@@ -3,6 +3,7 @@
  * Handles attacks, weapons, and combat-related actions
  */
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import {renderStrainTracker, renderActiveManifestations} from "./charactersheet-psionics-ui.js";
 
 const {e_, ee} = /** @type {*} */ (globalThis);
 
@@ -5719,6 +5720,140 @@ class CharacterSheetCombat {
 	 * Lunar Empowerment switches (14) and Lunar Phenomenon (18). Hidden entirely unless
 	 * the character has Lunar Embodiment.
 	 */
+	/**
+	 * The Psionics cockpit (MCDM Talent).
+	 *
+	 * The Powers tab is the library — browse, read, learn. This is the surface a Talent
+	 * needs *during* a turn, on the tab they are already on: how close strain is to killing
+	 * them, what is currently running, and the powers they can actually manifest right now.
+	 *
+	 * It renders the strain tracker and the running list through the shared psionics
+	 * renderers, so the two homes cannot drift, and it lists only powers whose
+	 * manifestation time fits inside a turn — a ten-minute ritual is a Powers-tab concern.
+	 * Manifesting delegates to the Powers module's dialog: three entry points, one decision
+	 * surface.
+	 */
+	renderCombatPsionics () {
+		const section = document.getElementById("charsheet-combat-psionics-section");
+		const container = document.getElementById("charsheet-combat-psionics");
+		if (!container) return;
+
+		if (!this._state.isPsionicManifester?.()) {
+			if (section) section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		if (section) section.style.display = "";
+		container.innerHTML = "";
+
+		const state = this._state;
+		const powers = this._page._powers;
+		const commit = () => {
+			this._page._saveCurrentCharacter?.();
+			this._page._renderCharacter?.();
+		};
+
+		const calc = state.getFeatureCalculations();
+		const concMax = state.getPowerConcentrationMax();
+		const concNow = state.getPowerConcentrations().length;
+		const stats = [
+			calc.powerSaveDc ? `Save DC <strong>${calc.powerSaveDc}</strong>` : null,
+			calc.powerAttackBonus != null ? `Attack <strong>+${calc.powerAttackBonus}</strong>` : null,
+			`Die <strong>${state.getManifestationDie()}</strong>`,
+			concMax ? `Concentrating <strong>${concNow}/${concMax}</strong>` : null,
+		].filter(Boolean);
+		container.append(e_({outer: `<div class="cs-psi-combat__stats">${stats.join("<span class=\"cs-psi-combat__sep\">·</span>")}</div>`}));
+
+		renderStrainTracker(container, {
+			state,
+			compact: true,
+			onChange: commit,
+			pPickTrack: prompt => this._page._pPickStrainTrack?.(prompt),
+			onStrainToMaintain: () => powers?._pStrainToMaintain?.(),
+		});
+
+		const running = e_({outer: `<div class="cs-psi-combat__running"></div>`});
+		const nRunning = renderActiveManifestations(running, {
+			state,
+			compact: true,
+			onChange: commit,
+			onExert: m => powers?._pApplyOutcomeExertion?.(m),
+		});
+		if (nRunning) {
+			container.append(e_({outer: `<div class="cs-psi-combat__label">Running</div>`}));
+			container.append(running);
+		}
+
+		// Only what can be manifested inside a turn. `meta.actionType === "long"` means a
+		// minute or more, which belongs to prep, not to the round in progress.
+		const manifestable = state.getKnownPowers().filter(p => p.meta?.actionType !== "long");
+		container.append(e_({outer: `<div class="cs-psi-combat__label">Manifest</div>`}));
+
+		if (!manifestable.length) {
+			container.append(e_({outer: `<div class="ve-muted ve-small">No powers you can manifest in a turn. Learn powers in the Powers tab.</div>`}));
+			return;
+		}
+
+		// A level-20 Talent knows 26 powers. Listing all of them turns the cockpit into the
+		// library it was supposed to be an alternative to, so group by what the power costs
+		// this turn — the question being asked — and collapse everything past the first
+		// bucket behind a disclosure.
+		const byCost = [
+			{key: "action", label: "Action", powers: manifestable.filter(p => (p.meta?.actionType || "action") === "action")},
+			{key: "bonus", label: "Bonus action", powers: manifestable.filter(p => p.meta?.actionType === "bonus")},
+			{key: "reaction", label: "Reaction", powers: manifestable.filter(p => p.meta?.actionType === "reaction")},
+		].filter(g => g.powers.length);
+
+		const list = e_({outer: `<div class="cs-psi-combat__powers"></div>`});
+		const renderGroup = (group, host) => {
+			if (byCost.length > 1) host.append(e_({outer: `<div class="cs-psi-combat__cost">${group.label}</div>`}));
+			for (const power of group.powers) host.append(buildRow(power));
+		};
+		const buildRow = power => {
+			const isRunning = state.getActiveManifestations().some(m => m.powerId === power.id);
+			const cost = power.isFirstOrder ? "at will" : `${power.order} strain on a failure`;
+			const row = e_({outer: `
+				<div class="cs-psi-combat__power ${isRunning ? "cs-psi-combat__power--running" : ""}">
+					<span class="cs-psi-combat__power-name">${CharacterSheetClassUtils.getPsionicPowerHoverLink(power, this._page) || power.name}</span>
+					<button class="cs-psi-combat__power-btn js-manifest" title="Manifest ${power.name}">
+						<span class="cs-psi-combat__power-cost">${cost}</span>
+						<span class="cs-psi-combat__power-go">Manifest</span>
+					</button>
+					<span class="cs-psi-combat__power-tags">
+						${power.meta?.actionType === "bonus" ? `<span class="cs-psi-combat__tag">bonus</span>` : ""}
+						${power.meta?.actionType === "reaction" ? `<span class="cs-psi-combat__tag">reaction</span>` : ""}
+						${power.concentrates ? `<span class="cs-psi-combat__tag">conc.</span>` : ""}
+						${isRunning ? `<span class="cs-psi-combat__tag cs-psi-combat__tag--running">running</span>` : ""}
+					</span>
+				</div>
+			`});
+			row.querySelector(".js-manifest").addEventListener("click", () => powers?._pManifest?.(power));
+			return row;
+		};
+
+		// The first bucket (nearly always Action) stays open; the rest are one tap away.
+		const PRIMARY_CAP = 8;
+		const primary = byCost[0];
+		const primaryShown = primary.powers.slice(0, PRIMARY_CAP);
+		renderGroup({...primary, powers: primaryShown}, list);
+
+		const overflowPowers = primary.powers.slice(PRIMARY_CAP);
+		const rest = byCost.slice(1);
+		const nHidden = overflowPowers.length + rest.reduce((n, g) => n + g.powers.length, 0);
+		if (nHidden) {
+			const more = e_({outer: `
+				<details class="cs-psi-combat__more">
+					<summary>${nHidden} more</summary>
+					<div class="cs-psi-combat__more-body"></div>
+				</details>`});
+			const body = more.querySelector(".cs-psi-combat__more-body");
+			if (overflowPowers.length) renderGroup({...primary, powers: overflowPowers, label: `${primary.label} (continued)`}, body);
+			for (const group of rest) renderGroup(group, body);
+			list.append(more);
+		}
+		container.append(list);
+	}
+
 	renderCombatLunar () {
 		const section = document.getElementById("charsheet-combat-lunar-section");
 		const container = document.getElementById("charsheet-combat-lunar");
@@ -6943,11 +7078,39 @@ class CharacterSheetCombat {
 	_classifyFeatureActionType (feature) {
 		const nameLower = feature?.name?.toLowerCase() || "";
 		if (CharacterSheetState.FEATURE_CLASSIFICATION_OVERRIDES?.[nameLower] === "reaction") return "reaction";
+
+		// A psionic power states its cost in a `Manifestation Time` header, which the
+		// psionics parser already lifts into `meta.actionType`. Reading it beats the text
+		// scan below, which sees the power's whole BODY and mistakes an effect that
+		// mentions a reaction for a power that costs one — 17 of the 103 `TalPsi` powers
+		// classify wrongly that way (CS-BUG-165).
+		const psionic = this._classifyPsionicPowerActionType(feature);
+		if (psionic) return psionic;
+
 		const text = this._resolveFeatureText(feature);
 		if (/bonus action/.test(text)) return "bonus";
 		if (/reaction/.test(text)) return "reaction";
 		if (/no action required|\bfree action\b/.test(text)) return "free";
 		return "action";
+	}
+
+	/**
+	 * The action-economy bucket for a psionic power, read from its parsed manifestation
+	 * time rather than guessed from its prose.
+	 *
+	 * Returns `"long"` for a power that takes a minute or more to manifest. That is not an
+	 * action-economy bucket at all, and the caller drops it: a 10-minute ritual has no
+	 * business in a panel captioned "everything you can do this turn".
+	 *
+	 * @param {*} feature
+	 * @returns {string|null} null when the feature is not a psionic power
+	 */
+	_classifyPsionicPowerActionType (feature) {
+		if (!CharacterSheetState.isPsionicPowerFeature?.(feature)) return null;
+		const power = this._state.getKnownPower?.(`${feature.name}|${feature.source || ""}`);
+		const actionType = power?.meta?.actionType;
+		if (!actionType) return null;
+		return actionType === "long" ? "long" : actionType;
 	}
 
 	/**
@@ -7029,15 +7192,25 @@ class CharacterSheetCombat {
 		for (const feature of features) {
 			if (!this._isActionEconomyFeature(feature)) continue;
 			const type = this._classifyFeatureActionType(feature);
-			if (type === "free") continue;
+			// "free" costs no action; "long" takes a minute or more. Neither belongs in a
+			// panel that answers "what can I do this turn".
+			if (type === "free" || type === "long") continue;
+			const psionic = CharacterSheetState.isPsionicPowerFeature?.(feature)
+				? this._state.getKnownPower?.(`${feature.name}|${feature.source || ""}`)
+				: null;
 			push(type, {
-				kind: "feature",
+				kind: psionic ? "power" : "feature",
 				id: feature.id || feature.name,
 				name: feature.name,
-				source: feature.featureType || feature.source || "",
-				subtitle: this._featureEconomySubtitle(feature),
+				source: psionic ? "Power" : (feature.featureType || feature.source || ""),
+				subtitle: psionic ? this._psionicEconomySubtitle(psionic) : this._featureEconomySubtitle(feature),
+				subtitleTitle: psionic ? this._psionicEconomyTitle(psionic) : null,
+				flag: psionic?.concentrates ? {glyph: "⏳", label: "Concentration"} : null,
 				actionType: type,
 				entity: feature,
+				// The feature carries no `modes`, and a power's rules text lives there, so the
+				// hover needs the projected power rather than the feature it was learned as.
+				psionic,
 			});
 		}
 
@@ -7101,6 +7274,55 @@ class CharacterSheetCombat {
 	 * @param {*} feature
 	 * @returns {string}
 	 */
+	/**
+	 * The one line a Talent needs beside a power mid-turn: what it costs them.
+	 *
+	 * A power has no `uses`, so the generic subtitle fell through to `featureType` and
+	 * leaked the internal code `PsiPH`. What actually decides the choice is the order (and
+	 * therefore the strain a failed manifestation charges), the discipline, and whether it
+	 * will tie up concentration.
+	 *
+	 * @param {*} power a `getKnownPowers()` projection entry
+	 * @returns {string}
+	 */
+	/**
+	 * The Action Economy answers "what can I do this turn", in a column barely 250px wide
+	 * next to a name that must stay legible. So the subtitle carries only what bears on the
+	 * decision, as densely as it can be said honestly:
+	 *
+	 * - **order and strain** — `2nd · 2 strain`. By rule these are the same number, but both
+	 *   are load-bearing: the order gates what you may manifest, the strain is the price.
+	 *   Spelling it "2nd-order · 2 strain on a failure" is the same two facts in 2.5× the
+	 *   width, and at this column size it truncated to "2nd-order · …" — strictly less
+	 *   information than the short form fits whole.
+	 * - **concentration** — not here at all, but as a separate `⏳` flag element, so that a
+	 *   long name truncates the order/strain text and never the flag. Whether a power ties
+	 *   up concentration is the one fact that can invalidate the whole plan.
+	 * - **discipline** — dropped. Taxonomy, not turn planning; it is on the hover card and
+	 *   the Powers tab, and it was the longest segment.
+	 *
+	 * The unabbreviated wording, including "if the manifestation test fails", lives on the
+	 * row's `title` via `_psionicEconomyTitle`.
+	 */
+	_psionicEconomySubtitle (power) {
+		if (!power) return "";
+		return power.isFirstOrder
+			? "at will"
+			: `${CharacterSheetState._ordinalOrder(power.order)} · ${power.order} strain`;
+	}
+
+	/** The unabbreviated form, for the row's `title` — nothing is lost to the ellipsis. */
+	_psionicEconomyTitle (power) {
+		if (!power) return "";
+		return [
+			power.isFirstOrder
+				? "At will — no test, no strain"
+				: `${CharacterSheetState._ordinalOrder(power.order)}-order — costs ${power.order} strain if the manifestation test fails`,
+			power.disciplineLabel,
+			power.concentrates ? "Concentration" : null,
+		].filter(Boolean).join(" · ");
+	}
+
 	_featureEconomySubtitle (feature) {
 		if (feature?.uses && feature.uses.max > 0) {
 			const cur = feature.uses.current ?? feature.uses.max;
@@ -7114,12 +7336,25 @@ class CharacterSheetCombat {
 	 * source so a reader can tell an attack from a spell at a glance without the
 	 * cost chip carrying the whole load.
 	 */
+	/**
+	 * Entity kinds that collapse into a single disclosure in the **Action** column.
+	 *
+	 * These are the kinds a character accumulates dozens of and reads as a set rather than
+	 * one at a time. Bonus-action and reaction entries of the same kind are deliberately
+	 * absent: there are few of them and forgetting one is the actual failure mode.
+	 */
+	static ACTION_ECONOMY_COLLAPSIBLE_KINDS = Object.freeze([
+		{kind: "spell", label: "Spells", labelOne: "spell"},
+		{kind: "power", label: "Powers", labelOne: "power"},
+	]);
+
 	static get ACTION_ECONOMY_KIND_META () {
 		return {
 			action: {label: "Standard action", glyph: "●"},
 			attack: {label: "Attack", glyph: "⚔"},
 			spell: {label: "Spell", glyph: "✦"},
 			feature: {label: "Feature", glyph: "★"},
+			power: {label: "Psionic power", glyph: "🧠"},
 			custom: {label: "Custom", glyph: "✨"},
 			item: {label: "Item", glyph: "◆"},
 		};
@@ -7163,6 +7398,8 @@ class CharacterSheetCombat {
 				}
 				case "spell":
 					return this._page?.getHoverLink?.(UrlUtil.PG_SPELLS, entry.name, entry.source, null, safeName) || safeName;
+				case "power":
+					return CharacterSheetClassUtils.getPsionicPowerHoverLink(entry.psionic || entry.entity, this._page) || safeName;
 				case "feature":
 					return this._page?._getFeatureHoverLink?.(entry.entity) || safeName;
 				case "item": {
@@ -7237,12 +7474,25 @@ class CharacterSheetCombat {
 			if (entry.subtitle) {
 				const sub = e_({tag: "span", clazz: "cs-combat-action-economy__sub"});
 				sub.textContent = entry.subtitle;
+				// The subtitle is the element that truncates now, so the full wording lives
+				// one hover away rather than being lost to the ellipsis.
+				const full = entry.subtitleTitle || entry.subtitle;
+				if (full) sub.setAttribute("title", full);
 				row.appendChild(sub);
+			}
+
+			// A flag is a single bounded glyph, so it can be unshrinkable without risking
+			// the crush that unshrinkable prose caused: it marks a fact that must survive
+			// however narrow the column gets.
+			if (entry.flag) {
+				const flag = e_({tag: "span", clazz: "cs-combat-action-economy__flag"});
+				flag.textContent = entry.flag.glyph;
+				flag.setAttribute("title", entry.flag.label);
+				flag.setAttribute("aria-label", entry.flag.label);
+				row.appendChild(flag);
 			}
 			return row;
 		};
-
-		const spellMeta = kindMeta.spell || {label: "Spell", glyph: "✦"};
 
 		for (const col of columns) {
 			const entries = buckets[col.key];
@@ -7257,31 +7507,38 @@ class CharacterSheetCombat {
 				empty.textContent = "None";
 				list.appendChild(empty);
 			} else {
-				// Action-cost spells are numerous and unsurprising, so in the Action
-				// column they collapse into one compact disclosure to keep the panel
-				// from flooding; the rare, easy-to-forget Bonus/Reaction spells stay as
+				// Action-cost spells and powers are numerous and unsurprising, so in the
+				// Action column each kind collapses into one compact disclosure to keep the
+				// panel from flooding; the rare, easy-to-forget Bonus/Reaction ones stay as
 				// individual rows because those are the ones that drive turn planning.
-				const collapseSpells = col.key === "action";
-				const spellEntries = collapseSpells ? entries.filter(e => e.kind === "spell") : [];
-				const flatEntries = collapseSpells ? entries.filter(e => e.kind !== "spell") : entries;
+				//
+				// Driven by a list rather than a per-kind branch: a Talent knows up to 26
+				// powers, exactly the flooding spells already had, and the next entity type
+				// to hit the same wall should need a table entry and not a third copy of
+				// this block.
+				const collapsible = col.key === "action" ? CharacterSheetCombat.ACTION_ECONOMY_COLLAPSIBLE_KINDS : [];
+				const collapsedKinds = collapsible.filter(it => entries.some(e => e.kind === it.kind));
+				const collapsedSet = new Set(collapsedKinds.map(it => it.kind));
 
-				for (const entry of flatEntries) list.appendChild(buildRow(entry));
+				for (const entry of entries.filter(e => !collapsedSet.has(e.kind))) list.appendChild(buildRow(entry));
 
-				if (spellEntries.length) {
+				for (const {kind, label, labelOne} of collapsedKinds) {
+					const kindEntries = entries.filter(e => e.kind === kind);
+					const meta = kindMeta[kind] || {label: "", glyph: "•"};
+
 					const details = e_({tag: "details", clazz: "cs-combat-action-economy__spells"});
 					const summary = e_({tag: "summary", clazz: "cs-combat-action-economy__spell-summary"});
 
 					const badge = e_({tag: "span", clazz: "cs-combat-action-economy__kind"});
-					badge.setAttribute("title", spellMeta.label);
-					badge.setAttribute("aria-label", spellMeta.label);
-					badge.textContent = spellMeta.glyph;
+					badge.setAttribute("title", meta.label);
+					badge.setAttribute("aria-label", meta.label);
+					badge.textContent = meta.glyph;
 					summary.appendChild(badge);
 
-					const label = e_({tag: "span", clazz: "cs-combat-action-economy__name", text: "Spells"});
-					summary.appendChild(label);
+					summary.appendChild(e_({tag: "span", clazz: "cs-combat-action-economy__name", text: label}));
 
-					const count = e_({tag: "span", clazz: "cs-combat-action-economy__spell-count", text: String(spellEntries.length)});
-					count.setAttribute("aria-label", `${spellEntries.length} action-cost spell${spellEntries.length === 1 ? "" : "s"}`);
+					const count = e_({tag: "span", clazz: "cs-combat-action-economy__spell-count", text: String(kindEntries.length)});
+					count.setAttribute("aria-label", `${kindEntries.length} action-cost ${kindEntries.length === 1 ? labelOne : label.toLowerCase()}`);
 					summary.appendChild(count);
 
 					const chevron = e_({tag: "span", clazz: "cs-combat-action-economy__spell-chevron"});
@@ -7292,7 +7549,7 @@ class CharacterSheetCombat {
 					details.appendChild(summary);
 
 					const children = e_({tag: "div", clazz: "cs-combat-action-economy__spell-children"});
-					for (const entry of spellEntries) children.appendChild(buildRow(entry));
+					for (const entry of kindEntries) children.appendChild(buildRow(entry));
 					details.appendChild(children);
 
 					list.appendChild(details);

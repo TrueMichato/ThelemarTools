@@ -6228,9 +6228,17 @@ body[data-font="readable"] {
 	color: var(--cs-primary, #6366f1);
 }
 
+/* The name is the row's identity and the subtitle is metadata about it, so when the two
+   compete for a narrow column the metadata yields. Previously the name was the only
+   shrinkable element and had no floor while the subtitle was `flex: 0 0 auto`, which meant
+   flexbox resolved any overflow by collapsing the name to 0px — a psionic power rendered as
+   a bare "3rd-order · 3 strain on a failure · Metamorphosis" with no name at all, and
+   `text-overflow` could not help because at zero width there is nothing to ellipsize. */
 .cs-combat-action-economy__name {
 	flex: 1 1 auto;
-	min-width: 0;
+	/* Enough to read a name by, but not so much that a fixed-length subtitle like
+	   "2nd · 2 strain" is forced to truncate mid-word beside it. */
+	min-width: 5.5rem;
 	font-size: var(--cs-text-sm, 0.85rem);
 	font-weight: var(--cs-weight-medium, 500);
 	white-space: nowrap;
@@ -6239,10 +6247,22 @@ body[data-font="readable"] {
 }
 
 .cs-combat-action-economy__sub {
-	flex: 0 0 auto;
+	flex: 0 1 auto;
+	min-width: 0;
 	font-size: var(--cs-text-xs, 0.7rem);
 	color: var(--cs-text-muted, var(--rgb-muted));
 	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* A single bounded glyph marking a fact that must outlive truncation. Safe to make
+   unshrinkable precisely because it cannot grow with content the way a subtitle can. */
+.cs-combat-action-economy__flag {
+	flex: 0 0 auto;
+	font-size: var(--cs-text-xs, 0.7rem);
+	line-height: 1;
+	cursor: help;
 }
 
 .cs-combat-action-economy__item--optional .cs-combat-action-economy__sub {
@@ -25217,7 +25237,13 @@ color: var(--cs-text-primary, #f1f5f9);
 	font-size: var(--cs-text-lg, 1.05rem);
 	font-weight: 700;
 	line-height: 1.2;
-	color: var(--cs-primary-strong, #6366f1);
+	font-variant-numeric: tabular-nums;
+}
+
+/* Over budget is reachable through a respec or a level change, and it is the one number in
+   this header that needs to argue with the player. */
+.charsheet__power-stat-value--over {
+	color: var(--cs-danger);
 }
 
 .charsheet__power-stat-label {
@@ -25228,93 +25254,288 @@ color: var(--cs-text-primary, #f1f5f9);
 	margin-top: 0.15rem;
 }
 
-/* --- Strain ------------------------------------------------------------- */
+/* --- Strain (shared: Powers tab + Combat cockpit) ------------------------ */
 
-.charsheet__strain-meter {
+/* Rendered by charactersheet-psionics-ui.js into both hosts. Density is a
+   parameter, never a branch on which tab is rendering. */
+
+.cs-psi-strain__head {
+	display: flex;
+	align-items: baseline;
+	gap: var(--cs-space-sm, 0.5rem);
+	margin-bottom: var(--cs-space-xs, 0.25rem);
+}
+
+.cs-psi-strain__total {
+	font-size: var(--cs-text-xl, 1.35rem);
+	font-weight: 700;
+	line-height: 1;
+	font-variant-numeric: tabular-nums;
+}
+
+.cs-psi-strain__max {
+	font-size: var(--cs-text-sm, 0.8rem);
+	font-weight: 500;
+	opacity: 0.6;
+}
+
+/* The number that actually decides the turn. Quiet until it is not. */
+.cs-psi-strain__margin {
+	font-size: var(--cs-text-xs, 0.72rem);
+	opacity: 0.7;
+	margin-left: auto;
+}
+
+.cs-psi-strain__margin--warn {
+	color: var(--cs-danger);
+	opacity: 1;
+	font-weight: 600;
+}
+
+.cs-psi-strain__meter {
+	position: relative;
 	height: 0.4rem;
 	border-radius: var(--cs-radius-full, 9999px);
-	background: var(--cs-bg-alt, rgba(99, 102, 241, 0.08));
+	/* The gradient is painted across the WHOLE meter so a position along it means a fixed
+	   amount of strain. Painting it on the filled portion instead made the gradient scale
+	   with the fill, so the bar's tip was red at 3/16 as readily as at 15/16 — the one
+	   colour that must mean something meant nothing. */
+	background: linear-gradient(90deg, var(--cs-success) 0%, var(--cs-warning) 55%, var(--cs-danger) 100%);
 	overflow: hidden;
 }
 
-.charsheet__strain-meter-fill {
-	height: 100%;
-	/* Green through amber to red: strain is survivable until suddenly it is not,
-	   and the bar should read as a warning well before it fills. */
-	background: linear-gradient(90deg, #22c55e 0%, #f59e0b 55%, #ef4444 100%);
-	transition: width var(--cs-transition-normal, 0.25s ease);
+/* Strain not yet taken is masked back to the track colour, revealing only as much of the
+   gradient as the character has actually spent. */
+.cs-psi-strain__mask {
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	background: var(--cs-bg-alt);
+	transition: left 200ms var(--cs-ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1));
 }
 
-.charsheet__strain-track {
-	display: flex;
+.cs-psi-track {
+	display: grid;
+	grid-template-columns: 3.25rem auto minmax(1.5rem, auto) auto 1fr;
 	align-items: center;
 	gap: var(--cs-space-xs, 0.25rem);
 	font-size: var(--cs-text-sm, 0.8rem);
-	padding: 0.15rem 0;
+	padding: 0.2rem 0;
 }
 
-.charsheet__strain-track-name {
-	width: 3.25rem;
+.cs-psi-track__name {
 	font-weight: 600;
-	flex: 0 0 auto;
 }
 
-.charsheet__strain-track-value {
+.cs-psi-track__value {
 	min-width: 1.5rem;
 	text-align: center;
 	font-variant-numeric: tabular-nums;
 	font-weight: 700;
 }
 
-.charsheet__strain-track-effects {
+.cs-psi-track__status {
 	margin-left: var(--cs-space-sm, 0.5rem);
-	opacity: 0.75;
 	font-size: var(--cs-text-xs, 0.7rem);
 	min-width: 0;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0 var(--cs-space-xs, 0.25rem);
 }
 
-.charsheet__power-strain-actions {
+/* What is already costing you. */
+.cs-psi-track__live {
+	opacity: 0.85;
+}
+
+/* What one more point would cost you — the comparison that makes the track
+   choice a decision rather than a memory test. */
+.cs-psi-track__next {
+	opacity: 0.55;
+	font-style: italic;
+}
+
+.cs-psi-track--ignored .cs-psi-track__name,
+.cs-psi-track__ignored {
+	opacity: 0.5;
+}
+
+.cs-psi-strain__actions {
 	display: flex;
 	flex-wrap: wrap;
 	gap: var(--cs-space-xs, 0.25rem);
+	margin-top: var(--cs-space-xs, 0.25rem);
 }
 
 .charsheet__section-badge--danger {
-	background: var(--cs-danger, #ef4444);
+	background: var(--cs-danger);
 }
 
-/* --- Active manifestations ---------------------------------------------- */
+/* --- Active manifestations (shared) -------------------------------------- */
 
-.charsheet__power-active-row {
+.cs-psi-active {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	gap: var(--cs-space-sm, 0.5rem);
 	padding: var(--cs-space-sm, 0.5rem) var(--cs-space-md, 0.75rem);
-	border-left: 3px solid var(--cs-accent-amethyst, #8b5cf6);
-	background: var(--cs-bg-alt, rgba(139, 92, 246, 0.05));
+	/* Full border + tint, never an accent stripe (the No-Stripe Rule). */
+	border: 1px solid var(--cs-border);
+	background: var(--cs-bg-alt);
 	border-radius: var(--cs-radius-sm, 0.25rem);
 	margin-bottom: var(--cs-space-xs, 0.25rem);
 }
 
-.charsheet__power-active-main {
+.cs-psi-active--compact {
+	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+}
+
+.cs-psi-active__main {
 	min-width: 0;
 }
 
-.charsheet__power-active-name {
+.cs-psi-active__name {
 	font-weight: 600;
 }
 
-.charsheet__power-active-meta {
+.cs-psi-active__meta {
 	display: block;
 	font-size: var(--cs-text-xs, 0.7rem);
 	opacity: 0.7;
 }
 
-.charsheet__power-active-actions {
+.cs-psi-active__actions {
 	display: flex;
 	gap: var(--cs-space-xs, 0.25rem);
 	flex: 0 0 auto;
+}
+
+/* --- Psionics cockpit (Combat tab) --------------------------------------- */
+
+.cs-psi-combat__stats {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0 var(--cs-space-xs, 0.25rem);
+	font-size: var(--cs-text-sm, 0.8rem);
+	margin-bottom: var(--cs-space-sm, 0.5rem);
+}
+
+.cs-psi-combat__stats strong {
+	font-variant-numeric: tabular-nums;
+}
+
+.cs-psi-combat__sep {
+	opacity: 0.35;
+	margin: 0 0.35rem;
+}
+
+.cs-psi-combat__label {
+	font-size: var(--cs-text-xs, 0.7rem);
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	opacity: 0.6;
+	margin: var(--cs-space-sm, 0.5rem) 0 var(--cs-space-xs, 0.25rem);
+}
+
+.cs-psi-combat__powers {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.cs-psi-combat__power {
+	display: flex;
+	align-items: center;
+	gap: var(--cs-space-xs, 0.25rem);
+}
+
+.cs-psi-combat__power-btn {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: baseline;
+	gap: var(--cs-space-sm, 0.5rem);
+	padding: 0.2rem var(--cs-space-sm, 0.5rem);
+	background: none;
+	border: 1px solid transparent;
+	border-radius: var(--cs-radius-sm, 0.25rem);
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+	transition: background 150ms var(--cs-ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1));
+}
+
+/* The name is a hover target and the button is the action; they must not be the same
+   element, or peeking at the rules and spending strain become the same click. */
+.cs-psi-combat__power-name {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.cs-psi-combat__power-go {
+	font-size: var(--cs-text-xs, 0.7rem);
+	font-weight: 600;
+	opacity: 0.75;
+}
+
+.cs-psi-combat__power-btn:hover {
+	background: var(--cs-bg-hover);
+}
+
+.cs-psi-combat__power-btn:focus-visible {
+	outline: none;
+	border-color: var(--cs-primary);
+	background: var(--cs-bg-hover);
+}
+
+.cs-psi-combat__power-cost {
+	font-size: var(--cs-text-xs, 0.7rem);
+	opacity: 0.65;
+	flex: 0 0 auto;
+	font-variant-numeric: tabular-nums;
+}
+
+.cs-psi-combat__power-tags {
+	display: flex;
+	gap: 0.2rem;
+	flex: 0 0 auto;
+}
+
+.cs-psi-combat__tag {
+	font-size: var(--cs-text-xs, 0.65rem);
+	padding: 0.05rem 0.3rem;
+	border-radius: var(--cs-radius-full, 9999px);
+	border: 1px solid var(--cs-border);
+	background: var(--cs-bg-alt);
+	white-space: nowrap;
+}
+
+.cs-psi-combat__tag--running {
+	border-color: var(--cs-accent-amethyst);
+	font-weight: 700;
+}
+
+.cs-psi-combat__power--running .cs-psi-combat__power-name {
+	color: var(--cs-accent-amethyst);
+}
+
+/* Narrow host column: the status text takes a row of its own rather than being
+   squeezed to nothing (the Container-Adaptive Rule). */
+@container cs-panel (max-width: 380px) {
+	.cs-psi-track {
+		grid-template-columns: 3.25rem auto minmax(1.5rem, auto) auto;
+	}
+
+	.cs-psi-track__status {
+		grid-column: 1 / -1;
+		margin-left: 0;
+	}
 }
 
 /* --- Filters ------------------------------------------------------------ */
@@ -25377,8 +25598,10 @@ color: var(--cs-text-primary, #f1f5f9);
 }
 
 .charsheet__power-row--active {
-	border-left: 3px solid var(--cs-accent-amethyst, #8b5cf6);
-	padding-left: var(--cs-space-sm, 0.5rem);
+	/* Full border + tint, never an accent stripe (the No-Stripe Rule). */
+	border: 1px solid var(--cs-accent-amethyst);
+	background: var(--cs-bg-alt);
+	border-radius: var(--cs-radius-sm, 0.25rem);
 }
 
 .charsheet__power-row-main {
@@ -25420,25 +25643,25 @@ color: var(--cs-text-primary, #f1f5f9);
 }
 
 .charsheet__power-badge--discipline {
-	background: rgba(139, 92, 246, 0.12);
-	border-color: rgba(139, 92, 246, 0.3);
+	border-color: var(--cs-accent-amethyst);
+	color: var(--cs-accent-amethyst);
 }
 
 .charsheet__power-badge--conc {
-	background: rgba(59, 130, 246, 0.12);
-	border-color: rgba(59, 130, 246, 0.3);
+	border-color: var(--cs-accent-sapphire);
+	color: var(--cs-accent-sapphire);
 }
 
 .charsheet__power-badge--atwill {
-	background: rgba(34, 197, 94, 0.12);
-	border-color: rgba(34, 197, 94, 0.3);
+	border-color: var(--cs-success);
+	color: var(--cs-success);
 	text-transform: none;
 	letter-spacing: normal;
 }
 
 .charsheet__power-badge--running {
-	background: rgba(139, 92, 246, 0.25);
-	border-color: rgba(139, 92, 246, 0.5);
+	border-color: var(--cs-accent-amethyst);
+	background: var(--cs-bg-alt);
 	font-weight: 700;
 }
 
@@ -25524,7 +25747,7 @@ color: var(--cs-text-primary, #f1f5f9);
 .charsheet__manifest-projection {
 	margin-top: var(--cs-space-sm, 0.5rem);
 	padding: var(--cs-space-sm, 0.5rem);
-	border: 1px dashed var(--cs-border-strong, rgba(99, 102, 241, 0.3));
+	border: 1px dashed var(--cs-border);
 	border-radius: var(--cs-radius-sm, 0.25rem);
 	font-size: var(--cs-text-sm, 0.8rem);
 }
@@ -25557,4 +25780,412 @@ color: var(--cs-text-primary, #f1f5f9);
 	.charsheet__manifest-field select {
 		flex: 1 1 auto;
 	}
+}
+
+/* --- Strain overflow: the one lethal choice on the sheet ------------------ */
+
+.cs-psi-overflow {
+	border: 1px solid var(--cs-danger);
+	background: var(--cs-bg-alt);
+	border-radius: var(--cs-radius-md, 0.375rem);
+	padding: var(--cs-space-sm, 0.5rem) var(--cs-space-md, 0.75rem);
+}
+
+.cs-psi-overflow__head {
+	font-size: var(--cs-text-sm, 0.85rem);
+	color: var(--cs-danger);
+	font-weight: 600;
+}
+
+.cs-psi-overflow__body {
+	font-size: var(--cs-text-sm, 0.85rem);
+	margin: var(--cs-space-xs, 0.25rem) 0 var(--cs-space-sm, 0.5rem);
+}
+
+.cs-psi-overflow__actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.cs-psi-overflow__confirm {
+	margin-top: var(--cs-space-sm, 0.5rem);
+	padding-top: var(--cs-space-sm, 0.5rem);
+	border-top: 1px solid var(--cs-border);
+}
+
+.cs-psi-overflow__warn {
+	font-size: var(--cs-text-sm, 0.85rem);
+	font-weight: 600;
+	color: var(--cs-danger);
+	margin-bottom: var(--cs-space-sm, 0.5rem);
+}
+
+/* --- Manifest dialog: the risk, then the levers --------------------------- */
+
+.cs-manifest-risk {
+	border: 1px solid var(--cs-border);
+	background: var(--cs-bg-alt);
+	border-radius: var(--cs-radius-md, 0.375rem);
+	padding: var(--cs-space-sm, 0.5rem) var(--cs-space-md, 0.75rem);
+	margin-bottom: var(--cs-space-md, 0.75rem);
+}
+
+.cs-manifest-risk__row {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 0 var(--cs-space-xs, 0.25rem);
+}
+
+.cs-manifest-risk__die,
+.cs-manifest-risk__score {
+	font-size: var(--cs-text-lg, 1.05rem);
+	font-weight: 700;
+	font-variant-numeric: tabular-nums;
+}
+
+.cs-manifest-risk__vs {
+	opacity: 0.6;
+	font-size: var(--cs-text-sm, 0.8rem);
+}
+
+.cs-manifest-risk__fail {
+	margin-left: auto;
+	font-size: var(--cs-text-xs, 0.72rem);
+	opacity: 0.75;
+}
+
+.cs-manifest-risk__headline {
+	font-weight: 600;
+}
+
+.cs-manifest-risk__detail {
+	font-size: var(--cs-text-xs, 0.72rem);
+	opacity: 0.6;
+	margin-top: 0.1rem;
+}
+
+.cs-manifest-risk__projection {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 0 var(--cs-space-sm, 0.5rem);
+	margin-top: var(--cs-space-xs, 0.25rem);
+	padding-top: var(--cs-space-xs, 0.25rem);
+	border-top: 1px solid var(--cs-border);
+}
+
+.cs-manifest-risk__arrow {
+	font-variant-numeric: tabular-nums;
+	font-weight: 600;
+}
+
+.cs-manifest-risk__over {
+	color: var(--cs-danger);
+}
+
+.cs-manifest-risk__worst {
+	font-size: var(--cs-text-xs, 0.72rem);
+	opacity: 0.7;
+}
+
+.cs-manifest-risk__notes {
+	font-size: var(--cs-text-xs, 0.72rem);
+	opacity: 0.8;
+	margin-top: 0.15rem;
+}
+
+.cs-manifest-risk__danger {
+	color: var(--cs-danger);
+	font-weight: 600;
+	opacity: 1;
+}
+
+/* Three cards, each naming what it would cost you — a comparison, not a recall test. */
+.cs-manifest-tracks {
+	border: none;
+	padding: 0;
+	margin: 0 0 var(--cs-space-md, 0.75rem);
+}
+
+.cs-manifest-tracks__legend {
+	font-size: var(--cs-text-xs, 0.7rem);
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	opacity: 0.6;
+	border: none;
+	margin-bottom: var(--cs-space-xs, 0.25rem);
+	padding: 0;
+	width: auto;
+}
+
+.cs-manifest-tracks__options {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.cs-manifest-track {
+	display: grid;
+	grid-template-columns: auto auto auto 1fr;
+	align-items: baseline;
+	gap: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+	padding: 0.3rem var(--cs-space-sm, 0.5rem);
+	border: 1px solid transparent;
+	border-radius: var(--cs-radius-sm, 0.25rem);
+	cursor: pointer;
+	font-weight: 400;
+	margin: 0;
+}
+
+.cs-manifest-track:hover {
+	background: var(--cs-bg-hover);
+}
+
+.cs-manifest-track:has(.js-track-radio:checked) {
+	border-color: var(--cs-primary);
+	background: var(--cs-bg-alt);
+}
+
+.cs-manifest-track__name {
+	font-weight: 600;
+}
+
+.cs-manifest-track__at {
+	font-size: var(--cs-text-xs, 0.7rem);
+	opacity: 0.6;
+	font-variant-numeric: tabular-nums;
+}
+
+.cs-manifest-track__next {
+	font-size: var(--cs-text-xs, 0.7rem);
+	opacity: 0.7;
+	min-width: 0;
+}
+
+.cs-manifest-advanced {
+	margin-bottom: var(--cs-space-sm, 0.5rem);
+}
+
+.cs-manifest-advanced__summary {
+	cursor: pointer;
+	font-size: var(--cs-text-sm, 0.8rem);
+	opacity: 0.75;
+	padding: 0.2rem 0;
+}
+
+.cs-manifest-advanced__body {
+	padding-top: var(--cs-space-xs, 0.25rem);
+}
+
+/* Learning progress is progress, not danger — it must not borrow the strain meter's
+   green-to-red gradient, which reads as "you are approaching death". */
+.cs-psi-learn__meter {
+	height: 0.3rem;
+	border-radius: var(--cs-radius-full, 9999px);
+	background: var(--cs-bg-alt);
+	overflow: hidden;
+}
+
+.cs-psi-learn__fill {
+	height: 100%;
+	background: var(--cs-accent-sapphire);
+	transition: width 200ms var(--cs-ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1));
+}
+
+.cs-psi-combat__cost {
+	font-size: var(--cs-text-xs, 0.68rem);
+	font-weight: 600;
+	opacity: 0.5;
+	margin: var(--cs-space-xs, 0.25rem) 0 0.1rem;
+}
+
+.cs-psi-combat__more > summary {
+	cursor: pointer;
+	font-size: var(--cs-text-xs, 0.72rem);
+	opacity: 0.7;
+	padding: 0.25rem 0;
+}
+
+/* --- Power picker (level-up wizard + Powers tab) -------------------------- */
+
+/* The trade bar: what you give up sits above what you gain, in reading order. */
+.cs-power-picker__swap {
+	display: flex;
+	align-items: center;
+	gap: var(--cs-space-sm, 0.5rem);
+	margin-bottom: 0.75rem;
+	padding-bottom: 0.75rem;
+	border-bottom: 1px solid var(--rgb-border, rgba(0, 0, 0, 0.12));
+	font-weight: 400;
+}
+
+.cs-power-picker__swap-label {
+	flex: 0 0 auto;
+	font-weight: 600;
+	font-size: 0.85rem;
+}
+
+.cs-power-picker__swap select {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.cs-power-picker__head {
+	display: flex;
+	align-items: baseline;
+	gap: var(--cs-space-sm, 0.5rem);
+	margin-bottom: 0.15rem;
+}
+
+.cs-power-picker__title {
+	font-weight: 600;
+}
+
+.cs-power-picker__budget {
+	margin-left: auto;
+	font-size: var(--cs-text-sm, 0.8rem);
+	font-variant-numeric: tabular-nums;
+	opacity: 0.75;
+}
+
+.cs-power-picker__pools {
+	margin-bottom: var(--cs-space-xs, 0.25rem);
+}
+
+.cs-power-picker__filters {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--cs-space-xs, 0.25rem);
+	margin-bottom: var(--cs-space-xs, 0.25rem);
+}
+
+.cs-power-picker__filters .js-search {
+	flex: 1 1 10rem;
+	min-width: 0;
+}
+
+.cs-power-picker__filters select {
+	flex: 0 1 9rem;
+	width: auto;
+	min-width: 0;
+}
+
+/* Bounded so the wizard's own controls stay reachable with 90 options loaded. */
+.cs-power-picker__list {
+	max-height: 22rem;
+	overflow-y: auto;
+	border: 1px solid var(--cs-border);
+	border-radius: var(--cs-radius-sm, 0.25rem);
+	padding: var(--cs-space-xs, 0.25rem);
+}
+
+.cs-power-picker__group-head {
+	display: flex;
+	align-items: center;
+	gap: var(--cs-space-sm, 0.5rem);
+	font-size: var(--cs-text-xs, 0.7rem);
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	opacity: 0.6;
+	padding: var(--cs-space-xs, 0.25rem) 0 0.1rem;
+	border-bottom: 1px solid var(--cs-border);
+	margin-bottom: 0.15rem;
+}
+
+.cs-power-picker__group-head--locked {
+	opacity: 0.4;
+}
+
+.cs-power-picker__lock,
+.cs-power-picker__group-count {
+	margin-left: auto;
+	text-transform: none;
+	letter-spacing: normal;
+	font-weight: 400;
+}
+
+.cs-power-picker__row {
+	display: flex;
+	align-items: baseline;
+	gap: var(--cs-space-xs, 0.25rem);
+	padding: 0.2rem 0.3rem;
+	margin: 0;
+	border-radius: var(--cs-radius-sm, 0.25rem);
+	font-weight: 400;
+	cursor: pointer;
+}
+
+.cs-power-picker__row:hover {
+	background: var(--cs-bg-hover);
+}
+
+.cs-power-picker__row--locked,
+.cs-power-picker__row--known {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.cs-power-picker__name {
+	font-weight: 600;
+}
+
+.cs-power-picker__chip {
+	font-size: var(--cs-text-xs, 0.65rem);
+	padding: 0.02rem 0.3rem;
+	border-radius: var(--cs-radius-full, 9999px);
+	border: 1px solid var(--cs-border);
+	white-space: nowrap;
+}
+
+.cs-power-picker__state {
+	margin-left: auto;
+	font-size: var(--cs-text-xs, 0.7rem);
+	opacity: 0.7;
+	white-space: nowrap;
+}
+
+.cs-power-picker-modal {
+	padding: var(--cs-space-md, 0.75rem);
+	min-width: min(30rem, 90vw);
+}
+
+/* A track that would actually cost you something reads louder than one that would not. */
+.cs-manifest-track__next--hit {
+	color: var(--cs-warning);
+	opacity: 1;
+	font-weight: 600;
+}
+
+/* --- "What is strain?" ---------------------------------------------------- */
+
+.cs-psi-explainer {
+	margin-bottom: var(--cs-space-sm, 0.5rem);
+}
+
+.cs-psi-explainer__summary {
+	cursor: pointer;
+	font-size: var(--cs-text-sm, 0.8rem);
+	opacity: 0.7;
+	padding: 0.15rem 0;
+}
+
+.cs-psi-explainer__body {
+	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+	border-left: none;
+	border: 1px solid var(--cs-border);
+	background: var(--cs-bg-alt);
+	border-radius: var(--cs-radius-sm, 0.25rem);
+}
+
+.cs-psi-explainer__body p {
+	margin-bottom: var(--cs-space-xs, 0.25rem);
+}
+
+.cs-psi-explainer__body p:last-child {
+	margin-bottom: 0;
 }

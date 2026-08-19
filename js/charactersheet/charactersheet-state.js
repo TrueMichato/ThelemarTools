@@ -38909,14 +38909,81 @@ class CharacterSheetState {
 	 * @param {string} track "body" | "mind" | "soul"
 	 * @returns {string[]}
 	 */
+	/**
+	 * The strain a track must reach for each of its four effects to land.
+	 * RAW: effects arrive at 1, 3, 5 and 7 strain, cumulatively.
+	 */
+	static PSIONIC_STRAIN_THRESHOLDS = Object.freeze([1, 3, 5, 7]);
+
+	/**
+	 * Each track's four effects, in the order they land.
+	 * Lifted out of `getStrainTrackEffects` so "what is live now" and "what lands next"
+	 * read the same table and can never disagree about the ladder.
+	 */
+	static PSIONIC_STRAIN_EFFECTS = Object.freeze({
+		body: ["disadvantage on Str/Dex checks", "speed halved", "disadvantage on Str/Dex saves", "hit point maximum halved"],
+		mind: ["can't Dash, Disengage or Dodge", "lose skill proficiencies", "−5 AC", "lose saving throw proficiencies"],
+		soul: ["disadvantage on Wis/Cha checks", "disadvantage on death saves", "disadvantage on Wis/Cha saves", "supernatural healing halved"],
+	});
+
 	getStrainTrackEffects (track) {
 		const tier = this.getStrainTier(track);
-		const byTrack = {
-			body: ["disadvantage on Str/Dex checks", "speed halved", "disadvantage on Str/Dex saves", "hit point maximum halved"],
-			mind: ["can't Dash, Disengage or Dodge", "lose skill proficiencies", "−5 AC", "lose saving throw proficiencies"],
-			soul: ["disadvantage on Wis/Cha checks", "disadvantage on death saves", "disadvantage on Wis/Cha saves", "supernatural healing halved"],
-		};
-		return (byTrack[track] || []).slice(0, Math.max(0, Math.min(4, tier)));
+		return (CharacterSheetState.PSIONIC_STRAIN_EFFECTS[track] || []).slice(0, Math.max(0, Math.min(4, tier)));
+	}
+
+	/**
+	 * The next penalty this track is heading for.
+	 *
+	 * The tracker used to show only what was already live, so a player could not see that
+	 * one more point of mind strain would cost them every skill proficiency — the single
+	 * most decision-relevant fact when choosing which track to pay from.
+	 *
+	 * @param {string} track "body" | "mind" | "soul"
+	 * @returns {{at: number, inThatMany: number, effect: string}|null} null when the track
+	 *   is maxed out on effects, or suppressed by Ignore Strain
+	 */
+	getNextStrainThreshold (track) {
+		if (!CharacterSheetState.PSIONIC_STRAIN_TRACKS.includes(track)) return null;
+		if (this.getIgnoredStrainTrack() === track) return null;
+		const tier = this.getStrainTier(track);
+		if (tier >= 4) return null;
+		const at = CharacterSheetState.PSIONIC_STRAIN_THRESHOLDS[tier];
+		const effect = CharacterSheetState.PSIONIC_STRAIN_EFFECTS[track]?.[tier];
+		if (at == null || !effect) return null;
+		return {at, inThatMany: Math.max(0, at - (this.getStrain()[track] || 0)), effect};
+	}
+
+	/**
+	 * Every penalty that taking `amount` strain on this track would switch on.
+	 *
+	 * `getNextStrainThreshold()` answers "what is the very next one", which is the right
+	 * question when nothing is pending. It is the wrong question in the manifest dialog:
+	 * a 4th-order failure charges 4 strain at once and can cross two thresholds, and a card
+	 * that names only the first understates the cost of the choice being made.
+	 *
+	 * @param {string} track "body" | "mind" | "soul"
+	 * @param {number} amount strain about to be taken
+	 * @returns {string[]} the effects that would newly land, in order
+	 */
+	getStrainEffectsGainedBy (track, amount) {
+		if (!CharacterSheetState.PSIONIC_STRAIN_TRACKS.includes(track)) return [];
+		if (this.getIgnoredStrainTrack() === track) return [];
+		const add = Math.max(0, Math.floor(Number(amount) || 0));
+		if (!add) return [];
+
+		const before = this.getStrainTier(track);
+		const projected = (this.getStrain()[track] || 0) + add;
+		const after = projected >= 7 ? 4 : projected >= 5 ? 3 : projected >= 3 ? 2 : projected >= 1 ? 1 : 0;
+		if (after <= before) return [];
+		return (CharacterSheetState.PSIONIC_STRAIN_EFFECTS[track] || []).slice(before, after);
+	}
+
+	/**
+	 * How much strain the character can still take before it kills them.
+	 * @returns {number}
+	 */
+	getStrainHeadroom () {
+		return Math.max(0, this.getStrainMaximum() - this.getTotalStrain());
 	}
 
 	getStrainState () {
@@ -56944,6 +57011,11 @@ class CharacterSheetState {
 		// (CS-BUG-124) A known mutagen formula is activatable: consuming it is a bonus action
 		// that spends one concoction from the per-rest Mutagen pool.
 		const isMutagen = feature?.optionalFeatureTypes?.includes("MTGN");
+		// (CS-BUG-166) A psionic power carries its mechanics in `entries` and never has a
+		// rendered `description`, so the entries-only early return below dropped every one
+		// of them before `_detectPsionicActivation` could run — the detector existed but was
+		// unreachable for powers learned through the normal path.
+		const isPsionicPower = CharacterSheetState.isPsionicPowerFeature(feature);
 		const isHybridTransformation = name === "hybrid transformation";
 		// (R20) Allow features that carry classification-relevant markers to be processed
 		// even when they only have `entries` (no rendered `description`) — e.g. Invoke Hell
@@ -56954,7 +57026,7 @@ class CharacterSheetState {
 		// entries-only copies were dropped here and never reached their branches below.
 		const isSunBloodlineFeature = ["sun bloodline", "child of the sun bloodline"]
 			.includes((feature?.subclassShortName || feature?.subclassName || "").toLowerCase());
-		const hasMarkers = !!(feature?.consumes || feature?._raceManifestation || isCrimsonRite || isBloodCurse || isHybridTransformation || isJesterAct || isMutagen || isSunBloodlineFeature);
+		const hasMarkers = !!(feature?.consumes || feature?._raceManifestation || isCrimsonRite || isBloodCurse || isHybridTransformation || isJesterAct || isMutagen || isSunBloodlineFeature || isPsionicPower);
 		// (R40) A feature named in FEATURE_CLASSIFICATION_OVERRIDES must be processed even when
 		// it arrives entries-only (no rendered `description`), so its override is honoured
 		// rather than dropped by this early return. The override branch below builds its own
@@ -59828,6 +59900,12 @@ class CharacterSheetState {
 	 */
 	static isHiddenFromGenericAbilitySurfaces (feature, allFeatures) {
 		return CharacterSheetState.isInterdictionManagedFeature(feature)
+			// A psionic power is activatable (CS-BUG-166), which is what the generic
+			// surfaces key off — but it has two canonical homes of its own on the very
+			// tab those surfaces live on: the Psionics cockpit and the Action Economy's
+			// collapsed Powers row. Listing 26 of them a third time, without their order
+			// or strain cost, is noise. See CS-BUG-167.
+			|| CharacterSheetState.isPsionicPowerFeature(feature)
 			|| CharacterSheetState.isRedundantImprovementFeature(feature, allFeatures);
 	}
 	// #endregion

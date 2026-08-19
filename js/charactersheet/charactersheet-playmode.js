@@ -1243,10 +1243,18 @@ export class CharacterSheetPlayMode {
 		}
 		this._ce("span", "pm-spell-stats__tag", statRow).textContent = `${state.getManifestationDie()} manifestation`;
 
+		// Play mode is the two-second glance, so it gets the same number the tracker leads
+		// with: how much is left before this kills you, not arithmetic to do mid-turn.
 		const max = state.getStrainMaximum();
 		const total = state.getTotalStrain();
+		const headroom = state.getStrainHeadroom();
 		const strainTag = this._ce("span", "pm-spell-stats__tag", statRow);
 		strainTag.textContent = `Strain ${total}/${max}`;
+		strainTag.title = headroom === 0 ? "Any more strain kills you" : `${headroom} more would kill you`;
+		if (headroom <= 2) {
+			const marginTag = this._ce("span", "pm-spell-stats__tag", statRow);
+			marginTag.textContent = headroom === 0 ? "any more kills you" : `${headroom} from death`;
+		}
 
 		const concMax = state.getPowerConcentrationMax();
 		const active = state.getActiveManifestations();
@@ -1256,7 +1264,10 @@ export class CharacterSheetPlayMode {
 				const wrapper = this._ce("div", "pm-spell-wrapper", card);
 				const row = this._ce("div", "pm-spell", wrapper);
 				this._ce("span", "pm-spell__name", row).textContent = m.name;
-				this._ce("span", "pm-spell__level", row).textContent = `O${m.order}`;
+				const chip = this._ce("span", "pm-spell__level", row);
+				chip.textContent = String(m.order);
+				chip.title = `${CharacterSheetState._ordinalOrder(m.order)}-order`;
+				chip.setAttribute("aria-label", `${CharacterSheetState._ordinalOrder(m.order)}-order`);
 				this._ce("span", "pm-spell__meta", row).textContent = [m.modeName, m.concentration ? "conc." : null, "running"].filter(Boolean).join(" · ");
 				const btn = this._ce("button", "pm-spell__cast", row);
 				btn.textContent = "End";
@@ -1287,10 +1298,26 @@ export class CharacterSheetPlayMode {
 	_renderPsionicPowerRow (card, power) {
 		const wrapper = this._ce("div", "pm-spell-wrapper", card);
 		const row = this._ce("div", "pm-spell", wrapper);
-		this._ce("span", "pm-spell__name", row).textContent = power.name;
-		this._ce("span", "pm-spell__level", row).textContent = power.isFirstOrder ? "AW" : `O${power.order}`;
+		const nameEl = this._ce("span", "pm-spell__name", row);
+		// Hoverable, like the spell row beside it. Falls back to plain text on its own.
+		const hover = CharacterSheetClassUtils.getPsionicPowerHoverLink(power, this._page);
+		if (hover) nameEl.innerHTML = hover;
+		else nameEl.textContent = power.name;
+
+		// The chip carries the order the way the spell row carries a level. `AW` and `O2`
+		// were invented shorthand no player has seen; the number needs no glossary, and the
+		// words that matter go in the meta line where there is room for them.
+		const chip = this._ce("span", "pm-spell__level", row);
+		chip.textContent = String(power.order);
+		chip.title = `${CharacterSheetState._ordinalOrder(power.order)}-order power`;
+		chip.setAttribute("aria-label", `${CharacterSheetState._ordinalOrder(power.order)}-order power`);
+
+		// A reaction power's manifestation time is a whole trigger sentence; the bucket is
+		// what a player scans for mid-turn.
+		const timing = {bonus: "bonus action", reaction: "reaction", long: power.meta?.manifestationTime}[power.meta?.actionType];
 		this._ce("span", "pm-spell__meta", row).textContent = [
-			power.meta?.manifestationTime,
+			power.isFirstOrder ? "at will" : `${power.order} strain on a failure`,
+			timing,
 			power.disciplineLabel,
 			power.concentrates ? "conc." : null,
 		].filter(Boolean).join(" · ");

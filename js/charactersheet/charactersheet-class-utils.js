@@ -1218,6 +1218,103 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * A hoverable name for a psionic power.
+	 *
+	 * Powers are a real 5etools entity type with their own page and hash builder
+	 * (`UrlUtil.PG_PSIONICS`), so they get the site's genuine hover rather than a
+	 * reconstructed one — the same treatment a spell gets. Falls back to an inline
+	 * entries hover built from the power's own text when the catalog is not loaded (a
+	 * saved character whose brew has not been fetched), and to escaped plain text when
+	 * even that is unavailable, so a name is never lost to a missing hover.
+	 *
+	 * @param {*} power a `getKnownPowers()` projection entry, or a raw `psionic` entity
+	 * @param {*} [page] the character-sheet page, for its `getHoverLink`
+	 * @param {*} [opts]
+	 * @param {string} [opts.label] visible text, when it should not be the power's name —
+	 *   e.g. a glyph beside a name that is already shown and owns a different click
+	 * @returns {string|null} HTML, or null when there is nothing to render
+	 */
+	/**
+	 * A psionic power's rules text is split across the entity: `entries` holds only the meta
+	 * lines (Manifestation Time / Range / Duration) and the actual effect lives in `modes`.
+	 * A hover built from `entries` alone would therefore say nothing about what the power
+	 * does, so both are composed here.
+	 * @param {*} entity
+	 * @returns {Array}
+	 */
+	static getPsionicHoverEntries (/** @type {*} */ entity) {
+		const out = [...(entity?.entries || [])];
+		for (const mode of entity?.modes || []) {
+			if (!mode?.entries?.length) continue;
+			out.push({type: "entries", name: mode.name, entries: mode.entries});
+		}
+		return out;
+	}
+
+	static getPsionicPowerHoverLink (/** @type {*} */ power, /** @type {*} */ page = null, /** @type {*} */ {label = null} = {}) {
+		const name = power?.name;
+		if (!name) return null;
+		const display = label ?? name;
+		const safeDisplay = CharacterSheetClassUtils.escapeHtml(display);
+		try {
+			const source = power.source || power.entity?.source;
+			if (source && page?.getHoverLink) {
+				const link = page.getHoverLink(UrlUtil.PG_PSIONICS, name, source, null, safeDisplay);
+				if (link) return link;
+			}
+			// Fallback for a power whose book is not installed. It composes `modes` as well
+			// as `entries`, because a power's meta lines live in the latter and its actual
+			// effect text in the former — a hover built from `entries` alone said nothing
+			// about what the power does.
+			const entries = CharacterSheetClassUtils.getPsionicHoverEntries(power.entity || power);
+			if (entries.length) {
+				return CharacterSheetClassUtils.buildInlineEntriesHoverLink(display, name, entries) || safeDisplay;
+			}
+			return safeDisplay;
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet] getPsionicPowerHoverLink error:", e);
+			return safeDisplay;
+		}
+	}
+
+	/**
+	 * The same hover as `getPsionicPowerHoverLink`, but as a bare attribute string so it can
+	 * be applied to an element that is already something else — notably the Powers tab's
+	 * name, which is a button that expands the row. Deliberately carries no `onclick`, so
+	 * the host element's own click behaviour survives.
+	 *
+	 * @param {*} power
+	 * @returns {string} attribute string, or "" when no hover can be built
+	 */
+	static getPsionicPowerHoverAttributes (/** @type {*} */ power) {
+		const name = power?.name;
+		if (!name) return "";
+		try {
+			const source = power.source || power.entity?.source;
+			const attrs = (() => {
+				if (source && typeof Renderer !== "undefined" && Renderer.hover?.getHoverElementAttributes) {
+					const hash = UrlUtil.encodeForHash([name, source].join(HASH_LIST_SEP));
+					return Renderer.hover.getHoverElementAttributes({page: UrlUtil.PG_PSIONICS, source, hash});
+				}
+				const entries = CharacterSheetClassUtils.getPsionicHoverEntries(power.entity || power);
+				if (entries.length && Renderer?.hover?.getInlineHover) {
+					return Renderer.hover.getInlineHover({type: "entries", name, entries}).html;
+				}
+				return "";
+			})();
+			// Both hover builders bind their own click (which pins a permanent hover window).
+			// The host here is already a button with its own meaning, so the hover contributes
+			// hover behaviour only and leaves the click to the element it decorates.
+			return attrs.replace(/\sonclick="[^"]*"/g, "");
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet] getPsionicPowerHoverAttributes error:", e);
+			return "";
+		}
+	}
+
+	/**
 	 * Build a hoverable `<span>` whose visible label may differ from the hovered
 	 * entry's heading. Used when the on-sheet label (e.g. an active-state name
 	 * like "Zodiac Form: Octopus") should stay verbatim but the floating hover

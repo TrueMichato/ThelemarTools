@@ -470,6 +470,139 @@ Talent quirk, and a probe that skips that call will wrongly report them missing.
 
 ---
 
+## Two homes, one model
+
+Powers are needed in two different scenes, and they are not the same scene.
+
+- **Prep** — browse, read, compare, learn. That is the **Powers tab**: the library.
+- **In the fight** — how close is strain to killing me, what is running, what can I do this
+  turn. That is the **Combat tab's Psionics section**: the cockpit.
+
+Neither is a copy. `charactersheet-psionics-ui.js` owns the two pieces both surfaces need —
+`renderStrainTracker()` and `renderActiveManifestations()` — so they cannot drift. Density
+is a parameter (`compact`), never a branch on the host tab; the layout otherwise responds to
+its *container* through `@container cs-panel`, per the Container-Adaptive Rule.
+
+**Three surfaces, one renderer.** The Resources strip on Overview had its own hand-written
+strain block, which showed a bare `3 / 9` and the live penalties but never the lethal margin
+or the next threshold — so the same character read differently depending on which panel you
+happened to be looking at. It now calls the shared tracker too. Play mode, which is a
+deliberately terser surface, does not embed the tracker but reports the same margin.
+
+**The lethal margin is the headline everywhere.** `getStrainHeadroom()` answers the only
+question worth asking mid-encounter — *"6 more would kill you"* — instead of leaving the
+player to subtract two numbers under time pressure. `getNextStrainThreshold(track)` supplies
+the other half: what one more point of *this* track would switch on.
+
+The Combat section is gated on `isPsionicManifester()` and self-hides exactly like its
+eleven sibling sections. It lists only powers whose manifestation time fits inside a turn —
+a ten-minute ritual is a library concern — and its Manifest button opens the same dialog the
+Powers tab and play mode open. Three entry points, one decision surface.
+
+Its power list is grouped by **what the power costs this turn**, which is the question being
+asked, and shows the first eight of the leading bucket with the rest behind a *"N more"*
+disclosure. A level-20 Talent knows 26 powers; listing all of them would turn the cockpit
+into the library it exists to be an alternative to.
+
+**Mobile.** The play bar holds five tabs, and a Talent's Spells tab is permanently empty, so
+`CharacterSheetMobile.resolvePlayTabs()` spends that slot on Powers instead — but only for a
+manifester who casts nothing, so a Talent/Wizard keeps both. `partitionTabs()` stays a pure
+static and takes the play set as an argument, which is what keeps the "no tab is unreachable"
+invariant testable.
+
+### Choosing powers
+
+`charactersheet-power-picker.js` owns the choice wherever it comes up. The generic
+optional-feature list is a flat run of checkboxes, which cannot carry a psionic pool: 44
+eligible powers at level 1, over 90 by level 13, across six orders and six disciplines,
+against two separate budgets.
+
+The picker groups by order, searches, chips the discipline, hovers the name, and counts both
+pools. Two decisions in it are load-bearing:
+
+- **A power the character cannot yet learn is shown locked, with the reason** — *"unlocks at
+  Talent 13"*. Filtering it away would tell the player nothing; this tells them what they
+  are working toward.
+- **Within a group, what they can take sorts first.** Already-known and locked powers fall
+  to the bottom, or a Talent who knows the alphabetically-early powers reads a whole screen
+  of dead rows before their first real choice.
+
+One renderer, two hosts: `render()` draws it **inline** for the level-up and Builder
+wizards, which are already modals — a modal inside a modal is worse than a section inside a
+wizard — and `pShow()` wraps the same renderer in a dialog for the Powers tab's *Swap a
+power* flow, where there is no host to live inside. Dispatch happens on the `PsiP1` / `PsiPH`
+feature types, exactly the way Combat Methods already branch, so Builder and Quick Build
+inherit it.
+
+> The picker's selection counter must read `Selected: N / M`. The E2E `autoFillAllSelections`
+> harness finds required pickers by matching that exact string, so a prettier label makes a
+> picker invisible to every automated build.
+
+**Swapping is the same surface.** A per-level swap gives up one power and gains another, and
+those are one decision, so the picker takes a `swap` option that puts the outgoing choice in
+its own header and rebuilds the candidate list when it changes — legality depends on what is
+given up. Only powers that actually have something to trade for are offered, because a
+swappable power with no candidates is a dead option better excluded than explained. The
+earlier two-dialog version was worse than clunky: its `pGetUserEnum` opened on a disabled
+placeholder, so confirming without touching the select returned `null` and *Swap a power*
+silently did nothing.
+
+### Reading strain at a glance
+
+The strain meter's gradient is painted on the **track**, not on the filled portion, and the
+unfilled remainder is masked back to the track colour. A gradient is sized to its own
+element, so painting it on the fill scaled the whole green→amber→red spectrum into whatever
+width the fill happened to be — a Talent at 3 of 16 strain saw a bar with a red tip, exactly
+as alarming as one at 15 of 16. Colour here is the only wordless signal that death is close,
+so it has to mean a fixed amount of strain wherever it appears.
+
+### Powers in the Action Economy
+
+The Action Economy panel had been rendering powers since the day they became pickable, and
+costing them by regexing their prose. That mistook one power in six (CS-BUG-165), and a
+gate above the psionic detector meant powers learned the normal way never reached activation
+at all (CS-BUG-166). Both are fixed: the panel reads the parsed `meta.actionType`, drops
+manifestation times longer than a turn, gives powers their own `🧠` kind rather than
+borrowing `★ Feature`, and states the strain a failure would charge instead of leaking the
+internal code `PsiPH`.
+
+Fixing CS-BUG-166 then flooded three surfaces that key off activation (CS-BUG-167). Powers
+now join `isHiddenFromGenericAbilitySurfaces()` — the shared boundary predicate that keeps a
+feature to one canonical home — so they stay out of the generic Abilities list, and
+action-cost powers collapse into a single `🧠 Powers N ›` disclosure driven by
+`ACTION_ECONOMY_COLLAPSIBLE_KINDS`, the same treatment spells already had. Bonus and
+reaction powers stay as individual rows, because those are the ones a player forgets.
+
+**What the row says.** The Action column is barely 250px wide, so the subtitle reads
+`2nd · 2 strain` — the order gates what you may manifest, the strain is the price, and by
+rule they are the same number. The longer `2nd-order · 2 strain on a failure · Metamorphosis`
+fitted *less* information, because it truncated to "2nd-order · …" and took the name down
+with it (CS-BUG-169). The discipline moved to the hover card and the row's `title`;
+concentration became a `⏳` flag rather than another word in the sentence, so a long name can
+truncate the cost text but never the one fact that invalidates the whole plan.
+
+**Hover.** `UrlUtil.PG_PSIONICS` existed with a working hash builder from the start and was
+simply unwired. `getPsionicPowerHoverLink()` connects it for all four surfaces.
+
+On the Powers tab the name is a button that expands the row, so the hover first hung off a
+small ⓘ beside it. That was the wrong trade: at 12px and 45% opacity nobody found it, and a
+power you cannot hover by pointing at its name reads as a power that is not hoverable at
+all. `getPsionicPowerHoverAttributes()` returns the hover as a bare attribute string so the
+name button can carry it directly — one target, both behaviours, and the ⓘ is retired.
+
+Both of 5etools' hover builders bind their own `onclick`, which pins a permanent hover
+window; that is right for a link and wrong for a button that already means something, so the
+attributes variant strips it. The hover contributes hovering only and leaves the click to
+the element it decorates. In the picker the opposite problem applies — an anchor inside a
+`<label>` steals the click — so there the anchor's default is suppressed instead.
+
+The **fallback** for an uninstalled book composes `modes` as well as `entries`. A power's
+meta lines (Manifestation Time, Range, Duration) live in `entries` and its actual effect
+text lives in `modes`, so the original fallback would have rendered a card that never said
+what the power did.
+
+---
+
 ## The Powers tab
 
 `charactersheet-powers.js` renders a dedicated `🧠 Powers` tab, shown only when
@@ -481,7 +614,7 @@ spell, and a player who knows one panel already knows this one.
 | Section | Contents |
 |---|---|
 | Manifesting | Manifestation die, power save DC, power attack bonus, max order, both powers-known budgets, and the concentration meter *n / PB* |
-| Strain | A gradient meter, the three tracks with ± controls and their live penalties, plus *Psychic Boost* and *Strain to Maintain* buttons when they apply |
+| Strain | The lethal margin (*"6 more would kill you"* — not raw arithmetic), a gradient meter, the three tracks with ± controls, and for each the live penalties **and the next one it is heading for** (*"at 3: lose skill proficiencies"*), plus *Psychic Boost* and *Strain to Maintain* when they apply |
 | Active manifestations | One row per running power — order, mode, concentration, an **Exert** button for outcome-timed options, and **End** |
 | Learning from others | The in-progress study with its day counter, or the long-rest lockout notice |
 | Powers | Grouped by order, 1st-order first and badged **At will · no test · no strain**, with discipline chips, parsed metadata, a favourite star, expandable bodies and **Manifest** |
@@ -509,6 +642,18 @@ track) whose *combination* determines the cost. Chaining sequential `pGetUserEnu
 prompts would hide the one thing that makes the decision legible — the running strain
 total updating as the player pushes harder.
 
+**The risk leads.** The dialog opens with the die against the score, what a failure costs,
+and `current → projected / maximum`, before any control. Nine controls first and the price
+last is a form; the price first is a decision.
+
+**The three tracks are choice cards, not a dropdown.** Each names what it is currently
+carrying and the penalty it would switch on next (*"Mind · now 2 · at 3: lose skill
+proficiencies"*), read from `getNextStrainThreshold()`. Choosing where to take strain is
+then a comparison rather than a recall test against the class table.
+
+**Exertion, Adept and Reduce Stress sit behind *Advanced*.** They change the cost, so they
+belong in the dialog; they are not the common case, so they do not open it.
+
 It shows a context line (order, discipline, save DC, attack bonus, manifestation time,
 range), and then:
 
@@ -526,8 +671,14 @@ range), and then:
   evict an older power, and whether a concentrated spell is about to end.
 
 After the roll it shows the result lines plus the **penalty deltas** the new strain just
-switched on, so the cost is visible where it lands, and — on overflow — the two
-`resolveStrainOverflow` buttons.
+switched on, so the cost is visible where it lands.
+
+**Overflow is the one lethal control on the sheet, and is built like it.** RAW offers two
+outcomes and only one is permanent, so the survivable one — *"Let it go — drop to 0 hit
+points"* — is the primary button and takes focus. The fatal one is a quiet *"Push it through
+anyway…"* that reveals a second confirmation naming the character: *"This kills Phirse … 0
+hit points and three failed death saves. There is no save against this."* A misclick cannot
+end a campaign character.
 
 Everything else uses the sheet's existing prompt vocabulary and does **not** get a modal:
 the Ignore Strain track choice, the strain-track pick for an outcome Exertion and the
@@ -557,6 +708,15 @@ exactly one dialog.
   unchanged single-spell behaviour, the proficiency-bonus cap, power/spell mutual
   exclusion, ending one without ending the rest, and the `concentrating` → `concentrations`
   migration.
+- `test/jest/charactersheet/CharacterSheetPowersActionEconomy.test.js` — the Combat tab's
+  costing of powers (CS-BUG-165) and the activation gate they used to fall through
+  (CS-BUG-166). Its fixtures deliberately mention "a reaction" and "a bonus action" in the
+  body while costing neither, so the suite fails 9 of 12 if the parsed classification is
+  removed — verified by reverting the fix.
+- `test/jest/charactersheet/MobileTabOverflow.test.js` — the play-bar partition at eleven
+  tabs, and `resolvePlayTabs()` swapping a dead Spells slot for Powers on a pure manifester
+  while leaving a Talent/Wizard alone. The invariant asserted throughout is that
+  `play ∪ overflow` is still every tab.
 - `test/e2e/specs/tgtt-talent-chronopath.spec.ts` — full L1→20 comprehensive build with a
   `featuresMatrix` entry per feature per tier, plus the shared `EffectCheck` kinds
   `psionicStrainMechanics` (drives all three tracks through every threshold and asserts

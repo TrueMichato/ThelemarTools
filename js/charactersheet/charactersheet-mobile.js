@@ -1067,16 +1067,46 @@ class CharacterSheetMobile {
 	 * phone — is only checkable if the policy can be called without a DOM.
 	 *
 	 * @param {string[]} hrefs Tab hrefs in document order.
+	 * @param {*} [opts]
+	 * @param {string[]} [opts.playHrefs] Override the play set. Supplied by
+	 *   `resolvePlayTabs()` so a character whose Spells tab is dead (a psionic
+	 *   manifester who casts nothing) spends that bar slot on Powers instead.
+	 *   Defaults to the standard five, so every existing caller is unchanged.
 	 * @return {{play: string[], overflow: string[]}}
 	 */
-	static partitionTabs (hrefs) {
+	static partitionTabs (hrefs, {playHrefs = CharacterSheetMobile._PLAY_TAB_HREFS} = {}) {
 		const play = [];
 		const overflow = [];
 		for (const href of hrefs || []) {
 			if (!href) continue;
-			(CharacterSheetMobile._PLAY_TAB_HREFS.includes(href) ? play : overflow).push(href);
+			(playHrefs.includes(href) ? play : overflow).push(href);
 		}
 		return {play, overflow};
+	}
+
+	/**
+	 * Which five tabs earn a slot in the bar for *this* character.
+	 *
+	 * The default five assume every character either casts or does not care about the
+	 * Spells tab. A Talent breaks that: the class has no spellcasting whatsoever, so its
+	 * Spells tab is permanently empty — yet it held a bar slot while Powers, the class's
+	 * entire action economy, sat behind "More". A player mid-encounter got a dead tab in
+	 * the bar and their real one two taps away.
+	 *
+	 * The swap is deliberately narrow. It fires only when the character manifests AND
+	 * knows no spells, so a Talent/Wizard multiclass keeps Spells and finds Powers under
+	 * "More". Hiding Spells for *every* non-caster (Fighters, Barbarians, Rogues) is a
+	 * separate product decision and is not made here.
+	 *
+	 * @param {*} state a CharacterSheetState, or null
+	 * @return {string[]}
+	 */
+	static resolvePlayTabs (state) {
+		const base = CharacterSheetMobile._PLAY_TAB_HREFS;
+		if (!state?.isPsionicManifester?.()) return base;
+		const castsSpells = !!(state.getSpells?.() || []).length;
+		if (castsSpells) return base;
+		return base.map(href => (href === "#charsheet-tab-spells" ? "#charsheet-tab-powers" : href));
 	}
 
 	_initTabOverflow () {
@@ -1086,6 +1116,7 @@ class CharacterSheetMobile {
 
 		const {overflow} = CharacterSheetMobile.partitionTabs(
 			[...tabList.children].map(li => li.querySelector("a[href]")?.getAttribute("href")),
+			{playHrefs: CharacterSheetMobile.resolvePlayTabs(this._page?.getState?.())},
 		);
 		const overflowItems = [...tabList.children].filter(li => {
 			const href = li.querySelector("a[href]")?.getAttribute("href");

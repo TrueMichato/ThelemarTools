@@ -11,6 +11,8 @@
  * and hands decisions back to it.
  */
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import {renderStrainTracker, renderActiveManifestations} from "./charactersheet-psionics-ui.js";
+import {CharacterSheetPowerPicker} from "./charactersheet-power-picker.js";
 
 const {e_, Renderer, Parser, JqueryUtil, InputUiUtil, CharacterSheetState, CharacterSheetClassUtils} = /** @type {*} */ (globalThis);
 
@@ -70,9 +72,9 @@ class CharacterSheetPowers {
 		const concMax = state.getPowerConcentrationMax();
 		const concNow = state.getPowerConcentrations().length;
 
-		const stat = (label, value, title = "") => `
+		const stat = (label, value, title = "", isWarn = false) => `
 			<div class="charsheet__power-stat" ${title ? `title="${title}"` : ""}>
-				<div class="charsheet__power-stat-value">${value}</div>
+				<div class="charsheet__power-stat-value ${isWarn ? "charsheet__power-stat-value--over" : ""}">${value}</div>
 				<div class="charsheet__power-stat-label">${label}</div>
 			</div>`;
 
@@ -86,8 +88,8 @@ class CharacterSheetPowers {
 					${stat("Power save DC", calc.powerSaveDc ?? "—")}
 					${stat("Power attack", calc.powerAttackBonus != null ? `+${calc.powerAttackBonus}` : "—")}
 					${stat("Max order", CharacterSheetPowers._ordinal(state.getMaxPowerOrder()), "The highest order you can learn or manifest")}
-					${stat("1st-order known", `${budget.firstOrder.used}/${budget.firstOrder.max}`)}
-					${stat("Powers known", `${budget.higherOrder.used}/${budget.higherOrder.max}`, "Powers of 2nd order or higher")}
+					${stat("1st-order known", `${budget.firstOrder.used}/${budget.firstOrder.max}`, "", budget.firstOrder.used > budget.firstOrder.max)}
+					${stat("Powers known", `${budget.higherOrder.used}/${budget.higherOrder.max}`, "Powers of 2nd order or higher", budget.higherOrder.used > budget.higherOrder.max)}
 					${stat("Concentration", `${concNow}/${concMax}`, "You can concentrate on this many powers at once — but never on a power and a spell together")}
 				</div>
 			</div>
@@ -101,67 +103,39 @@ class CharacterSheetPowers {
 
 	_renderStrain (container) {
 		const state = this._state;
-		const max = state.getStrainMaximum?.() || 0;
-		if (!max) return;
+		if (!state.getStrainMaximum?.()) return;
 
+		// Every other resource on this sheet depletes; strain accumulates and then kills
+		// you. A first-time Talent should meet that rule here, in the panel, rather than
+		// for the first time in a red error box after a bad roll. One sentence, and it
+		// stops asking once the player has clearly met the mechanic.
 		const total = state.getTotalStrain();
-		const pct = Math.min(100, Math.round((total / max) * 100));
-		const boost = (state.getResources?.() || []).find(r => r.name === "Psychic Boost");
-
+		const isNew = total === 0 && !state.getActiveManifestations().length;
 		const section = e_({outer: `
 			<div class="charsheet__section charsheet__section--strain">
 				<div class="charsheet__section-header">
 					<h4 class="charsheet__section-title">Strain</h4>
-					<span class="charsheet__section-badge ${total >= max ? "charsheet__section-badge--danger" : ""}">${total} / ${max}</span>
 				</div>
-				<div class="charsheet__strain-meter" role="img" aria-label="Strain ${total} of ${max}">
-					<div class="charsheet__strain-meter-fill" style="width:${pct}%"></div>
-				</div>
-				<div class="charsheet__strain-tracks mt-2"></div>
-				<div class="charsheet__power-strain-actions mt-2"></div>
+				<details class="cs-psi-explainer" ${isNew ? "open" : ""}>
+					<summary class="cs-psi-explainer__summary">What is strain?</summary>
+					<div class="cs-psi-explainer__body ve-small">
+						<p>Every other resource on this sheet depletes. Strain does the opposite: it <strong>accumulates</strong>,
+						and it is the price of manifesting powers of 2nd order or higher.</p>
+						<p>It lands on one of three tracks — <strong>body</strong>, <strong>mind</strong> or <strong>soul</strong> —
+						and you choose which. Each track imposes a penalty at 1, 3, 5 and 7, and they stack.</p>
+						<p>If your total strain ever passes your maximum, <strong>you die</strong>. A long rest clears strain
+						entirely; a short rest can spend Hit Dice to remove it one point at a time.</p>
+					</div>
+				</details>
+				<div class="charsheet__power-strain-host"></div>
 			</div>
 		`});
-
-		const tracks = section.querySelector(".charsheet__strain-tracks");
-		const ignored = state.getIgnoredStrainTrack();
-		for (const track of CharacterSheetState.PSIONIC_STRAIN_TRACKS) {
-			const value = state.getStrain()[track] || 0;
-			const effects = state.getStrainTrackEffects(track);
-			const isIgnored = ignored === track;
-			const row = e_({outer: `
-				<div class="charsheet__strain-track">
-					<span class="charsheet__strain-track-name">${track[0].toUpperCase()}${track.slice(1)}</span>
-					<button class="ve-btn ve-btn-xs ve-btn-default js-dec" ${value <= 0 ? "disabled" : ""} aria-label="Remove one ${track} strain">−</button>
-					<span class="charsheet__strain-track-value">${value}</span>
-					<button class="ve-btn ve-btn-xs ve-btn-danger js-inc" ${total >= max ? "disabled" : ""} aria-label="Add one ${track} strain">+</button>
-					<span class="charsheet__strain-track-effects ${isIgnored ? "ve-muted" : ""}">${isIgnored ? "ignored until your next long rest" : (effects.join(" · ") || "no effect yet")}</span>
-				</div>
-			`});
-			row.querySelector(".js-inc").addEventListener("click", () => { state.addStrain(1, track); this._commit(); });
-			row.querySelector(".js-dec").addEventListener("click", () => { state.removeStrain(1, track); this._commit(); });
-			tracks.append(row);
-		}
-
-		const actions = section.querySelector(".charsheet__power-strain-actions");
-		if (boost) {
-			const btn = e_({outer: `<button class="ve-btn ve-btn-xs ve-btn-primary" ${boost.current < 1 || !total ? "disabled" : ""}>
-				🧘 Psychic Boost (${boost.current}/${boost.max}) — remove ${state.getProficiencyBonus()} strain</button>`});
-			btn.addEventListener("click", async () => {
-				const track = await this._pPickTrack("Remove strain from which track?");
-				if (!track) return;
-				state.usePsychicBoost(track);
-				this._commit();
-			});
-			actions.append(btn);
-		}
-		if (state.getPowerConcentrations().length) {
-			const quote = state.payStrainToMaintain({apply: false});
-			const btn = e_({outer: `<button class="ve-btn ve-btn-xs ve-btn-default" title="Use after failing a Constitution save to keep every power you are concentrating on">
-				🪢 Strain to Maintain — ${quote?.cost ?? 0} strain</button>`});
-			btn.addEventListener("click", () => this._pStrainToMaintain());
-			actions.append(btn);
-		}
-
+		renderStrainTracker(section.querySelector(".charsheet__power-strain-host"), {
+			state,
+			onChange: () => this._commit(),
+			pPickTrack: prompt => this._pPickTrack(prompt),
+			onStrainToMaintain: () => this._pStrainToMaintain(),
+		});
 		container.append(section);
 	}
 
@@ -183,6 +157,9 @@ class CharacterSheetPowers {
 		const tracks = CharacterSheetState.PSIONIC_STRAIN_TRACKS;
 		const ix = await InputUiUtil.pGetUserEnum({
 			values: tracks.map(t => `${t[0].toUpperCase()}${t.slice(1)}`),
+			// Without a default the select opens on a disabled placeholder, so confirming
+			// without touching it returns null and the whole flow dies silently.
+			default: 0,
 			title: "Strain track",
 			htmlDescription: `<div>${prompt}</div>`,
 		});
@@ -195,56 +172,24 @@ class CharacterSheetPowers {
 
 	_renderActive (container) {
 		const state = this._state;
-		const active = state.getActiveManifestations();
+		const count = state.getActiveManifestations().length;
 
 		const section = e_({outer: `
 			<div class="charsheet__section">
 				<div class="charsheet__section-header">
 					<h4 class="charsheet__section-title">Active manifestations</h4>
-					<span class="charsheet__section-badge">${active.length}</span>
+					<span class="charsheet__section-badge">${count}</span>
 				</div>
 				<div class="charsheet__power-active"></div>
 			</div>
 		`});
-		const list = section.querySelector(".charsheet__power-active");
 
-		if (!active.length) {
-			list.append(e_({outer: `<div class="ve-muted ve-small py-2">Nothing running. Manifest a power below and it appears here, where you can end it or spend a Psionic Exertion on its outcome.</div>`}));
-			container.append(section);
-			return;
-		}
-
-		const outcomeExertions = state.getKnownExertions({timing: "outcome"});
-		for (const m of active) {
-			const bits = [
-				`${CharacterSheetPowers._ordinal(m.order)}-order`,
-				m.order > m.baseOrder ? "increased" : null,
-				m.modeName || null,
-				m.concentration ? `concentration, up to ${m.concentration.duration} ${m.concentration.unit}` : null,
-				m.exertionUsed ? `${m.exertionUsed} spent` : null,
-			].filter(Boolean);
-
-			const row = e_({outer: `
-				<div class="charsheet__power-active-row">
-					<div class="charsheet__power-active-main">
-						<span class="charsheet__power-active-name">${m.name}</span>
-						<span class="charsheet__power-active-meta">${bits.join(" · ")}</span>
-					</div>
-					<div class="charsheet__power-active-actions"></div>
-				</div>
-			`});
-			const actions = row.querySelector(".charsheet__power-active-actions");
-
-			if (outcomeExertions.length && !m.exertionUsed) {
-				const btn = e_({outer: `<button class="ve-btn ve-btn-xs ve-btn-default" title="Spend a Psionic Exertion triggered by this power's outcome">⚡ Exert</button>`});
-				btn.addEventListener("click", () => this._pApplyOutcomeExertion(m));
-				actions.append(btn);
-			}
-			const endBtn = e_({outer: `<button class="ve-btn ve-btn-xs ve-btn-default" title="End this power (no action required, on your turn)">End</button>`});
-			endBtn.addEventListener("click", () => { state.endManifestation(m.id); this._commit(); });
-			actions.append(endBtn);
-			list.append(row);
-		}
+		renderActiveManifestations(section.querySelector(".charsheet__power-active"), {
+			state,
+			onChange: () => this._commit(),
+			onExert: m => this._pApplyOutcomeExertion(m),
+			emptyText: "Nothing running. Manifest a power below and it appears here, where you can end it or spend a Psionic Exertion on its outcome.",
+		});
 		container.append(section);
 	}
 
@@ -259,6 +204,7 @@ class CharacterSheetPowers {
 		});
 		const ix = await InputUiUtil.pGetUserEnum({
 			values: labels,
+			default: 0,
 			title: `Exert — ${manifestation.name}`,
 			htmlDescription: `<div>Only one Psionic Exertion option can be spent on a power.</div>`,
 		});
@@ -270,6 +216,7 @@ class CharacterSheetPowers {
 		if (chosen.costOptions?.length > 1) {
 			const sizeIx = await InputUiUtil.pGetUserEnum({
 				values: chosen.costOptions.map(o => `${o.label} — ${o.cost} strain`),
+				default: 0,
 				title: "Target size",
 				htmlDescription: `<div>${chosen.name} costs more against a bigger target.</div>`,
 			});
@@ -326,7 +273,7 @@ class CharacterSheetPowers {
 						<strong>${learning.name}</strong>
 						<span class="ve-muted ve-small ml-2">${CharacterSheetPowers._ordinal(learning.order)}-order · day ${learning.daysDone} of ${learning.daysRequired}</span>
 					</div>
-					<div class="charsheet__strain-meter"><div class="charsheet__strain-meter-fill" style="width:${pct}%"></div></div>
+					<div class="cs-psi-learn__meter" role="img" aria-label="Day ${learning.daysDone} of ${learning.daysRequired}"><div class="cs-psi-learn__fill" style="width:${pct}%"></div></div>
 					<div class="ve-small ve-muted mt-1">One hour of practice a day. Studying a different power, or missing a day, forfeits this progress.</div>
 					<div class="mt-2">
 						<button class="ve-btn ve-btn-xs ve-btn-primary js-advance">Log a day of practice</button>
@@ -354,16 +301,23 @@ class CharacterSheetPowers {
 		const state = this._state;
 		const all = state.getKnownPowers();
 
+		// The once-per-level swap has had working state APIs (`replacePsionicPower`,
+		// `getPowerReplacementCandidates`) since powers became first-class, and no way to
+		// reach them. It shares the level-up picker rather than growing a second one.
+		const canReplace = state.canReplacePower?.() && all.some(p => !p.isFirstOrder);
 		const section = e_({outer: `
 			<div class="charsheet__section">
 				<div class="charsheet__section-header">
 					<h4 class="charsheet__section-title">Powers</h4>
 					<span class="charsheet__section-badge">${all.length}</span>
+					${canReplace ? `<button class="ve-btn ve-btn-xs ve-btn-default ml-2 js-replace"
+						title="Once per level you may swap a known power for another of the same order or lower">Swap a power</button>` : ""}
 				</div>
 				<div class="charsheet__power-filters"></div>
 				<div class="charsheet__power-list"></div>
 			</div>
 		`});
+		section.querySelector(".js-replace")?.addEventListener("click", () => this._pReplacePower());
 
 		if (!all.length) {
 			section.querySelector(".charsheet__power-list").append(e_({outer:
@@ -384,7 +338,15 @@ class CharacterSheetPowers {
 
 		const list = section.querySelector(".charsheet__power-list");
 		if (!shown.length) {
-			list.append(e_({outer: `<div class="ve-muted ve-small py-2">No power matches those filters.</div>`}));
+			const empty = e_({outer: `<div class="ve-muted ve-small py-2">No power matches those filters.
+				<button class="ve-btn ve-btn-xs ve-btn-default ml-2 js-clear-filters">Clear filters</button></div>`});
+			empty.querySelector(".js-clear-filters").addEventListener("click", () => {
+				this._filter = "";
+				this._orderFilter = "all";
+				this._disciplineFilter = "all";
+				this.render();
+			});
+			list.append(empty);
 			container.append(section);
 			return;
 		}
@@ -405,6 +367,50 @@ class CharacterSheetPowers {
 		}
 
 		container.append(section);
+	}
+
+	/**
+	 * The per-level power swap: pick what leaves, then pick what replaces it.
+	 *
+	 * Two steps rather than one combined list, because the second list DEPENDS on the
+	 * first — RAW only allows a replacement of equal or lower order, and
+	 * `getPowerReplacementCandidates()` already encodes that.
+	 */
+	async _pReplacePower () {
+		const state = this._state;
+		// 1st-order powers are the at-will pool and are not swappable.
+		const swappable = state.getKnownPowers().filter(p => !p.isFirstOrder);
+		if (!swappable.length) return;
+
+		// Every swappable power that has nothing to trade for is a dead option; excluding
+		// them up front beats letting the player pick one and then explaining the mistake.
+		const tradeable = swappable.filter(p => state.getPowerReplacementCandidates(p.id).length);
+		if (!tradeable.length) {
+			JqueryUtil.doToast({content: `There is no unknown power of a low enough order to swap for.`, type: "warning"});
+			return;
+		}
+
+		const res = await CharacterSheetPowerPicker.pShow({
+			state,
+			pickCount: 1,
+			title: "Swap a power",
+			known: state.getKnownPowers(),
+			page: this._page,
+			confirmLabel: "Swap",
+			swap: {
+				outgoing: tradeable,
+				fnGetCandidates: outgoing => state.getPowerReplacementCandidates(outgoing.id),
+			},
+		});
+		if (!res?.picked?.length) return;
+
+		const out = state.replacePsionicPower(res.outgoing.id, res.picked[0]);
+		if (!out.ok) {
+			JqueryUtil.doToast({content: `That swap isn't allowed (${out.reason}).`, type: "warning"});
+			return;
+		}
+		JqueryUtil.doToast({content: `${out.outgoing} swapped for ${out.incoming}.`, type: "success"});
+		this._commit();
 	}
 
 	_renderFilters (wrp, all) {
@@ -429,11 +435,14 @@ class CharacterSheetPowers {
 		const search = bar.querySelector(".js-search");
 		search.addEventListener("input", evt => {
 			this._filter = evt.target.value;
+			// A full re-render replaces every node, so focus, caret AND scroll position all
+			// have to be carried across or the list jumps to the top on each keystroke.
+			const scroller = document.scrollingElement || document.documentElement;
+			const scrollTop = scroller.scrollTop;
 			this.render();
-			// Re-rendering replaces the node, so focus has to be restored explicitly or
-			// typing a second character silently goes nowhere.
-			const next = document.querySelector("#charsheet-powers-container .js-search");
+			const next = /** @type {*} */ (document.querySelector("#charsheet-powers-container .js-search"));
 			if (next) { next.focus(); next.setSelectionRange(next.value.length, next.value.length); }
+			scroller.scrollTop = scrollTop;
 		});
 		bar.querySelector(".js-order").addEventListener("change", evt => { this._orderFilter = evt.target.value; this.render(); });
 		bar.querySelector(".js-discipline")?.addEventListener("change", evt => { this._disciplineFilter = evt.target.value; this.render(); });
@@ -454,10 +463,12 @@ class CharacterSheetPowers {
 		const row = e_({outer: `
 			<div class="charsheet__power-row ${isRunning ? "charsheet__power-row--active" : ""}">
 				<div class="charsheet__power-row-main">
-					<button class="charsheet__power-name js-expand" aria-expanded="${isExpanded}">${power.name}</button>
+					<button class="charsheet__power-name js-expand" aria-expanded="${isExpanded}"
+						${CharacterSheetClassUtils.getPsionicPowerHoverAttributes(power)}
+						title="Click to show this power's modes">${power.name}</button>
 					<div class="charsheet__power-tags">
 						${power.disciplineLabel ? `<span class="charsheet__power-badge charsheet__power-badge--discipline">${power.disciplineLabel}</span>` : ""}
-						${power.concentrates ? `<span class="charsheet__power-badge charsheet__power-badge--conc" title="Ties up one of your concentration slots">Concentration</span>` : ""}
+						${power.concentrates ? `<span class="charsheet__power-badge charsheet__power-badge--conc" title="Ties up one of your concentration slots">⏳ Concentration</span>` : ""}
 						${power.meta.actionType === "bonus" ? `<span class="charsheet__power-badge">Bonus action</span>` : ""}
 						${power.meta.actionType === "reaction" ? `<span class="charsheet__power-badge">Reaction</span>` : ""}
 						${power.meta.actionType === "long" ? `<span class="charsheet__power-badge">Ritual-length</span>` : ""}
@@ -466,7 +477,7 @@ class CharacterSheetPowers {
 					<div class="charsheet__power-meta">${meta.join(" · ")}</div>
 				</div>
 				<div class="charsheet__power-row-actions">
-					<button class="ve-btn ve-btn-xs ve-btn-default js-fav" title="${isFav ? "Remove from favourites" : "Add to favourites"}" aria-pressed="${isFav}">${isFav ? "★" : "☆"}</button>
+					<button class="ve-btn ve-btn-xs ve-btn-default js-fav" aria-label="${isFav ? `Remove ${power.name} from favourites` : `Add ${power.name} to favourites`}" title="${isFav ? "Remove from favourites" : "Add to favourites"}" aria-pressed="${isFav}">${isFav ? "★" : "☆"}</button>
 					<button class="ve-btn ve-btn-xs ve-btn-primary js-manifest">Manifest</button>
 				</div>
 				<div class="charsheet__power-body ${isExpanded ? "" : "ve-hidden"}"></div>
@@ -554,11 +565,25 @@ class CharacterSheetPowers {
 			power.meta.range,
 		].filter(Boolean);
 
+		// The decision, then the levers that change it. Reading order matters here: a
+		// player mid-combat needs the price before the options, not after nine controls.
 		const wrp = e_({outer: `
 			<div class="charsheet__manifest-dialog">
 				<div class="ve-small ve-muted mb-2">${contextBits.join(" · ")}</div>
 
-				${power.isFirstOrder ? `<div class="charsheet__manifest-note mb-2">1st-order powers are manifested at will: no manifestation test, no strain.</div>` : ""}
+				<div class="cs-manifest-risk" role="group" aria-live="polite">
+					${power.isFirstOrder
+		? `<div class="cs-manifest-risk__headline">At will — no test, no strain.</div>`
+		: `<div class="cs-manifest-risk__row">
+							<span class="cs-manifest-risk__die js-die">${state.getManifestationDie()}</span>
+							<span class="cs-manifest-risk__vs">vs. score</span>
+							<span class="cs-manifest-risk__score js-score">—</span>
+							<span class="cs-manifest-risk__fail js-fail"></span>
+						</div>
+						<div class="cs-manifest-risk__detail js-score-detail"></div>`}
+					<div class="cs-manifest-risk__projection js-projection"></div>
+					<div class="cs-manifest-risk__notes js-risk-notes"></div>
+				</div>
 
 				${canIncrease ? `<label class="charsheet__manifest-field">Manifest at
 					<select class="ve-form-control form-control--minimal js-order">
@@ -569,32 +594,33 @@ class CharacterSheetPowers {
 				${power.variantModes.length ? `<label class="charsheet__manifest-field">Effect
 					<select class="ve-form-control form-control--minimal js-mode">
 						${power.variantModes.map(m => `<option value="${m.name}">${m.name}</option>`).join("")}
-					</select></label>` : ""}
+					</select></label>
+					<div class="ve-small ve-muted mb-2 js-mode-text"></div>` : ""}
 
+				<fieldset class="cs-manifest-tracks">
+					<legend class="cs-manifest-tracks__legend">Take strain as</legend>
+					<div class="cs-manifest-tracks__options"></div>
+				</fieldset>
+
+				${/* A Psionic Exertion is a class-defining lever, not an advanced setting — if the
+					character has one it stays visible. Only the two per-rest safety valves,
+					which most manifestations do not touch, collapse. */ ""}
 				${exertions.length ? `<label class="charsheet__manifest-field">Psionic Exertion
 					<select class="ve-form-control form-control--minimal js-exertion">
 						<option value="">None</option>
 						${exertions.map(e => `<option value="${e.name}">${e.name} — ${e.summary}</option>`).join("")}
 					</select></label>` : ""}
 
-				${power.isFirstOrder ? "" : `
-					<div class="charsheet__manifest-score mb-2">
-						Manifestation test: <strong class="js-die">${state.getManifestationDie()}</strong> vs. score
-						<strong class="js-score">—</strong>
-						<span class="ve-muted ve-small js-score-detail"></span>
-					</div>`}
-
-				<label class="charsheet__manifest-field">Take strain as
-					<select class="ve-form-control form-control--minimal js-track">
-						${CharacterSheetState.PSIONIC_STRAIN_TRACKS.map(t => `<option value="${t}">${t[0].toUpperCase()}${t.slice(1)}</option>`).join("")}
-					</select></label>
-
-				${canAdept ? `<label class="charsheet__manifest-check"><input type="checkbox" class="js-adept">
-					Spend ${calc.adeptDiscipline || "discipline"} Adept to reroll a failed test</label>` : ""}
-				${canReduce ? `<label class="charsheet__manifest-check"><input type="checkbox" class="js-reduce">
-					Spend Reduce Stress to halve the strain (minimum 1)</label>` : ""}
-
-				<div class="charsheet__manifest-projection" id="charsheet-manifest-projection" role="group" aria-live="polite"></div>
+				${canAdept || canReduce ? `
+				<details class="cs-manifest-advanced">
+					<summary class="cs-manifest-advanced__summary">Spend a per-rest reroll or reduction${canAdept && canReduce ? "" : canAdept ? " — Adept" : " — Reduce Stress"}</summary>
+					<div class="cs-manifest-advanced__body">
+						${canAdept ? `<label class="charsheet__manifest-check"><input type="checkbox" class="js-adept">
+							Spend ${calc.adeptDiscipline || "discipline"} Adept to reroll a failed test</label>` : ""}
+						${canReduce ? `<label class="charsheet__manifest-check"><input type="checkbox" class="js-reduce">
+							Spend Reduce Stress to halve the strain (minimum 1)</label>` : ""}
+					</div>
+				</details>` : ""}
 
 				<div class="ve-flex-v-center mt-3" style="gap:.5rem;">
 					<button class="ve-btn ve-btn-primary js-confirm">Manifest</button>
@@ -603,6 +629,41 @@ class CharacterSheetPowers {
 				<div class="mt-2 js-result"></div>
 			</div>
 		`});
+
+		// Each track is a card naming the penalty it would switch on, so choosing where to
+		// take the hit is a comparison rather than a memory test against the class table.
+		const trackWrp = wrp.querySelector(".cs-manifest-tracks__options");
+		for (const [i, track] of CharacterSheetState.PSIONIC_STRAIN_TRACKS.entries()) {
+			const at = state.getStrain()[track] || 0;
+			trackWrp.append(e_({outer: `
+				<label class="cs-manifest-track" data-track="${track}">
+					<input type="radio" name="psi-track" class="js-track-radio" value="${track}" ${i === 0 ? "checked" : ""}>
+					<span class="cs-manifest-track__name">${track[0].toUpperCase()}${track.slice(1)}</span>
+					<span class="cs-manifest-track__at">now ${at}</span>
+					<span class="cs-manifest-track__next js-track-next"></span>
+				</label>
+			`}));
+		}
+
+		// Recomputed whenever the projected cost changes, because the consequence of a
+		// track depends on how much strain is about to land on it.
+		const doUpdateTracks = worst => {
+			for (const track of CharacterSheetState.PSIONIC_STRAIN_TRACKS) {
+				const ele = wrp.querySelector(`.cs-manifest-track[data-track="${track}"] .js-track-next`);
+				if (!ele) continue;
+				if (state.getIgnoredStrainTrack() === track) { ele.textContent = "ignored — no effect"; continue; }
+
+				const gained = state.getStrainEffectsGainedBy(track, worst);
+				if (gained.length) {
+					ele.textContent = `would switch on: ${gained.join(", ")}`;
+					ele.classList.add("cs-manifest-track__next--hit");
+					continue;
+				}
+				ele.classList.remove("cs-manifest-track__next--hit");
+				const next = state.getNextStrainThreshold(track);
+				ele.textContent = next ? `no new effect — next at ${next.at}: ${next.effect}` : "every effect already live";
+			}
+		};
 
 		const {eleModalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `🧠 ${power.name}`,
@@ -615,11 +676,26 @@ class CharacterSheetPowers {
 		const getMode = () => wrp.querySelector(".js-mode")?.value || null;
 		const getExertion = () => wrp.querySelector(".js-exertion")?.value || null;
 
-		const eleProjection = wrp.querySelector(".charsheet__manifest-projection");
+		const getTrack = () => /** @type {*} */ (wrp.querySelector(".js-track-radio:checked"))?.value
+			|| CharacterSheetState.PSIONIC_STRAIN_TRACKS[0];
+
+		const eleProjection = wrp.querySelector(".js-projection");
+		const eleNotes = wrp.querySelector(".js-risk-notes");
 		const eleUpcast = wrp.querySelector(".js-upcast-text");
 		if (eleUpcast && power.increasedOrder) {
 			eleUpcast.textContent = (power.increasedOrder.entries || []).filter(e => typeof e === "string").join(" ");
 		}
+
+		// The dialog is where the variant is chosen, so it is where the variant has to be
+		// legible. A bare list of names ("Inspired / Sorrow / Terror") asks the player to
+		// remember the power they came here to look up.
+		const eleModeText = wrp.querySelector(".js-mode-text");
+		const syncModeText = () => {
+			if (!eleModeText) return;
+			const mode = power.variantModes.find(m => m.name === getMode());
+			eleModeText.textContent = (mode?.entries || []).filter(e => typeof e === "string").join(" ");
+		};
+		syncModeText();
 
 		const doUpdate = () => {
 			const order = getOrder();
@@ -627,9 +703,10 @@ class CharacterSheetPowers {
 			const eleScore = wrp.querySelector(".js-score");
 			if (eleScore) {
 				eleScore.textContent = String(score);
+				wrp.querySelector(".js-fail").textContent = `roll under and it costs ${order} strain`;
 				wrp.querySelector(".js-score-detail").textContent = others
-					? `(${order} + ${others} for the ${others === 1 ? "power" : "powers"} you are already concentrating on)`
-					: "(nothing else concentrated on)";
+					? `${order} for the power, +${others} for the ${others === 1 ? "power" : "powers"} you are already concentrating on`
+					: "nothing else concentrated on";
 			}
 
 			// Worst case, so the RAW "manifest and die" branch is never a surprise.
@@ -639,32 +716,40 @@ class CharacterSheetPowers {
 			const exertionCost = exertion ? state.getExertionStrainCost(exertion, {powerOrder: order}) : 0;
 			worst += exertionCost;
 
-			const projected = state.getTotalStrain() + worst;
+			const now = state.getTotalStrain();
+			const projected = now + worst;
 			const isOver = projected > strainMax;
+
+			eleProjection.innerHTML = worst
+				? `<span class="cs-manifest-risk__arrow">${now} → <strong class="${isOver ? "cs-manifest-risk__over" : ""}">${projected}</strong> / ${strainMax}</span>
+					<span class="cs-manifest-risk__worst">worst case +${worst}${exertionCost ? `, ${exertionCost} of it the Exertion` : ""}</span>`
+				: `<span class="cs-manifest-risk__arrow">${now} / ${strainMax}</span><span class="cs-manifest-risk__worst">costs nothing</span>`;
+
 			const conc = CharacterSheetClassUtils.getPsionicPowerConcentration(power.entity, {
 				order, modeName: getMode(), characterLevel: state.getTotalLevel(),
 			});
-			const concMax = state.getPowerConcentrationMax();
-			const willEvict = conc && others >= concMax;
+			const willEvict = conc && others >= state.getPowerConcentrationMax();
+			const spellConc = state.getSpellConcentration();
 
-			eleProjection.innerHTML = [
-				`<div>Worst case <strong>+${worst}</strong> strain · projected <strong>${projected} / ${strainMax}</strong>${exertionCost ? ` (${exertionCost} of it for the Exertion)` : ""}</div>`,
-				isOver ? `<div class="ve-error">That exceeds your strain maximum. You would have to choose between manifesting and dying, or dropping to 0 hit points.</div>` : "",
-				conc ? `<div class="ve-muted ve-small">Concentration, up to ${conc.duration} ${conc.unit}.${willEvict ? " You are already concentrating on as many powers as you can, so the oldest one ends." : ""}</div>` : "",
-				state.getSpellConcentration() && conc ? `<div class="ve-muted ve-small">Your concentration on ${state.getSpellConcentration().name} ends — you can't hold a spell and a power at once.</div>` : "",
+			doUpdateTracks(worst);
+
+			eleNotes.innerHTML = [
+				isOver ? `<div class="cs-manifest-risk__danger">This would take you past your maximum — you would have to choose between manifesting and dying, or dropping to 0 hit points.</div>` : "",
+				conc ? `<div>Concentration, up to ${conc.duration} ${conc.unit}.${willEvict ? " You are already holding as many powers as you can, so the oldest ends." : ""}</div>` : "",
+				spellConc && conc ? `<div>Your concentration on ${spellConc.name} ends — you can't hold a spell and a power at once.</div>` : "",
 			].filter(Boolean).join("");
 		};
 
-		wrp.querySelectorAll(".js-order, .js-mode, .js-exertion, .js-reduce, .js-adept, .js-track")
+		wrp.querySelectorAll(".js-order, .js-mode, .js-exertion, .js-reduce, .js-adept, .js-track-radio")
 			.forEach(ele => { ele.addEventListener("change", doUpdate); ele.addEventListener("input", doUpdate); });
+		wrp.querySelector(".js-mode")?.addEventListener("change", syncModeText);
 		doUpdate();
 
 		wrp.querySelector(".js-cancel").addEventListener("click", () => doClose(false));
 		wrp.querySelector(".js-confirm").addEventListener("click", () => {
-			const track = wrp.querySelector(".js-track").value;
-			const order = getOrder();
+			const track = getTrack();
 			const res = state.manifestPower(power.id, {
-				order,
+				order: getOrder(),
 				modeName: getMode(),
 				exertion: getExertion(),
 				track,
@@ -679,21 +764,59 @@ class CharacterSheetPowers {
 		const state = this._state;
 
 		if (!res.ok && res.reason === "overflow") {
+			// The only place on this sheet where a button ends a campaign character. RAW
+			// gives two outcomes and neither is good, but only one is permanent — so the
+			// survivable one is the primary, and the fatal one has to be asked for twice
+			// and names who dies.
+			const name = state.getName?.() || "your character";
+			const hp = state.getCurrentHp?.() ?? 0;
+			const strainMax = state.getStrainMaximum();
 			wrp.innerHTML = `
-				<div class="ve-error mb-2">Rolled <strong>${res.test.roll}</strong> on ${res.test.die} vs. score <strong>${res.test.score}</strong> —
-					<strong>${res.test.strain} strain</strong>, which would take you past your maximum of ${state.getStrainMaximum()}.</div>
-				<div class="ve-flex-v-center" style="gap:.5rem;">
-					<button class="ve-btn ve-btn-xs ve-btn-danger js-die-manifest">Manifest it and die</button>
-					<button class="ve-btn ve-btn-xs ve-btn-default js-decline">Don't manifest (drop to 0 hp)</button>
+				<div class="cs-psi-overflow">
+					<div class="cs-psi-overflow__head">Rolled <strong>${res.test.roll}</strong> on ${res.test.die} vs. score
+						<strong>${res.test.score}</strong> — <strong>${res.test.strain} strain</strong>, past your maximum of ${strainMax}.</div>
+					<p class="cs-psi-overflow__body">The power is more than ${name} can hold. Let it go and the backlash drops
+						them from ${hp} hit points to 0 — unconscious, but alive and stabilisable. Push it through and it kills them.</p>
+					<div class="cs-psi-overflow__actions">
+						<button class="ve-btn ve-btn-primary js-decline">Let it go — drop to 0 hit points</button>
+						<button class="ve-btn ve-btn-default ve-btn-xs js-die-arm">Push it through anyway…</button>
+					</div>
+					<div class="cs-psi-overflow__confirm ve-hidden" role="alert">
+						<p class="cs-psi-overflow__warn">This kills <strong>${name}</strong>: the power manifests, then they die with
+							${res.test.strain} strain past their maximum — 0 hit points and three failed death saves. There is no save against this.</p>
+						<div class="cs-psi-overflow__actions">
+							<button class="ve-btn ve-btn-danger ve-btn-xs js-die-manifest">Yes — manifest it and kill ${name}</button>
+							<button class="ve-btn ve-btn-default ve-btn-xs js-die-cancel">Back</button>
+						</div>
+					</div>
 				</div>`;
+
+			const confirm = wrp.querySelector(".cs-psi-overflow__confirm");
+			const armRow = wrp.querySelector(".cs-psi-overflow__actions");
+			wrp.querySelector(".js-die-arm").addEventListener("click", () => {
+				confirm.classList.remove("ve-hidden");
+				armRow.classList.add("ve-hidden");
+				/** @type {*} */ (wrp.querySelector(".js-die-cancel"))?.focus();
+			});
+			wrp.querySelector(".js-die-cancel").addEventListener("click", () => {
+				confirm.classList.add("ve-hidden");
+				armRow.classList.remove("ve-hidden");
+				/** @type {*} */ (wrp.querySelector(".js-decline"))?.focus();
+			});
 			wrp.querySelector(".js-die-manifest").addEventListener("click", () => {
 				state.resolveStrainOverflow({manifest: true, strain: res.test.strain, track});
 				this._commit();
 			});
 			wrp.querySelector(".js-decline").addEventListener("click", () => {
 				state.resolveStrainOverflow({manifest: false});
+				JqueryUtil.doToast({
+					content: `${name} is at 0 hit points and unconscious. They make a death saving throw at the start of each of their turns; an ally can stabilise them with a DC 10 Medicine check or any healing.`,
+					type: "warning",
+				});
 				this._commit();
 			});
+			// The survivable choice is where the keyboard lands.
+			/** @type {*} */ (wrp.querySelector(".js-decline"))?.focus();
 			return;
 		}
 

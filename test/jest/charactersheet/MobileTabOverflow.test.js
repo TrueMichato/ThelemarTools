@@ -37,6 +37,7 @@ const ALL_TABS = [
 	"#charsheet-tab-spells",
 	"#charsheet-tab-inventory",
 	"#charsheet-tab-features",
+	"#charsheet-tab-powers",
 	"#charsheet-tab-notes",
 	"#charsheet-tab-companions",
 	"#charsheet-tab-builder",
@@ -63,11 +64,60 @@ describe("Mobile tab overflow policy", () => {
 		const {overflow} = CharacterSheetMobile.partitionTabs(ALL_TABS);
 		expect(overflow).toEqual([
 			"#charsheet-tab-abilities",
+			"#charsheet-tab-powers",
 			"#charsheet-tab-notes",
 			"#charsheet-tab-companions",
 			"#charsheet-tab-builder",
 			"#charsheet-tab-respec",
 		]);
+	});
+
+	// The bar's five slots are a fixed budget, so a tab that is dead for THIS character
+	// is a slot stolen from one that is not. A Talent has no spellcasting at all.
+	describe("resolving the play set for the character", () => {
+		const asTalent = ({spells = []} = {}) => ({
+			isPsionicManifester: () => true,
+			getSpells: () => spells,
+		});
+
+		it("keeps the standard five for a character with no psionics", () => {
+			expect(CharacterSheetMobile.resolvePlayTabs(null)).toContain("#charsheet-tab-spells");
+			expect(CharacterSheetMobile.resolvePlayTabs({isPsionicManifester: () => false}))
+				.not.toContain("#charsheet-tab-powers");
+		});
+
+		it("spends the dead Spells slot on Powers for a manifester who casts nothing", () => {
+			const play = CharacterSheetMobile.resolvePlayTabs(asTalent());
+			expect(play).toContain("#charsheet-tab-powers");
+			expect(play).not.toContain("#charsheet-tab-spells");
+			expect(play).toHaveLength(5);
+		});
+
+		it("keeps Spells for a manifester who also casts, so neither surface is lost", () => {
+			const play = CharacterSheetMobile.resolvePlayTabs(asTalent({spells: [{name: "Shield"}]}));
+			expect(play).toContain("#charsheet-tab-spells");
+			expect(play).not.toContain("#charsheet-tab-powers");
+		});
+
+		it("puts Powers in the bar and Spells behind More for a pure Talent", () => {
+			const {play, overflow} = CharacterSheetMobile.partitionTabs(ALL_TABS, {
+				playHrefs: CharacterSheetMobile.resolvePlayTabs(asTalent()),
+			});
+			expect(play).toContain("#charsheet-tab-powers");
+			expect(overflow).toContain("#charsheet-tab-spells");
+			// The invariant that matters: nothing became unreachable.
+			expect([...play, ...overflow].sort()).toEqual([...ALL_TABS].sort());
+		});
+
+		it("still accounts for every tab whichever play set is used", () => {
+			for (const state of [null, asTalent(), asTalent({spells: [{name: "Shield"}]})]) {
+				const {play, overflow} = CharacterSheetMobile.partitionTabs(ALL_TABS, {
+					playHrefs: CharacterSheetMobile.resolvePlayTabs(state),
+				});
+				expect(play).toHaveLength(5);
+				expect([...play, ...overflow].sort()).toEqual([...ALL_TABS].sort());
+			}
+		});
 	});
 
 	it("preserves document order within each bucket", () => {

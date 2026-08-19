@@ -355,6 +355,11 @@ if (!globalThis.Renderer.spell) {
 // Mock UrlUtil if needed
 globalThis.UrlUtil = globalThis.UrlUtil || {
 	autoEncodeHash: (it) => it?.name?.toLowerCase().replace(/\s+/g, "-") || "",
+	// Real signature: joins a [name, source] pair that callers build with HASH_LIST_SEP.
+	encodeForHash: (it) => (Array.isArray(it) ? it : [it])
+		.map(p => String(p).toLowerCase().replace(/\s+/g, "%20")).join(""),
 	PG_SPELLS: "spells.html",
 	PG_ITEMS: "items.html",
+	PG_PSIONICS: "psionics.html",
 };
+globalThis.HASH_LIST_SEP = globalThis.HASH_LIST_SEP || "_";

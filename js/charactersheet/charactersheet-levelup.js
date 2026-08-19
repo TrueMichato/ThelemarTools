@@ -4,6 +4,7 @@
  */
 
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import {CharacterSheetPowerPicker} from "./charactersheet-power-picker.js";
 
 // Project globals — destructured from globalThis so the TypeScript checkJs
 // language service has typed names to reference. Zero runtime impact.
@@ -3011,15 +3012,53 @@ class CharacterSheetLevelUp {
 		gains.forEach((/** @type {*} */ gain) => {
 			const featureKey = gain.featureTypes.join("_");
 			const isCombatMethods = gain.featureTypes.some((/** @type {*} */ ft) => ft.startsWith("CTM:"));
+			// A psionic pool is 44 options at level 1 and 90+ by level 13, across six
+			// orders and six disciplines. The flat list below cannot carry that, so powers
+			// branch to their own picker exactly the way Combat Methods do.
+			const isPsionicPowers = gain.featureTypes.some((/** @type {*} */ ft) => typeof ft === "string" && ft.startsWith("PsiP"));
 
 			if (isCombatMethods) {
 				// Use special Combat Methods rendering with tradition filtering
 				this._renderCombatMethodsLevelUp(container, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey, {subclassGrantedTraditionCodes, existingSelections: existingSelections[featureKey] || [], activeSubclass});
+			} else if (isPsionicPowers) {
+				this._renderPsionicPowersLevelUp(container, gain, allOptFeatures, existingOptFeatures, onSelect, featureKey, levelContext);
 			} else {
 				// Standard optional feature rendering
 				this._renderStandardOptionalFeaturesLevelUp(container, gain, allOptFeatures, existingOptFeatures, onSelect, featureKey, levelContext, activeSubclass);
 			}
 		});
+	}
+
+	/**
+	 * Render the psionic power pool during level-up.
+	 *
+	 * Delegates to `CharacterSheetPowerPicker`, which is shared with the Powers tab's
+	 * learn/replace flow, so a power is chosen the same way wherever the choice comes up.
+	 * Rendered inline rather than in a dialog: the level-up wizard is already a modal, and
+	 * a modal inside a modal is a worse answer than a section inside a wizard.
+	 */
+	_renderPsionicPowersLevelUp (/** @type {*} */ container, /** @type {*} */ gain, /** @type {*} */ allOptFeatures, /** @type {*} */ existingOptFeatures, /** @type {*} */ onSelect, /** @type {*} */ featureKey, /** @type {*} */ levelContext = null) {
+		const known = existingOptFeatures.filter((/** @type {*} */ f) =>
+			f.optionalFeatureTypes?.some((/** @type {*} */ ft) => gain.featureTypes.includes(ft)));
+
+		// Deliberately NOT filtered by eligibility: the picker shows a power the character
+		// cannot yet learn as locked, with the level that unlocks it. An absence teaches
+		// nothing; "unlocks at Talent 13" tells them what they are working toward.
+		const options = (allOptFeatures || []).filter((/** @type {*} */ f) =>
+			f.featureType?.some?.((/** @type {*} */ ft) => gain.featureTypes.includes(ft))
+			|| f.optionalFeatureTypes?.some?.((/** @type {*} */ ft) => gain.featureTypes.includes(ft)));
+
+		const section = e_({outer: `<div class="charsheet__levelup-opt-gain mb-3"></div>`});
+		CharacterSheetPowerPicker.render(section, {
+			state: this._state,
+			options,
+			pickCount: gain.newCount,
+			title: `${gain.name} — choose ${gain.newCount}`,
+			known,
+			page: this._page,
+			onChange: (/** @type {*} */ selected) => onSelect(featureKey, selected),
+		});
+		container.append(section);
 	}
 
 	/**

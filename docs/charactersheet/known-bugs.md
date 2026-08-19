@@ -9711,3 +9711,230 @@ method was unselectable. Fixed with `e_({outer, change})`.
 dialog that renders its *content* correctly can still be completely non-functional,
 and only a DOM-level check catches it — grep for
 `e_({…})\n\s*.addEventListener` when touching any dialog.
+
+---
+
+## CS-BUG-165 — the Combat tab costed psionic powers by reading their prose — FIXED
+
+**Symptom.** A Talent's Combat tab listed powers under the wrong heading in the **Action
+Economy** panel — the one captioned *"Everything you can do this turn, grouped by what it
+costs."* *Jaunt*, *Fluid Motion*, *Force Orbs*, *Read Thoughts* and *Ally of Time* are all
+1-action powers, and all five appeared under **Bonus Action**. *Beam Gaze*, *Disappear*,
+*Harlequin* and *Momentary Lapse of Reason* appeared under **Reaction**. Five powers that
+take a minute or more to manifest — *Broadcast*, *Fold Space*, *Psychic Projection*,
+*Read Object*, *Reveal the Path* — were offered as things the character could do in a turn.
+**17 of the 103 `TalPsi` powers, roughly one in six.** Rows also showed the raw internal
+code `PsiPH` as their subtitle, and carried no strain cost.
+
+**Root cause — two systems that never met.** Powers are stored in `_data.features`, and
+`_isActionEconomyFeature` admits anything `detectActivatableFeature()` recognises. Since
+`_detectPsionicActivation` fires for every power, the panel had been rendering powers from
+the day they became pickable. It costed them with `_classifyFeatureActionType`, which reads
+the feature's *whole resolved text*:
+
+```js
+if (/bonus action/.test(text)) return "bonus";
+if (/reaction/.test(text)) return "reaction";
+```
+
+A power's body routinely mentions both without either being its cost — *Harlequin* says the
+duplicate "can take a reaction"; *Jaunt* offers a follow-up "as a bonus action". The regex
+cannot tell an effect that *grants* an action from a cost that *is* one, and it never saw
+the `{@b Manifestation Time:}` header, which states the answer plainly.
+
+The header had already been parsed into `meta.actionType` when powers became first-class.
+The Combat tab was guessing at something the model knew for certain.
+
+**Fix.** `_classifyPsionicPowerActionType()` reads the parsed value and short-circuits the
+text scan. It returns `"long"` for a manifestation time of a minute or more, which the
+caller drops — a ten-minute ritual has no place in a panel about this turn. Powers get their
+own economy `kind` (`🧠 Psionic power`) rather than borrowing `★ Feature`, and a subtitle
+that states what actually decides the choice: the order and the strain a failure charges,
+the discipline, and whether it will tie up concentration.
+
+**Test.** `test/jest/charactersheet/CharacterSheetPowersActionEconomy.test.js`. The fixture
+powers deliberately carry a body mentioning both "a reaction" and "a bonus action" while
+costing neither, so the suite fails 9 of 12 if the parsed classification is removed —
+verified by reverting the fix.
+
+**Lesson.** When a parser already extracts a value, a downstream regex re-deriving it is a
+bug waiting for the right input. The general form: *if two code paths can disagree about
+the same fact, one of them is wrong and you will not find out which until a user does.*
+
+---
+
+## CS-BUG-166 — psionic powers never reached the activation pipeline — FIXED
+
+**Symptom.** Found while fixing CS-BUG-165. A Talent's powers were absent from the Combat
+tab's Action Economy entirely — not misfiled, *missing*. `detectActivatableFeature()`
+returned `null` for every power learned through the normal path, so nothing downstream that
+gates on activation could see them.
+
+**Root cause — an early return that predates powers.** `detectActivatableFeature` bails on a
+feature that has no rendered `description`, unless it recognises an opt-in marker:
+
+```js
+const hasMarkers = !!(feature?.consumes || feature?._raceManifestation || isCrimsonRite
+    || isBloodCurse || isHybridTransformation || isJesterAct || isMutagen || isSunBloodlineFeature);
+if (!feature?.description && !feature?.activatable && !hasMarkers && !hasClassificationOverride) return null;
+```
+
+That list has grown one entry per entries-only feature family — Crimson Rites, Blood Curses,
+Jester's Acts, Mutagens. Psionic powers are exactly such a family (their mechanics live in
+`entries`; they have no `description`), and were never added. `_detectPsionicActivation` sat
+below the gate and could not be reached.
+
+The bug hid because the existing psionics tests build their fixtures with an explicit
+`description`, which clears the gate. Only a power learned the way the app learns one —
+`learnPsionicPower()`, which writes `entries` — hit the path, and no test did that until
+this one.
+
+**Fix.** Add `isPsionicPowerFeature(feature)` to the marker list.
+
+**Test.** `CharacterSheetPowersActionEconomy.test.js` asserts the feature has no
+`description`, has `entries`, and is still detected as activatable — plus a negative case
+proving an unrelated entries-only feature is not promoted.
+
+**Lesson.** An allowlist that grows one entry per feature family is a gate that silently
+fails closed for the next family. Worse, fixtures that supply a convenience field the real
+code path never sets will hide it: **build test fixtures the way production builds the
+object, not the way that is easiest to write.**
+
+
+---
+
+## CS-BUG-167 — making powers activatable flooded three unrelated surfaces — FIXED
+
+**Symptom.** After CS-BUG-166, a level-13 Talent's Combat tab became unreadable. The
+**Abilities** panel listed all 20-odd powers as generic abilities with no order and no
+strain cost. The **Action Economy** panel listed every action-cost power as its own row,
+burying the attacks and features it exists to summarise. And in both — plus the Powers tab
+and Play Mode — a power's name was inert text, while the spell beside it hovered.
+
+**Root cause — one flag, many readers.** CS-BUG-166 made powers pass
+`detectActivatableFeature()`. That was correct: powers *are* activatable, and the fix was
+needed for the Use button to work at all. But activation is the switch a dozen unrelated
+surfaces key off, and each of them assumed that anything activatable is a *feature* it knows
+how to render:
+
+- `getCombatActions()` treats `!!_getActivatableAbilityForFeature(f)` as "this is an
+  ability" (`charactersheet-combat.js`), so every power qualified.
+- `getCombatActionEconomy()` pushes one row per entry; only `kind === "spell"` collapsed.
+- `_getActionEconomyNameHtml()` had no `power` case and fell through to `default: return
+  safeName` — plain text, no hover.
+
+This is the same shape as CS-BUG-165: a value that means "this is usable" was read by code
+that also assumed "…and I know how to display it."
+
+**Fix.**
+
+- Powers join `isHiddenFromGenericAbilitySurfaces()`, the existing single boundary predicate
+  the Resources panel, the Abilities list and the active-state lists already share, so a
+  feature surfaces in exactly one canonical home. Powers have two of their own on the very
+  same tab.
+- The Action Economy's spell disclosure is generalised into
+  `ACTION_ECONOMY_COLLAPSIBLE_KINDS`, a table rather than a per-kind branch. Action-cost
+  powers collapse into one `🧠 Powers N ›` row; bonus and reaction powers stay individual,
+  because forgetting one of those is the real failure mode.
+- `CharacterSheetClassUtils.getPsionicPowerHoverLink()` wires `UrlUtil.PG_PSIONICS`, which
+  had existed with a working hash builder the whole time. Used by all four surfaces, with an
+  inline-entries fallback for a catalog that has not loaded and escaped plain text beyond
+  that, so a name is never lost to a missing hover.
+
+**Test.** `CharacterSheetPowersSurfaces.test.js`.
+
+**Lesson.** Widening a predicate is never a local change. Before flipping something into an
+existing classification, grep every reader of that classification and ask what each will do
+with the new member — the compiler cannot, and neither can a test that only covers the
+thing you were fixing.
+
+## CS-BUG-168 — `pGetUserEnum` prompts silently do nothing if the user just clicks OK — PARTIALLY FIXED
+
+**Symptom.** Found while verifying the psionic *Swap a power* flow. Clicking **Swap a
+power**, then **OK**, closed the dialog and changed nothing — no toast, no error, no swap.
+The button looked broken.
+
+**Root cause.** `InputUiUtil.pGetUserEnum` seeds its select with a disabled placeholder
+option carrying `value="-1"` (`js/utils-ui.js:3147`), and when the caller passes no
+`opts.default` it explicitly selects it (`selEnum.selectedIndex = 0`, `:3164`). Confirming
+then reads `-1` and bails (`if (!~ix) return null;`, `:3190`), which every caller treats as
+"the user cancelled". A user who agrees with the prompt as presented and clicks OK is
+therefore indistinguishable from one who pressed Cancel.
+
+**Scope — this is not one bug.** Roughly twenty call sites across the sheet omit `default`,
+including in `charactersheet-builder.js`, `charactersheet-combat.js`,
+`charactersheet-inventory.js`, `charactersheet-levelup.js`, `charactersheet-quickbuild.js`
+and `charactersheet-spells.js`. Each has the same dead OK.
+
+**Fix.** In the psionics surface the real repair was structural: the swap no longer uses a
+separate enum prompt at all, because giving up a power and gaining one are one decision and
+belong in one dialog (`charactersheet-powers.js`, `_pReplacePower`). The three remaining
+psionic prompts — strain track, outcome Exertion, target size — now pass `default: 0`, which
+is meaningful for all three because each opens on a legitimate first choice.
+
+**Not fixed.** The other call sites are untouched. They are pre-existing, span features far
+outside this work, and each needs its own judgement about what a safe default is — a wrong
+default is worse than a dead OK, because it commits the user to something.
+
+**Lesson.** A prompt whose confirm button can do nothing is worse than no prompt. When
+wrapping a shared input helper, check what it does when the user accepts it unchanged: the
+"do nothing" path and the "cancel" path must not be the same value.
+
+## CS-BUG-169 — Action Economy rows rendered without the power's name — FIXED
+
+**Symptom.** In the Combat tab's Action Economy panel, many psionic powers rendered as a
+glyph and a subtitle with no name at all:
+
+```
+🧠  3rd-order · 3 strain on a failure · Metamorphosis
+```
+
+The subtitle also overflowed past the card's right edge. Measured at 1440px, the name
+element was **0px wide** for Adapt, Ally of Time and Aura Projection. Apparition survived
+only because *"at will · Resopathy · concentration"* happened to be short.
+
+**Root cause — a priority inversion in the row.** `css/charactersheet.css`:
+
+```css
+.cs-combat-action-economy__name { flex: 1 1 auto; min-width: 0; }
+.cs-combat-action-economy__sub  { flex: 0 0 auto; white-space: nowrap; }
+```
+
+The name was the only shrinkable element in the row and had no floor, while the subtitle
+was declared unshrinkable. Flexbox therefore resolved every overflow by collapsing the
+name — the row's identity — and keeping its metadata. `text-overflow: ellipsis` on the name
+could not help, because at zero width there is nothing to ellipsize. The same declaration
+is why the subtitle escaped its container instead of truncating.
+
+This was never psionics-specific. The rule had simply never met a subtitle longer than
+`Level 3` or `Standard action`; powers were the first entity to exercise it. Features with
+long `featureType` strings were being truncated by the same rule.
+
+**Fix.**
+
+1. **The layout rule, first.** The name gets a legible floor (`min-width: 5.5rem`); the
+   subtitle becomes `flex: 0 1 auto; min-width: 0` with `overflow: hidden` and an ellipsis.
+   Metadata now yields to identity instead of the reverse. Generic — every kind benefits.
+2. **Then the content.** `_psionicEconomySubtitle` says `2nd · 2 strain` instead of
+   `2nd-order · 2 strain on a failure · Metamorphosis`. The discipline is dropped (taxonomy,
+   already on the hover card and the Powers tab, and the longest segment); the long form
+   fits *less* information because it truncated to "2nd-order · …".
+3. **Concentration became a flag, not prose.** A `⏳` span with `flex: 0 0 auto`, so a long
+   name truncates the order/strain text and never the one fact that can invalidate the whole
+   plan. Safe to make unshrinkable precisely because a glyph is bounded and cannot grow with
+   content — which is what made the old subtitle dangerous.
+4. The unabbreviated wording, including "if the manifestation test fails" and the discipline,
+   moved to the row's `title`.
+
+**Verified.** At 1440 / 1024 / 390px: zero crushed names, zero subtitles escaping their
+column, zero lost flags. Three of nineteen rows truncate the subtitle at 1440px, which is
+the graceful degradation working — the flag survives and the title carries the full text.
+
+**Test.** `CharacterSheetPowersActionEconomy.test.js`, describes `CS-BUG-169 — the row keeps
+its name` and `CS-BUG-169 — the layout rule that caused it`. The layout assertions read the
+stylesheet directly, because the defect was a CSS declaration and jsdom does not do flexbox.
+
+**Lesson.** In a flex row, decide explicitly which element loses when space runs out. An
+element with `min-width: 0` and `flex-shrink: 1` beside one with `flex: 0 0 auto` has been
+volunteered to disappear entirely — and if that element is the name, the row stops being
+about anything. Give identity a floor and let metadata ellipsize.

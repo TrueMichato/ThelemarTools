@@ -4,6 +4,7 @@ import {CharacterSheetBuilder} from "./charactersheet-builder.js";
 import {CharacterSheetCombat} from "./charactersheet-combat.js";
 import {CharacterSheetSpells} from "./charactersheet-spells.js";
 import {CharacterSheetPowers} from "./charactersheet-powers.js";
+import {renderStrainTracker} from "./charactersheet-psionics-ui.js";
 import {CharacterSheetInventory} from "./charactersheet-inventory.js";
 import {CharacterSheetFeatures} from "./charactersheet-features.js";
 import {CharacterSheetRest} from "./charactersheet-rest.js";
@@ -3550,6 +3551,8 @@ class CharacterSheetPage {
 			this._combat.renderCombatMasteries?.();
 			// Additive Lunar Sorcery panel (gated; self-hides without Lunar Embodiment).
 			this._combat.renderCombatLunar?.();
+			// Additive Psionics cockpit (gated; self-hides for a non-manifester).
+			this._combat.renderCombatPsionics?.();
 		}
 		if (this._respec) this._respec.render();
 		if (this._playMode && this._state.getViewMode() === "play") this._playMode.render();
@@ -7029,11 +7032,8 @@ class CharacterSheetPage {
 	 */
 	_renderPsionicStrainTracker (container) {
 		const state = this._state;
-		const max = state.getStrainMaximum?.() || 0;
-		if (!max) return false;
+		if (!state.getStrainMaximum?.()) return false;
 
-		const strain = state.getStrain();
-		const total = state.getTotalStrain();
 		const canIgnore = !!state.getFeatureCalculations().hasIgnoreStrain;
 		const ignored = state.getIgnoredStrainTrack();
 
@@ -7042,12 +7042,8 @@ class CharacterSheetPage {
 				<div class="ve-flex-v-center">
 					<span class="charsheet__resource-name">Psionic Strain</span>
 					<span class="charsheet__resource-recharge ve-muted ve-small ml-2">(Long)</span>
-					<div class="charsheet__resource-uses ml-auto">
-						<span class="charsheet__resource-current">${total}</span>
-						<span class="charsheet__resource-max">/ ${max}</span>
-					</div>
 				</div>
-				<div class="charsheet__strain-tracks mt-1"></div>
+				<div class="charsheet__strain-host mt-1"></div>
 				${canIgnore ? `<label class="ve-flex-v-center ve-small mt-1" style="gap:.35rem;">Ignore Strain suppresses
 					<select class="ve-form-control form-control--minimal charsheet__strain-ignore" style="width:7rem;">
 						<option value="">None</option>
@@ -7056,30 +7052,15 @@ class CharacterSheetPage {
 			</div>
 		`});
 
-		const tracks = wrp.querySelector(".charsheet__strain-tracks");
-		CharacterSheetState.PSIONIC_STRAIN_TRACKS.forEach(track => {
-			const value = strain[track] || 0;
-			const effects = state.getStrainTrackEffects(track);
-			const row = e_({outer: `
-				<div class="ve-flex-v-center ve-small mb-1">
-					<span style="width: 3.5rem;">${track[0].toUpperCase()}${track.slice(1)}</span>
-					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__strain-dec" ${value <= 0 ? "disabled" : ""}>−</button>
-					<span class="mx-1" style="min-width: 1.5rem; text-align: center;">${value}</span>
-					<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__strain-inc" ${total >= max ? "disabled" : ""}>+</button>
-					<span class="ve-muted ml-2">${ignored === track ? "ignored" : (effects.join("; ") || "no effect")}</span>
-				</div>
-			`});
-			row.querySelector(".charsheet__strain-inc").addEventListener("click", () => {
-				state.addStrain(1, track);
-				this._saveCurrentCharacter();
-				this._renderCharacter();
-			});
-			row.querySelector(".charsheet__strain-dec").addEventListener("click", () => {
-				state.removeStrain(1, track);
-				this._saveCurrentCharacter();
-				this._renderCharacter();
-			});
-			tracks.append(row);
+		// The shared renderer, not a third hand-written copy: the Resources strip used to
+		// show a bare "3 / 9" and the live penalties, but never the lethal margin or the
+		// next threshold, so the same character read differently depending on which
+		// surface you happened to be looking at.
+		renderStrainTracker(wrp.querySelector(".charsheet__strain-host"), {
+			state,
+			compact: true,
+			onChange: () => { this._saveCurrentCharacter(); this._renderCharacter(); },
+			pPickTrack: prompt => this._pPickStrainTrack(prompt),
 		});
 
 		const eleIgnore = wrp.querySelector(".charsheet__strain-ignore");
@@ -7094,7 +7075,6 @@ class CharacterSheetPage {
 		container.append(wrp);
 		return true;
 	}
-
 	_renderResources () {
 		const container = document.getElementById("charsheet-resources");
 		container.innerHTML = "";
