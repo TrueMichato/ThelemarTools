@@ -13027,8 +13027,31 @@ class CharacterSheetState {
 				if (fx.noRangedDisadvantageInMelee) base.noRangedDisadvantageInMelee = true;
 
 				if (fx.penetrationIgnoresMagicalAc) base.penetrationIgnoresMagicalAc = true;
+
+				// A material's `critical` axis lands on the PROJECTION, not on the raw item this
+				// function reads — so an Orichaline katana reported a threshold of 20 here while
+				// the projected item said 19, and every caller of this accessor saw the wrong
+				// number. Read the delta from the projection, exactly as `_recalculateItemBonuses`
+				// does, so the clamps and degradation's `zeroedAxes` apply here too instead of
+				// being re-derived from the axis and drifting.
+				//
+				// The material and the `Critical: Spiked` upgrade are INDEPENDENT sources, so the
+				// material's delta is subtracted from whatever the upgrade fold left behind — not
+				// compared against it. Comparing is how this first went in, and it silently
+				// dropped the material's point whenever an upgrade had already taken one.
+				const projected = this.projectItemMaterial(item);
+				if (projected !== item) {
+					const rawCrit = Number(item.critThreshold) || 20;
+					const materialCritReduction = rawCrit - (Number(projected.critThreshold) || rawCrit);
+					if (materialCritReduction > 0) base.critThreshold -= materialCritReduction;
+				}
 			}
 		}
+
+		// Clamped once, after BOTH reduction sources, rather than by each of them: never an
+		// impossible crit, never past the natural 20. `applyToItem` clamps the projection the
+		// same way, so the two agree by construction.
+		base.critThreshold = Math.max(2, Math.min(20, base.critThreshold));
 
 		// `bonusWeapon` is the "+2" of a +2 weapon: it applies to BOTH attack and damage. Left
 		// as a bare field, every reader has to know that and fold it in itself — twenty-one call
@@ -13518,14 +13541,43 @@ class CharacterSheetState {
 		return `${/^[aeiou]/i.test(label) ? "an" : "a"} ${label}`;
 	}
 
+	/**
+	 * The armour category of an item, as one of `"heavy" | "medium" | "light" | "shield" | null`.
+	 *
+	 * Two vocabularies describe the same fact in this codebase and neither is going away: the
+	 * 5etools catalogue encodes it in `type` as `"HA" | "MA" | "LA" | "S"` (sometimes suffixed,
+	 * e.g. `"HA|XPHB"`), while the custom-item builder writes a plain `armorType: "heavy"` and a
+	 * generic `type: "armor"`. Code that understands only one of them silently ignores half the
+	 * inventory — which is exactly how Adamantine's damage reduction came to do nothing on every
+	 * custom-built plate in the corpus while working fine on a catalogue one.
+	 *
+	 * @param {object} item
+	 * @returns {string|null}
+	 */
+	static getArmorCategory (item) {
+		if (!item) return null;
+		const explicit = String(item.armorType || "").toLowerCase();
+		if (["heavy", "medium", "light"].includes(explicit)) return explicit;
+		if (item.shield) return "shield";
+		const type = String(item.type || "").split("|")[0].toUpperCase();
+		switch (type) {
+			case "HA": return "heavy";
+			case "MA": return "medium";
+			case "LA": return "light";
+			case "S": return "shield";
+			default: return null;
+		}
+	}
+
 	static _materialDamageReductionApplies (item, armorType) {
-		const type = (item?.type || "").split("|")[0].toUpperCase();
+		const category = CharacterSheetState.getArmorCategory(item);
 		switch (armorType) {
-			case "heavy": return type === "HA";
-			case "medium": return type === "MA";
-			case "light": return type === "LA";
-			case "shield": return type === "S";
-			case "any": return ["HA", "MA", "LA", "S"].includes(type);
+			case "heavy":
+			case "medium":
+			case "light":
+			case "shield":
+				return category === armorType;
+			case "any": return category != null;
 			default: return true;
 		}
 	}

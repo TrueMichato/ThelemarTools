@@ -383,7 +383,10 @@ class CharacterSheetMaterials {
 	 * downstream (projection, modifiers, UI) reads the returned object.
 	 *
 	 * @param {object} item
-	 * @param {object} material
+	 * @param {object} [material] The resolved material entity. Omit to resolve from the item
+	 *        against the ambient catalog, exactly as `applyToItem` / `getMaterialNotes` /
+	 *        `getPenetration` do — they all resolve internally, and this one not doing so made a
+	 *        forgotten argument indistinguishable from a material with no effects.
 	 * @returns {object}
 	 */
 	static getMaterialEffects (item, material) {
@@ -431,6 +434,7 @@ class CharacterSheetMaterials {
 			effectNotes: {},
 			effectQualifiers: {},
 		};
+		if (!material) material = CharacterSheetMaterials.resolveMaterial(item);
 		if (!material?.effects?.length) return out;
 
 		const kind = CharacterSheetMaterials.getItemKind(item);
