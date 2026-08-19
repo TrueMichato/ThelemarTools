@@ -154,7 +154,7 @@ class CharacterSheetMaterials {
 		damageReduction: {consumer: "modifier", note: "Named modifier of type damageReduction."},
 		resistance: {consumer: "modifier", note: "Added to derived resistances."},
 		immunity: {consumer: "modifier", note: "Added to derived immunities."},
-		perceptionPenaltyToNotice: {consumer: "modifier", note: "Derived, DM-facing: penalty to OTHERS' passive Perception to notice the wearer."},
+		perceptionPenaltyToNotice: {consumer: "modifier", note: "Conditional Stealth modifier: a penalty to an observer's check equals a bonus to the wearer's contested roll."},
 		spellcastingFocus: {consumer: "modifier", note: "Makes the item eligible as a spellcasting focus."},
 		draconicResonanceSlot: {consumer: "modifier", note: "Grants draconic resonance slots."},
 

@@ -13431,6 +13431,29 @@ class CharacterSheetState {
 				});
 				added = true;
 			}
+
+			// Nightsilk: "creatures have a −2 penalty to passive Perception to notice its
+			// carrier." The sheet models ONE character, so an observer's penalty has no
+			// direct home — but a −2 to the observer's check is arithmetically identical to
+			// a +2 on the wearer's contested Stealth, in every comparison the rules make.
+			// So it is mechanized as exactly that, rather than being written off as prose.
+			//
+			// It is CONDITIONAL by design: it applies to being noticed, not to every use of
+			// Stealth, and only the player knows which roll is which. The conditional system
+			// already gates on that and offers it per roll.
+			if (fx.perceptionPenaltyToNotice) {
+				this._data.namedModifiers.push({
+					id: CryptUtil.uid(),
+					name: `${material.name} (evading notice)`,
+					type: "skill:stealth",
+					value: Math.abs(Number(fx.perceptionPenaltyToNotice) || 0),
+					conditional: "when a creature is trying to notice you",
+					sourceType: "itemMaterial",
+					sourceLabel: item.name || "",
+					enabled: true,
+				});
+				added = true;
+			}
 		}
 
 		const isChanged = hadOwn || added;
@@ -33500,6 +33523,40 @@ class CharacterSheetState {
 	 *
 	 * @returns {{ok:boolean, source:(string|null)}}
 	 */
+	/**
+	 * The first carried item whose MATERIAL makes it a spellcasting focus, if any.
+	 *
+	 * Deliberately scoped to CARRIED rather than equipped, matching every other path in
+	 * `getSpellcastingFocusStatus` — a component pouch in your pack is a valid focus, and a
+	 * deep-crystal dagger on your belt is no different. (This is why it does not reuse
+	 * `getEquippedMaterialEffects`, whose equipped-only scope is right for AC and speed and
+	 * wrong here.)
+	 *
+	 * @returns {{ok: true, source: string, itemName: string|null}|null}
+	 */
+	getMaterialSpellcastingFocus () {
+		if (typeof CharacterSheetMaterials === "undefined") return null;
+		if (this._data.settings?.enableMaterials === false) return null;
+		const catalog = this._itemMaterialCatalog || [];
+
+		for (const invItem of this._data.inventory || []) {
+			const item = invItem.item || invItem;
+			if (!item?.material?.name) continue;
+			const material = CharacterSheetMaterials.resolveMaterial(item, catalog);
+			if (!material) continue;
+			// `getMaterialEffects` applies the effect's own `appliesTo` gate and any
+			// condensate role-scoping, so a Deep Crystal ring and a dormant focus affinity
+			// both correctly report nothing here.
+			if (!CharacterSheetMaterials.getMaterialEffects(item, material).spellcastingFocus) continue;
+			return {
+				ok: true,
+				source: `${material.name} focus`,
+				itemName: item.name || invItem.name || null,
+			};
+		}
+		return null;
+	}
+
 	getSpellcastingFocusStatus () {
 		const inv = this._data.inventory || [];
 		const baseType = it => {
@@ -33524,6 +33581,18 @@ class CharacterSheetState {
 		if (has((i, it) => it.focus === true || (Array.isArray(it.focus) && it.focus.some(cls => classNames.has(String(cls).toLowerCase()))))) {
 			return {ok: true, source: "spellcasting focus", itemName: matched.name};
 		}
+
+		// A material can make its item a focus: Deep Crystal ("a weapon with a deep-crystal
+		// striking surface can be used as a spellcasting focus"), Mirror Amalgam. This sits
+		// with the other focus-ITEM paths rather than with the feature substitutions below,
+		// because it is the item that qualifies, not the character.
+		//
+		// The `appliesTo` gate in `getMaterialEffects` already does the hard part: Deep
+		// Crystal is authored `appliesTo: ["weapon"]`, so a Deep Crystal *ring* never
+		// reports as a focus. Role-scoping is honoured there too, so a condensate serving
+		// as a weapon's striking surface does not also grant its focus properties.
+		const materialFocus = this.getMaterialSpellcastingFocus();
+		if (materialFocus) return materialFocus;
 
 		// 2. A component pouch (matched by name — it is plain adventuring gear).
 		if (has((i, it) => (it.name || i.name || "").toLowerCase().includes("component pouch"))) return {ok: true, source: "component pouch", itemName: matched.name};
