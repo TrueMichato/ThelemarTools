@@ -12938,6 +12938,9 @@ class CharacterSheetState {
 			damageRiders,
 			// Weapon-property tags granted by upgrades (e.g. Silvered, Magical, Runic).
 			tags: [],
+			// A weapon whose own damage dice explode: a die rolling its maximum is rerolled and
+			// added, and the reroll may explode again (Brutal). Authored data, per upgrade.
+			explodingDamageDice: item.explodingDamageDice === true,
 		};
 
 		// Add upgrade effects
@@ -12966,6 +12969,7 @@ class CharacterSheetState {
 			if (Array.isArray(effects.tags) && effects.tags.length) {
 				base.tags = [...effects.tags];
 			}
+			if (effects.explodingDamageDice) base.explodingDamageDice = true;
 		}
 
 		// `bonusWeapon` is the "+2" of a +2 weapon: it applies to BOTH attack and damage. Left

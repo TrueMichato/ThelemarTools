@@ -752,6 +752,15 @@ An item may carry `material: {name, source}` — a **non-destructive reference**
 - ⚠️ **Several upgrade `notes` are authored self-labelled** (`"Brutal: Reroll max damage dice…"`),
   so `getUpgradeSummary` strips a redundant `"<name>: "` prefix before prepending the name.
   Without it the hover read `"Brutal: Brutal: Reroll…"`.
+- ✅ **Exploding dice are authored, not name-checked.** `explodingDamageDice: true` on the catalog
+  entity flows descriptor → merge → aggregation → `getEffectiveItemBonuses.explodingDamageDice`,
+  so homebrew can grant it without code. Boolean descriptor props merge by **OR** (a later plain
+  upgrade must not revoke it), unlike the numeric props, which sum. `_explodeDamageDice` in
+  combat mutates a `_parseDamage` result in place — total, animation groups and roll log all
+  update for free. It touches ONLY the weapon's own roll (riders/sneak/Doubleshot are separate
+  `_parseDamage` calls), skips maximized rolls (Destructive Wrath *sets* max, doesn't roll it),
+  is bounded by `maxExplosions`, and refuses `sides < 2`. Crit dice are already doubled into
+  `rolls` before it runs, so one pass explodes them correctly with no double-explode risk.
 - ⚠️ **A single-valued picker closes on apply; a multi-valued one must not.** A material is one
   field, so `showMaterialPickerModal` closing is correct. `showUpgradePickerModal` is a *list*
   editor — a weapon takes several upgrades — so it rebuilds its body in place via `renderBody()`

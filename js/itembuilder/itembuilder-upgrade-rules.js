@@ -59,6 +59,10 @@ const _UPGRADE_EFFECT_DEFAULTS = Object.freeze({
 	notes: [],
 	bonusDamageDice: null,
 	bonusDamageType: null,
+	// Weapon damage dice that "explode": a die rolling its maximum is rerolled and added, and
+	// the reroll may explode again. Authored on the upgrade (`explodingDamageDice: true`), never
+	// inferred from prose or keyed off a name, so any homebrew upgrade can declare it.
+	explodingDamageDice: false,
 	effects: [],
 	itemPowers: [],
 	attachedSpells: [],
@@ -154,7 +158,10 @@ function _getBuiltInUpgradeDescriptor (upgrade) {
 		out.bonusDamageType = "slashing";
 		out.notes = ["Saw-toothed: +1d4 slashing damage (no effect vs constructs/undead)"];
 	}
-	if (name === "brutal") out.notes = ["Brutal: Reroll max damage dice and add to total (repeats if max rolled again)"];
+	if (name === "brutal") {
+		out.explodingDamageDice = true;
+		out.notes = ["Brutal: Reroll max damage dice and add to total (repeats if max rolled again)"];
+	}
 	if (name === "flanged") out.notes = ["Flanged: On hit, target\u2019s medium/heavy armor takes cumulative \u22121 AC"];
 
 	const armor = {};
@@ -211,6 +218,7 @@ function _getStructuredUpgradeDescriptor (entity) {
 	}
 	if (entity.bonusDamageDice) out.bonusDamageDice = entity.bonusDamageDice;
 	if (entity.bonusDamageType) out.bonusDamageType = entity.bonusDamageType;
+	if (entity.explodingDamageDice) out.explodingDamageDice = true;
 	if (entity.tags?.length) out.tags = _copy(entity.tags);
 	if (entity.notes?.length) out.notes = _copy(entity.notes);
 	if (entity.effects?.length) out.effects = _copy(entity.effects);
@@ -245,6 +253,11 @@ function _mergeUpgradeDescriptor (base, addition, {isNumericOverride = false} = 
 	}
 	for (const prop of ["tags", "notes", "effects", "itemPowers", "attachedSpells"]) {
 		if (addition?.[prop]?.length) out[prop] = _mergeUnique(out[prop], addition[prop], it => prop === "itemPowers" ? (it.id || it.name) : JSON.stringify(it));
+	}
+	// Boolean flags accumulate by OR: one upgrade granting exploding dice is not undone by a
+	// later upgrade that simply doesn't mention them.
+	for (const prop of ["explodingDamageDice"]) {
+		if (addition?.[prop]) out[prop] = true;
 	}
 	for (const prop of ["bonusDamageDice", "bonusDamageType", "charges", "recharge", "rechargeAmount", "reqAttune", "focus", "ability", "modifySpeed"]) {
 		if (addition?.[prop] != null) out[prop] = _copy(addition[prop]);

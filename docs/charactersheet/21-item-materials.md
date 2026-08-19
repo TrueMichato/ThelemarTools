@@ -869,6 +869,39 @@ they told a player carrying three upgrades that their magic bonus was "none". Th
 > A `getEffectiveItemBonuses` call for an unknown id still returns `{}`, so `|| 0` guards on the
 > totals hold. Test stubs that mock the function with `() => ({})` keep working unchanged.
 
+### Exploding damage dice are an effect, not a note
+
+*Brutal*'s rules text is genuine exploding dice — roll the maximum on the weapon's damage dice
+and you reroll them, adding the result, repeating for as long as you keep rolling maxima. For a
+long time the upgrade carried only a `notes` string, so it cost a thousand gold and did nothing
+but print a sentence.
+
+It follows the same doctrine magicality does: **the effect is authored data.**
+`explodingDamageDice: true` sits on the catalog entity and travels through
+`_getStructuredUpgradeDescriptor` → `_mergeUpgradeDescriptor` → `getAggregatedUpgradeEffects` →
+`getEffectiveItemBonuses`, so a homebrew upgrade can grant it with no code change and no name
+match. The name-keyed built-in survives only as a fallback for saves and catalogs that predate
+the field, exactly as `isUpgradeMagical` does.
+
+Boolean flags merge by **OR**, not last-wins: applying Balanced after Brutal must not quietly
+revoke the explosion.
+
+`_explodeDamageDice(roll)` applies it, mutating a `_parseDamage` result in place so the damage
+total, the dice animation groups and the roll log all pick the extra dice up for free. Three
+things it deliberately does:
+
+- **Only the weapon's own dice explode.** Riders, sneak attack and Doubleshot are separate
+  `_parseDamage` calls and are left alone — the rule is about *the weapon's* damage dice.
+- **Crit-doubled dice explode, once each.** `_parseDamage` doubles `numDice` before this runs, so
+  the doubled dice are already in `rolls`; a single pass over them is both correct and immune to
+  double-exploding.
+- **A maximized roll does not explode.** Destructive Wrath *sets* the dice to their maximum; it
+  does not roll it. And the loop is bounded (`maxExplosions`, default 20) rather than trusted —
+  a d2 explodes half the time, and a degenerate `sides < 2` is refused outright.
+
+The reroll is itemised in the breakdown (`+ 16 (exploding: 12, 4)`). A player must be able to see
+why the number grew.
+
 ### The hover tells the truth, and keeps a way back to the book
 
 A materialled or upgraded item is no longer what the catalog describes, so it stops routing to

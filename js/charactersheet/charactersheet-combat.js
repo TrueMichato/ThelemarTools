@@ -3040,6 +3040,13 @@ class CharacterSheetCombat {
 			return roll;
 		};
 		const damageRoll = rollTypedDamage(damageExpression, weaponDamageType);
+		// Exploding weapon dice (Brutal). Only the weapon's OWN dice explode — riders, sneak
+		// attack and Doubleshot are separate rolls and are left alone. A maximized roll is
+		// excluded: those dice were set to their maximum, not rolled to it.
+		const explodedDice = (!destructiveWrathApplied && attack.sourceItem?.id != null
+			&& this._state.getEffectiveItemBonuses?.(attack.sourceItem.id)?.explodingDamageDice)
+			? this._explodeDamageDice(damageRoll)
+			: [];
 		const abilityMod = this._state.getWeaponAbilityMod(attack);
 
 		// Doubleshot (#20, S4-owned): a pending one-shot rider that grants +1 weapon
@@ -3299,6 +3306,7 @@ class CharacterSheetCombat {
 
 		// Build subtitle with breakdown
 		let subtitle = `${damageExpression}${isCrit ? " (crit)" : ""} + ${abilityMod} (${attack.abilityMod || "STR"})`;
+		if (explodedDice.length) subtitle += ` <strong style="color:#f39c12">+ ${explodedDice.reduce((a, b) => a + b, 0)} (exploding: ${explodedDice.join(", ")})</strong>`;
 		if (attack.damageBonus) subtitle += ` + ${attack.damageBonus} (weapon)`;
 		if (featureDamageBonus) subtitle += ` + ${featureDamageBonus} (features)`;
 		for (const c of itemWeaponDamageContribs) subtitle += ` + ${c.value} (${c.name})`;
@@ -3894,6 +3902,44 @@ class CharacterSheetCombat {
 		if (!this._isSneakAttackTriggerSatisfied(attack.id, {showWarnings, isMelee: attack?.isMelee !== false && !attack?.isRanged})) return false;
 
 		return true;
+	}
+
+	/**
+	 * Explode a weapon's own damage dice, in place.
+	 *
+	 * A die that comes up its maximum is rerolled and the reroll added; if the reroll is also
+	 * maximum it explodes again. Granted by upgrades that author `explodingDamageDice` (Brutal).
+	 *
+	 * Mutates `roll.rolls` and `roll.total`, so every downstream consumer — the damage total, the
+	 * dice animation groups, the roll log — picks the extra dice up for free.
+	 *
+	 * Crit is already resolved before this runs: `_parseDamage` doubles `numDice` for a crit, so
+	 * the doubled dice are present in `rolls` and explode exactly once each, with no risk of a
+	 * second pass double-exploding them.
+	 *
+	 * @param {{rolls: number[], total: number, sides: number}|null} roll A `_parseDamage` result.
+	 * @param {object} [opts]
+	 * @param {number} [opts.maxExplosions] Hard ceiling. A d2 explodes half the time and a
+	 *   pathological d1 would explode forever, so the loop is bounded rather than trusted.
+	 * @returns {number[]} The values added by explosions, in order. Empty if nothing exploded.
+	 */
+	_explodeDamageDice (roll, {maxExplosions = 20} = {}) {
+		const sides = Number(roll?.sides);
+		if (!roll || !Array.isArray(roll.rolls) || !Number.isFinite(sides) || sides < 2) return [];
+
+		const added = [];
+		// Snapshot: only the dice actually rolled explode. Rerolls are appended as we go and are
+		// themselves re-examined through `pending`, not by re-scanning a growing array.
+		let pending = roll.rolls.filter(v => Number(v) === sides).length;
+		while (pending > 0 && added.length < maxExplosions) {
+			pending--;
+			const reroll = this._page.rollDice(1, sides);
+			added.push(reroll);
+			roll.rolls.push(reroll);
+			roll.total += reroll;
+			if (reroll === sides) pending++;
+		}
+		return added;
 	}
 
 	_parseDamage (damageStr, isCrit = false, {maximize = false} = {}) {

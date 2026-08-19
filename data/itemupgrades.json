@@ -185,6 +185,7 @@
 				"WU:2"
 			],
 			"cost": "1,000 gp (base)",
+			"explodingDamageDice": true,
 			"prerequisite": [
 				{
 					"item": [
