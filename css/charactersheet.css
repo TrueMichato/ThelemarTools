@@ -20923,6 +20923,20 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	transition: background-color 0.15s ease;
 }
 
+/* Rows read as distinct from a hairline, not from alternating fills. Zebra striping ties a
+   row's appearance to its ordinal position, so a row changes colour when the list above it
+   grows — and this picker now re-renders in place after every apply. */
+.charsheet__upgrade-applied,
+.charsheet__upgrade-gem,
+.charsheet__upgrade-option {
+	box-shadow: inset 0 0 0 1px var(--cs-border-color, rgba(99, 102, 241, 0.15));
+}
+
+.charsheet__upgrade-rules-ref {
+	border-radius: var(--cs-radius-sm, 6px);
+	box-shadow: inset 0 0 0 1px var(--cs-border-color, rgba(99, 102, 241, 0.15));
+}
+
 .charsheet__upgrade-applied:hover,
 .charsheet__upgrade-gem:hover,
 .charsheet__upgrade-option:hover,
@@ -20958,6 +20972,106 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	color: inherit;
 }
 
+/* Tier badges in the upgrade modals are LABELS ("2nd Tier Weapon"), not counters. The global
+   `.badge` is a 2.5rem circular puck built for single-digit counts, so a multi-word label
+   stretched into an ellipse — and the `-info` / `-default` / `-warning` variants carry no
+   background at all here, leaving white text on nothing. Scope a label treatment instead, in
+   the sheet's established ink-on-tint voice so every variant reads at the same weight. */
+.charsheet__upgrade-modal .badge,
+.charsheet__empower-modal .badge,
+.charsheet__socket-modal .badge {
+	min-width: 0;
+	height: auto;
+	padding: 0.2em 0.6em;
+	font-size: 0.75rem;
+	font-weight: 600;
+	letter-spacing: 0.01em;
+	border-radius: 999px;
+	background-color: color-mix(in srgb, var(--cs-badge-ink, #94a3b8) 16%, transparent);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cs-badge-ink, #94a3b8) 38%, transparent);
+	color: var(--cs-badge-ink, #94a3b8);
+}
+
+.charsheet__upgrade-modal .badge-info,
+.charsheet__empower-modal .badge-info,
+.charsheet__socket-modal .badge-info { --cs-badge-ink: #22d3ee; }
+
+.charsheet__upgrade-modal .badge-primary,
+.charsheet__empower-modal .badge-primary,
+.charsheet__socket-modal .badge-primary { --cs-badge-ink: #a5b4fc; }
+
+.charsheet__upgrade-modal .badge-warning,
+.charsheet__empower-modal .badge-warning,
+.charsheet__socket-modal .badge-warning { --cs-badge-ink: #fbbf24; }
+
+.charsheet__upgrade-modal .badge-success,
+.charsheet__empower-modal .badge-success,
+.charsheet__socket-modal .badge-success { --cs-badge-ink: #34d399; }
+
+.charsheet__upgrade-modal .badge-secondary,
+.charsheet__empower-modal .badge-secondary,
+.charsheet__socket-modal .badge-secondary { --cs-badge-ink: #cbd5e1; }
+
+.ve-night-mode .charsheet__upgrade-modal .badge-info { --cs-badge-ink: #22d3ee; }
+
+body:not(.ve-night-mode) .charsheet__upgrade-modal .badge,
+body:not(.ve-night-mode) .charsheet__empower-modal .badge,
+body:not(.ve-night-mode) .charsheet__socket-modal .badge { --cs-badge-ink: #475569; }
+
+body:not(.ve-night-mode) .charsheet__upgrade-modal .badge-info,
+body:not(.ve-night-mode) .charsheet__empower-modal .badge-info,
+body:not(.ve-night-mode) .charsheet__socket-modal .badge-info { --cs-badge-ink: #0e7490; }
+
+body:not(.ve-night-mode) .charsheet__upgrade-modal .badge-primary,
+body:not(.ve-night-mode) .charsheet__empower-modal .badge-primary,
+body:not(.ve-night-mode) .charsheet__socket-modal .badge-primary { --cs-badge-ink: #4338ca; }
+
+body:not(.ve-night-mode) .charsheet__upgrade-modal .badge-warning,
+body:not(.ve-night-mode) .charsheet__empower-modal .badge-warning,
+body:not(.ve-night-mode) .charsheet__socket-modal .badge-warning { --cs-badge-ink: #a16207; }
+
+body:not(.ve-night-mode) .charsheet__upgrade-modal .badge-success,
+body:not(.ve-night-mode) .charsheet__empower-modal .badge-success,
+body:not(.ve-night-mode) .charsheet__socket-modal .badge-success { --cs-badge-ink: #047857; }
+
+body:not(.ve-night-mode) .charsheet__upgrade-modal .badge-secondary,
+body:not(.ve-night-mode) .charsheet__empower-modal .badge-secondary,
+body:not(.ve-night-mode) .charsheet__socket-modal .badge-secondary { --cs-badge-ink: #475569; }
+
+/* The picker no longer closes itself after an apply, so the footer is the deliberate way out
+   and must never sit on top of the last row's Apply button. */
+.charsheet__upgrade-modal + .ve-flex-h-right {
+	padding-top: var(--cs-space-sm, 0.5rem);
+	border-top: 1px solid color-mix(in srgb, currentcolor 14%, transparent);
+}
+
+/* Applying several upgrades in a row is now the expected session, so every control in the
+   picker is tapped repeatedly rather than once. Bootstrap's `-xs` buttons land at ~22px. */
+@media (pointer: coarse) {
+	.charsheet__upgrade-modal .charsheet__upgrade-apply,
+	.charsheet__upgrade-modal .charsheet__upgrade-remove,
+	.charsheet__upgrade-modal .charsheet__gem-unsocket,
+	.charsheet__upgrade-modal .charsheet__gem-socket-btn,
+	.charsheet__upgrade-modal + .ve-flex-h-right .ve-btn {
+		min-height: 44px;
+		min-width: 44px;
+	}
+
+	.charsheet__upgrade-override-label {
+		min-height: 44px;
+	}
+
+	.charsheet__upgrade-override {
+		width: 20px;
+		height: 20px;
+	}
+
+	.charsheet__upgrade-details summary {
+		min-height: 44px;
+		display: flex;
+		align-items: center;
+	}
+}
 .charsheet__upgrade-name a:hover {
 	text-decoration: underline;
 	color: var(--cs-accent, #6366f1);

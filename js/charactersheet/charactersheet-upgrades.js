@@ -259,206 +259,235 @@ class CharacterSheetUpgrades {
 	 * @param {string} itemId - The item ID
 	 */
 	async showUpgradePickerModal (itemId) {
-		const items = this._state.getItems();
-		const item = items.find(i => i.id === itemId);
-		if (!item) return;
-
-		const eligibleUpgrades = this.getEligibleUpgrades(item);
-		const currentUpgrades = this._state.getItemUpgrades(itemId);
-		const totalGold = this._state.getTotalGold();
-		const rulesRef = CharacterSheetUpgrades.getRulesReference(item);
+		const initialItem = this._state.getItems().find(i => i.id === itemId);
+		if (!initialItem) return;
 
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
-			title: `Upgrade: ${item.name}`,
+			title: `Upgrade: ${initialItem.name}`,
 			isMinHeight0: true,
 			isWidth100: true,
 		});
 
 		const content = e_({outer: `<div class="charsheet__upgrade-modal"></div>`});
 
-		// Rules reference header — gives players one-click hover access to the governing TCAH rules
-		if (rulesRef) {
-			let rulesLink;
-			if (rulesRef.isVariantrule) {
-				// Real variantrule entity in the loaded TCAH brew — standard hover link
-				rulesLink = CharacterSheetPage.getHoverLink(
-					UrlUtil.PG_VARIANTRULES,
-					rulesRef.name,
-					rulesRef.source,
-					null,
-					rulesRef.label,
-				);
-			} else if (rulesRef.inlineEntry) {
-				// No upstream variantrule — render a predefined hover from inline entry content
-				const hoverMeta = Renderer.hover.getMakePredefinedHover(rulesRef.inlineEntry, {isBookContent: true});
-				rulesLink = `<a href="#" ${hoverMeta.html} onclick="event.preventDefault()">${rulesRef.label}</a>`;
-			}
-			if (rulesLink) {
-				content.append(e_({outer: `
-					<div class="charsheet__upgrade-rules-ref ve-flex-v-center mb-2 p-2 stripe-even ve-small">
-						<span class="glyphicon glyphicon-book mr-1" aria-hidden="true"></span>
-						<span><strong>Rules:</strong> ${rulesLink} <span class="ve-muted">(hover for full text)</span></span>
-					</div>
-				`}));
-			}
-		}
+		// The bypass checkbox is destroyed on every rebuild, so the player's choice has to
+		// live outside the DOM or it silently resets after each apply.
+		let isOverrideSticky = false;
 
-		// Current upgrades section
-		if (currentUpgrades.length) {
-			const currentSection = e_({outer: `<div class="charsheet__upgrade-current mb-3"></div>`});
-			currentSection.append(e_({outer: `<h5>Applied Upgrades</h5>`}));
-			for (const upgrade of currentUpgrades) {
-				const tierLabel = CharacterSheetUpgrades.getUpgradeTierLabel(upgrade.upgradeType);
-				const tierColor = CharacterSheetUpgrades.getUpgradeTierColor(upgrade.upgradeType);
-				const upgradeLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, upgrade.name, upgrade.source);
-				currentSection.append(e_({outer: `
-					<div class="charsheet__upgrade-applied ve-flex-v-center mb-1 p-1 stripe-even">
-						<div class="ve-flex-1">
-							<span class="badge ${tierColor} ve-small mr-1">${tierLabel}</span>
-							<span class="charsheet__upgrade-name">${upgradeLink}</span>
-							${upgrade.costPaid ? `<span class="ve-muted ve-small ml-1">(${upgrade.costPaid} gp)</span>` : ""}
+		/**
+		 * Rebuild the entire modal body from current state.
+		 *
+		 * An item takes MANY upgrades, so the picker stays open across applies. That makes
+		 * every derived value here — the eligible list, the applied list, the gold total, the
+		 * socketed gemstones — stale the moment anything is applied. They are therefore
+		 * recomputed per render rather than captured once and closed over.
+		 */
+		const renderBody = () => {
+			content.innerHTML = "";
+
+			const item = this._state.getItems().find(i => i.id === itemId);
+			if (!item) return doClose(false);
+
+			const eligibleUpgrades = this.getEligibleUpgrades(item);
+			const currentUpgrades = this._state.getItemUpgrades(itemId);
+			const totalGold = this._state.getTotalGold();
+			const gemstones = this._state.getSocketedGemstones(itemId);
+			const rulesRef = CharacterSheetUpgrades.getRulesReference(item);
+
+			// Rules reference header — gives players one-click hover access to the governing TCAH rules
+			if (rulesRef) {
+				let rulesLink;
+				if (rulesRef.isVariantrule) {
+					// Real variantrule entity in the loaded TCAH brew — standard hover link
+					rulesLink = CharacterSheetPage.getHoverLink(
+						UrlUtil.PG_VARIANTRULES,
+						rulesRef.name,
+						rulesRef.source,
+						null,
+						rulesRef.label,
+					);
+				} else if (rulesRef.inlineEntry) {
+					// No upstream variantrule — render a predefined hover from inline entry content
+					const hoverMeta = Renderer.hover.getMakePredefinedHover(rulesRef.inlineEntry, {isBookContent: true});
+					rulesLink = `<a href="#" ${hoverMeta.html} onclick="event.preventDefault()">${rulesRef.label}</a>`;
+				}
+				if (rulesLink) {
+					content.append(e_({outer: `
+						<div class="charsheet__upgrade-rules-ref ve-flex-v-center mb-2 p-2 ve-small">
+							<span class="glyphicon glyphicon-book mr-1" aria-hidden="true"></span>
+							<span><strong>Rules:</strong> ${rulesLink} <span class="ve-muted">(hover for full text)</span></span>
 						</div>
-						<button type="button" class="ve-btn ve-btn-xs ve-btn-danger charsheet__upgrade-remove" data-upgrade-name="${upgrade.name}" data-upgrade-source="${upgrade.source}" title="Remove upgrade">
-							<span class="glyphicon glyphicon-trash"></span>
-						</button>
-					</div>
-				`}));
-			}
-			content.append(currentSection);
-		}
-
-		// Socketed gemstones section
-		const gemstones = this._state.getSocketedGemstones(itemId);
-		if (gemstones.length) {
-			const gemSection = e_({outer: `<div class="charsheet__upgrade-gems mb-3"></div>`});
-			gemSection.append(e_({outer: `<h5>Socketed Gemstones</h5>`}));
-			for (const gem of gemstones) {
-				const tierLabel = CharacterSheetUpgrades.getUpgradeTierLabel(gem.upgradeType);
-				const chargeStr = gem.chargesMax != null ? ` (${gem.chargesCurrent}/${gem.chargesMax} charges)` : "";
-				const gemLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, gem.name, gem.source);
-				gemSection.append(e_({outer: `
-					<div class="charsheet__upgrade-gem ve-flex-v-center mb-1 p-1 stripe-even">
-						<div class="ve-flex-1">
-							<span class="badge badge-success ve-small mr-1">${gem.gemName || tierLabel}</span>
-							<span class="charsheet__upgrade-name">${gemLink}</span>
-							<span class="ve-muted ve-small">${chargeStr}</span>
-						</div>
-						<button type="button" class="ve-btn ve-btn-xs ve-btn-warning charsheet__gem-unsocket" data-gem-name="${gem.name}" title="Unsocket gemstone">
-							<span class="glyphicon glyphicon-eject"></span>
-						</button>
-					</div>
-				`}));
-			}
-			content.append(gemSection);
-		}
-
-		// Available upgrades section
-		if (eligibleUpgrades.length) {
-			const availSection = e_({outer: `<div class="charsheet__upgrade-available mb-3"></div>`});
-			availSection.append(e_({outer: `<h5>Available Upgrades</h5>`}));
-			availSection.append(e_({outer: `<p class="ve-small ve-muted">Gold available: <strong>${totalGold.toFixed(1)} gp</strong></p>`}));
-			// Override / escape hatch (#14): apply upgrades the character already owns (migrating /
-			// pre-owned gear) without paying gold or meeting prerequisites.
-			availSection.append(e_({outer: `
-				<label class="charsheet__upgrade-override-label ve-flex-v-center ve-small mb-2" title="Apply upgrades without paying gold or meeting prerequisites — for migrating or already-upgraded gear.">
-					<input type="checkbox" class="charsheet__upgrade-override mr-1">
-					<span>Bypass cost &amp; prerequisites <span class="ve-muted">(already-owned / migrating)</span></span>
-				</label>
-			`}));
-
-			// Group by tier
-			const grouped = {};
-			for (const upgrade of eligibleUpgrades) {
-				const tier = upgrade.upgradeType?.[0] || "Other";
-				if (!grouped[tier]) grouped[tier] = [];
-				grouped[tier].push(upgrade);
-			}
-
-			for (const [tier, upgrades] of Object.entries(grouped)) {
-				const tierLabel = CharacterSheetUpgrades.getUpgradeTierLabel(tier);
-				const tierColor = CharacterSheetUpgrades.getUpgradeTierColor(tier);
-				availSection.append(e_({outer: `<div class="ve-small ve-bold mt-2 mb-1"><span class="badge ${tierColor}">${tierLabel}</span></div>`}));
-
-				for (const upgrade of upgrades) {
-					const gpCost = CharacterSheetUpgrades.parseGoldCost(upgrade.cost);
-					const isBase = CharacterSheetUpgrades.isBaseCost(upgrade.cost);
-					const costLabel = CharacterSheetUpgrades.formatCostDisplay(upgrade.cost);
-					const canAfford = totalGold >= gpCost;
-					const prereqItems = upgrade.prerequisite?.[0]?.item;
-					const prereqText = prereqItems?.length ? `Requires: ${prereqItems.join("; ")}` : "";
-					const renderedEntries = upgrade.entries?.length
-						? Renderer.get().render({type: "entries", entries: upgrade.entries})
-						: "";
-					const btnAttr = !canAfford ? "disabled data-cost-locked=\"1\" title=\"Insufficient gold — tick the bypass box above to apply anyway\"" : `title="Apply for ${gpCost} gp"`;
-					const upgradeLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, upgrade.name, upgrade.source);
-					const baseHint = isBase
-						? `<span class="badge badge-default ve-small ml-1" title="Per-upgrade base cost. The DM may scale this for the specific item per the source's pricing tables.">base</span>`
-						: "";
-
-					const row = e_({outer: `
-						<div class="charsheet__upgrade-option mb-1 p-2 stripe-even">
-							<div class="ve-flex-v-center mb-1">
-								<div class="ve-flex-1">
-									<span class="charsheet__upgrade-name">${upgradeLink}</span>
-									<span class="ve-muted ve-small ml-1">${costLabel}</span>${baseHint}
-									${prereqText ? `<div class="ve-small ve-muted">${prereqText}</div>` : ""}
-								</div>
-								<button type="button"
-									class="ve-btn ve-btn-xs ${canAfford ? "ve-btn-primary" : "ve-btn-default"} charsheet__upgrade-apply"
-									data-upgrade-name="${upgrade.name}"
-									data-upgrade-source="${upgrade.source}"
-									data-upgrade-cost="${gpCost}"
-									${btnAttr}>
-									<span class="glyphicon glyphicon-plus"></span> Apply
-								</button>
-							</div>
-							${renderedEntries ? `<details class="ve-small charsheet__upgrade-details"><summary class="ve-muted">Details</summary><div class="mt-1">${renderedEntries}</div></details>` : ""}
-						</div>
-					`});
-					availSection.append(row);
+					`}));
 				}
 			}
-			content.append(availSection);
-		} else if (!currentUpgrades.length) {
-			content.append(e_({outer: `<p class="ve-muted">No upgrades available for this item type.</p>`}));
-		}
 
-		// Socket gemstone button (if item is socketable and has room)
-		if (CharacterSheetUpgrades.isSocketable(item) && gemstones.length < 1) {
-			const socketSection = e_({outer: `<div class="charsheet__upgrade-socket mt-3"></div>`});
-			socketSection.append(e_({outer: `
-				<button type="button" class="ve-btn ve-btn-sm ve-btn-success charsheet__gem-socket-btn">
-					<span class="glyphicon glyphicon-plus-sign"></span> Socket Gemstone
-				</button>
-			`}));
-			content.append(socketSection);
-		}
+			// Current upgrades section
+			if (currentUpgrades.length) {
+				const currentSection = e_({outer: `<div class="charsheet__upgrade-current mb-3"></div>`});
+				currentSection.append(e_({outer: `<h5>Applied Upgrades</h5>`}));
+				for (const upgrade of currentUpgrades) {
+					const tierLabel = CharacterSheetUpgrades.getUpgradeTierLabel(upgrade.upgradeType);
+					const tierColor = CharacterSheetUpgrades.getUpgradeTierColor(upgrade.upgradeType);
+					const upgradeLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, upgrade.name, upgrade.source);
+					currentSection.append(e_({outer: `
+						<div class="charsheet__upgrade-applied ve-flex-v-center mb-1 p-1">
+							<div class="ve-flex-1">
+								<span class="badge ${tierColor} ve-small mr-1">${tierLabel}</span>
+								<span class="charsheet__upgrade-name">${upgradeLink}</span>
+								${upgrade.costPaid ? `<span class="ve-muted ve-small ml-1">(${upgrade.costPaid} gp)</span>` : ""}
+							</div>
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-danger charsheet__upgrade-remove" data-upgrade-name="${upgrade.name}" data-upgrade-source="${upgrade.source}" title="Remove upgrade" aria-label="Remove ${upgrade.name}">
+								<span class="glyphicon glyphicon-trash" aria-hidden="true"></span>
+							</button>
+						</div>
+					`}));
+				}
+				content.append(currentSection);
+			}
 
+			// Socketed gemstones section
+			if (gemstones.length) {
+				const gemSection = e_({outer: `<div class="charsheet__upgrade-gems mb-3"></div>`});
+				gemSection.append(e_({outer: `<h5>Socketed Gemstones</h5>`}));
+				for (const gem of gemstones) {
+					const tierLabel = CharacterSheetUpgrades.getUpgradeTierLabel(gem.upgradeType);
+					const chargeStr = gem.chargesMax != null ? ` (${gem.chargesCurrent}/${gem.chargesMax} charges)` : "";
+					const gemLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, gem.name, gem.source);
+					gemSection.append(e_({outer: `
+						<div class="charsheet__upgrade-gem ve-flex-v-center mb-1 p-1">
+							<div class="ve-flex-1">
+								<span class="badge badge-success ve-small mr-1">${gem.gemName || tierLabel}</span>
+								<span class="charsheet__upgrade-name">${gemLink}</span>
+								<span class="ve-muted ve-small">${chargeStr}</span>
+							</div>
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-warning charsheet__gem-unsocket" data-gem-name="${gem.name}" title="Unsocket gemstone" aria-label="Unsocket ${gem.gemName || gem.name}">
+								<span class="glyphicon glyphicon-eject" aria-hidden="true"></span>
+							</button>
+						</div>
+					`}));
+				}
+				content.append(gemSection);
+			}
+
+			// Available upgrades section
+			if (eligibleUpgrades.length) {
+				const availSection = e_({outer: `<div class="charsheet__upgrade-available mb-3"></div>`});
+				availSection.append(e_({outer: `<h5>Available Upgrades</h5>`}));
+				availSection.append(e_({outer: `<p class="ve-small ve-muted">Gold available: <strong>${totalGold.toFixed(1)} gp</strong></p>`}));
+				// Override / escape hatch (#14): apply upgrades the character already owns (migrating /
+				// pre-owned gear) without paying gold or meeting prerequisites.
+				availSection.append(e_({outer: `
+					<label class="charsheet__upgrade-override-label ve-flex-v-center ve-small mb-2" title="Apply upgrades without paying gold or meeting prerequisites — for migrating or already-upgraded gear.">
+						<input type="checkbox" class="charsheet__upgrade-override mr-1"${isOverrideSticky ? " checked" : ""}>
+						<span>Bypass cost &amp; prerequisites <span class="ve-muted">(already-owned / migrating)</span></span>
+					</label>
+				`}));
+
+				// Group by tier
+				const grouped = {};
+				for (const upgrade of eligibleUpgrades) {
+					const tier = upgrade.upgradeType?.[0] || "Other";
+					if (!grouped[tier]) grouped[tier] = [];
+					grouped[tier].push(upgrade);
+				}
+
+				for (const [tier, upgrades] of Object.entries(grouped)) {
+					const tierLabel = CharacterSheetUpgrades.getUpgradeTierLabel(tier);
+					const tierColor = CharacterSheetUpgrades.getUpgradeTierColor(tier);
+					availSection.append(e_({outer: `<div class="ve-small ve-bold mt-2 mb-1"><span class="badge ${tierColor}">${tierLabel}</span></div>`}));
+
+					for (const upgrade of upgrades) {
+						const gpCost = CharacterSheetUpgrades.parseGoldCost(upgrade.cost);
+						const isBase = CharacterSheetUpgrades.isBaseCost(upgrade.cost);
+						const costLabel = CharacterSheetUpgrades.formatCostDisplay(upgrade.cost);
+						const canAfford = isOverrideSticky || totalGold >= gpCost;
+						const prereqItems = upgrade.prerequisite?.[0]?.item;
+						const prereqText = prereqItems?.length ? `Requires: ${prereqItems.join("; ")}` : "";
+						const renderedEntries = upgrade.entries?.length
+							? Renderer.get().render({type: "entries", entries: upgrade.entries})
+							: "";
+						const isCostLocked = totalGold < gpCost;
+						const btnAttr = !canAfford
+							? "disabled data-cost-locked=\"1\" title=\"Insufficient gold — tick the bypass box above to apply anyway\""
+							: `${isCostLocked ? "data-cost-locked=\"1\" " : ""}title="${isCostLocked ? "Apply for free (cost bypassed)" : `Apply for ${gpCost} gp`}"`;
+						const upgradeLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, upgrade.name, upgrade.source);
+						const baseHint = isBase
+							? `<span class="badge badge-default ve-small ml-1" title="Per-upgrade base cost. The DM may scale this for the specific item per the source's pricing tables.">base</span>`
+							: "";
+
+						const row = e_({outer: `
+							<div class="charsheet__upgrade-option mb-1 p-2">
+								<div class="ve-flex-v-center mb-1">
+									<div class="ve-flex-1">
+										<span class="charsheet__upgrade-name">${upgradeLink}</span>
+										<span class="ve-muted ve-small ml-1">${costLabel}</span>${baseHint}
+										${prereqText ? `<div class="ve-small ve-muted">${prereqText}</div>` : ""}
+									</div>
+									<button type="button"
+										class="ve-btn ve-btn-xs ${canAfford ? "ve-btn-primary" : "ve-btn-default"} charsheet__upgrade-apply"
+										data-upgrade-name="${upgrade.name}"
+										data-upgrade-source="${upgrade.source}"
+										data-upgrade-cost="${gpCost}"
+										aria-label="Apply ${upgrade.name}"
+										${btnAttr}>
+										<span class="glyphicon glyphicon-plus" aria-hidden="true"></span> Apply
+									</button>
+								</div>
+								${renderedEntries ? `<details class="ve-small charsheet__upgrade-details"><summary class="ve-muted">Details</summary><div class="mt-1">${renderedEntries}</div></details>` : ""}
+							</div>
+						`});
+						availSection.append(row);
+					}
+				}
+				content.append(availSection);
+			} else if (!currentUpgrades.length) {
+				content.append(e_({outer: `<p class="ve-muted">No upgrades available for this item type.</p>`}));
+			} else {
+				content.append(e_({outer: `<p class="ve-muted ve-small">Every upgrade this item can take is already applied.</p>`}));
+			}
+
+			// Socket gemstone button (if item is socketable and has room)
+			if (CharacterSheetUpgrades.isSocketable(item) && gemstones.length < 1) {
+				const socketSection = e_({outer: `<div class="charsheet__upgrade-socket mt-3"></div>`});
+				socketSection.append(e_({outer: `
+					<button type="button" class="ve-btn ve-btn-sm ve-btn-success charsheet__gem-socket-btn">
+						<span class="glyphicon glyphicon-plus-sign" aria-hidden="true"></span> Socket Gemstone
+					</button>
+				`}));
+				content.append(socketSection);
+			}
+
+			// Override toggle (#14): when ticked, enable cost-locked apply buttons so already-owned
+			// upgrades can be applied without paying gold or meeting prerequisites.
+			const overrideCb = content.querySelector(".charsheet__upgrade-override");
+			if (overrideCb) {
+				overrideCb.addEventListener("change", () => {
+					isOverrideSticky = overrideCb.checked;
+					content.querySelectorAll(".charsheet__upgrade-apply[data-cost-locked]").forEach((/** @type {*} */ btn) => {
+						btn.disabled = !isOverrideSticky;
+						btn.classList.toggle("ve-btn-primary", isOverrideSticky);
+						btn.classList.toggle("ve-btn-default", !isOverrideSticky);
+						btn.title = isOverrideSticky ? "Apply for free (cost bypassed)" : "Insufficient gold — tick the bypass box above to apply anyway";
+					});
+				});
+			}
+		};
+
+		renderBody();
 		modalInner.append(content);
 
-		// Override toggle (#14): when ticked, enable cost-locked apply buttons so already-owned
-		// upgrades can be applied without paying gold or meeting prerequisites.
-		const overrideCb = content.querySelector(".charsheet__upgrade-override");
-		if (overrideCb) {
-			overrideCb.addEventListener("change", () => {
-				const isOverride = overrideCb.checked;
-				content.querySelectorAll(".charsheet__upgrade-apply[data-cost-locked]").forEach((/** @type {*} */ btn) => {
-					btn.disabled = !isOverride;
-					btn.classList.toggle("ve-btn-primary", isOverride);
-					btn.classList.toggle("ve-btn-default", !isOverride);
-					btn.title = isOverride ? "Apply for free (cost bypassed)" : "Insufficient gold — tick the bypass box above to apply anyway";
-				});
-			});
-		}
-
-		// Footer
+		// Footer. `Done` rather than `Close`: the picker no longer closes itself after an
+		// apply, so this is the deliberate way out of a multi-pick session.
 		const footer = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
-			<button class="ve-btn ve-btn-default">Close</button>
+			<button class="ve-btn ve-btn-primary">Done</button>
 		</div>`;
 		modalInner.append(footer);
-		footer.querySelector("button").addEventListener("click", () => doClose(false));
+		footer.querySelector("button")?.addEventListener("click", () => doClose(false));
 
-		// Event delegation for the modal
+		// Event delegation for the modal. Bound to `content` itself, which `renderBody()`
+		// empties rather than replaces, so it survives every rebuild.
+		const getItemName = () => this._state.getItems().find(i => i.id === itemId)?.name || initialItem.name;
+
 		content.addEventListener("click", async (e) => {
 			// Apply upgrade
 			const applyBtn = e.target.closest(".charsheet__upgrade-apply");
@@ -467,7 +496,7 @@ class CharacterSheetUpgrades {
 				const source = applyBtn.dataset.upgradeSource;
 				const rawCost = parseFloat(applyBtn.dataset.upgradeCost);
 				// When the override box is ticked, bypass gold cost & prerequisites entirely.
-				const isOverride = !!overrideCb?.checked;
+				const isOverride = isOverrideSticky;
 				const cost = isOverride ? 0 : rawCost;
 				const upgrade = (this._page.getItemUpgrades?.() || this._allUpgrades).find(
 					u => u.name === name && u.source === source,
@@ -491,10 +520,10 @@ class CharacterSheetUpgrades {
 				}
 
 				const costMsg = isOverride && rawCost > 0 ? "(cost bypassed)" : `for ${cost} gp`;
-				JqueryUtil.doToast({content: `Applied "${upgrade.name}" to ${item.name} ${costMsg}`, type: "success"});
+				JqueryUtil.doToast({content: `Applied "${upgrade.name}" to ${getItemName()} ${costMsg}`, type: "success"});
 				this._page.saveCharacter();
-				doClose(true);
 				this._page._inventory?.render();
+				renderBody();
 				return;
 			}
 
@@ -522,7 +551,7 @@ class CharacterSheetUpgrades {
 				} else {
 					const ok = await InputUiUtil.pGetUserBoolean({
 						title: `Remove "${name}"?`,
-						htmlDescription: `This upgrade will be removed from <strong>${item.name}</strong>.`,
+						htmlDescription: `This upgrade will be removed from <strong>${getItemName()}</strong>.`,
 						textYes: "Remove",
 						textNo: "Cancel",
 					});
@@ -537,10 +566,10 @@ class CharacterSheetUpgrades {
 				if (refund > 0) this._state.addGold(refund);
 
 				const refundStr = refund > 0 ? ` (refunded ${refund} gp)` : "";
-				JqueryUtil.doToast({content: `Removed "${name}" from ${item.name}${refundStr}`, type: "info"});
+				JqueryUtil.doToast({content: `Removed "${name}" from ${getItemName()}${refundStr}`, type: "info"});
 				this._page.saveCharacter();
-				doClose(true);
 				this._page._inventory?.render();
+				renderBody();
 				return;
 			}
 
@@ -550,10 +579,10 @@ class CharacterSheetUpgrades {
 				const gemName = unsocketBtn.dataset.gemName;
 				const removed = this._state.unsocketGemstone(itemId, gemName);
 				if (removed) {
-					JqueryUtil.doToast({content: `Unsocketed "${gemName}" from ${item.name}`, type: "info"});
+					JqueryUtil.doToast({content: `Unsocketed "${gemName}" from ${getItemName()}`, type: "info"});
 					this._page.saveCharacter();
-					doClose(true);
 					this._page._inventory?.render();
+					renderBody();
 				}
 				return;
 			}
@@ -614,7 +643,7 @@ class CharacterSheetUpgrades {
 			modalInner.append(content);
 			const footer = ee`<div class="ve-flex-v-center ve-flex-h-right mt-1"><button class="ve-btn ve-btn-default ve-btn-xs">Close</button></div>`;
 			modalInner.append(footer);
-			footer.querySelector("button").addEventListener("click", () => doClose(false));
+			footer.querySelector("button")?.addEventListener("click", () => doClose(false));
 			return;
 		}
 
@@ -684,7 +713,7 @@ class CharacterSheetUpgrades {
 			<button class="ve-btn ve-btn-default ve-btn-xs">Close</button>
 		</div>`;
 		modalInner.append(footer);
-		footer.querySelector("button").addEventListener("click", () => doClose(false));
+		footer.querySelector("button")?.addEventListener("click", () => doClose(false));
 
 		// Event delegation
 		content.addEventListener("click", async (e) => {
@@ -996,7 +1025,7 @@ class CharacterSheetUpgrades {
 			<button class="ve-btn ve-btn-default">Close</button>
 		</div>`;
 		modalInner.append(footer);
-		footer.querySelector("button").addEventListener("click", () => doClose(false));
+		footer.querySelector("button")?.addEventListener("click", () => doClose(false));
 
 		// Event delegation
 		content.addEventListener("click", (e) => {

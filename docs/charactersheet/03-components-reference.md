@@ -695,6 +695,8 @@ toggleEditMode()
 ### Features
 
 - Upgrade picker modal: browse eligible upgrades by tier, show prerequisites and costs
+- **The picker stays open across a whole multi-pick session.** An item takes many upgrades, so applying, removing or unsocketing rebuilds the modal body in place (`renderBody()`) instead of closing it. Every derived value — the eligible list, the applied list, the gold total, the socketed gemstones — is recomputed per rebuild rather than captured once and closed over, so nothing goes stale mid-session. An explicit **Done** button is the deliberate way out. (Contrast the materials picker, which *is* single-valued and rightly closes on apply.)
+- **The cost-bypass choice outlives its checkbox.** The bypass box is destroyed on every rebuild, so the ticked state lives in a closure flag (`isOverrideSticky`) outside the DOM and is re-rendered back onto the box.
 - **Rules-reference hover header** in the picker — links the governing TCAH variant rule (Upgrading Armor for armor/shields, Weapon Upgrade Comparison for weapons) so players can hover for the source text.
 - Gold deduction with multi-denomination conversion
 - **Refund-on-remove flow**: removing an applied upgrade prompts for No / Full / Half refund of the originally paid cost via `state.addGold()`.
@@ -702,6 +704,7 @@ toggleEditMode()
 - Gemstone socketing: socket/unsocket with 1-gem-per-item limit
 - Mechanical effect calculation from applied upgrades
 - Upgrade badges on item rows
+- **Three named empty states**, never one generic blank: nothing eligible for this item *kind*; nothing eligible at this *tier*; and everything this item can take is *already applied*.
 
 ### Key Methods
 

@@ -778,6 +778,22 @@ modal, and blaming the item for a data-loading failure sends the player off to r
 rules for an answer that is not there. The picker branches on `getMaterials().length` and names
 the homebrew when the catalog itself is missing.
 
+The **upgrade** picker now follows the same rule with three branches: nothing eligible for this
+item kind, nothing eligible at this tier, and everything this item can take already applied.
+
+### A single-valued picker closes; a multi-valued one stays open
+
+A material is one field, so applying one is a completed decision and the modal closes. Upgrades
+are a *list* — a weapon takes several — so the upgrade picker rebuilds its body in place after
+every apply, remove or unsocket and exits only via an explicit **Done**. The consequence is that
+nothing in its body may be closed over: the eligible list, the applied list, the gold total and
+the socketed gemstones are all recomputed per rebuild. Anything that must persist across a
+rebuild but lives in the DOM — the cost-bypass checkbox — is mirrored into a closure flag,
+because the element itself is destroyed each time.
+
+This is also why the upgrade rows use a hairline separator rather than zebra stripes: a row's
+colour must not change just because the list above it grew.
+
 ### The row wraps instead of overflowing
 
 Each row carries a name, a stat summary and up to two chips. At 390px they cannot share a line:

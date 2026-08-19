@@ -688,6 +688,25 @@ An item may carry `material: {name, source}` — a **non-destructive reference**
   condensate roles are vocabulary this feature invents; outside the 678-line rules document the
   collapsed `<details>` at the foot of the picker is the only place they are defined. Adding a
   new abbreviation to a row means adding it there too.
+- ⚠️ **A single-valued picker closes on apply; a multi-valued one must not.** A material is one
+  field, so `showMaterialPickerModal` closing is correct. `showUpgradePickerModal` is a *list*
+  editor — a weapon takes several upgrades — so it rebuilds its body in place via `renderBody()`
+  after every apply / remove / unsocket and exits only through an explicit **Done**. The
+  consequence is structural: nothing in that body may be captured before the build. The eligible
+  list, the applied list, `getTotalGold()` and the socketed gemstones are recomputed inside
+  `renderBody()`, and the cost-bypass choice — whose checkbox is destroyed on each rebuild — is
+  mirrored into an `isOverrideSticky` closure flag and re-rendered back onto the box. Bind the
+  click delegation to the `content` element that `renderBody()` **empties** rather than
+  replaces, or the handler dies on the first rebuild.
+- **A re-rendering list cannot use zebra stripes.** Once the upgrade picker rebuilds in place, an
+  alternating fill means a row changes colour merely because the list above it grew, which reads
+  as a state change that did not happen. Rows separate via an inset hairline instead.
+- ⚠️ **Bootstrap's global `.badge` is a 2.5rem circular puck** (`border-radius: 50%`,
+  `min-width: 2.5rem`) built for single-digit counters, and `.badge-info` / `-default` /
+  `-warning` / `-secondary` / `-success` define **no background at all** — white text on
+  transparent. Multi-word tier labels ("1st Tier Weapon") therefore rendered as giant empty
+  ellipses. The character sheet's modals scope a pill-shaped, ink-on-tint override; reuse it
+  rather than reaching for the global class.
 - ⚠️ **The MC headline modifier is `--overloaded` / `--suppressing`; the inventory badge's is
   `--over` / `--suppress`.** They are different elements with different vocabularies, and
   writing `.charsheet__mc-headline--over` (which matched nothing for as long as it existed)
