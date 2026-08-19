@@ -1437,6 +1437,96 @@ effect of no longer over-reporting their damage per round.
   `abilityMod + base + feature + item`, and the situational component is zero." That
   probe is what proved the rider exclusion was safe.
 
+### v22 — a material is part of the weapon, so it belongs on the attack
+
+Two reported bugs, one root cause: **materials and upgrades are stored as references and
+resolved at read time**, and the exporter read the stored item.
+
+**Bug #1 — the statblock had no material awareness at all.** Not one mention of
+`material`, `getMaterialEffects` or `_materialEffects`. A DM running Mikase never learned
+that her Starfire Katana counts as magical, crits on 19, and lands on a miss by 5 or less
+even against magical AC.
+
+**Bug #2 — the bundled companion item shipped *base* stats.** `buildCompanionItems` read
+`state.getInventory()` — the raw list — so the hover added in v20 showed a measurably
+weaker item than the statblock was built from:
+
+| item | as worn | as bundled (pre-v22) |
+|---|---|---|
+| Mikase's Angelic Plate | AC 21 | AC 18 |
+| Arthur's Cataclysm | `2d10`, crit 19 | `2d6`, crit 20 |
+| Mikase's Starfire Katana | crit 19 | crit 20 |
+
+**Where each effect now lives.** One home each, per the standing doctrine — *state the
+number, link the term, say the mechanic once*, and anything that changes a roll goes **on
+the attack**, never into a trait the reader has to cross-reference:
+
+| effect | home | read from |
+|---|---|---|
+| `countsAsMagical` / `countsAsSilvered` | attack qualifier | `getEffectiveItemBonuses().tags` |
+| `penetration` (+ `penetrationIgnoresMagicalAc`) | attack line, as a near-miss clause | `getMaterialEffects` |
+| crit threshold (material + upgrade, combined **once**) | attack line | projected item ∪ `getEffectiveItemBonuses` |
+| `overrideDamageType` | attack damage clause, as an *option* | `getMaterialDamageTypeChoice` |
+| `extraDamageDiceVsType`, `bonusCritDamage` | v15 rider system | `getMaterialEffects` |
+| `saveAdvantage` / `checkAdvantage` | folded into `Resilience`, attributed | `getEquippedMaterialEffects` |
+| `damageReduction`, `indestructible`, `perceptionPenaltyToNotice` | `Armor Traits` | `getItemMaterialNotes` |
+| `grantedActions`, condensate affinities | action / bonus / reaction | `getItemPowers({activeOnly})` |
+| `speedDelta`, `bonusInitiative` | `speed`, `initiative` | already folded into `getSpeed()` / `getInitiativeBonuses()` |
+| everything narrative | bundled item `entries` | `getMaterialNotes` |
+
+**Penetration is an AC mechanic, not a resistance one.** *On a miss, if the attack missed
+by N or less, it still hits* — i.e. it resolves against AC reduced by N, against
+**nonmagical** AC unless `penetrationIgnoresMagicalAc` (Orichaline) is set. The in-app
+glossary at `charactersheet-materials.js:1892` says it "ignores that much of a target's
+non-magical damage resistance", which is wrong; that one string is where an earlier
+design error in this very feature came from. The wording is now pinned by a test that
+also asserts the wrong phrasing is absent.
+
+**`requiresProperty` is a gate, not a footnote.** Stout Blackwood's bonus crit die is real
+only on a Loading weapon. It is emitted or not; it is never emitted with a caveat.
+
+**Bake, then describe.** The bundled item carries baked numbers and **no** `material` /
+`appliedUpgrades` reference. `additionalProperties: false` forbids them, and a reference is
+inert on a receiving instance with no material engine — so shipping one would either fail
+validation or silently double-apply. Provenance survives as prose:
+
+```
+{@b Material:} Orichaline. Penetration 5: a miss by 5 or less still hits, even against
+magical AC. Counts as magical for overcoming resistance and immunity. Magic capacity 3 (0 used).
+{@b Upgrades:} Balanced: +1 attack.
+```
+
+The statblock and the bundled item both state penetration and crit. That is **not** the
+"Master Smith's Aegis appears twice" defect, which was two *statblock traits* saying one
+thing: the bundled item is a separate artifact that must not degrade, and a DM only sees it
+on hover. Within the statblock, each effect still has exactly one home.
+
+**Multiattack now scores the rendered attack, not the stored row.** Composing upgrades
+stepped Mikase's Silver Dragon Katana to `1d10` and Multiattack promptly named it over the
+Starfire Katana — because `_estimateDamageScore` reads only the weapon's own die and could
+not see Starfire's `+2d8` radiant. `_estimateRenderedAttackScore` sums every `{@damage}`
+clause on the finished line instead, excluding once-per-turn riders (a 1/turn rider fires
+on whichever attack lands first, so it cannot distinguish between them). This also fixed a
+pre-existing defect: a monk's Unarmed Strike row stores the bare die with no ability
+modifier, so Tikal's `1d10+5` fist scored `5.5` and lost to a `1d6+5` spear.
+
+**What v22 taught.**
+
+- **An accessor that returns an empty result for a missing argument is a silent failure.**
+  `getMaterialEffects(item)` does not resolve the material — called with one argument it
+  returns a fully-populated *empty* shape rather than throwing, so a forgotten
+  `resolveMaterial` is indistinguishable from a material with no effects. It cost more
+  time than every real bug in this pass combined.
+- **A regex that consumes its trailing context eats the next match.**
+  `/\{@damage ([^}]+)\}([^.]*)/g` swallowed the second damage clause on every line and
+  scored only the first. A lookahead reads context without consuming it.
+- **"Nothing reads this" and "this is deliberately a table call" look identical in code.**
+  The sibling session's `EFFECT_HANDLING` registry is the fix: every effect type declares
+  its consumer, and an exporter test now fails when a type has no home here either.
+- **A composition bug is a count of derivations.** The bundled item was one of 21 sites
+  independently re-deriving a weapon's total. The fix was not to add a 22nd but to read
+  `getEffectiveItemBonuses` / `getEffectiveWeaponDamage` like everything else.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 
@@ -1466,6 +1556,12 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
 
 - Unit/regression: `CharacterSheetNpcExporter.test.js` (prose rewrite, tag preserve/enrich, defense fold-in, feature dedupe, residual modifiers)
 - Class + systems matrix: `CharacterSheetNpcExporter.matrix.test.js` — all 13 PHB/TCE/XPHB classes L5, multiclass, combat methods, specialties, divine favor, ioun/items, channel divinity, gemstones, custom abilities, resources, combined legendary boss
+- Materials & upgrades: `CharacterSheetNpcExporter.materials.test.js` — attack-line
+  routing (penetration wording, magical-AC reach, crit threshold, damage-type *option*,
+  rider die scaling, the `requiresProperty` gate), advantage folding into `Resilience`,
+  material-power economy inference, bundle composition, and three **routing-completeness**
+  guards driven by `CharacterSheetMaterials.EFFECT_HANDLING` — a new effect type with no
+  exporter home fails the suite rather than silently vanishing.
 - **Real-save contract tests**: `CharacterSheetNpcExporter.realsaves.test.js` runs the
   exporter against complete character saves in `npc-exports/` and asserts the contracts
   that synthetic fixtures never caught (no serialized JSON, no `p`/`s`/`b` damage codes,
@@ -1684,5 +1780,6 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
 | `js/charactersheet/charactersheet-export.js` | Dialog, persistence, brew I/O |
 | `test/jest/charactersheet/CharacterSheetNpcExporter.test.js` | Unit / regression |
 | `test/jest/charactersheet/CharacterSheetNpcExporter.matrix.test.js` | Class × systems coverage |
+| `test/jest/charactersheet/CharacterSheetNpcExporter.materials.test.js` | Material & upgrade routing, bundle composition |
 | `test/jest/charactersheet/CharacterSheetNpcExporter.realsaves.test.js` | Contract tests against real saves in `npc-exports/` (skipped when absent) |
 | `.agents/skills/charactersheet-development/references/subsystem-details.md` | Agent quick ref |

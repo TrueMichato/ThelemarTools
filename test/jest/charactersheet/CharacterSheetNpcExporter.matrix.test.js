@@ -510,7 +510,7 @@ describe("CharacterSheetNpcExporter — special systems matrix", () => {
 
 		const mon = CharacterSheetNpcExporter.convertStateToMonster(s);
 		assertValidMonster(mon, "upgrades");
-		expect(mon.trait.some(t => t.name === "Armor Upgrades")).toBe(true);
+		expect(mon.trait.some(t => t.name === "Armor Traits")).toBe(true);
 		expect(mon.trait.some(t => t.name === "Gemstone Effects")).toBe(true);
 		expect(mon.trait.find(t => t.name === "Gemstone Effects").entries.join(" ")).toMatch(/Ruby/);
 	});

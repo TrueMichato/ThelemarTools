@@ -392,6 +392,11 @@ class CharacterSheetNpcExporter {
 		const multiattackAction = this._getMultiattackAction(state, {
 			npcName,
 			attacks: realAttacks,
+			// The rendered actions carry every damage clause the row does not: a weapon's
+			// own rider, a material's extra dice, a feature's bonus damage. Scoring the row
+			// alone rated Mikase's Starfire Katana (1d8 + 2d8 radiant) below a plain 1d10,
+			// so Multiattack named the weaker sword.
+			renderedAttacks: weaponActions,
 			attacksPerAction,
 		});
 		const actions = [
@@ -404,7 +409,7 @@ class CharacterSheetNpcExporter {
 			: null;
 		const specialEquipmentBlock = this._getSpecialEquipmentBlock(state);
 		const divineFavorBlock = this._getDivineFavorBlock(state, {npcName});
-		const armorUpgradeBlock = this._getArmorUpgradeBlock(state);
+		const armorUpgradeBlock = this._getArmorTraitBlock(state);
 		const gemstoneNotesBlock = this._getGemstoneNotesBlock(state);
 		const itemUseBlocks = this._getMagicItemUseBlocks(state, {npcName});
 		const spellcastingBlocks = this._getSpellcastingBlocks(state, {npcName});
@@ -620,6 +625,10 @@ class CharacterSheetNpcExporter {
 		this._dropEntriesRestatedAsLabelledClauses(out);
 		this._consolidateManeuverEntries(out, state, calculations, {npcName});
 		this._consolidateMetamagicEntries(out, state, {npcName});
+		// Added before the merge, not after: each arrives as a single standing clause, which
+		// is exactly what the Resilience pass is built to absorb — so a material's advantage
+		// is attributed beside a feat's instead of stranded in its own trait.
+		this._addMaterialAdvantageTraits(out, state, {npcName});
 		this._mergeResilienceTraits(out, {npcName});
 		this._resolveHeldWeaponReferences(out, state);
 		this._consolidateShapeshiftEntries(out, state, {npcName});
@@ -3834,6 +3843,87 @@ class CharacterSheetNpcExporter {
 	 *
 	 * @param {Object} out monster object being assembled (mutated)
 	 */
+	/**
+	 * Advantage a material grants on saves or checks, as single-clause traits.
+	 *
+	 * The user's standing rule is that a trait is for what is *not* numeric or roll-related,
+	 * so an advantage must not stop at being prose in an armour block: it belongs with the
+	 * other standing roll modifiers. Emitting these as ordinary one-clause traits lets
+	 * `_mergeResilienceTraits` fold, attribute and de-duplicate them exactly as it does a
+	 * feat's — Lead's advantage against Enchantment sits beside Dauntless Heritage's against
+	 * being frightened, in the one place a DM reads roll modifiers.
+	 *
+	 * @param {Object} out monster object being assembled (mutated)
+	 * @param {Object} state
+	 */
+	static _addMaterialAdvantageTraits (out, state, {npcName = "The NPC"} = {}) {
+		const equipped = typeof state?.getEquippedMaterialEffects === "function"
+			? (state.getEquippedMaterialEffects() || [])
+			: [];
+		if (!equipped.length) return;
+
+		const seen = new Set();
+		const traits = [];
+
+		equipped.forEach(({material, fx}) => {
+			(fx?.conditionalModifiers || []).forEach(mod => {
+				const clause = this._getMaterialAdvantageClause(mod);
+				if (!clause) return;
+				const key = clause.toLowerCase();
+				if (seen.has(key)) return;
+				seen.add(key);
+				traits.push({
+					name: this._getSafeInlineText(material?.name, {maxLen: 40}) || "Material",
+					// Phrased as a full sentence because that is what the Resilience extractor
+					// matches on; a bare noun phrase would be left stranded as its own trait.
+					entries: [`${npcName} has ${clause.charAt(0).toLowerCase()}${clause.slice(1)}.`],
+				});
+			});
+		});
+
+		if (traits.length) out.trait = [...(out.trait || []), ...traits];
+	}
+
+	/** One standing advantage clause, phrased for a statblock. */
+	static _getMaterialAdvantageClause (mod) {
+		const skill = this._getSafeInlineText(mod?.skill, {maxLen: 40});
+		// A save advantage and a check advantage read identically apart from this noun, and
+		// an authored `conditional` often already covers both ("on checks and saving throws
+		// made to resist being moved"), in which case it supplies the whole clause itself.
+		const subject = skill
+			? `${skill} checks`
+			: mod?.kind === "check" ? "ability checks" : "saving throws";
+
+		// Authored in the player's voice ("…moved against your will"), which a statblock
+		// cannot print; the same substitutions the rider path already makes apply here.
+		const conditional = this._getSafeInlineText(
+			String(mod?.conditional || "")
+				.replace(/\byou are\b/gi, "it is")
+				.replace(/\byour\b/gi, "its")
+				.replace(/\byourself\b/gi, "itself")
+				.replace(/\byou\b/gi, "it"),
+			{maxLen: 200},
+		);
+		if (conditional) {
+			// "On checks and saving throws made to resist being moved against your will"
+			// already names its own subject; prefixing ours would duplicate it, and its
+			// leading preposition would collide with the one in "Advantage on ...".
+			const isSelfDescribing = /\b(?:checks?|saving throws?|saves?)\b/i.test(conditional);
+			const body = isSelfDescribing
+				? conditional.replace(/^on\s+/i, "")
+				// "Against Abjuration…" opens a sentence in the source but lands mid-clause here.
+				: `${subject} ${conditional.charAt(0).toLowerCase()}${conditional.slice(1)}`;
+			return `Advantage on ${body.charAt(0).toLowerCase()}${body.slice(1)}`;
+		}
+
+		const schools = (mod?.schools || [])
+			.map(code => Parser.spSchoolAbvToFull?.(code))
+			.filter(Boolean);
+		if (schools.length) return `Advantage on ${subject} against ${this._getCommaAndList(schools)} spells`;
+
+		return `Advantage on ${subject}`;
+	}
+
 	static _mergeResilienceTraits (out, {npcName = "The NPC"} = {}) {
 		if (!out.trait?.length) return;
 
@@ -6865,19 +6955,30 @@ class CharacterSheetNpcExporter {
 		return head.length >= 3 ? head : raw;
 	}
 
-	static _getMultiattackAction (state, {npcName = "The NPC", attacks = [], attacksPerAction = 1} = {}) {
+	static _getMultiattackAction (state, {npcName = "The NPC", attacks = [], renderedAttacks = [], attacksPerAction = 1} = {}) {
 		if (attacksPerAction < 2) return null;
+		// Prefer the rendered action when one exists for this row: `attack.damage` holds only
+		// the weapon's own die, while the rendered line holds every clause that actually
+		// lands, which is what "hits hardest" has to mean.
+		const renderedByName = new Map((renderedAttacks || [])
+			.filter(it => it?.name)
+			.map(it => [String(it.name).toLowerCase(), it]));
+		const scoreOf = attack => {
+			const rendered = renderedByName.get(String(attack?.name || "").toLowerCase());
+			const renderedScore = rendered ? this._estimateRenderedAttackScore(rendered) : null;
+			return renderedScore == null ? this._estimateDamageScore(attack) : renderedScore;
+		};
 		const weaponAttacks = (attacks || []).filter(a => a?.name && !this._isDefaultUnarmedAttack(a));
 		// The first attack in the sheet's list is often a rider (a Paladin's Radiant
 		// Strikes, a species' Horns) that nobody would open with. Multiattack should
 		// name whatever actually hits hardest.
 		const named = (attacks || []).filter(a => a?.name);
-		const bestOf = list => (list.length ? list.reduce((best, cur) => (this._estimateDamageScore(cur) > this._estimateDamageScore(best) ? cur : best)) : null);
+		const bestOf = list => (list.length ? list.reduce((best, cur) => (scoreOf(cur) > scoreOf(best) ? cur : best)) : null);
 		const bestWeapon = bestOf(weaponAttacks);
 		const bestAny = bestOf(named);
 		// A monk's Unarmed Strike is not the filler an unarmed strike usually is — when it
 		// out-damages every weapon carried, it is the attack the NPC opens with.
-		const primary = bestWeapon && (!bestAny || this._estimateDamageScore(bestWeapon) >= this._estimateDamageScore(bestAny))
+		const primary = bestWeapon && (!bestAny || scoreOf(bestWeapon) >= scoreOf(bestAny))
 			? bestWeapon
 			: bestAny;
 		const attackName = this._getSafeInlineText(this._getShortAttackName(primary?.name) || "weapon attack", {maxLen: 48}) || "weapon attack";
@@ -6889,6 +6990,58 @@ class CharacterSheetNpcExporter {
 				`${npcName} makes ${countWord} ${attackName} attacks.`,
 			],
 		};
+	}
+
+	/**
+	 * Average damage of a rendered attack line, summing every `{@damage}` clause it carries.
+	 *
+	 * A once-per-turn rider is deliberately excluded: it fires on whichever attack lands
+	 * first, so it is worth the same no matter which weapon Multiattack names, and counting
+	 * it would let a 7d6 Sneak Attack decide the question on the attack that happens to
+	 * print it.
+	 *
+	 * @param {Object} action rendered action entry
+	 * @returns {?number} average damage, or `null` when the line states none
+	 */
+	static _estimateRenderedAttackScore (action) {
+		const text = (action?.entries || []).filter(it => typeof it === "string").join(" ");
+		if (!text) return null;
+
+		let total = 0;
+		let found = false;
+		// Lookahead, not a capture: consuming the trailing text would swallow the very next
+		// `{@damage}` tag and score only the first clause on the line.
+		const re = /\{@damage ([^}]+)\}(?=([^.{]*))/g;
+		let m;
+		while ((m = re.exec(text)) !== null) {
+			const trailing = String(m[2] || "");
+			if (/\b(?:1\/turn|once per turn)\b/i.test(trailing)) continue;
+			const avg = this._estimateAverageDice(m[1]);
+			if (avg == null) continue;
+			total += avg;
+			found = true;
+		}
+
+		return found ? total : null;
+	}
+
+	/**
+	 * Average of a dice expression such as `2d8+13` or `1d4`.
+	 *
+	 * @param {string} formula dice expression
+	 * @returns {?number} average value, or `null` when unparseable
+	 */
+	static _estimateAverageDice (formula) {
+		const raw = String(formula || "").trim();
+		if (!raw) return null;
+		const m = raw.match(/^(\d+)d(\d+)\s*(?:([+-])\s*(\d+))?$/i);
+		if (m) {
+			const avg = Number(m[1]) * (Number(m[2]) + 1) / 2;
+			const bonus = m[4] ? (m[3] === "-" ? -Number(m[4]) : Number(m[4])) : 0;
+			return avg + bonus;
+		}
+		const flat = Number(raw);
+		return Number.isFinite(flat) ? flat : null;
 	}
 
 	static _numberToWord (n) {
@@ -7479,6 +7632,14 @@ class CharacterSheetNpcExporter {
 	 * `additionalProperties: false`, this is a whitelist, not a clean-up — anything the
 	 * schema does not name is dropped rather than guessed at.
 	 */
+	static _MATERIAL_NOTE_FLAGS = Object.freeze([
+		"indestructible",
+		"spellcastingFocus",
+		"armorWearableUnderClothing",
+		"noRangedDisadvantageInMelee",
+		"perceptionPenaltyToNotice",
+	]);
+
 	static _getSanitizedBrewItem (item, {sourceJson} = {}) {
 		if (!item || typeof item !== "object") return null;
 
@@ -7570,12 +7731,18 @@ class CharacterSheetNpcExporter {
 	 * it, so a custom item the statblock never names is not shipped, and a tag can never
 	 * point at an entity that is missing.
 	 */
-	static buildCompanionItems (monster, state, {sourceJson} = {}) {
+	static buildCompanionItems (monster, state, {sourceJson, warnings} = {}) {
 		const source = this._getSafeSourceJson(sourceJson || monster?.source || CharacterSheetNpcExporter._companionItemSource);
 		const tagged = this._collectItemTagNames(monster, source);
 		if (!tagged.size) return [];
 
-		const inventory = state?.getInventory?.() || state?._data?.inventory || [];
+		// The PROJECTED inventory, not the raw one. A material rewrites `ac`, `dmg1`,
+		// `critThreshold`, `weight`, `value`, `property` and `range` at read time and never
+		// touches the stored entry, so the raw inventory describes an item the character does
+		// not actually own: Mikase's Angelic Plate is AC 18 stored and AC 21 as worn, and
+		// Arthur's Cataclysm is 2d6 stored and 2d8 as forged. Bundling the raw entry shipped a
+		// weaker item than the statblock was built from, so the hover contradicted the block.
+		const inventory = state?.getItems?.() || state?.getInventory?.() || state?._data?.inventory || [];
 		const out = [];
 		const seen = new Set();
 
@@ -7591,10 +7758,344 @@ class CharacterSheetNpcExporter {
 			seen.add(key);
 
 			const sanitized = this._getSanitizedBrewItem(item, {sourceJson: source});
-			if (sanitized) out.push(sanitized);
+			if (sanitized) {
+				this._applyComposedItemStats(sanitized, state, wrapper?.id ?? item?.id, item);
+				this._collectItemProvenanceWarnings(item, state, warnings);
+				out.push(sanitized);
+			}
 		});
 
 		return out.sort((a, b) => a.name.localeCompare(b.name));
+	}
+
+	/**
+	 * Fold the item's second shaping axis — upgrades — onto an already material-projected
+	 * entity.
+	 *
+	 * `getItems()` projects materials but deliberately NOT upgrades: upgrades compose through
+	 * `getEffectiveItemBonuses`, and the sheet collapsed twenty-one independent re-derivations
+	 * of that total into one helper precisely because the ones reading the item directly kept
+	 * dropping them. Re-deriving here would make a twenty-second, so this reads the canonical
+	 * helpers and copies the answer.
+	 *
+	 * @param {object} out Sanitized, schema-legal item — mutated in place.
+	 * @param {object} state
+	 * @param {string} itemId Inventory id; the helpers are keyed on it, not on the item object.
+	 * @returns {object} `out`
+	 */
+	static _applyComposedItemStats (out, state, itemId, projectedItem) {
+		if (!out) return out;
+
+		const provenance = this._getItemProvenanceEntries(projectedItem || out, state, itemId);
+		if (provenance.length) out.entries = [...(Array.isArray(out.entries) ? out.entries : []), ...provenance];
+
+		if (!itemId) return out;
+
+		const eff = typeof state?.getEffectiveItemBonuses === "function"
+			? (state.getEffectiveItemBonuses(itemId) || null)
+			: null;
+		if (!eff) return out;
+
+		// `dice` here is the projected die after any upgrade die-step: Cataclysm is 2d6 stored,
+		// 2d8 once Steeline is applied, and 2d10 once Superior steps it again.
+		const dmg = typeof state?.getEffectiveWeaponDamage === "function"
+			? state.getEffectiveWeaponDamage(itemId)
+			: null;
+		if (dmg?.dice) {
+			out.dmg1 = dmg.dice;
+			if (dmg.diceVersatile) out.dmg2 = dmg.diceVersatile;
+		}
+
+		// `bonusWeapon` is the "+N" of a +N weapon and means attack AND damage. Splitting it
+		// into the two explicit fields is what lets an attack-only upgrade (Balanced) and a
+		// damage-only one (Wounding: Keen) sit on the same weapon without either being rounded
+		// into the other — and prevents a reader adding `bonusWeapon` on top of the totals.
+		delete out.bonusWeapon;
+		this._setSignedItemBonus(out, "bonusWeaponAttack", eff.totalAttackBonus);
+		this._setSignedItemBonus(out, "bonusWeaponDamage", eff.totalDamageBonus);
+
+		const crit = this._getComposedCritThreshold(out, eff);
+		if (crit > 0 && crit < 20) out.critThreshold = crit;
+		else delete out.critThreshold;
+
+		return out;
+	}
+
+	static _setSignedItemBonus (out, key, value) {
+		const num = Number(value);
+		if (!Number.isFinite(num) || num === 0) {
+			delete out[key];
+			return;
+		}
+		out[key] = num > 0 ? `+${num}` : `${num}`;
+	}
+
+	/**
+	 * The crit threshold with BOTH of its independent sources honoured.
+	 *
+	 * A material sets an absolute threshold, projected onto the item (Orichaline -> 19). An
+	 * upgrade contributes a reduction, folded by `getEffectiveItemBonuses` (Critical: Spiked
+	 * -> 19). At the time of writing the latter reads the RAW item, so it misses the material
+	 * entirely — Mikase's Starfire Katana projects 19 but reports 20. Taking the lower of the
+	 * two is correct today and stays correct once that is fixed, which a subtraction would not.
+	 */
+	static _getComposedCritThreshold (projectedItem, eff) {
+		const candidates = [20];
+		const fromMaterial = Number(projectedItem?.critThreshold);
+		const fromBonuses = Number(eff?.critThreshold);
+		if (Number.isFinite(fromMaterial) && fromMaterial > 0) candidates.push(fromMaterial);
+		if (Number.isFinite(fromBonuses) && fromBonuses > 0) candidates.push(fromBonuses);
+		return Math.min(...candidates);
+	}
+
+	/**
+	 * Flag provenance the bundle could not describe.
+	 *
+	 * A material named on the item but absent from the catalog means the bundled entity ships
+	 * with *base* numbers and no explanation — silently weaker than the weapon the statblock
+	 * was built from. That is precisely the failure this pass exists to remove, so it is worth
+	 * saying out loud rather than letting the item quietly degrade a second time.
+	 */
+	static _collectItemProvenanceWarnings (projectedItem, state, warnings) {
+		if (!Array.isArray(warnings)) return;
+		const materialName = this._getSafeInlineText(projectedItem?.material?.name, {maxLen: 60});
+		if (!materialName) return;
+		const Materials = globalThis.CharacterSheetMaterials;
+		const resolved = typeof Materials?.resolveMaterial === "function"
+			? Materials.resolveMaterial(projectedItem, state?.getItemMaterialCatalog?.() || [])
+			: null;
+		if (resolved) return;
+		const itemName = this._getSafeInlineText(projectedItem?.name, {maxLen: 80}) || "An item";
+		warnings.push(`${itemName} is made of "${materialName}", which is not in the material catalog; the bundled item ships with base stats.`);
+	}
+
+	/**
+	 * Material and upgrade provenance, as prose for the bundled item's `entries`.
+	 *
+	 * The two axes that shape a Thelemar item are stored as *references* — `material` and
+	 * `appliedUpgrades` — and a reference is inert on a receiving instance with no material
+	 * engine, quite apart from being rejected by `additionalProperties: false`. So the
+	 * numbers are baked into the schema fields and everything with no schema home is written
+	 * out here in words: bake, then describe. A re-imported item is then a plain item with
+	 * correct stats and an honest account of where they came from, and cannot double-apply.
+	 *
+	 * @param {object} projectedItem Material-projected item; carries both refs plus the
+	 *   projected-only fields (`penetration`) that the schema whitelist drops.
+	 * @param {object} state
+	 * @returns {string[]} Zero, one or two paragraphs.
+	 */
+	static _getItemProvenanceEntries (projectedItem, state, itemId) {
+		if (!projectedItem || typeof projectedItem !== "object") return [];
+
+		const Materials = globalThis.CharacterSheetMaterials;
+		const Upgrades = globalThis.CharacterSheetUpgrades;
+		const out = [];
+
+		const materialName = this._getSafeInlineText(projectedItem.material?.name, {maxLen: 60});
+		if (materialName) {
+			const material = typeof Materials?.resolveMaterial === "function"
+				? Materials.resolveMaterial(projectedItem, state?.getItemMaterialCatalog?.() || [])
+				: null;
+			const roleKey = projectedItem.material?.role;
+			const roleLabel = roleKey
+				? String(Materials?.ROLE_LABELS?.[roleKey] || roleKey).toLowerCase()
+				: "";
+			const head = roleLabel ? `${materialName} (${roleLabel})` : materialName;
+			// An unresolved material still gets its name recorded: losing the fact that the
+			// blade is Orichaline is worse than losing the sentence explaining what that does.
+			const clauses = material ? this._getMaterialProseClauses(projectedItem, material, state, itemId) : [];
+			out.push(`{@b Material:} ${head}.${clauses.length ? ` ${clauses.join(" ")}` : ""}`);
+		}
+
+		const upgrades = Array.isArray(projectedItem.appliedUpgrades) ? projectedItem.appliedUpgrades : [];
+		if (upgrades.length && typeof Upgrades?.getUpgradeSummary === "function") {
+			// `getUpgradeSummary` only knows the weapon axes, so every armour upgrade collapses
+			// to its bare name — "Reinforced" alone tells a DM nothing. The armour effects live
+			// on a separate aggregate, so they are folded back in by label here.
+			const armorNotes = new Map();
+			if (typeof Upgrades.getArmorUpgradeNotes === "function") {
+				(Upgrades.getArmorUpgradeNotes(projectedItem) || []).forEach(note => {
+					if (note?.label && note?.description) armorNotes.set(String(note.label).toLowerCase(), String(note.description));
+				});
+			}
+
+			const summaries = upgrades
+				.filter(upgrade => upgrade?.name)
+				.map(upgrade => {
+					const summary = this._getSafeInlineText(Upgrades.getUpgradeSummary(upgrade), {maxLen: 240});
+					if (!summary) return "";
+					if (summary.toLowerCase() !== String(upgrade.name).toLowerCase()) return summary;
+					const note = armorNotes.get(String(upgrade.name).toLowerCase());
+					return note ? `${upgrade.name}: ${this._getSafeInlineText(note, {maxLen: 240})}` : summary;
+				})
+				.filter(Boolean)
+				.map(text => text.replace(/[.;\s]+$/, ""));
+			if (summaries.length) out.push(`{@b Upgrades:} ${summaries.join(". ")}.`);
+		}
+
+		return out;
+	}
+
+	/**
+	 * The material's mechanics that no item-schema field can carry, as sentences.
+	 *
+	 * Deliberately omits everything already baked into a schema field — damage die, AC, crit
+	 * threshold, weight, value, properties — because repeating "Steeline: +1 damage die step"
+	 * next to a `dmg1` that already reads `2d8` invites the reader to apply it twice.
+	 */
+	static _getMaterialProseClauses (projectedItem, material, state, itemId) {
+		const Materials = globalThis.CharacterSheetMaterials;
+		if (typeof Materials?.getMaterialEffects !== "function") return [];
+
+		const fx = Materials.getMaterialEffects(projectedItem, material) || {};
+		const clauses = [];
+
+		// Penetration first, because it is the one thing the sheet's own note prose never
+		// states as a number — and a rating with no number is unusable at a table.
+		const penetration = Number(projectedItem.penetration) || 0;
+		if (penetration > 0) clauses.push(this._getPenetrationClause(penetration, !!fx.penetrationIgnoresMagicalAc));
+
+		clauses.push(...this._getMaterialNoteClauses(projectedItem, material, state, itemId, {isPenetrationStated: penetration > 0}));
+
+		const capacity = this._getMagicCapacityClause(projectedItem, material);
+		if (capacity) clauses.push(capacity);
+
+		return clauses;
+	}
+
+	/**
+	 * The material's descriptive prose, taken from the sheet's own note generator wherever it
+	 * is reachable so the export and the in-app item modal say the same thing in the same
+	 * words. Two adjustments are needed for a statblock:
+	 *
+	 * - the generator emits every armour tier a material covers (Adamantine has a heavy row
+	 *   AND a medium row); only the tier actually being worn is true of this item;
+	 * - it explains penetration's magical-AC reach in two sentences without ever giving the
+	 *   rating, so when the rating has already been stated that gloss is redundant.
+	 *
+	 * Falls back to deriving the clauses from the effects object when the accessor is out of
+	 * reach — headless conversion and older saves both hit that path.
+	 */
+	static _getMaterialNoteClauses (projectedItem, material, state, itemId, {isPenetrationStated = false} = {}) {
+		const authored = itemId != null && typeof state?.getItemMaterialNotes === "function"
+			? (state.getItemMaterialNotes(itemId) || [])
+			: [];
+
+		if (authored.length) {
+			const armorType = String(projectedItem?.armorType || "").toLowerCase();
+			return authored
+				.filter(note => this._isMaterialNoteApplicable(note, armorType))
+				.filter(note => !(isPenetrationStated && /penetrat/i.test(String(note?.description || ""))))
+				.map(note => {
+					const text = this._getSafeInlineText(note?.description, {maxLen: 300});
+					if (!text) return "";
+					const prefix = note?.type === "drawback" ? "Drawback: " : "";
+					return `${prefix}${/[.!?]$/.test(text) ? text : `${text}.`}`;
+				})
+				.filter(Boolean);
+		}
+
+		const fx = globalThis.CharacterSheetMaterials?.getMaterialEffects?.(projectedItem, material) || {};
+		return this._getDerivedMaterialClauses(projectedItem, material, fx);
+	}
+
+	/** A tier-scoped note ("Adamantine (heavy)") is only true of armour of that tier. */
+	static _isMaterialNoteApplicable (note, armorType) {
+		const tier = /\((heavy|medium|light)\)\s*$/i.exec(String(note?.label || ""))?.[1];
+		if (!tier) return true;
+		if (!armorType) return true;
+		return tier.toLowerCase() === armorType;
+	}
+
+	/** The pre-accessor derivation, kept as the fallback for headless and degraded paths. */
+	static _getDerivedMaterialClauses (projectedItem, material, fx) {
+		const notes = fx.effectNotes || {};
+		const clauses = [];
+
+		if (fx.countsAsMagical) clauses.push("Counts as magical for overcoming resistance and immunity to nonmagical attacks.");
+		if (fx.countsAsSilvered) clauses.push("Counts as silvered.");
+
+		const damageReduction = this._getMaterialDamageReductionClause(projectedItem, fx);
+		if (damageReduction) clauses.push(damageReduction);
+
+		CharacterSheetNpcExporter._MATERIAL_NOTE_FLAGS.forEach(key => {
+			if (!fx[key]) return;
+			const note = this._getSafeInlineText(notes[key], {maxLen: 300});
+			if (note) clauses.push(/[.!?]$/.test(note) ? note : `${note}.`);
+		});
+
+		if (fx.condensate) {
+			const affinity = this._getSafeInlineText(fx.condensate.affinity, {maxLen: 300});
+			// A condensate's affinity only applies while the material holds the role it was
+			// written for, so a dormant one is reported as dormant rather than as a live effect.
+			if (affinity && fx.condensate.isActive) clauses.push(/[.!?]$/.test(affinity) ? affinity : `${affinity}.`);
+			else if (affinity) clauses.push(`Dormant affinity: ${affinity}`);
+			const instability = this._getSafeInlineText(fx.condensate.instability, {maxLen: 300});
+			if (instability) clauses.push(`Drawback: ${/[.!?]$/.test(instability) ? instability : `${instability}.`}`);
+		}
+
+		const slots = Number(fx.draconicResonanceSlots) || 0;
+		if (slots > 0) {
+			const filled = Array.isArray(projectedItem.material?.resonance)
+				? projectedItem.material.resonance.filter(Boolean).length
+				: (projectedItem.material?.resonance ? 1 : 0);
+			const open = Math.max(0, slots - filled);
+			if (open > 0) clauses.push(`Has ${open} unfilled draconic resonance ${open === 1 ? "slot" : "slots"}.`);
+		}
+
+		return clauses;
+	}
+
+	/**
+	 * Penetration is a *Penetrating Blow*: a near-miss that still lands.
+	 *
+	 * Worth stating plainly because the sheet's own glossary describes it as ignoring damage
+	 * resistance, which it does not — it is an AC mechanic, and putting it anywhere near the
+	 * `resist` array would be wrong.
+	 */
+	static _getPenetrationClause (penetration, isIgnoreMagicalAc) {
+		return isIgnoreMagicalAc
+			? `Penetration ${penetration}: a miss by ${penetration} or less still hits, even against magical AC.`
+			: `Penetration ${penetration}: a miss by ${penetration} or less still hits against nonmagical AC.`;
+	}
+
+	/** Adamantine reduces damage by 3 in heavy and 2 in medium; only the worn tier applies. */
+	static _getMaterialDamageReductionClause (projectedItem, fx) {
+		if (!Array.isArray(fx?.damageReduction) || !fx.damageReduction.length) return null;
+		const armorType = String(projectedItem?.armorType || "").toLowerCase();
+		const entry = fx.damageReduction.find(it => !it?.armorType || String(it.armorType).toLowerCase() === armorType)
+			|| fx.damageReduction[0];
+		const value = Number(entry?.value) || 0;
+		if (!value) return null;
+		const types = Array.isArray(entry?.damageTypes) && entry.damageTypes.length
+			? this._getCommaAndList(entry.damageTypes.map(it => String(it).toLowerCase()))
+			: "";
+		return types
+			? `Reduces ${types} damage taken by ${value}.`
+			: `Reduces damage taken by ${value}.`;
+	}
+
+	/** `["a"]` -> "a"; `["a","b"]` -> "a and b"; `["a","b","c"]` -> "a, b and c". */
+	static _getCommaAndList (values) {
+		const list = (values || []).map(it => String(it).trim()).filter(Boolean);
+		if (!list.length) return "";
+		if (list.length === 1) return list[0];
+		return `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
+	}
+
+	static _getMagicCapacityClause (projectedItem, material) {
+		const Materials = globalThis.CharacterSheetMaterials;
+		if (typeof Materials?.getMagicCapacityStatus !== "function") return null;
+		let status = null;
+		try {
+			status = Materials.getMagicCapacityStatus(projectedItem, material, {manualAdjust: Number(projectedItem?.material?.mcAdjust) || 0});
+		} catch (ignored) { return null; }
+		if (!status || status.isUnlimited) return null;
+		const capacity = Number(status.capacity);
+		if (!Number.isFinite(capacity) || capacity <= 0) return null;
+		const used = Number(status.count) || 0;
+		const overloaded = status.isOverloaded ? " The item is overloaded." : "";
+		return `Magic capacity ${capacity} (${used} used).${overloaded}`;
 	}
 
 	/** Every `{@item Name|SOURCE}` in the monster whose source is `source`, lowercased. */
@@ -8320,15 +8821,65 @@ class CharacterSheetNpcExporter {
 		return /\bioun\s+stone\b/i.test(name);
 	}
 
-	static _getArmorUpgradeBlock (state) {
+	/**
+	 * Worn-armour traits, from BOTH of the axes that shape a suit: its upgrades and its
+	 * material.
+	 *
+	 * They were split before — upgrades had this block, materials had nothing — which meant
+	 * Mikase's Adamantine plate never told a DM it reduces every bludgeoning, piercing and
+	 * slashing hit by 3. Two blocks would have been worse than one: they describe the same
+	 * suit, and a reader mid-swing should not have to find out which of two traits owns the
+	 * number they need.
+	 */
+	static _getArmorTraitBlock (state) {
 		// Prefer state getters when present — do not require the Upgrades UI module
 		// to be loaded (tests, headless conversion, degraded mode).
-		const notes = state.getArmorUpgradeNotes?.() || [];
+		const notes = [
+			...(state.getArmorUpgradeNotes?.() || []),
+			...this._getEquippedArmorMaterialNotes(state),
+		];
 		if (!notes.length) return null;
-		return {
-			name: "Armor Upgrades",
-			entries: notes.map(n => `{@b ${this._getSafeInlineText(n.label || "Upgrade", {maxLen: 60}) || "Upgrade"}.} ${this._getSafeInlineText(n.description || "", {maxLen: 240})}`),
-		};
+
+		const seen = new Set();
+		// One material can author several notes (Adamantine is both indestructible and damage
+		// reduction). Emitting a line each repeats the label and splits one property across
+		// two bullets, so descriptions are grouped under the label they belong to.
+		const byLabel = new Map();
+		notes.forEach(note => {
+			// The tier parenthetical ("Adamantine (heavy)") disambiguates a list showing
+			// every tier; once filtered to the one being worn it only invites the reader
+			// to wonder which other tier they should have been looking at.
+			const label = this._getSafeInlineText(String(note?.label || "").replace(/\s*\((?:heavy|medium|light)\)\s*$/i, ""), {maxLen: 60}) || "Upgrade";
+			const description = this._getSafeInlineText(note?.description, {maxLen: 240});
+			if (!description) return;
+			const key = description.toLowerCase();
+			if (seen.has(key)) return;
+			seen.add(key);
+			if (!byLabel.has(label)) byLabel.set(label, []);
+			byLabel.get(label).push(description.replace(/\s*\.\s*$/, ""));
+		});
+
+		const entries = [...byLabel.entries()].map(([label, descriptions]) => `{@b ${label}.} ${descriptions.join(". ")}.`);
+		if (!entries.length) return null;
+
+		return {name: "Armor Traits", entries};
+	}
+
+	/** The equipped armour's material notes, scoped to the tier actually being worn. */
+	static _getEquippedArmorMaterialNotes (state) {
+		if (typeof state?.getItemMaterialNotes !== "function") return [];
+		const worn = (state.getItems?.() || [])
+			.filter(it => !!it && this._isActiveItem(it))
+			.filter(it => String(it.type || "").toLowerCase() === "armor" || !!it.armorType);
+		const out = [];
+		worn.forEach(item => {
+			if (!item?.material?.name || item.id == null) return;
+			const armorType = String(item.armorType || "").toLowerCase();
+			(state.getItemMaterialNotes(item.id) || [])
+				.filter(note => this._isMaterialNoteApplicable(note, armorType))
+				.forEach(note => out.push(note));
+		});
+		return out;
 	}
 
 	static _getGemstoneNotesBlock (state) {
@@ -8340,6 +8891,54 @@ class CharacterSheetNpcExporter {
 			name: "Gemstone Effects",
 			entries: passiveNotes,
 		};
+	}
+
+	/**
+	 * Statblock entries for powers a material grants the items it is made from.
+	 *
+	 * Two shapes arrive on the same channel and only one of them belongs here:
+	 *
+	 * - a `grantsAction` power is a thing the NPC can *do* that exists nowhere else in
+	 *   the export (Yellowwood's bonus-action follow-up, Stout Blackwood's shove);
+	 * - a condensate *affinity* is usually the prose form of something already baked into
+	 *   the item — Skyshard's affinity describes the weight and thrown range the projection
+	 *   has already applied, Emberglass's describes the damage-type option now printed on
+	 *   the attack line. Repeating those would be the "same effect in two places" failure.
+	 *
+	 * So an affinity earns an entry only when it is live *and* names its own action economy,
+	 * which is exactly the case where it grants something to do rather than something to be.
+	 *
+	 * Every one of these is authored `isReferenceOnly` with `actionType: "special"`, so the
+	 * economy has to come from the prose; that is what `_getActivationSectionFromText` is for.
+	 */
+	static _getMaterialPowerEntries (state, {npcName = "The NPC"} = {}) {
+		const powers = typeof state?.getItemPowers === "function"
+			? (state.getItemPowers({activeOnly: true}) || [])
+			: [];
+		const out = [];
+
+		powers.filter(power => power?.materialPower).forEach(power => {
+			// A condensate only has its affinity while it holds the role that affinity was
+			// written for; a dormant one is a fact about the item, not about the fight.
+			if (power.isDormant) return;
+			const section = this._getActivationSectionFromText(power.description || "");
+			if (power.materialAffinity && !section) return;
+
+			const body = this._prepareFeatureEntriesForNpc(power.description || "", {npcName});
+			if (!body.length) return;
+
+			const materialName = this._getSafeInlineText(power.materialName || "", {maxLen: 40});
+			const rawName = this._getSafeInlineText(power.name || "", {maxLen: 80});
+			// "Yellowwood Flurry" already names its material; "Emberglass Affinity" reads
+			// better than "Ninjato — Emberglass Affinity" would.
+			const name = rawName && materialName && !rawName.toLowerCase().includes(materialName.toLowerCase())
+				? `${materialName} \u2014 ${rawName}`
+				: rawName || `${materialName} Property`;
+
+			out.push({section: section || "trait", entry: {name, entries: body}});
+		});
+
+		return out;
 	}
 
 	static _getMagicItemUseBlocks (state, {npcName = "The NPC"} = {}) {
@@ -8413,6 +9012,12 @@ class CharacterSheetNpcExporter {
 				else pushEntry("action", entry);
 			}
 		});
+
+		// A material can grant its own power, and that power reaches nothing else here:
+		// `_isMagicItem` gates this loop, and a plain steel-and-Yellowwood longbow is not
+		// magical. Routed through the same `pushEntry` so it dedupes against magic-item
+		// entries rather than beside them.
+		this._getMaterialPowerEntries(state, {npcName}).forEach(({section, entry}) => pushEntry(section, entry));
 
 		// Group item-granted spells into one entry per item (bestiary style) instead
 		// of one action per spell, and never leak raw `name|source` UIDs.
@@ -9427,29 +10032,76 @@ class CharacterSheetNpcExporter {
 		return state.getAbilityMod?.("str") || 0;
 	}
 
+	static _ATTACK_TAGS_ALREADY_STATED = new Set(["magical", "silvered"]);
+
 	static _getAttackQualifiers (attack, state) {
 		const parts = [];
+
+		const sourceItem = attack?._sourceItem;
+		// `_sourceItem` comes off `getItems()`, so it is already material-projected: the
+		// penetration rating and the lowered crit threshold are on it, and `tags` carries the
+		// material's "Magical" alongside any the upgrades contribute.
+		const itemBonuses = sourceItem?.id != null && typeof state?.getEffectiveItemBonuses === "function"
+			? (state.getEffectiveItemBonuses(sourceItem.id) || null)
+			: null;
+		const itemTags = new Set((itemBonuses?.tags || []).map(it => String(it).toLowerCase()));
 
 		const magicAttackBonus = Number(attack?.magicAttackBonus) || 0;
 		const magicDamageBonus = Number(attack?.magicDamageBonus) || 0;
 		// Bonuses are already folded into {@hit}/{@damage}; note only what the folded
-		// numbers cannot convey — that the attack counts as magical.
-		if (magicAttackBonus || magicDamageBonus) {
+		// numbers cannot convey — that the attack counts as magical. A material can make a
+		// weapon magical without granting a single point of bonus (Orichaline), so the tag
+		// has to be consulted too or that weapon reads as mundane.
+		if (magicAttackBonus || magicDamageBonus || itemTags.has("magical")) {
 			parts.push("The attack is magical");
 		}
+		if (itemTags.has("silvered")) parts.push("The attack counts as silvered");
 
 		// Weapon upgrade tags and notes from the source item
-		if (attack._sourceItem && typeof CharacterSheetUpgrades !== "undefined") {
-			const eff = CharacterSheetUpgrades.getUpgradeEffects(attack._sourceItem);
-			if (eff.tags.length) parts.push(eff.tags.join(", "));
+		if (sourceItem && typeof CharacterSheetUpgrades !== "undefined") {
+			const eff = CharacterSheetUpgrades.getUpgradeEffects(sourceItem);
+			// "Magical"/"Silvered" already have their own sentence above; an upgrade that also
+			// grants one must not restate it.
+			const tags = eff.tags.filter(it => !CharacterSheetNpcExporter._ATTACK_TAGS_ALREADY_STATED.has(String(it).toLowerCase()));
+			if (tags.length) parts.push(tags.join(", "));
 			if (eff.bonusDamageDice) parts.push(`Plus {@damage ${eff.bonusDamageDice}} ${eff.bonusDamageType} damage`);
 			for (const note of eff.notes) parts.push(note);
 
 			// Gemstone effect summary
-			const gems = attack._sourceItem.socketedGemstones || [];
+			const gems = sourceItem.socketedGemstones || [];
 			for (const gem of gems) {
 				const summary = CharacterSheetUpgrades.getGemstoneSummary(gem);
 				if (summary) parts.push(`Gemstone (${gem.gemName || gem.name}): ${summary}`);
+			}
+		}
+
+		// The two "unusual numbers" a 5e statblock has no field for. Both change how the
+		// attack ROLL resolves, so they belong here rather than in a trait the reader would
+		// have to cross-reference mid-swing.
+		const critThreshold = this._getComposedCritThreshold(sourceItem, itemBonuses);
+		if (critThreshold > 1 && critThreshold < 20) parts.push(`Scores a critical hit on a roll of ${critThreshold}-20`);
+
+		const penetration = Number(sourceItem?.penetration) || 0;
+		if (penetration > 0) {
+			// Deliberately NOT phrased as piercing resistance: it is a near-miss-versus-AC
+			// mechanic, and the sheet's own glossary gets this wrong.
+			parts.push(sourceItem?.penetrationIgnoresMagicalAc
+				? `Penetrating Blow: a miss by ${penetration} or less still hits, even against magical AC`
+				: `Penetrating Blow: a miss by ${penetration} or less still hits against nonmagical AC`);
+		}
+
+		parts.push(...this._getMaterialDamageRiders(sourceItem));
+
+		const damageTypeChoice = typeof state?.getMaterialDamageTypeChoice === "function"
+			? state.getMaterialDamageTypeChoice(sourceItem?.id)
+			: null;
+		if (damageTypeChoice?.damageType) {
+			const type = this._getSafeInlineText(damageTypeChoice.damageType, {maxLen: 24});
+			const material = this._getSafeInlineText(damageTypeChoice.materialName, {maxLen: 40});
+			if (type) {
+				parts.push(damageTypeChoice.optional
+					? `Can deal ${type} damage instead of its normal type (${material})`
+					: `Deals ${type} damage instead of its normal type (${material})`);
 			}
 		}
 
@@ -9469,6 +10121,68 @@ class CharacterSheetNpcExporter {
 
 		if (!parts.length) return "";
 		return `${parts.join(". ").replace(/\.\s*$/, "")}.`;
+	}
+
+	/**
+	 * Conditional damage a material adds to this weapon.
+	 *
+	 * Kept as exporter-side text rather than routed through the sheet's roll-time prompts:
+	 * the sheet asks "is the target fey?" when you roll, but a statblock has to say the
+	 * condition out loud on the line, because there is nobody to ask.
+	 *
+	 * @param {object} sourceItem Material-projected weapon.
+	 * @returns {string[]}
+	 */
+	static _getMaterialDamageRiders (sourceItem) {
+		const Materials = globalThis.CharacterSheetMaterials;
+		if (!sourceItem?.material?.name || typeof Materials?.getMaterialEffects !== "function") return [];
+		// `getMaterialEffects` takes the resolved entity, not the reference stored on the item,
+		// and returns a fully-empty shape rather than throwing when it is missing — so
+		// forgetting to resolve looks exactly like a material with no effects.
+		const material = Materials.resolveMaterial?.(sourceItem);
+		if (!material) return [];
+		const fx = Materials.getMaterialEffects(sourceItem, material) || {};
+		const qualifiers = fx.effectQualifiers || {};
+		const parts = [];
+
+		(fx.extraDamageDiceVsType || []).forEach(vsType => {
+			if (!vsType?.creatureType) return;
+			// `dice` counts *weapon* dice rather than naming a die, so it has to be resolved
+			// against this weapon: "one extra die" is 1d4 on a dagger and 1d12 on a greataxe.
+			const dice = this._getExtraWeaponDice(sourceItem, vsType.dice);
+			const creature = this._getSafeInlineText(vsType.creatureType, {maxLen: 40});
+			if (dice && creature) parts.push(`Deals an extra {@damage ${dice}} damage to ${creature} creatures`);
+		});
+
+		const crit = fx.bonusCritDamage;
+		// `requiresProperty` is a hard gate, not an availability hint: Stout Blackwood's crit
+		// die is only real on a loading weapon, so on anything else the rider does not exist.
+		const isCritGated = crit?.requiresProperty
+			&& !Materials._hasProperty?.(sourceItem, crit.requiresProperty);
+		if (crit?.dice && !isCritGated) {
+			const dice = this._getSafeInlineText(String(crit.dice), {maxLen: 24});
+			const type = crit.damageType && crit.damageType !== "weapon"
+				? ` ${this._getSafeInlineText(crit.damageType, {maxLen: 24})}`
+				: "";
+			// With the gate satisfied the authored qualifier only restates the gate ("with a
+			// weapon that has the loading property"); it is worth printing only when ungated,
+			// where it is the sole narrowing the reader gets.
+			const qualifier = crit.requiresProperty
+				? ""
+				: this._getSafeInlineText(qualifiers.bonusCritDamage, {maxLen: 160});
+			if (dice) parts.push(`On a critical hit it deals an extra {@damage ${dice}}${type} damage${qualifier ? ` (${qualifier.replace(/\.$/, "")})` : ""}`);
+		}
+
+		return parts;
+	}
+
+	/** `count` extra weapon dice, expressed in this weapon's own die. */
+	static _getExtraWeaponDice (sourceItem, count) {
+		const n = Number(count) || 0;
+		if (n <= 0) return "";
+		const die = /(\d*)d(\d+)/i.exec(String(sourceItem?.dmg1 || ""));
+		if (!die) return "";
+		return `${n * (Number(die[1]) || 1)}d${die[2]}`;
 	}
 
 	static _getMasteryName (masteryEntry) {

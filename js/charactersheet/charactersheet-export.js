@@ -311,6 +311,7 @@ class CharacterSheetExport {
 			const spellIndex = await this._pGetNpcExportSpellIndex();
 			let monster = null;
 			let companionItems = [];
+			let companionItemWarnings = [];
 			let sourceMeta = CharacterSheetNpcExporter.getDefaultSourceMeta(sourceConfig);
 
 			const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
@@ -479,8 +480,9 @@ class CharacterSheetExport {
 			// Rebuilt whenever the monster is, since the export source is part of an item's
 			// identity and the user can change it from this very dialog.
 			const rebuildCompanionItems = () => {
+				companionItemWarnings = [];
 				try {
-					companionItems = CharacterSheetNpcExporter.buildCompanionItems(monster, this._state, {sourceJson: monster?.source});
+					companionItems = CharacterSheetNpcExporter.buildCompanionItems(monster, this._state, {sourceJson: monster?.source, warnings: companionItemWarnings});
 				} catch (e) {
 					// eslint-disable-next-line no-console
 					console.error("Failed to build companion items for NPC export:", e);
@@ -491,6 +493,9 @@ class CharacterSheetExport {
 			const getCompanionItems = () => companionItems;
 
 			const renderValidation = (validation) => {
+				// The bundle is built after validation runs, so anything it learned about an
+				// item has to be merged in here rather than discovered by `getValidationIssues`.
+				if (companionItemWarnings.length) validation = {...validation, warnings: [...(validation.warnings || []), ...companionItemWarnings]};
 				const notes = [...(validation.notes || [])];
 				const nBundled = companionItems.length;
 				if (nBundled) notes.unshift(`Bundling ${nBundled} custom item${nBundled === 1 ? "" : "s"} so their links resolve.`);
