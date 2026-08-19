@@ -1970,7 +1970,7 @@ class CharacterSheetMaterials {
 					<dt>MC \u221e</dt><dd>Unlimited \u2014 this material never overloads.</dd>
 					<dt>MC \u2212\u221e</dt><dd>Suppressing \u2014 this material smothers magic entirely, so no enchantment functions while the item is made of it.</dd>
 					<dt>\u2726</dt><dd>The material carries a magical property of its own.</dd>
-					<dt>Pen</dt><dd>Penetration \u2014 on a miss, if you missed by that much or less, the attack may still hit. Ask your DM. Applies against non-magical AC unless the material says otherwise.</dd>
+					<dt>Pen</dt><dd>Penetration \u2014 on a miss, if you missed by that much or less, the attack may still hit. Applies against non-magical AC unless the material says otherwise.</dd>
 					<dt>Crit</dt><dd>The die roll on which an attack becomes a critical hit. Lower is better.</dd>
 					<dt>Roles</dt><dd>A condensate grants its affinity in one role only: a weapon's <b>striking surface</b> or its <b>focus</b>, or armour's <b>protective layer</b>. An affinity written for a role this item cannot host stays dormant.</dd>
 				</dl>
