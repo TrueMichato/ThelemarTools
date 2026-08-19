@@ -3013,7 +3013,9 @@ class CharacterSheetCombat {
 			methodEffectApplied = await this._promptUseCombatMethod(attack);
 		}
 		const juggernautTarget = await this._pChooseJuggernautTargetContext(attack);
-		const gemstoneTargetTypes = await this._pChooseGemstoneTargetContext(attack);
+		// One target question, pooled across every rider on this attack that gates on
+		// creature type (gemstones and materials both do).
+		const targetTypes = await this._pChooseTargetTypeContext(attack);
 
 		// Resolve auto-generated weapon damage live so a hands-used change cannot leave a
 		// stale cached die. Explicit/custom attack damage remains authoritative.
@@ -3192,7 +3194,42 @@ class CharacterSheetCombat {
 				riderRollsForAnim.push(riderRoll);
 			}
 
-			for (const rider of this._state.getGemstoneDamageRidersForAttack?.(attack, {targetTypes: gemstoneTargetTypes}) || []) {
+			// Material damage riders. Two shapes, both authored per material:
+			//
+			// - `materialExtraDiceVsType` (Cold Iron: +1 weapon damage die vs fey) adds N of
+			//   the WEAPON'S OWN dice, under the weapon's own damage type — the same "+1
+			//   weapon damage die" idea Doubleshot implements above. Gated on the target
+			//   type the player already answered once for this attack.
+			// - `materialCritDamage` (Stout Blackwood: +1d4 on a crit) fires only on a crit,
+			//   and is deliberately NOT crit-doubled: it IS the crit bonus, so doubling it
+			//   would pay the critical out twice.
+			const materialEff = attack.sourceItem?.id != null
+				? (this._state.getEffectiveItemBonuses?.(attack.sourceItem.id) || {})
+				: {};
+
+			for (const rider of materialEff.materialExtraDiceVsType || []) {
+				if (!targetTypes.includes(rider.creatureType)) continue;
+				const singleDie = this._getSingleWeaponDie(damageExpression);
+				if (!singleDie) continue;
+				const count = Number(rider.dice) || 1;
+				const formula = count > 1 ? `${count}${singleDie}` : `1${singleDie}`;
+				const riderRoll = rollTypedDamage(formula, weaponDamageType);
+				riderDamageTotal += riderRoll.total;
+				riderParts.push({name: `${rider.name} (vs ${rider.creatureType})`, dice: formula, total: riderRoll.total, type: weaponDamageType});
+				riderRollsForAnim.push(riderRoll);
+			}
+
+			if (isCrit && materialEff.materialCritDamage?.dice) {
+				const critRider = materialEff.materialCritDamage;
+				// `damageType: null` means "the weapon's own type" — only this site knows it.
+				const critType = critRider.damageType || weaponDamageType;
+				const riderRoll = this._parseDamage(critRider.dice, false);
+				riderDamageTotal += riderRoll.total;
+				riderParts.push({name: `${critRider.name} (crit)`, dice: critRider.dice, total: riderRoll.total, type: critType});
+				riderRollsForAnim.push(riderRoll);
+			}
+
+			for (const rider of this._state.getGemstoneDamageRidersForAttack?.(attack, {targetTypes}) || []) {
 				if (!rider?.dice) continue;
 				const riderId = `gemstone:${rider.gemInstanceId}`;
 				if (rider.perTurn && !this._isRiderAvailableThisTurn(riderId)) continue;
@@ -3803,12 +3840,30 @@ class CharacterSheetCombat {
 			|| (attack?.sourceFeature || "").toLowerCase() === rider.attackSourceFeature.toLowerCase();
 	}
 
-	async _pChooseGemstoneTargetContext (attack) {
+	/**
+	 * Ask once what the target is, for every rider on this attack that cares.
+	 *
+	 * Gemstones and materials both gate damage on the target's creature type, and a player
+	 * swinging a Cold Iron blade with a socketed gem should be asked "what are you hitting?"
+	 * ONCE, not once per subsystem. So the candidate types are pooled from both sources and
+	 * the single answer is handed back to both.
+	 *
+	 * Returns `[]` when nothing on this attack is target-gated, so the common case costs the
+	 * player no interaction at all.
+	 */
+	async _pChooseTargetTypeContext (attack) {
 		const effects = this._state.getGemstoneEffects?.({hostItemId: attack?.sourceItem?.id}) || [];
-		const targetTypes = [...new Set(effects.flatMap(effect => effect.rider?.targetTypes || []))];
+		const gemTypes = effects.flatMap(effect => effect.rider?.targetTypes || []);
+
+		const itemEff = attack?.sourceItem?.id != null
+			? (this._state.getEffectiveItemBonuses?.(attack.sourceItem.id) || {})
+			: {};
+		const materialTypes = (itemEff.materialExtraDiceVsType || []).map(it => it.creatureType).filter(Boolean);
+
+		const targetTypes = [...new Set([...gemTypes, ...materialTypes])];
 		if (!targetTypes.length) return [];
 		const selected = await InputUiUtil.pGetUserEnum({
-			title: `${attack.name} — Gemstone Target`,
+			title: `${attack.name} — Target Type`,
 			values: ["none", ...targetTypes],
 			fnDisplay: value => value === "none" ? "No qualifying type" : value.toTitleCase(),
 			isResolveItem: true,
@@ -3940,6 +3995,20 @@ class CharacterSheetCombat {
 			if (reroll === sides) pending++;
 		}
 		return added;
+	}
+
+	/**
+	 * Extract ONE of a weapon's own damage dice from its damage expression.
+	 *
+	 * "+1 weapon damage die" is a real rules phrase (Cold Iron vs fey, Doubleshot, Half-Orc
+	 * Savage Attacks) and it means one more of whatever the weapon already rolls — a greataxe
+	 * adds `d12`, a maul rolling `2d6` adds `d6`, NOT another `2d6`. Returns the bare die
+	 * (`"d6"`) so callers can prefix their own count, or `null` for a weapon with no dice at
+	 * all (a flat-damage entry), where the phrase has no meaning.
+	 */
+	_getSingleWeaponDie (damageExpression) {
+		const match = String(damageExpression || "").match(/(\d+)d(\d+)/);
+		return match ? `d${match[2]}` : null;
 	}
 
 	_parseDamage (damageStr, isCrit = false, {maximize = false} = {}) {

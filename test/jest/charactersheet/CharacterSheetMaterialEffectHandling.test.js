@@ -75,7 +75,7 @@ describe("Material effect handling registry", () => {
 		// If this ever grows large, the sheet has quietly given up on automating materials.
 		const referenced = Object.entries(CharacterSheetMaterials.EFFECT_HANDLING)
 			.filter(([, spec]) => spec.consumer === "reference");
-		expect(referenced.length).toBeLessThanOrEqual(6);
+		expect(referenced.length).toBeLessThanOrEqual(7);
 	});
 });
 
@@ -110,5 +110,51 @@ describe("Material effect coverage across the brew", () => {
 			if (allReference) offenders.push(`${mat.name} (${types.join(", ")})`);
 		}
 		expect(offenders).toEqual([]);
+	});
+});
+
+/**
+ * The picker's "What do these numbers mean?" legend is in-app help, and it drifted: for two
+ * days it described Penetration as "ignores that much of a target's non-magical damage
+ * resistance" — a completely different mechanic from the one the sheet implements. Nobody
+ * noticed, and a second author read that string, believed it, and carried the wrong
+ * mechanic into a design review before it was caught.
+ *
+ * Help text that contradicts the code is worse than no help text, because it is believed.
+ * So the legend is pinned against the combat tooltip that resolves the actual roll: the two
+ * must agree on what Penetration does, and neither may describe it as a resistance effect.
+ */
+describe("Picker legend agrees with the mechanic it explains", () => {
+	const materialsSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-materials.js"), "utf8");
+	const combatSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-combat.js"), "utf8");
+
+	const legendPen = materialsSrc.match(/<dt>Pen<\/dt><dd>([^<]*)<\/dd>/)?.[1] || "";
+	const tooltipPen = combatSrc.match(/title="Penetration \$\{pen\}: ([^"]*)"/)?.[1] || "";
+
+	it("finds both the legend entry and the combat tooltip", () => {
+		expect(legendPen).toBeTruthy();
+		expect(tooltipPen).toBeTruthy();
+	});
+
+	it("describes Penetration as a near-miss against AC in both places", () => {
+		for (const text of [legendPen, tooltipPen]) {
+			expect(text.toLowerCase()).toMatch(/miss(ed)? by/);
+		}
+	});
+
+	it("never describes Penetration as piercing damage resistance", () => {
+		// The exact drift that happened. `resistance` has no business in either string.
+		for (const text of [legendPen, tooltipPen]) {
+			expect(text.toLowerCase()).not.toContain("resistance");
+		}
+	});
+
+	it("keeps every legend entry non-empty and tag-balanced", () => {
+		const entries = [...materialsSrc.matchAll(/<dt>([^<]*)<\/dt><dd>([^<]*(?:<b>[^<]*<\/b>[^<]*)*)<\/dd>/g)];
+		expect(entries.length).toBeGreaterThanOrEqual(7);
+		for (const [, term, def] of entries) {
+			expect(term.trim()).not.toBe("");
+			expect(def.trim().length).toBeGreaterThan(10);
+		}
 	});
 });

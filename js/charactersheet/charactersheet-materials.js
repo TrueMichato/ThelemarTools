@@ -164,7 +164,16 @@ class CharacterSheetMaterials {
 		overrideDamageType: {consumer: "roll", note: "Offered as a damage-type choice at roll time."},
 		bonusCritDamage: {consumer: "roll", note: "Extra dice on a critical hit."},
 		extraDamageDiceVsType: {consumer: "roll", note: "Extra dice against a creature type."},
-		noRangedDisadvantageInMelee: {consumer: "roll", note: "Suppresses the melee-range ranged disadvantage."},
+
+		// --- reference: deliberately a table call ---
+		// The sheet has no positional model — it never knows whether a hostile creature is
+		// within 5 feet, so it never imposes the ranged-in-melee disadvantage in the first
+		// place. Suppressing a penalty that is never applied would be a no-op dressed up as
+		// a feature. (The pre-existing `ranged:noDisdvantageInMelee` feat modifier has the
+		// same shape and the same zero consumers, for the same reason.) The flag is still
+		// published on `getEffectiveItemBonuses` for readers that DO model position, such as
+		// the NPC statblock exporter, and the player sees it as prose on the item.
+		noRangedDisadvantageInMelee: {consumer: "reference", note: "The sheet has no positional model, so it never imposes the disadvantage this would suppress."},
 
 		// --- power: surfaces in the Actions hub ---
 		grantsAction: {consumer: "power", note: "Becomes an item power."},
@@ -1880,7 +1889,7 @@ class CharacterSheetMaterials {
 					<dt>MC \u221e</dt><dd>Unlimited \u2014 this material never overloads.</dd>
 					<dt>MC \u2212\u221e</dt><dd>Suppressing \u2014 this material smothers magic entirely, so no enchantment functions while the item is made of it.</dd>
 					<dt>\u2726</dt><dd>The material carries a magical property of its own.</dd>
-					<dt>Pen</dt><dd>Penetration \u2014 ignores that much of a target's non-magical damage resistance.</dd>
+					<dt>Pen</dt><dd>Penetration \u2014 on a miss, if you missed by that much or less, the attack may still hit. Ask your DM. Applies against non-magical AC unless the material says otherwise.</dd>
 					<dt>Crit</dt><dd>The die roll on which an attack becomes a critical hit. Lower is better.</dd>
 					<dt>Roles</dt><dd>A condensate grants its affinity in one role only: a weapon's <b>striking surface</b> or its <b>focus</b>, or armour's <b>protective layer</b>. An affinity written for a role this item cannot host stays dormant.</dd>
 				</dl>
