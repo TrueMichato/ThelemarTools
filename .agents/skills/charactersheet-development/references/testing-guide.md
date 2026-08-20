@@ -386,6 +386,30 @@ If you are writing a probe against an item, the shape is `accessor(row.id)`, not
 and not `accessor(row.item)`. And when a probe comes back empty, **check the call before you
 believe the result** -- that is what all three occurrences had in common.
 
+### Your suite is smaller on a clean checkout than it is on your machine
+
+`npm test` here runs **17,120** tests. On a fresh clone it runs **16,359**. The 759-test gap is
+almost entirely `CharacterSheetNpcExporter.realsaves.test.js`, which walks a corpus of real
+character saves in `npc-exports/` -- an **untracked, local-only** directory. The suite filters it
+with `existsSync` and degrades to a documented skip when it is absent, which is the right
+behaviour; the hazard is that nothing in a green run tells you which of the two numbers you got.
+
+Two consequences worth holding on to:
+
+- **A green run is not a fixed amount of evidence.** Before concluding that a change is safe
+  because the suite passed, check that the suite was the size you assumed. `Tests: N passed` is
+  the number to read, not the word `passed`.
+- **Isolating a test run can silently weaken it.** The pre-push hook now checks the pushed commit
+  out into a throwaway worktree, and the first version of that change dropped all 759 without a
+  word -- a stricter-looking gate that tested less. Local-only *inputs* (`node_modules`, `.cache`,
+  `npc-exports`) are environment rather than content and are linked in deliberately; see
+  `scripts/hooks/run-prepush.mjs`. If you add a suite that reads an untracked fixture directory,
+  add it to `LOCAL_INPUTS` or the push gate quietly stops running it.
+
+The general form is the one this guide keeps arriving at from different directions: **a filtered
+walk has to assert what it found *and* that it looked.** Here the walk is over files on disk, and
+the thing that looked is the environment itself.
+
 ## Test File Conventions
 
 - **File naming**: `CharacterSheet{Topic}.test.js` (PascalCase descriptive name)
