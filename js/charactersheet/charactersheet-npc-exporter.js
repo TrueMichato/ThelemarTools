@@ -8881,11 +8881,15 @@ class CharacterSheetNpcExporter {
 			const label = this._getSafeInlineText(String(note?.label || "").replace(/\s*\((?:heavy|medium|light)\)\s*$/i, ""), {maxLen: 60}) || "Upgrade";
 			const description = this._getSafeInlineText(note?.description, {maxLen: 240});
 			if (!description) return;
-			const key = description.toLowerCase();
+			// Key on the same form that is rendered. Terminal punctuation is stripped below, so
+			// treating "...by 3" and "...by 3." as two different notes would let one sentence
+			// print twice purely because two channels punctuated it differently.
+			const body = description.replace(/\s*\.\s*$/, "");
+			const key = body.toLowerCase();
 			if (seen.has(key)) return;
 			seen.add(key);
 			if (!byLabel.has(label)) byLabel.set(label, []);
-			byLabel.get(label).push(description.replace(/\s*\.\s*$/, ""));
+			byLabel.get(label).push(body);
 		});
 
 		const entries = [...byLabel.entries()].map(([label, descriptions]) => `{@b ${label}.} ${descriptions.join(". ")}.`);

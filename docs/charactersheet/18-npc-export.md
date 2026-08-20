@@ -1761,6 +1761,42 @@ every field a projection writes needs its inverse handled somewhere. They needed
 *de-projection* (a missing one compounded a thrown range 20 → 40 → 60 across builder round
 trips); the exporter needs a *non-addition*. Same invariant, two directions.
 
+#### v26c — damage reduction has exactly one home
+
+The sheet publishes a material's damage reduction through **two** independent channels:
+
+| channel | shape |
+|---|---|
+| `getItemMaterialNotes(itemId)` | authored prose — *"...reduce incoming damage by 3"* |
+| `getNamedModifiersByType("damageReduction")` | structured — `{name: "Adamantine (damage reduction)", value: 3}` |
+
+For most of this task the structured channel returned `[]` for every character, so "only one
+channel prints" was true **by accident**. It began firing once the sheet fixed its armour-tier
+gate, which is the moment a latent double-report becomes a real one.
+
+The exporter reads `getMaterialEffects` and never the modifier channel, so the count stayed at
+one — but nothing failed if that changed. Four guards now pin it, including a vacuity guard that
+asserts *both* channels are live, because counting to one proves nothing if one channel is quiet.
+
+**The guard corrected its own premise.** I believed the authored/derived `if`/`else` in
+`_getMaterialNoteClauses` was what held the count at one, and RED-verified by making it additive
+— the count stayed at **1**. The real protection is `_getArmorTraitBlock`'s dedupe on the
+lowercased description. Pinning the mechanism that looked responsible would have guarded nothing.
+
+That dedupe had a bug of its own: it **rendered** descriptions with terminal punctuation stripped
+but **keyed** on the unstripped string, so *"...by 3"* and *"...by 3."* counted as two different
+notes. Two channels punctuating one sentence differently would each print. Fixed by keying on the
+same form that is rendered.
+
+Its limitation is now stated in a test rather than assumed: the dedupe collapses an *identical*
+description, **not a paraphrase**. If a second channel ever renders its own wording for a number
+that is already stated, the dedupe cannot save it — which is why "one derivation, one surface"
+has to hold at the source.
+
+Corpus movement: **0 of 24**. Only 2 characters carry armour notes at all, so this area is thinly
+covered; the evidence is a direct scan of every save for punctuation-differing note pairs, not the
+regen diff.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 

@@ -932,3 +932,110 @@ maybeDescribe("NPC export v26b — a projected bonus is counted exactly once", (
 		expect(dieSteppers.map(m => m.name)).toEqual([]);
 	});
 });
+
+/**
+ * v26c -- a material's damage reduction has exactly one home.
+ *
+ * The sheet publishes DR through two independent channels: `getItemMaterialNotes` carries the
+ * authored prose ("...reduce incoming damage by 3"), and `getNamedModifiersByType` carries the
+ * structured modifier. For most of this task the second returned [] for every character, so
+ * "only one channel prints" was true by accident rather than by design. It started firing in
+ * `6ffb68ca`, and the sibling session explicitly asked which surface should own it.
+ *
+ * The answer is the authored prose, because it says the same thing in the material's own voice
+ * and is already grouped under the armour that grants it. The exporter reads `getMaterialEffects`
+ * and never the modifier channel -- but nothing failed if it started, so pin it.
+ */
+maybeDescribe("NPC export v26c -- damage reduction is stated once, not once per channel", () => {
+	const plate = () => ({
+		id: "a-dr-plate",
+		item: {
+			id: "a-dr-plate",
+			name: "Probe Plate",
+			source: "CUSTOM",
+			custom: true,
+			type: "armor",
+			armorType: "heavy",
+			armor: true,
+			ac: 18,
+			weight: 65,
+			value: 150000,
+			material: {name: "Adamantine", source: "TGTT"},
+		},
+		quantity: 1,
+		equipped: true,
+	});
+
+	const DR_SENTENCE = /[Rr]educe[sd]? (?:incoming )?(?:bludgeoning|damage)[^"]{0,80}?by \d+/g;
+
+	it("keeps BOTH channels live, or counting to one proves nothing", () => {
+		// The vacuity guard, and the whole reason this file needs the test. If either channel
+		// goes quiet the single-surface assertion below passes for the wrong reason -- which is
+		// exactly the state this repo was in for several waves without noticing.
+		const state = makeState({items: [plate()]});
+
+		expect((state.getNamedModifiersByType?.("damageReduction") || []).length).toBeGreaterThan(0);
+		expect((state.getItemMaterialNotes?.("a-dr-plate") || []).length).toBeGreaterThan(0);
+	});
+
+	it("prints the reduction exactly once across the whole statblock", () => {
+		const state = makeState({items: [plate()]});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+
+		expect(String(JSON.stringify(out)).match(DR_SENTENCE) || []).toHaveLength(1);
+	});
+
+	it("puts it on the armour that grants it, so a DM knows what to take off", () => {
+		// Naming the home makes a future move visible in the diff rather than silent.
+		const state = makeState({items: [plate()]});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const armorTraits = (out.trait || []).find(t => /^Armor Traits$/i.test(t.name || ""));
+
+		expect(armorTraits).toBeTruthy();
+		expect(JSON.stringify(armorTraits)).toMatch(/reduce incoming[^"]*by 3/i);
+	});
+
+	it("never reads the structured modifier channel", () => {
+		// The exporter goes through `getMaterialEffects`. If someone adds a
+		// `getNamedModifiersByType("damageReduction")` read for a "more robust" number, this
+		// names the reason before anyone has to bisect for it.
+		expect(String(CharacterSheetNpcExporter._getMaterialDamageReductionClause))
+			.not.toMatch(/getNamedModifiersByType/);
+	});
+
+	it("collapses two identical descriptions, which is what actually holds the count at one", () => {
+		// Measured, not assumed. I first believed the authored/derived if-else was the guard and
+		// verified RED by making it additive -- the count stayed at 1. The real protection is
+		// `Armor Traits`' dedupe on the lowercased description. Pin the mechanism that is doing
+		// the work, not the one that looks like it is.
+		const state = makeState({items: [plate()]});
+		const twice = [
+			{label: "Adamantine", description: "Reduce incoming damage by 3", type: "passive"},
+			{label: "Adamantine", description: "reduce incoming damage BY 3.", type: "passive"},
+		];
+		state.getArmorUpgradeNotes = () => twice;
+		CharacterSheetNpcExporter._getEquippedArmorMaterialNotes = () => [];
+
+		const traits = CharacterSheetNpcExporter._getArmorTraitBlock(state);
+		expect(String(JSON.stringify(traits)).match(/reduce incoming damage by 3/gi) || [])
+			.toHaveLength(1);
+	});
+
+	it("cannot collapse a PARAPHRASE, so a second channel must never render its own wording", () => {
+		// The limitation of the dedupe, stated so nobody trusts it further than it goes. Two
+		// channels saying the same thing in different words both survive -- which is exactly
+		// what would happen if the structured modifier ("Adamantine (damage reduction)", 3)
+		// were ever rendered alongside the authored prose. The count test above would catch it;
+		// this says WHY it would not be caught by the dedupe.
+		const state = makeState({items: [plate()]});
+		state.getArmorUpgradeNotes = () => [
+			{label: "Adamantine", description: "Reduce incoming damage by 3", type: "passive"},
+			{label: "Adamantine", description: "Damage taken is lowered by 3", type: "passive"},
+		];
+		CharacterSheetNpcExporter._getEquippedArmorMaterialNotes = () => [];
+
+		const traits = CharacterSheetNpcExporter._getArmorTraitBlock(state);
+		expect(String(JSON.stringify(traits))).toMatch(/reduce incoming damage by 3/i);
+		expect(String(JSON.stringify(traits))).toMatch(/lowered by 3/i);
+	});
+});

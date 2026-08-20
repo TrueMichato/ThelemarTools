@@ -1161,6 +1161,29 @@ Two traps worth carrying forward:
   `"; "` before a capital into `". "` (exporter line ~5459). Any clause appended after a
   semicolon must start lower-case or it will be cut into its own sentence.
 
+### Pin the mechanism that works, not the one that looks responsible (v26c)
+
+A guard is only worth what its RED verification proves. When pinning that a material's damage
+reduction is stated once, the obvious culprit was the authored-vs-derived `if`/`else` in
+`_getMaterialNoteClauses`. Making it **additive** — the exact mistake being guarded — left the
+count at **1**. The real protection was elsewhere: `_getArmorTraitBlock` dedupes on the lowercased
+description.
+
+Two lessons:
+
+- **RED-verify against the mechanism you believe in.** Had the test passed without that check, it
+  would have "guarded" a branch that was never load-bearing while the actual protection stayed
+  untested.
+- **A dedupe must key on the form it renders.** That one keyed on the raw description but rendered
+  with terminal punctuation stripped, so `"...by 3"` and `"...by 3."` were two notes. Any
+  normalisation applied at render time must also be applied to the key.
+
+And state a dedupe's ceiling in a test: text-identity dedupe collapses a duplicate, **never a
+paraphrase**. It cannot substitute for one derivation having one surface.
+
+Related: a channel that returns `[]` today makes a double-report guard pass vacuously. Assert both
+channels are live before asserting the count.
+
 ### Bundling sheet-authored items with the export (v20)
 
 An NPC export is a homebrew document (`{_meta, monster: [...]}`), so it may also carry
