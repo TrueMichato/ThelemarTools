@@ -13569,17 +13569,13 @@ class CharacterSheetState {
 		}
 	}
 
+	/**
+	 * Delegates to the materials module so the tier gate has exactly one implementation. Both
+	 * the modifier path here and the note path in `getMaterialNotes` must agree about which
+	 * authored tier applies, or the sheet grants one number and explains another.
+	 */
 	static _materialDamageReductionApplies (item, armorType) {
-		const category = CharacterSheetState.getArmorCategory(item);
-		switch (armorType) {
-			case "heavy":
-			case "medium":
-			case "light":
-			case "shield":
-				return category === armorType;
-			case "any": return category != null;
-			default: return true;
-		}
+		return CharacterSheetMaterials.damageReductionApplies(item, armorType);
 	}
 
 	/**

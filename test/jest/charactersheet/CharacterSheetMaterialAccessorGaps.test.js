@@ -205,3 +205,101 @@ describe("getMaterialEffects resolves its material like its siblings do", () => 
 		expect(CharacterSheetMaterials.getMaterialEffects({...KATANA}).damageReduction).toEqual([]);
 	});
 });
+
+/**
+ * The mirror of gap #2, found by the NPC-export session hitting the same defect from the other
+ * side. The MODIFIER path gates each authored tier by the item's armour category; the NOTE path
+ * did not gate at all. So the sheet granted the right number and then explained a different one:
+ * an Adamantine plate's modal listed a reduction of 3 AND of 2, and an Adamantine longsword —
+ * which gets no reduction whatsoever — listed both as well.
+ *
+ * Inventing a defence is worse than omitting one. A missing note reads as "this material does
+ * nothing here"; a manufactured one reads as a rule, and nothing on screen marks it as false.
+ */
+describe("a material's damage-reduction note is gated to the tier that actually applies", () => {
+	beforeEach(() => { globalThis.__csMaterialCatalog = CATALOG; });
+	afterEach(() => { delete globalThis.__csMaterialCatalog; });
+
+	const drNotes = (item) => CharacterSheetMaterials.getMaterialNotes({...item, material: {name: "Adamantine", source: "TGTT"}})
+		.filter(note => /Reduce incoming/.test(note.description || ""));
+
+	it("gives catalogue heavy armour only the heavy tier", () => {
+		const notes = drNotes(CATALOG_PLATE);
+
+		expect(notes).toHaveLength(1);
+		expect(notes[0].description).toContain("by 3");
+	});
+
+	it("gives custom-built heavy armour the same single tier as the catalogue one", () => {
+		const notes = drNotes(CUSTOM_PLATE);
+
+		// Asserted absolutely as well as relatively: two identically-broken outputs are equal to
+		// each other, so the comparison alone would survive the gate being removed entirely.
+		expect(notes).toHaveLength(1);
+		expect(notes).toEqual(drNotes(CATALOG_PLATE));
+	});
+
+	it("gives medium armour the medium tier and not the heavy one", () => {
+		const notes = drNotes({name: "Half Plate", source: "PHB", type: "MA", ac: 15});
+
+		expect(notes).toHaveLength(1);
+		expect(notes[0].description).toContain("by 2");
+	});
+
+	it("gives light armour nothing, because Adamantine grants light armour no reduction", () => {
+		expect(drNotes({name: "Leather", source: "PHB", type: "LA", ac: 11})).toEqual([]);
+	});
+
+	it("gives a weapon nothing, rather than a defence a weapon cannot have", () => {
+		expect(drNotes(KATANA)).toEqual([]);
+	});
+
+	it("agrees with the modifier path about which tier applies", () => {
+		const state = makeState();
+		const id = equipWithMaterial(state, CATALOG_PLATE, "Adamantine");
+
+		const modifier = state.getNamedModifiersByType("damageReduction").find(d => d.sourceType === "itemMaterial");
+		const notes = drNotes(CATALOG_PLATE);
+		expect(notes).toHaveLength(1);
+		expect(notes[0].description).toContain(`by ${modifier.value}`);
+	});
+
+	it("drops the authored prose too when no tier applies, instead of letting it resurface", () => {
+		const noted = {
+			...ADAMANTINE,
+			name: "Noted Adamantine",
+			effects: ADAMANTINE.effects.map(fx => ({...fx, note: "Blows glance from the plating."})),
+		};
+		globalThis.__csMaterialCatalog = [...CATALOG, noted];
+
+		const notes = CharacterSheetMaterials.getMaterialNotes({...KATANA, material: {name: "Noted Adamantine", source: "TGTT"}});
+
+		expect(notes.some(note => /glance from the plating/.test(note.description || ""))).toBe(false);
+	});
+});
+
+/**
+ * The gate lives in the materials module and `CharacterSheetState` delegates to it, so the tier
+ * switch exists exactly once. The armour-category *reading* is the one thing still written
+ * twice: materials falls back to an inline copy for headless callers that load it without the
+ * state module. These pin the two together so the fallback cannot drift into disagreement.
+ */
+describe("the headless armour-category fallback agrees with the state module", () => {
+	const SHAPES = [
+		{type: "HA"}, {type: "MA"}, {type: "LA"}, {type: "S"}, {type: "HA|XPHB"},
+		{type: "armor", armorType: "heavy"}, {type: "armor", armorType: "medium"},
+		{type: "armor", armorType: "light"}, {shield: true}, {type: "M", weapon: true}, null,
+	];
+
+	it.each(SHAPES)("resolves %j identically with and without the state module", (item) => {
+		const viaState = CharacterSheetState.getArmorCategory(item);
+
+		const saved = globalThis.CharacterSheetState;
+		delete globalThis.CharacterSheetState;
+		try {
+			expect(CharacterSheetMaterials.getArmorCategory(item)).toBe(viaState);
+		} finally {
+			globalThis.CharacterSheetState = saved;
+		}
+	});
+});

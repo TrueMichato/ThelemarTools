@@ -1427,6 +1427,58 @@ class CharacterSheetMaterials {
 		return `Magic Capacity ${status.count} of ${status.capacityDisplay}. Open details.`;
 	}
 
+	/**
+	 * The armour tier of an item, in whichever of the two vocabularies it uses.
+	 *
+	 * Defers to `CharacterSheetState.getArmorCategory` whenever the state module is loaded, so
+	 * the app has exactly one answer. The inline reading below exists only for headless callers
+	 * that load this module on its own, and a test pins the two together so they cannot drift.
+	 *
+	 * @param {object} item
+	 * @returns {?string} `"heavy" | "medium" | "light" | "shield"`, or null when not armour.
+	 */
+	static getArmorCategory (item) {
+		if (globalThis.CharacterSheetState?.getArmorCategory) return globalThis.CharacterSheetState.getArmorCategory(item);
+		if (!item) return null;
+		const explicit = String(item.armorType || "").toLowerCase();
+		if (["heavy", "medium", "light"].includes(explicit)) return explicit;
+		if (item.shield) return "shield";
+		switch (String(item.type || "").split("|")[0].toUpperCase()) {
+			case "HA": return "heavy";
+			case "MA": return "medium";
+			case "LA": return "light";
+			case "S": return "shield";
+			default: return null;
+		}
+	}
+
+	/**
+	 * Whether one authored damage-reduction entry actually applies to the item carrying it.
+	 *
+	 * Authored DR is a TIERED LIST — Adamantine grants 3 to heavy armour and 2 to medium — so
+	 * every consumer has to pick the entry matching this item and reject the others. Skip the
+	 * gate and a single plate claims a reduction of 3 *and* of 2; reach for `[0]` as a fallback
+	 * instead and light armour, or a sword, is handed a defence the material never grants.
+	 * Inventing a defence is worse than omitting one, because the reader has no way to tell the
+	 * number was manufactured rather than authored.
+	 *
+	 * @param {object} item
+	 * @param {?string} armorType The `armorType` narrowing the authored entry, if any.
+	 * @returns {boolean}
+	 */
+	static damageReductionApplies (item, armorType) {
+		const category = CharacterSheetMaterials.getArmorCategory(item);
+		switch (armorType) {
+			case "heavy":
+			case "medium":
+			case "light":
+			case "shield":
+				return category === armorType;
+			case "any": return category != null;
+			default: return true;
+		}
+	}
+
 	/** Display-ready notes for an item's material, for the item info modal. */
 	static getMaterialNotes (item, material) {
 		const mat = material || CharacterSheetMaterials.resolveMaterial(item);
@@ -1457,7 +1509,16 @@ class CharacterSheetMaterials {
 		if (fx.spellcastingFocus) push("spellcastingFocus", "Can be used as a spellcasting focus", "passive");
 		if (fx.armorWearableUnderClothing) push("armorWearableUnderClothing", "Can be concealed beneath ordinary clothing", "passive");
 		if (fx.noRangedDisadvantageInMelee) push("noRangedDisadvantageInMelee", "No disadvantage on ranged attacks while within 5 feet of a hostile creature", "passive");
-		for (const dr of fx.damageReduction) {
+		// Only the tier matching this item is real. An ungated loop prints every authored tier
+		// at once — one plate told to reduce by 3 and by 2 — and prints them on swords, which
+		// get no reduction at all. When nothing applies, the authored prose is consumed and
+		// dropped rather than left to resurface as a free-floating note below.
+		const drApplicable = fx.damageReduction.filter(dr => CharacterSheetMaterials.damageReductionApplies(item, dr.armorType));
+		if (!drApplicable.length) {
+			take(unusedAuthored, "damageReduction");
+			take(unusedQualifiers, "damageReduction");
+		}
+		for (const dr of drApplicable) {
 			push("damageReduction", `Reduce incoming ${dr.damageTypes.join(", ")} damage by ${dr.value}`, "passive", `${mat.name} (${dr.armorType || "armor"})`);
 		}
 		for (const ex of fx.extraDamageDiceVsType) {

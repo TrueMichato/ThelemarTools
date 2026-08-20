@@ -1117,6 +1117,18 @@ Two rules that follow:
   tier (Adamantine: heavy-3, medium-2). A `|| list[0]` fallback hands light armour a reduction
   the material never grants — inventing a defence, which is worse than omitting one.
 
+**Use the gate, do not re-derive it.** `CharacterSheetMaterials.damageReductionApplies(item,
+armorType)` is the single implementation; `CharacterSheetState._materialDamageReductionApplies`
+delegates to it. The sheet's *note* path was ungated until v27 and so printed every authored tier
+on every item — a plate reducing by 3 *and* by 2, and a longsword reducing damage at all — while
+the modifier path beside it gated correctly. One subsystem granted one number and explained
+another. Any new reader of `fx.damageReduction` must call the gate rather than loop the array.
+
+Note why it survived review: with no gate, catalogue **heavy** armour still printed the right
+number, because heavy is authored first. The case anyone checks first was the one case the defect
+could not touch — and no character in the 24-save corpus carries a DR-bearing material at all, so
+regeneration moved nothing either. A corpus proves only what it contains.
+
 ### A drawback goes where the benefit is (v25)
 
 When the exporter prints a conditional benefit on an attack line, the condition that removes

@@ -1226,6 +1226,34 @@ session. `setItemMaterialCatalog` and `setDraconicResonanceCatalog` now call
 `_recalculateEquipmentModifiers()` when a non-empty catalog changes size and an inventory exists.
 An empty catalog is ignored rather than allowed to wipe live modifiers.
 
+## Damage reduction is a tiered list, so every reader must gate it
+
+Adamantine authors **two** damage-reduction entries — 3 for heavy armour, 2 for medium — and
+authors nothing for light armour, shields or weapons. The entries are a menu, not a total, so
+every consumer has to select the one matching the item in hand and reject the rest.
+
+There are two ways to get this wrong and both manufacture a rule:
+
+- **No gate at all** prints every tier at once. One plate is told to reduce incoming damage by 3
+  *and* by 2, and a longsword is told it reduces damage at all.
+- **Falling back to the first entry** when no tier matches hands light armour, or a sword, the
+  heavy-armour number, because heavy happens to be authored first.
+
+Inventing a defence is worse than omitting one. A missing note reads as "this material does
+nothing here"; a manufactured one reads as a rule, and nothing on screen marks it as false.
+
+The gate is `CharacterSheetMaterials.damageReductionApplies(item, armorType)` and it is the only
+copy — `CharacterSheetState._materialDamageReductionApplies` delegates to it, so the modifier
+path and the note path cannot disagree about which tier applies. Armour tier itself comes from
+`CharacterSheetState.getArmorCategory`, which understands both the catalogue vocabulary
+(`type: "HA"`) and the builder's (`type: "armor"` plus `armorType: "heavy"`); the materials
+module keeps a small inline fallback for headless callers, pinned against the state module by
+test so it cannot drift.
+
+Note the shape of the bug that hid this: under an ungated loop, catalogue **heavy** armour still
+printed the right number, because the first authored tier happened to be the heavy one. The case
+anyone would check first was the one case the defect could not touch.
+
 ## Phasing
 
 | Phase | Status | Contents |
