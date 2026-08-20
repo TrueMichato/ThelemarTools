@@ -1265,6 +1265,38 @@ a test for only one invites the other: silence the duplicate by dropping the cla
 gap returns. The matrix test asserts `gaps === []` *and* `dupes === []` across every
 condensate and every item role.
 
+### A classification reachable by neglect is not a classification (v33)
+
+A completeness guard that enumerates categories can be satisfied by moving a failing item
+into the category that asserts nothing. `reference` — "deliberately not delivered" — is
+exactly that shape, and it needs an **inverse assertion** to survive: every `reference`
+entry must be confirmed genuinely absent, so the classification keeps earning itself on
+every run rather than being audited once at authoring time.
+
+This generalises past this subsystem. Any manifest with an "intentionally not handled"
+bucket has the same hole, and the fix is always the same: assert the negative.
+
+### A minimal fixture can be minimal enough to stop testing the thing (v33)
+
+A mutation that fails to go RED is a finding about the *fixture* at least as often as it is
+a finding about the code. A `grantsAction` effect reduced to `{type, note}` lacks
+`actionType`, so it is inert for reasons unrelated to the guard — the downgrade mutation had
+nothing to break, and the guard passed while the real mechanism went untested.
+
+The remedy is to replay **authored** data alongside the synthetic shape. Synthetic fixtures
+isolate; authored fixtures prove the isolation still resembles production.
+
+### Probe absences across every dimension the gate uses (v33)
+
+Five material powers appeared unreachable because the probe swept two item slots and the
+gate keys on three roles (`strikingSurface` / `protectiveLayer` / `focus`). All five were
+`focus`-role and surfaced correctly once probed there. Nothing was broken.
+
+The rule: before reporting an absence, enumerate the dimensions the gate actually reads and
+sweep all of them. A probe that covers a proper subset of the gate's inputs reports false
+absences with full confidence — this was the fourth failed control of the pass, all four
+sharing one cause: **an instrument that could not reach the case it was judging.**
+
 ### Absence is evidence only when presence is demonstrated beside it (v32)
 
 The NPC exporter consumes `aggregateModifiers` in exactly one place — `initiative` —

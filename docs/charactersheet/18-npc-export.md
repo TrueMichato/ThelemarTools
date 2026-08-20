@@ -2023,6 +2023,50 @@ That last one means the guard now protects *their* fix from a foreign consumer's
 vantage point — a guard written in a different vocabulary from the thing it guards, so
 it cannot be a mirror of their own tests.
 
+### v33 — a classification must keep earning itself
+
+The `routing completeness` guard could be satisfied by *downgrading* a failing effect type
+to `reference`. That is how a bug becomes a documented feature, so `reference` now carries
+an inverse assertion: every `reference`-declared effect is confirmed genuinely absent from
+the action economy, rather than merely declared decorative.
+
+The measured invariant is narrower than "produces nothing", because that is not true:
+
+- On a **weapon**, a `reference` effect produces no derived output at all.
+- On **armour**, all five contribute prose to the aggregate **Armor Traits** trait.
+- On neither does a `reference` effect create its **own** `action` / `bonus` / `reaction`
+  entry. That is the line, and it is what the guard pins.
+
+Two things about building it are worth keeping.
+
+**A synthetic minimal fixture can under-test.** The first version of the guard passed the
+downgrade mutation, because a `grantsAction` stripped to `{type, note}` has no `actionType`
+and is legitimately inert — so the mutation had nothing to break. The guard only failed on
+the merits once it replayed the *authored* effects from the brew alongside the synthetic
+shape. A fixture reduced until it is easy to reason about can be reduced until it no longer
+exercises the thing under test.
+
+**The exporter silently drops non-mechanical prose,** by design (the `MECHANICAL` filters).
+A probe effect whose note reads `"ZZQQ prose here."` vanishes with no error, while the same
+effect with the authored note surfaces. This cost four failed controls before it was
+isolated by bisecting from a real material object toward the synthetic one — which is the
+technique to reach for, rather than guessing which field is missing.
+
+### v33b — a power dormant in one role is not a missing power
+
+Sweeping only weapon and armour slots made five authored material powers look permanently
+unreachable: Smokestone Cloud, Mineralite Mending, Stormprism Surge, Sunprism Outline and
+Ashglass Ward. They are not. A condensate's granted action is gated on the role its
+affinity is written for — `strikingSurface` (weapon), `protectiveLayer` (armour) or
+`focus` (anything else) — and all five are `focus`-role. On a spellcasting focus they
+surface correctly, in `getItemPowers` and in the export.
+
+No defect existed; the probe simply could not reach the case. The lasting product of the
+investigation is the positive guard it produced: **every authored material power must reach
+the export on at least one item role.** That is the assertion that would catch a power
+reaching *no* surface at all, which is the real failure mode and the one a single-slot
+probe cannot see. It RED-verifies against a product mutation and names its offenders.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 

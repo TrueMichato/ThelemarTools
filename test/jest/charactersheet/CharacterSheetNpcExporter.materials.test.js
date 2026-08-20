@@ -379,6 +379,180 @@ maybeDescribe("NPC export v22 — materials reach the statblock", () => {
 			expect(Object.values(MECHANISM).filter(fn => typeof CharacterSheetNpcExporter[fn] !== "function")).toEqual([]);
 		});
 
+		// v33. The three tests above are all satisfied by DOWNGRADING a type to `reference`.
+		// That is the move by which a bug becomes a documented feature: a `power` type whose
+		// mechanism is missing can be silenced by reclassifying it as "deliberately a table
+		// call". `reference` has to be a decision someone records, not a resting state
+		// reachable by neglect -- so it must keep earning the classification on every run.
+		//
+		// The measured distinction is sharper than "absent from the export". A reference
+		// effect may contribute PROSE to an aggregate block (the armour trait carries material
+		// notes, which is where a table call belongs). What it must never do is create its own
+		// action-economy entry, because that is a named thing the creature can DO.
+		const REFERENCE_PROBE = (() => {
+			// The note text must read as mechanical. The exporter deliberately filters
+			// non-mechanical prose as noise, and a probe worded "probe prose here" is dropped
+			// silently -- which cost four failed controls to discover. A probe that cannot
+			// count to one cannot count to zero, so the wording is load-bearing here.
+			const PROSE = "The target takes 1d6 extra damage and must make a DC 15 Dexterity saving throw.";
+			const MAT = "ZzProbeAlloy";
+
+			const exportWith = (effects, {isArmor = false} = {}) => {
+				const material = {
+					name: MAT,
+					source: "TGTT",
+					materialCategory: "metal",
+					density: 1,
+					magicCapacity: 3,
+					rarity: "uncommon",
+					roles: ["strikingSurface", "protectiveLayer", "focus"],
+					appliesTo: ["weapon", "armor", "shield", "other"],
+					effects,
+				};
+				const catalog = [...MATERIALS, material];
+				const item = isArmor
+					? {id: "zz-armor", name: "Probe Armor", source: "CUSTOM", custom: true, type: "armor", armorType: "heavy", armor: true, ac: 18, weight: 20, value: 10000}
+					: {id: "zz-weapon", name: "Probe Blade", source: "CUSTOM", custom: true, type: "weapon", weapon: true, weaponCategory: "martial", baseItem: "longsword|xphb", dmg1: "1d8", dmgType: "S", property: [], weight: 3, value: 1500};
+				item.material = {name: MAT, source: "TGTT"};
+
+				const state = new CharacterSheetState();
+				state.setItemMaterialCatalog?.(catalog);
+				state.loadFromJson({
+					name: "Probe",
+					classes: [{name: "Fighter", source: "PHB", level: 5}],
+					abilities: {str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10},
+					hp: {max: 44, current: 44},
+					inventory: [{id: item.id, item, quantity: 1, equipped: true}],
+				});
+				state.setItemMaterialCatalog?.(catalog);
+				return CharacterSheetNpcExporter.convertStateToMonster(state, {});
+			};
+
+			// An entry the material contributed *as its own ability*: the exporter prefixes
+			// such entries with the material name. Prose folded into an aggregate block (the
+			// armour traits) is deliberately not counted here.
+			const ownEntries = out => ["action", "bonus", "reaction"]
+				.flatMap(sec => (out[sec] || []).map(e => ({sec, name: String(e.name || "")})))
+				.filter(({name}) => name.includes(MAT))
+				.map(({sec, name}) => `${sec}:${name}`);
+
+			return {PROSE, MAT, exportWith, ownEntries};
+		})();
+
+		// The three item roles a material can hold. A condensate's granted action is dormant
+		// unless the item gives it the role its affinity names, so any sweep that omits one of
+		// these reports false absences.
+		const ROLE_SLOTS = ["weapon", "armor", "focus"];
+
+		const exportRealMaterial = (materialName, slot) => {
+			const base = {id: `real-${slot}`, name: `Probe ${slot}`, source: "CUSTOM", custom: true, weight: 3, value: 1500};
+			const item = slot === "weapon"
+				? {...base, type: "weapon", weapon: true, weaponCategory: "martial", baseItem: "longsword|xphb", dmg1: "1d8", dmgType: "S", property: ["2H", "H"]}
+				: slot === "armor"
+					? {...base, type: "armor", armorType: "heavy", armor: true, ac: 18}
+					: {...base, type: "SCF", scfType: "arcane"};
+			item.material = {name: materialName, source: "TGTT"};
+
+			const state = new CharacterSheetState();
+			state.setItemMaterialCatalog?.(MATERIALS);
+			state.loadFromJson({
+				name: "Probe",
+				classes: [{name: "Fighter", source: "PHB", level: 5}],
+				abilities: {str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10},
+				hp: {max: 44, current: 44},
+				inventory: [{id: item.id, item, quantity: 1, equipped: true}],
+			});
+			state.setItemMaterialCatalog?.(MATERIALS);
+			return CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		};
+
+		it("control: a power-declared effect does create its own action-economy entry", () => {
+			// Without this the assertion below is unfalsifiable -- an export that produced no
+			// action economy at all, or a probe material that silently failed to resolve,
+			// would satisfy it just as well as correct routing does.
+			const {PROSE, exportWith, ownEntries} = REFERENCE_PROBE;
+			["weapon", "armor"].forEach(slot => {
+				const out = exportWith([{
+					type: "grantsAction",
+					name: "Probe Power",
+					actionType: "action",
+					appliesTo: [slot],
+					note: PROSE,
+				}], {isArmor: slot === "armor"});
+				expect(ownEntries(out)).toHaveLength(1);
+			});
+		});
+
+		it("no reference-declared effect creates its own action-economy entry", () => {
+			const {PROSE, exportWith, ownEntries} = REFERENCE_PROBE;
+			const handling = CharacterSheetMaterials.EFFECT_HANDLING || {};
+			const referenceTypes = Object.entries(handling)
+				.filter(([, spec]) => spec?.consumer === "reference")
+				.map(([type]) => type);
+
+			// Anti-vacuity: a manifest with no reference types would pass the loop trivially.
+			expect(referenceTypes.length).toBeGreaterThan(0);
+
+			// Two shapes per type, because either alone has a hole. The synthetic shape covers
+			// types nothing has authored yet; the AUTHORED shape covers types whose minimal
+			// form is legitimately inert. `grantsAction` is exactly that: stripped to
+			// `{type, note}` it is reference-only by design, so a synthetic probe would let a
+			// downgrade of it slip through -- while Yellowwood's real, fully-specified effect
+			// still emits its own bonus action and is caught.
+			const authoredOf = type => MATERIALS
+				.flatMap(m => (m.effects || []))
+				.filter(e => e?.type === type);
+
+			const offenders = [];
+			referenceTypes.forEach(type => {
+				const shapes = [
+					{label: "synthetic", effect: type === "note" ? {type: "note", text: PROSE} : {type, note: PROSE}},
+					...authoredOf(type).slice(0, 4).map((e, i) => ({label: `authored#${i}`, effect: JSON.parse(JSON.stringify(e))})),
+				];
+				shapes.forEach(({label, effect}) => {
+					["weapon", "armor"].forEach(slot => {
+						const eff = {...effect};
+						if (!eff.appliesTo) eff.appliesTo = [slot];
+						const out = exportWith([eff], {isArmor: slot === "armor"});
+						ownEntries(out).forEach(entry => offenders.push(`${type} [${label}] (${slot}) -> ${entry}`));
+					});
+				});
+			});
+
+			expect(offenders).toEqual([]);
+		});
+
+		it("every authored material power reaches the export on at least one item role", () => {
+			// The positive counterpart to the guard above, and the one that would have caught
+			// `condensateInstability`: a power that reaches NO surface is the failure mode, and
+			// it is invisible to any test that probes a single slot.
+			//
+			// A condensate's power is gated on the role its affinity is written for --
+			// `strikingSurface` (weapon), `protectiveLayer` (armour), `focus` (anything else).
+			// Probing only weapon and armour makes five focus-role powers look permanently
+			// missing; they are simply dormant on items that never grant that role. Sweeping
+			// all three roles is what turns "absent" into a real measurement.
+			const {PROSE, MAT, exportWith} = REFERENCE_PROBE;
+			void PROSE; void MAT;
+
+			const authoredPowers = MATERIALS
+				.flatMap(m => (m.effects || []).map(e => ({material: m, effect: e})))
+				.filter(({effect}) => effect?.type === "grantsAction" && effect?.name);
+
+			// Anti-vacuity: an empty catalog would satisfy the sweep below trivially.
+			expect(authoredPowers.length).toBeGreaterThan(0);
+
+			const unreachable = authoredPowers.filter(({material, effect}) => {
+				return !ROLE_SLOTS.some(slot => {
+					const out = exportRealMaterial(material.name, slot);
+					return ["trait", "action", "bonus", "reaction"]
+						.some(sec => JSON.stringify(out[sec] || []).includes(effect.name));
+				});
+			}).map(({material, effect}) => `${material.name}: ${effect.name}`);
+
+			expect(unreachable).toEqual([]);
+		});
+
 		it("normalises every authored effect rather than dropping it on the floor", () => {
 			// `getMaterialEffects` returns a fully-populated empty shape when the material is
 			// missing, so a silently-unresolved material is indistinguishable from one with no
