@@ -19,6 +19,10 @@
  * "check:advantage:perception" reached it through nothing.
  */
 
+import {readFileSync} from "fs";
+import {dirname, resolve} from "path";
+import {fileURLToPath} from "url";
+
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-materials.js";
 import "../../../js/charactersheet/charactersheet-state.js";
@@ -37,6 +41,26 @@ const withModifier = (type, {conditional = "test condition"} = {}) => {
 		name: "PROBE", type, value: 1, enabled: true, conditional, sourceType: "class",
 	});
 	return state;
+};
+
+const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"];
+const ALL_SKILLS = [
+	"athletics", "acrobatics", "sleight of hand", "stealth", "arcana", "history",
+	"investigation", "nature", "religion", "animal handling", "insight", "medicine",
+	"perception", "survival", "deception", "intimidation", "performance", "persuasion",
+];
+const ROLL_QUERIES = [
+	"attack", "attack:melee", "attack:ranged", "attack:spell", "damage", "damage:melee",
+	"damage:ranged", "damage:cantrip", "initiative", "deathSave", "concentration", "d20:all",
+	"ac", "speed", "healing", "hitDice", "passive:perception", "passive:investigation",
+	"spellcasting", "unarmed", "ranged", "resistance", "reroll", "critDie", "spell",
+	...ABILITIES.map(a => `save:${a}`), ...ABILITIES.map(a => `check:${a}`),
+	...ALL_SKILLS.map(s => `skill:${s}`),
+];
+
+const isRollReachable = type => {
+	const state = withModifier(type, {conditional: null});
+	return ROLL_QUERIES.some(query => state.getModifiersForType(query).some(m => m.name === "PROBE"));
 };
 
 const offeredNames = (state, query) => {
@@ -143,5 +167,163 @@ describe("every registered skill-selected modType has a roll that can read it", 
 
 	it("the skill list is non-empty (the walk above cannot pass vacuously)", () => {
 		expect(SKILLS.length).toBeGreaterThan(10);
+	});
+});
+
+/**
+ * The consumption manifest.
+ *
+ * `EFFECT_HANDLING` in charactersheet-materials.js exists because a material
+ * effect that nothing consumes is invisible rather than loud. Feature modifiers
+ * had no equivalent, so a registered `modType` with no consumer looked exactly
+ * like one with a consumer — which is how Keen Senses and Synchronized Stealth
+ * stayed dead behind a passing test.
+ *
+ * Every registered modType is classified here:
+ *
+ *   roll      - reachable from at least one roll query via getModifiersForType.
+ *   named     - has a dedicated consumer that reads it by name (carry capacity,
+ *               armor stealth penalty, medium-armor Dex cap, ...).
+ *   reference - deliberately NOT delivered by the sheet. The feature text is
+ *               shown to the player and the DM adjudicates it. Ignoring cover,
+ *               ritual casting and charge riders depend on positional or
+ *               narrative state the sheet does not model.
+ *
+ * "reference" is a decision, not an absence. Listing a type here is how that
+ * decision gets recorded; a type that is merely forgotten fails the
+ * completeness test instead of sitting silently in the registry.
+ */
+const MODIFIER_CONSUMERS = {
+	"ac": "roll",
+	"ac:ally:reaction": "reference",
+	"ac:mediumArmorMaxDex": "named",
+	"armor:medium:noStealthDisadvantage": "named",
+	"attack:advantage:grappled": "reference",
+	"attack:heavy": "reference",
+	"attack:ranged": "roll",
+	"carryCapacity": "named",
+	"check:advantage:deception:impersonation": "roll",
+	"check:advantage:forcedmovement": "roll",
+	"check:advantage:int:lore": "roll",
+	"check:advantage:perception": "roll",
+	"check:advantage:performance:impersonation": "roll",
+	"check:advantage:stealth": "roll",
+	"check:cha:advantage": "roll",
+	"check:wis:advantage": "roll",
+	"concentration": "roll",
+	"critDie:melee:extra": "reference",
+	"damage:bonus:surprised": "reference",
+	"damage:bonus:vs-larger": "reference",
+	"damage:charge": "reference",
+	"damage:heavy": "reference",
+	"damage:heavy:bonusOnCritOrKill": "reference",
+	"damage:melee:oneHanded": "roll",
+	"damage:offhand:addAbility": "reference",
+	"damage:ranged": "roll",
+	"damage:reroll:interdicted:1or2": "reference",
+	"damage:reroll:melee": "reference",
+	"damage:reroll:twoHanded:1or2": "reference",
+	"deathSave:advantage": "roll",
+	"healing:healerKit": "reference",
+	"hitDice:longRestRecovery": "reference",
+	"hitDice:minimumRoll": "reference",
+	"initiative": "roll",
+	"initiative:advantage": "roll",
+	"passive:investigation": "roll",
+	"passive:perception": "roll",
+	"ranged:ignoreCover": "reference",
+	"ranged:noDisdvantageInMelee": "named",
+	"ranged:noLongRangeDisadvantage": "reference",
+	"reach:melee:bonus": "named",
+	"reroll:1:ability": "reference",
+	"reroll:1:attack": "named",
+	"reroll:1:save": "reference",
+	"resistance:all-except-psychic": "reference",
+	"resistance:chosen": "reference",
+	"save:advantage:cha:magic": "roll",
+	"save:advantage:charmed": "roll",
+	"save:advantage:disease": "roll",
+	"save:advantage:forcedmovement": "roll",
+	"save:advantage:frightened": "roll",
+	"save:advantage:int:magic": "roll",
+	"save:advantage:magic": "roll",
+	"save:advantage:poisoned": "roll",
+	"save:advantage:spell:adjacent": "roll",
+	"save:advantage:wis": "roll",
+	"save:advantage:wis:magic": "roll",
+	"save:all": "roll",
+	"save:cha:advantage": "roll",
+	"save:dex:advantage": "roll",
+	"save:dex:shield": "roll",
+	"save:int:advantage": "roll",
+	"save:wis:advantage": "roll",
+	"skill:advantage:history:psychometry": "roll",
+	"skill:advantage:perception:senses": "roll",
+	"skill:advantage:survival:tracking": "roll",
+	"skill:animal handling:advantage": "roll",
+	"skill:athletics": "roll",
+	"skill:athletics:advantage": "roll",
+	"skill:perception": "roll",
+	"spell:ignoreCover": "reference",
+	"spell:rangeDouble": "reference",
+	"spellcasting:ritual": "reference",
+	"unarmed:damage": "reference",
+};
+
+describe("every registered modType declares how it is consumed", () => {
+	const REGISTERED = (() => {
+		const path = resolve(dirname(fileURLToPath(import.meta.url)), "../../../js/charactersheet/charactersheet-state.js");
+		// Skip comment lines: the JSDoc for the modifier shape carries a
+		// `modType: "ac|attack|damage|..."` placeholder that is documentation,
+		// not a registration, and an extractor that cannot tell them apart
+		// reports a type that does not exist.
+		const body = readFileSync(path, "utf8").split("\n").filter(l => !/^\s*(\*|\/\/)/.test(l)).join("\n");
+		return [...new Set([...body.matchAll(/modType:\s*"([^"]+)"/g)].map(m => m[1]))].sort();
+	})();
+
+	it("extracts a plausible number of registrations (the walk is not vacuous)", () => {
+		expect(REGISTERED.length).toBeGreaterThan(60);
+		expect(REGISTERED).not.toContain("ac|attack|damage|...");
+	});
+
+	it("classifies every registered modType", () => {
+		const undeclared = REGISTERED.filter(t => !MODIFIER_CONSUMERS[t]);
+		expect(undeclared).toEqual([]);
+	});
+
+	it("declares nothing that is no longer registered", () => {
+		const stale = Object.keys(MODIFIER_CONSUMERS).filter(t => !REGISTERED.includes(t));
+		expect(stale).toEqual([]);
+	});
+
+	it("every type declared reachable by roll actually is", () => {
+		const broken = Object.entries(MODIFIER_CONSUMERS)
+			.filter(([, consumer]) => consumer === "roll")
+			.filter(([type]) => !isRollReachable(type))
+			.map(([type]) => type);
+
+		expect(broken).toEqual([]);
+	});
+
+	// The mirror of the assertion above, and the one that keeps the manifest
+	// honest. Without it a type could be downgraded to "reference" to silence a
+	// failure, which is how a bug becomes a documented feature.
+	it("every type declared reference-only is genuinely not delivered", () => {
+		const delivered = Object.entries(MODIFIER_CONSUMERS)
+			.filter(([, consumer]) => consumer === "reference")
+			.filter(([type]) => isRollReachable(type))
+			.map(([type]) => type);
+
+		// If this fails, the sheet started delivering something the manifest
+		// says it does not. Reclassify it as "roll" rather than deleting the case.
+		expect(delivered).toEqual([]);
+	});
+
+	it("each classification is actually used (no bucket is empty)", () => {
+		const counts = Object.values(MODIFIER_CONSUMERS).reduce((acc, c) => ({...acc, [c]: (acc[c] || 0) + 1}), {});
+		expect(counts.roll).toBeGreaterThan(0);
+		expect(counts.named).toBeGreaterThan(0);
+		expect(counts.reference).toBeGreaterThan(0);
+		expect(Object.keys(counts).sort()).toEqual(["named", "reference", "roll"]);
 	});
 });

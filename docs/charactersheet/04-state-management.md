@@ -846,6 +846,27 @@ Two consequences worth carrying:
 
 `_normalizeSkillKey` is the single spelling rule shared by the match branch and `_isConditionalSaveSubtype`. Routing both through it is what stops a two-word skill (`"Animal Handling"`) from being a selector to one and a condition to the other.
 
+### The consumption manifest
+
+`EFFECT_HANDLING` (materials) exists because an effect nothing consumes is invisible rather than loud. Feature modifiers now have the equivalent: `MODIFIER_CONSUMERS` in `CharacterSheetModifierReachability.test.js` classifies **every** registered `modType`.
+
+| Class | Count | Meaning |
+|---|---|---|
+| `roll` | 42 | Reachable from at least one roll query via `getModifiersForType`. |
+| `named` | 6 | Read by a dedicated consumer (`carryCapacity`, `ac:mediumArmorMaxDex`, `armor:medium:noStealthDisadvantage`, `reach:melee:bonus`, `reroll:1:attack`, `ranged:noDisdvantageInMelee`). |
+| `reference` | 26 | Deliberately **not** delivered — shown to the player, adjudicated by the DM. Ignoring cover, ritual casting, charge riders and the like depend on positional or narrative state the sheet does not model. |
+
+Four guards keep it honest, and each RED-verifies independently:
+
+- every registered type is classified (a new registration fails until someone decides what it is);
+- nothing is declared that is no longer registered;
+- every `roll` type is *behaviourally* reachable — probed, not asserted;
+- every `reference` type is genuinely **not** reachable.
+
+That last one is the load-bearing one. Without it, a failure could be silenced by downgrading a type to `reference`, which is how a bug becomes a documented feature. **`reference` is a decision that has to be recorded, not an absence that can be reached by neglect.**
+
+The extractor deliberately skips comment lines: the JSDoc for the modifier shape carries a `modType: "ac|attack|damage|..."` placeholder, and an extractor that cannot tell documentation from registration reports a type that does not exist.
+
 ---
 
 *Previous: [Components Reference](./03-components-reference.md) | Next: [Feature Calculations](./05-feature-calculations.md)*
