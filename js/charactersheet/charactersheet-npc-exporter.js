@@ -8894,6 +8894,23 @@ class CharacterSheetNpcExporter {
 	}
 
 	/**
+	 * The action economy of a material-granted power.
+	 *
+	 * `actionType` is authored data and outranks the prose scan, which cannot see it: every
+	 * one of the five economy-bearing notes ("When an attack hits you, move 5 feet") states
+	 * the trigger without ever naming the cost, so prose alone files all five as traits.
+	 *
+	 * `"special"` is the accessor's own filler for "the brew said nothing", not an authored
+	 * value, so it defers to the prose — which is how Yellowwood's Flurry still reaches the
+	 * bonus-action section off the strength of its own wording.
+	 */
+	static _getMaterialPowerSection (power) {
+		const authored = String(power?.actionType || "").toLowerCase();
+		const mapped = {bonus: "bonus", reaction: "reaction", action: "action", attack: "action"}[authored] || null;
+		return mapped || this._getActivationSectionFromText(power?.description || "");
+	}
+
+	/**
 	 * Statblock entries for powers a material grants the items it is made from.
 	 *
 	 * Two shapes arrive on the same channel and only one of them belongs here:
@@ -8908,8 +8925,16 @@ class CharacterSheetNpcExporter {
 	 * So an affinity earns an entry only when it is live *and* names its own action economy,
 	 * which is exactly the case where it grants something to do rather than something to be.
 	 *
-	 * Every one of these is authored `isReferenceOnly` with `actionType: "special"`, so the
-	 * economy has to come from the prose; that is what `_getActivationSectionFromText` is for.
+	 * The economy comes from the authored `actionType` when the brew names one — five of the
+	 * nine granted actions do (Tideglass and Stormprism react, Smokestone is a bonus action,
+	 * Sunprism an action) — and from the prose otherwise. Prose is the fallback rather than
+	 * the source because a reaction filed as a trait is a reaction the reader never finds.
+	 *
+	 * Note the sheet's `isReferenceOnly` is deliberately NOT consulted. It means "the sheet
+	 * cannot resolve this from a button" — Yellowwood's Flurry rides on the Attack action, so
+	 * no button can express it. A statblock reader has no such limit: they can read "bonus
+	 * action to attack again" and do it. So an economy the sheet had to decline is still an
+	 * economy here, which is why the prose fallback earns its keep.
 	 */
 	static _getMaterialPowerEntries (state, {npcName = "The NPC"} = {}) {
 		const powers = typeof state?.getItemPowers === "function"
@@ -8921,7 +8946,7 @@ class CharacterSheetNpcExporter {
 			// A condensate only has its affinity while it holds the role that affinity was
 			// written for; a dormant one is a fact about the item, not about the fight.
 			if (power.isDormant) return;
-			const section = this._getActivationSectionFromText(power.description || "");
+			const section = this._getMaterialPowerSection(power);
 			if (power.materialAffinity && !section) return;
 
 			const body = this._prepareFeatureEntriesForNpc(power.description || "", {npcName});

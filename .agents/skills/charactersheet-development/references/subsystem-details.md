@@ -1073,6 +1073,29 @@ found them.
   source)` instead — it keys on the same authored data, so any feature granting the effect
   is picked up rather than one hardcoded name.
 
+### A material power's action economy is authored, not inferred (v24)
+
+`getItemPowers()` carries an authored `actionType` on every material-granted action. Read it;
+do **not** infer the economy from the power's prose.
+
+Five of the nine `grantsAction` effects in the brew declare one (Tideglass and Stormprism
+react, Smokestone is a bonus action, Sunprism an action, Ashglass reacts). None of their notes
+*says* so, because the field is right there — they state the trigger instead ("When an attack
+hits you..."). A prose scan therefore returns `null` for all five, and they file as traits.
+
+- **`"special"` is filler, not data.** The accessor emits `actionType: act.actionType || "special"`,
+  so `"special"` means the brew declared nothing. Fall back to prose there — that is how
+  Yellowwood's Flurry still reaches the bonus-action section off its own wording.
+- **`isReferenceOnly` is a statement about the *sheet*, not about the rule.** It means "no
+  button can express this" (Yellowwood's Flurry rides on the Attack action). A statblock
+  reader is not a button. Do not use it to suppress an economy.
+- **The `requiresProperty` gate is applied upstream only for `grantsAction`.** `getMaterialEffects`
+  checks it at `materials.js:513` inside that case and nowhere else, so a consumer of
+  `bonusCritDamage` must check the property itself.
+- **`getNamedModifiersByType("damageReduction")` is ordering-sensitive.** It returns `[]` when
+  the material catalog is set *after* `loadFromJson`, and the real modifier when set before.
+  Any headless probe must call `setItemMaterialCatalog` first or it will measure a phantom.
+
 ### Bundling sheet-authored items with the export (v20)
 
 An NPC export is a homebrew document (`{_meta, monster: [...]}`), so it may also carry

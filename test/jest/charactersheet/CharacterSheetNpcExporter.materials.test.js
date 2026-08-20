@@ -498,3 +498,75 @@ maybeDescribe("NPC export v23 — the rider says what it does", () => {
 		});
 	});
 });
+
+/**
+ * v24 — a material-granted reaction reaches the Reactions section.
+ *
+ * `getItemPowers` publishes an authored `actionType`, and the exporter was ignoring it in
+ * favour of scanning the power's prose. That scan is structurally unable to find the
+ * answer: every economy-bearing note in the brew states its *trigger* ("When an attack
+ * hits you...") and never its *cost*, so all five reactions and actions were filing
+ * themselves as traits — the one section a player never checks mid-combat.
+ */
+maybeDescribe("NPC export v24 — the material power lands in the right section", () => {
+	const authoredEconomies = MATERIALS
+		.flatMap(mat => (mat.effects || [])
+			.filter(fx => fx.type === "grantsAction" && fx.actionType)
+			.map(fx => ({material: mat.name, name: fx.name, actionType: fx.actionType, note: fx.note || ""})));
+
+	it("has authored economies to route, or this whole block is vacuous", () => {
+		// Guards the suite against passing because the brew stopped declaring `actionType`
+		// at all, which would make every assertion below trivially true.
+		expect(authoredEconomies.length).toBeGreaterThanOrEqual(5);
+	});
+
+	it.each([
+		["reaction", "reaction"],
+		["bonus", "bonus"],
+		["action", "action"],
+		["attack", "action"],
+	])("routes an authored %s to the %s section", (actionType, expected) => {
+		expect(CharacterSheetNpcExporter._getMaterialPowerSection({
+			actionType,
+			description: "Move 5 feet without provoking Opportunity Attacks.",
+		})).toBe(expected);
+	});
+
+	it("routes every authored economy in the brew away from the trait pile", () => {
+		// The real defect, stated over the shipped data rather than a fixture: not one of
+		// these notes names its own cost, so prose alone sends all of them to `trait`.
+		authoredEconomies.forEach(power => {
+			expect(CharacterSheetNpcExporter._getActivationSectionFromText(power.note)).toBeNull();
+			expect(CharacterSheetNpcExporter._getMaterialPowerSection(power)).not.toBeNull();
+		});
+	});
+
+	it("still reads the prose when the brew names no cost", () => {
+		// Yellowwood's Flurry is `isReferenceOnly` on the sheet because no button can express
+		// "when you take the Attack action". A statblock reader has no such limit, so the
+		// bonus action its own prose declares must survive.
+		expect(CharacterSheetNpcExporter._getMaterialPowerSection({
+			actionType: "special",
+			description: "When you take the Attack action with a yellowwood melee weapon, you can use a bonus action to attack again with it.",
+		})).toBe("bonus");
+	});
+
+	it("leaves a genuinely passive power in the trait pile", () => {
+		// Stout Blackwood's shove rides on a hit and costs nothing. `special` is the
+		// accessor's filler for "the brew said nothing", so it must not become an action.
+		expect(CharacterSheetNpcExporter._getMaterialPowerSection({
+			actionType: "special",
+			description: "Once per turn when you hit, contest Strength (Athletics) against the target.",
+		})).toBeNull();
+	});
+
+	it("keeps a condensate affinity suppressible, because it has no economy of its own", () => {
+		// `_getMaterialPowerEntries` drops an affinity whose section is null; that gate is
+		// what stops Emberglass restating the damage-type option already on the attack line.
+		expect(CharacterSheetNpcExporter._getMaterialPowerSection({
+			actionType: "special",
+			materialAffinity: true,
+			description: "Kindles dry material touched to it for a minute.",
+		})).toBeNull();
+	});
+});

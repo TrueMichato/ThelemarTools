@@ -1593,6 +1593,52 @@ de-duplication decision already settled.
   one-die weapon, where the wrong arithmetic gives the right answer. Choosing the fixture
   that can distinguish the hypotheses is most of the work.
 
+### v24 — a material-granted reaction reaches the Reactions section
+
+`getItemPowers()` publishes an authored `actionType` on every material-granted action. The
+exporter ignored it and scanned the power's prose instead.
+
+That scan is *structurally* unable to find the answer. Every economy-bearing note in the brew
+states its **trigger** and never its **cost**:
+
+> Tideglass Slip — "When an attack hits you, move 5 feet without provoking Opportunity Attacks."
+
+There is no "as a reaction" in that sentence, because `actionType: "reaction"` is sitting
+right next to it in the data. So the scan returned `null` for all five economy-bearing
+powers and every one of them filed itself as a **trait** — the one section a player does not
+re-read mid-combat. A reaction nobody finds is a reaction the NPC does not have.
+
+`_getMaterialPowerSection` now prefers the authored value and keeps the prose scan as the
+fallback, using the same `{bonus, reaction, action, attack → action}` map that
+`_getFeatureActivationSection` already uses for features.
+
+**The sheet's `isReferenceOnly` is deliberately not consulted.** It means "the sheet cannot
+resolve this from a button" — Yellowwood's Flurry rides on the Attack action, so no button
+can express it. A statblock reader has no such limit: they can read "you can use a bonus
+action to attack again" and simply do it. An economy the *sheet* had to decline is still an
+economy *here*, which is exactly what the prose fallback preserves — and why the two
+consumers of this data correctly disagree.
+
+`"special"` is the accessor's filler for "the brew declared nothing", not an authored value,
+so it defers to the prose. That keeps Stout Blackwood's shove a trait and keeps a condensate
+affinity suppressible, which is what stops Emberglass restating the damage-type option
+already printed on the attack line.
+
+**What v24 taught.**
+
+- **Prefer authored data to inference, and know which is which.** The prose scan was not
+  merely weaker than the authored field; it was answering a different question. The note
+  says *when*, the field says *what it costs*.
+- **A sibling subsystem's "no" can be scoped to that subsystem.** `isReferenceOnly` is a true
+  statement about a character sheet and a false one about a statblock. Reading another
+  module's flag means inheriting its constraints, so check whether they are yours.
+- **Measure the claim, not the claimant.** Of the accessor notes received this pass, the
+  condensate-affinity coverage and the `damageReduction` accessor were both reported with the
+  wrong status — in opposite directions. Both were settled in minutes by a probe.
+- **Probe ordering is part of the measurement.** `getNamedModifiersByType("damageReduction")`
+  returns `[]` when the material catalog is set *after* `loadFromJson` and the real value when
+  set before. An earlier "it does not fire" finding here was an artifact of that, not a defect.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 
