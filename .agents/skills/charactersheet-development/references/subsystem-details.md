@@ -1380,9 +1380,46 @@ Three corollaries now hold across this subsystem:
   vocabulary, structurally could not detect.
 - **A probe that cannot count to one cannot count to zero.** Two successive probes here
   read "no effect" while their controls were also flat; the reading was worthless both
-  times. The value-bearing skill channel turned out to be
-  `customModifiers.skills[skill]` via `getSkillCustomMod` — *not* a `namedModifiers`
-  entry typed `skill:<name>`, which is inert for numeric purposes.
+  times.
+
+**Correction (v35b), and it lands on the bullet directly above.** The sentence that used to
+end that bullet — that `customModifiers.skills[skill]` is the value-bearing channel and a
+`namedModifiers` entry typed `skill:<name>` "is inert for numeric purposes" — **was false**,
+and it was produced by exactly the flat probe the bullet warns about. The two are not
+rivals: `namedModifiers` → `_recalculateCustomModifiers()` → `customModifiers.skills` →
+`getSkillCustomMod` → `getSkillMod` (fold at `charactersheet-state.js:52650`, and
+`getSkillMod` says so at `:11318`). `customModifiers.skills` is the **cache the named entry
+writes into**, not an alternative input. ~90 `skill:<name>` registrations exist across `js/`.
+
+A raw `.push()` is inert for **two** independent reasons, and both must be fixed:
+
+| `enabled` | `_recalculateCustomModifiers()` | `getSkillMod("perception")` |
+|---|---|---|
+| absent | called | `0` — inert |
+| `true` | called | **`5`** |
+| `true` | not called | `0` — inert |
+| *(via `addNamedModifier`)* | — | **`5`** |
+
+`addNamedModifier` sets `enabled: modifier.enabled !== false` and recalculates, which is why
+the public API works and hand-rolled injection does not. **Use `addNamedModifier`; if you
+must push raw, push `{enabled: true}` and call the recalc.** This repo's own working helper
+had it right all along — `CharacterSheetNpcExporter.test.js:1045` pushes
+`{enabled: true, ...m}`. The ad-hoc probe forgot what the committed code already knew.
+
+**The failure mode is distinct from the three before it, and worth its own name.** A no-op
+mutation normally yields a *false negative* — "no effect observed." This one went further:
+the flat run was promoted into a **positive claim about how the system works**, and then
+forwarded to another session as a caution. The same evidence that says *don't trust this
+run* reads, if you squint, like *and here is why it was flat* — and the second reading is
+unearned. A dead probe explains nothing, least of all itself.
+
+> **A vacuous run may not report an absence; it may report a mechanism. Only the first is
+> recognisable as a failure.**
+
+Blast radius was luck, not judgement: zero `skill:<name>` registrations live in
+`charactersheet-materials.js` or `-upgrades.js`, so the sibling subsystem the claim was sent
+to was unaffected in fact. Had one material carried a skill bonus, the note would have had a
+live effect filed as dead.
 
 ### Two ladders step the damage die, and a guard is what keeps them apart (v31)
 
