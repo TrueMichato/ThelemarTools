@@ -1265,6 +1265,39 @@ a test for only one invites the other: silence the duplicate by dropping the cla
 gap returns. The matrix test asserts `gaps === []` *and* `dupes === []` across every
 condensate and every item role.
 
+### Absence is evidence only when presence is demonstrated beside it (v32)
+
+The NPC exporter consumes `aggregateModifiers` in exactly one place — `initiative` —
+and turns its `advantage` into a shipped `{"advantageMode": "adv"}`. All other
+advantage in a statblock is feature prose carried verbatim (23 of 24 corpus exports).
+So a skill-scoped advantage modifier reaching initiative would be a real, visible
+defect, and the sheet-side change that made `check:advantage:<skill>` reachable
+touched precisely the matching code that decides what initiative also sees.
+
+Scoping is correct: the skill-name branch is gated on `category === "skill"`, and
+initiative admits only `check:dex` / `check:all`.
+
+**The general lesson is about how to guard a negative.** Two assertions of the form
+"X must not reach Y" are *both* satisfied when Y has stopped listening to everything —
+so a negative guard needs a positive sibling proving the channel still carries. This
+was measured, not reasoned: severing initiative from `check:all` left the "must not
+leak" test **passing on a broken build**, and only the added anti-vacuity leg caught it.
+
+Three corollaries now hold across this subsystem:
+
+- **A guard over absence must be paired with a demonstration of presence** on the same
+  channel, or it is satisfied by wholesale breakage.
+- **A guard is worth most when written in a different vocabulary from the thing it
+  guards.** This one queries from the consumer side (`skill:perception`, then the
+  exported block) rather than from the registration string, so reverting the sheet-side
+  fix fails it — something the sheet's own tests, written in the registration's
+  vocabulary, structurally could not detect.
+- **A probe that cannot count to one cannot count to zero.** Two successive probes here
+  read "no effect" while their controls were also flat; the reading was worthless both
+  times. The value-bearing skill channel turned out to be
+  `customModifiers.skills[skill]` via `getSkillCustomMod` — *not* a `namedModifiers`
+  entry typed `skill:<name>`, which is inert for numeric purposes.
+
 ### Two ladders step the damage die, and a guard is what keeps them apart (v31)
 
 A weapon's damage die is stepped from two independent places and the export adds them:

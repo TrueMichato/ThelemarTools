@@ -1979,6 +1979,50 @@ The combined-source test is deliberately based at **`1d4`**, not `1d8`. From `1d
 erroneous third step *clamps* at `1d12` and the assertion passes on a broken build — the
 case you would reach for first is the one the bug cannot reach.
 
+### v32 — initiative advantage is the only modifier-derived flag, and a skill must not reach it
+
+The exporter consumes `aggregateModifiers` in exactly **one** place: initiative, whose
+`advantage` becomes `{"initiative": {"advantageMode": "adv"}}` in the shipped block.
+Every other advantage in a statblock is **feature prose carried verbatim** — 23 of the
+24 corpus exports carry some, and none of it comes from the modifier registry.
+
+That split is the answer to a question from the sheet-side session: their fix making
+`check:advantage:<skill>` reachable from `skill:<skill>` (Beastheart's Keen Senses,
+Hunter's Synchronized Stealth) **changes nothing in the export**. Skills export as a
+single number from `getSkillMod`, and advantage has no numeric representation:
+
+| state | `skill.perception` | export `initiative` |
+|---|---|---|
+| baseline | `+7` | `null` |
+| `customModifiers.skills.perception = 5` *(control)* | `+12` | `null` |
+| `check:advantage:perception` | `+7` | `null` |
+| `check:all` advantage | `+7` | `{"advantageMode": "adv"}` |
+| `initiative` advantage *(control)* | `+7` | `{"advantageMode": "adv"}` |
+
+Nothing is lost by the silence — a Beastheart's Keen Senses reaches the table through
+its own feature text, which is where the mechanic is stated once. Annotating the skill
+block as well would be the same mechanic on two surfaces, which v22 already settled
+against.
+
+**Their edit touched precisely the code that decides what initiative sees.** The skill
+branch is gated on `category === "skill"` and initiative admits only `check:dex` /
+`check:all`, so the scoping is correct today — but an over-broad match would silently
+have granted initiative advantage to every creature with Keen Senses, and initiative
+advantage *ships*. Pinned with four tests.
+
+**The third test is the load-bearing one, and it exists because of a measured failure.**
+Two "must not reach initiative" assertions are both satisfied if aggregation breaks
+wholesale and *nothing* ever reaches initiative. Severing initiative from `check:all`
+proved it: the leak test **passed on that broken build**, and only the anti-vacuity leg
+failed. Absence is evidence only when presence is demonstrated beside it.
+
+RED-verified three ways, each failing a different single leg: widening initiative to the
+whole `check:` family fails the leak test; severing `check:all` fails the anti-vacuity
+test; reverting the sibling's reachability fix fails the leak test's liveness assertion.
+That last one means the guard now protects *their* fix from a foreign consumer's
+vantage point — a guard written in a different vocabulary from the thing it guards, so
+it cannot be a mirror of their own tests.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 

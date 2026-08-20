@@ -1005,3 +1005,82 @@ describe("CharacterSheetNpcExporter", () => {
 		expect(bodies[0]).toMatch(/grappled|difficult terrain|advantage/i);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// v32 — initiative advantage is the exporter's only modifier-derived flag, and
+// a skill-scoped advantage must not reach it.
+//
+// The exporter consumes `aggregateModifiers` in exactly one place: initiative,
+// whose `advantage` becomes `{"initiative": {"advantageMode": "adv"}}` in the
+// shipped statblock. Everything else the exporter says about advantage is
+// feature prose carried verbatim, and 23 of the 24 corpus exports carry some.
+//
+// A sibling change made `check:advantage:<skill>` reachable from `skill:<skill>`
+// (previously it reached nothing). That edit touched precisely the matching code
+// that decides what `initiative` also sees, so an over-broad match would have
+// silently granted initiative advantage to any creature with, say, Keen Senses.
+//
+// The third leg is the load-bearing one. Two "must not reach" assertions are
+// both satisfied if aggregation breaks wholesale and nothing reaches initiative
+// ever — so a genuinely broad `check:all` must still reach it. Absence is only
+// evidence when presence is demonstrated beside it.
+// ---------------------------------------------------------------------------
+describe("CharacterSheetNpcExporter — initiative advantage scoping (v32)", () => {
+	const makeState = (namedModifiers = []) => {
+		const st = new CharacterSheetState();
+		st.setName("Scout");
+		st.addClass({name: "Ranger", source: "PHB", level: 11});
+		st.setAbilityBase("dex", 16);
+		st.setAbilityBase("wis", 16);
+		st.setMaxHp(80);
+		st.setCurrentHp(80);
+		st.setSkillProficiency("perception", 1);
+		st.setSkillProficiency("stealth", 1);
+		namedModifiers.forEach(m => st._data.namedModifiers.push({enabled: true, ...m}));
+		return st;
+	};
+	const initiativeOf = st => CharacterSheetNpcExporter.convertStateToMonster(st).initiative ?? null;
+
+	it("control: an initiative-scoped advantage does reach the exported block", () => {
+		// Without this the three assertions below are unfalsifiable.
+		expect(initiativeOf(makeState())).toBeNull();
+		expect(initiativeOf(makeState([{type: "initiative", advantage: true, name: "Alert"}])))
+			.toEqual(expect.objectContaining({advantageMode: "adv"}));
+	});
+
+	it("a skill-scoped advantage does not leak into initiative", () => {
+		for (const type of ["check:advantage:perception", "check:advantage:stealth"]) {
+			const st = makeState([{type, advantage: true, name: "Keen Senses"}]);
+			// The modifier is live — it reaches the skill it names…
+			expect(st.aggregateModifiers(`skill:${type.split(":").pop()}`).advantage).toBe(true);
+			// …and stops there.
+			expect(st.aggregateModifiers("initiative").advantage).toBe(false);
+			expect(initiativeOf(st)).toBeNull();
+		}
+	});
+
+	it("a genuinely broad check advantage still does reach initiative", () => {
+		// Anti-vacuity for the negatives above: proves initiative has not simply
+		// stopped listening to the whole `check:` family.
+		const st = makeState([{type: "check:all", advantage: true, name: "Broad"}]);
+		expect(st.aggregateModifiers("initiative").advantage).toBe(true);
+		expect(initiativeOf(st)).toEqual(expect.objectContaining({advantageMode: "adv"}));
+	});
+
+	it("skill advantage never perturbs the numeric skill block", () => {
+		// Skills export as a single number from `getSkillMod`; advantage has no
+		// representation there and must not be smuggled in as a bonus.
+		const base = CharacterSheetNpcExporter.convertStateToMonster(makeState()).skill;
+		const withAdv = CharacterSheetNpcExporter.convertStateToMonster(makeState([
+			{type: "check:advantage:perception", advantage: true, name: "Keen Senses"},
+		])).skill;
+		expect(withAdv).toEqual(base);
+
+		// Control: a real numeric bonus on the same skill does move it, so the
+		// equality above is a measurement rather than two blind reads.
+		const bumped = makeState();
+		bumped._data.customModifiers.skills.perception = 5;
+		expect(CharacterSheetNpcExporter.convertStateToMonster(bumped).skill)
+			.not.toEqual(base);
+	});
+});
