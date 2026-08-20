@@ -43895,14 +43895,26 @@ class CharacterSheetState {
 	 * @param {Array<object>} materials
 	 */
 	setItemMaterialCatalog (materials) {
+		const previousSize = (this._itemMaterialCatalog || []).length;
 		this._itemMaterialCatalog = Array.isArray(materials) ? materials : [];
 		// `CharacterSheetMaterials`' static helpers are pure and catalog-free by design;
 		// this is the one shared handle they read when no catalog is passed explicitly.
 		globalThis.__csMaterialCatalog = this._itemMaterialCatalog;
+		if (!this._itemMaterialCatalog.length) return;
+
 		// Anything that failed to resolve before this point failed for want of a catalog, not
 		// because the reference was bad. Drop those records so a late-arriving brew does not
 		// leave behind warnings that are no longer true.
-		if (this._itemMaterialCatalog.length) globalThis.CharacterSheetMaterials?.clearUnresolvedReferences?.();
+		globalThis.CharacterSheetMaterials?.clearUnresolvedReferences?.();
+
+		// A brew can install *after* a character is already loaded, and every material modifier
+		// computed before that point was computed against an empty catalog -- i.e. against
+		// nothing. Without this the sheet stays silently un-materialled for the rest of the
+		// session: equipped Adamantine grants no damage reduction, and no path recomputes it,
+		// because from the inventory's point of view nothing changed.
+		if (previousSize !== this._itemMaterialCatalog.length && this._data?.inventory?.length) {
+			this._recalculateEquipmentModifiers();
+		}
 	}
 
 	/** @returns {Array<object>} */
@@ -43924,9 +43936,16 @@ class CharacterSheetState {
 	 * @param {Array<object>} resonances
 	 */
 	setDraconicResonanceCatalog (resonances) {
+		const previousSize = (this._draconicResonanceCatalog || []).length;
 		this._draconicResonanceCatalog = Array.isArray(resonances) ? resonances : [];
 		// Mirrors `__csMaterialCatalog`: the shared handle the pure static helpers read.
 		globalThis.__csResonanceCatalog = this._draconicResonanceCatalog;
+		// Same late-arrival problem as the material catalog: a resonance chosen on an item is a
+		// reference, so until its catalog exists the item's resonance contributes nothing and
+		// nothing else would ever recompute it.
+		if (this._draconicResonanceCatalog.length && previousSize !== this._draconicResonanceCatalog.length && this._data?.inventory?.length) {
+			this._recalculateEquipmentModifiers();
+		}
 	}
 
 	/** @returns {Array<object>} */

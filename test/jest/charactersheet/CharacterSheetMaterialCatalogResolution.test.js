@@ -154,3 +154,58 @@ describe("A late-arriving catalog clears stale complaints", () => {
 		expect(Materials.getUnresolvedReferences().map(r => r.name)).toEqual(["Unobtainium"]);
 	});
 });
+
+describe("A catalog that arrives after the character still takes effect", () => {
+	/**
+	 * A brew is user-installed, so it can load *after* a character. Every material modifier
+	 * computed before that point was computed against an empty catalog -- against nothing -- and
+	 * from the inventory's point of view nothing has changed since, so no ordinary path would
+	 * ever recompute them. The sheet would stay silently un-materialled for the whole session.
+	 */
+	const buildUnmaterialledWearer = () => {
+		globalThis.__csMaterialCatalog = [];
+		const st = new globalThis.CharacterSheetState();
+		st.addItem({...ADAMANTINE_PLATE});
+		const id = st.getItems().slice(-1)[0].id;
+		st._data.inventory.find(i => i.id === id).equipped = true;
+		st._recalculateMaterialModifiers();
+		return st;
+	};
+
+	it("grants damage reduction that was invisible when the character loaded", () => {
+		const st = buildUnmaterialledWearer();
+		expect(st.getNamedModifiersByType("damageReduction")).toEqual([]);
+
+		st.setItemMaterialCatalog(MATERIALS);
+
+		expect(st.getNamedModifiersByType("damageReduction")).toHaveLength(1);
+		expect(st.getNamedModifiersByType("damageReduction")[0].value).toBe(3);
+	});
+
+	it("does not recompute when the catalog is set to the same size twice", () => {
+		const st = buildUnmaterialledWearer();
+		st.setItemMaterialCatalog(MATERIALS);
+
+		let recalcs = 0;
+		const original = st._recalculateEquipmentModifiers.bind(st);
+		st._recalculateEquipmentModifiers = () => { ++recalcs; return original(); };
+		st.setItemMaterialCatalog(MATERIALS);
+
+		expect(recalcs).toBe(0);
+		expect(st.getNamedModifiersByType("damageReduction")).toHaveLength(1);
+	});
+
+	it("is safe on a state with no inventory yet", () => {
+		const st = new globalThis.CharacterSheetState();
+		expect(() => st.setItemMaterialCatalog(MATERIALS)).not.toThrow();
+		expect(st.getItemMaterialCatalog()).toHaveLength(MATERIALS.length);
+	});
+
+	it("ignores an empty catalog rather than wiping live modifiers", () => {
+		const st = buildUnmaterialledWearer();
+		st.setItemMaterialCatalog(MATERIALS);
+		st.setItemMaterialCatalog([]);
+
+		expect(st.getNamedModifiersByType("damageReduction")).toHaveLength(1);
+	});
+});

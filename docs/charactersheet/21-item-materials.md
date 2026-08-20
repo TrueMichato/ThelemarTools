@@ -1218,6 +1218,14 @@ test materials — it tests the empty-material path, and it will pass against a 
 implementation. `CharacterSheetMaterialCatalogResolution.test.js` measures the real Adamantine
 path against the authored brew for exactly this reason.
 
+**Order matters, and the setter now compensates.** A brew is user-installed, so it can load
+*after* a character. Every material modifier computed before that point was computed against an
+empty catalog, and from the inventory's point of view nothing has changed since — so no ordinary
+path would ever recompute them, and the sheet stayed silently un-materialled for the rest of the
+session. `setItemMaterialCatalog` and `setDraconicResonanceCatalog` now call
+`_recalculateEquipmentModifiers()` when a non-empty catalog changes size and an inventory exists.
+An empty catalog is ignored rather than allowed to wipe live modifiers.
+
 ## Phasing
 
 | Phase | Status | Contents |
