@@ -92913,6 +92913,7 @@
 				{
 					"type": "grantsAction",
 					"name": "Yellowwood Flurry",
+					"actionType": "bonus",
 					"appliesTo": [
 						"weapon"
 					],

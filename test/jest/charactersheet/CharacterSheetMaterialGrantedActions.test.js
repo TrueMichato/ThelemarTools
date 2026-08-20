@@ -15,6 +15,13 @@
  * - **`requiresProperty` removes the power, it does not disable it.** A stout blackwood dagger
  *   does not have an unavailable Shove; it never had one.
  *
+ * That first rule is about *code*, and the code always followed it. The Flurry was nonetheless
+ * unusable for the whole life of this suite, because the rule can only read what the brew
+ * declares and the brew declared nothing — while the Flurry's own prose said "you can use a
+ * bonus action to attack again". The data contradicted itself, and a correctly-implemented
+ * rule faithfully carried the contradiction through. The final describe below guards the data
+ * against its own prose, which is the one direction no code-side check can see.
+ *
  * Role-scoping is inherited rather than re-implemented: a Smokestone *weapon* is ordinary dense
  * stone, and only a Smokestone *focus* gets the cloud. That gate already lives in
  * `getMaterialEffects`, and this suite proves it survives the trip through `getItemPowers`.
@@ -98,24 +105,129 @@ describe("An action with no declared cost is reference-only, not a fake button",
 	let st;
 	beforeEach(() => { st = makeState(); });
 
-	it("marks Yellowwood Flurry reference-only", () => {
-		addMaterialItem(st, {name: "Yellowwood Club", materialName: "Yellowwood"});
-		const power = materialPowers(st).find(p => p.name === "Yellowwood Flurry");
+	// This block used Yellowwood Flurry as its exemplar, which was the wrong
+	// choice: the Flurry's prose says "you can use a bonus action to attack
+	// again", so it has always had a declared cost in English. It was
+	// reference-only only because the brew never carried `actionType`, and
+	// pinning that state recorded an authoring gap as if it were a design
+	// decision. Stout Blackwood's Shove is the honest exemplar — it rides on a
+	// hit you already made and there is no cost to declare.
+	it("marks Stout Blackwood Shove reference-only", () => {
+		addMaterialItem(st, {name: "Stout Blackwood Maul", materialName: "Stout Blackwood", property: ["2H"]});
+		const power = materialPowers(st).find(p => p.name === "Stout Blackwood Shove");
 		expect(power).toBeTruthy();
 		expect(power.isReferenceOnly).toBe(true);
 	});
 
 	it("explains itself with the standard reference-only message", () => {
-		addMaterialItem(st, {name: "Yellowwood Club", materialName: "Yellowwood"});
-		const power = materialPowers(st).find(p => p.name === "Yellowwood Flurry");
+		addMaterialItem(st, {name: "Stout Blackwood Maul", materialName: "Stout Blackwood", property: ["2H"]});
+		const power = materialPowers(st).find(p => p.name === "Stout Blackwood Shove");
 		expect(power.isAvailable).toBe(false);
 		expect(power.unavailableReason).toBe("Rules reference only; resolve this effect manually.");
 	});
 
 	it("still carries its full rules text so the reference is usable", () => {
+		addMaterialItem(st, {name: "Stout Blackwood Maul", materialName: "Stout Blackwood", property: ["2H"]});
+		const power = materialPowers(st).find(p => p.name === "Stout Blackwood Shove");
+		expect(power.description).toMatch(/knock it prone or push it 5 feet/i);
+	});
+});
+
+describe("Yellowwood Flurry costs a bonus action, because its own text says so", () => {
+	let st;
+	beforeEach(() => { st = makeState(); });
+
+	it("is activatable rather than reference-only", () => {
+		addMaterialItem(st, {name: "Yellowwood Club", materialName: "Yellowwood"});
+		const power = materialPowers(st).find(p => p.name === "Yellowwood Flurry");
+
+		expect(power.actionType).toBe("bonus");
+		expect(power.isReferenceOnly).toBe(false);
+		expect(power.isAvailable).toBe(true);
+	});
+
+	it("still carries its full rules text", () => {
 		addMaterialItem(st, {name: "Yellowwood Club", materialName: "Yellowwood"});
 		const power = materialPowers(st).find(p => p.name === "Yellowwood Flurry");
 		expect(power.description).toMatch(/bonus action to attack again/i);
+	});
+
+	// The shape that matters: it must be indistinguishable from a power that
+	// was authored with a cost from the start, or the Actions hub will render
+	// it as a second-class entry.
+	it("has the same shape as a power authored with a cost from the start", () => {
+		addMaterialItem(st, {name: "Yellowwood Club", materialName: "Yellowwood"});
+		addMaterialItem(st, {name: "Smokestone Orb", materialName: "Smokestone", type: "SCF", weapon: false});
+
+		const flurry = materialPowers(st).find(p => p.name === "Yellowwood Flurry");
+		const cloud = materialPowers(st).find(p => p.name === "Smokestone Cloud");
+
+		expect(flurry.actionType).toBe(cloud.actionType);
+		expect(flurry.isReferenceOnly).toBe(cloud.isReferenceOnly);
+		expect(flurry.isAvailable).toBe(cloud.isAvailable);
+		expect(flurry.unavailableReason).toBe(cloud.unavailableReason);
+	});
+});
+
+describe("a granted action whose prose names a cost must declare that cost", () => {
+	// EFFECT_HANDLING guards code against its own declarations. Nothing guarded
+	// the DATA against its own prose, which is how the Flurry stated a bonus
+	// action in English while the sheet treated it as having no cost at all.
+	// The rule was followed correctly; the entry was simply incomplete, and no
+	// code-side guard can see that.
+	const ECONOMY_PATTERNS = [
+		[/\buse a bonus action\b|\bas a bonus action\b/i, "bonus"],
+		[/\bas an action\b|\buse an action\b/i, "action"],
+		[/\bas a reaction\b|\buse your reaction\b/i, "reaction"],
+	];
+
+	const grantedActions = CATALOG.flatMap(material =>
+		(material.effects || [])
+			.filter(fx => fx.type === "grantsAction")
+			.map(fx => ({material: material.name, ...fx})));
+
+	it("finds the granted actions at all (the walk is not vacuous)", () => {
+		expect(grantedActions.length).toBeGreaterThanOrEqual(9);
+	});
+
+	it.each(ECONOMY_PATTERNS.map(([pattern, expected]) => [expected, pattern]))(
+		"every power whose text says %s declares it",
+		(expected, pattern) => {
+			const undeclared = grantedActions
+				.filter(fx => pattern.test(fx.note || ""))
+				.filter(fx => !fx.actionType)
+				.map(fx => `${fx.material}: ${fx.name}`);
+
+			expect(undeclared).toEqual([]);
+		},
+	);
+
+	// The implication runs one way only, and the brew proves it: every power
+	// authored with an `action` or `reaction` cost describes only its TRIGGER
+	// ("When an attack hits you...", "Immediately after being hit..."), never
+	// the cost. Their economy exists solely as structured data. So a guard
+	// requiring prose to name the cost would be wrong in that direction.
+	//
+	// Pinning which patterns currently fire keeps that asymmetry a recorded
+	// fact rather than an unexamined one. If a future entry states "as an
+	// action" in its text, this fails and someone looks — which is the point.
+	// A bare "no pattern is dead" assertion would instead have forced the
+	// patterns to be trimmed to whatever happens to match today.
+	it("records which economies are currently stated in prose", () => {
+		const live = ECONOMY_PATTERNS
+			.filter(([pattern]) => grantedActions.some(fx => pattern.test(fx.note || "")))
+			.map(([, expected]) => expected);
+
+		expect(live).toEqual(["bonus"]);
+	});
+
+	it("a declared cost does not have to be repeated in the prose", () => {
+		const declaredNotInProse = grantedActions
+			.filter(fx => fx.actionType === "reaction")
+			.filter(fx => !/\bas a reaction\b|\buse your reaction\b/i.test(fx.note || ""));
+
+		// All three reaction powers are in this state, deliberately.
+		expect(declaredNotInProse.length).toBeGreaterThanOrEqual(3);
 	});
 });
 

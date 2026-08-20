@@ -175,6 +175,27 @@ Notes on effects that generate no summary line of their own (`rangeMultiplier`, 
 …) are surfaced as free-standing notes so their prose is never lost. `grantsAction` is exempt
 from both rules — its note *is* the action's description.
 
+### A note that names its own cost is data, not decoration
+
+`grantsAction` decides activatable-vs-reference-only from the authored `actionType`, and only
+from it (see `EFFECT_HANDLING`). That rule is right, and the code has always followed it — but
+it can only read what the entry declares. Yellowwood's Flurry declared nothing while its own
+note said *"you can use a bonus action to attack again"*, so the sheet correctly applied the
+rule to an entry that contradicted itself, and the power sat unusable behind an accurate
+"Rules reference only" label.
+
+No code-side guard can catch that, because nothing about the code is wrong. So the check lives
+on the data: `CharacterSheetMaterialGrantedActions.test.js` walks every `grantsAction` in the
+brew and fails any whose note names an action economy without declaring a matching
+`actionType`.
+
+The implication runs one way only. Every power authored with an `action` or `reaction` cost
+describes only its **trigger** ("When an attack hits you…"), never the cost — their economy
+exists solely as structured data, and requiring the prose to repeat it would be wrong. The
+suite therefore pins *which* economies currently appear in prose (`bonus`, once) rather than
+demanding that all of them do, so the asymmetry stays a recorded fact instead of an
+unexamined one.
+
 ### Degradation and instability
 
 Some materials break, and some bite back. The two are deliberate siblings — **identical trigger
