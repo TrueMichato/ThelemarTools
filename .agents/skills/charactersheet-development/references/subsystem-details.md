@@ -1503,6 +1503,40 @@ guard's own clothes, and it is why a silence assertion needs a liveness clause o
 **Under the first mutation the six pre-existing tests all stayed green**, which is the
 demonstration that the gap was structural rather than hypothetical.
 
+### A delegated guard is only inherited on the paths that reach the delegate (v38)
+
+The v35d lesson above has a second, stronger instance, and it changes what a coverage audit
+of a guard is worth.
+
+The sibling later made the guard structural: every `itemId` lookup routes through one
+`_findInventoryRow` (`charactersheet-state.js:12956`), so an accessor cannot resolve a row
+without passing the check. Independently measured by walking the prototype for methods whose
+first parameter is literally `itemId` and calling each with the item object: **84 of 93
+audible.** The frame-walk that names the *entry point* rather than the delegate works --
+**0 mislabelled**.
+
+But two of the nine silent ones, `getItemDegradation` (`:30280`) and `getMagicCapacityStatus`
+(`:30215`), *do* delegate to the guarded `getItemRaw`. They are silent anyway. Spied on the
+delegate: it is **reached 0 times**. Both open with feature-flag early returns --
+`if (!this.isMaterialDegradationEnabled()) return null;` -- which fire before the lookup.
+
+So this is the `getEffectiveWeaponDamage` defect with a different blocker. There the early
+return was on *lookup failure*; here it is on *configuration*. The general rule:
+
+> **A guard inherited by delegation is inherited only on the paths that reach the delegate.**
+> An early return of any kind -- failure, feature flag, permission, cache hit -- silently
+> removes the guard from that path, and the code still reads as though it delegates.
+
+The consequence for auditing is the sharp part, and it bit both sessions: **audibility can
+depend on runtime configuration, so a coverage count is only valid for the configuration it
+was measured in.** Two independent records listed these two accessors as guarded; both were
+measured with materials enabled. With materials off they are silent, and *were silent before
+the refactor too* -- verified by probing the pre-refactor blob rather than trusting either
+record. There was no regression; there were two stale numbers that happened to agree.
+
+When auditing guard coverage, vary the feature flags, or state the configuration in the
+number. `84 of 93` is not a fact about the code; it is a fact about the code in one setting.
+
 ### Two ladders step the damage die, and a guard is what keeps them apart (v31)
 
 A weapon's damage die is stepped from two independent places and the export adds them:
