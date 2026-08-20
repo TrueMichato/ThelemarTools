@@ -12,6 +12,7 @@
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-materials.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+import "../../../js/charactersheet/charactersheet-rest.js";
 import {jest} from "@jest/globals";
 import {readFileSync, readdirSync} from "fs";
 import {dirname, resolve} from "path";
@@ -23,7 +24,7 @@ const CharacterSheetState = globalThis.CharacterSheetState;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../../..");
 
-const VALID_CONSUMERS = new Set(["projection", "modifier", "power", "roll", "reference"]);
+const VALID_CONSUMERS = new Set(["projection", "modifier", "power", "roll", "rest", "reference"]);
 
 function loadBrewMaterials () {
 	const raw = readFileSync(resolve(REPO_ROOT, "homebrew/TravelersGuidetoThelemar.json"), "utf8");
@@ -353,5 +354,73 @@ describe("A material's modifiers change what the sheet reports", () => {
 		const withMods = snapshot(state);
 		state._data.namedModifiers = [];
 		expect(snapshot(state)).toBe(withMods);
+	});
+});
+
+/**
+ * The `rest` channel, swept the same way as the modifier channel — and it needs its own
+ * sweep precisely BECAUSE the modifier one cannot see it.
+ *
+ * `shortRestHealingBonus` was first declared `consumer: "modifier"`. That was false by the
+ * table's own definition (it reaches no derived stat), and worse, it was false in a way no
+ * existing test could report: the modifier sweep enumerates materials that emit named
+ * modifiers, and this effect emits none. It would have sat there declared-and-unswept,
+ * which is the exact shape of the `damageReduction` failure the table warns about.
+ *
+ * So the outcome asked for here is the one the player experiences: a rest that pays more.
+ */
+describe("A material's rest effects change what a rest pays out", () => {
+	const brew = loadBrewMaterials();
+
+	const REST_TYPES = Object.entries(CharacterSheetMaterials.EFFECT_HANDLING)
+		.filter(([, spec]) => spec.consumer === "rest")
+		.map(([type]) => type);
+
+	function buildHolder (material) {
+		const state = new CharacterSheetState();
+		state.addClass({name: "Fighter", source: "PHB", level: 5});
+		state.setMaxHp(60);
+		state.setCurrentHp(1);
+		state.setItemMaterialCatalog(brew);
+		state.addItem({name: "Orb", type: "SCF", weight: 1, value: 100, quantity: 1});
+		const id = state.getItems().slice(-1)[0].id;
+		state.setItemEquipped(id, true);
+		state.setItemMaterial(id, material);
+		return state;
+	}
+
+	it("declares at least one rest-consumer type, so the sweep below is not vacuous", () => {
+		expect(REST_TYPES.length).toBeGreaterThan(0);
+	});
+
+	it.each(REST_TYPES)("%s is authored by a material and moves that material's rest", (type) => {
+		const authors = brew.filter(mat => (mat.effects || []).some(fx => fx.type === type));
+		expect(authors.length).toBeGreaterThan(0);
+
+		const failures = [];
+		for (const material of authors) {
+			const state = buildHolder(material);
+			const bonuses = state.getShortRestHealingBonuses();
+			if (!bonuses.length) { failures.push(`${material.name} authors ${type} but grants no rest bonus`); continue; }
+
+			const rest = Object.create(globalThis.CharacterSheetRest.prototype);
+			rest._state = state;
+			rest._page = {};
+			const before = state.getHp().current;
+			rest._applyRestBonusHealing({bonuses, suppressedNames: new Set(), hasSpentHitDice: true});
+			if (state.getHp().current <= before) failures.push(`${material.name}'s ${type} healed nothing`);
+		}
+		expect(failures.join("\n")).toBe("");
+	});
+
+	/**
+	 * The control. Without it, a `rest` effect that resolved to 0 for every material — or a
+	 * `getShortRestHealingBonuses` that returned everything unconditionally — would satisfy
+	 * the sweep above just as well as a working channel does.
+	 */
+	it("pays nothing for a material with no rest effect, so the sweep is not paying everyone", () => {
+		const inert = brew.find(mat => !(mat.effects || []).some(fx => REST_TYPES.includes(fx.type)));
+		expect(inert).toBeTruthy();
+		expect(buildHolder(inert).getShortRestHealingBonuses()).toEqual([]);
 	});
 });

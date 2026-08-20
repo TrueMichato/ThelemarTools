@@ -326,6 +326,11 @@ maybeDescribe("NPC export v22 — materials reach the statblock", () => {
 			roll: "attack line",
 			// Surfaces as an action/bonus/reaction/trait via getItemPowers.
 			power: "action economy section",
+			// Deliberately NOT exported. A 5e statblock has no rest phase, so there is no line
+			// for a rest payout to land on and nothing to print it next to. This is the one
+			// home that means "absent", which makes it the one an unwired type could hide
+			// behind -- see the per-type guard below.
+			rest: "not exported — a statblock has no rest phase",
 			// Deliberately a table call; prose on the bundled item is the whole treatment.
 			reference: "bundled item entries",
 		};
@@ -377,6 +382,89 @@ maybeDescribe("NPC export v22 — materials reach the statblock", () => {
 			expect(powerTypes.length).toBeGreaterThanOrEqual(3);
 			expect(powerTypes.filter(t => !MECHANISM[t])).toEqual([]);
 			expect(Object.values(MECHANISM).filter(fn => typeof CharacterSheetNpcExporter[fn] !== "function")).toEqual([]);
+		});
+
+		// v40. `rest` is the only consumer whose declared home means "absent", which makes it
+		// the only one an unwired type can hide behind: declare `consumer: "rest"` and the two
+		// category tests above go green while the effect reaches nothing anywhere. The category
+		// therefore has to keep earning the exemption, and the exemption has to be MEASURED
+		// rather than asserted -- a bare "nothing appeared" passes for a probe that never ran.
+		it("keeps rest effects off the statblock, and proves the probe could have shown one", () => {
+			const handling = CharacterSheetMaterials.EFFECT_HANDLING || {};
+			const restTypes = Object.entries(handling)
+				.filter(([, spec]) => spec?.consumer === "rest")
+				.map(([type]) => type);
+
+			// A ruling per type, so adding a rest effect forces the export question to be
+			// answered rather than inherited.
+			const RULED_NOT_EXPORTED = {
+				shortRestHealingBonus: "a statblock has no rest phase to pay out on",
+			};
+			expect(restTypes.filter(t => !RULED_NOT_EXPORTED[t])).toEqual([]);
+			expect(restTypes.length).toBeGreaterThanOrEqual(1);
+
+			const MAT = "ZzRestProbeAlloy";
+			const exportWithEffects = effects => {
+				const material = {
+					name: MAT,
+					source: "TGTT",
+					materialCategory: "metal",
+					density: 1,
+					magicCapacity: 3,
+					rarity: "uncommon",
+					roles: ["strikingSurface", "protectiveLayer", "focus"],
+					appliesTo: ["weapon", "armor", "shield", "other"],
+					effects,
+				};
+				const catalog = [...MATERIALS, material];
+				const item = {
+					id: "zz-rest-weapon",
+					name: "Rest Probe Blade",
+					source: "CUSTOM",
+					custom: true,
+					type: "weapon",
+					weapon: true,
+					weaponCategory: "martial",
+					baseItem: "longsword|xphb",
+					dmg1: "1d8",
+					dmgType: "S",
+					property: [],
+					weight: 3,
+					value: 1500,
+					material: {name: MAT, source: "TGTT"},
+				};
+				const state = new CharacterSheetState();
+				state.setItemMaterialCatalog?.(catalog);
+				state.loadFromJson({
+					name: "RestProbe",
+					classes: [{name: "Fighter", source: "PHB", level: 5}],
+					abilities: {str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10},
+					hp: {max: 44, current: 44},
+					inventory: [{id: item.id, item, quantity: 1, equipped: true}],
+				});
+				state.setItemMaterialCatalog?.(catalog);
+				return JSON.stringify(CharacterSheetNpcExporter.convertStateToMonster(state, {}));
+			};
+
+			// The control runs first and must FAIL to be silent: the same material carrying a
+			// `power` effect does put its name in the export. Without this, the negative below
+			// would also pass for a probe whose material never reached the exporter at all.
+			const control = exportWithEffects([{
+				type: "grantsAction",
+				role: "strikingSurface",
+				actionType: "bonus",
+				note: "The wielder deals 1d6 extra radiant damage on the next hit.",
+			}]);
+			expect(control).toContain(MAT);
+
+			const restOnly = exportWithEffects(restTypes.map(type => ({
+				type,
+				role: "strikingSurface",
+				value: "proficiency",
+				requiresHitDice: true,
+				note: "The wielder regains additional Hit Points equal to its Proficiency Bonus.",
+			})));
+			expect(restOnly).not.toContain(MAT);
 		});
 
 		// v33. The three tests above are all satisfied by DOWNGRADING a type to `reference`.

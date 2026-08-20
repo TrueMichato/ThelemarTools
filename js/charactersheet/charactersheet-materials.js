@@ -146,6 +146,8 @@ class CharacterSheetMaterials {
 	 * - `modifier`    — reaches a derived stat (speed, initiative, named modifiers, resistances).
 	 * - `power`       — surfaces as an item power in the Actions hub.
 	 * - `roll`        — read by the attack/damage roll path.
+	 * - `rest`        — changes the outcome of a rest. Moves nothing on the derived-stat
+	 *   surface, so the modifier sweep is structurally blind to it and it gets its own.
 	 * - `reference`   — DELIBERATELY not automated; it is a table call. Must still be visible.
 	 */
 	static EFFECT_HANDLING = {
@@ -178,6 +180,13 @@ class CharacterSheetMaterials {
 		perceptionPenaltyToNotice: {consumer: "modifier", note: "Conditional Stealth modifier: a penalty to an observer's check equals a bonus to the wearer's contested roll."},
 		spellcastingFocus: {consumer: "modifier", note: "Makes the item eligible as a spellcasting focus."},
 		draconicResonanceSlot: {consumer: "modifier", note: "Grants draconic resonance slots."},
+
+		// --- rest: changes what a rest pays out ---
+		// NOT `modifier`, though it was written that way first. It registers no named
+		// modifier and moves nothing on the derived-stat surface, so the modifier sweep
+		// would have skipped it in silence — the `damageReduction` failure this table's
+		// own warning is about, repeating one category over.
+		shortRestHealingBonus: {consumer: "rest", note: "getShortRestHealingBonuses() → CharacterSheetRest._applyRestBonusHealing() inside the Short Rest modal's confirm handler. Deliberately NOT wired through useHitDie(): the modal computes its own total and never calls it, so a state-only wiring would be invisible on the only path a player uses."},
 
 		// --- roll: read by the attack/damage path ---
 		countsAsMagical: {consumer: "roll", note: "Weapon tag; overcomes non-magical resistance."},
@@ -494,6 +503,7 @@ class CharacterSheetMaterials {
 			countsAsSilvered: false,
 			indestructible: false,
 			spellcastingFocus: false,
+			shortRestHealingBonus: null,
 			noRangedDisadvantageInMelee: false,
 			doubleNumericProperties: false,
 			penetrationIgnoresMagicalAc: false,
@@ -545,6 +555,21 @@ class CharacterSheetMaterials {
 				case "bonusWeaponDamage": out.bonusWeaponDamage += fx.value || 0; break;
 				case "bonusInitiative": out.bonusInitiative += fx.value || 0; break;
 				case "speedDelta": out.speedDelta += fx.value || 0; break;
+
+				// Kept as a spec rather than a resolved number: `value` may be the string
+				// "proficiency", and this module has no character to resolve it against.
+				//
+				// `requiresHitDice` is explicit opt-in (`=== true`), matching `isMagical`'s
+				// handling elsewhere. Defaulting an unauthored gate to ON would withhold a
+				// bonus the author never gated — and a bonus that silently fails to pay is
+				// far harder to notice than one that pays when the author meant it not to.
+				case "shortRestHealingBonus":
+					out.shortRestHealingBonus = {
+						value: fx.value ?? 0,
+						requiresHitDice: fx.requiresHitDice === true,
+						note: fx.note || null,
+					};
+					break;
 
 				case "addProperty": out.addProperties.push(...(fx.properties || [])); break;
 				case "removeProperty": out.removeProperties.push(...(fx.properties || [])); break;

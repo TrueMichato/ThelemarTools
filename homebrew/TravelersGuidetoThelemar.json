@@ -43150,6 +43150,13 @@
 					"text": "A creature that spends Hit Dice during a Short Rest while holding Cloudpearl regains additional Hit Points equal to its Proficiency Bonus."
 				},
 				{
+						"type": "shortRestHealingBonus",
+						"role": "focus",
+						"value": "proficiency",
+						"requiresHitDice": true,
+						"note": "Once per Short Rest, however many Hit Dice are spent."
+					},
+					{
 					"type": "condensateInstability",
 					"text": "Cold damage suppresses this benefit until the pearl spends 1 minute in a fire or another source of strong heat."
 				}

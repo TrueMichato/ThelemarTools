@@ -155,7 +155,7 @@ class CharacterSheetRest {
 					spentDice[hd.type]++;
 
 					eleRemaining.txt(`${remaining}`);
-					eleTotalHealing.txt(`${totalHealing}`);
+					refreshHealingTotal();
 
 					if (remaining <= 0) btn.disabled = true;
 
@@ -177,6 +177,30 @@ class CharacterSheetRest {
 				</div>`.appendTo(hdContainer);
 			});
 		}
+
+		// --- Material rest bonuses (e.g. Cloudpearl's +PB) ---
+		// Applied here rather than in `useHitDie()`, which this modal deliberately never calls
+		// (see the confirm handler). Wiring it there would leave the only path a player
+		// actually uses untouched.
+		const restBonuses = this._state.getShortRestHealingBonuses?.() || [];
+		const suppressedBonuses = new Set();
+		let eleBonusRows = [];
+
+		/**
+		 * Repaint the running total. The per-row state is written separately from the combined
+		 * figure on purpose: a player who sees only one number cannot tell a material bonus
+		 * from a lucky die, and legibility is the whole point of graduating this from prose.
+		 */
+		const refreshHealingTotal = () => {
+			const hasSpent = Object.keys(spentDice).length > 0;
+			const {total} = CharacterSheetRest.computeRestBonusHealing({bonuses: restBonuses, suppressedNames: suppressedBonuses, hasSpentHitDice: hasSpent});
+			eleTotalHealing.txt(`${totalHealing + total}`);
+			eleBonusRows.forEach(({bonus, eleState, cb}) => {
+				if (!cb.checked) return void eleState.txt("suppressed");
+				if (bonus.requiresHitDice && !hasSpent) return void eleState.txt("spend a Hit Die");
+				eleState.txt(`+${bonus.value}`);
+			});
+		};
 
 		// Footer buttons
 		const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel", click: () => doClose(false)});
@@ -314,6 +338,19 @@ class CharacterSheetRest {
 			else modalInner.append(memorizeSpell.section);
 		}
 
+		// --- Material rest bonuses ---
+		// Rendered with the other optional sections rather than inline with the Hit Dice list,
+		// because it shares their footer-relative insertion point. Building it here also means
+		// `refreshHealingTotal` has its rows before its first paint.
+		const materialBonusSection = this._buildMaterialRestBonusSection(restBonuses, suppressedBonuses, () => refreshHealingTotal());
+		if (materialBonusSection) {
+			eleBonusRows = materialBonusSection.rows;
+			const mbTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
+			if (mbTarget?.parentNode) mbTarget.parentNode.insertBefore(materialBonusSection.section, mbTarget);
+			else modalInner.append(materialBonusSection.section);
+		}
+		refreshHealingTotal();
+
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "✓ Finish Short Rest"});
 		btnConfirm.onClick(() => {
 			// Snapshot the full pre-rest state so this rest can be undone (BUG 8).
@@ -332,6 +369,15 @@ class CharacterSheetRest {
 			if (totalHealing > 0) {
 				this._state.heal(totalHealing);
 			}
+
+			// Material rest bonuses land AFTER the dice healing and are reported separately,
+			// so the log distinguishes "you rolled well" from "the pearl paid out".
+			const bonusHealing = this._applyRestBonusHealing({
+				bonuses: restBonuses,
+				suppressedNames: suppressedBonuses,
+				hasSpentHitDice: Object.keys(spentDice).length > 0,
+			});
+
 			this._restoreResources("short");
 			this._state.restoreSignatureSpells?.();
 
@@ -386,6 +432,7 @@ class CharacterSheetRest {
 
 			let message = `😴 Short rest complete!`;
 			if (totalHealing > 0) message += ` Recovered ${totalHealing} HP.`;
+			if (bonusHealing > 0) message += ` Materials added ${bonusHealing} HP.`;
 			if (slotsRecovered > 0) message += ` Recovered ${slotsRecovered} spell slot(s) via ${slotRecoveryFeatureName}.`;
 			if (spRecovered > 0) message += ` Recovered ${spRecovered} sorcery point(s).`;
 			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
@@ -409,6 +456,91 @@ class CharacterSheetRest {
 			${btnCancel}
 			${btnConfirm}
 		</div>`.appendTo(modalInner);
+	}
+
+	/**
+	 * Sum the material healing bonuses that actually pay out this rest.
+	 *
+	 * Pure and DOM-free so the ruling it encodes is directly testable. Two things are being
+	 * decided here and they are separable:
+	 *
+	 * - **Once per rest, not once per die.** The reduction is over *bonuses*, never over dice,
+	 *   so spending five Hit Dice pays a Cloudpearl exactly what spending one does.
+	 * - **`requiresHitDice` is the trigger, not the amount.** Cloudpearl's text is *"a creature
+	 *   that **spends** Hit Dice"*, so resting without spending any is not the trigger at all.
+	 *   A material may author the effect ungated, and then it pays on any short rest.
+	 *
+	 * @param {{bonuses?: *[], suppressedNames?: Set<string>, hasSpentHitDice?: boolean}} opts
+	 * @returns {{total: number, applied: *[]}}
+	 */
+	static computeRestBonusHealing ({bonuses = [], suppressedNames = new Set(), hasSpentHitDice = false} = {}) {
+		const applied = bonuses
+			.filter(it => !suppressedNames.has(it.name))
+			.filter(it => !it.requiresHitDice || hasSpentHitDice)
+			.filter(it => Number(it.value) > 0);
+		return {total: applied.reduce((total, it) => total + Number(it.value), 0), applied};
+	}
+
+	/**
+	 * Apply material rest bonuses to the character and report them.
+	 *
+	 * Deliberately separate from the dice healing rather than folded into one `heal()` call:
+	 * a player who sees a single combined number cannot tell a lucky die from a material
+	 * paying out, and the toast plus roll-history entry are what make the pearl legible.
+	 *
+	 * @param {{bonuses?: *[], suppressedNames?: Set<string>, hasSpentHitDice?: boolean}} opts
+	 * @returns {number} Hit points actually added.
+	 */
+	_applyRestBonusHealing (opts) {
+		const {total, applied} = CharacterSheetRest.computeRestBonusHealing(opts);
+		if (total <= 0) return 0;
+
+		this._state.heal(total);
+		const names = applied.map(it => it.name).join(", ");
+		JqueryUtil.doToast({type: "success", content: `💠 ${names}: +${total} HP`});
+		this._page._rollHistory?.addRoll({title: `Short Rest: ${names}`, total, breakdown: "material rest bonus"});
+		return total;
+	}
+
+	/**
+	 * Build the "Material Benefits" section for the short-rest dialog.
+	 *
+	 * Each bonus gets a **ticked** checkbox rather than an unticked one, which inverts the
+	 * sheet's usual conditional-modifier default on purpose. A conditional bonus is offered
+	 * because the sheet cannot know whether it applies; Cloudpearl's benefit is the reverse —
+	 * it applies by default and is *suppressed* by an instability (cold damage) the sheet
+	 * likewise cannot see. Unticking is the player declaring the suppression.
+	 *
+	 * @returns {{section: *, rows: *[]}|null} Null when nothing grants a bonus.
+	 */
+	_buildMaterialRestBonusSection (restBonuses, suppressedBonuses, onChange) {
+		if (!restBonuses?.length) return null;
+
+		const section = e_({outer: `<div class="charsheet__rest-section">
+			<div class="charsheet__rest-section-title">💠 Material Benefits</div>
+		</div>`});
+		const rows = [];
+
+		restBonuses.forEach(bonus => {
+			const eleState = e_({tag: "span", clazz: "charsheet__hit-die-remaining"});
+			const cb = e_({tag: "input", type: "checkbox", checked: true});
+			cb.onChange(() => {
+				if (cb.checked) suppressedBonuses.delete(bonus.name);
+				else suppressedBonuses.add(bonus.name);
+				onChange();
+			});
+
+			const gate = bonus.requiresHitDice ? " when you spend at least one Hit Die" : "";
+			ee`<label class="charsheet__rest-option">
+				${cb}
+				<span>${bonus.name}: <b>+${bonus.value} HP</b> once this rest${gate}</span>
+				${eleState}
+			</label>`.appendTo(section);
+
+			rows.push({bonus, eleState, cb});
+		});
+
+		return {section, rows};
 	}
 
 	/**

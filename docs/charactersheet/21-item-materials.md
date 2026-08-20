@@ -79,15 +79,23 @@ distinguished "deliberately narrative" from "someone forgot to wire it up".
 `CharacterSheetMaterialEffectHandling.test.js` walks all 72 materials and fails on any type that
 is unregistered, so that failure mode is now a red build rather than a disappointed player.
 
-The five consumers:
+The six consumers:
 
 | Consumer | Meaning |
 |---|---|
 | `projection` | Changes the item itself, via `applyToItem`. The projected item carries the new number. |
 | `modifier` | Becomes a named modifier on the character through `_recalculateMaterialModifiers`. |
 | `roll` | Read at roll time by `charactersheet-combat.js` — a rider, a crit change, an advantage. |
+| `rest` | Changes what a rest pays out, in `charactersheet-rest.js`. |
 | `power` | Surfaces in the Actions hub through `getItemPowers()`. |
 | `reference` | **Deliberately** not automated. Surfaced as prose because resolving it is a table decision. |
+
+A consumer is only as good as its **outcome sweep** — the test that equips every material in the
+category and requires a number to move. `modifier` has one, and it enumerates materials that emit
+*named modifiers*, which means it is structurally blind to any category that does not. That is how
+`damageReduction` sat correctly declared while nothing consumed it, and it is why `rest` was added
+as its own category with its own sweep rather than filed under `modifier`. **A category without a
+sweep is a place for claims to hide.**
 
 `reference` is a claim that has to be earned. It means someone decided the rule is a DM call,
 not that nobody got to it. Only seven types hold it, and the guard test caps that number — pushing
@@ -121,7 +129,7 @@ past the cap fails CI and forces the question to be argued rather than assumed.
 | `speedDelta` | getMaterialSpeedBonus() → getSpeed()/getSpeedByType(). |
 | `saveAdvantage` | Conditional named modifier on saves. |
 | `checkAdvantage` | Conditional named modifier on checks. |
-| `damageReduction` | Named modifier of type damageReduction. |
+| `damageReduction` | Named modifier of type `damageReduction`, consumed by `getDamageReduction()` inside `applyDamageDefenses()` — a flat reduction applied after immunity and **before** resistance halving, per RAW. |
 | `resistance` | Added to derived resistances. |
 | `immunity` | Added to derived immunities. |
 | `perceptionPenaltyToNotice` | Conditional Stealth modifier: a penalty to an observer's check equals a bonus to the wearer's contested roll. |
@@ -138,12 +146,21 @@ past the cap fails CI and forces the question to be argued rather than assumed.
 | `bonusCritDamage` | Extra dice on a critical hit. |
 | `extraDamageDiceVsType` | Extra dice against a creature type. |
 
+#### `rest`  (1)
+
+| Effect type | What actually happens |
+|---|---|
+| `shortRestHealingBonus` | `getShortRestHealingBonuses()` → `CharacterSheetRest._applyRestBonusHealing()` in the Short Rest modal's confirm handler. |
+
+This category exists because the `modifier` sweep is structurally blind to it. See
+[Cloudpearl](#cloudpearl-a-condensate-that-graduated) below.
+
 #### `power`  (3)
 
 | Effect type | What actually happens |
 |---|---|
 | `grantsAction` | Becomes an item power in the Actions hub; activatable when the author declared an `actionType`, reference-only otherwise. A `requiresProperty` gate removes it entirely. |
-| `condensateAffinity` | Becomes an item power; reference-only when it is a table call. |
+| `condensateAffinity` | Becomes an item power; reference-only when it is a table call. A material may pair it with a mechanical effect — Cloudpearl carries both, so the prose still renders *and* the number is applied. |
 | `condensateInstability` | Offered on its trigger, never auto-applied. |
 
 #### `reference`  (5)
@@ -1347,6 +1364,19 @@ instead of throwing).
 `test/jest/CraftingItemMaterials.test.js` additionally pins the two Thelemar reference rules,
 including the drift guard between the brew's Magical Interference table and the JS constant.
 
+`test/jest/charactersheet/CharacterSheetCloudpearlRest.test.js` covers the rest-bonus channel
+end to end — the state accessor, the pure arithmetic, the HP mutation, and the checkbox
+section builder.
+
+**The one honest gap:** the ~12 lines *inside* `_showShortRestDialog` that read the checkboxes
+and hand the result over are not unit-covered. The repo has no jsdom (`testEnvironment: "node"`,
+and `jest-environment-jsdom` is not installed), and the shared `setup.js` element stub cannot
+be queried or dispatched against. The E2E suite does not close it either: its
+`triggerShortRest()` calls `onShortRest()` and `_restoreResources()` directly, bypassing the
+modal. This is precisely why `computeRestBonusHealing`, `_applyRestBonusHealing` and
+`_buildMaterialRestBonusSection` were extracted out of the modal closure — the answer to an
+untestable region is to shrink it, not to mock a DOM the project does not otherwise carry.
+
 ## An empty catalog looks exactly like "no material"
 
 Materials are stored on items as a `{name, source}` **reference**; the entity itself lives in the
@@ -1420,13 +1450,122 @@ Note the shape of the bug that hid this: under an ungated loop, catalogue **heav
 printed the right number, because the first authored tier happened to be the heavy one. The case
 anyone would check first was the one case the defect could not touch.
 
+### …and then nothing read it
+
+The tiering above was correct, tested, and irrelevant, because for the whole of P1–P4 **no
+product code called `aggregateModifiers("damageReduction")`**. `takeDamage(10)` took exactly 10
+with 3 points of Adamantine DR on the sheet. `applyDamageDefenses` handled immunity, resistance
+and vulnerability and nothing else.
+
+This was never a materials bug. Heavy Armor Master — PHB *and* XPHB — registers the identical
+type through the feature-effect registry and had the identical fate, so the missing consumer is
+one hole and both subsystems fell into it.
+
+The consumer is `CharacterSheetState.getDamageReduction(damageType, {isMagicalDamage})`, applied
+inside `applyDamageDefenses` so that all three damage entry points inherit it at once.
+
+**The order is RAW and it is the counter-intuitive one.** PHB: *"Resistance and then
+vulnerability are applied after all other modifiers to damage"*, with a worked example of exactly
+this case — 25 bludgeoning, resistance, and an aura reducing damage by 5, resolving to 10, not
+7. So the pipeline is **immunity → flat DR → resistance → vulnerability**, floored at 0. DR-last
+and DR-first give different numbers on the same input, which is what makes the ordering testable
+rather than a matter of taste.
+
+Three scoping rules, each chosen against a cheaper wrong answer:
+
+- **Type scoping skips rather than guesses.** A reduction scoped to `damageTypes` cannot be
+  matched against damage with no stated type, so it does not apply. Unscoped reductions still do.
+- **`conditional` is free text, and only two clauses are machine-checkable.** `nonmagical` keys
+  on *the clause*, never on the mere presence of a condition — XPHB Heavy Armor Master drops the
+  nonmagical limit while keeping `"while wearing heavy armor"`, so gating on presence would
+  silently nerf the 2024 feat to its 2014 text. `heavy armor` is verified against what is worn.
+  Everything else applies: silently withholding a defence the player has written down is the
+  worse failure.
+- **`proficiencyBonus` is resolved, not read.** XPHB authors a bonus there rather than a flat
+  number.
+
+The UI had a matching hole. The damage prompt only asks for a type when a defence could change
+the number, and that list was built from resistances / immunities / vulnerabilities alone — so a
+character whose only defence was Adamantine was never asked, `damageType` arrived `null`, and the
+B/P/S-scoped reduction could not match. `getDamageReductionDamageTypes()` closes it, and
+`hasNonmagicalDamageReduction()` decides whether the magical-damage toggle is worth showing at
+all. A model-side fix alone would have been unreachable through the only path a player has.
+
+## Cloudpearl, a condensate that graduated
+
+Cloudpearl's affinity — *"a creature that spends Hit Dice during a Short Rest while holding
+Cloudpearl regains additional Hit Points equal to its Proficiency Bonus"* — was free text for
+the whole of P3. It now carries a second, mechanical effect alongside the prose:
+
+```json
+{"type": "shortRestHealingBonus", "role": "focus", "value": "proficiency",
+ "requiresHitDice": true, "note": "Once per Short Rest, however many Hit Dice are spent."}
+```
+
+Four decisions are worth recording, because each of them had a cheaper wrong answer.
+
+**Once per rest, not once per die.** The wording puts one condition on the rest — *spends Hit
+Dice* — rather than a rider on each die. `CharacterSheetRest.computeRestBonusHealing` reduces
+over *bonuses* and takes no die count at all, so there is nothing for a die count to multiply.
+That is structural, not disciplined: reintroducing per-die payment would require adding a
+parameter, which a test pins.
+
+**It is a new effect type, not a name check.** `EFFECT_HANDLING` keys on effect *type*, and
+Cloudpearl and Ashglass are both `condensateAffinity`. A type is what lets one graduate while
+the other stays a `power`, and it means any future material can pay out on a rest without
+touching code.
+
+**"While holding" is free.** The effect is authored `role: "focus"`, and `getMaterialEffects`
+already suppresses every non-descriptive effect whose role is not the item's active one. No
+holding check was written.
+
+**`requiresHitDice` is explicit opt-in.** An unauthored gate defaults to *off* (`=== true`,
+matching `isMagical`). Defaulting it on would withhold a bonus the author never gated, and a
+bonus that silently fails to pay is far harder to notice than one that pays too readily.
+
+### Why it lives in the modal and not in `useHitDie()`
+
+`useHitDie()` is the obvious home and it is the wrong one. The Short Rest modal accumulates
+its **own** `totalHealing` and deliberately never calls `useHitDie` — there is a comment in
+the confirm handler saying so, to avoid healing twice. A bonus wired into `useHitDie` would
+be a real function, correctly computed, reachable by a unit test, and **invisible on the only
+path a player takes**.
+
+### The instability is an offer, and it is ticked by default
+
+Cold damage suppresses the benefit until the pearl spends a minute in a fire. The sheet cannot
+know that happened, so the modal renders a **ticked** checkbox per bonus and unticking it is
+the player declaring the suppression.
+
+This inverts the sheet's usual conditional-modifier default on purpose, and the distinction is
+worth holding onto: a conditional *bonus* is offered unticked because the sheet cannot know it
+applies; Cloudpearl's benefit applies by default and is *withdrawn* by an instability the sheet
+likewise cannot see. Same ignorance, opposite default.
+
+### The registry entry that was false for a day
+
+`shortRestHealingBonus` was first declared `consumer: "modifier"`. That was false by the
+table's own definition — it reaches no derived stat — and it was false in a way no existing
+test could report. The modifier sweep enumerates materials that emit **named modifiers**, and
+this effect emits none, so it would have sat declared-and-unswept: the exact shape of the
+`damageReduction` failure the table's own warning is about, one category over.
+
+The fix was a new `consumer: "rest"` category *with its own outcome sweep* — equip every
+material authoring a `rest` type, apply the bonus, require hit points to actually move — plus
+a control proving the sweep is not simply paying everyone. A category without a sweep is a
+declaration; a category with one is evidence.
+
+**Ashglass stays a `power`** by ruling: its resistance needs a per-instance lifecycle (charges
+consumed on a triggering hit, restored by a specific act) that the sheet has no concept of.
+Graduating it would mean inventing that lifecycle, not wiring an existing one.
+
 ## Phasing
 
 | Phase | Status | Contents |
 |---|---|---|
 | **P1 — Core** | **done** | 72 entities, loader + settings, die ladder, projection, weight/value/penetration, all three UI entry points, the `MTL` crafting-page entity, tests, docs |
 | **P2 — Magic Capacity** | **done** | Effect counter, `n/MC` badge, `∞`/`−∞`, DC 15 + overage roll, d8 interference table, per-material MC exceptions, manual ±1 adjustment, post-rest re-check |
-| **P3 — Draconic / Blood / Ioun** | **done** | ✅ 18 condensates (role-gated) · ✅ 18 Draconic Domain Resonances · ✅ Dragon Blood's twelve uses (pre-existing, in `charactersheet-spells.js`) · ✅ Ioun Sand matrices, fragments and geode prose |
+| **P3 — Draconic / Blood / Ioun** | **done** | ✅ 18 condensates (role-gated, Cloudpearl's affinity mechanised as a `rest` effect) · ✅ 18 Draconic Domain Resonances · ✅ Dragon Blood's twelve uses (pre-existing, in `charactersheet-spells.js`) · ✅ Ioun Sand matrices, fragments and geode prose |
 | **P4 — Durability & Degradation** | **done** | ✅ Object Durability + Magical Interference reference tables on the crafting page · ✅ degradation auto-detect on nat-1 / crit / fire, stacks, shatter, manual + short-rest repair |
 
 ## Known limitations

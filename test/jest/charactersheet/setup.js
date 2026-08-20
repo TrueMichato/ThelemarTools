@@ -43,6 +43,16 @@ globalThis.e_ = function (opts = {}) {
 		addEventListener (eventName, handler) { this._handlers[eventName] = handler; },
 		removeEventListener (eventName) { delete this._handlers[eventName]; },
 		click () { this._handlers.click?.(); },
+		// Event-binding sugar the `js/` modules use in place of `addEventListener`. Additive:
+		// before these existed any call threw, so no passing test can depend on their absence.
+		onn (evt, handler) { this._handlers[evt] = handler; return this; },
+		onClick (handler) { this._handlers.click = handler; return this; },
+		onChange (handler) { this._handlers.change = handler; return this; },
+		txt (v) { this.textContent = `${v}`; return this; },
+		appendTo (parent) { parent?.append?.(this); return this; },
+		find () { return globalThis.e_({}); },
+		checked: opts.checked ?? false,
+		disabled: opts.disabled ?? false,
 		setAttribute () {},
 		getAttribute () { return null; },
 		remove () {},

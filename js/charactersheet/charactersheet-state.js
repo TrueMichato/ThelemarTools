@@ -13640,6 +13640,34 @@ class CharacterSheetState {
 			.map(it => ({name: it.material.name, value: Number(it.fx.bonusInitiative)}));
 	}
 
+	/**
+	 * Flat healing an equipped material adds to a Short Rest (Cloudpearl +PB).
+	 *
+	 * ONCE PER REST, not once per Hit Die — the authored wording is *"a creature that spends
+	 * Hit Dice during a Short Rest … regains additional Hit Points equal to its Proficiency
+	 * Bonus"*, which is a single condition on the rest and not a rider on each die. Hence
+	 * `requiresHitDice`: the bonus is gated on spending at least one die, and is then added
+	 * exactly once however many are spent.
+	 *
+	 * `value` may be the string `"proficiency"`, which is resolved here because this is the
+	 * first point in the chain that has a character to resolve it against.
+	 *
+	 * @returns {Array<{name: string, value: number, requiresHitDice: boolean, note: string|null}>}
+	 */
+	getShortRestHealingBonuses () {
+		const out = [];
+		for (const {material, fx} of this.getEquippedMaterialEffects()) {
+			const spec = fx.shortRestHealingBonus;
+			if (!spec) continue;
+			const value = spec.value === "proficiency"
+				? this.getProficiencyBonus()
+				: Number(spec.value) || 0;
+			if (!value) continue;
+			out.push({name: material.name, value, requiresHitDice: spec.requiresHitDice, note: spec.note});
+		}
+		return out;
+	}
+
 	_recalculateMaterialModifiers ({isDeferAggregate = false} = {}) {
 		if (!Array.isArray(this._data.namedModifiers)) this._data.namedModifiers = [];
 
