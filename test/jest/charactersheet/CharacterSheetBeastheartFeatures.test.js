@@ -770,6 +770,31 @@ describe("Synchronized Stealth (Hunter, 11th)", () => {
 		expect(mods.total || 0).toBe(0);
 	});
 
+	// The assertion above queries "check:advantage:stealth" — the exact string the
+	// feature is REGISTERED with — so it matches by construction and passed for as
+	// long as the registration existed, including the entire period the feature was
+	// unreachable from any actual roll. A real Stealth check issues "skill:stealth".
+	// Ask the question in the caller's vocabulary, not the registration's.
+	it("surfaces on the roll type a real Stealth check actually issues", () => {
+		makeBeastheart({level: 11, bond: "Hunter"});
+
+		const mods = state.aggregateModifiers("skill:stealth");
+		const offered = mods.conditionalsAvailable || [];
+
+		expect(offered.some(m => /Synchronized Stealth/i.test(m.source || m.name || ""))).toBe(true);
+		// Still opt-in, never automatic.
+		expect(mods.advantage).toBe(false);
+	});
+
+	it("does not leak onto unrelated skills", () => {
+		makeBeastheart({level: 11, bond: "Hunter"});
+
+		["skill:perception", "skill:athletics", "skill:survival"].forEach(query => {
+			const offered = state.aggregateModifiers(query).conditionalsAvailable || [];
+			expect(offered.some(m => /Synchronized Stealth/i.test(m.source || m.name || ""))).toBe(false);
+		});
+	});
+
 	it("is absent for a 10th-level Hunter", () => {
 		makeBeastheart({level: 10, bond: "Hunter"});
 		const mods = state.aggregateModifiers("check:advantage:stealth");

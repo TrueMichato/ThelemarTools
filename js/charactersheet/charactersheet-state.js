@@ -52896,6 +52896,21 @@ class CharacterSheetState {
 	 * @param {string} subtype - Lowercased sub-type token.
 	 * @returns {boolean}
 	 */
+	/**
+	 * Collapse a skill selector to a comparable key: lower-cased, with spaces,
+	 * hyphens and underscores removed. "Animal Handling", "animal handling" and
+	 * "animalhandling" all normalise to the same thing, so the several
+	 * vocabularies in play (registry sub-types, roll query strings, the
+	 * `standardSkills` set) can be compared without each inventing its own
+	 * spelling rule.
+	 * @param {string} value
+	 * @returns {string}
+	 */
+	static _normalizeSkillKey (value) {
+		if (!value) return "";
+		return String(value).toLowerCase().replace(/[\s_-]+/g, "");
+	}
+
 	static _isConditionalSaveSubtype (/** @type {string} */ subtype) {
 		if (!subtype) return false;
 		const lower = String(subtype).toLowerCase();
@@ -52910,7 +52925,7 @@ class CharacterSheetState {
 			"animalhandling", "insight", "medicine", "perception", "survival",
 			"deception", "intimidation", "performance", "persuasion",
 		]);
-		if (standardSkills.has(lower)) return false;
+		if (standardSkills.has(CharacterSheetState._normalizeSkillKey(lower))) return false;
 		return true;
 	}
 
@@ -53232,6 +53247,15 @@ class CharacterSheetState {
 				// Get the skill's ability
 				const skillAbility = this._getSkillAbility(specific);
 				if (modSpecific === "all" || modSpecific === skillAbility) matches = true;
+				// A `check:<skill>` modifier names the skill directly rather than its
+				// ability (Keen Senses' "check:advantage:perception", Synchronized
+				// Stealth's "check:advantage:stealth"). Neither the ability match above
+				// nor `_isConditionalSaveSubtype` can see those: the former compares
+				// against "wis"/"dex", and the latter deliberately excludes standard
+				// skill names because a skill is a *selector*, not a condition. Both
+				// choices are right on their own terms, and together they left every
+				// skill-selected modifier unreachable from the roll that should read it.
+				if (!matches && CharacterSheetState._normalizeSkillKey(modSpecific) === CharacterSheetState._normalizeSkillKey(specific)) matches = true;
 			}
 
 			// Initiative is a special case - it's a DEX check

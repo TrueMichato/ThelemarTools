@@ -826,6 +826,26 @@ A `Set<string>` of conditional modifier IDs (from `_buildConditionalModId`) that
 
 `getAdvantageState(type, opts)` and `getModifierBonus(type, opts)` forward `opts` unchanged.
 
+### Registration vocabulary vs. query vocabulary
+
+A modifier is **registered** with one string (`modType`) and **read** with another (the roll type a caller passes). These are different vocabularies, and `getModifiersForType` is the only thing that connects them:
+
+| Registered | Read from | Connected by |
+|---|---|---|
+| `check:dex` | `skill:stealth` | the skill's ability |
+| `save:advantage:frightened` | `save:wis` | `_isConditionalSaveSubtype` → synthesized conditional |
+| `check:advantage:perception` | `skill:perception` | `_normalizeSkillKey` name match |
+| `d20:all` | any d20 roll | explicit category list |
+
+**A registration with no path is silent.** It parses, stores, renders in the feature list, and never reaches a roll. `check:advantage:perception` (Keen Senses) and `check:advantage:stealth` (Synchronized Stealth) sat in exactly that state: the ability branch compares sub-types against `"wis"`/`"dex"`, and `_isConditionalSaveSubtype` deliberately excludes standard skill names because a skill is a *selector*, not a condition. Both rules are correct in isolation; together they left skill-selected modifiers with no route at all.
+
+Two consequences worth carrying:
+
+- **Never test a modifier by querying its own registration string.** `aggregateModifiers("check:advantage:stealth")` exact-matches by construction, so it passes whether or not any roll can reach the modifier. Query the roll type the feature actually affects (`skill:stealth`). The tautological form of this test existed and passed for the entire life of the bug — see `CharacterSheetBeastheartFeatures.test.js`, where both variants now sit side by side.
+- **Assert reachability per type, not per category.** `check:*` had a home the whole time; `check:advantage:perception` reached it through nothing. `CharacterSheetModifierReachability.test.js` walks all 18 standard skills so the next skill-selected modifier cannot be born dead.
+
+`_normalizeSkillKey` is the single spelling rule shared by the match branch and `_isConditionalSaveSubtype`. Routing both through it is what stops a two-word skill (`"Animal Handling"`) from being a selector to one and a condition to the other.
+
 ---
 
 *Previous: [Components Reference](./03-components-reference.md) | Next: [Feature Calculations](./05-feature-calculations.md)*
