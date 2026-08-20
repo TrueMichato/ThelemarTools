@@ -8,6 +8,45 @@ notes for whoever fixes it.
 When fixing one, move the entry to the **Resolved** section with a
 commit reference rather than deleting it.
 
+## Convention: put the *status* in the test title, not just the ID
+
+A test title carrying `CS-BUG-NNN` can mean two opposite things — a
+**regression guard** asserting the fixed behaviour, or a
+**characterization** asserting the behaviour the bug still produces.
+Nothing in the ID distinguishes them, so a reader who trusts the title
+can invert the meaning of the assertion.
+
+Write the status into the title:
+
+```js
+it("CS-BUG-170 (FIXED in v39): disabled-but-conditional now reaches the line too", ...)
+```
+
+Measured across `test/jest/` at the time of writing:
+
+| | count |
+|---|---|
+| bug IDs appearing in a test **title** (`it`/`test`/`describe`) | **72** |
+| — of those, carrying an explicit status marker | **1** |
+| bug IDs anywhere in `test/jest/` (titles + comments + bodies) | 179 |
+| `## CS-BUG-` headings in this file | 99 |
+| — of those, carrying a trailing `— OPEN`/`— FIXED` marker | **30** |
+
+The status marker in *this* file cannot serve as the discriminator,
+because 69 of 99 entries do not carry one. The title is the only place
+the reader is already looking.
+
+Two measurement traps, both hit while establishing the above:
+
+- **Scope the grep to the whole title, not its first token.** A pattern
+  anchored as `it("CS-BUG-` returns **5**, because it misses every
+  `describe()` and every trailing parenthetical (`... (CS-BUG-118)`).
+  The true count is 72 — off by 14×, and in the direction that makes
+  the problem look already solved.
+- A characterization test is only reachable by `jest -t` if the ID is
+  in the **title**; 107 of the 179 mentions are in comments or bodies
+  and are invisible to the runner.
+
 ---
 
 ## Phase 16 — E2E spec doctrine sweep (no-blind-spots)
