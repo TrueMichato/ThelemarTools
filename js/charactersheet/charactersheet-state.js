@@ -12835,7 +12835,7 @@ class CharacterSheetState {
 	 * @returns {boolean}
 	 */
 	setItemChosenSpellImmunities (itemId, spells) {
-		const entry = this._data.inventory?.find(i => i.id === itemId);
+		const entry = this._findInventoryRow(itemId);
 		if (!entry?.item) return false;
 		const slots = entry.item.spellImmunitySlots;
 		const max = Math.max(0, Number(slots?.count) || 0);
@@ -12861,7 +12861,7 @@ class CharacterSheetState {
 	 * @returns {Array<{name: string, source?: string}>}
 	 */
 	getItemChosenSpellImmunities (itemId) {
-		const entry = this._data.inventory?.find(i => i.id === itemId);
+		const entry = this._findInventoryRow(itemId);
 		const list = entry?.item?.chosenSpellImmunities;
 		return Array.isArray(list) ? list.map(s => ({...s})) : [];
 	}
@@ -12916,9 +12916,61 @@ class CharacterSheetState {
 		globalThis.console?.warn?.(`[charactersheet] ${methodName}() expects an item id, got an object.${hint} It will return an empty result, which is indistinguishable from "no such item".`);
 	}
 
+	/**
+	 * Name the accessor the *consumer* called, for the misuse warning only.
+	 *
+	 * Naming the innermost frame is wrong when accessors delegate: a bad `getMaterialRole(item)`
+	 * surfaces as `getItemRaw()` and sends the reader to a call site they never wrote. So walk
+	 * outward while the frame is still inside this file and keep the last one -- the first frame
+	 * from another file is the consumer, and the frame just inside it is the entry point.
+	 *
+	 * Engine-specific and best-effort by design: it runs *only* on the failure path, where a
+	 * slightly wrong label still beats the silence it replaces, and it falls back to a generic
+	 * noun rather than throwing if the stack format is unfamiliar.
+	 * @returns {string}
+	 */
+	static _callerName () {
+		const frames = new Error().stack?.split("\n").slice(3) || [];
+		let name = null;
+		for (const frame of frames) {
+			if (!frame.includes("charactersheet-state.js")) break;
+			name = frame.match(/at\s+(?:[\w$.]+\.)?([\w$]+)/)?.[1] || name;
+		}
+		return name || "an item accessor";
+	}
+
+	/**
+	 * The single place an `itemId` is resolved to its inventory row.
+	 *
+	 * Every `itemId`-taking accessor used to inline `find(i => i.id === itemId)`, which meant the
+	 * misuse guard had to be attached by hand and so covered 6 of 36 accessors -- the other 30
+	 * stayed silent, including three that had already eaten a false finding. Routing the lookup
+	 * through one function makes the guard structural: an accessor cannot resolve a row without
+	 * passing it.
+	 *
+	 * The object test is repeated here so the stack walk never runs on the happy path; these
+	 * accessors are called per-render.
+	 * @param {string} itemId
+	 * @returns {object|undefined} The inventory row, or `undefined` when there is no such item.
+	 */
+	_findInventoryRow (itemId) {
+		this._warnIfNotItemIdFromCaller(itemId);
+		return (this._data.inventory || []).find(row => row.id === itemId);
+	}
+
+	/**
+	 * The misuse warning, for the two lookups that cannot use `_findInventoryRow` because they
+	 * also match a *nested* `item.id`. Their two matchers differ from each other in a real (if
+	 * narrow) way, so they are deliberately left inline rather than unified -- but the guard is
+	 * the same one, so there is still a single mechanism.
+	 * @param {*} itemId
+	 */
+	_warnIfNotItemIdFromCaller (itemId) {
+		if (itemId && typeof itemId === "object") this._warnIfNotItemId(itemId, CharacterSheetState._callerName());
+	}
+
 	getEffectiveItemBonuses (itemId) {
-		this._warnIfNotItemId(itemId, "getEffectiveItemBonuses");
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem) return {};
 
 		const item = invItem.item || invItem;
@@ -13113,8 +13165,7 @@ class CharacterSheetState {
 	getEffectiveWeaponDamage (itemId) {
 		// A third, independent lookup site: this early-returns before it ever reaches
 		// `getEffectiveItemBonuses` below, so it does not inherit that method's guard.
-		this._warnIfNotItemId(itemId, "getEffectiveWeaponDamage");
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem) return null;
 
 		// Read the PROJECTED item — a material rewrites `dmg1` at read time and never touches
@@ -13326,6 +13377,7 @@ class CharacterSheetState {
 	 * @returns {Array<{label: string, description: string, type: "passive"|"active"|"reactive"|"drawback"}>}
 	 */
 	getItemMaterialNotes (itemId) {
+		this._warnIfNotItemIdFromCaller(itemId);
 		if (typeof CharacterSheetMaterials === "undefined") return [];
 		if (this._data.settings?.enableMaterials === false) return [];
 		const invItem = (this._data.inventory || []).find(it => (it.id || it.item?.id) === itemId);
@@ -30063,8 +30115,7 @@ class CharacterSheetState {
 	 * @returns {object|null}
 	 */
 	getItemRaw (itemId) {
-		this._warnIfNotItemId(itemId, "getItemRaw");
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem) return null;
 		return {
 			id: invItem.id,
@@ -30119,7 +30170,7 @@ class CharacterSheetState {
 	 * @returns {boolean} Whether anything changed.
 	 */
 	setItemMaterial (itemId, material, choices = null) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem?.item) return false;
 
 		if (!material) return this.clearItemMaterial(itemId);
@@ -30143,7 +30194,7 @@ class CharacterSheetState {
 	 * @returns {boolean}
 	 */
 	clearItemMaterial (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem?.item?.material) return false;
 		delete invItem.item.material;
 		this._onItemMaterialChanged();
@@ -30338,7 +30389,7 @@ class CharacterSheetState {
 	 * @returns {object|null} The new standing, or `null` if nothing applied.
 	 */
 	degradeItemMaterial (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem?.item?.material) return null;
 		const mat = this.getItemMaterialEntity(invItem.item);
 		const spec = CharacterSheetMaterials.getDegradationSpec(mat);
@@ -30360,7 +30411,7 @@ class CharacterSheetState {
 	 * @returns {boolean} Whether anything changed.
 	 */
 	repairItemMaterial (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		const material = invItem?.item?.material;
 		if (!material) return false;
 		if (!material.degradationStacks && !material.isDestroyed) return false;
@@ -30400,7 +30451,7 @@ class CharacterSheetState {
 	 * @returns {number}
 	 */
 	getMagicCapacityAdjust (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		return Number(invItem?.item?.material?.mcAdjust) || 0;
 	}
 
@@ -30410,7 +30461,7 @@ class CharacterSheetState {
 	 * @returns {boolean} Whether anything changed.
 	 */
 	setMagicCapacityAdjust (itemId, delta) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem?.item?.material) return false;
 		const next = Number(delta) || 0;
 		if ((Number(invItem.item.material.mcAdjust) || 0) === next) return false;
@@ -30431,7 +30482,7 @@ class CharacterSheetState {
 	}
 
 	setMaterialRole (itemId, role) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem?.item?.material) return false;
 		const material = this.getItemMaterialEntity(invItem.item);
 		if (!material) return false;
@@ -30458,7 +30509,7 @@ class CharacterSheetState {
 	 * @returns {boolean} Whether anything changed.
 	 */
 	setDraconicResonance (itemId, ref) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem?.item?.material) return false;
 		const material = this.getItemMaterialEntity(invItem.item);
 		if (!material) return false;
@@ -30565,7 +30616,7 @@ class CharacterSheetState {
 	 * @returns {boolean}
 	 */
 	setItemHandsUsed (itemId, handsUsed) {
-		const invItem = (this._data.inventory || []).find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem?.item) return false;
 
 		const parsedHands = Math.floor(Number(handsUsed));
@@ -30592,7 +30643,7 @@ class CharacterSheetState {
 	 * @returns {boolean}
 	 */
 	updateInventoryItemAttackOverrides (itemId, {attackOverrides, customAttackBonus, customDamageBonus} = {}) {
-		const invItem = (this._data.inventory || []).find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem || !invItem.item || typeof invItem.item !== "object") return false;
 
 		if (attackOverrides === null) delete invItem.item.attackOverrides;
@@ -31574,7 +31625,7 @@ class CharacterSheetState {
 			};
 		}
 		if (power.isDestructive && !confirmed) return {ok: false, needsConfirmation: true, power};
-		const entry = this._data.inventory.find(it => it.id === itemId);
+		const entry = this._findInventoryRow(itemId);
 		if (!entry?.item) return {ok: false, reason: "Item not found."};
 		let isActive = power.isActive;
 		if (power.isToggle) {
@@ -31639,7 +31690,7 @@ class CharacterSheetState {
 	 * @returns {Array<object>} Array of activation abilities or empty array
 	 */
 	getItemActivation (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		return invItem?.item?.activation || [];
 	}
 
@@ -31700,7 +31751,7 @@ class CharacterSheetState {
 	 * @returns {Array<object>} Array of conditional bonuses or empty array
 	 */
 	getItemConditionalBonuses (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		return invItem?.item?.conditionalBonuses || [];
 	}
 
@@ -31755,7 +31806,7 @@ class CharacterSheetState {
 	 * @returns {boolean}
 	 */
 	isArtifact (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		return invItem?.item?.rarity === "artifact";
 	}
 
@@ -31765,7 +31816,7 @@ class CharacterSheetState {
 	 * @returns {object|null} Requirements object or null
 	 */
 	getArtifactPropertyRequirements (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		return invItem?.item?.artifactProperties?.requirements || null;
 	}
 
@@ -31775,7 +31826,7 @@ class CharacterSheetState {
 	 * @returns {Array} Array of selected property objects
 	 */
 	getArtifactProperties (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		return invItem?.item?.artifactProperties?.selected || [];
 	}
 
@@ -31785,7 +31836,7 @@ class CharacterSheetState {
 	 * @returns {boolean}
 	 */
 	isArtifactFullyConfigured (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem?.item?.artifactProperties) return true; // Not an artifact
 
 		const {requirements, selected} = invItem.item.artifactProperties;
@@ -31822,7 +31873,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if added successfully
 	 */
 	setArtifactProperty (itemId, type, property) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem?.item?.artifactProperties) return false;
 
 		if (!invItem.item.artifactProperties.selected) {
@@ -31846,7 +31897,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if removed successfully
 	 */
 	removeArtifactProperty (itemId, index) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem?.item?.artifactProperties?.selected) return false;
 
 		if (index >= 0 && index < invItem.item.artifactProperties.selected.length) {
@@ -32978,7 +33029,7 @@ class CharacterSheetState {
 		this.removeItemFromContainer(itemId);
 
 		// If item is a container, "uncontain" all its items first
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (item?.item?.containedItems?.length) {
 			item.item.containedItems = [];
 		}
@@ -33014,7 +33065,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if the item was found and replaced
 	 */
 	replaceItem (itemId, newItemProps) {
-		const wrapper = this._data.inventory.find(i => i.id === itemId);
+		const wrapper = this._findInventoryRow(itemId);
 		if (!wrapper) return false;
 
 		// Strip any wrapper-level props that might be present on the incoming object
@@ -33060,7 +33111,7 @@ class CharacterSheetState {
 	}
 
 	setItemQuantity (itemId, quantity) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (item) {
 			if (quantity <= 0) {
 				this.removeItem(itemId);
@@ -33071,7 +33122,7 @@ class CharacterSheetState {
 	}
 
 	setItemEquipped (itemId, equipped) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (item) {
 			const wasActive = this._isItemProficienciesActive(item);
 			item.equipped = equipped;
@@ -33101,7 +33152,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if item was found and equipped
 	 */
 	equip (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (invItem) {
 			invItem.equipped = true;
 
@@ -33133,7 +33184,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if item was found and unequipped
 	 */
 	unequip (itemId) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (item) {
 			item.equipped = false;
 			// A set stone is by definition functioning, so taking it out of use must also take
@@ -33150,7 +33201,7 @@ class CharacterSheetState {
 	}
 
 	setItemAttuned (itemId, attuned) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (item) {
 			const wasActive = this._isItemProficienciesActive(item);
 			item.attuned = attuned;
@@ -33182,7 +33233,7 @@ class CharacterSheetState {
 	 * @param {boolean} starred - Whether the item is starred
 	 */
 	setItemStarred (itemId, starred) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (item) item.starred = starred;
 	}
 
@@ -33192,7 +33243,7 @@ class CharacterSheetState {
 	 * @returns {boolean} The new starred status
 	 */
 	toggleItemStarred (itemId) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (item) {
 			item.starred = !item.starred;
 			return item.starred;
@@ -33214,7 +33265,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if attunement succeeded, false if at capacity or item not found
 	 */
 	attune (itemId) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (!item) return false;
 
 		// Check if already at max attunement — items whose own rules exempt them from the
@@ -33232,12 +33283,12 @@ class CharacterSheetState {
 	 * @param {string} itemId - The item ID
 	 */
 	unattune (itemId) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (item) this.setItemAttuned(itemId, false);
 	}
 
 	setItemCharges (itemId, charges) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (item && item.item.charges) {
 			item.item.chargesCurrent = Math.max(0, Math.min(charges, item.item.charges));
 		}
@@ -33407,7 +33458,7 @@ class CharacterSheetState {
 	 *   `{itemId, name, isDice, formula, rolls, amount, previous, newCharges, restored, didChange, breakdown, committed}`
 	 */
 	rechargeItemCharges (itemId, {rolledAmount = null, commit = true} = {}) {
-		const entry = this._data.inventory.find(i => i.id === itemId);
+		const entry = this._findInventoryRow(itemId);
 		const itemData = entry?.item;
 		if (!itemData || !itemData.charges) return null;
 
@@ -33468,7 +33519,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if charges were used
 	 */
 	useItemCharge (itemId, charges = 1) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (!item?.item) return false;
 
 		const current = item.item.chargesCurrent ?? item.item.charges ?? 0;
@@ -33490,7 +33541,7 @@ class CharacterSheetState {
 	 * @returns {boolean}
 	 */
 	isConsumable (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem?.item) return false;
 		const type = invItem.item.type;
 		// P = Potion, SC = Scroll
@@ -33503,7 +33554,7 @@ class CharacterSheetState {
 	 * @returns {boolean}
 	 */
 	isPotion (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		return invItem?.item?.type === "P";
 	}
 
@@ -33513,7 +33564,7 @@ class CharacterSheetState {
 	 * @returns {boolean}
 	 */
 	isSpellScroll (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		return invItem?.item?.type === "SC";
 	}
 
@@ -33523,7 +33574,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if item was consumed
 	 */
 	consumeItem (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem) return false;
 
 		const quantity = invItem.quantity || 1;
@@ -33667,7 +33718,7 @@ class CharacterSheetState {
 	 * @returns {object|null} The matching spellEffect entry, or null
 	 */
 	getVariantComponentEffects (itemId, spell, spellData = null) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem?.item?.variantComponent?.spellEffects?.length) return null;
 
 		const spellUid = `${spell.name}|${spell.source}`.toLowerCase();
@@ -33940,7 +33991,7 @@ class CharacterSheetState {
 	 * @returns {object|null} {dice: string, modifier?: number} or null
 	 */
 	getItemHealingEffect (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem?.item) return null;
 
 		const item = invItem.item;
@@ -33983,7 +34034,7 @@ class CharacterSheetState {
 	 * @returns {object|null} {name: string, source?: string, level?: number} or null
 	 */
 	getScrollSpell (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem?.item) return null;
 
 		const item = invItem.item;
@@ -34064,7 +34115,7 @@ class CharacterSheetState {
 	 */
 	putItemInContainer (itemId, containerId) {
 		const container = this._data.inventory.find(i => i.id === containerId);
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 
 		if (!container?.item?.containerCapacity) {
 			return {success: false, error: "Target is not a container"};
@@ -34137,7 +34188,7 @@ class CharacterSheetState {
 		// Calculate used weight
 		let weightUsed = 0;
 		containedItems.forEach(itemId => {
-			const item = this._data.inventory.find(i => i.id === itemId);
+			const item = this._findInventoryRow(itemId);
 			if (item) {
 				weightUsed += (item.item?.weight || 0) * (item.quantity || 1);
 			}
@@ -34172,7 +34223,7 @@ class CharacterSheetState {
 	 * @returns {boolean}
 	 */
 	isContainer (itemId) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		return !!item?.item?.containerCapacity;
 	}
 
@@ -34186,7 +34237,7 @@ class CharacterSheetState {
 	 * @returns {string|null} tier name or null
 	 */
 	getVestigeTier (itemId) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		return item?.item?.vestigeTier || null;
 	}
 
@@ -34199,7 +34250,7 @@ class CharacterSheetState {
 	 * @returns {string|null} "vestige" or "dragon" or null
 	 */
 	getItemTierType (itemId) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		return item?.item?.itemTierType || null;
 	}
 
@@ -34210,7 +34261,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if set successfully
 	 */
 	setVestigeTier (itemId, tier) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (!item?.item?.vestigeTier) return false;
 
 		const tierType = item.item.itemTierType;
@@ -34232,7 +34283,7 @@ class CharacterSheetState {
 	 * @returns {object} {success: boolean, newTier?: string, error?: string}
 	 */
 	upgradeVestige (itemId) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (!item?.item?.vestigeTier) {
 			return {success: false, error: "Item is not a tiered item"};
 		}
@@ -34309,7 +34360,7 @@ class CharacterSheetState {
 	 * @returns {object} {success: boolean, error?: string}
 	 */
 	applyItemUpgrade (itemId, upgrade, costPaid = 0) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (!item) return {success: false, error: "Item not found"};
 
 		if (!Array.isArray(item.item.appliedUpgrades)) item.item.appliedUpgrades = [];
@@ -34345,7 +34396,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if removed
 	 */
 	removeItemUpgrade (itemId, upgradeName, upgradeSource) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (!item?.item?.appliedUpgrades?.length) return false;
 
 		const idx = item.item.appliedUpgrades.findIndex(
@@ -34365,7 +34416,7 @@ class CharacterSheetState {
 	 * @returns {Array} Array of applied upgrade entries
 	 */
 	getItemUpgrades (itemId) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		return item?.item?.appliedUpgrades || [];
 	}
 
@@ -34520,7 +34571,7 @@ class CharacterSheetState {
 	 * @returns {object} {success: boolean, error?: string}
 	 */
 	socketGemstone (itemId, gemstone) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (!item) return {success: false, error: "Item not found"};
 
 		if (!Array.isArray(item.item.socketedGemstones)) item.item.socketedGemstones = [];
@@ -34549,7 +34600,7 @@ class CharacterSheetState {
 	 * @returns {boolean} Whether the gem was found and updated
 	 */
 	markGemstoneEmpowered (itemId, gemstoneData, display = {}) {
-		const wrapper = this._data.inventory.find(i => i.id === itemId);
+		const wrapper = this._findInventoryRow(itemId);
 		if (!wrapper) return false;
 
 		if (display.name != null) wrapper.item.name = display.name;
@@ -34568,7 +34619,7 @@ class CharacterSheetState {
 	 * @returns {object|null} The removed gemstone data, or null
 	 */
 	unsocketGemstone (itemId, gemstoneName) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (!item?.item?.socketedGemstones?.length) return null;
 
 		const idx = item.item.socketedGemstones.findIndex(g => g.name === gemstoneName);
@@ -34605,7 +34656,7 @@ class CharacterSheetState {
 	 * @returns {Array} Array of socketed gemstone entries
 	 */
 	getSocketedGemstones (itemId) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		return item?.item?.socketedGemstones || [];
 	}
 
@@ -34616,7 +34667,7 @@ class CharacterSheetState {
 	 * @returns {object} {success: boolean, remaining?: number, error?: string}
 	 */
 	useGemstoneCharge (itemId, gemstoneName) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		const gem = item?.item?.socketedGemstones?.find(g => g.name === gemstoneName);
 		if (!gem) return {success: false, error: "Gemstone not found"};
 		const descriptor = typeof CharacterSheetUpgrades !== "undefined" ? CharacterSheetUpgrades.getGemstoneDescriptor(gem) : null;
@@ -34637,7 +34688,7 @@ class CharacterSheetState {
 	 * @param {number} amount - Charges to restore
 	 */
 	restoreGemstoneCharges (itemId, gemstoneName, amount = 1) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		const gem = item?.item?.socketedGemstones?.find(g => g.name === gemstoneName);
 		const descriptor = typeof CharacterSheetUpgrades !== "undefined" ? CharacterSheetUpgrades.getGemstoneDescriptor(gem) : null;
 		const definition = descriptor?.resource || (gem?.charges != null ? {key: "charges"} : null);
@@ -34661,7 +34712,7 @@ class CharacterSheetState {
 	 * @returns {object} {success: boolean, error?: string}
 	 */
 	useGemstoneDaily (itemId, gemstoneName) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		const gem = item?.item?.socketedGemstones?.find(g => g.name === gemstoneName);
 		if (!gem) return {success: false, error: "Gemstone not found"};
 		const descriptor = typeof CharacterSheetUpgrades !== "undefined" ? CharacterSheetUpgrades.getGemstoneDescriptor(gem) : null;
@@ -34678,7 +34729,7 @@ class CharacterSheetState {
 	 * @param {string} gemstoneName - The gemstone power name
 	 */
 	resetGemstoneDaily (itemId, gemstoneName) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		const gem = item?.item?.socketedGemstones?.find(g => g.name === gemstoneName);
 		const descriptor = gem && typeof CharacterSheetUpgrades !== "undefined" ? CharacterSheetUpgrades.getGemstoneDescriptor(gem) : null;
 		const resource = descriptor?.resource && gem?.runtime?.resources?.[descriptor.resource.key];
@@ -34813,7 +34864,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if marked successfully
 	 */
 	useResourceRestoration (itemId) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (!item?.item?.resourceRestoration) return false;
 		item.item.resourceRestoration.used = true;
 		return true;
@@ -34836,7 +34887,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if available to use
 	 */
 	isResourceRestorationAvailable (itemId) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (!item?.item?.resourceRestoration) return false;
 		return !item.item.resourceRestoration.used;
 	}
@@ -34918,7 +34969,7 @@ class CharacterSheetState {
 	 * @returns {object} {success: boolean, error?: string}
 	 */
 	storeSpell (itemId, spellData) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (!item?.item?.maxSpellLevels) {
 			return {success: false, error: "Item cannot store spells"};
 		}
@@ -34952,7 +35003,7 @@ class CharacterSheetState {
 	 * @returns {object|null} The cast spell data, or null if failed
 	 */
 	castStoredSpell (itemId, spellIndex) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (!item?.item?.storedSpells?.length) return null;
 
 		if (spellIndex < 0 || spellIndex >= item.item.storedSpells.length) return null;
@@ -34968,7 +35019,7 @@ class CharacterSheetState {
 	 * @returns {Array} Array of stored spell objects
 	 */
 	getStoredSpells (itemId) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		return item?.item?.storedSpells || [];
 	}
 
@@ -34978,7 +35029,7 @@ class CharacterSheetState {
 	 * @returns {object} {maxLevels, usedLevels, remainingLevels, spells}
 	 */
 	getSpellStoringCapacity (itemId) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (!item?.item?.maxSpellLevels) {
 			return {maxLevels: 0, usedLevels: 0, remainingLevels: 0, spells: []};
 		}
@@ -35000,7 +35051,7 @@ class CharacterSheetState {
 	 * @returns {boolean}
 	 */
 	canStoreSpells (itemId) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		return !!item?.item?.maxSpellLevels;
 	}
 
@@ -35632,7 +35683,7 @@ class CharacterSheetState {
 	 * @returns {boolean} Whether anything was restored
 	 */
 	dematerialiseIounHostBonuses (itemId) {
-		const row = this._data.inventory.find(i => i.id === itemId);
+		const row = this._findInventoryRow(itemId);
 		const data = row?.item;
 		if (!data?.iounBaseBonuses) return false;
 		for (const [key, base] of Object.entries(data.iounBaseBonuses)) data[key] = base;
@@ -49792,7 +49843,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if item was found and updated
 	 */
 	updateItemNote (itemId, note) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		if (!item) return false;
 		item.note = note || "";
 		return true;
@@ -49804,7 +49855,7 @@ class CharacterSheetState {
 	 * @returns {string} The note content or empty string
 	 */
 	getItemNote (itemId) {
-		const item = this._data.inventory.find(i => i.id === itemId);
+		const item = this._findInventoryRow(itemId);
 		return item?.note || "";
 	}
 
@@ -51111,7 +51162,7 @@ class CharacterSheetState {
 	 * @private
 	 */
 	_applyItemProficiencies (itemId) {
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		if (!invItem) return;
 
 		const itemData = invItem.item || invItem;
@@ -51450,7 +51501,7 @@ class CharacterSheetState {
 		if (Array.isArray(this._data.acFormulas)) {
 			this._data.acFormulas = this._data.acFormulas.filter(formula => formula.sourceFeatureId !== sourceId);
 		}
-		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const invItem = this._findInventoryRow(itemId);
 		const effects = invItem?.item?.effects;
 		if (Array.isArray(effects)) {
 			for (const effect of effects) {
@@ -65942,6 +65993,7 @@ class CharacterSheetState {
 	 * @returns {object|null} The inventory entry (with id, item, quantity, equipped, attuned) or null
 	 */
 	getItem (itemId) {
+		this._warnIfNotItemIdFromCaller(itemId);
 		const entry = this._data.inventory.find(e => e.id === itemId || e.item?.id === itemId);
 		if (!entry) return null;
 

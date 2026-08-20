@@ -1,5 +1,6 @@
 import "./setup.js";
 import {jest} from "@jest/globals";
+import {readFileSync} from "fs";
 import "../../../js/charactersheet/charactersheet-materials.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 
@@ -137,5 +138,90 @@ describe("An item accessor called with the item instead of its id says so", () =
 		expect(state.getItemRaw("no-such-item")).toBeNull();
 		expect(state.getEffectiveItemBonuses("no-such-item")).toEqual({});
 		expect(warn).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * The guard above was attached by hand, one call site at a time, and so covered 6 of the 94
+ * `itemId`-taking accessors. The other 88 resolved their row with their own inline
+ * `find(i => i.id === itemId)` and stayed silent -- including three that had already eaten a
+ * false finding.
+ *
+ * Routing every lookup through `_findInventoryRow` makes the guard structural rather than
+ * remembered: an accessor cannot resolve a row without passing it. These tests pin that
+ * property, so the next accessor someone adds inherits the guard instead of re-opening the hole.
+ */
+describe("The misuse guard is structural, not attached by hand", () => {
+	let warn;
+
+	const SOURCE = readFileSync(new URL("../../../js/charactersheet/charactersheet-state.js", import.meta.url), "utf8");
+
+	/** Accessors that resolve a row through the shared helper, read off the source itself so the
+	 * list cannot drift as accessors are added or removed. */
+	const routed = () => Object.getOwnPropertyNames(CharacterSheetState.prototype)
+		.filter(n => !n.startsWith("_") && n !== "constructor")
+		.filter(n => {
+			const fn = Object.getOwnPropertyDescriptor(CharacterSheetState.prototype, n)?.value;
+			return typeof fn === "function" && fn.toString().includes("_findInventoryRow(itemId)");
+		});
+
+	beforeEach(() => {
+		CharacterSheetState._warnedItemIdMisuse?.clear();
+		warn = jest.spyOn(globalThis.console, "warn").mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		warn.mockRestore();
+		CharacterSheetState._warnedItemIdMisuse?.clear();
+	});
+
+	it("covers a broad family of accessors, not a handful", () => {
+		// A bound derived from the file rather than written down, so it cannot record the day it
+		// was authored. If someone re-inlines the lookups this drops and the test says so.
+		expect(routed().length).toBeGreaterThan(20);
+	});
+
+	it("names the accessor the caller actually called, never the one it delegates to", () => {
+		const mislabelled = [];
+		for (const name of routed()) {
+			CharacterSheetState._warnedItemIdMisuse?.clear();
+			warn.mockClear();
+			const state = makeState();
+			try {
+				state[name]({...WEAPON});
+			} catch (ignored) {
+				// Mutators may fail on a bogus row; the guard fires at the lookup, before that.
+			}
+			const msg = warn.mock.calls.map(c => String(c[0])).find(m => m.includes("expects an item id"));
+			if (msg && !msg.includes(`${name}()`)) mislabelled.push(`${name} -> ${msg.slice(18, 60)}`);
+		}
+		expect(mislabelled).toEqual([]);
+	});
+
+	it("makes accessors audible that were silent before it existed", () => {
+		// Each of these resolved its own row inline and said nothing when handed an item.
+		for (const name of ["getMaterialRole", "getItemUpgrades", "getSocketedGemstones", "getItemActivation", "getItem", "getItemMaterialNotes"]) {
+			CharacterSheetState._warnedItemIdMisuse?.clear();
+			warn.mockClear();
+			makeState()[name]({...WEAPON});
+
+			const msg = warn.mock.calls.map(c => String(c[0])).find(m => m.includes("expects an item id"));
+			expect(`${name}: ${msg ? "warned" : "SILENT"}`).toBe(`${name}: warned`);
+			expect(msg).toContain(`${name}(item.id)`);
+		}
+	});
+
+	it("leaves no inventory id lookup inlined for the guard to miss", () => {
+		// Matches any lambda name: the first mechanical sweep keyed on `i =>` and missed a site
+		// that used `it =>`, which this leg is what caught.
+		const lines = SOURCE.split("\n");
+		const helperAt = lines.findIndex(l => l.includes("_findInventoryRow (itemId) {"));
+		const inlined = lines
+			.map((line, i) => [i + 1, line])
+			// The helper's own lookup is the one that is supposed to exist.
+			.filter(([n]) => helperAt < 0 || n <= helperAt || n > helperAt + 4)
+			.filter(([, line]) => /_data\.inventory[^;]*\.find\(\s*\w+\s*=>\s*\w+\.id === itemId\s*\)/.test(line));
+
+		expect(inlined.map(([n, l]) => `${n}: ${l.trim()}`)).toEqual([]);
 	});
 });
