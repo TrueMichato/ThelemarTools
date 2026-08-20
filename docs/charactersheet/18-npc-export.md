@@ -2067,6 +2067,54 @@ the export on at least one item role.** That is the assertion that would catch a
 reaching *no* surface at all, which is the real failure mode and the one a single-slot
 probe cannot see. It RED-verifies against a product mutation and names its offenders.
 
+### v34 — the corpus was validating a degraded export
+
+`getEffectiveItemBonuses` guards on **both** `CharacterSheetMaterials` and
+`CharacterSheetUpgrades` being defined, and returns the item untouched when either is
+missing — silently. In the app the script tags supply them; under Jest only an explicit
+import does. That is the shallow half.
+
+The deeper half is that importing the module is not enough: the **catalog must also be
+seeded**. `CharacterSheetNpcExporter.realsaves.test.js` seeded `setDivineFavorCatalog` and
+never `setItemMaterialCatalog`, so no material resolved for any real save. The sheet was
+saying so the whole time —
+
+```
+[charactersheet] Unresolved material reference "Steeline" (TGTT):
+the material catalog is empty - it was never loaded. Its effects will be silently absent.
+```
+
+— to a test run that discarded stdout.
+
+Measured: seeding the catalog changes **4 of 25 corpus exports** (Aldor, Arthur, Mikase,
+Missy). Every corpus-wide contract had been asserted against exports with those characters'
+materials structurally removed.
+
+**The fix is one seeded constructor, not eight seeded call sites.** Eight places loaded a
+save; two remembered divine favour and none remembered materials, which is what a per-site
+convention reliably produces. `loadStateFrom()` now makes the seeded state the only
+reachable one.
+
+### v34b — an absolute bound records the day it was written
+
+Seeding the catalog broke exactly one assertion, and it was the right one to break. A4
+capped a replacement attack's prose at `< 400` characters; with materials resolving,
+Mikase's Starlight Arc reads 435, because it legitimately gained **crit range 19–20** and
+**Penetrating Blow** — both attack-affecting material mechanics that project doctrine
+*requires* on the attack line.
+
+The line was correct and the bound was wrong. Raising `400` to `450` would have been the
+same move as downgrading a type to `reference`: making the guard agree with the code by
+lowering it.
+
+The assertion two lines above already stated the right principle — it derives `parentHit`
+from the parent weapon rather than hardcoding it, "because pinning the literal number here
+only records whatever the item bonuses happened to total on the day the test was written."
+The length bound violated the philosophy its own neighbour stated. It is now derived the
+same way: a replacement attack is the parent's line retargeted plus its own die, so the
+bound is `parentLen + 150`. Self-adjusting, and tight — 435 against 452. RED-verified by
+lengthening only replacement attacks (541 > 452).
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 

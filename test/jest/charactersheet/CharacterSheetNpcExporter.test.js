@@ -1,5 +1,11 @@
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+// `getEffectiveItemBonuses` guards on BOTH of these being defined and returns the item
+// untouched when either is missing -- silently, with no error. In the app the script tags
+// supply them; in Jest only an explicit import does. Without these two lines any test here
+// that touched an item material or upgrade would pass while measuring nothing.
+import "../../../js/charactersheet/charactersheet-upgrades.js";
+import "../../../js/charactersheet/charactersheet-materials.js";
 import {CharacterSheetNpcExporter} from "../../../js/charactersheet/charactersheet-npc-exporter.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;

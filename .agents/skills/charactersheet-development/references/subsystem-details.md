@@ -1265,6 +1265,33 @@ a test for only one invites the other: silence the duplicate by dropping the cla
 gap returns. The matrix test asserts `gaps === []` *and* `dupes === []` across every
 condensate and every item role.
 
+### Importing the module is half the seeding; the catalog is the other half (v34)
+
+`getEffectiveItemBonuses` no-ops silently when `CharacterSheetMaterials` **or**
+`CharacterSheetUpgrades` is undefined, so a Jest file that omits either import measures a
+degraded object with no error. Less obvious, and worse: importing the module still resolves
+nothing unless `setItemMaterialCatalog()` is also called. A test can import correctly, load
+a real save, and still export as though the character had no materials.
+
+The NPC-export corpus suite did exactly that for its whole life — **4 of 25 exports change**
+once the catalog is seeded. The sheet emits an explicit "the material catalog is empty"
+warning that a test run simply discards, which is worth remembering: **the codebase may
+already be reporting the fault to a channel nobody is reading.**
+
+Seed through **one helper**, never per call site. Eight load sites, two of which remembered
+one catalog and none the other, is the predictable outcome of a convention.
+
+### Derive a bound, or it records the day it was written (v34)
+
+An absolute threshold in a test (`length < 400`) silently encodes the state of the world at
+authoring time. When the corpus fixture was corrected, that bound failed on content the
+export was *right* to have gained — and the tempting fix, raising the number, is the same
+error as reclassifying a failing item into a bucket that asserts nothing.
+
+Derive the bound from a sibling quantity whenever one exists (here: the parent attack the
+replacement is a retargeting of). A derived bound survives a fixture correction; a literal
+one converts every legitimate gain into a false failure and trains people to bump it.
+
 ### A classification reachable by neglect is not a classification (v33)
 
 A completeness guard that enumerates categories can be satisfied by moving a failing item

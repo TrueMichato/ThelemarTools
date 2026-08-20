@@ -21,6 +21,7 @@ import "../../../js/charactersheet/charactersheet-state.js";
 // the generic Ioun-stone preamble shipped unnoticed — the harness never took that path.
 import "../../../js/charactersheet/charactersheet-ioun.js";
 import "../../../js/charactersheet/charactersheet-upgrades.js";
+import "../../../js/charactersheet/charactersheet-materials.js";
 import "../../../js/charactersheet/charactersheet-npc-exporter.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
@@ -46,15 +47,38 @@ const availableTable = available.length ? available : ["(no npc-exports/ corpus 
 
 // The app seeds this from loaded homebrew; without it `getDivineFavorGodData()` returns
 // null and the exporter can never resolve a god's tiers.
-const DIVINE_FAVOR_CATALOG = (() => {
+const BREW = (() => {
 	const brewPath = path.resolve(process.cwd(), "homebrew", "TravelersGuidetoThelemar.json");
-	if (!fs.existsSync(brewPath)) return [];
+	if (!fs.existsSync(brewPath)) return {};
 	try {
-		return JSON.parse(fs.readFileSync(brewPath, "utf8")).divineFavor || [];
+		return JSON.parse(fs.readFileSync(brewPath, "utf8")) || {};
 	} catch {
-		return [];
+		return {};
 	}
 })();
+
+const DIVINE_FAVOR_CATALOG = BREW.divineFavor || [];
+
+// The same class of seeding as the one above, and it was absent. An unseeded catalog
+// resolves no material at all -- the sheet itself warns "the material catalog is empty ...
+// its effects will be silently absent" -- so four of these characters (Aldor, Arthur,
+// Mikase, Missy) were being validated against an export with their materials structurally
+// removed. Measured: seeding this changes 4 of 25 corpus exports.
+const ITEM_MATERIAL_CATALOG = BREW.itemMaterial || [];
+
+// One seeded constructor for every call site. Eight places loaded a save; two remembered to
+// seed divine favour and none seeded materials, which is exactly the failure a per-site
+// convention produces. A helper makes the seeded state the only reachable one.
+const loadStateFrom = (fileName) => {
+	const state = new CharacterSheetState();
+	// Seeded before and after: the catalog must be present while the inventory hydrates,
+	// and `loadFromJson` replaces state wholesale.
+	state.setItemMaterialCatalog?.(ITEM_MATERIAL_CATALOG);
+	state.loadFromJson(JSON.parse(fs.readFileSync(path.join(SAVE_DIR, fileName), "utf8")));
+	state.setItemMaterialCatalog?.(ITEM_MATERIAL_CATALOG);
+	state.setDivineFavorCatalog?.(DIVINE_FAVOR_CATALOG);
+	return state;
+};
 
 // Conversion is the expensive part (a full state load plus an ~80-pass pipeline), and the
 // corpus-wide contracts each want every character. Memoized on name + options: the
@@ -64,9 +88,7 @@ const MONSTER_CACHE = new Map();
 const loadMonster = (name, opts = {}) => {
 	const key = `${name}|${JSON.stringify(opts)}`;
 	if (!MONSTER_CACHE.has(key)) {
-		const state = new CharacterSheetState();
-		state.loadFromJson(JSON.parse(fs.readFileSync(path.join(SAVE_DIR, `${name}.json`), "utf8")));
-		state.setDivineFavorCatalog?.(DIVINE_FAVOR_CATALOG);
+		const state = loadStateFrom(`${name}.json`);
 		MONSTER_CACHE.set(key, CharacterSheetNpcExporter.convertStateToMonster(state, opts));
 	}
 	return MONSTER_CACHE.get(key);
@@ -137,8 +159,7 @@ describeReal("CharacterSheetNpcExporter — real saves", () => {
 				// invents a *source*, so only sourced tags have to be in the vocabulary.
 				.filter(t => t.includes("|"))
 				.map(t => t.split("|")[0].toLowerCase()))];
-			const state = new CharacterSheetState();
-			state.loadFromJson(JSON.parse(fs.readFileSync(path.join(SAVE_DIR, `${name}.json`), "utf8")));
+			const state = loadStateFrom(`${name}.json`);
 			// Prose enrichment is limited to multi-word names (single words like "shield"
 			// are ordinary English); item entries tag directly from item data.
 			const known = new Set([
@@ -263,8 +284,7 @@ describeReal("CharacterSheetNpcExporter — real saves", () => {
 		// ---- v5 fidelity contracts -------------------------------------------
 
 		it("states every save whose effective value beats the bare ability modifier", () => {
-			const state = new CharacterSheetState();
-			state.loadFromJson(JSON.parse(fs.readFileSync(path.join(SAVE_DIR, `${name}.json`), "utf8")));
+			const state = loadStateFrom(`${name}.json`);
 			// An always-on aura (Aura of Protection) is not part of the sheet's displayed
 			// breakdown but does apply to every save the NPC rolls, so the block may print
 			// more — provided a trait on the block explains it. It may never print less.
@@ -280,8 +300,7 @@ describeReal("CharacterSheetNpcExporter — real saves", () => {
 		});
 
 		it("reports effective, not canonical, skill bonuses", () => {
-			const state = new CharacterSheetState();
-			state.loadFromJson(JSON.parse(fs.readFileSync(path.join(SAVE_DIR, `${name}.json`), "utf8")));
+			const state = loadStateFrom(`${name}.json`);
 			Object.entries(mon.skill || {}).forEach(([key, value]) => {
 				const skillKey = key.split("|")[0];
 				expect(Number(value)).toBe(state.getSkillMod(skillKey));
@@ -386,8 +405,7 @@ describeReal("CharacterSheetNpcExporter — real saves", () => {
 
 		it("emits initiative only when it beats the bare Dexterity modifier", () => {
 			available.forEach(name => {
-				const state = new CharacterSheetState();
-				state.loadFromJson(JSON.parse(fs.readFileSync(path.join(SAVE_DIR, `${name}.json`), "utf8")));
+				const state = loadStateFrom(`${name}.json`);
 				const mon = loadMonster(name);
 				const dexMod = state.getAbilityMod("dex");
 				const effective = state.getInitiativeBreakdown().total;
@@ -1791,8 +1809,16 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			expect(arc.entries[0]).toMatch(/\{@damage 1d8\+10\} slashing damage/);
 			// The extra die lands inside the damage sentence, not after the line's last period.
 			expect(arc.entries[0]).not.toMatch(/magical\.,/);
-			// …and states only what the line cannot carry.
-			expect(arc.entries.join(" ").length).toBeLessThan(400);
+			// …and states only what the line cannot carry. Derived from the parent for the same
+			// reason `parentHit` is: a replacement attack is the parent's line retargeted plus
+			// its own die, so the bound that expresses the intent is "not much longer than the
+			// line it replaces". An absolute number here silently encodes whatever the item
+			// happened to carry the day it was written -- this one read 400, calibrated before
+			// the material catalog was seeded, and every material mechanic the attack legitimately
+			// gained (crit range, Penetrating Blow) counted against it.
+			const arcLen = arc.entries.join(" ").length;
+			const parentLen = parent.entries.join(" ").length;
+			expect(arcLen).toBeLessThan(parentLen + 150);
 			expect(arc.entries.join(" ")).not.toMatch(/dissipates|equidistant|forgo/i);
 		});
 
@@ -2112,8 +2138,7 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			// A power's `description` holds only its Range/Manifestation Time headers, so
 			// reading that field credited a level 20 Talent with none of its own damage.
 			// Assert against the model rather than a CR number, which moves with the corpus.
-			const state = new CharacterSheetState();
-			state.loadFromJson(JSON.parse(fs.readFileSync(path.join(SAVE_DIR, "Phirse.json"), "utf8")));
+			const state = loadStateFrom("Phirse.json");
 			const damaging = (state.getFeatures() || [])
 				.filter(f => f?._entityType === "psionicPower")
 				.filter(f => /\b\d+d\d+\b/.test(JSON.stringify(f.modes || [])));
@@ -2286,9 +2311,7 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
  */
 describeReal("v20 — companion items travel with the monster", () => {
 	const loadState = (name) => {
-		const state = new CharacterSheetState();
-		state.loadFromJson(JSON.parse(fs.readFileSync(path.join(SAVE_DIR, `${name}.json`), "utf8")));
-		state.setDivineFavorCatalog?.(DIVINE_FAVOR_CATALOG);
+		const state = loadStateFrom(`${name}.json`);
 		return state;
 	};
 
