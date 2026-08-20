@@ -239,3 +239,62 @@ describe("v21 — the helper's die-only contract", () => {
 		expect(globalThis.CharacterSheetUpgrades.increaseDamageDie("2d6", 1)).toBe("2d8");
 	});
 });
+
+describe("v36 — the rider path's `enabled` gate is pinned, not merely present", () => {
+	// The gate at charactersheet-npc-exporter.js:9815 drops a conditional damage modifier
+	// registered `enabled: false` -- which is exactly how the sheet registers a *text-parsed*
+	// conditional, and which `getModifiersForType` deliberately admits via its CS-BUG-053
+	// carve-out (charactersheet-state.js:53253). Two gates on one channel, disagreeing.
+	//
+	// Deleting that line was measured against the whole exporter suite: 1160/1160 stayed
+	// green, including the 953-test corpus, while a control that suppressed every rider
+	// turned 8 red. So the suite could see riders and still could not see *which* modifiers
+	// were admitted to them. These two tests close that hole.
+	const duelingState = ({enabled}) => {
+		const state = makeFighter();
+		state.addItem({
+			name: "Longsword",
+			source: "PHB",
+			dmg1: "1d8",
+			dmgType: "slashing",
+			type: "M",
+			weaponCategory: "martial",
+			properties: [],
+			equipped: true,
+		});
+		state._data.namedModifiers.push({
+			type: "damage:melee:oneHanded",
+			value: 2,
+			enabled,
+			conditional: "wielding one melee weapon and no other weapons",
+			name: "Dueling",
+		});
+		return state;
+	};
+
+	const riderTextFor = (state) => {
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		return String(out.action.find(a => a.name === "Longsword").entries[0]);
+	};
+
+	it("control: the same modifier, enabled, does reach the line as a rider", () => {
+		// Without this the assertion below passes just as well when the rider path is
+		// broken outright, or when this fixture never produced a rider to begin with.
+		const entry = riderTextFor(duelingState({enabled: true}));
+		expect(getDamage(entry)).toBe("1d8+5");
+		expect(entry).toMatch(/plus \{@damage 2\} damage when wielding one melee weapon/i);
+	});
+
+	it("CS-BUG-170: the same modifier, disabled-but-conditional, is silently dropped", () => {
+		// This pins a KNOWN DEFECT so it is visible rather than invisible. The sheet admits
+		// this modifier; the export does not, and a DM running the statblock deals 2 less
+		// damage per hit than the character does.
+		//
+		// When CS-BUG-170 is fixed, this test SHOULD fail -- invert it to expect the rider,
+		// and see the bug entry for why the one-line fix (deleting the gate) is not the fix:
+		// Dueling registers twice and the first-wins dedup keeps the truncated conditional.
+		const entry = riderTextFor(duelingState({enabled: false}));
+		expect(getDamage(entry)).toBe("1d8+5");
+		expect(entry).not.toMatch(/wielding one melee weapon/i);
+	});
+});

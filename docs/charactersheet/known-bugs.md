@@ -10023,3 +10023,17 @@ JSON.stringify(mon).includes("Dueling");   // false
 **die** against `getEffectiveWeaponDamage().dice` and says nothing about
 the flat bonus or about riders. A guard that checks one component of a
 number is silent about the others.
+
+**Now pinned (v36).** The gate was measured to be defended by **0 of the
+1160** tests in the exporter suite -- deleting `:9815` left every one of
+them green, including the 953-test corpus that reads all 45 real saves.
+A control that suppressed *every* rider turned 8 red, so the suite could
+see riders and still could not see which modifiers were admitted to them.
+
+`CharacterSheetNpcExporter.weaponDamage.test.js`, `describe("v36 -- the
+rider path's \`enabled\` gate is pinned, not merely present")` now carries
+two tests: a control proving an `enabled: true` Dueling modifier does
+reach the line, and a characterization of this defect. **When CS-BUG-170
+is fixed the second test will fail** -- invert it to expect the rider.
+RED-verified: deleting the gate fails the characterization and leaves the
+control green.

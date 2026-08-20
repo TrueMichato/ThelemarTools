@@ -1405,6 +1405,11 @@ cache; aggregates walk the array directly:
 | `push({…, enabled: false, conditional})` + recalc | `0` | **`1`** |
 | `addNamedModifier()` | **`5`** | **`1`** |
 
+> **The test is the authority; this table is a transcription.** The executable copy is
+> `CharacterSheetModifierReachability.test.js` &rarr; `describe("the two gates a raw
+> namedModifiers push has to clear")`. `testing-guide.md` carries a second prose copy.
+> If the three ever disagree, the test wins and both tables are stale.
+
 **Correction (v35e): `enabled` is not the universal gate.** An earlier revision of this
 section said it was. The two readers gate differently, and the difference is a *policy*, not
 plumbing:
