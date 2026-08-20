@@ -621,9 +621,20 @@ What is flagged today:
 |---|---|---|
 | `data/itemupgrades.json` | **Enchanted**, **Magical**, **Arcane** | The only three of thirty that invoke magic — spellcasting-focus bonuses, and counting as magical for resistance |
 | `homebrew/TravelersGuidetoThelemar.json` | all 39 `GS:*` gemstone powers | They carry `rarity` and `craftingDC`: magic items by construction |
-| `homebrew/TravelersGuidetoThelemar.json` | **Blessed**, **Mirrored**, **Specifically Tempered**, **Copper Plated** | The four `AU` tags that grant damage resistance. No mundane crafting in 5e grants resistance — that is the province of magic, or of a *material*, which is a separate axis |
+| `homebrew/TravelersGuidetoThelemar.json` | **Blessed**, **Mirrored** | Two of the four `AU` resistance tags. Necrotic and radiant resistance are divine in this setting |
 
-Absence of the field means mundane; the flag is never written `false` in data. Note that
+The other two `AU` resistance tags — **Specifically Tempered** (fire/cold/lightning/thunder) and
+**Copper Plated** (acid) — are authored `isMagical: false`. They used to be flagged, on the
+reasoning that *"no mundane crafting in 5e grants damage resistance."* That is a sound
+generalisation about 5e and the wrong authority for the question: magicality here is a **setting
+ruling**, not a derivation from the base game. Tempering steel against the elemental four and
+plating armour in copper against acid are metallurgy and chemistry — expensive craft, not
+enchantment. The distinction matters because a magical upgrade consumes Magic Capacity, so this
+ruling gives back two slots on any armour carrying them.
+
+Absence of the field means mundane, and those two are the only entries written `false`
+explicitly — an authored statement that the question was asked and answered, as distinct from an
+absence, which means "written before the field existed" and sends the resolver to the catalog. Note that
 *Gem Socket* is **not** magical — the socket is a fitting, and the gem set into it is counted
 separately.
 

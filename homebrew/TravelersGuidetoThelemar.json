@@ -35464,7 +35464,7 @@
 			"upgradeType": [
 				"AU"
 			],
-			"isMagical": true,
+			"isMagical": false,
 			"cost": "600 gp",
 			"prerequisite": [
 				{
@@ -35512,7 +35512,7 @@
 			"upgradeType": [
 				"AU"
 			],
-			"isMagical": true,
+			"isMagical": false,
 			"cost": "500 gp",
 			"prerequisite": [
 				{

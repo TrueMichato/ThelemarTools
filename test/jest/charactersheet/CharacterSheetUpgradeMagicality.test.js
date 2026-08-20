@@ -130,13 +130,62 @@ describe("Upgrade magicality", () => {
 			expect(gems.filter(u => u.isMagical !== true)).toEqual([]);
 		});
 
-		it("flags the brew's resistance-granting armour tags and nothing else in AU", () => {
+		it("flags two of the brew's four resistance-granting armour tags", () => {
 			const {itemUpgrade} = readJson("homebrew/TravelersGuidetoThelemar.json");
 			const au = itemUpgrade.filter(u => (u.upgradeType || []).includes("AU"));
 			const magical = au.filter(u => u.isMagical).map(u => u.name).sort();
-			// No mundane crafting in 5e grants damage resistance — that is the province of magic,
-			// or of a material, and materials are a separate axis entirely.
-			expect(magical).toEqual(["Blessed", "Copper Plated", "Mirrored", "Specifically Tempered"]);
+			// This list used to hold all four, on the reasoning that "no mundane crafting in 5e
+			// grants damage resistance." That is a sound generalisation about 5e and the wrong
+			// authority for this question: magicality here is a SETTING RULING, and the setting's
+			// author has ruled that only the divine two are magical. Tempering steel against fire,
+			// cold, lightning or thunder and plating armour in copper against acid are metallurgy
+			// and chemistry — expensive craft, not enchantment.
+			expect(magical).toEqual(["Blessed", "Mirrored"]);
+		});
+
+		/**
+		 * The other two are still AU, still resistance-granting, and still cost hundreds of gold.
+		 * Asserted explicitly rather than left to the absence above, because "not in the magical
+		 * list" is also what a typo in the name or a dropped entry produces.
+		 */
+		it("keeps the mundane two authored, resistance-granting and explicitly non-magical", () => {
+			const {itemUpgrade} = readJson("homebrew/TravelersGuidetoThelemar.json");
+			const mundane = itemUpgrade.filter(u => ["Specifically Tempered", "Copper Plated"].includes(u.name));
+
+			expect(mundane).toHaveLength(2);
+			for (const u of mundane) {
+				// `false`, not absent. An absent flag means "written before the field existed" and
+				// sends the resolver to the catalog; an explicit `false` is an authored statement.
+				expect(u.isMagical).toBe(false);
+				expect(u.upgradeType).toContain("AU");
+				expect(JSON.stringify(u.entries)).toMatch(/resistance/i);
+			}
+		});
+
+		/**
+		 * The consequence of the ruling that is NOT visible in the data: an applied-upgrade
+		 * snapshot carries its own `isMagical`, and the resolver prefers it over the catalog.
+		 * So a character who applied Copper Plated before this ruling keeps counting it against
+		 * their Magic Capacity, and re-applying it is what adopts the new answer.
+		 *
+		 * Pinned rather than migrated. A migration would have to rewrite authored snapshots on
+		 * load, and the snapshot exists precisely so that a later catalog edit cannot silently
+		 * restate what an item already is. Recorded here so the grandfathering is a declared
+		 * property rather than a bug report.
+		 */
+		it("does not retroactively demagick an already-applied snapshot", () => {
+			const {itemUpgrade} = readJson("homebrew/TravelersGuidetoThelemar.json");
+			setItemUpgradeCatalog(itemUpgrade);
+
+			const legacy = {name: "Copper Plated", source: "TGTT", isMagical: true};
+			expect(isUpgradeMagical(legacy)).toBe(true);
+
+			// A snapshot predating the field resolves against the catalog, and so DOES adopt it.
+			expect(isUpgradeMagical({name: "Copper Plated", source: "TGTT"})).toBe(false);
+			// Control: the same two shapes on an upgrade the ruling did not touch, proving the
+			// contrast above is about the ruling and not about one of the lookups simply failing.
+			expect(isUpgradeMagical({name: "Blessed", source: "TGTT", isMagical: true})).toBe(true);
+			expect(isUpgradeMagical({name: "Blessed", source: "TGTT"})).toBe(true);
 		});
 
 		it("keeps every flagged brew upgrade resolvable by the real resolver", () => {
