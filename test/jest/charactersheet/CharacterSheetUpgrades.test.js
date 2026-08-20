@@ -557,8 +557,18 @@ describe("Item Upgrades", () => {
 			expect(CharacterSheetUpgrades.increaseDamageDie("1d10")).toBe("1d12");
 		});
 
-		it("should cap at 1d12", () => {
-			expect(CharacterSheetUpgrades.increaseDamageDie("1d12")).toBe("1d12");
+		it("should continue past 1d12 onto the Thelemar ladder", () => {
+			// This used to assert a cap here, and the cap was the bug: `Superior` is the only
+			// author of a damage-die step in the setting, so a Superior greataxe was an
+			// upgrade that could not change the weapon it was applied to.
+			expect(CharacterSheetUpgrades.increaseDamageDie("1d12")).toBe("2d6");
+			expect(CharacterSheetUpgrades.increaseDamageDie("2d12")).toBe("3d8");
+		});
+
+		it("should cap at 3d10, the top of the Thelemar ladder", () => {
+			expect(CharacterSheetUpgrades.increaseDamageDie("3d10")).toBe("3d10");
+			// And must not invent 3d12 on the way, which the old sides-only ladder did.
+			expect(CharacterSheetUpgrades.increaseDamageDie("3d8")).toBe("3d10");
 		});
 
 		it("should preserve number of dice", () => {

@@ -4,6 +4,7 @@
  */
 
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import {CharacterSheetMaterials} from "./charactersheet-materials.js";
 import {
 	getAggregatedArmorUpgradeEffects,
 	getAggregatedUpgradeEffects,
@@ -1321,24 +1322,32 @@ class CharacterSheetUpgrades {
 	}
 
 	/**
-	 * Increase a damage die by one step (e.g., "1d6" -> "1d8")
-	 * @param {string} damageDie - e.g. "1d6", "2d6", "1d10"
-	 * @param {number} steps - Number of steps to increase
-	 * @returns {string} The increased die string
+	 * Step a damage die up the Thelemar Weapon Damage Progression.
+	 *
+	 * This helper used to walk a private `[4, 6, 8, 10, 12]` sides-only ladder, which made
+	 * the `Superior` upgrade — its ONLY author, via `damageDieIncrease` — a no-op on the
+	 * weapons players most wanted it on: `1d12` and `2d12` were already at the cap, so a
+	 * greataxe paid for an upgrade that could not change its damage. It now delegates to
+	 * `CharacterSheetMaterials.stepDamageDie`, which walks the full 11-step progression the
+	 * material rules define, so `1d12 -> 2d6` and `2d12 -> 3d8`.
+	 *
+	 * The DIE-ONLY CONTRACT is deliberately preserved. The regex is loose on purpose: the
+	 * die is extracted from anywhere in the input and the return is the bare die, so
+	 * `"2d6+15"` yields `"2d8"`. `stepDamageDie`'s own regex is ANCHORED and would return a
+	 * composed string unchanged, which would have made this a silent no-op for every caller
+	 * that passes a formula. Extracting first is what keeps the two contracts compatible.
+	 *
+	 * @param {string} damageDie e.g. "1d6", "2d6", "1d10", "2d6+15"
+	 * @param {number} steps Number of steps to increase
+	 * @returns {string} The increased die, alone
 	 */
 	static increaseDamageDie (damageDie, steps = 1) {
 		if (!damageDie) return damageDie;
-		const dieOrder = [4, 6, 8, 10, 12];
-		const match = damageDie.match(/(\d+)d(\d+)/);
+		const match = String(damageDie).match(/(\d+)d(\d+)/);
 		if (!match) return damageDie;
 
-		const numDice = parseInt(match[1]);
-		let dieSize = parseInt(match[2]);
-		const idx = dieOrder.indexOf(dieSize);
-		if (idx === -1) return damageDie;
-
-		const newIdx = Math.min(idx + steps, dieOrder.length - 1);
-		return `${numDice}d${dieOrder[newIdx]}`;
+		const bare = `${parseInt(match[1])}d${parseInt(match[2])}`;
+		return CharacterSheetMaterials.stepDamageDie(bare, steps);
 	}
 }
 

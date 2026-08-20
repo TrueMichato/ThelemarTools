@@ -731,43 +731,51 @@ Materials step the damage die along an **11-step ladder**, wider than the upgrad
 Heart Stone −2) and clamps at both ends. Off-ladder equivalents (`2d4`, `3d4`, `3d6`) are
 normalised onto the ladder.
 
-`CharacterSheetUpgrades.increaseDamageDie` is deliberately **left unchanged** so the `Superior`
-upgrade behaves exactly as before. It holds the die **count** fixed and clamps the die **size**
-at 12 — so `1d12` stays `1d12`, but `2d10` still becomes `2d12`. It is not a `1d12` cap.
+`CharacterSheetUpgrades.increaseDamageDie` **delegates to this same ladder**. It extracts the
+bare die from its input first, then calls `stepDamageDie`. `Superior` is the only author of a
+damage-die step in the setting, so this is one channel, not a sweep.
 
-### The two ladders diverge at three rungs, and one of them inverts
+### The two ladders used to diverge, and the divergence was the bug
 
-The upgrade ladder is `[4, 6, 8, 10, 12]` with a `Math.min` clamp, holding the die **count**
-fixed and stepping only the **size**. It agrees with the material ladder on every die a base
-weapon actually has, and disagrees at exactly three:
+The upgrade ladder was `[4, 6, 8, 10, 12]` with a `Math.min` clamp, holding the die **count**
+fixed and stepping only the **size**. It agreed with the material ladder on every die a base
+weapon actually has, and disagreed at exactly three:
 
-| die | material step | upgrade step | which one stops |
+| die | material step | old upgrade step | which one stopped |
 |---|---|---|---|
 | `1d12` | `2d6` | `1d12` | upgrade |
 | `2d12` | `3d8` | `2d12` | upgrade |
 | `3d10` | `3d10` | `3d12` | **material** |
 
-The third row is the one to read twice. At the top rung the direction **reverses**: the material
-ladder is the one that clamps, and the upgrade ladder walks on to `3d12` — a die that is not on
-the material ladder at all. So "the upgrade ladder is the short one" is two-thirds true, and a
-rules decision phrased as *"should `Superior` walk further past `1d12`"* is under-specified: it
-silently also decides `2d12`, and at `3d8`/`3d10` it would **reduce** a result rather than
-extend it.
+The third row was the one to read twice: at the top rung the direction **reversed**, and the
+old upgrade ladder walked on to `3d12` — a die that is not on the material ladder at all. That
+is why the swap had to be a redirect to the authored ladder rather than "let `Superior` walk
+one more rung": extending the upgrade ladder past `1d12` would also have kept `3d12`.
 
-The `1d12` rung matters most because **materials can reach `1d12` from a common weapon** —
-`Darkeline` and `Paradox Metal` are `+2`, so any d8 weapon lands there. The consequence is that a
-`Superior` upgrade on such a weapon costs resources, still prints *"Damage die +1 step"*, and
-changes nothing. It predates materials (a `Superior` greataxe was always inert) but materials
-turn a corner case into a common one.
+The `1d12` rung mattered most because **materials can reach `1d12` from a common weapon** —
+`Darkeline` and `Paradox Metal` are `+2`, so any d8 weapon lands there. A `Superior` upgrade on
+such a weapon cost resources, printed *"Damage die +1 step"*, and changed nothing. It predated
+materials (a `Superior` greataxe was always inert) but materials turned a corner case into a
+common one.
 
-This is **not** treated as a bug to fix in passing, because unifying the ladders is a rules
-decision with three dependents that must move together: the cap is pinned by
-`CharacterSheetUpgrades.test.js`, the NPC exporter relies on `increaseDamageDie` returning the
-die term *alone* (it pre-extracts flat modifiers because of it, so `2d6+15` → `2d8`), and the
-two ladders come from different books. The divergence is instead **pinned as declared
-behaviour** in `CharacterSheetMaterialAccessorGaps.test.js` and, as an exact set including the
-inversion, in `CharacterSheetDamageDieComposition.test.js`, so that whoever changes it is shown
-everything it touches.
+**Resolved by delegation, not by replacement.** The two helpers still have different *input*
+contracts and that difference is load-bearing:
+
+| | `stepDamageDie` | `increaseDamageDie` |
+|---|---|---|
+| regex | `/^(\d+)d(\d+)$/` — anchored | `/(\d+)d(\d+)/` — loose |
+| `"2d6+15"` | returned **unchanged** — a silent no-op | `"2d8"` |
+
+The NPC exporter hands `increaseDamageDie` a whole formula and expects the die term alone
+back. Pointing it at `stepDamageDie` directly would silently step nothing. Extracting the bare
+die before delegating is what lets one ladder serve both callers, and the asymmetry is asserted
+as a deliberate pair in `CharacterSheetMaterialAccessorGaps.test.js` so neither side looks
+broken.
+
+The unified behaviour is pinned in `CharacterSheetDamageDieComposition.test.js` (agreement
+across the whole range, including negative steps, plus the former divergence points asserted
+**by value** — agreement alone is satisfiable by both helpers being broken identically) and
+end-to-end onto the statblock in `CharacterSheetNpcExporter.materials.test.js`.
 
 ### Material steps and upgrade steps travel in separate channels
 

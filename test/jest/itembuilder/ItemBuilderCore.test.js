@@ -273,25 +273,40 @@ describe("ItemBuilderCore", () => {
 			expectedProjected: {critThreshold: 20},
 			expectedField: "critThreshold",
 		},
+		// Superior now walks the Thelemar progression, so the ladder's cap moved from 1d12
+		// to 3d10 and these cases moved with it. 1d12, 3d12 and 2d12+3 all invert cleanly
+		// now -- pinned below in "formerly clamped Superior dice".
 		{
 			label: "a clamped Superior damage increase",
+			item: {dmg1: "3d10"},
+			composition: {upgrades: [{name: "Superior", source: "TCAH"}]},
+			expectedProjected: {dmg1: "3d10"},
+			expectedField: "dmg1",
+		},
+		{
+			// One rung below the cap: 3d8 and 3d10 BOTH project to 3d10.
+			label: "a clamped Superior modified-dice increase",
+			item: {dmg1: "3d8 + 2"},
+			composition: {upgrades: [{name: "Superior", source: "TCAH"}]},
+			expectedProjected: {dmg1: "3d10 + 2"},
+			expectedField: "dmg1",
+		},
+		{
+			// Not clamped -- Superior moves this die properly now. It is ambiguous because
+			// `DIE_EQUIVALENTS` declares 2d4 to sit on the SAME RUNG as 1d12, so both
+			// project to 2d6 and neither is a better guess at what the author typed.
+			label: "a Superior increase off a rung shared with an equivalent die",
 			item: {dmg1: "1d12"},
 			composition: {upgrades: [{name: "Superior", source: "TCAH"}]},
-			expectedProjected: {dmg1: "1d12"},
+			expectedProjected: {dmg1: "2d6"},
 			expectedField: "dmg1",
 		},
 		{
-			label: "a clamped Superior multiple-dice increase",
-			item: {dmg1: "3d12"},
-			composition: {upgrades: [{name: "Superior", source: "TCAH"}]},
-			expectedProjected: {dmg1: "3d12"},
-			expectedField: "dmg1",
-		},
-		{
-			label: "a clamped Superior modified-dice increase",
+			// The same collision with a modifier attached: 2d12 and 3d6 share a rung.
+			label: "a modified Superior increase off a shared rung",
 			item: {dmg1: "2d12 + 3"},
 			composition: {upgrades: [{name: "Superior", source: "TCAH"}]},
-			expectedProjected: {dmg1: "2d12 + 3"},
+			expectedProjected: {dmg1: "3d8 + 3"},
 			expectedField: "dmg1",
 		},
 		{
@@ -369,19 +384,77 @@ describe("ItemBuilderCore", () => {
 		expect(ItemBuilderCore.serialize(ItemBuilderCore.fromItem(canonical), catalogs)).toEqual(canonical);
 	});
 
+	// 2d8, not 3d8: 3d8 now sits one rung below the ladder's cap, so 3d8 and 3d10 both
+	// project to 3d10 and the migration stops being invertible. Mid-ladder is the only
+	// place this claim can be made.
 	test("preserves dice count and modifiers through an invertible Superior migration", () => {
 		const preset = {...ITEMS[0]};
 		delete preset.dmg2;
 		const catalogs = {items: [preset], materials: MATERIALS, upgrades: UPGRADES};
 		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), preset, {source: "HB"});
-		draft.item.dmg1 = "3d8 + 2";
+		draft.item.dmg1 = "2d8 + 2";
 		draft.upgrades = [{name: "Superior", source: "TCAH"}];
 		const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
-		expect(legacyProjected.dmg1).toBe("3d10 + 2");
+		expect(legacyProjected.dmg1).toBe("2d10 + 2");
 		const restored = ItemBuilderCore.fromItem(legacyProjected);
 
 		expect(ItemBuilderCore.validate(restored, catalogs).isValid).toBe(true);
-		expect(ItemBuilderCore.serialize(restored, catalogs).dmg1).toBe("3d8 + 2");
+		expect(ItemBuilderCore.serialize(restored, catalogs).dmg1).toBe("2d8 + 2");
+	});
+
+	/**
+	 * `3d12` used to be listed as a "clamped Superior" case, on the reasoning that the
+	 * transform did nothing to it and so could not be reversed. Both halves were wrong
+	 * together: it IS a fixed point (3d12 is off the Thelemar ladder entirely, so Superior
+	 * legitimately cannot move it), but being a fixed point does not make it ambiguous --
+	 * nothing else lands on 3d12 either, so the base is recoverable exactly.
+	 *
+	 * Asserted as a round trip rather than a projection, because "the die did not move" and
+	 * "the builder can still get back to what the author typed" are separate claims and only
+	 * the second is what the clamped-case list was ever about.
+	 */
+	test("round-trips an off-ladder 3d12, which Superior legitimately cannot move", () => {
+		const preset = {...ITEMS[0]};
+		delete preset.dmg2;
+		const catalogs = {items: [preset], materials: MATERIALS, upgrades: UPGRADES};
+		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), preset, {source: "HB"});
+		draft.item.dmg1 = "3d12";
+		draft.upgrades = [{name: "Superior", source: "TCAH"}];
+
+		const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
+		expect(legacyProjected.dmg1).toBe("3d12");
+
+		const restored = ItemBuilderCore.fromItem(legacyProjected);
+		expect(ItemBuilderCore.validate(restored, catalogs).isValid).toBe(true);
+		expect(ItemBuilderCore.serialize(restored, catalogs).dmg1).toBe("3d12");
+	});
+
+	/**
+	 * The regression that the rung-mate fix above exists for.
+	 *
+	 * Before it, a modifier suppressed the ladder candidates entirely, leaving only
+	 * same-count variants. `2d12 + 3` projects to `3d8 + 3`, and `3d6 + 3` -- a same-count
+	 * variant sharing 2d12's rung -- projects there too. The search found `3d6 + 3`, called
+	 * it unique, and deprojected to it with NO validation error. A silently wrong authored
+	 * value is worse than a refusal, so this pins that it is refused.
+	 */
+	test("refuses a shared-rung deprojection instead of silently picking the wrong base", () => {
+		const preset = {...ITEMS[0]};
+		delete preset.dmg2;
+		const catalogs = {items: [preset], materials: MATERIALS, upgrades: UPGRADES};
+		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), preset, {source: "HB"});
+		draft.item.dmg1 = "2d12 + 3";
+		draft.upgrades = [{name: "Superior", source: "TCAH"}];
+
+		const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
+		expect(legacyProjected.dmg1).toBe("3d8 + 3");
+
+		const validation = ItemBuilderCore.validate(ItemBuilderCore.fromItem(legacyProjected), catalogs);
+		expect(validation.isValid).toBe(false);
+		// Specifically: it names BOTH rung-mates, so the refusal is about the collision and
+		// not about the die being unrecognised.
+		expect(validation.errors[0].message).toMatch(/2d12/);
+		expect(validation.errors[0].message).toMatch(/3d6/);
 	});
 
 	test("deprojects composed Gold and Superior damage transforms in forward order without drift", () => {

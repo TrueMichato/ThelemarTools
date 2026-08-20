@@ -124,16 +124,27 @@ function _formatDamageDie ({prefix = "", count, sides, modifier = "", suffix = "
 	return `${prefix}${count}d${sides}${modifier}${suffix}`;
 }
 
+/**
+ * The builder's own die-stepper, which unlike the sheet's PRESERVES prefix, modifier and
+ * suffix — the builder edits an authored string a human typed and must hand it back in the
+ * same shape.
+ *
+ * It walks the same Thelemar progression as `CharacterSheetUpgrades.increaseDamageDie`, and
+ * must: this is on the `Superior` path (`upgradeEffects.damageDieIncrease`, applied to
+ * `dmg1`/`dmg2` below), so a private ladder here would make the builder's preview disagree
+ * with the sheet's combat tab about the same weapon.
+ *
+ * The count is no longer fixed. `1d12 -> 2d6` moves both terms, which is exactly why the
+ * sides-only ladder capped out and did nothing.
+ */
 function _increaseDamageDie (damageDie, steps = 1) {
 	if (!damageDie || !steps) return damageDie;
 	const parsed = _parseDamageDie(damageDie);
 	if (!parsed) return damageDie;
-	const ix = _DIE_ORDER.indexOf(parsed.sides);
-	if (!~ix) return damageDie;
-	return _formatDamageDie({
-		...parsed,
-		sides: _DIE_ORDER[Math.max(0, Math.min(_DIE_ORDER.length - 1, ix + steps))],
-	});
+	const stepped = CharacterSheetMaterials.stepDamageDie(`${parsed.count}d${parsed.sides}`, steps);
+	const match = /^(\d+)d(\d+)$/.exec(stepped);
+	if (!match) return damageDie;
+	return _formatDamageDie({...parsed, count: Number(match[1]), sides: Number(match[2])});
 }
 
 function _getGeneratedEntries ({material, upgrades, gemstone, upgradeCatalog}) {
@@ -650,23 +661,42 @@ export class ItemBuilderCore {
 		return out;
 	}
 
-	static _getDamageProjectionCandidates ({observed, materialDamageSteps}) {
+	/**
+	 * Candidate authored dice that could project to `observed`.
+	 *
+	 * The same-count variants cover a sides-only step. They are NOT sufficient once the
+	 * ladder can move the count as well: the preimage of `2d6` under `Superior` is `1d12`,
+	 * which no `{...parsed, sides}` variant can produce.
+	 *
+	 * The rungs must carry the observed modifier rather than being skipped when one is
+	 * present. Skipping them looked safe — ladder rungs are bare dice, an authored die may
+	 * have a `+3` — but it left the search a set that was no longer a superset of the true
+	 * preimages, so it could find a DIFFERENT rung-mate and deproject to it with confidence.
+	 * Measured: `2d12 + 3` deprojected to `3d6 + 3`, silently, with no validation error,
+	 * because `2d12` and `3d6` share a rung and only one of them was a candidate.
+	 */
+	static _getDamageProjectionCandidates ({observed, materialDamageSteps, upgradeDamageSteps}) {
 		const parsed = _parseDamageDie(observed);
 		if (!parsed) return [];
 
 		const out = _DIE_ORDER.map(sides => _formatDamageDie({...parsed, sides}));
-		if (!materialDamageSteps || parsed.modifier) return out;
-		out.push(
+		if (!materialDamageSteps && !upgradeDamageSteps) return out;
+
+		const rungs = [
 			...CharacterSheetMaterials.DIE_LADDER,
 			...Object.keys(CharacterSheetMaterials.DIE_EQUIVALENTS),
-		);
+		];
+		for (const rung of rungs) {
+			const match = /^(\d+)d(\d+)$/.exec(rung);
+			if (match) out.push(_formatDamageDie({...parsed, count: Number(match[1]), sides: Number(match[2])}));
+		}
 		return [...new Set(out)];
 	}
 
 	static _getDamageProjectionPreimages ({observed, materialDamageSteps, upgradeDamageSteps}) {
 		return this._getProjectionPreimages({
 			observed,
-			candidates: this._getDamageProjectionCandidates({observed, materialDamageSteps}),
+			candidates: this._getDamageProjectionCandidates({observed, materialDamageSteps, upgradeDamageSteps}),
 			project: candidate => _increaseDamageDie(
 				CharacterSheetMaterials.stepDamageDie(candidate, materialDamageSteps),
 				upgradeDamageSteps,

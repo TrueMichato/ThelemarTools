@@ -1,34 +1,38 @@
 /**
  * Damage-die composition — Unit Tests
  *
- * TWO ladders move a weapon's damage die, and they are not the same ladder:
+ * There used to be TWO ladders. `CharacterSheetUpgrades.increaseDamageDie` held the die
+ * COUNT fixed and stepped only the SIZE through `[4, 6, 8, 10, 12]`, while
+ * `CharacterSheetMaterials.stepDamageDie` walked the 11-rung Thelemar progression
+ * (`1d4 … 1d12, 2d6 … 2d12, 3d8, 3d10`). They agreed across most of the range, which is why
+ * the difference went unnamed for so long.
  *
- *   - `CharacterSheetMaterials.stepDamageDie`  walks the 11-rung Thelemar progression
- *     (`1d4 … 1d12, 2d6 … 2d12, 3d8, 3d10`) and accepts negative steps.
- *   - `CharacterSheetUpgrades.increaseDamageDie` holds the die COUNT fixed and steps only
- *     the die SIZE through `[4, 6, 8, 10, 12]`.
+ * Where they disagreed, the upgrade ladder was simply wrong for this setting: `Superior` is
+ * its ONLY author, and at `1d12` and `2d12` it clamped — so a Superior greataxe was an
+ * upgrade the player paid for that could not change the weapon's damage at all. The ladders
+ * are now one; `increaseDamageDie` extracts the bare die and delegates.
  *
- * They agree across most of the range, which is why the difference went unnamed: it is
- * invisible everywhere a weapon actually sits. These tests pin the three things that are
- * NOT obvious from either function alone.
+ * What this file pins after that change:
  *
- * 1. WHERE THEY DIVERGE. Three dice, not one — and the third one INVERTS. At `1d12` and
- *    `2d12` the upgrade ladder clamps while the material ladder walks on; at `3d10` it is
- *    the MATERIAL ladder that stops and the upgrade ladder that continues, to `3d12` —
- *    a die that is not on the material ladder at all. "The upgrade ladder is the short
- *    one" is therefore two-thirds true, and any rules decision phrased as "should Superior
- *    walk further past 1d12" silently also decides `2d12` and REDUCES `3d8`/`3d10`.
+ * 1. THE LADDERS ARE ONE, on every die either was ever handed. A future private ladder in
+ *    either helper reddens this immediately. The former divergence points are asserted by
+ *    value, so "they agree" cannot be satisfied by both being broken the same way.
  *
- * 2. THE COMPOSITION DOES NOT COMMUTE. Applying a material step then an upgrade step gives
- *    a different die from the reverse at five of thirteen dice, including `1d10` — a very
- *    common weapon die. So the order is load-bearing, not incidental.
+ * 2. THE STEPS NOW COMMUTE — trivially, being the same function. Recorded rather than
+ *    celebrated: order used to be load-bearing for the RESULT and is not any more. It
+ *    remains load-bearing for WHERE the value lands, which is section 3. A control proves
+ *    the comparison can still detect a difference, so the emptiness is a finding and not
+ *    a broken harness.
  *
- * 3. THE PRODUCT APPLIES MATERIAL FIRST. Every path agrees on this today — the read-time
- *    projection bakes the material into `dmg1`, and the upgrade step is applied afterwards
- *    by whoever reads the projected item. Nothing enforced it, and the corpus cannot: the
- *    one real character combining the two (Arthur's Cataclysm, `2d6` + Steeline + Superior)
- *    sits at a die where the two orders AGREE. The combination is live; the invariant is
- *    corpus-invisible. That is exactly the gap a unit test has to cover.
+ * 3. THE PRODUCT APPLIES MATERIAL FIRST. The read-time projection bakes the material into
+ *    `dmg1`; the upgrade is applied on top by whoever reads the projected item. The two
+ *    halves land in different places, which is what makes the split observable even now
+ *    that the arithmetic no longer depends on it.
+ *
+ * 4. THE CORPUS CANNOT POLICE ANY OF IT. The one real character combining material and
+ *    Superior (Arthur's Cataclysm, `2d6` + Steeline + Superior) sits at a die where nothing
+ *    above is diagnostic — and its shipped `2d10` is unchanged by the ladder swap, which is
+ *    why a corpus diff would have reported this whole change as a no-op.
  */
 
 import "./setup.js";
@@ -97,55 +101,80 @@ const composeThroughProduct = (dmg1, {isMaterial = true, isUpgrade = true} = {})
 	};
 };
 
-describe("damage-die composition: two ladders, one order", () => {
+describe("damage-die composition: one ladder, one order", () => {
 	// ==========================================================================
-	// 1. Where the ladders disagree
+	// 1. The ladders are one
 	// ==========================================================================
-	describe("the two ladders diverge on an exact set", () => {
+	describe("the upgrade ladder is the material ladder", () => {
 		const diverging = DICE.filter(die => matStep(die) !== upgStep(die));
 
-		it("diverges somewhere at all", () => {
-			// Anti-vacuity: if the ladders were ever unified this whole describe would pass
-			// by saying nothing, so prove the comparison has teeth before pinning the set.
-			expect(diverging.length).toBeGreaterThan(0);
+		it("agrees on every die either ladder is ever handed", () => {
+			expect(diverging).toEqual([]);
 		});
 
-		it("diverges on exactly these dice", () => {
-			expect(diverging).toEqual(["1d12", "2d12", "3d10"]);
+		it("still agrees when the step is negative, which only the material ladder used to accept", () => {
+			// Gold (−1) and Heart Stone (−2) author negative steps. The old upgrade ladder
+			// would happily walk backwards down its own short ladder and disagree.
+			expect(DICE.filter(die => matStep(die, -1) !== upgStep(die, -1))).toEqual([]);
+			expect(DICE.filter(die => matStep(die, -2) !== upgStep(die, -2))).toEqual([]);
 		});
 
-		it("lets the material ladder walk past the upgrade clamp at the 1d12 and 2d12 rungs", () => {
-			expect([matStep("1d12"), upgStep("1d12")]).toEqual(["2d6", "1d12"]);
-			expect([matStep("2d12"), upgStep("2d12")]).toEqual(["3d8", "2d12"]);
+		/**
+		 * Agreement alone is satisfiable by both helpers being broken identically — which
+		 * is precisely what delegation makes easy. So the three rungs that used to diverge
+		 * are asserted BY VALUE, against the Thelemar progression rather than against each
+		 * other.
+		 */
+		it("walks past the rungs where the upgrade ladder used to clamp", () => {
+			expect(upgStep("1d12")).toBe("2d6");
+			expect(upgStep("2d12")).toBe("3d8");
 		});
 
-		it("INVERTS at 3d10, where the material ladder is the one that stops", () => {
-			// The reason "make Superior use the Thelemar ladder" is not a one-line change:
-			// at the top rung it would turn 3d12 into 3d10, a reduction nobody asked for.
-			expect(matStep("3d10")).toBe("3d10");
-			expect(upgStep("3d10")).toBe("3d12");
+		it("stops at 3d10, and never invents the off-ladder 3d12", () => {
+			// The old upgrade ladder produced 3d12 here, a die the material progression does
+			// not contain. Fixing the clamp had to not introduce its mirror image.
+			expect(upgStep("3d10")).toBe("3d10");
 			expect(CharacterSheetMaterials.DIE_LADDER).not.toContain("3d12");
+		});
+
+		/**
+		 * The one contract the two helpers do NOT share, and must not: `increaseDamageDie`
+		 * is die-only and loose about its input, because the exporter hands it a formula.
+		 * `stepDamageDie` is anchored and would return that formula unchanged — a silent
+		 * no-op. Extracting the bare die first is what lets one ladder serve both callers.
+		 */
+		it("keeps the die-only contract that lets a formula be stepped at all", () => {
+			expect(upgStep("2d6+15")).toBe("2d8");
+			expect(matStep("2d6+15")).toBe("2d6+15");
 		});
 	});
 
 	// ==========================================================================
-	// 2. Order is load-bearing
+	// 2. Order no longer changes the number
 	// ==========================================================================
-	describe("the two steps do not commute", () => {
+	describe("the two steps commute", () => {
 		const nonCommuting = DICE.filter(die => upgStep(matStep(die)) !== matStep(upgStep(die)));
 
-		it("fails to commute somewhere at all", () => {
-			expect(nonCommuting.length).toBeGreaterThan(0);
+		it("commutes on every die, now that both steps walk the same rungs", () => {
+			expect(nonCommuting).toEqual([]);
 		});
 
-		it("fails to commute on exactly these dice", () => {
-			expect(nonCommuting).toEqual(["1d10", "1d12", "2d10", "2d12", "3d8"]);
-		});
-
-		it("differs by a whole die on 1d10, which is an ordinary weapon die", () => {
-			// Halberd, glaive, pike, heavy crossbow, versatile longsword. Not a corner case.
-			expect(upgStep(matStep("1d10"))).toBe("1d12");
-			expect(matStep(upgStep("1d10"))).toBe("2d6");
+		/**
+		 * Anti-vacuity. An empty list is what a broken comparison also produces, so prove
+		 * the same filter still finds a difference when one genuinely exists — here against
+		 * the sides-only ladder the upgrade helper used to carry.
+		 */
+		it("would still detect a divergence, so the empty list above is a finding", () => {
+			const legacyStep = (die) => {
+				const order = [4, 6, 8, 10, 12];
+				const m = String(die).match(/(\d+)d(\d+)/);
+				if (!m) return die;
+				const ix = order.indexOf(Number(m[2]));
+				if (ix === -1) return die;
+				return `${Number(m[1])}d${order[Math.min(ix + 1, order.length - 1)]}`;
+			};
+			const wouldDiverge = DICE.filter(die => legacyStep(matStep(die)) !== matStep(legacyStep(die)));
+			expect(wouldDiverge.length).toBeGreaterThan(0);
 		});
 	});
 
@@ -153,47 +182,45 @@ describe("damage-die composition: two ladders, one order", () => {
 	// 3. The invariant: the product applies the material first
 	// ==========================================================================
 	describe("the product composes material-first", () => {
-		it("applies the material step before the upgrade step on 1d10", () => {
-			// Anti-vacuity, stated inside the test: this die is only diagnostic because the
-			// two orders disagree on it. If that ever stops being true the assertion below
-			// stops distinguishing anything, and this line fails first.
-			expect(upgStep(matStep("1d10"))).not.toBe(matStep(upgStep("1d10")));
-
-			expect(composeThroughProduct("1d10").effective).toBe("1d12");
-		});
-
-		it("applies the material step before the upgrade step on 1d12", () => {
-			expect(upgStep(matStep("1d12"))).not.toBe(matStep(upgStep("1d12")));
-
-			expect(composeThroughProduct("1d12").effective).toBe("2d8");
-		});
-
+		/**
+		 * The arithmetic no longer distinguishes the orders, so this section can no longer
+		 * be proven by a number. It is proven by WHERE each half lands instead: `dmg1`
+		 * carries the material only, and the upgrade is applied on top at read time. That
+		 * split is the actual invariant and it survived the ladder change untouched.
+		 */
 		it("bakes the material into the projected die and leaves the upgrade to the reader", () => {
-			// The two halves land in different places, which is what makes the order fixed:
-			// `dmg1` carries the material only, and the upgrade is applied on top at read time.
 			const {projected, effective} = composeThroughProduct("1d10");
 			expect(projected).toBe("1d12");
-			expect(effective).toBe("1d12");
+			expect(effective).toBe("2d6");
 
 			expect(composeThroughProduct("1d10", {isUpgrade: false}).projected).toBe("1d12");
 			expect(composeThroughProduct("1d10", {isMaterial: false}).projected).toBe("1d10");
+		});
+
+		it("applies exactly two steps, not one and not three", () => {
+			// The failure mode a material-first/upgrade-first mix-up would actually produce
+			// today is a DOUBLE-APPLIED or DROPPED step, not a different rung.
+			expect(composeThroughProduct("1d10").effective).toBe(matStep("1d10", 2));
+			expect(composeThroughProduct("1d12").effective).toBe(matStep("1d12", 2));
+			expect(composeThroughProduct("1d10", {isUpgrade: false}).effective).toBe(matStep("1d10", 1));
+			expect(composeThroughProduct("1d10", {isMaterial: false}).effective).toBe(matStep("1d10", 1));
 		});
 	});
 
 	// ==========================================================================
 	// 4. The one real character — and why it cannot police the rule
 	// ==========================================================================
-	describe("Arthur's Cataclysm is live but blind to the ordering", () => {
-		it("reproduces the shipped 2d10", () => {
-			// 2d6 maul, Steeline (+1 damage axis), Superior among five upgrades.
+	describe("Arthur's Cataclysm is live but blind to the ladder change", () => {
+		it("reproduces the shipped 2d10, unchanged by the ladder swap", () => {
+			// 2d6 maul, Steeline (+1 damage axis), Superior among five upgrades. 2d6 is
+			// mid-ladder in both the old and new progressions, so the shipped statblock
+			// number does not move. Recorded because a corpus diff of IDENTICAL across this
+			// change would be true and worthless as evidence that nothing changed.
 			expect(composeThroughProduct("2d6").effective).toBe("2d10");
 		});
 
-		it("sits on a die where both orders agree, so a reorder would not move it", () => {
-			// Recorded, not celebrated: the only corpus instance of material+Superior cannot
-			// detect the bug the tests above exist to catch. A corpus diff of `IDENTICAL`
-			// across an ordering change would be true and worthless.
-			expect(upgStep(matStep("2d6"))).toBe(matStep(upgStep("2d6")));
+		it("sits where the former divergence cannot reach it", () => {
+			expect(["1d12", "2d12", "3d10"]).not.toContain("2d6");
 		});
 	});
 });

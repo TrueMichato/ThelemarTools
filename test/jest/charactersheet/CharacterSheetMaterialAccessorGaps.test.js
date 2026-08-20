@@ -421,36 +421,45 @@ describe("a material's die step and an upgrade's die step each land exactly once
 });
 
 /**
- * The material ladder and the upgrade ladder DISAGREE, and this pins the disagreement so it is a
- * declared property rather than a discovery someone makes from a bug report.
+ * The material ladder and the upgrade ladder used to DISAGREE, and this block pinned the
+ * disagreement so it would be a declared property rather than a discovery someone makes from a
+ * bug report. The disagreement is now gone: `CharacterSheetUpgrades.increaseDamageDie` extracts
+ * the bare die and delegates to `CharacterSheetMaterials.stepDamageDie`.
  *
- * `CharacterSheetMaterials.stepDamageDie` walks the authored eleven-step Thelemar ladder, which
- * continues past 1d12 into 2d6. `CharacterSheetUpgrades.increaseDamageDie` walks `[4,6,8,10,12]`
- * and clamps. They agree on every die a base weapon actually has -- and diverge at exactly one
- * point, 1d12, which materials can now REACH (Darkeline and Paradox Metal are +2, so any d8
- * weapon lands there).
+ * The old note said the fix "must move three things together: this pin, the cap pinned by
+ * CharacterSheetUpgrades.test.js, and the exporter's reliance on `increaseDamageDie` returning
+ * the die term alone." All three were correct and all three moved. The third is the interesting
+ * one, because it is the reason this was a delegation rather than a replacement: the two helpers
+ * still have DIFFERENT input contracts, and only one of them may be loosened.
  *
- * The user-visible consequence: a Superior upgrade on a 1d12 weapon costs resources, prints
- * "Damage die +1 step", and changes nothing. That predates materials -- a Superior greataxe was
- * always inert -- but materials make it common rather than a corner.
- *
- * This is deliberately NOT fixed here. The cap is pinned by `CharacterSheetUpgrades.test.js`, the
- * NPC exporter depends on `increaseDamageDie` returning the die term alone (it pre-extracts
- * because of it), and the two ladders come from different books -- so whether TCAH's step should
- * inherit Thelemar's ladder is a rules decision, not a refactor. If it is ever taken, this test
- * fails and points at everything that has to move together.
+ * What is pinned now is the consequence the old note described as user-visible: a Superior
+ * upgrade on a 1d12 weapon used to cost resources, print "Damage die +1 step", and change
+ * nothing. Materials made that reachable rather than rare -- Darkeline and Paradox Metal are +2,
+ * so any d8 weapon lands there.
  */
-describe("the material ladder and the upgrade ladder diverge at 1d12", () => {
-	const agreeing = ["1d4", "1d6", "1d8", "1d10", "2d6", "2d8"];
+describe("the material ladder and the upgrade ladder are one ladder", () => {
+	const shared = ["1d4", "1d6", "1d8", "1d10", "1d12", "2d6", "2d8", "2d10", "2d12", "3d8", "3d10"];
 
-	it.each(agreeing)("steps %s identically on both ladders", (die) => {
+	it.each(shared)("steps %s identically on both ladders", (die) => {
 		expect(CharacterSheetUpgrades.increaseDamageDie(die, 1))
 			.toBe(CharacterSheetMaterials.stepDamageDie(die, 1));
 	});
 
-	it("diverges at 1d12: the material ladder continues, the upgrade ladder clamps", () => {
+	it("no longer clamps at 1d12, so a Superior greataxe is not inert", () => {
+		expect(CharacterSheetUpgrades.increaseDamageDie("1d12", 1)).toBe("2d6");
 		expect(CharacterSheetMaterials.stepDamageDie("1d12", 1)).toBe("2d6");
-		expect(CharacterSheetUpgrades.increaseDamageDie("1d12", 1)).toBe("1d12");
+	});
+
+	/**
+	 * The contract that is NOT shared, and the reason the two helpers were not merged into
+	 * one. The exporter hands `increaseDamageDie` a whole formula and expects the die term
+	 * back; `stepDamageDie` is anchored and returns a formula unchanged -- a SILENT no-op if
+	 * a caller were ever pointed at it directly. Asserted as a pair so the asymmetry is
+	 * visible as a deliberate difference rather than looking like one of them is broken.
+	 */
+	it("keeps the loose input contract that the anchored material helper does not have", () => {
+		expect(CharacterSheetUpgrades.increaseDamageDie("2d6+15", 1)).toBe("2d8");
+		expect(CharacterSheetMaterials.stepDamageDie("2d6+15", 1)).toBe("2d6+15");
 	});
 
 	it("is reachable, because the shipped brew really does author +2 materials", () => {
@@ -462,7 +471,9 @@ describe("the material ladder and the upgrade ladder diverge at 1d12", () => {
 		const plusTwo = materials.filter(m => Number(m.damage) === 2).map(m => m.name);
 
 		expect(plusTwo.length).toBeGreaterThan(0);
-		// A d8 weapon plus any of them lands exactly on the one die the two ladders disagree about.
+		// A d8 weapon plus any of them lands exactly on the die the two ladders used to
+		// disagree about -- which is now the die that proves they no longer do.
 		expect(CharacterSheetMaterials.stepDamageDie("1d8", 2)).toBe("1d12");
+		expect(CharacterSheetUpgrades.increaseDamageDie("1d12", 1)).toBe("2d6");
 	});
 });

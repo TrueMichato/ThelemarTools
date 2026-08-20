@@ -1231,26 +1231,35 @@ maybeDescribe("NPC export v26b — a projected bonus is counted exactly once", (
 		expect(dieProbe({material: "Steel", upgrades: superior}).damage).toMatch(/^1d8\b/);
 	});
 
-	it("declares that an upgrade's ladder stops at 1d12 where a material's does not", () => {
-		// Not a bug report -- a pinned divergence. `CharacterSheetUpgrades.increaseDamageDie`
-		// walks [4,6,8,10,12] with a Math.min clamp; `CharacterSheetMaterials.stepDamageDie`
-		// continues 1d12 -> 2d6. They agree on every die a base weapon has and part company at
-		// exactly one point. Materials made that point reachable: Darkeline and Paradox Metal
-		// are +2, so any d8 weapon lands on 1d12, where a Superior upgrade costs resources,
-		// prints "Damage die +1 step" and does nothing.
+	it("carries a Superior step past 1d12 all the way onto the exported statblock", () => {
+		// This used to declare a pinned divergence: the upgrade ladder clamped at 1d12 where
+		// the material ladder walked on to 2d6, so a Darkeline (+2) d8 weapon with Superior
+		// exported 1d12 -- an upgrade that cost resources, printed "Damage die +1 step" and
+		// did nothing. The ladders are now one and the export follows.
 		//
-		// The export follows the upgrade ladder, so such a weapon exports 1d12 rather than 2d6.
-		// That is correct-per-implementation and arguably wrong-per-intent, and changing it is a
-		// rules call that must move three things together: this pin, the cap pinned by
-		// CharacterSheetUpgrades.test.js, and CharacterSheetNpcExporter.weaponDamage.test.js's
-		// reliance on `increaseDamageDie` returning the die term alone.
-		expect(CharacterSheetUpgrades.increaseDamageDie("1d12", 1)).toBe("1d12");
+		// Asserted end-to-end through `dieProbe` rather than on the helper, because "the
+		// ladder function returns 2d6" and "the statblock line reads 2d6" are separate
+		// claims. The helper is already pinned in CharacterSheetMaterialAccessorGaps.test.js;
+		// what this file is uniquely able to say is that the value survives the export.
+		expect(CharacterSheetUpgrades.increaseDamageDie("1d12", 1)).toBe("2d6");
 		expect(CharacterSheetMaterials.stepDamageDie("1d12", 1)).toBe("2d6");
 
 		const superior = [{name: "Superior", source: "TCAH"}];
+
+		// Material alone still lands on 1d12 -- so the change below is attributable to the
+		// upgrade step and not to the projection having moved underneath it.
 		expect(dieProbe({material: "Darkeline", dmg1: "1d8"}).damage).toMatch(/^1d12\b/);
 		expect(dieProbe({material: "Darkeline", upgrades: superior, dmg1: "1d8"}).damage)
-			.toMatch(/^1d12\b/);
+			.toMatch(/^2d6\b/);
+	});
+
+	it("carries the same step off a plain greataxe, with no material involved", () => {
+		// The original defect stated in its simplest form. Materials made it common; they
+		// were never required for it, and a fix that only worked through the material
+		// projection would pass the test above while leaving the plain case inert.
+		const superior = [{name: "Superior", source: "TCAH"}];
+		expect(dieProbe({dmg1: "1d12"}).damage).toMatch(/^1d12\b/);
+		expect(dieProbe({upgrades: superior, dmg1: "1d12"}).damage).toMatch(/^2d6\b/);
 	});
 });
 

@@ -1951,23 +1951,32 @@ says so in a comment — *"damage steps … are baked into the item by the read-
 projection, so re-adding them here would count them twice."* The leak is one line away from
 the code that already holds the material. A guard is what keeps the comment true.
 
-**The divergence.** `CharacterSheetUpgrades.increaseDamageDie` walks `[4,6,8,10,12]` with a
-`Math.min` clamp; `CharacterSheetMaterials.stepDamageDie` walks the longer Thelemar ladder
-and continues past it. They agree on every die a base weapon has and differ at exactly one
-point:
+**The former divergence (fixed).** `CharacterSheetUpgrades.increaseDamageDie` used to walk
+`[4,6,8,10,12]` with a `Math.min` clamp while `CharacterSheetMaterials.stepDamageDie` walked
+the longer Thelemar ladder. They agreed on every die a base weapon has and differed at three
+points, of which `1d12` was the reachable one:
 
-| die | material ladder | upgrade ladder |
-|---|---|---|
-| `1d12` | `2d6` | `1d12` (clamped, no-op) |
+| die | material ladder | old upgrade ladder | now |
+|---|---|---|---|
+| `1d12` | `2d6` | `1d12` (clamped, no-op) | `2d6` |
+| `2d12` | `3d8` | `2d12` (clamped, no-op) | `3d8` |
+| `3d10` | `3d10` | `3d12` (off-ladder) | `3d10` |
 
-Materials made that point reachable: `Darkeline` and `Paradox Metal` are +2, so **any d8
-weapon lands on `1d12`**, where a `Superior` upgrade costs resources, prints *"Damage die +1
-step"* and does nothing. The export follows the upgrade ladder, so such a weapon exports
-`1d12` rather than `2d6`. That is **correct-per-implementation and arguably wrong-per-intent**,
-and it is pinned as declared behaviour rather than fixed: changing it is a rules call (the
-two ladders come from different books) and must move three things together — this pin, the
-cap pinned by `CharacterSheetUpgrades.test.js`, and `CharacterSheetNpcExporter.weaponDamage.test.js`,
-which relies on `increaseDamageDie` returning the die term alone.
+Materials made the first row reachable: `Darkeline` and `Paradox Metal` are +2, so **any d8
+weapon lands on `1d12`**, where a `Superior` upgrade cost resources, printed *"Damage die +1
+step"* and did nothing. The export followed the upgrade ladder, so such a weapon exported
+`1d12` rather than `2d6`.
+
+`increaseDamageDie` now extracts the bare die and delegates to `stepDamageDie`, so the export
+follows the Thelemar ladder throughout. The third dependent named when this was still pinned —
+`CharacterSheetNpcExporter.weaponDamage.test.js`'s reliance on `increaseDamageDie` returning
+the die term *alone* — is exactly why this is a delegation and not a replacement; see the
+contract table in `21-item-materials.md`.
+
+**Exported end-to-end, not just in the helper.** `CharacterSheetNpcExporter.materials.test.js`
+asserts the statblock line itself, both with a material in play (`Darkeline` d8 → `1d12` →
+`2d6`) and off a plain greataxe with no material at all. The material-only leg is asserted
+alongside, so a change in the projection cannot be mistaken for the upgrade step landing.
 
 **Corpus.** Contrary to the expectation that this combination was hypothetical, one
 character carries it today: Arthur's **Cataclysm** is a `2d6` weapon with `Steeline` (+1)
