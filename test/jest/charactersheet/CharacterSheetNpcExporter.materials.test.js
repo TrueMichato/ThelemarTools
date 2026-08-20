@@ -607,6 +607,12 @@ maybeDescribe("NPC export v23 — the rider says what it does", () => {
 
 	const attackLine = (items, namePattern, extra = {}) => {
 		const state = new CharacterSheetState();
+		// Seeded before and after. Seeding only afterwards happens to work -- projection is
+		// read-time, so the catalog lands before `convertStateToMonster` -- but that makes
+		// this helper's correctness depend on a property of the projection it never states,
+		// and it logs an empty-catalog warning per load on the way past. `loadFromJson`
+		// replaces state wholesale, hence both calls.
+		state.setItemMaterialCatalog?.(MATERIALS);
 		state.loadFromJson({
 			name: "Probe",
 			classes: [{name: "Fighter", source: "PHB", level: 5}],
@@ -866,6 +872,12 @@ maybeDescribe("NPC export v25 — the drawback rides with the benefit", () => {
 
 	const attackFor = (name, material) => {
 		const state = new CharacterSheetState();
+		// Seeded before and after. Seeding only afterwards happens to work -- projection is
+		// read-time, so the catalog lands before `convertStateToMonster` -- but that makes
+		// this helper's correctness depend on a property of the projection it never states,
+		// and it logs an empty-catalog warning per load on the way past. `loadFromJson`
+		// replaces state wholesale, hence both calls.
+		state.setItemMaterialCatalog?.(MATERIALS);
 		state.loadFromJson({
 			name: "Probe",
 			classes: [{name: "Fighter", source: "PHB", level: 5}],
