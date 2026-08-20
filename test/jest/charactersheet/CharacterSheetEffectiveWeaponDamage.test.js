@@ -12,6 +12,10 @@
 
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+// Required, not incidental: `projectItemMaterial` returns the item UNCHANGED when
+// `CharacterSheetMaterials` is undefined, so omitting this import silently disables every
+// material effect and leaves a die-step test asserting against an unprojected weapon.
+import "../../../js/charactersheet/charactersheet-materials.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 
@@ -114,25 +118,34 @@ describe("getEffectiveWeaponDamage", () => {
 		const state = mkState();
 		state.setSetting("enableTgtt", true);
 		state.setSetting("materials", true);
+		// The brew authors a die step as a top-level `damage` axis. There is no
+		// `weaponEffects.damageDieStep` key anywhere in `js/` — a fixture inventing one
+		// projects nothing, and every assertion below would pass against an untouched 1d8.
 		state.setItemMaterialCatalog([{
-			name: "Darkmetal",
+			name: "Steeline",
 			source: "TGTT",
 			_entityType: "itemMaterial",
-			materialCategory: ["metal"],
-			weaponEffects: {damageDieStep: 1},
+			materialCategory: "constructed",
+			damage: 1,
+			appliesTo: ["weapon"],
+			roles: ["strikingSurface"],
 		}]);
 
 		const id = addSword(state);
 		const before = state.getEffectiveWeaponDamage(id).dice;
 
 		state.setItemMaterial(id, state.getItemMaterialCatalog()[0]);
-		const after = state.getEffectiveWeaponDamage(id).dice;
+		const after = state.getEffectiveWeaponDamage(id);
 
-		// Whether the catalog fixture actually steps the die depends on the projection rules;
-		// what must hold is that the derivation re-reads the projected item rather than a
-		// frozen string, so the two calls are free to differ.
-		expect(after).toBe(state.getItems().find(i => i.id === id).dmg1);
-		expect(typeof before).toBe("string");
+		// The die actually moves, and it moves along the material ladder.
+		expect(before).toBe("1d8");
+		expect(after.dice).toBe("1d10");
+		expect(after.diceVersatile).toBe("1d12");
+
+		// And it moved because the derivation re-read the PROJECTED item, not because the
+		// stored string changed: the raw entry is still the weapon as authored.
+		expect(after.dice).toBe(state.getItems().find(i => i.id === id).dmg1);
+		expect(state.getItemRaw(id).dmg1).toBe("1d8");
 	});
 
 	// ==========================================================================

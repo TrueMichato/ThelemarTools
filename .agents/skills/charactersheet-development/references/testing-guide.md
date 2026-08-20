@@ -85,6 +85,33 @@ const CharacterSheetState = globalThis.CharacterSheetState;
 
 Otherwise you'll get `ReferenceError: CharacterSheetClassUtils is not defined`.
 
+**The dangerous variant is the one that does NOT throw.** Some cross-module calls are wrapped in
+a `typeof X === "undefined"` guard so the sheet degrades gracefully when a module is absent. In a
+test, that guard turns a missing import into a **silent no-op** instead of an error:
+
+```javascript
+// charactersheet-state.js
+projectItemMaterial (itemData) {
+    if (typeof CharacterSheetMaterials === "undefined") return itemData;  // ← silent
+    ...
+}
+```
+
+A test that imports only `charactersheet-state.js` and then sets a material gets a populated
+catalog, a successful `setItemMaterial`, and an item whose `dmg1` never moves — indistinguishable
+from "this material has no effect". Known guarded pairs:
+
+| Caller | Guarded on | Silently skips |
+|---|---|---|
+| `projectItemMaterial` | `CharacterSheetMaterials` | the entire material projection |
+| `getEffectiveItemBonuses` | `CharacterSheetMaterials` | material tags, crit dice, rider effects |
+| `getEffectiveItemBonuses` | `CharacterSheetUpgrades` | every upgrade effect, incl. `damageDieIncrease` |
+
+This has already produced a vacuous test that shipped: a case titled *"tracks a material die
+step"* asserted no die step, and rationalised the flat result in a comment rather than finding
+the missing import. **If a test asserts that a module changes something, assert the changed
+value, and confirm the test fails when the import is removed.**
+
 ### What setup.js Mocks
 
 | Global | Mocked Methods |

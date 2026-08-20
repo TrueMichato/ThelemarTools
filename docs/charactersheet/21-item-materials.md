@@ -731,27 +731,42 @@ Materials step the damage die along an **11-step ladder**, wider than the upgrad
 Heart Stone −2) and clamps at both ends. Off-ladder equivalents (`2d4`, `3d4`, `3d6`) are
 normalised onto the ladder.
 
-`CharacterSheetUpgrades.increaseDamageDie` is deliberately **left unchanged** (it caps at
-`1d12`) so the `Superior` upgrade behaves exactly as before.
+`CharacterSheetUpgrades.increaseDamageDie` is deliberately **left unchanged** so the `Superior`
+upgrade behaves exactly as before. It holds the die **count** fixed and clamps the die **size**
+at 12 — so `1d12` stays `1d12`, but `2d10` still becomes `2d12`. It is not a `1d12` cap.
 
-### The two ladders diverge at 1d12, and materials made that reachable
+### The two ladders diverge at three rungs, and one of them inverts
 
-The upgrade ladder is `[4, 6, 8, 10, 12]` with a `Math.min` clamp. It agrees with the material
-ladder on every die a base weapon actually has, and disagrees at exactly one point: from `1d12`
-a material steps to `2d6`, while an upgrade stays at `1d12`.
+The upgrade ladder is `[4, 6, 8, 10, 12]` with a `Math.min` clamp, holding the die **count**
+fixed and stepping only the **size**. It agrees with the material ladder on every die a base
+weapon actually has, and disagrees at exactly three:
 
-That matters now because **materials can reach `1d12` from a common weapon** — `Darkeline` and
-`Paradox Metal` are `+2`, so any d8 weapon lands there. The consequence is that a `Superior`
-upgrade on such a weapon costs resources, still prints *"Damage die +1 step"*, and changes
-nothing. It predates materials (a `Superior` greataxe was always inert) but materials turn a
-corner case into a common one.
+| die | material step | upgrade step | which one stops |
+|---|---|---|---|
+| `1d12` | `2d6` | `1d12` | upgrade |
+| `2d12` | `3d8` | `2d12` | upgrade |
+| `3d10` | `3d10` | `3d12` | **material** |
+
+The third row is the one to read twice. At the top rung the direction **reverses**: the material
+ladder is the one that clamps, and the upgrade ladder walks on to `3d12` — a die that is not on
+the material ladder at all. So "the upgrade ladder is the short one" is two-thirds true, and a
+rules decision phrased as *"should `Superior` walk further past `1d12`"* is under-specified: it
+silently also decides `2d12`, and at `3d8`/`3d10` it would **reduce** a result rather than
+extend it.
+
+The `1d12` rung matters most because **materials can reach `1d12` from a common weapon** —
+`Darkeline` and `Paradox Metal` are `+2`, so any d8 weapon lands there. The consequence is that a
+`Superior` upgrade on such a weapon costs resources, still prints *"Damage die +1 step"*, and
+changes nothing. It predates materials (a `Superior` greataxe was always inert) but materials
+turn a corner case into a common one.
 
 This is **not** treated as a bug to fix in passing, because unifying the ladders is a rules
 decision with three dependents that must move together: the cap is pinned by
 `CharacterSheetUpgrades.test.js`, the NPC exporter relies on `increaseDamageDie` returning the
 die term *alone* (it pre-extracts flat modifiers because of it, so `2d6+15` → `2d8`), and the
 two ladders come from different books. The divergence is instead **pinned as declared
-behaviour** in `CharacterSheetMaterialAccessorGaps.test.js`, so that whoever changes it is shown
+behaviour** in `CharacterSheetMaterialAccessorGaps.test.js` and, as an exact set including the
+inversion, in `CharacterSheetDamageDieComposition.test.js`, so that whoever changes it is shown
 everything it touches.
 
 ### Material steps and upgrade steps travel in separate channels
@@ -765,14 +780,67 @@ stay separate structurally rather than by arithmetic care:
 | Upgrade | published as `getEffectiveItemBonuses().damageDieIncrease` | consumers that step the projected die |
 
 `damageDieIncrease` starts at `0` and accumulates **only** from `getUpgradeEffects`, so it is
-always `0` for a material-only weapon. The separation is reinforced by the fact that
-`getEffectiveItemBonuses` receives the **raw** inventory entry, which carries no resolved
-material entity at all — the accessor structurally *cannot* see a material's `damage` axis.
+always `0` for a material-only weapon.
+
+The separation is a **deliberate decline, not an impossibility.** `getEffectiveItemBonuses`
+resolves the material itself and holds `fx` in hand while it declines to re-add the damage axis;
+adding `material.damage` there is one line from code that already has it. Do not describe this
+accessor as structurally unable to see the axis — it can, and the comment above the block is the
+only thing keeping it from double-counting.
 
 So a consumer that reads the projected die **and** adds `damageDieIncrease` counts each source
 once, and this is why no double-application occurs. Note the reason carefully: it is **not**
 that materials avoid stepping dice. Thirteen of them do. Any guard written on the premise that
 none exist is vacuous and will never fire.
+
+### The order is load-bearing, and the corpus cannot police it
+
+The two steps **do not commute.** At five of thirteen dice, material-then-upgrade and
+upgrade-then-material give different answers:
+
+| die | material first | upgrade first |
+|---|---|---|
+| `1d10` | `1d12` | `2d6` |
+| `1d12` | `2d8` | `2d6` |
+| `2d10` | `2d12` | `3d8` |
+| `2d12` | `3d10` | `3d8` |
+| `3d8` | `3d12` | `3d10` |
+
+`1d10` is an ordinary weapon die — halberd, glaive, pike, heavy crossbow, versatile longsword —
+so this is not a corner case.
+
+Every path applies **material first**: the projection bakes the material into `dmg1`, and
+`getEffectiveWeaponDamage`, the combat path, the NPC exporter and
+`ItemBuilderCore._getDamageProjectionPreimages` all step the projected die afterwards. That
+ordering was consistent everywhere and enforced nowhere.
+
+It also cannot be caught downstream. The **only** character in the 24-character corpus combining
+a die-stepping material with a `Superior` upgrade is Arthur's *Cataclysm* (`2d6` maul, `Steeline`
+`+1`, `Superior`, exporting `2d10`) — and `2d6` is a die where the two orders **agree**. The
+combination is live in the corpus; the invariant is invisible to it. A corpus diff of `IDENTICAL`
+across a reordering change would be true and worthless. Pinned directly in
+`CharacterSheetDamageDieComposition.test.js`, which RED-verifies by reordering the read path and
+confirms that exactly the three ordering tests fail while Arthur's own case keeps passing.
+
+### A missing import silently disables the whole projection
+
+`projectItemMaterial` and `getEffectiveItemBonuses` each guard their entire material
+contribution with `typeof CharacterSheetMaterials === "undefined"`, and the upgrade block does
+the same for `CharacterSheetUpgrades`. In the app both are loaded by script tags; in Jest they
+are not. A test importing only `charactersheet-state.js` therefore gets an **unprojected item and
+no error** — the material resolves, the catalog is populated, `setItemMaterial` succeeds, and
+`dmg1` simply never moves.
+
+This is the "absent and empty wear the same face" failure again, and it has already produced one
+vacuous test: an earlier `getEffectiveWeaponDamage` case titled *"tracks a material die step"*
+asserted no die step at all, hedging in a comment that *"whether the catalog fixture actually
+steps the die depends on the projection rules"*. It did not — the import was missing and the
+fixture invented a `weaponEffects.damageDieStep` key that appears nowhere in `js/`. Two
+independent causes, each sufficient, both silent.
+
+Any test asserting a material effect must import `charactersheet-materials.js` explicitly, and
+should assert the **moved value** rather than a relationship between two reads that are free to
+be identical.
 
 ## Derived numbers
 
