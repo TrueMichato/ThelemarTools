@@ -2198,6 +2198,28 @@ Two things about how this was reached are worth more than the fix:
   about 400. **The estimate that justified not doing the work was cheaper to measure than to
   argue about**, and measuring it took one script that already existed.
 
+**The anchor, pinned as a consequence.** The rider loop admits a modifier on
+`/^damage(?:$|:)/`, and the trailing `(?:$|:)` is load-bearing: `damageReduction` shares the
+first eight characters, a naive `/^damage/` matches it, and item materials register exactly
+that type (Adamantine's damage reduction). Loosening the anchor would print a *defensive*
+property as extra weapon damage on every attack line.
+
+This surfaced from the other session's audit showing materials are outside CS-BUG-170. They
+are — but the reason is narrower than the `enabled` gate that bug is about. **Every material
+modifier registers `enabled: true`, so that gate never guarded them at any point.** The
+anchor was always the sole defence for the whole material family, and nothing asserted on
+it. Three tests now do, on both sides: `damageReduction` stays off the line,
+`damage:melee` still gets on it, and a control proves the same value under a plain `damage`
+type does produce a rider — so the negative assertion cannot pass by the fixture simply
+never reaching the loop.
+
+That control earned itself immediately. The first draft of the negative test excluded the
+*raw* wording `"while the armor is intact"`, which `_normalizeRiderCondition` rewrites to
+`"when ..."` — a phrase that appears in neither the passing nor the failing case, so it was
+a negative assertion that could not fail. The controls failed on the same wording and
+exposed it. **When a value is normalized between fixture and assertion, a negative
+assertion written against the pre-normalized form is vacuous by construction.**
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 

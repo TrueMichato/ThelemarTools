@@ -391,3 +391,55 @@ describe("v39 — one feature registering twice yields the more specific rider, 
 		expect(entry).not.toMatch(/frowning/i);
 	});
 });
+
+describe("v39 — the rider filter's `damage` anchor is the only thing holding back its neighbours", () => {
+	// `_getConditionalDamageRiders` admits a modifier on `/^damage(?:$|:)/`. That trailing
+	// `(?:$|:)` is not decoration: `damageReduction` starts with the same eight characters,
+	// and a naive `/^damage/` matches it. Item materials register exactly that type --
+	// Adamantine's damage reduction -- so loosening the anchor would print a defensive
+	// property as extra weapon damage on every attack line the character has.
+	//
+	// This was found by auditing the sibling session's claim that materials are outside
+	// CS-BUG-170. They are, and the reason turned out to be narrower than the `enabled` gate
+	// that bug is about: material modifiers all register `enabled: true`, so that gate never
+	// guarded them at any point. The anchor is a SINGLE point of failure for this whole
+	// family and nothing asserted on it.
+	const withModifierOfType = (type) => {
+		const state = makeFighterWithLongsword();
+		state._data.namedModifiers.push({
+			type,
+			value: 3,
+			enabled: true,
+			conditional: "while the armor is intact",
+			name: "Adamantine",
+		});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		return String(out.action.find(a => a.name === "Longsword").entries[0]);
+	};
+
+	it("keeps a damageReduction modifier off the attack line", () => {
+		const entry = withModifierOfType("damageReduction");
+		expect(entry).not.toMatch(/\{@damage 3\}/);
+		// Asserted against the NORMALIZED wording. The first draft excluded the raw
+		// "while the armor is intact", which `_normalizeRiderCondition` rewrites to
+		// "when ..." -- so it was a negative assertion on a string that cannot appear
+		// whether the rider is emitted or not, and it passed for no reason at all. The
+		// controls below are what exposed it.
+		expect(entry).not.toMatch(/when the armor is intact/i);
+	});
+
+	it("control: the same value under a real damage type does become a rider", () => {
+		// Anti-vacuity on the same channel. Without it the assertion above passes just as
+		// well when the rider path is broken outright, when the fixture never reached the
+		// loop, or when `value: 3` was silently dropped for some unrelated reason.
+		const entry = withModifierOfType("damage");
+		expect(entry).toMatch(/plus \{@damage 3\} damage when the armor is intact/i);
+	});
+
+	it("admits the sub-typed family the anchor is written to allow", () => {
+		// The anchor has to pass `damage:melee:oneHanded` while rejecting `damageReduction`,
+		// which is exactly why it is `(?:$|:)` and not `\b` or a bare prefix. Pinning both
+		// sides means a "simplification" in either direction fails here.
+		expect(withModifierOfType("damage:melee")).toMatch(/plus \{@damage 3\} damage when the armor is intact/i);
+	});
+});
