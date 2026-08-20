@@ -325,6 +325,27 @@ false fact about the codebase -- the same evidence that says "don't trust this r
 if you squint, like "and here is why", and the second reading is unearned. Fix the probe
 until the control moves, *then* interpret.
 
+### A guard can be blind to its own name because of call *order*
+
+`CharacterSheetMaterialCatalogResolution.test.js` carried a test called *"keeps complaining when the
+catalog arrives but still lacks the material"*. It seeded the catalog, then resolved a bad
+reference, then asserted the complaint was recorded. It passed for months.
+
+The bug it was named for is that `setItemMaterialCatalog` **clears** the record. So the record is
+only ever at risk when a catalog installs *after* it exists -- which that ordering never does. The
+test asserted "a bad reference gets recorded", which was never in doubt; it read as though it
+asserted "a bad reference survives", which was false. A wholesale clear was destroying genuine
+faults and the guard could not see it.
+
+Proof it was structural rather than lucky: under the mutation that restores the wholesale clear,
+the old test **stays green** and only the new orderings go red.
+
+**When a guard protects state against a destructive event, the event must happen after the state
+exists.** Ask what the failure mode needs in order to occur -- usually an ordering, a second call,
+or a reload -- and write *that* sequence. A setup-then-assert shape tests construction; it cannot
+test survival. The same applies to caches, dedupe sets and any "clear on X" path: exercise X at
+least once after the thing you expect to persist.
+
 ## Test File Conventions
 
 - **File naming**: `CharacterSheet{Topic}.test.js` (PascalCase descriptive name)

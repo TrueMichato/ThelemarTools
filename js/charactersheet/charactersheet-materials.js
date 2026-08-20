@@ -312,10 +312,28 @@ class CharacterSheetMaterials {
 	 */
 	static getUnresolvedReferences () { return [...CharacterSheetMaterials.unresolvedReferences.values()]; }
 
-	/** Clear the unresolved-reference record. Intended for tests and for a fresh character load. */
-	static clearUnresolvedReferences () {
-		CharacterSheetMaterials.unresolvedReferences.clear();
-		CharacterSheetMaterials._warnedUnresolved.clear();
+	/**
+	 * Clear the unresolved-reference record. Intended for tests and for a fresh character load.
+	 *
+	 * `onlyCatalogless` narrows the clear to references that failed *for want of a catalog*
+	 * (`poolSize === 0`). A late-arriving brew genuinely invalidates those -- they never had a
+	 * chance to resolve. It does not invalidate a `poolSize > 0` record: that reference was
+	 * checked against a populated catalog and is simply bad, and installing an unrelated second
+	 * catalog is not evidence it became good. Clearing wholesale on catalog install erased those
+	 * genuine faults, which is the one thing this record exists to retain.
+	 * @param {{onlyCatalogless?: boolean}} [opts]
+	 */
+	static clearUnresolvedReferences (opts) {
+		if (!opts?.onlyCatalogless) {
+			CharacterSheetMaterials.unresolvedReferences.clear();
+			CharacterSheetMaterials._warnedUnresolved.clear();
+			return;
+		}
+		for (const [key, rec] of [...CharacterSheetMaterials.unresolvedReferences.entries()]) {
+			if (rec.poolSize) continue;
+			CharacterSheetMaterials.unresolvedReferences.delete(key);
+			CharacterSheetMaterials._warnedUnresolved.delete(key);
+		}
 	}
 
 	/**

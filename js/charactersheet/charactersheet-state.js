@@ -43906,10 +43906,12 @@ class CharacterSheetState {
 		globalThis.__csMaterialCatalog = this._itemMaterialCatalog;
 		if (!this._itemMaterialCatalog.length) return;
 
-		// Anything that failed to resolve before this point failed for want of a catalog, not
-		// because the reference was bad. Drop those records so a late-arriving brew does not
-		// leave behind warnings that are no longer true.
-		globalThis.CharacterSheetMaterials?.clearUnresolvedReferences?.();
+		// Anything that failed to resolve *for want of a catalog* failed because there was nothing
+		// to resolve against, not because the reference was bad. Drop those records so a
+		// late-arriving brew does not leave behind warnings that are no longer true. A reference
+		// that failed against a *populated* catalog is a genuine fault and is deliberately kept:
+		// installing another catalog is not evidence that a mis-sourced name became correct.
+		globalThis.CharacterSheetMaterials?.clearUnresolvedReferences?.({onlyCatalogless: true});
 
 		// A brew can install *after* a character is already loaded, and every material modifier
 		// computed before that point was computed against an empty catalog -- i.e. against

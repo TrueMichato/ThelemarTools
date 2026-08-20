@@ -1351,8 +1351,14 @@ with opposite fixes:
 | `poolSize: n` | This one reference is bad — renamed or mis-sourced material | Fix the reference |
 
 Read the record with `CharacterSheetMaterials.getUnresolvedReferences()`. `setItemMaterialCatalog`
-clears it when a non-empty catalog arrives, so a late-loading brew does not leave behind warnings
-that are no longer true.
+clears the **`poolSize: 0`** records when a non-empty catalog arrives, so a late-loading brew does
+not leave behind warnings that are no longer true.
+
+**It deliberately keeps the `poolSize: n` ones.** Those were checked against a populated catalog and
+are genuinely bad; installing a second brew is not evidence that a mis-sourced name became correct.
+The clear used to be wholesale, which erased exactly the faults the record exists to retain — a
+brew reload was enough to lose them, and nothing re-recorded them until something re-resolved. The
+`poolSize: n` row above is only trustworthy because the clear is now narrowed.
 
 **When writing a test that touches materials, load the catalog.** A test that omits it does not
 test materials — it tests the empty-material path, and it will pass against a completely broken

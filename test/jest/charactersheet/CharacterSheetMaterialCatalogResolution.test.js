@@ -153,6 +153,57 @@ describe("A late-arriving catalog clears stale complaints", () => {
 
 		expect(Materials.getUnresolvedReferences().map(r => r.name)).toEqual(["Unobtainium"]);
 	});
+
+	/**
+	 * The test above orders the calls catalog-then-resolve, so the record is created *after* the
+	 * last clear and nothing runs afterwards that could erase it. That ordering cannot observe the
+	 * failure it is named for: the clear happens on `setItemMaterialCatalog`, so a record is only
+	 * at risk when a catalog installs *after* it exists. A brew reload, or a second brew, does
+	 * exactly that -- and used to wipe genuine faults along with the catalogless ones.
+	 */
+	it("does not forget a genuine bad reference when a LATER catalog installs", () => {
+		Materials.clearUnresolvedReferences();
+		const state = new globalThis.CharacterSheetState();
+		state.setItemMaterialCatalog(MATERIALS);
+
+		Materials.resolveMaterial({material: {name: "Unobtainium"}});
+		const recorded = Materials.getUnresolvedReferences();
+		// Anti-vacuity: the record must exist, and must be the kind that survives (pool non-empty).
+		expect(recorded).toHaveLength(1);
+		expect(recorded[0].poolSize).toBeGreaterThan(0);
+
+		// A second install -- another brew, or the same one reloaded.
+		state.setItemMaterialCatalog([...MATERIALS]);
+
+		expect(Materials.getUnresolvedReferences().map(r => r.name)).toEqual(["Unobtainium"]);
+	});
+
+	it("still forgets a catalogless record when a LATER catalog installs", () => {
+		Materials.clearUnresolvedReferences();
+		globalThis.__csMaterialCatalog = [];
+		Materials.resolveMaterial(ADAMANTINE_PLATE);
+		expect(Materials.getUnresolvedReferences()[0].poolSize).toBe(0);
+
+		const state = new globalThis.CharacterSheetState();
+		state.setItemMaterialCatalog(MATERIALS);
+		state.setItemMaterialCatalog([...MATERIALS]);
+
+		expect(Materials.getUnresolvedReferences()).toEqual([]);
+	});
+
+	it("keeps the genuine fault and drops the catalogless one in the same clear", () => {
+		Materials.clearUnresolvedReferences();
+		globalThis.__csMaterialCatalog = [];
+		Materials.resolveMaterial(ADAMANTINE_PLATE);
+
+		const state = new globalThis.CharacterSheetState();
+		state.setItemMaterialCatalog(MATERIALS);
+		Materials.resolveMaterial({material: {name: "Unobtainium"}});
+		state.setItemMaterialCatalog([...MATERIALS]);
+
+		// Both were recorded; exactly one is a genuine fault, and it is the one that remains.
+		expect(Materials.getUnresolvedReferences().map(r => r.name)).toEqual(["Unobtainium"]);
+	});
 });
 
 describe("A catalog that arrives after the character still takes effect", () => {
