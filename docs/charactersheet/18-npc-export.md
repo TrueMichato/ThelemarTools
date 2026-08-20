@@ -1872,6 +1872,46 @@ text.
 Stout Blackwood or Deathglass — so this is forward-looking and is pinned against the real
 brew rather than against corpus movement.
 
+### v29 — an affinity states its off-switch
+
+A condensate authors `affinity` and `instability` as one rule. The export had wired the
+drawback onto two of the three surfaces that can state a benefit:
+
+| surface | benefit | drawback | wired by |
+|---|---|---|---|
+| attack line | damage-type option | `_getAffinitySuppressionClause` | v25 |
+| `Armor Traits` | armour material note | material note (`type: "drawback"`) | v26 |
+| affinity entry (`focus` role) | trait / action / bonus / reaction | **nothing** | — |
+
+Measured against the shipped brew, **four** affinity entries advertised a benefit whose
+drawback appeared *nowhere in the statblock*: Smokestone, Stormprism, Sunprism and Ashglass.
+Stormprism's is the sharpest — *"on a natural 1 involving the item, its user takes
+`{@damage 1d6}` lightning damage"* — a self-damage rule the DM had no way to know about.
+
+This is worse than omitting both halves. A reader who found the benefit has positive
+evidence they have seen the whole rule.
+
+`_getMaterialPowerEntries` now appends the drawback to the entry that states the benefit,
+via `_getMaterialInstabilityEntries`. Three constraints shaped it:
+
+- **Affinity only.** A condensate's granted action lands in the *same section* as its
+  affinity (Stormprism emits both `Surge` and `Affinity` as reactions), so attaching the
+  drawback to every material power would report the rule twice in adjacent entries.
+- **Tags survive.** It goes through `_prepareFeatureEntriesForNpc`, not
+  `_getSafeInlineText` — the latter strips braces and would ship `@damage 1d6` as literal
+  text.
+- **Armour keeps what it already printed.** Tideglass's affinity is a protective layer, so
+  on armour both `Armor Traits` and the affinity entry are live. `_getArmorTraitBlock`
+  records the material into `claimedInstabilityMaterials` **at the point it emits a
+  `drawback` note**, and the affinity entry skips exactly those. Claiming on emission
+  rather than on "it is armour, so it must have said it" matters: a drawback dropped by
+  the tier filter never reached the block, and suppressing on that assumption would lose
+  the rule entirely — the same rule as v27/v28.
+
+Verified across all 18 condensates carrying both halves × every item role: no gap and no
+double-report. Corpus movement is nil — 5 of 45 saves carry a material and none carries a
+condensate in its affinity role — so this is a latent fix, like v28.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 

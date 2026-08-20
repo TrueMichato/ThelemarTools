@@ -1230,6 +1230,33 @@ Two rules worth reusing:
 Also: `_getSafeInlineText` strips `{}` and will quietly destroy a `{@damage}` tag. Prose bound
 for a statblock goes through `_prepareFeatureEntriesForNpc`.
 
+### State a benefit and its off-switch on the same surface (v29)
+
+An effect authored as a pair — a benefit plus the thing that suppresses it — must be
+delivered as a pair. Splitting it across surfaces is worse than dropping one half: a reader
+who found the benefit has positive evidence they saw the whole rule.
+
+The trap is that the pair usually gets wired **once per surface**, and surfaces are added
+over time. The NPC export stated a condensate's drawback on the attack line (v25) and in
+the armour block (v26); the third surface — the affinity entry for a `focus`-role item —
+had been shipping the benefit alone ever since, for four of the brew's condensates.
+
+Two rules fell out, both reusable:
+
+- **Attach the pair to the entry that states the benefit, not to every entry the source
+  produces.** A condensate emits its granted action *and* its affinity into the same
+  section; attaching the drawback to both prints the rule twice, adjacently.
+- **Claim on emission, never on category.** `_getArmorTraitBlock` records the material only
+  where it actually emitted a `drawback` note, and the affinity entry skips exactly those.
+  Suppressing on "this is armour, so the armour block must have said it" loses the rule for
+  any drawback the tier filter dropped. Third consecutive version to need this (v27, v28,
+  v29), which is what makes it structural rather than incidental.
+
+**Guard both directions.** The two failure modes are opposites — a gap and a duplicate — so
+a test for only one invites the other: silence the duplicate by dropping the clause and the
+gap returns. The matrix test asserts `gaps === []` *and* `dupes === []` across every
+condensate and every item role.
+
 ### Bundling sheet-authored items with the export (v20)
 
 An NPC export is a homebrew document (`{_meta, monster: [...]}`), so it may also carry

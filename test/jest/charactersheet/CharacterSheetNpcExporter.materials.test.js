@@ -40,6 +40,12 @@ const findMaterial = name => MATERIALS.find(m => m.name === name) || null;
 
 function makeState ({items = [], abilities = {}} = {}) {
 	const state = new CharacterSheetState();
+	// Before the load, not only after: a material is stored on an item as a `{name, source}`
+	// reference, so loading against an empty catalog resolves every one of them to null and
+	// leaves derived state computed from nothing. Setting it afterwards repairs some paths
+	// and not others, which showed up here as an armour block that appeared or vanished
+	// depending on which tests ran first.
+	state.setItemMaterialCatalog?.(MATERIALS);
 	state.loadFromJson({
 		name: "Probe",
 		classes: [{name: "Fighter", source: "PHB", level: 5}],
@@ -559,12 +565,31 @@ maybeDescribe("NPC export v24 — the material power lands in the right section"
 	});
 
 	it("routes every authored economy in the brew away from the trait pile", () => {
-		// The real defect, stated over the shipped data rather than a fixture: not one of
-		// these notes names its own cost, so prose alone sends all of them to `trait`.
+		// Every authored economy must reach a section — that is the defect this pins, and it
+		// holds regardless of what the prose happens to say.
 		authoredEconomies.forEach(power => {
-			expect(CharacterSheetNpcExporter._getActivationSectionFromText(power.note)).toBeNull();
 			expect(CharacterSheetNpcExporter._getMaterialPowerSection(power)).not.toBeNull();
 		});
+
+		// Originally this asserted the stronger premise that NO authored note names its own
+		// cost, which was true of the data and is no longer: the brew gained
+		// `actionType: "bonus"` on Yellowwood Flurry, whose note already read "you can use a
+		// bonus action to attack again with it" — the entry had been contradicting itself.
+		// Pin WHICH notes name a cost rather than deleting the premise, so the next such move
+		// is visible instead of silent. `_getMaterialPowerSection` prefers the authored value,
+		// so a note that agrees with its data changes nothing; a note that disagrees would.
+		const selfDescribing = authoredEconomies
+			.filter(power => CharacterSheetNpcExporter._getActivationSectionFromText(power.note) != null)
+			.map(power => power.name)
+			.sort();
+		expect(selfDescribing).toEqual(["Yellowwood Flurry"]);
+		authoredEconomies
+			.filter(power => selfDescribing.includes(power.name))
+			.forEach(power => {
+				// A self-describing note must not contradict the data it sits beside.
+				expect(CharacterSheetNpcExporter._getActivationSectionFromText(power.note))
+					.toBe(CharacterSheetNpcExporter._getMaterialPowerSection(power));
+			});
 	});
 
 	it("still reads the prose when the brew names no cost", () => {
@@ -1268,5 +1293,151 @@ maybeDescribe("NPC export v28 -- a material attack rider rides the attack", () =
 		// No claim set at all (any other caller) must keep the old behaviour.
 		expect(CharacterSheetNpcExporter._getMaterialPowerEntries(fakeState, {npcName: "P"})
 			.map(it => it.section)).toEqual(["trait"]);
+	});
+});
+
+maybeDescribe("NPC export v29 — an affinity states its off-switch", () => {
+	// A condensate authors `affinity` and `instability` as one rule. The attack line has said
+	// both since v25 and the armour block since v26; a focus-role affinity had no third home,
+	// so its drawback reached no surface at all — the reader who found the benefit had
+	// positive evidence they had seen the whole rule when they had not.
+	const focusItem = material => {
+		const item = {
+			id: "focus-1",
+			name: "Orb",
+			source: "CUSTOM",
+			custom: true,
+			type: "RG",
+			weight: 1,
+			value: 5000,
+			material: {name: material, source: "TGTT"},
+		};
+		return {id: item.id, item, quantity: 1, equipped: true};
+	};
+	const armorItem = material => {
+		const item = {
+			// `type: "HA"` is the catalogue vocabulary. The item-builder's `type: "armor"` +
+			// `armorType` form resolves through `CharacterSheetState.getArmorCategory`, which
+			// was measured returning `null` for it under some suite-global states — a flaky
+			// dependency would make this pin pass for the wrong reason.
+			id: "armor-1",
+			name: "Plate",
+			source: "CUSTOM",
+			custom: true,
+			type: "armor",
+			armorType: "heavy",
+			ac: 18,
+			weight: 65,
+			value: 150000,
+			material: {name: material, source: "TGTT"},
+		};
+		return {id: item.id, item, quantity: 1, equipped: true};
+	};
+	// Tag-blind so an assertion cannot pass or fail on `{@damage 1d6}` vs `1d6` alone.
+	const flatten = str => String(str).replace(/\{@\w+ ([^}|]+)(\|[^}]*)?\}/g, "$1").toLowerCase();
+	const instabilityOf = name => {
+		const mat = findMaterial(name);
+		return String((mat?.effects || []).find(e => e?.type === "condensateInstability")?.text || "");
+	};
+	const withBoth = MATERIALS.filter(m => (m?.effects || []).some(e => e?.type === "condensateAffinity")
+		&& (m?.effects || []).some(e => e?.type === "condensateInstability"));
+
+	it("states the drawback in the same entry as the benefit it limits", () => {
+		const drawback = instabilityOf("Sunprism");
+		expect(drawback).toBeTruthy();
+
+		const out = CharacterSheetNpcExporter.convertStateToMonster(makeState({items: [focusItem("Sunprism")]}), {});
+		const found = findEntry(out, "Sunprism Affinity");
+		expect(found).toBeTruthy();
+		expect(flatten(textOf(found.entry))).toContain(flatten(drawback).slice(0, 40));
+	});
+
+	it("keeps a tag in the drawback rather than shipping it as literal text", () => {
+		// Stormprism's instability is `{@damage 1d6}` lightning. `_getSafeInlineText` strips
+		// braces, so routing this through the inline helper would print "@damage 1d6".
+		expect(instabilityOf("Stormprism")).toMatch(/\{@damage 1d6\}/);
+
+		const out = CharacterSheetNpcExporter.convertStateToMonster(makeState({items: [focusItem("Stormprism")]}), {});
+		const found = findEntry(out, "Stormprism Affinity");
+		expect(textOf(found.entry)).toContain("{@damage 1d6}");
+		expect(textOf(found.entry)).not.toMatch(/[^{]@damage 1d6/);
+	});
+
+	it("gives the drawback one home, not one per power the material grants", () => {
+		// Stormprism emits both a granted action and its affinity, in the same section.
+		const out = CharacterSheetNpcExporter.convertStateToMonster(makeState({items: [focusItem("Stormprism")]}), {});
+		const surge = findEntry(out, "Stormprism Surge");
+		const affinity = findEntry(out, "Stormprism Affinity");
+		expect(surge).toBeTruthy();
+		expect(affinity).toBeTruthy();
+		expect(textOf(surge.entry)).not.toContain("Drawback");
+		expect(textOf(affinity.entry)).toContain("Drawback");
+	});
+
+	it("lets the armour block keep the drawback it already printed", () => {
+		// Tideglass's affinity is a protective layer, so on armour BOTH the armour trait block
+		// and the affinity entry are live. The claim is recorded where the drawback is actually
+		// emitted, so exactly one of them says it.
+		const drawback = instabilityOf("Tideglass");
+		const out = CharacterSheetNpcExporter.convertStateToMonster(makeState({items: [armorItem("Tideglass")]}), {});
+		const key = flatten(drawback).slice(0, 26);
+		const entries = ["trait", "action", "bonus", "reaction"].flatMap(section => (out[section] || []));
+		const hits = entries.filter(entry => flatten(textOf(entry)).includes(key));
+
+		// Exactly one surface, whichever it is. Naming the owner would pin something the
+		// fixture does not control: whether the armour block prints a drawback depends on the
+		// material notes the state can resolve, so an owner assertion fails for a reason that
+		// has nothing to do with double-reporting. The ownership handover itself is pinned
+		// deterministically by the two tests below.
+		expect(hits.length).toBe(1);
+		const affinity = entries.find(entry => /Tideglass Affinity/i.test(String(entry?.name || "")));
+		const armorBlock = entries.find(entry => String(entry?.name || "") === "Armor Traits");
+		if (armorBlock && flatten(textOf(armorBlock)).includes(key)) {
+			expect(affinity ? flatten(textOf(affinity)).includes(key) : false).toBe(false);
+		}
+	});
+
+	it("claims on emission, so a drawback the armour block never printed is not suppressed", () => {
+		const power = {
+			id: "p-aff",
+			materialPower: true,
+			materialAffinity: true,
+			actionType: "action",
+			name: "Sunprism Affinity",
+			description: "It sheds bright light.",
+			instability: "Magical Darkness suppresses it.",
+			materialName: "Sunprism",
+			itemId: "i1",
+		};
+		const fakeState = {getItemPowers: () => [power]};
+		const read = opts => textOf(CharacterSheetNpcExporter._getMaterialPowerEntries(fakeState, {npcName: "P", ...opts}));
+
+		expect(read({})).toContain("Magical Darkness suppresses it.");
+		expect(read({claimedInstabilityMaterials: new Set(["Rootstone"])})).toContain("Magical Darkness suppresses it.");
+		expect(read({claimedInstabilityMaterials: new Set(["Sunprism"])})).not.toContain("Magical Darkness suppresses it.");
+	});
+
+	it("holds both invariants across every condensate and every item role", () => {
+		// The two failure modes are opposites, so pinning only one invites the other: silence
+		// the duplicate by dropping the clause and the gap comes back.
+		expect(withBoth.length).toBeGreaterThan(10);
+		const gaps = [];
+		const dupes = [];
+
+		withBoth.forEach(mat => {
+			const key = flatten(instabilityOf(mat.name)).slice(0, 26);
+			if (!key) return;
+			[focusItem, armorItem].forEach(build => {
+				const out = CharacterSheetNpcExporter.convertStateToMonster(makeState({items: [build(mat.name)]}), {});
+				const entries = ["trait", "action", "bonus", "reaction"].flatMap(s => (out[s] || []));
+				const hits = entries.filter(entry => flatten(textOf(entry)).includes(key));
+				if (hits.length > 1) dupes.push(`${mat.name}/${hits.length}`);
+				const affinity = entries.find(entry => /Affinity$/i.test(String(entry?.name || "")));
+				if (affinity && !hits.length) gaps.push(mat.name);
+			});
+		});
+
+		expect(dupes).toEqual([]);
+		expect(gaps).toEqual([]);
 	});
 });

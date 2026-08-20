@@ -414,9 +414,12 @@ class CharacterSheetNpcExporter {
 			: null;
 		const specialEquipmentBlock = this._getSpecialEquipmentBlock(state);
 		const divineFavorBlock = this._getDivineFavorBlock(state, {npcName});
-		const armorUpgradeBlock = this._getArmorTraitBlock(state);
+		// Armour states a material's drawback in its own block; built first so the affinity
+		// entry below can see what was actually printed rather than assume it.
+		const claimedInstabilityMaterials = new Set();
+		const armorUpgradeBlock = this._getArmorTraitBlock(state, {claimedInstabilityMaterials});
 		const gemstoneNotesBlock = this._getGemstoneNotesBlock(state);
-		const itemUseBlocks = this._getMagicItemUseBlocks(state, {npcName, claimedMaterialPowerIds});
+		const itemUseBlocks = this._getMagicItemUseBlocks(state, {npcName, claimedMaterialPowerIds, claimedInstabilityMaterials});
 		const spellcastingBlocks = this._getSpellcastingBlocks(state, {npcName});
 
 		const featureBlocks = this._getFeatureBlocks(state, {
@@ -8939,12 +8942,12 @@ class CharacterSheetNpcExporter {
 	 * suit, and a reader mid-swing should not have to find out which of two traits owns the
 	 * number they need.
 	 */
-	static _getArmorTraitBlock (state) {
+	static _getArmorTraitBlock (state, {claimedInstabilityMaterials = null} = {}) {
 		// Prefer state getters when present — do not require the Upgrades UI module
 		// to be loaded (tests, headless conversion, degraded mode).
 		const notes = [
 			...(state.getArmorUpgradeNotes?.() || []),
-			...this._getEquippedArmorMaterialNotes(state),
+			...this._getEquippedArmorMaterialNotes(state, {claimedInstabilityMaterials}),
 		];
 		if (!notes.length) return null;
 
@@ -8978,7 +8981,7 @@ class CharacterSheetNpcExporter {
 	}
 
 	/** The equipped armour's material notes, scoped to the tier actually being worn. */
-	static _getEquippedArmorMaterialNotes (state) {
+	static _getEquippedArmorMaterialNotes (state, {claimedInstabilityMaterials = null} = {}) {
 		if (typeof state?.getItemMaterialNotes !== "function") return [];
 		const worn = (state.getItems?.() || [])
 			.filter(it => !!it && this._isActiveItem(it))
@@ -8989,7 +8992,13 @@ class CharacterSheetNpcExporter {
 			const armorCategory = this._getArmorCategory(item);
 			(state.getItemMaterialNotes(item.id) || [])
 				.filter(note => this._isMaterialNoteApplicable(note, armorCategory))
-				.forEach(note => out.push(note));
+				.forEach(note => {
+					// Claim on emission, not on "this is armour, so it must have said it": a
+					// drawback filtered out by tier never reached the block, and suppressing
+					// the affinity entry on that assumption would lose the rule entirely.
+					if (note?.type === "drawback") claimedInstabilityMaterials?.add(String(item.material.name));
+					out.push(note);
+				});
 		});
 		return out;
 	}
@@ -9108,7 +9117,7 @@ class CharacterSheetNpcExporter {
 	 * action to attack again" and do it. So an economy the sheet had to decline is still an
 	 * economy here, which is why the prose fallback earns its keep.
 	 */
-	static _getMaterialPowerEntries (state, {npcName = "The NPC", claimedMaterialPowerIds = null} = {}) {
+	static _getMaterialPowerEntries (state, {npcName = "The NPC", claimedMaterialPowerIds = null, claimedInstabilityMaterials = null} = {}) {
 		const powers = typeof state?.getItemPowers === "function"
 			? (state.getItemPowers({activeOnly: true}) || [])
 			: [];
@@ -9128,6 +9137,15 @@ class CharacterSheetNpcExporter {
 			const body = this._prepareFeatureEntriesForNpc(power.description || "", {npcName});
 			if (!body.length) return;
 
+			// A benefit stated without its off-switch is a benefit the table will run wrong.
+			// The attack line says it (`_getAffinitySuppressionClause`) and the armour block
+			// says it; a focus-role affinity had no third home, so its drawback reached no
+			// surface at all. Affinity only: a condensate's granted action sits in the same
+			// section as its affinity, so stating it on both would report the rule twice.
+			if (power.materialAffinity && !claimedInstabilityMaterials?.has(String(power.materialName || ""))) {
+				body.push(...this._getMaterialInstabilityEntries(power, {npcName}));
+			}
+
 			const materialName = this._getSafeInlineText(power.materialName || "", {maxLen: 40});
 			const rawName = this._getSafeInlineText(power.name || "", {maxLen: 80});
 			// "Yellowwood Flurry" already names its material; "Emberglass Affinity" reads
@@ -9142,7 +9160,28 @@ class CharacterSheetNpcExporter {
 		return out;
 	}
 
-	static _getMagicItemUseBlocks (state, {npcName = "The NPC", claimedMaterialPowerIds = null} = {}) {
+	/**
+	 * The drawback half of a condensate, rendered for the entry that states the benefit.
+	 *
+	 * `instability` is authored beside `affinity` because the two are one rule. Splitting them
+	 * across surfaces is worse than omitting one: a reader who found the benefit has positive
+	 * evidence they have seen the whole rule when they have not.
+	 *
+	 * Goes through `_prepareFeatureEntriesForNpc` rather than `_getSafeInlineText` because an
+	 * instability can carry a tag — Stormprism's is `{@damage 1d6}` — and the inline
+	 * helper strips braces, which would ship `@damage 1d6` as literal text.
+	 */
+	static _getMaterialInstabilityEntries (power, {npcName = "The NPC"} = {}) {
+		const raw = typeof power?.instability === "string"
+			? power.instability
+			: (power?.instability?.text || "");
+		if (!raw.trim()) return [];
+		const body = this._prepareFeatureEntriesForNpc(raw, {npcName});
+		if (!body.length) return [];
+		return [`{@b Drawback.} ${body.join(" ")}`];
+	}
+
+	static _getMagicItemUseBlocks (state, {npcName = "The NPC", claimedMaterialPowerIds = null, claimedInstabilityMaterials = null} = {}) {
 		const out = {trait: [], action: [], bonus: [], reaction: []};
 		const items = (state.getItems?.() || [])
 			.filter(it => !!it)
@@ -9218,7 +9257,7 @@ class CharacterSheetNpcExporter {
 		// `_isMagicItem` gates this loop, and a plain steel-and-Yellowwood longbow is not
 		// magical. Routed through the same `pushEntry` so it dedupes against magic-item
 		// entries rather than beside them.
-		this._getMaterialPowerEntries(state, {npcName, claimedMaterialPowerIds}).forEach(({section, entry}) => pushEntry(section, entry));
+		this._getMaterialPowerEntries(state, {npcName, claimedMaterialPowerIds, claimedInstabilityMaterials}).forEach(({section, entry}) => pushEntry(section, entry));
 
 		// Group item-granted spells into one entry per item (bestiary style) instead
 		// of one action per spell, and never leak raw `name|source` UIDs.
