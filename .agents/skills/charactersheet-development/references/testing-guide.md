@@ -346,6 +346,20 @@ or a reload -- and write *that* sequence. A setup-then-assert shape tests constr
 test survival. The same applies to caches, dedupe sets and any "clear on X" path: exercise X at
 least once after the thing you expect to persist.
 
+### The `itemId` accessors now say so when you hand them an item
+
+Three of the failed controls described above had **one** cause: an accessor that takes an
+`itemId` was called with the *item*. `find(i => i.id === itemId)` matches nothing, and the
+caller gets `{}` or `null` -- indistinguishable from "this character has no such item". No
+error, no clue, and the empty result reads as a finding about the code.
+
+`getEffectiveItemBonuses` and `getItemRaw` now warn (once per method, never throw) and name the
+correction. The rest of the family routes through one of those two.
+
+If you are writing a probe against an item, the shape is `accessor(row.id)`, not `accessor(row)`
+and not `accessor(row.item)`. And when a probe comes back empty, **check the call before you
+believe the result** -- that is what all three occurrences had in common.
+
 ## Test File Conventions
 
 - **File naming**: `CharacterSheet{Topic}.test.js` (PascalCase descriptive name)

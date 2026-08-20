@@ -12889,7 +12889,35 @@ class CharacterSheetState {
 	 * @param {string} itemId - The item ID
 	 * @returns {object} Combined bonuses from base item + applied upgrades
 	 */
+	/**
+	 * The `itemId`-taking accessors resolve their row with `find(i => i.id === itemId)`, so passing
+	 * the *item* (or an inventory row) instead of its id matches nothing and returns an empty
+	 * result with no error -- indistinguishable from "this character has no such item".
+	 *
+	 * That silent empty has produced three separate false findings across two sessions:
+	 * `resolveMaterial(item.material)`, `getEffectiveItemBonuses(item)` and
+	 * `getEffectiveWeaponDamage(item)`. In each case a probe returned nothing, and nothing was
+	 * read as evidence about the *code* rather than about the probe. Warn loudly so the next one
+	 * is caught in the run that causes it.
+	 *
+	 * Deliberately warn-only: a mis-call degrades exactly as it did before rather than taking the
+	 * sheet down mid-render. Only objects are flagged -- that is the actual mistake, and it keeps
+	 * the guard free of false positives for any other id shape.
+	 * @param {*} itemId
+	 * @param {string} methodName
+	 */
+	_warnIfNotItemId (itemId, methodName) {
+		if (!itemId || typeof itemId !== "object") return;
+		const key = `${methodName}|${Array.isArray(itemId) ? "array" : "object"}`;
+		CharacterSheetState._warnedItemIdMisuse ||= new Set();
+		if (CharacterSheetState._warnedItemIdMisuse.has(key)) return;
+		CharacterSheetState._warnedItemIdMisuse.add(key);
+		const hint = itemId.id ? ` Did you mean \`${methodName}(item.id)\`?` : "";
+		globalThis.console?.warn?.(`[charactersheet] ${methodName}() expects an item id, got an object.${hint} It will return an empty result, which is indistinguishable from "no such item".`);
+	}
+
 	getEffectiveItemBonuses (itemId) {
+		this._warnIfNotItemId(itemId, "getEffectiveItemBonuses");
 		const invItem = this._data.inventory.find(i => i.id === itemId);
 		if (!invItem) return {};
 
@@ -30032,6 +30060,7 @@ class CharacterSheetState {
 	 * @returns {object|null}
 	 */
 	getItemRaw (itemId) {
+		this._warnIfNotItemId(itemId, "getItemRaw");
 		const invItem = this._data.inventory.find(i => i.id === itemId);
 		if (!invItem) return null;
 		return {
