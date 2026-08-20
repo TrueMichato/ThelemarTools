@@ -1688,6 +1688,51 @@ the attack being made, so it is excluded — the trigger check is `attackRoll`-o
   reads correctly, since it *is* a continuation. Weakening the shared normaliser to protect
   one caller would have been the worse trade.
 
+### v26 — armour tier is read across both vocabularies
+
+The sheet describes armour two ways. A catalogue plate is `type: "HA"` with no `armorType`;
+an item-builder plate is `type: "armor"` with `armorType: "heavy"`. The exporter read only
+`armorType`, so **every catalogue suit resolved to `""`** — and the tier gate treated "I could
+not tell" as "it applies".
+
+Measured, before the fix:
+
+| item | printed | correct |
+|---|---|---|
+| catalogue heavy (`HA`) | reduce by 3 | reduce by 3 ✓ |
+| catalogue medium (`MA`) | reduce by **3** | reduce by 2 |
+| catalogue light (`LA`) | reduce by **3** | *nothing — Adamantine grants light armour no DR* |
+| Adamantine **longsword** | *both* "(heavy)" and "(medium)" notes | neither |
+| item-builder armour | correct | correct ✓ |
+
+A catalogue plate also kept the `(heavy)` **and** `(medium)` notes at once, so one statblock
+told the DM to reduce damage by 3 and by 2 in the same block.
+
+Two separate causes, both fixed:
+
+- **One vocabulary read.** Now resolved through `_getArmorCategory`, which delegates to the
+  sheet's public `CharacterSheetState.getArmorCategory` and keeps a matching local fallback for
+  headless paths. A test asserts the two agree on eight shapes so they cannot drift.
+- **`|| fx.damageReduction[0]`.** When no tier matched, the clause fell back to the *first*
+  authored entry. Adamantine authors heavy-3 first, so light armour was handed a reduction the
+  material never grants. The fallback is gone: no match now prints nothing.
+
+`_isMaterialNoteApplicable` is also strict about an unknown tier, which is what stops an
+adamantine sword carrying armour prose.
+
+**What v26 taught.**
+
+- **Two vocabularies for one concept will be read as one.** The sibling session hit the exact
+  mirror of this on the sheet side — their gate read only `type`, so every *custom-built* plate
+  silently lost its DR while catalogue armour worked. Same root cause, opposite survivor. Each
+  bug looked correct to whoever tested the half they happened to have.
+- **A corpus proves what it contains.** All 24 characters use item-builder armour, which is the
+  half that worked, so regenerating them moved **nothing** — before or after. This defect was
+  unreachable by the corpus and was found only because someone described its mirror image.
+- **An accidentally-correct case hides a bug better than a broken one.** Under the fault,
+  catalogue *heavy* armour still printed 3, because the fallback entry happened to be the heavy
+  one. The most-tested case was the one the bug could not touch.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 

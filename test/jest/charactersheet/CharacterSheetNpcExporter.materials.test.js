@@ -725,3 +725,113 @@ maybeDescribe("NPC export v25 — the drawback rides with the benefit", () => {
 		expect(MATERIALS.filter(m => CharacterSheetMaterials.getInstabilitySpec?.(m)).length).toBeGreaterThanOrEqual(2);
 	});
 });
+
+/**
+ * v26 — armour tier is read across both vocabularies, or half the inventory is mis-read.
+ *
+ * The sheet describes armour two ways: a catalogue plate is `type: "HA"` with no `armorType`,
+ * an item-builder plate is `type: "armor"` with `armorType: "heavy"`. The exporter read only
+ * `armorType`, so every catalogue suit resolved to `""` — and the tier gate treated "I could
+ * not tell" as "it applies".
+ *
+ * The sibling session hit the mirror of this on the sheet side (their gate read only `type`,
+ * so every CUSTOM plate lost its DR). Same root cause, opposite survivor: their bug spared
+ * catalogue armour, mine spared custom armour, and each looked correct to whoever tested the
+ * half they had. The 24-character corpus is entirely custom-built and could not reach this.
+ */
+maybeDescribe("NPC export v26 — armour tier is read across both vocabularies", () => {
+	const ADAMANTINE = MATERIALS.find(m => m.name === "Adamantine");
+
+	const armor = ({type, armorType}) => {
+		const item = {
+			id: `a-${type}-${armorType || "none"}`,
+			name: "Probe Armor",
+			source: "CUSTOM",
+			custom: true,
+			type,
+			armor: true,
+			ac: 18,
+			weight: 20,
+			value: 10000,
+			material: {name: "Adamantine", source: "TGTT"},
+		};
+		if (armorType) item.armorType = armorType;
+		return item;
+	};
+
+	const drFor = (item) => CharacterSheetNpcExporter._getMaterialDamageReductionClause(
+		item,
+		CharacterSheetMaterials.getMaterialEffects(item, ADAMANTINE),
+	);
+
+	it("authors more than one armour tier, or none of this can be wrong", () => {
+		// If Adamantine ever collapses to a single tier every assertion below passes trivially.
+		const tiers = (ADAMANTINE.effects || []).filter(e => e.type === "damageReduction");
+		expect(tiers.length).toBeGreaterThanOrEqual(2);
+		expect(new Set(tiers.map(t => t.armorType)).size).toBeGreaterThanOrEqual(2);
+	});
+
+	describe("the reduction printed is the one the worn tier actually grants", () => {
+		it("reads a catalogue heavy suit (type HA, no armorType)", () => {
+			expect(drFor(armor({type: "HA"}))).toMatch(/damage taken by 3\./);
+		});
+
+		it("gives a catalogue medium suit its own smaller number", () => {
+			// This is the assertion that fails loudest: the old fallback printed the FIRST
+			// authored entry, so a half plate claimed heavy plate's reduction.
+			expect(drFor(armor({type: "MA"}))).toMatch(/damage taken by 2\./);
+		});
+
+		it("prints nothing on light armour, which Adamantine does not protect at all", () => {
+			// Inventing a defence is worse than omitting one -- the DM has no way to know the
+			// number was manufactured by a fallback.
+			expect(drFor(armor({type: "LA"}))).toBeNull();
+			expect(drFor(armor({type: "armor", armorType: "light"}))).toBeNull();
+		});
+
+		it("still reads the item-builder vocabulary it always could", () => {
+			// The half that worked must keep working; this is the regression guard on the fix.
+			expect(drFor(armor({type: "armor", armorType: "heavy"}))).toMatch(/damage taken by 3\./);
+			expect(drFor(armor({type: "armor", armorType: "medium"}))).toMatch(/damage taken by 2\./);
+		});
+	});
+
+	describe("a tier-scoped note is a statement about armour of that tier", () => {
+		const notes = [
+			{label: "Adamantine (heavy)", description: "Reduce incoming damage by 3.", type: "passive"},
+			{label: "Adamantine (medium)", description: "Reduce incoming damage by 2.", type: "passive"},
+			{label: "Adamantine", description: "Cannot be destroyed.", type: "passive"},
+		];
+		const kept = (item) => notes
+			.filter(n => CharacterSheetNpcExporter._isMaterialNoteApplicable(n, CharacterSheetNpcExporter._getArmorCategory(item)))
+			.map(n => n.label);
+
+		it("keeps only the worn tier on a catalogue suit", () => {
+			// Previously kept BOTH, so one statblock told the DM to reduce by 3 and by 2.
+			expect(kept(armor({type: "HA"}))).toEqual(["Adamantine (heavy)", "Adamantine"]);
+		});
+
+		it("drops every tier note on light armour while keeping the untiered one", () => {
+			expect(kept(armor({type: "LA"}))).toEqual(["Adamantine"]);
+		});
+
+		it("never puts an armour tier on a weapon", () => {
+			// An Adamantine sword was printing both armour reductions. It should keep only the
+			// note that is true of any adamantine object.
+			expect(kept({type: "M", weapon: true, name: "Adamantine Sword"})).toEqual(["Adamantine"]);
+		});
+	});
+
+	it("resolves tier identically to the sheet, so the two cannot drift", () => {
+		// The exporter keeps a local fallback for headless/degraded paths. If it disagreed with
+		// the sheet, an export would describe armour the sheet does not.
+		const cases = [
+			{type: "HA"}, {type: "MA"}, {type: "LA"}, {type: "S"},
+			{type: "armor", armorType: "heavy"}, {type: "armor", armorType: "light"},
+			{type: "M", weapon: true}, {},
+		];
+		cases.forEach(item => {
+			expect(CharacterSheetNpcExporter._getArmorCategory(item)).toBe(CharacterSheetState.getArmorCategory(item));
+		});
+	});
+});

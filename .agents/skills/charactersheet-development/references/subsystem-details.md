@@ -1096,6 +1096,27 @@ hits you..."). A prose scan therefore returns `null` for all five, and they file
   the material catalog is set *after* `loadFromJson`, and the real modifier when set before.
   Any headless probe must call `setItemMaterialCatalog` first or it will measure a phantom.
 
+### Armour tier has two vocabularies — always resolve, never read a field (v26)
+
+`CharacterSheetState.getArmorCategory(item)` is public and understands both shapes:
+
+- catalogue armour — `type: "HA" | "MA" | "LA" | "S"`, usually **no** `armorType`
+- item-builder armour — `type: "armor"` with `armorType: "heavy" | "medium" | "light"`
+
+Reading either field alone mis-reads half the inventory, and each half looks correct to whoever
+tests it. This produced two mirror-image bugs in the same week: the sheet's DR gate read only
+`type` and dropped DR on every custom plate; the exporter read only `armorType` and printed
+heavy-tier DR on catalogue *light* armour and on adamantine *weapons*.
+
+Two rules that follow:
+
+- **Return `null` for non-armour and treat it as a real answer.** A tier-scoped note
+  ("Adamantine (heavy)") is not true of a sword. Treating "unknown" as "applies" is what put
+  armour prose on a weapon.
+- **Never fall back to the first entry of a tiered list.** `fx.damageReduction` is authored per
+  tier (Adamantine: heavy-3, medium-2). A `|| list[0]` fallback hands light armour a reduction
+  the material never grants — inventing a defence, which is worse than omitting one.
+
 ### A drawback goes where the benefit is (v25)
 
 When the exporter prints a conditional benefit on an attack line, the condition that removes

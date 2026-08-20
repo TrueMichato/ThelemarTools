@@ -7982,9 +7982,9 @@ class CharacterSheetNpcExporter {
 			: [];
 
 		if (authored.length) {
-			const armorType = String(projectedItem?.armorType || "").toLowerCase();
+			const armorCategory = this._getArmorCategory(projectedItem);
 			return authored
-				.filter(note => this._isMaterialNoteApplicable(note, armorType))
+				.filter(note => this._isMaterialNoteApplicable(note, armorCategory))
 				.filter(note => !(isPenetrationStated && /penetrat/i.test(String(note?.description || ""))))
 				.map(note => {
 					const text = this._getSafeInlineText(note?.description, {maxLen: 300});
@@ -7999,12 +7999,38 @@ class CharacterSheetNpcExporter {
 		return this._getDerivedMaterialClauses(projectedItem, material, fx);
 	}
 
-	/** A tier-scoped note ("Adamantine (heavy)") is only true of armour of that tier. */
-	static _isMaterialNoteApplicable (note, armorType) {
+	/**
+	 * The armour tier of an item, across BOTH vocabularies the sheet uses.
+	 *
+	 * A catalogue plate is `type: "HA"` with no `armorType`; an item-builder plate is
+	 * `type: "armor"` with `armorType: "heavy"`. Reading either field alone silently
+	 * mis-reads half the inventory — and because each half looks correct on its own, the
+	 * failure is invisible until someone tests the other kind of armour.
+	 *
+	 * Returns `null` for anything that is not armour, which is a meaningful answer: a
+	 * tier-scoped statement is not true of a sword.
+	 */
+	static _getArmorCategory (item) {
+		const State = globalThis.CharacterSheetState;
+		if (typeof State?.getArmorCategory === "function") return State.getArmorCategory(item);
+		if (!item) return null;
+		const explicit = String(item.armorType || "").toLowerCase();
+		if (["heavy", "medium", "light"].includes(explicit)) return explicit;
+		if (item.shield) return "shield";
+		return {HA: "heavy", MA: "medium", LA: "light", S: "shield"}[String(item.type || "").split("|")[0].toUpperCase()] || null;
+	}
+
+	/**
+	 * A tier-scoped note ("Adamantine (heavy)") is only true of armour of that tier.
+	 *
+	 * Deliberately strict about an unknown tier. Treating "I could not tell" as "it applies"
+	 * printed Adamantine's heavy AND medium reductions side by side on the same catalogue
+	 * plate — two different numbers for one suit — and printed both on an Adamantine sword.
+	 */
+	static _isMaterialNoteApplicable (note, armorCategory) {
 		const tier = /\((heavy|medium|light)\)\s*$/i.exec(String(note?.label || ""))?.[1];
 		if (!tier) return true;
-		if (!armorType) return true;
-		return tier.toLowerCase() === armorType;
+		return tier.toLowerCase() === String(armorCategory || "").toLowerCase();
 	}
 
 	/** The pre-accessor derivation, kept as the fallback for headless and degraded paths. */
@@ -8062,9 +8088,12 @@ class CharacterSheetNpcExporter {
 	/** Adamantine reduces damage by 3 in heavy and 2 in medium; only the worn tier applies. */
 	static _getMaterialDamageReductionClause (projectedItem, fx) {
 		if (!Array.isArray(fx?.damageReduction) || !fx.damageReduction.length) return null;
-		const armorType = String(projectedItem?.armorType || "").toLowerCase();
-		const entry = fx.damageReduction.find(it => !it?.armorType || String(it.armorType).toLowerCase() === armorType)
-			|| fx.damageReduction[0];
+		const armorCategory = this._getArmorCategory(projectedItem);
+		// No `|| [0]` fallback. Adamantine authors heavy-3 and medium-2, so falling back to the
+		// first entry printed "reduces damage by 3" on light armour, which grants none at all --
+		// inventing a defence is worse than omitting one.
+		const entry = fx.damageReduction
+			.find(it => !it?.armorType || String(it.armorType).toLowerCase() === armorCategory);
 		const value = Number(entry?.value) || 0;
 		if (!value) return null;
 		const types = Array.isArray(entry?.damageTypes) && entry.damageTypes.length
@@ -8870,13 +8899,13 @@ class CharacterSheetNpcExporter {
 		if (typeof state?.getItemMaterialNotes !== "function") return [];
 		const worn = (state.getItems?.() || [])
 			.filter(it => !!it && this._isActiveItem(it))
-			.filter(it => String(it.type || "").toLowerCase() === "armor" || !!it.armorType);
+			.filter(it => this._getArmorCategory(it) != null);
 		const out = [];
 		worn.forEach(item => {
 			if (!item?.material?.name || item.id == null) return;
-			const armorType = String(item.armorType || "").toLowerCase();
+			const armorCategory = this._getArmorCategory(item);
 			(state.getItemMaterialNotes(item.id) || [])
-				.filter(note => this._isMaterialNoteApplicable(note, armorType))
+				.filter(note => this._isMaterialNoteApplicable(note, armorCategory))
 				.forEach(note => out.push(note));
 		});
 		return out;
