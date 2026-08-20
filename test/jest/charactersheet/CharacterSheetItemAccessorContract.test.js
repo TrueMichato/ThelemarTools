@@ -225,3 +225,43 @@ describe("The misuse guard is structural, not attached by hand", () => {
 		expect(inlined.map(([n, l]) => `${n}: ${l.trim()}`)).toEqual([]);
 	});
 });
+
+/**
+ * The hint half of the message (`Did you mean f(item.id)?`) is conditional on the argument
+ * carrying an `.id`, and an inventory *row*'s nested `.item` does not always. A detector -- or a
+ * test -- keyed on the hint therefore reads "silent" for a call that warned perfectly well.
+ *
+ * So pin the invariant half separately: the warning fires on the *shape* of the argument, and
+ * only the correction is conditional on being able to offer one.
+ */
+describe("The warning fires on the argument shape, not on the hint being available", () => {
+	let warn;
+
+	beforeEach(() => {
+		CharacterSheetState._warnedItemIdMisuse?.clear();
+		warn = jest.spyOn(globalThis.console, "warn").mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		warn.mockRestore();
+		CharacterSheetState._warnedItemIdMisuse?.clear();
+	});
+
+	it("still warns for an object with no `id` to suggest", () => {
+		makeState().getEffectiveItemBonuses({name: "Nameless", type: "weapon"});
+
+		const msg = String(warn.mock.calls[0]?.[0] || "");
+		expect(msg).toContain("getEffectiveItemBonuses() expects an item id");
+		// No `.id`, so there is nothing to correct to -- and that absence must not be mistaken
+		// for silence by anything reading this channel.
+		expect(msg).not.toContain("Did you mean");
+	});
+
+	it("offers the correction when there is one, which is the only difference", () => {
+		makeState().getEffectiveItemBonuses({...WEAPON});
+
+		const msg = String(warn.mock.calls[0]?.[0] || "");
+		expect(msg).toContain("getEffectiveItemBonuses() expects an item id");
+		expect(msg).toContain("Did you mean `getEffectiveItemBonuses(item.id)`?");
+	});
+});

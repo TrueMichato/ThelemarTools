@@ -178,6 +178,28 @@ describe("the two gates a raw namedModifiers push has to clear", () => {
 	});
 
 	/**
+	 * The carve-out, and the reason it is not a hole to route around.
+	 *
+	 * A text-parsed conditional is registered `enabled: false` on purpose (CS-BUG-053), so
+	 * aggregates admit it while totals do not -- and *no* recalc will promote it. That asymmetry
+	 * is the design: a conditional is surfaced for a per-roll opt-in, and must never silently
+	 * move a printed number. Anyone who reaches for a recalc to "fix" a conditional that isn't
+	 * showing up in a total is fixing the wrong thing.
+	 */
+	it("admits a disabled conditional to aggregates only, and no recalc promotes it", () => {
+		const state = bare();
+		const before = state.getSkillMod("perception");
+		state._data.namedModifiers.push({...PROBE, enabled: false, conditional: "when hidden"});
+
+		expect(state.getModifiersForType("skill:perception").some(m => m.name === "GATEPROBE")).toBe(true);
+		expect(state.getSkillMod("perception")).toBe(before);
+
+		state._recalculateCustomModifiers();
+		expect(state.getModifiersForType("skill:perception").some(m => m.name === "GATEPROBE")).toBe(true);
+		expect(state.getSkillMod("perception")).toBe(before);
+	});
+
+	/**
 	 * The aggregate gate has a deliberate carve-out: text-parsed conditionals are registered
 	 * `enabled: false` and would otherwise be double-gated into invisibility (CS-BUG-053). This is
 	 * why `withModifier` above can pass a conditional and still be read back.

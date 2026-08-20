@@ -310,14 +310,21 @@ Measured on `skill:perception` with `value: 5`, varying only the delivery:
 | `.push({enabled: true, ...})`, no recalc | `0 -> 0` **inert** | `0 -> 1` live |
 | `.push({enabled: true, ...})` + recalc | `0 -> 5` live | `0 -> 1` live |
 | `addNamedModifier({type, value})` | `0 -> 5` live | `0 -> 1` live |
+| `.push({enabled: false, conditional})` | `0 -> 0` | `0 -> 1` live |
+| `.push({enabled: false, conditional})` + recalc | `0 -> 0` | `0 -> 1` live |
 
-So: **`enabled: true` is required by both families; the recalc is required only by totals.**
+So: **the recalc is required only by totals, and `enabled: true` is required by totals
+unconditionally but by aggregates only for a non-conditional.** The last two rows are the
+carve-out, and the asymmetry in them is deliberate rather than a bug to route around: a
+conditional is *surfaced* for a per-roll opt-in, and must never silently move a printed number.
+No recalc will promote it, so reaching for one is the wrong repair twice over.
+
 All 15 raw-push sites in the suite already pass `enabled: true`, which is why they are sound --
 the hazard is writing a *new* one from a minimal object. A corollary worth stating because it
 is the natural wrong repair: **do not "fix" a bare push by adding the recalc.** Without
 `enabled` it stays inert in *both* columns, and the recalc makes it look like a fix was applied.
 
-All four rows are pinned executably in
+All six rows are pinned executably in
 `CharacterSheetModifierReachability.test.js` -> `describe("the two gates a raw namedModifiers
 push has to clear")`. That test, not this table, is the authority: this matrix is a transcription
 and a transcription cannot fail when the gates move. The same matrix is also described in
@@ -405,6 +412,22 @@ Two consequences worth holding on to:
   `npc-exports`) are environment rather than content and are linked in deliberately; see
   `scripts/hooks/run-prepush.mjs`. If you add a suite that reads an untracked fixture directory,
   add it to `LOCAL_INPUTS` or the push gate quietly stops running it.
+
+**And `LOCAL_INPUTS` only covers all-or-nothing.** A corpus that is *present but
+incomplete* degrades silently in exactly the same way, one file at a time, and no
+environment fix can see it: the per-character blocks are generated from an `existsSync`
+filter, so a missing save produces *no failing test* -- its assertions are never
+constructed. Measured on the real-save corpus: hiding a single file dropped the suite from
+**954 to 921 tests**, and both runs would have read `passed`.
+
+`CharacterSheetNpcExporter.realsaves.test.js` &rarr; `describe("v37 -- the corpus is present
+in full, or not at all")` closes that: `expect(available).toEqual(SAVE_NAMES)`, skipped
+only when the corpus is wholly absent. All-or-nothing is legitimate -- a fresh clone has
+none. Partial never is; it means a save was renamed, deleted or failed to copy.
+
+The general rule for any data-driven suite: **if the size of the table is read from the
+environment, assert the size.** A count that is discovered rather than declared can shrink
+to any value above zero without a single assertion failing.
 
 The general form is the one this guide keeps arriving at from different directions: **a filtered
 walk has to assert what it found *and* that it looked.** Here the walk is over files on disk, and
