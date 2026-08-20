@@ -2445,3 +2445,23 @@ describeReal("v20 — companion items travel with the monster", () => {
 		});
 	});
 });
+
+describe("v37 — the corpus is present in full, or not at all", () => {
+	// `available` is an existsSync filter, and every per-character block below is keyed off
+	// it. That handles the two ends -- a full local checkout runs, a fresh clone skips -- and
+	// nothing in between: a corpus that loses half its saves loses half its assertions and
+	// stays green, because the tests for a missing character are never constructed rather
+	// than failing.
+	//
+	// Measured by the sibling session on the pre-push hook: a worktree without `npc-exports/`
+	// linked in ran this suite at 194 tests instead of 953 and reported `564 suites passed`
+	// both times. 759 assertions can disappear behind an unchanged word.
+	//
+	// All-or-nothing is legitimate. Partial never is: it means a save was renamed, deleted or
+	// failed to copy, and the honest response is to say so rather than to quietly cover less.
+	const itReal = available.length ? it : it.skip;
+
+	itReal("covers every save it claims to, so a shrunken corpus fails instead of silently halving", () => {
+		expect(available).toEqual(SAVE_NAMES);
+	});
+});
