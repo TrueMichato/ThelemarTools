@@ -1909,8 +1909,21 @@ via `_getMaterialInstabilityEntries`. Three constraints shaped it:
   the rule entirely — the same rule as v27/v28.
 
 Verified across all 18 condensates carrying both halves × every item role: no gap and no
-double-report. Corpus movement is nil — 5 of 45 saves carry a material and none carries a
-condensate in its affinity role — so this is a latent fix, like v28.
+double-report.
+
+**Corpus movement is nil, and the reason is worth recording** because the first measurement
+of it was worthless. Of 24 saves, 5 carry a material and exactly **one** carries a
+condensate affinity — Aldor's Emberglass, in the `strikingSurface` role, i.e. the attack
+line v25 already covers. So v29 is latent, like v28.
+
+The first run of that measurement returned "identical" for the wrong reason: the corpus
+harness set the material catalog *after* `loadFromJson`, so every material on every
+character resolved to `null` and no material effect had reached the corpus at all. It went
+unnoticed because a null material is also the correct answer for an item that has no
+material. The sibling session's unresolved-reference diagnostic (`85f41a38`) is what
+surfaced it — the harness had been quietly emitting nothing for as long as the corpus has
+existed. Catalogs are now set before the load, and "identical" is a real result: Aldor's
+suppression clause and Mikase's Adamantine both appear in the regenerated output.
 
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:

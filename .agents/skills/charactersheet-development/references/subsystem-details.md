@@ -1252,6 +1252,14 @@ Two rules fell out, both reusable:
   any drawback the tier filter dropped. Third consecutive version to need this (v27, v28,
   v29), which is what makes it structural rather than incidental.
 
+**A harness that never loads the catalog measures nothing.** A material is stored on an item
+as a `{name, source}` reference; with an empty catalog every one resolves to `null` — which
+is also the correct answer for an item that has no material, so the loss is indistinguishable
+from a true negative. Any corpus or probe that reports "no material effects" must first prove
+it can see one. Set `setItemMaterialCatalog` (and `setDraconicResonanceCatalog`) **before**
+`loadFromJson`, and treat `CharacterSheetMaterials.getUnresolvedReferences()` as the check:
+`poolSize: 0` means the catalog was never loaded, `poolSize: n` means that one reference is bad.
+
 **Guard both directions.** The two failure modes are opposites — a gap and a duplicate — so
 a test for only one invites the other: silence the duplicate by dropping the clause and the
 gap returns. The matrix test asserts `gaps === []` *and* `dupes === []` across every
