@@ -442,6 +442,56 @@ apart by a *comment*; these gates are what stands behind it if either ever gains
 The practical procedure, since the reasoning is hard to do by inspection: **delete the gate
 and run the suite.** Zero red means no fixture reaches it, whatever the test names claim.
 
+### A test that names the real catalog may be reading a hand-built mirror of it
+
+`CharacterSheetMaterials.test.js` defines a synthetic `MATERIALS` fixture — legitimately, and
+its comment says so: *"these mirror their shape so the tests exercise the vocabulary, not the
+data."* Almost every test in the file should use it.
+
+One shouldn't, and did:
+
+```js
+it("flags exactly the five degrading materials in the real catalog", () => {
+    const flagged = MATERIALS.filter(m => CharacterSheetMaterials.getRiskFlag(m));
+    expect(flagged.every(m => !!m.degradation)).toBe(true);
+    expect(MATERIALS.filter(m => m.degradation).length).toBe(flagged.length);
+});
+```
+
+The synthetic fixture contains **zero** materials carrying a `degradation` block. Both
+assertions reduce to `0 === 0`. Measured: stubbing `getRiskFlag` to return `null` for every
+material — the function broken outright, nothing ever flagged risky — left this test **green**.
+Three other tests caught that mutation; the one whose entire subject is the risk flags did not.
+
+The number *five* appeared in exactly one place: the title. The fixture contradicted it, and
+`every()` on an empty array is `true`, so nothing said so.
+
+> **A synthetic fixture that mirrors real data is a second copy that can drift from it.** A
+> test asserting a property *of the real data* against the mirror asserts nothing about the
+> real data — and reads, in the diff and in the runner output, exactly like one that does.
+
+Fixed by reading the brew (`REAL_MATERIALS`) and asserting the five by **name**, not by a count
+compared against itself. Adding a sixth degrading material is now expected to fail here.
+
+The general rule, which the NPC exporter session arrived at from the opposite direction with a
+partially-populated corpus: **if the size of a data-driven table is read from the environment,
+assert the size.** A count that is *discovered* rather than *declared* can shrink to any value
+above zero — or to zero — without a single assertion failing.
+
+Note which shapes are already safe, so this isn't applied indiscriminately: a **named lookup**
+(`byName("Rimeglass")`) is self-defending, because a missing entry yields `undefined` and the
+test fails loudly. The disease is specific to **derived collections** — `filter`/`map` over a
+catalog, where a smaller collection is still a perfectly valid collection. In this repo
+`CharacterSheetMaterialAffinities.test.js` (`expect(condensates.length).toBe(18)`) and
+`CharacterSheetMaterialInstability.test.js` (a floor of 4) already declare theirs.
+
+**A probe aimed at the wrong catalog invents a finding.** Perturbing the brew file to measure
+this suite showed 180/180 green across a dropped material, stripped instabilities, and an
+*entirely empty* catalog — which reads like a suite blind to its data, and was very nearly
+reported as such. It reads a synthetic fixture; that green was correct isolation, not
+blindness. Confirm which data a suite actually loads before concluding anything from
+perturbing data it does not.
+
 ### Your suite is smaller on a clean checkout than it is on your machine
 
 `npm test` here runs **17,120** tests. On a fresh clone it runs **16,359**. The 759-test gap is

@@ -6,11 +6,22 @@
  */
 
 import "./setup.js";
+import {readFileSync} from "fs";
+import {dirname, join} from "path";
+import {fileURLToPath} from "url";
+
 import "../../../js/charactersheet/charactersheet-materials.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetMaterials = globalThis.CharacterSheetMaterials;
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// The REAL catalog. Everything below this line uses the hand-built `MATERIALS` fixture
+// instead, deliberately -- but a test that says "the real catalog" has to read this one.
+const REAL_MATERIALS = JSON.parse(
+	readFileSync(join(__dirname, "../../../homebrew/TravelersGuidetoThelemar.json"), "utf8"),
+).itemMaterial;
 
 // Minimal, hand-built catalog. The real entities live in the TGTT brew file; these
 // mirror their shape so the tests exercise the vocabulary, not the data.
@@ -841,11 +852,26 @@ describe("Item Materials", () => {
 		});
 
 		it("flags exactly the five degrading materials in the real catalog", () => {
-			// Derived from the authored `degradation` block, never from a material's name —
-			// so adding a sixth degrading material needs no code change.
-			const flagged = MATERIALS.filter(m => CharacterSheetMaterials.getRiskFlag(m));
+			// This test read the hand-built `MATERIALS` fixture until it was measured. That
+			// fixture contains ZERO materials carrying a `degradation` block, so both of its
+			// assertions reduced to `0 === 0`: with `getRiskFlag` stubbed to return null for
+			// every material -- the function broken outright, nothing ever flagged risky --
+			// this test still passed. The count in its own title was the only place the
+			// number five appeared, and the fixture contradicted it.
+			//
+			// Declared, not discovered: a subset size read from the data can shrink to any
+			// value including zero without an assertion noticing. Adding a sixth degrading
+			// material is expected to fail here, and the fix is to update the number.
+			const degrading = REAL_MATERIALS.filter(m => m.degradation);
+			expect(degrading.map(m => m.name).sort()).toEqual([
+				"Duststone", "Obsidian", "Ordinary Glass", "Rimeglass", "Stone and Flint",
+			]);
+
+			// Derived from the authored `degradation` block, never from a material's name.
+			const flagged = REAL_MATERIALS.filter(m => CharacterSheetMaterials.getRiskFlag(m));
+			expect(flagged.length).toBe(5);
 			expect(flagged.every(m => !!m.degradation)).toBe(true);
-			expect(MATERIALS.filter(m => m.degradation).length).toBe(flagged.length);
+			expect(flagged.map(m => m.name).sort()).toEqual(degrading.map(m => m.name).sort());
 		});
 	});
 
