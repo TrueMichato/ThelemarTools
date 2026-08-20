@@ -9938,3 +9938,88 @@ stylesheet directly, because the defect was a CSS declaration and jsdom does not
 element with `min-width: 0` and `flex-shrink: 1` beside one with `flex: 0 0 auto` has been
 volunteered to disappear entirely — and if that element is the name, the row stops being
 about anything. Give identity a floor and let metadata ellipsize.
+
+---
+
+## CS-BUG-170 — NPC export silently drops a fighting style's conditional damage — OPEN
+
+**Symptom.** Dzeiy has the **Dueling** fighting style (+2 damage while
+wielding one melee weapon and no other weapons) and exactly one equipped
+weapon, one-handed. Her export contains **no trace of it**: the string
+`Dueling` appears 0 times, the condition text appears 0 times, and the
+attack line reads `{@damage 1d8+8}` with no rider.
+
+The condition is permanently satisfied by the exported loadout, so a DM
+running the statblock deals 2 less damage per hit than the character does.
+
+**Root cause.** `charactersheet-npc-exporter.js:9815`, in the conditional
+damage-rider loop:
+
+```js
+if (!mod?.conditional) return;
+if (mod.enabled === false) return;   // <-- drops it
+```
+
+Text-parsed conditional modifiers are registered `enabled: false` **by
+design** — see the carve-out at `charactersheet-state.js:53253`,
+`if (!mod.enabled && !mod.conditional) return;`, added for CS-BUG-053 so
+the conditional picker can still offer them. The sheet therefore *does*
+see these; the exporter does not. **Two gates on one channel that
+disagree.**
+
+Corpus measurement (45 saves, 265 named modifiers): 61 are `enabled:
+false`, and **57 of those are conditional** — the carve-out is the
+majority mode for conditionals, not a corner case. Only **2** are
+`damage`-typed, both Dzeiy's Dueling, which is why this surfaced once.
+
+**The exporter already contains dead code that names this feature**, two
+lines above the gate that makes it unreachable (`:9739-9741`):
+
+```js
+// One feature can register the same bonus twice under differently-worded
+// conditionals (Dueling does), which reads as two separate riders on the line.
+if (sourceName && riders.some(r => r.sourceName === sourceName && r.damage === value)) return;
+```
+
+Dedup written for a feature the gate can never admit is strong evidence
+the gate is the accident, not the dedup.
+
+**Why this is not a one-line fix.** Deleting `:9815` was measured, and it
+produces a *worse* statblock:
+
+```
+plus {@damage 2} damage when it is wielding.
+```
+
+Dueling registers **twice** — a generic `damage` carrying a truncated
+conditional (`"when you are wielding"`) and a `damage:melee:oneHanded`
+carrying the good one (`"wielding one melee weapon and no other
+weapons"`). Both normalise fine on their own:
+
+| raw | `_normalizeRiderCondition` |
+|---|---|
+| `when you are wielding` | `when it is wielding` |
+| `wielding one melee weapon and no other weapons` | `when wielding one melee weapon and no other weapons` |
+
+but the dedup is **first-wins**, and array order puts the truncated one
+first. So a correct fix needs *both* the gate change and a
+prefer-the-more-specific-condition rule — and the latter reorders riders
+for every character, with 45 exports of expectation to re-validate.
+
+**Not attempted** because the blast radius is corpus-wide and the corpus
+evidence is `n = 1`. Filed rather than guessed at.
+
+**Repro.**
+
+```js
+const st = new CharacterSheetState();
+st.setItemMaterialCatalog(materials);
+st.loadFromJson(dzeiy);
+const mon = CharacterSheetNpcExporter.convertStateToMonster(st, {});
+JSON.stringify(mon).includes("Dueling");   // false
+```
+
+**Note.** The v35 corpus guard cannot catch this: it pins the exported
+**die** against `getEffectiveWeaponDamage().dice` and says nothing about
+the flat bonus or about riders. A guard that checks one component of a
+number is silent about the others.

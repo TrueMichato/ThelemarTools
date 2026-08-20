@@ -1398,19 +1398,34 @@ cache; aggregates walk the array directly:
 | injection | `getSkillMod()` *(total)* | `getModifiersForType()` *(aggregate)* |
 |---|---|---|
 | `push({type, value})` | `0` — inert | `0` — inert |
+| `push({type, value})` + recalc | `0` — inert | `0` — inert |
 | `push({…, enabled: true})` | `0` — inert | **`1`** |
 | `push({…, enabled: true})` + recalc | **`5`** | **`1`** |
+| `push({…, enabled: false, conditional})` | `0` | **`1`** |
+| `push({…, enabled: false, conditional})` + recalc | `0` | **`1`** |
 | `addNamedModifier()` | **`5`** | **`1`** |
 
-**`enabled` is the universal gate; the recalc is the totals-only gate.** The hard early
-return is `if (!mod.enabled) return;` (`charactersheet-state.js:52585`), and
+**Correction (v35e): `enabled` is not the universal gate.** An earlier revision of this
+section said it was. The two readers gate differently, and the difference is a *policy*, not
+plumbing:
+
+- **totals** need `enabled: true` **and** a recalc — `if (!mod.enabled) return;` at
+  `charactersheet-state.js:52585`. A `conditional` does **not** get in, even after a recalc:
+  a conditional must not silently move a printed number.
+- **aggregates** gate on `enabled` **or** `conditional` — `if (!mod.enabled && !mod.conditional)
+  return;` at `:53253`. Text-parsed conditionals are registered `enabled: false`, and dropping
+  them here double-gated them into invisibility, so the conditional picker never offered them
+  (CS-BUG-053). `aggregateModifiers` still refuses to *apply* them without an opt-in.
+
 `addNamedModifier` sets `enabled: modifier.enabled !== false` (`:52120`) *and* recalculates,
 which is why the public API works and hand-rolled injection often does not.
 
-So the rule is **match the injection to the reader**, and always carry `enabled`:
+So the rule is **match the injection to the reader**:
 
 - asserting a **number** → `addNamedModifier()`, or push `{enabled: true}` **and** recalc;
-- asserting **reachability / conditional offering** → push `{enabled: true}` and read back.
+- asserting **reachability / conditional offering** → push `{enabled: true}` and read back;
+- asserting the **conditional carve-out specifically** → push `{enabled: false, conditional}`
+  and read the aggregate; expect the total to stay put, because that is the whole point.
 
 Do *not* "fix" a bare push by adding a recalc: without `enabled` it stays inert in both
 columns. All 15 raw-push sites in `test/jest/charactersheet/` carry `enabled: true` and are
