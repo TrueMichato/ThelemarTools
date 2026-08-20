@@ -835,3 +835,100 @@ maybeDescribe("NPC export v26 — armour tier is read across both vocabularies",
 		});
 	});
 });
+
+/**
+ * v26b — a projected field is counted once, never added on top of itself.
+ *
+ * `applyToItem` bakes attack, damage, AC, dice and ranges INTO the item that `getItems()`
+ * returns. `getEffectiveItemBonuses` publishes overlapping totals for the same effects. Read
+ * both additively and every bonus pays twice.
+ *
+ * The exporter avoids this by branching (`eff ? eff.total... : item.bonusWeapon + ...`) rather
+ * than summing, which is correct but entirely invisible — nothing failed if someone changed
+ * the `else` to a `+`. The materials session has flagged this trap twice and hit its inverse
+ * on their own side (a projection with no de-projection compounded a thrown range 20 -> 40 ->
+ * 60 across builder round-trips). These pin the exporter's half.
+ */
+maybeDescribe("NPC export v26b — a projected bonus is counted exactly once", () => {
+	const magicSword = (bonus) => {
+		const item = {
+			id: "w-magic",
+			name: "Probe Sword",
+			source: "CUSTOM",
+			custom: true,
+			type: "M",
+			weapon: true,
+			weaponCategory: "martial",
+			baseItem: "longsword|xphb",
+			dmg1: "1d8",
+			dmgType: "S",
+			property: [],
+			weight: 3,
+			value: 1500,
+		};
+		if (bonus) item.bonusWeapon = `+${bonus}`;
+		return {id: item.id, item, quantity: 1, equipped: true};
+	};
+
+	const probe = (bonus) => {
+		const state = new CharacterSheetState();
+		state.setItemMaterialCatalog?.(MATERIALS);
+		state.loadFromJson({
+			name: "Probe",
+			classes: [{name: "Fighter", source: "PHB", level: 5}],
+			abilities: {str: 16, dex: 10, con: 14, int: 10, wis: 10, cha: 10},
+			hp: {max: 44, current: 44},
+			inventory: [magicSword(bonus)],
+		});
+		state.setItemMaterialCatalog?.(MATERIALS);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const action = (out.action || []).find(a => /Probe Sword/i.test(String(a.name || "")));
+		const text = String((action?.entries || []).join(" "));
+		return {
+			toHit: Number(/\{@hit \+?(-?\d+)\}/.exec(text)?.[1]),
+			damage: /\{@damage ([^}]+)\}/.exec(text)?.[1],
+			eff: state.getEffectiveItemBonuses?.("w-magic"),
+		};
+	};
+
+	it("adds a weapon's enhancement to hit exactly once", () => {
+		// STR +3, proficiency +3. A +1 sword is +7, not +8. Doubling here is a single
+		// character's difference in the source and silently inflates every magic weapon.
+		const plain = probe(0);
+		const plusOne = probe(1);
+
+		expect(plain.toHit).toBe(6);
+		expect(plusOne.toHit).toBe(7);
+		expect(plusOne.toHit - plain.toHit).toBe(1);
+	});
+
+	it("adds the same enhancement to damage exactly once", () => {
+		expect(probe(0).damage).toMatch(/1d8\s*\+\s*3$/);
+		expect(probe(1).damage).toMatch(/1d8\s*\+\s*4$/);
+	});
+
+	it("scales linearly, so a doubling cannot hide inside a small bonus", () => {
+		// +1 -> +7 and +3 -> +9. If the two channels were summed this would read +8 and +12,
+		// which a single-bonus test could mistake for an off-by-one somewhere else.
+		expect(probe(3).toHit - probe(1).toHit).toBe(2);
+	});
+
+	it("keeps the accessor and the raw item agreeing, which is why summing them is wrong", () => {
+		// The guard's premise: `getEffectiveItemBonuses` already CONTAINS the item's own
+		// enhancement. If this ever stops being true the branch above must be revisited, so
+		// state the premise rather than relying on it silently.
+		expect(Number(probe(2).eff?.totalAttackBonus)).toBe(2);
+		expect(Number(probe(2).eff?.totalDamageBonus)).toBe(2);
+	});
+
+	it("has no material that steps a damage die, which is what makes the die path safe", () => {
+		// `damageDieIncrease` is read from the accessor and applied on top of the PROJECTED
+		// item's die. That is only safe while no material steps dice during projection --
+		// Mithril's ladder moves properties (2H -> V), not dice. If a material ever gains a
+		// die step, the die would be raised twice and this fails first.
+		const dieSteppers = MATERIALS.filter(m => (m.effects || [])
+			.some(e => /^(damageDieIncrease|damageStep|damageDieLadder)$/.test(String(e.type))));
+
+		expect(dieSteppers.map(m => m.name)).toEqual([]);
+	});
+});

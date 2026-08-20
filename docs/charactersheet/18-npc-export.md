@@ -1733,6 +1733,34 @@ adamantine sword carrying armour prose.
   catalogue *heavy* armour still printed 3, because the fallback entry happened to be the heavy
   one. The most-tested case was the one the bug could not touch.
 
+#### v26b — the double-count is now guarded, not merely avoided
+
+`applyToItem` bakes attack, damage, AC, dice and ranges **into** the item `getItems()` returns.
+`getEffectiveItemBonuses` publishes overlapping totals for the same effects. Read both
+additively and every bonus pays twice.
+
+The exporter has always branched rather than summed:
+
+```js
+if (eff) { magicAttackBonus = eff.totalAttackBonus || 0; }
+else     { magicAttackBonus = (item.bonusWeapon || 0) + (item.bonusWeaponAttack || 0); }
+```
+
+That is correct and was entirely **invisible** — nothing failed if someone changed the `else`
+to a `+`. Five tests now pin it: a +1 sword is `+7` not `+8`, the bonus scales linearly so a
+doubling cannot hide inside a small number, and the branch's *premise* is stated outright
+(`eff.totalAttackBonus` already contains the item's own enhancement).
+
+The fifth guards a real future hazard. `damageDieIncrease` is read from the accessor and
+applied on top of the **projected** die, which is safe only while no material steps dice during
+projection — Mithril's ladder moves properties (`2H → V`), not dice. If a material ever gains a
+die step, that die would be raised twice; the test fails the moment one is authored.
+
+This is the exporter's half of a rule the materials session arrived at from the other side:
+every field a projection writes needs its inverse handled somewhere. They needed a
+*de-projection* (a missing one compounded a thrown range 20 → 40 → 60 across builder round
+trips); the exporter needs a *non-addition*. Same invariant, two directions.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 
