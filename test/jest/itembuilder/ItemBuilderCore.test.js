@@ -836,4 +836,68 @@ describe("thrown-range de-projection", () => {
 			field: "range",
 		}));
 	});
+
+	// `armorForceHeavy` is the one material projection that overwrites a *category* rather
+	// than a number, and it is the only one whose loss is invisible in the projected item:
+	// a forced-heavy leather armour is indistinguishable from authored plate, because
+	// forcing is idempotent (heavy -> heavy). `_getLegacyDeprojectionAmbiguities` already
+	// declares it non-invertible, correctly, and nothing pinned that.
+	//
+	// The material here carries ONLY the force effect. Darkmetal also blocks on `ac`,
+	// `stealth`, `weight` and `value`, so a test built on the real material would still
+	// report `isValid === false` with this branch deleted — passing while guarding nothing.
+	// Isolating the effect makes `armorType` the sole reason the save is refused.
+	describe("a material that overwrites the armor category blocks the round trip", () => {
+		const LEATHER = {
+			name: "Leather Armor",
+			source: "PHB",
+			type: "LA",
+			rarity: "none",
+			armor: true,
+			ac: 11,
+			armorType: "light",
+			weight: 10,
+			value: 1000,
+			entries: ["Light armor."],
+		};
+		const FORCER = {
+			name: "Forcer",
+			source: "TGTT",
+			appliesTo: ["armor"],
+			effects: [{type: "armorForceHeavy"}],
+			entries: ["Forcer armour is unwieldy."],
+		};
+		const INERT = {
+			name: "Inert",
+			source: "TGTT",
+			appliesTo: ["armor"],
+			entries: ["Inert armour is ordinary."],
+		};
+
+		const restoreProjected = material => {
+			const catalogs = {items: [LEATHER], materials: [FORCER, INERT], upgrades: UPGRADES};
+			const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), LEATHER, {source: "HB"});
+			draft.material = {name: material.name, source: material.source};
+			const projected = ItemBuilderCore.projectForPreview(draft, catalogs);
+			return {projected, validation: ItemBuilderCore.validate(ItemBuilderCore.fromItem(projected), catalogs)};
+		};
+
+		test("projects light armor to heavy, losing the authored category", () => {
+			const {projected} = restoreProjected(FORCER);
+			expect(projected.armorType).toBe("heavy");
+		});
+
+		test("refuses the save, naming the armor category as the only unreversible field", () => {
+			const {validation} = restoreProjected(FORCER);
+			expect(validation.isValid).toBe(false);
+			expect(validation.errors.map(e => e.field)).toEqual(["armorType"]);
+			expect(validation.errors[0].message).toMatch(/armor category cannot be uniquely reversed/i);
+		});
+
+		test("does not block an armor material that leaves the category alone", () => {
+			const {projected, validation} = restoreProjected(INERT);
+			expect(projected.armorType).toBe("light");
+			expect(validation.errors.map(e => e.field)).not.toContain("armorType");
+		});
+	});
 });

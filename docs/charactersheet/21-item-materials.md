@@ -1103,6 +1103,18 @@ onto the item needs a reversal in `_deprojectLegacyProjection` and, if it is los
 `_getLegacyDeprojectionAmbiguities`. A multiplier is lossy (floor rounding collapses distinct
 authored ranges) and is deliberately refused; an additive shift is exact and is reversed.
 
+**`armorForceHeavy` is the case where the loss is invisible.** It overwrites a *category* rather
+than a number, and forcing is idempotent — heavy stays heavy — so a forced-heavy leather armour
+is indistinguishable from authored plate in the projected item. There is no arithmetic to
+detect, which is why it is declared unreversible rather than inverted.
+
+Guarding it needs the effect **isolated**. Darkmetal, the only material that carries it, also
+blocks on `ac`, `stealth`, `weight` and `value`, so a test built on the real material still
+reports `isValid === false` with the category branch deleted — passing while guarding nothing.
+`ItemBuilderCore.test.js` therefore uses a material carrying only the force effect, making the
+armour category the sole reason the save is refused. Same trap as counting to one while a
+channel is silent: **a guard over one of several sufficient causes must isolate its own.**
+
 ### Exploding damage dice are an effect, not a note
 
 *Brutal*'s rules text is genuine exploding dice — roll the maximum on the weapon's damage dice
