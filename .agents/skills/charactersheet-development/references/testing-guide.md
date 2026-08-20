@@ -285,39 +285,48 @@ afterEach(() => {
 Prefer `jest.spyOn(Cls, "_method").mockReturnValue([])` with `restoreAllMocks`, which gets
 this right by construction. The manual form above is for statics a spy cannot reach.
 
-### A raw `namedModifiers` push is inert for *totals*, and live for *aggregates*
+### A raw `namedModifiers` push passes through **two** silent gates
 
-There are two reader families, and a bare `.push()` serves exactly one of them.
+There are two reader families and two gates, and a bare `.push()` of a minimal object
+satisfies neither family. Prefer **`addNamedModifier()`**, which clears both.
 
-**Total/value getters read a cache.** `_recalculateCustomModifiers()` folds
-`_data.namedModifiers` into `_data.customModifiers`, and `getSkillMod()` /
-`getAbilityCheckCustomMod()` and friends read the fold. `addNamedModifier()` triggers the
-recalc; a bare `.push()` does not, so the modifier sits in the array contributing nothing
-and the probe reads flat with no error.
+**Gate 1 -- `enabled`.** Both families skip a modifier that is not enabled:
+`_recalculateCustomModifiers()` at `charactersheet-state.js:52585` (`if (!mod.enabled) return;`)
+and `getModifiersForType()` at `:53250` (`if (!mod.enabled && !mod.conditional) return;`).
+`addNamedModifier()` sets `enabled: modifier.enabled !== false`; an object literal does not.
+Note the aggregate carve-out: a **`conditional`** modifier is admitted while disabled, because
+text-parsed conditionals are registered `enabled: false` on purpose (CS-BUG-053).
 
-**Aggregate/reachability getters read the array directly.** `getModifiersForType()` and
-`aggregateModifiers()` walk `_data.namedModifiers` themselves, so a raw push is the correct
-and idiomatic injection there -- which is why ~51 existing tests use it and are sound.
+**Gate 2 -- the recalc.** Total/value getters read a *cache*. `_recalculateCustomModifiers()`
+folds `_data.namedModifiers` into `_data.customModifiers`, and `getSkillMod()` /
+`getAbilityCheckCustomMod()` read the fold. `addNamedModifier()` triggers it; a bare `.push()`
+does not. Aggregate getters walk the array directly and so do not need it.
 
 Measured on `skill:perception` with `value: 5`, varying only the delivery:
 
 | injection | `getSkillMod()` (total) | `getModifiersForType()` (aggregate) |
 |---|---|---|
-| `_data.namedModifiers.push(...)` | `2 -> 2` | probe found |
-| `.push(...)` then `_recalculateCustomModifiers()` | `2 -> 7` | probe found |
-| `addNamedModifier(...)` | `2 -> 7` | probe found |
+| `.push({type, value})` + recalc | `0 -> 0` **inert** | `0 -> 0` **inert** |
+| `.push({enabled: true, ...})`, no recalc | `0 -> 0` **inert** | `0 -> 1` live |
+| `.push({enabled: true, ...})` + recalc | `0 -> 5` live | `0 -> 1` live |
+| `addNamedModifier({type, value})` | `0 -> 5` live | `0 -> 1` live |
 
-So the rule is **match the injection to the reader**, not "never push". If you assert on a
-number, push then recalc, or use `addNamedModifier()`. If you assert on reachability or
-conditional offering, push and read straight back.
+So: **`enabled: true` is required by both families; the recalc is required only by totals.**
+All 15 raw-push sites in the suite already pass `enabled: true`, which is why they are sound --
+the hazard is writing a *new* one from a minimal object.
 
-The trap is not the flat run -- it is what a flat run tempts you to conclude. A raw push
-was read once as evidence that `namedModifiers` typed `skill:<name>` is "inert for numeric
-purposes" and that `customModifiers.skills` is a separate, value-bearing channel. They are
-**the same channel**: `namedModifiers` -> recalc -> `customModifiers.skills` ->
-`getSkillCustomMod()` -> `getSkillMod()` (`charactersheet-state.js:52650`, and the getter
-says so at `:11318`). `customModifiers` is the cache, not a rival input. There are ~90
-`skill:<name>` registrations in `js/`; every one of them works.
+The trap is not the flat run -- it is what a flat run tempts you to conclude. A raw push was
+read once as evidence that `namedModifiers` typed `skill:<name>` is "inert for numeric purposes"
+and that `customModifiers.skills` is a separate, value-bearing channel. They are **the same
+channel**: `namedModifiers` -> recalc -> `customModifiers.skills` -> `getSkillCustomMod()` ->
+`getSkillMod()` (`:52650`, and the getter says so at `:11318`). `customModifiers` is the cache,
+not a rival input. There are ~90 `skill:<name>` registrations in `js/`; every one works.
+
+**Two sessions described this gate one turn apart and each named only the gate its own probe
+happened to trip.** Neither swept the dimensions before writing the rule down -- and the second
+description was committed as guidance, which is how a half-measured mechanism becomes the
+instruction that manufactures the next vacuous test. Enumerate what the gate reads *before*
+describing it, and vary each dimension independently.
 
 **A control that fails to move invalidates the measurement. It does not explain itself.**
 Reaching for the mechanism that would justify a flat control is how a dead probe becomes a

@@ -119,6 +119,70 @@ describe("skill-selected modifiers reach the roll that should read them", () => 
 	});
 });
 
+/**
+ * Every raw-push injection in this file -- and the ~15 across the suite -- depends on two silent
+ * gates that no test previously named. Both reader families skip `!enabled`, and totals
+ * additionally read a cache that only the recalc fills. A minimal object literal trips both, and
+ * a tripped gate is indistinguishable from "the modifier does nothing", which is exactly the
+ * reading that produced two separate false mechanism claims one turn apart.
+ *
+ * These pin the gates so the guidance in `testing-guide.md` cannot drift away from the code, and
+ * so removing a gate is a failure here rather than a silent change of contract for 15 call sites.
+ */
+describe("the two gates a raw namedModifiers push has to clear", () => {
+	const PROBE = {name: "GATEPROBE", type: "skill:perception", value: 5, sourceType: "class"};
+
+	const bare = () => {
+		const state = makeState();
+		return state;
+	};
+
+	it("drops a push with no `enabled`, in BOTH reader families", () => {
+		const state = bare();
+		const before = state.getSkillMod("perception");
+		state._data.namedModifiers.push({...PROBE});
+		state._recalculateCustomModifiers();
+
+		expect(state.getSkillMod("perception")).toBe(before);
+		expect(state.getModifiersForType("skill:perception").some(m => m.name === "GATEPROBE")).toBe(false);
+	});
+
+	it("admits `enabled: true` to aggregates immediately, and to totals only after the recalc", () => {
+		const state = bare();
+		const before = state.getSkillMod("perception");
+		state._data.namedModifiers.push({...PROBE, enabled: true});
+
+		// Aggregates walk the array, so the modifier is visible with no recalc...
+		expect(state.getModifiersForType("skill:perception").some(m => m.name === "GATEPROBE")).toBe(true);
+		// ...while totals read a cache that nothing has refilled yet.
+		expect(state.getSkillMod("perception")).toBe(before);
+
+		state._recalculateCustomModifiers();
+		expect(state.getSkillMod("perception")).toBe(before + 5);
+	});
+
+	it("clears both gates via the public API, which is why it is the recommended injection", () => {
+		const state = bare();
+		const before = state.getSkillMod("perception");
+		state.addNamedModifier({...PROBE});
+
+		expect(state.getSkillMod("perception")).toBe(before + 5);
+		expect(state.getModifiersForType("skill:perception").some(m => m.name === "GATEPROBE")).toBe(true);
+	});
+
+	/**
+	 * The aggregate gate has a deliberate carve-out: text-parsed conditionals are registered
+	 * `enabled: false` and would otherwise be double-gated into invisibility (CS-BUG-053). This is
+	 * why `withModifier` above can pass a conditional and still be read back.
+	 */
+	it("admits a disabled modifier to aggregates when it is conditional", () => {
+		const state = bare();
+		state._data.namedModifiers.push({...PROBE, enabled: false, conditional: "when testing"});
+
+		expect(state.getModifiersForType("skill:perception").some(m => m.name === "GATEPROBE")).toBe(true);
+	});
+});
+
 describe("the skill-key normaliser is the single spelling rule", () => {
 	it.each([
 		["Animal Handling", "animalhandling"],
