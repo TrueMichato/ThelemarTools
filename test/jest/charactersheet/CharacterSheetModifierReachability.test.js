@@ -35,6 +35,13 @@ const makeState = () => {
 	return state;
 };
 
+// `enabled: true` is load-bearing, not boilerplate: both reader families skip a modifier
+// without it (`charactersheet-state.js:52585` and `:53250`). Measured -- deleting it here
+// reds exactly 3 of these 49 tests, all of them the `conditional: null` probes. The other
+// 46 survive only because `getModifiersForType`'s carve-out admits a *disabled conditional*
+// (CS-BUG-053), and this helper defaults `conditional` to a truthy string. So the gate is
+// invisible to most of this suite by construction: keep at least one non-conditional probe,
+// or removing `enabled` here becomes a silent, suite-wide vacuity.
 const withModifier = (type, {conditional = "test condition"} = {}) => {
 	const state = makeState();
 	state._data.namedModifiers.push({

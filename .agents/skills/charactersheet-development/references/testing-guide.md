@@ -313,7 +313,16 @@ Measured on `skill:perception` with `value: 5`, varying only the delivery:
 
 So: **`enabled: true` is required by both families; the recalc is required only by totals.**
 All 15 raw-push sites in the suite already pass `enabled: true`, which is why they are sound --
-the hazard is writing a *new* one from a minimal object.
+the hazard is writing a *new* one from a minimal object. A corollary worth stating because it
+is the natural wrong repair: **do not "fix" a bare push by adding the recalc.** Without
+`enabled` it stays inert in *both* columns, and the recalc makes it look like a fix was applied.
+
+All four rows are pinned executably in
+`CharacterSheetModifierReachability.test.js` -> `describe("the two gates a raw namedModifiers
+push has to clear")`. That test, not this table, is the authority: this matrix is a transcription
+and a transcription cannot fail when the gates move. The same matrix is also described in
+`subsystem-details.md`; if you change one prose copy, the test is what tells you the other is now
+wrong.
 
 The trap is not the flat run -- it is what a flat run tempts you to conclude. A raw push was
 read once as evidence that `namedModifiers` typed `skill:<name>` is "inert for numeric purposes"
@@ -327,6 +336,14 @@ happened to trip.** Neither swept the dimensions before writing the rule down --
 description was committed as guidance, which is how a half-measured mechanism becomes the
 instruction that manufactures the next vacuous test. Enumerate what the gate reads *before*
 describing it, and vary each dimension independently.
+
+**A carve-out in the code under test can hide a gate from the suite that tests it.** Deleting
+`enabled: true` from the `withModifier` helper reds only **3 of 49** reachability tests -- the
+`conditional: null` ones. The other 46 pass because the modifier they build is conditional, and
+`getModifiersForType` deliberately admits a *disabled conditional*. So 46 tests are insensitive
+to gate 1 by construction, and a suite-wide vacuity is held off by three assertions. When a
+reader has a documented exemption, make sure something probes the **unexempted** path, or the
+exemption quietly becomes the only path you test.
 
 **A control that fails to move invalidates the measurement. It does not explain itself.**
 Reaching for the mechanism that would justify a flat control is how a dead probe becomes a
