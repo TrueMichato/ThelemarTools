@@ -384,8 +384,13 @@ class CharacterSheetNpcExporter {
 		const realAttacks = riderAttackNames.size
 			? attacks.filter(attack => !riderAttackNames.has(this._normalizeFeatureKey(attack?.name)))
 			: attacks;
+		// A material rider that would otherwise be filed as a trait is claimed by the attack
+		// line it belongs to; the trait side then skips exactly what was printed. Keying the
+		// suppression on emission rather than on a shared predicate makes it impossible to
+		// drop a rider whose weapon produced no attack line at all.
+		const claimedMaterialPowerIds = new Set();
 		const weaponActions = [
-			...this._getActionEntriesFromAttacks(realAttacks, state, {damageRiders}),
+			...this._getActionEntriesFromAttacks(realAttacks, state, {damageRiders, claimedMaterialPowerIds, npcName}),
 			...this._getFeatureWeaponActions(state, {npcName}),
 			...this._getFeatureGrantedAttacks(state, calculations, {npcName}),
 		];
@@ -411,7 +416,7 @@ class CharacterSheetNpcExporter {
 		const divineFavorBlock = this._getDivineFavorBlock(state, {npcName});
 		const armorUpgradeBlock = this._getArmorTraitBlock(state);
 		const gemstoneNotesBlock = this._getGemstoneNotesBlock(state);
-		const itemUseBlocks = this._getMagicItemUseBlocks(state, {npcName});
+		const itemUseBlocks = this._getMagicItemUseBlocks(state, {npcName, claimedMaterialPowerIds});
 		const spellcastingBlocks = this._getSpellcastingBlocks(state, {npcName});
 
 		const featureBlocks = this._getFeatureBlocks(state, {
@@ -9103,7 +9108,7 @@ class CharacterSheetNpcExporter {
 	 * action to attack again" and do it. So an economy the sheet had to decline is still an
 	 * economy here, which is why the prose fallback earns its keep.
 	 */
-	static _getMaterialPowerEntries (state, {npcName = "The NPC"} = {}) {
+	static _getMaterialPowerEntries (state, {npcName = "The NPC", claimedMaterialPowerIds = null} = {}) {
 		const powers = typeof state?.getItemPowers === "function"
 			? (state.getItemPowers({activeOnly: true}) || [])
 			: [];
@@ -9113,6 +9118,10 @@ class CharacterSheetNpcExporter {
 			// A condensate only has its affinity while it holds the role that affinity was
 			// written for; a dormant one is a fact about the item, not about the fight.
 			if (power.isDormant) return;
+			// Already stated on the attack line it rides (see `_getMaterialActionRiders`).
+			// Keyed on what was actually printed, so a rider whose weapon produced no attack
+			// line still gets its trait here rather than vanishing between the two passes.
+			if (power.id != null && claimedMaterialPowerIds?.has(power.id)) return;
 			const section = this._getMaterialPowerSection(power);
 			if (power.materialAffinity && !section) return;
 
@@ -9133,7 +9142,7 @@ class CharacterSheetNpcExporter {
 		return out;
 	}
 
-	static _getMagicItemUseBlocks (state, {npcName = "The NPC"} = {}) {
+	static _getMagicItemUseBlocks (state, {npcName = "The NPC", claimedMaterialPowerIds = null} = {}) {
 		const out = {trait: [], action: [], bonus: [], reaction: []};
 		const items = (state.getItems?.() || [])
 			.filter(it => !!it)
@@ -9209,7 +9218,7 @@ class CharacterSheetNpcExporter {
 		// `_isMagicItem` gates this loop, and a plain steel-and-Yellowwood longbow is not
 		// magical. Routed through the same `pushEntry` so it dedupes against magic-item
 		// entries rather than beside them.
-		this._getMaterialPowerEntries(state, {npcName}).forEach(({section, entry}) => pushEntry(section, entry));
+		this._getMaterialPowerEntries(state, {npcName, claimedMaterialPowerIds}).forEach(({section, entry}) => pushEntry(section, entry));
 
 		// Group item-granted spells into one entry per item (bestiary style) instead
 		// of one action per spell, and never leak raw `name|source` UIDs.
@@ -10055,13 +10064,13 @@ class CharacterSheetNpcExporter {
 		return this._isRangedOnlyAttack(attack);
 	}
 
-	static _getActionEntriesFromAttacks (attacks, state, {damageRiders = []} = {}) {
+	static _getActionEntriesFromAttacks (attacks, state, {damageRiders = [], claimedMaterialPowerIds = null, npcName = "The NPC"} = {}) {
 		const actions = attacks.map(a => {
 			const toHit = this._toSignedStr(this._getAttackToHit(a, state));
 			const range = this._formatAttackRange(a);
 			const hitDamage = this._getAttackDamageText(a, state);
 			const name = this._getSafeInlineText(a.name || "Attack", {maxLen: 80}) || "Attack";
-			const qualifiers = this._getAttackQualifiers(a, state);
+			const qualifiers = this._getAttackQualifiers(a, state, {claimedMaterialPowerIds, npcName});
 			const atkTag = this._getAttackTypeTag(a);
 			const riders = this._formatDamageRidersForAttack(damageRiders, a);
 
@@ -10299,7 +10308,7 @@ class CharacterSheetNpcExporter {
 
 	static _ATTACK_TAGS_ALREADY_STATED = new Set(["magical", "silvered"]);
 
-	static _getAttackQualifiers (attack, state) {
+	static _getAttackQualifiers (attack, state, {claimedMaterialPowerIds = null, npcName = "The NPC"} = {}) {
 		const parts = [];
 
 		const sourceItem = attack?._sourceItem;
@@ -10359,6 +10368,7 @@ class CharacterSheetNpcExporter {
 		if (noMeleeDisadvantage) parts.push(noMeleeDisadvantage);
 
 		parts.push(...this._getMaterialDamageRiders(sourceItem));
+		parts.push(...this._getMaterialActionRiders(sourceItem, state, {claimedMaterialPowerIds, npcName}));
 
 		const backfire = this._getInstabilityBackfireClause(sourceItem);
 		if (backfire) parts.push(backfire);
@@ -10457,6 +10467,67 @@ class CharacterSheetNpcExporter {
 			if (dice) parts.push(`On a critical hit it deals an extra {@damage ${dice}}${type} damage (${parenthetical})`);
 		}
 
+		return parts;
+	}
+
+	/**
+	 * True when a material's granted power is a rider on this weapon's own attack rather
+	 * than something the wielder does separately.
+	 *
+	 * The distinction is not cosmetic. Deathglass's charge reads "one target damaged by
+	 * this item" — in a trait block "this item" has no referent at all, because a trait
+	 * belongs to the creature and not to any weapon. Stout Blackwood's shove triggers off
+	 * a hit the reader has just resolved two lines earlier. Both are unfindable in the one
+	 * section nobody re-reads mid-combat.
+	 *
+	 * Defensive triggers are excluded: "when an attack hits you" is a reaction the wielder
+	 * takes, not a rider on a swing, and it belongs in Reactions.
+	 */
+	static _isMaterialAttackRiderText (text) {
+		const s = String(text || "");
+		if (!s) return false;
+		// "when you are hit" / "when an attack hits you" — someone else's attack.
+		if (/\bhits?\s+(?:you|it|the\s+(?:wearer|bearer|wielder))\b/i.test(s)) return false;
+		if (/\b(?:are|is)\s+hit\b/i.test(s)) return false;
+		if (/\bdamaged\s+by\s+this\s+(?:item|weapon)\b/i.test(s)) return true;
+		if (/\bon\s+a\s+hit\b/i.test(s)) return true;
+		// "Once per turn when you hit with a two-handed stout blackwood melee weapon, ..."
+		return /\bwhen\b[^.]{0,80}\bhits?\b/i.test(s);
+	}
+
+	/**
+	 * Material-granted riders that belong on this weapon's attack line.
+	 *
+	 * Only powers that would otherwise fall through to a trait are claimed. A power whose
+	 * economy resolves — authored `actionType`, or read off its own prose — already has a
+	 * section that tells the reader when to spend it, and burying a reaction inside an
+	 * attack line would be the same defect in the opposite direction. So this is strictly
+	 * a trait-to-attack move and can never steal from Actions, Bonus Actions or Reactions.
+	 *
+	 * Claiming is recorded so the trait side skips exactly what was printed here. The
+	 * suppression keys on emission rather than on a shared predicate, because a weapon that
+	 * produced no attack line must keep its trait rather than lose the rider entirely.
+	 */
+	static _getMaterialActionRiders (sourceItem, state, {claimedMaterialPowerIds = null, npcName = "The NPC"} = {}) {
+		const itemId = sourceItem?.id;
+		if (itemId == null || typeof state?.getItemPowers !== "function") return [];
+
+		const parts = [];
+		(state.getItemPowers({activeOnly: true}) || []).forEach(power => {
+			if (!power?.materialPower || power.materialAffinity || power.isDormant) return;
+			if (power.itemId !== itemId) return;
+			if (this._getMaterialPowerSection(power)) return;
+			if (!this._isMaterialAttackRiderText(power.description)) return;
+			// One printed instance: a weapon with two attack lines states the rider on the
+			// first, rather than twice, which was the duplicate-surface complaint.
+			if (power.id != null && claimedMaterialPowerIds?.has(power.id)) return;
+
+			const body = this._prepareFeatureEntriesForNpc(power.description || "", {npcName, maxLen: 300}).join(" ");
+			if (!body) return;
+			const name = this._getSafeInlineText(power.name || "", {maxLen: 60});
+			if (power.id != null && claimedMaterialPowerIds) claimedMaterialPowerIds.add(power.id);
+			parts.push(name ? `${name}: ${body.replace(/\s*\.\s*$/, "")}` : body.replace(/\s*\.\s*$/, ""));
+		});
 		return parts;
 	}
 

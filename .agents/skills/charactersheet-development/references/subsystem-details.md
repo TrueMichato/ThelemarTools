@@ -1203,6 +1203,33 @@ material. Any consumer that treats a bare `null`/`[]` as "nothing to do" cannot 
 from a broken one — read `CharacterSheetMaterials.getUnresolvedReferences()`, whose `poolSize`
 separates "catalog never loaded" (0) from "bad reference" (n).
 
+### Route an effect by what it does, not by what published it (v28)
+
+`getItemPowers` publishes every material-granted power on one channel, with
+`actionType: "special"` standing in for "the brew declared no economy". Reading a section off
+the prose is a reasonable fallback, but it silently defaults to `trait`, and two of the brew's
+nine granted actions are riders on the wielder's own attack rather than separate things to do.
+
+Both landed in Traits, where an attack-affecting effect is unfindable mid-combat — and one of
+them, Deathglass's "one target damaged by **this item**", was worse than misplaced: a trait
+belongs to the creature, not to a weapon, so the referent pointed at nothing. Putting the
+rider on the attack line resolves it for free.
+
+Two rules worth reusing:
+
+- **Gate a re-route on "where would this have gone otherwise?"** Claiming only powers that
+  would have become traits makes the change provably unable to steal a reaction or an action.
+  A predicate that asked "is this rider-shaped?" alone would have been free to hijack a
+  properly-sectioned power.
+- **Key suppression on emission, never on a shared predicate.** Two passes applying the same
+  test will disagree the moment one of them has an extra reason to skip — here, an item that
+  produces no attack line — and the item ends up described by neither. Record what was
+  actually printed and skip that. Same lesson as `provenanceWarned` in v27, hit twice in
+  consecutive versions, which is what makes it structural rather than incidental.
+
+Also: `_getSafeInlineText` strips `{}` and will quietly destroy a `{@damage}` tag. Prose bound
+for a statblock goes through `_prepareFeatureEntriesForNpc`.
+
 ### Bundling sheet-authored items with the export (v20)
 
 An NPC export is a homebrew document (`{_meta, monster: [...]}`), so it may also carry

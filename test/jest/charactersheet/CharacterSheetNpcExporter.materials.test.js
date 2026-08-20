@@ -1142,3 +1142,131 @@ maybeDescribe("NPC export v27 -- an unresolvable material is reported, not swall
 		expect(warnings).toEqual([]);
 	});
 });
+
+/**
+ * v28 — a material's attack rider is stated on the attack, not filed as a trait.
+ *
+ * `getItemPowers` publishes a material's granted actions with `actionType: "special"` when
+ * the brew declares no economy, so the exporter fell back to reading the prose. Two of the
+ * nine granted actions describe a rider on the wielder's own attack rather than something
+ * separate to do, and the prose fallback filed both as traits.
+ *
+ * That is wrong twice over. It buries an attack-affecting effect in the one section nobody
+ * re-reads mid-combat, and it strands a referent: Deathglass says "one target damaged by
+ * this item", and a trait belongs to the creature, not to any weapon, so "this item" points
+ * at nothing at all. Moving the rider onto the attack line resolves the referent for free.
+ */
+maybeDescribe("NPC export v28 -- a material attack rider rides the attack", () => {
+	const grantedActions = MATERIALS.flatMap(mat => (mat.effects || [])
+		.filter(fx => fx.type === "grantsAction")
+		.map(fx => ({
+			material: mat.name,
+			name: fx.name,
+			actionType: fx.actionType || "special",
+			description: fx.note || fx.description || "",
+		})));
+
+	const byName = name => grantedActions.find(it => it.name === name);
+	const isClaimed = power => !CharacterSheetNpcExporter._getMaterialPowerSection(power)
+		&& CharacterSheetNpcExporter._isMaterialAttackRiderText(power.description);
+
+	// Guards the whole block against passing because the brew stopped granting actions.
+	it("still has granted actions to route", () => {
+		expect(grantedActions.length).toBeGreaterThan(0);
+		expect(byName("Stout Blackwood Shove")).toBeTruthy();
+		expect(byName("Deathglass Charge")).toBeTruthy();
+	});
+
+	it("claims exactly the two riders and leaves the other seven alone", () => {
+		// Pinned as an exact set rather than a count: a loosened predicate that swept up an
+		// extra power would still satisfy "at least two".
+		const claimed = grantedActions.filter(isClaimed).map(it => it.name).sort();
+
+		expect(claimed).toEqual(["Deathglass Charge", "Stout Blackwood Shove"]);
+	});
+
+	it("never claims a power whose economy already resolves", () => {
+		// The anti-steal invariant. Burying a reaction inside an attack line is the same
+		// defect as burying a rider in a trait, pointing the other way.
+		grantedActions
+			.filter(power => CharacterSheetNpcExporter._getMaterialPowerSection(power))
+			.forEach(power => expect(isClaimed(power)).toBe(false));
+	});
+
+	it("does not mistake a defensive trigger for an attack rider", () => {
+		// "When an attack hits you" is someone else's attack; it belongs in Reactions.
+		expect(CharacterSheetNpcExporter._isMaterialAttackRiderText(
+			"When an attack hits you, move 5 feet without provoking Opportunity Attacks.",
+		)).toBe(false);
+	});
+
+	it("does not mistake incidental damage prose for a rider", () => {
+		// Mineralite repairs "a damaged nonmagical object" over a minute -- the word
+		// "damaged" appears, the trigger does not.
+		expect(CharacterSheetNpcExporter._isMaterialAttackRiderText(byName("Mineralite Mending").description)).toBe(false);
+	});
+
+	it("states the rider on the weapon's own attack line and drops the trait", () => {
+		const state = makeState({items: [weapon({name: "Blackwood Greatsword", material: "Stout Blackwood", property: ["2H"], dmg1: "2d6"})]});
+		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const attack = (monster.action || []).find(entry => /Blackwood Greatsword/i.test(String(entry?.name || "")));
+
+		expect(textOf(attack)).toMatch(/Stout Blackwood Shove/i);
+		expect(textOf(monster.trait || [])).not.toMatch(/Stout Blackwood Shove/i);
+	});
+
+	it("gives 'this item' a referent by putting it on the item's line", () => {
+		// The reason this is a correctness fix and not a formatting preference.
+		const state = makeState({items: [weapon({name: "Deathglass Blade", material: "Deathglass", property: ["2H"], dmg1: "2d6"})]});
+		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const attack = (monster.action || []).find(entry => /Deathglass Blade/i.test(String(entry?.name || "")));
+
+		expect(textOf(attack)).toMatch(/damaged by this item/i);
+		expect(textOf(monster.trait || [])).not.toMatch(/Deathglass Charge/i);
+	});
+
+	it("keeps the rider's damage tag intact on the attack line", () => {
+		// `_getSafeInlineText` strips braces, so routing the prose through it would have
+		// silently turned {@damage 2d6} into plain text.
+		const state = makeState({items: [weapon({name: "Deathglass Blade", material: "Deathglass", property: ["2H"], dmg1: "2d6"})]});
+		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const attack = (monster.action || []).find(entry => /Deathglass Blade/i.test(String(entry?.name || "")));
+
+		expect(textOf(attack)).toMatch(/\{@damage 2d6\}/);
+	});
+
+	it("scopes the rider to the weapon that carries the material", () => {
+		const state = makeState({items: [
+			weapon({name: "Blackwood Greatsword", material: "Stout Blackwood", property: ["2H"], dmg1: "2d6"}),
+			weapon({name: "Plain Greatsword", property: ["2H"], dmg1: "2d6"}),
+		]});
+		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const plain = (monster.action || []).find(entry => /Plain Greatsword/i.test(String(entry?.name || "")));
+
+		expect(textOf(plain)).not.toMatch(/Stout Blackwood Shove/i);
+	});
+
+	it("keeps the trait when no attack line claimed the rider", () => {
+		// The partition, and the reason suppression keys on emission rather than on a shared
+		// predicate: a material on something that produces no attack must not lose its rider
+		// between the two passes.
+		const power = {
+			id: "p1",
+			materialPower: true,
+			actionType: "special",
+			name: "Deathglass Charge",
+			description: byName("Deathglass Charge").description,
+			materialName: "Deathglass",
+			itemId: "i1",
+		};
+		const fakeState = {getItemPowers: () => [power]};
+
+		expect(CharacterSheetNpcExporter._getMaterialPowerEntries(fakeState, {npcName: "P", claimedMaterialPowerIds: new Set()})
+			.map(it => it.section)).toEqual(["trait"]);
+		expect(CharacterSheetNpcExporter._getMaterialPowerEntries(fakeState, {npcName: "P", claimedMaterialPowerIds: new Set(["p1"])})
+			.map(it => it.section)).toEqual([]);
+		// No claim set at all (any other caller) must keep the old behaviour.
+		expect(CharacterSheetNpcExporter._getMaterialPowerEntries(fakeState, {npcName: "P"})
+			.map(it => it.section)).toEqual(["trait"]);
+	});
+});

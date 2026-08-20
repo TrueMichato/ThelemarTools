@@ -1830,6 +1830,48 @@ described by neither pass.
 Corpus: **0 of 45** characters produce a warning — every material resolves. That is the intended
 result; this is a net for a broken state, not a finding about healthy data.
 
+### v28 — a material's attack rider is stated on the attack
+
+`getItemPowers` publishes a material's granted actions with `actionType: "special"` when the
+brew declares no economy, so the exporter fell back to reading the prose for a section. Seven
+of the nine granted actions name their economy one way or the other. The remaining two do not,
+because they are not separate things to do at all — they are riders on the wielder's own
+attack:
+
+| power | prose | filed as |
+|---|---|---|
+| Stout Blackwood Shove | "Once per turn **when you hit** with a two-handed stout blackwood melee weapon…" | trait |
+| Deathglass Charge | "…extra `{@damage 2d6}` necrotic damage to one target **damaged by this item**" | trait |
+
+Filing them as traits is wrong twice over. It buries an attack-affecting effect in the one
+section nobody re-reads mid-combat — the failure this export has been correcting since v1 —
+and it strands a referent. A trait belongs to the *creature*, not to any weapon, so
+Deathglass's "this item" pointed at nothing whatsoever. **Moving the rider onto the attack
+line resolves the referent for free**, which is why this is a correctness fix rather than a
+formatting preference.
+
+Two design constraints kept it safe:
+
+- **The gate is "would have become a trait."** A power whose economy resolves — authored
+  `actionType`, or read off its own prose — already has a section telling the reader when to
+  spend it. Burying a reaction inside an attack line is the same defect pointing the other
+  way. So this is strictly a trait-to-attack move and can never steal from Actions, Bonus
+  Actions or Reactions. Pinned as an exact set (`Deathglass Charge`, `Stout Blackwood Shove`),
+  not a count, because a loosened predicate would still satisfy "at least two".
+- **Suppression keys on emission, not on a shared predicate.** The attack pass records the
+  power ids it printed and the trait pass skips exactly those. Had both sides merely applied
+  the same predicate, a rider on an item that produced *no attack line* would have been
+  dropped by the trait pass and never printed by the attack pass — described by neither. This
+  is the `provenanceWarned` lesson from v27 applied a second time.
+
+The prose is routed through `_prepareFeatureEntriesForNpc` rather than `_getSafeInlineText`,
+because the latter strips braces and would have silently turned `{@damage 2d6}` into plain
+text.
+
+**Corpus coverage: 0 of 45.** Only 5 of 45 characters carry any material, and none carries
+Stout Blackwood or Deathglass — so this is forward-looking and is pinned against the real
+brew rather than against corpus movement.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 
