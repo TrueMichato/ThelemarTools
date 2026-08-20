@@ -13111,6 +13111,9 @@ class CharacterSheetState {
 	 * }}
 	 */
 	getEffectiveWeaponDamage (itemId) {
+		// A third, independent lookup site: this early-returns before it ever reaches
+		// `getEffectiveItemBonuses` below, so it does not inherit that method's guard.
+		this._warnIfNotItemId(itemId, "getEffectiveWeaponDamage");
 		const invItem = this._data.inventory.find(i => i.id === itemId);
 		if (!invItem) return null;
 

@@ -104,6 +104,33 @@ describe("An item accessor called with the item instead of its id says so", () =
 		expect(state.getItemRaw({...WEAPON})).toBeNull();
 	});
 
+	/**
+	 * `getEffectiveWeaponDamage` is a THIRD lookup site, not a consumer of the other two. It runs
+	 * its own `find` and returns `null` before it ever reaches `getEffectiveItemBonuses`, so it
+	 * does not inherit that guard by delegation -- measured silent before this was added.
+	 *
+	 * It is also the accessor whose mis-call is cited as one of the three false findings that
+	 * motivated the guard, and the one the NPC-export corpus walk reads for every weapon.
+	 */
+	it("guards the third lookup site, which delegates too late to inherit the others", () => {
+		const state = makeState();
+		state.getEffectiveWeaponDamage({...WEAPON});
+
+		expect(warn).toHaveBeenCalledTimes(1);
+		const msg = String(warn.mock.calls[0][0]);
+		expect(msg).toContain("getEffectiveWeaponDamage");
+		expect(msg).toContain("getEffectiveWeaponDamage(item.id)");
+	});
+
+	it("stays silent on a correct weapon-damage call, which really does return a die", () => {
+		const state = makeState();
+		const dmg = state.getEffectiveWeaponDamage(WEAPON.id);
+
+		expect(dmg).not.toBeNull();
+		expect(dmg.dice).toBe("1d8");
+		expect(warn).not.toHaveBeenCalled();
+	});
+
 	it("does not warn for a plain missing id, which is a legitimate question", () => {
 		const state = makeState();
 

@@ -1434,6 +1434,55 @@ Blast radius was luck, not judgement: zero `skill:<name>` registrations live in
 to was unaffected in fact. Had one material carried a skill bonus, the note would have had a
 live effect filed as dead.
 
+### A guard covers the sites it is *attached to*, not the family it is *described as* covering (v35d)
+
+The sibling built a real guard for the silent-empty accessor bug: `_warnIfNotItemId`
+(`charactersheet-state.js:12909`) warns once per method when an item accessor is handed the
+**item** instead of its **id**, a mis-call that returns `{}` or `null` — indistinguishable from
+"this character has no such item". It was attached to two lookup sites, `getEffectiveItemBonuses`
+and `getItemRaw`, on the stated reasoning that *every one of the family routes through one of
+them*.
+
+Measured, with `getEffectiveItemBonuses` as a control that must warn in the same run: of 36
+read-only `itemId` accessors, **6 warn and 30 are silent**. The reasoning was sound and the
+premise was false.
+
+**`getEffectiveWeaponDamage` is a third, independent lookup site.** It runs its own
+`find(i => i.id === itemId)` at `:13114` and returns `null` at `:13115` — *before* it reaches
+`getEffectiveItemBonuses` at `:13122`. Delegation that happens after an early return is not
+delegation. It now carries the guard directly.
+
+That accessor matters here specifically: it is what the **v35 corpus walk** reads for every
+weapon, and its mis-call is one of the three false findings the guard was written to prevent.
+Of those three, the guard as shipped caught **one**:
+
+| mis-call | audible? |
+|---|---|
+| `getEffectiveItemBonuses(item)` | yes |
+| `getEffectiveWeaponDamage(item)` | **no** — fixed here |
+| `resolveMaterial(item.material)` | **no** — see below |
+
+`resolveMaterial(item, allMaterials)` (`charactersheet-materials.js:268`) *has* a live
+complaint channel — `_noteUnresolved` — and the mis-call slips past it, because
+`if (!ref?.name) return null` fires first. Three-way probe: a correct call resolves silently, a
+genuinely-missing material warns and records, and the mis-call returns `null` with **zero
+warnings and zero records**. Left unfixed deliberately: the only cheap discriminator is
+"does this look like a material reference", and crafting materials *are* inventory items, so an
+item legitimately named `Mithril` would warn falsely. A guard whose false-positive rate is
+non-zero is worse here than the silence it replaces.
+
+> **When a guard is justified by "everything routes through here", that clause is a claim about
+> control flow and needs measuring like any other. Enumerate the surface and probe it, with a
+> control that warns in the same run.**
+
+The RED-verify is the part worth keeping. Two mutations, each failing exactly one leg:
+removing the guard call reddens only the warning leg; breaking the lookup so the accessor always
+returns `null` reddens only the anti-vacuity leg — and leaves the *warning* leg green, because
+the guard runs before the lookup. That second case is the silent-empty failure wearing the
+guard's own clothes, and it is why a silence assertion needs a liveness clause on the same call.
+**Under the first mutation the six pre-existing tests all stayed green**, which is the
+demonstration that the gap was structural rather than hypothetical.
+
 ### Two ladders step the damage die, and a guard is what keeps them apart (v31)
 
 A weapon's damage die is stepped from two independent places and the export adds them:
