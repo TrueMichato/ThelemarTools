@@ -10,7 +10,7 @@
  */
 
 import "../../../js/charactersheet/charactersheet-materials.js";
-import {readFileSync} from "fs";
+import {readFileSync, readdirSync} from "fs";
 import {dirname, resolve} from "path";
 import {fileURLToPath} from "url";
 
@@ -76,6 +76,54 @@ describe("Material effect handling registry", () => {
 		const referenced = Object.entries(CharacterSheetMaterials.EFFECT_HANDLING)
 			.filter(([, spec]) => spec.consumer === "reference");
 		expect(referenced.length).toBeLessThanOrEqual(7);
+	});
+
+	/**
+	 * `consumer` is a CATEGORY, so every assertion keyed on it is blind to a hole inside the
+	 * category. `condensateInstability` declares `consumer: "power"`; the power channel existed
+	 * and was well tested; and the instability reached it through nothing at all. A guard that
+	 * asks "does this category have a home?" answers yes and tells you nothing.
+	 *
+	 * So this asks the narrower question per type: does the effect key appear in code that is
+	 * not the authoring file itself? `charactersheet-materials.js` declares, normalises and
+	 * describes every type, so a type mentioned only there has been authored and never
+	 * delivered — which is the entire defect class `EFFECT_HANDLING` exists to prevent, applied
+	 * to `EFFECT_HANDLING` itself.
+	 */
+	it("gives every non-reference type a consumer outside the authoring file", () => {
+		const jsFiles = [];
+		const walk = (dir) => {
+			for (const entry of readdirSync(dir, {withFileTypes: true})) {
+				const full = resolve(dir, entry.name);
+				if (entry.isDirectory()) walk(full);
+				else if (full.endsWith(".js") && !full.endsWith("charactersheet-materials.js")) jsFiles.push(full);
+			}
+		};
+		walk(resolve(REPO_ROOT, "js"));
+		const corpus = jsFiles.map(f => readFileSync(f, "utf8"));
+
+		const undelivered = Object.entries(CharacterSheetMaterials.EFFECT_HANDLING)
+			.filter(([, spec]) => spec.consumer !== "reference")
+			.filter(([type]) => !corpus.some(src => src.includes(type)))
+			.map(([type, spec]) => `  "${type}" — declared consumer "${spec.consumer}", but no file outside charactersheet-materials.js mentions it`);
+
+		expect(undelivered.length ? `Effect types authored but never delivered:\n${undelivered.join("\n")}` : "").toBe("");
+	});
+
+	/**
+	 * The narrowest version of the same question, for the one channel where the miss actually
+	 * happened. A condensate's instability is the PRICE of its affinity. Surfacing the benefit
+	 * without the cost is worse than surfacing neither, because the player applies the half they
+	 * saw and a material designed as "strong option, real vulnerability" silently becomes
+	 * strictly better.
+	 */
+	it("carries a condensate's instability alongside the affinity it pays for", () => {
+		const stateSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-state.js"), "utf8");
+		const card = stateSrc.match(/id: "mat:affinity",[\s\S]{0,2000}?\n\t{5}\}\);/)?.[0] || "";
+
+		expect(card).toBeTruthy();
+		expect(card).toContain("description: condensate.affinity");
+		expect(card).toContain("instability");
 	});
 });
 

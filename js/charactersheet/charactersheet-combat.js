@@ -7988,6 +7988,7 @@ class CharacterSheetCombat {
 				<div class="charsheet__ability-modal-description">
 					${Renderer.get().render(ability.description || "No description.")}
 				</div>
+				${ability.instability ? `<div class="mt-2 charsheet__ability-modal-instability"><strong>Instability:</strong> ${Renderer.get().render(ability.instability)}</div>` : ""}
 				${effectsSummary}
 				${defenseSummary}
 				${uses ? `<div class="mt-2"><strong>Uses:</strong> ${uses.current}/${uses.max} (${uses.recharge} rest)</div>` : ""}

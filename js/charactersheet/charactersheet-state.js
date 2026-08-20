@@ -31438,6 +31438,14 @@ class CharacterSheetState {
 						actionType: "special",
 						kind: "ability",
 						description: condensate.affinity,
+						// The instability is the price of the affinity, and it travels with it.
+						// Showing the benefit without its off-switch is worse than showing
+						// neither: the player applies the half they saw, and a material designed
+						// as "strong option, real vulnerability" silently becomes strictly
+						// better. Emberglass's fire damage is suppressed by cold or immersion —
+						// a combat fact, and it belongs where the affinity is used, not only in
+						// the item modal the player opened once.
+						instability: condensate.instability || null,
 						isReferenceOnly: true,
 						materialPower: true,
 						materialAffinity: true,
