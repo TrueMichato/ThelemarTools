@@ -309,6 +309,32 @@ maybeDescribe("NPC export v22 — materials reach the statblock", () => {
 			expect(homeless).toEqual([]);
 		});
 
+		// v25. The two tests above are CATEGORY-level: they ask whether a consumer has a home,
+		// never whether a given TYPE reaches it. That is exactly how `condensateInstability`
+		// hid — declared `consumer: "power"`, it satisfied the category check while the
+		// exporter surfaced it through no power channel at all. For the one consumer where a
+		// type can plausibly be forgotten, name the mechanism per type instead.
+		it("names the exporter mechanism for every power-consumer effect type", () => {
+			const handling = CharacterSheetMaterials.EFFECT_HANDLING || {};
+			// Each entry must be a real exporter method. `condensateInstability` is deliberately
+			// NOT routed through `getItemPowers`: a fumble and a suppression qualify the attack
+			// being made, so they belong on the attack line, in the reader's eye at the moment
+			// they apply. Stating that here makes the divergence a decision, not an omission.
+			const MECHANISM = {
+				grantsAction: "_getMaterialPowerEntries",
+				condensateAffinity: "_getMaterialPowerEntries",
+				condensateInstability: "_getInstabilityBackfireClause",
+			};
+
+			const powerTypes = Object.entries(handling)
+				.filter(([, spec]) => spec?.consumer === "power")
+				.map(([type]) => type);
+
+			expect(powerTypes.length).toBeGreaterThanOrEqual(3);
+			expect(powerTypes.filter(t => !MECHANISM[t])).toEqual([]);
+			expect(Object.values(MECHANISM).filter(fn => typeof CharacterSheetNpcExporter[fn] !== "function")).toEqual([]);
+		});
+
 		it("normalises every authored effect rather than dropping it on the floor", () => {
 			// `getMaterialEffects` returns a fully-populated empty shape when the material is
 			// missing, so a silently-unresolved material is indistinguishable from one with no
@@ -568,5 +594,134 @@ maybeDescribe("NPC export v24 — the material power lands in the right section"
 			materialAffinity: true,
 			description: "Kindles dry material touched to it for a minute.",
 		})).toBeNull();
+	});
+});
+
+/**
+ * v25 — a condensate's drawback rides with the thing it undermines.
+ *
+ * The statblock advertised Emberglass's fire-damage option on the attack line and stated
+ * its off-switch nowhere at all: the suppression text lives on the bundled item, and only
+ * *custom* items are bundled, so for Aldor — whose sword is a catalog item — it reached the
+ * reader through no path whatsoever. Advertising a benefit while hiding the condition that
+ * removes it is worse than never mentioning it, because the DM applies the half they saw.
+ */
+maybeDescribe("NPC export v25 — the drawback rides with the benefit", () => {
+	const weapon = ({name, material, dmg1 = "1d8"}) => {
+		const item = {
+			id: `w-${name.replace(/\W+/g, "-").toLowerCase()}`,
+			name,
+			source: "CUSTOM",
+			custom: true,
+			type: "weapon",
+			weapon: true,
+			weaponCategory: "martial",
+			baseItem: "longsword|xphb",
+			dmg1,
+			dmgType: "S",
+			property: [],
+			weight: 3,
+			value: 1500,
+			material: {name: material, source: "TGTT"},
+		};
+		return {id: item.id, item, quantity: 1, equipped: true};
+	};
+
+	const attackFor = (name, material) => {
+		const state = new CharacterSheetState();
+		state.loadFromJson({
+			name: "Probe",
+			classes: [{name: "Fighter", source: "PHB", level: 5}],
+			abilities: {str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10},
+			hp: {max: 44, current: 44},
+			inventory: [weapon({name, material})],
+		});
+		state.setItemMaterialCatalog?.(MATERIALS);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const action = (out.action || []).find(a => new RegExp(name, "i").test(String(a.name || "")));
+		return String((action?.entries || []).join(" "));
+	};
+
+	const materialNamed = (name) => MATERIALS.find(m => m.name === name);
+
+	describe("a natural 1 that hurts the wielder is stated on the attack", () => {
+		it("turns Vitriol Crystal's fumble into an attack-line clause", () => {
+			// It is a consequence of THIS attack roll, so a reader must not have to remember
+			// to go and look up a trait after fumbling.
+			expect(CharacterSheetNpcExporter._getInstabilityBackfireClause({
+				_materialEntity: materialNamed("Vitriol Crystal"),
+			})).toMatch(/On a natural 1, it takes \{@damage 1d4\} acid damage \(Vitriol Crystal\)/);
+		});
+
+		it("uses each material's own die and damage type", () => {
+			// Stormprism is the second authored case; pinning both stops the clause being
+			// hardcoded to whichever one was written first.
+			expect(CharacterSheetNpcExporter._getInstabilityBackfireClause({
+				_materialEntity: materialNamed("Stormprism"),
+			})).toMatch(/\{@damage 1d6\} lightning damage/);
+		});
+
+		it("ignores an instability that is not triggered by the attack roll", () => {
+			// Magmaheart fires when the NPC TAKES cold damage. That has nothing to do with
+			// the attack it is making, so putting it here would be noise mid-swing.
+			expect(CharacterSheetNpcExporter._getInstabilityBackfireClause({
+				_materialEntity: materialNamed("Magmaheart"),
+			})).toBeNull();
+		});
+
+		it("says nothing for a material with no instability at all", () => {
+			expect(CharacterSheetNpcExporter._getInstabilityBackfireClause({
+				_materialEntity: materialNamed("Adamantine"),
+			})).toBeNull();
+		});
+	});
+
+	describe("an affinity's off-switch is stated where the affinity is offered", () => {
+		it("names the suppression beside the damage-type option it removes", () => {
+			const text = attackFor("Ember Blade", "Emberglass");
+
+			expect(text).toMatch(/Can deal fire damage instead of its normal type/i);
+			expect(text).toMatch(/suppresses its affinity/i);
+			// Both halves in ONE parenthetical: the reader must not be able to take the
+			// benefit without seeing the cost.
+			expect(text).toMatch(/\(Emberglass; cold damage[^)]*suppresses[^)]*\)/i);
+		});
+
+		it("keeps the clause lower-cased so the entry normaliser cannot split it", () => {
+			// `_getAttackQualifiers` joins parts with ". ", and a separate normaliser rewrites
+			// "; " before a CAPITAL into ". ". A capitalised clause therefore ends the
+			// parenthetical mid-sentence — which is exactly what shipped first.
+			const clause = CharacterSheetNpcExporter._getAffinitySuppressionClause({
+				_materialEffects: {condensate: {isActive: true, instability: "Cold damage suppresses its affinity."}},
+			});
+
+			expect(clause).toBe("cold damage suppresses its affinity");
+			expect(attackFor("Ember Blade", "Emberglass")).not.toMatch(/\(Emberglass\.\s/);
+		});
+
+		it("stays silent for an instability that is not a suppression", () => {
+			// Gravesalt dissolving in fresh water is a table call about the item, not a combat
+			// fact. Printing every instability would bury the two that matter.
+			expect(CharacterSheetNpcExporter._getAffinitySuppressionClause({
+				_materialEffects: {condensate: {isActive: true, instability: "Fresh water dissolves exposed Gravesalt in 1 minute."}},
+			})).toBeNull();
+		});
+
+		it("stays silent while the condensate is dormant, because nothing is being offered", () => {
+			// A dormant affinity grants no benefit, so there is no promise to qualify.
+			expect(CharacterSheetNpcExporter._getAffinitySuppressionClause({
+				_materialEffects: {condensate: {isActive: false, instability: "Cold damage suppresses its affinity."}},
+			})).toBeNull();
+		});
+	});
+
+	it("has real suppression and fumble instabilities authored, or this block is vacuous", () => {
+		// Guards against the brew dropping the vocabulary and every assertion above passing
+		// trivially.
+		const instabilities = MATERIALS
+			.flatMap(m => (m.effects || []).filter(e => e.type === "condensateInstability").map(e => e.text || ""));
+
+		expect(instabilities.filter(t => /suppress/i.test(t)).length).toBeGreaterThanOrEqual(3);
+		expect(MATERIALS.filter(m => CharacterSheetMaterials.getInstabilitySpec?.(m)).length).toBeGreaterThanOrEqual(2);
 	});
 });

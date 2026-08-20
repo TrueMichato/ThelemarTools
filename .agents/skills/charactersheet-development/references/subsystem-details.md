@@ -1096,6 +1096,38 @@ hits you..."). A prose scan therefore returns `null` for all five, and they file
   the material catalog is set *after* `loadFromJson`, and the real modifier when set before.
   Any headless probe must call `setItemMaterialCatalog` first or it will measure a phantom.
 
+### A drawback goes where the benefit is (v25)
+
+When the exporter prints a conditional benefit on an attack line, the condition that removes
+it must go in the same parenthetical. Emberglass's fire-damage option shipped for two versions
+without its suppression clause, because that text lives on the *bundled item* — and only
+custom items are bundled, so a character wielding a catalog item saw the upside and nothing
+else. A statblock reader has nobody to ask, so a split conditional is indistinguishable from
+an unconditional one.
+
+Two narrow helpers, both on the attack line:
+
+- `_getInstabilityBackfireClause(sourceItem)` — reads
+  `CharacterSheetMaterials.getInstabilitySpec(material)` and emits a clause only for a
+  structured `{trigger: {on: "attackRoll", natural: [...]}, effect: {type: "selfDamage"}}`.
+  Damage-triggered instabilities (Magmaheart) are excluded: they are not a consequence of the
+  attack being made.
+- `_getAffinitySuppressionClause(sourceItem)` — reads
+  `sourceItem._materialEffects.condensate.instability` (free text) and emits only when it
+  matches `/\bsuppress/i` and `isActive !== false`. Most of the eighteen authored
+  instabilities are table calls about the item; printing them all would bury the two that are
+  combat facts.
+
+Two traps worth carrying forward:
+
+- **`consumer` is a category, and a category-level test passes vacuously.**
+  `condensateInstability` is declared `consumer: "power"` in `EFFECT_HANDLING`, so a test
+  asserting "every consumer has a home" was green while the type reached no power channel at
+  all. Name the mechanism **per type**, at least for consumers where a type can be forgotten.
+- **`_getSafeInlineText` output still passes through the entry normaliser**, which rewrites
+  `"; "` before a capital into `". "` (exporter line ~5459). Any clause appended after a
+  semicolon must start lower-case or it will be cut into its own sentence.
+
 ### Bundling sheet-authored items with the export (v20)
 
 An NPC export is a homebrew document (`{_meta, monster: [...]}`), so it may also carry

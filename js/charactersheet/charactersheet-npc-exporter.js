@@ -8894,6 +8894,66 @@ class CharacterSheetNpcExporter {
 	}
 
 	/**
+	 * A condensate's instability, when it backfires on the attack roll itself.
+	 *
+	 * `getInstabilitySpec` resolves only the structured triggers; Vitriol Crystal and
+	 * Stormprism both turn a natural 1 into self-damage, which is a consequence of *this
+	 * attack* and therefore belongs on this line rather than in a trait the reader would
+	 * have to remember to cross-reference after a fumble.
+	 *
+	 * Only `attackRoll` triggers qualify. Magmaheart's cold-damage reaction fires when the
+	 * NPC is hit, which has nothing to do with the attack it is making.
+	 */
+	static _getInstabilityBackfireClause (sourceItem) {
+		const material = sourceItem?._materialEntity;
+		// `globalThis`-qualified deliberately: a bare identifier would throw ReferenceError
+		// rather than fall through the optional chain when the module is absent.
+		const Materials = globalThis.CharacterSheetMaterials;
+		const spec = material && typeof Materials?.getInstabilitySpec === "function"
+			? Materials.getInstabilitySpec(material)
+			: null;
+		if (spec?.trigger?.on !== "attackRoll") return null;
+		if (spec?.effect?.type !== "selfDamage" || !spec.effect.damage) return null;
+
+		const naturals = Array.isArray(spec.trigger.natural) ? spec.trigger.natural.filter(Number.isFinite) : [];
+		if (!naturals.length) return null;
+
+		const damage = this._getSafeInlineText(String(spec.effect.damage), {maxLen: 24});
+		const damageType = this._getSafeInlineText(String(spec.effect.damageType || ""), {maxLen: 24});
+		const name = this._getSafeInlineText(material?.name || "", {maxLen: 40});
+		if (!damage) return null;
+
+		const roll = naturals.length === 1 ? `a natural ${naturals[0]}` : `a natural ${naturals.join(" or ")}`;
+		const dealt = damageType ? `{@damage ${damage}} ${damageType} damage` : `{@damage ${damage}} damage`;
+		return `On ${roll}, it takes ${dealt}${name ? ` (${name})` : ""}`;
+	}
+
+	/**
+	 * The sentence that switches a condensate's affinity off, when there is one.
+	 *
+	 * Deliberately narrow. Most instabilities are table calls about the *item* — Gravesalt
+	 * dissolving in fresh water is not a combat fact — and dumping all of them onto the
+	 * attack line would bury the two that matter. This returns text only when the material
+	 * says its affinity can be *suppressed*, which is exactly the case where the statblock
+	 * has already promised the benefit being taken away.
+	 */
+	static _getAffinitySuppressionClause (sourceItem) {
+		const condensate = sourceItem?._materialEffects?.condensate;
+		if (!condensate || condensate.isActive === false) return null;
+		const raw = String(condensate.instability || "").trim();
+		if (!raw || !/\bsuppress/i.test(raw)) return null;
+
+		const text = this._getSafeInlineText(raw, {maxLen: 200});
+		if (!text) return null;
+		// Lower-cased deliberately. This is appended after a semicolon, and the entry
+		// normaliser rewrites `"; "` before a capital into `". "` — which would end the
+		// parenthetical mid-sentence. Reading it as a continuation is also simply correct:
+		// it qualifies the benefit named just before it rather than standing alone.
+		const trimmed = text.replace(/[.]$/, "");
+		return trimmed.charAt(0).toLowerCase() + trimmed.slice(1);
+	}
+
+	/**
 	 * The action economy of a material-granted power.
 	 *
 	 * `actionType` is authored data and outranks the prose scan, which cannot see it: every
@@ -10193,6 +10253,9 @@ class CharacterSheetNpcExporter {
 
 		parts.push(...this._getMaterialDamageRiders(sourceItem));
 
+		const backfire = this._getInstabilityBackfireClause(sourceItem);
+		if (backfire) parts.push(backfire);
+
 		const damageTypeChoice = typeof state?.getMaterialDamageTypeChoice === "function"
 			? state.getMaterialDamageTypeChoice(sourceItem?.id)
 			: null;
@@ -10200,9 +10263,15 @@ class CharacterSheetNpcExporter {
 			const type = this._getSafeInlineText(damageTypeChoice.damageType, {maxLen: 24});
 			const material = this._getSafeInlineText(damageTypeChoice.materialName, {maxLen: 40});
 			if (type) {
+				// A statblock that advertises a benefit must state its off-switch in the same
+				// breath. Emberglass offers fire damage and cold water takes it away; splitting
+				// those across two places means the reader applies the first and misses the
+				// second, which is worse than never having mentioned the option.
+				const suppression = this._getAffinitySuppressionClause(sourceItem);
+				const provenance = suppression ? `${material}; ${suppression}` : material;
 				parts.push(damageTypeChoice.optional
-					? `Can deal ${type} damage instead of its normal type (${material})`
-					: `Deals ${type} damage instead of its normal type (${material})`);
+					? `Can deal ${type} damage instead of its normal type (${provenance})`
+					: `Deals ${type} damage instead of its normal type (${provenance})`);
 			}
 		}
 

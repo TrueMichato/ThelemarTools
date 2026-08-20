@@ -1639,6 +1639,55 @@ already printed on the attack line.
   returns `[]` when the material catalog is set *after* `loadFromJson` and the real value when
   set before. An earlier "it does not fire" finding here was an artifact of that, not a defect.
 
+### v25 — the drawback rides with the benefit
+
+Aldor's attack line advertised a benefit and hid its off-switch:
+
+> Can deal fire damage instead of its normal type (Emberglass)
+
+The condition that removes it — cold damage or immersion in water — appeared **nowhere in the
+export**. Not in a trait, not on the item, not in a note. The suppression text lives on the
+bundled item, and only *custom* items are bundled; Aldor's sword is a catalog item, so the
+prose path never ran for him at all.
+
+That is worse than saying nothing, because a DM does not know what they were not told. They
+read the half they were given and apply it unconditionally, and the material's whole design —
+a strong option with a real vulnerability — silently becomes a strictly-better weapon.
+
+Two clauses now ride on the attack itself:
+
+| helper | emits | when |
+|---|---|---|
+| `_getInstabilityBackfireClause` | `On a natural 1, it takes {@damage 1d4} acid damage (Vitriol Crystal)` | the material's instability is a structured `attackRoll` / `selfDamage` spec |
+| `_getAffinitySuppressionClause` | `(Emberglass; cold damage or immersion in water suppresses its affinity…)` | the instability text says the affinity can be **suppressed**, and the condensate is active |
+
+Both are deliberately narrow. Most instabilities are table calls about the *item* — Gravesalt
+dissolving in fresh water is not a combat fact — and printing all eighteen on the attack line
+would bury the two that matter. A fumble is a consequence of *this attack roll*; a suppression
+qualifies a benefit *this line just promised*. Both are in the reader's eye at the moment they
+apply, which is the v22 doctrine applied to a drawback instead of a bonus.
+
+Magmaheart's instability fires when the NPC **takes** cold damage. That has nothing to do with
+the attack being made, so it is excluded — the trigger check is `attackRoll`-only.
+
+**What v25 taught.**
+
+- **A statblock that advertises a benefit must state its off-switch in the same breath.** The
+  reader cannot ask. Splitting a conditional across two sections is, for them, identical to
+  omitting the condition.
+- **A category-level guard can pass vacuously.** The routing test asserted every
+  `EFFECT_HANDLING` *consumer* had a home. `condensateInstability` is declared
+  `consumer: "power"`, so it satisfied that check while reaching no power channel whatsoever.
+  A guard keyed on the category cannot see a hole inside it. The test now names the exporter
+  mechanism **per type** for the `power` consumer, which also turns the deliberate divergence
+  (an instability belongs on the attack line, not in the action economy) into a stated
+  decision rather than an omission that happens to look like one.
+- **A shared normaliser will edit your punctuation.** The clause first shipped as
+  `Emberglass. Cold damage…` — a separate pass rewrites `"; "` before a capital into `". "`,
+  ending the parenthetical mid-sentence. Lower-casing the clause both sidesteps the rule and
+  reads correctly, since it *is* a continuation. Weakening the shared normaliser to protect
+  one caller would have been the worse trade.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 
