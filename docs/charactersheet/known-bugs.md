@@ -9941,7 +9941,7 @@ about anything. Give identity a floor and let metadata ellipsize.
 
 ---
 
-## CS-BUG-170 — NPC export silently drops a fighting style's conditional damage — OPEN
+## CS-BUG-170 — NPC export silently drops a fighting style's conditional damage — FIXED (v39)
 
 **Symptom.** Dzeiy has the **Dueling** fighting style (+2 damage while
 wielding one melee weapon and no other weapons) and exactly one equipped
@@ -10003,11 +10003,64 @@ weapons"`). Both normalise fine on their own:
 
 but the dedup is **first-wins**, and array order puts the truncated one
 first. So a correct fix needs *both* the gate change and a
-prefer-the-more-specific-condition rule — and the latter reorders riders
-for every character, with 45 exports of expectation to re-validate.
+prefer-the-more-specific rule.
 
-**Not attempted** because the blast radius is corpus-wide and the corpus
-evidence is `n = 1`. Filed rather than guessed at.
+> **Correction (v39).** The sentence that followed here claimed the second
+> half "reorders riders for every character, with 45 exports of expectation
+> to re-validate", and that estimate is what kept this filed instead of
+> fixed. It was an inference from the shape of the change, never measured.
+> Measured: the full fix changes **1 line of 388** across the 24-character
+> corpus. The blast radius was ~1/400th of the one I wrote down.
+>
+> A second claim in the original entry was also wrong, and it is the one
+> that blocked the fix longest: I recorded that gate removal produced only
+> *one* rider "even though neither dedup rule should have caught the
+> second", and called it unexplained. It is fully explained. Both
+> registrations resolve to `sourceName === "Dueling"` — the bare one
+> through `featuresById` from its `sourceFeatureId`, the sub-typed one by
+> falling back to `mod.name`. I had recorded the sub-typed one's
+> `sourceName` as `""`, having read `mod.sourceFeatureId` as absent and
+> stopped there instead of following the `||` chain. `:9741` fires exactly
+> as its comment says it does. **An "unexplained" result was a misread
+> fallback, and it deferred a one-character fix across several sessions.**
+
+**Fixed in v39.** Two changes, because the bug is two bugs:
+
+1. `:9815` deleted. The exporter now mirrors the state's own aggregate
+   gate — a modifier that is `conditional` is live regardless of
+   `enabled`, which is what `charactersheet-state.js:53253` already says.
+2. The `push` dedup upgrades **in place** rather than dropping the
+   newcomer: the position belongs to whichever arrived first, the content
+   to whichever is most specific. Specificity is the count of `:`
+   qualifiers on the modifier type, so `damage:melee:oneHanded` outranks
+   `damage` for the same source and value. The upgrade is gated on
+   *strictly* greater specificity, which leaves equal-specificity
+   collisions behaving exactly as before — that is why the corpus diff is
+   one line and not a reshuffle.
+
+The second change matters more than it looks. First-wins was keeping the
+worse copy on **two** axes, not one: the truncated condition *and*
+`meleeOnly`, which is derived from `/melee/` on the type. The bare
+`damage` copy yields `meleeOnly: false`, so the pre-existing dedup was
+also scoping a melee-only fighting style onto ranged attack lines.
+
+Measured result for Dzeiy:
+
+```
+- {@damage 1d8+8} piercing damage, plus {@damage 1d8} damage while a rite is active on the weapon.
++ {@damage 1d8+8} piercing damage, plus {@damage 1d8} damage while a rite is active on the weapon,
++ plus {@damage 2} damage when wielding one melee weapon and no other weapons.
+```
+
+The printed number is **unchanged** at `1d8+8`, and that is the point:
+`getEffectiveWeaponDamage().flat` is `3` (the item bonus alone) whether
+Dueling is enabled, disabled, or absent, so the +2 was never inside the
+number. Restoring the rider adds information without double-counting a
+bonus. Pinned by its own test.
+
+Wisp — the other Dueling character, and the one the `bakedInSources`
+check at `:9818` exists for — is unaffected, because her unconditional
+twin carries a `sourceFeatureId` and is still correctly suppressed.
 
 **Repro.**
 
@@ -10037,3 +10090,34 @@ reach the line, and a characterization of this defect. **When CS-BUG-170
 is fixed the second test will fail** -- invert it to expect the rider.
 RED-verified: deleting the gate fails the characterization and leaves the
 control green.
+
+**The characterization did its job (v39).** It failed on the first run
+after the fix, alone, and at exactly the right granularity -- the damage
+number in the same assertion stayed `1d8+5`, so the test distinguished
+"the rider appeared" from "the number moved" without being told to. It
+is now inverted, as the note above instructed, and joined by a
+`describe("v39 -- one feature registering twice yields the more specific
+rider, once")`.
+
+RED-verified against each half of the fix **independently**, and the two
+halves fail different sets:
+
+| mutation | red |
+|---|---|
+| restore the `:9815` gate | 6 — the inverted v36 test and all of v39 |
+| revert the dedup to first-wins | **1** — only the "bare first" ordering |
+
+That single red is the reason the ordering test is written as a pair.
+First-wins is *accidentally correct* when the sub-typed modifier happens
+to be registered first, so a suite that tested one order would have
+called the old behaviour fine 50% of the time. Registration order is the
+sheet's to choose, not the exporter's, so the pair is the assertion and
+either half alone is not.
+
+The v39 fixture also had to be corrected mid-write, for a reason worth
+recording: the first version gave the two modifiers different `name`s, so
+they never collided and the dedup under test never ran — both riders were
+emitted and three tests failed. The collision in the real save depends on
+the two `sourceName`s agreeing **by two different routes** (`featuresById`
+lookup vs the `mod.name` fallback). A fixture that simply names both
+"Dueling" passes while exercising a shape the sheet never produces.

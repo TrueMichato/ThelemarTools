@@ -9732,14 +9732,27 @@ class CharacterSheetNpcExporter {
 
 	static _getConditionalDamageRiders (state, calculations = {}) {
 		const riders = [];
-		const push = (damage, condition, {meleeOnly = true, sourceName = "", damageType = "", wholeFeature = false, named = false, appliesTo = "", onlyWeapon = ""} = {}) => {
+		const push = (damage, condition, {meleeOnly = true, sourceName = "", damageType = "", wholeFeature = false, named = false, appliesTo = "", onlyWeapon = "", specificity = 0} = {}) => {
 			const value = String(damage ?? "").trim();
 			if (!value || value === "0") return;
 			if (riders.some(r => r.condition === condition && r.onlyWeapon === onlyWeapon)) return;
+			const record = {damage: value, condition, meleeOnly, sourceName, damageType, wholeFeature, named: named || wholeFeature, appliesTo, onlyWeapon, specificity};
 			// One feature can register the same bonus twice under differently-worded
 			// conditionals (Dueling does), which reads as two separate riders on the line.
-			if (sourceName && riders.some(r => r.sourceName === sourceName && r.damage === value)) return;
-			riders.push({damage: value, condition, meleeOnly, sourceName, damageType, wholeFeature, named: named || wholeFeature, appliesTo, onlyWeapon});
+			// The copies are not interchangeable: the sub-typed one (`damage:melee:oneHanded`)
+			// carries both the scope that decides `meleeOnly` and the un-truncated wording,
+			// while the bare `damage` one degrades to "when it is wielding" on every attack
+			// including ranged. Keeping whichever arrived first kept the worse copy, so the
+			// duplicate is *upgraded in place* — the position is the first one's, the content
+			// is the most specific one's. Equal specificity keeps first-wins unchanged.
+			if (sourceName) {
+				const dupIdx = riders.findIndex(r => r.sourceName === sourceName && r.damage === value);
+				if (dupIdx !== -1) {
+					if (specificity > riders[dupIdx].specificity) riders[dupIdx] = record;
+					return;
+				}
+			}
+			riders.push(record);
 		};
 
 		const rage = Number(calculations.rageDamage);
@@ -9812,7 +9825,6 @@ class CharacterSheetNpcExporter {
 
 		modifiers.forEach(mod => {
 			if (!mod?.conditional) return;
-			if (mod.enabled === false) return;
 			if (!/^damage(?:$|:)/.test(String(mod.type || ""))) return;
 			if (/reroll/i.test(String(mod.type || ""))) return;
 			if (mod.sourceFeatureId && bakedInSources.has(mod.sourceFeatureId)) return;
@@ -9827,6 +9839,9 @@ class CharacterSheetNpcExporter {
 			push(String(value), condition, {
 				meleeOnly: /melee/i.test(String(mod.type || "")),
 				sourceName: featuresById.get(String(mod.sourceFeatureId || ""))?.name || mod.name || "",
+				// Each `:` segment is a scope the bare family does not have, so it ranks
+				// `damage:melee:oneHanded` above `damage` for the same feature and value.
+				specificity: String(mod.type || "").split(":").length - 1,
 			});
 		});
 

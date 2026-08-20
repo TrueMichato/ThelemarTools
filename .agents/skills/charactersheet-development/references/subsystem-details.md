@@ -1537,6 +1537,48 @@ record. There was no regression; there were two stale numbers that happened to a
 When auditing guard coverage, vary the feature flags, or state the configuration in the
 number. `84 of 93` is not a fact about the code; it is a fact about the code in one setting.
 
+### An estimate that justifies not doing the work is the one to measure (v39)
+
+CS-BUG-170 sat filed-and-open for several sessions behind two written claims, both mine,
+both plausible, neither measured:
+
+1. *"Fixing the dedup reorders riders for every character — 45 exports of expectation to
+   re-validate."* Measured: the complete fix changes **1 line of 388** across the corpus.
+   Wrong by roughly 400×.
+2. *"Gate removal produced one rider where neither dedup rule should have caught the
+   second — unexplained."* It was fully explained. Both registrations resolve to
+   `sourceName === "Dueling"`: one through the `featuresById` lookup, the other through the
+   `|| mod.name` fallback. I had recorded the second as `""` after reading
+   `mod.sourceFeatureId` as absent and stopping there, without following the `||` chain.
+
+The second is the ordinary version of a mistake this file already documents — reading a
+control-flow claim instead of measuring it. The first is worth its own entry, because it is
+the version that costs the most:
+
+> **A cost estimate that argues against doing the work deserves the same scepticism as a
+> correctness claim, and it is usually cheaper to measure than to defend.** The script that
+> settled it — dump every exported line for the corpus, mutate, diff — took a few minutes
+> and already existed in spirit. "The blast radius is corpus-wide" is a measurement stated
+> as an intuition.
+
+The tell is structural: an estimate that *blocks* work is never falsified by the work not
+happening, so nothing in the normal course of events will correct it. A wrong correctness
+claim gets caught by the next test run. A wrong cost claim compounds silently, and each
+session that inherits it inherits the conclusion without the evidence.
+
+Two secondary findings from the same fix, both narrow but reusable:
+
+- **Order-independence is one assertion, not two tests that happen to agree.** Reverting the
+  dedup half of the fix reddened **1** of the 2 ordering tests — first-wins is *accidentally
+  correct* when the better copy is registered first. Testing one order would have exonerated
+  the old behaviour half the time. Where the ordering of an input is chosen by another
+  subsystem, both orders are the test.
+- **A fixture can be too tidy to reproduce the collision it exists for.** My first v39
+  fixture gave the two modifiers different `name`s, so they never collided, the dedup never
+  ran, and three tests failed. The real collision depends on two `sourceName`s agreeing *by
+  two different routes*. Naming both "Dueling" would have passed while exercising a shape
+  the sheet never produces.
+
 ### Two ladders step the damage die, and a guard is what keeps them apart (v31)
 
 A weapon's damage die is stepped from two independent places and the export adds them:

@@ -2147,6 +2147,57 @@ That floor is the load-bearing half. Every filter in the walk is a silent `retur
 weapon, no sheet die, no matching action, no `{@damage}` tag. Four ways to quietly count
 nothing, one accessor whose wrong argument is indistinguishable from an unarmed party.
 
+### v39 — a fighting style's condition reaches the attack line, in the wording that survives
+
+CS-BUG-170: Dzeiy's **Dueling** was invisible in her statblock — the string `Dueling`
+appeared zero times, and so did its condition. Two independent causes, one on top of the
+other, which is why the obvious one-line fix made the output worse rather than better.
+
+**The gate.** The rider loop dropped any modifier registered `enabled: false`. That is
+precisely how the sheet registers a *text-parsed* conditional — 57 of the corpus's 61
+disabled modifiers are that shape — and `charactersheet-state.js:53253` deliberately admits
+them (`if (!mod.enabled && !mod.conditional) return;`). Two gates on one channel,
+disagreeing. The exporter's is now gone, so it agrees with the sheet.
+
+**The dedup.** Dueling registers twice, and the copies are not interchangeable:
+
+| type | condition | `meleeOnly` |
+|---|---|---|
+| `damage` | `"when you are wielding"` → *"when it is wielding"* | **false** |
+| `damage:melee:oneHanded` | `"wielding one melee weapon and no other weapons"` | **true** |
+
+`meleeOnly` is derived from `/melee/` on the type, so the bare copy is worse on *two* axes:
+a truncated condition that tells a DM nothing, and a scope that would advertise a melee-only
+fighting style on ranged attack lines. The dedup was first-wins and array order puts that
+copy first, so it kept exactly the wrong one. It now **upgrades in place** — the position is
+the first arrival's, the content is the most specific arrival's, where specificity is the
+count of `:` qualifiers on the type. The upgrade is gated on *strictly* greater specificity,
+so equal-specificity collisions behave exactly as before.
+
+That gating is what keeps the change honest: measured across all 24 corpus characters and
+388 exported lines, **exactly one line changes**. Wisp, the other Dueling character, is
+untouched — her unconditional twin carries a `sourceFeatureId` and the `bakedInSources`
+check still suppresses her rider correctly, which is the case that check exists for.
+
+The printed number does not move. `getEffectiveWeaponDamage().flat` is the item bonus alone
+(`3` for Dzeiy, with or without Dueling), so the +2 was never folded into `1d8+8`. The rider
+adds information rather than a second copy of a bonus — asserted directly, because "the
+rider appeared" and "the number stayed put" are separate claims and a fix that traded an
+invisible bonus for a double-counted one would satisfy the first.
+
+Two things about how this was reached are worth more than the fix:
+
+- The entry had been filed as blocked on an **unexplained** result — gate removal produced
+  one rider where two were expected. It was not unexplained. Both registrations resolve to
+  `sourceName === "Dueling"`, one through `featuresById` and one through the `mod.name`
+  fallback; I had recorded the second as `""` after reading `sourceFeatureId` as absent and
+  stopping before the `||`. A misread fallback deferred a one-character fix across several
+  sessions.
+- The recorded blast radius — "reorders riders for every character, 45 exports to
+  re-validate" — was an inference from the shape of the change and was wrong by a factor of
+  about 400. **The estimate that justified not doing the work was cheaper to measure than to
+  argue about**, and measuring it took one script that already existed.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 

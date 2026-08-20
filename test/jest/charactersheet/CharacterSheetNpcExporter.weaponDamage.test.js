@@ -240,6 +240,23 @@ describe("v21 — the helper's die-only contract", () => {
 	});
 });
 
+// Shared by the v36 and v39 rider tests: one equipped one-handed martial weapon, which is
+// the loadout every Dueling-shaped conditional is written against.
+const makeFighterWithLongsword = () => {
+	const state = makeFighter();
+	state.addItem({
+		name: "Longsword",
+		source: "PHB",
+		dmg1: "1d8",
+		dmgType: "slashing",
+		type: "M",
+		weaponCategory: "martial",
+		properties: [],
+		equipped: true,
+	});
+	return state;
+};
+
 describe("v36 — the rider path's `enabled` gate is pinned, not merely present", () => {
 	// The gate at charactersheet-npc-exporter.js:9815 drops a conditional damage modifier
 	// registered `enabled: false` -- which is exactly how the sheet registers a *text-parsed*
@@ -251,17 +268,7 @@ describe("v36 — the rider path's `enabled` gate is pinned, not merely present"
 	// turned 8 red. So the suite could see riders and still could not see *which* modifiers
 	// were admitted to them. These two tests close that hole.
 	const duelingState = ({enabled}) => {
-		const state = makeFighter();
-		state.addItem({
-			name: "Longsword",
-			source: "PHB",
-			dmg1: "1d8",
-			dmgType: "slashing",
-			type: "M",
-			weaponCategory: "martial",
-			properties: [],
-			equipped: true,
-		});
+		const state = makeFighterWithLongsword();
 		state._data.namedModifiers.push({
 			type: "damage:melee:oneHanded",
 			value: 2,
@@ -285,16 +292,102 @@ describe("v36 — the rider path's `enabled` gate is pinned, not merely present"
 		expect(entry).toMatch(/plus \{@damage 2\} damage when wielding one melee weapon/i);
 	});
 
-	it("CS-BUG-170: the same modifier, disabled-but-conditional, is silently dropped", () => {
-		// This pins a KNOWN DEFECT so it is visible rather than invisible. The sheet admits
-		// this modifier; the export does not, and a DM running the statblock deals 2 less
-		// damage per hit than the character does.
-		//
-		// When CS-BUG-170 is fixed, this test SHOULD fail -- invert it to expect the rider,
-		// and see the bug entry for why the one-line fix (deleting the gate) is not the fix:
-		// Dueling registers twice and the first-wins dedup keeps the truncated conditional.
+	it("CS-BUG-170 (FIXED in v39): disabled-but-conditional now reaches the line too", () => {
+		// Was a characterization of the defect; inverted when v39 fixed it, exactly as the
+		// note left here instructed. `enabled` must not decide this, because `enabled: false`
+		// is how the sheet registers a *text-parsed* conditional -- 57 of the corpus's 61
+		// disabled modifiers are that shape, not user-disabled ones.
 		const entry = riderTextFor(duelingState({enabled: false}));
 		expect(getDamage(entry)).toBe("1d8+5");
-		expect(entry).not.toMatch(/wielding one melee weapon/i);
+		expect(entry).toMatch(/plus \{@damage 2\} damage when wielding one melee weapon/i);
+	});
+
+	it("admitting the modifier does not move the printed number", () => {
+		// The rider is *additional* information, not a second copy of a bonus already summed
+		// in. `getEffectiveWeaponDamage().flat` is the item bonus alone, so `1d8+5` has to be
+		// identical with the modifier enabled, disabled, or absent -- otherwise the fix would
+		// have traded an invisible bonus for a double-counted one.
+		const absent = riderTextFor(makeFighterWithLongsword());
+		expect(getDamage(absent)).toBe("1d8+5");
+		expect(getDamage(riderTextFor(duelingState({enabled: true})))).toBe("1d8+5");
+		expect(getDamage(riderTextFor(duelingState({enabled: false})))).toBe("1d8+5");
+	});
+});
+
+describe("v39 — one feature registering twice yields the more specific rider, once", () => {
+	// The sheet registers Dueling under two modifiers, and they are NOT interchangeable:
+	//
+	//   damage                     "when you are wielding"                        <- truncated
+	//   damage:melee:oneHanded     "wielding one melee weapon and no other weapons"
+	//
+	// The bare one normalizes to "when it is wielding" (meaningless to a reader) and, because
+	// `meleeOnly` is derived from `/melee/` on the type, it is also scoped to *every* attack
+	// including ranged. Dedup at the `push` helper was first-wins, so it kept precisely the
+	// worse copy on both axes. It now upgrades in place: first one's position, best one's
+	// content. Measured corpus-wide -- exactly one line of 388 changes.
+	// Faithful to the save: the two registrations only collide because their `sourceName`
+	// agrees, and it agrees by two *different* routes -- the bare one resolves through
+	// `featuresById` from its `sourceFeatureId`, the sub-typed one has no `sourceFeatureId`
+	// at all and falls back to `mod.name`. A fixture that simply named both "Dueling" would
+	// pass while testing a shape the sheet never produces.
+	const DUELING_FEATURE_ID = "dueling-feature-id";
+	const BARE = {
+		type: "damage",
+		value: 2,
+		enabled: false,
+		conditional: "when you are wielding",
+		name: "Dueling: when you are wielding",
+		sourceFeatureId: DUELING_FEATURE_ID,
+	};
+	const SUBTYPED = {
+		type: "damage:melee:oneHanded",
+		value: 2,
+		enabled: false,
+		conditional: "wielding one melee weapon and no other weapons",
+		name: "Dueling",
+	};
+
+	const riderTextForMods = (mods) => {
+		const state = makeFighterWithLongsword();
+		state._data.features = [...(state._data.features || []), {id: DUELING_FEATURE_ID, name: "Dueling"}];
+		mods.forEach(m => state._data.namedModifiers.push({...m}));
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		return String(out.action.find(a => a.name === "Longsword").entries[0]);
+	};
+
+	it.each([
+		["registration order (bare first)", [BARE, SUBTYPED]],
+		["reversed order (sub-typed first)", [SUBTYPED, BARE]],
+	])("keeps the un-truncated wording in %s", (_label, mods) => {
+		// Order-independence is the point. A fix that only works because the better copy
+		// happens to arrive second is an accident, and the sheet's registration order is not
+		// something the exporter controls.
+		const entry = riderTextForMods(mods);
+		expect(entry).toMatch(/plus \{@damage 2\} damage when wielding one melee weapon and no other weapons/i);
+		expect(entry).not.toMatch(/when it is wielding/i);
+	});
+
+	it("emits the shared bonus once, not once per registration", () => {
+		const entry = riderTextForMods([BARE, SUBTYPED]);
+		expect(entry.match(/\{@damage 2\}/g)).toHaveLength(1);
+	});
+
+	it("control: each modifier alone still produces its own rider", () => {
+		// Anti-vacuity on the same channel. Without this, the two assertions above pass just
+		// as well if the dedup grew strict enough to swallow both copies -- the export would
+		// be silent again and the tests would not notice.
+		expect(riderTextForMods([SUBTYPED])).toMatch(/\{@damage 2\} damage when wielding one melee weapon/i);
+		expect(riderTextForMods([BARE])).toMatch(/\{@damage 2\} damage when it is wielding/i);
+	});
+
+	it("equal specificity still keeps the first, so the change is a strict superset", () => {
+		// The upgrade is gated on *strictly* greater specificity. Two same-shaped registrations
+		// therefore behave exactly as they did before v39, which is what keeps the corpus diff
+		// at one line instead of reshuffling every rider that shares a source name.
+		const first = {...BARE, conditional: "while you are grinning"};
+		const second = {...BARE, conditional: "while you are frowning"};
+		const entry = riderTextForMods([first, second]);
+		expect(entry).toMatch(/when it is grinning/i);
+		expect(entry).not.toMatch(/frowning/i);
 	});
 });
