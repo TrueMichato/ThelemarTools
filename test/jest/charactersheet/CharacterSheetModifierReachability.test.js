@@ -19,7 +19,7 @@
  * "check:advantage:perception" reached it through nothing.
  */
 
-import {readFileSync} from "fs";
+import {readdirSync, readFileSync} from "fs";
 import {dirname, resolve} from "path";
 import {fileURLToPath} from "url";
 
@@ -183,7 +183,11 @@ describe("every registered skill-selected modType has a roll that can read it", 
  *
  *   roll      - reachable from at least one roll query via getModifiersForType.
  *   named     - has a dedicated consumer that reads it by name (carry capacity,
- *               armor stealth penalty, medium-armor Dex cap, ...).
+ *               armor stealth penalty, medium-armor Dex cap, ...). That consumer
+ *               need not live on the modifier pipeline at all: `ranged:noDisdvantageInMelee`
+ *               is delivered by the NPC exporter matching `eff.modType` off
+ *               `FeatureEffectRegistry.getFeatEffects()`, which `isRollReachable`
+ *               structurally cannot see. Hence the registry-channel guard below.
  *   reference - deliberately NOT delivered by the sheet. The feature text is
  *               shown to the player and the DM adjudicates it. Ignoring cover,
  *               ritual casting and charge riders depend on positional or
@@ -317,6 +321,63 @@ describe("every registered modType declares how it is consumed", () => {
 		// If this fails, the sheet started delivering something the manifest
 		// says it does not. Reclassify it as "roll" rather than deleting the case.
 		expect(delivered).toEqual([]);
+	});
+
+	// SECOND CHANNEL. Everything above walks the modifier pipeline, so it can only
+	// ever answer "is this reachable from a roll". A modType can also be delivered
+	// by a consumer reading `FeatureEffectRegistry.getFeatEffects()` and matching
+	// `eff.modType` itself, entirely outside `getModifiersForType`. The NPC exporter
+	// does exactly that for `ranged:noDisdvantageInMelee`, which the pipeline walk
+	// correctly reports as unreachable -- right about the pipeline, wrong about the
+	// world. So "reference" needs a second, independent negative.
+	describe("the registry channel", () => {
+		const OTHER_SOURCES = (() => {
+			const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../../js");
+			const files = [];
+			const walk = dir => {
+				for (const ent of readdirSync(dir, {withFileTypes: true})) {
+					const full = resolve(dir, ent.name);
+					if (ent.isDirectory()) walk(full);
+					else if (ent.name.endsWith(".js") && ent.name !== "charactersheet-state.js") files.push(full);
+				}
+			};
+			walk(root);
+			// Strip comments. A comment naming a modType is documentation -- often
+			// documentation of the very deadness being tested -- and counting it is
+			// how a grep reassures you with your own prose.
+			return files.map(f => ({
+				file: f,
+				body: readFileSync(f, "utf8")
+					.replace(/\/\*[\s\S]*?\*\//g, "")
+					.split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n"),
+			}));
+		})();
+
+		const mentionedOutsideRegistration = type => OTHER_SOURCES
+			.filter(({body}) => body.includes(`"${type}"`))
+			.map(({file}) => file.split("/js/")[1]);
+
+		// Anti-vacuity, and it is the whole reason this describe can be trusted.
+		// `ranged:noDisdvantageInMelee` IS consumed this way, so the scanner must
+		// find it. If this goes green-by-emptiness the negative below means nothing.
+		it("control: finds the one modType known to be consumed off-pipeline", () => {
+			const found = mentionedOutsideRegistration("ranged:noDisdvantageInMelee");
+			expect(found.length).toBeGreaterThan(0);
+			expect(found).toContain("charactersheet/charactersheet-npc-exporter.js");
+		});
+
+		it("no reference-only type is consumed off-pipeline either", () => {
+			const leaked = Object.entries(MODIFIER_CONSUMERS)
+				.filter(([, consumer]) => consumer === "reference")
+				.map(([type]) => [type, mentionedOutsideRegistration(type)])
+				.filter(([, files]) => files.length)
+				.map(([type, files]) => `${type} <- ${files.join(", ")}`);
+
+			// A hit here is not necessarily a bug: it means some consumer names the
+			// type outside the registration site, so the "reference" claim needs
+			// re-deciding by reading that consumer.
+			expect(leaked).toEqual([]);
+		});
 	});
 
 	it("each classification is actually used (no bucket is empty)", () => {

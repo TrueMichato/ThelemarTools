@@ -246,7 +246,7 @@ expect(state.getAbilityMod("str")).toBe(4);    // (18-10)/2
 | Reading `_data.abilities.str` directly | Gets base only, not total | Use `getAbilityScore()` (base+bonus) |
 | Not matching source in spell assertions | Blade Ward behaves differently by edition | Always check name AND source |
 | `SomeClass._method = () => []` with no restore | Permanent static clobber -- every test declared *after* it silently runs against the stub | Capture the original, restore in `afterEach`, and add a tripwire (below) |
-| `state._data.namedModifiers.push({...})` | Bypasses `_recalculateCustomModifiers()`, so the modifier is inert and the probe reads flat | Use `addNamedModifier()`, or call `_recalculateCustomModifiers()` after the push (below) |
+| `state._data.namedModifiers.push({...})` **then asserting a total** | Bypasses `_recalculateCustomModifiers()`, so the value never reaches the cache the total getters read | Use `addNamedModifier()`, or recalc after the push. Raw push is correct for `getModifiersForType`/`aggregateModifiers` (below) |
 
 ### Replacing a static is a false-green generator
 
@@ -285,20 +285,31 @@ afterEach(() => {
 Prefer `jest.spyOn(Cls, "_method").mockReturnValue([])` with `restoreAllMocks`, which gets
 this right by construction. The manual form above is for statics a spy cannot reach.
 
-### A raw `namedModifiers` push is inert, and reads as a channel that does not exist
+### A raw `namedModifiers` push is inert for *totals*, and live for *aggregates*
 
-`_data.namedModifiers` is not the input the getters read -- it is folded into
-`_data.customModifiers` by `_recalculateCustomModifiers()`, and the getters read the fold.
-`addNamedModifier()` triggers the recalc; a bare `.push()` does not. So the modifier sits
-in the array, contributes nothing, and the probe reads flat with no error.
+There are two reader families, and a bare `.push()` serves exactly one of them.
 
-Measured on `skill:perception` with `value: 5`, one variable (the delivery mechanism):
+**Total/value getters read a cache.** `_recalculateCustomModifiers()` folds
+`_data.namedModifiers` into `_data.customModifiers`, and `getSkillMod()` /
+`getAbilityCheckCustomMod()` and friends read the fold. `addNamedModifier()` triggers the
+recalc; a bare `.push()` does not, so the modifier sits in the array contributing nothing
+and the probe reads flat with no error.
 
-| injection | `getSkillMod("perception")` |
-|---|---|
-| `_data.namedModifiers.push(...)` | `2 -> 2` |
-| `.push(...)` then `_recalculateCustomModifiers()` | `2 -> 7` |
-| `addNamedModifier(...)` | `2 -> 7` |
+**Aggregate/reachability getters read the array directly.** `getModifiersForType()` and
+`aggregateModifiers()` walk `_data.namedModifiers` themselves, so a raw push is the correct
+and idiomatic injection there -- which is why ~51 existing tests use it and are sound.
+
+Measured on `skill:perception` with `value: 5`, varying only the delivery:
+
+| injection | `getSkillMod()` (total) | `getModifiersForType()` (aggregate) |
+|---|---|---|
+| `_data.namedModifiers.push(...)` | `2 -> 2` | probe found |
+| `.push(...)` then `_recalculateCustomModifiers()` | `2 -> 7` | probe found |
+| `addNamedModifier(...)` | `2 -> 7` | probe found |
+
+So the rule is **match the injection to the reader**, not "never push". If you assert on a
+number, push then recalc, or use `addNamedModifier()`. If you assert on reachability or
+conditional offering, push and read straight back.
 
 The trap is not the flat run -- it is what a flat run tempts you to conclude. A raw push
 was read once as evidence that `namedModifiers` typed `skill:<name>` is "inert for numeric
