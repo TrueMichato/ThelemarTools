@@ -43899,6 +43899,10 @@ class CharacterSheetState {
 		// `CharacterSheetMaterials`' static helpers are pure and catalog-free by design;
 		// this is the one shared handle they read when no catalog is passed explicitly.
 		globalThis.__csMaterialCatalog = this._itemMaterialCatalog;
+		// Anything that failed to resolve before this point failed for want of a catalog, not
+		// because the reference was bad. Drop those records so a late-arriving brew does not
+		// leave behind warnings that are no longer true.
+		if (this._itemMaterialCatalog.length) globalThis.CharacterSheetMaterials?.clearUnresolvedReferences?.();
 	}
 
 	/** @returns {Array<object>} */

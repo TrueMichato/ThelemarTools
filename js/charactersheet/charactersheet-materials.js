@@ -64,6 +64,15 @@ class CharacterSheetMaterials {
 	/** Categories whose density is compared against the wood baseline. */
 	static WOOD_CATEGORIES = new Set(["wood"]);
 
+	/**
+	 * Material/resonance references an item named but the catalog could not supply, keyed by
+	 * `kind|name|source`. Populated by `_noteUnresolved`; read via `getUnresolvedReferences`.
+	 */
+	static unresolvedReferences = new Map();
+
+	/** Keys already warned about, so one bad reference does not flood the console per render. */
+	static _warnedUnresolved = new Set();
+
 	/** d8 Magical Interference table (verbatim). */
 	static MAGICAL_INTERFERENCE_TABLE = [
 		{roll: 1, name: "Arcane Sparks", entry: "The item sheds dim, colorful light in a 10-foot radius and hums loudly. Its user has Disadvantage on Dexterity ({@skill Stealth}) checks while it is unsheathed or worn."},
@@ -262,9 +271,51 @@ class CharacterSheetMaterials {
 		const pool = allMaterials || globalThis.__csMaterialCatalog || [];
 		const name = ref.name.toLowerCase();
 		const source = (ref.source || "").toLowerCase();
-		return pool.find(m => m.name?.toLowerCase() === name && (!source || (m.source || "").toLowerCase() === source))
+		const found = pool.find(m => m.name?.toLowerCase() === name && (!source || (m.source || "").toLowerCase() === source))
 			|| pool.find(m => m.name?.toLowerCase() === name)
 			|| null;
+		if (!found) CharacterSheetMaterials._noteUnresolved("material", ref, pool.length);
+		return found;
+	}
+
+	/**
+	 * Record — and, once per unique reference, warn about — an item that names a material or
+	 * resonance the catalog cannot supply.
+	 *
+	 * This exists because the failure is otherwise invisible: `resolveMaterial` returning `null`
+	 * looks exactly like "this item has no material", so every downstream effect silently
+	 * evaporates and the sheet renders a plausible, wrong item. The catalog size is part of the
+	 * signal, and it separates the two causes that need opposite fixes:
+	 *   - pool empty     -> the catalog was never loaded (brew missing, or a test that forgot
+	 *                       `setItemMaterialCatalog`). Every material on the character is dead.
+	 *   - pool non-empty -> this one reference is bad (renamed or mis-sourced material).
+	 * @param {"material"|"resonance"} kind
+	 * @param {{name: string, source?: string}} ref
+	 * @param {number} poolSize
+	 */
+	static _noteUnresolved (kind, ref, poolSize) {
+		const key = `${kind}|${ref.name}|${ref.source || ""}`;
+		CharacterSheetMaterials.unresolvedReferences.set(key, {kind, name: ref.name, source: ref.source || null, poolSize});
+		if (CharacterSheetMaterials._warnedUnresolved.has(key)) return;
+		CharacterSheetMaterials._warnedUnresolved.add(key);
+		const cause = poolSize
+			? `not found among ${poolSize} known ${kind}s - renamed or mis-sourced?`
+			: `the ${kind} catalog is empty - it was never loaded`;
+		globalThis.console?.warn?.(`[charactersheet] Unresolved ${kind} reference "${ref.name}"${ref.source ? ` (${ref.source})` : ""}: ${cause}. Its effects will be silently absent.`);
+	}
+
+	/**
+	 * Every unresolved material/resonance reference seen this session, keyed by `kind|name|source`.
+	 * Consumers (the exporter's validation pass, tests) can read this to surface a warning rather
+	 * than shipping an item whose material quietly did nothing.
+	 * @returns {Array<{kind: string, name: string, source: string|null, poolSize: number}>}
+	 */
+	static getUnresolvedReferences () { return [...CharacterSheetMaterials.unresolvedReferences.values()]; }
+
+	/** Clear the unresolved-reference record. Intended for tests and for a fresh character load. */
+	static clearUnresolvedReferences () {
+		CharacterSheetMaterials.unresolvedReferences.clear();
+		CharacterSheetMaterials._warnedUnresolved.clear();
 	}
 
 	/**
@@ -280,9 +331,11 @@ class CharacterSheetMaterials {
 		const pool = allResonances || globalThis.__csResonanceCatalog || [];
 		const name = ref.name.toLowerCase();
 		const source = (ref.source || "").toLowerCase();
-		return pool.find(r => r.name?.toLowerCase() === name && (!source || (r.source || "").toLowerCase() === source))
+		const found = pool.find(r => r.name?.toLowerCase() === name && (!source || (r.source || "").toLowerCase() === source))
 			|| pool.find(r => r.name?.toLowerCase() === name)
 			|| null;
+		if (!found) CharacterSheetMaterials._noteUnresolved("resonance", ref, pool.length);
+		return found;
 	}
 
 	/**

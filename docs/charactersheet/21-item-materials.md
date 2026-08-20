@@ -1187,6 +1187,37 @@ instead of throwing).
 `test/jest/CraftingItemMaterials.test.js` additionally pins the two Thelemar reference rules,
 including the drift guard between the brew's Magical Interference table and the JS constant.
 
+## An empty catalog looks exactly like "no material"
+
+Materials are stored on items as a `{name, source}` **reference**; the entity itself lives in the
+catalog. `resolveMaterial` returns `null` when it cannot find the entity — and `null` is also the
+correct answer for an item that simply has no material. Those two cases are indistinguishable to
+every caller, so a character whose catalog never loaded renders as a plausible, wrong sheet: no
+error, no missing section, just every material effect quietly absent.
+
+This is not hypothetical. Two sessions independently concluded that Adamantine's damage reduction
+was unimplemented, each having loaded a real save into a harness that never called
+`setItemMaterialCatalog`. Both measured `getNamedModifiersByType("damageReduction") === []` and
+both believed it. The feature was working the whole time.
+
+`resolveMaterial` and `resolveResonance` now record every reference they cannot satisfy, and warn
+once per unique reference. **The catalog size is the diagnostic**, because it separates two causes
+with opposite fixes:
+
+| Signal | Cause | Fix |
+|---|---|---|
+| `poolSize: 0` | The catalog was never loaded — brew missing, or a test that forgot `setItemMaterialCatalog` | Load it. *Every* material on the character is dead, not just this one |
+| `poolSize: n` | This one reference is bad — renamed or mis-sourced material | Fix the reference |
+
+Read the record with `CharacterSheetMaterials.getUnresolvedReferences()`. `setItemMaterialCatalog`
+clears it when a non-empty catalog arrives, so a late-loading brew does not leave behind warnings
+that are no longer true.
+
+**When writing a test that touches materials, load the catalog.** A test that omits it does not
+test materials — it tests the empty-material path, and it will pass against a completely broken
+implementation. `CharacterSheetMaterialCatalogResolution.test.js` measures the real Adamantine
+path against the authored brew for exactly this reason.
+
 ## Phasing
 
 | Phase | Status | Contents |

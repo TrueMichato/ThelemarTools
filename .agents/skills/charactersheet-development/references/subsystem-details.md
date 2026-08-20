@@ -647,6 +647,15 @@ An item may carry `material: {name, source}` — a **non-destructive reference**
 - **`getMaterialEffects(item, material)` resolves internally now**, like `applyToItem` /
   `getMaterialNotes` / `getPenetration`. Before, a forgotten second argument returned a fully
   populated *empty* shape, indistinguishable from a material with no effects.
+- ⚠️ **A test that touches materials without `setItemMaterialCatalog` does not test materials.**
+  Items store a `{name, source}` *reference*; the entity lives in the catalog. With no catalog,
+  `resolveMaterial` returns `null` — the same answer as "this item has no material" — so every
+  effect silently evaporates and the test passes against an arbitrarily broken implementation.
+  Two sessions each concluded Adamantine's damage reduction was unimplemented this way; it was
+  working the whole time. `resolveMaterial` / `resolveResonance` now record unresolved references
+  (`CharacterSheetMaterials.getUnresolvedReferences()`) and **`poolSize` tells you which bug you
+  have**: `0` means the catalog never loaded and *every* material is dead; non-zero means this one
+  reference is bad. Load the real brew from `homebrew/TravelersGuidetoThelemar.json`.
 - ⚠️ **`item.attachedSpells` is a dict far more often than an array** (~343 vs ~84 in the
   shipped catalog). `will` / `other` / `ritual` hold arrays directly; `daily` / `charges` /
   `limited` / `rest` nest one level further under a use count (`{"1e": [...]}`); and a
