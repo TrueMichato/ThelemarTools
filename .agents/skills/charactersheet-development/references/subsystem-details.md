@@ -1391,20 +1391,33 @@ rivals: `namedModifiers` → `_recalculateCustomModifiers()` → `customModifier
 `getSkillMod` says so at `:11318`). `customModifiers.skills` is the **cache the named entry
 writes into**, not an alternative input. ~90 `skill:<name>` registrations exist across `js/`.
 
-A raw `.push()` is inert for **two** independent reasons, and both must be fixed:
+A raw `.push()` is inert for **two** independent reasons, and there are **two reader
+families** with different sensitivity to them. Totals read the `_recalculateCustomModifiers`
+cache; aggregates walk the array directly:
 
-| `enabled` | `_recalculateCustomModifiers()` | `getSkillMod("perception")` |
+| injection | `getSkillMod()` *(total)* | `getModifiersForType()` *(aggregate)* |
 |---|---|---|
-| absent | called | `0` — inert |
-| `true` | called | **`5`** |
-| `true` | not called | `0` — inert |
-| *(via `addNamedModifier`)* | — | **`5`** |
+| `push({type, value})` | `0` — inert | `0` — inert |
+| `push({…, enabled: true})` | `0` — inert | **`1`** |
+| `push({…, enabled: true})` + recalc | **`5`** | **`1`** |
+| `addNamedModifier()` | **`5`** | **`1`** |
 
-`addNamedModifier` sets `enabled: modifier.enabled !== false` and recalculates, which is why
-the public API works and hand-rolled injection does not. **Use `addNamedModifier`; if you
-must push raw, push `{enabled: true}` and call the recalc.** This repo's own working helper
-had it right all along — `CharacterSheetNpcExporter.test.js:1045` pushes
-`{enabled: true, ...m}`. The ad-hoc probe forgot what the committed code already knew.
+**`enabled` is the universal gate; the recalc is the totals-only gate.** The hard early
+return is `if (!mod.enabled) return;` (`charactersheet-state.js:52585`), and
+`addNamedModifier` sets `enabled: modifier.enabled !== false` (`:52120`) *and* recalculates,
+which is why the public API works and hand-rolled injection often does not.
+
+So the rule is **match the injection to the reader**, and always carry `enabled`:
+
+- asserting a **number** → `addNamedModifier()`, or push `{enabled: true}` **and** recalc;
+- asserting **reachability / conditional offering** → push `{enabled: true}` and read back.
+
+Do *not* "fix" a bare push by adding a recalc: without `enabled` it stays inert in both
+columns. All 15 raw-push sites in `test/jest/charactersheet/` carry `enabled: true` and are
+sound as written — including `CharacterSheetNpcExporter.test.js:1045`
+(`push({enabled: true, ...m})`). This repo's committed helpers had it right the whole time;
+the ad-hoc probe forgot what the working code already knew. **A throwaway probe is a
+reimplementation of a fixture you already have** — grep for an existing injection first.
 
 **The failure mode is distinct from the three before it, and worth its own name.** A no-op
 mutation normally yields a *false negative* — "no effect observed." This one went further:
