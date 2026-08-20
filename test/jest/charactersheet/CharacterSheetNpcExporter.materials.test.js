@@ -25,6 +25,7 @@ import {CharacterSheetNpcExporter} from "../../../js/charactersheet/charactershe
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetMaterials = globalThis.CharacterSheetMaterials;
+const CharacterSheetUpgrades = globalThis.CharacterSheetUpgrades;
 
 const __dirnameLocal = path.dirname(fileURLToPath(import.meta.url));
 const BREW_PATH = path.join(__dirnameLocal, "..", "..", "..", "homebrew", "TravelersGuidetoThelemar.json");
@@ -983,15 +984,87 @@ maybeDescribe("NPC export v26b — a projected bonus is counted exactly once", (
 		expect(Number(probe(2).eff?.totalDamageBonus)).toBe(2);
 	});
 
-	it("has no material that steps a damage die, which is what makes the die path safe", () => {
-		// `damageDieIncrease` is read from the accessor and applied on top of the PROJECTED
-		// item's die. That is only safe while no material steps dice during projection --
-		// Mithril's ladder moves properties (2H -> V), not dice. If a material ever gains a
-		// die step, the die would be raised twice and this fails first.
-		const dieSteppers = MATERIALS.filter(m => (m.effects || [])
-			.some(e => /^(damageDieIncrease|damageStep|damageDieLadder)$/.test(String(e.type))));
+	/**
+	 * v31 -- what makes the die path safe is disjointness, not absence.
+	 *
+	 * The guard this replaces filtered `effects[]` for an entry typed `damageDieIncrease` /
+	 * `damageStep` / `damageDieLadder` and asserted the result was empty. No material has ever
+	 * used such an effect type, so it matched nothing and passed vacuously -- and its premise
+	 * ("no material steps a damage die") was flatly false: materials step dice through the
+	 * top-level `damage` axis, and thirteen of them do it today.
+	 *
+	 * The real invariant is that the two channels cannot see each other. A material's step is
+	 * baked into the projected die by `applyToItem`; an upgrade's is published separately as
+	 * `damageDieIncrease`, which starts at 0 and accumulates only from `getUpgradeEffects`.
+	 * Reading the projected die and adding `damageDieIncrease` therefore counts each source
+	 * exactly once. Assert that directly instead of asserting an emptiness.
+	 */
+	const dieSteppers = MATERIALS.filter(m => Number(m.damage || 0) > 0);
 
-		expect(dieSteppers.map(m => m.name)).toEqual([]);
+	const dieProbe = ({material = null, upgrades = null, dmg1 = "1d4"} = {}) => {
+		const entry = weapon({name: "Die Probe", material, upgrades, dmg1});
+		const state = makeState({items: [entry]});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const action = (out.action || []).find(a => /Die Probe/i.test(String(a.name || "")));
+		const text = String((action?.entries || []).join(" "));
+		return {
+			damage: /\{@damage ([^}]+)\}/.exec(text)?.[1],
+			dieIncrease: Number(state.getEffectiveItemBonuses?.(entry.id)?.damageDieIncrease ?? NaN),
+		};
+	};
+
+	it("has materials that step damage dice, so the guard below can actually fire", () => {
+		// Anti-vacuity. The predecessor of this block filtered on a key nothing used and its
+		// `toEqual([])` could never fail. Prove the pool is reachable before asserting over it.
+		expect(dieSteppers.length).toBeGreaterThan(0);
+		expect(dieSteppers.map(m => m.name)).toEqual(expect.arrayContaining(["Steel", "Darkeline"]));
+	});
+
+	it("keeps every die-stepping material out of the upgrade channel", () => {
+		// The load-bearing fact. `getEffectiveItemBonuses` receives the raw inventory entry,
+		// whose `material` is only a {name, source} stub, so it structurally cannot read a
+		// material's damage axis. If any material ever reports a non-zero increase here, the
+		// exporter's `projected die + damageDieIncrease` starts double-counting that material.
+		const leaked = dieSteppers
+			.map(m => ({name: m.name, inc: dieProbe({material: m.name}).dieIncrease}))
+			.filter(r => r.inc !== 0);
+
+		expect(leaked).toEqual([]);
+	});
+
+	it("counts a material and an upgrade exactly once each", () => {
+		// Deliberately based at 1d4. From 1d8 an erroneous third step CLAMPS at 1d12 on the
+		// upgrade ladder and the assertion passes on a broken build -- the case you would reach
+		// for first is the one the bug cannot reach. From 1d4 the run ends short of both
+		// ceilings, so over- and under-counting are each visible.
+		const superior = [{name: "Superior", source: "TCAH"}];
+
+		expect(dieProbe({}).damage).toMatch(/^1d4\b/);
+		expect(dieProbe({material: "Steel"}).damage).toMatch(/^1d6\b/);
+		expect(dieProbe({upgrades: superior}).damage).toMatch(/^1d6\b/);
+		expect(dieProbe({material: "Steel", upgrades: superior}).damage).toMatch(/^1d8\b/);
+	});
+
+	it("declares that an upgrade's ladder stops at 1d12 where a material's does not", () => {
+		// Not a bug report -- a pinned divergence. `CharacterSheetUpgrades.increaseDamageDie`
+		// walks [4,6,8,10,12] with a Math.min clamp; `CharacterSheetMaterials.stepDamageDie`
+		// continues 1d12 -> 2d6. They agree on every die a base weapon has and part company at
+		// exactly one point. Materials made that point reachable: Darkeline and Paradox Metal
+		// are +2, so any d8 weapon lands on 1d12, where a Superior upgrade costs resources,
+		// prints "Damage die +1 step" and does nothing.
+		//
+		// The export follows the upgrade ladder, so such a weapon exports 1d12 rather than 2d6.
+		// That is correct-per-implementation and arguably wrong-per-intent, and changing it is a
+		// rules call that must move three things together: this pin, the cap pinned by
+		// CharacterSheetUpgrades.test.js, and CharacterSheetNpcExporter.weaponDamage.test.js's
+		// reliance on `increaseDamageDie` returning the die term alone.
+		expect(CharacterSheetUpgrades.increaseDamageDie("1d12", 1)).toBe("1d12");
+		expect(CharacterSheetMaterials.stepDamageDie("1d12", 1)).toBe("2d6");
+
+		const superior = [{name: "Superior", source: "TCAH"}];
+		expect(dieProbe({material: "Darkeline", dmg1: "1d8"}).damage).toMatch(/^1d12\b/);
+		expect(dieProbe({material: "Darkeline", upgrades: superior, dmg1: "1d8"}).damage)
+			.toMatch(/^1d12\b/);
 	});
 });
 

@@ -1265,6 +1265,39 @@ a test for only one invites the other: silence the duplicate by dropping the cla
 gap returns. The matrix test asserts `gaps === []` *and* `dupes === []` across every
 condensate and every item role.
 
+### Two ladders step the damage die, and a guard is what keeps them apart (v31)
+
+A weapon's damage die is stepped from two independent places and the export adds them:
+
+- a **material** steps it during the read-time projection, via the material entity's
+  top-level `damage` axis (13 shipped materials do this — `Steel` +1, `Darkeline` +2, …);
+- an **upgrade** steps it via `damageDieIncrease`, applied on top of the projected die.
+
+**The disjointness is deliberate, not structural.** `getEffectiveItemBonuses` resolves the
+material and holds its effects (`charactersheet-state.js:12993`) and *chooses* not to add
+the step, with a comment saying why — *"damage steps … are baked into the item by the
+read-time projection, so re-adding them here would count them twice."* Do not assume the
+accessor "can't see" a material's damage; it can, and the double-count is one line away.
+Assert `damageDieIncrease === 0` for every die-stepping material rather than trusting it.
+
+**The two ladders differ at exactly one die.** `CharacterSheetUpgrades.increaseDamageDie`
+walks `[4,6,8,10,12]` with `Math.min`; `CharacterSheetMaterials.stepDamageDie` walks the
+longer Thelemar ladder. At `1d12`: material → `2d6`, upgrade → `1d12` (no-op). A +2 material
+puts any d8 weapon on `1d12`, so a `Superior` upgrade there is inert. Declared behaviour,
+not fixed — unifying them is a rules call and would break three pinned expectations.
+
+**Test-design lessons, both paid for:**
+- A guard filtered on a key **no data has ever used** passed vacuously for versions while
+  asserting a premise that was false for 13 materials. Prove the pool is non-empty before
+  asserting over it.
+- Base a ladder test at `1d4`, not `1d8`. From `1d8` an erroneous extra step **clamps** at
+  `1d12` and the broken build passes. The case you reach for first is the one the bug
+  cannot reach.
+- When a RED-verify fails to go red, suspect the *mutation* before concluding the code is
+  safe. Mutating via `resolveMaterial(item.material)` silently returned `null` — the
+  signature is `resolveMaterial(item, catalog)`. An unconditional mutation at the same site
+  proved the guard was sensitive and the mutation was wrong.
+
 ### Bundling sheet-authored items with the export (v20)
 
 An NPC export is a homebrew document (`{_meta, monster: [...]}`), so it may also carry

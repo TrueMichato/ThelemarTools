@@ -1925,6 +1925,60 @@ surfaced it — the harness had been quietly emitting nothing for as long as the
 existed. Catalogs are now set before the load, and "identical" is a real result: Aldor's
 suppression clause and Mikase's Adamantine both appear in the regenerated output.
 
+### v31 — the damage die has two ladders, and they part company at 1d12
+
+A weapon's damage die can be stepped from two places, and the export reads both:
+
+- a **material** steps it during the read-time projection, through the top-level `damage`
+  axis on the material entity (`Steel` +1, `Darkeline` +2, `Heart Stone` −2, …);
+- an **upgrade** steps it by publishing `damageDieIncrease`, which the exporter applies on
+  top of the already-projected die.
+
+Counting each exactly once is only correct while the two channels cannot see each other,
+and the guard that was supposed to protect that could never fire. It filtered each
+material's `effects[]` for an entry typed `damageDieIncrease` / `damageStep` /
+`damageDieLadder` and asserted the result was empty. **No material has ever used such an
+effect type**, so the filter matched nothing and the assertion passed vacuously — while its
+stated premise, "no material steps a damage die", was false for **thirteen** shipped
+materials. Replaced with an assertion of the disjointness itself: every die-stepping
+material must report `damageDieIncrease === 0`, preceded by an anti-vacuity check that the
+pool is non-empty.
+
+The disjointness is **not** structural, which is why it needs a guard.
+`getEffectiveItemBonuses` resolves the material and has its effects in hand
+(`charactersheet-state.js:12993`); it declines to add the damage step deliberately, and
+says so in a comment — *"damage steps … are baked into the item by the read-time
+projection, so re-adding them here would count them twice."* The leak is one line away from
+the code that already holds the material. A guard is what keeps the comment true.
+
+**The divergence.** `CharacterSheetUpgrades.increaseDamageDie` walks `[4,6,8,10,12]` with a
+`Math.min` clamp; `CharacterSheetMaterials.stepDamageDie` walks the longer Thelemar ladder
+and continues past it. They agree on every die a base weapon has and differ at exactly one
+point:
+
+| die | material ladder | upgrade ladder |
+|---|---|---|
+| `1d12` | `2d6` | `1d12` (clamped, no-op) |
+
+Materials made that point reachable: `Darkeline` and `Paradox Metal` are +2, so **any d8
+weapon lands on `1d12`**, where a `Superior` upgrade costs resources, prints *"Damage die +1
+step"* and does nothing. The export follows the upgrade ladder, so such a weapon exports
+`1d12` rather than `2d6`. That is **correct-per-implementation and arguably wrong-per-intent**,
+and it is pinned as declared behaviour rather than fixed: changing it is a rules call (the
+two ladders come from different books) and must move three things together — this pin, the
+cap pinned by `CharacterSheetUpgrades.test.js`, and `CharacterSheetNpcExporter.weaponDamage.test.js`,
+which relies on `increaseDamageDie` returning the die term alone.
+
+**Corpus.** Contrary to the expectation that this combination was hypothetical, one
+character carries it today: Arthur's **Cataclysm** is a `2d6` weapon with `Steeline` (+1)
+*and* a `Superior` upgrade. It exports `2d10+13` — `2d6` → `2d8` by material, `2d8` → `2d10`
+by upgrade. Both ladders agree there, so the divergence stays latent, but the
+count-each-source-once path is live in the corpus rather than theoretical.
+
+The combined-source test is deliberately based at **`1d4`**, not `1d8`. From `1d8` an
+erroneous third step *clamps* at `1d12` and the assertion passes on a broken build — the
+case you would reach for first is the one the bug cannot reach.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 
