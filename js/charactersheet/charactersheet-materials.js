@@ -129,6 +129,18 @@ class CharacterSheetMaterials {
 	 * every material in the brew and fails on any type missing from this table, so the gap
 	 * is now a test failure rather than a bug report.
 	 *
+	 * A WARNING ABOUT THIS TABLE, EARNED THE EXPENSIVE WAY. `damageReduction` sat here
+	 * declared `consumer: "modifier"` while a character in Adamantine plate took full
+	 * damage, because nothing anywhere read the channel. The entry was not wrong — a named
+	 * modifier really was registered — it was just answering a different question than the
+	 * one a reader assumes. "A modifier exists" and "a modifier is consumed" are separate
+	 * claims, and only the first is checkable by reading this file.
+	 *
+	 * So an entry here is a DECLARATION OF INTENT, never evidence. The evidence lives in
+	 * the test's outcome sweep, which equips each material, strips only its own named
+	 * modifiers, and requires the sheet's reported numbers or offers to move. Write the
+	 * note; do not trust it.
+	 *
 	 * `consumer` values:
 	 * - `projection`  — `applyToItem` bakes it into the derived item.
 	 * - `modifier`    — reaches a derived stat (speed, initiative, named modifiers, resistances).
@@ -160,7 +172,7 @@ class CharacterSheetMaterials {
 		speedDelta: {consumer: "modifier", note: "getMaterialSpeedBonus() → getSpeed()/getSpeedByType()."},
 		saveAdvantage: {consumer: "modifier", note: "Conditional named modifier on saves."},
 		checkAdvantage: {consumer: "modifier", note: "Conditional named modifier on checks."},
-		damageReduction: {consumer: "modifier", note: "Named modifier of type damageReduction."},
+		damageReduction: {consumer: "modifier", note: "Named modifier of type damageReduction, consumed by getDamageReduction() inside applyDamageDefenses() — flat reduction applied after immunity and BEFORE resistance halving, per RAW."},
 		resistance: {consumer: "modifier", note: "Added to derived resistances."},
 		immunity: {consumer: "modifier", note: "Added to derived immunities."},
 		perceptionPenaltyToNotice: {consumer: "modifier", note: "Conditional Stealth modifier: a penalty to an observer's check equals a bonus to the wearer's contested roll."},

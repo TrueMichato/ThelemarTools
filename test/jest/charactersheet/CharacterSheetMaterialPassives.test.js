@@ -221,3 +221,165 @@ describe("Material damage reduction", () => {
 		expect(getDr(state).length).toBe(1);
 	});
 });
+
+/**
+ * The four tests above assert that the modifier is REGISTERED. Every one of them passed
+ * while `takeDamage(10)` took exactly 10 — `applyDamageDefenses` handled immunity,
+ * resistance and vulnerability and nothing else, and no code anywhere called
+ * `aggregateModifiers("damageReduction")`. Registration and consumption are separate
+ * claims and only the first had a test.
+ */
+describe("Material damage reduction is actually consumed", () => {
+	/**
+	 * Damage TAKEN, not HP remaining. Equipping armour recalculates max HP and clamps
+	 * `current` to it, so a fixture that pins an absolute HP value before equipping is
+	 * measuring the clamp as much as the reduction. The delta is the claim being made.
+	 */
+	const damageTaken = (state, amount, opts) => {
+		state._data.hp.current = state.getMaxHp();
+		const before = state.getCurrentHp();
+		state.takeDamage(amount, opts);
+		return before - state.getCurrentHp();
+	};
+
+	it("CONTROL — the harness moves a number at all, via resistance", () => {
+		// Without this control every assertion below could pass on a state whose HP simply
+		// never changes, and the suite would read as proof of a reduction that never ran.
+		const state = makeState();
+		state.addResistance("bludgeoning");
+		expect(damageTaken(state, 10, {damageType: "bludgeoning"})).toBe(5);
+	});
+
+	it("CONTROL — an undefended character takes the full amount", () => {
+		expect(damageTaken(makeState(), 10, {damageType: "bludgeoning"})).toBe(10);
+	});
+
+	it("Adamantine's 3 points come off the damage taken", () => {
+		const state = makeState();
+		equipWithMaterial(state, HEAVY_ARMOR, "Adamantine");
+		expect(damageTaken(state, 10, {damageType: "bludgeoning"})).toBe(7);
+	});
+
+	it("does not reduce a damage type it is not scoped to", () => {
+		const state = makeState();
+		equipWithMaterial(state, HEAVY_ARMOR, "Adamantine");
+		expect(damageTaken(state, 10, {damageType: "fire"})).toBe(10);
+	});
+
+	it("applies BEFORE resistance halves, per RAW — and the two orders differ", () => {
+		// PHB: "Resistance and then vulnerability are applied after all other modifiers to
+		// damage." The numbers are chosen so the orders are distinguishable:
+		//   correct: (9 − 3) = 6, halved = 3
+		//   wrong:   floor(9 / 2) = 4, − 3 = 1
+		// An assertion that could not tell them apart would be no test of the ordering.
+		const state = makeState();
+		equipWithMaterial(state, HEAVY_ARMOR, "Adamantine");
+		state.addResistance("bludgeoning");
+		const result = state.applyDamageDefenses(9, "bludgeoning");
+		expect(result.damage).toBe(3);
+		expect(result.damage).not.toBe(1);
+		expect(result).toMatchObject({raw: 9, reduction: 3, applied: "resistance"});
+	});
+
+	it("cannot take the damage below zero", () => {
+		const state = makeState();
+		equipWithMaterial(state, HEAVY_ARMOR, "Adamantine");
+		expect(state.applyDamageDefenses(2, "bludgeoning").damage).toBe(0);
+	});
+
+	it("immunity still wins outright, without consuming the reduction", () => {
+		const state = makeState();
+		equipWithMaterial(state, HEAVY_ARMOR, "Adamantine");
+		state.addImmunity("bludgeoning");
+		expect(state.applyDamageDefenses(10, "bludgeoning")).toMatchObject({damage: 0, applied: "immunity"});
+	});
+
+	it("surfaces its damage types so the sheet's damage prompt asks for one", () => {
+		// The prompt is built from resistances/immunities/vulnerabilities. A character whose
+		// ONLY defence is a reduction would never be asked for a damage type, `damageType`
+		// would arrive null, and this B/P/S-scoped reduction could not match — correct in the
+		// model and unreachable through the UI.
+		const state = makeState();
+		expect(state.getDamageReductionDamageTypes()).toEqual([]);
+		equipWithMaterial(state, HEAVY_ARMOR, "Adamantine");
+		expect(state.getDamageReductionDamageTypes().sort()).toEqual(["bludgeoning", "piercing", "slashing"]);
+	});
+
+	it("materials are unconditional, so nothing asks about magical damage", () => {
+		const state = makeState();
+		equipWithMaterial(state, HEAVY_ARMOR, "Adamantine");
+		expect(state.hasNonmagicalDamageReduction()).toBe(false);
+		expect(state.getDamageReduction("bludgeoning", {isMagicalDamage: true}).total).toBe(3);
+	});
+});
+
+/**
+ * The channel is not materials-specific, and proving that is the point of this block:
+ * Heavy Armor Master registers the identical modifier type through the feature-effect
+ * registry and was equally inert. A fix that only worked for materials would pass every
+ * test above and still leave the feat broken.
+ */
+describe("Damage reduction from the feature-effect registry (Heavy Armor Master)", () => {
+	const withFeat = (name, source) => {
+		const state = new CharacterSheetState();
+		state.addClass({name: "Fighter", source: "PHB", level: 5});
+		state._data.ac = {...(state._data.ac || {}), armor: {type: "heavy"}};
+		state._processFeatRegistryEffects({name, source, id: "feat-ham"});
+		return state;
+	};
+
+	const damageTaken = (state, amount, opts) => {
+		state._data.hp.current = state.getMaxHp();
+		const before = state.getCurrentHp();
+		state.takeDamage(amount, opts);
+		return before - state.getCurrentHp();
+	};
+
+	it("PHB: reduces nonmagical B/P/S by 3", () => {
+		expect(damageTaken(withFeat("Heavy Armor Master", "PHB"), 10, {damageType: "slashing"})).toBe(7);
+	});
+
+	it("PHB: keeps its damage-type scope instead of reducing everything", () => {
+		// The registry authors `damageTypes` and the bridge into `addNamedModifier` dropped
+		// it, so the reduction silently applied to fire, psychic and every other type.
+		expect(damageTaken(withFeat("Heavy Armor Master", "PHB"), 10, {damageType: "fire"})).toBe(10);
+	});
+
+	it("PHB: is suppressed when the damage is magical", () => {
+		expect(damageTaken(withFeat("Heavy Armor Master", "PHB"), 10, {damageType: "slashing", isMagicalDamage: true})).toBe(10);
+	});
+
+	it("XPHB: scales with proficiency bonus rather than a flat 3", () => {
+		const state = withFeat("Heavy Armor Master", "XPHB");
+		expect(state.getProficiencyBonus()).toBe(3);
+		expect(damageTaken(state, 10, {damageType: "slashing"})).toBe(7);
+	});
+
+	it("XPHB: is NOT suppressed by magical damage, because the 2024 feat dropped that limit", () => {
+		// Keying the suppression on "the modifier has a condition" rather than on the
+		// condition SAYING nonmagical would silently nerf this feat back to its 2014 text.
+		// XPHB Heavy Armor Master still carries a condition ("while wearing heavy armor").
+		const state = withFeat("Heavy Armor Master", "XPHB");
+		expect(damageTaken(state, 10, {damageType: "slashing", isMagicalDamage: true})).toBe(7);
+	});
+
+	it("requires the heavy armour its condition names", () => {
+		const state = withFeat("Heavy Armor Master", "PHB");
+		state._data.ac.armor = {type: "light"};
+		expect(damageTaken(state, 10, {damageType: "slashing"})).toBe(10);
+		expect(state.getDamageReduction("slashing").suppressed[0]).toMatchObject({reason: "heavy armour not worn"});
+	});
+
+	it("only PHB advertises the magical question", () => {
+		expect(withFeat("Heavy Armor Master", "PHB").hasNonmagicalDamageReduction()).toBe(true);
+		expect(withFeat("Heavy Armor Master", "XPHB").hasNonmagicalDamageReduction()).toBe(false);
+	});
+
+	it("stacks with a material reduction rather than one shadowing the other", () => {
+		const state = withFeat("Heavy Armor Master", "PHB");
+		state.setItemMaterialCatalog(CATALOG);
+		equipWithMaterial(state, HEAVY_ARMOR, "Adamantine");
+		state._data.ac.armor = {type: "heavy"};
+		expect(state.getDamageReduction("slashing").total).toBe(6);
+	});
+});

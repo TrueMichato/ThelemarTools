@@ -676,9 +676,12 @@ describe("takeDamage applies defenses (CS-BUG-100, generic)", () => {
 	it("applyDamageDefenses is the shared arithmetic", () => {
 		const state = makeShadowSorcery(20);
 		state.addResistance("cold");
-		expect(state.applyDamageDefenses(9, "cold")).toEqual({damage: 4, raw: 9, applied: "resistance"});
-		expect(state.applyDamageDefenses(9, "fire")).toEqual({damage: 9, raw: 9, applied: null});
-		expect(state.applyDamageDefenses(9, null)).toEqual({damage: 9, raw: 9, applied: null});
+		// `reduction` reports the flat damage-reduction step, which runs BEFORE the halving.
+		// It is 0 for this character; the assertions stay exact rather than switching to
+		// `objectContaining` so that a reduction leaking in from anywhere would fail here.
+		expect(state.applyDamageDefenses(9, "cold")).toEqual({damage: 4, raw: 9, reduction: 0, applied: "resistance"});
+		expect(state.applyDamageDefenses(9, "fire")).toEqual({damage: 9, raw: 9, reduction: 0, applied: null});
+		expect(state.applyDamageDefenses(9, null)).toEqual({damage: 9, raw: 9, reduction: 0, applied: null});
 	});
 
 	it("halved damage still arms the zero-HP intervention at the REDUCED amount", () => {

@@ -3593,7 +3593,13 @@ export class CharacterSheetPlayMode {
 				const current = this._state.getCurrentHp();
 				const newHp = Math.max(0, current - remaining);
 				this._state.setCurrentHp(newHp);
-				const suffix = effective !== val ? ` (${val} ${damageType} → ${effective} after ${effective < val ? "resistance" : "vulnerability"})` : "";
+				// `effective < val` used to be read as "resistance" unconditionally, which
+				// became wrong the moment flat damage reduction started applying: a reduced
+				// hit is also smaller than the raw amount. Name the steps that actually ran.
+				const steps = [];
+				if (defenses.reduction) steps.push(`−${defenses.reduction} reduction`);
+				if (defenses.applied) steps.push(defenses.applied);
+				const suffix = steps.length ? ` (${val} ${damageType} → ${effective} after ${steps.join(", then ")})` : "";
 				this._logActivity("damage", `Took ${effective} damage${suffix} → ${newHp} HP`);
 			} else {
 				this._logActivity("shield", `Temp HP absorbed ${effective} damage`);

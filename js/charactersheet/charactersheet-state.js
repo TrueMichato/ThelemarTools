@@ -10028,24 +10028,139 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Apply immunity / resistance / vulnerability to a damage amount.
+	 * Total flat damage reduction applying to one incoming damage instance.
 	 *
-	 * The one place the ×0 / ÷2 / ×2 arithmetic lives, so the model's damage entry point and
-	 * any UI preview cannot disagree about the number. RAW ordering: immunity wins outright,
-	 * then resistance halves (rounding down), then vulnerability doubles.
+	 * Flat DR is a first-class `namedModifiers` type that two independent subsystems already
+	 * author — Adamantine through materials, Heavy Armor Master through the feature-effect
+	 * registry — and that, until now, **nothing read**.
+	 * `aggregateModifiers("damageReduction")` returned the correct number and no caller
+	 * existed, so `takeDamage(10)` took exactly 10 with 3 points of DR on the sheet. This is
+	 * the missing consumer.
+	 *
+	 * Type scoping: a modifier carrying `damageTypes` applies only to those types. Damage
+	 * with no stated type cannot be matched against a scoped reduction, so scoped entries are
+	 * skipped rather than guessed at; unscoped entries still apply.
+	 *
+	 * Conditions: `conditional` is free text. Two clauses are machine-checkable and are
+	 * checked; anything else applies, because silently withholding a defence the player has
+	 * written down is the worse failure.
+	 *
+	 * - `"nonmagical"` — suppressed when the caller states the damage is magical. This keys on
+	 *   the clause, **not** on "the modifier has a condition", because XPHB Heavy Armor Master
+	 *   deliberately drops the nonmagical limit while keeping a condition
+	 *   (`"while wearing heavy armor"`). Gating on mere presence would silently nerf the 2024
+	 *   feat to its 2014 text.
+	 * - `"heavy armor"` — requires heavy armour actually equipped, which the sheet can verify
+	 *   for itself and therefore should.
+	 *
+	 * @param {string|null} damageType lowercase damage type, or null when not stated
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.isMagicalDamage=false] The incoming damage is magical.
+	 * @returns {{total: number, sources: Array<{name: string, value: number}>, suppressed: Array<{name: string, reason: string}>}}
+	 */
+	getDamageReduction (damageType, {isMagicalDamage = false} = {}) {
+		const type = damageType ? String(damageType).toLowerCase() : null;
+		const sources = [];
+		const suppressed = [];
+
+		for (const mod of this._data.namedModifiers || []) {
+			if (mod.type !== "damageReduction" || mod.enabled === false) continue;
+
+			if (mod.damageTypes?.length) {
+				if (!type) continue;
+				if (!mod.damageTypes.some(t => String(t).toLowerCase() === type)) continue;
+			}
+
+			const cond = String(mod.conditional || "").toLowerCase();
+			if (isMagicalDamage && cond.includes("nonmagical")) {
+				suppressed.push({name: mod.name, reason: "damage is magical"});
+				continue;
+			}
+			if ((cond.includes("heavy armor") || cond.includes("heavy armour")) && this._data.ac?.armor?.type !== "heavy") {
+				suppressed.push({name: mod.name, reason: "heavy armour not worn"});
+				continue;
+			}
+
+			let value = Number(mod.value) || 0;
+			if (mod.proficiencyBonus) value += this.getProficiencyBonus();
+			if (value <= 0) continue;
+			sources.push({name: mod.name, value});
+		}
+
+		return {total: sources.reduce((sum, src) => sum + src.value, 0), sources, suppressed};
+	}
+
+	/**
+	 * Every damage type some enabled damage reduction is scoped to.
+	 *
+	 * The sheet's damage prompt only asks for a damage type when the character has a defence
+	 * that could change the number, and that list was built from resistances / immunities /
+	 * vulnerabilities alone. A character whose only defence is Adamantine or Heavy Armor
+	 * Master was therefore never asked, `damageType` arrived as `null`, and the B/P/S-scoped
+	 * reduction could not match — the defence was unreachable through the UI even once the
+	 * model consumed it correctly.
+	 *
+	 * @returns {string[]} lowercase damage types, deduplicated
+	 */
+	getDamageReductionDamageTypes () {
+		const out = new Set();
+		for (const mod of this._data.namedModifiers || []) {
+			if (mod.type !== "damageReduction" || mod.enabled === false) continue;
+			for (const type of mod.damageTypes || []) out.add(String(type).toLowerCase());
+		}
+		return [...out];
+	}
+
+	/**
+	 * Whether any enabled damage reduction is limited to nonmagical damage.
+	 *
+	 * Drives whether the damage prompt bothers asking if the incoming damage is magical. PHB
+	 * Heavy Armor Master carries the limit; XPHB Heavy Armor Master and every material
+	 * reduction do not, so the overwhelmingly common case is not to ask at all.
+	 *
+	 * @returns {boolean}
+	 */
+	hasNonmagicalDamageReduction () {
+		return (this._data.namedModifiers || []).some(mod =>
+			mod.type === "damageReduction"
+			&& mod.enabled !== false
+			&& String(mod.conditional || "").toLowerCase().includes("nonmagical"));
+	}
+
+	/**
+	 * Apply flat damage reduction and immunity / resistance / vulnerability to a damage amount.
+	 *
+	 * The one place the ×0 / −N / ÷2 / ×2 arithmetic lives, so the model's damage entry point
+	 * and any UI preview cannot disagree about the number.
+	 *
+	 * RAW ordering, and it is the counter-intuitive direction: **flat reduction comes before
+	 * the resistance halving, not after.** PHB: *"Resistance and then vulnerability are applied
+	 * after all other modifiers to damage"*, with a worked example of exactly this case — 25
+	 * damage against resistance plus an aura reducing damage by 5 is reduced to 20 and *then*
+	 * halved to 10, not halved to 12 and then reduced to 7. The two orders give different
+	 * numbers, which is what makes the ordering testable rather than a matter of taste.
 	 *
 	 * @param {number} damage
 	 * @param {string|null} damageType lowercase damage type
-	 * @returns {{damage: number, raw: number, applied: "immunity"|"resistance"|"vulnerability"|null}}
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.isMagicalDamage=false] Suppresses DR that is limited to nonmagical damage.
+	 * @returns {{damage: number, raw: number, reduction: number, applied: "immunity"|"resistance"|"vulnerability"|null}}
 	 */
-	applyDamageDefenses (damage, damageType) {
+	applyDamageDefenses (damage, damageType, {isMagicalDamage = false} = {}) {
 		const raw = Math.max(0, Math.floor(Number(damage) || 0));
 		const type = damageType ? String(damageType).toLowerCase() : null;
-		if (!type) return {damage: raw, raw, applied: null};
-		if (this.hasImmunity(type)) return {damage: 0, raw, applied: "immunity"};
-		if (this.hasResistance(type)) return {damage: Math.floor(raw / 2), raw, applied: "resistance"};
-		if (this.hasVulnerability(type)) return {damage: raw * 2, raw, applied: "vulnerability"};
-		return {damage: raw, raw, applied: null};
+		if (type && this.hasImmunity(type)) return {damage: 0, raw, reduction: 0, applied: "immunity"};
+
+		// Deliberately computed even when `type` is null: an unscoped reduction ("reduce all
+		// damage by 3") is not conditional on the attacker having named a damage type. The
+		// previous early return on `!type` sat above this point, so placing DR after it would
+		// have made every untyped hit bypass the reduction entirely.
+		const reduction = this.getDamageReduction(type, {isMagicalDamage}).total;
+		const reduced = Math.max(0, raw - reduction);
+
+		if (type && this.hasResistance(type)) return {damage: Math.floor(reduced / 2), raw, reduction, applied: "resistance"};
+		if (type && this.hasVulnerability(type)) return {damage: reduced * 2, raw, reduction, applied: "vulnerability"};
+		return {damage: reduced, raw, reduction, applied: null};
 	}
 
 	/**
@@ -10062,9 +10177,11 @@ class CharacterSheetState {
 	 * @param {boolean} [opts.skipDefenses=false] The caller has ALREADY halved/doubled/zeroed
 	 *        the amount for defenses (Play Mode's damage modal does its own arithmetic so it
 	 *        can show a preview). Prevents double-application.
+	 * @param {boolean} [opts.isMagicalDamage=false] The damage is magical, which suppresses
+	 *        flat damage reduction limited to nonmagical sources (PHB Heavy Armor Master).
 	 * @returns {boolean} True if damage was taken
 	 */
-	takeDamage (damage, {unpreventable = false, damageType = null, isCritical = false, skipDefenses = false} = {}) {
+	takeDamage (damage, {unpreventable = false, damageType = null, isCritical = false, skipDefenses = false, isMagicalDamage = false} = {}) {
 		if (damage <= 0) return false;
 
 		// CS-BUG-100: `damageType` was accepted and then used ONLY to gate zero-HP
@@ -10072,8 +10189,13 @@ class CharacterSheetState {
 		// (Umbral Form's "Resistance to all damage except Force and Radiant", Draconic
 		// Resilience, racial resistances, Rage) was therefore invisible to the model's own
 		// damage entry point: `getResistances()` listed them and no damage was ever reduced.
-		const defenses = !unpreventable && !skipDefenses && damageType
-			? this.applyDamageDefenses(damage, damageType)
+		//
+		// The `&& damageType` term this condition used to carry has been dropped: it was
+		// correct while the only defences were type-keyed, but flat damage reduction is not.
+		// "Reduce all damage by 3" does not stop applying because the attacker declined to
+		// name a damage type, and with the term in place every untyped hit bypassed it.
+		const defenses = !unpreventable && !skipDefenses
+			? this.applyDamageDefenses(damage, damageType, {isMagicalDamage})
 			: {damage, applied: null};
 		damage = defenses.damage;
 		if (damage <= 0 && defenses.applied === "immunity") {
@@ -45027,12 +45149,17 @@ class CharacterSheetState {
 
 				// ---- Damage reduction (e.g., Heavy Armor Master: -3 BPS) ----
 				case "damageReduction": {
-					const drValue = effect.value === "proficiency" ? 0 : effect.value;
 					this.addNamedModifier({
 						name: `${featData.name} (DR)`,
 						type: "damageReduction",
-						value: drValue,
-						proficiencyBonus: effect.value === "proficiency",
+						// `addNamedModifier` performs the "proficiency" → `proficiencyBonus`
+						// conversion itself, so hand it the authored value rather than
+						// pre-flattening it to 0 and losing which feat scales.
+						value: effect.value,
+						// XPHB Heavy Armor Master scopes to B/P/S exactly as the 2014 feat
+						// does; without forwarding this the reduction applied to every
+						// damage type in the game.
+						damageTypes: effect.damageTypes,
 						sourceFeatureId: featData.id,
 						sourceType: "feat",
 						conditional: effect.condition,
@@ -52236,6 +52363,10 @@ class CharacterSheetState {
 		if (modifier.sourceType) newModifier.sourceType = modifier.sourceType;
 		if (modifier.duration) newModifier.duration = modifier.duration;
 		if (modifier.conditional) newModifier.conditional = modifier.conditional;
+		// Damage-type scoping for `damageReduction`. Dropping this silently widens a
+		// reduction: Heavy Armor Master authors `["bludgeoning", "piercing", "slashing"]`
+		// and, without this line, reduced fire and psychic damage too.
+		if (modifier.damageTypes?.length) newModifier.damageTypes = [...modifier.damageTypes];
 
 		// Numeric modifier adjustments
 		if (modifier.perLevel) newModifier.perLevel = true;

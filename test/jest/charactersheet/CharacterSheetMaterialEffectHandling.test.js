@@ -9,12 +9,16 @@
  * `EFFECT_HANDLING` is the declaration; this is its enforcement.
  */
 
+import "./setup.js";
 import "../../../js/charactersheet/charactersheet-materials.js";
+import "../../../js/charactersheet/charactersheet-state.js";
+import {jest} from "@jest/globals";
 import {readFileSync, readdirSync} from "fs";
 import {dirname, resolve} from "path";
 import {fileURLToPath} from "url";
 
 const CharacterSheetMaterials = globalThis.CharacterSheetMaterials;
+const CharacterSheetState = globalThis.CharacterSheetState;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../../..");
@@ -204,5 +208,150 @@ describe("Picker legend agrees with the mechanic it explains", () => {
 			expect(term.trim()).not.toBe("");
 			expect(def.trim().length).toBeGreaterThan(10);
 		}
+	});
+});
+
+/**
+ * The registry's own defect, measured instead of declared.
+ *
+ * `EFFECT_HANDLING` recorded `damageReduction: {consumer: "modifier"}` for months while
+ * absolutely nothing read the channel — a character in Adamantine plate took full damage.
+ * The declaration was TRUE (a named modifier really was registered) and useless, because
+ * "a modifier exists" and "a modifier is consumed" are different claims and the registry
+ * only ever made the first.
+ *
+ * The guard above ("mentioned outside the authoring file") passed throughout, because
+ * `damageReduction` appeared twice more — at the feature-effect bridge and in the modifier
+ * constructor. Both are WRITES. A write is not a consumer, and grepping for a bare string
+ * cannot tell the two apart.
+ *
+ * My first replacement spied on `getModifiersForType`, on the assumption it was the choke
+ * point every read passes through. Measured: driving the whole derived-output surface with
+ * three named modifiers present records **zero** calls to it, and zero to
+ * `aggregateModifiers`. Subsystems read `_data.namedModifiers` directly. There is no choke
+ * point, so any guard built on watching one is watching nothing.
+ *
+ * So this measures the OUTCOME instead, which needs no choke point to exist:
+ *
+ *   1. Equip a material and snapshot the sheet's derived-output surface.
+ *   2. Strip that material's own named modifiers and snapshot again.
+ *   3. A `modifier`-consumer channel that leaves the snapshot untouched is not consumed.
+ *
+ * Stripping only the material's modifiers — rather than comparing "material" against "no
+ * material" — isolates the modifier channel from the projection channel, so a material
+ * that changes AC through `applyToItem` cannot mask a dead modifier.
+ */
+describe("A material's modifiers change what the sheet reports", () => {
+	const brew = loadBrewMaterials();
+
+	const ITEMS = [
+		{name: "Plate", source: "PHB", type: "HA", ac: 18, weight: 65, value: 150000},
+		{name: "Longsword", source: "PHB", type: "M", weapon: true, dmg1: "1d8", dmgType: "S", weight: 3, value: 1500},
+		{name: "Shield", source: "PHB", type: "S", ac: 2, weight: 6, value: 1000},
+	];
+
+	const DAMAGE_TYPES = ["bludgeoning", "piercing", "slashing", "fire", "cold", "necrotic", "radiant"];
+	const SKILLS = ["stealth", "perception", "athletics", "arcana", "acrobatics"];
+	/**
+	 * The channels a conditional modifier can be offered on. `aggregateModifiers` matches
+	 * by exact type, so querying "fire" never surfaces a conditional registered on "save".
+	 */
+	const CONDITIONAL_CHANNELS = ["save", "check", "attack", "damage", "damageReduction", "d20:all"]
+		.concat(SKILLS.map(s => `skill:${s}`));
+
+	function build (material) {
+		const state = new CharacterSheetState();
+		state.addClass({name: "Fighter", source: "PHB", level: 5});
+		state.setItemMaterialCatalog(brew);
+		for (const item of ITEMS) {
+			state.addItem({quantity: 1, equipped: true, ...item});
+			const id = state.getItems().slice(-1)[0].id;
+			try { state.setItemMaterial(id, material); } catch { continue; }
+			const raw = state._data.inventory.find(it => it.id === id);
+			if (raw) raw.equipped = true;
+		}
+		state._recalculateEquipmentModifiers();
+		return state;
+	}
+
+	/**
+	 * Everything the sheet says about itself that a modifier could plausibly move. A
+	 * channel invisible to all of it is invisible to the player.
+	 */
+	function snapshot (state) {
+		return JSON.stringify({
+			speed: state.getSpeed(),
+			init: state.getInitiative(),
+			ac: state.getAc(),
+			saves: ["str", "dex", "con", "int", "wis", "cha"].map(a => state.getSaveModifier(a)),
+			saveAdv: ["str", "dex", "con", "int", "wis", "cha"].map(a => state.getSaveAdvantageState?.(a) ?? null),
+			skills: SKILLS.map(s => state.getSkillModifier(s)),
+			skillAdv: SKILLS.map(s => state.getSkillAdvantageState?.(s) ?? null),
+			damage: DAMAGE_TYPES.map(t => state.applyDamageDefenses(10, t).damage),
+			// Conditionals gate off by default, so a conditional modifier moves none of the
+			// numbers above — by design. It is still consumed: it is OFFERED at roll time,
+			// and the offer is the outcome. Queried by the channel's own name, because a
+			// conditional on "save" is invisible to a query for "fire".
+			conditionalOffers: CONDITIONAL_CHANNELS.map(k => {
+				try { return state.aggregateModifiers(k).conditionalsAvailable?.length ?? 0; } catch { return 0; }
+			}),
+		});
+	}
+
+	/** Materials that emit at least one named modifier, with the types they emit. */
+	const emitters = brew
+		.map(material => {
+			const state = build(material);
+			const own = (state._data.namedModifiers || []).filter(m => m.sourceType === "itemMaterial");
+			return own.length ? {material, state, types: [...new Set(own.map(m => m.type))]} : null;
+		})
+		.filter(Boolean);
+
+	it("finds materials that emit modifiers, so the sweep below is not vacuous", () => {
+		expect(emitters.length).toBeGreaterThan(0);
+		expect([...new Set(emitters.flatMap(e => e.types))].length).toBeGreaterThan(1);
+	});
+
+	it("moves some reported number or state for every material modifier emitted", () => {
+		const dead = [];
+		for (const {material, state, types} of emitters) {
+			const withMods = snapshot(state);
+			state._data.namedModifiers = state._data.namedModifiers.filter(m => m.sourceType !== "itemMaterial");
+			const withoutMods = snapshot(state);
+			if (withMods === withoutMods) dead.push(`  ${material.name} — emits ${types.map(t => `"${t}"`).join(", ")}, but the sheet reports the same thing with and without it`);
+		}
+
+		expect(dead.length ? `Material modifiers that change nothing the sheet reports:\n${dead.join("\n")}` : "").toBe("");
+	});
+
+	/**
+	 * The control the sweep needs to be worth anything. If `snapshot` were sensitive to
+	 * something incidental — an id, a timestamp, array identity — every material would
+	 * "pass" for reasons unrelated to being consumed, and the sweep would be vacuous in
+	 * the direction that looks like success.
+	 */
+	it("reports identically when nothing is stripped, so the sweep cannot pass by noise", () => {
+		const {state} = emitters[0];
+		expect(snapshot(state)).toBe(snapshot(state));
+	});
+
+	/**
+	 * The sweep is only as strong as its ability to fail. Inject a modifier of a type
+	 * nothing consumes and confirm the same comparison catches it — otherwise a green
+	 * sweep proves the harness is blind, not that the channels are live.
+	 */
+	it("catches a channel that genuinely nothing consumes", () => {
+		const state = build(emitters[0].material);
+		state._data.namedModifiers = [{
+			id: "probe",
+			name: "Probe",
+			type: "a-channel-nothing-consumes",
+			value: 99,
+			sourceType: "itemMaterial",
+			enabled: true,
+		}];
+		const withMods = snapshot(state);
+		state._data.namedModifiers = [];
+		expect(snapshot(state)).toBe(withMods);
 	});
 });

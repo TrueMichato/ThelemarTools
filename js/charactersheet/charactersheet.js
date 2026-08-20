@@ -12469,6 +12469,11 @@ class CharacterSheetPage {
 			// the prompt never appeared for a character with no defenses, so Rimeglass's
 			// authored fire degradation and Magmaheart's cold backlash could never fire.
 			...(this._state.getMaterialReactiveDamageTypes?.() || []),
+			// Flat damage reduction is type-scoped too (Adamantine and both Heavy Armor
+			// Masters are B/P/S). Omitting it meant a character whose only defence was a
+			// reduction never saw this prompt, so `damageType` stayed null and the scoped
+			// reduction could never match — correct in the model, unreachable through the UI.
+			...(this._state.getDamageReductionDamageTypes?.() || []),
 		];
 		if (defended.length) {
 			const NONE = "Untyped / no defense";
@@ -12482,18 +12487,38 @@ class CharacterSheetPage {
 			if (picked && picked !== NONE) damageType = String(picked).toLowerCase();
 		}
 
-		const preview = this._state.applyDamageDefenses(amount, damageType);
+		// Only PHB Heavy Armor Master-style reductions care whether the damage was magical, so
+		// the question is asked only when the character actually has one. XPHB Heavy Armor
+		// Master deliberately dropped the limit and every material reduction is unconditional,
+		// which means the common case adds no extra prompt at all.
+		let isMagicalDamage = false;
+		if (this._state.hasNonmagicalDamageReduction?.()) {
+			isMagicalDamage = await InputUiUtil.pGetUserBoolean({
+				title: "Magical Damage?",
+				htmlDescription: `<div>Your damage reduction only applies to nonmagical damage. Was this attack magical?</div>`,
+				textYes: "Magical",
+				textNo: "Nonmagical",
+			}) === true;
+		}
+
+		const preview = this._state.applyDamageDefenses(amount, damageType, {isMagicalDamage});
 
 		// CS-BUG-081: route through the model. This method used to hand-roll the temp-HP and
 		// current-HP arithmetic, which meant Death Ward — and every other drop-to-0
 		// intervention — could never fire from the sheet's own Damage button.
-		this._state.takeDamage(amount, {damageType});
+		this._state.takeDamage(amount, {damageType, isMagicalDamage});
 
 		this._saveCurrentCharacter();
 		this._renderHp();
 		this._renderConditions(); // Update bloodied condition display
 
-		const suffix = preview.applied ? ` (${amount} ${damageType} → ${preview.damage} after ${preview.applied})` : "";
+		// Reduction and multiplier are reported as separate steps because they ARE separate
+		// steps applied in a fixed order; collapsing them into a single "after resistance"
+		// clause hides which one produced the number the player is looking at.
+		const steps = [];
+		if (preview.reduction) steps.push(`−${preview.reduction} reduction`);
+		if (preview.applied) steps.push(preview.applied);
+		const suffix = steps.length ? ` (${amount}${damageType ? ` ${damageType}` : ""} → ${preview.damage} after ${steps.join(", then ")})` : "";
 		this._showDiceResult("Damage", preview.damage, `Took ${preview.damage} damage${suffix}`);
 
 		// Offer any drop-to-0 intervention the character has (Strength of the Grave, …).
