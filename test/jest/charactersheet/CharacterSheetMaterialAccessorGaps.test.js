@@ -22,9 +22,15 @@
  */
 
 import "./setup.js";
+import {readFileSync} from "fs";
+import {dirname, resolve} from "path";
+import {fileURLToPath} from "url";
 import "../../../js/charactersheet/charactersheet-materials.js";
 import "../../../js/charactersheet/charactersheet-upgrades.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(__dirname, "../../..");
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetMaterials = globalThis.CharacterSheetMaterials;
@@ -301,5 +307,162 @@ describe("the headless armour-category fallback agrees with the state module", (
 		} finally {
 			globalThis.CharacterSheetState = saved;
 		}
+	});
+});
+
+/**
+ * The same "two independent sources, combined exactly once" shape as the crit tests above, for
+ * damage dice — pinned because the NPC-export session reasoned about it from the outside and
+ * reached a true conclusion from a false premise.
+ *
+ * They believed the die path was safe *because no material steps a damage die*. Thirteen of the
+ * brew's seventy-two do (Steel +1, Darkeline +2, Paradox Metal +2, the dragon materials…), so
+ * that premise is simply false. What actually makes it safe is a separation of channels:
+ *
+ * - a MATERIAL's step is baked into the projected `dmg1` by `applyToItem`
+ * - an UPGRADE's step is published as `getEffectiveItemBonuses().damageDieIncrease`
+ *
+ * `damageDieIncrease` is fed only by `getUpgradeEffects`, so it stays 0 for a material-only
+ * weapon and a reader that steps the projected die by it counts each source once. Route a
+ * material's step into the accessor and every such weapon silently gains a die — which is why
+ * the zero is asserted directly rather than inferred from the final die.
+ */
+describe("a material's die step and an upgrade's die step each land exactly once", () => {
+	const DARKELINE = {
+		name: "Darkeline",
+		source: "TGTT",
+		materialCategory: "metal",
+		damage: 2,
+		appliesTo: ["weapon"],
+		effects: [],
+	};
+	const STEEL = {
+		name: "Steel",
+		source: "TGTT",
+		materialCategory: "metal",
+		damage: 1,
+		appliesTo: ["weapon"],
+		effects: [],
+	};
+	const HEART_STONE = {
+		name: "Heart Stone",
+		source: "TGTT",
+		materialCategory: "stone",
+		damage: -2,
+		appliesTo: ["weapon"],
+		effects: [],
+	};
+	const DIE_CATALOG = [...CATALOG, STEEL, DARKELINE, HEART_STONE];
+
+	// A d4 base leaves headroom on BOTH ladders. Starting at 1d8 puts the two-step case on 1d12,
+	// which is the upgrade stepper's ceiling -- so a third, erroneous step would be clamped away
+	// and the assertion would pass on a broken build.
+	const DAGGER = {name: "Dagger", type: "M", weapon: true, dmg1: "1d4", dmgType: "P"};
+
+	function armed (materialName, appliedUpgrades, base = KATANA) {
+		const state = new CharacterSheetState();
+		state.addClass({name: "Fighter", source: "PHB", level: 5});
+		state.setItemMaterialCatalog(DIE_CATALOG);
+		state.addItem({quantity: 1, ...base});
+		const id = state.getItems().slice(-1)[0].id;
+		if (materialName) state.setItemMaterial(id, DIE_CATALOG.find(m => m.name === materialName));
+		const raw = state._data.inventory.find(it => it.id === id);
+		if (appliedUpgrades) {
+			raw.appliedUpgrades = appliedUpgrades;
+			if (raw.item) raw.item.appliedUpgrades = appliedUpgrades;
+		}
+		raw.equipped = true;
+		state._recalculateEquipmentModifiers();
+		return {state, id};
+	}
+
+	it("steps the die once for a material, through the projection", () => {
+		const {state, id} = armed("Steel");
+
+		expect(state.getItems().find(it => it.id === id).dmg1).toBe("1d10");
+		expect(state.getEffectiveWeaponDamage(id).dice).toBe("1d10");
+	});
+
+	it("keeps a material's step OUT of damageDieIncrease, which is the upgrade channel", () => {
+		const dieIncreaseFor = name => {
+			const {state, id} = armed(name);
+			return state.getEffectiveItemBonuses(id).damageDieIncrease || 0;
+		};
+
+		expect(dieIncreaseFor("Steel")).toBe(0);
+		expect(dieIncreaseFor("Darkeline")).toBe(0);
+		expect(dieIncreaseFor("Heart Stone")).toBe(0);
+	});
+
+	it("steps the die once for an upgrade, leaving the projection alone", () => {
+		const {state, id} = armed(null, [{name: "superior"}]);
+
+		expect(state.getItems().find(it => it.id === id).dmg1).toBe("1d8");
+		expect(state.getEffectiveItemBonuses(id).damageDieIncrease).toBe(1);
+		expect(state.getEffectiveWeaponDamage(id).dice).toBe("1d10");
+	});
+
+	it("combines the two sources into exactly two steps, never three", () => {
+		const {state, id} = armed("Steel", [{name: "superior"}], DAGGER);
+
+		// 1d4 --material--> 1d6 --upgrade--> 1d8. A third step (1d10) would mean one source was
+		// counted twice; 1d6 would mean one was dropped. Both directions are visible here only
+		// because the run ends short of either ladder's ceiling.
+		expect(state.getItems().find(it => it.id === id).dmg1).toBe("1d6");
+		expect(state.getEffectiveWeaponDamage(id).dice).toBe("1d8");
+	});
+
+	it("steps a negative material's die down, without the accessor undoing it", () => {
+		const {state, id} = armed("Heart Stone");
+
+		const projected = state.getItems().find(it => it.id === id).dmg1;
+		expect(state.getEffectiveWeaponDamage(id).dice).toBe(projected);
+	});
+});
+
+/**
+ * The material ladder and the upgrade ladder DISAGREE, and this pins the disagreement so it is a
+ * declared property rather than a discovery someone makes from a bug report.
+ *
+ * `CharacterSheetMaterials.stepDamageDie` walks the authored eleven-step Thelemar ladder, which
+ * continues past 1d12 into 2d6. `CharacterSheetUpgrades.increaseDamageDie` walks `[4,6,8,10,12]`
+ * and clamps. They agree on every die a base weapon actually has -- and diverge at exactly one
+ * point, 1d12, which materials can now REACH (Darkeline and Paradox Metal are +2, so any d8
+ * weapon lands there).
+ *
+ * The user-visible consequence: a Superior upgrade on a 1d12 weapon costs resources, prints
+ * "Damage die +1 step", and changes nothing. That predates materials -- a Superior greataxe was
+ * always inert -- but materials make it common rather than a corner.
+ *
+ * This is deliberately NOT fixed here. The cap is pinned by `CharacterSheetUpgrades.test.js`, the
+ * NPC exporter depends on `increaseDamageDie` returning the die term alone (it pre-extracts
+ * because of it), and the two ladders come from different books -- so whether TCAH's step should
+ * inherit Thelemar's ladder is a rules decision, not a refactor. If it is ever taken, this test
+ * fails and points at everything that has to move together.
+ */
+describe("the material ladder and the upgrade ladder diverge at 1d12", () => {
+	const agreeing = ["1d4", "1d6", "1d8", "1d10", "2d6", "2d8"];
+
+	it.each(agreeing)("steps %s identically on both ladders", (die) => {
+		expect(CharacterSheetUpgrades.increaseDamageDie(die, 1))
+			.toBe(CharacterSheetMaterials.stepDamageDie(die, 1));
+	});
+
+	it("diverges at 1d12: the material ladder continues, the upgrade ladder clamps", () => {
+		expect(CharacterSheetMaterials.stepDamageDie("1d12", 1)).toBe("2d6");
+		expect(CharacterSheetUpgrades.increaseDamageDie("1d12", 1)).toBe("1d12");
+	});
+
+	it("is reachable, because the shipped brew really does author +2 materials", () => {
+		// Read from the brew rather than a hard-coded list. A guard that asserts a die ladder
+		// against names it supplies itself proves only that the test file is self-consistent --
+		// which is precisely the vacuity this whole describe exists to avoid.
+		const raw = readFileSync(resolve(REPO_ROOT, "homebrew/TravelersGuidetoThelemar.json"), "utf8");
+		const materials = JSON.parse(raw).itemMaterial || [];
+		const plusTwo = materials.filter(m => Number(m.damage) === 2).map(m => m.name);
+
+		expect(plusTwo.length).toBeGreaterThan(0);
+		// A d8 weapon plus any of them lands exactly on the one die the two ladders disagree about.
+		expect(CharacterSheetMaterials.stepDamageDie("1d8", 2)).toBe("1d12");
 	});
 });

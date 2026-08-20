@@ -713,6 +713,46 @@ normalised onto the ladder.
 `CharacterSheetUpgrades.increaseDamageDie` is deliberately **left unchanged** (it caps at
 `1d12`) so the `Superior` upgrade behaves exactly as before.
 
+### The two ladders diverge at 1d12, and materials made that reachable
+
+The upgrade ladder is `[4, 6, 8, 10, 12]` with a `Math.min` clamp. It agrees with the material
+ladder on every die a base weapon actually has, and disagrees at exactly one point: from `1d12`
+a material steps to `2d6`, while an upgrade stays at `1d12`.
+
+That matters now because **materials can reach `1d12` from a common weapon** — `Darkeline` and
+`Paradox Metal` are `+2`, so any d8 weapon lands there. The consequence is that a `Superior`
+upgrade on such a weapon costs resources, still prints *"Damage die +1 step"*, and changes
+nothing. It predates materials (a `Superior` greataxe was always inert) but materials turn a
+corner case into a common one.
+
+This is **not** treated as a bug to fix in passing, because unifying the ladders is a rules
+decision with three dependents that must move together: the cap is pinned by
+`CharacterSheetUpgrades.test.js`, the NPC exporter relies on `increaseDamageDie` returning the
+die term *alone* (it pre-extracts flat modifiers because of it, so `2d6+15` → `2d8`), and the
+two ladders come from different books. The divergence is instead **pinned as declared
+behaviour** in `CharacterSheetMaterialAccessorGaps.test.js`, so that whoever changes it is shown
+everything it touches.
+
+### Material steps and upgrade steps travel in separate channels
+
+A weapon can be stepped by both a material and an upgrade, and each must land exactly once. They
+stay separate structurally rather than by arithmetic care:
+
+| Source | Where the step lives | Read by |
+|---|---|---|
+| Material | baked into the projected `dmg1` by `applyToItem` | anything reading `getItems()` |
+| Upgrade | published as `getEffectiveItemBonuses().damageDieIncrease` | consumers that step the projected die |
+
+`damageDieIncrease` starts at `0` and accumulates **only** from `getUpgradeEffects`, so it is
+always `0` for a material-only weapon. The separation is reinforced by the fact that
+`getEffectiveItemBonuses` receives the **raw** inventory entry, which carries no resolved
+material entity at all — the accessor structurally *cannot* see a material's `damage` axis.
+
+So a consumer that reads the projected die **and** adds `damageDieIncrease` counts each source
+once, and this is why no double-application occurs. Note the reason carefully: it is **not**
+that materials avoid stepping dice. Thirteen of them do. Any guard written on the premise that
+none exist is vacuous and will never fire.
+
 ## Derived numbers
 
 | Quantity | Rule |
