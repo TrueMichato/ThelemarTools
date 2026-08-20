@@ -242,9 +242,11 @@ expect(state.getAbilityMod("str")).toBe(4);    // (18-10)/2
 | Testing feature presence with string matching | Brittle, doesn't test mechanics | Assert on computed values |
 | Huge test bodies with no beforeEach | Hard to read, brittle | Extract setup to beforeEach |
 | Not importing dependencies | ReferenceError in CI | Import all needed modules |
-| Mutating state without isolation | Tests leak between each other | Use `beforeEach` for fresh state || Reading `_data.abilities.str` directly | Gets base only, not total | Use `getAbilityScore()` (base+bonus) |
+| Mutating state without isolation | Tests leak between each other | Use `beforeEach` for fresh state |
+| Reading `_data.abilities.str` directly | Gets base only, not total | Use `getAbilityScore()` (base+bonus) |
 | Not matching source in spell assertions | Blade Ward behaves differently by edition | Always check name AND source |
 | `SomeClass._method = () => []` with no restore | Permanent static clobber -- every test declared *after* it silently runs against the stub | Capture the original, restore in `afterEach`, and add a tripwire (below) |
+| `state._data.namedModifiers.push({...})` | Bypasses `_recalculateCustomModifiers()`, so the modifier is inert and the probe reads flat | Use `addNamedModifier()`, or call `_recalculateCustomModifiers()` after the push (below) |
 
 ### Replacing a static is a false-green generator
 
@@ -282,6 +284,35 @@ afterEach(() => {
 
 Prefer `jest.spyOn(Cls, "_method").mockReturnValue([])` with `restoreAllMocks`, which gets
 this right by construction. The manual form above is for statics a spy cannot reach.
+
+### A raw `namedModifiers` push is inert, and reads as a channel that does not exist
+
+`_data.namedModifiers` is not the input the getters read -- it is folded into
+`_data.customModifiers` by `_recalculateCustomModifiers()`, and the getters read the fold.
+`addNamedModifier()` triggers the recalc; a bare `.push()` does not. So the modifier sits
+in the array, contributes nothing, and the probe reads flat with no error.
+
+Measured on `skill:perception` with `value: 5`, one variable (the delivery mechanism):
+
+| injection | `getSkillMod("perception")` |
+|---|---|
+| `_data.namedModifiers.push(...)` | `2 -> 2` |
+| `.push(...)` then `_recalculateCustomModifiers()` | `2 -> 7` |
+| `addNamedModifier(...)` | `2 -> 7` |
+
+The trap is not the flat run -- it is what a flat run tempts you to conclude. A raw push
+was read once as evidence that `namedModifiers` typed `skill:<name>` is "inert for numeric
+purposes" and that `customModifiers.skills` is a separate, value-bearing channel. They are
+**the same channel**: `namedModifiers` -> recalc -> `customModifiers.skills` ->
+`getSkillCustomMod()` -> `getSkillMod()` (`charactersheet-state.js:52650`, and the getter
+says so at `:11318`). `customModifiers` is the cache, not a rival input. There are ~90
+`skill:<name>` registrations in `js/`; every one of them works.
+
+**A control that fails to move invalidates the measurement. It does not explain itself.**
+Reaching for the mechanism that would justify a flat control is how a dead probe becomes a
+false fact about the codebase -- the same evidence that says "don't trust this run" reads,
+if you squint, like "and here is why", and the second reading is unearned. Fix the probe
+until the control moves, *then* interpret.
 
 ## Test File Conventions
 
