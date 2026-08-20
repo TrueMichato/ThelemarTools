@@ -1265,6 +1265,33 @@ a test for only one invites the other: silence the duplicate by dropping the cla
 gap returns. The matrix test asserts `gaps === []` *and* `dupes === []` across every
 condensate and every item role.
 
+### Two implementations of one number will drift; pin them to each other (v35)
+
+The NPC exporter recomputes weapon damage from item + material + upgrade rather than
+reading `getEffectiveWeaponDamage`. Two implementations of one number, and they had
+already drifted once in history. A corpus that checks an export against literals
+transcribed *from that export* cannot see this class of error at all — it records the
+error as the expectation.
+
+The fix is a cross-implementation guard: walk every character, pair each inventory weapon
+with its exported action, assert the dice agree. 28 pairs across 25 saves.
+
+Generalises past the exporter: **wherever a subsystem recomputes a value the sheet already
+derives, the cheapest strong test is not "is the value right" but "do the two agree".** It
+needs no literals, so it cannot record a wrong answer, and it keeps working as the data
+moves underneath it.
+
+### A walk built from silent `return`s needs a floor (v35)
+
+The v35 walk skips non-weapons, missing sheet dice, unmatched actions and untagged damage
+— four silent `continue`s. Any one accessor going wrong makes the walk measure nothing and
+pass. The floor (`expect(pairs.length).toBeGreaterThanOrEqual(20)`) is what makes the
+zero-result case observable, and it RED-verifies against a real mistake rather than an
+invented one: `getEffectiveWeaponDamage(item)` instead of `(row.id)` returns `undefined`
+silently and zeroes the entire scan.
+
+**A filtered walk asserts two things or it asserts one: what it found, and that it looked.**
+
 ### Importing the module is half the seeding; the catalog is the other half (v34)
 
 `getEffectiveItemBonuses` no-ops silently when `CharacterSheetMaterials` **or**

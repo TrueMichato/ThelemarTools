@@ -2394,4 +2394,54 @@ describeReal("v20 — companion items travel with the monster", () => {
 			expect(issues.warnings.join(" ")).not.toMatch(/homebrew|external brew/i);
 		});
 	});
+
+	describe("v35 — the exported damage die is the sheet's own", () => {
+		// The exporter does not read the sheet's damage; it recomputes it from the base
+		// item, then the material, then the upgrade. Two independent implementations of one
+		// number, which is exactly the shape that drifts silently. It already did once: the
+		// comment above the die-step in `charactersheet-npc-exporter.js` records Cataclysm
+		// exporting as `2d8+4` against the sheet's own `+13`.
+		//
+		// This is the only corpus-wide guard on the material/upgrade die ladder. It cannot
+		// police the *order* of the two steps -- exactly one weapon in the corpus carries
+		// both a die-stepping material and a die upgrade, and it sits on a rung where both
+		// orders agree (that ordering contract is pinned by unit test elsewhere). What it
+		// does police is the thing a DM actually reads: that the number in the statblock is
+		// the number on the sheet, on every rung, for every weapon anyone has really built.
+		const DIE_RE = /\d+d\d+/;
+
+		const weaponPairs = (name) => {
+			const state = loadStateFrom(`${name}.json`);
+			const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+			const out = [];
+			(state.getInventory?.() || []).forEach(row => {
+				const item = row?.item;
+				if (!item?.weapon) return;
+				// `getEffectiveWeaponDamage` takes the inventory row id, not the item.
+				const sheet = state.getEffectiveWeaponDamage?.(row.id);
+				const sheetDie = DIE_RE.exec(String(sheet?.dice || ""))?.[0];
+				if (!sheetDie) return;
+				const action = (monster.action || []).find(a => a.name === item.name || a.name.startsWith(item.name));
+				if (!action) return;
+				const exportDie = /\{@damage (\d+d\d+)/.exec(String(action.entries[0]))?.[1];
+				if (!exportDie) return;
+				out.push({label: `${name}/${item.name}`, sheetDie, exportDie});
+			});
+			return out;
+		};
+
+		it("agrees with the sheet's own damage die for every weapon in the corpus", () => {
+			const pairs = [];
+			available.forEach(name => pairs.push(...weaponPairs(name)));
+
+			// Anti-vacuity. Every filter above is a silent `return`, and the accessor it
+			// depends on takes a row id rather than the item -- passing the wrong one yields
+			// `undefined` with no error, which would zero this walk and pass. Measured at 28.
+			expect(pairs.length).toBeGreaterThanOrEqual(20);
+
+			const drifted = pairs.filter(p => p.exportDie !== p.sheetDie)
+				.map(p => `${p.label}: sheet=${p.sheetDie} export=${p.exportDie}`);
+			expect(drifted).toEqual([]);
+		});
+	});
 });

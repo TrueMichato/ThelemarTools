@@ -2115,6 +2115,38 @@ same way: a replacement attack is the parent's line retargeted plus its own die,
 bound is `parentLen + 150`. Self-adjusting, and tight — 435 against 452. RED-verified by
 lengthening only replacement attacks (541 > 452).
 
+### v35 — two implementations of one number, now pinned to each other
+
+The exporter never asks the sheet what a weapon does. It recomputes the damage from the
+base item, then the material, then the upgrade — a second implementation of a number the
+sheet already owns. That is the shape that drifts silently, and it has: the comment above
+the die-step records Cataclysm exporting as `2d8+4` against the sheet's own `+13`.
+
+Nothing compared them. The corpus checked the export against *itself* — against literals
+written down by reading the export — so an error present at authoring time was simply
+recorded as expected. v35 walks all 25 characters, pairs every inventory weapon with its
+exported action and asserts the die matches `getEffectiveWeaponDamage`. **28 weapons, all
+28 agree.**
+
+This is the only corpus-wide guard on the material/upgrade die ladder. It deliberately
+does *not* claim to police the ordering of those two steps: exactly one corpus weapon
+carries both a die-stepping material and a die upgrade (Arthur's Cataclysm, Steeline `+1`,
+upgrade `+1`), and it sits on a rung where both orders agree — `2d6 → 2d10` either way.
+Ordering is pinned by unit test elsewhere. What the corpus *can* police is the thing that
+reaches the table: the number in the statblock is the number on the sheet, on every rung,
+for every weapon anyone has really built.
+
+Both directions RED-verify, and each fails for its own reason rather than blurring into a
+single alarm. Disabling the upgrade die-step in the exporter reproduces the historical bug
+by name — `Arthur/Cataclysm: sheet=2d10 export=2d8`. Separately, reintroducing a mistake I
+had actually made while probing — calling `getEffectiveWeaponDamage(item)` instead of
+`(row.id)`, which returns `undefined` with no error — trips the anti-vacuity floor at `0`
+rather than passing a walk that measured nothing.
+
+That floor is the load-bearing half. Every filter in the walk is a silent `return`: not a
+weapon, no sheet die, no matching action, no `{@damage}` tag. Four ways to quietly count
+nothing, one accessor whose wrong argument is indistinguishable from an unarmed party.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 
