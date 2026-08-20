@@ -7734,7 +7734,13 @@ class CharacterSheetNpcExporter {
 	static buildCompanionItems (monster, state, {sourceJson, warnings} = {}) {
 		const source = this._getSafeSourceJson(sourceJson || monster?.source || CharacterSheetNpcExporter._companionItemSource);
 		const tagged = this._collectItemTagNames(monster, source);
-		if (!tagged.size) return [];
+		if (!tagged.size) {
+			// Still worth saying. A character can carry a material-bearing item that the
+			// statblock never tags, and the catalog can be missing entirely; neither is a
+			// reason to stay silent about effects that vanished.
+			this._collectUnresolvedMaterialWarnings(state, warnings, new Set());
+			return [];
+		}
 
 		// The PROJECTED inventory, not the raw one. A material rewrites `ac`, `dmg1`,
 		// `critThreshold`, `weight`, `value`, `property` and `range` at read time and never
@@ -7745,6 +7751,7 @@ class CharacterSheetNpcExporter {
 		const inventory = state?.getItems?.() || state?.getInventory?.() || state?._data?.inventory || [];
 		const out = [];
 		const seen = new Set();
+		const provenanceWarned = new Set();
 
 		inventory.forEach(wrapper => {
 			const item = wrapper?.item || wrapper;
@@ -7761,11 +7768,78 @@ class CharacterSheetNpcExporter {
 			if (sanitized) {
 				this._applyComposedItemStats(sanitized, state, wrapper?.id ?? item?.id, item);
 				this._collectItemProvenanceWarnings(item, state, warnings);
+				// Record what was ACTUALLY reported, not what was merely visited. `seen` is added
+				// before sanitizing and so includes items that never reached the provenance check;
+				// skipping on it would leave such an item described by neither pass.
+				provenanceWarned.add(key);
 				out.push(sanitized);
 			}
 		});
 
+		this._collectUnresolvedMaterialWarnings(state, warnings, provenanceWarned);
+
 		return out.sort((a, b) => a.name.localeCompare(b.name));
+	}
+
+	/**
+	 * Say when a material reference resolved to nothing, for items the bundle never covered.
+	 *
+	 * A material is stored on an item as a `{name, source}` REFERENCE; the entity lives in the
+	 * catalog. `resolveMaterial` returns `null` both for a reference it cannot satisfy and for
+	 * an item that simply has no material — the same face for "absent" and "empty" — so every
+	 * effect silently evaporates and nothing anywhere says so.
+	 *
+	 * `_collectItemProvenanceWarnings` already covers this, but only for items that are BUNDLED:
+	 * it runs inside the bundling loop, behind an `_isCompanionItem` gate and behind the
+	 * `!tagged.size` early return. A catalog item -- or any item the statblock did not tag --
+	 * lost its material in silence. That is the same shape as the v25 suppression defect, where
+	 * a material code path reached only custom items while catalog items quietly lost the text.
+	 *
+	 * The two causes need opposite fixes, so they are worded differently rather than merged:
+	 * an empty catalog kills EVERY material at once and is one problem, while an unmatched name
+	 * in a populated catalog is a bad reference and is one problem per reference.
+	 *
+	 * @param {object} state
+	 * @param {string[]} warnings
+	 * @param {Set<string>} alreadyWarned Lower-cased names the bundle has already reported, so a
+	 *   bundled item is not described twice in one validation panel.
+	 */
+	static _collectUnresolvedMaterialWarnings (state, warnings, alreadyWarned) {
+		if (!Array.isArray(warnings)) return;
+		const Materials = globalThis.CharacterSheetMaterials;
+		if (typeof Materials?.resolveMaterial !== "function") return;
+
+		const catalog = state?.getItemMaterialCatalog?.() || [];
+		const skip = alreadyWarned instanceof Set ? alreadyWarned : new Set();
+		const items = state?.getItems?.() || state?.getInventory?.() || state?._data?.inventory || [];
+
+		const unresolved = new Map();
+		items.forEach(wrapper => {
+			const item = wrapper?.item || wrapper;
+			const materialName = this._getSafeInlineText(item?.material?.name, {maxLen: 60});
+			if (!materialName) return;
+			const itemName = this._getSafeInlineText(item?.name, {maxLen: 80}) || "An item";
+			if (skip.has(itemName.toLowerCase())) return;
+			if (Materials.resolveMaterial(item, catalog)) return;
+			if (!unresolved.has(materialName)) unresolved.set(materialName, new Set());
+			unresolved.get(materialName).add(itemName);
+		});
+		if (!unresolved.size) return;
+
+		if (!catalog.length) {
+			// One problem, stated once. Repeating "the catalog is empty" per item buries the
+			// single action that fixes all of them.
+			const names = [...unresolved.keys()].sort().join(", ");
+			warnings.push(`The material catalog was not loaded, so no material effect reached this export (${unresolved.size} referenced: ${names}).`);
+			return;
+		}
+
+		[...unresolved.entries()]
+			.sort(([a], [b]) => a.localeCompare(b))
+			.forEach(([materialName, itemNames]) => {
+				const on = [...itemNames].sort().join(", ");
+				warnings.push(`"${materialName}" is not among the ${catalog.length} known materials, so its effects are absent from ${on}.`);
+			});
 	}
 
 	/**

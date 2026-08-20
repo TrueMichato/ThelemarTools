@@ -1797,6 +1797,39 @@ Corpus movement: **0 of 24**. Only 2 characters carry armour notes at all, so th
 covered; the evidence is a direct scan of every save for punctuation-differing note pairs, not the
 regen diff.
 
+### v27 — a material that resolved to nothing is said out loud
+
+A material is stored on an item as a `{name, source}` **reference**; the entity lives in the
+catalog. `resolveMaterial` returns `null` both for a reference it cannot satisfy **and** for an
+item that simply has no material — "absent" and "empty" wearing the same face. Every effect then
+evaporates and nothing anywhere says so.
+
+The exporter already warned about this, but only for **bundled** items: the check sat inside the
+bundling loop, behind an `_isCompanionItem` gate *and* behind a `!tagged.size` early return. So a
+catalogue item — or any item the statblock never tagged — lost its material in silence.
+
+That is the **third** time a material code path has reached custom items only (cf. v25, where
+suppression text reached bundled items and Aldor's catalogue sword advertised a benefit whose
+off-switch appeared nowhere). The pattern is worth naming: *a helper written while looking at the
+bundle will be scoped to the bundle.*
+
+`_collectUnresolvedMaterialWarnings` now runs over the whole inventory, on both paths. The two
+causes are worded differently because their fixes are opposite:
+
+| condition | message | why |
+|---|---|---|
+| catalog empty | *"The material catalog was not loaded, so no material effect reached this export (N referenced: …)"* | one problem with one fix; repeating it per item buries the action |
+| name unmatched in a populated catalog | *"X" is not among the N known materials, so its effects are absent from Y* | one problem **per reference** — each needs its own correction |
+
+**Partition, not duplication.** The pre-existing bundled-item warning says something extra and
+true ("the bundled item ships with base stats"), so it keeps its items; this pass takes the rest.
+The skip set records what was **actually reported**, not what was merely visited — `seen` is
+populated *before* sanitizing, so skipping on it would leave an item that failed to sanitize
+described by neither pass.
+
+Corpus: **0 of 45** characters produce a warning — every material resolves. That is the intended
+result; this is a net for a broken state, not a finding about healthy data.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 

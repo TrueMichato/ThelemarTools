@@ -1184,6 +1184,25 @@ paraphrase**. It cannot substitute for one derivation having one surface.
 Related: a channel that returns `[]` today makes a double-report guard pass vacuously. Assert both
 channels are live before asserting the count.
 
+### A helper written while looking at the bundle will be scoped to the bundle (v27)
+
+Three separate material defects have now had the same shape: the code path reached **custom /
+bundled** items and silently skipped catalogue ones. v25 (suppression text), the provenance
+warning (v27), and the tier note before v26 all failed this way.
+
+The cause is structural, not careless. `buildCompanionItems` is where item-shaped work naturally
+gets written, and it is gated three times over — `_isCompanionItem`, a `tagged.has(name)` check,
+and a `!tagged.size` early return. Anything added inside it inherits all three gates whether or
+not that scope was intended.
+
+**When adding item-level logic, ask which of those three gates should apply.** If the answer is
+"none", it does not belong inside that loop.
+
+Related: `resolveMaterial` returns `null` for an unsatisfiable reference *and* for an item with no
+material. Any consumer that treats a bare `null`/`[]` as "nothing to do" cannot tell a healthy item
+from a broken one — read `CharacterSheetMaterials.getUnresolvedReferences()`, whose `poolSize`
+separates "catalog never loaded" (0) from "bad reference" (n).
+
 ### Bundling sheet-authored items with the export (v20)
 
 An NPC export is a homebrew document (`{_meta, monster: [...]}`), so it may also carry

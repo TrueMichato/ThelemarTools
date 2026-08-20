@@ -1039,3 +1039,106 @@ maybeDescribe("NPC export v26c -- damage reduction is stated once, not once per 
 		expect(String(JSON.stringify(traits))).toMatch(/lowered by 3/i);
 	});
 });
+/**
+ * v27 -- a material that resolved to nothing is said out loud.
+ *
+ * A material lives on an item as a `{name, source}` REFERENCE; the entity lives in the catalog.
+ * `resolveMaterial` returns null both for a reference it cannot satisfy and for an item with no
+ * material at all -- "absent" and "empty" wearing one face -- so every effect evaporates silently.
+ *
+ * The exporter already warned about this, but only for BUNDLED items: the check sat inside the
+ * bundling loop, behind an `_isCompanionItem` gate and behind a `!tagged.size` early return. A
+ * catalog item, or any item the statblock never tagged, lost its material in silence. That is the
+ * third time a material code path has reached custom items only (cf. v25 suppression).
+ */
+maybeDescribe("NPC export v27 -- an unresolvable material is reported, not swallowed", () => {
+	const catalogWeapon = (materialName) => ({
+		id: "w-cat",
+		item: {
+			id: "w-cat",
+			name: "Catalog Longsword",
+			source: "XPHB",
+			type: "M",
+			weapon: true,
+			weaponCategory: "martial",
+			baseItem: "longsword|xphb",
+			dmg1: "1d8",
+			dmgType: "S",
+			material: {name: materialName, source: "TGTT"},
+		},
+		quantity: 1,
+		equipped: true,
+	});
+
+	const warningsFor = (state) => {
+		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const warnings = [];
+		CharacterSheetNpcExporter.buildCompanionItems(monster, state, {sourceJson: "TEST", warnings});
+		return warnings;
+	};
+
+	it("names the material when the catalog never loaded", () => {
+		const state = makeState({items: [catalogWeapon("Adamantine")]});
+		state.setItemMaterialCatalog([]);
+
+		expect(warningsFor(state).join(" ")).toMatch(/catalog was not loaded[^]*Adamantine/i);
+	});
+
+	it("states an empty catalog once, not once per item", () => {
+		// An empty catalog kills every material at the same time and has ONE fix. Repeating the
+		// sentence per item buries the single action that resolves all of them.
+		const state = makeState({
+			items: [
+				catalogWeapon("Adamantine"),
+				{...catalogWeapon("Orichaline"), id: "w-cat2", item: {...catalogWeapon("Orichaline").item, id: "w-cat2", name: "Second Blade"}},
+			],
+		});
+		state.setItemMaterialCatalog([]);
+
+		expect(warningsFor(state).filter(w => /catalog was not loaded/i.test(w))).toHaveLength(1);
+	});
+
+	it("blames the reference, not the catalog, when the catalog is populated", () => {
+		// The two causes need opposite fixes -- load the catalog vs. correct the name -- so they
+		// must not share a sentence.
+		const state = makeState({items: [catalogWeapon("Unobtanium")]});
+		const joined = warningsFor(state).join(" ");
+
+		expect(joined).toMatch(/"Unobtanium" is not among the \d+ known materials/i);
+		expect(joined).toMatch(/Catalog Longsword/);
+		expect(joined).not.toMatch(/catalog was not loaded/i);
+	});
+
+	it("says nothing when the material resolves, so the warning means something", () => {
+		// The vacuity guard in the other direction: a warning that always fires is noise.
+		const state = makeState({items: [catalogWeapon("Adamantine")]});
+
+		expect(warningsFor(state)).toEqual([]);
+	});
+
+	it("covers items the bundle never reaches, which is the whole defect", () => {
+		// A catalog weapon is not a companion item and is never bundled, so the pre-existing
+		// provenance warning could not fire for it at all.
+		const state = makeState({items: [catalogWeapon("Unobtanium")]});
+		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const bundled = CharacterSheetNpcExporter.buildCompanionItems(monster, state, {sourceJson: "TEST", warnings: []});
+
+		expect(bundled.map(b => b.name)).not.toContain("Catalog Longsword");
+		expect(warningsFor(state).length).toBeGreaterThan(0);
+	});
+
+	it("does not describe the same item twice when the bundle already reported it", () => {
+		// The partition. `_collectItemProvenanceWarnings` owns bundled items and says something
+		// extra and true about them ("ships with base stats"); this pass owns the rest. Stating
+		// it twice in one validation panel is the defect v26c guarded in the statblock.
+		const state = makeState({items: [catalogWeapon("Unobtanium")]});
+		const warnings = [];
+		CharacterSheetNpcExporter._collectUnresolvedMaterialWarnings(
+			state,
+			warnings,
+			new Set(["catalog longsword"]),
+		);
+
+		expect(warnings).toEqual([]);
+	});
+});
