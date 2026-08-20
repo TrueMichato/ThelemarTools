@@ -1441,3 +1441,102 @@ maybeDescribe("NPC export v29 — an affinity states its off-switch", () => {
 		expect(gaps).toEqual([]);
 	});
 });
+
+/**
+ * v30 — the tier filter and the accessor's tier gate must not fight.
+ *
+ * `_isMaterialNoteApplicable` was written when `getItemMaterialNotes` handed back EVERY
+ * tier of a material's damage reduction regardless of what the item was, so a catalogue
+ * plate printed "by 3" and "by 2" side by side and a longsword invented a defence. The
+ * sibling session has since gated the accessor itself (58408f4c), which makes this filter
+ * redundant — measured, it now drops nothing at all.
+ *
+ * It stays anyway, because of HOW it fails. The regex is on the note's label, so a
+ * relabelling makes it match nothing and `return true` — it degrades to the accessor's
+ * gate rather than overriding it. And it cannot fail the other way in the live path,
+ * because `_getArmorCategory` delegates to `CharacterSheetState.getArmorCategory`, i.e.
+ * the same function the accessor's own gate is built on. Two consumers, one category.
+ *
+ * What is dangerous is leaving a dead filter quiet. These pin both directions.
+ */
+describe("NPC export v30 — the armour tier filter defers to the accessor", () => {
+	const TIERS = [["HA", "heavy"], ["MA", "medium"], ["LA", "light"]];
+
+	// Every tier-suffixed note the accessor emits, across the whole brew, paired with the
+	// category the exporter independently derives for the item that produced it.
+	function collectTierScopedNotes () {
+		const rows = [];
+		MATERIALS.forEach(material => {
+			TIERS.forEach(([type, tierName]) => {
+				const item = {id: "tier-probe", name: `Probe ${type}`, type, material: {name: material.name, source: material.source}, equipped: true};
+				const state = makeState({items: [{item, quantity: 1, equipped: true}]});
+				const armorCategory = CharacterSheetNpcExporter._getArmorCategory(item);
+				(state.getItemMaterialNotes?.("tier-probe") || [])
+					.filter(note => /\((heavy|medium|light)\)\s*$/i.test(String(note?.label || "")))
+					.forEach(note => rows.push({
+						material: material.name,
+						wornAs: tierName,
+						label: String(note.label),
+						armorCategory,
+						kept: CharacterSheetNpcExporter._isMaterialNoteApplicable(note, armorCategory),
+					}));
+			});
+		});
+		return rows;
+	}
+
+	it("never drops a tier-scoped note the accessor decided to emit", () => {
+		const rows = collectTierScopedNotes();
+
+		// Anti-vacuity FIRST. A filter that is handed nothing drops nothing, so the
+		// invariant below is trivially true against an accessor that has stopped emitting.
+		// This is the failure mode that let the Cold Iron fixture pass while wrong.
+		expect(rows.length).toBeGreaterThan(0);
+
+		expect(rows.filter(row => !row.kept)).toEqual([]);
+	});
+
+	it("agrees with the accessor about which tier the item is", () => {
+		const rows = collectTierScopedNotes();
+		// A forEach over nothing asserts nothing. Same reason as above.
+		expect(rows.length).toBeGreaterThan(0);
+		rows.forEach(row => {
+			// The accessor emitted this note for an item worn as `wornAs`; the exporter
+			// derived `armorCategory` for the same item by its own route. A divergence here
+			// is what would make the filter silently swallow the one correct note.
+			expect(row.armorCategory).toBe(row.wornAs);
+			expect(row.label.toLowerCase()).toContain(`(${row.wornAs})`);
+		});
+	});
+
+	it("pins that the accessor now emits exactly one tier per item", () => {
+		const rows = collectTierScopedNotes();
+		expect(rows.length).toBeGreaterThan(0);
+		const byItem = new Map();
+		rows.forEach(row => {
+			const key = `${row.material}|${row.wornAs}`;
+			byItem.set(key, (byItem.get(key) || 0) + 1);
+		});
+		// Before 58408f4c every one of these was 2 — the heavy AND the medium reduction on
+		// one suit. If any goes back above 1 the export is stating two numbers for one rule.
+		expect([...byItem.entries()].filter(([, n]) => n > 1)).toEqual([]);
+	});
+
+	it("states which materials are tier-scoped at all, so a new one is noticed", () => {
+		const materials = [...new Set(collectTierScopedNotes().map(row => row.material))].sort();
+		// Adamantine is the brew's only damage-reduction material, and damage reduction is
+		// the brew's only tier-scoped note type. Asserting the set rather than deleting the
+		// check keeps the filter honest when a second one is authored.
+		expect(materials).toEqual(["Adamantine"]);
+	});
+
+	it("keeps a note it cannot place, rather than guessing it away", () => {
+		// The fail-open property that justifies keeping the filter at all: an unrecognised
+		// label defers to the accessor instead of overriding it.
+		expect(CharacterSheetNpcExporter._isMaterialNoteApplicable({label: "Adamantine — Heavy"}, "medium")).toBe(true);
+		expect(CharacterSheetNpcExporter._isMaterialNoteApplicable({label: "Adamantine"}, null)).toBe(true);
+		// ...but a label it CAN place is still held to it.
+		expect(CharacterSheetNpcExporter._isMaterialNoteApplicable({label: "Adamantine (heavy)"}, "medium")).toBe(false);
+		expect(CharacterSheetNpcExporter._isMaterialNoteApplicable({label: "Adamantine (heavy)"}, "heavy")).toBe(true);
+	});
+});
