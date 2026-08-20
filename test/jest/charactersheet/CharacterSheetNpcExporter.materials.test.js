@@ -57,6 +57,43 @@ function makeState ({items = [], abilities = {}} = {}) {
 	return state;
 }
 
+/**
+ * Silences the material-note channel for a test that is isolating the UPGRADE-note channel.
+ *
+ * This used to be an unrestored `CharacterSheetNpcExporter._getEquippedArmorMaterialNotes =
+ * () => []`, which is a PERMANENT static clobber: every test declared after it in this file
+ * saw a stub for the rest of the run. It cost hours chasing a phantom order-dependency in
+ * `getArmorCategory` -- the inputs all measured correct because the mutated thing was the
+ * function itself, not anything it reads.
+ */
+let _restoreMaterialNoteChannel = null;
+function silenceMaterialNoteChannel () {
+	const original = CharacterSheetNpcExporter._getEquippedArmorMaterialNotes;
+	CharacterSheetNpcExporter._getEquippedArmorMaterialNotes = () => [];
+	_restoreMaterialNoteChannel = () => { CharacterSheetNpcExporter._getEquippedArmorMaterialNotes = original; };
+}
+
+// Every exporter static this file is entitled to replace, captured before any test runs.
+// The tripwire below is the point: a clobber that forgets to restore does not fail where it
+// is written, it silently weakens every test declared after it. That is how the matrix
+// invariant below came to be running against a dead armour path while still passing.
+const _PRISTINE_STATICS = Object.freeze({
+	_getEquippedArmorMaterialNotes: CharacterSheetNpcExporter._getEquippedArmorMaterialNotes,
+	_getArmorTraitBlock: CharacterSheetNpcExporter._getArmorTraitBlock,
+	_getMaterialPowerEntries: CharacterSheetNpcExporter._getMaterialPowerEntries,
+	_getMagicItemUseBlocks: CharacterSheetNpcExporter._getMagicItemUseBlocks,
+});
+
+afterEach(() => {
+	if (_restoreMaterialNoteChannel) _restoreMaterialNoteChannel();
+	_restoreMaterialNoteChannel = null;
+
+	// Fails on the test that leaked, not on some innocent test hundreds of lines later.
+	Object.entries(_PRISTINE_STATICS).forEach(([name, fn]) => {
+		expect(CharacterSheetNpcExporter[name]).toBe(fn);
+	});
+});
+
 function weapon ({name = "Test Longsword", material = null, upgrades = null, property = [], dmg1 = "1d8"} = {}) {
 	const item = {
 		id: `w-${name.replace(/\W+/g, "-").toLowerCase()}`,
@@ -1039,7 +1076,7 @@ maybeDescribe("NPC export v26c -- damage reduction is stated once, not once per 
 			{label: "Adamantine", description: "reduce incoming damage BY 3.", type: "passive"},
 		];
 		state.getArmorUpgradeNotes = () => twice;
-		CharacterSheetNpcExporter._getEquippedArmorMaterialNotes = () => [];
+		silenceMaterialNoteChannel();
 
 		const traits = CharacterSheetNpcExporter._getArmorTraitBlock(state);
 		expect(String(JSON.stringify(traits)).match(/reduce incoming damage by 3/gi) || [])
@@ -1057,7 +1094,7 @@ maybeDescribe("NPC export v26c -- damage reduction is stated once, not once per 
 			{label: "Adamantine", description: "Reduce incoming damage by 3", type: "passive"},
 			{label: "Adamantine", description: "Damage taken is lowered by 3", type: "passive"},
 		];
-		CharacterSheetNpcExporter._getEquippedArmorMaterialNotes = () => [];
+		silenceMaterialNoteChannel();
 
 		const traits = CharacterSheetNpcExporter._getArmorTraitBlock(state);
 		expect(String(JSON.stringify(traits))).toMatch(/reduce incoming damage by 3/i);
