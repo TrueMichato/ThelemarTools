@@ -217,6 +217,45 @@ expect(state.getAbilityMod("str")).toBe(4);    // (18-10)/2
 | Not importing dependencies | ReferenceError in CI | Import all needed modules |
 | Mutating state without isolation | Tests leak between each other | Use `beforeEach` for fresh state || Reading `_data.abilities.str` directly | Gets base only, not total | Use `getAbilityScore()` (base+bonus) |
 | Not matching source in spell assertions | Blade Ward behaves differently by edition | Always check name AND source |
+| `SomeClass._method = () => []` with no restore | Permanent static clobber -- every test declared *after* it silently runs against the stub | Capture the original, restore in `afterEach`, and add a tripwire (below) |
+
+### Replacing a static is a false-green generator
+
+A bare `CharacterSheetNpcExporter._getEquippedArmorMaterialNotes = () => [];` inside one
+test is not scoped to that test. It replaces the static for the rest of the file, so every
+later test runs against the stub and keeps passing -- while checking less than it claims.
+
+This is expensive to diagnose because it presents as **order-dependence**: the test passes
+under `-t "name"` (the clobbering test is skipped) and fails in the full-file run. The
+natural next step -- instrumenting everything the function reads -- is a dead end, because
+the inputs really are all correct. The thing that changed is the callee.
+
+It also fails *quietly in the safe direction*. In one real case the leak had disarmed the
+armour half of a matrix invariant: the test passed, but disabling the production guard it
+was supposed to catch failed only one test instead of two.
+
+```js
+let _restore = null;
+function silenceChannel () {
+    const original = Cls._method;
+    Cls._method = () => [];
+    _restore = () => { Cls._method = original; };
+}
+
+// Captured before any test runs.
+const _PRISTINE = Object.freeze({_method: Cls._method, _other: Cls._other});
+
+afterEach(() => {
+    if (_restore) _restore();
+    _restore = null;
+    // Attribution: fails ON the leaking test, not on an innocent one 500 lines later.
+    Object.entries(_PRISTINE).forEach(([k, fn]) => expect(Cls[k]).toBe(fn));
+});
+```
+
+Prefer `jest.spyOn(Cls, "_method").mockReturnValue([])` with `restoreAllMocks`, which gets
+this right by construction. The manual form above is for statics a spy cannot reach.
+
 ## Test File Conventions
 
 - **File naming**: `CharacterSheet{Topic}.test.js` (PascalCase descriptive name)
