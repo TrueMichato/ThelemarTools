@@ -247,6 +247,7 @@ expect(state.getAbilityMod("str")).toBe(4);    // (18-10)/2
 | Not matching source in spell assertions | Blade Ward behaves differently by edition | Always check name AND source |
 | `SomeClass._method = () => []` with no restore | Permanent static clobber -- every test declared *after* it silently runs against the stub | Capture the original, restore in `afterEach`, and add a tripwire (below) |
 | `state._data.namedModifiers.push({...})` **then asserting a total** | Bypasses `_recalculateCustomModifiers()`, so the value never reaches the cache the total getters read | Use `addNamedModifier()`, or recalc after the push. Raw push is correct for `getModifiersForType`/`aggregateModifiers` (below) |
+| Naming a test after a gate without checking the fixture reaches it | The test passes whether the gate exists or not, and its *name* is what stops anyone re-checking | Delete the gate and run. Zero red means the test's name is the only thing testing it (below) |
 
 ### Replacing a static is a false-green generator
 
@@ -392,6 +393,54 @@ correction. The rest of the family routes through one of those two.
 If you are writing a probe against an item, the shape is `accessor(row.id)`, not `accessor(row)`
 and not `accessor(row.item)`. And when a probe comes back empty, **check the call before you
 believe the result** -- that is what all three occurrences had in common.
+
+### A fixture on the wrong side of a gate does not, by itself, test that gate
+
+The obvious rule is *a gate is only under test if some fixture is on the wrong side of it* —
+line coverage cannot tell "the branch executed" from "a fixture the branch rejects exists".
+That rule is necessary but **not sufficient**, and materials has the counterexample.
+
+`_matchesTrigger` (`charactersheet-materials.js:896`) guards two disjoint trigger shapes:
+
+```js
+if (t.on === "attackRoll") {
+    if (trigger.type !== "attackRoll") return false;   // :900
+    if (Array.isArray(t.natural) && t.natural.includes(Number(trigger.natural))) return true;
+```
+
+`CharacterSheetMaterialInstability.test.js` already carried a test **named after that gate** —
+*"does not fire a natural-1 instability on a damageTaken trigger"* — and a Magmaheart leg
+doing the mirror. Both stay green with the gate deleted. Measured against the whole suite:
+**17,130 tests, zero red**, for either gate.
+
+The reason is that the check *after* the gate independently rejects a **plain** cross-type
+trigger. A `damageTaken` event carries no `natural`, so `includes(Number(undefined))` is
+false anyway; an `attackRoll` carries no `damageType`, so the string compare fails anyway.
+The fixture really is on the wrong side, and it flows through a gate that happens to be
+redundant *for that input*.
+
+> **A fixture on the wrong side of a gate tests it only if the code after the gate would
+> answer differently.** Otherwise it passes through a redundant gate and is green either way.
+
+The discriminating fixture is an **enriched** cross-type trigger — one carrying the *other*
+shape's field. With the gates removed, both of these flip to `true`:
+
+```js
+// Stormprism fires on a natural 1; this is a damage event that happens to carry one.
+isInstabilityTriggered(stormprism, {type: "damageTaken", damageType: "lightning", natural: 1})
+// Magmaheart bites when its carrier TAKES cold damage, not when they swing a cold weapon.
+isInstabilityTriggered(magmaheart, {type: "attackRoll", natural: 7, damageType: "cold"})
+```
+
+Pinned in `describe("the cross-type trigger gates, pinned with a fixture that can reach them")`.
+
+**Latent, not live.** All three trigger construction sites in product code
+(`charactersheet-combat.js:1915`, `:1962`, `charactersheet.js:12524`) build the disjoint
+shapes promised by the docstring at `charactersheet-materials.js:840`. The shapes are held
+apart by a *comment*; these gates are what stands behind it if either ever gains a field.
+
+The practical procedure, since the reasoning is hard to do by inspection: **delete the gate
+and run the suite.** Zero red means no fixture reaches it, whatever the test names claim.
 
 ### Your suite is smaller on a clean checkout than it is on your machine
 

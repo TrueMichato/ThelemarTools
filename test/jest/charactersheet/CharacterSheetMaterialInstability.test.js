@@ -200,3 +200,61 @@ describe("State candidate accessors", () => {
 		expect(found[0].material.name).toBe("Rimeglass");
 	});
 });
+
+/**
+ * The two cross-type gates in `_matchesTrigger` (charactersheet-materials.js:900 and :906)
+ * were each measured deletable against the FULL suite: 17,130 tests, zero red, either one.
+ *
+ * Two tests above look like they already cover this -- "does not fire a natural-1 instability
+ * on a damageTaken trigger", and the Magmaheart `NAT_1` leg. Both stay green with the gates
+ * removed, because the checks AFTER each gate independently reject a *plain* cross-type
+ * trigger: a damageTaken event carries no `natural`, an attackRoll event carries no
+ * `damageType`, so the fallthrough answers `false` for its own reasons.
+ *
+ *     A fixture on the wrong side of a gate only tests that gate if the code after it would
+ *     answer differently. Otherwise it passes through a redundant gate, green either way.
+ *
+ * The discriminating fixture is an ENRICHED cross-type trigger -- one carrying the *other*
+ * shape's field. Measured with the gates removed, both of the negatives below return `true`.
+ *
+ * Latent, not live: all three trigger construction sites in product code
+ * (charactersheet-combat.js:1915 and :1962, charactersheet.js:12524) build the disjoint
+ * shapes the docstring at charactersheet-materials.js:840 promises. These gates are what
+ * stands between that comment and a wrongly-fired instability should either shape ever gain
+ * a field -- `damageType` on an attack roll being the plausible one, for a material that
+ * cares about the damage you deal.
+ */
+describe("the cross-type trigger gates, pinned with a fixture that can reach them", () => {
+	it("control: each material still fires on its own trigger shape", () => {
+		// Without this, the negatives below pass just as well when the matcher is broken
+		// outright and nothing fires at all.
+		expect(CharacterSheetMaterials.isInstabilityTriggered(byName("Stormprism"), NAT_1)).toBe(true);
+		expect(CharacterSheetMaterials.isInstabilityTriggered(
+			byName("Magmaheart"), {type: "damageTaken", damageType: "cold"},
+		)).toBe(true);
+	});
+
+	it("an attackRoll instability ignores a damageTaken event carrying a `natural`", () => {
+		// Stormprism fires on a natural 1; this is a damage event that happens to carry one.
+		expect(CharacterSheetMaterials.isInstabilityTriggered(
+			byName("Stormprism"), {type: "damageTaken", damageType: "lightning", natural: 1},
+		)).toBe(false);
+	});
+
+	it("a damageTaken instability ignores an attackRoll carrying a `damageType`", () => {
+		// Magmaheart bites when its carrier TAKES cold damage -- not when they swing a
+		// cold-damage weapon.
+		expect(CharacterSheetMaterials.isInstabilityTriggered(
+			byName("Magmaheart"), {type: "attackRoll", natural: 7, isCrit: false, damageType: "cold"},
+		)).toBe(false);
+	});
+
+	it("the same two gates guard degradation, which shares the matcher", () => {
+		// `_matchesTrigger` is shared so instability and degradation can never drift apart
+		// about what a natural 1 is. That sharing also means one missing fixture leaves
+		// BOTH subsystems unguarded, which is why this leg exists on the degradation side.
+		expect(CharacterSheetMaterials.isDegradationTriggered(
+			byName("Rimeglass"), {type: "attackRoll", natural: 7, isCrit: false, damageType: "fire"},
+		)).toBe(false);
+	});
+});
