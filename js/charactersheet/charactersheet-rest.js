@@ -664,6 +664,11 @@ class CharacterSheetRest {
 		else cbClearExhaustion.disabled = true;
 		const cbBreakConcentration = isConcentrating ? (() => { const cb = e_({tag: "input", type: "checkbox"}); cb.checked = true; return cb; })() : null;
 
+		// Ability-score damage restore (only offered when the character actually has drains).
+		const totalAbilityDamage = this._state.getTotalAbilityDamage?.() || 0;
+		const hasAbilityDamage = totalAbilityDamage > 0;
+		const cbRestoreAbilityDamage = hasAbilityDamage ? (() => { const cb = e_({tag: "input", type: "checkbox"}); cb.checked = true; return cb; })() : null;
+
 		// Track which conditions to remove
 		const conditionsToRemove = new Set(conditions); // All checked by default for long rest
 		const conditionCheckboxes = [];
@@ -728,7 +733,7 @@ class CharacterSheetRest {
 			
 			<div class="charsheet__rest-section">
 				<div class="charsheet__rest-section-title">⚙️ Options</div>
-				<div class="charsheet__rest-options">
+				<div class="charsheet__rest-options" id="long-rest-options-container">
 					<label class="charsheet__rest-option">
 						${cbResetTempHp}
 						<span>Reset temporary HP to 0</span>
@@ -749,6 +754,17 @@ class CharacterSheetRest {
 			</div>
 			` : ""}
 		</div>`.appendTo(modalInner);
+
+		// Restore-ability-damage option (only when drains exist). Appended as its own
+		// ee fragment so the checkbox DOM node embeds correctly (a plain-string nested
+		// template would stringify it to "[object HTMLInputElement]").
+		if (cbRestoreAbilityDamage) {
+			const optsContainer = e_({ele: modalInner}).find("#long-rest-options-container");
+			ee`<label class="charsheet__rest-option">
+				${cbRestoreAbilityDamage}
+				<span>🩸 Restore ability damage (−${totalAbilityDamage} total)</span>
+			</label>`.appendTo(optsContainer);
+		}
 
 		// Render condition checkboxes
 		if (conditions.length > 0 || isConcentrating) {
@@ -865,6 +881,13 @@ class CharacterSheetRest {
 				}
 			}
 
+			// Restore ability-score damage (all drains) if requested.
+			let abilityDamageRestored = 0;
+			if (cbRestoreAbilityDamage?.checked) {
+				abilityDamageRestored = totalAbilityDamage;
+				this._state.clearAllAbilityDamage?.();
+			}
+
 			// Remove selected conditions
 			conditionsToRemove.forEach(condition => {
 				this._state.removeCondition?.(condition);
@@ -926,6 +949,7 @@ class CharacterSheetRest {
 			if (forkedTongueChanged) message += ` Forked Tongue: swapped ${forkedTongueChanged}.`;
 			if (terrorizingForceChanged) message += ` Terrorizing Force damage set to ${terrorizingForceChanged}.`;
 			if (spellMasteryChanged) message += ` Spell Mastery changed to ${spellMasteryChanged}.`;
+			if (abilityDamageRestored > 0) message += ` Restored ${abilityDamageRestored} ability damage.`;
 			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
 			if (cbBreakConcentration?.checked) message += ` Broke concentration.`;
 			if (removedCompanions > 0) message += ` Wild Shape form/companion dismissed.`;

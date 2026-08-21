@@ -1470,6 +1470,30 @@ class CharacterSheetPage {
 		bind("charsheet-btn-heal", "click", () => this._onHeal());
 		bind("charsheet-btn-damage", "click", () => this._onDamage());
 
+		// Inline damage/heal intake control (amount + type picker + live preview).
+		const dmgAmountEl = document.getElementById("charsheet-ipt-dmg-amount");
+		if (dmgAmountEl) {
+			dmgAmountEl.addEventListener("input", () => this._renderDamageIntake());
+			dmgAmountEl.addEventListener("keydown", (e) => {
+				if ((/** @type {KeyboardEvent} */ (e)).key === "Enter") {
+					e.preventDefault();
+					this._onDamageIntakeApply();
+				}
+			});
+		}
+		bind("charsheet-btn-dmg-type", "click", (e) => { e.stopPropagation(); this._toggleDamageTypeMenu(); });
+		bind("charsheet-btn-dmg-apply", "click", () => this._onDamageIntakeApply());
+		bind("charsheet-btn-heal-apply", "click", () => this._onHealIntakeApply());
+		// Close the type menu on outside click.
+		document.addEventListener("click", (e) => {
+			const menu = document.getElementById("charsheet-dmg-type-menu");
+			const trigger = document.getElementById("charsheet-btn-dmg-type");
+			if (!menu || menu.hidden) return;
+			const target = /** @type {Node} */ (e.target);
+			if (menu.contains(target) || trigger?.contains(target)) return;
+			this._toggleDamageTypeMenu(false);
+		});
+
 		// HP breakdown popover — bind on the whole HP section, but stop propagation
 		// on interactive children (inputs, heal/damage buttons) so editing/clicking them
 		// doesn't open the popover.
@@ -3846,12 +3870,91 @@ class CharacterSheetPage {
 					<div class="charsheet__ability-name">${abl.toUpperCase()}</div>
 					<div class="charsheet__ability-score" id="charsheet-ability-${abl}-score">${score}</div>
 					<div class="charsheet__ability-mod" id="charsheet-ability-${abl}-mod">${mod}</div>
+					<div class="charsheet__ability-drain" id="charsheet-ability-${abl}-drain" hidden></div>
 				</div>
 			`});
 
 			ability.addEventListener("click", (e) => this._rollAbilityCheck(abl, e));
 			this._bindActivate(ability, {label: `Roll ${Parser.attAbvToFull(abl)} check`});
 			container.append(ability);
+		});
+
+		this._renderAbilityDamageAffordance();
+	}
+
+	/**
+	 * Compact "Ability damage" affordance under the ability grid (progressive disclosure).
+	 * Opens an inline picker (ability + points) rather than six always-visible steppers.
+	 * Also surfaces a one-tap "Restore all" when any drain exists.
+	 */
+	_renderAbilityDamageAffordance () {
+		const grid = document.getElementById("charsheet-abilities");
+		if (!grid) return;
+		let host = document.getElementById("charsheet-ability-damage-control");
+		if (!host) {
+			host = e_({outer: `<div class="charsheet__ability-damage" id="charsheet-ability-damage-control"></div>`});
+			grid.parentElement?.insertBefore(host, grid.nextSibling);
+		}
+		const total = this._state.getTotalAbilityDamage?.() || 0;
+		const hasDamage = total > 0;
+		const wasOpen = !!this._abilityDamageEditorOpen;
+		host.innerHTML = `
+			<div class="charsheet__ability-damage-bar">
+				<button type="button" class="charsheet__ability-damage-trigger" id="charsheet-btn-ability-damage-toggle" aria-expanded="${wasOpen}" aria-controls="charsheet-ability-damage-editor" title="Apply ability-score damage">
+					<span aria-hidden="true">🩸</span>
+					<span class="charsheet__ability-damage-trigger-label">${hasDamage ? `Ability damage −${total}` : "Ability damage"}</span>
+					<span class="charsheet__ability-damage-chevron" aria-hidden="true">⌄</span>
+				</button>
+				${hasDamage ? `<button type="button" class="charsheet__ability-damage-clearall" id="charsheet-btn-ability-damage-clearall" title="Remove all ability damage">Restore all</button>` : ""}
+			</div>
+			<div class="charsheet__ability-damage-editor" id="charsheet-ability-damage-editor" ${wasOpen ? "" : "hidden"}>
+				<div class="charsheet__ability-damage-row">
+					<select class="ve-form-control form-control--minimal charsheet__ability-damage-abl" id="charsheet-sel-ability-damage-abl" aria-label="Ability to damage">
+						${Parser.ABIL_ABVS.map(a => `<option value="${a}">${a.toUpperCase()}</option>`).join("")}
+					</select>
+					<input type="number" class="ve-form-control form-control--minimal charsheet__ability-damage-amount" id="charsheet-ipt-ability-damage-amount" min="1" step="1" inputmode="numeric" placeholder="−N" aria-label="Points of ability damage">
+					<button type="button" class="ve-btn ve-btn-danger ve-btn-xs charsheet__ability-damage-apply" id="charsheet-btn-ability-damage-apply">Apply</button>
+				</div>
+				${hasDamage ? `<div class="charsheet__ability-damage-active" role="list" aria-label="Active ability damage">
+					${Parser.ABIL_ABVS.filter(a => (this._state.getAbilityDamage?.(a) || 0) > 0).map(a => {
+		const d = this._state.getAbilityDamage(a);
+		return `<span class="charsheet__ability-damage-chip" role="listitem"><span class="charsheet__ability-damage-chip-label">🩸 ${a.toUpperCase()} −${d}</span><button type="button" class="charsheet__ability-damage-chip-clear" data-abl="${a}" title="Restore ${a.toUpperCase()} (−${d})" aria-label="Restore ${a.toUpperCase()} ability damage">✕</button></span>`;
+	}).join("")}
+				</div>` : ""}
+			</div>
+		`;
+
+		const toggle = host.querySelector("#charsheet-btn-ability-damage-toggle");
+		const editor = host.querySelector("#charsheet-ability-damage-editor");
+		toggle?.addEventListener("click", () => {
+			const open = editor.hidden;
+			editor.hidden = !open;
+			this._abilityDamageEditorOpen = open;
+			toggle.setAttribute("aria-expanded", String(open));
+			if (open) /** @type {HTMLInputElement} */ (host.querySelector("#charsheet-ipt-ability-damage-amount"))?.focus?.();
+		});
+		host.querySelector("#charsheet-btn-ability-damage-apply")?.addEventListener("click", () => {
+			const abl = /** @type {HTMLSelectElement} */ (host.querySelector("#charsheet-sel-ability-damage-abl"))?.value;
+			const amtEl = /** @type {HTMLInputElement} */ (host.querySelector("#charsheet-ipt-ability-damage-amount"));
+			const amount = Math.max(0, Math.floor(Number(amtEl?.value) || 0));
+			if (!abl || amount <= 0) return;
+			this._state.applyAbilityDamage(abl, amount, {source: "Manual"});
+			this._saveCurrentCharacter();
+			this.renderCharacter();
+		});
+		host.querySelector("#charsheet-btn-ability-damage-clearall")?.addEventListener("click", () => {
+			this._state.clearAllAbilityDamage();
+			this._saveCurrentCharacter();
+			this.renderCharacter();
+		});
+		host.querySelectorAll(".charsheet__ability-damage-chip-clear").forEach(btn => {
+			btn.addEventListener("click", () => {
+				const abl = btn.getAttribute("data-abl");
+				if (!abl) return;
+				this._state.removeAbilityDamage(abl);
+				this._saveCurrentCharacter();
+				this.renderCharacter();
+			});
 		});
 	}
 
@@ -3872,10 +3975,35 @@ class CharacterSheetPage {
 			// (the inner span title would otherwise override the cell's title).
 			modCell.innerHTML = this._formatModWithEffective(canonical, effective, {titleEffective: tooltip});
 			modCell.title = tooltip;
+
+			// Ability-damage drain badge (manual model). Shows the pre-drain → current score,
+			// the magnitude, and a strong warning when a physical stat is fully drained.
+			const drainEl = document.getElementById(`charsheet-ability-${abl}-drain`);
+			if (drainEl) {
+				const drain = this._state.getAbilityDamage?.(abl) || 0;
+				if (drain > 0) {
+					const preDrain = score + drain;
+					const atZero = score === 0;
+					const isPhysical = abl === "str" || abl === "con";
+					drainEl.hidden = false;
+					drainEl.className = `charsheet__ability-drain${atZero ? " charsheet__ability-drain--zero" : ""}`;
+					const badgeHtml = `<span class="charsheet__ability-drain-badge" title="${abl.toUpperCase()} ${preDrain} → ${score} (−${drain} ability damage)">🩸 −${drain}</span>`;
+					const warnHtml = atZero && isPhysical ? `<span class="charsheet__ability-drain-warn" title="${Parser.attAbvToFull(abl)} is 0 — the character is severely incapacitated (this does not automatically kill them)">⚠️ ${abl.toUpperCase()} 0</span>` : "";
+					drainEl.innerHTML = `${badgeHtml}${warnHtml}`;
+				} else {
+					drainEl.hidden = true;
+					drainEl.innerHTML = "";
+				}
+			}
 		});
 
 		// Update prominent passive scores display
 		this._renderPassiveScores();
+
+		// Ability-damage affordance (bar label, Restore-all, and active-drain chip list)
+		// is data-driven, so refresh it here in the hot render path — _renderAbilities
+		// (structural) is not called on every in-place re-render.
+		this._renderAbilityDamageAffordance();
 	}
 
 	_renderPassiveScores () {
@@ -4250,6 +4378,197 @@ class CharacterSheetPage {
 
 		// Update HP percentage text
 		(/** @type {*} */ (document.getElementById("charsheet-hp-percent"))).textContent = `${Math.round(hpPercent)}%`;
+
+		// Streamlined damage/heal intake (amount + type picker + live preview + defenses strip).
+		this._renderDamageIntake();
+	}
+
+	/**
+	 * The canonical 13 damage types plus an "untyped" sentinel, each with an icon for the
+	 * inline damage-type picker. Kept local to the sheet's emoji iconography.
+	 * @type {Array<{id: (string|null), label: string, icon: string}>}
+	 */
+	static get DAMAGE_INTAKE_TYPES () {
+		return [
+			{id: null, label: "Untyped", icon: "◇"},
+			{id: "acid", label: "Acid", icon: "🧪"},
+			{id: "bludgeoning", label: "Bludgeoning", icon: "🔨"},
+			{id: "cold", label: "Cold", icon: "❄️"},
+			{id: "fire", label: "Fire", icon: "🔥"},
+			{id: "force", label: "Force", icon: "🌀"},
+			{id: "lightning", label: "Lightning", icon: "⚡"},
+			{id: "necrotic", label: "Necrotic", icon: "💀"},
+			{id: "piercing", label: "Piercing", icon: "🗡️"},
+			{id: "poison", label: "Poison", icon: "☠️"},
+			{id: "psychic", label: "Psychic", icon: "🧠"},
+			{id: "radiant", label: "Radiant", icon: "☀️"},
+			{id: "slashing", label: "Slashing", icon: "⚔️"},
+			{id: "thunder", label: "Thunder", icon: "🌩️"},
+		];
+	}
+
+	_getDamageIntakeType (id) {
+		return CharacterSheetPage.DAMAGE_INTAKE_TYPES.find(t => t.id === (id ?? null)) || CharacterSheetPage.DAMAGE_INTAKE_TYPES[0];
+	}
+
+	/**
+	 * Render the inline damage/heal intake control: sync the type trigger to the
+	 * session-remembered type, enable/disable Apply buttons on the current amount, paint the
+	 * live mitigated preview, and refresh the read-only defenses chip strip. The mitigation
+	 * engine is never invoked to mutate here — the preview uses `applyDamageDefenses` purely
+	 * as a pure function.
+	 */
+	_renderDamageIntake () {
+		const amountEl = /** @type {HTMLInputElement} */ (document.getElementById("charsheet-ipt-dmg-amount"));
+		if (!amountEl) return; // control not present (defensive)
+
+		const typeInfo = this._getDamageIntakeType(this._lastDamageType);
+		const iconEl = document.getElementById("charsheet-dmg-type-icon");
+		const labelEl = document.getElementById("charsheet-dmg-type-label");
+		if (iconEl) iconEl.textContent = typeInfo.icon;
+		if (labelEl) labelEl.textContent = typeInfo.label;
+
+		const amount = Math.max(0, Math.floor(Number(amountEl.value) || 0));
+		const hasAmount = amount > 0;
+		const btnDamage = /** @type {HTMLButtonElement} */ (document.getElementById("charsheet-btn-dmg-apply"));
+		const btnHeal = /** @type {HTMLButtonElement} */ (document.getElementById("charsheet-btn-heal-apply"));
+		if (btnDamage) btnDamage.disabled = !hasAmount;
+		if (btnHeal) btnHeal.disabled = !hasAmount;
+
+		// Live mitigated preview (Damage only). No mutation.
+		const previewEl = document.getElementById("charsheet-dmg-preview");
+		if (previewEl) {
+			if (!hasAmount) {
+				previewEl.textContent = "";
+				previewEl.className = "charsheet__dmg-preview";
+			} else {
+				const preview = this._state.applyDamageDefenses(amount, this._lastDamageType, {});
+				const mitigated = preview.damage;
+				let reason = "";
+				let tone = "plain";
+				if (preview.applied === "immunity") {
+					reason = "Immune"; tone = "immune";
+				} else if (preview.applied === "resistance") {
+					reason = "Resisted"; tone = "resist";
+				} else if (preview.applied === "vulnerability") {
+					reason = "Vulnerable"; tone = "vuln";
+				} else if (preview.reduction) {
+					reason = `−${preview.reduction} reduction`; tone = "resist";
+				}
+
+				const changed = mitigated !== amount;
+				const text = changed
+					? `${amount} → ${mitigated}${reason ? ` · ${reason}` : ""}`
+					: `${mitigated}${reason ? ` · ${reason}` : ""}`;
+				previewEl.textContent = text;
+				previewEl.className = `charsheet__dmg-preview charsheet__dmg-preview--${tone}`;
+			}
+		}
+
+		this._renderDamageIntakeDefenses();
+	}
+
+	/**
+	 * Read-only chip strip of the character's current resistances / immunities /
+	 * vulnerabilities beneath the intake control. Purely informational — there is no editor.
+	 */
+	_renderDamageIntakeDefenses () {
+		const el = document.getElementById("charsheet-dmg-defenses");
+		if (!el) return;
+		const def = this._state.getEffectiveDefenses?.() || {};
+		const fmt = (s) => CharacterSheetClassUtils.escapeHtml(String(s).replace(/\b\w/g, c => c.toUpperCase()));
+		const chip = (type, cls, icon) => `<span class="charsheet__dmg-def-chip charsheet__dmg-def-chip--${cls}"><span aria-hidden="true">${icon}</span> ${fmt(type)}</span>`;
+		const parts = [];
+		(def.resistances || []).forEach(t => parts.push(chip(t, "resist", "🛡️")));
+		(def.immunities || []).forEach(t => parts.push(chip(t, "immune", "🚫")));
+		(def.vulnerabilities || []).forEach(t => parts.push(chip(t, "vuln", "⚠️")));
+		el.innerHTML = parts.length ? parts.join("") : `<span class="charsheet__dmg-def-none ve-muted">No damage defenses</span>`;
+		el.hidden = false;
+	}
+
+	/**
+	 * Brief, non-blocking flash on the HP bar announcing what a damage/heal apply did.
+	 * Motion conveys state only (a short fade), matching the design doctrine.
+	 * @param {string} text
+	 * @param {"damage"|"heal"} kind
+	 */
+	_flashHpBar (text, kind) {
+		const host = document.querySelector(".charsheet__hp-bar-container");
+		if (!host) return;
+		const prev = host.querySelector(".charsheet__hp-flash");
+		if (prev) prev.remove();
+		const flash = e_({outer: `<div class="charsheet__hp-flash charsheet__hp-flash--${kind}" role="status">${CharacterSheetClassUtils.escapeHtml(text)}</div>`});
+		host.appendChild(flash);
+		// Force reflow so the enter transition runs, then schedule removal.
+		void (/** @type {HTMLElement} */ (flash)).offsetWidth;
+		flash.classList.add("charsheet__hp-flash--in");
+		setTimeout(() => {
+			flash.classList.remove("charsheet__hp-flash--in");
+			setTimeout(() => flash.remove(), 250);
+		}, 1400);
+	}
+
+	/**
+	 * Toggle the inline damage-type picker menu, lazily painting its options.
+	 * @param {boolean} [open]
+	 */
+	_toggleDamageTypeMenu (open) {
+		const menu = document.getElementById("charsheet-dmg-type-menu");
+		const trigger = document.getElementById("charsheet-btn-dmg-type");
+		if (!menu || !trigger) return;
+		const willOpen = open ?? menu.hidden;
+		if (willOpen) {
+			menu.innerHTML = CharacterSheetPage.DAMAGE_INTAKE_TYPES.map(t => {
+				const isSel = (t.id ?? null) === (this._lastDamageType ?? null);
+				return `<button type="button" class="charsheet__dmg-type-option${isSel ? " charsheet__dmg-type-option--selected" : ""}" role="option" aria-selected="${isSel}" data-dmg-type="${t.id ?? ""}"><span aria-hidden="true">${t.icon}</span> ${CharacterSheetClassUtils.escapeHtml(t.label)}</button>`;
+			}).join("");
+			menu.querySelectorAll("[data-dmg-type]").forEach(btn => {
+				btn.addEventListener("click", () => {
+					const raw = btn.getAttribute("data-dmg-type");
+					this._lastDamageType = raw || null;
+					this._toggleDamageTypeMenu(false);
+					this._renderDamageIntake();
+				});
+			});
+		}
+		menu.hidden = !willOpen;
+		trigger.setAttribute("aria-expanded", String(willOpen));
+	}
+
+	/**
+	 * Apply the amount currently in the intake field as damage, reusing the full damage
+	 * pipeline (`_pApplyDamage`) so defenses, Death Ward, interventions and concentration
+	 * all behave identically to the modal button. Clears the amount on success.
+	 */
+	async _onDamageIntakeApply () {
+		const amountEl = /** @type {HTMLInputElement} */ (document.getElementById("charsheet-ipt-dmg-amount"));
+		if (!amountEl) return;
+		const amount = Math.max(0, Math.floor(Number(amountEl.value) || 0));
+		if (amount <= 0) return;
+		await this._pApplyDamage(amount, {damageType: this._lastDamageType});
+		amountEl.value = "";
+		this._renderDamageIntake();
+	}
+
+	/**
+	 * Apply the amount currently in the intake field as healing via the model's `heal`
+	 * (clamped at max HP by the model). Clears the amount on success.
+	 */
+	_onHealIntakeApply () {
+		const amountEl = /** @type {HTMLInputElement} */ (document.getElementById("charsheet-ipt-dmg-amount"));
+		if (!amountEl) return;
+		const amount = Math.max(0, Math.floor(Number(amountEl.value) || 0));
+		if (amount <= 0) return;
+		const before = this._state.getCurrentHp();
+		this._state.heal(amount);
+		const gained = this._state.getCurrentHp() - before;
+		this._saveCurrentCharacter();
+		this._renderHp();
+		this._renderConditions();
+		this._showDiceResult("Healing", gained, `Healed ${gained} HP`);
+		this._flashHpBar(`+${gained}`, "heal");
+		amountEl.value = "";
+		this._renderDamageIntake();
 	}
 
 	_renderCombatStats () {
@@ -12509,6 +12828,24 @@ class CharacterSheetPage {
 			}) === true;
 		}
 
+		await this._pApplyDamage(amount, {damageType, isMagicalDamage});
+	}
+
+	/**
+	 * Apply damage that has already been fully specified (amount + optional type + magical
+	 * flag), routing through the model's `takeDamage` so Death Ward, the drop-to-0
+	 * interventions, material reactions and the concentration check all fire exactly as they
+	 * do for the modal Damage button.
+	 *
+	 * Extracted from {@link _onDamage} so the inline HP-block damage control can reuse the
+	 * identical tail without re-prompting through modals.
+	 * @param {number} amount
+	 * @param {object} [opts]
+	 * @param {string|null} [opts.damageType]
+	 * @param {boolean} [opts.isMagicalDamage]
+	 * @returns {Promise<object>} the mitigation preview that was applied
+	 */
+	async _pApplyDamage (amount, {damageType = null, isMagicalDamage = false} = {}) {
 		const preview = this._state.applyDamageDefenses(amount, damageType, {isMagicalDamage});
 
 		// CS-BUG-081: route through the model. This method used to hand-roll the temp-HP and
@@ -12529,6 +12866,12 @@ class CharacterSheetPage {
 		const suffix = steps.length ? ` (${amount}${damageType ? ` ${damageType}` : ""} → ${preview.damage} after ${steps.join(", then ")})` : "";
 		this._showDiceResult("Damage", preview.damage, `Took ${preview.damage} damage${suffix}`);
 
+		// Brief inline flash on the HP bar summarising what landed.
+		const flashParts = [`−${preview.damage}`];
+		if (damageType) flashParts.push(damageType);
+		if (preview.applied) flashParts.push(`· ${preview.applied}`);
+		this._flashHpBar(flashParts.join(" "), "damage");
+
 		// Offer any drop-to-0 intervention the character has (Strength of the Grave, …).
 		await this._pOfferZeroHpIntervention();
 
@@ -12541,6 +12884,7 @@ class CharacterSheetPage {
 		if (this._state.isConcentrating?.()) {
 			await this._promptConcentrationCheck(preview.damage);
 		}
+		return preview;
 	}
 
 	/**

@@ -9263,6 +9263,16 @@ class CharacterSheetState {
 		// getAbilityScore is a hot path and must not recurse through the effect collector.
 		computed += this._getAbilityScoreBonusFromStatesRaw(ability);
 
+		// Ability-score damage (manual model). Applied LAST and floored at 0 — unlike the
+		// natural minimum of 3 an ability normally has, ability *damage* can reduce a score
+		// all the way to 0 (RAW: a score of 0 means incapacity, not death). Read raw from
+		// active states so this stays on the getAbilityScore hot path without recursing
+		// through the effect collector. Note: the Wild Shape branch above returns early, so a
+		// drain never touches a borrowed beast's physical scores — the drain rides the
+		// character, and reverting Wild Shape reveals it again.
+		const abilityDamage = this._getAbilityDamageFromStatesRaw(ability);
+		if (abilityDamage > 0) computed = Math.max(0, computed - abilityDamage);
+
 		return computed;
 	}
 
@@ -9285,6 +9295,29 @@ class CharacterSheetState {
 			}
 		}
 		return bonus;
+	}
+
+	/**
+	 * Sum of `abilityDamage` customEffects on currently-active states for one ability.
+	 *
+	 * Mirrors {@link _getAbilityScoreBonusFromStatesRaw}: reads `_data.activeStates` directly
+	 * (not `getActiveStateEffects()`) so it stays cheap and recursion-free for the
+	 * getAbilityScore hot path. Ability damage is authored as active states carrying an
+	 * `{type:"abilityDamage", target:<ability>, value:N}` effect (see applyAbilityDamage),
+	 * which is why it serializes and survives reload for free.
+	 * @param {string} ability
+	 * @returns {number} total (positive) points of damage to subtract
+	 * @private
+	 */
+	_getAbilityDamageFromStatesRaw (ability) {
+		let total = 0;
+		for (const state of this._data.activeStates || []) {
+			if (!state.active) continue;
+			for (const e of state.customEffects || []) {
+				if (e.type === "abilityDamage" && e.target === ability) total += Math.abs(Number(e.value) || 0);
+			}
+		}
+		return total;
 	}
 
 	// Alias for compatibility
@@ -61576,6 +61609,104 @@ class CharacterSheetState {
 	 */
 	isInCombat () { return !!this._data.inCombat; }
 
+	// #endregion
+
+	// #region Ability-score damage (manual model)
+	/**
+	 * Apply ability-score damage as a serialized active state.
+	 *
+	 * Ability damage is modeled as a `custom` active state carrying a single
+	 * `{type:"abilityDamage", target:<ability>, value:N}` effect, rather than as a new field
+	 * on `_data`. That choice buys three things for free: it serializes through the existing
+	 * active-state save/load path, it survives reload, and {@link getAbilityScore} already
+	 * subtracts it — so every derived stat (mod, AC via DEX, saves, skills, carry capacity)
+	 * cascades automatically with no extra wiring.
+	 *
+	 * Each call adds a SEPARATE state so multiple drains stack and can be cleared
+	 * individually (`sourceFeatureId` is uniquified per call). This never touches HP or death
+	 * state: STR/CON reaching 0 is a severe condition but not, by itself, lethal.
+	 * @param {string} ability - three-letter key ("str", "dex", …)
+	 * @param {number} amount - points of damage (magnitude; sign ignored)
+	 * @param {object} [opts]
+	 * @param {string} [opts.source] - human label for where the drain came from
+	 * @returns {string|null} the created state id, or null if the input was invalid
+	 */
+	applyAbilityDamage (ability, amount, {source = null} = {}) {
+		if (!Parser.ABIL_ABVS.includes(ability)) return null;
+		const value = Math.abs(Math.floor(Number(amount) || 0));
+		if (value <= 0) return null;
+		const label = Parser.attAbvToFull(ability);
+		return this.addActiveState("custom", {
+			name: `Ability Damage: ${ability.toUpperCase()}`,
+			icon: "🩸",
+			description: source ? `−${value} ${label} (${source})` : `−${value} ${label}`,
+			sourceFeatureId: `abilityDamage:${ability}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+			customEffects: [{type: "abilityDamage", target: ability, value, source: source || null}],
+		});
+	}
+
+	/**
+	 * All active-state ids that carry an `abilityDamage` effect for the given ability
+	 * (or every ability when `ability` is omitted).
+	 * @param {string|null} [ability]
+	 * @returns {string[]}
+	 * @private
+	 */
+	_getAbilityDamageStateIds (ability = null) {
+		const ids = [];
+		for (const state of this._data.activeStates || []) {
+			if (!state.active) continue;
+			const hit = (state.customEffects || []).some(e => e.type === "abilityDamage" && (!ability || e.target === ability));
+			if (hit) ids.push(state.id);
+		}
+		return ids;
+	}
+
+	/**
+	 * Total points of ability damage currently applied to one ability.
+	 * @param {string} ability
+	 * @returns {number}
+	 */
+	getAbilityDamage (ability) {
+		return this._getAbilityDamageFromStatesRaw(ability);
+	}
+
+	/**
+	 * True when any ability currently has ability damage.
+	 * @returns {boolean}
+	 */
+	hasAnyAbilityDamage () {
+		return this._getAbilityDamageStateIds().length > 0;
+	}
+
+	/**
+	 * Sum of ability damage across every ability (used for the rest-menu "restore −N" label).
+	 * @returns {number}
+	 */
+	getTotalAbilityDamage () {
+		return Parser.ABIL_ABVS.reduce((acc, abl) => acc + this._getAbilityDamageFromStatesRaw(abl), 0);
+	}
+
+	/**
+	 * Remove ability damage for a single ability (all stacked drains on it).
+	 * @param {string} ability
+	 * @returns {number} count of drains removed
+	 */
+	removeAbilityDamage (ability) {
+		const ids = this._getAbilityDamageStateIds(ability);
+		ids.forEach(id => this.removeActiveState(id));
+		return ids.length;
+	}
+
+	/**
+	 * Remove every ability-damage drain (used by the long rest restore action).
+	 * @returns {number} count of drains removed
+	 */
+	clearAllAbilityDamage () {
+		const ids = this._getAbilityDamageStateIds();
+		ids.forEach(id => this.removeActiveState(id));
+		return ids.length;
+	}
 	// #endregion
 
 	/**
