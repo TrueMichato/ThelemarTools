@@ -28,6 +28,14 @@ class _ManageExistingEntitiesUi extends BaseComponent {
 					await this._parent.pDoHandleClickDownloadJson({uniqueIds: this._getSelectedUniqueIds()});
 				},
 			),
+			this._parent.pDoHandleClickDownloadJsonPortable
+				? new ContextUtil.Action(
+					"Download Portable JSON",
+					async () => {
+						await this._parent.pDoHandleClickDownloadJsonPortable({uniqueIds: this._getSelectedUniqueIds()});
+					},
+				)
+				: null,
 			new ContextUtil.Action(
 				"Download Markdown",
 				async () => {
@@ -179,6 +187,14 @@ class _ManageExistingEntitiesUi extends BaseComponent {
 					await this._parent.pHandleClick_downloadJsonUniqueId(ent.uniqueId);
 				},
 			),
+			this._parent.pHandleClick_downloadJsonUniqueIdPortable
+				? new ContextUtil.Action(
+					"Download Portable JSON",
+					async () => {
+						await this._parent.pHandleClick_downloadJsonUniqueIdPortable(ent.uniqueId);
+					},
+				)
+				: null,
 			null,
 			new ContextUtil.Action(
 				"View Markdown",

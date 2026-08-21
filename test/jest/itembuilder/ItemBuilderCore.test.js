@@ -771,7 +771,7 @@ describe("ItemBuilderCore", () => {
 		expect(canonical).toEqual(expect.objectContaining({
 			baseItem: "Longsword|PHB",
 			dmg1: "1d8",
-			material: {name: "starsteel", source: ""},
+			material: {name: "starsteel", source: "TGTT"},
 		}));
 		expect(ItemBuilderCore.projectForPreview(ItemBuilderCore.fromItem(canonical), catalogs).dmg1).toBe("1d10");
 	});
@@ -791,6 +791,119 @@ describe("ItemBuilderCore", () => {
 		expect(draft.material).toEqual(item.material);
 		expect(draft.upgrades).toEqual(item.appliedUpgrades);
 		expect(draft.gemstone).toEqual(item.socketedGemstones[0]);
+	});
+
+	test("preserves material role and resonance in the canonical reference", () => {
+		const draft = ItemBuilderCore.createDraft({source: "HB"});
+		draft.material = {
+			name: "Dragonbone",
+			source: "TGTT",
+			role: "strikingSurface",
+			resonance: {name: "Ember Domain", source: "TGTT"},
+		};
+
+		expect(ItemBuilderCore.serialize(draft).material).toEqual(draft.material);
+	});
+
+	test("projects canonical composition idempotently for site rendering and search", () => {
+		const item = {
+			...ITEMS[0],
+			material: {name: "Starsteel", source: "TGTT"},
+			appliedUpgrades: [{name: "Balanced", source: "TCAH"}],
+			socketedGemstones: [{name: "Journey", source: "TGTT"}],
+		};
+		const catalogs = {materials: MATERIALS, upgrades: UPGRADES};
+
+		const first = ItemBuilderCore.projectItem(item, catalogs);
+		const second = ItemBuilderCore.projectItem(first, catalogs);
+
+		expect(first.dmg1).toBe("1d10");
+		expect(first.bonusWeaponAttack).toBe(1);
+		expect(second).toEqual(first);
+		expect(first._compositionRaw).toEqual(item);
+		expect(first._compositionSearch).toEqual(expect.arrayContaining(["Starsteel", "Balanced", "Journey"]));
+		expect(first._composition.displayEntries).toHaveLength(3);
+		expect(first.entries.map(it => it?.name).filter(Boolean)).not.toEqual(expect.arrayContaining([
+			"Item Builder: Material - Starsteel",
+			"Item Builder: Upgrade - Balanced",
+			"Item Builder: Gem - Journey",
+		]));
+	});
+
+	test("applies case-variant duplicate upgrade UIDs only once", () => {
+		const item = {
+			...ITEMS[0],
+			appliedUpgrades: [
+				{name: "Balanced", source: "TCAH"},
+				{name: "balanced", source: "tcah"},
+			],
+		};
+
+		const projected = ItemBuilderCore.projectItem(item, {upgrades: UPGRADES});
+
+		expect(projected.bonusWeaponAttack).toBe(1);
+		expect(projected._compositionRaw.appliedUpgrades).toEqual([{name: "Balanced", source: "TCAH"}]);
+	});
+
+	test("migrates generated legacy composition only when the catalog match is unique", () => {
+		const legacy = {
+			...ITEMS[0],
+			entries: [
+				...ITEMS[0].entries,
+				{type: "entries", name: "Item Builder: Material - Starsteel", entries: ["Legacy material prose."]},
+				{type: "entries", name: "Item Builder: Upgrade - Balanced", entries: ["Legacy upgrade prose."]},
+			],
+		};
+		const unique = ItemBuilderCore.migrateLegacyComposition(legacy, {materials: MATERIALS, upgrades: UPGRADES});
+		expect(unique.item.material).toEqual({name: "Starsteel", source: "TGTT"});
+		expect(unique.item.appliedUpgrades).toEqual([{name: "Balanced", source: "TCAH"}]);
+		expect(unique.warnings).toEqual([]);
+
+		const ambiguous = ItemBuilderCore.migrateLegacyComposition(legacy, {
+			materials: [...MATERIALS, {...MATERIALS[0], source: "ALT"}],
+			upgrades: UPGRADES,
+		});
+		expect(ambiguous.item).not.toHaveProperty("material");
+		expect(ambiguous.item.entries).toEqual(legacy.entries);
+		expect(ambiguous.warnings).toContainEqual(expect.objectContaining({kind: "Material", reason: "ambiguous"}));
+
+		const projectedAmbiguous = ItemBuilderCore.projectItem(legacy, {
+			materials: [...MATERIALS, {...MATERIALS[0], source: "ALT"}],
+			upgrades: UPGRADES,
+		});
+		expect(projectedAmbiguous.entries).toContainEqual(expect.objectContaining({
+			name: "Item Builder: Material - Starsteel",
+			entries: ["Legacy material prose."],
+		}));
+	});
+
+	test("builds an importable portable brew with the exact composition dependency closure", () => {
+		const resonance = {name: "Ember Domain", source: "TGTT", entries: ["Embers answer the bearer."], _entityType: "draconicResonance"};
+		const item = {
+			...ITEMS[0],
+			source: "HB",
+			material: {
+				name: "Starsteel",
+				source: "TGTT",
+				role: "strikingSurface",
+				resonance: {name: resonance.name, source: resonance.source},
+			},
+			appliedUpgrades: [{name: "Balanced", source: "TCAH"}],
+			socketedGemstones: [{name: "Journey", source: "TGTT"}],
+			bonusWeaponAttack: undefined,
+		};
+		const sourceMeta = [{json: "HB", abbreviation: "HB", full: "Homebrew"}, {json: "TGTT", abbreviation: "TGTT", full: "Thelemar"}];
+		const {brew, missing} = ItemBuilderCore.getPortableBrew({
+			items: [item],
+			catalogs: {materials: MATERIALS, upgrades: UPGRADES, resonances: [resonance], sources: sourceMeta},
+		});
+
+		expect(missing).toEqual([]);
+		expect(brew.item).toEqual([item]);
+		expect(brew.itemMaterial).toEqual([MATERIALS[0]]);
+		expect(brew.itemUpgrade.map(it => it.name)).toEqual(["Balanced", "Journey"]);
+		expect(brew.draconicResonance).toEqual([{name: resonance.name, source: resonance.source, entries: resonance.entries}]);
+		expect(brew._meta.sources).toEqual(sourceMeta);
 	});
 });
 

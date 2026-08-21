@@ -32,6 +32,8 @@
 		"test:manual": "npm run test:manual:credits && npm run test:manual:page-numbers && npm run test:manual:page-generator && npm run test:manual:tags-future && npm run test:manual:homebrew-tags -- --dir \"../homebrew\"",
 		"lint:data": "node node/prettify-data/prettify-data.js",
 		"test:json": "node test/test-json.js",
+		"test:combatmethods-schema": "node test/test-combatmethods-schema.js",
+		"test:item-composition": "node test/test-item-composition.js",
 		"test:tags": "node test/test-tags.js",
 		"test:unit": "node --localstorage-file test/localstorage.tmp --experimental-vm-modules node_modules/jest/bin/jest.js",
 		"test:e2e": "npx playwright test",

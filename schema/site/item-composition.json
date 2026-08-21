@@ -1,0 +1,89 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "item-composition.json",
+	"title": "Item Composition",
+	"description": "Repository-owned extension for reusable item material, upgrade, and gemstone references. Character-instance state such as degradation, destroyed flags, paid costs, and timestamps does not belong here.",
+	"type": "object",
+	"properties": {
+		"material": {
+			"$ref": "#/$defs/itemMaterialAssignment"
+		},
+		"appliedUpgrades": {
+			"$ref": "#/$defs/itemAppliedUpgrades"
+		},
+		"socketedGemstones": {
+			"$ref": "#/$defs/itemSocketedGemstones"
+		}
+	},
+	"additionalProperties": false,
+	"$defs": {
+		"itemComponentRef": {
+			"type": "object",
+			"description": "A source-qualified reusable component identity. Character-instance state is forbidden.",
+			"properties": {
+				"name": {
+					"type": "string",
+					"minLength": 1
+				},
+				"source": {
+					"type": "string",
+					"minLength": 1
+				}
+			},
+			"required": [
+				"name",
+				"source"
+			],
+			"additionalProperties": false
+		},
+		"itemMaterialRole": {
+			"type": "string",
+			"enum": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			]
+		},
+		"itemMaterialAssignment": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string",
+					"minLength": 1
+				},
+				"source": {
+					"type": "string",
+					"minLength": 1
+				},
+				"role": {
+					"$ref": "#/$defs/itemMaterialRole"
+				},
+				"resonance": {
+					"$ref": "#/$defs/itemComponentRef"
+				}
+			},
+			"required": [
+				"name",
+				"source"
+			],
+			"additionalProperties": false
+		},
+		"itemAppliedUpgrades": {
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/itemComponentRef"
+			},
+			"minItems": 1,
+			"uniqueItems": true
+		},
+		"itemSocketedGemstones": {
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/itemComponentRef"
+			},
+			"minItems": 1,
+			"maxItems": 1,
+			"uniqueItems": true
+		}
+	}
+}

@@ -24,6 +24,16 @@ import {CharacterSheetUpgrades} from "./charactersheet-upgrades.js";
 import {CharacterSheetMaterials} from "./charactersheet-materials.js";
 import {CharacterSheetPlayMode} from "./charactersheet-playmode.js";
 import * as CharacterSheetBuffPickerHelpers from "./charactersheet-buffpicker-helpers.js";
+
+const _dedupeCompositionCatalog = entities => {
+	const seen = new Set();
+	return (entities || []).filter(it => {
+		const key = `${String(it?.name || "").toLowerCase()}|${String(it?.source || "").toLowerCase()}`;
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
+};
 import {CharacterSheetDruidResources} from "./charactersheet-druid-resources.js";
 import {CharacterSheetIoun} from "./charactersheet-ioun.js";
 import {CharacterSheetSpawnSpec, CharacterSheetSpawnRng} from "./charactersheet-spawn.js";
@@ -343,7 +353,7 @@ class CharacterSheetPage {
 		// Load all necessary data in parallel
 		// Note: Using loadRawJSON for classes to get classFeature and subclassFeature arrays
 		// Also pre-cache class/subclass features in DataLoader so hover links work properly
-		const [races, classes, backgrounds, spells, items, brewItems, prereleaseItems, actions, feats, optFeatures, skills, conditionsData, languagesData, combatMethods, itemUpgrades, prereleaseData, brewData, variantComponents] = await Promise.all([
+		const [races, classes, backgrounds, spells, items, brewItems, prereleaseItems, actions, feats, optFeatures, skills, conditionsData, languagesData, combatMethods, itemUpgrades, itemMaterials, prereleaseData, brewData, variantComponents] = await Promise.all([
 			DataUtil.race.loadJSON(),
 			DataUtil.class.loadRawJSON(),
 			DataUtil.loadJSON("data/backgrounds.json"),
@@ -362,6 +372,7 @@ class CharacterSheetPage {
 			DataUtil.loadJSON("data/languages.json"),
 			DataUtil.combatmethod.loadJSON().catch(() => ({combatMethod: []})),
 			DataUtil.itemUpgrade.loadJSON().catch(() => ({itemUpgrade: []})),
+			DataUtil.itemMaterial.loadJSON().catch(() => ({itemMaterial: []})),
 			// Load homebrew/prerelease data (for non-item entities)
 			PrereleaseUtil.pGetBrewProcessed(),
 			BrewUtil2.pGetBrewProcessed(),
@@ -389,13 +400,10 @@ class CharacterSheetPage {
 		this._combatMethodsData = (combatMethods.combatMethod || []).map(m => ({...m, _entityType: "combatMethod"}));
 		this._state.setCombatMethodCatalog(this._combatMethodsData);
 		this._itemUpgradesData = (itemUpgrades.itemUpgrade || []).map(u => ({...u, _entityType: "itemUpgrade"}));
-		// Item materials are homebrew-only (no site data file); the catalog starts
-		// empty and is populated from brew in _mergeBrewData.
-		this._itemMaterialsData = [];
+		this._itemMaterialsData = (itemMaterials.itemMaterial || []).map(m => ({...m, _entityType: "itemMaterial"}));
 		// Feature-granted companion stat blocks are homebrew-only too.
 		this._brewMonstersData = [];
-		// Draconic domain resonances are likewise homebrew-only.
-		this._draconicResonancesData = [];
+		this._draconicResonancesData = (itemMaterials.draconicResonance || []).map(r => ({...r, _entityType: "draconicResonance"}));
 		// Divine Favor gods are homebrew-only (no site data file); the catalog starts
 		// empty and is populated from brew in _mergeBrewData.
 		this._divineFavorData = [];
@@ -765,13 +773,13 @@ class CharacterSheetPage {
 		// Item upgrades (TGTT gemstones, etc.)
 		if (brewData.itemUpgrade?.length) {
 			const brewUpgrades = MiscUtil.copyFast(brewData.itemUpgrade).map(u => ({...u, _entityType: "itemUpgrade"}));
-			this._itemUpgradesData = [...this._itemUpgradesData, ...brewUpgrades];
+			this._itemUpgradesData = _dedupeCompositionCatalog([...this._itemUpgradesData, ...brewUpgrades]);
 		}
 
 		// Item materials (TGTT — what an item is made of)
 		if (brewData.itemMaterial?.length) {
 			const brewMaterials = MiscUtil.copyFast(brewData.itemMaterial).map(m => ({...m, _entityType: "itemMaterial"}));
-			this._itemMaterialsData = [...this._itemMaterialsData, ...brewMaterials];
+			this._itemMaterialsData = _dedupeCompositionCatalog([...this._itemMaterialsData, ...brewMaterials]);
 			this._state.setItemMaterialCatalog(this._itemMaterialsData);
 			if (this._materials) this._materials.setMaterials(this._itemMaterialsData);
 		}
@@ -786,7 +794,7 @@ class CharacterSheetPage {
 		// Draconic domain resonances (TGTT — carried by items made of solid dragon remains)
 		if (brewData.draconicResonance?.length) {
 			const brewResonances = MiscUtil.copyFast(brewData.draconicResonance).map(r => ({...r, _entityType: "draconicResonance"}));
-			this._draconicResonancesData = [...this._draconicResonancesData, ...brewResonances];
+			this._draconicResonancesData = _dedupeCompositionCatalog([...this._draconicResonancesData, ...brewResonances]);
 			this._state.setDraconicResonanceCatalog(this._draconicResonancesData);
 			if (this._materials) this._materials.setResonances(this._draconicResonancesData);
 		}
@@ -19144,7 +19152,7 @@ class CharacterSheetPage {
 	getCombatMethodEntities () { return this._combatMethodsData; }
 	getItemUpgrades () { return this._itemUpgradesData; }
 	getUpgradesModule () { return this._upgrades; }
-	/** @returns {Array<*>} All known item materials (homebrew only). */
+	/** @returns {Array<*>} All known item materials (site data plus homebrew). */
 	getItemMaterials () { return this._itemMaterialsData; }
 	getDraconicResonances () { return this._draconicResonancesData; }
 	getMaterialsModule () { return this._materials; }

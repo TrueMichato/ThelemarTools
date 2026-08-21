@@ -1,0 +1,114 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "combatmethods.json",
+	"title": "Combat Methods",
+	"description": "Repository-owned schema for combat methods used by the Combat Methods page and character sheet.",
+	"type": "object",
+	"properties": {
+		"_meta": {
+			"$ref": "util.json#/$defs/metaBlock"
+		},
+		"combatMethod": {
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/combatMethod"
+			},
+			"uniqueItems": true
+		}
+	},
+	"required": [
+		"combatMethod"
+	],
+	"additionalProperties": false,
+	"$defs": {
+		"combatMethod": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string",
+					"minLength": 1
+				},
+				"source": {
+					"$ref": "util.json#/$defs/source"
+				},
+				"page": {
+					"$ref": "util.json#/$defs/page"
+				},
+				"edition": {
+					"$ref": "util-edition.json#/$defs/edition"
+				},
+				"tradition": {
+					"type": "string",
+					"minLength": 1
+				},
+				"degree": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 5
+				},
+				"staminaCost": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"actionType": {
+					"type": "string",
+					"minLength": 1
+				},
+				"isStance": {
+					"type": "boolean"
+				},
+				"prerequisite": {
+					"$ref": "util.json#/$defs/prerequisite"
+				},
+				"entries": {
+					"type": "array",
+					"items": {
+						"$ref": "entry.json"
+					},
+					"minItems": 1
+				},
+				"additionalSources": {
+					"$ref": "util.json#/$defs/additionalSources"
+				},
+				"otherSources": {
+					"$ref": "util.json#/$defs/otherSources"
+				},
+				"referenceSources": {
+					"$ref": "util.json#/$defs/referenceSources"
+				},
+				"reprintedAs": {
+					"$ref": "util.json#/$defs/reprintedAs"
+				},
+				"legacy": {
+					"$ref": "util.json#/$defs/legacy"
+				},
+				"hasFluff": {
+					"const": true
+				},
+				"hasFluffImages": {
+					"const": true
+				},
+				"srd": {
+					"$ref": "util.json#/$defs/srd"
+				},
+				"srd52": {
+					"$ref": "util.json#/$defs/srd"
+				},
+				"basicRules": {
+					"$ref": "util.json#/$defs/basicRules"
+				},
+				"basicRules2024": {
+					"$ref": "util.json#/$defs/basicRules"
+				}
+			},
+			"required": [
+				"name",
+				"source",
+				"tradition",
+				"degree",
+				"entries"
+			],
+			"additionalProperties": false
+		}
+	}
+}

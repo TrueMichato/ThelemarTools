@@ -391,6 +391,13 @@ class PageFilterItems extends PageFilterEquipment {
 		this._immuneFilter = FilterCommon.getDamageImmuneFilter();
 		this._defenseFilter = new MultiFilter({header: "Damage", filters: [this._vulnerableFilter, this._resistFilter, this._immuneFilter]});
 		this._conditionImmuneFilter = FilterCommon.getConditionImmuneFilter();
+		const fnDisplayComposition = uid => {
+			const [name, source] = String(uid).split("|");
+			return `${name}${source ? ` (${Parser.sourceJsonToAbv(source)})` : ""}`;
+		};
+		this._materialFilter = new SearchableFilter({header: "Material", displayFn: fnDisplayComposition, itemSortFn: SortUtil.ascSortLower});
+		this._upgradeFilter = new SearchableFilter({header: "Upgrade", displayFn: fnDisplayComposition, itemSortFn: SortUtil.ascSortLower});
+		this._gemstoneFilter = new SearchableFilter({header: "Gemstone", displayFn: fnDisplayComposition, itemSortFn: SortUtil.ascSortLower});
 	}
 
 	static mutateForFilters (item) {
@@ -409,6 +416,12 @@ class PageFilterItems extends PageFilterEquipment {
 		if (item.grantsProficiency) item._fMisc.push("Grants Proficiency");
 		if (item.grantsLanguage) item._fMisc.push("Grants Language");
 		if (item.critThreshold) item._fMisc.push("Expanded Critical Range");
+		item._fMaterial = item.material?.name ? [`${item.material.name}|${item.material.source || ""}`] : [];
+		item._fUpgrades = (item.appliedUpgrades || []).map(it => `${it.name}|${it.source || ""}`);
+		item._fGemstones = (item.socketedGemstones || []).map(it => `${it.name}|${it.source || ""}`);
+		if (item._fMaterial.length) item._fMisc.push("Has Material");
+		if (item._fUpgrades.length) item._fMisc.push("Has Upgrades");
+		if (item._fGemstones.length) item._fMisc.push("Has Socketed Gemstone");
 
 		const fBaseItemSelf = item._isBaseItem ? `${item.name}__${item.source}`.toLowerCase() : null;
 		item._fBaseItem = [
@@ -494,6 +507,9 @@ class PageFilterItems extends PageFilterEquipment {
 		this._resistFilter.addItem(item._fRes);
 		this._immuneFilter.addItem(item._fImm);
 		this._conditionImmuneFilter.addItem(item._fCondImm);
+		this._materialFilter.addItem(item._fMaterial);
+		this._upgradeFilter.addItem(item._fUpgrades);
+		this._gemstoneFilter.addItem(item._fGemstones);
 	}
 
 	async _pPopulateBoxOptions (opts) {
@@ -527,6 +543,9 @@ class PageFilterItems extends PageFilterEquipment {
 			this._classFeaturesFilter,
 			this._optionalfeaturesFilter,
 			this._attachedSpellsFilter,
+			this._materialFilter,
+			this._upgradeFilter,
+			this._gemstoneFilter,
 		];
 	}
 
@@ -567,6 +586,9 @@ class PageFilterItems extends PageFilterEquipment {
 			it._fClassFeatures,
 			it.optionalfeatures,
 			it._fAttachedSpells,
+			it._fMaterial,
+			it._fUpgrades,
+			it._fGemstones,
 		);
 	}
 }
@@ -668,6 +690,7 @@ class ListSyntaxItems extends ListUiUtil.ListSyntax {
 	static _INDEXABLE_PROPS_ENTRIES = [
 		"_fullEntries",
 		"entries",
+		"_compositionSearch",
 	];
 }
 

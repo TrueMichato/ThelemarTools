@@ -32448,6 +32448,29 @@ class CharacterSheetState {
 			abilities: [...(item.selectedAbilityChoices || [])].sort((a, b) => String(a.ability).localeCompare(String(b.ability))),
 			language: item.selectedLanguage || "",
 		});
+		const getCompositionUid = itemData => {
+			const refUid = ref => `${String(ref?.name || "").toLowerCase()}|${String(ref?.source || "").toLowerCase()}`;
+			const stableStringify = value => {
+				if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+				if (value && typeof value === "object") {
+					return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+				}
+				return JSON.stringify(value);
+			};
+			return stableStringify({
+				material: itemData.material
+					? {
+						...itemData.material,
+						name: String(itemData.material.name || "").toLowerCase(),
+						source: String(itemData.material.source || "").toLowerCase(),
+						resonance: itemData.material.resonance ? refUid(itemData.material.resonance) : null,
+					}
+					: null,
+				upgrades: (itemData.appliedUpgrades || []).map(refUid).sort(),
+				gemstones: (itemData.socketedGemstones || []).map(refUid).sort(),
+			});
+		};
+		const incomingCompositionUid = getCompositionUid(item);
 		const existing = isIncomingCustom ? null : this._data.inventory.find(
 			i => {
 				const existingSpellUid = i.item.selectedSpell
@@ -32462,6 +32485,7 @@ class CharacterSheetState {
 					&& i.item.source === item.source
 					&& (i.item._fromPack || null) === incomingPackProvenance
 					&& existingChoiceUid === selectedChoiceUid
+					&& getCompositionUid(i.item) === incomingCompositionUid
 					&& !i.item._isCustom;
 			},
 		);

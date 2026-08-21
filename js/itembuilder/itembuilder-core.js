@@ -35,6 +35,13 @@ const _COMPOSITION_COLLECTION_PROPS = [
 const _copy = value => value == null ? value : JSON.parse(JSON.stringify(value));
 const _key = value => String(value || "").trim().toLowerCase();
 const _ref = ent => ent?.name ? {name: ent.name, source: ent.source || ""} : null;
+const _materialRef = ent => {
+	const out = _ref(ent);
+	if (!out) return null;
+	if (ent.role) out.role = ent.role;
+	if (ent.resonance?.name) out.resonance = _ref(ent.resonance);
+	return out;
+};
 const _isEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 function _isObject (value) {
@@ -179,6 +186,221 @@ export class ItemBuilderCore {
 
 	static dedupeCatalog (entities) {
 		return _mergeUnique([], entities || [], it => `${_key(it?.name)}|${_key(it?.source)}`);
+	}
+
+	static _getMatchesByLegacyName (pool, name) {
+		return (pool || []).filter(it => _key(it?.name) === _key(name));
+	}
+
+	static migrateLegacyComposition (item, catalogs = {}) {
+		const out = _copy(item || {});
+		const warnings = [];
+		const entries = out.entries || [];
+		const candidates = {material: [], upgrades: [], gemstones: []};
+
+		for (const entry of entries) {
+			const name = String(entry?.name || "");
+			let match = /^Item Builder:\s*Material\s*-\s*(.+)$/i.exec(name);
+			if (match) {
+				candidates.material.push(match[1].trim());
+				continue;
+			}
+			match = /^Item Builder:\s*Upgrade\s*-\s*(.+)$/i.exec(name);
+			if (match) {
+				candidates.upgrades.push(match[1].trim());
+				continue;
+			}
+			match = /^Item Builder:\s*Gem\s*-\s*(.+)$/i.exec(name);
+			if (match) candidates.gemstones.push(match[1].trim());
+		}
+
+		const resolveLegacy = ({name, pool, kind}) => {
+			const matches = this._getMatchesByLegacyName(pool, name);
+			if (matches.length === 1) return _ref(matches[0]);
+			warnings.push({
+				kind,
+				name,
+				reason: matches.length ? "ambiguous" : "missing",
+				message: matches.length
+					? `${kind} "${name}" matches more than one catalog entity; the original prose was preserved.`
+					: `${kind} "${name}" is not available in the loaded catalogs; the original prose was preserved.`,
+			});
+			return null;
+		};
+
+		if (!out.material && candidates.material.length === 1) {
+			const material = resolveLegacy({name: candidates.material[0], pool: catalogs.materials, kind: "Material"});
+			if (material) out.material = material;
+		}
+		if (!out.appliedUpgrades?.length) {
+			out.appliedUpgrades = candidates.upgrades
+				.map(name => resolveLegacy({name, pool: catalogs.upgrades, kind: "Upgrade"}))
+				.filter(Boolean);
+			if (!out.appliedUpgrades.length) delete out.appliedUpgrades;
+		}
+		if (!out.socketedGemstones?.length) {
+			out.socketedGemstones = candidates.gemstones
+				.map(name => resolveLegacy({name, pool: catalogs.upgrades, kind: "Gemstone"}))
+				.filter(Boolean);
+			if (!out.socketedGemstones.length) delete out.socketedGemstones;
+		}
+
+		return {
+			item: out,
+			warnings,
+			isLegacy: !!(candidates.material.length || candidates.upgrades.length || candidates.gemstones.length),
+		};
+	}
+
+	static resolveComposition (item, catalogs = {}) {
+		const material = _findByRef(catalogs.materials, item?.material);
+		const upgrades = (item?.appliedUpgrades || []).map(ref => ({ref: _ref(ref), entity: _findByRef(catalogs.upgrades, ref)}));
+		const gemstones = (item?.socketedGemstones || []).map(ref => ({ref: _ref(ref), entity: _findByRef(catalogs.upgrades, ref)}));
+		const resonance = item?.material?.resonance
+			? _findByRef(catalogs.resonances, item.material.resonance)
+			: null;
+		const missing = [
+			...(!item?.material?.name || material ? [] : [{kind: "material", ref: _materialRef(item.material)}]),
+			...upgrades.filter(it => !it.entity).map(it => ({kind: "upgrade", ref: it.ref})),
+			...gemstones.filter(it => !it.entity).map(it => ({kind: "gemstone", ref: it.ref})),
+			...(!item?.material?.resonance?.name || resonance ? [] : [{kind: "resonance", ref: _ref(item.material.resonance)}]),
+		];
+
+		const resolved = {
+			material,
+			upgrades: upgrades.map(it => it.entity).filter(Boolean),
+			gemstones: gemstones.map(it => it.entity).filter(Boolean),
+			resonance,
+		};
+		const search = [
+			material?.name || item?.material?.name,
+			...upgrades.map(it => it.entity?.name || it.ref?.name),
+			...gemstones.map(it => it.entity?.name || it.ref?.name),
+			resonance?.name || item?.material?.resonance?.name,
+			...resolved.upgrades.flatMap(it => it.entries || []),
+			...resolved.gemstones.flatMap(it => it.entries || []),
+			...(material?.entries || []),
+		].filter(Boolean);
+
+		return {resolved, missing, search};
+	}
+
+	static getCompositionDisplayEntries (item, composition) {
+		const out = [];
+		const push = (label, ref, ent) => {
+			if (!ref?.name) return;
+			const source = ref.source ? ` (${ref.source})` : "";
+			out.push({
+				type: "entries",
+				name: `${label}: ${ent?.name || ref.name}${source}`,
+				entries: _copy(ent?.entries?.length ? ent.entries : [`The referenced ${label.toLowerCase()} has no descriptive rules text.`]),
+			});
+		};
+		push("Material", item?.material, composition.resolved.material);
+		for (const ref of item?.appliedUpgrades || []) push("Upgrade", ref, _findByRef(composition.resolved.upgrades, ref));
+		for (const ref of item?.socketedGemstones || []) push("Gemstone", ref, _findByRef(composition.resolved.gemstones, ref));
+		push("Resonance", item?.material?.resonance, composition.resolved.resonance);
+		for (const missing of composition.missing) out.push(`{@note Unresolved ${missing.kind}: ${missing.ref.name}${missing.ref.source ? ` (${missing.ref.source})` : ""}. Install the referenced source to restore its mechanics.}`);
+		return out;
+	}
+
+	static projectItem (item, catalogs = {}) {
+		const legacy = this.migrateLegacyComposition(item?._compositionRaw || item, catalogs);
+		const canonical = legacy.item;
+		if (
+			!legacy.isLegacy
+			&& !canonical.material?.name
+			&& !canonical.appliedUpgrades?.length
+			&& !canonical.socketedGemstones?.length
+		) return _copy(item);
+		const draft = this.fromItem(canonical);
+		const canonicalLean = this.serialize(draft, catalogs);
+		const projected = this.projectForPreview(draft, catalogs);
+		projected.entries = (projected.entries || []).filter(entry => !(entry?.name || "").startsWith(_GENERATED_ENTRY_PREFIX));
+		if (legacy.warnings.length) {
+			const unresolvedNames = new Set(
+				legacy.warnings.map(({kind, name}) => _key(`${_GENERATED_ENTRY_PREFIX} ${kind === "Gemstone" ? "Gem" : kind} - ${name}`)),
+			);
+			projected.entries.push(
+				...(canonical.entries || [])
+					.filter(entry => unresolvedNames.has(_key(entry?.name))),
+			);
+		}
+		if (!projected.entries?.length) delete projected.entries;
+		const composition = this.resolveComposition(canonicalLean, catalogs);
+		composition.warnings = legacy.warnings;
+		composition.displayEntries = this.getCompositionDisplayEntries(canonicalLean, composition);
+		projected._compositionRaw = _copy(canonicalLean);
+		projected._composition = composition;
+		projected._compositionSearch = composition.search;
+		return projected;
+	}
+
+	static collectDependencies (items, catalogs = {}) {
+		const materialRefs = [];
+		const upgradeRefs = [];
+		const resonanceRefs = [];
+		for (const item of items || []) {
+			if (item?.material) materialRefs.push(item.material);
+			upgradeRefs.push(...(item?.appliedUpgrades || []), ...(item?.socketedGemstones || []));
+			if (item?.material?.resonance) resonanceRefs.push(item.material.resonance);
+		}
+		const collect = (refs, pool, kind) => {
+			const entities = [];
+			const missing = [];
+			for (const ref of refs) {
+				const entity = _findByRef(pool, ref);
+				if (!entity) {
+					missing.push({kind, ref: _ref(ref)});
+					continue;
+				}
+				entities.push(entity);
+			}
+			return {
+				entities: this.dedupeCatalog(entities).map(entity => {
+					const out = _copy(entity);
+					delete out.uniqueId;
+					for (const key of Object.keys(out)) if (key.startsWith("_")) delete out[key];
+					return out;
+				}),
+				missing,
+			};
+		};
+		const materials = collect(materialRefs, catalogs.materials, "itemMaterial");
+		const upgrades = collect(upgradeRefs, catalogs.upgrades, "itemUpgrade");
+		const resonances = collect(resonanceRefs, catalogs.resonances, "draconicResonance");
+		return {
+			itemMaterial: materials.entities,
+			itemUpgrade: upgrades.entities,
+			draconicResonance: resonances.entities,
+			missing: [...materials.missing, ...upgrades.missing, ...resonances.missing],
+		};
+	}
+
+	static getPortableBrew ({items, catalogs = {}, meta = {}}) {
+		const canonicalItems = (items || []).map(item => {
+			const out = _copy(item?._compositionRaw || item);
+			delete out.uniqueId;
+			for (const key of Object.keys(out)) if (key.startsWith("_composition")) delete out[key];
+			return out;
+		});
+		const dependencies = this.collectDependencies(canonicalItems, catalogs);
+		const usedSources = new Set([
+			...canonicalItems,
+			...dependencies.itemMaterial,
+			...dependencies.itemUpgrade,
+			...dependencies.draconicResonance,
+		].map(it => it?.source).filter(Boolean));
+		const sources = (catalogs.sources || meta.sources || []).filter(it => usedSources.has(it.json));
+		const out = {
+			_meta: {..._copy(meta), ...(sources.length ? {sources: _copy(sources)} : {})},
+			item: canonicalItems,
+		};
+		for (const prop of ["itemMaterial", "itemUpgrade", "draconicResonance"]) {
+			if (dependencies[prop].length) out[prop] = dependencies[prop];
+		}
+		if (!Object.keys(out._meta).length) delete out._meta;
+		return {brew: out, missing: dependencies.missing};
 	}
 
 	static createDraft ({source = "", item = null} = {}) {
@@ -327,14 +549,32 @@ export class ItemBuilderCore {
 			if (out.type && preset.source && !String(out.type).includes("|")) out.type = `${out.type}|${preset.source}`;
 		}
 
-		if (normalized.material) out.material = _ref(normalized.material);
-		else delete out.material;
+		if (normalized.material) {
+			const resolvedMaterial = _findByRef(catalogs.materials, normalized.material);
+			const material = {
+				...normalized.material,
+				source: normalized.material.source || resolvedMaterial?.source || "",
+			};
+			if (material.resonance?.name && !material.resonance.source) {
+				const resolvedResonance = _findByRef(catalogs.resonances, material.resonance);
+				material.resonance = {...material.resonance, source: resolvedResonance?.source || ""};
+			}
+			out.material = _materialRef(material);
+		} else delete out.material;
 
-		out.appliedUpgrades = normalized.upgrades.map(_ref).filter(Boolean);
+		out.appliedUpgrades = this.dedupeCatalog(normalized.upgrades.map(ref => {
+			const resolved = _findByRef(catalogs.upgrades, ref);
+			return _ref({...ref, source: ref.source || resolved?.source || ""});
+		}).filter(Boolean));
 		if (!out.appliedUpgrades.length) delete out.appliedUpgrades;
 
-		if (normalized.gemstone) out.socketedGemstones = [_ref(normalized.gemstone)];
-		else delete out.socketedGemstones;
+		if (normalized.gemstone) {
+			const resolved = _findByRef(catalogs.upgrades, normalized.gemstone);
+			out.socketedGemstones = this.dedupeCatalog([_ref({
+				...normalized.gemstone,
+				source: normalized.gemstone.source || resolved?.source || "",
+			})]);
+		} else delete out.socketedGemstones;
 
 		out.entries = (out.entries || []).filter(entry => !(entry?.name || "").startsWith(_GENERATED_ENTRY_PREFIX));
 		if (!out.entries.length) delete out.entries;
@@ -349,9 +589,10 @@ export class ItemBuilderCore {
 			normalized.materialized?.isLegacyProjected
 			&& (legacyResolution.missing.length || legacyResolution.ambiguities.length)
 		) return out;
-		const material = _findByRef(catalogs.materials, normalized.material);
-		const upgrades = normalized.upgrades.map(ref => _findByRef(catalogs.upgrades, ref) || ref).filter(Boolean);
-		const gemstone = normalized.gemstone ? (_findByRef(catalogs.upgrades, normalized.gemstone) || normalized.gemstone) : null;
+		const material = _findByRef(catalogs.materials, out.material);
+		const upgrades = (out.appliedUpgrades || []).map(ref => _findByRef(catalogs.upgrades, ref) || ref).filter(Boolean);
+		const gemstoneRef = out.socketedGemstones?.[0];
+		const gemstone = gemstoneRef ? (_findByRef(catalogs.upgrades, gemstoneRef) || gemstoneRef) : null;
 
 		if (material) {
 			out = CharacterSheetMaterials.applyToItem(out, material, {isSkipDegradation: true});

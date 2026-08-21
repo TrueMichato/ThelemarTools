@@ -1,0 +1,53 @@
+{
+	"cases": [
+		{
+			"name": "empty site catalog",
+			"value": {
+				"combatMethod": []
+			}
+		},
+		{
+			"name": "minimal combat method",
+			"value": {
+				"combatMethod": [
+					{
+						"name": "Measured Strike",
+						"source": "TST",
+						"tradition": "Patient Blade",
+						"degree": 1,
+						"entries": [
+							"Make one weapon attack."
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "full combat method",
+			"value": {
+				"combatMethod": [
+					{
+						"name": "Stone Guard",
+						"source": "TST",
+						"page": 12,
+						"tradition": "Adamant Mountain",
+						"degree": 3,
+						"staminaCost": 2,
+						"actionType": "bonus action",
+						"isStance": true,
+						"prerequisite": [
+							{
+								"feature": [
+									"Extra Attack"
+								]
+							}
+						],
+						"entries": [
+							"Until the stance ends, you gain a +1 bonus to AC."
+						]
+					}
+				]
+			}
+		}
+	]
+}

@@ -69,6 +69,49 @@ describe("Inventory Management", () => {
 			expect(items[0].quantity).toBe(75);
 		});
 
+		it("does not stack items with different structured composition", () => {
+			state.addItem({
+				name: "Longsword",
+				source: "PHB",
+				material: {name: "Iron", source: "TGTT"},
+				appliedUpgrades: [{name: "Balanced", source: "TCAH"}],
+			});
+			state.addItem({
+				name: "Longsword",
+				source: "PHB",
+				material: {name: "Silver", source: "TGTT"},
+				appliedUpgrades: [{name: "Balanced", source: "TCAH"}],
+			});
+			state.addItem({
+				name: "Longsword",
+				source: "PHB",
+				material: {name: "Iron", source: "TGTT", role: "strikingSurface"},
+				appliedUpgrades: [{name: "Balanced", source: "TCAH"}],
+			});
+
+			expect(state.getInventory()).toHaveLength(3);
+		});
+
+		it("stacks items with equivalent structured composition", () => {
+			const item = {
+				name: "Longsword",
+				source: "PHB",
+				material: {
+					name: "Dragonbone",
+					source: "TGTT",
+					role: "strikingSurface",
+					resonance: {name: "Ember Domain", source: "TGTT"},
+				},
+				appliedUpgrades: [{name: "Balanced", source: "TCAH"}],
+				socketedGemstones: [{name: "Journey", source: "TGTT"}],
+			};
+			state.addItem({...structuredClone(item), quantity: 1});
+			state.addItem({...structuredClone(item), quantity: 2});
+
+			expect(state.getInventory()).toHaveLength(1);
+			expect(state.getInventory()[0].quantity).toBe(3);
+		});
+
 		it("should get items via getItems helper (flattened structure)", () => {
 			state.addItem({name: "Torch", source: "PHB", quantity: 10, weight: 1});
 			const items = state.getItems();

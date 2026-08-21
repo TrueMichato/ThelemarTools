@@ -1,0 +1,118 @@
+{
+	"cases": [
+		{
+			"name": "missing catalog",
+			"value": {}
+		},
+		{
+			"name": "missing name",
+			"value": {
+				"combatMethod": [
+					{
+						"source": "TST",
+						"tradition": "Patient Blade",
+						"degree": 1,
+						"entries": [
+							"Make one weapon attack."
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "missing source",
+			"value": {
+				"combatMethod": [
+					{
+						"name": "Measured Strike",
+						"tradition": "Patient Blade",
+						"degree": 1,
+						"entries": [
+							"Make one weapon attack."
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "degree below range",
+			"value": {
+				"combatMethod": [
+					{
+						"name": "Measured Strike",
+						"source": "TST",
+						"tradition": "Patient Blade",
+						"degree": 0,
+						"entries": [
+							"Make one weapon attack."
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "degree above range",
+			"value": {
+				"combatMethod": [
+					{
+						"name": "Measured Strike",
+						"source": "TST",
+						"tradition": "Patient Blade",
+						"degree": 6,
+						"entries": [
+							"Make one weapon attack."
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "negative stamina",
+			"value": {
+				"combatMethod": [
+					{
+						"name": "Measured Strike",
+						"source": "TST",
+						"tradition": "Patient Blade",
+						"degree": 1,
+						"staminaCost": -1,
+						"entries": [
+							"Make one weapon attack."
+						]
+					}
+				]
+			}
+		},
+		{
+			"name": "empty entries",
+			"value": {
+				"combatMethod": [
+					{
+						"name": "Measured Strike",
+						"source": "TST",
+						"tradition": "Patient Blade",
+						"degree": 1,
+						"entries": []
+					}
+				]
+			}
+		},
+		{
+			"name": "unknown entity property",
+			"value": {
+				"combatMethod": [
+					{
+						"name": "Measured Strike",
+						"source": "TST",
+						"tradition": "Patient Blade",
+						"degree": 1,
+						"entries": [
+							"Make one weapon attack."
+						],
+						"damageBonus": 2
+					}
+				]
+			}
+		}
+	]
+}

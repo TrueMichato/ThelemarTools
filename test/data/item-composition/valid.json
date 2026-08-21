@@ -1,0 +1,53 @@
+{
+	"cases": [
+		{
+			"name": "composition omitted",
+			"value": {}
+		},
+		{
+			"name": "minimal material",
+			"value": {
+				"material": {
+					"name": "Mithril",
+					"source": "TGTT"
+				}
+			}
+		},
+		{
+			"name": "material with role and resonance",
+			"value": {
+				"material": {
+					"name": "Dragonbone",
+					"source": "TGTT",
+					"role": "strikingSurface",
+					"resonance": {
+						"name": "Ember Domain",
+						"source": "TGTT"
+					}
+				}
+			}
+		},
+		{
+			"name": "all composition axes",
+			"value": {
+				"material": {
+					"name": "Darkmetal",
+					"source": "TGTT",
+					"role": "protectiveLayer"
+				},
+				"appliedUpgrades": [
+					{
+						"name": "Balanced",
+						"source": "TCAH"
+					}
+				],
+				"socketedGemstones": [
+					{
+						"name": "Journey",
+						"source": "TGTT"
+					}
+				]
+			}
+		}
+	]
+}

@@ -31,6 +31,60 @@ point and the item returns to its printed stats.
 > Use `state.getItemRaw(id)` when you need the **unprojected** item (the picker preview
 > does this — previewing against an already-projected item was a real bug).
 
+## Structured composition across the site
+
+Items now carry all three composition axes as canonical source-qualified references:
+
+```jsonc
+{
+  "name": "Wayfarer's Starblade",
+  "source": "HB",
+  "material": {
+    "name": "Dragonbone",
+    "source": "TGTT",
+    "role": "strikingSurface",
+    "resonance": {"name": "Ember Domain", "source": "TGTT"}
+  },
+  "appliedUpgrades": [{"name": "Balanced", "source": "TCAH"}],
+  "socketedGemstones": [{"name": "Journey", "source": "TGTT"}]
+}
+```
+
+These fields are authored state. Adjusted damage dice, AC, bonuses, value, weight, properties,
+charges, and generated rules text are read-time projections and must never be written back into
+the canonical item. `ItemBuilderCore.projectItem()` is the shared Items-page/builder projector;
+it keeps `_compositionRaw` as the lean source, reports unresolved references, and is idempotent.
+`socketedGemstones` is an array for compatibility with the sheet data model, but this contract
+permits at most one socketed gemstone, matching the sheet's single-socket rule.
+
+`items.html` loads the shipped material and upgrade catalogs before adding rows. Composed items
+therefore use their effective statistics in ordinary filters and statblocks, while Material,
+Upgrade, and Gemstone filters/search expose their structured assignments directly. Legacy
+`Item Builder: Material/Upgrade/Gem - ...` entries are migrated only when a name has one unique
+catalog match; ambiguous or missing names remain prose and produce a warning.
+
+The Makebrew item menu offers **Download Portable JSON** in addition to the ordinary lean
+download. Portable JSON remains a normal importable brew document, but includes the exact
+referenced `itemMaterial`, `itemUpgrade`, and `draconicResonance` entities and their available
+source metadata. The character sheet also loads shipped `itemMaterial` data, and inventory
+stacking includes material role/resonance, upgrades, and gemstones so differently composed items
+cannot merge.
+
+### Repository-owned schema contract
+
+This fork owns the composition extension in
+[`schema/site/item-composition.json`](../../schema/site/item-composition.json); it does not depend
+on a matching `5etools-utils` release. The focused schema validates the three structured fields,
+strict source-qualified component references, material roles, and resonance references. It rejects
+empty or duplicate component arrays and character-instance fields such as degradation, destroyed
+state, paid cost, and timestamps.
+
+`test/test-item-composition.js` validates positive/negative fixtures and every composed `item` or
+`baseitem` found under `data/`. During the ordinary upstream schema pass, `test/test-json.js`
+temporarily removes only these three locally owned fields from composed entities. Every other item
+field is still validated by the installed upstream item schema, while the local schema remains the
+authority for composition. Run the focused contract with `npm run test:item-composition`.
+
 ## Data model
 
 Each material declares six axes plus metadata. Every axis is **tri-state**:

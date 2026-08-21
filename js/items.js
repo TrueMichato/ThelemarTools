@@ -1,4 +1,45 @@
 import {RenderItems} from "./render-items.js";
+import {ItemBuilderCore} from "./itembuilder/itembuilder-core.js";
+
+let _pCompositionCatalogs;
+
+async function _pGetCompositionCatalogs () {
+	_pCompositionCatalogs ||= Promise.all([
+		DataUtil.itemMaterial.loadJSON().catch(() => ({itemMaterial: []})),
+		DataUtil.itemUpgrade.loadJSON().catch(() => ({itemUpgrade: []})),
+		PrereleaseUtil.pGetBrewProcessed().catch(() => ({})),
+		BrewUtil2.pGetBrewProcessed().catch(() => ({})),
+	]).then(([materials, upgrades, prerelease, brew]) => ({
+		materials: ItemBuilderCore.dedupeCatalog([
+			...(materials.itemMaterial || []),
+			...(prerelease.itemMaterial || []),
+			...(brew.itemMaterial || []),
+		]),
+		upgrades: ItemBuilderCore.dedupeCatalog([
+			...(upgrades.itemUpgrade || []),
+			...(prerelease.itemUpgrade || []),
+			...(brew.itemUpgrade || []),
+		]),
+		resonances: ItemBuilderCore.dedupeCatalog([
+			...(materials.draconicResonance || []),
+			...(prerelease.draconicResonance || []),
+			...(brew.draconicResonance || []),
+		]),
+		sources: [
+			...(prerelease._meta?.sources || []),
+			...(brew._meta?.sources || []),
+		],
+	}));
+	return _pCompositionCatalogs;
+}
+
+async function _pLoadComposedItems (pLoad) {
+	const [data, catalogs] = await Promise.all([pLoad(), _pGetCompositionCatalogs()]);
+	return {
+		...data,
+		item: (data.item || []).map(item => ItemBuilderCore.projectItem(item, catalogs)),
+	};
+}
 
 class ItemsSublistManager extends SublistManager {
 	constructor () {
@@ -225,9 +266,9 @@ class ItemsPage extends ListPage {
 		const pFnGetFluff = Renderer.item.pGetFluff.bind(Renderer.item);
 
 		super({
-			dataSource: DataUtil.item.loadJSON.bind(DataUtil.item),
-			prereleaseDataSource: DataUtil.item.loadPrerelease.bind(DataUtil.item),
-			brewDataSource: DataUtil.item.loadBrew.bind(DataUtil.item),
+			dataSource: () => _pLoadComposedItems(DataUtil.item.loadJSON.bind(DataUtil.item)),
+			prereleaseDataSource: () => _pLoadComposedItems(DataUtil.item.loadPrerelease.bind(DataUtil.item)),
+			brewDataSource: () => _pLoadComposedItems(DataUtil.item.loadBrew.bind(DataUtil.item)),
 
 			pFnGetFluff,
 

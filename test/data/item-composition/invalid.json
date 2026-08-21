@@ -1,0 +1,141 @@
+{
+	"cases": [
+		{
+			"name": "material missing name",
+			"value": {
+				"material": {
+					"source": "TGTT"
+				}
+			}
+		},
+		{
+			"name": "material missing source",
+			"value": {
+				"material": {
+					"name": "Mithril"
+				}
+			}
+		},
+		{
+			"name": "unknown material role",
+			"value": {
+				"material": {
+					"name": "Mithril",
+					"source": "TGTT",
+					"role": "blade"
+				}
+			}
+		},
+		{
+			"name": "material contains instance state",
+			"value": {
+				"material": {
+					"name": "Mithril",
+					"source": "TGTT",
+					"degradationStacks": 1
+				}
+			}
+		},
+		{
+			"name": "resonance missing source",
+			"value": {
+				"material": {
+					"name": "Dragonbone",
+					"source": "TGTT",
+					"resonance": {
+						"name": "Ember Domain"
+					}
+				}
+			}
+		},
+		{
+			"name": "empty upgrades",
+			"value": {
+				"appliedUpgrades": []
+			}
+		},
+		{
+			"name": "duplicate upgrades",
+			"value": {
+				"appliedUpgrades": [
+					{
+						"name": "Balanced",
+						"source": "TCAH"
+					},
+					{
+						"name": "Balanced",
+						"source": "TCAH"
+					}
+				]
+			}
+		},
+		{
+			"name": "upgrade contains paid cost",
+			"value": {
+				"appliedUpgrades": [
+					{
+						"name": "Balanced",
+						"source": "TCAH",
+						"costPaid": 500
+					}
+				]
+			}
+		},
+		{
+			"name": "empty gemstones",
+			"value": {
+				"socketedGemstones": []
+			}
+		},
+		{
+			"name": "duplicate gemstones",
+			"value": {
+				"socketedGemstones": [
+					{
+						"name": "Journey",
+						"source": "TGTT"
+					},
+					{
+						"name": "Journey",
+						"source": "TGTT"
+					}
+				]
+			}
+		},
+		{
+			"name": "more than one gemstone",
+			"value": {
+				"socketedGemstones": [
+					{
+						"name": "Journey",
+						"source": "TGTT"
+					},
+					{
+						"name": "Magebane",
+						"source": "TGTT"
+					}
+				]
+			}
+		},
+		{
+			"name": "gemstone contains timestamp",
+			"value": {
+				"socketedGemstones": [
+					{
+						"name": "Journey",
+						"source": "TGTT",
+						"timestamp": "2026-01-01T00:00:00Z"
+					}
+				]
+			}
+		},
+		{
+			"name": "unknown composition property",
+			"value": {
+				"upgradeState": {
+					"destroyed": false
+				}
+			}
+		}
+	]
+}

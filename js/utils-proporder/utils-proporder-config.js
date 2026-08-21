@@ -1538,6 +1538,16 @@ const PROPORDER_ITEM = [
 	ObjectKey.getCopyKey({fnGetModOrder: () => PROPORDER_ITEM__COPY_MOD}),
 
 	"baseItem",
+	new ObjectKey("material", {
+		order: [
+			"name",
+			"source",
+			"role",
+			new ObjectKey("resonance", {order: ["name", "source"]}),
+		],
+	}),
+	new ArrayKey("appliedUpgrades", {fnGetOrder: () => ["name", "source"]}),
+	new ArrayKey("socketedGemstones", {fnGetOrder: () => ["name", "source"]}),
 
 	"edition",
 

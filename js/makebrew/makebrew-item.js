@@ -51,7 +51,7 @@ export class ItemBuilder extends BuilderBase {
 			prop: "item",
 			pFnGetFluff: Renderer.item.pGetFluff.bind(Renderer.item),
 		});
-		this._catalogs = {items: [], materials: [], upgrades: []};
+		this._catalogs = {items: [], materials: [], upgrades: [], resonances: [], sources: []};
 		this._draft = null;
 		this._saveStatus = "";
 		this._wrpValidation = null;
@@ -69,7 +69,36 @@ export class ItemBuilder extends BuilderBase {
 			items: ItemBuilderCore.dedupeCatalog([...(itemData.baseitem || []), ...(itemData.item || []), ...(brew.item || [])]),
 			materials: ItemBuilderCore.dedupeCatalog([...(materialData.itemMaterial || []), ...(brew.itemMaterial || [])]),
 			upgrades: ItemBuilderCore.dedupeCatalog([...(upgradeData.itemUpgrade || []), ...(brew.itemUpgrade || [])]),
+			resonances: ItemBuilderCore.dedupeCatalog([...(materialData.draconicResonance || []), ...(brew.draconicResonance || [])]),
+			sources: brew._meta?.sources || [],
 		};
+	}
+
+	async pHandleClick_downloadJsonUniqueIdPortable (uniqueId) {
+		const item = MiscUtil.copy(await BrewUtil2.pGetEditableBrewEntity(this._prop, uniqueId));
+		const meta = this._ui._getJsonOutputTemplate()._meta || {};
+		const {brew, missing} = ItemBuilderCore.getPortableBrew({items: [item], catalogs: this._catalogs, meta});
+		DataUtil.userDownload(`${DataUtil.getCleanFilename(item.name)}-portable`, brew);
+		if (missing.length) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: `Downloaded the item, but ${missing.length} referenced composition dependenc${missing.length === 1 ? "y was" : "ies were"} unavailable.`,
+			});
+		}
+	}
+
+	async pDoHandleClickDownloadJsonPortable ({uniqueIds = null} = {}) {
+		const items = (await this._pGetBrewEntitiesCurrentSource())
+			.filter(ent => uniqueIds == null || uniqueIds.includes(ent.uniqueId));
+		const meta = this._ui._getJsonOutputTemplate()._meta || {};
+		const {brew, missing} = ItemBuilderCore.getPortableBrew({items, catalogs: this._catalogs, meta});
+		DataUtil.userDownload(`${DataUtil.getCleanFilename(BrewUtil2.sourceJsonToFull(this._ui.source))}-portable`, brew);
+		if (missing.length) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: `Downloaded the items, but ${missing.length} referenced composition dependenc${missing.length === 1 ? "y was" : "ies were"} unavailable.`,
+			});
+		}
 	}
 
 	_getInitialState () {

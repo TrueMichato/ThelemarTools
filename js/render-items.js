@@ -66,7 +66,14 @@ class _RenderItemsImplBase extends RenderPageImplBase {
 	/* ----- */
 
 	_getCommonHtmlParts_entries ({ent, renderer}) {
-		let renderedText = Renderer.item.getRenderedEntries(ent);
+		let renderedText = ent._composition?.displayEntries?.length
+			? renderer.render({
+				type: "entries",
+				name: "Composition",
+				entries: ent._composition.displayEntries,
+			})
+			: "";
+		renderedText += Renderer.item.getRenderedEntries(ent);
 		renderedText += this._getRenderedSeeAlso({renderer, ent, prop: "seeAlsoDeck", tag: "deck"});
 		renderedText += this._getRenderedSeeAlso({renderer, ent, prop: "seeAlsoVehicle", tag: "vehicle"});
 
