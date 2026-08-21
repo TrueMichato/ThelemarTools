@@ -271,51 +271,25 @@ class CharacterSheetPage {
 			setTimeout(() => elOverlay.remove(), 300);
 		}
 
-		// Add page unload protection - save current character before leaving
+		// Add page unload protection. The canonical store is IndexedDB (async), which cannot be
+		// written reliably during unload, so we SYNCHRONOUSLY mirror ONLY the active character to
+		// localStorage. The loader (`_pLoadCharacter`) reconciles this mirror against the canonical
+		// copy by `_savedAt`, so an in-flight async write that never settled is recovered here.
 		window.addEventListener("beforeunload", () => {
-			if (this._currentCharacterId) {
-				// Use synchronous localStorage for reliability on page unload
-				try {
-					const characters = JSON.parse(localStorage.getItem("charsheet-characters") || "[]");
-					const charData = this._state.toJson();
-					charData.id = this._currentCharacterId;
-
-					const existingIndex = characters.findIndex(c => c.id === this._currentCharacterId);
-					if (existingIndex >= 0) {
-						characters[existingIndex] = charData;
-					} else {
-						characters.push(charData);
-					}
-
-					localStorage.setItem("charsheet-characters", JSON.stringify(characters));
-				} catch (err) {
-					// eslint-disable-next-line no-console
-					console.error("Emergency save on unload failed:", err);
-				}
-			}
+			if (!this._currentCharacterId) return;
+			const charData = this._state.toJson();
+			charData.id = this._currentCharacterId;
+			charData._savedAt = Date.now();
+			this._writeActiveCharacterMirror(charData);
 		});
 
 		// Also add pagehide as fallback (more reliable on mobile)
 		window.addEventListener("pagehide", () => {
-			if (this._currentCharacterId) {
-				try {
-					const characters = JSON.parse(localStorage.getItem("charsheet-characters") || "[]");
-					const charData = this._state.toJson();
-					charData.id = this._currentCharacterId;
-
-					const existingIndex = characters.findIndex(c => c.id === this._currentCharacterId);
-					if (existingIndex >= 0) {
-						characters[existingIndex] = charData;
-					} else {
-						characters.push(charData);
-					}
-
-					localStorage.setItem("charsheet-characters", JSON.stringify(characters));
-				} catch (err) {
-					// eslint-disable-next-line no-console
-					console.error("Emergency save on pagehide failed:", err);
-				}
-			}
+			if (!this._currentCharacterId) return;
+			const charData = this._state.toJson();
+			charData.id = this._currentCharacterId;
+			charData._savedAt = Date.now();
+			this._writeActiveCharacterMirror(charData);
 		});
 	}
 
@@ -1644,7 +1618,13 @@ class CharacterSheetPage {
 
 	async _pLoadCharacter (charId) {
 		const characters = await StorageUtil.pGet("charsheet-characters") || [];
-		const character = characters.find(c => c.id === charId);
+		const canonical = characters.find(c => c.id === charId) || null;
+
+		// Reconcile against the synchronous rescue mirror: if a mutation was mirrored but its
+		// async IndexedDB write never settled (fast refresh / character-switch race), the mirror
+		// carries the newer `_savedAt` and is preferred here.
+		const mirror = this._readActiveCharacterMirror(charId);
+		const {chosen: character, mirrorWon} = this._reconcilePersistedCharacter(canonical, mirror);
 
 		if (character) {
 			this._currentCharacterId = charId;
@@ -1663,13 +1643,18 @@ class CharacterSheetPage {
 
 			this._renderCharacter();
 
-			// Persist load-time migrations (reconcile backfill) so they survive to the next
-			// load. Guarded against a concurrent character switch: only save if THIS load is
-			// still the active character (the await above can interleave with another load).
-			if (reconcileResult && (reconcileResult.added > 0 || reconcileResult.backfilled > 0)) {
-				if (this._currentCharacterId === charId) {
-					await this._saveCurrentCharacter();
-				}
+			// Persist load-time repairs so they survive to the next load, and so the canonical
+			// (IndexedDB) store absorbs a mirror that won reconciliation — after which the stale
+			// mirror is dropped so it can never later win incorrectly. Guarded against a
+			// concurrent character switch: only save if THIS load is still the active character
+			// (the await above can interleave with another load).
+			const needsSave = mirrorWon
+				|| (reconcileResult && (reconcileResult.added > 0 || reconcileResult.backfilled > 0));
+			if (needsSave && this._currentCharacterId === charId) {
+				await this._saveCurrentCharacter();
+			} else if (this._currentCharacterId === charId) {
+				// Nothing to persist, but the mirror (if any) now agrees with canonical — clear it.
+				this._clearActiveCharacterMirror(charId);
 			}
 
 			// Apply saved section layout
@@ -3403,16 +3388,101 @@ class CharacterSheetPage {
 		});
 	}
 
+	/**
+	 * localStorage key holding the synchronous rescue mirror for a single character.
+	 * Per-character (never the all-characters blob) so a portrait-heavy roster can't push
+	 * the mirror over the ~5MB localStorage quota. See {@link _writeActiveCharacterMirror}.
+	 * @param {string} charId
+	 * @returns {string}
+	 */
+	_getActiveMirrorKey (charId) { return `charsheet-active-mirror__${charId}`; }
+
+	/**
+	 * SYNCHRONOUSLY mirror the active character to localStorage (via StorageUtil.syncSet).
+	 *
+	 * The canonical store is IndexedDB (async, via StorageUtil.pSet). Most mutation handlers
+	 * call saveCharacter() WITHOUT awaiting it, so a refresh or character-switch that happens
+	 * before the async write settles would otherwise silently lose the last HP/slot/use change.
+	 * This mirror is written synchronously (before the first await of _saveCurrentCharacter and
+	 * from the unload handlers), so the loader can recover the newest state on the next load.
+	 *
+	 * Quota-safe by contract: only ONE character is mirrored, and every write is wrapped so a
+	 * QuotaExceededError (or any storage failure) degrades gracefully — IndexedDB remains the
+	 * source of truth and the app never breaks.
+	 *
+	 * @param {object} charData A `toJson()` payload; must already carry `id` and `_savedAt`.
+	 */
+	_writeActiveCharacterMirror (charData) {
+		if (!charData?.id) return;
+		try {
+			StorageUtil.syncSet(this._getActiveMirrorKey(charData.id), charData);
+		} catch (err) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet] Sync rescue-mirror write failed (canonical IndexedDB store is unaffected):", err);
+		}
+	}
+
+	/**
+	 * Read the synchronous rescue mirror for a character, or null if absent/unreadable.
+	 * @param {string} charId
+	 * @returns {object|null}
+	 */
+	_readActiveCharacterMirror (charId) {
+		try {
+			return StorageUtil.syncGet(this._getActiveMirrorKey(charId)) || null;
+		} catch (err) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet] Sync rescue-mirror read failed:", err);
+			return null;
+		}
+	}
+
+	/**
+	 * Remove the synchronous rescue mirror for a character (best-effort).
+	 * @param {string} charId
+	 */
+	_clearActiveCharacterMirror (charId) {
+		if (!charId) return;
+		try {
+			StorageUtil.syncRemove(this._getActiveMirrorKey(charId));
+		} catch (err) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet] Sync rescue-mirror clear failed:", err);
+		}
+	}
+
+	/**
+	 * Pick the newer of two persisted character records by `_savedAt`. Records without a
+	 * timestamp are treated as oldest, so the canonical (async) copy is preferred on a tie or
+	 * when neither is stamped — the mirror only ever wins when it is STRICTLY newer.
+	 * @param {object|null} canonical
+	 * @param {object|null} mirror
+	 * @returns {{chosen: object|null, mirrorWon: boolean}}
+	 */
+	_reconcilePersistedCharacter (canonical, mirror) {
+		if (!mirror) return {chosen: canonical || null, mirrorWon: false};
+		if (!canonical) return {chosen: mirror, mirrorWon: true};
+		const mirrorWon = (Number(mirror._savedAt) || 0) > (Number(canonical._savedAt) || 0);
+		return {chosen: mirrorWon ? mirror : canonical, mirrorWon};
+	}
+
 	async _saveCurrentCharacter () {
 		if (!this._currentCharacterId) return;
 
 		// Show saving indicator
 		this._updateSaveIndicator("saving");
 
+		const charData = this._state.toJson();
+		charData.id = this._currentCharacterId;
+		charData._savedAt = Date.now();
+
+		// SYNCHRONOUS rescue mirror FIRST — before any await — so an un-awaited saveCharacter()
+		// call followed by a refresh/switch still leaves the newest state recoverable by the
+		// loader even if the async IndexedDB write below never settles.
+		this._writeActiveCharacterMirror(charData);
+
 		try {
 			let characters = await StorageUtil.pGet("charsheet-characters") || [];
-			const charData = this._state.toJson();
-			charData.id = this._currentCharacterId;
 
 			const existingIndex = characters.findIndex(c => c.id === this._currentCharacterId);
 			if (existingIndex >= 0) {
@@ -3423,11 +3493,16 @@ class CharacterSheetPage {
 
 			await StorageUtil.pSet("charsheet-characters", characters);
 
+			// Canonical store now agrees with (or supersedes) the mirror — drop the mirror so a
+			// stale copy can never later win reconciliation. Guarded against a concurrent switch.
+			if (this._currentCharacterId === charData.id) this._clearActiveCharacterMirror(charData.id);
+
 			// Show saved indicator
 			this._updateSaveIndicator("saved");
 		} catch (err) {
 			// eslint-disable-next-line no-console
 			console.error("Save error:", err);
+			// Leave the sync mirror in place: it is the only surviving copy of this write.
 			this._updateSaveIndicator("error");
 		}
 	}
