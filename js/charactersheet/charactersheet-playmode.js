@@ -318,6 +318,13 @@ export class CharacterSheetPlayMode {
 		if (portrait) {
 			const img = this._ce("img", "pm-status__portrait", wrap);
 			img.alt = "Portrait";
+			// Apply persisted framing (focal point + zoom) so the play-mode portrait
+			// matches the overview/notes crop.
+			const pos = this._sanitizePortraitPosition(this._state.getAppearance("portraitObjectPosition"));
+			const zoom = this._sanitizePortraitZoom(this._state.getAppearance("portraitZoom"));
+			img.style.objectPosition = pos;
+			img.style.transformOrigin = pos;
+			if (zoom !== 1) img.style.transform = `scale(${zoom})`;
 			// Fall back to the same placeholder if the URL fails to load, rather
 			// than leaving a broken-image glyph in the status bar.
 			img.onerror = () => {
@@ -4557,6 +4564,30 @@ export class CharacterSheetPlayMode {
 		if (className) el.className = className;
 		if (parent) parent.appendChild(el);
 		return el;
+	}
+
+	/** Sanitize a portrait object-position string (mirrors CharacterSheet). */
+	_sanitizePortraitPosition (value) {
+		const fallback = "center center";
+		if (typeof value !== "string") return fallback;
+		const tokens = value.trim().toLowerCase().split(/\s+/).slice(0, 2);
+		if (!tokens.length) return fallback;
+		const keywords = new Set(["left", "right", "top", "bottom", "center"]);
+		const clean = tokens.map((tok) => {
+			if (keywords.has(tok)) return tok;
+			const m = /^(\d{1,3}(?:\.\d+)?)%$/.exec(tok);
+			if (!m) return null;
+			return `${Math.max(0, Math.min(100, Number(m[1])))}%`;
+		});
+		if (clean.some((t) => t == null)) return fallback;
+		return clean.length === 1 ? `${clean[0]} center` : clean.join(" ");
+	}
+
+	/** Sanitize a portrait zoom value: finite, clamped 1..3, 2dp. */
+	_sanitizePortraitZoom (value) {
+		const num = Number(value);
+		if (!Number.isFinite(num)) return 1;
+		return Math.round(Math.max(1, Math.min(3, num)) * 100) / 100;
 	}
 
 	/**

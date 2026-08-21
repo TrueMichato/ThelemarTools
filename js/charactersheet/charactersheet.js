@@ -5125,11 +5125,48 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * Sanitize a portrait object-position string. Accepts up to two whitespace-
+	 * separated tokens, each a clamped 0-100% value or a keyword
+	 * (left/right/top/bottom/center). Anything else falls back to "center center".
+	 * @param {*} value
+	 * @returns {string}
+	 */
+	_sanitizePortraitPosition (value) {
+		const fallback = "center center";
+		if (typeof value !== "string") return fallback;
+		const tokens = value.trim().toLowerCase().split(/\s+/).slice(0, 2);
+		if (!tokens.length) return fallback;
+		const keywords = new Set(["left", "right", "top", "bottom", "center"]);
+		const clean = tokens.map((tok) => {
+			if (keywords.has(tok)) return tok;
+			const m = /^(\d{1,3}(?:\.\d+)?)%$/.exec(tok);
+			if (!m) return null;
+			const num = Math.max(0, Math.min(100, Number(m[1])));
+			return `${num}%`;
+		});
+		if (clean.some((t) => t == null)) return fallback;
+		return clean.length === 1 ? `${clean[0]} center` : clean.join(" ");
+	}
+
+	/**
+	 * Sanitize a portrait zoom value: finite number clamped to 1..3, rounded to 2dp.
+	 * @param {*} value
+	 * @returns {number}
+	 */
+	_sanitizePortraitZoom (value) {
+		const num = Number(value);
+		if (!Number.isFinite(num)) return 1;
+		return Math.round(Math.max(1, Math.min(3, num)) * 100) / 100;
+	}
+
+	/**
 	 * Render the character portrait in both overview and notes tabs
 	 */
 	_renderPortrait () {
 		const portraitUrl = this._state.getAppearance("portraitUrl");
 		const hasPortrait = !!portraitUrl;
+		const position = this._sanitizePortraitPosition(this._state.getAppearance("portraitObjectPosition"));
+		const zoom = this._sanitizePortraitZoom(this._state.getAppearance("portraitZoom"));
 
 		// Show the image when a portrait URL is set, otherwise fall back to the
 		// placeholder. If the URL is set but fails to load (dead external link or
@@ -5144,11 +5181,17 @@ class CharacterSheetPage {
 					placeholder.classList.remove("ve-hidden");
 					image.classList.add("ve-hidden");
 				};
+				image.style.objectPosition = position;
+				image.style.transformOrigin = position;
+				image.style.transform = zoom !== 1 ? `scale(${zoom})` : "";
 				image.setAttribute("src", portraitUrl);
 			} else {
 				placeholder.classList.remove("ve-hidden");
 				image.classList.add("ve-hidden");
 				image.onerror = null;
+				image.style.objectPosition = "";
+				image.style.transformOrigin = "";
+				image.style.transform = "";
 				image.setAttribute("src", "");
 			}
 		};
@@ -5164,6 +5207,181 @@ class CharacterSheetPage {
 
 		// Remove button visibility
 		document.getElementById("charsheet-portrait-remove-btn")?.classList.toggle("ve-hidden", !hasPortrait);
+
+		this._renderPortraitFocalControl();
+	}
+
+	/**
+	 * Render the inline focal-point / zoom editor affordance for each portrait
+	 * container. The "Adjust" button is only present when a portrait image exists;
+	 * clicking it toggles an inline editor (built here in JS) that lets the user
+	 * drag to set the focal point and zoom, persisting the values via setAppearance.
+	 */
+	_renderPortraitFocalControl () {
+		const hasPortrait = !!this._state.getAppearance("portraitUrl");
+
+		const specs = [
+			{container: "charsheet-portrait-container", key: "overview"},
+			{container: "charsheet-notes-portrait-container", key: "notes"},
+		];
+
+		specs.forEach(({container, key}) => {
+			const el = document.getElementById(container);
+			if (!el) return;
+
+			let btn = el.querySelector(".charsheet__portrait-adjust-btn");
+			let editor = el.querySelector(".charsheet__portrait-focal-editor");
+
+			if (!hasPortrait) {
+				btn?.remove();
+				editor?.remove();
+				return;
+			}
+
+			if (!btn) {
+				btn = document.createElement("button");
+				btn.type = "button";
+				btn.className = "charsheet__portrait-adjust-btn";
+				btn.title = "Adjust framing";
+				btn.innerHTML = `<span class="glyphicon glyphicon-move"></span><span class="charsheet__portrait-adjust-label">Adjust</span>`;
+				btn.addEventListener("click", (e) => {
+					e.stopPropagation();
+					const existing = el.querySelector(".charsheet__portrait-focal-editor");
+					if (existing) { existing.remove(); return; }
+					this._openPortraitFocalEditor(el);
+				});
+				el.appendChild(btn);
+			}
+		});
+	}
+
+	/**
+	 * Build and attach the inline focal editor to a portrait container.
+	 * @param {HTMLElement} containerEl
+	 */
+	_openPortraitFocalEditor (containerEl) {
+		// Close any other open editors first.
+		document.querySelectorAll(".charsheet__portrait-focal-editor").forEach((n) => n.remove());
+
+		const portraitUrl = this._state.getAppearance("portraitUrl");
+		if (!portraitUrl) return;
+
+		let position = this._sanitizePortraitPosition(this._state.getAppearance("portraitObjectPosition"));
+		let zoom = this._sanitizePortraitZoom(this._state.getAppearance("portraitZoom"));
+
+		// Parse position into numeric percentages for dragging (keywords → %).
+		const toPct = (tok, axis) => {
+			if (tok === "center") return 50;
+			if (axis === "x" && tok === "left") return 0;
+			if (axis === "x" && tok === "right") return 100;
+			if (axis === "y" && tok === "top") return 0;
+			if (axis === "y" && tok === "bottom") return 100;
+			const m = /^(\d{1,3}(?:\.\d+)?)%$/.exec(tok);
+			return m ? Math.max(0, Math.min(100, Number(m[1]))) : 50;
+		};
+		const parts = position.split(/\s+/);
+		let posX = toPct(parts[0] || "center", "x");
+		let posY = toPct(parts[1] || "center", "y");
+
+		const editor = document.createElement("div");
+		editor.className = "charsheet__portrait-focal-editor";
+		editor.addEventListener("click", (e) => e.stopPropagation());
+
+		const frame = document.createElement("div");
+		frame.className = "charsheet__portrait-focal-frame";
+		const img = document.createElement("img");
+		img.className = "charsheet__portrait-focal-img";
+		img.alt = "Portrait framing preview";
+		img.src = portraitUrl;
+		frame.appendChild(img);
+
+		const controls = document.createElement("div");
+		controls.className = "charsheet__portrait-focal-controls";
+
+		const zoomLabel = document.createElement("label");
+		zoomLabel.className = "charsheet__portrait-focal-zoom";
+		zoomLabel.innerHTML = `<span>Zoom</span>`;
+		const zoomInput = document.createElement("input");
+		zoomInput.type = "range";
+		zoomInput.min = "1";
+		zoomInput.max = "3";
+		zoomInput.step = "0.05";
+		zoomInput.value = String(zoom);
+		zoomLabel.appendChild(zoomInput);
+
+		const btnRow = document.createElement("div");
+		btnRow.className = "charsheet__portrait-focal-btnrow";
+		const resetBtn = document.createElement("button");
+		resetBtn.type = "button";
+		resetBtn.className = "charsheet__portrait-focal-reset";
+		resetBtn.textContent = "Reset to center";
+		const doneBtn = document.createElement("button");
+		doneBtn.type = "button";
+		doneBtn.className = "charsheet__portrait-focal-done";
+		doneBtn.textContent = "Done";
+		btnRow.appendChild(resetBtn);
+		btnRow.appendChild(doneBtn);
+
+		controls.appendChild(zoomLabel);
+		controls.appendChild(btnRow);
+		editor.appendChild(frame);
+		editor.appendChild(controls);
+		containerEl.appendChild(editor);
+
+		const applyPreview = () => {
+			const pos = `${posX}% ${posY}%`;
+			img.style.objectPosition = pos;
+			img.style.transformOrigin = pos;
+			img.style.transform = zoom !== 1 ? `scale(${zoom})` : "";
+		};
+
+		const persist = () => {
+			const rx = Math.round(posX * 100) / 100;
+			const ry = Math.round(posY * 100) / 100;
+			position = this._sanitizePortraitPosition(`${rx}% ${ry}%`);
+			zoom = this._sanitizePortraitZoom(zoom);
+			this._state.setAppearance("portraitObjectPosition", position);
+			this._state.setAppearance("portraitZoom", zoom);
+			this._saveCurrentCharacter();
+			this._renderPortrait();
+		};
+
+		applyPreview();
+
+		// Drag within the frame to move the focal point. Dragging the image toward
+		// a direction reveals the opposite edge, so we invert the pointer delta.
+		let dragging = false;
+		const onDown = (e) => { dragging = true; frame.setPointerCapture?.(e.pointerId); e.preventDefault(); };
+		const onMove = (e) => {
+			if (!dragging) return;
+			const rect = frame.getBoundingClientRect();
+			if (!rect.width || !rect.height) return;
+			// Movement drags the image; invert so dragging right shows left side.
+			posX = Math.max(0, Math.min(100, posX - (e.movementX / rect.width) * 100));
+			posY = Math.max(0, Math.min(100, posY - (e.movementY / rect.height) * 100));
+			applyPreview();
+		};
+		const onUp = () => { if (!dragging) return; dragging = false; persist(); };
+		frame.addEventListener("pointerdown", onDown);
+		frame.addEventListener("pointermove", onMove);
+		frame.addEventListener("pointerup", onUp);
+		frame.addEventListener("pointercancel", onUp);
+		frame.addEventListener("pointerleave", onUp);
+
+		zoomInput.addEventListener("input", () => {
+			zoom = this._sanitizePortraitZoom(zoomInput.value);
+			applyPreview();
+		});
+		zoomInput.addEventListener("change", () => persist());
+
+		resetBtn.addEventListener("click", () => {
+			posX = 50; posY = 50; zoom = 1;
+			zoomInput.value = "1";
+			applyPreview();
+			persist();
+		});
+
+		doneBtn.addEventListener("click", () => editor.remove());
 	}
 
 	/**

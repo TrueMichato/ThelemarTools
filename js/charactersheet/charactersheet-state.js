@@ -5110,6 +5110,8 @@ class CharacterSheetState {
 				skin: "",
 				hair: "",
 				portraitUrl: "", // Base64 data URL or external URL for character portrait
+				portraitObjectPosition: "center center", // CSS object-position for portrait framing/focal point
+				portraitZoom: 1, // Numeric scale factor (1..3) for portrait zoom
 			},
 
 			// Defenses
