@@ -5606,29 +5606,38 @@ class CharacterSheetPage {
 	}
 
 	/**
-	 * Render the inline focal-point / zoom editor affordance for each portrait
-	 * container. The "Adjust" button is only present when a portrait image exists;
-	 * clicking it toggles an inline editor (built here in JS) that lets the user
-	 * drag to set the focal point and zoom, persisting the values via setAppearance.
+	 * Render the "Frame portrait" trigger affordance for each portrait.
+	 *
+	 * The button is attached to the non-clipped `.charsheet__portrait-frame`
+	 * wrapper (a sibling of the clipped circular/rounded portrait container) so
+	 * the container's `overflow: hidden` cannot clip the control away — the bug
+	 * that made the previous inline affordance invisible. Clicking it opens a
+	 * dedicated framing modal (protected focus + room for a real crop preview).
+	 * The button is only present when a portrait image exists.
 	 */
 	_renderPortraitFocalControl () {
 		const hasPortrait = !!this._state.getAppearance("portraitUrl");
 
-		const specs = [
-			{container: "charsheet-portrait-container", key: "overview"},
-			{container: "charsheet-notes-portrait-container", key: "notes"},
-		];
+		const containerIds = ["charsheet-portrait-container", "charsheet-notes-portrait-container"];
 
-		specs.forEach(({container, key}) => {
-			const el = document.getElementById(container);
+		containerIds.forEach((containerId) => {
+			const el = document.getElementById(containerId);
 			if (!el) return;
 
-			let btn = el.querySelector(".charsheet__portrait-adjust-btn");
-			let editor = el.querySelector(".charsheet__portrait-focal-editor");
+			// Attach the trigger to the un-clipped frame wrapper, not the clipped
+			// container. Fall back to the immediate parent for resilience if the
+			// wrapper markup is ever missing.
+			const frame = el.closest(".charsheet__portrait-frame") || el.parentElement;
+			if (!frame) return;
+
+			// Retire any stale inline editor left over from the previous design.
+			frame.querySelectorAll(".charsheet__portrait-focal-editor").forEach((n) => n.remove());
+			el.querySelectorAll(".charsheet__portrait-focal-editor, .charsheet__portrait-adjust-btn").forEach((n) => n.remove());
+
+			let btn = frame.querySelector(":scope > .charsheet__portrait-adjust-btn");
 
 			if (!hasPortrait) {
 				btn?.remove();
-				editor?.remove();
 				return;
 			}
 
@@ -5636,27 +5645,25 @@ class CharacterSheetPage {
 				btn = document.createElement("button");
 				btn.type = "button";
 				btn.className = "charsheet__portrait-adjust-btn";
-				btn.title = "Adjust framing";
-				btn.innerHTML = `<span class="glyphicon glyphicon-move"></span><span class="charsheet__portrait-adjust-label">Adjust</span>`;
+				btn.title = "Frame portrait";
+				btn.setAttribute("aria-label", "Frame portrait");
+				btn.innerHTML = `<span class="glyphicon glyphicon-move" aria-hidden="true"></span><span class="charsheet__portrait-adjust-label">Frame</span>`;
 				btn.addEventListener("click", (e) => {
 					e.stopPropagation();
-					const existing = el.querySelector(".charsheet__portrait-focal-editor");
-					if (existing) { existing.remove(); return; }
-					this._openPortraitFocalEditor(el);
+					this._openPortraitFrameModal();
 				});
-				el.appendChild(btn);
+				frame.appendChild(btn);
 			}
 		});
 	}
 
 	/**
-	 * Build and attach the inline focal editor to a portrait container.
-	 * @param {HTMLElement} containerEl
+	 * Open the portrait framing modal: a WYSIWYG crop editor with a large square
+	 * preview stage, a circular mask matching the overview crop, drag-to-pan, and
+	 * a zoom slider. Changes are committed live (the sheet portraits update behind
+	 * the modal) and persisted via setAppearance → save.
 	 */
-	_openPortraitFocalEditor (containerEl) {
-		// Close any other open editors first.
-		document.querySelectorAll(".charsheet__portrait-focal-editor").forEach((n) => n.remove());
-
+	_openPortraitFrameModal () {
 		const portraitUrl = this._state.getAppearance("portraitUrl");
 		if (!portraitUrl) return;
 
@@ -5677,59 +5684,7 @@ class CharacterSheetPage {
 		let posX = toPct(parts[0] || "center", "x");
 		let posY = toPct(parts[1] || "center", "y");
 
-		const editor = document.createElement("div");
-		editor.className = "charsheet__portrait-focal-editor";
-		editor.addEventListener("click", (e) => e.stopPropagation());
-
-		const frame = document.createElement("div");
-		frame.className = "charsheet__portrait-focal-frame";
-		const img = document.createElement("img");
-		img.className = "charsheet__portrait-focal-img";
-		img.alt = "Portrait framing preview";
-		img.src = portraitUrl;
-		frame.appendChild(img);
-
-		const controls = document.createElement("div");
-		controls.className = "charsheet__portrait-focal-controls";
-
-		const zoomLabel = document.createElement("label");
-		zoomLabel.className = "charsheet__portrait-focal-zoom";
-		zoomLabel.innerHTML = `<span>Zoom</span>`;
-		const zoomInput = document.createElement("input");
-		zoomInput.type = "range";
-		zoomInput.min = "1";
-		zoomInput.max = "3";
-		zoomInput.step = "0.05";
-		zoomInput.value = String(zoom);
-		zoomLabel.appendChild(zoomInput);
-
-		const btnRow = document.createElement("div");
-		btnRow.className = "charsheet__portrait-focal-btnrow";
-		const resetBtn = document.createElement("button");
-		resetBtn.type = "button";
-		resetBtn.className = "charsheet__portrait-focal-reset";
-		resetBtn.textContent = "Reset to center";
-		const doneBtn = document.createElement("button");
-		doneBtn.type = "button";
-		doneBtn.className = "charsheet__portrait-focal-done";
-		doneBtn.textContent = "Done";
-		btnRow.appendChild(resetBtn);
-		btnRow.appendChild(doneBtn);
-
-		controls.appendChild(zoomLabel);
-		controls.appendChild(btnRow);
-		editor.appendChild(frame);
-		editor.appendChild(controls);
-		containerEl.appendChild(editor);
-
-		const applyPreview = () => {
-			const pos = `${posX}% ${posY}%`;
-			img.style.objectPosition = pos;
-			img.style.transformOrigin = pos;
-			img.style.transform = zoom !== 1 ? `scale(${zoom})` : "";
-		};
-
-		const persist = () => {
+		const commit = () => {
 			const rx = Math.round(posX * 100) / 100;
 			const ry = Math.round(posY * 100) / 100;
 			position = this._sanitizePortraitPosition(`${rx}% ${ry}%`);
@@ -5740,42 +5695,112 @@ class CharacterSheetPage {
 			this._renderPortrait();
 		};
 
+		const {eleModalInner, doClose} = UiUtil.getShowModal({
+			title: "Frame Portrait",
+			isMinHeight0: true,
+			cbClose: () => commit(),
+		});
+
+		const wrp = document.createElement("div");
+		wrp.className = "charsheet__portrait-crop";
+
+		const stage = document.createElement("div");
+		stage.className = "charsheet__portrait-crop-stage";
+		stage.title = "Drag to reposition";
+		const img = document.createElement("img");
+		img.className = "charsheet__portrait-crop-img";
+		img.alt = "Portrait framing preview";
+		img.draggable = false;
+		img.src = portraitUrl;
+		const mask = document.createElement("div");
+		mask.className = "charsheet__portrait-crop-mask";
+		mask.setAttribute("aria-hidden", "true");
+		stage.appendChild(img);
+		stage.appendChild(mask);
+
+		const hint = document.createElement("div");
+		hint.className = "charsheet__portrait-crop-hint ve-muted ve-small";
+		hint.textContent = "The circle is the overview crop; the square is the notes card. Zoom in to pan sideways.";
+
+		const zoomRow = document.createElement("label");
+		zoomRow.className = "charsheet__portrait-crop-zoom";
+		const zoomLbl = document.createElement("span");
+		zoomLbl.textContent = "Zoom";
+		const zoomInput = document.createElement("input");
+		zoomInput.type = "range";
+		zoomInput.min = "1";
+		zoomInput.max = "3";
+		zoomInput.step = "0.05";
+		zoomInput.value = String(zoom);
+		const zoomVal = document.createElement("span");
+		zoomVal.className = "charsheet__portrait-crop-zoomval";
+		zoomVal.textContent = `${zoom.toFixed(2)}×`;
+		zoomRow.appendChild(zoomLbl);
+		zoomRow.appendChild(zoomInput);
+		zoomRow.appendChild(zoomVal);
+
+		const btnRow = document.createElement("div");
+		btnRow.className = "charsheet__portrait-crop-btnrow";
+		const resetBtn = document.createElement("button");
+		resetBtn.type = "button";
+		resetBtn.className = "ve-btn ve-btn-default charsheet__portrait-crop-btn";
+		resetBtn.textContent = "Reset to center";
+		const doneBtn = document.createElement("button");
+		doneBtn.type = "button";
+		doneBtn.className = "ve-btn ve-btn-primary charsheet__portrait-crop-btn charsheet__portrait-crop-done";
+		doneBtn.textContent = "Done";
+		btnRow.appendChild(resetBtn);
+		btnRow.appendChild(doneBtn);
+
+		wrp.appendChild(stage);
+		wrp.appendChild(hint);
+		wrp.appendChild(zoomRow);
+		wrp.appendChild(btnRow);
+		eleModalInner.appendChild(wrp);
+
+		const applyPreview = () => {
+			const pos = `${posX}% ${posY}%`;
+			img.style.objectPosition = pos;
+			img.style.transformOrigin = pos;
+			img.style.transform = zoom !== 1 ? `scale(${zoom})` : "";
+			zoomVal.textContent = `${zoom.toFixed(2)}×`;
+		};
+
 		applyPreview();
 
-		// Drag within the frame to move the focal point. Dragging the image toward
+		// Drag within the stage to move the focal point. Dragging the image toward
 		// a direction reveals the opposite edge, so we invert the pointer delta.
 		let dragging = false;
-		const onDown = (e) => { dragging = true; frame.setPointerCapture?.(e.pointerId); e.preventDefault(); };
+		const onDown = (e) => { dragging = true; stage.setPointerCapture?.(e.pointerId); e.preventDefault(); };
 		const onMove = (e) => {
 			if (!dragging) return;
-			const rect = frame.getBoundingClientRect();
+			const rect = stage.getBoundingClientRect();
 			if (!rect.width || !rect.height) return;
-			// Movement drags the image; invert so dragging right shows left side.
 			posX = Math.max(0, Math.min(100, posX - (e.movementX / rect.width) * 100));
 			posY = Math.max(0, Math.min(100, posY - (e.movementY / rect.height) * 100));
 			applyPreview();
 		};
-		const onUp = () => { if (!dragging) return; dragging = false; persist(); };
-		frame.addEventListener("pointerdown", onDown);
-		frame.addEventListener("pointermove", onMove);
-		frame.addEventListener("pointerup", onUp);
-		frame.addEventListener("pointercancel", onUp);
-		frame.addEventListener("pointerleave", onUp);
+		const onUp = () => { if (!dragging) return; dragging = false; commit(); };
+		stage.addEventListener("pointerdown", onDown);
+		stage.addEventListener("pointermove", onMove);
+		stage.addEventListener("pointerup", onUp);
+		stage.addEventListener("pointercancel", onUp);
+		stage.addEventListener("pointerleave", onUp);
 
 		zoomInput.addEventListener("input", () => {
 			zoom = this._sanitizePortraitZoom(zoomInput.value);
 			applyPreview();
 		});
-		zoomInput.addEventListener("change", () => persist());
+		zoomInput.addEventListener("change", () => commit());
 
 		resetBtn.addEventListener("click", () => {
 			posX = 50; posY = 50; zoom = 1;
 			zoomInput.value = "1";
 			applyPreview();
-			persist();
+			commit();
 		});
 
-		doneBtn.addEventListener("click", () => editor.remove());
+		doneBtn.addEventListener("click", () => doClose(true));
 	}
 
 	/**

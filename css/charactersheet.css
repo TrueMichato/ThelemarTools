@@ -3395,29 +3395,39 @@ body[data-font="readable"] {
 	opacity: 1;
 }
 
-/* Portrait focal-point / zoom control */
+/* Portrait framing ("Frame" trigger + crop modal) */
+
+/* Non-clipped wrapper: lets the trigger escape the container's overflow:hidden
+   circular/rounded clip (the bug that made the old affordance invisible). */
+.charsheet__portrait-frame {
+	position: relative;
+	display: inline-flex;
+	line-height: 0;
+	flex-shrink: 0;
+}
+
 .charsheet__portrait-adjust-btn {
 	position: absolute;
-	bottom: 2px;
-	right: 2px;
+	bottom: -4px;
+	right: -4px;
 	z-index: 2;
 	display: inline-flex;
 	align-items: center;
 	gap: 3px;
-	padding: 2px 5px;
-	font-size: 0.6rem;
+	padding: 3px 7px;
+	font-size: 0.62rem;
 	line-height: 1;
 	color: var(--cs-text, #e5e7eb);
-	background: var(--cs-bg-elevated, rgba(15, 23, 42, 0.9));
+	background: var(--cs-bg-elevated, rgba(15, 23, 42, 0.92));
 	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.25));
-	border-radius: var(--cs-radius-sm, 4px);
+	border-radius: 999px;
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
 	cursor: pointer;
 	opacity: 0;
 	transition: opacity 150ms ease-out, border-color 150ms ease-out, background-color 150ms ease-out;
 }
 
-.charsheet__portrait-container:hover .charsheet__portrait-adjust-btn,
-.charsheet__notes-portrait-container:hover .charsheet__portrait-adjust-btn,
+.charsheet__portrait-frame:hover .charsheet__portrait-adjust-btn,
 .charsheet__portrait-adjust-btn:focus-visible {
 	opacity: 1;
 }
@@ -3429,51 +3439,44 @@ body[data-font="readable"] {
 	outline: none;
 }
 
-.charsheet__portrait-container .charsheet__portrait-adjust-label {
-	display: none; /* keep the 64px overview control icon-only */
+/* Overview control is icon-only (64px circle); notes control shows its label. */
+.charsheet__portrait-frame:not(.charsheet__portrait-frame--notes) .charsheet__portrait-adjust-label {
+	display: none;
 }
 
-.charsheet__portrait-focal-editor {
-	position: absolute;
-	top: calc(100% + 6px);
-	left: 0;
-	z-index: 20;
-	width: 200px;
-	max-width: calc(100vw - 32px);
-	padding: 8px;
+.charsheet__portrait-frame--notes .charsheet__portrait-adjust-label {
+	display: inline;
+}
+
+/* Crop modal */
+.charsheet__portrait-crop {
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
-	background: var(--cs-bg-surface, #1e293b);
-	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.15));
-	border-radius: var(--cs-radius-md, 8px);
-	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-	cursor: default;
-	animation: charsheet-focal-in 180ms ease-out;
+	gap: var(--cs-space-md, 0.75rem);
+	width: min(320px, 78vw);
+	max-width: 100%;
+	margin: 0 auto;
 }
 
-@keyframes charsheet-focal-in {
-	from { opacity: 0; transform: translateY(-4px); }
-	to { opacity: 1; transform: translateY(0); }
-}
-
-.charsheet__portrait-focal-frame {
+.charsheet__portrait-crop-stage {
 	position: relative;
 	width: 100%;
 	aspect-ratio: 1 / 1;
-	border-radius: var(--cs-radius-sm, 6px);
-	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.15));
+	border-radius: var(--cs-radius-md, 8px);
 	overflow: hidden;
 	background: var(--cs-bg-elevated, #0f172a);
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.15));
 	cursor: grab;
 	touch-action: none;
+	user-select: none;
 }
 
-.charsheet__portrait-focal-frame:active {
+.charsheet__portrait-crop-stage:active {
 	cursor: grabbing;
 }
 
-.charsheet__portrait-focal-img {
+.charsheet__portrait-crop-img {
+	display: block;
 	width: 100%;
 	height: 100%;
 	object-fit: cover;
@@ -3482,56 +3485,54 @@ body[data-font="readable"] {
 	-webkit-user-drag: none;
 }
 
-.charsheet__portrait-focal-controls {
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
+/* Scrim outside the inscribed circle previews the overview crop; the clear
+   square previews the notes card. */
+.charsheet__portrait-crop-mask {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
 }
 
-.charsheet__portrait-focal-zoom {
+.charsheet__portrait-crop-mask::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	border-radius: 50%;
+	box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45);
+	border: 1px solid rgba(255, 255, 255, 0.55);
+}
+
+.charsheet__portrait-crop-hint {
+	text-align: center;
+}
+
+.charsheet__portrait-crop-zoom {
 	display: flex;
 	align-items: center;
-	gap: 6px;
-	font-size: 0.7rem;
+	gap: var(--cs-space-sm, 0.5rem);
+	font-size: 0.72rem;
 	color: var(--cs-text-muted, #94a3b8);
 }
 
-.charsheet__portrait-focal-zoom input[type="range"] {
+.charsheet__portrait-crop-zoom input[type="range"] {
 	flex: 1;
 	accent-color: var(--cs-primary, #6366f1);
 }
 
-.charsheet__portrait-focal-btnrow {
-	display: flex;
-	gap: 6px;
-}
-
-.charsheet__portrait-focal-btnrow button {
-	flex: 1;
-	padding: 4px 6px;
-	font-size: 0.68rem;
+.charsheet__portrait-crop-zoomval {
+	min-width: 3.5ch;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
 	color: var(--cs-text, #e5e7eb);
-	background: var(--cs-bg-elevated, rgba(15, 23, 42, 0.9));
-	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.2));
-	border-radius: var(--cs-radius-sm, 4px);
-	cursor: pointer;
-	transition: border-color 150ms ease-out, background-color 150ms ease-out;
 }
 
-.charsheet__portrait-focal-btnrow button:hover,
-.charsheet__portrait-focal-btnrow button:focus-visible {
-	border-color: var(--cs-primary, #6366f1);
-	background: var(--cs-primary-subtle, rgba(99, 102, 241, 0.2));
-	outline: none;
+.charsheet__portrait-crop-btnrow {
+	display: flex;
+	gap: var(--cs-space-sm, 0.5rem);
 }
 
-.charsheet__portrait-focal-done {
-	color: var(--cs-primary, #6366f1) !important;
-}
-
-/* Notes-tab control: room for icon + text label */
-.charsheet__notes-portrait-container .charsheet__portrait-adjust-label {
-	display: inline;
+.charsheet__portrait-crop-btn {
+	flex: 1;
 }
 
 .charsheet__portrait-remove-btn {

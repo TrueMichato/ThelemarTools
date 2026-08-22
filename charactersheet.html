@@ -406,6 +406,7 @@
 						<div class="charsheet__section charsheet__section--header charsheet__section--identity">
 							<div class="charsheet__identity-main">
 								<!-- Portrait -->
+								<div class="charsheet__portrait-frame">
 								<div class="charsheet__portrait-container" id="charsheet-portrait-container" title="Click to change portrait">
 									<div class="charsheet__portrait-placeholder" id="charsheet-portrait-placeholder">
 										<span class="charsheet__portrait-icon">👤</span>
@@ -416,6 +417,7 @@
 										<span class="glyphicon glyphicon-camera"></span>
 									</div>
 									<input type="file" id="charsheet-portrait-input" accept="image/*" class="ve-hidden">
+								</div>
 								</div>
 								<div class="charsheet__identity-name">
 									<input type="text" class="ve-form-control form-control--minimal charsheet__ipt-name" id="charsheet-ipt-name" placeholder="Character Name">
@@ -1625,6 +1627,7 @@
 							<h4 class="charsheet__section-title">Appearance</h4>
 							<!-- Portrait in Notes tab -->
 							<div class="charsheet__notes-portrait-row mb-3">
+								<div class="charsheet__portrait-frame charsheet__portrait-frame--notes">
 								<div class="charsheet__notes-portrait-container" id="charsheet-notes-portrait-container" title="Click to change portrait">
 									<div class="charsheet__portrait-placeholder" id="charsheet-notes-portrait-placeholder">
 										<span class="charsheet__portrait-icon">👤</span>
@@ -1634,6 +1637,7 @@
 									<div class="charsheet__portrait-overlay">
 										<span class="glyphicon glyphicon-camera"></span>
 									</div>
+								</div>
 								</div>
 								<button class="btn btn-xs btn-default charsheet__portrait-remove-btn ve-hidden" id="charsheet-portrait-remove-btn" title="Remove portrait">
 									<span class="glyphicon glyphicon-trash"></span> Remove
