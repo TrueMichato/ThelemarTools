@@ -595,10 +595,6 @@
 										<span class="charsheet__hp-separator">/</span>
 										<span class="charsheet__hp-max" id="charsheet-disp-hp-max">0</span>
 									</div>
-									<div class="ve-flex ve-flex-h-center ve-flex-wrap mt-2 charsheet__hp-buttons">
-										<button class="ve-btn ve-btn-success ve-btn-xs mr-1 charsheet__hp-btn charsheet__hp-btn--heal" id="charsheet-btn-heal" title="Add HP (healing)"><span class="charsheet__hp-btn-icon">💚</span> Heal</button>
-										<button class="ve-btn ve-btn-danger ve-btn-xs charsheet__hp-btn charsheet__hp-btn--damage" id="charsheet-btn-damage" title="Remove HP (damage)"><span class="charsheet__hp-btn-icon">💔</span> Damage</button>
-									</div>
 								</div>
 								<div class="charsheet__hp-box charsheet__hp-box--temp">
 									<div class="charsheet__hp-label">Temp HP</div>
@@ -606,22 +602,7 @@
 									<div class="charsheet__hp-temp-hint">Absorbs damage first</div>
 								</div>
 							</div>
-							<!-- Streamlined damage/heal intake: amount + damage-type picker (Damage only) + live mitigated preview, all inline. The mitigation engine (takeDamage/applyDamageDefenses) is untouched — this is intake + preview only. -->
-							<div class="charsheet__dmg-intake" id="charsheet-dmg-intake">
-								<div class="charsheet__dmg-intake-row">
-									<input type="number" class="ve-form-control form-control--minimal charsheet__dmg-amount" id="charsheet-ipt-dmg-amount" min="0" step="1" inputmode="numeric" placeholder="0" aria-label="Damage or healing amount" title="Amount to apply">
-									<button type="button" class="charsheet__dmg-type-trigger" id="charsheet-btn-dmg-type" aria-haspopup="listbox" aria-expanded="false" aria-controls="charsheet-dmg-type-menu" title="Damage type (applies your resistances, immunities and vulnerabilities)">
-										<span class="charsheet__dmg-type-icon" id="charsheet-dmg-type-icon" aria-hidden="true">◇</span>
-										<span class="charsheet__dmg-type-label" id="charsheet-dmg-type-label">Untyped</span>
-										<span class="charsheet__dmg-type-chevron" aria-hidden="true">⌄</span>
-									</button>
-									<button type="button" class="ve-btn ve-btn-danger ve-btn-xs charsheet__dmg-apply charsheet__dmg-apply--damage" id="charsheet-btn-dmg-apply" disabled title="Apply damage"><span aria-hidden="true">💔</span> Damage</button>
-									<button type="button" class="ve-btn ve-btn-success ve-btn-xs charsheet__dmg-apply charsheet__dmg-apply--heal" id="charsheet-btn-heal-apply" disabled title="Apply healing"><span aria-hidden="true">💚</span> Heal</button>
-								</div>
-								<div class="charsheet__dmg-type-menu" id="charsheet-dmg-type-menu" role="listbox" aria-label="Damage type" hidden></div>
-								<div class="charsheet__dmg-preview" id="charsheet-dmg-preview" aria-live="polite"></div>
-								<div class="charsheet__dmg-defenses" id="charsheet-dmg-defenses"></div>
-							</div>
+							<div data-charsheet-hp-intake-host="overview"></div>
 							<!-- Max HP Reduction — rarely used, so it is collapsed behind a quiet affordance and expands inline on demand -->
 							<div class="charsheet__hp-reduction" id="charsheet-hp-max-reduction-control">
 								<div class="charsheet__hp-reduction-bar">
@@ -1104,6 +1085,16 @@
 			<!-- Combat Tab -->
 			<div id="charsheet-tab-combat" class="tab-pane fade">
 				<div class="charsheet__combat-masonry" id="charsheet-combat-masonry">
+						<div class="charsheet__section charsheet__section--hp charsheet__section--hp-combat" id="charsheet-combat-hp-section">
+							<h4 class="charsheet__section-title"><span class="charsheet__section-icon">❤️</span> Hit Points</h4>
+							<div class="charsheet__combat-hp-summary">
+								<span class="charsheet__combat-hp-current" data-charsheet-combat-hp-current>0</span>
+								<span class="charsheet__hp-separator">/</span>
+								<span class="charsheet__combat-hp-max" data-charsheet-combat-hp-max>0</span>
+								<span class="charsheet__combat-hp-temp" data-charsheet-combat-hp-temp hidden></span>
+							</div>
+							<div data-charsheet-hp-intake-host="combat"></div>
+						</div>
 						<!-- Combat Methods Section (Thelemar homebrew) -->
 						<div class="charsheet__section" id="charsheet-combat-methods-tab-section" style="display: none;">
 							<h4 class="charsheet__section-title">

@@ -100,6 +100,13 @@ class CharacterSheetPage {
 		// (BUG 8). Never persisted to the saved character; cleared on undo/reload.
 		/** @type {?{restType: string, json: *, ts: number}} */
 		this._lastRestSnapshot = null;
+		this._lastDamageType = null;
+		this._damageIntakeAmount = 0;
+		this._damageIntakePreviewIntent = "damage";
+		/** @type {?{characterId: string, kind: "damage"|"heal", damageType: ?string, requestedAmount: number, actualDelta: number, before: {currentHp: number, tempHp: number}, after: {currentHp: number, tempHp: number}}} */
+		this._lastHpChange = null;
+		/** @type {?{text: string, tone: string}} */
+		this._lastHpOutcome = null;
 
 		// Data caches
 		this._races = [];
@@ -1403,6 +1410,7 @@ class CharacterSheetPage {
 
 		// HP controls
 		bind("charsheet-ipt-hp-current", "change", (e) => {
+			this._clearLastHpChange();
 			this._state.setCurrentHp(parseInt((/** @type {*} */ (e.target)).value) || 0);
 			this._saveCurrentCharacter();
 			this._renderHp(); // Update HP bar
@@ -1410,6 +1418,7 @@ class CharacterSheetPage {
 		});
 
 		bind("charsheet-ipt-hp-temp", "change", (e) => {
+			this._clearLastHpChange();
 			this._state.setTempHp(parseInt((/** @type {*} */ (e.target)).value) || 0);
 			this._saveCurrentCharacter();
 			this._renderHp(); // Update HP bar
@@ -1441,35 +1450,74 @@ class CharacterSheetPage {
 			this._setHpReductionEditorOpen(false, {focus: true});
 		});
 
-		bind("charsheet-btn-heal", "click", () => this._onHeal());
-		bind("charsheet-btn-damage", "click", () => this._onDamage());
-
-		// Inline damage/heal intake control (amount + type picker + live preview).
-		const dmgAmountEl = document.getElementById("charsheet-ipt-dmg-amount");
-		if (dmgAmountEl) {
-			dmgAmountEl.addEventListener("input", () => this._renderDamageIntake());
-			dmgAmountEl.addEventListener("keydown", (e) => {
-				if ((/** @type {KeyboardEvent} */ (e)).key === "Enter") {
-					e.preventDefault();
-					this._onDamageIntakeApply();
-				}
+		// Both Overview and Combat hosts use the same delegated transaction controller.
+		document.querySelectorAll("[data-charsheet-hp-intake-host]").forEach(host => {
+			host.addEventListener("input", (e) => {
+				const target = /** @type {HTMLInputElement} */ (e.target);
+				if (!target.matches("[data-charsheet-dmg-role=\"amount\"]")) return;
+				this._damageIntakeAmount = Math.max(0, Math.floor(Number(target.value) || 0));
+				this._lastHpOutcome = null;
+				this._syncDamageIntakeControls();
 			});
-		}
-		bind("charsheet-btn-dmg-type", "click", (e) => { e.stopPropagation(); this._toggleDamageTypeMenu(); });
-		bind("charsheet-btn-dmg-apply", "click", () => this._onDamageIntakeApply());
-		bind("charsheet-btn-heal-apply", "click", () => this._onHealIntakeApply());
-		// Close the type menu on outside click.
-		document.addEventListener("click", (e) => {
-			const menu = document.getElementById("charsheet-dmg-type-menu");
-			const trigger = document.getElementById("charsheet-btn-dmg-type");
-			if (!menu || menu.hidden) return;
-			const target = /** @type {Node} */ (e.target);
-			if (menu.contains(target) || trigger?.contains(target)) return;
-			this._toggleDamageTypeMenu(false);
+			host.addEventListener("keydown", (e) => {
+				const evt = /** @type {KeyboardEvent} */ (e);
+				const target = /** @type {HTMLElement} */ (e.target);
+				if (evt.key !== "Enter" || !target.matches("[data-charsheet-dmg-role=\"amount\"]")) return;
+				evt.preventDefault();
+				// Damage is the primary combat transaction, so Enter intentionally applies Damage.
+				this._onDamageIntakeApply();
+			});
+			host.addEventListener("click", (e) => {
+				const target = /** @type {HTMLElement} */ (e.target);
+				const control = target.closest("button[data-charsheet-dmg-role]");
+				if (!control) return;
+				const role = control.getAttribute("data-charsheet-dmg-role");
+				if (role === "type-trigger") {
+					e.stopPropagation();
+					this._toggleDamageTypeMenu(/** @type {HTMLElement} */ (host));
+					return;
+				}
+				if (role === "type-option") {
+					this._lastDamageType = control.getAttribute("data-dmg-type") || null;
+					this._toggleDamageTypeMenu(/** @type {HTMLElement} */ (host), false);
+					this._syncDamageIntakeControls();
+					return;
+				}
+				if (role === "damage") return void this._onDamageIntakeApply();
+				if (role === "heal") return void this._onHealIntakeApply();
+				if (role === "advanced") return void this._onAdvancedDamageIntakeApply();
+				if (role === "undo") return void this._onUndoLastHpChange();
+			});
+			const setIntentFromEvent = (e) => {
+				const target = /** @type {HTMLElement} */ (e.target);
+				const action = target.closest("[data-charsheet-dmg-role=\"damage\"], [data-charsheet-dmg-role=\"heal\"]");
+				if (!action) return;
+				this._damageIntakePreviewIntent = action.getAttribute("data-charsheet-dmg-role") === "heal" ? "heal" : "damage";
+				this._syncDamageIntakeControls();
+			};
+			host.addEventListener("pointerover", setIntentFromEvent);
+			host.addEventListener("focusin", setIntentFromEvent);
+			host.addEventListener("pointerleave", () => {
+				this._damageIntakePreviewIntent = "damage";
+				this._syncDamageIntakeControls();
+			});
+			host.addEventListener("focusout", (e) => {
+				if ((/** @type {HTMLElement} */ (host)).contains((/** @type {FocusEvent} */ (e)).relatedTarget)) return;
+				this._damageIntakePreviewIntent = "damage";
+				this._syncDamageIntakeControls();
+			});
 		});
+		// Close every type menu on an outside click.
+		document.addEventListener("click", (e) => {
+			const target = /** @type {Node} */ (e.target);
+			if ((/** @type {HTMLElement} */ (target)).closest?.("[data-charsheet-hp-intake-host]")) return;
+			document.querySelectorAll("[data-charsheet-hp-intake-host]").forEach(host => this._toggleDamageTypeMenu(/** @type {HTMLElement} */ (host), false));
+		});
+		// Generated controls must exist even before a saved character is selected.
+		this._renderDamageIntakes();
 
 		// HP breakdown popover — bind on the whole HP section, but stop propagation
-		// on interactive children (inputs, heal/damage buttons) so editing/clicking them
+		// on interactive children so editing/clicking them
 		// doesn't open the popover.
 		const hpSection = document.querySelector(".charsheet__section--hp");
 		if (hpSection) {
@@ -1632,6 +1680,7 @@ class CharacterSheetPage {
 		if (this._currentCharacterId) {
 			await this._saveCurrentCharacter();
 		}
+		this._clearLastHpChange();
 
 		if (charId) {
 			await this._pLoadCharacter(charId);
@@ -1706,6 +1755,7 @@ class CharacterSheetPage {
 	}
 
 	_createNewCharacter () {
+		this._clearLastHpChange();
 		this._currentCharacterId = CryptUtil.uid();
 		this._isLevelUpBannerDismissed = false;
 		this._state.reset();
@@ -1983,6 +2033,7 @@ class CharacterSheetPage {
 		charData.id = newId;
 		charData.name = `${charData.name || "Character"} (Copy)`;
 
+		this._clearLastHpChange();
 		this._currentCharacterId = newId;
 		this._isLevelUpBannerDismissed = false;
 		this._state.loadFromJson(charData);
@@ -2006,6 +2057,7 @@ class CharacterSheetPage {
 		await StorageUtil.pSet("charsheet-characters", characters);
 
 		// Load the new character
+		this._clearLastHpChange();
 		this._currentCharacterId = newId;
 		this._isLevelUpBannerDismissed = false;
 		this._state.loadFromJson(charData);
@@ -3578,6 +3630,7 @@ class CharacterSheetPage {
 
 		// Assign new ID
 		json.id = CryptUtil.uid();
+		this._clearLastHpChange();
 		this._currentCharacterId = json.id;
 		this._state.loadFromJson(json);
 		this._reconcileClassFeatures();
@@ -4454,8 +4507,14 @@ class CharacterSheetPage {
 		// Update HP percentage text
 		(/** @type {*} */ (document.getElementById("charsheet-hp-percent"))).textContent = `${Math.round(hpPercent)}%`;
 
-		// Streamlined damage/heal intake (amount + type picker + live preview + defenses strip).
-		this._renderDamageIntake();
+		document.querySelectorAll("[data-charsheet-combat-hp-current]").forEach(el => { el.textContent = String(currentHp); });
+		document.querySelectorAll("[data-charsheet-combat-hp-max]").forEach(el => { el.textContent = String(maxHp); });
+		document.querySelectorAll("[data-charsheet-combat-hp-temp]").forEach(el => {
+			el.textContent = tempHp > 0 ? `+${tempHp} temp` : "";
+			(/** @type {HTMLElement} */ (el)).hidden = tempHp <= 0;
+		});
+
+		this._renderDamageIntakes();
 	}
 
 	/**
@@ -4486,70 +4545,7 @@ class CharacterSheetPage {
 		return CharacterSheetPage.DAMAGE_INTAKE_TYPES.find(t => t.id === (id ?? null)) || CharacterSheetPage.DAMAGE_INTAKE_TYPES[0];
 	}
 
-	/**
-	 * Render the inline damage/heal intake control: sync the type trigger to the
-	 * session-remembered type, enable/disable Apply buttons on the current amount, paint the
-	 * live mitigated preview, and refresh the read-only defenses chip strip. The mitigation
-	 * engine is never invoked to mutate here — the preview uses `applyDamageDefenses` purely
-	 * as a pure function.
-	 */
-	_renderDamageIntake () {
-		const amountEl = /** @type {HTMLInputElement} */ (document.getElementById("charsheet-ipt-dmg-amount"));
-		if (!amountEl) return; // control not present (defensive)
-
-		const typeInfo = this._getDamageIntakeType(this._lastDamageType);
-		const iconEl = document.getElementById("charsheet-dmg-type-icon");
-		const labelEl = document.getElementById("charsheet-dmg-type-label");
-		if (iconEl) iconEl.textContent = typeInfo.icon;
-		if (labelEl) labelEl.textContent = typeInfo.label;
-
-		const amount = Math.max(0, Math.floor(Number(amountEl.value) || 0));
-		const hasAmount = amount > 0;
-		const btnDamage = /** @type {HTMLButtonElement} */ (document.getElementById("charsheet-btn-dmg-apply"));
-		const btnHeal = /** @type {HTMLButtonElement} */ (document.getElementById("charsheet-btn-heal-apply"));
-		if (btnDamage) btnDamage.disabled = !hasAmount;
-		if (btnHeal) btnHeal.disabled = !hasAmount;
-
-		// Live mitigated preview (Damage only). No mutation.
-		const previewEl = document.getElementById("charsheet-dmg-preview");
-		if (previewEl) {
-			if (!hasAmount) {
-				previewEl.textContent = "";
-				previewEl.className = "charsheet__dmg-preview";
-			} else {
-				const preview = this._state.applyDamageDefenses(amount, this._lastDamageType, {});
-				const mitigated = preview.damage;
-				let reason = "";
-				let tone = "plain";
-				if (preview.applied === "immunity") {
-					reason = "Immune"; tone = "immune";
-				} else if (preview.applied === "resistance") {
-					reason = "Resisted"; tone = "resist";
-				} else if (preview.applied === "vulnerability") {
-					reason = "Vulnerable"; tone = "vuln";
-				} else if (preview.reduction) {
-					reason = `−${preview.reduction} reduction`; tone = "resist";
-				}
-
-				const changed = mitigated !== amount;
-				const text = changed
-					? `${amount} → ${mitigated}${reason ? ` · ${reason}` : ""}`
-					: `${mitigated}${reason ? ` · ${reason}` : ""}`;
-				previewEl.textContent = text;
-				previewEl.className = `charsheet__dmg-preview charsheet__dmg-preview--${tone}`;
-			}
-		}
-
-		this._renderDamageIntakeDefenses();
-	}
-
-	/**
-	 * Read-only chip strip of the character's current resistances / immunities /
-	 * vulnerabilities beneath the intake control. Purely informational — there is no editor.
-	 */
-	_renderDamageIntakeDefenses () {
-		const el = document.getElementById("charsheet-dmg-defenses");
-		if (!el) return;
+	_getDamageIntakeDefensesHtml () {
 		const def = this._state.getEffectiveDefenses?.() || {};
 		const fmt = (s) => CharacterSheetClassUtils.escapeHtml(String(s).replace(/\b\w/g, c => c.toUpperCase()));
 		const chip = (type, cls, icon) => `<span class="charsheet__dmg-def-chip charsheet__dmg-def-chip--${cls}"><span aria-hidden="true">${icon}</span> ${fmt(type)}</span>`;
@@ -4557,8 +4553,124 @@ class CharacterSheetPage {
 		(def.resistances || []).forEach(t => parts.push(chip(t, "resist", "🛡️")));
 		(def.immunities || []).forEach(t => parts.push(chip(t, "immune", "🚫")));
 		(def.vulnerabilities || []).forEach(t => parts.push(chip(t, "vuln", "⚠️")));
-		el.innerHTML = parts.length ? parts.join("") : `<span class="charsheet__dmg-def-none ve-muted">No damage defenses</span>`;
-		el.hidden = false;
+		return parts.length ? parts.join("") : `<span class="charsheet__dmg-def-none ve-muted">No damage defenses</span>`;
+	}
+
+	_getDamageIntakeMarkup (hostKey) {
+		const menuId = `charsheet-dmg-type-menu-${hostKey}`;
+		const advanced = this._state.hasNonmagicalDamageReduction?.()
+			? `<button type="button" class="charsheet__dmg-advanced" data-charsheet-dmg-role="advanced" disabled>Advanced damage…</button>`
+			: "";
+		return `
+			<div class="charsheet__dmg-intake">
+				<div class="charsheet__dmg-intake-row">
+					<input type="number" class="ve-form-control form-control--minimal charsheet__dmg-amount" data-charsheet-dmg-role="amount" min="0" step="1" inputmode="numeric" placeholder="0" aria-label="Damage or healing amount" title="Amount to apply; press Enter to apply Damage">
+					<div class="charsheet__dmg-type-wrap">
+						<button type="button" class="charsheet__dmg-type-trigger" data-charsheet-dmg-role="type-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="${menuId}" title="Damage type (applies your resistances, immunities and vulnerabilities)">
+							<span class="charsheet__dmg-type-icon" data-charsheet-dmg-role="type-icon" aria-hidden="true">◇</span>
+							<span class="charsheet__dmg-type-label" data-charsheet-dmg-role="type-label">Untyped</span>
+							<span class="charsheet__dmg-type-chevron" aria-hidden="true">⌄</span>
+						</button>
+						<div class="charsheet__dmg-type-menu" id="${menuId}" data-charsheet-dmg-role="type-menu" role="listbox" aria-label="Damage type" hidden></div>
+					</div>
+					<span class="charsheet__dmg-flow" aria-hidden="true">→</span>
+					<div class="charsheet__dmg-actions">
+						<button type="button" class="charsheet__dmg-apply charsheet__dmg-apply--damage" data-charsheet-dmg-role="damage" disabled title="Apply damage"><span aria-hidden="true">💔</span> Damage</button>
+						<button type="button" class="charsheet__dmg-apply charsheet__dmg-apply--heal" data-charsheet-dmg-role="heal" disabled title="Apply healing"><span aria-hidden="true">💚</span> Heal</button>
+					</div>
+				</div>
+				${advanced}
+				<div class="charsheet__dmg-preview" data-charsheet-dmg-role="preview" aria-live="polite"></div>
+				<button type="button" class="charsheet__dmg-undo" data-charsheet-dmg-role="undo" hidden></button>
+				<div class="charsheet__dmg-defenses">${this._getDamageIntakeDefensesHtml()}</div>
+			</div>
+		`;
+	}
+
+	_renderDamageIntakes () {
+		document.querySelectorAll("[data-charsheet-hp-intake-host]").forEach(host => {
+			const hostKey = host.getAttribute("data-charsheet-hp-intake-host") || "overview";
+			host.innerHTML = this._getDamageIntakeMarkup(hostKey);
+		});
+		this._syncDamageIntakeControls();
+	}
+
+	_syncDamageIntakeControls () {
+		const typeInfo = this._getDamageIntakeType(this._lastDamageType);
+		const amount = Math.max(0, Math.floor(Number(this._damageIntakeAmount) || 0));
+		const hasAmount = amount > 0;
+		let outcome = this._lastHpOutcome;
+		if (hasAmount) {
+			const hp = {
+				current: this._state.getCurrentHp(),
+				temp: this._state.getTempHp(),
+				max: this._state.getMaxHp(),
+			};
+			const preview = this._damageIntakePreviewIntent === "damage"
+				? this._state.applyDamageDefenses(amount, this._lastDamageType, {})
+				: null;
+			outcome = this._getHpOutcomePreview({
+				intent: this._damageIntakePreviewIntent,
+				amount,
+				hp,
+				preview,
+			});
+		}
+
+		document.querySelectorAll("[data-charsheet-hp-intake-host]").forEach(host => {
+			const amountEl = /** @type {HTMLInputElement} */ (host.querySelector("[data-charsheet-dmg-role=\"amount\"]"));
+			if (amountEl && Number(amountEl.value || 0) !== amount) amountEl.value = amount ? String(amount) : "";
+			const iconEl = host.querySelector("[data-charsheet-dmg-role=\"type-icon\"]");
+			const labelEl = host.querySelector("[data-charsheet-dmg-role=\"type-label\"]");
+			if (iconEl) iconEl.textContent = typeInfo.icon;
+			if (labelEl) labelEl.textContent = typeInfo.label;
+			host.querySelectorAll("[data-charsheet-dmg-role=\"damage\"], [data-charsheet-dmg-role=\"heal\"], [data-charsheet-dmg-role=\"advanced\"]")
+				.forEach(el => { (/** @type {HTMLButtonElement} */ (el)).disabled = !hasAmount; });
+			const previewEl = host.querySelector("[data-charsheet-dmg-role=\"preview\"]");
+			if (previewEl) {
+				previewEl.textContent = outcome?.text || "";
+				previewEl.className = `charsheet__dmg-preview${outcome?.tone ? ` charsheet__dmg-preview--${outcome.tone}` : ""}`;
+			}
+			const undoEl = /** @type {HTMLButtonElement} */ (host.querySelector("[data-charsheet-dmg-role=\"undo\"]"));
+			if (undoEl) {
+				undoEl.hidden = !this._lastHpChange;
+				undoEl.textContent = this._lastHpChange ? this._getLastHpChangeUndoLabel() : "";
+			}
+		});
+	}
+
+	_getHpOutcomePreview ({intent, amount, hp, preview = null, after = null}) {
+		const beforeCurrent = Math.max(0, Number(hp.current) || 0);
+		const beforeTemp = Math.max(0, Number(hp.temp) || 0);
+		const maxHp = Math.max(0, Number(hp.max) || 0);
+		if (intent === "heal") {
+			const afterCurrent = after?.currentHp ?? Math.min(maxHp, beforeCurrent + amount);
+			let reason = "";
+			if (beforeCurrent >= maxHp) reason = "already full";
+			else if (beforeCurrent + amount > maxHp) reason = "capped at maximum";
+			return {
+				text: `${beforeCurrent} → ${afterCurrent} HP${reason ? ` · ${reason}` : ""}`,
+				tone: "plain",
+			};
+		}
+
+		const damage = Math.max(0, Number(preview?.damage ?? amount) || 0);
+		const afterTemp = after?.tempHp ?? Math.max(0, beforeTemp - damage);
+		const hpDamage = Math.max(0, damage - beforeTemp);
+		const afterCurrent = after?.currentHp ?? Math.max(0, beforeCurrent - hpDamage);
+		const reasons = [];
+		if (preview?.reduction) reasons.push(`${preview.reduction} damage reduced`);
+		if (preview?.applied === "resistance") reasons.push("resistance applied");
+		else if (preview?.applied === "immunity") reasons.push("immune");
+		else if (preview?.applied === "vulnerability") reasons.push("vulnerable (doubled)");
+		const absorbed = Math.max(0, beforeTemp - afterTemp);
+		if (absorbed) reasons.push(afterCurrent === beforeCurrent ? "temp HP absorbed" : `${absorbed} temp absorbed`);
+		const beforeText = beforeTemp ? `${beforeCurrent} HP + ${beforeTemp} temp` : `${beforeCurrent}`;
+		const afterText = afterTemp ? `${afterCurrent} HP + ${afterTemp} temp` : `${afterCurrent} HP`;
+		return {
+			text: `${beforeText} → ${afterText}${reasons.length ? ` · ${reasons.join(" · ")}` : ""}`,
+			tone: "plain",
+		};
 	}
 
 	/**
@@ -4585,26 +4697,23 @@ class CharacterSheetPage {
 
 	/**
 	 * Toggle the inline damage-type picker menu, lazily painting its options.
+	 * @param {HTMLElement} host
 	 * @param {boolean} [open]
 	 */
-	_toggleDamageTypeMenu (open) {
-		const menu = document.getElementById("charsheet-dmg-type-menu");
-		const trigger = document.getElementById("charsheet-btn-dmg-type");
+	_toggleDamageTypeMenu (host, open) {
+		const menu = /** @type {HTMLElement} */ (host.querySelector("[data-charsheet-dmg-role=\"type-menu\"]"));
+		const trigger = host.querySelector("[data-charsheet-dmg-role=\"type-trigger\"]");
 		if (!menu || !trigger) return;
 		const willOpen = open ?? menu.hidden;
 		if (willOpen) {
+			document.querySelectorAll("[data-charsheet-hp-intake-host]").forEach(other => {
+				if (other === host) return;
+				this._toggleDamageTypeMenu(/** @type {HTMLElement} */ (other), false);
+			});
 			menu.innerHTML = CharacterSheetPage.DAMAGE_INTAKE_TYPES.map(t => {
 				const isSel = (t.id ?? null) === (this._lastDamageType ?? null);
-				return `<button type="button" class="charsheet__dmg-type-option${isSel ? " charsheet__dmg-type-option--selected" : ""}" role="option" aria-selected="${isSel}" data-dmg-type="${t.id ?? ""}"><span aria-hidden="true">${t.icon}</span> ${CharacterSheetClassUtils.escapeHtml(t.label)}</button>`;
+				return `<button type="button" class="charsheet__dmg-type-option${isSel ? " charsheet__dmg-type-option--selected" : ""}" data-charsheet-dmg-role="type-option" role="option" aria-selected="${isSel}" data-dmg-type="${t.id ?? ""}"><span aria-hidden="true">${t.icon}</span> ${CharacterSheetClassUtils.escapeHtml(t.label)}</button>`;
 			}).join("");
-			menu.querySelectorAll("[data-dmg-type]").forEach(btn => {
-				btn.addEventListener("click", () => {
-					const raw = btn.getAttribute("data-dmg-type");
-					this._lastDamageType = raw || null;
-					this._toggleDamageTypeMenu(false);
-					this._renderDamageIntake();
-				});
-			});
 		}
 		menu.hidden = !willOpen;
 		trigger.setAttribute("aria-expanded", String(willOpen));
@@ -4613,16 +4722,14 @@ class CharacterSheetPage {
 	/**
 	 * Apply the amount currently in the intake field as damage, reusing the full damage
 	 * pipeline (`_pApplyDamage`) so defenses, Death Ward, interventions and concentration
-	 * all behave identically to the modal button. Clears the amount on success.
+	 * all behave identically to every other incoming-damage path.
 	 */
 	async _onDamageIntakeApply () {
-		const amountEl = /** @type {HTMLInputElement} */ (document.getElementById("charsheet-ipt-dmg-amount"));
-		if (!amountEl) return;
-		const amount = Math.max(0, Math.floor(Number(amountEl.value) || 0));
+		const amount = Math.max(0, Math.floor(Number(this._damageIntakeAmount) || 0));
 		if (amount <= 0) return;
 		await this._pApplyDamage(amount, {damageType: this._lastDamageType});
-		amountEl.value = "";
-		this._renderDamageIntake();
+		this._damageIntakeAmount = 0;
+		this._syncDamageIntakeControls();
 	}
 
 	/**
@@ -4630,20 +4737,93 @@ class CharacterSheetPage {
 	 * (clamped at max HP by the model). Clears the amount on success.
 	 */
 	_onHealIntakeApply () {
-		const amountEl = /** @type {HTMLInputElement} */ (document.getElementById("charsheet-ipt-dmg-amount"));
-		if (!amountEl) return;
-		const amount = Math.max(0, Math.floor(Number(amountEl.value) || 0));
+		const amount = Math.max(0, Math.floor(Number(this._damageIntakeAmount) || 0));
 		if (amount <= 0) return;
-		const before = this._state.getCurrentHp();
+		const before = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp()};
 		this._state.heal(amount);
-		const gained = this._state.getCurrentHp() - before;
+		const after = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp()};
+		const gained = after.currentHp - before.currentHp;
+		this._storeLastHpChange({kind: "heal", damageType: null, requestedAmount: amount, before, after});
+		this._lastHpOutcome = this._getHpOutcomePreview({
+			intent: "heal",
+			amount,
+			hp: {current: before.currentHp, temp: before.tempHp, max: this._state.getMaxHp()},
+			after,
+		});
 		this._saveCurrentCharacter();
 		this._renderHp();
 		this._renderConditions();
 		this._showDiceResult("Healing", gained, `Healed ${gained} HP`);
 		this._flashHpBar(`+${gained}`, "heal");
-		amountEl.value = "";
-		this._renderDamageIntake();
+		this._damageIntakeAmount = 0;
+		this._syncDamageIntakeControls();
+	}
+
+	async _onAdvancedDamageIntakeApply () {
+		if (!this._state.hasNonmagicalDamageReduction?.()) return;
+		const amount = Math.max(0, Math.floor(Number(this._damageIntakeAmount) || 0));
+		if (amount <= 0) return;
+		const isMagicalDamage = await InputUiUtil.pGetUserBoolean({
+			title: "Magical Damage?",
+			htmlDescription: `<div>Your damage reduction only applies to nonmagical damage. Was this attack magical?</div>`,
+			textYes: "Magical",
+			textNo: "Nonmagical",
+		}) === true;
+		await this._pApplyDamage(amount, {damageType: this._lastDamageType, isMagicalDamage});
+		this._damageIntakeAmount = 0;
+		this._syncDamageIntakeControls();
+	}
+
+	_storeLastHpChange ({kind, damageType, requestedAmount, before, after}) {
+		const actualDelta = (after.currentHp + after.tempHp) - (before.currentHp + before.tempHp);
+		if (!actualDelta || !this._currentCharacterId) {
+			this._lastHpChange = null;
+			return;
+		}
+		this._lastHpChange = {
+			characterId: this._currentCharacterId,
+			kind,
+			damageType,
+			requestedAmount,
+			actualDelta,
+			before,
+			after,
+		};
+	}
+
+	_getLastHpChangeUndoLabel () {
+		if (!this._lastHpChange) return "";
+		const magnitude = Math.abs(this._lastHpChange.actualDelta);
+		const detail = this._lastHpChange.kind === "heal"
+			? `+${magnitude} healing`
+			: `−${magnitude}${this._lastHpChange.damageType ? ` ${this._lastHpChange.damageType}` : ""}`;
+		return `↩ Undo last change (${detail})`;
+	}
+
+	_clearLastHpChange () {
+		this._lastHpChange = null;
+		this._lastHpOutcome = null;
+	}
+
+	_onUndoLastHpChange () {
+		const snapshot = this._lastHpChange;
+		if (!snapshot || snapshot.characterId !== this._currentCharacterId) return false;
+		if (
+			this._state.getCurrentHp() !== snapshot.after.currentHp
+			|| this._state.getTempHp() !== snapshot.after.tempHp
+		) {
+			this._clearLastHpChange();
+			this._renderDamageIntakes();
+			return false;
+		}
+		this._lastHpChange = null;
+		this._lastHpOutcome = null;
+		this._state.setHp(snapshot.before.currentHp, undefined, snapshot.before.tempHp);
+		this._saveCurrentCharacter();
+		this._renderHp();
+		this._renderConditions();
+		this._flashHpBar("↩ restored", snapshot.kind);
+		return true;
 	}
 
 	_renderCombatStats () {
@@ -13069,94 +13249,11 @@ class CharacterSheetPage {
 	// #endregion
 
 	// #region Actions
-	async _onHeal () {
-		const amount = await InputUiUtil.pGetUserNumber({
-			inputMode: "numeric",
-			title: "Heal",
-			default: 0,
-			min: 0,
-		});
-
-		if (amount == null || amount <= 0) return;
-
-		const currentHp = this._state.getCurrentHp();
-		const maxHp = this._state.getMaxHp();
-		const newHp = Math.min(currentHp + amount, maxHp);
-
-		this._state.setCurrentHp(newHp);
-		this._saveCurrentCharacter();
-		this._renderHp();
-		this._renderConditions(); // Update bloodied condition display
-
-		this._showDiceResult("Healing", amount, `Healed ${amount} HP`);
-	}
-
-	async _onDamage () {
-		const amount = await InputUiUtil.pGetUserNumber({
-			inputMode: "numeric",
-			title: "Take Damage",
-			default: 0,
-			min: 0,
-		});
-
-		if (amount == null || amount <= 0) return;
-
-		// CS-BUG-100: ask for the damage type whenever the character actually has a defense
-		// that could change the number. Without it the sheet's Damage button applied the raw
-		// amount and every resistance the model computes — Umbral Form, Rage, Draconic
-		// Resilience, racial resistances — was decorative on this path.
-		let damageType = null;
-		const defended = [
-			...(this._state.getResistances?.() || []),
-			...(this._state.getImmunities?.() || []),
-			...(this._state.getVulnerabilities?.() || []),
-			// Materials that react to a damage type care about the answer too. Without this
-			// the prompt never appeared for a character with no defenses, so Rimeglass's
-			// authored fire degradation and Magmaheart's cold backlash could never fire.
-			...(this._state.getMaterialReactiveDamageTypes?.() || []),
-			// Flat damage reduction is type-scoped too (Adamantine and both Heavy Armor
-			// Masters are B/P/S). Omitting it meant a character whose only defence was a
-			// reduction never saw this prompt, so `damageType` stayed null and the scoped
-			// reduction could never match — correct in the model, unreachable through the UI.
-			...(this._state.getDamageReductionDamageTypes?.() || []),
-		];
-		if (defended.length) {
-			const NONE = "Untyped / no defense";
-			const values = [NONE, ...[...new Set(defended)].sort()];
-			const picked = await InputUiUtil.pGetUserEnum({
-				title: "Damage Type",
-				htmlDescription: `<div>Pick the damage type so your resistances, immunities and vulnerabilities apply.</div>`,
-				values,
-				isResolveItem: true,
-			});
-			if (picked && picked !== NONE) damageType = String(picked).toLowerCase();
-		}
-
-		// Only PHB Heavy Armor Master-style reductions care whether the damage was magical, so
-		// the question is asked only when the character actually has one. XPHB Heavy Armor
-		// Master deliberately dropped the limit and every material reduction is unconditional,
-		// which means the common case adds no extra prompt at all.
-		let isMagicalDamage = false;
-		if (this._state.hasNonmagicalDamageReduction?.()) {
-			isMagicalDamage = await InputUiUtil.pGetUserBoolean({
-				title: "Magical Damage?",
-				htmlDescription: `<div>Your damage reduction only applies to nonmagical damage. Was this attack magical?</div>`,
-				textYes: "Magical",
-				textNo: "Nonmagical",
-			}) === true;
-		}
-
-		await this._pApplyDamage(amount, {damageType, isMagicalDamage});
-	}
-
 	/**
 	 * Apply damage that has already been fully specified (amount + optional type + magical
 	 * flag), routing through the model's `takeDamage` so Death Ward, the drop-to-0
 	 * interventions, material reactions and the concentration check all fire exactly as they
-	 * do for the modal Damage button.
-	 *
-	 * Extracted from {@link _onDamage} so the inline HP-block damage control can reuse the
-	 * identical tail without re-prompting through modals.
+	 * do for both canonical inline intake entry points.
 	 * @param {number} amount
 	 * @param {object} [opts]
 	 * @param {string|null} [opts.damageType]
@@ -13164,6 +13261,9 @@ class CharacterSheetPage {
 	 * @returns {Promise<object>} the mitigation preview that was applied
 	 */
 	async _pApplyDamage (amount, {damageType = null, isMagicalDamage = false} = {}) {
+		const characterId = this._currentCharacterId;
+		const before = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp()};
+		const maxHp = this._state.getMaxHp();
 		const preview = this._state.applyDamageDefenses(amount, damageType, {isMagicalDamage});
 
 		// CS-BUG-081: route through the model. This method used to hand-roll the temp-HP and
@@ -13201,6 +13301,20 @@ class CharacterSheetPage {
 		// Prompt for concentration check if concentrating
 		if (this._state.isConcentrating?.()) {
 			await this._promptConcentrationCheck(preview.damage);
+		}
+		const after = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp()};
+		if (characterId === this._currentCharacterId) {
+			this._storeLastHpChange({kind: "damage", damageType, requestedAmount: amount, before, after});
+			this._lastHpOutcome = this._getHpOutcomePreview({
+				intent: "damage",
+				amount,
+				hp: {current: before.currentHp, temp: before.tempHp, max: maxHp},
+				preview,
+				after,
+			});
+			this._saveCurrentCharacter();
+			this._renderHp();
+			this._renderConditions();
 		}
 		return preview;
 	}

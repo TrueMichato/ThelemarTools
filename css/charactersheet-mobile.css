@@ -459,41 +459,6 @@
 		background: var(--cs-danger, #ef4444);
 	}
 
-	/* Heal and Damage need an amount, so they live in a tray instead of the
-	   strip: the glance surface stays a glance surface. */
-	.charsheet-mobile__status-tray {
-		display: flex;
-		gap: 8px;
-		padding: 8px;
-		border-top: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
-		background: var(--cs-bg-base, #0f172a);
-	}
-
-	.charsheet-mobile__status-tray[hidden] {
-		display: none;
-	}
-
-	.charsheet-mobile__status-tray-btn {
-		flex: 1 1 0;
-		min-height: 44px;
-		border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
-		border-radius: var(--cs-radius-md, 8px);
-		background: var(--cs-bg-surface, #1e293b);
-		color: var(--cs-text-primary, #f1f5f9);
-		font-size: max(14px, calc(var(--cs-text-sm, 0.875rem) * var(--cs-text-scale, 1)));
-		font-weight: 600;
-		cursor: pointer;
-	}
-
-	.charsheet-mobile__status-tray-btn:active {
-		background: var(--cs-bg-hover, rgba(255, 255, 255, 0.06));
-	}
-
-	.charsheet-mobile__status-tray-btn:focus-visible {
-		outline: 2px solid var(--cs-accent, #6366f1);
-		outline-offset: 2px;
-	}
-
 	/* A modal is a mode: our own chrome steps out of the way (see the
 	   Layer-Scale Rule in DESIGN.md). */
 	body.ve-ui-modal__body-active .charsheet-mobile__status {
@@ -823,11 +788,6 @@
 		width: 100%;
 	}
 
-	.charsheet__hp-btn {
-		min-height: 40px;
-		flex: 1;
-	}
-
 	.charsheet__hp-reduction-trigger,
 	.charsheet__hp-reduction-quickclear {
 		min-height: 44px;
@@ -835,6 +795,13 @@
 
 	.charsheet__hp-reduction-quickclear {
 		width: 44px;
+	}
+
+	.charsheet__dmg-amount,
+	.charsheet__dmg-type-trigger,
+	.charsheet__dmg-apply,
+	.charsheet__dmg-advanced {
+		min-height: 44px;
 	}
 
 	/* ====================================================================

@@ -46,7 +46,6 @@ class CharacterSheetMobile {
 		this._elTabSheet = null;
 		this._tabObserver = null;
 		this._elStatusStrip = null;
-		this._elStatusTray = null;
 		this._statusObserver = null;
 		this._statusModels = null;
 		this._statusSyncQueued = false;
@@ -1309,8 +1308,15 @@ class CharacterSheetMobile {
 					sub: `/${maxVal}`,
 					ratio: vital.ratio,
 					state: vital.state,
-					expands: true,
 				};
+			},
+			activate: () => {
+				document.querySelector("#charsheet-tabs a[href=\"#charsheet-tab-combat\"]")?.click();
+				requestAnimationFrame(() => {
+					const intake = document.querySelector("[data-charsheet-hp-intake-host=\"combat\"]");
+					intake?.scrollIntoView({behavior: "smooth", block: "center"});
+					intake?.querySelector("[data-charsheet-dmg-role=\"amount\"]")?.focus();
+				});
 			},
 		},
 		{
@@ -1413,28 +1419,6 @@ class CharacterSheetMobile {
 		row.className = "charsheet-mobile__status-row";
 		strip.appendChild(row);
 
-		// The HP tray holds the two controls that need an amount, so the strip
-		// itself stays a glance surface and never grows a numeric keypad.
-		const tray = document.createElement("div");
-		tray.className = "charsheet-mobile__status-tray";
-		tray.hidden = true;
-		[
-			{id: "charsheet-btn-heal", txt: "💚 Heal", cls: "charsheet-mobile__status-tray-btn--heal"},
-			{id: "charsheet-btn-damage", txt: "💔 Damage", cls: "charsheet-mobile__status-tray-btn--damage"},
-		].forEach(spec => {
-			const btn = document.createElement("button");
-			btn.type = "button";
-			btn.className = `charsheet-mobile__status-tray-btn ${spec.cls}`;
-			btn.textContent = spec.txt;
-			btn.addEventListener("click", () => {
-				this._closeStatusTray();
-				document.getElementById(spec.id)?.click();
-			});
-			tray.appendChild(btn);
-		});
-		strip.appendChild(tray);
-		this._elStatusTray = tray;
-
 		return strip;
 	}
 
@@ -1476,7 +1460,6 @@ class CharacterSheetMobile {
 		// rather than showing an empty bar.
 		strip.classList.toggle("charsheet-mobile__status--empty", rendered === 0);
 		document.body.classList.toggle("charsheet-mobile__has-status", rendered > 0);
-		if (!rendered) this._closeStatusTray();
 	}
 
 	_createStatusSegment (seg) {
@@ -1499,8 +1482,6 @@ class CharacterSheetMobile {
 				model = seg.read();
 			} catch (e) { /* fall through to the no-op below */ }
 			if (!model) return;
-			if (model.expands) return this._toggleStatusTray();
-			this._closeStatusTray();
 			this._haptic("light");
 			seg.activate?.(model);
 		});
@@ -1523,24 +1504,6 @@ class CharacterSheetMobile {
 		el.setAttribute("aria-label", `${model.label} ${model.value}${model.sub || ""}`);
 	}
 
-	_toggleStatusTray () {
-		if (!this._elStatusTray) return;
-		this._elStatusTray.hidden ? this._openStatusTray() : this._closeStatusTray();
-	}
-
-	_openStatusTray () {
-		if (!this._elStatusTray) return;
-		this._elStatusTray.hidden = false;
-		this._elStatusStrip?.classList.add("charsheet-mobile__status--tray-open");
-		this._haptic("light");
-	}
-
-	_closeStatusTray () {
-		if (!this._elStatusTray) return;
-		this._elStatusTray.hidden = true;
-		this._elStatusStrip?.classList.remove("charsheet-mobile__status--tray-open");
-	}
-
 	_teardownStatusStrip () {
 		this._statusObserver?.disconnect();
 		this._statusObserver = null;
@@ -1551,7 +1514,6 @@ class CharacterSheetMobile {
 		}
 		this._elStatusStrip?.remove();
 		this._elStatusStrip = null;
-		this._elStatusTray = null;
 		this._statusModels = null;
 		this._statusSyncQueued = false;
 		document.body.classList.remove("charsheet-mobile__has-status");
