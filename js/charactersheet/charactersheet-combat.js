@@ -10709,7 +10709,7 @@ class CharacterSheetCombat {
 				return `<span class="charsheet__resource-pip ${isFilled ? "" : "used"}" data-pip-index="${i}" title="${title}"></span>`;
 			}).join("");
 			const resourceEl = e_({outer: `
-				<div class="charsheet__combat-resource-item mb-2" data-resource-id="${resource.id}">
+				<div class="charsheet__combat-resource-item mb-2" data-resource-id="${resource.id}" data-charsheet-status-resource="primary" data-status-current="${resource.current}" data-status-max="${resource.max}">
 					<div class="charsheet__combat-resource-name ve-small font-weight-bold">${resourceNameHtml}</div>
 					<div class="charsheet__combat-resource-pips">${pipsHtml}</div>
 					<div class="ve-small ve-muted">${resource.current}/${resource.max}${resource.recharge ? ` (${resource.recharge})` : ""}</div>
@@ -10737,7 +10737,7 @@ class CharacterSheetCombat {
 				return `<span class="charsheet__resource-pip ${isFilled ? "" : "used"}" data-pip-index="${i}" title="${title}"></span>`;
 			}).join("");
 			const resourceEl = e_({outer: `
-				<div class="charsheet__combat-resource-item charsheet__combat-resource-item--synthetic mb-2" data-resource-kind="${resource.kind}">
+				<div class="charsheet__combat-resource-item charsheet__combat-resource-item--synthetic mb-2" data-resource-kind="${resource.kind}" data-charsheet-status-resource="signature" data-status-current="${resource.current}" data-status-max="${resource.max}">
 					<div class="charsheet__combat-resource-name ve-small font-weight-bold">${resourceNameHtml}</div>
 					<div class="charsheet__combat-resource-pips">${pipsHtml}</div>
 					<div class="ve-small ve-muted">${resource.current}/${resource.max} (${rechargeLabel})</div>

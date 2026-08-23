@@ -44,8 +44,12 @@ class CharacterSheetMobile {
 		this._elFabBackdrop = null;
 		this._elTabMoreItem = null;
 		this._elTabSheet = null;
+		this._tabItems = [];
+		this._tabOverflowItems = [];
+		this._tabSheetSignature = "";
 		this._tabObserver = null;
 		this._elStatusStrip = null;
+		this._elFirstRun = null;
 		this._statusObserver = null;
 		this._statusModels = null;
 		this._statusSyncQueued = false;
@@ -134,6 +138,7 @@ class CharacterSheetMobile {
 		this._initLongPress();
 		this._initFab();
 		this._initTabOverflow();
+		this._initFirstRunState();
 		this._initStatusStrip();
 		this._initHeaderToggle();
 		this._initTouchFeedback();
@@ -173,6 +178,9 @@ class CharacterSheetMobile {
 		this._elContextMenuBackdrop = null;
 		this._elFab = null;
 		this._elFabBackdrop = null;
+		this._elFirstRun?.remove();
+		this._elFirstRun = null;
+		document.body.classList.remove("charsheet-mobile__is-empty");
 
 		// Disconnect header observer
 		this._headerObserver?.disconnect();
@@ -190,6 +198,7 @@ class CharacterSheetMobile {
 		}
 
 		// Unwrap section-content wrappers so desktop DOM is clean
+		document.querySelectorAll(".charsheet-mobile__section-toggle").forEach(button => button.remove());
 		document.querySelectorAll(".charsheet-mobile__section-content").forEach(wrapper => {
 			const parent = wrapper.parentNode;
 			while (wrapper.firstChild) {
@@ -279,7 +288,7 @@ class CharacterSheetMobile {
 		const noCollapse = CharacterSheetMobile._SECTIONS_NO_COLLAPSE;
 		const defaultCollapsed = CharacterSheetMobile._SECTIONS_DEFAULT_COLLAPSED;
 
-		sections.forEach(section => {
+		sections.forEach((section, sectionIndex) => {
 			// Skip non-collapsible sections
 			const isNoCollapse = [...noCollapse].some(cls => section.classList.contains(cls));
 			if (isNoCollapse) return;
@@ -294,12 +303,29 @@ class CharacterSheetMobile {
 			// Wrap content for animated collapse (skip the title itself)
 			const contentWrapper = document.createElement("div");
 			contentWrapper.className = "charsheet-mobile__section-content";
-			const children = [...section.children].filter(c => c !== title);
+			let titleHost = title;
+			while (titleHost.parentElement && titleHost.parentElement !== section) titleHost = titleHost.parentElement;
+			if (titleHost.parentElement !== section) return;
+			const children = [...section.children].filter(c => c !== titleHost);
 			children.forEach(c => contentWrapper.appendChild(c));
 			section.appendChild(contentWrapper);
+			contentWrapper.id = `charsheet-mobile-section-content-${sectionIndex}`;
+
+			const toggleButton = document.createElement("button");
+			toggleButton.type = "button";
+			toggleButton.className = "charsheet-mobile__section-toggle";
+			const titleLabel = [...(title.childNodes || [])]
+				.filter(node => !node.matches?.("button, .ve-btn, .charsheet__section-edit"))
+				.map(node => node.textContent?.trim())
+				.filter(Boolean)
+				.join(" ") || title.textContent.trim() || "section";
+			toggleButton.setAttribute("aria-label", `Toggle ${titleLabel}`);
+			toggleButton.setAttribute("aria-controls", contentWrapper.id);
+			title.appendChild(toggleButton);
 
 			// Collapse by default for specified sections
-			const shouldCollapse = [...defaultCollapsed].some(cls => section.classList.contains(cls));
+			const shouldCollapse = section.dataset.mobileSectionRole === "reference"
+				|| [...defaultCollapsed].some(cls => section.classList.contains(cls));
 			if (shouldCollapse) {
 				section.classList.add("charsheet-mobile--collapsed");
 				contentWrapper.style.maxHeight = "0";
@@ -310,13 +336,11 @@ class CharacterSheetMobile {
 				// silently clipping everything that renders later. See `_releaseMaxHeight`.
 				contentWrapper.style.maxHeight = "none";
 			}
+			toggleButton.setAttribute("aria-expanded", shouldCollapse ? "false" : "true");
 
-			// Add tap-to-toggle behavior
-			title.addEventListener("click", (/** @type {*} */ e) => {
-				// Don't toggle if clicking edit buttons within the title
-				if (e.target.closest(".charsheet__section-edit, .ve-btn, button")) return;
-
+			const toggleSection = () => {
 				const isCollapsed = section.classList.toggle("charsheet-mobile--collapsed");
+				toggleButton.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
 
 				if (isCollapsed) {
 					contentWrapper.style.maxHeight = `${contentWrapper.scrollHeight}px`;
@@ -331,6 +355,17 @@ class CharacterSheetMobile {
 				}
 
 				this._haptic("light");
+			};
+
+			// Keep the generous title-row tap target while giving keyboard and assistive
+			// technology users a real disclosure control.
+			title.addEventListener("click", (/** @type {*} */ e) => {
+				if (e.target.closest(".charsheet__section-edit, .ve-btn, button")) return;
+				toggleSection();
+			});
+			toggleButton.addEventListener("click", e => {
+				e.stopPropagation();
+				toggleSection();
 			});
 		});
 	}
@@ -350,10 +385,12 @@ class CharacterSheetMobile {
 	 */
 	_releaseMaxHeight (section, contentWrapper) {
 		let timeoutId = null;
+		contentWrapper.classList.add("charsheet-mobile__section-content--animating");
 
 		const release = () => {
 			if (timeoutId != null) clearTimeout(timeoutId);
 			contentWrapper.removeEventListener("transitionend", onTransitionEnd);
+			contentWrapper.classList.remove("charsheet-mobile__section-content--animating");
 			// Re-collapsed mid-transition: the collapse handler owns the height now.
 			if (section.classList.contains("charsheet-mobile--collapsed")) return;
 			contentWrapper.style.maxHeight = "none";
@@ -966,7 +1003,7 @@ class CharacterSheetMobile {
 		const el = document.createElement("div");
 		el.className = "charsheet-mobile__fab";
 		el.innerHTML = `
-			<button class="charsheet-mobile__fab-main" id="charsheet-mobile-fab-toggle" title="Quick Actions">
+			<button class="charsheet-mobile__fab-main" id="charsheet-mobile-fab-toggle" title="Quick Actions" aria-label="Quick Actions">
 				⚡
 			</button>
 			<div class="charsheet-mobile__fab-actions">
@@ -1100,12 +1137,19 @@ class CharacterSheetMobile {
 	 * @param {*} state a CharacterSheetState, or null
 	 * @return {string[]}
 	 */
-	static resolvePlayTabs (state) {
+	static resolvePlayTabs (state, {availableHrefs = null} = {}) {
 		const base = CharacterSheetMobile._PLAY_TAB_HREFS;
-		if (!state?.isPsionicManifester?.()) return base;
-		const castsSpells = !!(state.getSpells?.() || []).length;
-		if (castsSpells) return base;
-		return base.map(href => (href === "#charsheet-tab-spells" ? "#charsheet-tab-powers" : href));
+		if (!state) return base;
+
+		const castsSpells = !!state.getSpellcastingInfo?.()
+			|| !!(state.getSpells?.() || []).length
+			|| !!(state.getInnateSpells?.() || []).length;
+		let capabilityHref = castsSpells
+			? "#charsheet-tab-spells"
+			: (state.isPsionicManifester?.() ? "#charsheet-tab-powers" : "#charsheet-tab-abilities");
+
+		if (availableHrefs && !availableHrefs.includes(capabilityHref)) capabilityHref = "#charsheet-tab-spells";
+		return base.map(href => (href === "#charsheet-tab-spells" ? capabilityHref : href));
 	}
 
 	_initTabOverflow () {
@@ -1113,30 +1157,20 @@ class CharacterSheetMobile {
 		if (!tabList || tabList.dataset.mobileOverflow) return;
 		tabList.dataset.mobileOverflow = "true";
 
-		const {overflow} = CharacterSheetMobile.partitionTabs(
-			[...tabList.children].map(li => li.querySelector("a[href]")?.getAttribute("href")),
-			{playHrefs: CharacterSheetMobile.resolvePlayTabs(this._page?.getState?.())},
-		);
-		const overflowItems = [...tabList.children].filter(li => {
-			const href = li.querySelector("a[href]")?.getAttribute("href");
-			return href && overflow.includes(href);
-		});
-		if (!overflowItems.length) return;
-
-		overflowItems.forEach(li => li.classList.add("charsheet-mobile__tab--overflow"));
+		this._tabItems = [...tabList.children].filter(li => li.querySelector("a[href]"));
 
 		this._elTabMoreItem = this._createTabMoreItem();
 		tabList.appendChild(this._elTabMoreItem);
 
-		this._elTabSheet = this._createTabSheet(overflowItems);
+		this._elTabSheet = this._createTabSheet();
 		document.body.appendChild(this._elTabSheet);
 
 		// The site toggles `ve-active` on the <li>; mirror it onto "More" so the
 		// bar never claims nothing is selected while an overflow tab is open.
-		this._boundSyncTabMore = () => this._syncTabMoreActive(overflowItems);
+		this._boundSyncTabMore = () => this._syncTabOverflow();
 		this._tabObserver = new MutationObserver(this._boundSyncTabMore);
-		[...tabList.children].forEach(li => this._tabObserver.observe(li, {attributes: true, attributeFilter: ["class"]}));
-		this._boundSyncTabMore();
+		this._tabItems.forEach(li => this._tabObserver.observe(li, {attributes: true, attributeFilter: ["class"]}));
+		this._syncTabOverflow();
 	}
 
 	_createTabMoreItem () {
@@ -1154,7 +1188,7 @@ class CharacterSheetMobile {
 		return li;
 	}
 
-	_createTabSheet (overflowItems) {
+	_createTabSheet () {
 		const el = document.createElement("div");
 		el.className = "charsheet-mobile__tab-sheet";
 		el.id = "charsheet-mobile-tab-sheet";
@@ -1163,22 +1197,12 @@ class CharacterSheetMobile {
 		el.setAttribute("aria-label", "More sections");
 		el.hidden = true;
 
-		const rows = overflowItems.map(li => {
-			const anchor = li.querySelector("a[href]");
-			const icon = anchor.querySelector(".charsheet__tab-icon")?.textContent?.trim() || "";
-			const text = anchor.querySelector(".charsheet__tab-text")?.textContent?.trim() || anchor.textContent.trim();
-			return `<button type="button" class="charsheet-mobile__tab-sheet-item" data-href="${anchor.getAttribute("href")}">
-				<span class="charsheet-mobile__tab-sheet-icon" aria-hidden="true">${icon}</span>
-				<span class="charsheet-mobile__tab-sheet-label">${text}</span>
-			</button>`;
-		}).join("");
-
 		el.innerHTML = `
 			<div class="charsheet-mobile__tab-sheet-backdrop"></div>
-			<div class="charsheet-mobile__tab-sheet-panel">
+			<div class="charsheet-mobile__tab-sheet-panel" tabindex="-1">
 				<div class="charsheet-mobile__tab-sheet-grip" aria-hidden="true"></div>
 				<div class="charsheet-mobile__tab-sheet-title">More sections</div>
-				<div class="charsheet-mobile__tab-sheet-list">${rows}</div>
+				<div class="charsheet-mobile__tab-sheet-list"></div>
 			</div>
 		`;
 
@@ -1192,7 +1216,100 @@ class CharacterSheetMobile {
 			this._closeTabSheet();
 			this._haptic("light");
 		});
+		el.addEventListener("keydown", e => this._onTabSheetKeydown(e));
 		return el;
+	}
+
+	_renderTabSheetItems (overflowItems) {
+		const list = this._elTabSheet?.querySelector(".charsheet-mobile__tab-sheet-list");
+		if (!list) return;
+		const signature = overflowItems
+			.map(li => li.querySelector("a[href]")?.getAttribute("href"))
+			.filter(Boolean)
+			.join("|");
+		if (signature === this._tabSheetSignature) return;
+		this._tabSheetSignature = signature;
+		list.innerHTML = "";
+
+		overflowItems.forEach(li => {
+			const anchor = li.querySelector("a[href]");
+			if (!anchor) return;
+			const btn = document.createElement("button");
+			btn.type = "button";
+			btn.className = "charsheet-mobile__tab-sheet-item";
+			btn.dataset.href = anchor.getAttribute("href");
+
+			const icon = document.createElement("span");
+			icon.className = "charsheet-mobile__tab-sheet-icon";
+			icon.setAttribute("aria-hidden", "true");
+			icon.textContent = anchor.querySelector(".charsheet__tab-icon")?.textContent?.trim() || "";
+
+			const label = document.createElement("span");
+			label.className = "charsheet-mobile__tab-sheet-label";
+			label.textContent = anchor.querySelector(".charsheet__tab-text")?.textContent?.trim() || anchor.textContent.trim();
+			btn.append(icon, label);
+			list.append(btn);
+		});
+	}
+
+	_syncTabOverflow () {
+		if (!this._tabItems.length || !this._elTabMoreItem) return;
+		const availableHrefs = this._tabItems
+			.filter(li => !li.classList.contains("ve-hidden"))
+			.map(li => li.querySelector("a[href]")?.getAttribute("href"))
+			.filter(Boolean);
+		const playHrefs = CharacterSheetMobile.resolvePlayTabs(this._page?.getState?.(), {availableHrefs});
+		const {overflow} = CharacterSheetMobile.partitionTabs(
+			this._tabItems.map(li => li.querySelector("a[href]")?.getAttribute("href")),
+			{playHrefs},
+		);
+
+		this._tabOverflowItems = this._tabItems.filter(li => {
+			const href = li.querySelector("a[href]")?.getAttribute("href");
+			const isOverflow = !!href && overflow.includes(href);
+			li.classList.toggle("charsheet-mobile__tab--overflow", isOverflow);
+			return isOverflow;
+		});
+
+		const availableOverflowItems = this._tabOverflowItems.filter(li => !li.classList.contains("ve-hidden"));
+		const activeItem = this._tabItems.find(li => li.classList.contains("ve-active"));
+		if (activeItem?.classList.contains("ve-hidden")) {
+			const fallbackHref = playHrefs.find(href => availableHrefs.includes(href));
+			this._tabItems
+				.find(li => li.querySelector("a[href]")?.getAttribute("href") === fallbackHref)
+				?.querySelector("a[href]")
+				?.click();
+		}
+		this._elTabMoreItem.hidden = !availableOverflowItems.length;
+		this._renderTabSheetItems(availableOverflowItems);
+		this._syncTabMoreActive(availableOverflowItems);
+		if (this._tabSheetOpen && !availableOverflowItems.length) this._closeTabSheet();
+	}
+
+	_onTabSheetKeydown (e) {
+		if (!this._tabSheetOpen) return;
+		if (e.key === "Escape") {
+			e.preventDefault();
+			this._closeTabSheet();
+			return;
+		}
+		if (e.key !== "Tab") return;
+
+		const focusable = [...this._elTabSheet.querySelectorAll(".charsheet-mobile__tab-sheet-item:not([disabled])")];
+		if (!focusable.length) {
+			e.preventDefault();
+			this._elTabSheet.querySelector(".charsheet-mobile__tab-sheet-panel")?.focus();
+			return;
+		}
+		const first = focusable[0];
+		const last = focusable[focusable.length - 1];
+		if (e.shiftKey && document.activeElement === first) {
+			e.preventDefault();
+			last.focus();
+		} else if (!e.shiftKey && document.activeElement === last) {
+			e.preventDefault();
+			first.focus();
+		}
 	}
 
 	_toggleTabSheet () {
@@ -1202,6 +1319,8 @@ class CharacterSheetMobile {
 
 	_openTabSheet () {
 		if (!this._elTabSheet) return;
+		this._syncTabOverflow();
+		if (this._elTabMoreItem?.hidden) return;
 		this._tabSheetOpen = true;
 		this._elTabSheet.hidden = false;
 		// Next frame so the transition has a from-state to animate out of.
@@ -1233,11 +1352,53 @@ class CharacterSheetMobile {
 		this._elTabSheet?.remove();
 		this._elTabMoreItem = null;
 		this._elTabSheet = null;
+		this._tabItems = [];
+		this._tabOverflowItems = [];
+		this._tabSheetSignature = "";
 		this._tabSheetOpen = false;
 		document.querySelectorAll(".charsheet-mobile__tab--overflow")
 			.forEach(li => li.classList.remove("charsheet-mobile__tab--overflow"));
 		const tabList = document.getElementById("charsheet-tabs");
 		if (tabList) delete tabList.dataset.mobileOverflow;
+	}
+
+	// =========================================================================
+	// First Run — one productive choice before the populated shell exists
+	// =========================================================================
+
+	_initFirstRunState () {
+		if (this._elFirstRun) return;
+		const header = document.getElementById("charsheet-header");
+		if (!header) return;
+
+		const el = document.createElement("section");
+		el.className = "charsheet-mobile__first-run";
+		el.hidden = true;
+		el.setAttribute("aria-labelledby", "charsheet-mobile-first-run-title");
+		el.innerHTML = `
+			<h2 id="charsheet-mobile-first-run-title">Start your character</h2>
+			<p>Create a character with the guided builder, or bring in an existing character file.</p>
+			<div class="charsheet-mobile__first-run-actions">
+				<button type="button" class="ve-btn ve-btn-primary" data-mobile-first-run-action="create">Create Character</button>
+				<button type="button" class="ve-btn ve-btn-default" data-mobile-first-run-action="import">Import Character</button>
+			</div>
+		`;
+		el.addEventListener("click", e => {
+			const action = e.target.closest("[data-mobile-first-run-action]")?.dataset.mobileFirstRunAction;
+			if (action === "create") document.getElementById("charsheet-btn-new")?.click();
+			if (action === "import") document.getElementById("charsheet-btn-import")?.click();
+			requestAnimationFrame(() => this._syncFirstRunState());
+		});
+		header.insertAdjacentElement("afterend", el);
+		this._elFirstRun = el;
+		this._syncFirstRunState();
+	}
+
+	_syncFirstRunState () {
+		if (!this._elFirstRun || !this._page?.hasCurrentCharacter) return;
+		const isEmpty = !this._page.hasCurrentCharacter();
+		this._elFirstRun.hidden = !isEmpty;
+		document.body.classList.toggle("charsheet-mobile__is-empty", isEmpty);
 	}
 
 	// =========================================================================
@@ -1277,6 +1438,11 @@ class CharacterSheetMobile {
 		return {ratio, state: current <= 0 ? "critical" : ratio <= 0.5 ? "warn" : null};
 	}
 
+	static hasPlayableCharacter (page) {
+		return !!page?.hasCurrentCharacter?.()
+			&& (page?.getState?.()?.getTotalLevel?.() || 0) > 0;
+	}
+
 	/**
 	 * Pure: which spell-slot level the strip should offer.
 	 *
@@ -1288,6 +1454,45 @@ class CharacterSheetMobile {
 	 */
 	static pickSlotLevel (levels) {
 		return (levels || []).find(l => l && l.open > 0) || null;
+	}
+
+	static pickStatusResource (candidates) {
+		const priority = {secondary: 1, primary: 2, signature: 3};
+		return (candidates || [])
+			.map((candidate, index) => ({candidate, index}))
+			.filter(({candidate}) => candidate
+				&& Number(candidate.current) > 0
+				&& candidate.target
+				&& !candidate.target.disabled)
+			.sort((a, b) => (priority[b.candidate.priority] || 0) - (priority[a.candidate.priority] || 0)
+				|| a.index - b.index)
+			.at(0)?.candidate || null;
+	}
+
+	static _readStatusResource () {
+		const candidates = [...document.querySelectorAll("[data-charsheet-status-resource]")]
+			.map(row => {
+				const isCombat = row.classList.contains("charsheet__combat-resource-item");
+				const pips = isCombat ? [...row.querySelectorAll(".charsheet__resource-pip:not(.used)")] : [];
+				const target = isCombat
+					? pips[pips.length - 1]
+					: row.querySelector(".charsheet__resource-use-btn, .charsheet__stamina-use-btn");
+				return {
+					priority: row.dataset.charsheetStatusResource,
+					name: row.querySelector(".charsheet__combat-resource-name, .charsheet__resource-name")?.textContent?.trim(),
+					current: Number(row.dataset.statusCurrent),
+					max: Number(row.dataset.statusMax),
+					target,
+				};
+			});
+		const pick = CharacterSheetMobile.pickStatusResource(candidates);
+		if (!pick?.name || !Number.isFinite(pick.current) || !Number.isFinite(pick.max)) return null;
+		return {
+			label: pick.name,
+			value: `${pick.current}`,
+			sub: `/${pick.max}`,
+			target: pick.target,
+		};
 	}
 
 	static _STATUS_SEGMENTS = [
@@ -1353,26 +1558,7 @@ class CharacterSheetMobile {
 		},
 		{
 			key: "resource",
-			read: () => {
-				const row = [...document.querySelectorAll(".charsheet__resource-row")]
-					.find(r => {
-						const btn = r.querySelector(".charsheet__resource-use-btn");
-						return btn && !btn.disabled;
-					});
-				if (!row) return null;
-				const name = row.querySelector(".charsheet__resource-name")?.textContent?.trim();
-				const cur = row.querySelector(".charsheet__resource-current")?.textContent?.trim();
-				// The source renders "/ 5" with a space; the strip is too narrow to
-				// spend a character on it.
-				const max = row.querySelector(".charsheet__resource-max")?.textContent?.replace(/\s+/g, "");
-				if (!name || cur == null) return null;
-				return {
-					label: name,
-					value: cur,
-					sub: max || "",
-					target: row.querySelector(".charsheet__resource-use-btn"),
-				};
-			},
+			read: () => CharacterSheetMobile._readStatusResource(),
 			activate: model => model?.target?.click(),
 		},
 	];
@@ -1393,6 +1579,8 @@ class CharacterSheetMobile {
 			this._statusSyncQueued = true;
 			requestAnimationFrame(() => {
 				this._statusSyncQueued = false;
+				this._syncFirstRunState();
+				this._syncTabOverflow();
 				this._syncStatusStrip();
 			});
 		};
@@ -1430,6 +1618,13 @@ class CharacterSheetMobile {
 
 		this._statusModels = {};
 		let rendered = 0;
+		const hasPlayableCharacter = CharacterSheetMobile.hasPlayableCharacter(this._page);
+		if (!hasPlayableCharacter) {
+			row.innerHTML = "";
+			strip.classList.add("charsheet-mobile__status--empty");
+			document.body.classList.remove("charsheet-mobile__has-status");
+			return;
+		}
 
 		for (const seg of CharacterSheetMobile._STATUS_SEGMENTS) {
 			let model = null;

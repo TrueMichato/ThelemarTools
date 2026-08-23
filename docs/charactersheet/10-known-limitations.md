@@ -684,9 +684,9 @@ feature and class work, and is tracked separately. Do not attempt it as a ride-a
 
 ### Mobile Experience
 
-The sheet reclaims its first viewport on phones and keeps the play loop
-reachable, but the information architecture below the fold is still the desktop
-one.
+The Manager view now provides a parity-oriented mobile shell around the same
+controllers and state as desktop. It reorganizes dense surfaces for phone use
+without maintaining a second character sheet or removing capabilities.
 
 **Fixed (mobile viewport reclamation pass):**
 
@@ -694,10 +694,10 @@ one.
   toolbar folds behind the 🔧 toggle, so the character's name now lands at
   ~284px instead of ~1085px. Nothing is removed — expanding the header restores
   every management control, unclipped.
-- **Tab bar**: five play tabs (Overview, Combat, Spells, Inventory, Features)
-  stay in the bar; Abilities, Notes, Companions, Builder and Respec move into a
-  **More** bottom sheet. The strip no longer overflows at 390px or 320px, and
-  "More" mirrors the active state when an overflow tab is open.
+- **Tab bar**: five play destinations stay in the bar; Notes, Companions,
+  Builder, Respec, and other available destinations move into a **More** bottom
+  sheet. The strip no longer overflows at 390px or 320px, and "More" mirrors the
+  active state when an overflow tab is open.
 - **Modals**: the tab bar is demoted to `--cs-z-sticky` and the FAB is hidden
   while a modal is open, so modal footers — and their primary action — are no
   longer covered.
@@ -786,6 +786,45 @@ one.
   `min: 0` or `min: 1`, so the absent iOS minus key costs nothing). The 32
   call sites elsewhere — dice roller, DM Screen, homebrew builder — are
   untouched.
+
+**Fixed (mobile Manager parity pass):**
+
+- **First run is productive and honest.** With no current character, mobile
+  replaces populated status/navigation chrome with direct Create Character and
+  Import Character actions delegated to the real Manager controls. It no longer
+  presents default AC/HP as if a character existed.
+- **The fifth primary destination is capability-aware.** Spells, Powers, or
+  Abilities fills the capability slot according to live tab availability.
+  Every other available authored destination remains in More, and More rebuilds
+  itself after character/capability changes instead of retaining dead entries.
+- **Inventory commands fit at 320px.** Add Item remains in the title row; Custom,
+  Harvest, Craft, and both view modes wrap into a stable utility row. All six
+  controls remain in the viewport and measure 44px high in portrait, narrow
+  portrait, and phone landscape.
+- **Spells has retrieval instead of a long scan.** Name search and spell-level
+  filtering reuse the controller's existing filter state. Combined filters,
+  explicit no-results feedback, and both Clear routes restore the full list
+  without duplicating spell data or mutation logic.
+- **Combat defaults reflect the play task.** Active play/resource surfaces stay
+  open; Combat Spells, Action Economy, and Defenses default folded as duplicate
+  or reference-heavy material. Manual disclosure choices still use the existing
+  persisted section-state path.
+- **Status resources are intentional.** Features, Overview, and Combat publish
+  generic resource priority/action metadata. The mobile strip skips spent or
+  disabled candidates and promotes the best actionable resource without a
+  Fighter/Warlock/Druid/Wizard name map.
+- **More is a keyboard-complete dialog.** Its destinations synchronize on open;
+  Escape closes it, focus is contained while open, and focus returns to the More
+  trigger. The Quick Actions FAB now has an explicit accessible name.
+- **Remaining primary touch actions meet the floor.** Inventory commands and
+  spell filters use 44px targets; Respec, HP undo, portrait framing, and
+  spell-slot controls are enlarged without hiding capability in landscape.
+- **Bounded browser evidence:** Wizard/Evocation, Fighter/Champion,
+  Warlock/Fiend, and Druid/Moon were exercised at 390x844, 320x844, and 844x390
+  in day and night themes. The matrix reported zero horizontal overflow, zero
+  clipped expanded wrappers, every Inventory action in-viewport, working spell
+  filter/reset recovery, expected Combat disclosure, and meaningful promoted
+  resources (Arcane Recovery, Indomitable, Infernal Luck, and Wild Shape).
 
 **Still open:**
 

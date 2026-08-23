@@ -78,12 +78,32 @@ describe("Mobile tab overflow policy", () => {
 		const asTalent = ({spells = []} = {}) => ({
 			isPsionicManifester: () => true,
 			getSpells: () => spells,
+			getInnateSpells: () => [],
+			getSpellcastingInfo: () => spells.length ? {} : null,
+		});
+		const asMartial = () => ({
+			isPsionicManifester: () => false,
+			getSpells: () => [],
+			getInnateSpells: () => [],
+			getSpellcastingInfo: () => null,
 		});
 
-		it("keeps the standard five for a character with no psionics", () => {
+		it("keeps the standard five before a character is available", () => {
 			expect(CharacterSheetMobile.resolvePlayTabs(null)).toContain("#charsheet-tab-spells");
-			expect(CharacterSheetMobile.resolvePlayTabs({isPsionicManifester: () => false}))
-				.not.toContain("#charsheet-tab-powers");
+		});
+
+		it("spends a non-caster's dead Spells slot on Abilities", () => {
+			const play = CharacterSheetMobile.resolvePlayTabs(asMartial());
+			expect(play).toContain("#charsheet-tab-abilities");
+			expect(play).not.toContain("#charsheet-tab-spells");
+		});
+
+		it("falls back to Spells when the optional Abilities destination is unavailable", () => {
+			const play = CharacterSheetMobile.resolvePlayTabs(asMartial(), {
+				availableHrefs: ALL_TABS.filter(href => href !== "#charsheet-tab-abilities"),
+			});
+			expect(play).toContain("#charsheet-tab-spells");
+			expect(play).not.toContain("#charsheet-tab-abilities");
 		});
 
 		it("spends the dead Spells slot on Powers for a manifester who casts nothing", () => {
@@ -110,7 +130,7 @@ describe("Mobile tab overflow policy", () => {
 		});
 
 		it("still accounts for every tab whichever play set is used", () => {
-			for (const state of [null, asTalent(), asTalent({spells: [{name: "Shield"}]})]) {
+			for (const state of [null, asMartial(), asTalent(), asTalent({spells: [{name: "Shield"}]})]) {
 				const {play, overflow} = CharacterSheetMobile.partitionTabs(ALL_TABS, {
 					playHrefs: CharacterSheetMobile.resolvePlayTabs(state),
 				});
@@ -163,5 +183,20 @@ describe("Mobile tab overflow policy", () => {
 		const {play, overflow} = CharacterSheetMobile.partitionTabs([...ALL_TABS, "#charsheet-tab-crafting"]);
 		expect(play).toHaveLength(5);
 		expect(overflow).toContain("#charsheet-tab-crafting");
+	});
+
+	it("marks More active only for the currently available overflow set", () => {
+		let isActive = null;
+		const mobile = Object.create(CharacterSheetMobile.prototype);
+		mobile._elTabMoreItem = {
+			classList: {toggle: (_cls, value) => { isActive = value; }},
+		};
+		const activeItem = {classList: {contains: cls => cls === "ve-active"}};
+
+		mobile._syncTabMoreActive([activeItem]);
+		expect(isActive).toBe(true);
+
+		mobile._syncTabMoreActive([]);
+		expect(isActive).toBe(false);
 	});
 });

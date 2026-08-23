@@ -188,6 +188,8 @@ class CharacterSheetExport {
 
 		const cbReplace = e_({tag: "input", clazz: "mr-2"});
 		cbReplace.type = "checkbox";
+		const hasCurrentCharacter = this._page.hasCurrentCharacter?.() !== false;
+		cbReplace.disabled = !hasCurrentCharacter;
 
 		// File input handler
 		fileInput.addEventListener("change", (e) => {
@@ -220,7 +222,7 @@ class CharacterSheetExport {
 				${jsonTextarea}
 			</div>
 			
-			<div class="charsheet__import-option mt-3">
+			<div class="charsheet__import-option mt-3 ${hasCurrentCharacter ? "" : "ve-hidden"}">
 				<label class="ve-flex-v-center">
 					${cbReplace}
 					<span>
@@ -238,7 +240,7 @@ class CharacterSheetExport {
 			txt: "Import",
 			click: async () => {
 				const jsonStr = jsonTextarea.value.trim();
-				const replaceExisting = cbReplace.checked;
+				const replaceExisting = cbReplace.checked && this._page.hasCurrentCharacter?.() !== false;
 
 				if (!jsonStr) {
 					JqueryUtil.doToast({type: "warning", content: "Please provide character data to import."});

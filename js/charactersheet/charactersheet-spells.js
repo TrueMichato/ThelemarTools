@@ -19,6 +19,17 @@ const PLAYER_CHOSEN_SPELL_FEATURES = /** @type {*} */ (globalThis).CharacterShee
  * Handles spell slots, known spells, prepared spells, and casting
  */
 class CharacterSheetSpells {
+	static filterSpellList (spells, {search = "", level = "all"} = {}) {
+		const normalizedSearch = `${search || ""}`.trim().toLowerCase();
+		const normalizedLevel = `${level ?? "all"}`;
+		return (spells || []).filter(spell => {
+			if (!spell) return false;
+			if (normalizedSearch && !`${spell.name || ""}`.toLowerCase().includes(normalizedSearch)) return false;
+			if (normalizedLevel !== "all" && Number(spell.level) !== Number(normalizedLevel)) return false;
+			return true;
+		});
+	}
+
 	/**
 	 * Returns true if the spell was chosen by the player (counts against known/prepared limit).
 	 * Returns false for feature-granted spells AND for orphans (sourceFeature == null) — orphans
@@ -262,6 +273,17 @@ class CharacterSheetSpells {
 		document.addEventListener("change", (/** @type {*} */ e) => {
 			if (!e.target.matches("#charsheet-spell-level-filter")) return;
 			this._spellLevelFilter = e.target.value;
+			this._renderSpellList();
+		});
+
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			if (!e.target.closest("[data-charsheet-spell-filter-reset]")) return;
+			this._spellFilter = "";
+			this._spellLevelFilter = "all";
+			const search = /** @type {*} */ (document.getElementById("charsheet-spell-search"));
+			const level = /** @type {*} */ (document.getElementById("charsheet-spell-level-filter"));
+			if (search) search.value = "";
+			if (level) level.value = "all";
 			this._renderSpellList();
 		});
 
@@ -7033,6 +7055,7 @@ class CharacterSheetSpells {
 
 		const container = document.getElementById("charsheet-spell-lists");
 		if (!container) return;
+		this._syncSpellFilterControls();
 
 		// BUG 5: tag the container with the active view mode so mode-scoped CSS (e.g. the
 		// green outline on prepared spells in "known" mode) can key off it.
@@ -7044,7 +7067,11 @@ class CharacterSheetSpells {
 
 		// Render innate spells first (from features/feats)
 		this._renderWizardCapstonePanel(container);
-		this._renderInnateSpells(container);
+		const filteredInnate = CharacterSheetSpells.filterSpellList(this._state.getInnateSpells(), {
+			search: this._spellFilter,
+			level: this._spellLevelFilter,
+		});
+		this._renderInnateSpells(container, filteredInnate);
 
 		// Render scribing spellbook section (Spell Scribing Adept)
 		this._renderScribingSpellbook(container);
@@ -7059,14 +7086,10 @@ class CharacterSheetSpells {
 		const spellcastingInfo = this._state.getSpellcastingInfo();
 
 		// Apply filters
-		let filtered = spells;
-		if (this._spellFilter) {
-			filtered = filtered.filter(s => s.name.toLowerCase().includes(this._spellFilter));
-		}
-
-		if (this._spellLevelFilter !== "all") {
-			filtered = filtered.filter(s => s.level === parseInt(this._spellLevelFilter));
-		}
+		let filtered = CharacterSheetSpells.filterSpellList(spells, {
+			search: this._spellFilter,
+			level: this._spellLevelFilter,
+		});
 
 		// BUG 5: restrict the visible spells to the active view mode BEFORE layout, so all
 		// downstream layouts (spellbook/standard) render only the intended subset.
@@ -7085,12 +7108,21 @@ class CharacterSheetSpells {
 			this._renderStandardSpellLayout(container, filtered, spellcastingInfo);
 		}
 
-		const innateSpells = this._state.getInnateSpells();
-		if (!filtered.length && !innateSpells.length) {
-			const emptyMsg = viewMode === "prepared"
-				? "No prepared spells"
-				: (viewMode === "known" ? "No known spells" : "No spells");
-			container.insertAdjacentHTML("beforeend", `<p class="ve-muted text-center">${emptyMsg}</p>`);
+		if (!filtered.length && !filteredInnate.length) {
+			const hasActiveFilter = !!this._spellFilter || this._spellLevelFilter !== "all";
+			if (hasActiveFilter) {
+				container.insertAdjacentHTML("beforeend", `
+					<div class="charsheet__spell-filter-empty">
+						<span>No spells match these filters.</span>
+						<button type="button" class="ve-btn ve-btn-default" data-charsheet-spell-filter-reset>Clear filters</button>
+					</div>
+				`);
+			} else {
+				const emptyMsg = viewMode === "prepared"
+					? "No prepared spells"
+					: (viewMode === "known" ? "No known spells" : "No spells");
+				container.insertAdjacentHTML("beforeend", `<p class="ve-muted text-center">${emptyMsg}</p>`);
+			}
 		}
 
 		// Keep the cantrip/known/prepared counters in sync with the list. The
@@ -7100,6 +7132,16 @@ class CharacterSheetSpells {
 		// full reload). _renderSpellTrackingUI does not call back into this
 		// method, so there's no recursion.
 		this._renderSpellTrackingUI();
+	}
+
+	_syncSpellFilterControls () {
+		const search = /** @type {*} */ (document.getElementById("charsheet-spell-search"));
+		const level = /** @type {*} */ (document.getElementById("charsheet-spell-level-filter"));
+		if (search && search.value !== this._spellFilter) search.value = this._spellFilter;
+		if (level && level.value !== this._spellLevelFilter) level.value = this._spellLevelFilter;
+		const hasActiveFilter = !!this._spellFilter || this._spellLevelFilter !== "all";
+		document.querySelectorAll("[data-charsheet-spell-filter-reset]")
+			.forEach(btn => { btn.hidden = !hasActiveFilter; });
 	}
 
 	_renderWizardCapstonePanel (container) {
@@ -7574,16 +7616,7 @@ class CharacterSheetSpells {
 	/**
 	 * Render innate spells section (from features/feats)
 	 */
-	_renderInnateSpells (container) {
-		const innateSpells = this._state.getInnateSpells();
-		if (!innateSpells) return;
-
-		// Apply filter
-		let filtered = innateSpells;
-		if (this._spellFilter) {
-			filtered = filtered.filter(s => s.name.toLowerCase().includes(this._spellFilter));
-		}
-
+	_renderInnateSpells (container, filtered) {
 		if (!filtered?.length) return;
 
 		const group = e_({outer: `

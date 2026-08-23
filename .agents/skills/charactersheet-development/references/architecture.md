@@ -179,7 +179,7 @@ BEM-like naming: `.charsheet__element--modifier`
 #### The mobile layer
 
 `charactersheet-mobile.css` + `js/charactersheet/charactersheet-mobile.js` form a
-**shell around the desktop sheet**, not a second sheet. Ten rules govern it:
+**shell around the desktop sheet**, not a second sheet. Fourteen rules govern it:
 
 1. **The gate is a posture, not a width.** Both the CSS media query and
    `CharacterSheetMobile.isMobile()` fire on
@@ -271,6 +271,34 @@ BEM-like naming: `.charsheet__element--modifier`
     listener eats whichever click arrives first within its 500ms window — on a
     phone that is usually the user's immediate tap on the menu the press just
     opened, so their first choice silently does nothing.
+11. **First run is a capability state, not level zero.**
+    `CharacterSheetPage.hasCurrentCharacter()` exposes whether
+    `_currentCharacterId` exists. Mobile uses that signal to replace populated
+    navigation and status chrome with Create Character and Import Character
+    actions that click the existing controls. A newly created level-zero
+    character is still a real character; an empty collection must not render
+    invented default AC or HP.
+12. **The primary tab budget adapts by capability.** Four stable slots are
+    Overview, Combat, Inventory, and Features. The fifth resolves through the
+    currently available Spells, Powers, or Abilities surface; every other
+    available authored tab remains in More. `resolvePrimaryTabHrefs()` and
+    `partitionTabs()` are pure policy helpers, while `_syncTabOverflow()` rebuilds
+    the More destinations from live visibility so no dead or dropped tab survives
+    a character switch.
+13. **Dense surfaces need retrieval and disclosure, not smaller controls.**
+    Spells reuses `CharacterSheetSpells`' existing `_spellFilter` and
+    `_spellLevelFilter` state through a visible search/level/reset row, including
+    an explicit filter-empty recovery. Combat sections declare semantic
+    `data-mobile-section-role` values: active play and resource surfaces remain
+    open, while duplicate/reference surfaces default collapsed and retain the
+    user's persisted override.
+14. **Resource promotion is renderer metadata, never class logic or DOM order.**
+    Shared Features, Overview, and Combat renderers publish
+    `data-mobile-resource-priority`, availability, and the real action target.
+    `rankResourceCandidates()` selects the highest-priority available candidate,
+    skips spent/disabled rows, and delegates activation to its existing control.
+    Synthetic combat resources use the same contract; the mobile module never
+    branches on class, subclass, or feature names.
 
 Form controls on mobile take a 16px **floor**
 (`max(16px, calc(var(--cs-text-sm) * var(--cs-text-scale)))`) rather than a flat

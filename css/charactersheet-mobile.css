@@ -128,6 +128,53 @@
 		color: #fff;
 	}
 
+	.charsheet-mobile__first-run {
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		min-height: min(520px, calc(var(--vh, 1vh) * 64));
+		max-width: 34rem;
+		margin: 0 auto;
+		padding: 2rem 1.25rem 6rem;
+		text-align: center;
+	}
+
+	.charsheet-mobile__first-run[hidden] {
+		display: none;
+	}
+
+	.charsheet-mobile__first-run h2 {
+		margin: 0 0 0.75rem;
+		font-family: var(--cs-font-display, Cinzel, serif);
+		font-size: var(--cs-text-2xl, 1.5rem);
+		color: var(--cs-text-primary, #f1f5f9);
+	}
+
+	.charsheet-mobile__first-run p {
+		max-width: 30rem;
+		margin: 0 auto 1.25rem;
+		color: var(--cs-text-secondary, #cbd5e1);
+		line-height: 1.55;
+	}
+
+	.charsheet-mobile__first-run-actions {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		gap: 0.75rem;
+	}
+
+	.charsheet-mobile__first-run-actions .ve-btn {
+		min-height: 48px;
+		font-size: 1rem;
+	}
+
+	body.charsheet-mobile__is-empty #charsheet-tabs,
+	body.charsheet-mobile__is-empty .charsheet-page .tab-content,
+	body.charsheet-mobile__is-empty .charsheet-mobile__fab,
+	body.charsheet-mobile__is-empty .charsheet-mobile__status {
+		display: none !important;
+	}
+
 	/* ====================================================================
 	   Bottom Tab Bar — Fixed navigation at screen bottom
 	   ==================================================================== */
@@ -244,6 +291,11 @@
 		border-radius: var(--cs-radius-xl, 24px) var(--cs-radius-xl, 24px) 0 0;
 		transform: translateY(100%);
 		transition: transform 0.25s ease-out;
+	}
+
+	.charsheet-mobile__tab-sheet-panel:focus-visible {
+		outline: 2px solid var(--cs-primary, #6366f1);
+		outline-offset: -4px;
 	}
 
 	.charsheet-mobile__tab-sheet.charsheet-mobile--visible .charsheet-mobile__tab-sheet-panel {
@@ -663,8 +715,13 @@
 
 	/* Animated collapse wrapper (JS wraps content children in this) */
 	.charsheet-mobile__section-content {
-		overflow: hidden;
+		overflow: visible;
 		transition: max-height 0.3s ease-out;
+	}
+
+	.charsheet__section.charsheet-mobile--collapsed > .charsheet-mobile__section-content,
+	.charsheet-mobile__section-content.charsheet-mobile__section-content--animating {
+		overflow: hidden;
 	}
 
 	.charsheet__section.charsheet-mobile--collapsed .charsheet__section-title {
@@ -688,6 +745,27 @@
 		font-size: 0.8rem;
 		color: var(--cs-text-muted, #64748b);
 		transition: transform 0.2s ease;
+	}
+
+	.charsheet-mobile__section-toggle {
+		position: absolute;
+		z-index: 1;
+		top: 50%;
+		right: 0;
+		width: 44px;
+		height: 44px;
+		padding: 0;
+		transform: translateY(-50%);
+		border: 0;
+		background: transparent;
+		color: inherit;
+		cursor: pointer;
+	}
+
+	.charsheet-mobile__section-toggle:focus-visible {
+		outline: 2px solid var(--cs-primary, #6366f1);
+		outline-offset: -2px;
+		border-radius: var(--cs-radius-sm, 6px);
 	}
 
 	.charsheet__section.charsheet-mobile--collapsed .charsheet__section-title::after {
@@ -1484,6 +1562,27 @@
 		padding: 0.5rem 0.75rem;
 	}
 
+	.charsheet__portrait-adjust-btn {
+		min-width: 44px;
+		min-height: 44px;
+		justify-content: center;
+		opacity: 1;
+	}
+
+	.charsheet__level-entry-edit {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 44px;
+		min-height: 44px;
+		opacity: 1;
+	}
+
+	.charsheet__dmg-undo {
+		min-height: 44px;
+		padding: 0.25rem 0;
+	}
+
 	/* ====================================================================
 	   Tab-Specific: Inventory — Search-First, Touch-Friendly
 	   ==================================================================== */
@@ -1495,6 +1594,85 @@
 	#charsheet-ipt-inventory-search {
 		min-height: 44px;
 		font-size: 1rem;
+	}
+
+	.charsheet__inventory-toolbar {
+		display: flex;
+		flex-direction: column;
+		align-items: stretch;
+		gap: 0.5rem;
+	}
+
+	.charsheet__inventory-toolbar-primary,
+	.charsheet__inventory-toolbar-secondary {
+		display: flex;
+		align-items: center;
+		min-width: 0;
+	}
+
+	.charsheet__inventory-toolbar-primary {
+		justify-content: space-between;
+	}
+
+	.charsheet__inventory-toolbar-primary .charsheet__section-title {
+		min-width: 0;
+		margin-right: 0.5rem !important;
+	}
+
+	.charsheet__inventory-toolbar-primary #charsheet-btn-add-item {
+		flex: 0 0 auto;
+		min-height: 44px;
+		margin-right: 0 !important;
+	}
+
+	.charsheet__inventory-toolbar-secondary {
+		flex-wrap: wrap;
+		gap: 0.375rem;
+	}
+
+	.charsheet__inventory-toolbar-secondary > .ve-btn {
+		flex: 1 1 auto;
+		min-height: 44px;
+		margin-right: 0 !important;
+	}
+
+	.charsheet__inventory-toolbar-secondary .charsheet__inventory-view-toggle {
+		display: inline-flex;
+		flex: 0 0 auto;
+		margin-left: auto !important;
+	}
+
+	.charsheet__inventory-toolbar-secondary .charsheet__inventory-view-toggle .ve-btn {
+		min-width: 44px;
+		min-height: 44px;
+	}
+
+	.charsheet__spell-filters {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto auto;
+		gap: 0.5rem;
+		align-items: center;
+	}
+
+	.charsheet__spell-search,
+	.charsheet__spell-level-filter,
+	.charsheet__spell-filter-reset {
+		min-height: 44px;
+	}
+
+	.charsheet__spell-level-filter {
+		width: auto;
+		min-width: 7.5rem;
+	}
+
+	.charsheet__spell-filter-empty {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 1.5rem 0.75rem;
+		text-align: center;
+		color: var(--cs-text-muted, #94a3b8);
 	}
 
 	/* Inventory items — card-like rows */
@@ -1575,6 +1753,19 @@
 	.charsheet__ipt-name {
 		font-size: 1rem;
 	}
+
+	.charsheet-mobile__first-run-actions {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.charsheet__spell-filters {
+		grid-template-columns: minmax(0, 1fr) auto;
+	}
+
+	.charsheet__spell-filter-reset {
+		grid-column: 1 / -1;
+		width: 100%;
+	}
 }
 
 /* ========================================================================
@@ -1603,7 +1794,7 @@
 	/* Landscape gives us width but almost no height, so the strip trades its
 	   stacked label/value for one line. Same four segments, half the height. */
 	.charsheet-mobile__status-row {
-		min-height: 36px;
+		min-height: 44px;
 	}
 
 	.charsheet-mobile__status-seg {
@@ -1635,6 +1826,11 @@
 	body.is-charsheet-page .ve-ui-modal__inner {
 		max-height: 90vh;
 		max-height: calc(var(--vh, 1vh) * 90);
+	}
+
+	.charsheet__section {
+		padding-top: 0.5rem;
+		padding-bottom: 0.5rem;
 	}
 }
 
@@ -1672,6 +1868,13 @@
 	.charsheet-page .charsheet__resource-use-btn,
 	.charsheet-page .charsheet__resource-restore-btn {
 		position: relative;
+	}
+
+	.charsheet-page .charsheet__spell-slot-pip {
+		width: 24px;
+		height: 24px;
+		min-width: 24px;
+		min-height: 24px;
 	}
 
 	.charsheet-page .charsheet__spell-slot-pip::after,

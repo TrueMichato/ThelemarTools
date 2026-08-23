@@ -7948,7 +7948,7 @@ class CharacterSheetPage {
 
 			if (staminaMax > 0) {
 				const row = e_({outer: `
-					<div class="charsheet__resource-row" data-resource-id="stamina">
+					<div class="charsheet__resource-row" data-resource-id="stamina" data-charsheet-status-resource="secondary" data-status-current="${staminaCurrent}" data-status-max="${staminaMax}">
 						<span class="charsheet__resource-name">Stamina</span>
 						<span class="charsheet__resource-recharge ve-muted ve-small ml-2">(Short)</span>
 						<div class="charsheet__resource-uses ml-auto">
@@ -7999,7 +7999,7 @@ class CharacterSheetPage {
 
 		resources.forEach(resource => {
 			const row = e_({outer: `
-				<div class="charsheet__resource-row" data-resource-id="${resource.id}">
+				<div class="charsheet__resource-row" data-resource-id="${resource.id}" data-charsheet-status-resource="secondary" data-status-current="${resource.current}" data-status-max="${resource.max}">
 					<span class="charsheet__resource-name">${resource.name}</span>
 					<span class="charsheet__resource-recharge ve-muted ve-small ml-2">(${resource.recharge === "short" ? "Short" : "Long"})</span>
 					<div class="charsheet__resource-uses ml-auto">
@@ -19985,6 +19985,7 @@ class CharacterSheetPage {
 	getSkillsData () { return this._skillsData; }
 	getConditionsData () { return this._conditionsData; }
 	getState () { return this._state; }
+	hasCurrentCharacter () { return !!this._currentCharacterId; }
 	getLevelUpHelper () { return this._levelUp; }
 
 	/**

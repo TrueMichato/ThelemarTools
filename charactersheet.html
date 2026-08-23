@@ -1212,7 +1212,7 @@
 							</div>
 						</div>
 
-						<div class="charsheet__section mt-3" id="charsheet-combat-spells-section" style="display: none;">
+						<div class="charsheet__section mt-3" id="charsheet-combat-spells-section" data-mobile-section-role="reference" style="display: none;">
 							<h4 class="charsheet__section-title">Combat Spells</h4>
 							<div class="charsheet__combat-spell-stats mb-2">
 								<span class="ve-muted">Spell Attack: </span><span id="charsheet-combat-spell-attack" class="badge badge-primary">+0</span>
@@ -1232,7 +1232,7 @@
 						</div>
 
 						<!-- Action Economy overview (B9): attacks, spells & abilities grouped by turn cost -->
-						<div class="charsheet__section mt-3" id="charsheet-combat-action-economy-section" style="display: none;">
+						<div class="charsheet__section mt-3" id="charsheet-combat-action-economy-section" data-mobile-section-role="reference" style="display: none;">
 							<h4 class="charsheet__section-title">Action Economy</h4>
 							<p class="charsheet__section-caption ve-muted ve-small">Everything you can do this turn, grouped by what it costs.</p>
 							<div class="cs-combat-action-economy" id="charsheet-combat-action-economy"></div>
@@ -1275,7 +1275,7 @@
 							</div>
 						</div>
 
-						<div class="charsheet__section">
+						<div class="charsheet__section" data-mobile-section-role="reference">
 							<h4 class="charsheet__section-title">Defenses</h4>
 							<div id="charsheet-combat-defenses">
 								<div class="charsheet__defense-row">
@@ -1390,13 +1390,32 @@
 
 					<!-- Spell Lists by Level -->
 					<div class="charsheet__section">
-						<div class="ve-flex-v-center mb-2">
+						<div class="ve-flex-v-center mb-2 charsheet__spell-list-head">
 							<h4 class="charsheet__section-title mb-0 mr-3">Spells</h4>
 							<button class="charsheet__add-btn" id="charsheet-btn-add-spell"><span class="glyphicon glyphicon-plus"></span> Add Spell</button>
 						</div>
 						<!-- BUG 5: Current / Prepared / Known view toggle. Populated by
 						     CharacterSheetSpells._renderSpellViewToggle(). -->
 						<div class="charsheet__spell-view-toggle-host mb-2" id="charsheet-spell-view-toggle"></div>
+						<div class="charsheet__spell-filters mb-2" role="search" aria-label="Filter spells">
+							<label class="ve-hidden" for="charsheet-spell-search">Search spells</label>
+							<input type="search" class="ve-form-control form-control--minimal charsheet__spell-search" id="charsheet-spell-search" placeholder="Search spells…" aria-label="Search spells" autocomplete="off">
+							<label class="ve-hidden" for="charsheet-spell-level-filter">Spell level</label>
+							<select class="ve-form-control form-control--minimal charsheet__spell-level-filter" id="charsheet-spell-level-filter" aria-label="Filter spells by level">
+								<option value="all">All levels</option>
+								<option value="0">Cantrips</option>
+								<option value="1">Level 1</option>
+								<option value="2">Level 2</option>
+								<option value="3">Level 3</option>
+								<option value="4">Level 4</option>
+								<option value="5">Level 5</option>
+								<option value="6">Level 6</option>
+								<option value="7">Level 7</option>
+								<option value="8">Level 8</option>
+								<option value="9">Level 9</option>
+							</select>
+							<button type="button" class="ve-btn ve-btn-default charsheet__spell-filter-reset" data-charsheet-spell-filter-reset hidden>Clear</button>
+						</div>
 						<div class="charsheet__spell-lists" id="charsheet-spell-lists">
 							<div class="ve-muted ve-text-center py-2">No spells known</div>
 						</div>
@@ -1417,15 +1436,19 @@
 				<div class="ve-flex charsheet__inventory-layout">
 					<div class="ve-flex-col" style="flex: 2;">
 						<div class="charsheet__section charsheet__section--inventory">
-							<div class="ve-flex-v-center mb-2">
-								<h4 class="charsheet__section-title mb-0 mr-3">Equipment</h4>
-								<button class="charsheet__add-btn mr-2" id="charsheet-btn-add-item"><span class="glyphicon glyphicon-plus"></span> Add Item</button>
-								<button class="ve-btn ve-btn-default ve-btn-xs mr-2" id="charsheet-btn-add-custom-item"><span class="glyphicon glyphicon-pencil"></span> Custom</button>
-								<button class="ve-btn ve-btn-default ve-btn-xs mr-2" id="charsheet-btn-harvest" title="Harvest materials from a creature you've felled">🧺 Harvest</button>
-								<button class="ve-btn ve-btn-default ve-btn-xs mr-2" id="charsheet-btn-craft" title="See what you can make with what you're carrying">🔨 Craft</button>
-								<div class="charsheet__inventory-view-toggle ml-auto">
-									<button class="ve-btn ve-btn-xs ve-btn-default ve-active" id="charsheet-btn-view-list" title="List view"><span class="glyphicon glyphicon-list"></span></button>
-									<button class="ve-btn ve-btn-xs ve-btn-default" id="charsheet-btn-view-compact" title="Compact view"><span class="glyphicon glyphicon-th-list"></span></button>
+							<div class="ve-flex-v-center mb-2 charsheet__inventory-toolbar">
+								<div class="charsheet__inventory-toolbar-primary">
+									<h4 class="charsheet__section-title mb-0 mr-3">Equipment</h4>
+									<button class="charsheet__add-btn mr-2" id="charsheet-btn-add-item"><span class="glyphicon glyphicon-plus"></span> Add Item</button>
+								</div>
+								<div class="charsheet__inventory-toolbar-secondary">
+									<button class="ve-btn ve-btn-default ve-btn-xs mr-2" id="charsheet-btn-add-custom-item"><span class="glyphicon glyphicon-pencil"></span> Custom</button>
+									<button class="ve-btn ve-btn-default ve-btn-xs mr-2" id="charsheet-btn-harvest" title="Harvest materials from a creature you've felled">🧺 Harvest</button>
+									<button class="ve-btn ve-btn-default ve-btn-xs mr-2" id="charsheet-btn-craft" title="See what you can make with what you're carrying">🔨 Craft</button>
+									<div class="charsheet__inventory-view-toggle ml-auto">
+										<button class="ve-btn ve-btn-xs ve-btn-default ve-active" id="charsheet-btn-view-list" title="List view"><span class="glyphicon glyphicon-list"></span></button>
+										<button class="ve-btn ve-btn-xs ve-btn-default" id="charsheet-btn-view-compact" title="Compact view"><span class="glyphicon glyphicon-th-list"></span></button>
+									</div>
 								</div>
 							</div>
 							<div class="charsheet__inventory-filters mb-2">

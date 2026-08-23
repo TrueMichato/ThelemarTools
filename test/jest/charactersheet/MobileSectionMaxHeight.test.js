@@ -53,9 +53,15 @@ function makeSection ({collapsed = false} = {}) {
 
 function makeWrapper () {
 	const listeners = [];
+	const classes = new Set();
 	return {
 		style: {maxHeight: "120px"},
 		listeners,
+		classList: {
+			contains: cls => classes.has(cls),
+			add: cls => classes.add(cls),
+			remove: cls => classes.delete(cls),
+		},
 		addEventListener: (type, fn) => listeners.push({type, fn}),
 		removeEventListener: (type, fn) => {
 			const ix = listeners.findIndex(l => l.type === type && l.fn === fn);
@@ -80,10 +86,12 @@ describe("CharacterSheetMobile._releaseMaxHeight", () => {
 
 		mobile._releaseMaxHeight(section, wrapper);
 		expect(wrapper.style.maxHeight).toBe("120px");
+		expect(wrapper.classList.contains("charsheet-mobile__section-content--animating")).toBe(true);
 
 		wrapper.fire({target: wrapper, propertyName: "max-height"});
 
 		expect(wrapper.style.maxHeight).toBe("none");
+		expect(wrapper.classList.contains("charsheet-mobile__section-content--animating")).toBe(false);
 	});
 
 	it("releases via the timeout when no transition fires — the reduced-motion path", () => {
@@ -96,6 +104,7 @@ describe("CharacterSheetMobile._releaseMaxHeight", () => {
 		jest.advanceTimersByTime(CharacterSheetMobile._MAX_HEIGHT_RELEASE_MS);
 
 		expect(wrapper.style.maxHeight).toBe("none");
+		expect(wrapper.classList.contains("charsheet-mobile__section-content--animating")).toBe(false);
 	});
 
 	it("outlasts the CSS transition, so the fallback never pre-empts the animation", () => {
@@ -154,5 +163,76 @@ describe("CharacterSheetMobile._releaseMaxHeight", () => {
 		wrapper.fire({target: wrapper, propertyName: "max-height"});
 
 		expect(wrapper.listeners).toHaveLength(0);
+	});
+});
+
+describe("mobile section disclosure accessibility", () => {
+	it("adds a native disclosure button and keeps aria-expanded synchronized", () => {
+		const sectionClasses = new Set();
+		const section = {
+			children: [],
+			dataset: {mobileSectionRole: "action"},
+			classList: {
+				contains: cls => sectionClasses.has(cls),
+				add: cls => sectionClasses.add(cls),
+				toggle: cls => {
+					if (sectionClasses.has(cls)) {
+						sectionClasses.delete(cls);
+						return false;
+					}
+					sectionClasses.add(cls);
+					return true;
+				},
+			},
+			querySelector: selector => selector === ".charsheet__section-title" ? title : null,
+			appendChild: child => section.children.push(child),
+		};
+		const titleListeners = {};
+		const title = {
+			dataset: {},
+			textContent: "Defenses",
+			parentElement: section,
+			appendChild: child => { title.toggleButton = child; },
+			addEventListener: (type, fn) => { titleListeners[type] = fn; },
+		};
+		const body = {parentElement: section};
+		section.children = [title, body];
+
+		const originalQuerySelectorAll = document.querySelectorAll;
+		const originalCreateElement = document.createElement;
+		document.querySelectorAll = () => [section];
+		document.createElement = tag => {
+			const attributes = {};
+			const listeners = {};
+			return {
+				tag,
+				attributes,
+				listeners,
+				style: {},
+				classList: {add: () => {}, remove: () => {}},
+				setAttribute: (name, value) => { attributes[name] = value; },
+				appendChild: () => {},
+				addEventListener: (type, fn) => { listeners[type] = fn; },
+				removeEventListener: () => {},
+			};
+		};
+		mobile._haptic = jest.fn();
+
+		try {
+			mobile._initCollapsibleSections();
+			const button = title.toggleButton;
+			expect(button.tag).toBe("button");
+			expect(button.type).toBe("button");
+			expect(button.attributes["aria-controls"]).toBe("charsheet-mobile-section-content-0");
+			expect(button.attributes["aria-expanded"]).toBe("true");
+
+			button.listeners.click({stopPropagation: jest.fn()});
+
+			expect(sectionClasses.has(COLLAPSED_CLASS)).toBe(true);
+			expect(button.attributes["aria-expanded"]).toBe("false");
+		} finally {
+			document.querySelectorAll = originalQuerySelectorAll;
+			document.createElement = originalCreateElement;
+		}
 	});
 });

@@ -70,6 +70,65 @@ describe("CharacterSheetMobile.readVitalState", () => {
 		expect(CharacterSheetMobile.readVitalState(40, 50)).toEqual({ratio: 0.8, state: null});
 	});
 
+	describe("CharacterSheetMobile.hasPlayableCharacter", () => {
+		it("rejects the empty first-run state", () => {
+			expect(CharacterSheetMobile.hasPlayableCharacter({
+				hasCurrentCharacter: () => false,
+				getState: () => ({getTotalLevel: () => 0}),
+			})).toBe(false);
+		});
+
+		it("keeps a newly-created blank character out of the status strip", () => {
+			expect(CharacterSheetMobile.hasPlayableCharacter({
+				hasCurrentCharacter: () => true,
+				getState: () => ({getTotalLevel: () => 0}),
+			})).toBe(false);
+		});
+
+		it("accepts a loaded character with a real class level", () => {
+			expect(CharacterSheetMobile.hasPlayableCharacter({
+				hasCurrentCharacter: () => true,
+				getState: () => ({getTotalLevel: () => 1}),
+			})).toBe(true);
+		});
+	});
+
+	describe("CharacterSheetMobile.pickStatusResource", () => {
+		const target = (disabled = false) => ({disabled});
+
+		it("promotes a signature combat resource over earlier reference rows", () => {
+			const pick = CharacterSheetMobile.pickStatusResource([
+				{name: "Stonecunning", priority: "secondary", current: 2, target: target()},
+				{name: "Second Wind", priority: "signature", current: 1, target: target()},
+			]);
+			expect(pick.name).toBe("Second Wind");
+		});
+
+		it("falls back when the promoted resource is spent or disabled", () => {
+			const pick = CharacterSheetMobile.pickStatusResource([
+				{name: "Action Surge", priority: "signature", current: 0, target: target()},
+				{name: "Second Wind", priority: "signature", current: 1, target: target(true)},
+				{name: "Wild Shape", priority: "primary", current: 2, target: target()},
+			]);
+			expect(pick.name).toBe("Wild Shape");
+		});
+
+		it("preserves source order between equally ranked available resources", () => {
+			const pick = CharacterSheetMobile.pickStatusResource([
+				{name: "Ki", priority: "primary", current: 3, target: target()},
+				{name: "Focus", priority: "primary", current: 2, target: target()},
+			]);
+			expect(pick.name).toBe("Ki");
+		});
+
+		it("returns null when nothing can be spent", () => {
+			expect(CharacterSheetMobile.pickStatusResource([
+				{name: "Rage", priority: "signature", current: 0, target: target()},
+				{name: "Sorcery Points", priority: "primary", current: 2, target: null},
+			])).toBeNull();
+		});
+	});
+
 	it("warns at exactly half — the boundary belongs to the warning", () => {
 		expect(CharacterSheetMobile.readVitalState(25, 50).state).toBe("warn");
 	});

@@ -1501,6 +1501,13 @@ body.is-charsheet-page .ve-ui-modal__scroller > .ve-flex.ve-w-100.ve-mb-1 {
 	background: var(--cs-bg-input, rgba(15, 23, 42, 0.6));
 }
 
+/* Mobile groups the command bar into two rows; display: contents preserves the
+   existing desktop flex layout without duplicating or moving any controls. */
+.charsheet__inventory-toolbar-primary,
+.charsheet__inventory-toolbar-secondary {
+	display: contents;
+}
+
 .charsheet__dice-preset-apply {
 	padding: 3px 8px;
 	background: transparent;
