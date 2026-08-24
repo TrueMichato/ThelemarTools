@@ -3328,7 +3328,7 @@ Renderer.utils = class {
 	static _getNameTr_getPtPrereleaseBrewSourceLink ({ent, brewUtil}) {
 		if (!brewUtil.hasSourceJson(ent.source) || !brewUtil.sourceJsonToSource(ent.source)?.url) return "";
 
-		return `<a href="${brewUtil.sourceJsonToSource(ent.source).url}" title="View ${brewUtil.DISPLAY_NAME.toTitleCase()} Source" class="ve-self-flex-center ve-ml-2 ve-muted ve-rd__stats-name-brew-link" target="_blank" rel="noopener noreferrer"><span class="	glyphicon glyphicon-share"></span></a>`;
+		return `<a href="${brewUtil.sourceJsonToSource(ent.source).url.qq()}" title="View ${brewUtil.DISPLAY_NAME.toTitleCase()} Source" class="ve-self-flex-center ve-ml-2 ve-muted ve-rd__stats-name-brew-link" target="_blank" rel="noopener noreferrer"><span class="	glyphicon glyphicon-share"></span></a>`;
 	}
 
 	static getBtnSendToFoundryHtml ({isMb = true} = {}) {

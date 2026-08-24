@@ -66,6 +66,7 @@ class NavBar {
 		document.getElementById("navigation").prepend(btnShowHide);
 
 		this._addElement_li({page: "index.html", aText: "Home"});
+		this._addElement_li({page: "hub.html", aText: "Campaign Hub"});
 
 		this._addElement_dropdown({category: NavBar._CAT_RULES});
 		this._addElement_li({keyPath: [NavBar._CAT_RULES], page: "variantrules.html", aText: "Rules Glossary"});

@@ -44,6 +44,8 @@ export class BrewUtil2Base {
 	_isDirty = false;
 
 	_brewsTemp = [];
+	_brewsTempCacheKey = null;
+	_brewsTempGeneration = 0;
 	_addLazy_brewsTemp = [];
 
 	_storage = StorageUtil;
@@ -240,12 +242,16 @@ export class BrewUtil2Base {
 	}
 
 	async _pGetBrewProcessed_ ({lockToken}) {
+		const brewsTempGeneration = this._brewsTempGeneration;
 		// Deep copy up-front so everything downstream is free to mutate in place.
 		const cpyBrews = MiscUtil.copyFast([
 			...await this.pGetBrew({lockToken}),
 			...this._brewsTemp,
 		]);
-		if (!cpyBrews.length) return this._cache_brewsProc = {};
+		if (!cpyBrews.length) {
+			if (brewsTempGeneration !== this._brewsTempGeneration) return this._pGetBrewProcessed_({lockToken});
+			return this._cache_brewsProc = {};
+		}
 
 		await this._pGetBrewProcessed_pDoBlocklistExtension({cpyBrews});
 
@@ -256,7 +262,9 @@ export class BrewUtil2Base {
 		const cpyBrewsMerged = this._pGetBrewProcessed_getMergedOutput({cpyBrews});
 
 		// Apply "_copy" etc.
-		this._cache_brewsProc = await DataUtil.pDoMetaMerge(CryptUtil.uid(), cpyBrewsMerged, {isSkipMetaMergeCache: true});
+		const brewsProc = await DataUtil.pDoMetaMerge(CryptUtil.uid(), cpyBrewsMerged, {isSkipMetaMergeCache: true});
+		if (brewsTempGeneration !== this._brewsTempGeneration) return this._pGetBrewProcessed_({lockToken});
+		this._cache_brewsProc = brewsProc;
 
 		return this._cache_brewsProc;
 	}
@@ -449,6 +457,38 @@ export class BrewUtil2Base {
 	/* -------------------------------------------- */
 
 	getCacheIteration () { return this._cache_iteration; }
+
+	getBrewTemporaryCacheKey () { return this._brewsTempCacheKey; }
+
+	/**
+	 * Replace the non-persisted brew overlay used by the current page context.
+	 * This intentionally does not call `pSetBrew`; personal brew remains untouched.
+	 */
+	setBrewTemporary (brewDocs, {cacheKey = null} = {}) {
+		if (!(brewDocs instanceof Array)) throw new TypeError(`${this.DISPLAY_NAME.uppercaseFirst()} temporary brew must be an array!`);
+		if (cacheKey != null && (typeof cacheKey !== "string" || !cacheKey.trim())) throw new TypeError(`Temporary brew cache key must be a non-empty string or null.`);
+		if (brewDocs.some(brewDoc => brewDoc?.body?.blocklist?.length)) {
+			throw new TypeError(`Temporary campaign brew cannot contain persistent blocklists.`);
+		}
+		if (cacheKey != null && cacheKey === this._brewsTempCacheKey) return false;
+
+		this._brewsTemp = MiscUtil.copyFast(brewDocs);
+		this._brewsTempCacheKey = cacheKey;
+		this._brewsTempGeneration++;
+		if (this._cache_brewsProc) this._cache_iteration++;
+		this._cache_brewsProc = null;
+		return true;
+	}
+
+	clearBrewTemporary () {
+		if (!this._brewsTemp.length && this._brewsTempCacheKey == null) return false;
+		this._brewsTemp = [];
+		this._brewsTempCacheKey = null;
+		this._brewsTempGeneration++;
+		if (this._cache_brewsProc) this._cache_iteration++;
+		this._cache_brewsProc = null;
+		return true;
+	}
 
 	/* -------------------------------------------- */
 

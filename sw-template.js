@@ -2,10 +2,11 @@
 
 import { precacheAndRoute } from "workbox-precaching";
 import { registerRoute } from "workbox-routing";
-import { CacheFirst, NetworkFirst, Strategy, StrategyHandler } from "workbox-strategies";
+import { CacheFirst, NetworkFirst, NetworkOnly, Strategy, StrategyHandler } from "workbox-strategies";
 import { ExpirationPlugin, CacheExpiration } from "workbox-expiration";
 
 import { createCacheKey } from "workbox-precaching/utils/createCacheKey";
+import {isHubNetworkOnlyUrl} from "./js/hub/hub-route-policy.js";
 
 /*
 this comment will attempt to explain the caching strategy employed by this service worker
@@ -111,6 +112,11 @@ https://stackoverflow.com/questions/52423473
 */
 
 // the self value is replaced with key:value pair of file:hash, to allow workbox to carry files over between caches if they match
+registerRoute(
+	({url}) => isHubNetworkOnlyUrl({url, appOrigin: self.location.origin}),
+	new NetworkOnly(),
+);
+
 precacheAndRoute(self.__WB_PRECACHE_MANIFEST);
 
 class RevisionCacheFirst extends Strategy {

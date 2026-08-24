@@ -117,7 +117,10 @@ export class BrewDoc {
 	static _metaMerge_dependenciesIncludes (a, b) {
 		if (a != null && b != null) {
 			Object.entries(b)
-				.forEach(([prop, arr]) => a[prop] = [...(a[prop] || []), ...arr].unique());
+				.forEach(([prop, arr]) => {
+					this._assertSafeMetaProp(prop);
+					a[prop] = [...(a[prop] || []), ...arr].unique();
+				});
 			return a;
 		}
 
@@ -128,11 +131,20 @@ export class BrewDoc {
 		if (a != null && b != null) {
 			// Note that this can clobber the values in the mapping, but we don't really care since they're not used.
 			Object.entries(b)
-				.forEach(([prop, obj]) => a[prop] = Object.assign(a[prop] || {}, obj));
+				.forEach(([prop, obj]) => {
+					this._assertSafeMetaProp(prop);
+					const target = Object.assign(Object.create(null), a[prop] || {});
+					for (const key of Object.keys(obj || {})) this._assertSafeMetaProp(key);
+					a[prop] = Object.assign(target, obj);
+				});
 			return a;
 		}
 
 		return a ?? b;
+	}
+
+	static _assertSafeMetaProp (prop) {
+		if (["__proto__", "constructor", "prototype"].includes(prop)) throw new TypeError(`Unsafe homebrew metadata key "${prop}".`);
 	}
 
 	static _META_MERGE__STATUS_PRECEDENCE = [
