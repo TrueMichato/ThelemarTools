@@ -1,0 +1,169 @@
+import {EventEmitter} from "node:events";
+import {HubOutboxDispatcher, HubRealtime} from "../../../server/src/realtime.js";
+import {canViewEvent, projectCharacterForPlayer} from "../../../server/src/projections.js";
+
+class FakeSocket extends EventEmitter {
+	readyState = 1;
+	sent = [];
+	send (message) { this.sent.push(JSON.parse(message)); }
+	close () { this.readyState = 3; this.emit("close"); }
+}
+
+describe("hub projections and event visibility", () => {
+	it("removes private character fields from player projections", () => {
+		const projected = projectCharacterForPlayer({
+			id: "c1",
+			ownerAccountId: "a1",
+			campaignId: "cmp",
+			revision: 2,
+			data: {
+				name: "Mira",
+				hp: {current: 10},
+				notes: {backstory: "Secret"},
+				inventory: [{name: "Secret Item"}],
+			},
+		});
+		expect(projected.data).toEqual({name: "Mira", hp: {current: 10}});
+	});
+
+	it("enforces all event visibility modes", () => {
+		expect(canViewEvent({event: {visibility: "all_members"}, accountId: "p", role: "player"})).toBe(true);
+		expect(canViewEvent({event: {visibility: "dm_only"}, accountId: "p", role: "player"})).toBe(false);
+		expect(canViewEvent({event: {visibility: "dm_only"}, accountId: "d", role: "dm"})).toBe(true);
+		expect(canViewEvent({event: {visibility: "actor_and_dm", actorAccountId: "p"}, accountId: "p", role: "player"})).toBe(true);
+		expect(canViewEvent({event: {visibility: "explicit_accounts", visibleAccountIds: ["p"]}, accountId: "x", role: "player"})).toBe(false);
+	});
+});
+
+describe("hub realtime", () => {
+	it("filters published events per subscriber role", async () => {
+		const realtime = new HubRealtime({store: {
+			pGetMembership: async ({accountId}) => ({role: accountId === "dm" ? "dm" : "player"}),
+			pGetSessionById: async () => ({session: {}, account: {}}),
+		}});
+		const dm = new FakeSocket();
+		const player = new FakeSocket();
+		realtime.addConnection({socket: dm, account: {id: "dm", displayName: "DM"}, session: {id: "s1"}, membership: {id: "m1", role: "dm"}, campaignId: "cmp"});
+		realtime.addConnection({socket: player, account: {id: "p", displayName: "Player"}, session: {id: "s2"}, membership: {id: "m2", role: "player"}, campaignId: "cmp"});
+		dm.sent.length = 0;
+		player.sent.length = 0;
+
+		await realtime.pPublishEvent({campaignId: "cmp", visibility: "dm_only", type: "roll.logged"});
+		expect(dm.sent.filter(message => message.type === "event")).toHaveLength(1);
+		expect(player.sent.filter(message => message.type === "event")).toHaveLength(0);
+	});
+
+	it("closes sockets whose session was revoked before publication", async () => {
+		const realtime = new HubRealtime({store: {
+			pGetSessionById: async () => null,
+			pGetMembership: async () => ({role: "player"}),
+		}});
+		const socket = new FakeSocket();
+		realtime.addConnection({socket, account: {id: "p", displayName: "P"}, session: {id: "revoked"}, membership: {id: "m", role: "player"}, campaignId: "cmp"});
+		await realtime.pPublishEvent({campaignId: "cmp", visibility: "all_members"});
+		expect(socket.readyState).toBe(3);
+	});
+
+	describe("realtime client ordering", () => {
+		it("does not emit an older snapshot after a newer event", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			const client = new HubRealtimeClient({campaignId: "cmp", location: {protocol: "https:", host: "tools.example"}});
+			const snapshots = [];
+			client.on("snapshot", snapshot => snapshots.push(snapshot));
+			client._handleMessage({type: "event", event: {sequence: 11, type: "x"}});
+			client._handleMessage({type: "resync_complete", snapshot: {lastSequence: 10}, events: [{sequence: 11, type: "x"}]});
+			expect(snapshots).toEqual([{lastSequence: 10}]);
+			expect(client._lastSequence).toBe(11);
+		});
+
+		it("reconnects after a transient close and preserves the resync sequence", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			class BrowserSocket extends EventEmitter {
+				readyState = 1;
+				send () {}
+				close () { this.emit("close", {code: 1000}); }
+				addEventListener (type, listener) { this.on(type, listener); }
+				removeEventListener (type, listener) { this.off(type, listener); }
+			}
+			const sockets = [];
+			const timers = [];
+			const client = new HubRealtimeClient({
+				campaignId: "cmp",
+				location: {protocol: "https:", host: "tools.example"},
+				fnCreateSocket: () => {
+					const socket = new BrowserSocket();
+					sockets.push(socket);
+					queueMicrotask(() => socket.emit("open"));
+					return socket;
+				},
+				fnSetTimeout: fn => {
+					timers.push(fn);
+					return timers.length;
+				},
+			});
+			await client.pConnect();
+			sockets[0].emit("close", {code: 1006});
+			expect(timers).toHaveLength(1);
+			timers.shift()();
+			await new Promise(resolve => setImmediate(resolve));
+			expect(sockets).toHaveLength(2);
+			client.close();
+		});
+	});
+
+	it("returns authorized snapshot and delta events on resync", async () => {
+		const store = {
+			pGetSessionById: async () => ({session: {}, account: {}}),
+			pGetMembership: async () => ({role: "player"}),
+			pGetCampaignSnapshot: async () => ({lastSequence: 3, characters: []}),
+			pListVisibleEvents: async () => [{sequence: 4, type: "roll.logged"}],
+		};
+		const realtime = new HubRealtime({store});
+		const socket = new FakeSocket();
+		realtime.addConnection({socket, account: {id: "p", displayName: "Player"}, session: {id: "s"}, membership: {id: "m", role: "player"}, campaignId: "cmp"});
+		socket.emit("message", Buffer.from(JSON.stringify({type: "resync", afterSequence: 3})));
+		await new Promise(resolve => setImmediate(resolve));
+		expect(socket.sent).toContainEqual({
+			type: "resync_complete",
+			snapshot: {lastSequence: 3, characters: []},
+			events: [{sequence: 4, type: "roll.logged"}],
+		});
+	});
+
+	it("dispatches claimed outbox events and marks them published", async () => {
+		const published = [];
+		const store = {
+			pClaimOutboxBatch: async () => [{id: 1, event: {campaignId: "cmp", visibility: "all_members"}}],
+			pMarkOutboxPublished: async ({outboxId}) => published.push(outboxId),
+			pMarkOutboxFailed: async () => {},
+		};
+		const seen = [];
+		const dispatcher = new HubOutboxDispatcher({store, realtime: {pPublishEvent: async event => seen.push(event)}});
+		await expect(dispatcher.pDispatchOnce()).resolves.toBe(1);
+		expect(seen).toHaveLength(1);
+		expect(published).toEqual([1]);
+	});
+
+	it("marks failed delivery and retries it on the next dispatch", async () => {
+		let status = "pending";
+		let attempts = 0;
+		const store = {
+			pClaimOutboxBatch: async () => ["pending", "failed"].includes(status) ? [{id: 1, event: {id: "e1"}}] : [],
+			pMarkOutboxPublished: async () => status = "published",
+			pMarkOutboxFailed: async () => status = "failed",
+		};
+		const dispatcher = new HubOutboxDispatcher({
+			store,
+			realtime: {
+				pPublishEvent: async () => {
+					if (++attempts === 1) throw new Error("transient");
+				},
+			},
+		});
+		await dispatcher.pDispatchOnce();
+		expect(status).toBe("failed");
+		await dispatcher.pDispatchOnce();
+		expect(status).toBe("published");
+		expect(attempts).toBe(2);
+	});
+});

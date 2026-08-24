@@ -1,0 +1,206 @@
+import crypto from "node:crypto";
+import {isDeepStrictEqual} from "node:util";
+import {HubStoreError} from "./hub-store-error.js";
+
+export const CURRENCY_TYPES = Object.freeze(["cp", "sp", "ep", "gp", "pp"]);
+export const STRUCTURED_EFFECT_TYPES = Object.freeze([
+	"damage",
+	"healing",
+	"condition_add",
+	"condition_remove",
+	"spell_slot_spend",
+	"informational",
+]);
+
+function getFiniteNumber (value, {label, fallback = 0, minimum = 0, isInteger = false}) {
+	if (value == null || value === "") return fallback;
+	const number = Number(value);
+	if (!Number.isFinite(number) || number < minimum || Math.abs(number) > Number.MAX_SAFE_INTEGER) throw new HubStoreError("NUMERIC_INVALID", `${label} must be a finite safe number.`);
+	return isInteger ? Math.floor(number) : number;
+}
+
+function addFinite (a, b, label) {
+	const out = a + b;
+	if (!Number.isFinite(out) || Math.abs(out) > Number.MAX_SAFE_INTEGER) throw new HubStoreError("NUMERIC_INVALID", `${label} exceeds the safe numeric range.`);
+	return out;
+}
+
+export function normalizeCurrency (currency = {}) {
+	return Object.fromEntries(CURRENCY_TYPES.map(type => [
+		type,
+		getFiniteNumber(currency[type], {label: `${type} amount`, fallback: 0, minimum: 0, isInteger: true}),
+	]));
+}
+
+export function normalizeInventory (inventory = []) {
+	if (!Array.isArray(inventory)) return [];
+	return inventory.map(entry => ({
+		...structuredClone(entry),
+		id: entry.id || crypto.randomUUID(),
+		quantity: getFiniteNumber(entry.quantity, {label: "Item quantity", fallback: 1, minimum: Number.EPSILON}),
+	}));
+}
+
+export function normalizeCharacterInventory (data) {
+	const out = structuredClone(data);
+	out.inventory = normalizeInventory(out.inventory);
+	out.currency = normalizeCurrency(out.currency);
+	return out;
+}
+
+function getHp (data) {
+	data.hp ||= {};
+	data.hp.max = Math.max(0, Number(data.hp.max) || 0);
+	data.hp.current = Math.max(0, Number(data.hp.current) || 0);
+	data.hp.temp = Math.max(0, Number(data.hp.temp) || 0);
+	return data.hp;
+}
+
+export function applyStructuredEffect ({data, effect}) {
+	if (!STRUCTURED_EFFECT_TYPES.includes(effect?.type)) throw new HubStoreError("ACTION_INVALID", `Unsupported structured effect.`);
+	const out = structuredClone(data);
+	switch (effect.type) {
+		case "damage": {
+			const amount = getFiniteNumber(effect.amount, {label: "Damage amount"});
+			const hp = getHp(out);
+			const absorbed = Math.min(hp.temp, amount);
+			hp.temp -= absorbed;
+			hp.current = Math.max(0, hp.current - (amount - absorbed));
+			break;
+		}
+		case "healing": {
+			const amount = getFiniteNumber(effect.amount, {label: "Healing amount"});
+			const hp = getHp(out);
+			hp.current = Math.min(hp.max, hp.current + amount);
+			break;
+		}
+		case "condition_add": {
+			if (typeof effect.condition !== "string" || !effect.condition.trim()) throw new HubStoreError("ACTION_INVALID", `Condition is required.`);
+			out.conditions ||= [];
+			if (!out.conditions.some(it => (typeof it === "string" ? it : it.name)?.toLowerCase() === effect.condition.toLowerCase())) {
+				out.conditions.push({name: effect.condition, source: effect.source || null});
+			}
+			break;
+		}
+		case "condition_remove":
+			out.conditions = (out.conditions || []).filter(it => (typeof it === "string" ? it : it.name)?.toLowerCase() !== `${effect.condition || ""}`.toLowerCase());
+			break;
+		case "spell_slot_spend": {
+			const level = getFiniteNumber(effect.level, {label: "Spell-slot level", minimum: 0, isInteger: true});
+			const amount = getFiniteNumber(effect.amount, {label: "Spell-slot amount", fallback: 1, minimum: 1, isInteger: true});
+			const slot = out.spellcasting?.spellSlots?.[level];
+			if (!slot || slot.current < amount) throw new HubStoreError("RESOURCE_INSUFFICIENT", `Not enough spell slots.`);
+			slot.current -= amount;
+			break;
+		}
+		case "informational": break;
+	}
+	return out;
+}
+
+function getComparableInventoryEntry (entry) {
+	const out = structuredClone(entry);
+	delete out.id;
+	delete out.quantity;
+	delete out._sourceIndex;
+	for (const key of ["equipped", "attuned", "starred"]) {
+		if (!out[key]) delete out[key];
+	}
+	return out;
+}
+
+function getDestinationInventoryEntry (entry) {
+	const out = structuredClone(entry);
+	delete out._sourceIndex;
+	out.equipped = false;
+	out.attuned = false;
+	out.starred = false;
+	return out;
+}
+
+function hasItemReference (value, itemId) {
+	if (!value || typeof value !== "object") return false;
+	if (Array.isArray(value)) return value.some(it => hasItemReference(it, itemId));
+	for (const [key, child] of Object.entries(value)) {
+		if (["inventoryItemId", "weaponId", "itemId", "ammoId"].includes(key) && child === itemId) return true;
+		if (hasItemReference(child, itemId)) return true;
+	}
+	return false;
+}
+
+function getWholeItemTransferBlockers ({container, entry}) {
+	const itemId = entry.id;
+	const sourceFeatureId = `item:${itemId}`;
+	const blockers = [];
+	if (entry.equipped) blockers.push("equipped");
+	if (entry.attuned) blockers.push("attuned");
+	if (entry.item?.containedItems?.length) blockers.push("contains items");
+	if ((container.inventory || []).some(it => it.id !== itemId && it.item?.containedItems?.includes(itemId))) blockers.push("inside a container");
+	if (entry.item?.iounSet?.length) blockers.push("hosts Ioun items");
+	if ((container.inventory || []).some(it => it.id !== itemId && it.item?.iounSet?.includes(itemId))) blockers.push("seated in an Ioun host");
+	if (container.selectedAmmo?.[itemId] || Object.values(container.selectedAmmo || {}).includes(itemId)) blockers.push("selected ammunition");
+	if (Object.hasOwn(container.ammunitionConsumed || {}, itemId)) blockers.push("tracked ammunition");
+	if ((container.namedModifiers || []).some(it => it.sourceFeatureId === sourceFeatureId)) blockers.push("item effects");
+	if ((container.acFormulas || []).some(it => it.sourceFeatureId === sourceFeatureId)) blockers.push("AC effects");
+	if (Object.values(container.grantedDefensiveTraits || {}).some(byName =>
+		Object.values(byName || {}).some(sourceIds => Array.isArray(sourceIds) && sourceIds.includes(sourceFeatureId)),
+	)) blockers.push("defensive effects");
+	if (hasItemReference(container.activeStates, itemId)) blockers.push("active state");
+	return [...new Set(blockers)];
+}
+
+export function removeTransferPayload ({container, payload}) {
+	const out = structuredClone(container);
+	out.inventory = normalizeInventory(out.inventory);
+	out.currency = normalizeCurrency(out.currency);
+	const escrowItems = [];
+	for (const requested of payload.items || []) {
+		const entry = out.inventory.find(it => it.id === requested.entryId);
+		const quantity = getFiniteNumber(requested.quantity, {label: "Transfer quantity", minimum: Number.EPSILON});
+		if (!entry || quantity <= 0 || entry.quantity < quantity) {
+			throw new HubStoreError("TRANSFER_INSUFFICIENT", `Inventory entry is unavailable.`, {status: 409});
+		}
+		const isWholeItem = entry.quantity === quantity;
+		if (isWholeItem) {
+			const blockers = getWholeItemTransferBlockers({container: out, entry});
+			if (blockers.length) {
+				throw new HubStoreError(
+					"TRANSFER_ITEM_LINKED",
+					`Unequip, unattune, and detach this item before transferring it: ${blockers.join(", ")}.`,
+					{status: 409, details: {entryId: entry.id, blockers}},
+				);
+			}
+		}
+		escrowItems.push({...structuredClone(entry), quantity, _sourceIndex: out.inventory.indexOf(entry)});
+		entry.quantity -= quantity;
+		if (!entry.quantity) out.inventory.splice(out.inventory.indexOf(entry), 1);
+	}
+	const escrowCurrency = normalizeCurrency(payload.currency);
+	if (!escrowItems.length && !CURRENCY_TYPES.some(type => escrowCurrency[type] > 0)) {
+		throw new HubStoreError("TRANSFER_EMPTY", `Transfer must contain an item or positive currency amount.`);
+	}
+	for (const type of CURRENCY_TYPES) {
+		if (out.currency[type] < escrowCurrency[type]) throw new HubStoreError("TRANSFER_INSUFFICIENT", `Insufficient ${type}.`, {status: 409});
+		out.currency[type] -= escrowCurrency[type];
+	}
+	return {container: out, escrow: {items: escrowItems, currency: escrowCurrency}};
+}
+
+export function addTransferPayload ({container, escrow, isRestore = false}) {
+	const out = structuredClone(container);
+	out.inventory = normalizeInventory(out.inventory);
+	out.currency = normalizeCurrency(out.currency);
+	for (const incoming of escrow.items || []) {
+		const entry = isRestore ? structuredClone(incoming) : getDestinationInventoryEntry(incoming);
+		delete entry._sourceIndex;
+		const existing = isRestore
+			? out.inventory.find(it => it.id === entry.id)
+			: out.inventory.find(it => isDeepStrictEqual(getComparableInventoryEntry(it), getComparableInventoryEntry(entry)));
+		if (existing) existing.quantity = addFinite(existing.quantity, incoming.quantity, "Item quantity");
+		else if (isRestore) out.inventory.splice(Math.min(incoming._sourceIndex ?? out.inventory.length, out.inventory.length), 0, entry);
+		else out.inventory.push({...entry, id: crypto.randomUUID()});
+	}
+	const currency = normalizeCurrency(escrow.currency);
+	for (const type of CURRENCY_TYPES) out.currency[type] = addFinite(out.currency[type], currency[type], `${type} amount`);
+	return out;
+}

@@ -1,0 +1,119 @@
+import fs from "node:fs";
+import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
+
+const migrationUrl = new URL("../../../server/migrations/0001_hub_core.sql", import.meta.url);
+const sql = fs.readFileSync(migrationUrl, "utf8");
+const postgresStore = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");
+
+describe("campaign hub first migration contract", () => {
+	it.each([
+		"accounts",
+		"external_identities",
+		"sessions",
+		"campaigns",
+		"memberships",
+		"invites",
+		"characters",
+		"character_leases",
+		"dm_workspaces",
+		"dm_workspace_leases",
+		"brew_bundle_versions",
+		"rules_versions",
+		"party_inventories",
+		"inventory_entries",
+		"pending_actions",
+		"transfers",
+		"domain_events",
+		"audit_entries",
+		"command_receipts",
+		"outbox_entries",
+	])("creates the %s table", table => {
+		expect(sql).toMatch(new RegExp(`CREATE TABLE hub\\.${table}\\b`));
+	});
+
+	it("places tenant identifiers on campaign-owned data", () => {
+		for (const table of [
+			"memberships",
+			"invites",
+			"characters",
+			"dm_workspaces",
+			"brew_bundle_versions",
+			"rules_versions",
+			"party_inventories",
+			"inventory_entries",
+			"pending_actions",
+			"transfers",
+			"domain_events",
+		]) {
+			const tableSql = sql.match(new RegExp(`CREATE TABLE hub\\.${table} \\(([\\s\\S]*?)\\n\\);`))?.[1];
+			expect(tableSql).toContain("campaign_id uuid");
+		}
+	});
+
+	it("includes revision and fencing invariants before cloud writes ship", () => {
+		expect(sql).toMatch(/characters[\s\S]*revision bigint NOT NULL DEFAULT 1/);
+		expect(sql).toMatch(/characters[\s\S]*lease_epoch bigint NOT NULL DEFAULT 0/);
+		expect(sql).toMatch(/character_leases[\s\S]*epoch bigint NOT NULL/);
+		expect(sql).toMatch(/dm_workspaces[\s\S]*revision bigint NOT NULL DEFAULT 1/);
+		expect(sql).toMatch(/dm_workspace_leases[\s\S]*epoch bigint NOT NULL/);
+	});
+
+	it("makes event ordering, command idempotency, and outbox delivery durable", () => {
+		expect(sql).toContain("UNIQUE (campaign_id, sequence)");
+		expect(sql).toContain("PRIMARY KEY (actor_account_id, idempotency_key)");
+		expect(sql).toContain("command_receipts_expires_idx");
+		expect(sql).toContain("expires_at timestamptz NOT NULL DEFAULT (now() + interval '24 hours')");
+		expect(sql).toContain("FOREIGN KEY (campaign_id, event_id)");
+	});
+
+	it("requires exactly one inventory container", () => {
+		expect(sql).toContain("(character_id IS NOT NULL)::integer + (party_inventory_id IS NOT NULL)::integer = 1");
+	});
+
+	it("enforces character tenant consistency at child-row write time without blocking later moves", () => {
+		expect(sql).toContain("CREATE FUNCTION hub.enforce_character_campaign_match");
+		expect(sql).toContain("inventory_entries_character_campaign_check");
+		expect(sql).toContain("pending_actions_character_campaign_check");
+		expect(sql).toContain("transfers_character_campaign_check");
+	});
+
+	it.each([
+		["invite creator", "FOREIGN KEY (campaign_id, created_by_membership_id)"],
+		["active campaign brew", "FOREIGN KEY (id, active_brew_bundle_version_id)"],
+		["active campaign rules", "FOREIGN KEY (id, active_rules_version_id)"],
+		["DM workspace owner", "FOREIGN KEY (campaign_id, owner_membership_id)"],
+		["party inventory", "FOREIGN KEY (campaign_id, party_inventory_id)"],
+		["inventory brew reference", "FOREIGN KEY (campaign_id, bundle_version_id)"],
+		["transfer source party inventory", "FOREIGN KEY (campaign_id, source_party_inventory_id)"],
+		["transfer target party inventory", "FOREIGN KEY (campaign_id, target_party_inventory_id)"],
+		["outbox event", "FOREIGN KEY (campaign_id, event_id)"],
+	])("enforces tenant consistency for %s", (label, constraint) => {
+		expect(sql).toContain(constraint);
+	});
+
+	it("serializes first-time identity creation and idempotent commands", () => {
+		expect(postgresStore.match(/pg_advisory_xact_lock/g)?.length).toBeGreaterThanOrEqual(2);
+		expect(postgresStore).toContain("[provider, providerSubject]");
+		expect(postgresStore).toContain("[accountId, normalized.key]");
+	});
+
+	it("stores compact expiring receipts for character-returning commands", async () => {
+		const queries = [];
+		const store = new PostgresHubStore({
+			pool: {
+				query: async () => ({rows: [], rowCount: 0}),
+				connect: async () => null,
+				on: () => {},
+			},
+		});
+		await store._pSaveReceipt({
+			client: {query: async (...args) => { queries.push(args); }},
+			accountId: "account",
+			idempotencyKey: {key: "key", requestHash: "hash"},
+			commandType: "character.patch",
+			response: {character: {id: "character", revision: 2, data: {notes: "large"}}},
+		});
+		const stored = JSON.parse(queries[0][1][4]);
+		expect(stored.character).toEqual({__hubReceiptRef: "character", id: "character"});
+	});
+});
