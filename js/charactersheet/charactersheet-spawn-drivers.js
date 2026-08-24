@@ -303,7 +303,9 @@ class CharacterSheetSpawner {
 		const prompts = new CharacterSheetSpawnPrompts({page: this._page, picker, report, spec});
 		prompts.install();
 		try {
-			if (this._page._currentCharacterId) await this._page.saveCharacter();
+			if (this._page._currentCharacterId && await this._page.saveCharacter() === false) {
+				throw new Error(`Could not save the current character; spawn was cancelled.`);
+			}
 			this._page._createNewCharacter();
 			if (this._page._selCharacter) this._page._selCharacter.value = "";
 
@@ -464,7 +466,7 @@ class CharacterSheetSpawner {
 
 	async _persist () {
 		const page = this._page;
-		await page.saveCharacter();
+		if (await page.saveCharacter() === false) throw new Error(`Could not save the spawned character.`);
 		if (page._pLoadCharacters) await page._pLoadCharacters();
 		if (page._selCharacter) page._selCharacter.value = page._currentCharacterId;
 	}

@@ -249,6 +249,7 @@ class CharacterSheetExport {
 
 				try {
 					let data = JSON.parse(jsonStr);
+					const previousData = this._state.toJson();
 
 					// Accept the E2E test-export wrapper shape
 					// ({status, displayName, character: <state>, ...}) by
@@ -265,14 +266,18 @@ class CharacterSheetExport {
 
 					if (replaceExisting) {
 						this._state.fromJSON(data);
+						this._page.renderCharacter();
+						if (await this._page.saveCharacter() === false) {
+							this._state.fromJSON(previousData);
+							this._page.renderCharacter();
+							return;
+						}
 					} else {
 						const newState = new CharacterSheetState();
 						newState.fromJSON(data);
-						await this._page.addCharacter(newState);
+						if (await this._page.addCharacter(newState) === false) return;
+						this._page.renderCharacter();
 					}
-
-					this._page.renderCharacter();
-					await this._page.saveCharacter();
 
 					doClose(true);
 					JqueryUtil.doToast({type: "success", content: `Imported ${data.name || "character"} successfully!`});

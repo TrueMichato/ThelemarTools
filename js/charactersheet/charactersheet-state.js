@@ -4315,6 +4315,8 @@ class CharacterSheetState {
 
 	constructor () {
 		this._data = this._getDefaultState();
+		this._campaignSettingsOverlay = null;
+		this._campaignSettingsBase = null;
 		// Optional full spell database, injected by the controller after data
 		// load (`setSpellData`). Used to enrich subclass/feature-granted spells
 		// with their real level/school/metadata so they render and persist
@@ -5307,13 +5309,27 @@ class CharacterSheetState {
 
 	toJson () {
 		this._ensureBattleMasterSuperiorityDice();
-		return MiscUtil.copyFast(this._data);
+		const out = MiscUtil.copyFast(this._data);
+		if (this._campaignSettingsOverlay && this._campaignSettingsBase) {
+			out.settings ||= {};
+			for (const key of Object.keys(this._campaignSettingsOverlay)) {
+				const base = this._campaignSettingsBase[key];
+				if (base?.isPresent) out.settings[key] = MiscUtil.copyFast(base.value);
+				else delete out.settings[key];
+			}
+		}
+		return out;
 	}
 
 	// Alias for compatibility with export module
 	toJSON () { return this.toJson(); }
 
 	loadFromJson (json) {
+		const campaignSettingsOverlay = this._campaignSettingsOverlay
+			? MiscUtil.copyFast(this._campaignSettingsOverlay)
+			: null;
+		this._campaignSettingsOverlay = null;
+		this._campaignSettingsBase = null;
 		// Handle string input (parse if needed)
 		let data = json;
 		if (typeof json === "string") {
@@ -5335,6 +5351,7 @@ class CharacterSheetState {
 			...this._getDefaultState(),
 			...MiscUtil.copyFast(data),
 		};
+		if (campaignSettingsOverlay) this.setCampaignSettingsOverlay(campaignSettingsOverlay);
 		this._migrateInventoryItemMetadata();
 
 		this._data.xp = Math.max(0, Math.floor(Number(this._data.xp) || 0));
@@ -37479,11 +37496,39 @@ class CharacterSheetState {
 	// #endregion
 
 	// #region Settings
+	setCampaignSettingsOverlay (settings) {
+		this.clearCampaignSettingsOverlay();
+		if (!settings || typeof settings !== "object") return;
+		this._campaignSettingsOverlay = MiscUtil.copyFast(settings);
+		this._campaignSettingsBase = {};
+		this._data.settings ||= {};
+		for (const [key, value] of Object.entries(this._campaignSettingsOverlay)) {
+			this._campaignSettingsBase[key] = {
+				isPresent: Object.hasOwn(this._data.settings, key),
+				value: MiscUtil.copyFast(this._data.settings[key]),
+			};
+			this._data.settings[key] = MiscUtil.copyFast(value);
+		}
+	}
+
+	clearCampaignSettingsOverlay () {
+		if (!this._campaignSettingsOverlay || !this._campaignSettingsBase) return;
+		this._data.settings ||= {};
+		for (const key of Object.keys(this._campaignSettingsOverlay)) {
+			const base = this._campaignSettingsBase[key];
+			if (base?.isPresent) this._data.settings[key] = MiscUtil.copyFast(base.value);
+			else delete this._data.settings[key];
+		}
+		this._campaignSettingsOverlay = null;
+		this._campaignSettingsBase = null;
+	}
+
 	getSettings () {
 		return this._data.settings || {exhaustionRules: "2024", showAllOptFeatureVersions: false};
 	}
 
 	setSetting (key, value) {
+		if (this._campaignSettingsOverlay && Object.hasOwn(this._campaignSettingsOverlay, key)) return false;
 		if (!this._data.settings) {
 			this._data.settings = /** @type {*} */ ({
 				exhaustionRules: "2024",
@@ -37494,6 +37539,7 @@ class CharacterSheetState {
 			});
 		}
 		this._data.settings[key] = value;
+		return true;
 	}
 
 	/** Whether the optional top-level "Abilities" tab is shown (default false). */
@@ -37510,13 +37556,13 @@ class CharacterSheetState {
 	}
 
 	setExhaustionRules (rules) {
-		if (!this._data.settings) this._data.settings = /** @type {*} */ ({exhaustionRules: "2024", allowedSources: null, includeCoreSpellsForHomebrew: true, allowExoticLanguages: true});
-		this._data.settings.exhaustionRules = rules;
+		if (!this.setSetting("exhaustionRules", rules)) return false;
 		// Clamp current exhaustion to new max when switching rules
 		const max = this.getMaxExhaustion();
 		if (this._data.exhaustion > max) {
 			this._data.exhaustion = max;
 		}
+		return true;
 	}
 
 	/**

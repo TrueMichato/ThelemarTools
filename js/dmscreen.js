@@ -40,11 +40,15 @@ import {Panzoom} from "./utils-ui/utils-ui-panzoom.js";
 import {DmScreenJoystickMenu} from "./dmscreen/dmscreen-joystickmenu.js";
 import {DmScreenSideMenu} from "./dmscreen/sidemenu/dmscreen-sidemenu.js";
 import {DmScreenMigrator} from "./dmscreen/dmscreen-migrator.js";
+import {LocalDmWorkspaceRepository} from "./hub/hub-dm-workspace-repository.js";
+import {HubHttpDmWorkspaceRepository} from "./hub/hub-http-dm-workspace-repository.js";
+import {HubCampaignContext} from "./hub/hub-campaign-context.js";
+import {HubRealtimeClient} from "./hub/hub-realtime-client.js";
 
 const TITLE_LOADING = "Loading...";
 
 class Board {
-	constructor () {
+	constructor ({workspaceRepository = null} = {}) {
 		this.panels = {};
 		this.exiledPanels = [];
 		this.eleScreen = es(`.dm-screen`);
@@ -67,8 +71,44 @@ class Board {
 		this.availBooks = {};
 
 		this.cbConfirmTabClose = null;
+		this._hubCharacterProjections = [];
+		this._saveGeneration = 0;
+		this._savedGeneration = 0;
 
-		this._pDoSaveStateDebounced = MiscUtil.debounce(() => StorageUtil.pSet(VeCt.STORAGE_DMSCREEN, this.getSaveableState()), VeCt.DUR_DEBOUNCE_SAVE);
+		this._workspaceRepository = workspaceRepository || new LocalDmWorkspaceRepository({
+			storage: StorageUtil,
+			storageKey: VeCt.STORAGE_DMSCREEN,
+		});
+		this._pDoSaveStateDebounced = MiscUtil.debounce(async () => {
+			const saveGeneration = this._saveGeneration;
+			try {
+				await this._workspaceRepository.pSet(this.getSaveableState());
+				this._savedGeneration = Math.max(this._savedGeneration, saveGeneration);
+			} catch (error) {
+				if (error?.code === "WORKSPACE_CONFLICT" && this._workspaceRepository.pResolveConflict) {
+					const choice = await InputUiUtil.pGetUserBoolean({
+						title: "DM Workspace Changed on Another Device",
+						htmlDescription: "Your local workspace overlaps a newer server version. Use your local workspace, or load the server workspace?",
+						textYes: "Use Local",
+						textNo: "Use Server",
+					});
+					if (choice == null) {
+						DataUtil.userDownload("dm-workspace-conflict-local", error.recovery.local, {fileType: "dm-screen"});
+						return;
+					}
+					const resolved = await this._workspaceRepository.pResolveConflict({choice: choice ? "local" : "server"});
+					if (!choice && resolved) await this.pDoLoadStateFrom(resolved);
+					this._savedGeneration = Math.max(this._savedGeneration, saveGeneration);
+					return;
+				}
+				// eslint-disable-next-line no-console
+				console.error("Failed to save DM screen:", error);
+				JqueryUtil.doToast({
+					content: `Failed to save DM screen. ${VeCt.STR_SEE_CONSOLE}`,
+					type: "danger",
+				});
+			}
+		}, VeCt.DUR_DEBOUNCE_SAVE);
 	}
 
 	getInitialWidth () {
@@ -574,7 +614,7 @@ class Board {
 	}
 
 	async pHasSavedState () {
-		return !!await StorageUtil.pGet(VeCt.STORAGE_DMSCREEN);
+		return !!await this._workspaceRepository.pGet();
 	}
 
 	_getSaveSlotState () {
@@ -618,7 +658,12 @@ class Board {
 	}
 
 	doSaveStateDebounced () {
+		this._saveGeneration++;
 		this._pDoSaveStateDebounced();
+	}
+
+	hasPendingDebouncedSave () {
+		return this._savedGeneration < this._saveGeneration;
 	}
 
 	/* -------------------------------------------- */
@@ -774,13 +819,13 @@ class Board {
 	async pDoLoadState () {
 		let toLoad;
 		try {
-			toLoad = await StorageUtil.pGet(VeCt.STORAGE_DMSCREEN);
+			toLoad = await this._workspaceRepository.pGet();
 		} catch (e) {
 			JqueryUtil.doToast({
 				content: `Error when loading DM screen! Purged saved data. ${VeCt.STR_SEE_CONSOLE}`,
 				type: "danger",
 			});
-			await StorageUtil.pRemove(VeCt.STORAGE_DMSCREEN);
+			if (this._workspaceRepository.canRemove) await this._workspaceRepository.pRemove();
 			setTimeout(() => { throw e; });
 			return;
 		}
@@ -810,12 +855,19 @@ class Board {
 			.onn("click", () => handleClickDownload());
 
 		const handleClickPurge = async () => {
+			if (!this._workspaceRepository.canRemove) {
+				JqueryUtil.doToast({
+					content: `Cloud DM workspaces cannot be purged from this recovery dialog.`,
+					type: "warning",
+				});
+				return;
+			}
 			if (!await InputUiUtil.pGetUserBoolean({title: "Purge", htmlDescription: "Are you sure?", textYes: "Yes", textNo: "Cancel"})) return;
-			await StorageUtil.pRemove(VeCt.STORAGE_DMSCREEN);
+			await this._workspaceRepository.pRemove();
 			doClose(true);
 		};
 
-		const btnPurge = ee`<button class="ve-btn ve-btn-sm ve-btn-danger">Purge and Continue</button>`
+		const btnPurge = ee`<button class="ve-btn ve-btn-sm ve-btn-danger" ${this._workspaceRepository.canRemove ? "" : "disabled"}>Purge and Continue</button>`
 			.onn("click", () => handleClickPurge());
 
 		const txtDownload = ee`<b class="ve-clickable">download a backup of your save</b>`
@@ -1005,6 +1057,9 @@ class Board {
 		const {type} = opts;
 
 		if (!type) throw new Error(`Event type must be specified!`);
+		if (type === "hubCharacterProjections") {
+			this._hubCharacterProjections = MiscUtil.copyFast(opts.payload?.characters || []);
+		}
 
 		Object.values(this.panels)
 			.forEach(panel => this._fireBoardEvent_panel({panel, ...opts}));
@@ -3650,13 +3705,57 @@ class AdventureOrBookView {
 }
 
 window.addEventListener("load", () => {
-	// expose it for dbg purposes
-	window.DM_SCREEN = new Board();
-	Renderer.hover.bindDmScreen(window.DM_SCREEN);
-	window.DM_SCREEN.pInitialise()
+	(async () => {
+		const campaignId = new URLSearchParams(window.location.search).get("hubCampaign");
+		const workspaceRepository = campaignId
+			? new HubHttpDmWorkspaceRepository({campaignId})
+			: null;
+		if (campaignId) await new HubCampaignContext({campaignId}).pActivate();
+		// expose it for dbg purposes
+		window.DM_SCREEN = new Board({workspaceRepository});
+		Renderer.hover.bindDmScreen(window.DM_SCREEN);
+		await window.DM_SCREEN.pInitialise();
+		if (workspaceRepository?.hasPendingWrites) {
+			window.addEventListener("beforeunload", event => {
+				if (!workspaceRepository.hasPendingWrites() && !window.DM_SCREEN?.hasPendingDebouncedSave()) return;
+				event.preventDefault();
+				event.returnValue = "";
+			});
+		}
+		if (campaignId) {
+			const realtime = new HubRealtimeClient({campaignId});
+			realtime.on("snapshot", snapshot => window.DM_SCREEN.fireBoardEvent({
+				type: "hubCharacterProjections",
+				payload: {characters: snapshot.characters},
+			}));
+			realtime.on("event", event => {
+				if (![
+					"character.created",
+					"character.cloned",
+					"character.archived",
+					"character.moved",
+					"character.moved_out",
+					"character.reactivated",
+					"character.projection.updated",
+					"xp.granted",
+					"item.granted",
+					"action.applied",
+					"transfer.committed",
+					"transfer.rejected",
+					"campaign.archived",
+				].includes(event.type)) return;
+				realtime.requestResync();
+			});
+			await realtime.pConnect();
+			realtime.setPresence({activity: "viewing_dm_screen"});
+			window.DM_SCREEN_HUB_REALTIME = realtime;
+		}
+	})()
 		.catch(err => {
 			JqueryUtil.doToast({content: `Failed to load with error "${err.message}". ${VeCt.STR_SEE_CONSOLE}`, type: "danger"});
 			es(`.dm-screen-loading .initial-message`)?.txt("Failed!");
 			setTimeout(() => { throw err; });
 		});
 });
+
+export {Board};

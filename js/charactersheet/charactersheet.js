@@ -38,6 +38,11 @@ import {CharacterSheetDruidResources} from "./charactersheet-druid-resources.js"
 import {CharacterSheetIoun} from "./charactersheet-ioun.js";
 import {CharacterSheetSpawnSpec, CharacterSheetSpawnRng} from "./charactersheet-spawn.js";
 import {CharacterSheetSpawner} from "./charactersheet-spawn-drivers.js";
+import {LocalCharacterRepository} from "../hub/hub-character-repository.js";
+import {HubHttpCharacterRepository} from "../hub/hub-http-character-repository.js";
+import {HubCampaignContext} from "../hub/hub-campaign-context.js";
+import {HubRollLogAdapter} from "../hub/hub-roll-log-adapter.js";
+import {diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
 
 const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, StorageUtil, DataUtil, BrewUtil2, PrereleaseUtil} = /** @type {*} */ (globalThis);
 
@@ -60,8 +65,19 @@ class CharacterSheetPage {
 		"Tip: hover over almost anything on your sheet—spells, items, conditions—to see its full rules text without leaving the page.",
 	];
 
-	constructor () {
+	constructor ({characterRepository = null} = {}) {
 		this._state = new CharacterSheetState();
+		const hubCampaignId = typeof window === "undefined"
+			? null
+			: new URLSearchParams(window.location.search).get("hubCampaign");
+		this._characterRepository = characterRepository
+			|| (hubCampaignId
+				? new HubHttpCharacterRepository({campaignId: hubCampaignId})
+				: new LocalCharacterRepository({storage: StorageUtil}));
+		this._hubCampaignId = hubCampaignId;
+		this._hubCampaignContext = null;
+		this._hubContext = null;
+		this._hubRollLogAdapter = null;
 		this._builder = null;
 		this._combat = null;
 		this._spells = null;
@@ -91,6 +107,7 @@ class CharacterSheetPage {
 
 		this._selCharacter = /** @type {*} */ (null);
 		this._currentCharacterId = null;
+		this._lastSavedAt = 0;
 		this._isLevelUpBannerDismissed = false;
 		/** @type {?*} Lazily created on first spawn — see `get spawner`. */
 		this._spawner = null;
@@ -145,6 +162,15 @@ class CharacterSheetPage {
 	async pInit () {
 		// eslint-disable-next-line no-console
 		this._pInitLoadingTip().catch(err => console.warn("Failed to init loading tip:", err));
+		if (this._hubCampaignId) {
+			this._hubCampaignContext = new HubCampaignContext({campaignId: this._hubCampaignId});
+			this._hubContext = await this._hubCampaignContext.pActivate();
+			this._hubRollLogAdapter = new HubRollLogAdapter({
+				api: this._hubCampaignContext.api,
+				campaignId: this._hubCampaignId,
+				getCharacterId: () => this._currentCharacterId,
+			});
+		}
 		await this._pLoadData();
 		this._installHoverNormalizationHook();
 		this._initUi();
@@ -283,20 +309,25 @@ class CharacterSheetPage {
 		// localStorage. The loader (`_pLoadCharacter`) reconciles this mirror against the canonical
 		// copy by `_savedAt`, so an in-flight async write that never settled is recovered here.
 		window.addEventListener("beforeunload", () => {
-			if (!this._currentCharacterId) return;
+			if (!this._currentCharacterId || !this._characterRepository.isRescueMirrorEnabled) return;
 			const charData = this._state.toJson();
 			charData.id = this._currentCharacterId;
-			charData._savedAt = Date.now();
+			charData._savedAt = this._getNextSavedAt(charData);
 			this._writeActiveCharacterMirror(charData);
 		});
 
 		// Also add pagehide as fallback (more reliable on mobile)
 		window.addEventListener("pagehide", () => {
-			if (!this._currentCharacterId) return;
+			if (!this._currentCharacterId || !this._characterRepository.isRescueMirrorEnabled) return;
 			const charData = this._state.toJson();
 			charData.id = this._currentCharacterId;
-			charData._savedAt = Date.now();
+			charData._savedAt = this._getNextSavedAt(charData);
 			this._writeActiveCharacterMirror(charData);
+		});
+		window.addEventListener("beforeunload", event => {
+			if (!this._characterRepository.hasPendingWrites?.()) return;
+			event.preventDefault();
+			event.returnValue = "";
 		});
 	}
 
@@ -1642,7 +1673,7 @@ class CharacterSheetPage {
 
 	// #region Character Management
 	async _pLoadCharacters () {
-		const characters = await StorageUtil.pGet("charsheet-characters") || [];
+		const characters = await this._characterRepository.pList();
 		this._updateCharacterDropdown(characters);
 	}
 
@@ -1655,7 +1686,10 @@ class CharacterSheetPage {
 		this._selCharacter.insertAdjacentHTML("beforeend", `<option value="">➕ Create New Character</option>`);
 
 		if (characters.length) {
-			this._selCharacter.insertAdjacentHTML("beforeend", `<option disabled>────── Saved Characters ──────</option>`);
+			const divider = document.createElement("option");
+			divider.disabled = true;
+			divider.textContent = "────── Saved Characters ──────";
+			this._selCharacter.append(divider);
 		}
 
 		characters.forEach(char => {
@@ -1665,7 +1699,10 @@ class CharacterSheetPage {
 			const classNames = char.classes?.map(c => c.name).join("/") || "";
 			const classInfo = classNames ? `${classNames} ${totalLevel}` : "";
 			const label = classInfo ? `${name} — ${classInfo}` : name;
-			this._selCharacter.insertAdjacentHTML("beforeend", `<option value="${char.id}">${label}</option>`);
+			const option = document.createElement("option");
+			option.value = char.id;
+			option.textContent = label;
+			this._selCharacter.append(option);
 		});
 
 		if (this._currentCharacterId) {
@@ -1678,7 +1715,11 @@ class CharacterSheetPage {
 
 		// Save current character before switching to prevent data loss
 		if (this._currentCharacterId) {
-			await this._saveCurrentCharacter();
+			const isSaved = await this._saveCurrentCharacter();
+			if (!isSaved) {
+				this._selCharacter.value = this._currentCharacterId;
+				return;
+			}
 		}
 		this._clearLastHpChange();
 
@@ -1690,19 +1731,22 @@ class CharacterSheetPage {
 	}
 
 	async _pLoadCharacter (charId) {
-		const characters = await StorageUtil.pGet("charsheet-characters") || [];
-		const canonical = characters.find(c => c.id === charId) || null;
+		const canonical = await this._characterRepository.pGet({characterId: charId});
 
 		// Reconcile against the synchronous rescue mirror: if a mutation was mirrored but its
 		// async IndexedDB write never settled (fast refresh / character-switch race), the mirror
 		// carries the newer `_savedAt` and is preferred here.
-		const mirror = this._readActiveCharacterMirror(charId);
+		const mirror = this._characterRepository.isRescueMirrorEnabled
+			? this._readActiveCharacterMirror(charId)
+			: null;
 		const {chosen: character, mirrorWon} = this._reconcilePersistedCharacter(canonical, mirror);
 
 		if (character) {
 			this._currentCharacterId = charId;
 			this._isLevelUpBannerDismissed = false;
+			this._state.clearCampaignSettingsOverlay();
 			this._state.loadFromJson(character);
+			this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
 
 			// Backfill any class features missing from `_data.features` (e.g. on
 			// saves migrated from older formats). Idempotent. The result tells us whether
@@ -1725,7 +1769,7 @@ class CharacterSheetPage {
 				|| (reconcileResult && (reconcileResult.added > 0 || reconcileResult.backfilled > 0));
 			if (needsSave && this._currentCharacterId === charId) {
 				await this._saveCurrentCharacter();
-			} else if (this._currentCharacterId === charId) {
+			} else if (this._characterRepository.isRescueMirrorEnabled && this._currentCharacterId === charId) {
 				// Nothing to persist, but the mirror (if any) now agrees with canonical — clear it.
 				this._clearActiveCharacterMirror(charId);
 			}
@@ -1758,7 +1802,9 @@ class CharacterSheetPage {
 		this._clearLastHpChange();
 		this._currentCharacterId = CryptUtil.uid();
 		this._isLevelUpBannerDismissed = false;
+		this._state.clearCampaignSettingsOverlay();
 		this._state.reset();
+		this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
 		this._state.setClassFeatureCatalog(this._classFeatures || [], this._subclassFeatures || [], this._optionalFeaturesData || []);
 		this._state.setId(this._currentCharacterId);
 		this._renderCharacter();
@@ -1853,7 +1899,7 @@ class CharacterSheetPage {
 	async _onNewCharacter () {
 		// Save current character before creating new to prevent data loss
 		if (this._currentCharacterId) {
-			await this._saveCurrentCharacter();
+			if (!await this._saveCurrentCharacter()) return;
 		}
 
 		this._createNewCharacter();
@@ -2026,9 +2072,11 @@ class CharacterSheetPage {
 		if (!this._currentCharacterId) return;
 
 		// Save current character first to preserve any unsaved changes
-		await this._saveCurrentCharacter();
+		if (!await this._saveCurrentCharacter()) return;
 
 		const newId = CryptUtil.uid();
+		const sourceId = this._currentCharacterId;
+		const sourceData = this._state.toJson();
 		const charData = this._state.toJson();
 		charData.id = newId;
 		charData.name = `${charData.name || "Character"} (Copy)`;
@@ -2038,7 +2086,14 @@ class CharacterSheetPage {
 		this._isLevelUpBannerDismissed = false;
 		this._state.loadFromJson(charData);
 		this._reconcileClassFeatures();
-		await this._saveCurrentCharacter();
+		if (!await this._saveCurrentCharacter()) {
+			this._currentCharacterId = sourceId;
+			this._state.loadFromJson(sourceData);
+			this._reconcileClassFeatures();
+			this._renderCharacter();
+			this._selCharacter.value = sourceId;
+			return;
+		}
 		await this._pLoadCharacters();
 		this._selCharacter.value = newId;
 	}
@@ -2048,22 +2103,25 @@ class CharacterSheetPage {
 	 * @param {CharacterSheetState} state - The state object to add as a new character
 	 */
 	async addCharacter (state) {
+		if (this._currentCharacterId && !await this._saveCurrentCharacter()) {
+			JqueryUtil.doToast({type: "danger", content: "Could not save the current character; import was cancelled."});
+			return false;
+		}
 		const newId = CryptUtil.uid();
 		const charData = state.toJson();
 		charData.id = newId;
 
-		let characters = await StorageUtil.pGet("charsheet-characters") || [];
-		characters.push(charData);
-		await StorageUtil.pSet("charsheet-characters", characters);
+		const persisted = await this._characterRepository.pUpsert({character: charData});
 
 		// Load the new character
 		this._clearLastHpChange();
-		this._currentCharacterId = newId;
+		this._currentCharacterId = persisted?.id || newId;
 		this._isLevelUpBannerDismissed = false;
-		this._state.loadFromJson(charData);
+		this._state.loadFromJson(persisted || charData);
 		this._reconcileClassFeatures();
 		await this._pLoadCharacters();
-		this._selCharacter.value = newId;
+		this._selCharacter.value = this._currentCharacterId;
+		return true;
 	}
 
 	_onXpAdd () {
@@ -2115,9 +2173,7 @@ class CharacterSheetPage {
 
 		if (!confirm) return;
 
-		let characters = await StorageUtil.pGet("charsheet-characters") || [];
-		characters = characters.filter(c => c.id !== this._currentCharacterId);
-		await StorageUtil.pSet("charsheet-characters", characters);
+		await this._characterRepository.pDelete({characterId: this._currentCharacterId});
 
 		this._createNewCharacter();
 		await this._pLoadCharacters();
@@ -2125,7 +2181,7 @@ class CharacterSheetPage {
 	}
 
 	async _onManageCharacters () {
-		const characters = await StorageUtil.pGet("charsheet-characters") || [];
+		const characters = await this._characterRepository.pList();
 
 		if (characters.length === 0) {
 			JqueryUtil.doToast({type: "warning", content: "No saved characters to manage."});
@@ -2190,8 +2246,7 @@ class CharacterSheetPage {
 
 		// Execute deletion
 		const selectedIds = new Set(selected.map(c => c.id));
-		const remaining = characters.filter(c => !selectedIds.has(c.id));
-		await StorageUtil.pSet("charsheet-characters", remaining);
+		await this._characterRepository.pDeleteMany({characterIds: [...selectedIds]});
 
 		// If the currently loaded character was deleted, switch to a new blank character
 		if (this._currentCharacterId && selectedIds.has(this._currentCharacterId)) {
@@ -3542,6 +3597,16 @@ class CharacterSheetPage {
 		return {chosen: mirrorWon ? mirror : canonical, mirrorWon};
 	}
 
+	_getNextSavedAt (charData) {
+		const nxt = Math.max(
+			Date.now(),
+			(Number(charData?._savedAt) || 0) + 1,
+			(Number(this._lastSavedAt) || 0) + 1,
+		);
+		this._lastSavedAt = nxt;
+		return nxt;
+	}
+
 	async _saveCurrentCharacter () {
 		if (!this._currentCharacterId) return;
 
@@ -3550,36 +3615,106 @@ class CharacterSheetPage {
 
 		const charData = this._state.toJson();
 		charData.id = this._currentCharacterId;
-		charData._savedAt = Date.now();
+		charData._savedAt = this._getNextSavedAt(charData);
 
 		// SYNCHRONOUS rescue mirror FIRST — before any await — so an un-awaited saveCharacter()
 		// call followed by a refresh/switch still leaves the newest state recoverable by the
 		// loader even if the async IndexedDB write below never settles.
-		this._writeActiveCharacterMirror(charData);
+		if (this._characterRepository.isRescueMirrorEnabled) this._writeActiveCharacterMirror(charData);
 
 		try {
-			let characters = await StorageUtil.pGet("charsheet-characters") || [];
-
-			const existingIndex = characters.findIndex(c => c.id === this._currentCharacterId);
-			if (existingIndex >= 0) {
-				characters[existingIndex] = charData;
-			} else {
-				characters.push(charData);
+			const persisted = await this._characterRepository.pUpsert({character: charData});
+			if (persisted?.id && persisted.id !== charData.id && this._currentCharacterId === charData.id) {
+				this._currentCharacterId = persisted.id;
+				this._state.setId?.(persisted.id);
+				const url = new URL(window.location.href);
+				url.searchParams.set("id", persisted.id);
+				window.history?.replaceState?.({}, "", url);
+				await this._pLoadCharacters?.();
+				if (this._selCharacter) this._selCharacter.value = persisted.id;
 			}
-
-			await StorageUtil.pSet("charsheet-characters", characters);
+			if (persisted) {
+				const getClean = data => {
+					const out = MiscUtil.copyFast(data);
+					delete out.id;
+					delete out._savedAt;
+					return out;
+				};
+				const submitted = getClean(charData);
+				const canonical = getClean(persisted);
+				if (diffJson(submitted, canonical).length) {
+					const live = getClean(this._state.toJson());
+					const rebased = rebaseJsonChanges({base: submitted, local: live, remote: canonical});
+					if (rebased.isConflict) {
+						const conflict = new Error(`Live character edits overlap server changes.`);
+						conflict.code = "CHARACTER_LIVE_CONFLICT";
+						conflict.recovery = {local: live, server: canonical, conflicts: rebased.conflicts};
+						throw conflict;
+					}
+					this._state.loadFromJson({...rebased.document, id: persisted.id});
+					this._reconcileClassFeatures();
+					this._renderCharacter();
+				}
+			}
 
 			// Canonical store now agrees with (or supersedes) the mirror — drop the mirror so a
 			// stale copy can never later win reconciliation. Guarded against a concurrent switch.
-			if (this._currentCharacterId === charData.id) this._clearActiveCharacterMirror(charData.id);
+			if (this._characterRepository.isRescueMirrorEnabled && this._currentCharacterId === charData.id) {
+				const mirror = this._readActiveCharacterMirror(charData.id);
+				if (!mirror || (Number(mirror._savedAt) || 0) <= charData._savedAt) {
+					this._clearActiveCharacterMirror(charData.id);
+				}
+			}
 
 			// Show saved indicator
 			this._updateSaveIndicator("saved");
+			return true;
 		} catch (err) {
 			// eslint-disable-next-line no-console
 			console.error("Save error:", err);
 			// Leave the sync mirror in place: it is the only surviving copy of this write.
 			this._updateSaveIndicator("error");
+			if (err?.code === "CHARACTER_LIVE_CONFLICT") {
+				const choice = await InputUiUtil.pGetUserBoolean({
+					title: "Character Changed While Saving",
+					htmlDescription: "New local edits overlap a server update. Keep your local version, or load the server version?",
+					textYes: "Keep Local",
+					textNo: "Use Server",
+				});
+				if (choice == null) {
+					DataUtil.userDownload("character-live-conflict-recovery", err.recovery, {fileType: "character-conflict"});
+					return false;
+				}
+				if (choice) return this._saveCurrentCharacter();
+				this._state.loadFromJson(err.recovery.server);
+				this._reconcileClassFeatures();
+				this._renderCharacter();
+				this._updateSaveIndicator("saved");
+				return true;
+			}
+			if (err?.code === "CHARACTER_CONFLICT" && this._characterRepository.pResolveConflict) {
+				const choice = await InputUiUtil.pGetUserBoolean({
+					title: "Character Changed on Another Device",
+					htmlDescription: "Your local edits overlap newer server changes. Use your local version, or load the server version?",
+					textYes: "Use Local",
+					textNo: "Use Server",
+				});
+				if (choice == null) {
+					DataUtil.userDownload("character-conflict-recovery", err.recovery, {fileType: "character-conflict"});
+					return false;
+				}
+				const resolved = await this._characterRepository.pResolveConflict({
+					characterId: this._currentCharacterId,
+					choice: choice ? "local" : "server",
+				});
+				if (resolved) {
+					this._state.loadFromJson(resolved);
+					this._renderCharacter();
+					this._updateSaveIndicator("saved");
+					return true;
+				}
+			}
+			return false;
 		}
 	}
 
@@ -3628,13 +3763,26 @@ class CharacterSheetPage {
 			return;
 		}
 
+		if (this._currentCharacterId && !await this._saveCurrentCharacter()) return;
+		const sourceId = this._currentCharacterId;
+		const sourceData = sourceId ? this._state.toJson() : null;
+
 		// Assign new ID
 		json.id = CryptUtil.uid();
 		this._clearLastHpChange();
 		this._currentCharacterId = json.id;
 		this._state.loadFromJson(json);
 		this._reconcileClassFeatures();
-		await this._saveCurrentCharacter();
+		if (!await this._saveCurrentCharacter()) {
+			this._currentCharacterId = sourceId;
+			if (sourceData) {
+				this._state.loadFromJson(sourceData);
+				this._reconcileClassFeatures();
+				this._renderCharacter();
+			}
+			this._selCharacter.value = sourceId || "";
+			return;
+		}
 		await this._pLoadCharacters();
 		this._selCharacter.value = json.id;
 		this._renderCharacter();
@@ -20607,7 +20755,7 @@ class CharacterSheetPage {
 	}
 
 	async saveCharacter () {
-		await this._saveCurrentCharacter();
+		return this._saveCurrentCharacter();
 	}
 
 	/**

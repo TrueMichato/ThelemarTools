@@ -73,6 +73,17 @@ export class CharacterSheetRollHistory {
 		if (this._isOpen) {
 			this._renderList();
 		}
+		if (this._page?._hubRollLogAdapter) {
+			this._page._hubRollLogAdapter.pLog({
+				formula: breakdown || title,
+				total: Number(total) || 0,
+				context: rollType.toLowerCase(),
+				detail: {title, breakdown, resultClass, resultNote},
+			}).catch(error => {
+				// eslint-disable-next-line no-console
+				console.error("Failed to persist campaign roll:", error);
+			});
+		}
 	}
 
 	/**

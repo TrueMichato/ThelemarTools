@@ -11,6 +11,7 @@
 // controllable dual-backend fake StorageUtil, plus a state-layer roundtrip guard.
 
 import "./setup.js";
+import {LocalCharacterRepository} from "../../../js/hub/hub-character-repository.js";
 
 const REPO_ROOT = new URL("../../../", import.meta.url).pathname;
 
@@ -72,8 +73,12 @@ function makeHost ({state} = {}) {
 		_readActiveCharacterMirror: proto._readActiveCharacterMirror,
 		_clearActiveCharacterMirror: proto._clearActiveCharacterMirror,
 		_reconcilePersistedCharacter: proto._reconcilePersistedCharacter,
+		_getNextSavedAt: proto._getNextSavedAt,
 		_saveCurrentCharacter: proto._saveCurrentCharacter,
+		_characterRepository: null,
+		_lastSavedAt: 0,
 	};
+	host._characterRepository = new LocalCharacterRepository({storage: globalThis.StorageUtil});
 	return host;
 }
 
@@ -177,7 +182,7 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 		host._currentCharacterId = "quota-id";
 
 		// Must not throw despite the mirror failing.
-		await expect(host._saveCurrentCharacter()).resolves.toBeUndefined();
+		await expect(host._saveCurrentCharacter()).resolves.toBe(true);
 
 		// Canonical store is written and unaffected by the mirror failure.
 		const canonical = await backend.pGet("charsheet-characters");

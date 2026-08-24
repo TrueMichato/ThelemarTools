@@ -1015,3 +1015,12 @@
 		}
 	}
 }
+.dm-party__char--linked-readonly {
+	opacity: 0.92;
+
+	input:disabled,
+	select:disabled,
+	textarea:disabled {
+		cursor: not-allowed;
+	}
+}

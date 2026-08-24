@@ -15,6 +15,9 @@ export class PartyTracker extends DmScreenPanelAppBase {
 		this._comp = new PartyTrackerRoot(board, wrpPanel);
 		this._comp.setStateFrom(state || {});
 		this._comp.render(wrpPanel);
+		if (board._hubCharacterProjections?.length) {
+			this._comp.setHubCharacterProjections(board._hubCharacterProjections);
+		}
 		return wrpPanel;
 	}
 
@@ -28,6 +31,11 @@ export class PartyTracker extends DmScreenPanelAppBase {
 
 	getSettings () {
 		return this._comp?.getSettings() || {};
+	}
+
+	onBoardEvent ({type, payload}) {
+		if (type !== "hubCharacterProjections") return;
+		this._comp?.setHubCharacterProjections(payload?.characters || []);
 	}
 }
 
@@ -44,6 +52,7 @@ class PartyTrackerRoot {
 		this._wrpChars = null;
 		this._wrpDcCalc = null;
 		this._showDcCalc = false;
+		this._hubCharacterIds = new Set();
 	}
 
 	render (eleParent) {
@@ -116,9 +125,11 @@ class PartyTrackerRoot {
 	}
 
 	_renderCharacter (charComp, container) {
+		const isReadOnly = this._hubCharacterIds.has(charComp.data?.id);
 		charComp.settings = this._settings;
 		charComp.render(container, {
 			onUpdate: () => {
+				if (isReadOnly) return;
 				this._doSave();
 				this._updateSummary();
 				this._dcCalc?.refresh();
@@ -126,7 +137,12 @@ class PartyTrackerRoot {
 			},
 			onRemove: null,
 			enableTgtt: () => this._settings.enableTgtt,
+			isReadOnly,
 		});
+		if (isReadOnly) {
+			charComp.onRemove = null;
+			return;
+		}
 		charComp.onRemove = () => {
 			const ix = this._characters.indexOf(charComp);
 			if (~ix) {
@@ -158,6 +174,23 @@ class PartyTrackerRoot {
 	/* -------------------------------------------- */
 	//  Character Sheet Import
 	/* -------------------------------------------- */
+
+	setHubCharacterProjections (characters) {
+		this._characters = this._characters.filter(character => !this._hubCharacterIds.has(character.data?.id));
+		this._hubCharacterIds.clear();
+		for (const character of characters) {
+			const raw = character.data || character;
+			const validation = PartyTrackerImporter.validate(raw);
+			if (!validation.valid) continue;
+			const mapped = PartyTrackerImporter.mapCharacterSheetData(raw);
+			mapped.id = character.id || raw.id;
+			this._hubCharacterIds.add(mapped.id);
+			this._characters.push(new PartyTrackerCharacter(mapped, this._settings));
+		}
+		if (this._wrpPanel) this.render(this._wrpPanel);
+		this._dcCalc?.refresh();
+		this._board.fireBoardEvent({type: "partyTrackerUpdate"});
+	}
 
 	_handleImportJson (jsonStr) {
 		let parsed;
@@ -246,6 +279,7 @@ class PartyTrackerRoot {
 				anyHpSet = true;
 			}
 		}
+
 		const avgLevel = Math.round((totalLevel / n) * 10) / 10;
 		const carryPct = totalCapacity > 0 ? Math.round((totalWeight / totalCapacity) * 100) : 0;
 
@@ -374,7 +408,9 @@ class PartyTrackerRoot {
 	getSaveableState () {
 		return {
 			settings: PartyTrackerCharacterSerializer.serializeSettings(this._settings),
-			characters: this._characters.map(c => PartyTrackerCharacterSerializer.serialize(c.getSaveableData())),
+			characters: this._characters
+				.filter(c => !this._hubCharacterIds.has(c.data?.id))
+				.map(c => PartyTrackerCharacterSerializer.serialize(c.getSaveableData())),
 		};
 	}
 
@@ -386,3 +422,5 @@ class PartyTrackerRoot {
 		return {...this._settings};
 	}
 }
+
+export {PartyTrackerRoot};

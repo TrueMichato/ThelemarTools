@@ -1,4 +1,5 @@
 import "./setup.js";
+import {jest} from "@jest/globals";
 
 let CharacterSheetRollHistory;
 
@@ -45,6 +46,18 @@ describe("CharacterSheetRollHistory", () => {
 			expect(roll.breakdown).toBe("");
 			expect(roll.resultClass).toBe("");
 			expect(roll.resultNote).toBe("");
+		});
+
+		test("persists campaign rolls through the optional hub adapter", async () => {
+			const pLog = jest.fn(async () => ({}));
+			history = new CharacterSheetRollHistory({_hubRollLogAdapter: {pLog}});
+			history.addRoll({title: "Saving Throw: Dexterity", total: 17, breakdown: "1d20 (14) + 3"});
+			await Promise.resolve();
+			expect(pLog).toHaveBeenCalledWith(expect.objectContaining({
+				formula: "1d20 (14) + 3",
+				total: 17,
+				context: "save",
+			}));
 		});
 	});
 

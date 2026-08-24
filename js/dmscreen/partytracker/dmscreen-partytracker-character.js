@@ -153,10 +153,11 @@ export class PartyTrackerCharacter {
 	//  UI Rendering
 	/* -------------------------------------------- */
 
-	render (eleParent, {onUpdate, onRemove, onSwap, getElesChildren, enableTgtt}) {
+	render (eleParent, {onUpdate, onRemove, onSwap, getElesChildren, enableTgtt, isReadOnly = false}) {
 		this._onUpdate = onUpdate;
 		this._isExpanded = false;
 		this._enableTgtt = enableTgtt;
+		this._isReadOnly = isReadOnly;
 
 		// Kick off async data load (non-blocking)
 		PartyTrackerCharacter.pLoadConditionDiseaseData().catch(() => {});
@@ -175,7 +176,11 @@ export class PartyTrackerCharacter {
 		const totalLevel = this.getTotalLevel();
 		const classStr = this._data.classes.map(c => `${c.name || "?"}${c.level ? ` ${c.level}` : ""}`).join("/");
 
-		const btnExpand = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" title="${this._isExpanded ? "Collapse" : "Expand"} character details" aria-label="${this._isExpanded ? "Collapse" : "Expand"} ${this._data.name || "character"}" aria-expanded="${this._isExpanded}"><span class="glyphicon glyphicon-${this._isExpanded ? "minus" : "plus"}" aria-hidden="true"></span></button>`
+		const expandIcon = ee`<span aria-hidden="true"></span>`.addClass(`glyphicon glyphicon-${this._isExpanded ? "minus" : "plus"}`);
+		const btnExpand = ee`<button class="ve-btn ve-btn-default ve-btn-xxs">${expandIcon}</button>`
+			.attr("title", `${this._isExpanded ? "Collapse" : "Expand"} character details`)
+			.attr("aria-label", `${this._isExpanded ? "Collapse" : "Expand"} ${this._data.name || "character"}`)
+			.attr("aria-expanded", this._isExpanded)
 			.onn("click", async () => {
 				this._isExpanded = !this._isExpanded;
 				if (this._isExpanded) {
@@ -186,7 +191,9 @@ export class PartyTrackerCharacter {
 				}
 			});
 
-		const btnRemove = ee`<button class="ve-btn ve-btn-danger ve-btn-xxs" title="Remove ${this._data.name || "character"}" aria-label="Remove ${this._data.name || "character"}"><span class="glyphicon glyphicon-trash" aria-hidden="true"></span></button>`
+		const btnRemove = ee`<button class="ve-btn ve-btn-danger ve-btn-xxs"><span class="glyphicon glyphicon-trash" aria-hidden="true"></span></button>`
+			.attr("title", `Remove ${this._data.name || "character"}`)
+			.attr("aria-label", `Remove ${this._data.name || "character"}`)
 			.onn("click", () => this._onRemove?.());
 
 		const tgttInfo = this._enableTgtt?.()
@@ -227,22 +234,26 @@ export class PartyTrackerCharacter {
 		const wrpCondPills = ee`<span class="dm-party__conditions-summary"></span>`;
 		for (const cond of (this._data.conditions || [])) {
 			const color = Parser?.CONDITION_TO_COLOR?.[cond.name];
-			const pill = ee`<span class="dm-party__condition-pill" style="${color ? `background: ${color}; color: #fff;` : ""}" title="${cond.name}">${cond.name}</span>`;
+			const pill = ee`<span class="dm-party__condition-pill"></span>`.txt(cond.name).attr("title", cond.name);
+			if (color) pill.css({background: color, color: "#fff"});
 			if (cond.source || color) this._bindConditionDiseaseHover(pill, cond.name, cond.source);
 			pill.appendTo(wrpCondPills);
 		}
 		for (const disease of (this._data.diseases || [])) {
-			const pill = ee`<span class="dm-party__condition-pill dm-party__condition-pill--disease" title="${disease.name}">${disease.name}</span>`;
+			const pill = ee`<span class="dm-party__condition-pill dm-party__condition-pill--disease"></span>`.txt(disease.name).attr("title", disease.name);
 			if (disease.source) this._bindConditionDiseaseHover(pill, disease.name, disease.source);
 			pill.appendTo(wrpCondPills);
 		}
 
+		const eleName = ee`<span class="dm-party__char-name"></span>`.txt(this._data.name || "\u2014").attr("title", this._data.name || "");
+		const eleRace = ee`<span class="dm-party__char-meta"></span>`.txt(this._data.race || "");
+		const eleClasses = ee`<span class="dm-party__char-meta"></span>`.txt(classStr || "\u2014");
 		ee`<div class="dm-party__char-row-wrap">
 			<div class="dm-party__char-row">
 			${btnExpand}
-			<span class="dm-party__char-name" title="${this._data.name || ""}">${this._data.name || "\u2014"}</span>
-			<span class="dm-party__char-meta">${this._data.race || ""}</span>
-			<span class="dm-party__char-meta">${classStr || "\u2014"}</span>
+			${eleName}
+			${eleRace}
+			${eleClasses}
 			<span class="dm-party__char-stat ${hpClass}" title="${hpTitle}" aria-label="Hit points ${hpDisplay}"><span aria-hidden="true">\u2764</span> ${hpDisplay}</span>
 			<span class="dm-party__char-stat" title="Armor Class" aria-label="Armor Class ${this._data.ac}"><span aria-hidden="true">\u{1F6E1}</span> ${this._data.ac}</span>
 			<span class="dm-party__char-stat" title="Passive Perception" aria-label="Passive Perception ${this.getPassiveScore("perception")}"><span aria-hidden="true">\u{1F441}</span> ${this.getPassiveScore("perception")}</span>
@@ -259,18 +270,22 @@ export class PartyTrackerCharacter {
 		</div>
 		${hpMax > 0 ? ee`<div class="dm-party__hp-bar"><div class="dm-party__hp-bar-fill ${hpClass}" style="width: ${Math.max(0, Math.min(100, hpPct))}%"></div></div>` : ""}
 		</div>`.appendTo(this._eleRow);
+		this._applyReadOnly();
 	}
 
 	_renderExpandedForm () {
 		this._eleRow.empty();
 
-		const btnCollapse = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" title="Collapse" aria-label="Collapse ${this._data.name || "character"}" aria-expanded="true"><span class="glyphicon glyphicon-minus" aria-hidden="true"></span> Collapse</button>`
+		const btnCollapse = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" title="Collapse" aria-expanded="true"><span class="glyphicon glyphicon-minus" aria-hidden="true"></span> Collapse</button>`
+			.attr("aria-label", `Collapse ${this._data.name || "character"}`)
 			.onn("click", () => {
 				this._isExpanded = false;
 				this._renderSummaryRow();
 			});
 
-		const btnRemove = ee`<button class="ve-btn ve-btn-danger ve-btn-xxs" title="Remove ${this._data.name || "character"}" aria-label="Remove ${this._data.name || "character"}"><span class="glyphicon glyphicon-trash" aria-hidden="true"></span></button>`
+		const btnRemove = ee`<button class="ve-btn ve-btn-danger ve-btn-xxs"><span class="glyphicon glyphicon-trash" aria-hidden="true"></span></button>`
+			.attr("title", `Remove ${this._data.name || "character"}`)
+			.attr("aria-label", `Remove ${this._data.name || "character"}`)
 			.onn("click", () => this._onRemove?.());
 
 		/* ----- Identity ----- */
@@ -464,7 +479,8 @@ export class PartyTrackerCharacter {
 			});
 
 		/* ----- Notes ----- */
-		const iptNotes = ee`<textarea class="ve-form-control ve-input-xs" rows="2" placeholder="Notes" aria-label="Character notes">${this._data.notes || ""}</textarea>`
+		const iptNotes = ee`<textarea class="ve-form-control ve-input-xs" rows="2" placeholder="Notes" aria-label="Character notes"></textarea>`
+			.val(this._data.notes || "")
 			.onn("change", (e) => { this._data.notes = e.target.value; this._doUpdate(); });
 
 		/* ----- Conditions, Diseases, Counters ----- */
@@ -610,6 +626,7 @@ export class PartyTrackerCharacter {
 				${iptNotes}
 			</div>
 		</div>`.appendTo(this._eleRow);
+		this._applyReadOnly();
 	}
 
 	/* -------------------------------------------- */
@@ -619,7 +636,8 @@ export class PartyTrackerCharacter {
 	_renderClassRows (wrpClasses) {
 		wrpClasses.empty();
 		this._data.classes.forEach((cls, ix) => {
-			const iptName = ee`<input class="ve-form-control ve-input-xs" style="width: 90px;" placeholder="Class" value="${cls.name || ""}" aria-label="Class name">`
+			const iptName = ee`<input class="ve-form-control ve-input-xs" style="width: 90px;" placeholder="Class" aria-label="Class name">`
+				.val(cls.name || "")
 				.onn("change", (e) => { cls.name = e.target.value; this._doUpdate(); });
 			const iptLevel = ee`<input class="ve-form-control ve-input-xs ve-text-center" style="width: 38px;" type="number" min="1" max="20" value="${cls.level || 1}" aria-label="Class level">`
 				.onn("change", (e) => {
@@ -890,7 +908,14 @@ export class PartyTrackerCharacter {
 			const condSource = ent.source;
 			const color = Parser.CONDITION_TO_COLOR?.[condName];
 			const isActive = (this._data.conditions || []).some(c => c.name === condName);
-			const btn = ee`<button class="dm-party__condition-btn ${isActive ? "dm-party__condition-btn--active" : ""}" style="${isActive ? `background: ${color || "#6c757d"}; color: #fff; border-color: ${color || "#6c757d"};` : color ? `border-color: ${color}; color: ${color};` : ""}" title="${condName} (${condSource})" aria-label="${condName}" aria-pressed="${isActive}">${condName}</button>`;
+			const btn = ee`<button class="dm-party__condition-btn"></button>`
+				.toggleClass("dm-party__condition-btn--active", isActive)
+				.attr("title", `${condName} (${condSource})`)
+				.attr("aria-label", condName)
+				.attr("aria-pressed", isActive)
+				.txt(condName);
+			if (isActive) btn.css({background: color || "#6c757d", color: "#fff", borderColor: color || "#6c757d"});
+			else if (color) btn.css({borderColor: color, color});
 			btn.onn("click", () => {
 				if (!this._data.conditions) this._data.conditions = [];
 				const ix = this._data.conditions.findIndex(c => c.name === condName);
@@ -907,13 +932,13 @@ export class PartyTrackerCharacter {
 		const knownNames = new Set(condEntries.map(e => e.name));
 		const customConds = (this._data.conditions || []).filter(c => !knownNames.has(c.name));
 		for (const cond of customConds) {
-			const btnRm = ee`<button class="dm-party__pill-remove" aria-label="Remove ${cond.name}">\u00d7</button>`;
+			const btnRm = ee`<button class="dm-party__pill-remove">\u00d7</button>`.attr("aria-label", `Remove ${cond.name}`);
 			btnRm.onn("click", () => {
 				this._data.conditions = (this._data.conditions || []).filter(c => c.name !== cond.name);
 				this._renderExpandedForm();
 				this._doUpdate();
 			});
-			const pill = ee`<span class="dm-party__condition-pill dm-party__condition-pill--custom">${cond.name} ${btnRm}</span>`;
+			const pill = ee`<span class="dm-party__condition-pill dm-party__condition-pill--custom"></span>`.txt(`${cond.name} `).append(btnRm);
 			if (cond.source) this._bindConditionDiseaseHover(pill, cond.name, cond.source);
 			pill.appendTo(wrpCustom);
 		}
@@ -946,13 +971,13 @@ export class PartyTrackerCharacter {
 
 		const wrpPills = ee`<div class="dm-party__diseases-list"></div>`;
 		for (const disease of (this._data.diseases || [])) {
-			const btnRm = ee`<button class="dm-party__pill-remove" aria-label="Remove ${disease.name}">\u00d7</button>`;
+			const btnRm = ee`<button class="dm-party__pill-remove">\u00d7</button>`.attr("aria-label", `Remove ${disease.name}`);
 			btnRm.onn("click", () => {
 				this._data.diseases = (this._data.diseases || []).filter(d => d.name !== disease.name);
 				this._renderExpandedForm();
 				this._doUpdate();
 			});
-			const pill = ee`<span class="dm-party__disease-pill">${disease.name} ${btnRm}</span>`;
+			const pill = ee`<span class="dm-party__disease-pill"></span>`.txt(`${disease.name} `).append(btnRm);
 			this._bindConditionDiseaseHover(pill, disease.name, disease.source);
 			pill.appendTo(wrpPills);
 		}
@@ -1010,7 +1035,8 @@ export class PartyTrackerCharacter {
 		if (!this._data.counters) this._data.counters = [];
 
 		this._data.counters.forEach((counter, ix) => {
-			const iptName = ee`<input class="ve-form-control ve-input-xs" style="width: 100px;" placeholder="Name" value="${counter.name || ""}" aria-label="Counter name">`
+			const iptName = ee`<input class="ve-form-control ve-input-xs" style="width: 100px;" placeholder="Name" aria-label="Counter name">`
+				.val(counter.name || "")
 				.onn("change", (e) => { counter.name = e.target.value; this._doUpdate(); });
 			const iptCurrent = ee`<input class="ve-form-control ve-input-xs ve-text-center" style="width: 36px;" type="number" min="0" value="${counter.current ?? 0}" aria-label="Current value">`
 				.onn("change", (e) => { counter.current = Math.max(0, Number(e.target.value) || 0); this._doUpdate(); });
@@ -1044,7 +1070,13 @@ export class PartyTrackerCharacter {
 	/* -------------------------------------------- */
 
 	_makeInput (prop, {placeholder = "", cls = "", width = "100px", ariaLabel = ""} = {}) {
-		return ee`<input class="ve-form-control ve-input-xs ${cls}" style="width: ${width};" placeholder="${placeholder}" value="${this._data[prop] || ""}" ${ariaLabel ? `aria-label="${ariaLabel}"` : ""}>`
+		const input = ee`<input class="ve-form-control ve-input-xs">`
+			.addClass(cls)
+			.css({width})
+			.attr("placeholder", placeholder)
+			.val(this._data[prop] || "");
+		if (ariaLabel) input.attr("aria-label", ariaLabel);
+		return input
 			.onn("change", (e) => {
 				this._data[prop] = e.target.value;
 				this._doUpdate();
@@ -1052,7 +1084,18 @@ export class PartyTrackerCharacter {
 	}
 
 	_doUpdate () {
+		if (this._isReadOnly) return;
 		this._onUpdate?.();
+	}
+
+	_applyReadOnly () {
+		if (!this._isReadOnly || !this._eleRow) return;
+		this._eleRow.addClass("dm-party__char--linked-readonly");
+		for (const control of this._eleRow.querySelectorAll("input, select, textarea, button")) {
+			const label = control.getAttribute("aria-label") || "";
+			if (/^(?:Expand|Collapse)\b/.test(label)) continue;
+			control.disabled = true;
+		}
 	}
 
 	set onRemove (fn) { this._onRemove = fn; }
