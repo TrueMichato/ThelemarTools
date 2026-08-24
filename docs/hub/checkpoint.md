@@ -1,6 +1,6 @@
 # Campaign Hub Phase 0-5 checkpoint
 
-> **Status:** Commit series in progress; three implementation layers committed
+> **Status:** Commit series complete; final validation pending
 > **Captured:** 2026-08-24
 > **Branch:** `multiplayer-hub`
 > **Base/HEAD at capture:** `c91554179649944665a52b7ed5a82d4af5a5eb8c`
@@ -27,9 +27,13 @@ That backup is historical rewritten-equivalent work, not the current Campaign Hu
 | Authoritative backend | `830472104133684da7cfab2df5dfdcb2582d2161` | Dependencies, migration 0001, BFF/security/domain helpers, PostgreSQL/memory authorities, operations scripts, shared JSON patch, server/domain tests |
 | Browser Hub client | `03e7fed33de5bc2d05cf3bcf828bbffb0ed785cc` | Hub/Campaign pages, browser repositories/context/realtime, brew/renderer/PWA/navigation seams, Hub styles and client tests |
 | Character Sheet/DM Screen integration | `f8e07e7020908821f3bee10dc2f0cbc872aea556` | Character Sheet cloud/context/roll integration, private Board/Party Tracker projection integration, styles and focused tests |
-| Documentation/handoff | Pending this commit | `docs/hub`, ADRs, checkpoint/history/roadmaps, traceability/risks/runbook structure, documentation/performance tests |
+| Documentation/handoff | `5a5da87394e369a44f8fdb270fa22dc2db427f8a` | `docs/hub`, ADRs, checkpoint/history/roadmaps, traceability/risks/runbook structure, documentation/performance tests |
 
 No commit has been pushed and no pull request has been opened.
+
+`HubRealtime.test.js` spans the server dispatcher/visibility authority and browser reconnect/order client. Its
+test file lands in the backend commit while the browser client lands in the immediately following browser
+commit; the checkpoint-level Hub gate validates the combined contract.
 
 ## Change groups
 
@@ -96,9 +100,8 @@ Phase 6A adds documentation tests; rerun `npm run test:hub` before checkpointing
 
 ## Checkpoint completion procedure
 
-1. Commit the documentation/handoff layer after documentation/performance/full Hub checks.
-2. Update this table with the documentation commit SHA in a tiny documentation-only record commit.
-3. Run the full Hub suite and verify a clean working tree.
-4. Declare migration 0001 immutable.
-5. Mark the checkpoint gate complete; Phase 6B/6C may begin.
-6. Do not push or open a PR without separate explicit instruction.
+1. Commit this SHA/status update as a tiny documentation-only checkpoint record.
+2. Run the full Hub suite and verify a clean working tree.
+3. Declare migration 0001 immutable.
+4. Mark the checkpoint gate complete; Phase 6B/6C may begin.
+5. Do not push or open a PR without separate explicit instruction.
