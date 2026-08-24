@@ -9,9 +9,10 @@ Private invite-only V1 is implemented through Phase 5 on `multiplayer-hub`. The 
 private-table staging deployment after the environment-specific gates below are completed. Semi-public
 onboarding remains intentionally disabled.
 
-Phase 6A documentation/handoff and the approved four-layer checkpoint series are complete. Final combined Hub
-validation and the checkpoint-record commit remain; then Phase 6B lifecycle and Phase 6C migrations are ready
-to begin. Phases 6D-6H remain pending; see [private-v1-roadmap.md](private-v1-roadmap.md).
+Phase 6A documentation/handoff and the approved checkpoint commit series are complete. Combined Hub
+validation passes 30 suites / 216 tests with a clean tree. Migration 0001 is immutable; Phase 6B lifecycle
+and Phase 6C migrations are ready to begin. Phases 6D-6H remain pending; see
+[private-v1-roadmap.md](private-v1-roadmap.md).
 
 ## Implemented
 

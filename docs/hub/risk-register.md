@@ -6,7 +6,7 @@
 
 | ID | Risk | Trigger/evidence | Impact | Current mitigation | Detection | Next action |
 |---|---|---|---|---|---|---|
-| R-01 | Uncheckpointed large working tree | Phase 0-5 began uncommitted | Review/recovery ambiguity | Closed by four reviewed checkpoint commits; no push/PR yet | `git log`, clean-tree check | Record final checkpoint validation, then keep closed |
+| R-01 | Uncheckpointed large working tree | Phase 0-5 began uncommitted | Review/recovery ambiguity | Closed by reviewed checkpoint commits and 30-suite Hub validation; no push/PR yet | `git log`, clean-tree check | Closed; reopen only if later work accumulates without commits |
 | R-02 | Schema cannot evolve safely after first deployment | Current migrator applies one SQL file without a ledger | Failed/repeated migration or unknown schema version | Fresh/restore drills only | Startup health, manual schema inspection | Phase 6C checksummed migration ledger and roles |
 | R-03 | Administrative lifecycle is incomplete | No invite revoke, member removal, session list/revoke, or deletion workflow | Operators require direct DB access; stale access/data | Route authorization and current-session logout | Support reports, authorization tests | Phase 6B lifecycle administration |
 | R-04 | No portable BFF deployment image/topology | Root image is static-only | Provider-specific drift and unsafe proxy setup | Same-origin contract documented | Deployment review | Phase 6D OCI/Compose stack |

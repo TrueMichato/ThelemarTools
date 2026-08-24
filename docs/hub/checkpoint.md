@@ -1,6 +1,6 @@
 # Campaign Hub Phase 0-5 checkpoint
 
-> **Status:** Commit series complete; final validation pending
+> **Status:** Complete and validated
 > **Captured:** 2026-08-24
 > **Branch:** `multiplayer-hub`
 > **Base/HEAD at capture:** `c91554179649944665a52b7ed5a82d4af5a5eb8c`
@@ -30,6 +30,8 @@ That backup is historical rewritten-equivalent work, not the current Campaign Hu
 | Documentation/handoff | `5a5da87394e369a44f8fdb270fa22dc2db427f8a` | `docs/hub`, ADRs, checkpoint/history/roadmaps, traceability/risks/runbook structure, documentation/performance tests |
 
 No commit has been pushed and no pull request has been opened.
+
+Checkpoint metadata was recorded in `b2405f2e` after the four primary layers.
 
 `HubRealtime.test.js` spans the server dispatcher/visibility authority and browser reconnect/order client. Its
 test file lands in the backend commit while the browser client lands in the immediately following browser
@@ -96,12 +98,16 @@ to verify the remaining documentation-only working tree before the fourth commit
   single-transaction restore;
 - signed-out/signed-in Hub and campaign desktop/mobile browser checks.
 
-Phase 6A adds documentation tests; rerun `npm run test:hub` before checkpointing.
+Final combined validation after the series:
 
-## Checkpoint completion procedure
+- `npm run test:hub`: 30 suites / 216 tests passed;
+- documentation contract: 4 tests passed;
+- staged and final diff checks passed;
+- working tree was clean before closing the checkpoint status.
 
-1. Commit this SHA/status update as a tiny documentation-only checkpoint record.
-2. Run the full Hub suite and verify a clean working tree.
-3. Declare migration 0001 immutable.
-4. Mark the checkpoint gate complete; Phase 6B/6C may begin.
-5. Do not push or open a PR without separate explicit instruction.
+## Checkpoint result
+
+- The reviewed commit series and checkpoint metadata are durable.
+- Migration 0001 is now immutable; future schema work begins at migration 0002 under ADR 0005.
+- Phase 6B lifecycle and Phase 6C migration management may begin.
+- Do not push or open a PR without separate explicit instruction.

@@ -1,7 +1,7 @@
 # Campaign Hub private-V1 launch roadmap
 
 > **Status:** Approved continuation plan
-> **Current phase:** Checkpoint gate — final record/validation
+> **Current phase:** Phase 6B lifecycle and Phase 6C migrations ready
 > **Last reviewed:** 2026-08-24
 > **Owner:** Campaign Hub maintainers
 
