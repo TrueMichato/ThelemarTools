@@ -1,0 +1,199 @@
+# Campaign Hub realtime protocol
+
+> **Status:** Current private-V1 wire protocol
+> **Protocol version:** `1`
+> **Last verified:** 2026-08-24
+> **Owner:** Campaign Hub maintainers
+
+## Connection
+
+```text
+GET /ws/campaign/{campaignId}?v=1
+Origin: <exact HUB_APP_ORIGIN>
+Cookie: __Host-hub_session=...
+```
+
+Upgrade requires:
+
+- UUID campaign id;
+- query protocol `v=1`;
+- exact Origin;
+- valid signed/unexpired session;
+- active campaign membership.
+
+The service worker does not intercept WebSocket traffic.
+
+## Initial server message
+
+```json
+{
+  "type": "subscribed",
+  "campaignId": "uuid",
+  "membershipId": "uuid",
+  "role": "player",
+  "connectedAt": "ISO-8601"
+}
+```
+
+The server then broadcasts current presence.
+
+## Client messages
+
+### Presence
+
+```json
+{
+  "type": "presence",
+  "activity": "editing_character",
+  "targetId": "character-or-workspace-id"
+}
+```
+
+Allowed activities:
+
+- `idle`;
+- `viewing_character`;
+- `editing_character`;
+- `viewing_dm_screen`.
+
+Unknown activity becomes `idle`. `targetId` is optional and limited to 200 characters.
+
+### Resync
+
+```json
+{
+  "type": "resync",
+  "afterSequence": 42
+}
+```
+
+Response:
+
+```json
+{
+  "type": "resync_complete",
+  "snapshot": {},
+  "events": []
+}
+```
+
+The snapshot is role-shaped by the authority. Events are ordered, visibility-filtered, sequence-greater than
+the requested value, and capped at 500.
+
+Unknown client types receive:
+
+```json
+{"type":"error","code":"UNSUPPORTED_MESSAGE"}
+```
+
+Invalid JSON receives `INVALID_MESSAGE`. Handler failure receives `MESSAGE_FAILED`.
+
+## Server messages
+
+### Presence
+
+```json
+{
+  "type": "presence",
+  "members": [
+    {
+      "accountId": "uuid",
+      "displayName": "Player",
+      "role": "player",
+      "activity": "viewing_character",
+      "targetId": "uuid",
+      "connectedAt": "ISO-8601"
+    }
+  ]
+}
+```
+
+Presence is ephemeral and not written to the event log.
+
+### Event
+
+```json
+{
+  "type": "event",
+  "event": {
+    "id": "uuid",
+    "campaignId": "uuid",
+    "sequence": 43,
+    "type": "character.projection.updated",
+    "actorAccountId": "uuid",
+    "aggregateType": "character",
+    "aggregateId": "uuid",
+    "aggregateRevision": 8,
+    "visibility": "all_members",
+    "visibleAccountIds": null,
+    "payload": {},
+    "createdAt": "ISO-8601"
+  }
+}
+```
+
+## Limits and close behavior
+
+- Fastify WebSocket max payload: 16 KB.
+- Realtime handler independently closes oversized messages with code 1009.
+- More than 20 messages in one second closes with 1008.
+- Expired/revoked session closes with 1008.
+- Removed membership closes with 1008.
+- Revoking the current session through logout closes matching sockets immediately.
+
+Session and membership are rechecked:
+
+- on each client message;
+- before each event fanout;
+- during each presence broadcast.
+
+## Visibility
+
+| Visibility | Recipient |
+|---|---|
+| `all_members` | every active campaign member |
+| `dm_only` | DM and co-DM |
+| `actor_and_dm` | actor plus DM/co-DM |
+| `explicit_accounts` | listed accounts plus DM/co-DM |
+
+Visibility is enforced during both database replay and live fanout. The client cannot widen it.
+
+## Ordering and delivery
+
+Each campaign has a monotonically allocated `sequence`.
+
+1. Canonical transaction inserts event and outbox row.
+2. Dispatcher claims up to 100 available rows with a claim token.
+3. Rows are processed in order.
+4. If one campaign event fails, later claimed events for that campaign are marked failed rather than
+   overtaking it.
+5. Success marks the row published.
+6. Failure clears claim and schedules retry after one second.
+7. Stale publishing claims are reclaimable.
+
+WebSocket delivery is at-least-once in the presence of process/network failure. Clients deduplicate by event
+id (falling back to sequence/type) and track the highest sequence.
+
+## Client resync algorithm
+
+`HubRealtimeClient`:
+
+1. reconnects with bounded exponential backoff;
+2. sends resync from last accepted sequence;
+3. buffers live events while resync is in progress;
+4. applies snapshot;
+5. applies replay events;
+6. suppresses snapshot-covered historical state events;
+7. applies buffered events in order;
+8. emits current presence/events to page consumers.
+
+Snapshot-covered event types are suppressed only when at/before the snapshot sequence. Durable roll/action
+history may still replay because it is not fully represented by current state.
+
+## Protocol evolution
+
+- Header/query version mismatch fails closed.
+- Old clients must not submit writes under a new incompatible protocol.
+- Additive server messages still require clients to ignore unknown types safely or a protocol bump.
+- Any shape/visibility/order change updates this document, event catalog, route tests, client tests, and
+  `HUB_PROTOCOL_VERSION`.

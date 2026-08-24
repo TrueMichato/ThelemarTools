@@ -1,0 +1,70 @@
+import fs from "node:fs";
+import path from "node:path";
+import {fileURLToPath} from "node:url";
+
+const DOCS_ROOT = fileURLToPath(new URL("../../../docs/hub/", import.meta.url));
+
+function getMarkdownFiles (dir = DOCS_ROOT) {
+	return fs.readdirSync(dir, {withFileTypes: true})
+		.flatMap(entry => {
+			const absolute = path.join(dir, entry.name);
+			if (entry.isDirectory()) return getMarkdownFiles(absolute);
+			return entry.name.endsWith(".md") ? [absolute] : [];
+		});
+}
+
+describe("Campaign Hub documentation contract", () => {
+	const required = [
+		"README.md",
+		"current-system.md",
+		"architecture.md",
+		"domain-model.md",
+		"api-reference.md",
+		"realtime-protocol.md",
+		"event-catalog.md",
+		"data-lifecycle.md",
+		"implementation-history.md",
+		"checkpoint.md",
+		"traceability.md",
+		"risk-register.md",
+		"testing.md",
+		"contributing.md",
+		"staging-plan.md",
+		"private-v1-roadmap.md",
+		"troubleshooting.md",
+		"post-v1-roadmap.md",
+		"runbooks/README.md",
+	];
+
+	it("contains and indexes every required handoff document", () => {
+		const index = fs.readFileSync(path.join(DOCS_ROOT, "README.md"), "utf8");
+		for (const relative of required) {
+			expect(fs.existsSync(path.join(DOCS_ROOT, relative))).toBe(true);
+			if (relative !== "README.md") expect(index).toContain(`(${relative})`);
+		}
+	});
+
+	it("keeps ADR numbering contiguous and records status", () => {
+		const adrDir = path.join(DOCS_ROOT, "adr");
+		const adrs = fs.readdirSync(adrDir).filter(name => /^\d{4}-.+\.md$/.test(name)).sort();
+		expect(adrs.map(name => name.slice(0, 4))).toEqual(["0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008"]);
+		for (const adr of adrs) expect(fs.readFileSync(path.join(adrDir, adr), "utf8")).toMatch(/^Status:/m);
+	});
+
+	it("does not contain broken relative Markdown links", () => {
+		for (const file of getMarkdownFiles()) {
+			const markdown = fs.readFileSync(file, "utf8");
+			for (const match of markdown.matchAll(/\[[^\]]*]\(([^)]+)\)/g)) {
+				const target = match[1].split("#")[0];
+				if (!target || /^(?:https?:|mailto:)/i.test(target)) continue;
+				expect(fs.existsSync(path.resolve(path.dirname(file), decodeURIComponent(target)))).toBe(true);
+			}
+		}
+	});
+
+	it("keeps session-private paths out of repository documentation", () => {
+		for (const file of getMarkdownFiles()) {
+			expect(fs.readFileSync(file, "utf8")).not.toContain(".copilot/session-state");
+		}
+	});
+});
