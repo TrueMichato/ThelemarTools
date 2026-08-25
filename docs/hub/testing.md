@@ -1,7 +1,7 @@
 # Campaign Hub testing guide
 
-> **Status:** Current automated coverage plus planned launch coverage
-> **Last verified:** 2026-08-24
+> **Status:** Current automated and real-stack coverage plus managed-staging gates
+> **Last verified:** 2026-08-25
 > **Owner:** Campaign Hub maintainers
 
 ## Test layers
@@ -17,6 +17,8 @@
 | Integration seams | Character Sheet repository/rules/roll-history tests; `HubPartyTrackerProjection.test.js` | Existing page behavior and local/Hub separation |
 | Static UI/PWA contracts | `HubPageContract.test.js`, `HubRoutePolicy.test.js`, `HubPerformanceBudget.test.js` | Required states, boot order, navigation, service-worker and fixed limits |
 | Database contract | `HubMigrationContract.test.js`, local PostgreSQL drills | Schema clauses and real migration/transaction/restore |
+| Real-stack browser | `test/e2e/hub/`, `test/e2e/pages/HubCampaignPage.ts` | Multi-user lifecycle, real Character Sheet, six-member/replay/quota/contention budgets |
+| CI/supply chain | `.github/workflows/hub.yml`, `HubCiContract.test.js` | Pinned actions, deterministic gates, SBOM/image/provenance and test-auth isolation |
 
 ## Current commands
 
@@ -51,6 +53,10 @@ npm run build:sw
 
 # Production dependency audit
 npm audit --omit=dev --audit-level=high
+
+# Tracked-file secret scan and disposable HTTPS/PostgreSQL E2E
+npm run hub:check-secrets
+npm run test:hub:e2e:stack
 ```
 
 ## Test data rules
@@ -61,18 +67,11 @@ npm audit --omit=dev --audit-level=high
 - PostgreSQL drills use a disposable UTF-8 database and an isolated restore target.
 - Test-auth code must live only in a test entry point and must fail startup in production mode.
 
-## Required continuation coverage
+## Remaining managed-staging coverage
 
-Phase 6 adds:
-
-- invite listing/revocation, member role/removal, session revoke, deletion grace/cancel/purge;
-- migration ledger fresh/baseline/upgrade/checksum/concurrency/failure;
-- least-privilege role tests;
-- OCI/Compose boot, readiness, graceful shutdown, and proxy/WebSocket smoke;
-- maintenance retention and log-redaction fixtures;
-- real-stack multi-context Playwright;
-- load and fault tests against documented budgets;
-- restore evidence tied to one image/migration version.
+Phase 6G/H still require real GitHub OAuth, physical devices, provider proxy/PITR/alerts, immutable registry
+promotion, service-worker version skew, rollback, and provider restore evidence tied to one image/migration
+version. Synthetic CI never substitutes for these gates.
 
 ## Evidence record
 
@@ -113,3 +112,30 @@ Evidence containing secrets or user data belongs in the approved private operati
 - Operations: migration 0003; singleton-lock and seeded technical cleanup drills; protected aggregate metrics;
   OAuth query/secret log scan; backup/evidence role boundaries; AES-GCM tamper failure; encrypted backup and
   isolated restore with matching SHA-256 and persistent age metrics.
+
+## Phase 6F evidence
+
+- Hub: 41 suites / 265 tests.
+- Repository JavaScript lint, focused Hub/DM Screen SCSS lint, service-worker build, production dependency
+  audit, tracked-file secret scan, and CycloneDX Node SBOM generation passed.
+- Dedicated Playwright discovery: 2 tests in 2 files.
+- Disposable same-origin HTTPS/PostgreSQL stack: both scenarios passed in 50.5 seconds in CI reporter mode.
+- Lifecycle scenario: DM/player sign-in, campaign/invite, cloud Character Sheet, XP, structured damage, party
+  inventory transfer, second-device session revoke, member removal/detachment, deletion request/cancel.
+- Budget scenario: six active members, 1.4 MB character, 500 roll writes/replay page, concurrent transfer
+  reservation with one success/one conflict.
+- Fault probes: independent BFF restart and PostgreSQL restart both recovered `/api/ready`; stack teardown
+  removed the unique per-run test project's containers, networks, volumes, and images without touching a
+  normal Hub project or externally supplied production image.
+- Cancellation drill: SIGTERM during a child image build propagated to the process group, exited 143, and
+  left no matching containers, volumes, or networks.
+- Supply chain: production BFF image builds, Node SBOM generation passes, and CI is configured to emit the
+  exact image archive, image SBOM, provenance record, Trivy scan, and success/failure Playwright result.
+- Image equivalence: the synthetic-auth layer derives from the downloaded production image, and the
+  unmodified production image must boot its real entry point and become healthy against the migrated test
+  database before Playwright starts.
+- Secret fixtures cover direct/YAML, shell `export`, Docker `ENV`, inline JSON, continued lines, classic and
+  fine-grained GitHub tokens, database URL, OAuth, cookie, CSRF, metrics, backup, and test-auth assignments.
+  Large text/source files are scanned; only known binary formats are explicitly counted as skipped.
+
+See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth boundaries, and artifact semantics.

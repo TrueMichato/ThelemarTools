@@ -1,7 +1,7 @@
 # Campaign Hub traceability matrix
 
 > **Status:** Active; expand with every continuation change
-> **Last verified:** 2026-08-24
+> **Last verified:** 2026-08-25
 > **Owner:** Campaign Hub maintainers
 
 | Requirement/invariant | Decision/reference | Implementation | Primary tests/evidence | Operational reference |
@@ -23,6 +23,7 @@
 | Safe schema evolution | ADR 0005; `migrations.md` | checksummed/advisory-locked runner, baseline fingerprint, migration-aware readiness, role grants | migration runner/contract/role tests and PostgreSQL fresh/baseline drills | migration guide; failure runbook pending |
 | Reproducible deployment | ADR 0004; `deployment.md` | BFF/static images, Compose DB/migrate/grants/BFF/static/edge, live/ready probes | deployment contract, image build/inspect, Compose config/start/routing/restart probes | deployment guide |
 | Technical retention and recovery signals | ADR 0006; `observability.md` | migration 0003, maintenance lock/cleanup, metrics, encrypted backup/restore, evidence role | maintenance/observability/encryption tests and real cleanup/backup/restore drills | operations and incident runbooks |
-| Real-stack multi-context behavior | `staging-plan.md` | not implemented | Phase 6F Playwright and Phase 6H game day | staging evidence |
+| Real-stack multi-context behavior | ADR 0008; `ci-and-provenance.md` | test-only BFF image, disposable Compose override/orchestrator, Hub page object and Playwright journeys | lifecycle/load scenarios, BFF/DB restart probes | CI artifacts; Phase 6H game day |
+| Reproducible CI and supply-chain evidence | ADR 0008; `ci-and-provenance.md` | pinned workflow, secret scan, exact-image export, SBOMs, provenance writer, image scan | `HubCiContract`, local SBOM/image build, GitHub CI run required before staging | Phase 6G digest-promotion record |
 
 Use `not implemented` explicitly. A planned row must not be presented as current capability.

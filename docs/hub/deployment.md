@@ -1,7 +1,7 @@
 # Campaign Hub portable deployment
 
 > **Status:** OCI/Compose reference implemented and locally verified
-> **Last verified:** 2026-08-24
+> **Last verified:** 2026-08-25
 > **Owner:** Campaign Hub maintainers
 
 ## Purpose
@@ -186,3 +186,12 @@ Production Phase 6G must provide:
 - logs/metrics/alerts and isolated restore drill;
 - provider scheduler invokes maintenance and encrypted backup profiles;
 - no host-published database/BFF/static ports.
+
+## CI artifact promotion
+
+Phase 6F exports the already-scanned production image as `hub-bff-image.tar` and records its SHA-256,
+source/lockfile SHAs, versions, and SBOMs in `hub-ci-provenance.json`. Phase 6G must import that archive,
+push it without rebuilding, record the resulting provider registry digest, and deploy by that digest. The
+archive SHA-256 is not labeled as an OCI digest. CI also loads this archive, derives the test-auth layer from
+it, and separately requires the unmodified image's production entry point to become healthy. See [CI and
+provenance](ci-and-provenance.md).

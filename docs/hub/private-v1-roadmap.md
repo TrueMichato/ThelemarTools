@@ -1,8 +1,8 @@
 # Campaign Hub private-V1 launch roadmap
 
 > **Status:** Approved continuation plan
-> **Current phase:** Phase 6F CI and real-stack integration testing
-> **Last reviewed:** 2026-08-24
+> **Current phase:** Phase 6G managed staging selection
+> **Last reviewed:** 2026-08-25
 > **Owner:** Campaign Hub maintainers
 
 ## Scope
@@ -111,7 +111,7 @@ Exit:
 - restore demonstrates RPO/RTO;
 - a second operator can use the runbooks without undocumented knowledge.
 
-## Phase 6F — CI and real integration
+## Phase 6F — CI and real integration (implemented)
 
 Deliver:
 
@@ -127,6 +127,16 @@ Exit:
 - critical path runs unattended against PostgreSQL;
 - one digest ties source, SBOM, migration, tests, and staging promotion;
 - existing local Character Sheet/DM Screen paths remain green.
+
+Evidence:
+
+- pinned-action four-job pull-request workflow;
+- exact production image archive, Node/image SBOMs, provenance and image scan contract;
+- production-excluded, fail-closed synthetic authentication derived from the exact release image;
+- unmodified production-entry-point health smoke and unique/signal-safe E2E teardown;
+- two multi-context scenarios against the disposable HTTPS/PostgreSQL stack;
+- six active members, 500-event replay, near-limit character and transfer-contention budgets;
+- BFF and database restart/readiness recovery.
 
 ## Phase 6G — managed staging
 

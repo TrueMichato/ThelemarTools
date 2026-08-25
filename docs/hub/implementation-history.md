@@ -1,7 +1,7 @@
 # Campaign Hub implementation history
 
-> **Status:** Historical record of implemented Phases 0-5
-> **Last verified:** 2026-08-24
+> **Status:** Historical record of implemented Phases 0-6F
+> **Last verified:** 2026-08-25
 > **Owner:** Campaign Hub maintainers
 
 This record explains how the implementation reached its current architecture. It preserves reasons and
@@ -212,3 +212,36 @@ Added:
 - fresh, baseline, concurrent, failed, checksum-mismatch, restored-database, and role-boundary drills.
 
 The BFF runtime no longer needs schema-owner privileges once provider roles are configured.
+
+## Phase 6D: portable deployment
+
+Added a pinned Node 24 non-root/read-only-compatible BFF image, lightweight static image, PostgreSQL 17,
+one-shot migration and role-grant jobs, same-origin HTTPS Caddy edge, explicit private/public/egress networks,
+and migration-aware liveness/readiness. The local reference stack proved secure cookies, WebSocket routing,
+exact proxy trust, GitHub egress, clean-volume startup, and graceful restart.
+
+## Phase 6E: operations and recovery
+
+Added migration 0003 operational evidence, advisory-locked bounded maintenance, protected Prometheus metrics,
+bounded correlation ids, query-stripped/redacted JSON logs, outbox status metrics, AES-256-GCM encrypted
+backup/restore, dedicated backup/operations roles, SLOs, alerts, and executable incident/recovery runbooks.
+Real drills covered cleanup, singleton exclusion, tamper failure, encrypted restore, evidence age, and role
+boundaries.
+
+## Phase 6F: CI and real-stack integration
+
+Added:
+
+- a pinned-action Hub pull-request workflow with deterministic install, Hub/affected regression, PostgreSQL,
+  migration/role, PWA, lint, audit, secret, SBOM, image, and provenance gates;
+- a production-excluded test BFF with secret-gated synthetic sessions and production-mode refusal;
+- a disposable, unique-project, signal-cleaned Compose orchestrator and dedicated Playwright
+  configuration/page object;
+- test auth derived from the exact exported production image plus an unmodified production-entry-point smoke;
+- a lifecycle journey through the real Character Sheet and multiplayer administration;
+- a six-member budget journey with near-limit documents, 500-event replay, and contended reservation;
+- post-browser BFF and PostgreSQL restart/readiness probes.
+
+Both real-stack journeys passed in 50.5 seconds in CI reporter mode. The harness removed all test containers,
+networks, and volumes after the run. A separate SIGTERM drill exited 143 and left no matching Docker
+resources.

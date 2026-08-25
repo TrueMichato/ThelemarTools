@@ -1,6 +1,6 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-08-24
+> **Last updated:** 2026-08-25
 > **Owner:** Campaign Hub maintainers
 
 ## Status
@@ -9,8 +9,9 @@ Private invite-only V1 is implemented through Phase 5 on `multiplayer-hub`. The 
 private-table staging deployment after the environment-specific gates below are completed. Semi-public
 onboarding remains intentionally disabled.
 
-Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecycle administration, and Phase
-6C migration management through 0002 are complete.
+Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecycle administration, Phase 6C
+migration management, Phase 6D portable deployment, Phase 6E operations, and Phase 6F CI/real-stack
+integration are complete.
 
 - Lifecycle includes invite list/revoke, owner role changes, owner/co-DM member removal, voluntary leave,
   session/device revocation, immediate socket closure, workspace archive/restore, character detachment,
@@ -18,7 +19,7 @@ Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecyc
 - Migration management includes immutable/checksummed files, advisory locking, baseline detection,
   status/plan/apply, migration-aware readiness, runtime/backup role grants, migration 0002, and
   fresh/baseline/concurrent/failure/checksum/restored-database drills.
-- Current Hub validation passes 39 suites / 254 tests; repository JS lint and Hub SCSS build/lint pass.
+- Current Hub validation passes 41 suites / 265 tests; repository JS lint and Hub SCSS build/lint pass.
 
 Phase 6D portable deployment is implemented and locally verified: non-root/read-only BFF image, lightweight
 static image, PostgreSQL 17, one-shot migration/role grants, least-privilege runtime, same-origin Caddy edge,
@@ -29,7 +30,14 @@ bounded maintenance, protected Prometheus metrics, bounded route/request correla
 logs, SLO/alert catalog, AES-256-GCM backup/restore, dedicated backup/evidence roles, and executable deploy/
 rollback/outage/outbox/rotation/incident runbooks. Real cleanup, singleton lock, role boundaries, tamper
 failure, encrypted backup/restore, evidence-age metrics, and OAuth log sanitization were drilled. Managed
-PITR, scheduling, dashboards, and alerts remain Phase 6G. Phase 6F CI/real-stack integration is next.
+PITR, scheduling, dashboards, and alerts remain Phase 6G.
+
+Phase 6F adds a pinned-action Hub pull-request workflow, deterministic install/lint/test/migration/supply-chain
+gates, exact-image export with Node/image SBOMs and provenance, production-excluded synthetic authentication
+derived from the exact release image, production-entry-point smoke, and an isolated disposable same-origin
+HTTPS/PostgreSQL Playwright stack. Two multi-context journeys pass in 50.5 seconds, covering the private
+lifecycle, real Character Sheet loading, six-member load, 500-event replay, near-limit character storage,
+contended transfer reservation, and BFF/database restart recovery.
 
 ## Implemented
 
@@ -50,6 +58,8 @@ PITR, scheduling, dashboards, and alerts remain Phase 6G. Phase 6F CI/real-stack
 - Invite/member/session lifecycle administration and seven-day account deletion.
 - Checksummed migration ledger, migration 0002, migration-aware readiness, and least-privilege role grants.
 - Migration 0003 operational evidence, maintenance/metrics/redacted logs, and encrypted backup/restore.
+- Pinned Hub CI, affected Character Sheet/DM Screen regressions, fresh PostgreSQL/role checks, SBOM/image
+  evidence, secret/audit gates, and real-stack Playwright.
 
 ## Final verification
 
@@ -66,6 +76,10 @@ PITR, scheduling, dashboards, and alerts remain Phase 6G. Phase 6F CI/real-stack
   clean consoles, no horizontal overflow, and 44 px visible controls.
 - Phase 6B/C PostgreSQL drills covered lifecycle escrow restoration/detachment/purge and fresh, baseline,
   concurrent, failed, checksum-mismatch, and restored migration paths.
+- Phase 6F real-stack Playwright: 2 scenarios passed in 50.5 seconds; the harness then restarted BFF and
+  PostgreSQL independently and recovered migration-aware readiness after each.
+- Phase 6F cancellation drill: SIGTERM exited 143 and removed the unique test project's containers, volumes,
+  and networks.
 
 ## V1 limitations
 

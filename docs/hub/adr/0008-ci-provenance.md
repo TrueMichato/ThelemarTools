@@ -1,6 +1,6 @@
 # ADR 0008: Build once, verify deeply, promote by digest
 
-Status: Accepted for Phase 6F; implementation pending
+Status: Implemented in Phase 6F
 
 ## Context
 
@@ -21,6 +21,12 @@ multi-context browser tests, dependency/image scanning, and reproducible promoti
 7. Separate build and deployment. Staging promotion is approved/manual; production promotion remains disabled
    until Phase 6H go/no-go.
 8. Test-only authentication must use a separate entry point and fail startup under production mode.
+
+Implementation evidence is recorded in [CI and provenance](../ci-and-provenance.md). Until Phase 6G provides
+a registry, the promoted build artifact is an exported image archive identified by SHA-256; provider import
+records the resulting registry digest without rebuilding. CI derives its synthetic-auth layer from that
+exact archive and separately boots the unmodified production entry point against PostgreSQL. The archive
+checksum is never represented as an OCI registry digest.
 
 ## Consequences
 

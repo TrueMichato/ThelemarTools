@@ -31,6 +31,7 @@ describe("Campaign Hub documentation contract", () => {
 		"traceability.md",
 		"risk-register.md",
 		"testing.md",
+		"ci-and-provenance.md",
 		"contributing.md",
 		"staging-plan.md",
 		"private-v1-roadmap.md",

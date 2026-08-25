@@ -1,7 +1,7 @@
 # Campaign Hub risk register
 
 > **Status:** Active
-> **Last reviewed:** 2026-08-24
+> **Last reviewed:** 2026-08-25
 > **Owner:** Campaign Hub maintainers
 
 | ID | Risk | Trigger/evidence | Impact | Current mitigation | Detection | Next action |
@@ -12,14 +12,14 @@
 | R-04 | Portable BFF deployment was missing | Root image is static-only | Provider-specific drift and unsafe proxy setup | Closed by non-root BFF image, lightweight static image, one-shot migrations/grants, private/public networks, and same-origin edge | Deployment contracts and local Compose probes | Closed locally; Phase 6G verifies provider adaptation |
 | R-05 | Managed backup objectives are unproven | Portable encrypted local drill completed, provider PITR/schedule absent | Data loss or recovery outside RTO | AES-GCM backup/restore, evidence-age metrics, restore runbook | Backup/restore metrics and evidence | Phase 6G enable PITR/schedule and demonstrate provider RPO/RTO |
 | R-06 | Outbox/maintenance failures lacked signals | Phase 0-5 cleanup was manual and dispatcher stderr-only | Delayed realtime, table growth | Closed portably by singleton maintenance, DB evidence, outbox/dispatcher metrics, SLOs/runbook | Protected Prometheus endpoint | Phase 6G implements provider alerts |
-| R-07 | Browser/API behavior lacks real-stack E2E | Current browser checks used mocked API; domain tests inject Fastify | Boot/proxy/service-worker regressions can escape | Strong Jest contracts and manual browser checks | CI/manual staging | Phase 6F disposable stack and multi-context Playwright |
+| R-07 | Browser/API behavior lacks real-stack E2E | Prior browser checks used mocked API; domain tests injected Fastify | Boot/proxy/service-worker regressions can escape | Closed portably by exact-image production smoke, derived-auth real HTTPS/PostgreSQL journeys, and restart/readiness probes | Required JSON Playwright CI artifact | Closed for portable stack; Phase 6H repeats with real OAuth/devices |
 | R-08 | Provider proxy/header behavior can invalidate security assumptions | `HUB_TRUST_PROXY` must match exact proxy behavior | Origin/IP/rate-limit/cookie errors | Explicit configuration, exact-origin checks | Staging security tests | Select provider only after portable proxy contract |
 | R-09 | Character/Board upstream churn | Active WIP files are large integration hotspots | Rebase regressions and duplicated persistence paths | Narrow repository/context seams and tests | Character Sheet/DM Screen suites | Maintain hotspot list and rebase checklist |
 | R-10 | Private assumptions expand into public service | Enabling open registration without moderation/legal/quotas | Abuse, privacy, cost, tenant-security exposure | Numeric allowlist and invite-only campaigns | Configuration/release review | Keep public roadmap behind explicit gate |
 | R-11 | Sensitive content could leak through logs | OAuth callback query and private bodies/tokens exist | Privacy/security incident | Query-stripping request serializer, redaction paths, bounded metrics/evidence, empirical secret scan | Log fixture/unit and stack probe | Keep closed; repeat in Phase 6F/6G logging integration |
 | R-12 | Account deletion conflicts with audit/ownership/backups | User requests deletion while owning campaigns or appearing in history | Referential failure or incomplete deletion | Seven-day state machine, ownership block, lifecycle cleanup, FK anonymization, purge/block reporting implemented | Lifecycle tests, purge output, backup aging docs | Phase 6E schedules/alerts purge and records backup-aging evidence |
-| R-13 | Realtime scale exceeds V1 assumptions | More sockets/events than private table target | Latency, replay pressure, reconnect storms | 500 replay/100 dispatch budgets | No production telemetry yet | Phase 6F load tests; Phase 6E metrics |
-| R-14 | Supply-chain drift | Existing workflows use mutable action refs and broad `npm i` | Non-reproducible or compromised builds | Lockfile and dependency audit | Manual audit | Phase 6F deterministic CI, pinned actions, SBOM/image scan |
+| R-13 | Realtime scale exceeds V1 assumptions | More sockets/events than private table target | Latency, replay pressure, reconnect storms | Six-member/500-event real-stack budget test plus dispatcher/replay metrics | CI test and protected metrics | Phase 6G/6H observe provider latency and alerts |
+| R-14 | Supply-chain drift | Existing workflows use mutable action refs and broad `npm i` | Non-reproducible or compromised builds | Closed for Hub by locked install, pinned actions, expanded Hub-credential scan, exact-image export/reuse, SBOMs, archive provenance, and image scan | `HubCiContract` and attempt-keyed workflow artifacts | Phase 6G imports the artifact and records provider registry digest |
 
 ## Review rule
 

@@ -3,9 +3,9 @@
 The Campaign Hub is an optional online layer over the existing local-first 5etools experience.
 Signed-out character sheets, homebrew, and DM screens remain supported and do not use hub storage.
 
-> **Implementation:** Private invite-only V1 through Phase 5
-> **Deployment:** Not yet hosted; Phase 6 launch-readiness work remains
-> **Last verified:** 2026-08-24
+> **Implementation:** Private invite-only V1 through Phase 6F
+> **Deployment:** Not yet hosted; managed staging and launch validation remain
+> **Last verified:** 2026-08-25
 > **Owner:** Campaign Hub maintainers
 
 ## Start here
@@ -27,6 +27,7 @@ Signed-out character sheets, homebrew, and DM screens remain supported and do no
 | Logs, metrics, SLOs, alerts | [Observability](observability.md) |
 | Local setup/backup/restore | [Operations](operations.md) |
 | Tests and release evidence | [Testing guide](testing.md) |
+| CI, test-auth boundary, artifacts | [CI and provenance](ci-and-provenance.md) |
 | How to change Hub safely | [Contributor guide](contributing.md) |
 | Planned managed staging | [Staging plan](staging-plan.md) |
 | Launch sequence and phase gates | [Private-V1 roadmap](private-v1-roadmap.md) |
@@ -67,8 +68,8 @@ Documents labeled **planned**, **pending**, or **not implemented** are not curre
 - [ADR 0007: lifecycle and account deletion](adr/0007-lifecycle-deletion.md)
 - [ADR 0008: CI and artifact provenance](adr/0008-ci-provenance.md)
 
-ADRs 0001-0003 describe implemented architecture. ADRs 0004-0008 are accepted continuation decisions whose
-implementation is explicitly pending.
+ADRs 0001-0008 describe implemented portable architecture and launch-readiness decisions. A provider ADR is
+added only after the Phase 6G selection.
 
 ## Local BFF setup
 
