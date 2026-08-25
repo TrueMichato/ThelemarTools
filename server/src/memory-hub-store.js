@@ -38,10 +38,51 @@ export class MemoryHubStore {
 		this._partyInventories = new Map();
 		this._pendingActions = new Map();
 		this._transfers = new Map();
+		this._operationalRuns = [];
 	}
 
 	async pCheckHealth () {
 		return true;
+	}
+
+	async pGetOperationalMetrics () {
+		const now = this._fnNow();
+		const last = [...this._operationalRuns].reverse().find(run => run.status === "succeeded");
+		return {
+			outboxPending: this._outbox.filter(entry => ["pending", "publishing", "failed"].includes(entry.status)).length,
+			outboxFailed: this._outbox.filter(entry => entry.status === "failed").length,
+			outboxOldestAgeSeconds: 0,
+			activeSessions: [...this._sessions.values()].filter(session => !session.revokedAt && new Date(session.expiresAt) > now).length,
+			expiredReceipts: 0,
+			deletionDueAccounts: [...this._accounts.values()].filter(account => account.status === "deletion_requested" && new Date(account.purgeAfter) <= now).length,
+			lastMaintenanceAgeSeconds: last ? Math.max(0, (now - new Date(last.completedAt)) / 1000) : -1,
+			lastBackupAgeSeconds: -1,
+			lastRestoreDrillAgeSeconds: -1,
+		};
+	}
+
+	async pRunMaintenance ({batchSize = 1_000} = {}) {
+		const now = this._fnNow();
+		const result = {
+			skipped: false,
+			commandReceipts: 0,
+			publishedOutbox: 0,
+			sessions: 0,
+			invites: 0,
+			leases: {characterLeases: 0, workspaceLeases: 0},
+			accounts: await this.pPurgeDueAccounts({limit: Math.min(batchSize, 100)}),
+		};
+		for (const [hash, session] of [...this._sessions]) {
+			if (
+				new Date(session.expiresAt) < new Date(now.getTime() - 30 * 86_400_000)
+				|| (session.revokedAt && new Date(session.revokedAt) < new Date(now.getTime() - 30 * 86_400_000))
+			) {
+				this._sessions.delete(hash);
+				result.sessions++;
+			}
+		}
+		this._operationalRuns.push({status: "succeeded", completedAt: now.toISOString(), details: copy(result)});
+		return result;
 	}
 
 	async pUpsertOAuthAccount ({provider, providerSubject, displayName}) {

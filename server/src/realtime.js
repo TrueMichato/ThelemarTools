@@ -12,6 +12,10 @@ export class HubRealtime {
 		this._connections = new Map();
 	}
 
+	getConnectionCount () {
+		return this._connections.size;
+	}
+
 	addConnection ({socket, account, session, membership, campaignId}) {
 		const connection = {
 			socket,
@@ -174,6 +178,10 @@ export class HubOutboxDispatcher {
 		this._intervalMs = intervalMs;
 		this._timer = null;
 		this._isRunning = false;
+		this._lastDispatchAt = null;
+		this._lastSuccessAt = null;
+		this._lastBatchCount = 0;
+		this._consecutiveErrors = 0;
 	}
 
 	async pDispatchOnce () {
@@ -182,8 +190,10 @@ export class HubOutboxDispatcher {
 		try {
 			const entries = await this._store.pClaimOutboxBatch({limit: 100});
 			const failedCampaigns = new Set();
+			let hasFailure = false;
 			for (const entry of entries) {
 				if (failedCampaigns.has(entry.event.campaignId)) {
+					hasFailure = true;
 					await this._store.pMarkOutboxFailed({outboxId: entry.id, claimToken: entry.claimToken, error: "Blocked by earlier campaign event failure"});
 					continue;
 				}
@@ -191,11 +201,23 @@ export class HubOutboxDispatcher {
 					await this._realtime.pPublishEvent(entry.event);
 					await this._store.pMarkOutboxPublished({outboxId: entry.id, claimToken: entry.claimToken});
 				} catch (error) {
+					hasFailure = true;
 					failedCampaigns.add(entry.event.campaignId);
 					await this._store.pMarkOutboxFailed({outboxId: entry.id, claimToken: entry.claimToken, error: error.message});
 				}
 			}
+			this._lastDispatchAt = new Date();
+			this._lastBatchCount = entries.length;
+			if (hasFailure) this._consecutiveErrors++;
+			else {
+				this._lastSuccessAt = new Date();
+				this._consecutiveErrors = 0;
+			}
 			return entries.length;
+		} catch (error) {
+			this._lastDispatchAt = new Date();
+			this._consecutiveErrors++;
+			throw error;
 		} finally {
 			this._isRunning = false;
 		}
@@ -215,5 +237,15 @@ export class HubOutboxDispatcher {
 		if (!this._timer) return;
 		clearInterval(this._timer);
 		this._timer = null;
+	}
+
+	getStatus ({now = new Date()} = {}) {
+		return {
+			lastDispatchAt: this._lastDispatchAt?.toISOString() || null,
+			lastSuccessAt: this._lastSuccessAt?.toISOString() || null,
+			lastBatchCount: this._lastBatchCount,
+			lastSuccessAgeSeconds: this._lastSuccessAt ? Math.max(0, (now - this._lastSuccessAt) / 1000) : -1,
+			consecutiveErrors: this._consecutiveErrors,
+		};
 	}
 }

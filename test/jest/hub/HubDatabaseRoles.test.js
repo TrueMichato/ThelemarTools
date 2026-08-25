@@ -14,12 +14,14 @@ describe("Hub database roles", () => {
 			client,
 			runtimeRole: "hub_runtime",
 			backupRole: "hub_backup",
-		})).resolves.toEqual({runtimeRole: "hub_runtime", backupRole: "hub_backup"});
+			operationsRole: "hub_operations",
+		})).resolves.toEqual({runtimeRole: "hub_runtime", backupRole: "hub_backup", operationsRole: "hub_operations"});
 		const sql = calls.map(it => it.sql).join("\n");
 		expect(sql).toContain(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA hub TO "hub_runtime"`);
 		expect(sql).toContain(`GRANT SELECT ON ALL TABLES IN SCHEMA hub TO "hub_backup"`);
 		expect(sql).toContain(`REVOKE CREATE ON SCHEMA hub FROM "hub_runtime"`);
 		expect(sql).toContain(`REVOKE CREATE ON SCHEMA hub FROM "hub_backup"`);
+		expect(sql).toContain(`GRANT SELECT, INSERT ON hub.operational_runs TO "hub_operations"`);
 	});
 
 	it("rejects role-name injection before issuing a query", async () => {
@@ -35,6 +37,26 @@ describe("Hub database roles", () => {
 		await expect(pGrantHubDatabaseRoles({
 			client,
 			runtimeRole: "missing_runtime",
-		})).rejects.toThrow(/does not exist/);
+		})).rejects.toThrow(/does not exist and no creation password/);
+	});
+
+	it("creates a newly introduced role transactionally without embedding its password in SQL", async () => {
+		const calls = [];
+		const client = {
+			async query (sql, params = []) {
+				calls.push({sql, params});
+				if (sql.startsWith("SELECT 1 FROM pg_roles")) return {rowCount: 0, rows: []};
+				return {rowCount: 0, rows: []};
+			},
+		};
+		await pGrantHubDatabaseRoles({
+			client,
+			runtimeRole: "hub_runtime",
+			runtimePassword: "runtime-secret",
+		});
+		const sql = calls.map(call => call.sql).join("\n");
+		expect(sql).toContain("CREATE ROLE %I LOGIN PASSWORD %L");
+		expect(sql).not.toContain("runtime-secret");
+		expect(calls).toContainEqual(expect.objectContaining({params: ["runtime-secret"]}));
 	});
 });

@@ -4,6 +4,7 @@ import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
 const migrationUrl = new URL("../../../server/migrations/0001_hub_core.sql", import.meta.url);
 const sql = fs.readFileSync(migrationUrl, "utf8");
 const lifecycleSql = fs.readFileSync(new URL("../../../server/migrations/0002_lifecycle_administration.sql", import.meta.url), "utf8");
+const operationsSql = fs.readFileSync(new URL("../../../server/migrations/0003_operational_runs.sql", import.meta.url), "utf8");
 const postgresStore = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");
 
 describe("campaign hub first migration contract", () => {
@@ -128,5 +129,11 @@ describe("campaign hub first migration contract", () => {
 		expect(lifecycleSql).toContain("transfers_actor_account_fk");
 		expect(lifecycleSql).toContain("domain_events_actor_account_fk");
 		expect(lifecycleSql).toContain("invites_creator_membership_fk");
+	});
+
+	it("adds bounded operational run evidence in migration 0003", () => {
+		expect(operationsSql).toContain("CREATE TABLE hub.operational_runs");
+		expect(operationsSql).toContain("job_type IN ('maintenance', 'backup', 'restore_drill')");
+		expect(operationsSql).toContain("operational_runs_job_started_idx");
 	});
 });

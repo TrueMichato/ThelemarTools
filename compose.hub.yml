@@ -10,6 +10,7 @@ services:
       POSTGRES_PASSWORD: ${HUB_POSTGRES_PASSWORD:?Set HUB_POSTGRES_PASSWORD}
       HUB_RUNTIME_DB_PASSWORD: ${HUB_RUNTIME_DB_PASSWORD:?Set HUB_RUNTIME_DB_PASSWORD}
       HUB_BACKUP_DB_PASSWORD: ${HUB_BACKUP_DB_PASSWORD:?Set HUB_BACKUP_DB_PASSWORD}
+      HUB_OPERATIONS_DB_PASSWORD: ${HUB_OPERATIONS_DB_PASSWORD:?Set HUB_OPERATIONS_DB_PASSWORD}
     volumes:
       - hub-postgres:/var/lib/postgresql/data
       - ./deploy/hub/init-roles.sh:/docker-entrypoint-initdb.d/10-hub-roles.sh:ro
@@ -52,7 +53,11 @@ services:
       DATABASE_URL: postgresql://hub_owner:${HUB_POSTGRES_PASSWORD}@db:5432/hub
       HUB_DATABASE_SSL: "false"
       HUB_RUNTIME_DB_ROLE: hub_runtime
+      HUB_RUNTIME_DB_PASSWORD: ${HUB_RUNTIME_DB_PASSWORD:?Set HUB_RUNTIME_DB_PASSWORD}
       HUB_BACKUP_DB_ROLE: hub_backup
+      HUB_BACKUP_DB_PASSWORD: ${HUB_BACKUP_DB_PASSWORD:?Set HUB_BACKUP_DB_PASSWORD}
+      HUB_OPERATIONS_DB_ROLE: hub_operations
+      HUB_OPERATIONS_DB_PASSWORD: ${HUB_OPERATIONS_DB_PASSWORD:?Set HUB_OPERATIONS_DB_PASSWORD}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -77,6 +82,8 @@ services:
       HUB_PORT: 5052
       HUB_COOKIE_SECRET: ${HUB_COOKIE_SECRET:?Set HUB_COOKIE_SECRET}
       HUB_CSRF_SECRET: ${HUB_CSRF_SECRET:?Set HUB_CSRF_SECRET}
+      HUB_METRICS_TOKEN: ${HUB_METRICS_TOKEN:?Set HUB_METRICS_TOKEN}
+      HUB_LOG_LEVEL: ${HUB_LOG_LEVEL:-info}
       DATABASE_URL: postgresql://hub_runtime:${HUB_RUNTIME_DB_PASSWORD}@db:5432/hub
       HUB_DATABASE_SSL: "false"
       HUB_TRUST_PROXY: ${HUB_TRUST_PROXY:-172.30.0.10}
@@ -116,10 +123,55 @@ services:
         ipv4_address: 172.30.0.10
       hub-public:
 
+  maintenance:
+    profiles: ["maintenance"]
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+      args:
+        VERSION: ${HUB_IMAGE_VERSION:-dev}
+        VCS_REF: ${HUB_VCS_REF:-local}
+        NPM_REGISTRY: ${HUB_NPM_REGISTRY:-https://registry.npmjs.org/}
+    command: ["npm", "run", "hub:maintenance"]
+    environment:
+      DATABASE_URL: postgresql://hub_runtime:${HUB_RUNTIME_DB_PASSWORD}@db:5432/hub
+      HUB_DATABASE_SSL: "false"
+      HUB_MAINTENANCE_BATCH_SIZE: ${HUB_MAINTENANCE_BATCH_SIZE:-1000}
+    depends_on:
+      grant-roles:
+        condition: service_completed_successfully
+    restart: "no"
+    networks: [hub-private]
+
+  backup:
+    profiles: ["backup"]
+    build:
+      context: .
+      dockerfile: server/ops.Dockerfile
+      args:
+        VERSION: ${HUB_IMAGE_VERSION:-dev}
+        VCS_REF: ${HUB_VCS_REF:-local}
+    command:
+      - sh
+      - -ec
+      - node server/scripts/backup-encrypted.mjs "/backups/hub-$$(date -u +%Y%m%dT%H%M%SZ).dump.enc"
+    environment:
+      DATABASE_URL: postgresql://hub_backup:${HUB_BACKUP_DB_PASSWORD}@db:5432/hub
+      HUB_OPERATIONS_DATABASE_URL: postgresql://hub_operations:${HUB_OPERATIONS_DB_PASSWORD}@db:5432/hub
+      HUB_BACKUP_ENCRYPTION_KEY: ${HUB_BACKUP_ENCRYPTION_KEY:?Set HUB_BACKUP_ENCRYPTION_KEY}
+    volumes:
+      - hub-backups:/backups
+    depends_on:
+      grant-roles:
+        condition: service_completed_successfully
+    restart: "no"
+    networks: [hub-private]
+
 volumes:
   hub-postgres:
   hub-caddy-data:
   hub-caddy-config:
+  hub-backups:
 
 networks:
   hub-private:

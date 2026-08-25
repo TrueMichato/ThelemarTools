@@ -20,6 +20,8 @@ import {
 	validateCampaignBrewBundle,
 } from "./campaign-content.js";
 import {HubOutboxDispatcher, HubRealtime} from "./realtime.js";
+import {getSafeRequestId, HubMetrics} from "./observability.js";
+import crypto from "node:crypto";
 
 const SESSION_COOKIE = "__Host-hub_session";
 const OAUTH_COOKIE = "__Host-hub_oauth";
@@ -66,6 +68,7 @@ function validateConfig (config) {
 	if (!config?.appOrigin) throw new TypeError(`config.appOrigin is required.`);
 	if (!config?.cookieSecret || config.cookieSecret.length < 32) throw new TypeError(`config.cookieSecret must be at least 32 characters.`);
 	if (!config?.csrfSecret || config.csrfSecret.length < 32) throw new TypeError(`config.csrfSecret must be at least 32 characters.`);
+	if (config.metricsToken != null && config.metricsToken.length < 32) throw new TypeError(`config.metricsToken must be at least 32 characters.`);
 	const appOrigin = new URL(config.appOrigin).origin;
 	return {
 		sessionTtlSeconds: 60 * 60 * 24 * 30,
@@ -73,6 +76,7 @@ function validateConfig (config) {
 		isSecure: new URL(appOrigin).protocol === "https:",
 		allowedOAuthSubjects: [],
 		trustProxy: false,
+		metricsToken: null,
 		...config,
 		appOrigin,
 	};
@@ -97,11 +101,18 @@ export async function createHubApp ({
 	logger = false,
 	realtime: realtimeOverride = null,
 	isStartOutboxDispatcher = false,
+	metrics: metricsOverride = null,
 }) {
 	if (!store) throw new TypeError(`store is required.`);
 	if (!oauthProvider) throw new TypeError(`oauthProvider is required.`);
 	const config = validateConfig(rawConfig);
-	const app = Fastify({logger, trustProxy: config.trustProxy, bodyLimit: 2 * 1024 * 1024});
+	const metrics = metricsOverride || new HubMetrics();
+	const app = Fastify({
+		logger,
+		trustProxy: config.trustProxy,
+		bodyLimit: 2 * 1024 * 1024,
+		genReqId: request => getSafeRequestId(request) || crypto.randomUUID(),
+	});
 	await app.register(cookie, {secret: config.cookieSecret});
 	await app.register(websocket, {options: {maxPayload: 16 * 1024}});
 	await app.register(rateLimit, {
@@ -110,6 +121,7 @@ export async function createHubApp ({
 		timeWindow: "1 minute",
 	});
 	app.addHook("onSend", async (request, reply, payload) => {
+		reply.header("x-request-id", request.id);
 		reply.header("x-content-type-options", "nosniff");
 		reply.header("x-frame-options", "DENY");
 		reply.header("referrer-policy", "same-origin");
@@ -119,8 +131,20 @@ export async function createHubApp ({
 		}
 		return payload;
 	});
+	app.addHook("onRequest", async request => {
+		request.hubRequestStartedAt = performance.now();
+	});
+	app.addHook("onResponse", async (request, reply) => {
+		metrics.observeRequest({
+			method: request.method,
+			route: request.routeOptions?.url || "unknown",
+			statusCode: reply.statusCode,
+			durationMs: performance.now() - request.hubRequestStartedAt,
+		});
+	});
 
 	app.decorateRequest("hubAuth", null);
+	app.decorateRequest("hubRequestStartedAt", 0);
 	app.addHook("preValidation", async request => {
 		const values = [
 			...Object.entries(request.params || {}).filter(([key]) => key.endsWith("Id")),
@@ -137,6 +161,7 @@ export async function createHubApp ({
 	const outboxDispatcher = new HubOutboxDispatcher({store, realtime});
 	app.decorate("hubRealtime", realtime);
 	app.decorate("hubOutboxDispatcher", outboxDispatcher);
+	app.decorate("hubMetrics", metrics);
 	if (isStartOutboxDispatcher) outboxDispatcher.start();
 	app.addHook("onClose", async () => outboxDispatcher.stop());
 	app.setErrorHandler((error, request, reply) => {
@@ -168,6 +193,7 @@ export async function createHubApp ({
 	const deletionPendingAllowedPaths = new Set([
 		"/api/live",
 		"/api/ready",
+		"/api/metrics",
 		"/api/session",
 		"/api/account/export",
 		"/api/account/deletion",
@@ -179,7 +205,7 @@ export async function createHubApp ({
 	]);
 	app.addHook("preHandler", async (request, reply) => {
 		const pathname = request.url.split("?")[0];
-		if (["/api/live", "/api/ready", "/api/health", "/api/meta"].includes(pathname) || pathname.startsWith("/auth/")) return;
+		if (["/api/live", "/api/ready", "/api/health", "/api/meta", "/api/metrics"].includes(pathname) || pathname.startsWith("/auth/")) return;
 		const auth = await pGetAuth(request);
 		if (auth?.account.status !== "deletion_requested") return;
 		if (deletionPendingAllowedPaths.has(pathname)) return;
@@ -260,6 +286,22 @@ export async function createHubApp ({
 	};
 	app.get("/api/ready", pHandleReadiness);
 	app.get("/api/health", pHandleReadiness);
+
+	app.get("/api/metrics", async (request, reply) => {
+		if (!config.metricsToken) return reply.code(404).send({error: "NOT_FOUND"});
+		const authorization = request.headers.authorization;
+		const supplied = typeof authorization === "string" && authorization.startsWith("Bearer ")
+			? authorization.slice(7)
+			: null;
+		if (!isConstantTimeEqual(supplied, config.metricsToken)) return reply.code(401).send({error: "AUTH_REQUIRED"});
+		const operational = await store.pGetOperationalMetrics();
+		reply.type("text/plain; version=0.0.4; charset=utf-8");
+		return metrics.toPrometheus({
+			operational,
+			websocketConnections: realtime.getConnectionCount(),
+			dispatcher: outboxDispatcher.getStatus(),
+		});
+	});
 
 	app.get("/api/meta", async () => ({
 		protocolVersion: HUB_PROTOCOL_VERSION,

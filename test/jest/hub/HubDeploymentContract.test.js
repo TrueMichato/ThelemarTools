@@ -8,6 +8,8 @@ describe("Hub portable deployment contract", () => {
 	const compose = read("compose.hub.yml");
 	const caddy = read("deploy/hub/Caddyfile");
 	const staticDockerfile = read("deploy/hub/static.Dockerfile");
+	const opsDockerfile = read("server/ops.Dockerfile");
+	const opsDockerignore = read("server/ops.Dockerfile.dockerignore");
 	const roles = read("deploy/hub/init-roles.sh");
 
 	it("builds a separate pinned non-root Node BFF image with safe health checking", () => {
@@ -60,8 +62,19 @@ describe("Hub portable deployment contract", () => {
 	it("creates runtime and backup identities without embedding passwords", () => {
 		expect(roles).toContain("CREATE ROLE hub_runtime");
 		expect(roles).toContain("CREATE ROLE hub_backup");
+		expect(roles).toContain("CREATE ROLE hub_operations");
 		expect(roles).toContain(":'runtime_password'");
-		expect(roles).not.toMatch(/PASSWORD\\s+'[^']+'/);
+		expect(roles).not.toMatch(/PASSWORD\s+'[^']+'/);
+	});
+
+	it("provides one-shot maintenance and encrypted backup profiles", () => {
+		expect(compose).toContain(`profiles: ["maintenance"]`);
+		expect(compose).toContain(`profiles: ["backup"]`);
+		expect(compose).toContain("hub:maintenance");
+		expect(compose).toContain("backup-encrypted.mjs");
+		expect(opsDockerfile).toContain("FROM postgres:17.6-bookworm");
+		expect(opsDockerfile).toContain("USER postgres");
+		expect(opsDockerignore).toContain("!server/scripts/**");
 	});
 
 	it("keeps local secrets out of Git and the BFF image context", () => {

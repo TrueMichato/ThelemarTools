@@ -20,7 +20,11 @@ try {
 		const result = await pGrantHubDatabaseRoles({
 			client,
 			runtimeRole,
+			runtimePassword: process.env.HUB_RUNTIME_DB_PASSWORD || null,
 			backupRole: process.env.HUB_BACKUP_DB_ROLE || null,
+			backupPassword: process.env.HUB_BACKUP_DB_PASSWORD || null,
+			operationsRole: process.env.HUB_OPERATIONS_DB_ROLE || null,
+			operationsPassword: process.env.HUB_OPERATIONS_DB_PASSWORD || null,
 		});
 		process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 	} finally {

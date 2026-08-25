@@ -562,6 +562,179 @@ export class PostgresHubStore {
 		return result.rowCount;
 	}
 
+	async pDeletePublishedOutbox ({limit = 1_000, retentionDays = 7} = {}) {
+		const result = await this._pool.query(`
+			DELETE FROM hub.outbox_entries
+			WHERE ctid IN (
+				SELECT ctid
+				FROM hub.outbox_entries
+				WHERE status = 'published'
+					AND published_at < now() - ($2::integer * interval '1 day')
+				ORDER BY published_at, id
+				LIMIT $1
+			)
+		`, [limit, retentionDays]);
+		return result.rowCount;
+	}
+
+	async pDeleteExpiredSessions ({limit = 1_000, retentionDays = 30} = {}) {
+		const result = await this._pool.query(`
+			DELETE FROM hub.sessions
+			WHERE ctid IN (
+				SELECT ctid
+				FROM hub.sessions
+				WHERE (
+					expires_at < now() - ($2::integer * interval '1 day')
+					OR revoked_at < now() - ($2::integer * interval '1 day')
+				)
+				ORDER BY COALESCE(revoked_at, expires_at), id
+				LIMIT $1
+			)
+		`, [limit, retentionDays]);
+		return result.rowCount;
+	}
+
+	async pDeleteExpiredInvites ({limit = 1_000, retentionDays = 30} = {}) {
+		const result = await this._pool.query(`
+			DELETE FROM hub.invites
+			WHERE ctid IN (
+				SELECT ctid
+				FROM hub.invites
+				WHERE (
+					expires_at < now() - ($2::integer * interval '1 day')
+					OR revoked_at < now() - ($2::integer * interval '1 day')
+				)
+				ORDER BY COALESCE(revoked_at, expires_at), id
+				LIMIT $1
+			)
+		`, [limit, retentionDays]);
+		return result.rowCount;
+	}
+
+	async pDeleteExpiredLeases ({limit = 1_000, retentionDays = 1} = {}) {
+		const characters = await this._pool.query(`
+			DELETE FROM hub.character_leases
+			WHERE ctid IN (
+				SELECT ctid FROM hub.character_leases
+				WHERE expires_at < now() - ($2::integer * interval '1 day')
+				ORDER BY expires_at, character_id
+				LIMIT $1
+			)
+		`, [limit, retentionDays]);
+		const workspaces = await this._pool.query(`
+			DELETE FROM hub.dm_workspace_leases
+			WHERE ctid IN (
+				SELECT ctid FROM hub.dm_workspace_leases
+				WHERE expires_at < now() - ($2::integer * interval '1 day')
+				ORDER BY expires_at, workspace_id
+				LIMIT $1
+			)
+		`, [limit, retentionDays]);
+		return {characterLeases: characters.rowCount, workspaceLeases: workspaces.rowCount};
+	}
+
+	async pGetOperationalMetrics () {
+		const result = await this._pool.query(`
+			SELECT
+				(SELECT count(*) FROM hub.outbox_entries WHERE status IN ('pending', 'publishing', 'failed'))::bigint AS outbox_pending,
+				(SELECT count(*) FROM hub.outbox_entries WHERE status = 'failed')::bigint AS outbox_failed,
+				COALESCE((SELECT EXTRACT(EPOCH FROM now() - min(created_at)) FROM hub.outbox_entries WHERE status IN ('pending', 'publishing', 'failed')), 0)::double precision AS outbox_oldest_age_seconds,
+				(SELECT count(*) FROM hub.sessions WHERE revoked_at IS NULL AND expires_at > now())::bigint AS active_sessions,
+				(SELECT count(*) FROM hub.command_receipts WHERE expires_at <= now())::bigint AS expired_receipts,
+				(SELECT count(*) FROM hub.accounts WHERE status = 'deletion_requested' AND purge_after <= now())::bigint AS deletion_due_accounts,
+				COALESCE((
+					SELECT EXTRACT(EPOCH FROM now() - completed_at)
+					FROM hub.operational_runs
+					WHERE job_type = 'maintenance' AND status = 'succeeded'
+					ORDER BY completed_at DESC
+					LIMIT 1
+				), -1)::double precision AS last_maintenance_age_seconds,
+				COALESCE((
+					SELECT EXTRACT(EPOCH FROM now() - completed_at)
+					FROM hub.operational_runs
+					WHERE job_type = 'backup' AND status = 'succeeded'
+					ORDER BY completed_at DESC
+					LIMIT 1
+				), -1)::double precision AS last_backup_age_seconds,
+				COALESCE((
+					SELECT EXTRACT(EPOCH FROM now() - completed_at)
+					FROM hub.operational_runs
+					WHERE job_type = 'restore_drill' AND status = 'succeeded'
+					ORDER BY completed_at DESC
+					LIMIT 1
+				), -1)::double precision AS last_restore_drill_age_seconds
+		`);
+		const row = result.rows[0];
+		return {
+			outboxPending: Number(row.outbox_pending),
+			outboxFailed: Number(row.outbox_failed),
+			outboxOldestAgeSeconds: Number(row.outbox_oldest_age_seconds),
+			activeSessions: Number(row.active_sessions),
+			expiredReceipts: Number(row.expired_receipts),
+			deletionDueAccounts: Number(row.deletion_due_accounts),
+			lastMaintenanceAgeSeconds: Number(row.last_maintenance_age_seconds),
+			lastBackupAgeSeconds: Number(row.last_backup_age_seconds),
+			lastRestoreDrillAgeSeconds: Number(row.last_restore_drill_age_seconds),
+		};
+	}
+
+	async pRunMaintenance ({batchSize = 1_000} = {}) {
+		const lockClient = await this._pool.connect();
+		const runId = crypto.randomUUID();
+		let isLocked = false;
+		try {
+			const lock = await lockClient.query(`SELECT pg_try_advisory_lock(hashtextextended($1, 8)) AS locked`, ["campaign-hub-maintenance"]);
+			isLocked = !!lock.rows[0]?.locked;
+			if (!isLocked) return {skipped: true, reason: "already_running"};
+			await lockClient.query(`
+				INSERT INTO hub.operational_runs (id, job_type, status, app_version)
+				VALUES ($1, 'maintenance', 'running', $2)
+			`, [runId, process.env.npm_package_version || null]);
+			try {
+				const result = {
+					skipped: false,
+					commandReceipts: await this.pDeleteExpiredCommandReceipts({limit: batchSize}),
+					publishedOutbox: await this.pDeletePublishedOutbox({limit: batchSize}),
+					sessions: await this.pDeleteExpiredSessions({limit: batchSize}),
+					invites: await this.pDeleteExpiredInvites({limit: batchSize}),
+					leases: await this.pDeleteExpiredLeases({limit: batchSize}),
+					accounts: await this.pPurgeDueAccounts({limit: Math.min(batchSize, 100)}),
+				};
+				await lockClient.query(`
+					UPDATE hub.operational_runs
+					SET status = 'succeeded', details = $2::jsonb, completed_at = now()
+					WHERE id = $1
+				`, [runId, JSON.stringify(result)]);
+				return result;
+			} catch (error) {
+				try {
+					await lockClient.query(`
+						UPDATE hub.operational_runs
+						SET status = 'failed',
+							details = jsonb_build_object('errorCode', $2::text),
+							completed_at = now()
+						WHERE id = $1
+					`, [runId, `${error.code || error.name || "ERROR"}`.slice(0, 100)]);
+				} catch (evidenceError) {
+					this._fnOnPoolError(evidenceError);
+				}
+				throw error;
+			}
+		} finally {
+			try {
+				if (isLocked) {
+					try {
+						await lockClient.query(`SELECT pg_advisory_unlock(hashtextextended($1, 8))`, ["campaign-hub-maintenance"]);
+					} catch (unlockError) {
+						this._fnOnPoolError(unlockError);
+					}
+				}
+			} finally {
+				lockClient.release();
+			}
+		}
+	}
+
 	_normalizeIdempotencyKey (idempotencyKey) {
 		if (idempotencyKey && typeof idempotencyKey === "object") return idempotencyKey;
 		const key = `${idempotencyKey}`;

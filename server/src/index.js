@@ -1,6 +1,7 @@
 import {createHubApp} from "./app.js";
 import {GitHubOAuthProvider} from "./github-oauth-provider.js";
 import {PostgresHubStore} from "./postgres-hub-store.js";
+import {getSafeRequestLog, HUB_LOG_REDACT_PATHS} from "./observability.js";
 
 function requireEnv (name) {
 	const value = process.env[name];
@@ -32,7 +33,11 @@ const oauthProvider = new GitHubOAuthProvider({
 const app = await createHubApp({
 	store,
 	oauthProvider,
-	logger: true,
+	logger: {
+		level: process.env.HUB_LOG_LEVEL || "info",
+		redact: {paths: [...HUB_LOG_REDACT_PATHS], censor: "[REDACTED]"},
+		serializers: {req: getSafeRequestLog},
+	},
 	isStartOutboxDispatcher: true,
 	config: {
 		appOrigin: requireEnv("HUB_APP_ORIGIN"),
@@ -40,6 +45,7 @@ const app = await createHubApp({
 		csrfSecret: requireEnv("HUB_CSRF_SECRET"),
 		allowedOAuthSubjects: getCsv("HUB_ALLOWED_OAUTH_SUBJECTS"),
 		trustProxy: getTrustProxy(),
+		metricsToken: requireEnv("HUB_METRICS_TOKEN"),
 	},
 });
 

@@ -176,8 +176,13 @@ describe("hub realtime", () => {
 		});
 		await dispatcher.pDispatchOnce();
 		expect(status).toBe("failed");
+		expect(dispatcher.getStatus().consecutiveErrors).toBe(1);
 		await dispatcher.pDispatchOnce();
 		expect(status).toBe("published");
 		expect(attempts).toBe(2);
+		expect(dispatcher.getStatus()).toEqual(expect.objectContaining({
+			consecutiveErrors: 0,
+			lastBatchCount: 1,
+		}));
 	});
 });
