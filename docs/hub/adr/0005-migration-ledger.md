@@ -1,6 +1,6 @@
 # ADR 0005: Immutable checksummed forward-only migrations
 
-Status: Accepted for Phase 6C; implementation pending
+Status: Implemented through lifecycle migration 0002
 
 ## Context
 

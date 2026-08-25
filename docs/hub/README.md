@@ -18,6 +18,8 @@ Signed-out character sheets, homebrew, and DM screens remain supported and do no
 | Exact Phase 0-5 working-tree checkpoint | [Checkpoint record](checkpoint.md) |
 | Current capabilities/gates | [Implementation status](implementation-status.md) |
 | Data, ownership, lifecycle | [Domain model](domain-model.md) and [data lifecycle](data-lifecycle.md) |
+| Schema evolution and DB roles | [Migration guide](migrations.md) |
+| OCI/Compose and edge contract | [Deployment guide](deployment.md) |
 | HTTP/error/auth contract | [API reference](api-reference.md) |
 | WebSocket/event contract | [Realtime protocol](realtime-protocol.md) and [event catalog](event-catalog.md) |
 | Who may do what | [Permission matrix](permission-matrix.md) |

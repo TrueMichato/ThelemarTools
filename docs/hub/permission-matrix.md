@@ -14,8 +14,10 @@ visibility is not authorization.
 | Archive campaign | Owner only | No | No | No |
 | Transfer campaign ownership | Owner only | No | No | No |
 | Create invite | Yes | Yes | No | No |
-| List/revoke invites | Not implemented | Not implemented | No | No |
-| Change/remove member | Not implemented | Not implemented | No | No |
+| List/revoke invites | Yes | Yes | No | No |
+| Change member role | Owner only | No | No | No |
+| Remove member | Any non-owner | Player/spectator only | No | No |
+| Leave campaign | Owner must transfer/archive first | Yes | Yes | Yes |
 | Publish/activate rules or brew | Yes | Yes | No | No |
 | Read full campaign character | Any campaign character | Any campaign character | Own only | Own only if one already exists |
 | Read player-visible campaign projection | Yes | Yes | Yes | Yes |
@@ -48,9 +50,8 @@ Every HTTP read/write and WebSocket subscription also checks:
 - object status (active/archived/revoked);
 - revision/lease/fencing preconditions for writes.
 
-WebSocket messages/fanout recheck session and membership, so a membership that is made inactive at the
-authority is closed on the next message/broadcast. The member-removal API and immediate explicit socket close
-are Phase 6B work and must not be inferred from this revalidation behavior.
+WebSocket messages/fanout recheck session and membership. Member removal/leave additionally closes that
+account's campaign sockets immediately after the authoritative transaction commits.
 
 ## Important distinctions
 
@@ -62,3 +63,5 @@ are Phase 6B work and must not be inferred from this revalidation behavior.
 - Action resolution is explicitly limited to DM/co-DM/player before the target-owner check. Transfer
   resolution has no equivalent role list and therefore still permits a spectator who owns the target
   character to accept/reject that transfer. This asymmetry is current behavior, not a general role rule.
+- Account deletion-pending sessions may read session/deletion state, export, cancel deletion, or logout;
+  ordinary campaign routes return `ACCOUNT_DELETION_PENDING`.

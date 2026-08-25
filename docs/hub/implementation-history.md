@@ -170,3 +170,45 @@ At the Phase 5 close:
   horizontal overflow.
 
 These results describe the implementation checkpoint, not a managed-provider staging deployment.
+
+## Phase 6A: durable handoff and checkpoint
+
+Added the repository-owned current-system, architecture, domain, API, realtime, event, data-lifecycle,
+implementation-history, checkpoint, traceability, risk, testing, staging, troubleshooting, contributor,
+runbook, and roadmap documentation. ADRs 0004-0008 record the continuation decisions. Documentation contracts
+verify required files, links, ADR sequence, and absence of session-private paths.
+
+The large working tree was checkpointed as reviewed backend, browser, Character Sheet/DM Screen, and
+documentation commits. Migration 0001 became immutable.
+
+## Phase 6B: lifecycle administration
+
+Added:
+
+- invite metadata list/revoke;
+- owner-authorized role changes;
+- owner/co-DM member removal and voluntary leave;
+- transactional action/transfer cancellation, escrow restoration, lease release, workspace archive, and
+  character detachment;
+- session/device list and revoke;
+- seven-day account deletion request/restricted reauthentication/cancellation/purge;
+- blocked purge reporting and immediate socket closure;
+- Hub/Campaign lifecycle UI and runbooks.
+
+Memory, API, and PostgreSQL drills cover ownership protections, role boundaries, escrow restoration,
+detachment, deletion cancellation, and FK-safe purge.
+
+## Phase 6C: migration management
+
+Added:
+
+- immutable checksummed migration discovery/ledger;
+- session advisory lock;
+- status/plan/apply commands;
+- verified pre-ledger 0001 baselining;
+- migration-aware readiness;
+- least-privilege runtime/backup grants;
+- migration 0002 lifecycle fields/FKs;
+- fresh, baseline, concurrent, failed, checksum-mismatch, restored-database, and role-boundary drills.
+
+The BFF runtime no longer needs schema-owner privileges once provider roles are configured.

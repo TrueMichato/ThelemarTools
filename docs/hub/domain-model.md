@@ -24,17 +24,17 @@ security boundary.
 
 | Table | Aggregate/purpose | Important invariants | Current use |
 |---|---|---|---|
-| `accounts` | Internal user | display name 1-100; status active/suspended/deleted | Active accounts used; suspension/deletion workflows pending |
+| `accounts` | Internal user | display name 1-100; active/suspended/deletion_requested/deleted; paired deletion timestamps | Seven-day request/cancel/purge implemented |
 | `external_identities` | OAuth link | unique provider+subject; cascade with account | GitHub only in private V1 |
 | `sessions` | Browser session | unique token hash; expiry after creation; optional revoke | Hash-only server sessions |
 | `campaigns` | Campaign root | owner account; active/archived/deleting; monotonic next event sequence | active and archived used; deleting reserved |
-| `memberships` | Account role in campaign | unique campaign+account; dm/co_dm/player/spectator | active used; invited/removed/left reserved for lifecycle work |
-| `invites` | Redeemable role grant | hash-only token, expiry, max/use count, optional revoke | create/redeem/expiry/max-use used; list/revoke pending |
+| `memberships` | Account role in campaign | unique campaign+account; dm/co_dm/player/spectator | active, removed, and left used; reinvite reuses row |
+| `invites` | Redeemable role grant | hash-only token, expiry, max/use count, optional revoke | create/list/redeem/revoke/expiry/max-use used |
 | `brew_bundle_versions` | Immutable campaign brew | campaign version and content hash unique; creator membership | content stored in JSONB; `object_key` reserved |
 | `rules_versions` | Immutable typed campaign rules | campaign version unique; schema version | create/activate used |
 | `characters` | Canonical character document | owner, optional campaign, schema version, revision, lease epoch, JSON data | active/archive/reactivate/clone/move |
 | `character_leases` | One active editor | one row/character; session; epoch; expiry | acquired/taken over/reused; expired rows are passive |
-| `dm_workspaces` | Private DM Board document | one per owner membership/campaign; revision/epoch | private DM/co-DM workspace |
+| `dm_workspaces` | Private DM Board document | one per owner membership/campaign; revision/epoch; archive timestamp | archived on removal and restored on reinvite/access |
 | `dm_workspace_leases` | One workspace editor | one row/workspace; session; epoch; expiry | same fencing model as character |
 | `party_inventories` | Shared campaign container | one per campaign; revision; denomination JSON currency | lazily created |
 | `inventory_entries` | Relational party inventory rows and future character-entry model | exactly one character/party parent; quantity >0; metadata JSON | current store writes party rows; character inventory remains embedded JSON |
@@ -107,18 +107,33 @@ Archive:
 Archived campaigns remain readable but are mutation-closed. Store mutation helpers require an active
 campaign, so a later mutation returns `CAMPAIGN_NOT_FOUND` rather than a dedicated read-only error.
 
+### Account
+
+```mermaid
+stateDiagram-v2
+  [*] --> active
+  active --> deletion_requested: user request after ownership check
+  deletion_requested --> active: cancel during 7-day grace
+  deletion_requested --> [*]: purge command after deadline
+```
+
+Deletion request revokes sessions and freezes ordinary routes. Reauthentication is intentionally permitted
+for export/cancellation. Purge detaches memberships, resolves pending work, deletes owned characters and owned
+archived campaigns, anonymizes retained actor references, and reports blocked accounts.
+
 ### Membership
 
 ```mermaid
 stateDiagram-v2
   [*] --> active: campaign owner or invite redemption
-  active --> removed: Phase 6B
-  active --> left: Phase 6B
+  active --> removed: owner/co-DM removal
+  active --> left: non-owner leaves or account purge
   [*] --> invited: reserved; not currently persisted
 ```
 
-Current implementation creates active memberships directly. Removal/leave transitions and their cross-domain
-cleanup are not implemented.
+Current implementation creates active memberships directly. Removal/leave resolves reserved transfers,
+cancels pending actions, releases leases, archives the private workspace, detaches owned campaign characters,
+and emits audit/events before making membership inactive.
 
 ### Character
 
@@ -202,14 +217,10 @@ compatible. Restore preserves source identity/index.
 
 ## Known domain gaps
 
-- invite list/revoke;
-- member role/removal/leave;
-- session/device list/revoke;
-- account deletion grace/purge;
 - active enforcement of pending-action/transfer `expires_at`;
 - relational character inventory migration/dual-write (not required for current V1 behavior);
 - `campaigns.deleting`, `characters.deleted`, membership non-active statuses;
 - object storage path for brew `object_key`;
-- migration ledger and technical retention worker.
+- technical retention worker (account purge exists as a one-shot command).
 
 These gaps are tracked in the private-V1 roadmap and must not be inferred from reserved schema fields.

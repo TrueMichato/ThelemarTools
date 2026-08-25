@@ -9,9 +9,21 @@ Private invite-only V1 is implemented through Phase 5 on `multiplayer-hub`. The 
 private-table staging deployment after the environment-specific gates below are completed. Semi-public
 onboarding remains intentionally disabled.
 
-Phase 6A documentation/handoff and the approved checkpoint commit series are complete. Combined Hub
-validation passes 30 suites / 216 tests with a clean tree. Migration 0001 is immutable; Phase 6B lifecycle
-and Phase 6C migrations are ready to begin. Phases 6D-6H remain pending; see
+Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecycle administration, and Phase
+6C migration management through 0002 are complete.
+
+- Lifecycle includes invite list/revoke, owner role changes, owner/co-DM member removal, voluntary leave,
+  session/device revocation, immediate socket closure, workspace archive/restore, character detachment,
+  escrow/action cleanup, and seven-day deletion request/cancel/purge with blocked-id reporting.
+- Migration management includes immutable/checksummed files, advisory locking, baseline detection,
+  status/plan/apply, migration-aware readiness, runtime/backup role grants, migration 0002, and
+  fresh/baseline/concurrent/failure/checksum/restored-database drills.
+- Current Hub validation passes 36 suites / 243 tests; repository JS lint and Hub SCSS build/lint pass.
+
+Phase 6D portable deployment is implemented and locally verified: non-root/read-only BFF image, lightweight
+static image, PostgreSQL 17, one-shot migration/role grants, least-privilege runtime, same-origin Caddy edge,
+WebSocket forwarding, liveness/readiness, and graceful restart. Managed deployment remains Phase 6G. Phase
+6E operations/observability is next; Phases 6F-6H remain pending. See
 [private-v1-roadmap.md](private-v1-roadmap.md).
 
 ## Implemented
@@ -30,6 +42,8 @@ and Phase 6C migrations are ready to begin. Phases 6D-6H remain pending; see
   every mutation.
 - Idempotency receipts are compact, expire after 24 hours, and have bounded cleanup support.
 - Backup/restore scripts and successful PostgreSQL 17 restore drills.
+- Invite/member/session lifecycle administration and seven-day account deletion.
+- Checksummed migration ledger, migration 0002, migration-aware readiness, and least-privilege role grants.
 
 ## Final verification
 
@@ -44,6 +58,8 @@ and Phase 6C migrations are ready to begin. Phases 6D-6H remain pending; see
   audit passed.
 - Signed-out Hub, signed-in Hub, and DM Campaign views were checked at desktop and 390 px mobile widths with
   clean consoles, no horizontal overflow, and 44 px visible controls.
+- Phase 6B/C PostgreSQL drills covered lifecycle escrow restoration/detachment/purge and fresh, baseline,
+  concurrent, failed, checksum-mismatch, and restored migration paths.
 
 ## V1 limitations
 

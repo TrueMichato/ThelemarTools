@@ -29,7 +29,11 @@
 | `campaign.archived` | campaign | all_members | empty | Characters already detached |
 | `campaign.ownership_transferred` | campaign | all_members | target account id | Owner/roles changed atomically |
 | `invite.created` | invite | dm_only | role, expiry | Raw token is never in event |
+| `invite.revoked` | invite | dm_only | empty | Revoke is idempotent |
 | `membership.joined` | membership | all_members | account id, role | Invite id remains audit detail, not public payload |
+| `membership.role_changed` | membership | all_members | account id, role | Owner-authorized non-owner role change |
+| `membership.removed` | membership | all_members | account id, detached character ids | Administrative removal completed |
+| `membership.left` | membership | all_members | account id, detached character ids | Voluntary leave/account purge cleanup |
 | `character.created` | character | all_members | owner account id | Full document not emitted |
 | `character.reactivated` | character | all_members | empty | Same scoped import reactivates archived row |
 | `character.patched` | character | actor_and_dm | submitted patches | Private owner/DM state event |
@@ -44,6 +48,7 @@
 | `action.proposed` | pending action | explicit actor+target | target id, structured effect | DMs also see explicit-account events |
 | `action.applied` | pending action | explicit actor+target | effect, target id, character revision | Character changed semantically |
 | `action.rejected` | pending action | explicit actor+target | effect, target id, character revision | No character mutation |
+| `action.cancelled` | pending action | explicit actor+target | lifecycle reason | Membership/character lifecycle cancellation |
 | `xp.granted` | character | explicit DM+owner | amount, reason, resulting XP | DM/co-DM also included by visibility policy |
 | `item.granted` | character | explicit DM+owner | granted entry | Entry content is cross-user validated |
 | `transfer.reserved` | transfer | all_members | source/target kinds and ids | Escrow content is not broadcast |
@@ -77,7 +82,8 @@ Audit is distinct from domain events:
 Current audit actions include:
 
 - `campaign.created`, `campaign.archived`, `campaign.ownership_transferred`;
-- `invite.created`, `invite.redeemed`;
+- `invite.created`, `invite.redeemed`, `invite.revoked`;
+- `membership.role_changed`, `membership.removed`, `membership.left`;
 - `character.created`, `character.reactivated`, `character.cloned`, `character.moved`,
   `character.archived`;
 - `brew.created`, `brew.activated`;
@@ -85,7 +91,9 @@ Current audit actions include:
 - `dm_workspace.created`, `dm_workspace.updated`;
 - `action.applied`, `action.rejected`;
 - `xp.granted`, `item.granted`;
-- `transfer.committed`, `transfer.rejected`.
+- `transfer.committed`, `transfer.rejected`;
+- `session.revoked`, `session.revoked_others`;
+- `account.deletion_requested`, `account.deletion_cancelled`, `account.deletion_purged`.
 
 Not every high-frequency product event has an audit row. Character patches, presence, roll logging, action
 proposal, and transfer reservation are represented by canonical/domain data instead. Changing audit policy

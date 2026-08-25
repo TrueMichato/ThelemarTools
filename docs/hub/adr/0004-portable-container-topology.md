@@ -1,6 +1,6 @@
 # ADR 0004: Portable OCI and same-origin edge topology
 
-Status: Accepted for Phase 6D; implementation pending
+Status: Implemented and locally verified; managed-provider adaptation pending Phase 6G
 
 ## Context
 

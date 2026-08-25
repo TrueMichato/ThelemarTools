@@ -20,6 +20,9 @@ Runbooks are executable operational procedures. Each final runbook must contain:
 ## Current procedure
 
 - [Current setup, backup, restore, retention, and rotation](../operations.md)
+- [Member removal](member-removal.md)
+- [Account deletion grace and purge](account-deletion.md)
+- [Session/device compromise](session-compromise.md)
 
 ## Required before private launch
 
@@ -32,8 +35,6 @@ Runbooks are executable operational procedures. Each final runbook must contain:
 - session/OAuth compromise;
 - cookie/CSRF/OAuth/database secret rotation;
 - allowlist change;
-- member removal with active resources;
-- account deletion/cancellation/purge;
 - campaign ownership recovery;
 - incident declaration, containment, evidence, and postmortem.
 

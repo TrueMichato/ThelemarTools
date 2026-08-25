@@ -15,7 +15,9 @@ roles, and drilled runbooks remain continuation work.
 3. Apply the schema:
 
    ```bash
+   DATABASE_URL=... npm run hub:migrate:plan
    DATABASE_URL=... npm run hub:migrate
+   DATABASE_URL=... npm run hub:migrate:status
    ```
 
 4. Create a GitHub OAuth application with callback
@@ -27,8 +29,8 @@ roles, and drilled runbooks remain continuation work.
    forwarded headers. Leave it empty for a directly exposed BFF.
 7. Start the BFF with `npm run hub:serve`.
 
-The process refuses to listen until PostgreSQL is reachable and `hub.accounts` exists. `/api/health` also
-returns 503 if readiness fails.
+The process refuses to listen until PostgreSQL is reachable and the required ledger migration exists.
+`/api/health` also returns 503 if readiness fails. See [migrations.md](migrations.md).
 
 ## Backup
 
@@ -72,7 +74,14 @@ PostgreSQL provider and meets the documented RPO/RTO.
   part of receipt cleanup.
 
 There is currently no scheduled maintenance worker. Receipt cleanup is an explicit store method. Published
-outbox/session/invite cleanup and deletion purge are Phase 6E work.
+outbox/session/invite cleanup is Phase 6E work. Due account deletion is available as a bounded one-shot:
+
+```bash
+DATABASE_URL=... HUB_PURGE_LIMIT=100 npm run hub:purge-accounts
+```
+
+The result lists both `purgedAccountIds` and `blockedAccountIds`. Any blocked id is an operational alert:
+campaign ownership was acquired or not resolved after deletion was requested.
 
 ## Secret and session rotation
 
@@ -84,9 +93,23 @@ outbox/session/invite cleanup and deletion purge are Phase 6E work.
 - Rotate the GitHub client secret through the provider and deployment secret manager.
 - Revoke individual browser sessions through the database/admin path; logout revokes the current token.
 
+## Database roles
+
+Provision role identities/passwords in the provider, then grant least privilege as the migration owner:
+
+```bash
+DATABASE_URL=... \
+HUB_RUNTIME_DB_ROLE=hub_runtime \
+HUB_BACKUP_DB_ROLE=hub_backup \
+npm run hub:grant-roles
+```
+
+The runtime connection string used by `hub:serve` should belong to `hub_runtime`; migration and grant commands
+use the schema owner. The backup command should use the read-only backup role when the provider permits.
+
 ## Current launch gaps
 
-- no checksummed migration ledger or migration-aware readiness;
+- automated scheduling/alerting for account purge is not yet configured;
 - no dedicated BFF image/reference same-origin Compose stack;
 - no separate migration/runtime/backup database roles;
 - no scheduled maintenance;

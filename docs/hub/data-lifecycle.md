@@ -81,18 +81,18 @@ transactional membership lookup requires `campaigns.status = 'active'`, so later
 
 ## Current deletion behavior
 
-There is no account deletion endpoint/workflow.
-
-Database constraints intentionally prevent a naive account delete:
+Database constraints and migration 0002 support the implemented seven-day deletion workflow. A naive account
+delete remains forbidden:
 
 - campaigns and characters reference owner accounts without cascade;
 - identities, sessions, memberships, and receipts cascade after dependencies are resolved;
 - audit/domain actor references can become null;
 - campaign deletion cascades campaign-owned children but characters must be detached first.
 
-Direct `DELETE FROM hub.accounts` is not an approved operational procedure.
+Direct `DELETE FROM hub.accounts` is not an approved operational procedure; use the request/cancel flow and
+bounded `hub:purge-accounts` processor.
 
-## Approved account-deletion lifecycle (Phase 6B)
+## Account-deletion lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -102,7 +102,7 @@ stateDiagram-v2
   purging --> deleted: transactional/batched purge completes
 ```
 
-Policy:
+Implemented policy:
 
 1. Offer export first.
 2. Block while the account owns an active campaign.
@@ -110,10 +110,11 @@ Policy:
 4. Set request/deadline; revoke ordinary sessions and freeze mutations.
 5. Allow restricted reauthentication for export/cancellation during grace.
 6. Once purge starts, cancellation is forbidden.
-7. Remove identities, sessions, memberships, private workspaces, owned characters, and personal data.
+7. Purge identities, sessions, memberships, private workspaces, owned characters, and personal data.
 8. Null/anonymize actor references that must remain for tenant audit integrity.
 9. Record purge evidence without copying deleted data.
-10. Document the date by which PITR/backup retention can no longer restore deleted content.
+10. Return both purged and blocked account ids so operators can detect an overdue ownership conflict.
+11. Document the date by which PITR/backup retention can no longer restore deleted content.
 
 ## Retention policy
 
@@ -123,7 +124,7 @@ Approved private-V1 policy:
 - command receipts: 24 hours;
 - published outbox rows: 7 days;
 - expired/revoked sessions and invites: 30 days;
-- leases: expired rows may be reused immediately; bounded cleanup is Phase 6E;
+- leases: revoked with sessions/member removal; expired rows may be reused immediately; old-row cleanup is Phase 6E;
 - backups: managed PITR + nightly encrypted portable backup, with rotation chosen to meet RPO <=24h and
   RTO <=4h while documenting deletion aging.
 
@@ -152,6 +153,5 @@ export against the deletion/privacy disclosure and add any user-owned data neede
 
 ## Reserved fields without active lifecycle
 
-The schema permits action/transfer expiry and several inactive/deleting/deleted statuses, but current
-authority does not advance those automatically. Documents and UI must not claim timeout/deletion behavior
-until Phase 6 implements it.
+The schema permits action/transfer expiry and several deleting/deleted statuses, but current authority does
+not advance those automatically. Membership removed/left and account deletion_requested are active behavior.

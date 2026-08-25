@@ -19,9 +19,9 @@
 | Service worker never caches auth/API | `security.md` | Hub route policy + `sw-template.js` | route-policy/service-worker build | stale-client staging scenario |
 | Backup is portable and atomic | `operations.md` | backup/restore/pg-env scripts | local PostgreSQL backup/restore drill | backup/restore runbook |
 | Managed recovery meets RPO/RTO | continuation decision | not implemented | staging restore evidence required | Phase 6E/G/H |
-| Member/session/account lifecycle | continuation decision | not implemented | Phase 6B tests required | Phase 6B runbooks |
-| Safe schema evolution | ADR 0005 planned | not implemented | Phase 6C migration matrix required | migration runbook |
-| Reproducible deployment | ADR 0004 planned | not implemented | Phase 6D container/Compose smoke | deployment guide |
+| Member/session/account lifecycle | ADR 0007; data lifecycle | invite/member/session/deletion APIs, migration 0002, socket closure, purge command | lifecycle administration/API/migration/session tests and PostgreSQL drill | member removal, account deletion, session compromise runbooks |
+| Safe schema evolution | ADR 0005; `migrations.md` | checksummed/advisory-locked runner, baseline fingerprint, migration-aware readiness, role grants | migration runner/contract/role tests and PostgreSQL fresh/baseline drills | migration guide; failure runbook pending |
+| Reproducible deployment | ADR 0004; `deployment.md` | BFF/static images, Compose DB/migrate/grants/BFF/static/edge, live/ready probes | deployment contract, image build/inspect, Compose config/start/routing/restart probes | deployment guide |
 | Real-stack multi-context behavior | `staging-plan.md` | not implemented | Phase 6F Playwright and Phase 6H game day | staging evidence |
 
 Use `not implemented` explicitly. A planned row must not be presented as current capability.

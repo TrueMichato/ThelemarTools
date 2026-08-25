@@ -37,7 +37,7 @@ The Campaign Hub is an optional online layer over the existing local-first site.
 | Domain helpers | `server/src/hub-actions.js`, `server/src/campaign-content.js`, `server/src/cloud-data-validation.js` | Structured effects, inventory/escrow, rules, brew validation, character sanitization/quotas |
 | Realtime authority | `server/src/realtime.js`, `server/src/projections.js` | Presence, resync, visibility filtering, outbox dispatch |
 | Auth/security | `server/src/github-oauth-provider.js`, `server/src/security.js` | OAuth exchange, PKCE, signed state, hashes, tokens, CSRF helpers |
-| Schema/operations | `server/migrations/0001_hub_core.sql`, `server/scripts/` | Initial schema, migration, backup, restore, credential-safe libpq environment |
+| Schema/operations | `server/migrations/`, `server/src/migration-runner.js`, `server/scripts/` | Immutable migrations, checksummed ledger, role grants, backup, restore, credential-safe DB access |
 | Character Sheet seams | `js/charactersheet/charactersheet.js`, `charactersheet-state.js`, `charactersheet-rollhistory.js` | Repository selection, context overlay, save/rebase/recovery, campaign roll logging |
 | DM Screen seams | `js/dmscreen.js`, `js/dmscreen/partytracker/` | Workspace repository selection and non-persisted live character projections |
 | PWA policy | `sw-template.js`, `js/hub/hub-route-policy.js` | Network-only handling for same-origin `/api` and `/auth` |
@@ -59,8 +59,9 @@ flowchart LR
   Outbox --> WS
 ```
 
-The repository does not yet contain the dedicated BFF OCI image, reference Compose topology, managed
-provider configuration, or production deployment workflow. Those are Phase 6D-6G work.
+The repository contains a dedicated BFF OCI image and a locally verified PostgreSQL/migrator/role-grant/BFF/
+static/same-origin-edge Compose topology. Managed provider configuration and production promotion remain
+Phase 6G work.
 
 ## Character persistence
 
@@ -139,6 +140,8 @@ provider configuration, or production deployment workflow. Those are Phase 6D-6G
   outbox row, and command receipt in the same transaction.
 - Portable custom-format backups and single-transaction restores have been exercised locally against
   PostgreSQL 17.
+- Migration status/plan/apply uses a checksummed ledger and advisory lock. Pre-ledger Phase 0-5 databases are
+  fingerprinted before recording 0001; application readiness requires the expected migration version.
 
 ## Implemented UI
 
@@ -148,6 +151,8 @@ provider configuration, or production deployment workflow. Those are Phase 6D-6G
 - campaign list;
 - inline campaign creation;
 - invite-fragment preservation across OAuth.
+- session/device listing and revocation;
+- account export and seven-day deletion request/cancellation state.
 
 `campaign.html` supports:
 
@@ -155,13 +160,17 @@ provider configuration, or production deployment workflow. Those are Phase 6D-6G
 - invite creation;
 - local-character upload;
 - campaign brew and rules publication/activation;
+- invite metadata listing/revocation;
+- owner role changes, owner/co-DM member removal, and non-owner leave;
 - private DM workspace link;
 - effect proposals and pending resolution;
 - XP and item grants;
 - party inventory summary and item/currency transfers.
 
-Current administrative gaps are launch work, not hidden capabilities: invite listing/revocation, member role
-changes/removal, session/device management, and user-requested account deletion are not yet implemented.
+Lifecycle administration is authoritative: member removal restores escrow, cancels pending work, releases
+leases, archives the member workspace, detaches player-owned characters, and closes campaign sockets. Account
+deletion freezes ordinary access for seven days, permits reauthenticated export/cancellation, and is purged by
+the bounded `hub:purge-accounts` command.
 
 ## Fixed limits
 

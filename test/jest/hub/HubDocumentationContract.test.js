@@ -23,6 +23,8 @@ describe("Campaign Hub documentation contract", () => {
 		"realtime-protocol.md",
 		"event-catalog.md",
 		"data-lifecycle.md",
+		"deployment.md",
+		"migrations.md",
 		"implementation-history.md",
 		"checkpoint.md",
 		"traceability.md",

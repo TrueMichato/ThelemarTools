@@ -1,7 +1,7 @@
 # Campaign Hub private-V1 launch roadmap
 
 > **Status:** Approved continuation plan
-> **Current phase:** Phase 6B lifecycle and Phase 6C migrations ready
+> **Current phase:** Phase 6E operations and observability
 > **Last reviewed:** 2026-08-24
 > **Owner:** Campaign Hub maintainers
 
@@ -38,7 +38,7 @@ Exit:
 - no repository documentation depends on session/chat history;
 - old proof documents point to current references.
 
-## Phase 6B — lifecycle administration
+## Phase 6B — lifecycle administration (implemented)
 
 Deliver:
 
@@ -54,7 +54,7 @@ Exit:
 - authorization, idempotency, lifecycle, and PostgreSQL tests cover every transition;
 - removal cannot delete a player's character or strand escrow.
 
-## Phase 6C — migration management
+## Phase 6C — migration management (implemented through 0002)
 
 Deliver:
 
@@ -73,7 +73,7 @@ Exit:
 - runtime role cannot alter schema;
 - app/database version skew fails readiness.
 
-## Phase 6D — portable deployment
+## Phase 6D — portable deployment (implemented locally)
 
 Deliver:
 

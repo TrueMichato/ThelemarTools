@@ -95,3 +95,18 @@ For each release candidate, record:
 | Go/no-go decision | |
 
 Evidence containing secrets or user data belongs in the approved private operational store, not Git.
+
+## Phase 6B-6D evidence
+
+- Hub: 36 suites / 243 tests.
+- PostgreSQL 17: fresh 0001+0002, pre-ledger baseline+0002, concurrent runners, failed 0002 rollback,
+  checksum mismatch, restored-database upgrade/readiness.
+- Runtime role: CRUD allowed, schema create denied.
+- Backup role: reads allowed, writes denied.
+- Lifecycle: invite/member/session administration, escrow restoration, character detachment, restricted
+  deletion reauthentication/cancellation, FK-safe purge.
+- Browser: active account/device controls, pending-deletion surface, DM member/invite controls at desktop and
+  390 px mobile with no console error/overflow.
+- Deployment: BFF image build via configurable registry, UID 10001/read-only runtime, ~85 MB BFF and ~70 MB
+  static images, Compose migration/grant ordering, least-privilege BFF readiness, static/API/auth/WebSocket
+  edge probes, and graceful SIGTERM restart.

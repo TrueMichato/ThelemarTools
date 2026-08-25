@@ -56,13 +56,19 @@ Path/query keys ending in `Id` must be UUID-shaped. Invalid values fail as `INVA
 
 | Method/path | Access | Input | Result/behavior |
 |---|---|---|---|
-| `GET /api/health` | Public | none | `{ok:true}` or 503 `{ok:false,error:"DATABASE_UNAVAILABLE"}`; currently DB/schema-presence readiness |
+| `GET /api/health` | Public | none | `{ok:true}` or 503 `{ok:false,error:"DATABASE_UNAVAILABLE"}`; verifies DB, migration ledger, and required migration |
 | `GET /api/meta` | Public | none | protocol and package/app version |
 | `GET /auth/github/start` | Public, 10/min | query `returnTo?` | Sets signed OAuth-state cookie and redirects to GitHub PKCE authorization |
 | `GET /auth/github/callback` | OAuth state cookie, 20/min | query `code`, `state` | Exchanges code, enforces numeric-subject allowlist, rotates prior session, sets session cookie, redirects safely |
 | `GET /api/session` | Public | session cookie optional | `{signedIn:false}` or account + CSRF token |
 | `POST /api/logout` | Mutation security | none | Revokes current session, closes its sockets, clears cookie |
 | `GET /api/account/export` | Authenticated | none | Download containing owned account/membership/campaign/character/audit data |
+| `GET /api/account/sessions` | Authenticated active account | none | Own sessions with current/revoked/activity metadata |
+| `POST /api/account/sessions/:sessionId/revoke` | Authenticated mutation | own session UUID | Revokes session/leases and closes matching sockets |
+| `POST /api/account/sessions/revoke-others` | Authenticated mutation | none | Revokes all other own sessions/leases/sockets |
+| `GET /api/account/deletion` | Authenticated, including deletion grace | none | Current deletion status/timestamps |
+| `POST /api/account/deletion/request` | Authenticated mutation | `{confirmation:"DELETE"}` | Blocks active campaign owners; schedules seven-day purge, revokes sessions/cookie |
+| `POST /api/account/deletion/cancel` | Reauthenticated deletion-grace mutation | none | Restores active account before purge begins |
 
 ## Campaign routes
 
@@ -72,6 +78,9 @@ Path/query keys ending in `Id` must be UUID-shaped. Invalid values fail as `INVA
 | `GET /api/campaigns` | Authenticated | none | Active memberships' non-deleting campaigns |
 | `GET /api/campaigns/:campaignId` | Active member | none | Campaign with caller membership role/id |
 | `GET /api/campaigns/:campaignId/members` | Active member | none | Active member summaries |
+| `PATCH /api/campaigns/:campaignId/members/:membershipId` | Campaign owner mutation | role co_dm/player/spectator | Changes a non-owner role |
+| `DELETE /api/campaigns/:campaignId/members/:membershipId` | Owner or co-DM mutation | none | Removes allowed non-owner, resolves pending state, detaches characters |
+| `POST /api/campaigns/:campaignId/leave` | Non-owner mutation | none | Leaves and performs the same lifecycle cleanup |
 | `GET /api/campaigns/:campaignId/context` | Active member | none | Active immutable brew/rules versions |
 | `GET /api/campaigns/:campaignId/snapshot` | Active member | none | Campaign, membership, role-shaped characters, last sequence |
 | `GET /api/campaigns/:campaignId/events` | Active member | `afterSequence>=0`, `limit` 1-500 (default 200) | Visibility-filtered ordered events |
@@ -85,10 +94,11 @@ The archive/ownership routes rely on store-level owner authorization in addition
 | Method/path | Authorization | Input | Result |
 |---|---|---|---|
 | `POST /api/campaigns/:campaignId/invites` | DM/co-DM mutation, 20/min | role co_dm/player/spectator, expiry 1-720h (default 168), max uses 1-20 | 201 invite metadata plus raw token |
+| `GET /api/campaigns/:campaignId/invites` | DM/co-DM | none | Invite metadata without token hashes/raw tokens |
+| `POST /api/campaigns/:campaignId/invites/:inviteId/revoke` | DM/co-DM mutation | none | Idempotently sets revoke time |
 | `POST /api/invites/redeem` | Authenticated mutation, 20/min | raw token 32-500 chars | Active membership; invalid/expired/revoked/exhausted is `INVITE_INVALID` |
 
-Only the token hash is persisted. The raw token is returned only from creation. Listing/revocation endpoints
-are Phase 6B work.
+Only the token hash is persisted. The raw token is returned only from creation.
 
 ## Character routes
 
@@ -154,11 +164,11 @@ Campaign role alone does not permit reading another DM's workspace.
 
 | Class | Stable codes |
 |---|---|
-| Authentication/security | `AUTH_REQUIRED`, `INVALID_ORIGIN`, `INVALID_CSRF`, `PROTOCOL_UPDATE_REQUIRED`, `ACCOUNT_NOT_ALLOWED`, `FORBIDDEN` |
+| Authentication/security | `AUTH_REQUIRED`, `INVALID_ORIGIN`, `INVALID_CSRF`, `PROTOCOL_UPDATE_REQUIRED`, `ACCOUNT_NOT_ALLOWED`, `ACCOUNT_DELETION_PENDING`, `FORBIDDEN` |
 | Request/idempotency | `INVALID_REQUEST`, `INVALID_ID`, `INVALID_CAMPAIGN_NAME`, `IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_REUSED`, `IDEMPOTENCY_RESULT_GONE`, `PAYLOAD_TOO_LARGE`, `REQUEST_REJECTED` |
 | OAuth | `INVALID_OAUTH_STATE`, `ACCOUNT_NOT_ALLOWED` |
-| Not found/lifecycle | `ACCOUNT_NOT_FOUND`, `CAMPAIGN_NOT_FOUND`, `CHARACTER_NOT_FOUND`, `WORKSPACE_NOT_FOUND`, `ACTION_NOT_FOUND`, `TRANSFER_NOT_FOUND`, `BREW_NOT_FOUND`, `RULES_NOT_FOUND`, `INVITE_INVALID` |
-| Concurrency | `REVISION_CONFLICT`, `LEASE_HELD`, `LEASE_EXPIRED`, `LEASE_FENCED`, `CHARACTER_BUSY`, `CAMPAIGN_BUSY` |
+| Not found/lifecycle | `ACCOUNT_NOT_FOUND`, `SESSION_NOT_FOUND`, `CAMPAIGN_NOT_FOUND`, `MEMBERSHIP_NOT_FOUND`, `CHARACTER_NOT_FOUND`, `WORKSPACE_NOT_FOUND`, `ACTION_NOT_FOUND`, `TRANSFER_NOT_FOUND`, `BREW_NOT_FOUND`, `RULES_NOT_FOUND`, `INVITE_INVALID`, `INVITE_NOT_FOUND`, `ACCOUNT_DELETION_NOT_PENDING` |
+| Concurrency/lifecycle conflicts | `REVISION_CONFLICT`, `LEASE_HELD`, `LEASE_EXPIRED`, `LEASE_FENCED`, `CHARACTER_BUSY`, `CAMPAIGN_BUSY`, `MEMBERSHIP_OWNER_PROTECTED`, `ACCOUNT_OWNS_CAMPAIGN` |
 | Character/cloud content | `CHARACTER_INVALID`, `CHARACTER_TOO_LARGE`, `CLOUD_DATA_INVALID`, `CLOUD_DATA_TOO_LARGE`, `CLOUD_DATA_TOO_DEEP`, `CLOUD_HTML_FORBIDDEN`, `CLOUD_URL_FORBIDDEN`, `CLOUD_KEY_FORBIDDEN` |
 | Campaign content | `BREW_INVALID`, `BREW_TOO_LARGE`, `BREW_TOO_DEEP`, `BREW_BLOCKLIST_FORBIDDEN`, `BREW_RAW_HTML_FORBIDDEN`, `BREW_URL_FORBIDDEN`, `BREW_KEY_FORBIDDEN`, `BREW_DEPENDENCY_MISSING`, `RULES_INVALID`; generic `CLOUD_DATA_INVALID`, `CLOUD_DATA_TOO_LARGE`, or `CLOUD_DATA_TOO_DEEP` may surface from the shared JSON-safety pass |
 | Actions/transfers | `ACTION_INVALID`, `RESOURCE_INSUFFICIENT`, `NUMERIC_INVALID`, `TRANSFER_EMPTY`, `TRANSFER_INSUFFICIENT`, `TRANSFER_ITEM_LINKED`, `TRANSFER_TARGET_INVALID` |
