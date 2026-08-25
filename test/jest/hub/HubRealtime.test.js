@@ -9,6 +9,12 @@ class FakeSocket extends EventEmitter {
 	close () { this.readyState = 3; this.emit("close"); }
 }
 
+class HeartbeatSocket extends FakeSocket {
+	pingCount = 0;
+	ping () { this.pingCount++; }
+	terminate () { this.close(); }
+}
+
 describe("hub projections and event visibility", () => {
 	it("removes private character fields from player projections", () => {
 		const projected = projectCharacterForPlayer({
@@ -36,6 +42,35 @@ describe("hub projections and event visibility", () => {
 });
 
 describe("hub realtime", () => {
+	it("keeps responsive sockets alive and terminates missed heartbeats", () => {
+		const timers = [];
+		const cleared = [];
+		const realtime = new HubRealtime({
+			store: {},
+			fnSetInterval: fn => {
+				timers.push(fn);
+				return timers.length;
+			},
+			fnClearInterval: timer => cleared.push(timer),
+		});
+		const socket = new HeartbeatSocket();
+		realtime.addConnection({
+			socket,
+			account: {id: "p", displayName: "P"},
+			session: {id: "s"},
+			membership: {id: "m", role: "player"},
+			campaignId: "cmp",
+		});
+		timers[0]();
+		expect(socket.pingCount).toBe(1);
+		socket.emit("pong");
+		timers[0]();
+		expect(socket.pingCount).toBe(2);
+		timers[0]();
+		expect(socket.readyState).toBe(3);
+		expect(cleared).toContain(1);
+	});
+
 	it("filters published events per subscriber role", async () => {
 		const realtime = new HubRealtime({store: {
 			pGetMembership: async ({accountId}) => ({role: accountId === "dm" ? "dm" : "player"}),

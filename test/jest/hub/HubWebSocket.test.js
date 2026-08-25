@@ -42,7 +42,7 @@ describe("campaign WebSocket", () => {
 		});
 	});
 
-	afterEach(async () => app.close());
+	afterEach(async () => app?.close());
 
 	async function pSignIn () {
 		const start = await app.inject({method: "GET", url: "/auth/github/start"});
@@ -116,5 +116,82 @@ describe("campaign WebSocket", () => {
 		await expect(app.injectWS(`/ws/campaign/${campaign.id}?v=1`, {
 			headers: {cookie: session.cookie, origin: "https://evil.example"},
 		})).rejects.toThrow();
+	});
+
+	it("closes active sockets with a bounded server-shutdown code", async () => {
+		const session = await pSignIn();
+		const campaign = (await app.inject({
+			method: "POST",
+			url: "/api/campaigns",
+			headers: headers(session, "shutdown-campaign"),
+			payload: {name: "Shutdown"},
+		})).json().campaign;
+		const socket = await app.injectWS(`/ws/campaign/${campaign.id}?v=1`, {
+			headers: {cookie: session.cookie, origin: APP_ORIGIN},
+		});
+		const pClosed = once(socket, "close");
+		await app.close();
+		app = null;
+		const [code, reason] = await pClosed;
+		expect(code).toBe(1001);
+		expect(reason.toString()).toBe("Server shutdown");
+	});
+
+	it("passes the configured provider client address into WebSocket authorization context", async () => {
+		let connection;
+		const providerStore = new MemoryHubStore();
+		const providerApp = await createHubApp({
+			store: providerStore,
+			oauthProvider: {
+				getAuthorizationUrl: ({state}) => `https://github.example/?state=${state}`,
+				pExchangeCode: async () => ({
+					provider: "github",
+					providerSubject: "123",
+					login: "dm",
+					displayName: "DM",
+				}),
+			},
+			realtime: {
+				getConnectionCount: () => 0,
+				addConnection: value => connection = value,
+				pPublishEvent: async () => {},
+				close: () => {},
+			},
+			config: {
+				appOrigin: APP_ORIGIN,
+				cookieSecret: "x".repeat(32),
+				csrfSecret: "y".repeat(32),
+				allowedOAuthSubjects: ["github:123"],
+				clientIpHeader: "do-connecting-ip",
+			},
+		});
+		try {
+			const start = await providerApp.inject({method: "GET", url: "/auth/github/start"});
+			const state = new URL(start.headers.location).searchParams.get("state");
+			const callback = await providerApp.inject({
+				method: "GET",
+				url: `/auth/github/callback?code=x&state=${state}`,
+				headers: {cookie: `__Host-hub_oauth=${getCookie(start, "__Host-hub_oauth")}`},
+			});
+			const cookie = `__Host-hub_session=${getCookie(callback, "__Host-hub_session")}`;
+			const session = (await providerApp.inject({method: "GET", url: "/api/session", headers: {cookie}})).json();
+			const campaign = (await providerApp.inject({
+				method: "POST",
+				url: "/api/campaigns",
+				headers: headers({cookie, ...session}, "provider-campaign"),
+				payload: {name: "Provider Realtime"},
+			})).json().campaign;
+			const socket = await providerApp.injectWS(`/ws/campaign/${campaign.id}?v=1`, {
+				headers: {
+					cookie,
+					origin: APP_ORIGIN,
+					"do-connecting-ip": "203.0.113.15",
+				},
+			});
+			expect(connection).toEqual(expect.objectContaining({clientIp: "203.0.113.15"}));
+			socket.close();
+		} finally {
+			await providerApp.close();
+		}
 	});
 });

@@ -1,4 +1,5 @@
 import {createHubApp} from "./app.js";
+import {getClientIpHeader} from "./client-ip.js";
 import {GitHubOAuthProvider} from "./github-oauth-provider.js";
 import {PostgresHubStore} from "./postgres-hub-store.js";
 import {getSafeRequestLog, HUB_LOG_REDACT_PATHS} from "./observability.js";
@@ -21,6 +22,7 @@ function getTrustProxy () {
 	return proxies.length ? proxies : false;
 }
 
+const clientIpHeader = getClientIpHeader(process.env.HUB_CLIENT_IP_HEADER);
 const store = PostgresHubStore.fromConnectionString({
 	connectionString: requireEnv("DATABASE_URL"),
 	ssl: process.env.HUB_DATABASE_SSL !== "false",
@@ -36,7 +38,7 @@ const app = await createHubApp({
 	logger: {
 		level: process.env.HUB_LOG_LEVEL || "info",
 		redact: {paths: [...HUB_LOG_REDACT_PATHS], censor: "[REDACTED]"},
-		serializers: {req: getSafeRequestLog},
+		serializers: {req: request => getSafeRequestLog(request, {clientIpHeader})},
 	},
 	isStartOutboxDispatcher: true,
 	config: {
@@ -46,6 +48,7 @@ const app = await createHubApp({
 		allowedOAuthSubjects: getCsv("HUB_ALLOWED_OAUTH_SUBJECTS"),
 		trustProxy: getTrustProxy(),
 		metricsToken: requireEnv("HUB_METRICS_TOKEN"),
+		clientIpHeader,
 	},
 });
 

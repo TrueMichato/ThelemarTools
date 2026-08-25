@@ -1,3 +1,5 @@
+import {getRequestClientIp} from "./client-ip.js";
+
 const LABEL_ESCAPE_RE = /[\\"]/g;
 
 function escapeLabel (value) {
@@ -67,12 +69,12 @@ export function getSafeRequestId (request) {
 	return null;
 }
 
-export function getSafeRequestLog (request) {
+export function getSafeRequestLog (request, {clientIpHeader = null} = {}) {
 	return {
 		method: request.method,
 		url: `${request.url || ""}`.split("?")[0],
 		host: request.headers?.host,
-		remoteAddress: request.ip,
+		remoteAddress: getRequestClientIp({request, clientIpHeader}),
 		remotePort: request.socket?.remotePort,
 	};
 }

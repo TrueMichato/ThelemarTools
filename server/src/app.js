@@ -21,8 +21,10 @@ import {
 } from "./campaign-content.js";
 import {HubOutboxDispatcher, HubRealtime} from "./realtime.js";
 import {getSafeRequestId, HubMetrics} from "./observability.js";
+import {getClientIpHeader, getRequestClientIp} from "./client-ip.js";
 import crypto from "node:crypto";
 
+const {normalizeIP} = rateLimit;
 const SESSION_COOKIE = "__Host-hub_session";
 const OAUTH_COOKIE = "__Host-hub_oauth";
 const HUB_PROTOCOL_VERSION = "1";
@@ -70,6 +72,10 @@ function validateConfig (config) {
 	if (!config?.csrfSecret || config.csrfSecret.length < 32) throw new TypeError(`config.csrfSecret must be at least 32 characters.`);
 	if (config.metricsToken != null && config.metricsToken.length < 32) throw new TypeError(`config.metricsToken must be at least 32 characters.`);
 	const appOrigin = new URL(config.appOrigin).origin;
+	const clientIpHeader = getClientIpHeader(config.clientIpHeader);
+	if (clientIpHeader && config.trustProxy) {
+		throw new TypeError(`clientIpHeader and trustProxy cannot be enabled together.`);
+	}
 	return {
 		sessionTtlSeconds: 60 * 60 * 24 * 30,
 		oauthStateTtlSeconds: 10 * 60,
@@ -79,6 +85,7 @@ function validateConfig (config) {
 		metricsToken: null,
 		...config,
 		appOrigin,
+		clientIpHeader,
 	};
 }
 
@@ -114,12 +121,44 @@ export async function createHubApp ({
 		genReqId: request => getSafeRequestId(request) || crypto.randomUUID(),
 	});
 	await app.register(cookie, {secret: config.cookieSecret});
-	await app.register(websocket, {options: {maxPayload: 16 * 1024}});
+	let realtime;
+	await app.register(websocket, {
+		options: {maxPayload: 16 * 1024},
+		preClose: async function () {
+			realtime?.stop?.();
+			const sockets = [...this.websocketServer.clients];
+			const closePromises = sockets.map(socket => new Promise(resolve => {
+				if (socket.readyState === 3) return resolve();
+				socket.once("close", resolve);
+				if (socket.readyState === 1) socket.close(1001, "Server shutdown");
+			}));
+			let timeout;
+			await Promise.race([
+				Promise.all(closePromises),
+				new Promise(resolve => {
+					timeout = setTimeout(resolve, 1_000);
+					timeout.unref?.();
+				}),
+			]);
+			if (timeout) clearTimeout(timeout);
+			for (const socket of sockets) {
+				if (socket.readyState !== 3) socket.terminate();
+			}
+			await new Promise((resolve, reject) => {
+				this.websocketServer.close(error => error ? reject(error) : resolve());
+			});
+		},
+	});
 	await app.register(rateLimit, {
 		global: false,
 		max: 30,
 		timeWindow: "1 minute",
+		keyGenerator: request => normalizeIP(getRequestClientIp({
+			request,
+			clientIpHeader: config.clientIpHeader,
+		})),
 	});
+	app.decorateRequest("hubClientIp", null);
 	app.addHook("onSend", async (request, reply, payload) => {
 		reply.header("x-request-id", request.id);
 		reply.header("x-content-type-options", "nosniff");
@@ -133,6 +172,7 @@ export async function createHubApp ({
 	});
 	app.addHook("onRequest", async request => {
 		request.hubRequestStartedAt = performance.now();
+		request.hubClientIp = getRequestClientIp({request, clientIpHeader: config.clientIpHeader});
 	});
 	app.addHook("onResponse", async (request, reply) => {
 		metrics.observeRequest({
@@ -157,13 +197,15 @@ export async function createHubApp ({
 			}
 		}
 	});
-	const realtime = realtimeOverride || new HubRealtime({store});
+	realtime = realtimeOverride || new HubRealtime({store});
 	const outboxDispatcher = new HubOutboxDispatcher({store, realtime});
 	app.decorate("hubRealtime", realtime);
 	app.decorate("hubOutboxDispatcher", outboxDispatcher);
 	app.decorate("hubMetrics", metrics);
 	if (isStartOutboxDispatcher) outboxDispatcher.start();
-	app.addHook("onClose", async () => outboxDispatcher.stop());
+	app.addHook("onClose", async () => {
+		outboxDispatcher.stop();
+	});
 	app.setErrorHandler((error, request, reply) => {
 		if (error instanceof HubStoreError) {
 			return reply.code(error.status).send({
@@ -332,6 +374,7 @@ export async function createHubApp ({
 			session: request.hubAuth.session,
 			membership: request.hubMembership,
 			campaignId: request.params.campaignId,
+			clientIp: request.hubClientIp,
 		});
 	});
 

@@ -6,9 +6,18 @@ function sendJson (socket, message) {
 }
 
 export class HubRealtime {
-	constructor ({store, fnNow = () => new Date()}) {
+	constructor ({
+		store,
+		fnNow = () => new Date(),
+		heartbeatIntervalMs = 25_000,
+		fnSetInterval = setInterval,
+		fnClearInterval = clearInterval,
+	}) {
 		this._store = store;
 		this._fnNow = fnNow;
+		this._heartbeatIntervalMs = heartbeatIntervalMs;
+		this._fnSetInterval = fnSetInterval;
+		this._fnClearInterval = fnClearInterval;
 		this._connections = new Map();
 	}
 
@@ -16,7 +25,7 @@ export class HubRealtime {
 		return this._connections.size;
 	}
 
-	addConnection ({socket, account, session, membership, campaignId}) {
+	addConnection ({socket, account, session, membership, campaignId, clientIp = null}) {
 		const connection = {
 			socket,
 			accountId: account.id,
@@ -25,14 +34,37 @@ export class HubRealtime {
 			membershipId: membership.id,
 			role: membership.role,
 			campaignId,
+			clientIp,
 			connectedAt: this._fnNow().toISOString(),
 			activity: "idle",
 			targetId: null,
 			messageWindowStartedAt: Date.now(),
 			messageCount: 0,
+			isAlive: true,
+			heartbeatTimer: null,
 		};
 		this._connections.set(socket, connection);
+		if (typeof socket.ping === "function") {
+			socket.on("pong", () => connection.isAlive = true);
+			connection.heartbeatTimer = this._fnSetInterval(() => {
+				if (socket.readyState !== 1) return;
+				if (!connection.isAlive) {
+					if (typeof socket.terminate === "function") socket.terminate();
+					else socket.close(1001, "Heartbeat timeout");
+					return;
+				}
+				connection.isAlive = false;
+				try {
+					socket.ping();
+				} catch {
+					if (typeof socket.terminate === "function") socket.terminate();
+					else socket.close(1001, "Heartbeat failed");
+				}
+			}, this._heartbeatIntervalMs);
+			connection.heartbeatTimer.unref?.();
+		}
 		socket.on("close", () => {
+			if (connection.heartbeatTimer != null) this._fnClearInterval(connection.heartbeatTimer);
 			this._connections.delete(socket);
 			void this.pBroadcastPresence({campaignId}).catch(() => {});
 		});
@@ -168,6 +200,13 @@ export class HubRealtime {
 			if (campaignId && connection.campaignId !== campaignId) continue;
 			connection.socket.close(1008, reason);
 		}
+	}
+
+	stop () {
+		for (const connection of this._connections.values()) {
+			if (connection.heartbeatTimer != null) this._fnClearInterval(connection.heartbeatTimer);
+		}
+		this._connections.clear();
 	}
 }
 
