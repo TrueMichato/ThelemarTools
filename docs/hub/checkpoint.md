@@ -1,7 +1,7 @@
-# Campaign Hub Phase 0-5 checkpoint
+# Campaign Hub checkpoint record
 
-> **Status:** Complete and validated
-> **Captured:** 2026-08-24
+> **Status:** Complete and validated through Phase 6F
+> **Captured:** 2026-08-25
 > **Branch:** `multiplayer-hub`
 > **Base/HEAD at capture:** `c91554179649944665a52b7ed5a82d4af5a5eb8c`
 > **Owner:** Campaign Hub maintainers
@@ -36,6 +36,20 @@ Checkpoint metadata was recorded in `b2405f2e` after the four primary layers.
 `HubRealtime.test.js` spans the server dispatcher/visibility authority and browser reconnect/order client. Its
 test file lands in the backend commit while the browser client lands in the immediately following browser
 commit; the checkpoint-level Hub gate validates the combined contract.
+
+## Continuation commit series
+
+| Phase/layer | Commit | Contents |
+|---|---|---|
+| 6B/6C lifecycle and migrations | `24fa150f785d3825fefad048d126e850831fc931` | Invite/member/session/account lifecycle, seven-day deletion, migration ledger and 0002 |
+| 6D portable deployment | `cab23807767edb71fc7131998c0936b9310c5e50` | Production BFF/static images, PostgreSQL/migration/grant services, same-origin HTTPS Compose topology |
+| 6B-6D documentation | `fc507679066eeae095fc053ca4e0a89c064725b1` | Lifecycle, migration, role, deployment, and runbook record |
+| 6E operations | `3b76da439762ed81bd2550235f1cc0a211f53227` | Migration 0003, maintenance, metrics/logging, encrypted backup/restore and evidence |
+| 6E SLO/runbooks | `44d0fe142d0f2005c3cf7cc79393a277175c4239` | SLO/alert catalog and deploy/rollback/outage/incident procedures |
+| 6F CI/E2E implementation | `68476c71a6b9b8cc046b2ac608340c2b91200fb5` | Pinned Hub CI, exact-image evidence, test-only auth, disposable real-stack Playwright, scale/fault/security contracts |
+| 6F documentation | `39a0a0d805a8500271e38c2f5962490758db4bda` | CI/provenance boundary, Phase 6F evidence, traceability, risk and roadmap status |
+
+Nothing in the continuation series has been pushed and no pull request has been opened.
 
 ## Change groups
 
@@ -109,5 +123,5 @@ Final combined validation after the series:
 
 - The reviewed commit series and checkpoint metadata are durable.
 - Migration 0001 is now immutable; future schema work begins at migration 0002 under ADR 0005.
-- Phase 6B lifecycle and Phase 6C migration management may begin.
+- Phases 6A-6F are complete; Phase 6G managed-provider selection and staging is next.
 - Do not push or open a PR without separate explicit instruction.
