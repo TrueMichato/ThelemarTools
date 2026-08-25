@@ -24,6 +24,7 @@ Signed-out character sheets, homebrew, and DM screens remain supported and do no
 | WebSocket/event contract | [Realtime protocol](realtime-protocol.md) and [event catalog](event-catalog.md) |
 | Who may do what | [Permission matrix](permission-matrix.md) |
 | Security and limits | [Security model](security.md) and [performance budgets](performance.md) |
+| Logs, metrics, SLOs, alerts | [Observability](observability.md) |
 | Local setup/backup/restore | [Operations](operations.md) |
 | Tests and release evidence | [Testing guide](testing.md) |
 | How to change Hub safely | [Contributor guide](contributing.md) |

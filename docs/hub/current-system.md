@@ -142,6 +142,11 @@ Phase 6G work.
   PostgreSQL 17.
 - Migration status/plan/apply uses a checksummed ledger and advisory lock. Pre-ledger Phase 0-5 databases are
   fingerprinted before recording 0001; application readiness requires the expected migration version.
+- Migration 0003 records bounded maintenance/backup/restore evidence.
+- Protected Prometheus metrics expose aggregate HTTP/WebSocket/outbox/session/deletion/maintenance/recovery
+  signals. Structured logs use correlation ids and strip query strings/secrets.
+- A singleton maintenance job prunes only technical records and processes due account purges.
+- Encrypted AES-256-GCM portable backups use the read-only backup role and a separate evidence-writer role.
 
 ## Implemented UI
 

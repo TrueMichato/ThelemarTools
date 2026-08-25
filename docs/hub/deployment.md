@@ -27,7 +27,8 @@ Startup order:
 1. PostgreSQL initializes UTF-8 data and creates `hub_runtime`/`hub_backup` login roles.
 2. Database health passes.
 3. Migrator applies 0001/0002 under the owner credential.
-4. Role grant job assigns runtime DML and backup read-only privileges/defaults.
+4. Role grant job idempotently creates any newly introduced login role when supplied its password, then
+   assigns runtime DML, backup read-only, and operations-evidence privileges/defaults.
 5. BFF starts under `hub_runtime`, passes `/api/live` and `/api/ready`.
 6. Edge starts and publishes one host port.
 
@@ -110,12 +111,16 @@ resolution.
 | `HUB_DATABASE_SSL` | all DB clients | No | False only inside local private Compose |
 | `HUB_COOKIE_SECRET` | BFF | Yes | Cookie signing; independent 32+ chars |
 | `HUB_CSRF_SECRET` | BFF | Yes | CSRF and deterministic invite derivation |
+| `HUB_METRICS_TOKEN` | BFF/monitor | Yes | Independent bearer for `/api/metrics` |
+| `HUB_LOG_LEVEL` | BFF | No | Structured log threshold |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | BFF | Secret (client secret) | OAuth application |
 | `HUB_ALLOWED_OAUTH_SUBJECTS` | BFF | Operationally sensitive | Comma-separated `github:<numeric id>` |
 | `HUB_TRUST_PROXY` | BFF | No | Exact trusted proxy IP/CIDR; local reference uses `172.30.0.10` |
 | `HUB_POSTGRES_PASSWORD` | Compose DB/jobs | Yes | Local schema owner |
 | `HUB_RUNTIME_DB_PASSWORD` | Compose DB/BFF | Yes | Local runtime role |
 | `HUB_BACKUP_DB_PASSWORD` | Compose DB | Yes | Local read-only backup role |
+| `HUB_OPERATIONS_DB_PASSWORD` | Compose DB/backup | Yes | Can select/insert only operational evidence |
+| `HUB_BACKUP_ENCRYPTION_KEY` | Backup/restore | Yes | Base64 for exactly 32 random bytes |
 | `HUB_IMAGE_VERSION` / `HUB_VCS_REF` | build | No | OCI provenance |
 | `HUB_NPM_REGISTRY` | build | No | Approved package registry/proxy |
 
@@ -143,6 +148,10 @@ publicly trusted certificate and a separate OAuth application whose callback is
 
 The database health check explicitly probes TCP (`127.0.0.1`) with a 30-second start period. A Unix-socket
 probe can report the temporary initialization server healthy before init-role scripts finish.
+
+Role creation is not dependent on `initdb`: the owner-run grant job creates a missing validated role
+transactionally when its password is supplied. This is required when upgrading an existing volume to a phase
+that introduces a new role.
 
 ## Health and shutdown
 
@@ -175,4 +184,5 @@ Production Phase 6G must provide:
 - exact proxy trust;
 - scheduled maintenance and nightly encrypted backup export;
 - logs/metrics/alerts and isolated restore drill;
+- provider scheduler invokes maintenance and encrypted backup profiles;
 - no host-published database/BFF/static ports.

@@ -73,15 +73,26 @@ PostgreSQL provider and meets the documented RPO/RTO.
 - Domain-event replay and immutable audit retention remain separate policies; do not delete audit rows as
   part of receipt cleanup.
 
-There is currently no scheduled maintenance worker. Receipt cleanup is an explicit store method. Published
-outbox/session/invite cleanup is Phase 6E work. Due account deletion is available as a bounded one-shot:
+Maintenance is a singleton advisory-locked bounded one-shot. Provider scheduling is Phase 6G:
 
 ```bash
-DATABASE_URL=... HUB_PURGE_LIMIT=100 npm run hub:purge-accounts
+DATABASE_URL=... HUB_MAINTENANCE_BATCH_SIZE=1000 npm run hub:maintenance
 ```
 
-The result lists both `purgedAccountIds` and `blockedAccountIds`. Any blocked id is an operational alert:
-campaign ownership was acquired or not resolved after deletion was requested.
+It removes expired receipts, old published outbox rows, expired/revoked sessions/invites, and old leases,
+then processes due deletion. User-visible domain/audit/roll/action history is preserved. The result lists
+both `purgedAccountIds` and `blockedAccountIds`; blocked ids are alerts.
+
+Encrypted backup:
+
+```bash
+DATABASE_URL=... \
+HUB_OPERATIONS_DATABASE_URL=... \
+HUB_BACKUP_ENCRYPTION_KEY=... \
+npm run hub:backup:encrypted -- /secure/path/hub-YYYY-MM-DD.dump.enc
+```
+
+See [observability.md](observability.md) and [backup/restore runbook](runbooks/backup-restore.md).
 
 ## Secret and session rotation
 
@@ -109,12 +120,12 @@ use the schema owner. The backup command should use the read-only backup role wh
 
 ## Current launch gaps
 
-- automated scheduling/alerting for account purge is not yet configured;
+- provider scheduling/alerting for maintenance/backup is not yet configured;
 - no dedicated BFF image/reference same-origin Compose stack;
 - no separate migration/runtime/backup database roles;
 - no scheduled maintenance;
-- no portable metric/SLO/alert implementation;
-- no managed PITR/nightly export configuration;
+- no provider dashboard/alert implementation;
+- no managed PITR/nightly schedule configuration;
 - no provider restore drill;
 - no invite/member/session/account lifecycle administration;
 - no real-stack browser/load/fault CI.

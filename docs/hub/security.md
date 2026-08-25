@@ -32,6 +32,9 @@
 - API/auth responses are `no-store` and include nosniff, frame denial, same-origin referrer, and restrictive
   permissions-policy headers.
 - Database connections and queries have bounded timeouts; idle pool errors are handled.
+- Structured request logs strip query strings and redact auth/cookie/CSRF/idempotency fields.
+- Metrics require an independent bearer token and expose aggregate bounded labels only.
+- Backup archives are authenticated AES-256-GCM ciphertext; keys are separate from archives.
 
 ## Content restrictions
 
@@ -54,5 +57,4 @@ sandboxed renderer, malicious fixture corpus, and another security review.
 - Direct database access is restricted to the BFF role; browser database SDKs are not used.
 - A formal public-service privacy/ToS review remains a gate before semi-public onboarding.
 - Core renderer behavior prevents a strict no-inline-script CSP from being the primary content boundary.
-- Managed runtime/database roles, image provenance, redacted observability, and provider restore evidence remain
-  Phase 6 launch work.
+- Provider-native alerting/PITR and production restore evidence remain Phase 6G launch work.

@@ -44,6 +44,7 @@ security boundary.
 | `audit_entries` | Security/admin history | nullable campaign/account/session refs; details JSON | mutations append relevant audit |
 | `command_receipts` | Payload-aware idempotency | account+key primary key; request hash; 24h expiry | character payload compacted to reference |
 | `outbox_entries` | Transactional delivery queue | one row/event; pending/publishing/published/failed; claim token | claimed/retried/published by dispatcher |
+| `operational_runs` | Bounded operator evidence | maintenance/backup/restore_drill; running/succeeded/failed; non-sensitive JSON | metrics and recovery evidence |
 
 ## Aggregate boundaries
 
@@ -221,6 +222,6 @@ compatible. Restore preserves source identity/index.
 - relational character inventory migration/dual-write (not required for current V1 behavior);
 - `campaigns.deleting`, `characters.deleted`, membership non-active statuses;
 - object storage path for brew `object_key`;
-- technical retention worker (account purge exists as a one-shot command).
+- provider scheduling/alerting for the implemented maintenance/backup commands.
 
 These gaps are tracked in the private-V1 roadmap and must not be inferred from reserved schema fields.

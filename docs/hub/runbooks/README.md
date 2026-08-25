@@ -23,19 +23,19 @@ Runbooks are executable operational procedures. Each final runbook must contain:
 - [Member removal](member-removal.md)
 - [Account deletion grace and purge](account-deletion.md)
 - [Session/device compromise](session-compromise.md)
+- [Deploy and promote](deploy-promote.md)
+- [Application/database rollback](rollback.md)
+- [Encrypted backup and restore drill](backup-restore.md)
+- [Database outage](database-outage.md)
+- [Stuck/failed outbox](outbox-failure.md)
+- [Secret rotation](secret-rotation.md)
+- [Incident declaration and response](incident.md)
+- [Database migration failure](migration-failure.md)
+- [Private OAuth allowlist change](allowlist-change.md)
+- [Campaign ownership recovery](campaign-ownership-recovery.md)
 
 ## Required before private launch
 
-- deploy and promote;
-- rollback application image;
-- backup and isolated restore;
-- migration failure;
-- database outage;
-- stuck/failed outbox;
 - session/OAuth compromise;
-- cookie/CSRF/OAuth/database secret rotation;
-- allowlist change;
-- campaign ownership recovery;
-- incident declaration, containment, evidence, and postmortem.
 
 Until these exist and have been drilled, do not represent the implementation as operationally launch-ready.

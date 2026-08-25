@@ -1,7 +1,7 @@
 # Campaign Hub private-V1 launch roadmap
 
 > **Status:** Approved continuation plan
-> **Current phase:** Phase 6E operations and observability
+> **Current phase:** Phase 6F CI and real-stack integration testing
 > **Last reviewed:** 2026-08-24
 > **Owner:** Campaign Hub maintainers
 
@@ -92,7 +92,7 @@ Exit:
 - no image/log/config contains secrets;
 - root static image remains unchanged in purpose.
 
-## Phase 6E — operations and observability
+## Phase 6E — operations and observability (portable foundation implemented)
 
 Deliver:
 

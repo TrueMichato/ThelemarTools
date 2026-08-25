@@ -18,13 +18,18 @@ Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecyc
 - Migration management includes immutable/checksummed files, advisory locking, baseline detection,
   status/plan/apply, migration-aware readiness, runtime/backup role grants, migration 0002, and
   fresh/baseline/concurrent/failure/checksum/restored-database drills.
-- Current Hub validation passes 36 suites / 243 tests; repository JS lint and Hub SCSS build/lint pass.
+- Current Hub validation passes 39 suites / 254 tests; repository JS lint and Hub SCSS build/lint pass.
 
 Phase 6D portable deployment is implemented and locally verified: non-root/read-only BFF image, lightweight
 static image, PostgreSQL 17, one-shot migration/role grants, least-privilege runtime, same-origin Caddy edge,
-WebSocket forwarding, liveness/readiness, and graceful restart. Managed deployment remains Phase 6G. Phase
-6E operations/observability is next; Phases 6F-6H remain pending. See
-[private-v1-roadmap.md](private-v1-roadmap.md).
+WebSocket forwarding, liveness/readiness, and graceful restart.
+
+Phase 6E portable operations/observability is implemented: migration 0003 operational evidence, singleton
+bounded maintenance, protected Prometheus metrics, bounded route/request correlation, query/secret-safe JSON
+logs, SLO/alert catalog, AES-256-GCM backup/restore, dedicated backup/evidence roles, and executable deploy/
+rollback/outage/outbox/rotation/incident runbooks. Real cleanup, singleton lock, role boundaries, tamper
+failure, encrypted backup/restore, evidence-age metrics, and OAuth log sanitization were drilled. Managed
+PITR, scheduling, dashboards, and alerts remain Phase 6G. Phase 6F CI/real-stack integration is next.
 
 ## Implemented
 
@@ -44,6 +49,7 @@ WebSocket forwarding, liveness/readiness, and graceful restart. Managed deployme
 - Backup/restore scripts and successful PostgreSQL 17 restore drills.
 - Invite/member/session lifecycle administration and seven-day account deletion.
 - Checksummed migration ledger, migration 0002, migration-aware readiness, and least-privilege role grants.
+- Migration 0003 operational evidence, maintenance/metrics/redacted logs, and encrypted backup/restore.
 
 ## Final verification
 

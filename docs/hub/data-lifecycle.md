@@ -24,6 +24,7 @@
 | Outbox rows | Technical delivery | BFF/operators | published 7-day cleanup approved, not implemented |
 | Command receipts | Idempotent retry | BFF/store | 24 hours |
 | Backup archives/PITR | Recovery | operators/provider | policy pending Phase 6E; must age deleted data out |
+| Operational runs | Maintenance/backup/restore evidence | operators/metrics; no user content | bounded retention policy finalized with provider scheduling |
 
 ## Privacy boundary
 
@@ -127,6 +128,10 @@ Approved private-V1 policy:
 - leases: revoked with sessions/member removal; expired rows may be reused immediately; old-row cleanup is Phase 6E;
 - backups: managed PITR + nightly encrypted portable backup, with rotation chosen to meet RPO <=24h and
   RTO <=4h while documenting deletion aging.
+
+The portable backup uses AES-256-GCM, a random IV, authenticated envelope, mode-0600 output, and no retained
+plaintext temporary file. The encryption key is stored separately from the archive. Success/failure evidence
+uses a dedicated database role limited to `operational_runs`.
 
 Only technical cleanup is automatic. Do not prune roll/action/domain history under the technical policy.
 

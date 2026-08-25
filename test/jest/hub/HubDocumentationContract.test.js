@@ -25,6 +25,7 @@ describe("Campaign Hub documentation contract", () => {
 		"data-lifecycle.md",
 		"deployment.md",
 		"migrations.md",
+		"observability.md",
 		"implementation-history.md",
 		"checkpoint.md",
 		"traceability.md",

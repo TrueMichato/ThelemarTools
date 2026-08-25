@@ -1,6 +1,6 @@
 # ADR 0006: Portable observability and technical-record retention
 
-Status: Accepted for Phase 6E; implementation pending
+Status: Implemented portable foundation; provider scheduling/alerts/PITR pending Phase 6G
 
 ## Context
 

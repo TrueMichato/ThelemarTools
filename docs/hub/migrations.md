@@ -1,6 +1,6 @@
 # Campaign Hub migration guide
 
-> **Status:** Implemented through lifecycle migration 0002
+> **Status:** Implemented through operational migration 0003
 > **Last verified:** 2026-08-24
 > **Owner:** Campaign Hub maintainers
 
@@ -86,6 +86,12 @@ If the fingerprint is incomplete, baselining fails. Do not force-insert a ledger
    - concurrent runners;
    - restored database.
 
+Current migrations:
+
+- 0001 canonical Hub schema;
+- 0002 lifecycle administration and deletion-safe foreign keys;
+- 0003 operational maintenance/backup/restore evidence.
+
 ## Readiness
 
 `PostgresHubStore.pCheckHealth()` requires:
@@ -122,9 +128,10 @@ Backup role receives:
 - matching default privileges;
 - explicit no schema create.
 
-The grant script validates role identifiers and verifies roles already exist. It does not create roles or
-manage passwords. Run it as the same role that will create future migration objects so default privileges
-apply correctly.
+The grant script validates role identifiers. It does not rotate existing passwords. When a validated
+configured role is missing and its password environment variable is supplied, it creates the login role
+transactionally before grants; this supports role additions on already-initialized databases. Run it as the
+same role that will create future migration objects so default privileges apply correctly.
 
 ## Failure response
 
