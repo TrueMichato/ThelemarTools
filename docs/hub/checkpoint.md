@@ -48,6 +48,10 @@ commit; the checkpoint-level Hub gate validates the combined contract.
 | 6E SLO/runbooks | `44d0fe142d0f2005c3cf7cc79393a277175c4239` | SLO/alert catalog and deploy/rollback/outage/incident procedures |
 | 6F CI/E2E implementation | `68476c71a6b9b8cc046b2ac608340c2b91200fb5` | Pinned Hub CI, exact-image evidence, test-only auth, disposable real-stack Playwright, scale/fault/security contracts |
 | 6F documentation | `39a0a0d805a8500271e38c2f5962490758db4bda` | CI/provenance boundary, Phase 6F evidence, traceability, risk and roadmap status |
+| 6F checkpoint metadata | `f6e0cde9766a6d9e863176d6fa5bbf1b9a3b501b` | Continuation SHA ledger through Phase 6F |
+| 6G provider recommendation | `4c176742522458a27281188cdccb43282204096c` | Four-provider comparison, proposed DigitalOcean ADR 0009, single-replica constraint and staging gates |
+| 6G managed-ingress preparation | `a0ac01c238c949683ed6a70eab05eab8d5f70cec` | Provider-gated client IPs, IPv6 rate-limit normalization, ping/pong heartbeat, bounded code-1001 shutdown and tests |
+| 6G preparation documentation | `0be5f57cfc3332de1b00769ae0b128728ca1cd52` | Environment contract, realtime/security/observability behavior, evidence, risks and remaining managed gates |
 
 Nothing in the continuation series has been pushed and no pull request has been opened.
 
@@ -123,5 +127,6 @@ Final combined validation after the series:
 
 - The reviewed commit series and checkpoint metadata are durable.
 - Migration 0001 is now immutable; future schema work begins at migration 0002 under ADR 0005.
-- Phases 6A-6F are complete; Phase 6G managed-provider selection and staging is next.
+- Phases 6A-6F are complete. Phase 6G provider research and locally verifiable ingress preparation are
+  checkpointed; provider approval/region/account inputs and managed staging remain.
 - Do not push or open a PR without separate explicit instruction.
