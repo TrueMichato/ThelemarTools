@@ -74,11 +74,13 @@
 		"hub:grant-roles": "node server/scripts/grant-roles.mjs",
 		"hub:purge-accounts": "node server/scripts/purge-accounts.mjs",
 		"hub:maintenance": "node server/scripts/maintenance.mjs",
+		"hub:check-secrets": "node server/scripts/check-secrets.mjs",
 		"hub:backup": "node server/scripts/backup.mjs",
 		"hub:backup:encrypted": "node server/scripts/backup-encrypted.mjs",
 		"hub:restore": "node server/scripts/restore.mjs",
 		"hub:restore:encrypted": "node server/scripts/restore-encrypted.mjs",
-		"test:hub": "node --localstorage-file test/localstorage.tmp --experimental-vm-modules node_modules/jest/bin/jest.js test/jest/hub/ --no-coverage --forceExit"
+		"test:hub": "node --localstorage-file test/localstorage.tmp --experimental-vm-modules node_modules/jest/bin/jest.js test/jest/hub/ --no-coverage --forceExit",
+		"test:hub:e2e:stack": "node server/scripts/run-hub-e2e.mjs"
 	},
 	"lint-staged": {
 		"*.{js,cjs,mjs}": "eslint --fix --no-warn-ignored",

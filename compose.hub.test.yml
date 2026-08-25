@@ -1,0 +1,11 @@
+services:
+  bff:
+    build:
+      context: .
+      dockerfile: server/test.Dockerfile
+      args:
+        HUB_TEST_BASE_IMAGE: ${HUB_TEST_BASE_IMAGE:?Set HUB_TEST_BASE_IMAGE}
+    environment:
+      NODE_ENV: test
+      HUB_TEST_AUTH_ENABLED: "true"
+      HUB_TEST_AUTH_SECRET: ${HUB_TEST_AUTH_SECRET:?Set HUB_TEST_AUTH_SECRET}

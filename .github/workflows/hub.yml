@@ -1,0 +1,238 @@
+name: Campaign Hub validation
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hub-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-and-supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.7.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Hub unit and contract tests
+        run: npm run test:hub
+
+      - name: JavaScript lint
+        run: npm run test:js
+
+      - name: Hub and DM Screen SCSS lint
+        run: npx stylelint scss/hub.scss scss/includes/dmscreen-party-tracker.scss
+
+      - name: Service worker build
+        run: npm run build:sw
+
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Source secret scan
+        run: npm run hub:check-secrets
+
+      - name: Generate Node dependency SBOM
+        run: npm sbom --omit=dev --sbom-format=cyclonedx > hub-node-sbom.json
+
+      - name: Build BFF image
+        run: docker build -f server/Dockerfile --build-arg VERSION=${GITHUB_SHA} --build-arg VCS_REF=${GITHUB_SHA} -t thelemartools-hub-bff:${GITHUB_SHA} .
+
+      - name: Export immutable image artifact
+        run: |
+          docker save --output hub-bff-image.tar "thelemartools-hub-bff:${GITHUB_SHA}"
+          echo "HUB_CI_IMAGE_ARCHIVE_SHA256=$(sha256sum hub-bff-image.tar | cut -d ' ' -f 1)" >> "$GITHUB_ENV"
+
+      - name: Generate image SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: thelemartools-hub-bff:${{ github.sha }}
+          output-file: hub-image-sbom.spdx.json
+          upload-artifact: false
+
+      - name: Record immutable provenance
+        env:
+          HUB_CI_IMAGE_REF: thelemartools-hub-bff:${{ github.sha }}
+        run: node server/scripts/write-ci-provenance.mjs
+
+      - name: Scan BFF image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: thelemartools-hub-bff:${{ github.sha }}
+          format: json
+          output: hub-trivy-results.json
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Upload image and supply-chain evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hub-bff-${{ github.sha }}
+          path: |
+            hub-bff-image.tar
+            hub-node-sbom.json
+            hub-image-sbom.spdx.json
+            hub-ci-provenance.json
+            hub-trivy-results.json
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+  affected-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.7.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Character Sheet Hub seams
+        run: >
+          node --localstorage-file test/localstorage.tmp --experimental-vm-modules
+          node_modules/jest/bin/jest.js
+          test/jest/charactersheet/CharacterSheetPersistenceBackend.test.js
+          test/jest/charactersheet/CharacterSheetRepositorySeam.test.js
+          test/jest/charactersheet/CharacterSheetCampaignRules.test.js
+          test/jest/charactersheet/CharacterSheetRollHistory.test.js
+          --no-coverage --forceExit
+
+      - name: DM Screen Hub seams
+        run: >
+          node --localstorage-file test/localstorage.tmp --experimental-vm-modules
+          node_modules/jest/bin/jest.js
+          test/jest/DmScreenNpcTracker.test.js
+          test/jest/DmScreenJourneyTracker.test.js
+          test/jest/DmScreenInitiativeTrackerNpcAppend.test.js
+          test/jest/DmScreenLairMarkers.test.js
+          test/jest/dmscreen/DmScreenNpcTrackerUx.test.js
+          test/jest/hub/HubPartyTrackerProjection.test.js
+          --no-coverage --forceExit
+
+  migration-and-roles:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_DB: hub
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: hub-owner
+        options: >-
+          --health-cmd "pg_isready -U postgres -d hub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgresql://postgres:hub-owner@127.0.0.1:5432/hub
+      HUB_DATABASE_SSL: "false"
+      HUB_RUNTIME_DB_ROLE: hub_runtime
+      HUB_RUNTIME_DB_PASSWORD: hub-runtime
+      HUB_BACKUP_DB_ROLE: hub_backup
+      HUB_BACKUP_DB_PASSWORD: hub-backup
+      HUB_OPERATIONS_DB_ROLE: hub_operations
+      HUB_OPERATIONS_DB_PASSWORD: hub-operations
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.7.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Apply fresh migration chain
+        run: |
+          npm run hub:migrate
+          npm run hub:grant-roles
+          npm run hub:migrate:status
+
+      - name: Verify runtime role boundary
+        env:
+          RUNTIME_DATABASE_URL: postgresql://hub_runtime:hub-runtime@127.0.0.1:5432/hub
+        run: |
+          node --input-type=module <<'NODE'
+          import pg from "pg";
+          const pool = new pg.Pool({connectionString: process.env.RUNTIME_DATABASE_URL});
+          try {
+            await pool.query("SELECT count(*) FROM hub.accounts");
+            try {
+              await pool.query("CREATE TABLE hub.__ci_forbidden (id integer)");
+              throw new Error("Runtime role unexpectedly altered the Hub schema.");
+            } catch (error) {
+              if (error.code !== "42501") throw error;
+            }
+          } finally {
+            await pool.end();
+          }
+          NODE
+
+  real-stack-e2e:
+    needs: unit-and-supply-chain
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.7.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Download verified production image
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: hub-bff-${{ github.sha }}
+
+      - name: Load verified production image
+        run: docker load --input hub-bff-image.tar
+
+      - name: Run disposable multi-context Hub E2E
+        env:
+          HUB_TEST_BASE_IMAGE: thelemartools-hub-bff:${{ github.sha }}
+        run: npm run test:hub:e2e:stack
+
+      - name: Upload Playwright evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hub-playwright-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            playwright-report/
+            test-results/hub-playwright-results.json
+            test-results/hub-playwright-output/
+          if-no-files-found: error
