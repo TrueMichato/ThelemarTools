@@ -30,6 +30,7 @@ Signed-out character sheets, homebrew, and DM screens remain supported and do no
 | CI, test-auth boundary, artifacts | [CI and provenance](ci-and-provenance.md) |
 | How to change Hub safely | [Contributor guide](contributing.md) |
 | Planned managed staging | [Staging plan](staging-plan.md) |
+| Managed provider decision | [Provider comparison](provider-comparison.md) |
 | Launch sequence and phase gates | [Private-V1 roadmap](private-v1-roadmap.md) |
 | Diagnose a problem | [Troubleshooting](troubleshooting.md) and [runbooks](runbooks/README.md) |
 | Requirement-to-code evidence | [Traceability matrix](traceability.md) |
@@ -67,9 +68,10 @@ Documents labeled **planned**, **pending**, or **not implemented** are not curre
 - [ADR 0006: operations and retention](adr/0006-operations-retention.md)
 - [ADR 0007: lifecycle and account deletion](adr/0007-lifecycle-deletion.md)
 - [ADR 0008: CI and artifact provenance](adr/0008-ci-provenance.md)
+- [ADR 0009: managed staging provider](adr/0009-managed-staging-provider.md)
 
-ADRs 0001-0008 describe implemented portable architecture and launch-readiness decisions. A provider ADR is
-added only after the Phase 6G selection.
+ADRs 0001-0008 describe implemented portable architecture and launch-readiness decisions. ADR 0009 is a
+proposed provider decision and is not accepted until provider/cost/region approval.
 
 ## Local BFF setup
 

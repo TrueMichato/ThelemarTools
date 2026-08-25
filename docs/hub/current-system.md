@@ -190,8 +190,17 @@ See [performance.md](performance.md) for the normative table. Important V1 value
 - outbox dispatch: 100 rows/batch;
 - command receipt: 24 hours.
 
+## Scaling constraint
+
+Private V1 supports exactly one active BFF process and therefore has no multi-replica application HA.
+WebSocket membership and the outbox dispatch callback are process-local; multiple replicas can split sockets
+and deliver a claimed event to only one process. Reconnect snapshot/replay remains the recovery mechanism,
+but it is not a substitute for shared live fanout.
+
+Provider configuration must fix the BFF to one instance and drill rolling-deployment reconnect. Horizontal
+scale requires a shared-fanout design, ADR, failure model, and multi-replica tests.
+
 ## Deployment status
 
-The implementation is verified but not production-deployed. Before inviting users, complete Phases 6A-6H
-from the continuation plan: lifecycle administration, migration management, portable containers,
-operations/observability, real integration/E2E, provider staging, and a private multi-device game day.
+The implementation is verified through portable Phase 6F but is not managed-provider deployed. Before
+inviting users, complete Phase 6G managed staging and Phase 6H private multi-device game day/go-no-go.

@@ -1,7 +1,7 @@
 # Campaign Hub private-V1 launch roadmap
 
 > **Status:** Approved continuation plan
-> **Current phase:** Phase 6G managed staging selection
+> **Current phase:** Phase 6G provider recommendation awaiting approval
 > **Last reviewed:** 2026-08-25
 > **Owner:** Campaign Hub maintainers
 
@@ -139,6 +139,13 @@ Evidence:
 - BFF and database restart/readiness recovery.
 
 ## Phase 6G — managed staging
+
+Decision progress:
+
+- AWS, GCP, DigitalOcean, and Render compared against the portable contract;
+- DigitalOcean App Platform + Managed PostgreSQL recommended at an estimated $20-30/month;
+- ADR 0009 remains proposed pending provider/cost/region approval;
+- no billable resource, domain, OAuth app, registry, or secret has been created.
 
 Deliver:
 

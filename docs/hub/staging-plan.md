@@ -1,7 +1,7 @@
 # Campaign Hub staging plan
 
 > **Status:** Planned; no managed staging environment exists yet
-> **Last reviewed:** 2026-08-24
+> **Last reviewed:** 2026-08-25
 > **Owner:** Campaign Hub maintainers
 
 ## Objectives
@@ -20,6 +20,8 @@ environment and must not use copied production characters.
 - Managed PITR and nightly encrypted portable backup.
 - Maintenance worker and outbox dispatcher active.
 - Logs and metrics configured with redaction.
+- Exactly one BFF instance; autoscaling disabled until shared realtime fanout exists.
+- Provider-specific client-IP trust behavior proven against direct spoofing.
 
 ## Participants
 
@@ -86,6 +88,9 @@ environment and must not use copied production characters.
 - database restart;
 - temporary database unavailability and readiness behavior;
 - edge/WebSocket disconnect;
+- rolling deployment overlap with old/new sockets and replay after reconnect;
+- quiet WebSocket period beyond the provider idle threshold, with heartbeat where required;
+- spoofed/missing provider client-IP header and rate-limit key behavior;
 - outbox publish failure and retry;
 - expired lease/session;
 - stale service worker/protocol;

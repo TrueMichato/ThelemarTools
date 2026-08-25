@@ -34,6 +34,7 @@ describe("Campaign Hub documentation contract", () => {
 		"ci-and-provenance.md",
 		"contributing.md",
 		"staging-plan.md",
+		"provider-comparison.md",
 		"private-v1-roadmap.md",
 		"troubleshooting.md",
 		"post-v1-roadmap.md",
@@ -51,7 +52,7 @@ describe("Campaign Hub documentation contract", () => {
 	it("keeps ADR numbering contiguous and records status", () => {
 		const adrDir = path.join(DOCS_ROOT, "adr");
 		const adrs = fs.readdirSync(adrDir).filter(name => /^\d{4}-.+\.md$/.test(name)).sort();
-		expect(adrs.map(name => name.slice(0, 4))).toEqual(["0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008"]);
+		expect(adrs.map(name => name.slice(0, 4))).toEqual(["0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009"]);
 		for (const adr of adrs) expect(fs.readFileSync(path.join(adrDir, adr), "utf8")).toMatch(/^Status:/m);
 	});
 

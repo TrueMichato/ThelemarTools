@@ -186,6 +186,7 @@ Production Phase 6G must provide:
 - logs/metrics/alerts and isolated restore drill;
 - provider scheduler invokes maintenance and encrypted backup profiles;
 - no host-published database/BFF/static ports.
+- exactly one active BFF replica; shared realtime fanout is not implemented for horizontal scale.
 
 ## CI artifact promotion
 

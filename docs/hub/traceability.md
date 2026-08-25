@@ -25,5 +25,7 @@
 | Technical retention and recovery signals | ADR 0006; `observability.md` | migration 0003, maintenance lock/cleanup, metrics, encrypted backup/restore, evidence role | maintenance/observability/encryption tests and real cleanup/backup/restore drills | operations and incident runbooks |
 | Real-stack multi-context behavior | ADR 0008; `ci-and-provenance.md` | test-only BFF image, disposable Compose override/orchestrator, Hub page object and Playwright journeys | lifecycle/load scenarios, BFF/DB restart probes | CI artifacts; Phase 6H game day |
 | Reproducible CI and supply-chain evidence | ADR 0008; `ci-and-provenance.md` | pinned workflow, secret scan, exact-image export, SBOMs, provenance writer, image scan | `HubCiContract`, local SBOM/image build, GitHub CI run required before staging | Phase 6G digest-promotion record |
+| Managed staging provider | Proposed ADR 0009; `provider-comparison.md` | not implemented; DigitalOcean recommendation pending approval | first-party contract review; live provider probes required | `staging-plan.md`; provider evidence record pending |
+| One BFF replica in private V1 | `provider-comparison.md`; R-15 | provider config must fix instance count to one | CI reconnect/replay and Phase 6G rolling-deploy drill | shared-fanout ADR required before scale-out |
 
 Use `not implemented` explicitly. A planned row must not be presented as current capability.
