@@ -30,17 +30,18 @@ PostgreSQL 17 cluster for staging:
 6. scheduled maintenance and encrypted-backup jobs;
 7. encrypted runtime variables, provider logs/insights/alerts, and synthetic staging data only.
 
-## Required implementation before acceptance
+## Required live evidence before acceptance
 
 DigitalOcean documents that `do-connecting-ip` contains the client address while `X-Forwarded-For` contains
-the ingress server. Add a provider-gated adapter that accepts this header only when the deployment is
-explicitly configured for App Platform. Use the result consistently for logs, HTTP rate-limit keys, and
-WebSocket upgrades. Cover spoofed/absent headers and IPv4/IPv6. Require first-party overwrite assurance or a
-decisive staging proof; never enable unrestricted `trustProxy`.
+the ingress server. The provider-gated adapter is implemented: only this header is accepted, it is mutually
+exclusive with `HUB_TRUST_PROXY`, and one validated address drives logs, HTTP rate-limit keys, and WebSocket
+context. IPv6 rate limits retain `/64` normalization. Unit/integration coverage includes
+spoofed/absent/ambiguous headers and IPv4/IPv6. Staging still
+requires first-party overwrite assurance or a decisive live proof; never enable unrestricted `trustProxy`.
 
-Staging must also add a heartbeat or prove quiet WebSocket survival, then demonstrate routing,
-rolling-deploy reconnect/replay, shutdown grace, scheduled jobs, PostgreSQL TLS/trusted source, backup/PITR,
-and restore. Failure of any of these gates rejects this ADR and selects the AWS fallback.
+The server now sends 25-second WebSocket ping control frames and terminates missed pongs. Staging must prove
+quiet-session survival, routing, rolling-deploy reconnect/replay, shutdown grace, scheduled jobs, PostgreSQL
+TLS/trusted source, backup/PITR, and restore. Failure of any gate rejects this ADR and selects AWS.
 
 ## Cost and region
 

@@ -116,6 +116,7 @@ resolution.
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | BFF | Secret (client secret) | OAuth application |
 | `HUB_ALLOWED_OAUTH_SUBJECTS` | BFF | Operationally sensitive | Comma-separated `github:<numeric id>` |
 | `HUB_TRUST_PROXY` | BFF | No | Exact trusted proxy IP/CIDR; local reference uses `172.30.0.10` |
+| `HUB_CLIENT_IP_HEADER` | BFF | No | Optional provider-set client address; only `do-connecting-ip` is accepted and it is mutually exclusive with `HUB_TRUST_PROXY` |
 | `HUB_POSTGRES_PASSWORD` | Compose DB/jobs | Yes | Local schema owner |
 | `HUB_RUNTIME_DB_PASSWORD` | Compose DB/BFF | Yes | Local runtime role |
 | `HUB_BACKUP_DB_PASSWORD` | Compose DB | Yes | Local read-only backup role |
@@ -139,6 +140,12 @@ The edge must:
 - use exact trusted proxy CIDRs in BFF configuration;
 - preserve BFF no-store/security headers;
 - support at least the BFF's 2 MB body cap and appropriate WebSocket idle timeout.
+
+The portable Caddy stack uses `HUB_TRUST_PROXY`. The proposed DigitalOcean deployment leaves that value
+empty and uses `HUB_CLIENT_IP_HEADER=do-connecting-ip`. The authority rejects enabling both mechanisms. The
+provider header is parsed as one IP address and used consistently for structured logs, HTTP rate-limit keys,
+and WebSocket connection context; missing, malformed, array, or comma-separated values fall back to the
+socket peer.
 
 The local Caddy reference uses `tls internal` and persists its local CA under `hub-caddy-data`. Trust that CA
 on a development machine before browser/OAuth testing; `curl --insecure` is acceptable only for local probes.

@@ -145,6 +145,7 @@ Decision progress:
 - AWS, GCP, DigitalOcean, and Render compared against the portable contract;
 - DigitalOcean App Platform + Managed PostgreSQL recommended at an estimated $20-30/month;
 - ADR 0009 remains proposed pending provider/cost/region approval;
+- provider client-IP adapter and 25-second WebSocket heartbeat implemented; live ingress evidence pending;
 - no billable resource, domain, OAuth app, registry, or secret has been created.
 
 Deliver:

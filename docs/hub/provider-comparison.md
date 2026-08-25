@@ -50,18 +50,18 @@ accepts the provider/cost and selects a region.
 
 1. Keep `instance_count: 1` and disable autoscaling. Realtime socket membership and dispatch are process-local
    in private V1; horizontal replicas are not supported.
-2. Add and test a narrowly configured trusted-client-IP adapter for the provider-set `do-connecting-ip`
-   header. It must use one authenticated source consistently for structured logs, HTTP rate-limit keys, and
-   WebSocket upgrades. Do not enable blanket proxy trust or accept a browser-supplied copy. Require first-party
-   assurance or a decisive staging proof that ingress overwrites client copies; otherwise use AWS.
+2. The code-level trusted-client-IP adapter for provider-set `do-connecting-ip` is implemented. It uses one
+   validated source consistently for structured logs, HTTP rate-limit keys, and WebSocket context. The
+   remaining gate is first-party assurance or a decisive staging proof that ingress overwrites browser
+   copies; otherwise use AWS.
 3. Route `/api`, `/auth`, and `/ws` to the BFF with preserved prefixes; route `/` to the static component.
 4. Import the CI image archive, push it to an approved supported registry (GHCR or DOCR), record the registry
    digest, and deploy only that digest. Define digest retention/garbage collection before the free tier fills.
 5. Attach managed PostgreSQL as the only trusted database source, require TLS verification, apply migrations
    with the owner role, then run the BFF/jobs with least-privilege roles.
 6. Configure daily encrypted portable backup and bounded maintenance as scheduled jobs.
-7. Add an application heartbeat or prove quiet WebSockets survive the provider idle policy, then drill
-   upgrade/reconnect, client-IP spoofing, SIGTERM, rolling deployment overlap, PITR, restore, and
+7. The server now emits 25-second WebSocket ping frames and terminates missed pongs. Drill quiet-session
+   survival, upgrade/reconnect, client-IP spoofing, SIGTERM, rolling deployment overlap, PITR, restore, and
    destroy/recreate before accepting the provider.
 8. Fall back to AWS ECS/ALB/RDS if DigitalOcean cannot satisfy client-IP authenticity, WebSocket routing, or
    graceful shutdown in a live staging probe.

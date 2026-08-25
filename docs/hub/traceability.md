@@ -27,5 +27,7 @@
 | Reproducible CI and supply-chain evidence | ADR 0008; `ci-and-provenance.md` | pinned workflow, secret scan, exact-image export, SBOMs, provenance writer, image scan | `HubCiContract`, local SBOM/image build, GitHub CI run required before staging | Phase 6G digest-promotion record |
 | Managed staging provider | Proposed ADR 0009; `provider-comparison.md` | not implemented; DigitalOcean recommendation pending approval | first-party contract review; live provider probes required | `staging-plan.md`; provider evidence record pending |
 | One BFF replica in private V1 | `provider-comparison.md`; R-15 | provider config must fix instance count to one | CI reconnect/replay and Phase 6G rolling-deploy drill | shared-fanout ADR required before scale-out |
+| Provider client-IP authenticity | Proposed ADR 0009; R-08 | `server/src/client-ip.js`, app rate-limit/WebSocket context, safe request logger | `HubClientIp`, `HubWebSocket`; live overwrite/spoof probe pending | AWS fallback if provider guarantee fails |
+| Quiet WebSocket survival | ADR 0009; `realtime-protocol.md` | 25-second server ping/pong heartbeat in `HubRealtime` | `HubRealtime`; managed-ingress idle drill pending | reconnect/resync fallback |
 
 Use `not implemented` explicitly. A planned row must not be presented as current capability.

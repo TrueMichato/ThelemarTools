@@ -1,7 +1,7 @@
 # Campaign Hub security model
 
 > **Status:** Implemented private-V1 controls; managed deployment review pending
-> **Last verified:** 2026-08-24
+> **Last verified:** 2026-08-25
 > **Owner:** Campaign Hub maintainers
 
 ## Trust boundaries
@@ -35,6 +35,10 @@
 - Structured request logs strip query strings and redact auth/cookie/CSRF/idempotency fields.
 - Metrics require an independent bearer token and expose aggregate bounded labels only.
 - Backup archives are authenticated AES-256-GCM ciphertext; keys are separate from archives.
+- Provider client identity is fail-closed: only `do-connecting-ip` can be enabled, it cannot be combined with
+  `HUB_TRUST_PROXY`, and only one syntactically valid IP is accepted. The same resolved address keys logs,
+  HTTP rate limits, and WebSocket context; IPv6 rate-limit keys retain the plugin's `/64` normalization. Live
+  staging must still prove DigitalOcean overwrites client copies before ADR 0009 is accepted.
 
 ## Content restrictions
 
@@ -58,3 +62,5 @@ sandboxed renderer, malicious fixture corpus, and another security review.
 - A formal public-service privacy/ToS review remains a gate before semi-public onboarding.
 - Core renderer behavior prevents a strict no-inline-script CSP from being the primary content boundary.
 - Provider-native alerting/PITR and production restore evidence remain Phase 6G launch work.
+- Exactly one BFF replica is supported; private V1 accepts application restart/deploy downtime until shared
+  realtime fanout exists.

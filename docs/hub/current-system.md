@@ -200,6 +200,10 @@ but it is not a substitute for shared live fanout.
 Provider configuration must fix the BFF to one instance and drill rolling-deployment reconnect. Horizontal
 scale requires a shared-fanout design, ADR, failure model, and multi-replica tests.
 
+The WebSocket server sends protocol ping frames every 25 seconds and removes connections which miss a pong.
+The proposed DigitalOcean path also has an explicit `do-connecting-ip` adapter shared by logs, HTTP rate
+limits, and WebSocket context; live ingress spoofing evidence is still required.
+
 ## Deployment status
 
 The implementation is verified through portable Phase 6F but is not managed-provider deployed. Before

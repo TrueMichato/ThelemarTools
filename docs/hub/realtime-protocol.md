@@ -2,7 +2,7 @@
 
 > **Status:** Current private-V1 wire protocol
 > **Protocol version:** `1`
-> **Last verified:** 2026-08-24
+> **Last verified:** 2026-08-25
 > **Owner:** Campaign Hub maintainers
 
 ## Connection
@@ -22,6 +22,11 @@ Upgrade requires:
 - active campaign membership.
 
 The service worker does not intercept WebSocket traffic.
+
+The server sends a WebSocket protocol ping every 25 seconds. Standards-compliant browser clients reply with
+pong automatically. A connection which misses one complete heartbeat interval is terminated and recovers
+through the normal reconnect/resync path. Heartbeats are control frames, not JSON messages, and do not count
+against the 20-message client rate limit.
 
 ## Initial server message
 
@@ -140,6 +145,10 @@ Presence is ephemeral and not written to the event log.
 - Expired/revoked session closes with 1008.
 - Removed membership closes with 1008.
 - Revoking the current session through logout closes matching sockets immediately.
+- Missed heartbeat closes the underlying socket; server shutdown closes with 1001.
+
+Shutdown sends code 1001 during the WebSocket plugin's pre-close phase, waits up to one second for close
+handshakes, then terminates stragglers before the HTTP server and database pool exit.
 
 Session and membership are rechecked:
 

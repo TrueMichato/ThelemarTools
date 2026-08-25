@@ -139,3 +139,14 @@ Evidence containing secrets or user data belongs in the approved private operati
   Large text/source files are scanned; only known binary formats are explicitly counted as skipped.
 
 See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth boundaries, and artifact semantics.
+
+## Phase 6G preparation evidence
+
+- Hub: 42 suites / 273 tests.
+- `HubClientIp` verifies the supported header allowlist, single IPv4/IPv6 parsing, safe fallback, structured
+  logging, rate-limit isolation, unsupported configuration, and mutual exclusion with proxy trust.
+- `HubWebSocket` verifies the resolved provider client address reaches WebSocket connection context.
+- `HubRealtime` verifies ping/pong liveness and termination after a missed heartbeat; `HubWebSocket` also
+  verifies bounded code-1001 shutdown during plugin pre-close.
+- Exact-image real-stack Playwright remains green: 2 scenarios in 53.8 seconds, followed by BFF/database
+  restart recovery and complete resource cleanup.

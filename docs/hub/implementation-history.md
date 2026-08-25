@@ -245,3 +245,20 @@ Added:
 Both real-stack journeys passed in 50.5 seconds in CI reporter mode. The harness removed all test containers,
 networks, and volumes after the run. A separate SIGTERM drill exited 143 and left no matching Docker
 resources.
+
+## Phase 6G: provider decision preparation
+
+Compared AWS, Google Cloud, DigitalOcean, and Render against the portable contract. ADR 0009 proposes
+DigitalOcean App Platform + Managed PostgreSQL at an estimated $20-30/month, with AWS as fallback. The
+recommendation surfaced the process-local single-replica/no-HA constraint, provider client-IP trust gap, and
+managed-ingress idle WebSocket risk.
+
+Implemented the provider-neutral preparation that can be validated locally:
+
+- `do-connecting-ip` is the only accepted provider header and cannot coexist with `HUB_TRUST_PROXY`;
+- one validated address is shared by safe request logs, HTTP rate-limit keys, and WebSocket context;
+- malformed, missing, array, and comma-separated provider values fall back to the socket peer;
+- the server sends 25-second WebSocket pings and terminates missed pongs for reconnect/resync recovery.
+
+Provider/cost/region acceptance, live header-overwrite proof, managed resources, OAuth/domain, PITR, jobs,
+alerts, backup destination, and restore remain Phase 6G gates.

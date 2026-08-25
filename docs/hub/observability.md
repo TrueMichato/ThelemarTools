@@ -14,7 +14,7 @@ Required fields:
 - request id;
 - method and bounded route URL;
 - response status and duration;
-- remote/client address after exact proxy trust;
+- remote/client address after exact proxy trust or the explicitly configured provider header;
 - process/container identity;
 - explicit signal on graceful shutdown.
 
@@ -31,6 +31,11 @@ Never log:
 `HUB_LOG_REDACT_PATHS` is applied by `server/src/index.js`. Fastify request ids accept only
 `[a-zA-Z0-9_.:-]` up to 100 characters; other values are replaced by UUIDs and every response returns
 `X-Request-Id`.
+
+`HUB_CLIENT_IP_HEADER` is optional and accepts only `do-connecting-ip`. It is mutually exclusive with
+`HUB_TRUST_PROXY`. One validated provider address is used for the safe request log, HTTP rate-limit key, and
+WebSocket connection context; invalid/missing values use the direct socket peer. Logs retain the full IPv6
+address while HTTP rate-limit keys use the plugin's default `/64` normalization.
 
 ## Metrics endpoint
 
