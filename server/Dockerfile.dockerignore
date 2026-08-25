@@ -1,0 +1,12 @@
+*
+!package.json
+!package-lock.json
+!server
+!server/**
+server/.env*
+server/**/.env*
+!server/.env*.example
+!server/**/.env*.example
+!js
+!js/hub
+!js/hub/hub-json-patch.js

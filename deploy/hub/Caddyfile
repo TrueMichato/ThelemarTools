@@ -1,0 +1,20 @@
+https://localhost:8443 {
+	tls internal
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy bff:5052
+	}
+
+	handle /auth/* {
+		reverse_proxy bff:5052
+	}
+
+	handle /ws/* {
+		reverse_proxy bff:5052
+	}
+
+	handle {
+		reverse_proxy static:80
+	}
+}

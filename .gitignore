@@ -28,6 +28,15 @@ sw-injector.js
 # Log files
 *.log
 
+# Local Campaign Hub deployment secrets
+.env.hub
+.env
+.env.*
+**/.env
+**/.env.*
+!.env*.example
+!**/.env*.example
+
 # Dev scripts
 dev-*.sh
 5etools Thelemar State *.json
