@@ -80,4 +80,35 @@ describe("hub API client", () => {
 
 		await expect(client.pCreateCampaign({name: "Campaign"})).rejects.toBeInstanceOf(HubApiError);
 	});
+
+	it("uses the lifecycle administration routes and mutation headers", async () => {
+		const calls = [];
+		const client = new HubApiClient({
+			fnFetch: async (path, opts = {}) => {
+				calls.push({path, opts});
+				if (path === "/api/session") return getResponse({body: {signedIn: true, csrfToken: "csrf-1"}});
+				if (path === "/api/account/sessions") return getResponse({body: {sessions: []}});
+				if (path.endsWith("/invites") && opts.method === "GET") return getResponse({body: {invites: []}});
+				return getResponse({body: {ok: true}});
+			},
+		});
+		await client.pGetSession();
+		await client.pListSessions();
+		await client.pRevokeOtherSessions({idempotencyKey: "sessions"});
+		await client.pListInvites({campaignId: "campaign"});
+		await client.pRevokeInvite({campaignId: "campaign", inviteId: "invite", idempotencyKey: "invite"});
+		await client.pChangeMemberRole({campaignId: "campaign", membershipId: "membership", role: "spectator", idempotencyKey: "role"});
+		await client.pRemoveMember({campaignId: "campaign", membershipId: "membership", idempotencyKey: "remove"});
+		await client.pRequestAccountDeletion({idempotencyKey: "delete"});
+		expect(calls.map(call => [call.path, call.opts.method || "GET"])).toEqual(expect.arrayContaining([
+			["/api/account/sessions", "GET"],
+			["/api/account/sessions/revoke-others", "POST"],
+			["/api/campaigns/campaign/invites", "GET"],
+			["/api/campaigns/campaign/invites/invite/revoke", "POST"],
+			["/api/campaigns/campaign/members/membership", "PATCH"],
+			["/api/campaigns/campaign/members/membership", "DELETE"],
+			["/api/account/deletion/request", "POST"],
+		]));
+		expect(calls.find(call => call.path === "/api/account/deletion/request").opts.headers["idempotency-key"]).toBe("delete");
+	});
 });

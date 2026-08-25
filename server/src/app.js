@@ -165,6 +165,27 @@ export async function createHubApp ({
 		return request.hubAuth;
 	};
 
+	const deletionPendingAllowedPaths = new Set([
+		"/api/live",
+		"/api/ready",
+		"/api/session",
+		"/api/account/export",
+		"/api/account/deletion",
+		"/api/account/deletion/request",
+		"/api/account/deletion/cancel",
+		"/api/logout",
+		"/api/health",
+		"/api/meta",
+	]);
+	app.addHook("preHandler", async (request, reply) => {
+		const pathname = request.url.split("?")[0];
+		if (["/api/live", "/api/ready", "/api/health", "/api/meta"].includes(pathname) || pathname.startsWith("/auth/")) return;
+		const auth = await pGetAuth(request);
+		if (auth?.account.status !== "deletion_requested") return;
+		if (deletionPendingAllowedPaths.has(pathname)) return;
+		return reply.code(423).send({error: "ACCOUNT_DELETION_PENDING"});
+	});
+
 	const requireAuth = async (request, reply) => {
 		const auth = await pGetAuth(request);
 		if (auth) return;
@@ -218,6 +239,7 @@ export async function createHubApp ({
 		if (request.headers.origin !== config.appOrigin) return reply.code(403).send({error: "INVALID_ORIGIN"});
 		const auth = await pGetAuth(request);
 		if (!auth) return reply.code(401).send({error: "AUTH_REQUIRED"});
+		if (auth.account.status !== "active") return reply.code(423).send({error: "ACCOUNT_DELETION_PENDING"});
 		const membership = await store.pGetMembership({
 			accountId: auth.account.id,
 			campaignId: request.params.campaignId,
@@ -226,14 +248,18 @@ export async function createHubApp ({
 		request.hubMembership = membership;
 	};
 
-	app.get("/api/health", async (request, reply) => {
+	app.get("/api/live", async () => ({ok: true}));
+
+	const pHandleReadiness = async (request, reply) => {
 		try {
 			await store.pCheckHealth();
 			return {ok: true};
 		} catch {
 			return reply.code(503).send({ok: false, error: "DATABASE_UNAVAILABLE"});
 		}
-	});
+	};
+	app.get("/api/ready", pHandleReadiness);
+	app.get("/api/health", pHandleReadiness);
 
 	app.get("/api/meta", async () => ({
 		protocolVersion: HUB_PROTOCOL_VERSION,
@@ -345,6 +371,9 @@ export async function createHubApp ({
 			account: {
 				id: auth.account.id,
 				displayName: auth.account.displayName,
+				status: auth.account.status,
+				deletionRequestedAt: auth.account.deletionRequestedAt,
+				purgeAfter: auth.account.purgeAfter,
 			},
 			csrfToken: getCsrfToken({csrfSecret: config.csrfSecret, sessionId: auth.session.id}),
 		};
@@ -356,6 +385,73 @@ export async function createHubApp ({
 		reply.header("content-disposition", `attachment; filename="campaign-hub-export.json"`);
 		return exported;
 	});
+
+	app.get("/api/account/sessions", {preHandler: requireAuth}, async request => ({
+		sessions: await store.pListSessions({
+			accountId: request.hubAuth.account.id,
+			currentSessionId: request.hubAuth.session.id,
+		}),
+	}));
+
+	app.post("/api/account/sessions/:sessionId/revoke", {
+		preHandler: requireMutationSecurity,
+		schema: {
+			params: {
+				type: "object",
+				required: ["sessionId"],
+				additionalProperties: false,
+				properties: {sessionId: {type: "string", format: "uuid"}},
+			},
+		},
+	}, async (request, reply) => {
+		const response = await store.pRevokeAccountSession({
+			accountId: request.hubAuth.account.id,
+			sessionId: request.params.sessionId,
+			idempotencyKey: getIdempotencyKey(request),
+		});
+		realtime.closeSession({sessionId: request.params.sessionId});
+		if (request.params.sessionId === request.hubAuth.session.id) reply.clearCookie(SESSION_COOKIE, getClearCookieOptions({isSecure: config.isSecure}));
+		return response;
+	});
+
+	app.post("/api/account/sessions/revoke-others", {preHandler: requireMutationSecurity}, async request => {
+		const response = await store.pRevokeOtherSessions({
+			accountId: request.hubAuth.account.id,
+			currentSessionId: request.hubAuth.session.id,
+			idempotencyKey: getIdempotencyKey(request),
+		});
+		response.revokedSessionIds.forEach(sessionId => realtime.closeSession({sessionId}));
+		return response;
+	});
+
+	app.get("/api/account/deletion", {preHandler: requireAuth}, async request => ({
+		deletion: await store.pGetAccountDeletion({accountId: request.hubAuth.account.id}),
+	}));
+
+	app.post("/api/account/deletion/request", {
+		preHandler: requireMutationSecurity,
+		schema: {
+			body: {
+				type: "object",
+				required: ["confirmation"],
+				additionalProperties: false,
+				properties: {confirmation: {type: "string", const: "DELETE"}},
+			},
+		},
+	}, async (request, reply) => {
+		const response = await store.pRequestAccountDeletion({
+			accountId: request.hubAuth.account.id,
+			idempotencyKey: getIdempotencyKey(request),
+		});
+		realtime.closeAccount({accountId: request.hubAuth.account.id, reason: "Account deletion requested"});
+		reply.clearCookie(SESSION_COOKIE, getClearCookieOptions({isSecure: config.isSecure}));
+		return response;
+	});
+
+	app.post("/api/account/deletion/cancel", {preHandler: requireMutationSecurity}, async request => store.pCancelAccountDeletion({
+		accountId: request.hubAuth.account.id,
+		idempotencyKey: getIdempotencyKey(request),
+	}));
 
 	app.post("/api/logout", {preHandler: requireMutationSecurity}, async (request, reply) => {
 		await store.pRevokeSession({sessionId: request.hubAuth.session.id});
@@ -431,6 +527,67 @@ export async function createHubApp ({
 			campaignId: request.params.campaignId,
 		}),
 	}));
+
+	app.patch("/api/campaigns/:campaignId/members/:membershipId", {
+		preHandler: requireMutationSecurity,
+		schema: {
+			params: {
+				type: "object",
+				required: ["campaignId", "membershipId"],
+				additionalProperties: false,
+				properties: {
+					campaignId: {type: "string", format: "uuid"},
+					membershipId: {type: "string", format: "uuid"},
+				},
+			},
+			body: {
+				type: "object",
+				required: ["role"],
+				additionalProperties: false,
+				properties: {role: {type: "string", enum: ["co_dm", "player", "spectator"]}},
+			},
+		},
+	}, async request => store.pChangeMemberRole({
+		accountId: request.hubAuth.account.id,
+		campaignId: request.params.campaignId,
+		membershipId: request.params.membershipId,
+		role: request.body.role,
+		idempotencyKey: getIdempotencyKey(request),
+	}));
+
+	app.delete("/api/campaigns/:campaignId/members/:membershipId", {
+		preHandler: [requireMutationSecurity, requireCampaignRole(["dm", "co_dm"])],
+		schema: {
+			params: {
+				type: "object",
+				required: ["campaignId", "membershipId"],
+				additionalProperties: false,
+				properties: {
+					campaignId: {type: "string", format: "uuid"},
+					membershipId: {type: "string", format: "uuid"},
+				},
+			},
+		},
+	}, async request => {
+		const response = await store.pRemoveMember({
+			accountId: request.hubAuth.account.id,
+			campaignId: request.params.campaignId,
+			membershipId: request.params.membershipId,
+			idempotencyKey: getIdempotencyKey(request),
+		});
+		realtime.closeAccount({accountId: response.removedAccountId, campaignId: request.params.campaignId, reason: "Membership removed"});
+		return response;
+	});
+
+	app.post("/api/campaigns/:campaignId/leave", {preHandler: requireMutationSecurity}, async request => {
+		const response = await store.pLeaveCampaign({
+			accountId: request.hubAuth.account.id,
+			campaignId: request.params.campaignId,
+			idempotencyKey: getIdempotencyKey(request),
+		});
+		realtime.closeAccount({accountId: request.hubAuth.account.id, campaignId: request.params.campaignId, reason: "Membership left"});
+		return response;
+	});
 
 	app.get("/api/campaigns/:campaignId/context", {
 		preHandler: requireAuth,
@@ -715,6 +872,23 @@ export async function createHubApp ({
 		idempotencyKey: getIdempotencyKey(request),
 	}));
 
+	app.get("/api/campaigns/:campaignId/invites", {
+		preHandler: [requireAuth, requireCampaignRole(["dm", "co_dm"])],
+		schema: {
+			params: {
+				type: "object",
+				required: ["campaignId"],
+				additionalProperties: false,
+				properties: {campaignId: {type: "string", format: "uuid"}},
+			},
+		},
+	}, async request => ({
+		invites: await store.pListInvites({
+			accountId: request.hubAuth.account.id,
+			campaignId: request.params.campaignId,
+		}),
+	}));
+
 	app.post("/api/campaigns/:campaignId/invites", {
 		preHandler: [requireMutationSecurity, requireCampaignRole(["dm", "co_dm"])],
 		config: {rateLimit: {max: 20, timeWindow: "1 minute"}},
@@ -754,6 +928,26 @@ export async function createHubApp ({
 		});
 		return reply.code(201).send({...created, token});
 	});
+
+	app.post("/api/campaigns/:campaignId/invites/:inviteId/revoke", {
+		preHandler: [requireMutationSecurity, requireCampaignRole(["dm", "co_dm"])],
+		schema: {
+			params: {
+				type: "object",
+				required: ["campaignId", "inviteId"],
+				additionalProperties: false,
+				properties: {
+					campaignId: {type: "string", format: "uuid"},
+					inviteId: {type: "string", format: "uuid"},
+				},
+			},
+		},
+	}, async request => store.pRevokeInvite({
+		accountId: request.hubAuth.account.id,
+		campaignId: request.params.campaignId,
+		inviteId: request.params.inviteId,
+		idempotencyKey: getIdempotencyKey(request),
+	}));
 
 	app.post("/api/invites/redeem", {
 		preHandler: requireMutationSecurity,

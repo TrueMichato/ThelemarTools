@@ -83,6 +83,15 @@ describe("campaign hub BFF", () => {
 		expect(response.json()).toEqual({ok: false, error: "DATABASE_UNAVAILABLE"});
 	});
 
+	it("reports readiness failures even when a signed session cookie is present", async () => {
+		const cookie = await pSignIn();
+		store.pGetSessionByTokenHash = async () => { throw new Error("auth database unavailable"); };
+		store.pCheckHealth = async () => { throw new Error("database unavailable"); };
+		const response = await app.inject({method: "GET", url: "/api/health", headers: {cookie}});
+		expect(response.statusCode).toBe(503);
+		expect(response.json()).toEqual({ok: false, error: "DATABASE_UNAVAILABLE"});
+	});
+
 	it("uses signed OAuth state and creates a server-side session", async () => {
 		const cookie = await pSignIn();
 		const response = await app.inject({method: "GET", url: "/api/session", headers: {cookie}});

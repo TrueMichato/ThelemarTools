@@ -12,6 +12,10 @@ function getErrorMessage (error) {
 		case "AUTH_REQUIRED": return "Your session has expired. Sign in again to continue.";
 		case "CAMPAIGN_NOT_FOUND": return "This campaign is unavailable or you no longer have access.";
 		case "INVALID_CAMPAIGN_NAME": return "Enter a campaign name before creating it.";
+		case "INVITE_INVALID": return "That invite is expired, revoked, or has already been fully used.";
+		case "ACCOUNT_OWNS_CAMPAIGN": return "Transfer ownership or archive every active campaign before deleting your account.";
+		case "ACCOUNT_DELETION_PENDING": return "Your account is scheduled for deletion. Cancel deletion before using campaign features.";
+		case "MEMBERSHIP_OWNER_PROTECTED": return "The campaign owner must transfer ownership or archive the campaign first.";
 		case "PROTOCOL_UPDATE_REQUIRED": return "This page is out of date. Reload before making campaign changes.";
 		default: return "The campaign hub could not complete that request. Try again.";
 	}
@@ -55,9 +59,79 @@ function renderCampaignList (campaigns) {
 	});
 }
 
+function getDateLabel (value) {
+	if (!value) return "Unknown";
+	const date = new Date(value);
+	return Number.isNaN(date.getTime()) ? "Unknown" : date.toLocaleString();
+}
+
+function renderAccountDeletionPending (deletion) {
+	setHidden(document.getElementById("hub-account-active"), true);
+	setHidden(document.getElementById("hub-account-deletion-pending"), false);
+	const deadline = document.getElementById("hub-deletion-deadline");
+	if (deadline) deadline.textContent = `Your account is frozen and scheduled for deletion after ${getDateLabel(deletion.purgeAfter)}. Re-authenticate before then to cancel.`;
+}
+
+async function pRenderAccountSessions () {
+	const list = document.getElementById("hub-session-list");
+	if (!list) return;
+	const sessions = await api.pListSessions();
+	list.replaceChildren(...sessions.map(session => {
+		const row = document.createElement("div");
+		row.className = "hub-data-row";
+		const main = document.createElement("div");
+		main.className = "hub-data-row__main";
+		const name = document.createElement("span");
+		name.textContent = session.isCurrent ? "This device" : (session.userAgent || "Unknown device");
+		const meta = document.createElement("span");
+		meta.className = "hub-data-row__meta";
+		meta.textContent = `${session.revokedAt ? "Revoked" : "Active"} · Last seen ${getDateLabel(session.lastSeenAt)}`;
+		main.append(name, meta);
+		row.append(main);
+		if (!session.isCurrent && !session.revokedAt) {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "hub-button";
+			button.textContent = "Sign out";
+			button.addEventListener("click", async () => {
+				button.disabled = true;
+				try {
+					await api.pRevokeSession({sessionId: session.id, idempotencyKey: crypto.randomUUID()});
+					await pRenderAccountSessions();
+				} catch (error) {
+					renderError(getErrorMessage(error));
+					button.disabled = false;
+				}
+			});
+			row.append(button);
+		}
+		return row;
+	}));
+}
+
 async function pInitHubIndex ({session}) {
 	const name = document.getElementById("hub-account-name");
 	if (name) name.textContent = session.account.displayName;
+	document.getElementById("hub-cancel-deletion")?.addEventListener("click", async event => {
+		const button = event.currentTarget;
+		button.disabled = true;
+		try {
+			await api.pCancelAccountDeletion({idempotencyKey: crypto.randomUUID()});
+			window.location.reload();
+		} catch (error) {
+			renderError(getErrorMessage(error));
+			button.disabled = false;
+		}
+	});
+	if (session.account.status === "deletion_requested") {
+		renderAccountDeletionPending({
+			purgeAfter: session.account.purgeAfter,
+			deletionRequestedAt: session.account.deletionRequestedAt,
+		});
+		return;
+	}
+	setHidden(document.getElementById("hub-account-active"), false);
+	setHidden(document.getElementById("hub-account-deletion-pending"), true);
 	const campaigns = await api.pListCampaigns();
 	renderCampaignList(campaigns);
 	const inviteToken = sessionStorage.getItem("hub-pending-invite");
@@ -101,6 +175,35 @@ async function pInitHubIndex ({session}) {
 			button.textContent = "Create campaign";
 		}
 	});
+	try {
+		await pRenderAccountSessions();
+	} catch (error) {
+		renderError(getErrorMessage(error));
+	}
+	document.getElementById("hub-revoke-other-sessions")?.addEventListener("click", async event => {
+		const button = event.currentTarget;
+		button.disabled = true;
+		try {
+			await api.pRevokeOtherSessions({idempotencyKey: crypto.randomUUID()});
+			await pRenderAccountSessions();
+		} catch (error) {
+			renderError(getErrorMessage(error));
+		} finally {
+			button.disabled = false;
+		}
+	});
+	document.getElementById("hub-request-deletion")?.addEventListener("click", async event => {
+		if (window.prompt(`Type DELETE to schedule account deletion after a 7-day grace period.`) !== "DELETE") return;
+		const button = event.currentTarget;
+		button.disabled = true;
+		try {
+			const result = await api.pRequestAccountDeletion({idempotencyKey: crypto.randomUUID()});
+			renderAccountDeletionPending(result.deletion);
+		} catch (error) {
+			renderError(getErrorMessage(error));
+			button.disabled = false;
+		}
+	});
 }
 
 async function pInitCampaign ({session}) {
@@ -113,13 +216,39 @@ async function pInitCampaign ({session}) {
 		api.pGetCampaignSnapshot({campaignId}),
 	]);
 	const context = await api.pGetCampaignContext({campaignId});
+	const pRefreshMembers = async () => renderMemberList({
+		campaign,
+		campaignId,
+		members: await api.pListMembers({campaignId}),
+		session,
+		pRefresh: pRefreshMembers,
+	});
+	const pRefreshInvites = async () => renderInviteList({
+		campaignId,
+		invites: await api.pListInvites({campaignId}),
+		pRefresh: pRefreshInvites,
+	});
 	document.getElementById("campaign-name").textContent = campaign.name;
 	document.getElementById("campaign-role").textContent = getRoleLabel(campaign.role);
+	document.getElementById("campaign-status").textContent = campaign.status === "active" ? "Active" : "Archived";
 	document.getElementById("campaign-account").textContent = session.account.displayName;
-	renderMemberList(members);
+	renderMemberList({campaign, campaignId, members, session, pRefresh: pRefreshMembers});
+	if (["dm", "co_dm"].includes(campaign.role)) await pRefreshInvites();
 	renderCharacterList({campaignId, characters});
 	renderCampaignContext(context);
-	await pInitCampaignForms({campaign, campaignId, session, characters, targetCharacters: snapshot.characters, context});
+	if (campaign.status !== "active") {
+		setHidden(document.getElementById("campaign-invite-form"), true);
+		setHidden(document.getElementById("campaign-upload-local"), true);
+		setHidden(document.getElementById("campaign-dm-controls"), true);
+		setHidden(document.getElementById("campaign-open-dm-screen"), true);
+		setHidden(document.getElementById("campaign-shared-actions"), true);
+		setHidden(document.getElementById("campaign-leave"), true);
+		setHidden(document.getElementById("campaign-loading"), true);
+		setHidden(document.getElementById("campaign-content"), false);
+		document.title = `${campaign.name} - Campaign Hub - ThelemarTools`;
+		return;
+	}
+	await pInitCampaignForms({campaign, campaignId, session, characters, targetCharacters: snapshot.characters, context, pRefreshInvites});
 	document.title = `${campaign.name} - Campaign Hub - ThelemarTools`;
 	setHidden(document.getElementById("campaign-loading"), true);
 	setHidden(document.getElementById("campaign-content"), false);
@@ -140,18 +269,109 @@ function renderCampaignContext (context) {
 	}
 }
 
-function renderMemberList (members) {
+function renderMemberList ({campaign, campaignId, members, session, pRefresh}) {
 	const list = document.getElementById("campaign-member-list");
 	if (!list) return;
 	list.replaceChildren(...members.map(member => {
 		const row = document.createElement("li");
 		row.className = "hub-data-row";
+		const main = document.createElement("div");
+		main.className = "hub-data-row__main";
 		const name = document.createElement("span");
 		name.textContent = member.displayName;
 		const role = document.createElement("span");
 		role.className = "hub-data-row__meta";
 		role.textContent = getRoleLabel(member.role);
-		row.append(name, role);
+		main.append(name, role);
+		row.append(main);
+		const isOwner = member.accountId === campaign.ownerAccountId;
+		const canChangeRole = campaign.status === "active" && session.account.id === campaign.ownerAccountId && !isOwner;
+		const canRemove = campaign.status === "active" && !isOwner && (
+			session.account.id === campaign.ownerAccountId
+			|| (campaign.role === "co_dm" && ["player", "spectator"].includes(member.role))
+		);
+		if (canChangeRole || canRemove) {
+			const controls = document.createElement("div");
+			controls.className = "hub-data-row__controls";
+			if (canChangeRole) {
+				const select = document.createElement("select");
+				select.className = "hub-input";
+				for (const value of ["co_dm", "player", "spectator"]) {
+					const option = document.createElement("option");
+					option.value = value;
+					option.textContent = getRoleLabel(value);
+					option.selected = member.role === value;
+					select.append(option);
+				}
+				select.addEventListener("change", async () => {
+					select.disabled = true;
+					try {
+						await api.pChangeMemberRole({campaignId, membershipId: member.id, role: select.value, idempotencyKey: crypto.randomUUID()});
+						await pRefresh();
+					} catch (error) {
+						renderError(getErrorMessage(error));
+						select.disabled = false;
+						select.value = member.role;
+					}
+				});
+				controls.append(select);
+			}
+			if (canRemove) {
+				const button = document.createElement("button");
+				button.type = "button";
+				button.className = "hub-button hub-button--danger";
+				button.textContent = "Remove";
+				button.addEventListener("click", async () => {
+					if (!window.confirm(`Remove ${member.displayName} from this campaign? Their campaign characters will return to personal ownership.`)) return;
+					button.disabled = true;
+					try {
+						await api.pRemoveMember({campaignId, membershipId: member.id, idempotencyKey: crypto.randomUUID()});
+						await pRefresh();
+					} catch (error) {
+						renderError(getErrorMessage(error));
+						button.disabled = false;
+					}
+				});
+				controls.append(button);
+			}
+			row.append(controls);
+		}
+		return row;
+	}));
+}
+
+function renderInviteList ({campaignId, invites, pRefresh}) {
+	const list = document.getElementById("campaign-invite-list");
+	if (!list) return;
+	list.replaceChildren(...invites.map(invite => {
+		const row = document.createElement("div");
+		row.className = "hub-data-row";
+		const main = document.createElement("div");
+		main.className = "hub-data-row__main";
+		const title = document.createElement("span");
+		title.textContent = `${getRoleLabel(invite.role)} invite`;
+		const meta = document.createElement("span");
+		meta.className = "hub-data-row__meta";
+		meta.textContent = `${invite.useCount}/${invite.maxUses} used · expires ${getDateLabel(invite.expiresAt)}${invite.revokedAt ? " · revoked" : ""}`;
+		main.append(title, meta);
+		row.append(main);
+		if (!invite.revokedAt) {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "hub-button";
+			button.textContent = "Revoke";
+			button.addEventListener("click", async () => {
+				button.disabled = true;
+				try {
+					await api.pRevokeInvite({campaignId, inviteId: invite.id, idempotencyKey: crypto.randomUUID()});
+					await pRefresh();
+				} catch (error) {
+					renderError(getErrorMessage(error));
+					button.disabled = false;
+				}
+			});
+			row.append(button);
+		}
 		return row;
 	}));
 }
@@ -278,7 +498,7 @@ async function pRunFormMutation ({form, fnMutate}) {
 	}
 }
 
-async function pInitCampaignForms ({campaign, campaignId, session, characters, targetCharacters, context}) {
+async function pInitCampaignForms ({campaign, campaignId, session, characters, targetCharacters, context, pRefreshInvites}) {
 	const inviteForm = document.getElementById("campaign-invite-form");
 	const inviteOutput = document.getElementById("campaign-invite-output");
 	const isDm = ["dm", "co_dm"].includes(campaign.role);
@@ -302,7 +522,21 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 				joinUrl.hash = `invite=${encodeURIComponent(result.token)}`;
 				inviteOutput.value = joinUrl.href;
 				inviteOutput.select();
+				await pRefreshInvites();
 			}});
+	});
+	const leave = document.getElementById("campaign-leave");
+	setHidden(leave, session.account.id === campaign.ownerAccountId);
+	leave?.addEventListener("click", async () => {
+		if (!window.confirm(`Leave ${campaign.name}? Your campaign characters will return to personal ownership.`)) return;
+		leave.disabled = true;
+		try {
+			await api.pLeaveCampaign({campaignId, idempotencyKey: crypto.randomUUID()});
+			window.location.assign("hub.html");
+		} catch (error) {
+			renderError(getErrorMessage(error));
+			leave.disabled = false;
+		}
 	});
 
 	const upload = document.getElementById("campaign-upload-local");
@@ -526,6 +760,10 @@ async function pInit () {
 			}
 		});
 		const view = document.body.dataset.hubView;
+		if (session.account.status === "deletion_requested" && view === "campaign") {
+			window.location.assign("hub.html");
+			return;
+		}
 		if (view === "campaign") await pInitCampaign({session});
 		else await pInitHubIndex({session});
 	} catch (error) {

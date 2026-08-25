@@ -1,0 +1,1 @@
+export const HUB_REQUIRED_MIGRATION_VERSION = "0002";

@@ -53,6 +53,8 @@ export class MemoryHubStore {
 				id: accountId,
 				displayName,
 				status: "active",
+				deletionRequestedAt: null,
+				purgeAfter: null,
 				createdAt: this._fnNow().toISOString(),
 			});
 			this._identityToAccount.set(identityKey, accountId);
@@ -69,6 +71,8 @@ export class MemoryHubStore {
 			accountId,
 			tokenHash,
 			userAgent,
+			createdAt: this._fnNow().toISOString(),
+			lastSeenAt: this._fnNow().toISOString(),
 			expiresAt: expiresAt.toISOString(),
 			revokedAt: null,
 		};
@@ -80,7 +84,8 @@ export class MemoryHubStore {
 		const session = this._sessions.get(tokenHash);
 		if (!session || session.revokedAt || new Date(session.expiresAt) <= this._fnNow()) return null;
 		const account = this._accounts.get(session.accountId);
-		if (!account || account.status !== "active") return null;
+		if (!account || !["active", "deletion_requested"].includes(account.status)) return null;
+		session.lastSeenAt = this._fnNow().toISOString();
 		return {session: copy(session), account: copy(account)};
 	}
 
@@ -101,6 +106,46 @@ export class MemoryHubStore {
 			if (lease.sessionId === sessionId) this._dmWorkspaceLeases.delete(workspaceId);
 		}
 		return true;
+	}
+
+	async pListSessions ({accountId, currentSessionId = null}) {
+		if (!this._accounts.has(accountId)) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
+		return [...this._sessions.values()]
+			.filter(session => session.accountId === accountId)
+			.map(session => ({
+				id: session.id,
+				accountId,
+				userAgent: session.userAgent,
+				createdAt: session.createdAt,
+				lastSeenAt: session.lastSeenAt,
+				expiresAt: session.expiresAt,
+				revokedAt: session.revokedAt,
+				isCurrent: session.id === currentSessionId,
+			}))
+			.sort((a, b) => `${b.createdAt}`.localeCompare(`${a.createdAt}`));
+	}
+
+	async pRevokeAccountSession ({accountId, sessionId, idempotencyKey}) {
+		const prior = this._getReceipt({accountId, idempotencyKey});
+		if (prior) return prior;
+		const session = [...this._sessions.values()].find(it => it.id === sessionId && it.accountId === accountId);
+		if (!session) throw new HubStoreError("SESSION_NOT_FOUND", `Session was not found.`, {status: 404});
+		await this.pRevokeSession({sessionId});
+		this._appendAudit({actorAccountId: accountId, action: "session.revoked", targetType: "session", targetId: sessionId});
+		return this._setReceipt({accountId, idempotencyKey, response: {ok: true, revokedSessionIds: [sessionId]}});
+	}
+
+	async pRevokeOtherSessions ({accountId, currentSessionId, idempotencyKey}) {
+		const prior = this._getReceipt({accountId, idempotencyKey});
+		if (prior) return prior;
+		const revokedSessionIds = [];
+		for (const session of this._sessions.values()) {
+			if (session.accountId !== accountId || session.id === currentSessionId || session.revokedAt) continue;
+			await this.pRevokeSession({sessionId: session.id});
+			revokedSessionIds.push(session.id);
+		}
+		this._appendAudit({actorAccountId: accountId, action: "session.revoked_others", targetType: "account", targetId: accountId, details: {count: revokedSessionIds.length}});
+		return this._setReceipt({accountId, idempotencyKey, response: {ok: true, revokedSessionIds}});
 	}
 
 	async pCreateCampaign ({accountId, name, idempotencyKey}) {
@@ -264,6 +309,27 @@ export class MemoryHubStore {
 			.sort((a, b) => a.displayName.localeCompare(b.displayName));
 	}
 
+	async pListInvites ({accountId, campaignId}) {
+		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"], isRequireActiveCampaign: false});
+		return [...this._invites.values()]
+			.filter(invite => invite.campaignId === campaignId)
+			.map(({tokenHash: _tokenHash, ...invite}) => copy(invite))
+			.sort((a, b) => `${b.createdAt}`.localeCompare(`${a.createdAt}`));
+	}
+
+	async pRevokeInvite ({accountId, campaignId, inviteId, idempotencyKey}) {
+		const prior = this._getReceipt({accountId, idempotencyKey});
+		if (prior) return prior;
+		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
+		const invite = [...this._invites.values()].find(it => it.id === inviteId && it.campaignId === campaignId);
+		if (!invite) throw new HubStoreError("INVITE_NOT_FOUND", `Invite was not found.`, {status: 404});
+		invite.revokedAt ||= this._fnNow().toISOString();
+		this._appendAudit({campaignId, actorAccountId: accountId, action: "invite.revoked", targetType: "invite", targetId: inviteId});
+		this._appendEvent({campaignId, actorAccountId: accountId, type: "invite.revoked", aggregateType: "invite", aggregateId: inviteId, visibility: "dm_only", payload: {}});
+		const {tokenHash: _tokenHash, ...safeInvite} = invite;
+		return this._setReceipt({accountId, idempotencyKey, response: {invite: copy(safeInvite)}});
+	}
+
 	async pCreateInvite ({accountId, campaignId, role, tokenHash, expiresAt, maxUses, idempotencyKey}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
 		if (prior) return prior;
@@ -339,6 +405,116 @@ export class MemoryHubStore {
 			payload: {accountId, role: membership.role},
 		});
 		return this._setReceipt({accountId, idempotencyKey, response: {membership}});
+	}
+
+	_getMembershipById ({campaignId, membershipId}) {
+		const membership = [...this._memberships.values()].find(it => it.id === membershipId && it.campaignId === campaignId);
+		if (!membership) throw new HubStoreError("MEMBERSHIP_NOT_FOUND", `Membership was not found.`, {status: 404});
+		return membership;
+	}
+
+	async pChangeMemberRole ({accountId, campaignId, membershipId, role, idempotencyKey}) {
+		const prior = this._getReceipt({accountId, idempotencyKey});
+		if (prior) return prior;
+		const campaign = this._campaigns.get(campaignId);
+		if (!campaign || campaign.status !== "active") throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+		if (campaign.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the campaign owner can change roles.`, {status: 403});
+		const membership = this._getMembershipById({campaignId, membershipId});
+		if (membership.accountId === campaign.ownerAccountId) throw new HubStoreError("MEMBERSHIP_OWNER_PROTECTED", `Campaign owner role cannot be changed.`, {status: 409});
+		if (membership.status !== "active") throw new HubStoreError("MEMBERSHIP_NOT_FOUND", `Membership was not found.`, {status: 404});
+		membership.role = role;
+		this._appendAudit({campaignId, actorAccountId: accountId, action: "membership.role_changed", targetType: "membership", targetId: membershipId, details: {role}});
+		this._appendEvent({campaignId, actorAccountId: accountId, type: "membership.role_changed", aggregateType: "membership", aggregateId: membershipId, payload: {accountId: membership.accountId, role}});
+		return this._setReceipt({accountId, idempotencyKey, response: {membership: copy(membership)}});
+	}
+
+	_cancelTransferForLifecycle ({transfer, actorAccountId, reason}) {
+		if (transfer.status !== "reserved") return;
+		const source = this._getTransferContainer({kind: transfer.sourceKind, id: transfer.sourceId, campaignId: transfer.campaignId});
+		this._setTransferContainer({
+			holder: source,
+			container: addTransferPayload({container: source.container, escrow: transfer.payload.escrow, isRestore: true}),
+		});
+		transfer.status = "cancelled";
+		transfer.resolvedAt = this._fnNow().toISOString();
+		this._appendEvent({campaignId: transfer.campaignId, actorAccountId, type: "transfer.cancelled", aggregateType: "transfer", aggregateId: transfer.id, payload: {reason}});
+	}
+
+	_removeMembershipLifecycle ({campaign, membership, actorAccountId, status}) {
+		const characterIds = [...this._characters.values()]
+			.filter(character => character.ownerAccountId === membership.accountId && character.campaignId === campaign.id)
+			.map(character => character.id);
+		const characterIdSet = new Set(characterIds);
+		for (const action of this._pendingActions.values()) {
+			if (action.campaignId !== campaign.id || action.status !== "proposed") continue;
+			const target = this._characters.get(action.targetCharacterId);
+			if (action.actorAccountId !== membership.accountId && target?.ownerAccountId !== membership.accountId) continue;
+			action.status = "cancelled";
+			action.resolvedAt = this._fnNow().toISOString();
+			this._appendEvent({
+				campaignId: campaign.id,
+				actorAccountId,
+				type: "action.cancelled",
+				aggregateType: "pending_action",
+				aggregateId: action.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: [...new Set([action.actorAccountId, target?.ownerAccountId].filter(Boolean))],
+				payload: {reason: "membership_lifecycle"},
+			});
+		}
+		for (const transfer of this._transfers.values()) {
+			if (transfer.campaignId !== campaign.id || transfer.status !== "reserved") continue;
+			const isAffected = transfer.actorAccountId === membership.accountId
+				|| (transfer.sourceKind === "character" && characterIdSet.has(transfer.sourceId))
+				|| (transfer.targetKind === "character" && characterIdSet.has(transfer.targetId));
+			if (isAffected) this._cancelTransferForLifecycle({transfer, actorAccountId, reason: "membership_lifecycle"});
+		}
+		for (const characterId of characterIds) {
+			const character = this._characters.get(characterId);
+			this._characterLeases.delete(characterId);
+			character.campaignId = null;
+			character.clientImportId = null;
+			character.revision++;
+			character.updatedAt = this._fnNow().toISOString();
+			this._appendEvent({campaignId: campaign.id, actorAccountId, type: "character.moved_out", aggregateType: "character", aggregateId: characterId, aggregateRevision: character.revision, payload: {targetCampaignId: null, reason: "membership_lifecycle"}});
+		}
+		const workspace = [...this._dmWorkspaces.values()].find(it => it.ownerMembershipId === membership.id);
+		if (workspace) {
+			workspace.archivedAt = this._fnNow().toISOString();
+			this._dmWorkspaceLeases.delete(workspace.id);
+		}
+		membership.status = status;
+		membership.updatedAt = this._fnNow().toISOString();
+		this._appendAudit({campaignId: campaign.id, actorAccountId, action: `membership.${status}`, targetType: "membership", targetId: membership.id, details: {accountId: membership.accountId, detachedCharacterIds: characterIds}});
+		this._appendEvent({campaignId: campaign.id, actorAccountId, type: `membership.${status}`, aggregateType: "membership", aggregateId: membership.id, payload: {accountId: membership.accountId, detachedCharacterIds: characterIds}});
+		return {membership: copy(membership), removedAccountId: membership.accountId, detachedCharacterIds: characterIds};
+	}
+
+	async pRemoveMember ({accountId, campaignId, membershipId, idempotencyKey}) {
+		const prior = this._getReceipt({accountId, idempotencyKey});
+		if (prior) return prior;
+		const campaign = this._campaigns.get(campaignId);
+		if (!campaign || campaign.status !== "active") throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+		const actor = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
+		const target = this._getMembershipById({campaignId, membershipId});
+		if (target.accountId === campaign.ownerAccountId) throw new HubStoreError("MEMBERSHIP_OWNER_PROTECTED", `Campaign owner cannot be removed.`, {status: 409});
+		if (target.status !== "active") {
+			return this._setReceipt({accountId, idempotencyKey, response: {membership: copy(target), removedAccountId: target.accountId, detachedCharacterIds: []}});
+		}
+		if (campaign.ownerAccountId !== accountId && (actor.role !== "co_dm" || !["player", "spectator"].includes(target.role))) {
+			throw new HubStoreError("FORBIDDEN", `This member cannot be removed by the current role.`, {status: 403});
+		}
+		return this._setReceipt({accountId, idempotencyKey, response: this._removeMembershipLifecycle({campaign, membership: target, actorAccountId: accountId, status: "removed"})});
+	}
+
+	async pLeaveCampaign ({accountId, campaignId, idempotencyKey}) {
+		const prior = this._getReceipt({accountId, idempotencyKey});
+		if (prior) return prior;
+		const campaign = this._campaigns.get(campaignId);
+		if (!campaign || campaign.status !== "active") throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+		if (campaign.ownerAccountId === accountId) throw new HubStoreError("MEMBERSHIP_OWNER_PROTECTED", `Transfer ownership or archive the campaign before leaving.`, {status: 409});
+		const membership = this._getMembership({accountId, campaignId});
+		return this._setReceipt({accountId, idempotencyKey, response: this._removeMembershipLifecycle({campaign, membership, actorAccountId: accountId, status: "left"})});
 	}
 
 	_getCharacterOrThrow (characterId) {
@@ -697,6 +873,7 @@ export class MemoryHubStore {
 			this._dmWorkspaces.set(key, workspace);
 			this._appendAudit({campaignId, actorAccountId: accountId, action: "dm_workspace.created", targetType: "dm_workspace", targetId: workspace.id});
 		}
+		workspace.archivedAt = null;
 		return copy(workspace);
 	}
 
@@ -976,6 +1153,122 @@ export class MemoryHubStore {
 			.map(copy);
 	}
 
+	async pGetAccountDeletion ({accountId}) {
+		const account = this._accounts.get(accountId);
+		if (!account) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
+		return {
+			status: account.status,
+			deletionRequestedAt: account.deletionRequestedAt,
+			purgeAfter: account.purgeAfter,
+		};
+	}
+
+	async pRequestAccountDeletion ({accountId, idempotencyKey, graceMs = 7 * 24 * 60 * 60 * 1000}) {
+		const prior = this._getReceipt({accountId, idempotencyKey});
+		if (prior) return prior;
+		const account = this._accounts.get(accountId);
+		if (!account) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
+		const ownedCampaigns = [...this._campaigns.values()].filter(campaign => campaign.ownerAccountId === accountId && campaign.status === "active");
+		if (ownedCampaigns.length) {
+			throw new HubStoreError("ACCOUNT_OWNS_CAMPAIGN", `Transfer ownership or archive campaigns before deleting the account.`, {
+				status: 409,
+				details: {campaignIds: ownedCampaigns.map(campaign => campaign.id)},
+			});
+		}
+		if (account.status !== "deletion_requested") {
+			const requestedAt = this._fnNow();
+			account.status = "deletion_requested";
+			account.deletionRequestedAt = requestedAt.toISOString();
+			account.purgeAfter = new Date(requestedAt.getTime() + graceMs).toISOString();
+		}
+		const revokedSessionIds = [];
+		for (const session of this._sessions.values()) {
+			if (session.accountId !== accountId || session.revokedAt) continue;
+			await this.pRevokeSession({sessionId: session.id});
+			revokedSessionIds.push(session.id);
+		}
+		this._appendAudit({actorAccountId: accountId, action: "account.deletion_requested", targetType: "account", targetId: accountId, details: {purgeAfter: account.purgeAfter}});
+		const response = {deletion: await this.pGetAccountDeletion({accountId}), revokedSessionIds};
+		return this._setReceipt({accountId, idempotencyKey, response});
+	}
+
+	async pCancelAccountDeletion ({accountId, idempotencyKey}) {
+		const prior = this._getReceipt({accountId, idempotencyKey});
+		if (prior) return prior;
+		const account = this._accounts.get(accountId);
+		if (!account) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
+		if (account.status !== "deletion_requested") throw new HubStoreError("ACCOUNT_DELETION_NOT_PENDING", `Account deletion is not pending.`, {status: 409});
+		account.status = "active";
+		account.deletionRequestedAt = null;
+		account.purgeAfter = null;
+		this._appendAudit({actorAccountId: accountId, action: "account.deletion_cancelled", targetType: "account", targetId: accountId});
+		return this._setReceipt({accountId, idempotencyKey, response: {deletion: await this.pGetAccountDeletion({accountId})}});
+	}
+
+	_deleteCampaignData (campaignId) {
+		this._campaigns.delete(campaignId);
+		for (const [key, membership] of this._memberships) if (membership.campaignId === campaignId) this._memberships.delete(key);
+		for (const [key, invite] of this._invites) if (invite.campaignId === campaignId) this._invites.delete(key);
+		for (const [key, version] of this._brewVersions) if (version.campaignId === campaignId) this._brewVersions.delete(key);
+		for (const [key, version] of this._rulesVersions) if (version.campaignId === campaignId) this._rulesVersions.delete(key);
+		for (const [key, workspace] of this._dmWorkspaces) if (workspace.campaignId === campaignId) this._dmWorkspaces.delete(key);
+		this._partyInventories.delete(campaignId);
+		for (const [key, action] of this._pendingActions) if (action.campaignId === campaignId) this._pendingActions.delete(key);
+		for (const [key, transfer] of this._transfers) if (transfer.campaignId === campaignId) this._transfers.delete(key);
+		const removedEventIds = new Set(this._events.filter(event => event.campaignId === campaignId).map(event => event.id));
+		this._events = this._events.filter(event => event.campaignId !== campaignId);
+		this._outbox = this._outbox.filter(entry => !removedEventIds.has(entry.eventId));
+		for (const audit of this._audit) if (audit.campaignId === campaignId) audit.campaignId = null;
+	}
+
+	async pPurgeDueAccounts ({limit = 100} = {}) {
+		const due = [...this._accounts.values()]
+			.filter(account => account.status === "deletion_requested" && new Date(account.purgeAfter) <= this._fnNow())
+			.slice(0, limit);
+		const purgedAccountIds = [];
+		const blockedAccountIds = [];
+		for (const account of due) {
+			if ([...this._campaigns.values()].some(campaign => campaign.ownerAccountId === account.id && campaign.status !== "archived")) {
+				blockedAccountIds.push(account.id);
+				continue;
+			}
+			for (const membership of [...this._memberships.values()]) {
+				if (membership.accountId !== account.id || membership.status !== "active") continue;
+				const campaign = this._campaigns.get(membership.campaignId);
+				if (campaign) this._removeMembershipLifecycle({campaign, membership, actorAccountId: account.id, status: "left"});
+			}
+			const ownedCharacterIds = new Set([...this._characters.values()].filter(character => character.ownerAccountId === account.id).map(character => character.id));
+			for (const [id, action] of this._pendingActions) if (ownedCharacterIds.has(action.targetCharacterId)) this._pendingActions.delete(id);
+			for (const [id, transfer] of this._transfers) {
+				if (
+					(transfer.sourceKind === "character" && ownedCharacterIds.has(transfer.sourceId))
+					|| (transfer.targetKind === "character" && ownedCharacterIds.has(transfer.targetId))
+				) this._transfers.delete(id);
+			}
+			for (const [id, character] of this._characters) {
+				if (character.ownerAccountId !== account.id) continue;
+				this._characterLeases.delete(id);
+				this._characters.delete(id);
+			}
+			for (const campaign of [...this._campaigns.values()]) {
+				if (campaign.ownerAccountId === account.id && campaign.status === "archived") this._deleteCampaignData(campaign.id);
+			}
+			for (const [hash, session] of this._sessions) if (session.accountId === account.id) this._sessions.delete(hash);
+			for (const [identity, id] of this._identityToAccount) if (id === account.id) this._identityToAccount.delete(identity);
+			for (const [key] of this._commandReceipts) if (key.startsWith(`${account.id}::`)) this._commandReceipts.delete(key);
+			for (const [key, membership] of this._memberships) if (membership.accountId === account.id) this._memberships.delete(key);
+			for (const action of this._pendingActions.values()) if (action.actorAccountId === account.id) action.actorAccountId = null;
+			for (const transfer of this._transfers.values()) if (transfer.actorAccountId === account.id) transfer.actorAccountId = null;
+			for (const audit of this._audit) if (audit.actorAccountId === account.id) audit.actorAccountId = null;
+			for (const event of this._events) if (event.actorAccountId === account.id) event.actorAccountId = null;
+			this._appendAudit({actorAccountId: account.id, action: "account.deletion_purged", targetType: "account", targetId: account.id});
+			this._audit[this._audit.length - 1].actorAccountId = null;
+			this._accounts.delete(account.id);
+			purgedAccountIds.push(account.id);
+		}
+		return {purgedAccountIds, blockedAccountIds};
+	}
+
 	_cancelIncomingForCharacter ({character}) {
 		for (const action of this._pendingActions.values()) {
 			if (action.targetCharacterId === character.id && action.status === "proposed") action.status = "cancelled";
@@ -1050,7 +1343,9 @@ export class MemoryHubStore {
 		for (const character of this._characters.values()) {
 			if (character.campaignId !== campaignId) continue;
 			character.campaignId = null;
+			character.clientImportId = null;
 			character.revision++;
+			character.updatedAt = this._fnNow().toISOString();
 			this._characterLeases.delete(character.id);
 		}
 		this._appendAudit({campaignId, actorAccountId: accountId, action: "campaign.archived", targetType: "campaign", targetId: campaignId});

@@ -1,15 +1,25 @@
-import {spawnSync} from "node:child_process";
 import path from "node:path";
-import {getPgEnv} from "./pg-env.mjs";
+import pg from "pg";
+import {pRunMigrations} from "../src/migration-runner.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error(`DATABASE_URL is required.`);
-const migration = path.resolve(process.argv[2] || "server/migrations/0001_hub_core.sql");
-const result = spawnSync("psql", [
-	"-v",
-	"ON_ERROR_STOP=1",
-	"-f",
-	migration,
-], {stdio: "inherit", env: getPgEnv({databaseUrl})});
-if (result.error) throw result.error;
-if (result.status !== 0) throw new Error(`psql exited with status ${result.status}.`);
+const operation = process.argv[2] || "apply";
+const migrationsDir = path.resolve(process.argv[3] || "server/migrations");
+const pool = new pg.Pool({
+	connectionString: databaseUrl,
+	ssl: process.env.HUB_DATABASE_SSL === "false" ? false : {rejectUnauthorized: true},
+	connectionTimeoutMillis: 5_000,
+	max: 1,
+});
+try {
+	const result = await pRunMigrations({
+		pool,
+		migrationsDir,
+		operation,
+		appVersion: process.env.npm_package_version || null,
+	});
+	process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+} finally {
+	await pool.end();
+}

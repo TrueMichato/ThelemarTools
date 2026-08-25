@@ -18,11 +18,14 @@ describe("PostgreSQL operations credential handling", () => {
 	});
 
 	it("does not place DATABASE_URL in pg command arguments", () => {
-		for (const file of ["backup.mjs", "restore.mjs", "migrate.mjs"]) {
+		for (const file of ["backup.mjs", "restore.mjs"]) {
 			const source = fs.readFileSync(new URL(`../../../server/scripts/${file}`, import.meta.url), "utf8");
 			expect(source).not.toMatch(/--dbname=\$\{databaseUrl\}/);
 			expect(source).toContain("getPgEnv({databaseUrl})");
 		}
+		const migrate = fs.readFileSync(new URL("../../../server/scripts/migrate.mjs", import.meta.url), "utf8");
+		expect(migrate).not.toContain("spawn");
+		expect(migrate).toContain("connectionString: databaseUrl");
 	});
 
 	it("rejects URLs without an explicit database name", () => {

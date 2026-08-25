@@ -64,6 +64,20 @@ describe("hub realtime", () => {
 		expect(socket.readyState).toBe(3);
 	});
 
+	it("closes only the affected account/campaign sockets on lifecycle changes", () => {
+		const realtime = new HubRealtime({store: {}});
+		const target = new FakeSocket();
+		const otherCampaign = new FakeSocket();
+		const otherAccount = new FakeSocket();
+		realtime.addConnection({socket: target, account: {id: "p", displayName: "P"}, session: {id: "s1"}, membership: {id: "m1", role: "player"}, campaignId: "c1"});
+		realtime.addConnection({socket: otherCampaign, account: {id: "p", displayName: "P"}, session: {id: "s2"}, membership: {id: "m2", role: "player"}, campaignId: "c2"});
+		realtime.addConnection({socket: otherAccount, account: {id: "x", displayName: "X"}, session: {id: "s3"}, membership: {id: "m3", role: "player"}, campaignId: "c1"});
+		realtime.closeAccount({accountId: "p", campaignId: "c1", reason: "Membership removed"});
+		expect(target.readyState).toBe(3);
+		expect(otherCampaign.readyState).toBe(1);
+		expect(otherAccount.readyState).toBe(1);
+	});
+
 	describe("realtime client ordering", () => {
 		it("does not emit an older snapshot after a newer event", async () => {
 			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");

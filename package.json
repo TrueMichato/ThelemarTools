@@ -69,6 +69,10 @@
 		"hooks:e2e-smoke": "node scripts/hooks/run-e2e-smoke.mjs",
 		"hub:serve": "node server/src/index.js",
 		"hub:migrate": "node server/scripts/migrate.mjs",
+		"hub:migrate:plan": "node server/scripts/migrate.mjs plan",
+		"hub:migrate:status": "node server/scripts/migrate.mjs status",
+		"hub:grant-roles": "node server/scripts/grant-roles.mjs",
+		"hub:purge-accounts": "node server/scripts/purge-accounts.mjs",
 		"hub:backup": "node server/scripts/backup.mjs",
 		"hub:restore": "node server/scripts/restore.mjs",
 		"test:hub": "node --localstorage-file test/localstorage.tmp --experimental-vm-modules node_modules/jest/bin/jest.js test/jest/hub/ --no-coverage --forceExit"

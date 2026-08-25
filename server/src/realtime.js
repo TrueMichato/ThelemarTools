@@ -157,6 +157,14 @@ export class HubRealtime {
 			connection.socket.close(1008, "Session revoked");
 		}
 	}
+
+	closeAccount ({accountId, campaignId = null, reason = "Account access changed"}) {
+		for (const connection of this._connections.values()) {
+			if (connection.accountId !== accountId) continue;
+			if (campaignId && connection.campaignId !== campaignId) continue;
+			connection.socket.close(1008, reason);
+		}
+	}
 }
 
 export class HubOutboxDispatcher {

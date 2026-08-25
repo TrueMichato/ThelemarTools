@@ -22,6 +22,17 @@ describe("campaign hub pages", () => {
 		expect(hubHtml).not.toContain("<dialog");
 	});
 
+	it("exposes account/session/deletion and campaign lifecycle controls", () => {
+		for (const id of [
+			"hub-session-list",
+			"hub-revoke-other-sessions",
+			"hub-request-deletion",
+			"hub-account-deletion-pending",
+			"hub-cancel-deletion",
+		]) expect(hubHtml).toContain(`id="${id}"`);
+		for (const id of ["campaign-invite-list", "campaign-leave"]) expect(campaignHtml).toContain(`id="${id}"`);
+	});
+
 	it("loads the same hub client on both surfaces", () => {
 		expect(hubHtml).toContain("src=\"js/hub/hub-page.js\"");
 		expect(campaignHtml).toContain("src=\"js/hub/hub-page.js\"");

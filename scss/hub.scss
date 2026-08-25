@@ -112,6 +112,27 @@
 	color: #fff;
 }
 
+.hub-button--danger {
+	border-color: var(--hub-danger);
+	color: var(--hub-danger);
+}
+
+.hub-button--danger:hover {
+	border-color: var(--hub-danger);
+	background: color-mix(in srgb, var(--hub-danger) 10%, transparent);
+	color: var(--hub-danger);
+}
+
+.hub-button-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.hub-button-row--centered {
+	justify-content: center;
+}
+
 .hub-button:disabled {
 	cursor: wait;
 	opacity: 0.65;
@@ -312,6 +333,27 @@
 	border-bottom: 1px solid var(--hub-border);
 	color: var(--hub-text);
 	text-decoration: none;
+}
+
+.hub-data-row__main {
+	display: flex;
+	min-width: 0;
+	flex: 1;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.hub-data-row__controls {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
+.hub-data-row__controls .hub-input {
+	width: auto;
+	min-width: 120px;
 }
 
 .hub-data-row:hover {

@@ -60,7 +60,7 @@
 					<h2 id="campaign-name" class="hub-campaign-header__title"></h2>
 					<div class="hub-campaign-meta">
 						<span><span class="hub-label">Role</span> <span id="campaign-role"></span></span>
-						<span><span class="hub-label">Status</span> Active</span>
+						<span><span class="hub-label">Status</span> <span id="campaign-status"></span></span>
 					</div>
 				</div>
 				<div class="hub-campaign-actions">
@@ -78,6 +78,8 @@
 							<label class="hub-label" for="campaign-invite-output">Invite link</label>
 							<input id="campaign-invite-output" class="hub-input" readonly>
 						</form>
+						<div id="campaign-invite-list" class="hub-data-list"></div>
+						<button id="campaign-leave" class="hub-button ve-hidden" type="button">Leave campaign</button>
 					</section>
 					<section class="hub-campaign-action">
 						<h3 class="hub-campaign-action__title">Characters</h3>
@@ -122,7 +124,7 @@
 						</form>
 					</div>
 				</section>
-				<section class="hub-panel">
+				<section id="campaign-shared-actions" class="hub-panel">
 					<h2 class="hub-panel__title">Shared actions</h2>
 					<p class="hub-panel__description">Send structured effects, review pending actions, and move inventory without editing another player's sheet directly.</p>
 					<div class="hub-settings-grid">

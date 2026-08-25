@@ -3,6 +3,7 @@ import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
 
 const migrationUrl = new URL("../../../server/migrations/0001_hub_core.sql", import.meta.url);
 const sql = fs.readFileSync(migrationUrl, "utf8");
+const lifecycleSql = fs.readFileSync(new URL("../../../server/migrations/0002_lifecycle_administration.sql", import.meta.url), "utf8");
 const postgresStore = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");
 
 describe("campaign hub first migration contract", () => {
@@ -106,6 +107,7 @@ describe("campaign hub first migration contract", () => {
 				on: () => {},
 			},
 		});
+
 		await store._pSaveReceipt({
 			client: {query: async (...args) => { queries.push(args); }},
 			accountId: "account",
@@ -115,5 +117,16 @@ describe("campaign hub first migration contract", () => {
 		});
 		const stored = JSON.parse(queries[0][1][4]);
 		expect(stored.character).toEqual({__hubReceiptRef: "character", id: "character"});
+	});
+
+	it("adds lifecycle deletion state and safe creator/actor foreign-key behavior in migration 0002", () => {
+		expect(lifecycleSql).toContain("'deletion_requested'");
+		expect(lifecycleSql).toContain("accounts_deletion_due_idx");
+		expect(lifecycleSql).toContain("archived_at timestamptz");
+		expect(lifecycleSql).toContain("ON DELETE SET NULL (created_by_membership_id)");
+		expect(lifecycleSql).toContain("pending_actions_actor_account_fk");
+		expect(lifecycleSql).toContain("transfers_actor_account_fk");
+		expect(lifecycleSql).toContain("domain_events_actor_account_fk");
+		expect(lifecycleSql).toContain("invites_creator_membership_fk");
 	});
 });

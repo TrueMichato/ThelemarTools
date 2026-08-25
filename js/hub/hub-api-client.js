@@ -49,12 +49,78 @@ export class HubApiClient {
 		return (await this._pRequest("/api/campaigns")).campaigns;
 	}
 
+	async pListSessions () {
+		return (await this._pRequest("/api/account/sessions")).sessions;
+	}
+
+	async pRevokeSession ({sessionId, idempotencyKey}) {
+		return this._pRequest(`/api/account/sessions/${encodeURIComponent(sessionId)}/revoke`, {
+			method: "POST",
+			isMutation: true,
+			idempotencyKey,
+		});
+	}
+
+	async pRevokeOtherSessions ({idempotencyKey}) {
+		return this._pRequest("/api/account/sessions/revoke-others", {
+			method: "POST",
+			isMutation: true,
+			idempotencyKey,
+		});
+	}
+
+	async pGetAccountDeletion () {
+		return (await this._pRequest("/api/account/deletion")).deletion;
+	}
+
+	async pRequestAccountDeletion ({idempotencyKey}) {
+		return this._pRequest("/api/account/deletion/request", {
+			method: "POST",
+			body: {confirmation: "DELETE"},
+			isMutation: true,
+			idempotencyKey,
+		});
+	}
+
+	async pCancelAccountDeletion ({idempotencyKey}) {
+		return this._pRequest("/api/account/deletion/cancel", {
+			method: "POST",
+			isMutation: true,
+			idempotencyKey,
+		});
+	}
+
 	async pGetCampaign ({campaignId}) {
 		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}`)).campaign;
 	}
 
 	async pListMembers ({campaignId}) {
 		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/members`)).members;
+	}
+
+	async pChangeMemberRole ({campaignId, membershipId, role, idempotencyKey}) {
+		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/members/${encodeURIComponent(membershipId)}`, {
+			method: "PATCH",
+			body: {role},
+			isMutation: true,
+			idempotencyKey,
+		});
+	}
+
+	async pRemoveMember ({campaignId, membershipId, idempotencyKey}) {
+		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/members/${encodeURIComponent(membershipId)}`, {
+			method: "DELETE",
+			isMutation: true,
+			idempotencyKey,
+		});
+	}
+
+	async pLeaveCampaign ({campaignId, idempotencyKey}) {
+		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/leave`, {
+			method: "POST",
+			isMutation: true,
+			idempotencyKey,
+		});
 	}
 
 	async pGetCampaignContext ({campaignId}) {
@@ -91,6 +157,18 @@ export class HubApiClient {
 		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/invites`, {
 			method: "POST",
 			body: {role, expiresInHours, maxUses},
+			isMutation: true,
+			idempotencyKey,
+		});
+	}
+
+	async pListInvites ({campaignId}) {
+		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/invites`)).invites;
+	}
+
+	async pRevokeInvite ({campaignId, inviteId, idempotencyKey}) {
+		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/invites/${encodeURIComponent(inviteId)}/revoke`, {
+			method: "POST",
 			isMutation: true,
 			idempotencyKey,
 		});

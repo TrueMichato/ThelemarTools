@@ -12,6 +12,7 @@ import {
 	STRUCTURED_EFFECT_TYPES,
 } from "./hub-actions.js";
 import {validateCloudCharacterData, validateCloudValue} from "./cloud-data-validation.js";
+import {HUB_REQUIRED_MIGRATION_VERSION} from "./migration-version.js";
 
 const {Pool} = pg;
 
@@ -20,6 +21,8 @@ function getAccount (row) {
 		id: row.id,
 		displayName: row.display_name,
 		status: row.status,
+		deletionRequestedAt: row.deletion_requested_at ?? null,
+		purgeAfter: row.purge_after ?? null,
 	};
 }
 
@@ -28,6 +31,8 @@ function getSession (row) {
 		id: row.session_id,
 		accountId: row.account_id,
 		userAgent: row.user_agent,
+		createdAt: row.created_at,
+		lastSeenAt: row.last_seen_at,
 		expiresAt: row.expires_at,
 		revokedAt: row.revoked_at,
 	};
@@ -113,10 +118,23 @@ export class PostgresHubStore {
 
 	async pCheckHealth () {
 		const result = await this._pool.query(`
-			SELECT to_regclass('hub.accounts') AS accounts_table
+			SELECT
+				to_regclass('hub.accounts') AS accounts_table,
+				to_regclass('hub.schema_migrations') AS migrations_table
 		`);
 		if (result.rows[0]?.accounts_table !== "hub.accounts") {
 			throw new Error(`Campaign Hub database migration 0001_hub_core.sql has not been applied.`);
+		}
+		if (result.rows[0]?.migrations_table !== "hub.schema_migrations") {
+			throw new Error(`Campaign Hub migration ledger has not been initialized.`);
+		}
+		const migration = await this._pool.query(`
+			SELECT version
+			FROM hub.schema_migrations
+			WHERE version = $1
+		`, [HUB_REQUIRED_MIGRATION_VERSION]);
+		if (!migration.rowCount) {
+			throw new Error(`Campaign Hub database is missing required migration ${HUB_REQUIRED_MIGRATION_VERSION}.`);
 		}
 		return true;
 	}
@@ -129,7 +147,7 @@ export class PostgresHubStore {
 				SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 1))
 			`, [provider, providerSubject]);
 			const existing = await client.query(`
-				SELECT a.id, a.display_name, a.status
+				SELECT a.id, a.display_name, a.status, a.deletion_requested_at, a.purge_after
 				FROM hub.external_identities ei
 				JOIN hub.accounts a ON a.id = ei.account_id
 				WHERE ei.provider = $1 AND ei.provider_subject = $2
@@ -141,7 +159,7 @@ export class PostgresHubStore {
 					UPDATE hub.accounts
 					SET display_name = $2, updated_at = now()
 					WHERE id = $1
-					RETURNING id, display_name, status
+					RETURNING id, display_name, status, deletion_requested_at, purge_after
 				`, [existing.rows[0].id, displayName]);
 				account = getAccount(updated.rows[0]);
 			} else {
@@ -150,7 +168,7 @@ export class PostgresHubStore {
 				const inserted = await client.query(`
 					INSERT INTO hub.accounts (id, display_name)
 					VALUES ($1, $2)
-					RETURNING id, display_name, status
+					RETURNING id, display_name, status, deletion_requested_at, purge_after
 				`, [accountId, displayName]);
 				await client.query(`
 					INSERT INTO hub.external_identities (id, account_id, provider, provider_subject)
@@ -173,7 +191,7 @@ export class PostgresHubStore {
 		const result = await this._pool.query(`
 			INSERT INTO hub.sessions (id, account_id, token_hash, expires_at, user_agent)
 			VALUES ($1, $2, decode($3, 'hex'), $4, $5)
-			RETURNING id AS session_id, account_id, user_agent, expires_at, revoked_at
+			RETURNING id AS session_id, account_id, user_agent, created_at, last_seen_at, expires_at, revoked_at
 		`, [id, accountId, tokenHash, expiresAt, userAgent]);
 		return getSession(result.rows[0]);
 	}
@@ -184,19 +202,30 @@ export class PostgresHubStore {
 				s.id AS session_id,
 				s.account_id,
 				s.user_agent,
+				s.created_at,
+				s.last_seen_at,
 				s.expires_at,
 				s.revoked_at,
 				a.id,
 				a.display_name,
-				a.status
+				a.status,
+				a.deletion_requested_at,
+				a.purge_after
 			FROM hub.sessions s
 			JOIN hub.accounts a ON a.id = s.account_id
 			WHERE s.token_hash = decode($1, 'hex')
 				AND s.revoked_at IS NULL
 				AND s.expires_at > now()
-				AND a.status = 'active'
+				AND a.status IN ('active', 'deletion_requested')
 		`, [tokenHash]);
 		if (!result.rowCount) return null;
+		if (new Date(result.rows[0].last_seen_at).getTime() < Date.now() - 60_000) {
+			void this._pool.query(`
+				UPDATE hub.sessions
+				SET last_seen_at = now()
+				WHERE id = $1 AND last_seen_at < now() - interval '1 minute'
+			`, [result.rows[0].session_id]).catch(error => this._fnOnPoolError(error));
+		}
 		return {
 			session: getSession(result.rows[0]),
 			account: getAccount(result.rows[0]),
@@ -206,11 +235,12 @@ export class PostgresHubStore {
 	async pGetSessionById ({sessionId}) {
 		const result = await this._pool.query(`
 			SELECT
-				s.id AS session_id, s.account_id, s.user_agent, s.expires_at, s.revoked_at,
-				a.id, a.display_name, a.status
+				s.id AS session_id, s.account_id, s.user_agent, s.created_at, s.last_seen_at, s.expires_at, s.revoked_at,
+				a.id, a.display_name, a.status, a.deletion_requested_at, a.purge_after
 			FROM hub.sessions s
 			JOIN hub.accounts a ON a.id = s.account_id
-			WHERE s.id = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND a.status = 'active'
+			WHERE s.id = $1 AND s.revoked_at IS NULL AND s.expires_at > now()
+				AND a.status IN ('active', 'deletion_requested')
 		`, [sessionId]);
 		if (!result.rowCount) return null;
 		return {session: getSession(result.rows[0]), account: getAccount(result.rows[0])};
@@ -229,6 +259,80 @@ export class PostgresHubStore {
 			await client.query(`DELETE FROM hub.dm_workspace_leases WHERE session_id = $1`, [sessionId]);
 			await client.query("COMMIT");
 			return result.rowCount > 0;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pListSessions ({accountId, currentSessionId = null}) {
+		const result = await this._pool.query(`
+				SELECT id AS session_id, account_id, user_agent, created_at, last_seen_at, expires_at, revoked_at
+				FROM hub.sessions
+				WHERE account_id = $1
+				ORDER BY created_at DESC, id
+			`, [accountId]);
+		return result.rows.map(row => ({...getSession(row), isCurrent: row.session_id === currentSessionId}));
+	}
+
+	async pRevokeAccountSession ({accountId, sessionId, idempotencyKey}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			const result = await client.query(`
+					UPDATE hub.sessions
+					SET revoked_at = COALESCE(revoked_at, now())
+					WHERE id = $1 AND account_id = $2
+					RETURNING id
+				`, [sessionId, accountId]);
+			if (!result.rowCount) throw new HubStoreError("SESSION_NOT_FOUND", `Session was not found.`, {status: 404});
+			await client.query(`DELETE FROM hub.character_leases WHERE session_id = $1`, [sessionId]);
+			await client.query(`DELETE FROM hub.dm_workspace_leases WHERE session_id = $1`, [sessionId]);
+			const response = {ok: true, revokedSessionIds: [sessionId]};
+			await this._pAppendAudit({client, actorAccountId: accountId, action: "session.revoked", targetType: "session", targetId: sessionId});
+			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "session.revoke", response});
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pRevokeOtherSessions ({accountId, currentSessionId, idempotencyKey}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			const result = await client.query(`
+					UPDATE hub.sessions
+					SET revoked_at = COALESCE(revoked_at, now())
+					WHERE account_id = $1 AND id <> $2 AND revoked_at IS NULL
+					RETURNING id
+				`, [accountId, currentSessionId]);
+			const revokedSessionIds = result.rows.map(row => row.id);
+			if (revokedSessionIds.length) {
+				await client.query(`DELETE FROM hub.character_leases WHERE session_id = ANY($1::uuid[])`, [revokedSessionIds]);
+				await client.query(`DELETE FROM hub.dm_workspace_leases WHERE session_id = ANY($1::uuid[])`, [revokedSessionIds]);
+			}
+			const response = {ok: true, revokedSessionIds};
+			await this._pAppendAudit({client, actorAccountId: accountId, action: "session.revoked_others", targetType: "account", targetId: accountId, details: {count: revokedSessionIds.length}});
+			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "session.revoke_others", response});
+			await client.query("COMMIT");
+			return response;
 		} catch (error) {
 			await client.query("ROLLBACK");
 			throw error;
@@ -533,6 +637,28 @@ export class PostgresHubStore {
 		return result.rows.map(getMembership);
 	}
 
+	async pListInvites ({accountId, campaignId}) {
+		const membership = await this.pGetMembership({accountId, campaignId});
+		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+		if (!["dm", "co_dm"].includes(membership.role)) throw new HubStoreError("FORBIDDEN", `Campaign role is not allowed.`, {status: 403});
+		const result = await this._pool.query(`
+			SELECT id, campaign_id, role, max_uses, use_count, expires_at, revoked_at, created_at
+			FROM hub.invites
+			WHERE campaign_id = $1
+			ORDER BY created_at DESC, id
+		`, [campaignId]);
+		return result.rows.map(row => ({
+			id: row.id,
+			campaignId: row.campaign_id,
+			role: row.role,
+			maxUses: row.max_uses,
+			useCount: row.use_count,
+			expiresAt: row.expires_at,
+			revokedAt: row.revoked_at,
+			createdAt: row.created_at,
+		}));
+	}
+
 	async pCreateInvite ({accountId, campaignId, role, tokenHash, expiresAt, maxUses, idempotencyKey}) {
 		const client = await this._pool.connect();
 		try {
@@ -542,6 +668,7 @@ export class PostgresHubStore {
 				await client.query("COMMIT");
 				return prior;
 			}
+
 			const membership = await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm"]});
 			const inviteId = crypto.randomUUID();
 			const inserted = await client.query(`
@@ -563,6 +690,47 @@ export class PostgresHubStore {
 			await this._pAppendAudit({client, campaignId, actorAccountId: accountId, action: "invite.created", targetType: "invite", targetId: inviteId, details: {role, maxUses}});
 			await this._pAppendEvent({client, campaignId, actorAccountId: accountId, type: "invite.created", aggregateType: "invite", aggregateId: inviteId, visibility: "dm_only", payload: {role, expiresAt}});
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "invite.create", response});
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pRevokeInvite ({accountId, campaignId, inviteId, idempotencyKey}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm"]});
+			const result = await client.query(`
+				UPDATE hub.invites
+				SET revoked_at = COALESCE(revoked_at, now())
+				WHERE id = $1 AND campaign_id = $2
+				RETURNING id, campaign_id, role, max_uses, use_count, expires_at, revoked_at, created_at
+			`, [inviteId, campaignId]);
+			if (!result.rowCount) throw new HubStoreError("INVITE_NOT_FOUND", `Invite was not found.`, {status: 404});
+			const row = result.rows[0];
+			const response = {invite: {
+				id: row.id,
+				campaignId: row.campaign_id,
+				role: row.role,
+				maxUses: row.max_uses,
+				useCount: row.use_count,
+				expiresAt: row.expires_at,
+				revokedAt: row.revoked_at,
+				createdAt: row.created_at,
+			}};
+			await this._pAppendAudit({client, campaignId, actorAccountId: accountId, action: "invite.revoked", targetType: "invite", targetId: inviteId});
+			await this._pAppendEvent({client, campaignId, actorAccountId: accountId, type: "invite.revoked", aggregateType: "invite", aggregateId: inviteId, visibility: "dm_only", payload: {}});
+			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "invite.revoke", response});
 			await client.query("COMMIT");
 			return response;
 		} catch (error) {
@@ -1213,6 +1381,8 @@ export class PostgresHubStore {
 					RETURNING *
 				`, [crypto.randomUUID(), campaignId, membership.id, JSON.stringify(defaultState)]);
 				await this._pAppendAudit({client, campaignId, actorAccountId: accountId, action: "dm_workspace.created", targetType: "dm_workspace", targetId: result.rows[0].id});
+			} else if (result.rows[0].archived_at) {
+				result = await client.query(`UPDATE hub.dm_workspaces SET archived_at = NULL, updated_at = now() WHERE id = $1 RETURNING *`, [result.rows[0].id]);
 			}
 			await client.query("COMMIT");
 			const row = result.rows[0];
@@ -1849,6 +2019,221 @@ export class PostgresHubStore {
 		}
 	}
 
+	async _pCancelTransferForLifecycle ({client, row, actorAccountId, reason}) {
+		const transfer = this._getTransfer(row);
+		const source = await this._pGetTransferContainer({client, campaignId: transfer.campaignId, kind: transfer.sourceKind, id: transfer.sourceId});
+		await source.pWrite(addTransferPayload({container: source.container, escrow: transfer.payload.escrow, isRestore: true}));
+		await client.query(`UPDATE hub.transfers SET status = 'cancelled', updated_at = now() WHERE id = $1`, [transfer.id]);
+		await this._pAppendEvent({client, campaignId: transfer.campaignId, actorAccountId, type: "transfer.cancelled", aggregateType: "transfer", aggregateId: transfer.id, payload: {reason}});
+	}
+
+	async _pRemoveMembershipLifecycle ({client, campaignId, membership, actorAccountId, status}) {
+		const characters = await client.query(`
+			SELECT id
+			FROM hub.characters
+			WHERE campaign_id = $1 AND owner_account_id = $2 AND status = 'active'
+			ORDER BY id
+			FOR UPDATE
+		`, [campaignId, membership.accountId]);
+		const characterIds = characters.rows.map(row => row.id);
+		for (const characterId of characterIds) {
+			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [characterId]);
+		}
+
+		const transfers = await client.query(`
+			SELECT *
+			FROM hub.transfers
+			WHERE campaign_id = $1 AND status = 'reserved'
+				AND (
+					actor_account_id = $2
+					OR source_character_id = ANY($3::uuid[])
+					OR target_character_id = ANY($3::uuid[])
+				)
+			ORDER BY id
+			FOR UPDATE
+		`, [campaignId, membership.accountId, characterIds]);
+		for (const row of transfers.rows) {
+			await this._pCancelTransferForLifecycle({client, row, actorAccountId, reason: "membership_lifecycle"});
+		}
+
+		const actions = await client.query(`
+			SELECT pa.*, c.owner_account_id AS target_owner_account_id
+			FROM hub.pending_actions pa
+			LEFT JOIN hub.characters c ON c.id = pa.target_character_id
+			WHERE pa.campaign_id = $1 AND pa.status = 'proposed'
+				AND (pa.actor_account_id = $2 OR c.owner_account_id = $2)
+			ORDER BY pa.id
+			FOR UPDATE OF pa
+		`, [campaignId, membership.accountId]);
+		if (actions.rowCount) {
+			await client.query(`
+				UPDATE hub.pending_actions
+				SET status = 'cancelled', updated_at = now()
+				WHERE id = ANY($1::uuid[])
+			`, [actions.rows.map(row => row.id)]);
+			for (const action of actions.rows) {
+				await this._pAppendEvent({
+					client,
+					campaignId,
+					actorAccountId,
+					type: "action.cancelled",
+					aggregateType: "pending_action",
+					aggregateId: action.id,
+					visibility: "explicit_accounts",
+					visibleAccountIds: [...new Set([action.actor_account_id, action.target_owner_account_id].filter(Boolean))],
+					payload: {reason: "membership_lifecycle"},
+				});
+			}
+		}
+
+		if (characterIds.length) {
+			await client.query(`DELETE FROM hub.character_leases WHERE character_id = ANY($1::uuid[])`, [characterIds]);
+		}
+		const detached = await client.query(`
+			UPDATE hub.characters
+			SET campaign_id = NULL, client_import_id = NULL, revision = revision + 1, updated_at = now()
+			WHERE id = ANY($1::uuid[])
+			RETURNING id, revision
+		`, [characterIds]);
+
+		const workspaces = await client.query(`SELECT id FROM hub.dm_workspaces WHERE campaign_id = $1 AND owner_membership_id = $2 FOR UPDATE`, [campaignId, membership.id]);
+		if (workspaces.rowCount) {
+			const workspaceIds = workspaces.rows.map(row => row.id);
+			await client.query(`DELETE FROM hub.dm_workspace_leases WHERE workspace_id = ANY($1::uuid[])`, [workspaceIds]);
+			await client.query(`UPDATE hub.dm_workspaces SET archived_at = now(), updated_at = now() WHERE id = ANY($1::uuid[])`, [workspaceIds]);
+		}
+
+		const membershipResult = await client.query(`
+			UPDATE hub.memberships
+			SET status = $2, updated_at = now()
+			WHERE id = $1
+			RETURNING id, campaign_id, account_id, role, status
+		`, [membership.id, status]);
+		const membershipNxt = getMembership(membershipResult.rows[0]);
+		for (const character of detached.rows) {
+			await this._pAppendEvent({
+				client,
+				campaignId,
+				actorAccountId,
+				type: "character.moved_out",
+				aggregateType: "character",
+				aggregateId: character.id,
+				aggregateRevision: Number(character.revision),
+				payload: {targetCampaignId: null, reason: "membership_lifecycle"},
+			});
+		}
+		await this._pAppendAudit({
+			client,
+			campaignId,
+			actorAccountId,
+			action: `membership.${status}`,
+			targetType: "membership",
+			targetId: membership.id,
+			details: {accountId: membership.accountId, detachedCharacterIds: characterIds},
+		});
+		await this._pAppendEvent({
+			client,
+			campaignId,
+			actorAccountId,
+			type: `membership.${status}`,
+			aggregateType: "membership",
+			aggregateId: membership.id,
+			payload: {accountId: membership.accountId, detachedCharacterIds: characterIds},
+		});
+		return {membership: membershipNxt, removedAccountId: membership.accountId, detachedCharacterIds: characterIds};
+	}
+
+	async pChangeMemberRole ({accountId, campaignId, membershipId, role, idempotencyKey}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [campaignId]);
+			const campaign = (await client.query(`SELECT * FROM hub.campaigns WHERE id = $1 AND status = 'active' FOR UPDATE`, [campaignId])).rows[0];
+			if (!campaign) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+			if (campaign.owner_account_id !== accountId) throw new HubStoreError("FORBIDDEN", `Only the campaign owner can change roles.`, {status: 403});
+			const target = (await client.query(`SELECT * FROM hub.memberships WHERE id = $1 AND campaign_id = $2 FOR UPDATE`, [membershipId, campaignId])).rows[0];
+			if (!target || target.status !== "active") throw new HubStoreError("MEMBERSHIP_NOT_FOUND", `Membership was not found.`, {status: 404});
+			if (target.account_id === campaign.owner_account_id) throw new HubStoreError("MEMBERSHIP_OWNER_PROTECTED", `Campaign owner role cannot be changed.`, {status: 409});
+			const updated = await client.query(`UPDATE hub.memberships SET role = $2, updated_at = now() WHERE id = $1 RETURNING id, campaign_id, account_id, role, status`, [membershipId, role]);
+			const membership = getMembership(updated.rows[0]);
+			const response = {membership};
+			await this._pAppendAudit({client, campaignId, actorAccountId: accountId, action: "membership.role_changed", targetType: "membership", targetId: membershipId, details: {role}});
+			await this._pAppendEvent({client, campaignId, actorAccountId: accountId, type: "membership.role_changed", aggregateType: "membership", aggregateId: membershipId, payload: {accountId: membership.accountId, role}});
+			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "membership.role_change", response});
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pRemoveMember ({accountId, campaignId, membershipId, idempotencyKey}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			const actor = await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm"]});
+			const campaign = (await client.query(`SELECT * FROM hub.campaigns WHERE id = $1 FOR UPDATE`, [campaignId])).rows[0];
+			const target = (await client.query(`SELECT * FROM hub.memberships WHERE id = $1 AND campaign_id = $2 FOR UPDATE`, [membershipId, campaignId])).rows[0];
+			if (!target) throw new HubStoreError("MEMBERSHIP_NOT_FOUND", `Membership was not found.`, {status: 404});
+			if (target.account_id === campaign.owner_account_id) throw new HubStoreError("MEMBERSHIP_OWNER_PROTECTED", `Campaign owner cannot be removed.`, {status: 409});
+			if (target.status !== "active") {
+				const response = {membership: getMembership(target), removedAccountId: target.account_id, detachedCharacterIds: []};
+				await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "membership.remove", response});
+				await client.query("COMMIT");
+				return response;
+			}
+			if (campaign.owner_account_id !== accountId && (actor.role !== "co_dm" || !["player", "spectator"].includes(target.role))) {
+				throw new HubStoreError("FORBIDDEN", `This member cannot be removed by the current role.`, {status: 403});
+			}
+			const response = await this._pRemoveMembershipLifecycle({client, campaignId, membership: getMembership(target), actorAccountId: accountId, status: "removed"});
+			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "membership.remove", response});
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pLeaveCampaign ({accountId, campaignId, idempotencyKey}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			const membership = await this._pGetMembershipForUpdate({client, accountId, campaignId});
+			const campaign = (await client.query(`SELECT * FROM hub.campaigns WHERE id = $1 FOR UPDATE`, [campaignId])).rows[0];
+			if (campaign.owner_account_id === accountId) throw new HubStoreError("MEMBERSHIP_OWNER_PROTECTED", `Transfer ownership or archive the campaign before leaving.`, {status: 409});
+			const response = await this._pRemoveMembershipLifecycle({client, campaignId, membership, actorAccountId: accountId, status: "left"});
+			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "membership.leave", response});
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
 	async pProposeTransfer ({accountId, campaignId, sourceKind, sourceId, targetKind, targetId, payload, idempotencyKey}) {
 		const client = await this._pool.connect();
 		try {
@@ -1959,9 +2344,185 @@ export class PostgresHubStore {
 		return result.rows.map(row => this._getTransfer(row));
 	}
 
+	async pGetAccountDeletion ({accountId}) {
+		const result = await this._pool.query(`
+			SELECT status, deletion_requested_at, purge_after
+			FROM hub.accounts
+			WHERE id = $1
+		`, [accountId]);
+		if (!result.rowCount) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
+		return {
+			status: result.rows[0].status,
+			deletionRequestedAt: result.rows[0].deletion_requested_at,
+			purgeAfter: result.rows[0].purge_after,
+		};
+	}
+
+	async pRequestAccountDeletion ({accountId, idempotencyKey, graceMs = 7 * 24 * 60 * 60 * 1000}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			const account = (await client.query(`SELECT * FROM hub.accounts WHERE id = $1 FOR UPDATE`, [accountId])).rows[0];
+			if (!account) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
+			const owned = await client.query(`SELECT id FROM hub.campaigns WHERE owner_account_id = $1 AND status = 'active' ORDER BY id`, [accountId]);
+			if (owned.rowCount) {
+				throw new HubStoreError("ACCOUNT_OWNS_CAMPAIGN", `Transfer ownership or archive campaigns before deleting the account.`, {
+					status: 409,
+					details: {campaignIds: owned.rows.map(row => row.id)},
+				});
+			}
+			let deletion;
+			if (account.status === "deletion_requested") {
+				deletion = {
+					status: account.status,
+					deletionRequestedAt: account.deletion_requested_at,
+					purgeAfter: account.purge_after,
+				};
+			} else {
+				const updated = await client.query(`
+					UPDATE hub.accounts
+					SET status = 'deletion_requested',
+						deletion_requested_at = now(),
+						purge_after = now() + ($2::bigint * interval '1 millisecond'),
+						updated_at = now()
+					WHERE id = $1
+					RETURNING status, deletion_requested_at, purge_after
+				`, [accountId, graceMs]);
+				deletion = {
+					status: updated.rows[0].status,
+					deletionRequestedAt: updated.rows[0].deletion_requested_at,
+					purgeAfter: updated.rows[0].purge_after,
+				};
+			}
+			const sessions = await client.query(`
+				UPDATE hub.sessions
+				SET revoked_at = COALESCE(revoked_at, now())
+				WHERE account_id = $1 AND revoked_at IS NULL
+				RETURNING id
+			`, [accountId]);
+			const revokedSessionIds = sessions.rows.map(row => row.id);
+			if (revokedSessionIds.length) {
+				await client.query(`DELETE FROM hub.character_leases WHERE session_id = ANY($1::uuid[])`, [revokedSessionIds]);
+				await client.query(`DELETE FROM hub.dm_workspace_leases WHERE session_id = ANY($1::uuid[])`, [revokedSessionIds]);
+			}
+			await this._pAppendAudit({client, actorAccountId: accountId, action: "account.deletion_requested", targetType: "account", targetId: accountId, details: {purgeAfter: deletion.purgeAfter}});
+			const response = {deletion, revokedSessionIds};
+			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "account.deletion_request", response});
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pCancelAccountDeletion ({accountId, idempotencyKey}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			const updated = await client.query(`
+				UPDATE hub.accounts
+				SET status = 'active', deletion_requested_at = NULL, purge_after = NULL, updated_at = now()
+				WHERE id = $1 AND status = 'deletion_requested'
+				RETURNING status, deletion_requested_at, purge_after
+			`, [accountId]);
+			if (!updated.rowCount) throw new HubStoreError("ACCOUNT_DELETION_NOT_PENDING", `Account deletion is not pending.`, {status: 409});
+			const deletion = {
+				status: updated.rows[0].status,
+				deletionRequestedAt: updated.rows[0].deletion_requested_at,
+				purgeAfter: updated.rows[0].purge_after,
+			};
+			await this._pAppendAudit({client, actorAccountId: accountId, action: "account.deletion_cancelled", targetType: "account", targetId: accountId});
+			const response = {deletion};
+			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "account.deletion_cancel", response});
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pPurgeDueAccounts ({limit = 100} = {}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const accounts = await client.query(`
+				SELECT *
+				FROM hub.accounts
+				WHERE status = 'deletion_requested' AND purge_after <= now()
+				ORDER BY purge_after, id
+				LIMIT $1
+				FOR UPDATE SKIP LOCKED
+			`, [limit]);
+			const purgedAccountIds = [];
+			const blockedAccountIds = [];
+			for (const account of accounts.rows) {
+				const blockingCampaign = await client.query(`SELECT 1 FROM hub.campaigns WHERE owner_account_id = $1 AND status <> 'archived' LIMIT 1 FOR UPDATE`, [account.id]);
+				if (blockingCampaign.rowCount) {
+					blockedAccountIds.push(account.id);
+					continue;
+				}
+				const memberships = await client.query(`
+					SELECT id, campaign_id, account_id, role, status
+					FROM hub.memberships
+					WHERE account_id = $1 AND status = 'active'
+					ORDER BY campaign_id, id
+					FOR UPDATE
+				`, [account.id]);
+				for (const row of memberships.rows) {
+					await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [row.campaign_id]);
+					await this._pRemoveMembershipLifecycle({
+						client,
+						campaignId: row.campaign_id,
+						membership: getMembership(row),
+						actorAccountId: account.id,
+						status: "left",
+					});
+				}
+				await client.query(`
+					DELETE FROM hub.pending_actions
+					WHERE target_character_id IN (SELECT id FROM hub.characters WHERE owner_account_id = $1)
+				`, [account.id]);
+				await client.query(`
+					DELETE FROM hub.transfers
+					WHERE source_character_id IN (SELECT id FROM hub.characters WHERE owner_account_id = $1)
+						OR target_character_id IN (SELECT id FROM hub.characters WHERE owner_account_id = $1)
+				`, [account.id]);
+				await client.query(`DELETE FROM hub.character_leases WHERE character_id IN (SELECT id FROM hub.characters WHERE owner_account_id = $1)`, [account.id]);
+				await client.query(`DELETE FROM hub.characters WHERE owner_account_id = $1`, [account.id]);
+				await client.query(`DELETE FROM hub.campaigns WHERE owner_account_id = $1 AND status = 'archived'`, [account.id]);
+				await this._pAppendAudit({client, actorAccountId: account.id, action: "account.deletion_purged", targetType: "account", targetId: account.id});
+				await client.query(`DELETE FROM hub.accounts WHERE id = $1`, [account.id]);
+				purgedAccountIds.push(account.id);
+			}
+			await client.query("COMMIT");
+			return {purgedAccountIds, blockedAccountIds};
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
 	async pExportAccountData ({accountId}) {
 		const [account, memberships, campaigns, characters, audit] = await Promise.all([
-			this._pool.query(`SELECT id, display_name, status, created_at, updated_at FROM hub.accounts WHERE id = $1`, [accountId]),
+			this._pool.query(`SELECT id, display_name, status, deletion_requested_at, purge_after, created_at, updated_at FROM hub.accounts WHERE id = $1`, [accountId]),
 			this._pool.query(`SELECT id, campaign_id, account_id, role, status, created_at, updated_at FROM hub.memberships WHERE account_id = $1`, [accountId]),
 			this._pool.query(`
 				SELECT c.*

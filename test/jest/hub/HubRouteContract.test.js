@@ -10,6 +10,8 @@ describe("hub route registration contract", () => {
 		});
 		await app.ready();
 		for (const route of [
+			["GET", "/api/live"],
+			["GET", "/api/ready"],
 			["GET", "/api/campaigns/:campaignId"],
 			["POST", "/api/campaigns/:campaignId/archive"],
 			["GET", "/api/campaigns/:campaignId/context"],
@@ -17,6 +19,15 @@ describe("hub route registration contract", () => {
 			["POST", "/api/campaigns/:campaignId/actions"],
 			["POST", "/api/campaigns/:campaignId/transfers"],
 			["GET", "/api/account/export"],
+			["GET", "/api/account/sessions"],
+			["POST", "/api/account/sessions/:sessionId/revoke"],
+			["POST", "/api/account/deletion/request"],
+			["POST", "/api/account/deletion/cancel"],
+			["GET", "/api/campaigns/:campaignId/invites"],
+			["POST", "/api/campaigns/:campaignId/invites/:inviteId/revoke"],
+			["PATCH", "/api/campaigns/:campaignId/members/:membershipId"],
+			["DELETE", "/api/campaigns/:campaignId/members/:membershipId"],
+			["POST", "/api/campaigns/:campaignId/leave"],
 			["GET", "/ws/campaign/:campaignId"],
 		]) {
 			expect(app.hasRoute({method: route[0], url: route[1]})).toBe(true);

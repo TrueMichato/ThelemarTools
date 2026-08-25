@@ -53,30 +53,52 @@
 			</div>
 		</section>
 		<section id="hub-signed-in" class="hub-state ve-hidden">
-			<div class="hub-toolbar">
-				<div class="hub-toolbar__identity">
-					<span class="hub-label">Signed in as</span>
-					<span id="hub-account-name" class="hub-toolbar__name"></span>
+			<div id="hub-account-active">
+				<div class="hub-toolbar">
+					<div class="hub-toolbar__identity">
+						<span class="hub-label">Signed in as</span>
+						<span id="hub-account-name" class="hub-toolbar__name"></span>
+					</div>
+					<button id="hub-logout" class="hub-button" type="button">Sign out</button>
 				</div>
-				<button id="hub-logout" class="hub-button" type="button">Sign out</button>
+				<div class="hub-workspace">
+					<div class="hub-panel">
+						<h2 class="hub-panel__title">Campaigns</h2>
+						<p class="hub-panel__description">Open a table to manage its people, characters, rules, and DM tools.</p>
+						<div id="hub-campaign-list" class="hub-campaign-list"></div>
+						<div id="hub-campaign-empty" class="hub-empty ve-hidden">No campaigns yet. Create the first table when you are ready.</div>
+					</div>
+					<div class="hub-panel">
+						<h2 class="hub-panel__title">Create a campaign</h2>
+						<p class="hub-panel__description">Start with a name. Members and content come next.</p>
+						<form id="hub-create-form" class="hub-form">
+							<label class="hub-label" for="hub-campaign-name">Campaign name</label>
+							<input id="hub-campaign-name" class="hub-input" name="name" type="text" maxlength="120" autocomplete="off" required>
+							<button id="hub-create-submit" class="hub-button hub-button--primary" type="submit">Create campaign</button>
+						</form>
+					</div>
+				</div>
+				<section class="hub-panel">
+					<h2 class="hub-panel__title">Account &amp; devices</h2>
+					<p class="hub-panel__description">Review signed-in devices, export your data, or schedule account deletion.</p>
+					<div id="hub-session-list" class="hub-data-list"></div>
+					<div class="hub-button-row">
+						<button id="hub-revoke-other-sessions" class="hub-button" type="button">Sign out other devices</button>
+						<a class="hub-button" href="/api/account/export">Export account data</a>
+						<button id="hub-request-deletion" class="hub-button hub-button--danger" type="button">Delete account</button>
+					</div>
+				</section>
 			</div>
-			<div class="hub-workspace">
-				<div class="hub-panel">
-					<h2 class="hub-panel__title">Campaigns</h2>
-					<p class="hub-panel__description">Open a table to manage its people, characters, rules, and DM tools.</p>
-					<div id="hub-campaign-list" class="hub-campaign-list"></div>
-					<div id="hub-campaign-empty" class="hub-empty ve-hidden">No campaigns yet. Create the first table when you are ready.</div>
+			<section id="hub-account-deletion-pending" class="hub-state--centered ve-hidden">
+				<div class="hub-state__content">
+					<h2 class="hub-state__title">Account deletion scheduled</h2>
+					<p id="hub-deletion-deadline" class="hub-state__description"></p>
+					<div class="hub-button-row hub-button-row--centered">
+						<a class="hub-button" href="/api/account/export">Export account data</a>
+						<button id="hub-cancel-deletion" class="hub-button hub-button--primary" type="button">Keep my account</button>
+					</div>
 				</div>
-				<div class="hub-panel">
-					<h2 class="hub-panel__title">Create a campaign</h2>
-					<p class="hub-panel__description">Start with a name. Members and content come next.</p>
-					<form id="hub-create-form" class="hub-form">
-						<label class="hub-label" for="hub-campaign-name">Campaign name</label>
-						<input id="hub-campaign-name" class="hub-input" name="name" type="text" maxlength="120" autocomplete="off" required>
-						<button id="hub-create-submit" class="hub-button hub-button--primary" type="submit">Create campaign</button>
-					</form>
-				</div>
-			</div>
+			</section>
 		</section>
 	</div>
 </main>
