@@ -5296,7 +5296,7 @@ globalThis.DataUtil = class {
 					// isn't in the (dependency-only) `flatDependencyData`. That miss is expected here and
 					// resolved by the `internalCopies` pass below, so tolerate it silently -- otherwise
 					// every internal `_copy` produces a bogus "missing parent" diagnostic on this pass.
-					await Promise.all(data[dataProp].map(entry => DataUtil._pDoMetaMerge_handleCopyProp(dataProp, flatDependencyData, entry, {...options, isErrorOnMissing: !isHasInternalCopies, isIgnoreMissing: isHasInternalCopies || options.isIgnoreMissing})));
+					await Promise.all(data[dataProp].map(entry => DataUtil._pDoMetaMerge_handleCopyProp(dataProp, flatDependencyData, entry, {...options, isErrorOnMissing: !isHasInternalCopies, isIgnoreMissing: isHasInternalCopies || options?.isIgnoreMissing})));
 				}));
 				delete data._meta.dependencies;
 			}

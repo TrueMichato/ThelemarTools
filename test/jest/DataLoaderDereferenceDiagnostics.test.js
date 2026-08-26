@@ -212,4 +212,26 @@ describe("DataLoader dereference diagnostics", () => {
 		expect(merged._copy).toBeUndefined();
 		expect(merged.entries).toEqual(["base entry"]);
 	});
+
+	// Regression: `pDoMetaMerge` is often called without an options object (e.g. `_loadJson` ->
+	// prerelease/brew dependency loads). The dependency pass must not dereference `options` directly,
+	// or every such load throws "Cannot read properties of undefined (reading 'isIgnoreMissing')".
+	it("tolerates pDoMetaMerge being called without an options object", async () => {
+		const parent = {name: "Solo Parent Feat", source: "HB-DEP", entries: ["dep entry"]};
+		const child = {name: "Solo Child Feat", source: "HB", _copy: {name: "Solo Parent Feat", source: "HB-DEP"}};
+		const data = {
+			_meta: {dependencies: {feat: ["HB-DEP"]}},
+			feat: [child],
+		};
+
+		const loadSpy = jest.spyOn(DataUtil, "pLoadByMeta").mockResolvedValue({feat: [parent]});
+
+		const out = await DataUtil.pDoMetaMerge(CryptUtil.uid(), data);
+
+		loadSpy.mockRestore();
+
+		const merged = out.feat.find(it => it.name === "Solo Child Feat");
+		expect(merged._copy).toBeUndefined();
+		expect(merged.entries).toEqual(["dep entry"]);
+	});
 });
