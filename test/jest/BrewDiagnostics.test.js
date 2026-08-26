@@ -33,7 +33,22 @@ describe("BrewDiagnostics", () => {
 		...overrides,
 	});
 
-	it("normalizes, stores, stays silent on the console by default, and returns defensive copies of records", () => {
+	// The high-volume benign dangling-reference class: hundreds of these can fire on a brew-heavy
+	// page load for `_copy` parents that only resolve against unloaded site data (and resolve fine
+	// at runtime), so they must stay off the console unless verbose mode is explicitly enabled.
+	const getCopyRecord = (overrides = {}) => ({
+		code: BrewDiagnostics.CODES.COPY_MISSING_PARENT,
+		severity: "warning",
+		target: {kind: "feat", uid: "missing parent|hb"},
+		origin: "brew",
+		documentId: "doc-1",
+		owner: {prop: "feat", name: "Orphan Feat", source: "HB"},
+		fieldPath: "_copy",
+		detail: `Could not find "feats.html" entity "Missing Parent" ("HB-PARENT")`,
+		...overrides,
+	});
+
+	it("normalizes, stores, and returns defensive copies of records", () => {
 		const out = BrewDiagnostics.report(getRecord());
 
 		expect(out).toEqual(expect.objectContaining({
@@ -46,28 +61,46 @@ describe("BrewDiagnostics", () => {
 				hash: null,
 			},
 		}));
-		// Quiet by default: collected in-memory, but never logged to the console.
-		expect(warnSpy).not.toHaveBeenCalled();
 		expect(BrewDiagnostics.getRecords()).toHaveLength(1);
 
 		out.owner.name = "Mutated";
 		expect(BrewDiagnostics.getRecords()[0].owner.name).toBe("Homebrew Armor");
 	});
 
-	it("logs to the console only when verbose mode is enabled, deduping repeats", () => {
+	it("stays silent on the console for the benign high-volume dangling-reference class by default", () => {
+		BrewDiagnostics.report(getCopyRecord());
+
+		// Collected in-memory + surfaced in the audit UI, but never logged to the console.
+		expect(warnSpy).not.toHaveBeenCalled();
+		expect(BrewDiagnostics.getRecords()).toHaveLength(1);
+	});
+
+	it("surfaces actionable item type/property diagnostics on the console even when quiet", () => {
+		// Genuine, inherently low-volume authoring bugs (an item referencing an unregistered
+		// type/property) that a homebrew author should see and fix directly -- e.g. `ADV_DIS`.
+		BrewDiagnostics.report(getRecord({
+			code: BrewDiagnostics.CODES.ITEM_MISSING_PROPERTY,
+			detail: `Item property "ADV_DIS" not found!`,
+		}));
+
+		expect(warnSpy).toHaveBeenCalledTimes(1);
+		expect(warnSpy).toHaveBeenCalledWith(
+			`[5et:brew-diagnostics] Item property "ADV_DIS" not found!`,
+			expect.objectContaining({code: BrewDiagnostics.CODES.ITEM_MISSING_PROPERTY}),
+		);
+	});
+
+	it("logs the benign dangling-reference class to the console only when verbose mode is enabled, deduping repeats", () => {
 		BrewDiagnostics.setConsoleVerbose(true);
 
-		BrewDiagnostics.report(getRecord());
-		BrewDiagnostics.report(getRecord());
+		BrewDiagnostics.report(getCopyRecord());
+		BrewDiagnostics.report(getCopyRecord());
 
 		expect(BrewDiagnostics.getRecords()).toHaveLength(1);
 		expect(warnSpy).toHaveBeenCalledTimes(1);
 		expect(warnSpy).toHaveBeenCalledWith(
-			`[5et:brew-diagnostics] Item type "armor" not found!`,
-			expect.objectContaining({
-				...getRecord(),
-				target: expect.objectContaining({kind: "itemType", uid: "armor"}),
-			}),
+			`[5et:brew-diagnostics] Could not find "feats.html" entity "Missing Parent" ("HB-PARENT")`,
+			expect.objectContaining({code: BrewDiagnostics.CODES.COPY_MISSING_PARENT}),
 		);
 	});
 

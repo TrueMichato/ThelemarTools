@@ -92,11 +92,11 @@ globalThis.BrewDiagnostics = class {
 	static _recordsByKey = new Map();
 	static _subscribers = new Set();
 	static _isStrictModeForTests = false;
-	// Quiet by default: records are collected in-memory and surfaced through the
-	// Manage Homebrew "Check for Issues" audit UI, not the console. A single brew-heavy
-	// page load can legitimately produce hundreds of benign dangling-reference records
-	// (e.g. `_copy` parents that only resolve against unloaded site data), so per-record
-	// console logging is an opt-in developer escape hatch rather than the default.
+	// Console verbosity flag for the developer/test opt-in that logs every record. The default
+	// per-record console policy lives in `_shouldLogToConsole`: genuinely-actionable, low-volume
+	// authoring issues (missing item type/property) surface on the console, while the high-volume
+	// benign dangling-reference class stays quiet. Every record is always collected in-memory and
+	// surfaced through the Manage Homebrew "Check for Issues" audit UI regardless of this flag.
 	static _isConsoleVerbose = false;
 
 	static report (record) {
@@ -108,7 +108,7 @@ globalThis.BrewDiagnostics = class {
 			this._records.push(normalized);
 			this._recordsByKey.set(key, normalized);
 
-			if (this._isConsoleVerbose) {
+			if (this._shouldLogToConsole(normalized)) {
 				// eslint-disable-next-line no-console
 				console.warn(`[5et:brew-diagnostics] ${normalized.detail || normalized.code}`, normalized);
 			}
@@ -141,6 +141,19 @@ globalThis.BrewDiagnostics = class {
 
 	static setConsoleVerbose (isVerbose) {
 		this._isConsoleVerbose = !!isVerbose;
+	}
+
+	// Default per-record console policy. `setConsoleVerbose(true)` is a developer/test opt-in that
+	// logs every record. Otherwise we surface only the genuinely-actionable, inherently low-volume
+	// authoring issues -- an item referencing an unregistered type or property -- which a homebrew
+	// author can and should fix directly. The high-volume benign dangling-reference class
+	// (`copy.missingParent`, unresolved string `reference.missing`) stays quiet: one brew-heavy
+	// page load can legitimately emit hundreds of those for parents that only resolve against
+	// unloaded site data and work fine at runtime. All records still reach the audit UI either way.
+	static _shouldLogToConsole (record) {
+		if (this._isConsoleVerbose) return true;
+		return record.code === this.CODES.ITEM_MISSING_TYPE
+			|| record.code === this.CODES.ITEM_MISSING_PROPERTY;
 	}
 
 	static getCopyableReport (records = null) {
