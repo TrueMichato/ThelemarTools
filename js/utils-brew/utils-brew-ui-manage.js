@@ -2,6 +2,7 @@ import {SOURCE_UNKNOWN_ABBREVIATION, SOURCE_UNKNOWN_FULL} from "./utils-brew-con
 import {BrewDoc} from "./utils-brew-models.js";
 import {GetBrewUi} from "./utils-brew-ui-get.js";
 import {ManageEditableBrewContentsUi} from "./utils-brew-ui-manage-editable-contents.js";
+import {ManageBrewDiagnosticsUtil} from "./utils-brew-ui-manage-diagnostics.js";
 import {ManageExternalUtils} from "../manageexternal/manageexternal-utils.js";
 
 export class ManageBrewUi {
@@ -13,6 +14,10 @@ export class ManageBrewUi {
 			this.brews = [];
 			this.menuListMass = null;
 			this.rowMetas = [];
+			this.diagnosticsSeenKeys = new Set();
+			this.diagnosticsToolbarUnsubscribe = null;
+			this.eleDiagnosticsButton = null;
+			this.eleDiagnosticsBadge = null;
 		}
 	};
 
@@ -183,6 +188,7 @@ export class ManageBrewUi {
 			</div>`,
 			isHeaderBorder: true,
 			cbClose: () => {
+				rdState.diagnosticsToolbarUnsubscribe?.();
 				if (!brewUtil.isReloadRequired()) return;
 				brewUtil.doLocationReload();
 			},
@@ -374,6 +380,8 @@ export class ManageBrewUi {
 				await this.constructor.pOnClickBtnExportListAsUrl({ele: evt.currentTarget});
 			});
 
+		const btnDiagnostics = this._pRender_getBtnDiagnostics(rdState);
+
 		const wrpBtnLoadAll = this._brewUtil.IS_ADD_BTN_ALL_PARTNERED
 			? ee`<div class="ve-flex-v-center ve-btn-group ve-mr-2">
 				${btnLoadPartnered}
@@ -393,6 +401,7 @@ export class ManageBrewUi {
 				</div>
 			</div>
 			<div class="ve-flex-v-center">
+				${btnDiagnostics}
 				<a href="${this._brewUtil.URL_REPO_DEFAULT}" class="ve-flex-v-center" target="_blank" rel="noopener noreferrer"><button class="ve-btn ve-btn-default ve-btn-sm ve-mr-2">Browse Source Repository</button></a>
 
 				<div class="ve-flex-v-center ve-btn-group ve-mr-2">
@@ -415,6 +424,315 @@ export class ManageBrewUi {
 			${wrpBtns.addClass("ve-mb-3")}
 			${rdState.stgBrewList}`;
 		}
+
+		this._pRender_bindDiagnosticsToolbar(rdState);
+	}
+
+	_pRender_getBtnDiagnostics (rdState) {
+		const eleBadge = e_({
+			tag: "span",
+			clazz: "manbrew-diag-launch__badge",
+			attrs: {"aria-hidden": "true"},
+		});
+
+		const eleButton = e_({
+			tag: "button",
+			clazz: "ve-btn ve-btn-default ve-btn-sm ve-mr-2 manbrew-diag-launch",
+			attrs: {"aria-label": "Check for homebrew issues"},
+			children: [
+				e_({tag: "span", clazz: "glyphicon glyphicon-search", attrs: {"aria-hidden": "true"}}),
+				e_({tag: "span", clazz: "ve-ml-1", text: "Check for Issues"}),
+				eleBadge,
+			],
+			click: () => this._pRender_pOpenDiagnosticsModal(rdState),
+		});
+
+		rdState.eleDiagnosticsButton = eleButton;
+		rdState.eleDiagnosticsBadge = eleBadge;
+		this._pRender_updateDiagnosticsButton(rdState);
+
+		return eleButton;
+	}
+
+	_pRender_bindDiagnosticsToolbar (rdState) {
+		rdState.diagnosticsToolbarUnsubscribe?.();
+		rdState.diagnosticsToolbarUnsubscribe = ManageBrewDiagnosticsUtil.subscribe(({event}) => {
+			if (event.type === "clear") rdState.diagnosticsSeenKeys.clear();
+			this._pRender_updateDiagnosticsButton(rdState);
+		});
+	}
+
+	_pRender_updateDiagnosticsButton (rdState) {
+		if (!rdState.eleDiagnosticsButton || !rdState.eleDiagnosticsBadge) return;
+
+		const {count, ariaLabel, badgeText, badgeTone} = ManageBrewDiagnosticsUtil.getLaunchButtonMeta({
+			records: BrewDiagnostics.getRecords(),
+			seenKeys: rdState.diagnosticsSeenKeys,
+		});
+
+		rdState.eleDiagnosticsButton.setAttribute("aria-label", ariaLabel);
+		rdState.eleDiagnosticsBadge.textContent = badgeText;
+		rdState.eleDiagnosticsBadge.classList.toggle("manbrew-diag-launch__badge--error", badgeTone === "error");
+		rdState.eleDiagnosticsBadge.classList.toggle("manbrew-diag-launch__badge--warning", badgeTone === "warning");
+		rdState.eleDiagnosticsBadge.hidden = !count;
+	}
+
+	_pRender_pOpenDiagnosticsModal (rdState) {
+		const filterState = {search: "", severity: "all"};
+		const collapsedDocumentKeys = new Set();
+		let recordsVisible = [];
+		let unsubscribe = null;
+
+		ManageBrewDiagnosticsUtil.markSeen({
+			records: BrewDiagnostics.getRecords(),
+			seenKeys: rdState.diagnosticsSeenKeys,
+		});
+		this._pRender_updateDiagnosticsButton(rdState);
+
+		const {eleModalInner} = UiUtil.getShowModal({
+			title: "Homebrew Issues",
+			isWidth100: true,
+			isHeaderBorder: true,
+			cbClose: () => unsubscribe?.(),
+		});
+
+		const eleSummary = e_({tag: "div", clazz: "manbrew-diag__summary-text"});
+		const btnCopy = e_({
+			tag: "button",
+			clazz: "ve-btn ve-btn-default ve-btn-xs",
+			text: "Copy report",
+			click: async () => {
+				await MiscUtil.pCopyTextToClipboard(ManageBrewDiagnosticsUtil.getCopyableReport(recordsVisible));
+				JqueryUtil.doToast("Copied issue report");
+			},
+		});
+		const btnClear = e_({
+			tag: "button",
+			clazz: "ve-btn ve-btn-danger ve-btn-xs",
+			text: "Clear",
+			click: async () => {
+				if (!await InputUiUtil.pGetUserBoolean({
+					title: "Clear issue log",
+					htmlDescription: "This clears the in-memory issue list for this session. It does not modify any homebrew.",
+					textYes: "Clear",
+					textNo: "Cancel",
+				})) return;
+
+				BrewDiagnostics.clear();
+			},
+		});
+		const eleSummaryBar = e_({
+			tag: "div",
+			clazz: "manbrew-diag__summary",
+			children: [
+				eleSummary,
+				e_({tag: "div", clazz: "ve-btn-group", children: [btnCopy, btnClear]}),
+			],
+		});
+
+		const iptSearch = e_({
+			tag: "input",
+			clazz: "ve-form-control input-xs manbrew-diag__search",
+			type: "search",
+			placeholder: "Filter by document, owner, target, code, or detail",
+			attrs: {"aria-label": "Filter homebrew issues"},
+		});
+		const severityButtons = [
+			{value: "all", label: "All"},
+			{value: "error", label: "Errors"},
+			{value: "warning", label: "Warnings"},
+		].map(({value, label}) => e_({
+			tag: "button",
+			clazz: `ve-btn ve-btn-default ve-btn-xs${filterState.severity === value ? " active" : ""}`,
+			text: label,
+			attrs: {"aria-pressed": filterState.severity === value ? "true" : "false"},
+			click: evt => {
+				filterState.severity = value;
+				severityButtons.forEach(btn => {
+					const isActive = btn === evt.currentTarget;
+					btn.classList.toggle("active", isActive);
+					btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+				});
+				render();
+			},
+		}));
+		const eleFilters = e_({
+			tag: "div",
+			clazz: "manbrew-diag__filters",
+			children: [
+				iptSearch,
+				e_({
+					tag: "div",
+					clazz: "ve-btn-group manbrew-diag__severity-filter",
+					attrs: {"aria-label": "Filter issues by severity", role: "group"},
+					children: severityButtons,
+				}),
+			],
+		});
+
+		const eleList = e_({tag: "div", clazz: "manbrew-diag__list"});
+		const eleControls = e_({
+			tag: "div",
+			clazz: "manbrew-diag__controls",
+			children: [eleSummaryBar, eleFilters],
+		});
+		const eleRoot = e_({
+			tag: "div",
+			clazz: "manbrew-diag",
+			children: [eleControls, eleList],
+		});
+		eleModalInner.append(eleRoot);
+
+		const render = ({highlightKey = null} = {}) => {
+			const model = ManageBrewDiagnosticsUtil.getViewModel(BrewDiagnostics.getRecords(), filterState);
+			recordsVisible = model.groups.flatMap(group => group.records);
+
+			eleSummaryBar.hidden = model.isEmpty;
+			eleFilters.hidden = model.isEmpty;
+			eleSummary.textContent = `${model.recordsVisible.length} issue${model.recordsVisible.length === 1 ? "" : "s"} across ${model.countDocuments} document${model.countDocuments === 1 ? "" : "s"}`;
+
+			eleList.empty();
+			if (model.isEmpty || model.isFilteredEmpty) {
+				eleList.append(this._pRender_getDiagnosticsEmptyState({isFilteredEmpty: model.isFilteredEmpty}));
+				return;
+			}
+
+			model.groups.forEach(group => eleList.append(this._pRender_getDiagnosticsGroup({
+				group,
+				collapsedDocumentKeys,
+				highlightKey,
+			})));
+		};
+
+		iptSearch.addEventListener("input", () => {
+			filterState.search = iptSearch.value;
+			render();
+		});
+
+		unsubscribe = ManageBrewDiagnosticsUtil.subscribe(({event}) => {
+			if (event.type === "clear") {
+				rdState.diagnosticsSeenKeys.clear();
+				render();
+				return;
+			}
+
+			render({highlightKey: ManageBrewDiagnosticsUtil.getRecordKey(event.record)});
+		});
+
+		render();
+		iptSearch.focus();
+	}
+
+	_pRender_getDiagnosticsEmptyState ({isFilteredEmpty}) {
+		return e_({
+			tag: "div",
+			clazz: "manbrew-diag__empty",
+			children: [
+				e_({
+					tag: "span",
+					clazz: `glyphicon ${isFilteredEmpty ? "glyphicon-filter" : "glyphicon-ok-circle"} manbrew-diag__empty-icon`,
+					attrs: {"aria-hidden": "true"},
+				}),
+				e_({
+					tag: "div",
+					clazz: "manbrew-diag__empty-title",
+					text: isFilteredEmpty ? "No issues match the current filters." : "No homebrew issues detected.",
+				}),
+				!isFilteredEmpty
+					? e_({
+						tag: "div",
+						clazz: "manbrew-diag__empty-detail",
+						text: "Issues appear here as content loads and renders; reload clears them.",
+					})
+					: null,
+			],
+		});
+	}
+
+	_pRender_getDiagnosticsGroup ({group, collapsedDocumentKeys, highlightKey}) {
+		const isCollapsed = collapsedDocumentKeys.has(group.key);
+		const eleRows = e_({
+			tag: "div",
+			clazz: "manbrew-diag__rows",
+			children: group.records.map(record => this._pRender_getDiagnosticsRow({record, highlightKey})),
+		});
+		eleRows.hidden = isCollapsed;
+
+		const eleCaret = e_({
+			tag: "span",
+			clazz: `glyphicon glyphicon-chevron-${isCollapsed ? "right" : "down"} manbrew-diag__caret`,
+			attrs: {"aria-hidden": "true"},
+		});
+		const btnHeader = e_({
+			tag: "button",
+			clazz: "manbrew-diag__group-header",
+			title: group.label,
+			attrs: {"aria-expanded": isCollapsed ? "false" : "true"},
+			children: [
+				eleCaret,
+				e_({tag: "span", clazz: "manbrew-diag__document", text: group.label}),
+				e_({tag: "span", clazz: "manbrew-diag__group-count", text: `${group.records.length}`}),
+				group.countErrors
+					? e_({tag: "span", clazz: "manbrew-diag__tally manbrew-diag__tally--error", text: `${group.countErrors} error${group.countErrors === 1 ? "" : "s"}`})
+					: null,
+				group.countWarnings
+					? e_({tag: "span", clazz: "manbrew-diag__tally manbrew-diag__tally--warning", text: `${group.countWarnings} warning${group.countWarnings === 1 ? "" : "s"}`})
+					: null,
+			],
+			click: () => {
+				if (collapsedDocumentKeys.has(group.key)) collapsedDocumentKeys.delete(group.key);
+				else collapsedDocumentKeys.add(group.key);
+				const isNowCollapsed = collapsedDocumentKeys.has(group.key);
+				eleRows.hidden = isNowCollapsed;
+				btnHeader.setAttribute("aria-expanded", isNowCollapsed ? "false" : "true");
+				eleCaret.className = `glyphicon glyphicon-chevron-${isNowCollapsed ? "right" : "down"} manbrew-diag__caret`;
+			},
+		});
+
+		return e_({
+			tag: "section",
+			clazz: "manbrew-diag__group",
+			children: [btnHeader, eleRows],
+		});
+	}
+
+	_pRender_getDiagnosticsRow ({record, highlightKey}) {
+		const isError = record.severity === "error";
+		const targetUid = record.target?.uid || [record.target?.page, record.target?.source, record.target?.hash].filter(Boolean).join("|") || "(Unknown target)";
+		const targetText = [
+			record.target?.kind || "entity",
+			targetUid,
+			record.target?.source ? `(${record.target.source})` : null,
+		].filter(Boolean).join(" ");
+		const ownerText = `${record.owner?.prop || "entity"} "${record.owner?.name || "(Unknown owner)"}"${record.owner?.source ? ` (${record.owner.source})` : ""}`;
+		const isHighlighted = highlightKey === ManageBrewDiagnosticsUtil.getRecordKey(record);
+
+		return e_({
+			tag: "div",
+			clazz: `manbrew-diag__row${isHighlighted ? " manbrew-diag__row--new" : ""}`,
+			title: record.detail || "",
+			children: [
+				e_({
+					tag: "span",
+					clazz: `manbrew-diag__severity manbrew-diag__severity--${isError ? "error" : "warning"}`,
+					children: [
+						e_({
+							tag: "span",
+							clazz: `glyphicon glyphicon-${isError ? "remove-sign" : "warning-sign"}`,
+							attrs: {"aria-hidden": "true"},
+						}),
+						e_({tag: "span", text: isError ? "ERROR" : "WARN"}),
+					],
+				}),
+				e_({tag: "span", clazz: "manbrew-diag__code", text: record.code, title: record.code}),
+				e_({tag: "span", clazz: "manbrew-diag__owner", text: ownerText, title: ownerText}),
+				e_({tag: "span", clazz: "manbrew-diag__field", text: record.fieldPath || "(Unknown field)", title: record.fieldPath || "(Unknown field)"}),
+				e_({tag: "span", clazz: "manbrew-diag__target", text: targetText, title: targetText}),
+				record.detail
+					? e_({tag: "span", clazz: "manbrew-diag__detail", text: record.detail})
+					: null,
+			],
+		});
 	}
 
 	async _pHandleClick_btnLoadPartnered (rdState) {

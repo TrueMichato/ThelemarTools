@@ -77,11 +77,367 @@
 		}
 	}
 
+	.manbrew-diag-launch {
+		display: inline-flex;
+		align-items: center;
+
+		&__badge {
+			min-width: 18px;
+			margin-left: 5px;
+			padding: 1px 5px;
+			border-radius: 9px;
+			color: vars.$rgb-bg;
+			font-size: 11px;
+			font-weight: 700;
+			line-height: 14px;
+			text-align: center;
+
+			&--error {
+				background: vars.$rgb-alert-text-danger;
+			}
+
+			&--warning {
+				background: vars.$rgb-alert-text-warning;
+			}
+		}
+	}
+
+	.manbrew-diag {
+		--manbrew-diag-highlight: #{vars.$rgb-bg-highlight};
+
+		display: flex;
+		flex-direction: column;
+		min-height: 260px;
+		max-height: calc(100vh - 90px);
+		color: vars.$rgb-font;
+
+		&__controls {
+			position: sticky;
+			top: 0;
+			z-index: 1;
+			flex-shrink: 0;
+			border-bottom: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg;
+		}
+
+		&__summary,
+		&__filters {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 8px;
+			padding: 6px 8px;
+		}
+
+		&__summary {
+			border-bottom: 1px solid vars.$rgb-border-grey;
+		}
+
+		&__summary-text {
+			font-weight: 600;
+		}
+
+		&__search {
+			min-width: 0;
+		}
+
+		&__severity-filter {
+			flex-shrink: 0;
+		}
+
+		&__list {
+			min-height: 0;
+			overflow-y: auto;
+		}
+
+		&__group {
+			border-bottom: 1px solid vars.$rgb-border-grey;
+		}
+
+		&__group-header {
+			display: flex;
+			align-items: center;
+			width: 100%;
+			gap: 6px;
+			padding: 5px 8px;
+			border: 0;
+			background: vars.$rgb-bg--alt;
+			color: vars.$rgb-font;
+			font: inherit;
+			text-align: left;
+
+			&:hover {
+				background: vars.$rgb-bg;
+			}
+
+			&:focus-visible {
+				outline: 2px solid vars.$rgb-link-blue;
+				outline-offset: -2px;
+			}
+		}
+
+		&__caret {
+			flex: 0 0 10px;
+			font-size: 11px;
+		}
+
+		&__document,
+		&__code,
+		&__field,
+		&__target {
+			overflow: hidden;
+			font-family: monospace;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		&__document {
+			flex: 1 1 auto;
+			min-width: 0;
+			font-weight: 600;
+		}
+
+		&__group-count {
+			min-width: 20px;
+			padding: 1px 5px;
+			border: 1px solid vars.$rgb-border-grey;
+			border-radius: 9px;
+			background: vars.$rgb-bg;
+			font-size: 11px;
+			line-height: 14px;
+			text-align: center;
+		}
+
+		&__tally {
+			font-size: 11px;
+			font-weight: 600;
+
+			&--error {
+				color: vars.$rgb-alert-text-danger;
+			}
+
+			&--warning {
+				color: vars.$rgb-alert-text-warning;
+			}
+		}
+
+		&__row {
+			display: grid;
+			grid-template-columns: auto minmax(110px, 0.7fr) minmax(160px, 1.2fr) minmax(130px, 1fr) minmax(150px, 1.2fr);
+			align-items: center;
+			gap: 4px 8px;
+			padding: 4px 8px;
+			border-bottom: 1px solid vars.$rgb-border-grey;
+
+			&:last-child {
+				border-bottom: 0;
+			}
+
+			&--new {
+				animation: manbrew-diag-highlight 1.4s ease-out;
+			}
+		}
+
+		&__severity {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			gap: 3px;
+			min-width: 58px;
+			padding: 2px 5px;
+			border-radius: 2px;
+			color: vars.$rgb-bg;
+			font-size: 11px;
+			font-weight: 700;
+			line-height: 14px;
+
+			&--error {
+				background: vars.$rgb-alert-text-danger;
+			}
+
+			&--warning {
+				background: vars.$rgb-alert-text-warning;
+			}
+		}
+
+		&__owner {
+			overflow: hidden;
+			font-weight: 600;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		&__code,
+		&__field,
+		&__target,
+		&__detail,
+		&__empty-detail {
+			color: vars.$rgb-cb-grey;
+		}
+
+		&__detail {
+			grid-column: 2 / -1;
+			overflow-wrap: anywhere;
+			font-size: 11px;
+		}
+
+		&__empty {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			min-height: 230px;
+			padding: 28px;
+			text-align: center;
+		}
+
+		&__empty-icon {
+			margin-bottom: 8px;
+			color: vars.$rgb-cb-grey;
+			font-size: 28px;
+		}
+
+		&__empty-title {
+			font-weight: 600;
+		}
+
+		&__empty-detail {
+			margin-top: 3px;
+			font-size: 12px;
+		}
+	}
+
 	.ve-night-mode .manbrew {
 		&__filtertools {
 			.wrp-cb-all {
 				border-color: vars-night.$rgb-border-grey--night;
 			}
+		}
+	}
+
+	.ve-night-mode {
+		.manbrew-diag-launch__badge {
+			color: vars.$rgb-bg;
+
+			&--error {
+				background: vars-night.$rgb-alert-danger-red--night;
+			}
+
+			&--warning {
+				background: vars-night.$rgb-alert-warning-orange--night;
+				color: vars-night.$rgb-bg--night;
+			}
+		}
+
+		.manbrew-diag {
+			--manbrew-diag-highlight: #{vars-night.$rgb-bg-highlight--night};
+
+			color: vars-night.$rgb-font--night;
+
+			&__controls {
+				border-color: vars-night.$rgb-border-grey--night;
+				background: vars-night.$rgb-bg--night;
+			}
+
+			&__summary,
+			&__group,
+			&__row {
+				border-color: vars-night.$rgb-border-grey--night;
+			}
+
+			&__group-header {
+				background: vars-night.$rgb-bg--alt-night;
+				color: vars-night.$rgb-font--night;
+
+				&:hover {
+					background: vars-night.$rgb-bg--night;
+				}
+
+				&:focus-visible {
+					outline-color: vars-night.$rgb-link-blue--night;
+				}
+			}
+
+			&__group-count {
+				border-color: vars-night.$rgb-border-grey--night;
+				background: vars-night.$rgb-bg--night;
+			}
+
+			&__tally--error {
+				color: vars-night.$rgb-alert-danger-red--night;
+			}
+
+			&__tally--warning {
+				color: vars-night.$rgb-alert-warning-orange--night;
+			}
+
+			&__severity--error {
+				background: vars-night.$rgb-alert-danger-red--night;
+				color: vars.$rgb-bg;
+			}
+
+			&__severity--warning {
+				background: vars-night.$rgb-alert-warning-orange--night;
+				color: vars-night.$rgb-bg--night;
+			}
+
+			&__code,
+			&__field,
+			&__target,
+			&__detail,
+			&__empty-detail,
+			&__empty-icon {
+				color: vars-night.$rgb-font--night;
+			}
+		}
+	}
+
+	@media (width <= 768px) {
+		.manbrew-diag {
+			&__summary,
+			&__filters {
+				align-items: stretch;
+				flex-direction: column;
+			}
+
+			&__severity-filter {
+				align-self: flex-start;
+			}
+
+			&__row {
+				grid-template-columns: auto minmax(0, 1fr);
+				padding: 6px 8px;
+			}
+
+			&__owner {
+				grid-column: 1 / -1;
+			}
+
+			&__field,
+			&__target,
+			&__detail {
+				grid-column: 1 / -1;
+			}
+
+			&__tally {
+				display: none;
+			}
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.manbrew-diag__row--new {
+			animation: none;
+		}
+	}
+
+	@keyframes manbrew-diag-highlight {
+		from {
+			background: var(--manbrew-diag-highlight);
+		}
+
+		to {
+			background: transparent;
 		}
 	}
 }
