@@ -84,6 +84,8 @@ globalThis.BrewDiagnostics = class {
 	static CODES = Object.freeze({
 		ITEM_MISSING_TYPE: "item.missingType",
 		ITEM_MISSING_PROPERTY: "item.missingProperty",
+		REFERENCE_MISSING: "reference.missing",
+		COPY_MISSING_PARENT: "copy.missingParent",
 	});
 
 	static _records = [];
@@ -5681,6 +5683,28 @@ globalThis.DataUtil = class {
 			const entParent = (impl._mergeCache = impl._mergeCache || {})[hash] || DataUtil.generic._pMergeCopy_search(impl, page, entryList, entry, options);
 
 			if (!entParent) {
+				if (!options.isIgnoreMissing || options.isErrorOnMissing) {
+					BrewDiagnostics.report({
+						code: BrewDiagnostics.CODES.COPY_MISSING_PARENT,
+						severity: "error",
+						target: {
+							kind: page,
+							uid: `${entry._copy.name}|${entry._copy.source}`,
+							page,
+							source: entry._copy.source,
+							hash,
+						},
+						...(entry.__diagnostic || {}),
+						owner: {
+							prop: entry.__diagnostic?.prop || entry.__prop || page,
+							name: entry.name || null,
+							source: SourceUtil.getEntitySource(entry) || null,
+						},
+						fieldPath: "_copy",
+						detail: `Could not find "${page}" entity "${entry._copy.name}" ("${entry._copy.source}") to copy in copier "${entry.name}" ("${entry.source}")`,
+					});
+				}
+
 				if (options.isErrorOnMissing) {
 					throw new Error(`Could not find "${page}" entity "${entry._copy.name}" ("${entry._copy.source}") to copy in copier "${entry.name}" ("${entry.source}")`);
 				}

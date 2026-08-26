@@ -19,7 +19,30 @@ export class DataLoaderInternalUtil {
 
 	static _NOTIFIED_FAILED_DEREFERENCES = new Set();
 
-	static doNotifyFailedDereferences ({missingRefSets, diagnostics}) {
+	static doNotifyFailedDereferences ({failedRefs, diagnostics}) {
+		if (!failedRefs?.length) return;
+
+		failedRefs.forEach(failedRef => {
+			BrewDiagnostics.report({
+				code: BrewDiagnostics.CODES.REFERENCE_MISSING,
+				severity: "error",
+				target: {
+					kind: failedRef.prop,
+					uid: failedRef.uid,
+					page: failedRef.prop,
+				},
+				...(failedRef.diagnostic || {}),
+				owner: failedRef.owner,
+				fieldPath: failedRef.fieldPath,
+				detail: `Could not resolve ${failedRef.prop} reference "${failedRef.uid}"`,
+			});
+		});
+
+		const missingRefSets = {};
+		failedRefs
+			.filter(({refKind}) => (refKind ?? "object") === "object")
+			.forEach(({prop, uid}) => (missingRefSets[prop] ||= new Set()).add(uid));
+
 		// region Avoid repeatedly throwing errors for the same missing references
 		const missingRefSetsUnseen = Object.entries(missingRefSets)
 			.mergeMap(([prop, set]) => ({

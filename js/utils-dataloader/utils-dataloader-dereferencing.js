@@ -67,7 +67,7 @@ export class DataLoaderDereferencerFacade {
 		});
 
 		await this._pGetDereferenced_pDoDereference({propEntries, entriesWithRefs, entriesWithoutRefs, loadspace});
-		this._pGetDereferenced_doNotifyFailed({entriesWithRefs, entities});
+		this._pGetDereferenced_doNotifyFailed({entriesWithRefs, entities, propEntries});
 		this._pGetDereferenced_doPopulateOutput({page, out, entriesWithoutRefs, entriesWithRefs});
 
 		return out;
@@ -191,35 +191,101 @@ export class DataLoaderDereferencerFacade {
 
 	/* -------------------------------------------- */
 
-	static _pGetDereferenced_doNotifyFailed ({entriesWithRefs, entities}) {
-		const entriesWithRefsVals = Object.values(entriesWithRefs)
-			.map(hashToEntry => Object.values(hashToEntry))
-			.flat();
+	static _pGetDereferenced_doNotifyFailed ({entriesWithRefs, entities, propEntries}) {
+		const failedRefs = Object.entries(entriesWithRefs)
+			.flatMap(([page, hashToEntry]) => Object.values(hashToEntry)
+				.flatMap(ent => this._pGetDereferenced_getFailedRefs({ent, page, propEntries})));
 
-		if (!entriesWithRefsVals.length) return;
-
-		const missingRefSets = {};
-		this._WALKER_READ.walk(
-			entriesWithRefsVals,
-			{
-				object: (obj) => {
-					switch (obj.type) {
-						case "refClassFeature": (missingRefSets["classFeature"] = missingRefSets["classFeature"] || new Set()).add(obj.classFeature); break;
-						case "refSubclassFeature": (missingRefSets["subclassFeature"] = missingRefSets["subclassFeature"] || new Set()).add(obj.subclassFeature); break;
-						case "refOptionalfeature": (missingRefSets["optionalfeature"] = missingRefSets["optionalfeature"] || new Set()).add(obj.optionalfeature); break;
-						case "refFeat": (missingRefSets["feat"] = missingRefSets["feat"] || new Set()).add(obj.feat); break;
-						case "refItemEntry": (missingRefSets["itemEntry"] = missingRefSets["itemEntry"] || new Set()).add(obj.itemEntry); break;
-					}
-				},
-			},
-		);
+		if (!failedRefs.length) return;
 
 		DataLoaderInternalUtil.doNotifyFailedDereferences({
-			missingRefSets,
+			failedRefs,
 			diagnostics: entities
 				.map(ent => ent.__diagnostic)
 				.filter(Boolean),
 		});
+	}
+
+	static _pGetDereferenced_getFailedRefs ({ent, page, propEntries}) {
+		const out = [];
+		const owner = {
+			prop: ent.__diagnostic?.prop || ent.__prop || page,
+			name: ent.name || null,
+			source: SourceUtil.getEntitySource(ent) || null,
+		};
+
+		this._pGetDereferenced_getFailedRefs_recurse({
+			value: ent[propEntries],
+			fieldPath: propEntries,
+			out,
+			owner,
+			diagnostic: ent.__diagnostic || null,
+		});
+		return out;
+	}
+
+	static _pGetDereferenced_getFailedRefs_recurse ({value, fieldPath, out, owner, diagnostic}) {
+		if (value instanceof Array) {
+			value.forEach((it, ix) => this._pGetDereferenced_getFailedRefs_recurse({
+				value: it,
+				fieldPath: `${fieldPath}[${ix}]`,
+				out,
+				owner,
+				diagnostic,
+			}));
+			return;
+		}
+
+		if (typeof value === "string") {
+			if (!value.startsWith("{#") || !value.endsWith("}")) return;
+			this._pGetDereferenced_getFailedRefs_add({
+				ref: Renderer.hover.getRefMetaFromTag(value),
+				fieldPath,
+				out,
+				owner,
+				diagnostic,
+				isDirect: true,
+			});
+			return;
+		}
+
+		if (!value || typeof value !== "object") return;
+		if (this._pGetDereferenced_getFailedRefs_add({ref: value, fieldPath, out, owner, diagnostic})) return;
+
+		Object.entries(value)
+			.filter(([k]) => !MiscUtil.GENERIC_WALKER_ENTRIES_KEY_BLOCKLIST.has(k))
+			.forEach(([k, v]) => this._pGetDereferenced_getFailedRefs_recurse({
+				value: v,
+				fieldPath: `${fieldPath}.${k}`,
+				out,
+				owner,
+				diagnostic,
+			}));
+	}
+
+	static _pGetDereferenced_getFailedRefs_add ({ref, fieldPath, out, owner, diagnostic, isDirect = false}) {
+		const meta = this._pGetDereferenced_getFailedRefs_getMeta(ref);
+		if (!meta) return false;
+
+		out.push({
+			...meta,
+			owner,
+			diagnostic,
+			refKind: isDirect ? "string" : "object",
+			fieldPath: `${fieldPath}${isDirect ? "" : meta.fieldSuffix}`,
+		});
+		return true;
+	}
+
+	static _pGetDereferenced_getFailedRefs_getMeta (ref) {
+		switch (ref.type) {
+			case "refClassFeature": return {prop: "classFeature", uid: ref.classFeature, fieldSuffix: ".classFeature"};
+			case "refSubclassFeature": return {prop: "subclassFeature", uid: ref.subclassFeature, fieldSuffix: ".subclassFeature"};
+			case "refOptionalfeature": return {prop: "optionalfeature", uid: ref.optionalfeature, fieldSuffix: ".optionalfeature"};
+			case "refFeat": return {prop: "feat", uid: ref.feat, fieldSuffix: ".feat"};
+			case "refItemEntry": return {prop: "itemEntry", uid: ref.itemEntry, fieldSuffix: ".itemEntry"};
+			default: return null;
+		}
 	}
 
 	/* -------------------------------------------- */

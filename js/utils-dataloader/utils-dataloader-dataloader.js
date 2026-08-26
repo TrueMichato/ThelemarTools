@@ -612,13 +612,22 @@ class DataTypeLoaderCustomRawable extends DataTypeLoader {
 		return this.constructor._getAsRawPrefixed(prereleaseBrew, {propsRaw: this.constructor._PROPS_RAWABLE});
 	}
 
-	static _pGetDereferencedData_doNotifyFailed ({ent, uids, prop}) {
-		const missingRefSets = {
-			[prop]: new Set(uids),
-		};
+	static _pGetDereferencedData_doNotifyFailed ({ent, refs, prop, ownerProp = null}) {
+		if (!refs.length) return;
 
 		DataLoaderInternalUtil.doNotifyFailedDereferences({
-			missingRefSets,
+			failedRefs: refs.map(({uid, fieldPath}) => ({
+				prop,
+				uid,
+				fieldPath,
+				refKind: "object",
+				diagnostic: ent.__diagnostic || null,
+				owner: {
+					prop: ent.__diagnostic?.prop || ent.__prop || ownerProp,
+					name: ent.name || null,
+					source: SourceUtil.getEntitySource(ent) || null,
+				},
+			})),
 			diagnostics: [ent.__diagnostic].filter(Boolean),
 		});
 	}
@@ -719,10 +728,10 @@ class DataTypeLoaderCustomClassesSubclass extends DataTypeLoaderCustomRawable {
 		clsOrSc = MiscUtil.copyFast(clsOrSc);
 
 		const byLevel = {}; // Build a map of `level: [ ...feature... ]`
-		const notFoundUids = [];
+		const notFoundRefs = [];
 
 		await (clsOrSc[propFeatures] || [])
-			.pSerialAwaitMap(async featureRef => {
+			.pSerialAwaitMap(async (featureRef, ixFeature) => {
 				const uid = featureRef[propFeature] ? featureRef[propFeature] : featureRef;
 				const unpackedUid = fnUnpackUid(uid);
 				const {source, displayText} = unpackedUid;
@@ -740,7 +749,12 @@ class DataTypeLoaderCustomClassesSubclass extends DataTypeLoaderCustomRawable {
 
 				const feature = await DataLoader.pCacheAndGet(propFeature, source, hash, {isCopy: true, lockToken2});
 				// Skip over missing links
-				if (!feature) return notFoundUids.push(uid);
+				if (!feature) {
+					return notFoundRefs.push({
+						uid,
+						fieldPath: `${propFeatures}[${ixFeature}]${featureRef[propFeature] ? `.${propFeature}` : ""}`,
+					});
+				}
 
 				feature.type ||= "entries";
 
@@ -757,7 +771,12 @@ class DataTypeLoaderCustomClassesSubclass extends DataTypeLoaderCustomRawable {
 				(byLevel[feature.level || 1] = byLevel[feature.level || 1] || []).push(feature);
 			});
 
-		this._pGetDereferencedData_doNotifyFailed({ent: clsOrSc, uids: notFoundUids, prop: propFeature});
+		this._pGetDereferencedData_doNotifyFailed({
+			ent: clsOrSc,
+			refs: notFoundRefs,
+			prop: propFeature,
+			ownerProp: propFeatures === "classFeatures" ? "class" : "subclass",
+		});
 
 		return byLevel;
 	}
@@ -918,10 +937,10 @@ class DataTypeLoaderCustomDeck extends DataTypeLoaderCustomRawable {
 	}
 
 	static async _pGetDereferencedCardData (deck, {lockToken2}) {
-		const notFoundUids = [];
+		const notFoundRefs = [];
 
 		const out = (await (deck.cards || [])
-			.pSerialAwaitMap(async cardMeta => {
+			.pSerialAwaitMap(async (cardMeta, ixCard) => {
 				const uid = typeof cardMeta === "string" ? cardMeta : cardMeta.uid;
 				const count = typeof cardMeta === "string" ? 1 : cardMeta.count ?? 1;
 				const isReplacement = typeof cardMeta === "string" ? false : cardMeta.replacement ?? false;
@@ -939,7 +958,12 @@ class DataTypeLoaderCustomDeck extends DataTypeLoaderCustomRawable {
 
 				const card = await DataLoader.pCacheAndGet("card", source, hash, {isCopy: true, lockToken2});
 				// Skip over missing links
-				if (!card) return notFoundUids.push(uid);
+				if (!card) {
+					return notFoundRefs.push({
+						uid,
+						fieldPath: `cards[${ixCard}]${typeof cardMeta === "string" ? "" : ".uid"}`,
+					});
+				}
 
 				if (deck.otherSources && deck.source === card.source) card.otherSources = MiscUtil.copyFast(deck.otherSources);
 				if (isReplacement) card._isReplacement = true;
@@ -949,7 +973,7 @@ class DataTypeLoaderCustomDeck extends DataTypeLoaderCustomRawable {
 			.flat()
 			.filter(Boolean);
 
-		this._pGetDereferencedData_doNotifyFailed({ent: deck, uids: notFoundUids, prop: "card"});
+		this._pGetDereferencedData_doNotifyFailed({ent: deck, refs: notFoundRefs, prop: "card", ownerProp: "deck"});
 
 		return out;
 	}
