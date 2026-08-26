@@ -8,12 +8,14 @@ describe("BrewDiagnostics", () => {
 
 	beforeEach(() => {
 		BrewDiagnostics.setStrictModeForTests(false);
+		BrewDiagnostics.setConsoleVerbose(false);
 		BrewDiagnostics.clear();
 		warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
 	});
 
 	afterEach(() => {
 		BrewDiagnostics.setStrictModeForTests(false);
+		BrewDiagnostics.setConsoleVerbose(false);
 		warnSpy.mockRestore();
 	});
 
@@ -31,7 +33,7 @@ describe("BrewDiagnostics", () => {
 		...overrides,
 	});
 
-	it("normalizes, stores, logs, and returns defensive copies of records", () => {
+	it("normalizes, stores, stays silent on the console by default, and returns defensive copies of records", () => {
 		const out = BrewDiagnostics.report(getRecord());
 
 		expect(out).toEqual(expect.objectContaining({
@@ -44,6 +46,22 @@ describe("BrewDiagnostics", () => {
 				hash: null,
 			},
 		}));
+		// Quiet by default: collected in-memory, but never logged to the console.
+		expect(warnSpy).not.toHaveBeenCalled();
+		expect(BrewDiagnostics.getRecords()).toHaveLength(1);
+
+		out.owner.name = "Mutated";
+		expect(BrewDiagnostics.getRecords()[0].owner.name).toBe("Homebrew Armor");
+	});
+
+	it("logs to the console only when verbose mode is enabled, deduping repeats", () => {
+		BrewDiagnostics.setConsoleVerbose(true);
+
+		BrewDiagnostics.report(getRecord());
+		BrewDiagnostics.report(getRecord());
+
+		expect(BrewDiagnostics.getRecords()).toHaveLength(1);
+		expect(warnSpy).toHaveBeenCalledTimes(1);
 		expect(warnSpy).toHaveBeenCalledWith(
 			`[5et:brew-diagnostics] Item type "armor" not found!`,
 			expect.objectContaining({
@@ -51,9 +69,6 @@ describe("BrewDiagnostics", () => {
 				target: expect.objectContaining({kind: "itemType", uid: "armor"}),
 			}),
 		);
-
-		out.owner.name = "Mutated";
-		expect(BrewDiagnostics.getRecords()[0].owner.name).toBe("Homebrew Armor");
 	});
 
 	it("dedupes repeated renders of the same document, entity, field, and target", () => {
@@ -61,7 +76,6 @@ describe("BrewDiagnostics", () => {
 		BrewDiagnostics.report(getRecord());
 
 		expect(BrewDiagnostics.getRecords()).toHaveLength(1);
-		expect(warnSpy).toHaveBeenCalledTimes(1);
 	});
 
 	it("retains separate records for separate owners and fields", () => {

@@ -11,11 +11,13 @@ describe("Renderer.item.getProperty — unknown property handling", () => {
 
 	beforeEach(() => {
 		BrewDiagnostics.clear();
+		BrewDiagnostics.setConsoleVerbose(true);
 		warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
 		toastSpy = jest.spyOn(JqueryUtil, "doToast").mockImplementation(() => {});
 	});
 
 	afterEach(() => {
+		BrewDiagnostics.setConsoleVerbose(false);
 		warnSpy.mockRestore();
 		toastSpy.mockRestore();
 	});
@@ -96,11 +98,13 @@ describe("Renderer.item.getType — unknown type handling", () => {
 
 	beforeEach(() => {
 		BrewDiagnostics.clear();
+		BrewDiagnostics.setConsoleVerbose(true);
 		warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
 		toastSpy = jest.spyOn(JqueryUtil, "doToast").mockImplementation(() => {});
 	});
 
 	afterEach(() => {
+		BrewDiagnostics.setConsoleVerbose(false);
 		warnSpy.mockRestore();
 		toastSpy.mockRestore();
 	});

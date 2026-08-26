@@ -13,6 +13,7 @@ describe("DataLoader dereference diagnostics", () => {
 
 	beforeEach(() => {
 		BrewDiagnostics.setStrictModeForTests(false);
+		BrewDiagnostics.setConsoleVerbose(true);
 		BrewDiagnostics.clear();
 		DataLoaderInternalUtil._NOTIFIED_FAILED_DEREFERENCES = new Set();
 		timeoutSpy = jest.spyOn(globalThis, "setTimeout").mockImplementation(() => 0);
@@ -22,6 +23,7 @@ describe("DataLoader dereference diagnostics", () => {
 
 	afterEach(() => {
 		BrewDiagnostics.setStrictModeForTests(false);
+		BrewDiagnostics.setConsoleVerbose(false);
 		timeoutSpy.mockRestore();
 		toastSpy.mockRestore();
 		warnSpy.mockRestore();

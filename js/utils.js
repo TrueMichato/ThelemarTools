@@ -92,6 +92,12 @@ globalThis.BrewDiagnostics = class {
 	static _recordsByKey = new Map();
 	static _subscribers = new Set();
 	static _isStrictModeForTests = false;
+	// Quiet by default: records are collected in-memory and surfaced through the
+	// Manage Homebrew "Check for Issues" audit UI, not the console. A single brew-heavy
+	// page load can legitimately produce hundreds of benign dangling-reference records
+	// (e.g. `_copy` parents that only resolve against unloaded site data), so per-record
+	// console logging is an opt-in developer escape hatch rather than the default.
+	static _isConsoleVerbose = false;
 
 	static report (record) {
 		const normalized = this._getNormalizedRecord(record);
@@ -102,8 +108,10 @@ globalThis.BrewDiagnostics = class {
 			this._records.push(normalized);
 			this._recordsByKey.set(key, normalized);
 
-			// eslint-disable-next-line no-console
-			console.warn(`[5et:brew-diagnostics] ${normalized.detail || normalized.code}`, normalized);
+			if (this._isConsoleVerbose) {
+				// eslint-disable-next-line no-console
+				console.warn(`[5et:brew-diagnostics] ${normalized.detail || normalized.code}`, normalized);
+			}
 			this._subscribers.forEach(fn => fn({type: "report", record: this._copyRecord(normalized)}));
 		}
 
@@ -129,6 +137,10 @@ globalThis.BrewDiagnostics = class {
 
 	static setStrictModeForTests (isStrict) {
 		this._isStrictModeForTests = !!isStrict;
+	}
+
+	static setConsoleVerbose (isVerbose) {
+		this._isConsoleVerbose = !!isVerbose;
 	}
 
 	static getCopyableReport (records = null) {
