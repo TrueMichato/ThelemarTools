@@ -488,7 +488,7 @@ export class BuilderBase extends ProxyBase {
 		const entEditable = await BrewUtil2.pGetEditableBrewEntity(this._prop, uniqueId);
 		if (entEditable._copy) {
 			JqueryUtil.doToast({type: "warning", content: ee`<span>You are attempting to edit a <code>_copy</code>! Saving your changes will overwrite the <code>_copy</code> with a resolved version of the entity.</span>`});
-			await DataUtil[this._prop]?.pMergeCopy([], entEditable, {isSkipMetaMergeCache: true});
+			await DataUtil[this._prop]?.pMergeCopy([], entEditable, {isSkipMetaMergeCache: true, isIgnoreMissing: true});
 		}
 		this.setStateFromLoaded({
 			s: MiscUtil.copy(entEditable),

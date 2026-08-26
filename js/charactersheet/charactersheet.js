@@ -986,7 +986,7 @@ class CharacterSheetPage {
 			for (const sc of this._subclasses) {
 				if (!sc._copy) continue;
 				tasks.push(
-					DataUtil.subclass.pMergeCopy(this._subclasses, sc, {})
+					DataUtil.subclass.pMergeCopy(this._subclasses, sc, {isIgnoreMissing: true})
 						.catch(e => {
 							// eslint-disable-next-line no-console
 							console.warn(`[CharSheet] Failed to resolve _copy on subclass "${sc.name || sc._copy?.name}" (${sc.source}):`, e?.message || e);
@@ -998,7 +998,7 @@ class CharacterSheetPage {
 			for (const cls of this._classes) {
 				if (!cls._copy) continue;
 				tasks.push(
-					DataUtil.class.pMergeCopy(this._classes, cls, {})
+					DataUtil.class.pMergeCopy(this._classes, cls, {isIgnoreMissing: true})
 						.catch(e => {
 							// eslint-disable-next-line no-console
 							console.warn(`[CharSheet] Failed to resolve _copy on class "${cls.name || cls._copy?.name}" (${cls.source}):`, e?.message || e);

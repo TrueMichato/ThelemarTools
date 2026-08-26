@@ -2159,7 +2159,7 @@ class CharacterSheetClassUtils {
 			&& typeof DataUtil !== "undefined"
 			&& DataUtil.subclass?.pMergeCopy) {
 			try {
-				DataUtil.subclass.pMergeCopy(globalThis._charSheetSubclassMergePool, found, {})
+				DataUtil.subclass.pMergeCopy(globalThis._charSheetSubclassMergePool, found, {isIgnoreMissing: true})
 					.then(() => {
 						// eslint-disable-next-line no-console
 						console.warn(`[CharSheet][Phase7] Lazy-merged subclass "${found.name || found._copy?.name}|${found.source}" on demand (eager merge missed it).`);

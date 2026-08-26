@@ -5292,7 +5292,11 @@ globalThis.DataUtil = class {
 					);
 
 					const flatDependencyData = dependencyData.map(dd => dd[dataProp]).flat().filter(Boolean);
-					await Promise.all(data[dataProp].map(entry => DataUtil._pDoMetaMerge_handleCopyProp(dataProp, flatDependencyData, entry, {...options, isErrorOnMissing: !isHasInternalCopies})));
+					// When a prop is ALSO an internal copy, an entity may copy a same-file parent that
+					// isn't in the (dependency-only) `flatDependencyData`. That miss is expected here and
+					// resolved by the `internalCopies` pass below, so tolerate it silently -- otherwise
+					// every internal `_copy` produces a bogus "missing parent" diagnostic on this pass.
+					await Promise.all(data[dataProp].map(entry => DataUtil._pDoMetaMerge_handleCopyProp(dataProp, flatDependencyData, entry, {...options, isErrorOnMissing: !isHasInternalCopies, isIgnoreMissing: isHasInternalCopies || options.isIgnoreMissing})));
 				}));
 				delete data._meta.dependencies;
 			}
@@ -5698,7 +5702,10 @@ globalThis.DataUtil = class {
 				if (!options.isIgnoreMissing || options.isErrorOnMissing) {
 					BrewDiagnostics.report({
 						code: BrewDiagnostics.CODES.COPY_MISSING_PARENT,
-						severity: "error",
+						// A miss on the soft path (no `isErrorOnMissing`) is a tolerated degradation --
+						// loading continues without the copy -- so surface it as a warning. Only the
+						// hard path, which throws below, is a true error.
+						severity: options.isErrorOnMissing ? "error" : "warning",
 						target: {
 							kind: page,
 							uid: `${entry._copy.name}|${entry._copy.source}`,

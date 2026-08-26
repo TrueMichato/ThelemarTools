@@ -53,6 +53,7 @@ describe("DataLoader dereference diagnostics", () => {
 		expect(BrewDiagnostics.getRecords()).toEqual([
 			expect.objectContaining({
 				code: BrewDiagnostics.CODES.COPY_MISSING_PARENT,
+				severity: "warning",
 				origin: "brew",
 				documentId: "doc-copy",
 				owner: {prop: "feat", name: "Orphan Feat", source: "HB"},
@@ -158,6 +159,7 @@ describe("DataLoader dereference diagnostics", () => {
 		await expect(DataUtil.feat.pMergeCopy([orphan], orphan, {isErrorOnMissing: true, isIgnoreMissing: true}))
 			.rejects.toThrow(`Could not find "feats.html" entity "Missing Parent" ("HB-PARENT")`);
 		expect(BrewDiagnostics.getRecords()).toHaveLength(1);
+		expect(BrewDiagnostics.getRecords()[0].severity).toBe("error");
 	});
 
 	it("dedupes repeated failures for the same owner, field, and target", async () => {
@@ -181,5 +183,33 @@ describe("DataLoader dereference diagnostics", () => {
 
 		expect(BrewDiagnostics.getRecords()).toEqual([]);
 		expect(warnSpy).not.toHaveBeenCalled();
+	});
+
+	// Regression: a prop declared in BOTH `_meta.dependencies` and `_meta.internalCopies` runs the
+	// dependency pass (which only sees dependency-source entries) before the internal pass. An entity
+	// copying a same-file parent legitimately misses the dependency pass and resolves on the internal
+	// pass -- it must not surface a bogus "missing parent" diagnostic. This is the mechanism behind the
+	// brew-heavy site reporting hundreds of `copy.missingParent` records for copies that resolve fine.
+	it("does not falsely report an internal _copy as missing during the dependency pass", async () => {
+		const parent = {name: "Base Internal Feat", source: "HB", entries: ["base entry"]};
+		const child = {name: "Child Internal Feat", source: "HB", _copy: {name: "Base Internal Feat", source: "HB"}};
+		const data = {
+			_meta: {
+				dependencies: {feat: ["HB-DEP"]},
+				internalCopies: ["feat"],
+			},
+			feat: [parent, child],
+		};
+
+		const loadSpy = jest.spyOn(DataUtil, "pLoadByMeta").mockResolvedValue({feat: []});
+
+		const out = await DataUtil.pDoMetaMerge(CryptUtil.uid(), data, {isSkipMetaMergeCache: true});
+
+		loadSpy.mockRestore();
+
+		expect(BrewDiagnostics.getRecords()).toEqual([]);
+		const merged = out.feat.find(it => it.name === "Child Internal Feat");
+		expect(merged._copy).toBeUndefined();
+		expect(merged.entries).toEqual(["base entry"]);
 	});
 });
