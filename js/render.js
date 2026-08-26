@@ -12667,8 +12667,7 @@ Renderer.item = class {
 		MiscUtil.set(this._propertyMap, sourceLookupFallback, abvLookup, cpy);
 	}
 
-	static _ERRORS_LOGGED_MISSING_PROPERTY = {};
-	static getProperty (uid, {isIgnoreMissing = false} = {}) {
+	static getProperty (uid, {isIgnoreMissing = false, diagnosticContext = null} = {}) {
 		const {abbreviation, source} = DataUtil.itemProperty.unpackUid(uid || "", {isLower: true});
 
 		const out = this._propertyMap?.[source]?.[abbreviation]
@@ -12677,13 +12676,13 @@ Renderer.item = class {
 			|| this._propertyMap?.[Parser.SRC_PHB.toLowerCase()]?.[abbreviation];
 
 		if (!isIgnoreMissing && !out) {
-			if (!this._ERRORS_LOGGED_MISSING_PROPERTY[uid]) {
-				this._ERRORS_LOGGED_MISSING_PROPERTY[uid] = true;
-				// External homebrew may reference item properties it never registers. Degrade gracefully
-				//   with a once-only console warning (rather than an uncaught throw) and skip the property.
-				// eslint-disable-next-line no-console
-				console.warn(`Item property "${uid}" not found!`);
-			}
+			BrewDiagnostics.report({
+				code: BrewDiagnostics.CODES.ITEM_MISSING_PROPERTY,
+				severity: "warning",
+				target: {kind: "itemProperty", uid},
+				...diagnosticContext,
+				detail: `Item property "${uid}" not found!`,
+			});
 		}
 		return out;
 	}
@@ -12717,8 +12716,7 @@ Renderer.item = class {
 		MiscUtil.set(this._typeMap, sourceLookupFallback, abvLookup, cpy);
 	}
 
-	static _ERRORS_LOGGED_MISSING_TYPE = {};
-	static getType (uid, {isIgnoreMissing = false} = {}) {
+	static getType (uid, {isIgnoreMissing = false, diagnosticContext = null} = {}) {
 		const {abbreviation, source} = DataUtil.itemType.unpackUid(uid || "", {isLower: true});
 
 		const out = this._typeMap?.[source]?.[abbreviation]
@@ -12726,13 +12724,13 @@ Renderer.item = class {
 			// Fall back on sourceless tag
 			|| this._typeMap?.[Parser.SRC_PHB.toLowerCase()]?.[abbreviation];
 		if (!isIgnoreMissing && !out) {
-			if (!this._ERRORS_LOGGED_MISSING_TYPE[uid]) {
-				this._ERRORS_LOGGED_MISSING_TYPE[uid] = true;
-				// External homebrew may reference item types it never registers. Degrade gracefully
-				//   with a once-only console warning (rather than an uncaught throw) and skip the type.
-				// eslint-disable-next-line no-console
-				console.warn(`Item type "${uid}" not found!`);
-			}
+			BrewDiagnostics.report({
+				code: BrewDiagnostics.CODES.ITEM_MISSING_TYPE,
+				severity: "warning",
+				target: {kind: "itemType", uid},
+				...diagnosticContext,
+				detail: `Item type "${uid}" not found!`,
+			});
 		}
 		return out;
 	}
@@ -12827,7 +12825,7 @@ Renderer.item = class {
 		const {genericVariants, linkedLootTables} = await Renderer.item._pGetCacheSiteGenericVariants();
 		const specificVariants = Renderer.item._createSpecificVariants(baseItems, genericVariants, {linkedLootTables});
 		const allItems = [...itemList, ...baseItems, ...genericVariants, ...specificVariants];
-		Renderer.item._enhanceItems(allItems);
+		Renderer.item._enhanceItems(allItems, {origin: "site"});
 
 		return {
 			item: allItems,
@@ -13192,8 +13190,8 @@ Renderer.item = class {
 			});
 	}
 
-	static _enhanceItems (allItems) {
-		allItems.forEach((item) => Renderer.item.enhanceItem(item));
+	static _enhanceItems (allItems, {origin = null} = {}) {
+		allItems.forEach((item) => Renderer.item.enhanceItem(item, {diagnosticContext: {origin}}));
 		return allItems;
 	}
 
@@ -13203,6 +13201,7 @@ Renderer.item = class {
 	 * @param [opts.additionalBaseItems]
 	 * @param [opts.baseItems]
 	 * @param [opts.isSpecificVariantsOnly]
+	 * @param [opts.origin]
 	 */
 	static async pGetGenericAndSpecificVariants (genericVariants, opts) {
 		opts = opts || {};
@@ -13219,11 +13218,11 @@ Renderer.item = class {
 		await Renderer.item._pAddPrereleaseBrewPropertiesAndTypes();
 		genericVariants.forEach(Renderer.item._genericVariants_addInheritedPropertiesToSelf);
 		const specificVariants = Renderer.item._createSpecificVariants(baseItems, genericVariants);
-		const outSpecificVariants = Renderer.item._enhanceItems(specificVariants);
+		const outSpecificVariants = Renderer.item._enhanceItems(specificVariants, {origin: opts.origin});
 
 		if (opts.isSpecificVariantsOnly) return outSpecificVariants;
 
-		const outGenericVariants = Renderer.item._enhanceItems(genericVariants);
+		const outGenericVariants = Renderer.item._enhanceItems(genericVariants, {origin: opts.origin});
 		return [...outGenericVariants, ...outSpecificVariants];
 	}
 
@@ -13286,27 +13285,43 @@ Renderer.item = class {
 		return Renderer.item.getType(t)?.name?.toLowerCase() || t;
 	}
 
-	static enhanceItem (item, {styleHint = null} = {}) {
+	static enhanceItem (item, {styleHint = null, diagnosticContext = null} = {}) {
 		if (item._isEnhanced) return;
 		item._isEnhanced = true;
 
 		styleHint ||= VetoolsConfig.get("styleSwitcher", "style");
 
 		const itemTypeAbv = item.type ? DataUtil.itemType.unpackUid(item.type).abbreviation : null;
+		const diagnosticContextBase = {
+			...(item.__diagnostic || {}),
+			...(diagnosticContext || {}),
+			origin: diagnosticContext?.origin || item.__diagnostic?.origin || "unknown",
+			owner: {
+				prop: item.__diagnostic?.prop || item.__prop || "item",
+				name: item.name || null,
+				source: SourceUtil.getEntitySource(item) || null,
+			},
+		};
 
 		if (item.noDisplay) return;
 		if (itemTypeAbv === Parser.ITM_TYP_ABV__GENERIC_VARIANT) item._category = "Generic Variant";
 		if (item._category == null) item._category = "Other";
 		if (item.entries == null) item.entries = [];
-		if (item.type && (Renderer.item.getType(item.type)?.entries || Renderer.item.getType(item.type)?.entriesTemplate)) {
+		const entType = item.type
+			? Renderer.item.getType(item.type, {diagnosticContext: {...diagnosticContextBase, fieldPath: "type"}})
+			: null;
+		if (entType?.entries || entType?.entriesTemplate) {
 			Renderer.item._initFullEntries(item);
 
-			const propertyEntries = Renderer.item._enhanceItem_getItemPropertyTypeEntries({item, ent: Renderer.item.getType(item.type)});
+			const propertyEntries = Renderer.item._enhanceItem_getItemPropertyTypeEntries({item, ent: entType});
 			propertyEntries.forEach(e => item._fullEntries.push({type: "wrapper", wrapped: e, data: {[VeCt.ENTDATA_ITEM_MERGED_ENTRY_TAG]: "type"}}));
 		}
 		if (item.property) {
-			item.property.forEach(p => {
-				const entProperty = Renderer.item.getProperty(p?.uid || p);
+			item.property.forEach((p, ix) => {
+				const entProperty = Renderer.item.getProperty(
+					p?.uid || p,
+					{diagnosticContext: {...diagnosticContextBase, fieldPath: `property[${ix}]${p?.uid ? ".uid" : ""}`}},
+				);
 				if (!entProperty?.entries && !entProperty?.entriesTemplate) return;
 
 				Renderer.item._initFullEntries(item);
@@ -13526,6 +13541,7 @@ Renderer.item = class {
 		if (brewUtil == null && brew == null) return [];
 
 		brew = brew || await brewUtil.pGetBrewProcessed();
+		const origin = brewUtil?.PAGE_MANAGE === UrlUtil.PG_MANAGE_PRERELEASE ? "prerelease" : "brew";
 
 		(brew.itemProperty || []).forEach(p => Renderer.item._addProperty(p));
 		(brew.itemType || []).forEach(t => Renderer.item._addType(t));
@@ -13541,7 +13557,7 @@ Renderer.item = class {
 			items = [...items, ...itemGroups];
 		}
 
-		Renderer.item._enhanceItems(items);
+		Renderer.item._enhanceItems(items, {origin});
 
 		let isReEnhanceVariants = false;
 
@@ -13553,7 +13569,7 @@ Renderer.item = class {
 
 			const variants = await Renderer.item.pGetGenericAndSpecificVariants(
 				genericVariants,
-				{baseItems: brew.baseitem || [], isSpecificVariantsOnly: true},
+				{baseItems: brew.baseitem || [], isSpecificVariantsOnly: true, origin},
 			);
 			items = [...items, ...variants];
 		}
@@ -13564,7 +13580,7 @@ Renderer.item = class {
 
 			const variants = await Renderer.item.pGetGenericAndSpecificVariants(
 				brew.magicvariant,
-				{additionalBaseItems: brew.baseitem || []},
+				{additionalBaseItems: brew.baseitem || [], origin},
 			);
 			items = [...items, ...variants];
 		}
@@ -13575,7 +13591,7 @@ Renderer.item = class {
 			const {genericVariants} = await Renderer.item._pGetCacheSiteGenericVariants();
 			genericVariants.forEach(item => {
 				Renderer.item.unenhanceItem(item);
-				Renderer.item.enhanceItem(item);
+				Renderer.item.enhanceItem(item, {diagnosticContext: {origin}});
 			});
 		}
 

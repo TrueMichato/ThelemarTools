@@ -270,13 +270,26 @@ export class BrewUtil2Base {
 	}
 
 	_pGetBrewProcessed_mutDiagnostics ({head, body}) {
-		if (!head.filename) return;
+		const origin = this.PAGE_MANAGE === UrlUtil.PG_MANAGE_PRERELEASE ? "prerelease" : "brew";
+		const sourceMetas = body._meta?.sources || [];
 
-		for (const arr of Object.values(body)) {
+		for (const [prop, arr] of Object.entries(body)) {
 			if (!(arr instanceof Array)) continue;
 			for (const ent of arr) {
-				if (!("__prop" in ent)) break;
-				ent.__diagnostic = {filename: head.filename};
+				if (!ent || typeof ent !== "object") continue;
+
+				const sourceJson = SourceUtil.getEntitySource(ent);
+				const source = sourceMetas.find(it => it.json === sourceJson);
+				ent.__diagnostic = {
+					origin,
+					documentId: head.docIdLocal || null,
+					filename: head.filename || null,
+					url: head.url || null,
+					prop,
+					source: source
+						? {json: source.json, full: source.full || null}
+						: {json: sourceJson || null, full: null},
+				};
 			}
 		}
 	}

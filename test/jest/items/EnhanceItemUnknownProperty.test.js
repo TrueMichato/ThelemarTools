@@ -10,7 +10,7 @@ describe("Renderer.item.getProperty — unknown property handling", () => {
 	let toastSpy;
 
 	beforeEach(() => {
-		Renderer.item._ERRORS_LOGGED_MISSING_PROPERTY = {};
+		BrewDiagnostics.clear();
 		warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
 		toastSpy = jest.spyOn(JqueryUtil, "doToast").mockImplementation(() => {});
 	});
@@ -25,7 +25,13 @@ describe("Renderer.item.getProperty — unknown property handling", () => {
 		expect(Renderer.item.getProperty("ADV_DIS")).toBeUndefined();
 
 		expect(warnSpy).toHaveBeenCalledTimes(1);
-		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ADV_DIS"));
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining("[5et:brew-diagnostics]"),
+			expect.objectContaining({
+				code: "item.missingProperty",
+				target: expect.objectContaining({uid: "ADV_DIS"}),
+			}),
+		);
 		expect(toastSpy).not.toHaveBeenCalled();
 	});
 
@@ -57,7 +63,26 @@ describe("Renderer.item.getProperty — unknown property handling", () => {
 		const merged = JSON.stringify(item._fullEntries || item.entries);
 		expect(merged).toContain("SENTINEL base entry.");
 		expect(merged).not.toContain("ADV_TRIP");
-		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ADV_TRIP"));
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining("ADV_TRIP"),
+			expect.objectContaining({
+				origin: "unknown",
+				owner: {prop: "item", name: "Homebrew Blade", source: "HB"},
+				fieldPath: "property[0].uid",
+			}),
+		);
+	});
+
+	it("keeps separate diagnostics for separate entities using the same missing property", () => {
+		[
+			{name: "Blade One", source: "HB", property: ["ADV_DBL"]},
+			{name: "Blade Two", source: "HB", property: ["ADV_DBL"]},
+		].forEach(item => Renderer.item.enhanceItem(item, {styleHint: "classic", diagnosticContext: {origin: "brew", filename: "items.json"}}));
+
+		expect(BrewDiagnostics.getRecords()).toEqual([
+			expect.objectContaining({owner: expect.objectContaining({name: "Blade One"})}),
+			expect.objectContaining({owner: expect.objectContaining({name: "Blade Two"})}),
+		]);
 	});
 });
 
@@ -70,7 +95,7 @@ describe("Renderer.item.getType — unknown type handling", () => {
 	let toastSpy;
 
 	beforeEach(() => {
-		Renderer.item._ERRORS_LOGGED_MISSING_TYPE = {};
+		BrewDiagnostics.clear();
 		warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
 		toastSpy = jest.spyOn(JqueryUtil, "doToast").mockImplementation(() => {});
 	});
@@ -85,7 +110,13 @@ describe("Renderer.item.getType — unknown type handling", () => {
 		expect(Renderer.item.getType("armor")).toBeUndefined();
 
 		expect(warnSpy).toHaveBeenCalledTimes(1);
-		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("armor"));
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining("[5et:brew-diagnostics]"),
+			expect.objectContaining({
+				code: "item.missingType",
+				target: expect.objectContaining({uid: "armor"}),
+			}),
+		);
 		expect(toastSpy).not.toHaveBeenCalled();
 	});
 
@@ -106,7 +137,14 @@ describe("Renderer.item.getType — unknown type handling", () => {
 		expect(item._isEnhanced).toBe(true);
 		const merged = JSON.stringify(item._fullEntries || item.entries);
 		expect(merged).toContain("SENTINEL armor entry.");
-		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("armor"));
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining("armor"),
+			expect.objectContaining({
+				origin: "unknown",
+				owner: {prop: "item", name: "Homebrew Armor", source: "HB"},
+				fieldPath: "type",
+			}),
+		);
 		expect(toastSpy).not.toHaveBeenCalled();
 	});
 });

@@ -80,6 +80,136 @@ globalThis.VeCt = class {
 	static Z_INDEX_BENEATH_HOVER = 199;
 };
 
+globalThis.BrewDiagnostics = class {
+	static CODES = Object.freeze({
+		ITEM_MISSING_TYPE: "item.missingType",
+		ITEM_MISSING_PROPERTY: "item.missingProperty",
+	});
+
+	static _records = [];
+	static _recordsByKey = new Map();
+	static _subscribers = new Set();
+	static _isStrictModeForTests = false;
+
+	static report (record) {
+		const normalized = this._getNormalizedRecord(record);
+		const key = this._getDedupeKey(normalized);
+		const existing = this._recordsByKey.get(key);
+
+		if (!existing) {
+			this._records.push(normalized);
+			this._recordsByKey.set(key, normalized);
+
+			// eslint-disable-next-line no-console
+			console.warn(`[5et:brew-diagnostics] ${normalized.detail || normalized.code}`, normalized);
+			this._subscribers.forEach(fn => fn({type: "report", record: this._copyRecord(normalized)}));
+		}
+
+		if (this._isStrictModeForTests) throw new Error(`[5et:brew-diagnostics] ${normalized.detail || normalized.code}`);
+		return this._copyRecord(existing || normalized);
+	}
+
+	static getRecords () {
+		return this._records.map(record => this._copyRecord(record));
+	}
+
+	static clear () {
+		this._records = [];
+		this._recordsByKey.clear();
+		this._subscribers.forEach(fn => fn({type: "clear"}));
+	}
+
+	static subscribe (fn) {
+		if (typeof fn !== "function") throw new TypeError(`Expected a diagnostics subscriber function.`);
+		this._subscribers.add(fn);
+		return () => this._subscribers.delete(fn);
+	}
+
+	static setStrictModeForTests (isStrict) {
+		this._isStrictModeForTests = !!isStrict;
+	}
+
+	static getCopyableReport (records = null) {
+		records = records || this.getRecords();
+		const lines = [`[5et:brew-diagnostics] ${records.length} issue${records.length === 1 ? "" : "s"}`];
+
+		records.forEach((record, ix) => {
+			const owner = [
+				record.owner.prop,
+				record.owner.name ? `"${record.owner.name}"` : null,
+				record.owner.source ? `(${record.owner.source})` : null,
+			].filter(Boolean).join(" ");
+			const document = record.filename || record.url || record.documentId;
+			const target = [
+				record.target.kind,
+				record.target.uid || record.target.hash,
+				record.target.source ? `(${record.target.source})` : null,
+			].filter(Boolean).join(" ");
+
+			lines.push(`${ix + 1}. [${record.severity.toUpperCase()}] ${record.code}: ${record.detail || "(No detail)"}`);
+			if (document) lines.push(`   Document: ${document}`);
+			if (owner) lines.push(`   Entity: ${owner}`);
+			if (record.fieldPath) lines.push(`   Field: ${record.fieldPath}`);
+			if (target) lines.push(`   Target: ${target}`);
+		});
+
+		return lines.join("\n");
+	}
+
+	static _getNormalizedRecord (record) {
+		record = record || {};
+		const target = record.target || {};
+		const owner = record.owner || {};
+
+		return Object.freeze({
+			code: record.code || "unknown",
+			severity: record.severity || "warning",
+			target: Object.freeze({
+				kind: target.kind || null,
+				uid: target.uid || null,
+				page: target.page || null,
+				source: target.source || null,
+				hash: target.hash || null,
+			}),
+			origin: record.origin || "unknown",
+			documentId: record.documentId || null,
+			filename: record.filename || null,
+			url: record.url || null,
+			owner: Object.freeze({
+				prop: owner.prop || null,
+				name: owner.name || null,
+				source: owner.source || null,
+			}),
+			fieldPath: record.fieldPath || null,
+			detail: record.detail || null,
+		});
+	}
+
+	static _getDedupeKey (record) {
+		return JSON.stringify([
+			record.code,
+			record.documentId || record.filename || record.url || record.origin,
+			record.owner.prop,
+			record.owner.name,
+			record.owner.source,
+			record.fieldPath,
+			record.target.kind,
+			record.target.uid,
+			record.target.page,
+			record.target.source,
+			record.target.hash,
+		]);
+	}
+
+	static _copyRecord (record) {
+		return {
+			...record,
+			target: {...record.target},
+			owner: {...record.owner},
+		};
+	}
+};
+
 // STRING ==============================================================================================================
 String.prototype.uppercaseFirst = String.prototype.uppercaseFirst || function () {
 	const str = this.toString();
