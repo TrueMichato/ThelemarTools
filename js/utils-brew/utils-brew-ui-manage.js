@@ -18,6 +18,8 @@ export class ManageBrewUi {
 			this.diagnosticsToolbarUnsubscribe = null;
 			this.eleDiagnosticsButton = null;
 			this.eleDiagnosticsBadge = null;
+			this.diagnosticsScanState = "idle"; // "idle" | "running" | "done"
+			this.diagnosticsScanPromise = null;
 		}
 	};
 
@@ -460,6 +462,42 @@ export class ManageBrewUi {
 			if (event.type === "clear") rdState.diagnosticsSeenKeys.clear();
 			this._pRender_updateDiagnosticsButton(rdState);
 		});
+
+		// Proactively validate the loaded homebrew so the badge + finder reflect real content issues
+		//   (e.g. an item referencing an undefined `type`/`property`) that otherwise only surface when
+		//   an item is actually enhanced on some other page. Manage Homebrew never renders items, so
+		//   without this the finder can only ever show load-time `_copy`/dereference issues.
+		this._pRender_pScanAndRefreshDiagnostics(rdState);
+	}
+
+	/**
+	 * Actively validate the loaded homebrew so structural content issues -- e.g. an item that
+	 * references an item `type`/`property` no entity defines -- surface in the "Homebrew Issues"
+	 * finder, instead of only appearing on another page's console when that item happens to render.
+	 * Delegates to the pure, unit-tested `ManageBrewDiagnosticsUtil.pRunValidationScan`, injecting
+	 * the browser-global `Renderer`.
+	 */
+	async _pRender_pScanAndRefreshDiagnostics (rdState, {isForce = false} = {}) {
+		if (rdState.diagnosticsScanState === "running") return rdState.diagnosticsScanPromise;
+		if (rdState.diagnosticsScanState === "done" && !isForce) return rdState.diagnosticsScanPromise;
+
+		rdState.diagnosticsScanState = "running";
+		rdState.diagnosticsScanPromise = (async () => {
+			try {
+				await ManageBrewDiagnosticsUtil.pRunValidationScan({
+					brewUtil: this._brewUtil,
+					renderer: typeof Renderer !== "undefined" ? Renderer : null,
+				});
+			} catch (e) {
+				// Validation is best-effort; a scan failure must never break homebrew management.
+				// eslint-disable-next-line no-console
+				console.error(`[manage-brew] Homebrew issue scan failed`, e);
+			} finally {
+				rdState.diagnosticsScanState = "done";
+				this._pRender_updateDiagnosticsButton(rdState);
+			}
+		})();
+		return rdState.diagnosticsScanPromise;
 	}
 
 	_pRender_updateDiagnosticsButton (rdState) {
@@ -477,7 +515,7 @@ export class ManageBrewUi {
 		rdState.eleDiagnosticsBadge.hidden = !count;
 	}
 
-	_pRender_pOpenDiagnosticsModal (rdState) {
+	async _pRender_pOpenDiagnosticsModal (rdState) {
 		const filterState = {search: "", severity: "all"};
 		const collapsedDocumentKeys = new Set();
 		let recordsVisible = [];
@@ -506,6 +544,16 @@ export class ManageBrewUi {
 				JqueryUtil.doToast("Copied issue report");
 			},
 		});
+		const btnRescan = e_({
+			tag: "button",
+			clazz: "ve-btn ve-btn-default ve-btn-xs",
+			title: "Re-scan the loaded homebrew for issues",
+			children: [
+				e_({tag: "span", clazz: "glyphicon glyphicon-refresh", attrs: {"aria-hidden": "true"}}),
+				e_({tag: "span", clazz: "ve-ml-1", text: "Re-scan"}),
+			],
+			click: () => pRunScan({isForce: true}),
+		});
 		const btnClear = e_({
 			tag: "button",
 			clazz: "ve-btn ve-btn-danger ve-btn-xs",
@@ -521,12 +569,18 @@ export class ManageBrewUi {
 				BrewDiagnostics.clear();
 			},
 		});
+		const eleScanStatus = e_({
+			tag: "div",
+			clazz: "manbrew-diag__scan-status",
+			attrs: {role: "status", "aria-live": "polite"},
+		});
+		eleScanStatus.hidden = true;
 		const eleSummaryBar = e_({
 			tag: "div",
 			clazz: "manbrew-diag__summary",
 			children: [
 				eleSummary,
-				e_({tag: "div", clazz: "ve-btn-group", children: [btnCopy, btnClear]}),
+				e_({tag: "div", clazz: "ve-btn-group", children: [btnRescan, btnCopy, btnClear]}),
 			],
 		});
 
@@ -574,7 +628,7 @@ export class ManageBrewUi {
 		const eleControls = e_({
 			tag: "div",
 			clazz: "manbrew-diag__controls",
-			children: [eleSummaryBar, eleFilters],
+			children: [eleSummaryBar, eleScanStatus, eleFilters],
 		});
 		const eleRoot = e_({
 			tag: "div",
@@ -609,6 +663,26 @@ export class ManageBrewUi {
 			render();
 		});
 
+		const pRunScan = async ({isForce = false} = {}) => {
+			if (rdState.diagnosticsScanState === "done" && !isForce) return;
+
+			eleScanStatus.hidden = false;
+			eleScanStatus.textContent = "Scanning the loaded homebrew for issues\u2026";
+			btnRescan.disabled = true;
+			try {
+				await this._pRender_pScanAndRefreshDiagnostics(rdState, {isForce});
+			} finally {
+				eleScanStatus.hidden = true;
+				btnRescan.disabled = false;
+				ManageBrewDiagnosticsUtil.markSeen({
+					records: BrewDiagnostics.getRecords(),
+					seenKeys: rdState.diagnosticsSeenKeys,
+				});
+				this._pRender_updateDiagnosticsButton(rdState);
+				render();
+			}
+		};
+
 		unsubscribe = ManageBrewDiagnosticsUtil.subscribe(({event}) => {
 			if (event.type === "clear") {
 				rdState.diagnosticsSeenKeys.clear();
@@ -621,6 +695,7 @@ export class ManageBrewUi {
 
 		render();
 		iptSearch.focus();
+		await pRunScan();
 	}
 
 	_pRender_getDiagnosticsEmptyState ({isFilteredEmpty}) {
@@ -642,7 +717,7 @@ export class ManageBrewUi {
 					? e_({
 						tag: "div",
 						clazz: "manbrew-diag__empty-detail",
-						text: "Issues appear here as content loads and renders; reload clears them.",
+						text: "The loaded homebrew was scanned for structural issues (such as an item referencing a type or property that no content defines) and none were found.",
 					})
 					: null,
 			],

@@ -137,6 +137,17 @@
 			font-weight: 600;
 		}
 
+		&__scan-status {
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			padding: 5px 8px;
+			border-bottom: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg--alt;
+			color: vars.$rgb-font--muted;
+			font-style: italic;
+		}
+
 		&__search {
 			min-width: 0;
 		}
@@ -343,6 +354,12 @@
 			&__group,
 			&__row {
 				border-color: vars-night.$rgb-border-grey--night;
+			}
+
+			&__scan-status {
+				border-color: vars-night.$rgb-border-grey--night;
+				background: vars-night.$rgb-bg--alt-night;
+				color: vars-night.$rgb-font--muted-night;
 			}
 
 			&__group-header {

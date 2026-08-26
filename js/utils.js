@@ -92,11 +92,11 @@ globalThis.BrewDiagnostics = class {
 	static _recordsByKey = new Map();
 	static _subscribers = new Set();
 	static _isStrictModeForTests = false;
-	// Console verbosity flag for the developer/test opt-in that logs every record. The default
-	// per-record console policy lives in `_shouldLogToConsole`: genuinely-actionable, low-volume
-	// authoring issues (missing item type/property) surface on the console, while the high-volume
-	// benign dangling-reference class stays quiet. Every record is always collected in-memory and
-	// surfaced through the Manage Homebrew "Check for Issues" audit UI regardless of this flag.
+	// Console verbosity flag for the developer/test opt-in that logs every record. By default the
+	// console stays completely silent (see `_shouldLogToConsole`): it is not a diagnostics UI, and a
+	// single brew-heavy page load can legitimately emit dozens-to-hundreds of records. Every record
+	// is always collected in-memory and surfaced through the Manage Homebrew "Check for Issues" audit
+	// UI -- which actively re-scans loaded homebrew -- regardless of this flag.
 	static _isConsoleVerbose = false;
 
 	static report (record) {
@@ -147,7 +147,8 @@ globalThis.BrewDiagnostics = class {
 	// logs every record to the console. By default the console stays completely silent -- it is not
 	// a diagnostics UI, and a single brew-heavy page load (a homebrew character sheet, a full brew
 	// import) can legitimately emit dozens-to-hundreds of records. All records are always collected
-	// in-memory and surfaced through the structured "Homebrew Issues" audit surface instead.
+	// in-memory and surfaced through the structured "Homebrew Issues" audit surface instead, which
+	// actively re-scans the loaded homebrew so it reflects the same issues real pages hit.
 	static _shouldLogToConsole (record) {
 		return this._isConsoleVerbose;
 	}

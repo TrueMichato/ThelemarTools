@@ -151,4 +151,34 @@ describe("Renderer.item.getType — unknown type handling", () => {
 		);
 		expect(toastSpy).not.toHaveBeenCalled();
 	});
+
+	// Regression: `enhanceItem` internally builds the item's type display text via
+	// `getRenderableTypeEntriesMeta` -> `getItemTypeName`, which used to re-report the missing type
+	// WITHOUT owner context -- producing a second, context-less duplicate record that surfaced as a
+	// noisy "(Unknown document)" row in the Homebrew Issues finder. The display-name lookup must now
+	// stay silent, leaving exactly one fully-attributed record.
+	it("emits exactly one attributed missing-type record for an enhanced item (no context-less duplicate)", () => {
+		const item = {name: "Ghost Blade", source: "HB", type: "PHANTOMTYPE|hb", entries: []};
+
+		Renderer.item.enhanceItem(item, {styleHint: "classic", diagnosticContext: {origin: "brew", filename: "ghosts.json"}});
+
+		const typeRecords = BrewDiagnostics.getRecords().filter(r => r.code === "item.missingType");
+		expect(typeRecords).toHaveLength(1);
+		expect(typeRecords[0].owner).toEqual({prop: "item", name: "Ghost Blade", source: "HB"});
+		// No context-less (null-owner) duplicate.
+		expect(typeRecords.some(r => !r.owner?.name)).toBe(false);
+	});
+
+	it("emits exactly one attributed missing-property record for an enhanced item (no context-less duplicate from display text)", () => {
+		const item = {name: "Ghost Wand", source: "HB", property: ["PHANTOMPROP"], entries: []};
+
+		Renderer.item.enhanceItem(item, {styleHint: "classic", diagnosticContext: {origin: "brew", filename: "ghosts.json"}});
+		// Render the property display text (the path that used to double-report without context).
+		Renderer.item._getPropertyText({item, property: "PHANTOMPROP", valsUsed: {}, renderer: Renderer.get()});
+
+		const propRecords = BrewDiagnostics.getRecords().filter(r => r.code === "item.missingProperty");
+		expect(propRecords).toHaveLength(1);
+		expect(propRecords[0].owner).toEqual({prop: "item", name: "Ghost Wand", source: "HB"});
+		expect(propRecords.some(r => !r.owner?.name)).toBe(false);
+	});
 });

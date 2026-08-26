@@ -12152,7 +12152,10 @@ Renderer.item = class {
 	}
 
 	static _getPropertyText ({item, property, valsUsed, renderer}) {
-		const pFull = Renderer.item.getProperty(property?.uid || property);
+		// Display-text helper only; the authoritative missing-property diagnostic (with full
+		//   owner/field provenance) is emitted by `enhanceItem`. Look up silently here to avoid a
+		//   duplicate, context-less record on a miss.
+		const pFull = Renderer.item.getProperty(property?.uid || property, {isIgnoreMissing: true});
 		if (!pFull) return "";
 
 		const ptNote = property.note ? ` (${property.note})` : "";
@@ -13282,7 +13285,10 @@ Renderer.item = class {
 	}
 
 	static getItemTypeName (t) {
-		return Renderer.item.getType(t)?.name?.toLowerCase() || t;
+		// Display-name lookup only; the authoritative missing-type diagnostic (with full owner/field
+		//   provenance) is emitted by `enhanceItem`. Reporting again here would add a duplicate,
+		//   context-less record, so this lookup stays silent on a miss and falls back to the raw token.
+		return Renderer.item.getType(t, {isIgnoreMissing: true})?.name?.toLowerCase() || t;
 	}
 
 	static enhanceItem (item, {styleHint = null, diagnosticContext = null} = {}) {

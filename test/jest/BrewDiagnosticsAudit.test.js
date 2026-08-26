@@ -113,4 +113,81 @@ describe("ManageBrewDiagnosticsUtil", () => {
 		expect(visibleSorted.map(record => record.owner.name)).toEqual(["Error Item", "Warning Item"]);
 		expect(ManageBrewDiagnosticsUtil.getCopyableReport(visibleSorted)).toBe(BrewDiagnostics.getCopyableReport(visibleSorted));
 	});
+
+	describe("pRunValidationScan", () => {
+		const getBrewUtil = () => ({PAGE_MANAGE: "manageprerelease"});
+
+		it("populates the site reference first, then enhances the loaded brew items, threading the brewUtil through", async () => {
+			const calls = [];
+			const brewUtil = getBrewUtil();
+			let enhanceArgs = null;
+			const renderer = {
+				item: {
+					pPopulatePropertyAndTypeReference: async () => { calls.push("populate"); },
+					pGetSiteUnresolvedRefItemsFromPrereleaseBrew: async args => { calls.push("enhance"); enhanceArgs = args; return []; },
+				},
+			};
+
+			const ran = await ManageBrewDiagnosticsUtil.pRunValidationScan({brewUtil, renderer});
+
+			expect(ran).toBe(true);
+			// Site reference MUST load before enhancement, else site types (e.g. "M", "LA") false-positive as missing.
+			expect(calls).toEqual(["populate", "enhance"]);
+			expect(enhanceArgs).toEqual({brewUtil});
+		});
+
+		it("surfaces the render-time item diagnostics the enhancement path reports", async () => {
+			BrewDiagnostics.clear();
+			const brewUtil = getBrewUtil();
+			const renderer = {
+				item: {
+					pPopulatePropertyAndTypeReference: async () => {},
+					pGetSiteUnresolvedRefItemsFromPrereleaseBrew: async () => {
+						// Simulate enhanceItem() hitting an undefined item type on a brew item.
+						BrewDiagnostics.report({
+							code: BrewDiagnostics.CODES.ITEM_MISSING_TYPE,
+							severity: "warning",
+							target: {kind: "itemType", uid: "widget"},
+							origin: "brew",
+							documentId: "doc-scan",
+							filename: "scan.json",
+							owner: {prop: "item", name: "Scanned Widget", source: "HB"},
+							fieldPath: "type",
+							detail: `Item type "widget" not found!`,
+						});
+						return [];
+					},
+				},
+			};
+
+			await ManageBrewDiagnosticsUtil.pRunValidationScan({brewUtil, renderer});
+
+			const records = BrewDiagnostics.getRecords();
+			expect(records).toHaveLength(1);
+			expect(records[0]).toEqual(expect.objectContaining({
+				code: BrewDiagnostics.CODES.ITEM_MISSING_TYPE,
+				owner: expect.objectContaining({name: "Scanned Widget"}),
+			}));
+			BrewDiagnostics.clear();
+		});
+
+		it("no-ops (does not enhance) when the enhancement API is unavailable", async () => {
+			const noop = async () => [];
+			expect(await ManageBrewDiagnosticsUtil.pRunValidationScan({brewUtil: getBrewUtil(), renderer: null})).toBe(false);
+			expect(await ManageBrewDiagnosticsUtil.pRunValidationScan({brewUtil: getBrewUtil(), renderer: {item: {}}})).toBe(false);
+			expect(await ManageBrewDiagnosticsUtil.pRunValidationScan({brewUtil: null, renderer: {item: {pGetSiteUnresolvedRefItemsFromPrereleaseBrew: noop}}})).toBe(false);
+		});
+
+		it("runs even when the optional site-reference loader is absent", async () => {
+			const brewUtil = getBrewUtil();
+			let enhanceArgs = null;
+			const ran = await ManageBrewDiagnosticsUtil.pRunValidationScan({
+				brewUtil,
+				renderer: {item: {pGetSiteUnresolvedRefItemsFromPrereleaseBrew: async args => { enhanceArgs = args; return []; }}},
+			});
+
+			expect(ran).toBe(true);
+			expect(enhanceArgs).toEqual({brewUtil});
+		});
+	});
 });

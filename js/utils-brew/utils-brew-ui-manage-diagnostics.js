@@ -122,6 +122,41 @@ export class ManageBrewDiagnosticsUtil {
 		}));
 	}
 
+	/**
+	 * Actively validate the loaded homebrew so structural content issues -- e.g. an item that
+	 * references an item `type`/`property` no entity defines -- surface in the "Homebrew Issues"
+	 * finder, instead of only appearing on another page's console when that item happens to render.
+	 *
+	 * Reuses the canonical `Renderer.item` enhancement path (the same code content pages run), so
+	 * "what counts as an issue" never diverges between the finder and real usage. `_copy` and
+	 * dereference issues are already collected at brew-load time; this adds the render-time item
+	 * diagnostics Manage Homebrew otherwise never triggers, because it never enhances items.
+	 *
+	 * Pure orchestration (no DOM), with an injectable `renderer` so it is unit-testable; the DOM
+	 * caller passes `globalThis.Renderer`. Best-effort: silently no-ops when the enhancement API is
+	 * unavailable, and callers wrap it so a scan failure never breaks homebrew management.
+	 *
+	 * @return {Promise<boolean>} `true` if the enhancement scan actually ran, `false` if it was
+	 *   skipped because the required `Renderer.item` API was unavailable.
+	 */
+	static async pRunValidationScan ({brewUtil, renderer} = {}) {
+		if (!brewUtil) return false;
+		if (!renderer || !renderer.item) return false;
+		if (typeof renderer.item.pGetSiteUnresolvedRefItemsFromPrereleaseBrew !== "function") return false;
+
+		// Load the site item property/type reference first, so brew items that legitimately reference
+		//   site types/properties (e.g. "M", "LA", "V") are not falsely reported as missing.
+		if (typeof renderer.item.pPopulatePropertyAndTypeReference === "function") {
+			await renderer.item.pPopulatePropertyAndTypeReference();
+		}
+
+		// Enhance every loaded brew item on the private throwaway copies returned by
+		//   `pGetBrewProcessed()`; enhancement triggers `getType()`/`getProperty()`, which report
+		//   `item.missingType` / `item.missingProperty` into `BrewDiagnostics` for undefined references.
+		await renderer.item.pGetSiteUnresolvedRefItemsFromPrereleaseBrew({brewUtil});
+		return true;
+	}
+
 	static _getSeverityRank (severity) {
 		return severity === "error" ? 0 : 1;
 	}
