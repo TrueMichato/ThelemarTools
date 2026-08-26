@@ -12728,9 +12728,10 @@ Renderer.item = class {
 		if (!isIgnoreMissing && !out) {
 			if (!this._ERRORS_LOGGED_MISSING_TYPE[uid]) {
 				this._ERRORS_LOGGED_MISSING_TYPE[uid] = true;
-				const msg = `Item type "${uid}" not found!`;
-				JqueryUtil.doToast({type: "danger", content: msg});
-				setTimeout(() => { throw new Error(msg); });
+				// External homebrew may reference item types it never registers. Degrade gracefully
+				//   with a once-only console warning (rather than an uncaught throw) and skip the type.
+				// eslint-disable-next-line no-console
+				console.warn(`Item type "${uid}" not found!`);
 			}
 		}
 		return out;

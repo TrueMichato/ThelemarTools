@@ -60,3 +60,53 @@ describe("Renderer.item.getProperty — unknown property handling", () => {
 		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ADV_TRIP"));
 	});
 });
+
+// Regression coverage: external homebrew referencing an unregistered item TYPE (e.g. `armor`)
+// must degrade gracefully — a once-only console warning, no uncaught throw, no danger toast.
+// Mirrors the getProperty hardening; previously getType did doToast(danger) + a deferred throw,
+// which crashed the renderer on managebrew hover for third-party brews.
+describe("Renderer.item.getType — unknown type handling", () => {
+	let warnSpy;
+	let toastSpy;
+
+	beforeEach(() => {
+		Renderer.item._ERRORS_LOGGED_MISSING_TYPE = {};
+		warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+		toastSpy = jest.spyOn(JqueryUtil, "doToast").mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		warnSpy.mockRestore();
+		toastSpy.mockRestore();
+	});
+
+	it("returns undefined and warns exactly once for a missing type (no toast, no throw)", () => {
+		expect(() => Renderer.item.getType("armor")).not.toThrow();
+		expect(Renderer.item.getType("armor")).toBeUndefined();
+
+		expect(warnSpy).toHaveBeenCalledTimes(1);
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("armor"));
+		expect(toastSpy).not.toHaveBeenCalled();
+	});
+
+	it("does not warn when isIgnoreMissing is passed", () => {
+		expect(Renderer.item.getType("armor", {isIgnoreMissing: true})).toBeUndefined();
+		expect(warnSpy).not.toHaveBeenCalled();
+	});
+
+	it("enhanceItem does not throw when an item references an unregistered type", () => {
+		const item = {
+			name: "Homebrew Armor",
+			source: "HB",
+			type: "armor|someHomebrew",
+			entries: ["SENTINEL armor entry."],
+		};
+
+		expect(() => Renderer.item.enhanceItem(item, {styleHint: "classic"})).not.toThrow();
+		expect(item._isEnhanced).toBe(true);
+		const merged = JSON.stringify(item._fullEntries || item.entries);
+		expect(merged).toContain("SENTINEL armor entry.");
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("armor"));
+		expect(toastSpy).not.toHaveBeenCalled();
+	});
+});
