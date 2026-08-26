@@ -144,16 +144,12 @@ globalThis.BrewDiagnostics = class {
 	}
 
 	// Default per-record console policy. `setConsoleVerbose(true)` is a developer/test opt-in that
-	// logs every record. Otherwise we surface only the genuinely-actionable, inherently low-volume
-	// authoring issues -- an item referencing an unregistered type or property -- which a homebrew
-	// author can and should fix directly. The high-volume benign dangling-reference class
-	// (`copy.missingParent`, unresolved string `reference.missing`) stays quiet: one brew-heavy
-	// page load can legitimately emit hundreds of those for parents that only resolve against
-	// unloaded site data and work fine at runtime. All records still reach the audit UI either way.
+	// logs every record to the console. By default the console stays completely silent -- it is not
+	// a diagnostics UI, and a single brew-heavy page load (a homebrew character sheet, a full brew
+	// import) can legitimately emit dozens-to-hundreds of records. All records are always collected
+	// in-memory and surfaced through the structured "Homebrew Issues" audit surface instead.
 	static _shouldLogToConsole (record) {
-		if (this._isConsoleVerbose) return true;
-		return record.code === this.CODES.ITEM_MISSING_TYPE
-			|| record.code === this.CODES.ITEM_MISSING_PROPERTY;
+		return this._isConsoleVerbose;
 	}
 
 	static getCopyableReport (records = null) {

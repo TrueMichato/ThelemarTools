@@ -33,9 +33,8 @@ describe("BrewDiagnostics", () => {
 		...overrides,
 	});
 
-	// The high-volume benign dangling-reference class: hundreds of these can fire on a brew-heavy
-	// page load for `_copy` parents that only resolve against unloaded site data (and resolve fine
-	// at runtime), so they must stay off the console unless verbose mode is explicitly enabled.
+	// A dangling-reference record. Any code -- item type/property, copy parent, reference -- stays
+	// off the console by default; the structured audit surface is the home for all of them.
 	const getCopyRecord = (overrides = {}) => ({
 		code: BrewDiagnostics.CODES.COPY_MISSING_PARENT,
 		severity: "warning",
@@ -67,30 +66,18 @@ describe("BrewDiagnostics", () => {
 		expect(BrewDiagnostics.getRecords()[0].owner.name).toBe("Homebrew Armor");
 	});
 
-	it("stays silent on the console for the benign high-volume dangling-reference class by default", () => {
+	it("stays silent on the console for every code by default", () => {
+		// The console is not a diagnostics UI. Even actionable, low-volume item type/property
+		// misses stay silent by default -- a homebrew character sheet can emit dozens at once.
+		// All records are collected in-memory and surfaced through the audit surface instead.
+		BrewDiagnostics.report(getRecord({code: BrewDiagnostics.CODES.ITEM_MISSING_PROPERTY, detail: `Item property "ADV_DIS" not found!`}));
 		BrewDiagnostics.report(getCopyRecord());
 
-		// Collected in-memory + surfaced in the audit UI, but never logged to the console.
 		expect(warnSpy).not.toHaveBeenCalled();
-		expect(BrewDiagnostics.getRecords()).toHaveLength(1);
+		expect(BrewDiagnostics.getRecords()).toHaveLength(2);
 	});
 
-	it("surfaces actionable item type/property diagnostics on the console even when quiet", () => {
-		// Genuine, inherently low-volume authoring bugs (an item referencing an unregistered
-		// type/property) that a homebrew author should see and fix directly -- e.g. `ADV_DIS`.
-		BrewDiagnostics.report(getRecord({
-			code: BrewDiagnostics.CODES.ITEM_MISSING_PROPERTY,
-			detail: `Item property "ADV_DIS" not found!`,
-		}));
-
-		expect(warnSpy).toHaveBeenCalledTimes(1);
-		expect(warnSpy).toHaveBeenCalledWith(
-			`[5et:brew-diagnostics] Item property "ADV_DIS" not found!`,
-			expect.objectContaining({code: BrewDiagnostics.CODES.ITEM_MISSING_PROPERTY}),
-		);
-	});
-
-	it("logs the benign dangling-reference class to the console only when verbose mode is enabled, deduping repeats", () => {
+	it("logs to the console only when verbose mode is explicitly enabled, deduping repeats", () => {
 		BrewDiagnostics.setConsoleVerbose(true);
 
 		BrewDiagnostics.report(getCopyRecord());
