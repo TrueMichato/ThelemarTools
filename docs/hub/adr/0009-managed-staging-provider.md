@@ -1,6 +1,12 @@
 # ADR 0009: DigitalOcean for managed private-V1 staging
 
-Status: Proposed; awaiting provider, cost, and region approval
+Status: Rejected on cost grounds; superseded by [ADR 0010](0010-oracle-always-free-hosting.md) (2026-08-27)
+
+> **Outcome:** never accepted. After this comparison was written the project owner set a $0 recurring-cost
+> constraint, and Oracle Cloud Always Free was found to satisfy the portable contract. The analysis below
+> is retained because it remains the evaluation of record for the **paid upgrade path**: if self-managed
+> PostgreSQL operations become burdensome, DigitalOcean is the documented destination, and the
+> client-IP adapter built for this ADR is already implemented and tested.
 
 ## Context
 

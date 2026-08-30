@@ -68,10 +68,12 @@ Documents labeled **planned**, **pending**, or **not implemented** are not curre
 - [ADR 0006: operations and retention](adr/0006-operations-retention.md)
 - [ADR 0007: lifecycle and account deletion](adr/0007-lifecycle-deletion.md)
 - [ADR 0008: CI and artifact provenance](adr/0008-ci-provenance.md)
-- [ADR 0009: managed staging provider](adr/0009-managed-staging-provider.md)
+- [ADR 0009: managed staging provider](adr/0009-managed-staging-provider.md) — superseded
+- [ADR 0010: Oracle Cloud Always Free hosting](adr/0010-oracle-always-free-hosting.md)
 
-ADRs 0001-0008 describe implemented portable architecture and launch-readiness decisions. ADR 0009 is a
-proposed provider decision and is not accepted until provider/cost/region approval.
+ADRs 0001-0008 describe implemented portable architecture and launch-readiness decisions. ADR 0009 proposed
+a paid managed provider and was superseded on cost grounds by ADR 0010, which selects Oracle Cloud Always
+Free; it is retained as the evaluation of record for the paid upgrade path.
 
 ## Local BFF setup
 

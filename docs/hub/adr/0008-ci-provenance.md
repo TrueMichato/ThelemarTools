@@ -1,5 +1,13 @@
 # ADR 0008: Build once, verify deeply, promote by digest
 
+> **Narrowed by [ADR 0010](0010-oracle-always-free-hosting.md) (2026-08-27):** the selected host is ARM
+> (Oracle Ampere) while GitHub-hosted runners are x86, so the CI-produced image **cannot** run there. Until
+> multi-architecture builds exist, the instance rebuilds from a **verified git tag** whose CI run was green,
+> and provenance is "built from tag `X`, CI run `Y`" rather than an OCI registry digest. Everything else in
+> this ADR — build-once discipline, SBOMs, scans, secret scanning, pinned actions, manual promotion — is
+> unchanged. Restore digest promotion before any public exposure, either by adding `buildx`/QEMU
+> multi-architecture builds or by moving to an x86 host.
+
 Status: Implemented in Phase 6F
 
 ## Context

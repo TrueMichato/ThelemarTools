@@ -37,8 +37,10 @@
 - Backup archives are authenticated AES-256-GCM ciphertext; keys are separate from archives.
 - Provider client identity is fail-closed: only `do-connecting-ip` can be enabled, it cannot be combined with
   `HUB_TRUST_PROXY`, and only one syntactically valid IP is accepted. The same resolved address keys logs,
-  HTTP rate limits, and WebSocket context; IPv6 rate-limit keys retain the plugin's `/64` normalization. Live
-  staging must still prove DigitalOcean overwrites client copies before ADR 0009 is accepted.
+  HTTP rate limits, and WebSocket context; IPv6 rate-limit keys retain the plugin's `/64` normalization. Under
+  ADR 0010 this adapter stays **disabled**: Caddy is the only ingress, so `HUB_TRUST_PROXY` names its fixed
+  private address and `X-Forwarded-For` is trusted from that hop alone. It is re-enabled only if a managed
+  provider that injects its own header is adopted.
 
 ## Content restrictions
 

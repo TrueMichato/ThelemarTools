@@ -1,0 +1,22 @@
+# Public-internet overlay for the portable Campaign Hub stack.
+#
+# Usage:
+#   docker compose -f compose.hub.yml -f compose.hub.public.yml --env-file .env.hub up -d
+#
+# Differences from the local reference stack:
+#   - publishes 80/443 instead of 8443 for public HTTPS, HTTP redirects, and ACME validation;
+#   - swaps the self-signed `tls internal` Caddyfile for a public ACME-issued certificate.
+#
+# Requires Docker Compose v2.24+ for the `!override` tag.
+services:
+  edge:
+    ports: !override
+      - "80:80"
+      - "443:443"
+    volumes: !override
+      - ./deploy/hub/Caddyfile.public:/etc/caddy/Caddyfile:ro
+      - hub-caddy-data:/data
+      - hub-caddy-config:/config
+    environment:
+      HUB_PUBLIC_DOMAIN: ${HUB_PUBLIC_DOMAIN:?set HUB_PUBLIC_DOMAIN in .env.hub}
+      HUB_ACME_EMAIL: ${HUB_ACME_EMAIL:?set HUB_ACME_EMAIL in .env.hub}

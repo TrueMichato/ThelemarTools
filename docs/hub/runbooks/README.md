@@ -23,6 +23,7 @@ Runbooks are executable operational procedures. Each final runbook must contain:
 - [Member removal](member-removal.md)
 - [Account deletion grace and purge](account-deletion.md)
 - [Session/device compromise](session-compromise.md)
+- [Oracle Cloud Always Free provisioning](oracle-provisioning.md)
 - [Deploy and promote](deploy-promote.md)
 - [Application/database rollback](rollback.md)
 - [Encrypted backup and restore drill](backup-restore.md)

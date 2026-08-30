@@ -1,8 +1,13 @@
 # Campaign Hub managed-staging provider comparison
 
-> **Status:** Phase 6G decision checkpoint; recommendation pending approval
-> **Last verified:** 2026-08-25
+> **Status:** Phase 6G decision made — Oracle Cloud Always Free selected ([ADR 0010](adr/0010-oracle-always-free-hosting.md))
+> **Last verified:** 2026-08-27
 > **Owner:** Campaign Hub maintainers
+
+> **Outcome:** the paid comparison below led to a DigitalOcean recommendation that was **not** accepted. A
+> $0 recurring-cost constraint was then set, and the free-tier evaluation in the following section selected
+> Oracle Cloud Always Free instead. The paid analysis is retained as the evaluation of record for the
+> upgrade path.
 
 ## Decision criteria
 
@@ -20,7 +25,35 @@ The provider must preserve the portable contract rather than replace it:
 All estimates below are planning ranges, not quotes. Re-check the selected region and account console before
 creating billable resources.
 
-## Comparison
+## Free-tier evaluation (decisive)
+
+Added 2026-08-27 after the $0 constraint was set. Most free tiers fail on **shape**, not size — the
+workload is tiny, but it needs an always-on process holding WebSockets and a database that still exists
+next month.
+
+| Free offering | Always-on process | Persistent WebSockets | Durable PostgreSQL | Verdict |
+|---|---|---|---|---|
+| **Oracle Cloud Always Free (ARM VM)** | Yes — a real VM, no sleep, no expiry | Yes, unmediated | Self-hosted on the same VM; 200 GB block storage | **Selected** |
+| Render free web service | No — sleeps after 15 min idle | Broken by sleep | Free database **deleted after 30 days** | Disqualified |
+| Fly.io | Free allowance withdrawn for new organisations | n/a | Managed Postgres from $38/month | Disqualified |
+| Neon / Supabase free | Database only | n/a | 500 MB; Supabase pauses after 7 days idle; no PITR | Insufficient alone |
+| Cloudflare Workers | No long-lived Node process | Durable Objects only, a rewrite | Not applicable | Wrong shape |
+| Home server + Cloudflare Tunnel | Yes | Free/Pro plans cap idle sockets at 100 s | Self-hosted | Viable but availability depends on domestic power/internet |
+
+Oracle is the only entry that runs the portable stack unmodified. Its deviations from the criteria above
+are explicit and accepted in ADR 0010: images are **rebuilt on the instance from a verified tag** rather
+than pulled by digest, because the free tier is ARM while CI runners are x86; and there is **no managed
+PITR**, so recovery is from nightly encrypted backups with an RPO of up to 24 hours.
+
+Two constraints shaped the choice and are worth recording, because both are irreversible:
+
+- Always Free resources exist **only in the tenancy home region**, and that region is fixed permanently at
+  signup. Here it is Israel Central (Jerusalem), which is also the best available outcome — lowest latency
+  to the player base and a single legal regime for personal data.
+- Oracle permits **one free account per person** and reserves the right to suspend all accounts of an
+  offender. Creating a second tenancy to obtain a different region was therefore rejected.
+
+## Comparison (paid options, retained for the upgrade path)
 
 | Provider shape | Contract fit | Important deviations/open items | Estimated staging/month | Operations |
 |---|---|---|---:|---|
@@ -29,9 +62,10 @@ creating billable resources.
 | Google Cloud Run + HTTPS LB + Cloud SQL | Digest deployment, private Cloud SQL/PITR, managed secrets/telemetry | WebSockets reconnect at the request-timeout ceiling; fixed short SIGTERM grace; forwarded trust is hop-based rather than an exact CIDR; LB required for one origin | about $55-80 | Medium-high |
 | Render services + Postgres | Digest deployment, native WebSockets on web services, private database, low cost | No verified fixed ingress CIDR; static rewrite WebSocket behavior is not documented, otherwise a paid edge service is needed; PITR window depends on plan | about $20-27 | Low-medium |
 
-## Recommendation
+## Recommendation (paid path — not adopted)
 
-Use **DigitalOcean App Platform + DigitalOcean Managed PostgreSQL** for private-V1 staging, conditionally.
+Had cost not been constrained, the recommendation was **DigitalOcean App Platform + DigitalOcean Managed
+PostgreSQL**, conditionally.
 It best fits the small trusted-table workload and keeps the planning range near $20-30/month:
 
 - one `apps-s-1vcpu-0.5gb` BFF service at $5/month;
@@ -43,8 +77,9 @@ It best fits the small trusted-table workload and keeps the planning range near 
 - $0-5 for the mandatory encrypted-backup destination, depending on whether approved external storage
   already exists.
 
-The recommendation is not permission to provision resources. ADR 0009 remains proposed until the user
-accepts the provider/cost and selects a region.
+The recommendation above was not adopted. ADR 0009 is superseded by ADR 0010; DigitalOcean remains the
+documented destination if self-managed PostgreSQL operations later become burdensome, and the client-IP
+adapter it required is already implemented and tested.
 
 ### Mandatory conditions
 

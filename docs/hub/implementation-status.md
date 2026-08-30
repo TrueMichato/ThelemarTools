@@ -40,10 +40,21 @@ HTTPS/PostgreSQL Playwright stack. Two multi-context journeys pass in 50.5 secon
 lifecycle, real Character Sheet loading, six-member load, 500-event replay, near-limit character storage,
 contended transfer reservation, and BFF/database restart recovery.
 
-Phase 6G provider preparation compares four managed platforms and proposes DigitalOcean at approximately
-$20-30/month with AWS fallback. The guarded `do-connecting-ip` adapter and 25-second WebSocket heartbeat are
-implemented and pass the full real-stack gate. Provider/cost/region acceptance and live managed-infrastructure
-evidence remain pending; no resource has been created.
+Phase 6G provider selection is **decided**: [ADR 0010](adr/0010-oracle-always-free-hosting.md) selects Oracle
+Cloud Always Free (single ARM VM, Israel Central) at $0/month, superseding the earlier DigitalOcean proposal
+in ADR 0009, which is retained as the paid upgrade path. Two deployment artefacts are added and validated
+locally: `compose.hub.public.yml` and `deploy/hub/Caddyfile.public`, which publish 80/443 and issue Let's
+Encrypt certificates for a real hostname without altering the base local stack. A click-by-click
+[provisioning runbook](runbooks/oracle-provisioning.md) covers quota, capacity, the VCN/host dual-firewall
+trap, DNS, the OAuth app, and first boot.
+
+Two decisions are consequently narrowed and recorded in place: no managed PITR, so recovery is from nightly
+encrypted backups with an RPO of up to 24 hours (ADR 0006); and image promotion by verified git tag rather
+than registry digest, because the free tier is ARM while CI runners are x86 (ADR 0008).
+
+The guarded `do-connecting-ip` adapter and 25-second WebSocket heartbeat are implemented and pass the full
+real-stack gate; the adapter stays disabled on Oracle, where Caddy is the sole ingress. **No cloud resource
+has been created yet** — provisioning, the Phase 6G drills, and the Phase 6H game day remain outstanding.
 
 ## Implemented
 

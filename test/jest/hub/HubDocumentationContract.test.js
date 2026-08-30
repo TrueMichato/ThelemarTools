@@ -49,11 +49,19 @@ describe("Campaign Hub documentation contract", () => {
 		}
 	});
 
-	it("keeps ADR numbering contiguous and records status", () => {
+	it("keeps ADR numbering contiguous, records status, and indexes every ADR", () => {
 		const adrDir = path.join(DOCS_ROOT, "adr");
 		const adrs = fs.readdirSync(adrDir).filter(name => /^\d{4}-.+\.md$/.test(name)).sort();
-		expect(adrs.map(name => name.slice(0, 4))).toEqual(["0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009"]);
-		for (const adr of adrs) expect(fs.readFileSync(path.join(adrDir, adr), "utf8")).toMatch(/^Status:/m);
+		expect(adrs.length).toBeGreaterThanOrEqual(9);
+
+		const numbers = adrs.map(name => Number(name.slice(0, 4)));
+		expect(numbers).toEqual(numbers.map((_, ix) => ix + 1));
+
+		const index = fs.readFileSync(path.join(DOCS_ROOT, "README.md"), "utf8");
+		for (const adr of adrs) {
+			expect(fs.readFileSync(path.join(adrDir, adr), "utf8")).toMatch(/^Status:/m);
+			expect(index).toContain(`(adr/${adr})`);
+		}
 	});
 
 	it("does not contain broken relative Markdown links", () => {

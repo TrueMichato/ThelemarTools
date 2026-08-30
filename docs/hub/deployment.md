@@ -178,15 +178,50 @@ Verified locally:
 - read-only BFF filesystem;
 - graceful container restart and post-restart readiness.
 
+## Public deployment overlay
+
+The base `compose.hub.yml` is deliberately local-only: the edge publishes `8443` and Caddy issues a
+self-signed certificate through `tls internal`. Two files extend it for a real hostname without editing the
+base stack:
+
+| File | Purpose |
+|---|---|
+| `deploy/hub/Caddyfile.public` | Serves `{$HUB_PUBLIC_DOMAIN}` with Caddy-managed public HTTPS, keeping the same `/api`, `/auth`, `/ws` → `bff:5052` routing and static fallback |
+| `compose.hub.public.yml` | Overlay replacing the edge service's published ports with `80`/`443` and swapping in the public Caddyfile |
+
+```bash
+docker compose --env-file .env.hub -f compose.hub.yml -f compose.hub.public.yml up --build -d
+```
+
+Both `HUB_PUBLIC_DOMAIN` and `HUB_ACME_EMAIL` are required and fail fast if unset.
+
+The overlay relies on the `!override` YAML tag (Compose v2.24+). This is load-bearing rather than
+stylistic: Compose **merges** `ports` and `volumes` by default, so without it the edge would publish
+`8443` *and* `443`, and would mount two files at `/etc/caddy/Caddyfile`. Verify any change with:
+
+```bash
+docker compose -f compose.hub.yml -f compose.hub.public.yml config | grep -A6 'edge:'
+```
+
+Keep port 80 open even though application traffic redirects to HTTPS. It provides the redirect and Caddy's
+HTTP certificate-challenge path; port 443 also permits the TLS-ALPN challenge. Caddy selects an available
+challenge and renews certificates automatically.
+
+For a full click-by-click provisioning path see
+[runbooks/oracle-provisioning.md](runbooks/oracle-provisioning.md).
+
 ## Production deviations
 
 Do not lift the local Compose database into production unchanged.
 
 Production Phase 6G must provide:
 
-- managed PostgreSQL 17 with PITR/private network/TLS;
+- PostgreSQL 17 on private networking with TLS at the edge, and PITR **where the host offers it** — under
+  [ADR 0010](adr/0010-oracle-always-free-hosting.md) the database is self-managed, so recovery is from
+  nightly encrypted backups with an RPO of up to 24 hours;
 - separate migration/runtime/backup credentials in a secret manager;
-- immutable image digest promotion;
+- immutable image promotion — by registry digest where architecture permits, otherwise a build on the host
+  from a verified git tag (see the ADR 0008 note on the ARM/x86 divergence);
 - provider-native HTTPS/custom domain;
 - exact proxy trust;
 - scheduled maintenance and nightly encrypted backup export;
