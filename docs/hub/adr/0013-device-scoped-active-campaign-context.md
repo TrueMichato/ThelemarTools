@@ -79,29 +79,70 @@ The browser stores one JSON record under the versioned origin-local key `hub.act
   "schemaVersion": 1,
   "accountId": "account-uuid",
   "campaignId": "campaign-uuid",
+  "state": "selected",
   "revision": 7,
   "updatedAt": 1788271737000,
   "writerId": "tab-uuid"
 }
 ```
 
+Clearing uses the same durable shape with `"state": "cleared"` and `"campaignId": null`. The cleared record is
+an ordered tombstone, not an absent key.
+
 Rules:
 
-- `accountId` and `campaignId` are opaque identifiers and must pass the same UUID validation as API paths.
+- `accountId` and a selected `campaignId` are opaque identifiers and must pass the same UUID validation as API
+  paths. `campaignId` is null only when `state` is `cleared`.
 - The record is ignored until `GET /api/session` returns the same active `account.id`.
-- A signed-out session or a different `account.id` removes the record before any campaign activation.
-- Every write reads the latest record and increments `revision`. Concurrent equal revisions are ordered by
-  `updatedAt`, then `writerId`, so all receiving tabs converge deterministically.
+- A signed-out session writes a clear tombstone for the record's account before any campaign activation. A
+  different `account.id` treats the stored record as no selection and replaces it through the same mutation
+  protocol with a revision-1 clear tombstone bound to the current account.
+- Records are comparable only when their `accountId` matches. Records for one account are ordered
+  lexicographically by `revision`, then state precedence (`cleared` outranks `selected`), then `updatedAt`, then
+  `writerId`. Concurrent equal-revision select/clear races therefore clear; equal-state races still have one
+  deterministic winner.
+- Every selection or clear mutation is serialized with the origin-scoped Web Lock
+  `hub:active-campaign-write:v1` when `navigator.locks` is available. Inside the lock, the writer rereads the
+  durable record, increments its revision, chooses an `updatedAt` greater than both `Date.now()` and the prior
+  timestamp, writes the complete record, rereads it, and only then broadcasts.
+- Browsers without Web Locks use the compare-and-repair protocol below. A last physical
+  `localStorage.setItem()` is not assumed to be the logical winner.
 - Unknown schema versions, malformed JSON, missing fields, impossible revisions, and records larger than
   1 KiB are removed and treated as no selection.
-- Clearing writes a broadcast tombstone before removing storage, so open tabs deactivate even though
-  `localStorage.removeItem()` carries no account payload.
+- A valid selection or clear is never represented by `localStorage.removeItem()`. Tombstones remain durable
+  until a higher ordered selection/tombstone for that account, an account switch, or explicit origin-data
+  deletion supersedes them.
 - A logout intent clears the local selection immediately, then calls `POST /api/logout`. A network failure may
   leave the server session alive, but it must not leave campaign context active in that browser.
 - The record is preference metadata, not an authorization cache. JavaScript or a user may edit it without
   gaining access.
 
 No campaign response body is persisted alongside this record.
+
+### Compare-and-repair protocol
+
+The fallback and every synchronization receiver retain the greatest valid same-account record observed from
+memory, storage, or channel messages:
+
+1. Reject cross-account comparison. For one account, compare records by the full `revision` / state precedence
+   / `updatedAt` / `writerId` ordering tuple. At the same revision, `cleared` beats `selected`.
+2. Adopt the greatest record as the in-memory winner and apply its state to the page subject to validation and
+   resource pinning.
+3. Reread `hub.activeCampaign.v1`. If storage is absent or contains a lower ordered record, write the exact
+   winning record back without incrementing its revision.
+4. Reread after repair. If storage now contains a higher record, adopt it. If it is still absent/lower, retry
+   with bounded asynchronous backoff while the tab remains active. Every later `storage` or channel event
+   restarts comparison.
+5. Broadcast the winning record after a repair so tabs which observed only the losing physical write converge.
+
+This is convergence **and durable convergence**: after participating tabs quiesce, the stored record must equal
+the greatest record they accepted. Closing every tab and starting a new coordinator must recover that same
+winner. Repair copies an existing ordered record verbatim; assigning a new revision during repair would create
+an endless revision race.
+
+A durable clear tombstone participates identically. It always wins an equal-revision select/clear race. A late
+physical write of the losing selection is repaired back to the tombstone, so browser restart cannot resurrect
+that campaign.
 
 ## Context precedence
 
@@ -262,12 +303,14 @@ Messages contain only:
 }
 ```
 
-Clears use `type: "selection_cleared"` and the same ordering fields. Receivers:
+Clears use `type: "selection_cleared"` and carry the complete durable tombstone with the same ordering fields.
+Receivers:
 
 - ignore their own `writerId`;
 - ignore a message for a different authenticated account;
-- compare ordering before applying;
+- compare memory, message, and durable storage by the full ordering tuple before applying;
 - reread storage on every `storage` event instead of trusting event payload alone;
+- repair storage when its physical value is lower than the accepted logical winner;
 - update the source tab synchronously because `storage` does not fire there;
 - validate a newly selected campaign before applying it as effective context.
 
@@ -425,6 +468,8 @@ decoration is linear in rendered navigation links and performs no network reques
 1. A verified selection survives navigation, reload, and browser restart for the same account/profile.
 2. The same account on another browser profile/device keeps an independent selection.
 3. BroadcastChannel propagation and storage-event fallback converge, including concurrent writes and clears.
+   Equal-revision select/select races must converge in memory and durable storage; after both tabs close, a new
+   coordinator must recover the same ordered winner.
 4. An explicit URL overrides stored selection only after validation and then updates the selection.
 5. A cloud character's authoritative campaign corrects a stale URL and becomes the verified selection.
 6. No candidate preserves local mode; campaign list order never auto-selects.
@@ -439,6 +484,9 @@ decoration is linear in rendered navigation links and performs no network reques
     resource or losing unsaved data.
 14. Hub lightweight request/script budgets and active-context timing/size budgets remain green.
 15. Service-worker and application caches contain no authenticated campaign response.
+16. Equal-revision select/clear races must converge in memory and durable storage with the clear tombstone as
+    the ordered winner. Closing every tab and restarting must remain cleared; the losing selection must not
+    resurrect.
 
 ## Consequences
 

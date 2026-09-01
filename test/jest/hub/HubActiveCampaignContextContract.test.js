@@ -48,7 +48,25 @@ describe("device-scoped active campaign context contract", () => {
 			"not synchronized between devices",
 		]) expect(adr).toContain(value);
 		expect(adrCompact).toContain("records larger than 1 KiB are removed");
-		expect(adrCompact).toContain("different `account.id` removes the record");
+		expect(adrCompact).toContain("different `account.id` treats the stored record as no selection");
+	});
+
+	it("requires durable ordering and restart-safe repair for concurrent selection races", () => {
+		for (const value of [
+			"ordered tombstone",
+			"`hub:active-campaign-write:v1`",
+			"compare-and-repair protocol",
+			"full `revision` / state precedence / `updatedAt` / `writerId` ordering tuple",
+			"write the exact winning record back without incrementing its revision",
+			"convergence **and durable convergence**",
+			"restart cannot resurrect that campaign",
+		]) expect(adrCompact).toContain(value);
+		expect(adr).toContain("A valid selection or clear is never represented by `localStorage.removeItem()`.");
+		expect(adrCompact).toContain("Records are comparable only when their `accountId` matches.");
+		expect(adrCompact).toContain("At the same revision, `cleared` beats `selected`.");
+		expect(adrCompact).toContain("Equal-revision select/select races must converge in memory and durable storage; after both tabs close, a new coordinator must recover the same ordered winner.");
+		expect(adrCompact).toContain("Equal-revision select/clear races must converge in memory and durable storage with the clear tombstone as the ordered winner.");
+		expect(adrCompact).toContain("Closing every tab and restarting must remain cleared; the losing selection must not resurrect.");
 	});
 
 	it("keeps explicit/resource URL context ahead of persisted selection without unsafe fallback", () => {
