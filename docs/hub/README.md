@@ -97,12 +97,14 @@ second character or apply the move twice. Local character JSON does not gain Hub
 - [ADR 0012: idempotent semantic character operations](adr/0012-idempotent-semantic-character-operations.md) — contract only
 - [ADR 0013: device-scoped active campaign context](adr/0013-device-scoped-active-campaign-context.md) — contract only
 - [ADR 0014: multi-provider account identity](adr/0014-multi-provider-identity.md) — contract only
+- [ADR 0015: versioned Campaign Hub rules policy](adr/0015-campaign-rules-policy.md) — contract only
 
 ADRs 0001-0008 describe implemented portable architecture and launch-readiness decisions. ADR 0009 proposed
 a paid managed provider and was superseded on cost grounds by ADR 0010, which selects Oracle Cloud Always
-Free; it is retained as the evaluation of record for the paid upgrade path. ADRs 0011-0012 are accepted
-architecture contracts for projection privacy and semantic operation reconciliation; production behavior is
-not implemented by those ADRs.
+Free; it is retained as the evaluation of record for the paid upgrade path. ADRs 0011-0015 are accepted
+architecture contracts for projection privacy, semantic operation reconciliation, active campaign context,
+multi-provider identity, and versioned rules-policy enforcement; production behavior is not implemented by
+those ADRs.
 
 ## Local BFF setup
 
