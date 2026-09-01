@@ -83,7 +83,7 @@ describe("campaign DM Screen controller", () => {
 		}));
 		expect(events).toContainEqual({
 			type: "hubCharacterProjections",
-			payload: {characters: [{id: "character-1"}]},
+			payload: {characters: [{id: "character-1"}], roster: []},
 		});
 
 		realtime.emit("state", {state: "reconnecting"});
@@ -132,7 +132,7 @@ describe("campaign DM Screen controller", () => {
 		expect(controller.getState().access).toBe("permission_denied");
 		expect(events).toContainEqual({
 			type: "hubCharacterProjections",
-			payload: {characters: []},
+			payload: {characters: [], roster: []},
 		});
 	});
 
@@ -140,8 +140,9 @@ describe("campaign DM Screen controller", () => {
 		const realtime = new Observable();
 		const timers = new Map();
 		let nextTimerId = 0;
-		let resyncCount = 0;
-		realtime.requestResync = () => resyncCount++;
+		let fetchCount = 0;
+		let requestResyncCount = 0;
+		realtime.requestResync = () => requestResyncCount++;
 		const controller = new DmScreenHubController({
 			campaignId: "campaign-1",
 			api: {
@@ -151,6 +152,10 @@ describe("campaign DM Screen controller", () => {
 					status: "active",
 					role: "dm",
 				}),
+				pListCampaignCharacterProjections: async () => {
+					fetchCount++;
+					return {projections: [], roster: []};
+				},
 			},
 			document: null,
 			fnSetTimeout: fn => {
@@ -168,13 +173,17 @@ describe("campaign DM Screen controller", () => {
 		});
 
 		realtime.emit("event", {type: "roll.logged"});
-		expect(resyncCount).toBe(0);
-		realtime.emit("event", {type: "character.projection.updated"});
+		expect(fetchCount).toBe(0);
+		realtime.emit("event", {type: "character.projection.invalidated", payload: {projectionRevision: 4}});
 		realtime.emit("event", {type: "item.granted"});
 		realtime.emit("event", {type: "transfer.committed"});
-		expect(resyncCount).toBe(0);
+		// Repeated invalidations coalesce into a single scoped refetch.
+		expect(fetchCount).toBe(0);
 		expect(timers.size).toBe(1);
 		timers.values().next().value();
-		expect(resyncCount).toBe(1);
+		await new Promise(resolve => setImmediate(resolve));
+		expect(fetchCount).toBe(1);
+		// ADR 0011: projections come from the HTTP projector, never from a socket resync.
+		expect(requestResyncCount).toBe(0);
 	});
 });

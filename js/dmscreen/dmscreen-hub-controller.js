@@ -98,6 +98,9 @@ export class DmScreenHubController {
 		if (realtime?.on) {
 			this._unsubscribers.push(realtime.on("state", state => this._handleRealtimeState(state)));
 			this._unsubscribers.push(realtime.on("event", event => this._handleCampaignEvent(event)));
+			// A resync baseline now carries only a cursor and cache-invalidation refs, so the
+			// projections themselves are refetched over HTTP.
+			this._unsubscribers.push(realtime.on("cursor", () => this._queueProjectionResync()));
 		}
 
 		this._publishBoardStatus();
@@ -110,11 +113,26 @@ export class DmScreenHubController {
 		this._clearResyncTimer();
 	}
 
+	/**
+	 * Fetch linked characters through the authorization-scoped HTTP projector. This is the
+	 * only way projections reach the DM Screen — the realtime socket carries invalidation
+	 * metadata, never character data.
+	 */
+	async pRefreshProjections () {
+		if (!this._campaignId) return;
+		try {
+			const result = await this._api.pListCampaignCharacterProjections({campaignId: this._campaignId});
+			this.applySnapshot({characters: result?.projections || [], roster: result?.roster || []});
+		} catch (error) {
+			this.handleRealtimeError(error);
+		}
+	}
+
 	applySnapshot (snapshot) {
 		const characters = snapshot?.characters || [];
 		this._board?.fireBoardEvent({
 			type: "hubCharacterProjections",
-			payload: {characters},
+			payload: {characters, roster: snapshot?.roster || []},
 		});
 		this._state.sync = "live";
 		this._isSyncStale = false;
@@ -175,9 +193,12 @@ export class DmScreenHubController {
 		if (access !== "ready") {
 			this._state.sync = "stopped";
 			this._clearStaleTimer();
+			// Losing access drops the roster too: a demoted co-DM must not keep a cached
+			// broader projection or its owner attribution.
+			this._clearResyncTimer();
 			this._board?.fireBoardEvent({
 				type: "hubCharacterProjections",
-				payload: {characters: []},
+				payload: {characters: [], roster: []},
 			});
 		}
 		this._syncBodyState();
@@ -239,7 +260,7 @@ export class DmScreenHubController {
 			"character.moved",
 			"character.moved_out",
 			"character.reactivated",
-			"character.projection.updated",
+			"character.projection.invalidated",
 			"xp.granted",
 			"item.granted",
 			"action.applied",
@@ -322,11 +343,15 @@ export class DmScreenHubController {
 		this._staleTimer = null;
 	}
 
+	/**
+	 * Coalesce invalidations into a single scoped refetch. Repeated invalidations during
+	 * the delay collapse into one request.
+	 */
 	_queueProjectionResync () {
 		this._clearResyncTimer();
 		this._resyncTimer = this._fnSetTimeout(() => {
 			this._resyncTimer = null;
-			this._realtime?.requestResync?.();
+			void this.pRefreshProjections();
 		}, this._resyncDelayMs);
 	}
 

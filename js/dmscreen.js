@@ -3769,7 +3769,7 @@ window.addEventListener("load", () => {
 			realtime,
 			fnRetryWorkspace: () => window.DM_SCREEN.doSaveStateDebounced(),
 		});
-		realtime.on("snapshot", snapshot => hubController.applySnapshot(snapshot));
+		await hubController.pRefreshProjections();
 		try {
 			await realtime.pConnect();
 		} catch (error) {

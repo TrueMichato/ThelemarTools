@@ -119,10 +119,17 @@ export class HubRealtimeClient {
 		}
 		if (message.type === "resync_complete") {
 			const previousSequence = this._lastSequence;
-			const snapshotSequence = message.snapshot?.lastSequence || 0;
+			// ADR 0011: resync carries a cursor and cache-invalidation refs only. Consumers
+			// refetch through the authorization-scoped HTTP projector.
+			const snapshotSequence = message.cursor?.lastSequence || 0;
 			if (!this._hasBaseline || snapshotSequence >= this._lastSequence) {
 				this._lastSequence = snapshotSequence;
-				this._emit("snapshot", message.snapshot);
+				this._emit("cursor", {
+					cursor: message.cursor,
+					campaign: message.campaign,
+					membership: message.membership,
+					characterRefs: message.characterRefs || [],
+				});
 			}
 			this._hasBaseline = true;
 			const events = [...(message.events || []), ...this._bufferedEvents]
@@ -139,7 +146,7 @@ export class HubRealtimeClient {
 					"character.moved",
 					"character.moved_out",
 					"character.reactivated",
-					"character.projection.updated",
+					"character.projection.invalidated",
 					"xp.granted",
 					"item.granted",
 					"action.applied",

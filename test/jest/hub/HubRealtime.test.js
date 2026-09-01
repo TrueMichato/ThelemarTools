@@ -154,14 +154,23 @@ describe("hub realtime", () => {
 	});
 
 	describe("realtime client ordering", () => {
-		it("does not emit an older snapshot after a newer event", async () => {
+		it("does not emit an older baseline after a newer event", async () => {
 			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
 			const client = new HubRealtimeClient({campaignId: "cmp", location: {protocol: "https:", host: "tools.example"}});
-			const snapshots = [];
-			client.on("snapshot", snapshot => snapshots.push(snapshot));
+			const baselines = [];
+			client.on("cursor", baseline => baselines.push(baseline));
 			client._handleMessage({type: "event", event: {sequence: 11, type: "x"}});
-			client._handleMessage({type: "resync_complete", snapshot: {lastSequence: 10}, events: [{sequence: 11, type: "x"}]});
-			expect(snapshots).toEqual([{lastSequence: 10}]);
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 10},
+				characterRefs: [{id: "c1", revision: 4, projectionRevision: 2}],
+				events: [{sequence: 11, type: "x"}],
+			});
+
+			expect(baselines).toHaveLength(1);
+			expect(baselines[0].cursor).toEqual({campaignId: "cmp", lastSequence: 10});
+			// The baseline carries cache-invalidation refs only, never character data.
+			expect(baselines[0].characterRefs).toEqual([{id: "c1", revision: 4, projectionRevision: 2}]);
 			expect(client._lastSequence).toBe(11);
 		});
 
@@ -232,8 +241,8 @@ describe("hub realtime", () => {
 			});
 			await client.pConnect();
 			expect([...intervals.values()].map(({delay}) => delay)).toEqual([10_000]);
-			client._handleMessage({type: "resync_complete", snapshot: {lastSequence: 3}, events: []});
-			client._handleMessage({type: "resync_complete", snapshot: {lastSequence: 3}, events: []});
+			client._handleMessage({type: "resync_complete", cursor: {campaignId: "cmp", lastSequence: 3}, characterRefs: [], events: []});
+			client._handleMessage({type: "resync_complete", cursor: {campaignId: "cmp", lastSequence: 3}, characterRefs: [], events: []});
 
 			expect([...intervals.values()].map(({delay}) => delay)).toEqual([10_000]);
 			intervals.values().next().value.fn();
