@@ -1,6 +1,8 @@
 # Campaign Overview redesign brief
 
-Status: design direction approved for staged implementation after V2-T1 through V2-T7 establish stable user-facing responsibilities.
+Status: design direction approved. The authoritative roadmap merged in PR #211, release automation shipped in PR #219,
+and activity history shipped in PR #218. Implementation waits for V2-T2 through V2-T7 to establish the remaining
+stable user-facing responsibilities.
 
 ## Purpose and timing
 
@@ -8,10 +10,12 @@ Campaign Overview should answer two questions quickly: **Is this campaign ready?
 It should orient players and DMs, summarize campaign state, and expose setup without becoming another active-play
 workspace.
 
-This PR records design decisions only. It does not implement UI or polish temporary forms. Final implementation starts
-after activity, effect, inventory, whole-site context, policy, and targeting responsibilities have moved to their
-accepted Character Sheet and DM Screen flows. The redesign must then be refreshed against those shipped capabilities
-rather than preserve temporary controls.
+This PR records design decisions only. It does not implement UI or polish temporary forms. Activity history is now
+shipped; final implementation starts after the remaining tracks establish their accepted responsibilities. T5
+campaign context remains a whole-site capability. T6 policy remains authoritative in the Hub/API and is enforced
+consistently by Builder, LevelUp, Character Sheet, and DM surfaces. Only character-specific active-play actions move
+from Campaign Overview to contextual Character Sheet and DM Screen flows. The redesign must then be refreshed against
+those shipped capabilities rather than preserve temporary controls.
 
 ## Method and evidence
 
@@ -136,6 +140,13 @@ Campaign Overview
 6. **Legacy during migration only:** generic active-play forms in a labeled disclosure, never competing with the
    primary action.
 
+The player primary action depends on campaign-character count:
+
+- **Zero:** **Add a campaign character** opens focused onboarding with create, import, and attach paths.
+- **One:** **Open _character name_** opens that character directly.
+- **Many:** **Choose a character** opens an accessible chooser, then opens the explicit selection. It never silently
+  chooses or opens the first character.
+
 ### Roster consolidation
 
 Render one party roster, not parallel "My characters" and "Party roster" concepts. Each row represents a character
@@ -143,6 +154,15 @@ and names its owner, access, privacy/compliance state, campaign attachment, read
 action. Local originals and cloud copies appear only when attachment or migration requires that distinction; explain
 the consequence before copy, attach, or move. Membership administration remains in setup rather than creating a
 second operational roster.
+
+Roster badges are projection- and role-scoped:
+
+- **DM/co-DM:** truthful owner, access, and compliance state plus the exact peer-projection preview.
+- **Character owner:** canonical truth for their own character.
+- **Peer or spectator:** only badges permitted by the shared peer projection.
+
+Peer/spectator rows never expose hidden canonical truth, raw sharing overrides, or badges whose presence or wording
+allows replacement state to be inferred.
 
 ### Responsive composition
 
@@ -157,17 +177,21 @@ present the same information priority rather than preserving desktop form densit
 The final Campaign Overview **removes generic effect, transfer, XP, and item-grant forms** after equivalent Character
 Sheet and DM Screen flows ship. Do not polish those temporary forms into permanent Campaign Overview components.
 Character-specific effects, approvals, inventory, and transfers belong with the Character Sheet; DM actions and
-session awards belong with the DM Screen or contextual sheet actions. Campaign Overview retains summaries, attention,
-activity, readiness, policy visibility, and setup.
+session awards belong with the DM Screen or contextual sheet actions. This relocation does not narrow authority: T5
+campaign context remains whole-site, while T6 policy remains authoritative at Hub/API mutation boundaries and across
+Builder, LevelUp, Character Sheet, and DM enforcement surfaces. Campaign Overview retains summaries, attention,
+activity, readiness, policy visibility and configuration, and setup.
 
 ## Staged migration
 
-1. **Stabilize responsibilities:** finish and accept Track 2 projection/privacy, Track 4 inventory/carry/awards,
-   Track 5 whole-site context, and Track 6 policy enforcement before implementation. Track 1 activity, Track 3 live
-   effects, and Track 7 targeting must also have stable user-facing contracts before the final redesign. Together
-   these define authorization, capability, failure, reconnect, privacy, and observability behavior.
-2. **Ship equivalent contextual flows:** move active-play effect, grant, transfer, XP, and item actions to Character
-   Sheet and DM Screen with impact preview and recovery.
+1. **Stabilize responsibilities:** Track 1 activity is shipped in PR #218. Finish and accept Track 2
+   projection/privacy, Track 4 inventory/carry/awards, Track 5 whole-site context, and Track 6 policy enforcement
+   before implementation. Track 3 live effects and Track 7 targeting must also have stable user-facing contracts
+   before the final redesign. Together these define authorization, capability, failure, reconnect, privacy, and
+   observability behavior.
+2. **Ship equivalent contextual flows:** move character-specific active-play effect, grant, transfer, XP, and item
+   actions to Character Sheet and DM Screen with impact preview and recovery. Keep T5 context whole-site and T6 policy
+   authoritative across the Hub/API and every enforcing UI.
 3. **Coexist temporarily:** place remaining Campaign Overview forms behind a clearly labeled legacy disclosure and
    compare old/new task completion and regressions. Do not visually polish the legacy path.
 4. **Reshape Campaign Overview:** implement the target component map around role-primary action, attention, roster,
