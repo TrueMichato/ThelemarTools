@@ -25,7 +25,16 @@ function getSnapshotName (snapshot) {
 	return sanitizeCharacterDisplayName(snapshot.displayName || snapshot.name);
 }
 
-export function enrichEventPayload ({payload = {}, aggregateType, aggregateId, getCharacterById}) {
+/**
+ * Event types whose payload must stay metadata-only. ADR 0011 forbids a projection
+ * invalidation from carrying any character field or display text, so it is never
+ * enriched with a name snapshot — the name is exactly the kind of value a sharing policy
+ * may be hiding.
+ */
+const UNENRICHED_EVENT_TYPES = new Set(["character.projection.invalidated"]);
+
+export function enrichEventPayload ({payload = {}, aggregateType, aggregateId, getCharacterById, type = null}) {
+	if (UNENRICHED_EVENT_TYPES.has(type)) return payload && typeof payload === "object" ? {...payload} : {};
 	const sourcePayload = payload && typeof payload === "object" ? payload : {};
 	const enriched = {...sourcePayload};
 	const addSnapshot = (key, id) => {

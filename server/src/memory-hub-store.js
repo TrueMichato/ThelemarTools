@@ -317,6 +317,7 @@ export class MemoryHubStore {
 		const sequence = this._events.filter(event => event.campaignId === campaignId).length + 1;
 		const eventPayload = enrichEventPayload({
 			payload,
+			type,
 			aggregateType,
 			aggregateId,
 			getCharacterById: characterId => {

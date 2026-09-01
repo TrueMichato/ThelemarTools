@@ -792,6 +792,7 @@ export class PostgresHubStore {
 		const names = new Map(characterResult.rows.map(row => [row.id, {data: {name: row.name}}]));
 		const eventPayload = enrichEventPayload({
 			payload,
+			type,
 			aggregateType,
 			aggregateId,
 			getCharacterById: characterId => names.get(characterId),
