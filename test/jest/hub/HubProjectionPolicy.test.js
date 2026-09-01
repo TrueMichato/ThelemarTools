@@ -187,3 +187,35 @@ describe("character sheet sharing controls", () => {
 		expect(describePreviewValue(null)).toBe("—");
 	});
 });
+
+describe("hub character view reader", () => {
+	it("reads ownership from raw documents and envelopes alike", async () => {
+		const {getProjectionOwnerAccountId, getProjectionId, getProjectionName} = await import("../../../js/hub/hub-character-view.js");
+		const raw = {id: "c1", ownerAccountId: "a1", data: {name: "Mira"}};
+		const owner = {kind: "owner_truth", character: raw};
+		const dm = {kind: "dm_truth", character: raw, peerPreview: {kind: "peer_profile", id: "c1", data: {}}};
+		const peer = {kind: "peer_profile", id: "c1", data: {identity: {name: "Mira"}}};
+
+		// `/api/characters` still returns raw owner-scoped documents while campaign reads
+		// return envelopes; both flow through the same selectors.
+		expect(getProjectionOwnerAccountId(raw)).toBe("a1");
+		expect(getProjectionOwnerAccountId(owner)).toBe("a1");
+		expect(getProjectionOwnerAccountId(dm)).toBe("a1");
+		// A peer never learns who owns a character from the projection itself.
+		expect(getProjectionOwnerAccountId(peer)).toBeNull();
+
+		for (const value of [raw, owner, dm, peer]) {
+			expect(getProjectionId(value)).toBe("c1");
+			expect(getProjectionName(value)).toBe("Mira");
+		}
+	});
+
+	it("refuses canonical data from a peer profile", async () => {
+		const {getCanonicalCharacter, isCanonicalProjection} = await import("../../../js/hub/hub-character-view.js");
+		const peer = {kind: "peer_profile", id: "c1", data: {identity: {name: "Mira"}}};
+
+		expect(isCanonicalProjection(peer)).toBe(false);
+		expect(() => getCanonicalCharacter(peer)).toThrow(/Canonical character data is not available/);
+		expect(getCanonicalCharacter({kind: "owner_truth", character: {id: "c1"}})).toEqual({id: "c1"});
+	});
+});

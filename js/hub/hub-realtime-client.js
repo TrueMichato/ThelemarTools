@@ -7,6 +7,7 @@ export class HubRealtimeClient {
 		fnSetInterval = (...args) => setInterval(...args),
 		fnClearInterval = timer => clearInterval(timer),
 		resyncIntervalMs = 10_000,
+		fnOnListenerError = null,
 	}) {
 		if (!campaignId) throw new TypeError(`campaignId is required.`);
 		this._campaignId = campaignId;
@@ -16,6 +17,7 @@ export class HubRealtimeClient {
 		this._fnSetInterval = fnSetInterval;
 		this._fnClearInterval = fnClearInterval;
 		this._resyncIntervalMs = resyncIntervalMs;
+		this._fnOnListenerError = fnOnListenerError;
 		this._socket = null;
 		this._pConnecting = null;
 		this._shouldReconnect = false;
@@ -36,8 +38,19 @@ export class HubRealtimeClient {
 		return () => listeners.delete(listener);
 	}
 
+	/**
+	 * Consumer callbacks must never break protocol handling: a listener that throws used
+	 * to abort `_handleMessage` partway, leaving the connection stuck before
+	 * `_setConnectionState("live")` ever ran.
+	 */
 	_emit (type, value) {
-		for (const listener of this._listeners.get(type) || []) listener(value);
+		for (const listener of this._listeners.get(type) || []) {
+			try {
+				listener(value);
+			} catch (error) {
+				this._fnOnListenerError?.(error, type);
+			}
+		}
 	}
 
 	getConnectionState () {

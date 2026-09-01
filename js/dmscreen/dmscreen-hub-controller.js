@@ -7,8 +7,10 @@ export class DmScreenHubController {
 		campaignId,
 		api,
 		document = globalThis.document,
-		fnSetTimeout = globalThis.setTimeout,
-		fnClearTimeout = globalThis.clearTimeout,
+		// Wrapped, not passed by reference: an unbound `globalThis.setTimeout` throws
+		// "Illegal invocation" when called as a method on this controller.
+		fnSetTimeout = (...args) => setTimeout(...args),
+		fnClearTimeout = timer => clearTimeout(timer),
 		staleAfterMs = DEFAULT_STALE_AFTER_MS,
 		resyncDelayMs = DEFAULT_RESYNC_DELAY_MS,
 	}) {

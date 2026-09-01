@@ -334,6 +334,23 @@ describe("projection privacy canaries", () => {
 		expect(broken.error).toBeUndefined();
 	});
 
+	it("resolves roster owner attribution from every projection source", async () => {
+		const {peerA, campaign, character} = await setup();
+		const snapshot = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/snapshot`, headers: readHeaders(peerA)})).json().snapshot;
+		const batch = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/character-projections`, headers: readHeaders(peerA)})).json();
+
+		// Both projection sources must agree; a source that silently omits the membership
+		// id would drop owner attribution from the roster without failing anything else.
+		const fromSnapshot = snapshot.roster.find(entry => entry.characterId === character.id);
+		const fromBatch = batch.roster.find(entry => entry.characterId === character.id);
+		expect(fromSnapshot).toEqual(fromBatch);
+		expect(fromSnapshot.ownerMembershipId).toEqual(expect.any(String));
+
+		const members = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/members`, headers: readHeaders(peerA)})).json();
+		const list = members.members || members;
+		expect(list.some(member => member.id === fromSnapshot.ownerMembershipId)).toBe(true);
+	});
+
 	it("keeps projection truth out of logs and metrics", () => {
 		const metrics = new HubMetrics({fnNow: () => 0});
 		metrics.observeRequest({method: "GET", route: "/api/characters/:characterId", statusCode: 200, durationMs: 5});

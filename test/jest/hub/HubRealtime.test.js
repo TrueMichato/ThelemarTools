@@ -154,6 +154,22 @@ describe("hub realtime", () => {
 	});
 
 	describe("realtime client ordering", () => {
+		it("reaches the live state even when a consumer listener throws", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			const errors = [];
+			const client = new HubRealtimeClient({
+				campaignId: "cmp",
+				location: {protocol: "https:", host: "tools.example"},
+				fnOnListenerError: (error, type) => errors.push({message: error.message, type}),
+			});
+			client.on("cursor", () => { throw new Error("consumer exploded"); });
+			client._handleMessage({type: "resync_complete", cursor: {campaignId: "cmp", lastSequence: 3}, characterRefs: [], events: []});
+
+			// A broken consumer must not strand the connection mid-handler.
+			expect(client.getConnectionState().state).toBe("live");
+			expect(errors).toEqual([{message: "consumer exploded", type: "cursor"}]);
+		});
+
 		it("does not emit an older baseline after a newer event", async () => {
 			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
 			const client = new HubRealtimeClient({campaignId: "cmp", location: {protocol: "https:", host: "tools.example"}});

@@ -1942,7 +1942,19 @@ export class PostgresHubStore {
 			if (!membershipResult.rowCount) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 			const membership = getMembership(membershipResult.rows[0]);
 			const campaignResult = await client.query(`SELECT id, owner_account_id, name, status, created_at FROM hub.campaigns WHERE id = $1`, [campaignId]);
-			const characterResult = await client.query(`SELECT * FROM hub.characters WHERE campaign_id = $1 AND status = 'active' ORDER BY lower(data->>'name'), id`, [campaignId]);
+			// The membership join supplies roster owner attribution. Without it
+			// `ownerMembershipId` is silently null here while the memory store resolves it,
+			// which is exactly the kind of parity gap ADR 0011 evidence must catch.
+			const characterResult = await client.query(`
+				SELECT c.*, m.id AS owner_membership_id
+				FROM hub.characters c
+				LEFT JOIN hub.memberships m
+					ON m.campaign_id = c.campaign_id
+					AND m.account_id = c.owner_account_id
+					AND m.status = 'active'
+				WHERE c.campaign_id = $1 AND c.status = 'active'
+				ORDER BY lower(c.data->>'name'), c.id
+			`, [campaignId]);
 			const sequenceResult = await client.query(`SELECT COALESCE(max(sequence), 0) AS sequence FROM hub.domain_events WHERE campaign_id = $1`, [campaignId]);
 			const campaign = campaignResult.rows[0];
 			const snapshot = {

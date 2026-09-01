@@ -100,6 +100,33 @@ describe("campaign DM Screen controller", () => {
 		}));
 	});
 
+	it("schedules a coalesced refetch with browser-safe timers", async () => {
+		const {DmScreenHubController} = await import("../../../js/dmscreen/dmscreen-hub-controller.js");
+		let fetchCount = 0;
+		const controller = new DmScreenHubController({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCampaign: async () => ({name: "Ashen March", status: "active", role: "dm"}),
+				pListCampaignCharacterProjections: async () => {
+					fetchCount++;
+					return {projections: [], roster: []};
+				},
+			},
+			document: null,
+		});
+		await controller.pLoadCampaign();
+		const realtime = new Observable();
+		controller.attach({board: {fireBoardEvent: () => {}}, repository: null, realtime});
+
+		// Default timers must be callable as controller methods: an unbound
+		// `globalThis.setTimeout` throws "Illegal invocation" in a browser, which would
+		// abort the realtime handler that dispatched this listener.
+		expect(() => realtime.emit("cursor", {cursor: {lastSequence: 1}, characterRefs: []})).not.toThrow();
+		await new Promise(resolve => setTimeout(resolve, 250));
+		expect(fetchCount).toBeGreaterThan(0);
+	});
+
 	it("closes projections when the current co-DM is demoted", async () => {
 		const realtime = new Observable();
 		const events = [];

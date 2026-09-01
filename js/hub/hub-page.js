@@ -4,6 +4,7 @@ import {renderHubActivityRows} from "./hub-activity-render.js";
 import {
 	getOwnerMembershipId,
 	getProjectionId,
+	getProjectionOwnerAccountId,
 	getProjectionName,
 	getProjectionSummary,
 	getTargetableProjections,
@@ -986,7 +987,7 @@ function renderPartyRoster ({campaignId, characters, members, session, isDm, ros
 	setHidden(document.getElementById("campaign-party-empty"), !!characters.length);
 	list.replaceChildren(...characters.map(character => {
 		const characterId = getProjectionId(character);
-		const canOpen = isCanonicalProjection(character) && (isDm || character.character?.ownerAccountId === session.account.id);
+		const canOpen = isCanonicalProjection(character) && (isDm || getProjectionOwnerAccountId(character) === session.account.id);
 		const row = document.createElement(canOpen ? "a" : "div");
 		row.className = "hub-data-row";
 		if (canOpen) {
@@ -1033,7 +1034,9 @@ function fillCharacterSelect (select, characters, {includeParty = false, partyIn
 	if (!select) return;
 	select.replaceChildren();
 	for (const character of characters) {
-		if (ownerAccountId && character.character?.ownerAccountId !== ownerAccountId) continue;
+		// `characters` may be raw owner-scoped documents (the player's own list) or
+		// authorization envelopes (campaign-wide), so ownership is read through one helper.
+		if (ownerAccountId && getProjectionOwnerAccountId(character) !== ownerAccountId) continue;
 		const option = document.createElement("option");
 		option.value = `character:${getProjectionId(character)}`;
 		option.textContent = getProjectionName(character);
@@ -1072,7 +1075,7 @@ async function renderPendingActions ({campaign, campaignId, session, targetChara
 		text.textContent = `${getMemberName(members, action.actorAccountId)} proposes ${getEffectDescription(action.payload?.effect)} for ${getCharacterName(target)}.`;
 		const meta = document.createElement("span");
 		meta.className = "hub-data-row__meta";
-		const canResolve = isDm || (campaign.role === "player" && target?.ownerAccountId === session.account.id);
+		const canResolve = isDm || (campaign.role === "player" && getProjectionOwnerAccountId(target) === session.account.id);
 		meta.textContent = canResolve ? "Your response is needed" : "Waiting for the recipient";
 		main.append(text, meta);
 		row.append(main);
@@ -1120,7 +1123,7 @@ async function renderPendingTransfers ({campaign, campaignId, session, targetCha
 		const contents = getTransferContentsDescription(transfer);
 		text.textContent = `${actor} offers ${contents}: ${getContainerName({kind: transfer.sourceKind, id: transfer.sourceId, characters: targetCharacters})} to ${getContainerName({kind: transfer.targetKind, id: transfer.targetId, characters: targetCharacters})}.`;
 		const target = transfer.targetKind === "character" ? getCharacterById(targetCharacters, transfer.targetId) : null;
-		const canResolve = isDm || target?.ownerAccountId === session.account.id;
+		const canResolve = isDm || getProjectionOwnerAccountId(target) === session.account.id;
 		const meta = document.createElement("span");
 		meta.className = "hub-data-row__meta";
 		meta.textContent = canResolve ? "Your response is needed" : "Waiting for the recipient";

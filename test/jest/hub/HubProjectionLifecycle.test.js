@@ -153,6 +153,21 @@ describe("projection lifecycle safety", () => {
 	});
 });
 
+describe("store parity guards", () => {
+	it("joins membership in every PostgreSQL projection query that returns a roster", () => {
+		const source = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");
+		const rosterCallers = ["pGetCampaignSnapshot", "pListCampaignCharacterProjections"];
+		for (const caller of rosterCallers) {
+			const start = source.indexOf(`async ${caller} (`);
+			expect({caller, found: start > -1}).toEqual({caller, found: true});
+			const body = source.slice(start, start + 2_000);
+			// `_getCampaignRoster` reads `owner_membership_id`; without the join it is
+			// silently undefined and owner attribution disappears from the roster.
+			expect({caller, hasJoin: body.includes("owner_membership_id")}).toEqual({caller, hasJoin: true});
+		}
+	});
+});
+
 describe("owner character sheet safety", () => {
 	const read = path => fs.readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
 

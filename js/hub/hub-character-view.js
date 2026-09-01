@@ -139,6 +139,17 @@ export function getTargetableProjections ({projections, roster = null}) {
 	return list.filter(projection => targetable.has(getProjectionId(projection)) && getProjectionView(projection).name);
 }
 
+/**
+ * The owner account id, for owner-scoped surfaces that legitimately hold it — the
+ * signed-in player's own character list. A peer profile never carries one, so this
+ * returns `null` rather than guessing.
+ */
+export function getProjectionOwnerAccountId (projection) {
+	if (projection?.kind === "peer_profile") return null;
+	if (projection?.kind) return projection.character?.ownerAccountId ?? null;
+	return projection?.ownerAccountId ?? null;
+}
+
 /** Owner attribution comes from roster metadata, never from the character envelope. */
 export function getOwnerMembershipId ({roster, characterId}) {
 	if (!Array.isArray(roster)) return null;
