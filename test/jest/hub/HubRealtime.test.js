@@ -1,6 +1,7 @@
 import {EventEmitter} from "node:events";
 import {HubOutboxDispatcher, HubRealtime} from "../../../server/src/realtime.js";
-import {canViewEvent, projectCharacterForPlayer} from "../../../server/src/projections.js";
+import {canViewEvent} from "../../../server/src/projections.js";
+import {computePeerProfile, getDefaultProjectionPolicy} from "../../../server/src/character-projection.js";
 
 class FakeSocket extends EventEmitter {
 	readyState = 1;
@@ -22,19 +23,32 @@ class HeartbeatSocket extends FakeSocket {
 
 describe("hub projections and event visibility", () => {
 	it("removes private character fields from player projections", () => {
-		const projected = projectCharacterForPlayer({
-			id: "c1",
-			ownerAccountId: "a1",
-			campaignId: "cmp",
-			revision: 2,
-			data: {
-				name: "Mira",
-				hp: {current: 10},
-				notes: {backstory: "Secret"},
-				inventory: [{name: "Secret Item"}],
+		const projected = computePeerProfile({
+			character: {
+				id: "c1",
+				ownerAccountId: "a1",
+				campaignId: "cmp",
+				revision: 2,
+				projectionRevision: 1,
+				projectionPolicy: getDefaultProjectionPolicy(),
+				data: {
+					name: "Mira",
+					hp: {current: 10},
+					notes: {backstory: "Secret"},
+					inventory: [{name: "Secret Item"}],
+				},
 			},
 		});
-		expect(projected.data).toEqual({name: "Mira", hp: {current: 10}});
+
+		expect(projected.kind).toBe("peer_profile");
+		expect(projected.data.identity).toEqual({name: "Mira"});
+		expect(projected.data.hp).toEqual({current: 10});
+		// The owner account id is never a peer field, and the `table` default keeps both
+		// inventory-derived summaries closed.
+		expect(projected.ownerAccountId).toBeUndefined();
+		expect(projected.data.inventorySummary).toBeUndefined();
+		expect(projected.data.carrySummary).toBeUndefined();
+		expect(JSON.stringify(projected)).not.toContain("Secret");
 	});
 
 	it("enforces all event visibility modes", () => {
@@ -265,11 +279,18 @@ describe("hub realtime", () => {
 		});
 	});
 
-	it("returns authorized snapshot and delta events on resync", async () => {
+	it("returns a metadata-only cursor and delta events on resync", async () => {
+		let snapshotCalls = 0;
 		const store = {
 			pGetSessionById: async () => ({session: {}, account: {}}),
 			pGetMembership: async () => ({role: "player"}),
-			pGetCampaignSnapshot: async () => ({lastSequence: 3, characters: []}),
+			pGetCampaignSnapshot: async () => { snapshotCalls++; return {}; },
+			pGetCampaignCursor: async () => ({
+				cursor: {campaignId: "cmp", lastSequence: 3},
+				campaign: {id: "cmp"},
+				membership: {role: "player"},
+				characterRefs: [{id: "c1", revision: 7, projectionRevision: 2}],
+			}),
 			pListVisibleEvents: async () => [{sequence: 4, type: "roll.logged"}],
 		};
 		const realtime = new HubRealtime({store});
@@ -277,11 +298,18 @@ describe("hub realtime", () => {
 		realtime.addConnection({socket, account: {id: "p", displayName: "Player"}, session: {id: "s"}, membership: {id: "m", role: "player"}, campaignId: "cmp"});
 		socket.emit("message", Buffer.from(JSON.stringify({type: "resync", afterSequence: 3})));
 		await new Promise(resolve => setImmediate(resolve));
+
 		expect(socket.sent).toContainEqual({
 			type: "resync_complete",
-			snapshot: {lastSequence: 3, characters: []},
+			cursor: {campaignId: "cmp", lastSequence: 3},
+			campaign: {id: "cmp"},
+			membership: {role: "player"},
+			characterRefs: [{id: "c1", revision: 7, projectionRevision: 2}],
 			events: [{sequence: 4, type: "roll.logged"}],
 		});
+		// ADR 0011: the realtime path must not reach the character projector at all, so a
+		// second projection implementation cannot grow inside the socket.
+		expect(snapshotCalls).toBe(0);
 	});
 
 	it("dispatches claimed outbox events and marks them published", async () => {

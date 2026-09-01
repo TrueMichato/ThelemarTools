@@ -31,7 +31,7 @@ const evidence = {
 	versions: {
 		app: packageJson.version,
 		protocol: "1",
-		migration: "0003",
+		migration: "0004",
 	},
 	inputs: {
 		packageLockSha256: crypto.createHash("sha256").update(lockBytes).digest("hex"),

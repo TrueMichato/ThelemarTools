@@ -72,7 +72,7 @@ describe("campaign lifecycle and export", () => {
 		await store.pResolveTransfer({accountId: successor, campaignId: campaign.id, transferId: transfer.id, decision: "reject", idempotencyKey: "reject"});
 		const archived = await store.pArchiveCampaign({accountId: owner, campaignId: campaign.id, idempotencyKey: "archive-2"});
 		expect(archived.campaign.status).toBe("archived");
-		expect((await store.pGetCharacter({accountId: owner, characterId: source.id})).campaignId).toBeNull();
+		expect((await store.pGetCharacter({accountId: owner, characterId: source.id})).character.campaignId).toBeNull();
 		await expect(store.pCreateInvite({
 			accountId: owner,
 			campaignId: campaign.id,
@@ -103,7 +103,10 @@ describe("campaign lifecycle and export", () => {
 			idempotencyKey: "create-again",
 		})).character;
 		expect(recreated).toEqual(expect.objectContaining({id: created.id, status: "active", data: expect.objectContaining({name: "Reactivated"})}));
-		await expect(store.pGetCharacter({accountId: owner, characterId: created.id})).resolves.toEqual(expect.objectContaining({status: "active"}));
+		await expect(store.pGetCharacter({accountId: owner, characterId: created.id})).resolves.toEqual(expect.objectContaining({
+			kind: "owner_truth",
+			character: expect.objectContaining({status: "active"}),
+		}));
 		expect(store.getAuditEntries()).toContainEqual(expect.objectContaining({action: "character.reactivated", targetId: created.id}));
 		expect(store.getDomainEvents()).toContainEqual(expect.objectContaining({type: "character.reactivated", aggregateId: created.id}));
 	});

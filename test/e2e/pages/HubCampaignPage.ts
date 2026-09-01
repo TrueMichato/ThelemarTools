@@ -40,7 +40,7 @@ export class HubCampaignPage {
 		return {
 			origin,
 			"x-csrf-token": session.csrfToken,
-			"x-hub-protocol-version": "1",
+			"x-hub-protocol-version": "2",
 			"idempotency-key": crypto.randomUUID(),
 		};
 	}

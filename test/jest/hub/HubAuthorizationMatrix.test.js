@@ -41,7 +41,12 @@ describe("campaign authorization matrix", () => {
 	}
 
 	function headers (session) {
-		return {cookie: session.cookie, origin: ORIGIN, "x-csrf-token": session.csrfToken, "x-hub-protocol-version": "1", "idempotency-key": `k-${++ix}`};
+		return {cookie: session.cookie, origin: ORIGIN, "x-csrf-token": session.csrfToken, "x-hub-protocol-version": "2", "idempotency-key": `k-${++ix}`};
+	}
+
+	/** Projection-shaped reads must declare their protocol version, like mutations. */
+	function readHeaders (session) {
+		return {cookie: session.cookie, "x-hub-protocol-version": "2"};
 	}
 
 	async function campaign (session, name) {
@@ -61,7 +66,7 @@ describe("campaign authorization matrix", () => {
 			`/api/campaigns/${campaignA.id}/snapshot`,
 			`/api/campaigns/${campaignA.id}/dm-workspace`,
 		]) {
-			const response = await app.inject({method: "GET", url: path, headers: {cookie: dmB.cookie}});
+			const response = await app.inject({method: "GET", url: path, headers: readHeaders(dmB)});
 			expect([403, 404]).toContain(response.statusCode);
 		}
 		expect(campaignB.id).not.toBe(campaignA.id);
@@ -101,13 +106,26 @@ describe("campaign authorization matrix", () => {
 			headers: headers(player),
 			payload: {clientImportId: "p", campaignId: campaignA.id, schemaVersion: 1, data: {name: "Secret", notes: {backstory: "Hidden"}, hp: {current: 10}}},
 		})).json().character;
-		const dmRead = await app.inject({method: "GET", url: `/api/characters/${character.id}`, headers: {cookie: dm.cookie}});
-		expect(dmRead.json().character.data.notes.backstory).toBe("Hidden");
+		const dmRead = await app.inject({method: "GET", url: `/api/characters/${character.id}`, headers: readHeaders(dm)});
+		expect(dmRead.json().projection.kind).toBe("dm_truth");
+		expect(dmRead.json().projection.character.data.notes.backstory).toBe("Hidden");
+		// A DM sees truth beside the exact peer preview, but never the owner's raw policy.
+		expect(dmRead.json().projection.peerPreview.kind).toBe("peer_profile");
+		expect(dmRead.json().projection.character.projectionPolicy).toBeUndefined();
 
 		const other = await signIn(identities.other);
 		await app.inject({method: "POST", url: "/api/invites/redeem", headers: headers(other), payload: {token: invite.json().token}});
-		const snapshot = await app.inject({method: "GET", url: `/api/campaigns/${campaignA.id}/snapshot`, headers: {cookie: other.cookie}});
-		expect(snapshot.json().snapshot.characters[0].data.notes).toBeUndefined();
+		const snapshot = await app.inject({method: "GET", url: `/api/campaigns/${campaignA.id}/snapshot`, headers: readHeaders(other)});
+		const peer = snapshot.json().snapshot.characters[0];
+		expect(peer.kind).toBe("peer_profile");
+		expect(peer.data.notes).toBeUndefined();
+		expect(peer.ownerAccountId).toBeUndefined();
+		expect(JSON.stringify(snapshot.json())).not.toContain("Hidden");
+
+		// A peer's direct read is the same recipient-independent profile, and it matches
+		// the preview the DM was shown.
+		const peerRead = await app.inject({method: "GET", url: `/api/characters/${character.id}`, headers: readHeaders(other)});
+		expect(peerRead.json().projection).toEqual(dmRead.json().projection.peerPreview);
 	});
 
 	it("prevents spectators from creating characters or proposing actions", async () => {

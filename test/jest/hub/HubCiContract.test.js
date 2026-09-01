@@ -60,7 +60,7 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(provenanceWriter).toContain("packageLockSha256");
 		expect(provenanceWriter).toContain("archiveSha256");
 		expect(provenanceWriter).toContain("registryDigest: null");
-		expect(provenanceWriter).toContain(`migration: "0003"`);
+		expect(provenanceWriter).toContain(`migration: "0004"`);
 	});
 
 	it("isolates every E2E Compose run and records success evidence", () => {
