@@ -52,6 +52,36 @@ describe("Campaign Hub rules-policy ADR contract", () => {
 		expect(adr).toContain("Content is never auto-removed.");
 	});
 
+	it("treats every newly introduced item identity as a governed delta across routes", () => {
+		expect(adr).toContain("Introducing a new item identity is a governed delta.");
+		for (const route of [
+			"direct character document patches",
+			"DM grants/awards",
+			"party-stash creation or moves",
+			"transfers",
+			"import adjuncts",
+		]) expect(adr).toContain(route);
+		expect(adr).toMatch(/stale or\s+bypassed clients/);
+		expect(adr).toContain("must satisfy the same authoritative current source/edition policy");
+	});
+
+	it("allows routine admitted-item changes without laundering grandfather provenance", () => {
+		expect(adr).toContain("Changing quantity, equipped/attuned state, or container placement for an already-admitted identity may remain");
+		expect(adr).toMatch(/Grandfather provenance records the admitting campaign\/rules version and\s+content identity/);
+		expect(adr).toContain("a client cannot mint, rewrite, or strip it");
+		expect(adr).toMatch(/Its visible warning follows the\s+item in both containers\./);
+		expect(adr).toMatch(/The move neither deletes it nor\s+launders it into a compliant identity\./);
+	});
+
+	it("pins and rechecks item policy transactionally with atomic batches", () => {
+		expect(adr).toContain("cannot rely on picker or catalog filtering");
+		expect(adr).toContain("transaction pins/rechecks the active rules version");
+		expect(adr).toContain("returns `POLICY_VERSION_STALE` before inventory state changes");
+		expect(adr).toContain("Batch grants/awards and");
+		expect(adr).toContain("multi-item transfers are all-or-none");
+		expect(adr).toContain("no subset of item identities is added");
+	});
+
 	it("defines browser/server parity and keeps TGTT calculations in CharacterSheetState", () => {
 		expect(adr).toContain("The evaluator is a pure, data-only module usable by browser and server.");
 		expect(adr).toContain("The server is authoritative for Hub writes.");
@@ -92,5 +122,11 @@ describe("Campaign Hub rules-policy ADR contract", () => {
 		for (let gate = 1; gate <= 10; ++gate) {
 			expect(adr).toContain(`**AG-${String(gate).padStart(2, "0")}`);
 		}
+	});
+
+	it("requires cross-route inventory parity in the acceptance gates", () => {
+		expect(adr).toMatch(/AG-03[\s\S]*direct patch, grant\/award, transfer, and party-stash projections/);
+		expect(adr).toMatch(/AG-07[\s\S]*cross-route parity covers direct character\s+patch, DM grant\/award, transfer, and stash flows/);
+		expect(adr).toContain("including all-or-none multi-item batches");
 	});
 });

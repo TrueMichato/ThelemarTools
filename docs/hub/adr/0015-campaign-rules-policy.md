@@ -199,7 +199,7 @@ Policy evaluates both the complete character and the current operation:
 | Level up | Only choices introduced or replaced by the level-up must comply; pre-existing violations remain grandfathered. |
 | Quick Build | Every choice introduced by the batch must comply; pre-existing violations remain grandfathered. |
 | Respec | Every replacement choice must comply; untouched noncompliant history remains grandfathered. |
-| Routine play mutation | HP, resources, notes, conditions, inventory quantities, and other non-choice changes remain writable despite grandfathered violations. |
+| Routine play mutation | HP, resources, notes, conditions, and quantity/equipment/container changes to an already-admitted item identity remain writable despite grandfathered violations, subject to normal invariants. |
 
 Existing noncompliant characters remain playable and are visibly flagged. "Playable" includes ordinary rolls,
 rests, resource use, damage/healing, notes, and other state changes that do not introduce a governed choice.
@@ -212,6 +212,49 @@ validated again. A stale, bypassed, or incomplete browser filter cannot create a
 Content is never auto-removed. No policy activation or evaluation may delete or replace a species/race, class,
 subclass, feat, feature, spell, item, language, or stored choice. Remediation is an explicit user action. The
 system may offer rebuild/respec guidance, but it does not mutate until the player confirms a supported flow.
+
+### Inventory and item-identity boundary
+
+Policy sensitivity follows item identity, not the name of the route or the shape of the storage mutation.
+An item identity is the canonical content identity used by the item catalog (normally `name|source`, together
+with edition when the resolved entity declares one) plus provenance needed to distinguish a campaign-brew
+entity/version. Quantity, currency value, equipment/attunement state, and container position do not create a
+new content identity.
+
+An **already-admitted item identity** is one that is present in the prior authoritative character or party
+inventory state, or carries immutable grandfather provenance proving that the same identity was admitted before
+the currently active rules version. Grandfather provenance records the admitting campaign/rules version and
+content identity; a client cannot mint, rewrite, or strip it. Its representation may evolve, but it remains
+server-owned metadata and must survive character serialization, relational inventory storage, and transfer
+escrow.
+
+The boundaries are:
+
+- Changing quantity, equipped/attuned state, or container placement for an already-admitted identity may remain
+  a routine mutation, subject to inventory, lease, revision, ownership, and recalculation invariants.
+- Introducing a new item identity is a governed delta. This includes direct character document patches, DM
+  grants/awards, party-stash creation or moves, transfers, import adjuncts, batch commands, and stale or
+  bypassed clients. It must satisfy the same authoritative current source/edition policy unless the server can
+  verify explicit grandfather provenance established before that policy/version.
+- A character import, campaign attach/move, or whole-document admission may grandfather its existing item
+  identities only through the explicit compatibility/admission flow. Adding another item to that admitted
+  document later is not covered by the document's age.
+- DM grants/awards, transfers, and party-stash commands cannot rely on picker or catalog filtering. Their server
+  transaction pins/rechecks the active rules version and evaluates every introduced identity before any
+  inventory, escrow, audit, event, outbox, or receipt write commits.
+- Moving an existing grandfathered item between an eligible character and the campaign party stash preserves
+  its canonical identity, bundle/version metadata, and grandfather provenance. Its visible warning follows the
+  item in both containers. The move neither deletes it nor launders it into a compliant identity.
+- A transferred item retains its prior admission provenance. If the destination campaign/policy cannot accept
+  that provenance through an explicit cross-campaign admission flow, the transfer is rejected without removing
+  the source item.
+- A stale policy pin returns `POLICY_VERSION_STALE` before inventory state changes. Batch grants/awards and
+  multi-item transfers are all-or-none: one blocked, unknown, stale, or malformed item rejects the entire
+  policy-sensitive batch, so no subset of item identities is added.
+
+Compliance reports for grandfathered inventory violations include the item identity, current container,
+admitting rules version/provenance, and `grandfathered` disposition. Reports never expose private character
+details to an actor who lacks permission for that container.
 
 ### Shared evaluator boundary
 
@@ -232,8 +275,10 @@ rule implementations.
 
 The server is authoritative for Hub writes. For a brand-new character it evaluates the complete governed
 choice projection. For an existing character it compares the prior accepted document with the candidate and
-evaluates newly introduced or replaced choices. A routine patch with no policy-sensitive delta remains valid
-even when the full character report contains grandfathered violations.
+evaluates newly introduced or replaced choices, including item identities hidden inside document patches.
+Grant, award, transfer, and stash adapters project their transactional before/after state through the same item
+identity classifier and evaluator. A routine patch with no policy-sensitive delta remains valid even when the
+full character report contains grandfathered violations.
 
 If a policy-sensitive delta cannot be classified safely, the server rejects that delta with a stable policy
 error and a compliance report. It must not convert an evaluator failure into success. Unknown or unsupported
@@ -307,10 +352,11 @@ Every campaign page pins the complete active tuple:
 `campaignId + rulesVersion.id + rulesVersion.version + rulesVersion.schemaVersion + catalogVersion`
 
 Policy-sensitive browser submissions include the pinned `rulesVersion.id`. The server evaluates against the
-currently active version. If the pin is stale, it returns `POLICY_VERSION_STALE` with the current version and a
-fresh report; the browser refreshes candidate lists and asks the user to review the affected choice. Routine
-play mutations with no governed-choice delta are not discarded solely because a DM changed policy during the
-request.
+currently active version inside the authoritative transaction. If the pin is stale, it returns
+`POLICY_VERSION_STALE` with the current version and a fresh report; the browser refreshes candidate lists and
+asks the user to review the affected choice. No item, escrow, event, or receipt in a policy-sensitive batch is
+partially committed. Routine play mutations with no governed-choice delta are not discarded solely because a
+DM changed policy during the request.
 
 Rules schema version 1 remains readable. A one-way adapter maps its six keys to the stable TGTT catalog IDs for
 projection/reporting. The adapter does not mutate historical `rules_versions` rows and does not claim source,
@@ -365,15 +411,19 @@ gates pass:
 - **AG-02 Migration:** schema version 1 adapter fixtures; immutable historical rows; unsupported future schema
   behavior; read-compatible deploy and rollback proof.
 - **AG-03 Evaluator parity:** browser/server golden vectors cover compliant, blocking, grandfathered,
-  advisory, unknown, intrinsic grant, and contradictory cases.
+  advisory, unknown, intrinsic grant, contradictory, admitted-item, and newly-introduced-item cases across
+  direct patch, grant/award, transfer, and party-stash projections.
 - **AG-04 Character preservation:** policy activation, context switch, import, attach, copy, move, and rollback
-  never auto-remove content or persist campaign projections into character JSON.
+  never auto-remove content or persist campaign projections into character JSON; grandfather item identity,
+  bundle metadata, and admission provenance survive character/stash moves and transfer escrow.
 - **AG-05 Existing play:** a noncompliant existing character is visibly flagged and can perform routine play
-  mutations without weakening authorization, lease, revision, or schema checks.
+  mutations, including allowed changes to an admitted item, without weakening authorization, lease, revision,
+  inventory, provenance, or schema checks.
 - **AG-06 Choice surfaces:** Builder, Level Up, Quick Build, and supported Respec paths filter/explain invalid
   candidates and revalidate the final delta.
 - **AG-07 Server authority:** new-character and policy-sensitive write tests prove browser bypass, stale policy
-  pins, malformed reports, and unknown enforced rules cannot commit.
+  pins, malformed reports, and unknown enforced rules cannot commit; cross-route parity covers direct character
+  patch, DM grant/award, transfer, and stash flows, including all-or-none multi-item batches.
 - **AG-08 TGTT composition:** campaign precedence, personal fallback, master/subrule dependencies, transient
   projection, and existing `CharacterSheetState` calculations are covered without duplicate formulas.
 - **AG-09 Lifecycle/cache:** rapid campaign/rules/brew/character switches prove abort, generation fencing,
