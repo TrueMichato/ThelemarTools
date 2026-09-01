@@ -630,8 +630,11 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-connection-status")).toHaveText("Live updates connected");
 		const row = this.page.locator("#campaign-party-roster .hub-data-row").filter({hasText: characterName});
 		await expect(row).toContainText(`HP ${hp}/12`, {timeout: 15_000});
-		await expect(this.page.locator("#campaign-activity-list"))
-			.toContainText(/rolled initiative: -?\d+\./i, {timeout: 15_000});
+		const roll = this.page.locator("#campaign-activity-list .hub-activity-row")
+			.filter({hasText: characterName})
+			.filter({hasText: "Initiative"})
+			.first();
+		await expect(roll).toContainText(/Result: -?\d+/, {timeout: 15_000});
 	}
 
 	async signOutAndExpectLocalCharacter ({characterId, name}: {characterId: string; name: string}): Promise<void> {

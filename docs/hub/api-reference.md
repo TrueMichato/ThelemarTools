@@ -83,7 +83,7 @@ Path/query keys ending in `Id` must be UUID-shaped. Invalid values fail as `INVA
 | `POST /api/campaigns/:campaignId/leave` | Non-owner mutation | none | Leaves and performs the same lifecycle cleanup |
 | `GET /api/campaigns/:campaignId/context` | Active member | none | Active immutable brew/rules versions |
 | `GET /api/campaigns/:campaignId/snapshot` | Active member | none | Campaign, membership, role-shaped characters, last sequence |
-| `GET /api/campaigns/:campaignId/events` | Active member | `afterSequence>=0`, `limit` 1-500 (default 200) | Visibility-filtered ordered events |
+| `GET /api/campaigns/:campaignId/events` | Active member | `afterSequence>=0`, `limit` 1-500 (default 200) | Visibility-filtered ordered events; character-related payloads may carry bounded versioned display-name snapshots |
 | `POST /api/campaigns/:campaignId/archive` | Campaign owner mutation | none | Cancels actions/releases leases/detaches characters, or `CAMPAIGN_BUSY` |
 | `POST /api/campaigns/:campaignId/transfer-ownership` | Campaign owner mutation | `{targetAccountId}` | Changes owner and owner/target roles atomically |
 
@@ -119,7 +119,7 @@ Character data is sanitized/validated and capped at 1.5 MB after the resulting m
 
 | Method/path | Authorization | Input | Result |
 |---|---|---|---|
-| `POST /api/campaigns/:campaignId/rolls` | Active-member mutation; character owner or DM when character supplied | characterId?, formula <=200, numeric total, context <=100, visibility, detail | Durable `roll.logged` event |
+| `POST /api/campaigns/:campaignId/rolls` | Active-member mutation; character owner or DM when character supplied | characterId?, formula <=200, numeric total, context <=100, visibility, detail | Durable `roll.logged` event; activity uses a bounded semantic `detail.title` and selected detail fields |
 | `GET /api/campaigns/:campaignId/actions` | Active member | none | Actions visible to DM, actor, or target owner |
 | `POST /api/campaigns/:campaignId/actions` | DM/co-DM/player mutation; spectator denied | target character + structured effect | 201 proposed action |
 | `POST /api/campaigns/:campaignId/actions/:actionId/resolve` | Target owner or DM/co-DM mutation | decision accept/reject | Action and canonical target character |
