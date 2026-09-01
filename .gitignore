@@ -42,6 +42,7 @@ sw-injector.js
 
 # Dev scripts
 dev-*.sh
+.goals/
 5etools Thelemar State *.json
 5etools-src.code-workspace
 

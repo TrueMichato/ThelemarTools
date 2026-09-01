@@ -97,7 +97,8 @@ off-machine backup/restore evidence, monitoring, and the Phase 6H game day remai
 - Campaign Party Trackers separate live read-only projections from private manual rows, retain the last good
   projection while reconnecting, show sync timestamps and empty states, and render linked details without
   disabled mutation controls.
-- Durable roll log.
+- Durable roll log with semantic, bounded activity titles and selected authorized detail; character-related
+  events carry privacy-safe versioned display-name snapshots so historical activity survives rename/detach/archive.
 - Structured effect proposals/approval, XP/item grants, party inventory, escrowed item/currency transfers.
 - Whole-item transfers preserve Character Sheet invariants, rollback identity, and metadata-safe stack merges.
 - Character HTML is sanitized at the authority boundary; canonical documents are capped at 1.5 MB after

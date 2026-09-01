@@ -11,6 +11,7 @@ import {
 	STRUCTURED_EFFECT_TYPES,
 } from "./hub-actions.js";
 import {validateCloudCharacterData, validateCloudValue} from "./cloud-data-validation.js";
+import {createCharacterDisplayNameSnapshot, enrichEventPayload} from "./hub-event-snapshots.js";
 
 function copy (value) {
 	return value === undefined ? undefined : structuredClone(value);
@@ -306,6 +307,15 @@ export class MemoryHubStore {
 	_appendEvent ({campaignId, actorAccountId, type, aggregateType, aggregateId, aggregateRevision = null, visibility = "all_members", visibleAccountIds = null, payload = {}}) {
 		const campaign = this._campaigns.get(campaignId);
 		const sequence = this._events.filter(event => event.campaignId === campaignId).length + 1;
+		const eventPayload = enrichEventPayload({
+			payload,
+			aggregateType,
+			aggregateId,
+			getCharacterById: characterId => {
+				const character = this._characters.get(characterId);
+				return character?.campaignId === campaignId ? character : null;
+			},
+		});
 		const event = {
 			id: crypto.randomUUID(),
 			campaignId,
@@ -317,7 +327,7 @@ export class MemoryHubStore {
 			aggregateRevision,
 			visibility,
 			visibleAccountIds: copy(visibleAccountIds),
-			payload: copy(payload),
+			payload: copy(eventPayload),
 			createdAt: this._fnNow().toISOString(),
 		};
 		this._events.push(event);
@@ -478,7 +488,20 @@ export class MemoryHubStore {
 		});
 		transfer.status = "cancelled";
 		transfer.resolvedAt = this._fnNow().toISOString();
-		this._appendEvent({campaignId: transfer.campaignId, actorAccountId, type: "transfer.cancelled", aggregateType: "transfer", aggregateId: transfer.id, payload: {reason}});
+		this._appendEvent({
+			campaignId: transfer.campaignId,
+			actorAccountId,
+			type: "transfer.cancelled",
+			aggregateType: "transfer",
+			aggregateId: transfer.id,
+			payload: {
+				reason,
+				sourceKind: transfer.sourceKind,
+				sourceId: transfer.sourceId,
+				targetKind: transfer.targetKind,
+				targetId: transfer.targetId,
+			},
+		});
 	}
 
 	_removeMembershipLifecycle ({campaign, membership, actorAccountId, status}) {
@@ -500,7 +523,7 @@ export class MemoryHubStore {
 				aggregateId: action.id,
 				visibility: "explicit_accounts",
 				visibleAccountIds: [...new Set([action.actorAccountId, target?.ownerAccountId].filter(Boolean))],
-				payload: {reason: "membership_lifecycle"},
+				payload: {reason: "membership_lifecycle", targetCharacterId: action.targetCharacterId},
 			});
 		}
 		for (const transfer of this._transfers.values()) {
@@ -510,14 +533,31 @@ export class MemoryHubStore {
 				|| (transfer.targetKind === "character" && characterIdSet.has(transfer.targetId));
 			if (isAffected) this._cancelTransferForLifecycle({transfer, actorAccountId, reason: "membership_lifecycle"});
 		}
+		const characterNameSnapshots = characterIds
+			.map(characterId => {
+				const character = this._characters.get(characterId);
+				return character
+					? {characterId, ...createCharacterDisplayNameSnapshot(character.data?.name)}
+					: null;
+			})
+			.filter(Boolean);
 		for (const characterId of characterIds) {
 			const character = this._characters.get(characterId);
+			const characterNameSnapshot = createCharacterDisplayNameSnapshot(character.data?.name);
 			this._characterLeases.delete(characterId);
 			character.campaignId = null;
 			character.clientImportId = null;
 			character.revision++;
 			character.updatedAt = this._fnNow().toISOString();
-			this._appendEvent({campaignId: campaign.id, actorAccountId, type: "character.moved_out", aggregateType: "character", aggregateId: characterId, aggregateRevision: character.revision, payload: {targetCampaignId: null, reason: "membership_lifecycle"}});
+			this._appendEvent({
+				campaignId: campaign.id,
+				actorAccountId,
+				type: "character.moved_out",
+				aggregateType: "character",
+				aggregateId: characterId,
+				aggregateRevision: character.revision,
+				payload: {targetCampaignId: null, reason: "membership_lifecycle", characterNameSnapshot},
+			});
 		}
 		const workspace = [...this._dmWorkspaces.values()].find(it => it.ownerMembershipId === membership.id);
 		if (workspace) {
@@ -527,7 +567,14 @@ export class MemoryHubStore {
 		membership.status = status;
 		membership.updatedAt = this._fnNow().toISOString();
 		this._appendAudit({campaignId: campaign.id, actorAccountId, action: `membership.${status}`, targetType: "membership", targetId: membership.id, details: {accountId: membership.accountId, detachedCharacterIds: characterIds}});
-		this._appendEvent({campaignId: campaign.id, actorAccountId, type: `membership.${status}`, aggregateType: "membership", aggregateId: membership.id, payload: {accountId: membership.accountId, detachedCharacterIds: characterIds}});
+		this._appendEvent({
+			campaignId: campaign.id,
+			actorAccountId,
+			type: `membership.${status}`,
+			aggregateType: "membership",
+			aggregateId: membership.id,
+			payload: {accountId: membership.accountId, detachedCharacterIds: characterIds, characterNameSnapshots},
+		});
 		return {membership: copy(membership), removedAccountId: membership.accountId, detachedCharacterIds: characterIds};
 	}
 
@@ -805,15 +852,32 @@ export class MemoryHubStore {
 			throw new HubStoreError("CHARACTER_BUSY", `Resolve outgoing transfers before moving.`, {status: 409});
 		}
 		const sourceCampaignId = character.campaignId;
+		const characterNameSnapshot = createCharacterDisplayNameSnapshot(character.data?.name);
 		character.campaignId = campaignId;
 		character.clientImportId = null;
 		character.revision++;
 		character.updatedAt = this._fnNow().toISOString();
 		this._appendAudit({campaignId, actorAccountId: accountId, action: "character.moved", targetType: "character", targetId: character.id, details: {sourceCampaignId}});
 		if (sourceCampaignId && sourceCampaignId !== campaignId) {
-			this._appendEvent({campaignId: sourceCampaignId, actorAccountId: accountId, type: "character.moved_out", aggregateType: "character", aggregateId: character.id, aggregateRevision: character.revision, payload: {targetCampaignId: campaignId}});
+			this._appendEvent({
+				campaignId: sourceCampaignId,
+				actorAccountId: accountId,
+				type: "character.moved_out",
+				aggregateType: "character",
+				aggregateId: character.id,
+				aggregateRevision: character.revision,
+				payload: {targetCampaignId: campaignId, characterNameSnapshot},
+			});
 		}
-		this._appendEvent({campaignId, actorAccountId: accountId, type: "character.moved", aggregateType: "character", aggregateId: character.id, aggregateRevision: character.revision, payload: {sourceCampaignId}});
+		this._appendEvent({
+			campaignId,
+			actorAccountId: accountId,
+			type: "character.moved",
+			aggregateType: "character",
+			aggregateId: character.id,
+			aggregateRevision: character.revision,
+			payload: {sourceCampaignId, characterNameSnapshot},
+		});
 		return this._setReceipt({accountId, idempotencyKey, response: {character}});
 	}
 
@@ -1012,7 +1076,12 @@ export class MemoryHubStore {
 			.filter(event => event.campaignId === campaignId && event.sequence > afterSequence)
 			.filter(event => canViewEvent({event, accountId, role: membership.role}))
 			.slice(0, limit)
-			.map(copy);
+			.map(event => ({
+				...copy(event),
+				...(this._accounts.get(event.actorAccountId)?.displayName
+					? {actorDisplayName: this._accounts.get(event.actorAccountId).displayName}
+					: {}),
+			}));
 	}
 
 	async pLogRoll ({accountId, campaignId, characterId = null, visibility, payload, idempotencyKey}) {
@@ -1217,7 +1286,19 @@ export class MemoryHubStore {
 		transfer.status = decision === "accept" ? "committed" : "rejected";
 		transfer.resolvedAt = this._fnNow().toISOString();
 		this._appendAudit({campaignId, actorAccountId: accountId, action: `transfer.${transfer.status}`, targetType: "transfer", targetId: transfer.id});
-		this._appendEvent({campaignId, actorAccountId: accountId, type: `transfer.${transfer.status}`, aggregateType: "transfer", aggregateId: transfer.id, payload: {sourceId: transfer.sourceId, targetId: transfer.targetId}});
+		this._appendEvent({
+			campaignId,
+			actorAccountId: accountId,
+			type: `transfer.${transfer.status}`,
+			aggregateType: "transfer",
+			aggregateId: transfer.id,
+			payload: {
+				sourceKind: transfer.sourceKind,
+				sourceId: transfer.sourceId,
+				targetKind: transfer.targetKind,
+				targetId: transfer.targetId,
+			},
+		});
 		return this._setReceipt({accountId, idempotencyKey, response: {transfer}});
 	}
 
@@ -1364,7 +1445,20 @@ export class MemoryHubStore {
 			});
 			transfer.status = "cancelled";
 			transfer.resolvedAt = this._fnNow().toISOString();
-			this._appendEvent({campaignId: transfer.campaignId, actorAccountId: character.ownerAccountId, type: "transfer.cancelled", aggregateType: "transfer", aggregateId: transfer.id, payload: {reason: "target_lifecycle_change"}});
+			this._appendEvent({
+				campaignId: transfer.campaignId,
+				actorAccountId: character.ownerAccountId,
+				type: "transfer.cancelled",
+				aggregateType: "transfer",
+				aggregateId: transfer.id,
+				payload: {
+					reason: "target_lifecycle_change",
+					sourceKind: transfer.sourceKind,
+					sourceId: transfer.sourceId,
+					targetKind: transfer.targetKind,
+					targetId: transfer.targetId,
+				},
+			});
 		}
 	}
 

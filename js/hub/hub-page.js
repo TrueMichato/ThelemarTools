@@ -1,5 +1,6 @@
 import {HubApiClient, HubApiError} from "./hub-api-client.js";
 import {HubRealtimeClient} from "./hub-realtime-client.js";
+import {renderHubActivityRows} from "./hub-activity-render.js";
 
 const api = new HubApiClient();
 const CURRENCY_TYPES = ["cp", "sp", "ep", "gp", "pp"];
@@ -1024,63 +1025,18 @@ function renderPartyRoster ({campaignId, characters, members, session, isDm}) {
 	}));
 }
 
-function getActivityDescription ({event, characters, members}) {
-	const actor = getMemberName(members, event.actorAccountId);
-	const character = getCharacterNameById(characters, event.aggregateId);
-	const target = getCharacterNameById(characters, event.payload?.targetCharacterId);
-	switch (event.type) {
-		case "campaign.created": return `${actor} created the campaign.`;
-		case "campaign.archived": return `${actor} archived the campaign.`;
-		case "campaign.ownership_transferred": return `Campaign ownership changed to ${getMemberName(members, event.payload?.targetAccountId)}.`;
-		case "membership.joined": return `${getMemberName(members, event.payload?.accountId)} joined as ${getRoleLabel(event.payload?.role)}.`;
-		case "membership.role_changed": return `${getMemberName(members, event.payload?.accountId)} is now ${getRoleLabel(event.payload?.role)}.`;
-		case "invite.created": return `${actor} created a ${getRoleLabel(event.payload?.role)} invite.`;
-		case "invite.revoked": return `${actor} revoked an invite.`;
-		case "character.created": return `${character} joined the campaign.`;
-		case "character.reactivated": return `${character} returned to the campaign.`;
-		case "character.moved": return `${character} moved into this campaign.`;
-		case "character.moved_out": return `${character} left this campaign.`;
-		case "character.archived": return `${character} was archived.`;
-		case "character.projection.updated": return `${character} updated.`;
-		case "roll.logged": return `${actor} rolled ${event.payload?.context || event.payload?.formula || "dice"}: ${event.payload?.total ?? "result unavailable"}.`;
-		case "action.proposed": return `${actor} proposed ${getEffectDescription(event.payload?.effect)} for ${target}.`;
-		case "action.applied": return `${getEffectDescription(event.payload?.effect)} was applied to ${target}.`;
-		case "action.rejected": return `${getEffectDescription(event.payload?.effect)} for ${target} was rejected.`;
-		case "action.cancelled": return `An effect request for ${target} was cancelled.`;
-		case "transfer.reserved":
-			return `${actor} offered a transfer from ${getContainerName({kind: event.payload?.sourceKind, id: event.payload?.sourceId, characters})} to ${getContainerName({kind: event.payload?.targetKind, id: event.payload?.targetId, characters})}.`;
-		case "transfer.committed": return `${actor} accepted a transfer.`;
-		case "transfer.rejected": return `${actor} rejected a transfer.`;
-		case "transfer.cancelled": return `A transfer was cancelled.`;
-		case "xp.granted": return `${target === "Unnamed Character" ? character : target} received ${event.payload?.amount || 0} XP.`;
-		case "item.granted": return `${character} received ${event.payload?.entry?.item?.name || "an item"}.`;
-		case "brew.activated": return `${actor} published campaign homebrew version ${event.payload?.version || ""}.`.replace("version .", "homebrew.");
-		case "rules.activated": return `${actor} published campaign rules version ${event.payload?.version || ""}.`.replace("version .", "rules.");
-		default: return null;
-	}
-}
-
 function renderRecentActivity ({events, characters, members}) {
 	const list = document.getElementById("campaign-activity-list");
 	if (!list) return;
-	const rows = events
-		.map(event => ({event, description: getActivityDescription({event, characters, members})}))
-		.filter(({description}) => description)
-		.slice(-8)
-		.reverse();
+	const rows = renderHubActivityRows({
+		list,
+		events,
+		characters,
+		members,
+		documentRef: document,
+		getDateLabel,
+	});
 	setHidden(document.getElementById("campaign-activity-empty"), !!rows.length);
-	list.replaceChildren(...rows.map(({event, description}) => {
-		const row = document.createElement("div");
-		row.className = "hub-activity-row";
-		const text = document.createElement("span");
-		text.textContent = description;
-		const time = document.createElement("time");
-		time.className = "hub-data-row__meta";
-		time.dateTime = event.createdAt || "";
-		time.textContent = getDateLabel(event.createdAt);
-		row.append(text, time);
-		return row;
-	}));
 }
 
 function fillCharacterSelect (select, characters, {includeParty = false, partyInventory = null, ownerAccountId = null} = {}) {

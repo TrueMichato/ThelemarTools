@@ -54,6 +54,16 @@ describe("Hub portable deployment contract", () => {
 		expect(dockerignore).not.toContain("!data");
 	});
 
+	it("keeps event snapshot enrichment inside the packaged server tree", () => {
+		const memoryStore = read("server/src/memory-hub-store.js");
+		const postgresStore = read("server/src/postgres-hub-store.js");
+		for (const source of [memoryStore, postgresStore]) {
+			expect(source).toContain("from \"./hub-event-snapshots.js\"");
+			expect(source).not.toContain("../../js/hub/hub-event-presentation.js");
+		}
+		expect(dockerfile).toContain("COPY --chown=hub:hub server ./server");
+	});
+
 	it("orders database, migration, grants, BFF, static site, and edge services", () => {
 		for (const service of ["db:", "migrate:", "grant-roles:", "bff:", "static:", "edge:"]) expect(compose).toContain(`  ${service}`);
 		expect(compose).toContain("service_completed_successfully");

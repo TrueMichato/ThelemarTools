@@ -18,7 +18,7 @@
 | `visibility` | all_members/dm_only/actor_and_dm/explicit_accounts |
 | `visibleAccountIds` | Required only for explicit_accounts |
 | `correlationId` | Reserved; not consistently populated in V1 |
-| `payload` | Minimal client payload; never assume it is a full aggregate |
+| `payload` | Minimal client payload; never assume it is a full aggregate. Character-related events may include bounded `characterNameSnapshot`, `targetCharacterNameSnapshot`, or endpoint snapshot objects with `{version: 1, displayName}`. |
 | `createdAt` | Database timestamp |
 
 ## Current domain events
@@ -44,7 +44,7 @@
 | `character.archived` | character | all_members | empty/default | Character preserved for owner |
 | `brew.activated` | brew bundle version | all_members | version | Context consumers refetch/activate |
 | `rules.activated` | rules version | all_members | version | Context consumers refetch/activate |
-| `roll.logged` | character or campaign | caller-selected all_members/dm_only/actor_and_dm | formula, total, context, detail | Cooperative evidence, not cryptographic roll authority |
+| `roll.logged` | character or campaign | caller-selected all_members/dm_only/actor_and_dm | formula, total, context, detail | Cooperative evidence, not cryptographic roll authority. Activity presentation prefers bounded `detail.title` and selectively renders safe breakdown/result/advantage/critical/spell/ability/target fields. |
 | `action.proposed` | pending action | explicit actor+target | target id, structured effect | DMs also see explicit-account events |
 | `action.applied` | pending action | explicit actor+target | effect, target id, character revision | Character changed semantically |
 | `action.rejected` | pending action | explicit actor+target | effect, target id, character revision | No character mutation |
@@ -70,6 +70,14 @@ snapshot already contains their result:
 - applied action.
 
 Roll history and non-state workflow history are not assumed to be represented by the snapshot.
+
+### Character display-name snapshots
+
+Character-related events capture the sanitized display name at the authoritative write point. The snapshot is
+bounded and versioned so activity remains legible after a rename, detach, archive, or deletion. A viewer may use
+the snapshot only after the event has passed the existing visibility filter; no new event visibility is granted.
+Legacy events without a snapshot resolve a current authorized roster name, then an authorized account fallback, and
+finally a neutral label.
 
 ## Audit entries
 

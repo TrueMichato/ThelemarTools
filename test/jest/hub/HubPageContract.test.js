@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import {renderHubActivityRows} from "../../../js/hub/hub-activity-render.js";
 
 const read = path => fs.readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
 
@@ -117,6 +118,73 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("getContainerName({kind: transfer.sourceKind");
 		expect(source).toContain("navigator.clipboard.writeText(inviteOutput.value)");
 		expect(campaignHtml).toContain("id=\"campaign-invite-copy\"");
+	});
+
+	it("renders normalized character subjects safely and keeps activity rows usable on mobile", () => {
+		const source = read("js/hub/hub-activity-render.js");
+		expect(source).toContain("presentation.subject");
+		expect(source).toContain("presentation.subject || presentation.actorName");
+		expect(source).toContain("textContent = rollAttribution");
+		expect(source).toContain("event.type === \"roll.logged\"");
+		expect(source).not.toContain("innerHTML = presentation");
+		expect(scss).toContain(".hub-activity-row__subject");
+		expect(scss).toMatch(/@media \(width <= 720px\)[\s\S]*\.hub-activity-row\s*\{\s*grid-template-columns: 1fr/);
+	});
+
+	it("renders lifecycle subjects safely on a narrow client without raw identifiers", () => {
+		const makeElement = tagName => ({
+			tagName,
+			children: [],
+			className: "",
+			textContent: "",
+			dateTime: "",
+			append (...children) {
+				this.children.push(...children);
+			},
+		});
+		const documentRef = {createElement: makeElement};
+		const list = makeElement("div");
+		list.replaceChildren = (...children) => {
+			list.children = children;
+		};
+		const events = [
+			{
+				id: "event-archive",
+				type: "character.archived",
+				aggregateType: "character",
+				aggregateId: "character-raw-id",
+				payload: {characterNameSnapshot: {version: 1, displayName: "<img src=x onerror=alert(1)> Nyx"}},
+			},
+			{
+				id: "event-transfer",
+				type: "transfer.cancelled",
+				aggregateType: "transfer",
+				aggregateId: "transfer-raw-id",
+				payload: {
+					sourceKind: "character",
+					sourceId: "source-raw-id",
+					sourceCharacterNameSnapshot: {version: 1, displayName: "Source"},
+					targetKind: "character",
+					targetId: "target-raw-id",
+					targetCharacterNameSnapshot: {version: 1, displayName: "<script>Rook</script>"},
+				},
+			},
+		];
+		renderHubActivityRows({
+			list,
+			events,
+			characters: [],
+			members: [],
+			documentRef,
+			getDateLabel: () => "now",
+		});
+		const text = node => `${node.textContent} ${node.children.map(text).join(" ")}`;
+		expect(list.children).toHaveLength(2);
+		expect(text(list)).toContain("Nyx was archived.");
+		expect(text(list)).toContain("Rook's transfer was cancelled.");
+		expect(text(list)).not.toMatch(/<|>|event-|character-|source-|target-|transfer-/);
+		expect(list.children.every(row => row.className === "hub-activity-row")).toBe(true);
+		expect(scss).toMatch(/@media \(width <= 720px\)[\s\S]*\.hub-activity-row\s*\{\s*grid-template-columns: 1fr/);
 	});
 
 	it("uses human-readable interaction controls instead of internal inventory identifiers", () => {

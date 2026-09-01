@@ -8,7 +8,7 @@
 
 | Layer | Location | Purpose |
 |---|---|---|
-| Pure domain | `test/jest/hub/HubActions.test.js`, `HubCloudDataValidation.test.js`, `HubCampaignContent.test.js` | Effects, escrow, quotas, sanitization, rules/brew validation |
+| Pure domain | `test/jest/hub/HubActions.test.js`, `HubCloudDataValidation.test.js`, `HubCampaignContent.test.js`, `HubEventPresentation.test.js` | Effects, escrow, quotas, sanitization, rules/brew validation, privacy-safe activity normalization |
 | Repository proofs | `HubCharacterRepository.test.js`, `HubDmWorkspaceRepository.test.js` | Revision/lease/rebase/recovery semantics |
 | HTTP repositories | `HubHttpCharacterRepository.test.js`, `HubHttpDmWorkspaceRepository.test.js` | API translation, retry, canonical ids, recovery |
 | BFF/domain API | `HubServerApp.test.js`, `HubPhase1Domain.test.js` through `HubPhase4Domain.test.js`, `HubLifecycle.test.js` | Auth, campaigns, characters, content, realtime actions, lifecycle |
