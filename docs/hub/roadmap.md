@@ -29,12 +29,16 @@ criteria pass in the target environment and its release/campaign gate is intenti
 | **shipped** | Phase 6G Oracle deployment | Release `hub-staging-2026-09-01` at `8f181712` is deployed to the private Oracle Always Free environment; HTTPS, GitHub OAuth, PostgreSQL, static, BFF, API, and WebSocket smoke checks pass |
 | **active** | V1 host-operations proof | Prove scheduled timers, encrypted off-machine backup, isolated restore, and exact-release rollback |
 | **active** | V1 physical game day | Complete the one-DM/two-player session on physical devices and record the go/no-go evidence |
-| **next** | Approved V2 program | Ship the release trains below independently, respecting their dependencies and capability gates |
+| **active** | V2 operational/product foundations | V2-T0 and T1 are in implementation; V2-T2 is active architecture/contract work |
+| **active** | V2 decision-record precursors | ADR work for V2-T5 device context, V2-T6 rules policy, and V2-T8 identity providers is active |
+| **next** | V2 feature enablement | Enable each accepted train independently after its architecture, capability, and operational gates pass |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
 
 ## V1 launch closeout
 
 Phase 6G is complete. V1 has exactly two remaining launch gates; neither is an implementation phase.
+These are rollout/operations gates in parallel with V2 engineering. They gate expansion of the private pilot,
+not implementation or merging of independently safe V2 work.
 
 ### V1-G1 — host-operations proof (**active**)
 
@@ -79,8 +83,13 @@ Acceptance:
 
 ## V2 delivery rules
 
-Each train below is independently releasable once its listed dependencies and acceptance criteria pass. A train
-must not wait for unrelated V2 work, and merging a train does not silently enable it.
+Each train below is independently releasable once its listed architecture dependencies and acceptance criteria
+pass. V2 engineering does not wait for V1-G1, V1-G2, or the V1 go/no-go. A train must not wait for unrelated
+V2 work, and merging a train does not silently enable it.
+
+V2-T0 is the first operational priority and must ship before any new V2 product capability is enabled on
+Oracle. That enablement gate does not block T1/T2 implementation, ADR work, or independently safe feature code
+from being reviewed and merged behind disabled capability gates.
 
 Every train must:
 
@@ -107,32 +116,48 @@ corresponding ADR files land; add links when they do.
 
 ## Approved V2 release trains
 
-### V2-T0 — release automation (**next**)
+### V2-T0 — release automation (**active — implementation**)
 
 Purpose: make the exact source-to-Oracle promotion and rollback path repeatable before increasing product scope.
 
 Deliver:
 
 - protected, auditable promotion of an exact reviewed release artifact/tag;
+- deliberate deployment initiated by an authenticated, authorized operator after review; merge/tag creation
+  alone never changes the target environment;
 - automated migration plan/apply, readiness, smoke, provenance, backup-age, and rollback-precondition checks;
 - release evidence tying source, build, protocol, migration, tests, SBOM/provenance, deployment, and operator
   approval together;
+- application auto-rollback only when the deployed and prior application versions are both compatible with the
+  current schema;
+- expand/contract migration sequencing for future schema changes;
 - a dry-run path and a documented manual break-glass path.
 
 Acceptance:
 
 - one approved invocation promotes the exact reviewed release without rebuilding untracked code on the host;
 - failed preconditions stop before traffic changes; partial deployment fails visibly and is recoverable;
-- rollback target and migration compatibility are proven before promotion;
+- rollback target and migration compatibility are proven before promotion; an unhealthy schema-compatible
+  application rollout may return automatically to the prior application;
+- automation never reverses a migration and never restores a backup over the production/staging database;
+  incompatible recovery stops mutations and requires the explicit isolated-restore/runbook decision;
+- future migrations prove the expand/deploy/contract sequence, with contraction occurring only after every
+  supported application version has stopped using the old shape;
 - secrets are neither printed nor embedded in artifacts, commands, logs, or evidence.
 
-### V2-T1 — legible activity log (**next**)
+### V2-T1 — legible activity log (**active — implementation**)
 
 Purpose: turn durable events into a player- and DM-readable campaign history.
 
 Deliver:
 
 - plain-language actor, action, subject, target, outcome, and time for supported campaign events;
+- character display-name snapshots on every new character-related event so history survives rename, detach, and
+  deletion;
+- old-event fallback that uses the best authorized current name when available and a stable neutral label when
+  it is not;
+- `detail.title` as the primary rendered event title when present, falling back to roll category only when the
+  semantic title is absent;
 - role-filtered detail, pagination, reconnect-safe ordering, empty/error states, and accessible filtering;
 - stable semantic event presentation rather than raw internal ids or payload dumps.
 
@@ -140,45 +165,77 @@ Acceptance:
 
 - common invite, membership, character, effect, grant, inventory, transfer, and policy events are understandable
   without inspecting JSON;
+- rename, detach, and deletion do not rewrite or erase the display name captured by a new event, while historical
+  events without snapshots still render an explicit fallback;
+- a roll with `detail.title` displays that title rather than the generic roll category;
 - unauthorized/private fields never appear, including through pagination, replay, or stale clients;
 - reconnect/replay produces no duplicate, missing, or reordered visible entries;
 - desktop/mobile and keyboard/screen-reader checks pass.
 
-### V2-T2 — projection and privacy foundation (**next**)
+### V2-T2 — projection and privacy foundation (**active — architecture/contract**)
 
 Purpose: establish the versioned contract all richer live campaign features use.
 
 Deliver:
 
-- explicit allowlisted projections by viewer role, capability, and semantic entity;
-- versioned projection/event schemas with one authorization path for snapshots, realtime, and refresh;
-- field-level privacy tests and safe unknown-version behavior;
-- a documented boundary between canonical private documents and derived live views.
+- realtime character events containing only character id/revision invalidation, never character fields or a
+  projection payload;
+- authorization-scoped projection fetches after invalidation, using one authorization path for initial load,
+  refresh, and resync;
+- an owner view that is canonical truth;
+- a DM/co-DM view that exposes canonical truth plus an exact preview of what peers share;
+- one shared peer profile for all peer viewers, rather than viewer-specific ad hoc documents;
+- reviewed presets plus fixed, type-safe per-field `share`, `hide`, and `replace` overrides;
+- versioned projection schemas, field-level privacy tests, safe unknown-version behavior, and a documented
+  boundary between canonical private documents and derived live views.
 
 Acceptance:
 
 - every projected field has an owner, audience, purpose, and test;
-- snapshots, replay, realtime, and direct reads expose the same authorized shape;
+- WebSocket payloads reveal no character data beyond the authorized character id/revision invalidation;
+- owner fetches equal canonical truth, DM/co-DM fetches include truth plus the peer preview, and every peer sees
+  the same shared peer profile;
+- presets and fixed overrides cannot introduce unknown fields, invalid replacement types, or an audience wider
+  than their declared contract;
+- HTTP reads, WebSocket invalidations, logs, Party Tracker rows, targeting selectors, carry summaries, and
+  inventory summaries leak no hidden/replaced field or inferable private value;
 - unknown projection versions and revoked access fail closed while loaded private data is removed or made
   inaccessible;
 - projection generation cannot mutate or persist the canonical character/Board document.
 
-### V2-T3 — live semantic effects on the Character Sheet (**next**)
+### V2-T3 — live semantic effects on the Character Sheet (**next — feature enablement**)
 
 Dependency: V2-T2.
 
 Deliver:
 
-- approved semantic damage, healing, condition, resource, and supported modifier effects apply through typed
-  Character Sheet state operations;
-- accepted effects update derived sheet UI live and survive save/reload/reconnect;
+- DM/co-DM semantic effects auto-apply through typed Character Sheet state operations and notify the character
+  owner;
+- peer-originated effects derive from an actual ability/spell the peer can use and require target approval before
+  application;
+- stable operation ids shared across proposal, acceptance, server mutation, realtime invalidation, and local
+  reconciliation;
+- accepted semantic damage, healing, condition, resource, and supported modifier effects update derived sheet
+  UI live and survive save/reload/reconnect;
+- reconciliation that applies effect `E` to the player's current local state while advancing the accepted base
+  to the server canonical state, preserving unrelated local edits;
 - unsupported/custom effects remain explicit player work rather than guessed mutations;
-- audit, idempotency, conflict, stale-editor, and recovery behavior.
+- explicit handling for an in-flight save, reconnect/resync, lease fencing, stale editors, and access/session
+  revocation;
+- dedicated semantic-operation recovery when automatic reconciliation is unsafe, never blind reuse of the
+  current revision-conflict modal.
 
 Acceptance:
 
 - each supported effect changes the authoritative state and every affected derived display exactly once;
-- duplicate delivery, refresh, reconnect, and stale retries cannot reapply an effect;
+- DM/co-DM effects apply and notify without target approval; peer effects cannot be created from arbitrary text
+  or apply before the target accepts;
+- duplicate delivery, refresh, reconnect, stale retries, and replayed approval cannot reapply a stable operation
+  id;
+- applying `E` during unsaved local work preserves those local changes and advances the accepted base to the
+  canonical server result, so the next save cannot revert `E`;
+- in-flight save, reconnect/resync, fencing, takeover, and revocation scenarios end in an explicit consistent
+  state without opening the generic revision-conflict modal as a catch-all;
 - unsupported or policy-forbidden effects do not partially mutate a character;
 - local sheets and campaigns without the capability retain current behavior.
 
@@ -201,7 +258,7 @@ Acceptance:
 - carry rules identify their campaign policy/edition and warnings explain unsupported/custom cases;
 - permission, contention, near-limit, reconnect, rollback, and mobile-accessibility tests pass.
 
-### V2-T5 — whole-site campaign context per browser/device (**next**)
+### V2-T5 — whole-site campaign context per browser/device (**active precursor; next enablement**)
 
 Dependency: V2-T2 for privacy-safe context summaries.
 
@@ -218,7 +275,7 @@ Acceptance:
 - signed-out/local-only pages remain unchanged and never inherit stale campaign state;
 - tabs converge safely within a browser profile, while explicit campaign deep links remain deterministic.
 
-### V2-T6 — enforced campaign rules/source/species/edition policy (**next**)
+### V2-T6 — enforced campaign rules/source/species/edition policy (**active precursor; next enablement**)
 
 Dependencies: V2-T2 and V2-T5.
 
@@ -254,23 +311,29 @@ Acceptance:
 - retries cannot duplicate work and partial completion is visible and recoverable;
 - disabled downstream capabilities cannot be targeted through API or stale UI.
 
-### V2-T8 — Discord and Google identity-provider framework (**next**)
+### V2-T8 — Discord and Google identity-provider framework (**active precursor; next enablement**)
 
 Deliver:
 
 - a provider-neutral OAuth/OIDC adapter contract, stable external-subject identities, and account-linking model;
 - Discord and Google implementations with provider-specific configuration and claims validation;
-- safe link, unlink, collision, recovery, allowlist, session, audit, and deletion behavior.
+- linking only from an authenticated Hub session after fresh reauthentication;
+- safe link, unlink, collision, recovery, allowlist, invite, session-revocation, audit, export, and deletion
+  behavior across every linked identity.
 
 Acceptance:
 
 - signing in through a linked provider reaches the same Hub account without duplicating ownership or membership;
+- linking without both an authenticated session and successful reauthentication is rejected;
+- a provider subject already owned by another Hub account can never be linked, transferred, or auto-merged;
 - unlinked matching email/login strings never auto-merge accounts;
 - state, PKCE/nonce where applicable, redirect, token, issuer/audience, subject, and session-rotation tests pass;
 - losing one provider does not strand an account that retains another verified sign-in path;
+- allowlisting, invite redemption, session/device revocation, audit attribution, account export, and deletion
+  behave consistently regardless of which linked identity established the session;
 - provider rollout is separately gated and GitHub remains available until migration evidence supports a change.
 
-### V2-T9 — Campaign Overview critique and redesign (**next**)
+### V2-T9 — Campaign Overview critique and redesign (**next — feature enablement**)
 
 Dependencies: V2-T1 through V2-T7 should have stable user-facing contracts before the final redesign; the critique
 may begin earlier but must be refreshed against the accepted capabilities.
@@ -295,17 +358,23 @@ Acceptance:
 
 ```mermaid
 flowchart LR
-  G1[V1-G1 host operations] --> G2[V1-G2 physical game day]
-  G2 --> GO[V1 go/no-go]
-  GO --> T0[V2-T0 release automation]
-  GO --> T1[V2-T1 activity log]
-  GO --> T2[V2-T2 projection/privacy]
-  GO --> T8[V2-T8 provider framework]
+  subgraph Rollout[V1 rollout and operations]
+    G1[V1-G1 host operations] --> G2[V1-G2 physical game day]
+    G2 --> GO[Private-pilot expansion decision]
+  end
+  subgraph Engineering[V2 engineering in parallel]
+    T0[V2-T0 release automation]
+    T1[V2-T1 activity log]
+    T2[V2-T2 projection/privacy]
+    P13[ADR 0013 precursor] --> T5[V2-T5 whole-site context]
+    P14[ADR 0014 precursor] --> T8[V2-T8 provider framework]
+    P15[ADR 0015 precursor] --> T6[V2-T6 policy enforcement]
+  end
   T2 --> T3[V2-T3 live effects]
   T2 --> T4[V2-T4 inventory/carry/awards]
-  T2 --> T5[V2-T5 whole-site context]
+  T2 --> T5
   T2 --> T7[V2-T7 targeting]
-  T5 --> T6[V2-T6 policy enforcement]
+  T5 --> T6
   T2 --> T6
   T1 --> T9[V2-T9 overview redesign]
   T3 --> T9
@@ -313,11 +382,22 @@ flowchart LR
   T5 --> T9
   T6 --> T9
   T7 --> T9
+  T0 --> ENABLE[Gate: enable new V2 product scope on Oracle]
+  T1 -. accepted .-> ENABLE
+  T3 -. accepted .-> ENABLE
+  T4 -. accepted .-> ENABLE
+  T5 -. accepted .-> ENABLE
+  T6 -. accepted .-> ENABLE
+  T7 -. accepted .-> ENABLE
+  T8 -. accepted .-> ENABLE
+  T9 -. accepted .-> ENABLE
 ```
 
-V2-T0, T1, T2, and T8 can proceed independently after the V1 decision. V2-T3, T4, T5, and T7 can ship
-independently after T2. T6 requires both T2 and T5. T9's critique can start earlier, but the final redesign
-follows the stable product contracts to avoid designing around temporary screens.
+V1-G1/G2 intentionally have no dependency edge into V2 engineering. They gate private-pilot expansion, not
+implementation or merge. V2-T0, T1, T2, and the T5/T6/T8 ADR precursors are active in parallel. T0 is the first
+operational priority and gates enabling new V2 product scope on Oracle. V2-T3, T4, T5, and T7 can be engineered
+independently after T2's applicable contracts land; T6 requires both T2 and T5. T9's critique can start earlier,
+but the final redesign follows stable product contracts to avoid designing around temporary screens.
 
 ## Deferred horizons A-F
 
