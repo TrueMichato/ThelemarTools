@@ -302,13 +302,21 @@ Deliver:
 
 - explicit single-player, multi-player, character, and party targeting for supported DM actions;
 - audience-aware realtime/inbox/activity behavior and recipient confirmation;
-- online/offline, membership-change, cancellation, and partial-resolution semantics.
+- online/offline, membership-change, cancellation, and partial-resolution semantics;
+- a later source-cost contract for peer abilities/spells that consume a spell slot, charge, or limited use; the
+  initial cost-free/fail-closed templates do not satisfy the full "cast spells on each other" capability.
 
 Acceptance:
 
 - only authorized targets see private requests or details;
 - target sets are fixed and auditable for each command, with explicit behavior when membership changes;
 - retries cannot duplicate work and partial completion is visible and recoverable;
+- T7/full peer casting cannot be marked **shipped** while only cost-free templates exist;
+- at least one peer ability/spell with a slot, charge, or use cost commits the source cost and target effect
+  atomically exactly once;
+- reject, cancel, and expiry consume no source cost; concurrent or unavailable cost fails without any target
+  mutation;
+- source-cost and target failures remain privacy-preserving and non-enumerating;
 - disabled downstream capabilities cannot be targeted through API or stale UI.
 
 ### V2-T8 — Discord and Google identity-provider framework (**active precursor; next enablement**)
