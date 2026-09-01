@@ -1,7 +1,7 @@
 # Campaign Hub staging plan
 
-> **Status:** Planned; no managed staging environment exists yet
-> **Last reviewed:** 2026-08-25
+> **Status:** Active private Oracle staging; not yet approved for player testing
+> **Last reviewed:** 2026-08-31
 > **Owner:** Campaign Hub maintainers
 
 ## Objectives
@@ -10,6 +10,17 @@ Staging must prove the provider-portable contract with real HTTPS, GitHub OAuth,
 service workers, multiple physical devices, maintenance, monitoring, backup, and restore. It is not a demo
 environment and must not use copied production characters.
 
+## Current environment
+
+- A reused Oracle Always Free ARM VM runs the private staging stack on Ubuntu 22.04 LTS.
+- Caddy terminates public HTTPS and keeps the static site, API, OAuth, and WebSocket routes on one origin.
+- GitHub OAuth, PostgreSQL, campaign creation, and the basic deployment smoke checks pass.
+- The instance must not be stopped, resized, detached, or recreated while replacement ARM capacity is
+  unavailable; normal guest reboots are allowed.
+- The staging-baseline repair, lightweight Hub boot, Character Sheet-native campaign linking, role-aware
+  campaign operation page, and human-readable interaction controls are validated in the release candidate.
+  They must be deployed and rechecked on Oracle before inviting players.
+
 ## Environment requirements
 
 - Separate database, OAuth application, secrets, allowlist, domain, backup destination, and alerts.
@@ -17,7 +28,7 @@ environment and must not use copied production characters.
 - Immutable BFF image digest with recorded app/protocol/migration versions.
 - Same-origin static/API/auth/WebSocket routing.
 - Least-privilege runtime and migration roles.
-- Managed PITR and nightly encrypted portable backup.
+- Nightly encrypted off-machine portable backup with an isolated restore drill.
 - Maintenance worker and outbox dispatcher active.
 - Logs and metrics configured with redaction.
 - Exactly one BFF instance; autoscaling disabled until shared realtime fanout exists.
@@ -47,9 +58,11 @@ environment and must not use copied production characters.
 ### Characters and content
 
 - local-only character remains local while signed out;
-- claim/upload, canonical-id adoption, edit/save/reload;
+- non-destructive local-to-campaign copy, canonical-id adoption, edit/save/reload;
 - lease takeover and stale-writer fencing;
-- clone, move, archive, and campaign detachment;
+- detached-character Hub discovery and attachment;
+- clone-by-default reuse, compatibility-gated move, another-device move refusal, retry, and idempotent replay;
+- archive and campaign detachment;
 - campaign brew/rules in two campaign tabs without personal-brew mutation;
 - near-limit character and rejected over-limit mutation;
 - DM full view versus player projection/private notes.
@@ -65,10 +78,14 @@ environment and must not use copied production characters.
 ### Actions and inventory
 
 - online and offline structured effect;
+- damage, healing, condition, informational, and spell-slot proposals with useful spell/action context;
 - accept, reject, cancel, and DM override;
-- XP and item grant while owner is active;
+- XP and core/campaign-homebrew/custom item grants while owner is active;
 - party inventory;
-- partial stack, currency, full item, metadata-incompatible stacks;
+- source-aware partial/full stack selection and CP/SP/EP/GP/PP transfers without entering inventory IDs;
+- empty and visibly insufficient transfer rejection before reservation;
+- currency-only transfer from a character with no transferable item stacks;
+- metadata-incompatible stacks;
 - reject/cancel restores identity;
 - linked/equipped item is refused;
 - disconnect and member removal during reserved transfer.

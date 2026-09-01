@@ -1,7 +1,7 @@
 # Campaign Hub testing guide
 
 > **Status:** Current automated and real-stack coverage plus managed-staging gates
-> **Last verified:** 2026-08-25
+> **Last verified:** 2026-08-31
 > **Owner:** Campaign Hub maintainers
 
 ## Test layers
@@ -13,11 +13,11 @@
 | HTTP repositories | `HubHttpCharacterRepository.test.js`, `HubHttpDmWorkspaceRepository.test.js` | API translation, retry, canonical ids, recovery |
 | BFF/domain API | `HubServerApp.test.js`, `HubPhase1Domain.test.js` through `HubPhase4Domain.test.js`, `HubLifecycle.test.js` | Auth, campaigns, characters, content, realtime actions, lifecycle |
 | Authorization/security | `HubAuthorizationMatrix.test.js`, `HubXssContract.test.js`, `HubInviteRoleSafety.test.js`, `HubRouteContract.test.js` | Tenancy, roles, XSS, schemas, route policy |
-| Realtime | `HubRealtime.test.js`, `HubWebSocket.test.js`, `HubBroadcastSync.test.js` | Visibility, replay, presence, sockets, tabs |
-| Integration seams | Character Sheet repository/rules/roll-history tests; `HubPartyTrackerProjection.test.js` | Existing page behavior and local/Hub separation |
+| Realtime | `HubRealtime.test.js`, `HubWebSocket.test.js`, `HubBroadcastSync.test.js` | Visibility, replay, presence, observable connection state, terminal policy closure, sockets, tabs |
+| Integration seams | Character Sheet repository/rules/roll-history tests; `DmScreenHubController.test.js`; `HubPartyTrackerProjection.test.js` | Existing page behavior, Campaign DM Screen access/recovery, live/manual Party Tracker separation, and local/Hub isolation |
 | Static UI/PWA contracts | `HubPageContract.test.js`, `HubRoutePolicy.test.js`, `HubPerformanceBudget.test.js` | Required states, boot order, navigation, service-worker and fixed limits |
 | Database contract | `HubMigrationContract.test.js`, local PostgreSQL drills | Schema clauses and real migration/transaction/restore |
-| Real-stack browser | `test/e2e/hub/`, `test/e2e/pages/HubCampaignPage.ts` | Multi-user lifecycle, real Character Sheet, six-member/replay/quota/contention budgets |
+| Real-stack browser | `test/e2e/hub/`, `test/e2e/pages/HubCampaignPage.ts` | Multi-user lifecycle, Character Sheet copy/attach/clone/move, leases, keyboard focus, phone reflow, labels/touch targets, and six-member/replay/quota/contention budgets |
 | CI/supply chain | `.github/workflows/hub.yml`, `HubCiContract.test.js` | Pinned actions, deterministic gates, SBOM/image/provenance and test-auth isolation |
 
 ## Current commands
@@ -38,7 +38,10 @@ NODE_OPTIONS='--experimental-vm-modules' \
     test/jest/DmScreenInitiativeTrackerNpcAppend.test.js \
     test/jest/DmScreenLairMarkers.test.js \
     test/jest/dmscreen/DmScreenNpcTrackerUx.test.js \
+    test/jest/hub/DmScreenHubController.test.js \
+    test/jest/hub/HubHttpDmWorkspaceRepository.test.js \
     test/jest/hub/HubPartyTrackerProjection.test.js \
+    test/jest/hub/HubRealtime.test.js \
     --no-coverage --forceExit
 
 # Entire Jest/unit corpus
@@ -142,11 +145,55 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
 
 ## Phase 6G preparation evidence
 
-- Hub: 42 suites / 273 tests.
+- Current Hub gate: 45 suites / 315 tests.
 - `HubClientIp` verifies the supported header allowlist, single IPv4/IPv6 parsing, safe fallback, structured
   logging, rate-limit isolation, unsupported configuration, and mutual exclusion with proxy trust.
 - `HubWebSocket` verifies the resolved provider client address reaches WebSocket connection context.
 - `HubRealtime` verifies ping/pong liveness and termination after a missed heartbeat; `HubWebSocket` also
   verifies bounded code-1001 shutdown during plugin pre-close.
-- Exact-image real-stack Playwright remains green: 2 scenarios in 53.8 seconds, followed by BFF/database
-  restart recovery and complete resource cleanup.
+- Exact-image real-stack Playwright now covers four scenarios. The readiness journey verifies Hub discovery
+  and attachment of detached characters, non-destructive clone as the default, compatibility review before
+  an explicit move, another-device lease refusal, retry after lease release, and idempotent move replay.
+- The role-aware campaign page contract covers role gating, primary player/DM tasks, inbox and activity states,
+  disclosed administration, mutation feedback, and invite-copy behavior. Desktop DM and 390 px player layouts
+  were checked with representative data, clean consoles, and no horizontal overflow.
+- The lifecycle journey now grants a Longsword through the on-demand core item catalog, proposes and applies a
+  contextual spell-slot spend, then selects that stack and transfers it with non-zero CP/SP/EP/GP/PP. The DM
+  inbox asserts the human-readable actor, source, item, quantity, denominations, endpoints, and waiting state.
+- The item-catalog unit contract combines regular items, base items, and active campaign brew, deduplicates by
+  case-insensitive `name|source`, and surfaces loading failures without adding data files to initial Hub boot.
+- The signed-out Hub scores 100 in Lighthouse accessibility snapshots in both desktop/day and 390x844
+  mobile/night configurations. Both runs report zero failed accessibility audits.
+- Real-stack Playwright verifies the skip link moves keyboard focus to the main landmark, the Hub and campaign
+  retain a semantic `h1`, Hub-owned controls have accessible names, entry controls retain 44 px targets, and
+  signed-out/campaign layouts do not overflow at 390x844 portrait or 844x390 landscape.
+- The Character Sheet campaign flow verifies that opening the campaign panel moves focus to its destination
+  picker and closing it restores focus to the replacement toggle.
+- Failure-state hardening classifies fetch rejection, malformed success, and unreadable 503 responses without
+  exposing browser-specific errors. Campaign UI contracts cover offline retention, reconnect refresh, direct
+  protocol reload, terminal read-only access state, size/safety validation, insufficient transfer/resource,
+  lease, and conflict copy.
+- Real-stack lifecycle coverage now proves offline/reconnect posture, protocol-update recovery, an insufficient
+  spell-slot action followed by rejection, client-side insufficient-currency feedback, and read-only state
+  after live session and membership revocation.
+- Realtime campaign coverage proves that accepted Character Sheet HP edits and initiative rolls reach the DM
+  roster/activity view, a second device is initially read-only, lease takeover fences the stale writer, and
+  campaign pages react immediately to session or membership revocation.
+- Campaign snapshot consumers render `character.projection.updated` payloads immediately and fence older
+  in-flight snapshot responses with the campaign event sequence, so an authoritative refresh cannot regress a
+  newer visible projection. A single 10-second client watchdog requests an authoritative snapshot while the
+  socket remains live, closing the gap where a missed outbox delivery could otherwise leave stale data visible.
+- Moved-character browser coverage opens the old campaign URL and proves it canonicalizes before campaign
+  context activation. Journey Tracker regressions prove linked campaign participants and their activity/slot
+  references remain ephemeral.
+- Transfer acceptance refreshes canonical character documents, shared inventory, balances, source/target/item
+  pickers, and the inbox together; the lifecycle journey proves the accepted item is immediately selectable
+  from party inventory without reloading.
+- The saturation scenario runs after the interactive journeys, writes 500 rolls, exercises six members, large
+  character documents and transfer contention, then waits for the transactional outbox to drain completely
+  before cleanup.
+- The current four-scenario PostgreSQL/HTTPS run passes in 3.0 minutes and still recovers from independent BFF
+  and database restarts, passes production-entry-point smoke, and removes its isolated resources.
+- Oracle operations contracts cover persistent systemd timers, host-readable encrypted backup output,
+  non-destructive off-machine pulls, readiness/WebSocket/TLS/host/Compose/operational-metric checks, and the
+  isolated restore procedure.

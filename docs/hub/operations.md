@@ -1,12 +1,14 @@
 # Campaign Hub operations
 
-> **Status:** Current local procedures; managed-provider runbooks pending Phase 6E/G
-> **Last verified:** 2026-08-24
+> **Status:** Current portable procedures plus Oracle host installation runbook
+> **Last verified:** 2026-08-31
 > **Owner:** Campaign Hub maintainers
 
-The commands below have been exercised locally against PostgreSQL 17. They do not by themselves meet the
-private-launch recovery target. Managed PITR, scheduled encrypted backup, monitoring, maintenance, provider
-roles, and drilled runbooks remain continuation work.
+The commands below have been exercised locally against PostgreSQL 17. The reused Oracle deployment uses
+nightly encrypted portable backups rather than managed PITR. Installation, off-machine copying, monitoring,
+and the isolated restore drill are defined in
+[Oracle host operations](runbooks/oracle-operations.md); the resulting evidence must still be produced on the
+live host before private launch.
 
 ## Local/initial setup
 
@@ -34,8 +36,8 @@ The process refuses to listen until PostgreSQL is reachable and the required led
 
 ## Backup
 
-Production should enable provider-managed point-in-time recovery before the first cloud character is
-accepted. The repository command creates an additional portable custom-format snapshot:
+The Oracle deployment creates encrypted portable snapshots through the `backup` Compose profile. The
+unencrypted command below remains a local development reference only:
 
 ```bash
 DATABASE_URL=... npm run hub:backup -- backups/hub-YYYY-MM-DD.dump
@@ -120,14 +122,10 @@ use the schema owner. The backup command should use the read-only backup role wh
 
 ## Current launch gaps
 
-- provider scheduling/alerting for maintenance/backup is not yet configured;
-- no dedicated BFF image/reference same-origin Compose stack;
-- no separate migration/runtime/backup database roles;
-- no scheduled maintenance;
-- no provider dashboard/alert implementation;
-- no managed PITR/nightly schedule configuration;
-- no provider restore drill;
-- no invite/member/session/account lifecycle administration;
-- no real-stack browser/load/fault CI.
+- install and enable the checked-in Oracle maintenance, backup, and monitor timers;
+- schedule the off-machine pull on a second trusted computer;
+- complete and record the first Oracle isolated restore drill;
+- connect the heartbeat/failure URLs or an equivalent alert receiver;
+- rehearse rollback against the exact player-test release.
 
 See [private-v1-roadmap.md](private-v1-roadmap.md) and [runbooks](runbooks/README.md).

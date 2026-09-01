@@ -154,8 +154,13 @@ removed by Character Sheet serialization.
 - Each DM membership owns a private Board workspace.
 - The workspace is one revisioned/fenced Board blob.
 - Recovery drafts are scoped by account/workspace to prevent cross-account leakage.
+- Campaign identity and DM/co-DM authorization are checked before the private Board blob is loaded.
+- A focused Campaign DM Screen controller combines workspace save/conflict state with observable realtime
+  connection state. Policy closure, role loss, membership removal, and archive block the Board instead of
+  silently leaving private controls active.
 - Live campaign character projections are injected outside serialized Board state.
-- Linked Party Tracker rows are read-only and cannot be edited into duplicate local characters.
+- Linked Party Tracker rows use a static read-only detail view, are visually separated from private manual
+  rows, and cannot be edited into duplicate local characters.
 - Journey Tracker consumes only the Party Tracker projection allowed by existing board integration.
 
 ## Deployment boundary

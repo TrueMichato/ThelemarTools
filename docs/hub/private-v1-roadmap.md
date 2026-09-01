@@ -1,8 +1,8 @@
 # Campaign Hub private-V1 launch roadmap
 
 > **Status:** Approved continuation plan
-> **Current phase:** Phase 6G provider recommendation awaiting approval
-> **Last reviewed:** 2026-08-25
+> **Current phase:** Phase 6G live Oracle staging and player-test readiness
+> **Last reviewed:** 2026-08-31
 > **Owner:** Campaign Hub maintainers
 
 ## Scope
@@ -14,7 +14,7 @@ Decisions:
 
 - provider-portable OCI/Compose contract before provider selection;
 - existing root Dockerfile remains static-site only;
-- managed PITR plus nightly encrypted portable backup;
+- nightly encrypted off-machine portable backup; no managed PITR on the selected free-tier host;
 - RPO <=24 hours and RTO <=4 hours;
 - user-visible campaign history retained until campaign/account deletion;
 - technical records pruned on short schedules;
@@ -138,7 +138,7 @@ Evidence:
 - six active members, 500-event replay, near-limit character and transfer-contention budgets;
 - BFF and database restart/readiness recovery.
 
-## Phase 6G — managed staging
+## Phase 6G — private Oracle staging
 
 Decision progress:
 
@@ -146,8 +146,16 @@ Decision progress:
 - DigitalOcean App Platform + Managed PostgreSQL recommended at an estimated $20-30/month, then not adopted;
 - a $0 recurring-cost constraint was set; free tiers re-evaluated and Oracle Cloud Always Free selected;
 - ADR 0010 accepted (supersedes ADR 0009); public Compose overlay and provisioning runbook added;
-- provider client-IP adapter and 25-second WebSocket heartbeat implemented; live ingress evidence pending;
-- no billable resource, domain, OAuth app, registry, or secret has been created.
+- provider client-IP adapter and 25-second WebSocket heartbeat implemented;
+- the existing Foundry VM was safely repurposed on Ubuntu 22.04 LTS because replacement ARM capacity was
+  unavailable;
+- private same-origin HTTPS, GitHub OAuth, PostgreSQL, static, BFF, and WebSocket staging is live;
+- the release candidate has a role-aware campaign operation page with player/DM task ordering, a permission-
+  aware inbox, recent activity, copyable invites, and secondary administration disclosures;
+- campaign interactions use source-aware item stacks, every currency denomination, contextual structured
+  effects including spell-slot spending, human-readable inbox entries, and a lazily loaded DM item catalog;
+- initial smoke checks pass; release-candidate redeploy, off-machine restore evidence, monitoring, and alerts
+  remain before the player test.
 
 Deliver:
 

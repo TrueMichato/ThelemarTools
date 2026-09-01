@@ -3,9 +3,9 @@
 The Campaign Hub is an optional online layer over the existing local-first 5etools experience.
 Signed-out character sheets, homebrew, and DM screens remain supported and do not use hub storage.
 
-> **Implementation:** Private invite-only V1 through Phase 6F
-> **Deployment:** Not yet hosted; managed staging and launch validation remain
-> **Last verified:** 2026-08-25
+> **Implementation:** Private invite-only V1 plus player-test readiness through role-aware campaign workflows
+> **Deployment:** Private Oracle staging is live; the one-DM/two-player pilot is not yet approved
+> **Last verified:** 2026-08-31
 > **Owner:** Campaign Hub maintainers
 
 ## Start here
@@ -49,6 +49,8 @@ Documents labeled **planned**, **pending**, or **not implemented** are not curre
 - Campaign content: immutable brew/rules versions activated as non-persisted overlays.
 - Realtime: committed outbox rows -> visibility-filtered WebSocket events; snapshots/replay recover gaps.
 - Multiplayer commands: structured effects, grants, party inventory, and escrowed item/currency transfers.
+- Campaign controls use character/item names rather than internal IDs, expose CP/SP/EP/GP/PP, and load the core
+  plus campaign-homebrew item catalog only when a DM opens it.
 - Local mode: unchanged local Character Sheet/DM Screen repositories and personal brew.
 
 | Concern | Existing local path | Hub path |
@@ -57,6 +59,27 @@ Documents labeled **planned**, **pending**, or **not implemented** are not curre
 | Homebrew | `BrewUtil2.pSetBrew()` personal persistence | `HubBrewContext` temporary overlay |
 | DM screen | `DMSCREEN_STORAGE` Board blob | per-membership `HubDmWorkspaceRepository` |
 | API/auth | ordinary network fallback | explicit service-worker NetworkOnly route |
+
+## Character campaign workflow
+
+The Character Sheet campaign control is the canonical place to add an existing character to a campaign:
+
+1. A local character remains local while signed out. After sign-in, **Create cloud copy** saves the local
+   character first, creates a separate campaign character, and leaves the local original unchanged.
+2. A campaign character copied to another campaign is cloned by default. The original stays in its current
+   campaign and the two characters do not share later changes.
+3. Moving an attached cloud character is deliberately secondary. The sheet first compares the source and
+   destination rules and homebrew, explains the consequences, and requires an explicit checkbox confirmation.
+   A move preserves the character id, cancels pending incoming actions, and creates no duplicate.
+4. Membership removal or campaign lifecycle changes can leave an owned cloud character detached rather than
+   deleting it. `hub.html` lists these as **Cloud characters between campaigns**; opening one allows the same
+   cloud character to join an eligible campaign.
+5. The current browser releases only its own editor lease before a move. A lease held by another device blocks
+   the operation without opening the normal conflict-takeover dialog; the character stays in its source
+   campaign and the player can retry after that editor closes or expires.
+
+Copy, attach, and move commands reuse an idempotency key when retried, so a lost response cannot create a
+second character or apply the move twice. Local character JSON does not gain Hub ownership metadata.
 
 ## Architecture decisions
 
