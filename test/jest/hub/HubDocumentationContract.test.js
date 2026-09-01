@@ -59,9 +59,122 @@ describe("Campaign Hub documentation contract", () => {
 
 		const index = fs.readFileSync(path.join(DOCS_ROOT, "README.md"), "utf8");
 		for (const adr of adrs) {
-			expect(fs.readFileSync(path.join(adrDir, adr), "utf8")).toMatch(/^Status:/m);
+			const markdown = fs.readFileSync(path.join(adrDir, adr), "utf8");
+			expect(markdown).toMatch(/^Status:/m);
 			expect(index).toContain(`(adr/${adr})`);
 		}
+	});
+
+	it("locks the authorization-scoped projection and privacy decision", () => {
+		const markdown = fs.readFileSync(
+			path.join(DOCS_ROOT, "adr/0011-authorization-scoped-character-projections.md"),
+			"utf8",
+		);
+
+		for (const anchor of [
+			"server/src/projections.js",
+			"server/src/realtime.js",
+			"js/dmscreen/dmscreen-hub-controller.js",
+			"Owner truth",
+			"DM truth",
+			"Peer profile",
+			"recipient-independent",
+			"character.projection.invalidated",
+			"metadata-only",
+			"authorization-scoped",
+			"HTTP fetch",
+			"editable owner Character Sheet must never",
+			"{\"projectionRevision\": 4}",
+			"carries no projected character",
+			"PROJECTION_POLICY_INVALID",
+			"Implementation: Contract only.",
+		]) expect(markdown).toContain(anchor);
+
+		for (const mode of ["`share`", "`hide`", "`replace`"]) expect(markdown).toContain(mode);
+		for (const preset of ["`table`", "`minimal`", "`open`", "`private`"]) expect(markdown).toContain(preset);
+		for (const field of [
+			"`identity`",
+			"`species`",
+			"`classes`",
+			"`abilities`",
+			"`saves`",
+			"`skills`",
+			"`ac`",
+			"`hp`",
+			"`speed`",
+			"`senses`",
+			"`conditions`",
+			"`diseases`",
+			"`exhaustion`",
+			"`inventorySummary`",
+			"`carrySummary`",
+		]) expect(markdown).toContain(field);
+
+		for (const boundary of [
+			"**HTTP:**",
+			"**WebSocket:**",
+			"**Activity log:**",
+			"**Party Tracker:**",
+			"**Targeting:**",
+			"**Inventory and carry:**",
+		]) expect(markdown).toContain(boundary);
+	});
+
+	it("locks the semantic-operation identity, approval, and rebase decision", () => {
+		const markdown = fs.readFileSync(
+			path.join(DOCS_ROOT, "adr/0012-idempotent-semantic-character-operations.md"),
+			"utf8",
+		);
+
+		for (const anchor of [
+			"server/src/hub-actions.js",
+			"js/hub/hub-http-character-repository.js",
+			"CharacterSheet._saveCurrentCharacter()",
+			"`commandId`",
+			"`operationId`",
+			"`eventId`",
+			"`IDEMPOTENCY_KEY_REUSED`",
+			"DM, co-DM, or an allowlisted",
+			"internal server workflow",
+			"free-authored operation kind or arguments",
+			"`sourceCharacterId`",
+			"`sourceEntity`",
+			"`effectTemplateId`",
+			"`choice`",
+			"stable entity identity",
+			"server, not the peer, derives",
+			"actually has the source",
+			"Target approval is consent",
+			"`SOURCE_COST_UNSUPPORTED`",
+			"No actor resource is reserved",
+			"`sourceDisplaySnapshot`",
+			"`targetDisplaySnapshot`",
+			"`effectDisplaySnapshot`",
+			"`SOURCE_OR_TARGET_UNAVAILABLE`",
+			"same provenance, derivation, validation, expiry, and approval path",
+			"Monster/NPC sources",
+			"area/multi-target orchestration",
+			"`hp.damage`",
+			"`hp.heal`",
+			"`condition.add`",
+			"`condition.remove`",
+			"`spell_slot.spend`",
+			"`spell_slot.restore`",
+			"R = E(B)",
+			"F = E(L)",
+			"diff(R, F)",
+			"DM/co-DM operation",
+			"source-derived peer proposal always enters `proposed`",
+			"`LEASE_FENCED`",
+			"`CHARACTER_CONFLICT`",
+			"`CHARACTER_LIVE_CONFLICT`",
+			"replay watermark",
+			"revocation",
+			"post-clamp effective delta",
+			"bounded, non-null expiry",
+			"rejection of peer-authored `kind`",
+			"Implementation: Contract only.",
+		]) expect(markdown).toContain(anchor);
 	});
 
 	it("does not contain broken relative Markdown links", () => {
