@@ -95,6 +95,7 @@ second character or apply the move twice. Local character JSON does not gain Hub
 - [ADR 0010: Oracle Cloud Always Free hosting](adr/0010-oracle-always-free-hosting.md)
 - [ADR 0011: authorization-scoped character projections](adr/0011-authorization-scoped-character-projections.md) — contract only
 - [ADR 0012: idempotent semantic character operations](adr/0012-idempotent-semantic-character-operations.md) — contract only
+- [ADR 0013: device-scoped active campaign context](adr/0013-device-scoped-active-campaign-context.md) — contract only
 
 ADRs 0001-0008 describe implemented portable architecture and launch-readiness decisions. ADR 0009 proposed
 a paid managed provider and was superseded on cost grounds by ADR 0010, which selects Oracle Cloud Always
