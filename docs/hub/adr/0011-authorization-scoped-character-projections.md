@@ -136,6 +136,12 @@ whole source object merely because its top-level key is allowed.
 `EntityLabel`, `SafeAssetRef`, skill/rank values, movement keys, numeric bounds, string lengths, and collection
 limits are closed schemas in the implementation. Unknown properties fail validation.
 
+Derived statistics (`abilities`, `saves`, `skills`, `ac`) are the character's **baseline**: the values its own
+sheet shows with no temporary effect active. Active states, combat stances and ability substitutions are
+persisted and do emit invalidations, so they could be projected; they are excluded as a product decision,
+because a peer looking up a character wants what it is rather than what it is doing this round. Implementations
+must read these values from the authoritative sheet calculation rather than reimplementing it.
+
 Policy writes validate the preset, every override, and every replacement value before commit. Invalid input
 returns a stable validation error and does not change the last valid policy. If persisted policy cannot be
 validated, peer projection fails closed: peers receive no data fields, owner/DM management receives

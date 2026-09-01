@@ -9,6 +9,7 @@ import {
 	getPolicyNotAvailableError,
 	assertPeerTargetable,
 	canViewCharacterEventActor,
+	canViewSharedCharacterEvent,
 	redactEventActor,
 	stripProjectionPolicy,
 	isPeerVisibleIdentity,
@@ -1250,7 +1251,8 @@ export class MemoryHubStore {
 				},
 				accountId,
 				role: membership.role,
-			}));
+			}))
+			.filter(Boolean);
 	}
 
 	/**
@@ -1261,6 +1263,9 @@ export class MemoryHubStore {
 	redactEventForViewer ({event, accountId, role}) {
 		if (event.visibility !== "all_members" || event.aggregateType !== "character") return event;
 		const character = this._characters.get(event.aggregateId) || null;
+		// A hidden character contributes no shared rows at all, so no adjacent membership
+		// event can be composed with one to recover the owner association.
+		if (!canViewSharedCharacterEvent({character, accountId, role})) return null;
 		return canViewCharacterEventActor({character, accountId, role, actorAccountId: event.actorAccountId})
 			? event
 			: redactEventActor(event);

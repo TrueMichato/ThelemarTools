@@ -1,4 +1,5 @@
 import {HubStoreError} from "./hub-store-error.js";
+import {getDerivedStats} from "./character-derived-stats.js";
 
 /**
  * Authorization-scoped character projections (ADR 0011).
@@ -168,121 +169,11 @@ function toEntityLabel (value) {
 //  View model derivation
 /* -------------------------------------------- */
 
-function getTotalLevel (data) {
-	if (!Array.isArray(data.classes)) return 1;
-	const total = data.classes.reduce((acc, cls) => acc + (toFiniteNumber(cls?.level, {min: 0, max: 20, isInteger: true}) || 0), 0);
-	return Math.max(1, Math.min(20, total || 1));
-}
-
-function getProficiencyBonus (data) {
-	const override = toFiniteNumber(data.overrides?.proficiencyBonus, {min: 0, max: 20, isInteger: true});
-	if (override != null && data.overrides?.proficiencyBonus != null) return override;
-	return Math.floor((getTotalLevel(data) - 1) / 4) + 2;
-}
-
-/**
- * Ability totals, not stored base scores. Mirrors
- * `PartyTrackerImporter._computeAbilities` — a stored `abilities` map holds base values
- * and every bonus source lives elsewhere in the document.
- */
-function getAbilityScores (data) {
-	const out = {};
-	for (const ability of ABILITY_KEYS) {
-		const base = toFiniteNumber(data.abilities?.[ability], {min: 0, max: MAX_ABILITY_SCORE, isInteger: true}) ?? 10;
-		const racial = toFiniteNumber(data.abilityBonuses?.[ability], {min: -MAX_ABILITY_SCORE, max: MAX_ABILITY_SCORE, isInteger: true}) || 0;
-		const feature = toFiniteNumber(data.customModifiers?.abilityScores?.[ability], {min: -MAX_ABILITY_SCORE, max: MAX_ABILITY_SCORE, isInteger: true}) || 0;
-		const direct = toFiniteNumber(data.directAbilityBonuses?.[ability], {min: -MAX_ABILITY_SCORE, max: MAX_ABILITY_SCORE, isInteger: true}) || 0;
-		const item = toFiniteNumber(data.itemAbilityOverrides?.bonus?.[ability], {min: -MAX_ABILITY_SCORE, max: MAX_ABILITY_SCORE, isInteger: true}) || 0;
-		let computed = base + racial + feature + direct + item;
-		for (const staticValue of [
-			data.itemAbilityOverrides?.static?.[ability],
-			data.customModifiers?.abilityScoreStatic?.[ability],
-		]) {
-			const parsed = toFiniteNumber(staticValue, {min: 0, max: MAX_ABILITY_SCORE, isInteger: true});
-			if (parsed != null && staticValue != null && parsed > computed) computed = parsed;
-		}
-		out[ability] = Math.max(1, Math.min(30, computed));
-	}
-	return out;
-}
-
-function getAbilityModifier (score) {
-	return Math.floor((score - 10) / 2);
-}
-
-function getSaveProficiencies (data) {
-	const out = Object.fromEntries(ABILITY_KEYS.map(ability => [ability, false]));
-	const source = data.saveProficiencies;
-	if (Array.isArray(source)) {
-		for (const ability of source) if (ABILITY_KEYS.includes(ability)) out[ability] = true;
-	} else if (source && typeof source === "object") {
-		for (const ability of ABILITY_KEYS) out[ability] = !!source[ability];
-	}
-	return out;
-}
-
 function getSkillRank (level) {
 	if (level >= 2) return "expertise";
 	if (level >= 1) return "proficient";
 	if (level > 0) return "half";
 	return "none";
-}
-
-const MAX_MODIFIER = 99;
-
-function toModifier (value) {
-	return toFiniteNumber(value, {min: -MAX_MODIFIER, max: MAX_MODIFIER}) || 0;
-}
-
-function getAbilitySuffix (ability) {
-	return `${ability.charAt(0).toUpperCase()}${ability.slice(1)}`;
-}
-
-/**
- * Persisted, unconditional save bonuses, mirroring `CharacterSheetState.getSaveMod()`:
- * `customModifiers.savingThrows`, a blanket item bonus, a per-ability item bonus, and
- * Paladin Aura of Protection.
- *
- * The blanket item term uses `||`, not `??`, to match the sheet: a seeded
- * `itemBonuses.savingThrow: 0` must fall through to the legacy `saves` key rather than
- * making it unreachable.
- *
- * Transient contributions — active states, combat stances, ability substitutions — are
- * deliberately excluded: a projection describes the character, not whatever is toggled on
- * right now. See docs/hub/data-lifecycle.md for the full reconciliation.
- */
-function getPersistedSaveBonus (data, ability, abilities) {
-	const custom = toModifier(data.customModifiers?.savingThrows?.[ability]);
-	const blanketItem = toModifier(data.itemBonuses?.savingThrow || data.itemBonuses?.saves);
-	const perAbilityItem = toModifier(data.itemBonuses?.[`savingThrow${getAbilitySuffix(ability)}`]);
-	return custom + blanketItem + perAbilityItem + getAuraOfProtectionBonus(data, abilities);
-}
-
-/** Paladin 6+ adds their Charisma modifier to every save. */
-function getAuraOfProtectionBonus (data, abilities) {
-	const isAuraPaladin = (Array.isArray(data.classes) ? data.classes : [])
-		.some(cls => `${cls?.name || ""}`.toLowerCase() === "paladin" && (toFiniteNumber(cls?.level, {min: 0, max: 20, isInteger: true}) || 0) >= 6);
-	return isAuraPaladin ? Math.max(0, getAbilityModifier(abilities.cha)) : 0;
-}
-
-/**
- * Persisted, unconditional skill bonuses, mirroring
- * `CharacterSheetState._getSkillModResolved()`: the per-skill and "all skills" custom
- * modifiers, a blanket and per-ability item ability-check bonus, and the custom
- * ability-check modifier — a skill check *is* an ability check.
- */
-function getPersistedSkillBonus (data, skill) {
-	const ability = SKILL_TO_ABILITY[skill];
-	const custom = toModifier(data.customModifiers?.skills?.[skill]) + toModifier(data.customModifiers?.skills?._all);
-	const itemCheck = toModifier(data.itemBonuses?.abilityCheck) + toModifier(data.itemBonuses?.[`abilityCheck${getAbilitySuffix(ability)}`]);
-	const customCheck = toModifier(data.customModifiers?.abilityChecks?.[ability]);
-	return custom + itemCheck + customCheck;
-}
-
-/** Jack of All Trades grants half proficiency on skills the character is not trained in. */
-function hasJackOfAllTrades (data) {
-	return (Array.isArray(data.features) ? data.features : [])
-		.some(feature => `${feature?.name || ""}`.toLowerCase().includes("jack of all trades"));
 }
 
 function getInventoryEntries (data) {
@@ -312,9 +203,9 @@ export function buildCharacterViewModel (characterData) {
 		? characterData
 		: {};
 
-	const abilities = getAbilityScores(data);
-	const proficiencyBonus = getProficiencyBonus(data);
-	const saveProficiencies = getSaveProficiencies(data);
+	// Derived statistics come from the authority the player reads, not from a port of it.
+	const derived = getDerivedStats({characterData: data, abilityKeys: ABILITY_KEYS, skillKeys: SKILL_KEYS});
+	const abilities = derived?.abilities || Object.fromEntries(ABILITY_KEYS.map(ability => [ability, 10]));
 
 	const identity = {name: toLabel(data.name) || "Unnamed Character"};
 	const pronouns = toLabel(data.pronouns, {maxLength: 40});
@@ -339,30 +230,12 @@ export function buildCharacterViewModel (characterData) {
 		})
 		.filter(Boolean);
 
-	const saves = Object.fromEntries(ABILITY_KEYS.map(ability => {
-		const proficient = saveProficiencies[ability];
-		const modifier = getAbilityModifier(abilities[ability])
-			+ (proficient ? proficiencyBonus : 0)
-			+ getPersistedSaveBonus(data, ability, abilities);
-		return [ability, {modifier, proficient}];
-	}));
+	const saves = derived?.saves || {};
+	const skills = Object.fromEntries(Object.entries(derived?.skills || {})
+		.map(([skill, entry]) => [skill, {modifier: entry.modifier, rank: getSkillRank(entry.level)}]));
 
-	const isJackOfAllTrades = hasJackOfAllTrades(data);
-	const skills = Object.fromEntries(SKILL_KEYS.map(skill => {
-		const level = toFiniteNumber(data.skillProficiencies?.[skill], {min: 0, max: 2}) || 0;
-		const ability = SKILL_TO_ABILITY[skill];
-		const trained = level === 0 && isJackOfAllTrades
-			? Math.floor(proficiencyBonus / 2)
-			: level * proficiencyBonus;
-		const modifier = Math.trunc(
-			getAbilityModifier(abilities[ability])
-			+ trained
-			+ getPersistedSkillBonus(data, skill),
-		);
-		return [skill, {modifier, rank: getSkillRank(level)}];
-	}));
-
-	let acValue = toFiniteNumber(data.ac, {min: 0, max: MAX_AC, isInteger: true});
+	let acValue = derived?.ac == null ? null : toFiniteNumber(derived.ac, {min: 0, max: MAX_AC, isInteger: true});
+	if (acValue == null) acValue = toFiniteNumber(data.ac, {min: 0, max: MAX_AC, isInteger: true});
 	if (acValue == null && data.ac && typeof data.ac === "object") {
 		const base = toFiniteNumber(data.ac.base, {min: 0, max: MAX_AC, isInteger: true}) ?? 10;
 		const itemBonus = toFiniteNumber(data.ac.itemBonus, {min: -MAX_AC, max: MAX_AC, isInteger: true}) || 0;
@@ -810,6 +683,28 @@ export function canViewCharacterEventActor ({character, accountId, role, actorAc
 export function redactEventActor (event) {
 	const {actorAccountId, actorDisplayName, ...rest} = event;
 	return {...rest, actorAccountId: null};
+}
+
+/**
+ * Whether a shared character event may be shown to this viewer at all.
+ *
+ * Redacting the actor is not sufficient on its own. Lifecycle events compose: a hidden
+ * character's `character.moved_out` lands immediately before the `membership.left` /
+ * `membership.removed` that names the departing member, and the membership event is
+ * legitimate roster news that cannot be sanitised away — even without its payload, its
+ * aggregate is a membership id a peer can resolve through the member list. Two adjacent
+ * rows therefore map the hidden character to its owner and retroactively attribute its
+ * whole activity history.
+ *
+ * So a character whose identity its owner does not share contributes no shared activity
+ * rows. Nothing is lost: without the identity those rows could only ever have read
+ * "A character updated".
+ */
+export function canViewSharedCharacterEvent ({character, accountId, role}) {
+	if (!character) return true;
+	if (character.ownerAccountId === accountId) return true;
+	if (["dm", "co_dm"].includes(role)) return true;
+	return isPeerVisibleIdentity(character);
 }
 
 /** True when peers can see who this character is, and therefore may target it. */export function isPeerVisibleIdentity (character) {

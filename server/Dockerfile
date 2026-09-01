@@ -39,6 +39,14 @@ COPY --from=dependencies --chown=hub:hub /app/node_modules ./node_modules
 COPY --chown=hub:hub package.json ./
 COPY --chown=hub:hub server ./server
 COPY --chown=hub:hub js/hub/hub-json-patch.js ./js/hub/hub-json-patch.js
+# Character projections read derived statistics from the authoritative Character Sheet
+# calculation rather than reimplementing it, so the server needs those modules. All four
+# are pure JavaScript on this path; `lib/ace.js` is behind a lazy import that the server
+# never reaches.
+COPY --chown=hub:hub js/parser.js ./js/parser.js
+COPY --chown=hub:hub js/utils.js ./js/utils.js
+COPY --chown=hub:hub js/charactersheet/charactersheet-state.js ./js/charactersheet/charactersheet-state.js
+COPY --chown=hub:hub js/charactersheet/charactersheet-class-utils.js ./js/charactersheet/charactersheet-class-utils.js
 
 USER 10001:10001
 EXPOSE 5052

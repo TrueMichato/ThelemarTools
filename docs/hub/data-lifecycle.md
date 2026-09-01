@@ -46,15 +46,22 @@
   privacy-setting invalidation itself are actor-redacted for peers. Attribution survives wherever it is
   independently authorized — the actor, the owner, a DM, or once identity is peer-visible and the roster
   already carries the association.
-- Derived `saves` and `skills` reproduce `CharacterSheetState.getSaveMod()` and `_getSkillModResolved()` for
-  every **persisted, unconditional** term: custom save and skill modifiers, blanket and per-ability item bonuses
-  for both saves and ability checks, custom ability-check modifiers, Paladin Aura of Protection, and Jack of All
-  Trades. Parity is enforced by `test/jest/hub/HubProjectionSheetParity.test.js`, which drives the real
-  `CharacterSheetState`.
-- Transient contributions are excluded by design: active states, combat stances, ability substitutions, and
-  feature calculations that depend on live toggles. A projection describes the character, not what is switched
-  on right now — including it would change the projection with no document revision to cache or invalidate
-  against.
+- Derived `abilities`, `saves`, `skills` and `ac` are produced by loading the document into a real
+  `CharacterSheetState` (`server/src/character-derived-stats.js`) and reading the same methods the owner's sheet
+  displays. Earlier revisions hand-ported that math and three review rounds each found a different term missing
+  — proficiency-bonus items, Blood Hunter Dark Augmentation, TGTT Linguistics, dynamic feature modifiers — so
+  the port was replaced by the authority itself. Parity is enforced by
+  `test/jest/hub/HubProjectionSheetParity.test.js`.
+- Projected statistics are the character's **baseline**: what it is, not what it is doing this round. Active
+  states, combat stances and ability substitutions are excluded.
+
+  This is a product boundary, not a technical limitation. Those toggles *are* persisted — the sheet calls
+  `_saveCurrentCharacter()`, the repository patches the diff, and the server emits an invalidation like any
+  other change — so they could be projected. They are excluded because a Rage or Bless bonus describes a moment
+  in an encounter rather than the character a peer is looking up, and because a roster that flickered with
+  every toggle would be noise. See ADR 0011.
+- When the sheet cannot read a document, `saves` and `skills` are omitted rather than approximated: a modifier
+  the projection cannot stand behind would silently disagree with the sheet the owner reads.
 - A private DM workspace belongs to one membership, not all campaign DMs.
 - Explicit-account events still include all campaign DMs/co-DMs by policy.
 - Browser cache/service worker must never cache authenticated API/auth responses.

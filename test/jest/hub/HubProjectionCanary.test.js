@@ -476,17 +476,14 @@ describe("projection privacy canaries", () => {
 		});
 
 		const peerEvents = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/events`, headers: readHeaders(peerA)})).json().events;
-		const forCharacter = peerEvents.filter(event => event.aggregateId === character.id);
-		// Both `character.created` and the privacy-setting invalidation itself would
-		// otherwise name the owner beside the aggregate id.
-		expect(forCharacter.map(event => event.type).sort()).toEqual(["character.created", "character.projection.invalidated"]);
-		for (const event of forCharacter) {
-			expect({type: event.type, actor: event.actorAccountId}).toEqual({type: event.type, actor: null});
-			expect(event.actorDisplayName).toBeUndefined();
-		}
+
+		// A hidden character contributes no shared activity rows at all. Redacting the
+		// actor is not enough on its own: lifecycle rows compose with the adjacent
+		// membership event, which is legitimate roster news and cannot be sanitised away.
+		expect(peerEvents.filter(event => event.aggregateId === character.id)).toEqual([]);
+		expect(JSON.stringify(peerEvents)).not.toContain(character.id);
 		// Membership events still name the member: joining a campaign is roster news the
 		// member list already carries. It is the *character* linkage that is suppressed.
-		expect(JSON.stringify(forCharacter)).not.toContain(owner.account.id);
 		expect(peerEvents.some(event => event.type === "membership.joined" && event.actorAccountId === owner.account.id)).toBe(true);
 
 		// Attribution survives wherever it is independently authorized.
@@ -494,6 +491,45 @@ describe("projection privacy canaries", () => {
 		expect(dmEvents.filter(event => event.aggregateId === character.id).every(event => event.actorAccountId === owner.account.id)).toBe(true);
 		const ownerEvents = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/events`, headers: readHeaders(owner)})).json().events;
 		expect(ownerEvents.filter(event => event.aggregateId === character.id).every(event => event.actorAccountId === owner.account.id)).toBe(true);
+	});
+
+	it("reveals no hidden character beside an attributed self-leave", async () => {
+		const {owner, peerA, campaign, character} = await setup();
+		const base = (await app.inject({method: "GET", url: `/api/characters/${character.id}/projection-policy`, headers: readHeaders(owner)})).json();
+		await app.inject({
+			method: "PUT",
+			url: `/api/characters/${character.id}/projection-policy`,
+			headers: headers(owner),
+			payload: {expectedProjectionRevision: base.projectionRevision, policy: {version: 1, preset: "private", overrides: {}}},
+		});
+		await app.inject({method: "POST", url: `/api/campaigns/${campaign.id}/leave`, headers: headers(owner)});
+
+		const peerEvents = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/events`, headers: readHeaders(peerA)})).json().events;
+		// The whole serialized block, not individual payload keys: `character.moved_out`
+		// landing beside `membership.left` is what mapped the character to its owner.
+		expect(JSON.stringify(peerEvents)).not.toContain(character.id);
+		expect(peerEvents.some(event => event.type === "membership.left")).toBe(true);
+	});
+
+	it("reveals no hidden character beside a DM-attributed removal", async () => {
+		const {dm, owner, peerA, campaign, character} = await setup();
+		const base = (await app.inject({method: "GET", url: `/api/characters/${character.id}/projection-policy`, headers: readHeaders(owner)})).json();
+		await app.inject({
+			method: "PUT",
+			url: `/api/characters/${character.id}/projection-policy`,
+			headers: headers(owner),
+			payload: {expectedProjectionRevision: base.projectionRevision, policy: {version: 1, preset: "private", overrides: {}}},
+		});
+		const members = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/members`, headers: readHeaders(dm)})).json();
+		const membershipId = (members.members || members).find(member => member.accountId === owner.account.id).id;
+		await app.inject({method: "DELETE", url: `/api/campaigns/${campaign.id}/members/${membershipId}`, headers: headers(dm)});
+
+		const peerEvents = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/events`, headers: readHeaders(peerA)})).json().events;
+		// The removal names the DM, and its aggregate is the removed member's membership
+		// id, which a peer can resolve through the member list. The character must not
+		// appear anywhere alongside it.
+		expect(JSON.stringify(peerEvents)).not.toContain(character.id);
+		expect(peerEvents.some(event => event.type === "membership.removed")).toBe(true);
 	});
 
 	it("keeps actor attribution once the owner shares an identity", async () => {

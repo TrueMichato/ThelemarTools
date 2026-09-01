@@ -167,6 +167,8 @@ export class HubRealtime {
 			const viewerEvent = this._store.redactEventForViewer
 				? await this._store.redactEventForViewer({event, accountId: connection.accountId, role: connection.role})
 				: event;
+			// A null outcome means this viewer may not see the event at all.
+			if (!viewerEvent) continue;
 			sendJson(connection.socket, {type: "event", event: viewerEvent});
 		}
 	}

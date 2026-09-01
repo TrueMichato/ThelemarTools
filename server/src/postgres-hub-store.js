@@ -9,6 +9,7 @@ import {
 	getPolicyNotAvailableError,
 	assertPeerTargetable,
 	canViewCharacterEventActor,
+	canViewSharedCharacterEvent,
 	redactEventActor,
 	stripProjectionPolicy,
 	isPeerVisibleIdentity,
@@ -2061,7 +2062,7 @@ export class PostgresHubStore {
 			accountId,
 			role: membership.role,
 			character: charactersById.get(row.aggregate_id) || null,
-		})).map(row => ({
+		})).filter(Boolean).map(row => ({
 			id: row.id,
 			campaignId: row.campaign_id,
 			sequence: Number(row.sequence),
@@ -2084,6 +2085,9 @@ export class PostgresHubStore {
 	 */
 	_redactRowForViewer ({row, accountId, role, character}) {
 		if (row.visibility !== "all_members" || row.aggregate_type !== "character") return row;
+		// A hidden character contributes no shared rows at all, so no adjacent membership
+		// event can be composed with one to recover the owner association.
+		if (!canViewSharedCharacterEvent({character, accountId, role})) return null;
 		if (canViewCharacterEventActor({character, accountId, role, actorAccountId: row.actor_account_id})) return row;
 		return {...row, actor_account_id: null, actor_display_name: null};
 	}
@@ -2095,6 +2099,7 @@ export class PostgresHubStore {
 		const character = result.rowCount
 			? {ownerAccountId: result.rows[0].owner_account_id, projectionPolicy: result.rows[0].projection_policy}
 			: null;
+		if (!canViewSharedCharacterEvent({character, accountId, role})) return null;
 		return canViewCharacterEventActor({character, accountId, role, actorAccountId: event.actorAccountId})
 			? event
 			: redactEventActor(event);
