@@ -290,5 +290,8 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			headers: {cookie: b.session.cookie},
 		})).json().character;
 		expect(restoredSource.data.inventory).toContainEqual(expect.objectContaining({id: entry.id}));
-	});
+		// Builds and re-canonicalises documents against the 1.5 MB ceiling, so it is CPU-bound
+		// rather than slow: ~1.1s alone, but well past Jest's 5s default when the full suite
+		// runs it alongside 600+ other projects.
+	}, 30_000);
 });
