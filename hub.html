@@ -20,23 +20,27 @@
 	<link rel="stylesheet" href="css/hub.css">
 	<link rel="icon" type="image/x-icon" href="favicon.ico">
 	<link rel="manifest" href="manifest.webmanifest">
-	<script type="text/javascript" src="sw-injector.js"></script>
 	<script blocking="render" type="module" src="js/styleswitch.js"></script>
-	<script type="text/javascript" src="js/navigation.js"></script>
-	<script type="module" src="js/browsercheck.js"></script>
 </head>
 <body data-hub-view="index">
+<a class="hub-skip-link" href="#main-content">Skip to campaign content</a>
 <div class="overlay-noise no-print"></div>
 <header class="hidden-xs hidden-sm page__header">
 	<div class="container">
-		<h1 class="page__title no-wrap my-0" id="page__title">Campaign Hub</h1>
+		<div class="page__title no-wrap my-0" id="page__title">Campaign Hub</div>
 		<p class="page__subtitle no-wrap my-0" id="page__subtitle">Your tables, characters, and campaign tools in one place</p>
 	</div>
 </header>
-<nav class="container page__nav" id="navigation">
-	<ul class="nav nav-pills page__nav-inner" id="navbar"></ul>
+<nav class="container page__nav hub-nav" aria-label="Hub navigation">
+	<ul class="nav nav-pills page__nav-inner hub-nav__list">
+		<li><a class="hub-nav__link" href="index.html">Home</a></li>
+		<li class="active"><a class="hub-nav__link" href="hub.html" aria-current="page">Campaign Hub</a></li>
+		<li><a class="hub-nav__link" href="charactersheet.html">Character Sheet</a></li>
+		<li><a class="hub-nav__link" href="dmscreen.html">DM Screen</a></li>
+	</ul>
 </nav>
-<main class="container hub-page">
+<main id="main-content" class="container hub-page" tabindex="-1">
+	<h1 class="sr-only">Campaign Hub</h1>
 	<div class="hub-shell">
 		<div id="hub-error" class="hub-error ve-hidden" role="alert" aria-live="assertive"></div>
 		<section id="hub-loading" class="hub-state hub-state--centered" aria-live="polite">
@@ -78,6 +82,11 @@
 						</form>
 					</div>
 				</div>
+				<section id="hub-detached-characters" class="hub-panel hub-panel--border-top ve-hidden">
+					<h2 class="hub-panel__title">Cloud characters between campaigns</h2>
+					<p class="hub-panel__description">These characters are safely stored online but are not visible to a campaign. Open one to add it to a table.</p>
+					<div id="hub-detached-character-list" class="hub-data-list"></div>
+				</section>
 				<section class="hub-panel">
 					<h2 class="hub-panel__title">Account &amp; devices</h2>
 					<p class="hub-panel__description">Review signed-in devices, export your data, or schedule account deletion.</p>
@@ -104,23 +113,6 @@
 </main>
 <!--5ETOOLS_SCRIPT_ANCHOR-->
 
-<script type="text/javascript" defer src="lib/localforage.js"></script>
-<script type="text/javascript" defer src="js/parser.js"></script>
-<script type="text/javascript" defer src="js/utils.js"></script>
-<script type="text/javascript" defer src="js/utils-ui.js"></script>
-<script type="module" defer src="js/omnidexer.js"></script>
-<script type="module" src="js/omnisearch.js"></script>
-<script type="module" src="js/filter.js"></script>
-<script type="module" src="js/utils-dataloader.js"></script>
-<script type="module" src="js/utils-font.js"></script>
-<script type="module" src="js/utils-brew.js"></script>
-<script type="module" src="js/utils-config.js"></script>
-<script type="text/javascript" defer src="js/render.js"></script>
-<script type="text/javascript" defer src="js/render-dice.js"></script>
-<script type="module" src="js/shim-esmodules.js"></script>
-<script type="text/javascript" defer src="js/hist.js"></script>
-<script type="module" defer src="js/list2.js"></script>
-<script type="text/javascript" defer src="lib/elasticlunr.js"></script>
 <script type="module" src="js/hub/hub-page.js"></script>
 </body>
 </html>

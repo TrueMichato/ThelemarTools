@@ -1,8 +1,32 @@
+import fs from "node:fs";
 import {validateCampaignBrewBundle} from "../../../server/src/campaign-content.js";
 import {createHubApp} from "../../../server/src/app.js";
 import {MemoryHubStore} from "../../../server/src/memory-hub-store.js";
 
+const read = path => fs.readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
+
 describe("hub performance budgets", () => {
+	it.each(["hub.html", "campaign.html"])("%s has a lightweight first-party boot graph", page => {
+		const html = read(page);
+		const scripts = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map(([, src]) => src);
+		expect(scripts).toEqual([
+			"js/styleswitch.js",
+			"js/hub/hub-page.js",
+		]);
+		for (const forbidden of [
+			"localforage",
+			"navigation.js",
+			"omnisearch",
+			"filter.js",
+			"utils-dataloader",
+			"utils-font",
+			"utils-brew",
+			"render.js",
+			"elasticlunr",
+			"sw-injector",
+		]) expect(html).not.toContain(forbidden);
+	});
+
 	it("rejects campaign brew above one megabyte", () => {
 		const huge = [{
 			head: {filename: "huge.json"},

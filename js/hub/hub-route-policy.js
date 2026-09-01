@@ -1,11 +1,18 @@
 const _HUB_NETWORK_ONLY_PATHS = new Set([
 	"/api",
 	"/auth",
+	"/campaign.html",
+	"/css/hub.css",
+	"/hub.html",
+	"/manifest.webmanifest",
+	"/sw-injector.js",
+	"/sw.js",
 ]);
 
 const _HUB_NETWORK_ONLY_PREFIXES = [
 	"/api/",
 	"/auth/",
+	"/js/hub/",
 ];
 
 export function isHubNetworkOnlyUrl ({url, appOrigin}) {

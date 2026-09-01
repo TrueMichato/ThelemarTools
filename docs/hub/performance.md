@@ -1,7 +1,7 @@
 # Campaign Hub performance budgets
 
-> **Status:** V1 budgets; production telemetry/load validation pending
-> **Last verified:** 2026-08-24
+> **Status:** V1 server and lightweight-shell budgets enforced; Oracle telemetry validation pending
+> **Last verified:** 2026-08-31
 > **Owner:** Campaign Hub maintainers
 
 | Surface | V1 budget | Enforcement |
@@ -18,10 +18,21 @@
 | Database connection | 5 s | pg pool |
 | Database query/statement | 10 s | pg pool |
 | WebSocket fanout | event payload, not full campaign snapshot | outbox dispatcher |
+| Signed-out Hub initial requests | <=25 | real-stack Playwright |
+| Signed-out Hub third-party requests | 0 | real-stack Playwright |
+| Signed-out Hub unthrottled desktop LCP | <=1.5 s | real-stack Playwright |
+| Hub/campaign general data, homebrew, search, and font requests | 0 | source contract and real-stack Playwright |
+| Ordinary same-stack API read p95 | <=300 ms | ten-request real-stack Playwright sample |
 
 Full character documents are used only for explicit import/export and authorized snapshot reads. Routine
 editing emits path patches; other players receive a limited projection. DM Board saves remain one compressed
 workspace blob, protected by debounce, revision, and lease fencing.
+
+`hub.html` and `campaign.html` have a dedicated two-script boot graph: the theme switcher and the Hub page
+controller. The general renderer/filter/search/data-loader stack is not loaded. Campaign local-character
+discovery loads `localforage` through `hub-local-character-adapter.js` only after the user opens the copy
+flow. Hub shell files remain network-only when an older site service worker controls the page, and Caddy
+requires revalidation for every unversioned static response.
 
 Campaign brew also passes the shared cloud-value traversal. Effective errors are `BREW_TOO_DEEP` for the
 brew-specific depth 101-150 range and `CLOUD_DATA_TOO_DEEP` beyond the shared depth 150 ceiling.
