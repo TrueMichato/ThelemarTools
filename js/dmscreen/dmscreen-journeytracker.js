@@ -146,6 +146,7 @@ export class JourneyTrackerRoot {
 					id: ptChar.id,
 					name: ptChar.name || "Unnamed",
 					isFromPartyTracker: true,
+					isHubProjection: !!ptChar.isHubProjection,
 				});
 			}
 			this._addLog("party-sync", `Initial sync: added ${ptChars.length} character(s) from Party Tracker`);
@@ -2155,9 +2156,10 @@ export class JourneyTrackerRoot {
 			seg.stealthSlots = (seg.stealthSlots || []).filter(slot => slot.playerId !== player.id);
 			neutralise(seg);
 		}
+		this._state.camp.guardSlots = (this._state.camp.guardSlots || []).filter(slot => slot.playerId !== player.id);
 		neutralise(this._state.camp);
 
-		this._reconcileRm({reason: `Removed ${player.name}`});
+		this._reconcileRm({reason: player.isHubProjection ? "Removed linked campaign character" : `Removed ${player.name}`});
 
 		/* Discard the now-empty slot data so it doesn't linger as an orphan in saved state. */
 		for (const seg of this._state.journey.segments) { if (seg.activities) delete seg.activities[player.id]; }
@@ -2347,11 +2349,7 @@ export class JourneyTrackerRoot {
 
 	syncPartyCharacters () {
 		const ptChars = this._getPartyTrackerCharacters();
-
-		if (!ptChars.length) {
-			this._updateSyncStatus();
-			return;
-		}
+		const persistentStateBefore = JSON.stringify(this.getSaveableState());
 
 		const existingIds = new Set(this._state.players.filter(p => p.isFromPartyTracker).map(p => p.id));
 		const ptIds = new Set(ptChars.map(c => c.id));
@@ -2365,12 +2363,16 @@ export class JourneyTrackerRoot {
 					id: ptChar.id,
 					name: ptChar.name || "Unnamed",
 					isFromPartyTracker: true,
+					isHubProjection: !!ptChar.isHubProjection,
 				});
-				added.push(ptChar.name || "Unnamed");
+				if (!ptChar.isHubProjection) added.push(ptChar.name || "Unnamed");
 			} else {
 				/* Update name if changed */
 				const existing = this._state.players.find(p => p.id === ptChar.id);
-				if (existing) existing.name = ptChar.name || "Unnamed";
+				if (existing) {
+					existing.name = ptChar.name || "Unnamed";
+					existing.isHubProjection = !!ptChar.isHubProjection;
+				}
 			}
 		}
 
@@ -2379,7 +2381,7 @@ export class JourneyTrackerRoot {
 		const removed = [];
 		const departed = this._state.players.filter(p => p.isFromPartyTracker && !ptIds.has(p.id));
 		for (const p of departed) {
-			removed.push(p.name);
+			if (!p.isHubProjection) removed.push(p.name);
 			this._undoPlayerRm(p);
 		}
 		if (departed.length) {
@@ -2401,7 +2403,7 @@ export class JourneyTrackerRoot {
 		this._updateSyncStatus();
 		this._syncSupplyBurnRates();
 		this._reRenderCurrentTab();
-		this._doSave();
+		if (JSON.stringify(this.getSaveableState()) !== persistentStateBefore) this._doSave();
 	}
 
 	_getPartyTrackerCharacters () {
@@ -2907,6 +2909,7 @@ export class JourneyTrackerRoot {
 				id: p.id || CryptUtil.uid(),
 				name: p.name || "",
 				isFromPartyTracker: !!p.isFromPartyTracker,
+				isHubProjection: !!p.isHubProjection,
 			})),
 			area: {
 				areaName: toLoad.area?.areaName || "",
@@ -2984,12 +2987,21 @@ export class JourneyTrackerRoot {
 	}
 
 	getSaveableState () {
+		const ephemeralPlayerIds = new Set(this._state.players
+			.filter(player => player.isHubProjection)
+			.map(player => player.id));
+		const getActivities = activities => Object.fromEntries(
+			Object.entries(JourneyTrackerRoot._cloneActivities(activities))
+				.filter(([playerId]) => !ephemeralPlayerIds.has(playerId)),
+		);
 		return {
 			tab: this._state.tab,
 			riskModifier: this._state.riskModifier,
 			travelPace: this._state.travelPace,
 			rollMode: this._state.rollMode,
-			players: this._state.players.map(p => ({...p})),
+			players: this._state.players
+				.filter(player => !player.isHubProjection)
+				.map(player => ({...player})),
 			area: {
 				areaName: this._state.area.areaName,
 				baseDc: this._state.area.baseDc ?? 10,
@@ -3004,9 +3016,11 @@ export class JourneyTrackerRoot {
 			},
 			journey: {
 				segments: this._state.journey.segments.map(seg => ({
-					activities: JourneyTrackerRoot._cloneActivities(seg.activities),
+					activities: getActivities(seg.activities),
 					activityGroupRm: {...(seg.activityGroupRm || {})},
-					stealthSlots: (seg.stealthSlots || []).map(s => ({...s})),
+					stealthSlots: (seg.stealthSlots || [])
+						.filter(slot => !ephemeralPlayerIds.has(slot.playerId))
+						.map(s => ({...s})),
 					stealthGroupRm: seg.stealthGroupRm ?? 0,
 					riskRoll: seg.riskRoll,
 					riskRollTotal: seg.riskRollTotal,
@@ -3019,9 +3033,11 @@ export class JourneyTrackerRoot {
 			camp: {
 				campfireActive: this._state.camp.campfireActive,
 				siteDescription: this._state.camp.siteDescription || "",
-				activities: JourneyTrackerRoot._cloneActivities(this._state.camp.activities),
+				activities: getActivities(this._state.camp.activities),
 				activityGroupRm: {...(this._state.camp.activityGroupRm || {})},
-				guardSlots: this._state.camp.guardSlots.map(s => ({...s})),
+				guardSlots: this._state.camp.guardSlots
+					.filter(slot => !ephemeralPlayerIds.has(slot.playerId))
+					.map(s => ({...s})),
 				riskRoll: this._state.camp.riskRoll,
 				riskRollTotal: this._state.camp.riskRollTotal,
 				riskRollOverride: this._state.camp.riskRollOverride,

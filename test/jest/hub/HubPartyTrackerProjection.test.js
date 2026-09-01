@@ -1,8 +1,11 @@
+import fs from "node:fs";
 import "../../../js/parser.js";
 import "../../../js/utils.js";
 import {
 	PartyTrackerRoot,
 } from "../../../js/dmscreen/partytracker/dmscreen-partytracker.js";
+
+const characterSource = fs.readFileSync(new URL("../../../js/dmscreen/partytracker/dmscreen-partytracker-character.js", import.meta.url), "utf8");
 
 describe("live Party Tracker projections", () => {
 	it("injects linked campaign characters without persisting them in the Board blob", () => {
@@ -27,9 +30,21 @@ describe("live Party Tracker projections", () => {
 		}]);
 
 		expect(root.getCharacters().map(it => it.name)).toEqual(["Manual", "Cloud"]);
+		expect(root.getCharacters().find(it => it.name === "Cloud")?.isHubProjection).toBe(true);
 		const saved = root.getSaveableState();
 		expect(saved.characters).toHaveLength(1);
 		expect(saved.characters[0].id).toBe("manual");
 		expect(events).toContainEqual({type: "partyTrackerUpdate"});
+	});
+
+	it("uses valid DOM class tokens and hides mutation controls for linked rows", () => {
+		expect(characterSource).toContain(".addClass(\"glyphicon\")");
+		expect(characterSource).toMatch(/\.addClass\(`glyphicon-\$\{this\._isExpanded \? "minus" : "plus"}`\)/);
+		expect(characterSource).not.toContain(".addClass(`glyphicon glyphicon-");
+		expect(characterSource).toMatch(/\$\{this\._isReadOnly \? "" : btnRemove\}/);
+		expect(characterSource).toContain("Live campaign character; edit on the Character Sheet");
+		expect(characterSource).toContain("this._renderReadOnlyDetails()");
+		expect(characterSource).toContain("Campaign live");
+		expect(characterSource).toContain("if (cls) input.addClass(cls);");
 	});
 });

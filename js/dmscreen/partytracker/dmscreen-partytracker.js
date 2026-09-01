@@ -14,6 +14,7 @@ export class PartyTracker extends DmScreenPanelAppBase {
 		const wrpPanel = ee`<div class="ve-w-100 ve-h-100 dm-party__root dm__panel-bg dm__data-anchor"></div>`;
 		this._comp = new PartyTrackerRoot(board, wrpPanel);
 		this._comp.setStateFrom(state || {});
+		this._comp.setHubCampaignStatus(board.getHubCampaignStatus?.(), {isSkipRender: true});
 		this._comp.render(wrpPanel);
 		if (board._hubCharacterProjections?.length) {
 			this._comp.setHubCharacterProjections(board._hubCharacterProjections);
@@ -34,8 +35,13 @@ export class PartyTracker extends DmScreenPanelAppBase {
 	}
 
 	onBoardEvent ({type, payload}) {
-		if (type !== "hubCharacterProjections") return;
-		this._comp?.setHubCharacterProjections(payload?.characters || []);
+		switch (type) {
+			case "hubCharacterProjections":
+				this._comp?.setHubCharacterProjections(payload?.characters || []);
+				return;
+			case "hubCampaignStatus":
+				this._comp?.setHubCampaignStatus(payload);
+		}
 	}
 }
 
@@ -50,9 +56,14 @@ class PartyTrackerRoot {
 		this._settings = PartyTrackerCharacterSerializer.deserializeSettings({});
 		this._dcCalc = null;
 		this._wrpChars = null;
+		this._wrpLinkedRows = null;
+		this._wrpManualRows = null;
+		this._eleSyncState = null;
+		this._eleManualCount = null;
 		this._wrpDcCalc = null;
 		this._showDcCalc = false;
 		this._hubCharacterIds = new Set();
+		this._hubCampaignStatus = board.getHubCampaignStatus?.() || null;
 	}
 
 	render (eleParent) {
@@ -62,19 +73,24 @@ class PartyTrackerRoot {
 		const enableTgtt = () => settings.enableTgtt;
 
 		/* ----- Header ----- */
-		const btnAdd = ee`<button class="ve-btn ve-btn-primary ve-btn-xs" title="Add a new character" aria-label="Add Character"><span class="glyphicon glyphicon-plus" aria-hidden="true"></span> Add Character</button>`
+		const isHubCampaign = !!this._hubCampaignStatus;
+		const addLabel = isHubCampaign ? "Add Manual" : "Add Character";
+		const importLabel = isHubCampaign ? "Import Manual" : "Import";
+		const btnAdd = ee`<button class="ve-btn ve-btn-primary ve-btn-xs" title="${isHubCampaign ? "Add a manual workspace character" : "Add a new character"}" aria-label="${addLabel}"><span class="glyphicon glyphicon-plus" aria-hidden="true"></span> ${addLabel}</button>`
 			.onn("click", () => {
 				const charData = PartyTrackerCharacterSerializer.getDefaultCharacter();
 				const charComp = new PartyTrackerCharacter(charData, this._settings);
 				this._characters.push(charComp);
-				this._renderCharacter(charComp, this._wrpChars);
+				if (this._hubCampaignStatus) this._renderManualCharacters();
+				else this._renderCharacterLists();
 				this._doSave();
 				this._updateSummary();
 				this._dcCalc?.refresh();
 				this._board.fireBoardEvent({type: "partyTrackerUpdate"});
 			});
 
-		const btnDcCalc = ee`<button class="ve-btn ve-btn-default ve-btn-xs" title="Toggle DC Success Calculator" aria-label="Toggle DC Calculator"><span class="glyphicon glyphicon-signal" aria-hidden="true"></span> DC Calc</button>`
+		const btnDcCalc = ee`<button class="ve-btn ${this._showDcCalc ? "ve-btn-primary" : "ve-btn-default"} ve-btn-xs" title="Toggle DC Success Calculator" aria-label="Toggle DC Calculator"><span class="glyphicon glyphicon-signal" aria-hidden="true"></span> DC Calc</button>`
+			.attr("aria-pressed", this._showDcCalc)
 			.onn("click", () => {
 				this._showDcCalc = !this._showDcCalc;
 				btnDcCalc.toggleClass("ve-btn-primary", this._showDcCalc).toggleClass("ve-btn-default", !this._showDcCalc);
@@ -95,7 +111,7 @@ class PartyTrackerRoot {
 			reader.readAsText(file);
 		});
 
-		const btnImport = ee`<button class="ve-btn ve-btn-default ve-btn-xs" title="Import character from Character Sheet JSON export" aria-label="Import Character"><span class="glyphicon glyphicon-import" aria-hidden="true"></span> Import</button>`
+		const btnImport = ee`<button class="ve-btn ve-btn-default ve-btn-xs" title="${isHubCampaign ? "Import a manual workspace character from Character Sheet JSON" : "Import character from Character Sheet JSON export"}" aria-label="${importLabel}"><span class="glyphicon glyphicon-import" aria-hidden="true"></span> ${importLabel}</button>`
 			.onn("click", () => iptFileImport.click());
 
 		const btnSettings = ee`<button class="ve-btn ve-btn-default ve-btn-xs" title="Party Tracker Settings" aria-label="Settings"><span class="glyphicon glyphicon-cog" aria-hidden="true"></span></button>`
@@ -106,8 +122,8 @@ class PartyTrackerRoot {
 		this._updateSummary();
 
 		/* ----- Characters ----- */
-		this._wrpChars = ee`<div class="dm-party__body" role="list" aria-label="Party characters"></div>`;
-		this._characters.forEach(charComp => this._renderCharacter(charComp, this._wrpChars));
+		this._wrpChars = ee`<div class="dm-party__body"></div>`;
+		this._renderCharacterLists();
 
 		/* ----- DC Calc ----- */
 		this._wrpDcCalc = ee`<div class="ve-flex-col ve-w-100 ve-no-shrink"></div>`;
@@ -122,6 +138,80 @@ class PartyTrackerRoot {
 			${this._wrpChars}
 			${this._wrpDcCalc}
 		</div>`.appendTo(eleParent);
+		this._renderDcCalcSection();
+	}
+
+	_renderCharacterLists () {
+		if (!this._wrpChars) return;
+		this._wrpChars.empty();
+		this._wrpLinkedRows = null;
+		this._wrpManualRows = null;
+		this._eleSyncState = null;
+		this._eleManualCount = null;
+		if (!this._hubCampaignStatus) {
+			const wrpCharacters = ee`<div class="dm-party__character-list" role="list" aria-label="Party characters"></div>`.appendTo(this._wrpChars);
+			this._characters.forEach(charComp => this._renderCharacter(charComp, wrpCharacters));
+			return;
+		}
+
+		const wrpLinked = ee`<section class="dm-party__group dm-party__group--linked" aria-label="Live campaign characters"></section>`.appendTo(this._wrpChars);
+		ee`<div class="dm-party__group-header">
+			<div><span class="dm-party__group-title">Live campaign characters</span><span class="dm-party__group-help">Read-only; edit from each Character Sheet</span></div>
+			${this._eleSyncState = ee`<span class="dm-party__sync-state"></span>`}
+		</div>`.appendTo(wrpLinked);
+		this._wrpLinkedRows = ee`<div class="dm-party__character-list" role="list" aria-label="Linked campaign characters"></div>`.appendTo(wrpLinked);
+		this._renderLinkedCharacters();
+
+		const wrpManual = ee`<section class="dm-party__group dm-party__group--manual" aria-label="Manual workspace characters"></section>`.appendTo(this._wrpChars);
+		ee`<div class="dm-party__group-header">
+			<div><span class="dm-party__group-title">Manual workspace characters</span><span class="dm-party__group-help">Private to this DM workspace</span></div>
+			${this._eleManualCount = ee`<span class="dm-party__manual-count"></span>`}
+		</div>`.appendTo(wrpManual);
+		this._wrpManualRows = ee`<div class="dm-party__character-list" role="list" aria-label="Manual workspace characters"></div>`.appendTo(wrpManual);
+		this._renderManualCharacters();
+	}
+
+	_renderLinkedCharacters () {
+		if (!this._wrpLinkedRows) return;
+		const linked = this._characters.filter(character => this._hubCharacterIds.has(character.data?.id));
+		this._wrpLinkedRows.empty();
+		if (linked.length) linked.forEach(charComp => this._renderCharacter(charComp, this._wrpLinkedRows));
+		else {
+			const sync = this._hubCampaignStatus?.sync || "connecting";
+			const emptyText = ["connecting", "syncing"].includes(sync)
+				? "Waiting for campaign character data..."
+				: "No campaign characters are linked yet. They will appear here when players add them to this campaign.";
+			ee`<div class="dm-party__empty-state"></div>`.txt(emptyText).appendTo(this._wrpLinkedRows);
+		}
+		this._updateHubSyncState();
+	}
+
+	_renderManualCharacters () {
+		if (!this._wrpManualRows) return;
+		const manual = this._characters.filter(character => !this._hubCharacterIds.has(character.data?.id));
+		this._wrpManualRows.empty();
+		if (manual.length) manual.forEach(charComp => this._renderCharacter(charComp, this._wrpManualRows));
+		else ee`<div class="dm-party__empty-state">No manual characters. Use Add Manual or Import Manual if you need a private reference row.</div>`.appendTo(this._wrpManualRows);
+		if (this._eleManualCount) this._eleManualCount.textContent = `${manual.length} manual`;
+	}
+
+	_updateHubSyncState () {
+		if (!this._eleSyncState || !this._hubCampaignStatus) return;
+		const sync = this._hubCampaignStatus.sync || "connecting";
+		const linkedCount = this._hubCharacterIds.size;
+		const lastSynced = this._hubCampaignStatus.lastSyncedAt
+			? new Date(this._hubCampaignStatus.lastSyncedAt).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"})
+			: null;
+		const syncText = {
+			connecting: "Connecting...",
+			syncing: "Syncing...",
+			live: `${linkedCount} linked${lastSynced ? ` \u00b7 ${lastSynced}` : ""}`,
+			reconnecting: `Reconnecting${lastSynced ? ` \u00b7 last sync ${lastSynced}` : ""}`,
+			stale: `Data may be stale${lastSynced ? ` \u00b7 last sync ${lastSynced}` : ""}`,
+			stopped: "Sync stopped",
+		}[sync] || "Unavailable";
+		this._eleSyncState.className = `dm-party__sync-state dm-party__sync-state--${sync}`;
+		this._eleSyncState.textContent = syncText;
 	}
 
 	_renderCharacter (charComp, container) {
@@ -147,7 +237,8 @@ class PartyTrackerRoot {
 			const ix = this._characters.indexOf(charComp);
 			if (~ix) {
 				this._characters.splice(ix, 1);
-				charComp.eleRow?.remove();
+				if (this._hubCampaignStatus) this._renderManualCharacters();
+				else this._renderCharacterLists();
 				this._doSave();
 				this._updateSummary();
 				this._dcCalc?.refresh();
@@ -187,9 +278,25 @@ class PartyTrackerRoot {
 			this._hubCharacterIds.add(mapped.id);
 			this._characters.push(new PartyTrackerCharacter(mapped, this._settings));
 		}
-		if (this._wrpPanel) this.render(this._wrpPanel);
+		if (this._wrpPanel) {
+			if (this._hubCampaignStatus && this._wrpLinkedRows) this._renderLinkedCharacters();
+			else this._renderCharacterLists();
+		}
+		this._updateSummary();
 		this._dcCalc?.refresh();
 		this._board.fireBoardEvent({type: "partyTrackerUpdate"});
+	}
+
+	setHubCampaignStatus (status, {isSkipRender = false} = {}) {
+		const wasHubCampaign = !!this._hubCampaignStatus;
+		this._hubCampaignStatus = status || null;
+		if (isSkipRender || !this._wrpPanel) return;
+		if (wasHubCampaign !== !!this._hubCampaignStatus) {
+			this.render(this._wrpPanel);
+			return;
+		}
+		if (!this._hubCharacterIds.size) this._renderLinkedCharacters();
+		else this._updateHubSyncState();
 	}
 
 	_handleImportJson (jsonStr) {
@@ -217,7 +324,10 @@ class PartyTrackerRoot {
 
 		// Check for existing character with same name
 		const existingIx = charData.name
-			? this._characters.findIndex(c => (c.data?.name || "").toLowerCase() === charData.name.toLowerCase())
+			? this._characters.findIndex(c =>
+				!this._hubCharacterIds.has(c.data?.id)
+				&& (c.data?.name || "").toLowerCase() === charData.name.toLowerCase(),
+			)
 			: -1;
 
 		if (~existingIx) {
@@ -230,8 +340,8 @@ class PartyTrackerRoot {
 				charData.bonuses = existing.data.bonuses || {skills: {}, saves: {}, passives: {}};
 				charData.id = existing.data.id;
 				existing.data = charData;
-				existing.eleRow?.remove();
-				this._renderCharacter(existing, this._wrpChars);
+				if (this._hubCampaignStatus) this._renderManualCharacters();
+				else this._renderCharacterLists();
 				JqueryUtil.doToast({content: `Updated "${charData.name}"`, type: "success"});
 			} else {
 				this._addImportedCharacter(charData);
@@ -249,7 +359,8 @@ class PartyTrackerRoot {
 	_addImportedCharacter (charData) {
 		const charComp = new PartyTrackerCharacter(charData, this._settings);
 		this._characters.push(charComp);
-		this._renderCharacter(charComp, this._wrpChars);
+		if (this._hubCampaignStatus) this._renderManualCharacters();
+		else this._renderCharacterLists();
 		JqueryUtil.doToast({content: `Imported "${charData.name}"`, type: "success"});
 	}
 
@@ -284,7 +395,10 @@ class PartyTrackerRoot {
 		const carryPct = totalCapacity > 0 ? Math.round((totalWeight / totalCapacity) * 100) : 0;
 
 		const hpStr = anyHpSet ? ` \u00b7 HP: ${totalHpCurrent}/${totalHpMax}` : "";
-		this._eleSummary.textContent = `${n} char${n !== 1 ? "s" : ""} \u00b7 Lv ${avgLevel}${hpStr} \u00b7 Carry: ${totalWeight}/${totalCapacity} lb (${carryPct}%)`;
+		const sourceStr = this._hubCampaignStatus
+			? ` \u00b7 ${this._hubCharacterIds.size} live \u00b7 ${n - this._hubCharacterIds.size} manual`
+			: "";
+		this._eleSummary.textContent = `${n} char${n !== 1 ? "s" : ""}${sourceStr} \u00b7 Lv ${avgLevel}${hpStr} \u00b7 Carry: ${totalWeight}/${totalCapacity} lb (${carryPct}%)`;
 	}
 
 	_openSettingsMenu (evt) {
@@ -415,7 +529,10 @@ class PartyTrackerRoot {
 	}
 
 	getCharacters () {
-		return this._characters.map(c => c.getSaveableData());
+		return this._characters.map(c => ({
+			...c.getSaveableData(),
+			isHubProjection: this._hubCharacterIds.has(c.data?.id),
+		}));
 	}
 
 	getSettings () {

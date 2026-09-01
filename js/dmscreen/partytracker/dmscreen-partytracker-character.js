@@ -159,9 +159,6 @@ export class PartyTrackerCharacter {
 		this._enableTgtt = enableTgtt;
 		this._isReadOnly = isReadOnly;
 
-		// Kick off async data load (non-blocking)
-		PartyTrackerCharacter.pLoadConditionDiseaseData().catch(() => {});
-
 		this._eleRow = ee`<div class="ve-flex-col ve-w-100" role="listitem"></div>`;
 		this._renderSummaryRow();
 		this._eleRow.appendTo(eleParent);
@@ -176,7 +173,9 @@ export class PartyTrackerCharacter {
 		const totalLevel = this.getTotalLevel();
 		const classStr = this._data.classes.map(c => `${c.name || "?"}${c.level ? ` ${c.level}` : ""}`).join("/");
 
-		const expandIcon = ee`<span aria-hidden="true"></span>`.addClass(`glyphicon glyphicon-${this._isExpanded ? "minus" : "plus"}`);
+		const expandIcon = ee`<span aria-hidden="true"></span>`
+			.addClass("glyphicon")
+			.addClass(`glyphicon-${this._isExpanded ? "minus" : "plus"}`);
 		const btnExpand = ee`<button class="ve-btn ve-btn-default ve-btn-xxs">${expandIcon}</button>`
 			.attr("title", `${this._isExpanded ? "Collapse" : "Expand"} character details`)
 			.attr("aria-label", `${this._isExpanded ? "Collapse" : "Expand"} ${this._data.name || "character"}`)
@@ -230,6 +229,9 @@ export class PartyTrackerCharacter {
 		const passiveLinguistics = this._enableTgtt?.() ? this.getPassiveScore("linguistics") : null;
 
 		const jump = this.getJumpDistances();
+		const linkedBadge = this._isReadOnly
+			? ee`<span class="dm-party__linked-badge" title="Live campaign character; edit on the Character Sheet">Live</span>`
+			: "";
 
 		const wrpCondPills = ee`<span class="dm-party__conditions-summary"></span>`;
 		for (const cond of (this._data.conditions || [])) {
@@ -266,7 +268,7 @@ export class PartyTrackerCharacter {
 			${exhaustion > 0 ? ee`<span class="dm-party__char-stat dm-party__char-stat--danger" title="Exhaustion Level ${exhaustion}" aria-label="Exhaustion level ${exhaustion}"><span aria-hidden="true">\u{1F4A4}</span> ${exhaustion}</span>` : ""}
 			${wrpCondPills}
 			${tgttInfo}
-			<div class="ve-ml-auto">${btnRemove}</div>
+			<div class="ve-ml-auto">${linkedBadge}${this._isReadOnly ? "" : btnRemove}</div>
 		</div>
 		${hpMax > 0 ? ee`<div class="dm-party__hp-bar"><div class="dm-party__hp-bar-fill ${hpClass}" style="width: ${Math.max(0, Math.min(100, hpPct))}%"></div></div>` : ""}
 		</div>`.appendTo(this._eleRow);
@@ -274,6 +276,10 @@ export class PartyTrackerCharacter {
 	}
 
 	_renderExpandedForm () {
+		if (this._isReadOnly) {
+			this._renderReadOnlyDetails();
+			return;
+		}
 		this._eleRow.empty();
 
 		const btnCollapse = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" title="Collapse" aria-expanded="true"><span class="glyphicon glyphicon-minus" aria-hidden="true"></span> Collapse</button>`
@@ -532,7 +538,7 @@ export class PartyTrackerCharacter {
 		ee`<div class="dm-party__card">
 			<div class="dm-party__card-header">
 				${btnCollapse}
-				${btnRemove}
+				${this._isReadOnly ? ee`<span class="dm-party__linked-badge" title="Live campaign character; edit on the Character Sheet">Live · read-only</span>` : btnRemove}
 			</div>
 
 			<div class="dm-party__section">
@@ -627,6 +633,110 @@ export class PartyTrackerCharacter {
 			</div>
 		</div>`.appendTo(this._eleRow);
 		this._applyReadOnly();
+	}
+
+	_renderReadOnlyDetails () {
+		this._eleRow.empty();
+
+		const btnCollapse = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" title="Collapse" aria-expanded="true"><span class="glyphicon glyphicon-minus" aria-hidden="true"></span> Collapse</button>`
+			.attr("aria-label", `Collapse ${this._data.name || "character"}`)
+			.onn("click", () => {
+				this._isExpanded = false;
+				this._renderSummaryRow();
+			});
+		const linkedBadge = ee`<span class="dm-party__linked-badge" title="Live campaign character; edit on the Character Sheet">Campaign live</span>`;
+		const classes = this._data.classes
+			.map(cls => `${cls.name || "Unknown class"} ${cls.level || 1}`)
+			.join(" / ");
+		const hp = this._data.hp || {current: 0, max: 0, temp: 0};
+		const formatBonus = value => value >= 0 ? `+${value}` : `${value}`;
+
+		const wrpAbilities = ee`<div class="dm-party__abilities-grid"></div>`;
+		for (const ability of ["str", "dex", "con", "int", "wis", "cha"]) {
+			ee`<div class="dm-party__ability-cell">
+				<span class="dm-party__ability-label">${PartyTrackerCharacterSerializer.ABILITY_DISPLAY[ability]}</span>
+				<strong>${this._data.abilities?.[ability] ?? 10}</strong>
+				<span class="dm-party__ability-mod">${formatBonus(this.getAbilityMod(ability))}</span>
+			</div>`.appendTo(wrpAbilities);
+		}
+
+		const wrpSaves = ee`<div class="dm-party__readonly-grid"></div>`;
+		for (const ability of ["str", "dex", "con", "int", "wis", "cha"]) {
+			const isProficient = !!this._data.saveProficiencies?.[ability];
+			ee`<div class="dm-party__readonly-stat">
+				<span>${PartyTrackerCharacterSerializer.ABILITY_DISPLAY[ability]} save${isProficient ? " \u2022" : ""}</span>
+				<strong>${formatBonus(this.getSaveBonus(ability))}</strong>
+			</div>`.appendTo(wrpSaves);
+		}
+
+		const skills = [
+			...PartyTrackerCharacterSerializer.STANDARD_SKILLS,
+			...(this._enableTgtt?.() ? PartyTrackerCharacterSerializer.TGTT_SKILLS : []),
+		];
+		const wrpSkills = ee`<div class="dm-party__readonly-grid dm-party__readonly-grid--skills"></div>`;
+		for (const skill of skills) {
+			const proficiency = this._data.skillProficiencies?.[skill] || 0;
+			const proficiencyText = proficiency >= 2 ? " \u2022\u2022" : proficiency ? " \u2022" : "";
+			ee`<div class="dm-party__readonly-stat">
+				<span>${PartyTrackerCharacterSerializer.SKILL_DISPLAY_NAMES[skill]}${proficiencyText}</span>
+				<strong>${formatBonus(this.getSkillBonus(skill))}</strong>
+			</div>`.appendTo(wrpSkills);
+		}
+
+		const senses = Object.entries(this._data.senses || {})
+			.filter(([, distance]) => distance > 0)
+			.map(([sense, distance]) => `${sense} ${distance} ft`)
+			.join(", ") || "None";
+		const conditions = [
+			...(this._data.conditions || []).map(it => it.name),
+			...(this._data.diseases || []).map(it => it.name),
+		].filter(Boolean).join(", ") || "None";
+		const details = [
+			["Speed", Object.entries(this._data.speed || {}).filter(([, speed]) => speed > 0).map(([mode, speed]) => `${mode} ${speed} ft`).join(", ") || "Not set"],
+			["Senses", senses],
+			["Languages", (this._data.languages || []).join(", ") || "None listed"],
+			["Tools", (this._data.toolProficiencies || []).join(", ") || "None listed"],
+			["Conditions", conditions],
+		];
+		const wrpDetails = ee`<dl class="dm-party__readonly-details"></dl>`;
+		for (const [label, value] of details) {
+			ee`<dt>${label}</dt>`.appendTo(wrpDetails);
+			ee`<dd></dd>`.txt(value).appendTo(wrpDetails);
+		}
+
+		ee`<div class="dm-party__card dm-party__card--linked">
+			<div class="dm-party__card-header">
+				${btnCollapse}
+				<div class="ve-flex-col">
+					<strong class="dm-party__char-name">${this._data.name || "\u2014"}</strong>
+					<span class="dm-party__char-meta">${this._data.race || "Unknown species"} \u00b7 ${classes}</span>
+				</div>
+				<div class="ve-ml-auto">${linkedBadge}</div>
+			</div>
+			<div class="dm-party__readonly-vitals">
+				<span><b>HP</b> ${hp.current || 0}${hp.temp > 0 ? ` + ${hp.temp} temp` : ""} / ${hp.max || "\u2014"}</span>
+				<span><b>AC</b> ${this._data.ac ?? 10}</span>
+				<span><b>Proficiency</b> ${formatBonus(this.getProficiencyBonus())}</span>
+				<span><b>Exhaustion</b> ${this._data.exhaustionLevel || 0}</span>
+			</div>
+			<div class="dm-party__section">
+				<div class="dm-party__section-title">Abilities</div>
+				${wrpAbilities}
+			</div>
+			<div class="dm-party__section">
+				<div class="dm-party__section-title">Saving throws</div>
+				${wrpSaves}
+			</div>
+			<div class="dm-party__section">
+				<div class="dm-party__section-title">Skills <span class="ve-muted">\u2022 proficient</span></div>
+				${wrpSkills}
+			</div>
+			<div class="dm-party__section">
+				<div class="dm-party__section-title">Movement and proficiencies</div>
+				${wrpDetails}
+			</div>
+		</div>`.appendTo(this._eleRow);
+		this._eleRow.addClass("dm-party__char--linked-readonly");
 	}
 
 	/* -------------------------------------------- */
@@ -1071,10 +1181,10 @@ export class PartyTrackerCharacter {
 
 	_makeInput (prop, {placeholder = "", cls = "", width = "100px", ariaLabel = ""} = {}) {
 		const input = ee`<input class="ve-form-control ve-input-xs">`
-			.addClass(cls)
 			.css({width})
 			.attr("placeholder", placeholder)
 			.val(this._data[prop] || "");
+		if (cls) input.addClass(cls);
 		if (ariaLabel) input.attr("aria-label", ariaLabel);
 		return input
 			.onn("change", (e) => {

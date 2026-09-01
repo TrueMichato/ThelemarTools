@@ -553,3 +553,62 @@ describe("JourneyTrackerRoot._migrateRmBookkeeping (orphan pruning)", () => {
 		expect(seg.stealthSlots).toEqual([{playerId: "p1"}]);
 	});
 });
+
+describe("JourneyTrackerRoot campaign projection persistence", () => {
+	it("keeps linked campaign participants and their activity references out of the Board blob", () => {
+		const root = new JourneyTrackerRoot({doSaveStateDebounced () {}}, null);
+		root._state.players = [
+			{id: "manual", name: "Manual", isFromPartyTracker: false, isHubProjection: false},
+			{id: "linked", name: "Linked", isFromPartyTracker: true, isHubProjection: true},
+		];
+		root._state.journey.segments = [root._makeEmptySegment()];
+		root._state.journey.segments[0].activities = {
+			manual: [{activity: "scout"}],
+			linked: [{activity: "forage"}],
+		};
+		root._state.journey.segments[0].stealthSlots = [
+			{playerId: "manual"},
+			{playerId: "linked"},
+		];
+		root._state.camp.activities = {
+			manual: [{activity: "guard"}],
+			linked: [{activity: "cook"}],
+		};
+		root._state.camp.guardSlots = [
+			{playerId: "manual"},
+			{playerId: "linked"},
+		];
+
+		const saved = root.getSaveableState();
+		expect(saved.players).toEqual([
+			{id: "manual", name: "Manual", isFromPartyTracker: false, isHubProjection: false},
+		]);
+		expect(saved.journey.segments[0].activities).toEqual({manual: [{activity: "scout"}]});
+		expect(saved.journey.segments[0].stealthSlots).toEqual([{playerId: "manual"}]);
+		expect(saved.camp.activities).toEqual({manual: [{activity: "guard"}]});
+		expect(saved.camp.guardSlots).toEqual([{playerId: "manual"}]);
+	});
+
+	it("removes stale linked participants when campaign projections become empty", () => {
+		const saves = [];
+		const root = new JourneyTrackerRoot({
+			doSaveStateDebounced: () => saves.push(true),
+		}, null);
+		root._state.players = [
+			{id: "manual", name: "Manual", isFromPartyTracker: false},
+			{id: "linked", name: "Linked", isFromPartyTracker: true, isHubProjection: true},
+		];
+		root._state.camp.guardSlots = [{playerId: "linked", rollResult: "12"}];
+		root._getPartyTrackerCharacters = () => [];
+		root._updateSyncStatus = () => {};
+		root._syncSupplyBurnRates = () => {};
+		root._reRenderCurrentTab = () => {};
+
+		root.syncPartyCharacters();
+
+		expect(root._state.players).toEqual([{id: "manual", name: "Manual", isFromPartyTracker: false}]);
+		expect(root._state.camp.guardSlots).toEqual([]);
+		expect(root.getSaveableState().camp.guardSlots).toEqual([]);
+		expect(saves).toHaveLength(0);
+	});
+});
