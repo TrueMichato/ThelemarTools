@@ -3,9 +3,9 @@
 The Campaign Hub is an optional online layer over the existing local-first 5etools experience.
 Signed-out character sheets, homebrew, and DM screens remain supported and do not use hub storage.
 
-> **Implementation:** Private invite-only V1 plus player-test readiness through role-aware campaign workflows
-> **Deployment:** Private Oracle staging is live; deliberate tagged release automation is implemented but its
-> real-host induced-failure drill and the one-DM/two-player pilot remain gated
+> **Implementation:** Private invite-only V1 plus shipped tagged release automation and legible activity history
+> **Deployment:** Release `hub-staging-2026-09-01` at `8f181712` is live on private Oracle staging; host-
+> operations proof and the physical one-DM/two-player game day remain gated
 > **Last verified:** 2026-09-01
 > **Owner:** Campaign Hub maintainers
 
@@ -14,6 +14,7 @@ Signed-out character sheets, homebrew, and DM screens remain supported and do no
 | Need | Read |
 |---|---|
 | What exists now | [Current system](current-system.md) |
+| What ships next and why | [Living roadmap](roadmap.md) |
 | Why it is structured this way | [Architecture](architecture.md) and [ADRs](#architecture-decisions) |
 | What was implemented and why | [Implementation history](implementation-history.md) |
 | Exact Phase 0-5 working-tree checkpoint | [Checkpoint record](checkpoint.md) |
@@ -31,13 +32,13 @@ Signed-out character sheets, homebrew, and DM screens remain supported and do no
 | Tests and release evidence | [Testing guide](testing.md) |
 | CI, test-auth boundary, artifacts | [CI and provenance](ci-and-provenance.md) |
 | How to change Hub safely | [Contributor guide](contributing.md) |
-| Planned managed staging | [Staging plan](staging-plan.md) |
+| Oracle staging and game-day plan | [Staging plan](staging-plan.md) |
 | Managed provider decision | [Provider comparison](provider-comparison.md) |
-| Launch sequence and phase gates | [Private-V1 roadmap](private-v1-roadmap.md) |
+| Historical Phase 6A-6H launch plan | [Private-V1 roadmap](private-v1-roadmap.md) |
 | Diagnose a problem | [Troubleshooting](troubleshooting.md) and [runbooks](runbooks/README.md) |
 | Requirement-to-code evidence | [Traceability matrix](traceability.md) |
 | Current risks | [Risk register](risk-register.md) |
-| Future options, not launch scope | [Post-V1 roadmap](post-v1-roadmap.md) |
+| Historical post-V1 horizons A-F | [Post-V1 roadmap](post-v1-roadmap.md) |
 
 Documents labeled **planned**, **pending**, or **not implemented** are not current capabilities.
 

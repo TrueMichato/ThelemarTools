@@ -1,13 +1,13 @@
 # Campaign Hub current system
 
 > **Status:** Current implementation reference
-> **Scope:** Private invite-only V1 through Phase 5
-> **Last verified:** 2026-08-24
+> **Scope:** Private invite-only V1 through Phase 6G
+> **Last verified:** 2026-09-01
 > **Owner:** Campaign Hub maintainers
 
-This document describes what exists in the repository now. It is not the deployment plan and does not imply
-that the Hub is already hosted. Start here when changing Hub behavior, then follow the linked domain,
-protocol, security, and operations references.
+This document describes what exists in the repository and deployed private Oracle staging now. It is not the
+delivery plan. Start here when changing Hub behavior, then follow the linked domain, protocol, security,
+operations, and [living roadmap](roadmap.md) references.
 
 ## Product boundary
 
@@ -59,9 +59,9 @@ flowchart LR
   Outbox --> WS
 ```
 
-The repository contains a dedicated BFF OCI image and a locally verified PostgreSQL/migrator/role-grant/BFF/
-static/same-origin-edge Compose topology. Managed provider configuration and production promotion remain
-Phase 6G work.
+The repository contains a dedicated BFF OCI image and a PostgreSQL/migrator/role-grant/BFF/static/same-origin-
+edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed release
+`hub-staging-2026-09-01` at `8f181712` to the private staging environment.
 
 ## Character persistence
 
@@ -206,5 +206,6 @@ limits, and WebSocket context; live ingress spoofing evidence is still required.
 
 ## Deployment status
 
-The implementation is verified through portable Phase 6F but is not managed-provider deployed. Before
-inviting users, complete Phase 6G managed staging and Phase 6H private multi-device game day/go-no-go.
+The implementation and Phase 6G Oracle deployment are complete through release `hub-staging-2026-09-01` at
+`8f181712`. Before expanding the allowlist, complete the host-operations proof and physical one-DM/two-player
+game day/go-no-go in the [living roadmap](roadmap.md).

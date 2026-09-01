@@ -1,7 +1,7 @@
 # Campaign Hub staging plan
 
-> **Status:** Active private Oracle staging; not yet approved for player testing
-> **Last reviewed:** 2026-08-31
+> **Status:** Release deployed; host-operations proof and physical game day remain
+> **Last reviewed:** 2026-09-01
 > **Owner:** Campaign Hub maintainers
 
 ## Objectives
@@ -15,11 +15,13 @@ environment and must not use copied production characters.
 - A reused Oracle Always Free ARM VM runs the private staging stack on Ubuntu 22.04 LTS.
 - Caddy terminates public HTTPS and keeps the static site, API, OAuth, and WebSocket routes on one origin.
 - GitHub OAuth, PostgreSQL, campaign creation, and the basic deployment smoke checks pass.
+- Release `hub-staging-2026-09-01` at `8f181712` is deployed; Phase 6G is complete.
 - The instance must not be stopped, resized, detached, or recreated while replacement ARM capacity is
   unavailable; normal guest reboots are allowed.
 - The staging-baseline repair, lightweight Hub boot, Character Sheet-native campaign linking, role-aware
-  campaign operation page, and human-readable interaction controls are validated in the release candidate.
-  They must be deployed and rechecked on Oracle before inviting players.
+  campaign operation page, and human-readable interaction controls are deployed and pass Oracle smoke checks.
+- The [living roadmap](roadmap.md) now gates the V1 decision only on host-operations proof and the physical
+  one-DM/two-player game day.
 
 ## Environment requirements
 

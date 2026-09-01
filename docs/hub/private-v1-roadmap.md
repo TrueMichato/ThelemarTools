@@ -1,14 +1,19 @@
-# Campaign Hub private-V1 launch roadmap
+# Campaign Hub private-V1 launch roadmap (historical snapshot)
 
-> **Status:** Approved continuation plan
-> **Current phase:** Phase 6G live Oracle staging and player-test readiness
-> **Last reviewed:** 2026-08-31
+> **Status:** Historical snapshot; superseded by the [living roadmap](roadmap.md)
+> **Snapshot:** Pre-deployment continuation plan through Phase 6G
+> **Last reviewed as active:** 2026-08-31
 > **Owner:** Campaign Hub maintainers
+
+This file preserves the approved Phase 6A-6H plan and its original exit criteria. It is not the current status
+or delivery authority. Phase 6G is now complete; use the [living roadmap](roadmap.md) for the deployed baseline,
+the two remaining V1 gates, and the approved V2 program.
 
 ## Scope
 
-This roadmap finishes private invite-only V1 deployment/readiness. It does not commit the post-V1 features in
-[post-v1-roadmap.md](post-v1-roadmap.md).
+This snapshot described the plan to finish private invite-only V1 deployment/readiness. Its post-V1 options are
+preserved in [post-v1-roadmap.md](post-v1-roadmap.md) and consolidated in the
+[living roadmap](roadmap.md).
 
 Decisions:
 

@@ -23,7 +23,7 @@
 | Domain events | Ordered replay/history | visibility-filtered | retained until campaign/account deletion |
 | Outbox rows | Technical delivery | BFF/operators | published 7-day cleanup approved, not implemented |
 | Command receipts | Idempotent retry | BFF/store | 24 hours |
-| Backup archives/PITR | Recovery | operators/provider | policy pending Phase 6E; must age deleted data out |
+| Encrypted backup archives | Recovery | operators | nightly/off-machine policy; must age deleted data out |
 | Operational runs | Maintenance/backup/restore evidence | operators/metrics; no user content | bounded retention policy finalized with provider scheduling |
 
 ## Privacy boundary
@@ -145,8 +145,8 @@ Current account export includes:
 - all owned characters;
 - audit entries where the account is actor.
 
-It does not export another user's full character or another DM's private workspace. Phase 6B must review the
-export against the deletion/privacy disclosure and add any user-owned data needed for completeness.
+It does not export another user's full character or another DM's private workspace. Lifecycle reviews must
+compare the export against the deletion/privacy disclosure and add any newly introduced user-owned data.
 
 ## Backup and restore
 
@@ -154,7 +154,8 @@ export against the deletion/privacy disclosure and add any user-owned data neede
 - Restore uses `--clean --if-exists --single-transaction`.
 - Credentials are passed through libpq environment fields, not process argument URLs.
 - Restores are performed only into an isolated drill database.
-- Managed-provider PITR and scheduled encrypted backup export are not yet configured.
+- Oracle intentionally has no managed PITR. Encrypted backup, off-machine copy, and restore tooling exist; their
+  scheduled target-environment proof remains V1-G1 in the [living roadmap](roadmap.md).
 
 ## Reserved fields without active lifecycle
 

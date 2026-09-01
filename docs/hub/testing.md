@@ -70,10 +70,10 @@ npm run test:hub:e2e:stack
 - PostgreSQL drills use a disposable UTF-8 database and an isolated restore target.
 - Test-auth code must live only in a test entry point and must fail startup in production mode.
 
-## Remaining managed-staging coverage
+## Remaining V1 target-environment coverage
 
-Phase 6G/H still require real GitHub OAuth, physical devices, provider proxy/PITR/alerts, immutable registry
-promotion, service-worker version skew, rollback, and provider restore evidence tied to one image/migration
+The remaining V1 gates require physical devices, scheduled host-operations evidence, encrypted off-machine
+backup, isolated restore, and rollback tied to release `hub-staging-2026-09-01` at `8f181712`
 version. Synthetic CI never substitutes for these gates.
 
 ## Evidence record

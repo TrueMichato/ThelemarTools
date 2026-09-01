@@ -1,14 +1,14 @@
 # Campaign Hub portable deployment
 
-> **Status:** OCI/Compose reference implemented and locally verified
-> **Last verified:** 2026-08-25
+> **Status:** OCI/Compose reference implemented; Oracle adaptation deployed
+> **Last verified:** 2026-09-01
 > **Owner:** Campaign Hub maintainers
 
 ## Purpose
 
-The reference stack proves the provider-independent runtime contract. It is suitable for local/staging
-verification. Production should use managed PostgreSQL/PITR and provider secret/network/observability
-services while preserving the same service boundaries.
+The reference stack proves the provider-independent runtime contract. It supports local verification and the
+deployed private Oracle staging topology. Oracle uses self-managed PostgreSQL and encrypted portable backups
+rather than managed PITR while preserving the same service boundaries.
 
 ## Topology
 
@@ -210,11 +210,11 @@ challenge and renews certificates automatically.
 For a full click-by-click provisioning path see
 [runbooks/oracle-provisioning.md](runbooks/oracle-provisioning.md).
 
-## Production deviations
+## Oracle deployment requirements
 
 Do not lift the local Compose database into production unchanged.
 
-Production Phase 6G must provide:
+The Phase 6G Oracle topology provides or is configured to provide:
 
 - PostgreSQL 17 on private networking with TLS at the edge, and PITR **where the host offers it** — under
   [ADR 0010](adr/0010-oracle-always-free-hosting.md) the database is self-managed, so recovery is from
@@ -232,9 +232,9 @@ Production Phase 6G must provide:
 
 ## CI artifact promotion
 
-Phase 6F exports the already-scanned production image as `hub-bff-image.tar` and records its SHA-256,
-source/lockfile SHAs, versions, and SBOMs in `hub-ci-provenance.json`. Phase 6G must import that archive,
-push it without rebuilding, record the resulting provider registry digest, and deploy by that digest. The
-archive SHA-256 is not labeled as an OCI digest. CI also loads this archive, derives the test-auth layer from
-it, and separately requires the unmodified image's production entry point to become healthy. See [CI and
-provenance](ci-and-provenance.md).
+Phase 6F exports the already-scanned x86 production image as `hub-bff-image.tar` and records its SHA-256,
+source/lockfile SHAs, versions, and SBOMs in `hub-ci-provenance.json`. The ARM Oracle path instead builds from
+the verified release tag as recorded by ADR 0008/0010; release `hub-staging-2026-09-01` at `8f181712` is the
+deployed baseline. The archive SHA-256 is not labeled as an OCI digest. CI loads the x86 archive, derives the
+test-auth layer from it, and separately requires the unmodified image's production entry point to become
+healthy. See [CI and provenance](ci-and-provenance.md).
