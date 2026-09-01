@@ -1,6 +1,9 @@
 import {HubApiClient, HubApiError} from "./hub-api-client.js";
+import {HubRealtimeClient} from "./hub-realtime-client.js";
 
 const api = new HubApiClient();
+const CURRENCY_TYPES = ["cp", "sp", "ep", "gp", "pp"];
+let isCampaignReloadRequired = false;
 
 function setHidden (element, isHidden) {
 	element?.classList.toggle("ve-hidden", isHidden);
@@ -9,23 +12,99 @@ function setHidden (element, isHidden) {
 function getErrorMessage (error) {
 	if (!(error instanceof HubApiError)) return "The campaign hub could not be reached. Check your connection and try again.";
 	switch (error.code) {
+		case "NETWORK_UNAVAILABLE": return "The Campaign Hub could not be reached. Your open data is still shown, but changes cannot be saved until the connection returns.";
+		case "DATABASE_UNAVAILABLE":
+		case "SERVICE_UNAVAILABLE":
+			return "The campaign service is temporarily unavailable. Your data was not changed. Try again in a moment.";
+		case "RESPONSE_INVALID": return "The campaign service returned an unreadable response. Your data was not changed. Reload the page before trying again.";
 		case "AUTH_REQUIRED": return "Your session has expired. Sign in again to continue.";
 		case "CAMPAIGN_NOT_FOUND": return "This campaign is unavailable or you no longer have access.";
+		case "FORBIDDEN": return "Your campaign permissions no longer allow that action. Reload to update the controls available to you.";
 		case "INVALID_CAMPAIGN_NAME": return "Enter a campaign name before creating it.";
 		case "INVITE_INVALID": return "That invite is expired, revoked, or has already been fully used.";
 		case "ACCOUNT_OWNS_CAMPAIGN": return "Transfer ownership or archive every active campaign before deleting your account.";
 		case "ACCOUNT_DELETION_PENDING": return "Your account is scheduled for deletion. Cancel deletion before using campaign features.";
 		case "MEMBERSHIP_OWNER_PROTECTED": return "The campaign owner must transfer ownership or archive the campaign first.";
-		case "PROTOCOL_UPDATE_REQUIRED": return "This page is out of date. Reload before making campaign changes.";
-		default: return "The campaign hub could not complete that request. Try again.";
+		case "PROTOCOL_UPDATE_REQUIRED": return "This page is out of date. Reload it before making campaign changes.";
+		case "PAYLOAD_TOO_LARGE":
+		case "CHARACTER_TOO_LARGE":
+		case "CLOUD_DATA_TOO_LARGE":
+			return "That content is too large to store online. Your existing data was not changed. Reduce the file or character history and try again.";
+		case "CLOUD_DATA_TOO_DEEP":
+		case "CLOUD_DATA_INVALID":
+		case "CLOUD_HTML_FORBIDDEN":
+		case "CLOUD_URL_FORBIDDEN":
+		case "CLOUD_KEY_FORBIDDEN":
+		case "CHARACTER_INVALID":
+		case "INVALID_REQUEST":
+			return "That content cannot be stored safely. Your existing data was not changed. Review custom content and try again.";
+		case "BREW_TOO_LARGE": return "That homebrew bundle exceeds the 1 MB campaign limit or contains too many documents. Split it into a smaller bundle and try again.";
+		case "BREW_TOO_DEEP":
+		case "BREW_INVALID":
+		case "BREW_BLOCKLIST_FORBIDDEN":
+		case "BREW_RAW_HTML_FORBIDDEN":
+		case "BREW_URL_FORBIDDEN":
+			return "That homebrew file is not safe or valid for campaign sharing. Your current campaign homebrew is unchanged.";
+		case "BREW_DEPENDENCY_MISSING": return "That homebrew is missing content it depends on. Add the required source documents and publish again.";
+		case "TRANSFER_INSUFFICIENT": return "The source no longer has enough of that item or currency. Nothing was moved. Reload the latest balances and try again.";
+		case "TRANSFER_ITEM_LINKED": return "That item is currently linked to character equipment or another feature, so it cannot be transferred safely.";
+		case "TRANSFER_EMPTY": return "Choose at least one item or enter a positive currency amount before sending a transfer.";
+		case "TRANSFER_NOT_FOUND": return "That transfer is no longer waiting. Reload the campaign inbox to see its latest status.";
+		case "RESOURCE_INSUFFICIENT": return "The character no longer has enough of that resource. Nothing was applied. Reload the character and try again.";
+		case "ACTION_NOT_FOUND": return "That effect request is no longer waiting. Reload the campaign inbox to see its latest status.";
+		case "REVISION_CONFLICT": return "This data changed on another device. Your changes were not discarded. Reload and use the recovery choice shown before editing again.";
+		case "LEASE_HELD": return "This character or workspace is being edited on another device. Open it read-only or explicitly take over editing there.";
+		case "LEASE_FENCED":
+		case "LEASE_EXPIRED":
+			return "This device no longer holds the editing lease. Your unsaved changes remain recoverable; reload before choosing whether to take over.";
+		default:
+			if (error.status === 503 || error.status >= 500) return "The campaign service is temporarily unavailable. Your data was not changed. Try again in a moment.";
+			return "The campaign hub could not complete that request. Your data was not changed. Try again.";
 	}
 }
 
-function renderError (message) {
+function setCampaignReadOnlyAfterAccessChange (error) {
+	if (!(error instanceof HubApiError)) return;
+	const statuses = {
+		AUTH_REQUIRED: "Signed out · data is read only",
+		CAMPAIGN_NOT_FOUND: "Access removed · data is read only",
+		FORBIDDEN: "Permissions changed · data is read only",
+		PROTOCOL_UPDATE_REQUIRED: "Update required · data is read only",
+	};
+	const label = statuses[error.code];
+	if (!label || document.body.dataset.hubView !== "campaign") return;
+	setCampaignConnectionStatus({label, state: "error"});
+	document.querySelectorAll("#campaign-content button, #campaign-content input, #campaign-content select, #campaign-content textarea")
+		.forEach(control => {
+			if (control.id !== "hub-logout") control.disabled = true;
+		});
+}
+
+function renderError (messageOrError, {actionLabel = null, fnAction = null} = {}) {
 	const wrp = document.getElementById("hub-error");
 	if (!wrp) return;
-	wrp.textContent = message;
+	const error = messageOrError instanceof HubApiError ? messageOrError : null;
+	const message = error ? getErrorMessage(error) : messageOrError;
+	wrp.replaceChildren();
+	if (message) {
+		const text = document.createElement("span");
+		text.textContent = message;
+		wrp.append(text);
+	}
+	if (error?.code === "PROTOCOL_UPDATE_REQUIRED") {
+		actionLabel = "Reload now";
+		fnAction = () => window.location.reload();
+	}
+	if (message && actionLabel && fnAction) {
+		const button = document.createElement("button");
+		button.className = "hub-button hub-button--small";
+		button.type = "button";
+		button.textContent = actionLabel;
+		button.addEventListener("click", fnAction);
+		wrp.append(button);
+	}
 	setHidden(wrp, !message);
+	setCampaignReadOnlyAfterAccessChange(error);
 }
 
 function getRoleLabel (role) {
@@ -59,10 +138,352 @@ function renderCampaignList (campaigns) {
 	});
 }
 
+function renderDetachedCharacterList (characters) {
+	const section = document.getElementById("hub-detached-characters");
+	const list = document.getElementById("hub-detached-character-list");
+	if (!section || !list) return;
+	const detached = characters.filter(character => character.campaignId == null);
+	setHidden(section, !detached.length);
+	list.replaceChildren(...detached.map(character => {
+		const link = document.createElement("a");
+		link.className = "hub-data-row";
+		link.href = `charactersheet.html?id=${encodeURIComponent(character.id)}&hubCharacter=1`;
+		const main = document.createElement("span");
+		main.className = "hub-data-row__main";
+		const name = document.createElement("span");
+		name.textContent = character.data?.name || "Unnamed Character";
+		const meta = document.createElement("span");
+		meta.className = "hub-data-row__meta";
+		meta.textContent = "Stored online · choose a campaign";
+		main.append(name, meta);
+		link.append(main);
+		return link;
+	}));
+}
+
 function getDateLabel (value) {
 	if (!value) return "Unknown";
 	const date = new Date(value);
 	return Number.isNaN(date.getTime()) ? "Unknown" : date.toLocaleString();
+}
+
+function setCampaignConnectionStatus ({label, state}) {
+	const status = document.getElementById("campaign-connection-status");
+	if (!status) return;
+	status.textContent = label;
+	status.dataset.state = state;
+}
+
+function initCampaignNetworkAwareness () {
+	if (document.body.dataset.hubView !== "campaign") return;
+	window.addEventListener("offline", () => {
+		isCampaignReloadRequired = true;
+		setCampaignConnectionStatus({label: "Offline · shown data may be stale", state: "offline"});
+		renderError("You are offline. The campaign data already on screen is retained, but changes cannot be saved until the connection returns.");
+	});
+	window.addEventListener("online", () => {
+		setCampaignConnectionStatus({label: "Back online · reload to refresh", state: "warning"});
+		renderError("The connection is back. Reload the campaign before making changes so you have the latest data.", {
+			actionLabel: "Reload campaign",
+			fnAction: () => window.location.reload(),
+		});
+	});
+}
+
+function setCount ({id, count}) {
+	const element = document.getElementById(id);
+	if (element) element.textContent = `${count}`;
+}
+
+function getCharacterName (character) {
+	return character?.data?.name || "Unnamed Character";
+}
+
+function getCharacterSummary (character) {
+	const data = character?.data || {};
+	const classes = Array.isArray(data.classes)
+		? data.classes
+			.filter(cls => cls?.name)
+			.map(cls => `${cls.name}${Number.isFinite(Number(cls.level)) ? ` ${cls.level}` : ""}`)
+			.join(" / ")
+		: "";
+	const hpCurrent = Number(data.hp?.current);
+	const hpMax = Number(data.hp?.max);
+	const hp = Number.isFinite(hpCurrent)
+		? `HP ${hpCurrent}${Number.isFinite(hpMax) ? `/${hpMax}` : ""}`
+		: "";
+	const acValue = Number(typeof data.ac === "object" ? data.ac?.value : data.ac);
+	const ac = Number.isFinite(acValue) ? `AC ${acValue}` : "";
+	return [classes, hp, ac].filter(Boolean).join(" · ") || "Campaign character";
+}
+
+function getMemberName (members, accountId) {
+	return members.find(member => member.accountId === accountId)?.displayName || "A campaign member";
+}
+
+function getCharacterById (characters, characterId) {
+	return characters.find(character => character.id === characterId);
+}
+
+function getCharacterNameById (characters, characterId) {
+	return getCharacterName(getCharacterById(characters, characterId));
+}
+
+function getContainerName ({kind, id, characters}) {
+	return kind === "party_inventory" ? "Party inventory" : getCharacterNameById(characters, id);
+}
+
+function getEffectDescription (effect = {}) {
+	const context = effect.context ? `${effect.context}: ` : "";
+	switch (effect.type) {
+		case "damage": return `${context}${Number(effect.amount) || 0} damage`;
+		case "healing": return `${context}${Number(effect.amount) || 0} healing`;
+		case "condition_add": return `${context}add ${effect.condition || "a condition"}`;
+		case "condition_remove": return `${context}remove ${effect.condition || "a condition"}`;
+		case "spell_slot_spend": return `${context}spend ${Number(effect.amount) || 1} level ${Number(effect.level) || 1} spell ${Number(effect.amount) === 1 ? "slot" : "slots"}`;
+		case "informational": return `${context}${effect.note || "informational request"}`;
+		default: return `${context}${String(effect.type || "effect").replaceAll("_", " ")}`;
+	}
+}
+
+function getCurrencyDescription (currency = {}) {
+	return CURRENCY_TYPES
+		.filter(type => Number(currency[type]) > 0)
+		.map(type => `${currency[type]} ${type.toUpperCase()}`)
+		.join(", ");
+}
+
+function renderPartyInventoryStatus (partyInventory) {
+	const status = document.getElementById("campaign-party-inventory-status");
+	if (!status) return;
+	status.textContent = `${partyInventory.inventory.length} item stack(s) · ${getCurrencyDescription(partyInventory.currency) || "no currency"}`;
+}
+
+function getTransferContentsDescription (transfer) {
+	const escrow = transfer.payload?.escrow || {};
+	const items = (escrow.items || []).map(entry => {
+		const source = entry.item?.source ? ` · ${entry.item.source}` : "";
+		return `${entry.quantity} × ${entry.item?.name || "item"}${source}`;
+	});
+	const currency = getCurrencyDescription(escrow.currency);
+	return [...items, currency].filter(Boolean).join(" + ") || "Reserved transfer";
+}
+
+function getTransferContainer ({value, characters, partyInventory}) {
+	const [kind, id] = value.split(":");
+	if (kind === "party_inventory") return partyInventory;
+	return getCharacterById(characters, id)?.data || null;
+}
+
+function syncTransferItemPicker ({characters, partyInventory}) {
+	const source = document.getElementById("campaign-transfer-source");
+	const target = document.getElementById("campaign-transfer-target");
+	const item = document.getElementById("campaign-transfer-entry");
+	const quantity = document.getElementById("campaign-transfer-quantity");
+	const balance = document.getElementById("campaign-transfer-balance");
+	if (!source || !item || !quantity) return;
+	const container = getTransferContainer({value: source.value, characters, partyInventory});
+	if (target?.value === source.value) {
+		const nextTarget = [...target.options].find(option => option.value !== source.value);
+		if (nextTarget) target.value = nextTarget.value;
+	}
+	const inventory = Array.isArray(container?.inventory) ? container.inventory : [];
+	item.replaceChildren();
+	const currencyOnly = document.createElement("option");
+	currencyOnly.value = "";
+	currencyOnly.textContent = inventory.length ? "Currency only" : "No transferable item stacks";
+	item.append(currencyOnly, ...inventory.map(entry => {
+		const option = document.createElement("option");
+		option.value = entry.id;
+		const sourceLabel = entry.item?.source ? ` · ${entry.item.source}` : "";
+		option.textContent = `${entry.item?.name || "Unnamed item"}${sourceLabel} · ${entry.quantity} available`;
+		option.dataset.quantity = `${entry.quantity}`;
+		return option;
+	}));
+	item.disabled = !inventory.length;
+	quantity.value = "0";
+	quantity.disabled = true;
+	quantity.removeAttribute("max");
+	if (balance) {
+		const currency = getCurrencyDescription(container?.currency);
+		balance.textContent = `Available currency: ${currency || "none"}.`;
+	}
+}
+
+function syncTransferQuantity () {
+	const item = document.getElementById("campaign-transfer-entry");
+	const quantity = document.getElementById("campaign-transfer-quantity");
+	if (!item || !quantity) return;
+	const selected = item.selectedOptions[0];
+	const maximum = Number(selected?.dataset.quantity);
+	const hasItem = !!item.value && Number.isFinite(maximum) && maximum > 0;
+	quantity.disabled = !hasItem;
+	quantity.value = hasItem ? "1" : "0";
+	if (hasItem) quantity.max = `${maximum}`;
+	else quantity.removeAttribute("max");
+}
+
+async function pInitGrantItemCatalog ({context}) {
+	const open = document.getElementById("campaign-item-catalog-open");
+	const close = document.getElementById("campaign-item-catalog-close");
+	const wrapper = document.getElementById("campaign-item-catalog");
+	const search = document.getElementById("campaign-item-catalog-search");
+	const results = document.getElementById("campaign-item-catalog-results");
+	const status = document.getElementById("campaign-item-catalog-status");
+	const name = document.getElementById("campaign-item-name");
+	const source = document.getElementById("campaign-item-source");
+	const summary = document.getElementById("campaign-item-selection-summary");
+	if (!open || !wrapper || !search || !results || !name || !source) {
+		return {setCampaignBrewContent () {}};
+	}
+
+	let catalog = null;
+	let isApplyingCatalog = false;
+	let isCatalogSelection = false;
+	let campaignBrewContent = context.brewBundle?.content;
+	const renderMatches = () => {
+		const query = search.value.trim().toLowerCase();
+		results.replaceChildren();
+		if (query.length < 2) {
+			if (status) status.textContent = "Type at least 2 characters to search.";
+			return;
+		}
+		const matches = catalog
+			.filter(item => item.name.toLowerCase().includes(query) || item.source.toLowerCase().includes(query))
+			.slice(0, 100);
+		results.replaceChildren(...matches.map(item => {
+			const option = document.createElement("option");
+			option.value = `${item.name}|${item.source}`;
+			option.textContent = `${item.name} — ${item.source}`;
+			return option;
+		}));
+		if (status) {
+			status.textContent = matches.length
+				? `${matches.length}${matches.length === 100 ? "+" : ""} matching items.`
+				: "No matching items. Try another name or use a custom item.";
+		}
+	};
+	const applySelection = () => {
+		const selected = results.selectedOptions[0];
+		if (!selected) return;
+		const splitAt = selected.value.lastIndexOf("|");
+		isApplyingCatalog = true;
+		name.value = selected.value.slice(0, splitAt);
+		source.value = selected.value.slice(splitAt + 1);
+		isApplyingCatalog = false;
+		isCatalogSelection = true;
+		if (summary) summary.textContent = `Selected: ${name.value} · ${source.value}`;
+	};
+
+	open.addEventListener("click", async () => {
+		open.disabled = true;
+		open.textContent = "Loading item catalog...";
+		try {
+			if (!catalog) {
+				const {pLoadHubItemCatalog} = await import("./hub-item-catalog.js");
+				catalog = await pLoadHubItemCatalog({campaignBrewContent});
+			}
+			setHidden(wrapper, false);
+			search.focus();
+			renderMatches();
+		} catch (error) {
+			const message = error.message || "The item catalog could not be loaded.";
+			setFormStatus({formId: "campaign-item-form", message, isError: true});
+		} finally {
+			open.disabled = false;
+			open.textContent = "Choose from item catalog";
+		}
+	});
+	close?.addEventListener("click", () => {
+		setHidden(wrapper, true);
+		open.focus();
+	});
+	search.addEventListener("input", renderMatches);
+	results.addEventListener("change", applySelection);
+	results.addEventListener("dblclick", () => {
+		applySelection();
+		setHidden(wrapper, true);
+		open.focus();
+	});
+	name.addEventListener("input", () => {
+		if (isApplyingCatalog) return;
+		isCatalogSelection = false;
+		source.value = "HB";
+		if (summary) summary.textContent = "Custom item · homebrew source";
+	});
+	return {
+		setCampaignBrewContent (content) {
+			campaignBrewContent = content;
+			catalog = null;
+			search.value = "";
+			results.replaceChildren();
+			setHidden(wrapper, true);
+			if (isCatalogSelection) {
+				name.value = "";
+				source.value = "HB";
+				isCatalogSelection = false;
+				if (summary) summary.textContent = "Custom item · homebrew source";
+			}
+			if (status) status.textContent = "Campaign homebrew changed. Reopen the catalog to use the latest items.";
+		},
+	};
+}
+
+function applyCampaignRoleLayout ({campaign, characters}) {
+	const isDm = ["dm", "co_dm"].includes(campaign.role);
+	const canPlay = ["dm", "co_dm", "player"].includes(campaign.role);
+	const isSpectator = campaign.role === "spectator";
+	const content = document.getElementById("campaign-content");
+	if (content) content.dataset.campaignRole = campaign.role;
+
+	const title = document.getElementById("campaign-character-title");
+	const description = document.getElementById("campaign-character-description");
+	const guidance = document.getElementById("campaign-role-guidance");
+	if (isDm) {
+		if (title) title.textContent = "Live character roster";
+		if (description) description.textContent = "Open any campaign character or move directly into the live DM workspace.";
+		if (guidance) guidance.textContent = "Keep play moving from the live workspace, then return here for requests and campaign setup.";
+	} else {
+		if (title) title.textContent = "My characters";
+		if (description) description.textContent = "Your cloud characters for this campaign. Local originals remain independent.";
+		if (guidance) {
+			guidance.textContent = isSpectator
+				? "Follow the party roster and campaign activity. Gameplay controls are reserved for players and DMs."
+				: "Open your character, check requests, or send an effect or transfer to another player.";
+		}
+	}
+
+	setHidden(document.getElementById("campaign-characters-panel"), isSpectator);
+	setHidden(document.getElementById("campaign-party-panel"), isDm);
+	setHidden(document.getElementById("campaign-shared-actions"), !canPlay);
+	setHidden(document.getElementById("campaign-jump-effect"), !canPlay);
+	setHidden(document.getElementById("campaign-jump-transfer"), !canPlay);
+	setHidden(document.getElementById("campaign-dm-grants"), !isDm);
+	setHidden(document.getElementById("campaign-content-managed-note"), isDm);
+	setHidden(document.getElementById("campaign-open-dm-screen"), !isDm);
+	setHidden(document.getElementById("campaign-upload-local"), !canPlay);
+
+	const primaryCharacter = document.getElementById("campaign-open-primary-character");
+	const firstCharacter = !isDm ? characters[0] : null;
+	if (primaryCharacter && firstCharacter) {
+		primaryCharacter.href = `charactersheet.html?id=${encodeURIComponent(firstCharacter.id)}&hubCampaign=${encodeURIComponent(campaign.id)}`;
+		primaryCharacter.textContent = `Open ${getCharacterName(firstCharacter)}`;
+	}
+	setHidden(primaryCharacter, !firstCharacter);
+}
+
+function setFormStatus ({formId, message = "", isError = false}) {
+	const status = document.getElementById(`${formId}-status`);
+	if (!status) return;
+	status.textContent = message;
+	status.classList.toggle("hub-inline-status--error", isError);
+}
+
+function setFormAvailability ({formId, isAvailable, message}) {
+	const form = document.getElementById(formId);
+	if (!form) return;
+	for (const button of form.querySelectorAll("button[type='submit']")) button.disabled = !isAvailable;
+	if (!isAvailable) setFormStatus({formId, message});
 }
 
 function renderAccountDeletionPending (deletion) {
@@ -99,7 +520,7 @@ async function pRenderAccountSessions () {
 					await api.pRevokeSession({sessionId: session.id, idempotencyKey: crypto.randomUUID()});
 					await pRenderAccountSessions();
 				} catch (error) {
-					renderError(getErrorMessage(error));
+					renderError(error);
 					button.disabled = false;
 				}
 			});
@@ -119,7 +540,7 @@ async function pInitHubIndex ({session}) {
 			await api.pCancelAccountDeletion({idempotencyKey: crypto.randomUUID()});
 			window.location.reload();
 		} catch (error) {
-			renderError(getErrorMessage(error));
+			renderError(error);
 			button.disabled = false;
 		}
 	});
@@ -132,15 +553,19 @@ async function pInitHubIndex ({session}) {
 	}
 	setHidden(document.getElementById("hub-account-active"), false);
 	setHidden(document.getElementById("hub-account-deletion-pending"), true);
-	const campaigns = await api.pListCampaigns();
+	const [campaigns, characters] = await Promise.all([
+		api.pListCampaigns(),
+		api.pListCharacters(),
+	]);
 	renderCampaignList(campaigns);
+	renderDetachedCharacterList(characters);
 	const inviteToken = sessionStorage.getItem("hub-pending-invite");
 	if (inviteToken) {
 		try {
 			await api.pRedeemInvite({token: inviteToken, idempotencyKey: crypto.randomUUID()});
 			renderCampaignList(await api.pListCampaigns());
 		} catch (error) {
-			renderError(getErrorMessage(error));
+			renderError(error);
 		} finally {
 			sessionStorage.removeItem("hub-pending-invite");
 		}
@@ -170,7 +595,7 @@ async function pInitHubIndex ({session}) {
 			pendingCreate = null;
 			window.location.assign(`campaign.html?id=${encodeURIComponent(campaign.id)}`);
 		} catch (error) {
-			renderError(getErrorMessage(error));
+			renderError(error);
 			button.disabled = false;
 			button.textContent = "Create campaign";
 		}
@@ -178,7 +603,7 @@ async function pInitHubIndex ({session}) {
 	try {
 		await pRenderAccountSessions();
 	} catch (error) {
-		renderError(getErrorMessage(error));
+		renderError(error);
 	}
 	document.getElementById("hub-revoke-other-sessions")?.addEventListener("click", async event => {
 		const button = event.currentTarget;
@@ -187,7 +612,7 @@ async function pInitHubIndex ({session}) {
 			await api.pRevokeOtherSessions({idempotencyKey: crypto.randomUUID()});
 			await pRenderAccountSessions();
 		} catch (error) {
-			renderError(getErrorMessage(error));
+			renderError(error);
 		} finally {
 			button.disabled = false;
 		}
@@ -200,7 +625,7 @@ async function pInitHubIndex ({session}) {
 			const result = await api.pRequestAccountDeletion({idempotencyKey: crypto.randomUUID()});
 			renderAccountDeletionPending(result.deletion);
 		} catch (error) {
-			renderError(getErrorMessage(error));
+			renderError(error);
 			button.disabled = false;
 		}
 	});
@@ -215,7 +640,14 @@ async function pInitCampaign ({session}) {
 		api.pListCharacters({campaignId}),
 		api.pGetCampaignSnapshot({campaignId}),
 	]);
-	const context = await api.pGetCampaignContext({campaignId});
+	const [context, events] = await Promise.all([
+		api.pGetCampaignContext({campaignId}),
+		api.pListEvents({
+			campaignId,
+			afterSequence: Math.max(0, snapshot.lastSequence - 50),
+			limit: 50,
+		}),
+	]);
 	const pRefreshMembers = async () => renderMemberList({
 		campaign,
 		campaignId,
@@ -230,25 +662,177 @@ async function pInitCampaign ({session}) {
 	});
 	document.getElementById("campaign-name").textContent = campaign.name;
 	document.getElementById("campaign-role").textContent = getRoleLabel(campaign.role);
-	document.getElementById("campaign-status").textContent = campaign.status === "active" ? "Active" : "Archived";
+	const campaignStatus = document.getElementById("campaign-status");
+	campaignStatus.textContent = campaign.status === "active" ? "Active campaign" : "Archived";
+	campaignStatus.dataset.state = campaign.status;
 	document.getElementById("campaign-account").textContent = session.account.displayName;
 	renderMemberList({campaign, campaignId, members, session, pRefresh: pRefreshMembers});
 	if (["dm", "co_dm"].includes(campaign.role)) await pRefreshInvites();
 	renderCharacterList({campaignId, characters});
+	renderPartyRoster({
+		campaignId,
+		characters: snapshot.characters,
+		members,
+		session,
+		isDm: ["dm", "co_dm"].includes(campaign.role),
+	});
+	renderRecentActivity({events, characters: snapshot.characters, members});
 	renderCampaignContext(context);
+	applyCampaignRoleLayout({campaign, characters});
 	if (campaign.status !== "active") {
 		setHidden(document.getElementById("campaign-invite-form"), true);
 		setHidden(document.getElementById("campaign-upload-local"), true);
 		setHidden(document.getElementById("campaign-dm-controls"), true);
 		setHidden(document.getElementById("campaign-open-dm-screen"), true);
+		setHidden(document.getElementById("campaign-inbox-panel"), true);
 		setHidden(document.getElementById("campaign-shared-actions"), true);
 		setHidden(document.getElementById("campaign-leave"), true);
+		setHidden(document.getElementById("campaign-jump-effect"), true);
+		setHidden(document.getElementById("campaign-jump-transfer"), true);
+		const partyStatus = document.getElementById("campaign-party-inventory-status");
+		if (partyStatus) partyStatus.textContent = "Shared inventory is read-only while this campaign is archived.";
+		setCampaignConnectionStatus({label: "Archived · read only", state: "neutral"});
 		setHidden(document.getElementById("campaign-loading"), true);
 		setHidden(document.getElementById("campaign-content"), false);
 		document.title = `${campaign.name} - Campaign Hub - ThelemarTools`;
 		return;
 	}
-	await pInitCampaignForms({campaign, campaignId, session, characters, targetCharacters: snapshot.characters, context, pRefreshInvites});
+	const {pRefreshTransferState} = await pInitCampaignForms({
+		campaign,
+		campaignId,
+		session,
+		characters,
+		targetCharacters: snapshot.characters,
+		members,
+		context,
+		pRefreshInvites,
+	});
+	const realtime = new HubRealtimeClient({campaignId});
+	let liveEvents = events;
+	let liveMembers = members;
+	let liveCharacters = snapshot.characters;
+	let liveLastSequence = snapshot.lastSequence;
+	let refreshTimer = null;
+	let isRefreshing = false;
+	let isRefreshQueued = false;
+	const pRefreshLiveViews = async () => {
+		if (isCampaignReloadRequired || !navigator.onLine) return;
+		if (isRefreshing) {
+			isRefreshQueued = true;
+			return;
+		}
+		isRefreshing = true;
+		try {
+			const [membersNxt, charactersNxt, snapshotNxt] = await Promise.all([
+				api.pListMembers({campaignId}),
+				api.pListCharacters({campaignId}),
+				api.pGetCampaignSnapshot({campaignId}),
+			]);
+			const eventsNxt = await api.pListEvents({
+				campaignId,
+				afterSequence: Math.max(0, snapshotNxt.lastSequence - 50),
+				limit: 50,
+			});
+			liveEvents = [...eventsNxt, ...liveEvents]
+				.filter((event, index, all) => all.findIndex(other => other.id === event.id) === index)
+				.sort((a, b) => a.sequence - b.sequence)
+				.slice(-50);
+			liveMembers = membersNxt;
+			if (snapshotNxt.lastSequence >= liveLastSequence) {
+				liveCharacters = snapshotNxt.characters;
+				liveLastSequence = snapshotNxt.lastSequence;
+			}
+			renderCharacterList({campaignId, characters: charactersNxt});
+			renderPartyRoster({
+				campaignId,
+				characters: liveCharacters,
+				members: membersNxt,
+				session,
+				isDm: ["dm", "co_dm"].includes(campaign.role),
+			});
+			renderRecentActivity({events: liveEvents, characters: liveCharacters, members: membersNxt});
+			await Promise.all([
+				renderPendingActions({campaign, campaignId, session, targetCharacters: liveCharacters, members: membersNxt}),
+				pRefreshTransferState({
+					charactersNxt,
+					targetCharactersNxt: liveCharacters,
+					membersNxt,
+				}),
+			]);
+		} catch (error) {
+			renderError(error);
+		} finally {
+			isRefreshing = false;
+			if (isRefreshQueued) {
+				isRefreshQueued = false;
+				void pRefreshLiveViews();
+			}
+		}
+	};
+	const queueLiveRefresh = () => {
+		if (isCampaignReloadRequired) return;
+		if (refreshTimer != null) window.clearTimeout(refreshTimer);
+		refreshTimer = window.setTimeout(() => {
+			refreshTimer = null;
+			void pRefreshLiveViews();
+		}, 250);
+	};
+	realtime.on("event", event => {
+		if (!isCampaignReloadRequired && navigator.onLine) {
+			liveLastSequence = Math.max(liveLastSequence, event.sequence || 0);
+			const projectedCharacter = event.type === "character.projection.updated"
+				? event.payload?.character
+				: null;
+			if (projectedCharacter?.id) {
+				liveCharacters = [
+					...liveCharacters.filter(character => character.id !== projectedCharacter.id),
+					projectedCharacter,
+				];
+				renderPartyRoster({
+					campaignId,
+					characters: liveCharacters,
+					members: liveMembers,
+					session,
+					isDm: ["dm", "co_dm"].includes(campaign.role),
+				});
+			}
+			liveEvents = [...liveEvents.filter(existing => existing.id !== event.id), event]
+				.sort((a, b) => a.sequence - b.sequence)
+				.slice(-50);
+			renderRecentActivity({events: liveEvents, characters: liveCharacters, members: liveMembers});
+		}
+		queueLiveRefresh();
+	});
+	realtime.on("snapshot", snapshotNxt => {
+		if (Array.isArray(snapshotNxt?.characters) && snapshotNxt.lastSequence >= liveLastSequence) {
+			liveCharacters = snapshotNxt.characters;
+			liveLastSequence = snapshotNxt.lastSequence;
+			renderPartyRoster({
+				campaignId,
+				characters: liveCharacters,
+				members: liveMembers,
+				session,
+				isDm: ["dm", "co_dm"].includes(campaign.role),
+			});
+		}
+		queueLiveRefresh();
+	});
+	realtime.on("state", ({state, reason}) => {
+		if (isCampaignReloadRequired) return;
+		if (state === "live") setCampaignConnectionStatus({label: "Live updates connected", state: "connected"});
+		else if (state === "reconnecting") setCampaignConnectionStatus({label: "Live updates reconnecting", state: "warning"});
+		else if (state === "access_lost") {
+			isCampaignReloadRequired = true;
+			if (/session|account deletion/i.test(reason || "")) renderError(new HubApiError({code: "AUTH_REQUIRED", status: 401}));
+			else if (/membership|authorization/i.test(reason || "")) renderError(new HubApiError({code: "CAMPAIGN_NOT_FOUND", status: 404}));
+			else setCampaignConnectionStatus({label: "Live updates stopped · reload required", state: "warning"});
+		}
+	});
+	window.addEventListener("beforeunload", () => realtime.close(), {once: true});
+	await realtime.pConnect().catch(() => {
+		if (!isCampaignReloadRequired) setCampaignConnectionStatus({label: "Live updates reconnecting", state: "warning"});
+	});
+	if (realtime.getConnectionState().state !== "live") setCampaignConnectionStatus({label: "Campaign data connected", state: "connected"});
 	document.title = `${campaign.name} - Campaign Hub - ThelemarTools`;
 	setHidden(document.getElementById("campaign-loading"), true);
 	setHidden(document.getElementById("campaign-content"), false);
@@ -259,19 +843,21 @@ function renderCampaignContext (context) {
 	const rules = document.getElementById("campaign-rules-status");
 	if (brew) {
 		brew.textContent = context.brewBundle
-			? `Version ${context.brewBundle.version} · ${context.brewBundle.manifest.documentCount} document(s) · ${context.brewBundle.contentHash.slice(0, 12)}`
-			: "No campaign homebrew published.";
+			? `Version ${context.brewBundle.version} · ${context.brewBundle.manifest.documentCount} ${context.brewBundle.manifest.documentCount === 1 ? "document" : "documents"}`
+			: "Not published";
 	}
 	if (rules) {
 		rules.textContent = context.rulesVersion
-			? `Version ${context.rulesVersion.version} · ${context.rulesVersion.rules.exhaustionRules} exhaustion`
-			: "No campaign rules published.";
+			? `${context.rulesVersion.rules.exhaustionRules} exhaustion · version ${context.rulesVersion.version}`
+			: "Not published";
 	}
 }
 
 function renderMemberList ({campaign, campaignId, members, session, pRefresh}) {
 	const list = document.getElementById("campaign-member-list");
 	if (!list) return;
+	const summary = document.getElementById("campaign-member-summary");
+	if (summary) summary.textContent = `${members.length} ${members.length === 1 ? "member" : "members"}`;
 	list.replaceChildren(...members.map(member => {
 		const row = document.createElement("li");
 		row.className = "hub-data-row";
@@ -309,7 +895,7 @@ function renderMemberList ({campaign, campaignId, members, session, pRefresh}) {
 						await api.pChangeMemberRole({campaignId, membershipId: member.id, role: select.value, idempotencyKey: crypto.randomUUID()});
 						await pRefresh();
 					} catch (error) {
-						renderError(getErrorMessage(error));
+						renderError(error);
 						select.disabled = false;
 						select.value = member.role;
 					}
@@ -328,7 +914,7 @@ function renderMemberList ({campaign, campaignId, members, session, pRefresh}) {
 						await api.pRemoveMember({campaignId, membershipId: member.id, idempotencyKey: crypto.randomUUID()});
 						await pRefresh();
 					} catch (error) {
-						renderError(getErrorMessage(error));
+						renderError(error);
 						button.disabled = false;
 					}
 				});
@@ -366,7 +952,7 @@ function renderInviteList ({campaignId, invites, pRefresh}) {
 					await api.pRevokeInvite({campaignId, inviteId: invite.id, idempotencyKey: crypto.randomUUID()});
 					await pRefresh();
 				} catch (error) {
-					renderError(getErrorMessage(error));
+					renderError(error);
 					button.disabled = false;
 				}
 			});
@@ -379,17 +965,121 @@ function renderInviteList ({campaignId, invites, pRefresh}) {
 function renderCharacterList ({campaignId, characters}) {
 	const list = document.getElementById("campaign-character-list");
 	if (!list) return;
+	setCount({id: "campaign-character-count", count: characters.length});
+	const empty = document.getElementById("campaign-character-empty");
+	if (empty) {
+		empty.textContent = "No characters are attached yet. Add a local copy without changing the original.";
+		setHidden(empty, !!characters.length);
+	}
 	list.replaceChildren(...characters.map(character => {
 		const link = document.createElement("a");
 		link.className = "hub-data-row";
 		link.href = `charactersheet.html?id=${encodeURIComponent(character.id)}&hubCampaign=${encodeURIComponent(campaignId)}`;
+		const main = document.createElement("span");
+		main.className = "hub-data-row__main";
 		const name = document.createElement("span");
-		name.textContent = character.data?.name || "Unnamed Character";
+		name.className = "hub-data-row__name";
+		name.textContent = getCharacterName(character);
 		const status = document.createElement("span");
 		status.className = "hub-data-row__meta";
-		status.textContent = character.ownerAccountId ? "Cloud character" : "Character";
-		link.append(name, status);
+		status.textContent = getCharacterSummary(character);
+		main.append(name, status);
+		const open = document.createElement("span");
+		open.className = "hub-data-row__open";
+		open.textContent = "Open sheet";
+		link.append(main, open);
 		return link;
+	}));
+}
+
+function renderPartyRoster ({campaignId, characters, members, session, isDm}) {
+	const list = document.getElementById("campaign-party-roster");
+	if (!list) return;
+	setCount({id: "campaign-party-count", count: characters.length});
+	setHidden(document.getElementById("campaign-party-empty"), !!characters.length);
+	list.replaceChildren(...characters.map(character => {
+		const canOpen = isDm || character.ownerAccountId === session.account.id;
+		const row = document.createElement(canOpen ? "a" : "div");
+		row.className = "hub-data-row";
+		if (canOpen) {
+			row.href = `charactersheet.html?id=${encodeURIComponent(character.id)}&hubCampaign=${encodeURIComponent(campaignId)}`;
+		}
+		const main = document.createElement("span");
+		main.className = "hub-data-row__main";
+		const name = document.createElement("span");
+		name.className = "hub-data-row__name";
+		name.textContent = getCharacterName(character);
+		const meta = document.createElement("span");
+		meta.className = "hub-data-row__meta";
+		meta.textContent = `${getMemberName(members, character.ownerAccountId)} · ${getCharacterSummary(character)}`;
+		main.append(name, meta);
+		row.append(main);
+		if (canOpen) {
+			const open = document.createElement("span");
+			open.className = "hub-data-row__open";
+			open.textContent = "Open sheet";
+			row.append(open);
+		}
+		return row;
+	}));
+}
+
+function getActivityDescription ({event, characters, members}) {
+	const actor = getMemberName(members, event.actorAccountId);
+	const character = getCharacterNameById(characters, event.aggregateId);
+	const target = getCharacterNameById(characters, event.payload?.targetCharacterId);
+	switch (event.type) {
+		case "campaign.created": return `${actor} created the campaign.`;
+		case "campaign.archived": return `${actor} archived the campaign.`;
+		case "campaign.ownership_transferred": return `Campaign ownership changed to ${getMemberName(members, event.payload?.targetAccountId)}.`;
+		case "membership.joined": return `${getMemberName(members, event.payload?.accountId)} joined as ${getRoleLabel(event.payload?.role)}.`;
+		case "membership.role_changed": return `${getMemberName(members, event.payload?.accountId)} is now ${getRoleLabel(event.payload?.role)}.`;
+		case "invite.created": return `${actor} created a ${getRoleLabel(event.payload?.role)} invite.`;
+		case "invite.revoked": return `${actor} revoked an invite.`;
+		case "character.created": return `${character} joined the campaign.`;
+		case "character.reactivated": return `${character} returned to the campaign.`;
+		case "character.moved": return `${character} moved into this campaign.`;
+		case "character.moved_out": return `${character} left this campaign.`;
+		case "character.archived": return `${character} was archived.`;
+		case "character.projection.updated": return `${character} updated.`;
+		case "roll.logged": return `${actor} rolled ${event.payload?.context || event.payload?.formula || "dice"}: ${event.payload?.total ?? "result unavailable"}.`;
+		case "action.proposed": return `${actor} proposed ${getEffectDescription(event.payload?.effect)} for ${target}.`;
+		case "action.applied": return `${getEffectDescription(event.payload?.effect)} was applied to ${target}.`;
+		case "action.rejected": return `${getEffectDescription(event.payload?.effect)} for ${target} was rejected.`;
+		case "action.cancelled": return `An effect request for ${target} was cancelled.`;
+		case "transfer.reserved":
+			return `${actor} offered a transfer from ${getContainerName({kind: event.payload?.sourceKind, id: event.payload?.sourceId, characters})} to ${getContainerName({kind: event.payload?.targetKind, id: event.payload?.targetId, characters})}.`;
+		case "transfer.committed": return `${actor} accepted a transfer.`;
+		case "transfer.rejected": return `${actor} rejected a transfer.`;
+		case "transfer.cancelled": return `A transfer was cancelled.`;
+		case "xp.granted": return `${target === "Unnamed Character" ? character : target} received ${event.payload?.amount || 0} XP.`;
+		case "item.granted": return `${character} received ${event.payload?.entry?.item?.name || "an item"}.`;
+		case "brew.activated": return `${actor} published campaign homebrew version ${event.payload?.version || ""}.`.replace("version .", "homebrew.");
+		case "rules.activated": return `${actor} published campaign rules version ${event.payload?.version || ""}.`.replace("version .", "rules.");
+		default: return null;
+	}
+}
+
+function renderRecentActivity ({events, characters, members}) {
+	const list = document.getElementById("campaign-activity-list");
+	if (!list) return;
+	const rows = events
+		.map(event => ({event, description: getActivityDescription({event, characters, members})}))
+		.filter(({description}) => description)
+		.slice(-8)
+		.reverse();
+	setHidden(document.getElementById("campaign-activity-empty"), !!rows.length);
+	list.replaceChildren(...rows.map(({event, description}) => {
+		const row = document.createElement("div");
+		row.className = "hub-activity-row";
+		const text = document.createElement("span");
+		text.textContent = description;
+		const time = document.createElement("time");
+		time.className = "hub-data-row__meta";
+		time.dateTime = event.createdAt || "";
+		time.textContent = getDateLabel(event.createdAt);
+		row.append(text, time);
+		return row;
 	}));
 }
 
@@ -411,55 +1101,107 @@ function fillCharacterSelect (select, characters, {includeParty = false, partyIn
 	}
 }
 
-async function renderPendingActions ({campaignId, session}) {
+function updateInboxCount ({kind, count}) {
+	const element = document.getElementById("campaign-inbox-count");
+	if (!element) return;
+	element.dataset[kind] = `${count}`;
+	element.textContent = `${Number(element.dataset.actions || 0) + Number(element.dataset.transfers || 0)}`;
+}
+
+async function renderPendingActions ({campaign, campaignId, session, targetCharacters, members}) {
 	const list = document.getElementById("campaign-pending-actions");
 	if (!list) return;
 	const actions = await api.pListPendingActions({campaignId});
-	list.replaceChildren(...actions.filter(action => action.status === "proposed").map(action => {
+	const pending = actions.filter(action => action.status === "proposed");
+	updateInboxCount({kind: "actions", count: pending.length});
+	setHidden(document.getElementById("campaign-pending-actions-empty"), !!pending.length);
+	const isDm = ["dm", "co_dm"].includes(campaign.role);
+	list.replaceChildren(...pending.map(action => {
 		const row = document.createElement("div");
 		row.className = "hub-data-row";
+		const main = document.createElement("span");
+		main.className = "hub-data-row__main";
 		const text = document.createElement("span");
-		text.textContent = `${action.payload.effect.type.replaceAll("_", " ")} → ${action.targetCharacterId}`;
-		const controls = document.createElement("span");
-		for (const decision of ["accept", "reject"]) {
-			const button = document.createElement("button");
-			button.type = "button";
-			button.className = "hub-button";
-			button.textContent = decision === "accept" ? "Apply" : "Reject";
-			button.addEventListener("click", async () => {
-				await api.pResolveStructuredAction({campaignId, actionId: action.id, decision, idempotencyKey: crypto.randomUUID()});
-				await renderPendingActions({campaignId, session});
-			});
-			controls.append(button);
+		const target = getCharacterById(targetCharacters, action.targetCharacterId);
+		text.textContent = `${getMemberName(members, action.actorAccountId)} proposes ${getEffectDescription(action.payload?.effect)} for ${getCharacterName(target)}.`;
+		const meta = document.createElement("span");
+		meta.className = "hub-data-row__meta";
+		const canResolve = isDm || (campaign.role === "player" && target?.ownerAccountId === session.account.id);
+		meta.textContent = canResolve ? "Your response is needed" : "Waiting for the recipient";
+		main.append(text, meta);
+		row.append(main);
+		if (canResolve) {
+			const controls = document.createElement("span");
+			controls.className = "hub-data-row__controls";
+			for (const decision of ["accept", "reject"]) {
+				const button = document.createElement("button");
+				button.type = "button";
+				button.className = decision === "accept" ? "hub-button hub-button--primary" : "hub-button";
+				button.textContent = decision === "accept" ? "Apply" : "Reject";
+				button.addEventListener("click", async () => {
+					button.disabled = true;
+					try {
+						await api.pResolveStructuredAction({campaignId, actionId: action.id, decision, idempotencyKey: crypto.randomUUID()});
+						await renderPendingActions({campaign, campaignId, session, targetCharacters, members});
+					} catch (error) {
+						renderError(error);
+						button.disabled = false;
+					}
+				});
+				controls.append(button);
+			}
+			row.append(controls);
 		}
-
-		row.append(text, controls);
 		return row;
 	}));
 }
 
-async function renderPendingTransfers ({campaignId}) {
+async function renderPendingTransfers ({campaign, campaignId, session, targetCharacters, members, pRefreshTransferState}) {
 	const list = document.getElementById("campaign-pending-transfers");
 	if (!list) return;
 	const transfers = await api.pListTransfers({campaignId});
-	list.replaceChildren(...transfers.filter(transfer => transfer.status === "reserved").map(transfer => {
+	const pending = transfers.filter(transfer => transfer.status === "reserved");
+	updateInboxCount({kind: "transfers", count: pending.length});
+	setHidden(document.getElementById("campaign-pending-transfers-empty"), !!pending.length);
+	const isDm = ["dm", "co_dm"].includes(campaign.role);
+	list.replaceChildren(...pending.map(transfer => {
 		const row = document.createElement("div");
 		row.className = "hub-data-row";
+		const main = document.createElement("span");
+		main.className = "hub-data-row__main";
 		const text = document.createElement("span");
-		text.textContent = `${transfer.sourceKind.replace("_", " ")} → ${transfer.targetKind.replace("_", " ")}`;
-		const controls = document.createElement("span");
-		for (const decision of ["accept", "reject"]) {
-			const button = document.createElement("button");
-			button.type = "button";
-			button.className = "hub-button";
-			button.textContent = decision === "accept" ? "Accept" : "Reject";
-			button.addEventListener("click", async () => {
-				await api.pResolveTransfer({campaignId, transferId: transfer.id, decision, idempotencyKey: crypto.randomUUID()});
-				await renderPendingTransfers({campaignId});
-			});
-			controls.append(button);
+		const actor = getMemberName(members, transfer.actorAccountId);
+		const contents = getTransferContentsDescription(transfer);
+		text.textContent = `${actor} offers ${contents}: ${getContainerName({kind: transfer.sourceKind, id: transfer.sourceId, characters: targetCharacters})} to ${getContainerName({kind: transfer.targetKind, id: transfer.targetId, characters: targetCharacters})}.`;
+		const target = transfer.targetKind === "character" ? getCharacterById(targetCharacters, transfer.targetId) : null;
+		const canResolve = isDm || target?.ownerAccountId === session.account.id;
+		const meta = document.createElement("span");
+		meta.className = "hub-data-row__meta";
+		meta.textContent = canResolve ? "Your response is needed" : "Waiting for the recipient";
+		main.append(text, meta);
+		row.append(main);
+		if (canResolve) {
+			const controls = document.createElement("span");
+			controls.className = "hub-data-row__controls";
+			for (const decision of ["accept", "reject"]) {
+				const button = document.createElement("button");
+				button.type = "button";
+				button.className = decision === "accept" ? "hub-button hub-button--primary" : "hub-button";
+				button.textContent = decision === "accept" ? "Accept" : "Reject";
+				button.addEventListener("click", async () => {
+					button.disabled = true;
+					try {
+						await api.pResolveTransfer({campaignId, transferId: transfer.id, decision, idempotencyKey: crypto.randomUUID()});
+						await pRefreshTransferState();
+					} catch (error) {
+						renderError(error);
+						button.disabled = false;
+					}
+				});
+				controls.append(button);
+			}
+			row.append(controls);
 		}
-		row.append(text, controls);
 		return row;
 	}));
 }
@@ -486,7 +1228,16 @@ async function pRunFormMutation ({form, fnMutate}) {
 	}
 	form._hubIsSubmitting = true;
 	const buttons = [...form.querySelectorAll("button[type='submit']")];
-	buttons.forEach(button => button.disabled = true);
+	const buttonStates = buttons.map(button => ({
+		button,
+		disabled: button.disabled,
+		text: button.textContent,
+	}));
+	form.setAttribute("aria-busy", "true");
+	buttonStates.forEach(({button}) => {
+		button.disabled = true;
+		if (button.dataset.pendingLabel) button.textContent = button.dataset.pendingLabel;
+	});
 	try {
 		const out = await fnMutate(form._hubMutationKey);
 		form._hubMutationKey = null;
@@ -494,13 +1245,19 @@ async function pRunFormMutation ({form, fnMutate}) {
 		return out;
 	} finally {
 		form._hubIsSubmitting = false;
-		buttons.forEach(button => button.disabled = false);
+		form.removeAttribute("aria-busy");
+		buttonStates.forEach(({button, disabled, text}) => {
+			button.disabled = disabled;
+			button.textContent = text;
+		});
 	}
 }
 
-async function pInitCampaignForms ({campaign, campaignId, session, characters, targetCharacters, context, pRefreshInvites}) {
+async function pInitCampaignForms ({campaign, campaignId, session, characters, targetCharacters, members, context, pRefreshInvites}) {
 	const inviteForm = document.getElementById("campaign-invite-form");
 	const inviteOutput = document.getElementById("campaign-invite-output");
+	const inviteResult = document.getElementById("campaign-invite-result");
+	const inviteCopy = document.getElementById("campaign-invite-copy");
 	const isDm = ["dm", "co_dm"].includes(campaign.role);
 	const activeRules = context.rulesVersion?.rules;
 	if (activeRules) {
@@ -514,16 +1271,34 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 	setHidden(inviteForm, !isDm);
 	inviteForm?.addEventListener("submit", async event => {
 		event.preventDefault();
-		await pRunFormMutation({form: event.currentTarget,
-			fnMutate: async idempotencyKey => {
-				const role = document.getElementById("campaign-invite-role").value;
-				const result = await api.pCreateInvite({campaignId, role, idempotencyKey});
-				const joinUrl = new URL("hub.html", window.location.href);
-				joinUrl.hash = `invite=${encodeURIComponent(result.token)}`;
-				inviteOutput.value = joinUrl.href;
-				inviteOutput.select();
-				await pRefreshInvites();
-			}});
+		setFormStatus({formId: "campaign-invite-form"});
+		try {
+			await pRunFormMutation({form: event.currentTarget,
+				fnMutate: async idempotencyKey => {
+					const role = document.getElementById("campaign-invite-role").value;
+					const result = await api.pCreateInvite({campaignId, role, idempotencyKey});
+					const joinUrl = new URL("hub.html", window.location.href);
+					joinUrl.hash = `invite=${encodeURIComponent(result.token)}`;
+					inviteOutput.value = joinUrl.href;
+					setHidden(inviteResult, false);
+					setFormStatus({formId: "campaign-invite-form", message: "Invite ready. Copy the link and send it privately."});
+					await pRefreshInvites();
+					inviteCopy.focus();
+				}});
+		} catch (error) {
+			const message = getErrorMessage(error);
+			setFormStatus({formId: "campaign-invite-form", message, isError: true});
+			renderError(error);
+		}
+	});
+	inviteCopy?.addEventListener("click", async () => {
+		try {
+			await navigator.clipboard.writeText(inviteOutput.value);
+			setFormStatus({formId: "campaign-invite-form", message: "Invite link copied."});
+		} catch {
+			inviteOutput.select();
+			setFormStatus({formId: "campaign-invite-form", message: "The invite link is selected. Copy it with your browser's copy command."});
+		}
 	});
 	const leave = document.getElementById("campaign-leave");
 	setHidden(leave, session.account.id === campaign.ownerAccountId);
@@ -534,141 +1309,361 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			await api.pLeaveCampaign({campaignId, idempotencyKey: crypto.randomUUID()});
 			window.location.assign("hub.html");
 		} catch (error) {
-			renderError(getErrorMessage(error));
+			renderError(error);
 			leave.disabled = false;
 		}
 	});
 
 	const upload = document.getElementById("campaign-upload-local");
+	const uploadControls = document.getElementById("campaign-upload-local-controls");
+	const uploadSelect = document.getElementById("campaign-upload-local-select");
+	const uploadConfirm = document.getElementById("campaign-upload-local-confirm");
+	const uploadCancel = document.getElementById("campaign-upload-local-cancel");
+	const uploadStatus = document.getElementById("campaign-upload-local-status");
+	let localCharacters = [];
 	upload?.addEventListener("click", async () => {
-		const localCharacters = await globalThis.StorageUtil?.pGet("charsheet-characters") || [];
-		if (!localCharacters.length) {
-			renderError("No local characters are available to upload.");
-			return;
+		upload.disabled = true;
+		if (uploadStatus) uploadStatus.textContent = "";
+		try {
+			const {pGetLocalCharacters} = await import("./hub-local-character-adapter.js");
+			localCharacters = await pGetLocalCharacters();
+			if (!localCharacters.length) {
+				if (uploadStatus) uploadStatus.textContent = "No local characters are available to copy. Create one in the Character Sheet first.";
+				return;
+			}
+			uploadSelect.replaceChildren(...localCharacters.map((character, index) => {
+				const option = document.createElement("option");
+				option.value = `${index}`;
+				option.textContent = character.name || "Unnamed Character";
+				return option;
+			}));
+			setHidden(uploadControls, false);
+			uploadSelect.focus();
+		} catch (error) {
+			renderError(error.message || "Local character storage could not be read.");
+		} finally {
+			upload.disabled = false;
 		}
-		const selected = await globalThis.InputUiUtil?.pGetUserMultipleChoice({
-			title: "Upload Local Character Copy",
-			values: localCharacters,
-			fnDisplay: character => character.name || "Unnamed Character",
-			isResolveItems: true,
-			min: 1,
-			max: 1,
-		});
-		const character = selected?.[0];
+	});
+	uploadCancel?.addEventListener("click", () => {
+		setHidden(uploadControls, true);
+		upload.focus();
+	});
+	uploadConfirm?.addEventListener("click", async () => {
+		const character = localCharacters[Number(uploadSelect.value)];
 		if (!character) return;
-		await api.pCreateCharacter({
-			clientImportId: character.id,
-			campaignId,
-			data: character,
-			idempotencyKey: crypto.randomUUID(),
-		});
-		renderCharacterList({campaignId, characters: await api.pListCharacters({campaignId})});
+		uploadConfirm.disabled = true;
+		try {
+			await api.pCreateCharacter({
+				clientImportId: character.id,
+				campaignId,
+				data: character,
+				idempotencyKey: crypto.randomUUID(),
+			});
+			const charactersNxt = await api.pListCharacters({campaignId});
+			renderCharacterList({campaignId, characters: charactersNxt});
+			applyCampaignRoleLayout({campaign, characters: charactersNxt});
+			setHidden(uploadControls, true);
+			if (uploadStatus) uploadStatus.textContent = `${character.name || "Character"} was added as a cloud copy. The local original is unchanged.`;
+		} catch (error) {
+			renderError(error);
+		} finally {
+			uploadConfirm.disabled = false;
+		}
 	});
 
 	const dmControls = document.getElementById("campaign-dm-controls");
 	setHidden(dmControls, !isDm);
 	const dmScreenLink = document.getElementById("campaign-open-dm-screen");
 	if (dmScreenLink) dmScreenLink.href = `dmscreen.html?hubCampaign=${encodeURIComponent(campaignId)}`;
-	await renderPendingActions({campaignId, session});
-	await renderPendingTransfers({campaignId});
-	const partyInventory = await api.pGetPartyInventory({campaignId});
-	const partyStatus = document.getElementById("campaign-party-inventory-status");
-	if (partyStatus) {
-		const currency = Object.entries(partyInventory.currency).filter(([, amount]) => amount).map(([type, amount]) => `${amount} ${type}`).join(", ") || "no currency";
-		partyStatus.textContent = `${partyInventory.inventory.length} item stack(s) · ${currency}`;
-	}
+	let partyInventory = await api.pGetPartyInventory({campaignId});
+	const pRefreshTransferState = async ({
+		charactersNxt = null,
+		targetCharactersNxt = null,
+		membersNxt = null,
+		partyInventoryNxt = null,
+	} = {}) => {
+		const source = document.getElementById("campaign-transfer-source");
+		const target = document.getElementById("campaign-transfer-target");
+		const item = document.getElementById("campaign-transfer-entry");
+		const selections = {
+			source: source?.value,
+			target: target?.value,
+			item: item?.value,
+			quantity: document.getElementById("campaign-transfer-quantity")?.value,
+		};
+		const [charactersLatest, snapshotLatest, partyInventoryLatest] = await Promise.all([
+			charactersNxt ? null : api.pListCharacters({campaignId}),
+			targetCharactersNxt ? null : api.pGetCampaignSnapshot({campaignId}),
+			partyInventoryNxt ? null : api.pGetPartyInventory({campaignId}),
+		]);
+		characters.splice(0, characters.length, ...(charactersNxt || charactersLatest));
+		targetCharacters.splice(0, targetCharacters.length, ...(targetCharactersNxt || snapshotLatest.characters));
+		if (membersNxt) members.splice(0, members.length, ...membersNxt);
+		partyInventory = partyInventoryNxt || partyInventoryLatest;
+
+		fillCharacterSelect(source, characters, {
+			includeParty: isDm,
+			partyInventory,
+			ownerAccountId: session.account.id,
+		});
+		fillCharacterSelect(target, targetCharacters, {includeParty: true, partyInventory});
+		if ([...source.options].some(option => option.value === selections.source)) source.value = selections.source;
+		if ([...target.options].some(option => option.value === selections.target)) target.value = selections.target;
+		syncTransferItemPicker({characters, partyInventory});
+		if ([...item.options].some(option => option.value === selections.item)) {
+			item.value = selections.item;
+			syncTransferQuantity();
+			const maximum = Number(item.selectedOptions[0]?.dataset.quantity);
+			if (Number(selections.quantity) > 0 && Number(selections.quantity) <= maximum) {
+				document.getElementById("campaign-transfer-quantity").value = selections.quantity;
+			}
+		}
+		renderPartyInventoryStatus(partyInventory);
+		await renderPendingTransfers({
+			campaign,
+			campaignId,
+			session,
+			targetCharacters,
+			members,
+			pRefreshTransferState,
+		});
+	};
+
+	await renderPendingActions({campaign, campaignId, session, targetCharacters, members});
+	await pRefreshTransferState({
+		charactersNxt: characters,
+		targetCharactersNxt: targetCharacters,
+		membersNxt: members,
+		partyInventoryNxt: partyInventory,
+	});
 
 	fillCharacterSelect(document.getElementById("campaign-action-target"), targetCharacters);
 	for (const id of ["campaign-xp-target", "campaign-item-target"]) fillCharacterSelect(document.getElementById(id), characters);
-	fillCharacterSelect(document.getElementById("campaign-transfer-source"), characters, {
-		includeParty: isDm,
-		partyInventory,
-		ownerAccountId: isDm ? null : session.account.id,
+	document.getElementById("campaign-transfer-source")?.addEventListener("change", () => syncTransferItemPicker({characters, partyInventory}));
+	document.getElementById("campaign-transfer-entry")?.addEventListener("change", syncTransferQuantity);
+	setFormAvailability({
+		formId: "campaign-action-form",
+		isAvailable: !!document.getElementById("campaign-action-target")?.options.length,
+		message: "Add a campaign character before proposing an effect.",
 	});
-	fillCharacterSelect(document.getElementById("campaign-transfer-target"), targetCharacters, {includeParty: true, partyInventory});
+	setFormAvailability({
+		formId: "campaign-transfer-form",
+		isAvailable: !!document.getElementById("campaign-transfer-source")?.options.length,
+		message: "Add one of your characters before starting a transfer.",
+	});
+	for (const formId of ["campaign-xp-form", "campaign-item-form"]) {
+		setFormAvailability({
+			formId,
+			isAvailable: !!characters.length,
+			message: "Add a campaign character before using this grant.",
+		});
+	}
+
+	const actionType = document.getElementById("campaign-action-type");
+	const actionValue = document.getElementById("campaign-action-value");
+	const actionValueLabel = document.getElementById("campaign-action-value-label");
+	const actionSlotFields = document.getElementById("campaign-action-slot-fields");
+	const syncActionFields = () => {
+		const type = actionType.value;
+		const isSlot = type === "spell_slot_spend";
+		setHidden(actionSlotFields, !isSlot);
+		actionValue.disabled = isSlot;
+		actionValue.required = !isSlot;
+		if (isSlot) return;
+		const configuration = {
+			damage: {label: "Damage amount", type: "number", placeholder: "1"},
+			healing: {label: "Healing amount", type: "number", placeholder: "1"},
+			condition_add: {label: "Condition to add", type: "text", placeholder: "Poisoned"},
+			condition_remove: {label: "Condition to remove", type: "text", placeholder: "Poisoned"},
+			informational: {label: "Note", type: "text", placeholder: "Describe what needs approval"},
+		}[type];
+		actionValueLabel.textContent = configuration.label;
+		actionValue.type = configuration.type;
+		actionValue.inputMode = configuration.type === "number" ? "numeric" : "text";
+		actionValue.placeholder = configuration.placeholder;
+		actionValue.min = configuration.type === "number" ? "1" : "";
+	};
+	actionType?.addEventListener("change", syncActionFields);
+	syncActionFields();
 
 	document.getElementById("campaign-action-form")?.addEventListener("submit", async event => {
 		event.preventDefault();
-		await pRunFormMutation({form: event.currentTarget,
-			fnMutate: async idempotencyKey => {
-				const type = document.getElementById("campaign-action-type").value;
-				const rawValue = document.getElementById("campaign-action-value").value.trim();
-				const effect = ["damage", "healing"].includes(type)
-					? {type, amount: Number(rawValue) || 0}
-					: ["condition_add", "condition_remove"].includes(type)
-						? {type, condition: rawValue}
-						: {type: "informational", note: rawValue};
-				await api.pCreateStructuredAction({
-					campaignId,
-					targetCharacterId: document.getElementById("campaign-action-target").value.split(":")[1],
-					effect,
-					idempotencyKey,
-				});
-				await renderPendingActions({campaignId, session});
-			}});
+		const formId = "campaign-action-form";
+		setFormStatus({formId});
+		try {
+			await pRunFormMutation({form: event.currentTarget,
+				fnMutate: async idempotencyKey => {
+					const type = document.getElementById("campaign-action-type").value;
+					const rawValue = document.getElementById("campaign-action-value").value.trim();
+					if (["damage", "healing"].includes(type) && !(Number(rawValue) > 0)) {
+						throw new Error("Enter a positive amount.");
+					}
+					if (["condition_add", "condition_remove", "informational"].includes(type) && !rawValue) {
+						throw new Error(type === "informational" ? "Enter a note." : "Enter a condition.");
+					}
+					const slotLevel = Number(document.getElementById("campaign-action-slot-level").value);
+					const slotAmount = Number(document.getElementById("campaign-action-slot-amount").value);
+					if (type === "spell_slot_spend" && (!Number.isInteger(slotLevel) || slotLevel < 1 || slotLevel > 9)) {
+						throw new Error("Choose a spell-slot level from 1 to 9.");
+					}
+					if (type === "spell_slot_spend" && (!Number.isInteger(slotAmount) || slotAmount < 1)) {
+						throw new Error("Enter a whole number of spell slots of at least 1.");
+					}
+					const effect = type === "spell_slot_spend"
+						? {
+							type,
+							level: slotLevel,
+							amount: slotAmount,
+						}
+						: ["damage", "healing"].includes(type)
+							? {type, amount: Number(rawValue)}
+							: ["condition_add", "condition_remove"].includes(type)
+								? {type, condition: rawValue}
+								: {type: "informational", note: rawValue};
+					const contextValue = document.getElementById("campaign-action-context").value.trim();
+					if (contextValue) {
+						effect.context = contextValue;
+					}
+					await api.pCreateStructuredAction({
+						campaignId,
+						targetCharacterId: document.getElementById("campaign-action-target").value.split(":")[1],
+						effect,
+						idempotencyKey,
+					});
+					document.getElementById("campaign-action-value").value = "";
+					document.getElementById("campaign-action-context").value = "";
+					setFormStatus({formId, message: "Effect proposal sent. It is now in the campaign inbox."});
+					await renderPendingActions({campaign, campaignId, session, targetCharacters, members});
+				}});
+		} catch (error) {
+			const message = error instanceof HubApiError ? getErrorMessage(error) : error.message;
+			setFormStatus({formId, message, isError: true});
+			if (error instanceof HubApiError) renderError(error);
+		}
 	});
 
 	document.getElementById("campaign-xp-form")?.addEventListener("submit", async event => {
 		event.preventDefault();
-		await pRunFormMutation({form: event.currentTarget,
-			fnMutate: idempotencyKey => api.pGrantXp({
-				campaignId,
-				characterId: document.getElementById("campaign-xp-target").value.split(":")[1],
-				amount: Number(document.getElementById("campaign-xp-amount").value),
-				reason: document.getElementById("campaign-xp-reason").value || null,
-				idempotencyKey,
-			})});
+		const formId = "campaign-xp-form";
+		setFormStatus({formId});
+		try {
+			await pRunFormMutation({form: event.currentTarget,
+				fnMutate: idempotencyKey => api.pGrantXp({
+					campaignId,
+					characterId: document.getElementById("campaign-xp-target").value.split(":")[1],
+					amount: Number(document.getElementById("campaign-xp-amount").value),
+					reason: document.getElementById("campaign-xp-reason").value || null,
+					idempotencyKey,
+				})});
+			setFormStatus({formId, message: "XP granted."});
+			document.getElementById("campaign-xp-amount").value = "";
+			document.getElementById("campaign-xp-reason").value = "";
+		} catch (error) {
+			setFormStatus({formId, message: getErrorMessage(error), isError: true});
+			if (error instanceof HubApiError) renderError(error);
+		}
 	});
 
+	const itemCatalog = await pInitGrantItemCatalog({context});
 	document.getElementById("campaign-item-form")?.addEventListener("submit", async event => {
 		event.preventDefault();
-		await pRunFormMutation({form: event.currentTarget,
-			fnMutate: idempotencyKey => api.pGrantItem({
-				campaignId,
-				characterId: document.getElementById("campaign-item-target").value.split(":")[1],
-				item: {
-					name: document.getElementById("campaign-item-name").value,
-					source: document.getElementById("campaign-item-source").value || "HB",
-				},
-				quantity: Number(document.getElementById("campaign-item-quantity").value) || 1,
-				idempotencyKey,
-			})});
+		const formId = "campaign-item-form";
+		setFormStatus({formId});
+		try {
+			await pRunFormMutation({form: event.currentTarget,
+				fnMutate: idempotencyKey => api.pGrantItem({
+					campaignId,
+					characterId: document.getElementById("campaign-item-target").value.split(":")[1],
+					item: {
+						name: document.getElementById("campaign-item-name").value,
+						source: document.getElementById("campaign-item-source").value || "HB",
+					},
+					quantity: Number(document.getElementById("campaign-item-quantity").value) || 1,
+					idempotencyKey,
+				})});
+			setFormStatus({formId, message: "Item granted."});
+			document.getElementById("campaign-item-name").value = "";
+			document.getElementById("campaign-item-source").value = "HB";
+			document.getElementById("campaign-item-quantity").value = "1";
+			document.getElementById("campaign-item-selection-summary").textContent = "Custom item · homebrew source";
+		} catch (error) {
+			setFormStatus({formId, message: getErrorMessage(error), isError: true});
+			if (error instanceof HubApiError) renderError(error);
+		}
 	});
 
 	document.getElementById("campaign-transfer-form")?.addEventListener("submit", async event => {
 		event.preventDefault();
-		await pRunFormMutation({form: event.currentTarget,
-			fnMutate: async idempotencyKey => {
-				const [sourceKind, sourceId] = document.getElementById("campaign-transfer-source").value.split(":");
-				const [targetKind, targetId] = document.getElementById("campaign-transfer-target").value.split(":");
-				const entryId = document.getElementById("campaign-transfer-entry").value.trim();
-				const quantity = Number(document.getElementById("campaign-transfer-quantity").value) || 0;
-				const gp = Number(document.getElementById("campaign-transfer-gp").value) || 0;
-				await api.pProposeTransfer({
-					campaignId,
-					sourceKind,
-					sourceId,
-					targetKind,
-					targetId,
-					payload: {
-						items: entryId && quantity ? [{entryId, quantity}] : [],
-						currency: {gp},
-					},
-					idempotencyKey,
+		const formId = "campaign-transfer-form";
+		setFormStatus({formId});
+		try {
+			await pRunFormMutation({form: event.currentTarget,
+				fnMutate: async idempotencyKey => {
+					const [sourceKind, sourceId] = document.getElementById("campaign-transfer-source").value.split(":");
+					const [targetKind, targetId] = document.getElementById("campaign-transfer-target").value.split(":");
+					if (sourceKind === targetKind && sourceId === targetId) throw new Error("Choose a different recipient.");
+					const itemSelect = document.getElementById("campaign-transfer-entry");
+					const entryId = itemSelect.value;
+					const quantity = entryId ? Number(document.getElementById("campaign-transfer-quantity").value) : 0;
+					if (entryId && (!Number.isInteger(quantity) || quantity < 1)) throw new Error("Enter a whole item quantity of at least 1.");
+					const availableQuantity = Number(itemSelect.selectedOptions[0]?.dataset.quantity);
+					if (entryId && quantity > availableQuantity) throw new Error(`Only ${availableQuantity} of that item is available.`);
+					const currency = Object.fromEntries(CURRENCY_TYPES.map(type => [
+						type,
+						Number(document.getElementById(`campaign-transfer-${type}`).value) || 0,
+					]));
+					if (Object.values(currency).some(amount => !Number.isInteger(amount) || amount < 0)) {
+						throw new Error("Currency amounts must be whole numbers of at least 0.");
+					}
+					const sourceContainer = getTransferContainer({
+						value: document.getElementById("campaign-transfer-source").value,
+						characters,
+						partyInventory,
+					});
+					const insufficientType = CURRENCY_TYPES.find(type => currency[type] > (Number(sourceContainer?.currency?.[type]) || 0));
+					if (insufficientType) throw new Error(`Only ${sourceContainer?.currency?.[insufficientType] || 0} ${insufficientType.toUpperCase()} is available.`);
+					if (!entryId && !Object.values(currency).some(Boolean)) throw new Error("Choose an item or enter a currency amount.");
+					await api.pProposeTransfer({
+						campaignId,
+						sourceKind,
+						sourceId,
+						targetKind,
+						targetId,
+						payload: {
+							items: entryId && quantity ? [{entryId, quantity}] : [],
+							currency,
+						},
+						idempotencyKey,
+					});
+				}});
+			for (const type of CURRENCY_TYPES) document.getElementById(`campaign-transfer-${type}`).value = "0";
+			setFormStatus({formId, message: "Transfer reserved. The recipient can now accept it from the inbox."});
+			try {
+				await pRefreshTransferState();
+			} catch {
+				setFormStatus({
+					formId,
+					message: "Transfer reserved, but the latest balances could not be loaded. Reload the campaign before sending another transfer.",
+					isError: true,
 				});
-				await renderPendingTransfers({campaignId});
-			}});
+				event.currentTarget.querySelector("button[type='submit']").disabled = true;
+			}
+		} catch (error) {
+			const message = error instanceof HubApiError ? getErrorMessage(error) : error.message;
+			setFormStatus({formId, message, isError: true});
+			if (error instanceof HubApiError) renderError(error);
+		}
 	});
-	for (const id of ["campaign-xp-form", "campaign-item-form"]) {
-		setHidden(document.getElementById(id), !isDm);
-	}
+	setHidden(document.getElementById("campaign-dm-grants"), !isDm);
 
 	document.getElementById("campaign-brew-form")?.addEventListener("submit", async event => {
 		event.preventDefault();
 		renderError("");
+		setFormStatus({formId: "campaign-brew-form"});
 		const file = document.getElementById("campaign-brew-file").files?.[0];
 		if (!file) {
-			renderError("Choose a homebrew JSON file before publishing.");
+			setFormStatus({formId: "campaign-brew-form", message: "Choose a homebrew JSON file before publishing.", isError: true});
 			return;
 		}
 		try {
@@ -690,16 +1685,22 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 						versionId: created.brewBundle.id,
 						idempotencyKey: `${idempotencyKey}:activate`,
 					});
-					renderCampaignContext(await api.pGetCampaignContext({campaignId}));
+					const contextNxt = await api.pGetCampaignContext({campaignId});
+					renderCampaignContext(contextNxt);
+					itemCatalog.setCampaignBrewContent(contextNxt.brewBundle?.content);
+					setFormStatus({formId: "campaign-brew-form", message: "Campaign homebrew published."});
 				}});
 		} catch (error) {
-			renderError(error instanceof SyntaxError ? "The selected file is not valid JSON." : getErrorMessage(error));
+			const message = error instanceof SyntaxError ? "The selected file is not valid JSON." : getErrorMessage(error);
+			setFormStatus({formId: "campaign-brew-form", message, isError: true});
+			renderError(error instanceof SyntaxError ? message : error);
 		}
 	});
 
 	document.getElementById("campaign-rules-form")?.addEventListener("submit", async event => {
 		event.preventDefault();
 		renderError("");
+		setFormStatus({formId: "campaign-rules-form"});
 		try {
 			await pRunFormMutation({form: event.currentTarget,
 				fnMutate: async idempotencyKey => {
@@ -722,14 +1723,20 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 						idempotencyKey: `${idempotencyKey}:activate`,
 					});
 					renderCampaignContext(await api.pGetCampaignContext({campaignId}));
+					setFormStatus({formId: "campaign-rules-form", message: "Campaign rules published."});
 				}});
 		} catch (error) {
-			renderError(getErrorMessage(error));
+			const message = getErrorMessage(error);
+			setFormStatus({formId: "campaign-rules-form", message, isError: true});
+			renderError(error);
 		}
 	});
+
+	return {pRefreshTransferState};
 }
 
 async function pInit () {
+	initCampaignNetworkAwareness();
 	const inviteFragment = new URLSearchParams(window.location.hash.slice(1)).get("invite");
 	if (inviteFragment) {
 		sessionStorage.setItem("hub-pending-invite", inviteFragment);
@@ -756,7 +1763,7 @@ async function pInit () {
 				await api.pLogout();
 				window.location.assign("hub.html");
 			} catch (error) {
-				renderError(getErrorMessage(error));
+				renderError(error);
 			}
 		});
 		const view = document.body.dataset.hubView;
@@ -768,7 +1775,13 @@ async function pInit () {
 		else await pInitHubIndex({session});
 	} catch (error) {
 		setHidden(loading, true);
-		renderError(getErrorMessage(error));
+		setCampaignConnectionStatus({
+			label: error instanceof HubApiError && error.code === "NETWORK_UNAVAILABLE"
+				? "Offline · campaign unavailable"
+				: "Campaign unavailable",
+			state: "error",
+		});
+		renderError(error);
 		if (error instanceof HubApiError && error.code === "AUTH_REQUIRED") setHidden(signedOut, false);
 	}
 }

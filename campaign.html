@@ -13,23 +13,27 @@
 	<link rel="stylesheet" href="css/hub.css">
 	<link rel="icon" type="image/x-icon" href="favicon.ico">
 	<link rel="manifest" href="manifest.webmanifest">
-	<script type="text/javascript" src="sw-injector.js"></script>
 	<script blocking="render" type="module" src="js/styleswitch.js"></script>
-	<script type="text/javascript" src="js/navigation.js"></script>
-	<script type="module" src="js/browsercheck.js"></script>
 </head>
 <body data-hub-view="campaign">
+<a class="hub-skip-link" href="#main-content">Skip to campaign content</a>
 <div class="overlay-noise no-print"></div>
 <header class="hidden-xs hidden-sm page__header">
 	<div class="container">
-		<h1 class="page__title no-wrap my-0" id="page__title">Campaign Hub</h1>
+		<div class="page__title no-wrap my-0" id="page__title">Campaign Hub</div>
 		<p class="page__subtitle no-wrap my-0" id="page__subtitle">Campaign overview</p>
 	</div>
 </header>
-<nav class="container page__nav" id="navigation">
-	<ul class="nav nav-pills page__nav-inner" id="navbar"></ul>
+<nav class="container page__nav hub-nav" aria-label="Hub navigation">
+	<ul class="nav nav-pills page__nav-inner hub-nav__list">
+		<li><a class="hub-nav__link" href="index.html">Home</a></li>
+		<li class="active"><a class="hub-nav__link" href="hub.html" aria-current="page">Campaign Hub</a></li>
+		<li><a class="hub-nav__link" href="charactersheet.html">Character Sheet</a></li>
+		<li><a class="hub-nav__link" href="dmscreen.html">DM Screen</a></li>
+	</ul>
 </nav>
-<main class="container hub-page">
+<main id="main-content" class="container hub-page" tabindex="-1">
+	<h1 class="sr-only">Campaign Hub</h1>
 	<div class="hub-shell">
 		<div id="hub-error" class="hub-error ve-hidden" role="alert" aria-live="assertive"></div>
 		<section id="hub-loading" class="hub-state hub-state--centered" aria-live="polite">
@@ -42,7 +46,7 @@
 			<div class="hub-state__content">
 				<h2 class="hub-state__title">Sign in to continue</h2>
 				<p class="hub-state__description">Campaign data is available only to signed-in members.</p>
-				<a class="hub-button hub-button--primary" href="/auth/github/start">Sign in with GitHub</a>
+				<a id="hub-sign-in" class="hub-button hub-button--primary" href="/auth/github/start">Sign in with GitHub</a>
 			</div>
 		</section>
 		<section id="hub-signed-in" class="hub-state ve-hidden">
@@ -57,157 +61,302 @@
 					<button id="hub-logout" class="hub-button" type="button">Sign out</button>
 				</div>
 				<div class="hub-campaign-header">
-					<h2 id="campaign-name" class="hub-campaign-header__title"></h2>
-					<div class="hub-campaign-meta">
-						<span><span class="hub-label">Role</span> <span id="campaign-role"></span></span>
-						<span><span class="hub-label">Status</span> <span id="campaign-status"></span></span>
+					<div class="hub-campaign-header__main">
+						<div>
+							<h2 id="campaign-name" class="hub-campaign-header__title"></h2>
+							<div class="hub-campaign-meta">
+								<span id="campaign-role" class="hub-badge"></span>
+								<span id="campaign-status" class="hub-badge hub-badge--status"></span>
+								<span id="campaign-connection-status" class="hub-connection" data-state="loading" role="status">Connecting...</span>
+							</div>
+						</div>
+						<div class="hub-button-row hub-campaign-header__actions">
+							<a id="campaign-open-primary-character" class="hub-button ve-hidden" href="charactersheet.html">Open character sheet</a>
+							<a id="campaign-open-dm-screen" class="hub-button hub-button--primary ve-hidden" href="dmscreen.html">Open DM workspace</a>
+						</div>
 					</div>
 				</div>
-				<div class="hub-campaign-actions">
-					<section class="hub-campaign-action">
-						<h3 class="hub-campaign-action__title">Members</h3>
-						<ul id="campaign-member-list" class="hub-data-list"></ul>
-						<form id="campaign-invite-form" class="hub-form ve-hidden">
-							<label class="hub-label" for="campaign-invite-role">New member role</label>
-							<select id="campaign-invite-role" class="hub-input">
-								<option value="player">Player</option>
-								<option value="co_dm">Co-DM</option>
-								<option value="spectator">Spectator</option>
-							</select>
-							<button class="hub-button" type="submit">Create invite link</button>
-							<label class="hub-label" for="campaign-invite-output">Invite link</label>
-							<input id="campaign-invite-output" class="hub-input" readonly>
-						</form>
-						<div id="campaign-invite-list" class="hub-data-list"></div>
-						<button id="campaign-leave" class="hub-button ve-hidden" type="button">Leave campaign</button>
-					</section>
-					<section class="hub-campaign-action">
-						<h3 class="hub-campaign-action__title">Characters</h3>
-						<div id="campaign-character-list" class="hub-data-list"></div>
-						<button id="campaign-upload-local" class="hub-button" type="button">Upload local character copy</button>
-					</section>
-					<section class="hub-campaign-action">
-						<h3 class="hub-campaign-action__title">Homebrew &amp; rules</h3>
-						<p id="campaign-brew-status" class="hub-campaign-action__description"></p>
-						<p id="campaign-rules-status" class="hub-campaign-action__description"></p>
-					</section>
-					<section class="hub-campaign-action">
-						<h3 class="hub-campaign-action__title">DM workspace</h3>
-						<p class="hub-campaign-action__description">Open your private, campaign-scoped DM screen.</p>
-						<a id="campaign-open-dm-screen" class="hub-button" href="dmscreen.html">Open DM workspace</a>
-					</section>
+
+				<div class="hub-campaign-layout">
+					<div class="hub-campaign-main">
+						<section id="campaign-characters-panel" class="hub-campaign-section">
+							<div class="hub-section-heading">
+								<div>
+									<h3 id="campaign-character-title" class="hub-campaign-section__title">Characters</h3>
+									<p id="campaign-character-description" class="hub-campaign-section__description"></p>
+								</div>
+								<span id="campaign-character-count" class="hub-count" aria-label="Character count">0</span>
+							</div>
+							<div id="campaign-character-list" class="hub-data-list hub-data-list--flush"></div>
+							<p id="campaign-character-empty" class="hub-empty hub-empty--compact ve-hidden"></p>
+							<button id="campaign-upload-local" class="hub-button" type="button">Add a local character copy</button>
+							<div id="campaign-upload-local-controls" class="hub-local-copy ve-hidden">
+								<label class="hub-label" for="campaign-upload-local-select">Local character</label>
+								<select id="campaign-upload-local-select" class="hub-input" name="localCharacter" autocomplete="off"></select>
+								<div class="hub-button-row">
+									<button id="campaign-upload-local-confirm" class="hub-button hub-button--primary" type="button">Add cloud copy</button>
+									<button id="campaign-upload-local-cancel" class="hub-button" type="button">Cancel</button>
+								</div>
+							</div>
+							<p id="campaign-upload-local-status" class="hub-inline-status" role="status" aria-live="polite"></p>
+						</section>
+
+						<section id="campaign-party-panel" class="hub-campaign-section">
+							<div class="hub-section-heading">
+								<div>
+									<h3 class="hub-campaign-section__title">Party roster</h3>
+									<p class="hub-campaign-section__description">Player-visible status from the latest campaign snapshot.</p>
+								</div>
+								<span id="campaign-party-count" class="hub-count" aria-label="Party character count">0</span>
+							</div>
+							<div id="campaign-party-roster" class="hub-data-list hub-data-list--flush"></div>
+							<p id="campaign-party-empty" class="hub-empty hub-empty--compact ve-hidden">No campaign characters have joined the party yet.</p>
+						</section>
+
+						<section id="campaign-inbox-panel" class="hub-campaign-section">
+							<div class="hub-section-heading">
+								<div>
+									<h3 class="hub-campaign-section__title">Inbox</h3>
+									<p class="hub-campaign-section__description">Requests that are waiting for a player or DM.</p>
+								</div>
+								<span id="campaign-inbox-count" class="hub-count" aria-label="Pending request count">0</span>
+							</div>
+							<div class="hub-inbox-grid">
+								<div>
+									<h4 class="hub-subheading">Effects</h4>
+									<div id="campaign-pending-actions" class="hub-data-list hub-data-list--flush"></div>
+									<p id="campaign-pending-actions-empty" class="hub-empty hub-empty--compact ve-hidden">No effect requests are waiting.</p>
+								</div>
+								<div>
+									<h4 class="hub-subheading">Transfers</h4>
+									<div id="campaign-pending-transfers" class="hub-data-list hub-data-list--flush"></div>
+									<p id="campaign-pending-transfers-empty" class="hub-empty hub-empty--compact ve-hidden">No item or currency transfers are waiting.</p>
+								</div>
+							</div>
+						</section>
+
+						<section id="campaign-shared-actions" class="hub-campaign-section">
+							<div class="hub-section-heading">
+								<div>
+									<h3 class="hub-campaign-section__title">At the table</h3>
+									<p class="hub-campaign-section__description">Propose an effect or pass something to another character without editing their sheet.</p>
+								</div>
+							</div>
+							<div id="campaign-play-controls" class="hub-settings-grid">
+								<form id="campaign-action-form" class="hub-form">
+									<h4 class="hub-subheading">Propose an effect</h4>
+									<label class="hub-label" for="campaign-action-target">Target</label>
+									<select id="campaign-action-target" class="hub-input" name="target" autocomplete="off"></select>
+									<label class="hub-label" for="campaign-action-type">Effect</label>
+									<select id="campaign-action-type" class="hub-input" name="effect" autocomplete="off">
+										<option value="damage">Damage</option>
+										<option value="healing">Healing</option>
+										<option value="condition_add">Add condition</option>
+										<option value="condition_remove">Remove condition</option>
+										<option value="spell_slot_spend">Spend spell slot</option>
+										<option value="informational">Informational request</option>
+									</select>
+									<label class="hub-label" for="campaign-action-context">Spell or action (optional)</label>
+									<input id="campaign-action-context" class="hub-input" name="context" autocomplete="off" placeholder="For example: Cure Wounds">
+									<label id="campaign-action-value-label" class="hub-label" for="campaign-action-value">Damage amount</label>
+									<input id="campaign-action-value" class="hub-input" name="value" autocomplete="off" required>
+									<div id="campaign-action-slot-fields" class="hub-field-pair ve-hidden">
+										<div>
+											<label class="hub-label" for="campaign-action-slot-level">Slot level</label>
+											<select id="campaign-action-slot-level" class="hub-input" name="slotLevel" autocomplete="off">
+												<option value="1">1st</option>
+												<option value="2">2nd</option>
+												<option value="3">3rd</option>
+												<option value="4">4th</option>
+												<option value="5">5th</option>
+												<option value="6">6th</option>
+												<option value="7">7th</option>
+												<option value="8">8th</option>
+												<option value="9">9th</option>
+											</select>
+										</div>
+										<div>
+											<label class="hub-label" for="campaign-action-slot-amount">Slots</label>
+											<input id="campaign-action-slot-amount" class="hub-input" name="slotAmount" type="number" inputmode="numeric" min="1" value="1" autocomplete="off" required>
+										</div>
+									</div>
+									<button class="hub-button hub-button--primary" type="submit" data-pending-label="Sending...">Send proposal</button>
+									<p id="campaign-action-form-status" class="hub-inline-status" data-hub-form-status role="status" aria-live="polite"></p>
+								</form>
+								<form id="campaign-transfer-form" class="hub-form">
+									<h4 class="hub-subheading">Give item or currency</h4>
+									<label class="hub-label" for="campaign-transfer-source">From</label>
+									<select id="campaign-transfer-source" class="hub-input" name="source" autocomplete="off"></select>
+									<label class="hub-label" for="campaign-transfer-target">To</label>
+									<select id="campaign-transfer-target" class="hub-input" name="target" autocomplete="off"></select>
+									<label class="hub-label" for="campaign-transfer-entry">Item (optional)</label>
+									<select id="campaign-transfer-entry" class="hub-input" name="item" autocomplete="off">
+										<option value="">Currency only</option>
+									</select>
+									<label class="hub-label" for="campaign-transfer-quantity">Quantity</label>
+									<input id="campaign-transfer-quantity" class="hub-input" name="quantity" type="number" inputmode="numeric" min="0" value="0" autocomplete="off" disabled>
+									<fieldset class="hub-currency-fields">
+										<legend>Currency (optional)</legend>
+										<label for="campaign-transfer-cp">CP <input id="campaign-transfer-cp" class="hub-input" name="cp" type="number" inputmode="numeric" min="0" value="0" autocomplete="off"></label>
+										<label for="campaign-transfer-sp">SP <input id="campaign-transfer-sp" class="hub-input" name="sp" type="number" inputmode="numeric" min="0" value="0" autocomplete="off"></label>
+										<label for="campaign-transfer-ep">EP <input id="campaign-transfer-ep" class="hub-input" name="ep" type="number" inputmode="numeric" min="0" value="0" autocomplete="off"></label>
+										<label for="campaign-transfer-gp">GP <input id="campaign-transfer-gp" class="hub-input" name="gp" type="number" inputmode="numeric" min="0" value="0" autocomplete="off"></label>
+										<label for="campaign-transfer-pp">PP <input id="campaign-transfer-pp" class="hub-input" name="pp" type="number" inputmode="numeric" min="0" value="0" autocomplete="off"></label>
+									</fieldset>
+									<p id="campaign-transfer-balance" class="hub-form-hint"></p>
+									<button class="hub-button hub-button--primary" type="submit" data-pending-label="Reserving...">Reserve transfer</button>
+									<p id="campaign-transfer-form-status" class="hub-inline-status" data-hub-form-status role="status" aria-live="polite"></p>
+								</form>
+							</div>
+							<div id="campaign-dm-grants" class="hub-dm-grants ve-hidden">
+								<form id="campaign-xp-form" class="hub-form">
+									<h4 class="hub-subheading">Grant XP</h4>
+									<label class="hub-label" for="campaign-xp-target">Character</label>
+									<select id="campaign-xp-target" class="hub-input" name="target" autocomplete="off"></select>
+									<label class="hub-label" for="campaign-xp-amount">Amount</label>
+									<input id="campaign-xp-amount" class="hub-input" name="amount" type="number" inputmode="numeric" min="1" autocomplete="off" required>
+									<label class="hub-label" for="campaign-xp-reason">Reason (optional)</label>
+									<input id="campaign-xp-reason" class="hub-input" name="reason" autocomplete="off">
+									<button class="hub-button" type="submit" data-pending-label="Granting...">Grant XP</button>
+									<p id="campaign-xp-form-status" class="hub-inline-status" data-hub-form-status role="status" aria-live="polite"></p>
+								</form>
+								<form id="campaign-item-form" class="hub-form">
+									<h4 class="hub-subheading">Grant item</h4>
+									<label class="hub-label" for="campaign-item-target">Character</label>
+									<select id="campaign-item-target" class="hub-input" name="target" autocomplete="off"></select>
+									<label class="hub-label" for="campaign-item-name">Item name</label>
+									<input id="campaign-item-name" class="hub-input" name="itemName" autocomplete="off" required placeholder="Custom item name">
+									<input id="campaign-item-source" name="itemSource" type="hidden" value="HB">
+									<button id="campaign-item-catalog-open" class="hub-button" type="button">Choose from item catalog</button>
+									<div id="campaign-item-catalog" class="hub-item-catalog ve-hidden">
+										<label class="hub-label" for="campaign-item-catalog-search">Find an item</label>
+										<input id="campaign-item-catalog-search" class="hub-input" type="search" autocomplete="off" placeholder="Type at least 2 characters">
+										<label class="hub-label" for="campaign-item-catalog-results">Matching items</label>
+										<select id="campaign-item-catalog-results" class="hub-input" name="catalogItem" autocomplete="off" size="6"></select>
+										<p id="campaign-item-catalog-status" class="hub-form-hint" aria-live="polite">Type at least 2 characters to search.</p>
+										<button id="campaign-item-catalog-close" class="hub-button" type="button">Close catalog</button>
+									</div>
+									<p id="campaign-item-selection-summary" class="hub-form-hint">Custom item · homebrew source</p>
+									<label class="hub-label" for="campaign-item-quantity">Quantity</label>
+									<input id="campaign-item-quantity" class="hub-input" name="quantity" type="number" inputmode="numeric" min="1" value="1" autocomplete="off">
+									<button class="hub-button" type="submit" data-pending-label="Granting...">Grant item</button>
+									<p id="campaign-item-form-status" class="hub-inline-status" data-hub-form-status role="status" aria-live="polite"></p>
+								</form>
+							</div>
+						</section>
+
+						<section id="campaign-activity-panel" class="hub-campaign-section">
+							<div class="hub-section-heading">
+								<div>
+									<h3 class="hub-campaign-section__title">Recent activity</h3>
+									<p class="hub-campaign-section__description">The latest campaign changes visible to you.</p>
+								</div>
+							</div>
+							<div id="campaign-activity-list" class="hub-activity-list"></div>
+							<p id="campaign-activity-empty" class="hub-empty hub-empty--compact ve-hidden">Campaign activity will appear here as the table gets moving.</p>
+						</section>
+					</div>
+
+					<aside class="hub-campaign-rail" aria-label="Campaign status and shortcuts">
+						<section class="hub-rail-section hub-rail-section--tools">
+							<h3 class="hub-rail-section__title">Campaign tools</h3>
+							<p id="campaign-role-guidance" class="hub-rail-section__description"></p>
+							<div class="hub-quick-actions">
+								<a id="campaign-jump-effect" class="hub-button" href="#campaign-action-form">Propose effect</a>
+								<a id="campaign-jump-transfer" class="hub-button" href="#campaign-transfer-form">Give item or currency</a>
+							</div>
+						</section>
+						<section class="hub-rail-section">
+							<h3 class="hub-rail-section__title">Party inventory</h3>
+							<p id="campaign-party-inventory-status" class="hub-rail-section__description">Loading shared supplies...</p>
+						</section>
+						<section class="hub-rail-section">
+							<h3 class="hub-rail-section__title">Campaign setup</h3>
+							<dl class="hub-status-list">
+								<div>
+									<dt>Members</dt>
+									<dd id="campaign-member-summary">Loading...</dd>
+								</div>
+								<div>
+									<dt>Homebrew</dt>
+									<dd id="campaign-brew-status">Loading...</dd>
+								</div>
+								<div>
+									<dt>Rules</dt>
+									<dd id="campaign-rules-status">Loading...</dd>
+								</div>
+							</dl>
+						</section>
+					</aside>
 				</div>
-				<section id="campaign-dm-controls" class="hub-panel ve-hidden">
-					<h2 class="hub-panel__title">Campaign settings</h2>
-					<p class="hub-panel__description">Published versions apply to every campaign character without changing their saved personal settings.</p>
-					<div class="hub-settings-grid">
-						<form id="campaign-brew-form" class="hub-form">
-							<h3 class="hub-campaign-action__title">Publish homebrew</h3>
-							<label class="hub-label" for="campaign-brew-file">Homebrew JSON</label>
-							<input id="campaign-brew-file" class="hub-input" type="file" accept=".json,application/json" required>
-							<button class="hub-button" type="submit">Validate and publish</button>
-						</form>
-						<form id="campaign-rules-form" class="hub-form">
-							<h3 class="hub-campaign-action__title">Publish gameplay rules</h3>
-							<label class="hub-setting"><input id="campaign-rule-tgtt" type="checkbox" checked> Enable Thelemar rules</label>
-							<label class="hub-label" for="campaign-rule-exhaustion">Exhaustion</label>
-							<select id="campaign-rule-exhaustion" class="hub-input">
-								<option value="thelemar">Thelemar</option>
-								<option value="2024">2024 rules</option>
-								<option value="2014">2014 rules</option>
-							</select>
-							<label class="hub-setting"><input id="campaign-rule-carry" type="checkbox" checked> Thelemar carry capacity</label>
-							<label class="hub-setting"><input id="campaign-rule-jumping" type="checkbox" checked> Thelemar jumping</label>
-							<label class="hub-setting"><input id="campaign-rule-linguistics" type="checkbox" checked> Linguistics bonus</label>
-							<label class="hub-setting"><input id="campaign-rule-critical" type="checkbox" checked> Thelemar critical rolls</label>
-							<button class="hub-button" type="submit">Publish rules</button>
-						</form>
-					</div>
-				</section>
-				<section id="campaign-shared-actions" class="hub-panel">
-					<h2 class="hub-panel__title">Shared actions</h2>
-					<p class="hub-panel__description">Send structured effects, review pending actions, and move inventory without editing another player's sheet directly.</p>
-					<div class="hub-settings-grid">
-						<form id="campaign-action-form" class="hub-form">
-							<h3 class="hub-campaign-action__title">Propose effect</h3>
-							<label class="hub-label" for="campaign-action-target">Target</label>
-							<select id="campaign-action-target" class="hub-input"></select>
-							<label class="hub-label" for="campaign-action-type">Effect</label>
-							<select id="campaign-action-type" class="hub-input">
-								<option value="damage">Damage</option>
-								<option value="healing">Healing</option>
-								<option value="condition_add">Add condition</option>
-								<option value="condition_remove">Remove condition</option>
-								<option value="informational">Informational request</option>
-							</select>
-							<label class="hub-label" for="campaign-action-value">Amount, condition, or note</label>
-							<input id="campaign-action-value" class="hub-input" required>
-							<button class="hub-button" type="submit">Send proposal</button>
-						</form>
-						<div>
-							<h3 class="hub-campaign-action__title">Pending actions</h3>
-							<div id="campaign-pending-actions" class="hub-data-list"></div>
+
+				<div class="hub-campaign-admin">
+					<h3 class="hub-campaign-admin__title">Campaign administration</h3>
+					<details class="hub-disclosure">
+						<summary>People and invitations</summary>
+						<div class="hub-disclosure__content">
+							<ul id="campaign-member-list" class="hub-data-list hub-data-list--flush"></ul>
+							<form id="campaign-invite-form" class="hub-form hub-form--bounded ve-hidden">
+								<h4 class="hub-subheading">Invite someone</h4>
+								<label class="hub-label" for="campaign-invite-role">Role</label>
+								<select id="campaign-invite-role" class="hub-input" name="role" autocomplete="off">
+									<option value="player">Player</option>
+									<option value="co_dm">Co-DM</option>
+									<option value="spectator">Spectator</option>
+								</select>
+								<button class="hub-button" type="submit" data-pending-label="Creating...">Create invite link</button>
+								<div id="campaign-invite-result" class="hub-invite-result ve-hidden">
+									<label class="hub-label" for="campaign-invite-output">Invite link</label>
+									<input id="campaign-invite-output" class="hub-input" name="inviteUrl" autocomplete="off" readonly>
+									<button id="campaign-invite-copy" class="hub-button" type="button">Copy invite link</button>
+								</div>
+								<p id="campaign-invite-form-status" class="hub-inline-status" data-hub-form-status role="status" aria-live="polite"></p>
+							</form>
+							<div id="campaign-invite-list" class="hub-data-list"></div>
+							<button id="campaign-leave" class="hub-button hub-button--danger ve-hidden" type="button">Leave campaign</button>
 						</div>
-						<form id="campaign-transfer-form" class="hub-form">
-							<h3 class="hub-campaign-action__title">Transfer inventory</h3>
-							<label class="hub-label" for="campaign-transfer-source">From</label>
-							<select id="campaign-transfer-source" class="hub-input"></select>
-							<label class="hub-label" for="campaign-transfer-target">To</label>
-							<select id="campaign-transfer-target" class="hub-input"></select>
-							<label class="hub-label" for="campaign-transfer-entry">Item entry ID (optional)</label>
-							<input id="campaign-transfer-entry" class="hub-input">
-							<label class="hub-label" for="campaign-transfer-quantity">Quantity</label>
-							<input id="campaign-transfer-quantity" class="hub-input" type="number" min="0" value="0">
-							<label class="hub-label" for="campaign-transfer-gp">Gold pieces</label>
-							<input id="campaign-transfer-gp" class="hub-input" type="number" min="0" value="0">
-							<button class="hub-button" type="submit">Reserve transfer</button>
-						</form>
-						<div>
-							<h3 class="hub-campaign-action__title">Party inventory</h3>
-							<p id="campaign-party-inventory-status" class="hub-campaign-action__description"></p>
-							<h3 class="hub-campaign-action__title">Pending transfers</h3>
-							<div id="campaign-pending-transfers" class="hub-data-list"></div>
+					</details>
+					<details class="hub-disclosure">
+						<summary>Rules and homebrew</summary>
+						<div class="hub-disclosure__content">
+							<p class="hub-campaign-section__description">Published campaign content is available to every campaign character without changing personal settings.</p>
+							<section id="campaign-dm-controls" class="ve-hidden">
+								<div class="hub-settings-grid">
+									<form id="campaign-brew-form" class="hub-form">
+										<h4 class="hub-subheading">Publish homebrew</h4>
+										<label class="hub-label" for="campaign-brew-file">Homebrew JSON</label>
+										<input id="campaign-brew-file" class="hub-input" name="homebrew" type="file" accept=".json,application/json" required>
+										<button class="hub-button" type="submit" data-pending-label="Publishing...">Validate and publish</button>
+										<p id="campaign-brew-form-status" class="hub-inline-status" data-hub-form-status role="status" aria-live="polite"></p>
+									</form>
+									<form id="campaign-rules-form" class="hub-form">
+										<h4 class="hub-subheading">Publish gameplay rules</h4>
+										<label class="hub-setting"><input id="campaign-rule-tgtt" name="enableTgtt" type="checkbox" checked> Enable Thelemar rules</label>
+										<label class="hub-label" for="campaign-rule-exhaustion">Exhaustion</label>
+										<select id="campaign-rule-exhaustion" class="hub-input" name="exhaustionRules" autocomplete="off">
+											<option value="thelemar">Thelemar</option>
+											<option value="2024">2024 rules</option>
+											<option value="2014">2014 rules</option>
+										</select>
+										<label class="hub-setting"><input id="campaign-rule-carry" name="carryWeight" type="checkbox" checked> Thelemar carry capacity</label>
+										<label class="hub-setting"><input id="campaign-rule-jumping" name="jumping" type="checkbox" checked> Thelemar jumping</label>
+										<label class="hub-setting"><input id="campaign-rule-linguistics" name="linguisticsBonus" type="checkbox" checked> Linguistics bonus</label>
+										<label class="hub-setting"><input id="campaign-rule-critical" name="criticalRolls" type="checkbox" checked> Thelemar critical rolls</label>
+										<button class="hub-button" type="submit" data-pending-label="Publishing...">Publish rules</button>
+										<p id="campaign-rules-form-status" class="hub-inline-status" data-hub-form-status role="status" aria-live="polite"></p>
+									</form>
+								</div>
+							</section>
+							<p id="campaign-content-managed-note">Your Dungeon Master manages campaign rules and homebrew.</p>
 						</div>
-						<form id="campaign-xp-form" class="hub-form ve-hidden">
-							<h3 class="hub-campaign-action__title">Grant XP</h3>
-							<select id="campaign-xp-target" class="hub-input"></select>
-							<input id="campaign-xp-amount" class="hub-input" type="number" min="1" required placeholder="XP amount">
-							<input id="campaign-xp-reason" class="hub-input" placeholder="Reason (optional)">
-							<button class="hub-button" type="submit">Grant XP</button>
-						</form>
-						<form id="campaign-item-form" class="hub-form ve-hidden">
-							<h3 class="hub-campaign-action__title">Grant item</h3>
-							<select id="campaign-item-target" class="hub-input"></select>
-							<input id="campaign-item-name" class="hub-input" required placeholder="Item name">
-							<input id="campaign-item-source" class="hub-input" placeholder="Source">
-							<input id="campaign-item-quantity" class="hub-input" type="number" min="1" value="1">
-							<button class="hub-button" type="submit">Grant item</button>
-						</form>
-					</div>
-				</section>
+					</details>
+				</div>
 			</div>
 		</section>
 	</div>
 </main>
 <!--5ETOOLS_SCRIPT_ANCHOR-->
 
-<script type="text/javascript" defer src="lib/localforage.js"></script>
-<script type="text/javascript" defer src="js/parser.js"></script>
-<script type="text/javascript" defer src="js/utils.js"></script>
-<script type="text/javascript" defer src="js/utils-ui.js"></script>
-<script type="module" defer src="js/omnidexer.js"></script>
-<script type="module" src="js/omnisearch.js"></script>
-<script type="module" src="js/filter.js"></script>
-<script type="module" src="js/utils-dataloader.js"></script>
-<script type="module" src="js/utils-font.js"></script>
-<script type="module" src="js/utils-brew.js"></script>
-<script type="module" src="js/utils-config.js"></script>
-<script type="text/javascript" defer src="js/render.js"></script>
-<script type="text/javascript" defer src="js/render-dice.js"></script>
-<script type="module" src="js/shim-esmodules.js"></script>
-<script type="text/javascript" defer src="js/hist.js"></script>
-<script type="module" defer src="js/list2.js"></script>
-<script type="text/javascript" defer src="lib/elasticlunr.js"></script>
 <script type="module" src="js/hub/hub-page.js"></script>
 </body>
 </html>

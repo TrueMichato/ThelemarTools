@@ -33,14 +33,119 @@ describe("campaign hub pages", () => {
 		for (const id of ["campaign-invite-list", "campaign-leave"]) expect(campaignHtml).toContain(`id="${id}"`);
 	});
 
+	it("organizes the campaign around role-aware play tasks before administration", () => {
+		for (const id of [
+			"campaign-characters-panel",
+			"campaign-party-panel",
+			"campaign-inbox-panel",
+			"campaign-shared-actions",
+			"campaign-activity-panel",
+			"campaign-dm-controls",
+		]) expect(campaignHtml).toContain(`id="${id}"`);
+		expect(campaignHtml.indexOf("id=\"campaign-characters-panel\""))
+			.toBeLessThan(campaignHtml.indexOf("class=\"hub-campaign-admin\""));
+		expect(campaignHtml).toContain("<details class=\"hub-disclosure\">");
+		expect(campaignHtml).toContain("People and invitations");
+		expect(campaignHtml).toContain("Rules and homebrew");
+	});
+
+	it("provides explicit campaign loading, connection, empty, and mutation feedback", () => {
+		for (const id of [
+			"campaign-connection-status",
+			"campaign-character-empty",
+			"campaign-party-empty",
+			"campaign-pending-actions-empty",
+			"campaign-pending-transfers-empty",
+			"campaign-activity-empty",
+			"campaign-invite-form-status",
+			"campaign-action-form-status",
+			"campaign-transfer-form-status",
+		]) expect(campaignHtml).toContain(`id="${id}"`);
+		expect(campaignHtml).toContain("aria-live=\"polite\"");
+		expect(campaignHtml).toContain("data-pending-label=\"Sending...\"");
+	});
+
+	it("keeps loaded campaign data visible while offline and requires a refresh after reconnecting", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("window.addEventListener(\"offline\"");
+		expect(source).toContain("Offline · shown data may be stale");
+		expect(source).toContain("window.addEventListener(\"online\"");
+		expect(source).toContain("Back online · reload to refresh");
+		expect(source).toContain("Reload campaign");
+		expect(scss).toContain(".hub-connection[data-state=\"offline\"]::before");
+	});
+
+	it("provides actionable protocol, service, access, resource, and validation failures", () => {
+		const source = read("js/hub/hub-page.js");
+		for (const code of [
+			"NETWORK_UNAVAILABLE",
+			"DATABASE_UNAVAILABLE",
+			"PROTOCOL_UPDATE_REQUIRED",
+			"FORBIDDEN",
+			"CHARACTER_TOO_LARGE",
+			"BREW_TOO_LARGE",
+			"TRANSFER_INSUFFICIENT",
+			"TRANSFER_ITEM_LINKED",
+			"RESOURCE_INSUFFICIENT",
+			"REVISION_CONFLICT",
+			"LEASE_FENCED",
+		]) expect(source).toContain(`case "${code}"`);
+		expect(source).toContain("actionLabel = \"Reload now\"");
+		expect(source).toContain("setCampaignReadOnlyAfterAccessChange(error)");
+		expect(source).toContain("if (error instanceof HubApiError) renderError(error)");
+	});
+
+	it("keeps role-specific controls out of unavailable campaign views", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("applyCampaignRoleLayout({campaign, characters})");
+		expect(source).toContain("setHidden(document.getElementById(\"campaign-open-dm-screen\"), !isDm)");
+		expect(source).toContain("setHidden(document.getElementById(\"campaign-shared-actions\"), !canPlay)");
+		expect(source).toContain("setHidden(document.getElementById(\"campaign-characters-panel\"), isSpectator)");
+	});
+
+	it("renders a named inbox, recent activity, and copyable invite result", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("api.pListEvents({");
+		expect(source).toContain("new HubRealtimeClient({campaignId})");
+		expect(source).toContain("realtime.on(\"event\", event =>");
+		expect(source).toContain("realtime.on(\"snapshot\", snapshotNxt =>");
+		expect(source).toContain("event.type === \"character.projection.updated\"");
+		expect(source).toContain("snapshotNxt.lastSequence >= liveLastSequence");
+		expect(source).toContain("liveEvents = [...liveEvents.filter");
+		expect(source).toContain("renderRecentActivity({events: liveEvents");
+		expect(source).toContain("getCharacterName(target)");
+		expect(source).toContain("getContainerName({kind: transfer.sourceKind");
+		expect(source).toContain("navigator.clipboard.writeText(inviteOutput.value)");
+		expect(campaignHtml).toContain("id=\"campaign-invite-copy\"");
+	});
+
+	it("uses human-readable interaction controls instead of internal inventory identifiers", () => {
+		const source = read("js/hub/hub-page.js");
+		for (const type of ["cp", "sp", "ep", "gp", "pp"]) {
+			expect(campaignHtml).toContain(`id="campaign-transfer-${type}"`);
+		}
+		expect(campaignHtml).toContain("<option value=\"spell_slot_spend\">");
+		expect(campaignHtml).toMatch(/id="campaign-action-slot-amount"[^>]+required/);
+		expect(campaignHtml).toContain("id=\"campaign-item-catalog-open\"");
+		expect(source).toContain("import(\"./hub-item-catalog.js\")");
+		expect(source).toContain("ownerAccountId: session.account.id");
+		expect(source).toContain("itemCatalog.setCampaignBrewContent");
+		expect(source).toContain("getTransferContentsDescription(transfer)");
+		expect(campaignHtml).not.toContain("Item entry ID");
+	});
+
 	it("loads the same hub client on both surfaces", () => {
 		expect(hubHtml).toContain("src=\"js/hub/hub-page.js\"");
 		expect(campaignHtml).toContain("src=\"js/hub/hub-page.js\"");
 	});
 
-	it("loads localforage before StorageUtil on the campaign page", () => {
-		expect(campaignHtml.indexOf("src=\"lib/localforage.js\"")).toBeLessThan(campaignHtml.indexOf("src=\"js/utils.js\""));
-		expect(campaignHtml.indexOf("src=\"js/utils.js\"")).toBeLessThan(campaignHtml.indexOf("src=\"js/hub/hub-page.js\""));
+	it("loads local character storage only when the copy flow is opened", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(campaignHtml).not.toContain("src=\"lib/localforage.js\"");
+		expect(campaignHtml).toContain("id=\"campaign-upload-local-select\"");
+		expect(source).toContain("import(\"./hub-local-character-adapter.js\")");
+		expect(source).not.toContain("globalThis.StorageUtil");
+		expect(source).not.toContain("globalThis.InputUiUtil");
 	});
 
 	it("preserves the complete hub URL through signed-out OAuth", () => {
@@ -63,10 +168,25 @@ describe("campaign hub pages", () => {
 		expect(scss).toContain("@media (width <= 720px)");
 		expect(scss).toContain(":focus-visible");
 		expect(scss).toContain("@media (prefers-reduced-motion: reduce)");
+		expect(scss).toContain("--hub-primary: #5f62e9");
+		for (const html of [hubHtml, campaignHtml]) {
+			expect(html).toContain("class=\"hub-skip-link\"");
+			expect(html).toContain("id=\"main-content\"");
+			expect(html).toContain("<h1 class=\"sr-only\">Campaign Hub</h1>");
+		}
 	});
 
 	it("makes the campaign hub reachable from global navigation", () => {
 		expect(navigation).toContain("page: \"hub.html\", aText: \"Campaign Hub\"");
+	});
+
+	it("uses a valid lightweight navigation list on Hub-owned pages", () => {
+		for (const html of [hubHtml, campaignHtml]) {
+			expect(html).toContain("aria-label=\"Hub navigation\"");
+			expect(html).toContain("href=\"charactersheet.html\"");
+			expect(html).toContain("href=\"dmscreen.html\"");
+			expect(html).not.toContain("src=\"js/navigation.js\"");
+		}
 	});
 
 	it("declares pending-transfer rendering at module scope", () => {
