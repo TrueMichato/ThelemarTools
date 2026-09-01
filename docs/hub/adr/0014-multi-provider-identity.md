@@ -84,7 +84,8 @@ The BFF receives a validated registry rather than one `oauthProvider`. Each entr
 - a fixed slug and concrete start/callback paths;
 - authorization URL construction and exact redirect URI;
 - authorization-code exchange;
-- PKCE and, for OIDC, nonce requirements;
+- declared security capabilities, including PKCE support, confidential-client authentication, and OIDC nonce
+  requirements;
 - normalized identity extraction;
 - bounded scopes and provider-specific response validation;
 - configuration health and an emergency enabled flag.
@@ -102,15 +103,19 @@ providers return 404 before creating an OAuth transaction. The callback invokes 
 route, and the adapter's returned provider must match that route and transaction.
 
 The existing GitHub scopes remain `read:user`. Discord starts with `identify`. Google starts with
-`openid profile`; email scope is not required. Each provider uses the authorization-code flow. GitHub and
-Discord use S256 PKCE. Google uses S256 PKCE plus OIDC nonce validation.
+`openid profile`; email scope is not required. Each provider uses the authorization-code flow. GitHub uses
+S256 PKCE. Google uses S256 PKCE plus OIDC nonce validation. Discord uses the confidential-client
+authorization-code flow with state/cookie correlation, exact redirect URI, client authentication, and
+one-time transaction/code handling. PKCE is enabled for Discord only if its official documentation and a live
+acceptance probe demonstrate support before production enablement; the registry must not pretend all providers
+have the same capabilities.
 
 ## Admission and sign-in
 
 Callback resolution is ordered and transactional:
 
 1. Validate and atomically consume the OAuth transaction, including route provider, operation, browser cookie,
-   expiry, state, redirect URI, PKCE verifier, and OIDC nonce where applicable.
+   expiry, state, redirect URI, and adapter-declared PKCE verifier or OIDC nonce where applicable.
 2. Normalize and validate the provider identity.
 3. If `(provider, subject)` already exists, sign in to its internal account unless the transaction is a link
    for a different account.
@@ -196,17 +201,18 @@ Implement this as an additive `0004_multi_provider_identity.sql` migration befor
    `ON DELETE SET NULL`, plus an index for identity-scoped revocation. Backfill only where an old session's
    account has exactly one identity; ambiguous provenance stays null.
 5. Add `hub.oauth_transactions` with a random-state hash, provider, operation
-   (`sign_in`, `reauthenticate`, or `link`), optional initiating account/session, PKCE verifier, optional OIDC
-   nonce, exact redirect URI, bounded return path, expiry, consumed timestamp, and creation timestamp.
+   (`sign_in`, `reauthenticate`, or `link`), optional initiating account/session, optional PKCE verifier,
+   optional OIDC nonce, exact redirect URI, bounded return path, expiry, consumed timestamp, and creation
+   timestamp.
 6. Constrain account/session presence by operation, uniquely index the state hash, index expiry for bounded
    cleanup, and cascade transient transactions with an initiating account/session.
 7. Grant the runtime role only the CRUD required for these rows. Backup/export handling follows the existing
    least-privilege roles.
 
 Only a hash of the random state is durable. The raw state is correlated with a Secure, httpOnly, SameSite=Lax,
-`__Host-` cookie. The PKCE verifier and OIDC nonce are transient BFF secrets, retained for at most ten minutes
-and removed by atomic consumption or bounded maintenance. Authorization codes, access tokens, and refresh
-tokens are never stored.
+`__Host-` cookie. A PKCE verifier or OIDC nonce required by an adapter is a transient BFF secret, retained for
+at most ten minutes and removed by atomic consumption or bounded maintenance. Authorization codes, access
+tokens, and refresh tokens are never stored.
 
 Migration and deployment order is:
 
@@ -248,13 +254,13 @@ security telemetry, not audit rows attached to a guessed account.
 |---|---|
 | OAuth confused deputy or mix-up | Concrete provider routes; transaction binds provider, operation, redirect URI, account/session, and adapter; callback rejects any mismatch |
 | Login CSRF | Unpredictable one-time state, browser cookie correlation, ten-minute expiry, atomic consumption, safe same-origin return path |
-| Authorization-code interception/injection | Exact registered HTTPS callback, S256 PKCE where supported, one-time code exchange, no code/token logging |
-| Account takeover through linking | Existing linked-identity reauthentication, CSRF-protected link intent, operation-bound state/PKCE, private admission, ownership uniqueness, other-session revocation |
+| Authorization-code interception/injection | Exact registered HTTPS callback and one-time exchange for every provider; S256 PKCE for GitHub/Google; confidential-client authentication and one-time transaction/code handling for Discord; no code/token logging |
+| Account takeover through linking | Existing linked-identity reauthentication, CSRF-protected link intent, operation-bound state plus adapter-declared protections, private admission, ownership uniqueness, other-session revocation |
 | Email or profile takeover/change | Email is neither stored as identity nor used for lookup/link/admission; mutable handle/display name cannot change `(provider, subject)` |
 | Cross-account link race | Identity-key and account locking plus unique `(provider, provider_subject)`; loser receives non-enumerating conflict and no orphan account |
 | Last-login removal | Locked usable-identity count on unlink and provider-disable preflight; no rollback to software which cannot serve the remaining identity |
 | Stolen session | Recent provider reauthentication for link/unlink; session rotation; revoke other sessions, leases, and sockets |
-| OAuth transaction replay | State hash is unique and atomically consumed; cookie, route, operation, account/session, expiry, and PKCE/nonce are checked |
+| OAuth transaction replay | State hash is unique and atomically consumed; cookie, route, operation, account/session, expiry, and adapter-required PKCE/nonce are checked; Discord authorization codes are one-time |
 | Provider outage or compromise | Per-provider emergency disable; existing Hub sessions remain governed by normal expiry/revocation unless incident response requires global revocation |
 
 The no-email-link rule is absolute even when a provider asserts `email_verified=true`. Recovery from accidental
@@ -273,7 +279,8 @@ Rotation is provider-by-provider:
 1. create the replacement credential or provider application without exposing the value;
 2. register the same exact callback and minimum scopes;
 3. update the BFF secret/config and restart;
-4. pass start/callback, state, PKCE/nonce, allowlist, session rotation, and redacted-log probes;
+4. pass start/callback, state, declared provider-capability, allowlist, session rotation, and redacted-log
+   probes;
 5. revoke the prior credential only after success.
 
 If a provider supports only one active secret, use a parallel provider application or a short announced login
@@ -319,7 +326,7 @@ merge accounts, rewrite subjects, or auto-link by email to make rollback appear 
 Emergency disabling of one compromised provider is allowed even though normal Discord/Google product
 enablement is paired. Existing sessions may remain active when the provider is merely unavailable; a security
 incident can revoke sessions through the account-scoped mechanism. Restore the provider only after exact
-callback, secret, state, PKCE/nonce, and redacted-observability probes pass.
+callback, secret, state, declared provider-capability, and redacted-observability probes pass.
 
 ## Acceptance tests
 
@@ -327,13 +334,16 @@ Implementation is not accepted until automated tests cover:
 
 1. registry rejection of duplicate slugs/routes, unknown adapters, enabled providers with missing config, and
    mismatched callback origins;
-2. unchanged GitHub start/callback paths, numeric-subject allowlist behavior, PKCE, safe return paths, existing
-   identity/account ids, and session-cookie semantics;
+2. unchanged GitHub start/callback paths, numeric-subject allowlist behavior, S256 PKCE, safe return paths,
+   existing identity/account ids, and session-cookie semantics;
 3. concrete Discord and Google paths, minimum scopes, exact redirect URI, Discord snowflake handling without
-   numeric precision loss, and complete Google OIDC issuer/audience/signature/expiry/nonce validation;
+   numeric precision loss, Discord confidential-client authentication and one-time transaction/code handling,
+   no Discord PKCE parameters unless official documentation and a live probe prove support, and Google S256
+   PKCE plus complete OIDC issuer/audience/signature/expiry/nonce validation;
 4. disabled/unknown provider 404 behavior before transaction creation;
 5. state cookie correlation, expiry, single consumption, callback replay refusal, provider/operation/redirect
-   binding, callback swapping, PKCE failure, and OIDC nonce failure;
+   binding, callback swapping, adapter-capability enforcement, GitHub/Google PKCE failure, Google OIDC nonce
+   failure, and Discord client-authentication/code-replay failure;
 6. normalization of GitHub, Discord, and Google subjects while mutable handle/display-name changes preserve
    identity ownership;
 7. explicit proof that equal or changed emails never link, merge, admit, or select an account;

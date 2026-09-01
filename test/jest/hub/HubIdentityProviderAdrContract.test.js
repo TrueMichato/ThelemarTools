@@ -7,10 +7,19 @@ describe("Campaign Hub multi-provider identity ADR contract", () => {
 		expect(adr).toMatch(/^Status: Accepted for implementation \(2026-09-01\)$/m);
 		expect(adr).toContain("application-owned provider registry");
 		expect(adr).toContain("ship Discord and Google together");
+		expect(adr).toContain("declared security capabilities");
 		expect(adr).toContain("GET /auth/github/start");
 		expect(adr).toContain("GET /auth/discord/start");
 		expect(adr).toContain("GET /auth/google/start");
 		expect(adr).toContain("There is no catch-all callback");
+	});
+
+	it("uses documented provider-specific authorization-code protections", () => {
+		expect(adr).toContain("GitHub uses\nS256 PKCE");
+		expect(adr).toContain("Google uses S256 PKCE plus OIDC nonce validation");
+		expect(adr).toContain("Discord uses the confidential-client");
+		expect(adr).toContain("PKCE is enabled for Discord only if its official documentation and a live");
+		expect(adr).toContain("no Discord PKCE parameters unless official documentation and a live probe prove support");
 	});
 
 	it("makes provider and subject authoritative and forbids email linking", () => {
