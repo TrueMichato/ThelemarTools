@@ -15,6 +15,7 @@
 | Cross-user content is safe | ADR 0003; `security.md` | campaign/character validators and renderer escaping | campaign content, cloud validation, XSS contract | security incident runbook (planned) |
 | Character quota applies after mutation | `performance.md` | `validateCloudCharacterData` in every write path | cloud validation, Phase 4 oversized grant/transfer | troubleshooting quota section |
 | Realtime respects visibility | `realtime-protocol.md` | projections, store visible-event query, realtime | realtime/WebSocket/authorization tests | future outbox/realtime runbook |
+| Character projections are authorization-scoped | `adr/0011-authorization-scoped-character-projections.md`, `data-lifecycle.md` | `server/src/character-projection.js`, both stores, `js/hub/hub-character-view.js`, `js/charactersheet/charactersheet-sharing.js` | `HubCharacterProjection`, `HubProjectionPolicy`, `HubProjectionCanary`, `HubProjectionLifecycle`, `HubPartyTrackerProjection` | migration 0004 |
 | Transfers cannot duplicate/lose assets | `domain-model.md` | `hub-actions.js`, transactional store locks/escrow | Hub actions and Phase 4 domain | future stuck-transfer runbook |
 | Service worker never caches auth/API | `security.md` | Hub route policy + `sw-template.js` | route-policy/service-worker build | stale-client staging scenario |
 | Backup is portable and atomic | `operations.md` | backup/restore/pg-env scripts | local PostgreSQL backup/restore drill | backup/restore runbook |

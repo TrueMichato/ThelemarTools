@@ -21,7 +21,16 @@
   idempotency key so an idempotent retry can reproduce the same raw token while PostgreSQL stores only its
   hash. Compromise/rotation of the CSRF secret therefore also affects invite issuance/recovery.
 - Mutations require exact Origin, CSRF HMAC, protocol version, payload schema, role permission, and
-  idempotency key.
+  idempotency key. Reads whose response is an authorization envelope also require the protocol version, so an
+  older client is told to update rather than silently misreading a newer shape.
+- Character reads cross the trust boundary through one server-owned projector
+  ([ADR 0011](adr/0011-authorization-scoped-character-projections.md)). Peer values are derived into a typed,
+  closed catalog rather than copied from the document, so a new document field cannot become shared by
+  accident. A policy that fails validation fails closed and is indistinguishable from `private`; the server
+  never falls back to a more permissive preset.
+- Projection invalidation events are metadata-only. The durable event, outbox, live fanout, replay and resync
+  paths carry no character field, patch, path, amount, field name, display text or name snapshot; logging and
+  metrics record projection kind, revisions and failure code only.
 - WebSocket upgrades require same origin, session, active membership, and protocol version.
 - Event visibility is enforced server-side (`all_members`, `dm_only`, `actor_and_dm`,
   `explicit_accounts`) before replay or broadcast.

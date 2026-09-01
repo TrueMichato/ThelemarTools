@@ -104,10 +104,10 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
 - WebSocket upgrade requires exact origin, signed session, active membership, and protocol version.
 - The server revalidates session and membership on messages, fanout, and presence broadcasts.
 - Client messages are limited to presence and resync in V1.
-- Resync returns an authorization-shaped campaign snapshot plus visible events after a sequence.
+- Resync returns a metadata-only cursor with cache-invalidation refs; projections are fetched over HTTP. The HTTP snapshot returns an authorization-shaped campaign snapshot plus visible events after a sequence.
 - Outbox rows are claimed with tokens and stale-claim recovery; events for one campaign are not overtaken
   after an earlier delivery failure.
-- Other players receive a fixed limited character projection. DMs/co-DMs receive full authorized snapshots.
+- Other members receive one recipient-independent peer profile shaped by the character owner's sharing policy ([ADR 0011](adr/0011-authorization-scoped-character-projections.md)). DMs/co-DMs receive full authorized snapshots.
 - Party Tracker projections are linked, read-only rows and are excluded from saved Board state.
 
 ## Multiplayer mutations

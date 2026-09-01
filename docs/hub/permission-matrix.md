@@ -20,7 +20,10 @@ visibility is not authorization.
 | Leave campaign | Owner must transfer/archive first | Yes | Yes | Yes |
 | Publish/activate rules or brew | Yes | Yes | No | No |
 | Read full campaign character | Any campaign character | Any campaign character | Own only | Own only if one already exists |
-| Read player-visible campaign projection | Yes | Yes | Yes | Yes |
+| Read peer character profile | Yes, beside truth as `peerPreview` | Yes, beside truth as `peerPreview` | Yes | Yes |
+| Read own sharing policy | Own character only | Own character only | Own character only | Own character only |
+| Read another member's sharing policy | No | No | No | No |
+| Change sharing policy | Own character only | Own character only | Own character only | Own character only |
 | Create campaign character | Own character | Own character | Own character | No |
 | Edit character under lease | Own character only | Own character only | Own character only | No while spectator |
 | Clone/move character into campaign | Own character only | Own character only | Own character only | No |

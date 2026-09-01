@@ -71,13 +71,28 @@ Each character starts in collapsed (summary row) mode. Clicking the expand butto
 ```javascript
 getSaveableState() → {
   settings: PartyTrackerCharacterSerializer.serializeSettings(this._settings),
-  characters: this._characters.map(c =>
-    PartyTrackerCharacterSerializer.serialize(c.getSaveableData())
-  )
+  characters: this._characters
+    .filter(c => !this._hubCharacterIds.has(c.data?.id))
+    .map(c => PartyTrackerCharacterSerializer.serialize(c.getSaveableData()))
 }
 ```
 
-State is saved to localStorage via `board.doSaveStateDebounced()` on every character add/remove/update and every settings change. See [Character Model](./02-party-tracker-character.md) for the full serialization format.
+State is saved to localStorage via `board.doSaveStateDebounced()` on every character add/remove/update and every settings change.
+
+### Hub-linked rows
+
+Rows injected from a Campaign Hub campaign are **read-only and never persisted**: the filter above excludes
+them from the saved Board blob, so a projection cannot outlive the authorization that produced it.
+
+`setHubCharacterProjections()` receives ADR 0011 authorization envelopes and dispatches on `kind`. A
+`dm_truth`/`owner_truth` envelope maps through `PartyTrackerImporter.mapCharacterSheetData()`; a `peer_profile`
+maps through `PartyTrackerImporter.mapPeerProfile()`, which reads the already-projected catalog and never
+treats it as a Character Sheet document. A peer profile that shares no identity produces no row at all rather
+than a placeholder that would confirm the character exists.
+
+Projections arrive only from the authorization-scoped HTTP projector
+(`DmScreenHubController.pRefreshProjections()`); the realtime socket merely triggers a coalesced refetch. See
+[docs/hub/adr/0011-authorization-scoped-character-projections.md](../hub/adr/0011-authorization-scoped-character-projections.md). See [Character Model](./02-party-tracker-character.md) for the full serialization format.
 
 ## Toolbar Summary
 

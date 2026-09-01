@@ -14,7 +14,8 @@
 | Campaign/member/role | Authorization and campaign roster | active campaign members | campaign/account lifecycle |
 | Invite token hash/role/usage/expiry | Join authorization | creator/authority; raw token returned at creation | expiry/revoke; automated 30-day cleanup pending |
 | Raw invite token in browser | Share/redeem invite and survive OAuth round-trip | visible in creator output/link; recipient URL fragment then `sessionStorage["hub-pending-invite"]` until redemption attempt completes | cleared from URL immediately and from sessionStorage after success or failure |
-| Character document | Player state, including notes/backstory | owner and campaign DM/co-DM full; other players fixed projection | owner lifetime/export/archive/deletion |
+| Character document | Player state, including notes/backstory | owner and campaign DM/co-DM full; other members receive the owner's chosen peer profile | owner lifetime/export/archive/deletion |
+| Character sharing policy | Owner's projection choices | owner only; DMs see its computed result, never the raw policy | character lifetime |
 | Campaign brew/rules versions | Shared campaign content/policy | campaign members | campaign lifetime |
 | Private DM workspace | DM Board | owning DM membership only | membership/campaign/account lifecycle |
 | Roll/action/transfer history | Campaign play history | event visibility rules | retained until campaign/account deletion |
@@ -28,8 +29,18 @@
 
 ## Privacy boundary
 
-- DMs/co-DMs can read the complete sheet, including notes and backstory.
-- Other players receive only keys allowlisted by `projectCharacterForPlayer`.
+- DMs/co-DMs can read the complete sheet, including notes and backstory, plus the exact `peerPreview` other
+  members receive. They do not receive the owner's raw sharing configuration.
+- Other members receive one recipient-independent peer profile built from the versioned catalog in
+  `server/src/character-projection.js` and filtered by the owner's policy
+  ([ADR 0011](adr/0011-authorization-scoped-character-projections.md)). Existing characters default to the
+  `table` preset.
+- Peer values are derived into a typed view model, never copied from the source document; `ownerAccountId`,
+  raw policy, internal item ids, document paths and omitted truth are not peer fields.
+- A policy that cannot be validated fails closed: peers receive no data fields — indistinguishable from the
+  `private` preset — while owner/DM management receives `PROJECTION_POLICY_INVALID`.
+- Owner attribution on the roster is campaign metadata carrying a membership id, gated on the character's
+  identity being peer-visible; a character with hidden identity is not peer-targetable.
 - A private DM workspace belongs to one membership, not all campaign DMs.
 - Explicit-account events still include all campaign DMs/co-DMs by policy.
 - Browser cache/service worker must never cache authenticated API/auth responses.

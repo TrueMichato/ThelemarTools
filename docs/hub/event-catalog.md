@@ -37,7 +37,7 @@
 | `character.created` | character | all_members | owner account id | Full document not emitted |
 | `character.reactivated` | character | all_members | empty | Same scoped import reactivates archived row |
 | `character.patched` | character | actor_and_dm | submitted patches | Private owner/DM state event |
-| `character.projection.updated` | character | all_members | fixed player projection | Does not contain notes/inventory/private fields |
+| `character.projection.invalidated` | character | all_members | `{projectionRevision}` only | Metadata-only ([ADR 0011](adr/0011-authorization-scoped-character-projections.md)). Carries no character field, patch, path, amount, field name or display text — including no name snapshot. Consumers refetch through the scoped HTTP projector |
 | `character.cloned` | character | all_members | source campaign/character ids | New aggregate id |
 | `character.moved_out` | character | all_members in source | target campaign id | Source-campaign notification |
 | `character.moved` | character | all_members in target | source campaign/character ids | Same character id, new campaign |
@@ -65,9 +65,14 @@ Current-state character events at/before `snapshot.lastSequence` may be omitted 
 snapshot already contains their result:
 
 - character create/clone/move/move-out/archive/reactivate;
-- character projection update;
+- character projection invalidation;
 - XP/item grants;
 - applied action.
+
+One metadata-only invalidation is emitted per affected character per commit by every mutation that can change
+a catalog field: owner patches, item grants, applied structured effects, both legs of a transfer (escrow
+reservation and resolution), archived-import reactivation, and a sharing-policy write. `xp.granted` emits none
+because `xp` is not a catalog field.
 
 Roll history and non-state workflow history are not assumed to be represented by the snapshot.
 

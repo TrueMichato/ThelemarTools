@@ -2,8 +2,13 @@
 
 Status: Accepted as an architecture contract (2026-09-01)
 
-Implementation: Contract only. The current production behavior described below remains in place until a
-separate implementation change supplies the migrations, protocol changes, and tests required by this ADR.
+Implementation: Shipped. Migration `0004` persists the policy, `HUB_PROTOCOL_VERSION` is `2`, and the
+required memory/PostgreSQL evidence lives in `test/jest/hub/HubCharacterProjection.test.js`,
+`HubProjectionPolicy.test.js`, `HubProjectionCanary.test.js` and `HubProjectionLifecycle.test.js`. Two
+implementation notes refine, but do not alter, the contract below: `inventorySummary.entryCount` is the total
+number of inventory entries while `publicItems` lists only entries an owner has explicitly marked shared, and
+peer-facing owner attribution is served as campaign-roster metadata (a membership id, gated on peer-visible
+identity) rather than as a catalog field.
 
 ## Context
 

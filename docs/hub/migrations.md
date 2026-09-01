@@ -1,6 +1,6 @@
 # Campaign Hub migration guide
 
-> **Status:** Implemented through operational migration 0003
+> **Status:** Implemented through character projection migration 0004
 > **Last verified:** 2026-08-24
 > **Owner:** Campaign Hub maintainers
 
@@ -91,6 +91,7 @@ Current migrations:
 - 0001 canonical Hub schema;
 - 0002 lifecycle administration and deletion-safe foreign keys;
 - 0003 operational maintenance/backup/restore evidence.
+- 0004 additive character projection policy/revision columns; existing rows adopt the `table` preset.
 
 ## Readiness
 

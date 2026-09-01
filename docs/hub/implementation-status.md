@@ -92,11 +92,13 @@ pass. Only the host-operations proof and physical one-DM/two-player game day rem
 - Immutable campaign brew/rules versions and early page context activation.
 - Private per-DM workspaces using the existing Board blob and lease fencing.
 - Authenticated WebSockets, presence, visibility-filtered event replay, snapshots, outbox dispatcher.
-- Campaign pages consume both initial snapshots and visible events, render projection updates immediately,
+- Campaign pages consume both initial snapshots and visible events, coalesce projection invalidations into one
+  authorization-scoped HTTP refetch that replaces rather than merges,
   debounce authoritative refreshes, sequence-fence stale refresh responses so newer roster state cannot
   regress, and run one bounded 10-second resync watchdog so a missed delivery cannot leave a live-looking
   roster stale indefinitely.
-- DM full character reads; limited player projections; live Party Tracker linked rows.
+- DM full character reads plus the exact peer preview; owner-chosen peer profiles for other members with a
+  sharing UI on the Character Sheet; live Party Tracker linked rows.
 - Stale Character Sheet campaign URLs canonicalize before campaign rules/homebrew activation, and Hub-linked
   Party/Journey participants remain session-only rather than leaking into the private Board blob.
 - Campaign DM Screen access is validated before private workspace data loads. Its persistent campaign banner
