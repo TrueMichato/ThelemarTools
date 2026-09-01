@@ -24,7 +24,7 @@ describe("Hub portable deployment contract", () => {
 	const oracleOperations = read("docs/hub/runbooks/oracle-operations.md");
 
 	it("builds a separate pinned non-root Node BFF image with safe health checking", () => {
-		expect(dockerfile).toContain("FROM node:24.7.0-bookworm-slim");
+		expect(dockerfile).toContain("FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e");
 		expect(dockerfile).toContain("USER 10001:10001");
 		expect(dockerfile).toContain("npm ci --omit=dev --ignore-scripts");
 		expect(dockerfile).toContain("--fetch-retries=5");
@@ -32,6 +32,20 @@ describe("Hub portable deployment contract", () => {
 		expect(dockerfile).toContain("org.opencontainers.image.revision");
 		expect(dockerfile).toContain("/api/live");
 		expect(dockerfile).toContain(`CMD ["node", "server/src/index.js"]`);
+	});
+
+	it("keeps package-manager tooling and the build lockfile out of the BFF runtime", () => {
+		for (const path of [
+			"/usr/local/lib/node_modules",
+			"/usr/local/bin/corepack",
+			"/usr/local/bin/npm",
+			"/usr/local/bin/npx",
+			"/usr/local/bin/yarn",
+			"/usr/local/bin/yarnpkg",
+			"/opt/yarn-v*",
+		]) expect(dockerfile).toContain(path);
+		expect(dockerfile).toContain("COPY --chown=hub:hub package.json ./");
+		expect(dockerfile).not.toContain("COPY --chown=hub:hub package.json package-lock.json ./");
 	});
 
 	it("limits the BFF build context to runtime files and its shared patch helper", () => {
@@ -55,6 +69,16 @@ describe("Hub portable deployment contract", () => {
 		expect(compose).toMatch(/bff:[\s\S]*?networks:\n\s+- hub-private\n\s+- hub-egress[\s\S]*?static:/);
 		expect(compose).toMatch(/edge:[\s\S]*?networks:\n\s+hub-private:\n\s+ipv4_address: 172\.30\.0\.10\n\s+hub-public:/);
 		expect(compose).toMatch(/HUB_TRUST_PROXY: \$\{HUB_TRUST_PROXY:-172\.30\.0\.10}/);
+	});
+
+	it("runs every BFF-image service without package-manager tooling", () => {
+		const serviceBlocks = [...compose.matchAll(/^ {2}([a-z0-9-]+):\n([\s\S]*?)(?=^ {2}[a-z0-9-]+:|^volumes:)/gm)]
+			.filter(([, , block]) => block.includes("dockerfile: server/Dockerfile"));
+		expect(serviceBlocks.map(([, name]) => name)).toEqual(["migrate", "grant-roles", "bff", "maintenance"]);
+		for (const [, , block] of serviceBlocks) expect(block).not.toMatch(/\b(?:npm|npx|corepack|yarn|yarnpkg)\b/);
+		expect(compose).toContain(`command: ["node", "server/scripts/migrate.mjs"]`);
+		expect(compose).toContain(`command: ["node", "server/scripts/grant-roles.mjs"]`);
+		expect(compose).toContain(`command: ["node", "server/scripts/maintenance.mjs"]`);
 	});
 
 	it("keeps API, auth, WebSocket, and static traffic on one edge origin", () => {
@@ -101,7 +125,7 @@ describe("Hub portable deployment contract", () => {
 	it("provides one-shot maintenance and encrypted backup profiles", () => {
 		expect(compose).toContain(`profiles: ["maintenance"]`);
 		expect(compose).toContain(`profiles: ["backup"]`);
-		expect(compose).toContain("hub:maintenance");
+		expect(compose).toContain("server/scripts/maintenance.mjs");
 		expect(compose).toContain("backup-encrypted.mjs");
 		expect(opsDockerfile).toContain("FROM postgres:17.6-bookworm");
 		expect(opsDockerfile).toContain("USER postgres");

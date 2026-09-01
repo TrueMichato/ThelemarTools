@@ -41,6 +41,8 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(workflow).toContain("postgres:17.6-bookworm");
 		expect(workflow).toContain("CharacterSheetRepositorySeam.test.js");
 		expect(workflow).toContain("DmScreenJourneyTracker.test.js");
+		expect(workflow.match(/node-version: 24\.20\.0/g)).toHaveLength(4);
+		expect(workflow).not.toContain("node-version: 24.7.0");
 	});
 
 	it("exports one immutable image with SBOM and provenance evidence", () => {
@@ -66,6 +68,7 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(e2eRunner).toContain(`process.once(signal`);
 		expect(e2eRunner).toContain(`cleanup();`);
 		expect(e2eRunner).toContain(`productionSmokeName`);
+		expect(e2eRunner).toMatch(/catch \(error\)[\s\S]*?composeArgs, "ps", "--all"[\s\S]*?composeArgs, "logs", "--tail=200"/);
 		expect(playwrightConfig).toContain("hub-playwright-results.json");
 		expect(workflow).toContain("test-results/hub-playwright-results.json");
 		expect(workflow).toContain("if-no-files-found: error");

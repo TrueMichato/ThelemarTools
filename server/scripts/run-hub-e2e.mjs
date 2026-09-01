@@ -195,7 +195,11 @@ try {
 	}
 	if (exitCode !== 0) await run("docker", [...composeArgs, "logs", "--tail=200"], {isAllowFailure: true});
 } catch (error) {
-	if (!isStopping) throw error;
+	if (!isStopping) {
+		await run("docker", [...composeArgs, "ps", "--all"], {isAllowFailure: true});
+		await run("docker", [...composeArgs, "logs", "--tail=200"], {isAllowFailure: true});
+		throw error;
+	}
 } finally {
 	await cleanup();
 }

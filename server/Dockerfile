@@ -1,4 +1,4 @@
-FROM node:24.7.0-bookworm-slim AS dependencies
+FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS dependencies
 
 ARG NPM_REGISTRY=https://registry.npmjs.org/
 
@@ -11,7 +11,7 @@ RUN npm config set registry "${NPM_REGISTRY}" \
 		--fetch-retry-maxtimeout=60000 \
 	&& npm cache clean --force
 
-FROM node:24.7.0-bookworm-slim AS runtime
+FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime
 
 ARG VCS_REF=unknown
 ARG VERSION=dev
@@ -25,10 +25,18 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 RUN groupadd --system --gid 10001 hub \
-	&& useradd --system --uid 10001 --gid hub --home-dir /app --shell /usr/sbin/nologin hub
+	&& useradd --system --uid 10001 --gid hub --home-dir /app --shell /usr/sbin/nologin hub \
+	&& rm -rf \
+		/usr/local/lib/node_modules \
+		/usr/local/bin/corepack \
+		/usr/local/bin/npm \
+		/usr/local/bin/npx \
+		/usr/local/bin/yarn \
+		/usr/local/bin/yarnpkg \
+		/opt/yarn-v*
 
 COPY --from=dependencies --chown=hub:hub /app/node_modules ./node_modules
-COPY --chown=hub:hub package.json package-lock.json ./
+COPY --chown=hub:hub package.json ./
 COPY --chown=hub:hub server ./server
 COPY --chown=hub:hub js/hub/hub-json-patch.js ./js/hub/hub-json-patch.js
 
