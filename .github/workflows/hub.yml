@@ -21,7 +21,7 @@ jobs:
       - name: Set up Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24.7.0
+          node-version: 24.20.0
           cache: npm
 
       - name: Install locked dependencies
@@ -102,7 +102,7 @@ jobs:
       - name: Set up Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24.7.0
+          node-version: 24.20.0
           cache: npm
 
       - name: Install locked dependencies
@@ -162,7 +162,7 @@ jobs:
       - name: Set up Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24.7.0
+          node-version: 24.20.0
           cache: npm
 
       - name: Install locked dependencies
@@ -204,7 +204,7 @@ jobs:
       - name: Set up Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24.7.0
+          node-version: 24.20.0
           cache: npm
 
       - name: Install locked dependencies

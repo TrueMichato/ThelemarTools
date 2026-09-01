@@ -30,7 +30,7 @@ services:
         VERSION: ${HUB_IMAGE_VERSION:-dev}
         VCS_REF: ${HUB_VCS_REF:-local}
         NPM_REGISTRY: ${HUB_NPM_REGISTRY:-https://registry.npmjs.org/}
-    command: ["npm", "run", "hub:migrate"]
+    command: ["node", "server/scripts/migrate.mjs"]
     environment:
       DATABASE_URL: postgresql://hub_owner:${HUB_POSTGRES_PASSWORD}@db:5432/hub
       HUB_DATABASE_SSL: "false"
@@ -48,7 +48,7 @@ services:
         VERSION: ${HUB_IMAGE_VERSION:-dev}
         VCS_REF: ${HUB_VCS_REF:-local}
         NPM_REGISTRY: ${HUB_NPM_REGISTRY:-https://registry.npmjs.org/}
-    command: ["npm", "run", "hub:grant-roles"]
+    command: ["node", "server/scripts/grant-roles.mjs"]
     environment:
       DATABASE_URL: postgresql://hub_owner:${HUB_POSTGRES_PASSWORD}@db:5432/hub
       HUB_DATABASE_SSL: "false"
@@ -132,7 +132,7 @@ services:
         VERSION: ${HUB_IMAGE_VERSION:-dev}
         VCS_REF: ${HUB_VCS_REF:-local}
         NPM_REGISTRY: ${HUB_NPM_REGISTRY:-https://registry.npmjs.org/}
-    command: ["npm", "run", "hub:maintenance"]
+    command: ["node", "server/scripts/maintenance.mjs"]
     environment:
       DATABASE_URL: postgresql://hub_runtime:${HUB_RUNTIME_DB_PASSWORD}@db:5432/hub
       HUB_DATABASE_SSL: "false"
