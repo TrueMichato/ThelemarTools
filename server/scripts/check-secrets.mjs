@@ -93,6 +93,7 @@ function main () {
 	let scannedFiles = 0;
 	let skippedBinaryFiles = 0;
 	for (const file of files) {
+		if (!fs.existsSync(file)) continue;
 		if (/\.(?:png|jpe?g|gif|webp|woff2?|ttf|ico|pdf|zip|gz|br|wasm|mp[34]|webm|ogg|dump|enc)$/i.test(file)) {
 			skippedBinaryFiles++;
 			continue;
