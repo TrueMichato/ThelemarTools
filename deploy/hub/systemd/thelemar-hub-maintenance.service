@@ -1,0 +1,13 @@
+[Unit]
+Description=Run bounded Campaign Hub maintenance
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+RuntimeDirectory=thelemar-hub
+WorkingDirectory=/home/ubuntu/ThelemarTools
+ExecStart=/usr/bin/flock -n /run/thelemar-hub/maintenance.lock /usr/bin/docker compose --env-file .env.hub -f compose.hub.yml -f compose.hub.public.yml --profile maintenance run --rm maintenance
+TimeoutStartSec=1h
+Nice=10

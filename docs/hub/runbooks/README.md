@@ -1,7 +1,7 @@
 # Campaign Hub runbooks
 
-> **Status:** Runbook index; detailed provider-portable runbooks are Phase 6E deliverables
-> **Last reviewed:** 2026-08-24
+> **Status:** Current portable runbooks plus Oracle host installation
+> **Last reviewed:** 2026-08-31
 > **Owner:** Campaign Hub maintainers
 
 Runbooks are executable operational procedures. Each final runbook must contain:
@@ -24,6 +24,7 @@ Runbooks are executable operational procedures. Each final runbook must contain:
 - [Account deletion grace and purge](account-deletion.md)
 - [Session/device compromise](session-compromise.md)
 - [Oracle Cloud Always Free provisioning](oracle-provisioning.md)
+- [Oracle host operations, backups, monitoring, and restore drill](oracle-operations.md)
 - [Deploy and promote](deploy-promote.md)
 - [Application/database rollback](rollback.md)
 - [Encrypted backup and restore drill](backup-restore.md)
@@ -35,8 +36,5 @@ Runbooks are executable operational procedures. Each final runbook must contain:
 - [Private OAuth allowlist change](allowlist-change.md)
 - [Campaign ownership recovery](campaign-ownership-recovery.md)
 
-## Required before private launch
-
-- session/OAuth compromise;
-
-Until these exist and have been drilled, do not represent the implementation as operationally launch-ready.
+The procedures are implemented. Private launch still requires installing and drilling the Oracle operations
+units, producing a fresh off-machine backup and restore record, and rehearsing the exact release rollback.

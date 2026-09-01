@@ -1,0 +1,12 @@
+[Unit]
+Description=Check Campaign Hub host and service health
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/ThelemarTools
+EnvironmentFile=/home/ubuntu/ThelemarTools/.env.hub
+ExecStart=/home/ubuntu/ThelemarTools/deploy/hub/monitor-host.sh
+TimeoutStartSec=2m

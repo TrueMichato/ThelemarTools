@@ -6,6 +6,7 @@ describe("Hub portable deployment contract", () => {
 	const dockerfile = read("server/Dockerfile");
 	const dockerignore = read("server/Dockerfile.dockerignore");
 	const compose = read("compose.hub.yml");
+	const publicCompose = read("compose.hub.public.yml");
 	const caddy = read("deploy/hub/Caddyfile");
 	const publicCaddy = read("deploy/hub/Caddyfile.public");
 	const staticDockerfile = read("deploy/hub/static.Dockerfile");
@@ -14,6 +15,13 @@ describe("Hub portable deployment contract", () => {
 	const opsDockerfile = read("server/ops.Dockerfile");
 	const opsDockerignore = read("server/ops.Dockerfile.dockerignore");
 	const roles = read("deploy/hub/init-roles.sh");
+	const monitor = read("deploy/hub/monitor-host.sh");
+	const pullBackups = read("deploy/hub/pull-backups.sh");
+	const backupService = read("deploy/hub/systemd/thelemar-hub-backup.service");
+	const backupTimer = read("deploy/hub/systemd/thelemar-hub-backup.timer");
+	const maintenanceTimer = read("deploy/hub/systemd/thelemar-hub-maintenance.timer");
+	const monitorTimer = read("deploy/hub/systemd/thelemar-hub-monitor.timer");
+	const oracleOperations = read("docs/hub/runbooks/oracle-operations.md");
 
 	it("builds a separate pinned non-root Node BFF image with safe health checking", () => {
 		expect(dockerfile).toContain("FROM node:24.7.0-bookworm-slim");
@@ -98,6 +106,35 @@ describe("Hub portable deployment contract", () => {
 		expect(opsDockerfile).toContain("FROM postgres:17.6-bookworm");
 		expect(opsDockerfile).toContain("USER postgres");
 		expect(opsDockerignore).toContain("!server/scripts/**");
+	});
+
+	it("makes Oracle backup output host-readable and safe to copy off-machine", () => {
+		expect(publicCompose).toContain("HUB_BACKUP_DIR:-./.hub-backups");
+		expect(publicCompose).toContain("HUB_BACKUP_UID:-1000");
+		expect(pullBackups).toContain("--ignore-existing");
+		expect(pullBackups).toContain("--include='hub-*.dump.enc'");
+		expect(pullBackups).not.toContain("--delete");
+		expect(pullBackups).toContain("-mmin -1800");
+		expect(oracleOperations).toContain("Run this on a different trusted computer, not on the Oracle VM.");
+		expect(oracleOperations).toContain("Never restore over the production database.");
+	});
+
+	it("ships persistent Oracle maintenance, backup, and monitoring timers", () => {
+		for (const timer of [backupTimer, maintenanceTimer, monitorTimer]) expect(timer).toContain("Persistent=true");
+		expect(backupService).toContain("RuntimeDirectory=thelemar-hub");
+		expect(backupService).toContain("/usr/bin/flock -n /run/thelemar-hub/backup.lock");
+		expect(monitor).toMatch(/curl --silent --show-error --fail --max-time 15 "\$\{base_url\}\/api\/ready"/);
+		expect(monitor).toMatch(/--header "Authorization: Bearer \$\{HUB_METRICS_TOKEN\}"/);
+		expect(monitor).toMatch(/--header "Origin: \$\{base_url\}"/);
+		expect(monitor).toContain("openssl x509 -in \"$certificate_file\" -noout -checkend 1209600");
+		for (const metric of [
+			"hub_outbox_oldest_age_seconds",
+			"hub_outbox_failed",
+			"hub_last_maintenance_age_seconds",
+			"hub_last_backup_age_seconds",
+			"hub_last_restore_drill_age_seconds",
+		]) expect(monitor).toContain(metric);
+		expect(monitor).not.toContain("character");
 	});
 
 	it("keeps local secrets out of Git and the BFF image context", () => {

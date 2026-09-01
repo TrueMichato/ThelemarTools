@@ -1346,12 +1346,12 @@ Run these checks in order:
 
 Then in a browser:
 
-1. `https://campaignhub.duckdns.org` loads the site with a valid padlock;
-2. sign-in redirects to GitHub and returns successfully;
-3. an account **not** on the allowlist is refused;
-4. create a campaign, create a character, reload — data persists;
-5. open a second browser profile, join, and confirm a change in one appears in the other within a second;
-6. leave a tab idle 30 minutes and confirm the socket survives — this exercises the 25-second heartbeat.
+- `https://campaignhub.duckdns.org` loads the site with a valid padlock;
+- sign-in redirects to GitHub and returns successfully;
+- an account **not** on the allowlist is refused;
+- create a campaign, create a character, reload — data persists;
+- open a second browser profile, join, and confirm a change in one appears in the other within a second;
+- leave a tab idle 30 minutes and confirm the socket survives — this exercises the 25-second heartbeat.
 
 ---
 

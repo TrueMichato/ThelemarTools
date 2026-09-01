@@ -20,3 +20,8 @@ services:
     environment:
       HUB_PUBLIC_DOMAIN: ${HUB_PUBLIC_DOMAIN:?set HUB_PUBLIC_DOMAIN in .env.hub}
       HUB_ACME_EMAIL: ${HUB_ACME_EMAIL:?set HUB_ACME_EMAIL in .env.hub}
+
+  backup:
+    user: ${HUB_BACKUP_UID:-1000}:${HUB_BACKUP_GID:-1000}
+    volumes: !override
+      - ${HUB_BACKUP_DIR:-./.hub-backups}:/backups

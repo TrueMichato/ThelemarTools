@@ -32,6 +32,7 @@ sw-injector.js
 .env.hub
 .env
 .env.*
+.hub-backups/
 **/.env
 **/.env.*
 !.env*.example

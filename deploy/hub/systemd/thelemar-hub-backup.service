@@ -1,0 +1,13 @@
+[Unit]
+Description=Create an encrypted Campaign Hub backup
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+RuntimeDirectory=thelemar-hub
+WorkingDirectory=/home/ubuntu/ThelemarTools
+ExecStart=/usr/bin/flock -n /run/thelemar-hub/backup.lock /usr/bin/docker compose --env-file .env.hub -f compose.hub.yml -f compose.hub.public.yml --profile backup run --rm backup
+TimeoutStartSec=2h
+Nice=10

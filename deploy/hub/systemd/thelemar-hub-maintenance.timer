@@ -1,0 +1,11 @@
+[Unit]
+Description=Run daily Campaign Hub maintenance
+
+[Timer]
+OnCalendar=*-*-* 01:15:00 UTC
+RandomizedDelaySec=15m
+Persistent=true
+Unit=thelemar-hub-maintenance.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Check Campaign Hub health every five minutes
+
+[Timer]
+OnBootSec=5m
+OnUnitActiveSec=5m
+AccuracySec=30s
+Persistent=true
+Unit=thelemar-hub-monitor.service
+
+[Install]
+WantedBy=timers.target
