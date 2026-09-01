@@ -1,6 +1,6 @@
 # Runbook: Oracle host operations for the Campaign Hub
 
-> **Status:** Ready to install and drill on the reused Oracle host
+> **Status:** Scheduled operations and deliberate release automation implemented; live drills pending
 > **Owner:** Campaign Hub operator
 
 This procedure adds scheduled maintenance, encrypted backups, off-machine copies, and five-minute health
@@ -36,9 +36,17 @@ HUB_MONITOR_HEARTBEAT_URL=https://your-monitor.example/success-id
 HUB_MONITOR_FAILURE_URL=https://your-monitor.example/failure-id
 ```
 
-The public Compose overlay runs the backup container as UID/GID 1000, matching the standard Oracle `ubuntu`
-account. If that account has a different result from `id -u` or `id -g`, set `HUB_BACKUP_UID` and
-`HUB_BACKUP_GID` in `.env.hub`.
+This Oracle host's `ubuntu` account is UID/GID 1001. Keep the host path explicit so a clean release checkout
+cannot redirect backups:
+
+```dotenv
+HUB_BACKUP_DIR=/home/ubuntu/ThelemarTools/.hub-backups
+HUB_BACKUP_UID=1001
+HUB_BACKUP_GID=1001
+```
+
+Confirm with `id -u`, `id -g`, and `stat -c '%u:%g %a' .hub-backups`. The release command refuses a mismatch.
+Its `--repair-backup-ids` flag changes only those two `.env.hub` keys; it never changes filesystem ownership.
 
 The success URL creates an external dead-man's-switch signal. The failure URL receives an empty POST when a
 check fails. Do not put secrets or campaign identifiers in either URL's label.
@@ -184,9 +192,31 @@ docker compose --env-file .env.hub \
 curl -fsS "https://${HUB_PUBLIC_DOMAIN}/api/ready"
 ```
 
-Before each release, also record the git tag/SHA, BFF/static image IDs, migration status, `.env.hub` SHA-256
-(hash only), latest backup SHA-256, tested rollback tag, and the browser/unit gate results. Never copy
-`.env.hub` contents into the evidence.
+Before each release, run:
+
+```bash
+cd /home/ubuntu/ThelemarTools
+./deploy/hub/release.sh --dry-run hub-staging-YYYY-MM-DD
+./deploy/hub/release.sh hub-staging-YYYY-MM-DD
+```
+
+The command records the immutable tag object/full SHA, previous tag/SHA, BFF/static image IDs and repo digests,
+Compose/Caddy/migration-policy hash, migration status/plan, durable `schema_mutated` state and exact
+planned/applied migration versions, `.env.hub` SHA-256 (never contents), verified encrypted backup
+filename/hash/size, readiness, TLS/WebSocket/metrics, static assets, backup age, Foundry port, timestamps, and
+rollback result. Evidence is redacted and mode 0600 under
+`~/.local/state/thelemar-hub/releases/`.
+
+The command never invokes Compose `down`, never recreates PostgreSQL, and never controls Foundry or port 30000.
+An application rollback re-tags the captured BFF/static images and keeps the current database. Incompatible
+or contract migrations are normally rejected before apply. Stopping only the Hub BFF and printing
+isolated-restore instructions is a defense-in-depth response to unexpected post-cutover compatibility drift;
+no automatic path reverses a migration or restores over production.
+
+After this automation merges, the operator must still run a real-host induced-failure drill: lock contention,
+failed backup before cutover, and a forced post-cutover health failure with compatible application rollback.
+Record the evidence paths, service/image state, database migration state, and uninterrupted Foundry listener.
+Do not claim the release gate complete from local simulations.
 
 ## Stop conditions
 

@@ -1,6 +1,6 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-08-31
+> **Last updated:** 2026-09-01
 > **Owner:** Campaign Hub maintainers
 
 ## Status
@@ -13,6 +13,13 @@ intentionally disabled.
 Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecycle administration, Phase 6C
 migration management, Phase 6D portable deployment, Phase 6E operations, and Phase 6F CI/real-stack
 integration are complete.
+
+The Oracle deployment now has deliberate one-command release automation in `deploy/hub/release.sh`. It locks
+out concurrent operators, verifies an immutable annotated tag and clean exact checkout, records rollback
+identity, creates and reads an encrypted pre-release backup, enforces expand/deploy/contract migration
+compatibility, applies the checked-in Compose overlays, performs complete public/runtime/static/backup checks,
+and emits redacted machine/human evidence. It can automatically roll back only compatible application images;
+it never reverses migrations, restores a database, changes filesystem ownership, or touches Foundry.
 
 - Lifecycle includes invite list/revoke, owner role changes, owner/co-DM member removal, voluntary leave,
   session/device revocation, immediate socket closure, workspace archive/restore, character detachment,
@@ -109,6 +116,9 @@ off-machine backup/restore evidence, monitoring, and the Phase 6H game day remai
   for protocol skew, and become read-only immediately after session, membership, or permission loss.
 - Oracle-ready systemd timers for maintenance, encrypted backup, and five-minute host checks; a host bind mount
   for encrypted archives; and a non-destructive off-machine pull script.
+- Operator-triggered Oracle release automation with process locking, UID/GID 1001 backup mapping, immutable
+  tag/SHA drift protection, verified pre-release backup, migration policy, compatible app-only rollback,
+  protected endpoint/static asset checks, and redacted evidence.
 
 ## Final verification
 
@@ -171,10 +181,13 @@ off-machine backup/restore evidence, monitoring, and the Phase 6H game day remai
 
 ## Deployment gates
 
-1. Deploy the validated staging-baseline repair and repeat the icon, service-worker, Party Tracker, API, and
-   WebSocket smoke checks on Oracle.
-2. Install and prove the checked-in scheduled encrypted backup, off-machine copy, isolated restore, monitoring,
-   and alerting procedures on Oracle.
-3. Rehearse rollback and recovery against the exact player-test release.
-4. Complete a private-table staging session with real GitHub OAuth and multiple physical devices before
+1. Merge and tag the release automation, then run its Oracle dry run and deliberate release against the next
+   verified `hub-*` tag.
+2. Execute the real-host induced-failure gate: lock contention, pre-cutover backup failure, compatible
+   post-cutover health failure/application rollback, evidence inspection, and uninterrupted Foundry port 30000.
+3. Prove the checked-in scheduled encrypted backup, off-machine copy, isolated restore, monitoring, and
+   alerting procedures on Oracle.
+4. Rehearse the documented schema-incompatible isolated-restore/break-glass decision path without restoring
+   over production.
+5. Complete a private-table staging session with real GitHub OAuth and multiple physical devices before
    inviting the V1 group.
