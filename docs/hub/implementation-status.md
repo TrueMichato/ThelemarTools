@@ -22,6 +22,12 @@ compatibility, applies the checked-in Compose overlays, performs complete public
 and emits redacted machine/human evidence. It can automatically roll back only compatible application images;
 it never reverses migrations, restores a database, changes filesystem ownership, or touches Foundry.
 
+V2-T0 release-automation implementation is **shipped** by
+[PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219), and V2-T1 legible activity history is
+**shipped** by [PR #218](https://github.com/TrueMichato/ThelemarTools/pull/218). The release script's live
+Oracle dry run, deliberate release, and induced-failure drills are external host-operations evidence, not
+unfinished T0 implementation; they remain blocked under the first V1 gate below.
+
 - Lifecycle includes invite list/revoke, owner role changes, owner/co-DM member removal, voluntary leave,
   session/device revocation, immediate socket closure, workspace archive/restore, character detachment,
   escrow/action cleanup, and seven-day deletion request/cancel/purge with blocked-id reporting.

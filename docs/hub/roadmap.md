@@ -13,13 +13,14 @@ gates. [Implementation status](implementation-status.md) records what exists, wh
 
 | Label | Meaning |
 |---|---|
-| **shipped** | Implemented, deployed where required, and supported by recorded evidence |
+| **shipped** | Implemented, merged, and supported by the train's recorded code/contract evidence |
 | **active** | Approved work currently required for the next release decision |
 | **next** | Approved and sequenced, but not started or not yet enabled |
 | **deferred** | Explicitly outside the approved release trains; requires a new decision before implementation |
 
-Labels apply to capabilities, not merely merged code. A capability is not **shipped** until its acceptance
-criteria pass in the target environment and its release/campaign gate is intentionally enabled.
+Labels apply to the scope named by each row or heading. A train may mark its implementation **shipped** while
+an explicitly separate target-environment rollout gate remains **active**; that distinction must be stated
+rather than inferring deployment or enablement from merged code.
 
 ## Current baseline
 
@@ -27,10 +28,12 @@ criteria pass in the target environment and its release/campaign gate is intenti
 |---|---|---|
 | **shipped** | Private invite-only Hub implementation through Phase 6F | Server, browser, Character Sheet, DM Screen, lifecycle, migration, operations, CI, and real-stack evidence are summarized in [implementation status](implementation-status.md) |
 | **shipped** | Phase 6G Oracle deployment | Release `hub-staging-2026-09-01` at `8f181712` is deployed to the private Oracle Always Free environment; HTTPS, GitHub OAuth, PostgreSQL, static, BFF, API, and WebSocket smoke checks pass |
-| **active** | V1 host-operations proof | Prove scheduled timers, encrypted off-machine backup, isolated restore, and exact-release rollback |
-| **active** | V1 physical game day | Complete the one-DM/two-player session on physical devices and record the go/no-go evidence |
-| **active** | V2 operational/product foundations | V2-T0 and T1 are in implementation; V2-T2 is active architecture/contract work |
-| **active** | V2 decision-record precursors | ADR work for V2-T5 device context, V2-T6 rules policy, and V2-T8 identity providers is active |
+| **shipped** | V2-T0 release-automation implementation | [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219) merged the deliberate tagged Oracle release path; its real-host drills remain blocked under V1-G1 |
+| **shipped** | V2-T1 legible activity history | [PR #218](https://github.com/TrueMichato/ThelemarTools/pull/218) merged semantic titles, privacy-safe display-name snapshots, historical fallback, and lifecycle coverage |
+| **shipped** | V2 decision-record precursors | ADRs 0011-0015 define the approved projection, semantic-operation, device-context, identity-provider, and rules-policy contracts; implementation remains gated per train |
+| **active** | V1 external Oracle host-operations proof | Blocked pending real-host release/induced-failure evidence, timers, encrypted off-machine backup, isolated restore, and rollback proof |
+| **active** | V1 physical game day | Blocked on V1-G1; complete the one-DM/two-player session on physical devices and record the go/no-go evidence |
+| **active** | V2-T2 projection/privacy foundation | Architecture/contract work remains active after ADR 0011; feature implementation and enablement are not shipped |
 | **next** | V2 feature enablement | Enable each accepted train independently after its architecture, capability, and operational gates pass |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
 
@@ -87,9 +90,10 @@ Each train below is independently releasable once its listed architecture depend
 pass. V2 engineering does not wait for V1-G1, V1-G2, or the V1 go/no-go. A train must not wait for unrelated
 V2 work, and merging a train does not silently enable it.
 
-V2-T0 is the first operational priority and must ship before any new V2 product capability is enabled on
-Oracle. That enablement gate does not block T1/T2 implementation, ADR work, or independently safe feature code
-from being reviewed and merged behind disabled capability gates.
+V2-T0's implementation is shipped and remains the first operational foundation. Its live Oracle
+dry-run/release and induced-failure evidence are part of V1-G1 and must pass before any new V2 product
+capability is enabled on Oracle. That enablement gate does not block T2 implementation or independently safe
+feature code from being reviewed and merged behind disabled capability gates.
 
 Every train must:
 
@@ -103,22 +107,25 @@ Every train must:
   cannot be preserved;
 - update implementation status, traceability, risks, tests, runbooks, and this roadmap in the same release.
 
-The approved decision-record sequence is coordinated as follows. The numbers are reserved references until the
-corresponding ADR files land; add links when they do.
+The approved decision-record sequence has landed:
 
 | ADR | Decision | Primary trains |
 |---|---|---|
-| ADR 0011 | Authorization-scoped projections and privacy | V2-T2, T7 |
-| ADR 0012 | Semantic operations and reconciliation | V2-T3, T4, T7 |
-| ADR 0013 | Device-scoped campaign context | V2-T5 |
-| ADR 0014 | Identity-provider registry | V2-T8 |
-| ADR 0015 | Campaign rules policy | V2-T6 |
+| [ADR 0011](adr/0011-authorization-scoped-character-projections.md) | Authorization-scoped projections and privacy | V2-T2, T7 |
+| [ADR 0012](adr/0012-idempotent-semantic-character-operations.md) | Semantic operations and reconciliation | V2-T3, T4, T7 |
+| [ADR 0013](adr/0013-device-scoped-active-campaign-context.md) | Device-scoped campaign context | V2-T5 |
+| [ADR 0014](adr/0014-multi-provider-identity.md) | Identity-provider registry | V2-T8 |
+| [ADR 0015](adr/0015-campaign-rules-policy.md) | Campaign rules policy | V2-T6 |
 
 ## Approved V2 release trains
 
-### V2-T0 — release automation (**active — implementation**)
+### V2-T0 — release automation (**shipped — implementation; external proof active**)
 
 Purpose: make the exact source-to-Oracle promotion and rollback path repeatable before increasing product scope.
+
+Implementation shipped in [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219). The live Oracle
+dry run, deliberate release, and induced-failure evidence remain blocked under V1-G1; this heading does not
+claim those operator drills have passed.
 
 Deliver:
 
@@ -145,9 +152,12 @@ Acceptance:
   supported application version has stopped using the old shape;
 - secrets are neither printed nor embedded in artifacts, commands, logs, or evidence.
 
-### V2-T1 — legible activity log (**active — implementation**)
+### V2-T1 — legible activity log (**shipped**)
 
 Purpose: turn durable events into a player- and DM-readable campaign history.
+
+[PR #218](https://github.com/TrueMichato/ThelemarTools/pull/218) shipped the semantic presentation,
+display-name snapshot, historical fallback, lifecycle, and production-packaging implementation.
 
 Deliver:
 
@@ -258,7 +268,7 @@ Acceptance:
 - carry rules identify their campaign policy/edition and warnings explain unsupported/custom cases;
 - permission, contention, near-limit, reconnect, rollback, and mobile-accessibility tests pass.
 
-### V2-T5 — whole-site campaign context per browser/device (**active precursor; next enablement**)
+### V2-T5 — whole-site campaign context per browser/device (**contract shipped; next enablement**)
 
 Dependency: V2-T2 for privacy-safe context summaries.
 
@@ -275,7 +285,7 @@ Acceptance:
 - signed-out/local-only pages remain unchanged and never inherit stale campaign state;
 - tabs converge safely within a browser profile, while explicit campaign deep links remain deterministic.
 
-### V2-T6 — enforced campaign rules/source/species/edition policy (**active precursor; next enablement**)
+### V2-T6 — enforced campaign rules/source/species/edition policy (**contract shipped; next enablement**)
 
 Dependencies: V2-T2 and V2-T5.
 
@@ -319,7 +329,7 @@ Acceptance:
 - source-cost and target failures remain privacy-preserving and non-enumerating;
 - disabled downstream capabilities cannot be targeted through API or stale UI.
 
-### V2-T8 — Discord and Google identity-provider framework (**active precursor; next enablement**)
+### V2-T8 — Discord and Google identity-provider framework (**contract shipped; next enablement**)
 
 Deliver:
 
@@ -371,12 +381,12 @@ flowchart LR
     G2 --> GO[Private-pilot expansion decision]
   end
   subgraph Engineering[V2 engineering in parallel]
-    T0[V2-T0 release automation]
-    T1[V2-T1 activity log]
-    T2[V2-T2 projection/privacy]
-    P13[ADR 0013 precursor] --> T5[V2-T5 whole-site context]
-    P14[ADR 0014 precursor] --> T8[V2-T8 provider framework]
-    P15[ADR 0015 precursor] --> T6[V2-T6 policy enforcement]
+    T0[V2-T0 implementation shipped]
+    T1[V2-T1 shipped]
+    T2[V2-T2 active]
+    P13[ADR 0013 shipped] --> T5[V2-T5 whole-site context]
+    P14[ADR 0014 shipped] --> T8[V2-T8 provider framework]
+    P15[ADR 0015 shipped] --> T6[V2-T6 policy enforcement]
   end
   T2 --> T3[V2-T3 live effects]
   T2 --> T4[V2-T4 inventory/carry/awards]
@@ -399,13 +409,15 @@ flowchart LR
   T7 -. accepted .-> ENABLE
   T8 -. accepted .-> ENABLE
   T9 -. accepted .-> ENABLE
+  G1 -. live operational proof .-> ENABLE
 ```
 
 V1-G1/G2 intentionally have no dependency edge into V2 engineering. They gate private-pilot expansion, not
-implementation or merge. V2-T0, T1, T2, and the T5/T6/T8 ADR precursors are active in parallel. T0 is the first
-operational priority and gates enabling new V2 product scope on Oracle. V2-T3, T4, T5, and T7 can be engineered
-independently after T2's applicable contracts land; T6 requires both T2 and T5. T9's critique can start earlier,
-but the final redesign follows stable product contracts to avoid designing around temporary screens.
+implementation or merge. V2-T0 implementation and V2-T1 are shipped; T2 remains active; and the T5/T6/T8
+decision-record precursors are shipped contracts. T0 plus V1-G1's live operational proof gate enabling new V2
+product scope on Oracle. V2-T3, T4, T5, and T7 can be engineered independently after T2's applicable contracts
+land; T6 requires both T2 and T5. T9's critique can start earlier, but the final redesign follows stable product
+contracts to avoid designing around temporary screens.
 
 ## Deferred horizons A-F
 

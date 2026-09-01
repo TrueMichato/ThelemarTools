@@ -72,9 +72,11 @@ npm run test:hub:e2e:stack
 
 ## Remaining V1 target-environment coverage
 
-The remaining V1 gates require physical devices, scheduled host-operations evidence, encrypted off-machine
-backup, isolated restore, and rollback tied to release `hub-staging-2026-09-01` at `8f181712`
-version. Synthetic CI never substitutes for these gates.
+The shipped V2-T0 release-automation implementation and V2-T1 activity history do not clear external Oracle
+or physical-table gates. V1-G1 still requires the real-host dry run, deliberate release, induced lock/backup/
+compatible-rollback failures, redacted evidence, uninterrupted Foundry, scheduled host operations, encrypted
+off-machine backup, isolated restore, and break-glass decision rehearsal. V1-G2 remains blocked on V1-G1 and
+requires the physical one-DM/two-player game day. Synthetic CI never substitutes for these gates.
 
 ## Evidence record
 
@@ -142,6 +144,15 @@ Evidence containing secrets or user data belongs in the approved private operati
   Large text/source files are scanned; only known binary formats are explicitly counted as skipped.
 
 See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth boundaries, and artifact semantics.
+
+## Shipped V2 foundation evidence
+
+- V2-T0 release automation shipped in [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219):
+  25 focused release/deployment/documentation contracts, shell/Bash/Python validation, and Compose rendering
+  passed. The PR explicitly leaves the live Oracle induced-failure drill to V1-G1.
+- V2-T1 activity history shipped in [PR #218](https://github.com/TrueMichato/ThelemarTools/pull/218):
+  75 targeted presentation/deployment/Character Sheet roll-history tests, the full Hub suite, disposable
+  PostgreSQL lifecycle integration, JavaScript lint, style lint, and all four Hub CI jobs passed.
 
 ## Phase 6G preparation evidence
 

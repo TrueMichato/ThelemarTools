@@ -8,8 +8,9 @@
 
 `.github/workflows/hub.yml` runs on pull requests and manual dispatch. Every third-party action is pinned to
 a full reviewed commit SHA. Deployment remains intentionally absent from this workflow. Phase 6G deployed a
-verified git tag to the ARM Oracle host under ADR 0008/0010; V2-T0 in the [living roadmap](roadmap.md) adds the
-protected release-automation path. Expansion stays disabled until the V1 go/no-go.
+verified git tag to the ARM Oracle host under ADR 0008/0010. V2-T0 protected release automation shipped in
+[PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219); only the V1-G1 live Oracle release and
+induced-failure proof remains. Expansion stays disabled until the V1 go/no-go.
 
 | Job | Gates | Failure owner |
 |---|---|---|
