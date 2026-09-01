@@ -1,0 +1,9 @@
+{
+	"name": "thelemartools-static-build",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"esbuild": "0.27.7",
+		"workbox-build": "7.4.1"
+	}
+}

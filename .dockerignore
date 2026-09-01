@@ -5,8 +5,20 @@
 !manifest.webmanifest
 !sw.js
 !sw-injector.js
+!sw-template.js
+!sw-injector-template.js
+
+!package.json
+!package-lock.json
+!node
+!deploy
+!deploy/hub
+!deploy/hub/static-build
+!deploy/hub/static-build/package.json
+!deploy/hub/static-build/package-lock.json
 
 !*.html
+!*.ico
 !*.png
 !*.svg
 !*.xml

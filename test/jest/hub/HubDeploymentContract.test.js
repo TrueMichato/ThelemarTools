@@ -7,7 +7,10 @@ describe("Hub portable deployment contract", () => {
 	const dockerignore = read("server/Dockerfile.dockerignore");
 	const compose = read("compose.hub.yml");
 	const caddy = read("deploy/hub/Caddyfile");
+	const publicCaddy = read("deploy/hub/Caddyfile.public");
 	const staticDockerfile = read("deploy/hub/static.Dockerfile");
+	const staticDockerignore = read(".dockerignore");
+	const serviceWorkerBuild = read("node/build-sw.mjs");
 	const opsDockerfile = read("server/ops.Dockerfile");
 	const opsDockerignore = read("server/ops.Dockerfile.dockerignore");
 	const roles = read("deploy/hub/init-roles.sh");
@@ -51,12 +54,32 @@ describe("Hub portable deployment contract", () => {
 		expect(caddy).toContain("reverse_proxy bff:5052");
 		expect(caddy).toContain("reverse_proxy static:80");
 		expect(caddy).toContain("tls internal");
+		for (const config of [caddy, publicCaddy]) {
+			expect(config).toContain("header Cache-Control \"public, max-age=0, must-revalidate\"");
+			expect(config.indexOf("header Cache-Control")).toBeGreaterThan(config.indexOf("handle {"));
+		}
 	});
 
-	it("serves the existing static build context from a lightweight dedicated image", () => {
+	it("generates production service workers inside the static image build", () => {
+		expect(staticDockerfile).toContain("FROM node:24.7.0-bookworm-slim AS service-worker");
+		expect(staticDockerfile).toContain("deploy/hub/static-build/package-lock.json");
+		expect(staticDockerfile).toContain("npm ci --ignore-scripts");
+		expect(staticDockerfile).toContain("node node/build-sw.mjs prod");
+		expect(staticDockerfile).toContain("rm -rf deploy node node_modules");
 		expect(staticDockerfile).toContain("FROM caddy:2.8.4-alpine");
+		expect(staticDockerfile).toContain("COPY --from=service-worker /site /srv");
 		expect(staticDockerfile).toContain(`"file-server"`);
 		expect(compose).toContain("dockerfile: deploy/hub/static.Dockerfile");
+		for (const required of [
+			"!package.json",
+			"!package-lock.json",
+			"!node",
+			"!sw-template.js",
+			"!sw-injector-template.js",
+			"!*.ico",
+			"!deploy/hub/static-build/package-lock.json",
+		]) expect(staticDockerignore).toContain(required);
+		expect(serviceWorkerBuild).toContain(`"*.ico"`);
 	});
 
 	it("creates runtime and backup identities without embedding passwords", () => {

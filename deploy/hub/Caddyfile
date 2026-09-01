@@ -15,6 +15,7 @@ https://localhost:8443 {
 	}
 
 	handle {
+		header Cache-Control "public, max-age=0, must-revalidate"
 		reverse_proxy static:80
 	}
 }

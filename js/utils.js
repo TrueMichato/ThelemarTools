@@ -4942,7 +4942,7 @@ globalThis.DataUtil = class {
 							new this._OptionalJsonResponse({
 								url,
 								status: request.status,
-								error: `Error during JSON request: ${getRequestDetails()}`,
+								error: `Error during JSON request for "${url}": ${getRequestDetails()}`,
 							}),
 						);
 					}
