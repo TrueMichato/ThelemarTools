@@ -4,8 +4,9 @@ The Campaign Hub is an optional online layer over the existing local-first 5etoo
 Signed-out character sheets, homebrew, and DM screens remain supported and do not use hub storage.
 
 > **Implementation:** Private invite-only V1 plus player-test readiness through role-aware campaign workflows
-> **Deployment:** Private Oracle staging is live; the one-DM/two-player pilot is not yet approved
-> **Last verified:** 2026-08-31
+> **Deployment:** Private Oracle staging is live; deliberate tagged release automation is implemented but its
+> real-host induced-failure drill and the one-DM/two-player pilot remain gated
+> **Last verified:** 2026-09-01
 > **Owner:** Campaign Hub maintainers
 
 ## Start here
@@ -20,6 +21,7 @@ Signed-out character sheets, homebrew, and DM screens remain supported and do no
 | Data, ownership, lifecycle | [Domain model](domain-model.md) and [data lifecycle](data-lifecycle.md) |
 | Schema evolution and DB roles | [Migration guide](migrations.md) |
 | OCI/Compose and edge contract | [Deployment guide](deployment.md) |
+| Tagged Oracle release | [Deploy and promote runbook](runbooks/deploy-promote.md) |
 | HTTP/error/auth contract | [API reference](api-reference.md) |
 | WebSocket/event contract | [Realtime protocol](realtime-protocol.md) and [event catalog](event-catalog.md) |
 | Who may do what | [Permission matrix](permission-matrix.md) |

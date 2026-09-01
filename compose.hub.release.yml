@@ -1,0 +1,14 @@
+# Release-only overlay. deploy/hub/release.sh sets these to immutable image IDs captured
+# immediately after building the verified tag.
+services:
+  migrate:
+    image: ${HUB_RELEASE_MIGRATE_IMAGE:?set by deploy/hub/release.sh}
+
+  grant-roles:
+    image: ${HUB_RELEASE_GRANT_ROLES_IMAGE:?set by deploy/hub/release.sh}
+
+  bff:
+    image: ${HUB_RELEASE_BFF_IMAGE:?set by deploy/hub/release.sh}
+
+  static:
+    image: ${HUB_RELEASE_STATIC_IMAGE:?set by deploy/hub/release.sh}

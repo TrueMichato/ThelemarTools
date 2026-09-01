@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "migrations": {
+    "0001": {
+      "phase": "expand",
+      "previousAppCompatible": false,
+      "notes": "Initial schema; there is no previous application on a fresh database."
+    },
+    "0002": {
+      "phase": "expand",
+      "previousAppCompatible": true,
+      "notes": "Adds lifecycle state and deletion-safe constraints without removing the V1 schema."
+    },
+    "0003": {
+      "phase": "expand",
+      "previousAppCompatible": true,
+      "notes": "Adds operational evidence read by newer code and ignored by the previous application."
+    }
+  }
+}
