@@ -224,4 +224,4 @@ compatible. Restore preserves source identity/index.
 - object storage path for brew `object_key`;
 - provider scheduling/alerting for the implemented maintenance/backup commands.
 
-These gaps are tracked in the private-V1 roadmap and must not be inferred from reserved schema fields.
+These gaps are tracked in the [living roadmap](roadmap.md) and must not be inferred from reserved schema fields.

@@ -1,6 +1,6 @@
 # Runbook: secret rotation
 
-> **Status:** Portable procedure; provider commands pending Phase 6G
+> **Status:** Portable procedure applicable to Oracle staging
 > **Owner:** Campaign Hub operator
 
 ## General

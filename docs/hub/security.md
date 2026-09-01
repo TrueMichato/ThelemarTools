@@ -63,6 +63,7 @@ sandboxed renderer, malicious fixture corpus, and another security review.
 - Direct database access is restricted to the BFF role; browser database SDKs are not used.
 - A formal public-service privacy/ToS review remains a gate before semi-public onboarding.
 - Core renderer behavior prevents a strict no-inline-script CSP from being the primary content boundary.
-- Provider-native alerting/PITR and production restore evidence remain Phase 6G launch work.
+- Oracle uses portable encrypted backups rather than provider-native PITR. Scheduled operations, off-machine
+  backup, isolated restore, and exact-release rollback evidence remain the V1 host-operations gate.
 - Exactly one BFF replica is supported; private V1 accepts application restart/deploy downtime until shared
   realtime fanout exists.

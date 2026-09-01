@@ -1,7 +1,7 @@
 # Campaign Hub traceability matrix
 
 > **Status:** Active; expand with every continuation change
-> **Last verified:** 2026-08-31
+> **Last verified:** 2026-09-01
 > **Owner:** Campaign Hub maintainers
 
 | Requirement/invariant | Decision/reference | Implementation | Primary tests/evidence | Operational reference |
@@ -18,14 +18,14 @@
 | Transfers cannot duplicate/lose assets | `domain-model.md` | `hub-actions.js`, transactional store locks/escrow | Hub actions and Phase 4 domain | future stuck-transfer runbook |
 | Service worker never caches auth/API | `security.md` | Hub route policy + `sw-template.js` | route-policy/service-worker build | stale-client staging scenario |
 | Backup is portable and atomic | `operations.md` | backup/restore/pg-env scripts | local PostgreSQL backup/restore drill | backup/restore runbook |
-| Managed recovery meets RPO/RTO | continuation decision | not implemented | staging restore evidence required | Phase 6E/G/H |
+| Oracle recovery meets RPO/RTO | ADR 0006; `roadmap.md` V1-G1 | encrypted backup/restore and scheduled-operation tooling implemented; off-machine/isolated proof active | exact-release staging restore/rollback evidence required | backup/restore and rollback runbooks |
 | Member/session/account lifecycle | ADR 0007; data lifecycle | invite/member/session/deletion APIs, migration 0002, socket closure, purge command | lifecycle administration/API/migration/session tests and PostgreSQL drill | member removal, account deletion, session compromise runbooks |
 | Safe schema evolution | ADR 0005; `migrations.md` | checksummed/advisory-locked runner, baseline fingerprint, migration-aware readiness, role grants | migration runner/contract/role tests and PostgreSQL fresh/baseline drills | migration guide; failure runbook pending |
 | Reproducible deployment | ADR 0004; `deployment.md` | BFF/static images, Compose DB/migrate/grants/BFF/static/edge, live/ready probes | deployment contract, image build/inspect, Compose config/start/routing/restart probes | deployment guide |
 | Technical retention and recovery signals | ADR 0006; `observability.md` | migration 0003, maintenance lock/cleanup, metrics, encrypted backup/restore, evidence role | maintenance/observability/encryption tests and real cleanup/backup/restore drills | operations and incident runbooks |
 | Real-stack multi-context behavior | ADR 0008; `ci-and-provenance.md` | test-only BFF image, disposable Compose override/orchestrator, Hub page object and Playwright journeys | lifecycle/load scenarios, BFF/DB restart probes | CI artifacts; Phase 6H game day |
-| Reproducible CI and supply-chain evidence | ADR 0008; `ci-and-provenance.md` | pinned workflow, secret scan, exact-image export, SBOMs, provenance writer, image scan | `HubCiContract`, local SBOM/image build, GitHub CI run required before staging | Phase 6G digest-promotion record |
-| Staging/launch provider | ADR 0010 (supersedes 0009); `provider-comparison.md` | `compose.hub.public.yml`, `deploy/hub/Caddyfile.public`; private Hub stack deployed on the existing Oracle A1 host under the C-ALT deviation | Compose overlay validation, successful live OAuth/PostgreSQL/API/WebSocket smoke, and exact-image real-stack browser gate; physical-device rehearsal remains | `runbooks/oracle-provisioning.md`; `runbooks/oracle-operations.md` |
+| Reproducible CI and supply-chain evidence | ADR 0008; `ci-and-provenance.md` | pinned workflow, secret scan, exact-image export, SBOMs, provenance writer, image scan; Oracle release from verified tag | `HubCiContract`, local SBOM/image build, GitHub CI, deployed tag `hub-staging-2026-09-01` at `8f181712` | V2-T0 release automation |
+| Staging/launch provider | ADR 0010 (supersedes 0009); `provider-comparison.md` | `compose.hub.public.yml`, `deploy/hub/Caddyfile.public`; release `hub-staging-2026-09-01` at `8f181712` deployed on the existing Oracle A1 host under the C-ALT deviation | Compose overlay validation, successful live OAuth/PostgreSQL/API/WebSocket smoke, and exact-image real-stack browser gate; physical game day remains | `runbooks/oracle-provisioning.md`; `runbooks/oracle-operations.md` |
 | One BFF replica in private V1 | `provider-comparison.md`; R-15 | single-VM Compose stack is inherently one replica | CI reconnect/replay and Phase 6G deploy-restart drill | shared-fanout ADR required before scale-out |
 | Provider client-IP authenticity | ADR 0009 (superseded); R-08 | `server/src/client-ip.js` retained but inactive on Oracle; Caddy is sole ingress and `HUB_TRUST_PROXY` names its fixed private address | `HubClientIp`, `HubWebSocket`; Phase 6G client-IP drill confirms real addresses reach rate limits | re-enable `HUB_CLIENT_IP_HEADER` only if a managed provider is adopted |
 | Quiet WebSocket survival | ADR 0010; `realtime-protocol.md` | 25-second server ping/pong heartbeat in `HubRealtime` | `HubRealtime`; managed-ingress idle drill pending | reconnect/resync fallback |

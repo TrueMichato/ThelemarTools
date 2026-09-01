@@ -1,11 +1,13 @@
-# Campaign Hub post-V1 roadmap
+# Campaign Hub post-V1 roadmap (historical snapshot)
 
-> **Status:** Options under consideration; not committed private-launch scope
-> **Last reviewed:** 2026-08-24
+> **Status:** Historical snapshot; superseded by the [living roadmap](roadmap.md)
+> **Last reviewed as active:** 2026-08-24
 > **Owner:** Campaign Hub maintainers
 
-Private V1 launch work is defined separately. The following horizons require discovery, threat modeling,
-data-model review, an ADR, and explicit approval before implementation.
+This file preserves the original A-F horizon record. The [living roadmap](roadmap.md) is authoritative, carries
+every horizon forward with an explicit **deferred** label, and separates them from the approved V2 release
+trains. The following original horizons require discovery, threat modeling, data-model review, an ADR, and
+explicit approval before implementation.
 
 ## A. Private-campaign usability
 

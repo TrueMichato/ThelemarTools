@@ -63,8 +63,8 @@ After restore:
 4. Record the backup timestamp, restore duration, checks, and operator.
 5. Destroy the drill database.
 
-Private V1 cannot be considered launch-ready until this drill is executed against the selected managed
-PostgreSQL provider and meets the documented RPO/RTO.
+Private V1 cannot be considered launch-ready until this drill is executed against the deployed Oracle
+PostgreSQL stack and meets the documented RPO/RTO.
 
 ## Retention and quotas
 
@@ -75,7 +75,8 @@ PostgreSQL provider and meets the documented RPO/RTO.
 - Domain-event replay and immutable audit retention remain separate policies; do not delete audit rows as
   part of receipt cleanup.
 
-Maintenance is a singleton advisory-locked bounded one-shot. Provider scheduling is Phase 6G:
+Maintenance is a singleton advisory-locked bounded one-shot. Oracle timer units are checked in; installation,
+enablement, and scheduled execution evidence remain part of V1-G1:
 
 ```bash
 DATABASE_URL=... HUB_MAINTENANCE_BATCH_SIZE=1000 npm run hub:maintenance
@@ -122,10 +123,9 @@ use the schema owner. The backup command should use the read-only backup role wh
 
 ## Current launch gaps
 
-- install and enable the checked-in Oracle maintenance, backup, and monitor timers;
-- schedule the off-machine pull on a second trusted computer;
-- complete and record the first Oracle isolated restore drill;
-- connect the heartbeat/failure URLs or an equivalent alert receiver;
-- rehearse rollback against the exact player-test release.
+- prove the checked-in Oracle maintenance, backup, and monitor timers under scheduled execution;
+- complete an encrypted off-machine pull from a second trusted computer;
+- complete and record an isolated restore and rollback against release `hub-staging-2026-09-01` at `8f181712`;
+- complete the physical one-DM/two-player game day after the host-operations proof passes.
 
-See [private-v1-roadmap.md](private-v1-roadmap.md) and [runbooks](runbooks/README.md).
+See the [living roadmap](roadmap.md) and [runbooks](runbooks/README.md).

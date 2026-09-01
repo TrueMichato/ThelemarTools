@@ -5,14 +5,15 @@
 
 ## Status
 
-Private invite-only V1 is running on a reused Oracle Always Free ARM instance. The same-origin HTTPS,
-GitHub OAuth, PostgreSQL, static site, BFF, and WebSocket stack is available for private staging, but the
-controlled one-DM/two-player test remains gated on the readiness work below. Semi-public onboarding remains
-intentionally disabled.
+Private invite-only V1 release `hub-staging-2026-09-01` at `8f181712` is deployed on a reused Oracle Always
+Free ARM instance. The same-origin HTTPS, GitHub OAuth, PostgreSQL, static site, BFF, API, and WebSocket smoke
+checks pass. Phase 6G deployment is complete. The controlled one-DM/two-player test remains gated on
+host-operations proof and the physical game day described in the [living roadmap](roadmap.md). Semi-public
+onboarding remains intentionally disabled.
 
 Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecycle administration, Phase 6C
-migration management, Phase 6D portable deployment, Phase 6E operations, and Phase 6F CI/real-stack
-integration are complete.
+migration management, Phase 6D portable deployment, Phase 6E operations, Phase 6F CI/real-stack integration,
+and Phase 6G Oracle deployment are complete.
 
 The Oracle deployment now has deliberate one-command release automation in `deploy/hub/release.sh`. It locks
 out concurrent operators, verifies an immutable annotated tag and clean exact checkout, records rollback
@@ -20,6 +21,12 @@ identity, creates and reads an encrypted pre-release backup, enforces expand/dep
 compatibility, applies the checked-in Compose overlays, performs complete public/runtime/static/backup checks,
 and emits redacted machine/human evidence. It can automatically roll back only compatible application images;
 it never reverses migrations, restores a database, changes filesystem ownership, or touches Foundry.
+
+V2-T0 release-automation implementation is **shipped** by
+[PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219), and V2-T1 legible activity history is
+**shipped** by [PR #218](https://github.com/TrueMichato/ThelemarTools/pull/218). The release script's live
+Oracle dry run, deliberate release, and induced-failure drills are external host-operations evidence, not
+unfinished T0 implementation; they remain blocked under the first V1 gate below.
 
 - Lifecycle includes invite list/revoke, owner role changes, owner/co-DM member removal, voluntary leave,
   session/device revocation, immediate socket closure, workspace archive/restore, character detachment,
@@ -39,8 +46,9 @@ Phase 6E portable operations/observability is implemented: migration 0003 operat
 bounded maintenance, protected Prometheus metrics, bounded route/request correlation, query/secret-safe JSON
 logs, SLO/alert catalog, AES-256-GCM backup/restore, dedicated backup/evidence roles, and executable deploy/
 rollback/outage/outbox/rotation/incident runbooks. Real cleanup, singleton lock, role boundaries, tamper
-failure, encrypted backup/restore, evidence-age metrics, and OAuth log sanitization were drilled. Managed
-PITR, scheduling, dashboards, and alerts remain Phase 6G.
+failure, encrypted backup/restore, evidence-age metrics, and OAuth log sanitization were drilled. Oracle
+scheduling, off-machine backup, isolated restore, and rollback proof remain the V1 host-operations gate;
+managed PITR is intentionally not part of the Oracle free-tier design.
 
 Phase 6F adds a pinned-action Hub pull-request workflow, deterministic install/lint/test/migration/supply-chain
 gates, exact-image export with Node/image SBOMs and provenance, production-excluded synthetic authentication
@@ -49,10 +57,10 @@ HTTPS/PostgreSQL Playwright stack. Four multi-context journeys cover the private
 Sheet loading, character detachment/copy/move recovery, six-member load, 500-event replay, near-limit
 character storage, contended transfer reservation, and BFF/database restart recovery.
 
-Phase 6G provider selection is **decided**: [ADR 0010](adr/0010-oracle-always-free-hosting.md) selects Oracle
+Phase 6G is **complete**: [ADR 0010](adr/0010-oracle-always-free-hosting.md) selects Oracle
 Cloud Always Free (single ARM VM, Israel Central) at $0/month, superseding the earlier DigitalOcean proposal
 in ADR 0009, which is retained as the paid upgrade path. Two deployment artefacts are added and validated
-locally: `compose.hub.public.yml` and `deploy/hub/Caddyfile.public`, which publish 80/443 and issue Let's
+locally and on Oracle: `compose.hub.public.yml` and `deploy/hub/Caddyfile.public`, which publish 80/443 and issue Let's
 Encrypt certificates for a real hostname without altering the base local stack. A click-by-click
 [provisioning runbook](runbooks/oracle-provisioning.md) covers quota, capacity, the VCN/host dual-firewall
 trap, DNS, the OAuth app, and first boot.
@@ -62,9 +70,9 @@ encrypted backups with an RPO of up to 24 hours (ADR 0006); and image promotion 
 than registry digest, because the free tier is ARM while CI runners are x86 (ADR 0008).
 
 The guarded `do-connecting-ip` adapter and 25-second WebSocket heartbeat are implemented and pass the full
-real-stack gate; the adapter stays disabled on Oracle, where Caddy is the sole ingress. The Oracle staging
-resource is live on the repurposed Foundry VM. Its initial smoke checks pass; player-test readiness,
-off-machine backup/restore evidence, monitoring, and the Phase 6H game day remain outstanding.
+real-stack gate; the adapter stays disabled on Oracle, where Caddy is the sole ingress. Release
+`hub-staging-2026-09-01` at `8f181712` is live on the repurposed Foundry VM and its deployment smoke checks
+pass. Only the host-operations proof and physical one-DM/two-player game day remain before the V1 go/no-go.
 
 ## Implemented
 
@@ -180,15 +188,14 @@ off-machine backup/restore evidence, monitoring, and the Phase 6H game day remai
 - Semi-public moderation, self-service recovery, billing, and legal/privacy publication are not enabled.
 - Private V1 supports one BFF replica and therefore no multi-replica application HA.
 
-## Deployment gates
+## Remaining V1 gates
 
-1. Merge and tag the release automation, then run its Oracle dry run and deliberate release against the next
-   verified `hub-*` tag.
-2. Execute the real-host induced-failure gate: lock contention, pre-cutover backup failure, compatible
-   post-cutover health failure/application rollback, evidence inspection, and uninterrupted Foundry port 30000.
-3. Prove the checked-in scheduled encrypted backup, off-machine copy, isolated restore, monitoring, and
-   alerting procedures on Oracle.
-4. Rehearse the documented schema-incompatible isolated-restore/break-glass decision path without restoring
-   over production.
-5. Complete a private-table staging session with real GitHub OAuth and multiple physical devices before
-   inviting the V1 group.
+1. **Host-operations proof:** run the shipped release automation's Oracle dry run and deliberate release against
+   the next verified `hub-*` tag; prove lock contention, pre-cutover backup failure, compatible app rollback,
+   redacted evidence, uninterrupted Foundry, timers, encrypted off-machine backup, isolated restore,
+   monitoring/alerts, and the schema-incompatible break-glass decision without restoring over production.
+2. **Physical game day:** complete and record the private one-DM/two-player session with real GitHub OAuth and
+   physical devices, then make an explicit go/no-go decision.
+
+The [living roadmap](roadmap.md) owns scope, dependencies, and acceptance criteria for these gates and the
+approved V2 program.

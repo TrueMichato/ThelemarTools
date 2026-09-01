@@ -1,7 +1,7 @@
 # Campaign Hub observability and SLOs
 
-> **Status:** Portable metrics/logging implemented; provider alerts pending Phase 6G
-> **Last verified:** 2026-08-25
+> **Status:** Metrics/logging deployed; scheduled Oracle operations proof active
+> **Last verified:** 2026-09-01
 > **Owner:** Campaign Hub operator
 
 ## Logging contract

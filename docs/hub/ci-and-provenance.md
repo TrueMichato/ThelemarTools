@@ -1,14 +1,16 @@
 # Campaign Hub CI, test boundary, and artifact provenance
 
-> **Status:** Implemented for Phase 6F
-> **Last verified:** 2026-08-25
+> **Status:** Implemented for Phase 6F; tagged Oracle promotion deployed
+> **Last verified:** 2026-09-01
 > **Owner:** Campaign Hub maintainers
 
 ## Workflow contract
 
 `.github/workflows/hub.yml` runs on pull requests and manual dispatch. Every third-party action is pinned to
-a full reviewed commit SHA. Deployment is intentionally absent: Phase 6G selects the provider and adds an
-approved digest-promotion path; production promotion stays disabled until Phase 6H.
+a full reviewed commit SHA. Deployment remains intentionally absent from this workflow. Phase 6G deployed a
+verified git tag to the ARM Oracle host under ADR 0008/0010. V2-T0 protected release automation shipped in
+[PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219); only the V1-G1 live Oracle release and
+induced-failure proof remains. Expansion stays disabled until the V1 go/no-go.
 
 | Job | Gates | Failure owner |
 |---|---|---|
@@ -32,7 +34,8 @@ boundaries:
 
 `compose.hub.test.yml` is only an override for the disposable E2E stack. It does not change
 `compose.hub.yml` or the production image. A production-configurable test-auth switch remains prohibited.
-Real OAuth, callback, allowlist, and cookie behavior are Phase 6G/6H staging gates.
+Real OAuth, callback, allowlist, and cookie behavior pass Oracle smoke checks. The physical one-DM/two-player
+game day remains the target-environment acceptance gate.
 
 ## Real-stack scenarios
 
@@ -75,9 +78,9 @@ source/revision/version labels. It exports:
 
 The artifact name includes the source SHA and is retained for 14 days. The SHA-256 recorded in provenance is
 calculated from the exported image archive, so a changed archive cannot be substituted silently. It is
-explicitly an archive checksum, not an OCI manifest/registry digest; `registryDigest` remains null until
-Phase 6G imports and pushes the archive without rebuilding. Signing/attestation beyond the workflow evidence
-is a pre-public-service gate.
+explicitly an archive checksum, not an OCI manifest/registry digest; `registryDigest` remains null because the
+ARM Oracle path builds from a verified git tag rather than importing the x86 CI image. Signing/attestation
+beyond the workflow evidence is a pre-public-service gate.
 
 The source-SHA image artifact is uploaded with explicit overwrite semantics, so a failed supply-chain job can
 replace its own partial attempt and an E2E-only rerun can still download the successful producer artifact.
@@ -86,8 +89,9 @@ Playwright artifacts include `github.run_attempt`. Playwright always emits
 step rather than being silently ignored.
 
 Never promote from an untrusted pull request artifact. Staging promotion requires an approved branch/run and
-records source SHA, archive hash, resulting registry digest, SBOMs, migration version, test run, operator, and
-time. Production promotion remains disabled until the explicit Phase 6H go decision.
+records source SHA/tag, applicable archive hash or image id, SBOMs, migration version, test run, operator, and
+time. Release `hub-staging-2026-09-01` at `8f181712` is the deployed baseline. Automated promotion remains
+V2-T0; expansion remains disabled until the explicit V1 go decision.
 
 ## Local commands
 
