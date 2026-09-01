@@ -356,6 +356,8 @@ Acceptance:
 Dependencies: V2-T1 through V2-T7 should have stable user-facing contracts before the final redesign; the critique
 may begin earlier but must be refreshed against the accepted capabilities.
 
+Design evidence and decisions: [Campaign Overview redesign brief](campaign-overview-redesign-brief.md).
+
 Deliver:
 
 1. an Impeccable review of task hierarchy, information architecture, privacy cues, responsive behavior,

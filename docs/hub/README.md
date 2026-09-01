@@ -15,6 +15,7 @@ Signed-out character sheets, homebrew, and DM screens remain supported and do no
 |---|---|
 | What exists now | [Current system](current-system.md) |
 | What ships next and why | [Living roadmap](roadmap.md) |
+| Why Campaign Overview must change | [Campaign Overview redesign brief](campaign-overview-redesign-brief.md) |
 | Why it is structured this way | [Architecture](architecture.md) and [ADRs](#architecture-decisions) |
 | What was implemented and why | [Implementation history](implementation-history.md) |
 | Exact Phase 0-5 working-tree checkpoint | [Checkpoint record](checkpoint.md) |
