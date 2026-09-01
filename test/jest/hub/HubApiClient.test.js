@@ -69,6 +69,49 @@ describe("hub API client", () => {
 		}));
 	});
 
+	it("normalizes browser fetch failures without leaking browser-specific messages", async () => {
+		const original = new TypeError("Load failed");
+		const client = new HubApiClient({
+			fnFetch: async () => { throw original; },
+		});
+
+		await expect(client.pGetCampaign({campaignId: "campaign"})).rejects.toEqual(expect.objectContaining({
+			code: "NETWORK_UNAVAILABLE",
+			status: 0,
+			cause: original,
+		}));
+	});
+
+	it("rejects unreadable successful responses explicitly", async () => {
+		const client = new HubApiClient({
+			fnFetch: async () => ({
+				ok: true,
+				status: 200,
+				async json () { throw new SyntaxError("not json"); },
+			}),
+		});
+
+		await expect(client.pGetCampaign({campaignId: "campaign"})).rejects.toEqual(expect.objectContaining({
+			code: "RESPONSE_INVALID",
+			status: 200,
+		}));
+	});
+
+	it("retains service status when an error response is unreadable", async () => {
+		const client = new HubApiClient({
+			fnFetch: async () => ({
+				ok: false,
+				status: 503,
+				async json () { throw new SyntaxError("proxy response"); },
+			}),
+		});
+
+		await expect(client.pGetCampaign({campaignId: "campaign"})).rejects.toEqual(expect.objectContaining({
+			code: "REQUEST_FAILED",
+			status: 503,
+		}));
+	});
+
 	it("clears mutation state after logout", async () => {
 		const client = new HubApiClient({
 			fnFetch: async path => path === "/api/session"
@@ -110,5 +153,28 @@ describe("hub API client", () => {
 			["/api/account/deletion/request", "POST"],
 		]));
 		expect(calls.find(call => call.path === "/api/account/deletion/request").opts.headers["idempotency-key"]).toBe("delete");
+	});
+
+	it("uses compact compatibility and current-session lease release routes", async () => {
+		const calls = [];
+		const client = new HubApiClient({
+			fnFetch: async (path, opts = {}) => {
+				calls.push({path, opts});
+				if (path === "/api/session") return getResponse({body: {signedIn: true, csrfToken: "csrf-1"}});
+				if (path.endsWith("/compatibility")) return getResponse({body: {compatibility: {campaignId: "campaign"}}});
+				return getResponse({body: {released: true}});
+			},
+		});
+		await client.pGetSession();
+
+		await expect(client.pGetCampaignCompatibility({campaignId: "campaign"}))
+			.resolves.toEqual({campaignId: "campaign"});
+		await expect(client.pReleaseCharacterLease({characterId: "character"}))
+			.resolves.toEqual({released: true});
+		expect(calls.map(call => [call.path, call.opts.method || "GET"])).toEqual([
+			["/api/session", "GET"],
+			["/api/campaigns/campaign/compatibility", "GET"],
+			["/api/characters/character/lease/release", "POST"],
+		]);
 	});
 });

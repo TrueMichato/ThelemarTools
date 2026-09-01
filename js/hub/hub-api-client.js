@@ -1,10 +1,11 @@
 export class HubApiError extends Error {
-	constructor ({code, status, message = null, details = null}) {
+	constructor ({code, status, message = null, details = null, cause = null}) {
 		super(message || code || `Hub request failed.`);
 		this.name = "HubApiError";
 		this.code = code || "REQUEST_FAILED";
 		this.status = status;
 		this.details = details;
+		this.cause = cause;
 	}
 }
 
@@ -22,18 +23,34 @@ export class HubApiClient {
 			headers["x-csrf-token"] = this._csrfToken;
 			headers["idempotency-key"] = idempotencyKey || crypto.randomUUID();
 		}
-		const response = await this._fnFetch(path, {
-			method,
-			credentials: "same-origin",
-			headers,
-			body: body == null ? undefined : JSON.stringify(body),
-		});
+		let response;
+		try {
+			response = await this._fnFetch(path, {
+				method,
+				credentials: "same-origin",
+				headers,
+				body: body == null ? undefined : JSON.stringify(body),
+			});
+		} catch (error) {
+			if (error instanceof HubApiError) throw error;
+			throw new HubApiError({
+				code: "NETWORK_UNAVAILABLE",
+				status: 0,
+				cause: error,
+			});
+		}
 		const data = response.status === 204 ? null : await response.json().catch(() => null);
 		if (!response.ok) {
 			throw new HubApiError({
 				code: data?.error || "REQUEST_FAILED",
 				status: response.status,
 				details: data?.details || null,
+			});
+		}
+		if (response.status !== 204 && data == null) {
+			throw new HubApiError({
+				code: "RESPONSE_INVALID",
+				status: response.status,
 			});
 		}
 		return data;
@@ -127,6 +144,10 @@ export class HubApiClient {
 		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/context`)).context;
 	}
 
+	async pGetCampaignCompatibility ({campaignId}) {
+		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/compatibility`)).compatibility;
+	}
+
 	async pGetCampaignSnapshot ({campaignId}) {
 		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/snapshot`)).snapshot;
 	}
@@ -207,6 +228,14 @@ export class HubApiClient {
 			body: {takeover: isTakeover},
 			isMutation: true,
 		})).lease;
+	}
+
+	async pReleaseCharacterLease ({characterId}) {
+		return this._pRequest(`/api/characters/${encodeURIComponent(characterId)}/lease/release`, {
+			method: "POST",
+			body: {},
+			isMutation: true,
+		});
 	}
 
 	async pPatchCharacter ({characterId, baseRevision, leaseEpoch, patches, idempotencyKey}) {
