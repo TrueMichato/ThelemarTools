@@ -690,6 +690,25 @@ export class MemoryHubStore {
 		return copy(lease);
 	}
 
+	async pReleaseCharacterLease ({accountId, sessionId, characterId}) {
+		const character = this._getCharacterOrThrow(characterId);
+		if (character.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can release this character editor.`, {status: 403});
+		const lease = this._characterLeases.get(characterId);
+		if (!lease) return {released: false};
+		if (new Date(lease.expiresAt) <= this._fnNow()) {
+			this._characterLeases.delete(characterId);
+			return {released: false};
+		}
+		if (lease.sessionId !== sessionId) {
+			throw new HubStoreError("LEASE_HELD", `Character is being edited by another device.`, {
+				status: 409,
+				details: {expiresAt: lease.expiresAt},
+			});
+		}
+		this._characterLeases.delete(characterId);
+		return {released: true};
+	}
+
 	async pPatchCharacter ({
 		accountId,
 		sessionId,
@@ -831,6 +850,28 @@ export class MemoryHubStore {
 			campaignId,
 			brewBundle: copy(brew),
 			rulesVersion: copy(rules),
+		};
+	}
+
+	async pGetCampaignCompatibility ({accountId, campaignId}) {
+		const context = await this.pGetCampaignContext({accountId, campaignId});
+		return {
+			campaignId,
+			brewBundle: context.brewBundle
+				? {
+					id: context.brewBundle.id,
+					version: context.brewBundle.version,
+					contentHash: context.brewBundle.contentHash,
+					documentCount: context.brewBundle.manifest?.documentCount || 0,
+				}
+				: null,
+			rulesVersion: context.rulesVersion
+				? {
+					id: context.rulesVersion.id,
+					version: context.rulesVersion.version,
+					rules: copy(context.rulesVersion.rules),
+				}
+				: null,
 		};
 	}
 

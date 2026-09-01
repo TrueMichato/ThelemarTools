@@ -1147,6 +1147,50 @@ export class PostgresHubStore {
 		}
 	}
 
+	async pReleaseCharacterLease ({accountId, sessionId, characterId}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [characterId]);
+			const characterResult = await client.query(`
+				SELECT owner_account_id
+				FROM hub.characters
+				WHERE id = $1 AND status = 'active'
+				FOR UPDATE
+			`, [characterId]);
+			if (!characterResult.rowCount) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
+			if (characterResult.rows[0].owner_account_id !== accountId) {
+				throw new HubStoreError("FORBIDDEN", `Only the owner can release this character editor.`, {status: 403});
+			}
+			const leaseResult = await client.query(`
+				SELECT session_id, expires_at
+				FROM hub.character_leases
+				WHERE character_id = $1
+				FOR UPDATE
+			`, [characterId]);
+			const lease = leaseResult.rows[0];
+			if (!lease || lease.expires_at <= new Date()) {
+				if (lease) await client.query(`DELETE FROM hub.character_leases WHERE character_id = $1`, [characterId]);
+				await client.query("COMMIT");
+				return {released: false};
+			}
+			if (lease.session_id !== sessionId) {
+				throw new HubStoreError("LEASE_HELD", `Character is being edited by another device.`, {
+					status: 409,
+					details: {expiresAt: lease.expires_at},
+				});
+			}
+			await client.query(`DELETE FROM hub.character_leases WHERE character_id = $1`, [characterId]);
+			await client.query("COMMIT");
+			return {released: true};
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
 	async pPatchCharacter ({
 		accountId,
 		sessionId,
@@ -1400,6 +1444,41 @@ export class PostgresHubStore {
 				schemaVersion: row.rules_schema_version,
 				rules: row.rules,
 			} : null,
+		};
+	}
+
+	async pGetCampaignCompatibility ({accountId, campaignId}) {
+		const membership = await this.pGetMembership({accountId, campaignId});
+		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+		const result = await this._pool.query(`
+			SELECT
+				c.id AS campaign_id,
+				b.id AS brew_id, b.version AS brew_version, b.content_hash, b.manifest,
+				r.id AS rules_id, r.version AS rules_version, r.rules
+			FROM hub.campaigns c
+			LEFT JOIN hub.brew_bundle_versions b ON b.id = c.active_brew_bundle_version_id
+			LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
+			WHERE c.id = $1 AND c.status <> 'deleting'
+		`, [campaignId]);
+		if (!result.rowCount) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+		const row = result.rows[0];
+		return {
+			campaignId: row.campaign_id,
+			brewBundle: row.brew_id
+				? {
+					id: row.brew_id,
+					version: row.brew_version,
+					contentHash: row.content_hash,
+					documentCount: row.manifest?.documentCount || 0,
+				}
+				: null,
+			rulesVersion: row.rules_id
+				? {
+					id: row.rules_id,
+					version: row.rules_version,
+					rules: row.rules,
+				}
+				: null,
 		};
 	}
 

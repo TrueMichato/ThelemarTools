@@ -3,22 +3,30 @@ export class HubRealtimeClient {
 		campaignId,
 		fnCreateSocket = url => new WebSocket(url),
 		location = globalThis.location,
-		fnSetTimeout = setTimeout,
+		fnSetTimeout = (...args) => setTimeout(...args),
+		fnSetInterval = (...args) => setInterval(...args),
+		fnClearInterval = timer => clearInterval(timer),
+		resyncIntervalMs = 10_000,
 	}) {
 		if (!campaignId) throw new TypeError(`campaignId is required.`);
 		this._campaignId = campaignId;
 		this._fnCreateSocket = fnCreateSocket;
 		this._location = location;
 		this._fnSetTimeout = fnSetTimeout;
+		this._fnSetInterval = fnSetInterval;
+		this._fnClearInterval = fnClearInterval;
+		this._resyncIntervalMs = resyncIntervalMs;
 		this._socket = null;
 		this._pConnecting = null;
 		this._shouldReconnect = false;
 		this._reconnectAttempt = 0;
 		this._reconnectTimer = null;
+		this._resyncTimer = null;
 		this._lastSequence = 0;
 		this._hasBaseline = false;
 		this._bufferedEvents = [];
 		this._listeners = new Map();
+		this._connectionState = {state: "closed"};
 	}
 
 	on (type, listener) {
@@ -32,9 +40,21 @@ export class HubRealtimeClient {
 		for (const listener of this._listeners.get(type) || []) listener(value);
 	}
 
+	getConnectionState () {
+		return {...this._connectionState};
+	}
+
+	_setConnectionState (state, detail = {}) {
+		this._connectionState = {state, ...detail};
+		this._emit("state", this.getConnectionState());
+	}
+
 	pConnect () {
 		this._shouldReconnect = true;
 		if (this._pConnecting) return this._pConnecting;
+		this._setConnectionState(this._reconnectAttempt ? "reconnecting" : "connecting", {
+			attempt: this._reconnectAttempt,
+		});
 		this._pConnecting = new Promise((resolve, reject) => {
 			this._hasBaseline = false;
 			this._bufferedEvents = [];
@@ -48,14 +68,25 @@ export class HubRealtimeClient {
 			socket.addEventListener("open", () => {
 				isOpened = true;
 				socket.removeEventListener("error", onError);
+				const isReconnect = this._reconnectAttempt > 0;
 				this.requestResync();
-				this._reconnectAttempt = 0;
+				this._armResyncTimer();
+				this._setConnectionState("syncing", {isReconnect});
 				resolve();
 			}, {once: true});
 			socket.addEventListener("message", event => this._handleMessage(JSON.parse(event.data)));
 			socket.addEventListener("close", event => {
 				if (!isOpened) reject(new Error(`WebSocket closed before opening.`));
+				this._clearResyncTimer();
 				this._emit("close", event);
+				if (event?.code === 1008) {
+					this._shouldReconnect = false;
+					this._setConnectionState("access_lost", {
+						code: event.code,
+						reason: event.reason || "Session or campaign access changed.",
+					});
+					return;
+				}
 				this._scheduleReconnect();
 			});
 		}).finally(() => this._pConnecting = null);
@@ -65,6 +96,10 @@ export class HubRealtimeClient {
 	_scheduleReconnect () {
 		if (!this._shouldReconnect || this._reconnectTimer) return;
 		const delay = Math.min(10_000, 500 * (2 ** this._reconnectAttempt++));
+		this._setConnectionState("reconnecting", {
+			attempt: this._reconnectAttempt,
+			delay,
+		});
 		this._reconnectTimer = this._fnSetTimeout(() => {
 			this._reconnectTimer = null;
 			void this.pConnect().catch(() => this._scheduleReconnect());
@@ -113,6 +148,8 @@ export class HubRealtimeClient {
 				this._lastSequence = Math.max(this._lastSequence, event.sequence);
 				this._emit("event", event);
 			}
+			this._reconnectAttempt = 0;
+			this._setConnectionState("live");
 			return;
 		}
 		this._emit(message.type, message);
@@ -123,14 +160,29 @@ export class HubRealtimeClient {
 	}
 
 	requestResync () {
-		this._socket?.send(JSON.stringify({type: "resync", afterSequence: this._lastSequence}));
+		if (this._socket?.readyState !== 1) return;
+		this._socket.send(JSON.stringify({type: "resync", afterSequence: this._lastSequence}));
+	}
+
+	_armResyncTimer () {
+		if (!this._socket || this._resyncTimer != null) return;
+		this._resyncTimer = this._fnSetInterval(() => this.requestResync(), this._resyncIntervalMs);
+		this._resyncTimer?.unref?.();
+	}
+
+	_clearResyncTimer () {
+		if (this._resyncTimer == null) return;
+		this._fnClearInterval(this._resyncTimer);
+		this._resyncTimer = null;
 	}
 
 	close () {
 		this._shouldReconnect = false;
 		if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
 		this._reconnectTimer = null;
+		this._clearResyncTimer();
 		this._socket?.close();
 		this._socket = null;
+		this._setConnectionState("closed");
 	}
 }

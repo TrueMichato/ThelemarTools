@@ -5,8 +5,13 @@ import {canViewEvent, projectCharacterForPlayer} from "../../../server/src/proje
 class FakeSocket extends EventEmitter {
 	readyState = 1;
 	sent = [];
+	closeEvents = [];
 	send (message) { this.sent.push(JSON.parse(message)); }
-	close () { this.readyState = 3; this.emit("close"); }
+	close (code = 1000, reason = "") {
+		this.closeEvents.push({code, reason});
+		this.readyState = 3;
+		this.emit("close", {code, reason});
+	}
 }
 
 class HeartbeatSocket extends FakeSocket {
@@ -99,6 +104,27 @@ describe("hub realtime", () => {
 		expect(socket.readyState).toBe(3);
 	});
 
+	it("uses a reconnectable close code when a client exceeds the message rate limit", async () => {
+		const realtime = new HubRealtime({store: {
+			pGetSessionById: async () => ({session: {}, account: {}}),
+			pGetMembership: async () => ({role: "player"}),
+		}});
+		const socket = new FakeSocket();
+		realtime.addConnection({
+			socket,
+			account: {id: "p", displayName: "P"},
+			session: {id: "s"},
+			membership: {id: "m", role: "player"},
+			campaignId: "cmp",
+		});
+		const connection = realtime._connections.get(socket);
+		for (let i = 0; i < 21; ++i) {
+			await realtime._pHandleMessage({connection, raw: Buffer.from(JSON.stringify({type: "presence", activity: "idle"}))});
+		}
+
+		expect(socket.closeEvents).toContainEqual({code: 1013, reason: "Rate limit exceeded"});
+	});
+
 	it("closes only the affected account/campaign sockets on lifecycle changes", () => {
 		const realtime = new HubRealtime({store: {}});
 		const target = new FakeSocket();
@@ -151,12 +177,91 @@ describe("hub realtime", () => {
 				},
 			});
 			await client.pConnect();
-			sockets[0].emit("close", {code: 1006});
+			sockets[0].emit("close", {code: 1013, reason: "Rate limit exceeded"});
 			expect(timers).toHaveLength(1);
 			timers.shift()();
 			await new Promise(resolve => setImmediate(resolve));
 			expect(sockets).toHaveLength(2);
 			client.close();
+		});
+
+		it("uses one bounded authoritative resync watchdog while a socket stays live", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			class BrowserSocket extends EventEmitter {
+				readyState = 1;
+				sent = [];
+				send (message) { this.sent.push(JSON.parse(message)); }
+				close () { this.readyState = 3; this.emit("close", {code: 1000}); }
+				addEventListener (type, listener) { this.on(type, listener); }
+				removeEventListener (type, listener) { this.off(type, listener); }
+			}
+			const socket = new BrowserSocket();
+			const intervals = new Map();
+			const cleared = [];
+			let nextIntervalId = 0;
+			const client = new HubRealtimeClient({
+				campaignId: "cmp",
+				location: {protocol: "https:", host: "tools.example"},
+				fnCreateSocket: () => {
+					queueMicrotask(() => socket.emit("open"));
+					return socket;
+				},
+				fnSetInterval: (fn, delay) => {
+					const id = ++nextIntervalId;
+					intervals.set(id, {fn, delay});
+					return id;
+				},
+				fnClearInterval: id => {
+					cleared.push(id);
+					intervals.delete(id);
+				},
+			});
+			await client.pConnect();
+			expect([...intervals.values()].map(({delay}) => delay)).toEqual([10_000]);
+			client._handleMessage({type: "resync_complete", snapshot: {lastSequence: 3}, events: []});
+			client._handleMessage({type: "resync_complete", snapshot: {lastSequence: 3}, events: []});
+
+			expect([...intervals.values()].map(({delay}) => delay)).toEqual([10_000]);
+			intervals.values().next().value.fn();
+			expect(socket.sent.at(-1)).toEqual({type: "resync", afterSequence: 3});
+			client.close();
+			expect(cleared).toEqual([1]);
+		});
+
+		it("surfaces lifecycle state and does not reconnect after access is revoked", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			class BrowserSocket extends EventEmitter {
+				readyState = 1;
+				send () {}
+				close () { this.emit("close", {code: 1000}); }
+				addEventListener (type, listener) { this.on(type, listener); }
+				removeEventListener (type, listener) { this.off(type, listener); }
+			}
+			const socket = new BrowserSocket();
+			const timers = [];
+			const states = [];
+			const client = new HubRealtimeClient({
+				campaignId: "cmp",
+				location: {protocol: "https:", host: "tools.example"},
+				fnCreateSocket: () => {
+					queueMicrotask(() => socket.emit("open"));
+					return socket;
+				},
+				fnSetTimeout: fn => {
+					timers.push(fn);
+					return timers.length;
+				},
+			});
+			client.on("state", state => states.push(state));
+			await client.pConnect();
+			socket.emit("close", {code: 1008, reason: "Membership removed"});
+			expect(states.map(it => it.state)).toEqual(["connecting", "syncing", "access_lost"]);
+			expect(client.getConnectionState()).toEqual({
+				state: "access_lost",
+				code: 1008,
+				reason: "Membership removed",
+			});
+			expect(timers).toHaveLength(0);
 		});
 	});
 

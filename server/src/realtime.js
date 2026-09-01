@@ -106,7 +106,7 @@ export class HubRealtime {
 			connection.messageCount = 0;
 		}
 		if (++connection.messageCount > 20) {
-			connection.socket.close(1008, "Rate limit exceeded");
+			connection.socket.close(1013, "Rate limit exceeded");
 			return;
 		}
 		let message;

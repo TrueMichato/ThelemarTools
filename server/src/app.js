@@ -691,6 +691,23 @@ export async function createHubApp ({
 		}),
 	}));
 
+	app.get("/api/campaigns/:campaignId/compatibility", {
+		preHandler: requireAuth,
+		schema: {
+			params: {
+				type: "object",
+				required: ["campaignId"],
+				additionalProperties: false,
+				properties: {campaignId: {type: "string", format: "uuid"}},
+			},
+		},
+	}, async request => ({
+		compatibility: await store.pGetCampaignCompatibility({
+			accountId: request.hubAuth.account.id,
+			campaignId: request.params.campaignId,
+		}),
+	}));
+
 	app.get("/api/campaigns/:campaignId/snapshot", {
 		preHandler: requireAuth,
 		schema: {
@@ -1324,6 +1341,26 @@ export async function createHubApp ({
 			characterId: request.params.characterId,
 			isTakeover: !!request.body?.takeover,
 		}),
+	}));
+
+	app.post("/api/characters/:characterId/lease/release", {
+		preHandler: requireMutationSecurity,
+		schema: {
+			params: {
+				type: "object",
+				required: ["characterId"],
+				additionalProperties: false,
+				properties: {characterId: {type: "string", format: "uuid"}},
+			},
+			body: {
+				type: "object",
+				additionalProperties: false,
+			},
+		},
+	}, async request => store.pReleaseCharacterLease({
+		accountId: request.hubAuth.account.id,
+		sessionId: request.hubAuth.session.id,
+		characterId: request.params.characterId,
 	}));
 
 	app.patch("/api/characters/:characterId", {

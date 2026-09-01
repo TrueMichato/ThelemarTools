@@ -281,6 +281,90 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 		expect(missing.statusCode).toBe(404);
 	});
 
+	it("returns compact campaign compatibility metadata", async () => {
+		const player = await pSignIn(IDENTITIES.player);
+		const campaign = await pCreateCampaign(player, "Campaign A");
+		const rules = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/rules-versions`,
+			headers: mutationHeaders(player),
+			payload: {rules: {exhaustionRules: "2024"}},
+		});
+		await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/rules-versions/${rules.json().rulesVersion.id}/activate`,
+			headers: mutationHeaders(player),
+		});
+
+		const response = await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/compatibility`,
+			headers: {cookie: player.cookie},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toEqual({
+			compatibility: {
+				campaignId: campaign.id,
+				rulesVersion: expect.objectContaining({
+					version: 1,
+					rules: expect.objectContaining({exhaustionRules: "2024"}),
+				}),
+				brewBundle: null,
+			},
+		});
+	});
+
+	it("only lets the session holding a character lease release it", async () => {
+		const playerA = await pSignIn(IDENTITIES.player);
+		const campaign = await pCreateCampaign(playerA, "Player Campaign");
+		const created = await app.inject({
+			method: "POST",
+			url: "/api/characters",
+			headers: mutationHeaders(playerA),
+			payload: {
+				clientImportId: "local-character-1",
+				campaignId: campaign.id,
+				schemaVersion: 1,
+				data: {name: "Mira"},
+			},
+		});
+		const characterId = created.json().character.id;
+		await app.inject({
+			method: "POST",
+			url: `/api/characters/${characterId}/lease`,
+			headers: mutationHeaders(playerA),
+			payload: {},
+		});
+		const playerB = await pSignIn(IDENTITIES.player);
+
+		const refused = await app.inject({
+			method: "POST",
+			url: `/api/characters/${characterId}/lease/release`,
+			headers: mutationHeaders(playerB),
+			payload: {},
+		});
+		expect(refused.statusCode).toBe(409);
+		expect(refused.json().error).toBe("LEASE_HELD");
+
+		const released = await app.inject({
+			method: "POST",
+			url: `/api/characters/${characterId}/lease/release`,
+			headers: mutationHeaders(playerA),
+			payload: {},
+		});
+		expect(released.statusCode).toBe(200);
+		expect(released.json()).toEqual({released: true});
+
+		const acquired = await app.inject({
+			method: "POST",
+			url: `/api/characters/${characterId}/lease`,
+			headers: mutationHeaders(playerB),
+			payload: {},
+		});
+		expect(acquired.statusCode).toBe(200);
+	});
+
 	it("blocks mutation calls from stale protocol clients", async () => {
 		const player = await pSignIn(IDENTITIES.player);
 		const response = await app.inject({
