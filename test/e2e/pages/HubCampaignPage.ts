@@ -579,10 +579,61 @@ export class HubCampaignPage {
 		return responses.map(response => response.status()).sort();
 	}
 
-	async getCharacter (characterId: string): Promise<any> {
-		const response = await this.page.request.get(`/api/characters/${encodeURIComponent(characterId)}`);
+	async getProjectionPolicy (characterId: string): Promise<any> {
+		const response = await this.page.request.get(`/api/characters/${encodeURIComponent(characterId)}/projection-policy`, {
+			headers: {"x-hub-protocol-version": "2"},
+		});
 		expect(response.ok()).toBe(true);
-		return (await response.json()).character;
+		return response.json();
+	}
+
+	async setProjectionPolicyRaw (
+		{characterId, policy, expectedProjectionRevision}: {characterId: string; policy: any; expectedProjectionRevision: number},
+	): Promise<{status: number; body: any}> {
+		const response = await this.page.request.put(`/api/characters/${encodeURIComponent(characterId)}/projection-policy`, {
+			headers: await this.getMutationHeaders(),
+			data: {policy, expectedProjectionRevision},
+		});
+		return {status: response.status(), body: await response.json()};
+	}
+
+	async setProjectionPolicy (
+		args: {characterId: string; policy: any; expectedProjectionRevision: number},
+	): Promise<any> {
+		const result = await this.setProjectionPolicyRaw(args);
+		expect(result.status).toBe(200);
+		return result.body;
+	}
+
+	/**
+	 * The owner's sharing controls must be usable without reading JSON or ids, and the
+	 * preview must reflect the server's own peer profile.
+	 */
+	async expectSharingControls ({previewText}: {previewText: string}): Promise<void> {
+		const sharing = this.page.locator(".charsheet__sharing");
+		await expect(sharing).toBeVisible();
+		await expect(sharing.locator(".charsheet__sharing-presets legend")).toHaveText("Sharing level");
+		await expect(sharing.locator("input[name='charsheet-sharing-preset'][value='minimal']")).toBeChecked();
+		await expect(sharing.locator(".charsheet__sharing-preview")).toContainText(previewText);
+		// Nothing on screen exposes the raw policy shape or an internal identifier.
+		const text = (await sharing.innerText()).toLowerCase();
+		expect(text).not.toContain("\"mode\"");
+		expect(text).not.toContain("projectionrevision");
+	}
+
+	/** The raw ADR 0011 authorization envelope for a character. */
+	async getCharacterProjection (characterId: string): Promise<any> {
+		const response = await this.page.request.get(`/api/characters/${encodeURIComponent(characterId)}`, {
+			headers: {"x-hub-protocol-version": "2"},
+		});
+		expect(response.ok()).toBe(true);
+		return (await response.json()).projection;
+	}
+
+	async getCharacter (characterId: string): Promise<any> {
+		const projection = await this.getCharacterProjection(characterId);
+		expect(["owner_truth", "dm_truth"]).toContain(projection.kind);
+		return projection.character;
 	}
 
 	async openCharacterSheet ({campaignId, characterId, name}: {campaignId: string; characterId: string; name: string}): Promise<void> {
