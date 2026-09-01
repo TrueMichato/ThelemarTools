@@ -23,6 +23,7 @@ visibility is not authorization.
 | Read peer character profile | Yes, beside truth as `peerPreview` | Yes, beside truth as `peerPreview` | Yes | Yes |
 | Read own sharing policy | Own character only | Own character only | Own character only | Own character only |
 | Read another member's sharing policy | No | No | No | No |
+| Target a character whose identity is hidden | Yes | Yes | Owner only | No |
 | Change sharing policy | Own character only | Own character only | Own character only | Own character only |
 | Create campaign character | Own character | Own character | Own character | No |
 | Edit character under lease | Own character only | Own character only | Own character only | No while spectator |

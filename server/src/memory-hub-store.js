@@ -6,6 +6,9 @@ import {
 	computePeerProfile,
 	getDefaultProjectionPolicy,
 	getPolicyManagementResponse,
+	getPolicyNotAvailableError,
+	assertPeerTargetable,
+	stripProjectionPolicy,
 	isPeerVisibleIdentity,
 	projectCharacterForRequester,
 	validateProjectionPolicy,
@@ -318,6 +321,7 @@ export class MemoryHubStore {
 		const eventPayload = enrichEventPayload({
 			payload,
 			type,
+			visibility,
 			aggregateType,
 			aggregateId,
 			getCharacterById: characterId => {
@@ -615,6 +619,21 @@ export class MemoryHubStore {
 		return this._setReceipt({accountId, idempotencyKey, response: this._removeMembershipLifecycle({campaign, membership, actorAccountId: accountId, status: "left"})});
 	}
 
+	/**
+	 * Targeting is authorized on the server, not filtered in the browser: a peer may only
+	 * target a character whose owner shares its identity. The rejection is the same
+	 * "not found" a non-existent character produces, so a probe cannot enumerate hidden
+	 * characters.
+	 */
+	_assertTargetable ({character, accountId, role}) {
+		assertPeerTargetable({
+			character,
+			accountId,
+			role,
+			fnError: () => new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404}),
+		});
+	}
+
 	_getCharacterOrThrow (characterId) {
 		const character = this._characters.get(characterId);
 		if (!character || character.status !== "active") {
@@ -672,7 +691,7 @@ export class MemoryHubStore {
 				const membership = this._memberships.get(`${it.campaignId}::${accountId}`);
 				return ["dm", "co_dm"].includes(membership?.role) && membership.status === "active";
 			})
-			.map(copy);
+			.map(character => stripProjectionPolicy(copy(character)));
 	}
 
 	async pGetCharacter ({accountId, characterId}) {
@@ -726,16 +745,23 @@ export class MemoryHubStore {
 	}
 
 	async pGetProjectionPolicy ({accountId, characterId}) {
-		const character = this._getCharacterOrThrow(characterId);
-		if (character.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can manage sharing.`, {status: 403});
-		return getPolicyManagementResponse(character);
+		return getPolicyManagementResponse(this._getOwnedCharacterOrThrow({accountId, characterId}));
+	}
+
+	/**
+	 * Resolve a character the requester owns. Missing and unauthorized share one outcome
+	 * so this endpoint cannot be used to probe which character ids exist.
+	 */
+	_getOwnedCharacterOrThrow ({accountId, characterId}) {
+		const character = this._characters.get(characterId);
+		if (!character || character.status !== "active" || character.ownerAccountId !== accountId) throw getPolicyNotAvailableError();
+		return character;
 	}
 
 	async pSetProjectionPolicy ({accountId, characterId, policy, expectedProjectionRevision, idempotencyKey}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
 		if (prior) return prior;
-		const character = this._getCharacterOrThrow(characterId);
-		if (character.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can manage sharing.`, {status: 403});
+		const character = this._getOwnedCharacterOrThrow({accountId, characterId});
 		if (character.projectionRevision !== expectedProjectionRevision) {
 			throw new HubStoreError("PROJECTION_POLICY_CONFLICT", `Sharing settings changed on another device.`, {
 				status: 409,
@@ -789,7 +815,7 @@ export class MemoryHubStore {
 					this._commitCharacterMutation({character: imported, actorAccountId: accountId, isRevisionBump: false});
 				}
 			}
-			return this._setReceipt({accountId, idempotencyKey, response: {character: imported}});
+			return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(imported)}});
 		}
 		const character = {
 			id: crypto.randomUUID(),
@@ -827,10 +853,11 @@ export class MemoryHubStore {
 				aggregateType: "character",
 				aggregateId: character.id,
 				aggregateRevision: character.revision,
-				payload: {ownerAccountId: accountId},
+				// Owner association is roster metadata, not a shared event payload.
+				payload: {},
 			});
 		}
-		return this._setReceipt({accountId, idempotencyKey, response: {character}});
+		return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(character)}});
 	}
 
 	async pAcquireCharacterLease ({accountId, sessionId, characterId, isTakeover = false, ttlMs = 30_000}) {
@@ -921,7 +948,7 @@ export class MemoryHubStore {
 			});
 		}
 		this._commitCharacterMutation({character, actorAccountId: accountId, isRevisionBump: false});
-		return this._setReceipt({accountId, idempotencyKey, response: {character}});
+		return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(character)}});
 	}
 
 	async pCloneCharacter ({accountId, characterId, campaignId, idempotencyKey}) {
@@ -949,7 +976,7 @@ export class MemoryHubStore {
 		this._characters.set(clone.id, clone);
 		this._appendAudit({campaignId, actorAccountId: accountId, action: "character.cloned", targetType: "character", targetId: clone.id, details: {sourceCharacterId: source.id}});
 		this._appendEvent({campaignId, actorAccountId: accountId, type: "character.created", aggregateType: "character", aggregateId: clone.id, aggregateRevision: 1, payload: {clonedFromCharacterId: source.id}});
-		return this._setReceipt({accountId, idempotencyKey, response: {character: clone}});
+		return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(clone)}});
 	}
 
 	async pMoveCharacter ({accountId, characterId, campaignId, idempotencyKey}) {
@@ -993,7 +1020,7 @@ export class MemoryHubStore {
 			aggregateRevision: character.revision,
 			payload: {sourceCampaignId, characterNameSnapshot},
 		});
-		return this._setReceipt({accountId, idempotencyKey, response: {character}});
+		return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(character)}});
 	}
 
 	async pArchiveCharacter ({accountId, characterId, idempotencyKey}) {
@@ -1248,9 +1275,10 @@ export class MemoryHubStore {
 		validateCloudValue(effect, {label: "Structured effect"});
 		const prior = this._getReceipt({accountId, idempotencyKey});
 		if (prior) return prior;
-		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+		const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
 		const target = this._getCharacterOrThrow(targetCharacterId);
 		if (target.campaignId !== campaignId) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
+		this._assertTargetable({character: target, accountId, role: membership.role});
 		if (!STRUCTURED_EFFECT_TYPES.includes(effect?.type)) throw new HubStoreError("ACTION_INVALID", `Unsupported structured effect.`);
 		const action = {
 			id: crypto.randomUUID(),
@@ -1291,7 +1319,7 @@ export class MemoryHubStore {
 		// An applied effect changes hp/conditions, which are catalog fields, while the
 		// action event itself is visible only to the actor and DM.
 		if (action.status === "applied") this._commitCharacterMutation({character: target, actorAccountId: accountId, isRevisionBump: false});
-		return this._setReceipt({accountId, idempotencyKey, response: {action, character: target}});
+		return this._setReceipt({accountId, idempotencyKey, response: {action, character: stripProjectionPolicy(target)}});
 	}
 
 	async pListPendingActions ({accountId, campaignId}) {
@@ -1320,7 +1348,7 @@ export class MemoryHubStore {
 		this._appendEvent({campaignId, actorAccountId: accountId, type: "xp.granted", aggregateType: "character", aggregateId: characterId, aggregateRevision: character.revision, visibility: "explicit_accounts", visibleAccountIds: [...new Set([accountId, character.ownerAccountId])], payload: {amount, reason, xp: character.data.xp}});
 		// No projection invalidation: `xp` is not a catalog field, so no peer-visible value
 		// can change here. Asserted by HubProjectionCanary.
-		return this._setReceipt({accountId, idempotencyKey, response: {character}});
+		return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(character)}});
 	}
 
 	async pGrantItem ({accountId, campaignId, characterId, item, quantity = 1, idempotencyKey}) {
@@ -1340,7 +1368,7 @@ export class MemoryHubStore {
 		this._appendEvent({campaignId, actorAccountId: accountId, type: "item.granted", aggregateType: "character", aggregateId: characterId, aggregateRevision: character.revision, visibility: "explicit_accounts", visibleAccountIds: [...new Set([accountId, character.ownerAccountId])], payload: {entry}});
 		// A granted item changes the inventory and carry summaries.
 		this._commitCharacterMutation({character, actorAccountId: accountId, isRevisionBump: false});
-		return this._setReceipt({accountId, idempotencyKey, response: {character, entry}});
+		return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(character), entry}});
 	}
 
 	_getPartyInventory (campaignId) {
@@ -1389,7 +1417,8 @@ export class MemoryHubStore {
 		if (prior) return prior;
 		const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
 		const source = this._getTransferContainer({kind: sourceKind, id: sourceId, campaignId});
-		this._getTransferContainer({kind: targetKind, id: targetId, campaignId});
+		const target = this._getTransferContainer({kind: targetKind, id: targetId, campaignId});
+		if (target._character) this._assertTargetable({character: target._character, accountId, role: membership.role});
 		if (sourceKind === "character" && source._character.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can transfer from this character.`, {status: 403});
 		if (sourceKind === "party_inventory" && !["dm", "co_dm"].includes(membership.role)) throw new HubStoreError("FORBIDDEN", `Only a DM can transfer from party inventory.`, {status: 403});
 		const {container, escrow} = removeTransferPayload({container: source.container, payload});

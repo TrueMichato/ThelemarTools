@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import {HUB_PROTOCOL_VERSION} from "../../../server/src/app.js";
+import {HUB_REQUIRED_MIGRATION_VERSION} from "../../../server/src/migration-version.js";
 
 const read = path => fs.readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
 
@@ -60,7 +62,14 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(provenanceWriter).toContain("packageLockSha256");
 		expect(provenanceWriter).toContain("archiveSha256");
 		expect(provenanceWriter).toContain("registryDigest: null");
-		expect(provenanceWriter).toContain(`migration: "0004"`);
+		// Provenance must be derived from the runtime constants, so it cannot drift from
+		// what the server enforces.
+		expect(provenanceWriter).toContain("protocol: HUB_PROTOCOL_VERSION");
+		expect(provenanceWriter).toContain("migration: HUB_REQUIRED_MIGRATION_VERSION");
+		expect(provenanceWriter).not.toMatch(/protocol: "\d+"/);
+		expect(provenanceWriter).not.toMatch(/migration: "\d+"/);
+		expect(HUB_PROTOCOL_VERSION).toBe("2");
+		expect(HUB_REQUIRED_MIGRATION_VERSION).toBe("0004");
 	});
 
 	it("isolates every E2E Compose run and records success evidence", () => {

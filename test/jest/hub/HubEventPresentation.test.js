@@ -100,18 +100,30 @@ describe("campaign activity event presentation", () => {
 		const cancellations = events.filter(event => event.type === "transfer.cancelled");
 		expect(cancellations).toHaveLength(4);
 		for (const event of cancellations) {
+			// The correlating ids remain durable so lifecycle cleanup stays auditable...
 			expect(event.payload).toEqual(expect.objectContaining({
 				sourceKind: "character",
 				sourceId: source.id,
 				targetKind: "character",
 				targetId: expect.any(String),
-				sourceCharacterNameSnapshot: {version: 1, displayName: "Source"},
-				targetCharacterNameSnapshot: expect.objectContaining({version: 1}),
 			}));
+			// ...but a shared row carries no canonical name, because a durable event cannot
+			// be retracted when its owner later narrows their sharing policy.
+			expect(event.payload.sourceCharacterNameSnapshot).toBeUndefined();
+			expect(event.payload.targetCharacterNameSnapshot).toBeUndefined();
 		}
-		expect(events.find(event => event.type === "character.archived").payload.characterNameSnapshot.displayName).toBe("After Rename");
-		expect(events.find(event => event.type === "character.moved_out" && event.aggregateId === moveTarget.id).payload.characterNameSnapshot.displayName).toBe("Move Target");
-		expect(events.find(event => event.type === "character.moved_out" && event.aggregateId === deleteTarget.id).payload.characterNameSnapshot.displayName).toBe("Delete Target");
+
+		const archived = events.find(event => event.type === "character.archived");
+		const movedOut = events.filter(event => event.type === "character.moved_out");
+		expect(archived.payload.characterNameSnapshot).toBeUndefined();
+		expect(movedOut.every(event => event.payload.characterNameSnapshot === undefined)).toBe(true);
+		// Names that only ever existed in the canonical document never reach a shared row.
+		const sharedText = JSON.stringify(events.filter(event => event.visibility === "all_members"));
+		for (const name of ["After Rename", "Before Rename", "Move Target", "Delete Target", "Source"]) {
+			expect({name, leaked: sharedText.includes(name)}).toEqual({name, leaked: false});
+		}
+		// The lifecycle records themselves remain durable and correlatable.
+		expect(movedOut.map(event => event.aggregateId)).toEqual(expect.arrayContaining([moveTarget.id, deleteTarget.id]));
 		expect(store.getDomainEvents().some(event => event.aggregateId === deleteTarget.id && event.type === "character.moved_out")).toBe(true);
 	});
 
@@ -562,11 +574,12 @@ describe("campaign activity event presentation", () => {
 		expect(JSON.stringify(normalized)).not.toMatch(/character-id/);
 	});
 
-	it("adds snapshots at the authoritative event write point without exposing IDs", () => {
+	it("adds snapshots to targeted events at the authoritative write point without exposing IDs", () => {
 		const payload = enrichEventPayload({
 			payload: {targetCharacterId: "target", sourceKind: "character", sourceId: "source"},
 			aggregateType: "character",
 			aggregateId: "aggregate",
+			visibility: "explicit_accounts",
 			getCharacterById: id => ({data: {name: `<b>${id === "aggregate" ? "The Hero" : id} name</b>`}}),
 		});
 		expect(payload.characterNameSnapshot.displayName).toBe("The Hero name");
@@ -575,5 +588,27 @@ describe("campaign activity event presentation", () => {
 		expect(normalizeHubEvent({
 			event: {type: "character.created", aggregateType: "character", aggregateId: "aggregate", payload},
 		}).title).not.toContain("aggregate");
+	});
+
+	it("keeps canonical names and owner association out of shared event payloads", () => {
+		const payload = enrichEventPayload({
+			payload: {
+				targetCharacterId: "target",
+				sourceKind: "character",
+				sourceId: "source",
+				ownerAccountId: "account-1",
+				characterNameSnapshot: {version: 1, displayName: "The Hero"},
+			},
+			aggregateType: "character",
+			aggregateId: "aggregate",
+			visibility: "all_members",
+			getCharacterById: id => ({data: {name: `${id} name`}}),
+		});
+
+		// A durable event is never rewritten, so a name captured here would survive an
+		// owner later narrowing their sharing policy. Shared rows carry ids only.
+		expect(payload).toEqual({targetCharacterId: "target", sourceKind: "character", sourceId: "source"});
+		expect(JSON.stringify(payload)).not.toContain("account-1");
+		expect(JSON.stringify(payload)).not.toContain("The Hero");
 	});
 });

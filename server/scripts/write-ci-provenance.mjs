@@ -1,5 +1,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+// Sourced from the runtime, not restated: an attestation that disagrees with what the
+// server actually enforces is worse than no attestation.
+import {HUB_PROTOCOL_VERSION} from "../src/app.js";
+import {HUB_REQUIRED_MIGRATION_VERSION} from "../src/migration-version.js";
 
 const imageRef = process.env.HUB_CI_IMAGE_REF?.trim();
 const archiveSha256 = process.env.HUB_CI_IMAGE_ARCHIVE_SHA256?.trim();
@@ -30,8 +34,8 @@ const evidence = {
 	},
 	versions: {
 		app: packageJson.version,
-		protocol: "1",
-		migration: "0004",
+		protocol: HUB_PROTOCOL_VERSION,
+		migration: HUB_REQUIRED_MIGRATION_VERSION,
 	},
 	inputs: {
 		packageLockSha256: crypto.createHash("sha256").update(lockBytes).digest("hex"),

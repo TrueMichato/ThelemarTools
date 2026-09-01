@@ -606,6 +606,32 @@ export class HubCampaignPage {
 	}
 
 	/**
+	 * Drive the real sharing controls and the real Save button.
+	 *
+	 * Direct API helpers cannot cover this: they attach their own mutation headers, so a
+	 * client that forgets CSRF/idempotency still passes. Only clicking Save exercises the
+	 * request the browser actually sends.
+	 */
+	async changeSharingPresetAndSave ({preset, expectPreviewText}: {preset: string; expectPreviewText: string}): Promise<void> {
+		const sharing = this.page.locator(".charsheet__sharing");
+		await expect(sharing).toBeVisible();
+		await sharing.locator(`input[name='charsheet-sharing-preset'][value='${preset}']`).check();
+		await sharing.locator(".charsheet__sharing-save").click();
+		await expect(sharing.locator(".charsheet__sharing-feedback--success")).toHaveText("Sharing settings saved.");
+		await expect(sharing.locator(".charsheet__sharing-preview")).toContainText(expectPreviewText);
+	}
+
+	/** Set one field to "Show instead" and save, exercising the generated typed controls. */
+	async replaceSharedFieldAndSave ({field, expectPreviewText}: {field: string; expectPreviewText: string}): Promise<void> {
+		const sharing = this.page.locator(".charsheet__sharing");
+		await sharing.locator(`input[name='charsheet-sharing-${field}'][value='replace']`).check();
+		await expect(sharing.locator(".charsheet__sharing-replacement").first()).toBeVisible();
+		await sharing.locator(".charsheet__sharing-save").click();
+		await expect(sharing.locator(".charsheet__sharing-feedback--success")).toHaveText("Sharing settings saved.");
+		await expect(sharing.locator(".charsheet__sharing-preview")).toContainText(expectPreviewText);
+	}
+
+	/**
 	 * The owner's sharing controls must be usable without reading JSON or ids, and the
 	 * preview must reflect the server's own peer profile.
 	 */

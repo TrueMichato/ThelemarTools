@@ -241,6 +241,7 @@ export class HubApiClient {
 		return this._pRequest(`/api/characters/${encodeURIComponent(characterId)}/projection-policy`, {
 			method: "PUT",
 			body: {policy, expectedProjectionRevision},
+			isMutation: true,
 			idempotencyKey,
 		});
 	}

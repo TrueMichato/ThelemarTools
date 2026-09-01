@@ -34,7 +34,7 @@
 | `membership.role_changed` | membership | all_members | account id, role | Owner-authorized non-owner role change |
 | `membership.removed` | membership | all_members | account id, detached character ids | Administrative removal completed |
 | `membership.left` | membership | all_members | account id, detached character ids | Voluntary leave/account purge cleanup |
-| `character.created` | character | all_members | owner account id | Full document not emitted |
+| `character.created` | character | all_members | empty | Full document not emitted; owner association is roster metadata, not an event payload |
 | `character.reactivated` | character | all_members | empty | Same scoped import reactivates archived row |
 | `character.patched` | character | actor_and_dm | submitted patches | Private owner/DM state event |
 | `character.projection.invalidated` | character | all_members | `{projectionRevision}` only | Metadata-only ([ADR 0011](adr/0011-authorization-scoped-character-projections.md)). Carries no character field, patch, path, amount, field name or display text — including no name snapshot. Consumers refetch through the scoped HTTP projector |

@@ -28,7 +28,10 @@ export const PRESET_CHOICES = Object.freeze([
 	{
 		value: "private",
 		label: "Private",
-		description: "Share nothing. Other players see this character on the roster only if you also share their name; hiding your name keeps you off shared target lists.",
+		// Existence is deliberately not hidden: ADR 0011 treats the character id and its
+		// presence on the roster as campaign metadata. Promising otherwise would be a
+		// privacy claim the server does not make.
+		description: "Share no details. Other players can still see that this character is in the campaign, but not its name, stats, or who plays it — and it cannot be picked as a target.",
 	},
 ]);
 
@@ -96,7 +99,7 @@ export const FIELD_DESCRIPTORS = Object.freeze({
 		label: "Skills",
 		shape: "object",
 		parts: SKILL_KEYS.flatMap(key => [
-			num(`${key}.modifier`, `${key} modifier`, {min: -99, max: 99}),
+			num(`${key}.modifier`, `${key} modifier`, {min: -99, max: 99, isRequired: true}),
 			{key: `${key}.rank`, label: `${key} training`, kind: "select", options: SKILL_RANKS},
 		]),
 	},
@@ -132,6 +135,16 @@ export const FIELD_DESCRIPTORS = Object.freeze({
 		shape: "object",
 		parts: [num("carried", "Carried", {min: 0, max: 99999}), num("capacity", "Capacity", {min: 0, max: 99999}), text("state", "Or a word instead of numbers", {maxLength: 40})],
 	},
+});
+
+/**
+ * Fields whose parts are all optional still have to carry at least one value, so a
+ * freshly opened control starts from a neutral label rather than an empty object the
+ * server would reject.
+ */
+const FIELD_EMPTY_FALLBACKS = Object.freeze({
+	hp: {state: "Hidden"},
+	carrySummary: {state: "Hidden"},
 });
 
 export const FIELD_KEYS = Object.freeze(Object.keys(FIELD_DESCRIPTORS));
@@ -284,11 +297,44 @@ export class CharacterSheetSharing {
 		return this._draft?.overrides?.[field]?.mode || "default";
 	}
 
+	/**
+	 * Seed a replacement from what is shared now, so "show instead" starts from something
+	 * real and every required value is present. A field the policy currently hides has no
+	 * preview, so it falls back to type-correct defaults — an empty draft would submit a
+	 * value the server must reject.
+	 */
 	_getInitialReplacementDraft (field) {
 		const descriptor = FIELD_DESCRIPTORS[field];
-		if (descriptor.shape === "list") return {items: [""]};
-		if (descriptor.shape === "rows") return {rows: [{}]};
-		return descriptor.rows ? {[descriptor.rows.key]: []} : {};
+		const current = this._preview?.data?.[field];
+		if (descriptor.shape === "list") {
+			return {items: Array.isArray(current) && current.length ? [...current] : [""]};
+		}
+		if (descriptor.shape === "rows") {
+			const rows = Array.isArray(current) && current.length
+				? current.map((row, index) => ({...row, _id: `${index}`}))
+				: [{_id: "0"}];
+			return {rows};
+		}
+		if (field === "exhaustion") {
+			return typeof current === "string" ? {label: current} : {value: Number.isFinite(current) ? current : 0};
+		}
+		const draft = current && typeof current === "object"
+			? structuredClone(current)
+			: structuredClone(FIELD_EMPTY_FALLBACKS[field] || {});
+		for (const part of descriptor.parts) {
+			if (getDeep(draft, part.key) != null) continue;
+			setDeep(draft, part.key, this._getPartDefault(part));
+		}
+		if (descriptor.rows) draft[descriptor.rows.key] ||= [];
+		return draft;
+	}
+
+	/** A type-correct starting value, so a freshly opened control is already submittable. */
+	_getPartDefault (part) {
+		if (part.kind === "checkbox") return false;
+		if (part.kind === "select") return part.options[0];
+		if (part.kind === "number") return part.isRequired ? Math.max(0, part.min) : "";
+		return part.isRequired ? "Hidden" : "";
 	}
 
 	/** Assemble the policy to submit. Replacement values are built from owner input only. */
@@ -490,6 +536,13 @@ export class CharacterSheetSharing {
 			input.value = getDeep(store, part.key) ?? "";
 		}
 		wrp.setAttribute("for", id);
+		// A checkbox or select shows a default the owner never touches; record it now so it
+		// is part of the submitted replacement rather than silently missing.
+		const rendered = part.kind === "checkbox" ? input.checked : input.value;
+		if (part.kind !== "text" || rendered !== "") {
+			if (target) target[part.key] = rendered;
+			else setDeep(store, part.key, rendered);
+		}
 		input.addEventListener("input", () => {
 			const value = part.kind === "checkbox" ? input.checked : input.value;
 			if (target) target[part.key] = value;

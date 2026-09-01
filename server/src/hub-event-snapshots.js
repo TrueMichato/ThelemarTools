@@ -33,8 +33,33 @@ function getSnapshotName (snapshot) {
  */
 const UNENRICHED_EVENT_TYPES = new Set(["character.projection.invalidated"]);
 
-export function enrichEventPayload ({payload = {}, aggregateType, aggregateId, getCharacterById, type = null}) {
+/**
+ * Payload keys that carry a canonical character name or an owner association. A durable
+ * event is never re-written, so a name captured here would survive an owner later
+ * choosing a narrower sharing policy — the policy could not retract it. Shared rows
+ * therefore carry none of these and derive their labels from the *current* peer-visible
+ * projection at render time; targeted rows may keep them because their audience is
+ * already authorized for that character.
+ */
+const SHARED_FORBIDDEN_PAYLOAD_KEYS = Object.freeze([
+	"characterNameSnapshot",
+	"characterNameSnapshots",
+	"targetCharacterNameSnapshot",
+	"sourceCharacterNameSnapshot",
+	"ownerAccountId",
+]);
+
+export function stripSharedCharacterIdentity (payload) {
+	const out = {...(payload && typeof payload === "object" ? payload : {})};
+	for (const key of SHARED_FORBIDDEN_PAYLOAD_KEYS) delete out[key];
+	return out;
+}
+
+export function enrichEventPayload ({payload = {}, aggregateType, aggregateId, getCharacterById, type = null, visibility = "all_members"}) {
 	if (UNENRICHED_EVENT_TYPES.has(type)) return payload && typeof payload === "object" ? {...payload} : {};
+	// A shared event reaches every member, including peers the owner shares nothing with,
+	// so it is stripped rather than enriched.
+	if (visibility === "all_members") return stripSharedCharacterIdentity(payload);
 	const sourcePayload = payload && typeof payload === "object" ? payload : {};
 	const enriched = {...sourcePayload};
 	const addSnapshot = (key, id) => {

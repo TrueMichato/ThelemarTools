@@ -174,6 +174,46 @@ describe("character sheet sharing controls", () => {
 		expect(sharing.getSubmittablePolicy().overrides).toEqual({});
 	});
 
+	it("submits a server-valid replacement for every catalog field without extra input", async () => {
+		const {validateProjectionPolicy} = await import("../../../server/src/character-projection.js");
+		const sharing = getSharing();
+		await sharing.pLoad();
+
+		// The defaults an owner sees the moment they pick "Show instead" — including
+		// checkbox and select values they never touch — must already be submittable.
+		for (const field of FIELD_KEYS) {
+			const value = buildReplacementValue({field, draft: sharing._getInitialReplacementDraft(field)});
+			let error = null;
+			try {
+				validateProjectionPolicy({version: 1, preset: "table", overrides: {[field]: {mode: "replace", value}}});
+			} catch (caught) {
+				error = caught.message;
+			}
+			expect({field, error}).toEqual({field, error: null});
+		}
+	});
+
+	it("seeds a replacement from what is currently shared", async () => {
+		const sharing = getSharing({
+			api: getApi({preview: {kind: "peer_profile", data: {identity: {name: "Mira"}, hp: {current: 4, max: 9}}}}),
+		});
+		await sharing.pLoad();
+
+		expect(sharing._getInitialReplacementDraft("identity")).toEqual(expect.objectContaining({name: "Mira"}));
+		expect(sharing._getInitialReplacementDraft("hp")).toEqual(expect.objectContaining({current: 4, max: 9}));
+		// A field the policy hides has no preview, so it falls back to a neutral label
+		// rather than an empty object the server would reject.
+		expect(sharing._getInitialReplacementDraft("carrySummary")).toEqual(expect.objectContaining({state: "Hidden"}));
+	});
+
+	it("describes the private preset without promising the character disappears", () => {
+		const preset = PRESET_CHOICES.find(choice => choice.value === "private");
+		// ADR 0011 deliberately keeps existence and the opaque id visible as roster
+		// metadata, so the copy must not claim otherwise.
+		expect(preset.description).toContain("can still see that this character is in the campaign");
+		expect(preset.description).not.toMatch(/only if you also share/);
+	});
+
 	it("is unavailable rather than broken without a character", async () => {
 		const sharing = getSharing({fnGetCharacterId: () => null});
 		await sharing.pLoad();

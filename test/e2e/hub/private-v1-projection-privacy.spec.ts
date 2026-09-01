@@ -83,6 +83,27 @@ test("character sharing policy narrows peer projections and survives a stale wri
 		// preview, with no raw policy JSON on screen.
 		await owner.openCharacterSheet({campaignId, characterId: character.id, name: "Mira"});
 		await owner.expectSharingControls({previewText: "steady"});
+
+		// Drive the real controls and the real Save button. A direct API helper attaches
+		// its own mutation headers, so it cannot catch a client that omits CSRF or an
+		// idempotency key — only a genuine click does.
+		// `minimal` hid the ability scores; saving `table` from the UI must bring them back.
+		await owner.changeSharingPresetAndSave({preset: "table", expectPreviewText: "Ability scores"});
+		const afterUiSave = await peer.getCharacterProjection(character.id);
+		expect(afterUiSave.data.abilities).toBeDefined();
+		expect(afterUiSave.data.skills).toBeDefined();
+		// The per-field override set earlier survives a preset change.
+		expect(afterUiSave.data.hp).toEqual({state: "steady"});
+
+		// "Show instead" submits the generated typed controls, including the checkbox and
+		// select defaults an owner never touches.
+		await owner.replaceSharedFieldAndSave({field: "saves", expectPreviewText: "Saving throws"});
+		const afterReplace = await peer.getCharacterProjection(character.id);
+		expect(Object.keys(afterReplace.data.saves)).toEqual(["str", "dex", "con", "int", "wis", "cha"]);
+		for (const save of Object.values<any>(afterReplace.data.saves)) {
+			expect(typeof save.proficient).toBe("boolean");
+			expect(Number.isInteger(save.modifier)).toBe(true);
+		}
 	} finally {
 		await Promise.all([dmContext.close(), ownerContext.close(), peerContext.close(), secondDeviceContext.close()]);
 	}

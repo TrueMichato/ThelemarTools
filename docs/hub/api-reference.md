@@ -120,10 +120,10 @@ Only the token hash is persisted. The raw token is returned only from creation.
 
 | Method/path | Authorization | Input | Result |
 |---|---|---|---|
-| `GET /api/characters?campaignId?` | Authenticated; campaign membership if scoped | optional campaign UUID | Owner's active characters; DMs see campaign characters; other members see only owned rows |
+| `GET /api/characters?campaignId?` | Authenticated; protocol-versioned | optional campaign UUID | Owner's active characters; DMs see campaign characters; other members see only owned rows. No response ever carries `projectionPolicy` — sharing settings are read only from the owner-only management endpoint |
 | `POST /api/characters` | Authenticated mutation; non-spectator membership if campaign scoped | `clientImportId`, `campaignId?`, `schemaVersion`, `data` | 201 created/reactivated/idempotently existing canonical character |
 | `GET /api/characters/:characterId` | Any active campaign member; protocol-versioned | none | `{projection}` — one ADR 0011 envelope: `owner_truth`, `dm_truth`, or `peer_profile` |
-| `GET /api/characters/:characterId/projection-policy` | Owner only; protocol-versioned | none | `{policy, projectionRevision, preview}`; `preview` is the server-computed peer profile, and `error` reports `PROJECTION_POLICY_INVALID` |
+| `GET /api/characters/:characterId/projection-policy` | Owner only; protocol-versioned | none | `{policy, projectionRevision, preview}`; `preview` is the server-computed peer profile, and `error` reports `PROJECTION_POLICY_INVALID`. A character owned by somebody else and one that does not exist both return `404 PROJECTION_POLICY_NOT_AVAILABLE`, so the endpoint cannot confirm an id |
 | `PUT /api/characters/:characterId/projection-policy` | Owner mutation | `{policy, expectedProjectionRevision}` + `Idempotency-Key` | Updated policy/preview, `409 PROJECTION_POLICY_CONFLICT` with the current safe state, or `422 PROJECTION_POLICY_INVALID` |
 | `POST /api/characters/:characterId/lease` | Owner mutation | `{takeover?}` | Lease session, monotonic epoch, expiry |
 | `PATCH /api/characters/:characterId` | Owner mutation + held lease | `baseRevision`, `leaseEpoch`, up to 500 add/remove/replace patches | Canonical character or revision/lease conflict |

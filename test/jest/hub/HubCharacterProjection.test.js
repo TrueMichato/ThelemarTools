@@ -76,6 +76,41 @@ describe("authorization-scoped character projections", () => {
 			expect(viewModel.identity).toEqual({name: "Mira Vale", pronouns: "she/her"});
 		});
 
+		it("includes persisted unconditional modifiers the sheet applies", () => {
+			// A peer profile and Party Tracker row must agree with the sheet: a custom save
+			// modifier and a magic-item bonus are persisted and unconditional, so leaving
+			// them out would understate the character everywhere the projection is shown.
+			const viewModel = buildCharacterViewModel(getCharacterData({
+				abilities: {str: 10, dex: 14, con: 12, int: 10, wis: 10, cha: 10},
+				abilityBonuses: {},
+				classes: [{name: "Rogue", level: 5}],
+				saveProficiencies: ["dex"],
+				skillProficiencies: {stealth: 1},
+				customModifiers: {savingThrows: {dex: 2}, skills: {stealth: 1, _all: 1}},
+				itemBonuses: {savingThrow: 1, savingThrowDex: 1},
+			}));
+
+			// dex 14 (+2) + proficiency 3 + custom 2 + blanket item 1 + per-ability item 1
+			expect(viewModel.saves.dex).toEqual({modifier: 9, proficient: true});
+			// con 12 (+1), unproficient, but the blanket item bonus applies to every save
+			expect(viewModel.saves.con).toEqual({modifier: 2, proficient: false});
+			// dex 14 (+2) + proficiency 3 + per-skill 1 + all-skills 1
+			expect(viewModel.skills.stealth).toEqual({modifier: 7, rank: "proficient"});
+			// int 10 (+0), unproficient, all-skills 1 still applies
+			expect(viewModel.skills.arcana).toEqual({modifier: 1, rank: "none"});
+		});
+
+		it("ignores transient state bonuses that are not part of the character", () => {
+			const base = buildCharacterViewModel(getCharacterData());
+			const withStates = buildCharacterViewModel(getCharacterData({
+				activeStates: {rage: true},
+				stateBonuses: {savingThrows: {str: 5}},
+			}));
+
+			// A projection describes the character, not whatever is toggled on right now.
+			expect(withStates.saves).toEqual(base.saves);
+		});
+
 		it("keeps unshared item truth out of the inventory summary", () => {
 			const viewModel = buildCharacterViewModel(getCharacterData());
 

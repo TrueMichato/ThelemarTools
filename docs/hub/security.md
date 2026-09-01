@@ -31,6 +31,13 @@
 - Projection invalidation events are metadata-only. The durable event, outbox, live fanout, replay and resync
   paths carry no character field, patch, path, amount, field name, display text or name snapshot; logging and
   metrics record projection kind, revisions and failure code only.
+- No shared (`all_members`) event payload carries a canonical character name or an owner association. A durable
+  event cannot be rewritten, so a name captured in one would survive an owner later choosing a narrower policy;
+  shared activity derives its labels from the current peer-visible projection instead. Name snapshots remain on
+  targeted events, whose audience is already authorized for that character.
+- Targeting is authorized on the server, not filtered in the browser. A peer proposing an effect or a transfer
+  to a character whose identity its owner hides receives the same `CHARACTER_NOT_FOUND` a non-existent
+  character produces, so a rejected probe cannot enumerate hidden characters.
 - WebSocket upgrades require same origin, session, active membership, and protocol version.
 - Event visibility is enforced server-side (`all_members`, `dm_only`, `actor_and_dm`,
   `explicit_accounts`) before replay or broadcast.

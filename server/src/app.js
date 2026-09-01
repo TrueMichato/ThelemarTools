@@ -1297,7 +1297,9 @@ export async function createHubApp ({
 		return reply.code(201).send(created);
 	});
 
-	app.get("/api/characters", {preHandler: requireAuth}, async request => ({
+	// Protocol-gated: the response shape changed when the owner's sharing policy stopped
+	// being part of a canonical character response.
+	app.get("/api/characters", {preHandler: requireProtocolVersion}, async request => ({
 		characters: await store.pListCharacters({
 			accountId: request.hubAuth.account.id,
 			campaignId: request.query?.campaignId || null,

@@ -124,8 +124,18 @@ describe("projection privacy canaries", () => {
 	it("refuses a peer the owner's raw policy and gives them the peer profile instead", async () => {
 		const {owner, peerA, character} = await setup();
 		const denied = await app.inject({method: "GET", url: `/api/characters/${character.id}/projection-policy`, headers: readHeaders(peerA)});
-		expect(denied.statusCode).toBe(403);
+		expect(denied.statusCode).toBe(404);
+		expect(denied.json().error).toBe("PROJECTION_POLICY_NOT_AVAILABLE");
 		expect(denied.body).not.toContain(CANARY);
+
+		// A character that does not exist is indistinguishable from one owned by somebody
+		// else, so this endpoint cannot confirm which ids are real.
+		const missing = await app.inject({
+			method: "GET",
+			url: `/api/characters/00000000-0000-4000-8000-000000000000/projection-policy`,
+			headers: readHeaders(peerA),
+		});
+		expect({status: missing.statusCode, body: missing.json()}).toEqual({status: denied.statusCode, body: denied.json()});
 
 		const read = await app.inject({method: "GET", url: `/api/characters/${character.id}`, headers: readHeaders(peerA)});
 		expect(read.json().projection.kind).toBe("peer_profile");
@@ -349,6 +359,110 @@ describe("projection privacy canaries", () => {
 		const members = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/members`, headers: readHeaders(peerA)})).json();
 		const list = members.members || members;
 		expect(list.some(member => member.id === fromSnapshot.ownerMembershipId)).toBe(true);
+	});
+
+	it("refuses peer actions and transfers targeting a private character", async () => {
+		const {owner, peerA, campaign, character} = await setup();
+		const base = (await app.inject({method: "GET", url: `/api/characters/${character.id}/projection-policy`, headers: readHeaders(owner)})).json();
+		await app.inject({
+			method: "PUT",
+			url: `/api/characters/${character.id}/projection-policy`,
+			headers: headers(owner),
+			payload: {expectedProjectionRevision: base.projectionRevision, policy: {version: 1, preset: "private", overrides: {}}},
+		});
+
+		// Targeting is authorized on the server, not merely filtered in the browser.
+		const action = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/actions`,
+			headers: headers(peerA),
+			payload: {targetCharacterId: character.id, effect: {type: "damage", amount: 3}},
+		});
+		expect(action.statusCode).toBe(404);
+		// Non-enumerating: identical to a character that does not exist.
+		const missing = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/actions`,
+			headers: headers(peerA),
+			payload: {targetCharacterId: "00000000-0000-4000-8000-000000000000", effect: {type: "damage", amount: 3}},
+		});
+		expect(action.json()).toEqual(missing.json());
+
+		const peerCharacter = (await app.inject({
+			method: "POST",
+			url: "/api/characters",
+			headers: headers(peerA),
+			payload: {clientImportId: "peer-own", campaignId: campaign.id, schemaVersion: 1, data: {...CHARACTER_DATA, name: "Peer Own", inventory: [{id: "gift", name: "Gift", quantity: 1}]}},
+		})).json().character;
+		const transfer = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(peerA),
+			payload: {
+				sourceKind: "character",
+				sourceId: peerCharacter.id,
+				targetKind: "character",
+				targetId: character.id,
+				payload: {entries: [{id: "gift", quantity: 1}]},
+			},
+		});
+		expect(transfer.statusCode).toBe(404);
+	});
+
+	it("still lets the DM and the owner target a private character", async () => {
+		const {dm, owner, campaign, character} = await setup();
+		const base = (await app.inject({method: "GET", url: `/api/characters/${character.id}/projection-policy`, headers: readHeaders(owner)})).json();
+		await app.inject({
+			method: "PUT",
+			url: `/api/characters/${character.id}/projection-policy`,
+			headers: headers(owner),
+			payload: {expectedProjectionRevision: base.projectionRevision, policy: {version: 1, preset: "private", overrides: {}}},
+		});
+
+		const dmAction = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/actions`,
+			headers: headers(dm),
+			payload: {targetCharacterId: character.id, effect: {type: "damage", amount: 1}},
+		});
+		expect(dmAction.statusCode).toBe(201);
+	});
+
+	it("never returns another owner's sharing policy on a character response", async () => {
+		const {dm, owner, campaign, character} = await setup();
+		const responses = [
+			await app.inject({method: "GET", url: `/api/characters?campaignId=${campaign.id}`, headers: readHeaders(dm)}),
+			await app.inject({
+				method: "POST",
+				url: `/api/campaigns/${campaign.id}/characters/${character.id}/item-grants`,
+				headers: headers(dm),
+				payload: {item: {name: "Torch"}, quantity: 1},
+			}),
+			await app.inject({
+				method: "POST",
+				url: `/api/campaigns/${campaign.id}/characters/${character.id}/xp-grants`,
+				headers: headers(dm),
+				payload: {amount: 10},
+			}),
+		];
+		for (const [index, response] of responses.entries()) {
+			expect({index, leaks: response.body.includes("projectionPolicy")}).toEqual({index, leaks: false});
+		}
+
+		// The owner's own responses are equally free of it: policy is read from the
+		// dedicated management endpoint, which is the only sanctioned source.
+		const ownList = await app.inject({method: "GET", url: "/api/characters", headers: readHeaders(owner)});
+		expect(ownList.body).not.toContain("projectionPolicy");
+	});
+
+	it("gates the campaign-scoped character list on the current protocol", async () => {
+		const {dm, campaign} = await setup();
+		const stale = await app.inject({
+			method: "GET",
+			url: `/api/characters?campaignId=${campaign.id}`,
+			headers: {cookie: dm.cookie, "x-hub-protocol-version": "1"},
+		});
+		expect(stale.statusCode).toBe(426);
 	});
 
 	it("keeps projection truth out of logs and metrics", () => {

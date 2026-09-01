@@ -228,6 +228,34 @@ function getSkillRank (level) {
 	return "none";
 }
 
+const MAX_MODIFIER = 99;
+
+function toModifier (value) {
+	return toFiniteNumber(value, {min: -MAX_MODIFIER, max: MAX_MODIFIER}) || 0;
+}
+
+/**
+ * Persisted, unconditional save bonuses the Character Sheet always applies:
+ * `customModifiers.savingThrows`, a blanket item bonus, and a per-ability item bonus.
+ *
+ * Transient active-state bonuses are deliberately excluded — a projection describes the
+ * character, not whatever is toggled on right now.
+ */
+function getPersistedSaveBonus (data, ability) {
+	const custom = toModifier(data.customModifiers?.savingThrows?.[ability]);
+	const blanketItem = toModifier(data.itemBonuses?.savingThrow ?? data.itemBonuses?.saves);
+	const perAbilityItem = toModifier(data.itemBonuses?.[`savingThrow${ability.charAt(0).toUpperCase()}${ability.slice(1)}`]);
+	return custom + blanketItem + perAbilityItem;
+}
+
+/**
+ * Persisted, unconditional skill bonuses, mirroring `getSkillCustomMod()`: a per-skill
+ * modifier plus the "all skills" modifier.
+ */
+function getPersistedSkillBonus (data, skill) {
+	return toModifier(data.customModifiers?.skills?.[skill]) + toModifier(data.customModifiers?.skills?._all);
+}
+
 function getInventoryEntries (data) {
 	return Array.isArray(data.inventory) ? data.inventory.filter(entry => entry && typeof entry === "object") : [];
 }
@@ -284,14 +312,20 @@ export function buildCharacterViewModel (characterData) {
 
 	const saves = Object.fromEntries(ABILITY_KEYS.map(ability => {
 		const proficient = saveProficiencies[ability];
-		const modifier = getAbilityModifier(abilities[ability]) + (proficient ? proficiencyBonus : 0);
+		const modifier = getAbilityModifier(abilities[ability])
+			+ (proficient ? proficiencyBonus : 0)
+			+ getPersistedSaveBonus(data, ability);
 		return [ability, {modifier, proficient}];
 	}));
 
 	const skills = Object.fromEntries(SKILL_KEYS.map(skill => {
 		const level = toFiniteNumber(data.skillProficiencies?.[skill], {min: 0, max: 2}) || 0;
 		const ability = SKILL_TO_ABILITY[skill];
-		const modifier = Math.trunc(getAbilityModifier(abilities[ability]) + (level * proficiencyBonus));
+		const modifier = Math.trunc(
+			getAbilityModifier(abilities[ability])
+			+ (level * proficiencyBonus)
+			+ getPersistedSkillBonus(data, skill),
+		);
 		return [skill, {modifier, rank: getSkillRank(level)}];
 	}));
 
@@ -668,6 +702,40 @@ export function computePeerProfile ({character}) {
  * When the persisted policy is invalid the owner/DM sees `PROJECTION_POLICY_INVALID`
  * while the preview stays empty — the same value peers receive.
  */
+/**
+ * The single outcome for a sharing-policy request the requester may not have: a character
+ * that does not exist and one owned by somebody else are indistinguishable, and neither
+ * confirms an id.
+ */
+/**
+ * Strip the owner's sharing configuration from a canonical character response.
+ *
+ * Raw policy is never a response field outside the owner's own management endpoint and
+ * the `owner_truth` envelope's `policy`. Campaign-scoped lists and DM mutation responses
+ * carry the document, so they must not carry another owner's choices with it.
+ */
+export function stripProjectionPolicy (character) {
+	if (!character || typeof character !== "object") return character;
+	const {projectionPolicy, ...rest} = character;
+	return rest;
+}
+
+/**
+ * A peer may only target a character whose identity that character's owner shares. The
+ * error is deliberately identical to "not found" so a rejected probe cannot enumerate
+ * hidden characters.
+ */
+export function assertPeerTargetable ({character, accountId, role, fnError}) {
+	if (character.ownerAccountId === accountId) return;
+	if (["dm", "co_dm"].includes(role)) return;
+	if (isPeerVisibleIdentity(character)) return;
+	throw fnError();
+}
+
+export function getPolicyNotAvailableError () {
+	return new HubStoreError("PROJECTION_POLICY_NOT_AVAILABLE", `Sharing settings are not available for this character.`, {status: 404});
+}
+
 export function getPolicyManagementResponse (character) {
 	const preview = computePeerProfile({character});
 	try {

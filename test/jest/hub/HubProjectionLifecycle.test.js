@@ -154,6 +154,17 @@ describe("projection lifecycle safety", () => {
 });
 
 describe("store parity guards", () => {
+	it("invalidates on archived-import reactivation in both stores", () => {
+		const pg = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");
+		const memory = fs.readFileSync(new URL("../../../server/src/memory-hub-store.js", import.meta.url), "utf8");
+		// Reactivation replaces the document and bumps the revision, so peers must be told
+		// to refetch. The memory store did this from the start; PostgreSQL must match.
+		const pgReactivation = pg.slice(pg.indexOf("character.reactivated"), pg.indexOf("character.reactivated") + 600);
+		expect(pgReactivation).toContain("_pAppendProjectionInvalidation");
+		const memoryReactivation = memory.slice(memory.indexOf("character.reactivated"), memory.indexOf("character.reactivated") + 900);
+		expect(memoryReactivation).toContain("_commitCharacterMutation");
+	});
+
 	it("joins membership in every PostgreSQL projection query that returns a roster", () => {
 		const source = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");
 		const rosterCallers = ["pGetCampaignSnapshot", "pListCampaignCharacterProjections"];
