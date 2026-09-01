@@ -79,6 +79,11 @@ The initial catalog is:
 | `spell_slot.spend` | integer `level`, positive integer `amount` | Decrement the matching slot if available |
 | `spell_slot.restore` | integer `level`, positive integer `amount` | Increment the matching slot, clamped to its maximum |
 
+This low-level operation envelope is a privileged command surface. Only a DM, co-DM, or an allowlisted
+internal server workflow may submit a generic `kind` plus `arguments`. A player/peer route rejects a body that
+contains free-authored operation kind or arguments; target approval must never turn arbitrary peer JSON into an
+authoritative effect.
+
 The authoritative event contains the declared operation after input normalization, its semantic version,
 resulting character revision, actor/target metadata, and no unrelated character fields. It never substitutes a
 post-clamp effective delta: `hp.heal 5` remains `hp.heal 5` even if canonical HP clamps, so the client can apply
@@ -90,26 +95,94 @@ Informational requests do not mutate a character and are not disguised as semant
 Inventory transfers, XP grants, and item grants keep their existing domain-specific commands until they adopt
 equivalent versioned operation contracts.
 
+### Source-derived peer proposals
+
+A peer effect originates from an actual Character Sheet ability or spell targeting flow, not the generic
+operation catalog. The proposal command has this closed shape:
+
+```json
+{
+  "commandId": "UUID",
+  "sourceCharacterId": "actor-owned character UUID",
+  "sourceEntity": {
+    "type": "ability",
+    "uid": "stable source entity identity",
+    "version": "stable content/rules version"
+  },
+  "effectTemplateId": "server-recognized template identity",
+  "choice": {"templateDefinedChoice": "closed typed value"},
+  "targetRef": "opaque targeting reference"
+}
+```
+
+`sourceEntity.type` is initially `ability` or `spell`. Its `uid` uses the stable entity identity from the
+activated campaign content/rules context, and `version` pins the exact semantics that produced the UI choice.
+`effectTemplateId` selects a server registry entry for that entity version. `choice` may contain only selectors
+declared by that template, such as a listed mode or cast level; it cannot contain an operation `kind`, amount,
+condition, slot delta, or other free-authored effect argument unless the template itself defines that exact
+closed choice.
+
+Monster/NPC sources, one proposal producing multiple target mutations, and area/multi-target orchestration are
+outside this initial contract.
+
+The server, not the peer, derives the normalized semantic operation from
+`sourceEntity + effectTemplateId + choice`. At proposal creation it authoritatively validates:
+
+1. the authenticated actor owns `sourceCharacterId`, which is active in the same campaign;
+2. the pinned source entity/template exists in the active content/rules policy and the submitted choice matches
+   its schema;
+3. the canonical source character actually has the source and can currently use the chosen template;
+4. the opaque target reference is valid for that source, range/target policy permits it, and the actor is
+   allowed to propose to it;
+5. operation derivation produces exactly one supported single-target operation;
+6. all source-side resource and cost semantics are supported by this contract.
+
+The same checks run again while holding the source and target aggregate locks in stable id order immediately
+before application. The apply transaction uses current source/target truth and the pinned entity/template
+version. Target approval is consent, not authority to legitimize a missing, arbitrary, no-longer-usable, or
+stale source.
+
+This initial contract deliberately supports only templates whose declared actor-side cost is `none`. A peer
+effect that would consume or reserve a spell slot, charge, limited use, item, ammunition, currency, material
+component, concentration state, action/reaction, or any other source-character state fails closed with
+`SOURCE_COST_UNSUPPORTED` before a pending action is created and again at apply. No actor resource is reserved
+at proposal, committed at approval, or released on reject/cancel/expiry in this initial scope because no
+cost-bearing peer proposal is admitted. Supporting such effects later requires an atomic reservation contract
+that names each reserved resource, prevents double spend, commits source cost with the target effect, and
+releases it on every terminal non-applied transition.
+
+The server stores immutable, privacy-safe `sourceDisplaySnapshot`, `targetDisplaySnapshot`, and
+`effectDisplaySnapshot` values with the proposal for approval and audit UI. They are derived from the applicable
+ADR 0011 peer profiles plus template-owned display text, not copied character/entity truth. Events may include
+those snapshots and the actor's submitted source identity/version/template/choice, but never hidden source or
+target state, derived eligibility facts, effective/clamped deltas, or a broader profile.
+
+Target discovery uses only profile-visible identity and opaque references. Proposal/apply failures sent to the
+peer actor are non-enumerating (`SOURCE_OR_TARGET_UNAVAILABLE` or `PROPOSAL_STALE`); target owner and DM may
+receive an actionable private reason. A different failure code, timing response, activity row, or event payload
+must not reveal hidden HP, condition, spell-slot, inventory, carry, source availability, or target eligibility.
+
 ### Approval policy
 
 - A DM/co-DM operation is authorized and applied immediately in one canonical transaction. It does not create
   a pending approval merely because the target belongs to a player.
-- A peer operation always enters `proposed`, including a self-targeted operation, and requires an explicit
-  target-owner approval command before application.
+- A source-derived peer proposal always enters `proposed`, including a self-targeted proposal, and requires an
+  explicit target-owner approval command before application. This ADR defines no owner-local semantic-command
+  exception; self-targeting uses the same provenance, derivation, validation, expiry, and approval path.
 - A target owner may approve or reject. A DM/co-DM may reject or cancel abusive/stale proposals, but approving
   on the target's behalf is unnecessary: a DM who intends the effect issues a new DM operation, which
   auto-applies with its own actor and command identity.
-- Proposal creation validates membership, target visibility/token, and operation syntax only. It does not
-  disclose hidden HP, conditions, spell slots, inventory, or carry state. Semantic validation occurs at apply
-  time under the target lock. A peer actor receives a non-enumerating terminal failure if private state makes
-  the operation invalid; target owner and DM may receive the actionable reason.
+- Proposal creation and application both perform the authoritative source, policy, derivation, target, and cost
+  validation above. Neither response discloses hidden HP, conditions, spell slots, inventory, carry, source
+  usability, or target eligibility.
 - Every peer proposal receives a bounded, non-null expiry at creation. Expiry is a terminal transition with its
   own stable event id; the implementation may configure the duration but may not leave proposals indefinitely
   actionable.
 
-Application locks the target aggregate, rechecks actor/approver authorization inside the transaction, applies
-the operation to current canonical truth, increments the character revision, and commits the receipt,
-pending-action transition when applicable, audit, domain event, metadata-only projection invalidation from
+Application locks the source and target aggregates in stable id order, rechecks actor/approver authorization
+inside the transaction, re-derives and applies the operation to current canonical target truth, increments the
+target character revision, and commits the receipt, pending-action transition when applicable, audit, domain
+event, metadata-only projection invalidation from
 [ADR 0011](0011-authorization-scoped-character-projections.md), and outbox rows atomically.
 
 Semantic operations do not require or steal the target owner's edit lease. The revision change intentionally
@@ -227,16 +300,25 @@ Production implementation is not complete until tests cover:
 
 1. stable `commandId`, `operationId`, and `eventId` across exact retries, lost responses, outbox retry, and
    reconnect, plus mismatch rejection;
-2. immediate DM/co-DM application and mandatory target approval for peer operations;
-3. deterministic damage, heal, condition, spell-slot spend/restore semantics and version validation;
-4. the exact `B/L`, `R = E(B)`, `F = E(L)`, `diff(R, F)` transition, including clamping/non-commutative cases;
-5. both in-flight orderings, newer live edits, duplicate/out-of-order event delivery, and replay watermark
+2. generic operation admission for DM/co-DM/internal callers only, and rejection of peer-authored `kind`,
+   `arguments`, amounts, or condition/resource deltas;
+3. required `sourceCharacterId`, stable `sourceEntity` identity/version, `effectTemplateId`, and typed `choice`,
+   including actor ownership, source presence/usability, policy, derivation, target, and apply-time stale-source
+   checks;
+4. immediate DM/co-DM application and mandatory target approval for source-derived peer proposals, including
+   the same path for self-targeting;
+5. fail-closed `SOURCE_COST_UNSUPPORTED` behavior, no initial source reservation/mutation, and terminal
+   reject/cancel/expiry behavior;
+6. privacy-safe source/target/effect display snapshots plus non-enumerating target/source/eligibility failures;
+7. deterministic damage, heal, condition, spell-slot spend/restore semantics and version validation;
+8. the exact `B/L`, `R = E(B)`, `F = E(L)`, `diff(R, F)` transition, including clamping/non-commutative cases;
+9. both in-flight orderings, newer live edits, duplicate/out-of-order event delivery, and replay watermark
    behavior;
-6. lease expiry, takeover fencing, session revocation, membership removal, role demotion, archive, and pending
+10. lease expiry, takeover fencing, session revocation, membership removal, role demotion, archive, and pending
    proposal cancellation;
-7. semantic events arriving before and during each existing conflict modal choice;
-8. privacy canaries proving operation details and eligibility failures do not cross ADR 0011 boundaries;
-9. parity between memory and PostgreSQL authority plus real two-browser reconnect evidence.
+11. semantic events arriving before and during each existing conflict modal choice;
+12. privacy canaries proving operation details and eligibility failures do not cross ADR 0011 boundaries;
+13. parity between memory and PostgreSQL authority plus real two-browser reconnect evidence.
 
 The implementation change must update ADR 0002's proof description, API and realtime protocol documents, event
 catalog, permission matrix, domain state machine, data lifecycle/retention, security model, Character Sheet
@@ -261,5 +343,9 @@ architecture, and conflict-recovery tests.
 - **Require target approval for DM operations:** it defeats the adopted DM authority model.
 - **Let DMs approve peer proposals:** a fresh DM command expresses the true actor and preserves the approval
   rule.
+- **Let peers submit generic operations for approval:** consent cannot prove an actual ability/spell source,
+  derive trusted effects, or make stale source/cost state valid.
+- **Partially support unreserved peer source costs:** retries and concurrent proposals could double-spend actor
+  resources; unsupported cost-bearing templates fail closed until atomic reservation exists.
 - **Ignore operations while a conflict modal is open:** the later modal choice could silently undo canonical
   state.
