@@ -65,6 +65,45 @@
 		display: none !important;
 	}
 
+	body.is-charsheet-mobile .charsheet__campaign {
+		grid-template-columns: minmax(0, 1fr) auto;
+		padding: 0.4rem 0.5rem;
+	}
+
+	body.is-charsheet-mobile .charsheet__campaign-detail {
+		white-space: normal;
+	}
+
+	body.is-charsheet-mobile .charsheet__campaign-button,
+	body.is-charsheet-mobile .charsheet__campaign-submit {
+		min-height: 44px;
+	}
+
+	body.is-charsheet-mobile .charsheet__campaign-panel {
+		grid-template-columns: 1fr;
+	}
+
+	body.is-charsheet-mobile .charsheet__campaign-panel-heading {
+		grid-column: auto;
+	}
+
+	body.is-charsheet-mobile .charsheet__campaign-move {
+		padding: 0.625rem;
+	}
+
+	body.is-charsheet-mobile .charsheet__campaign-confirm {
+		min-height: 44px;
+	}
+
+	body.is-charsheet-mobile .charsheet__campaign-confirm input {
+		width: 20px;
+		height: 20px;
+	}
+
+	body.is-charsheet-mobile .charsheet__campaign-submit--danger {
+		width: 100%;
+	}
+
 	/* Collapsed, the row is a single line: selector + save state + toggle. */
 	body.is-charsheet-mobile .charsheet__header-row--primary {
 		flex-wrap: nowrap;

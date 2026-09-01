@@ -12,6 +12,81 @@ describe("HTTP character repository", () => {
 		await expect(repository.pList()).resolves.toEqual([{id: "server-1", name: "Mira"}]);
 	});
 
+	it("lists only detached documents when no campaign scope is selected", async () => {
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pListCharacters: async ({campaignId}) => {
+				expect(campaignId).toBeNull();
+				return [
+					{id: "detached", campaignId: null, revision: 1, data: {name: "Mira"}},
+					{id: "attached", campaignId: "campaign-1", revision: 1, data: {name: "Tarin"}},
+				];
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: null, api});
+
+		await expect(repository.pList()).resolves.toEqual([{id: "detached", name: "Mira"}]);
+	});
+
+	it("rejects a character that moved outside the repository campaign scope", async () => {
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({
+				id: "moved",
+				campaignId: "campaign-2",
+				revision: 2,
+				data: {name: "Mira"},
+			}),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+
+		await expect(repository.pGet({characterId: "moved"})).rejects.toMatchObject({
+			code: "CHARACTER_CAMPAIGN_MISMATCH",
+			characterId: "moved",
+			campaignId: "campaign-2",
+		});
+		await expect(repository.pGetCampaignId({characterId: "moved"})).resolves.toBe("campaign-2");
+	});
+
+	it("releases the current repository lease and forgets its epoch", async () => {
+		let releaseInput;
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pAcquireCharacterLease: async () => ({epoch: 7}),
+			pReleaseCharacterLease: async input => {
+				releaseInput = input;
+				return {released: true};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pAcquireLease({characterId: "server-1"});
+
+		await expect(repository.pReleaseLease({characterId: "server-1"})).resolves.toEqual({released: true});
+		expect(releaseInput).toEqual({characterId: "server-1"});
+		expect(repository._leases.has("server-1")).toBe(false);
+	});
+
+	it("clears only retryable lease conflicts without discarding recovery data", () => {
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api: {}});
+		const leaseRecovery = {
+			local: {name: "Local"},
+			server: {name: "Server"},
+			conflicts: [{reason: "LEASE_HELD"}],
+		};
+		repository._conflicts.set("lease-conflict", leaseRecovery);
+		repository._failedWrites.set("lease-conflict", leaseRecovery.local);
+		repository._conflicts.set("data-conflict", {
+			...leaseRecovery,
+			conflicts: [{reason: "overlapping paths"}],
+		});
+
+		expect(repository.clearRetryableLeaseConflict({characterId: "lease-conflict"})).toBe(true);
+		expect(repository.getConflictRecovery("lease-conflict")).toBeNull();
+		expect(repository._failedWrites.get("lease-conflict")).toEqual(leaseRecovery.local);
+		expect(repository.clearRetryableLeaseConflict({characterId: "data-conflict"})).toBe(false);
+		expect(repository.getConflictRecovery("data-conflict")).not.toBeNull();
+	});
+
 	it("creates a cloud document and adopts its canonical server id", async () => {
 		const api = {
 			pGetSession: async () => ({signedIn: true}),
@@ -35,6 +110,7 @@ describe("HTTP character repository", () => {
 			pGetSession: async () => ({signedIn: true}),
 			pGetCharacter: async () => ({
 				id: "server-1",
+				campaignId: "campaign-1",
 				revision: 3,
 				data: {name: "Mira", hp: {current: 20}},
 			}),
@@ -106,7 +182,7 @@ describe("HTTP character repository", () => {
 		const calls = [];
 		const api = {
 			pGetSession: async () => ({signedIn: true}),
-			pGetCharacter: async () => ({id: "c", revision: 1, data: {xp: 0, hp: {current: 20}}}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {xp: 0, hp: {current: 20}}}),
 			pAcquireCharacterLease: async () => ({epoch: 1}),
 			pPatchCharacter: async input => {
 				calls.push(input);
@@ -129,8 +205,8 @@ describe("HTTP character repository", () => {
 		const api = {
 			pGetSession: async () => ({signedIn: true}),
 			pGetCharacter: async () => patchCalls
-				? {id: "c", revision: 2, data: {name: "Mira", xp: 200, notes: "old"}}
-				: {id: "c", revision: 1, data: {name: "Mira", xp: 100, notes: "old"}},
+				? {id: "c", campaignId: "cmp", revision: 2, data: {name: "Mira", xp: 200, notes: "old"}}
+				: {id: "c", campaignId: "cmp", revision: 1, data: {name: "Mira", xp: 100, notes: "old"}},
 			pAcquireCharacterLease: async () => ({epoch: 1}),
 			pPatchCharacter: async input => {
 				if (!patchCalls++) {
@@ -153,8 +229,8 @@ describe("HTTP character repository", () => {
 		const api = {
 			pGetSession: async () => ({signedIn: true}),
 			pGetCharacter: async () => ++getCount === 1
-				? {id: "c", revision: 1, data: {name: "Mira", xp: 100}}
-				: {id: "c", revision: 2, data: {name: "Mira", xp: 200}},
+				? {id: "c", campaignId: "cmp", revision: 1, data: {name: "Mira", xp: 100}}
+				: {id: "c", campaignId: "cmp", revision: 2, data: {name: "Mira", xp: 200}},
 			pAcquireCharacterLease: async () => ({epoch: 1}),
 			pPatchCharacter: async () => {
 				const error = new Error("conflict");
@@ -198,8 +274,8 @@ describe("HTTP character repository", () => {
 		const api = {
 			pGetSession: async () => ({signedIn: true}),
 			pGetCharacter: async () => ++getCount === 1
-				? {id: "c", revision: 1, data: {name: "Mira", xp: 100}}
-				: {id: "c", revision: 2, data: {name: "Mira", xp: 200}},
+				? {id: "c", campaignId: "cmp", revision: 1, data: {name: "Mira", xp: 100}}
+				: {id: "c", campaignId: "cmp", revision: 2, data: {name: "Mira", xp: 200}},
 			pAcquireCharacterLease: async () => ({epoch: 1}),
 			pPatchCharacter: async () => {
 				doNotifyStarted();
@@ -226,7 +302,7 @@ describe("HTTP character repository", () => {
 		let attempts = 0;
 		const api = {
 			pGetSession: async () => ({signedIn: true}),
-			pGetCharacter: async () => ({id: "c", revision: 1, data: {hp: 10}}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
 			pAcquireCharacterLease: async () => ({epoch: 1}),
 			pPatchCharacter: async input => {
 				keys.push(input.idempotencyKey);

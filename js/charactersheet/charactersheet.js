@@ -38,6 +38,7 @@ import {CharacterSheetDruidResources} from "./charactersheet-druid-resources.js"
 import {CharacterSheetIoun} from "./charactersheet-ioun.js";
 import {CharacterSheetSpawnSpec, CharacterSheetSpawnRng} from "./charactersheet-spawn.js";
 import {CharacterSheetSpawner} from "./charactersheet-spawn-drivers.js";
+import {CharacterSheetCampaign, getCloudCharacterUrl} from "./charactersheet-campaign.js";
 import {LocalCharacterRepository} from "../hub/hub-character-repository.js";
 import {HubHttpCharacterRepository} from "../hub/hub-http-character-repository.js";
 import {HubCampaignContext} from "../hub/hub-campaign-context.js";
@@ -67,14 +68,17 @@ class CharacterSheetPage {
 
 	constructor ({characterRepository = null} = {}) {
 		this._state = new CharacterSheetState();
-		const hubCampaignId = typeof window === "undefined"
-			? null
-			: new URLSearchParams(window.location.search).get("hubCampaign");
+		const hubParams = typeof window === "undefined"
+			? new URLSearchParams()
+			: new URLSearchParams(window.location.search);
+		const hubCampaignId = hubParams.get("hubCampaign");
+		const isHubCharacter = !!hubCampaignId || hubParams.get("hubCharacter") === "1";
 		this._characterRepository = characterRepository
-			|| (hubCampaignId
+			|| (isHubCharacter
 				? new HubHttpCharacterRepository({campaignId: hubCampaignId})
 				: new LocalCharacterRepository({storage: StorageUtil}));
 		this._hubCampaignId = hubCampaignId;
+		this._isHubCharacter = isHubCharacter;
 		this._hubCampaignContext = null;
 		this._hubContext = null;
 		this._hubRollLogAdapter = null;
@@ -93,6 +97,7 @@ class CharacterSheetPage {
 		this._quickBuild = null;
 		this._upgrades = null;
 		this._playMode = null;
+		this._campaign = null;
 		this._druidResources = null;
 		this._druidResourcesEnabled = false;
 		this._ioun = null;
@@ -159,9 +164,20 @@ class CharacterSheetPage {
 		this._dialectParentMap = {};
 	}
 
+	async _pCanonicalizeHubCharacterUrl () {
+		if (!this._isHubCharacter || !this._characterRepository.pGetCampaignId) return false;
+		const characterId = new URLSearchParams(window.location.search).get("id");
+		if (!characterId) return false;
+		const campaignId = await this._characterRepository.pGetCampaignId({characterId});
+		if (campaignId === this._hubCampaignId) return false;
+		window.location.replace(getCloudCharacterUrl({campaignId, characterId}));
+		return true;
+	}
+
 	async pInit () {
 		// eslint-disable-next-line no-console
 		this._pInitLoadingTip().catch(err => console.warn("Failed to init loading tip:", err));
+		if (await this._pCanonicalizeHubCharacterUrl()) return;
 		if (this._hubCampaignId) {
 			this._hubCampaignContext = new HubCampaignContext({campaignId: this._hubCampaignId});
 			this._hubContext = await this._hubCampaignContext.pActivate();
@@ -253,6 +269,10 @@ class CharacterSheetPage {
 		} catch (e) { console.error("Failed to init playMode:", e); }
 
 		try {
+			this._campaign = new CharacterSheetCampaign({page: this});
+		} catch (e) { console.error("Failed to init campaign control:", e); }
+
+		try {
 			this._respec = new CharacterSheetRespec({page: this, state: this._state});
 			this._respec.init();
 		} catch (e) { console.error("Failed to init respec:", e); }
@@ -289,8 +309,12 @@ class CharacterSheetPage {
 		const urlParams = new URLSearchParams(window.location.search);
 		const charId = urlParams.get("id");
 		if (charId) {
-			await this._pLoadCharacter(charId);
+			if (!await this._pLoadCharacter(charId)) return;
 		}
+		this._campaign?.pInit().catch(error => {
+			// eslint-disable-next-line no-console
+			console.error("Failed to load campaign control:", error);
+		});
 
 		await this._pHandleSpawnUrl(urlParams);
 
@@ -1731,7 +1755,17 @@ class CharacterSheetPage {
 	}
 
 	async _pLoadCharacter (charId) {
-		const canonical = await this._characterRepository.pGet({characterId: charId});
+		let canonical;
+		try {
+			canonical = await this._characterRepository.pGet({characterId: charId});
+		} catch (error) {
+			if (error?.code !== "CHARACTER_CAMPAIGN_MISMATCH") throw error;
+			window.location.replace(getCloudCharacterUrl({
+				campaignId: error.campaignId,
+				characterId: error.characterId || charId,
+			}));
+			return false;
+		}
 
 		// Reconcile against the synchronous rescue mirror: if a mutation was mirrored but its
 		// async IndexedDB write never settled (fast refresh / character-switch race), the mirror
@@ -1796,6 +1830,7 @@ class CharacterSheetPage {
 			url.searchParams.set("id", charId);
 			window.history.replaceState({}, "", url);
 		}
+		return true;
 	}
 
 	_createNewCharacter () {
@@ -2496,6 +2531,7 @@ class CharacterSheetPage {
 		const refresh = () => {
 			this._saveCurrentCharacter();
 			this._renderCompanions();
+			this._campaign?.render();
 		};
 
 		card.querySelector(".btn-companion-ferocity-gain")?.addEventListener("click", async () => {
@@ -3607,7 +3643,7 @@ class CharacterSheetPage {
 		return nxt;
 	}
 
-	async _saveCurrentCharacter () {
+	async _saveCurrentCharacter ({isInteractiveConflict = true} = {}) {
 		if (!this._currentCharacterId) return;
 
 		// Show saving indicator
@@ -3674,6 +3710,10 @@ class CharacterSheetPage {
 			console.error("Save error:", err);
 			// Leave the sync mirror in place: it is the only surviving copy of this write.
 			this._updateSaveIndicator("error");
+			if (!isInteractiveConflict && ["CHARACTER_LIVE_CONFLICT", "CHARACTER_CONFLICT"].includes(err?.code)) {
+				this._characterRepository.clearRetryableLeaseConflict?.({characterId: this._currentCharacterId});
+				throw err;
+			}
 			if (err?.code === "CHARACTER_LIVE_CONFLICT") {
 				const choice = await InputUiUtil.pGetUserBoolean({
 					title: "Character Changed While Saving",

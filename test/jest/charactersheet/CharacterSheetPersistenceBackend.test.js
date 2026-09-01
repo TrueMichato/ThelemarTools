@@ -11,6 +11,7 @@
 // controllable dual-backend fake StorageUtil, plus a state-layer roundtrip guard.
 
 import "./setup.js";
+import {jest} from "@jest/globals";
 import {LocalCharacterRepository} from "../../../js/hub/hub-character-repository.js";
 
 const REPO_ROOT = new URL("../../../", import.meta.url).pathname;
@@ -209,5 +210,30 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 		const saved = canonical.find(c => c.id === "clean-id");
 		expect(saved).toBeTruthy();
 		expect(typeof saved._savedAt).toBe("number");
+	});
+
+	it("surfaces a campaign-operation conflict without opening the takeover dialog", async () => {
+		const conflict = Object.assign(new Error("Character is being edited on another device."), {
+			code: "CHARACTER_CONFLICT",
+			recovery: {conflicts: [{reason: "LEASE_HELD"}]},
+		});
+		const host = makeHost();
+		host._currentCharacterId = "cloud-id";
+		host._characterRepository = {
+			isRescueMirrorEnabled: false,
+			pUpsert: jest.fn(async () => { throw conflict; }),
+			pResolveConflict: jest.fn(),
+			clearRetryableLeaseConflict: jest.fn(() => true),
+		};
+		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean");
+		const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+
+		await expect(host._saveCurrentCharacter({isInteractiveConflict: false})).rejects.toBe(conflict);
+		expect(prompt).not.toHaveBeenCalled();
+		expect(host._characterRepository.pResolveConflict).not.toHaveBeenCalled();
+		expect(host._characterRepository.clearRetryableLeaseConflict).toHaveBeenCalledWith({characterId: "cloud-id"});
+
+		consoleError.mockRestore();
+		prompt.mockRestore();
 	});
 });

@@ -5,13 +5,16 @@ import {HubBroadcastSync} from "./hub-broadcast-sync.js";
 export class HubHttpCharacterRepository {
 	isRescueMirrorEnabled = false;
 
-	constructor ({campaignId, api = new HubApiClient(), broadcastSync = null}) {
-		if (typeof campaignId !== "string" || !campaignId) throw new TypeError(`campaignId is required.`);
+	constructor ({campaignId = null, api = new HubApiClient(), broadcastSync = null}) {
+		if (campaignId != null && (typeof campaignId !== "string" || !campaignId)) throw new TypeError(`campaignId must be a non-empty string or null.`);
 		this._campaignId = campaignId;
 		this._api = api;
-		this._broadcastSync = broadcastSync || (typeof BroadcastChannel === "undefined"
-			? null
-			: new HubBroadcastSync({campaignId}));
+		this._scopeKey = campaignId || "detached";
+		this._broadcastSync = broadcastSync || (
+			!campaignId || typeof BroadcastChannel === "undefined"
+				? null
+				: new HubBroadcastSync({campaignId})
+		);
 		this._session = null;
 		this._accepted = new Map();
 		this._canonicalIds = new Map();
@@ -42,18 +45,38 @@ export class HubHttpCharacterRepository {
 		return out;
 	}
 
+	_assertCharacterScope (character) {
+		const campaignId = character.campaignId || null;
+		if (campaignId === this._campaignId) return;
+		const error = new Error(`Character campaign changed.`);
+		error.code = "CHARACTER_CAMPAIGN_MISMATCH";
+		error.characterId = character.id;
+		error.campaignId = campaignId;
+		throw error;
+	}
+
+	async pGetCampaignId ({characterId}) {
+		await this._pEnsureSession();
+		const canonicalId = this._canonicalIds.get(characterId) || characterId;
+		const character = await this._api.pGetCharacter({characterId: canonicalId});
+		return character.campaignId || null;
+	}
+
 	async pList () {
 		await this._pEnsureSession();
-		return (await this._api.pListCharacters({campaignId: this._campaignId})).map(character => {
-			this._accepted.set(character.id, character);
-			return this._getData(character);
-		});
+		return (await this._api.pListCharacters({campaignId: this._campaignId}))
+			.filter(character => this._campaignId || character.campaignId == null)
+			.map(character => {
+				this._accepted.set(character.id, character);
+				return this._getData(character);
+			});
 	}
 
 	async pGet ({characterId}) {
 		await this._pEnsureSession();
 		const canonicalId = this._canonicalIds.get(characterId) || characterId;
 		const character = await this._api.pGetCharacter({characterId: canonicalId});
+		this._assertCharacterScope(character);
 		this._accepted.set(canonicalId, character);
 		const recovery = this._failedWrites.get(characterId) || this.getPendingRecovery(characterId);
 		if (recovery) {
@@ -85,8 +108,8 @@ export class HubHttpCharacterRepository {
 			map.set(toId, map.get(fromId));
 			map.delete(fromId);
 		}
-		const oldKey = `hub-character-recovery:${this._campaignId}:${fromId}`;
-		const newKey = `hub-character-recovery:${this._campaignId}:${toId}`;
+		const oldKey = `hub-character-recovery:${this._scopeKey}:${fromId}`;
+		const newKey = `hub-character-recovery:${this._scopeKey}:${toId}`;
 		if (this._recoveryVersions.has(oldKey)) {
 			this._recoveryVersions.set(newKey, this._recoveryVersions.get(oldKey));
 			this._recoveryVersions.delete(oldKey);
@@ -101,7 +124,7 @@ export class HubHttpCharacterRepository {
 	}
 
 	pUpsert ({character}) {
-		let recoveryKey = `hub-character-recovery:${this._campaignId}:${character.id}`;
+		let recoveryKey = `hub-character-recovery:${this._scopeKey}:${character.id}`;
 		const recoveryVersion = (this._recoveryVersions.get(recoveryKey) || 0) + 1;
 		this._recoveryVersions.set(recoveryKey, recoveryVersion);
 		const requestedId = character.id;
@@ -137,7 +160,7 @@ export class HubHttpCharacterRepository {
 			const canonicalId = this._canonicalIds.get(requestedId) || requestedId;
 			if (canonicalId !== requestedId) {
 				this._migrateCharacterIdentity({fromId: requestedId, toId: canonicalId});
-				recoveryKey = `hub-character-recovery:${this._campaignId}:${canonicalId}`;
+				recoveryKey = `hub-character-recovery:${this._scopeKey}:${canonicalId}`;
 			}
 			const characterNxt = {...structuredClone(submittedSnapshot), id: canonicalId};
 			const existingConflict = this._conflicts.get(canonicalId);
@@ -164,7 +187,7 @@ export class HubHttpCharacterRepository {
 					});
 					this._canonicalIds.set(requestedId, created.character.id);
 					this._migrateCharacterIdentity({fromId: requestedId, toId: created.character.id});
-					recoveryKey = `hub-character-recovery:${this._campaignId}:${created.character.id}`;
+					recoveryKey = `hub-character-recovery:${this._scopeKey}:${created.character.id}`;
 					this._accepted.set(created.character.id, created.character);
 					accepted = created.character;
 				}
@@ -283,7 +306,7 @@ export class HubHttpCharacterRepository {
 
 	getPendingRecovery (characterId) {
 		try {
-			const raw = this._recoveryStorage?.getItem(`hub-character-recovery:${this._campaignId}:${characterId}`);
+			const raw = this._recoveryStorage?.getItem(`hub-character-recovery:${this._scopeKey}:${characterId}`);
 			if (!raw) return null;
 			const parsed = JSON.parse(raw);
 			if (parsed.snapshot) {
@@ -302,6 +325,14 @@ export class HubHttpCharacterRepository {
 		return recovery ? structuredClone(recovery) : null;
 	}
 
+	clearRetryableLeaseConflict ({characterId}) {
+		const recovery = this._conflicts.get(characterId);
+		const reasons = recovery?.conflicts?.map(conflict => conflict?.reason).filter(Boolean) || [];
+		if (!reasons.length || reasons.some(reason => !["LEASE_HELD", "LEASE_FENCED", "LEASE_EXPIRED"].includes(reason))) return false;
+		this._conflicts.delete(characterId);
+		return true;
+	}
+
 	async pResolveConflict ({characterId, choice}) {
 		const recovery = this._conflicts.get(characterId);
 		if (!recovery) return null;
@@ -310,7 +341,7 @@ export class HubHttpCharacterRepository {
 			this._accepted.set(characterId, recovery.serverDocument);
 			this._failedWrites.delete(characterId);
 			this._failedCommands.delete(characterId);
-			const recoveryKey = `hub-character-recovery:${this._campaignId}:${characterId}`;
+			const recoveryKey = `hub-character-recovery:${this._scopeKey}:${characterId}`;
 			this._recoveryVersions.delete(recoveryKey);
 			try {
 				this._recoveryStorage?.removeItem(recoveryKey);
@@ -332,6 +363,13 @@ export class HubHttpCharacterRepository {
 		this._accepted.delete(characterId);
 		this._leases.delete(characterId);
 		return true;
+	}
+
+	async pReleaseLease ({characterId}) {
+		await this._pEnsureSession();
+		const result = await this._api.pReleaseCharacterLease({characterId});
+		this._leases.delete(characterId);
+		return result;
 	}
 
 	async pDeleteMany ({characterIds}) {
