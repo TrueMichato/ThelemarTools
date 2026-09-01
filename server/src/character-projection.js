@@ -234,26 +234,55 @@ function toModifier (value) {
 	return toFiniteNumber(value, {min: -MAX_MODIFIER, max: MAX_MODIFIER}) || 0;
 }
 
-/**
- * Persisted, unconditional save bonuses the Character Sheet always applies:
- * `customModifiers.savingThrows`, a blanket item bonus, and a per-ability item bonus.
- *
- * Transient active-state bonuses are deliberately excluded — a projection describes the
- * character, not whatever is toggled on right now.
- */
-function getPersistedSaveBonus (data, ability) {
-	const custom = toModifier(data.customModifiers?.savingThrows?.[ability]);
-	const blanketItem = toModifier(data.itemBonuses?.savingThrow ?? data.itemBonuses?.saves);
-	const perAbilityItem = toModifier(data.itemBonuses?.[`savingThrow${ability.charAt(0).toUpperCase()}${ability.slice(1)}`]);
-	return custom + blanketItem + perAbilityItem;
+function getAbilitySuffix (ability) {
+	return `${ability.charAt(0).toUpperCase()}${ability.slice(1)}`;
 }
 
 /**
- * Persisted, unconditional skill bonuses, mirroring `getSkillCustomMod()`: a per-skill
- * modifier plus the "all skills" modifier.
+ * Persisted, unconditional save bonuses, mirroring `CharacterSheetState.getSaveMod()`:
+ * `customModifiers.savingThrows`, a blanket item bonus, a per-ability item bonus, and
+ * Paladin Aura of Protection.
+ *
+ * The blanket item term uses `||`, not `??`, to match the sheet: a seeded
+ * `itemBonuses.savingThrow: 0` must fall through to the legacy `saves` key rather than
+ * making it unreachable.
+ *
+ * Transient contributions — active states, combat stances, ability substitutions — are
+ * deliberately excluded: a projection describes the character, not whatever is toggled on
+ * right now. See docs/hub/data-lifecycle.md for the full reconciliation.
+ */
+function getPersistedSaveBonus (data, ability, abilities) {
+	const custom = toModifier(data.customModifiers?.savingThrows?.[ability]);
+	const blanketItem = toModifier(data.itemBonuses?.savingThrow || data.itemBonuses?.saves);
+	const perAbilityItem = toModifier(data.itemBonuses?.[`savingThrow${getAbilitySuffix(ability)}`]);
+	return custom + blanketItem + perAbilityItem + getAuraOfProtectionBonus(data, abilities);
+}
+
+/** Paladin 6+ adds their Charisma modifier to every save. */
+function getAuraOfProtectionBonus (data, abilities) {
+	const isAuraPaladin = (Array.isArray(data.classes) ? data.classes : [])
+		.some(cls => `${cls?.name || ""}`.toLowerCase() === "paladin" && (toFiniteNumber(cls?.level, {min: 0, max: 20, isInteger: true}) || 0) >= 6);
+	return isAuraPaladin ? Math.max(0, getAbilityModifier(abilities.cha)) : 0;
+}
+
+/**
+ * Persisted, unconditional skill bonuses, mirroring
+ * `CharacterSheetState._getSkillModResolved()`: the per-skill and "all skills" custom
+ * modifiers, a blanket and per-ability item ability-check bonus, and the custom
+ * ability-check modifier — a skill check *is* an ability check.
  */
 function getPersistedSkillBonus (data, skill) {
-	return toModifier(data.customModifiers?.skills?.[skill]) + toModifier(data.customModifiers?.skills?._all);
+	const ability = SKILL_TO_ABILITY[skill];
+	const custom = toModifier(data.customModifiers?.skills?.[skill]) + toModifier(data.customModifiers?.skills?._all);
+	const itemCheck = toModifier(data.itemBonuses?.abilityCheck) + toModifier(data.itemBonuses?.[`abilityCheck${getAbilitySuffix(ability)}`]);
+	const customCheck = toModifier(data.customModifiers?.abilityChecks?.[ability]);
+	return custom + itemCheck + customCheck;
+}
+
+/** Jack of All Trades grants half proficiency on skills the character is not trained in. */
+function hasJackOfAllTrades (data) {
+	return (Array.isArray(data.features) ? data.features : [])
+		.some(feature => `${feature?.name || ""}`.toLowerCase().includes("jack of all trades"));
 }
 
 function getInventoryEntries (data) {
@@ -314,16 +343,20 @@ export function buildCharacterViewModel (characterData) {
 		const proficient = saveProficiencies[ability];
 		const modifier = getAbilityModifier(abilities[ability])
 			+ (proficient ? proficiencyBonus : 0)
-			+ getPersistedSaveBonus(data, ability);
+			+ getPersistedSaveBonus(data, ability, abilities);
 		return [ability, {modifier, proficient}];
 	}));
 
+	const isJackOfAllTrades = hasJackOfAllTrades(data);
 	const skills = Object.fromEntries(SKILL_KEYS.map(skill => {
 		const level = toFiniteNumber(data.skillProficiencies?.[skill], {min: 0, max: 2}) || 0;
 		const ability = SKILL_TO_ABILITY[skill];
+		const trained = level === 0 && isJackOfAllTrades
+			? Math.floor(proficiencyBonus / 2)
+			: level * proficiencyBonus;
 		const modifier = Math.trunc(
 			getAbilityModifier(abilities[ability])
-			+ (level * proficiencyBonus)
+			+ trained
 			+ getPersistedSkillBonus(data, skill),
 		);
 		return [skill, {modifier, rank: getSkillRank(level)}];
@@ -752,6 +785,31 @@ export function getPolicyManagementResponse (character) {
 			error: error.code,
 		};
 	}
+}
+
+/**
+ * Whether a viewer may learn that `actorAccountId` acted on this character.
+ *
+ * Stripping payload keys is not enough: a shared event envelope also carries the actor
+ * beside the aggregate id, so `character.created` — and the privacy-setting invalidation
+ * itself — would otherwise map a hidden character straight back to its named owner.
+ *
+ * Attribution survives wherever it is independently authorized: the actor sees their own
+ * action, the owner and DMs already know, and once identity is peer-visible the roster
+ * exposes the same association anyway.
+ */
+export function canViewCharacterEventActor ({character, accountId, role, actorAccountId}) {
+	if (!character) return true;
+	if (accountId && actorAccountId === accountId) return true;
+	if (character.ownerAccountId === accountId) return true;
+	if (["dm", "co_dm"].includes(role)) return true;
+	return isPeerVisibleIdentity(character);
+}
+
+/** Remove actor attribution from one event without disturbing its ordering metadata. */
+export function redactEventActor (event) {
+	const {actorAccountId, actorDisplayName, ...rest} = event;
+	return {...rest, actorAccountId: null};
 }
 
 /** True when peers can see who this character is, and therefore may target it. */export function isPeerVisibleIdentity (character) {

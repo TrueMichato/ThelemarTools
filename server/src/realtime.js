@@ -162,7 +162,12 @@ export class HubRealtime {
 			}
 			connection.role = membership.role;
 			if (!canViewEvent({event, accountId: connection.accountId, role: connection.role})) continue;
-			sendJson(connection.socket, {type: "event", event});
+			// Live fanout applies the same ADR 0011 actor redaction as the HTTP read, so a
+			// socket cannot expose an owner association the read hides.
+			const viewerEvent = this._store.redactEventForViewer
+				? await this._store.redactEventForViewer({event, accountId: connection.accountId, role: connection.role})
+				: event;
+			sendJson(connection.socket, {type: "event", event: viewerEvent});
 		}
 	}
 

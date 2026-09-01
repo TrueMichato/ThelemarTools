@@ -8,6 +8,8 @@ import {
 	getPolicyManagementResponse,
 	getPolicyNotAvailableError,
 	assertPeerTargetable,
+	canViewCharacterEventActor,
+	redactEventActor,
 	stripProjectionPolicy,
 	isPeerVisibleIdentity,
 	projectCharacterForRequester,
@@ -558,7 +560,10 @@ export class PostgresHubStore {
 		if (response?.character?.__hubReceiptRef !== "character") return response;
 		const result = await client.query(`SELECT * FROM hub.characters WHERE id = $1`, [response.character.id]);
 		if (!result.rowCount) throw new HubStoreError("IDEMPOTENCY_RESULT_GONE", `The prior command succeeded, but its character no longer exists.`, {status: 410});
-		return {...response, character: getCharacter(result.rows[0])};
+		// Rehydration rebuilds from the row, so it must strip the owner's policy exactly as
+		// the first response did — otherwise an idempotent retry both leaks another owner's
+		// sharing configuration and returns a different body than the call it replays.
+		return {...response, character: stripProjectionPolicy(getCharacter(result.rows[0]))};
 	}
 
 	async pDeleteExpiredCommandReceipts ({limit = 1_000} = {}) {
@@ -2043,7 +2048,20 @@ export class PostgresHubStore {
 			ORDER BY e.sequence
 			LIMIT $5
 		`, [campaignId, afterSequence, isDm, accountId, limit]);
-		return result.rows.map(row => ({
+		// Actor redaction needs the target characters' sharing policies, fetched once.
+		const characterIds = [...new Set(result.rows
+			.filter(row => row.visibility === "all_members" && row.aggregate_type === "character")
+			.map(row => row.aggregate_id))];
+		const characters = characterIds.length
+			? (await this._pool.query(`SELECT id, owner_account_id, projection_policy FROM hub.characters WHERE id = ANY($1::uuid[])`, [characterIds])).rows
+			: [];
+		const charactersById = new Map(characters.map(row => [row.id, {ownerAccountId: row.owner_account_id, projectionPolicy: row.projection_policy}]));
+		return result.rows.map(row => this._redactRowForViewer({
+			row,
+			accountId,
+			role: membership.role,
+			character: charactersById.get(row.aggregate_id) || null,
+		})).map(row => ({
 			id: row.id,
 			campaignId: row.campaign_id,
 			sequence: Number(row.sequence),
@@ -2058,6 +2076,28 @@ export class PostgresHubStore {
 			payload: row.payload,
 			createdAt: row.created_at,
 		}));
+	}
+
+	/**
+	 * Apply ADR 0011 actor redaction to a raw event row before it is mapped, so the shared
+	 * envelope cannot map a hidden character back to its named owner.
+	 */
+	_redactRowForViewer ({row, accountId, role, character}) {
+		if (row.visibility !== "all_members" || row.aggregate_type !== "character") return row;
+		if (canViewCharacterEventActor({character, accountId, role, actorAccountId: row.actor_account_id})) return row;
+		return {...row, actor_account_id: null, actor_display_name: null};
+	}
+
+	/** Realtime fanout shares the HTTP read's redaction rather than duplicating it. */
+	async redactEventForViewer ({event, accountId, role}) {
+		if (event.visibility !== "all_members" || event.aggregateType !== "character") return event;
+		const result = await this._pool.query(`SELECT owner_account_id, projection_policy FROM hub.characters WHERE id = $1`, [event.aggregateId]);
+		const character = result.rowCount
+			? {ownerAccountId: result.rows[0].owner_account_id, projectionPolicy: result.rows[0].projection_policy}
+			: null;
+		return canViewCharacterEventActor({character, accountId, role, actorAccountId: event.actorAccountId})
+			? event
+			: redactEventActor(event);
 	}
 
 	async pLogRoll ({accountId, campaignId, characterId = null, visibility, payload, idempotencyKey}) {

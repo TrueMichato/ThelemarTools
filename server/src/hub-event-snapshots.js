@@ -47,6 +47,9 @@ const SHARED_FORBIDDEN_PAYLOAD_KEYS = Object.freeze([
 	"targetCharacterNameSnapshot",
 	"sourceCharacterNameSnapshot",
 	"ownerAccountId",
+	// Maps a departing member to the characters they owned, which is the same owner
+	// association the roster suppresses for a hidden character.
+	"detachedCharacterIds",
 ]);
 
 export function stripSharedCharacterIdentity (payload) {

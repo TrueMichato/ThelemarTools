@@ -465,6 +465,81 @@ describe("projection privacy canaries", () => {
 		expect(stale.statusCode).toBe(426);
 	});
 
+	it("keeps owner association out of shared events for a private character", async () => {
+		const {dm, owner, peerA, campaign, character} = await setup();
+		const base = (await app.inject({method: "GET", url: `/api/characters/${character.id}/projection-policy`, headers: readHeaders(owner)})).json();
+		await app.inject({
+			method: "PUT",
+			url: `/api/characters/${character.id}/projection-policy`,
+			headers: headers(owner),
+			payload: {expectedProjectionRevision: base.projectionRevision, policy: {version: 1, preset: "private", overrides: {}}},
+		});
+
+		const peerEvents = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/events`, headers: readHeaders(peerA)})).json().events;
+		const forCharacter = peerEvents.filter(event => event.aggregateId === character.id);
+		// Both `character.created` and the privacy-setting invalidation itself would
+		// otherwise name the owner beside the aggregate id.
+		expect(forCharacter.map(event => event.type).sort()).toEqual(["character.created", "character.projection.invalidated"]);
+		for (const event of forCharacter) {
+			expect({type: event.type, actor: event.actorAccountId}).toEqual({type: event.type, actor: null});
+			expect(event.actorDisplayName).toBeUndefined();
+		}
+		// Membership events still name the member: joining a campaign is roster news the
+		// member list already carries. It is the *character* linkage that is suppressed.
+		expect(JSON.stringify(forCharacter)).not.toContain(owner.account.id);
+		expect(peerEvents.some(event => event.type === "membership.joined" && event.actorAccountId === owner.account.id)).toBe(true);
+
+		// Attribution survives wherever it is independently authorized.
+		const dmEvents = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/events`, headers: readHeaders(dm)})).json().events;
+		expect(dmEvents.filter(event => event.aggregateId === character.id).every(event => event.actorAccountId === owner.account.id)).toBe(true);
+		const ownerEvents = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/events`, headers: readHeaders(owner)})).json().events;
+		expect(ownerEvents.filter(event => event.aggregateId === character.id).every(event => event.actorAccountId === owner.account.id)).toBe(true);
+	});
+
+	it("keeps actor attribution once the owner shares an identity", async () => {
+		const {owner, peerA, campaign, character} = await setup();
+		const peerEvents = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/events`, headers: readHeaders(peerA)})).json().events;
+
+		// Under the `table` default the roster already links this character to its owner,
+		// so suppressing the actor would remove nothing and cost readability.
+		expect(peerEvents.filter(event => event.aggregateId === character.id).every(event => event.actorAccountId === owner.account.id)).toBe(true);
+	});
+
+	it("keeps departing-member character links out of shared membership events", async () => {
+		const {dm, owner, campaign, character} = await setup();
+		const members = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/members`, headers: readHeaders(dm)})).json();
+		const membershipId = (members.members || members).find(member => member.accountId === owner.account.id).id;
+		await app.inject({method: "DELETE", url: `/api/campaigns/${campaign.id}/members/${membershipId}`, headers: headers(dm)});
+
+		const events = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/events`, headers: readHeaders(dm)})).json().events;
+		const membershipEvents = events.filter(event => event.type.startsWith("membership.") && event.visibility === "all_members");
+		for (const event of membershipEvents) {
+			// The member leaving is roster news; which characters they owned is not.
+			expect(event.payload.detachedCharacterIds).toBeUndefined();
+			expect(event.payload.characterNameSnapshots).toBeUndefined();
+		}
+		expect(JSON.stringify(membershipEvents)).not.toContain(character.id);
+	});
+
+	it("returns an identical, policy-free body when a DM grant is retried", async () => {
+		const {dm, campaign, character} = await setup();
+		const request = {
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/characters/${character.id}/item-grants`,
+			headers: headers(dm, "grant-stable"),
+			payload: {item: {name: "Torch"}, quantity: 1},
+		};
+		const first = await app.inject(request);
+		const retry = await app.inject(request);
+
+		// A replayed receipt is rehydrated from the row, so it must strip the owner's
+		// policy exactly as the first response did — and match it byte for byte.
+		expect(retry.statusCode).toBe(first.statusCode);
+		expect(retry.json()).toEqual(first.json());
+		expect(first.body).not.toContain("projectionPolicy");
+		expect(retry.body).not.toContain("projectionPolicy");
+	});
+
 	it("keeps projection truth out of logs and metrics", () => {
 		const metrics = new HubMetrics({fnNow: () => 0});
 		metrics.observeRequest({method: "GET", route: "/api/characters/:characterId", statusCode: 200, durationMs: 5});

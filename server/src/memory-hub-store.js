@@ -8,6 +8,8 @@ import {
 	getPolicyManagementResponse,
 	getPolicyNotAvailableError,
 	assertPeerTargetable,
+	canViewCharacterEventActor,
+	redactEventActor,
 	stripProjectionPolicy,
 	isPeerVisibleIdentity,
 	projectCharacterForRequester,
@@ -1239,12 +1241,29 @@ export class MemoryHubStore {
 			.filter(event => event.campaignId === campaignId && event.sequence > afterSequence)
 			.filter(event => canViewEvent({event, accountId, role: membership.role}))
 			.slice(0, limit)
-			.map(event => ({
-				...copy(event),
-				...(this._accounts.get(event.actorAccountId)?.displayName
-					? {actorDisplayName: this._accounts.get(event.actorAccountId).displayName}
-					: {}),
+			.map(event => this.redactEventForViewer({
+				event: {
+					...copy(event),
+					...(this._accounts.get(event.actorAccountId)?.displayName
+						? {actorDisplayName: this._accounts.get(event.actorAccountId).displayName}
+						: {}),
+				},
+				accountId,
+				role: membership.role,
 			}));
+	}
+
+	/**
+	 * Apply ADR 0011 actor redaction to one already visibility-filtered event. Shared and
+	 * live fanout both route through this, so the socket cannot expose an association the
+	 * HTTP read hides.
+	 */
+	redactEventForViewer ({event, accountId, role}) {
+		if (event.visibility !== "all_members" || event.aggregateType !== "character") return event;
+		const character = this._characters.get(event.aggregateId) || null;
+		return canViewCharacterEventActor({character, accountId, role, actorAccountId: event.actorAccountId})
+			? event
+			: redactEventActor(event);
 	}
 
 	async pLogRoll ({accountId, campaignId, characterId = null, visibility, payload, idempotencyKey}) {
