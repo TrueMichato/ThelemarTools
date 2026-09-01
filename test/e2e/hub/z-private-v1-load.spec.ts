@@ -1,10 +1,19 @@
-import {expect, test} from "@playwright/test";
+import {expect, test, type BrowserContext} from "@playwright/test";
 import {HubCampaignPage} from "../pages/HubCampaignPage";
 
+async function pCloseContext (context: BrowserContext): Promise<void> {
+	await Promise.race([
+		context.close().catch(() => undefined),
+		new Promise<void>(resolve => setTimeout(resolve, 5_000)),
+	]);
+}
+
 test("private V1 budgets hold across six members, replay, large documents, and transfer contention", async ({browser}) => {
-	test.setTimeout(120_000);
+	test.setTimeout(180_000);
 	const secret = process.env.HUB_TEST_AUTH_SECRET;
 	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
+	const metricsToken = process.env.HUB_METRICS_TOKEN;
+	if (!metricsToken) throw new Error("HUB_METRICS_TOKEN is required.");
 	const contexts = await Promise.all(Array.from({length: 6}, () => browser.newContext({
 		baseURL: process.env.HUB_E2E_ORIGIN || "https://localhost:8443",
 		ignoreHTTPSErrors: true,
@@ -37,7 +46,8 @@ test("private V1 budgets hold across six members, replay, large documents, and t
 			partyInventoryId: party.id,
 			amount: 7,
 		})).toEqual([201, 409]);
+		await pages[0].waitForOutboxDrain({token: metricsToken});
 	} finally {
-		await Promise.all(contexts.map(context => context.close()));
+		await Promise.all(contexts.map(pCloseContext));
 	}
 });
