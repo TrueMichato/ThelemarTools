@@ -30,7 +30,7 @@ rather than inferring deployment or enablement from merged code.
 | **shipped** | Phase 6G Oracle deployment | Release `hub-staging-2026-09-01` at `8f181712` is deployed to the private Oracle Always Free environment; HTTPS, GitHub OAuth, PostgreSQL, static, BFF, API, and WebSocket smoke checks pass |
 | **shipped** | V2-T0 release-automation implementation | [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219) merged the deliberate tagged Oracle release path; its real-host drills remain blocked under V1-G1 |
 | **shipped** | V2-T1 legible activity history | [PR #218](https://github.com/TrueMichato/ThelemarTools/pull/218) merged semantic titles, privacy-safe display-name snapshots, historical fallback, and lifecycle coverage |
-| **shipped** | V2 decision-record precursors | ADRs 0011-0015 define the approved projection, semantic-operation, device-context, identity-provider, and rules-policy contracts; implementation remains gated per train |
+| **shipped** | V2 decision-record precursors | ADRs 0011-0016 define the approved projection, semantic-operation, device-context, identity-provider, rules-policy, and atomic peer source-cost contracts; implementation remains gated per train |
 | **active** | V1 external Oracle host-operations proof | Blocked pending real-host release/induced-failure evidence, timers, encrypted off-machine backup, isolated restore, and rollback proof |
 | **active** | V1 physical game day | Blocked on V1-G1; complete the one-DM/two-player session on physical devices and record the go/no-go evidence |
 | **active** | V2-T2 projection/privacy foundation | Architecture/contract work remains active after ADR 0011; feature implementation and enablement are not shipped |
@@ -116,6 +116,7 @@ The approved decision-record sequence has landed:
 | [ADR 0013](adr/0013-device-scoped-active-campaign-context.md) | Device-scoped campaign context | V2-T5 |
 | [ADR 0014](adr/0014-multi-provider-identity.md) | Identity-provider registry | V2-T8 |
 | [ADR 0015](adr/0015-campaign-rules-policy.md) | Campaign rules policy | V2-T6 |
+| [ADR 0016](adr/0016-atomic-peer-source-costs.md) | Atomic peer source costs | V2-T7 |
 
 ## Approved V2 release trains
 
@@ -310,7 +311,7 @@ Acceptance:
 - policy changes identify affected entities before activation and are auditable/reversible by version;
 - stale clients cannot bypass current policy.
 
-### V2-T7 — player targeting (**next**)
+### V2-T7 — player targeting (**source-cost contract shipped; next implementation**)
 
 Dependency: V2-T2. Integrations with V2-T3/T4 activate only when those capabilities are also enabled.
 
@@ -319,8 +320,9 @@ Deliver:
 - explicit single-player, multi-player, character, and party targeting for supported DM actions;
 - audience-aware realtime/inbox/activity behavior and recipient confirmation;
 - online/offline, membership-change, cancellation, and partial-resolution semantics;
-- a later source-cost contract for peer abilities/spells that consume a spell slot, charge, or limited use; the
-  initial cost-free/fail-closed templates do not satisfy the full "cast spells on each other" capability.
+- implement the accepted [atomic source-cost contract](adr/0016-atomic-peer-source-costs.md) for peer
+  abilities/spells that consume a spell slot, charge, item quantity, or limited use; the initial
+  cost-free/fail-closed templates do not satisfy the full "cast spells on each other" capability.
 
 Acceptance:
 
@@ -395,6 +397,7 @@ flowchart LR
     P13[ADR 0013 shipped] --> T5[V2-T5 whole-site context]
     P14[ADR 0014 shipped] --> T8[V2-T8 provider framework]
     P15[ADR 0015 shipped] --> T6[V2-T6 policy enforcement]
+    P16[ADR 0016 shipped] --> T7[V2-T7 targeting]
   end
   T2 --> T3[V2-T3 live effects]
   T2 --> T4[V2-T4 inventory/carry/awards]
@@ -421,10 +424,10 @@ flowchart LR
 ```
 
 V1-G1/G2 intentionally have no dependency edge into V2 engineering. They gate private-pilot expansion, not
-implementation or merge. V2-T0 implementation and V2-T1 are shipped; T2 remains active; and the T5/T6/T8
-decision-record precursors are shipped contracts. T0 plus V1-G1's live operational proof gate enabling new V2
-product scope on Oracle. V2-T3, T4, T5, and T7 can be engineered independently after T2's applicable contracts
-land; T6 requires both T2 and T5. T9's critique can start earlier, but the final redesign follows stable product
+implementation or merge. V2-T0 implementation and V2-T1 are shipped; T2 remains active; and the
+T5/T6/T7-source-cost/T8 decision-record precursors are shipped contracts. T0 plus V1-G1's live operational proof
+gate enabling new V2 product scope on Oracle. V2-T3, T4, T5, and T7 can be engineered independently after T2's
+applicable contracts land; T6 requires both T2 and T5. T9's critique can start earlier, but the final redesign follows stable product
 contracts to avoid designing around temporary screens.
 
 ## Deferred horizons A-F

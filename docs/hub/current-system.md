@@ -129,6 +129,9 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
   target-owner approval, including self-target. The state machine supports reject/cancel/24-hour expiry and
   lifecycle cleanup. No successful production cost-free peer template is enabled yet; recognized Cure Wounds
   costs fail closed.
+- [ADR 0016](adr/0016-atomic-peer-source-costs.md) defines the future approval-time atomic source-cost contract,
+  typed resource catalog, two-character/self-target revisions, and privacy-scoped reconciliation. It is a
+  contract only: protocol 3 still consumes no peer source cost and admits no cost-bearing production template.
 - XP/item grants are audited semantic commands; XP does not perform level-up choices.
 - Party currency is denomination-based (`cp`, `sp`, `ep`, `gp`, `pp`).
 - Transfers reserve source assets in escrow before acceptance.
