@@ -145,6 +145,12 @@ inert. The coordinator routes metadata-only projection invalidations and the fro
 delivery cannot overtake an in-flight save. Character/campaign switch, canonical-id replacement, detach,
 revocation, logout, and terminal page hide all fence the subscription generation.
 
+Applied operations are reconciled in the repository under ADR 0012. Because `rebaseJsonChanges` conflicts on
+path overlap regardless of value equality, the accepted base and every other base track must advance together
+with live state or the next save reports a spurious conflict on identical values. Delivery is therefore a
+prepare/adopt/commit transaction over per-track coverage records, and an unprovable delivery schedules a
+serialized recovery that replays ordered visible history instead of forcing a reload.
+
 This delivery layer is intentionally not reconciliation: it does not mutate `CharacterSheetState`, accepted
 bases, revisions, leases, conflicts, or recovery storage, and it does not fetch or replace the owner document.
 The later live-apply layer owns ADR 0012 operation-aware base/live transforms.

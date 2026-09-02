@@ -350,8 +350,15 @@ load. It routes the exact `character.operation.*` allowlist through the HTTP rep
 callbacks on switch, detach, access loss, logout, and terminal page hide. A missing canonical cursor ref or a
 matching remote archive/move event queues teardown behind already-accepted operation delivery. A persisted
 `pagehide` suspends the socket; persisted `pageshow` resumes the same client with its sequence/deduplication
-state intact. This substrate does not mutate `CharacterSheetState`, fetch/replace a projection, render, save, or
-open a generic conflict modal; operation application belongs to the later ADR 0012 live-reconciliation layer.
+state intact. Applied semantic operations are reconciled live by the ADR 0012 `B/L -> R/F` layer: the accepted base becomes
+`R = E(B)`, live state becomes `F = E(L)`, and the next save is naturally `diff(R, F)`, so a DM effect and an
+unsaved player edit both survive. The operation is applied by the shared pure applicator
+(`js/hub/hub-semantic-operations.js`), never by sheet mutators such as `addCondition()` or `takeDamage()`, whose
+immunity checks, Thelemar variant remapping, `bloodied` toggling and concentration side effects would make
+`F != E(L)` and cause the follow-up patch to fight canonical state. Adoption reuses the existing
+`loadFromJson` -> `_reconcileClassFeatures()` -> `_renderCharacter()` path; rendering runs after the transaction
+commits so a paint failure cannot roll back coherent state. Client-derived state such as `bloodied` is re-derived
+on the live track only and travels to the server as an ordinary owner patch.
 
 ## Persistence Layer
 

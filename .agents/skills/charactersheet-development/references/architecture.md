@@ -451,6 +451,28 @@ the `cbClose` composition.
   and a non-positive stored `hp.max` (`_migrateHpMax`, which must run last so every input to
   `_calculateMaxHp()` is already restored)
 
+## Live Campaign Effects (ADR 0012)
+
+An applied server operation reaches an open campaign sheet through
+`CharacterSheetRealtimeCoordinator.on("semanticOperation")`, registered in `charactersheet.js`. The handler is
+**synchronous by contract**: the coordinator's `_emit` does not await listeners, so async work would escape the
+repository mutation queue that keeps an operation ordered against an in-flight save.
+
+Reconciliation is `R = E(B)`, `F = E(L)`, `nextSave = diff(R, F)`:
+
+- `E` is the shared pure applicator in `js/hub/hub-semantic-operations.js` — **never** `addCondition()`,
+  `takeDamage()`, `heal()` or `setCurrentHp()`. Those apply immunity checks, Thelemar variant remapping,
+  `bloodied` toggling and concentration breaks, which would make `F != E(L)` and make the follow-up patch fight
+  canonical state forever.
+- Base and live tracks must advance **together**: `rebaseJsonChanges` conflicts on path overlap regardless of
+  value equality, so advancing only one side produces a spurious conflict on identical values.
+- Adoption reuses the existing `loadFromJson` → `_reconcileClassFeatures()` → `_renderCharacter()` path.
+  Rendering runs after the repository commits, so a paint failure never rolls back coherent state.
+- Coverage is tracked per document track, not by one accepted revision, because `pGet` can store fresh canonical
+  truth containing the operation while returning an older recovery draft as live state.
+- An unprovable delivery blocks autosave and schedules a serialized no-reload recovery
+  (`pRunPendingResync`) rather than guessing or writing blindly.
+
 ## Key Integration Points
 
 | Module A | Module B | Relationship |

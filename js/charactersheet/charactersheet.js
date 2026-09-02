@@ -184,7 +184,175 @@ class CharacterSheetPage {
 
 	_detachHubRealtime () {
 		this._hubRealtime?.detach();
+		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
 	}
+
+	// #region Live semantic-operation reconciliation (ADR 0012)
+
+	/**
+	 * Register the production consumers for server-authoritative campaign effects. Handlers run synchronously
+	 * inside the repository's realtime delivery queue, so they must not await: the coordinator emits to listeners
+	 * without awaiting them, and any async work would escape the serialization window that keeps an incoming
+	 * operation ordered against an in-flight save.
+	 */
+	_initHubRealtimeListeners () {
+		if (!this._hubRealtime || this._isHubRealtimeListenersBound) return false;
+		this._isHubRealtimeListenersBound = true;
+		this._hubRealtime.on("cursor", metadata => this._onHubRealtimeCursor(metadata));
+		this._hubRealtime.on("semanticOperation", event => this._onHubSemanticOperation(event));
+		this._hubRealtime.on("connectionState", state => this._onHubRealtimeConnectionState(state));
+		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
+		return true;
+	}
+
+	_onHubRealtimeCursor (metadata) {
+		this._characterRepository?.recordRealtimeCursor?.({
+			characterId: metadata?.characterId,
+			lastSequence: metadata?.lastSequence,
+			revision: metadata?.revision,
+			projectionRevision: metadata?.projectionRevision,
+			operationWatermark: metadata?.operationWatermark,
+		});
+	}
+
+	_onHubRealtimeConnectionState (state) {
+		if (!["closed", "access_lost"].includes(state?.state)) return;
+		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
+	}
+
+	_onHubRealtimeDeliveryError (detail) {
+		// The coordinator deliberately carries no operation payload here, so nothing private is surfaced.
+		JqueryUtil.doToast({
+			type: "danger",
+			content: `A campaign update could not be applied (${detail?.deliveryType || "update"}). Reload this character to catch up.`,
+		});
+	}
+
+	/** The repository document shape: live state without the transient sheet id. */
+	_getHubLiveCharacterData () {
+		const out = this._state.toJson();
+		delete out.id;
+		return out;
+	}
+
+	/**
+	 * Adopt `F = E(L)` using the same path a post-save rebase uses. Throwing is intentional: it tells the
+	 * repository to abort its commit so accepted/base tracks never advance past live state.
+	 */
+	_adoptHubLiveCharacterData (liveNext) {
+		const liveBefore = this._state.toJson();
+		try {
+			this._state.loadFromJson({...liveNext, id: this._currentCharacterId});
+			this._reconcileClassFeatures();
+		} catch (error) {
+			try {
+				this._state.loadFromJson(liveBefore);
+				this._reconcileClassFeatures();
+			} catch (restoreError) {
+				JqueryUtil.doToast({
+					type: "danger",
+					content: `This character's state could not be restored after a failed campaign effect. Export your character before making further changes.`,
+				});
+				throw restoreError;
+			}
+			throw error;
+		}
+	}
+
+	_onHubSemanticOperation (event) {
+		if (event?.status !== "applied") return false;
+		if (!this._currentCharacterId || event.targetCharacterId !== this._currentCharacterId) return false;
+		const repository = this._characterRepository;
+		if (typeof repository?.applyRealtimeOperation !== "function") return false;
+
+		const result = repository.applyRealtimeOperation({
+			characterId: this._currentCharacterId,
+			operation: event.payload?.operation,
+			resultingCharacterRevision: event.payload?.resultingCharacterRevision,
+			eventId: event.eventId,
+			sequence: event.sequence,
+			liveData: this._getHubLiveCharacterData(),
+			fnAdoptLive: liveNext => this._adoptHubLiveCharacterData(liveNext),
+		});
+
+		switch (result?.status) {
+			case "applied":
+				// Rendering runs after the transaction committed; a paint failure must not roll back state that
+				// is already coherent.
+				try {
+					this._renderCharacter();
+				} catch (error) {
+					JqueryUtil.doToast({type: "danger", content: `A campaign effect was applied but the sheet could not be redrawn. Reload to refresh the display.`});
+					// eslint-disable-next-line no-console
+					console.error("Render after campaign effect failed:", error);
+				}
+				return true;
+			case "resync_required":
+				this._scheduleHubRealtimeResync({characterId: this._currentCharacterId});
+				return true;
+			case "blocked":
+			case "rejected":
+				this._updateSaveIndicator("error");
+				JqueryUtil.doToast({
+					type: "danger",
+					content: `A campaign effect could not be applied (${result.error?.message || "unknown error"}). Saving is paused until it is resolved.`,
+				});
+				return false;
+			default:
+				return false;
+		}
+	}
+
+	/**
+	 * Recovery is scheduled from a microtask rather than awaited inside the delivery: re-entering the
+	 * repository's mutation queue from a task already running on it would deadlock.
+	 */
+	_scheduleHubRealtimeResync ({characterId}) {
+		if (this._isHubResyncScheduled) return false;
+		this._isHubResyncScheduled = true;
+		queueMicrotask(() => {
+			this._isHubResyncScheduled = false;
+			void this._pRunHubRealtimeResync({characterId});
+		});
+		return true;
+	}
+
+	async _pRunHubRealtimeResync ({characterId}) {
+		const repository = this._characterRepository;
+		if (typeof repository?.pRunPendingResync !== "function") return false;
+		const generation = this._characterLoadGeneration;
+		const result = await repository.pRunPendingResync({
+			characterId,
+			fnGetLiveData: () => this._getHubLiveCharacterData(),
+			fnAdoptLive: liveNext => this._adoptHubLiveCharacterData(liveNext),
+			fnIsCurrent: () => this._currentCharacterId === characterId && this._characterLoadGeneration === generation,
+		}).catch(error => ({status: "failed", error}));
+
+		switch (result?.status) {
+			case "recovered":
+				this._renderCharacter();
+				this._updateSaveIndicator("saved");
+				return true;
+			case "history_unavailable":
+				this._updateSaveIndicator("error");
+				JqueryUtil.doToast({
+					type: "danger",
+					content: `Campaign effect history is no longer available, so this character cannot be caught up automatically. Reload the character, or export your local copy first.`,
+				});
+				return false;
+			case "failed":
+				this._updateSaveIndicator("error");
+				JqueryUtil.doToast({
+					type: "danger",
+					content: `Could not catch up with campaign effects. Saving stays paused; retry or reload this character.`,
+				});
+				return false;
+			default:
+				return false;
+		}
+	}
+
+	// #endregion
 
 	_canRestoreHubRealtimeAfterError (error) {
 		return ![
@@ -218,6 +386,7 @@ class CharacterSheetPage {
 				isAuthenticated: true,
 				repository: this._characterRepository,
 			});
+			this._initHubRealtimeListeners();
 			this._hubRollLogAdapter = new HubRollLogAdapter({
 				api: this._hubCampaignContext.api,
 				campaignId: this._hubCampaignId,
@@ -3725,6 +3894,15 @@ class CharacterSheetPage {
 	async _saveCurrentCharacter ({isInteractiveConflict = true} = {}) {
 		if (!this._currentCharacterId) return;
 
+		// A campaign effect that could not be reconciled leaves this character un-saveable until recovery
+		// completes. Writing anyway would push a document that silently undoes the server-authoritative effect.
+		if (this._characterRepository.isSaveBlocked?.(this._currentCharacterId)) {
+			const block = this._characterRepository.getSaveBlock?.(this._currentCharacterId);
+			this._updateSaveIndicator("error");
+			JqueryUtil.doToast({type: "warning", content: block?.message || `Saving is paused while this character catches up with campaign effects.`});
+			return false;
+		}
+
 		// Show saving indicator
 		this._updateSaveIndicator("saving");
 
@@ -3764,7 +3942,10 @@ class CharacterSheetPage {
 					if (rebased.isConflict) {
 						const conflict = new Error(`Live character edits overlap server changes.`);
 						conflict.code = "CHARACTER_LIVE_CONFLICT";
-						conflict.recovery = {local: live, server: canonical, conflicts: rebased.conflicts};
+						conflict.recovery = {base: submitted, local: live, server: canonical, conflicts: rebased.conflicts};
+						// Registered so a campaign effect arriving while the modal is open transforms these
+						// candidates too, instead of the choice resolving against a stale captured snapshot.
+						this._characterRepository.registerLiveConflict?.({characterId: this._currentCharacterId, recovery: conflict.recovery});
 						throw conflict;
 					}
 					this._state.loadFromJson({...rebased.document, id: persisted.id});
@@ -3801,12 +3982,16 @@ class CharacterSheetPage {
 					textYes: "Keep Local",
 					textNo: "Use Server",
 				});
+				// A campaign effect may have arrived while the modal was open; the registered record carries that
+				// transform, so resolve against it rather than the snapshot captured before the prompt.
+				const recovery = this._characterRepository.getLiveConflictRecovery?.(this._currentCharacterId) || err.recovery;
 				if (choice == null) {
-					DataUtil.userDownload("character-live-conflict-recovery", err.recovery, {fileType: "character-conflict"});
+					DataUtil.userDownload("character-live-conflict-recovery", recovery, {fileType: "character-conflict"});
 					return false;
 				}
+				this._characterRepository.clearLiveConflict?.({characterId: this._currentCharacterId});
 				if (choice) return this._saveCurrentCharacter();
-				this._state.loadFromJson(err.recovery.server);
+				this._state.loadFromJson(recovery.server);
 				this._reconcileClassFeatures();
 				this._renderCharacter();
 				this._updateSaveIndicator("saved");

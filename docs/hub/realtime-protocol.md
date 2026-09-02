@@ -111,7 +111,15 @@ preserved chain through reconnect backoff rather than leaving live delivery buff
 `operationWatermark` is optional owner/DM truth metadata. When present, it is `0` or the campaign sequence of
 the latest applied semantic operation already reflected in that canonical character truth. It is never added
 to a peer-only ref. Clients still deliver ordered semantic-operation events at or below the watermark; the
-later Character Sheet reconciliation layer uses the watermark to avoid transforming an already-covered base.
+Character Sheet reconciliation layer uses the watermark to avoid transforming an already-covered base.
+
+The reconciliation layer consumes this cursor directly: `operationWatermark` becomes the `acceptedSequence` of a
+document track, and is the `afterSequence` floor used when ordered history must be replayed over
+`GET /api/campaigns/:campaignId/events` to close a coverage gap without reloading the sheet. That replay obeys
+the same rule as socket replay - it follows `scannedThroughSequence` while `hasMore` is true and never infers
+exhaustion from `events.length`. Because coverage is tracked per document track, an event at or below the
+watermark is still applied to a stale local draft that has not yet folded it in, while canonical truth that
+already reflects it is left untouched.
 
 Unknown client types receive:
 
