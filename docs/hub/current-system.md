@@ -121,8 +121,8 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
 - The open owner sheet reads pending approvals from
   `GET /api/campaigns/:campaignId/characters/:characterId/pending-actions`. The route fails closed for a DM,
   co-DM, peer, or other character owner and projects only an opaque action id, expiry, resolve capability and
-  immutable source/effect labels. Initial open, reconnect and focus reconciliation prevents a missed socket edge
-  from hiding a decision.
+  immutable source/effect/outcome labels. Initial open, reconnect and focus reconciliation prevents a missed
+  socket edge from hiding a decision.
 - Approve/Reject are inline, single-flight and retryable. Approval never mutates the sheet from the resolve
   response; it waits for `character.operation.applied` to complete ADR 0012 reconciliation. Successful adoption
   produces a polite, dismissible and time-bounded sheet notice. Blocked adoption produces recovery UI instead.

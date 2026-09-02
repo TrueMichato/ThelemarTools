@@ -423,8 +423,8 @@ The second slice implements the client half and freezes these choices:
   error, and offers authoritative reload plus export rather than a blind write.
 - pending approvals on the open sheet are bootstrapped and reconciled through an owner-only,
   character-scoped read. Its projection contains only the opaque action id, expiry, resolve capabilities and
-  immutable presentation labels; it does not return character/account ids, source entities, choices, target
-  refs or hidden character state. Proposal events carry the same presentation-only contract.
+  immutable source, effect, and typed outcome labels; it does not return character/account ids, source entities,
+  choices, target refs or hidden character state. Proposal events carry the same presentation-only contract.
 - approval resolution is single-flight and idempotent, but never applies browser state from the HTTP response.
   The card remains in a waiting state until the authoritative `character.operation.applied` event passes the
   same prepare/adopt/commit reconciliation. Rejection may remove the card from its authoritative resolve

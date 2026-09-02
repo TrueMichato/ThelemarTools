@@ -152,9 +152,13 @@ test("an open character sheet resolves peer effects and adopts authoritative out
 			amount: 2,
 		});
 		await expect(effectRegion.getByRole("button", {name: /Approve Steadying Word/})).toHaveCount(2, {timeout: 20_000});
+		const fourHitPointApproval = effectRegion.getByRole("button", {
+			name: "Approve Steadying Word: Restore 4 hit points from Aster",
+		});
+		await expect(fourHitPointApproval).toBeVisible();
 		await expect(hpInput).toBeFocused();
 
-		await effectRegion.getByRole("button", {name: /Approve Steadying Word/}).first().click();
+		await fourHitPointApproval.click();
 		await expect(hpInput).toHaveValue("9", {timeout: 20_000});
 		await expect(effectRegion).toContainText("4 hit points restored by the campaign.");
 		await expect(effectRegion.getByRole("button", {name: /Approve Steadying Word/})).toHaveCount(1);

@@ -1721,6 +1721,15 @@ export class MemoryHubStore {
 				sourceDisplaySnapshot: copy(derived.sourceDisplaySnapshot),
 				targetDisplaySnapshot: copy(derived.targetDisplaySnapshot),
 				effectDisplaySnapshot: copy(derived.effectDisplaySnapshot),
+				effectOutcomeLabel: getPendingEffectPresentation({
+					operationId,
+					status: "proposed",
+					sourceDisplaySnapshot: derived.sourceDisplaySnapshot,
+					effectDisplaySnapshot: derived.effectDisplaySnapshot,
+					operationKind: derived.operation.kind,
+					operationArguments: derived.operation.arguments,
+					expiresAt,
+				}).presentation.outcomeLabel,
 				expiresAt,
 			},
 		});
@@ -1914,6 +1923,8 @@ export class MemoryHubStore {
 				status: operation.status,
 				sourceDisplaySnapshot: operation.sourceDisplaySnapshot,
 				effectDisplaySnapshot: operation.effectDisplaySnapshot,
+				operationKind: operation.kind,
+				operationArguments: operation.arguments,
 				expiresAt: operation.expiresAt,
 			}))
 			.filter(Boolean)

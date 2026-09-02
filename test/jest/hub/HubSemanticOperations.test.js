@@ -424,7 +424,11 @@ describe("semantic character operations", () => {
 				actionId,
 				status: "proposed",
 				expiresAt: "2026-01-02T00:00:00.000Z",
-				presentation: {sourceName: "Aster", effectLabel: "Test Blessing"},
+				presentation: {
+					sourceName: "Aster",
+					effectLabel: "Test Blessing",
+					outcomeLabel: "Restore 4 hit points",
+				},
 				capabilities: {canApprove: true, canReject: true},
 			}],
 		});
@@ -453,6 +457,7 @@ describe("semantic character operations", () => {
 		expect(proposedEvent.payload).not.toHaveProperty("sourceEntity");
 		expect(proposedEvent.payload).not.toHaveProperty("effectTemplateId");
 		expect(proposedEvent.payload).not.toHaveProperty("choice");
+		expect(proposedEvent.payload.effectOutcomeLabel).toBe("Restore 4 hit points");
 	});
 
 	it("fails stale or cost-bearing proposals without partial mutation", async () => {

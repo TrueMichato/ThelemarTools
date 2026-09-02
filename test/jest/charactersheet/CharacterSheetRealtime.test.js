@@ -90,6 +90,7 @@ const makeLifecycleEvent = ({
 				sourceDisplaySnapshot: {identity: {name: "Aster"}},
 				targetDisplaySnapshot: {identity: {name: "Mira"}},
 				effectDisplaySnapshot: {label: "Lay on Hands"},
+				effectOutcomeLabel: "Restore 3 hit points",
 				expiresAt: "2030-01-01T00:00:00.000Z",
 			}
 			: {
@@ -304,7 +305,11 @@ describe("Character Sheet realtime coordinator", () => {
 			actionId: "operation-1",
 			status: "proposed",
 			expiresAt: "2030-01-01T00:00:00.000Z",
-			presentation: {sourceName: "Aster", effectLabel: "Lay on Hands"},
+			presentation: {
+				sourceName: "Aster",
+				effectLabel: "Lay on Hands",
+				outcomeLabel: "Restore 3 hit points",
+			},
 			capabilities: {canApprove: true, canReject: true},
 		});
 		expect(delivered[0].payload).not.toHaveProperty("targetCharacterId");

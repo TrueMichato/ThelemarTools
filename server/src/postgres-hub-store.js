@@ -2658,6 +2658,15 @@ export class PostgresHubStore {
 					sourceDisplaySnapshot: derived.sourceDisplaySnapshot,
 					targetDisplaySnapshot: derived.targetDisplaySnapshot,
 					effectDisplaySnapshot: derived.effectDisplaySnapshot,
+					effectOutcomeLabel: getPendingEffectPresentation({
+						operationId,
+						status: "proposed",
+						sourceDisplaySnapshot: derived.sourceDisplaySnapshot,
+						effectDisplaySnapshot: derived.effectDisplaySnapshot,
+						operationKind: derived.operation.kind,
+						operationArguments: derived.operation.arguments,
+						expiresAt,
+					}).presentation.outcomeLabel,
 					expiresAt,
 				},
 			});
@@ -2807,6 +2816,8 @@ export class PostgresHubStore {
 					status: operation.status,
 					sourceDisplaySnapshot: operation.sourceDisplaySnapshot,
 					effectDisplaySnapshot: operation.effectDisplaySnapshot,
+					operationKind: operation.kind,
+					operationArguments: operation.arguments,
 					expiresAt: operation.expiresAt,
 				}))
 				.filter(Boolean)

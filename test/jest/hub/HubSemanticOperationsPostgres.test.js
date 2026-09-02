@@ -298,7 +298,11 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 			actionId: proposed.operation.operationId,
 			status: "proposed",
 			expiresAt: expect.any(String),
-			presentation: {sourceName: "Source", effectLabel: "Steadying Word"},
+			presentation: {
+				sourceName: "Source",
+				effectLabel: "Steadying Word",
+				outcomeLabel: "Restore 2 hit points",
+			},
 			capabilities: {canApprove: true, canReject: true},
 		}]);
 		await expect(store.pListCharacterPendingActions({
@@ -313,6 +317,7 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 			WHERE id = $1
 		`, [proposed.eventIds[0]]);
 		expect(event.rows[0].payload).not.toHaveProperty("sourceEntity");
+		expect(event.rows[0].payload.effectOutcomeLabel).toBe("Restore 2 hit points");
 		expect(event.rows[0].payload).not.toHaveProperty("effectTemplateId");
 		expect(event.rows[0].payload).not.toHaveProperty("choice");
 	});

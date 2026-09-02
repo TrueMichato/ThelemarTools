@@ -6,11 +6,12 @@ const makeAction = ({
 	actionId = "action-1",
 	sourceName = "Aster",
 	effectLabel = "Steadying Word",
+	outcomeLabel = "Restore 4 hit points",
 } = {}) => ({
 	actionId,
 	status: "proposed",
 	expiresAt: "2026-01-02T00:00:00.000Z",
-	presentation: {sourceName, effectLabel},
+	presentation: {sourceName, effectLabel, outcomeLabel},
 	capabilities: {canApprove: true, canReject: true},
 });
 
@@ -89,6 +90,16 @@ describe("Character Sheet Hub effect controls", () => {
 		expect(controller._isAuthorized).toBe(false);
 		expect(root.hidden).toBe(true);
 		expect(root.textContent).not.toContain("hidden");
+	});
+
+	it("renders the server-projected outcome in the approval card", () => {
+		const card = controller._getApprovalCard(controller._getNormalizedAction(makeAction()));
+		const [copy] = card._children;
+		expect(copy._children.map(element => element.textContent)).toEqual([
+			"Steadying Word",
+			"Restore 4 hit points",
+			"From Aster",
+		]);
 	});
 
 	it("fetches on open, reconnect, focus, and visible-tab restoration", async () => {

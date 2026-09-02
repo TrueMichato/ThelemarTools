@@ -8,11 +8,38 @@ const _getLabel = (value, fallback) => {
 	return clean ? clean.slice(0, _MAX_LABEL_LENGTH) : fallback;
 };
 
+export function getPendingEffectOutcomeLabel ({kind, arguments: args = {}}) {
+	const amount = Math.max(0, Number(args.amount) || 0);
+	switch (kind) {
+		case "hp.damage":
+			return `${amount} damage`;
+		case "hp.heal":
+			return `Restore ${amount} hit point${amount === 1 ? "" : "s"}`;
+		case "condition.add":
+			return `Add ${_getLabel(args.condition?.name, "condition")}`;
+		case "condition.remove":
+			return `Remove ${_getLabel(args.condition?.name, "condition")}`;
+		case "spell_slot.spend": {
+			const level = Math.max(1, Number(args.level) || 1);
+			return `Spend ${amount} level ${level} spell slot${amount === 1 ? "" : "s"}`;
+		}
+		case "spell_slot.restore": {
+			const level = Math.max(1, Number(args.level) || 1);
+			return `Restore ${amount} level ${level} spell slot${amount === 1 ? "" : "s"}`;
+		}
+		default:
+			return null;
+	}
+}
+
 export function getPendingEffectPresentation ({
 	operationId,
 	status,
 	sourceDisplaySnapshot,
 	effectDisplaySnapshot,
+	operationKind = null,
+	operationArguments = null,
+	effectOutcomeLabel = null,
 	expiresAt,
 }) {
 	const normalizedExpiresAt = expiresAt instanceof Date ? expiresAt.toISOString() : expiresAt;
@@ -31,6 +58,11 @@ export function getPendingEffectPresentation ({
 		presentation: {
 			sourceName: _getLabel(sourceDisplaySnapshot?.identity?.name, "A party member"),
 			effectLabel: _getLabel(effectDisplaySnapshot?.label, "Campaign effect"),
+			outcomeLabel: _getLabel(
+				effectOutcomeLabel,
+				getPendingEffectOutcomeLabel({kind: operationKind, arguments: operationArguments || {}})
+					|| "Review campaign effect",
+			),
 		},
 	};
 }

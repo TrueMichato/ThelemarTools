@@ -80,6 +80,7 @@ export function getCharacterOperationRouting (event) {
 			status: payload.status,
 			sourceDisplaySnapshot: payload.sourceDisplaySnapshot,
 			effectDisplaySnapshot: payload.effectDisplaySnapshot,
+			effectOutcomeLabel: payload.effectOutcomeLabel,
 			expiresAt: payload.expiresAt,
 		})
 		: null;

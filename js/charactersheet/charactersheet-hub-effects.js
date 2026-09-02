@@ -317,6 +317,9 @@ export class CharacterSheetHubEffects {
 			presentation: {
 				sourceName: action.presentation.sourceName.slice(0, 120),
 				effectLabel: action.presentation.effectLabel.slice(0, 120),
+				outcomeLabel: typeof action.presentation.outcomeLabel === "string"
+					? action.presentation.outcomeLabel.slice(0, 120)
+					: "Review campaign effect",
 			},
 			capabilities: {canApprove: true, canReject: true},
 			decisionState: null,
@@ -436,6 +439,7 @@ export class CharacterSheetHubEffects {
 		const copy = e_({tag: "div", clazz: "charsheet__hub-approval-copy"});
 		copy.append(
 			e_({tag: "strong", clazz: "charsheet__hub-approval-effect", text: action.presentation.effectLabel}),
+			e_({tag: "span", clazz: "charsheet__hub-approval-outcome", text: action.presentation.outcomeLabel}),
 			e_({tag: "span", clazz: "charsheet__hub-approval-source", text: `From ${action.presentation.sourceName}`}),
 		);
 		const controls = e_({tag: "div", clazz: "charsheet__hub-approval-controls"});
@@ -449,7 +453,7 @@ export class CharacterSheetHubEffects {
 			button.disabled = isBusy;
 			button.dataset.hubActionId = action.actionId;
 			button.dataset.hubDecision = decision;
-			button.setAttribute("aria-label", `${label} ${action.presentation.effectLabel} from ${action.presentation.sourceName}`);
+			button.setAttribute("aria-label", `${label} ${action.presentation.effectLabel}: ${action.presentation.outcomeLabel} from ${action.presentation.sourceName}`);
 			button.addEventListener("click", () => void this.pResolve({actionId: action.actionId, decision}));
 			controls.append(button);
 		}

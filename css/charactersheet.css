@@ -570,6 +570,10 @@ body.is-charsheet-page .ve-ui-modal__scroller > .ve-flex.ve-w-100.ve-mb-1 {
 	font-size: var(--cs-text-sm, 0.875rem);
 }
 
+.charsheet__hub-approval-outcome {
+	font-size: var(--cs-text-sm, 0.875rem);
+}
+
 .charsheet__hub-approval-source,
 .charsheet__hub-approval-state,
 .charsheet__hub-approval-item-error {
