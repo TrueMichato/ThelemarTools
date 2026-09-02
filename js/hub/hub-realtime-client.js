@@ -197,6 +197,11 @@ export class HubRealtimeClient {
 			this._setConnectionState("live");
 			return;
 		}
+		if (message.type === "error" && message.code === "MESSAGE_FAILED" && this._resyncStartSequence != null) {
+			this._emit("error", message);
+			this._socket?.close();
+			return;
+		}
 		this._emit(message.type, message);
 	}
 

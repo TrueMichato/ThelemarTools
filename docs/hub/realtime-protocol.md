@@ -104,7 +104,9 @@ exemption, and the server consumes that step before reading the next page. Repla
 markers remain ordinary `resync` messages subject to the 20-message-per-second burst limit. A reconnect starts a
 new connection but resumes from the client's last server-issued scanned sequence. The client treats all
 continuation pages as one replay chain: it buffers live events until the final page, emits recovered and live
-events once in campaign-sequence order, and does not start a periodic resync while that chain is active.
+events once in campaign-sequence order, and does not start a periodic resync while that chain is active. If a
+valid replay request fails, the client closes that socket and resumes the preserved chain through reconnect
+backoff rather than leaving live delivery buffered indefinitely.
 
 Unknown client types receive:
 

@@ -76,7 +76,8 @@ without scanning the whole history.
 Realtime tests cover 26 exact continuation pages on one connection, one-time connection-scoped rate-limit
 exemptions, forged/replayed marker limiting, reconnect preservation, exact-once accumulation, and explicit
 campaign-client close/reset. They also interleave live delivery with a periodic multi-page replay and prove
-recovered and live events emit exactly once in sequence order without an overlapping watchdog resync.
+recovered and live events emit exactly once in sequence order without an overlapping watchdog resync. A failed
+replay request must close/reconnect, preserve its replay marker, and recover buffered live events exactly once.
 
 The memory semantic suite additionally covers every version-1 kind, player generic-operation denial,
 DM/co-DM immediate application, self-target explicit approval, DM non-owner approval denial, unsupported and
