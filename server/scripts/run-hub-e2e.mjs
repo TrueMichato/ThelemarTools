@@ -193,6 +193,7 @@ try {
 		"--experimental-vm-modules",
 		"./node_modules/jest/bin/jest.js",
 		"test/jest/hub/HubSemanticOperationsPostgres.test.js",
+		"test/jest/hub/HubInventoryPostgres.test.js",
 		"--runInBand",
 		"--no-coverage",
 		"--forceExit",

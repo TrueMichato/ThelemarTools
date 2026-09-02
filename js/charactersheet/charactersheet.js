@@ -45,6 +45,7 @@ import {HubCampaignContext} from "../hub/hub-campaign-context.js";
 import {HubRollLogAdapter} from "../hub/hub-roll-log-adapter.js";
 import {CharacterSheetRealtimeCoordinator} from "./charactersheet-realtime.js";
 import {CharacterSheetHubEffects} from "./charactersheet-hub-effects.js";
+import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js";
 import {diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
 
 const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, StorageUtil, DataUtil, BrewUtil2, PrereleaseUtil} = /** @type {*} */ (globalThis);
@@ -87,6 +88,7 @@ class CharacterSheetPage {
 		this._hubEffects = null;
 		this._hubRealtime = realtimeCoordinator;
 		this._fnCreateRealtimeCoordinator = fnCreateRealtimeCoordinator;
+		this._partyInventory = null;
 		this._characterLoadGeneration = 0;
 		this._hubRealtimeGeneration = 0;
 		this._builder = null;
@@ -184,11 +186,17 @@ class CharacterSheetPage {
 	_attachHubRealtime ({characterId = this._currentCharacterId} = {}) {
 		this._hubRealtimeGeneration++;
 		this._hubEffects?.activate({characterId});
-		return this._hubRealtime?.attach({characterId}) || false;
+		const isAttached = this._hubRealtime?.attach({characterId}) || false;
+		void this._partyInventory?.pAttach({
+			characterId,
+			generation: this._characterLoadGeneration,
+		});
+		return isAttached;
 	}
 
 	_detachHubRealtime () {
 		this._hubRealtimeGeneration++;
+		this._partyInventory?.detach();
 		this._hubRealtime?.detach();
 		this._hubEffects?.deactivate();
 		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
@@ -488,6 +496,29 @@ class CharacterSheetPage {
 		try {
 			this._inventory = new CharacterSheetInventory(this);
 		} catch (e) { console.error("Failed to init inventory:", e); }
+
+		if (this._hubCampaignId) {
+			try {
+				this._partyInventory = new CharacterSheetPartyInventory({
+					campaignId: this._hubCampaignId,
+					api: this._hubCampaignContext.api,
+					repository: this._characterRepository,
+					realtime: this._hubRealtime,
+					fnGetCharacterData: () => this._state.toJson(),
+					fnAdoptCharacterData: data => {
+						this._state.loadFromJson(data);
+						this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
+						this._reconcileClassFeatures();
+						this._renderCharacter();
+					},
+					fnSaveCharacter: () => this._saveCurrentCharacter({isInteractiveConflict: false}),
+					fnIsCurrentCharacter: ({characterId, generation}) => (
+						this._currentCharacterId === characterId
+						&& this._characterLoadGeneration === generation
+					),
+				});
+			} catch (e) { console.error("Failed to init party inventory:", e); }
+		}
 
 		try {
 			this._features = new CharacterSheetFeatures(this);

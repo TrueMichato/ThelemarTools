@@ -3146,11 +3146,14 @@ export class PostgresHubStore {
 	async _pReadPartyContainer ({client, party}) {
 		const entries = await client.query(`SELECT * FROM hub.inventory_entries WHERE party_inventory_id = $1 ORDER BY created_at, id`, [party.id]);
 		return {
-			inventory: entries.rows.map(row => ({
-				id: row.id,
-				item: row.metadata?.item || {name: row.item_uid.split("|")[0], source: row.item_uid.split("|")[1]},
-				quantity: Number(row.quantity),
-			})),
+			inventory: entries.rows.map(row => {
+				const legacyItem = row.metadata?.item || {name: row.item_uid.split("|")[0], source: row.item_uid.split("|")[1]};
+				return {
+					...(row.metadata?.entry || {item: legacyItem}),
+					id: row.id,
+					quantity: Number(row.quantity),
+				};
+			}),
 			currency: normalizeCurrency(party.currency),
 		};
 	}
@@ -3163,7 +3166,14 @@ export class PostgresHubStore {
 				INSERT INTO hub.inventory_entries (
 					id, campaign_id, party_inventory_id, item_uid, quantity, metadata
 				) VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-			`, [entry.id, party.campaign_id, party.id, `${entry.item?.name || "item"}|${entry.item?.source || ""}`, entry.quantity, JSON.stringify({item: entry.item})]);
+			`, [
+				entry.id,
+				party.campaign_id,
+				party.id,
+				`${entry.item?.name || "item"}|${entry.item?.source || ""}`,
+				entry.quantity,
+				JSON.stringify({entry: Object.fromEntries(Object.entries(entry).filter(([key]) => !["id", "quantity"].includes(key)))}),
+			]);
 		}
 	}
 

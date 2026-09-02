@@ -5,6 +5,7 @@ const _LISTENER_TYPES = new Set([
 	"connectionState",
 	"cursor",
 	"deliveryError",
+	"inventoryTransfer",
 	"projectionInvalidated",
 	"semanticOperation",
 ]);
@@ -12,6 +13,14 @@ const _LISTENER_TYPES = new Set([
 const _CHARACTER_TEARDOWN_EVENT_TYPES = new Set([
 	"character.archived",
 	"character.moved_out",
+]);
+
+const _INVENTORY_TRANSFER_EVENT_TYPES = new Set([
+	"transfer.cancelled",
+	"transfer.committed",
+	"transfer.expired",
+	"transfer.rejected",
+	"transfer.reserved",
 ]);
 
 export class CharacterSheetRealtimeCoordinator {
@@ -82,6 +91,7 @@ export class CharacterSheetRealtimeCoordinator {
 			generation,
 			isDetachQueued: false,
 			isSuspended: false,
+			inventoryEventKeys: new Set(),
 			operationKeys: new Set(),
 			projectionCursorKey: null,
 			unsubscribers: [],
@@ -217,6 +227,35 @@ export class CharacterSheetRealtimeCoordinator {
 					projectionRevision: event.payload?.projectionRevision,
 				},
 			});
+			return;
+		}
+
+		if (_INVENTORY_TRANSFER_EVENT_TYPES.has(event.type)) {
+			const sourceKind = event.payload?.sourceKind;
+			const targetKind = event.payload?.targetKind;
+			const isCurrentCharacterAffected = (
+				sourceKind === "character" && event.payload?.sourceId === active.characterId
+			) || (
+				targetKind === "character" && event.payload?.targetId === active.characterId
+			);
+			const isPartyInventoryAffected = sourceKind === "party_inventory" || targetKind === "party_inventory";
+			if (isCurrentCharacterAffected || isPartyInventoryAffected) {
+				const eventKey = event.id || `${event.type}:${event.sequence}`;
+				if (active.inventoryEventKeys.has(eventKey)) return;
+				active.inventoryEventKeys.add(eventKey);
+				if (active.inventoryEventKeys.size > 2_000) active.inventoryEventKeys.delete(active.inventoryEventKeys.values().next().value);
+				this._enqueue(active, {
+					type: "inventoryTransfer",
+					value: {
+						eventId: event.id,
+						campaignId: this._campaignId,
+						sequence: event.sequence,
+						type: event.type,
+						isCurrentCharacterAffected,
+						isPartyInventoryAffected,
+					},
+				});
+			}
 			return;
 		}
 

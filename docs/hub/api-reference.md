@@ -196,7 +196,23 @@ arbitrary spell prose.
 | `POST /api/campaigns/:campaignId/transfers/:transferId/resolve` | Target owner or DM/co-DM mutation | accept/reject | committed or rejected transfer |
 
 `sourceKind`/`targetKind` are `character` or `party_inventory`. Empty/insufficient transfers fail before a
-row is committed. Whole linked/equipped items return `TRANSFER_ITEM_LINKED`.
+row is committed. Item quantities must be positive finite safe integers within the route schema limit. The
+authority removes the requested value into escrow before returning `reserved`; acceptance writes that escrow
+to the destination, while rejection or lifecycle cancellation restores the source exactly once. Reusing an
+idempotency key with the same command replays its stored result rather than repeating either mutation.
+
+The server derives item eligibility and stack compatibility from canonical data. A whole stack is refused
+while equipped, attuned, container-linked, spell/component-linked, or otherwise referenced by Character Sheet
+state; a partial move is allowed only when every reference remains valid against the source copy. Such refusals
+return `TRANSFER_ITEM_LINKED`. Destination stacks merge only when their complete transferable metadata matches;
+custom names, source/edition, charges, durability, notes, material/variant/component state, and other mutable
+fields therefore remain distinct when they differ.
+
+An owned campaign-backed Character Sheet uses these routes directly: it fetches the party stash on open and
+after reconnect or relevant transfer events, proposes character-to-stash and character-to-character moves, and
+lets a DM/co-DM move stash items into the open character. The browser never applies an escrow mutation to two
+documents itself. Character updates are adopted through the HTTP character repository's authoritative
+reconciliation queue. Local, signed-out, detached, and non-owner sheets do not activate this integration.
 
 ## Campaign content routes
 

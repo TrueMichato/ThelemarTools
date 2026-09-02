@@ -1052,7 +1052,7 @@ export async function createHubApp ({
 									additionalProperties: false,
 									properties: {
 										entryId: {type: "string", minLength: 1, maxLength: 200},
-										quantity: {type: "number", exclusiveMinimum: 0},
+										quantity: {type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER},
 									},
 								},
 							},

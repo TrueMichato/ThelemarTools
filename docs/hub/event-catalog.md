@@ -57,10 +57,10 @@
 | `character.operation.expired` | semantic operation | explicit proposer+target owner | same minimized terminal shape | Bounded 24-hour expiry transitions once |
 | `xp.granted` | character | explicit DM+owner | amount, reason, resulting XP | DM/co-DM also included by visibility policy |
 | `item.granted` | character | explicit DM+owner | granted entry | Entry content is cross-user validated |
-| `transfer.reserved` | transfer | all_members | source/target kinds and ids | Escrow content is not broadcast |
-| `transfer.committed` | transfer | all_members | source/target ids | Destination write complete |
-| `transfer.rejected` | transfer | all_members | source/target ids | Source restored |
-| `transfer.cancelled` | transfer | all_members | lifecycle reason or source/target ids | Source restored |
+| `transfer.reserved` | transfer | all_members | source/target kinds and ids | Escrow content is not broadcast; Character Sheet reduces this to affected-current-character/party-stash booleans |
+| `transfer.committed` | transfer | all_members | source/target kinds and ids | Destination write complete; affected sheets refetch authoritative state |
+| `transfer.rejected` | transfer | all_members | source/target kinds and ids | Source restored; affected sheets refetch authoritative state |
+| `transfer.cancelled` | transfer | all_members | lifecycle reason plus source/target kinds and ids | Source restored; affected sheets refetch authoritative state |
 
 Legacy pre-v3 `action.*` records may remain as history, but migration 0005 terminalizes arbitrary pending
 structured effects and the protocol-v3 API cannot apply them.
