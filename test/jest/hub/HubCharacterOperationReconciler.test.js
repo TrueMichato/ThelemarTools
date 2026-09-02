@@ -61,13 +61,62 @@ describe("Semantic operation applicator", () => {
 		expect(out.hp.current).toBe(20);
 	});
 
-	it("preserves unknown hit-point keys byte-for-byte instead of deriving them", () => {
+	it("preserves unknown and opaque hit-point keys byte-for-byte instead of deriving them", () => {
 		const data = makeCharacter({current: 5});
 		data.hp.maxHpReduction = 3;
 		data.hp.effectiveMax = 42;
-		const out = applySemanticOperation({data, operation: makeOperation({kind: "hp.heal", args: {amount: 2}})});
-		expect(out.hp.maxHpReduction).toBe(3);
-		expect(out.hp.effectiveMax).toBe(42);
+		data.hp.someFutureKey = {nested: ["opaque", 1]};
+		for (const kind of ["hp.heal", "hp.damage"]) {
+			const out = applySemanticOperation({data, operation: makeOperation({kind, args: {amount: 2}})});
+			expect(out.hp.maxHpReduction).toBe(3);
+			// The applicator must carry the applicable maximum through, never recompute it.
+			expect(out.hp.effectiveMax).toBe(42);
+			expect(out.hp.someFutureKey).toEqual({nested: ["opaque", 1]});
+		}
+	});
+
+	it("clamps healing to the applicable maximum rather than the stored base maximum", () => {
+		const data = makeCharacter({current: 10, max: 20});
+		data.hp.effectiveMax = 12;
+		const out = applySemanticOperation({data, operation: makeOperation({kind: "hp.heal", args: {amount: 9}})});
+		expect(out.hp.current).toBe(12);
+	});
+
+	it("never converts a heal into damage when current already exceeds the applicable maximum", () => {
+		// Psionic body strain halves the maximum without touching the current total.
+		const data = makeCharacter({current: 30, max: 44});
+		data.hp.effectiveMax = 22;
+		const out = applySemanticOperation({data, operation: makeOperation({kind: "hp.heal", args: {amount: 5}})});
+		expect(out.hp.current).toBe(30);
+	});
+
+	it("preserves a fractional applicable maximum exactly and clamps healing to the fraction", () => {
+		const accepted = makeCharacter({current: 10, max: 20});
+		accepted.hp.effectiveMax = 12.5;
+		const live = makeCharacter({current: 8, max: 20});
+		live.hp.effectiveMax = 12.5;
+
+		const plan = planOne({
+			tracks: {
+				accepted: {data: accepted, coverage: createCoverage({revision: 4})},
+				live: {data: live, coverage: createCoverage({revision: 4})},
+			},
+			operation: makeOperation({kind: "hp.heal", args: {amount: 9}}),
+		});
+
+		expect(plan.staged.accepted.hp.effectiveMax).toBe(12.5);
+		expect(plan.staged.live.hp.effectiveMax).toBe(12.5);
+		expect(plan.staged.accepted.hp.current).toBe(12.5);
+		expect(plan.staged.live.hp.current).toBe(12.5);
+		// The fractional maximum itself never appears as a change to be saved.
+		expect(diffJson(plan.staged.accepted, plan.staged.live)).toEqual([]);
+	});
+
+	it("fails visibly instead of clamping to zero when no usable maximum exists", () => {
+		const data = makeCharacter({current: 5, max: 0});
+		delete data.hp.effectiveMax;
+		expect(() => applySemanticOperation({data, operation: makeOperation({kind: "hp.heal", args: {amount: 4}})}))
+			.toThrow(/usable maximum/);
 	});
 
 	it("dedupes an added condition against a legacy bare-string condition", () => {

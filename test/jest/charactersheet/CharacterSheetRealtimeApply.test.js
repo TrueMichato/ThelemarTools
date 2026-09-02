@@ -351,3 +351,87 @@ describe("Live campaign effects on an open Character Sheet", () => {
 		expect(state.getConditions()).toEqual([{name: "Poisoned", source: "XPHB"}]);
 	});
 });
+
+describe("Applicable maximum through live reconciliation", () => {
+	it("does not put the applicable maximum into the follow-up save when no max input changed", async () => {
+		const {api, clients, repository, state} = await pMakeHarness();
+		const effectiveMaxBefore = state.toJson().hp.effectiveMax;
+
+		clients[0].emit("event", makeAppliedEvent());
+		await pFlush();
+
+		// Both R and F carry the same materialised maximum, so it is not a change to persist.
+		expect(state.toJson().hp.effectiveMax).toBe(effectiveMaxBefore);
+		expect(repository._accepted.get("character-1").data.hp.effectiveMax).toBe(effectiveMaxBefore);
+
+		api.state.character = makeCharacterDocument(structuredClone(repository._accepted.get("character-1").data), 2);
+		await repository.pUpsert({character: {...state.toJson(), id: "character-1"}});
+		expect(api.state.patches.filter(patch => patch.path === "/hp/effectiveMax")).toEqual([]);
+	});
+
+	it("persists a genuine max-input change exactly once across interleaved damage and healing", async () => {
+		const {api, clients, repository, state} = await pMakeHarness();
+		const before = state.toJson().hp.effectiveMax;
+
+		// A durable max-affecting input: constitution feeds `_calculateMaxHp()`, so once the cached maximum
+		// is recalculated the new value survives the `loadFromJson` adoption path — unlike an explicit
+		// `setMaxHp()` override, which adoption recomputes away.
+		state.setAbilityBase("con", 18);
+		state.recalculateHp();
+		const after = state.toJson().hp.effectiveMax;
+		expect(after).toBeGreaterThan(before);
+
+		clients[0].emit("event", makeAppliedEvent({args: {amount: 4}}));
+		await pFlush();
+		clients[0].emit("event", makeAppliedEvent({
+			id: "event-2",
+			operationId: "operation-2",
+			sequence: 21,
+			revision: 3,
+			kind: "hp.heal",
+			args: {amount: 2},
+		}));
+		await pFlush();
+
+		// The rematerialised maximum survives both operations and is never double counted.
+		expect(state.toJson().hp.effectiveMax).toBe(after);
+
+		api.state.character = makeCharacterDocument(structuredClone(repository._accepted.get("character-1").data), 3);
+		await repository.pUpsert({character: {...state.toJson(), id: "character-1"}});
+		const maxPatches = api.state.patches.filter(patch => patch.path === "/hp/effectiveMax");
+		expect(maxPatches).toEqual([{op: "replace", path: "/hp/effectiveMax", value: after}]);
+	});
+
+	it("keeps a strained character's current hit points above the transient effective maximum", async () => {
+		// Psionic body strain halves the applicable maximum without touching the current total, so a document
+		// whose current HP legitimately exceeds it must survive adoption, reconciliation and saving unchanged.
+		const {api, clients, repository, state} = await pMakeHarness({
+			seed: {
+				classes: [{name: "Talent", level: 10, subclass: null}],
+				psionicStrain: {body: 7, mind: 0, soul: 0},
+				hp: {current: 60, max: 80, temp: 0},
+			},
+		});
+		const effectiveMax = state.toJson().hp.effectiveMax;
+		expect(effectiveMax).toBeLessThan(state.getCurrentHp());
+
+		// Healing must not be able to pull the total down to the halved maximum.
+		clients[0].emit("event", makeAppliedEvent({kind: "hp.heal", args: {amount: 5}}));
+		await pFlush();
+		expect(state.getCurrentHp()).toBe(60);
+
+		// Repeated adoption must be idempotent, not erosive.
+		for (let i = 0; i < 3; ++i) {
+			CharacterSheetPage.prototype._adoptHubLiveCharacterData.call(
+				{_state: state, _currentCharacterId: "character-1", _reconcileClassFeatures: () => ({})},
+				state.toJson(),
+			);
+		}
+		expect(state.getCurrentHp()).toBe(60);
+
+		api.state.character = makeCharacterDocument(structuredClone(repository._accepted.get("character-1").data), 2);
+		await repository.pUpsert({character: {...state.toJson(), id: "character-1"}});
+		expect(api.state.patches.filter(patch => patch.path === "/hp/current")).toEqual([]);
+		expect(state.getCurrentHp()).toBe(60);
+	});
+});
