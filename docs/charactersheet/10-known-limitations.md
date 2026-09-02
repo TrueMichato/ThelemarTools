@@ -949,11 +949,15 @@ Consequences worth knowing:
   at 32/37. Long-standing and out of scope here — it is why `_migrateHpMax()` runs at the *end* of the load
   and writes `hp.max` directly instead of calling `_recalculateMaxHp()`. A real fix needs the current-HP cap
   suppressed while a rebuild is in flight.
-- **Psionic body strain no longer eats hit points.** `_recalculateMaxHp()` skips its current-HP cap while
-  strain is halving the maximum, because the halving is transient and layered on live in `getMaxHp()` — a
-  strained Talent above the halved maximum used to drop to it on every load, reconcile, or Hub adoption, and
-  the loss was then saved canonically. Current-above-effective is a supported state, which is also why the
-  semantic heal operation is monotonic.
+- **Psionic body strain no longer eats hit points.** `_recalculateMaxHp()` caps current HP against the
+  *unhalved* applicable maximum (`getUnhalvedMaxHp()` — base plus item max-HP effects) rather than the
+  strain-halved projection, because the halving is transient and layered on live in `getMaxHp()`. A strained
+  Talent above the halved maximum used to drop to it on every load, reconcile, or Hub adoption, and the loss
+  was then saved canonically. A genuine, permanent reduction — an HP-maximum reduction, a lost level, an
+  unequipped item — is still enforced immediately, including while strained, so nothing lingers above the
+  maximum waiting to be collapsed by a later ordinary heal. Where no halving applies the cap is exactly the
+  previous one. Current-above-effective remains a supported state, which is also why the semantic heal
+  operation is monotonic.
 
 ### Conditional Modifier Picker is Opt-In Per Roll
 

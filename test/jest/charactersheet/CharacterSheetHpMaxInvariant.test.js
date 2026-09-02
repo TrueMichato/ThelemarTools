@@ -217,4 +217,70 @@ describe("Hit point maximum document invariant", () => {
 			expect(doc.hp.current).toBe(doc.hp.effectiveMax);
 		});
 	});
+
+	describe("the current-HP cap uses the unhalved applicable maximum", () => {
+		function strainedTalent () {
+			const state = new CharacterSheetState();
+			state.loadFromJson({
+				name: "Strained Talent",
+				classes: [{name: "Talent", level: 10, subclass: null}],
+				abilities: {str: 10, dex: 14, con: 14, int: 12, wis: 12, cha: 16},
+				hp: {current: 60, max: 0, temp: 0},
+				psionicStrain: {body: 7, mind: 0, soul: 0},
+			});
+			return state;
+		}
+
+		it("enforces a permanent maximum reduction taken while strained, so a later heal cannot drop HP", () => {
+			// Exempting strain from the cap entirely leaves current above the reduced maximum:
+			// the sheet reads 60/42 once the halving ends, and the next ordinary heal silently
+			// collapses it to 42. The reduction must bite when it is applied.
+			const state = strainedTalent();
+			const unhalvedBefore = state.getUnhalvedMaxHp();
+
+			state.setMaxHpReduction(20);
+
+			expect(state.getUnhalvedMaxHp()).toBe(unhalvedBefore - 20);
+			expect(state.getCurrentHp()).toBe(state.getUnhalvedMaxHp());
+
+			// Strain drops below the halving tier (body >= 4); nothing further may change.
+			const afterReduction = state.getCurrentHp();
+			state.removeStrain(4, "body");
+			expect(state.getMaxHp()).toBe(afterReduction);
+			expect(state.getCurrentHp()).toBe(afterReduction);
+
+			state.heal(1);
+			expect(state.getCurrentHp()).toBe(afterReduction);
+		});
+
+		it("does not cap merely because strain halves the maximum", () => {
+			const state = strainedTalent();
+
+			state._recalculateMaxHp();
+
+			expect(state.getMaxHp()).toBeLessThan(60);
+			expect(state.getCurrentHp()).toBe(60);
+		});
+
+		it("counts item max-HP bonuses in the unhalved maximum used for the cap", () => {
+			const state = strainedTalent();
+			state.addItem({
+				id: "healthy-charm-hb",
+				name: "Healthy Charm",
+				source: "HB",
+				effects: [{type: "maxHpBonus", value: 10, name: "Health"}],
+				equipped: true,
+				attuned: true,
+				quantity: 1,
+			});
+			const withItem = state.getUnhalvedMaxHp();
+			state.setHp(withItem, undefined, undefined);
+
+			state._recalculateMaxHp();
+
+			// The item bonus is part of the applicable maximum, so it must not be capped away.
+			expect(state.getCurrentHp()).toBe(withItem);
+			expect(withItem).toBeGreaterThan(state.getMaxHp());
+		});
+	});
 });

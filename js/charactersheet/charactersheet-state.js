@@ -9797,7 +9797,16 @@ class CharacterSheetState {
 		}
 	}
 
-	getMaxHp () {
+	/**
+	 * The applicable maximum BEFORE psionic body-strain halving: the stored base (or the
+	 * calculated fallback) plus live item max-HP effects.
+	 *
+	 * Exists so the current-HP cap can distinguish a *permanent* maximum change from the
+	 * transient halving that strain layers on in {@link getMaxHp}. Capping against the halved
+	 * projection would delete hit points the character gets back the moment the strain clears.
+	 * @returns {number}
+	 */
+	getUnhalvedMaxHp () {
 		const base = this._data.hp.max > 0 ? this._data.hp.max : this._calculateMaxHp();
 		let itemBonus = 0;
 		for (const item of this.getItems()) {
@@ -9807,7 +9816,11 @@ class CharacterSheetState {
 				if (effect?.type === "maxHpPerLevel") itemBonus += (Number(effect.value) || 0) * (this.getTotalLevel() || 1);
 			}
 		}
-		const total = Math.max(1, base + itemBonus);
+		return Math.max(1, base + itemBonus);
+	}
+
+	getMaxHp () {
+		const total = this.getUnhalvedMaxHp();
 		// Psionic body strain (Talent, 7+ body strain) halves the hit point maximum.
 		if (this._isStrainHalvingMaxHp()) return Math.max(1, Math.floor(total / 2));
 		return total;
@@ -10083,15 +10096,15 @@ class CharacterSheetState {
 		const calculated = this._calculateMaxHp();
 		// Always update max HP when recalculated (level up, class added/removed, etc.)
 		this._data.hp.max = calculated;
-		// Cap current HP if it exceeds the maximum — EXCEPT while psionic body strain is halving
-		// it. That halving is a transient effect layered on live in getMaxHp() and never written
-		// into the stored base, so capping against it would permanently delete hit points the
-		// character gets back the moment the strain clears. Current-above-effective is a supported
-		// state: the semantic heal operation is monotonic for exactly this reason.
-		if (this._isStrainHalvingMaxHp()) return;
-		const effectiveMax = this.getMaxHp();
-		if (this._data.hp.current > effectiveMax) {
-			this._data.hp.current = effectiveMax;
+		// Cap current HP against the UNHALVED applicable maximum. Psionic body strain halves the
+		// maximum transiently and only in the live projection, so capping against the halved value
+		// would permanently delete hit points the character gets back when the strain clears — but
+		// a genuine, permanent reduction (an HP-maximum reduction, a lost level, an unequipped
+		// item) must still be enforced, including while strained. Identical to capping against
+		// `getMaxHp()` whenever no halving is in effect.
+		const cap = this.getUnhalvedMaxHp();
+		if (this._data.hp.current > cap) {
+			this._data.hp.current = cap;
 		}
 	}
 
