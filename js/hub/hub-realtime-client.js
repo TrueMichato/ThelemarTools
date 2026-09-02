@@ -29,6 +29,7 @@ export class HubRealtimeClient {
 		this._bufferedEvents = [];
 		this._resyncAccumulatedEvents = [];
 		this._resyncScannedThroughSequence = null;
+		this._resyncStartSequence = null;
 		this._listeners = new Map();
 		this._connectionState = {state: "closed"};
 	}
@@ -84,7 +85,7 @@ export class HubRealtimeClient {
 				isOpened = true;
 				socket.removeEventListener("error", onError);
 				const isReconnect = this._reconnectAttempt > 0;
-				this.requestResync();
+				this.requestResync(this._resyncScannedThroughSequence ?? this._lastSequence);
 				this._armResyncTimer();
 				this._setConnectionState("syncing", {isReconnect});
 				resolve();
@@ -123,7 +124,7 @@ export class HubRealtimeClient {
 
 	_handleMessage (message) {
 		if (message.type === "event") {
-			if (!this._hasBaseline) {
+			if (!this._hasBaseline || this._resyncStartSequence != null) {
 				this._bufferedEvents.push(message.event);
 				return;
 			}
@@ -133,7 +134,7 @@ export class HubRealtimeClient {
 			return;
 		}
 		if (message.type === "resync_complete") {
-			const previousSequence = this._lastSequence;
+			const previousSequence = this._resyncStartSequence ?? this._lastSequence;
 			this._resyncAccumulatedEvents.push(...(message.events || []));
 			if (message.replay?.hasMore) {
 				const scannedThroughSequence = Number(message.replay.scannedThroughSequence);
@@ -142,6 +143,11 @@ export class HubRealtimeClient {
 					|| scannedThroughSequence <= (this._resyncScannedThroughSequence ?? previousSequence)
 				) {
 					this._emit("error", {type: "error", code: "INVALID_REPLAY_CONTINUATION"});
+					this._resyncAccumulatedEvents = [];
+					this._resyncScannedThroughSequence = null;
+					this._resyncStartSequence = null;
+					this._hasBaseline = false;
+					this.requestResync(previousSequence);
 					return;
 				}
 				this._resyncScannedThroughSequence = scannedThroughSequence;
@@ -165,6 +171,7 @@ export class HubRealtimeClient {
 				.sort((a, b) => a.sequence - b.sequence);
 			this._resyncAccumulatedEvents = [];
 			this._resyncScannedThroughSequence = null;
+			this._resyncStartSequence = null;
 			this._bufferedEvents = [];
 			const seen = new Set();
 			for (const event of events) {
@@ -197,9 +204,15 @@ export class HubRealtimeClient {
 		this._socket?.send(JSON.stringify({type: "presence", activity, targetId}));
 	}
 
-	requestResync (afterSequence = this._resyncScannedThroughSequence ?? this._lastSequence) {
+	requestResync (afterSequence) {
 		if (this._socket?.readyState !== 1) return;
-		this._socket.send(JSON.stringify({type: "resync", afterSequence}));
+		const isContinuationOrResume = afterSequence != null;
+		if (!isContinuationOrResume && this._resyncStartSequence != null) return;
+		if (this._resyncStartSequence == null) this._resyncStartSequence = this._lastSequence;
+		this._socket.send(JSON.stringify({
+			type: "resync",
+			afterSequence: isContinuationOrResume ? afterSequence : this._lastSequence,
+		}));
 	}
 
 	_armResyncTimer () {
@@ -221,8 +234,11 @@ export class HubRealtimeClient {
 		this._clearResyncTimer();
 		this._socket?.close();
 		this._socket = null;
+		this._hasBaseline = false;
+		this._bufferedEvents = [];
 		this._resyncAccumulatedEvents = [];
 		this._resyncScannedThroughSequence = null;
+		this._resyncStartSequence = null;
 		this._setConnectionState("closed");
 	}
 }

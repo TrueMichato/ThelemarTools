@@ -222,6 +222,114 @@ describe("hub realtime", () => {
 			expect(client.getConnectionState().state).toBe("live");
 		});
 
+		it("buffers live events during a periodic multi-page replay without dropping recovered events", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			const sent = [];
+			const events = [];
+			const client = new HubRealtimeClient({campaignId: "cmp", location: {protocol: "https:", host: "tools.example"}});
+			client._socket = {
+				readyState: 1,
+				send: raw => sent.push(JSON.parse(raw)),
+			};
+			client.on("event", event => events.push(event));
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 0},
+				characterRefs: [],
+				events: [],
+				replay: {scannedThroughSequence: 0, hasMore: false},
+			});
+
+			client.requestResync();
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 1_001},
+				characterRefs: [],
+				events: [{id: "recovered-100", sequence: 100, type: "character.operation.proposed"}],
+				replay: {scannedThroughSequence: 500, hasMore: true},
+			});
+			client.requestResync();
+			client._handleMessage({type: "event", event: {id: "live-1001", sequence: 1_001, type: "roll.logged"}});
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 1_001},
+				characterRefs: [],
+				events: [
+					{id: "recovered-600", sequence: 600, type: "character.operation.applied"},
+					{id: "live-1001", sequence: 1_001, type: "roll.logged"},
+				],
+				replay: {scannedThroughSequence: 1_001, hasMore: false},
+			});
+
+			expect(sent).toEqual([
+				{type: "resync", afterSequence: 0},
+				{type: "resync", afterSequence: 500},
+			]);
+			expect(events.map(event => event.id)).toEqual(["recovered-100", "recovered-600", "live-1001"]);
+			expect(client._lastSequence).toBe(1_001);
+			expect(client.getConnectionState().state).toBe("live");
+		});
+
+		it("restarts a malformed replay chain without stranding buffered live events", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			const sent = [];
+			const events = [];
+			const errors = [];
+			const client = new HubRealtimeClient({campaignId: "cmp", location: {protocol: "https:", host: "tools.example"}});
+			client._socket = {
+				readyState: 1,
+				send: raw => sent.push(JSON.parse(raw)),
+			};
+			client.on("event", event => events.push(event));
+			client.on("error", error => errors.push(error));
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 10},
+				characterRefs: [],
+				events: [],
+				replay: {scannedThroughSequence: 10, hasMore: false},
+			});
+
+			client.requestResync();
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 30},
+				characterRefs: [],
+				events: [{id: "recovered-11", sequence: 11, type: "character.operation.proposed"}],
+				replay: {scannedThroughSequence: 20, hasMore: true},
+			});
+			client._handleMessage({type: "event", event: {id: "live-30", sequence: 30, type: "roll.logged"}});
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 30},
+				characterRefs: [],
+				events: [{id: "invalid-page", sequence: 21, type: "character.operation.applied"}],
+				replay: {scannedThroughSequence: 20, hasMore: true},
+			});
+
+			expect(errors).toEqual([{type: "error", code: "INVALID_REPLAY_CONTINUATION"}]);
+			expect(sent).toEqual([
+				{type: "resync", afterSequence: 10},
+				{type: "resync", afterSequence: 20},
+				{type: "resync", afterSequence: 10},
+			]);
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 30},
+				characterRefs: [],
+				events: [
+					{id: "recovered-11", sequence: 11, type: "character.operation.proposed"},
+					{id: "recovered-21", sequence: 21, type: "character.operation.applied"},
+					{id: "live-30", sequence: 30, type: "roll.logged"},
+				],
+				replay: {scannedThroughSequence: 30, hasMore: false},
+			});
+
+			expect(events.map(event => event.id)).toEqual(["recovered-11", "recovered-21", "live-30"]);
+			expect(client._lastSequence).toBe(30);
+			expect(client.getConnectionState().state).toBe("live");
+		});
+
 		it("reconnects after a transient close and preserves the resync sequence", async () => {
 			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
 			class BrowserSocket extends EventEmitter {

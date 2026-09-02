@@ -102,7 +102,9 @@ event from stranding a later visible semantic lifecycle event.
 Only the exact next scanned sequence issued to that live connection receives a replay-continuation rate-limit
 exemption, and the server consumes that step before reading the next page. Replayed, forged, or cross-connection
 markers remain ordinary `resync` messages subject to the 20-message-per-second burst limit. A reconnect starts a
-new connection but resumes from the client's last server-issued scanned sequence.
+new connection but resumes from the client's last server-issued scanned sequence. The client treats all
+continuation pages as one replay chain: it buffers live events until the final page, emits recovered and live
+events once in campaign-sequence order, and does not start a periodic resync while that chain is active.
 
 Unknown client types receive:
 
