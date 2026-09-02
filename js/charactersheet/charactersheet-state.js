@@ -5810,10 +5810,14 @@ class CharacterSheetState {
 	 * Campaign Hub's authoritative `hp.heal` clamps with `Math.min(hp.max, ...)`, so healing such a
 	 * character would drive it to 0 hit points.
 	 *
-	 * Must run at the very END of the load: `_recalculateMaxHp()` caps current hit points against
-	 * the maximum it computes, and mid-load — inside `_clearClassFeatureEffects()`, before feature
-	 * modifiers such as Draconic Resilience are re-minted — that maximum is understated, which
-	 * would silently delete hit points the player still has.
+	 * Must run at the very END of the load, after class-feature modifiers such as Draconic
+	 * Resilience have been re-minted, so the repaired value is the complete one.
+	 *
+	 * Repairs the cache directly rather than through `_recalculateMaxHp()`, which also caps current
+	 * hit points against the effective maximum. Current-above-effective is a legitimate, supported
+	 * state — psionic body strain halves the maximum without touching the current total, and the
+	 * semantic heal operation is monotonic precisely so it cannot undo that — so clamping here
+	 * would permanently delete hit points merely on open-and-save.
 	 *
 	 * Only ever fills a missing/zero/non-finite maximum, and only once class levels exist, so a
 	 * blank character stays blank and an explicitly-set maximum is never overwritten.
@@ -5823,7 +5827,7 @@ class CharacterSheetState {
 		const stored = Number(this._data.hp?.max);
 		if (Number.isFinite(stored) && stored > 0) return;
 		if (!this.getTotalLevel()) return;
-		this._recalculateMaxHp();
+		this._data.hp.max = this._calculateMaxHp();
 	}
 
 	/**
@@ -10079,7 +10083,12 @@ class CharacterSheetState {
 		const calculated = this._calculateMaxHp();
 		// Always update max HP when recalculated (level up, class added/removed, etc.)
 		this._data.hp.max = calculated;
-		// If current HP exceeds max, cap it
+		// Cap current HP if it exceeds the maximum — EXCEPT while psionic body strain is halving
+		// it. That halving is a transient effect layered on live in getMaxHp() and never written
+		// into the stored base, so capping against it would permanently delete hit points the
+		// character gets back the moment the strain clears. Current-above-effective is a supported
+		// state: the semantic heal operation is monotonic for exactly this reason.
+		if (this._isStrainHalvingMaxHp()) return;
 		const effectiveMax = this.getMaxHp();
 		if (this._data.hp.current > effectiveMax) {
 			this._data.hp.current = effectiveMax;

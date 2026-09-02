@@ -90,7 +90,7 @@ acceptance. Application commits operation status, target revision, audit, lifecy
 invalidation, watermark, outbox, and persistent command result in one transaction. Source and target lock in
 stable character-id order; supported initial peer templates have no source reservation/mutation.
 A target document that cannot supply a positive hit-point maximum fails the whole transaction with
-`OPERATION_STATE_INVALID` rather than clamping a heal to zero.
+`HP_MAX_UNAVAILABLE` rather than clamping a heal to zero.
 
 ### Transfer
 

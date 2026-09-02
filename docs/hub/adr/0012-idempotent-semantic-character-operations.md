@@ -98,8 +98,10 @@ serialization and is stripped on load, so it can never be mistaken for an explic
 
 The single resolution rule lives in `js/hub/hub-semantic-hp.js` — browser-safe, imported by the server the
 same way `hub-json-patch.js` already is, so one formula serves both the authoritative and the live-apply
-tracks: prefer `effectiveMax`; fall back to `max` when it is a positive integer; otherwise fail with
-`OPERATION_STATE_INVALID`. A document that cannot supply a positive maximum is malformed, not "capped at
+tracks: prefer `effectiveMax`; fall back to `max`; otherwise fail with `HP_MAX_UNAVAILABLE`. Any positive
+finite safe number is a usable maximum, integer or not, matching the cloud-data numeric contract. The code
+is deliberately distinct from `OPERATION_STATE_INVALID`, which spell-slot operations also raise, so a client
+can name the actual remedy. A document that cannot supply a positive maximum is malformed, not "capped at
 zero", and the operation is rejected atomically rather than silently converting healing into damage.
 Healing is additionally monotonic — it can only ever raise current hit points — so a maximum that has
 fallen below the current total (strain halving) cannot turn a heal into damage either.

@@ -17,13 +17,13 @@
  *
  * This module is browser-safe and dependency-free (see `hub-json-patch.js`, which the server stores
  * already import the same way). It returns `null` instead of throwing a domain error so that each
- * caller can raise its own: the server maps `null` to `HubStoreError("OPERATION_STATE_INVALID")`.
+ * caller can raise its own: the server maps `null` to `HubStoreError("HP_MAX_UNAVAILABLE")`.
  */
 
-function getPositiveIntegerOrNull (value) {
+function getUsableMaxHpOrNull (value) {
 	if (value == null || value === "" || typeof value === "boolean") return null;
 	const number = Number(value);
-	if (!Number.isInteger(number) || number < 1 || number > Number.MAX_SAFE_INTEGER) return null;
+	if (!Number.isFinite(number) || number <= 0 || number > Number.MAX_SAFE_INTEGER) return null;
 	return number;
 }
 
@@ -31,15 +31,18 @@ function getPositiveIntegerOrNull (value) {
  * Resolve the maximum a semantic hit-point operation must clamp against.
  *
  * Prefers the applicable maximum; falls back to the base maximum so documents stored before
- * `hp.effectiveMax` existed keep behaving exactly as they do today. A non-positive maximum is
- * never a legitimate clamp target — returning `null` makes the caller fail visibly instead of
- * silently clamping a heal down to zero hit points.
+ * `hp.effectiveMax` existed keep behaving exactly as they do today. Accepts any positive finite
+ * safe number — not only integers — because the sheet and the cloud-data contract both permit
+ * fractional hit-point values, and rejecting one would either fail a legitimate document or
+ * silently ignore the authoritative maximum in favour of the base. A non-positive maximum is never
+ * a legitimate clamp target: returning `null` makes the caller fail visibly instead of silently
+ * clamping a heal down to zero hit points.
  * @param {object} hp A character document's `hp` block.
- * @returns {number|null} A positive integer maximum, or `null` when the document cannot supply one.
+ * @returns {number|null} A positive finite maximum, or `null` when the document cannot supply one.
  */
 export function resolveApplicableMaxHp (hp) {
 	if (!hp || typeof hp !== "object" || Array.isArray(hp)) return null;
-	return getPositiveIntegerOrNull(hp.effectiveMax) ?? getPositiveIntegerOrNull(hp.max);
+	return getUsableMaxHpOrNull(hp.effectiveMax) ?? getUsableMaxHpOrNull(hp.max);
 }
 
 /**

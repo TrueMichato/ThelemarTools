@@ -11,9 +11,17 @@ describe("resolveApplicableMaxHp", () => {
 	});
 
 	it.each([
+		["a fractional base maximum", {current: 10, max: 20.5}, 20.5],
+		["a fractional applicable maximum", {current: 10, max: 20, effectiveMax: 20.5}, 20.5],
+	])("accepts %s rather than failing or silently falling back", (_label, hp, expected) => {
+		// The sheet and the cloud-data contract both permit fractional hit-point values.
+		// Rejecting them would either fail a legitimate document or quietly clamp to the base.
+		expect(resolveApplicableMaxHp(hp)).toBe(expected);
+	});
+
+	it.each([
 		["zero", 0],
 		["negative", -1],
-		["fractional", 12.5],
 		["non-finite", Number.POSITIVE_INFINITY],
 		["NaN", Number.NaN],
 		["null", null],

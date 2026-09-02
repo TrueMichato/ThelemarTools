@@ -931,8 +931,10 @@ Consequences worth knowing:
 - **A stored maximum of zero used to be permanent.** `getMaxHp()` falls back to a calculated value whenever
   the stored one is non-positive, so the sheet looked healthy while the saved document claimed zero, and the
   refresh in `_recalculateCustomModifiers()` was itself gated on `hp.max > 0`. `_migrateHpMax()` now repairs
-  it at the end of the load. This mattered beyond the sheet: the Campaign Hub clamps authoritative healing
-  to the document's maximum, so a heal against such a save drove the character to 0 hit points.
+  it at the end of the load — writing the cache directly, never through `_recalculateMaxHp()`, so a
+  strain-halved character whose current total legitimately exceeds its effective maximum keeps those hit
+  points. This mattered beyond the sheet: the Campaign Hub clamps authoritative healing to the document's
+  maximum, so a heal against such a save drove the character to 0 hit points.
 - **`toJson()` also emits `hp.effectiveMax`** — the applicable maximum, straight from `getMaxHp()`. It is
   serialization-only and is stripped on load, so it never becomes an explicitly-set maximum (which would
   double-count item bonuses on the next load). See [ADR 0012](../hub/adr/0012-idempotent-semantic-character-operations.md).
@@ -945,8 +947,13 @@ Consequences worth knowing:
   that window; `_recalculateMaxHp()` caps current HP against the momentarily understated maximum, and the
   maximum recovers afterwards while the lost hit points do not. A Draconic Sorcerer 5 saved at 37/37 loads
   at 32/37. Long-standing and out of scope here — it is why `_migrateHpMax()` runs at the *end* of the load
-  and why the `hp.max > 0` gate was deliberately left in place. A real fix needs the current-HP cap
+  and writes `hp.max` directly instead of calling `_recalculateMaxHp()`. A real fix needs the current-HP cap
   suppressed while a rebuild is in flight.
+- **Psionic body strain no longer eats hit points.** `_recalculateMaxHp()` skips its current-HP cap while
+  strain is halving the maximum, because the halving is transient and layered on live in `getMaxHp()` — a
+  strained Talent above the halved maximum used to drop to it on every load, reconcile, or Hub adoption, and
+  the loss was then saved canonically. Current-above-effective is a supported state, which is also why the
+  semantic heal operation is monotonic.
 
 ### Conditional Modifier Picker is Opt-In Per Roll
 
