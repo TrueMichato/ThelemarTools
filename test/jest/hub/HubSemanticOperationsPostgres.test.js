@@ -272,6 +272,121 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 		});
 	});
 
+	test("rejects approval after the original actor loses current target visibility", async () => {
+		const privateTarget = (await store.pCreateCharacter({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			data: getCharacterData({name: "Private Target"}),
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const commandId = crypto.randomUUID();
+		const request = {
+			commandId,
+			sourceCharacterId: sourceCharacter.id,
+			sourceEntity: {type: "ability", uid: "steadying word|tst", version: "tst-v1"},
+			effectTemplateId: "ability.steadying-word.heal",
+			choice: {amount: 3},
+			targetRef: privateTarget.targetRef,
+		};
+		const proposed = await store.pCreateStructuredAction({
+			accountId: sourceOwner.id,
+			sessionId: sourceSession.id,
+			campaignId: campaign.id,
+			...request,
+			idempotencyKey: getIdempotency(commandId, request),
+		});
+		await store.pSetProjectionPolicy({
+			accountId: targetOwner.id,
+			characterId: privateTarget.id,
+			policy: {version: 1, preset: "private", overrides: {}},
+			expectedProjectionRevision: privateTarget.projectionRevision,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const resolveCommandId = crypto.randomUUID();
+		const resolveRequest = {
+			commandId: resolveCommandId,
+			operationId: proposed.operation.operationId,
+			decision: "accept",
+		};
+		await expect(store.pResolveStructuredAction({
+			accountId: targetOwner.id,
+			sessionId: targetSession.id,
+			campaignId: campaign.id,
+			commandId: resolveCommandId,
+			actionId: proposed.operation.operationId,
+			decision: "accept",
+			idempotencyKey: getIdempotency(resolveCommandId, resolveRequest),
+		})).rejects.toMatchObject({code: "PROPOSAL_STALE"});
+		const persisted = await pool.query(`
+			SELECT c.revision, c.data->'hp'->>'current' AS current_hp, so.status
+			FROM hub.characters c
+			JOIN hub.semantic_operations so ON so.target_character_id = c.id
+			WHERE c.id = $1 AND so.id = $2
+		`, [privateTarget.id, proposed.operation.operationId]);
+		expect(persisted.rows[0]).toEqual({revision: "1", current_hp: "5", status: "proposed"});
+	});
+
+	test("resets a campaign-local operation watermark when a character moves campaigns", async () => {
+		const movable = (await store.pCreateCharacter({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			data: getCharacterData({name: "Movable Target"}),
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const commandId = crypto.randomUUID();
+		const request = {
+			commandId,
+			targetCharacterId: movable.id,
+			operation: {kind: "hp.damage", version: 1, arguments: {amount: 1}},
+		};
+		const applied = await store.pCreateStructuredAction({
+			accountId: dm.id,
+			sessionId: dmSession.id,
+			campaignId: campaign.id,
+			...request,
+			idempotencyKey: getIdempotency(commandId, request),
+		});
+		expect(applied.operationWatermark).toBeGreaterThan(0);
+		const destination = (await store.pCreateCampaign({
+			accountId: targetOwner.id,
+			name: `Watermark destination ${crypto.randomUUID()}`,
+			idempotencyKey: crypto.randomUUID(),
+		})).campaign;
+		const moved = await store.pMoveCharacter({
+			accountId: targetOwner.id,
+			characterId: movable.id,
+			campaignId: destination.id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		expect(moved.character.operationWatermark).toBe(0);
+		const cursor = await store.pGetCampaignCursor({accountId: targetOwner.id, campaignId: destination.id});
+		expect(cursor.characterRefs).toContainEqual(expect.objectContaining({
+			id: movable.id,
+			operationWatermark: 0,
+		}));
+		const destinationCommandId = crypto.randomUUID();
+		const destinationRequest = {
+			commandId: destinationCommandId,
+			targetCharacterId: movable.id,
+			operation: {kind: "hp.damage", version: 1, arguments: {amount: 1}},
+		};
+		const destinationApplied = await store.pCreateStructuredAction({
+			accountId: targetOwner.id,
+			sessionId: targetSession.id,
+			campaignId: destination.id,
+			...destinationRequest,
+			idempotencyKey: getIdempotency(destinationCommandId, destinationRequest),
+		});
+		expect(destinationApplied.operationWatermark).toBeGreaterThan(0);
+		expect(destinationApplied.operationWatermark).toBeLessThan(applied.operationWatermark);
+		const reloaded = await store.pGetCharacter({accountId: targetOwner.id, characterId: movable.id});
+		expect(reloaded.character.data.hp.current).toBe(moved.character.data.hp.current - 1);
+	});
+
 	test("expires and lifecycle-cancels proposals with privacy-safe terminal events", async () => {
 		const pPropose = async amount => {
 			const commandId = crypto.randomUUID();
@@ -343,7 +458,6 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 			clientImportId: crypto.randomUUID(),
 			idempotencyKey: crypto.randomUUID(),
 		})).character;
-		const before = await store.pGetCampaignCursor({accountId: targetOwner.id, campaignId: campaign.id});
 		await store.pSetProjectionPolicy({
 			accountId: hiddenOwner.id,
 			characterId: hiddenCharacter.id,
@@ -351,14 +465,30 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 			expectedProjectionRevision: hiddenCharacter.projectionRevision,
 			idempotencyKey: crypto.randomUUID(),
 		});
-		await store.pLogRoll({
-			accountId: hiddenOwner.id,
-			campaignId: campaign.id,
-			characterId: hiddenCharacter.id,
-			visibility: "all_members",
-			payload: {formula: "1d20", total: 12},
-			idempotencyKey: crypto.randomUUID(),
-		});
+		const before = await store.pGetCampaignCursor({accountId: targetOwner.id, campaignId: campaign.id});
+		const hiddenEventCount = 501;
+		const hiddenEventIds = Array.from({length: hiddenEventCount}, () => crypto.randomUUID());
+		const advanced = await pool.query(`
+			UPDATE hub.campaigns
+			SET next_event_sequence = next_event_sequence + $2::integer
+			WHERE id = $1
+			RETURNING next_event_sequence - $2::integer AS first_sequence
+		`, [campaign.id, hiddenEventCount]);
+		await pool.query(`
+			INSERT INTO hub.domain_events (
+				id, campaign_id, sequence, event_type, actor_account_id,
+				aggregate_type, aggregate_id, visibility, payload
+			)
+			SELECT event_id, $1, $2::bigint + ordinality - 1, 'roll.logged', $4,
+				'character', $5, 'all_members', jsonb_build_object('total', ordinality)
+			FROM unnest($3::uuid[]) WITH ORDINALITY AS generated(event_id, ordinality)
+		`, [
+			campaign.id,
+			advanced.rows[0].first_sequence,
+			hiddenEventIds,
+			hiddenOwner.id,
+			hiddenCharacter.id,
+		]);
 		const commandId = crypto.randomUUID();
 		const request = {
 			commandId,
@@ -373,35 +503,30 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 			idempotencyKey: getIdempotency(commandId, request),
 		});
 
-		let afterSequence = before.cursor.lastSequence;
-		const visible = [];
 		const first = await store.pListVisibleEventPage({
 			accountId: targetOwner.id,
 			campaignId: campaign.id,
-			afterSequence,
-			limit: 1,
+			afterSequence: before.cursor.lastSequence,
+			limit: 500,
 		});
 		expect(first.events).toEqual([]);
-		expect(first.replay.hasMore).toBe(true);
-		expect(first.replay.scannedThroughSequence).toBeGreaterThan(afterSequence);
-		afterSequence = first.replay.scannedThroughSequence;
-
-		for (let i = 0; i < 10; ++i) {
-			const page = await store.pListVisibleEventPage({
-				accountId: targetOwner.id,
-				campaignId: campaign.id,
-				afterSequence,
-				limit: 1,
-			});
-			visible.push(...page.events);
-			afterSequence = page.replay.scannedThroughSequence;
-			if (!page.replay.hasMore) break;
-		}
-		expect(visible).toContainEqual(expect.objectContaining({
+		expect(first.replay).toEqual({
+			scannedThroughSequence: before.cursor.lastSequence + 500,
+			hasMore: true,
+		});
+		const second = await store.pListVisibleEventPage({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			afterSequence: first.replay.scannedThroughSequence,
+			limit: 500,
+		});
+		expect(second.events).toContainEqual(expect.objectContaining({
 			type: "character.operation.applied",
 			payload: expect.objectContaining({
 				operation: expect.objectContaining({operationId: applied.operation.operationId}),
 			}),
 		}));
+		expect(second.replay.hasMore).toBe(false);
+		expect(second.replay.scannedThroughSequence).toBeGreaterThan(first.replay.scannedThroughSequence);
 	});
 });

@@ -70,7 +70,7 @@ function normalizeConditionReference (value) {
 
 function getConditionIdentity (value) {
 	const name = typeof value === "string" ? value : value?.name;
-	const source = typeof value === "object" && value ? value.source : null;
+	const source = typeof value === "object" && value ? value.source || "XPHB" : "XPHB";
 	return `${String(name || "").trim().toLowerCase()}|${String(source || "").trim().toLowerCase()}`;
 }
 
@@ -125,7 +125,7 @@ function getSemanticHp (data) {
 	if (!hp || typeof hp !== "object" || Array.isArray(hp)) {
 		throw new HubStoreError("OPERATION_STATE_INVALID", `Character hit points are unavailable.`, {status: 409});
 	}
-	const out = {};
+	const out = structuredClone(hp);
 	for (const key of ["current", "max", "temp"]) {
 		const fallback = key === "temp" && hp[key] == null ? 0 : hp[key];
 		const value = Number(fallback);

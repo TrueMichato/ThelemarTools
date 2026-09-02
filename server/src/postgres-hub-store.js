@@ -28,6 +28,7 @@ import {validateCloudCharacterData, validateCloudValue} from "./cloud-data-valid
 import {HUB_REQUIRED_MIGRATION_VERSION} from "./migration-version.js";
 import {createCharacterDisplayNameSnapshot, enrichEventPayload} from "./hub-event-snapshots.js";
 import {createSemanticOperationRegistry} from "./semantic-operation-registry.js";
+import {canViewEvent} from "./projections.js";
 
 const {Pool} = pg;
 
@@ -1526,6 +1527,7 @@ export class PostgresHubStore {
 				const updated = await client.query(`
 					UPDATE hub.characters
 					SET campaign_id = $2, client_import_id = NULL, target_ref = gen_random_uuid(),
+						operation_watermark = CASE WHEN campaign_id IS DISTINCT FROM $2 THEN 0 ELSE operation_watermark END,
 						revision = revision + 1, updated_at = now()
 					WHERE id = $1
 					RETURNING *
@@ -2077,7 +2079,6 @@ export class PostgresHubStore {
 	async pListVisibleEventPage ({accountId, campaignId, afterSequence = 0, limit = 500}) {
 		const membership = await this.pGetMembership({accountId, campaignId});
 		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
-		const isDm = ["dm", "co_dm"].includes(membership.role);
 		const result = await this._pool.query(`
 			SELECT e.*, a.display_name AS actor_display_name
 			FROM hub.domain_events
@@ -2085,25 +2086,28 @@ export class PostgresHubStore {
 			LEFT JOIN hub.accounts a ON a.id = e.actor_account_id
 			WHERE e.campaign_id = $1
 				AND e.sequence > $2
-				AND (
-					e.visibility = 'all_members'
-					OR ($3::boolean AND e.visibility IN ('dm_only', 'actor_and_dm'))
-					OR (e.visibility = 'actor_and_dm' AND e.actor_account_id = $4)
-					OR (e.visibility = 'explicit_accounts' AND ($3::boolean OR $4 = ANY(e.visible_account_ids)))
-				)
 			ORDER BY e.sequence
-			LIMIT $5
-		`, [campaignId, afterSequence, isDm, accountId, limit + 1]);
+			LIMIT $3
+		`, [campaignId, afterSequence, limit + 1]);
 		const scannedRows = result.rows.slice(0, limit);
+		const visibleRows = scannedRows.filter(row => canViewEvent({
+			event: {
+				visibility: row.visibility,
+				actorAccountId: row.actor_account_id,
+				visibleAccountIds: row.visible_account_ids,
+			},
+			accountId,
+			role: membership.role,
+		}));
 		// Actor redaction needs the target characters' sharing policies, fetched once.
-		const characterIds = [...new Set(scannedRows
+		const characterIds = [...new Set(visibleRows
 			.filter(row => row.visibility === "all_members" && row.aggregate_type === "character")
 			.map(row => row.aggregate_id))];
 		const characters = characterIds.length
 			? (await this._pool.query(`SELECT id, owner_account_id, projection_policy FROM hub.characters WHERE id = ANY($1::uuid[])`, [characterIds])).rows
 			: [];
 		const charactersById = new Map(characters.map(row => [row.id, {ownerAccountId: row.owner_account_id, projectionPolicy: row.projection_policy}]));
-		const events = scannedRows.map(row => this._redactRowForViewer({
+		const events = visibleRows.map(row => this._redactRowForViewer({
 			row,
 			accountId,
 			role: membership.role,
@@ -2827,6 +2831,36 @@ export class PostgresHubStore {
 			let terminalEvent;
 			let invalidationEvent = null;
 			if (decision === "accept") {
+				let originMembership;
+				try {
+					originMembership = await this._pGetMembershipForUpdate({
+						client,
+						accountId: operation.originActorAccountId,
+						campaignId,
+						roles: ["dm", "co_dm", "player"],
+					});
+				} catch (error) {
+					if (["CAMPAIGN_NOT_FOUND", "FORBIDDEN"].includes(error.code)) {
+						throw new HubStoreError("PROPOSAL_STALE", `The proposal is no longer applicable.`, {status: 409});
+					}
+					throw error;
+				}
+				const isOriginStillEligible = source.ownerAccountId === operation.originActorAccountId
+					&& source.campaignId === campaignId
+					&& target.campaignId === campaignId
+					&& target.targetRef === operation.targetRef;
+				if (!isOriginStillEligible) {
+					throw new HubStoreError("PROPOSAL_STALE", `The proposal is no longer applicable.`, {status: 409});
+				}
+				try {
+					this._assertTargetable({
+						character: target,
+						accountId: operation.originActorAccountId,
+						role: originMembership.role,
+					});
+				} catch {
+					throw new HubStoreError("PROPOSAL_STALE", `The proposal is no longer applicable.`, {status: 409});
+				}
 				let derived;
 				try {
 					derived = this._semanticOperationRegistry.derive({
@@ -3342,7 +3376,7 @@ export class PostgresHubStore {
 		const detached = await client.query(`
 			UPDATE hub.characters
 			SET campaign_id = NULL, client_import_id = NULL, target_ref = gen_random_uuid(),
-				revision = revision + 1, updated_at = now()
+				operation_watermark = 0, revision = revision + 1, updated_at = now()
 			WHERE id = ANY($1::uuid[])
 			RETURNING id, revision
 		`, [characterIds]);
@@ -3882,7 +3916,7 @@ export class PostgresHubStore {
 			});
 			await client.query(`UPDATE hub.pending_actions SET status = 'cancelled', updated_at = now() WHERE campaign_id = $1 AND status = 'proposed'`, [campaignId]);
 			await client.query(`DELETE FROM hub.character_leases WHERE character_id IN (SELECT id FROM hub.characters WHERE campaign_id = $1)`, [campaignId]);
-			await client.query(`UPDATE hub.characters SET campaign_id = NULL, client_import_id = NULL, target_ref = gen_random_uuid(), revision = revision + 1, updated_at = now() WHERE campaign_id = $1`, [campaignId]);
+			await client.query(`UPDATE hub.characters SET campaign_id = NULL, client_import_id = NULL, target_ref = gen_random_uuid(), operation_watermark = 0, revision = revision + 1, updated_at = now() WHERE campaign_id = $1`, [campaignId]);
 			const updated = await client.query(`UPDATE hub.campaigns SET status = 'archived', updated_at = now() WHERE id = $1 RETURNING *`, [campaignId]);
 			await this._pAppendAudit({client, campaignId, actorAccountId: accountId, action: "campaign.archived", targetType: "campaign", targetId: campaignId});
 			await this._pAppendEvent({client, campaignId, actorAccountId: accountId, type: "campaign.archived", aggregateType: "campaign", aggregateId: campaignId, payload: {}});

@@ -85,6 +85,21 @@ describe("semantic operations", () => {
 			operation: getOperation("spell_slot.spend", {level: 1, amount: 1}),
 		})).toThrow();
 	});
+
+	it("matches legacy source-less conditions against their XPHB identity", () => {
+		const original = {conditions: ["Prone", {name: "Poisoned"}]};
+		let data = applySemanticOperation({
+			data: original,
+			operation: getOperation("condition.add", {condition: {name: "prone", source: "XPHB"}}),
+		});
+		expect(data.conditions).toEqual(original.conditions);
+		data = applySemanticOperation({
+			data,
+			operation: getOperation("condition.remove", {condition: {name: "PRONE", source: "xphb"}}),
+		});
+		expect(data.conditions).toEqual([{name: "Poisoned"}]);
+		expect(original).toEqual({conditions: ["Prone", {name: "Poisoned"}]});
+	});
 });
 
 describe("inventory escrow", () => {

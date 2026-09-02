@@ -1422,11 +1422,16 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 	const actionType = document.getElementById("campaign-action-type");
 	const actionValue = document.getElementById("campaign-action-value");
 	const actionValueLabel = document.getElementById("campaign-action-value-label");
+	const actionConditionSourceField = document.getElementById("campaign-action-condition-source-field");
+	const actionConditionSource = document.getElementById("campaign-action-condition-source");
 	const actionSlotFields = document.getElementById("campaign-action-slot-fields");
 	const syncActionFields = () => {
 		const type = actionType.value;
 		const isSlot = ["spell_slot_spend", "spell_slot_restore"].includes(type);
+		const isCondition = ["condition_add", "condition_remove"].includes(type);
 		setHidden(actionSlotFields, !isSlot);
+		setHidden(actionConditionSourceField, !isCondition);
+		actionConditionSource.disabled = !isCondition;
 		actionValue.disabled = isSlot;
 		actionValue.required = !isSlot;
 		if (isSlot) return;
@@ -1460,6 +1465,10 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					if (["condition_add", "condition_remove"].includes(type) && !rawValue) {
 						throw new Error("Enter a condition.");
 					}
+					const conditionSource = document.getElementById("campaign-action-condition-source").value.trim();
+					if (["condition_add", "condition_remove"].includes(type) && !conditionSource) {
+						throw new Error("Enter the condition source code.");
+					}
 					const slotLevel = Number(document.getElementById("campaign-action-slot-level").value);
 					const slotAmount = Number(document.getElementById("campaign-action-slot-amount").value);
 					if (["spell_slot_spend", "spell_slot_restore"].includes(type) && (!Number.isInteger(slotLevel) || slotLevel < 1 || slotLevel > 9)) {
@@ -1484,7 +1493,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 								? {
 									kind: type === "condition_add" ? "condition.add" : "condition.remove",
 									version: 1,
-									arguments: {condition: {name: rawValue, source: "PHB"}},
+									arguments: {condition: {name: rawValue, source: conditionSource}},
 								}
 								: null;
 					await api.pCreateStructuredAction({

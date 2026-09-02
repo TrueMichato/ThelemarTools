@@ -226,13 +226,15 @@ describe("hub realtime", () => {
 			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
 			class BrowserSocket extends EventEmitter {
 				readyState = 1;
-				send () {}
+				sent = [];
+				send (message) { this.sent.push(JSON.parse(message)); }
 				close () { this.emit("close", {code: 1000}); }
 				addEventListener (type, listener) { this.on(type, listener); }
 				removeEventListener (type, listener) { this.off(type, listener); }
 			}
 			const sockets = [];
 			const timers = [];
+			const events = [];
 			const client = new HubRealtimeClient({
 				campaignId: "cmp",
 				location: {protocol: "https:", host: "tools.example"},
@@ -247,13 +249,56 @@ describe("hub realtime", () => {
 					return timers.length;
 				},
 			});
+			client.on("event", event => events.push(event));
 			await client.pConnect();
+			expect(sockets[0].sent).toEqual([{type: "resync", afterSequence: 0}]);
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 501},
+				characterRefs: [],
+				events: [{id: "proposal", sequence: 1, type: "character.operation.proposed"}],
+				replay: {scannedThroughSequence: 500, hasMore: true},
+			});
+			expect(sockets[0].sent.at(-1)).toEqual({type: "resync", afterSequence: 500});
 			sockets[0].emit("close", {code: 1013, reason: "Rate limit exceeded"});
 			expect(timers).toHaveLength(1);
 			timers.shift()();
 			await new Promise(resolve => setImmediate(resolve));
 			expect(sockets).toHaveLength(2);
+			expect(sockets[1].sent).toEqual([{type: "resync", afterSequence: 500}]);
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 501},
+				characterRefs: [],
+				events: [{id: "applied", sequence: 501, type: "character.operation.applied"}],
+				replay: {scannedThroughSequence: 501, hasMore: false},
+			});
+			expect(events.map(event => event.id)).toEqual(["proposal", "applied"]);
 			client.close();
+		});
+
+		it("clears partial replay state on explicit close and starts another campaign at zero", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			const client = new HubRealtimeClient({campaignId: "first", location: {protocol: "https:", host: "tools.example"}});
+			client._socket = {readyState: 1, send: () => {}, close: () => {}};
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "first", lastSequence: 501},
+				characterRefs: [],
+				events: [{id: "partial", sequence: 1, type: "character.operation.proposed"}],
+				replay: {scannedThroughSequence: 500, hasMore: true},
+			});
+			expect(client._resyncAccumulatedEvents).toHaveLength(1);
+			expect(client._resyncScannedThroughSequence).toBe(500);
+			client.close();
+			expect(client._resyncAccumulatedEvents).toEqual([]);
+			expect(client._resyncScannedThroughSequence).toBeNull();
+
+			const sent = [];
+			const nextCampaign = new HubRealtimeClient({campaignId: "second", location: {protocol: "https:", host: "tools.example"}});
+			nextCampaign._socket = {readyState: 1, send: raw => sent.push(JSON.parse(raw))};
+			nextCampaign.requestResync();
+			expect(sent).toEqual([{type: "resync", afterSequence: 0}]);
 		});
 
 		it("uses one bounded authoritative resync watchdog while a socket stays live", async () => {
@@ -334,6 +379,161 @@ describe("hub realtime", () => {
 			});
 			expect(timers).toHaveLength(0);
 		});
+	});
+
+	it("delivers 26 exact continuation pages once without tripping the burst limit", async () => {
+		const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+		const pageCount = 26;
+		const pageWidth = 500;
+		const pageCalls = [];
+		const store = {
+			pGetSessionById: async () => ({session: {}, account: {}}),
+			pGetMembership: async () => ({role: "player"}),
+			pGetCampaignCursor: async () => ({
+				cursor: {campaignId: "cmp", lastSequence: pageCount * pageWidth},
+				campaign: {id: "cmp"},
+				membership: {role: "player"},
+				characterRefs: [],
+			}),
+			pListVisibleEventPage: async ({afterSequence}) => {
+				pageCalls.push(afterSequence);
+				const page = Math.floor(afterSequence / pageWidth) + 1;
+				const scannedThroughSequence = page * pageWidth;
+				return {
+					events: [{
+						id: `operation-${page}`,
+						sequence: scannedThroughSequence,
+						type: "character.operation.proposed",
+					}],
+					replay: {
+						scannedThroughSequence,
+						hasMore: page < pageCount,
+					},
+				};
+			},
+		};
+		const realtime = new HubRealtime({store});
+		const serverSocket = new FakeSocket();
+		realtime.addConnection({
+			socket: serverSocket,
+			account: {id: "player", displayName: "Player"},
+			session: {id: "session"},
+			membership: {id: "membership", role: "player"},
+			campaignId: "cmp",
+		});
+		const connection = realtime._connections.get(serverSocket);
+		await new Promise(resolve => setImmediate(resolve));
+		serverSocket.sent.length = 0;
+
+		const clientRequests = [];
+		const delivered = [];
+		const client = new HubRealtimeClient({campaignId: "cmp", location: {protocol: "https:", host: "tools.example"}});
+		client._socket = {
+			readyState: 1,
+			send: raw => clientRequests.push(JSON.parse(raw)),
+		};
+		client.on("event", event => delivered.push(event));
+		client.requestResync();
+
+		while (clientRequests.length) {
+			const request = clientRequests.shift();
+			await realtime._pHandleMessage({connection, raw: Buffer.from(JSON.stringify(request))});
+			client._handleMessage(serverSocket.sent.shift());
+		}
+
+		expect(pageCalls).toEqual(Array.from({length: pageCount}, (_, i) => i * pageWidth));
+		expect(delivered.map(event => event.id)).toEqual(Array.from({length: pageCount}, (_, i) => `operation-${i + 1}`));
+		expect(new Set(delivered.map(event => event.id)).size).toBe(pageCount);
+		expect(connection.messageCount).toBe(1);
+		expect(serverSocket.closeEvents).toEqual([]);
+		expect(client.getConnectionState().state).toBe("live");
+	});
+
+	it("counts forged, cross-connection, and replayed continuation markers against the burst limit", async () => {
+		const store = {
+			pGetSessionById: async () => ({session: {}, account: {}}),
+			pGetMembership: async () => ({role: "player"}),
+			pGetCampaignCursor: async ({campaignId}) => ({
+				cursor: {campaignId, lastSequence: 10_000},
+				campaign: {id: campaignId},
+				membership: {role: "player"},
+				characterRefs: [],
+			}),
+			pListVisibleEventPage: async ({afterSequence}) => ({
+				events: [],
+				replay: {scannedThroughSequence: afterSequence + 1, hasMore: true},
+			}),
+		};
+		const realtime = new HubRealtime({store});
+		const firstSocket = new FakeSocket();
+		const otherSocket = new FakeSocket();
+		realtime.addConnection({
+			socket: firstSocket,
+			account: {id: "first", displayName: "First"},
+			session: {id: "first-session"},
+			membership: {id: "first-membership", role: "player"},
+			campaignId: "first-campaign",
+		});
+		realtime.addConnection({
+			socket: otherSocket,
+			account: {id: "other", displayName: "Other"},
+			session: {id: "other-session"},
+			membership: {id: "other-membership", role: "player"},
+			campaignId: "other-campaign",
+		});
+		const first = realtime._connections.get(firstSocket);
+		const other = realtime._connections.get(otherSocket);
+
+		await realtime._pHandleMessage({connection: first, raw: Buffer.from(JSON.stringify({type: "resync", afterSequence: 0}))});
+		expect(first.replayContinuationAfterSequence).toBe(1);
+		expect(first.messageCount).toBe(1);
+		await realtime._pHandleMessage({connection: other, raw: Buffer.from(JSON.stringify({type: "resync", afterSequence: 1}))});
+		expect(other.messageCount).toBe(1);
+
+		await realtime._pHandleMessage({connection: first, raw: Buffer.from(JSON.stringify({type: "resync", afterSequence: 1}))});
+		expect(first.messageCount).toBe(1);
+		expect(first.replayContinuationAfterSequence).toBe(2);
+		for (let i = 0; i < 20; ++i) {
+			await realtime._pHandleMessage({connection: first, raw: Buffer.from(JSON.stringify({type: "resync", afterSequence: 1}))});
+		}
+		expect(firstSocket.closeEvents).toContainEqual({code: 1013, reason: "Rate limit exceeded"});
+	});
+
+	it("caps concurrent forged traffic before starting authorization store work", async () => {
+		const sessionResolvers = [];
+		let sessionCalls = 0;
+		let membershipCalls = 0;
+		const store = {
+			pGetSessionById: () => {
+				sessionCalls++;
+				return new Promise(resolve => sessionResolvers.push(resolve));
+			},
+			pGetMembership: async () => {
+				membershipCalls++;
+				return {role: "player"};
+			},
+		};
+		const realtime = new HubRealtime({store});
+		const socket = new FakeSocket();
+		const connection = {
+			socket,
+			sessionId: "session",
+			accountId: "account",
+			campaignId: "campaign",
+			role: "player",
+			messageWindowStartedAt: Date.now(),
+			messageCount: 0,
+			replayContinuationAfterSequence: null,
+		};
+		const requests = Array.from({length: 100}, () =>
+			realtime._pHandleMessage({connection, raw: Buffer.from(JSON.stringify({type: "forged"}))}),
+		);
+
+		expect(sessionCalls).toBe(20);
+		expect(socket.closeEvents).toContainEqual({code: 1013, reason: "Rate limit exceeded"});
+		for (const resolve of sessionResolvers) resolve({session: {}, account: {}});
+		await Promise.all(requests);
+		expect(membershipCalls).toBe(20);
 	});
 
 	it("returns a metadata-only cursor and delta events on resync", async () => {

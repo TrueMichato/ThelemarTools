@@ -48,6 +48,7 @@ export class MemoryHubStore {
 		this._memberships = new Map();
 		this._audit = [];
 		this._events = [];
+		this._campaignEvents = new Map();
 		this._outbox = [];
 		this._commandReceipts = new Map();
 		this._invites = new Map();
@@ -256,6 +257,7 @@ export class MemoryHubStore {
 			payload: {name},
 		};
 		this._events.push(event);
+		this._campaignEvents.set(campaign.id, [event]);
 		this._outbox.push({id: this._outbox.length + 1, eventId: event.id, campaignId: campaign.id, status: "pending"});
 		const response = {campaign: copy(campaign), membership: copy(membership)};
 		return this._setReceipt({accountId, idempotencyKey, response});
@@ -327,9 +329,21 @@ export class MemoryHubStore {
 		return {key, requestHash: crypto.createHash("sha256").update(key).digest("hex")};
 	}
 
+	_getCampaignEvents (campaignId) {
+		if (!this._campaignEvents.has(campaignId)) {
+			this._campaignEvents.set(campaignId, this._events.filter(event => event.campaignId === campaignId));
+		}
+		return this._campaignEvents.get(campaignId);
+	}
+
+	_getCampaignLastSequence (campaignId) {
+		return this._getCampaignEvents(campaignId).at(-1)?.sequence || 0;
+	}
+
 	_appendEvent ({eventId = crypto.randomUUID(), campaignId, actorAccountId, type, aggregateType, aggregateId, aggregateRevision = null, visibility = "all_members", visibleAccountIds = null, payload = {}}) {
 		const campaign = this._campaigns.get(campaignId);
-		const sequence = this._events.filter(event => event.campaignId === campaignId).length + 1;
+		const campaignEvents = this._getCampaignEvents(campaignId);
+		const sequence = (campaignEvents.at(-1)?.sequence || 0) + 1;
 		const eventPayload = enrichEventPayload({
 			payload,
 			type,
@@ -356,6 +370,7 @@ export class MemoryHubStore {
 			createdAt: this._fnNow().toISOString(),
 		};
 		this._events.push(event);
+		campaignEvents.push(event);
 		this._outbox.push({id: this._outbox.length + 1, eventId: event.id, campaignId, status: "pending"});
 		if (campaign) campaign.nextEventSequence = sequence + 1;
 		return event;
@@ -601,6 +616,7 @@ export class MemoryHubStore {
 			this._characterLeases.delete(characterId);
 			character.campaignId = null;
 			character.targetRef = crypto.randomUUID();
+			character.operationWatermark = 0;
 			character.clientImportId = null;
 			character.revision++;
 			character.updatedAt = this._fnNow().toISOString();
@@ -1034,6 +1050,9 @@ export class MemoryHubStore {
 		if (lease && new Date(lease.expiresAt) > this._fnNow()) {
 			throw new HubStoreError("LEASE_HELD", `Release the active character editor before moving.`, {status: 409});
 		}
+		if ([...this._transfers.values()].some(it => it.status === "reserved" && it.sourceKind === "character" && it.sourceId === characterId)) {
+			throw new HubStoreError("CHARACTER_BUSY", `Resolve outgoing transfers before moving.`, {status: 409});
+		}
 		this._cancelIncomingForCharacter({character});
 		for (const operation of this._semanticOperations.values()) {
 			if (
@@ -1043,13 +1062,11 @@ export class MemoryHubStore {
 				this._cancelSemanticOperationForLifecycle({operation, actorAccountId: accountId});
 			}
 		}
-		if ([...this._transfers.values()].some(it => it.status === "reserved" && it.sourceKind === "character" && it.sourceId === characterId)) {
-			throw new HubStoreError("CHARACTER_BUSY", `Resolve outgoing transfers before moving.`, {status: 409});
-		}
 		const sourceCampaignId = character.campaignId;
 		const characterNameSnapshot = createCharacterDisplayNameSnapshot(character.data?.name);
 		character.campaignId = campaignId;
 		character.targetRef = crypto.randomUUID();
+		if (sourceCampaignId !== campaignId) character.operationWatermark = 0;
 		character.clientImportId = null;
 		character.revision++;
 		character.updatedAt = this._fnNow().toISOString();
@@ -1082,6 +1099,9 @@ export class MemoryHubStore {
 		if (prior) return prior;
 		const character = this._getCharacterOrThrow(characterId);
 		if (character.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can archive this character.`, {status: 403});
+		if ([...this._transfers.values()].some(it => it.status === "reserved" && it.sourceKind === "character" && it.sourceId === characterId)) {
+			throw new HubStoreError("CHARACTER_BUSY", `Resolve outgoing transfers before archiving.`, {status: 409});
+		}
 		this._cancelIncomingForCharacter({character});
 		for (const operation of this._semanticOperations.values()) {
 			if (
@@ -1090,9 +1110,6 @@ export class MemoryHubStore {
 			) {
 				this._cancelSemanticOperationForLifecycle({operation, actorAccountId: accountId});
 			}
-		}
-		if ([...this._transfers.values()].some(it => it.status === "reserved" && it.sourceKind === "character" && it.sourceId === characterId)) {
-			throw new HubStoreError("CHARACTER_BUSY", `Resolve outgoing transfers before archiving.`, {status: 409});
 		}
 		character.status = "archived";
 		character.revision++;
@@ -1267,7 +1284,7 @@ export class MemoryHubStore {
 			membership: copy(membership),
 			characters: active.map(character => this._projectOne({accountId, membership, character})),
 			roster: this._getCampaignRoster({membership, characters: active}),
-			lastSequence: Math.max(0, ...this._events.filter(event => event.campaignId === campaignId).map(event => event.sequence)),
+			lastSequence: this._getCampaignLastSequence(campaignId),
 		};
 	}
 
@@ -1281,7 +1298,7 @@ export class MemoryHubStore {
 		return {
 			cursor: {
 				campaignId,
-				lastSequence: Math.max(0, ...this._events.filter(event => event.campaignId === campaignId).map(event => event.sequence)),
+				lastSequence: this._getCampaignLastSequence(campaignId),
 			},
 			campaign: copy(this._campaigns.get(campaignId)),
 			membership: copy(membership),
@@ -1304,12 +1321,22 @@ export class MemoryHubStore {
 
 	async pListVisibleEventPage ({accountId, campaignId, afterSequence = 0, limit = 500}) {
 		const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
-		const candidates = this._events
-			.filter(event => event.campaignId === campaignId && event.sequence > afterSequence)
-			.filter(event => canViewEvent({event, accountId, role: membership.role}))
-			.slice(0, limit + 1);
+		const campaignEvents = this._getCampaignEvents(campaignId);
+		let lower = 0;
+		let upper = campaignEvents.length;
+		while (lower < upper) {
+			const middle = Math.floor((lower + upper) / 2);
+			if (campaignEvents[middle].sequence <= afterSequence) lower = middle + 1;
+			else upper = middle;
+		}
+		const candidates = [];
+		for (let index = lower; index < campaignEvents.length; ++index) {
+			candidates.push(campaignEvents[index]);
+			if (candidates.length > limit) break;
+		}
 		const scanned = candidates.slice(0, limit);
 		const events = scanned
+			.filter(event => canViewEvent({event, accountId, role: membership.role}))
 			.map(event => this.redactEventForViewer({
 				event: {
 					...copy(event),
@@ -1738,6 +1765,25 @@ export class MemoryHubStore {
 		let appliedEvent = null;
 		let invalidationEvent = null;
 		if (decision === "accept") {
+			const originMembership = this._memberships.get(`${campaignId}::${operation.originActorAccountId}`);
+			const isOriginStillEligible = originMembership?.status === "active"
+				&& ["dm", "co_dm", "player"].includes(originMembership.role)
+				&& source.ownerAccountId === operation.originActorAccountId
+				&& source.campaignId === campaignId
+				&& target.campaignId === campaignId
+				&& target.targetRef === operation.targetRef;
+			if (!isOriginStillEligible) {
+				throw new HubStoreError("PROPOSAL_STALE", `The proposal is no longer applicable.`, {status: 409});
+			}
+			try {
+				this._assertTargetable({
+					character: target,
+					accountId: operation.originActorAccountId,
+					role: originMembership.role,
+				});
+			} catch {
+				throw new HubStoreError("PROPOSAL_STALE", `The proposal is no longer applicable.`, {status: 409});
+			}
 			let derived;
 			try {
 				derived = this._semanticOperationRegistry.derive({
@@ -2093,6 +2139,7 @@ export class MemoryHubStore {
 		for (const [key, transfer] of this._transfers) if (transfer.campaignId === campaignId) this._transfers.delete(key);
 		const removedEventIds = new Set(this._events.filter(event => event.campaignId === campaignId).map(event => event.id));
 		this._events = this._events.filter(event => event.campaignId !== campaignId);
+		this._campaignEvents.delete(campaignId);
 		this._outbox = this._outbox.filter(entry => !removedEventIds.has(entry.eventId));
 		for (const audit of this._audit) if (audit.campaignId === campaignId) audit.campaignId = null;
 	}
@@ -2250,6 +2297,7 @@ export class MemoryHubStore {
 			if (character.campaignId !== campaignId) continue;
 			character.campaignId = null;
 			character.targetRef = crypto.randomUUID();
+			character.operationWatermark = 0;
 			character.clientImportId = null;
 			character.revision++;
 			character.updatedAt = this._fnNow().toISOString();

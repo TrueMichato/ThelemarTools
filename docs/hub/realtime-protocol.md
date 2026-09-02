@@ -92,12 +92,17 @@ revisions a client needs to invalidate its caches; the projections themselves ar
 authorization-scoped HTTP projector (`GET /api/campaigns/:campaignId/character-projections`). A ref carries
 `operationWatermark` only when the requester may read that character's canonical truth: its owner or a
 DM/co-DM. Peer refs never carry it, because a changing hidden sequence would disclose unseen operations.
-Events are ordered, visibility-filtered, sequence-greater than the requested value, and capped at 500.
-Projection-privacy redaction can produce a short or empty page even when later visible events exist. While
+Events are ordered, visibility-filtered, sequence-greater than the requested value, and capped at 500. Each store
+read examines at most 500 raw campaign-sequence rows plus one lookahead row before applying audience and
+projection-privacy filtering, so a page can be short or empty even when later visible events exist. While
 `replay.hasMore` is true, the client sends another `resync` with
 `afterSequence = replay.scannedThroughSequence`; it must not infer exhaustion from `events.length`. The scanned
 sequence is authoritative and advances across events evaluated but not disclosed, preventing a hidden character
 event from stranding a later visible semantic lifecycle event.
+Only the exact next scanned sequence issued to that live connection receives a replay-continuation rate-limit
+exemption, and the server consumes that step before reading the next page. Replayed, forged, or cross-connection
+markers remain ordinary `resync` messages subject to the 20-message-per-second burst limit. A reconnect starts a
+new connection but resumes from the client's last server-issued scanned sequence.
 
 Unknown client types receive:
 
@@ -229,6 +234,8 @@ Direct DM/co-DM application emits `character.operation.applied` and the separate
 `character.projection.invalidated`. `operationWatermark` is the latest applied-operation campaign sequence
 already reflected by owner/DM canonical truth. It does not suppress delivery: events at/below the watermark
 still arrive for history and dirty-local reconciliation, while a clean fetched base does not apply them twice.
+Because event sequences are campaign-local, moving a character to another campaign or detaching it resets the
+watermark to zero before that character is exposed in the new campaign context.
 
 ## Client resync algorithm
 

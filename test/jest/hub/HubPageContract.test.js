@@ -66,6 +66,14 @@ describe("campaign hub pages", () => {
 		expect(campaignHtml).toContain("data-pending-label=\"Applying...\"");
 	});
 
+	it("requires an explicit source identity for condition effects", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(campaignHtml).toContain("id=\"campaign-action-condition-source\"");
+		expect(campaignHtml).toContain("value=\"XPHB\"");
+		expect(source).toContain("arguments: {condition: {name: rawValue, source: conditionSource}}");
+		expect(source).not.toContain("source: \"PHB\"");
+	});
+
 	it("keeps loaded campaign data visible while offline and requires a refresh after reconnecting", () => {
 		const source = read("js/hub/hub-page.js");
 		expect(source).toContain("window.addEventListener(\"offline\"");

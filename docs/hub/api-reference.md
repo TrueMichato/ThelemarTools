@@ -93,8 +93,8 @@ The archive/ownership routes rely on store-level owner authorization in addition
 Event replay pages can contain fewer than `limit` events, including zero, after character-projection privacy
 redaction. A client continues while `replay.hasMore` is true and passes `replay.scannedThroughSequence` as the
 next `afterSequence`; returned event count is never evidence that the scanned range is exhausted. The marker is
-the highest candidate event sequence the server evaluated for that page, not the last event disclosed to the
-viewer.
+the highest raw event sequence in that page's bounded scan window, excluding its one-row lookahead, not the last
+event disclosed to the viewer.
 
 ### Authorization envelopes
 

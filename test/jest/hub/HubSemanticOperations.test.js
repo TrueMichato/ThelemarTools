@@ -169,6 +169,7 @@ describe("semantic character operations", () => {
 
 	it("applies DM operations atomically and replays the stable result exactly once", async () => {
 		const {campaign, dm, source, target, characters} = await setup();
+		store._characters.get(characters.target.id).data.hp.maxHpReduction = 3;
 		const commandId = crypto.randomUUID();
 		const body = getDirectBody({commandId, targetCharacterId: characters.target.id, amount: 7});
 		const first = await app.inject({
@@ -217,6 +218,7 @@ describe("semantic character operations", () => {
 		})).json().projection;
 		expect(truth.kind).toBe("dm_truth");
 		expect(truth.character.data.hp.current).toBe(0);
+		expect(truth.character.data.hp.maxHpReduction).toBe(3);
 		expect(truth.operationWatermark).toBe(first.json().operationWatermark);
 		expect(truth.targetRef).toEqual(expect.any(String));
 
@@ -377,6 +379,150 @@ describe("semantic character operations", () => {
 		expect(store._semanticOperations.get(operationId).status).toBe("proposed");
 		expect(store._events).toHaveLength(before.events);
 		expect(store._outbox).toHaveLength(before.outbox);
+	});
+
+	it.each(["move", "archive"])("rejects a busy character %s without cancelling semantic proposals", async lifecycleAction => {
+		const {campaign, source, target, characters} = await setup();
+		const commandId = crypto.randomUUID();
+		const proposed = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/actions`,
+			headers: semanticHeaders(source.session, commandId),
+			payload: getProposalBody({
+				commandId,
+				sourceCharacterId: characters.source.id,
+				targetRef: characters.target.targetRef,
+			}),
+		});
+		const operationId = proposed.json().operation.operationId;
+		const destination = lifecycleAction === "move"
+			? (await store.pCreateCampaign({
+				accountId: source.session.account.id,
+				name: "Destination",
+				idempotencyKey: `destination-${crypto.randomUUID()}`,
+			})).campaign
+			: null;
+		const transferId = crypto.randomUUID();
+		store._transfers.set(transferId, {
+			id: transferId,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: characters.source.id,
+			targetKind: "party_inventory",
+			targetId: "party",
+			status: "reserved",
+		});
+		const before = {
+			character: structuredClone(store._characters.get(characters.source.id)),
+			operation: structuredClone(store._semanticOperations.get(operationId)),
+			events: store._events.length,
+			outbox: store._outbox.length,
+		};
+
+		const mutation = lifecycleAction === "move"
+			? store.pMoveCharacter({
+				accountId: source.session.account.id,
+				characterId: characters.source.id,
+				campaignId: destination.id,
+				idempotencyKey: `move-${crypto.randomUUID()}`,
+			})
+			: store.pArchiveCharacter({
+				accountId: source.session.account.id,
+				characterId: characters.source.id,
+				idempotencyKey: `archive-${crypto.randomUUID()}`,
+			});
+		await expect(mutation).rejects.toMatchObject({code: "CHARACTER_BUSY"});
+		expect(store._characters.get(characters.source.id)).toEqual(before.character);
+		expect(store._semanticOperations.get(operationId)).toEqual(before.operation);
+		expect(store._events).toHaveLength(before.events);
+		expect(store._outbox).toHaveLength(before.outbox);
+	});
+
+	it("rejects approval after the original actor loses current target visibility", async () => {
+		const {campaign, source, target, characters} = await setup();
+		const commandId = crypto.randomUUID();
+		const proposed = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/actions`,
+			headers: semanticHeaders(source.session, commandId),
+			payload: getProposalBody({
+				commandId,
+				sourceCharacterId: characters.source.id,
+				targetRef: characters.target.targetRef,
+			}),
+		});
+		await store.pSetProjectionPolicy({
+			accountId: target.session.account.id,
+			characterId: characters.target.id,
+			policy: {version: 1, preset: "private", overrides: {}},
+			expectedProjectionRevision: characters.target.projectionRevision,
+			idempotencyKey: `private-${crypto.randomUUID()}`,
+		});
+		const before = {
+			target: structuredClone(store._characters.get(characters.target.id)),
+			events: store._events.length,
+			outbox: store._outbox.length,
+		};
+		const approvalId = crypto.randomUUID();
+		const approval = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/actions/${proposed.json().operation.operationId}/resolve`,
+			headers: semanticHeaders(target.session, approvalId),
+			payload: {commandId: approvalId, decision: "accept"},
+		});
+		expect(approval.statusCode).toBe(409);
+		expect(approval.json()).toEqual({error: "PROPOSAL_STALE"});
+		expect(store._characters.get(characters.target.id)).toEqual(before.target);
+		expect(store._semanticOperations.get(proposed.json().operation.operationId).status).toBe("proposed");
+		expect(store._events).toHaveLength(before.events);
+		expect(store._outbox).toHaveLength(before.outbox);
+	});
+
+	it("resets a campaign-local operation watermark when a character moves campaigns", async () => {
+		const {campaign, dm, target, characters} = await setup();
+		const commandId = crypto.randomUUID();
+		const applied = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/actions`,
+			headers: semanticHeaders(dm, commandId),
+			payload: getDirectBody({commandId, targetCharacterId: characters.target.id, amount: 1}),
+		});
+		expect(applied.json().operationWatermark).toBeGreaterThan(0);
+		const destination = (await store.pCreateCampaign({
+			accountId: target.session.account.id,
+			name: "Watermark Destination",
+			idempotencyKey: `watermark-destination-${crypto.randomUUID()}`,
+		})).campaign;
+		const moved = await store.pMoveCharacter({
+			accountId: target.session.account.id,
+			characterId: characters.target.id,
+			campaignId: destination.id,
+			idempotencyKey: `watermark-move-${crypto.randomUUID()}`,
+		});
+		expect(moved.character.operationWatermark).toBe(0);
+		const cursor = await store.pGetCampaignCursor({
+			accountId: target.session.account.id,
+			campaignId: destination.id,
+		});
+		expect(cursor.characterRefs).toContainEqual(expect.objectContaining({
+			id: characters.target.id,
+			operationWatermark: 0,
+		}));
+		const destinationCommandId = crypto.randomUUID();
+		const destinationApplied = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${destination.id}/actions`,
+			headers: semanticHeaders(target.session, destinationCommandId),
+			payload: getDirectBody({commandId: destinationCommandId, targetCharacterId: characters.target.id, amount: 1}),
+		});
+		expect(destinationApplied.statusCode).toBe(201);
+		expect(destinationApplied.json().operationWatermark).toBeGreaterThan(0);
+		expect(destinationApplied.json().operationWatermark).toBeLessThan(applied.json().operationWatermark);
+		const reloaded = await store.pGetCharacter({
+			accountId: target.session.account.id,
+			characterId: characters.target.id,
+		});
+		expect(reloaded.character.data.hp.current).toBe(moved.character.data.hp.current - 1);
 	});
 
 	it("expires once and lifecycle-cancels proposals with privacy-safe terminal events", async () => {

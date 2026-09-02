@@ -68,13 +68,19 @@ suite proves concurrent exact replay, one applied revision/event, mutated-body r
 approval under competing commands, no source mutation, owner/DM watermark persistence, bounded expiry,
 lifecycle cancellation, and minimized explicit-recipient terminal payloads.
 
-Memory, realtime-client, and real-PostgreSQL tests put privacy-redacted character events before a visible
-semantic lifecycle event and prove replay advances by the server-scanned sequence even when a page returns
-fewer than its limit.
+Memory and real-PostgreSQL tests put 501 privacy-redacted character events before a visible semantic lifecycle
+event and prove replay advances by the server-scanned sequence even when a page returns fewer than its limit.
+Both stores bound each read to `limit + 1` raw campaign-sequence rows before audience and projection filtering;
+the memory cursor test also proves a 150,000-event history remains stack-safe and pages audience-hidden rows
+without scanning the whole history.
+Realtime tests cover 26 exact continuation pages on one connection, one-time connection-scoped rate-limit
+exemptions, forged/replayed marker limiting, reconnect preservation, exact-once accumulation, and explicit
+campaign-client close/reset.
 
 The memory semantic suite additionally covers every version-1 kind, player generic-operation denial,
 DM/co-DM immediate application, self-target explicit approval, DM non-owner approval denial, unsupported and
-stale source cost/policy, target-ref rotation, revocation cleanup, and projection privacy canaries. Production
+stale source cost/policy, apply-time targetability, target-ref rotation, revocation cleanup, and projection
+privacy canaries. Production
 registry tests assert that recognized Cure Wounds templates fail closed and that no request/configuration can
 enable the constructor-only synthetic test template.
 
