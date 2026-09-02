@@ -29,11 +29,16 @@ function getSnapshotName (snapshot) {
 }
 
 function getCharacterName (character) {
-	return sanitizeCharacterDisplayName(character?.data?.name) || "A character";
+	// Envelope-aware: a peer profile exposes its name under the projected `identity`
+	// field, and a withheld name must stay withheld in activity copy.
+	const name = character?.kind === "peer_profile"
+		? character.data?.identity?.name
+		: character?.character?.data?.name ?? character?.data?.name;
+	return sanitizeCharacterDisplayName(name) || "A character";
 }
 
 function getCurrentCharacterName (characters, id) {
-	return getCharacterName(characters.find(character => character.id === id));
+	return getCharacterName(characters.find(character => (character?.kind === "peer_profile" ? character.id : character?.character?.id ?? character?.id) === id));
 }
 
 function getMemberName (members, accountId, fallback = "A campaign member") {
@@ -45,11 +50,9 @@ function getSubjectName ({event, characters, members = [], snapshotKey = "charac
 	if (snapshotName) return snapshotName;
 	const currentName = getCurrentCharacterName(characters, characterId);
 	if (currentName !== "A character") return currentName;
-	const ownerAccountId = event.payload?.ownerAccountId;
-	if (ownerAccountId && ownerAccountId !== event.actorAccountId) {
-		const ownerName = getMemberName(members, ownerAccountId, "");
-		if (ownerName) return ownerName;
-	}
+	// Deliberately no owner-account fallback: substituting the owner's display name for a
+	// character whose identity the policy withholds would reveal the very association the
+	// owner closed. Shared activity copy stays generic instead.
 	return "A character";
 }
 
@@ -275,7 +278,7 @@ export function normalizeHubEvent ({event, characters = [], members = [], actorD
 		"character.archived": `${subject} was archived.`,
 		"character.deleted": `${subject} was deleted.`,
 		"character.save_forced": `${actorName} forced a save for ${subject}.`,
-		"character.projection.updated": `${subject} updated.`,
+		"character.projection.invalidated": `${subject} updated.`,
 		"action.proposed": `${target} was offered an effect by ${actorName}.`,
 		"action.applied": `An effect was applied to ${target}.`,
 		"action.rejected": `An effect for ${target} was rejected.`,

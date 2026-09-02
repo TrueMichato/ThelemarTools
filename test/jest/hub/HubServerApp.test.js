@@ -60,7 +60,7 @@ describe("campaign hub BFF", () => {
 			cookie,
 			origin: APP_ORIGIN,
 			"x-csrf-token": csrfToken,
-			"x-hub-protocol-version": "1",
+			"x-hub-protocol-version": "2",
 			"idempotency-key": idempotencyKey,
 		};
 	}
@@ -343,7 +343,7 @@ describe("campaign hub BFF", () => {
 				cookie,
 				origin: APP_ORIGIN,
 				"x-csrf-token": csrfToken,
-				"x-hub-protocol-version": "1",
+				"x-hub-protocol-version": "2",
 			},
 			payload: {name: "Missing Key"},
 		});

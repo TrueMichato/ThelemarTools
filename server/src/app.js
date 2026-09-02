@@ -13,6 +13,7 @@ import {
 	isConstantTimeEqual,
 } from "./security.js";
 import {HubStoreError} from "./hub-store-error.js";
+import {PROJECTION_POLICY_VERSION, PROJECTION_PRESET_KEYS} from "./character-projection.js";
 import {
 	CAMPAIGN_RULES_SCHEMA_VERSION,
 	getCampaignBrewHash,
@@ -27,7 +28,7 @@ import crypto from "node:crypto";
 const {normalizeIP} = rateLimit;
 const SESSION_COOKIE = "__Host-hub_session";
 const OAUTH_COOKIE = "__Host-hub_oauth";
-const HUB_PROTOCOL_VERSION = "1";
+const HUB_PROTOCOL_VERSION = "2";
 const DEFAULT_DM_WORKSPACE = {
 	mv: 0,
 	w: 3,
@@ -258,6 +259,19 @@ export async function createHubApp ({
 		const auth = await pGetAuth(request);
 		if (auth) return;
 		return reply.code(401).send({error: "AUTH_REQUIRED"});
+	};
+
+	/**
+	 * Reads whose response shape is an ADR 0011 authorization envelope. An older client
+	 * would misread these silently rather than failing, so they are version-gated exactly
+	 * like mutations.
+	 */
+	const requireProtocolVersion = async (request, reply) => {
+		const auth = await pGetAuth(request);
+		if (!auth) return reply.code(401).send({error: "AUTH_REQUIRED"});
+		if (request.headers["x-hub-protocol-version"] !== HUB_PROTOCOL_VERSION) {
+			return reply.code(426).send({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: HUB_PROTOCOL_VERSION});
+		}
 	};
 
 	const requireMutationSecurity = async (request, reply) => {
@@ -708,8 +722,23 @@ export async function createHubApp ({
 		}),
 	}));
 
+	app.get("/api/campaigns/:campaignId/character-projections", {
+		preHandler: requireProtocolVersion,
+		schema: {
+			params: {
+				type: "object",
+				required: ["campaignId"],
+				additionalProperties: false,
+				properties: {campaignId: {type: "string", format: "uuid"}},
+			},
+		},
+	}, async request => store.pListCampaignCharacterProjections({
+		accountId: request.hubAuth.account.id,
+		campaignId: request.params.campaignId,
+	}));
+
 	app.get("/api/campaigns/:campaignId/snapshot", {
-		preHandler: requireAuth,
+		preHandler: requireProtocolVersion,
 		schema: {
 			params: {
 				type: "object",
@@ -1268,7 +1297,9 @@ export async function createHubApp ({
 		return reply.code(201).send(created);
 	});
 
-	app.get("/api/characters", {preHandler: requireAuth}, async request => ({
+	// Protocol-gated: the response shape changed when the owner's sharing policy stopped
+	// being part of a canonical character response.
+	app.get("/api/characters", {preHandler: requireProtocolVersion}, async request => ({
 		characters: await store.pListCharacters({
 			accountId: request.hubAuth.account.id,
 			campaignId: request.query?.campaignId || null,
@@ -1303,7 +1334,7 @@ export async function createHubApp ({
 	});
 
 	app.get("/api/characters/:characterId", {
-		preHandler: requireAuth,
+		preHandler: requireProtocolVersion,
 		schema: {
 			params: {
 				type: "object",
@@ -1313,10 +1344,61 @@ export async function createHubApp ({
 			},
 		},
 	}, async request => ({
-		character: await store.pGetCharacter({
+		projection: await store.pGetCharacter({
 			accountId: request.hubAuth.account.id,
 			characterId: request.params.characterId,
 		}),
+	}));
+
+	app.get("/api/characters/:characterId/projection-policy", {
+		preHandler: requireProtocolVersion,
+		schema: {
+			params: {
+				type: "object",
+				required: ["characterId"],
+				additionalProperties: false,
+				properties: {characterId: {type: "string", format: "uuid"}},
+			},
+		},
+	}, async request => store.pGetProjectionPolicy({
+		accountId: request.hubAuth.account.id,
+		characterId: request.params.characterId,
+	}));
+
+	app.put("/api/characters/:characterId/projection-policy", {
+		preHandler: requireMutationSecurity,
+		schema: {
+			params: {
+				type: "object",
+				required: ["characterId"],
+				additionalProperties: false,
+				properties: {characterId: {type: "string", format: "uuid"}},
+			},
+			body: {
+				type: "object",
+				required: ["policy", "expectedProjectionRevision"],
+				additionalProperties: false,
+				properties: {
+					expectedProjectionRevision: {type: "integer", minimum: 1},
+					policy: {
+						type: "object",
+						required: ["version", "preset"],
+						additionalProperties: false,
+						properties: {
+							version: {type: "integer", enum: [PROJECTION_POLICY_VERSION]},
+							preset: {type: "string", enum: [...PROJECTION_PRESET_KEYS]},
+							overrides: {type: "object"},
+						},
+					},
+				},
+			},
+		},
+	}, async request => store.pSetProjectionPolicy({
+		accountId: request.hubAuth.account.id,
+		characterId: request.params.characterId,
+		policy: request.body.policy,
+		expectedProjectionRevision: request.body.expectedProjectionRevision,
+		idempotencyKey: getIdempotencyKey(request),
 	}));
 
 	app.post("/api/characters/:characterId/lease", {

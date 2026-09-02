@@ -109,8 +109,11 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("api.pListEvents({");
 		expect(source).toContain("new HubRealtimeClient({campaignId})");
 		expect(source).toContain("realtime.on(\"event\", event =>");
-		expect(source).toContain("realtime.on(\"snapshot\", snapshotNxt =>");
-		expect(source).toContain("event.type === \"character.projection.updated\"");
+		expect(source).toContain("realtime.on(\"cursor\", baseline =>");
+		// ADR 0011: the page must not read character data off an event payload; every
+		// invalidation is coalesced into an authorization-scoped HTTP refetch.
+		expect(source).not.toContain("event.payload?.character");
+		expect(source).not.toContain("character.projection.updated");
 		expect(source).toContain("snapshotNxt.lastSequence >= liveLastSequence");
 		expect(source).toContain("liveEvents = [...liveEvents.filter");
 		expect(source).toContain("renderRecentActivity({events: liveEvents");

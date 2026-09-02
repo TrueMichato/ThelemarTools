@@ -124,7 +124,12 @@ export class HubRealtime {
 			return;
 		}
 		if (message.type === "resync") {
-			const snapshot = await this._store.pGetCampaignSnapshot({
+			// ADR 0011: resync carries the campaign cursor, authorized event history, and at
+			// most the ids/revisions a client needs to invalidate its caches. Character
+			// documents and peer profiles are fetched over the authorization-scoped HTTP
+			// projector instead, so a second projection path cannot grow in here — this
+			// deliberately does not call the snapshot projector at all.
+			const cursor = await this._store.pGetCampaignCursor({
 				accountId: connection.accountId,
 				campaignId: connection.campaignId,
 			});
@@ -134,7 +139,7 @@ export class HubRealtime {
 				afterSequence: Number(message.afterSequence) || 0,
 				limit: 500,
 			});
-			sendJson(connection.socket, {type: "resync_complete", snapshot, events});
+			sendJson(connection.socket, {type: "resync_complete", ...cursor, events});
 			return;
 		}
 		sendJson(connection.socket, {type: "error", code: "UNSUPPORTED_MESSAGE"});
@@ -157,7 +162,14 @@ export class HubRealtime {
 			}
 			connection.role = membership.role;
 			if (!canViewEvent({event, accountId: connection.accountId, role: connection.role})) continue;
-			sendJson(connection.socket, {type: "event", event});
+			// Live fanout applies the same ADR 0011 actor redaction as the HTTP read, so a
+			// socket cannot expose an owner association the read hides.
+			const viewerEvent = this._store.redactEventForViewer
+				? await this._store.redactEventForViewer({event, accountId: connection.accountId, role: connection.role})
+				: event;
+			// A null outcome means this viewer may not see the event at all.
+			if (!viewerEvent) continue;
+			sendJson(connection.socket, {type: "event", event: viewerEvent});
 		}
 	}
 

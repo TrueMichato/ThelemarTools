@@ -10,3 +10,8 @@ server/**/.env*
 !js
 !js/hub
 !js/hub/hub-json-patch.js
+!js/parser.js
+!js/utils.js
+!js/charactersheet
+!js/charactersheet/charactersheet-state.js
+!js/charactersheet/charactersheet-class-utils.js

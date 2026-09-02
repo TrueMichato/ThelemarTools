@@ -1,4 +1,5 @@
 import {HubApiClient, HubApiError} from "../hub/hub-api-client.js";
+import {CharacterSheetSharing} from "./charactersheet-sharing.js";
 
 const _CAMPAIGN_ROLES = new Set(["dm", "co_dm", "player"]);
 const _RULE_LABELS = {
@@ -118,6 +119,7 @@ export class CharacterSheetCampaign {
 		this._movePreview = null;
 		this._feedback = null;
 		this._pendingCommand = null;
+		this._sharing = null;
 	}
 
 	async pInit () {
@@ -155,6 +157,7 @@ export class CharacterSheetCampaign {
 			this._isLoading = false;
 			this.render();
 		}
+		await this.pRefreshSharing();
 	}
 
 	render () {
@@ -195,6 +198,26 @@ export class CharacterSheetCampaign {
 		}
 
 		if (this._isExpanded) this._root.append(this._getExpandedPanel({isCloud}));
+		// Sharing is only meaningful for a cloud character attached to a campaign: there
+		// are no other players to share with otherwise.
+		if (isCloud && this._currentCharacter?.campaignId && this._sharing) {
+			this._root.append(this._sharing.render({fnRerender: () => this.render()}));
+		}
+	}
+
+	/** Load the owner's sharing policy once the character's campaign context is known. */
+	async pRefreshSharing () {
+		if (!this._page._isHubCharacter || !this._currentCharacter?.campaignId) {
+			this._sharing = null;
+			return;
+		}
+		this._sharing ||= new CharacterSheetSharing({
+			api: this._api,
+			fnGetCharacterId: () => this._page._currentCharacterId,
+			fnGetErrorMessage: getCampaignControlErrorMessage,
+		});
+		await this._sharing.pLoad();
+		this.render();
 	}
 
 	_getTitle ({isCloud}) {

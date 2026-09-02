@@ -1,7 +1,7 @@
 # Campaign Hub realtime protocol
 
 > **Status:** Current private-V1 wire protocol
-> **Protocol version:** `1`
+> **Protocol version:** `2`
 > **Last verified:** 2026-08-25
 > **Owner:** Campaign Hub maintainers
 
@@ -77,13 +77,19 @@ Response:
 ```json
 {
   "type": "resync_complete",
-  "snapshot": {},
+  "cursor": {"campaignId": "uuid", "lastSequence": 42},
+  "campaign": {},
+  "membership": {},
+  "characterRefs": [{"id": "uuid", "revision": 8, "projectionRevision": 3}],
   "events": []
 }
 ```
 
-The snapshot is role-shaped by the authority. Events are ordered, visibility-filtered, sequence-greater than
-the requested value, and capped at 500.
+Resync carries **no character document and no peer profile**
+([ADR 0011](adr/0011-authorization-scoped-character-projections.md)). `characterRefs` supplies only the ids and
+revisions a client needs to invalidate its caches; the projections themselves are fetched over the
+authorization-scoped HTTP projector (`GET /api/campaigns/:campaignId/character-projections`). Events are
+ordered, visibility-filtered, sequence-greater than the requested value, and capped at 500.
 
 Unknown client types receive:
 
@@ -124,14 +130,14 @@ Presence is ephemeral and not written to the event log.
     "id": "uuid",
     "campaignId": "uuid",
     "sequence": 43,
-    "type": "character.projection.updated",
+    "type": "character.projection.invalidated",
     "actorAccountId": "uuid",
     "aggregateType": "character",
     "aggregateId": "uuid",
     "aggregateRevision": 8,
     "visibility": "all_members",
     "visibleAccountIds": null,
-    "payload": {},
+    "payload": {"projectionRevision": 3},
     "createdAt": "ISO-8601"
   }
 }
@@ -190,11 +196,17 @@ id (falling back to sequence/type) and track the highest sequence.
 1. reconnects with bounded exponential backoff;
 2. sends resync from last accepted sequence;
 3. buffers live events while resync is in progress;
-4. applies snapshot;
+4. applies the cursor baseline and emits `cursor` with `characterRefs`;
 5. applies replay events;
-6. suppresses snapshot-covered historical state events;
+6. suppresses cursor-covered historical state events;
 7. applies buffered events in order;
 8. emits current presence/events to page consumers.
+
+Consumers coalesce repeated `character.projection.invalidated` events and perform one
+authorization-scoped HTTP fetch. The response **replaces** the previous projection rather than merging with
+it, so a field an owner has just stopped sharing cannot survive from an older, broader response. An editable
+owner Character Sheet never replaces live local state from an invalidation-triggered fetch: it has no realtime
+subscription, and ordinary document changes use its accepted-base rebase.
 
 Snapshot-covered event types are suppressed only when at/before the snapshot sequence. Durable roll/action
 history may still replay because it is not fully represented by current state.

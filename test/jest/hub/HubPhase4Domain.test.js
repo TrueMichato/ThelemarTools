@@ -40,7 +40,12 @@ describe("Phase 4 actions, grants, and transfers", () => {
 	}
 
 	function headers (session, key = `k-${++ix}`) {
-		return {cookie: session.cookie, origin: ORIGIN, "x-csrf-token": session.csrfToken, "x-hub-protocol-version": "1", "idempotency-key": key};
+		return {cookie: session.cookie, origin: ORIGIN, "x-csrf-token": session.csrfToken, "x-hub-protocol-version": "2", "idempotency-key": key};
+	}
+
+	/** Projection-shaped reads must declare their protocol version, like mutations. */
+	function readHeaders (session) {
+		return {cookie: session.cookie, "x-hub-protocol-version": "2"};
 	}
 
 	async function setup () {
@@ -156,8 +161,8 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			payload: {decision: "accept"},
 		});
 		expect(committed.json().transfer.status).toBe("committed");
-		const source = (await app.inject({method: "GET", url: `/api/characters/${a.character.id}`, headers: {cookie: a.session.cookie}})).json().character;
-		const target = (await app.inject({method: "GET", url: `/api/characters/${b.character.id}`, headers: {cookie: b.session.cookie}})).json().character;
+		const source = (await app.inject({method: "GET", url: `/api/characters/${a.character.id}`, headers: readHeaders(a.session)})).json().projection.character;
+		const target = (await app.inject({method: "GET", url: `/api/characters/${b.character.id}`, headers: readHeaders(b.session)})).json().projection.character;
 		expect(source.data.inventory[0].quantity).toBe(7);
 		expect(source.data.currency).toEqual({cp: 0, sp: 2, ep: 0, gp: 6, pp: 0});
 		expect(target.data.inventory[0].quantity).toBe(13);
@@ -185,7 +190,7 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			headers: headers(b.session),
 			payload: {decision: "reject"},
 		});
-		const source = (await app.inject({method: "GET", url: `/api/characters/${a.character.id}`, headers: {cookie: a.session.cookie}})).json().character;
+		const source = (await app.inject({method: "GET", url: `/api/characters/${a.character.id}`, headers: readHeaders(a.session)})).json().projection.character;
 		expect(source.data.currency.gp).toBe(10);
 		expect(source.data.inventory).toContainEqual(expect.objectContaining({id: item.id, quantity: item.quantity}));
 	});
@@ -287,8 +292,8 @@ describe("Phase 4 actions, grants, and transfers", () => {
 		const restoredSource = (await app.inject({
 			method: "GET",
 			url: `/api/characters/${b.character.id}`,
-			headers: {cookie: b.session.cookie},
-		})).json().character;
+			headers: readHeaders(b.session),
+		})).json().projection.character;
 		expect(restoredSource.data.inventory).toContainEqual(expect.objectContaining({id: entry.id}));
 		// Builds and re-canonicalises documents against the 1.5 MB ceiling, so it is CPU-bound
 		// rather than slow: ~1.1s alone, but well past Jest's 5s default when the full suite

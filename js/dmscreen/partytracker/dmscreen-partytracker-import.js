@@ -39,6 +39,59 @@ export class PartyTrackerImporter {
 	}
 
 	/**
+	 * Map an ADR 0011 peer profile to Party Tracker character data.
+	 *
+	 * A peer profile is already a derived, policy-filtered catalog — not a Character
+	 * Sheet document — so nothing is recomputed here. Fields the owner withheld are
+	 * absent and stay absent: they render as the tracker's neutral defaults rather than
+	 * as inferred values.
+	 * @param {object} data — the `data` object of a `peer_profile` envelope
+	 * @returns {object} — deserialized Party Tracker character data
+	 */
+	static mapPeerProfile (data) {
+		if (!data || typeof data !== "object") throw new Error("Invalid peer profile data");
+		const abilities = {str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10};
+		for (const ability of Object.keys(abilities)) {
+			if (Number.isFinite(data.abilities?.[ability])) abilities[ability] = data.abilities[ability];
+		}
+		const skillProficiencies = {};
+		for (const [skill, entry] of Object.entries(data.skills || {})) {
+			skillProficiencies[skill] = entry?.rank === "expertise" ? 2 : (entry?.rank === "proficient" ? 1 : 0);
+		}
+		const senses = {darkvision: 0, blindsight: 0, tremorsense: 0, truesight: 0};
+		for (const sense of Array.isArray(data.senses) ? data.senses : []) {
+			if (sense?.name in senses) senses[sense.name] = Number(sense.range) || 0;
+		}
+		return PartyTrackerCharacterSerializer.deserialize({
+			n: data.identity?.name || "",
+			r: data.species?.name || "",
+			cl: (Array.isArray(data.classes) ? data.classes : []).map(c => ({n: c.name, l: c.level, s: c.source || null})),
+			ab: abilities,
+			sv: Object.fromEntries(Object.entries(data.saves || {}).map(([ability, entry]) => [ability, !!entry?.proficient])),
+			sp: skillProficiencies,
+			tp: [],
+			lng: [],
+			ac: Number(data.ac?.value) || 0,
+			hp: {c: data.hp?.current ?? 0, m: data.hp?.max ?? 0, t: data.hp?.temp ?? 0},
+			spd: {
+				walk: data.speed?.walk ?? 0,
+				fly: data.speed?.fly ?? 0,
+				swim: data.speed?.swim ?? 0,
+				climb: data.speed?.climb ?? 0,
+				burrow: data.speed?.burrow ?? 0,
+			},
+			sns: senses,
+			ct: [],
+			exh: Number.isFinite(data.exhaustion) ? data.exhaustion : 0,
+			cw: Number(data.carrySummary?.carried) || 0,
+			cnd: (data.conditions || []).map(name => ({n: name, s: null})),
+			dis: (data.diseases || []).map(name => ({n: name, s: null})),
+			nt: "",
+			ctr: [],
+		});
+	}
+
+	/**
 	 * Validate that an object looks like a Character Sheet export.
 	 * @param {object} data
 	 * @returns {{valid: boolean, reason?: string}}

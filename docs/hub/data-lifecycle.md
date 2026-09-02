@@ -14,7 +14,8 @@
 | Campaign/member/role | Authorization and campaign roster | active campaign members | campaign/account lifecycle |
 | Invite token hash/role/usage/expiry | Join authorization | creator/authority; raw token returned at creation | expiry/revoke; automated 30-day cleanup pending |
 | Raw invite token in browser | Share/redeem invite and survive OAuth round-trip | visible in creator output/link; recipient URL fragment then `sessionStorage["hub-pending-invite"]` until redemption attempt completes | cleared from URL immediately and from sessionStorage after success or failure |
-| Character document | Player state, including notes/backstory | owner and campaign DM/co-DM full; other players fixed projection | owner lifetime/export/archive/deletion |
+| Character document | Player state, including notes/backstory | owner and campaign DM/co-DM full; other members receive the owner's chosen peer profile | owner lifetime/export/archive/deletion |
+| Character sharing policy | Owner's projection choices | owner only; DMs see its computed result, never the raw policy | character lifetime |
 | Campaign brew/rules versions | Shared campaign content/policy | campaign members | campaign lifetime |
 | Private DM workspace | DM Board | owning DM membership only | membership/campaign/account lifecycle |
 | Roll/action/transfer history | Campaign play history | event visibility rules | retained until campaign/account deletion |
@@ -28,8 +29,49 @@
 
 ## Privacy boundary
 
-- DMs/co-DMs can read the complete sheet, including notes and backstory.
-- Other players receive only keys allowlisted by `projectCharacterForPlayer`.
+- DMs/co-DMs can read the complete sheet, including notes and backstory, plus the exact `peerPreview` other
+  members receive. They do not receive the owner's raw sharing configuration.
+- Other members receive one recipient-independent peer profile built from the versioned catalog in
+  `server/src/character-projection.js` and filtered by the owner's policy
+  ([ADR 0011](adr/0011-authorization-scoped-character-projections.md)). Existing characters default to the
+  `table` preset.
+- Peer values are derived into a typed view model, never copied from the source document; `ownerAccountId`,
+  raw policy, internal item ids, document paths and omitted truth are not peer fields.
+- A policy that cannot be validated fails closed: peers receive no data fields — indistinguishable from the
+  `private` preset — while owner/DM management receives `PROJECTION_POLICY_INVALID`.
+- Owner attribution on the roster is campaign metadata carrying a membership id, gated on the character's
+  identity being peer-visible; a character with hidden identity is not peer-targetable.
+- Shared events carry no owner association for a character whose identity is hidden. Payload stripping alone is
+  insufficient because the envelope names the actor beside the aggregate id, so `character.created` and the
+  privacy-setting invalidation itself are actor-redacted for peers. Attribution survives wherever it is
+  independently authorized — the actor, the owner, a DM, or once identity is peer-visible and the roster
+  already carries the association.
+- Derived `abilities`, `saves`, `skills` and `ac` are produced by loading the document into a real
+  `CharacterSheetState` (`server/src/character-derived-stats.js`) and reading the same methods the owner's sheet
+  displays. Earlier revisions hand-ported that math and three review rounds each found a different term missing
+  — proficiency-bonus items, Blood Hunter Dark Augmentation, TGTT Linguistics, dynamic feature modifiers — so
+  the port was replaced by the authority itself. Parity is enforced by
+  `test/jest/hub/HubProjectionSheetParity.test.js`, whose fixtures are authored through the sheet's own API:
+  `customModifiers` is a cache the sheet rebuilds on load, so a fixture that writes it directly asserts a state
+  no reader ever sees.
+- Projected statistics are the character's **baseline**: what it is, not what it is doing this round. Active
+  states, combat stances and ability substitutions are stripped from the document *before* it reaches the sheet
+  calculation, so a live Rage or Bless cannot move a projected save, skill or AC.
+
+  This is a product boundary, not a technical limitation. Those toggles *are* persisted — the sheet calls
+  `_saveCurrentCharacter()`, the repository patches the diff, and the server emits an invalidation like any
+  other change — so they could be projected. They are excluded because a Rage or Bless bonus describes a moment
+  in an encounter rather than the character a peer is looking up, and because a roster that flickered with
+  every toggle would be noise. See ADR 0011.
+- When the sheet cannot read a document, `saves` and `skills` are omitted rather than approximated: a modifier
+  the projection cannot stand behind would silently disagree with the sheet the owner reads.
+- Derivation runs with the console silenced. The sheet is browser code that warns about, for example,
+  unresolvable named modifiers — quoting the modifier's name and raw value, private character data that has not
+  passed the projection boundary and would otherwise reach operational logs on every derivation.
+- Shared event visibility fails closed when the character row is absent. Account purge hard-deletes the
+  character while retaining the campaign's domain events, and a deleted row cannot demonstrate that its owner
+  ever chose to share an identity, so deleting an account must not retroactively publish rows that were
+  suppressed while it existed. DMs retain the audit trail.
 - A private DM workspace belongs to one membership, not all campaign DMs.
 - Explicit-account events still include all campaign DMs/co-DMs by policy.
 - Browser cache/service worker must never cache authenticated API/auth responses.

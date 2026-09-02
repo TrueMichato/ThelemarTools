@@ -87,7 +87,7 @@ describe("Campaign Hub documentation contract", () => {
 			"{\"projectionRevision\": 4}",
 			"carries no projected character",
 			"PROJECTION_POLICY_INVALID",
-			"Implementation: Contract only.",
+			"Implementation: Shipped.",
 		]) expect(markdown).toContain(anchor);
 
 		for (const mode of ["`share`", "`hide`", "`replace`"]) expect(markdown).toContain(mode);

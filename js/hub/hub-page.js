@@ -1,6 +1,15 @@
 import {HubApiClient, HubApiError} from "./hub-api-client.js";
 import {HubRealtimeClient} from "./hub-realtime-client.js";
 import {renderHubActivityRows} from "./hub-activity-render.js";
+import {
+	getOwnerMembershipId,
+	getProjectionId,
+	getProjectionOwnerAccountId,
+	getProjectionName,
+	getProjectionSummary,
+	getTargetableProjections,
+	isCanonicalProjection,
+} from "./hub-character-view.js";
 
 const api = new HubApiClient();
 const CURRENCY_TYPES = ["cp", "sp", "ep", "gp", "pp"];
@@ -197,25 +206,16 @@ function setCount ({id, count}) {
 }
 
 function getCharacterName (character) {
-	return character?.data?.name || "Unnamed Character";
+	return getProjectionName(character);
 }
 
 function getCharacterSummary (character) {
-	const data = character?.data || {};
-	const classes = Array.isArray(data.classes)
-		? data.classes
-			.filter(cls => cls?.name)
-			.map(cls => `${cls.name}${Number.isFinite(Number(cls.level)) ? ` ${cls.level}` : ""}`)
-			.join(" / ")
-		: "";
-	const hpCurrent = Number(data.hp?.current);
-	const hpMax = Number(data.hp?.max);
-	const hp = Number.isFinite(hpCurrent)
-		? `HP ${hpCurrent}${Number.isFinite(hpMax) ? `/${hpMax}` : ""}`
-		: "";
-	const acValue = Number(typeof data.ac === "object" ? data.ac?.value : data.ac);
-	const ac = Number.isFinite(acValue) ? `AC ${acValue}` : "";
-	return [classes, hp, ac].filter(Boolean).join(" · ") || "Campaign character";
+	return getProjectionSummary(character);
+}
+
+function getMemberNameByMembership (members, membershipId) {
+	if (!membershipId) return "";
+	return members.find(member => member.id === membershipId)?.displayName || "";
 }
 
 function getMemberName (members, accountId) {
@@ -223,7 +223,7 @@ function getMemberName (members, accountId) {
 }
 
 function getCharacterById (characters, characterId) {
-	return characters.find(character => character.id === characterId);
+	return characters.find(character => getProjectionId(character) === characterId);
 }
 
 function getCharacterNameById (characters, characterId) {
@@ -676,6 +676,7 @@ async function pInitCampaign ({session}) {
 		members,
 		session,
 		isDm: ["dm", "co_dm"].includes(campaign.role),
+		roster: snapshot.roster || [],
 	});
 	renderRecentActivity({events, characters: snapshot.characters, members});
 	renderCampaignContext(context);
@@ -707,11 +708,13 @@ async function pInitCampaign ({session}) {
 		members,
 		context,
 		pRefreshInvites,
+		roster: snapshot.roster || [],
 	});
 	const realtime = new HubRealtimeClient({campaignId});
 	let liveEvents = events;
 	let liveMembers = members;
 	let liveCharacters = snapshot.characters;
+	let liveRoster = snapshot.roster || [];
 	let liveLastSequence = snapshot.lastSequence;
 	let refreshTimer = null;
 	let isRefreshing = false;
@@ -740,7 +743,10 @@ async function pInitCampaign ({session}) {
 				.slice(-50);
 			liveMembers = membersNxt;
 			if (snapshotNxt.lastSequence >= liveLastSequence) {
+				// Replacement, not a merge: a field the owner has just stopped sharing must
+				// disappear rather than survive from the previous, broader projection.
 				liveCharacters = snapshotNxt.characters;
+				liveRoster = snapshotNxt.roster || [];
 				liveLastSequence = snapshotNxt.lastSequence;
 			}
 			renderCharacterList({campaignId, characters: charactersNxt});
@@ -750,10 +756,11 @@ async function pInitCampaign ({session}) {
 				members: membersNxt,
 				session,
 				isDm: ["dm", "co_dm"].includes(campaign.role),
+				roster: liveRoster,
 			});
 			renderRecentActivity({events: liveEvents, characters: liveCharacters, members: membersNxt});
 			await Promise.all([
-				renderPendingActions({campaign, campaignId, session, targetCharacters: liveCharacters, members: membersNxt}),
+				renderPendingActions({campaign, campaignId, session, targetCharacters: liveCharacters, members: membersNxt, roster: liveRoster}),
 				pRefreshTransferState({
 					charactersNxt,
 					targetCharactersNxt: liveCharacters,
@@ -781,40 +788,20 @@ async function pInitCampaign ({session}) {
 	realtime.on("event", event => {
 		if (!isCampaignReloadRequired && navigator.onLine) {
 			liveLastSequence = Math.max(liveLastSequence, event.sequence || 0);
-			const projectedCharacter = event.type === "character.projection.updated"
-				? event.payload?.character
-				: null;
-			if (projectedCharacter?.id) {
-				liveCharacters = [
-					...liveCharacters.filter(character => character.id !== projectedCharacter.id),
-					projectedCharacter,
-				];
-				renderPartyRoster({
-					campaignId,
-					characters: liveCharacters,
-					members: liveMembers,
-					session,
-					isDm: ["dm", "co_dm"].includes(campaign.role),
-				});
-			}
 			liveEvents = [...liveEvents.filter(existing => existing.id !== event.id), event]
 				.sort((a, b) => a.sequence - b.sequence)
 				.slice(-50);
 			renderRecentActivity({events: liveEvents, characters: liveCharacters, members: liveMembers});
 		}
+		// ADR 0011: `character.projection.invalidated` carries no character data. Every
+		// event, including an invalidation, is coalesced into one authorization-scoped
+		// HTTP refetch that *replaces* the roster rather than merging into it, so a
+		// previously broader projection cannot survive a narrowed sharing policy.
 		queueLiveRefresh();
 	});
-	realtime.on("snapshot", snapshotNxt => {
-		if (Array.isArray(snapshotNxt?.characters) && snapshotNxt.lastSequence >= liveLastSequence) {
-			liveCharacters = snapshotNxt.characters;
-			liveLastSequence = snapshotNxt.lastSequence;
-			renderPartyRoster({
-				campaignId,
-				characters: liveCharacters,
-				members: liveMembers,
-				session,
-				isDm: ["dm", "co_dm"].includes(campaign.role),
-			});
+	realtime.on("cursor", baseline => {
+		if ((baseline?.cursor?.lastSequence || 0) >= liveLastSequence) {
+			liveLastSequence = baseline.cursor.lastSequence;
 		}
 		queueLiveRefresh();
 	});
@@ -993,17 +980,18 @@ function renderCharacterList ({campaignId, characters}) {
 	}));
 }
 
-function renderPartyRoster ({campaignId, characters, members, session, isDm}) {
+function renderPartyRoster ({campaignId, characters, members, session, isDm, roster = null}) {
 	const list = document.getElementById("campaign-party-roster");
 	if (!list) return;
 	setCount({id: "campaign-party-count", count: characters.length});
 	setHidden(document.getElementById("campaign-party-empty"), !!characters.length);
 	list.replaceChildren(...characters.map(character => {
-		const canOpen = isDm || character.ownerAccountId === session.account.id;
+		const characterId = getProjectionId(character);
+		const canOpen = isCanonicalProjection(character) && (isDm || getProjectionOwnerAccountId(character) === session.account.id);
 		const row = document.createElement(canOpen ? "a" : "div");
 		row.className = "hub-data-row";
 		if (canOpen) {
-			row.href = `charactersheet.html?id=${encodeURIComponent(character.id)}&hubCampaign=${encodeURIComponent(campaignId)}`;
+			row.href = `charactersheet.html?id=${encodeURIComponent(characterId)}&hubCampaign=${encodeURIComponent(campaignId)}`;
 		}
 		const main = document.createElement("span");
 		main.className = "hub-data-row__main";
@@ -1012,7 +1000,10 @@ function renderPartyRoster ({campaignId, characters, members, session, isDm}) {
 		name.textContent = getCharacterName(character);
 		const meta = document.createElement("span");
 		meta.className = "hub-data-row__meta";
-		meta.textContent = `${getMemberName(members, character.ownerAccountId)} · ${getCharacterSummary(character)}`;
+		// Owner attribution is campaign-roster metadata gated on peer-visible identity, so
+		// it is absent rather than guessed when the owner shares nothing.
+		const ownerName = getMemberNameByMembership(members, getOwnerMembershipId({roster, characterId}));
+		meta.textContent = [ownerName, getCharacterSummary(character)].filter(Boolean).join(" · ");
 		main.append(name, meta);
 		row.append(main);
 		if (canOpen) {
@@ -1043,10 +1034,12 @@ function fillCharacterSelect (select, characters, {includeParty = false, partyIn
 	if (!select) return;
 	select.replaceChildren();
 	for (const character of characters) {
-		if (ownerAccountId && character.ownerAccountId !== ownerAccountId) continue;
+		// `characters` may be raw owner-scoped documents (the player's own list) or
+		// authorization envelopes (campaign-wide), so ownership is read through one helper.
+		if (ownerAccountId && getProjectionOwnerAccountId(character) !== ownerAccountId) continue;
 		const option = document.createElement("option");
-		option.value = `character:${character.id}`;
-		option.textContent = character.data?.name || "Unnamed Character";
+		option.value = `character:${getProjectionId(character)}`;
+		option.textContent = getProjectionName(character);
 		select.append(option);
 	}
 	if (includeParty && partyInventory) {
@@ -1064,7 +1057,7 @@ function updateInboxCount ({kind, count}) {
 	element.textContent = `${Number(element.dataset.actions || 0) + Number(element.dataset.transfers || 0)}`;
 }
 
-async function renderPendingActions ({campaign, campaignId, session, targetCharacters, members}) {
+async function renderPendingActions ({campaign, campaignId, session, targetCharacters, members, roster = null}) {
 	const list = document.getElementById("campaign-pending-actions");
 	if (!list) return;
 	const actions = await api.pListPendingActions({campaignId});
@@ -1082,7 +1075,7 @@ async function renderPendingActions ({campaign, campaignId, session, targetChara
 		text.textContent = `${getMemberName(members, action.actorAccountId)} proposes ${getEffectDescription(action.payload?.effect)} for ${getCharacterName(target)}.`;
 		const meta = document.createElement("span");
 		meta.className = "hub-data-row__meta";
-		const canResolve = isDm || (campaign.role === "player" && target?.ownerAccountId === session.account.id);
+		const canResolve = isDm || (campaign.role === "player" && getProjectionOwnerAccountId(target) === session.account.id);
 		meta.textContent = canResolve ? "Your response is needed" : "Waiting for the recipient";
 		main.append(text, meta);
 		row.append(main);
@@ -1130,7 +1123,7 @@ async function renderPendingTransfers ({campaign, campaignId, session, targetCha
 		const contents = getTransferContentsDescription(transfer);
 		text.textContent = `${actor} offers ${contents}: ${getContainerName({kind: transfer.sourceKind, id: transfer.sourceId, characters: targetCharacters})} to ${getContainerName({kind: transfer.targetKind, id: transfer.targetId, characters: targetCharacters})}.`;
 		const target = transfer.targetKind === "character" ? getCharacterById(targetCharacters, transfer.targetId) : null;
-		const canResolve = isDm || target?.ownerAccountId === session.account.id;
+		const canResolve = isDm || getProjectionOwnerAccountId(target) === session.account.id;
 		const meta = document.createElement("span");
 		meta.className = "hub-data-row__meta";
 		meta.textContent = canResolve ? "Your response is needed" : "Waiting for the recipient";
@@ -1209,7 +1202,9 @@ async function pRunFormMutation ({form, fnMutate}) {
 	}
 }
 
-async function pInitCampaignForms ({campaign, campaignId, session, characters, targetCharacters, members, context, pRefreshInvites}) {
+async function pInitCampaignForms ({campaign, campaignId, session, characters, targetCharacters, members, context, pRefreshInvites, roster = []}) {
+	// Roster metadata travels beside the projections and is refreshed with them.
+	const rosterRef = {current: roster};
 	const inviteForm = document.getElementById("campaign-invite-form");
 	const inviteOutput = document.getElementById("campaign-invite-output");
 	const inviteResult = document.getElementById("campaign-invite-result");
@@ -1355,6 +1350,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		]);
 		characters.splice(0, characters.length, ...(charactersNxt || charactersLatest));
 		targetCharacters.splice(0, targetCharacters.length, ...(targetCharactersNxt || snapshotLatest.characters));
+		if (snapshotLatest?.roster) rosterRef.current = snapshotLatest.roster;
 		if (membersNxt) members.splice(0, members.length, ...membersNxt);
 		partyInventory = partyInventoryNxt || partyInventoryLatest;
 
@@ -1363,7 +1359,9 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			partyInventory,
 			ownerAccountId: session.account.id,
 		});
-		fillCharacterSelect(target, targetCharacters, {includeParty: true, partyInventory});
+		// A character whose identity the owner hid is absent from roster metadata and is
+		// therefore not peer-targetable.
+		fillCharacterSelect(target, getTargetableProjections({projections: targetCharacters, roster: rosterRef.current}), {includeParty: true, partyInventory});
 		if ([...source.options].some(option => option.value === selections.source)) source.value = selections.source;
 		if ([...target.options].some(option => option.value === selections.target)) target.value = selections.target;
 		syncTransferItemPicker({characters, partyInventory});
@@ -1394,7 +1392,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		partyInventoryNxt: partyInventory,
 	});
 
-	fillCharacterSelect(document.getElementById("campaign-action-target"), targetCharacters);
+	fillCharacterSelect(document.getElementById("campaign-action-target"), getTargetableProjections({projections: targetCharacters, roster: rosterRef.current}));
 	for (const id of ["campaign-xp-target", "campaign-item-target"]) fillCharacterSelect(document.getElementById(id), characters);
 	document.getElementById("campaign-transfer-source")?.addEventListener("change", () => syncTransferItemPicker({characters, partyInventory}));
 	document.getElementById("campaign-transfer-entry")?.addEventListener("change", syncTransferQuantity);

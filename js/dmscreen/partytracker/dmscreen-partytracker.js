@@ -270,11 +270,11 @@ class PartyTrackerRoot {
 		this._characters = this._characters.filter(character => !this._hubCharacterIds.has(character.data?.id));
 		this._hubCharacterIds.clear();
 		for (const character of characters) {
-			const raw = character.data || character;
-			const validation = PartyTrackerImporter.validate(raw);
-			if (!validation.valid) continue;
-			const mapped = PartyTrackerImporter.mapCharacterSheetData(raw);
-			mapped.id = character.id || raw.id;
+			// ADR 0011: a linked row renders whatever the requester is authorized to see.
+			// A DM/owner envelope carries the canonical document; a peer profile carries
+			// the already-projected catalog and must never be read as a document.
+			const mapped = this._getLinkedCharacterData(character);
+			if (!mapped) continue;
 			this._hubCharacterIds.add(mapped.id);
 			this._characters.push(new PartyTrackerCharacter(mapped, this._settings));
 		}
@@ -285,6 +285,23 @@ class PartyTrackerRoot {
 		this._updateSummary();
 		this._dcCalc?.refresh();
 		this._board.fireBoardEvent({type: "partyTrackerUpdate"});
+	}
+
+	_getLinkedCharacterData (character) {
+		try {
+			if (character?.kind === "peer_profile") {
+				const mapped = PartyTrackerImporter.mapPeerProfile(character.data || {});
+				mapped.id = character.id;
+				return mapped.name || mapped.classes?.some(c => c.name) ? mapped : null;
+			}
+			const raw = character?.character?.data || character?.data || character;
+			if (!PartyTrackerImporter.validate(raw).valid) return null;
+			const mapped = PartyTrackerImporter.mapCharacterSheetData(raw);
+			mapped.id = character?.character?.id || character?.id || raw.id;
+			return mapped;
+		} catch {
+			return null;
+		}
 	}
 
 	setHubCampaignStatus (status, {isSkipRender = false} = {}) {

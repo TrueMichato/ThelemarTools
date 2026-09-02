@@ -83,7 +83,7 @@ describe("campaign DM Screen controller", () => {
 		}));
 		expect(events).toContainEqual({
 			type: "hubCharacterProjections",
-			payload: {characters: [{id: "character-1"}]},
+			payload: {characters: [{id: "character-1"}], roster: []},
 		});
 
 		realtime.emit("state", {state: "reconnecting"});
@@ -98,6 +98,33 @@ describe("campaign DM Screen controller", () => {
 			type: "hubCampaignStatus",
 			payload: expect.objectContaining({sync: "stale"}),
 		}));
+	});
+
+	it("schedules a coalesced refetch with browser-safe timers", async () => {
+		const {DmScreenHubController} = await import("../../../js/dmscreen/dmscreen-hub-controller.js");
+		let fetchCount = 0;
+		const controller = new DmScreenHubController({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCampaign: async () => ({name: "Ashen March", status: "active", role: "dm"}),
+				pListCampaignCharacterProjections: async () => {
+					fetchCount++;
+					return {projections: [], roster: []};
+				},
+			},
+			document: null,
+		});
+		await controller.pLoadCampaign();
+		const realtime = new Observable();
+		controller.attach({board: {fireBoardEvent: () => {}}, repository: null, realtime});
+
+		// Default timers must be callable as controller methods: an unbound
+		// `globalThis.setTimeout` throws "Illegal invocation" in a browser, which would
+		// abort the realtime handler that dispatched this listener.
+		expect(() => realtime.emit("cursor", {cursor: {lastSequence: 1}, characterRefs: []})).not.toThrow();
+		await new Promise(resolve => setTimeout(resolve, 250));
+		expect(fetchCount).toBeGreaterThan(0);
 	});
 
 	it("closes projections when the current co-DM is demoted", async () => {
@@ -132,7 +159,7 @@ describe("campaign DM Screen controller", () => {
 		expect(controller.getState().access).toBe("permission_denied");
 		expect(events).toContainEqual({
 			type: "hubCharacterProjections",
-			payload: {characters: []},
+			payload: {characters: [], roster: []},
 		});
 	});
 
@@ -140,8 +167,9 @@ describe("campaign DM Screen controller", () => {
 		const realtime = new Observable();
 		const timers = new Map();
 		let nextTimerId = 0;
-		let resyncCount = 0;
-		realtime.requestResync = () => resyncCount++;
+		let fetchCount = 0;
+		let requestResyncCount = 0;
+		realtime.requestResync = () => requestResyncCount++;
 		const controller = new DmScreenHubController({
 			campaignId: "campaign-1",
 			api: {
@@ -151,6 +179,10 @@ describe("campaign DM Screen controller", () => {
 					status: "active",
 					role: "dm",
 				}),
+				pListCampaignCharacterProjections: async () => {
+					fetchCount++;
+					return {projections: [], roster: []};
+				},
 			},
 			document: null,
 			fnSetTimeout: fn => {
@@ -168,13 +200,17 @@ describe("campaign DM Screen controller", () => {
 		});
 
 		realtime.emit("event", {type: "roll.logged"});
-		expect(resyncCount).toBe(0);
-		realtime.emit("event", {type: "character.projection.updated"});
+		expect(fetchCount).toBe(0);
+		realtime.emit("event", {type: "character.projection.invalidated", payload: {projectionRevision: 4}});
 		realtime.emit("event", {type: "item.granted"});
 		realtime.emit("event", {type: "transfer.committed"});
-		expect(resyncCount).toBe(0);
+		// Repeated invalidations coalesce into a single scoped refetch.
+		expect(fetchCount).toBe(0);
 		expect(timers.size).toBe(1);
 		timers.values().next().value();
-		expect(resyncCount).toBe(1);
+		await new Promise(resolve => setImmediate(resolve));
+		expect(fetchCount).toBe(1);
+		// ADR 0011: projections come from the HTTP projector, never from a socket resync.
+		expect(requestResyncCount).toBe(0);
 	});
 });

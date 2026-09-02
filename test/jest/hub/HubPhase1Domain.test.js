@@ -61,9 +61,14 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 			cookie: session.cookie,
 			origin: APP_ORIGIN,
 			"x-csrf-token": session.csrfToken,
-			"x-hub-protocol-version": "1",
+			"x-hub-protocol-version": "2",
 			"idempotency-key": idempotencyKey,
 		};
+	}
+
+	/** Projection-shaped reads must declare their protocol version, like mutations. */
+	function readHeaders (session) {
+		return {cookie: session.cookie, "x-hub-protocol-version": "2"};
 	}
 
 	async function pCreateCampaign (session, name) {
@@ -178,11 +183,12 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 		const dmRead = await app.inject({
 			method: "GET",
 			url: `/api/characters/${character.id}`,
-			headers: {cookie: dm.cookie},
+			headers: readHeaders(dm),
 		});
 		expect(dmRead.statusCode).toBe(200);
-		expect(dmRead.json().character.data.notes.backstory).toBe("Private history");
-		expect(dmRead.json().character.data.features[0].description).toBe(`<div class="ve-rd__b"><p><strong>Safe</strong>&lt;script&gt;alert(1)&lt;/script&gt;</p></div>`);
+		expect(dmRead.json().projection.kind).toBe("dm_truth");
+		expect(dmRead.json().projection.character.data.notes.backstory).toBe("Private history");
+		expect(dmRead.json().projection.character.data.features[0].description).toBe(`<div class="ve-rd__b"><p><strong>Safe</strong>&lt;script&gt;alert(1)&lt;/script&gt;</p></div>`);
 	});
 
 	it("fences the old device after takeover", async () => {
@@ -276,7 +282,7 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 		const missing = await app.inject({
 			method: "GET",
 			url: `/api/characters/${cloned.json().character.id}`,
-			headers: {cookie: player.cookie},
+			headers: readHeaders(player),
 		});
 		expect(missing.statusCode).toBe(404);
 	});
@@ -377,6 +383,37 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 			payload: {name: "Old Client"},
 		});
 		expect(response.statusCode).toBe(426);
-		expect(response.json()).toEqual({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "1"});
+		expect(response.json()).toEqual({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "2"});
+	});
+
+	it("blocks projection-shaped reads from stale protocol clients", async () => {
+		const dm = await pSignIn(IDENTITIES.dm);
+		const campaign = (await app.inject({
+			method: "POST",
+			url: "/api/campaigns",
+			headers: mutationHeaders(dm),
+			payload: {name: "Stale Reader"},
+		})).json().campaign;
+		const character = (await app.inject({
+			method: "POST",
+			url: "/api/characters",
+			headers: mutationHeaders(dm),
+			payload: {clientImportId: "stale-read", schemaVersion: 1, campaignId: campaign.id, data: {name: "Reader"}},
+		})).json().character;
+
+		// A v1 client must be told to update rather than silently misreading a v2 envelope.
+		for (const url of [
+			`/api/characters/${character.id}`,
+			`/api/campaigns/${campaign.id}/snapshot`,
+			`/api/campaigns/${campaign.id}/character-projections`,
+			`/api/characters/${character.id}/projection-policy`,
+		]) {
+			const stale = await app.inject({method: "GET", url, headers: {cookie: dm.cookie, "x-hub-protocol-version": "1"}});
+			expect({url, status: stale.statusCode, body: stale.json()}).toEqual({
+				url,
+				status: 426,
+				body: {error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "2"},
+			});
+		}
 	});
 });

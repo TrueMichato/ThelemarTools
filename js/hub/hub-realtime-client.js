@@ -7,6 +7,7 @@ export class HubRealtimeClient {
 		fnSetInterval = (...args) => setInterval(...args),
 		fnClearInterval = timer => clearInterval(timer),
 		resyncIntervalMs = 10_000,
+		fnOnListenerError = null,
 	}) {
 		if (!campaignId) throw new TypeError(`campaignId is required.`);
 		this._campaignId = campaignId;
@@ -16,6 +17,7 @@ export class HubRealtimeClient {
 		this._fnSetInterval = fnSetInterval;
 		this._fnClearInterval = fnClearInterval;
 		this._resyncIntervalMs = resyncIntervalMs;
+		this._fnOnListenerError = fnOnListenerError;
 		this._socket = null;
 		this._pConnecting = null;
 		this._shouldReconnect = false;
@@ -36,8 +38,19 @@ export class HubRealtimeClient {
 		return () => listeners.delete(listener);
 	}
 
+	/**
+	 * Consumer callbacks must never break protocol handling: a listener that throws used
+	 * to abort `_handleMessage` partway, leaving the connection stuck before
+	 * `_setConnectionState("live")` ever ran.
+	 */
 	_emit (type, value) {
-		for (const listener of this._listeners.get(type) || []) listener(value);
+		for (const listener of this._listeners.get(type) || []) {
+			try {
+				listener(value);
+			} catch (error) {
+				this._fnOnListenerError?.(error, type);
+			}
+		}
 	}
 
 	getConnectionState () {
@@ -59,7 +72,7 @@ export class HubRealtimeClient {
 			this._hasBaseline = false;
 			this._bufferedEvents = [];
 			const protocol = this._location.protocol === "https:" ? "wss:" : "ws:";
-			const url = `${protocol}//${this._location.host}/ws/campaign/${encodeURIComponent(this._campaignId)}?v=1`;
+			const url = `${protocol}//${this._location.host}/ws/campaign/${encodeURIComponent(this._campaignId)}?v=2`;
 			const socket = this._fnCreateSocket(url);
 			this._socket = socket;
 			let isOpened = false;
@@ -119,10 +132,17 @@ export class HubRealtimeClient {
 		}
 		if (message.type === "resync_complete") {
 			const previousSequence = this._lastSequence;
-			const snapshotSequence = message.snapshot?.lastSequence || 0;
+			// ADR 0011: resync carries a cursor and cache-invalidation refs only. Consumers
+			// refetch through the authorization-scoped HTTP projector.
+			const snapshotSequence = message.cursor?.lastSequence || 0;
 			if (!this._hasBaseline || snapshotSequence >= this._lastSequence) {
 				this._lastSequence = snapshotSequence;
-				this._emit("snapshot", message.snapshot);
+				this._emit("cursor", {
+					cursor: message.cursor,
+					campaign: message.campaign,
+					membership: message.membership,
+					characterRefs: message.characterRefs || [],
+				});
 			}
 			this._hasBaseline = true;
 			const events = [...(message.events || []), ...this._bufferedEvents]
@@ -139,7 +159,7 @@ export class HubRealtimeClient {
 					"character.moved",
 					"character.moved_out",
 					"character.reactivated",
-					"character.projection.updated",
+					"character.projection.invalidated",
 					"xp.granted",
 					"item.granted",
 					"action.applied",

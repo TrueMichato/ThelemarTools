@@ -1,7 +1,7 @@
 # Campaign Hub HTTP API
 
 > **Status:** Current private-V1 contract
-> **Wire protocol:** `1`
+> **Wire protocol:** `2`
 > **Last verified:** 2026-08-24
 > **Owner:** Campaign Hub maintainers
 
@@ -24,7 +24,7 @@ Every mutation requires:
 ```http
 Origin: https://the-exact-app-origin.example
 X-CSRF-Token: <session HMAC>
-X-Hub-Protocol-Version: 1
+X-Hub-Protocol-Version: 2
 Idempotency-Key: <non-empty value, at most 200 characters>
 ```
 
@@ -82,12 +82,28 @@ Path/query keys ending in `Id` must be UUID-shaped. Invalid values fail as `INVA
 | `DELETE /api/campaigns/:campaignId/members/:membershipId` | Owner or co-DM mutation | none | Removes allowed non-owner, resolves pending state, detaches characters |
 | `POST /api/campaigns/:campaignId/leave` | Non-owner mutation | none | Leaves and performs the same lifecycle cleanup |
 | `GET /api/campaigns/:campaignId/context` | Active member | none | Active immutable brew/rules versions |
-| `GET /api/campaigns/:campaignId/snapshot` | Active member | none | Campaign, membership, role-shaped characters, last sequence |
+| `GET /api/campaigns/:campaignId/snapshot` | Active member; protocol-versioned | none | Campaign, membership, authorization-scoped character envelopes, roster metadata, last sequence |
+| `GET /api/campaigns/:campaignId/character-projections` | Active member; protocol-versioned | none | `{projections, roster}` — the batch scoped projector every consumer refetches through |
 | `GET /api/campaigns/:campaignId/events` | Active member | `afterSequence>=0`, `limit` 1-500 (default 200) | Visibility-filtered ordered events; character-related payloads may carry bounded versioned display-name snapshots |
 | `POST /api/campaigns/:campaignId/archive` | Campaign owner mutation | none | Cancels actions/releases leases/detaches characters, or `CAMPAIGN_BUSY` |
 | `POST /api/campaigns/:campaignId/transfer-ownership` | Campaign owner mutation | `{targetAccountId}` | Changes owner and owner/target roles atomically |
 
 The archive/ownership routes rely on store-level owner authorization in addition to session security.
+
+### Authorization envelopes
+
+Every character read returns exactly one outcome, discriminated by `kind`
+([ADR 0011](adr/0011-authorization-scoped-character-projections.md)):
+
+| Requester | `kind` | Contents |
+|---|---|---|
+| Character owner | `owner_truth` | canonical document, `policy`, `projectionRevision` |
+| DM or co-DM who is not the owner | `dm_truth` | canonical document plus the exact `peerPreview`; never the raw policy |
+| Any other active member | `peer_profile` | `{id, campaignId, revision, projectionRevision, data}` |
+
+Reads whose response is an envelope require `X-Hub-Protocol-Version`; a mismatch returns
+`426 PROTOCOL_UPDATE_REQUIRED` so an older client is told to update rather than silently misreading a shape it
+does not understand.
 
 ## Invite routes
 
@@ -104,9 +120,11 @@ Only the token hash is persisted. The raw token is returned only from creation.
 
 | Method/path | Authorization | Input | Result |
 |---|---|---|---|
-| `GET /api/characters?campaignId?` | Authenticated; campaign membership if scoped | optional campaign UUID | Owner's active characters; DMs see campaign characters; other members see only owned rows |
+| `GET /api/characters?campaignId?` | Authenticated; protocol-versioned | optional campaign UUID | Owner's active characters; DMs see campaign characters; other members see only owned rows. No response ever carries `projectionPolicy` — sharing settings are read only from the owner-only management endpoint |
 | `POST /api/characters` | Authenticated mutation; non-spectator membership if campaign scoped | `clientImportId`, `campaignId?`, `schemaVersion`, `data` | 201 created/reactivated/idempotently existing canonical character |
-| `GET /api/characters/:characterId` | Owner or campaign DM/co-DM | none | Full canonical character |
+| `GET /api/characters/:characterId` | Any active campaign member; protocol-versioned | none | `{projection}` — one ADR 0011 envelope: `owner_truth`, `dm_truth`, or `peer_profile` |
+| `GET /api/characters/:characterId/projection-policy` | Owner only; protocol-versioned | none | `{policy, projectionRevision, preview}`; `preview` is the server-computed peer profile, and `error` reports `PROJECTION_POLICY_INVALID`. A character owned by somebody else and one that does not exist both return `404 PROJECTION_POLICY_NOT_AVAILABLE`, so the endpoint cannot confirm an id |
+| `PUT /api/characters/:characterId/projection-policy` | Owner mutation | `{policy, expectedProjectionRevision}` + `Idempotency-Key` | Updated policy/preview, `409 PROJECTION_POLICY_CONFLICT` with the current safe state, or `422 PROJECTION_POLICY_INVALID` |
 | `POST /api/characters/:characterId/lease` | Owner mutation | `{takeover?}` | Lease session, monotonic epoch, expiry |
 | `PATCH /api/characters/:characterId` | Owner mutation + held lease | `baseRevision`, `leaseEpoch`, up to 500 add/remove/replace patches | Canonical character or revision/lease conflict |
 | `DELETE /api/characters/:characterId` | Owner mutation | none | Soft archive; blocks outgoing reserved transfer |

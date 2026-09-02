@@ -1,3 +1,5 @@
+import {isCanonicalProjection} from "./hub-character-view.js";
+
 export class HubApiError extends Error {
 	constructor ({code, status, message = null, details = null, cause = null}) {
 		super(message || code || `Hub request failed.`);
@@ -16,7 +18,7 @@ export class HubApiClient {
 	}
 
 	async _pRequest (path, {method = "GET", body = null, isMutation = false, idempotencyKey = null} = {}) {
-		const headers = {accept: "application/json", "x-hub-protocol-version": "1"};
+		const headers = {accept: "application/json", "x-hub-protocol-version": "2"};
 		if (body != null) headers["content-type"] = "application/json";
 		if (isMutation) {
 			if (!this._csrfToken) throw new HubApiError({code: "CSRF_NOT_READY", status: 0});
@@ -209,8 +211,39 @@ export class HubApiClient {
 		return (await this._pRequest(`/api/characters${query}`)).characters;
 	}
 
+	/** The raw ADR 0011 authorization envelope: `owner_truth`, `dm_truth` or `peer_profile`. */
+	async pGetCharacterProjection ({characterId}) {
+		return (await this._pRequest(`/api/characters/${encodeURIComponent(characterId)}`)).projection;
+	}
+
+	/**
+	 * The canonical character document, for owner/DM surfaces only. Throws rather than
+	 * degrading when the requester holds a peer profile, so a projection can never be
+	 * mistaken for truth.
+	 */
 	async pGetCharacter ({characterId}) {
-		return (await this._pRequest(`/api/characters/${encodeURIComponent(characterId)}`)).character;
+		const projection = await this.pGetCharacterProjection({characterId});
+		if (!isCanonicalProjection(projection)) {
+			throw new HubApiError({code: "CHARACTER_PROJECTION_SCOPED", status: 403});
+		}
+		return projection.character;
+	}
+
+	async pListCampaignCharacterProjections ({campaignId}) {
+		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/character-projections`);
+	}
+
+	async pGetProjectionPolicy ({characterId}) {
+		return this._pRequest(`/api/characters/${encodeURIComponent(characterId)}/projection-policy`);
+	}
+
+	async pSetProjectionPolicy ({characterId, policy, expectedProjectionRevision, idempotencyKey}) {
+		return this._pRequest(`/api/characters/${encodeURIComponent(characterId)}/projection-policy`, {
+			method: "PUT",
+			body: {policy, expectedProjectionRevision},
+			isMutation: true,
+			idempotencyKey,
+		});
 	}
 
 	async pCreateCharacter ({clientImportId, campaignId = null, schemaVersion = 1, data, idempotencyKey}) {

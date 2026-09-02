@@ -117,7 +117,7 @@ describe("Hub lifecycle administration", () => {
 			detachedCharacterIds: [character.id],
 		}));
 		expect(await store.pGetMembership({accountId: player.id, campaignId: campaign.id})).toBeNull();
-		const detached = await store.pGetCharacter({accountId: player.id, characterId: character.id});
+		const detached = (await store.pGetCharacter({accountId: player.id, characterId: character.id})).character;
 		expect(detached.campaignId).toBeNull();
 		expect(detached.clientImportId).toBeNull();
 		expect(detached.data.inventory).toContainEqual(expect.objectContaining({id: "map", quantity: 1}));
