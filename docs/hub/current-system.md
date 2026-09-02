@@ -115,7 +115,7 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
   detached-cloud, temporary, and failed-load sheets do not.
 - The sheet coordinator filters projection invalidations and the exact `character.operation.*` lifecycle
   allowlist to the open target. Delivery is serialized behind saves and fenced on switch, detach, revocation,
-  logout, page hide, and unload.
+  logout, and terminal page hide.
 - Cursor refs may carry an owner/DM-only `operationWatermark`. Operation events remain deliverable at/below it;
   this substrate exposes the metadata but does not apply operations or replace sheet state.
 

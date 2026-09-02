@@ -802,7 +802,7 @@ describe("hub realtime", () => {
 			client.close();
 		});
 
-		it("reconnects when the resync watchdog observes a stalled response", async () => {
+		it("reconnects when the resync watchdog observes no progress for a full interval", async () => {
 			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
 			class BrowserSocket extends EventEmitter {
 				readyState = 1;
@@ -834,6 +834,9 @@ describe("hub realtime", () => {
 				},
 			});
 			await client.pConnect();
+			intervals[0]();
+			expect(socket.readyState).toBe(1);
+			expect(reconnects).toHaveLength(0);
 			intervals[0]();
 
 			expect(socket.readyState).toBe(3);

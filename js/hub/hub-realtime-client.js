@@ -28,6 +28,7 @@ export class HubRealtimeClient {
 		this._reconnectAttempt = 0;
 		this._reconnectTimer = null;
 		this._resyncTimer = null;
+		this._resyncWatchdogMarker = null;
 		this._lastSequence = 0;
 		this._hasBaseline = false;
 		this._bufferedEvents = [];
@@ -279,9 +280,15 @@ export class HubRealtimeClient {
 		const id = this._fnSetInterval(() => {
 			if (!this._isCurrentSocket({socket, generation})) return;
 			if (this._resyncStartSequence != null) {
+				const marker = `${this._resyncScannedThroughSequence ?? "initial"}:${this._resyncAccumulatedEvents.length}`;
+				if (marker !== this._resyncWatchdogMarker) {
+					this._resyncWatchdogMarker = marker;
+					return;
+				}
 				socket.close(4000, "Resync timed out");
 				return;
 			}
+			this._resyncWatchdogMarker = null;
 			this.requestResync(null, {socket, generation});
 		}, this._resyncIntervalMs);
 		this._resyncTimer = {generation, id};
@@ -293,6 +300,7 @@ export class HubRealtimeClient {
 		if (generation != null && this._resyncTimer.generation !== generation) return;
 		this._fnClearInterval(this._resyncTimer.id);
 		this._resyncTimer = null;
+		this._resyncWatchdogMarker = null;
 	}
 
 	_disconnect ({isResetReplay}) {

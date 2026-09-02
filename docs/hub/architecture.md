@@ -143,7 +143,7 @@ canonical character has loaded. Socket-generation fencing makes stale messages, 
 inert. The coordinator routes metadata-only projection invalidations and the frozen
 `character.operation.*` lifecycle allowlist through the HTTP repository's existing mutation queue, so a
 delivery cannot overtake an in-flight save. Character/campaign switch, canonical-id replacement, detach,
-revocation, logout, page hide, and unload all fence the subscription generation.
+revocation, logout, and terminal page hide all fence the subscription generation.
 
 This delivery layer is intentionally not reconciliation: it does not mutate `CharacterSheetState`, accepted
 bases, revisions, leases, conflicts, or recovery storage, and it does not fetch or replace the owner document.

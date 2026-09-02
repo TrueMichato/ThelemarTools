@@ -161,7 +161,7 @@ No reactive system — renders are explicit. Related modules re-render together 
 - **Hub realtime callbacks**: `CharacterSheetRealtimeCoordinator.on()` exposes connection, cursor,
   metadata-only projection invalidation, semantic-operation lifecycle, and delivery-error handoffs. Only a
   signed-in campaign-backed canonical character attaches. Delivery uses the repository mutation queue and is
-  generation-fenced on switch/detach/revocation/unload; a missing canonical ref, remote archive, or remote move
+  generation-fenced on switch/detach/revocation/terminal page hide; a missing canonical ref, remote archive, or remote move
   serializes teardown behind already-queued delivery. Persisted `pagehide` suspends the socket and `pageshow`
   resumes the same client/cursor rather than replaying through a fresh generation. This substrate must not call
   state load/render/save or a generic conflict modal.

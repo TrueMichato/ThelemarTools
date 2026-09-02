@@ -204,7 +204,6 @@ class CharacterSheetPage {
 		window.addEventListener("pageshow", event => {
 			if (event.persisted) this._hubRealtime?.resume();
 		});
-		window.addEventListener("unload", () => this._detachHubRealtime());
 	}
 
 	async pInit () {

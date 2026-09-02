@@ -251,7 +251,7 @@ describe("Character Sheet repository seam", () => {
 		expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "character-1"});
 	});
 
-	it("tears down on unload and resumes the same subscription after BFCache restoration", () => {
+	it("tears down on terminal pagehide and resumes the same subscription after BFCache restoration", () => {
 		const listeners = {};
 		const windowPrev = globalThis.window;
 		globalThis.window = {
@@ -269,13 +269,12 @@ describe("Character Sheet repository seam", () => {
 			listeners.pagehide({persisted: true});
 			listeners.pageshow({persisted: true});
 			listeners.pagehide({persisted: false});
-			listeners.unload();
 		} finally {
 			globalThis.window = windowPrev;
 		}
 
 		expect(host._hubRealtime.suspend).toHaveBeenCalledTimes(1);
 		expect(host._hubRealtime.resume).toHaveBeenCalledTimes(1);
-		expect(host._detachHubRealtime).toHaveBeenCalledTimes(2);
+		expect(host._detachHubRealtime).toHaveBeenCalledTimes(1);
 	});
 });

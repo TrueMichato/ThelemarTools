@@ -76,8 +76,8 @@ without scanning the whole history.
 Realtime tests cover 26 exact continuation pages on one connection, one-time connection-scoped rate-limit
 exemptions, forged/replayed marker limiting, reconnect preservation, exact-once accumulation, and explicit
 campaign-client close/reset. They also interleave live delivery with a periodic multi-page replay and prove
-recovered and live events emit exactly once in sequence order without an overlapping watchdog resync. A failed
-replay request must close/reconnect, preserve its replay marker, and recover buffered live events exactly once.
+recovered and live events emit exactly once in sequence order without an overlapping watchdog resync. Any server
+error during replay must close/reconnect, preserve its replay marker, and recover buffered live events exactly once.
 
 The memory semantic suite additionally covers every version-1 kind, player generic-operation denial,
 DM/co-DM immediate application, self-target explicit approval, DM non-owner approval denial, unsupported and
@@ -217,7 +217,8 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
 - Campaign snapshot consumers coalesce `character.projection.invalidated` metadata into one authorization-scoped HTTP refetch and fence older
   in-flight snapshot responses with the campaign event sequence, so an authoritative refresh cannot regress a
   newer visible projection. A single 10-second client watchdog requests an authoritative snapshot while the
-  socket remains live, closing the gap where a missed outbox delivery could otherwise leave stale data visible.
+  socket remains live. During replay it allows a full unchanged interval before reconnecting, so advancing
+  continuation pages are not interrupted while a stalled chain still recovers.
 - Character Sheet realtime regressions use deterministic fake sockets and repository barriers to prove stale
   socket messages/closes cannot advance the cursor, replay/live duplicates collapse, lifecycle states remain
   ordered across owner/DM watermarks, in-flight saves finish before callbacks, and switch/reopen/access-loss

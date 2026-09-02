@@ -22,7 +22,7 @@
 | Party inventory | Shared assets | campaign members; mutations role/ownership controlled | campaign lifetime |
 | Audit entries | Security/admin evidence | BFF/operators; no public API | retained; actor/campaign refs nullable |
 | Domain events | Ordered replay/history | visibility-filtered | retained until campaign/account deletion |
-| Character Sheet realtime delivery | Ordered metadata/lifecycle handoff for the open owned character | current authenticated campaign page only | memory only; fenced and discarded on switch/detach/access loss/logout/unload; temporarily retained across BFCache suspension |
+| Character Sheet realtime delivery | Ordered metadata/lifecycle handoff for the open owned character | current authenticated campaign page only | memory only; fenced and discarded on switch/detach/access loss/logout/terminal page hide; temporarily retained across BFCache suspension |
 | Outbox rows | Technical delivery | BFF/operators | published 7-day cleanup approved, not implemented |
 | Command receipts | Idempotent retry | BFF/store | 24 hours |
 | Semantic operations/commands | Effect lifecycle, stable exactly-once replay, resulting revision/event linkage | authorized participants; BFF/store command records | campaign/account lifecycle; not pruned as technical receipts |
