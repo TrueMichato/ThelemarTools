@@ -245,17 +245,31 @@ describe("projection versus Character Sheet parity", () => {
 	it("keeps a stance out of the baseline as well", () => {
 		const authored = new CharacterSheetState();
 		Object.assign(authored._data, {
-			abilities: {str: 10, dex: 14, con: 12, int: 10, wis: 10, cha: 10},
+			abilities: {str: 16, dex: 12, con: 12, int: 10, wis: 10, cha: 10},
 			classes: [{name: "Fighter", level: 5}],
-			saveProficiencies: ["con"],
+			// A stance only contributes when the character actually uses the combat system
+			// and owns a stance method whose text parses into bonuses. Setting
+			// `activeStance` to an unknown name leaves `usesCombatSystem()` false, so the
+			// assertion would pass even if stance stripping regressed.
+			combatTraditions: ["Iron Bulwark"],
+			features: [{
+				name: "Bulwark Stance",
+				optionalFeatureTypes: ["CTM:1IB"],
+				description: "You adopt a defensive stance. This stance lasts until you fall unconscious. While in this stance, you gain a bonus to Strength (Athletics) checks equal to your proficiency bonus.",
+			}],
 		});
+		expect(authored.usesCombatSystem()).toBe(true);
 		const baseline = buildCharacterViewModel(JSON.parse(JSON.stringify(authored.toJson())));
 
-		authored._data.activeStance = "Defensive";
+		authored._data.activeStance = "Bulwark Stance";
 		const projected = buildCharacterViewModel(JSON.parse(JSON.stringify(authored.toJson())));
 
-		expect(projected.saves).toEqual(baseline.saves);
+		// The stance genuinely moves the live sheet...
+		expect(authored.getFeatureCalculations().stanceSkillBonuses).toEqual({athletics: 3});
+		expect(authored.getSkillMod("athletics")).toBe(baseline.skills.athletics.modifier + 3);
+		// ...and is absent from the projected baseline.
 		expect(projected.skills).toEqual(baseline.skills);
+		expect(projected.saves).toEqual(baseline.saves);
 	});
 
 	it("writes no character data to any console channel while deriving", () => {
