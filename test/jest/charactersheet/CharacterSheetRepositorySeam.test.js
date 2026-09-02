@@ -269,7 +269,7 @@ describe("Character Sheet repository seam", () => {
 			listeners.pagehide({persisted: true});
 			listeners.pageshow({persisted: true});
 			listeners.pagehide({persisted: false});
-			listeners.beforeunload();
+			listeners.unload();
 		} finally {
 			globalThis.window = windowPrev;
 		}
