@@ -29,7 +29,7 @@ The Campaign Hub is an optional online layer over the existing local-first site.
 | Character persistence | `js/hub/hub-http-character-repository.js`, `js/hub/hub-character-repository.js` | Cloud snapshots, patches, leases, queued bases, conflict recovery, canonical-id adoption |
 | DM workspace persistence | `js/hub/hub-http-dm-workspace-repository.js`, `js/hub/hub-dm-workspace-repository.js` | Private Board blobs, leases, recovery drafts, conflict handling |
 | Campaign context | `js/hub/hub-campaign-context.js`, `js/hub/hub-brew-context.js` | Rules and immutable campaign brew activation without personal-brew writes |
-| Realtime | `js/hub/hub-realtime-client.js`, `js/hub/hub-broadcast-sync.js` | WebSocket resync/presence/events and same-browser tab coordination |
+| Realtime | `js/hub/hub-realtime-client.js`, `js/hub/hub-broadcast-sync.js`, `js/charactersheet/charactersheet-realtime.js` | WebSocket resync/presence/events, stale-socket fencing, focused Character Sheet delivery, and same-browser tab coordination |
 | Roll bridge | `js/hub/hub-roll-log-adapter.js` | Durable server roll events from Character Sheet rolls |
 | BFF routes | `server/src/app.js` | Auth, schemas, roles, CSRF/origin/protocol checks, HTTP and WebSocket endpoints |
 | Production authority | `server/src/postgres-hub-store.js` | PostgreSQL queries, locks, transactions, canonical writes, audit/events/outbox/receipts |
@@ -111,6 +111,13 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
   after an earlier delivery failure.
 - Other members receive one recipient-independent peer profile shaped by the character owner's sharing policy ([ADR 0011](adr/0011-authorization-scoped-character-projections.md)). DMs/co-DMs receive full authorized snapshots.
 - Party Tracker projections are linked, read-only rows and are excluded from saved Board state.
+- Only an authenticated campaign-backed open Character Sheet character subscribes. Local, signed-out,
+  detached-cloud, temporary, and failed-load sheets do not.
+- The sheet coordinator filters projection invalidations and the exact `character.operation.*` lifecycle
+  allowlist to the open target. Delivery is serialized behind saves and fenced on switch, detach, revocation,
+  logout, page hide, and unload.
+- Cursor refs may carry an owner/DM-only `operationWatermark`. Operation events remain deliverable at/below it;
+  this substrate exposes the metadata but does not apply operations or replace sheet state.
 
 ## Multiplayer mutations
 

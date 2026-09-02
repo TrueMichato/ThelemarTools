@@ -13,8 +13,8 @@
 | HTTP repositories | `HubHttpCharacterRepository.test.js`, `HubHttpDmWorkspaceRepository.test.js` | API translation, retry, canonical ids, recovery |
 | BFF/domain API | `HubServerApp.test.js`, `HubPhase1Domain.test.js` through `HubPhase4Domain.test.js`, `HubLifecycle.test.js`, `HubSemanticOperations.test.js` | Auth, campaigns, characters, content, semantic operation roles/replay/privacy/lifecycle, realtime actions |
 | Authorization/security | `HubAuthorizationMatrix.test.js`, `HubXssContract.test.js`, `HubInviteRoleSafety.test.js`, `HubRouteContract.test.js` | Tenancy, roles, XSS, schemas, route policy |
-| Realtime | `HubRealtime.test.js`, `HubWebSocket.test.js`, `HubBroadcastSync.test.js` | Visibility, replay, presence, observable connection state, terminal policy closure, sockets, tabs |
-| Integration seams | Character Sheet repository/rules/roll-history tests; `DmScreenHubController.test.js`; `HubPartyTrackerProjection.test.js` | Existing page behavior, Campaign DM Screen access/recovery, live/manual Party Tracker separation, and local/Hub isolation |
+| Realtime | `HubRealtime.test.js`, `HubWebSocket.test.js`, `HubBroadcastSync.test.js` | Visibility, replay, presence, observable connection state, stale-socket fencing, terminal policy closure, sockets, tabs |
+| Integration seams | `CharacterSheetRealtime.test.js`, Character Sheet repository/rules/roll-history tests; `DmScreenHubController.test.js`; `HubPartyTrackerProjection.test.js` | Authenticated/canonical sheet subscription gates, target filtering, save-queue delivery, teardown fencing, existing page behavior, Campaign DM Screen access/recovery, live/manual Party Tracker separation, and local/Hub isolation |
 | Static UI/PWA contracts | `HubPageContract.test.js`, `HubRoutePolicy.test.js`, `HubPerformanceBudget.test.js` | Required states, boot order, navigation, service-worker and fixed limits |
 | Database contract | `HubMigrationContract.test.js`, `HubSemanticOperationsPostgres.test.js`, local PostgreSQL drills | Schema clauses and real migration/transaction/locking/replay/expiry/restore |
 | Real-stack browser | `test/e2e/hub/`, `test/e2e/pages/HubCampaignPage.ts` | Multi-user lifecycle, Character Sheet copy/attach/clone/move, leases, keyboard focus, phone reflow, labels/touch targets, and six-member/replay/quota/contention budgets |
@@ -218,6 +218,11 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   in-flight snapshot responses with the campaign event sequence, so an authoritative refresh cannot regress a
   newer visible projection. A single 10-second client watchdog requests an authoritative snapshot while the
   socket remains live, closing the gap where a missed outbox delivery could otherwise leave stale data visible.
+- Character Sheet realtime regressions use deterministic fake sockets and repository barriers to prove stale
+  socket messages/closes cannot advance the cursor, replay/live duplicates collapse, lifecycle states remain
+  ordered across owner/DM watermarks, in-flight saves finish before callbacks, and switch/reopen/access-loss
+  generations cannot deliver stale work. Static safety guards prohibit projection fetches, state load/render,
+  save, and generic conflict entry from the coordinator.
 - Moved-character browser coverage opens the old campaign URL and proves it canonicalizes before campaign
   context activation. Journey Tracker regressions prove linked campaign participants and their activity/slot
   references remain ephemeral.

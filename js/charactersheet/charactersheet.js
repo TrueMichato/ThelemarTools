@@ -43,6 +43,7 @@ import {LocalCharacterRepository} from "../hub/hub-character-repository.js";
 import {HubHttpCharacterRepository} from "../hub/hub-http-character-repository.js";
 import {HubCampaignContext} from "../hub/hub-campaign-context.js";
 import {HubRollLogAdapter} from "../hub/hub-roll-log-adapter.js";
+import {CharacterSheetRealtimeCoordinator} from "./charactersheet-realtime.js";
 import {diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
 
 const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, StorageUtil, DataUtil, BrewUtil2, PrereleaseUtil} = /** @type {*} */ (globalThis);
@@ -66,7 +67,7 @@ class CharacterSheetPage {
 		"Tip: hover over almost anything on your sheet—spells, items, conditions—to see its full rules text without leaving the page.",
 	];
 
-	constructor ({characterRepository = null} = {}) {
+	constructor ({characterRepository = null, realtimeCoordinator = null, fnCreateRealtimeCoordinator = options => new CharacterSheetRealtimeCoordinator(options)} = {}) {
 		this._state = new CharacterSheetState();
 		const hubParams = typeof window === "undefined"
 			? new URLSearchParams()
@@ -82,6 +83,9 @@ class CharacterSheetPage {
 		this._hubCampaignContext = null;
 		this._hubContext = null;
 		this._hubRollLogAdapter = null;
+		this._hubRealtime = realtimeCoordinator;
+		this._fnCreateRealtimeCoordinator = fnCreateRealtimeCoordinator;
+		this._characterLoadGeneration = 0;
 		this._builder = null;
 		this._combat = null;
 		this._spells = null;
@@ -174,6 +178,30 @@ class CharacterSheetPage {
 		return true;
 	}
 
+	_attachHubRealtime ({characterId = this._currentCharacterId} = {}) {
+		return this._hubRealtime?.attach({characterId}) || false;
+	}
+
+	_detachHubRealtime () {
+		this._hubRealtime?.detach();
+	}
+
+	_canRestoreHubRealtimeAfterError (error) {
+		return ![
+			"AUTH_REQUIRED",
+			"CAMPAIGN_NOT_FOUND",
+			"CHARACTER_CAMPAIGN_MISMATCH",
+			"CHARACTER_NOT_FOUND",
+			"FORBIDDEN",
+		].includes(error?.code);
+	}
+
+	_initHubRealtimeTeardown () {
+		const teardown = () => this._detachHubRealtime();
+		window.addEventListener("beforeunload", teardown);
+		window.addEventListener("pagehide", teardown);
+	}
+
 	async pInit () {
 		// eslint-disable-next-line no-console
 		this._pInitLoadingTip().catch(err => console.warn("Failed to init loading tip:", err));
@@ -181,6 +209,11 @@ class CharacterSheetPage {
 		if (this._hubCampaignId) {
 			this._hubCampaignContext = new HubCampaignContext({campaignId: this._hubCampaignId});
 			this._hubContext = await this._hubCampaignContext.pActivate();
+			this._hubRealtime ||= this._fnCreateRealtimeCoordinator({
+				campaignId: this._hubCampaignId,
+				isAuthenticated: true,
+				repository: this._characterRepository,
+			});
 			this._hubRollLogAdapter = new HubRollLogAdapter({
 				api: this._hubCampaignContext.api,
 				campaignId: this._hubCampaignId,
@@ -332,6 +365,7 @@ class CharacterSheetPage {
 		// written reliably during unload, so we SYNCHRONOUSLY mirror ONLY the active character to
 		// localStorage. The loader (`_pLoadCharacter`) reconciles this mirror against the canonical
 		// copy by `_savedAt`, so an in-flight async write that never settled is recovered here.
+		this._initHubRealtimeTeardown();
 		window.addEventListener("beforeunload", () => {
 			if (!this._currentCharacterId || !this._characterRepository.isRescueMirrorEnabled) return;
 			const charData = this._state.toJson();
@@ -1755,17 +1789,29 @@ class CharacterSheetPage {
 	}
 
 	async _pLoadCharacter (charId) {
+		const loadGeneration = (this._characterLoadGeneration || 0) + 1;
+		this._characterLoadGeneration = loadGeneration;
+		const previousCharacterId = this._currentCharacterId;
+		this._detachHubRealtime?.();
 		let canonical;
 		try {
 			canonical = await this._characterRepository.pGet({characterId: charId});
 		} catch (error) {
-			if (error?.code !== "CHARACTER_CAMPAIGN_MISMATCH") throw error;
+			if (error?.code !== "CHARACTER_CAMPAIGN_MISMATCH") {
+				if (
+					loadGeneration === this._characterLoadGeneration
+					&& previousCharacterId
+					&& this._canRestoreHubRealtimeAfterError?.(error) !== false
+				) this._attachHubRealtime?.({characterId: previousCharacterId});
+				throw error;
+			}
 			window.location.replace(getCloudCharacterUrl({
 				campaignId: error.campaignId,
 				characterId: error.characterId || charId,
 			}));
 			return false;
 		}
+		if (loadGeneration !== this._characterLoadGeneration) return false;
 
 		// Reconcile against the synchronous rescue mirror: if a mutation was mirrored but its
 		// async IndexedDB write never settled (fast refresh / character-switch race), the mirror
@@ -1829,11 +1875,16 @@ class CharacterSheetPage {
 			const url = new URL(/** @type {*} */ (window.location));
 			url.searchParams.set("id", charId);
 			window.history.replaceState({}, "", url);
+			if (loadGeneration === this._characterLoadGeneration && this._currentCharacterId === charId) {
+				this._attachHubRealtime({characterId: charId});
+			}
 		}
 		return true;
 	}
 
 	_createNewCharacter () {
+		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
+		this._detachHubRealtime?.();
 		this._clearLastHpChange();
 		this._currentCharacterId = CryptUtil.uid();
 		this._isLevelUpBannerDismissed = false;
@@ -2116,6 +2167,8 @@ class CharacterSheetPage {
 		charData.id = newId;
 		charData.name = `${charData.name || "Character"} (Copy)`;
 
+		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
+		this._detachHubRealtime?.();
 		this._clearLastHpChange();
 		this._currentCharacterId = newId;
 		this._isLevelUpBannerDismissed = false;
@@ -2127,6 +2180,7 @@ class CharacterSheetPage {
 			this._reconcileClassFeatures();
 			this._renderCharacter();
 			this._selCharacter.value = sourceId;
+			this._attachHubRealtime?.({characterId: sourceId});
 			return;
 		}
 		await this._pLoadCharacters();
@@ -2149,6 +2203,8 @@ class CharacterSheetPage {
 		const persisted = await this._characterRepository.pUpsert({character: charData});
 
 		// Load the new character
+		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
+		this._detachHubRealtime?.();
 		this._clearLastHpChange();
 		this._currentCharacterId = persisted?.id || newId;
 		this._isLevelUpBannerDismissed = false;
@@ -2156,6 +2212,7 @@ class CharacterSheetPage {
 		this._reconcileClassFeatures();
 		await this._pLoadCharacters();
 		this._selCharacter.value = this._currentCharacterId;
+		this._attachHubRealtime?.({characterId: this._currentCharacterId});
 		return true;
 	}
 
@@ -2208,7 +2265,14 @@ class CharacterSheetPage {
 
 		if (!confirm) return;
 
-		await this._characterRepository.pDelete({characterId: this._currentCharacterId});
+		const characterId = this._currentCharacterId;
+		this._detachHubRealtime();
+		try {
+			await this._characterRepository.pDelete({characterId});
+		} catch (error) {
+			if (this._canRestoreHubRealtimeAfterError(error)) this._attachHubRealtime({characterId});
+			throw error;
+		}
 
 		this._createNewCharacter();
 		await this._pLoadCharacters();
@@ -2281,7 +2345,18 @@ class CharacterSheetPage {
 
 		// Execute deletion
 		const selectedIds = new Set(selected.map(c => c.id));
-		await this._characterRepository.pDeleteMany({characterIds: [...selectedIds]});
+		const activeDeletedId = this._currentCharacterId && selectedIds.has(this._currentCharacterId)
+			? this._currentCharacterId
+			: null;
+		if (activeDeletedId) this._detachHubRealtime();
+		try {
+			await this._characterRepository.pDeleteMany({characterIds: [...selectedIds]});
+		} catch (error) {
+			if (activeDeletedId && this._canRestoreHubRealtimeAfterError(error)) {
+				this._attachHubRealtime({characterId: activeDeletedId});
+			}
+			throw error;
+		}
 
 		// If the currently loaded character was deleted, switch to a new blank character
 		if (this._currentCharacterId && selectedIds.has(this._currentCharacterId)) {
@@ -3668,6 +3743,7 @@ class CharacterSheetPage {
 				window.history?.replaceState?.({}, "", url);
 				await this._pLoadCharacters?.();
 				if (this._selCharacter) this._selCharacter.value = persisted.id;
+				this._attachHubRealtime?.({characterId: persisted.id});
 			}
 			if (persisted) {
 				const getClean = data => {

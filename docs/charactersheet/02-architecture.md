@@ -341,8 +341,21 @@ Modules communicate through:
 2. **State Updates**: `this._state.setHp(...)` triggers recalculation
 3. **jQuery Events**: DOM event handlers for user interactions
 4. **Render Callbacks**: `this._page.renderAll()` or specific `render*()` methods
+5. **Campaign Realtime Callbacks**: `CharacterSheetRealtimeCoordinator.on()` delivers connection/cursor
+   metadata, projection invalidations, and semantic-operation lifecycle events for the open canonical campaign
+   character.
+
+The campaign realtime coordinator starts only after authenticated campaign activation and canonical character
+load. It routes the exact `character.operation.*` allowlist through the HTTP repository's save queue and fences
+callbacks on switch, detach, access loss, logout, page hide, and unload. This substrate does not mutate
+`CharacterSheetState`, fetch/replace a projection, render, save, or open a generic conflict modal; operation
+application belongs to the later ADR 0012 live-reconciliation layer.
 
 ## Persistence Layer
+
+Campaign-backed sheets use `HubHttpCharacterRepository`; local sheets retain the local repository below.
+Realtime lifecycle payloads are memory-only callback values and never enter either persistence backend,
+recovery storage, logs, or caches.
 
 ```
 localStorage

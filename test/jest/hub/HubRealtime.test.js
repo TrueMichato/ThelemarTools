@@ -564,6 +564,213 @@ describe("hub realtime", () => {
 			});
 			expect(timers).toHaveLength(0);
 		});
+
+		it("ignores messages and close events from a replaced socket generation", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			class BrowserSocket extends EventEmitter {
+				readyState = 1;
+				sent = [];
+				send (message) { this.sent.push(JSON.parse(message)); }
+				close () { this.readyState = 3; this.emit("close", {code: 1000}); }
+				addEventListener (type, listener) { this.on(type, listener); }
+				removeEventListener (type, listener) { this.off(type, listener); }
+			}
+			const sockets = [];
+			const timers = [];
+			const states = [];
+			const events = [];
+			const client = new HubRealtimeClient({
+				campaignId: "cmp",
+				location: {protocol: "https:", host: "tools.example"},
+				fnCreateSocket: () => {
+					const socket = new BrowserSocket();
+					sockets.push(socket);
+					queueMicrotask(() => socket.emit("open"));
+					return socket;
+				},
+				fnSetTimeout: fn => {
+					timers.push(fn);
+					return timers.length;
+				},
+			});
+			client.on("state", state => states.push(state.state));
+			client.on("event", event => events.push(event.id));
+			await client.pConnect();
+			sockets[0].emit("message", {data: JSON.stringify({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 5},
+				characterRefs: [],
+				events: [],
+			})});
+			sockets[0].emit("close", {code: 1013});
+			timers.shift()();
+			await new Promise(resolve => setImmediate(resolve));
+			expect(sockets).toHaveLength(2);
+			sockets[1].emit("message", {data: JSON.stringify({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 6},
+				characterRefs: [],
+				events: [],
+			})});
+
+			sockets[0].emit("message", {data: JSON.stringify({
+				type: "event",
+				event: {id: "stale", campaignId: "cmp", sequence: 99, type: "roll.logged"},
+			})});
+			sockets[0].emit("close", {code: 1008, reason: "stale access loss"});
+			sockets[1].emit("message", {data: JSON.stringify({
+				type: "event",
+				event: {id: "current", campaignId: "cmp", sequence: 7, type: "roll.logged"},
+			})});
+
+			expect(events).toEqual(["current"]);
+			expect(client._lastSequence).toBe(7);
+			expect(client.getConnectionState().state).toBe("live");
+			expect(states).not.toContain("access_lost");
+			client.close();
+		});
+
+		it("delivers semantic operations even when canonical truth reports a covering watermark", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			const client = new HubRealtimeClient({campaignId: "cmp", location: {protocol: "https:", host: "tools.example"}});
+			const events = [];
+			const cursors = [];
+			client.on("event", event => events.push(event));
+			client.on("cursor", cursor => cursors.push(cursor));
+
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 20},
+				characterRefs: [{id: "c1", revision: 4, projectionRevision: 2, operationWatermark: 19}],
+				events: [{
+					id: "operation-event",
+					campaignId: "cmp",
+					sequence: 19,
+					type: "character.operation.applied",
+				}],
+			});
+
+			expect(events).toEqual([expect.objectContaining({id: "operation-event", sequence: 19})]);
+			expect(cursors[0].characterRefs[0].operationWatermark).toBe(19);
+			expect(client._lastSequence).toBe(20);
+		});
+
+		it("deduplicates a repeated event id even if it arrives with a newer sequence", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			const client = new HubRealtimeClient({campaignId: "cmp", location: {protocol: "https:", host: "tools.example"}});
+			const events = [];
+			client.on("event", event => events.push(event.sequence));
+			client._handleMessage({type: "resync_complete", cursor: {campaignId: "cmp", lastSequence: 3}, characterRefs: [], events: []});
+			client._handleMessage({type: "event", event: {id: "stable-id", sequence: 4, type: "roll.logged"}});
+			client._handleMessage({type: "event", event: {id: "stable-id", sequence: 5, type: "roll.logged"}});
+
+			expect(events).toEqual([4]);
+			expect(client._lastSequence).toBe(5);
+		});
+
+		it("pages a capped replay before advancing to the snapshot cursor", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			class BrowserSocket extends EventEmitter {
+				readyState = 1;
+				sent = [];
+				send (message) { this.sent.push(JSON.parse(message)); }
+				close () { this.readyState = 3; this.emit("close", {code: 1000}); }
+				addEventListener (type, listener) { this.on(type, listener); }
+				removeEventListener (type, listener) { this.off(type, listener); }
+			}
+			const socket = new BrowserSocket();
+			const events = [];
+			const client = new HubRealtimeClient({
+				campaignId: "cmp",
+				location: {protocol: "https:", host: "tools.example"},
+				fnCreateSocket: () => {
+					queueMicrotask(() => socket.emit("open"));
+					return socket;
+				},
+			});
+			client.on("event", event => events.push(event.sequence));
+			await client.pConnect();
+			socket.emit("message", {data: JSON.stringify({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 600},
+				characterRefs: [],
+				events: Array.from({length: 500}, (_, ix) => ({
+					id: `event-${ix + 1}`,
+					sequence: ix + 1,
+					type: "roll.logged",
+				})),
+			})});
+
+			expect(socket.sent.at(-1)).toEqual({type: "resync", afterSequence: 500});
+			expect(client._lastSequence).toBe(500);
+			expect(client.getConnectionState().state).toBe("syncing");
+			socket.emit("message", {data: JSON.stringify({
+				type: "event",
+				event: {id: "event-550", sequence: 550, type: "character.operation.applied"},
+			})});
+			socket.emit("message", {data: JSON.stringify({
+				type: "event",
+				event: {id: "event-601", sequence: 601, type: "roll.logged"},
+			})});
+			socket.emit("message", {data: JSON.stringify({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 600},
+				characterRefs: [],
+				events: Array.from({length: 100}, (_, ix) => ({
+					id: `event-${ix + 501}`,
+					sequence: ix + 501,
+					type: ix === 49 ? "character.operation.applied" : "roll.logged",
+				})),
+			})});
+
+			expect(events).toHaveLength(601);
+			expect(events).toContain(550);
+			expect(events.at(-1)).toBe(601);
+			expect(events.filter(sequence => sequence === 550)).toHaveLength(1);
+			expect(client._lastSequence).toBe(601);
+			expect(client.getConnectionState().state).toBe("live");
+			client.close();
+		});
+
+		it("reconnects when the resync watchdog observes a stalled response", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			class BrowserSocket extends EventEmitter {
+				readyState = 1;
+				send () {}
+				close (code = 1000, reason = "") {
+					this.readyState = 3;
+					this.emit("close", {code, reason});
+				}
+				addEventListener (type, listener) { this.on(type, listener); }
+				removeEventListener (type, listener) { this.off(type, listener); }
+			}
+			const socket = new BrowserSocket();
+			const intervals = [];
+			const reconnects = [];
+			const client = new HubRealtimeClient({
+				campaignId: "cmp",
+				location: {protocol: "https:", host: "tools.example"},
+				fnCreateSocket: () => {
+					queueMicrotask(() => socket.emit("open"));
+					return socket;
+				},
+				fnSetInterval: fn => {
+					intervals.push(fn);
+					return intervals.length;
+				},
+				fnSetTimeout: fn => {
+					reconnects.push(fn);
+					return reconnects.length;
+				},
+			});
+			await client.pConnect();
+			intervals[0]();
+
+			expect(socket.readyState).toBe(3);
+			expect(reconnects).toHaveLength(1);
+			expect(client.getConnectionState().state).toBe("reconnecting");
+			client.close();
+		});
 	});
 
 	it("delivers 26 exact continuation pages once without tripping the burst limit", async () => {

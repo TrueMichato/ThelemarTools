@@ -38,6 +38,11 @@
 | `character.reactivated` | character | all_members | empty | Same scoped import reactivates archived row |
 | `character.patched` | character | actor_and_dm | submitted patches | Private owner/DM state event |
 | `character.projection.invalidated` | character | all_members | `{projectionRevision}` only | Metadata-only ([ADR 0011](adr/0011-authorization-scoped-character-projections.md)). Carries no character field, patch, path, amount, field name or display text — including no name snapshot. Consumers refetch through the scoped HTTP projector |
+| `character.operation.proposed` | semantic operation | explicit proposer+target owner | `{operationId,targetCharacterId,status:"proposed",sourceEntity,effectTemplateId,choice,sourceDisplaySnapshot,targetDisplaySnapshot,effectDisplaySnapshot,expiresAt}` | Stable operation id; DM/co-DM included by policy. Contains no derived low-level operation |
+| `character.operation.applied` | target character | explicit proposer+target owner | `{operation:{operationId,kind,version:1,targetCharacterId,arguments},resultingCharacterRevision}` | `aggregateRevision === resultingCharacterRevision`; direct DM/co-DM application emits only this lifecycle state plus a separate projection invalidation |
+| `character.operation.rejected` | semantic operation | explicit proposer+target owner | `{operationId,targetCharacterId,status:"rejected",reason,sourceDisplaySnapshot,targetDisplaySnapshot,effectDisplaySnapshot}` | Closed uniformly non-enumerating reason in the multi-recipient event |
+| `character.operation.cancelled` | semantic operation | explicit proposer+target owner | `{operationId,targetCharacterId,status:"cancelled",reason,sourceDisplaySnapshot,targetDisplaySnapshot,effectDisplaySnapshot}` | Terminal |
+| `character.operation.expired` | semantic operation | explicit proposer+target owner | `{operationId,targetCharacterId,status:"expired",reason,sourceDisplaySnapshot,targetDisplaySnapshot,effectDisplaySnapshot}` | Terminal |
 | `character.cloned` | character | all_members | source campaign/character ids | New aggregate id |
 | `character.moved_out` | character | all_members in source | target campaign id | Source-campaign notification |
 | `character.moved` | character | all_members in target | source campaign/character ids | Same character id, new campaign |
@@ -78,6 +83,11 @@ The exact applied payload is:
 Actor attribution remains in the already-authorized event envelope. Shared terminal reasons are uniformly
 non-enumerating; recipient-specific diagnostics do not ride a multi-recipient lifecycle event.
 
+There is no `character.operation.accepted` lifecycle event. A distinct target-owner acceptance command emits
+`character.operation.applied`. Operation payloads expose no source character id, canonical field/path,
+effective delta, hidden eligibility/resource truth, or raw actor account id. Event/outbox/idempotent command
+retries preserve `eventId` and `operationId`.
+
 ## Snapshot/replay interaction
 
 Current-state character events at/before `snapshot.lastSequence` may be omitted by the client because the
@@ -95,6 +105,9 @@ reservation and resolution), archived-import reactivation, and a sharing-policy 
 because `xp` is not a catalog field.
 
 Roll history and non-state workflow history are not assumed to be represented by the snapshot.
+Character semantic-operation lifecycle events are delivered even when their sequence is at/before the
+snapshot cursor or an owner/DM character ref's `operationWatermark`. The later live-apply consumer, not the
+transport, decides whether an applied operation is already represented by canonical truth.
 
 Semantic lifecycle events are still delivered when their sequence is at/below `operationWatermark`; the
 watermark says only that owner/DM canonical truth already includes the applied mutation. Clients deduplicate by

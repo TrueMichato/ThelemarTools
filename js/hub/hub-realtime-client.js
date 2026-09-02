@@ -4,6 +4,7 @@ export class HubRealtimeClient {
 		fnCreateSocket = url => new WebSocket(url),
 		location = globalThis.location,
 		fnSetTimeout = (...args) => setTimeout(...args),
+		fnClearTimeout = timer => clearTimeout(timer),
 		fnSetInterval = (...args) => setInterval(...args),
 		fnClearInterval = timer => clearInterval(timer),
 		resyncIntervalMs = 10_000,
@@ -14,12 +15,15 @@ export class HubRealtimeClient {
 		this._fnCreateSocket = fnCreateSocket;
 		this._location = location;
 		this._fnSetTimeout = fnSetTimeout;
+		this._fnClearTimeout = fnClearTimeout;
 		this._fnSetInterval = fnSetInterval;
 		this._fnClearInterval = fnClearInterval;
 		this._resyncIntervalMs = resyncIntervalMs;
 		this._fnOnListenerError = fnOnListenerError;
 		this._socket = null;
+		this._socketGeneration = 0;
 		this._pConnecting = null;
+		this._pendingConnectionReject = null;
 		this._shouldReconnect = false;
 		this._reconnectAttempt = 0;
 		this._reconnectTimer = null;
@@ -30,6 +34,7 @@ export class HubRealtimeClient {
 		this._resyncAccumulatedEvents = [];
 		this._resyncScannedThroughSequence = null;
 		this._resyncStartSequence = null;
+		this._seenEventKeys = new Set();
 		this._listeners = new Map();
 		this._connectionState = {state: "closed"};
 	}
@@ -65,13 +70,29 @@ export class HubRealtimeClient {
 		this._emit("state", this.getConnectionState());
 	}
 
+	_getEventKey (event) {
+		return event.id || `${event.sequence}:${event.type || ""}`;
+	}
+
+	_isEventSeen (event) {
+		return this._seenEventKeys.has(this._getEventKey(event));
+	}
+
+	_rememberEvent (event) {
+		this._seenEventKeys.add(this._getEventKey(event));
+		if (this._seenEventKeys.size <= 2_000) return;
+		this._seenEventKeys.delete(this._seenEventKeys.values().next().value);
+	}
+
 	pConnect () {
 		this._shouldReconnect = true;
 		if (this._pConnecting) return this._pConnecting;
+		const generation = ++this._socketGeneration;
 		this._setConnectionState(this._reconnectAttempt ? "reconnecting" : "connecting", {
 			attempt: this._reconnectAttempt,
 		});
 		this._pConnecting = new Promise((resolve, reject) => {
+			this._pendingConnectionReject = {generation, reject};
 			this._hasBaseline = false;
 			this._bufferedEvents = [];
 			const protocol = this._location.protocol === "https:" ? "wss:" : "ws:";
@@ -82,18 +103,31 @@ export class HubRealtimeClient {
 			const onError = error => reject(error);
 			socket.addEventListener("error", onError, {once: true});
 			socket.addEventListener("open", () => {
+				if (!this._isCurrentSocket({socket, generation})) return;
 				isOpened = true;
 				socket.removeEventListener("error", onError);
 				const isReconnect = this._reconnectAttempt > 0;
-				this.requestResync(this._resyncScannedThroughSequence ?? this._lastSequence);
-				this._armResyncTimer();
+				this.requestResync(
+					this._resyncScannedThroughSequence ?? this._lastSequence,
+					{socket, generation},
+				);
+				this._armResyncTimer({socket, generation});
 				this._setConnectionState("syncing", {isReconnect});
+				if (this._pendingConnectionReject?.generation === generation) this._pendingConnectionReject = null;
 				resolve();
 			}, {once: true});
-			socket.addEventListener("message", event => this._handleMessage(JSON.parse(event.data)));
+			socket.addEventListener("message", event => {
+				if (!this._isCurrentSocket({socket, generation})) return;
+				this._handleMessage(JSON.parse(event.data), {socket, generation});
+			});
 			socket.addEventListener("close", event => {
-				if (!isOpened) reject(new Error(`WebSocket closed before opening.`));
-				this._clearResyncTimer();
+				if (!this._isCurrentSocket({socket, generation})) return;
+				if (!isOpened) {
+					if (this._pendingConnectionReject?.generation === generation) this._pendingConnectionReject = null;
+					reject(new Error(`WebSocket closed before opening.`));
+				}
+				this._socket = null;
+				this._clearResyncTimer({generation});
 				this._emit("close", event);
 				if (event?.code === 1008) {
 					this._shouldReconnect = false;
@@ -103,26 +137,42 @@ export class HubRealtimeClient {
 					});
 					return;
 				}
-				this._scheduleReconnect();
+				this._scheduleReconnect({generation});
 			});
-		}).finally(() => this._pConnecting = null);
+		});
+		const pConnecting = this._pConnecting;
+		void pConnecting.then(
+			() => {
+				if (this._pConnecting === pConnecting) this._pConnecting = null;
+			},
+			() => {
+				if (this._pConnecting === pConnecting) this._pConnecting = null;
+			},
+		);
 		return this._pConnecting;
 	}
 
-	_scheduleReconnect () {
+	_isCurrentSocket ({socket, generation}) {
+		return this._socket === socket && this._socketGeneration === generation;
+	}
+
+	_scheduleReconnect ({generation = this._socketGeneration} = {}) {
 		if (!this._shouldReconnect || this._reconnectTimer) return;
 		const delay = Math.min(10_000, 500 * (2 ** this._reconnectAttempt++));
 		this._setConnectionState("reconnecting", {
 			attempt: this._reconnectAttempt,
 			delay,
 		});
-		this._reconnectTimer = this._fnSetTimeout(() => {
+		const timer = this._fnSetTimeout(() => {
+			if (this._socketGeneration !== generation || this._reconnectTimer?.id !== timer) return;
 			this._reconnectTimer = null;
 			void this.pConnect().catch(() => this._scheduleReconnect());
 		}, delay);
+		this._reconnectTimer = {generation, id: timer};
 	}
 
-	_handleMessage (message) {
+	_handleMessage (message, context = null) {
+		if (context && !this._isCurrentSocket(context)) return;
 		if (message.type === "event") {
 			if (!this._hasBaseline || this._resyncStartSequence != null) {
 				this._bufferedEvents.push(message.event);
@@ -130,6 +180,8 @@ export class HubRealtimeClient {
 			}
 			if (message.event.sequence <= this._lastSequence) return;
 			this._lastSequence = message.event.sequence;
+			if (this._isEventSeen(message.event)) return;
+			this._rememberEvent(message.event);
 			this._emit("event", message.event);
 			return;
 		}
@@ -158,7 +210,6 @@ export class HubRealtimeClient {
 			// refetch through the authorization-scoped HTTP projector.
 			const snapshotSequence = message.cursor?.lastSequence || 0;
 			if (!this._hasBaseline || snapshotSequence >= this._lastSequence) {
-				this._lastSequence = snapshotSequence;
 				this._emit("cursor", {
 					cursor: message.cursor,
 					campaign: message.campaign,
@@ -166,17 +217,14 @@ export class HubRealtimeClient {
 					characterRefs: message.characterRefs || [],
 				});
 			}
-			this._hasBaseline = true;
 			const events = [...this._resyncAccumulatedEvents, ...this._bufferedEvents]
 				.sort((a, b) => a.sequence - b.sequence);
-			this._resyncAccumulatedEvents = [];
-			this._resyncScannedThroughSequence = null;
-			this._resyncStartSequence = null;
 			this._bufferedEvents = [];
-			const seen = new Set();
+			this._lastSequence = Math.max(this._lastSequence, snapshotSequence);
 			for (const event of events) {
-				const key = event.id || `${event.sequence}:${event.type || ""}`;
-				if (seen.has(key) || event.sequence <= previousSequence) continue;
+				if (event.sequence <= previousSequence) continue;
+				this._lastSequence = Math.max(this._lastSequence, event.sequence);
+				if (this._isEventSeen(event)) continue;
 				if (event.sequence <= snapshotSequence && [
 					"character.created",
 					"character.cloned",
@@ -189,17 +237,20 @@ export class HubRealtimeClient {
 					"item.granted",
 					"action.applied",
 				].includes(event.type)) continue;
-				seen.add(key);
-				this._lastSequence = Math.max(this._lastSequence, event.sequence);
+				this._rememberEvent(event);
 				this._emit("event", event);
 			}
+			this._resyncAccumulatedEvents = [];
+			this._resyncScannedThroughSequence = null;
+			this._resyncStartSequence = null;
+			this._hasBaseline = true;
 			this._reconnectAttempt = 0;
 			this._setConnectionState("live");
 			return;
 		}
-		if (message.type === "error" && message.code === "MESSAGE_FAILED" && this._resyncStartSequence != null) {
+		if (message.type === "error" && this._resyncStartSequence != null) {
 			this._emit("error", message);
-			this._socket?.close();
+			(context?.socket || this._socket)?.close(4000, "Replay failed");
 			return;
 		}
 		this._emit(message.type, message);
@@ -209,41 +260,57 @@ export class HubRealtimeClient {
 		this._socket?.send(JSON.stringify({type: "presence", activity, targetId}));
 	}
 
-	requestResync (afterSequence) {
-		if (this._socket?.readyState !== 1) return;
+	requestResync (
+		afterSequence = null,
+		{socket = this._socket, generation = this._socketGeneration} = {},
+	) {
+		if (!this._isCurrentSocket({socket, generation}) || socket?.readyState !== 1) return;
 		const isContinuationOrResume = afterSequence != null;
 		if (!isContinuationOrResume && this._resyncStartSequence != null) return;
 		if (this._resyncStartSequence == null) this._resyncStartSequence = this._lastSequence;
-		this._socket.send(JSON.stringify({
+		socket.send(JSON.stringify({
 			type: "resync",
 			afterSequence: isContinuationOrResume ? afterSequence : this._lastSequence,
 		}));
 	}
 
-	_armResyncTimer () {
-		if (!this._socket || this._resyncTimer != null) return;
-		this._resyncTimer = this._fnSetInterval(() => this.requestResync(), this._resyncIntervalMs);
-		this._resyncTimer?.unref?.();
+	_armResyncTimer ({socket, generation}) {
+		if (!this._isCurrentSocket({socket, generation}) || this._resyncTimer != null) return;
+		const id = this._fnSetInterval(() => {
+			if (!this._isCurrentSocket({socket, generation})) return;
+			if (this._resyncStartSequence != null) {
+				socket.close(4000, "Resync timed out");
+				return;
+			}
+			this.requestResync(null, {socket, generation});
+		}, this._resyncIntervalMs);
+		this._resyncTimer = {generation, id};
+		id?.unref?.();
 	}
 
-	_clearResyncTimer () {
+	_clearResyncTimer ({generation = null} = {}) {
 		if (this._resyncTimer == null) return;
-		this._fnClearInterval(this._resyncTimer);
+		if (generation != null && this._resyncTimer.generation !== generation) return;
+		this._fnClearInterval(this._resyncTimer.id);
 		this._resyncTimer = null;
 	}
 
 	close () {
 		this._shouldReconnect = false;
-		if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
+		this._socketGeneration++;
+		this._pendingConnectionReject?.reject(new Error(`Realtime client closed.`));
+		this._pendingConnectionReject = null;
+		if (this._reconnectTimer) this._fnClearTimeout(this._reconnectTimer.id);
 		this._reconnectTimer = null;
 		this._clearResyncTimer();
-		this._socket?.close();
+		const socket = this._socket;
 		this._socket = null;
 		this._hasBaseline = false;
 		this._bufferedEvents = [];
 		this._resyncAccumulatedEvents = [];
 		this._resyncScannedThroughSequence = null;
 		this._resyncStartSequence = null;
+		socket?.close();
 		this._setConnectionState("closed");
 	}
 }

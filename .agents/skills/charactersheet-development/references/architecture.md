@@ -107,6 +107,12 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   rest preview, activity feed, combat tracker, concentration checks.
 │   Reads from same state, delegates all mutations to existing modules.
 │
+├── CharacterSheetRealtimeCoordinator (charactersheet-realtime.js)
+│   Authenticated campaign-character WebSocket delivery seam. Filters projection
+│   invalidations and character.operation lifecycle events to the open canonical
+│   character, then serializes ephemeral callbacks behind repository saves.
+│   It never mutates CharacterSheetState or fetches/replaces the owner document.
+│
 ├── CharacterSheetSpellPicker (charactersheet-spell-picker.js, ~1,200 lines, all static)
 │   Reusable spell selection UI for Builder, LevelUp, QuickBuild.
 │
@@ -152,6 +158,11 @@ No reactive system — renders are explicit. Related modules re-render together 
 - **Manual re-renders**: Modules call `_renderXxx()` — forgetting is a common source of stale UI bugs
 - **Toast notifications**: `JqueryUtil.doToast({type: "success", content: "..."})` for user feedback (site-wide utility, not jQuery-dependent despite the name)
 - **HTML generation**: `e_({outer: \`<button class="btn">...</button>\`})` for single elements, `ee\`<div>...</div>\`` tagged template for complex HTML. `insertAdjacentHTML()` for appending HTML strings.
+- **Hub realtime callbacks**: `CharacterSheetRealtimeCoordinator.on()` exposes connection, cursor,
+  metadata-only projection invalidation, semantic-operation lifecycle, and delivery-error handoffs. Only a
+  signed-in campaign-backed canonical character attaches. Delivery uses the repository mutation queue and is
+  generation-fenced on switch/detach/revocation/unload; this substrate must not call state load/render/save or
+  a generic conflict modal.
 
 ### Module Init Order
 

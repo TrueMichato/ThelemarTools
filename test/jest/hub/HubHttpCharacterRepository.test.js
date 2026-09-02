@@ -150,6 +150,52 @@ describe("HTTP character repository", () => {
 		await expect(repository.pList()).rejects.toThrow("Sign in to edit campaign characters");
 	});
 
+	it("serializes realtime delivery behind an in-flight save without changing repository state", async () => {
+		let resolvePatch;
+		const pPatch = new Promise(resolve => resolvePatch = resolve);
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({
+				id: "server-1",
+				campaignId: "campaign-1",
+				revision: 3,
+				data: {name: "Mira", hp: {current: 20}},
+			}),
+			pAcquireCharacterLease: async () => ({epoch: 7}),
+			pPatchCharacter: async () => pPatch,
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "server-1"});
+		const pSave = repository.pUpsert({character: {id: "server-1", name: "Mira", hp: {current: 17}}});
+		const delivered = [];
+		const pDelivery = repository.pEnqueueRealtimeDelivery({
+			characterId: "server-1",
+			fnDeliver: () => delivered.push("operation"),
+		});
+		await Promise.resolve();
+		expect(delivered).toEqual([]);
+
+		resolvePatch({
+			character: {
+				id: "server-1",
+				campaignId: "campaign-1",
+				revision: 4,
+				data: {name: "Mira", hp: {current: 17}},
+			},
+		});
+		await pSave;
+		const acceptedAfterSave = structuredClone(repository._accepted.get("server-1"));
+		const leasesAfterSave = structuredClone([...repository._leases]);
+		await pDelivery;
+
+		expect(delivered).toEqual(["operation"]);
+		expect(repository._accepted.get("server-1")).toEqual(acceptedAfterSave);
+		expect([...repository._leases]).toEqual(leasesAfterSave);
+		expect(repository._conflicts.size).toBe(0);
+		expect(repository._failedWrites.size).toBe(0);
+		expect(repository._recoveryVersions.size).toBe(0);
+	});
+
 	it("patches later queued snapshots after the first create returns a canonical id", async () => {
 		const calls = [];
 		const api = {

@@ -27,6 +27,7 @@ flowchart TB
     Board[DM Screen]
     API[HubApiClient]
     CharRepo[Hub HTTP character repository]
+    SheetRT[Character Sheet realtime coordinator]
     DmRepo[Hub HTTP workspace repository]
     Context[Campaign context + brew overlay]
     RT[Realtime client]
@@ -46,6 +47,8 @@ flowchart TB
   HubPage --> API
   Sheet --> CharRepo --> API
   Sheet --> Context --> API
+  Sheet --> SheetRT --> RT
+  SheetRT --> CharRepo
   Board --> DmRepo --> API
   Board --> Context
   RT <-->|WebSocket| Routes
@@ -134,6 +137,17 @@ flowchart LR
 
 Clients use snapshots and sequence-based replay to recover from disconnects. Presence is ephemeral. Roll and
 action history is durable. Visibility is evaluated on the server for both replay and live fanout.
+
+An authenticated campaign-backed Character Sheet attaches a focused realtime coordinator only after its
+canonical character has loaded. Socket-generation fencing makes stale messages, closes, and watchdog timers
+inert. The coordinator routes metadata-only projection invalidations and the frozen
+`character.operation.*` lifecycle allowlist through the HTTP repository's existing mutation queue, so a
+delivery cannot overtake an in-flight save. Character/campaign switch, canonical-id replacement, detach,
+revocation, logout, page hide, and unload all fence the subscription generation.
+
+This delivery layer is intentionally not reconciliation: it does not mutate `CharacterSheetState`, accepted
+bases, revisions, leases, conflicts, or recovery storage, and it does not fetch or replace the owner document.
+The later live-apply layer owns ADR 0012 operation-aware base/live transforms.
 
 ## Campaign content overlay
 
