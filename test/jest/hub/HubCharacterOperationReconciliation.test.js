@@ -403,3 +403,35 @@ describe("Repository resync recovery", () => {
 		expect(repository.isSaveBlocked("character-1")).toBe(false);
 	});
 });
+
+describe("Failed save followed by a live effect", () => {
+	it("keeps applying effects after a mid-session save failure instead of demanding a reload", async () => {
+		const api = makeApi({character: {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData()}});
+		const repository = makeRepository({api});
+		await repository.pGet({characterId: "character-1"});
+
+		// A transient failure leaves a recovered local snapshot behind.
+		api.pPatchCharacter.mockRejectedValueOnce(Object.assign(new Error("offline"), {code: "NETWORK_ERROR"}));
+		await expect(repository.pUpsert({character: {...makeCharacterData({name: "Renamed"}), id: "character-1"}}))
+			.rejects.toMatchObject({code: "NETWORK_ERROR"});
+		expect(repository._failedWrites.has("character-1")).toBe(true);
+
+		let adopted = null;
+		const result = repository.applyRealtimeOperation({
+			characterId: "character-1",
+			operation: makeOperation(),
+			resultingCharacterRevision: 2,
+			eventId: "event-1",
+			sequence: 20,
+			liveData: makeCharacterData({name: "Renamed"}),
+			fnAdoptLive: next => { adopted = next; },
+		});
+
+		// The recovered snapshot's coverage is known, so the effect applies rather than cascading to a resync.
+		expect(result.status).toBe("applied");
+		expect(adopted).toMatchObject({name: "Renamed", hp: {current: 6}});
+		expect(repository.isSaveBlocked("character-1")).toBe(false);
+		// The pending local snapshot is carried forward too, so retrying the save cannot undo the effect.
+		expect(repository._failedWrites.get("character-1").hp.current).toBe(6);
+	});
+});

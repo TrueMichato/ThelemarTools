@@ -895,6 +895,10 @@ export class HubHttpCharacterRepository {
 			.catch(error => {
 				this._failedWrites.set(requestedId, structuredClone(character));
 				this._failedCommands.set(requestedId, {snapshot: submittedSnapshot, commandKeys});
+				// Keep the in-memory coverage of the recovered snapshot in step with the copy written to recovery
+				// storage above. Without this the failed write would carry unknown coverage, and the next campaign
+				// effect would classify it as unprovable and cascade into a resync the history can never satisfy.
+				bookAtCall.failedWrite = this._cloneTrackCoverage(submittedSnapshotCoverage);
 				throw error;
 			})
 			.finally(() => this._pendingWrites--);
