@@ -274,13 +274,83 @@ describe("Hit point maximum document invariant", () => {
 				quantity: 1,
 			});
 			const withItem = state.getUnhalvedMaxHp();
-			state.setHp(withItem, undefined, undefined);
+			state._data.hp.current = withItem;
 
 			state._recalculateMaxHp();
 
 			// The item bonus is part of the applicable maximum, so it must not be capped away.
 			expect(state.getCurrentHp()).toBe(withItem);
 			expect(withItem).toBeGreaterThan(state.getMaxHp());
+		});
+
+		it.each([
+			["setItemEquipped", (state, id) => state.setItemEquipped(id, false)],
+			["setItemAttuned", (state, id) => state.setItemAttuned(id, false)],
+		])("does not collapse a strained character's hit points through %s", (_label, toggle) => {
+			// The real toggle paths carry their own inline cap. Driving `_recalculateMaxHp()`
+			// directly would pass while these still clamped against the halved maximum.
+			const state = strainedTalent();
+			state.addItem({
+				id: "plain-cloak-hb",
+				name: "Plain Cloak",
+				source: "HB",
+				equipped: true,
+				attuned: true,
+				quantity: 1,
+			});
+			expect(state.getCurrentHp()).toBe(60);
+			expect(state.getMaxHp()).toBeLessThan(60);
+
+			toggle(state, "plain-cloak-hb");
+
+			// Toggling an item with no max-HP effect cannot lower the maximum, so it must not
+			// lower current hit points either.
+			expect(state.getCurrentHp()).toBe(60);
+		});
+
+		it("caps to the unhalved maximum when a strained character removes a max-HP item", () => {
+			const state = strainedTalent();
+			state.addItem({
+				id: "amulet-hb",
+				name: "Amulet",
+				source: "HB",
+				effects: [{type: "maxHpBonus", value: 10, name: "Health"}],
+				equipped: true,
+				attuned: true,
+				quantity: 1,
+			});
+			const withItem = state.getUnhalvedMaxHp();
+			state._data.hp.current = withItem;
+
+			state.setItemEquipped("amulet-hb", false);
+
+			// The maximum genuinely dropped by 10, so the cap applies — but against the unhalved
+			// value, not the halved projection.
+			expect(state.getCurrentHp()).toBe(withItem - 10);
+			expect(state.getCurrentHp()).toBe(state.getUnhalvedMaxHp());
+
+			state.removeStrain(4, "body");
+			expect(state.getCurrentHp()).toBe(state.getMaxHp());
+		});
+
+		it("still caps normally when an unstrained character removes a max-HP item", () => {
+			const state = new CharacterSheetState();
+			state.addItem({
+				id: "charm-hb",
+				name: "Healthy Charm",
+				source: "HB",
+				effects: [{type: "maxHpBonus", value: 10, name: "Health"}],
+				equipped: true,
+				attuned: true,
+				quantity: 1,
+			});
+			state.setCurrentHp(state.getMaxHp());
+			const withItem = state.getCurrentHp();
+
+			state.setItemEquipped("charm-hb", false);
+
+			expect(state.getCurrentHp()).toBe(withItem - 10);
+			expect(state.getCurrentHp()).toBe(state.getMaxHp());
 		});
 	});
 });

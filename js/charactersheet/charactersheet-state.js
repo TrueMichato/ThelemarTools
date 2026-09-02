@@ -10096,12 +10096,22 @@ class CharacterSheetState {
 		const calculated = this._calculateMaxHp();
 		// Always update max HP when recalculated (level up, class added/removed, etc.)
 		this._data.hp.max = calculated;
-		// Cap current HP against the UNHALVED applicable maximum. Psionic body strain halves the
-		// maximum transiently and only in the live projection, so capping against the halved value
-		// would permanently delete hit points the character gets back when the strain clears — but
-		// a genuine, permanent reduction (an HP-maximum reduction, a lost level, an unequipped
-		// item) must still be enforced, including while strained. Identical to capping against
-		// `getMaxHp()` whenever no halving is in effect.
+		this._capCurrentHpToUnhalvedMax();
+	}
+
+	/**
+	 * Clamp current hit points to the unhalved applicable maximum.
+	 *
+	 * Every cap site must agree on this ceiling. Psionic body strain halves the maximum
+	 * transiently and only at read time, so capping against `getMaxHp()` permanently deletes hit
+	 * points the character gets back the moment the strain clears — and it fires even when the
+	 * change that triggered the cap did not lower the maximum at all, so toggling an unrelated
+	 * item could collapse a strained character's hit points. A genuine, permanent change still
+	 * caps, because it moves the unhalved maximum itself. Identical to capping against
+	 * `getMaxHp()` whenever no halving is in effect.
+	 * @private
+	 */
+	_capCurrentHpToUnhalvedMax () {
 		const cap = this.getUnhalvedMaxHp();
 		if (this._data.hp.current > cap) {
 			this._data.hp.current = cap;
@@ -33442,7 +33452,7 @@ class CharacterSheetState {
 				const host = this.getIounHostOfStone(itemId);
 				if (host) this.unsetIounStone(host.id, itemId);
 			}
-			this._data.hp.current = Math.min(this._data.hp.current, this.getMaxHp());
+			this._capCurrentHpToUnhalvedMax();
 		}
 	}
 
@@ -33514,7 +33524,7 @@ class CharacterSheetState {
 				this._removeItemProficiencies(itemId);
 				this._unregisterItemEffects(itemId);
 			}
-			this._data.hp.current = Math.min(this._data.hp.current, this.getMaxHp());
+			this._capCurrentHpToUnhalvedMax();
 			// Bonding or unbonding a stone can start or end a host's attunement waiver, and an
 			// unbonded stone can no longer occupy a setting.
 			if (CharacterSheetState.isIounStone(item.item || item)) {
