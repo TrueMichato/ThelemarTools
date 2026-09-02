@@ -917,6 +917,49 @@ See [Contributing Guide](./12-contributing-guide.md) for:
 
 ## UX Behaviours Worth Knowing
 
+### The Stored Hit Point Maximum Is a Cache, Not the Displayed Maximum
+
+`_data.hp.max` caches `_calculateMaxHp()` — class hit dice, CON, custom modifiers, active-state
+`hpMaxIncrease` (Aid), Beastheart Beast Vitality, minus `maxHpReduction`. It is **not** the number on
+screen. `getMaxHp()` layers two further things on top and never writes them back:
+
+- item `maxHpBonus` / `maxHpPerLevel` effects, which are deliberately evaluated live by their consumers;
+- psionic body-strain halving, which can drop the effective maximum *below* current hit points.
+
+Consequences worth knowing:
+
+- **A stored maximum of zero used to be permanent.** `getMaxHp()` falls back to a calculated value whenever
+  the stored one is non-positive, so the sheet looked healthy while the saved document claimed zero, and the
+  refresh in `_recalculateCustomModifiers()` was itself gated on `hp.max > 0`. `_migrateHpMax()` now repairs
+  it at the end of the load — writing the cache directly, never through `_recalculateMaxHp()`, so a
+  strain-halved character whose current total legitimately exceeds its effective maximum keeps those hit
+  points. This mattered beyond the sheet: the Campaign Hub clamps authoritative healing to the document's
+  maximum, so a heal against such a save drove the character to 0 hit points.
+- **`toJson()` also emits `hp.effectiveMax`** — the applicable maximum, straight from `getMaxHp()`. It is
+  serialization-only and is stripped on load, so it never becomes an explicitly-set maximum (which would
+  double-count item bonuses on the next load). See [ADR 0012](../hub/adr/0012-idempotent-semantic-character-operations.md).
+- **An explicitly-set maximum does not survive a reload or an HP-reduction change.** `setMaxHp(80)` followed
+  by `setMaxHpReduction(5)` stores `calculated − 5`, not `75`, and `loadFromJson()` recalculates a stored
+  maximum outright. This is long-standing behaviour, unchanged by the repair above, and is a separate fix:
+  distinguishing "user override" from "cache" needs a stored override flag.
+- **Loading can shave current HP when the maximum comes from a class feature.** `applyClassFeatureEffects()`
+  clears feature-minted modifiers before re-minting them, and `_recalculateCustomModifiers()` runs inside
+  that window; `_recalculateMaxHp()` caps current HP against the momentarily understated maximum, and the
+  maximum recovers afterwards while the lost hit points do not. A Draconic Sorcerer 5 saved at 37/37 loads
+  at 32/37. Long-standing and out of scope here — it is why `_migrateHpMax()` runs at the *end* of the load
+  and writes `hp.max` directly instead of calling `_recalculateMaxHp()`. A real fix needs the current-HP cap
+  suppressed while a rebuild is in flight.
+- **Psionic body strain no longer eats hit points.** Every current-HP cap site goes through
+  `_capCurrentHpToUnhalvedMax()`, which clamps against the *unhalved* applicable maximum
+  (`getUnhalvedMaxHp()` — base plus item max-HP effects) rather than the strain-halved projection, because
+  the halving is transient and layered on live in `getMaxHp()`. A strained Talent above the halved maximum
+  used to drop to it on every load, reconcile, Hub adoption, or item equip/attune toggle — even toggling an
+  item with no HP effect at all — and the loss was then saved canonically. A genuine, permanent reduction —
+  an HP-maximum reduction, a lost level, an unequipped max-HP item — is still enforced immediately,
+  including while strained, so nothing lingers above the maximum waiting to be collapsed by a later ordinary
+  heal. Where no halving applies the cap is exactly the previous one. Current-above-effective remains a
+  supported state, which is also why the semantic heal operation is monotonic.
+
 ### Conditional Modifier Picker is Opt-In Per Roll
 
 Deliberate design: conditional advantage/disadvantage/bonus modifiers (e.g. Dauntless Heritage "against being frightened") do **not** auto-apply. They surface as a pre-roll picker so the player decides per roll whether the condition is actually met. Players who find the prompt repetitive can toggle **"Skip conditional prompts"** in the dice settings dropdown (persists via `settings.skipConditionalPrompt`); with the toggle on, conditionals are simply ignored — there is no "always apply" mode by design (it would re-introduce the original bug class).

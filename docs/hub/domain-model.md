@@ -66,6 +66,12 @@ Canonical data remains one JSONB document. `revision` orders accepted state; `le
 Character inventory/currency currently live inside `data`, not `inventory_entries`. The relational
 `character_id` inventory path is schema groundwork and must not be documented as an active dual-write model.
 
+`data.hp` carries two maxima with different roles. `hp.max` is the Character Sheet's cached base maximum and
+is a round-trip input. `hp.effectiveMax` is persisted authority metadata: the applicable maximum the sheet
+shows the player, materialised deterministically by `toJson()` from `getMaxHp()` and stripped again on load,
+so it is never a calculation input. Semantic operations clamp against it (see ADR 0012) and carry it through
+unchanged; the server never derives or recomputes it.
+
 ### DM workspace
 
 One canonical Board JSONB document per DM membership. Membership id, not merely campaign id, is the privacy
@@ -83,6 +89,8 @@ proposal additionally pins source character/entity/template/choice and requires 
 acceptance. Application commits operation status, target revision, audit, lifecycle event, projection
 invalidation, watermark, outbox, and persistent command result in one transaction. Source and target lock in
 stable character-id order; supported initial peer templates have no source reservation/mutation.
+A target document that cannot supply a positive hit-point maximum fails the whole transaction with
+`HP_MAX_UNAVAILABLE` rather than clamping a heal to zero.
 
 ### Transfer
 

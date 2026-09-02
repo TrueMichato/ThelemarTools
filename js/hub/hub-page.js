@@ -61,6 +61,7 @@ function getErrorMessage (error) {
 		case "TRANSFER_EMPTY": return "Choose at least one item or enter a positive currency amount before sending a transfer.";
 		case "TRANSFER_NOT_FOUND": return "That transfer is no longer waiting. Reload the campaign inbox to see its latest status.";
 		case "RESOURCE_INSUFFICIENT": return "The character no longer has enough of that resource. Nothing was applied. Reload the character and try again.";
+		case "HP_MAX_UNAVAILABLE": return "This character's hit point maximum could not be read, so nothing was applied. Open it in the character sheet once to refresh its totals, then try again.";
 		case "ACTION_NOT_FOUND": return "That effect request is no longer waiting. Reload the campaign inbox to see its latest status.";
 		case "REVISION_CONFLICT": return "This data changed on another device. Your changes were not discarded. Reload and use the recovery choice shown before editing again.";
 		case "LEASE_HELD": return "This character or workspace is being edited on another device. Open it read-only or explicitly take over editing there.";

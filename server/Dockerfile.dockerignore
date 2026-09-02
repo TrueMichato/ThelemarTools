@@ -10,6 +10,7 @@ server/**/.env*
 !js
 !js/hub
 !js/hub/hub-json-patch.js
+!js/hub/hub-semantic-hp.js
 !js/parser.js
 !js/utils.js
 !js/charactersheet

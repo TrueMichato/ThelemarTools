@@ -142,6 +142,29 @@ describe("authorization-scoped character projections", () => {
 			expect(JSON.stringify(data)).not.toContain("30");
 		});
 
+		it("carries the applicable maximum only alongside an authorized base maximum", () => {
+			const shared = computePeerProfile({
+				character: getCharacter({data: getCharacterData({hp: {current: 30, max: 44, temp: 5, effectiveMax: 54}})}),
+			});
+			expect(shared.data.hp).toEqual({current: 30, max: 44, temp: 5, effectiveMax: 54});
+
+			// A policy that withholds the maximum must not leak it back through the derived value.
+			const replaced = computePeerProfile({
+				character: getCharacter({
+					data: getCharacterData({hp: {current: 30, max: 44, temp: 5, effectiveMax: 54}}),
+					projectionPolicy: {version: 1, preset: "table", overrides: {hp: {mode: "replace", value: {state: "healthy"}}}},
+				}),
+			});
+			expect(replaced.data.hp).toEqual({state: "healthy"});
+			expect(JSON.stringify(replaced.data)).not.toContain("54");
+
+			// A document that carries only a derived maximum exposes neither.
+			const orphaned = computePeerProfile({
+				character: getCharacter({data: getCharacterData({hp: {current: 30, effectiveMax: 54}})}),
+			});
+			expect(orphaned.data.hp?.effectiveMax).toBeUndefined();
+		});
+
 		it("rejects invalid presets, fields, modes, and replacement values", () => {
 			const invalid = [
 				{version: 2, preset: "table", overrides: {}},

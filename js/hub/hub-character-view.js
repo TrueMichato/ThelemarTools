@@ -83,7 +83,7 @@ export function getProjectionView (projection) {
 			.filter(cls => cls?.name)
 			.map(cls => ({name: cls.name, level: Number(cls.level)})),
 		hp: data.hp && typeof data.hp === "object"
-			? {current: Number(data.hp.current), max: Number(data.hp.max)}
+			? {current: Number(data.hp.current), max: getViewMaxHp(data.hp)}
 			: null,
 		ac: getAcValue(data.ac),
 	};
@@ -96,9 +96,20 @@ function getPeerView (projection) {
 		isTruth: false,
 		name: typeof data.identity?.name === "string" ? data.identity.name : null,
 		classes: (Array.isArray(data.classes) ? data.classes : []).map(cls => ({name: cls.name, level: Number(cls.level)})),
-		hp: data.hp ? {current: Number(data.hp.current), max: Number(data.hp.max), state: data.hp.state} : null,
+		hp: data.hp ? {current: Number(data.hp.current), max: getViewMaxHp(data.hp), state: data.hp.state} : null,
 		ac: getAcValue(data.ac),
 	};
+}
+
+/**
+ * The maximum to show a reader: the applicable maximum when the document carries one, else the
+ * stored base maximum. Prevents a document whose base maximum was never recalculated from being
+ * rendered as "HP 25/0", and shows item and strain adjustments the base value omits.
+ */
+function getViewMaxHp (hp) {
+	const effective = Number(hp?.effectiveMax);
+	if (Number.isFinite(effective) && effective > 0) return effective;
+	return Number(hp?.max);
 }
 
 function getAcValue (ac) {

@@ -19,6 +19,24 @@ describe("structured effects", () => {
 		expect(healed.hp.current).toBe(20);
 	});
 
+	it("refuses to heal a character with no usable maximum instead of zeroing it", () => {
+		expect(() => applyStructuredEffect({
+			data: {hp: {current: 25, max: 0, temp: 0}},
+			effect: {type: "healing", amount: 10},
+		})).toThrow(expect.objectContaining({code: "HP_MAX_UNAVAILABLE"}));
+	});
+
+	it("clamps healing to the applicable maximum and never lowers hit points", () => {
+		expect(applyStructuredEffect({
+			data: {hp: {current: 10, max: 44, temp: 0, effectiveMax: 54}},
+			effect: {type: "healing", amount: 100},
+		}).hp.current).toBe(54);
+		expect(applyStructuredEffect({
+			data: {hp: {current: 30, max: 40, temp: 0, effectiveMax: 20}},
+			effect: {type: "healing", amount: 5},
+		}).hp.current).toBe(30);
+	});
+
 	it("adds conditions idempotently and spends slots", () => {
 		let data = applyStructuredEffect({data: {conditions: []}, effect: {type: "condition_add", condition: "Prone"}});
 		data = applyStructuredEffect({data, effect: {type: "condition_add", condition: "prone"}});
@@ -84,6 +102,65 @@ describe("semantic operations", () => {
 			data: {spellcasting: {spellSlots: {1: {current: 0, max: 1}}}},
 			operation: getOperation("spell_slot.spend", {level: 1, amount: 1}),
 		})).toThrow();
+	});
+
+	it("clamps a heal to the applicable maximum, not the stored base maximum", () => {
+		// `hp.max` is the sheet's base cache; item max-HP effects and strain live only in
+		// `effectiveMax`. Clamping to the base would silently under-apply the heal.
+		const data = applySemanticOperation({
+			data: {hp: {current: 10, max: 44, temp: 0, effectiveMax: 54}},
+			operation: getOperation("hp.heal", {amount: 100}),
+		});
+
+		expect(data.hp.current).toBe(54);
+	});
+
+	it("refuses to heal a character whose document has no usable maximum", () => {
+		// The regression: a save written before the maximum was recalculated serialized
+		// `max: 0`, and `Math.min(0, ...)` turned a heal into "set hit points to zero".
+		const original = {hp: {current: 25, max: 0, temp: 0}};
+
+		expect(() => applySemanticOperation({
+			data: original,
+			operation: getOperation("hp.heal", {amount: 10}),
+		})).toThrow(expect.objectContaining({code: "HP_MAX_UNAVAILABLE", status: 409}));
+		expect(original).toEqual({hp: {current: 25, max: 0, temp: 0}});
+	});
+
+	it("never lowers hit points when the current total exceeds the applicable maximum", () => {
+		const data = applySemanticOperation({
+			data: {hp: {current: 30, max: 40, temp: 0, effectiveMax: 20}},
+			operation: getOperation("hp.heal", {amount: 5}),
+		});
+
+		expect(data.hp.current).toBe(30);
+	});
+
+	it("changes only current hit points when the maximum inputs are unchanged", () => {
+		const original = {hp: {current: 10, max: 44, temp: 3, effectiveMax: 54}};
+
+		const data = applySemanticOperation({data: original, operation: getOperation("hp.heal", {amount: 6})});
+
+		expect(data.hp).toEqual({...original.hp, current: 16});
+	});
+
+	it("carries effectiveMax through every operation without recomputing it", () => {
+		// A stale-looking value must survive byte-for-byte: the applicator is not allowed to
+		// derive it, so no operation may add, drop, or "correct" it.
+		const hp = {current: 10, max: 44, temp: 4, effectiveMax: 54};
+		let data = {hp, conditions: [], spellcasting: {spellSlots: {1: {current: 1, max: 2}}}};
+		for (const operation of [
+			getOperation("hp.damage", {amount: 6}),
+			getOperation("hp.heal", {amount: 3}),
+			getOperation("condition.add", {condition: {name: "Prone", source: "PHB"}}),
+			getOperation("condition.remove", {condition: {name: "Prone", source: "PHB"}}),
+			getOperation("spell_slot.spend", {level: 1, amount: 1}),
+			getOperation("spell_slot.restore", {level: 1, amount: 1}),
+		]) {
+			data = applySemanticOperation({data, operation});
+			expect(data.hp.effectiveMax).toBe(54);
+			expect(data.hp.max).toBe(44);
+		}
 	});
 
 	it("matches legacy source-less conditions against their XPHB identity", () => {

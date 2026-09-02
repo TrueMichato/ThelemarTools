@@ -442,9 +442,14 @@ the `cbClose` composition.
 - **Missing field handling in load**: Deep merge with defaults ensures all nested objects exist
 
 ### State Serialization
-- `toJson()`: Deep copy of `_data` via `MiscUtil.copyFast()`
+- `toJson()`: Deep copy of `_data` via `MiscUtil.copyFast()`, **plus** the one derived field
+  `hp.effectiveMax` (= `getMaxHp()`), materialised so a consumer reading the document alone knows the
+  applicable maximum. `loadFromJson()` strips it, so it is never a calculation input — writing it back into
+  `hp.max` would double-count item `maxHpBonus` effects on the next load.
 - `loadFromJson(json)`: Deep merge with defaults + migration steps + effect re-application
-- Migration handles: legacy features, combat traditions, custom ability effects, unarmed strike
+- Migration handles: legacy features, combat traditions, custom ability effects, unarmed strike,
+  and a non-positive stored `hp.max` (`_migrateHpMax`, which must run last so every input to
+  `_calculateMaxHp()` is already restored)
 
 ## Key Integration Points
 

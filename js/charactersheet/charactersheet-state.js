@@ -5310,6 +5310,18 @@ class CharacterSheetState {
 	toJson () {
 		this._ensureBattleMasterSuperiorityDice();
 		const out = MiscUtil.copyFast(this._data);
+		// Materialise the APPLICABLE maximum alongside the base cache in `hp.max`.
+		//
+		// `hp.max` is the cached `_calculateMaxHp()` base; it deliberately excludes the
+		// contributions that `getMaxHp()` layers on live — item `maxHpBonus`/`maxHpPerLevel`
+		// effects and psionic body-strain halving. A consumer that reads the document alone
+		// therefore cannot know the maximum the player actually sees, and the Campaign Hub's
+		// authoritative `hp.heal` needs exactly that number to clamp against.
+		//
+		// This is a one-way projection of an already-derived value: `loadFromJson()` strips it
+		// so it can never be mistaken for an explicitly-set maximum (which `getMaxHp()` would
+		// then add item bonuses to a second time) and can never carry staleness forward.
+		out.hp = {...out.hp, effectiveMax: this.getMaxHp()};
 		if (this._campaignSettingsOverlay && this._campaignSettingsBase) {
 			out.settings ||= {};
 			for (const key of Object.keys(this._campaignSettingsOverlay)) {
@@ -5361,6 +5373,10 @@ class CharacterSheetState {
 		this._data.abilities = {...this._getDefaultState().abilities, ...this._data.abilities};
 		this._data.abilityBonuses = {...this._getDefaultState().abilityBonuses, ...this._data.abilityBonuses};
 		this._data.hp = {...this._getDefaultState().hp, ...this._data.hp};
+		// `hp.effectiveMax` is a serialization-only projection of `getMaxHp()` (see toJson).
+		// Strip it on the way in: keeping it would let a stale derived number outlive the state
+		// it was derived from, and it must never be treated as a stored maximum.
+		delete this._data.hp.effectiveMax;
 		this._data.deathSaves = {...this._getDefaultState().deathSaves, ...this._data.deathSaves};
 		this._data.speed = {...this._getDefaultState().speed, ...this._data.speed};
 		this._data.senses = {...this._getDefaultState().senses, ...this._data.senses};
@@ -5772,6 +5788,46 @@ class CharacterSheetState {
 		// explicit `weapon:true` flag) both categorise as weapons and generate an attack.
 		// Idempotent; only ever sets a missing/false flag to true.
 		this._migrateInventoryItemWeaponFlag();
+
+		// Repair a stored hit-point maximum of zero. Runs LAST so every input to
+		// `_calculateMaxHp()` (classes, level history, custom modifiers, active states,
+		// equipment) has already been restored and migrated.
+		this._migrateHpMax();
+	}
+
+	/**
+	 * Repair a non-positive stored hit-point maximum.
+	 *
+	 * `_data.hp.max` caches `_calculateMaxHp()`, but it defaults to 0 and nothing in the load path
+	 * ever wrote it, so a save produced before the maximum was first recalculated — or one written
+	 * in an older format that omitted `hp.max` entirely — keeps `max: 0` forever. The cache is
+	 * self-healing only while it is ALREADY positive: `_recalculateCustomModifiers()` refreshes it
+	 * behind an `hp.max > 0` guard, so zero is sticky.
+	 *
+	 * The sheet hides the damage, because `getMaxHp()` falls back to `_calculateMaxHp()` whenever
+	 * the stored value is non-positive — the character displays a healthy maximum while the
+	 * serialized document claims zero. Any consumer that trusts the document then reads 0; the
+	 * Campaign Hub's authoritative `hp.heal` clamps with `Math.min(hp.max, ...)`, so healing such a
+	 * character would drive it to 0 hit points.
+	 *
+	 * Must run at the very END of the load, after class-feature modifiers such as Draconic
+	 * Resilience have been re-minted, so the repaired value is the complete one.
+	 *
+	 * Repairs the cache directly rather than through `_recalculateMaxHp()`, which also caps current
+	 * hit points against the effective maximum. Current-above-effective is a legitimate, supported
+	 * state — psionic body strain halves the maximum without touching the current total, and the
+	 * semantic heal operation is monotonic precisely so it cannot undo that — so clamping here
+	 * would permanently delete hit points merely on open-and-save.
+	 *
+	 * Only ever fills a missing/zero/non-finite maximum, and only once class levels exist, so a
+	 * blank character stays blank and an explicitly-set maximum is never overwritten.
+	 * @private
+	 */
+	_migrateHpMax () {
+		const stored = Number(this._data.hp?.max);
+		if (Number.isFinite(stored) && stored > 0) return;
+		if (!this.getTotalLevel()) return;
+		this._data.hp.max = this._calculateMaxHp();
 	}
 
 	/**
@@ -9741,7 +9797,16 @@ class CharacterSheetState {
 		}
 	}
 
-	getMaxHp () {
+	/**
+	 * The applicable maximum BEFORE psionic body-strain halving: the stored base (or the
+	 * calculated fallback) plus live item max-HP effects.
+	 *
+	 * Exists so the current-HP cap can distinguish a *permanent* maximum change from the
+	 * transient halving that strain layers on in {@link getMaxHp}. Capping against the halved
+	 * projection would delete hit points the character gets back the moment the strain clears.
+	 * @returns {number}
+	 */
+	getUnhalvedMaxHp () {
 		const base = this._data.hp.max > 0 ? this._data.hp.max : this._calculateMaxHp();
 		let itemBonus = 0;
 		for (const item of this.getItems()) {
@@ -9751,7 +9816,11 @@ class CharacterSheetState {
 				if (effect?.type === "maxHpPerLevel") itemBonus += (Number(effect.value) || 0) * (this.getTotalLevel() || 1);
 			}
 		}
-		const total = Math.max(1, base + itemBonus);
+		return Math.max(1, base + itemBonus);
+	}
+
+	getMaxHp () {
+		const total = this.getUnhalvedMaxHp();
 		// Psionic body strain (Talent, 7+ body strain) halves the hit point maximum.
 		if (this._isStrainHalvingMaxHp()) return Math.max(1, Math.floor(total / 2));
 		return total;
@@ -10027,10 +10096,25 @@ class CharacterSheetState {
 		const calculated = this._calculateMaxHp();
 		// Always update max HP when recalculated (level up, class added/removed, etc.)
 		this._data.hp.max = calculated;
-		// If current HP exceeds max, cap it
-		const effectiveMax = this.getMaxHp();
-		if (this._data.hp.current > effectiveMax) {
-			this._data.hp.current = effectiveMax;
+		this._capCurrentHpToUnhalvedMax();
+	}
+
+	/**
+	 * Clamp current hit points to the unhalved applicable maximum.
+	 *
+	 * Every cap site must agree on this ceiling. Psionic body strain halves the maximum
+	 * transiently and only at read time, so capping against `getMaxHp()` permanently deletes hit
+	 * points the character gets back the moment the strain clears — and it fires even when the
+	 * change that triggered the cap did not lower the maximum at all, so toggling an unrelated
+	 * item could collapse a strained character's hit points. A genuine, permanent change still
+	 * caps, because it moves the unhalved maximum itself. Identical to capping against
+	 * `getMaxHp()` whenever no halving is in effect.
+	 * @private
+	 */
+	_capCurrentHpToUnhalvedMax () {
+		const cap = this.getUnhalvedMaxHp();
+		if (this._data.hp.current > cap) {
+			this._data.hp.current = cap;
 		}
 	}
 
@@ -33368,7 +33452,7 @@ class CharacterSheetState {
 				const host = this.getIounHostOfStone(itemId);
 				if (host) this.unsetIounStone(host.id, itemId);
 			}
-			this._data.hp.current = Math.min(this._data.hp.current, this.getMaxHp());
+			this._capCurrentHpToUnhalvedMax();
 		}
 	}
 
@@ -33440,7 +33524,7 @@ class CharacterSheetState {
 				this._removeItemProficiencies(itemId);
 				this._unregisterItemEffects(itemId);
 			}
-			this._data.hp.current = Math.min(this._data.hp.current, this.getMaxHp());
+			this._capCurrentHpToUnhalvedMax();
 			// Bonding or unbonding a stone can start or end a host's attunement waiver, and an
 			// unbonded stone can no longer occupy a setting.
 			if (CharacterSheetState.isIounStone(item.item || item)) {
@@ -53100,7 +53184,12 @@ class CharacterSheetState {
 		cm.abilityScoreMaxIncrease = nextAbilityScoreMaxIncrease;
 		cm.abilityScoreMaxSet = nextAbilityScoreMaxSet;
 
-		// Recalculate max HP if it was previously cached (HP modifiers may have changed)
+		// Recalculate max HP if it was previously cached (HP modifiers may have changed).
+		// Deliberately still gated on a positive cache: this runs mid-rebuild inside
+		// `_clearClassFeatureEffects()`, where feature-minted HP modifiers are momentarily
+		// absent, and `_recalculateMaxHp()` caps current HP against the understated maximum it
+		// computes there. A zero cache is repaired by `_migrateHpMax()` at the END of the load
+		// instead, once every contribution is back.
 		if (this._data.hp.max > 0) {
 			this._recalculateMaxHp();
 		}
