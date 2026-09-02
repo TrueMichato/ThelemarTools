@@ -31,7 +31,14 @@ function getSnapshotName (snapshot) {
  * enriched with a name snapshot — the name is exactly the kind of value a sharing policy
  * may be hiding.
  */
-const UNENRICHED_EVENT_TYPES = new Set(["character.projection.invalidated"]);
+const UNENRICHED_EVENT_TYPES = new Set([
+	"character.projection.invalidated",
+	"character.operation.proposed",
+	"character.operation.applied",
+	"character.operation.rejected",
+	"character.operation.cancelled",
+	"character.operation.expired",
+]);
 
 /**
  * Payload keys that carry a canonical character name or an owner association. A durable

@@ -63,7 +63,7 @@ describe("campaign hub pages", () => {
 			"campaign-transfer-form-status",
 		]) expect(campaignHtml).toContain(`id="${id}"`);
 		expect(campaignHtml).toContain("aria-live=\"polite\"");
-		expect(campaignHtml).toContain("data-pending-label=\"Sending...\"");
+		expect(campaignHtml).toContain("data-pending-label=\"Applying...\"");
 	});
 
 	it("keeps loaded campaign data visible while offline and requires a refresh after reconnecting", () => {

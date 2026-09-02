@@ -28,7 +28,7 @@ import crypto from "node:crypto";
 const {normalizeIP} = rateLimit;
 const SESSION_COOKIE = "__Host-hub_session";
 const OAUTH_COOKIE = "__Host-hub_oauth";
-const HUB_PROTOCOL_VERSION = "2";
+const HUB_PROTOCOL_VERSION = "3";
 const DEFAULT_DM_WORKSPACE = {
 	mv: 0,
 	w: 3,
@@ -304,6 +304,16 @@ export async function createHubApp ({
 				query: request.query || {},
 				body,
 			})),
+		};
+	};
+	const getSemanticCommand = request => {
+		const idempotencyKey = getIdempotencyKey(request);
+		if (idempotencyKey.key !== request.body.commandId) {
+			throw new HubStoreError("IDEMPOTENCY_KEY_MISMATCH", `Command ID must match the idempotency key.`);
+		}
+		return {
+			commandId: request.body.commandId,
+			requestHash: idempotencyKey.requestHash,
 		};
 	};
 
@@ -819,7 +829,7 @@ export async function createHubApp ({
 	}));
 
 	app.get("/api/campaigns/:campaignId/actions", {
-		preHandler: requireAuth,
+		preHandler: requireProtocolVersion,
 	}, async request => ({
 		actions: await store.pListPendingActions({
 			accountId: request.hubAuth.account.id,
@@ -832,26 +842,80 @@ export async function createHubApp ({
 		schema: {
 			body: {
 				type: "object",
-				required: ["targetCharacterId", "effect"],
 				additionalProperties: false,
 				properties: {
+					commandId: {type: "string", format: "uuid"},
 					targetCharacterId: {type: "string", format: "uuid"},
-					effect: {
+					operation: {
 						type: "object",
-						required: ["type"],
-						additionalProperties: true,
-						properties: {type: {type: "string"}},
+						required: ["kind", "version", "arguments"],
+						additionalProperties: false,
+						properties: {
+							kind: {type: "string", enum: ["hp.damage", "hp.heal", "condition.add", "condition.remove", "spell_slot.spend", "spell_slot.restore"]},
+							version: {type: "integer", const: 1},
+							arguments: {
+								type: "object",
+								additionalProperties: false,
+								properties: {
+									amount: {type: "number", exclusiveMinimum: 0},
+									condition: {
+										type: "object",
+										required: ["name", "source"],
+										additionalProperties: false,
+										properties: {
+											name: {type: "string", minLength: 1, maxLength: 100},
+											source: {type: "string", minLength: 1, maxLength: 20},
+										},
+									},
+									level: {type: "integer", minimum: 1, maximum: 9},
+								},
+							},
+						},
 					},
+					sourceCharacterId: {type: "string", format: "uuid"},
+					sourceEntity: {
+						type: "object",
+						required: ["type", "uid", "version"],
+						additionalProperties: false,
+						properties: {
+							type: {type: "string", enum: ["spell", "ability"]},
+							uid: {type: "string", minLength: 1, maxLength: 200},
+							version: {type: "string", minLength: 1, maxLength: 80},
+						},
+					},
+					effectTemplateId: {type: "string", minLength: 1, maxLength: 100},
+					choice: {
+						type: "object",
+						additionalProperties: false,
+						maxProperties: 10,
+						properties: {
+							amount: {type: "integer", minimum: 1, maximum: 10},
+						},
+					},
+					targetRef: {type: "string", format: "uuid"},
 				},
+				oneOf: [
+					{required: ["commandId", "targetCharacterId", "operation"]},
+					{required: ["commandId", "sourceCharacterId", "sourceEntity", "effectTemplateId", "choice", "targetRef"]},
+				],
 			},
 		},
 	}, async (request, reply) => {
+		const command = getSemanticCommand(request);
 		const created = await store.pCreateStructuredAction({
 			accountId: request.hubAuth.account.id,
+			sessionId: request.hubAuth.session.id,
 			campaignId: request.params.campaignId,
 			targetCharacterId: request.body.targetCharacterId,
-			effect: request.body.effect,
-			idempotencyKey: getIdempotencyKey(request),
+			operation: request.body.operation,
+			sourceCharacterId: request.body.sourceCharacterId,
+			sourceEntity: request.body.sourceEntity,
+			effectTemplateId: request.body.effectTemplateId,
+			choice: request.body.choice,
+			targetRef: request.body.targetRef,
+			commandId: command.commandId,
+			requestHash: command.requestHash,
+			idempotencyKey: {key: command.commandId, requestHash: command.requestHash},
 		});
 		return reply.code(201).send(created);
 	});
@@ -861,18 +925,26 @@ export async function createHubApp ({
 		schema: {
 			body: {
 				type: "object",
-				required: ["decision"],
+				required: ["commandId", "decision"],
 				additionalProperties: false,
-				properties: {decision: {type: "string", enum: ["accept", "reject"]}},
+				properties: {
+					commandId: {type: "string", format: "uuid"},
+					decision: {type: "string", enum: ["accept", "reject", "cancel"]},
+				},
 			},
 		},
-	}, async request => store.pResolveStructuredAction({
-		accountId: request.hubAuth.account.id,
-		campaignId: request.params.campaignId,
-		actionId: request.params.actionId,
-		decision: request.body.decision,
-		idempotencyKey: getIdempotencyKey(request),
-	}));
+	}, async request => {
+		const command = getSemanticCommand(request);
+		return store.pResolveStructuredAction({
+			accountId: request.hubAuth.account.id,
+			sessionId: request.hubAuth.session.id,
+			campaignId: request.params.campaignId,
+			actionId: request.params.actionId,
+			decision: request.body.decision,
+			...command,
+			idempotencyKey: {key: command.commandId, requestHash: command.requestHash},
+		});
+	});
 
 	app.post("/api/campaigns/:campaignId/characters/:characterId/xp-grants", {
 		preHandler: [requireMutationSecurity, requireCampaignRole(["dm", "co_dm"])],

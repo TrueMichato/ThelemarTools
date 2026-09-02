@@ -40,12 +40,12 @@ describe("Phase 4 actions, grants, and transfers", () => {
 	}
 
 	function headers (session, key = `k-${++ix}`) {
-		return {cookie: session.cookie, origin: ORIGIN, "x-csrf-token": session.csrfToken, "x-hub-protocol-version": "2", "idempotency-key": key};
+		return {cookie: session.cookie, origin: ORIGIN, "x-csrf-token": session.csrfToken, 		"x-hub-protocol-version": "3", "idempotency-key": key};
 	}
 
 	/** Projection-shaped reads must declare their protocol version, like mutations. */
 	function readHeaders (session) {
-		return {cookie: session.cookie, "x-hub-protocol-version": "2"};
+		return {cookie: session.cookie, "x-hub-protocol-version": "3"};
 	}
 
 	async function setup () {
@@ -79,24 +79,23 @@ describe("Phase 4 actions, grants, and transfers", () => {
 		return {dm, campaign, a: players[0], b: players[1]};
 	}
 
-	it("queues and resolves a structured effect for an offline target", async () => {
-		const {campaign, a, b} = await setup();
-		const proposed = await app.inject({
+	it("applies a DM semantic operation immediately for an offline target", async () => {
+		const {dm, campaign, b} = await setup();
+		const commandId = crypto.randomUUID();
+		const applied = await app.inject({
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/actions`,
-			headers: headers(a.session),
-			payload: {targetCharacterId: b.character.id, effect: {type: "damage", amount: 8, damageType: "fire"}},
+			headers: headers(dm, commandId),
+			payload: {
+				commandId,
+				targetCharacterId: b.character.id,
+				operation: {kind: "hp.damage", version: 1, arguments: {amount: 8}},
+			},
 		});
-		expect(proposed.statusCode).toBe(201);
-		const pending = await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/actions`, headers: {cookie: b.session.cookie}});
-		expect(pending.json().actions).toHaveLength(1);
-		const resolved = await app.inject({
-			method: "POST",
-			url: `/api/campaigns/${campaign.id}/actions/${proposed.json().action.id}/resolve`,
-			headers: headers(b.session),
-			payload: {decision: "accept"},
-		});
-		expect(resolved.json().character.data.hp).toEqual({current: 17, max: 20, temp: 0});
+		expect(applied.statusCode).toBe(201);
+		expect(applied.json().operation).toMatchObject({status: "applied"});
+		const truth = await app.inject({method: "GET", url: `/api/characters/${b.character.id}`, headers: readHeaders(b.session)});
+		expect(truth.json().projection.character.data.hp).toEqual({current: 17, max: 20, temp: 0});
 	});
 
 	it("grants XP without changing class levels and grants stable item entries", async () => {

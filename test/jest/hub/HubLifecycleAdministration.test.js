@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import {MemoryHubStore} from "../../../server/src/memory-hub-store.js";
+import {createSemanticOperationRegistry} from "../../../server/src/semantic-operation-registry.js";
 
 describe("Hub lifecycle administration", () => {
 	let now;
@@ -8,12 +9,24 @@ describe("Hub lifecycle administration", () => {
 	let coDm;
 	let player;
 	let observer;
+	let playerSession;
 	let campaign;
 	let ix;
 
 	beforeEach(async () => {
 		now = new Date("2026-08-24T00:00:00.000Z");
-		store = new MemoryHubStore({fnNow: () => new Date(now)});
+		store = new MemoryHubStore({
+			fnNow: () => new Date(now),
+			semanticOperationRegistry: createSemanticOperationRegistry({
+				templates: [{
+					sourceEntity: {type: "ability", uid: "lifecycle source|tst", version: "tst-v1"},
+					effectTemplateId: "test.lifecycle.damage",
+					cost: "none",
+					hasSource: () => true,
+					deriveOperation: () => ({kind: "hp.damage", arguments: {amount: 2}}),
+				}],
+			}),
+		});
 		ix = 0;
 		const createAccount = (subject, displayName) => store.pUpsertOAuthAccount({provider: "github", providerSubject: subject, displayName});
 		dm = await createAccount("1", "DM");
@@ -24,6 +37,11 @@ describe("Hub lifecycle administration", () => {
 		await join(coDm, "co_dm");
 		await join(player, "player");
 		await join(observer, "player");
+		playerSession = await store.pCreateSession({
+			accountId: player.id,
+			tokenHash: crypto.randomBytes(32).toString("hex"),
+			expiresAt: new Date(now.getTime() + 86_400_000),
+		});
 	});
 
 	function key (label) {
@@ -98,13 +116,27 @@ describe("Hub lifecycle administration", () => {
 			payload: {items: [{entryId: "map", quantity: 1}], currency: {gp: 2}},
 			idempotencyKey: key("transfer"),
 		})).transfer;
-		const action = (await store.pCreateStructuredAction({
-			accountId: coDm.id,
+		const target = (await store.pCreateCharacter({
+			accountId: observer.id,
 			campaignId: campaign.id,
-			targetCharacterId: character.id,
-			effect: {type: "damage", amount: 2},
-			idempotencyKey: key("action"),
-		})).action;
+			clientImportId: "observer-local",
+			schemaVersion: 1,
+			data: {name: "Observer Character", hp: {current: 10, max: 10, temp: 0}},
+			idempotencyKey: key("target-character"),
+		})).character;
+		const commandId = crypto.randomUUID();
+		const operation = (await store.pCreateStructuredAction({
+			accountId: player.id,
+			sessionId: playerSession.id,
+			campaignId: campaign.id,
+			commandId,
+			sourceCharacterId: character.id,
+			sourceEntity: {type: "ability", uid: "lifecycle source|tst", version: "tst-v1"},
+			effectTemplateId: "test.lifecycle.damage",
+			choice: {},
+			targetRef: target.targetRef,
+			idempotencyKey: commandId,
+		})).operation;
 		const membership = await store.pGetMembership({accountId: player.id, campaignId: campaign.id});
 		const removed = await store.pRemoveMember({
 			accountId: dm.id,
@@ -123,7 +155,11 @@ describe("Hub lifecycle administration", () => {
 		expect(detached.data.inventory).toContainEqual(expect.objectContaining({id: "map", quantity: 1}));
 		expect(detached.data.currency.gp).toBe(4);
 		expect((await store.pListTransfers({accountId: dm.id, campaignId: campaign.id})).find(it => it.id === transfer.id).status).toBe("cancelled");
-		expect((await store.pListPendingActions({accountId: dm.id, campaignId: campaign.id})).find(it => it.id === action.id).status).toBe("cancelled");
+		const events = await store.pListVisibleEvents({accountId: dm.id, campaignId: campaign.id});
+		expect(events).toContainEqual(expect.objectContaining({
+			type: "character.operation.cancelled",
+			payload: expect.objectContaining({operationId: operation.operationId}),
+		}));
 	});
 
 	it("protects campaign ownership and limits co-DM removal", async () => {
@@ -157,7 +193,7 @@ describe("Hub lifecycle administration", () => {
 			expect.objectContaining({id: second.id, isCurrent: false}),
 		]));
 		const revoked = await store.pRevokeOtherSessions({accountId: player.id, currentSessionId: first.id, idempotencyKey: key("revoke-others")});
-		expect(revoked.revokedSessionIds).toEqual([second.id]);
+		expect(new Set(revoked.revokedSessionIds)).toEqual(new Set([playerSession.id, second.id]));
 
 		await expect(store.pRequestAccountDeletion({
 			accountId: dm.id,

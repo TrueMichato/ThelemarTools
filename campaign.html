@@ -139,12 +139,12 @@
 							<div class="hub-section-heading">
 								<div>
 									<h3 class="hub-campaign-section__title">At the table</h3>
-									<p class="hub-campaign-section__description">Propose an effect or pass something to another character without editing their sheet.</p>
+									<p class="hub-campaign-section__description">Apply a DM effect or pass something to another character without editing their sheet.</p>
 								</div>
 							</div>
 							<div id="campaign-play-controls" class="hub-settings-grid">
 								<form id="campaign-action-form" class="hub-form">
-									<h4 class="hub-subheading">Propose an effect</h4>
+									<h4 class="hub-subheading">Apply an effect</h4>
 									<label class="hub-label" for="campaign-action-target">Target</label>
 									<select id="campaign-action-target" class="hub-input" name="target" autocomplete="off"></select>
 									<label class="hub-label" for="campaign-action-type">Effect</label>
@@ -154,10 +154,8 @@
 										<option value="condition_add">Add condition</option>
 										<option value="condition_remove">Remove condition</option>
 										<option value="spell_slot_spend">Spend spell slot</option>
-										<option value="informational">Informational request</option>
+										<option value="spell_slot_restore">Restore spell slot</option>
 									</select>
-									<label class="hub-label" for="campaign-action-context">Spell or action (optional)</label>
-									<input id="campaign-action-context" class="hub-input" name="context" autocomplete="off" placeholder="For example: Cure Wounds">
 									<label id="campaign-action-value-label" class="hub-label" for="campaign-action-value">Damage amount</label>
 									<input id="campaign-action-value" class="hub-input" name="value" autocomplete="off" required>
 									<div id="campaign-action-slot-fields" class="hub-field-pair ve-hidden">
@@ -180,7 +178,7 @@
 											<input id="campaign-action-slot-amount" class="hub-input" name="slotAmount" type="number" inputmode="numeric" min="1" value="1" autocomplete="off" required>
 										</div>
 									</div>
-									<button class="hub-button hub-button--primary" type="submit" data-pending-label="Sending...">Send proposal</button>
+									<button class="hub-button hub-button--primary" type="submit" data-pending-label="Applying...">Apply effect</button>
 									<p id="campaign-action-form-status" class="hub-inline-status" data-hub-form-status role="status" aria-live="polite"></p>
 								</form>
 								<form id="campaign-transfer-form" class="hub-form">

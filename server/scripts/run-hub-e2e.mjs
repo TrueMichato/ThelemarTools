@@ -9,6 +9,7 @@ const externalBaseImage = process.env.HUB_TEST_BASE_IMAGE?.trim() || null;
 const baseImage = externalBaseImage || `thelemartools-hub-bff:e2e-${runId}`;
 const testBffImage = `${projectName}-test-bff:latest`;
 const productionSmokeName = `${projectName}-production-smoke`;
+const postgresPort = `${20_000 + crypto.randomInt(10_000)}`;
 const env = {
 	...process.env,
 	HUB_APP_ORIGIN: "https://localhost:8443",
@@ -23,6 +24,7 @@ const env = {
 	HUB_BACKUP_ENCRYPTION_KEY: crypto.randomBytes(32).toString("base64"),
 	HUB_ALLOWED_OAUTH_SUBJECTS: "github:0",
 	HUB_TEST_AUTH_SECRET: crypto.randomBytes(32).toString("base64url"),
+	HUB_TEST_POSTGRES_PORT: postgresPort,
 	GITHUB_CLIENT_ID: "hub-e2e",
 	GITHUB_CLIENT_SECRET: crypto.randomBytes(24).toString("base64url"),
 	HUB_IMAGE_VERSION: "e2e",
@@ -162,6 +164,7 @@ try {
 		DATABASE_URL: `postgresql://hub_runtime:${env.HUB_RUNTIME_DB_PASSWORD}@db:5432/hub`,
 		HUB_DATABASE_SSL: "false",
 		HUB_HOST: "0.0.0.0",
+		HUB_TEST_POSTGRES_URL: `postgresql://hub_runtime:${env.HUB_RUNTIME_DB_PASSWORD}@127.0.0.1:${postgresPort}/hub`,
 	});
 	await run("docker", [
 		"run", "--detach",
@@ -186,6 +189,14 @@ try {
 		baseImage,
 	]);
 	await pWaitForContainerHealthy({name: productionSmokeName});
+	await run("node", [
+		"--experimental-vm-modules",
+		"./node_modules/jest/bin/jest.js",
+		"test/jest/hub/HubSemanticOperationsPostgres.test.js",
+		"--runInBand",
+		"--no-coverage",
+		"--forceExit",
+	]);
 	exitCode = await run("npx", ["playwright", "test", "--config", "playwright.hub.config.ts"], {isAllowFailure: true});
 	if (exitCode === 0) {
 		await run("docker", [...composeArgs, "restart", "bff"]);

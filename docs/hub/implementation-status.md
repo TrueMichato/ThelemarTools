@@ -1,6 +1,6 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-09-01
+> **Last updated:** 2026-09-02
 > **Owner:** Campaign Hub maintainers
 
 ## Status
@@ -27,6 +27,13 @@ V2-T0 release-automation implementation is **shipped** by
 **shipped** by [PR #218](https://github.com/TrueMichato/ThelemarTools/pull/218). The release script's live
 Oracle dry run, deliberate release, and induced-failure drills are external host-operations evidence, not
 unfinished T0 implementation; they remain blocked under the first V1 gate below.
+
+The focused `t2-effects-server-role` prerequisite slice implements the ADR 0012 server contract without changing
+the roadmap train status: protocol-v3 closed operations, immediate atomic DM/co-DM application, persistent
+command/operation/event identity, owner/DM watermarks, opaque target refs, and the source-derived peer
+proposal/terminal state machine. Production deliberately enables no successful `cost=none` peer template;
+Cure Wounds is recognized and rejected as cost-bearing. Character Sheet subscription/rebase, approval/targeting
+UI, costs, monster/multi-target effects, and the first real peer template remain later slices.
 
 - Lifecycle includes invite list/revoke, owner role changes, owner/co-DM member removal, voluntary leave,
   session/device revocation, immediate socket closure, workspace archive/restore, character detachment,
@@ -109,7 +116,8 @@ pass. Only the host-operations proof and physical one-DM/two-player game day rem
   disabled mutation controls.
 - Durable roll log with semantic, bounded activity titles and selected authorized detail; character-related
   events carry privacy-safe versioned display-name snapshots so historical activity survives rename/detach/archive.
-- Structured effect proposals/approval, XP/item grants, party inventory, escrowed item/currency transfers.
+- Immediate DM/co-DM semantic character operations plus the fail-closed source-derived peer proposal/terminal
+  server contract; XP/item grants, party inventory, and escrowed item/currency transfers remain domain-specific.
 - Whole-item transfers preserve Character Sheet invariants, rollback identity, and metadata-safe stack merges.
 - Character HTML is sanitized at the authority boundary; canonical documents are capped at 1.5 MB after
   every mutation.
@@ -185,8 +193,8 @@ pass. Only the host-operations proof and physical one-DM/two-player game day rem
 - Campaign brew intentionally rejects raw HTML and persistent blocklists.
 - Full simultaneous character/Board co-editing is not supported; one active editor holds the lease.
 - Offline players can view a cached copy only; cloud mutation requires an authenticated online session.
-- Pending actions and transfers do not expire on a timer in private V1. They remain explicit inbox work until
-  accepted/rejected or are cancelled by campaign, account, membership, or character lifecycle cleanup.
+- Semantic proposals expire after a bounded 24 hours when observed/processed. Legacy pending actions are
+  terminalized by migration 0005. Transfers still remain explicit inbox work until resolved or lifecycle-cancelled.
 - Semi-public moderation, self-service recovery, billing, and legal/privacy publication are not enabled.
 - Private V1 supports one BFF replica and therefore no multi-replica application HA.
 

@@ -8,15 +8,15 @@
 
 | Layer | Location | Purpose |
 |---|---|---|
-| Pure domain | `test/jest/hub/HubActions.test.js`, `HubCloudDataValidation.test.js`, `HubCampaignContent.test.js`, `HubEventPresentation.test.js` | Effects, escrow, quotas, sanitization, rules/brew validation, privacy-safe activity normalization |
+| Pure domain | `test/jest/hub/HubActions.test.js`, `HubCloudDataValidation.test.js`, `HubCampaignContent.test.js`, `HubEventPresentation.test.js` | Versioned semantic operations, escrow, quotas, sanitization, rules/brew validation, privacy-safe activity normalization |
 | Repository proofs | `HubCharacterRepository.test.js`, `HubDmWorkspaceRepository.test.js` | Revision/lease/rebase/recovery semantics |
 | HTTP repositories | `HubHttpCharacterRepository.test.js`, `HubHttpDmWorkspaceRepository.test.js` | API translation, retry, canonical ids, recovery |
-| BFF/domain API | `HubServerApp.test.js`, `HubPhase1Domain.test.js` through `HubPhase4Domain.test.js`, `HubLifecycle.test.js` | Auth, campaigns, characters, content, realtime actions, lifecycle |
+| BFF/domain API | `HubServerApp.test.js`, `HubPhase1Domain.test.js` through `HubPhase4Domain.test.js`, `HubLifecycle.test.js`, `HubSemanticOperations.test.js` | Auth, campaigns, characters, content, semantic operation roles/replay/privacy/lifecycle, realtime actions |
 | Authorization/security | `HubAuthorizationMatrix.test.js`, `HubXssContract.test.js`, `HubInviteRoleSafety.test.js`, `HubRouteContract.test.js` | Tenancy, roles, XSS, schemas, route policy |
 | Realtime | `HubRealtime.test.js`, `HubWebSocket.test.js`, `HubBroadcastSync.test.js` | Visibility, replay, presence, observable connection state, terminal policy closure, sockets, tabs |
 | Integration seams | Character Sheet repository/rules/roll-history tests; `DmScreenHubController.test.js`; `HubPartyTrackerProjection.test.js` | Existing page behavior, Campaign DM Screen access/recovery, live/manual Party Tracker separation, and local/Hub isolation |
 | Static UI/PWA contracts | `HubPageContract.test.js`, `HubRoutePolicy.test.js`, `HubPerformanceBudget.test.js` | Required states, boot order, navigation, service-worker and fixed limits |
-| Database contract | `HubMigrationContract.test.js`, local PostgreSQL drills | Schema clauses and real migration/transaction/restore |
+| Database contract | `HubMigrationContract.test.js`, `HubSemanticOperationsPostgres.test.js`, local PostgreSQL drills | Schema clauses and real migration/transaction/locking/replay/expiry/restore |
 | Real-stack browser | `test/e2e/hub/`, `test/e2e/pages/HubCampaignPage.ts` | Multi-user lifecycle, Character Sheet copy/attach/clone/move, leases, keyboard focus, phone reflow, labels/touch targets, and six-member/replay/quota/contention budgets |
 | CI/supply chain | `.github/workflows/hub.yml`, `HubCiContract.test.js` | Pinned actions, deterministic gates, SBOM/image/provenance and test-auth isolation |
 
@@ -61,6 +61,18 @@ npm audit --omit=dev --audit-level=high
 npm run hub:check-secrets
 npm run test:hub:e2e:stack
 ```
+
+The disposable stack exposes PostgreSQL only on a random loopback port for the duration of the run. Before
+browser journeys, it executes `HubSemanticOperationsPostgres.test.js` against the migrated runtime role. That
+suite proves concurrent exact replay, one applied revision/event, mutated-body rejection, explicit target-owner
+approval under competing commands, no source mutation, owner/DM watermark persistence, bounded expiry,
+lifecycle cancellation, and minimized explicit-recipient terminal payloads.
+
+The memory semantic suite additionally covers every version-1 kind, player generic-operation denial,
+DM/co-DM immediate application, self-target explicit approval, DM non-owner approval denial, unsupported and
+stale source cost/policy, target-ref rotation, revocation cleanup, and projection privacy canaries. Production
+registry tests assert that recognized Cure Wounds templates fail closed and that no request/configuration can
+enable the constructor-only synthetic test template.
 
 ## Test data rules
 

@@ -1,7 +1,7 @@
 # Campaign Hub security model
 
 > **Status:** Implemented private-V1 controls; managed deployment review pending
-> **Last verified:** 2026-08-25
+> **Last verified:** 2026-09-02
 > **Owner:** Campaign Hub maintainers
 
 ## Trust boundaries
@@ -35,13 +35,21 @@
   event cannot be rewritten, so a name captured in one would survive an owner later choosing a narrower policy;
   shared activity derives its labels from the current peer-visible projection instead. Name snapshots remain on
   targeted events, whose audience is already authorized for that character.
-- Targeting is authorized on the server, not filtered in the browser. A peer proposing an effect or a transfer
-  to a character whose identity its owner hides receives the same `CHARACTER_NOT_FOUND` a non-existent
-  character produces, so a rejected probe cannot enumerate hidden characters.
+- Targeting is authorized on the server, not filtered in the browser. Semantic peers use random target
+  references exposed only by an identity-visible profile. Hidden/missing/stale source, target, or eligibility
+  fails as `SOURCE_OR_TARGET_UNAVAILABLE` at creation and `PROPOSAL_STALE` at apply, without identifying the
+  failed predicate. Transfer targeting retains its non-enumerating not-found behavior.
+- Generic semantic `kind`/`arguments` are privileged to DM/co-DM/internal authority. Player effects must resolve
+  through a closed server template and explicit target-owner approval, including self-targeting. Recognized
+  source costs fail closed before persistence and again before application.
+- Semantic creation/resolution revalidates the authenticated session, active account/campaign/membership/role,
+  source/target truth, template policy, and approval authority inside one transaction. Stable command ids are
+  actor/body bound, and no unsupported/stale operation can partially mutate character/event/outbox state.
 - WebSocket upgrades require same origin, session, active membership, and protocol version.
 - Event visibility is enforced server-side (`all_members`, `dm_only`, `actor_and_dm`,
   `explicit_accounts`) before replay or broadcast.
-- Every campaign-owned foreign-key relationship uses `campaign_id` in its database constraint.
+- Campaign-owned semantic event linkage uses campaign-scoped foreign keys; historical operation references
+  tolerate later character movement while creation/apply revalidate same-campaign truth.
 - Character and DM-workspace writes require aggregate revision plus a monotonic lease epoch.
 - Inventory transfers reserve source value into escrow and lock source/target in deterministic order.
 - Campaign archive refuses unresolved escrow and detaches characters without deleting player ownership.

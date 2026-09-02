@@ -68,12 +68,12 @@ describe("projection privacy canaries", () => {
 	}
 
 	function headers (session, key = `k-${++ix}`) {
-		return {cookie: session.cookie, origin: ORIGIN, "x-csrf-token": session.csrfToken, "x-hub-protocol-version": "2", "idempotency-key": key};
+		return {cookie: session.cookie, origin: ORIGIN, "x-csrf-token": session.csrfToken, 		"x-hub-protocol-version": "3", "idempotency-key": key};
 	}
 
 	/** Projection-shaped reads must declare their protocol version, like mutations. */
 	function readHeaders (session) {
-		return {cookie: session.cookie, "x-hub-protocol-version": "2"};
+		return {cookie: session.cookie, "x-hub-protocol-version": "3"};
 	}
 
 	async function setup () {
@@ -361,7 +361,7 @@ describe("projection privacy canaries", () => {
 		expect(list.some(member => member.id === fromSnapshot.ownerMembershipId)).toBe(true);
 	});
 
-	it("refuses peer actions and transfers targeting a private character", async () => {
+	it("refuses peer generic actions and transfers targeting a private character", async () => {
 		const {owner, peerA, campaign, character} = await setup();
 		const base = (await app.inject({method: "GET", url: `/api/characters/${character.id}/projection-policy`, headers: readHeaders(owner)})).json();
 		await app.inject({
@@ -372,19 +372,21 @@ describe("projection privacy canaries", () => {
 		});
 
 		// Targeting is authorized on the server, not merely filtered in the browser.
+		const commandId = crypto.randomUUID();
 		const action = await app.inject({
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/actions`,
-			headers: headers(peerA),
-			payload: {targetCharacterId: character.id, effect: {type: "damage", amount: 3}},
+			headers: headers(peerA, commandId),
+			payload: {commandId, targetCharacterId: character.id, operation: {kind: "hp.damage", version: 1, arguments: {amount: 3}}},
 		});
-		expect(action.statusCode).toBe(404);
-		// Non-enumerating: identical to a character that does not exist.
+		expect(action.statusCode).toBe(403);
+		// Role rejection happens before target lookup, so generic JSON cannot enumerate characters.
+		const missingCommandId = crypto.randomUUID();
 		const missing = await app.inject({
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/actions`,
-			headers: headers(peerA),
-			payload: {targetCharacterId: "00000000-0000-4000-8000-000000000000", effect: {type: "damage", amount: 3}},
+			headers: headers(peerA, missingCommandId),
+			payload: {commandId: missingCommandId, targetCharacterId: "00000000-0000-4000-8000-000000000000", operation: {kind: "hp.damage", version: 1, arguments: {amount: 3}}},
 		});
 		expect(action.json()).toEqual(missing.json());
 
@@ -409,7 +411,7 @@ describe("projection privacy canaries", () => {
 		expect(transfer.statusCode).toBe(404);
 	});
 
-	it("still lets the DM and the owner target a private character", async () => {
+	it("still lets the DM apply an operation to a private character", async () => {
 		const {dm, owner, campaign, character} = await setup();
 		const base = (await app.inject({method: "GET", url: `/api/characters/${character.id}/projection-policy`, headers: readHeaders(owner)})).json();
 		await app.inject({
@@ -419,11 +421,12 @@ describe("projection privacy canaries", () => {
 			payload: {expectedProjectionRevision: base.projectionRevision, policy: {version: 1, preset: "private", overrides: {}}},
 		});
 
+		const commandId = crypto.randomUUID();
 		const dmAction = await app.inject({
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/actions`,
-			headers: headers(dm),
-			payload: {targetCharacterId: character.id, effect: {type: "damage", amount: 1}},
+			headers: headers(dm, commandId),
+			payload: {commandId, targetCharacterId: character.id, operation: {kind: "hp.damage", version: 1, arguments: {amount: 1}}},
 		});
 		expect(dmAction.statusCode).toBe(201);
 	});

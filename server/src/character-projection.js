@@ -597,7 +597,12 @@ export function computePeerProfile ({character}) {
 	} catch {
 		return {...envelope, data: {}};
 	}
-	return {...envelope, data: applyProjectionPolicy({viewModel: buildCharacterViewModel(character.data), policy})};
+	const data = applyProjectionPolicy({viewModel: buildCharacterViewModel(character.data), policy});
+	return {
+		...envelope,
+		...(data.identity && character.targetRef ? {targetRef: character.targetRef} : {}),
+		data,
+	};
 }
 
 /**
@@ -739,10 +744,17 @@ export function projectCharacterForRequester ({character, authorizationClass, fn
 	// The canonical document is returned without its embedded policy: the owner receives
 	// the policy in its own field, and a DM receives the peer preview instead of the
 	// owner's raw sharing configuration.
-	const {projectionPolicy, ...truth} = fnCopy(character);
+	const {
+		projectionPolicy,
+		targetRef = null,
+		operationWatermark = 0,
+		...truth
+	} = fnCopy(character);
 	const envelope = {
 		character: truth,
 		projectionRevision: Number(character.projectionRevision) || 1,
+		targetRef,
+		operationWatermark: Number(operationWatermark) || 0,
 		...(isPolicyValid ? {} : {policyError: "PROJECTION_POLICY_INVALID"}),
 	};
 	if (authorizationClass === "owner") {

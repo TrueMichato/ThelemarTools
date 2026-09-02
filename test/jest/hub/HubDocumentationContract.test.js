@@ -151,7 +151,7 @@ describe("Campaign Hub documentation contract", () => {
 			"`targetDisplaySnapshot`",
 			"`effectDisplaySnapshot`",
 			"`SOURCE_OR_TARGET_UNAVAILABLE`",
-			"same provenance, derivation, validation, expiry, and approval path",
+			"later, distinct target-owner approval command",
 			"Monster/NPC sources",
 			"area/multi-target orchestration",
 			"`hp.damage`",
@@ -173,7 +173,7 @@ describe("Campaign Hub documentation contract", () => {
 			"post-clamp effective delta",
 			"bounded, non-null expiry",
 			"rejection of peer-authored `kind`",
-			"Implementation: Contract only.",
+			"Implementation: The protocol-v3 server/store/API/event substrate is implemented.",
 		]) expect(markdown).toContain(anchor);
 	});
 

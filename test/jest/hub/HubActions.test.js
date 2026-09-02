@@ -1,7 +1,9 @@
 import {
 	addTransferPayload,
+	applySemanticOperation,
 	applyStructuredEffect,
 	normalizeCharacterInventory,
+	normalizeSemanticOperation,
 	removeTransferPayload,
 } from "../../../server/src/hub-actions.js";
 
@@ -11,6 +13,7 @@ describe("structured effects", () => {
 			data: {hp: {current: 20, max: 20, temp: 5}},
 			effect: {type: "damage", amount: 8},
 		});
+
 		expect(damaged.hp).toEqual({current: 17, max: 20, temp: 0});
 		const healed = applyStructuredEffect({data: damaged, effect: {type: "healing", amount: 10}});
 		expect(healed.hp.current).toBe(20);
@@ -24,6 +27,63 @@ describe("structured effects", () => {
 			data: {spellcasting: {spellSlots: {1: {current: 2, max: 4}}}},
 			effect: {type: "spell_slot_spend", level: 1},
 		}).spellcasting.spellSlots[1].current).toBe(1);
+	});
+});
+
+describe("semantic operations", () => {
+	const getOperation = (kind, args) => ({
+		operationId: "00000000-0000-4000-8000-000000000001",
+		targetCharacterId: "00000000-0000-4000-8000-000000000002",
+		kind,
+		version: 1,
+		arguments: args,
+	});
+
+	it("normalizes the closed version-1 catalog and rejects ambiguous inputs", () => {
+		expect(normalizeSemanticOperation(getOperation("hp.heal", {amount: 2}))).toEqual(getOperation("hp.heal", {amount: 2}));
+		for (const operation of [
+			getOperation("custom", {}),
+			{...getOperation("hp.heal", {amount: 1}), version: 2},
+			getOperation("hp.heal", {amount: 0}),
+			getOperation("hp.damage", {amount: Number.POSITIVE_INFINITY}),
+			getOperation("condition.add", {condition: {name: "Prone"}}),
+			getOperation("spell_slot.spend", {level: 0, amount: 1}),
+			getOperation("spell_slot.restore", {level: 1, amount: 1.5}),
+		]) expect(() => normalizeSemanticOperation(operation)).toThrow();
+	});
+
+	it("applies every operation deterministically without mutating its input", () => {
+		const original = {
+			hp: {current: 10, max: 20, temp: 3},
+			conditions: [{name: "Prone", source: "PHB"}],
+			spellcasting: {spellSlots: {1: {current: 2, max: 4}}},
+		};
+		let data = applySemanticOperation({data: original, operation: getOperation("hp.damage", {amount: 5})});
+		expect(data.hp).toEqual({current: 8, max: 20, temp: 0});
+		data = applySemanticOperation({data, operation: getOperation("hp.heal", {amount: 50})});
+		expect(data.hp.current).toBe(20);
+		data = applySemanticOperation({data, operation: getOperation("condition.add", {condition: {name: "Poisoned", source: "PHB"}})});
+		data = applySemanticOperation({data, operation: getOperation("condition.add", {condition: {name: "poisoned", source: "phb"}})});
+		expect(data.conditions).toHaveLength(2);
+		data = applySemanticOperation({data, operation: getOperation("condition.remove", {condition: {name: "PRONE", source: "phb"}})});
+		expect(data.conditions).toEqual([{name: "Poisoned", source: "PHB"}]);
+		data = applySemanticOperation({data, operation: getOperation("spell_slot.spend", {level: 1, amount: 2})});
+		expect(data.spellcasting.spellSlots[1].current).toBe(0);
+		data = applySemanticOperation({data, operation: getOperation("spell_slot.restore", {level: 1, amount: 10})});
+		expect(data.spellcasting.spellSlots[1].current).toBe(4);
+		expect(original).toEqual({
+			hp: {current: 10, max: 20, temp: 3},
+			conditions: [{name: "Prone", source: "PHB"}],
+			spellcasting: {spellSlots: {1: {current: 2, max: 4}}},
+		});
+	});
+
+	it("fails closed on missing state and insufficient resources", () => {
+		expect(() => applySemanticOperation({data: {}, operation: getOperation("hp.heal", {amount: 1})})).toThrow();
+		expect(() => applySemanticOperation({
+			data: {spellcasting: {spellSlots: {1: {current: 0, max: 1}}}},
+			operation: getOperation("spell_slot.spend", {level: 1, amount: 1}),
+		})).toThrow();
 	});
 });
 

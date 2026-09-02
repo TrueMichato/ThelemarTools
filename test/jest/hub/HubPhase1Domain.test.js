@@ -61,14 +61,14 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 			cookie: session.cookie,
 			origin: APP_ORIGIN,
 			"x-csrf-token": session.csrfToken,
-			"x-hub-protocol-version": "2",
+			"x-hub-protocol-version": "3",
 			"idempotency-key": idempotencyKey,
 		};
 	}
 
 	/** Projection-shaped reads must declare their protocol version, like mutations. */
 	function readHeaders (session) {
-		return {cookie: session.cookie, "x-hub-protocol-version": "2"};
+		return {cookie: session.cookie, "x-hub-protocol-version": "3"};
 	}
 
 	async function pCreateCampaign (session, name) {
@@ -383,7 +383,7 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 			payload: {name: "Old Client"},
 		});
 		expect(response.statusCode).toBe(426);
-		expect(response.json()).toEqual({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "2"});
+		expect(response.json()).toEqual({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "3"});
 	});
 
 	it("blocks projection-shaped reads from stale protocol clients", async () => {
@@ -412,7 +412,7 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 			expect({url, status: stale.statusCode, body: stale.json()}).toEqual({
 				url,
 				status: 426,
-				body: {error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "2"},
+				body: {error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "3"},
 			});
 		}
 	});

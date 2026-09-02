@@ -18,22 +18,29 @@ import {
 } from "./character-projection.js";
 import {
 	addTransferPayload,
-	applyStructuredEffect,
+	applySemanticOperation,
 	normalizeCharacterInventory,
 	normalizeCurrency,
+	normalizeSemanticOperation,
 	removeTransferPayload,
-	STRUCTURED_EFFECT_TYPES,
 } from "./hub-actions.js";
 import {validateCloudCharacterData, validateCloudValue} from "./cloud-data-validation.js";
 import {createCharacterDisplayNameSnapshot, enrichEventPayload} from "./hub-event-snapshots.js";
+import {createSemanticOperationRegistry} from "./semantic-operation-registry.js";
 
 function copy (value) {
 	return value === undefined ? undefined : structuredClone(value);
 }
 
 export class MemoryHubStore {
-	constructor ({fnNow = () => new Date()} = {}) {
+	constructor ({
+		fnNow = () => new Date(),
+		semanticOperationRegistry = createSemanticOperationRegistry(),
+		semanticProposalTtlMs = 24 * 60 * 60 * 1_000,
+	} = {}) {
 		this._fnNow = fnNow;
+		this._semanticOperationRegistry = semanticOperationRegistry;
+		this._semanticProposalTtlMs = semanticProposalTtlMs;
 		this._accounts = new Map();
 		this._identityToAccount = new Map();
 		this._sessions = new Map();
@@ -52,6 +59,8 @@ export class MemoryHubStore {
 		this._dmWorkspaceLeases = new Map();
 		this._partyInventories = new Map();
 		this._pendingActions = new Map();
+		this._semanticOperations = new Map();
+		this._semanticOperationCommands = new Map();
 		this._transfers = new Map();
 		this._operationalRuns = [];
 	}
@@ -318,7 +327,7 @@ export class MemoryHubStore {
 		return {key, requestHash: crypto.createHash("sha256").update(key).digest("hex")};
 	}
 
-	_appendEvent ({campaignId, actorAccountId, type, aggregateType, aggregateId, aggregateRevision = null, visibility = "all_members", visibleAccountIds = null, payload = {}}) {
+	_appendEvent ({eventId = crypto.randomUUID(), campaignId, actorAccountId, type, aggregateType, aggregateId, aggregateRevision = null, visibility = "all_members", visibleAccountIds = null, payload = {}}) {
 		const campaign = this._campaigns.get(campaignId);
 		const sequence = this._events.filter(event => event.campaignId === campaignId).length + 1;
 		const eventPayload = enrichEventPayload({
@@ -333,7 +342,7 @@ export class MemoryHubStore {
 			},
 		});
 		const event = {
-			id: crypto.randomUUID(),
+			id: eventId,
 			campaignId,
 			sequence,
 			type,
@@ -489,6 +498,17 @@ export class MemoryHubStore {
 		const membership = this._getMembershipById({campaignId, membershipId});
 		if (membership.accountId === campaign.ownerAccountId) throw new HubStoreError("MEMBERSHIP_OWNER_PROTECTED", `Campaign owner role cannot be changed.`, {status: 409});
 		if (membership.status !== "active") throw new HubStoreError("MEMBERSHIP_NOT_FOUND", `Membership was not found.`, {status: 404});
+		if (role === "spectator") {
+			for (const operation of this._semanticOperations.values()) {
+				if (
+					operation.campaignId === campaignId
+					&& operation.status === "proposed"
+					&& operation.originActorAccountId === membership.accountId
+				) {
+					this._cancelSemanticOperationForLifecycle({operation, actorAccountId: accountId});
+				}
+			}
+		}
 		membership.role = role;
 		this._appendAudit({campaignId, actorAccountId: accountId, action: "membership.role_changed", targetType: "membership", targetId: membershipId, details: {role}});
 		this._appendEvent({campaignId, actorAccountId: accountId, type: "membership.role_changed", aggregateType: "membership", aggregateId: membershipId, payload: {accountId: membership.accountId, role}});
@@ -526,6 +546,16 @@ export class MemoryHubStore {
 			.filter(character => character.ownerAccountId === membership.accountId && character.campaignId === campaign.id)
 			.map(character => character.id);
 		const characterIdSet = new Set(characterIds);
+		for (const operation of this._semanticOperations.values()) {
+			if (operation.campaignId !== campaign.id || operation.status !== "proposed") continue;
+			if (
+				operation.originActorAccountId === membership.accountId
+				|| characterIdSet.has(operation.sourceCharacterId)
+				|| characterIdSet.has(operation.targetCharacterId)
+			) {
+				this._cancelSemanticOperationForLifecycle({operation, actorAccountId});
+			}
+		}
 		for (const action of this._pendingActions.values()) {
 			if (action.campaignId !== campaign.id || action.status !== "proposed") continue;
 			const target = this._characters.get(action.targetCharacterId);
@@ -563,6 +593,7 @@ export class MemoryHubStore {
 			const characterNameSnapshot = createCharacterDisplayNameSnapshot(character.data?.name);
 			this._characterLeases.delete(characterId);
 			character.campaignId = null;
+			character.targetRef = crypto.randomUUID();
 			character.clientImportId = null;
 			character.revision++;
 			character.updatedAt = this._fnNow().toISOString();
@@ -671,8 +702,8 @@ export class MemoryHubStore {
 	_commitCharacterMutation ({character, actorAccountId, isRevisionBump = true}) {
 		if (isRevisionBump) character.revision++;
 		character.updatedAt = this._fnNow().toISOString();
-		if (!character.campaignId) return character;
-		this._appendEvent({
+		if (!character.campaignId) return null;
+		return this._appendEvent({
 			campaignId: character.campaignId,
 			actorAccountId,
 			type: "character.projection.invalidated",
@@ -681,7 +712,6 @@ export class MemoryHubStore {
 			aggregateRevision: character.revision,
 			payload: {projectionRevision: character.projectionRevision},
 		});
-		return character;
 	}
 
 	async pListCharacters ({accountId, campaignId = null}) {
@@ -807,6 +837,7 @@ export class MemoryHubStore {
 			if (imported.status === "archived") {
 				imported.status = "active";
 				imported.campaignId = campaignId;
+				imported.targetRef = crypto.randomUUID();
 				imported.data = normalizeCharacterInventory(data);
 				imported.schemaVersion = schemaVersion;
 				imported.revision++;
@@ -834,6 +865,8 @@ export class MemoryHubStore {
 			schemaVersion,
 			revision: 1,
 			leaseEpoch: 0,
+			targetRef: crypto.randomUUID(),
+			operationWatermark: 0,
 			projectionPolicy: getDefaultProjectionPolicy(),
 			projectionRevision: 1,
 			data: normalizeCharacterInventory(data),
@@ -968,6 +1001,8 @@ export class MemoryHubStore {
 			clientImportId: null,
 			revision: 1,
 			leaseEpoch: 0,
+			targetRef: crypto.randomUUID(),
+			operationWatermark: 0,
 			// The owner's sharing choice follows their copy; the revision restarts because
 			// this is a new aggregate.
 			projectionRevision: 1,
@@ -993,12 +1028,21 @@ export class MemoryHubStore {
 			throw new HubStoreError("LEASE_HELD", `Release the active character editor before moving.`, {status: 409});
 		}
 		this._cancelIncomingForCharacter({character});
+		for (const operation of this._semanticOperations.values()) {
+			if (
+				operation.status === "proposed"
+				&& [operation.sourceCharacterId, operation.targetCharacterId].includes(characterId)
+			) {
+				this._cancelSemanticOperationForLifecycle({operation, actorAccountId: accountId});
+			}
+		}
 		if ([...this._transfers.values()].some(it => it.status === "reserved" && it.sourceKind === "character" && it.sourceId === characterId)) {
 			throw new HubStoreError("CHARACTER_BUSY", `Resolve outgoing transfers before moving.`, {status: 409});
 		}
 		const sourceCampaignId = character.campaignId;
 		const characterNameSnapshot = createCharacterDisplayNameSnapshot(character.data?.name);
 		character.campaignId = campaignId;
+		character.targetRef = crypto.randomUUID();
 		character.clientImportId = null;
 		character.revision++;
 		character.updatedAt = this._fnNow().toISOString();
@@ -1032,6 +1076,14 @@ export class MemoryHubStore {
 		const character = this._getCharacterOrThrow(characterId);
 		if (character.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can archive this character.`, {status: 403});
 		this._cancelIncomingForCharacter({character});
+		for (const operation of this._semanticOperations.values()) {
+			if (
+				operation.status === "proposed"
+				&& [operation.sourceCharacterId, operation.targetCharacterId].includes(characterId)
+			) {
+				this._cancelSemanticOperationForLifecycle({operation, actorAccountId: accountId});
+			}
+		}
 		if ([...this._transfers.values()].some(it => it.status === "reserved" && it.sourceKind === "character" && it.sourceId === characterId)) {
 			throw new HubStoreError("CHARACTER_BUSY", `Resolve outgoing transfers before archiving.`, {status: 409});
 		}
@@ -1232,6 +1284,9 @@ export class MemoryHubStore {
 					id: character.id,
 					revision: character.revision,
 					projectionRevision: character.projectionRevision,
+					...(["dm", "co_dm"].includes(membership.role) || character.ownerAccountId === accountId
+						? {operationWatermark: character.operationWatermark || 0}
+						: {}),
 				})),
 		};
 	}
@@ -1295,66 +1350,480 @@ export class MemoryHubStore {
 		return this._setReceipt({accountId, idempotencyKey, response: {event}});
 	}
 
-	async pCreateStructuredAction ({accountId, campaignId, targetCharacterId, effect, idempotencyKey}) {
-		validateCloudValue(effect, {label: "Structured effect"});
-		const prior = this._getReceipt({accountId, idempotencyKey});
-		if (prior) return prior;
-		const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
-		const target = this._getCharacterOrThrow(targetCharacterId);
-		if (target.campaignId !== campaignId) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
-		this._assertTargetable({character: target, accountId, role: membership.role});
-		if (!STRUCTURED_EFFECT_TYPES.includes(effect?.type)) throw new HubStoreError("ACTION_INVALID", `Unsupported structured effect.`);
-		const action = {
-			id: crypto.randomUUID(),
-			campaignId,
-			actorAccountId: accountId,
-			targetCharacterId,
-			actionType: "structured_effect",
-			status: "proposed",
-			payload: {effect: copy(effect)},
-			expiresAt: null,
-			createdAt: this._fnNow().toISOString(),
-		};
-		this._pendingActions.set(action.id, action);
-		this._appendEvent({campaignId, actorAccountId: accountId, type: "action.proposed", aggregateType: "pending_action", aggregateId: action.id, visibility: "explicit_accounts", visibleAccountIds: [...new Set([accountId, target.ownerAccountId])], payload: {targetCharacterId, effect}});
-		return this._setReceipt({accountId, idempotencyKey, response: {action}});
+	_assertSemanticSession ({accountId, sessionId}) {
+		const account = this._accounts.get(accountId);
+		const session = [...this._sessions.values()].find(it => it.id === sessionId && it.accountId === accountId);
+		if (!account || account.status !== "active" || !session || session.revokedAt || new Date(session.expiresAt) <= this._fnNow()) {
+			throw new HubStoreError("AUTH_REQUIRED", `The authenticated session is unavailable.`, {status: 401});
+		}
 	}
 
-	async pResolveStructuredAction ({accountId, campaignId, actionId, decision, idempotencyKey}) {
-		const prior = this._getReceipt({accountId, idempotencyKey});
-		if (prior) return prior;
-		const action = this._pendingActions.get(actionId);
-		if (!action || action.campaignId !== campaignId || action.status !== "proposed") throw new HubStoreError("ACTION_NOT_FOUND", `Pending action was not found.`, {status: 404});
-		const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
-		const target = this._getCharacterOrThrow(action.targetCharacterId);
-		if (target.ownerAccountId !== accountId && !["dm", "co_dm"].includes(membership.role)) {
-			throw new HubStoreError("FORBIDDEN", `Only the target owner or DM can resolve this action.`, {status: 403});
+	_getSemanticCommand ({accountId, commandId, idempotencyKey}) {
+		const normalized = this._normalizeIdempotencyKey(idempotencyKey);
+		if (normalized.key !== commandId) throw new HubStoreError("IDEMPOTENCY_KEY_REUSED", `Command and idempotency identities differ.`, {status: 409});
+		const prior = this._semanticOperationCommands.get(commandId);
+		if (!prior) return null;
+		if (prior.actorAccountId !== accountId || prior.requestHash !== normalized.requestHash) {
+			throw new HubStoreError("IDEMPOTENCY_KEY_REUSED", `Command identity was reused with a different request.`, {status: 409});
 		}
+		return copy(prior.response);
+	}
+
+	_setSemanticCommand ({accountId, commandId, operationId, commandType, idempotencyKey, response, eventIds}) {
+		const normalized = this._normalizeIdempotencyKey(idempotencyKey);
+		this._semanticOperationCommands.set(commandId, {
+			commandId,
+			operationId,
+			actorAccountId: accountId,
+			commandType,
+			requestHash: normalized.requestHash,
+			response: copy(response),
+			eventIds: [...eventIds],
+			createdAt: this._fnNow().toISOString(),
+		});
+		return copy(response);
+	}
+
+	_getSemanticOperationView (operation) {
+		const snapshots = {
+			sourceDisplaySnapshot: copy(operation.sourceDisplaySnapshot),
+			targetDisplaySnapshot: copy(operation.targetDisplaySnapshot),
+			effectDisplaySnapshot: copy(operation.effectDisplaySnapshot),
+		};
+		const out = {
+			operationId: operation.id,
+			status: operation.status,
+			targetCharacterId: operation.targetCharacterId,
+			version: operation.version,
+			expiresAt: operation.expiresAt,
+			resultingCharacterRevision: operation.resultingCharacterRevision,
+			...snapshots,
+		};
+		if (operation.sourceEntity) {
+			Object.assign(out, {
+				sourceEntity: copy(operation.sourceEntity),
+				effectTemplateId: operation.effectTemplateId,
+				choice: copy(operation.choice),
+			});
+		}
+		if (operation.status === "applied") {
+			out.operation = {
+				operationId: operation.id,
+				kind: operation.kind,
+				version: operation.version,
+				targetCharacterId: operation.targetCharacterId,
+				arguments: copy(operation.arguments),
+			};
+		}
+		return out;
+	}
+
+	_getSemanticRecipients ({operation, target}) {
+		return [...new Set([operation.originActorAccountId, target?.ownerAccountId].filter(Boolean))];
+	}
+
+	_cancelSemanticOperationForLifecycle ({operation, actorAccountId}) {
+		if (operation.status !== "proposed") return;
+		const target = this._characters.get(operation.targetCharacterId);
+		operation.status = "cancelled";
+		operation.updatedAt = this._fnNow().toISOString();
+		operation.resolvedAt = operation.updatedAt;
+		operation.terminalReason = "unavailable";
+		this._appendAudit({
+			campaignId: operation.campaignId,
+			actorAccountId,
+			action: "character.operation.cancelled",
+			targetType: "semantic_operation",
+			targetId: operation.id,
+			details: {reason: "lifecycle"},
+		});
+		const event = this._appendEvent({
+			campaignId: operation.campaignId,
+			actorAccountId,
+			type: "character.operation.cancelled",
+			aggregateType: "semantic_operation",
+			aggregateId: operation.id,
+			visibility: "explicit_accounts",
+			visibleAccountIds: this._getSemanticRecipients({operation, target}),
+			payload: {
+				operationId: operation.id,
+				targetCharacterId: operation.targetCharacterId,
+				status: "cancelled",
+				reason: "unavailable",
+				sourceDisplaySnapshot: copy(operation.sourceDisplaySnapshot),
+				targetDisplaySnapshot: copy(operation.targetDisplaySnapshot),
+				effectDisplaySnapshot: copy(operation.effectDisplaySnapshot),
+			},
+		});
+		operation.terminalEventId = event.id;
+	}
+
+	_expireSemanticOperations ({campaignId}) {
+		const now = this._fnNow();
+		for (const operation of this._semanticOperations.values()) {
+			if (
+				operation.campaignId !== campaignId
+				|| operation.status !== "proposed"
+				|| new Date(operation.expiresAt) > now
+			) continue;
+			const target = this._characters.get(operation.targetCharacterId);
+			operation.status = "expired";
+			operation.updatedAt = now.toISOString();
+			operation.resolvedAt = now.toISOString();
+			operation.terminalReason = "unavailable";
+			this._appendAudit({
+				campaignId,
+				actorAccountId: null,
+				action: "character.operation.expired",
+				targetType: "semantic_operation",
+				targetId: operation.id,
+			});
+			const event = this._appendEvent({
+				campaignId,
+				actorAccountId: null,
+				type: "character.operation.expired",
+				aggregateType: "semantic_operation",
+				aggregateId: operation.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: this._getSemanticRecipients({operation, target}),
+				payload: {
+					operationId: operation.id,
+					targetCharacterId: operation.targetCharacterId,
+					status: "expired",
+					reason: "unavailable",
+					sourceDisplaySnapshot: copy(operation.sourceDisplaySnapshot),
+					targetDisplaySnapshot: copy(operation.targetDisplaySnapshot),
+					effectDisplaySnapshot: copy(operation.effectDisplaySnapshot),
+				},
+			});
+			operation.terminalEventId = event.id;
+		}
+	}
+
+	async pCreateStructuredAction ({
+		accountId,
+		sessionId,
+		campaignId,
+		commandId,
+		targetCharacterId = null,
+		operation: submittedOperation = null,
+		sourceCharacterId = null,
+		sourceEntity = null,
+		effectTemplateId = null,
+		choice = null,
+		targetRef = null,
+		idempotencyKey,
+	}) {
+		const prior = this._getSemanticCommand({accountId, commandId, idempotencyKey});
+		this._assertSemanticSession({accountId, sessionId});
+		if (prior) return prior;
+		const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+		const operationId = crypto.randomUUID();
+		const now = this._fnNow();
+
+		if (submittedOperation) {
+			if (!["dm", "co_dm"].includes(membership.role)) {
+				throw new HubStoreError("OPERATION_FORBIDDEN", `Generic semantic operations require a DM role.`, {status: 403});
+			}
+			const target = this._getCharacterOrThrow(targetCharacterId);
+			if (target.campaignId !== campaignId) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
+			const normalized = normalizeSemanticOperation({
+				...submittedOperation,
+				operationId,
+				targetCharacterId,
+			});
+			const data = applySemanticOperation({data: target.data, operation: normalized});
+			validateCloudCharacterData(data);
+			const semanticOperation = {
+				id: operationId,
+				campaignId,
+				originActorAccountId: accountId,
+				sourceCharacterId: null,
+				targetCharacterId,
+				status: "applied",
+				version: normalized.version,
+				kind: normalized.kind,
+				arguments: copy(normalized.arguments),
+				sourceEntity: null,
+				effectTemplateId: null,
+				choice: null,
+				sourceDisplaySnapshot: null,
+				targetDisplaySnapshot: null,
+				effectDisplaySnapshot: null,
+				resultingCharacterRevision: target.revision + 1,
+				expiresAt: null,
+				createdAt: now.toISOString(),
+				updatedAt: now.toISOString(),
+			};
+			target.data = data;
+			target.revision++;
+			target.updatedAt = now.toISOString();
+			this._semanticOperations.set(operationId, semanticOperation);
+			this._appendAudit({
+				campaignId,
+				actorAccountId: accountId,
+				action: "character.operation.applied",
+				targetType: "semantic_operation",
+				targetId: operationId,
+				details: {kind: normalized.kind, version: normalized.version, resultingCharacterRevision: target.revision},
+			});
+			const appliedEvent = this._appendEvent({
+				campaignId,
+				actorAccountId: accountId,
+				type: "character.operation.applied",
+				aggregateType: "character",
+				aggregateId: target.id,
+				aggregateRevision: target.revision,
+				visibility: "explicit_accounts",
+				visibleAccountIds: this._getSemanticRecipients({operation: semanticOperation, target}),
+				payload: {
+					operation: normalized,
+					resultingCharacterRevision: target.revision,
+				},
+			});
+			semanticOperation.appliedEventId = appliedEvent.id;
+			semanticOperation.resolvedAt = now.toISOString();
+			target.operationWatermark = appliedEvent.sequence;
+			const invalidationEvent = this._commitCharacterMutation({character: target, actorAccountId: accountId, isRevisionBump: false});
+			const response = {
+				operation: this._getSemanticOperationView(semanticOperation),
+				eventIds: [appliedEvent.id, invalidationEvent?.id].filter(Boolean),
+				operationWatermark: target.operationWatermark,
+			};
+			return this._setSemanticCommand({
+				accountId,
+				commandId,
+				operationId,
+				commandType: "create_direct",
+				idempotencyKey,
+				response,
+				eventIds: response.eventIds,
+			});
+		}
+
+		const source = this._getCharacterOrThrow(sourceCharacterId);
+		if (source.ownerAccountId !== accountId || source.campaignId !== campaignId) {
+			throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+		}
+		const target = [...this._characters.values()].find(character =>
+			character.campaignId === campaignId
+			&& character.status === "active"
+			&& character.targetRef === targetRef,
+		);
+		if (!target) throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+		try {
+			this._assertTargetable({character: target, accountId, role: membership.role});
+		} catch {
+			throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+		}
+		const derived = this._semanticOperationRegistry.derive({
+			sourceCharacter: source,
+			targetCharacter: target,
+			targetRef,
+			sourceEntity,
+			effectTemplateId,
+			choice,
+			sourceProfile: computePeerProfile({character: source}),
+			targetProfile: computePeerProfile({character: target}),
+			operationId,
+		});
+		const expiresAt = new Date(now.getTime() + this._semanticProposalTtlMs).toISOString();
+		const semanticOperation = {
+			id: operationId,
+			campaignId,
+			originActorAccountId: accountId,
+			sourceCharacterId: source.id,
+			targetCharacterId: target.id,
+			targetRef,
+			status: "proposed",
+			version: derived.operation.version,
+			kind: derived.operation.kind,
+			arguments: copy(derived.operation.arguments),
+			sourceEntity: copy(derived.sourceEntity),
+			effectTemplateId: derived.effectTemplateId,
+			choice: copy(derived.choice),
+			sourceDisplaySnapshot: copy(derived.sourceDisplaySnapshot),
+			targetDisplaySnapshot: copy(derived.targetDisplaySnapshot),
+			effectDisplaySnapshot: copy(derived.effectDisplaySnapshot),
+			resultingCharacterRevision: null,
+			expiresAt,
+			createdAt: now.toISOString(),
+			updatedAt: now.toISOString(),
+		};
+		this._semanticOperations.set(operationId, semanticOperation);
+		this._appendAudit({
+			campaignId,
+			actorAccountId: accountId,
+			action: "character.operation.proposed",
+			targetType: "semantic_operation",
+			targetId: operationId,
+		});
+		const proposedEvent = this._appendEvent({
+			campaignId,
+			actorAccountId: accountId,
+			type: "character.operation.proposed",
+			aggregateType: "semantic_operation",
+			aggregateId: operationId,
+			visibility: "explicit_accounts",
+			visibleAccountIds: this._getSemanticRecipients({operation: semanticOperation, target}),
+			payload: {
+				operationId,
+				targetCharacterId: target.id,
+				status: "proposed",
+				sourceEntity: copy(derived.sourceEntity),
+				effectTemplateId: derived.effectTemplateId,
+				choice: copy(derived.choice),
+				sourceDisplaySnapshot: copy(derived.sourceDisplaySnapshot),
+				targetDisplaySnapshot: copy(derived.targetDisplaySnapshot),
+				effectDisplaySnapshot: copy(derived.effectDisplaySnapshot),
+				expiresAt,
+			},
+		});
+		semanticOperation.createdEventId = proposedEvent.id;
+		const response = {
+			operation: this._getSemanticOperationView(semanticOperation),
+			eventIds: [proposedEvent.id],
+		};
+		return this._setSemanticCommand({
+			accountId,
+			commandId,
+			operationId,
+			commandType: "create_proposal",
+			idempotencyKey,
+			response,
+			eventIds: response.eventIds,
+		});
+	}
+
+	async pResolveStructuredAction ({accountId, sessionId, campaignId, commandId, actionId, decision, idempotencyKey}) {
+		const prior = this._getSemanticCommand({accountId, commandId, idempotencyKey});
+		this._assertSemanticSession({accountId, sessionId});
+		if (prior) return prior;
+		this._expireSemanticOperations({campaignId});
+		const operation = this._semanticOperations.get(actionId);
+		if (!operation || operation.campaignId !== campaignId || operation.status !== "proposed") {
+			throw new HubStoreError("ACTION_NOT_FOUND", `Pending operation was not found.`, {status: 404});
+		}
+		const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+		const source = this._getCharacterOrThrow(operation.sourceCharacterId);
+		const target = this._getCharacterOrThrow(operation.targetCharacterId);
+		const isDm = ["dm", "co_dm"].includes(membership.role);
+		const isTargetOwner = target.ownerAccountId === accountId;
+		const isProposer = operation.originActorAccountId === accountId;
+		if (decision === "accept" && !isTargetOwner) throw new HubStoreError("FORBIDDEN", `Only the target owner may approve.`, {status: 403});
+		if (decision === "reject" && !isTargetOwner && !isDm) throw new HubStoreError("FORBIDDEN", `Cannot reject this proposal.`, {status: 403});
+		if (decision === "cancel" && !isProposer && !isDm) throw new HubStoreError("FORBIDDEN", `Cannot cancel this proposal.`, {status: 403});
+
+		let appliedEvent = null;
+		let invalidationEvent = null;
 		if (decision === "accept") {
-			const data = applyStructuredEffect({data: target.data, effect: action.payload.effect});
+			let derived;
+			try {
+				derived = this._semanticOperationRegistry.derive({
+					sourceCharacter: source,
+					targetCharacter: target,
+					targetRef: operation.targetRef,
+					sourceEntity: operation.sourceEntity,
+					effectTemplateId: operation.effectTemplateId,
+					choice: operation.choice,
+					sourceProfile: computePeerProfile({character: source}),
+					targetProfile: computePeerProfile({character: target}),
+					operationId: operation.id,
+				});
+			} catch (error) {
+				if (error.code === "SOURCE_COST_UNSUPPORTED" || error.code === "SOURCE_OR_TARGET_UNAVAILABLE") {
+					throw new HubStoreError("PROPOSAL_STALE", `The proposal is no longer applicable.`, {status: 409});
+				}
+				throw error;
+			}
+			if (JSON.stringify(derived.operation) !== JSON.stringify({
+				operationId: operation.id,
+				kind: operation.kind,
+				version: operation.version,
+				targetCharacterId: operation.targetCharacterId,
+				arguments: operation.arguments,
+			})) throw new HubStoreError("PROPOSAL_STALE", `The proposal is no longer applicable.`, {status: 409});
+			const data = applySemanticOperation({data: target.data, operation: derived.operation});
 			validateCloudCharacterData(data);
 			target.data = data;
 			target.revision++;
-			action.status = "applied";
-		} else action.status = "rejected";
-		action.resolvedAt = this._fnNow().toISOString();
-		this._appendAudit({campaignId, actorAccountId: accountId, action: `action.${action.status}`, targetType: "pending_action", targetId: action.id});
-		this._appendEvent({campaignId, actorAccountId: accountId, type: `action.${action.status}`, aggregateType: "pending_action", aggregateId: action.id, visibility: "explicit_accounts", visibleAccountIds: [...new Set([action.actorAccountId, target.ownerAccountId])], payload: {targetCharacterId: target.id, effect: action.payload.effect, characterRevision: target.revision}});
-		// An applied effect changes hp/conditions, which are catalog fields, while the
-		// action event itself is visible only to the actor and DM.
-		if (action.status === "applied") this._commitCharacterMutation({character: target, actorAccountId: accountId, isRevisionBump: false});
-		return this._setReceipt({accountId, idempotencyKey, response: {action, character: stripProjectionPolicy(target)}});
+			target.updatedAt = this._fnNow().toISOString();
+			operation.status = "applied";
+			operation.resultingCharacterRevision = target.revision;
+			appliedEvent = this._appendEvent({
+				campaignId,
+				actorAccountId: accountId,
+				type: "character.operation.applied",
+				aggregateType: "character",
+				aggregateId: target.id,
+				aggregateRevision: target.revision,
+				visibility: "explicit_accounts",
+				visibleAccountIds: this._getSemanticRecipients({operation, target}),
+				payload: {operation: derived.operation, resultingCharacterRevision: target.revision},
+			});
+			target.operationWatermark = appliedEvent.sequence;
+			invalidationEvent = this._commitCharacterMutation({character: target, actorAccountId: accountId, isRevisionBump: false});
+		} else {
+			operation.status = decision === "reject" ? "rejected" : "cancelled";
+		}
+		operation.updatedAt = this._fnNow().toISOString();
+		operation.resolvedAt = operation.updatedAt;
+		this._appendAudit({
+			campaignId,
+			actorAccountId: accountId,
+			action: `character.operation.${operation.status}`,
+			targetType: "semantic_operation",
+			targetId: operation.id,
+		});
+		const terminalEvent = appliedEvent || this._appendEvent({
+			campaignId,
+			actorAccountId: accountId,
+			type: `character.operation.${operation.status}`,
+			aggregateType: "semantic_operation",
+			aggregateId: operation.id,
+			visibility: "explicit_accounts",
+			visibleAccountIds: this._getSemanticRecipients({operation, target}),
+			payload: {
+				operationId: operation.id,
+				targetCharacterId: operation.targetCharacterId,
+				status: operation.status,
+				reason: "unavailable",
+				sourceDisplaySnapshot: copy(operation.sourceDisplaySnapshot),
+				targetDisplaySnapshot: copy(operation.targetDisplaySnapshot),
+				effectDisplaySnapshot: copy(operation.effectDisplaySnapshot),
+			},
+		});
+		if (operation.status === "applied") operation.appliedEventId = terminalEvent.id;
+		else {
+			operation.terminalEventId = terminalEvent.id;
+			operation.terminalReason = "unavailable";
+		}
+		const response = {
+			operation: this._getSemanticOperationView(operation),
+			eventIds: [terminalEvent.id, invalidationEvent?.id].filter(Boolean),
+			...(operation.status === "applied" ? {operationWatermark: target.operationWatermark} : {}),
+		};
+		return this._setSemanticCommand({
+			accountId,
+			commandId,
+			operationId: operation.id,
+			commandType: decision,
+			idempotencyKey,
+			response,
+			eventIds: response.eventIds,
+		});
 	}
 
 	async pListPendingActions ({accountId, campaignId}) {
 		const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
-		return [...this._pendingActions.values()]
-			.filter(action => action.campaignId === campaignId)
-			.filter(action => {
-				if (["dm", "co_dm"].includes(membership.role) || action.actorAccountId === accountId) return true;
-				return this._characters.get(action.targetCharacterId)?.ownerAccountId === accountId;
+		this._expireSemanticOperations({campaignId});
+		return [...this._semanticOperations.values()]
+			.filter(operation => operation.campaignId === campaignId && operation.status === "proposed")
+			.filter(operation => {
+				if (["dm", "co_dm"].includes(membership.role) || operation.originActorAccountId === accountId) return true;
+				return this._characters.get(operation.targetCharacterId)?.ownerAccountId === accountId;
 			})
-			.map(copy);
+			.map(operation => this._getSemanticOperationView(operation));
 	}
 
 	async pGrantXp ({accountId, campaignId, characterId, amount, reason = null, idempotencyKey}) {
@@ -1544,6 +2013,23 @@ export class MemoryHubStore {
 			account.deletionRequestedAt = requestedAt.toISOString();
 			account.purgeAfter = new Date(requestedAt.getTime() + graceMs).toISOString();
 		}
+		const ownedCharacterIds = new Set(
+			[...this._characters.values()]
+				.filter(character => character.ownerAccountId === accountId)
+				.map(character => character.id),
+		);
+		for (const operation of this._semanticOperations.values()) {
+			if (
+				operation.status === "proposed"
+				&& (
+					operation.originActorAccountId === accountId
+					|| ownedCharacterIds.has(operation.sourceCharacterId)
+					|| ownedCharacterIds.has(operation.targetCharacterId)
+				)
+			) {
+				this._cancelSemanticOperationForLifecycle({operation, actorAccountId: accountId});
+			}
+		}
 		const revokedSessionIds = [];
 		for (const session of this._sessions.values()) {
 			if (session.accountId !== accountId || session.revokedAt) continue;
@@ -1576,6 +2062,12 @@ export class MemoryHubStore {
 		for (const [key, version] of this._rulesVersions) if (version.campaignId === campaignId) this._rulesVersions.delete(key);
 		for (const [key, workspace] of this._dmWorkspaces) if (workspace.campaignId === campaignId) this._dmWorkspaces.delete(key);
 		this._partyInventories.delete(campaignId);
+		for (const [key, operation] of this._semanticOperations) {
+			if (operation.campaignId === campaignId) this._semanticOperations.delete(key);
+		}
+		for (const [key, command] of this._semanticOperationCommands) {
+			if (!this._semanticOperations.has(command.operationId)) this._semanticOperationCommands.delete(key);
+		}
 		for (const [key, action] of this._pendingActions) if (action.campaignId === campaignId) this._pendingActions.delete(key);
 		for (const [key, transfer] of this._transfers) if (transfer.campaignId === campaignId) this._transfers.delete(key);
 		const removedEventIds = new Set(this._events.filter(event => event.campaignId === campaignId).map(event => event.id));
@@ -1607,6 +2099,17 @@ export class MemoryHubStore {
 					(transfer.sourceKind === "character" && ownedCharacterIds.has(transfer.sourceId))
 					|| (transfer.targetKind === "character" && ownedCharacterIds.has(transfer.targetId))
 				) this._transfers.delete(id);
+			}
+			for (const [id, operation] of this._semanticOperations) {
+				if (ownedCharacterIds.has(operation.sourceCharacterId) || ownedCharacterIds.has(operation.targetCharacterId)) {
+					this._semanticOperations.delete(id);
+				} else if (operation.originActorAccountId === account.id) {
+					operation.originActorAccountId = null;
+				}
+			}
+			for (const [id, command] of this._semanticOperationCommands) {
+				if (!this._semanticOperations.has(command.operationId)) this._semanticOperationCommands.delete(id);
+				else if (command.actorAccountId === account.id) command.actorAccountId = null;
 			}
 			for (const [id, character] of this._characters) {
 				if (character.ownerAccountId !== account.id) continue;
@@ -1714,12 +2217,18 @@ export class MemoryHubStore {
 			throw new HubStoreError("CAMPAIGN_BUSY", `Resolve reserved transfers before archiving.`, {status: 409});
 		}
 		campaign.status = "archived";
+		for (const operation of this._semanticOperations.values()) {
+			if (operation.campaignId === campaignId && operation.status === "proposed") {
+				this._cancelSemanticOperationForLifecycle({operation, actorAccountId: accountId});
+			}
+		}
 		for (const action of this._pendingActions.values()) {
 			if (action.campaignId === campaignId && action.status === "proposed") action.status = "cancelled";
 		}
 		for (const character of this._characters.values()) {
 			if (character.campaignId !== campaignId) continue;
 			character.campaignId = null;
+			character.targetRef = crypto.randomUUID();
 			character.clientImportId = null;
 			character.revision++;
 			character.updatedAt = this._fnNow().toISOString();

@@ -1,7 +1,7 @@
 # Campaign Hub permission matrix
 
 > **Status:** Current private-V1 authorization
-> **Last verified:** 2026-08-24
+> **Last verified:** 2026-09-02
 > **Owner:** Campaign Hub maintainers
 
 The server checks active membership, role, tenant, object ownership, status, and write preconditions. Client UI
@@ -32,8 +32,11 @@ visibility is not authorization.
 | Read/create private DM workspace | Own workspace | Own workspace | No | No |
 | Read another DM's workspace | No | No | No | No |
 | Log roll | Yes | Yes | Yes | No |
-| Create structured effect proposal | Yes | Yes | Yes | No |
-| Accept/reject targeted effect | Override or target owner | Override or target owner | Target owner | No |
+| Apply generic versioned character operation | Yes, immediate | Yes, immediate | No | No |
+| Create source-derived peer proposal | Yes, proposed unless using direct authority | Yes, proposed unless using direct authority | Yes, proposed including self-target | No |
+| Accept peer proposal | Target owner only | Target owner only | Target owner only; same account may later accept self-target | No |
+| Reject peer proposal | Yes | Yes | Target owner only | No |
+| Cancel peer proposal | Yes | Yes | Own proposal only | No |
 | Grant XP/item | Yes | Yes | No | No |
 | Read party inventory | Yes | Yes | Yes | Yes |
 | Transfer from party inventory | Yes | Yes | No | No |
@@ -64,6 +67,8 @@ account's campaign sockets immediately after the authoritative transaction commi
 - Campaign owner is an account field on the campaign, not a separate role string.
 - Co-DM can perform DM content/grant/workspace operations but cannot transfer ownership or archive as owner.
 - Spectator is an authenticated read-only campaign role in current mutation paths.
+- DM/co-DM role alone never approves somebody else's peer proposal. The DM instead issues a distinct direct
+  operation with its own actor/command identity.
 - Action resolution is explicitly limited to DM/co-DM/player before the target-owner check. Transfer
   resolution has no equivalent role list and therefore still permits a spectator who owns the target
   character to accept/reject that transfer. This asymmetry is current behavior, not a general role rule.

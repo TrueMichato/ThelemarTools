@@ -1,7 +1,7 @@
 # Campaign Hub data lifecycle
 
 > **Status:** Current behavior plus approved Phase 6 policy
-> **Last verified:** 2026-08-24
+> **Last verified:** 2026-09-02
 > **Owner:** Campaign Hub maintainers
 
 ## Data inventory
@@ -24,6 +24,8 @@
 | Domain events | Ordered replay/history | visibility-filtered | retained until campaign/account deletion |
 | Outbox rows | Technical delivery | BFF/operators | published 7-day cleanup approved, not implemented |
 | Command receipts | Idempotent retry | BFF/store | 24 hours |
+| Semantic operations/commands | Effect lifecycle, stable exactly-once replay, resulting revision/event linkage | authorized participants; BFF/store command records | campaign/account lifecycle; not pruned as technical receipts |
+| Character target references/watermarks | Opaque peer targeting and owner/DM replay reconciliation | target ref only in authorized profiles/truth; watermark owner/DM truth only | character lifetime; target ref rotates on detach/move/archive/reactivation |
 | Encrypted backup archives | Recovery | operators | nightly/off-machine policy; must age deleted data out |
 | Operational runs | Maintenance/backup/restore evidence | operators/metrics; no user content | bounded retention policy finalized with provider scheduling |
 
@@ -74,6 +76,8 @@
   suppressed while it existed. DMs retain the audit trail.
 - A private DM workspace belongs to one membership, not all campaign DMs.
 - Explicit-account events still include all campaign DMs/co-DMs by policy.
+- Applied semantic-operation details are explicit-recipient data. Peer projections and peer resync refs never
+  carry `operationWatermark`; shared projection invalidations remain metadata-only.
 - Browser cache/service worker must never cache authenticated API/auth responses.
 
 The private pilot must disclose DM full-sheet access and account/export/deletion behavior before users upload
@@ -111,6 +115,7 @@ Character archive preserves the owned document and removes it from active listin
 
 - blocks while a reserved transfer exists;
 - cancels proposed actions;
+- terminalizes proposed semantic operations with minimized explicit-recipient events;
 - releases character leases;
 - detaches characters by setting campaign to null and clearing scoped import id;
 - preserves player ownership;
@@ -164,7 +169,9 @@ Implemented policy:
 Approved private-V1 policy:
 
 - user-visible campaign history: campaign/account deletion;
-- command receipts: 24 hours;
+- ordinary command receipts: 24 hours;
+- semantic command/operation replay records: campaign/account lifecycle, so stable command/operation/event
+  identity survives receipt cleanup;
 - published outbox rows: 7 days;
 - expired/revoked sessions and invites: 30 days;
 - leases: revoked with sessions/member removal; expired rows may be reused immediately; old-row cleanup is Phase 6E;
@@ -201,5 +208,6 @@ compare the export against the deletion/privacy disclosure and add any newly int
 
 ## Reserved fields without active lifecycle
 
-The schema permits action/transfer expiry and several deleting/deleted statuses, but current authority does
-not advance those automatically. Membership removed/left and account deletion_requested are active behavior.
+Semantic proposals advance to `expired` once after their bounded 24-hour deadline when listed/resolved or by
+lifecycle processing. Transfer expiry and several deleting/deleted statuses remain reserved. Membership
+removed/left and account deletion_requested are active behavior.

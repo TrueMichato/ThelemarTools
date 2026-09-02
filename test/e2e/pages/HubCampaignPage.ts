@@ -40,7 +40,7 @@ export class HubCampaignPage {
 		return {
 			origin,
 			"x-csrf-token": session.csrfToken,
-			"x-hub-protocol-version": "2",
+			"x-hub-protocol-version": "3",
 			"idempotency-key": crypto.randomUUID(),
 		};
 	}
@@ -581,7 +581,7 @@ export class HubCampaignPage {
 
 	async getProjectionPolicy (characterId: string): Promise<any> {
 		const response = await this.page.request.get(`/api/characters/${encodeURIComponent(characterId)}/projection-policy`, {
-			headers: {"x-hub-protocol-version": "2"},
+			headers: {"x-hub-protocol-version": "3"},
 		});
 		expect(response.ok()).toBe(true);
 		return response.json();
@@ -650,7 +650,7 @@ export class HubCampaignPage {
 	/** The raw ADR 0011 authorization envelope for a character. */
 	async getCharacterProjection (characterId: string): Promise<any> {
 		const response = await this.page.request.get(`/api/characters/${encodeURIComponent(characterId)}`, {
-			headers: {"x-hub-protocol-version": "2"},
+			headers: {"x-hub-protocol-version": "3"},
 		});
 		expect(response.ok()).toBe(true);
 		return (await response.json()).projection;
@@ -837,15 +837,16 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-item-form-status")).toHaveText("Item granted.");
 	}
 
-	async proposeDamage ({campaignId, characterName, amount}: {campaignId: string; characterName: string; amount: number}): Promise<void> {
+	async applyDamage ({campaignId, characterName, amount}: {campaignId: string; characterName: string; amount: number}): Promise<void> {
 		await this.gotoCampaign(campaignId);
 		await this.page.locator("#campaign-action-target").selectOption({label: characterName});
 		await this.page.locator("#campaign-action-type").selectOption("damage");
 		await this.page.locator("#campaign-action-value").fill(`${amount}`);
 		await this.page.locator("#campaign-action-form button[type='submit']").click();
+		await expect(this.page.locator("#campaign-action-form-status")).toContainText("Effect applied.");
 	}
 
-	async proposeSpellSlotSpend ({campaignId, characterName, context, level, amount}: {campaignId: string; characterName: string; context: string; level: number; amount: number}): Promise<void> {
+	async spendSpellSlot ({campaignId, characterName, context, level, amount}: {campaignId: string; characterName: string; context: string; level: number; amount: number}): Promise<void> {
 		await this.gotoCampaign(campaignId);
 		await this.page.locator("#campaign-action-target").selectOption({label: characterName});
 		await this.page.locator("#campaign-action-type").selectOption("spell_slot_spend");
@@ -853,7 +854,7 @@ export class HubCampaignPage {
 		await this.page.locator("#campaign-action-slot-level").selectOption(`${level}`);
 		await this.page.locator("#campaign-action-slot-amount").fill(`${amount}`);
 		await this.page.locator("#campaign-action-form button[type='submit']").click();
-		await expect(this.page.locator("#campaign-action-form-status")).toContainText("Effect proposal sent.");
+		await expect(this.page.locator("#campaign-action-form-status")).toContainText("Effect applied.");
 	}
 
 	async expectProtocolUpgradeRecovery ({campaignId, characterName}: {campaignId: string; characterName: string}): Promise<void> {
@@ -898,22 +899,15 @@ export class HubCampaignPage {
 		}
 	}
 
-	async applyFirstPendingAction (campaignId: string): Promise<void> {
+	async expectInsufficientSpellSlotSpend ({campaignId, characterName, context, level, amount}: {campaignId: string; characterName: string; context: string; level: number; amount: number}): Promise<void> {
 		await this.gotoCampaign(campaignId);
-		const button = this.page.locator("#campaign-pending-actions button", {hasText: "Apply"}).first();
-		await expect(button).toBeVisible();
-		await button.click();
-		await expect(button).toBeHidden();
-	}
-
-	async expectInsufficientActionAndReject (campaignId: string): Promise<void> {
-		await this.gotoCampaign(campaignId);
-		const row = this.page.locator("#campaign-pending-actions .hub-data-row").first();
-		await row.locator("button", {hasText: "Apply"}).click();
+		await this.page.locator("#campaign-action-target").selectOption({label: characterName});
+		await this.page.locator("#campaign-action-type").selectOption("spell_slot_spend");
+		await this.page.locator("#campaign-action-context").fill(context);
+		await this.page.locator("#campaign-action-slot-level").selectOption(`${level}`);
+		await this.page.locator("#campaign-action-slot-amount").fill(`${amount}`);
+		await this.page.locator("#campaign-action-form button[type='submit']").click();
 		await expect(this.page.locator("#hub-error")).toContainText("no longer has enough of that resource");
-		await expect(row).toBeVisible();
-		await row.locator("button", {hasText: "Reject"}).click();
-		await expect(row).toBeHidden();
 	}
 
 	async expectInsufficientTransferFeedback ({campaignId, characterName}: {campaignId: string; characterName: string}): Promise<void> {

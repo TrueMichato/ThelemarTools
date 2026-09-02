@@ -18,15 +18,16 @@ import {
 } from "./character-projection.js";
 import {
 	addTransferPayload,
-	applyStructuredEffect,
+	applySemanticOperation,
 	normalizeCharacterInventory,
 	normalizeCurrency,
+	normalizeSemanticOperation,
 	removeTransferPayload,
-	STRUCTURED_EFFECT_TYPES,
 } from "./hub-actions.js";
 import {validateCloudCharacterData, validateCloudValue} from "./cloud-data-validation.js";
 import {HUB_REQUIRED_MIGRATION_VERSION} from "./migration-version.js";
 import {createCharacterDisplayNameSnapshot, enrichEventPayload} from "./hub-event-snapshots.js";
+import {createSemanticOperationRegistry} from "./semantic-operation-registry.js";
 
 const {Pool} = pg;
 
@@ -90,15 +91,24 @@ function getCharacter (row) {
 		data: row.data,
 		projectionPolicy: row.projection_policy ?? getDefaultProjectionPolicy(),
 		projectionRevision: Number(row.projection_revision ?? 1),
+		targetRef: row.target_ref ?? null,
+		operationWatermark: Number(row.operation_watermark ?? 0),
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
 	};
 }
 
 export class PostgresHubStore {
-	constructor ({pool, fnOnPoolError = null}) {
+	constructor ({
+		pool,
+		fnOnPoolError = null,
+		semanticOperationRegistry = createSemanticOperationRegistry(),
+		semanticProposalTtlMs = 24 * 60 * 60 * 1_000,
+	}) {
 		if (!pool?.query || !pool?.connect) throw new TypeError(`A pg-compatible pool is required.`);
 		this._pool = pool;
+		this._semanticOperationRegistry = semanticOperationRegistry;
+		this._semanticProposalTtlMs = semanticProposalTtlMs;
 		this._fnOnPoolError = fnOnPoolError || (error => {
 			process.stderr.write(`Campaign Hub PostgreSQL idle client error: ${error.stack || error.message}\n`);
 		});
@@ -775,7 +785,7 @@ export class PostgresHubStore {
 		return membership;
 	}
 
-	async _pAppendEvent ({client, campaignId, actorAccountId, type, aggregateType, aggregateId, aggregateRevision = null, visibility = "all_members", visibleAccountIds = null, payload = {}}) {
+	async _pAppendEvent ({client, eventId = crypto.randomUUID(), campaignId, actorAccountId, type, aggregateType, aggregateId, aggregateRevision = null, visibility = "all_members", visibleAccountIds = null, payload = {}}) {
 		const sequenceResult = await client.query(`
 			UPDATE hub.campaigns
 			SET next_event_sequence = next_event_sequence + 1, updated_at = now()
@@ -783,7 +793,6 @@ export class PostgresHubStore {
 			RETURNING next_event_sequence - 1 AS sequence
 		`, [campaignId]);
 		if (!sequenceResult.rowCount) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
-		const eventId = crypto.randomUUID();
 		const characterIds = [...new Set([
 			aggregateType === "character" ? aggregateId : null,
 			payload.targetCharacterId,
@@ -829,6 +838,19 @@ export class PostgresHubStore {
 			INSERT INTO hub.outbox_entries (event_id, campaign_id)
 			VALUES ($1, $2)
 		`, [eventId, campaignId]);
+		return {
+			id: eventId,
+			campaignId,
+			sequence: Number(sequenceResult.rows[0].sequence),
+			type,
+			actorAccountId,
+			aggregateType,
+			aggregateId,
+			aggregateRevision,
+			visibility,
+			visibleAccountIds,
+			payload: eventPayload,
+		};
 	}
 
 	async _pAppendAudit ({client, campaignId = null, actorAccountId, action, targetType, targetId, details = {}}) {
@@ -1058,8 +1080,8 @@ export class PostgresHubStore {
 	 * silently leave peers holding stale data.
 	 */
 	async _pAppendProjectionInvalidation ({client, character, actorAccountId}) {
-		if (!character.campaignId) return;
-		await this._pAppendEvent({
+		if (!character.campaignId) return null;
+		return this._pAppendEvent({
 			client,
 			campaignId: character.campaignId,
 			actorAccountId,
@@ -1203,7 +1225,8 @@ export class PostgresHubStore {
 					const reactivated = await client.query(`
 						UPDATE hub.characters
 						SET status = 'active', campaign_id = $2, schema_version = $3,
-							data = $4::jsonb, revision = revision + 1, updated_at = now()
+							data = $4::jsonb, target_ref = gen_random_uuid(),
+							revision = revision + 1, updated_at = now()
 						WHERE id = $1
 						RETURNING *
 					`, [existing.rows[0].id, campaignId, schemaVersion, JSON.stringify(data)]);
@@ -1467,6 +1490,14 @@ export class PostgresHubStore {
 				await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [campaignLockId]);
 			}
 			await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+			if (isMove && sourceCampaignLookup.rows[0].campaign_id) {
+				await this._pCancelSemanticOperationsForLifecycle({
+					client,
+					campaignId: sourceCampaignLookup.rows[0].campaign_id,
+					actorAccountId: accountId,
+					characterIds: [characterId],
+				});
+			}
 			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [characterId]);
 			const characterResult = await client.query(`
 				SELECT * FROM hub.characters
@@ -1494,7 +1525,8 @@ export class PostgresHubStore {
 				if (busy.rowCount) throw new HubStoreError("CHARACTER_BUSY", `Resolve outgoing transfers before moving.`, {status: 409});
 				const updated = await client.query(`
 					UPDATE hub.characters
-					SET campaign_id = $2, client_import_id = NULL, revision = revision + 1, updated_at = now()
+					SET campaign_id = $2, client_import_id = NULL, target_ref = gen_random_uuid(),
+						revision = revision + 1, updated_at = now()
 					WHERE id = $1
 					RETURNING *
 				`, [characterId, campaignId]);
@@ -1565,6 +1597,12 @@ export class PostgresHubStore {
 			if (!campaignLookup.rowCount) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
 			if (campaignLookup.rows[0].campaign_id) {
 				await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [campaignLookup.rows[0].campaign_id]);
+				await this._pCancelSemanticOperationsForLifecycle({
+					client,
+					campaignId: campaignLookup.rows[0].campaign_id,
+					actorAccountId: accountId,
+					characterIds: [characterId],
+				});
 			}
 			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [characterId]);
 			const existing = await client.query(`SELECT * FROM hub.characters WHERE id = $1 AND owner_account_id = $2 AND status = 'active' FOR UPDATE`, [characterId, accountId]);
@@ -2005,7 +2043,7 @@ export class PostgresHubStore {
 		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 		const [campaignResult, characterResult, sequenceResult] = await Promise.all([
 			this._pool.query(`SELECT id, owner_account_id, name, status, created_at FROM hub.campaigns WHERE id = $1`, [campaignId]),
-			this._pool.query(`SELECT id, revision, projection_revision FROM hub.characters WHERE campaign_id = $1 AND status = 'active' ORDER BY id`, [campaignId]),
+			this._pool.query(`SELECT id, owner_account_id, revision, projection_revision, operation_watermark FROM hub.characters WHERE campaign_id = $1 AND status = 'active' ORDER BY id`, [campaignId]),
 			this._pool.query(`SELECT COALESCE(max(sequence), 0) AS sequence FROM hub.domain_events WHERE campaign_id = $1`, [campaignId]),
 		]);
 		const campaign = campaignResult.rows[0];
@@ -2025,6 +2063,9 @@ export class PostgresHubStore {
 				id: row.id,
 				revision: Number(row.revision),
 				projectionRevision: Number(row.projection_revision ?? 1),
+				...(["dm", "co_dm"].includes(membership.role) || row.owner_account_id === accountId
+					? {operationWatermark: Number(row.operation_watermark ?? 0)}
+					: {}),
 			})),
 		};
 	}
@@ -2243,37 +2284,383 @@ export class PostgresHubStore {
 		`, [outboxId, claimToken, `${error}`.slice(0, 2000)]);
 	}
 
-	async pCreateStructuredAction ({accountId, campaignId, targetCharacterId, effect, idempotencyKey}) {
-		validateCloudValue(effect, {label: "Structured effect"});
+	async _pLockSemanticCommand ({client, accountId, commandId, idempotencyKey}) {
+		const normalized = this._normalizeIdempotencyKey(idempotencyKey);
+		if (normalized.key !== commandId) {
+			throw new HubStoreError("IDEMPOTENCY_KEY_REUSED", `Command and idempotency identities differ.`, {status: 409});
+		}
+		await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 9))`, [commandId]);
+		const prior = await client.query(`
+			SELECT actor_account_id, request_hash, response
+			FROM hub.semantic_operation_commands
+			WHERE command_id = $1
+			FOR UPDATE
+		`, [commandId]);
+		if (!prior.rowCount) return null;
+		if (prior.rows[0].actor_account_id !== accountId || prior.rows[0].request_hash !== normalized.requestHash) {
+			throw new HubStoreError("IDEMPOTENCY_KEY_REUSED", `Command identity was reused with a different request.`, {status: 409});
+		}
+		return prior.rows[0].response;
+	}
+
+	async _pSaveSemanticCommand ({client, accountId, commandId, operationId, commandType, idempotencyKey, response, eventIds}) {
+		const normalized = this._normalizeIdempotencyKey(idempotencyKey);
+		await client.query(`
+			INSERT INTO hub.semantic_operation_commands (
+				command_id, operation_id, actor_account_id, command_type, request_hash, response, event_ids
+			) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::uuid[])
+		`, [commandId, operationId, accountId, commandType, normalized.requestHash, JSON.stringify(response), eventIds]);
+	}
+
+	async _pAssertSemanticSession ({client, accountId, sessionId}) {
+		const result = await client.query(`
+			SELECT s.id
+			FROM hub.sessions s
+			JOIN hub.accounts a ON a.id = s.account_id
+			WHERE s.id = $1
+				AND s.account_id = $2
+				AND s.revoked_at IS NULL
+				AND s.expires_at > now()
+				AND a.status = 'active'
+			FOR UPDATE OF s, a
+		`, [sessionId, accountId]);
+		if (!result.rowCount) throw new HubStoreError("AUTH_REQUIRED", `The authenticated session is unavailable.`, {status: 401});
+	}
+
+	_getSemanticOperation (row) {
+		return {
+			id: row.id,
+			campaignId: row.campaign_id,
+			originActorAccountId: row.origin_actor_account_id,
+			sourceCharacterId: row.source_character_id,
+			targetCharacterId: row.target_character_id,
+			targetRef: row.target_ref,
+			status: row.status,
+			version: row.version,
+			kind: row.kind,
+			arguments: row.arguments,
+			sourceEntity: row.source_entity,
+			effectTemplateId: row.effect_template_id,
+			choice: row.choice,
+			sourceDisplaySnapshot: row.source_display_snapshot,
+			targetDisplaySnapshot: row.target_display_snapshot,
+			effectDisplaySnapshot: row.effect_display_snapshot,
+			resultingCharacterRevision: row.resulting_character_revision == null ? null : Number(row.resulting_character_revision),
+			expiresAt: row.expires_at,
+			createdAt: row.created_at,
+			updatedAt: row.updated_at,
+		};
+	}
+
+	_getSemanticOperationView (operation) {
+		const out = {
+			operationId: operation.id,
+			status: operation.status,
+			targetCharacterId: operation.targetCharacterId,
+			version: operation.version,
+			expiresAt: operation.expiresAt,
+			resultingCharacterRevision: operation.resultingCharacterRevision,
+			sourceDisplaySnapshot: operation.sourceDisplaySnapshot,
+			targetDisplaySnapshot: operation.targetDisplaySnapshot,
+			effectDisplaySnapshot: operation.effectDisplaySnapshot,
+		};
+		if (operation.sourceEntity) {
+			Object.assign(out, {
+				sourceEntity: operation.sourceEntity,
+				effectTemplateId: operation.effectTemplateId,
+				choice: operation.choice,
+			});
+		}
+		if (operation.status === "applied") {
+			out.operation = {
+				operationId: operation.id,
+				kind: operation.kind,
+				version: operation.version,
+				targetCharacterId: operation.targetCharacterId,
+				arguments: operation.arguments,
+			};
+		}
+		return out;
+	}
+
+	async _pInsertSemanticOperation ({client, operation}) {
+		const result = await client.query(`
+			INSERT INTO hub.semantic_operations (
+				id, campaign_id, origin_actor_account_id, source_character_id,
+				target_character_id, target_ref, status, version, kind, arguments,
+				source_entity, effect_template_id, choice, source_display_snapshot,
+				target_display_snapshot, effect_display_snapshot,
+				resulting_character_revision, expires_at
+			) VALUES (
+				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb,
+				$11::jsonb, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb,
+				$17, $18
+			)
+			RETURNING *
+		`, [
+			operation.id,
+			operation.campaignId,
+			operation.originActorAccountId,
+			operation.sourceCharacterId,
+			operation.targetCharacterId,
+			operation.targetRef,
+			operation.status,
+			operation.version,
+			operation.kind,
+			operation.arguments == null ? null : JSON.stringify(operation.arguments),
+			operation.sourceEntity == null ? null : JSON.stringify(operation.sourceEntity),
+			operation.effectTemplateId,
+			operation.choice == null ? null : JSON.stringify(operation.choice),
+			operation.sourceDisplaySnapshot == null ? null : JSON.stringify(operation.sourceDisplaySnapshot),
+			operation.targetDisplaySnapshot == null ? null : JSON.stringify(operation.targetDisplaySnapshot),
+			operation.effectDisplaySnapshot == null ? null : JSON.stringify(operation.effectDisplaySnapshot),
+			operation.resultingCharacterRevision,
+			operation.expiresAt,
+		]);
+		return this._getSemanticOperation(result.rows[0]);
+	}
+
+	async pCreateStructuredAction ({
+		accountId,
+		sessionId,
+		campaignId,
+		commandId,
+		targetCharacterId = null,
+		operation: submittedOperation = null,
+		sourceCharacterId = null,
+		sourceEntity = null,
+		effectTemplateId = null,
+		choice = null,
+		targetRef = null,
+		idempotencyKey,
+	}) {
 		const client = await this._pool.connect();
 		try {
 			await client.query("BEGIN");
-			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
+			const prior = await this._pLockSemanticCommand({client, accountId, commandId, idempotencyKey});
+			await this._pAssertSemanticSession({client, accountId, sessionId});
 			if (prior) {
 				await client.query("COMMIT");
 				return prior;
 			}
-			const proposerMembership = await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm", "player"]});
-			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [targetCharacterId]);
-			if (!STRUCTURED_EFFECT_TYPES.includes(effect?.type)) throw new HubStoreError("ACTION_INVALID", `Unsupported structured effect.`);
-			const target = await client.query(`SELECT id, owner_account_id, projection_policy FROM hub.characters WHERE campaign_id = $1 AND id = $2 AND status = 'active'`, [campaignId, targetCharacterId]);
-			if (!target.rowCount) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
-			this._assertTargetable({
-				character: {ownerAccountId: target.rows[0].owner_account_id, projectionPolicy: target.rows[0].projection_policy},
+			const membership = await this._pGetMembershipForUpdate({
+				client,
 				accountId,
-				role: proposerMembership.role,
+				campaignId,
+				roles: ["dm", "co_dm", "player"],
 			});
-			const actionId = crypto.randomUUID();
-			const inserted = await client.query(`
-				INSERT INTO hub.pending_actions (
-					id, campaign_id, actor_account_id, target_character_id, action_type, payload
-				) VALUES ($1, $2, $3, $4, 'structured_effect', $5::jsonb)
-				RETURNING *
-			`, [actionId, campaignId, accountId, targetCharacterId, JSON.stringify({effect})]);
-			const action = this._getPendingAction(inserted.rows[0]);
-			await this._pAppendEvent({client, campaignId, actorAccountId: accountId, type: "action.proposed", aggregateType: "pending_action", aggregateId: actionId, visibility: "explicit_accounts", visibleAccountIds: [...new Set([accountId, target.rows[0].owner_account_id])], payload: {targetCharacterId, effect}});
-			const response = {action};
-			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "action.propose", response});
+			const operationId = crypto.randomUUID();
+			if (submittedOperation) {
+				if (!["dm", "co_dm"].includes(membership.role)) {
+					throw new HubStoreError("OPERATION_FORBIDDEN", `Generic semantic operations require a DM role.`, {status: 403});
+				}
+				await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [targetCharacterId]);
+				const targetResult = await client.query(`
+					SELECT *
+					FROM hub.characters
+					WHERE campaign_id = $1 AND id = $2 AND status = 'active'
+					FOR UPDATE
+				`, [campaignId, targetCharacterId]);
+				if (!targetResult.rowCount) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
+				const target = getCharacter(targetResult.rows[0]);
+				const normalized = normalizeSemanticOperation({
+					...submittedOperation,
+					operationId,
+					targetCharacterId,
+				});
+				const data = applySemanticOperation({data: target.data, operation: normalized});
+				validateCloudCharacterData(data);
+				const updatedTarget = await client.query(`
+					UPDATE hub.characters
+					SET data = $2::jsonb, revision = revision + 1, updated_at = now()
+					WHERE id = $1
+					RETURNING *
+				`, [target.id, JSON.stringify(data)]);
+				const targetNxt = getCharacter(updatedTarget.rows[0]);
+				let semanticOperation = await this._pInsertSemanticOperation({
+					client,
+					operation: {
+						id: operationId,
+						campaignId,
+						originActorAccountId: accountId,
+						sourceCharacterId: null,
+						targetCharacterId: target.id,
+						targetRef: null,
+						status: "applied",
+						version: normalized.version,
+						kind: normalized.kind,
+						arguments: normalized.arguments,
+						sourceEntity: null,
+						effectTemplateId: null,
+						choice: null,
+						sourceDisplaySnapshot: null,
+						targetDisplaySnapshot: null,
+						effectDisplaySnapshot: null,
+						resultingCharacterRevision: targetNxt.revision,
+						expiresAt: null,
+					},
+				});
+				await this._pAppendAudit({
+					client,
+					campaignId,
+					actorAccountId: accountId,
+					action: "character.operation.applied",
+					targetType: "semantic_operation",
+					targetId: operationId,
+					details: {kind: normalized.kind, version: normalized.version, resultingCharacterRevision: targetNxt.revision},
+				});
+				const appliedEvent = await this._pAppendEvent({
+					client,
+					campaignId,
+					actorAccountId: accountId,
+					type: "character.operation.applied",
+					aggregateType: "character",
+					aggregateId: target.id,
+					aggregateRevision: targetNxt.revision,
+					visibility: "explicit_accounts",
+					visibleAccountIds: [...new Set([accountId, target.ownerAccountId])],
+					payload: {operation: normalized, resultingCharacterRevision: targetNxt.revision},
+				});
+				await client.query(`
+					UPDATE hub.semantic_operations
+					SET applied_event_id = $2, resolved_at = now(), updated_at = now()
+					WHERE id = $1
+				`, [operationId, appliedEvent.id]);
+				await client.query(`UPDATE hub.characters SET operation_watermark = $2 WHERE id = $1`, [target.id, appliedEvent.sequence]);
+				targetNxt.operationWatermark = appliedEvent.sequence;
+				const invalidationEvent = await this._pAppendProjectionInvalidation({client, character: targetNxt, actorAccountId: accountId});
+				semanticOperation = {...semanticOperation, resultingCharacterRevision: targetNxt.revision};
+				const response = {
+					operation: this._getSemanticOperationView(semanticOperation),
+					eventIds: [appliedEvent.id, invalidationEvent?.id].filter(Boolean),
+					operationWatermark: appliedEvent.sequence,
+				};
+				await this._pSaveSemanticCommand({
+					client,
+					accountId,
+					commandId,
+					operationId,
+					commandType: "create_direct",
+					idempotencyKey,
+					response,
+					eventIds: response.eventIds,
+				});
+				await client.query("COMMIT");
+				return response;
+			}
+
+			const lookup = await client.query(`
+				SELECT *
+				FROM hub.characters
+				WHERE campaign_id = $1
+					AND status = 'active'
+					AND (id = $2 OR target_ref = $3)
+			`, [campaignId, sourceCharacterId, targetRef]);
+			const sourceLookup = lookup.rows.find(row => row.id === sourceCharacterId);
+			const targetLookup = lookup.rows.find(row => row.target_ref === targetRef);
+			if (!sourceLookup || !targetLookup || sourceLookup.owner_account_id !== accountId) {
+				throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+			}
+			const aggregateIds = [...new Set([sourceLookup.id, targetLookup.id])].sort();
+			for (const id of aggregateIds) await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [id]);
+			const locked = await client.query(`
+				SELECT *
+				FROM hub.characters
+				WHERE campaign_id = $1 AND status = 'active' AND id = ANY($2::uuid[])
+				ORDER BY id
+				FOR UPDATE
+			`, [campaignId, aggregateIds]);
+			const lockedSource = locked.rows.find(row => row.id === sourceLookup.id);
+			const lockedTarget = locked.rows.find(row => row.id === targetLookup.id);
+			if (!lockedSource || !lockedTarget) {
+				throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+			}
+			const source = getCharacter(lockedSource);
+			const target = getCharacter(lockedTarget);
+			if (source.ownerAccountId !== accountId || target.targetRef !== targetRef) {
+				throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+			}
+			try {
+				this._assertTargetable({character: target, accountId, role: membership.role});
+			} catch {
+				throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+			}
+			const derived = this._semanticOperationRegistry.derive({
+				sourceCharacter: source,
+				targetCharacter: target,
+				targetRef,
+				sourceEntity,
+				effectTemplateId,
+				choice,
+				sourceProfile: computePeerProfile({character: source}),
+				targetProfile: computePeerProfile({character: target}),
+				operationId,
+			});
+			const expiresAt = (await client.query(`
+				SELECT now() + ($1::bigint * interval '1 millisecond') AS expires_at
+			`, [this._semanticProposalTtlMs])).rows[0].expires_at;
+			const semanticOperation = await this._pInsertSemanticOperation({
+				client,
+				operation: {
+					id: operationId,
+					campaignId,
+					originActorAccountId: accountId,
+					sourceCharacterId: source.id,
+					targetCharacterId: target.id,
+					targetRef,
+					status: "proposed",
+					version: derived.operation.version,
+					kind: derived.operation.kind,
+					arguments: derived.operation.arguments,
+					sourceEntity: derived.sourceEntity,
+					effectTemplateId: derived.effectTemplateId,
+					choice: derived.choice,
+					sourceDisplaySnapshot: derived.sourceDisplaySnapshot,
+					targetDisplaySnapshot: derived.targetDisplaySnapshot,
+					effectDisplaySnapshot: derived.effectDisplaySnapshot,
+					resultingCharacterRevision: null,
+					expiresAt,
+				},
+			});
+			await this._pAppendAudit({client, campaignId, actorAccountId: accountId, action: "character.operation.proposed", targetType: "semantic_operation", targetId: operationId});
+			const proposedEvent = await this._pAppendEvent({
+				client,
+				campaignId,
+				actorAccountId: accountId,
+				type: "character.operation.proposed",
+				aggregateType: "semantic_operation",
+				aggregateId: operationId,
+				visibility: "explicit_accounts",
+				visibleAccountIds: [...new Set([accountId, target.ownerAccountId])],
+				payload: {
+					operationId,
+					targetCharacterId: target.id,
+					status: "proposed",
+					sourceEntity: derived.sourceEntity,
+					effectTemplateId: derived.effectTemplateId,
+					choice: derived.choice,
+					sourceDisplaySnapshot: derived.sourceDisplaySnapshot,
+					targetDisplaySnapshot: derived.targetDisplaySnapshot,
+					effectDisplaySnapshot: derived.effectDisplaySnapshot,
+					expiresAt,
+				},
+			});
+			await client.query(`
+				UPDATE hub.semantic_operations
+				SET created_event_id = $2, updated_at = now()
+				WHERE id = $1
+			`, [operationId, proposedEvent.id]);
+			const response = {operation: this._getSemanticOperationView(semanticOperation), eventIds: [proposedEvent.id]};
+			await this._pSaveSemanticCommand({
+				client,
+				accountId,
+				commandId,
+				operationId,
+				commandType: "create_proposal",
+				idempotencyKey,
+				response,
+				eventIds: response.eventIds,
+			});
 			await client.query("COMMIT");
 			return response;
 		} catch (error) {
@@ -2284,76 +2671,273 @@ export class PostgresHubStore {
 		}
 	}
 
-	_getPendingAction (row) {
-		return {
-			id: row.id,
-			campaignId: row.campaign_id,
-			actorAccountId: row.actor_account_id,
-			targetCharacterId: row.target_character_id,
-			actionType: row.action_type,
-			status: row.status,
-			payload: row.payload,
-			expiresAt: row.expires_at,
-			createdAt: row.created_at,
-			updatedAt: row.updated_at,
-		};
+	async _pExpireSemanticOperations ({client, campaignId}) {
+		const due = await client.query(`
+			SELECT so.*, target.owner_account_id AS target_owner_account_id
+			FROM hub.semantic_operations so
+			JOIN hub.characters target ON target.id = so.target_character_id
+			WHERE so.campaign_id = $1
+				AND so.status = 'proposed'
+				AND so.expires_at <= now()
+			ORDER BY so.id
+			FOR UPDATE OF so
+		`, [campaignId]);
+		for (const row of due.rows) {
+			const operation = this._getSemanticOperation(row);
+			const event = await this._pAppendEvent({
+				client,
+				campaignId,
+				actorAccountId: null,
+				type: "character.operation.expired",
+				aggregateType: "semantic_operation",
+				aggregateId: operation.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: [...new Set([operation.originActorAccountId, row.target_owner_account_id].filter(Boolean))],
+				payload: {
+					operationId: operation.id,
+					targetCharacterId: operation.targetCharacterId,
+					status: "expired",
+					reason: "unavailable",
+					sourceDisplaySnapshot: operation.sourceDisplaySnapshot,
+					targetDisplaySnapshot: operation.targetDisplaySnapshot,
+					effectDisplaySnapshot: operation.effectDisplaySnapshot,
+				},
+			});
+			await client.query(`
+				UPDATE hub.semantic_operations
+				SET status = 'expired', terminal_reason = 'unavailable',
+					terminal_event_id = $2, resolved_at = now(), updated_at = now()
+				WHERE id = $1 AND status = 'proposed'
+			`, [operation.id, event.id]);
+			await this._pAppendAudit({
+				client,
+				campaignId,
+				actorAccountId: null,
+				action: "character.operation.expired",
+				targetType: "semantic_operation",
+				targetId: operation.id,
+			});
+		}
 	}
 
 	async pListPendingActions ({accountId, campaignId}) {
-		const membership = await this.pGetMembership({accountId, campaignId});
-		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
-		const result = await this._pool.query(`
-			SELECT pa.*
-			FROM hub.pending_actions pa
-			LEFT JOIN hub.characters c ON c.id = pa.target_character_id
-			WHERE pa.campaign_id = $1
-				AND (
-					$2::boolean
-					OR pa.actor_account_id = $3
-					OR c.owner_account_id = $3
-				)
-			ORDER BY pa.created_at DESC
-		`, [campaignId, ["dm", "co_dm"].includes(membership.role), accountId]);
-		return result.rows.map(row => this._getPendingAction(row));
-	}
-
-	async pResolveStructuredAction ({accountId, campaignId, actionId, decision, idempotencyKey}) {
 		const client = await this._pool.connect();
 		try {
 			await client.query("BEGIN");
-			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
+			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [campaignId]);
+			const membership = await this._pGetMembershipForUpdate({
+				client,
+				accountId,
+				campaignId,
+				roles: ["dm", "co_dm", "player", "spectator"],
+			});
+			await this._pExpireSemanticOperations({client, campaignId});
+			const result = await client.query(`
+				SELECT so.*
+				FROM hub.semantic_operations so
+				JOIN hub.characters c ON c.id = so.target_character_id
+				WHERE so.campaign_id = $1
+					AND so.status = 'proposed'
+					AND (
+						$2::boolean
+						OR so.origin_actor_account_id = $3
+						OR c.owner_account_id = $3
+					)
+				ORDER BY so.created_at DESC
+			`, [campaignId, ["dm", "co_dm"].includes(membership.role), accountId]);
+			await client.query("COMMIT");
+			return result.rows.map(row => this._getSemanticOperationView(this._getSemanticOperation(row)));
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pResolveStructuredAction ({accountId, sessionId, campaignId, commandId, actionId, decision, idempotencyKey}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockSemanticCommand({client, accountId, commandId, idempotencyKey});
+			await this._pAssertSemanticSession({client, accountId, sessionId});
 			if (prior) {
 				await client.query("COMMIT");
 				return prior;
 			}
-			const targetLookup = await client.query(`SELECT target_character_id FROM hub.pending_actions WHERE campaign_id = $1 AND id = $2 AND status = 'proposed'`, [campaignId, actionId]);
-			if (!targetLookup.rowCount) throw new HubStoreError("ACTION_NOT_FOUND", `Pending action was not found.`, {status: 404});
-			const membership = await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm", "player"]});
-			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [targetLookup.rows[0].target_character_id]);
-			const actionResult = await client.query(`SELECT * FROM hub.pending_actions WHERE campaign_id = $1 AND id = $2 AND status = 'proposed' FOR UPDATE`, [campaignId, actionId]);
-			if (!actionResult.rowCount) throw new HubStoreError("ACTION_NOT_FOUND", `Pending action was not found.`, {status: 404});
-			const action = this._getPendingAction(actionResult.rows[0]);
-			const characterResult = await client.query(`SELECT * FROM hub.characters WHERE id = $1 AND campaign_id = $2 AND status = 'active' FOR UPDATE`, [action.targetCharacterId, campaignId]);
-			if (!characterResult.rowCount) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
-			const character = getCharacter(characterResult.rows[0]);
-			if (character.ownerAccountId !== accountId && !["dm", "co_dm"].includes(membership.role)) throw new HubStoreError("FORBIDDEN", `Cannot resolve this action.`, {status: 403});
-			let characterNxt = character;
-			const status = decision === "accept" ? "applied" : "rejected";
+			const membership = await this._pGetMembershipForUpdate({
+				client,
+				accountId,
+				campaignId,
+				roles: ["dm", "co_dm", "player"],
+			});
+			const lookup = await client.query(`
+				SELECT source_character_id, target_character_id
+				FROM hub.semantic_operations
+				WHERE campaign_id = $1 AND id = $2
+			`, [campaignId, actionId]);
+			if (!lookup.rowCount) throw new HubStoreError("ACTION_NOT_FOUND", `Pending operation was not found.`, {status: 404});
+			const aggregateIds = [...new Set([
+				lookup.rows[0].source_character_id,
+				lookup.rows[0].target_character_id,
+			].filter(Boolean))].sort();
+			const operationResult = await client.query(`
+				SELECT *
+				FROM hub.semantic_operations
+				WHERE campaign_id = $1 AND id = $2 AND status = 'proposed'
+				FOR UPDATE
+			`, [campaignId, actionId]);
+			if (!operationResult.rowCount) throw new HubStoreError("ACTION_NOT_FOUND", `Pending operation was not found.`, {status: 404});
+			let operation = this._getSemanticOperation(operationResult.rows[0]);
+			for (const id of aggregateIds) await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [id]);
+			const characters = await client.query(`
+				SELECT *
+				FROM hub.characters
+				WHERE campaign_id = $1 AND status = 'active' AND id = ANY($2::uuid[])
+				ORDER BY id
+				FOR UPDATE
+			`, [campaignId, aggregateIds]);
+			const sourceRow = characters.rows.find(row => row.id === operation.sourceCharacterId);
+			const targetRow = characters.rows.find(row => row.id === operation.targetCharacterId);
+			if (!sourceRow || !targetRow) throw new HubStoreError("PROPOSAL_STALE", `The proposal is no longer applicable.`, {status: 409});
+			const source = getCharacter(sourceRow);
+			const target = getCharacter(targetRow);
+			const isDm = ["dm", "co_dm"].includes(membership.role);
+			const isTargetOwner = target.ownerAccountId === accountId;
+			const isProposer = operation.originActorAccountId === accountId;
+			if (decision === "accept" && !isTargetOwner) throw new HubStoreError("FORBIDDEN", `Only the target owner may approve.`, {status: 403});
+			if (decision === "reject" && !isTargetOwner && !isDm) throw new HubStoreError("FORBIDDEN", `Cannot reject this proposal.`, {status: 403});
+			if (decision === "cancel" && !isProposer && !isDm) throw new HubStoreError("FORBIDDEN", `Cannot cancel this proposal.`, {status: 403});
+
+			const commandType = decision;
+			if (new Date(operation.expiresAt) <= new Date()) decision = "expire";
+			let targetNxt = target;
+			let terminalEvent;
+			let invalidationEvent = null;
 			if (decision === "accept") {
-				const data = applyStructuredEffect({data: character.data, effect: action.payload.effect});
+				let derived;
+				try {
+					derived = this._semanticOperationRegistry.derive({
+						sourceCharacter: source,
+						targetCharacter: target,
+						targetRef: operation.targetRef,
+						sourceEntity: operation.sourceEntity,
+						effectTemplateId: operation.effectTemplateId,
+						choice: operation.choice,
+						sourceProfile: computePeerProfile({character: source}),
+						targetProfile: computePeerProfile({character: target}),
+						operationId: operation.id,
+					});
+				} catch (error) {
+					if (["SOURCE_COST_UNSUPPORTED", "SOURCE_OR_TARGET_UNAVAILABLE"].includes(error.code)) {
+						throw new HubStoreError("PROPOSAL_STALE", `The proposal is no longer applicable.`, {status: 409});
+					}
+					throw error;
+				}
+				const expected = {
+					operationId: operation.id,
+					kind: operation.kind,
+					version: operation.version,
+					targetCharacterId: operation.targetCharacterId,
+					arguments: operation.arguments,
+				};
+				if (JSON.stringify(derived.operation) !== JSON.stringify(expected)) {
+					throw new HubStoreError("PROPOSAL_STALE", `The proposal is no longer applicable.`, {status: 409});
+				}
+				const data = applySemanticOperation({data: target.data, operation: derived.operation});
 				validateCloudCharacterData(data);
-				const updated = await client.query(`UPDATE hub.characters SET data = $2::jsonb, revision = revision + 1, updated_at = now() WHERE id = $1 RETURNING *`, [character.id, JSON.stringify(data)]);
-				characterNxt = getCharacter(updated.rows[0]);
+				const updated = await client.query(`
+					UPDATE hub.characters
+					SET data = $2::jsonb, revision = revision + 1, updated_at = now()
+					WHERE id = $1
+					RETURNING *
+				`, [target.id, JSON.stringify(data)]);
+				targetNxt = getCharacter(updated.rows[0]);
+				const updatedOperation = await client.query(`
+					UPDATE hub.semantic_operations
+					SET status = 'applied', resulting_character_revision = $2, updated_at = now()
+					WHERE id = $1
+					RETURNING *
+				`, [operation.id, targetNxt.revision]);
+				operation = this._getSemanticOperation(updatedOperation.rows[0]);
+				terminalEvent = await this._pAppendEvent({
+					client,
+					campaignId,
+					actorAccountId: accountId,
+					type: "character.operation.applied",
+					aggregateType: "character",
+					aggregateId: target.id,
+					aggregateRevision: targetNxt.revision,
+					visibility: "explicit_accounts",
+					visibleAccountIds: [...new Set([operation.originActorAccountId, target.ownerAccountId].filter(Boolean))],
+					payload: {operation: derived.operation, resultingCharacterRevision: targetNxt.revision},
+				});
+				await client.query(`
+					UPDATE hub.semantic_operations
+					SET applied_event_id = $2, resolved_at = now(), updated_at = now()
+					WHERE id = $1
+				`, [operation.id, terminalEvent.id]);
+				await client.query(`UPDATE hub.characters SET operation_watermark = $2 WHERE id = $1`, [target.id, terminalEvent.sequence]);
+				targetNxt.operationWatermark = terminalEvent.sequence;
+				invalidationEvent = await this._pAppendProjectionInvalidation({client, character: targetNxt, actorAccountId: accountId});
+			} else {
+				const status = decision === "reject" ? "rejected" : decision === "cancel" ? "cancelled" : "expired";
+				const updatedOperation = await client.query(`
+					UPDATE hub.semantic_operations
+					SET status = $2, updated_at = now()
+					WHERE id = $1
+					RETURNING *
+				`, [operation.id, status]);
+				operation = this._getSemanticOperation(updatedOperation.rows[0]);
+				terminalEvent = await this._pAppendEvent({
+					client,
+					campaignId,
+					actorAccountId: decision === "expire" ? null : accountId,
+					type: `character.operation.${status}`,
+					aggregateType: "semantic_operation",
+					aggregateId: operation.id,
+					visibility: "explicit_accounts",
+					visibleAccountIds: [...new Set([operation.originActorAccountId, target.ownerAccountId].filter(Boolean))],
+					payload: {
+						operationId: operation.id,
+						targetCharacterId: operation.targetCharacterId,
+						status,
+						reason: "unavailable",
+						sourceDisplaySnapshot: operation.sourceDisplaySnapshot,
+						targetDisplaySnapshot: operation.targetDisplaySnapshot,
+						effectDisplaySnapshot: operation.effectDisplaySnapshot,
+					},
+				});
+				await client.query(`
+					UPDATE hub.semantic_operations
+					SET terminal_reason = 'unavailable', terminal_event_id = $2,
+						resolved_at = now(), updated_at = now()
+					WHERE id = $1
+				`, [operation.id, terminalEvent.id]);
 			}
-			const updatedAction = await client.query(`UPDATE hub.pending_actions SET status = $2, updated_at = now() WHERE id = $1 RETURNING *`, [actionId, status]);
-			const actionNxt = this._getPendingAction(updatedAction.rows[0]);
-			await this._pAppendAudit({client, campaignId, actorAccountId: accountId, action: `action.${status}`, targetType: "pending_action", targetId: actionId});
-			await this._pAppendEvent({client, campaignId, actorAccountId: accountId, type: `action.${status}`, aggregateType: "pending_action", aggregateId: actionId, visibility: "explicit_accounts", visibleAccountIds: [...new Set([action.actorAccountId, character.ownerAccountId])], payload: {targetCharacterId: character.id, effect: action.payload.effect, characterRevision: characterNxt.revision}});
-			// An applied effect changes hp/conditions, which are catalog fields, while the
-			// action event itself is visible only to the actor and DM.
-			if (decision === "accept") await this._pAppendProjectionInvalidation({client, character: characterNxt, actorAccountId: accountId});
-			const response = {action: actionNxt, character: stripProjectionPolicy(characterNxt)};
-			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "action.resolve", response});
+			await this._pAppendAudit({
+				client,
+				campaignId,
+				actorAccountId: decision === "expire" ? null : accountId,
+				action: `character.operation.${operation.status}`,
+				targetType: "semantic_operation",
+				targetId: operation.id,
+			});
+			const response = {
+				operation: this._getSemanticOperationView(operation),
+				eventIds: [terminalEvent.id, invalidationEvent?.id].filter(Boolean),
+				...(operation.status === "applied" ? {operationWatermark: targetNxt.operationWatermark} : {}),
+			};
+			await this._pSaveSemanticCommand({
+				client,
+				accountId,
+				commandId,
+				operationId: operation.id,
+				commandType,
+				idempotencyKey,
+				response,
+				eventIds: response.eventIds,
+			});
 			await client.query("COMMIT");
 			return response;
 		} catch (error) {
@@ -2608,13 +3192,74 @@ export class PostgresHubStore {
 		});
 	}
 
+	async _pCancelSemanticOperationsForLifecycle ({
+		client,
+		campaignId,
+		actorAccountId,
+		affectedAccountId = null,
+		characterIds = [],
+		isAll = false,
+	}) {
+		const pending = await client.query(`
+			SELECT so.*, target.owner_account_id AS target_owner_account_id
+			FROM hub.semantic_operations so
+			LEFT JOIN hub.characters target ON target.id = so.target_character_id
+			WHERE so.campaign_id = $1
+				AND so.status = 'proposed'
+				AND (
+					$4::boolean
+					OR so.origin_actor_account_id = $2
+					OR so.source_character_id = ANY($3::uuid[])
+					OR so.target_character_id = ANY($3::uuid[])
+				)
+			ORDER BY so.id
+			FOR UPDATE OF so
+		`, [campaignId, affectedAccountId, characterIds, isAll]);
+		for (const row of pending.rows) {
+			const operation = this._getSemanticOperation(row);
+			const event = await this._pAppendEvent({
+				client,
+				campaignId,
+				actorAccountId,
+				type: "character.operation.cancelled",
+				aggregateType: "semantic_operation",
+				aggregateId: operation.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: [...new Set([row.origin_actor_account_id, row.target_owner_account_id].filter(Boolean))],
+				payload: {
+					operationId: operation.id,
+					targetCharacterId: operation.targetCharacterId,
+					status: "cancelled",
+					reason: "unavailable",
+					sourceDisplaySnapshot: operation.sourceDisplaySnapshot,
+					targetDisplaySnapshot: operation.targetDisplaySnapshot,
+					effectDisplaySnapshot: operation.effectDisplaySnapshot,
+				},
+			});
+			await client.query(`
+				UPDATE hub.semantic_operations
+				SET status = 'cancelled', terminal_reason = 'unavailable',
+					terminal_event_id = $2, resolved_at = now(), updated_at = now()
+				WHERE id = $1 AND status = 'proposed'
+			`, [operation.id, event.id]);
+			await this._pAppendAudit({
+				client,
+				campaignId,
+				actorAccountId,
+				action: "character.operation.cancelled",
+				targetType: "semantic_operation",
+				targetId: operation.id,
+				details: {reason: "lifecycle"},
+			});
+		}
+	}
+
 	async _pRemoveMembershipLifecycle ({client, campaignId, membership, actorAccountId, status}) {
 		const characters = await client.query(`
 			SELECT id, data->>'name' AS name
 			FROM hub.characters
 			WHERE campaign_id = $1 AND owner_account_id = $2 AND status = 'active'
 			ORDER BY id
-			FOR UPDATE
 		`, [campaignId, membership.accountId]);
 		const characterIds = characters.rows.map(row => row.id);
 		const characterNameSnapshots = characters.rows.map(row => ({
@@ -2622,6 +3267,13 @@ export class PostgresHubStore {
 			...createCharacterDisplayNameSnapshot(row.name),
 		}));
 		const characterNameSnapshotById = new Map(characterNameSnapshots.map(snapshot => [snapshot.characterId, snapshot]));
+		await this._pCancelSemanticOperationsForLifecycle({
+			client,
+			campaignId,
+			actorAccountId,
+			affectedAccountId: membership.accountId,
+			characterIds,
+		});
 		for (const characterId of characterIds) {
 			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [characterId]);
 		}
@@ -2677,7 +3329,8 @@ export class PostgresHubStore {
 		}
 		const detached = await client.query(`
 			UPDATE hub.characters
-			SET campaign_id = NULL, client_import_id = NULL, revision = revision + 1, updated_at = now()
+			SET campaign_id = NULL, client_import_id = NULL, target_ref = gen_random_uuid(),
+				revision = revision + 1, updated_at = now()
 			WHERE id = ANY($1::uuid[])
 			RETURNING id, revision
 		`, [characterIds]);
@@ -2749,6 +3402,21 @@ export class PostgresHubStore {
 			const target = (await client.query(`SELECT * FROM hub.memberships WHERE id = $1 AND campaign_id = $2 FOR UPDATE`, [membershipId, campaignId])).rows[0];
 			if (!target || target.status !== "active") throw new HubStoreError("MEMBERSHIP_NOT_FOUND", `Membership was not found.`, {status: 404});
 			if (target.account_id === campaign.owner_account_id) throw new HubStoreError("MEMBERSHIP_OWNER_PROTECTED", `Campaign owner role cannot be changed.`, {status: 409});
+			if (role === "spectator") {
+				const characters = await client.query(`
+					SELECT id
+					FROM hub.characters
+					WHERE campaign_id = $1 AND owner_account_id = $2 AND status = 'active'
+					ORDER BY id
+				`, [campaignId, target.account_id]);
+				await this._pCancelSemanticOperationsForLifecycle({
+					client,
+					campaignId,
+					actorAccountId: accountId,
+					affectedAccountId: target.account_id,
+					characterIds: characters.rows.map(row => row.id),
+				});
+			}
 			const updated = await client.query(`UPDATE hub.memberships SET role = $2, updated_at = now() WHERE id = $1 RETURNING id, campaign_id, account_id, role, status`, [membershipId, role]);
 			const membership = getMembership(updated.rows[0]);
 			const response = {membership};
@@ -3005,6 +3673,35 @@ export class PostgresHubStore {
 					purgeAfter: updated.rows[0].purge_after,
 				};
 			}
+			const affectedCampaigns = await client.query(`
+				SELECT DISTINCT so.campaign_id
+				FROM hub.semantic_operations so
+				LEFT JOIN hub.characters source ON source.id = so.source_character_id
+				LEFT JOIN hub.characters target ON target.id = so.target_character_id
+				WHERE so.status = 'proposed'
+					AND (
+						so.origin_actor_account_id = $1
+						OR source.owner_account_id = $1
+						OR target.owner_account_id = $1
+					)
+				ORDER BY so.campaign_id
+			`, [accountId]);
+			for (const {campaign_id: affectedCampaignId} of affectedCampaigns.rows) {
+				await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [affectedCampaignId]);
+				const ownedCharacters = await client.query(`
+					SELECT id
+					FROM hub.characters
+					WHERE campaign_id = $1 AND owner_account_id = $2
+					ORDER BY id
+				`, [affectedCampaignId, accountId]);
+				await this._pCancelSemanticOperationsForLifecycle({
+					client,
+					campaignId: affectedCampaignId,
+					actorAccountId: accountId,
+					affectedAccountId: accountId,
+					characterIds: ownedCharacters.rows.map(row => row.id),
+				});
+			}
 			const sessions = await client.query(`
 				UPDATE hub.sessions
 				SET revoked_at = COALESCE(revoked_at, now())
@@ -3165,9 +3862,15 @@ export class PostgresHubStore {
 			if (!campaign || campaign.owner_account_id !== accountId) throw new HubStoreError("FORBIDDEN", `Only the campaign owner can archive it.`, {status: 403});
 			const reserved = await client.query(`SELECT 1 FROM hub.transfers WHERE campaign_id = $1 AND status = 'reserved' LIMIT 1 FOR UPDATE`, [campaignId]);
 			if (reserved.rowCount) throw new HubStoreError("CAMPAIGN_BUSY", `Resolve reserved transfers before archiving.`, {status: 409});
+			await this._pCancelSemanticOperationsForLifecycle({
+				client,
+				campaignId,
+				actorAccountId: accountId,
+				isAll: true,
+			});
 			await client.query(`UPDATE hub.pending_actions SET status = 'cancelled', updated_at = now() WHERE campaign_id = $1 AND status = 'proposed'`, [campaignId]);
 			await client.query(`DELETE FROM hub.character_leases WHERE character_id IN (SELECT id FROM hub.characters WHERE campaign_id = $1)`, [campaignId]);
-			await client.query(`UPDATE hub.characters SET campaign_id = NULL, client_import_id = NULL, revision = revision + 1, updated_at = now() WHERE campaign_id = $1`, [campaignId]);
+			await client.query(`UPDATE hub.characters SET campaign_id = NULL, client_import_id = NULL, target_ref = gen_random_uuid(), revision = revision + 1, updated_at = now() WHERE campaign_id = $1`, [campaignId]);
 			const updated = await client.query(`UPDATE hub.campaigns SET status = 'archived', updated_at = now() WHERE id = $1 RETURNING *`, [campaignId]);
 			await this._pAppendAudit({client, campaignId, actorAccountId: accountId, action: "campaign.archived", targetType: "campaign", targetId: campaignId});
 			await this._pAppendEvent({client, campaignId, actorAccountId: accountId, type: "campaign.archived", aggregateType: "campaign", aggregateId: campaignId, payload: {}});

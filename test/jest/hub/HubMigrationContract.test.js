@@ -5,6 +5,7 @@ const migrationUrl = new URL("../../../server/migrations/0001_hub_core.sql", imp
 const sql = fs.readFileSync(migrationUrl, "utf8");
 const lifecycleSql = fs.readFileSync(new URL("../../../server/migrations/0002_lifecycle_administration.sql", import.meta.url), "utf8");
 const operationsSql = fs.readFileSync(new URL("../../../server/migrations/0003_operational_runs.sql", import.meta.url), "utf8");
+const semanticOperationsSql = fs.readFileSync(new URL("../../../server/migrations/0005_semantic_character_operations.sql", import.meta.url), "utf8");
 const postgresStore = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");
 
 describe("campaign hub first migration contract", () => {
@@ -135,5 +136,16 @@ describe("campaign hub first migration contract", () => {
 		expect(operationsSql).toContain("CREATE TABLE hub.operational_runs");
 		expect(operationsSql).toContain("job_type IN ('maintenance', 'backup', 'restore_drill')");
 		expect(operationsSql).toContain("operational_runs_job_started_idx");
+	});
+
+	it("persists semantic operations, commands, target references, and watermarks in migration 0005", () => {
+		expect(semanticOperationsSql).toContain("CREATE TABLE hub.semantic_operations");
+		expect(semanticOperationsSql).toContain("CREATE TABLE hub.semantic_operation_commands");
+		expect(semanticOperationsSql).toContain("target_ref uuid");
+		expect(semanticOperationsSql).toContain("operation_watermark bigint NOT NULL DEFAULT 0");
+		expect(semanticOperationsSql).toContain("ON hub.semantic_operations (target_character_id, resulting_character_revision)");
+		expect(semanticOperationsSql).toContain("command_id uuid PRIMARY KEY");
+		expect(semanticOperationsSql).toContain("interval '24 hours'");
+		expect(semanticOperationsSql).toContain("status = 'cancelled'");
 	});
 });

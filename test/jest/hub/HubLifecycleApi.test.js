@@ -40,7 +40,7 @@ describe("Hub lifecycle API", () => {
 	}
 
 	function headers (session, key = `k-${++ix}`) {
-		return {cookie: session.cookie, origin: ORIGIN, "x-csrf-token": session.csrfToken, "x-hub-protocol-version": "2", "idempotency-key": key};
+		return {cookie: session.cookie, origin: ORIGIN, "x-csrf-token": session.csrfToken, 		"x-hub-protocol-version": "3", "idempotency-key": key};
 	}
 
 	async function setupCampaign () {
@@ -73,11 +73,19 @@ describe("Hub lifecycle API", () => {
 			payload: {role: "spectator"},
 		});
 		expect(changed.json().membership.role).toBe("spectator");
+		const commandId = crypto.randomUUID();
 		const denied = await app.inject({
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/actions`,
-			headers: headers(player),
-			payload: {targetCharacterId: crypto.randomUUID(), effect: {type: "informational"}},
+			headers: headers(player, commandId),
+			payload: {
+				commandId,
+				sourceCharacterId: crypto.randomUUID(),
+				sourceEntity: {type: "ability", uid: "test|tst", version: "tst-v1"},
+				effectTemplateId: "test.effect",
+				choice: {},
+				targetRef: crypto.randomUUID(),
+			},
 		});
 		expect(denied.statusCode).toBe(403);
 

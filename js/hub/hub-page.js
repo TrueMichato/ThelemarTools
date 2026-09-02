@@ -450,14 +450,15 @@ function applyCampaignRoleLayout ({campaign, characters}) {
 		if (guidance) {
 			guidance.textContent = isSpectator
 				? "Follow the party roster and campaign activity. Gameplay controls are reserved for players and DMs."
-				: "Open your character, check requests, or send an effect or transfer to another player.";
+				: "Open your character, check requests, or send a transfer to another player.";
 		}
 	}
 
 	setHidden(document.getElementById("campaign-characters-panel"), isSpectator);
 	setHidden(document.getElementById("campaign-party-panel"), isDm);
 	setHidden(document.getElementById("campaign-shared-actions"), !canPlay);
-	setHidden(document.getElementById("campaign-jump-effect"), !canPlay);
+	setHidden(document.getElementById("campaign-action-form"), !isDm);
+	setHidden(document.getElementById("campaign-jump-effect"), !isDm);
 	setHidden(document.getElementById("campaign-jump-transfer"), !canPlay);
 	setHidden(document.getElementById("campaign-dm-grants"), !isDm);
 	setHidden(document.getElementById("campaign-content-managed-note"), isDm);
@@ -1072,17 +1073,21 @@ async function renderPendingActions ({campaign, campaignId, session, targetChara
 		main.className = "hub-data-row__main";
 		const text = document.createElement("span");
 		const target = getCharacterById(targetCharacters, action.targetCharacterId);
-		text.textContent = `${getMemberName(members, action.actorAccountId)} proposes ${getEffectDescription(action.payload?.effect)} for ${getCharacterName(target)}.`;
+		const sourceName = action.sourceDisplaySnapshot?.identity?.name || "A character";
+		const effectName = action.effectDisplaySnapshot?.label || "an effect";
+		const targetName = action.targetDisplaySnapshot?.identity?.name || getCharacterName(target);
+		text.textContent = `${sourceName} proposes ${effectName} for ${targetName}.`;
 		const meta = document.createElement("span");
 		meta.className = "hub-data-row__meta";
-		const canResolve = isDm || (campaign.role === "player" && getProjectionOwnerAccountId(target) === session.account.id);
-		meta.textContent = canResolve ? "Your response is needed" : "Waiting for the recipient";
+		const isTargetOwner = campaign.role === "player" && getProjectionOwnerAccountId(target) === session.account.id;
+		const decisions = isTargetOwner ? ["accept", "reject"] : isDm ? ["reject"] : [];
+		meta.textContent = decisions.length ? "Your response is needed" : "Waiting for the recipient";
 		main.append(text, meta);
 		row.append(main);
-		if (canResolve) {
+		if (decisions.length) {
 			const controls = document.createElement("span");
 			controls.className = "hub-data-row__controls";
-			for (const decision of ["accept", "reject"]) {
+			for (const decision of decisions) {
 				const button = document.createElement("button");
 				button.type = "button";
 				button.className = decision === "accept" ? "hub-button hub-button--primary" : "hub-button";
@@ -1090,7 +1095,7 @@ async function renderPendingActions ({campaign, campaignId, session, targetChara
 				button.addEventListener("click", async () => {
 					button.disabled = true;
 					try {
-						await api.pResolveStructuredAction({campaignId, actionId: action.id, decision, idempotencyKey: crypto.randomUUID()});
+						await api.pResolveStructuredAction({campaignId, actionId: action.operationId, decision, idempotencyKey: crypto.randomUUID()});
 						await renderPendingActions({campaign, campaignId, session, targetCharacters, members});
 					} catch (error) {
 						renderError(error);
@@ -1420,7 +1425,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 	const actionSlotFields = document.getElementById("campaign-action-slot-fields");
 	const syncActionFields = () => {
 		const type = actionType.value;
-		const isSlot = type === "spell_slot_spend";
+		const isSlot = ["spell_slot_spend", "spell_slot_restore"].includes(type);
 		setHidden(actionSlotFields, !isSlot);
 		actionValue.disabled = isSlot;
 		actionValue.required = !isSlot;
@@ -1430,7 +1435,6 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			healing: {label: "Healing amount", type: "number", placeholder: "1"},
 			condition_add: {label: "Condition to add", type: "text", placeholder: "Poisoned"},
 			condition_remove: {label: "Condition to remove", type: "text", placeholder: "Poisoned"},
-			informational: {label: "Note", type: "text", placeholder: "Describe what needs approval"},
 		}[type];
 		actionValueLabel.textContent = configuration.label;
 		actionValue.type = configuration.type;
@@ -1453,41 +1457,44 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					if (["damage", "healing"].includes(type) && !(Number(rawValue) > 0)) {
 						throw new Error("Enter a positive amount.");
 					}
-					if (["condition_add", "condition_remove", "informational"].includes(type) && !rawValue) {
-						throw new Error(type === "informational" ? "Enter a note." : "Enter a condition.");
+					if (["condition_add", "condition_remove"].includes(type) && !rawValue) {
+						throw new Error("Enter a condition.");
 					}
 					const slotLevel = Number(document.getElementById("campaign-action-slot-level").value);
 					const slotAmount = Number(document.getElementById("campaign-action-slot-amount").value);
-					if (type === "spell_slot_spend" && (!Number.isInteger(slotLevel) || slotLevel < 1 || slotLevel > 9)) {
+					if (["spell_slot_spend", "spell_slot_restore"].includes(type) && (!Number.isInteger(slotLevel) || slotLevel < 1 || slotLevel > 9)) {
 						throw new Error("Choose a spell-slot level from 1 to 9.");
 					}
-					if (type === "spell_slot_spend" && (!Number.isInteger(slotAmount) || slotAmount < 1)) {
+					if (["spell_slot_spend", "spell_slot_restore"].includes(type) && (!Number.isInteger(slotAmount) || slotAmount < 1)) {
 						throw new Error("Enter a whole number of spell slots of at least 1.");
 					}
-					const effect = type === "spell_slot_spend"
+					const operation = ["spell_slot_spend", "spell_slot_restore"].includes(type)
 						? {
-							type,
-							level: slotLevel,
-							amount: slotAmount,
+							kind: type === "spell_slot_spend" ? "spell_slot.spend" : "spell_slot.restore",
+							version: 1,
+							arguments: {level: slotLevel, amount: slotAmount},
 						}
 						: ["damage", "healing"].includes(type)
-							? {type, amount: Number(rawValue)}
+							? {
+								kind: type === "damage" ? "hp.damage" : "hp.heal",
+								version: 1,
+								arguments: {amount: Number(rawValue)},
+							}
 							: ["condition_add", "condition_remove"].includes(type)
-								? {type, condition: rawValue}
-								: {type: "informational", note: rawValue};
-					const contextValue = document.getElementById("campaign-action-context").value.trim();
-					if (contextValue) {
-						effect.context = contextValue;
-					}
+								? {
+									kind: type === "condition_add" ? "condition.add" : "condition.remove",
+									version: 1,
+									arguments: {condition: {name: rawValue, source: "PHB"}},
+								}
+								: null;
 					await api.pCreateStructuredAction({
 						campaignId,
 						targetCharacterId: document.getElementById("campaign-action-target").value.split(":")[1],
-						effect,
+						operation,
 						idempotencyKey,
 					});
 					document.getElementById("campaign-action-value").value = "";
-					document.getElementById("campaign-action-context").value = "";
-					setFormStatus({formId, message: "Effect proposal sent. It is now in the campaign inbox."});
+					setFormStatus({formId, message: "Effect applied."});
 					await renderPendingActions({campaign, campaignId, session, targetCharacters, members});
 				}});
 		} catch (error) {

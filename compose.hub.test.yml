@@ -1,4 +1,11 @@
 services:
+  db:
+    ports:
+      - "127.0.0.1:${HUB_TEST_POSTGRES_PORT:?Set HUB_TEST_POSTGRES_PORT}:5432"
+    networks:
+      - hub-private
+      - hub-public
+
   bff:
     build:
       context: .

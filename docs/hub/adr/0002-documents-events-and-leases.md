@@ -24,8 +24,10 @@ also require stale-writer protection.
 - Whole stale snapshots are never merged automatically.
 
 Owner edits are path patches derived from the last accepted snapshot. Structured server commands (grants,
-transfers, accepted effects) update canonical state semantically. Disjoint local patches may be rebased after
-a server command; overlapping paths require recovery/conflict UI.
+transfers, and ADR 0012 versioned character operations) update canonical state semantically. DM/co-DM character
+operations apply in their creation transaction; source-derived peer operations require explicit target-owner
+approval. Generic overlap handling remains for opaque writes, while operation-aware Character Sheet rebase is
+specified separately by ADR 0012.
 
 ## Consequences
 
@@ -37,12 +39,16 @@ a server command; overlapping paths require recovery/conflict UI.
 
 ## Proof
 
-`HubCharacterMemoryAuthority` and its Jest suite demonstrate:
+The memory/PostgreSQL authorities and their Jest/real-stack suites demonstrate:
 
 - stale-device fencing after takeover;
 - revision conflict detection;
 - idempotent retry;
 - one event/outbox record per mutation;
 - disjoint owner rebase over a DM XP grant.
+- stable command/operation/event identity and mutated-body rejection;
+- immediate DM/co-DM semantic application and explicit peer proposal resolution;
+- one atomic character revision, applied event, outbox row, and owner/DM operation watermark.
 
-This proof is not the production authority; SQL transactions must enforce the same invariants.
+PostgreSQL transactions are the production authority. Character Sheet operation-aware live rebase remains the
+client-side proof owned by ADR 0012.
