@@ -29,8 +29,15 @@ source before consent and create release/recovery work for every non-applied out
 only in the browser or only when the proposal is created cannot prevent another cast from spending it first.
 
 This ADR extends ADR 0012 for one source character, one target character, one closed source-cost bundle, and one
-semantic target operation. It does not implement player targeting, multi-target orchestration, UI, schema
-migrations, or runtime handlers.
+semantic target operation. It explicitly supersedes ADR 0012's earlier follow-up requirement for an atomic
+reservation/release contract. For every cost-bearing peer proposal, this newer ADR is normative: there is no
+pre-approval reservation, and only the acceptance transaction may consume the source cost. ADR 0012 remains
+normative for the protocol-3 `cost=none` substrate and its command, approval, operation, event, and reconciliation
+semantics. Transfer escrow is unaffected because it moves ownership of an asset rather than paying a deferred
+spell/ability cost.
+
+This ADR does not implement player targeting, multi-target orchestration, UI, schema migrations, or runtime
+handlers.
 
 ## Decision
 

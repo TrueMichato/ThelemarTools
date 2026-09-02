@@ -1,12 +1,12 @@
 # ADR 0012: Idempotent semantic character operations with operation-aware rebase
 
-Status: Accepted as an architecture contract (2026-09-01)
+Status: Accepted architecture contract; source-cost reservation superseded by ADR 0016 (2026-09-03)
 
 Implementation: The protocol-v3 server/store/API/event substrate is implemented. DM/co-DM operations apply
 immediately; the source-derived peer proposal state machine exists but has no successful production `cost=none`
 template. Character Sheet operation-aware reconciliation (`B/L -> R/F`) is implemented and live: an applied
 operation is now applied to an already-open canonical campaign sheet without a reload. Approval UI, effect
-banners, target discovery, and peer source costs remain separate follow-up work.
+banners, target discovery, and the ADR 0016 peer source-cost implementation remain separate follow-up work.
 
 ## Context
 
@@ -185,9 +185,14 @@ effect that would consume or reserve a spell slot, charge, limited use, item, am
 component, concentration state, action/reaction, or any other source-character state fails closed with
 `SOURCE_COST_UNSUPPORTED` before a pending action is created and again at apply. No actor resource is reserved
 at proposal, committed at approval, or released on reject/cancel/expiry in this initial scope because no
-cost-bearing peer proposal is admitted. Supporting such effects later requires an atomic reservation contract
-that names each reserved resource, prevents double spend, commits source cost with the target effect, and
-releases it on every terminal non-applied transition.
+cost-bearing peer proposal is admitted.
+
+[ADR 0016](0016-atomic-peer-source-costs.md) supersedes this section's earlier direction to add an atomic
+reservation/release contract. Its binding cost-bearing model names every server-resolved resource but performs
+no pre-approval reservation or mutation: proposal-time availability is advisory, and the acceptance transaction
+revalidates and consumes the complete source cost with the target effect in one commit. Reject, cancel, expiry,
+and failed acceptance consume nothing, so there is nothing to release. ADR 0012 remains normative for the
+protocol-3 `cost=none` substrate and its command, approval, operation, event, and reconciliation semantics.
 
 The server stores immutable, privacy-safe `sourceDisplaySnapshot`, `targetDisplaySnapshot`, and
 `effectDisplaySnapshot` values with the proposal for approval and audit UI. They are derived from the applicable
@@ -441,7 +446,8 @@ implemented.
   rule.
 - **Let peers submit generic operations for approval:** consent cannot prove an actual ability/spell source,
   derive trusted effects, or make stale source/cost state valid.
-- **Partially support unreserved peer source costs:** retries and concurrent proposals could double-spend actor
-  resources; unsupported cost-bearing templates fail closed until atomic reservation exists.
+- **Partially support peer source costs without ADR 0016 atomic acceptance:** retries and concurrent proposals
+  could double-spend actor resources; unsupported cost-bearing templates fail closed until the approval-time
+  cost/effect transaction exists.
 - **Ignore operations while a conflict modal is open:** the later modal choice could silently undo canonical
   state.

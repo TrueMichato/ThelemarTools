@@ -5,13 +5,29 @@ const adr = fs.readFileSync(
 	"utf8",
 );
 const normalizedAdr = adr.replace(/\s+/g, " ");
+const adr0012 = fs.readFileSync(
+	new URL("../../../docs/hub/adr/0012-idempotent-semantic-character-operations.md", import.meta.url),
+	"utf8",
+);
+const normalizedAdr0012 = adr0012.replace(/\s+/g, " ");
 
 describe("Campaign Hub peer source-cost ADR contract", () => {
 	it("is explicitly a contract rather than runtime evidence", () => {
 		expect(adr).toMatch(/^Status: Accepted as an implementation contract \(2026-09-02\); not implemented$/m);
 		expect(normalizedAdr).toContain("This ADR extends ADR 0012");
-		expect(normalizedAdr).toContain("It does not implement player targeting");
+		expect(normalizedAdr).toContain("This ADR does not implement player targeting");
 		expect(normalizedAdr).toContain("protocol-v3 substrate deliberately admits only");
+	});
+
+	it("supersedes ADR 0012's reservation direction with one unambiguous model", () => {
+		expect(normalizedAdr).toContain("explicitly supersedes ADR 0012's earlier follow-up requirement");
+		expect(normalizedAdr).toContain("only the acceptance transaction may consume the source cost");
+		expect(normalizedAdr0012).toContain("source-cost reservation superseded by ADR 0016");
+		expect(normalizedAdr0012).toContain(
+			"[ADR 0016](0016-atomic-peer-source-costs.md) supersedes this section's earlier direction",
+		);
+		expect(normalizedAdr0012).toContain("performs no pre-approval reservation or mutation");
+		expect(normalizedAdr0012).not.toContain("requires an atomic reservation contract");
 	});
 
 	it("binds stable command, request, operation, event, and leg identities", () => {
