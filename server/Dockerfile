@@ -40,6 +40,8 @@ COPY --chown=hub:hub package.json ./
 COPY --chown=hub:hub server ./server
 COPY --chown=hub:hub js/hub/hub-json-patch.js ./js/hub/hub-json-patch.js
 COPY --chown=hub:hub js/hub/hub-semantic-hp.js ./js/hub/hub-semantic-hp.js
+COPY --chown=hub:hub js/hub/hub-semantic-operations.js ./js/hub/hub-semantic-operations.js
+COPY --chown=hub:hub js/hub/hub-store-error.js ./js/hub/hub-store-error.js
 # Character projections read derived statistics from the authoritative Character Sheet
 # calculation rather than reimplementing it, so the server needs those modules. All four
 # are pure JavaScript on this path; `lib/ace.js` is behind a lazy import that the server

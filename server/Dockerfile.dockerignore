@@ -11,6 +11,8 @@ server/**/.env*
 !js/hub
 !js/hub/hub-json-patch.js
 !js/hub/hub-semantic-hp.js
+!js/hub/hub-semantic-operations.js
+!js/hub/hub-store-error.js
 !js/parser.js
 !js/utils.js
 !js/charactersheet
