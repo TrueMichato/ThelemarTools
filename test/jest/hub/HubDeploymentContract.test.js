@@ -54,6 +54,26 @@ describe("Hub portable deployment contract", () => {
 		expect(dockerignore).not.toContain("!data");
 	});
 
+	it("packages every shared browser module the server imports", () => {
+		// A server module importing `../../js/...` that the image never copies boots fine in tests
+		// and then crashes the container with ERR_MODULE_NOT_FOUND. Derive the list instead of
+		// pinning names so a new shared helper cannot be added without being packaged.
+		const testDockerignore = read("server/test.Dockerfile.dockerignore");
+		const serverDir = new URL("../../../server/src/", import.meta.url);
+		const imported = new Set();
+		for (const file of fs.readdirSync(serverDir).filter(name => name.endsWith(".js"))) {
+			const source = read(`server/src/${file}`);
+			for (const [, specifier] of source.matchAll(/from\s+"\.\.\/\.\.\/(js\/[^"]+)"/g)) imported.add(specifier);
+		}
+
+		expect(imported.size).toBeGreaterThan(0);
+		for (const specifier of imported) {
+			expect(dockerfile).toContain(`COPY --chown=hub:hub ${specifier} ./${specifier}`);
+			expect(dockerignore).toContain(`!${specifier}`);
+			expect(testDockerignore).toContain(`!${specifier}`);
+		}
+	});
+
 	it("keeps event snapshot enrichment inside the packaged server tree", () => {
 		const memoryStore = read("server/src/memory-hub-store.js");
 		const postgresStore = read("server/src/postgres-hub-store.js");

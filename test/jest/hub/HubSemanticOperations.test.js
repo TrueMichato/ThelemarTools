@@ -167,6 +167,60 @@ describe("semantic character operations", () => {
 		};
 	}
 
+	it("refuses a heal against a document with no usable maximum, atomically", async () => {
+		const {campaign, dm, characters} = await setup();
+		// Reproduces a save written before the hit point maximum was first recalculated: the
+		// sheet showed a healthy maximum while the stored document claimed zero. Clamping to it
+		// would have set the character to 0 hit points.
+		const stored = store._characters.get(characters.target.id);
+		stored.data.hp = {current: 5, max: 0, temp: 0};
+		const revisionBefore = stored.revision;
+		const commandId = crypto.randomUUID();
+
+		const response = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/actions`,
+			headers: semanticHeaders(dm, commandId),
+			payload: getDirectBody({
+				commandId,
+				targetCharacterId: characters.target.id,
+				amount: 10,
+				kind: "hp.heal",
+			}),
+		});
+
+		expect(response.statusCode).toBe(409);
+		expect(response.json()).toEqual({error: "HP_MAX_UNAVAILABLE"});
+		const after = store._characters.get(characters.target.id);
+		expect(after.data.hp).toEqual({current: 5, max: 0, temp: 0});
+		expect(after.revision).toBe(revisionBefore);
+	});
+
+	it("heals up to the applicable maximum rather than the stored base maximum", async () => {
+		const {campaign, dm, characters} = await setup();
+		const stored = store._characters.get(characters.target.id);
+		stored.data.hp = {current: 5, max: 20, temp: 0, effectiveMax: 30};
+		const commandId = crypto.randomUUID();
+
+		const response = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/actions`,
+			headers: semanticHeaders(dm, commandId),
+			payload: getDirectBody({
+				commandId,
+				targetCharacterId: characters.target.id,
+				amount: 100,
+				kind: "hp.heal",
+			}),
+		});
+
+		expect(response.statusCode).toBe(201);
+		// Clamped to the applicable maximum, and the maximum fields survive untouched.
+		expect(store._characters.get(characters.target.id).data.hp).toEqual({
+			current: 30, max: 20, temp: 0, effectiveMax: 30,
+		});
+	});
+
 	it("applies DM operations atomically and replays the stable result exactly once", async () => {
 		const {campaign, dm, source, target, characters} = await setup();
 		store._characters.get(characters.target.id).data.hp.maxHpReduction = 3;

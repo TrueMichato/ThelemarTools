@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import {isDeepStrictEqual} from "node:util";
+import {getHealedHp, resolveApplicableMaxHp} from "../../js/hub/hub-semantic-hp.js";
 import {HubStoreError} from "./hub-store-error.js";
 
 export const CURRENCY_TYPES = Object.freeze(["cp", "sp", "ep", "gp", "pp"]);
@@ -125,6 +126,8 @@ function getSemanticHp (data) {
 	if (!hp || typeof hp !== "object" || Array.isArray(hp)) {
 		throw new HubStoreError("OPERATION_STATE_INVALID", `Character hit points are unavailable.`, {status: 409});
 	}
+	// Preserves every other key — notably `effectiveMax`, which operations must carry through
+	// byte-for-byte and must never derive or recompute.
 	const out = structuredClone(hp);
 	for (const key of ["current", "max", "temp"]) {
 		const fallback = key === "temp" && hp[key] == null ? 0 : hp[key];
@@ -135,6 +138,28 @@ function getSemanticHp (data) {
 		out[key] = value;
 	}
 	return out;
+}
+
+/**
+ * The maximum a heal clamps against, or a visible failure.
+ *
+ * A document that cannot supply a positive maximum is malformed, not "capped at zero". Failing
+ * here keeps the operation atomic — nothing is written, no event is emitted, and the character's
+ * revision is unchanged — instead of silently converting healing into damage.
+ *
+ * Uses its own code rather than the shared `OPERATION_STATE_INVALID`, which spell-slot operations
+ * also raise, so the client can name the actual remedy without mislabelling a slot failure.
+ */
+function getApplicableMaxHp (hp) {
+	const applicableMax = resolveApplicableMaxHp(hp);
+	if (applicableMax == null) {
+		throw new HubStoreError(
+			"HP_MAX_UNAVAILABLE",
+			`Character hit points are missing a usable maximum.`,
+			{status: 409},
+		);
+	}
+	return applicableMax;
 }
 
 export function applySemanticOperation ({data, operation}) {
@@ -151,7 +176,13 @@ export function applySemanticOperation ({data, operation}) {
 		}
 		case "hp.heal": {
 			const hp = getSemanticHp(out);
-			hp.current = Math.min(hp.max, addFinite(hp.current, normalized.arguments.amount, "Hit points"));
+			// Result is bounded by `max(current, applicableMax)` — both already validated as safe
+			// numbers — so the intermediate sum can never escape the safe range.
+			hp.current = getHealedHp({
+				current: hp.current,
+				amount: normalized.arguments.amount,
+				applicableMax: getApplicableMaxHp(hp),
+			});
 			out.hp = hp;
 			break;
 		}
@@ -237,7 +268,11 @@ export function applyStructuredEffect ({data, effect}) {
 		case "healing": {
 			const amount = getFiniteNumber(effect.amount, {label: "Healing amount"});
 			const hp = getHp(out);
-			hp.current = Math.min(hp.max, hp.current + amount);
+			// Same applicable-maximum rule as the semantic `hp.heal` operation, so the legacy
+			// structured-effect path cannot clamp a heal down to zero hit points either.
+			const applicableMax = resolveApplicableMaxHp(hp);
+			if (applicableMax == null) throw new HubStoreError("HP_MAX_UNAVAILABLE", `Character hit points are missing a usable maximum.`, {status: 409});
+			hp.current = getHealedHp({current: hp.current, amount, applicableMax});
 			break;
 		}
 		case "condition_add": {

@@ -10,6 +10,7 @@ server/**/.env*
 !js
 !js/hub
 !js/hub/hub-json-patch.js
+!js/hub/hub-semantic-hp.js
 !test
 !test/e2e
 !test/e2e/hub

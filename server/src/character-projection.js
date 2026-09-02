@@ -247,10 +247,13 @@ export function buildCharacterViewModel (characterData) {
 	const ac = {value: acValue ?? 10};
 
 	const hp = {};
-	for (const key of ["current", "max", "temp"]) {
+	for (const key of ["current", "max", "temp", "effectiveMax"]) {
 		const value = toFiniteNumber(data.hp?.[key], {min: 0, max: MAX_HP});
 		if (value != null) hp[key] = value;
 	}
+	// The applicable maximum only ever rides along with the base maximum, so a projection that
+	// withholds the maximum cannot leak it back through the derived value.
+	if (hp.max == null) delete hp.effectiveMax;
 
 	const speed = {};
 	for (const key of MOVEMENT_KEYS) {
@@ -450,11 +453,12 @@ const FIELD_VALIDATORS = Object.freeze({
 	},
 	hp: value => {
 		assertPlainObject(value, "hp");
-		assertNoUnknownKeys(value, ["current", "max", "temp", "state"], "hp");
+		assertNoUnknownKeys(value, ["current", "max", "temp", "state", "effectiveMax"], "hp");
 		const out = {};
-		for (const key of ["current", "max", "temp"]) {
+		for (const key of ["current", "max", "temp", "effectiveMax"]) {
 			if (value[key] !== undefined) out[key] = assertNumber(value[key], `hp.${key}`, {min: 0, max: MAX_HP});
 		}
+		if (out.max === undefined) delete out.effectiveMax;
 		if (value.state !== undefined) out.state = assertLabel(value.state, "hp.state", {maxLength: 40});
 		if (!Object.keys(out).length) fail(`hp must contain at least one value.`);
 		return out;

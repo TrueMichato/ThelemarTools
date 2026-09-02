@@ -80,6 +80,38 @@ The initial catalog is:
 | `spell_slot.spend` | integer `level`, positive integer `amount` | Decrement the matching slot if available |
 | `spell_slot.restore` | integer `level`, positive integer `amount` | Increment the matching slot, clamped to its maximum |
 
+### The applicable hit-point maximum (added 2026-09-02)
+
+`hp.heal` clamps to *the applicable maximum*, which is a property of the character document — never of
+server-side rules. The Character Sheet holds two different numbers:
+
+- `hp.max` is its cached `_calculateMaxHp()` **base**. It excludes what `getMaxHp()` layers on live —
+  item `maxHpBonus` / `maxHpPerLevel` effects and psionic body-strain halving — and in documents written
+  before the maximum was first recalculated it can be absent or zero.
+- `hp.effectiveMax` is the **applicable maximum**: exactly what the sheet shows the player, materialised
+  deterministically by `toJson()` from the existing `getMaxHp()`.
+
+`hp.effectiveMax` is therefore persisted authority metadata, not a projection-only nicety: the server has to
+authorize and clamp healing without reimplementing Character Sheet formulas. It is produced only at
+serialization and is stripped on load, so it can never be mistaken for an explicitly-set maximum (which
+`getMaxHp()` would then add item bonuses to a second time) and can never carry staleness forward.
+
+The single resolution rule lives in `js/hub/hub-semantic-hp.js` — browser-safe, imported by the server the
+same way `hub-json-patch.js` already is, so one formula serves both the authoritative and the live-apply
+tracks: prefer `effectiveMax`; fall back to `max` when it is a positive integer; otherwise fail with
+`OPERATION_STATE_INVALID`. A document that cannot supply a positive maximum is malformed, not "capped at
+zero", and the operation is rejected atomically rather than silently converting healing into damage.
+Healing is additionally monotonic — it can only ever raise current hit points — so a maximum that has
+fallen below the current total (strain halving) cannot turn a heal into damage either.
+
+Operations carry `hp.effectiveMax` through byte-for-byte and never derive, recompute, or correct it; a heal
+changes only current hit points when the maximum inputs are unchanged. Projections expose it only alongside
+an already-authorized base maximum, so a policy that withholds the maximum cannot leak it back.
+
+This is **conformance to version 1**, not a redefinition of it: the semantics above are what this table
+already specified, and the previous implementation clamped to the base value instead. No new version is
+required.
+
 This low-level operation envelope is a privileged command surface. Only a DM, co-DM, or an allowlisted
 internal server workflow may submit a generic `kind` plus `arguments`. A player/peer route rejects a body that
 contains free-authored operation kind or arguments; target approval must never turn arbitrary peer JSON into an

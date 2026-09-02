@@ -529,4 +529,73 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 		expect(second.replay.hasMore).toBe(false);
 		expect(second.replay.scannedThroughSequence).toBeGreaterThan(first.replay.scannedThroughSequence);
 	});
+
+	test("rolls back a heal against a document with no usable maximum", async () => {
+		// A save written before the hit point maximum was first recalculated serialized
+		// `max: 0`; clamping to it would have set the character to 0 hit points.
+		await pool.query(`UPDATE hub.characters SET data = jsonb_set(data, '{hp}', $2::jsonb) WHERE id = $1`, [
+			targetCharacter.id,
+			JSON.stringify({current: 5, max: 0, temp: 0}),
+		]);
+		const before = await pool.query(`
+			SELECT c.revision, c.operation_watermark, c.data,
+				(SELECT count(*)::integer FROM hub.semantic_operations so WHERE so.target_character_id = c.id) AS operation_count
+			FROM hub.characters c WHERE c.id = $1
+		`, [targetCharacter.id]);
+		const commandId = crypto.randomUUID();
+		const request = {
+			commandId,
+			targetCharacterId: targetCharacter.id,
+			operation: {kind: "hp.heal", version: 1, arguments: {amount: 10}},
+		};
+
+		await expect(store.pCreateStructuredAction({
+			accountId: dm.id,
+			sessionId: dmSession.id,
+			campaignId: campaign.id,
+			commandId,
+			targetCharacterId: targetCharacter.id,
+			operation: request.operation,
+			idempotencyKey: getIdempotency(commandId, request),
+		})).rejects.toMatchObject({code: "HP_MAX_UNAVAILABLE", status: 409});
+
+		const after = await pool.query(`
+			SELECT c.revision, c.operation_watermark, c.data,
+				(SELECT count(*)::integer FROM hub.semantic_operations so WHERE so.target_character_id = c.id) AS operation_count,
+				(SELECT count(*)::integer FROM hub.semantic_operation_commands soc WHERE soc.command_id = $2) AS command_count
+			FROM hub.characters c WHERE c.id = $1
+		`, [targetCharacter.id, commandId]);
+		expect(after.rows[0].data.hp).toEqual({current: 5, max: 0, temp: 0});
+		expect(after.rows[0].revision).toBe(before.rows[0].revision);
+		expect(after.rows[0].operation_watermark).toBe(before.rows[0].operation_watermark);
+		// Nothing was recorded: no new semantic operation row, and no command receipt to replay.
+		expect(after.rows[0].operation_count).toBe(before.rows[0].operation_count);
+		expect(after.rows[0].command_count).toBe(0);
+	});
+
+	test("clamps a committed heal to the applicable maximum and preserves it verbatim", async () => {
+		await pool.query(`UPDATE hub.characters SET data = jsonb_set(data, '{hp}', $2::jsonb) WHERE id = $1`, [
+			targetCharacter.id,
+			JSON.stringify({current: 5, max: 20, temp: 0, effectiveMax: 30}),
+		]);
+		const commandId = crypto.randomUUID();
+		const request = {
+			commandId,
+			targetCharacterId: targetCharacter.id,
+			operation: {kind: "hp.heal", version: 1, arguments: {amount: 100}},
+		};
+
+		await store.pCreateStructuredAction({
+			accountId: dm.id,
+			sessionId: dmSession.id,
+			campaignId: campaign.id,
+			commandId,
+			targetCharacterId: targetCharacter.id,
+			operation: request.operation,
+			idempotencyKey: getIdempotency(commandId, request),
+		});
+
+		const persisted = await pool.query(`SELECT data FROM hub.characters WHERE id = $1`, [targetCharacter.id]);
+		expect(persisted.rows[0].data.hp).toEqual({current: 30, max: 20, temp: 0, effectiveMax: 30});
+	});
 });
