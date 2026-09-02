@@ -454,11 +454,33 @@ export class HubHttpCharacterRepository {
 			const parsed = JSON.parse(raw);
 			if (!parsed?.snapshot) return;
 			const book = this._getCoverageBook(canonicalId);
+			const failedWrite = this._failedWrites.get(canonicalId);
+			// Persisted coverage may only claim a revision for data this write can advance in the same step.
+			// The stored snapshot otherwise belongs to a save still in flight, whose document this repository
+			// does not own; advancing its coverage alone would let a reload trust pre-operation data as though
+			// the effect were already folded in, and then apply the next effect on top of it.
+			if (!failedWrite) {
+				delete parsed.coverageVersion;
+				delete parsed.coverage;
+				this._recoveryStorage?.setItem(key, JSON.stringify(parsed));
+				return;
+			}
+			parsed.snapshot = this._getSnapshotData({...structuredClone(failedWrite), id: canonicalId});
+			const recoveredBase = this._recoveredBases.get(canonicalId);
+			const coverage = {snapshot: serializeCoverage(book.failedWrite)};
+			if (recoveredBase) {
+				parsed.base = structuredClone(recoveredBase);
+				coverage.base = serializeCoverage(book.recoveredBase);
+			} else {
+				// The stored rebase base belongs to the submit that failed and no longer receives operations, so
+				// it is now behind the snapshot. It is a rebase reference rather than user data: dropping it lets
+				// the next save fall back to accepted truth, instead of stranding the character in a resync that
+				// only exists to repair a document nothing reads.
+				delete parsed.base;
+				delete coverage.base;
+			}
 			parsed.coverageVersion = COVERAGE_VERSION;
-			parsed.coverage = {
-				base: serializeCoverage(book.recoveredBase),
-				snapshot: serializeCoverage(book.failedWrite.revision == null ? book.live : book.failedWrite),
-			};
+			parsed.coverage = coverage;
 			this._recoveryStorage?.setItem(key, JSON.stringify(parsed));
 		} catch {
 			// Recovery-storage coverage is best-effort; see above.

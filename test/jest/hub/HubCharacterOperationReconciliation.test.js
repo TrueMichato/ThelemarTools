@@ -435,3 +435,61 @@ describe("Failed save followed by a live effect", () => {
 		expect(repository._failedWrites.get("character-1").hp.current).toBe(6);
 	});
 });
+
+describe("Recovery storage stays consistent with its coverage", () => {
+	const pSetUpFailedWriteThenOperation = async () => {
+		const sessionStorage = makeSessionStorage();
+		const api = makeApi({character: {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData()}});
+		const repository = makeRepository({api, sessionStorage});
+		await repository.pGet({characterId: "character-1"});
+
+		api.pPatchCharacter.mockRejectedValueOnce(Object.assign(new Error("offline"), {code: "NETWORK_ERROR"}));
+		await expect(repository.pUpsert({character: {...makeCharacterData({name: "Renamed"}), id: "character-1"}}))
+			.rejects.toMatchObject({code: "NETWORK_ERROR"});
+
+		repository.applyRealtimeOperation({
+			characterId: "character-1",
+			operation: makeOperation(),
+			resultingCharacterRevision: 2,
+			eventId: "event-1",
+			sequence: 20,
+			liveData: makeCharacterData(),
+			fnAdoptLive: () => {},
+		});
+		api.state.character = {id: "character-1", campaignId: "campaign-1", revision: 2, data: makeCharacterData({current: 6})};
+		return {api, repository, sessionStorage};
+	};
+
+	it("does not leave a reload trusting pre-operation data as already reconciled", async () => {
+		const {api, sessionStorage} = await pSetUpFailedWriteThenOperation();
+
+		// Simulate a tab refresh: sessionStorage survives, in-memory tracks do not.
+		const reloaded = makeRepository({api, sessionStorage});
+		const draft = await reloaded.pGet({characterId: "character-1"});
+
+		const book = reloaded._getCoverageBook("character-1");
+		// Coverage claims the operation is folded in, so the persisted draft must actually contain it.
+		expect(book.live.revision).toBe(2);
+		expect(draft.hp.current).toBe(6);
+	});
+
+	it("keeps applying later effects correctly after a reload that followed a failed write", async () => {
+		const {api, sessionStorage} = await pSetUpFailedWriteThenOperation();
+		const reloaded = makeRepository({api, sessionStorage});
+		let live = await reloaded.pGet({characterId: "character-1"});
+
+		const result = reloaded.applyRealtimeOperation({
+			characterId: "character-1",
+			operation: makeOperation({operationId: "operation-2", args: {amount: 3}}),
+			resultingCharacterRevision: 3,
+			eventId: "event-2",
+			sequence: 21,
+			liveData: live,
+			fnAdoptLive: next => { live = next; },
+		});
+
+		// 10 - 4 - 3 = 3. Anything else means the first operation was silently dropped on reload.
+		expect(result.status).toBe("applied");
+		expect(live.hp.current).toBe(3);
+	});
+});
