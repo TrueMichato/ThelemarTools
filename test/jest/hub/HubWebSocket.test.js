@@ -88,6 +88,10 @@ describe("campaign WebSocket", () => {
 		// character document or peer profile.
 		expect(resync.cursor).toEqual(expect.objectContaining({campaignId, lastSequence: 1}));
 		expect(resync.characterRefs).toEqual([]);
+		expect(resync.replay).toEqual({
+			scannedThroughSequence: 1,
+			hasMore: false,
+		});
 		expect(resync.snapshot).toBeUndefined();
 		expect(resync.characters).toBeUndefined();
 

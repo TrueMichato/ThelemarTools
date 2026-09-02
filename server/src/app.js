@@ -782,13 +782,11 @@ export async function createHubApp ({
 				},
 			},
 		},
-	}, async request => ({
-		events: await store.pListVisibleEvents({
-			accountId: request.hubAuth.account.id,
-			campaignId: request.params.campaignId,
-			afterSequence: request.query.afterSequence,
-			limit: request.query.limit,
-		}),
+	}, async request => store.pListVisibleEventPage({
+		accountId: request.hubAuth.account.id,
+		campaignId: request.params.campaignId,
+		afterSequence: request.query.afterSequence,
+		limit: request.query.limit,
 	}));
 
 	app.post("/api/campaigns/:campaignId/rolls", {

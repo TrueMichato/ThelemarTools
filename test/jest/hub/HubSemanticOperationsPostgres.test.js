@@ -331,4 +331,77 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 			expect(JSON.stringify(row.payload)).not.toContain(sourceCharacter.id);
 		}
 	});
+
+	test("continues PostgreSQL replay past privacy-redacted pages by scanned sequence", async () => {
+		const {account: hiddenOwner} = await pCreateAccountWithSession("Semantic Hidden");
+		await pJoinCampaign({account: hiddenOwner});
+		const hiddenCharacter = (await store.pCreateCharacter({
+			accountId: hiddenOwner.id,
+			campaignId: campaign.id,
+			data: getCharacterData({name: "Hidden"}),
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const before = await store.pGetCampaignCursor({accountId: targetOwner.id, campaignId: campaign.id});
+		await store.pSetProjectionPolicy({
+			accountId: hiddenOwner.id,
+			characterId: hiddenCharacter.id,
+			policy: {version: 1, preset: "private", overrides: {}},
+			expectedProjectionRevision: hiddenCharacter.projectionRevision,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await store.pLogRoll({
+			accountId: hiddenOwner.id,
+			campaignId: campaign.id,
+			characterId: hiddenCharacter.id,
+			visibility: "all_members",
+			payload: {formula: "1d20", total: 12},
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const commandId = crypto.randomUUID();
+		const request = {
+			commandId,
+			targetCharacterId: targetCharacter.id,
+			operation: {kind: "hp.damage", version: 1, arguments: {amount: 1}},
+		};
+		const applied = await store.pCreateStructuredAction({
+			accountId: dm.id,
+			sessionId: dmSession.id,
+			campaignId: campaign.id,
+			...request,
+			idempotencyKey: getIdempotency(commandId, request),
+		});
+
+		let afterSequence = before.cursor.lastSequence;
+		const visible = [];
+		const first = await store.pListVisibleEventPage({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			afterSequence,
+			limit: 1,
+		});
+		expect(first.events).toEqual([]);
+		expect(first.replay.hasMore).toBe(true);
+		expect(first.replay.scannedThroughSequence).toBeGreaterThan(afterSequence);
+		afterSequence = first.replay.scannedThroughSequence;
+
+		for (let i = 0; i < 10; ++i) {
+			const page = await store.pListVisibleEventPage({
+				accountId: targetOwner.id,
+				campaignId: campaign.id,
+				afterSequence,
+				limit: 1,
+			});
+			visible.push(...page.events);
+			afterSequence = page.replay.scannedThroughSequence;
+			if (!page.replay.hasMore) break;
+		}
+		expect(visible).toContainEqual(expect.objectContaining({
+			type: "character.operation.applied",
+			payload: expect.objectContaining({
+				operation: expect.objectContaining({operationId: applied.operation.operationId}),
+			}),
+		}));
+	});
 });

@@ -155,7 +155,11 @@ export class HubApiClient {
 	}
 
 	async pListEvents ({campaignId, afterSequence = 0, limit = 200}) {
-		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/events?afterSequence=${afterSequence}&limit=${limit}`)).events;
+		return (await this.pListEventPage({campaignId, afterSequence, limit})).events;
+	}
+
+	async pListEventPage ({campaignId, afterSequence = 0, limit = 200}) {
+		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/events?afterSequence=${afterSequence}&limit=${limit}`);
 	}
 
 	async pLogRoll ({campaignId, characterId = null, formula, total, context = null, visibility = "all_members", detail = {}, idempotencyKey}) {

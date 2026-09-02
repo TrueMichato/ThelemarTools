@@ -59,9 +59,9 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 		expect((await player.getCharacter(character.id)).data.hp.current).toBe(7);
 		const spellcaster = await player.createCharacter({campaignId, name: "Mira"});
 		expect(spellcaster.data.spellcasting.spellSlots[1].current).toBe(2);
-		await dm.spendSpellSlot({campaignId, characterName: "Mira", context: "Cure Wounds", level: 1, amount: 1});
+		await dm.spendSpellSlot({campaignId, characterName: "Mira", level: 1, amount: 1});
 		expect((await player.getCharacter(spellcaster.id)).data.spellcasting.spellSlots[1].current).toBe(1);
-		await dm.expectInsufficientSpellSlotSpend({campaignId, characterName: "Mira", context: "Shield", level: 1, amount: 2});
+		await dm.expectInsufficientSpellSlotSpend({campaignId, characterName: "Mira", level: 1, amount: 2});
 
 		await player.reserveItemAndCurrencyToParty({
 			campaignId,

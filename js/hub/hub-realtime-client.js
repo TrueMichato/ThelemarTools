@@ -27,6 +27,8 @@ export class HubRealtimeClient {
 		this._lastSequence = 0;
 		this._hasBaseline = false;
 		this._bufferedEvents = [];
+		this._resyncAccumulatedEvents = [];
+		this._resyncScannedThroughSequence = null;
 		this._listeners = new Map();
 		this._connectionState = {state: "closed"};
 	}
@@ -132,6 +134,20 @@ export class HubRealtimeClient {
 		}
 		if (message.type === "resync_complete") {
 			const previousSequence = this._lastSequence;
+			this._resyncAccumulatedEvents.push(...(message.events || []));
+			if (message.replay?.hasMore) {
+				const scannedThroughSequence = Number(message.replay.scannedThroughSequence);
+				if (
+					!Number.isSafeInteger(scannedThroughSequence)
+					|| scannedThroughSequence <= (this._resyncScannedThroughSequence ?? previousSequence)
+				) {
+					this._emit("error", {type: "error", code: "INVALID_REPLAY_CONTINUATION"});
+					return;
+				}
+				this._resyncScannedThroughSequence = scannedThroughSequence;
+				this.requestResync(scannedThroughSequence);
+				return;
+			}
 			// ADR 0011: resync carries a cursor and cache-invalidation refs only. Consumers
 			// refetch through the authorization-scoped HTTP projector.
 			const snapshotSequence = message.cursor?.lastSequence || 0;
@@ -145,8 +161,10 @@ export class HubRealtimeClient {
 				});
 			}
 			this._hasBaseline = true;
-			const events = [...(message.events || []), ...this._bufferedEvents]
+			const events = [...this._resyncAccumulatedEvents, ...this._bufferedEvents]
 				.sort((a, b) => a.sequence - b.sequence);
+			this._resyncAccumulatedEvents = [];
+			this._resyncScannedThroughSequence = null;
 			this._bufferedEvents = [];
 			const seen = new Set();
 			for (const event of events) {
@@ -179,9 +197,9 @@ export class HubRealtimeClient {
 		this._socket?.send(JSON.stringify({type: "presence", activity, targetId}));
 	}
 
-	requestResync () {
+	requestResync (afterSequence = this._resyncScannedThroughSequence ?? this._lastSequence) {
 		if (this._socket?.readyState !== 1) return;
-		this._socket.send(JSON.stringify({type: "resync", afterSequence: this._lastSequence}));
+		this._socket.send(JSON.stringify({type: "resync", afterSequence}));
 	}
 
 	_armResyncTimer () {
@@ -203,6 +221,8 @@ export class HubRealtimeClient {
 		this._clearResyncTimer();
 		this._socket?.close();
 		this._socket = null;
+		this._resyncAccumulatedEvents = [];
+		this._resyncScannedThroughSequence = null;
 		this._setConnectionState("closed");
 	}
 }

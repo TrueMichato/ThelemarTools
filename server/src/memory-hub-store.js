@@ -499,11 +499,18 @@ export class MemoryHubStore {
 		if (membership.accountId === campaign.ownerAccountId) throw new HubStoreError("MEMBERSHIP_OWNER_PROTECTED", `Campaign owner role cannot be changed.`, {status: 409});
 		if (membership.status !== "active") throw new HubStoreError("MEMBERSHIP_NOT_FOUND", `Membership was not found.`, {status: 404});
 		if (role === "spectator") {
+			const ownedCharacterIds = new Set([...this._characters.values()]
+				.filter(character => character.campaignId === campaignId && character.ownerAccountId === membership.accountId)
+				.map(character => character.id));
 			for (const operation of this._semanticOperations.values()) {
 				if (
 					operation.campaignId === campaignId
 					&& operation.status === "proposed"
-					&& operation.originActorAccountId === membership.accountId
+					&& (
+						operation.originActorAccountId === membership.accountId
+						|| ownedCharacterIds.has(operation.sourceCharacterId)
+						|| ownedCharacterIds.has(operation.targetCharacterId)
+					)
 				) {
 					this._cancelSemanticOperationForLifecycle({operation, actorAccountId: accountId});
 				}
@@ -1292,11 +1299,17 @@ export class MemoryHubStore {
 	}
 
 	async pListVisibleEvents ({accountId, campaignId, afterSequence = 0, limit = 500}) {
+		return (await this.pListVisibleEventPage({accountId, campaignId, afterSequence, limit})).events;
+	}
+
+	async pListVisibleEventPage ({accountId, campaignId, afterSequence = 0, limit = 500}) {
 		const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
-		return this._events
+		const candidates = this._events
 			.filter(event => event.campaignId === campaignId && event.sequence > afterSequence)
 			.filter(event => canViewEvent({event, accountId, role: membership.role}))
-			.slice(0, limit)
+			.slice(0, limit + 1);
+		const scanned = candidates.slice(0, limit);
+		const events = scanned
 			.map(event => this.redactEventForViewer({
 				event: {
 					...copy(event),
@@ -1308,6 +1321,13 @@ export class MemoryHubStore {
 				role: membership.role,
 			}))
 			.filter(Boolean);
+		return {
+			events,
+			replay: {
+				scannedThroughSequence: scanned.at(-1)?.sequence ?? afterSequence,
+				hasMore: candidates.length > limit,
+			},
+		};
 	}
 
 	/**
@@ -1699,7 +1719,6 @@ export class MemoryHubStore {
 		const prior = this._getSemanticCommand({accountId, commandId, idempotencyKey});
 		this._assertSemanticSession({accountId, sessionId});
 		if (prior) return prior;
-		this._expireSemanticOperations({campaignId});
 		const operation = this._semanticOperations.get(actionId);
 		if (!operation || operation.campaignId !== campaignId || operation.status !== "proposed") {
 			throw new HubStoreError("ACTION_NOT_FOUND", `Pending operation was not found.`, {status: 404});
@@ -1713,6 +1732,8 @@ export class MemoryHubStore {
 		if (decision === "accept" && !isTargetOwner) throw new HubStoreError("FORBIDDEN", `Only the target owner may approve.`, {status: 403});
 		if (decision === "reject" && !isTargetOwner && !isDm) throw new HubStoreError("FORBIDDEN", `Cannot reject this proposal.`, {status: 403});
 		if (decision === "cancel" && !isProposer && !isDm) throw new HubStoreError("FORBIDDEN", `Cannot cancel this proposal.`, {status: 403});
+		const commandType = decision;
+		if (new Date(operation.expiresAt) <= this._fnNow()) decision = "expire";
 
 		let appliedEvent = null;
 		let invalidationEvent = null;
@@ -1764,20 +1785,20 @@ export class MemoryHubStore {
 			target.operationWatermark = appliedEvent.sequence;
 			invalidationEvent = this._commitCharacterMutation({character: target, actorAccountId: accountId, isRevisionBump: false});
 		} else {
-			operation.status = decision === "reject" ? "rejected" : "cancelled";
+			operation.status = decision === "reject" ? "rejected" : decision === "cancel" ? "cancelled" : "expired";
 		}
 		operation.updatedAt = this._fnNow().toISOString();
 		operation.resolvedAt = operation.updatedAt;
 		this._appendAudit({
 			campaignId,
-			actorAccountId: accountId,
+			actorAccountId: decision === "expire" ? null : accountId,
 			action: `character.operation.${operation.status}`,
 			targetType: "semantic_operation",
 			targetId: operation.id,
 		});
 		const terminalEvent = appliedEvent || this._appendEvent({
 			campaignId,
-			actorAccountId: accountId,
+			actorAccountId: decision === "expire" ? null : accountId,
 			type: `character.operation.${operation.status}`,
 			aggregateType: "semantic_operation",
 			aggregateId: operation.id,
@@ -1807,7 +1828,7 @@ export class MemoryHubStore {
 			accountId,
 			commandId,
 			operationId: operation.id,
-			commandType: decision,
+			commandType,
 			idempotencyKey,
 			response,
 			eventIds: response.eventIds,

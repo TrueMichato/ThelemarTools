@@ -846,11 +846,10 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-action-form-status")).toContainText("Effect applied.");
 	}
 
-	async spendSpellSlot ({campaignId, characterName, context, level, amount}: {campaignId: string; characterName: string; context: string; level: number; amount: number}): Promise<void> {
+	async spendSpellSlot ({campaignId, characterName, level, amount}: {campaignId: string; characterName: string; level: number; amount: number}): Promise<void> {
 		await this.gotoCampaign(campaignId);
 		await this.page.locator("#campaign-action-target").selectOption({label: characterName});
 		await this.page.locator("#campaign-action-type").selectOption("spell_slot_spend");
-		await this.page.locator("#campaign-action-context").fill(context);
 		await this.page.locator("#campaign-action-slot-level").selectOption(`${level}`);
 		await this.page.locator("#campaign-action-slot-amount").fill(`${amount}`);
 		await this.page.locator("#campaign-action-form button[type='submit']").click();
@@ -899,11 +898,10 @@ export class HubCampaignPage {
 		}
 	}
 
-	async expectInsufficientSpellSlotSpend ({campaignId, characterName, context, level, amount}: {campaignId: string; characterName: string; context: string; level: number; amount: number}): Promise<void> {
+	async expectInsufficientSpellSlotSpend ({campaignId, characterName, level, amount}: {campaignId: string; characterName: string; level: number; amount: number}): Promise<void> {
 		await this.gotoCampaign(campaignId);
 		await this.page.locator("#campaign-action-target").selectOption({label: characterName});
 		await this.page.locator("#campaign-action-type").selectOption("spell_slot_spend");
-		await this.page.locator("#campaign-action-context").fill(context);
 		await this.page.locator("#campaign-action-slot-level").selectOption(`${level}`);
 		await this.page.locator("#campaign-action-slot-amount").fill(`${amount}`);
 		await this.page.locator("#campaign-action-form button[type='submit']").click();

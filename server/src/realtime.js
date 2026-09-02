@@ -40,6 +40,7 @@ export class HubRealtime {
 			targetId: null,
 			messageWindowStartedAt: Date.now(),
 			messageCount: 0,
+			replayContinuationAfterSequence: null,
 			isAlive: true,
 			heartbeatTimer: null,
 		};
@@ -100,20 +101,23 @@ export class HubRealtime {
 			return;
 		}
 		connection.role = membership.role;
-		const now = Date.now();
-		if (now - connection.messageWindowStartedAt >= 1000) {
-			connection.messageWindowStartedAt = now;
-			connection.messageCount = 0;
-		}
-		if (++connection.messageCount > 20) {
-			connection.socket.close(1013, "Rate limit exceeded");
-			return;
-		}
 		let message;
 		try {
 			message = JSON.parse(raw.toString());
 		} catch {
 			return sendJson(connection.socket, {type: "error", code: "INVALID_MESSAGE"});
+		}
+		const isReplayContinuation = message.type === "resync"
+			&& connection.replayContinuationAfterSequence != null
+			&& Number(message.afterSequence) === connection.replayContinuationAfterSequence;
+		const now = Date.now();
+		if (now - connection.messageWindowStartedAt >= 1000) {
+			connection.messageWindowStartedAt = now;
+			connection.messageCount = 0;
+		}
+		if (!isReplayContinuation && ++connection.messageCount > 20) {
+			connection.socket.close(1013, "Rate limit exceeded");
+			return;
 		}
 		if (message.type === "presence") {
 			connection.activity = ["idle", "viewing_character", "editing_character", "viewing_dm_screen"].includes(message.activity)
@@ -133,13 +137,16 @@ export class HubRealtime {
 				accountId: connection.accountId,
 				campaignId: connection.campaignId,
 			});
-			const events = await this._store.pListVisibleEvents({
+			const eventPage = await this._store.pListVisibleEventPage({
 				accountId: connection.accountId,
 				campaignId: connection.campaignId,
 				afterSequence: Number(message.afterSequence) || 0,
 				limit: 500,
 			});
-			sendJson(connection.socket, {type: "resync_complete", ...cursor, events});
+			connection.replayContinuationAfterSequence = eventPage.replay.hasMore
+				? eventPage.replay.scannedThroughSequence
+				: null;
+			sendJson(connection.socket, {type: "resync_complete", ...cursor, ...eventPage});
 			return;
 		}
 		sendJson(connection.socket, {type: "error", code: "UNSUPPORTED_MESSAGE"});

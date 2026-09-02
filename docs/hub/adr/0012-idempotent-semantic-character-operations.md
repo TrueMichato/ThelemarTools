@@ -181,6 +181,9 @@ must not reveal hidden HP, condition, spell-slot, inventory, carry, source avail
 - Every peer proposal receives a bounded, non-null expiry at creation. Expiry is a terminal transition with its
   own stable event id; the implementation may configure the duration but may not leave proposals indefinitely
   actionable.
+- An otherwise-authorized resolution command which reaches a still-proposed operation after its deadline wins
+  the single `expired` transition and returns replayable terminal metadata rather than applying the requested
+  decision.
 
 Application locks the source and target aggregates in stable id order, rechecks actor/approver authorization
 inside the transaction, re-derives and applies the operation to current canonical target truth, increments the
@@ -250,6 +253,9 @@ accepted event sequence. It does not infer ordering from WebSocket arrival time.
   consumers receive only ADR 0011 invalidation metadata.
 - Reconnect first reauthorizes, then fetches owner truth and replays ordered visible events after the last
   accepted sequence. The client deduplicates by `eventId`/`operationId`.
+- Each HTTP/WebSocket replay page carries authoritative `{scannedThroughSequence, hasMore}` metadata. Privacy
+  redaction may leave a page short or empty; clients continue from the scanned sequence while `hasMore` is true
+  and never treat visible event count as proof that later lifecycle events do not exist.
 - Owner/DM truth carries `operationWatermark`, the latest applied-operation campaign sequence already reflected
   in that canonical revision. Owner/DM resync refs may carry it; peer profiles and peer refs never do. Events at
   or below that watermark still deliver and update history but do not transform a fetched canonical base again.

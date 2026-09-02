@@ -2071,6 +2071,10 @@ export class PostgresHubStore {
 	}
 
 	async pListVisibleEvents ({accountId, campaignId, afterSequence = 0, limit = 500}) {
+		return (await this.pListVisibleEventPage({accountId, campaignId, afterSequence, limit})).events;
+	}
+
+	async pListVisibleEventPage ({accountId, campaignId, afterSequence = 0, limit = 500}) {
 		const membership = await this.pGetMembership({accountId, campaignId});
 		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 		const isDm = ["dm", "co_dm"].includes(membership.role);
@@ -2089,16 +2093,17 @@ export class PostgresHubStore {
 				)
 			ORDER BY e.sequence
 			LIMIT $5
-		`, [campaignId, afterSequence, isDm, accountId, limit]);
+		`, [campaignId, afterSequence, isDm, accountId, limit + 1]);
+		const scannedRows = result.rows.slice(0, limit);
 		// Actor redaction needs the target characters' sharing policies, fetched once.
-		const characterIds = [...new Set(result.rows
+		const characterIds = [...new Set(scannedRows
 			.filter(row => row.visibility === "all_members" && row.aggregate_type === "character")
 			.map(row => row.aggregate_id))];
 		const characters = characterIds.length
 			? (await this._pool.query(`SELECT id, owner_account_id, projection_policy FROM hub.characters WHERE id = ANY($1::uuid[])`, [characterIds])).rows
 			: [];
 		const charactersById = new Map(characters.map(row => [row.id, {ownerAccountId: row.owner_account_id, projectionPolicy: row.projection_policy}]));
-		return result.rows.map(row => this._redactRowForViewer({
+		const events = scannedRows.map(row => this._redactRowForViewer({
 			row,
 			accountId,
 			role: membership.role,
@@ -2118,6 +2123,13 @@ export class PostgresHubStore {
 			payload: row.payload,
 			createdAt: row.created_at,
 		}));
+		return {
+			events,
+			replay: {
+				scannedThroughSequence: scannedRows.length ? Number(scannedRows.at(-1).sequence) : afterSequence,
+				hasMore: result.rows.length > limit,
+			},
+		};
 	}
 
 	/**

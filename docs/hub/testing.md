@@ -68,6 +68,10 @@ suite proves concurrent exact replay, one applied revision/event, mutated-body r
 approval under competing commands, no source mutation, owner/DM watermark persistence, bounded expiry,
 lifecycle cancellation, and minimized explicit-recipient terminal payloads.
 
+Memory, realtime-client, and real-PostgreSQL tests put privacy-redacted character events before a visible
+semantic lifecycle event and prove replay advances by the server-scanned sequence even when a page returns
+fewer than its limit.
+
 The memory semantic suite additionally covers every version-1 kind, player generic-operation denial,
 DM/co-DM immediate application, self-target explicit approval, DM non-owner approval denial, unsupported and
 stale source cost/policy, target-ref rotation, revocation cleanup, and projection privacy canaries. Production

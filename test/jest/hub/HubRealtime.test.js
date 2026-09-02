@@ -190,6 +190,38 @@ describe("hub realtime", () => {
 			expect(client._lastSequence).toBe(11);
 		});
 
+		it("continues replay from the server-scanned sequence even when a page has no visible events", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			const sent = [];
+			const events = [];
+			const client = new HubRealtimeClient({campaignId: "cmp", location: {protocol: "https:", host: "tools.example"}});
+			client._socket = {
+				readyState: 1,
+				send: raw => sent.push(JSON.parse(raw)),
+			};
+			client.on("event", event => events.push(event));
+
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 501},
+				characterRefs: [],
+				events: [],
+				replay: {scannedThroughSequence: 500, hasMore: true},
+			});
+			expect(sent).toEqual([{type: "resync", afterSequence: 500}]);
+			expect(client.getConnectionState().state).not.toBe("live");
+
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 501},
+				characterRefs: [],
+				events: [{id: "applied-event", sequence: 501, type: "character.operation.applied"}],
+				replay: {scannedThroughSequence: 501, hasMore: false},
+			});
+			expect(events).toEqual([{id: "applied-event", sequence: 501, type: "character.operation.applied"}]);
+			expect(client.getConnectionState().state).toBe("live");
+		});
+
 		it("reconnects after a transient close and preserves the resync sequence", async () => {
 			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
 			class BrowserSocket extends EventEmitter {
@@ -316,7 +348,10 @@ describe("hub realtime", () => {
 				membership: {role: "player"},
 				characterRefs: [{id: "c1", revision: 7, projectionRevision: 2}],
 			}),
-			pListVisibleEvents: async () => [{sequence: 4, type: "roll.logged"}],
+			pListVisibleEventPage: async () => ({
+				events: [{sequence: 4, type: "roll.logged"}],
+				replay: {scannedThroughSequence: 4, hasMore: false},
+			}),
 		};
 		const realtime = new HubRealtime({store});
 		const socket = new FakeSocket();
@@ -331,6 +366,7 @@ describe("hub realtime", () => {
 			membership: {role: "player"},
 			characterRefs: [{id: "c1", revision: 7, projectionRevision: 2}],
 			events: [{sequence: 4, type: "roll.logged"}],
+			replay: {scannedThroughSequence: 4, hasMore: false},
 		});
 		// ADR 0011: the realtime path must not reach the character projector at all, so a
 		// second projection implementation cannot grow inside the socket.

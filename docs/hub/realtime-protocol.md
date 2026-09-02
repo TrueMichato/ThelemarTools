@@ -81,7 +81,8 @@ Response:
   "campaign": {},
   "membership": {},
   "characterRefs": [{"id": "uuid", "revision": 8, "projectionRevision": 3, "operationWatermark": 41}],
-  "events": []
+  "events": [],
+  "replay": {"scannedThroughSequence": 42, "hasMore": false}
 }
 ```
 
@@ -92,6 +93,11 @@ authorization-scoped HTTP projector (`GET /api/campaigns/:campaignId/character-p
 `operationWatermark` only when the requester may read that character's canonical truth: its owner or a
 DM/co-DM. Peer refs never carry it, because a changing hidden sequence would disclose unseen operations.
 Events are ordered, visibility-filtered, sequence-greater than the requested value, and capped at 500.
+Projection-privacy redaction can produce a short or empty page even when later visible events exist. While
+`replay.hasMore` is true, the client sends another `resync` with
+`afterSequence = replay.scannedThroughSequence`; it must not infer exhaustion from `events.length`. The scanned
+sequence is authoritative and advances across events evaluated but not disclosed, preventing a hidden character
+event from stranding a later visible semantic lifecycle event.
 
 Unknown client types receive:
 

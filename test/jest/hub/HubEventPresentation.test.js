@@ -350,6 +350,54 @@ describe("campaign activity event presentation", () => {
 		await expect(store.pListVisibleEvents({accountId: "revoked", campaignId: "campaign"})).rejects.toMatchObject({code: "CAMPAIGN_NOT_FOUND"});
 	});
 
+	it("pages replay by the authoritative scanned sequence rather than visible row count", async () => {
+		const store = new MemoryHubStore();
+		store._campaigns.set("campaign", {id: "campaign", status: "active"});
+		store._memberships.set("campaign::player", {campaignId: "campaign", accountId: "player", role: "player", status: "active"});
+		store._characters.set("hidden-character", {
+			id: "hidden-character",
+			campaignId: "campaign",
+			ownerAccountId: "other",
+			status: "active",
+			projectionPolicy: {version: 1, preset: "private", overrides: {}},
+		});
+		for (let i = 0; i < 2; ++i) {
+			store._appendEvent({
+				campaignId: "campaign",
+				actorAccountId: "other",
+				type: "roll.logged",
+				aggregateType: "character",
+				aggregateId: "hidden-character",
+				visibility: "all_members",
+				payload: {total: i + 1},
+			});
+		}
+		store._appendEvent({
+			campaignId: "campaign",
+			actorAccountId: "dm",
+			type: "character.operation.applied",
+			aggregateType: "character",
+			aggregateId: "target-character",
+			visibility: "explicit_accounts",
+			visibleAccountIds: ["player"],
+			payload: {operation: {operationId: "operation-id"}},
+		});
+
+		const first = await store.pListVisibleEventPage({accountId: "player", campaignId: "campaign", limit: 2});
+		expect(first).toEqual({
+			events: [],
+			replay: {scannedThroughSequence: 2, hasMore: true},
+		});
+		const second = await store.pListVisibleEventPage({
+			accountId: "player",
+			campaignId: "campaign",
+			afterSequence: first.replay.scannedThroughSequence,
+			limit: 2,
+		});
+		expect(second.events.map(event => event.type)).toEqual(["character.operation.applied"]);
+		expect(second.replay).toEqual({scannedThroughSequence: 3, hasMore: false});
+	});
+
 	it("renders character subjects for rolls and both transfer endpoints without IDs", () => {
 		const roll = normalizeHubEvent({
 			event: {

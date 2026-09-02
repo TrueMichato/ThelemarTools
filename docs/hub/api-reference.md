@@ -84,11 +84,17 @@ Path/query keys ending in `Id` must be UUID-shaped. Invalid values fail as `INVA
 | `GET /api/campaigns/:campaignId/context` | Active member | none | Active immutable brew/rules versions |
 | `GET /api/campaigns/:campaignId/snapshot` | Active member; protocol-versioned | none | Campaign, membership, authorization-scoped character envelopes, roster metadata, last sequence |
 | `GET /api/campaigns/:campaignId/character-projections` | Active member; protocol-versioned | none | `{projections, roster}` — the batch scoped projector every consumer refetches through |
-| `GET /api/campaigns/:campaignId/events` | Active member | `afterSequence>=0`, `limit` 1-500 (default 200) | Visibility-filtered ordered events; character-related payloads may carry bounded versioned display-name snapshots |
+| `GET /api/campaigns/:campaignId/events` | Active member | `afterSequence>=0`, `limit` 1-500 (default 200) | `{events, replay: {scannedThroughSequence, hasMore}}`; ordered authorization-scoped events plus the authoritative continuation boundary |
 | `POST /api/campaigns/:campaignId/archive` | Campaign owner mutation | none | Cancels actions/releases leases/detaches characters, or `CAMPAIGN_BUSY` |
 | `POST /api/campaigns/:campaignId/transfer-ownership` | Campaign owner mutation | `{targetAccountId}` | Changes owner and owner/target roles atomically |
 
 The archive/ownership routes rely on store-level owner authorization in addition to session security.
+
+Event replay pages can contain fewer than `limit` events, including zero, after character-projection privacy
+redaction. A client continues while `replay.hasMore` is true and passes `replay.scannedThroughSequence` as the
+next `afterSequence`; returned event count is never evidence that the scanned range is exhausted. The marker is
+the highest candidate event sequence the server evaluated for that page, not the last event disclosed to the
+viewer.
 
 ### Authorization envelopes
 
@@ -176,7 +182,9 @@ server template at creation and approval, always require a later explicit target
 self-target), and expire after at most 24 hours. DMs/co-DMs may reject/cancel but may accept only when they own
 the target. The production registry currently enables no successful `cost=none` peer template; recognized
 cost-bearing Cure Wounds requests fail with `SOURCE_COST_UNSUPPORTED` before row creation and again at apply.
-The authority does not interpret arbitrary spell prose.
+An otherwise-authorized resolution command received after the deadline performs the single `expired` transition
+and returns its stable terminal metadata; retries replay that response. The authority does not interpret
+arbitrary spell prose.
 
 ## Party inventory and transfer routes
 

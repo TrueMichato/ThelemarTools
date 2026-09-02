@@ -382,7 +382,7 @@ describe("semantic character operations", () => {
 	it("expires once and lifecycle-cancels proposals with privacy-safe terminal events", async () => {
 		const {campaign, dm, source, target, characters} = await setup();
 		const expiringCommandId = crypto.randomUUID();
-		await app.inject({
+		const expiring = await app.inject({
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/actions`,
 			headers: semanticHeaders(source.session, expiringCommandId),
@@ -393,6 +393,22 @@ describe("semantic character operations", () => {
 			}),
 		});
 		now = new Date(now.getTime() + 25 * 60 * 60 * 1_000);
+		const expiryCommandId = crypto.randomUUID();
+		const expired = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/actions/${expiring.json().operation.operationId}/resolve`,
+			headers: semanticHeaders(target.session, expiryCommandId),
+			payload: {commandId: expiryCommandId, decision: "accept"},
+		});
+		expect(expired.statusCode).toBe(200);
+		expect(expired.json().operation.status).toBe("expired");
+		const expiryReplay = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/actions/${expiring.json().operation.operationId}/resolve`,
+			headers: semanticHeaders(target.session, expiryCommandId),
+			payload: {commandId: expiryCommandId, decision: "accept"},
+		});
+		expect(expiryReplay.json()).toEqual(expired.json());
 		for (let i = 0; i < 2; ++i) {
 			const listed = await app.inject({
 				method: "GET",
@@ -434,6 +450,30 @@ describe("semantic character operations", () => {
 		}));
 		expect(terminal.payload).not.toHaveProperty("sourceCharacterId");
 		expect(terminal.payload).not.toHaveProperty("originActorAccountId");
+	});
+
+	it("cancels inbound proposals when the target owner becomes a spectator", async () => {
+		const {campaign, dm, source, target, characters} = await setup();
+		const commandId = crypto.randomUUID();
+		const proposed = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/actions`,
+			headers: semanticHeaders(source.session, commandId),
+			payload: getProposalBody({
+				commandId,
+				sourceCharacterId: characters.source.id,
+				targetRef: characters.target.targetRef,
+			}),
+		});
+		await store.pChangeMemberRole({
+			accountId: dm.account.id,
+			campaignId: campaign.id,
+			membershipId: target.membership.id,
+			role: "spectator",
+			idempotencyKey: `demote-${crypto.randomUUID()}`,
+		});
+		expect(store._semanticOperations.get(proposed.json().operation.operationId).status).toBe("cancelled");
+		expect(await store.pListPendingActions({accountId: target.session.account.id, campaignId: campaign.id})).toEqual([]);
 	});
 });
 
