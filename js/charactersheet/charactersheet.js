@@ -197,9 +197,14 @@ class CharacterSheetPage {
 	}
 
 	_initHubRealtimeTeardown () {
-		const teardown = () => this._detachHubRealtime();
-		window.addEventListener("beforeunload", teardown);
-		window.addEventListener("pagehide", teardown);
+		window.addEventListener("beforeunload", () => this._detachHubRealtime());
+		window.addEventListener("pagehide", event => {
+			if (event.persisted) this._hubRealtime?.suspend();
+			else this._detachHubRealtime();
+		});
+		window.addEventListener("pageshow", event => {
+			if (event.persisted) this._hubRealtime?.resume();
+		});
 	}
 
 	async pInit () {

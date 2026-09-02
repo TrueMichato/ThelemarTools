@@ -54,10 +54,10 @@
   load, then filters again by campaign and target character. It strips actor/visibility envelope fields from
   semantic callback values and never logs, persists, or caches lifecycle payloads.
 - Socket and subscription generations are both fenced. Access-loss code 1008, character/campaign changes,
-  detach, logout, page hide, and unload invalidate queued callbacks before they can reach a reopened sheet.
+  detach, logout, remote archive/move, non-persisted page hide, and unload invalidate queued callbacks before
+  they can reach a reopened sheet. BFCache suspension resumes only the same in-memory client generation.
 - Projection invalidation remains metadata-only on the owner sheet: this layer performs no projection fetch,
   document replacement, operation application, save, render, or generic conflict fallback.
-- Every campaign-owned foreign-key relationship uses `campaign_id` in its database constraint.
 - Character and DM-workspace writes require aggregate revision plus a monotonic lease epoch.
 - Inventory transfers reserve source value into escrow and lock source/target in deterministic order.
 - Campaign archive refuses unresolved escrow and detaches characters without deleting player ownership.

@@ -251,21 +251,31 @@ describe("Character Sheet repository seam", () => {
 		expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "character-1"});
 	});
 
-	it("tears down realtime on both pagehide and beforeunload", () => {
+	it("tears down on unload and resumes the same subscription after BFCache restoration", () => {
 		const listeners = {};
 		const windowPrev = globalThis.window;
 		globalThis.window = {
 			addEventListener: jest.fn((type, listener) => listeners[type] = listener),
 		};
-		const host = {_detachHubRealtime: jest.fn()};
+		const host = {
+			_detachHubRealtime: jest.fn(),
+			_hubRealtime: {
+				resume: jest.fn(),
+				suspend: jest.fn(),
+			},
+		};
 		try {
 			CharacterSheetPage.prototype._initHubRealtimeTeardown.call(host);
-			listeners.pagehide();
+			listeners.pagehide({persisted: true});
+			listeners.pageshow({persisted: true});
+			listeners.pagehide({persisted: false});
 			listeners.beforeunload();
 		} finally {
 			globalThis.window = windowPrev;
 		}
 
+		expect(host._hubRealtime.suspend).toHaveBeenCalledTimes(1);
+		expect(host._hubRealtime.resume).toHaveBeenCalledTimes(1);
 		expect(host._detachHubRealtime).toHaveBeenCalledTimes(2);
 	});
 });

@@ -9,6 +9,11 @@ const _LISTENER_TYPES = new Set([
 	"semanticOperation",
 ]);
 
+const _CHARACTER_TEARDOWN_EVENT_TYPES = new Set([
+	"character.archived",
+	"character.moved_out",
+]);
+
 export class CharacterSheetRealtimeCoordinator {
 	constructor ({
 		campaignId,
@@ -75,6 +80,8 @@ export class CharacterSheetRealtimeCoordinator {
 			client,
 			cursorKey: null,
 			generation,
+			isDetachQueued: false,
+			isSuspended: false,
 			operationKeys: new Set(),
 			projectionCursorKey: null,
 			unsubscribers: [],
@@ -86,11 +93,15 @@ export class CharacterSheetRealtimeCoordinator {
 			client.on("cursor", baseline => this._handleCursor(active, baseline)),
 			client.on("state", state => this._handleConnectionState(active, state)),
 		);
-		void client.pConnect().catch(() => {
-			if (!this._isCurrent(active)) return;
+		this._connect(active);
+		return true;
+	}
+
+	_connect (active) {
+		void active.client.pConnect().catch(() => {
+			if (!this._isCurrent(active) || active.isSuspended) return;
 			this._emit("connectionState", {state: "unavailable"});
 		});
-		return true;
 	}
 
 	detach () {
@@ -100,6 +111,22 @@ export class CharacterSheetRealtimeCoordinator {
 		if (!active) return;
 		for (const unsubscribe of active.unsubscribers) unsubscribe();
 		active.client.close();
+	}
+
+	suspend () {
+		const active = this._active;
+		if (!active || active.isSuspended) return false;
+		active.isSuspended = true;
+		active.client.close();
+		return true;
+	}
+
+	resume () {
+		const active = this._active;
+		if (!active?.isSuspended || !this._isEligible({characterId: active.characterId})) return false;
+		active.isSuspended = false;
+		this._connect(active);
+		return true;
 	}
 
 	_handleConnectionState (active, state) {
@@ -123,7 +150,13 @@ export class CharacterSheetRealtimeCoordinator {
 		if (!this._isCurrent(active)) return;
 		if (baseline.cursor?.campaignId !== this._campaignId) return;
 		const characterRef = baseline.characterRefs?.find(ref => ref?.id === active.characterId);
-		if (!characterRef) return;
+		if (!characterRef) {
+			this._queueDetach(active, {
+				reason: "Character is no longer available in this campaign.",
+				sequence: baseline.cursor?.lastSequence || 0,
+			});
+			return;
+		}
 		const hasOperationWatermark = characterRef.operationWatermark != null;
 		const metadata = {
 			campaignId: this._campaignId,
@@ -154,6 +187,18 @@ export class CharacterSheetRealtimeCoordinator {
 
 	_handleEvent (active, event) {
 		if (!this._isCurrent(active) || event?.campaignId !== this._campaignId) return;
+
+		if (
+			_CHARACTER_TEARDOWN_EVENT_TYPES.has(event.type)
+			&& event.aggregateType === "character"
+			&& event.aggregateId === active.characterId
+		) {
+			this._queueDetach(active, {
+				reason: "Character is no longer available in this campaign.",
+				sequence: event.sequence,
+			});
+			return;
+		}
 
 		if (
 			event.type === "character.projection.invalidated"
@@ -196,6 +241,31 @@ export class CharacterSheetRealtimeCoordinator {
 				status: routing.status,
 				payload: routing.payload,
 			},
+		});
+	}
+
+	_queueDetach (active, {reason, sequence}) {
+		if (!this._isCurrent(active) || active.isDetachQueued) return;
+		active.isDetachQueued = true;
+		queueMicrotask(() => {
+			if (!this._isCurrent(active)) return;
+			void this._repository.pEnqueueRealtimeDelivery({
+				characterId: active.characterId,
+				fnDeliver: () => {
+					if (!this._isCurrent(active)) return false;
+					this.detach();
+					this._emit("connectionState", {state: "closed", reason});
+					return true;
+				},
+			}).catch(() => {
+				if (!this._isCurrent(active)) return;
+				this.detach();
+				this._emit("deliveryError", {
+					characterId: active.characterId,
+					deliveryType: "teardown",
+					sequence,
+				});
+			});
 		});
 	}
 

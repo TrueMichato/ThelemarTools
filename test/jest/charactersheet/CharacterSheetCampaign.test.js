@@ -21,6 +21,13 @@ function getControl ({
 		_characterRepository: {
 			pReleaseLease: jest.fn(async () => ({released: true})),
 		},
+		_canRestoreHubRealtimeAfterError: jest.fn(error => ![
+			"AUTH_REQUIRED",
+			"CAMPAIGN_NOT_FOUND",
+			"CHARACTER_CAMPAIGN_MISMATCH",
+			"CHARACTER_NOT_FOUND",
+			"FORBIDDEN",
+		].includes(error?.code)),
 		_attachHubRealtime: jest.fn(),
 		_detachHubRealtime: jest.fn(),
 		_state: {
@@ -220,17 +227,34 @@ describe("Character Sheet campaign control", () => {
 		expect(control._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=cloud-source&hubCampaign=campaign-2");
 	});
 
-	it("restores the source subscription when a campaign move fails", async () => {
+	it("restores the source subscription when a campaign move is definitely rejected", async () => {
 		const {control, page} = getControl();
 		page._currentCharacterId = "cloud-source";
 		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
 		control._movePreview = {campaignId: "campaign-2", report: {}};
-		control._api.pMoveCharacter.mockRejectedValueOnce(new Error("offline"));
+		control._api.pMoveCharacter.mockRejectedValueOnce(new HubApiError({code: "CHARACTER_BUSY", status: 409}));
 
 		await control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});
 
 		expect(page._detachHubRealtime).toHaveBeenCalledTimes(1);
 		expect(page._attachHubRealtime).toHaveBeenCalledWith({characterId: "cloud-source"});
+		expect(control._fnNavigate).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		new HubApiError({code: "NETWORK_UNAVAILABLE", status: 0}),
+		new HubApiError({code: "AUTH_REQUIRED", status: 401}),
+	])("does not restore the source subscription after an ambiguous or access-loss failure", async error => {
+		const {control, page} = getControl();
+		page._currentCharacterId = "cloud-source";
+		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
+		control._movePreview = {campaignId: "campaign-2", report: {}};
+		control._api.pMoveCharacter.mockRejectedValueOnce(error);
+
+		await control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});
+
+		expect(page._detachHubRealtime).toHaveBeenCalledTimes(1);
+		expect(page._attachHubRealtime).not.toHaveBeenCalled();
 		expect(control._fnNavigate).not.toHaveBeenCalled();
 	});
 

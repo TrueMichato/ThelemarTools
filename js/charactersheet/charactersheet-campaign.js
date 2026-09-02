@@ -563,7 +563,14 @@ export class CharacterSheetCampaign {
 			this.render();
 			this._fnNavigate(getCampaignCharacterUrl({campaignId, characterId: result.character.id}));
 		} catch (error) {
-			if (isRealtimeDetached) this._page._attachHubRealtime?.({characterId});
+			const isDefiniteRejection = Number.isInteger(error?.status)
+				&& error.status >= 400
+				&& error.status < 500;
+			if (
+				isRealtimeDetached
+				&& isDefiniteRejection
+				&& this._page._canRestoreHubRealtimeAfterError?.(error) !== false
+			) this._page._attachHubRealtime?.({characterId});
 			this._feedback = {
 				type: "error",
 				text: error?.message === "CLOUD_SAVE_FAILED"

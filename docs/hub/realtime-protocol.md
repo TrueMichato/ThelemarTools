@@ -292,7 +292,9 @@ owner Character Sheet instead subscribes only after authenticated campaign activ
 load. `CharacterSheetRealtimeCoordinator` filters the open character, serializes projection invalidations and
 semantic lifecycle events behind repository saves, and emits ephemeral callbacks. In this substrate slice,
 those callbacks never fetch/replace the owner document, call `loadFromJson`, render, save, apply an operation,
-or open a generic conflict modal.
+or open a generic conflict modal. A missing canonical ref or matching remote archive/move event queues teardown
+behind already-accepted delivery. Persisted `pagehide` suspends the socket and persisted `pageshow` resumes the
+same client, sequence cursor, and in-memory dedupe state.
 
 Snapshot-covered event types are suppressed only when at/before the snapshot sequence. Semantic lifecycle
 events are not discarded solely because they are at/below `operationWatermark`; durable roll/operation history

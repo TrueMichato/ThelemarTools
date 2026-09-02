@@ -347,9 +347,11 @@ Modules communicate through:
 
 The campaign realtime coordinator starts only after authenticated campaign activation and canonical character
 load. It routes the exact `character.operation.*` allowlist through the HTTP repository's save queue and fences
-callbacks on switch, detach, access loss, logout, page hide, and unload. This substrate does not mutate
-`CharacterSheetState`, fetch/replace a projection, render, save, or open a generic conflict modal; operation
-application belongs to the later ADR 0012 live-reconciliation layer.
+callbacks on switch, detach, access loss, logout, page hide, and unload. A missing canonical cursor ref or a
+matching remote archive/move event queues teardown behind already-accepted operation delivery. A persisted
+`pagehide` suspends the socket; persisted `pageshow` resumes the same client with its sequence/deduplication
+state intact. This substrate does not mutate `CharacterSheetState`, fetch/replace a projection, render, save, or
+open a generic conflict modal; operation application belongs to the later ADR 0012 live-reconciliation layer.
 
 ## Persistence Layer
 

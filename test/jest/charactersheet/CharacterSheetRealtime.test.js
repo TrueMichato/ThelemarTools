@@ -201,6 +201,63 @@ describe("Character Sheet realtime coordinator", () => {
 		expect(cursors[1].operationWatermark).toBe(0);
 	});
 
+	it("delivers already-replayed operations before a missing character ref tears down the sheet", async () => {
+		const {clients, coordinator} = makeCoordinator();
+		const delivered = [];
+		const states = [];
+		coordinator.on("semanticOperation", value => delivered.push(value));
+		coordinator.on("connectionState", value => states.push(value));
+		coordinator.attach({characterId: "character-1"});
+
+		clients[0].emit("cursor", {
+			cursor: {campaignId: "campaign-1", lastSequence: 8},
+			characterRefs: [],
+		});
+		clients[0].emit("event", makeAppliedEvent({sequence: 7}));
+		await pFlush();
+
+		expect(delivered).toEqual([expect.objectContaining({eventId: "event-applied"})]);
+		expect(clients[0].close).toHaveBeenCalledTimes(1);
+		expect(states).toContainEqual({
+			state: "closed",
+			reason: "Character is no longer available in this campaign.",
+		});
+	});
+
+	it.each(["character.archived", "character.moved_out"])("tears down on a remote %s event", async type => {
+		const {clients, coordinator} = makeCoordinator();
+		coordinator.attach({characterId: "character-1"});
+
+		clients[0].emit("event", {
+			id: `event-${type}`,
+			campaignId: "campaign-1",
+			sequence: 9,
+			type,
+			aggregateType: "character",
+			aggregateId: "character-1",
+		});
+		await pFlush();
+
+		expect(clients[0].close).toHaveBeenCalledTimes(1);
+	});
+
+	it("suspends and resumes the same client without resetting its delivery generation", async () => {
+		const {clients, coordinator} = makeCoordinator();
+		const delivered = [];
+		coordinator.on("semanticOperation", value => delivered.push(value));
+		coordinator.attach({characterId: "character-1"});
+
+		expect(coordinator.suspend()).toBe(true);
+		expect(clients[0].close).toHaveBeenCalledTimes(1);
+		expect(coordinator.resume()).toBe(true);
+		expect(clients[0].pConnect).toHaveBeenCalledTimes(2);
+		clients[0].emit("event", makeAppliedEvent());
+		await pFlush();
+
+		expect(clients).toHaveLength(1);
+		expect(delivered).toHaveLength(1);
+	});
+
 	it("delivers the exact lifecycle allowlist and dedupes each operation state", async () => {
 		const {clients, coordinator} = makeCoordinator();
 		const delivered = [];
