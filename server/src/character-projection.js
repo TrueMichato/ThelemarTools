@@ -672,10 +672,14 @@ export function getPolicyManagementResponse (character) {
  * exposes the same association anyway.
  */
 export function canViewCharacterEventActor ({character, accountId, role, actorAccountId}) {
-	if (!character) return true;
 	if (accountId && actorAccountId === accountId) return true;
-	if (character.ownerAccountId === accountId) return true;
 	if (["dm", "co_dm"].includes(role)) return true;
+	// An absent character cannot be shown to have shared its identity. Rows outlive the
+	// row they describe — account purge hard-deletes the character while leaving the
+	// campaign's domain events — so a missing character fails closed rather than
+	// retroactively republishing everything its owner had hidden.
+	if (!character) return false;
+	if (character.ownerAccountId === accountId) return true;
 	return isPeerVisibleIdentity(character);
 }
 
@@ -701,9 +705,12 @@ export function redactEventActor (event) {
  * "A character updated".
  */
 export function canViewSharedCharacterEvent ({character, accountId, role}) {
-	if (!character) return true;
-	if (character.ownerAccountId === accountId) return true;
 	if (["dm", "co_dm"].includes(role)) return true;
+	// Fails closed when the character is gone: account purge hard-deletes the character
+	// but retains the campaign's domain events, and a deleted row cannot demonstrate that
+	// its owner ever chose to share an identity.
+	if (!character) return false;
+	if (character.ownerAccountId === accountId) return true;
 	return isPeerVisibleIdentity(character);
 }
 

@@ -55,7 +55,8 @@
   `customModifiers` is a cache the sheet rebuilds on load, so a fixture that writes it directly asserts a state
   no reader ever sees.
 - Projected statistics are the character's **baseline**: what it is, not what it is doing this round. Active
-  states, combat stances and ability substitutions are excluded.
+  states, combat stances and ability substitutions are stripped from the document *before* it reaches the sheet
+  calculation, so a live Rage or Bless cannot move a projected save, skill or AC.
 
   This is a product boundary, not a technical limitation. Those toggles *are* persisted — the sheet calls
   `_saveCurrentCharacter()`, the repository patches the diff, and the server emits an invalidation like any
@@ -64,6 +65,13 @@
   every toggle would be noise. See ADR 0011.
 - When the sheet cannot read a document, `saves` and `skills` are omitted rather than approximated: a modifier
   the projection cannot stand behind would silently disagree with the sheet the owner reads.
+- Derivation runs with the console silenced. The sheet is browser code that warns about, for example,
+  unresolvable named modifiers — quoting the modifier's name and raw value, private character data that has not
+  passed the projection boundary and would otherwise reach operational logs on every derivation.
+- Shared event visibility fails closed when the character row is absent. Account purge hard-deletes the
+  character while retaining the campaign's domain events, and a deleted row cannot demonstrate that its owner
+  ever chose to share an identity, so deleting an account must not retroactively publish rows that were
+  suppressed while it existed. DMs retain the audit trail.
 - A private DM workspace belongs to one membership, not all campaign DMs.
 - Explicit-account events still include all campaign DMs/co-DMs by policy.
 - Browser cache/service worker must never cache authenticated API/auth responses.

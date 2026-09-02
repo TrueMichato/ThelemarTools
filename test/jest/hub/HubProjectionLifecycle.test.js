@@ -153,6 +153,70 @@ describe("projection lifecycle safety", () => {
 	});
 });
 
+describe("event privacy after account purge", () => {
+	it("does not republish a purged character's suppressed rows", async () => {
+		const {MemoryHubStore} = await import("../../../server/src/memory-hub-store.js");
+		const store = new MemoryHubStore();
+		const dm = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "purge-dm", displayName: "DM"});
+		const owner = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "purge-owner", displayName: "Rowan Vale"});
+		const peer = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "purge-peer", displayName: "Peer"});
+		const campaign = (await store.pCreateCampaign({accountId: dm.id, name: "Purge", idempotencyKey: "c"})).campaign;
+		await store.pCreateInvite({accountId: dm.id, campaignId: campaign.id, role: "player", tokenHash: "purge-token", expiresAt: new Date(Date.now() + 60_000), maxUses: 5, idempotencyKey: "i"});
+		for (const account of [owner, peer]) {
+			await store.pRedeemInvite({accountId: account.id, tokenHash: "purge-token", idempotencyKey: `r-${account.id}`});
+		}
+		const character = (await store.pCreateCharacter({
+			accountId: owner.id,
+			campaignId: campaign.id,
+			data: {name: "Mira"},
+			schemaVersion: 1,
+			clientImportId: "purge-import",
+			idempotencyKey: "ch",
+		})).character;
+		await store.pSetProjectionPolicy({accountId: owner.id, characterId: character.id, policy: {version: 1, preset: "private", overrides: {}}, expectedProjectionRevision: 1, idempotencyKey: "p"});
+		await store.pLogRoll({accountId: owner.id, campaignId: campaign.id, characterId: character.id, visibility: "all_members", payload: {formula: "1d20+PURGE-SECRET", total: 12}, idempotencyKey: "roll"});
+
+		const before = await store.pListVisibleEvents({accountId: peer.id, campaignId: campaign.id});
+		expect(JSON.stringify(before)).not.toContain(character.id);
+		expect(JSON.stringify(before)).not.toContain("PURGE-SECRET");
+
+		await store.pRequestAccountDeletion({accountId: owner.id, idempotencyKey: "del", graceMs: 0});
+		await new Promise(resolve => setTimeout(resolve, 5));
+		await store.pPurgeDueAccounts();
+
+		// Purge hard-deletes the character but keeps the campaign's domain events. The
+		// suppression must not depend on the row still being there, or deleting an account
+		// would retroactively publish everything its owner had hidden.
+		const after = await store.pListVisibleEvents({accountId: peer.id, campaignId: campaign.id});
+		expect(JSON.stringify(after)).not.toContain(character.id);
+		expect(JSON.stringify(after)).not.toContain("PURGE-SECRET");
+		expect(after.some(event => event.aggregateId === character.id)).toBe(false);
+
+		// The DM keeps the audit trail.
+		const dmAfter = await store.pListVisibleEvents({accountId: dm.id, campaignId: campaign.id});
+		expect(dmAfter.some(event => event.aggregateId === character.id)).toBe(true);
+	});
+
+	it("fails closed for a missing character in the shared-event helpers", async () => {
+		const {canViewSharedCharacterEvent, canViewCharacterEventActor} = await import("../../../server/src/character-projection.js");
+
+		// A deleted row cannot demonstrate that its owner ever chose to share an identity.
+		expect(canViewSharedCharacterEvent({character: null, accountId: "peer", role: "player"})).toBe(false);
+		expect(canViewCharacterEventActor({character: null, accountId: "peer", role: "player", actorAccountId: "gone"})).toBe(false);
+		// DMs keep the audit trail, and an actor still sees their own action.
+		expect(canViewSharedCharacterEvent({character: null, accountId: "dm", role: "dm"})).toBe(true);
+		expect(canViewCharacterEventActor({character: null, accountId: "me", role: "player", actorAccountId: "me"})).toBe(true);
+	});
+
+	it("resolves a missing character the same way in PostgreSQL", () => {
+		const source = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");
+		// Both PostgreSQL paths pass `null` for a character the join could not resolve,
+		// which is exactly the post-purge case, so they inherit the fail-closed decision.
+		expect(source).toContain("character: charactersById.get(row.aggregate_id) || null");
+		expect(source).toMatch(/const character = result\.rowCount[\s\S]{0,200}: null;/);
+	});
+});
+
 describe("store parity guards", () => {
 	it("invalidates on archived-import reactivation in both stores", () => {
 		const pg = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");

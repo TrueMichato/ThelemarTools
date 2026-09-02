@@ -23,17 +23,60 @@ if (typeof CharacterSheetState !== "function") {
 }
 
 /**
- * Load one character document into the authority.
+ * Persisted fields that describe what a character is *doing right now* rather than what
+ * it is. They are cleared before derivation so a projection reports the character's
+ * baseline.
+ *
+ * `activeStates` also drives combat-stance bonuses and ability substitutions
+ * (`getActiveAbilitySubstitution` reads `getActiveStateEffects()`), so clearing it and
+ * `activeStance` removes every transient contribution at once.
+ */
+const TRANSIENT_FIELDS = Object.freeze({
+	activeStates: () => [],
+	activeStance: () => null,
+});
+
+/** Strip transient combat state, leaving the baseline document. */
+function getBaselineDocument (characterData) {
+	// A JSON round-trip rather than `structuredClone`: the document is JSON by definition,
+	// and cloning across module realms produces arrays that fail `Array.isArray` inside
+	// the sheet.
+	const document = JSON.parse(JSON.stringify(characterData));
+	for (const [field, getEmpty] of Object.entries(TRANSIENT_FIELDS)) {
+		if (field in document) document[field] = getEmpty();
+	}
+	return document;
+}
+
+/**
+ * Run one synchronous derivation with the console silenced.
+ *
+ * The sheet is browser code and warns through `console.*` about things like unresolvable
+ * named modifiers — quoting the modifier's name and raw value, both of which are private
+ * character data that has not passed the projection boundary. On a server those land in
+ * operational logs. Derivation is fully synchronous, so nothing can interleave between
+ * the swap and the restore.
+ */
+function withSilencedConsole (fn) {
+	const original = globalThis.console;
+	const noop = () => {};
+	globalThis.console = new Proxy({}, {get: () => noop});
+	try {
+		return fn();
+	} finally {
+		globalThis.console = original;
+	}
+}
+
+/**
+ * Load one character document into the authority, at its baseline.
  * @returns {object|null} a loaded state, or `null` when the document cannot be read
  */
 function getLoadedState (characterData) {
 	if (!characterData || typeof characterData !== "object" || Array.isArray(characterData)) return null;
 	try {
 		const state = new CharacterSheetState();
-		// A JSON round-trip rather than `structuredClone`: the document is JSON by
-		// definition, and cloning across module realms produces arrays that fail
-		// `Array.isArray` inside the sheet.
-		state.loadFromJson(JSON.parse(JSON.stringify(characterData)));
+		state.loadFromJson(getBaselineDocument(characterData));
 		return state;
 	} catch {
 		// A document the sheet itself cannot read yields no derived statistics rather than
@@ -55,6 +98,10 @@ function toFiniteInteger (value) {
  * than substituting a partial calculation.
  */
 export function getDerivedStats ({characterData, abilityKeys, skillKeys}) {
+	return withSilencedConsole(() => getDerivedStatsUnsafe({characterData, abilityKeys, skillKeys}));
+}
+
+function getDerivedStatsUnsafe ({characterData, abilityKeys, skillKeys}) {
 	const state = getLoadedState(characterData);
 	if (!state) return null;
 

@@ -208,23 +208,82 @@ describe("projection versus Character Sheet parity", () => {
 		}
 	});
 
-	it("excludes only transient contributions, and does so deliberately", () => {
-		const {document} = getFixture(data => {
-			Object.assign(data, {
-				abilities: {str: 10, dex: 12, con: 12, int: 10, wis: 10, cha: 10},
-				classes: [{name: "Fighter", level: 5}],
-				saveProficiencies: ["con"],
-			});
+	it("projects the baseline while the sheet's own live values move", () => {
+		const authored = new CharacterSheetState();
+		Object.assign(authored._data, {
+			abilities: {str: 10, dex: 16, con: 12, int: 10, wis: 10, cha: 10},
+			classes: [{name: "Rogue", level: 5}],
+			saveProficiencies: ["dex"],
+			skillProficiencies: {stealth: 1},
 		});
-		const baseline = buildCharacterViewModel(document);
-		const withTransient = buildCharacterViewModel({
-			...document,
-			activeStates: [{type: "rage"}, {type: "bless"}],
-		});
+		const baseline = buildCharacterViewModel(JSON.parse(JSON.stringify(authored.toJson())));
 
-		// Projected statistics are the character's baseline, not whatever is toggled on in
-		// this moment. See docs/hub/data-lifecycle.md for the reconciliation.
-		expect(withTransient.saves).toEqual(baseline.saves);
-		expect(withTransient.skills).toEqual(baseline.skills);
+		// A genuinely active state with real effects, authored through the sheet's own API.
+		// A bare `{type: "rage"}` object has no `active` flag, state type or effects, so
+		// `getActiveStateEffects()` ignores it and an assertion built on one proves nothing.
+		authored.addActiveState("custom", {
+			customEffects: [
+				{type: "bonus", target: "save", value: 2},
+				{type: "bonus", target: "skill:stealth", value: 5},
+				{type: "bonus", target: "ac", value: 3},
+			],
+		});
+		const document = JSON.parse(JSON.stringify(authored.toJson()));
+		const projected = buildCharacterViewModel(document);
+
+		// The sheet's live values move...
+		expect(authored.getSaveMod("dex")).toBe(baseline.saves.dex.modifier + 2);
+		expect(authored.getSkillMod("stealth")).toBe(baseline.skills.stealth.modifier + 5);
+		expect(authored.getAC()).toBe(baseline.ac.value + 3);
+		// ...while the projection reports what the character is, not what it is doing.
+		expect(projected.saves).toEqual(baseline.saves);
+		expect(projected.skills).toEqual(baseline.skills);
+		expect(projected.ac).toEqual(baseline.ac);
+		expect(document.activeStates.some(state => state.active)).toBe(true);
+	});
+
+	it("keeps a stance out of the baseline as well", () => {
+		const authored = new CharacterSheetState();
+		Object.assign(authored._data, {
+			abilities: {str: 10, dex: 14, con: 12, int: 10, wis: 10, cha: 10},
+			classes: [{name: "Fighter", level: 5}],
+			saveProficiencies: ["con"],
+		});
+		const baseline = buildCharacterViewModel(JSON.parse(JSON.stringify(authored.toJson())));
+
+		authored._data.activeStance = "Defensive";
+		const projected = buildCharacterViewModel(JSON.parse(JSON.stringify(authored.toJson())));
+
+		expect(projected.saves).toEqual(baseline.saves);
+		expect(projected.skills).toEqual(baseline.skills);
+	});
+
+	it("writes no character data to any console channel while deriving", () => {
+		const authored = new CharacterSheetState();
+		Object.assign(authored._data, {
+			abilities: {str: 10, dex: 16, con: 12, int: 10, wis: 10, cha: 10},
+			classes: [{name: "Rogue", level: 5}],
+		});
+		// An unresolvable named modifier makes the sheet warn, quoting the modifier's name
+		// and raw value — private data that has not passed the projection boundary. On a
+		// server that lands in operational logs, and dedup resets because every derivation
+		// builds a fresh state.
+		authored.addNamedModifier({name: "MARKER-PRIVATE-BLADE", type: "skill:stealth", value: "unresolvable-expr-MARKER", enabled: true});
+		const document = JSON.parse(JSON.stringify(authored.toJson()));
+
+		const captured = [];
+		const realConsole = globalThis.console;
+		globalThis.console = new Proxy({}, {get: () => (...args) => captured.push(args.map(arg => (typeof arg === "string" ? arg : JSON.stringify(arg))).join(" "))});
+		try {
+			for (let i = 0; i < 3; ++i) buildCharacterViewModel(document);
+		} finally {
+			globalThis.console = realConsole;
+		}
+
+		expect(captured).toEqual([]);
+		expect(JSON.stringify(captured)).not.toContain("MARKER-PRIVATE-BLADE");
+		expect(JSON.stringify(captured)).not.toContain("unresolvable-expr-MARKER");
+		// The console must be handed back exactly as it was found.
+		expect(globalThis.console).toBe(realConsole);
 	});
 });
