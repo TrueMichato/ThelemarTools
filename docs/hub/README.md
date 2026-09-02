@@ -102,12 +102,15 @@ second character or apply the move twice. Local character JSON does not gain Hub
 - [ADR 0013: device-scoped active campaign context](adr/0013-device-scoped-active-campaign-context.md) — contract only
 - [ADR 0014: multi-provider account identity](adr/0014-multi-provider-identity.md) — contract only
 - [ADR 0015: versioned Campaign Hub rules policy](adr/0015-campaign-rules-policy.md) — contract only
+- [ADR 0016: atomic source-cost binding for peer character operations](adr/0016-atomic-peer-source-costs.md) —
+  contract only
 
 ADRs 0001-0008 describe implemented portable architecture and launch-readiness decisions. ADR 0009 proposed
 a paid managed provider and was superseded on cost grounds by ADR 0010, which selects Oracle Cloud Always
-Free; it is retained as the evaluation of record for the paid upgrade path. ADRs 0011-0012 are accepted
-architecture contracts for projection privacy and semantic operation reconciliation; production behavior is
-not implemented by those ADRs.
+Free; it is retained as the evaluation of record for the paid upgrade path. ADRs 0011-0016 include accepted
+architecture contracts whose status lines distinguish shipped substrate from future implementation. In
+particular, ADR 0016 defines source-cost atomicity for peer operations but does not enable cost-bearing player
+targeting.
 
 ## Local BFF setup
 
