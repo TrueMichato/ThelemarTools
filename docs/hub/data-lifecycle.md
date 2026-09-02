@@ -22,6 +22,7 @@
 | Party inventory | Shared assets | campaign members; mutations role/ownership controlled | campaign lifetime |
 | Audit entries | Security/admin evidence | BFF/operators; no public API | retained; actor/campaign refs nullable |
 | Domain events | Ordered replay/history | visibility-filtered | retained until campaign/account deletion |
+| Character Sheet realtime delivery | Ordered metadata/lifecycle handoff for the open owned character | current authenticated campaign page only | memory only; fenced and discarded on switch/detach/access loss/logout/terminal page hide; temporarily retained across BFCache suspension |
 | Outbox rows | Technical delivery | BFF/operators | published 7-day cleanup approved, not implemented |
 | Command receipts | Idempotent retry | BFF/store | 24 hours |
 | Semantic operations/commands | Effect lifecycle, stable exactly-once replay, resulting revision/event linkage | authorized participants; BFF/store command records | campaign/account lifecycle; not pruned as technical receipts |
@@ -79,6 +80,12 @@
 - Applied semantic-operation details are explicit-recipient data. Peer projections and peer resync refs never
   carry `operationWatermark`; shared projection invalidations remain metadata-only.
 - Browser cache/service worker must never cache authenticated API/auth responses.
+- The Character Sheet realtime coordinator keeps no durable event queue or payload cache. It passes only the
+  open target's projection metadata and explicit-recipient semantic-operation lifecycle payloads through
+  ephemeral callbacks serialized behind saves. Payloads are not written to local/session storage, recovery
+  artifacts, telemetry, or logs. A remote archive/move or missing canonical ref serializes teardown behind
+  already-queued delivery. BFCache restoration resumes the same in-memory client/cursor rather than starting a
+  duplicate historical delivery generation.
 
 The private pilot must disclose DM full-sheet access and account/export/deletion behavior before users upload
 characters.

@@ -137,10 +137,12 @@ describe("Character Sheet repository seam", () => {
 			_clearActiveCharacterMirror: jest.fn(),
 			_getNextSavedAt: CharacterSheetPage.prototype._getNextSavedAt,
 			_lastSavedAt: 0,
+			_attachHubRealtime: jest.fn(),
 		};
 
 		await expect(CharacterSheetPage.prototype._saveCurrentCharacter.call(host)).resolves.toBe(true);
 		expect(host._currentCharacterId).toBe("server-id");
+		expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "server-id"});
 	});
 
 	it("applies remote fields while preserving edits made during the save", async () => {
@@ -201,5 +203,78 @@ describe("Character Sheet repository seam", () => {
 		})).resolves.toBe(false);
 
 		expect(repository.pUpsert).not.toHaveBeenCalled();
+	});
+
+	it("tears down realtime before creating an unsaved campaign character", () => {
+		const host = {
+			_characterLoadGeneration: 0,
+			_detachHubRealtime: jest.fn(),
+			_clearLastHpChange: jest.fn(),
+			_currentCharacterId: "canonical-id",
+			_isLevelUpBannerDismissed: true,
+			_hubContext: null,
+			_state: {
+				clearCampaignSettingsOverlay: jest.fn(),
+				reset: jest.fn(),
+				setCampaignSettingsOverlay: jest.fn(),
+				setClassFeatureCatalog: jest.fn(),
+				setId: jest.fn(),
+			},
+			_classFeatures: [],
+			_subclassFeatures: [],
+			_optionalFeaturesData: [],
+			_renderCharacter: jest.fn(),
+		};
+
+		CharacterSheetPage.prototype._createNewCharacter.call(host);
+
+		expect(host._detachHubRealtime).toHaveBeenCalledTimes(1);
+		expect(host._characterLoadGeneration).toBe(1);
+		expect(host._state.setId).toHaveBeenCalledWith(host._currentCharacterId);
+	});
+
+	it("restores the previous subscription when a character switch cannot load", async () => {
+		const host = {
+			_characterLoadGeneration: 0,
+			_currentCharacterId: "character-1",
+			_characterRepository: {
+				pGet: jest.fn(async () => { throw new Error("offline"); }),
+			},
+			_attachHubRealtime: jest.fn(),
+			_detachHubRealtime: jest.fn(),
+		};
+
+		await expect(CharacterSheetPage.prototype._pLoadCharacter.call(host, "character-2"))
+			.rejects.toThrow("offline");
+
+		expect(host._detachHubRealtime).toHaveBeenCalledTimes(1);
+		expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "character-1"});
+	});
+
+	it("tears down on terminal pagehide and resumes the same subscription after BFCache restoration", () => {
+		const listeners = {};
+		const windowPrev = globalThis.window;
+		globalThis.window = {
+			addEventListener: jest.fn((type, listener) => listeners[type] = listener),
+		};
+		const host = {
+			_detachHubRealtime: jest.fn(),
+			_hubRealtime: {
+				resume: jest.fn(),
+				suspend: jest.fn(),
+			},
+		};
+		try {
+			CharacterSheetPage.prototype._initHubRealtimeTeardown.call(host);
+			listeners.pagehide({persisted: true});
+			listeners.pageshow({persisted: true});
+			listeners.pagehide({persisted: false});
+		} finally {
+			globalThis.window = windowPrev;
+		}
+
+		expect(host._hubRealtime.suspend).toHaveBeenCalledTimes(1);
+		expect(host._hubRealtime.resume).toHaveBeenCalledTimes(1);
+		expect(host._detachHubRealtime).toHaveBeenCalledTimes(1);
 	});
 });

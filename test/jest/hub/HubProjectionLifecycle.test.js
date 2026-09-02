@@ -246,13 +246,15 @@ describe("store parity guards", () => {
 describe("owner character sheet safety", () => {
 	const read = path => fs.readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
 
-	it("keeps the Character Sheet off the realtime invalidation path", () => {
+	it("keeps Character Sheet realtime delivery metadata-only", () => {
 		const source = read("js/charactersheet/charactersheet.js");
-		// An invalidation must never be able to replace an owner's unsaved local document,
-		// so the sheet subscribes to no realtime channel at all.
-		expect(source).not.toContain("HubRealtimeClient");
-		expect(source).not.toContain("character.projection.invalidated");
-		expect(source).not.toContain("requestResync");
+		const realtime = read("js/charactersheet/charactersheet-realtime.js");
+		expect(source).toContain("CharacterSheetRealtimeCoordinator");
+		expect(realtime).toContain("character.projection.invalidated");
+		expect(realtime).toContain("pEnqueueRealtimeDelivery");
+		for (const forbidden of ["loadFromJson", "_renderCharacter", "_saveCurrentCharacter", "pGetCharacter"]) {
+			expect({forbidden, present: realtime.includes(forbidden)}).toEqual({forbidden, present: false});
+		}
 	});
 
 	it("keeps sharing controls out of the document write path", () => {

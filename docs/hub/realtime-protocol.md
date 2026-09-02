@@ -105,8 +105,13 @@ markers remain ordinary `resync` messages subject to the 20-message-per-second b
 new connection but resumes from the client's last server-issued scanned sequence. The client treats all
 continuation pages as one replay chain: it buffers live events until the final page, emits recovered and live
 events once in campaign-sequence order, and does not start a periodic resync while that chain is active. If a
-valid replay request fails, the client closes that socket and resumes the preserved chain through reconnect
-backoff rather than leaving live delivery buffered indefinitely.
+server `error` frame arrives while a replay chain is active, the client closes that socket and resumes the
+preserved chain through reconnect backoff rather than leaving live delivery buffered indefinitely.
+
+`operationWatermark` is optional owner/DM truth metadata. When present, it is `0` or the campaign sequence of
+the latest applied semantic operation already reflected in that canonical character truth. It is never added
+to a peer-only ref. Clients still deliver ordered semantic-operation events at or below the watermark; the
+later Character Sheet reconciliation layer uses the watermark to avoid transforming an already-covered base.
 
 Unknown client types receive:
 
@@ -160,6 +165,28 @@ Presence is ephemeral and not written to the event log.
 }
 ```
 
+### Character semantic-operation lifecycle
+
+The Character Sheet allowlist is:
+
+- `character.operation.proposed`;
+- `character.operation.applied`;
+- `character.operation.rejected`;
+- `character.operation.cancelled`;
+- `character.operation.expired`.
+
+An applied event targets the character aggregate. Its `aggregateRevision` equals
+`payload.resultingCharacterRevision`; the payload is
+`{operation:{operationId,kind,version:1,targetCharacterId,arguments},resultingCharacterRevision}`. Proposal
+and non-applied terminal events target the semantic-operation aggregate and route through
+`payload.operationId` plus `payload.targetCharacterId`. There is no `character.operation.accepted` event:
+target-owner acceptance emits `character.operation.applied`.
+
+Lifecycle events use `explicit_accounts` for proposer and target owner; DM/co-DM inclusion follows the normal
+visibility policy. Multi-recipient payloads contain only the frozen display snapshots and closed,
+non-enumerating reason specified by the event catalog. They contain no source character id, canonical
+field/path, effective delta, hidden eligibility/resource truth, or raw actor id inside the payload.
+
 ## Limits and close behavior
 
 - Fastify WebSocket max payload: 16 KB.
@@ -204,7 +231,9 @@ Each campaign has a monotonically allocated `sequence`.
 7. Stale publishing claims are reclaimable.
 
 WebSocket delivery is at-least-once in the presence of process/network failure. Clients deduplicate by event
-id (falling back to sequence/type) and track the highest sequence.
+id (falling back to sequence/type) and track the highest sequence. Character Sheet semantic consumers also
+deduplicate each lifecycle state by `type + operationId`, while allowing distinct states for the same
+operation to pass in order.
 
 ### Semantic character operations
 
@@ -246,19 +275,26 @@ watermark to zero before that character is exposed in the new campaign context.
 `HubRealtimeClient`:
 
 1. reconnects with bounded exponential backoff;
-2. sends resync from last accepted sequence;
-3. buffers live events while resync is in progress;
-4. applies the cursor baseline and emits `cursor` with `characterRefs`;
-5. applies replay events;
-6. suppresses cursor-covered historical state events;
-7. applies buffered events in order;
-8. emits current presence/events to page consumers.
+2. fences every socket generation so messages, timers, and closes from replaced sockets are inert;
+3. sends resync from last accepted sequence;
+4. buffers live events while resync is in progress;
+5. applies the cursor baseline and emits `cursor` with `characterRefs`;
+6. pages replay in batches of 500 without advancing past an unread sequence range;
+7. applies replay events;
+8. suppresses cursor-covered historical state events;
+9. applies buffered events in order;
+10. emits current presence/events to page consumers.
 
-Consumers coalesce repeated `character.projection.invalidated` events and perform one
+Campaign roster consumers coalesce repeated `character.projection.invalidated` events and perform one
 authorization-scoped HTTP fetch. The response **replaces** the previous projection rather than merging with
 it, so a field an owner has just stopped sharing cannot survive from an older, broader response. An editable
-owner Character Sheet never replaces live local state from an invalidation-triggered fetch: it has no realtime
-subscription, and ordinary document changes use its accepted-base rebase.
+owner Character Sheet instead subscribes only after authenticated campaign activation and canonical character
+load. `CharacterSheetRealtimeCoordinator` filters the open character, serializes projection invalidations and
+semantic lifecycle events behind repository saves, and emits ephemeral callbacks. In this substrate slice,
+those callbacks never fetch/replace the owner document, call `loadFromJson`, render, save, apply an operation,
+or open a generic conflict modal. A missing canonical ref or matching remote archive/move event queues teardown
+behind already-accepted delivery. Persisted `pagehide` suspends the socket and persisted `pageshow` resumes the
+same client, sequence cursor, partial replay chain, buffered live events, and in-memory dedupe state.
 
 Snapshot-covered event types are suppressed only when at/before the snapshot sequence. Semantic lifecycle
 events are not discarded solely because they are at/below `operationWatermark`; durable roll/operation history

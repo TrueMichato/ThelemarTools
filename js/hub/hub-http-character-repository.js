@@ -100,6 +100,12 @@ export class HubHttpCharacterRepository {
 		return pResult;
 	}
 
+	pEnqueueRealtimeDelivery ({characterId, fnDeliver}) {
+		if (typeof characterId !== "string" || !characterId) throw new TypeError(`characterId is required.`);
+		if (typeof fnDeliver !== "function") throw new TypeError(`fnDeliver is required.`);
+		return this._pRunMutation(fnDeliver);
+	}
+
 	_migrateCharacterIdentity ({fromId, toId}) {
 		if (fromId === toId) return;
 		this._canonicalIds.set(fromId, toId);

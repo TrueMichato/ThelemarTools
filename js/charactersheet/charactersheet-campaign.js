@@ -542,9 +542,12 @@ export class CharacterSheetCampaign {
 		this._isBusy = true;
 		this._feedback = null;
 		this.render();
+		let isRealtimeDetached = false;
 		try {
 			if (!await this._page._saveCurrentCharacter({isInteractiveConflict: false})) throw new Error("CLOUD_SAVE_FAILED");
 			await this._page._characterRepository.pReleaseLease?.({characterId});
+			this._page._detachHubRealtime?.();
+			isRealtimeDetached = true;
 			const command = this._getPendingCommand({kind: isDetached ? "attach-cloud" : "move-cloud", characterId, campaignId});
 			const result = await this._api.pMoveCharacter({
 				characterId,
@@ -560,6 +563,14 @@ export class CharacterSheetCampaign {
 			this.render();
 			this._fnNavigate(getCampaignCharacterUrl({campaignId, characterId: result.character.id}));
 		} catch (error) {
+			const isDefiniteRejection = Number.isInteger(error?.status)
+				&& error.status >= 400
+				&& error.status < 500;
+			if (
+				isRealtimeDetached
+				&& isDefiniteRejection
+				&& this._page._canRestoreHubRealtimeAfterError?.(error) !== false
+			) this._page._attachHubRealtime?.({characterId});
 			this._feedback = {
 				type: "error",
 				text: error?.message === "CLOUD_SAVE_FAILED"
