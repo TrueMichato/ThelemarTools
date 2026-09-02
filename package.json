@@ -134,8 +134,8 @@
 		"@fastify/cookie": "11.1.2",
 		"@fastify/rate-limit": "11.2.0",
 		"@fastify/websocket": "11.3.0",
-		"fastify": "5.12.0",
+		"fastify": "5.12.1",
 		"pg": "8.23.0",
-		"sanitize-html": "2.17.5"
+		"sanitize-html": "2.17.7"
 	}
 }

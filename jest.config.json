@@ -1,5 +1,9 @@
 {
+	"globalSetup": "<rootDir>/test/jest/setup-htmlparser2.cjs",
 	"moduleFileExtensions": ["js"],
+	"moduleNameMapper": {
+		"^htmlparser2$": "<rootDir>/node_modules/.cache/jest-htmlparser2.cjs"
+	},
 	"transform": {},
 	"testEnvironment": "node",
 	"testMatch": ["**/test/**/*.test.js"],
