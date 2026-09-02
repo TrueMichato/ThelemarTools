@@ -18,7 +18,7 @@ export class HubApiClient {
 	}
 
 	async _pRequest (path, {method = "GET", body = null, isMutation = false, idempotencyKey = null} = {}) {
-		const headers = {accept: "application/json", "x-hub-protocol-version": "2"};
+		const headers = {accept: "application/json", "x-hub-protocol-version": "3"};
 		if (body != null) headers["content-type"] = "application/json";
 		if (isMutation) {
 			if (!this._csrfToken) throw new HubApiError({code: "CSRF_NOT_READY", status: 0});
@@ -155,7 +155,11 @@ export class HubApiClient {
 	}
 
 	async pListEvents ({campaignId, afterSequence = 0, limit = 200}) {
-		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/events?afterSequence=${afterSequence}&limit=${limit}`)).events;
+		return (await this.pListEventPage({campaignId, afterSequence, limit})).events;
+	}
+
+	async pListEventPage ({campaignId, afterSequence = 0, limit = 200}) {
+		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/events?afterSequence=${afterSequence}&limit=${limit}`);
 	}
 
 	async pLogRoll ({campaignId, characterId = null, formula, total, context = null, visibility = "all_members", detail = {}, idempotencyKey}) {
@@ -365,15 +369,33 @@ export class HubApiClient {
 		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/actions`)).actions;
 	}
 
-	async pCreateStructuredAction ({campaignId, targetCharacterId, effect, idempotencyKey}) {
+	async pCreateStructuredAction ({campaignId, targetCharacterId, operation, idempotencyKey}) {
+		const commandId = idempotencyKey || crypto.randomUUID();
 		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/actions`, {
-			method: "POST", body: {targetCharacterId, effect}, isMutation: true, idempotencyKey,
+			method: "POST",
+			body: {commandId, targetCharacterId, operation},
+			isMutation: true,
+			idempotencyKey: commandId,
+		});
+	}
+
+	async pCreatePeerAction ({campaignId, sourceCharacterId, sourceEntity, effectTemplateId, choice, targetRef, idempotencyKey}) {
+		const commandId = idempotencyKey || crypto.randomUUID();
+		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/actions`, {
+			method: "POST",
+			body: {commandId, sourceCharacterId, sourceEntity, effectTemplateId, choice, targetRef},
+			isMutation: true,
+			idempotencyKey: commandId,
 		});
 	}
 
 	async pResolveStructuredAction ({campaignId, actionId, decision, idempotencyKey}) {
+		const commandId = idempotencyKey || crypto.randomUUID();
 		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/actions/${encodeURIComponent(actionId)}/resolve`, {
-			method: "POST", body: {decision}, isMutation: true, idempotencyKey,
+			method: "POST",
+			body: {commandId, decision},
+			isMutation: true,
+			idempotencyKey: commandId,
 		});
 	}
 

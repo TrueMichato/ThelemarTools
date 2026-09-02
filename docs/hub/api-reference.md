@@ -1,8 +1,8 @@
 # Campaign Hub HTTP API
 
 > **Status:** Current private-V1 contract
-> **Wire protocol:** `2`
-> **Last verified:** 2026-08-24
+> **Wire protocol:** `3`
+> **Last verified:** 2026-09-02
 > **Owner:** Campaign Hub maintainers
 
 The browser uses relative same-origin paths through `HubApiClient`. This is an application BFF contract, not
@@ -24,7 +24,7 @@ Every mutation requires:
 ```http
 Origin: https://the-exact-app-origin.example
 X-CSRF-Token: <session HMAC>
-X-Hub-Protocol-Version: 2
+X-Hub-Protocol-Version: 3
 Idempotency-Key: <non-empty value, at most 200 characters>
 ```
 
@@ -84,11 +84,17 @@ Path/query keys ending in `Id` must be UUID-shaped. Invalid values fail as `INVA
 | `GET /api/campaigns/:campaignId/context` | Active member | none | Active immutable brew/rules versions |
 | `GET /api/campaigns/:campaignId/snapshot` | Active member; protocol-versioned | none | Campaign, membership, authorization-scoped character envelopes, roster metadata, last sequence |
 | `GET /api/campaigns/:campaignId/character-projections` | Active member; protocol-versioned | none | `{projections, roster}` — the batch scoped projector every consumer refetches through |
-| `GET /api/campaigns/:campaignId/events` | Active member | `afterSequence>=0`, `limit` 1-500 (default 200) | Visibility-filtered ordered events; character-related payloads may carry bounded versioned display-name snapshots |
+| `GET /api/campaigns/:campaignId/events` | Active member | `afterSequence>=0`, `limit` 1-500 (default 200) | `{events, replay: {scannedThroughSequence, hasMore}}`; ordered authorization-scoped events plus the authoritative continuation boundary |
 | `POST /api/campaigns/:campaignId/archive` | Campaign owner mutation | none | Cancels actions/releases leases/detaches characters, or `CAMPAIGN_BUSY` |
 | `POST /api/campaigns/:campaignId/transfer-ownership` | Campaign owner mutation | `{targetAccountId}` | Changes owner and owner/target roles atomically |
 
 The archive/ownership routes rely on store-level owner authorization in addition to session security.
+
+Event replay pages can contain fewer than `limit` events, including zero, after character-projection privacy
+redaction. A client continues while `replay.hasMore` is true and passes `replay.scannedThroughSequence` as the
+next `afterSequence`; returned event count is never evidence that the scanned range is exhausted. The marker is
+the highest raw event sequence in that page's bounded scan window, excluding its one-row lookahead, not the last
+event disclosed to the viewer.
 
 ### Authorization envelopes
 
@@ -97,8 +103,8 @@ Every character read returns exactly one outcome, discriminated by `kind`
 
 | Requester | `kind` | Contents |
 |---|---|---|
-| Character owner | `owner_truth` | canonical document, `policy`, `projectionRevision` |
-| DM or co-DM who is not the owner | `dm_truth` | canonical document plus the exact `peerPreview`; never the raw policy |
+| Character owner | `owner_truth` | canonical document, `policy`, `projectionRevision`, opaque `targetRef`, `operationWatermark` |
+| DM or co-DM who is not the owner | `dm_truth` | canonical document, opaque `targetRef`, `operationWatermark`, plus the exact `peerPreview`; never the raw policy |
 | Any other active member | `peer_profile` | `{id, campaignId, revision, projectionRevision, data}` |
 
 Reads whose response is an envelope require `X-Hub-Protocol-Version`; a mismatch returns
@@ -138,14 +144,47 @@ Character data is sanitized/validated and capped at 1.5 MB after the resulting m
 | Method/path | Authorization | Input | Result |
 |---|---|---|---|
 | `POST /api/campaigns/:campaignId/rolls` | Active-member mutation; character owner or DM when character supplied | characterId?, formula <=200, numeric total, context <=100, visibility, detail | Durable `roll.logged` event; activity uses a bounded semantic `detail.title` and selected detail fields |
-| `GET /api/campaigns/:campaignId/actions` | Active member | none | Actions visible to DM, actor, or target owner |
-| `POST /api/campaigns/:campaignId/actions` | DM/co-DM/player mutation; spectator denied | target character + structured effect | 201 proposed action |
-| `POST /api/campaigns/:campaignId/actions/:actionId/resolve` | Target owner or DM/co-DM mutation | decision accept/reject | Action and canonical target character |
+| `GET /api/campaigns/:campaignId/actions` | Active member | none | Proposed semantic operations visible to DM/co-DM, proposer, or target owner |
+| `POST /api/campaigns/:campaignId/actions` | DM/co-DM/player mutation; spectator denied | Direct DM/co-DM command or source-derived peer proposal, below | 201 stable operation/lifecycle metadata; direct authority is already `applied`, peer authority is `proposed` |
+| `POST /api/campaigns/:campaignId/actions/:operationId/resolve` | Target owner, proposer, or DM/co-DM according to decision | `{commandId, decision}` where decision is `accept`, `reject`, or `cancel` | Stable operation/lifecycle metadata; acceptance returns the applied revision/watermark |
 | `POST /api/campaigns/:campaignId/characters/:characterId/xp-grants` | DM/co-DM mutation | integer amount 1-1,000,000; reason <=500 | Updated character |
 | `POST /api/campaigns/:campaignId/characters/:characterId/item-grants` | DM/co-DM mutation | item object; quantity 1-100,000 | Updated character + stable new entry |
 
-Supported structured effects are damage, healing, condition add/remove, spell-slot spend, and informational.
-The authority does not interpret arbitrary spell prose.
+Every semantic command uses a UUID `commandId` equal to `Idempotency-Key`. Exact retries return the stored
+operation and event ids; any actor/body reuse returns `IDEMPOTENCY_KEY_REUSED`.
+
+Direct DM/co-DM body:
+
+```json
+{
+  "commandId": "uuid",
+  "targetCharacterId": "uuid",
+  "operation": {"kind": "hp.heal", "version": 1, "arguments": {"amount": 5}}
+}
+```
+
+Source-derived peer body:
+
+```json
+{
+  "commandId": "uuid",
+  "sourceCharacterId": "uuid",
+  "sourceEntity": {"type": "ability", "uid": "name|source", "version": "content-version"},
+  "effectTemplateId": "server-template-id",
+  "choice": {},
+  "targetRef": "opaque-uuid"
+}
+```
+
+The version-1 catalog is `hp.damage`, `hp.heal`, `condition.add`, `condition.remove`, `spell_slot.spend`, and
+`spell_slot.restore`. Players cannot submit generic `kind`/`arguments`. Peer proposals rederive from the pinned
+server template at creation and approval, always require a later explicit target-owner acceptance (including
+self-target), and expire after at most 24 hours. DMs/co-DMs may reject/cancel but may accept only when they own
+the target. The production registry currently enables no successful `cost=none` peer template; recognized
+cost-bearing Cure Wounds requests fail with `SOURCE_COST_UNSUPPORTED` before row creation and again at apply.
+An otherwise-authorized resolution command received after the deadline performs the single `expired` transition
+and returns its stable terminal metadata; retries replay that response. The authority does not interpret
+arbitrary spell prose.
 
 ## Party inventory and transfer routes
 
@@ -189,7 +228,7 @@ Campaign role alone does not permit reading another DM's workspace.
 | Concurrency/lifecycle conflicts | `REVISION_CONFLICT`, `LEASE_HELD`, `LEASE_EXPIRED`, `LEASE_FENCED`, `CHARACTER_BUSY`, `CAMPAIGN_BUSY`, `MEMBERSHIP_OWNER_PROTECTED`, `ACCOUNT_OWNS_CAMPAIGN` |
 | Character/cloud content | `CHARACTER_INVALID`, `CHARACTER_TOO_LARGE`, `CLOUD_DATA_INVALID`, `CLOUD_DATA_TOO_LARGE`, `CLOUD_DATA_TOO_DEEP`, `CLOUD_HTML_FORBIDDEN`, `CLOUD_URL_FORBIDDEN`, `CLOUD_KEY_FORBIDDEN` |
 | Campaign content | `BREW_INVALID`, `BREW_TOO_LARGE`, `BREW_TOO_DEEP`, `BREW_BLOCKLIST_FORBIDDEN`, `BREW_RAW_HTML_FORBIDDEN`, `BREW_URL_FORBIDDEN`, `BREW_KEY_FORBIDDEN`, `BREW_DEPENDENCY_MISSING`, `RULES_INVALID`; generic `CLOUD_DATA_INVALID`, `CLOUD_DATA_TOO_LARGE`, or `CLOUD_DATA_TOO_DEEP` may surface from the shared JSON-safety pass |
-| Actions/transfers | `ACTION_INVALID`, `RESOURCE_INSUFFICIENT`, `NUMERIC_INVALID`, `TRANSFER_EMPTY`, `TRANSFER_INSUFFICIENT`, `TRANSFER_ITEM_LINKED`, `TRANSFER_TARGET_INVALID` |
+| Actions/transfers | `ACTION_INVALID`, `OPERATION_FORBIDDEN`, `SOURCE_OR_TARGET_UNAVAILABLE`, `SOURCE_COST_UNSUPPORTED`, `PROPOSAL_STALE`, `RESOURCE_INSUFFICIENT`, `NUMERIC_INVALID`, `TRANSFER_EMPTY`, `TRANSFER_INSUFFICIENT`, `TRANSFER_ITEM_LINKED`, `TRANSFER_TARGET_INVALID` |
 | Availability | `DATABASE_UNAVAILABLE`, `INTERNAL_ERROR` |
 
 Most validation/domain errors default to 400. Authorization uses 401/403, hidden/unavailable resources use

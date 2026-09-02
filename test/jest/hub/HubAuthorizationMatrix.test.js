@@ -41,12 +41,12 @@ describe("campaign authorization matrix", () => {
 	}
 
 	function headers (session) {
-		return {cookie: session.cookie, origin: ORIGIN, "x-csrf-token": session.csrfToken, "x-hub-protocol-version": "2", "idempotency-key": `k-${++ix}`};
+		return {cookie: session.cookie, origin: ORIGIN, "x-csrf-token": session.csrfToken, 		"x-hub-protocol-version": "3", "idempotency-key": `k-${++ix}`};
 	}
 
 	/** Projection-shaped reads must declare their protocol version, like mutations. */
 	function readHeaders (session) {
-		return {cookie: session.cookie, "x-hub-protocol-version": "2"};
+		return {cookie: session.cookie, "x-hub-protocol-version": "3"};
 	}
 
 	async function campaign (session, name) {

@@ -2,8 +2,9 @@
 
 Status: Accepted as an architecture contract (2026-09-01)
 
-Implementation: Contract only. No production route, repository, pending-action, or Character Sheet behavior is
-changed by this ADR.
+Implementation: The protocol-v3 server/store/API/event substrate is implemented. DM/co-DM operations apply
+immediately; the source-derived peer proposal state machine exists but has no successful production `cost=none`
+template. Character Sheet operation-aware reconciliation and approval UI remain separate follow-up work.
 
 ## Context
 
@@ -85,7 +86,8 @@ contains free-authored operation kind or arguments; target approval must never t
 authoritative effect.
 
 The authoritative event contains the declared operation after input normalization, its semantic version,
-resulting character revision, actor/target metadata, and no unrelated character fields. It never substitutes a
+target identity, resulting character revision, and no unrelated character fields. Actor attribution remains in
+the authorized event envelope and is not duplicated in the payload. It never substitutes a
 post-clamp effective delta: `hp.heal 5` remains `hp.heal 5` even if canonical HP clamps, so the client can apply
 the same operation to `B` and `L` and a peer actor cannot infer hidden HP from the clamp. Operation functions
 are pure and deterministic for a given validated character state and normalized operation. A semantic version
@@ -158,17 +160,18 @@ those snapshots and the actor's submitted source identity/version/template/choic
 target state, derived eligibility facts, effective/clamped deltas, or a broader profile.
 
 Target discovery uses only profile-visible identity and opaque references. Proposal/apply failures sent to the
-peer actor are non-enumerating (`SOURCE_OR_TARGET_UNAVAILABLE` or `PROPOSAL_STALE`); target owner and DM may
-receive an actionable private reason. A different failure code, timing response, activity row, or event payload
+peer actor are non-enumerating (`SOURCE_OR_TARGET_UNAVAILABLE` or `PROPOSAL_STALE`). Shared lifecycle events carry
+only the closed reason `unavailable`; richer diagnostics may exist only in an authorized command response or
+separately targeted private metadata. A different failure code, timing response, activity row, or event payload
 must not reveal hidden HP, condition, spell-slot, inventory, carry, source availability, or target eligibility.
 
 ### Approval policy
 
 - A DM/co-DM operation is authorized and applied immediately in one canonical transaction. It does not create
   a pending approval merely because the target belongs to a player.
-- A source-derived peer proposal always enters `proposed`, including a self-targeted proposal, and requires an
-  explicit target-owner approval command before application. This ADR defines no owner-local semantic-command
-  exception; self-targeting uses the same provenance, derivation, validation, expiry, and approval path.
+- A source-derived peer proposal always enters `proposed`, including a self-targeted proposal, and requires a
+  later, distinct target-owner approval command before application. For self-targeting, the same account may
+  issue that second command in its target-owner capacity; proposal creation itself never auto-approves.
 - A target owner may approve or reject. A DM/co-DM may reject or cancel abusive/stale proposals, but approving
   on the target's behalf is unnecessary: a DM who intends the effect issues a new DM operation, which
   auto-applies with its own actor and command identity.
@@ -178,6 +181,9 @@ must not reveal hidden HP, condition, spell-slot, inventory, carry, source avail
 - Every peer proposal receives a bounded, non-null expiry at creation. Expiry is a terminal transition with its
   own stable event id; the implementation may configure the duration but may not leave proposals indefinitely
   actionable.
+- An otherwise-authorized resolution command which reaches a still-proposed operation after its deadline wins
+  the single `expired` transition and returns replayable terminal metadata rather than applying the requested
+  decision.
 
 Application locks the source and target aggregates in stable id order, rechecks actor/approver authorization
 inside the transaction, re-derives and applies the operation to current canonical target truth, increments the
@@ -247,8 +253,12 @@ accepted event sequence. It does not infer ordering from WebSocket arrival time.
   consumers receive only ADR 0011 invalidation metadata.
 - Reconnect first reauthorizes, then fetches owner truth and replays ordered visible events after the last
   accepted sequence. The client deduplicates by `eventId`/`operationId`.
-- A snapshot/replay watermark states which operation sequence the fetched truth includes. Events at or below
-  that watermark update history but do not transform the state again.
+- Each HTTP/WebSocket replay page carries authoritative `{scannedThroughSequence, hasMore}` metadata. Privacy
+  redaction may leave a page short or empty; clients continue from the scanned sequence while `hasMore` is true
+  and never treat visible event count as proof that later lifecycle events do not exist.
+- Owner/DM truth carries `operationWatermark`, the latest applied-operation campaign sequence already reflected
+  in that canonical revision. Owner/DM resync refs may carry it; peer profiles and peer refs never do. Events at
+  or below that watermark still deliver and update history but do not transform a fetched canonical base again.
 - Local recovery retains its accepted base, local snapshot, command ids, and operation watermark. It is not
   silently promoted to a base after reload.
 - If replay needed to transform local work has expired, the client cannot prove `F`. It blocks cloud save and
@@ -323,6 +333,28 @@ Production implementation is not complete until tests cover:
 The implementation change must update ADR 0002's proof description, API and realtime protocol documents, event
 catalog, permission matrix, domain state machine, data lifecycle/retention, security model, Character Sheet
 architecture, and conflict-recovery tests.
+
+### Server substrate checkpoint
+
+The first implementation slice freezes these server-owned choices:
+
+- lifecycle events are `character.operation.proposed`, `.applied`, `.rejected`, `.cancelled`, and `.expired`;
+- semantic operation version is exactly `1`; Hub wire compatibility is independently fenced by protocol `3`;
+- proposal expiry is bounded to 24 hours;
+- `commandId` equals `Idempotency-Key`, while proposal and resolution commands have distinct command ids and one
+  stable `operationId`;
+- production recognizes PHB/XPHB Cure Wounds as cost-bearing and rejects it with
+  `SOURCE_COST_UNSUPPORTED`; no successful production peer template is enabled;
+- constructor-injected `cost=none` templates exist only as a test seam for memory/PostgreSQL parity;
+- terminal shared events expose only `unavailable`;
+- target references rotate on detach/move/archive/reactivation boundaries and are exposed to peers only through
+  an identity-visible profile;
+- `operationWatermark` appears only in owner/DM truth and authorization-varying owner/DM resync references.
+
+This checkpoint proves required evidence 1-7, the server portions of 9-10, and memory/PostgreSQL parity from 13.
+Character Sheet `B/L -> R/F`, modal coordination, effect banners, approval UI, target discovery, successful
+production peer templates, source costs, multi-target/monster operations, and live unsaved-edit reconciliation
+remain deliberately deferred. Therefore ADR 0012 is not yet marked fully implemented.
 
 ## Consequences
 

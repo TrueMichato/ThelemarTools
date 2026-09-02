@@ -62,7 +62,7 @@ describe("campaign WebSocket", () => {
 			cookie: session.cookie,
 			origin: APP_ORIGIN,
 			"x-csrf-token": session.csrfToken,
-			"x-hub-protocol-version": "2",
+			"x-hub-protocol-version": "3",
 			"idempotency-key": key,
 		};
 	}
@@ -78,7 +78,7 @@ describe("campaign WebSocket", () => {
 		const campaignId = campaignResponse.json().campaign.id;
 		await app.hubOutboxDispatcher.pDispatchOnce();
 
-		const socket = await app.injectWS(`/ws/campaign/${campaignId}?v=2`, {
+		const socket = await app.injectWS(`/ws/campaign/${campaignId}?v=3`, {
 			headers: {cookie: session.cookie, origin: APP_ORIGIN},
 		});
 		const pResync = pNextJson(socket, "resync_complete");
@@ -88,6 +88,10 @@ describe("campaign WebSocket", () => {
 		// character document or peer profile.
 		expect(resync.cursor).toEqual(expect.objectContaining({campaignId, lastSequence: 1}));
 		expect(resync.characterRefs).toEqual([]);
+		expect(resync.replay).toEqual({
+			scannedThroughSequence: 1,
+			hasMore: false,
+		});
 		expect(resync.snapshot).toBeUndefined();
 		expect(resync.characters).toBeUndefined();
 
@@ -118,7 +122,7 @@ describe("campaign WebSocket", () => {
 		await expect(app.injectWS(`/ws/campaign/${campaign.id}`, {
 			headers: {cookie: session.cookie, origin: APP_ORIGIN},
 		})).rejects.toThrow();
-		await expect(app.injectWS(`/ws/campaign/${campaign.id}?v=2`, {
+		await expect(app.injectWS(`/ws/campaign/${campaign.id}?v=3`, {
 			headers: {cookie: session.cookie, origin: "https://evil.example"},
 		})).rejects.toThrow();
 	});
@@ -131,7 +135,7 @@ describe("campaign WebSocket", () => {
 			headers: headers(session, "shutdown-campaign"),
 			payload: {name: "Shutdown"},
 		})).json().campaign;
-		const socket = await app.injectWS(`/ws/campaign/${campaign.id}?v=2`, {
+		const socket = await app.injectWS(`/ws/campaign/${campaign.id}?v=3`, {
 			headers: {cookie: session.cookie, origin: APP_ORIGIN},
 		});
 		const pClosed = once(socket, "close");
@@ -186,7 +190,7 @@ describe("campaign WebSocket", () => {
 				headers: headers({cookie, ...session}, "provider-campaign"),
 				payload: {name: "Provider Realtime"},
 			})).json().campaign;
-			const socket = await providerApp.injectWS(`/ws/campaign/${campaign.id}?v=2`, {
+			const socket = await providerApp.injectWS(`/ws/campaign/${campaign.id}?v=3`, {
 				headers: {
 					cookie,
 					origin: APP_ORIGIN,

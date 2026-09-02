@@ -254,11 +254,16 @@ export function normalizeHubEvent ({event, characters = [], members = [], actorD
 			members,
 		})
 		: event.payload?.targetKind === "party_inventory" ? "Party inventory" : null;
+	const semanticTarget = cleanText(event.payload?.targetDisplaySnapshot?.identity?.name, MAX_SNAPSHOT_LENGTH)
+		|| (event.aggregateType === "character" ? getSubjectName({event, characters, members}) : target);
+	const semanticEffect = cleanText(event.payload?.effectDisplaySnapshot?.label, MAX_TITLE_LENGTH) || "An effect";
 	const subject = event.aggregateType === "character"
 		? getSubjectName({event, characters, members})
-		: event.type.startsWith("transfer.") && event.payload?.sourceKind === "character"
-			? transferSource
-			: null;
+		: event.type.startsWith("character.operation.")
+			? semanticTarget
+			: event.type.startsWith("transfer.") && event.payload?.sourceKind === "character"
+				? transferSource
+				: null;
 	const descriptions = {
 		"campaign.created": `${actorName} created the campaign.`,
 		"campaign.archived": `${actorName} archived the campaign.`,
@@ -279,6 +284,11 @@ export function normalizeHubEvent ({event, characters = [], members = [], actorD
 		"character.deleted": `${subject} was deleted.`,
 		"character.save_forced": `${actorName} forced a save for ${subject}.`,
 		"character.projection.invalidated": `${subject} updated.`,
+		"character.operation.proposed": `${semanticTarget} was offered ${semanticEffect.toLowerCase()} by ${actorName}.`,
+		"character.operation.applied": `${semanticEffect} was applied to ${semanticTarget}.`,
+		"character.operation.rejected": `${semanticEffect} for ${semanticTarget} was rejected.`,
+		"character.operation.cancelled": `${semanticEffect} for ${semanticTarget} was cancelled.`,
+		"character.operation.expired": `${semanticEffect} for ${semanticTarget} expired.`,
 		"action.proposed": `${target} was offered an effect by ${actorName}.`,
 		"action.applied": `An effect was applied to ${target}.`,
 		"action.rejected": `An effect for ${target} was rejected.`,

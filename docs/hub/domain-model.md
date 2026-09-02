@@ -1,7 +1,7 @@
 # Campaign Hub domain model
 
 > **Status:** Current schema and authority behavior
-> **Last verified:** 2026-08-24
+> **Last verified:** 2026-09-02
 > **Owner:** Campaign Hub maintainers
 
 The authoritative schema is `server/migrations/0001_hub_core.sql`. The PostgreSQL authority is
@@ -32,13 +32,15 @@ security boundary.
 | `invites` | Redeemable role grant | hash-only token, expiry, max/use count, optional revoke | create/list/redeem/revoke/expiry/max-use used |
 | `brew_bundle_versions` | Immutable campaign brew | campaign version and content hash unique; creator membership | content stored in JSONB; `object_key` reserved |
 | `rules_versions` | Immutable typed campaign rules | campaign version unique; schema version | create/activate used |
-| `characters` | Canonical character document | owner, optional campaign, schema version, revision, lease epoch, JSON data | active/archive/reactivate/clone/move |
+| `characters` | Canonical character document | owner, optional campaign, schema version, revision, lease epoch, JSON data, random target ref, operation watermark | active/archive/reactivate/clone/move |
 | `character_leases` | One active editor | one row/character; session; epoch; expiry | acquired/taken over/reused; expired rows are passive |
 | `dm_workspaces` | Private DM Board document | one per owner membership/campaign; revision/epoch; archive timestamp | archived on removal and restored on reinvite/access |
 | `dm_workspace_leases` | One workspace editor | one row/workspace; session; epoch; expiry | same fencing model as character |
 | `party_inventories` | Shared campaign container | one per campaign; revision; denomination JSON currency | lazily created |
 | `inventory_entries` | Relational party inventory rows and future character-entry model | exactly one character/party parent; quantity >0; metadata JSON | current store writes party rows; character inventory remains embedded JSON |
-| `pending_actions` | Structured effect workflow | actor, optional target character, status, payload, optional expiry | proposed -> applied/rejected/cancelled; accepted/expired reserved |
+| `pending_actions` | Legacy pre-v3 structured effect workflow | actor, optional target character, status, payload, optional expiry | legacy history only; migration 0005 cancels arbitrary proposed rows |
+| `semantic_operations` | Versioned character intent lifecycle | one target, optional source, pinned template/choice, status, resulting revision, stable lifecycle event ids, <=24h proposal expiry | direct applied operation or proposed -> applied/rejected/cancelled/expired |
+| `semantic_operation_commands` | Persistent exactly-once command result | global command id, actor/body hash, operation, command type, response/event ids | create/resolve replay and mutated-body rejection |
 | `transfers` | Escrowed asset workflow | exactly one source and target container, status, escrow payload | created directly as reserved -> committed/rejected/cancelled; proposed/accepted/expired reserved |
 | `domain_events` | Ordered client-visible history | unique campaign sequence; visibility and explicit-recipient constraint | replay/live fanout |
 | `audit_entries` | Security/admin history | nullable campaign/account/session refs; details JSON | mutations append relevant audit |
@@ -74,10 +76,13 @@ boundary.
 Currency lives on `party_inventories`; item rows live in `inventory_entries`. The store rewrites party rows
 transactionally from the normalized container.
 
-### Action
+### Semantic operation
 
-Contains a structured effect proposal and target. Applying a proposal is a semantic character mutation in the
-same transaction as action status, audit, event, outbox, and receipt.
+Contains a closed version-1 operation and target. DM/co-DM creation applies immediately. A source-derived peer
+proposal additionally pins source character/entity/template/choice and requires later explicit target-owner
+acceptance. Application commits operation status, target revision, audit, lifecycle event, projection
+invalidation, watermark, outbox, and persistent command result in one transaction. Source and target lock in
+stable character-id order; supported initial peer templates have no source reservation/mutation.
 
 ### Transfer
 
@@ -157,10 +162,12 @@ stateDiagram-v2
   [*] --> proposed
   proposed --> applied: accept
   proposed --> rejected: reject
-  proposed --> cancelled: target lifecycle change
-  proposed --> expired: reserved; not implemented
-  proposed --> accepted: reserved intermediate; not used
+  proposed --> cancelled: proposer/DM or lifecycle change
+  proposed --> expired: bounded 24-hour deadline
 ```
+
+Direct DM/co-DM commands begin and end at `applied`; they do not create a `proposed` row. Acceptance has a
+distinct command id but retains the proposal's operation id. Reject/cancel/expire are terminal.
 
 ### Transfer
 

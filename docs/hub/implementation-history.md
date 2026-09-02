@@ -262,3 +262,17 @@ Implemented the provider-neutral preparation that can be validated locally:
 
 Provider/cost/region acceptance, live header-overwrite proof, managed resources, OAuth/domain, PITR, jobs,
 alerts, backup destination, and restore remain Phase 6G gates.
+
+## V2-T3 prerequisite: semantic operation server authority
+
+The `t2-effects-server-role` slice replaced the permissive structured-effect wire shape with protocol-v3
+versioned semantic operations. DM/co-DM commands now apply immediately and atomically. Player-authored generic
+operations fail; the peer path pins a source entity/template/typed choice, rederives under stable source/target
+locks, requires explicit target-owner acceptance, expires after 24 hours, and uses persistent command,
+operation, event, revision, and owner/DM watermark identity.
+
+The production template registry is intentionally fail-closed: Cure Wounds is recognized but rejected because
+its spell-slot/action cost is not yet reservable, and no unsafe automatic Survivor/Heroic Rally template exists.
+A constructor-only cost-free template proves memory/PostgreSQL parity without creating a production escape
+hatch. Character Sheet subscription/reconciliation and successful player effect UX remain separate roadmap
+slices.

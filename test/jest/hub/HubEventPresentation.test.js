@@ -350,6 +350,78 @@ describe("campaign activity event presentation", () => {
 		await expect(store.pListVisibleEvents({accountId: "revoked", campaignId: "campaign"})).rejects.toMatchObject({code: "CAMPAIGN_NOT_FOUND"});
 	});
 
+	it("pages replay by the authoritative scanned sequence rather than visible row count", async () => {
+		const store = new MemoryHubStore();
+		store._campaigns.set("campaign", {id: "campaign", status: "active"});
+		store._memberships.set("campaign::player", {campaignId: "campaign", accountId: "player", role: "player", status: "active"});
+		store._characters.set("hidden-character", {
+			id: "hidden-character",
+			campaignId: "campaign",
+			ownerAccountId: "other",
+			status: "active",
+			projectionPolicy: {version: 1, preset: "private", overrides: {}},
+		});
+		for (let i = 0; i < 501; ++i) {
+			store._appendEvent({
+				campaignId: "campaign",
+				actorAccountId: "other",
+				type: "roll.logged",
+				aggregateType: "character",
+				aggregateId: "hidden-character",
+				visibility: "all_members",
+				payload: {total: i + 1},
+			});
+		}
+		store._appendEvent({
+			campaignId: "campaign",
+			actorAccountId: "dm",
+			type: "character.operation.applied",
+			aggregateType: "character",
+			aggregateId: "target-character",
+			visibility: "explicit_accounts",
+			visibleAccountIds: ["player"],
+			payload: {operation: {operationId: "operation-id"}},
+		});
+
+		const first = await store.pListVisibleEventPage({accountId: "player", campaignId: "campaign", limit: 500});
+		expect(first).toEqual({
+			events: [],
+			replay: {scannedThroughSequence: 500, hasMore: true},
+		});
+		const second = await store.pListVisibleEventPage({
+			accountId: "player",
+			campaignId: "campaign",
+			afterSequence: first.replay.scannedThroughSequence,
+			limit: 500,
+		});
+		expect(second.events.map(event => event.type)).toEqual(["character.operation.applied"]);
+		expect(second.replay).toEqual({scannedThroughSequence: 502, hasMore: false});
+	});
+
+	it("keeps large memory cursors stack-safe and scans only bounded raw replay pages", async () => {
+		const store = new MemoryHubStore();
+		store._campaigns.set("campaign", {id: "campaign", status: "active"});
+		store._memberships.set("campaign::player", {campaignId: "campaign", accountId: "player", role: "player", status: "active"});
+		store._events = Array.from({length: 150_000}, (_, index) => ({
+			id: `event-${index + 1}`,
+			campaignId: "campaign",
+			sequence: index + 1,
+			type: "invite.created",
+			actorAccountId: "dm",
+			aggregateType: "invite",
+			aggregateId: `invite-${index + 1}`,
+			visibility: "dm_only",
+			visibleAccountIds: null,
+			payload: {},
+		}));
+
+		expect((await store.pGetCampaignCursor({accountId: "player", campaignId: "campaign"})).cursor.lastSequence).toBe(150_000);
+		expect(await store.pListVisibleEventPage({accountId: "player", campaignId: "campaign", limit: 2})).toEqual({
+			events: [],
+			replay: {scannedThroughSequence: 2, hasMore: true},
+		});
+	});
+
 	it("renders character subjects for rolls and both transfer endpoints without IDs", () => {
 		const roll = normalizeHubEvent({
 			event: {
@@ -430,6 +502,34 @@ describe("campaign activity event presentation", () => {
 			targetKind: "party_inventory",
 			targetId: "stash",
 		}).title).toBe("Morgan accepted a transfer from Nyx to Party inventory.");
+	});
+
+	it("renders every semantic lifecycle event from privacy-safe display snapshots", () => {
+		for (const [type, expected] of [
+			["character.operation.proposed", "Rook was offered steadying word by Wizard."],
+			["character.operation.applied", "Steadying Word was applied to Rook."],
+			["character.operation.rejected", "Steadying Word for Rook was rejected."],
+			["character.operation.cancelled", "Steadying Word for Rook was cancelled."],
+			["character.operation.expired", "Steadying Word for Rook expired."],
+		]) {
+			const normalized = normalizeHubEvent({
+				event: {
+					type,
+					aggregateType: "semantic_operation",
+					aggregateId: "operation-secret-id",
+					actorDisplayName: "Wizard",
+					payload: {
+						targetDisplaySnapshot: {identity: {name: "<b>Rook</b>"}},
+						effectDisplaySnapshot: {label: "<i>Steadying Word</i>"},
+					},
+				},
+				characters: [],
+			});
+			expect(normalized.title).toBe(expected);
+			expect(normalized.subject).toBe("Rook");
+			expect(JSON.stringify(normalized)).not.toContain("<");
+			expect(JSON.stringify(normalized)).not.toContain("operation-secret-id");
+		}
 	});
 
 	it("renders campaign-scoped roll attribution from the actor", () => {

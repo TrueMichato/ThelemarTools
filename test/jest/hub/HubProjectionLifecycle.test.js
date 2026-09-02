@@ -47,11 +47,11 @@ describe("projection lifecycle safety", () => {
 	}
 
 	function headers (session, key = `k-${++ix}`) {
-		return {cookie: session.cookie, origin: ORIGIN, "x-csrf-token": session.csrfToken, "x-hub-protocol-version": "2", "idempotency-key": key};
+		return {cookie: session.cookie, origin: ORIGIN, "x-csrf-token": session.csrfToken, 		"x-hub-protocol-version": "3", "idempotency-key": key};
 	}
 
 	function readHeaders (session) {
-		return {cookie: session.cookie, "x-hub-protocol-version": "2"};
+		return {cookie: session.cookie, "x-hub-protocol-version": "3"};
 	}
 
 	async function setup () {

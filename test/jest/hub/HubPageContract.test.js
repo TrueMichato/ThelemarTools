@@ -63,7 +63,15 @@ describe("campaign hub pages", () => {
 			"campaign-transfer-form-status",
 		]) expect(campaignHtml).toContain(`id="${id}"`);
 		expect(campaignHtml).toContain("aria-live=\"polite\"");
-		expect(campaignHtml).toContain("data-pending-label=\"Sending...\"");
+		expect(campaignHtml).toContain("data-pending-label=\"Applying...\"");
+	});
+
+	it("requires an explicit source identity for condition effects", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(campaignHtml).toContain("id=\"campaign-action-condition-source\"");
+		expect(campaignHtml).toContain("value=\"XPHB\"");
+		expect(source).toContain("arguments: {condition: {name: rawValue, source: conditionSource}}");
+		expect(source).not.toContain("source: \"PHB\"");
 	});
 
 	it("keeps loaded campaign data visible while offline and requires a refresh after reconnecting", () => {

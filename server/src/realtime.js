@@ -5,6 +5,16 @@ function sendJson (socket, message) {
 	socket.send(JSON.stringify(message));
 }
 
+function isMessageRateLimitExceeded ({connection, isReplayContinuation = false}) {
+	const now = Date.now();
+	if (now - connection.messageWindowStartedAt >= 1000) {
+		connection.messageWindowStartedAt = now;
+		connection.messageCount = 0;
+	}
+	if (isReplayContinuation) return false;
+	return ++connection.messageCount > 20;
+}
+
 export class HubRealtime {
 	constructor ({
 		store,
@@ -40,6 +50,7 @@ export class HubRealtime {
 			targetId: null,
 			messageWindowStartedAt: Date.now(),
 			messageCount: 0,
+			replayContinuationAfterSequence: null,
 			isAlive: true,
 			heartbeatTimer: null,
 		};
@@ -87,6 +98,25 @@ export class HubRealtime {
 			connection.socket.close(1009, "Message too large");
 			return;
 		}
+		let message;
+		let isInvalidMessage = false;
+		try {
+			message = JSON.parse(raw.toString());
+			isInvalidMessage = !message || typeof message !== "object" || Array.isArray(message);
+		} catch {
+			isInvalidMessage = true;
+		}
+		const isReplayContinuation = !isInvalidMessage
+			&& message.type === "resync"
+			&& connection.replayContinuationAfterSequence != null
+			&& Number(message.afterSequence) === connection.replayContinuationAfterSequence;
+		// The exemption is a single connection-scoped step. Consume it before awaiting any
+		// store work so duplicate/in-flight replay requests use the ordinary burst limit.
+		if (isReplayContinuation) connection.replayContinuationAfterSequence = null;
+		if (isMessageRateLimitExceeded({connection, isReplayContinuation})) {
+			connection.socket.close(1013, "Rate limit exceeded");
+			return;
+		}
 		if (!await this._store.pGetSessionById({sessionId: connection.sessionId})) {
 			connection.socket.close(1008, "Session expired");
 			return;
@@ -100,21 +130,7 @@ export class HubRealtime {
 			return;
 		}
 		connection.role = membership.role;
-		const now = Date.now();
-		if (now - connection.messageWindowStartedAt >= 1000) {
-			connection.messageWindowStartedAt = now;
-			connection.messageCount = 0;
-		}
-		if (++connection.messageCount > 20) {
-			connection.socket.close(1013, "Rate limit exceeded");
-			return;
-		}
-		let message;
-		try {
-			message = JSON.parse(raw.toString());
-		} catch {
-			return sendJson(connection.socket, {type: "error", code: "INVALID_MESSAGE"});
-		}
+		if (isInvalidMessage) return sendJson(connection.socket, {type: "error", code: "INVALID_MESSAGE"});
 		if (message.type === "presence") {
 			connection.activity = ["idle", "viewing_character", "editing_character", "viewing_dm_screen"].includes(message.activity)
 				? message.activity
@@ -133,13 +149,16 @@ export class HubRealtime {
 				accountId: connection.accountId,
 				campaignId: connection.campaignId,
 			});
-			const events = await this._store.pListVisibleEvents({
+			const eventPage = await this._store.pListVisibleEventPage({
 				accountId: connection.accountId,
 				campaignId: connection.campaignId,
 				afterSequence: Number(message.afterSequence) || 0,
 				limit: 500,
 			});
-			sendJson(connection.socket, {type: "resync_complete", ...cursor, events});
+			connection.replayContinuationAfterSequence = eventPage.replay.hasMore
+				? eventPage.replay.scannedThroughSequence
+				: null;
+			sendJson(connection.socket, {type: "resync_complete", ...cursor, ...eventPage});
 			return;
 		}
 		sendJson(connection.socket, {type: "error", code: "UNSUPPORTED_MESSAGE"});

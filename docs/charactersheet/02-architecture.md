@@ -80,6 +80,22 @@ The Character Sheet system follows a **Model-View-Controller (MVC)** pattern wit
 
 ## Data Flow
 
+### Campaign Hub semantic-operation boundary
+
+Campaign Hub protocol v3 keeps the canonical online document server-authoritative while preserving local mode.
+Without `hubCampaign`, the Character Sheet uses its existing local repository and no semantic-operation network
+contract is active.
+
+For Hub characters, the server emits only the ADR 0012 lifecycle allowlist:
+`character.operation.proposed`, `.applied`, `.rejected`, `.cancelled`, and `.expired`. An applied payload carries
+the normalized version-1 operation and resulting canonical revision; actor identity remains in the authorized
+event envelope. Owner/DM truth carries `operationWatermark`, while peers never receive that hidden sequence.
+
+The server/store slice persists and delivers this contract, but this document does not claim that the current
+sheet has implemented the later operation-aware `B/L -> R/F` live-edit reconciliation, conflict-modal
+coordination, banners, or peer approval UI. Until that client slice lands, ordinary local behavior and existing
+Hub repository save/rebase behavior remain unchanged.
+
 ### 1. Initialization Flow
 
 ```

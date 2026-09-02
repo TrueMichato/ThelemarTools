@@ -1,8 +1,8 @@
 # Campaign Hub current system
 
 > **Status:** Current implementation reference
-> **Scope:** Private invite-only V1 through Phase 6G
-> **Last verified:** 2026-09-01
+> **Scope:** Private invite-only V1 plus the protocol-v3 semantic-operation server substrate
+> **Last verified:** 2026-09-02
 > **Owner:** Campaign Hub maintainers
 
 This document describes what exists in the repository and deployed private Oracle staging now. It is not the
@@ -34,7 +34,7 @@ The Campaign Hub is an optional online layer over the existing local-first site.
 | BFF routes | `server/src/app.js` | Auth, schemas, roles, CSRF/origin/protocol checks, HTTP and WebSocket endpoints |
 | Production authority | `server/src/postgres-hub-store.js` | PostgreSQL queries, locks, transactions, canonical writes, audit/events/outbox/receipts |
 | Test authority | `server/src/memory-hub-store.js` | Deterministic behavioral double for domain/API tests; never used by `server/src/index.js` |
-| Domain helpers | `server/src/hub-actions.js`, `server/src/campaign-content.js`, `server/src/cloud-data-validation.js` | Structured effects, inventory/escrow, rules, brew validation, character sanitization/quotas |
+| Domain helpers | `server/src/hub-actions.js`, `server/src/semantic-operation-registry.js`, `server/src/campaign-content.js`, `server/src/cloud-data-validation.js` | Versioned semantic effects, source-derived template registry, inventory/escrow, rules, brew validation, character sanitization/quotas |
 | Realtime authority | `server/src/realtime.js`, `server/src/projections.js` | Presence, resync, visibility filtering, outbox dispatch |
 | Auth/security | `server/src/github-oauth-provider.js`, `server/src/security.js` | OAuth exchange, PKCE, signed state, hashes, tokens, CSRF helpers |
 | Schema/operations | `server/migrations/`, `server/src/migration-runner.js`, `server/scripts/` | Immutable migrations, checksummed ledger, role grants, backup, restore, credential-safe DB access |
@@ -85,6 +85,8 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
   state, selector state, and the page URL are migrated.
 - Cloud characters do not use the local rescue mirror; unresolved cloud conflicts produce explicit recovery
   artifacts instead of pretending to save locally.
+- Owner/DM truth carries `operationWatermark`, which says which applied-operation event sequence is already
+  reflected in the canonical revision. Peer profiles and peer refs never carry it.
 
 ## Campaign content
 
@@ -112,8 +114,12 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
 
 ## Multiplayer mutations
 
-- Structured effects support damage, healing, condition add/remove, spell-slot spend, and informational
-  requests.
+- Protocol-v3 semantic operations support damage, healing, condition add/remove, and spell-slot spend/restore.
+  Generic typed operations are DM/co-DM-only and apply immediately with one revision/event/outbox transaction.
+- Player effects are source-derived from a closed server registry and always proposed for later explicit
+  target-owner approval, including self-target. The state machine supports reject/cancel/24-hour expiry and
+  lifecycle cleanup. No successful production cost-free peer template is enabled yet; recognized Cure Wounds
+  costs fail closed.
 - XP/item grants are audited semantic commands; XP does not perform level-up choices.
 - Party currency is denomination-based (`cp`, `sp`, `ep`, `gp`, `pp`).
 - Transfers reserve source assets in escrow before acceptance.
@@ -168,7 +174,8 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
 - invite metadata listing/revocation;
 - owner role changes, owner/co-DM member removal, and non-owner leave;
 - private DM workspace link;
-- effect proposals and pending resolution;
+- immediate DM/co-DM semantic effects; the peer proposal/terminal API exists but its target/approval UI and first
+  successful production template are deferred;
 - XP and item grants;
 - party inventory summary and item/currency transfers.
 

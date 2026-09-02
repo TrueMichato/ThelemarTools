@@ -27,6 +27,9 @@ export class HubRealtimeClient {
 		this._lastSequence = 0;
 		this._hasBaseline = false;
 		this._bufferedEvents = [];
+		this._resyncAccumulatedEvents = [];
+		this._resyncScannedThroughSequence = null;
+		this._resyncStartSequence = null;
 		this._listeners = new Map();
 		this._connectionState = {state: "closed"};
 	}
@@ -72,7 +75,7 @@ export class HubRealtimeClient {
 			this._hasBaseline = false;
 			this._bufferedEvents = [];
 			const protocol = this._location.protocol === "https:" ? "wss:" : "ws:";
-			const url = `${protocol}//${this._location.host}/ws/campaign/${encodeURIComponent(this._campaignId)}?v=2`;
+			const url = `${protocol}//${this._location.host}/ws/campaign/${encodeURIComponent(this._campaignId)}?v=3`;
 			const socket = this._fnCreateSocket(url);
 			this._socket = socket;
 			let isOpened = false;
@@ -82,7 +85,7 @@ export class HubRealtimeClient {
 				isOpened = true;
 				socket.removeEventListener("error", onError);
 				const isReconnect = this._reconnectAttempt > 0;
-				this.requestResync();
+				this.requestResync(this._resyncScannedThroughSequence ?? this._lastSequence);
 				this._armResyncTimer();
 				this._setConnectionState("syncing", {isReconnect});
 				resolve();
@@ -121,7 +124,7 @@ export class HubRealtimeClient {
 
 	_handleMessage (message) {
 		if (message.type === "event") {
-			if (!this._hasBaseline) {
+			if (!this._hasBaseline || this._resyncStartSequence != null) {
 				this._bufferedEvents.push(message.event);
 				return;
 			}
@@ -131,7 +134,26 @@ export class HubRealtimeClient {
 			return;
 		}
 		if (message.type === "resync_complete") {
-			const previousSequence = this._lastSequence;
+			const previousSequence = this._resyncStartSequence ?? this._lastSequence;
+			this._resyncAccumulatedEvents.push(...(message.events || []));
+			if (message.replay?.hasMore) {
+				const scannedThroughSequence = Number(message.replay.scannedThroughSequence);
+				if (
+					!Number.isSafeInteger(scannedThroughSequence)
+					|| scannedThroughSequence <= (this._resyncScannedThroughSequence ?? previousSequence)
+				) {
+					this._emit("error", {type: "error", code: "INVALID_REPLAY_CONTINUATION"});
+					this._resyncAccumulatedEvents = [];
+					this._resyncScannedThroughSequence = null;
+					this._resyncStartSequence = null;
+					this._hasBaseline = false;
+					this.requestResync(previousSequence);
+					return;
+				}
+				this._resyncScannedThroughSequence = scannedThroughSequence;
+				this.requestResync(scannedThroughSequence);
+				return;
+			}
 			// ADR 0011: resync carries a cursor and cache-invalidation refs only. Consumers
 			// refetch through the authorization-scoped HTTP projector.
 			const snapshotSequence = message.cursor?.lastSequence || 0;
@@ -145,8 +167,11 @@ export class HubRealtimeClient {
 				});
 			}
 			this._hasBaseline = true;
-			const events = [...(message.events || []), ...this._bufferedEvents]
+			const events = [...this._resyncAccumulatedEvents, ...this._bufferedEvents]
 				.sort((a, b) => a.sequence - b.sequence);
+			this._resyncAccumulatedEvents = [];
+			this._resyncScannedThroughSequence = null;
+			this._resyncStartSequence = null;
 			this._bufferedEvents = [];
 			const seen = new Set();
 			for (const event of events) {
@@ -172,6 +197,11 @@ export class HubRealtimeClient {
 			this._setConnectionState("live");
 			return;
 		}
+		if (message.type === "error" && message.code === "MESSAGE_FAILED" && this._resyncStartSequence != null) {
+			this._emit("error", message);
+			this._socket?.close();
+			return;
+		}
 		this._emit(message.type, message);
 	}
 
@@ -179,9 +209,15 @@ export class HubRealtimeClient {
 		this._socket?.send(JSON.stringify({type: "presence", activity, targetId}));
 	}
 
-	requestResync () {
+	requestResync (afterSequence) {
 		if (this._socket?.readyState !== 1) return;
-		this._socket.send(JSON.stringify({type: "resync", afterSequence: this._lastSequence}));
+		const isContinuationOrResume = afterSequence != null;
+		if (!isContinuationOrResume && this._resyncStartSequence != null) return;
+		if (this._resyncStartSequence == null) this._resyncStartSequence = this._lastSequence;
+		this._socket.send(JSON.stringify({
+			type: "resync",
+			afterSequence: isContinuationOrResume ? afterSequence : this._lastSequence,
+		}));
 	}
 
 	_armResyncTimer () {
@@ -203,6 +239,11 @@ export class HubRealtimeClient {
 		this._clearResyncTimer();
 		this._socket?.close();
 		this._socket = null;
+		this._hasBaseline = false;
+		this._bufferedEvents = [];
+		this._resyncAccumulatedEvents = [];
+		this._resyncScannedThroughSequence = null;
+		this._resyncStartSequence = null;
 		this._setConnectionState("closed");
 	}
 }

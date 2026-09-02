@@ -55,7 +55,7 @@ describe("Phase 2 campaign context and DM workspace", () => {
 			cookie: session.cookie,
 			origin: APP_ORIGIN,
 			"x-csrf-token": session.csrfToken,
-			"x-hub-protocol-version": "2",
+			"x-hub-protocol-version": "3",
 			"idempotency-key": `m-${++mutationIx}`,
 		};
 	}

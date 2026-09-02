@@ -1,14 +1,14 @@
 # Campaign Hub realtime protocol
 
 > **Status:** Current private-V1 wire protocol
-> **Protocol version:** `2`
-> **Last verified:** 2026-08-25
+> **Protocol version:** `3`
+> **Last verified:** 2026-09-02
 > **Owner:** Campaign Hub maintainers
 
 ## Connection
 
 ```text
-GET /ws/campaign/{campaignId}?v=1
+GET /ws/campaign/{campaignId}?v=3
 Origin: <exact HUB_APP_ORIGIN>
 Cookie: __Host-hub_session=...
 ```
@@ -16,7 +16,7 @@ Cookie: __Host-hub_session=...
 Upgrade requires:
 
 - UUID campaign id;
-- query protocol `v=1`;
+- query protocol `v=3`;
 - exact Origin;
 - valid signed/unexpired session;
 - active campaign membership.
@@ -80,16 +80,33 @@ Response:
   "cursor": {"campaignId": "uuid", "lastSequence": 42},
   "campaign": {},
   "membership": {},
-  "characterRefs": [{"id": "uuid", "revision": 8, "projectionRevision": 3}],
-  "events": []
+  "characterRefs": [{"id": "uuid", "revision": 8, "projectionRevision": 3, "operationWatermark": 41}],
+  "events": [],
+  "replay": {"scannedThroughSequence": 42, "hasMore": false}
 }
 ```
 
 Resync carries **no character document and no peer profile**
 ([ADR 0011](adr/0011-authorization-scoped-character-projections.md)). `characterRefs` supplies only the ids and
 revisions a client needs to invalidate its caches; the projections themselves are fetched over the
-authorization-scoped HTTP projector (`GET /api/campaigns/:campaignId/character-projections`). Events are
-ordered, visibility-filtered, sequence-greater than the requested value, and capped at 500.
+authorization-scoped HTTP projector (`GET /api/campaigns/:campaignId/character-projections`). A ref carries
+`operationWatermark` only when the requester may read that character's canonical truth: its owner or a
+DM/co-DM. Peer refs never carry it, because a changing hidden sequence would disclose unseen operations.
+Events are ordered, visibility-filtered, sequence-greater than the requested value, and capped at 500. Each store
+read examines at most 500 raw campaign-sequence rows plus one lookahead row before applying audience and
+projection-privacy filtering, so a page can be short or empty even when later visible events exist. While
+`replay.hasMore` is true, the client sends another `resync` with
+`afterSequence = replay.scannedThroughSequence`; it must not infer exhaustion from `events.length`. The scanned
+sequence is authoritative and advances across events evaluated but not disclosed, preventing a hidden character
+event from stranding a later visible semantic lifecycle event.
+Only the exact next scanned sequence issued to that live connection receives a replay-continuation rate-limit
+exemption, and the server consumes that step before reading the next page. Replayed, forged, or cross-connection
+markers remain ordinary `resync` messages subject to the 20-message-per-second burst limit. A reconnect starts a
+new connection but resumes from the client's last server-issued scanned sequence. The client treats all
+continuation pages as one replay chain: it buffers live events until the final page, emits recovered and live
+events once in campaign-sequence order, and does not start a periodic resync while that chain is active. If a
+valid replay request fails, the client closes that socket and resumes the preserved chain through reconnect
+backoff rather than leaving live delivery buffered indefinitely.
 
 Unknown client types receive:
 
@@ -189,6 +206,41 @@ Each campaign has a monotonically allocated `sequence`.
 WebSocket delivery is at-least-once in the presence of process/network failure. Clients deduplicate by event
 id (falling back to sequence/type) and track the highest sequence.
 
+### Semantic character operations
+
+The lifecycle allowlist is:
+
+- `character.operation.proposed`;
+- `character.operation.applied`;
+- `character.operation.rejected`;
+- `character.operation.cancelled`;
+- `character.operation.expired`.
+
+Every lifecycle event includes a stable `operationId` and `targetCharacterId`. Proposal/terminal events aggregate
+on the semantic operation and use `explicit_accounts` for proposer plus target owner; existing visibility policy
+also includes DM/co-DM. Terminal payloads expose only `reason:"unavailable"` plus immutable safe display
+snapshots. Applied events aggregate on the target character and carry exactly:
+
+```json
+{
+  "operation": {
+    "operationId": "uuid",
+    "kind": "hp.heal",
+    "version": 1,
+    "targetCharacterId": "uuid",
+    "arguments": {"amount": 5}
+  },
+  "resultingCharacterRevision": 8
+}
+```
+
+Direct DM/co-DM application emits `character.operation.applied` and the separate metadata-only
+`character.projection.invalidated`. `operationWatermark` is the latest applied-operation campaign sequence
+already reflected by owner/DM canonical truth. It does not suppress delivery: events at/below the watermark
+still arrive for history and dirty-local reconciliation, while a clean fetched base does not apply them twice.
+Because event sequences are campaign-local, moving a character to another campaign or detaching it resets the
+watermark to zero before that character is exposed in the new campaign context.
+
 ## Client resync algorithm
 
 `HubRealtimeClient`:
@@ -208,8 +260,9 @@ it, so a field an owner has just stopped sharing cannot survive from an older, b
 owner Character Sheet never replaces live local state from an invalidation-triggered fetch: it has no realtime
 subscription, and ordinary document changes use its accepted-base rebase.
 
-Snapshot-covered event types are suppressed only when at/before the snapshot sequence. Durable roll/action
-history may still replay because it is not fully represented by current state.
+Snapshot-covered event types are suppressed only when at/before the snapshot sequence. Semantic lifecycle
+events are not discarded solely because they are at/below `operationWatermark`; durable roll/operation history
+may still replay because it is not fully represented by current state.
 
 ## Protocol evolution
 

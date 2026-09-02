@@ -1,7 +1,7 @@
 # Campaign Hub event and audit catalog
 
-> **Status:** Current private-V1 catalog
-> **Last verified:** 2026-08-24
+> **Status:** Current protocol-v3 catalog
+> **Last verified:** 2026-09-02
 > **Owner:** Campaign Hub maintainers
 
 ## Domain event envelope
@@ -45,10 +45,11 @@
 | `brew.activated` | brew bundle version | all_members | version | Context consumers refetch/activate |
 | `rules.activated` | rules version | all_members | version | Context consumers refetch/activate |
 | `roll.logged` | character or campaign | caller-selected all_members/dm_only/actor_and_dm | formula, total, context, detail | Cooperative evidence, not cryptographic roll authority. Activity presentation prefers bounded `detail.title` and selectively renders safe breakdown/result/advantage/critical/spell/ability/target fields. |
-| `action.proposed` | pending action | explicit actor+target | target id, structured effect | DMs also see explicit-account events |
-| `action.applied` | pending action | explicit actor+target | effect, target id, character revision | Character changed semantically |
-| `action.rejected` | pending action | explicit actor+target | effect, target id, character revision | No character mutation |
-| `action.cancelled` | pending action | explicit actor+target | lifecycle reason | Membership/character lifecycle cancellation |
+| `character.operation.proposed` | semantic operation | explicit proposer+target owner | `operationId`, `targetCharacterId`, `status`, pinned source/template/choice, safe source/target/effect snapshots, `expiresAt` | DMs also see explicit-account events; canonical source character id and derived low-level operation are omitted |
+| `character.operation.applied` | target character | explicit proposer/DM actor+target owner | normalized operation plus `resultingCharacterRevision` | Aggregate revision equals the resulting revision; payload has no raw actor id or canonical character fields |
+| `character.operation.rejected` | semantic operation | explicit proposer+target owner | `operationId`, `targetCharacterId`, status, `reason:"unavailable"`, safe snapshots | No character mutation |
+| `character.operation.cancelled` | semantic operation | explicit proposer+target owner | same minimized terminal shape | Explicit decision or lifecycle cancellation |
+| `character.operation.expired` | semantic operation | explicit proposer+target owner | same minimized terminal shape | Bounded 24-hour expiry transitions once |
 | `xp.granted` | character | explicit DM+owner | amount, reason, resulting XP | DM/co-DM also included by visibility policy |
 | `item.granted` | character | explicit DM+owner | granted entry | Entry content is cross-user validated |
 | `transfer.reserved` | transfer | all_members | source/target kinds and ids | Escrow content is not broadcast |
@@ -56,8 +57,26 @@
 | `transfer.rejected` | transfer | all_members | source/target ids | Source restored |
 | `transfer.cancelled` | transfer | all_members | lifecycle reason or source/target ids | Source restored |
 
-Schema permits future `expired`/intermediate action/transfer states, but no corresponding event is currently
-emitted automatically.
+Legacy pre-v3 `action.*` records may remain as history, but migration 0005 terminalizes arbitrary pending
+structured effects and the protocol-v3 API cannot apply them.
+
+The exact applied payload is:
+
+```json
+{
+  "operation": {
+    "operationId": "uuid",
+    "kind": "hp.heal",
+    "version": 1,
+    "targetCharacterId": "uuid",
+    "arguments": {"amount": 5}
+  },
+  "resultingCharacterRevision": 8
+}
+```
+
+Actor attribution remains in the already-authorized event envelope. Shared terminal reasons are uniformly
+non-enumerating; recipient-specific diagnostics do not ride a multi-recipient lifecycle event.
 
 ## Snapshot/replay interaction
 
@@ -67,7 +86,8 @@ snapshot already contains their result:
 - character create/clone/move/move-out/archive/reactivate;
 - character projection invalidation;
 - XP/item grants;
-- applied action.
+- applied semantic operation, only for a fetched canonical base whose owner/DM `operationWatermark` already
+  includes the event sequence.
 
 One metadata-only invalidation is emitted per affected character per commit by every mutation that can change
 a catalog field: owner patches, item grants, applied structured effects, both legs of a transfer (escrow
@@ -75,6 +95,10 @@ reservation and resolution), archived-import reactivation, and a sharing-policy 
 because `xp` is not a catalog field.
 
 Roll history and non-state workflow history are not assumed to be represented by the snapshot.
+
+Semantic lifecycle events are still delivered when their sequence is at/below `operationWatermark`; the
+watermark says only that owner/DM canonical truth already includes the applied mutation. Clients deduplicate by
+stable event id and applied operation id. Peer refs never carry this watermark.
 
 ### Character display-name snapshots
 
@@ -102,7 +126,7 @@ Current audit actions include:
 - `brew.created`, `brew.activated`;
 - `rules.created`, `rules.activated`;
 - `dm_workspace.created`, `dm_workspace.updated`;
-- `action.applied`, `action.rejected`;
+- `character.operation.proposed`, `.applied`, `.rejected`, `.cancelled`, `.expired`;
 - `xp.granted`, `item.granted`;
 - `transfer.committed`, `transfer.rejected`;
 - `session.revoked`, `session.revoked_others`;

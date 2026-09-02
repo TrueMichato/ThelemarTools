@@ -190,17 +190,163 @@ describe("hub realtime", () => {
 			expect(client._lastSequence).toBe(11);
 		});
 
-		it("reconnects after a transient close and preserves the resync sequence", async () => {
+		it("continues replay from the server-scanned sequence even when a page has no visible events", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			const sent = [];
+			const events = [];
+			const client = new HubRealtimeClient({campaignId: "cmp", location: {protocol: "https:", host: "tools.example"}});
+			client._socket = {
+				readyState: 1,
+				send: raw => sent.push(JSON.parse(raw)),
+			};
+			client.on("event", event => events.push(event));
+
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 501},
+				characterRefs: [],
+				events: [],
+				replay: {scannedThroughSequence: 500, hasMore: true},
+			});
+			expect(sent).toEqual([{type: "resync", afterSequence: 500}]);
+			expect(client.getConnectionState().state).not.toBe("live");
+
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 501},
+				characterRefs: [],
+				events: [{id: "applied-event", sequence: 501, type: "character.operation.applied"}],
+				replay: {scannedThroughSequence: 501, hasMore: false},
+			});
+			expect(events).toEqual([{id: "applied-event", sequence: 501, type: "character.operation.applied"}]);
+			expect(client.getConnectionState().state).toBe("live");
+		});
+
+		it("buffers live events during a periodic multi-page replay without dropping recovered events", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			const sent = [];
+			const events = [];
+			const client = new HubRealtimeClient({campaignId: "cmp", location: {protocol: "https:", host: "tools.example"}});
+			client._socket = {
+				readyState: 1,
+				send: raw => sent.push(JSON.parse(raw)),
+			};
+			client.on("event", event => events.push(event));
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 0},
+				characterRefs: [],
+				events: [],
+				replay: {scannedThroughSequence: 0, hasMore: false},
+			});
+
+			client.requestResync();
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 1_001},
+				characterRefs: [],
+				events: [{id: "recovered-100", sequence: 100, type: "character.operation.proposed"}],
+				replay: {scannedThroughSequence: 500, hasMore: true},
+			});
+			client.requestResync();
+			client._handleMessage({type: "event", event: {id: "live-1001", sequence: 1_001, type: "roll.logged"}});
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 1_001},
+				characterRefs: [],
+				events: [
+					{id: "recovered-600", sequence: 600, type: "character.operation.applied"},
+					{id: "live-1001", sequence: 1_001, type: "roll.logged"},
+				],
+				replay: {scannedThroughSequence: 1_001, hasMore: false},
+			});
+
+			expect(sent).toEqual([
+				{type: "resync", afterSequence: 0},
+				{type: "resync", afterSequence: 500},
+			]);
+			expect(events.map(event => event.id)).toEqual(["recovered-100", "recovered-600", "live-1001"]);
+			expect(client._lastSequence).toBe(1_001);
+			expect(client.getConnectionState().state).toBe("live");
+		});
+
+		it("restarts a malformed replay chain without stranding buffered live events", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			const sent = [];
+			const events = [];
+			const errors = [];
+			const client = new HubRealtimeClient({campaignId: "cmp", location: {protocol: "https:", host: "tools.example"}});
+			client._socket = {
+				readyState: 1,
+				send: raw => sent.push(JSON.parse(raw)),
+			};
+			client.on("event", event => events.push(event));
+			client.on("error", error => errors.push(error));
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 10},
+				characterRefs: [],
+				events: [],
+				replay: {scannedThroughSequence: 10, hasMore: false},
+			});
+
+			client.requestResync();
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 30},
+				characterRefs: [],
+				events: [{id: "recovered-11", sequence: 11, type: "character.operation.proposed"}],
+				replay: {scannedThroughSequence: 20, hasMore: true},
+			});
+			client._handleMessage({type: "event", event: {id: "live-30", sequence: 30, type: "roll.logged"}});
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 30},
+				characterRefs: [],
+				events: [{id: "invalid-page", sequence: 21, type: "character.operation.applied"}],
+				replay: {scannedThroughSequence: 20, hasMore: true},
+			});
+
+			expect(errors).toEqual([{type: "error", code: "INVALID_REPLAY_CONTINUATION"}]);
+			expect(sent).toEqual([
+				{type: "resync", afterSequence: 10},
+				{type: "resync", afterSequence: 20},
+				{type: "resync", afterSequence: 10},
+			]);
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 30},
+				characterRefs: [],
+				events: [
+					{id: "recovered-11", sequence: 11, type: "character.operation.proposed"},
+					{id: "recovered-21", sequence: 21, type: "character.operation.applied"},
+					{id: "live-30", sequence: 30, type: "roll.logged"},
+				],
+				replay: {scannedThroughSequence: 30, hasMore: false},
+			});
+
+			expect(events.map(event => event.id)).toEqual(["recovered-11", "recovered-21", "live-30"]);
+			expect(client._lastSequence).toBe(30);
+			expect(client.getConnectionState().state).toBe("live");
+		});
+
+		it("reconnects after a replay request fails without stranding live events", async () => {
 			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
 			class BrowserSocket extends EventEmitter {
 				readyState = 1;
-				send () {}
-				close () { this.emit("close", {code: 1000}); }
+				sent = [];
+				send (message) { this.sent.push(JSON.parse(message)); }
+				close () {
+					this.readyState = 3;
+					this.emit("close", {code: 1000});
+				}
 				addEventListener (type, listener) { this.on(type, listener); }
 				removeEventListener (type, listener) { this.off(type, listener); }
 			}
 			const sockets = [];
 			const timers = [];
+			const events = [];
+			const errors = [];
 			const client = new HubRealtimeClient({
 				campaignId: "cmp",
 				location: {protocol: "https:", host: "tools.example"},
@@ -215,13 +361,129 @@ describe("hub realtime", () => {
 					return timers.length;
 				},
 			});
+			client.on("event", event => events.push(event));
+			client.on("error", error => errors.push(error));
 			await client.pConnect();
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 0},
+				characterRefs: [],
+				events: [],
+				replay: {scannedThroughSequence: 0, hasMore: false},
+			});
+
+			client.requestResync();
+			client._handleMessage({type: "error", code: "MESSAGE_FAILED"});
+			for (let sequence = 1; sequence <= 10; ++sequence) {
+				client._handleMessage({type: "event", event: {id: `live-${sequence}`, sequence, type: "roll.logged"}});
+				client.requestResync();
+			}
+
+			expect(errors).toEqual([{type: "error", code: "MESSAGE_FAILED"}]);
+			expect(events).toEqual([]);
+			expect(sockets[0].sent).toEqual([
+				{type: "resync", afterSequence: 0},
+				{type: "resync", afterSequence: 0},
+			]);
+			expect(timers).toHaveLength(1);
+			timers.shift()();
+			await new Promise(resolve => setImmediate(resolve));
+			expect(sockets[1].sent).toEqual([{type: "resync", afterSequence: 0}]);
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 10},
+				characterRefs: [],
+				events: Array.from({length: 10}, (_, ix) => ({
+					id: `live-${ix + 1}`,
+					sequence: ix + 1,
+					type: "roll.logged",
+				})),
+				replay: {scannedThroughSequence: 10, hasMore: false},
+			});
+
+			expect(events.map(event => event.id)).toEqual(Array.from({length: 10}, (_, ix) => `live-${ix + 1}`));
+			expect(client._lastSequence).toBe(10);
+			expect(client.getConnectionState().state).toBe("live");
+			client.close();
+		});
+
+		it("reconnects after a transient close and preserves the resync sequence", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			class BrowserSocket extends EventEmitter {
+				readyState = 1;
+				sent = [];
+				send (message) { this.sent.push(JSON.parse(message)); }
+				close () { this.emit("close", {code: 1000}); }
+				addEventListener (type, listener) { this.on(type, listener); }
+				removeEventListener (type, listener) { this.off(type, listener); }
+			}
+			const sockets = [];
+			const timers = [];
+			const events = [];
+			const client = new HubRealtimeClient({
+				campaignId: "cmp",
+				location: {protocol: "https:", host: "tools.example"},
+				fnCreateSocket: () => {
+					const socket = new BrowserSocket();
+					sockets.push(socket);
+					queueMicrotask(() => socket.emit("open"));
+					return socket;
+				},
+				fnSetTimeout: fn => {
+					timers.push(fn);
+					return timers.length;
+				},
+			});
+			client.on("event", event => events.push(event));
+			await client.pConnect();
+			expect(sockets[0].sent).toEqual([{type: "resync", afterSequence: 0}]);
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 501},
+				characterRefs: [],
+				events: [{id: "proposal", sequence: 1, type: "character.operation.proposed"}],
+				replay: {scannedThroughSequence: 500, hasMore: true},
+			});
+			expect(sockets[0].sent.at(-1)).toEqual({type: "resync", afterSequence: 500});
 			sockets[0].emit("close", {code: 1013, reason: "Rate limit exceeded"});
 			expect(timers).toHaveLength(1);
 			timers.shift()();
 			await new Promise(resolve => setImmediate(resolve));
 			expect(sockets).toHaveLength(2);
+			expect(sockets[1].sent).toEqual([{type: "resync", afterSequence: 500}]);
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 501},
+				characterRefs: [],
+				events: [{id: "applied", sequence: 501, type: "character.operation.applied"}],
+				replay: {scannedThroughSequence: 501, hasMore: false},
+			});
+			expect(events.map(event => event.id)).toEqual(["proposal", "applied"]);
 			client.close();
+		});
+
+		it("clears partial replay state on explicit close and starts another campaign at zero", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			const client = new HubRealtimeClient({campaignId: "first", location: {protocol: "https:", host: "tools.example"}});
+			client._socket = {readyState: 1, send: () => {}, close: () => {}};
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "first", lastSequence: 501},
+				characterRefs: [],
+				events: [{id: "partial", sequence: 1, type: "character.operation.proposed"}],
+				replay: {scannedThroughSequence: 500, hasMore: true},
+			});
+			expect(client._resyncAccumulatedEvents).toHaveLength(1);
+			expect(client._resyncScannedThroughSequence).toBe(500);
+			client.close();
+			expect(client._resyncAccumulatedEvents).toEqual([]);
+			expect(client._resyncScannedThroughSequence).toBeNull();
+
+			const sent = [];
+			const nextCampaign = new HubRealtimeClient({campaignId: "second", location: {protocol: "https:", host: "tools.example"}});
+			nextCampaign._socket = {readyState: 1, send: raw => sent.push(JSON.parse(raw))};
+			nextCampaign.requestResync();
+			expect(sent).toEqual([{type: "resync", afterSequence: 0}]);
 		});
 
 		it("uses one bounded authoritative resync watchdog while a socket stays live", async () => {
@@ -304,6 +566,161 @@ describe("hub realtime", () => {
 		});
 	});
 
+	it("delivers 26 exact continuation pages once without tripping the burst limit", async () => {
+		const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+		const pageCount = 26;
+		const pageWidth = 500;
+		const pageCalls = [];
+		const store = {
+			pGetSessionById: async () => ({session: {}, account: {}}),
+			pGetMembership: async () => ({role: "player"}),
+			pGetCampaignCursor: async () => ({
+				cursor: {campaignId: "cmp", lastSequence: pageCount * pageWidth},
+				campaign: {id: "cmp"},
+				membership: {role: "player"},
+				characterRefs: [],
+			}),
+			pListVisibleEventPage: async ({afterSequence}) => {
+				pageCalls.push(afterSequence);
+				const page = Math.floor(afterSequence / pageWidth) + 1;
+				const scannedThroughSequence = page * pageWidth;
+				return {
+					events: [{
+						id: `operation-${page}`,
+						sequence: scannedThroughSequence,
+						type: "character.operation.proposed",
+					}],
+					replay: {
+						scannedThroughSequence,
+						hasMore: page < pageCount,
+					},
+				};
+			},
+		};
+		const realtime = new HubRealtime({store});
+		const serverSocket = new FakeSocket();
+		realtime.addConnection({
+			socket: serverSocket,
+			account: {id: "player", displayName: "Player"},
+			session: {id: "session"},
+			membership: {id: "membership", role: "player"},
+			campaignId: "cmp",
+		});
+		const connection = realtime._connections.get(serverSocket);
+		await new Promise(resolve => setImmediate(resolve));
+		serverSocket.sent.length = 0;
+
+		const clientRequests = [];
+		const delivered = [];
+		const client = new HubRealtimeClient({campaignId: "cmp", location: {protocol: "https:", host: "tools.example"}});
+		client._socket = {
+			readyState: 1,
+			send: raw => clientRequests.push(JSON.parse(raw)),
+		};
+		client.on("event", event => delivered.push(event));
+		client.requestResync();
+
+		while (clientRequests.length) {
+			const request = clientRequests.shift();
+			await realtime._pHandleMessage({connection, raw: Buffer.from(JSON.stringify(request))});
+			client._handleMessage(serverSocket.sent.shift());
+		}
+
+		expect(pageCalls).toEqual(Array.from({length: pageCount}, (_, i) => i * pageWidth));
+		expect(delivered.map(event => event.id)).toEqual(Array.from({length: pageCount}, (_, i) => `operation-${i + 1}`));
+		expect(new Set(delivered.map(event => event.id)).size).toBe(pageCount);
+		expect(connection.messageCount).toBe(1);
+		expect(serverSocket.closeEvents).toEqual([]);
+		expect(client.getConnectionState().state).toBe("live");
+	});
+
+	it("counts forged, cross-connection, and replayed continuation markers against the burst limit", async () => {
+		const store = {
+			pGetSessionById: async () => ({session: {}, account: {}}),
+			pGetMembership: async () => ({role: "player"}),
+			pGetCampaignCursor: async ({campaignId}) => ({
+				cursor: {campaignId, lastSequence: 10_000},
+				campaign: {id: campaignId},
+				membership: {role: "player"},
+				characterRefs: [],
+			}),
+			pListVisibleEventPage: async ({afterSequence}) => ({
+				events: [],
+				replay: {scannedThroughSequence: afterSequence + 1, hasMore: true},
+			}),
+		};
+		const realtime = new HubRealtime({store});
+		const firstSocket = new FakeSocket();
+		const otherSocket = new FakeSocket();
+		realtime.addConnection({
+			socket: firstSocket,
+			account: {id: "first", displayName: "First"},
+			session: {id: "first-session"},
+			membership: {id: "first-membership", role: "player"},
+			campaignId: "first-campaign",
+		});
+		realtime.addConnection({
+			socket: otherSocket,
+			account: {id: "other", displayName: "Other"},
+			session: {id: "other-session"},
+			membership: {id: "other-membership", role: "player"},
+			campaignId: "other-campaign",
+		});
+		const first = realtime._connections.get(firstSocket);
+		const other = realtime._connections.get(otherSocket);
+
+		await realtime._pHandleMessage({connection: first, raw: Buffer.from(JSON.stringify({type: "resync", afterSequence: 0}))});
+		expect(first.replayContinuationAfterSequence).toBe(1);
+		expect(first.messageCount).toBe(1);
+		await realtime._pHandleMessage({connection: other, raw: Buffer.from(JSON.stringify({type: "resync", afterSequence: 1}))});
+		expect(other.messageCount).toBe(1);
+
+		await realtime._pHandleMessage({connection: first, raw: Buffer.from(JSON.stringify({type: "resync", afterSequence: 1}))});
+		expect(first.messageCount).toBe(1);
+		expect(first.replayContinuationAfterSequence).toBe(2);
+		for (let i = 0; i < 20; ++i) {
+			await realtime._pHandleMessage({connection: first, raw: Buffer.from(JSON.stringify({type: "resync", afterSequence: 1}))});
+		}
+		expect(firstSocket.closeEvents).toContainEqual({code: 1013, reason: "Rate limit exceeded"});
+	});
+
+	it("caps concurrent forged traffic before starting authorization store work", async () => {
+		const sessionResolvers = [];
+		let sessionCalls = 0;
+		let membershipCalls = 0;
+		const store = {
+			pGetSessionById: () => {
+				sessionCalls++;
+				return new Promise(resolve => sessionResolvers.push(resolve));
+			},
+			pGetMembership: async () => {
+				membershipCalls++;
+				return {role: "player"};
+			},
+		};
+		const realtime = new HubRealtime({store});
+		const socket = new FakeSocket();
+		const connection = {
+			socket,
+			sessionId: "session",
+			accountId: "account",
+			campaignId: "campaign",
+			role: "player",
+			messageWindowStartedAt: Date.now(),
+			messageCount: 0,
+			replayContinuationAfterSequence: null,
+		};
+		const requests = Array.from({length: 100}, () =>
+			realtime._pHandleMessage({connection, raw: Buffer.from(JSON.stringify({type: "forged"}))}),
+		);
+
+		expect(sessionCalls).toBe(20);
+		expect(socket.closeEvents).toContainEqual({code: 1013, reason: "Rate limit exceeded"});
+		for (const resolve of sessionResolvers) resolve({session: {}, account: {}});
+		await Promise.all(requests);
+		expect(membershipCalls).toBe(20);
+	});
+
 	it("returns a metadata-only cursor and delta events on resync", async () => {
 		let snapshotCalls = 0;
 		const store = {
@@ -316,7 +733,10 @@ describe("hub realtime", () => {
 				membership: {role: "player"},
 				characterRefs: [{id: "c1", revision: 7, projectionRevision: 2}],
 			}),
-			pListVisibleEvents: async () => [{sequence: 4, type: "roll.logged"}],
+			pListVisibleEventPage: async () => ({
+				events: [{sequence: 4, type: "roll.logged"}],
+				replay: {scannedThroughSequence: 4, hasMore: false},
+			}),
 		};
 		const realtime = new HubRealtime({store});
 		const socket = new FakeSocket();
@@ -331,6 +751,7 @@ describe("hub realtime", () => {
 			membership: {role: "player"},
 			characterRefs: [{id: "c1", revision: 7, projectionRevision: 2}],
 			events: [{sequence: 4, type: "roll.logged"}],
+			replay: {scannedThroughSequence: 4, hasMore: false},
 		});
 		// ADR 0011: the realtime path must not reach the character projector at all, so a
 		// second projection implementation cannot grow inside the socket.

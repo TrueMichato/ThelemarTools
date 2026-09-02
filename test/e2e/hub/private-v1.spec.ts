@@ -42,7 +42,7 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 		await player.expectCampaignDmScreenDenied(campaignId);
 
 		const character = await player.copyLocalCharacterFromSheet({campaignId, name: "Rowan"});
-		await player.expectProtocolUpgradeRecovery({campaignId, characterName: "Rowan"});
+		await dm.expectProtocolUpgradeRecovery({campaignId, characterName: "Rowan"});
 		await dm.expectCampaignPartyTrackerProjection({campaignId, name: "Rowan"});
 		await dm.gotoCampaign(campaignId);
 		await player.editCharacterHpAndRollInitiative({campaignId, characterId: character.id, name: "Rowan", hp: 11});
@@ -55,16 +55,13 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 			expect.objectContaining({item: expect.objectContaining({name: "Longsword", source: "PHB"}), quantity: 1}),
 		]));
 
-		await player.proposeDamage({campaignId, characterName: "Rowan", amount: 4});
-		await dm.applyFirstPendingAction(campaignId);
+		await dm.applyDamage({campaignId, characterName: "Rowan", amount: 4});
 		expect((await player.getCharacter(character.id)).data.hp.current).toBe(7);
 		const spellcaster = await player.createCharacter({campaignId, name: "Mira"});
 		expect(spellcaster.data.spellcasting.spellSlots[1].current).toBe(2);
-		await player.proposeSpellSlotSpend({campaignId, characterName: "Mira", context: "Cure Wounds", level: 1, amount: 1});
-		await dm.applyFirstPendingAction(campaignId);
+		await dm.spendSpellSlot({campaignId, characterName: "Mira", level: 1, amount: 1});
 		expect((await player.getCharacter(spellcaster.id)).data.spellcasting.spellSlots[1].current).toBe(1);
-		await player.proposeSpellSlotSpend({campaignId, characterName: "Mira", context: "Shield", level: 1, amount: 2});
-		await dm.expectInsufficientActionAndReject(campaignId);
+		await dm.expectInsufficientSpellSlotSpend({campaignId, characterName: "Mira", level: 1, amount: 2});
 
 		await player.reserveItemAndCurrencyToParty({
 			campaignId,
