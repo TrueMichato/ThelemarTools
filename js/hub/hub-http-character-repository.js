@@ -607,6 +607,9 @@ export class HubHttpCharacterRepository {
 					status: "recovered",
 					appliedCount: plan.applied.length,
 					appliedOperations: plan.applied.map(entry => structuredClone(entry.operation)),
+					appliedEffects: plan.applied
+						.filter(entry => entry.appliedEffect)
+						.map(entry => structuredClone(entry.appliedEffect)),
 					liveNext: isLiveChanged ? structuredClone(liveNext) : undefined,
 				};
 			});
@@ -660,6 +663,7 @@ export class HubHttpCharacterRepository {
 		const applied = [];
 
 		for (const entry of ordered) {
+			const liveBefore = working.live ? structuredClone(working.live.data) : null;
 			const plan = planAppliedOperation({
 				tracks: working,
 				operation: entry.operation,
@@ -682,7 +686,18 @@ export class HubHttpCharacterRepository {
 				for (const [name, decision] of Object.entries(plan.decisions)) {
 					if (decision === TRACK_DECISION.COVERED) working[name].coverage.appliedOperationIds.add(operationId);
 				}
-				applied.push(entry);
+				applied.push({
+					...entry,
+					...(Object.hasOwn(plan.staged, "live")
+						? {
+							appliedEffect: {
+								operation: structuredClone(entry.operation),
+								beforeData: liveBefore,
+								afterData: structuredClone(plan.staged.live),
+							},
+						}
+						: {}),
+				});
 			}
 			if (entry.eventId) workingEvents.add(entry.eventId);
 			if (operationId) workingOperations.add(operationId);

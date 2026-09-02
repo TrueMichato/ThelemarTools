@@ -557,6 +557,11 @@ body.is-charsheet-page .ve-ui-modal__scroller > .ve-flex.ve-w-100.ve-mb-1 {
 	flex-wrap: wrap;
 }
 
+.charsheet__hub-approval:focus-visible {
+	outline: 2px solid var(--cs-border-focus, #7681f5);
+	outline-offset: 2px;
+}
+
 .charsheet__hub-approval-copy {
 	display: grid;
 }

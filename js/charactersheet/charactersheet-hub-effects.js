@@ -43,6 +43,7 @@ export class CharacterSheetHubEffects {
 		this._collectionRevision = 0;
 		this._characterId = null;
 		this._isAuthorized = false;
+		this._isCapabilityRevoked = false;
 		this._isLoading = false;
 		this._loadError = null;
 		this._actions = new Map();
@@ -79,6 +80,7 @@ export class CharacterSheetHubEffects {
 		this._generation++;
 		this._collectionRevision = 0;
 		this._characterId = characterId;
+		this._isCapabilityRevoked = false;
 		void this.pRefresh();
 		return true;
 	}
@@ -88,6 +90,7 @@ export class CharacterSheetHubEffects {
 		this._collectionRevision = 0;
 		this._characterId = null;
 		this._isAuthorized = false;
+		this._isCapabilityRevoked = false;
 		this._isLoading = false;
 		this._loadError = null;
 		this._actions.clear();
@@ -101,7 +104,7 @@ export class CharacterSheetHubEffects {
 	}
 
 	async pRefresh () {
-		if (!this._characterId) return false;
+		if (!this._characterId || this._isCapabilityRevoked) return false;
 		if (this._pRefreshActive) return this._pRefreshActive;
 		const token = {
 			generation: this._generation,
@@ -158,13 +161,21 @@ export class CharacterSheetHubEffects {
 	}
 
 	onConnectionState (state) {
-		if (state?.state === "live" && this._characterId) void this.pRefresh();
+		if (["access_lost", "closed"].includes(state?.state)) {
+			this._revokeApprovalCapability();
+			return;
+		}
+		if (state?.state === "live" && this._characterId) {
+			this._isCapabilityRevoked = false;
+			void this.pRefresh();
+		}
 	}
 
 	onRealtimeOperation (event) {
 		if (!this._characterId || event?.targetCharacterId !== this._characterId) return false;
 		if (event.status === "proposed") {
 			if (!this._isAuthorized) {
+				this._collectionRevision++;
 				void this.pRefresh();
 				return true;
 			}
@@ -260,6 +271,10 @@ export class CharacterSheetHubEffects {
 			return true;
 		} catch (error) {
 			if (!this._isCurrent(token) || !this._actions.has(actionId)) return false;
+			if (_CAPABILITY_LOSS_CODES.has(error?.code)) {
+				this._revokeApprovalCapability();
+				return false;
+			}
 			action.decisionState = null;
 			action.error = _getSafeErrorMessage(error).slice(0, _MAX_ERROR_LENGTH);
 			this._renderApprovals();
@@ -270,6 +285,19 @@ export class CharacterSheetHubEffects {
 
 	_isCurrent ({generation, characterId}) {
 		return this._generation === generation && this._characterId === characterId;
+	}
+
+	_revokeApprovalCapability () {
+		if (!this._characterId) return false;
+		const didChange = this._isAuthorized || this._actions.size || this._loadError;
+		this._generation++;
+		this._isAuthorized = false;
+		this._isCapabilityRevoked = true;
+		this._actions.clear();
+		this._loadError = null;
+		this._collectionRevision++;
+		this._renderApprovals();
+		return !!didChange;
 	}
 
 	_getNormalizedAction (action) {
@@ -386,15 +414,25 @@ export class CharacterSheetHubEffects {
 		for (const action of this._actions.values()) this._approvalsRoot.append(this._getApprovalCard(action));
 
 		if (focusedActionId && focusedDecision) {
-			this._approvalsRoot
-				.querySelector(`[data-hub-action-id="${CSS.escape(focusedActionId)}"][data-hub-decision="${focusedDecision}"]`)
-				?.focus({preventScroll: true});
+			const actionSelector = `[data-hub-action-id="${CSS.escape(focusedActionId)}"]`;
+			const decisionControl = this._approvalsRoot
+				.querySelector(`button${actionSelector}[data-hub-decision="${focusedDecision}"]`);
+			const focusTarget = decisionControl && !decisionControl.disabled
+				? decisionControl
+				: this._approvalsRoot.querySelector(`article${actionSelector}`)
+					|| this._approvalsRoot.querySelector("button:not(:disabled)")
+					|| this._noticesRoot?.querySelector("button")
+					|| document.getElementById?.("charsheet-ipt-hp-current");
+			focusTarget?.focus({preventScroll: true});
 		}
 		this._updateRootVisibility();
 	}
 
 	_getApprovalCard (action) {
 		const card = e_({tag: "article", clazz: "charsheet__hub-approval"});
+		card.tabIndex = -1;
+		card.dataset.hubActionId = action.actionId;
+		if (action.decision) card.dataset.hubDecision = action.decision;
 		const copy = e_({tag: "div", clazz: "charsheet__hub-approval-copy"});
 		copy.append(
 			e_({tag: "strong", clazz: "charsheet__hub-approval-effect", text: action.presentation.effectLabel}),

@@ -344,8 +344,8 @@ class CharacterSheetPage {
 			case "recovered":
 				this._renderCharacter();
 				this._updateSaveIndicator("saved");
-				for (const operation of result.appliedOperations || []) {
-					this._hubEffects?.onApplied({operation});
+				for (const appliedEffect of result.appliedEffects || []) {
+					this._hubEffects?.onApplied(appliedEffect);
 				}
 				return true;
 			case "history_unavailable":

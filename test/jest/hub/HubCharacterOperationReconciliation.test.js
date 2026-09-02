@@ -547,6 +547,14 @@ describe("Resync batch atomicity", () => {
 		expect(recovered.status).toBe("recovered");
 		// 10 - 4 - 3 = 3: both operations applied exactly once.
 		expect(live.hp.current).toBe(3);
+		expect(recovered.appliedEffects.map(({operation, beforeData, afterData}) => ({
+			operationId: operation.operationId,
+			before: beforeData.hp.current,
+			after: afterData.hp.current,
+		}))).toEqual([
+			{operationId: "operation-1", before: 10, after: 6},
+			{operationId: "operation-2", before: 6, after: 3},
+		]);
 		expect(repository.isSaveBlocked("character-1")).toBe(false);
 		expect(repository.hasPendingResync("character-1")).toBe(false);
 	});

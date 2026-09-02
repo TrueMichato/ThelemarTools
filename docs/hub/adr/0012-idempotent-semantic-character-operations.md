@@ -431,8 +431,8 @@ The second slice implements the client half and freezes these choices:
   response or terminal event. Open, reconnect, window focus and visible-tab restoration all refresh the
   owner-scoped collection under a character-generation fence.
 - successful notices are emitted only after repository adoption returns `applied`, or after a serialized resync
-  returns its actually applied operation list. Duplicate/replayed operations therefore do not announce twice,
-  while blocked/rejected adoption shows a persistent recovery error and never a success notice.
+  returns per-operation adopted before/after outcomes. Duplicate/replayed operations therefore do not announce
+  twice, while blocked/rejected adoption shows a persistent recovery error and never a success notice.
 
 Target discovery, successful production peer templates, the ADR 0016 peer source-cost implementation, and
 multi-target/monster operations remain deliberately deferred. Therefore ADR 0012 is not yet marked fully

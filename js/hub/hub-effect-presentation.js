@@ -1,3 +1,5 @@
+import {getConditionIdentity} from "./hub-semantic-operations.js";
+
 const _MAX_LABEL_LENGTH = 120;
 
 const _getLabel = (value, fallback) => {
@@ -58,15 +60,30 @@ export function getAppliedEffectNotice ({operation, beforeData = null, afterData
 			};
 		}
 		case "condition.add":
+		case "condition.remove": {
+			const label = _getLabel(args.condition?.name, "A condition");
+			const identity = getConditionIdentity(args.condition);
+			const beforeHas = beforeData && Array.isArray(beforeData.conditions)
+				? beforeData.conditions.some(condition => getConditionIdentity(condition) === identity)
+				: null;
+			const afterHas = afterData && Array.isArray(afterData.conditions)
+				? afterData.conditions.some(condition => getConditionIdentity(condition) === identity)
+				: null;
+			if (operation.kind === "condition.add") {
+				return {
+					id: operation.operationId,
+					message: beforeHas === true && afterHas === true
+						? `Campaign condition update applied; ${label} was already present.`
+						: `${label} added by the campaign.`,
+				};
+			}
 			return {
 				id: operation.operationId,
-				message: `${_getLabel(args.condition?.name, "A condition")} added by the campaign.`,
+				message: beforeHas === false && afterHas === false
+					? `Campaign condition update applied; ${label} was not present.`
+					: `${label} removed by the campaign.`,
 			};
-		case "condition.remove":
-			return {
-				id: operation.operationId,
-				message: `${_getLabel(args.condition?.name, "A condition")} removed by the campaign.`,
-			};
+		}
 		case "spell_slot.spend": {
 			const amount = Math.max(0, Number(args.amount) || 0);
 			const level = Math.max(1, Number(args.level) || 1);

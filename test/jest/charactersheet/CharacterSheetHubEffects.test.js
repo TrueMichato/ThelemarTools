@@ -55,6 +55,7 @@ describe("Character Sheet Hub effect controls", () => {
 			addEventListener: jest.fn((type, listener) => listeners.set(`document:${type}`, listener)),
 			removeEventListener: jest.fn(),
 		};
+		globalThis.CSS = {escape: value => value};
 		api = {
 			pListCharacterPendingActions: jest.fn(async () => []),
 			pResolveStructuredAction: jest.fn(),
@@ -105,6 +106,43 @@ describe("Character Sheet Hub effect controls", () => {
 		listeners.get("document:visibilitychange")();
 		await pFlush();
 		expect(api.pListCharacterPendingActions).toHaveBeenCalledTimes(4);
+	});
+
+	it("refetches when a proposal arrives during the initial authorization read", async () => {
+		const initial = makeDeferred();
+		api.pListCharacterPendingActions
+			.mockImplementationOnce(() => initial.promise)
+			.mockResolvedValueOnce([makeAction({actionId: "action-new"})]);
+		controller.activate({characterId: "character-1"});
+		controller.onRealtimeOperation({
+			status: "proposed",
+			targetCharacterId: "character-1",
+			payload: makeAction({actionId: "action-new"}),
+		});
+		initial.resolve([]);
+		await pFlush();
+		await pFlush();
+
+		expect(api.pListCharacterPendingActions).toHaveBeenCalledTimes(2);
+		expect([...controller._actions.keys()]).toEqual(["action-new"]);
+	});
+
+	it("clears resolver controls when realtime authorization is lost", async () => {
+		api.pListCharacterPendingActions.mockResolvedValue([makeAction()]);
+		controller.activate({characterId: "character-1"});
+		await pFlush();
+		controller.onConnectionState({state: "access_lost"});
+
+		expect(controller._isAuthorized).toBe(false);
+		expect(controller._actions.size).toBe(0);
+		expect(root.hidden).toBe(true);
+		listeners.get("window:focus")();
+		await pFlush();
+		expect(api.pListCharacterPendingActions).toHaveBeenCalledTimes(1);
+
+		controller.onConnectionState({state: "live"});
+		await pFlush();
+		expect(api.pListCharacterPendingActions).toHaveBeenCalledTimes(2);
 	});
 
 	it("fences stale fetches when the open character changes", async () => {
@@ -190,6 +228,18 @@ describe("Character Sheet Hub effect controls", () => {
 		expect(controller._actions.get("action-1").decisionState).toBe("waiting");
 	});
 
+	it("fails closed when authorization is lost during a decision", async () => {
+		api.pListCharacterPendingActions.mockResolvedValue([makeAction()]);
+		api.pResolveStructuredAction.mockRejectedValue(Object.assign(new Error("hidden"), {code: "FORBIDDEN"}));
+		controller.activate({characterId: "character-1"});
+		await pFlush();
+
+		await expect(controller.pResolve({actionId: "action-1", decision: "accept"})).resolves.toBe(false);
+		expect(controller._isAuthorized).toBe(false);
+		expect(controller._actions.size).toBe(0);
+		expect(root.textContent).not.toContain("hidden");
+	});
+
 	it("does not apply locally on approval and removes only after the authoritative applied event", async () => {
 		api.pListCharacterPendingActions.mockResolvedValue([makeAction()]);
 		api.pResolveStructuredAction.mockResolvedValue({operation: {status: "applied"}});
@@ -256,6 +306,66 @@ describe("Character Sheet Hub effect controls", () => {
 			afterData: {spellcasting: {spellSlots: {2: {current: 3, max: 3}}}},
 		});
 		expect([...controller._notices.values()][0].message).toBe("1 level 2 spell slot restored by the campaign.");
+	});
+
+	it("reports authoritative no-op condition outcomes without claiming a change", () => {
+		controller.activate({characterId: "character-1"});
+		const condition = {name: "Poisoned", source: "XPHB"};
+		controller.onApplied({
+			operation: makeOperation({operationId: "add-noop", kind: "condition.add", args: {condition}}),
+			beforeData: {conditions: [condition]},
+			afterData: {conditions: [condition]},
+		});
+		controller.onApplied({
+			operation: makeOperation({operationId: "remove-noop", kind: "condition.remove", args: {condition}}),
+			beforeData: {conditions: []},
+			afterData: {conditions: []},
+		});
+
+		expect([...controller._notices.values()].map(it => it.message)).toEqual([
+			"Campaign condition update applied; Poisoned was already present.",
+			"Campaign condition update applied; Poisoned was not present.",
+		]);
+	});
+
+	it("moves focus to the request card while its decision controls are disabled", async () => {
+		api.pListCharacterPendingActions.mockResolvedValue([makeAction()]);
+		controller.activate({characterId: "character-1"});
+		await pFlush();
+		const card = {focus: jest.fn()};
+		const disabledButton = {disabled: true, focus: jest.fn()};
+		controller._approvalsRoot.querySelector = jest.fn(selector => {
+			if (selector.startsWith("button")) return disabledButton;
+			if (selector.startsWith("article")) return card;
+			return null;
+		});
+		document.activeElement = {dataset: {hubActionId: "action-1", hubDecision: "accept"}};
+
+		controller._actions.get("action-1").decisionState = "submitting";
+		controller._actions.get("action-1").decision = "accept";
+		controller._renderApprovals();
+
+		expect(disabledButton.focus).not.toHaveBeenCalled();
+		expect(card.focus).toHaveBeenCalledWith({preventScroll: true});
+	});
+
+	it("moves focus back into the sheet after the last request resolves", async () => {
+		api.pListCharacterPendingActions.mockResolvedValue([makeAction()]);
+		controller.activate({characterId: "character-1"});
+		await pFlush();
+		const hpInput = {focus: jest.fn()};
+		document.getElementById = jest.fn(() => hpInput);
+		controller._approvalsRoot.querySelector = jest.fn(() => null);
+		controller._noticesRoot.querySelector = jest.fn(() => null);
+		document.activeElement = {dataset: {hubActionId: "action-1", hubDecision: "reject"}};
+
+		controller.onRealtimeOperation({
+			status: "rejected",
+			targetCharacterId: "character-1",
+			operationId: "action-1",
+		});
+
+		expect(hpInput.focus).toHaveBeenCalledWith({preventScroll: true});
 	});
 
 	it("retains only the privacy-safe server projection", async () => {
