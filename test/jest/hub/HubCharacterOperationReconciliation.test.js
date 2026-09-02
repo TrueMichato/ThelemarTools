@@ -493,3 +493,84 @@ describe("Recovery storage stays consistent with its coverage", () => {
 		expect(live.hp.current).toBe(3);
 	});
 });
+
+describe("Resync batch atomicity", () => {
+	// Canonical is at revision 3 having applied op1 (4 damage) and op2 (3 damage); live is still at revision 1
+	// with 10 hit points, so a correct recovery must bring it to 3.
+	const pSetUpGapWithHistory = async () => {
+		const api = makeApi({
+			character: {id: "character-1", campaignId: "campaign-1", revision: 3, data: makeCharacterData({current: 3})},
+			events: [
+				makeAppliedEvent({operationId: "operation-1", sequence: 20, revision: 2, args: {amount: 4}, id: "event-1"}),
+				makeAppliedEvent({operationId: "operation-2", sequence: 21, revision: 3, args: {amount: 3}, id: "event-2"}),
+			],
+		});
+		const repository = makeRepository({api});
+		await repository.pGet({characterId: "character-1"});
+		repository._getCoverageBook("character-1").live.revision = 1;
+
+		const queued = repository.applyRealtimeOperation({
+			characterId: "character-1",
+			operation: makeOperation({operationId: "operation-2", args: {amount: 3}}),
+			resultingCharacterRevision: 3,
+			eventId: "event-2",
+			sequence: 21,
+			liveData: makeCharacterData(),
+			fnAdoptLive: () => {},
+		});
+		expect(queued.status).toBe("resync_required");
+		return {api, repository};
+	};
+
+	it("applies every operation exactly once when a first adoption throws and the retry succeeds", async () => {
+		const {repository} = await pSetUpGapWithHistory();
+		let live = makeCharacterData();
+
+		const failed = await repository.pRunPendingResync({
+			characterId: "character-1",
+			fnGetLiveData: () => live,
+			fnAdoptLive: () => { throw new Error("render exploded"); },
+		});
+		expect(failed).toMatchObject({status: "failed", error: {code: "LIVE_ADOPTION_FAILED"}});
+
+		// A failed adoption must leave the batch replayable, not mark it as already covered.
+		expect(repository._getCoverageBook("character-1").live.revision).toBe(1);
+		expect(repository.isSaveBlocked("character-1")).toBe(true);
+		expect(repository.hasPendingResync("character-1")).toBe(true);
+
+		const recovered = await repository.pRunPendingResync({
+			characterId: "character-1",
+			fnGetLiveData: () => live,
+			fnAdoptLive: next => { live = next; },
+		});
+
+		expect(recovered.status).toBe("recovered");
+		// 10 - 4 - 3 = 3: both operations applied exactly once.
+		expect(live.hp.current).toBe(3);
+		expect(repository.isSaveBlocked("character-1")).toBe(false);
+		expect(repository.hasPendingResync("character-1")).toBe(false);
+	});
+
+	it("commits nothing when a later replay entry cannot be reconciled", async () => {
+		const {api, repository} = await pSetUpGapWithHistory();
+		// A third operation whose revision leaves an unbridgeable gap after the replayable ones.
+		api.state.events.push(makeAppliedEvent({operationId: "operation-3", sequence: 22, revision: 9, args: {amount: 2}, id: "event-3"}));
+
+		const acceptedBefore = structuredClone(repository._accepted.get("character-1"));
+		const liveCoverageBefore = repository._getCoverageBook("character-1").live.revision;
+
+		const result = await repository.pRunPendingResync({
+			characterId: "character-1",
+			fnGetLiveData: () => makeCharacterData(),
+			fnAdoptLive: () => { throw new Error("must not adopt a partially reconciled batch"); },
+		});
+
+		expect(result.status).toBe("history_unavailable");
+		// The earlier, individually replayable operations must not have been committed on their own.
+		expect(repository._accepted.get("character-1")).toEqual(acceptedBefore);
+		expect(repository._getCoverageBook("character-1").live.revision).toBe(liveCoverageBefore);
+		expect(repository._appliedOperationIds.get("character-1")?.has("operation-1")).toBeFalsy();
+		expect(repository.isSaveBlocked("character-1")).toBe(true);
+		expect(repository.hasPendingResync("character-1")).toBe(true);
+	});
+});

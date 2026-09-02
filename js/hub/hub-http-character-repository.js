@@ -570,53 +570,175 @@ export class HubHttpCharacterRepository {
 					return {status: "history_unavailable"};
 				}
 
-				// Canonical truth is exact, so adopt it directly; dirty tracks only need the operations they are
-				// missing, replayed in aggregate-revision order.
-				this._accepted.set(canonicalId, canonical);
-				const book = this._getCoverageBook(canonicalId);
-				book.acceptedOperationIds = new BoundedIdSet();
-
-				let liveData = fnGetLiveData ? fnGetLiveData() : undefined;
-				let isLiveChanged = false;
-				for (const entry of ordered) {
-					const result = this.applyRealtimeOperation({
-						characterId: canonicalId,
-						operation: entry.operation,
-						resultingCharacterRevision: entry.resultingCharacterRevision,
-						eventId: entry.eventId,
-						sequence: entry.sequence,
-						liveData,
-						fnAdoptLive: null,
+				// Canonical truth is exact and already reflects every operation up to its revision; the dirty
+				// tracks only need the ones they are missing. The whole batch is planned against working copies
+				// first, adopted into live state once, and only then committed — a partial commit would advance
+				// coverage past data the sheet never received, and every later replay would then be suppressed.
+				const working = this._buildResyncWorkingSet({
+					canonicalId,
+					canonical,
+					liveData: fnGetLiveData ? fnGetLiveData() : undefined,
+				});
+				const plan = this._planResyncBatch({canonicalId, working, ordered});
+				if (plan.status !== "planned") {
+					this._setSaveBlock(canonicalId, {
+						reason: "resync_unavailable",
+						code: plan.error?.code || "OPERATION_HISTORY_UNAVAILABLE",
+						message: `Campaign effect history is no longer available. Reload this character, or export your local copy.`,
 					});
-					if (result.status === RECONCILE_STATUS.APPLIED && result.liveNext !== undefined) {
-						liveData = result.liveNext;
-						isLiveChanged = true;
-					}
-					if (result.status === RECONCILE_STATUS.RESYNC_REQUIRED) {
-						this._setSaveBlock(canonicalId, {
-							reason: "resync_unavailable",
-							code: "OPERATION_HISTORY_UNAVAILABLE",
-							message: `Campaign effect history is no longer available. Reload this character, or export your local copy.`,
-						});
-						return {status: "history_unavailable"};
-					}
+					return {status: "history_unavailable"};
 				}
 
+				const liveNext = working.live?.data;
+				const isLiveChanged = !!plan.applied.length && liveNext !== undefined;
 				if (isLiveChanged && typeof fnAdoptLive === "function") {
 					try {
-						fnAdoptLive(structuredClone(liveData));
+						fnAdoptLive(structuredClone(liveNext));
 					} catch (error) {
+						// Nothing has been committed yet, so a retry replays the identical batch.
 						return {status: "failed", error: {code: "LIVE_ADOPTION_FAILED", message: error?.message}};
 					}
 				}
 
+				this._commitResyncBatch({canonicalId, canonical, plan});
 				this._pendingResync.delete(canonicalId);
 				this._clearSaveBlock(canonicalId);
-				return {status: "recovered", appliedCount: ordered.length, liveNext: isLiveChanged ? structuredClone(liveData) : undefined};
+				return {status: "recovered", appliedCount: plan.applied.length, liveNext: isLiveChanged ? structuredClone(liveNext) : undefined};
 			});
 		} finally {
 			this._resyncInFlight.delete(canonicalId);
 		}
+	}
+
+	/** Working copies of every track a resync may advance. Nothing here is repository state yet. */
+	_buildResyncWorkingSet ({canonicalId, canonical, liveData}) {
+		const book = this._getCoverageBook(canonicalId);
+		const acceptedSequence = this._realtimeCursors.get(canonicalId)?.operationWatermark ?? null;
+		const working = {
+			accepted: {
+				data: structuredClone(canonical.data),
+				coverage: createCoverage({revision: canonical.revision, acceptedSequence}),
+			},
+		};
+		if (liveData !== undefined) working.live = {data: structuredClone(liveData), coverage: this._cloneTrackCoverage(book.live)};
+		for (const [name, map, coverageKey] of [
+			["latestSubmitted", this._latestSubmitted, "latestSubmitted"],
+			["recoveredBase", this._recoveredBases, "recoveredBase"],
+			["failedWrite", this._failedWrites, "failedWrite"],
+		]) {
+			if (!map.has(canonicalId)) continue;
+			working[name] = {data: structuredClone(map.get(canonicalId)), coverage: this._cloneTrackCoverage(book[coverageKey])};
+		}
+		for (const [store, prefix] of [[this._conflicts, "conflict"], [this._liveConflicts, "liveConflict"]]) {
+			const conflict = store.get(canonicalId);
+			if (!conflict) continue;
+			for (const key of ["base", "local", "server"]) {
+				working[`${prefix}${key[0].toUpperCase()}${key.slice(1)}`] = {
+					data: structuredClone(conflict[key]),
+					coverage: this._getConflictCoverage(conflict, key),
+				};
+			}
+		}
+		return working;
+	}
+
+	/**
+	 * Replay the ordered batch across the working set without touching repository state.
+	 *
+	 * Returning a failure here leaves every track, id set and recovery record exactly as it was, so a retry
+	 * replays the identical batch instead of finding the earlier operations already marked as covered.
+	 */
+	_planResyncBatch ({canonicalId, working, ordered}) {
+		const {events, operations} = this._getAppliedIds(canonicalId);
+		const workingEvents = events.clone();
+		const workingOperations = operations.clone();
+		const applied = [];
+
+		for (const entry of ordered) {
+			const plan = planAppliedOperation({
+				tracks: working,
+				operation: entry.operation,
+				resultingCharacterRevision: entry.resultingCharacterRevision,
+				eventId: entry.eventId,
+				appliedEventIds: workingEvents,
+				appliedOperationIds: workingOperations,
+			});
+			if (plan.status !== RECONCILE_STATUS.APPLIED && plan.status !== RECONCILE_STATUS.SUPPRESSED) {
+				return {status: plan.status, error: plan.error};
+			}
+			const operationId = plan.operation?.operationId || null;
+			if (plan.status === RECONCILE_STATUS.APPLIED) {
+				for (const [name, next] of Object.entries(plan.staged)) {
+					working[name].data = next;
+					const coverage = working[name].coverage;
+					coverage.revision = Math.max(Number.isInteger(coverage.revision) ? coverage.revision : 0, plan.revisionNext);
+					coverage.appliedOperationIds.add(operationId);
+				}
+				for (const [name, decision] of Object.entries(plan.decisions)) {
+					if (decision === TRACK_DECISION.COVERED) working[name].coverage.appliedOperationIds.add(operationId);
+				}
+				applied.push(entry);
+			}
+			if (entry.eventId) workingEvents.add(entry.eventId);
+			if (operationId) workingOperations.add(operationId);
+		}
+		return {status: "planned", working, workingEvents, workingOperations, applied};
+	}
+
+	/** Publish a fully planned and already-adopted batch. */
+	_commitResyncBatch ({canonicalId, canonical, plan}) {
+		const book = this._getCoverageBook(canonicalId);
+		const working = plan.working;
+
+		this._accepted.set(canonicalId, {...canonical, data: working.accepted.data, revision: canonical.revision});
+		book.acceptedOperationIds = working.accepted.coverage.appliedOperationIds;
+		if (working.live) book.live = working.live.coverage;
+		for (const [name, map, coverageKey] of [
+			["latestSubmitted", this._latestSubmitted, "latestSubmitted"],
+			["recoveredBase", this._recoveredBases, "recoveredBase"],
+		]) {
+			if (!working[name]) continue;
+			map.set(canonicalId, working[name].data);
+			book[coverageKey] = working[name].coverage;
+		}
+		if (working.failedWrite) {
+			this._failedWrites.set(canonicalId, {...working.failedWrite.data, id: canonicalId});
+			book.failedWrite = working.failedWrite.coverage;
+		}
+		this._commitResyncConflict({store: this._conflicts, prefix: "conflict", canonicalId, working, isClearOnResolve: true});
+		this._commitResyncConflict({store: this._liveConflicts, prefix: "liveConflict", canonicalId, working, isClearOnResolve: false});
+
+		this._appliedEventIds.set(canonicalId, plan.workingEvents);
+		this._appliedOperationIds.set(canonicalId, plan.workingOperations);
+
+		const sequences = plan.applied.map(entry => entry.sequence).filter(Number.isInteger);
+		if (sequences.length) {
+			const cursor = this._realtimeCursors.get(canonicalId) || {};
+			this._realtimeCursors.set(canonicalId, {...cursor, operationWatermark: Math.max(cursor.operationWatermark || 0, ...sequences)});
+		}
+		this._writeRecoveryCoverage(canonicalId);
+	}
+
+	_commitResyncConflict ({store, prefix, canonicalId, working, isClearOnResolve}) {
+		const conflict = store.get(canonicalId);
+		if (!conflict) return;
+		const next = {...conflict, coverage: {...(conflict.coverage || {})}};
+		for (const key of ["base", "local", "server"]) {
+			const track = working[`${prefix}${key[0].toUpperCase()}${key.slice(1)}`];
+			if (!track) continue;
+			next[key] = track.data;
+			next.coverage[key] = serializeCoverage(track.coverage);
+		}
+		const serverTrack = working[`${prefix}Server`];
+		if (serverTrack && next.serverDocument) next.serverDocument = {...next.serverDocument, data: serverTrack.data};
+		const rebased = rebaseJsonChanges({base: next.base, local: next.local, remote: next.server});
+		if (!rebased.isConflict && isClearOnResolve) {
+			store.delete(canonicalId);
+			return;
+		}
+		next.conflicts = rebased.conflicts;
+		next.isResolved = !rebased.isConflict;
+		store.set(canonicalId, next);
 	}
 
 	_getResyncFloorSequence (canonicalId) {
