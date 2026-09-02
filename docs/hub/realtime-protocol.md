@@ -105,8 +105,8 @@ markers remain ordinary `resync` messages subject to the 20-message-per-second b
 new connection but resumes from the client's last server-issued scanned sequence. The client treats all
 continuation pages as one replay chain: it buffers live events until the final page, emits recovered and live
 events once in campaign-sequence order, and does not start a periodic resync while that chain is active. If a
-valid replay request fails, the client closes that socket and resumes the preserved chain through reconnect
-backoff rather than leaving live delivery buffered indefinitely.
+server `error` frame arrives while a replay chain is active, the client closes that socket and resumes the
+preserved chain through reconnect backoff rather than leaving live delivery buffered indefinitely.
 
 `operationWatermark` is optional owner/DM truth metadata. When present, it is `0` or the campaign sequence of
 the latest applied semantic operation already reflected in that canonical character truth. It is never added
@@ -294,7 +294,7 @@ semantic lifecycle events behind repository saves, and emits ephemeral callbacks
 those callbacks never fetch/replace the owner document, call `loadFromJson`, render, save, apply an operation,
 or open a generic conflict modal. A missing canonical ref or matching remote archive/move event queues teardown
 behind already-accepted delivery. Persisted `pagehide` suspends the socket and persisted `pageshow` resumes the
-same client, sequence cursor, and in-memory dedupe state.
+same client, sequence cursor, partial replay chain, buffered live events, and in-memory dedupe state.
 
 Snapshot-covered event types are suppressed only when at/before the snapshot sequence. Semantic lifecycle
 events are not discarded solely because they are at/below `operationWatermark`; durable roll/operation history

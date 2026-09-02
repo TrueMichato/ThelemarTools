@@ -8,6 +8,7 @@ class FakeRealtimeClient {
 	constructor () {
 		this.listeners = new Map();
 		this.pConnect = jest.fn(async () => {});
+		this.suspend = jest.fn();
 		this.close = jest.fn();
 	}
 
@@ -248,7 +249,8 @@ describe("Character Sheet realtime coordinator", () => {
 		coordinator.attach({characterId: "character-1"});
 
 		expect(coordinator.suspend()).toBe(true);
-		expect(clients[0].close).toHaveBeenCalledTimes(1);
+		expect(clients[0].suspend).toHaveBeenCalledTimes(1);
+		expect(clients[0].close).not.toHaveBeenCalled();
 		expect(coordinator.resume()).toBe(true);
 		expect(clients[0].pConnect).toHaveBeenCalledTimes(2);
 		clients[0].emit("event", makeAppliedEvent());

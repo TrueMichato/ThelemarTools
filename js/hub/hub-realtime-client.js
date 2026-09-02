@@ -94,7 +94,7 @@ export class HubRealtimeClient {
 		this._pConnecting = new Promise((resolve, reject) => {
 			this._pendingConnectionReject = {generation, reject};
 			this._hasBaseline = false;
-			this._bufferedEvents = [];
+			if (this._resyncStartSequence == null) this._bufferedEvents = [];
 			const protocol = this._location.protocol === "https:" ? "wss:" : "ws:";
 			const url = `${protocol}//${this._location.host}/ws/campaign/${encodeURIComponent(this._campaignId)}?v=3`;
 			const socket = this._fnCreateSocket(url);
@@ -295,22 +295,34 @@ export class HubRealtimeClient {
 		this._resyncTimer = null;
 	}
 
-	close () {
+	_disconnect ({isResetReplay}) {
 		this._shouldReconnect = false;
 		this._socketGeneration++;
 		this._pendingConnectionReject?.reject(new Error(`Realtime client closed.`));
 		this._pendingConnectionReject = null;
+		this._pConnecting = null;
 		if (this._reconnectTimer) this._fnClearTimeout(this._reconnectTimer.id);
 		this._reconnectTimer = null;
+		this._reconnectAttempt = 0;
 		this._clearResyncTimer();
 		const socket = this._socket;
 		this._socket = null;
 		this._hasBaseline = false;
-		this._bufferedEvents = [];
-		this._resyncAccumulatedEvents = [];
-		this._resyncScannedThroughSequence = null;
-		this._resyncStartSequence = null;
+		if (isResetReplay) {
+			this._bufferedEvents = [];
+			this._resyncAccumulatedEvents = [];
+			this._resyncScannedThroughSequence = null;
+			this._resyncStartSequence = null;
+		}
 		socket?.close();
 		this._setConnectionState("closed");
+	}
+
+	suspend () {
+		this._disconnect({isResetReplay: false});
+	}
+
+	close () {
+		this._disconnect({isResetReplay: true});
 	}
 }

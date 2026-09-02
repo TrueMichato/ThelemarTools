@@ -117,7 +117,7 @@ export class CharacterSheetRealtimeCoordinator {
 		const active = this._active;
 		if (!active || active.isSuspended) return false;
 		active.isSuspended = true;
-		active.client.close();
+		active.client.suspend();
 		return true;
 	}
 
