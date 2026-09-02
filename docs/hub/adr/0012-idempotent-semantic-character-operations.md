@@ -5,8 +5,9 @@ Status: Accepted architecture contract; source-cost reservation superseded by AD
 Implementation: The protocol-v3 server/store/API/event substrate is implemented. DM/co-DM operations apply
 immediately; the source-derived peer proposal state machine exists but has no successful production `cost=none`
 template. Character Sheet operation-aware reconciliation (`B/L -> R/F`) is implemented and live: an applied
-operation is now applied to an already-open canonical campaign sheet without a reload. Approval UI, effect
-banners, target discovery, and the ADR 0016 peer source-cost implementation remain separate follow-up work.
+operation is applied to an already-open canonical campaign sheet without a reload. The open sheet also shows
+post-adoption effect notices and owner-only inline peer approval controls. Target discovery and the ADR 0016 peer
+source-cost implementation remain separate follow-up work.
 
 ## Context
 
@@ -420,8 +421,20 @@ The second slice implements the client half and freezes these choices:
   a serialized recovery that fetches canonical truth plus ordered visible history and replays only the missing
   operations in revision order. Expired or insufficient history preserves `B`, `L`, `R`, the envelopes and the
   error, and offers authoritative reload plus export rather than a blind write.
+- pending approvals on the open sheet are bootstrapped and reconciled through an owner-only,
+  character-scoped read. Its projection contains only the opaque action id, expiry, resolve capabilities and
+  immutable presentation labels; it does not return character/account ids, source entities, choices, target
+  refs or hidden character state. Proposal events carry the same presentation-only contract.
+- approval resolution is single-flight and idempotent, but never applies browser state from the HTTP response.
+  The card remains in a waiting state until the authoritative `character.operation.applied` event passes the
+  same prepare/adopt/commit reconciliation. Rejection may remove the card from its authoritative resolve
+  response or terminal event. Open, reconnect, window focus and visible-tab restoration all refresh the
+  owner-scoped collection under a character-generation fence.
+- successful notices are emitted only after repository adoption returns `applied`, or after a serialized resync
+  returns its actually applied operation list. Duplicate/replayed operations therefore do not announce twice,
+  while blocked/rejected adoption shows a persistent recovery error and never a success notice.
 
-Approval UI, effect banners, target discovery, successful production peer templates, source costs, and
+Target discovery, successful production peer templates, the ADR 0016 peer source-cost implementation, and
 multi-target/monster operations remain deliberately deferred. Therefore ADR 0012 is not yet marked fully
 implemented.
 

@@ -603,7 +603,12 @@ export class HubHttpCharacterRepository {
 				this._commitResyncBatch({canonicalId, canonical, plan});
 				this._pendingResync.delete(canonicalId);
 				this._clearSaveBlock(canonicalId);
-				return {status: "recovered", appliedCount: plan.applied.length, liveNext: isLiveChanged ? structuredClone(liveNext) : undefined};
+				return {
+					status: "recovered",
+					appliedCount: plan.applied.length,
+					appliedOperations: plan.applied.map(entry => structuredClone(entry.operation)),
+					liveNext: isLiveChanged ? structuredClone(liveNext) : undefined,
+				};
 			});
 		} finally {
 			this._resyncInFlight.delete(canonicalId);

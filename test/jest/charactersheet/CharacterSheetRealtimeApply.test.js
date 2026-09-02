@@ -116,6 +116,12 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 	});
 
 	const toasts = [];
+	const hubEffects = {
+		onConnectionState: jest.fn(),
+		onRealtimeOperation: jest.fn(),
+		onApplied: jest.fn(),
+		onApplicationError: jest.fn(),
+	};
 	// The sheet modules destructure `JqueryUtil` at load time, so mutate the shared object rather than
 	// replacing it (see test/jest/charactersheet/setup.js).
 	globalThis.JqueryUtil.doToast = message => toasts.push(message);
@@ -124,6 +130,7 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 		_state: state,
 		_characterRepository: repository,
 		_hubRealtime: coordinator,
+		_hubEffects: hubEffects,
 		_currentCharacterId: "character-1",
 		_characterLoadGeneration: 0,
 		_isHubRealtimeListenersBound: false,
@@ -149,7 +156,7 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 	await repository.pGet({characterId: "character-1"});
 	coordinator.attach({characterId: "character-1"});
 
-	return {api, clients, coordinator, host, repository, state, toasts};
+	return {api, clients, coordinator, host, hubEffects, repository, state, toasts};
 };
 
 const pFlush = () => new Promise(resolve => setImmediate(resolve));
@@ -162,12 +169,17 @@ beforeAll(async () => {
 
 describe("Live campaign effects on an open Character Sheet", () => {
 	it("applies DM damage to the open sheet without a reload", async () => {
-		const {clients, host, state} = await pMakeHarness();
+		const {clients, host, hubEffects, state} = await pMakeHarness();
 		clients[0].emit("event", makeAppliedEvent());
 		await pFlush();
 
 		expect(state.getCurrentHp()).toBe(26);
 		expect(host._renderCount).toBeGreaterThan(0);
+		expect(hubEffects.onApplied).toHaveBeenCalledWith(expect.objectContaining({
+			operation: expect.objectContaining({operationId: "operation-1", kind: "hp.damage"}),
+			beforeData: expect.objectContaining({hp: expect.objectContaining({current: 30})}),
+			afterData: expect.objectContaining({hp: expect.objectContaining({current: 26})}),
+		}));
 	});
 
 	it("consumes temporary hit points before current hit points", async () => {
@@ -245,12 +257,13 @@ describe("Live campaign effects on an open Character Sheet", () => {
 	});
 
 	it("applies a duplicated delivery exactly once", async () => {
-		const {clients, state} = await pMakeHarness();
+		const {clients, hubEffects, state} = await pMakeHarness();
 		clients[0].emit("event", makeAppliedEvent());
 		clients[0].emit("event", makeAppliedEvent());
 		await pFlush();
 
 		expect(state.getCurrentHp()).toBe(26);
+		expect(hubEffects.onApplied).toHaveBeenCalledTimes(1);
 	});
 
 	it("applies an operation replayed after a reconnect exactly once", async () => {
@@ -268,21 +281,24 @@ describe("Live campaign effects on an open Character Sheet", () => {
 	});
 
 	it("ignores an operation aimed at a different character", async () => {
-		const {clients, state} = await pMakeHarness();
+		const {clients, hubEffects, state} = await pMakeHarness();
 		clients[0].emit("event", makeAppliedEvent({targetCharacterId: "character-2"}));
 		await pFlush();
 
 		expect(state.getCurrentHp()).toBe(30);
+		expect(hubEffects.onApplied).not.toHaveBeenCalled();
 	});
 
 	it("rejects an operation kind outside the closed catalog and pauses saving", async () => {
-		const {clients, repository, state, toasts} = await pMakeHarness();
+		const {clients, hubEffects, repository, state, toasts} = await pMakeHarness();
 		clients[0].emit("event", makeAppliedEvent({kind: "hp.adjust", args: {amount: 4}}));
 		await pFlush();
 
 		expect(state.getCurrentHp()).toBe(30);
 		expect(repository.isSaveBlocked("character-1")).toBe(true);
 		expect(toasts.some(toast => toast.type === "danger")).toBe(true);
+		expect(hubEffects.onApplied).not.toHaveBeenCalled();
+		expect(hubEffects.onApplicationError).toHaveBeenCalledWith({operationId: "operation-1"});
 	});
 
 	it("stops applying effects once the campaign subscription is torn down", async () => {

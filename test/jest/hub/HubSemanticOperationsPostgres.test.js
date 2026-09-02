@@ -272,6 +272,51 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 		});
 	});
 
+	test("lists a privacy-safe pending projection only for the target owner", async () => {
+		const commandId = crypto.randomUUID();
+		const request = {
+			commandId,
+			sourceCharacterId: sourceCharacter.id,
+			sourceEntity: {type: "ability", uid: "steadying word|tst", version: "tst-v1"},
+			effectTemplateId: "ability.steadying-word.heal",
+			choice: {amount: 2},
+			targetRef: targetCharacter.targetRef,
+		};
+		const proposed = await store.pCreateStructuredAction({
+			accountId: sourceOwner.id,
+			sessionId: sourceSession.id,
+			campaignId: campaign.id,
+			...request,
+			idempotencyKey: getIdempotency(commandId, request),
+		});
+
+		await expect(store.pListCharacterPendingActions({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			characterId: targetCharacter.id,
+		})).resolves.toEqual([{
+			actionId: proposed.operation.operationId,
+			status: "proposed",
+			expiresAt: expect.any(String),
+			presentation: {sourceName: "Source", effectLabel: "Steadying Word"},
+			capabilities: {canApprove: true, canReject: true},
+		}]);
+		await expect(store.pListCharacterPendingActions({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			characterId: targetCharacter.id,
+		})).rejects.toMatchObject({code: "CHARACTER_NOT_FOUND", status: 404});
+
+		const event = await pool.query(`
+			SELECT payload
+			FROM hub.domain_events
+			WHERE id = $1
+		`, [proposed.eventIds[0]]);
+		expect(event.rows[0].payload).not.toHaveProperty("sourceEntity");
+		expect(event.rows[0].payload).not.toHaveProperty("effectTemplateId");
+		expect(event.rows[0].payload).not.toHaveProperty("choice");
+	});
+
 	test("rejects approval after the original actor loses current target visibility", async () => {
 		const privateTarget = (await store.pCreateCharacter({
 			accountId: targetOwner.id,

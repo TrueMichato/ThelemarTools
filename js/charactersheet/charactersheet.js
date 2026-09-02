@@ -44,6 +44,7 @@ import {HubHttpCharacterRepository} from "../hub/hub-http-character-repository.j
 import {HubCampaignContext} from "../hub/hub-campaign-context.js";
 import {HubRollLogAdapter} from "../hub/hub-roll-log-adapter.js";
 import {CharacterSheetRealtimeCoordinator} from "./charactersheet-realtime.js";
+import {CharacterSheetHubEffects} from "./charactersheet-hub-effects.js";
 import {diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
 
 const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, StorageUtil, DataUtil, BrewUtil2, PrereleaseUtil} = /** @type {*} */ (globalThis);
@@ -83,6 +84,7 @@ class CharacterSheetPage {
 		this._hubCampaignContext = null;
 		this._hubContext = null;
 		this._hubRollLogAdapter = null;
+		this._hubEffects = null;
 		this._hubRealtime = realtimeCoordinator;
 		this._fnCreateRealtimeCoordinator = fnCreateRealtimeCoordinator;
 		this._characterLoadGeneration = 0;
@@ -179,11 +181,13 @@ class CharacterSheetPage {
 	}
 
 	_attachHubRealtime ({characterId = this._currentCharacterId} = {}) {
+		this._hubEffects?.activate({characterId});
 		return this._hubRealtime?.attach({characterId}) || false;
 	}
 
 	_detachHubRealtime () {
 		this._hubRealtime?.detach();
+		this._hubEffects?.deactivate();
 		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
 	}
 
@@ -216,6 +220,7 @@ class CharacterSheetPage {
 	}
 
 	_onHubRealtimeConnectionState (state) {
+		this._hubEffects?.onConnectionState(state);
 		if (!["closed", "access_lost"].includes(state?.state)) return;
 		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
 	}
@@ -260,10 +265,11 @@ class CharacterSheetPage {
 	}
 
 	_onHubSemanticOperation (event) {
-		if (event?.status !== "applied") return false;
 		if (!this._currentCharacterId || event.targetCharacterId !== this._currentCharacterId) return false;
+		if (event?.status !== "applied") return this._hubEffects?.onRealtimeOperation(event) || false;
 		const repository = this._characterRepository;
 		if (typeof repository?.applyRealtimeOperation !== "function") return false;
+		const beforeData = this._getHubLiveCharacterData();
 
 		const result = repository.applyRealtimeOperation({
 			characterId: this._currentCharacterId,
@@ -286,6 +292,11 @@ class CharacterSheetPage {
 					// eslint-disable-next-line no-console
 					console.error("Render after campaign effect failed:", error);
 				}
+				this._hubEffects?.onApplied({
+					operation: event.payload?.operation,
+					beforeData,
+					afterData: this._getHubLiveCharacterData(),
+				});
 				return true;
 			case "resync_required":
 				this._scheduleHubRealtimeResync({characterId: this._currentCharacterId});
@@ -293,6 +304,7 @@ class CharacterSheetPage {
 			case "blocked":
 			case "rejected":
 				this._updateSaveIndicator("error");
+				this._hubEffects?.onApplicationError({operationId: event.operationId});
 				JqueryUtil.doToast({
 					type: "danger",
 					content: `A campaign effect could not be applied (${result.error?.message || "unknown error"}). Saving is paused until it is resolved.`,
@@ -332,6 +344,9 @@ class CharacterSheetPage {
 			case "recovered":
 				this._renderCharacter();
 				this._updateSaveIndicator("saved");
+				for (const operation of result.appliedOperations || []) {
+					this._hubEffects?.onApplied({operation});
+				}
 				return true;
 			case "history_unavailable":
 				this._updateSaveIndicator("error");
@@ -477,6 +492,17 @@ class CharacterSheetPage {
 		try {
 			this._campaign = new CharacterSheetCampaign({page: this});
 		} catch (e) { console.error("Failed to init campaign control:", e); }
+
+		if (this._hubCampaignContext) {
+			try {
+				this._hubEffects = new CharacterSheetHubEffects({
+					campaignId: this._hubCampaignId,
+					api: this._hubCampaignContext.api,
+					root: document.getElementById("charsheet-hub-effects"),
+				});
+				this._hubEffects.init();
+			} catch (e) { console.error("Failed to init campaign effect controls:", e); }
+		}
 
 		try {
 			this._respec = new CharacterSheetRespec({page: this, state: this._state});

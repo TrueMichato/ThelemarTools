@@ -369,6 +369,12 @@ export class HubApiClient {
 		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/actions`)).actions;
 	}
 
+	async pListCharacterPendingActions ({campaignId, characterId}) {
+		return (await this._pRequest(
+			`/api/campaigns/${encodeURIComponent(campaignId)}/characters/${encodeURIComponent(characterId)}/pending-actions`,
+		)).actions;
+	}
+
 	async pCreateStructuredAction ({campaignId, targetCharacterId, operation, idempotencyKey}) {
 		const commandId = idempotencyKey || crypto.randomUUID();
 		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/actions`, {

@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import {applyJsonPatch} from "../../js/hub/hub-json-patch.js";
+import {getPendingEffectPresentation} from "../../js/hub/hub-effect-presentation.js";
 import {HubStoreError} from "./hub-store-error.js";
 import {canViewEvent} from "./projections.js";
 import {
@@ -1717,9 +1718,6 @@ export class MemoryHubStore {
 				operationId,
 				targetCharacterId: target.id,
 				status: "proposed",
-				sourceEntity: copy(derived.sourceEntity),
-				effectTemplateId: derived.effectTemplateId,
-				choice: copy(derived.choice),
 				sourceDisplaySnapshot: copy(derived.sourceDisplaySnapshot),
 				targetDisplaySnapshot: copy(derived.targetDisplaySnapshot),
 				effectDisplaySnapshot: copy(derived.effectDisplaySnapshot),
@@ -1891,6 +1889,35 @@ export class MemoryHubStore {
 				return this._characters.get(operation.targetCharacterId)?.ownerAccountId === accountId;
 			})
 			.map(operation => this._getSemanticOperationView(operation));
+	}
+
+	async pListCharacterPendingActions ({accountId, campaignId, characterId}) {
+		this._getMembership({
+			accountId,
+			campaignId,
+			roles: ["dm", "co_dm", "player"],
+			isRequireActiveCampaign: false,
+		});
+		const character = this._getCharacterOrThrow(characterId);
+		if (character.campaignId !== campaignId || character.ownerAccountId !== accountId) {
+			throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
+		}
+		this._expireSemanticOperations({campaignId});
+		return [...this._semanticOperations.values()]
+			.filter(operation =>
+				operation.campaignId === campaignId
+				&& operation.targetCharacterId === characterId
+				&& operation.status === "proposed",
+			)
+			.map(operation => getPendingEffectPresentation({
+				operationId: operation.id,
+				status: operation.status,
+				sourceDisplaySnapshot: operation.sourceDisplaySnapshot,
+				effectDisplaySnapshot: operation.effectDisplaySnapshot,
+				expiresAt: operation.expiresAt,
+			}))
+			.filter(Boolean)
+			.map(action => ({...action, capabilities: {canApprove: true, canReject: true}}));
 	}
 
 	async pGrantXp ({accountId, campaignId, characterId, amount, reason = null, idempotencyKey}) {

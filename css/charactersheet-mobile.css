@@ -74,6 +74,33 @@
 		white-space: normal;
 	}
 
+	body.is-charsheet-mobile .charsheet__hub-effects {
+		padding: 0.5rem;
+	}
+
+	body.is-charsheet-mobile .charsheet__hub-approval,
+	body.is-charsheet-mobile .charsheet__hub-approval-error {
+		align-items: stretch;
+	}
+
+	body.is-charsheet-mobile .charsheet__hub-approval-controls {
+		flex-basis: 100%;
+	}
+
+	body.is-charsheet-mobile .charsheet__hub-approval-controls .ve-btn {
+		flex: 1 1 50%;
+		min-height: 44px;
+	}
+
+	body.is-charsheet-mobile .charsheet__hub-effect-dismiss {
+		width: 44px;
+		height: 44px;
+	}
+
+	body.is-charsheet-mobile .charsheet__hub-approval-error .ve-btn {
+		min-height: 44px;
+	}
+
 	body.is-charsheet-mobile .charsheet__campaign-button,
 	body.is-charsheet-mobile .charsheet__campaign-submit {
 		min-height: 44px;

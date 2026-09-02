@@ -835,6 +835,27 @@ export async function createHubApp ({
 		}),
 	}));
 
+	app.get("/api/campaigns/:campaignId/characters/:characterId/pending-actions", {
+		preHandler: requireProtocolVersion,
+		schema: {
+			params: {
+				type: "object",
+				required: ["campaignId", "characterId"],
+				additionalProperties: false,
+				properties: {
+					campaignId: {type: "string", format: "uuid"},
+					characterId: {type: "string", format: "uuid"},
+				},
+			},
+		},
+	}, async request => ({
+		actions: await store.pListCharacterPendingActions({
+			accountId: request.hubAuth.account.id,
+			campaignId: request.params.campaignId,
+			characterId: request.params.characterId,
+		}),
+	}));
+
 	app.post("/api/campaigns/:campaignId/actions", {
 		preHandler: requireMutationSecurity,
 		schema: {

@@ -113,6 +113,11 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   character, then serializes ephemeral callbacks behind repository saves.
 │   It never mutates CharacterSheetState or fetches/replaces the owner document.
 │
+├── CharacterSheetHubEffects (charactersheet-hub-effects.js)
+│   Lifecycle-scoped, owner-only pending-effect approvals and post-adoption notices.
+│   Reconciles a privacy-safe server projection on open/reconnect/focus, fences async
+│   work by character generation, and never applies an effect from an HTTP response.
+│
 ├── CharacterSheetSpellPicker (charactersheet-spell-picker.js, ~1,200 lines, all static)
 │   Reusable spell selection UI for Builder, LevelUp, QuickBuild.
 │
@@ -165,6 +170,10 @@ No reactive system — renders are explicit. Related modules re-render together 
   serializes teardown behind already-queued delivery. Persisted `pagehide` suspends the socket and `pageshow`
   resumes the same client/cursor rather than replaying through a fresh generation. This substrate must not call
   state load/render/save or a generic conflict modal.
+- **Hub effect UI**: `CharacterSheetHubEffects` is activated and deactivated with the coordinator's current
+  canonical character. Its pending read is owner-only and presentation-only. Approval remains visibly pending
+  until the authoritative applied event completes repository adoption; only that success (or a successful
+  ordered resync) may create an accessible effect notice.
 
 ### Module Init Order
 

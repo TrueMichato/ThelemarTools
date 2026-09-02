@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import pg from "pg";
 import {applyJsonPatch} from "../../js/hub/hub-json-patch.js";
+import {getPendingEffectPresentation} from "../../js/hub/hub-effect-presentation.js";
 import {HubStoreError} from "./hub-store-error.js";
 import {
 	computePeerProfile,
@@ -123,6 +124,7 @@ export class PostgresHubStore {
 		queryTimeoutMillis = 10_000,
 		maxConnections = 10,
 		fnOnPoolError = null,
+		semanticOperationRegistry,
 	}) {
 		if (!connectionString) throw new TypeError(`connectionString is required.`);
 		return new this({
@@ -136,6 +138,7 @@ export class PostgresHubStore {
 				max: maxConnections,
 			}),
 			fnOnPoolError,
+			semanticOperationRegistry,
 		});
 	}
 
@@ -2652,9 +2655,6 @@ export class PostgresHubStore {
 					operationId,
 					targetCharacterId: target.id,
 					status: "proposed",
-					sourceEntity: derived.sourceEntity,
-					effectTemplateId: derived.effectTemplateId,
-					choice: derived.choice,
 					sourceDisplaySnapshot: derived.sourceDisplaySnapshot,
 					targetDisplaySnapshot: derived.targetDisplaySnapshot,
 					effectDisplaySnapshot: derived.effectDisplaySnapshot,
@@ -2763,6 +2763,54 @@ export class PostgresHubStore {
 			`, [campaignId, ["dm", "co_dm"].includes(membership.role), accountId]);
 			await client.query("COMMIT");
 			return result.rows.map(row => this._getSemanticOperationView(this._getSemanticOperation(row)));
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pListCharacterPendingActions ({accountId, campaignId, characterId}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [campaignId]);
+			await this._pGetMembershipForUpdate({
+				client,
+				accountId,
+				campaignId,
+				roles: ["dm", "co_dm", "player"],
+			});
+			const characterResult = await client.query(`
+				SELECT owner_account_id
+				FROM hub.characters
+				WHERE campaign_id = $1 AND id = $2 AND status = 'active'
+			`, [campaignId, characterId]);
+			if (!characterResult.rowCount || characterResult.rows[0].owner_account_id !== accountId) {
+				throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
+			}
+			await this._pExpireSemanticOperations({client, campaignId});
+			const result = await client.query(`
+				SELECT so.*
+				FROM hub.semantic_operations so
+				WHERE so.campaign_id = $1
+					AND so.target_character_id = $2
+					AND so.status = 'proposed'
+				ORDER BY so.created_at DESC
+			`, [campaignId, characterId]);
+			await client.query("COMMIT");
+			return result.rows
+				.map(row => this._getSemanticOperation(row))
+				.map(operation => getPendingEffectPresentation({
+					operationId: operation.id,
+					status: operation.status,
+					sourceDisplaySnapshot: operation.sourceDisplaySnapshot,
+					effectDisplaySnapshot: operation.effectDisplaySnapshot,
+					expiresAt: operation.expiresAt,
+				}))
+				.filter(Boolean)
+				.map(action => ({...action, capabilities: {canApprove: true, canReject: true}}));
 		} catch (error) {
 			await client.query("ROLLBACK");
 			throw error;

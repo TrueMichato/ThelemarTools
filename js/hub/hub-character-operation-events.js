@@ -1,3 +1,5 @@
+import {getPendingEffectPresentation} from "./hub-effect-presentation.js";
+
 export const CHARACTER_OPERATION_EVENT_TYPES = Object.freeze([
 	"character.operation.proposed",
 	"character.operation.applied",
@@ -68,40 +70,31 @@ export function getCharacterOperationRouting (event) {
 		|| !_isRecord(payload.effectDisplaySnapshot)
 		|| (
 			expectedStatus === "proposed"
-				? (
-					!_isRecord(payload.sourceEntity)
-					|| typeof payload.effectTemplateId !== "string"
-					|| !payload.effectTemplateId
-					|| !Object.hasOwn(payload, "choice")
-					|| typeof payload.expiresAt !== "string"
-					|| !payload.expiresAt
-				)
+				? typeof payload.expiresAt !== "string" || !payload.expiresAt
 				: typeof payload.reason !== "string" || !payload.reason
 		)
 	) return null;
+	const pendingAction = expectedStatus === "proposed"
+		? getPendingEffectPresentation({
+			operationId: payload.operationId,
+			status: payload.status,
+			sourceDisplaySnapshot: payload.sourceDisplaySnapshot,
+			effectDisplaySnapshot: payload.effectDisplaySnapshot,
+			expiresAt: payload.expiresAt,
+		})
+		: null;
+	if (expectedStatus === "proposed" && !pendingAction) return null;
 	return {
 		operationId: payload.operationId,
 		payload: expectedStatus === "proposed"
 			? {
-				operationId: payload.operationId,
-				targetCharacterId: payload.targetCharacterId,
-				status: payload.status,
-				sourceEntity: structuredClone(payload.sourceEntity),
-				effectTemplateId: payload.effectTemplateId,
-				choice: structuredClone(payload.choice),
-				sourceDisplaySnapshot: structuredClone(payload.sourceDisplaySnapshot),
-				targetDisplaySnapshot: structuredClone(payload.targetDisplaySnapshot),
-				effectDisplaySnapshot: structuredClone(payload.effectDisplaySnapshot),
-				expiresAt: payload.expiresAt,
+				...pendingAction,
+				capabilities: {canApprove: true, canReject: true},
 			}
 			: {
-				operationId: payload.operationId,
-				targetCharacterId: payload.targetCharacterId,
+				actionId: payload.operationId,
 				status: payload.status,
 				reason: payload.reason,
-				sourceDisplaySnapshot: structuredClone(payload.sourceDisplaySnapshot),
-				targetDisplaySnapshot: structuredClone(payload.targetDisplaySnapshot),
-				effectDisplaySnapshot: structuredClone(payload.effectDisplaySnapshot),
 			},
 		targetCharacterId: payload.targetCharacterId,
 		status: expectedStatus,

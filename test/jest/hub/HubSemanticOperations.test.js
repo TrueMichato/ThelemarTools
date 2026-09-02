@@ -398,6 +398,63 @@ describe("semantic character operations", () => {
 		expect(store._characters.get(characters.source.id).data.hp.current).toBe(16);
 	});
 
+	it("projects only owner-resolvable, privacy-safe pending actions for an open character", async () => {
+		const {campaign, dm, source, target, characters} = await setup();
+		const commandId = crypto.randomUUID();
+		const proposed = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/actions`,
+			headers: semanticHeaders(source.session, commandId),
+			payload: getProposalBody({
+				commandId,
+				sourceCharacterId: characters.source.id,
+				targetRef: characters.target.targetRef,
+			}),
+		});
+		const actionId = proposed.json().operation.operationId;
+
+		const response = await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/characters/${characters.target.id}/pending-actions`,
+			headers: readHeaders(target.session),
+		});
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toEqual({
+			actions: [{
+				actionId,
+				status: "proposed",
+				expiresAt: "2026-01-02T00:00:00.000Z",
+				presentation: {sourceName: "Aster", effectLabel: "Test Blessing"},
+				capabilities: {canApprove: true, canReject: true},
+			}],
+		});
+		const serialized = JSON.stringify(response.json());
+		for (const privateValue of [
+			characters.target.id,
+			characters.source.id,
+			target.session.account.id,
+			source.session.account.id,
+			"sourceEntity",
+			"effectTemplateId",
+			"choice",
+			"targetRef",
+		]) expect(serialized).not.toContain(privateValue);
+
+		for (const session of [dm, source.session]) {
+			const forbidden = await app.inject({
+				method: "GET",
+				url: `/api/campaigns/${campaign.id}/characters/${characters.target.id}/pending-actions`,
+				headers: readHeaders(session),
+			});
+			expect(forbidden.statusCode).toBe(404);
+		}
+
+		const proposedEvent = store._events.find(event => event.type === "character.operation.proposed" && event.aggregateId === actionId);
+		expect(proposedEvent.payload).not.toHaveProperty("sourceEntity");
+		expect(proposedEvent.payload).not.toHaveProperty("effectTemplateId");
+		expect(proposedEvent.payload).not.toHaveProperty("choice");
+	});
+
 	it("fails stale or cost-bearing proposals without partial mutation", async () => {
 		const {campaign, source, target, characters} = await setup();
 		const commandId = crypto.randomUUID();
