@@ -730,7 +730,17 @@ export class HubHttpCharacterRepository {
 			next.coverage[key] = serializeCoverage(track.coverage);
 		}
 		const serverTrack = working[`${prefix}Server`];
-		if (serverTrack && next.serverDocument) next.serverDocument = {...next.serverDocument, data: serverTrack.data};
+		if (serverTrack && next.serverDocument) {
+			// The resolvable document seeds accepted truth directly, so its revision must describe the data it
+			// now holds. The server track's own coverage is that invariant: it records exactly which operations
+			// were folded in, which is not necessarily the fetched canonical revision.
+			const revision = serverTrack.coverage?.revision;
+			next.serverDocument = {
+				...next.serverDocument,
+				data: serverTrack.data,
+				...(Number.isInteger(revision) ? {revision} : {}),
+			};
+		}
 		const rebased = rebaseJsonChanges({base: next.base, local: next.local, remote: next.server});
 		if (!rebased.isConflict && isClearOnResolve) {
 			store.delete(canonicalId);

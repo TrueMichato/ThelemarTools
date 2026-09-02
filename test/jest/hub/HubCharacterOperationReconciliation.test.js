@@ -574,3 +574,72 @@ describe("Resync batch atomicity", () => {
 		expect(repository.hasPendingResync("character-1")).toBe(true);
 	});
 });
+
+describe("Conflict candidates after a resync", () => {
+	// A persistent `/name` overlap keeps the conflict open while the batch advances the server candidate's
+	// hit points, so the resolved document must carry a revision that matches the data it now holds.
+	const pSetUpConflictAcrossResync = async () => {
+		const api = makeApi({
+			character: {id: "character-1", campaignId: "campaign-1", revision: 3, data: makeCharacterData({current: 3, name: "Server"})},
+			events: [
+				makeAppliedEvent({operationId: "operation-1", sequence: 20, revision: 2, args: {amount: 4}, id: "event-1"}),
+				makeAppliedEvent({operationId: "operation-2", sequence: 21, revision: 3, args: {amount: 3}, id: "event-2"}),
+			],
+		});
+		const repository = makeRepository({api});
+		await repository.pGet({characterId: "character-1"});
+		repository._getCoverageBook("character-1").live.revision = 1;
+
+		const coverageAtRevisionOne = {revision: 1, acceptedSequence: null, appliedOperationIds: []};
+		repository._conflicts.set("character-1", {
+			base: makeCharacterData({name: "Base"}),
+			local: makeCharacterData({name: "Local"}),
+			server: makeCharacterData({name: "Server"}),
+			serverDocument: {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData({name: "Server"})},
+			conflicts: [{localPath: "/name", remotePath: "/name"}],
+			coverage: {base: coverageAtRevisionOne, local: coverageAtRevisionOne, server: coverageAtRevisionOne},
+		});
+
+		repository.applyRealtimeOperation({
+			characterId: "character-1",
+			operation: makeOperation({operationId: "operation-2", args: {amount: 3}}),
+			resultingCharacterRevision: 3,
+			eventId: "event-2",
+			sequence: 21,
+			liveData: makeCharacterData(),
+			fnAdoptLive: () => {},
+		});
+
+		const recovered = await repository.pRunPendingResync({
+			characterId: "character-1",
+			fnGetLiveData: () => makeCharacterData(),
+			fnAdoptLive: () => {},
+		});
+		expect(recovered.status).toBe("recovered");
+		return {api, repository};
+	};
+
+	it("keeps the resolvable server document's revision in step with the data it now holds", async () => {
+		const {repository} = await pSetUpConflictAcrossResync();
+		const conflict = repository.getConflictRecovery("character-1");
+
+		// The unrelated `/name` overlap survives, so the conflict is still awaiting a choice.
+		expect(conflict).toBeTruthy();
+		expect(conflict.server.hp.current).toBe(3);
+		expect(conflict.serverDocument.data.hp.current).toBe(3);
+		// Data and revision must agree, or the resolved document seeds accepted truth with stale fencing.
+		expect(conflict.serverDocument.revision).toBe(3);
+		expect(conflict.coverage.server.revision).toBe(3);
+	});
+
+	it("installs a coherent accepted base when the conflict resolves to the server version", async () => {
+		const {repository} = await pSetUpConflictAcrossResync();
+
+		const resolved = await repository.pResolveConflict({characterId: "character-1", choice: "server"});
+
+		expect(resolved.hp.current).toBe(3);
+		const accepted = repository._accepted.get("character-1");
+		expect(accepted.data.hp.current).toBe(3);
+		expect(accepted.revision).toBe(3);
+	});
+});
