@@ -4,7 +4,9 @@ Status: Accepted as an architecture contract (2026-09-01)
 
 Implementation: The protocol-v3 server/store/API/event substrate is implemented. DM/co-DM operations apply
 immediately; the source-derived peer proposal state machine exists but has no successful production `cost=none`
-template. Character Sheet operation-aware reconciliation and approval UI remain separate follow-up work.
+template. Character Sheet operation-aware reconciliation (`B/L -> R/F`) is implemented and live: an applied
+operation is now applied to an already-open canonical campaign sheet without a reload. Approval UI, effect
+banners, target discovery, and peer source costs remain separate follow-up work.
 
 ## Context
 
@@ -386,9 +388,37 @@ The first implementation slice freezes these server-owned choices:
 - `operationWatermark` appears only in owner/DM truth and authorization-varying owner/DM resync references.
 
 This checkpoint proves required evidence 1-7, the server portions of 9-10, and memory/PostgreSQL parity from 13.
-Character Sheet `B/L -> R/F`, modal coordination, effect banners, approval UI, target discovery, successful
-production peer templates, source costs, multi-target/monster operations, and live unsaved-edit reconciliation
-remain deliberately deferred. Therefore ADR 0012 is not yet marked fully implemented.
+
+### Character Sheet reconciliation checkpoint
+
+The second slice implements the client half and freezes these choices:
+
+- the pure operation catalog lives in `js/hub/hub-semantic-operations.js` and is imported by both the server
+  (`server/src/hub-actions.js` re-exports it) and the browser, so no damage/heal/condition/slot formula is
+  duplicated across the wire; `js/hub/hub-store-error.js` backs one `HubStoreError` identity for both runtimes;
+- coverage is tracked **per document track**, not by a single accepted revision. `pGet` can store freshly
+  fetched canonical truth that already contains an operation while returning an older recovery draft as live
+  state, so one fence would wrongly skip `E(L)` and let the stale draft undo the effect. Each of accepted, live,
+  latest-submitted, recovered-base, failed-write and every conflict candidate carries
+  `{revision, acceptedSequence, appliedOperationIds}`;
+- the decision per track is: known operation id or `revision >= r` is covered, `revision === r - 1` applies, and
+  an unknown revision or a gap demands resync. Nothing is guessed in either direction;
+- session recovery gains additive `coverageVersion`/`coverage` metadata. The pre-existing `version` counter keeps
+  its meaning, and a blob without coverage is honoured as a draft but treated as unproven, forcing resync;
+- delivery is a prepare/adopt/commit transaction. Live adoption happens before any repository track moves, and
+  applied ids are marked last, so a throwing adoption leaves accepted data, revisions, coverage, conflict
+  candidates and id sets untouched and a retry still applies;
+- conflict candidates are classified individually. The revision-conflict and lease refetches already contain the
+  operation, so those server candidates are never transformed again; the overlap is then recomputed, clearing a
+  conflict whose only overlap was the operation itself;
+- an unprovable delivery does not strand the sheet: it stages a bounded envelope, blocks autosave, and schedules
+  a serialized recovery that fetches canonical truth plus ordered visible history and replays only the missing
+  operations in revision order. Expired or insufficient history preserves `B`, `L`, `R`, the envelopes and the
+  error, and offers authoritative reload plus export rather than a blind write.
+
+Approval UI, effect banners, target discovery, successful production peer templates, source costs, and
+multi-target/monster operations remain deliberately deferred. Therefore ADR 0012 is not yet marked fully
+implemented.
 
 ## Consequences
 
