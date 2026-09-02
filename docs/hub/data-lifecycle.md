@@ -51,7 +51,9 @@
   displays. Earlier revisions hand-ported that math and three review rounds each found a different term missing
   — proficiency-bonus items, Blood Hunter Dark Augmentation, TGTT Linguistics, dynamic feature modifiers — so
   the port was replaced by the authority itself. Parity is enforced by
-  `test/jest/hub/HubProjectionSheetParity.test.js`.
+  `test/jest/hub/HubProjectionSheetParity.test.js`, whose fixtures are authored through the sheet's own API:
+  `customModifiers` is a cache the sheet rebuilds on load, so a fixture that writes it directly asserts a state
+  no reader ever sees.
 - Projected statistics are the character's **baseline**: what it is, not what it is doing this round. Active
   states, combat stances and ability substitutions are excluded.
 

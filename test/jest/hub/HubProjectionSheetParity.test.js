@@ -17,9 +17,10 @@ const SKILLS = ["stealth", "arcana", "athletics", "perception", "persuasion", "l
  * on load rather than persisted, so comparing against the pre-save in-memory sheet would
  * assert against a state no reader ever sees.
  */
-function getFixture (mutate) {
+function getFixture (mutate, authorWith = null) {
 	const authored = new CharacterSheetState();
 	mutate(authored._data);
+	authorWith?.(authored);
 	const document = JSON.parse(JSON.stringify(authored.toJson()));
 	const reloaded = new CharacterSheetState();
 	reloaded.loadFromJson(JSON.parse(JSON.stringify(document)));
@@ -102,6 +103,14 @@ describe("projection versus Character Sheet parity", () => {
 			data.itemBonuses.savingThrow = 0;
 			data.itemBonuses.saves = 3;
 		},
+		"proficiency bonus from a named modifier": data => {
+			Object.assign(data, {
+				abilities: {str: 10, dex: 16, con: 12, int: 10, wis: 10, cha: 10},
+				classes: [{name: "Rogue", level: 5}],
+				saveProficiencies: ["dex"],
+				skillProficiencies: {stealth: 1},
+			});
+		},
 		"custom ability check and skill modifiers": data => {
 			Object.assign(data, {
 				abilities: {str: 10, dex: 12, con: 12, int: 14, wis: 10, cha: 10},
@@ -113,9 +122,15 @@ describe("projection versus Character Sheet parity", () => {
 		},
 	};
 
+	// A few cases must be authored through the sheet's own API rather than by writing
+	// `_data`, because the value they exercise is derived on load rather than stored.
+	const authors = {
+		"proficiency bonus from a named modifier": sheet => sheet.addNamedModifier({name: "Ring of Mastery", type: "proficiencyBonus", value: 2, enabled: true}),
+	};
+
 	for (const [name, mutate] of Object.entries(cases)) {
 		it(`matches the Character Sheet for ${name}`, () => {
-			const {document, sheet} = getFixture(mutate);
+			const {document, sheet} = getFixture(mutate, authors[name]);
 			const projected = buildCharacterViewModel(document);
 
 			for (const ability of ABILITIES) {
@@ -142,6 +157,37 @@ describe("projection versus Character Sheet parity", () => {
 		expect(projected.saves).toEqual({});
 		expect(projected.skills).toEqual({});
 		expect(projected.identity.name).toBe("Broken");
+	});
+
+	it("reads a proficiency bonus from its source modifier, not the derived cache", () => {
+		// `customModifiers` is a cache the sheet rebuilds on load, not stored input. A
+		// fixture that writes it directly is discarded on reload — by the sheet as well as
+		// by the projection — so parity fixtures must author through the sheet's API or
+		// they silently assert a state no reader ever sees.
+		const authored = new CharacterSheetState();
+		Object.assign(authored._data, {
+			abilities: {str: 10, dex: 16, con: 12, int: 10, wis: 10, cha: 10},
+			classes: [{name: "Rogue", level: 5}],
+			saveProficiencies: ["dex"],
+		});
+
+		const direct = new CharacterSheetState();
+		direct.loadFromJson(JSON.parse(JSON.stringify(authored.toJson())));
+		direct._data.customModifiers.proficiencyBonus = 2;
+		const afterDirectReload = new CharacterSheetState();
+		afterDirectReload.loadFromJson(JSON.parse(JSON.stringify(direct.toJson())));
+		// The sheet itself drops it, so there is nothing for a projection to carry.
+		expect(afterDirectReload._data.customModifiers.proficiencyBonus).toBe(0);
+
+		authored.addNamedModifier({name: "Ring of Mastery", type: "proficiencyBonus", value: 2, enabled: true});
+		const document = JSON.parse(JSON.stringify(authored.toJson()));
+		const reloaded = new CharacterSheetState();
+		reloaded.loadFromJson(JSON.parse(JSON.stringify(document)));
+
+		// The named modifier is the stored source, so it survives and rebuilds the cache.
+		expect(reloaded._data.customModifiers.proficiencyBonus).toBe(2);
+		expect(reloaded.getProficiencyBonus()).toBe(authored.getProficiencyBonus());
+		expect(buildCharacterViewModel(document).saves.dex.modifier).toBe(reloaded.getSaveMod("dex"));
 	});
 
 	it("ships every module the derivation needs into the server image", () => {
