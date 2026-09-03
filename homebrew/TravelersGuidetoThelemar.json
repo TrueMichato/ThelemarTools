@@ -126,7 +126,7 @@
 			"DW:S": "Dreamwalker Special Ability"
 		},
 		"dateAdded": 1649140894,
-		"dateLastModified": 1774699200,
+		"dateLastModified": 1788429797,
 		"edition": "classic",
 		"itemUpgradeTypes": {
 			"AU": "Armor Upgrade",
@@ -16867,6 +16867,18 @@
 			}
 		},
 		{
+			"source": "TGTT-2024",
+			"className": "Cleric",
+			"classSource": "TGTT",
+			"_copy": {
+				"name": "Arcana Domain",
+				"source": "AU",
+				"shortName": "Arcana",
+				"className": "Cleric",
+				"classSource": "XPHB"
+			}
+		},
+		{
 			"name": "Beauty Domain",
 			"source": "TGTT",
 			"className": "Cleric",
@@ -18825,6 +18837,18 @@
 			]
 		},
 		{
+			"source": "TGTT-2024",
+			"className": "Monk",
+			"classSource": "TGTT",
+			"_copy": {
+				"name": "Warrior of the Mystic Arts",
+				"source": "AU",
+				"shortName": "Mystic Arts",
+				"className": "Monk",
+				"classSource": "XPHB"
+			}
+		},
+		{
 			"source": "TGTT",
 			"className": "Monk",
 			"classSource": "TGTT",
@@ -19205,6 +19229,18 @@
 		},
 		{
 			"source": "TGTT-2024",
+			"className": "Fighter",
+			"classSource": "TGTT",
+			"_copy": {
+				"name": "Arcane Archer",
+				"source": "AU",
+				"shortName": "Arcane Archer",
+				"className": "Fighter",
+				"classSource": "XPHB"
+			}
+		},
+		{
+			"source": "TGTT-2024",
 			"className": "Paladin",
 			"classSource": "TGTT",
 			"_copy": {
@@ -19427,6 +19463,18 @@
 			}
 		},
 		{
+			"source": "TGTT-2024",
+			"className": "Warlock",
+			"classSource": "TGTT",
+			"_copy": {
+				"name": "Vestige Patron",
+				"source": "AU",
+				"shortName": "Vestige",
+				"className": "Warlock",
+				"classSource": "XPHB"
+			}
+		},
+		{
 			"source": "TGTT-2014",
 			"className": "Warlock",
 			"classSource": "TGTT",
@@ -19602,6 +19650,54 @@
 				"name": "Bladesinger",
 				"source": "FRHoF",
 				"shortName": "Bladesinger",
+				"className": "Wizard",
+				"classSource": "XPHB"
+			}
+		},
+		{
+			"source": "TGTT-2024",
+			"className": "Wizard",
+			"classSource": "TGTT",
+			"_copy": {
+				"name": "Conjurer",
+				"source": "AU",
+				"shortName": "Conjurer",
+				"className": "Wizard",
+				"classSource": "XPHB"
+			}
+		},
+		{
+			"source": "TGTT-2024",
+			"className": "Wizard",
+			"classSource": "TGTT",
+			"_copy": {
+				"name": "Enchanter",
+				"source": "AU",
+				"shortName": "Enchanter",
+				"className": "Wizard",
+				"classSource": "XPHB"
+			}
+		},
+		{
+			"source": "TGTT-2024",
+			"className": "Wizard",
+			"classSource": "TGTT",
+			"_copy": {
+				"name": "Necromancer",
+				"source": "AU",
+				"shortName": "Necromancer",
+				"className": "Wizard",
+				"classSource": "XPHB"
+			}
+		},
+		{
+			"source": "TGTT-2024",
+			"className": "Wizard",
+			"classSource": "TGTT",
+			"_copy": {
+				"name": "Transmuter",
+				"source": "AU",
+				"shortName": "Transmuter",
 				"className": "Wizard",
 				"classSource": "XPHB"
 			}

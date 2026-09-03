@@ -32,7 +32,7 @@ class TgttFilter {
 		"ScreenDungeonKit", "ScreenSpelljammer", "XScreen", "HF", "HFFotM", "HFStCM", "PaF", "HFDoMM", "CM",
 		"NRH", "NRH-TCMC", "NRH-AVitW", "NRH-ASS", "NRH-CoI", "NRH-TLT", "NRH-AWoL", "NRH-AT", "MGELFT", "VD",
 		"SjA", "HAT-TG", "HAT-LMI", "GotSF", "LK", "CoA", "PiP", "DitLCoT", "VNotEE", "LRDT", "UtHftLH",
-		"ScoEE", "HBTD", "BQGT", "PHB'24", "EFA", "TGTT",
+		"ScoEE", "HBTD", "BQGT", "PHB'24", "EFA", "TGTT", "AU",
 	]);
 
 	// Source-specific rarity overrides

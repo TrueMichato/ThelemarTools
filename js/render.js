@@ -6860,6 +6860,36 @@ Renderer.events = class {
 			throw new Error(`Could not find tag: "${tag}" (page/prop: "${page}") hash: "${hash}"`);
 		}
 
+		const headerName = displayName
+			|| (name ?? toRender.name ?? (toRender.entries?.length ? toRender.entries?.[0]?.name : "(Unknown)"));
+
+		const {htmlNameCollapsed, htmlNameExpanded} = Renderer.events._handleLoad_inlineStatblock_getHtmlNames({
+			tag, uid, displayName,
+		});
+
+		const fnRender = Renderer.hover.getFnRenderCompact(page);
+		const isFluff = !!toRender.__prop?.endsWith("Fluff");
+		const nxt = veE({
+			outer: Renderer.utils.embed.getHeader(
+				headerName,
+				style,
+				{
+					isStats: !isFluff,
+					htmlNameCollapsed,
+					htmlNameExpanded,
+					isFixedHeightInitial,
+					slotSize,
+					slotSizeSource: source,
+					scrollHash: isFluff ? null : hash,
+				},
+			)
+				+ fnRender(toRender, {...(entryData?.renderCompact || {}), isEmbeddedEntity: true})
+				+ Renderer.utils.embed.getFooter(),
+		});
+		wrpRenderedData.replaceWith(nxt);
+
+		const nxtTgt = nxt.querySelector(`[data-rd-rendered-data-embed-render-target="true"]`);
+
 		const fnBind = Renderer.hover.getFnBindListenersCompact(page);
 		if (fnBind) fnBind(toRender, nxtTgt);
 
