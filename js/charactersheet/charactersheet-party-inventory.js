@@ -1007,14 +1007,13 @@ export class CharacterSheetPartyInventory {
 		const rawUnitWeight = Number(entry?.item?.weight);
 		const unitWeight = Number(this._fnProjectItemWeight?.(entry?.item) ?? entry?.item?.weight);
 
-		if (!profile || !Number.isSafeInteger(quantity) || quantity < 1 || !Number.isFinite(unitWeight) || unitWeight < 0) {
-			// An unknown stack weight makes the consequence unknowable. Saying so is better
-			// than printing a delta of zero, which would read as "this changes nothing".
-			target.textContent = profile && entry ? "Carry impact unknown: this stack has no recorded weight." : "";
+		const isMovedWeightKnown = Number.isFinite(unitWeight) && unitWeight >= 0;
+		if (!profile || !entry || !Number.isSafeInteger(quantity) || quantity < 1) {
+			target.textContent = "";
 			return;
 		}
 
-		const moved = unitWeight * quantity;
+		const moved = isMovedWeightKnown ? unitWeight * quantity : null;
 		const movedRaw = Number.isFinite(rawUnitWeight) && rawUnitWeight >= 0 ? rawUnitWeight * quantity : null;
 		// Moving OUT of the stash adds to this character; moving out of this character removes.
 		const signedDelta = this._draft.kind === "party_inventory" ? moved : -moved;
@@ -1029,7 +1028,7 @@ export class CharacterSheetPartyInventory {
 		// equipped and attuned items), so it is bag-eligible unless it is itself a weightless
 		// container, which cannot be stowed inside itself.
 		const isFillable = !entry?.item?.containerCapacity?.weightless;
-		const after = getCarryProfile({
+		const after = moved == null ? null : getCarryProfile({
 			capacityOverride: profile.bodyCapacity,
 			externalCapacity: profile.externalCapacity,
 			grossWeight: Math.max(0, profile.grossWeight + signedDelta),
@@ -1039,7 +1038,7 @@ export class CharacterSheetPartyInventory {
 			unknownStackCount: profile.unknownStackCount,
 		});
 		const beforeLevel = getCarryStatus(profile).level;
-		const afterLevel = getCarryStatus(after).level;
+		const afterLevel = after ? getCarryStatus(after).level : null;
 		const label = level => ({
 			over_capacity: "Over capacity",
 			heavily_encumbered: "Heavily encumbered",
@@ -1052,8 +1051,17 @@ export class CharacterSheetPartyInventory {
 		// derived and need not share indeterminacy. The status itself is never softened — a
 		// known lower bound that already exceeds capacity is genuinely over capacity, and
 		// downgrading that truthful verdict would trade one inaccuracy for another.
-		const parts = [`You: ${formatWeight(profile.bodyLoad, profile.isIndeterminate)} → ${formatWeight(after.bodyLoad, after.isIndeterminate)} lb of ${formatNumber(profile.bodyCapacity)}`];
-		parts.push(beforeLevel === afterLevel ? label(afterLevel) : `${label(beforeLevel)} → ${label(afterLevel)}`);
+		// Each line is rendered with its own truthfulness rather than suppressing the whole
+		// message: an unweighed stack makes the ACTOR's consequence unknowable, but the stash's
+		// own totals remain perfectly reportable, and its uncertainty can even DECREASE if that
+		// unweighed stack is what leaves.
+		const parts = [];
+		if (after) {
+			parts.push(`You: ${formatWeight(profile.bodyLoad, profile.isIndeterminate)} → ${formatWeight(after.bodyLoad, after.isIndeterminate)} lb of ${formatNumber(profile.bodyCapacity)}`);
+			parts.push(beforeLevel === afterLevel ? label(afterLevel) : `${label(beforeLevel)} → ${label(afterLevel)}`);
+		} else {
+			parts.push(`You: currently ${formatWeight(profile.bodyLoad, profile.isIndeterminate)} lb of ${formatNumber(profile.bodyCapacity)} — impact unknown (this stack has no recorded weight)`);
+		}
 
 		// The recipient's consequence.
 		//
@@ -1080,12 +1088,20 @@ export class CharacterSheetPartyInventory {
 		// which is what the authoritative stash refresh will report a moment later.
 		const stash = getInventoryWeightSummary(this._partyInventory?.inventory || []);
 		if (this._draft.kind === "party_inventory" || this._draft.destinationKind === "party_inventory") {
+			const isFromStash = this._draft.kind === "party_inventory";
+			// An unweighed stack contributes nothing to the KNOWN total, so moving one leaves
+			// that number untouched — but it does move the uncertainty, and the whole-stack case
+			// can make the stash exact again when the last unweighed stack departs.
+			const isWholeStack = quantity >= (Number(entry?.quantity) || 0);
+			const stashAfterKnown = movedRaw == null
+				? stash.knownWeight
+				: Math.max(0, isFromStash ? stash.knownWeight - movedRaw : stash.knownWeight + movedRaw);
+			let unknownAfter = stash.unknownStackCount;
 			if (movedRaw == null) {
-				parts.push(`Stash: ${formatNumber(stash.knownWeight)} lb — impact unknown (this stack has no recorded weight)`);
-			} else {
-				const stashAfter = this._draft.kind === "party_inventory" ? stash.knownWeight - movedRaw : stash.knownWeight + movedRaw;
-				parts.push(`Stash: ${formatNumber(stash.knownWeight)} → ${formatNumber(Math.max(0, stashAfter))} lb`);
+				if (isFromStash) unknownAfter = isWholeStack ? Math.max(0, unknownAfter - 1) : unknownAfter;
+				else unknownAfter += 1;
 			}
+			parts.push(`Stash: ${formatWeight(stash.knownWeight, stash.unknownStackCount > 0)} → ${formatWeight(stashAfterKnown, unknownAfter > 0)} lb`);
 		}
 		target.textContent = `${parts.join(" · ")}.`;
 		target.classList.toggle("charsheet__party-inventory-carry-delta--warn", afterLevel === "over_capacity" && beforeLevel !== "over_capacity");

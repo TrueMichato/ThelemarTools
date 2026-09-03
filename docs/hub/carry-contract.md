@@ -176,7 +176,8 @@ as such and never defaulted to a number.
 `indeterminate` is about the **number**, not the verdict, and the two are decided separately:
 
 - the weight is always marked `≥`, wherever it appears — the actor's before and after values
-  (each from its own profile), a shared recipient's current load, and the party total;
+  (each from its own profile), a shared recipient's current load, the party **body** total, and
+  the shared **stash** total, before and after a transfer;
 - the tier is asserted only when the lower bound settles it. Below capacity nothing can be
   claimed, because the true load could sit in any band above the known one, so the status is
   `unknown`. Once the *known* part already exceeds capacity the verdict is settled — more
@@ -185,6 +186,18 @@ as such and never defaulted to a number.
 
 Softening that verdict to "unknown" would trade one inaccuracy for another: an overloaded
 character would read as merely unmeasured.
+
+**Every displayed quantity owns its own partiality.** The party body total and the shared stash
+total are independent sums, and a single combined flag got both wrong at once: an exact body
+total was marked `≥` merely because the stash held an unweighed stack, while that stash — the
+total actually in doubt — printed bare. `getPartyCarryAggregate()` therefore reports
+`isBodyTotalPartial` and `isStashTotalPartial` separately (`isTotalPartial` remains for callers
+asking only "is anything on this line uncertain?").
+
+Stash uncertainty can also **decrease**: an unweighed stack contributes nothing to the known
+total, so moving one leaves that number untouched while shifting the doubt — and when the last
+unweighed stack leaves, the stash becomes exact again. That is why the count is tracked rather
+than a boolean.
 
 Party aggregates count excluded members without estimating them, and nothing is back-derived
 from a total: an excluded member contributes nothing, so no hidden load can be recovered by

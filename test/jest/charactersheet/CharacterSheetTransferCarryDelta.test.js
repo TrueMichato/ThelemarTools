@@ -37,9 +37,10 @@ function makeUi ({
 	recipients = [],
 	recipientId = null,
 	stashInventory = [],
+	entryQuantity = 9,
 	characterProfile = getCarryProfile({sourceValue: 10, thresholdSourceValue: 10, grossWeight: 0}),
 } = {}) {
-	const entry = {id: "e1", quantity: 9, item: {name: "Ingots", weight: raw}};
+	const entry = {id: "e1", quantity: entryQuantity, item: {name: "Ingots", weight: raw}};
 	const ui = new CharacterSheetPartyInventory({
 		campaignId: "campaign-1",
 		api: {},
@@ -218,5 +219,55 @@ describe("a lower bound is never rendered as an exact weight", () => {
 		const projections = [{kind: "peer_profile", id: "r1", data: {identity: {name: "Kael"}, classes: [], carrySummary: {carried: 120, capacity: 150, state: "over_capacity", isIndeterminate: true}}}];
 		const [recipient] = getPartyInventoryRecipients({projections, roster: [{characterId: "r1", targetRef: "r1"}], currentCharacterId: "me"});
 		expect(recipient.carry.isIndeterminate).toBe(true);
+	});
+});
+
+describe("the stash's uncertainty is its own, and can decrease", () => {
+	// Inverted form of the same invariant. The party summary marked an EXACT body total `≥`
+	// merely because the shared stash held an unweighed stack, while that stash's own total —
+	// the one actually in doubt — printed bare.
+	const stashWithUnknown = [
+		{id: "s1", quantity: 1, item: {name: "Ingots", weight: 10}},
+		{id: "s2", quantity: 1, item: {name: "Mystery crate"}}, // no weight recorded
+	];
+
+	it("marks both stash weights when an unweighed stack remains", () => {
+		const text = render(makeUi({raw: 5, destinationKind: "party_inventory", stashInventory: stashWithUnknown}));
+		expect(text).toContain("Stash: ≥10 → ≥15 lb");
+	});
+
+	it("leaves an exact stash unmarked", () => {
+		const text = render(makeUi({raw: 5, destinationKind: "party_inventory", stashInventory: [{id: "s1", quantity: 1, item: {weight: 10}}]}));
+		expect(text).toContain("Stash: 10 → 15 lb");
+		expect(text).not.toContain("Stash: ≥");
+	});
+
+	it("becomes exact when the LAST unweighed stack leaves the stash", () => {
+		// The known total does not move — an unweighed stack contributed nothing to it — but
+		// the stash stops being a lower bound, which is the whole point of tracking the count
+		// rather than a single boolean.
+		const ui = makeUi({
+			raw: NaN,
+			draftKind: "party_inventory",
+			destinationKind: "character",
+			quantity: 1,
+			entryQuantity: 1,
+			stashInventory: [{id: "s1", quantity: 1, item: {weight: 10}}, {id: "s2", quantity: 1, item: {name: "Mystery"}}],
+		});
+		ui._draft.entryId = "s2";
+		expect(render(ui)).toContain("Stash: ≥10 → 10 lb");
+	});
+
+	it("gains uncertainty when an unweighed stack arrives", () => {
+		const ui = makeUi({raw: NaN, destinationKind: "party_inventory", stashInventory: [{id: "s1", quantity: 1, item: {weight: 10}}]});
+		expect(render(ui)).toContain("Stash: 10 → ≥10 lb");
+	});
+
+	it("still reports the actor's own impact as unknown for an unweighed stack", () => {
+		// Each line keeps its own truthfulness: the actor's consequence is genuinely
+		// unknowable while the stash's totals remain perfectly reportable.
+		const text = render(makeUi({raw: NaN, destinationKind: "party_inventory", stashInventory: [{id: "s1", quantity: 1, item: {weight: 10}}]}));
+		expect(text).toMatch(/You: currently .* impact unknown/);
+		expect(text).toContain("Stash:");
 	});
 });

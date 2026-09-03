@@ -422,9 +422,15 @@ export function getPartyCarryAggregate ({members = [], stashWeight = null, stash
 		out.totalSpareCapacity += toFiniteNonNegative(profile.bodyCapacity) - toFiniteNonNegative(profile.bodyLoad);
 	}
 
-	// Any indeterminate or excluded member makes the totals a lower bound, and the UI must
-	// say so rather than presenting a partial sum as a complete one.
-	out.isTotalPartial = out.indeterminateCount > 0 || out.unavailableCount > 0 || out.stashUnknownStackCount > 0;
+	// Partiality is reported PER QUANTITY, because the body total and the stash total are
+	// independent sums that can each be complete or partial on their own. A single combined
+	// flag was wrong in both directions at once: an exact party body was marked `≥` merely
+	// because the shared stash held an unweighed stack, while that stash's own total — the
+	// one actually in doubt — was rendered as exact.
+	out.isBodyTotalPartial = out.indeterminateCount > 0 || out.unavailableCount > 0;
+	out.isStashTotalPartial = out.stashUnknownStackCount > 0;
+	// Retained for callers that legitimately want "is anything on this line uncertain?".
+	out.isTotalPartial = out.isBodyTotalPartial || out.isStashTotalPartial;
 	return Object.freeze(out);
 }
 

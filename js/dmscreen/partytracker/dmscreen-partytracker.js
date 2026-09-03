@@ -444,7 +444,10 @@ class PartyTrackerRoot {
 
 		const avgLevel = Math.round((totalLevel / n) * 10) / 10;
 		const carryPct = carry.totalBodyCapacity > 0 ? Math.round((carry.totalBodyLoad / carry.totalBodyCapacity) * 100) : 0;
-		const carryPrefix = carry.isTotalPartial ? "\u2265" : "";
+		// Each total is marked from its OWN uncertainty: an unweighed stack in the shared stash
+		// says nothing about whether the party's body total is complete.
+		const carryPrefix = carry.isBodyTotalPartial ? "\u2265" : "";
+		const stashPrefix = carry.isStashTotalPartial ? "\u2265" : "";
 		const carryNotes = [
 			carry.overCapacityCount ? `${carry.overCapacityCount} over capacity` : null,
 			carry.unavailableCount ? `${carry.unavailableCount} not synced` : null,
@@ -455,7 +458,7 @@ class PartyTrackerRoot {
 			? ` \u00b7 ${this._hubCharacterIds.size} live \u00b7 ${n - this._hubCharacterIds.size} manual`
 			: "";
 		const stashStr = this._hubPartyInventory
-			? ` \u00b7 Stash: ${this._hubPartyInventory.state === "known" ? `${Math.round(this._hubPartyInventory.knownWeight * 10) / 10} lb` : "\u2014"}`
+			? ` \u00b7 Stash: ${this._hubPartyInventory.state === "known" ? `${stashPrefix}${Math.round(this._hubPartyInventory.knownWeight * 10) / 10} lb` : "\u2014"}`
 			: "";
 		const notesStr = carryNotes.length ? ` (${carryNotes.join(", ")})` : "";
 		this._eleSummary.textContent = `${n} char${n !== 1 ? "s" : ""}${sourceStr} \u00b7 Lv ${avgLevel}${hpStr} \u00b7 Carry: ${carryPrefix}${Math.round(carry.totalBodyLoad * 10) / 10}/${carry.totalBodyCapacity} lb (${carryPct}%)${notesStr}${stashStr}`;
