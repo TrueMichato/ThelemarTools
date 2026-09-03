@@ -60,6 +60,39 @@ export function getAwardSourceRequest (selectedItem) {
 	};
 }
 
+export function buildAwardSubmission ({
+	selectedItem,
+	targets = [],
+	selectedTargetIds = [],
+	quantity,
+	note = "",
+} = {}) {
+	const selectedIds = new Set(selectedTargetIds);
+	const targetCharacterIds = targets
+		.map(getProjectionId)
+		.filter(characterId => selectedIds.has(characterId));
+	const parsedQuantity = Number(quantity);
+	if (!selectedItem) throw new Error("Choose an item before awarding it.");
+	if (!targetCharacterIds.length) throw new Error("Choose at least one recipient.");
+	if (!Number.isSafeInteger(parsedQuantity) || parsedQuantity < 1 || parsedQuantity > 100000) {
+		throw new Error("Enter a whole quantity from 1 to 100,000 for each recipient.");
+	}
+	const source = getAwardSourceRequest(selectedItem);
+	if (source.kind === "party_inventory" && parsedQuantity * targetCharacterIds.length > selectedItem.availableQuantity) {
+		throw new Error(`The party stash has only ${selectedItem.availableQuantity} of that item.`);
+	}
+	return {
+		source,
+		targetCharacterIds,
+		quantity: parsedQuantity,
+		note: note.trim() || null,
+	};
+}
+
+export function getAwardCommandFingerprint ({source, targetCharacterIds, quantity, note}) {
+	return JSON.stringify({source, targetCharacterIds, quantity, note});
+}
+
 export function buildAwardPreview ({
 	targets = [],
 	selectedItem = null,
@@ -94,17 +127,19 @@ export function buildAwardPreview ({
 			};
 		}
 		const postAward = carry.carried + addedWeight;
+		const isDefinitelyOverCapacity = postAward > carry.capacity || carry.state === "over_capacity";
+		const capacityWarning = isDefinitelyOverCapacity ? " This is over the current capacity." : "";
 		if (carry.isIndeterminate) {
 			return {
 				characterId,
 				name,
 				state: "lower_bound",
-				message: `Known carry becomes at least ${postAward.toLocaleString()} lb of ${carry.capacity.toLocaleString()} lb; unweighed items keep the exact total unavailable.`,
+				message: `Known carry becomes at least ${postAward.toLocaleString()} lb of ${carry.capacity.toLocaleString()} lb; unweighed items keep the exact total unavailable.${capacityWarning}`,
 				postAward,
 			};
 		}
-		const warning = postAward > carry.capacity
-			? " This is over the current capacity."
+		const warning = isDefinitelyOverCapacity
+			? capacityWarning
 			: carry.state && carry.state !== "normal"
 				? ` Current carry state: ${carry.state.replaceAll("_", " ")}.`
 				: "";

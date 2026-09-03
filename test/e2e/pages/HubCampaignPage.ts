@@ -950,6 +950,8 @@ export class HubCampaignPage {
 		await this.page.route(requestUrl, async route => {
 			idempotencyKeys.push(route.request().headers()["idempotency-key"]);
 			if (++attempt === 1) {
+				const committed = await route.fetch();
+				expect(committed.ok()).toBe(true);
 				await route.fulfill({
 					status: 503,
 					contentType: "application/json",
@@ -971,8 +973,13 @@ export class HubCampaignPage {
 			await submit.click();
 			await expect(status).toContainText("temporarily unavailable");
 			await expect(submit).toBeEnabled();
-			await this.page.locator("#campaign-item-targets .hub-item-award__target").last()
-				.evaluate(target => target.parentElement?.prepend(target));
+			await this.page.locator("#campaign-item-note").fill(`  ${note || ""}  `);
+			await form.evaluate(element => {
+				const incidental = document.createElement("input");
+				incidental.id = "campaign-item-incidental-unchecked-target";
+				incidental.type = "checkbox";
+				element.append(incidental);
+			});
 
 			await submit.click();
 			await expect(form).toHaveAttribute("aria-busy", "true");

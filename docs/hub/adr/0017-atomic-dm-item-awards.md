@@ -43,6 +43,10 @@ campaign party inventory through the existing lock classes. The memory store sta
 stash mutation before publishing them and relies on single-threaded command execution plus the same receipt
 contract.
 
+The browser retains a failed attempt's key against that same normalized command body, including ordered target
+IDs. Incidental form controls and whitespace that normalize away cannot rotate the key, while any source,
+ordered-target, quantity, or note change must mint a new key before another request is sent.
+
 ### Item trust and normalization
 
 Catalog, recent, and campaign-item requests accept only this bounded summary:

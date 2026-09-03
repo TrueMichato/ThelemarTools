@@ -216,6 +216,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("ownerAccountId: session.account.id");
 		expect(source).toContain("itemAward.setCampaignBrewContent");
 		expect(source).toContain("api.pAwardItems");
+		expect(source).toContain("fingerprint: getAwardCommandFingerprint(submission)");
 		expect(source).toContain(".sort(([idA], [idB]) => idA.localeCompare(idB))");
 		expect(source).toContain("getTransferContentsDescription(transfer)");
 		expect(campaignHtml).not.toContain("Item entry ID");

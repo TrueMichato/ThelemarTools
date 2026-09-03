@@ -13,11 +13,12 @@ import {
 	isCanonicalProjection,
 } from "./hub-character-view.js";
 import {
+	buildAwardSubmission,
 	buildAwardPreview,
 	buildRecentAwardItems,
 	buildStashAwardItems,
 	filterAwardItems,
-	getAwardSourceRequest,
+	getAwardCommandFingerprint,
 } from "./hub-item-award.js";
 
 const api = new HubApiClient();
@@ -620,23 +621,13 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 			search.focus();
 		},
 		getSubmission () {
-			const targetCharacterIds = getSelectedTargets().map(getProjectionId);
-			const parsedQuantity = Number(quantity.value);
-			if (!selectedItem) throw new Error("Choose an item before awarding it.");
-			if (!targetCharacterIds.length) throw new Error("Choose at least one recipient.");
-			if (!Number.isSafeInteger(parsedQuantity) || parsedQuantity < 1 || parsedQuantity > 100000) {
-				throw new Error("Enter a whole quantity from 1 to 100,000 for each recipient.");
-			}
-			const source = getAwardSourceRequest(selectedItem);
-			if (source.kind === "party_inventory" && parsedQuantity * targetCharacterIds.length > selectedItem.availableQuantity) {
-				throw new Error(`The party stash has only ${selectedItem.availableQuantity} of that item.`);
-			}
-			return {
-				source,
-				targetCharacterIds,
-				quantity: parsedQuantity,
-				note: note.value.trim() || null,
-			};
+			return buildAwardSubmission({
+				selectedItem,
+				targets: currentTargets,
+				selectedTargetIds,
+				quantity: quantity.value,
+				note: note.value,
+			});
 		},
 		onSuccess (result) {
 			const awarded = result?.source?.item;
@@ -1475,9 +1466,9 @@ function getFormFingerprint (form) {
 		.sort(([idA], [idB]) => idA.localeCompare(idB)));
 }
 
-async function pRunFormMutation ({form, fnMutate}) {
+async function pRunFormMutation ({form, fingerprint, fnMutate}) {
 	if (form._hubIsSubmitting) return null;
-	const fingerprint = getFormFingerprint(form);
+	if (typeof fingerprint !== "string") throw new TypeError("A mutation fingerprint is required.");
 	if (form._hubMutationFingerprint !== fingerprint) {
 		form._hubMutationFingerprint = fingerprint;
 		form._hubMutationKey = crypto.randomUUID();
@@ -1533,6 +1524,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		setFormStatus({formId: "campaign-invite-form"});
 		try {
 			await pRunFormMutation({form: event.currentTarget,
+				fingerprint: getFormFingerprint(event.currentTarget),
 				fnMutate: async idempotencyKey => {
 					const role = document.getElementById("campaign-invite-role").value;
 					const result = await api.pCreateInvite({campaignId, role, idempotencyKey});
@@ -1767,6 +1759,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		setFormStatus({formId});
 		try {
 			await pRunFormMutation({form: event.currentTarget,
+				fingerprint: getFormFingerprint(event.currentTarget),
 				fnMutate: async idempotencyKey => {
 					const type = document.getElementById("campaign-action-type").value;
 					const rawValue = document.getElementById("campaign-action-value").value.trim();
@@ -1830,6 +1823,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		setFormStatus({formId});
 		try {
 			await pRunFormMutation({form: event.currentTarget,
+				fingerprint: getFormFingerprint(event.currentTarget),
 				fnMutate: idempotencyKey => api.pGrantXp({
 					campaignId,
 					characterId: document.getElementById("campaign-xp-target").value.split(":")[1],
@@ -1857,6 +1851,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			let result;
 			await pRunFormMutation({
 				form: event.currentTarget,
+				fingerprint: getAwardCommandFingerprint(submission),
 				fnMutate: async idempotencyKey => {
 					itemAward.setPending(true);
 					result = await api.pAwardItems({
@@ -1897,6 +1892,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		setFormStatus({formId});
 		try {
 			await pRunFormMutation({form: event.currentTarget,
+				fingerprint: getFormFingerprint(event.currentTarget),
 				fnMutate: async idempotencyKey => {
 					const [sourceKind, sourceId] = document.getElementById("campaign-transfer-source").value.split(":");
 					const [targetKind, targetId] = document.getElementById("campaign-transfer-target").value.split(":");
@@ -1966,6 +1962,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		}
 		try {
 			await pRunFormMutation({form: event.currentTarget,
+				fingerprint: getFormFingerprint(event.currentTarget),
 				fnMutate: async idempotencyKey => {
 					const parsed = JSON.parse(await file.text());
 					const brewDocs = Array.isArray(parsed)
@@ -2001,6 +1998,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		setFormStatus({formId: "campaign-rules-form"});
 		try {
 			await pRunFormMutation({form: event.currentTarget,
+				fingerprint: getFormFingerprint(event.currentTarget),
 				fnMutate: async idempotencyKey => {
 					const rules = {
 						enableTgtt: document.getElementById("campaign-rule-tgtt").checked,

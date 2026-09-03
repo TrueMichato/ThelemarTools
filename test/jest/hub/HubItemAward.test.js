@@ -1,8 +1,10 @@
 import {
+	buildAwardSubmission,
 	buildAwardPreview,
 	buildRecentAwardItems,
 	buildStashAwardItems,
 	filterAwardItems,
+	getAwardCommandFingerprint,
 	getAwardSourceRequest,
 } from "../../../js/hub/hub-item-award.js";
 
@@ -13,19 +15,20 @@ const getTarget = ({
 	capacity,
 	isIndeterminate = false,
 	isShared = false,
+	state = "normal",
 } = {}) => isShared
 	? {
 		kind: "peer_profile",
 		id,
 		data: {
 			identity: {name},
-			carrySummary: carried == null ? undefined : {carried, capacity, state: "normal", isIndeterminate},
+			carrySummary: carried == null ? undefined : {carried, capacity, state, isIndeterminate},
 		},
 	}
 	: {
 		kind: "dm_truth",
 		character: {id, data: {name}},
-		carrySummary: carried == null ? undefined : {carried, capacity, state: "normal", isIndeterminate},
+		carrySummary: carried == null ? undefined : {carried, capacity, state, isIndeterminate},
 	};
 
 describe("Hub item award presentation contract", () => {
@@ -63,6 +66,40 @@ describe("Hub item award presentation contract", () => {
 		expect(filterAwardItems({items, query: "mo"})).toEqual([{name: "Moon Blade", source: "TGTT"}]);
 	});
 
+	it("keys retries from the normalized ordered award command instead of incidental controls", () => {
+		const selectedItem = {name: "Torch", source: "PHB", sourceKind: "catalog", weight: 1};
+		const targets = [
+			getTarget({id: "a", name: "A"}),
+			getTarget({id: "b", name: "B"}),
+		];
+		const first = buildAwardSubmission({
+			selectedItem,
+			targets,
+			selectedTargetIds: new Set(["a", "b"]),
+			quantity: "2",
+			note: "  For the road  ",
+		});
+		const incidentalTarget = buildAwardSubmission({
+			selectedItem,
+			targets: [...targets, getTarget({id: "unchecked", name: "Unchecked"})],
+			selectedTargetIds: new Set(["a", "b"]),
+			quantity: "02",
+			note: "For the road",
+		});
+		const reordered = buildAwardSubmission({
+			selectedItem,
+			targets: [...targets].reverse(),
+			selectedTargetIds: new Set(["a", "b"]),
+			quantity: "2",
+			note: "For the road",
+		});
+
+		expect(incidentalTarget).toEqual(first);
+		expect(getAwardCommandFingerprint(incidentalTarget)).toBe(getAwardCommandFingerprint(first));
+		expect(reordered.targetCharacterIds).toEqual(["b", "a"]);
+		expect(getAwardCommandFingerprint(reordered)).not.toBe(getAwardCommandFingerprint(first));
+	});
+
 	it("distinguishes exact, lower-bound, unavailable, and policy-blocked previews", () => {
 		const preview = buildAwardPreview({
 			targets: [
@@ -96,6 +133,22 @@ describe("Hub item award presentation contract", () => {
 		expect(preview.rows).toEqual([expect.objectContaining({
 			state: "unavailable",
 			message: expect.stringContaining("no published weight"),
+		})]);
+	});
+
+	it.each([
+		["crosses capacity", getTarget({id: "crossing", name: "Crossing", carried: 90, capacity: 100, isIndeterminate: true})],
+		["is already over capacity", getTarget({id: "over", name: "Over", carried: 110, capacity: 100, isIndeterminate: true, state: "over_capacity"})],
+	])("keeps lower-bound wording and the definite warning when the known load %s", (_label, target) => {
+		const preview = buildAwardPreview({
+			targets: [target],
+			selectedItem: {name: "Anvil", source: "PHB", weight: 20},
+			quantity: 1,
+		});
+
+		expect(preview.rows).toEqual([expect.objectContaining({
+			state: "lower_bound",
+			message: expect.stringMatching(/at least .* This is over the current capacity\./),
 		})]);
 	});
 });
