@@ -8,9 +8,18 @@ import {
 	getProjectionOwnerAccountId,
 	getProjectionName,
 	getProjectionSummary,
+	getProjectionView,
 	getTargetableProjections,
 	isCanonicalProjection,
 } from "./hub-character-view.js";
+import {
+	buildAwardSubmission,
+	buildAwardPreview,
+	buildRecentAwardItems,
+	buildStashAwardItems,
+	filterAwardItems,
+	getAwardCommandFingerprint,
+} from "./hub-item-award.js";
 
 const api = new HubApiClient();
 
@@ -354,108 +363,337 @@ function syncTransferQuantity () {
 	else quantity.removeAttribute("max");
 }
 
-async function pInitGrantItemCatalog ({context}) {
-	const open = document.getElementById("campaign-item-catalog-open");
-	const close = document.getElementById("campaign-item-catalog-close");
-	const wrapper = document.getElementById("campaign-item-catalog");
-	const search = document.getElementById("campaign-item-catalog-search");
-	const results = document.getElementById("campaign-item-catalog-results");
-	const status = document.getElementById("campaign-item-catalog-status");
-	const name = document.getElementById("campaign-item-name");
-	const source = document.getElementById("campaign-item-source");
-	const summary = document.getElementById("campaign-item-selection-summary");
-	if (!open || !wrapper || !search || !results || !name || !source) {
-		return {setCampaignBrewContent () {}};
+async function pInitItemAwardComposer ({context, partyInventory, targetCharacters, events = []}) {
+	const form = document.getElementById("campaign-item-form");
+	const tabs = [...document.querySelectorAll("[data-item-award-source]")];
+	const sourceKind = document.getElementById("campaign-item-source-kind");
+	const selectionKey = document.getElementById("campaign-item-selection-key");
+	const panel = document.getElementById("campaign-item-source-panel");
+	const search = document.getElementById("campaign-item-search");
+	const searchLabel = document.getElementById("campaign-item-search-label");
+	const results = document.getElementById("campaign-item-results");
+	const resultsStatus = document.getElementById("campaign-item-results-status");
+	const useSelection = document.getElementById("campaign-item-use-selection");
+	const selectionSummary = document.getElementById("campaign-item-selection-summary");
+	const targetsRoot = document.getElementById("campaign-item-targets");
+	const targetsStatus = document.getElementById("campaign-item-targets-status");
+	const quantity = document.getElementById("campaign-item-quantity");
+	const note = document.getElementById("campaign-item-note");
+	const noteCount = document.getElementById("campaign-item-note-count");
+	const previewSummary = document.getElementById("campaign-item-preview-summary");
+	const previewList = document.getElementById("campaign-item-preview-list");
+	const previewWarning = document.getElementById("campaign-item-preview-warning");
+	const submit = form?.querySelector("button[type='submit']");
+	if (!form || !sourceKind || !search || !results || !targetsRoot || !quantity || !note || !submit) {
+		return {
+			focusPrimary () {},
+			getSubmission () { throw new Error("The item award form is unavailable."); },
+			onSuccess () {},
+			setCampaignBrewContent () {},
+			setEvents () {},
+			setPartyInventory () {},
+			setPending () {},
+			setTargets () {},
+		};
 	}
 
-	let catalog = null;
-	let isApplyingCatalog = false;
-	let isCatalogSelection = false;
 	let campaignBrewContent = context.brewBundle?.content;
-	const renderMatches = () => {
-		const query = search.value.trim().toLowerCase();
-		results.replaceChildren();
-		if (query.length < 2) {
-			if (status) status.textContent = "Type at least 2 characters to search.";
-			return;
+	let catalog = null;
+	let catalogLoad = null;
+	let selectedItem = null;
+	let currentPartyInventory = partyInventory;
+	let currentTargets = targetCharacters;
+	let currentEvents = events;
+	let visibleItems = [];
+	const selectedTargetIds = new Set();
+	const pendingDisabledStates = new Map();
+
+	const getSourceItems = () => {
+		switch (sourceKind.value) {
+			case "recent": return buildRecentAwardItems(currentEvents);
+			case "campaign_item": return (catalog || []).filter(item => item.sourceKind === "campaign_item");
+			case "party_inventory": return buildStashAwardItems(currentPartyInventory);
+			default: return (catalog || []).filter(item => item.sourceKind === "catalog");
 		}
-		const matches = catalog
-			.filter(item => item.name.toLowerCase().includes(query) || item.source.toLowerCase().includes(query))
-			.slice(0, 100);
-		results.replaceChildren(...matches.map(item => {
-			const option = document.createElement("option");
-			option.value = `${item.name}|${item.source}`;
-			option.textContent = `${item.name} — ${item.source}`;
-			return option;
-		}));
-		if (status) {
-			status.textContent = matches.length
-				? `${matches.length}${matches.length === 100 ? "+" : ""} matching items.`
-				: "No matching items. Try another name or use a custom item.";
-		}
-	};
-	const applySelection = () => {
-		const selected = results.selectedOptions[0];
-		if (!selected) return;
-		const splitAt = selected.value.lastIndexOf("|");
-		isApplyingCatalog = true;
-		name.value = selected.value.slice(0, splitAt);
-		source.value = selected.value.slice(splitAt + 1);
-		isApplyingCatalog = false;
-		isCatalogSelection = true;
-		if (summary) summary.textContent = `Selected: ${name.value} · ${source.value}`;
 	};
 
-	open.addEventListener("click", async () => {
-		open.disabled = true;
-		open.textContent = "Loading item catalog...";
-		try {
-			if (!catalog) {
-				const {pLoadHubItemCatalog} = await import("./hub-item-catalog.js");
-				catalog = await pLoadHubItemCatalog({campaignBrewContent});
-			}
-			setHidden(wrapper, false);
-			search.focus();
-			renderMatches();
-		} catch (error) {
-			const message = error.message || "The item catalog could not be loaded.";
-			setFormStatus({formId: "campaign-item-form", message, isError: true});
-		} finally {
-			open.disabled = false;
-			open.textContent = "Choose from item catalog";
+	const pEnsureCatalog = async () => {
+		if (catalog) return catalog;
+		if (!catalogLoad) {
+			resultsStatus.textContent = "Loading item catalog...";
+			catalogLoad = import("./hub-item-catalog.js")
+				.then(({pLoadHubItemCatalog}) => pLoadHubItemCatalog({campaignBrewContent}))
+				.then(loaded => catalog = loaded)
+				.finally(() => catalogLoad = null);
 		}
+		return catalogLoad;
+	};
+
+	const getSelectedTargets = () => currentTargets.filter(target => selectedTargetIds.has(getProjectionId(target)));
+
+	const renderPreview = () => {
+		const selectedTargets = getSelectedTargets();
+		const perTargetQuantity = Number(quantity.value);
+		const preview = buildAwardPreview({
+			targets: selectedTargets,
+			selectedItem,
+			quantity: Number.isSafeInteger(perTargetQuantity) ? perTargetQuantity : 0,
+		});
+		previewList.replaceChildren(...preview.rows.map(row => {
+			const item = document.createElement("li");
+			item.className = `hub-item-award__preview-row hub-item-award__preview-row--${row.state}`;
+			const name = document.createElement("strong");
+			name.textContent = row.name;
+			const detail = document.createElement("span");
+			detail.textContent = row.message;
+			item.append(name, detail);
+			return item;
+		}));
+		const requiredFromStash = selectedItem?.sourceKind === "party_inventory"
+			? perTargetQuantity * selectedTargets.length
+			: 0;
+		const isQuantityValid = Number.isSafeInteger(perTargetQuantity) && perTargetQuantity >= 1 && perTargetQuantity <= 100000;
+		const isStashInsufficient = requiredFromStash > (selectedItem?.availableQuantity || 0);
+		quantity.toggleAttribute("aria-invalid", !isQuantityValid || isStashInsufficient);
+		if (!selectedItem || !selectedTargets.length) {
+			previewSummary.textContent = "Choose an item and at least one recipient to preview this award.";
+		} else {
+			previewSummary.textContent = `${perTargetQuantity || 0} × ${selectedItem.name} for ${selectedTargets.length} recipient${selectedTargets.length === 1 ? "" : "s"}.`;
+		}
+		if (isStashInsufficient) {
+			previewWarning.textContent = `The party stash has ${selectedItem.availableQuantity}; this award needs ${requiredFromStash}. Nothing will move unless the full batch is available.`;
+		} else if (preview.rows.some(row => row.state === "lower_bound")) {
+			previewWarning.textContent = "At least one carry total is a lower bound. The server will not block this advisory award.";
+		} else if (preview.rows.some(row => row.state === "unavailable")) {
+			previewWarning.textContent = "At least one carry preview is unavailable. No hidden load or capacity was inferred.";
+		} else {
+			previewWarning.textContent = selectedItem && selectedTargets.length
+				? "Carry is advisory; the authoritative item arrives only after the whole batch commits."
+				: "";
+		}
+		submit.disabled = !selectedItem
+			|| !selectedTargets.length
+			|| !isQuantityValid
+			|| isStashInsufficient
+			|| preview.isPolicyBlocked;
+	};
+
+	const renderTargets = () => {
+		const availableIds = new Set(currentTargets.map(getProjectionId));
+		for (const id of [...selectedTargetIds]) {
+			if (!availableIds.has(id)) selectedTargetIds.delete(id);
+		}
+		if (!selectedTargetIds.size && currentTargets[0]) selectedTargetIds.add(getProjectionId(currentTargets[0]));
+		targetsRoot.replaceChildren(...currentTargets.map(target => {
+			const characterId = getProjectionId(target);
+			const label = document.createElement("label");
+			label.className = "hub-item-award__target";
+			const checkbox = document.createElement("input");
+			checkbox.id = `campaign-item-target-${characterId}`;
+			checkbox.type = "checkbox";
+			checkbox.name = "targetCharacter";
+			checkbox.value = characterId;
+			checkbox.checked = selectedTargetIds.has(characterId);
+			checkbox.addEventListener("change", () => {
+				if (checkbox.checked) selectedTargetIds.add(characterId);
+				else selectedTargetIds.delete(characterId);
+				renderPreview();
+			});
+			const text = document.createElement("span");
+			const view = getProjectionView(target);
+			text.textContent = view.classes.length
+				? `${getProjectionName(target)} · ${view.classes.map(cls => `${cls.name} ${cls.level}`).join(" / ")}`
+				: getProjectionName(target);
+			label.append(checkbox, text);
+			return label;
+		}));
+		targetsStatus.textContent = currentTargets.length
+			? `${selectedTargetIds.size} of ${currentTargets.length} eligible character${currentTargets.length === 1 ? "" : "s"} selected.`
+			: "No eligible campaign characters are available.";
+		renderPreview();
+	};
+
+	const renderResults = async () => {
+		const isCatalogSource = ["catalog", "campaign_item"].includes(sourceKind.value);
+		if (isCatalogSource && (sourceKind.value === "campaign_item" || search.value.trim().length >= 2)) {
+			try {
+				await pEnsureCatalog();
+			} catch (error) {
+				results.replaceChildren();
+				resultsStatus.textContent = error.message || "The item catalog could not be loaded.";
+				setFormStatus({formId: "campaign-item-form", message: resultsStatus.textContent, isError: true});
+				return;
+			}
+		}
+		visibleItems = filterAwardItems({
+			items: getSourceItems(),
+			query: search.value,
+			isQueryRequired: sourceKind.value === "catalog",
+		});
+		results.replaceChildren(...visibleItems.map((item, index) => {
+			const option = document.createElement("option");
+			option.value = `${index}`;
+			const amount = item.sourceKind === "party_inventory" ? ` · ${item.availableQuantity} available` : "";
+			option.textContent = `${item.name} — ${item.source}${amount}`;
+			return option;
+		}));
+		useSelection.disabled = !visibleItems.length;
+		if (sourceKind.value === "catalog" && search.value.trim().length < 2) {
+			resultsStatus.textContent = "Type at least 2 characters to load and search the catalog.";
+		} else if (!visibleItems.length) {
+			resultsStatus.textContent = `No ${tabs.find(tab => tab.dataset.itemAwardSource === sourceKind.value)?.textContent.toLowerCase() || ""} items match this search.`;
+		} else {
+			resultsStatus.textContent = `${visibleItems.length}${visibleItems.length === 100 ? "+" : ""} matching item${visibleItems.length === 1 ? "" : "s"}.`;
+		}
+	};
+
+	const clearSelection = () => {
+		selectedItem = null;
+		selectionKey.value = "";
+		selectionSummary.textContent = "No item selected.";
+		renderPreview();
+	};
+
+	const applySelection = () => {
+		const item = visibleItems[Number(results.value)];
+		if (!item) return;
+		selectedItem = item;
+		selectionKey.value = item.sourceKind === "party_inventory"
+			? `${item.sourceKind}:${item.entryId}`
+			: `${item.sourceKind}:${item.name}|${item.source}`;
+		selectionSummary.textContent = `Selected: ${item.name} · ${item.source}${item.sourceKind === "party_inventory" ? ` · ${item.availableQuantity} in the party stash` : ""}`;
+		renderPreview();
+	};
+
+	const setSource = async (nextSource, {isFocusSearch = true} = {}) => {
+		sourceKind.value = nextSource;
+		clearSelection();
+		search.value = "";
+		for (const tab of tabs) {
+			const isSelected = tab.dataset.itemAwardSource === nextSource;
+			tab.setAttribute("aria-selected", `${isSelected}`);
+			tab.tabIndex = isSelected ? 0 : -1;
+		}
+		const activeTab = tabs.find(tab => tab.dataset.itemAwardSource === nextSource);
+		panel?.setAttribute("aria-labelledby", activeTab?.id || "");
+		const labels = {
+			catalog: ["Search the item catalog", "Type at least 2 characters"],
+			recent: ["Search recent awards", "Search by item name or source"],
+			campaign_item: ["Search campaign items", "Search published campaign items"],
+			party_inventory: ["Search the party stash", "Search shared item stacks"],
+		}[nextSource];
+		searchLabel.textContent = labels[0];
+		search.placeholder = labels[1];
+		await renderResults();
+		if (isFocusSearch) search.focus();
+	};
+
+	for (const [index, tab] of tabs.entries()) {
+		tab.addEventListener("click", () => void setSource(tab.dataset.itemAwardSource, {isFocusSearch: false}));
+		tab.addEventListener("keydown", event => {
+			if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+			event.preventDefault();
+			const nextIndex = event.key === "Home"
+				? 0
+				: event.key === "End"
+					? tabs.length - 1
+					: (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+			void setSource(tabs[nextIndex].dataset.itemAwardSource, {isFocusSearch: false})
+				.then(() => tabs[nextIndex].focus());
+		});
+	}
+	search.addEventListener("input", () => {
+		clearSelection();
+		void renderResults();
 	});
-	close?.addEventListener("click", () => {
-		setHidden(wrapper, true);
-		open.focus();
+	results.addEventListener("change", () => {
+		useSelection.disabled = !results.selectedOptions.length;
 	});
-	search.addEventListener("input", renderMatches);
-	results.addEventListener("change", applySelection);
-	results.addEventListener("dblclick", () => {
-		applySelection();
-		setHidden(wrapper, true);
-		open.focus();
-	});
-	name.addEventListener("input", () => {
-		if (isApplyingCatalog) return;
-		isCatalogSelection = false;
-		source.value = "HB";
-		if (summary) summary.textContent = "Custom item · homebrew source";
-	});
+	results.addEventListener("dblclick", applySelection);
+	useSelection.addEventListener("click", applySelection);
+	quantity.addEventListener("input", renderPreview);
+	note.addEventListener("input", () => noteCount.textContent = `${note.value.length} / 500 characters`);
+	renderTargets();
+	await setSource("catalog", {isFocusSearch: false});
+
 	return {
+		focusPrimary () {
+			search.focus();
+		},
+		getSubmission () {
+			return buildAwardSubmission({
+				selectedItem,
+				targets: currentTargets,
+				selectedTargetIds,
+				quantity: quantity.value,
+				note: note.value,
+			});
+		},
+		onSuccess (result) {
+			const awarded = result?.source?.item;
+			if (awarded) {
+				currentEvents = [...currentEvents, {
+					id: `local-${result.awardId}`,
+					sequence: Math.max(0, ...currentEvents.map(event => event.sequence || 0)) + 1,
+					type: "item.granted",
+					payload: {entry: {item: awarded}},
+				}];
+			}
+			selectedItem = null;
+			selectionKey.value = "";
+			selectionSummary.textContent = "No item selected.";
+			quantity.value = "1";
+			note.value = "";
+			noteCount.textContent = "0 / 500 characters";
+			void renderResults();
+			renderPreview();
+		},
 		setCampaignBrewContent (content) {
 			campaignBrewContent = content;
 			catalog = null;
-			search.value = "";
-			results.replaceChildren();
-			setHidden(wrapper, true);
-			if (isCatalogSelection) {
-				name.value = "";
-				source.value = "HB";
-				isCatalogSelection = false;
-				if (summary) summary.textContent = "Custom item · homebrew source";
+			catalogLoad = null;
+			if (sourceKind.value === "campaign_item") {
+				clearSelection();
+				void renderResults();
 			}
-			if (status) status.textContent = "Campaign homebrew changed. Reopen the catalog to use the latest items.";
+		},
+		setEvents (nextEvents) {
+			currentEvents = nextEvents;
+			if (sourceKind.value === "recent") void renderResults();
+		},
+		setPartyInventory (nextPartyInventory) {
+			currentPartyInventory = nextPartyInventory;
+			if (sourceKind.value === "party_inventory") {
+				const refreshedSelection = selectedItem?.sourceKind === "party_inventory"
+					? buildStashAwardItems(currentPartyInventory).find(item => item.entryId === selectedItem.entryId)
+					: null;
+				if (refreshedSelection) {
+					selectedItem = refreshedSelection;
+					selectionKey.value = `${selectedItem.sourceKind}:${selectedItem.entryId}`;
+					selectionSummary.textContent = `Selected: ${selectedItem.name} · ${selectedItem.source} · ${selectedItem.availableQuantity} in the party stash`;
+					renderPreview();
+				} else {
+					clearSelection();
+				}
+				void renderResults();
+			}
+		},
+		setPending (isPending) {
+			if (isPending) {
+				pendingDisabledStates.clear();
+				for (const control of form.querySelectorAll("input, textarea, select, button")) {
+					if (control === submit) continue;
+					pendingDisabledStates.set(control, control.disabled);
+					control.disabled = true;
+				}
+				return;
+			}
+			for (const [control, wasDisabled] of pendingDisabledStates) control.disabled = wasDisabled;
+			pendingDisabledStates.clear();
+		},
+		setTargets (nextTargets) {
+			currentTargets = nextTargets;
+			renderTargets();
 		},
 	};
 }
@@ -754,6 +992,7 @@ async function pInitCampaign ({session}) {
 		targetCharacters: snapshot.characters,
 		members,
 		context,
+		events,
 		pRefreshInvites,
 		roster: snapshot.roster || [],
 	});
@@ -812,6 +1051,7 @@ async function pInitCampaign ({session}) {
 					charactersNxt,
 					targetCharactersNxt: liveCharacters,
 					membersNxt,
+					eventsNxt: liveEvents,
 				}),
 			]);
 		} catch (error) {
@@ -1222,12 +1462,13 @@ function getFormFingerprint (form) {
 				: ["checkbox", "radio"].includes(control.type)
 					? control.checked
 					: control.value,
-		]));
+		])
+		.sort(([idA], [idB]) => idA.localeCompare(idB)));
 }
 
-async function pRunFormMutation ({form, fnMutate}) {
+async function pRunFormMutation ({form, fingerprint, fnMutate}) {
 	if (form._hubIsSubmitting) return null;
-	const fingerprint = getFormFingerprint(form);
+	if (typeof fingerprint !== "string") throw new TypeError("A mutation fingerprint is required.");
 	if (form._hubMutationFingerprint !== fingerprint) {
 		form._hubMutationFingerprint = fingerprint;
 		form._hubMutationKey = crypto.randomUUID();
@@ -1259,7 +1500,7 @@ async function pRunFormMutation ({form, fnMutate}) {
 	}
 }
 
-async function pInitCampaignForms ({campaign, campaignId, session, characters, targetCharacters, members, context, pRefreshInvites, roster = []}) {
+async function pInitCampaignForms ({campaign, campaignId, session, characters, targetCharacters, members, context, events = [], pRefreshInvites, roster = []}) {
 	// Roster metadata travels beside the projections and is refreshed with them.
 	const rosterRef = {current: roster};
 	const inviteForm = document.getElementById("campaign-invite-form");
@@ -1283,6 +1524,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		setFormStatus({formId: "campaign-invite-form"});
 		try {
 			await pRunFormMutation({form: event.currentTarget,
+				fingerprint: getFormFingerprint(event.currentTarget),
 				fnMutate: async idempotencyKey => {
 					const role = document.getElementById("campaign-invite-role").value;
 					const result = await api.pCreateInvite({campaignId, role, idempotencyKey});
@@ -1386,11 +1628,13 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 	const dmScreenLink = document.getElementById("campaign-open-dm-screen");
 	if (dmScreenLink) dmScreenLink.href = `dmscreen.html?hubCampaign=${encodeURIComponent(campaignId)}`;
 	let partyInventory = await api.pGetPartyInventory({campaignId});
+	const itemAward = await pInitItemAwardComposer({context, partyInventory, targetCharacters, events});
 	const pRefreshTransferState = async ({
 		charactersNxt = null,
 		targetCharactersNxt = null,
 		membersNxt = null,
 		partyInventoryNxt = null,
+		eventsNxt = null,
 	} = {}) => {
 		const source = document.getElementById("campaign-transfer-source");
 		const target = document.getElementById("campaign-transfer-target");
@@ -1411,6 +1655,9 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		if (snapshotLatest?.roster) rosterRef.current = snapshotLatest.roster;
 		if (membersNxt) members.splice(0, members.length, ...membersNxt);
 		partyInventory = partyInventoryNxt || partyInventoryLatest;
+		if (eventsNxt) itemAward.setEvents(eventsNxt);
+		itemAward.setTargets(targetCharacters);
+		itemAward.setPartyInventory(partyInventory);
 
 		fillCharacterSelect(source, characters, {
 			includeParty: isDm,
@@ -1451,7 +1698,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 	});
 
 	fillCharacterSelect(document.getElementById("campaign-action-target"), getTargetableProjections({projections: targetCharacters, roster: rosterRef.current}));
-	for (const id of ["campaign-xp-target", "campaign-item-target"]) fillCharacterSelect(document.getElementById(id), characters);
+	fillCharacterSelect(document.getElementById("campaign-xp-target"), characters);
 	document.getElementById("campaign-transfer-source")?.addEventListener("change", () => syncTransferItemPicker({characters, partyInventory}));
 	document.getElementById("campaign-transfer-entry")?.addEventListener("change", syncTransferQuantity);
 	setFormAvailability({
@@ -1464,13 +1711,16 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		isAvailable: !!document.getElementById("campaign-transfer-source")?.options.length,
 		message: "Add one of your characters before starting a transfer.",
 	});
-	for (const formId of ["campaign-xp-form", "campaign-item-form"]) {
-		setFormAvailability({
-			formId,
-			isAvailable: !!characters.length,
-			message: "Add a campaign character before using this grant.",
-		});
-	}
+	setFormAvailability({
+		formId: "campaign-xp-form",
+		isAvailable: !!characters.length,
+		message: "Add a campaign character before using this grant.",
+	});
+	setFormAvailability({
+		formId: "campaign-item-form",
+		isAvailable: !!targetCharacters.length,
+		message: "Add an eligible campaign character before awarding an item.",
+	});
 
 	const actionType = document.getElementById("campaign-action-type");
 	const actionValue = document.getElementById("campaign-action-value");
@@ -1509,6 +1759,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		setFormStatus({formId});
 		try {
 			await pRunFormMutation({form: event.currentTarget,
+				fingerprint: getFormFingerprint(event.currentTarget),
 				fnMutate: async idempotencyKey => {
 					const type = document.getElementById("campaign-action-type").value;
 					const rawValue = document.getElementById("campaign-action-value").value.trim();
@@ -1572,6 +1823,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		setFormStatus({formId});
 		try {
 			await pRunFormMutation({form: event.currentTarget,
+				fingerprint: getFormFingerprint(event.currentTarget),
 				fnMutate: idempotencyKey => api.pGrantXp({
 					campaignId,
 					characterId: document.getElementById("campaign-xp-target").value.split(":")[1],
@@ -1588,31 +1840,49 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		}
 	});
 
-	const itemCatalog = await pInitGrantItemCatalog({context});
 	document.getElementById("campaign-item-form")?.addEventListener("submit", async event => {
 		event.preventDefault();
 		const formId = "campaign-item-form";
 		setFormStatus({formId});
+		renderError(null);
+		let isAwardComplete = false;
 		try {
-			await pRunFormMutation({form: event.currentTarget,
-				fnMutate: idempotencyKey => api.pGrantItem({
-					campaignId,
-					characterId: document.getElementById("campaign-item-target").value.split(":")[1],
-					item: {
-						name: document.getElementById("campaign-item-name").value,
-						source: document.getElementById("campaign-item-source").value || "HB",
-					},
-					quantity: Number(document.getElementById("campaign-item-quantity").value) || 1,
-					idempotencyKey,
-				})});
-			setFormStatus({formId, message: "Item granted."});
-			document.getElementById("campaign-item-name").value = "";
-			document.getElementById("campaign-item-source").value = "HB";
-			document.getElementById("campaign-item-quantity").value = "1";
-			document.getElementById("campaign-item-selection-summary").textContent = "Custom item · homebrew source";
+			const submission = itemAward.getSubmission();
+			let result;
+			await pRunFormMutation({
+				form: event.currentTarget,
+				fingerprint: getAwardCommandFingerprint(submission),
+				fnMutate: async idempotencyKey => {
+					itemAward.setPending(true);
+					result = await api.pAwardItems({
+						campaignId,
+						...submission,
+						idempotencyKey,
+					});
+				},
+			});
+			itemAward.onSuccess(result);
+			setFormStatus({
+				formId,
+				message: `${submission.quantity} × ${result.source.item.name} awarded to ${result.targets.length} character${result.targets.length === 1 ? "" : "s"}.`,
+			});
+			try {
+				await pRefreshTransferState();
+			} catch {
+				setFormStatus({
+					formId,
+					message: "Items awarded, but the latest campaign balances could not be loaded. Reload before awarding from the party stash again.",
+					isError: true,
+				});
+			}
+			isAwardComplete = true;
 		} catch (error) {
-			setFormStatus({formId, message: getErrorMessage(error), isError: true});
+			const message = error instanceof HubApiError ? getErrorMessage(error) : error.message;
+			setFormStatus({formId, message, isError: true});
 			if (error instanceof HubApiError) renderError(error);
+		} finally {
+			itemAward.setPending(false);
+			if (isAwardComplete) itemAward.focusPrimary();
 		}
 	});
 
@@ -1622,6 +1892,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		setFormStatus({formId});
 		try {
 			await pRunFormMutation({form: event.currentTarget,
+				fingerprint: getFormFingerprint(event.currentTarget),
 				fnMutate: async idempotencyKey => {
 					const [sourceKind, sourceId] = document.getElementById("campaign-transfer-source").value.split(":");
 					const [targetKind, targetId] = document.getElementById("campaign-transfer-target").value.split(":");
@@ -1691,6 +1962,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		}
 		try {
 			await pRunFormMutation({form: event.currentTarget,
+				fingerprint: getFormFingerprint(event.currentTarget),
 				fnMutate: async idempotencyKey => {
 					const parsed = JSON.parse(await file.text());
 					const brewDocs = Array.isArray(parsed)
@@ -1710,7 +1982,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					});
 					const contextNxt = await api.pGetCampaignContext({campaignId});
 					renderCampaignContext(contextNxt);
-					itemCatalog.setCampaignBrewContent(contextNxt.brewBundle?.content);
+					itemAward.setCampaignBrewContent(contextNxt.brewBundle?.content);
 					setFormStatus({formId: "campaign-brew-form", message: "Campaign homebrew published."});
 				}});
 		} catch (error) {
@@ -1726,6 +1998,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		setFormStatus({formId: "campaign-rules-form"});
 		try {
 			await pRunFormMutation({form: event.currentTarget,
+				fingerprint: getFormFingerprint(event.currentTarget),
 				fnMutate: async idempotencyKey => {
 					const rules = {
 						enableTgtt: document.getElementById("campaign-rule-tgtt").checked,

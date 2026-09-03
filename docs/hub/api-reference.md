@@ -156,10 +156,19 @@ Character data is sanitized/validated and capped at 1.5 MB after the resulting m
 | `POST /api/campaigns/:campaignId/actions` | DM/co-DM/player mutation; spectator denied | Direct DM/co-DM command or source-derived peer proposal, below | 201 stable operation/lifecycle metadata; direct authority is already `applied`, peer authority is `proposed` |
 | `POST /api/campaigns/:campaignId/actions/:operationId/resolve` | Target owner, proposer, or DM/co-DM according to decision | `{commandId, decision}` where decision is `accept`, `reject`, or `cancel` | Stable operation/lifecycle metadata; acceptance returns the applied revision/watermark |
 | `POST /api/campaigns/:campaignId/characters/:characterId/xp-grants` | DM/co-DM mutation | integer amount 1-1,000,000; reason <=500 | Updated character |
-| `POST /api/campaigns/:campaignId/characters/:characterId/item-grants` | DM/co-DM mutation | item object; quantity 1-100,000 | Updated character + stable new entry |
+| `POST /api/campaigns/:campaignId/characters/:characterId/item-grants` | DM/co-DM mutation | bounded safe item summary; quantity 1-100,000 | Compatibility route: updated character + stable entry |
+| `POST /api/campaigns/:campaignId/item-awards` | DM/co-DM mutation | source union; 1-50 ordered unique character UUIDs; quantity 1-100,000 each; note <=500 | One atomic award response in request target order |
 
 Every semantic command uses a UUID `commandId` equal to `Idempotency-Key`. Exact retries return the stored
 operation and event ids; any actor/body reuse returns `IDEMPOTENCY_KEY_REUSED`.
+
+The item-award source is either `{kind:"party_inventory",entryId}` or
+`{kind:"catalog"|"recent"|"campaign_item",item}`. A browser-supplied item is restricted to `name`, `source`,
+`page`, `rarity`, `weight`, `value`, `typeCode`, and `edition`; unknown/rich/executable content is rejected and
+the BFF does not load the site catalog. A stash award derives content from the locked authoritative stack and
+debits `quantity * targetCharacterIds.length` once. All targets, the optional stash debit, one batch audit, the
+ordered per-target grant/projection events, the optional stash invalidation, and the receipt commit together or
+not at all. Exact retries replay the same ordered response without another debit or grant.
 
 Direct DM/co-DM body:
 
@@ -254,7 +263,7 @@ Campaign role alone does not permit reading another DM's workspace.
 | Concurrency/lifecycle conflicts | `REVISION_CONFLICT`, `LEASE_HELD`, `LEASE_EXPIRED`, `LEASE_FENCED`, `CHARACTER_BUSY`, `CAMPAIGN_BUSY`, `MEMBERSHIP_OWNER_PROTECTED`, `ACCOUNT_OWNS_CAMPAIGN` |
 | Character/cloud content | `CHARACTER_INVALID`, `CHARACTER_TOO_LARGE`, `CLOUD_DATA_INVALID`, `CLOUD_DATA_TOO_LARGE`, `CLOUD_DATA_TOO_DEEP`, `CLOUD_HTML_FORBIDDEN`, `CLOUD_URL_FORBIDDEN`, `CLOUD_KEY_FORBIDDEN` |
 | Campaign content | `BREW_INVALID`, `BREW_TOO_LARGE`, `BREW_TOO_DEEP`, `BREW_BLOCKLIST_FORBIDDEN`, `BREW_RAW_HTML_FORBIDDEN`, `BREW_URL_FORBIDDEN`, `BREW_KEY_FORBIDDEN`, `BREW_DEPENDENCY_MISSING`, `RULES_INVALID`; generic `CLOUD_DATA_INVALID`, `CLOUD_DATA_TOO_LARGE`, or `CLOUD_DATA_TOO_DEEP` may surface from the shared JSON-safety pass |
-| Actions/transfers | `ACTION_INVALID`, `OPERATION_FORBIDDEN`, `SOURCE_OR_TARGET_UNAVAILABLE`, `SOURCE_COST_UNSUPPORTED`, `PROPOSAL_STALE`, `RESOURCE_INSUFFICIENT`, `NUMERIC_INVALID`, `TRANSFER_EMPTY`, `TRANSFER_INSUFFICIENT`, `TRANSFER_ITEM_LINKED`, `TRANSFER_TARGET_INVALID` |
+| Actions/transfers/awards | `ACTION_INVALID`, `OPERATION_FORBIDDEN`, `SOURCE_OR_TARGET_UNAVAILABLE`, `SOURCE_COST_UNSUPPORTED`, `PROPOSAL_STALE`, `RESOURCE_INSUFFICIENT`, `NUMERIC_INVALID`, `ITEM_AWARD_INVALID`, `ITEM_AWARD_SOURCE_NOT_FOUND`, `TRANSFER_EMPTY`, `TRANSFER_INSUFFICIENT`, `TRANSFER_ITEM_LINKED`, `TRANSFER_TARGET_INVALID` |
 | Availability | `DATABASE_UNAVAILABLE`, `INTERNAL_ERROR` |
 
 Most validation/domain errors default to 400. Authorization uses 401/403, hidden/unavailable resources use

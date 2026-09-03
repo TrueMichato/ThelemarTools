@@ -177,4 +177,38 @@ describe("hub API client", () => {
 			["/api/characters/character/lease/release", "POST"],
 		]);
 	});
+
+	it("sends one idempotent item-award batch", async () => {
+		const calls = [];
+		const client = new HubApiClient({
+			fnFetch: async (path, opts = {}) => {
+				calls.push({path, opts});
+				if (path === "/api/session") return getResponse({body: {signedIn: true, csrfToken: "csrf-1"}});
+				return getResponse({body: {awardId: "award-1", targets: []}});
+			},
+		});
+		await client.pGetSession();
+		await client.pAwardItems({
+			campaignId: "campaign",
+			source: {kind: "catalog", item: {name: "Rope", source: "PHB", weight: 10}},
+			targetCharacterIds: ["character-1", "character-2"],
+			quantity: 2,
+			note: "For the climb",
+			idempotencyKey: "award-key",
+		});
+
+		expect(calls[1]).toEqual(expect.objectContaining({
+			path: "/api/campaigns/campaign/item-awards",
+			opts: expect.objectContaining({
+				method: "POST",
+				body: JSON.stringify({
+					source: {kind: "catalog", item: {name: "Rope", source: "PHB", weight: 10}},
+					targetCharacterIds: ["character-1", "character-2"],
+					quantity: 2,
+					note: "For the climb",
+				}),
+				headers: expect.objectContaining({"idempotency-key": "award-key"}),
+			}),
+		}));
+	});
 });

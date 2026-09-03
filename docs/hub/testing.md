@@ -249,6 +249,13 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
 - Transfer acceptance refreshes canonical character documents, shared inventory, balances, source/target/item
   pickers, and the inbox together; the lifecycle journey proves the accepted item is immediately selectable
   from party inventory without reloading.
+- Item-award regressions mutation-verify role/tenant/target gates, strict source and note/quantity bounds,
+  multi-target rollback, exact retry and concurrent duplicate behavior, stash conservation under contention,
+  memory/PostgreSQL parity, carry invalidation, stable audit/event/projection ordering, privacy-safe preview
+  states, normalized retry identity, and open-sheet authoritative reconciliation. The real-stack lifecycle
+  commits a multi-character catalog award behind a lost response, changes incidental form state, retries with
+  the same key, observes exactly one live arrival on an already-open owner sheet, then awards a transferred
+  stash stack without loss or duplication.
 - The saturation scenario runs after the interactive journeys, writes 500 rolls, exercises six members, large
   character documents and transfer contention, then waits for the transactional outbox to drain completely
   before cleanup.

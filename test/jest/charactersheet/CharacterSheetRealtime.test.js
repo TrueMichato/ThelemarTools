@@ -344,9 +344,29 @@ describe("Character Sheet realtime coordinator", () => {
 			payload: {...event.payload, sourceKind: "character", sourceId: "other", targetId: "another"},
 		});
 		clients[0].emit("event", {
-			id: "stash-invalidation",
+			id: "item-award",
 			campaignId: "campaign-1",
 			sequence: 13,
+			type: "item.granted",
+			aggregateType: "character",
+			aggregateId: "character-1",
+			aggregateRevision: 4,
+			payload: {entry: {id: "private-entry-id", item: {name: "Rope", source: "PHB"}, quantity: 1}},
+		});
+		clients[0].emit("event", {
+			id: "other-item-award",
+			campaignId: "campaign-1",
+			sequence: 14,
+			type: "item.granted",
+			aggregateType: "character",
+			aggregateId: "other",
+			aggregateRevision: 8,
+			payload: {entry: {id: "other-private-entry", item: {name: "Torch", source: "PHB"}, quantity: 1}},
+		});
+		clients[0].emit("event", {
+			id: "stash-invalidation",
+			campaignId: "campaign-1",
+			sequence: 15,
 			type: "party_inventory.invalidated",
 			aggregateType: "campaign",
 			aggregateId: "campaign-1",
@@ -364,9 +384,17 @@ describe("Character Sheet realtime coordinator", () => {
 				isPartyInventoryAffected: true,
 			},
 			{
-				eventId: "stash-invalidation",
+				eventId: "item-award",
 				campaignId: "campaign-1",
 				sequence: 13,
+				type: "item.granted",
+				isCurrentCharacterAffected: true,
+				isPartyInventoryAffected: false,
+			},
+			{
+				eventId: "stash-invalidation",
+				campaignId: "campaign-1",
+				sequence: 15,
 				type: "party_inventory.invalidated",
 				isCurrentCharacterAffected: false,
 				isPartyInventoryAffected: true,

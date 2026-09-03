@@ -34,6 +34,7 @@ rather than inferring deployment or enablement from merged code.
 | **active** | V1 external Oracle host-operations proof | Blocked pending real-host release/induced-failure evidence, timers, encrypted off-machine backup, isolated restore, and rollback proof |
 | **active** | V1 physical game day | Blocked on V1-G1; complete the one-DM/two-player session on physical devices and record the go/no-go evidence |
 | **active** | V2-T2 projection/privacy foundation | Architecture/contract work remains active after ADR 0011; feature implementation and enablement are not shipped |
+| **active** | V2-T4 party inventory, carry, and item awards | The atomic DM multi-character award slice is implemented; broader player/party inventory and carry policy work remains |
 | **next** | V2 feature enablement | Enable each accepted train independently after its architecture, capability, and operational gates pass |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
 
@@ -256,7 +257,7 @@ Acceptance:
 - unsupported or policy-forbidden effects do not partially mutate a character;
 - local sheets and campaigns without the capability retain current behavior.
 
-### V2-T4 — party inventory, carry, and item awards (**next**)
+### V2-T4 — party inventory, carry, and item awards (**active — DM award slice implemented**)
 
 Dependency: V2-T2. It reuses the existing authoritative party inventory, grant, and transfer primitives.
 
@@ -274,6 +275,18 @@ Acceptance:
 - no award or transfer duplicates, loses, or silently rewrites item metadata;
 - carry rules identify their campaign policy/edition and warnings explain unsupported/custom cases;
 - permission, contention, near-limit, reconnect, rollback, and mobile-accessibility tests pass.
+
+Implemented slice:
+
+- one atomic idempotent DM/co-DM batch from catalog, recent awards, campaign items, or the authoritative stash;
+- ordered multi-character grants, one conserved stash debit, strict safe item summaries, bounded notes, and carry
+  invalidation;
+- privacy-safe known/lower-bound/unavailable preview states and live authoritative Character Sheet arrival;
+- memory/PostgreSQL parity, authorization/idempotency/contention/event ordering, rendered UI, and real-stack
+  coverage.
+
+Remaining T4 scope includes the broader first-class player party-inventory experience and enforced campaign carry
+policy. Advisory warnings do not claim that those later policy decisions are active.
 
 ### V2-T5 — whole-site campaign context per browser/device (**contract shipped; next enablement**)
 

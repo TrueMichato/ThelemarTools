@@ -239,6 +239,15 @@ Partial stack transfer is allowed because the source wrapper remains. Cross-cont
 ownership-local equipped/attuned/starred state and mints a new id unless full wrapper metadata is merge
 compatible. Restore preserves source identity/index.
 
+## Atomic item-award invariant
+
+A DM/co-DM award is one command for an ordered unique target set. Every target receives the same whole-number
+quantity, or no target changes. A stash-backed award locks and debits the selected authoritative stack once for
+the full `quantity * target count`, preserves transferable stack metadata through the existing inventory
+normalization, and commits that debit with every destination write. Catalog-like sources carry only bounded safe
+summary metadata. All destination inventory changes delete derived `data.carry` authority instead of
+recomputing it without a Character Sheet.
+
 ## Known domain gaps
 
 - active enforcement of pending-action/transfer `expires_at`;

@@ -714,6 +714,26 @@ export class HubCampaignPage {
 		).toBe("live");
 	}
 
+	async expectLiveAwardArrival ({
+		itemName,
+		source,
+		quantity,
+	}: {
+		itemName: string;
+		source: string;
+		quantity: number;
+	}): Promise<void> {
+		await expect.poll(() => this.page.evaluate(
+			({itemNameNxt, sourceNxt}) => {
+				const inventory = (window as any).charSheet?._state?._data?.inventory || [];
+				return inventory
+					.filter((entry: any) => entry.item?.name === itemNameNxt && entry.item?.source === sourceNxt)
+					.reduce((total: number, entry: any) => total + Number(entry.quantity || 0), 0);
+			},
+			{itemNameNxt: itemName, sourceNxt: source},
+		), {timeout: 15_000}).toBe(quantity);
+	}
+
 	async editCharacterHpAndRollInitiative ({campaignId, characterId, name, hp}: {campaignId: string; characterId: string; name: string; hp: number}): Promise<void> {
 		await this.openCharacterSheet({campaignId, characterId, name});
 		await this.page.locator("#charsheet-ipt-hp-current").fill(`${hp}`);
@@ -869,17 +889,141 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-xp-form button[type='submit']")).toBeEnabled();
 	}
 
-	async grantCatalogItem ({campaignId, characterName, itemName, source}: {campaignId: string; characterName: string; itemName: string; source: string}): Promise<void> {
+	private async selectItemAwardTargets (characterNames: string[]): Promise<void> {
+		for (const checkbox of await this.page.locator("#campaign-item-targets input[type='checkbox']").all()) {
+			await checkbox.uncheck();
+		}
+		for (const characterName of characterNames) {
+			const target = this.page.locator("#campaign-item-targets .hub-item-award__target", {hasText: characterName});
+			await expect(target).toHaveCount(1);
+			await target.locator("input[type='checkbox']").check();
+		}
+	}
+
+	async awardCatalogItems ({
+		campaignId,
+		characterNames,
+		itemName,
+		source,
+		quantity,
+		note,
+	}: {
+		campaignId: string;
+		characterNames: string[];
+		itemName: string;
+		source: string;
+		quantity: number;
+		note?: string;
+	}): Promise<void> {
 		await this.gotoCampaign(campaignId);
 		await expect(this.page.locator("#campaign-transfer-source option")).toHaveText(["Party inventory"]);
-		await this.page.locator("#campaign-item-target").selectOption({label: characterName});
-		await this.page.locator("#campaign-item-catalog-open").click();
-		await expect(this.page.locator("#campaign-item-catalog")).toBeVisible();
-		await this.page.locator("#campaign-item-catalog-search").fill(itemName);
-		await this.page.locator("#campaign-item-catalog-results").selectOption({label: `${itemName} — ${source}`});
+		const catalogTab = this.page.locator("#campaign-item-source-catalog");
+		const stashTab = this.page.locator("#campaign-item-source-stash");
+		await catalogTab.focus();
+		await catalogTab.press("End");
+		await expect(stashTab).toHaveAttribute("aria-selected", "true");
+		await expect(stashTab).toBeFocused();
+		await stashTab.press("Home");
+		await expect(catalogTab).toHaveAttribute("aria-selected", "true");
+		await expect(catalogTab).toBeFocused();
+		const search = this.page.locator("#campaign-item-search");
+		await search.fill(itemName);
+		await this.page.locator("#campaign-item-results").selectOption({label: `${itemName} — ${source}`});
+		await this.page.locator("#campaign-item-use-selection").click();
 		await expect(this.page.locator("#campaign-item-selection-summary")).toContainText(`${itemName} · ${source}`);
+		await this.selectItemAwardTargets(characterNames);
+		await this.page.locator("#campaign-item-quantity").fill(`${quantity}`);
+		if (note) await this.page.locator("#campaign-item-note").fill(note);
+		await expect(this.page.locator("#campaign-item-preview-summary"))
+			.toHaveText(`${quantity} × ${itemName} for ${characterNames.length} recipient${characterNames.length === 1 ? "" : "s"}.`);
+		await this.page.setViewportSize({width: 390, height: 844});
+		await this._expectCurrentHubSurfaceAccessible();
+		await this.page.setViewportSize({width: 1280, height: 720});
+
+		const requestUrl = `**/api/campaigns/${campaignId}/item-awards`;
+		const idempotencyKeys: string[] = [];
+		let attempt = 0;
+		let releaseSuccess: (() => void) | null = null;
+		let resolveSuccessHandled: (() => void) | null = null;
+		const successGate = new Promise<void>(resolve => releaseSuccess = resolve);
+		const successHandled = new Promise<void>(resolve => resolveSuccessHandled = resolve);
+		await this.page.route(requestUrl, async route => {
+			idempotencyKeys.push(route.request().headers()["idempotency-key"]);
+			if (++attempt === 1) {
+				const committed = await route.fetch();
+				expect(committed.ok()).toBe(true);
+				await route.fulfill({
+					status: 503,
+					contentType: "application/json",
+					body: JSON.stringify({error: "HUB_UNAVAILABLE"}),
+				});
+				return;
+			}
+			await successGate;
+			try {
+				await route.continue();
+			} finally {
+				resolveSuccessHandled();
+			}
+		});
+		const form = this.page.locator("#campaign-item-form");
+		const submit = form.locator("button[type='submit']");
+		const status = this.page.locator("#campaign-item-form-status");
+		try {
+			await submit.click();
+			await expect(status).toContainText("temporarily unavailable");
+			await expect(submit).toBeEnabled();
+			await this.page.locator("#campaign-item-note").fill(`  ${note || ""}  `);
+			await form.evaluate(element => {
+				const incidental = document.createElement("input");
+				incidental.id = "campaign-item-incidental-unchecked-target";
+				incidental.type = "checkbox";
+				element.append(incidental);
+			});
+
+			await submit.click();
+			await expect(form).toHaveAttribute("aria-busy", "true");
+			await expect(submit).toBeDisabled();
+			await expect(submit).toHaveText("Awarding items...");
+			await expect(search).toBeDisabled();
+			releaseSuccess();
+			await expect(status)
+				.toHaveText(`${quantity} × ${itemName} awarded to ${characterNames.length} character${characterNames.length === 1 ? "" : "s"}.`);
+			expect(idempotencyKeys).toHaveLength(2);
+			expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
+			await expect(search).toBeFocused();
+			await expect(this.page.locator("#hub-error")).toBeHidden();
+		} finally {
+			releaseSuccess?.();
+			if (attempt > 1) await successHandled;
+			await this.page.unroute(requestUrl);
+		}
+	}
+
+	async awardStashItems ({
+		campaignId,
+		characterNames,
+		itemName,
+		source,
+		quantity,
+	}: {
+		campaignId: string;
+		characterNames: string[];
+		itemName: string;
+		source: string;
+		quantity: number;
+	}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		await this.page.locator("#campaign-item-source-stash").click();
+		await this.page.locator("#campaign-item-results").selectOption({
+			label: `${itemName} — ${source} · ${quantity * characterNames.length} available`,
+		});
+		await this.page.locator("#campaign-item-use-selection").click();
+		await this.selectItemAwardTargets(characterNames);
+		await this.page.locator("#campaign-item-quantity").fill(`${quantity}`);
 		await this.page.locator("#campaign-item-form button[type='submit']").click();
-		await expect(this.page.locator("#campaign-item-form-status")).toHaveText("Item granted.");
+		await expect(this.page.locator("#campaign-item-form-status"))
+			.toHaveText(`${quantity} × ${itemName} awarded to ${characterNames.length} character${characterNames.length === 1 ? "" : "s"}.`);
 	}
 
 	async applyDamage ({campaignId, characterName, amount}: {campaignId: string; characterName: string; amount: number}): Promise<void> {

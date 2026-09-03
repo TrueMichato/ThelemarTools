@@ -19,10 +19,37 @@ describe("Hub item catalog", () => {
 		});
 
 		expect(catalog).toEqual([
-			{name: "Longsword", source: "PHB"},
-			{name: "Moon Blade", source: "TGTT"},
-			{name: "Potion of Healing", source: "DMG"},
+			{name: "Longsword", source: "PHB", sourceKind: "catalog"},
+			{name: "Moon Blade", source: "TGTT", sourceKind: "campaign_item"},
+			{name: "Potion of Healing", source: "DMG", sourceKind: "catalog"},
 		]);
+	});
+
+	it("keeps only bounded award metadata from catalog entities", () => {
+		expect(buildHubItemCatalog({
+			items: {item: [{
+				name: "Moon-Touched Sword",
+				source: "XGE",
+				page: 138,
+				rarity: "common",
+				type: "M",
+				weight: 3,
+				value: 1500,
+				edition: "classic",
+				entries: ["This rich content must not enter an award request."],
+				_onClick: "alert(1)",
+			}]},
+		})).toEqual([{
+			name: "Moon-Touched Sword",
+			source: "XGE",
+			sourceKind: "catalog",
+			page: 138,
+			rarity: "common",
+			typeCode: "M",
+			weight: 3,
+			value: 1500,
+			edition: "classic",
+		}]);
 	});
 
 	it("loads only the two item data files on demand", async () => {
@@ -34,8 +61,8 @@ describe("Hub item catalog", () => {
 		}));
 
 		await expect(pLoadHubItemCatalog({fnFetch})).resolves.toEqual([
-			{name: "Bag of Holding", source: "DMG"},
-			{name: "Club", source: "PHB"},
+			{name: "Bag of Holding", source: "DMG", sourceKind: "catalog"},
+			{name: "Club", source: "PHB", sourceKind: "catalog"},
 		]);
 		expect(fnFetch.mock.calls.map(([url]) => url)).toEqual(["data/items.json", "data/items-base.json"]);
 	});

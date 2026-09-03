@@ -27,6 +27,7 @@ documents into tickets/logs.
 | Outbox rows fail/retry | earliest failed campaign event | dispatcher/store/network | fix first event cause; preserve campaign order |
 | Party Tracker rows disappear | campaign snapshot/membership | linked projection is intentionally unsaved | restore connectivity/context; do not duplicate locally |
 | Transfer is stuck reserved | source/target status, membership, escrow | transfer lifecycle | resolve/cancel through authoritative command/runbook |
+| Item award is missing, duplicated, or stash count is wrong | request/idempotency key, `item.award_batch` audit, ordered `item.granted` events, character/stash revisions | award receipt, target locks, stash transaction, outbox/reconciliation | stop further inventory mutations for the campaign; preserve ids/counts and follow the incident runbook rather than compensating manually |
 | Backup command fails | libpq env, target existence, role | `backup.mjs`, provider access | choose a new encrypted target; never overwrite evidence |
 | Restore fails | empty drill DB, archive integrity, role/version | `restore.mjs`, provider tools | keep source backup immutable; capture full tool error |
 

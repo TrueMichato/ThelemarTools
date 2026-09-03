@@ -205,12 +205,22 @@ describe("campaign hub pages", () => {
 		}
 		expect(campaignHtml).toContain("<option value=\"spell_slot_spend\">");
 		expect(campaignHtml).toMatch(/id="campaign-action-slot-amount"[^>]+required/);
-		expect(campaignHtml).toContain("id=\"campaign-item-catalog-open\"");
+		for (const itemSource of ["catalog", "recent", "campaign", "stash"]) {
+			expect(campaignHtml).toContain(`id="campaign-item-source-${itemSource}"`);
+		}
+		expect(campaignHtml).toContain("id=\"campaign-item-targets\"");
+		expect(campaignHtml).toContain("id=\"campaign-item-preview-list\"");
+		expect(campaignHtml).toContain("maxlength=\"500\"");
+		expect(campaignHtml).toContain("role=\"tablist\"");
 		expect(source).toContain("import(\"./hub-item-catalog.js\")");
 		expect(source).toContain("ownerAccountId: session.account.id");
-		expect(source).toContain("itemCatalog.setCampaignBrewContent");
+		expect(source).toContain("itemAward.setCampaignBrewContent");
+		expect(source).toContain("api.pAwardItems");
+		expect(source).toContain("fingerprint: getAwardCommandFingerprint(submission)");
+		expect(source).toContain(".sort(([idA], [idB]) => idA.localeCompare(idB))");
 		expect(source).toContain("getTransferContentsDescription(transfer)");
 		expect(campaignHtml).not.toContain("Item entry ID");
+		expect(campaignHtml).not.toContain("Custom item name");
 	});
 
 	it("loads the same hub client on both surfaces", () => {

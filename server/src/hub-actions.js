@@ -16,6 +16,17 @@ export {
 } from "../../js/hub/hub-semantic-operations.js";
 
 export const CURRENCY_TYPES = Object.freeze(["cp", "sp", "ep", "gp", "pp"]);
+export const SAFE_ITEM_SUMMARY_FIELDS = Object.freeze([
+	"name",
+	"source",
+	"page",
+	"rarity",
+	"weight",
+	"value",
+	"typeCode",
+	"edition",
+]);
+export const ITEM_AWARD_SOURCE_KINDS = Object.freeze(["catalog", "recent", "campaign_item", "party_inventory"]);
 export const STRUCTURED_EFFECT_TYPES = Object.freeze([
 	"damage",
 	"healing",
@@ -35,6 +46,141 @@ function getFiniteNumber (value, {label, fallback = 0, minimum = 0, isInteger = 
 		|| (isInteger && !Number.isSafeInteger(number))
 	) throw new HubStoreError("NUMERIC_INVALID", `${label} must be a finite safe${isInteger ? " integer" : " number"}.`);
 	return number;
+}
+
+function throwItemAwardInvalid (message) {
+	throw new HubStoreError("ITEM_AWARD_INVALID", message);
+}
+
+function isPlainObject (value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const prototype = Object.getPrototypeOf(value);
+	return prototype === null || Object.prototype.toString.call(value) === "[object Object]";
+}
+
+function assertExactKeys (value, allowedKeys, label) {
+	if (!isPlainObject(value)) throwItemAwardInvalid(`${label} must be an object.`);
+	const unknownKey = Object.keys(value).find(key => !allowedKeys.includes(key));
+	if (unknownKey) throwItemAwardInvalid(`${label} contains an unsupported field.`);
+}
+
+function normalizeSafeItemString (value, {label, maxLength, isRequired = false}) {
+	if (value == null && !isRequired) return null;
+	if (typeof value !== "string" || value.length > maxLength) {
+		throwItemAwardInvalid(`${label} must be a string of at most ${maxLength} characters.`);
+	}
+	const normalized = value.trim();
+	if (isRequired && !normalized) throwItemAwardInvalid(`${label} is required.`);
+	// eslint-disable-next-line no-control-regex
+	if (/[\u0000-\u001f\u007f]/.test(normalized)
+		|| /<\/?[a-z][^>]*>/i.test(normalized)
+		|| /\bon\w+\s*=/i.test(normalized)
+		|| /(?:^|\|)(?:javascript|data|vbscript|file):/i.test(normalized.replace(/\s+/g, ""))) {
+		throwItemAwardInvalid(`${label} contains unsafe text.`);
+	}
+	return normalized;
+}
+
+function normalizeSafeItemNumber (value, {label, isInteger = false}) {
+	if (value == null) return null;
+	if (
+		typeof value !== "number"
+		|| !Number.isFinite(value)
+		|| value < 0
+		|| Math.abs(value) > Number.MAX_SAFE_INTEGER
+		|| (isInteger && !Number.isSafeInteger(value))
+	) throwItemAwardInvalid(`${label} must be a finite nonnegative safe${isInteger ? " integer" : " number"}.`);
+	return value;
+}
+
+export function normalizeSafeItemSummary (item) {
+	assertExactKeys(item, SAFE_ITEM_SUMMARY_FIELDS, "Item");
+	const out = {
+		name: normalizeSafeItemString(item.name, {label: "Item name", maxLength: 200, isRequired: true}),
+		source: normalizeSafeItemString(item.source, {label: "Item source", maxLength: 50, isRequired: true}),
+	};
+	const optional = {
+		page: normalizeSafeItemNumber(item.page, {label: "Item page", isInteger: true}),
+		rarity: normalizeSafeItemString(item.rarity, {label: "Item rarity", maxLength: 80}),
+		weight: normalizeSafeItemNumber(item.weight, {label: "Item weight"}),
+		value: normalizeSafeItemNumber(item.value, {label: "Item value"}),
+		typeCode: normalizeSafeItemString(item.typeCode, {label: "Item type code", maxLength: 80}),
+	};
+	for (const [key, value] of Object.entries(optional)) if (value != null) out[key] = value;
+	if (item.edition != null) {
+		if (!["classic", "one"].includes(item.edition)) throwItemAwardInvalid(`Item edition is unsupported.`);
+		out.edition = item.edition;
+	}
+	return out;
+}
+
+export function getSafeItemSummary (item) {
+	if (!isPlainObject(item)) throwItemAwardInvalid(`Item must be an object.`);
+	return normalizeSafeItemSummary(Object.fromEntries(
+		SAFE_ITEM_SUMMARY_FIELDS
+			.filter(key => Object.hasOwn(item, key))
+			.map(key => [key, item[key]]),
+	));
+}
+
+export function normalizeItemAwardQuantity (quantity) {
+	if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 100_000) {
+		throwItemAwardInvalid(`Award quantity must be an integer between 1 and 100000.`);
+	}
+	return quantity;
+}
+
+export function normalizeItemAwardRequest ({source, targetCharacterIds, quantity, note = null}) {
+	assertExactKeys(source, ["kind", "item", "entryId"], "Award source");
+	if (!ITEM_AWARD_SOURCE_KINDS.includes(source.kind)) throwItemAwardInvalid(`Award source kind is unsupported.`);
+	let normalizedSource;
+	if (source.kind === "party_inventory") {
+		assertExactKeys(source, ["kind", "entryId"], "Party-inventory award source");
+		if (typeof source.entryId !== "string" || !source.entryId || source.entryId.length > 200) {
+			throwItemAwardInvalid(`Party-inventory entry ID is required.`);
+		}
+		normalizedSource = {kind: source.kind, entryId: source.entryId};
+	} else {
+		assertExactKeys(source, ["kind", "item"], "Catalog award source");
+		normalizedSource = {kind: source.kind, item: normalizeSafeItemSummary(source.item)};
+	}
+	if (!Array.isArray(targetCharacterIds) || !targetCharacterIds.length || targetCharacterIds.length > 50) {
+		throwItemAwardInvalid(`Award targets must contain between 1 and 50 characters.`);
+	}
+	const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+	if (targetCharacterIds.some(id => typeof id !== "string" || !uuidPattern.test(id))) {
+		throwItemAwardInvalid(`Award targets must be valid character IDs.`);
+	}
+	if (new Set(targetCharacterIds).size !== targetCharacterIds.length) {
+		throwItemAwardInvalid(`Award targets must be unique.`);
+	}
+	normalizeItemAwardQuantity(quantity);
+	if (note != null && (typeof note !== "string" || note.length > 500)) {
+		throwItemAwardInvalid(`Award note must be null or a string of at most 500 characters.`);
+	}
+	return {
+		source: normalizedSource,
+		targetCharacterIds: [...targetCharacterIds],
+		quantity,
+		note,
+	};
+}
+
+export function getItemAwardTotalQuantity ({quantity, targetCount}) {
+	const total = quantity * targetCount;
+	if (!Number.isSafeInteger(total)) throwItemAwardInvalid(`Total award quantity exceeds the safe numeric range.`);
+	return total;
+}
+
+export function getItemAwardIdempotencyKey ({idempotencyKey, campaignId, request}) {
+	if (idempotencyKey && typeof idempotencyKey === "object") return idempotencyKey;
+	const key = `${idempotencyKey}`;
+	return {
+		key,
+		requestHash: crypto.createHash("sha256")
+			.update(JSON.stringify({campaignId, ...request}))
+			.digest("hex"),
+	};
 }
 
 function addFinite (a, b, label) {
@@ -140,6 +286,36 @@ function getDestinationInventoryEntry (entry) {
 	return out;
 }
 
+function addDestinationInventoryEntry ({inventory, incoming}) {
+	const entry = getDestinationInventoryEntry(incoming);
+	const existing = inventory.find(it => isDeepStrictEqual(getComparableInventoryEntry(it), getComparableInventoryEntry(entry)));
+	if (existing) {
+		existing.quantity = addFinite(existing.quantity, incoming.quantity, "Item quantity");
+		return existing;
+	}
+	const created = {...entry, id: crypto.randomUUID()};
+	inventory.push(created);
+	return created;
+}
+
+export function addAwardedEntryToCharacter ({container, incoming}) {
+	const out = normalizeCharacterInventory(container);
+	const normalizedIncoming = structuredClone(incoming);
+	normalizedIncoming.quantity = normalizeItemAwardQuantity(normalizedIncoming.quantity);
+	const entry = addDestinationInventoryEntry({
+		inventory: out.inventory,
+		incoming: normalizedIncoming,
+	});
+	return {container: out, entry: structuredClone(entry)};
+}
+
+export function addAwardedItemToCharacter ({container, item, quantity}) {
+	return addAwardedEntryToCharacter({
+		container,
+		incoming: {item: normalizeSafeItemSummary(item), quantity},
+	});
+}
+
 export function removeTransferPayload ({container, payload}) {
 	const out = structuredClone(container);
 	out.inventory = normalizeInventory(out.inventory);
@@ -183,14 +359,15 @@ export function addTransferPayload ({container, escrow, isRestore = false}) {
 		? [...(escrow.items || [])].sort((a, b) => (a._sourceIndex ?? Number.MAX_SAFE_INTEGER) - (b._sourceIndex ?? Number.MAX_SAFE_INTEGER))
 		: escrow.items || [];
 	for (const incoming of incomingItems) {
-		const entry = isRestore ? structuredClone(incoming) : getDestinationInventoryEntry(incoming);
+		if (!isRestore) {
+			addDestinationInventoryEntry({inventory: out.inventory, incoming});
+			continue;
+		}
+		const entry = structuredClone(incoming);
 		delete entry._sourceIndex;
-		const existing = isRestore
-			? out.inventory.find(it => it.id === entry.id)
-			: out.inventory.find(it => isDeepStrictEqual(getComparableInventoryEntry(it), getComparableInventoryEntry(entry)));
+		const existing = out.inventory.find(it => it.id === entry.id);
 		if (existing) existing.quantity = addFinite(existing.quantity, incoming.quantity, "Item quantity");
-		else if (isRestore) out.inventory.splice(Math.min(incoming._sourceIndex ?? out.inventory.length, out.inventory.length), 0, entry);
-		else out.inventory.push({...entry, id: crypto.randomUUID()});
+		else out.inventory.splice(Math.min(incoming._sourceIndex ?? out.inventory.length, out.inventory.length), 0, entry);
 	}
 	const currency = normalizeCurrency(escrow.currency);
 	for (const type of CURRENCY_TYPES) out.currency[type] = addFinite(out.currency[type], currency[type], `${type} amount`);
