@@ -122,18 +122,22 @@ export class PartyTrackerCharacter {
 		const linked = this._data.carrySummary;
 		if (linked) {
 			if (linked.state === "unavailable") return {state: "unavailable", profile: null, carried: null, capacity: null, level: null};
+			// The encumbrance LEVEL is taken from the projection, never recomputed here. This
+			// row cannot know which tier rule produced that capacity — PHB keys its tiers off
+			// the Strength score, Thelemar off capacity, and a table may have disabled them —
+			// so it previously assumed `capacity-only` and reported genuinely encumbered and
+			// heavily-encumbered characters as Normal.
 			const profile = getCarryProfile({
-				rule: "standard",
 				capacityOverride: linked.capacity,
 				grossWeight: linked.carried,
 				thresholdRuleId: "capacity-only",
 			});
 			return {
-				state: "known",
+				state: linked.state === "indeterminate" ? "indeterminate" : "known",
 				profile,
 				carried: linked.carried,
 				capacity: linked.capacity,
-				level: getCarryStatus(profile).level,
+				level: linked.level || getCarryStatus(profile).level,
 			};
 		}
 		const profile = this.getCarryProfile();

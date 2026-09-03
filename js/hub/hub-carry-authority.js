@@ -183,6 +183,41 @@ export function hasFreshCarryWrite (patches) {
 }
 
 /**
+ * Force a document-changing patch set to carry a ROOT `/carry` write.
+ *
+ * The server identifies a carry-aware writer by the presence of a whole-block `/carry` op.
+ * The clients, however, build their patches with a RECURSIVE `diffJson`, which never
+ * produces one: an unrelated rename emits only `/name`, and an edited summary emits
+ * `/carry/bodyLoad`. Both look exactly like an old client, so every ordinary save stripped
+ * the authority it was actually carrying and the following save re-added it — the summary
+ * oscillated between present and absent instead of simply staying current.
+ *
+ * Normalising here rather than in the diff keeps `diffJson` a pure structural diff, and
+ * keeps the "what does a current client look like?" question answered in one place next to
+ * the check that asks it.
+ *
+ * Nested `/carry/...` ops are collapsed into the single root write so the block is replaced
+ * atomically; a reader must never observe a half-updated summary, and a partial op could not
+ * be recognised as fresh anyway.
+ *
+ * @param {{patches: Array, document: object, base?: object}} params `document` is the state
+ *   being saved; `base` is the accepted document the patches were diffed against.
+ * @returns {Array} The patch list to submit.
+ */
+export function withRootCarryWrite ({patches, document, base = null} = {}) {
+	if (!Array.isArray(patches) || !patches.length) return Array.isArray(patches) ? patches : [];
+	// No authority to assert: the server strips nothing, and inventing a write would be a lie.
+	if (!isPlainObject(document?.carry)) return patches;
+
+	const rest = patches.filter(patch => {
+		const path = patch?.path;
+		return path !== "/carry" && !(typeof path === "string" && path.startsWith("/carry/"));
+	});
+	const op = isPlainObject(base) && Object.hasOwn(base, "carry") ? "replace" : "add";
+	return [...rest, {op, path: "/carry", value: document.carry}];
+}
+
+/**
  * Validate and return the authoritative carry summary, or `null`.
  *
  * Fails closed on every uncertainty: an absent block, a schema version this build does not

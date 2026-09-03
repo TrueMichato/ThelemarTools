@@ -99,10 +99,19 @@ export function getPartyInventoryRecipients ({projections = [], roster = [], cur
 		.filter(projection => getProjectionId(projection) !== currentCharacterId)
 		.map(projection => {
 			const view = getProjectionView(projection);
+			// Preserve the recipient's carry ONLY when they chose to share it. It is absent
+			// from the projection otherwise, so nothing here can reconstruct a withheld load —
+			// the transfer preview simply says nothing about that character, which is what
+			// ADR 0011 requires of any peer-facing carry surface.
+			const carry = view.carrySummary;
+			const isShared = !!carry && Number.isFinite(Number(carry.carried)) && Number.isFinite(Number(carry.capacity));
 			return {
 				id: getProjectionId(projection),
 				label: view.name,
 				summary: view.classes.map(cls => `${cls.name}${Number.isFinite(cls.level) ? ` ${cls.level}` : ""}`).join(" / "),
+				carry: isShared
+					? {carried: Number(carry.carried), capacity: Number(carry.capacity), state: typeof carry.state === "string" ? carry.state : null}
+					: null,
 			};
 		})
 		.filter(recipient => recipient.id && recipient.label)
@@ -136,6 +145,7 @@ export class CharacterSheetPartyInventory {
 		fnSaveCharacter,
 		fnIsCurrentCharacter,
 		fnGetCarryProfile = null,
+		fnProjectItemWeight = null,
 		fnToast = detail => globalThis.JqueryUtil?.doToast?.(detail),
 	}) {
 		this._campaignId = campaignId;
@@ -150,6 +160,8 @@ export class CharacterSheetPartyInventory {
 		// calculation the carry bar uses. Optional: without it the preview simply omits the
 		// carry line rather than guessing at capacity.
 		this._fnGetCarryProfile = fnGetCarryProfile;
+		// Projects an item's effective weight through the sheet's material rules.
+		this._fnProjectItemWeight = fnProjectItemWeight;
 		this._fnToast = fnToast;
 
 		this._isEnabled = typeof campaignId === "string"
@@ -961,7 +973,11 @@ export class CharacterSheetPartyInventory {
 		const profile = this._fnGetCarryProfile?.();
 		const entry = this._getEntry(this._draft);
 		const quantity = Number(this._draft.quantity);
-		const unitWeight = Number(entry?.item?.weight);
+		// The MATERIAL-PROJECTED weight, not the stored one: a mithril breastplate does not
+		// weigh what its steel base entry says, and the carry bar has always counted the
+		// projected figure. Falls back to the raw value for the party stash, whose plain
+		// documents have no sheet context to project through.
+		const unitWeight = Number(this._fnProjectItemWeight?.(entry?.item) ?? entry?.item?.weight);
 
 		if (!profile || !Number.isSafeInteger(quantity) || quantity < 1 || !Number.isFinite(unitWeight) || unitWeight < 0) {
 			// An unknown stack weight makes the consequence unknowable. Saying so is better
@@ -973,9 +989,22 @@ export class CharacterSheetPartyInventory {
 		const moved = unitWeight * quantity;
 		// Moving OUT of the stash adds to this character; moving out of this character removes.
 		const signedDelta = this._draft.kind === "party_inventory" ? moved : -moved;
+		// Apply the delta to GROSS and FILLABLE weight and let the contract re-derive the
+		// split, rather than adding it straight onto `bodyLoad`. With an extradimensional
+		// container equipped those are different numbers: 20 lb of stowable gear arriving into
+		// a bag with spare capacity leaves the body load unchanged, so the naive sum claimed a
+		// 20 lb increase the character would never feel — and, in the other direction, hid the
+		// moment the bag fills and the overflow starts landing on the body.
+		//
+		// A transferable stack is unequipped by definition (the eligibility rules block
+		// equipped and attuned items), so it is bag-eligible unless it is itself a weightless
+		// container, which cannot be stowed inside itself.
+		const isFillable = !entry?.item?.containerCapacity?.weightless;
 		const after = getCarryProfile({
 			capacityOverride: profile.bodyCapacity,
-			grossWeight: Math.max(0, profile.bodyLoad + signedDelta),
+			externalCapacity: profile.externalCapacity,
+			grossWeight: Math.max(0, profile.grossWeight + signedDelta),
+			fillableWeight: Math.max(0, profile.fillableWeight + (isFillable ? signedDelta : 0)),
 			thresholdRuleId: profile.thresholdRuleId,
 			thresholdSourceValue: profile.thresholdSourceValue,
 			unknownStackCount: profile.unknownStackCount,
@@ -992,6 +1021,20 @@ export class CharacterSheetPartyInventory {
 
 		const parts = [`You: ${formatNumber(profile.bodyLoad)} → ${formatNumber(after.bodyLoad)} lb of ${formatNumber(profile.bodyCapacity)}`];
 		parts.push(beforeLevel === afterLevel ? label(afterLevel) : `${label(beforeLevel)} → ${label(afterLevel)}`);
+
+		// The recipient's consequence, shown only when that character shares their carry.
+		if (this._draft.kind === "character" && this._draft.destinationKind === "character") {
+			const recipient = this._recipients.find(it => it.id === this._draft.recipientId);
+			if (recipient?.carry) {
+				const afterCarried = Math.max(0, recipient.carry.carried + moved);
+				parts.push(`${recipient.label}: ${formatNumber(recipient.carry.carried)} → ${formatNumber(afterCarried)} lb of ${formatNumber(recipient.carry.capacity)}`);
+				if (afterCarried > recipient.carry.capacity) parts.push(`over capacity for ${recipient.label}`);
+			} else if (recipient) {
+				// Explicit, and deliberately uninformative: "not shared" must not be inferable
+				// as any particular load, and silence would read as "no effect".
+				parts.push(`${recipient.label}: carry not shared`);
+			}
+		}
 
 		const stash = getInventoryWeightSummary(this._partyInventory?.inventory || []);
 		const stashAfter = this._draft.kind === "party_inventory" ? stash.knownWeight - moved : stash.knownWeight + moved;

@@ -145,7 +145,7 @@ describe("baseline", () => {
 		const ctx = await setup();
 		expect(getStoredCarry(ctx.store, ctx.character.id)).toBeDefined();
 		expect(await getVisibleCarry({...ctx, characterId: ctx.character.id}))
-			.toEqual({carried: 40, capacity: 240});
+			.toEqual({carried: 40, capacity: 240, state: "normal"});
 	});
 });
 
@@ -188,7 +188,7 @@ describe("item grant invalidates", () => {
 		expect(getStoredCarry(ctx.store, ctx.character.id)).toBeUndefined();
 		// Omitted rather than zeroed: "not synced" must be distinguishable from
 		// "carrying nothing".
-		expect(await getVisibleCarry({...ctx, characterId: ctx.character.id})).toEqual({});
+		expect(await getVisibleCarry({...ctx, characterId: ctx.character.id})).toBeNull();
 	});
 
 	it("the owner's next authoritative save restores it", async () => {
@@ -200,7 +200,7 @@ describe("item grant invalidates", () => {
 			item: {name: "Anvil", weight: 100},
 			idempotencyKey: "g-1",
 		});
-		expect(await getVisibleCarry({...ctx, characterId: ctx.character.id})).toEqual({});
+		expect(await getVisibleCarry({...ctx, characterId: ctx.character.id})).toBeNull();
 
 		const lease = await ctx.store.pAcquireCharacterLease({
 			accountId: ctx.player.id, sessionId: "s-1", characterId: ctx.character.id,
@@ -217,7 +217,7 @@ describe("item grant invalidates", () => {
 		});
 
 		expect(await getVisibleCarry({...ctx, characterId: ctx.character.id}))
-			.toEqual({carried: 140, capacity: 240});
+			.toEqual({carried: 140, capacity: 240, state: "normal"});
 	});
 });
 
@@ -284,7 +284,7 @@ describe("transfer lifecycle invalidates the written participant only", () => {
 		});
 
 		expect(getStoredCarry(ctx.store, ctx.other.id)).toBeUndefined();
-		expect(await getVisibleCarry({...ctx, characterId: ctx.other.id})).toEqual({});
+		expect(await getVisibleCarry({...ctx, characterId: ctx.other.id})).toBeNull();
 	});
 
 	it("rejection restores the source stack and leaves no stale summary behind", async () => {
@@ -354,7 +354,7 @@ describe("mixed-version patch protocol", () => {
 
 		expect(getStoredCarry(ctx.store, ctx.character.id)).toMatchObject({bodyLoad: 41});
 		expect(await getVisibleCarry({...ctx, characterId: ctx.character.id}))
-			.toEqual({carried: 41, capacity: 240});
+			.toEqual({carried: 41, capacity: 240, state: "normal"});
 	});
 
 	it("a malformed /carry write cannot preserve authority", async () => {
@@ -364,7 +364,7 @@ describe("mixed-version patch protocol", () => {
 			{op: "replace", path: "/carry", value: {schemaVersion: 99, bodyLoad: 1}},
 		], "p-1");
 		// Written, but unusable — the resolver rejects the version, so nothing is projected.
-		expect(await getVisibleCarry({...ctx, characterId: ctx.character.id})).toEqual({});
+		expect(await getVisibleCarry({...ctx, characterId: ctx.character.id})).toBeNull();
 	});
 });
 
@@ -372,7 +372,7 @@ describe("rules and brew rotation invalidate without touching the document", () 
 	it("activating a rules version stops the previous summary being trusted", async () => {
 		const ctx = await setup();
 		expect(await getVisibleCarry({...ctx, characterId: ctx.character.id}))
-			.toEqual({carried: 40, capacity: 240});
+			.toEqual({carried: 40, capacity: 240, state: "normal"});
 
 		const {rulesVersion} = await ctx.store.pCreateRulesVersion({
 			accountId: ctx.dm.id,
@@ -391,7 +391,7 @@ describe("rules and brew rotation invalidate without touching the document", () 
 		// The document is byte-identical; only the world around it moved. Switching the
 		// Thelemar carry rule changes capacity outright, so the old number is now wrong.
 		expect(getStoredCarry(ctx.store, ctx.character.id)).toBeDefined();
-		expect(await getVisibleCarry({...ctx, characterId: ctx.character.id})).toEqual({});
+		expect(await getVisibleCarry({...ctx, characterId: ctx.character.id})).toBeNull();
 	});
 });
 
@@ -408,8 +408,8 @@ describe("single-read and list projections agree", () => {
 
 		const single = await ctx.store.pGetCharacter({accountId: ctx.dm.id, characterId: ctx.character.id});
 		const fromList = await getVisibleCarry({...ctx, characterId: ctx.character.id});
-		expect(single.peerPreview.data.carrySummary).toEqual({});
-		expect(fromList).toEqual({});
+		expect(single.peerPreview.data.carrySummary).toBeUndefined();
+		expect(fromList).toBeNull();
 	});
 });
 

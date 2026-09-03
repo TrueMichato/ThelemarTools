@@ -621,6 +621,7 @@ class CharacterSheetPage {
 					realtime: this._hubRealtime,
 					fnGetCharacterData: () => this._state.toJson(),
 					fnGetCarryProfile: () => this._state.getCarryProfile(),
+					fnProjectItemWeight: item => this._state.projectItemMaterial(item)?.weight,
 					fnAdoptCharacterData: data => {
 						this._state.loadFromJson(data);
 						this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);

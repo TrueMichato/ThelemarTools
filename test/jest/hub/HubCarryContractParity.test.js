@@ -75,6 +75,10 @@ describe("sheet and server projection agree", () => {
 		expect(projectFrom(sheet)).toEqual({
 			carried: profile.bodyLoad,
 			capacity: profile.bodyCapacity,
+			// The authoritative level travels with the numbers: a consumer cannot re-derive
+			// which tier rule produced this capacity, and guessing reported genuinely
+			// encumbered characters as Normal.
+			state: profile.status,
 		});
 	});
 
@@ -150,7 +154,7 @@ describe("the sheet no longer contradicts itself", () => {
 describe("privacy", () => {
 	it("the projection exposes only the body pair, never formula factors", () => {
 		const sheet = mkSheet({str: 18, thelemar: true, size: "large", powerfulBuild: true, carried: 40});
-		expect(Object.keys(projectFrom(sheet)).sort()).toEqual(["capacity", "carried"]);
+		expect(Object.keys(projectFrom(sheet)).sort()).toEqual(["capacity", "carried", "state"]);
 	});
 
 	it("a Bag of Holding does not leak through the projection", () => {
@@ -169,7 +173,7 @@ describe("privacy", () => {
 		expect(profile.hasExtradimensional).toBe(true);
 		// The body pair is internally coherent and says nothing about the container: a peer
 		// cannot tell from `{carried, capacity}` that this character owns one.
-		expect(summary).toEqual({carried: profile.bodyLoad, capacity: profile.bodyCapacity});
+		expect(summary).toEqual({carried: profile.bodyLoad, capacity: profile.bodyCapacity, state: profile.status});
 		expect(summary.capacity).not.toBe(profile.total);
 	});
 

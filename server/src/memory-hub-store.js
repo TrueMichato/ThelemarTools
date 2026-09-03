@@ -1046,7 +1046,8 @@ export class MemoryHubStore {
 	}
 
 	async pGetProjectionPolicy ({accountId, characterId}) {
-		return getPolicyManagementResponse(this._getOwnedCharacterOrThrow({accountId, characterId}));
+		const owned = this._getOwnedCharacterOrThrow({accountId, characterId});
+		return getPolicyManagementResponse(owned, {expectedBasis: this._getExpectedCarryBasis(owned)});
 	}
 
 	/**
@@ -1066,7 +1067,7 @@ export class MemoryHubStore {
 		if (character.projectionRevision !== expectedProjectionRevision) {
 			throw new HubStoreError("PROJECTION_POLICY_CONFLICT", `Sharing settings changed on another device.`, {
 				status: 409,
-				details: getPolicyManagementResponse(character),
+				details: getPolicyManagementResponse(character, {expectedBasis: this._getExpectedCarryBasis(character)}),
 			});
 		}
 		// Validate before any mutation so a rejected write leaves the last valid policy intact.
@@ -1081,7 +1082,7 @@ export class MemoryHubStore {
 			targetType: "character",
 			targetId: character.id,
 		});
-		return this._setReceipt({accountId, idempotencyKey, response: getPolicyManagementResponse(character)});
+		return this._setReceipt({accountId, idempotencyKey, response: getPolicyManagementResponse(character, {expectedBasis: this._getExpectedCarryBasis(character)})});
 	}
 
 	async pCreateCharacter ({

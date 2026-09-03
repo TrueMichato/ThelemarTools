@@ -48,6 +48,33 @@ export class PartyTrackerImporter {
 	 * @param {object} data — the `data` object of a `peer_profile` envelope
 	 * @returns {object} — deserialized Party Tracker character data
 	 */
+	/**
+	 * Normalise a projected `{carried, capacity, state}` into the tracker's carry shape.
+	 *
+	 * `state` is the AUTHORITATIVE encumbrance level. Reconstructing a tier locally from the
+	 * two numbers is not possible: PHB keys its tiers off the Strength score, Thelemar off
+	 * capacity, and a table can turn tiers off — so a local guess reported genuinely
+	 * encumbered characters as Normal. `unknown` means an item weight is missing, making the
+	 * load a lower bound.
+	 * @param {?object} summary
+	 * @returns {?object} `{state, carried, capacity, level}` or `null` when unusable.
+	 */
+	static mapCarrySummary (summary) {
+		if (!summary || typeof summary !== "object") return null;
+		const carried = Number(summary.carried);
+		const capacity = Number(summary.capacity);
+		if (!Number.isFinite(carried) || !Number.isFinite(capacity)) return null;
+		const state = typeof summary.state === "string" ? summary.state : null;
+		return {
+			state: state === "unknown" ? "indeterminate" : "known",
+			carried,
+			capacity,
+			// A replacement label the owner substituted (e.g. "Hidden") is not an encumbrance
+			// level; fall back to `unknown` rather than rendering it as one.
+			level: ["normal", "encumbered", "heavily_encumbered", "over_capacity", "unknown"].includes(state) ? state : "unknown",
+		};
+	}
+
 	static mapPeerProfile (data) {
 		if (!data || typeof data !== "object") throw new Error("Invalid peer profile data");
 		const abilities = {str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10};
@@ -89,9 +116,7 @@ export class PartyTrackerImporter {
 			// current (an item grant, a transfer, or a campaign rules/brew rotation since
 			// their last save). An absent field must NOT be shown as 0/0 or "Normal": the
 			// tracker renders "not synced", so a DM can tell an unknown load from a light one.
-			csum: Number.isFinite(Number(data.carrySummary?.carried)) && Number.isFinite(Number(data.carrySummary?.capacity))
-				? {state: "known", carried: Number(data.carrySummary.carried), capacity: Number(data.carrySummary.capacity)}
-				: {state: "unavailable"},
+			csum: this.mapCarrySummary(data.carrySummary) ?? {state: "unavailable"},
 			cnd: (data.conditions || []).map(name => ({n: name, s: null})),
 			dis: (data.diseases || []).map(name => ({n: name, s: null})),
 			nt: "",

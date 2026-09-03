@@ -316,6 +316,15 @@ export function buildCharacterViewModel (characterData, {expectedBasis = undefin
 		if (carried != null) carrySummary.carried = carried;
 		const capacity = toFiniteNumber(carryAuthority.bodyCapacity, {min: 0, max: MAX_WEIGHT});
 		if (capacity != null) carrySummary.capacity = capacity;
+		// `state` carries the AUTHORITATIVE encumbrance level. Without it a consumer holds two
+		// numbers and no way to tier them: it cannot know which rule set produced the capacity
+		// (PHB keys its tiers off the Strength score, Thelemar off capacity, and a table may
+		// have turned tiers off entirely), so it would have to guess — and the Party Tracker
+		// guessed `capacity-only`, silently reporting genuinely encumbered characters as
+		// Normal. It also distinguishes `unknown`, where a missing item weight makes the load a
+		// lower bound, from a confident reading of the same two numbers.
+		const state = toLabel(carryAuthority.status, {maxLength: 40});
+		if (state) carrySummary.state = state;
 	}
 
 	const exhaustionLabel = typeof data.exhaustion === "string" ? toLabel(data.exhaustion, {maxLength: 40}) : null;
@@ -336,7 +345,11 @@ export function buildCharacterViewModel (characterData, {expectedBasis = undefin
 		diseases: toDisplayLabels(data.diseases),
 		exhaustion,
 		inventorySummary,
-		carrySummary,
+		// Absent, not empty. `applyProjectionPolicy` skips `undefined`, so an unresolved
+		// summary leaves no `carrySummary` key at all — which is what "fresh or absent" has to
+		// mean on the wire. An owned `{}` is a third state that reads as "shared but empty",
+		// and a consumer cannot tell it apart from a character who shared nothing.
+		carrySummary: Object.keys(carrySummary).length ? carrySummary : undefined,
 	};
 }
 
@@ -664,8 +677,14 @@ export function getPolicyNotAvailableError () {
 	return new HubStoreError("PROJECTION_POLICY_NOT_AVAILABLE", `Sharing settings are not available for this character.`, {status: 404});
 }
 
-export function getPolicyManagementResponse (character) {
-	const preview = computePeerProfile({character});
+/**
+ * @param {object} character
+ * @param {?object} expectedBasis The live carry basis. Required for the preview to match what
+ *   a peer actually reads: without it `resolveCarryAuthority` fails closed, and the owner is
+ *   shown a preview missing the very carry they just chose to share while peers see it.
+ */
+export function getPolicyManagementResponse (character, {expectedBasis} = {}) {
+	const preview = computePeerProfile({character, expectedBasis});
 	try {
 		return {
 			policy: validateProjectionPolicy(character.projectionPolicy),
@@ -754,6 +773,31 @@ export function canViewSharedCharacterEvent ({character, accountId, role}) {
  * @param {"owner"|"dm"|"peer"} options.authorizationClass resolved by the store
  * @param {Function} options.fnCopy deep-copy used for canonical documents
  */
+/**
+ * The validated carry summary a DM is entitled to, independent of the owner's sharing policy.
+ *
+ * A DM receives canonical truth, so their carry reading must not be routed through
+ * `peerPreview`: that is filtered by the owner's policy, and a character who shares nothing
+ * would leave the DM Screen with no summary and silently fall back to recomputing capacity
+ * from raw inventory — which is precisely the divergent local formula this contract removed.
+ *
+ * Validated through the same fail-closed resolver, so a stale or malformed block yields
+ * `undefined` here exactly as it does for a peer.
+ * @returns {?object} `{carried, capacity, state}` or `undefined`.
+ */
+export function getDmCarrySummary ({character, expectedBasis}) {
+	const authority = resolveCarryAuthority({data: character?.data, expectedBasis});
+	if (!authority) return undefined;
+	const out = {};
+	const carried = toFiniteNumber(authority.bodyLoad, {min: 0, max: MAX_WEIGHT});
+	if (carried != null) out.carried = carried;
+	const capacity = toFiniteNumber(authority.bodyCapacity, {min: 0, max: MAX_WEIGHT});
+	if (capacity != null) out.capacity = capacity;
+	const state = toLabel(authority.status, {maxLength: 40});
+	if (state) out.state = state;
+	return Object.keys(out).length ? out : undefined;
+}
+
 export function projectCharacterForRequester ({character, authorizationClass, fnCopy = structuredClone, expectedBasis}) {
 	if (authorizationClass === "peer") return computePeerProfile({character, expectedBasis});
 
@@ -781,5 +825,12 @@ export function projectCharacterForRequester ({character, authorizationClass, fn
 			policy: isPolicyValid ? validateProjectionPolicy(character.projectionPolicy) : null,
 		};
 	}
-	return {kind: "dm_truth", ...envelope, peerPreview: computePeerProfile({character, expectedBasis})};
+	return {
+		kind: "dm_truth",
+		...envelope,
+		// Policy-independent: a DM's view of carry must not depend on what the owner chose to
+		// share with peers.
+		carrySummary: getDmCarrySummary({character, expectedBasis}),
+		peerPreview: computePeerProfile({character, expectedBasis}),
+	};
 }

@@ -131,7 +131,9 @@ describe("authorization-scoped character projections", () => {
 
 	describe("presets and overrides", () => {
 		it("shares exactly the documented fields per preset", () => {
-			const viewModel = buildCharacterViewModel(getCharacterData());
+			// Basis supplied: this asserts preset FIELD COVERAGE, and carry now fails closed
+			// without one, which would otherwise remove the field for an unrelated reason.
+			const viewModel = buildCharacterViewModel(getCharacterData(), {expectedBasis: BASIS});
 			for (const [preset, expected] of Object.entries(PROJECTION_PRESETS)) {
 				const data = applyProjectionPolicy({viewModel, policy: {version: 1, preset, overrides: {}}});
 				expect({preset, keys: Object.keys(data).sort()}).toEqual({preset, keys: [...expected].sort()});
@@ -156,7 +158,7 @@ describe("authorization-scoped character projections", () => {
 			expect(data.hp).toEqual({state: "healthy"});
 			expect(data.identity).toEqual({name: "The Masked One"});
 			expect(data.conditions).toBeUndefined();
-			expect(data.carrySummary).toEqual({carried: 13, capacity: 150});
+			expect(data.carrySummary).toEqual({carried: 13, capacity: 150, state: "normal"});
 			// A replacement is emitted verbatim: no truth-derived calculation survives.
 			expect(JSON.stringify(data)).not.toContain("Mira");
 			expect(JSON.stringify(data)).not.toContain("30");
@@ -230,7 +232,7 @@ describe("authorization-scoped character projections", () => {
 		// the player did. ADR 0011 requires reading the authoritative sheet calculation.
 		it("reports the sheet's materialised body pair", () => {
 			const viewModel = buildCharacterViewModel(getCharacterData(), {expectedBasis: BASIS});
-			expect(viewModel.carrySummary).toEqual({carried: 13, capacity: 150});
+			expect(viewModel.carrySummary).toEqual({carried: 13, capacity: 150, state: "normal"});
 		});
 
 		it("does not derive capacity from the Strength score", () => {
@@ -246,25 +248,25 @@ describe("authorization-scoped character projections", () => {
 			expect(carry).toBeDefined();
 			// Omission, not zero: a consumer must be able to tell "not synced" from
 			// "carrying nothing", and any fallback formula would be a guess.
-			expect(buildCharacterViewModel(legacy, {expectedBasis: BASIS}).carrySummary).toEqual({});
+			expect(buildCharacterViewModel(legacy, {expectedBasis: BASIS}).carrySummary).toBeUndefined();
 		});
 
 		it("omits the field when the campaign rules version has rotated underneath it", () => {
 			const viewModel = buildCharacterViewModel(getCharacterData(), {
 				expectedBasis: {...BASIS, rulesVersionId: "rules-2"},
 			});
-			expect(viewModel.carrySummary).toEqual({});
+			expect(viewModel.carrySummary).toBeUndefined();
 		});
 
 		it("omits the field when the brew bundle has rotated, since material weights can change", () => {
 			const viewModel = buildCharacterViewModel(getCharacterData(), {
 				expectedBasis: {...BASIS, brewBundleHash: "brew-2"},
 			});
-			expect(viewModel.carrySummary).toEqual({});
+			expect(viewModel.carrySummary).toBeUndefined();
 		});
 
 		it("omits the field when no expected basis can be resolved at all", () => {
-			expect(buildCharacterViewModel(getCharacterData()).carrySummary).toEqual({});
+			expect(buildCharacterViewModel(getCharacterData()).carrySummary).toBeUndefined();
 		});
 
 		it("leaks no formula factors or item truth into the projection", () => {
@@ -274,7 +276,7 @@ describe("authorization-scoped character projections", () => {
 			const summary = buildCharacterViewModel(data, {expectedBasis: BASIS}).carrySummary;
 			// Only the body pair crosses the boundary — no multipliers, no bag capacity, no
 			// stack counts a peer could use to reason about hidden inventory.
-			expect(Object.keys(summary).sort()).toEqual(["capacity", "carried"]);
+			expect(Object.keys(summary).sort()).toEqual(["capacity", "carried", "state"]);
 		});
 	});
 

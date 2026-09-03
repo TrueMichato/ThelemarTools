@@ -440,7 +440,9 @@ describe("Character Sheet party inventory", () => {
 		});
 
 		expect(recipients).toEqual([
-			{id: "recipient-character", label: "Mira", summary: "Fighter 3"},
+			// `carry: null` is the privacy-safe default: this peer shared no carry summary, and
+			// a withheld load must be absent rather than defaulted to a number.
+			{id: "recipient-character", label: "Mira", summary: "Fighter 3", carry: null},
 		]);
 		expect(JSON.stringify(recipients)).not.toContain("hidden-character");
 	});

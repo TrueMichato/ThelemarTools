@@ -1488,7 +1488,10 @@ export class PostgresHubStore {
 		// One indistinguishable outcome for missing and unauthorized, so this endpoint
 		// cannot be used to probe which character ids exist.
 		if (!result.rowCount) throw getPolicyNotAvailableError();
-		return getPolicyManagementResponse(getCharacter(result.rows[0]));
+		const owned = getCharacter(result.rows[0]);
+		return getPolicyManagementResponse(owned, {
+			expectedBasis: getExpectedCarryBasis({character: owned, ...(await this._pGetCarryBasisContext(owned.campaignId))}),
+		});
 	}
 
 	async pSetProjectionPolicy ({accountId, characterId, policy, expectedProjectionRevision, idempotencyKey}) {
@@ -1506,7 +1509,9 @@ export class PostgresHubStore {
 			if (character.projectionRevision !== expectedProjectionRevision) {
 				throw new HubStoreError("PROJECTION_POLICY_CONFLICT", `Sharing settings changed on another device.`, {
 					status: 409,
-					details: getPolicyManagementResponse(character),
+					details: getPolicyManagementResponse(character, {
+						expectedBasis: getExpectedCarryBasis({character, ...(await this._pGetCarryBasisContext(character.campaignId))}),
+					}),
 				});
 			}
 			// Validate before any write so a rejected policy leaves the last valid one intact.
@@ -1520,7 +1525,9 @@ export class PostgresHubStore {
 			const characterNxt = getCharacter(updated.rows[0]);
 			await this._pAppendAudit({client, campaignId: characterNxt.campaignId, actorAccountId: accountId, action: "character.projection_policy.updated", targetType: "character", targetId: characterId});
 			await this._pAppendProjectionInvalidation({client, character: characterNxt, actorAccountId: accountId});
-			const response = getPolicyManagementResponse(characterNxt);
+			const response = getPolicyManagementResponse(characterNxt, {
+				expectedBasis: getExpectedCarryBasis({character: characterNxt, ...(await this._pGetCarryBasisContext(characterNxt.campaignId))}),
+			});
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "character.projection_policy.set", response});
 			await client.query("COMMIT");
 			return response;

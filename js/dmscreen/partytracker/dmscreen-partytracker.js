@@ -305,6 +305,14 @@ class PartyTrackerRoot {
 			if (!PartyTrackerImporter.validate(raw).valid) return null;
 			const mapped = PartyTrackerImporter.mapCharacterSheetData(raw);
 			mapped.id = character?.character?.id || character?.id || raw.id;
+			// A DM envelope carries its own server-validated, policy-independent carry summary.
+			// `mapCharacterSheetData` cannot supply one: it sees the canonical document, whose
+			// authority block only the server can vouch for, and would otherwise leave the row
+			// recomputing capacity locally from raw inventory weights — the divergent formula
+			// this contract exists to remove. Absent means "not synced", never zero.
+			mapped.carrySummary = character?.kind === "dm_truth"
+				? (PartyTrackerImporter.mapCarrySummary(character.carrySummary) ?? {state: "unavailable"})
+				: null;
 			return mapped;
 		} catch {
 			return null;

@@ -32,6 +32,12 @@ export class DmScreenHubController {
 		this._staleTimer = null;
 		this._resyncTimer = null;
 		this._partyInventoryTimer = null;
+		// Monotonic per-request sequence. Two refreshes in the same generation can resolve out
+		// of order (a slow earlier request landing after a fast later one), which would leave
+		// the older weight on screen forever. Only a response at least as new as the newest
+		// already applied may publish.
+		this._partyInventoryRequestSeq = 0;
+		this._partyInventoryAppliedSeq = 0;
 		this._isSyncStale = false;
 		// Monotonic generation. Every in-flight party-inventory request carries the value it
 		// started under; `detach()` and each load/attach bump it, so a response that arrives
@@ -260,6 +266,16 @@ export class DmScreenHubController {
 				type: "hubCharacterProjections",
 				payload: {characters: [], roster: []},
 			});
+			// The stash is campaign-private and must leave the board with the projections. A
+			// demoted co-DM otherwise keeps a live aggregate of a campaign they can no longer
+			// read, and an in-flight response could republish it seconds later. Bumping the
+			// generation fences those responses; the explicit publish replaces the number with
+			// `unavailable` rather than leaving the last known weight on screen.
+			this._clearPartyInventoryTimer();
+			this._generation++;
+			this._isPartyInventoryFenced = true;
+			this._partyInventory = {state: "unavailable", stackCount: 0, knownWeight: 0, unknownStackCount: 0};
+			this._publishPartyInventory();
 		}
 		this._syncBodyState();
 		this._publishBoardStatus();
@@ -329,6 +345,12 @@ export class DmScreenHubController {
 			"transfer.committed",
 			"transfer.rejected",
 			"transfer.cancelled",
+			// Activating a rules version or a brew bundle changes the carry BASIS without
+			// touching any character document, so no character-scoped invalidation is emitted.
+			// Without these the server starts rejecting every stored carry summary while the
+			// DM Screen keeps showing the last accepted numbers indefinitely.
+			"rules.activated",
+			"brew.activated",
 		].includes(event?.type)) {
 			this._queueProjectionResync();
 		}
@@ -461,11 +483,16 @@ export class DmScreenHubController {
 		if (!this._campaignId || this._isPartyInventoryFenced) return;
 		const generation = this._generation;
 		const campaignId = this._campaignId;
+		const seq = ++this._partyInventoryRequestSeq;
+		/** A response may publish only if it is current AND not superseded by a newer one. */
+		const isStale = () => generation !== this._generation
+			|| campaignId !== this._campaignId
+			|| seq <= this._partyInventoryAppliedSeq;
 		try {
 			const partyInventory = await this._api.pGetPartyInventory({campaignId});
 			// Discard a response that lost its race: the controller was detached, re-attached,
 			// or pointed at a different campaign while this request was in flight.
-			if (generation !== this._generation || campaignId !== this._campaignId) return;
+			if (isStale()) return;
 			const inventory = Array.isArray(partyInventory?.inventory) ? partyInventory.inventory : [];
 			const summary = inventory.reduce((acc, entry) => {
 				const quantity = Number(entry?.quantity);
@@ -481,13 +508,14 @@ export class DmScreenHubController {
 				unknownStackCount: summary.unknownStackCount,
 			};
 		} catch (error) {
-			if (generation !== this._generation || campaignId !== this._campaignId) return;
+			if (isStale()) return;
 			// Losing authorization is not a blip to retry: nothing will change until a new
 			// verified attach/load, and retrying would hammer an endpoint that will keep
 			// refusing. A transient failure stays retryable via the next invalidation.
 			if (error?.status === 401 || error?.status === 403) this._isPartyInventoryFenced = true;
 			this._partyInventory = {state: "unavailable", stackCount: 0, knownWeight: 0, unknownStackCount: 0};
 		}
+		this._partyInventoryAppliedSeq = seq;
 		this._publishPartyInventory();
 	}
 
