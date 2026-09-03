@@ -18,6 +18,15 @@ export class HubMetrics {
 		this._fnNow = fnNow;
 		this._startedAt = fnNow();
 		this._requests = new Map();
+		this._authOutcomes = new Map();
+	}
+
+	observeAuth ({provider, outcome}) {
+		const labels = {provider, outcome};
+		const key = JSON.stringify(labels);
+		const current = this._authOutcomes.get(key) || {labels, count: 0};
+		current.count++;
+		this._authOutcomes.set(key, current);
 	}
 
 	observeRequest ({method, route, statusCode, durationMs}) {
@@ -45,12 +54,18 @@ export class HubMetrics {
 			lines.push(metricLine("hub_http_request_duration_milliseconds_sum", current.labels, current.durationMs));
 			lines.push(metricLine("hub_http_request_duration_milliseconds_count", current.labels, current.count));
 		}
+		lines.push("# HELP hub_auth_outcomes_total Authentication outcomes by configured provider.");
+		lines.push("# TYPE hub_auth_outcomes_total counter");
+		for (const current of this._authOutcomes.values()) {
+			lines.push(metricLine("hub_auth_outcomes_total", current.labels, current.count));
+		}
 		for (const [key, value] of Object.entries({
 			outbox_pending: operational.outboxPending,
 			outbox_failed: operational.outboxFailed,
 			outbox_oldest_age_seconds: operational.outboxOldestAgeSeconds,
 			active_sessions: operational.activeSessions,
 			expired_receipts: operational.expiredReceipts,
+			expired_oauth_transactions: operational.expiredOAuthTransactions,
 			deletion_due_accounts: operational.deletionDueAccounts,
 			last_maintenance_age_seconds: operational.lastMaintenanceAgeSeconds,
 			last_backup_age_seconds: operational.lastBackupAgeSeconds,
@@ -89,4 +104,13 @@ export const HUB_LOG_REDACT_PATHS = Object.freeze([
 	"databaseUrl",
 	"token",
 	"tokenHash",
+	"state",
+	"stateHash",
+	"code",
+	"codeVerifier",
+	"pkceVerifier",
+	"oidcNonce",
+	"accessToken",
+	"refreshToken",
+	"idToken",
 ]);

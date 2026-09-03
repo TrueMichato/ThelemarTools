@@ -75,6 +75,7 @@
 		"hub:purge-accounts": "node server/scripts/purge-accounts.mjs",
 		"hub:maintenance": "node server/scripts/maintenance.mjs",
 		"hub:check-secrets": "node server/scripts/check-secrets.mjs",
+		"hub:check-auth-rollback": "node server/scripts/check-auth-provider-rollback.mjs",
 		"hub:backup": "node server/scripts/backup.mjs",
 		"hub:backup:encrypted": "node server/scripts/backup-encrypted.mjs",
 		"hub:restore": "node server/scripts/restore.mjs",

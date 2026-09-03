@@ -15,6 +15,7 @@ describe("Hub observability", () => {
 		let now = 1_000;
 		const metrics = new HubMetrics({fnNow: () => now});
 		metrics.observeRequest({method: "GET", route: "/api/characters/:characterId", statusCode: 200, durationMs: 12});
+		metrics.observeAuth({provider: "github", outcome: "succeeded"});
 		now += 1_000;
 		const text = metrics.toPrometheus({
 			operational: {outboxPending: 2, outboxFailed: 1, lastBackupAgeSeconds: -1},
@@ -24,6 +25,7 @@ describe("Hub observability", () => {
 
 		expect(text).toContain(`route="/api/characters/:characterId"`);
 		expect(text).toContain("hub_http_requests_total");
+		expect(text).toContain(`hub_auth_outcomes_total{provider="github",outcome="succeeded"} 1`);
 		expect(text).toContain("hub_outbox_pending 2");
 		expect(text).toContain("hub_websocket_connections 3");
 		expect(text).toContain("hub_last_backup_age_seconds -1");
@@ -52,6 +54,12 @@ describe("Hub observability", () => {
 			`req.headers["x-csrf-token"]`,
 			`req.headers["idempotency-key"]`,
 			`res.headers["set-cookie"]`,
+			"codeVerifier",
+			"pkceVerifier",
+			"oidcNonce",
+			"accessToken",
+			"refreshToken",
+			"idToken",
 		]) expect(HUB_LOG_REDACT_PATHS).toContain(path);
 	});
 

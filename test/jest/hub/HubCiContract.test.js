@@ -69,7 +69,7 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(provenanceWriter).not.toMatch(/protocol: "\d+"/);
 		expect(provenanceWriter).not.toMatch(/migration: "\d+"/);
 		expect(HUB_PROTOCOL_VERSION).toBe("3");
-		expect(HUB_REQUIRED_MIGRATION_VERSION).toBe("0005");
+		expect(HUB_REQUIRED_MIGRATION_VERSION).toBe("0006");
 	});
 
 	it("isolates every E2E Compose run and records success evidence", () => {
