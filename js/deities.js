@@ -11,12 +11,12 @@ class DeitiesSublistManager extends SublistManager {
 			new SublistCellTemplate({
 				name: "Pantheon",
 				css: "ve-col-2 ve-text-center",
-				colStyle: "ve-text-center",
+				colStyle: "text-center",
 			}),
 			new SublistCellTemplate({
 				name: "Alignment",
 				css: "ve-col-2 ve-text-center",
-				colStyle: "ve-text-center",
+				colStyle: "text-center",
 			}),
 			new SublistCellTemplate({
 				name: "Domains",
@@ -31,26 +31,27 @@ class DeitiesSublistManager extends SublistManager {
 		const domains = it.domains.join(", ");
 		const cellsText = [it.name, it.pantheon, alignment, domains];
 
-		const ele = ee`<div class="ve-lst__row ve-lst__row--sublist ve-flex-col">
+		const ele = veT`<div class="ve-lst__row ve-lst__row--sublist ve-flex-col">
 			<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
 				${this.constructor._getRowCellsHtml({values: cellsText})}
 			</a>
 		</div>`
-			.onn("contextmenu", evt => this._handleSublistItemContextMenu(evt, listItem))
-			.onn("click", evt => this._listSub.doSelect(listItem, evt));
+			.vee.onn("contextmenu", evt => this._handleSublistItemContextMenu(evt, listItem))
+			.vee.onn("click", evt => this._listSub.doSelect(listItem, evt));
 
 		const listItem = new ListItem(
 			hash,
 			ele,
 			it.name,
 			{
-				hash,
-				page: it.page,
+				...ListItem.getCommonValues(it),
 				pantheon: it.pantheon,
 				alignment,
 				domains,
 			},
 			{
+				hash,
+				page: it.page,
 				entity: it,
 				mdRow: [...cellsText],
 			},
@@ -103,15 +104,16 @@ class DeitiesPage extends ListPage {
 			eleLi,
 			ent.name,
 			{
-				hash,
 				source,
-				page: ent.page,
+				...ListItem.getCommonValues(ent),
 				title: ent.title || "",
 				pantheon: ent.pantheon,
 				alignment,
 				domains,
 			},
 			{
+				hash,
+				page: ent.page,
 				isExcluded,
 			},
 		);
@@ -123,7 +125,7 @@ class DeitiesPage extends ListPage {
 	}
 
 	_renderStats_doBuildStatsTab ({ent}) {
-		this._pgContent.empty().appends(RenderDeities.getRenderedDeity(ent));
+		this._pgContent.vee.empty().vee.appends(RenderDeities.getRenderedDeity(ent));
 	}
 }
 

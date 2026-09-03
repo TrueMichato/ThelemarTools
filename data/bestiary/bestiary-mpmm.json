@@ -19,6 +19,9 @@
 					"page": 209
 				}
 			],
+			"reprintedAs": [
+				"Abjurer Archmage|AU"
+			],
 			"size": [
 				"M"
 			],
@@ -103,7 +106,7 @@
 				{
 					"name": "Arcane Burst",
 					"entries": [
-						"{@atk ms,rs} {@hit 6} to hit, reach 5 ft. or range 120 ft., one target. {@h}20 ({@damage 3d10 + 4}) force damage."
+						"{@atk ms,rs} {@hit 8} to hit, reach 5 ft. or range 120 ft., one target. {@h}20 ({@damage 3d10 + 4}) force damage."
 					]
 				},
 				{
@@ -1772,10 +1775,6 @@
 				{
 					"source": "VGM",
 					"page": 210
-				},
-				{
-					"source": "WDMM",
-					"page": 311
 				}
 			],
 			"size": [
@@ -2939,7 +2938,7 @@
 				{
 					"name": "Magic Resistance",
 					"entries": [
-						"Bael have advantage on saving throws against spells and other magical effects."
+						"Bael has advantage on saving throws against spells and other magical effects."
 					]
 				},
 				{
@@ -4187,7 +4186,7 @@
 				{
 					"name": "Ice Walk",
 					"entries": [
-						"The hag can move across and climb icy surfaces without needing to make an ability check, and {@quickref difficult terrain||3} composed of ice or snow doesn't cost the hag extra moment."
+						"The hag can move across and climb icy surfaces without needing to make an ability check, and {@quickref difficult terrain||3} composed of ice or snow doesn't cost the hag extra movement."
 					]
 				}
 			],
@@ -4972,7 +4971,6 @@
 			"damageTags": [
 				"B",
 				"N",
-				"R",
 				"Y"
 			],
 			"miscTags": [
@@ -6061,10 +6059,6 @@
 				{
 					"source": "VGM",
 					"page": 212
-				},
-				{
-					"source": "WDMM",
-					"page": 312
 				}
 			],
 			"size": [
@@ -7343,6 +7337,9 @@
 					"source": "VGM",
 					"page": 212
 				}
+			],
+			"reprintedAs": [
+				"Conjurer Archmage|AU"
 			],
 			"size": [
 				"M"
@@ -10071,6 +10068,9 @@
 					"page": 213
 				}
 			],
+			"reprintedAs": [
+				"Diviner Archmage|AU"
+			],
 			"size": [
 				"M"
 			],
@@ -11261,7 +11261,7 @@
 					"name": "Spellcasting",
 					"type": "spellcasting",
 					"headerEntries": [
-						"The drow's casts one of the following spells, requiring no material components and using Charisma as the spellcasting ability (spell save {@dc 18}):"
+						"The drow casts one of the following spells, requiring no material components and using Charisma as the spellcasting ability (spell save {@dc 18}):"
 					],
 					"will": [
 						"{@spell dancing lights}",
@@ -14250,6 +14250,9 @@
 					"page": 213
 				}
 			],
+			"reprintedAs": [
+				"Enchanter Archmage|AU"
+			],
 			"size": [
 				"M"
 			],
@@ -14383,6 +14386,9 @@
 					"source": "VGM",
 					"page": 214
 				}
+			],
+			"reprintedAs": [
+				"Evoker Archmage|AU"
 			],
 			"size": [
 				"M"
@@ -17048,10 +17054,6 @@
 				{
 					"source": "MTF",
 					"page": 205
-				},
-				{
-					"source": "WDMM",
-					"page": 312
 				}
 			],
 			"referenceSources": [
@@ -21172,7 +21174,7 @@
 				{
 					"name": "Claw",
 					"entries": [
-						"{@atk mw} {@hit 9} to hit, reach 5 ft., one target.  {@h}14 ({@damage 2d8 + 5}) force damage plus 9 ({@damage 2d10}) psychic damage."
+						"{@atk mw} {@hit 9} to hit, reach 5 ft., one target. {@h}14 ({@damage 2d8 + 5}) force damage plus 9 ({@damage 2d10}) psychic damage."
 					]
 				},
 				{
@@ -21248,6 +21250,9 @@
 					"source": "VGM",
 					"page": 214
 				}
+			],
+			"reprintedAs": [
+				"Illusionist Archmage|AU"
 			],
 			"size": [
 				"M"
@@ -26329,6 +26334,9 @@
 			"referenceSources": [
 				"VEoR"
 			],
+			"reprintedAs": [
+				"Necromancer Archmage|AU"
+			],
 			"size": [
 				"M"
 			],
@@ -26923,10 +26931,6 @@
 				{
 					"source": "VGM",
 					"page": 181
-				},
-				{
-					"source": "WDMM",
-					"page": 315
 				}
 			],
 			"size": [
@@ -35646,6 +35650,9 @@
 					"page": 218
 				}
 			],
+			"reprintedAs": [
+				"Transmuter Archmage|AU"
+			],
 			"size": [
 				"M"
 			],
@@ -35916,10 +35923,6 @@
 				{
 					"source": "VGM",
 					"page": 175
-				},
-				{
-					"source": "WDMM",
-					"page": 316
 				}
 			],
 			"size": [
@@ -36254,8 +36257,7 @@
 				"D"
 			],
 			"damageTags": [
-				"N",
-				"R"
+				"N"
 			],
 			"miscTags": [
 				"HPR"

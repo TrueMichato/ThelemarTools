@@ -4272,7 +4272,7 @@
 				{
 					"name": "Deathly Claw",
 					"entries": [
-						"{@atk mw} {@hit 6} to hit, reach 5 ft., one target. {@h}13 ({@damage 3d6 + 3}) necrotic damage)."
+						"{@atk mw} {@hit 6} to hit, reach 5 ft., one target. {@h}13 ({@damage 3d6 + 3}) necrotic damage."
 					]
 				},
 				{
@@ -7324,7 +7324,8 @@
 				"MW"
 			],
 			"hasToken": true,
-			"hasFluff": true
+			"hasFluff": true,
+			"hasFluffImages": true
 		},
 		{
 			"name": "Duergar Kavalrachni",
@@ -10243,6 +10244,12 @@
 			"name": "Githyanki Gish",
 			"source": "MTF",
 			"page": 205,
+			"otherSources": [
+				{
+					"source": "WDMM",
+					"page": 312
+				}
+			],
 			"referenceSources": [
 				"WDMM"
 			],
@@ -11576,7 +11583,7 @@
 				{
 					"name": "Sow Discord",
 					"entries": [
-						"Graz'zt casts {@spell crown of madness} or dissonant whispers."
+						"Graz'zt casts {@spell crown of madness} or {@spell dissonant whispers}."
 					]
 				},
 				{
@@ -19210,6 +19217,9 @@
 			"name": "Star Spawn Grue",
 			"source": "MTF",
 			"page": 234,
+			"referenceSources": [
+				"WDMM"
+			],
 			"reprintedAs": [
 				"Star Spawn Grue|MPMM"
 			],
@@ -19294,6 +19304,9 @@
 			"name": "Star Spawn Hulk",
 			"source": "MTF",
 			"page": 234,
+			"referenceSources": [
+				"WDMM"
+			],
 			"reprintedAs": [
 				"Star Spawn Hulk|MPMM"
 			],
@@ -19623,9 +19636,7 @@
 			"source": "MTF",
 			"page": 236,
 			"referenceSources": [
-				"DC",
-				"DIP",
-				"SLW"
+				"WDMM"
 			],
 			"reprintedAs": [
 				"Star Spawn Mangler|MPMM"
@@ -19745,6 +19756,9 @@
 			"name": "Star Spawn Seer",
 			"source": "MTF",
 			"page": 236,
+			"referenceSources": [
+				"WDMM"
+			],
 			"reprintedAs": [
 				"Star Spawn Seer|MPMM"
 			],
@@ -22048,8 +22062,7 @@
 				"D"
 			],
 			"damageTags": [
-				"N",
-				"R"
+				"N"
 			],
 			"miscTags": [
 				"HPR"

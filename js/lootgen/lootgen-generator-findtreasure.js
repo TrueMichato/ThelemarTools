@@ -1,5 +1,4 @@
 import {LootGenGeneratorBase} from "./lootgen-generator-base.js";
-import {LootGenRender} from "./lootgen-render.js";
 
 /** @abstract */
 class LootGenGeneratorFindTreasureBase extends LootGenGeneratorBase {
@@ -34,13 +33,13 @@ class LootGenGeneratorFindTreasureBase extends LootGenGeneratorBase {
 
 		const cbIsHoard = ComponentUiUtil.getCbBool(this, "ft_isHoard");
 
-		const btnRoll = ee`<button class="ve-btn ve-btn-default ve-btn-xs ve-mr-2">Roll Loot</button>`
-			.onn("click", () => this._ft_pDoHandleClickRollLoot());
+		const btnRoll = veT`<button class="ve-btn ve-btn-default ve-btn-xs ve-mr-2">Roll Loot</button>`
+			.vee.onn("click", () => this._ft_pDoHandleClickRollLoot());
 
-		const btnClear = ee`<button class="ve-btn ve-btn-danger ve-btn-xs">Clear Output</button>`
-			.onn("click", () => this._outputManager.doClearOutput());
+		const btnClear = veT`<button class="ve-btn ve-btn-danger ve-btn-xs">Clear Output</button>`
+			.vee.onn("click", () => this._outputManager.doClearOutput());
 
-		ee`<div class="ve-flex-col ve-py-2 ve-px-3">
+		veT`<div class="ve-flex-col ve-py-2 ve-px-3">
 			<label class="ve-split-v-center ve-mb-2">
 				<div class="ve-mr-2 ve-w-66 ve-no-shrink">Challenge Rating</div>
 				${selChallenge}
@@ -61,7 +60,7 @@ class LootGenGeneratorFindTreasureBase extends LootGenGeneratorBase {
 			<hr class="ve-hr-3">
 
 			<div class="ve-small ve-italic">${this._getHtmlBasedOn()}</div>
-		</div>`.appendTo(tabMeta.wrpTab);
+		</div>`.vee.appendTo(tabMeta.wrpTab);
 	}
 
 	_ft_pDoHandleClickRollLoot () {
@@ -85,6 +84,7 @@ class LootGenGeneratorFindTreasureBase extends LootGenGeneratorBase {
 			type: `Individual Treasure: ${this.constructor._CHALLENGE_RATING_RANGES[this._state.ft_challenge]}`,
 			name: `{@b Individual Treasure} for challenge rating {@b ${this.constructor._CHALLENGE_RATING_RANGES[this._state.ft_challenge]}}`,
 			coins,
+			rendererWrapped: this._rendererWrapped,
 		});
 		this._outputManager.doAddOutput({lootOutput});
 	}
@@ -130,6 +130,7 @@ class LootGenGeneratorFindTreasureBase extends LootGenGeneratorBase {
 			gems,
 			artObjects,
 			magicItemsByTable,
+			rendererWrapped: this._rendererWrapped,
 		});
 		this._outputManager.doAddOutput({lootOutput});
 	}
@@ -147,7 +148,7 @@ export class LootGenGeneratorFindTreasure extends LootGenGeneratorFindTreasureBa
 	_source = Parser.SRC_DMG;
 
 	_getHtmlBasedOn () {
-		return LootGenRender.er(`Based on the tables and rules in the {@book ${Parser.sourceJsonToFull(Parser.SRC_DMG)}|DMG|7|Treasure Tables}, pages 133-149.`);
+		return this._rendererWrapped.er(`Based on the tables and rules in the {@book ${Parser.sourceJsonToFull(Parser.SRC_DMG)}|DMG|7|Treasure Tables}, pages 133-149.`);
 	}
 
 	_render_getStgHoardAdditional () { return null; }
@@ -177,7 +178,7 @@ export class LootGenGeneratorFindTreasure24 extends LootGenGeneratorFindTreasure
 	_source = Parser.SRC_XDMG;
 
 	_getHtmlBasedOn () {
-		return LootGenRender.er(`Based on the tables and rules in the {@book ${Parser.sourceJsonToFull(Parser.SRC_XDMG)}|XDMG} page 120 (&quot;{@book Adventure Rewards|XDMG|3|Adventure Rewards}&quot;) and page 218 (&quot;{@book Random Magic Item Rarity|XDMG|6|Random Magic Item Rarity}&quot;).`);
+		return this._rendererWrapped.er(`Based on the tables and rules in the {@book ${Parser.sourceJsonToFull(Parser.SRC_XDMG)}|XDMG} page 120 (&quot;{@book Adventure Rewards|XDMG|3|Adventure Rewards}&quot;) and page 218 (&quot;{@book Random Magic Item Rarity|XDMG|6|Random Magic Item Rarity}&quot;).`);
 	}
 
 	_render_getStgHoardAdditional () {
@@ -190,14 +191,14 @@ export class LootGenGeneratorFindTreasure24 extends LootGenGeneratorFindTreasure
 			},
 		);
 
-		const stg = ee`<div class="ve-flex-col ve-w-100">
+		const stg = veT`<div class="ve-flex-col ve-w-100">
 			<label class="ve-split-v-center ve-mb-2">
 				<div class="ve-mr-2 ve-w-66 ve-no-shrink">Character Level</div>
 				${selCharacterLevel}
 			</label>
 		</div>`;
 
-		this._addHookBase("ft_isHoard", () => stg.toggleVe(!!this._state.ft_isHoard))();
+		this._addHookBase("ft_isHoard", () => stg.vee.toggle(!!this._state.ft_isHoard))();
 
 		return stg;
 	}

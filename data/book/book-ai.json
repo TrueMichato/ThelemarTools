@@ -17,7 +17,7 @@
 				},
 				"Acquisitions Incorporated was founded in Seattle, Washington, in a time spoken of in only hushed tones: the year 2009. It first saw life as a podcast, which, at the time, was an unusual way to play Dungeons & Dragons. The intervening decade saw Acq Inc take on many forms\u2014streams, recorded content, comics, and, of course, live roleplaying shows. While these are all now completely normal ways to discover and enjoy D&D, back then, not so much. We just did it because it seemed like a cool idea, and ten years later, it seems like maybe we were right. Today, Acq Inc's adventures continue, dutifully chronicled online at acq-inc.com.",
 				"Our intention with Acquisitions Incorporated was to bring dark office comedy to a world of swords, sorcery, dungeons, and (dare we say) dragons. This book, created in concert with Wizards of the Coast, sets you up for success in your own fantasy-business endeavors. Chapter 1 provides an orientation for new franchise members, detailing how to start a game and play the Acquisitions Incorporated way. {@book Chapter 2|AI|1} explores the various positions within an Acq Inc franchise, introducing a variety of roles vital to an adventuring enterprise's success. {@book Chapter 3|AI|2} delves into backgrounds for Acq Inc franchise members, entrenching company goals at the core of their beings. In {@adventure Chapter 4|OoW|0}, all this comes together in an adventure taking characters from level 1 to 6, establishing a party's claim on a world they've begun to explore and strip-mine for profit.",
-				"Following these chapters, {@book appendix A|AI|4} presents stalwarts of the Acquisitions Incorporated world, founding members and characters from the company's ongoing adventures. {@book Appendix B|AI|11} details foes, from terrifying deep crows to infamous keg robots. {@book Appendices C|AI|12}, {@book D|AI|13}, and {@book E|AI|14} conclude this guide with a variety of Acq Inc tools and treasures, from vehicles like the {@vehicle battle balloon|AI} to the mighty {@item Orrery of the Wanderer|AI}.",
+				"Following these chapters, {@book appendix A|AI|4} presents stalwarts of the Acquisitions Incorporated world, founding members and characters from the company's ongoing adventures. {@book Appendix B|AI|4} details foes, from terrifying deep crows to infamous keg robots. {@book Appendices C|AI|6}, {@book D|AI|7}, and {@book E|AI|8} conclude this guide with a variety of Acq Inc tools and treasures, from vehicles like the {@vehicle battle balloon|AI} to the mighty {@item Orrery of the Wanderer|AI}.",
 				"Many hands worked diligently throughout the process of creating the Acquisitions Incorporated campaign and this resulting book. If you put your ear very close to the pages, you will hear us whisper, \"thank you.\"",
 				{
 					"type": "section",
@@ -1514,7 +1514,7 @@
 									"page": 22,
 									"entries": [
 										"As a rank 1 decisionist, you gain proficiency with a musical instrument (horn).",
-										"Head office also grants you the use of a musical instrument (your choice of {@item horn|PHB}), a voting kit (ballots, a ballot box, an \"I Voted\" sticker set), and a {@item coin of decisionry|AI}. This large gold coin is emblazoned with the sigil of Acquisitions Incorporated as \"heads,\" and has a \"tails\" image that varies.",
+										"Head Office also grants you the use of a musical instrument (your choice of {@item horn|PHB}), a voting kit (ballots, a ballot box, an \"I Voted\" sticker set), and a {@item coin of decisionry|AI}. This large gold coin is emblazoned with the sigil of Acquisitions Incorporated as \"heads,\" and has a \"tails\" image that varies.",
 										{
 											"type": "table",
 											"caption": "Coin of Decisionry \"Tails\" Image",
@@ -1853,7 +1853,7 @@
 									"page": 24,
 									"entries": [
 										"As a rank 1 documancer, you gain proficiency with {@item calligrapher's supplies|PHB}.",
-										"Head office also grants you the use of {@item calligrapher's supplies|PHB} (ink, a dozen sheets of parchment, and three quills), a {@item documancy satchel|AI} for your calligrapher's supplies, a ledger, {@item sealing wax|PHB}, copper and silver leaf, a documancer's seal of limited authority, and a {@item Map or Scroll Case|PHB|scroll case}."
+										"Head Office also grants you the use of {@item calligrapher's supplies|PHB} (ink, a dozen sheets of parchment, and three quills), a {@item documancy satchel|AI} for your calligrapher's supplies, a ledger, {@item sealing wax|PHB}, copper and silver leaf, a documancer's seal of limited authority, and a {@item Map or Scroll Case|PHB|scroll case}."
 									],
 									"id": "060"
 								},
@@ -2034,7 +2034,7 @@
 									"page": 25,
 									"entries": [
 										"As a rank 1 hoardsperson, you gain proficiency with jeweler's tools.",
-										"Head office also grants you the use of {@item jeweler's tools|PHB} (a small saw and hammer, files, pliers, and tweezers) and an account ledger, as well as up to 5 gp worth of equipment from the following options: {@item barrel|PHB}, {@item basket|PHB}, {@item block and tackle|PHB}, {@item bucket|PHB}, {@item chest|PHB}, {@item Tankard|PHB|flask or tankard}, {@item Jug|PHB|jug or pitcher}, {@item iron pot|PHB}, {@item pouch|PHB}, {@item sack|PHB}, {@item saddlebags|PHB}, {@item vial|PHB}, and {@item waterskin|PHB}."
+										"Head Office also grants you the use of {@item jeweler's tools|PHB} (a small saw and hammer, files, pliers, and tweezers) and an account ledger, as well as up to 5 gp worth of equipment from the following options: {@item barrel|PHB}, {@item basket|PHB}, {@item block and tackle|PHB}, {@item bucket|PHB}, {@item chest|PHB}, {@item Tankard|PHB|flask or tankard}, {@item Jug|PHB|jug or pitcher}, {@item iron pot|PHB}, {@item pouch|PHB}, {@item sack|PHB}, {@item saddlebags|PHB}, {@item vial|PHB}, and {@item waterskin|PHB}."
 									],
 									"id": "069"
 								},
@@ -2185,7 +2185,7 @@
 									"name": "Portable Hole Satchel",
 									"page": 26,
 									"entries": [
-										"At rank 4, your {@item living loot satchel|AI} receives another upgrade, becoming a very rare magic item. The secret chest accessed by your satchel now has the storage capacity of a {@item portable hole}\u20146 feet in diameter and 10 feet deep. As before, you can place any appropriately sized object into the {@i portable-hole}-sized chest, even if it wouldn't normally fit into your satchel.",
+										"At rank 4, your {@item living loot satchel|AI} receives another upgrade, becoming a very rare magic item. The secret chest accessed by your satchel now has the storage capacity of a {@item portable hole}\u20146 feet in diameter and 10 feet deep. As before, you can place any appropriately sized object into the {@item portable hole||portable-hole}-sized chest, even if it wouldn't normally fit into your satchel.",
 										{
 											"type": "quote",
 											"entries": [
@@ -2314,7 +2314,7 @@
 									"page": 27,
 									"entries": [
 										"As a rank 1 loremonger, you gain one of the following proficiencies of your choice: artisan's tools (choose type), {@item navigator's tools|PHB}, vehicles (land), or vehicles (water).",
-										"Head office also grants you the use of an appropriate tool kit if you chose a tool proficiency, as well as ink and an ink pen."
+										"Head Office also grants you the use of an appropriate tool kit if you chose a tool proficiency, as well as ink and an ink pen."
 									],
 									"id": "073"
 								},
@@ -2565,7 +2565,7 @@
 									"page": 29,
 									"entries": [
 										"As a rank 1 obviator, you gain proficiency with {@item alchemist's supplies|PHB}.",
-										"Head office also grants you the use of {@item alchemist's supplies|PHB} (two glass beakers, a metal frame to hold a beaker in place over an open flame, a glass stirring rod, a small mortar and pestle, and a pouch of common alchemical ingredients including salt, powdered iron, and purified water); your choice of a {@item Acid (vial)|PHB|vial of acid}, a {@item Alchemist's Fire (flask)|PHB|flask of alchemist's fire}, or a {@item Antitoxin (vial)|PHB|vial of antitoxin}; and a {@item hunting trap|PHB}."
+										"Head Office also grants you the use of {@item alchemist's supplies|PHB} (two glass beakers, a metal frame to hold a beaker in place over an open flame, a glass stirring rod, a small mortar and pestle, and a pouch of common alchemical ingredients including salt, powdered iron, and purified water); your choice of a {@item Acid (vial)|PHB|vial of acid}, a {@item Alchemist's Fire (flask)|PHB|flask of alchemist's fire}, or a {@item Antitoxin (vial)|PHB|vial of antitoxin}; and a {@item hunting trap|PHB}."
 									],
 									"id": "07d"
 								},
@@ -2825,7 +2825,7 @@
 									"page": 31,
 									"entries": [
 										"As a rank 1 occultant, you gain proficiency with one of the following of your choice: {@item cook's utensils|PHB}, {@item leatherworker's tools|PHB}, or {@item weaver's tools|PHB}.",
-										"Head office also grants you the use of a tool kit for your chosen proficiency, a merchant's scale, five waterproof belt pouches in which to store creature parts or other tools, and a unique item known as an {@item occultant abacus|AI} (sometimes just referred to as an occultant), whose beads resemble tiny skulls.",
+										"Head Office also grants you the use of a tool kit for your chosen proficiency, a merchant's scale, five waterproof belt pouches in which to store creature parts or other tools, and a unique item known as an {@item occultant abacus|AI} (sometimes just referred to as an occultant), whose beads resemble tiny skulls.",
 										{
 											"type": "image",
 											"href": {
@@ -3075,7 +3075,7 @@
 									"page": 33,
 									"entries": [
 										"As a rank 1 secretarian, you gain proficiency with one of the following of your choice: gaming set, musical instrument, or {@item disguise kit|PHB}.",
-										"Head office also grants you the use of a tool kit for your chosen proficiency, a collection of sales brochures, a set of business cards, a metal bell, and a {@item Fine Clothes|PHB|set of fine clothes}.",
+										"Head Office also grants you the use of a tool kit for your chosen proficiency, a collection of sales brochures, a set of business cards, a metal bell, and a {@item Fine Clothes|PHB|set of fine clothes}.",
 										{
 											"type": "quote",
 											"entries": [
@@ -3461,7 +3461,7 @@
 								"Some downtime and franchise activities alter a franchise's monthly costs. See the \"{@book Franchise Advancement|AI|1|Franchise Advancement}\" section earlier in this chapter for how to determine a franchise's base monthly costs, and see the \"{@book Running a Franchise|AI|1|Running a Franchise}\" section below for more information on how that activity modifies the base cost.",
 								{
 									"type": "list",
-									"columns": 2,
+									"columns": 3,
 									"items": [
 										"{@variantrule Downtime and Franchise Activity: Explore Territory|AI|Explore Territory|AI}",
 										"{@variantrule Downtime and Franchise Activity: Franchise Restructuring|AI|Franchise Restructuring|AI}",
@@ -3474,6 +3474,66 @@
 										"{@variantrule Downtime and Franchise Activity: Schmoozing|AI|Schmoozing|AI}",
 										"{@variantrule Downtime and Franchise Activity: Team Building|AI|Team Building|AI}"
 									]
+								},
+								{
+									"type": "statblock",
+									"name": "Downtime and Franchise Activity: Explore Territory",
+									"tag": "variantrule",
+									"source": "AI"
+								},
+								{
+									"type": "statblock",
+									"name": "Downtime and Franchise Activity: Franchise Restructuring",
+									"tag": "variantrule",
+									"source": "AI"
+								},
+								{
+									"type": "statblock",
+									"name": "Downtime and Franchise Activity: Headquarters Modification",
+									"tag": "variantrule",
+									"source": "AI"
+								},
+								{
+									"type": "statblock",
+									"name": "Downtime and Franchise Activity: Marketeering",
+									"tag": "variantrule",
+									"source": "AI"
+								},
+								{
+									"type": "statblock",
+									"name": "Downtime and Franchise Activity: Philanthropic Enterprise",
+									"tag": "variantrule",
+									"source": "AI"
+								},
+								{
+									"type": "statblock",
+									"name": "Downtime and Franchise Activity: Running a Franchise",
+									"tag": "variantrule",
+									"source": "AI"
+								},
+								{
+									"type": "statblock",
+									"name": "Downtime and Franchise Activity: Scrutineering",
+									"tag": "variantrule",
+									"source": "AI"
+								},
+								{
+									"type": "statblock",
+									"name": "Downtime and Franchise Activity: Shady Business Practice",
+									"tag": "variantrule",
+									"source": "AI"
+								},
+								{
+									"type": "statblock",
+									"name": "Downtime and Franchise Activity: Schmoozing",
+									"tag": "variantrule",
+									"source": "AI"
+								},
+								{
+									"type": "statblock",
+									"name": "Downtime and Franchise Activity: Team Building",
+									"tag": "variantrule",
+									"source": "AI"
 								}
 							],
 							"id": "0aa"
@@ -3514,7 +3574,7 @@
 						"And who knows? Being an incredible jackass could work in your favor!",
 						{
 							"type": "list",
-							"columns": 2,
+							"columns": 3,
 							"items": [
 								"{@background Celebrity Adventurer's Scion|AI}",
 								"{@background Failed Merchant|AI}",
@@ -3522,6 +3582,36 @@
 								"{@background Plaintiff|AI}",
 								"{@background Rival Intern|AI}"
 							]
+						},
+						{
+							"type": "statblock",
+							"name": "Celebrity Adventurer's Scion",
+							"tag": "background",
+							"source": "AI"
+						},
+						{
+							"type": "statblock",
+							"name": "Failed Merchant",
+							"tag": "background",
+							"source": "AI"
+						},
+						{
+							"type": "statblock",
+							"name": "Gambler",
+							"tag": "background",
+							"source": "AI"
+						},
+						{
+							"type": "statblock",
+							"name": "Plaintiff",
+							"tag": "background",
+							"source": "AI"
+						},
+						{
+							"type": "statblock",
+							"name": "Rival Intern",
+							"tag": "background",
+							"source": "AI"
 						}
 					],
 					"id": "0dd"
@@ -6448,7 +6538,7 @@
 						},
 						{
 							"type": "list",
-							"columns": 2,
+							"columns": 3,
 							"items": [
 								"{@spell Distort Value|AI}",
 								"{@spell Fast Friends|AI}",
@@ -6458,6 +6548,48 @@
 								"{@spell Jim's Magic Missile|AI}",
 								"{@spell Motivational Speech|AI}"
 							]
+						},
+						{
+							"type": "statblock",
+							"name": "Distort Value",
+							"tag": "spell",
+							"source": "AI"
+						},
+						{
+							"type": "statblock",
+							"name": "Fast Friends",
+							"tag": "spell",
+							"source": "AI"
+						},
+						{
+							"type": "statblock",
+							"name": "Gift of Gab",
+							"tag": "spell",
+							"source": "AI"
+						},
+						{
+							"type": "statblock",
+							"name": "Incite Greed",
+							"tag": "spell",
+							"source": "AI"
+						},
+						{
+							"type": "statblock",
+							"name": "Jim's Glowing Coin",
+							"tag": "spell",
+							"source": "AI"
+						},
+						{
+							"type": "statblock",
+							"name": "Jim's Magic Missile",
+							"tag": "spell",
+							"source": "AI"
+						},
+						{
+							"type": "statblock",
+							"name": "Motivational Speech",
+							"tag": "spell",
+							"source": "AI"
 						},
 						{
 							"type": "inset",
@@ -7037,7 +7169,7 @@
 				"This appendix details a few creatures that have roles to play in this adventure, and which can play an ongoing part in an Acquisitions Incorporated campaign.",
 				{
 					"type": "list",
-					"columns": 2,
+					"columns": 3,
 					"items": [
 						"{@creature Chaos Quadrapod|AI}",
 						"{@creature Clockwork Dragon|AI}",
@@ -7046,6 +7178,156 @@
 						"{@creature Keg Robot|AI}",
 						"{@creature Splugoth the Returned|AI}"
 					]
+				},
+				{
+					"type": "section",
+					"name": "Chaos Quadrapod",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Chaos Quadrapod",
+							"prop": "monsterFluff",
+							"source": "AI",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Chaos Quadrapod",
+							"tag": "creature",
+							"source": "AI",
+							"style": "narrow"
+						}
+					],
+					"id": "0af"
+				},
+				{
+					"type": "section",
+					"name": "Clockwork Dragon",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Clockwork Dragon",
+							"prop": "monsterFluff",
+							"source": "AI",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Clockwork Dragon",
+							"tag": "creature",
+							"source": "AI",
+							"style": "narrow"
+						}
+					],
+					"id": "0b0"
+				},
+				{
+					"type": "section",
+					"name": "Deep Crow",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Deep Crow",
+							"prop": "monsterFluff",
+							"source": "AI",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Deep Crow",
+							"tag": "creature",
+							"source": "AI",
+							"style": "narrow"
+						}
+					],
+					"id": "0b1"
+				},
+				{
+					"type": "section",
+					"name": "Ancient Deep Crow",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Ancient Deep Crow",
+							"prop": "monsterFluff",
+							"source": "AI",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Ancient Deep Crow",
+							"tag": "creature",
+							"source": "AI",
+							"style": "narrow"
+						}
+					],
+					"id": "0b2"
+				},
+				{
+					"type": "section",
+					"name": "Keg Robot",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Keg Robot",
+							"prop": "monsterFluff",
+							"source": "AI",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Keg Robot",
+							"tag": "creature",
+							"source": "AI",
+							"style": "narrow"
+						}
+					],
+					"id": "0b3"
+				},
+				{
+					"type": "section",
+					"name": "Splugoth the Returned",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Splugoth the Returned",
+							"prop": "monsterFluff",
+							"source": "AI",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Splugoth the Returned",
+							"tag": "creature",
+							"source": "AI",
+							"style": "narrow"
+						}
+					],
+					"id": "0b4"
 				},
 				{
 					"type": "section",
@@ -7541,11 +7823,25 @@
 				"Franchisees in an Acquisitions Incorporated campaign might gain access to\u2014or find themselves under attack from\u2014either of the unique vehicles in this section. Both are created and loaned out by Head Office, sometimes even at reasonable rates.",
 				{
 					"type": "list",
-					"columns": 2,
+					"columns": 3,
 					"items": [
 						"{@vehicle Battle Balloon|AI}",
 						"{@vehicle Mechanical Beholder|AI}"
 					]
+				},
+				{
+					"type": "statblock",
+					"name": "Battle Balloon",
+					"tag": "vehicle",
+					"source": "AI",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Mechanical Beholder",
+					"tag": "vehicle",
+					"source": "AI",
+					"style": "narrow"
 				}
 			],
 			"id": "1ae"
@@ -7568,6 +7864,48 @@
 						"{@item Timepiece of Travel|AI}",
 						"{@item Wheel of Stars|AI}"
 					]
+				},
+				{
+					"type": "statblock",
+					"name": "Orrery of the Wanderer",
+					"tag": "item",
+					"source": "AI"
+				},
+				{
+					"type": "statblock",
+					"name": "Chronolometer",
+					"tag": "item",
+					"source": "AI"
+				},
+				{
+					"type": "statblock",
+					"name": "Dimensional Loop",
+					"tag": "item",
+					"source": "AI"
+				},
+				{
+					"type": "statblock",
+					"name": "Far Gear",
+					"tag": "item",
+					"source": "AI"
+				},
+				{
+					"type": "statblock",
+					"name": "Rotor of Return",
+					"tag": "item",
+					"source": "AI"
+				},
+				{
+					"type": "statblock",
+					"name": "Timepiece of Travel",
+					"tag": "item",
+					"source": "AI"
+				},
+				{
+					"type": "statblock",
+					"name": "Wheel of Stars",
+					"tag": "item",
+					"source": "AI"
 				}
 			],
 			"id": "1af"

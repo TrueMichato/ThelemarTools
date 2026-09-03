@@ -104,6 +104,10 @@
 		$rgb-source-NF: #5bdbd6;
 		$rgb-source-LFL: #d35734;
 		$rgb-source-EFA: #827d4d;
+		$rgb-source-CaBoMP: #832c5a;
+		$rgb-source-RHW: #7e2327;
+		$rgb-source-AU: #b9618a;
+		$rgb-source-AUD: #729c3c;
 
 		// region Categories
 
@@ -561,6 +565,23 @@
 			&EFA,
 			&FFotR {
 				@include mix-source-color($rgb-source-EFA);
+			}
+
+			&CaBoMP {
+				@include mix-source-color($rgb-source-CaBoMP);
+			}
+
+			&RHW,
+			&XScreenRHW {
+				@include mix-source-color($rgb-source-RHW);
+			}
+
+			&AU {
+				@include mix-source-color($rgb-source-AU);
+			}
+
+			&AUD {
+				@include mix-source-color($rgb-source-AUD);
 			}
 		}
 		// endregion

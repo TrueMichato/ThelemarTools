@@ -98,6 +98,10 @@
 		background-color: vars.$rgb-bg;
 	}
 
+	.ve-shadow-big {
+		@include vars.mix-shadow-1;
+	}
+
 	.ve-highlight {
 		background-color: vars.$rgb-bg-highlight !important;
 	}
@@ -162,6 +166,41 @@
 
 	.ve-text-rtl {
 		direction: rtl;
+	}
+	// endregion
+
+	// region Caret
+	.ve-caret {
+		display: inline-block;
+		width: 0;
+		height: 0;
+		margin-left: 2px;
+		vertical-align: middle;
+		border-top: 4px dashed;
+		border-right: 4px solid transparent;
+		border-left: 4px solid transparent;
+
+		&--up {
+			transform: rotateZ(180deg);
+		}
+
+		&--right {
+			transform: rotate(270deg);
+		}
+	}
+
+	.ve-btn .ve-caret {
+		margin-left: 0;
+	}
+
+	.ve-btn-lg .ve-caret {
+		border-width: 5px 5px 0;
+	}
+
+	@media print {
+		.ve-btn > .ve-caret {
+			border-top-color: #000 !important;
+		}
 	}
 	// endregion
 
@@ -357,6 +396,10 @@
 		width: initial !important;
 	}
 
+	.ve-w-16p {
+		width: 16px !important;
+	}
+
 	.ve-w-20p {
 		width: 20px !important;
 	}
@@ -531,6 +574,10 @@
 		height: 21px !important;
 	}
 
+	.ve-h-22p {
+		height: 22px !important;
+	}
+
 	.ve-h-25p {
 		height: 25px !important;
 	}
@@ -586,6 +633,10 @@
 
 	.ve-min-h-100p {
 		min-height: 100px !important;
+	}
+
+	.ve-min-h-120p {
+		min-height: 120px !important;
 	}
 
 	.ve-min-h-360p {
@@ -949,6 +1000,12 @@
 	// region Opacity
 	.ve-opacity-50 {
 		opacity: 0.5 !important;
+	}
+	// endregion
+
+	// region Containers
+	.ve-container-inline {
+		container-type: inline-size !important;
 	}
 	// endregion
 

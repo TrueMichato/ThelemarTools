@@ -16,12 +16,22 @@ import {ModalFilterGemsArtObjects} from "./lootgen-filter-gemsartobjects.js";
 import {LootGenUiOutputManager} from "./lootgen-outputmanager.js";
 
 export class LootGenUi extends BaseComponent {
-	constructor ({spells, items, ClsLootGenOutput}) {
+	constructor (
+		{
+			spells,
+			items,
+			ClsLootGenOutput,
+			rendererWrapped,
+		},
+	) {
+		if (!rendererWrapped) throw new Error(`Missing required "rendererWrapped" option!`);
+
 		super();
 
 		TabUiUtil.decorate(this, {isInitMeta: true});
 
 		this._ClsLootGenOutput = ClsLootGenOutput || LootGenOutput;
+		this._rendererWrapped = rendererWrapped;
 		this._stateManager = LootgenStateManager.getInstance();
 		this._outputManager = new LootGenUiOutputManager();
 		this._dataManager = new LootGenUiDataManager({spells, items});
@@ -38,6 +48,7 @@ export class LootGenUi extends BaseComponent {
 			stateManager: this._stateManager,
 			outputManager: this._outputManager,
 			dataManager: this._dataManager,
+			rendererWrapped: this._rendererWrapped,
 		});
 
 		this._generatorFindTreasure = new LootGenGeneratorFindTreasure({
@@ -45,6 +56,7 @@ export class LootGenUi extends BaseComponent {
 			stateManager: this._stateManager,
 			outputManager: this._outputManager,
 			dataManager: this._dataManager,
+			rendererWrapped: this._rendererWrapped,
 		});
 
 		this._generatorLootTables = new LootGenGeneratorLootTables({
@@ -52,6 +64,7 @@ export class LootGenUi extends BaseComponent {
 			stateManager: this._stateManager,
 			outputManager: this._outputManager,
 			dataManager: this._dataManager,
+			rendererWrapped: this._rendererWrapped,
 		});
 
 		this._generatorPartyLoot = new LootGenGeneratorPartyLoot({
@@ -59,6 +72,7 @@ export class LootGenUi extends BaseComponent {
 			stateManager: this._stateManager,
 			outputManager: this._outputManager,
 			dataManager: this._dataManager,
+			rendererWrapped: this._rendererWrapped,
 		});
 
 		this._generatorDragonHoard = new LootGenGeneratorDragonHoard({
@@ -66,6 +80,7 @@ export class LootGenUi extends BaseComponent {
 			stateManager: this._stateManager,
 			outputManager: this._outputManager,
 			dataManager: this._dataManager,
+			rendererWrapped: this._rendererWrapped,
 		});
 
 		this._generatorGemsArtObjects = new LootGenGeneratorGemsArtObjects({
@@ -73,6 +88,7 @@ export class LootGenUi extends BaseComponent {
 			stateManager: this._stateManager,
 			outputManager: this._outputManager,
 			dataManager: this._dataManager,
+			rendererWrapped: this._rendererWrapped,
 		});
 
 		this._generators = [
@@ -382,14 +398,14 @@ export class LootGenUi extends BaseComponent {
 	_render_getStages ({stg, stgLhs, stgRhs}) {
 		if (!stg) return {stgLhs, stgRhs};
 
-		stgLhs = ee`<div class="ve-flex ve-w-50 ve-h-100"></div>`;
-		stgRhs = ee`<div class="ve-flex-col ve-w-50 ve-h-100"></div>`;
+		stgLhs = veT`<div class="ve-flex ve-w-50 ve-h-100"></div>`;
+		stgRhs = veT`<div class="ve-flex-col ve-w-50 ve-h-100"></div>`;
 
-		ee`<div class="ve-flex ve-w-100 ve-h-100">
+		veT`<div class="ve-flex ve-w-100 ve-h-100">
 			${stgLhs}
 			<div class="ve-vr-2 ve-h-100"></div>
 			${stgRhs}
-		</div>`.appendTo(stg.empty());
+		</div>`.vee.appendTo(stg.vee.empty());
 
 		return {stgLhs, stgRhs};
 	}
@@ -455,7 +471,7 @@ export class LootGenUi extends BaseComponent {
 
 		const hkIsActive = () => {
 			const tab = this._getActiveTab();
-			tabMeta.btns[0].toggleClass("ve-active", !!tab.isHeadHidden);
+			tabMeta.btns[0].vee.toggleClass("ve-active", !!tab.isHeadHidden);
 		};
 		this._addHookActiveTab(hkIsActive);
 		hkIsActive();
@@ -470,13 +486,13 @@ export class LootGenUi extends BaseComponent {
 
 				const cb = ComponentUiUtil.getCbBool(this._stateManager, propIsAllowed);
 
-				return ee`<label class="ve-split-v-center stripe-odd--faint">
+				return veT`<label class="ve-split-v-center stripe-odd--faint">
 					<div class="ve-no-wrap ve-mr-2">${Parser.coinAbvToFull(it).toTitleCase()}</div>
 					${cb}
 				</label>`;
 			});
 
-		ee(eleModalInner)`
+		veT(eleModalInner)`
 			<div class="ve-mb-1" title="Disabled currencies will be converted to equivalent amounts of another currency.">Allowed Currencies:</div>
 			<div class="ve-pl-4 ve-flex-col">
 				${rowsCurrency}
@@ -485,12 +501,12 @@ export class LootGenUi extends BaseComponent {
 	}
 
 	_render_output ({wrp}) {
-		const wrpOutputRows = this._outputManager.setWrpOutputRows(ee`<div class="ve-w-100 ve-h-100 ve-flex-col ve-overflow-y-auto ve-smooth-scroll"></div>`);
+		const wrpOutputRows = this._outputManager.setWrpOutputRows(veT`<div class="ve-w-100 ve-h-100 ve-flex-col ve-overflow-y-auto ve-smooth-scroll"></div>`);
 
-		ee`<div class="ve-flex-col ve-w-100 ve-h-100">
+		veT`<div class="ve-flex-col ve-w-100 ve-h-100">
 			<h4 class="ve-my-0"><i>Output</i></h4>
 			${wrpOutputRows}
 		</div>`
-			.appendTo(wrp);
+			.vee.appendTo(wrp);
 	}
 }

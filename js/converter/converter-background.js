@@ -20,6 +20,7 @@ export class ConverterBackground extends ConverterFeatureBase {
 	 * @param options.isAppend Default output append mode.
 	 * @param options.source Entity source.
 	 * @param options.page Entity page.
+	 * @param [options.isAddPageNumber] Whether to include the page in the output. Defaults to true if a page is provided.
 	 * @param options.titleCaseFields Array of fields to be title-cased in this entity (if enabled).
 	 * @param options.isTitleCase Whether title-case fields should be title-cased in this entity.
 	 * @param options.styleHint
@@ -202,6 +203,8 @@ export class ConverterBackground extends ConverterFeatureBase {
 	}
 
 	static _doBackgroundPostProcess (state, options) {
+		this._doPostProcess_removePage(state.entity, options);
+
 		if (!state.entity.entries) return;
 
 		// region Tag

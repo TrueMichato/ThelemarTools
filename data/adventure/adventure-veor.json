@@ -1142,7 +1142,7 @@
 									"page": 19,
 									"id": "03b",
 									"entries": [
-										"Areas C1\u2013C12 are dark, and characters must have {@sense darkvision} or a light source to see. Cult members frequent areas C13\u2013C26, so lanterns hung on wall hooks create bright light there."
+										"Areas C1\u2013C12 are dark, and characters must have {@sense darkvision} or a light source to see. Cult members frequent areas C13\u2013C26, so lanterns hung on wall hooks create {@quickref Vision and Light||2||bright light} there."
 									]
 								},
 								{
@@ -4071,7 +4071,7 @@
 									"page": 39,
 									"id": "0d0",
 									"entries": [
-										"{@spell Continual Flame} spells cast on sconces bathe most areas in bright light. Only {@area area S8|0df|x} is unlit."
+										"{@spell Continual Flame} spells cast on sconces bathe most areas in {@quickref Vision and Light||2||bright light}. Only {@area area S8|0df|x} is unlit."
 									]
 								},
 								{
@@ -12058,7 +12058,7 @@
 							"page": 73,
 							"id": "19e",
 							"entries": [
-								"The third piece of the {@item Rod of Seven Parts|VEoR} is found in {@area area L28|20a|x} within Landro. For more information about the rod and the spell this piece allows its wielder to cast, see this book's {@adventure introduction|VEoR|0|Rod Pieces}."
+								"The third piece of the {@item Rod of Seven Parts|VEoR} is found in {@area area L28|20a|x} within Landro. For more information about the rod and the spell this piece allows its wielder to cast, see this book's {@adventure introduction|VEoR|0|The Rod's Pieces}."
 							]
 						}
 					]
@@ -17247,7 +17247,7 @@
 									"page": 98,
 									"id": "23c",
 									"entries": [
-										"Unless otherwise noted, each room in the house is lit with bright light by oil lamps, a fireplace, or some other light source when the characters arrive. The cultists take oil lamps into the ritual chamber ({@adventure area D38|VEoR|5|D38: Ritual Chamber}) when they gather there."
+										"Unless otherwise noted, each room in the house is lit with {@quickref Vision and Light||2||bright light} by oil lamps, a fireplace, or some other light source when the characters arrive. The cultists take oil lamps into the ritual chamber ({@adventure area D38|VEoR|5|D38: Ritual Chamber}) when they gather there."
 									]
 								},
 								{
@@ -19366,8 +19366,8 @@
 													"type": "list",
 													"items": [
 														"110 gp and 60 sp in a pouch made of human skin",
-														"Three pieces of cut jade (worth 100 gp each) in a folded piece of black cloth",
-														"A black leather eye patch with a peridot (worth 500 gp) sewn into it",
+														"Three pieces of cut {@item jade} (worth 100 gp each) in a folded piece of black cloth",
+														"A black leather eye patch with a {@item peridot} (worth 500 gp) sewn into it",
 														"A chess set with pieces made of obsidian and chalcedony (worth 250 gp)",
 														"A {@item +2 Shortsword}"
 													]
@@ -23278,7 +23278,7 @@
 									"id": "2f9",
 									"entries": [
 										"Several areas in the vault contain objects known as moonlight mirrors, which each reflect a powerful beam of light from one of Krynn's moons. Moonlight mirrors can be used to disrupt Teremini's ritual, as described later in this chapter.",
-										"A moonlight mirror is a Medium object with AC 13; 5 hit points; and immunity to poison, psychic, and radiant damage. A {@spell Detect Magic} spell reveals an aura of evocation magic emanating from the mirror. Unless covered, the reflective side of a moonlight mirror casts bright light in a 20-foot hemisphere, in the color of the moon the mirror reflects. The text notes which ability checks, if any, are required to remove a moonlight mirror from where it is found."
+										"A moonlight mirror is a Medium object with AC 13; 5 hit points; and immunity to poison, psychic, and radiant damage. A {@spell Detect Magic} spell reveals an aura of evocation magic emanating from the mirror. Unless covered, the reflective side of a moonlight mirror casts {@quickref Vision and Light||2||bright light} in a 20-foot hemisphere, in the color of the moon the mirror reflects. The text notes which ability checks, if any, are required to remove a moonlight mirror from where it is found."
 									]
 								}
 							]
@@ -28137,7 +28137,7 @@
 												"Several inches of standing water cover the floor of these ruined rooms. Rubble in the northeast corner slopes downward to form a rough stairway."
 											]
 										},
-										"Stone walls once separated this basement level into four rooms, but the Cataclysm destroyed the north and west chambers. The standing water makes the floor difficult terrain in this area. The sloping rubble descends to area V13."
+										"Stone walls once separated this basement level into four rooms, but the Cataclysm destroyed the north and west chambers. The standing water makes the floor {@quickref difficult terrain||3} in this area. The sloping rubble descends to area V13."
 									]
 								},
 								{
@@ -28603,7 +28603,7 @@
 											"page": 126,
 											"id": "352",
 											"entries": [
-												"Black candles cast dim light throughout this inner room, revealing a circle of unholy runes drawn in chalk on the floor. A black-robed figure crouches, examining the runes, while a zombie-like creature holding a black rose in a glass jar stands nearby."
+												"Black candles cast {@quickref Vision and Light||2||dim light} throughout this inner room, revealing a circle of unholy runes drawn in chalk on the floor. A black-robed figure crouches, examining the runes, while a zombie-like creature holding a black rose in a glass jar stands nearby."
 											]
 										},
 										"A neutral evil human {@creature necromancer wizard|MPMM} (see {@adventure appendix A|VEoR|12}) named Akaazi uses this chamber to conduct necromantic rituals and create Undead soldiers for Lord Soth's army. Akaazi is accompanied by a {@creature black rose bearer|VEoR} (see {@adventure appendix A|VEoR|12}).",
@@ -31193,7 +31193,7 @@
 											"page": 137,
 											"id": "3a0",
 											"entries": [
-												"All the jewels embedded in the walls are made of worthless crystal except for one: an emerald worth 1,000 gp. A character who spends at least 1 minute examining the jewels spots the emerald with a successful {@dc 20} Intelligence ({@skill Investigation}) check. Prying the emerald from its wall socket is easily done. Placing the emerald in the statue opens the door sealing off the passage to {@area area T16|3c0|x}. The door resists all other attempts to open it. Once opened, however, it ceases to be locked and can thereafter be opened and closed without the emerald.",
+												"All the jewels embedded in the walls are made of worthless crystal except for one: an {@item emerald} worth 1,000 gp. A character who spends at least 1 minute examining the jewels spots the emerald with a successful {@dc 20} Intelligence ({@skill Investigation}) check. Prying the emerald from its wall socket is easily done. Placing the emerald in the statue opens the door sealing off the passage to {@area area T16|3c0|x}. The door resists all other attempts to open it. Once opened, however, it ceases to be locked and can thereafter be opened and closed without the emerald.",
 												"A character who succeeds on a {@dc 16} Intelligence ({@skill Arcana}) check recalls that emeralds are used to contain water elementals.",
 												"Whenever a creature touches one of the other jewels embedded in the walls, the statue glows and launches a blast of freezing magic down the hallway in a 30-foot line that is 5 feet wide. Each creature in that area must make a {@dc 20} Dexterity saving throw, taking 33 ({@dice 6d10}) cold damage on a failed save or half as much damage on a successful one."
 											]
@@ -31596,7 +31596,7 @@
 											"page": 142,
 											"id": "3bf",
 											"entries": [
-												"Once the stone has been destroyed or both juggernauts have been defeated, characters can take the diamond, which is worth 5,000 gp. The diamond stops glowing when it leaves the room."
+												"Once the stone has been destroyed or both juggernauts have been defeated, characters can take the {@item diamond}, which is worth 5,000 gp. The diamond stops glowing when it leaves the room."
 											]
 										}
 									]
@@ -32086,7 +32086,7 @@
 														"479 sp, 342 gp, and 179 pp",
 														"Jade game board with platinum playing pieces, worth 7,500 gp in total",
 														"Set of ruby earrings worth 500 gp",
-														"Three fire opals worth 1,000 gp each"
+														"Three {@item Fire Opal||fire opals} worth 1,000 gp each"
 													]
 												}
 											]
@@ -34561,7 +34561,7 @@
 									"page": 173,
 									"id": "47c",
 									"entries": [
-										"Strange multicolored lights flit through the caverns of Pandesmos, casting the area in dim light at all hours."
+										"Strange multicolored lights flit through the caverns of Pandesmos, casting the area in {@quickref Vision and Light||2||dim light} at all hours."
 									]
 								}
 							]
@@ -35410,7 +35410,7 @@
 									"page": 182,
 									"id": "4a5",
 									"entries": [
-										"The citadel is crumbling due to great age and proximity to the Ruinous Sea. Cracks in the ceiling and walls admit dim light throughout the citadel."
+										"The citadel is crumbling due to great age and proximity to the Ruinous Sea. Cracks in the ceiling and walls admit {@quickref Vision and Light||2||dim light} throughout the citadel."
 									]
 								},
 								{
@@ -35745,7 +35745,7 @@
 											"page": 183,
 											"id": "4b4",
 											"entries": [
-												"In addition to the {@item Cloak of Arachnida} that Naxa wears, this room contains four {@item +1 Longsword||+1 Longswords}, three {@item +1 Dagger|| +1 Daggers}, a {@item +2 Longbow}, three {@item Potion of Poison||Potions of Poison}, and a {@item Potion of Stone Giant Strength||Potion of Giant Strength (stone)}. One banner bearing Lolth's symbol is bordered with a thick silk rope. This is a {@item Rope of Climbing} that functions normally once unstitched from the banner. A mahogany chest the spyder-fiends took from a drow quartermaster contains 750 flawless black opals, each worth 1,000 gp."
+												"In addition to the {@item Cloak of Arachnida} that Naxa wears, this room contains four {@item +1 Longsword||+1 Longswords}, three {@item +1 Dagger|| +1 Daggers}, a {@item +2 Longbow}, three {@item Potion of Poison||Potions of Poison}, and a {@item Potion of Stone Giant Strength||Potion of Giant Strength (stone)}. One banner bearing Lolth's symbol is bordered with a thick silk rope. This is a {@item Rope of Climbing} that functions normally once unstitched from the banner. A mahogany chest the spyder-fiends took from a drow quartermaster contains 750 flawless {@item Black Opal||black opals}, each worth 1,000 gp."
 											]
 										}
 									]
@@ -36829,7 +36829,7 @@
 									"page": 192,
 									"id": "4e4",
 									"entries": [
-										"{@area Areas E1|4e8|x} and {@area E2|4ea|x} of Vecna's Grasp are unlit. Area descriptions assume the characters have a light source or some other means of seeing in the dark. Unrealities in E2 have bright light."
+										"{@area Areas E1|4e8|x} and {@area E2|4ea|x} of Vecna's Grasp are unlit. Area descriptions assume the characters have a light source or some other means of seeing in the dark. Unrealities in E2 have {@quickref Vision and Light||2||bright light}."
 									]
 								},
 								{
@@ -38622,7 +38622,7 @@
 									"page": 200,
 									"id": "511",
 									"entries": [
-										"The cave is bathed in eerie purple light, providing bright light."
+										"The cave is bathed in eerie purple light, providing {@quickref Vision and Light||2||bright light}."
 									]
 								},
 								{
@@ -39557,6 +39557,1006 @@
 						"{@creature Warforged Warrior|VEoR}",
 						"{@creature Whirling Chandelier|VEoR}"
 					]
+				},
+				{
+					"type": "section",
+					"name": "Blue Abishai",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Blue Abishai",
+							"prop": "monsterFluff",
+							"source": "MPMM",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Blue Abishai",
+							"tag": "creature",
+							"source": "MPMM",
+							"style": "narrow"
+						}
+					],
+					"id": "0f5"
+				},
+				{
+					"type": "section",
+					"name": "Green Abishai",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Green Abishai",
+							"prop": "monsterFluff",
+							"source": "MPMM",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Green Abishai",
+							"tag": "creature",
+							"source": "MPMM",
+							"style": "narrow"
+						}
+					],
+					"id": "1c2"
+				},
+				{
+					"type": "section",
+					"name": "Red Abishai",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Red Abishai",
+							"prop": "monsterFluff",
+							"source": "MPMM",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Red Abishai",
+							"tag": "creature",
+							"source": "MPMM",
+							"style": "narrow"
+						}
+					],
+					"id": "1c3"
+				},
+				{
+					"type": "section",
+					"name": "Astral Dreadnought",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Astral Dreadnought",
+							"prop": "monsterFluff",
+							"source": "MPMM",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Astral Dreadnought",
+							"tag": "creature",
+							"source": "MPMM",
+							"style": "narrow"
+						}
+					],
+					"id": "1c4"
+				},
+				{
+					"type": "section",
+					"name": "Black Rose Bearer",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Black Rose Bearer",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Black Rose Bearer",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "1c5"
+				},
+				{
+					"type": "section",
+					"name": "Blade Lieutenant",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Blade Lieutenant",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Blade Lieutenant",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "1c6"
+				},
+				{
+					"type": "section",
+					"name": "Blade Scout",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Blade Scout",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Blade Scout",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "410"
+				},
+				{
+					"type": "section",
+					"name": "Blazebear",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Blazebear",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Blazebear",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "411"
+				},
+				{
+					"type": "section",
+					"name": "Bone Roc",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Bone Roc",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Bone Roc",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "412"
+				},
+				{
+					"type": "section",
+					"name": "Borthak",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Borthak",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Borthak",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "413"
+				},
+				{
+					"type": "section",
+					"name": "Cadaver Collector",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Cadaver Collector",
+							"prop": "monsterFluff",
+							"source": "MPMM",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Cadaver Collector",
+							"tag": "creature",
+							"source": "MPMM",
+							"style": "narrow"
+						}
+					],
+					"id": "53c"
+				},
+				{
+					"type": "section",
+					"name": "Citadel Spider",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Citadel Spider",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Citadel Spider",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "53d"
+				},
+				{
+					"type": "section",
+					"name": "Cosmic Horror",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Cosmic Horror",
+							"prop": "monsterFluff",
+							"source": "BAM",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Cosmic Horror",
+							"tag": "creature",
+							"source": "BAM",
+							"style": "narrow"
+						}
+					],
+					"id": "53e"
+				},
+				{
+					"type": "section",
+					"name": "Deadbark Dryad",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Deadbark Dryad",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Deadbark Dryad",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "53f"
+				},
+				{
+					"type": "section",
+					"name": "Deathwolf",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Deathwolf",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Deathwolf",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "540"
+				},
+				{
+					"type": "section",
+					"name": "Degloth",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Degloth",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Degloth",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "541"
+				},
+				{
+					"type": "section",
+					"name": "Eye Monger",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Eye Monger",
+							"prop": "monsterFluff",
+							"source": "BAM",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Eye Monger",
+							"tag": "creature",
+							"source": "BAM",
+							"style": "narrow"
+						}
+					],
+					"id": "542"
+				},
+				{
+					"type": "section",
+					"name": "False Lich",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "False Lich",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "False Lich",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "543"
+				},
+				{
+					"type": "section",
+					"name": "Granite Juggernaut",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Granite Juggernaut",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Granite Juggernaut",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "544"
+				},
+				{
+					"type": "section",
+					"name": "Hazvongel",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Hazvongel",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Hazvongel",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "545"
+				},
+				{
+					"type": "section",
+					"name": "Hertilod",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Hertilod",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Hertilod",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "546"
+				},
+				{
+					"type": "section",
+					"name": "Inquisitor of the Tome",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Inquisitor of the Tome",
+							"prop": "monsterFluff",
+							"source": "VRGR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Inquisitor of the Tome",
+							"tag": "creature",
+							"source": "VRGR",
+							"style": "narrow"
+						}
+					],
+					"id": "547"
+				},
+				{
+					"type": "section",
+					"name": "Adult Lunar Dragon",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Adult Lunar Dragon",
+							"prop": "monsterFluff",
+							"source": "BAM",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Adult Lunar Dragon",
+							"tag": "creature",
+							"source": "BAM",
+							"style": "narrow"
+						}
+					],
+					"id": "548"
+				},
+				{
+					"type": "section",
+					"name": "Mirror Shade",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Mirror Shade",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Mirror Shade",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "549"
+				},
+				{
+					"type": "section",
+					"name": "Moonlight Guardian",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Moonlight Guardian",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Moonlight Guardian",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "54a"
+				},
+				{
+					"type": "section",
+					"name": "Necromancer Wizard",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Necromancer Wizard",
+							"prop": "monsterFluff",
+							"source": "MPMM",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Necromancer Wizard",
+							"tag": "creature",
+							"source": "MPMM",
+							"style": "narrow"
+						}
+					],
+					"id": "54b"
+				},
+				{
+					"type": "section",
+					"name": "Night Scavver",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Night Scavver",
+							"prop": "monsterFluff",
+							"source": "BAM",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Night Scavver",
+							"tag": "creature",
+							"source": "BAM",
+							"style": "narrow"
+						}
+					],
+					"id": "54c"
+				},
+				{
+					"type": "section",
+					"name": "Priest of Osybus",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Priest of Osybus",
+							"prop": "monsterFluff",
+							"source": "VRGR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Priest of Osybus",
+							"tag": "creature",
+							"source": "VRGR",
+							"style": "narrow"
+						}
+					],
+					"id": "54d"
+				},
+				{
+					"type": "section",
+					"name": "Relentless Impaler",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Relentless Impaler",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Relentless Impaler",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "54e"
+				},
+				{
+					"type": "section",
+					"name": "Lonely Sorrowsworn",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Lonely Sorrowsworn",
+							"prop": "monsterFluff",
+							"source": "MPMM",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Lonely Sorrowsworn",
+							"tag": "creature",
+							"source": "MPMM",
+							"style": "narrow"
+						}
+					],
+					"id": "54f"
+				},
+				{
+					"type": "section",
+					"name": "Lost Sorrowsworn",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Lost Sorrowsworn",
+							"prop": "monsterFluff",
+							"source": "MPMM",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Lost Sorrowsworn",
+							"tag": "creature",
+							"source": "MPMM",
+							"style": "narrow"
+						}
+					],
+					"id": "550"
+				},
+				{
+					"type": "section",
+					"name": "Spiderdragon",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Spiderdragon",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Spiderdragon",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "551"
+				},
+				{
+					"type": "section",
+					"name": "Kakkuu Spyder-Fiend",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Kakkuu Spyder-Fiend",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Kakkuu Spyder-Fiend",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "552"
+				},
+				{
+					"type": "section",
+					"name": "Phisarazu Spyder-Fiend",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Phisarazu Spyder-Fiend",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Phisarazu Spyder-Fiend",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "553"
+				},
+				{
+					"type": "section",
+					"name": "Quavilithku Spyder-Fiend",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Quavilithku Spyder-Fiend",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Quavilithku Spyder-Fiend",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "570"
+				},
+				{
+					"type": "section",
+					"name": "Raklupis Spyder-Fiend",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Raklupis Spyder-Fiend",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Raklupis Spyder-Fiend",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "571"
+				},
+				{
+					"type": "section",
+					"name": "Star Angler",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Star Angler",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Star Angler",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "572"
+				},
+				{
+					"type": "section",
+					"name": "Vlazok",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Vlazok",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Vlazok",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "573"
+				},
+				{
+					"type": "section",
+					"name": "Warforged Warrior",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Warforged Warrior",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Warforged Warrior",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "574"
+				},
+				{
+					"type": "section",
+					"name": "Whirling Chandelier",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Whirling Chandelier",
+							"prop": "monsterFluff",
+							"source": "VEoR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Whirling Chandelier",
+							"tag": "creature",
+							"source": "VEoR",
+							"style": "narrow"
+						}
+					],
+					"id": "575"
 				}
 			]
 		},

@@ -1,36 +1,42 @@
 import {TOOLTIP_NOTHING} from "./lootgen-const.js";
 import {VetoolsConfig} from "../utils-config/utils-config-config.js";
 import {SITE_STYLE__ONE} from "../consts.js";
-import {LootGenRender} from "./lootgen-render.js";
 
 class _LootGenMagicItemSpellUtils {
-	static getBindEles ({spells, comp, isVerbose = false}) {
-		const btnRerollSpell = ee`<span class="ve-roller render-roller ve-mr-2">[reroll${isVerbose ? ` spell` : ""}]</span>`
-			.onn("click", evt => evt.preventDefault())
-			.onn("click", () => {
+	static getBindEles (
+		{
+			spells,
+			comp,
+			rendererWrapped,
+			isVerbose = false,
+		},
+	) {
+		const btnRerollSpell = veT`<span class="ve-roller render-roller ve-mr-2">[reroll${isVerbose ? ` spell` : ""}]</span>`
+			.vee.onn("click", evt => evt.preventDefault())
+			.vee.onn("click", () => {
 				comp._state.spell = RollerUtil.rollOnArray(spells.filter(it => it.level === comp._state.spellLevel));
 			});
 
-		const dispSpell = ee`<div class="ve-no-wrap"></div>`;
+		const dispSpell = veT`<div class="ve-no-wrap"></div>`;
 		comp._addHookBase("spell", () => {
-			if (!comp._state.spell) return dispSpell.html(`<span class="ve-help-subtle" title="${TOOLTIP_NOTHING.qq()}">(no spell)</span>`);
-			dispSpell.html(LootGenRender.er(`{@spell ${comp._state.spell.name}|${comp._state.spell.source}}`));
+			if (!comp._state.spell) return dispSpell.vee.html(`<span class="ve-help-subtle" title="${TOOLTIP_NOTHING.qq()}">(no spell)</span>`);
+			dispSpell.vee.html(rendererWrapped.er(`{@spell ${comp._state.spell.name}|${comp._state.spell.source}}`));
 		})();
 
-		const dispFilter = ee`<div class="no-wrap"></div>`;
+		const dispFilter = veT`<div class="no-wrap"></div>`;
 		comp._addHookBase("spellLevel", () => {
 			if (comp._state.spellLevel == null) {
 				return dispFilter
-					.html("")
-					.hideVe();
+					.vee.html("")
+					.vee.hide();
 			}
 
 			dispFilter
-				.html(`${LootGenRender.er(`{@filter see all ${Parser.spLevelToFullLevelText(comp._state.spellLevel, {isDash: true})} spells|spells|level=${comp._state.spellLevel}}`)}`)
-				.showVe();
+				.vee.html(`${rendererWrapped.er(`{@filter see all ${Parser.spLevelToFullLevelText(comp._state.spellLevel, {isDash: true})} spells|spells|level=${comp._state.spellLevel}}`)}`)
+				.vee.show();
 		})();
 
-		const stgSpellScroll = ee`<div class="ve-flex-v-center ve-italic ve-mr-2">
+		const stgSpellScroll = veT`<div class="ve-flex-v-center ve-italic ve-mr-2">
 			<span>(</span>
 			${btnRerollSpell}
 			${dispSpell}
@@ -39,7 +45,7 @@ class _LootGenMagicItemSpellUtils {
 			<span>)</span>
 		</div>`;
 		comp._addHookBase("isSpellScroll", () => {
-			stgSpellScroll.toggleVe(!!comp._state.isSpellScroll);
+			stgSpellScroll.vee.toggle(!!comp._state.isSpellScroll);
 		})();
 
 		return stgSpellScroll;
@@ -55,11 +61,14 @@ export class LootGenMagicItem extends BaseComponent {
 			magicItemTable,
 			itemsAltChoose,
 			itemsAltChooseDisplayText,
+			rendererWrapped,
 			isItemsAltChooseRoll = false,
 			fnGetIsPreferAltChoose = null,
 			rowRoll = null,
 		},
 	) {
+		if (!rendererWrapped) throw new Error(`Missing required "rendererWrapped" option!`);
+
 		isItemsAltChooseRoll = isItemsAltChooseRoll && !!itemsAltChoose;
 		if (isItemsAltChooseRoll) {
 			const item = RollerUtil.rollOnArray(itemsAltChoose);
@@ -72,6 +81,7 @@ export class LootGenMagicItem extends BaseComponent {
 				magicItemTable,
 				itemsAltChoose,
 				itemsAltChooseDisplayText,
+				rendererWrapped,
 				isItemsAltChooseRoll,
 				fnGetIsPreferAltChoose,
 			});
@@ -85,6 +95,7 @@ export class LootGenMagicItem extends BaseComponent {
 				magicItemTable,
 				itemsAltChoose,
 				itemsAltChooseDisplayText,
+				rendererWrapped,
 				isItemsAltChooseRoll,
 				fnGetIsPreferAltChoose,
 			});
@@ -101,6 +112,7 @@ export class LootGenMagicItem extends BaseComponent {
 				magicItemTable,
 				itemsAltChoose,
 				itemsAltChooseDisplayText,
+				rendererWrapped,
 				isItemsAltChooseRoll,
 				fnGetIsPreferAltChoose,
 				baseEntry: row.item,
@@ -123,6 +135,7 @@ export class LootGenMagicItem extends BaseComponent {
 				magicItemTable,
 				itemsAltChoose,
 				itemsAltChooseDisplayText,
+				rendererWrapped,
 				isItemsAltChooseRoll,
 				fnGetIsPreferAltChoose,
 				baseEntry: row.item ?? `{@item ${row.choose.fromGeneric[0]}}`,
@@ -144,6 +157,7 @@ export class LootGenMagicItem extends BaseComponent {
 				magicItemTable,
 				itemsAltChoose,
 				itemsAltChooseDisplayText,
+				rendererWrapped,
 				isItemsAltChooseRoll,
 				fnGetIsPreferAltChoose,
 				baseEntry: row.item ?? `{@item ${row.choose.fromGroup[0]}}`,
@@ -165,6 +179,7 @@ export class LootGenMagicItem extends BaseComponent {
 				magicItemTable,
 				itemsAltChoose,
 				itemsAltChooseDisplayText,
+				rendererWrapped,
 				isItemsAltChooseRoll,
 				fnGetIsPreferAltChoose,
 				baseEntry: row.item,
@@ -194,6 +209,7 @@ export class LootGenMagicItem extends BaseComponent {
 				magicItemTable,
 				itemsAltChoose,
 				itemsAltChooseDisplayText,
+				rendererWrapped,
 				isItemsAltChooseRoll,
 				fnGetIsPreferAltChoose,
 				baseEntry,
@@ -222,6 +238,7 @@ export class LootGenMagicItem extends BaseComponent {
 				magicItemTable,
 				itemsAltChoose,
 				itemsAltChooseDisplayText,
+				rendererWrapped,
 				isItemsAltChooseRoll,
 				fnGetIsPreferAltChoose,
 				baseEntry: row.item,
@@ -246,6 +263,7 @@ export class LootGenMagicItem extends BaseComponent {
 			magicItemTable,
 			itemsAltChoose,
 			itemsAltChooseDisplayText,
+			rendererWrapped,
 			isItemsAltChooseRoll,
 			fnGetIsPreferAltChoose,
 			baseEntry: row.item,
@@ -262,6 +280,7 @@ export class LootGenMagicItem extends BaseComponent {
 			magicItemTable,
 			itemsAltChoose,
 			itemsAltChooseDisplayText,
+			rendererWrapped,
 			isItemsAltChooseRoll = false,
 			fnGetIsPreferAltChoose = null,
 			baseEntry,
@@ -280,6 +299,7 @@ export class LootGenMagicItem extends BaseComponent {
 				magicItemTable,
 				itemsAltChoose,
 				itemsAltChooseDisplayText,
+				rendererWrapped,
 				isItemsAltChooseRoll,
 				fnGetIsPreferAltChoose,
 				baseEntry,
@@ -300,6 +320,7 @@ export class LootGenMagicItem extends BaseComponent {
 				magicItemTable,
 				itemsAltChoose,
 				itemsAltChooseDisplayText,
+				rendererWrapped,
 				isItemsAltChooseRoll,
 				fnGetIsPreferAltChoose,
 				baseEntry: baseEntry,
@@ -316,6 +337,7 @@ export class LootGenMagicItem extends BaseComponent {
 			magicItemTable,
 			itemsAltChoose,
 			itemsAltChooseDisplayText,
+			rendererWrapped,
 			isItemsAltChooseRoll,
 			fnGetIsPreferAltChoose,
 			baseEntry,
@@ -368,6 +390,7 @@ export class LootGenMagicItem extends BaseComponent {
 	 * @param magicItemTable The table this result was rolled form.
 	 * @param itemsAltChoose Item list from which alternate rolls can be made.
 	 * @param itemsAltChooseDisplayText Summary display text for the alternate roll options.
+	 * @param rendererWrapped Wrapped renderer to be used when rendering entries.
 	 * @param isItemsAltChooseRoll If this item was rolled by an alt-choose roll.
 	 * @param fnGetIsPreferAltChoose Function to call when checking if this should default to the "alt choose" item set.
 	 * @param baseEntry The text, which may be an item itself, supplied by the `"item"` property in the row.
@@ -383,6 +406,7 @@ export class LootGenMagicItem extends BaseComponent {
 			magicItemTable,
 			itemsAltChoose,
 			itemsAltChooseDisplayText,
+			rendererWrapped,
 			isItemsAltChooseRoll,
 			fnGetIsPreferAltChoose,
 			baseEntry,
@@ -391,6 +415,8 @@ export class LootGenMagicItem extends BaseComponent {
 			rollAdditionalText,
 		},
 	) {
+		if (!rendererWrapped) throw new Error(`Missing required "rendererWrapped" option!`);
+
 		super();
 
 		this._dataManager = dataManager;
@@ -400,6 +426,7 @@ export class LootGenMagicItem extends BaseComponent {
 		this._magicItemTable = magicItemTable;
 		this._itemsAltChoose = itemsAltChoose;
 		this._itemsAltChooseDisplayText = itemsAltChooseDisplayText;
+		this._rendererWrapped = rendererWrapped;
 		this._fnGetIsPreferAltChoose = fnGetIsPreferAltChoose;
 
 		this._state.baseEntry = baseEntry;
@@ -428,6 +455,7 @@ export class LootGenMagicItem extends BaseComponent {
 			magicItemTable: this._magicItemTable,
 			itemsAltChoose: this._itemsAltChoose,
 			itemsAltChooseDisplayText: this._itemsAltChooseDisplayText,
+			rendererWrapped: this._rendererWrapped,
 			isItemsAltChooseRoll: isAltRoll,
 			fnGetIsPreferAltChoose: this._fnGetIsPreferAltChoose,
 		});
@@ -445,9 +473,9 @@ export class LootGenMagicItem extends BaseComponent {
 		const title = this._itemsAltChoose
 			? isAltModeDefault ? `SHIFT to roll on Magic Item Table ${this._magicItemTable.type}` : `SHIFT to roll ${Parser.getArticle(this._itemsAltChooseDisplayText)} ${this._itemsAltChooseDisplayText} item`
 			: null;
-		return ee`<span class="ve-roller render-roller" ${title ? `title="${title}"` : ""}>[reroll]</span>`
-			.onn("mousedown", evt => evt.preventDefault())
-			.onn("click", evt => this._pDoReroll({isAltRoll: isAltModeDefault ? !evt.shiftKey : evt.shiftKey}));
+		return veT`<span class="ve-roller render-roller" ${title ? `title="${title}"` : ""}>[reroll]</span>`
+			.vee.onn("mousedown", evt => evt.preventDefault())
+			.vee.onn("click", evt => this._pDoReroll({isAltRoll: isAltModeDefault ? !evt.shiftKey : evt.shiftKey}));
 	}
 
 	getRender () {
@@ -461,7 +489,7 @@ export class LootGenMagicItem extends BaseComponent {
 
 		const btnReroll = this._getBtnReroll();
 
-		return ee`<li class="ve-split-v-center">
+		return veT`<li class="ve-split-v-center">
 			<div class="ve-flex-v-center ve-flex-wrap ve-pr-3 ve-min-w-0">
 				${dispBaseEntry}
 				${dispRoll}
@@ -471,16 +499,16 @@ export class LootGenMagicItem extends BaseComponent {
 	}
 
 	_getRender_getDispBaseEntry ({prop = "baseEntry"} = {}) {
-		const dispBaseEntry = ee`<div class="ve-mr-2"></div>`;
-		const hkBaseEntry = () => dispBaseEntry.html(LootGenRender.er(this._state.isItemsAltChooseRoll ? `{@i ${this._state[prop]}}` : this._state[prop]));
+		const dispBaseEntry = veT`<div class="ve-mr-2"></div>`;
+		const hkBaseEntry = () => dispBaseEntry.vee.html(this._rendererWrapped.er(this._state.isItemsAltChooseRoll ? `{@i ${this._state[prop]}}` : this._state[prop]));
 		this._addHookBase(prop, hkBaseEntry);
 		hkBaseEntry();
 		return dispBaseEntry;
 	}
 
 	_getRender_getDispRoll ({prop = "roll", propAdditionalText = "rollAdditionalText"} = {}) {
-		const dispRoll = ee`<div class="ve-muted"></div>`;
-		const hkRoll = () => dispRoll.txt(this._state.isItemsAltChooseRoll ? `(${this._itemsAltChooseDisplayText} item)` : `(Rolled ${this._state[prop]}${this._state[propAdditionalText] || ""})`);
+		const dispRoll = veT`<div class="ve-muted"></div>`;
+		const hkRoll = () => dispRoll.vee.txt(this._state.isItemsAltChooseRoll ? `(${this._itemsAltChooseDisplayText} item)` : `(Rolled ${this._state[prop]}${this._state[propAdditionalText] || ""})`);
 		this._addHookBase(prop, hkRoll);
 		hkRoll();
 		return dispRoll;
@@ -502,7 +530,7 @@ class LootGenMagicItemNull extends LootGenMagicItem {
 	getExtensionExportMeta () { return null; }
 
 	_getRender () {
-		return ee`<li class="ve-split-v-center">
+		return veT`<li class="ve-split-v-center">
 			<div class="ve-flex-v-center ve-flex-wrap ve-muted ve-help-subtle" title="${TOOLTIP_NOTHING.qq()}">&mdash;</div>
 		</li>`;
 	}
@@ -538,11 +566,15 @@ class LootGenMagicItemSpellScroll extends LootGenMagicItem {
 		const dispBaseEntry = this._getRender_getDispBaseEntry();
 		const dispRoll = this._getRender_getDispRoll();
 
-		const stgSpellScroll = _LootGenMagicItemSpellUtils.getBindEles({spells: this._spells, comp: this});
+		const stgSpellScroll = _LootGenMagicItemSpellUtils.getBindEles({
+			spells: this._spells,
+			comp: this,
+			rendererWrapped: this._rendererWrapped,
+		});
 
 		const btnReroll = this._getBtnReroll();
 
-		return ee`<li class="ve-split-v-center">
+		return veT`<li class="ve-split-v-center">
 			<div class="ve-flex-v-center ve-flex-wrap ve-pr-3 ve-min-w-0">
 				${dispBaseEntry}
 				${stgSpellScroll}
@@ -591,11 +623,16 @@ class LootGenMagicItemSubItems extends LootGenMagicItem {
 		const dispBaseEntry = this._getRender_getDispBaseEntry();
 		const dispRoll = this._getRender_getDispRoll();
 
-		const stgSpellScroll = _LootGenMagicItemSpellUtils.getBindEles({spells: this._spells, comp: this, isVerbose: true});
+		const stgSpellScroll = _LootGenMagicItemSpellUtils.getBindEles({
+			spells: this._spells,
+			comp: this,
+			rendererWrapped: this._rendererWrapped,
+			isVerbose: true,
+		});
 
-		const btnRerollSubItem = ee`<span class="ve-roller render-roller">[reroll]</span>`
-			.onn("mousedown", evt => evt.preventDefault())
-			.onn("click", () => {
+		const btnRerollSubItem = veT`<span class="ve-roller render-roller">[reroll]</span>`
+			.vee.onn("mousedown", evt => evt.preventDefault())
+			.vee.onn("click", () => {
 				const itemRolled = RollerUtil.rollOnArray(this._subItems);
 				if (!itemRolled) return;
 				this._state.item = itemRolled;
@@ -604,11 +641,11 @@ class LootGenMagicItemSubItems extends LootGenMagicItem {
 
 		const dispSubItem = this._isInlineReroll
 			? null
-			: ee`<div class="ve-ml-2"></div>`;
+			: veT`<div class="ve-ml-2"></div>`;
 		if (!this._isInlineReroll) {
 			this._addHookBase("item", () => {
 				if (!this._state.item) return;
-				dispSubItem.html(LootGenRender.er(`{@item ${DataUtil.proxy.getUidPacked("item", this._state.item, "item", {isMaintainCase: true})}}`));
+				dispSubItem.vee.html(this._rendererWrapped.er(`{@item ${DataUtil.proxy.getUidPacked("item", this._state.item, "item", {isMaintainCase: true})}}`));
 			})();
 		}
 
@@ -632,7 +669,7 @@ class LootGenMagicItemSubItems extends LootGenMagicItem {
 		const btnReroll = this._getBtnReroll();
 
 		const ptSubItem = this._subItems.length
-			? ee`<div class="ve-flex-v-center ve-italic ve-mr-2">
+			? veT`<div class="ve-flex-v-center ve-italic ve-mr-2">
 					<span>(</span>
 					${btnRerollSubItem}
 					${dispSubItem}
@@ -640,7 +677,7 @@ class LootGenMagicItemSubItems extends LootGenMagicItem {
 				</div>`
 			: null;
 
-		return ee`<li class="ve-split-v-center">
+		return veT`<li class="ve-split-v-center">
 			<div class="ve-flex-v-center ve-flex-wrap ve-pr-3 ve-min-w-0">
 				${dispBaseEntry}
 				${ptSubItem}
@@ -700,9 +737,9 @@ export class LootGenMagicItemTable extends LootGenMagicItem {
 
 		const btnReroll = this._getBtnReroll();
 
-		const btnRerollSub = ee`<span class="ve-roller render-roller ve-small ve-self-flex-end">[reroll]</span>`
-			.onn("mousedown", evt => evt.preventDefault())
-			.onn("click", async () => {
+		const btnRerollSub = veT`<span class="ve-roller render-roller ve-small ve-self-flex-end">[reroll]</span>`
+			.vee.onn("mousedown", evt => evt.preventDefault())
+			.vee.onn("click", async () => {
 				const {subRowRoll, subRow, subItem} = await LootGenMagicItemTable.pGetSubRollMeta({
 					min: this._tableMinRoll,
 					max: this._tableMaxRoll,
@@ -714,7 +751,7 @@ export class LootGenMagicItemTable extends LootGenMagicItem {
 				this._state.tableRoll = subRowRoll;
 			});
 
-		return ee`<li class="ve-flex-col">
+		return veT`<li class="ve-flex-col">
 			<div class="ve-split-v-center">
 				<div class="ve-flex-v-center ve-flex-wrap ve-pr-3 ve-min-w-0">
 					${dispBaseEntry}

@@ -35,13 +35,13 @@ export class BrewUtil2_ extends BrewUtil2Base {
 
 	getFileUrl (path, urlRoot) { return DataUtil.brew.getFileUrl(path, urlRoot); }
 
-	pLoadTimestamps (urlRoot) { return DataUtil.brew.pLoadTimestamps(urlRoot); }
+	async pLoadTimestamps (urlRoot) { return DataUtil.brew.pLoadTimestamps(urlRoot); }
 
-	pLoadPropIndex (urlRoot) { return DataUtil.brew.pLoadPropIndex(urlRoot); }
+	async pLoadPropIndex (urlRoot) { return DataUtil.brew.pLoadPropIndex(urlRoot); }
 
-	pLoadMetaIndex (urlRoot) { return DataUtil.brew.pLoadMetaIndex(urlRoot); }
+	async pLoadMetaIndex (urlRoot) { return DataUtil.brew.pLoadMetaIndex(urlRoot); }
 
-	pLoadAdventureBookIdsIndex (urlRoot) { return DataUtil.brew.pLoadAdventureBookIdsIndex(urlRoot); }
+	async pLoadAdventureBookIdsIndex (urlRoot) { return DataUtil.brew.pLoadAdventureBookIdsIndex(urlRoot); }
 
 	/* -------------------------------------------- */
 
@@ -112,12 +112,19 @@ export class BrewUtil2_ extends BrewUtil2Base {
 	async pRemoveEditableBrewEntity (prop, uniqueId) {
 		if (!uniqueId) throw new Error(`A "uniqueId" must be provided!`);
 
+		await this.pRemoveEditableBrewEntities(prop, [uniqueId]);
+	}
+
+	async pRemoveEditableBrewEntities (prop, uniqueIds) {
+		if (!uniqueIds.length) return;
+
 		const brew = await this.pGetOrCreateEditableBrewDoc();
 
 		if (!brew.body?.[prop]?.length) return;
 
 		const nxt = MiscUtil.copyFast(brew);
-		nxt.body[prop] = nxt.body[prop].filter(it => it.uniqueId !== uniqueId);
+		const uniqueIdsSet = new Set(uniqueIds);
+		nxt.body[prop] = nxt.body[prop].filter(it => !uniqueIdsSet.has(it.uniqueId));
 
 		if (nxt.body[prop].length === brew.body[prop]) return; // Silently allow no-op deletes
 

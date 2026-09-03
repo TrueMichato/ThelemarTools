@@ -132,7 +132,8 @@
 										"{@adventure Episode 4: Dran Enterprises|OoW|4}",
 										"{@adventure Episode 5: Hide and Seek|OoW|5}",
 										"{@adventure Episode 6: Showdown with the Six|OoW|6}"
-									]
+									],
+									"columns": 3
 								}
 							]
 						}
@@ -4147,7 +4148,8 @@
 														"{@b First Success}: The {@creature gibbering mouther} deals half as much damage with its attacks.",
 														"{@b Second Success}: The {@creature gibbering mouther} loses its Gibbering feature.",
 														"{@b Third Success}: The portal closes and the {@creature gibbering mouther} dies."
-													]
+													],
+													"columns": 3
 												}
 											]
 										},
@@ -4574,7 +4576,7 @@
 											"id": "12c",
 											"entries": [
 												"If the characters question the defeated bandits, the criminals admit to working for Moguhl from time to time, but they can provide no other actionable information. If Moguhl is captured and convinced to talk, she can provide intelligence on the prison beneath Castle Never, which she has been gathering in case she needs to break in to talk to Oppal.",
-												"Characters who contract lycanthropy from Moguhl might have the opportunity to get the curse removed at the Hall of Knowledge later in this episode at a reduced cost, assuming they can help the head priest there with his troubles. See the \"{@area Hall of Knowledge|131|x}\" section below."
+												"Characters who contract {@variantrule Player Characters as Lycanthropes|MM|lycanthropy} from Moguhl might have the opportunity to get the curse removed at the Hall of Knowledge later in this episode at a reduced cost, assuming they can help the head priest there with his troubles. See the \"{@area Hall of Knowledge|131|x}\" section below."
 											]
 										},
 										{
@@ -4658,7 +4660,7 @@
 											"page": 122,
 											"id": "132",
 											"entries": [
-												"If any characters have lycanthropy from their run-in with Moguhl Vloot, Grand Scribe Liethennson can cast {@spell remove curse} for a donation of 50 gp. If he feels indebted to the characters (see \"{@area Alternative Entry|135|x}\" below), he might cast the spell for free."
+												"If any characters have {@variantrule Player Characters as Lycanthropes|MM|lycanthropy} from their run-in with Moguhl Vloot, Grand Scribe Liethennson can cast {@spell remove curse} for a donation of 50 gp. If he feels indebted to the characters (see \"{@area Alternative Entry|135|x}\" below), he might cast the spell for free."
 											]
 										}
 									]
@@ -4721,7 +4723,7 @@
 									"entries": [
 										"With the diamonds secured, the characters can leave the city with little problem. Provided they don't wave the diamonds under the noses of the guards while departing, they aren't bothered or taxed. If they report back to Omin with magic, he instructs the franchise's hoardsperson or another suitable character to keep the diamonds safe until delivery.",
 										"If the characters dispel or otherwise deal with the {@spell glyph of warding} and open the book, it contains a silk bag with twelve black diamonds inside. A successful {@dc 15} Intelligence ({@skill Investigation} or {@skill Nature}) check from any character with a merchant, jeweler, or mining background can assess the value of the gems. A character with experience as a jeweler has advantage on this check.",
-										"A successful check determines that while four of the gems are real diamonds (5,000 gp each), eight are actually finely cut smoky quartz (10 gp each). Omin knows that Oppal mixed the fakes with the real diamonds to throw off would-be thieves, allowing her to offer them the quartz while she used legerdemain to retain the valuable ones. Characters who don't know this might sweat a bit as they try to figure out how to explain the situation to Omin."
+										"A successful check determines that while four of the gems are real {@item Diamond||diamonds} (5,000 gp each), eight are actually finely cut smoky quartz (10 gp each). Omin knows that Oppal mixed the fakes with the real diamonds to throw off would-be thieves, allowing her to offer them the quartz while she used legerdemain to retain the valuable ones. Characters who don't know this might sweat a bit as they try to figure out how to explain the situation to Omin."
 									]
 								}
 							]
@@ -4970,7 +4972,7 @@
 											"page": 126,
 											"id": "14d",
 											"entries": [
-												"The lighthouse is mostly dark. Two lanterns full of oil hang within each level on the east and west walls. Window slits stand 3 feet above the floor on each level, at the center of the north and south walls. These slits are 3 feet high but only a few inches wide, so they're too small to allow passage or let much more than a little dim light in."
+												"The lighthouse is mostly dark. Two lanterns full of oil hang within each level on the east and west walls. Window slits stand 3 feet above the floor on each level, at the center of the north and south walls. These slits are 3 feet high but only a few inches wide, so they're too small to allow passage or let much more than a little {@quickref Vision and Light||2||dim light} in."
 											]
 										},
 										{
@@ -5195,7 +5197,7 @@
 									"page": 128,
 									"id": "163",
 									"entries": [
-										"The hatch in the ceiling of the fourth floor provides access to the top of the lighthouse. Magical shadow causes this area to be lightly obscured. When the characters arrive, read:",
+										"The hatch in the ceiling of the fourth floor provides access to the top of the lighthouse. Magical shadow causes this area to be {@quickref Vision and Light||2||lightly obscured}. When the characters arrive, read:",
 										{
 											"type": "insetReadaloud",
 											"id": "164",
@@ -5267,9 +5269,9 @@
 												{
 													"type": "list",
 													"items": [
-														"The area around the top of the lighthouse is no longer lightly obscured.",
+														"The area around the top of the lighthouse is no longer {@quickref Vision and Light||2||lightly obscured}.",
 														"The lens no longer grants benefits to undead.",
-														"The energy of the lens is reversed for 1 minute, shining out as bright light that fills all exterior areas of the lighthouse within 20 feet. While the energy is reversed, each undead creature that starts its turn in this area takes 11 ({@dice 2d10}) radiant damage. Each creature that isn't a construct or undead regains 11 ({@dice 2d10}) hit points at the start of its turn. A creature that could regain hit points but has died within the last minute returns to life with 1 hit point. (This includes any creatures that have fallen from the lighthouse.)"
+														"The energy of the lens is reversed for 1 minute, shining out as {@quickref Vision and Light||2||bright light} that fills all exterior areas of the lighthouse within 20 feet. While the energy is reversed, each undead creature that starts its turn in this area takes 11 ({@dice 2d10}) radiant damage. Each creature that isn't a construct or undead regains 11 ({@dice 2d10}) hit points at the start of its turn. A creature that could regain hit points but has died within the last minute returns to life with 1 hit point. (This includes any creatures that have fallen from the lighthouse.)"
 													]
 												},
 												{
@@ -7235,7 +7237,7 @@
 									"page": 152,
 									"id": "1f8",
 									"entries": [
-										"In addition to the book, the study holds 30 pp, 150 gp, two pieces of pink coral (100 gp each), a small gold bracelet (50 gp), five {@item +2 Arrow||+2 arrows} decorated with green flames, a {@item dagger of venom}, an {@item immovable rod}, and two {@item Potion of Greater Healing||potions of greater healing}. Bracus gifts all this to the characters if they save him, or they can loot it if things go the other way."
+										"In addition to the book, the study holds 30 pp, 150 gp, two pieces of pink {@item coral} (100 gp each), a small gold bracelet (50 gp), five {@item +2 Arrow||+2 arrows} decorated with green flames, a {@item dagger of venom}, an {@item immovable rod}, and two {@item Potion of Greater Healing||potions of greater healing}. Bracus gifts all this to the characters if they save him, or they can loot it if things go the other way."
 									]
 								},
 								{
@@ -10406,7 +10408,7 @@
 									"page": 184,
 									"id": "2e0",
 									"entries": [
-										"In this version of the Test Market inn, all the rooms upstairs ({@area areas 7|2d2|x} and {@area 8|2d3}) are empty except for one room of your choice. Any character who succeeds on a {@dc 12} Wisdom ({@skill Perception}) check or who has a passive Wisdom ({@skill Perception} score of 12 or higher can hear slurping and chewing sounds from that area.",
+										"In this version of the Test Market inn, all the rooms upstairs ({@area areas 7|2d2|x} and {@area 8|2d3}) are empty except for one room of your choice. Any character who succeeds on a {@dc 12} Wisdom ({@skill Perception}) check or who has a passive Wisdom ({@skill Perception}) score of 12 or higher can hear slurping and chewing sounds from that area.",
 										{
 											"type": "entries",
 											"name": "Creatures",

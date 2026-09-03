@@ -4,6 +4,7 @@ import {ConverterConst} from "./converterutils-const.js";
 import {ItemTag, SpellTag} from "./converterutils-entries.js";
 import {VetoolsConfig} from "../utils-config/utils-config-config.js";
 import {SITE_STYLE__CLASSIC} from "../consts.js";
+import {ConverterUtils} from "./converterutils-utils.js";
 
 export class AcConvert {
 	static _ITEM_LOOKUP = null;
@@ -1289,6 +1290,7 @@ export class DamageTypeTag extends _PrimaryLegendarySpellsTaggerBase {
 	//   Note that these names should exclude parenthetical parts (as these are removed before lookup)
 	static _BLOCKLIST_NAMES = new Set([
 		"vampire weaknesses",
+		"sunlight hypersensitivity",
 	]);
 
 	static _init () {
@@ -2132,7 +2134,7 @@ export class SpeedConvert {
 	static _SPEED_TYPES = new Set(Parser.SPEED_MODES);
 
 	static _splitSpeed (str) {
-		const cSplitter = str.includes(";") ? ";" : ",";
+		let cSplitter = ConverterUtils.isHasCharOutwithParens(str, ";") ? ";" : ",";
 
 		let ret = [];
 		let stack = "";
@@ -2174,6 +2176,13 @@ export class SpeedConvert {
 		if (typeof mon.speed !== "string") return;
 
 		let line = mon.speed.trim().replace(/^speed[:.]?\s*/i, "");
+
+		line = line
+			// E.g. "Battle Familiar" :: AU
+			.replace(
+				/(?<speed>\bfly\s+\d+\s*ft\.?)\s+hover;\s*(?<condition>[^,;]+?\bonly)\b/gi,
+				(...m) => `${m.at(-1).speed} (hover; ${m.at(-1).condition})`,
+			);
 
 		const out = {};
 		let byHand = false;

@@ -169,7 +169,7 @@
 							"page": 7,
 							"id": "00e",
 							"entries": [
-								"The staircase doesn't experience day or night, existing in a perpetual state of twilight. Distant doors, twinkling like stars, provide dim light to the dreamlike realm, as does the staircase itself, which gives off an ambient glow in some stretches."
+								"The staircase doesn't experience day or night, existing in a perpetual state of twilight. Distant doors, twinkling like stars, provide {@quickref Vision and Light||2||dim light} to the dreamlike realm, as does the staircase itself, which gives off an ambient glow in some stretches."
 							]
 						},
 						{
@@ -239,7 +239,7 @@
 							"id": "015",
 							"entries": [
 								"Areas of the staircase plagued by the Iron Shadow appear cold and lifeless and are shrouded in palls of magical gloom. A creature that enters the gloom for the first time on a turn or starts its turn there must succeed on a {@dc 10} Constitution saving throw or gain 1 level of {@condition exhaustion}. If this effect increases a creature's level of {@condition exhaustion} above 5, the creature becomes a {@creature shadow} under the Iron Shadow's control. Nothing short of a {@spell Wish} spell or divine intervention can reverse this transformation.",
-								"If an area of bright light created by a spell of 3rd level or higher overlaps with an area of gloom, that gloom disappears for 1 hour. Only a {@spell Wish} spell can permanently expunge a patch of the Iron Shadow from the staircase."
+								"If an area of {@quickref Vision and Light||2||bright light} created by a spell of 3rd level or higher overlaps with an area of gloom, that gloom disappears for 1 hour. Only a {@spell Wish} spell can permanently expunge a patch of the Iron Shadow from the staircase."
 							]
 						},
 						{
@@ -2045,7 +2045,7 @@
 											"page": 21,
 											"id": "049",
 											"entries": [
-												"Four {@creature Stirge||stirges}, their bellies engorged with the corpse's blood, hang asleep from the ceiling. Bright light or any noise louder than a whisper wakes the stirges, causing them to attack. A character attempting to retrieve the gems must succeed on a {@dc 15} Dexterity ({@skill Stealth}) check to avoid waking the stirges."
+												"Four {@creature Stirge||stirges}, their bellies engorged with the corpse's blood, hang asleep from the ceiling. {@quickref Vision and Light||2||Bright light} or any noise louder than a whisper wakes the stirges, causing them to attack. A character attempting to retrieve the gems must succeed on a {@dc 15} Dexterity ({@skill Stealth}) check to avoid waking the stirges."
 											]
 										},
 										{
@@ -2485,7 +2485,7 @@
 											"page": 25,
 											"id": "074",
 											"entries": [
-												"The basket contains 300 sp and five jasper stones worth 50 gp each."
+												"The basket contains 300 sp and five {@item Jasper||jasper stones} worth 50 gp each."
 											]
 										}
 									]
@@ -2510,7 +2510,7 @@
 											"page": 25,
 											"id": "077",
 											"entries": [
-												"The corpse carries a full canteen of water, three days of rations, and a sack with 40 gp and two citrines worth 50 gp each. The holy symbol\u2014which honors the elder evil Zargon\u2014houses a smooth sphere of yellow jasper worth 25 gp."
+												"The corpse carries a full canteen of water, three days of rations, and a sack with 40 gp and two {@item Citrine||citrines} worth 50 gp each. The holy symbol\u2014which honors the elder evil Zargon\u2014houses a smooth sphere of yellow jasper worth 25 gp."
 											]
 										}
 									]
@@ -2606,7 +2606,7 @@
 											"id": "07c",
 											"entries": [
 												"To be considered for membership, a character must reveal a secret about themself\u2014whether false or true\u2014and make a {@dc 14} Charisma ({@skill Deception} or {@skill Persuasion}) check. Characters who openly display allegiance to another faction in the ziggurat, such as by wearing a mask of Gorm, have disadvantage on this check. Characters who prove they've defeated members of another faction have advantage on this check. On a successful check, Auriga inducts that character into the Mages of Usamigaras. If a character tries to dupe the mages and fails, Auriga remarks that the character is a poor liar.",
-												"The mages give each inductee a set of starry robes, a silvered {@item dagger|PHB}, a silver mask worth 25 gp, and a silver tattoo of a five-pointed star on their right palm. Auriga also tells inductees how to operate the shifting wall in {@area area B21|086|x}. Additionally, if at least one character joins the faction, Auriga gifts the party a {@item Wand of Secrets} from a hidden niche in the altar.",
+												"The mages give each inductee a set of starry robes, a {@item silvered dagger|PHB}, a silver mask worth 25 gp, and a silver tattoo of a five-pointed star on their right palm. Auriga also tells inductees how to operate the shifting wall in {@area area B21|086|x}. Additionally, if at least one character joins the faction, Auriga gifts the party a {@item Wand of Secrets} from a hidden niche in the altar.",
 												"The Mages of Usamigaras and their allies can rest safely here and in area B19 without triggering random encounters."
 											]
 										},
@@ -2626,7 +2626,7 @@
 											"id": "07e",
 											"entries": [
 												"Auriga and their four mages each wear a silver mask of Usamigaras worth 25 gp. Auriga wears a bejeweled silver crown worth 100 gp and carries a {@item Wand of Magic Detection}.",
-												"A character who inspects the altar and succeeds on a {@dc 15} Intelligence ({@skill Investigation}) check finds a hidden compartment. Inside are six more masks, six sets of robes, six silvered {@item Dagger|PHB|daggers}, and a {@item Wand of Secrets}."
+												"A character who inspects the altar and succeeds on a {@dc 15} Intelligence ({@skill Investigation}) check finds a hidden compartment. Inside are six more masks, six sets of robes, six {@item Silvered Dagger|PHB|silvered daggers}, and a {@item Wand of Secrets}."
 											]
 										}
 									]
@@ -3647,7 +3647,7 @@
 											"page": 32,
 											"id": "0b6",
 											"entries": [
-												"Ten jewels set in the coffin are worth 50 gp each. Inside the coffin is a gold-plated set of {@item thieves' tools|PHB} worth 10 gp and two silvered {@item Dagger|PHB|daggers}."
+												"Ten jewels set in the coffin are worth 50 gp each. Inside the coffin is a gold-plated set of {@item thieves' tools|PHB} worth 10 gp and two {@item Silvered Dagger|PHB|silvered daggers}."
 											]
 										}
 									]
@@ -4969,7 +4969,7 @@
 												{
 													"type": "item",
 													"name": "Lighting",
-													"entry": "Bulbous growths cling to walls throughout. Their pulsing, sickly glow provides dim light."
+													"entry": "Bulbous growths cling to walls throughout. Their pulsing, sickly glow provides {@quickref Vision and Light||2||dim light}."
 												},
 												{
 													"type": "item",
@@ -12182,7 +12182,7 @@
 											"page": 67,
 											"id": "1e1",
 											"entries": [
-												"The desk drawer contains quills, ink, paper, a small horse figurine carved from coral (worth 100 gp), a pouch holding 50 gp, and Cipolla's {@item spellbook|PHB}. The spellbook contains the spells in the {@creature tower sage|QftIS} stat block plus the following: {@spell Color Spray}, {@spell Fog Cloud}, and {@spell Magic Mouth}."
+												"The desk drawer contains quills, ink, paper, a small horse figurine carved from {@item coral} (worth 100 gp), a pouch holding 50 gp, and Cipolla's {@item spellbook|PHB}. The spellbook contains the spells in the {@creature tower sage|QftIS} stat block plus the following: {@spell Color Spray}, {@spell Fog Cloud}, and {@spell Magic Mouth}."
 											]
 										}
 									]
@@ -14138,7 +14138,7 @@
 												"Leading off from the main valley is a narrow, steep-sided canyon. Warm mist rises from a stream, shrouding the canyon. Within the mist, you hear a creature babbling incessantly."
 											]
 										},
-										"This area is lightly obscured by mist from a piping-hot stream. The noise comes from the gibberling in area F2.",
+										"This area is {@quickref Vision and Light||2||lightly obscured} by mist from a piping-hot stream. The noise comes from the gibberling in area F2.",
 										{
 											"type": "entries",
 											"name": "Steamy Stream",
@@ -14454,7 +14454,8 @@
 										"{@item Gem of Brightness}",
 										"{@item Pearl of Power}",
 										"{@item +1 Weapon} (any)"
-									]
+									],
+									"columns": 3
 								},
 								"Each item bears an intricate constellation motif that shimmers in the presence of starlight."
 							]
@@ -15927,7 +15928,7 @@
 											"page": 82,
 											"id": "245",
 											"entries": [
-												"Any bright light in the room refracts through the crystals and fills the chamber with a soft glow and dazzling rainbow patterns."
+												"Any {@quickref Vision and Light||2||bright light} in the room refracts through the crystals and fills the chamber with a soft glow and dazzling rainbow patterns."
 											]
 										},
 										{
@@ -15985,7 +15986,7 @@
 														"{@spell Create or Destroy Water} cast to destroy part of the waterfall destroys a 5-foot-cube of water, which fills in after 1 minute.",
 														"Teleportation bypasses the waterfall as normal.",
 														"A creature under the effect of a {@spell Slow} spell more closely matches the waterfall's altered time and can move through the waterfall as if it were {@book difficult terrain|PHB|8|Difficult Terrain}.",
-														"A successful {@spell Dispel Magic} spell ({@dc 15}) cast on the waterfall causes it to flow normally for 1 minute, during which time creatures can move through the water as if it were difficult terrain."
+														"A successful {@spell Dispel Magic} spell ({@dc 15}) cast on the waterfall causes it to flow normally for 1 minute, during which time creatures can move through the water as if it were {@quickref difficult terrain||3}."
 													]
 												},
 												"At the DM's discretion, other solutions to bypassing the waterfall might exist."
@@ -16152,7 +16153,7 @@
 										{
 											"type": "item",
 											"name": "Lighting",
-											"entry": "The sky above the garden is a perpetual twilight range of orange, red, pink, and yellow hues with no visible sun, moon, or stars. During daylight hours, it emits bright light, but at night, it never reaches full darkness, becoming dim light instead."
+											"entry": "The sky above the garden is a perpetual twilight range of orange, red, pink, and yellow hues with no visible sun, moon, or stars. During daylight hours, it emits {@quickref Vision and Light||2||bright light}, but at night, it never reaches full darkness, becoming {@quickref Vision and Light||2||dim light} instead."
 										},
 										{
 											"type": "item",
@@ -22878,7 +22879,7 @@
 											"id": "35b",
 											"entries": [
 												"You surface in a tumbling, turbulent pool of water within a ten-foot-square shaft that ascends forty feet from the surface of the water. The air is damp, and the walls are covered with slimy green moss.",
-												"Dim light streams from an archway near the top of one side of the shaft. A narrow, roaring waterfall pours from the archway into the pool."
+												"{@quickref Vision and Light||2||Dim light} streams from an archway near the top of one side of the shaft. A narrow, roaring waterfall pours from the archway into the pool."
 											]
 										},
 										"If the party enters this area from the hall ({@area areas P30|35e|x}\u2013{@area P31|360|x}), read or paraphrase the following text:",
@@ -22925,7 +22926,7 @@
 									"page": 118,
 									"id": "360",
 									"entries": [
-										"This long hallway rises steadily toward {@area area P32|362|x}. Bright light shines from the hallway's southern end.",
+										"This long hallway rises steadily toward {@area area P32|362|x}. {@quickref Vision and Light||2||Bright light} shines from the hallway's southern end.",
 										{
 											"type": "entries",
 											"name": "Water of Athis",
@@ -23153,7 +23154,7 @@
 									"page": 119,
 									"id": "377",
 									"entries": [
-										"This room is a long-abandoned kitchen, its counters and cutlery coated in a thick layer of dust. In the center of the room, a heavy wooden block has a cleaver stuck into it. The cleaver, which is made of fine silver, functions as a silvered handaxe."
+										"This room is a long-abandoned kitchen, its counters and cutlery coated in a thick layer of dust. In the center of the room, a heavy wooden block has a cleaver stuck into it. The cleaver, which is made of fine silver, functions as a {@item silvered handaxe|PHB}."
 									]
 								},
 								{
@@ -30546,7 +30547,7 @@
 												"The walls and floor of this cavern are smeared with blood, and the scent of iron hangs thick in the air."
 											]
 										},
-										"Twenty {@creature Stirge||stirges} hang from the ceiling of this cave. Bright light or any noise louder than a whisper disturbs the stirges, causing them to attack."
+										"Twenty {@creature Stirge||stirges} hang from the ceiling of this cave. {@quickref Vision and Light||2||Bright light} or any noise louder than a whisper disturbs the stirges, causing them to attack."
 									]
 								},
 								{
@@ -30688,7 +30689,7 @@
 												"Bioluminescent fungi, some as tall as six feet, fill this moist cavern. The caps of the mushrooms sprouting from the floor and walls glow with a faint blue light. Pale, dog-sized insects chitter among the fungus."
 											]
 										},
-										"Three ghost-white cave crickets (use the {@creature giant frog} stat block) nibble at the glowing mushrooms in this cave, which radiate dim light. The crickets are indifferent toward the characters.",
+										"Three ghost-white cave crickets (use the {@creature giant frog} stat block) nibble at the glowing mushrooms in this cave, which radiate {@quickref Vision and Light||2||dim light}. The crickets are indifferent toward the characters.",
 										"If the characters disturb the crickets, the insects begin to chirp loudly. The trolls in {@area area L9|40c|x} investigate any loud noises in this area.",
 										{
 											"type": "entries",
@@ -30740,7 +30741,7 @@
 											"page": 138,
 											"id": "40b",
 											"entries": [
-												"The elf corpse carries a silvered rapier and wears {@item Bracers of Defense}."
+												"The elf corpse carries a {@item silvered rapier|PHB} and wears {@item Bracers of Defense}."
 											]
 										}
 									]
@@ -30778,7 +30779,7 @@
 											"page": 139,
 											"id": "40e",
 											"entries": [
-												"Gathered under the trolls' beds is their accumulated loot: 120 gp, 900 sp, four gems worth 50 gp each, wooden dentures set with mother-of-pearl teeth (worth 50 gp), a quiver with twenty silvered arrows, and a {@item Potion of Greater Healing||Potion of Healing (greater)}."
+												"Gathered under the trolls' beds is their accumulated loot: 120 gp, 900 sp, four gems worth 50 gp each, wooden dentures set with mother-of-pearl teeth (worth 50 gp), a quiver with twenty {@item silvered arrow|PHB|silvered arrows}, and a {@item Potion of Greater Healing||Potion of Healing (greater)}."
 											]
 										}
 									]
@@ -30797,7 +30798,7 @@
 											]
 										},
 										"During the day, the ceiling of this corridor is covered in thousands of bats, and a cacophony of chitters and squeaks echoes from above. At night, the bats flood out of the caverns to hunt in the mountains, returning to this area at dawn.",
-										"While the bats are roosting, bright light or any noise louder than a whisper agitates them and sends them into a panic. A number of {@creature Swarm of Bats||swarms of bats} equal to the number of characters in this area descend from the ceiling and attack the source of the disturbance. The swarms extinguish any nonmagical light sources they come within 5 feet of with a flurry of buffeting wings.",
+										"While the bats are roosting, {@quickref Vision and Light||2||bright light} or any noise louder than a whisper agitates them and sends them into a panic. A number of {@creature Swarm of Bats||swarms of bats} equal to the number of characters in this area descend from the ceiling and attack the source of the disturbance. The swarms extinguish any nonmagical light sources they come within 5 feet of with a flurry of buffeting wings.",
 										"Whenever a creature destroys a swarm, a new swarm immediately forms in an unoccupied space within 15 feet of the creature. The new swarm acts on the destroyed swarm's initiative count.",
 										"If the characters extinguish all light sources and cease attacking and making loud noises, the bats settle back into their roosts at the end of the round. They don't pursue creatures beyond the corridor."
 									]
@@ -30887,7 +30888,7 @@
 											]
 										},
 										"The lake teems with blind cave fish and crayfish. These critters are a food source for many of the denizens in the lesser caverns, including predators that dwell within the lake itself. The lake slopes sharply from its shores to a depth of 100 feet.",
-										"Four {@creature Chuul||chuuls} lurk near the lake bed, 90 feet below the surface. They're content to creep along the lightless depths and prey on cave fish unless something else catches their attention. Bright light draws the chuuls to the water's edge, as does any magic in the lake or near its surface, such as the boat from {@area area L13|416|x}. If drawn to the surface, the chuuls attack.",
+										"Four {@creature Chuul||chuuls} lurk near the lake bed, 90 feet below the surface. They're content to creep along the lightless depths and prey on cave fish unless something else catches their attention. {@quickref Vision and Light||2||Bright light} draws the chuuls to the water's edge, as does any magic in the lake or near its surface, such as the boat from {@area area L13|416|x}. If drawn to the surface, the chuuls attack.",
 										{
 											"type": "entries",
 											"name": "L14a: Stone Bridge",
@@ -31015,8 +31016,7 @@
 											"type": "insetReadaloud",
 											"id": "429",
 											"entries": [
-												"The natural cavern gives way to a luxurious parlor. Crystal chandeliers bathe the chamber in soft light, and the scent of orange blossoms perfumes the air. Plump cushions surround a low table heaped with ripe fruits, refreshing beverages, and succulent meats. Low sofas and comfortable chairs dot the walls of the",
-												"lounge, and side tables between these sitting areas overflow with gemstones, jewelry, and other treasures.",
+												"The natural cavern gives way to a luxurious parlor. Crystal chandeliers bathe the chamber in soft light, and the scent of orange blossoms perfumes the air. Plump cushions surround a low table heaped with ripe fruits, refreshing beverages, and succulent meats. Low sofas and comfortable chairs dot the walls of the lounge, and side tables between these sitting areas overflow with gemstones, jewelry, and other treasures.",
 												"Four impeccably dressed human aristocrats laugh and feast in the parlor. An unseen string quartet accompanies their revelry with soothing music."
 											]
 										},
@@ -37604,7 +37604,7 @@
 											"page": 154,
 											"id": "496",
 											"entries": [
-												"Creatures and objects can't have the {@condition invisible} condition while within the lantern's bright light."
+												"Creatures and objects can't have the {@condition invisible} condition while within the lantern's {@quickref Vision and Light||2||bright light}."
 											]
 										},
 										{
@@ -37985,7 +37985,33 @@
 										"{@item Laser pistol}",
 										"{@item Laser rifle}",
 										"{@item Smoke grenade}"
-									]
+									],
+									"columns": 3
+								},
+								{
+									"type": "statblock",
+									"name": "Antimatter rifle",
+									"tag": "item"
+								},
+								{
+									"type": "statblock",
+									"name": "Energy cell",
+									"tag": "item"
+								},
+								{
+									"type": "statblock",
+									"name": "Laser pistol",
+									"tag": "item"
+								},
+								{
+									"type": "statblock",
+									"name": "Laser rifle",
+									"tag": "item"
+								},
+								{
+									"type": "statblock",
+									"name": "Smoke grenade",
+									"tag": "item"
 								},
 								"Additional technological devices are provided in {@adventure appendix A|QftIS|8}. Many of these devices use {@item Energy Cell||energy cells} as ammunition or power sources. Energy cells found on the spaceship look like blue, coin-sized glass discs.",
 								"To simulate a character's ignorance about technology, determining how to use and reload these devices requires two successful Intelligence ({@skill Investigation}) checks (one to figure out how to use it, another to figure out how to load it). Each time a character makes a check, compare the result to the Figuring Out Alien Technology table. Consider having the item break if a character fails three or more times before taking a long rest.",
@@ -38169,7 +38195,7 @@
 									"id": "4b6",
 									"entries": [
 										"Some parts of the spaceship leak radioactive chemicals used in the vessel's construction. Surfaces covered in radiation give off a neon green glow. Exposure to radiation is dangerous.",
-										"A creature that enters an irradiated area for the first time on a turn or starts its turn there takes 5 ({@dice 1d10}) radiant damage and must make a {@dc 10} Constitution saving throw. On a failed save, the creature gains 1 level of {@condition exhaustion}. While this {@condition exhaustion} persists, the creature emits a green-hued dim light in a 5-foot radius. This light makes it impossible for the creature to benefit from having the {@condition invisible} condition."
+										"A creature that enters an irradiated area for the first time on a turn or starts its turn there takes 5 ({@dice 1d10}) radiant damage and must make a {@dc 10} Constitution saving throw. On a failed save, the creature gains 1 level of {@condition exhaustion}. While this {@condition exhaustion} persists, the creature emits a green-hued {@quickref Vision and Light||2||dim light} in a 5-foot radius. This light makes it impossible for the creature to benefit from having the {@condition invisible} condition."
 									]
 								},
 								{
@@ -40653,7 +40679,8 @@
 														"{@dice 1d6 + 2} {@item Concussion Grenade|QftIS|concussion grenades}",
 														"{@dice 1d6 + 2} {@item Sleep Grenade|QftIS|sleep grenades}",
 														"{@dice 1d6 + 2} {@item Smoke Grenade||smoke grenades}"
-													]
+													],
+													"columns": 3
 												},
 												"The robots meet any unauthorized attempt to take the grenades with hostility. If the party is in good standing with Aphelion, the supercomputer allows each character to take one grenade of their choice."
 											]
@@ -40781,7 +40808,7 @@
 											"page": 168,
 											"id": "4df",
 											"entries": [
-												"A cracked bust depicting the ship's commander lies in a corner room. Its two topaz eyes are each worth 500 gp."
+												"A cracked bust depicting the ship's commander lies in a corner room. Its two {@item Topaz||topaz eyes} are each worth 500 gp."
 											]
 										}
 									]
@@ -42931,7 +42958,7 @@
 											"width": 850,
 											"height": 1179
 										},
-										"Passengers watched films, news, and other broadcasted content in this theater. Ship lighting in this room has been disabled, but the glowing screen fills the room with dim light. The ceiling is 20 feet high.",
+										"Passengers watched films, news, and other broadcasted content in this theater. Ship lighting in this room has been disabled, but the glowing screen fills the room with {@quickref Vision and Light||2||dim light}. The ceiling is 20 feet high.",
 										"Two {@creature Mind Flayer||mind flayers} dwell here. The illithids discovered the ship weeks ago and have been studying its technology ever since, intent on using it to conquer other worlds. Four {@creature Intellect Devourer||intellect devourers} loyal to the mind flayers hide under the first row of seats in the audience. The intellect devourers fiercely defend their creators, who attack intruders on sight.",
 										{
 											"type": "entries",
@@ -43294,7 +43321,7 @@
 											"type": "insetReadaloud",
 											"id": "555",
 											"entries": [
-												"Dim light fills this lounge. It features elegant tables, time-worn couches, and a small stage. A bar with scant bottles of liquor stands along the north wall.",
+												"{@quickref Vision and Light||2||Dim light} fills this lounge. It features elegant tables, time-worn couches, and a small stage. A bar with scant bottles of liquor stands along the north wall.",
 												"A motionless, synthetic humanoid lies pinned under a section of fallen debris in front of the bar."
 											]
 										},
@@ -45528,7 +45555,7 @@
 											]
 										},
 										"Twenty gas bats\u2014bloated, chiropteran plants propelled by embarrassing-sounding emissions\u2014float above this futuristic taproom, where androids and crew once shared drinks together. Each bat uses the {@creature gas spore} stat block, but its size is Tiny.",
-										"The bats ignore most entrants but abhor light. If the characters enter with a source of bright light or activate the room's overhead lights, the bats fly into a fury and attack until the source is extinguished.",
+										"The bats ignore most entrants but abhor light. If the characters enter with a source of {@quickref Vision and Light||2||bright light} or activate the room's overhead lights, the bats fly into a fury and attack until the source is extinguished.",
 										{
 											"type": "entries",
 											"name": "Robo Bar",
@@ -45707,7 +45734,7 @@
 											"page": 184,
 											"id": "574",
 											"entries": [
-												"A school of twenty scintillating fish with gemlike scales inhabits this streamlet and its pool. The fish use the {@creature swarm of quippers} stat block but shed dim light in a 10-foot radius. The fish are indifferent toward the characters unless disturbed, at which point they retreat downstream toward the swamp ({@area area S58|57f|x})."
+												"A school of twenty scintillating fish with gemlike scales inhabits this streamlet and its pool. The fish use the {@creature swarm of quippers} stat block but shed {@quickref Vision and Light||2||dim light} in a 10-foot radius. The fish are indifferent toward the characters unless disturbed, at which point they retreat downstream toward the swamp ({@area area S58|57f|x})."
 											]
 										},
 										{
@@ -46391,6 +46418,24 @@
 								"{@item Heretic|QftIS}",
 								"{@item Staff of Ruling|QftIS}"
 							]
+						},
+						{
+							"type": "statblock",
+							"name": "Daoud's Wondrous Lanthorn",
+							"tag": "item",
+							"source": "QftIS"
+						},
+						{
+							"type": "statblock",
+							"name": "Heretic",
+							"tag": "item",
+							"source": "QftIS"
+						},
+						{
+							"type": "statblock",
+							"name": "Staff of Ruling",
+							"tag": "item",
+							"source": "QftIS"
 						}
 					]
 				},
@@ -46426,6 +46471,48 @@
 								"{@item Powered Armor|QftIS}",
 								"{@item Robot Controller|QftIS}"
 							]
+						},
+						{
+							"type": "statblock",
+							"name": "Antigravity Belt",
+							"tag": "item",
+							"source": "QftIS"
+						},
+						{
+							"type": "statblock",
+							"name": "Concussion Grenade",
+							"tag": "item",
+							"source": "QftIS"
+						},
+						{
+							"type": "statblock",
+							"name": "Sleep Grenade",
+							"tag": "item",
+							"source": "QftIS"
+						},
+						{
+							"type": "statblock",
+							"name": "Needler Pistol",
+							"tag": "item",
+							"source": "QftIS"
+						},
+						{
+							"type": "statblock",
+							"name": "Paralysis Pistol",
+							"tag": "item",
+							"source": "QftIS"
+						},
+						{
+							"type": "statblock",
+							"name": "Powered Armor",
+							"tag": "item",
+							"source": "QftIS"
+						},
+						{
+							"type": "statblock",
+							"name": "Robot Controller",
+							"tag": "item",
+							"source": "QftIS"
 						}
 					]
 				}
@@ -46670,6 +46757,806 @@
 							"height": 1189
 						}
 					]
+				},
+				{
+					"type": "section",
+					"name": "Android",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Android",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Android",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5c1"
+				},
+				{
+					"type": "section",
+					"name": "Barkburr",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Barkburr",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Barkburr",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5c2"
+				},
+				{
+					"type": "section",
+					"name": "Derro Apprentice",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Derro Apprentice",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Derro Apprentice",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5c3"
+				},
+				{
+					"type": "section",
+					"name": "Derro Raider",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Derro Raider",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Derro Raider",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5c4"
+				},
+				{
+					"type": "section",
+					"name": "Drelnza",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Drelnza",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Drelnza",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5c5"
+				},
+				{
+					"type": "section",
+					"name": "Froghemoth Elder",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Froghemoth Elder",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Froghemoth Elder",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5c6"
+				},
+				{
+					"type": "section",
+					"name": "The Gardener",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "The Gardener",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "The Gardener",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5c7"
+				},
+				{
+					"type": "section",
+					"name": "Gibberling",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Gibberling",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Gibberling",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5c8"
+				},
+				{
+					"type": "section",
+					"name": "Swarm of Gibberlings",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Swarm of Gibberlings",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Swarm of Gibberlings",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5c9"
+				},
+				{
+					"type": "section",
+					"name": "Champion of Gorm",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Champion of Gorm",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Champion of Gorm",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5ca"
+				},
+				{
+					"type": "section",
+					"name": "Guardian of Gorm",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Guardian of Gorm",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Guardian of Gorm",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5cb"
+				},
+				{
+					"type": "section",
+					"name": "Horrid Plant",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Horrid Plant",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Horrid Plant",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5cc"
+				},
+				{
+					"type": "section",
+					"name": "Leprechaun",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Leprechaun",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Leprechaun",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5cd"
+				},
+				{
+					"type": "section",
+					"name": "Champion of Usamigaras",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Champion of Usamigaras",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Champion of Usamigaras",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5ce"
+				},
+				{
+					"type": "section",
+					"name": "Mage of Usamigaras",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Mage of Usamigaras",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Mage of Usamigaras",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5cf"
+				},
+				{
+					"type": "section",
+					"name": "Maschin-i-Bozorg",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Maschin-i-Bozorg",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Maschin-i-Bozorg",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5d0"
+				},
+				{
+					"type": "section",
+					"name": "Memory Web",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Memory Web",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Memory Web",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5d1"
+				},
+				{
+					"type": "section",
+					"name": "Nafas",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Nafas",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Nafas",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5d2"
+				},
+				{
+					"type": "section",
+					"name": "Nafik",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Nafik",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Nafik",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5d3"
+				},
+				{
+					"type": "section",
+					"name": "Pech",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Pech",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Pech",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5d4"
+				},
+				{
+					"type": "section",
+					"name": "Combat Robot",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Combat Robot",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Combat Robot",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5d5"
+				},
+				{
+					"type": "section",
+					"name": "Worker Robot",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Worker Robot",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Worker Robot",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5d6"
+				},
+				{
+					"type": "section",
+					"name": "Sion",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Sion",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Sion",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5d7"
+				},
+				{
+					"type": "section",
+					"name": "Tower Hand",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Tower Hand",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Tower Hand",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5d8"
+				},
+				{
+					"type": "section",
+					"name": "Tower Sage",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Tower Sage",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Tower Sage",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5d9"
+				},
+				{
+					"type": "section",
+					"name": "Vegepygmy Moldmaker",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Vegepygmy Moldmaker",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Vegepygmy Moldmaker",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5da"
+				},
+				{
+					"type": "section",
+					"name": "Vegepygmy Scavenger",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Vegepygmy Scavenger",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Vegepygmy Scavenger",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5db"
+				},
+				{
+					"type": "section",
+					"name": "Vegepygmy Thorny Hunter",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Vegepygmy Thorny Hunter",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Vegepygmy Thorny Hunter",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5dc"
+				},
+				{
+					"type": "section",
+					"name": "Champion of Madarua",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Champion of Madarua",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Champion of Madarua",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5dd"
+				},
+				{
+					"type": "section",
+					"name": "Warrior of Madarua",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Warrior of Madarua",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Warrior of Madarua",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5de"
+				},
+				{
+					"type": "section",
+					"name": "Wolf-in-Sheep's-Clothing",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Wolf-in-Sheep's-Clothing",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Wolf-in-Sheep's-Clothing",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5df"
+				},
+				{
+					"type": "section",
+					"name": "Zargon the Returner",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Zargon the Returner",
+							"prop": "monsterFluff",
+							"source": "QftIS",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Zargon the Returner",
+							"tag": "creature",
+							"source": "QftIS",
+							"style": "narrow"
+						}
+					],
+					"id": "5e0"
 				}
 			]
 		},

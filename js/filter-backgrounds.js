@@ -145,6 +145,7 @@ class ModalFilterBackgrounds extends ModalFilterBase {
 			...opts,
 			modalTitle: `Background${opts.isRadio ? "" : "s"}`,
 			pageFilter: new PageFilterBackgrounds(),
+			previewButtonHandler: new ListUiPreviewButtonHandlerStatsFluff({page: UrlUtil.PG_BACKGROUNDS}),
 		});
 	}
 
@@ -193,7 +194,6 @@ class ModalFilterBackgrounds extends ModalFilterBase {
 			eleRow,
 			bg.name,
 			{
-				hash,
 				source,
 				sourceJson: bg.source,
 				...ListItem.getCommonValues(bg),
@@ -201,12 +201,14 @@ class ModalFilterBackgrounds extends ModalFilterBase {
 				skills: bg._skillDisplay,
 			},
 			{
+				hash,
+				page: bg.page,
 				cbSel: eleRow.firstElementChild.firstElementChild.firstElementChild,
 				btnShowHidePreview,
 			},
 		);
 
-		ListUiUtil.bindPreviewButton(UrlUtil.PG_BACKGROUNDS, this._allData, listItem, btnShowHidePreview);
+		this._previewButtonHandler.bindPreviewButton({entity: bg, listItem, btnShowHidePreview});
 
 		return listItem;
 	}

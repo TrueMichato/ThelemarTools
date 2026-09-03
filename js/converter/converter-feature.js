@@ -4,7 +4,7 @@ import {AlignmentUtil} from "./converterutils-utils-alignment.js";
 import {ConverterUtils} from "./converterutils-utils.js";
 
 export class ConverterFeatureBase extends ConverterBase {
-	static _RE_FEAT_TYPE = /\b(?<category>General|Origin|Fighting Style|Epic Boon|Dragonmark)\b/;
+	static _RE_FEAT_TYPE = new RegExp(`\\b(?<category>${Object.values(Parser.FEAT_CATEGORY_TO_FULL).join("|")})\\b`);
 
 	/* -------------------------------------------- */
 
@@ -152,7 +152,7 @@ export class ConverterFeatureBase extends ConverterBase {
 
 			if (/^spellcasting$/i.test(pt)) return pre.spellcasting2020 = true;
 			if (/^pact magic feature$/i.test(pt)) return pre.spellcasting2020 = true;
-			if (/^Spellcasting or Pact Magic Feature$/i.test(pt)) return pre.spellcasting2020 = true;
+			if (/^Spellcasting (?:Feature )?or Pact Magic Feature$/i.test(pt)) return pre.spellcasting2020 = true;
 
 			if (/^spellcasting feature$/i.test(pt)) return pre.spellcastingFeature = true;
 			if (/^spellcasting feature from a class that prepares spells$/i.test(pt)) return pre.spellcastingPrepared = true;
@@ -208,7 +208,14 @@ export class ConverterFeatureBase extends ConverterBase {
 				return;
 			}
 
-			if (/^Can't Have Another Dragonmark Feat$/i.test(pt)) return pre.exclusiveFeatCategory = ["D"];
+			const mExclusiveCategory = /^Can't Have Another (?<exclusiveType>.*?) Feat$/i.exec(pt);
+			if (mExclusiveCategory) {
+				const {exclusiveType} = mExclusiveCategory.groups;
+				switch (exclusiveType.toLowerCase().trim()) {
+					case "dragonmark": return pre.exclusiveFeatCategory = ["D"];
+					default: return pre.exclusiveFeatCategory = [exclusiveType];
+				}
+			}
 
 			const mFeatCategory = new RegExp(`^Any ${this._RE_FEAT_TYPE.source}(?: Feat)?`, "i").exec(pt);
 			if (mFeatCategory) {
@@ -283,10 +290,15 @@ export class ConverterFeatureBase extends ConverterBase {
 	static _PREREQUISITE_TRIE = null;
 
 	static _getPrerequisiteTokens (entPrereqString) {
+		// Pre-clean "Level" formatting
+		entPrereqString = entPrereqString
+			.replace(/(?<=\bLevel \d+\+?)( and )/g, "; ");
+
 		if (this._PREREQUISITE_TRIE == null) {
 			this._PREREQUISITE_TRIE = new Trie();
 			[
 				"Spellcasting or Pact Magic Feature",
+				"Spellcasting Feature or Pact Magic Feature",
 			]
 				.forEach(str => this._PREREQUISITE_TRIE.add(str));
 		}

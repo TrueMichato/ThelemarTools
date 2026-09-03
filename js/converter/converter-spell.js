@@ -32,6 +32,7 @@ export class ConverterSpell extends ConverterBase {
 	 * @param options.isAppend Default output append mode.
 	 * @param options.source Entity source.
 	 * @param options.page Entity page.
+	 * @param [options.isAddPageNumber] Whether to include the page in the output. Defaults to true if a page is provided.
 	 * @param options.titleCaseFields Array of fields to be title-cased in this entity (if enabled).
 	 * @param options.isTitleCase Whether title-case fields should be title-cased in this entity.
 	 * @param options.styleHint
@@ -181,6 +182,8 @@ export class ConverterSpell extends ConverterBase {
 	}
 
 	static _doSpellPostProcess (stats, options) {
+		this._doPostProcess_removePage(stats, options);
+
 		const doCleanup = () => {
 			// remove any empty arrays
 			Object.keys(stats).forEach(k => {
@@ -594,10 +597,15 @@ export class ConverterSpell extends ConverterBase {
 					: options.styleHint !== SITE_STYLE__CLASSIC
 						? Parser.SRC_XPHB
 						: Parser.SRC_PHB;
+				const srcArtificer = isLegacy
+					? Parser.SRC_TCE
+					: options.styleHint !== SITE_STYLE__CLASSIC
+						? Parser.SRC_EFA
+						: Parser.SRC_TCE;
 
 				switch (lowerPt) {
 					case "artificer":
-					case "artificers": tgt.push({"name": "Artificer", "source": "TCE"}); break;
+					case "artificers": tgt.push({"name": "Artificer", "source": srcArtificer}); break;
 					case "bard":
 					case "bards": tgt.push({"name": "Bard", "source": srcPhb}); break;
 					case "cleric":

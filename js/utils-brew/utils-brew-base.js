@@ -171,7 +171,7 @@ export class BrewUtil2Base {
 		try {
 			JqueryUtil.doToast({
 				...messageInfo,
-				content: e_({outer: messageInfo.contentHtml}),
+				content: veE({outer: messageInfo.contentHtml}),
 			});
 		} catch (e) {
 			setTimeout(() => { throw e; });
@@ -608,13 +608,13 @@ export class BrewUtil2Base {
 	/** @abstract */
 	getFileUrl (path, urlRoot) { throw new Error("Unimplemented!"); }
 	/** @abstract */
-	pLoadTimestamps (urlRoot) { throw new Error("Unimplemented!"); }
+	async pLoadTimestamps (urlRoot) { throw new Error("Unimplemented!"); }
 	/** @abstract */
-	pLoadPropIndex (urlRoot) { throw new Error("Unimplemented!"); }
+	async pLoadPropIndex (urlRoot) { throw new Error("Unimplemented!"); }
 	/** @abstract */
-	pLoadMetaIndex (urlRoot) { throw new Error("Unimplemented!"); }
+	async pLoadMetaIndex (urlRoot) { throw new Error("Unimplemented!"); }
 	/** @abstract */
-	pLoadAdventureBookIdsIndex (urlRoot) { throw new Error("Unimplemented!"); }
+	async pLoadAdventureBookIdsIndex (urlRoot) { throw new Error("Unimplemented!"); }
 
 	async pGetCombinedIndexes () {
 		const urlRoot = await this.pGetCustomUrl();
@@ -706,7 +706,21 @@ export class BrewUtil2Base {
 		this._PROPS_DEPS.forEach(prop => {
 			const obj = brewDoc.body._meta?.[prop];
 			if (!obj || !Object.keys(obj).length) return;
-			Object.values(obj)
+
+			// "All content from <x> source"
+			const cpyObj = MiscUtil.copyFast(obj);
+			if (cpyObj["*"]) {
+				cpyObj["*"]
+					.forEach(src => sources.add(src));
+				delete cpyObj["*"];
+				return;
+			}
+
+			// "Content from <dataProperty> from <x> source"
+			// Note that current implementation is functionally the same as that of
+			//   the `*` property, above, but this is not guaranteed to remain true.
+			// Specifying exact data properties is preferred, where possible.
+			Object.values(cpyObj)
 				.flat()
 				.forEach(src => sources.add(src));
 		});
@@ -927,14 +941,14 @@ export class BrewUtil2Base {
 	}
 
 	async pAddBrewFromLoaderTag (ele) {
-		ele = e_(ele);
-		if (!ele.hasClass("ve-rd__wrp-loadbrew--ready")) return; // an existing click is being handled
-		let jsonPath = ele.dataset.rdLoaderPath;
-		const name = ele.dataset.rdLoaderName;
-		const cached = ele.html();
-		const cachedTitle = ele.tooltip();
-		ele.tooltip("");
-		ele.removeClass("ve-rd__wrp-loadbrew--ready").html(`${name.qq()}<span class="glyphicon glyphicon-refresh ve-rd__loadbrew-icon ve-rd__loadbrew-icon--active"></span>`);
+		ele = veE(ele);
+		if (!ele.vee.hasClass("ve-rd__wrp-loadbrew--ready")) return; // an existing click is being handled
+		let jsonPath = ele.vee.attr("data-rd-loader-path");
+		const name = ele.vee.attr("data-rd-loader-name");
+		const cached = ele.vee.html();
+		const cachedTitle = ele.vee.tooltip();
+		ele.vee.tooltip("");
+		ele.vee.removeClass("ve-rd__wrp-loadbrew--ready").vee.html(`${name.qq()}<span class="glyphicon glyphicon-refresh ve-rd__loadbrew-icon ve-rd__loadbrew-icon--active"></span>`);
 
 		jsonPath = jsonPath.unescapeQuotes();
 		if (!UrlUtil.isFullUrl(jsonPath)) {
@@ -943,8 +957,8 @@ export class BrewUtil2Base {
 		}
 
 		await this.pAddBrewFromUrl(jsonPath);
-		ele.html(`${name.qq()}<span class="glyphicon glyphicon-saved ve-rd__loadbrew-icon"></span>`);
-		setTimeout(() => ele.html(cached).addClass("ve-rd__wrp-loadbrew--ready").tooltip(cachedTitle), 500);
+		ele.vee.html(`${name.qq()}<span class="glyphicon glyphicon-saved ve-rd__loadbrew-icon"></span>`);
+		setTimeout(() => ele.vee.html(cached).vee.addClass("ve-rd__wrp-loadbrew--ready").vee.tooltip(cachedTitle), 500);
 	}
 
 	_isMatchingCombinedIndexInfo (info) {
@@ -953,11 +967,13 @@ export class BrewUtil2Base {
 
 	async pGetCntBrewsPartnered () {
 		const combinedIndexes = await this.pGetCombinedIndexes();
+		if (!combinedIndexes) return 0;
 		return combinedIndexes.filter(it => this._isMatchingCombinedIndexInfo(it)).length;
 	}
 
 	async pAddBrewsPartnered ({isSilent = false} = {}) {
 		const combinedIndexes = await this.pGetCombinedIndexes();
+		if (!combinedIndexes) return [];
 
 		const brewInfos = combinedIndexes.filter(it => this._isMatchingCombinedIndexInfo(it));
 		if (!brewInfos.length) {
@@ -1119,6 +1135,7 @@ export class BrewUtil2Base {
 		[UrlUtil.PG_CLASS_SUBCLASS_FEATURES]: ["classFeature", "subclassFeature"],
 		[UrlUtil.PG_DECKS]: ["card", "deck"],
 		[UrlUtil.PG_BASTIONS]: ["facility", "facilityFluff"],
+		[UrlUtil.PG_HOMECRAFTS]: ["crochetPattern", "crochetPatternFluff"],
 	};
 
 	getPageProps ({page, isStrict = false, fallback = null} = {}) {
@@ -1149,6 +1166,7 @@ export class BrewUtil2Base {
 			case "creature": return "monster";
 			case "makebrew": return "makebrewCreatureTrait";
 			case "encounterbuilder": return "encounterShape";
+			case "crochetpattern": return "crochetPattern";
 		}
 		return dir;
 	}

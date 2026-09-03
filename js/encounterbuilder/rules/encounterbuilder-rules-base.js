@@ -1,4 +1,4 @@
-import {EncounterPartyPlayerMeta} from "../encounterbuilder-models.js";
+import {EncounterPartyPlayerMeta} from "../encounterbuilder-models-other.js";
 import {EncounterBuilderRandomizerTemplated} from "../randomizer/encounterbuilder-randomizer-templated.js";
 import {BUDGET_MODE_CR, BUDGET_MODE_XP} from "../consts/encounterbuilder-consts.js";
 import {EncounterbuilderAdjusterTemplated} from "../adjuster/encounterbuilder-adjuster-slots.js";
@@ -18,7 +18,9 @@ export class TierHtmlProviderBase {
 	getTierHtml ({partyMeta, tier}) {
 		const title = this.getTierTitle({tier});
 		const ptTierName = this.getTierName({tier}) || "?";
-		const ptTierBudget = partyMeta?.getTierDisplayBudget(tier) || "?";
+		const ptTierBudget = partyMeta.cntPlayers
+			? (partyMeta?.getTierDisplayBudget(tier) || "?")
+			: "?";
 
 		return `<span class="ve-help-subtle" ${title ? `title="${title}"` : ""}>${ptTierName}:</span> ${ptTierBudget} ${this._getBudgetUnit()}`;
 	}
@@ -112,11 +114,22 @@ export class EncounterBuilderRulesBase extends BaseComponent {
 
 	_budgetMode;
 
-	constructor ({comp, cache, encounterShapesLookup}) {
+	constructor (
+		{
+			comp,
+			cache,
+			encounterShapesLookup,
+			rendererWrapped,
+		},
+	) {
+		if (!rendererWrapped) throw new Error(`Missing required "rendererWrapped" option!`);
+
 		super();
+
 		this._comp = comp;
 		this._cache = cache;
 		this._encounterShapesLookup = encounterShapesLookup;
+		this._rendererWrapped = rendererWrapped;
 	}
 
 	/* -------------------------------------------- */
@@ -187,8 +200,8 @@ export class EncounterBuilderRulesBase extends BaseComponent {
 	 * @abstract
 	 * @param {number} ratioSpent
 	 * @param {EncounterPartyMetaBase} partyMeta
-	 * @param {number} cntMin
-	 * @param {number} cntMax
+	 * @param {?number} cntMin
+	 * @param {?number} cntMax
 	 * @return string
 	 */
 	getDisplayGroupBudgetSpent (
@@ -227,11 +240,11 @@ export class EncounterBuilderRulesBase extends BaseComponent {
 			encounterShapeHash: shapeHash,
 		});
 
-		const randomCreatureMetas = await randomizer.pGetRandomEncounter({
-			creatureMetasLocked: this._comp.creatureMetas.filter(creatureMeta => creatureMeta.getIsLocked()),
+		const randomCreatureGroups = await randomizer.pGetRandomEncounter({
+			creatureGroupsLocked: this._comp.creatureGroups.filter(creatureGroup => creatureGroup.getIsLocked()),
 		});
 
-		if (randomCreatureMetas != null) this._comp.creatureMetas = randomCreatureMetas;
+		if (randomCreatureGroups != null) this._comp.creatureGroups = randomCreatureGroups;
 	}
 
 	async _pDoAdjustEncounter ({tier}) {
@@ -247,11 +260,11 @@ export class EncounterBuilderRulesBase extends BaseComponent {
 			budgetMode: this._budgetMode,
 		});
 
-		const adjustedCreatureMetas = await adjuster.pGetAdjustedEncounter({
-			creatureMetas: this._comp.creatureMetas,
+		const adjustedCreatureGroups = await adjuster.pGetAdjustedEncounter({
+			creatureGroups: this._comp.creatureGroups,
 		});
 
-		if (adjustedCreatureMetas != null) this._comp.creatureMetas = adjustedCreatureMetas;
+		if (adjustedCreatureGroups != null) this._comp.creatureGroups = adjustedCreatureGroups;
 	}
 
 	/* -------------------------------------------- */
@@ -262,10 +275,10 @@ export class EncounterBuilderRulesBase extends BaseComponent {
 		},
 	) {
 		const stgRandom = this._getRenderedWrpRandomAndAdjust_getStgRandom({tiers})
-			.addClass("ve-mobile-lg__mb-2");
+			.vee.addClass("ve-mobile-lg__mb-2");
 		const stgAdjust = this._getRenderedWrpRandomAndAdjust_getAdjustMeta({tiers});
 
-		return ee`<div class="ve-flex-col">
+		return veT`<div class="ve-flex-col">
 			<div class="ve-flex-v-center ve-mobile-lg__flex-col ve-mobile-lg__flex-ai-start">
 				${stgRandom}
 
@@ -274,7 +287,7 @@ export class EncounterBuilderRulesBase extends BaseComponent {
 				${stgAdjust}
 			</div>
 		</div>`
-			.hideVe();
+			.vee.hide();
 	}
 
 	_getRenderedWrpRandomAndAdjust_getStgRandom ({tiers}) {
@@ -282,7 +295,7 @@ export class EncounterBuilderRulesBase extends BaseComponent {
 			this,
 			"tierRandom",
 			{
-				html: `<select class="ve-form-control ve-br-0"></select>`,
+				html: `<select class="ve-form-control ve-h-34p ve-br-0"></select>`,
 				values: tiers,
 				fnDisplay: val => val.toTitleCase(),
 			},
@@ -292,14 +305,14 @@ export class EncounterBuilderRulesBase extends BaseComponent {
 			this,
 			"shapeHashRandom",
 			{
-				html: `<select class="ve-form-control ve-br-0 ve-w-100"></select>`,
+				html: `<select class="ve-form-control ve-h-34p ve-br-0 ve-w-100"></select>`,
 				values: this._encounterShapesLookup.getHashList(),
 				fnDisplay: val => this._encounterShapesLookup.getEncounterShape(val).name,
 			},
 		);
 
-		const btnGenerate = ee`<button class="ve-btn ve-btn-primary ve-h-34p" title="Generate Encounter"><span class="glyphicon glyphicon-play"></span></button>`
-			.onn("click", async () => {
+		const btnGenerate = veT`<button class="ve-btn ve-btn-primary ve-h-34p" title="Generate Encounter"><span class="glyphicon glyphicon-play"></span></button>`
+			.vee.onn("click", async () => {
 				if (
 					this._encounterShapesLookup.isCustomEncounterHash(this._state.shapeHashRandom)
 				) {
@@ -313,11 +326,32 @@ export class EncounterBuilderRulesBase extends BaseComponent {
 				});
 			});
 
-		return ee`<div class="ve-flex-v-center ve-input-group ve-w-100">
+		return veT`<div class="ve-flex-v-center ve-input-group ve-w-100">
 			${selTier}
 			${selShapeType}
 			${btnGenerate}
 		</div>`;
+	}
+
+	_getRenderedWrpRandomAndAdjust_getBtnSendToFoundry () {
+		if (globalThis.IS_VTT || !ExtensionUtil.ACTIVE) return null;
+
+		return veT`<button title="Send to Foundry" class="no-print ve-btn ve-btn-md ve-btn-default ve-ml-2"><span class="glyphicon glyphicon-send"></span></button>`
+			.vee.onn("click", async () => {
+				const encounterActorName = await InputUiUtil.pGetUserString({title: "Encounter Actor Name", isSkippable: true});
+
+				await ExtensionUtil.pDoSend({
+					type: "5etools.encounterbuilder.encounter",
+					data: {
+						encounterActorName,
+						creatureMetasSerial: this._comp.creatureGroups
+							.map(({entity}) => ({
+								creature: entity.creature,
+								count: entity.count,
+							})),
+					},
+				});
+			});
 	}
 
 	_getRenderedWrpRandomAndAdjust_getAdjustMeta ({tiers}) {
@@ -330,48 +364,57 @@ export class EncounterBuilderRulesBase extends BaseComponent {
 			await this._pDoAdjustEncounter({tier: this._state.tierAdjust});
 		};
 
-		const getLi = (tier) => {
-			return ee`<li title="${getButtonTitle(tier)}"><a href="#">${getButtonText(tier)}</a></li>`
-				.onn("click", async (evt) => {
-					evt.preventDefault();
-					await pSetTier({tier});
-				});
-		};
-
-		const btn = ee`<button class="ve-btn ve-btn-primary ecgen__btn-adjust"></button>`
-			.onn("click", async evt => {
+		const btn = veT`<button class="ve-btn ve-btn-primary ecgen__btn-adjust"></button>`
+			.vee.onn("click", async evt => {
 				evt.preventDefault();
 				await pSetTier();
 			});
 
 		this._addHookBase("tierAdjust", () => {
 			btn
-				.txt(getButtonText(this._state.tierAdjust))
-				.tooltip(getButtonTitle(this._state.tierAdjust));
+				.vee.txt(getButtonText(this._state.tierAdjust))
+				.vee.tooltip(getButtonTitle(this._state.tierAdjust));
 		})();
 
-		const wrpMenu = ee`<ul class="ve-dropdown-menu ve-block">${tiers.map(tier => getLi(tier))}</ul>`
-			.hideVe();
+		const menu = ContextUtil.getMenu(
+			tiers
+				.map(tier => new ContextUtil.Action(
+					getButtonText(tier),
+					async () => pSetTier({tier}),
+					{
+						title: getButtonTitle(tier),
+					},
+				)),
+		);
 
-		const dispCaret = e_({outer: `<span class="caret"></span>`});
-		document.body.addEventListener("click", evt => {
-			if (btnMenu.contains(evt.target)) return;
-			wrpMenu.hideVe();
-			dispCaret.removeClass("caret--up");
-		});
-		const btnMenu = ee`<button class="ve-btn ve-btn-primary ve-w-24p ve-px-0">${dispCaret}</button>`
-			.onn("click", () => {
-				wrpMenu.toggleVe(!dispCaret.hasClass("caret--up"));
-				dispCaret.toggleClass("caret--up");
+		const dispCaret = veT`<span class="ve-caret"></span>`;
+		menu.on("open", () => dispCaret.vee.addClass("ve-caret--up"));
+		menu.on("close", () => dispCaret.vee.removeClass("ve-caret--up"));
+
+		const btnMenu = veT`<button class="ve-btn ve-btn-primary ve-w-24p ve-px-0">${dispCaret}</button>`
+			.vee.onn("click", evt => {
+				if (menu.isOpen()) {
+					evt.preventDefault();
+					evt.stopPropagation();
+					return menu.close();
+				}
+
+				const bcr = btnMenu.getBoundingClientRect();
+				return ContextUtil.pOpenMenu(evt, menu, {
+					xPos: (window.innerWidth - bcr.right) + window.scrollX,
+					isFromRight: true,
+					yPos: bcr.bottom + window.scrollY + 1,
+				});
 			});
 
-		return ee`<div class="ve-flex-v-center ve-relative ve-no-shrink">
-			<div class="ve-btn-group">
+		const btnSendToFoundry = this._getRenderedWrpRandomAndAdjust_getBtnSendToFoundry();
+
+		return veT`<div class="ve-flex-v-center ve-relative ve-no-shrink">
+			<div class="ve-btn-group ve-flex-v-center">
 				${btn}
 				${btnMenu}
 			</div>
-
-			${wrpMenu}
+			${btnSendToFoundry}
 		</div>`;
 	}
 
@@ -380,19 +423,19 @@ export class EncounterBuilderRulesBase extends BaseComponent {
 	_getRenderedDispsTierMeta ({tiers}) {
 		const dispsLookup = Object.fromEntries(
 			tiers
-				.map(tier => [tier, ee`<div></div>`]),
+				.map(tier => [tier, veT`<div></div>`]),
 		);
 
 		const onHookPulseDeriverPartyMeta = ({partyMeta}) => {
-			const encounterXpInfo = partyMeta.getEncounterSpendInfo(this._comp.creatureMetas);
+			const encounterXpInfo = partyMeta.getEncounterSpendInfo(this._comp.creatureGroups);
 
 			const tier = partyMeta.getEncounterTier(encounterXpInfo);
 
 			Object.entries(dispsLookup)
 				.forEach(([tier_, disp]) => {
 					disp
-						.toggleClass("ve-bold", tier === tier_)
-						.html(
+						.vee.toggleClass("ve-bold", tier === tier_)
+						.vee.html(
 							this._tierHtmlProvider.getTierHtml({
 								partyMeta,
 								tier: tier_,
@@ -412,7 +455,7 @@ export class EncounterBuilderRulesBase extends BaseComponent {
 	static _TITLE_XP_TO_NEXT_LEVEL = "The total XP required to allow each member of the party to level up to their next level.";
 
 	_getRenderedExpToLevel ({partyMeta}) {
-		return `<span class="ve-help-subtle" title="${this.constructor._TITLE_XP_TO_NEXT_LEVEL}">XP to Next Level:</span> ${partyMeta?.xpToNextLevel.toLocaleStringVe() || "?"} XP`;
+		return `<span class="ve-help-subtle" title="${this.constructor._TITLE_XP_TO_NEXT_LEVEL}">XP to Next Level:</span> ${partyMeta?.xpToNextLevel ? partyMeta?.xpToNextLevel.toLocaleStringVe() : "?"} XP`;
 	}
 
 	/* -------------------------------------------- */
@@ -428,10 +471,10 @@ export class EncounterBuilderRulesBase extends BaseComponent {
 
 	/* -------------------------------------------- */
 
-	static _TITLE_TTK = "Time to Kill: The estimated number of turns the party will require to defeat the encounter. This assumes single-target damage only.";
+	static _TITLE_TTK = "Time to Kill: The estimated number of rounds the party will require to defeat the encounter. This assumes single-target damage only.";
 
 	_getTtkProvider ({partyMeta, styleHint}) {
-		const sharedOpts = {partyMeta, creatureMetas: this._comp.creatureMetas};
+		const sharedOpts = {partyMeta, creatureGroups: this._comp.creatureGroups};
 
 		switch (styleHint) {
 			case SITE_STYLE__CLASSIC: return new EncounterBuilderTtkClassic(sharedOpts);
@@ -443,8 +486,16 @@ export class EncounterBuilderRulesBase extends BaseComponent {
 	_getTtkHtml ({partyMeta, styleHint = null}) {
 		styleHint ||= VetoolsConfig.get("styleSwitcher", "style");
 
-		return `<span class="ve-help" title="${this.constructor._TITLE_TTK}">TTK:</span> ${this._getTtkProvider({partyMeta, styleHint}).getApproxTurnsToKill().toFixed(2)}`;
+		const ptTtk = partyMeta.cntPlayers
+			? `${this._getTtkProvider({partyMeta, styleHint}).getApproxTurnsToKill().toFixed(2)} <span title="Rounds" class="ve-small-caps">rnd.</span>`
+			: `<span class="ve-muted">?</span>`;
+
+		return `<span class="ve-help" title="${this.constructor._TITLE_TTK}">TTK:</span> ${ptTtk}`;
 	}
+
+	/* -------------------------------------------- */
+
+	doCleanup () { /* Implement as required */ }
 
 	/* -------------------------------------------- */
 

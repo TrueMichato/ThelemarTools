@@ -1,25 +1,13 @@
 "use strict";
 
 // TODO implement remaining methods
-class RendererMarkdown {
+class RendererMarkdown extends Renderer {
 	static CHARS_PER_PAGE = 5500;
 
 	getLineBreak () { return "\n"; }
 
 	constructor () {
-		// FIXME this is awful
-		const renderer = new Renderer();
-		this.__super = {};
-		for (const k in renderer) {
-			if (this[k] === undefined) {
-				if (typeof renderer[k] === "function") this[k] = renderer[k].bind(this);
-				else this[k] = MiscUtil.copy(renderer[k]);
-			} else {
-				if (typeof renderer[k] === "function") this.__super[k] = renderer[k].bind(this);
-				else this.__super[k] = MiscUtil.copy(renderer[k]);
-			}
-		}
-
+		super();
 		this._isSkipStylingItemLinks = false;
 	}
 
@@ -49,16 +37,17 @@ class RendererMarkdown {
 	*/
 
 	_renderEntriesSubtypes (entry, textStack, meta, options, incDepth) {
+		const displayName = entry._displayName || entry.name;
 		const isInlineTitle = meta.depth >= 2;
 		const nextDepth = incDepth && meta.depth < 2 ? meta.depth + 1 : meta.depth;
 
 		const nxtPrefix = RendererMarkdown._getNextPrefix(options);
-		if (entry.name) {
+		if (displayName) {
 			if (isInlineTitle) {
-				textStack[0] += `${nxtPrefix}***${Renderer.stripTags(entry.name)}.*** `;
+				textStack[0] += `${nxtPrefix}***${Renderer.stripTags(displayName)}.*** `;
 			} else {
 				const hashCount = meta._typeStack.length === 1 && meta.depth === -1 ? 1 : Math.min(6, meta.depth + 3);
-				textStack[0] += `\n${nxtPrefix}${"#".repeat(hashCount)} ${Renderer.stripTags(entry.name)}\n\n`;
+				textStack[0] += `\n${nxtPrefix}${"#".repeat(hashCount)} ${Renderer.stripTags(displayName)}\n\n`;
 			}
 		}
 
@@ -68,7 +57,7 @@ class RendererMarkdown {
 			const len = entry.entries.length;
 			for (let i = 0; i < len; ++i) {
 				meta.depth = nextDepth;
-				const isFirstInline = i === 0 && entry.name && isInlineTitle;
+				const isFirstInline = i === 0 && displayName && isInlineTitle;
 				const suffix = meta.isStatblockInlineMonster ? `  \n` : `\n\n`;
 				this._recursiveRender(entry.entries[i], textStack, meta, {prefix: isFirstInline ? "" : RendererMarkdown._getNextPrefix(options), suffix});
 			}
@@ -759,7 +748,7 @@ class RendererMarkdown {
 
 			case "@link":
 			case "@5etools":
-				this.__super._renderString_renderTag(textStack, meta, options, tag, text); break;
+				super._renderString_renderTag(textStack, meta, options, tag, text); break;
 
 			// OTHER HOVERABLES ////////////////////////////////////////////////////////////////////////////////
 			case "@footnote":
@@ -1015,7 +1004,8 @@ class _RenderCompactMarkdownBestiaryImplBase {
 
 	_getCommonMdParts_sizeTypeAlignment ({mon, renderer, opts}) {
 		const monTypes = Parser.monTypeToFullObj(mon.type);
-		return `>*${mon.level ? `${Parser.getOrdinalForm(mon.level)}-level ` : ""}${Renderer.utils.getRenderedSize(mon.size)} ${monTypes.asText}${mon.alignment ? `, ${mon.alignmentPrefix ? RendererMarkdown.get().render(mon.alignmentPrefix) : ""}${Parser.alignmentListToFull(mon.alignment).toTitleCase()}` : ""}*`;
+		const sepTypeAlignment = monTypes.asText.asText.includes(",") ? "; " : ", ";
+		return `>*${mon.level ? `${Parser.getOrdinalForm(mon.level)}-level ` : ""}${Renderer.utils.getRenderedSize(mon.size)} ${monTypes.asText}${mon.alignment ? `${sepTypeAlignment}${mon.alignmentPrefix ? RendererMarkdown.get().render(mon.alignmentPrefix) : ""}${Parser.alignmentListToFull(mon.alignment).toTitleCase()}` : ""}*`;
 	}
 
 	_getCommonMdParts_ac ({mon, renderer, opts}) {
@@ -1696,6 +1686,33 @@ RendererMarkdown.feat = class {
 	}
 };
 
+RendererMarkdown.class = class {
+	static getCompactRenderedString (cls, opts = {}) {
+		const styleHint = VetoolsConfig.get("styleSwitcher", "style");
+
+		const cpyEntries = MiscUtil.copyFast(cls.classFeatures || [])
+			.flat()
+			.map(ent => Renderer.class.getDisplayNamedClassFeatureEntry(ent, {styleHint}));
+
+		return RendererMarkdown.utils.withMetaDepth(1, opts, () => RendererMarkdown.generic.getCompactRenderedString({...cls, entries: cpyEntries}, opts));
+	}
+};
+
+RendererMarkdown.subclass = class {
+	static getCompactRenderedString (sc, opts = {}) {
+		const styleHint = VetoolsConfig.get("styleSwitcher", "style");
+
+		const isEditionMismatch = !!opts.isEditionMismatch;
+
+		const cpyEntries = MiscUtil.copyFast((sc.subclassFeatures || []).flat())
+			.map(ent => Renderer.class.getDisplayNamedSubclassFeatureEntry(ent, {styleHint, isEditionMismatch}));
+
+		if (cpyEntries[0]?.name === sc.name) delete cpyEntries[0].name;
+
+		return RendererMarkdown.utils.withMetaDepth(1, opts, () => RendererMarkdown.generic.getCompactRenderedString({...sc, entries: cpyEntries}, opts));
+	}
+};
+
 RendererMarkdown.optionalfeature = class {
 	static getCompactRenderedString (ent, opts = {}) {
 		const entries = [
@@ -2122,8 +2139,11 @@ RendererMarkdown.vehicle = class {
 
 RendererMarkdown.vehicleUpgrade = class {
 	static getCompactRenderedString (ent, opts = {}) {
+		const entriesMeta = Renderer.vehicleUpgrade.getVehicleUpgradeRenderableEntriesMeta(ent);
+
 		const entries = [
-			RendererMarkdown.vehicleUpgrade.getUpgradeSummary(ent),
+			entriesMeta.entrySummary,
+			entriesMeta.entryCost,
 			{entries: ent.entries},
 		]
 			.filter(Boolean);
@@ -2136,17 +2156,6 @@ RendererMarkdown.vehicleUpgrade = class {
 		return RendererMarkdown.utils.withMetaDepth(1, opts, () => {
 			return RendererMarkdown.generic.getCompactRenderedString(entFull, opts);
 		});
-	}
-
-	static getUpgradeSummary (ent) {
-		const out = [
-			ent.upgradeType ? ent.upgradeType.map(t => Parser.vehicleTypeToFull(t)) : null,
-			ent.prerequisite ? Renderer.utils.prerequisite.getHtml(ent.prerequisite, {isTextOnly: true}) : null,
-		]
-			.filter(Boolean)
-			.join(", ");
-
-		return out ? `{@i ${out}}` : null;
 	}
 };
 
@@ -2185,6 +2194,84 @@ RendererMarkdown.recipe = class {
 			.filter(Boolean)
 			.join("\n\n");
 		return RendererMarkdown.utils.getNormalizedNewlines(out);
+	}
+};
+
+RendererMarkdown.crochetPattern = class {
+	static getCompactRenderedString (ent, opts = {}) {
+		const {entrySkillLevel, entryDesignedBy, entriesMeasurements, entriesHooks} = Renderer.crochetPattern.getCrochetPatternRenderableEntriesMeta(ent);
+
+		const ptHead = RendererMarkdown.utils.withMetaDepth(0, opts, () => {
+			const entries = [
+				`{@i Skill Level: ${entrySkillLevel}.${entryDesignedBy ? ` Designed by ${entryDesignedBy}.` : ""}}`,
+
+				entriesMeasurements?.length ? `#### Finished Measurements` : "",
+				...(entriesMeasurements || []),
+
+				ent.yarn?.length ? `#### Yarn` : "",
+				...(ent.yarn || []),
+
+				entriesHooks?.length ? `#### Hooks` : "",
+				...(entriesHooks || []),
+
+				ent.notions?.length ? `#### Notions` : "",
+				...(ent.notions || []),
+
+				ent.gauge?.length ? `#### Gauge` : "",
+				...(ent.gauge || []),
+
+				ent.stitches?.length ? `#### Special Stitches` : "",
+				...(ent.stitches || []),
+
+				ent.abbreviations?.length ? `#### Special Abbreviations` : "",
+				...(ent.abbreviations || []),
+
+				ent.notes?.length ? `#### Notes` : "",
+				...(ent.notes || []),
+
+				ent.finishing?.length ? `#### Finishing` : "",
+				...(ent.finishing || []),
+			]
+				.filter(Boolean);
+
+			const entFull = {
+				...ent,
+				entries,
+			};
+
+			return RendererMarkdown.generic.getCompactRenderedString(entFull, opts);
+		});
+
+		const ptInstructions = RendererMarkdown.utils.withMetaDepth(0, opts, () => {
+			return RendererMarkdown.generic.getRenderedSubEntry({entries: ent.instructions}, opts);
+		});
+
+		const out = [
+			ptHead,
+			ptInstructions,
+		]
+			.filter(Boolean)
+			.join("\n\n");
+
+		return RendererMarkdown.utils.getNormalizedNewlines(out);
+	}
+};
+
+RendererMarkdown.homecraft = class {
+	static getCompactRenderedString (ent) {
+		switch (ent.__prop) {
+			case "crochetPattern": return RendererMarkdown.crochetPattern.getCompactRenderedString(ent);
+			default: throw new Error(`Unhandled prop "${ent.__prop}"`);
+		}
+	}
+
+	/* -------------------------------------------- */
+
+	static pGetFluff (ent) {
+		switch (ent.__prop) {
+			case "crochetPattern": return RendererMarkdown.crochetPattern.pGetFluff(ent);
+			default: throw new Error(`Unhandled prop "${ent.__prop}"`);
+		}
 	}
 };
 
@@ -2231,7 +2318,7 @@ RendererMarkdown.generic = class {
 	}
 
 	static getRenderedPrerequisite (ent) {
-		const out = Renderer.utils.prerequisite.getHtml(ent.prerequisite, {isTextOnly: true, isSkipPrefix: true});
+		const out = Renderer.utils.prerequisite.getText(ent.prerequisite, {isSkipPrefix: true});
 		return out ? `Prerequisite: ${out}` : "";
 	}
 };
@@ -2278,9 +2365,9 @@ class MarkdownConverter {
 
 		// Scrub HTML
 		try {
-			const ele = ee`<div>${mdStr}</div>`;
-			ele.findAll("*").forEach(ele => ele.remove());
-			mdStr = ele.txt();
+			const ele = veT`<div>${mdStr}</div>`;
+			ele.vee.findAll("*").forEach(ele => ele.remove());
+			mdStr = ele.vee.txt();
 		} catch (e) {
 			setTimeout(() => { throw e; });
 		}

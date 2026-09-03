@@ -101,6 +101,7 @@ class PageFilterFeats extends PageFilterBase {
 		if (feat.repeatable != null) feat._fMisc.push(feat.repeatable ? "Repeatable" : "Not Repeatable");
 
 		feat._slAbility = ability.asTextShort || VeCt.STR_NONE;
+		feat._srtAbility = ability.asSortableString;
 		feat._slPrereq = prereqText;
 
 		FilterCommon.mutateForFilters_damageVulnResImmunePlayer(feat);
@@ -172,6 +173,7 @@ class ModalFilterFeats extends ModalFilterBase {
 			...opts,
 			modalTitle: `Feat${opts.isRadio ? "" : "s"}`,
 			pageFilter: new PageFilterFeats(),
+			previewButtonHandler: new ListUiPreviewButtonHandlerStatsFluff({page: UrlUtil.PG_FEATS}),
 		});
 	}
 
@@ -222,7 +224,6 @@ class ModalFilterFeats extends ModalFilterBase {
 			eleRow,
 			feat.name,
 			{
-				hash,
 				source,
 				sourceJson: feat.source,
 				...ListItem.getCommonValues(feat),
@@ -231,12 +232,15 @@ class ModalFilterFeats extends ModalFilterBase {
 				prerequisite: feat._slPrereq,
 			},
 			{
+				hash,
+				page: feat.page,
+				ability: feat._srtAbility,
 				cbSel: eleRow.firstElementChild.firstElementChild.firstElementChild,
 				btnShowHidePreview,
 			},
 		);
 
-		ListUiUtil.bindPreviewButton(UrlUtil.PG_FEATS, this._allData, listItem, btnShowHidePreview);
+		this._previewButtonHandler.bindPreviewButton({entity: feat, listItem, btnShowHidePreview});
 
 		return listItem;
 	}

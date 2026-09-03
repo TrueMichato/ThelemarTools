@@ -956,6 +956,55 @@
 										"{@deity Mishakal|dragonlance|DSotDQ}",
 										"{@deity Solinari|dragonlance|DSotDQ}"
 									]
+								},
+								{
+									"type": "statblock",
+									"name": "Paladine",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Branchala",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Habbakuk",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Kiri-Jolith",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Majere",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Mishakal",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Solinari",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
 								}
 							]
 						},
@@ -978,6 +1027,55 @@
 										"{@deity Sirrion|dragonlance|DSotDQ}",
 										"{@deity Zivilyn|dragonlance|DSotDQ}"
 									]
+								},
+								{
+									"type": "statblock",
+									"name": "Gilean",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Chislev",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Lunitari",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Reorx",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Shinare",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Sirrion",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Zivilyn",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
 								}
 							]
 						},
@@ -1000,6 +1098,55 @@
 										"{@deity Sargonnas|dragonlance|DSotDQ}",
 										"{@deity Zeboim|dragonlance|DSotDQ}"
 									]
+								},
+								{
+									"type": "statblock",
+									"name": "Takhisis",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Chemosh",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Hiddukel",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Morgion",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Nuitari",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Sargonnas",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
+								},
+								{
+									"type": "statblock",
+									"name": "Zeboim",
+									"tag": "deity",
+									"source": "DSotDQ",
+									"pantheon": "dragonlance"
 								}
 							]
 						}
@@ -1606,7 +1753,8 @@
 											"items": [
 												"{@feat Skilled} ({@book Player's Handbook|PHB})",
 												"{@feat Tough} ({@book Player's Handbook|PHB})"
-											]
+											],
+											"columns": 3
 										}
 									]
 								},
@@ -1631,7 +1779,8 @@
 												"{@feat Mobile} ({@book Player's Handbook|PHB})",
 												"{@feat Sentinel} ({@book Player's Handbook|PHB})",
 												"{@feat War Caster} ({@book Player's Handbook|PHB})"
-											]
+											],
+											"columns": 3
 										},
 										"You gain this bonus feat at 4th level regardless of your background\u2014even if you have the Knight of Solamnia or Mage of High Sorcery background. You must meet all prerequisites if the feat you choose has any."
 									]
@@ -1661,6 +1810,60 @@
 								"{@feat Knight of the Rose|DSotDQ}",
 								"{@feat Knight of the Sword|DSotDQ}"
 							]
+						},
+						{
+							"type": "statblock",
+							"name": "Divinely Favored",
+							"tag": "feat",
+							"source": "DSotDQ"
+						},
+						{
+							"type": "statblock",
+							"name": "Initiate of High Sorcery",
+							"tag": "feat",
+							"source": "DSotDQ"
+						},
+						{
+							"type": "statblock",
+							"name": "Adept of the Black Robes",
+							"tag": "feat",
+							"source": "DSotDQ"
+						},
+						{
+							"type": "statblock",
+							"name": "Adept of the Red Robes",
+							"tag": "feat",
+							"source": "DSotDQ"
+						},
+						{
+							"type": "statblock",
+							"name": "Adept of the White Robes",
+							"tag": "feat",
+							"source": "DSotDQ"
+						},
+						{
+							"type": "statblock",
+							"name": "Squire of Solamnia",
+							"tag": "feat",
+							"source": "DSotDQ"
+						},
+						{
+							"type": "statblock",
+							"name": "Knight of the Crown",
+							"tag": "feat",
+							"source": "DSotDQ"
+						},
+						{
+							"type": "statblock",
+							"name": "Knight of the Rose",
+							"tag": "feat",
+							"source": "DSotDQ"
+						},
+						{
+							"type": "statblock",
+							"name": "Knight of the Sword",
+							"tag": "feat",
+							"source": "DSotDQ"
 						}
 					]
 				},
@@ -7277,7 +7480,7 @@
 										{
 											"type": "item",
 											"name": "Light",
-											"entry": "Torches provide bright light throughout the fort, except for {@area area W5|1d5|x}, which is dimly lit."
+											"entry": "Torches provide {@quickref Vision and Light||2||bright light} throughout the fort, except for {@area area W5|1d5|x}, which is dimly lit."
 										},
 										{
 											"type": "item",
@@ -7909,7 +8112,7 @@
 													"type": "item",
 													"name": "Treasure",
 													"page": 92,
-													"entry": "Under each of the sets of bunks is a simple wooden footlocker. Each holds two sets of common clothes and 10 gp. One footlocker also contains a silvered {@item longsword|PHB}, while another contains a {@item holy symbol|PHB} of Takhisis and a key for the gate controls in {@area area W1|1cb|x}."
+													"entry": "Under each of the sets of bunks is a simple wooden footlocker. Each holds two sets of common clothes and 10 gp. One footlocker also contains a {@item silvered longsword|PHB}, while another contains a {@item holy symbol|PHB} of Takhisis and a key for the gate controls in {@area area W1|1cb|x}."
 												}
 											]
 										}
@@ -8139,7 +8342,7 @@
 												{
 													"type": "item",
 													"name": "Stream",
-													"entry": "The chilly stream is 4 feet deep and is {@book difficult terrain|PHB|8|Difficult Terrain}. The crossings aren't difficult terrain."
+													"entry": "The chilly stream is 4 feet deep and is {@book difficult terrain|PHB|8|Difficult Terrain}. The crossings aren't {@quickref difficult terrain||3}."
 												},
 												{
 													"type": "item",
@@ -8725,7 +8928,7 @@
 										{
 											"type": "item",
 											"name": "Cataclysmic Flames",
-											"entry": "Illusory violet flames fill the catacombs with dim light. These flames create no heat and don't harm creatures that touch them."
+											"entry": "Illusory violet flames fill the catacombs with {@quickref Vision and Light||2||dim light}. These flames create no heat and don't harm creatures that touch them."
 										},
 										{
 											"type": "item",
@@ -10335,7 +10538,14 @@
 											"type": "list",
 											"items": [
 												"{@reward Favor of the Heroic Steed|DSotDQ}"
-											]
+											],
+											"columns": 3
+										},
+										{
+											"type": "statblock",
+											"name": "Favor of the Heroic Steed",
+											"tag": "reward",
+											"source": "DSotDQ"
 										}
 									]
 								},
@@ -11648,7 +11858,8 @@
 												"{@area Blue Phoenix Shrine|263|x} (location C)",
 												"{@area Sunward Fortress|283|x} (location D)",
 												"{@area Wakenreth|2a7|x} (location E)"
-											]
+											],
+											"columns": 3
 										},
 										"Mark these sites' hexes on the players' map of the region in {@adventure appendix E|DSotDQ|12|Appendix E: Maps} after {@creature Dalamar|DSotDQ} notes their locations.",
 										"If the characters agree to work with {@creature Dalamar|DSotDQ}, he's pleased. They can explore the locations in any order they wish. {@creature Dalamar|DSotDQ} plans to convince Zhelsuel to let him meet the characters at Wakenreth. Once they've relayed their findings to him, he hopes he'll be able to determine the location of the City of Lost Names (see the end of the \"{@area E: Wakenreth|2a7|x}\" section for details). With this, {@creature Dalamar|DSotDQ} sends the characters on their way, wishing them fruitful investigations."
@@ -13389,7 +13600,7 @@
 											"page": 119,
 											"id": "2a4",
 											"entries": [
-												"This enormous orange gem weighs over a ton and sheds dim light for 10 feet. A {@spell detect magic} spell reveals it emanates an aura of transmutation magic. A character who inspects the Spawning Shard and succeeds on a {@dc 18} Intelligence ({@skill Arcana}) check determines the gem's magic can corrupt creatures and turn them into slaadi.",
+												"This enormous orange gem weighs over a ton and sheds {@quickref Vision and Light||2||dim light} for 10 feet. A {@spell detect magic} spell reveals it emanates an aura of transmutation magic. A character who inspects the Spawning Shard and succeeds on a {@dc 18} Intelligence ({@skill Arcana}) check determines the gem's magic can corrupt creatures and turn them into slaadi.",
 												"A creature that touches the gem must succeed on a {@dc 15} Constitution saving throw or become infected with a disease called chaos phage. While infected, the target can't regain hit points, and its hit point maximum is reduced by 10 ({@dice 3d6}) every 24 hours unless the target is cured by magic such as the {@spell lesser restoration} spell. If the disease reduces the target's hit point maximum to 0, the target instantly transforms into a {@creature red slaad} or, if it has the ability to cast spells of 3rd level or higher, a {@creature green slaad}. Only a {@spell wish} spell can reverse the transformation."
 											]
 										},
@@ -14173,7 +14384,7 @@
 									"entries": [
 										"After the anhkolox is defeated, Veriel continues his explanation. To cut Wakenreth off from the Shadowfell, the runes on the portal in area E4 must be restored to their intended order, which Veriel shares with them.",
 										"The runes on the portal can be adjusted only in {@area area E4|2bb|x}. The process takes five minutes and requires a character to make a {@dc 14} Constitution saving throw as Shadowfell energies tug at their life essence. On a failed check, the character takes 17 ({@dice 5d6}) necrotic damage and gains 1 level of {@condition exhaustion}, then the portal closes. On a successful check, the portal closes without harming the character. Either way, the portal's connection with the Shadowfell is severed.",
-										"Once Wakenreth is cut off from the Shadowfell, the supernatural darkness in area E4 fades, the torch sconces throughout the structure shed bright light, and the walls are restored."
+										"Once Wakenreth is cut off from the Shadowfell, the supernatural darkness in area E4 fades, the torch sconces throughout the structure shed {@quickref Vision and Light||2||bright light}, and the walls are restored."
 									]
 								},
 								{
@@ -14368,7 +14579,7 @@
 												{
 													"type": "item",
 													"name": "Lighting",
-													"entry": "Crystals fill the upper level of the cave with {@quickref Vision and Light|PHB|2||dim light}. The lower level opens to the surface, allowing natural bright light in during the daytime."
+													"entry": "Crystals fill the upper level of the cave with {@quickref Vision and Light|PHB|2||dim light}. The lower level opens to the surface, allowing natural {@quickref Vision and Light||2||bright light} in during the daytime."
 												}
 											]
 										}
@@ -15106,7 +15317,7 @@
 											"type": "insetReadaloud",
 											"id": "2d4",
 											"entries": [
-												"Blue crystal formations line the walls and floors of this cavern, so dense in places that they look engulfed in ice. The crystals glow sedately with a dim light."
+												"Blue crystal formations line the walls and floors of this cavern, so dense in places that they look engulfed in ice. The crystals glow sedately with a {@quickref Vision and Light||2||dim light}."
 											]
 										},
 										"Investigation reveals the crystals to be salt, though they have special properties (detailed in \"Bluemaw Cave Features\" above). The draconians in area F3 can be heard faintly from here, grunting and growling at each other in Draconic.",
@@ -16396,7 +16607,7 @@
 											"rows": [
 												[
 													"1\u20134",
-													"A {@creature Dragon Army officer|DSotDQ} (see {@adventure appendix B|DSotDQ|9}) on a dragonnel flies overhead, firing a heavy crossbow at the character closest to the Fray. The attack has a +4 bonus to hit and deals 7 ({@dice 1d10 + 2}) piercing damage plus 5 ({@dice 1d10}) fire damage on a hit."
+													"A {@creature Dragon Army officer|DSotDQ} (see {@adventure appendix B|DSotDQ|9}) on a dragonnel flies overhead, firing a heavy crossbow at the character closest to the Fray. The attack has a {@hit 4} bonus to hit and deals 7 ({@dice 1d10 + 2}) piercing damage plus 5 ({@dice 1d10}) fire damage on a hit."
 												],
 												[
 													"5\u20137",
@@ -18180,7 +18391,7 @@
 												"Murals of dancing people cover the walls, and a small stone stage rises to the west. The lower southwest half of the room is flooded, with the remains of tables, chairs, and a bar barely protruding above the water's surface."
 											]
 										},
-										"Murky water fills this room to a height of 3 feet, making the flooded area difficult terrain for creatures without a swimming speed.",
+										"Murky water fills this room to a height of 3 feet, making the flooded area {@quickref difficult terrain||3} for creatures without a swimming speed.",
 										"A {@creature green slaad} lurks on the stage, drawn to the tunnels by the chaotic magic of the city. If it notices a character, the slaad turns and hisses before using its Hurl Flame action against the character. If a character is in the water, the slaad ignites the flammable liquid (see below). The slaad fights until slain.",
 										{
 											"type": "entries",
@@ -18985,7 +19196,7 @@
 										{
 											"type": "item",
 											"name": "Lighting",
-											"entry": "Torches, candles, and fireplaces shed bright light throughout the mansion's interior."
+											"entry": "Torches, candles, and fireplaces shed {@quickref Vision and Light||2||bright light} throughout the mansion's interior."
 										},
 										{
 											"type": "item",
@@ -19752,7 +19963,7 @@
 										{
 											"type": "item",
 											"name": "Lighting",
-											"entry": "The temple and its grounds are lit by natural light alone. During the day, bright light fills the exterior areas and dim light fills the interior rooms. At night, all areas are in darkness. Area descriptions assume the characters have a light source or some other means of seeing in the dark."
+											"entry": "The temple and its grounds are lit by natural light alone. During the day, {@quickref Vision and Light||2||bright light} fills the exterior areas and {@quickref Vision and Light||2||dim light} fills the interior rooms. At night, all areas are in darkness. Area descriptions assume the characters have a light source or some other means of seeing in the dark."
 										}
 									]
 								}
@@ -20895,7 +21106,7 @@
 											"page": 152,
 											"id": "3a8",
 											"entries": [
-												"As each character enters this area, they gain the distinct impression the dragon sculptures are watching them. Good-aligned characters feel suffused with a warm sense of righteousness. If a character approaches the altar, a column of dim light rises from it.",
+												"As each character enters this area, they gain the distinct impression the dragon sculptures are watching them. Good-aligned characters feel suffused with a warm sense of righteousness. If a character approaches the altar, a column of {@quickref Vision and Light||2||dim light} rises from it.",
 												"If a character places {@creature Sarlamir|DSotDQ}'s lance on the altar in this light, the lance shines with a silvery glow. The rust covering the lance bubbles and leaks a dark liquid that flows away from the altar and disappears. At the same time, the spear lengthens, growing into a whole, newly forged, pike-length {@item dragonlance|FTD} (see {@adventure appendix A|DSotDQ|8}).",
 												"Before a character takes the reforged lance, read the following text:",
 												{
@@ -20966,7 +21177,7 @@
 										{
 											"type": "item",
 											"name": "Lighting",
-											"entry": "Magical lighting embedded in the ceilings fills the Threshold's rooms with bright light."
+											"entry": "Magical lighting embedded in the ceilings fills the Threshold's rooms with {@quickref Vision and Light||2||bright light}."
 										}
 									]
 								}
@@ -26643,6 +26854,24 @@
 								"{@item Hoopak|DSotDQ}",
 								"{@item Narycrash|DSotDQ}"
 							]
+						},
+						{
+							"type": "statblock",
+							"name": "Fargab",
+							"tag": "item",
+							"source": "DSotDQ"
+						},
+						{
+							"type": "statblock",
+							"name": "Hoopak",
+							"tag": "item",
+							"source": "DSotDQ"
+						},
+						{
+							"type": "statblock",
+							"name": "Narycrash",
+							"tag": "item",
+							"source": "DSotDQ"
 						}
 					]
 				},
@@ -26660,6 +26889,20 @@
 								"{@object Boilerdrak|DSotDQ}",
 								"{@object Gnomeflinger|DSotDQ}"
 							]
+						},
+						{
+							"type": "statblock",
+							"name": "Boilerdrak",
+							"tag": "object",
+							"source": "DSotDQ",
+							"style": "narrow"
+						},
+						{
+							"type": "statblock",
+							"name": "Gnomeflinger",
+							"tag": "object",
+							"source": "DSotDQ",
+							"style": "narrow"
 						}
 					]
 				},
@@ -26679,6 +26922,30 @@
 								"{@item Kagonesti Forest Shroud|DSotDQ}",
 								"{@item Mirror of Reflected Pasts|DSotDQ}"
 							]
+						},
+						{
+							"type": "statblock",
+							"name": "Dragonlance",
+							"tag": "item",
+							"source": "FTD"
+						},
+						{
+							"type": "statblock",
+							"name": "Flying Citadel Helm",
+							"tag": "item",
+							"source": "DSotDQ"
+						},
+						{
+							"type": "statblock",
+							"name": "Kagonesti Forest Shroud",
+							"tag": "item",
+							"source": "DSotDQ"
+						},
+						{
+							"type": "statblock",
+							"name": "Mirror of Reflected Pasts",
+							"tag": "item",
+							"source": "DSotDQ"
 						}
 					]
 				}
@@ -26891,6 +27158,581 @@
 								"{@creature Wasteland Dragonnel|DSotDQ}",
 								"{@creature Wersten Kern|DSotDQ}"
 							]
+						},
+						{
+							"type": "section",
+							"name": "Anhkolox",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Anhkolox",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Anhkolox",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "07b"
+						},
+						{
+							"type": "section",
+							"name": "Aurak Draconian",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Aurak Draconian",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Aurak Draconian",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "07c"
+						},
+						{
+							"type": "section",
+							"name": "Baaz Draconian",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Baaz Draconian",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Baaz Draconian",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "07d"
+						},
+						{
+							"type": "section",
+							"name": "Bozak Draconian",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Bozak Draconian",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Bozak Draconian",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "07f"
+						},
+						{
+							"type": "section",
+							"name": "Caradoc",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Caradoc",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Caradoc",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "080"
+						},
+						{
+							"type": "section",
+							"name": "Death Knight",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Death Knight",
+									"prop": "monsterFluff",
+									"source": "MM",
+									"tag": "creature",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Death Knight",
+									"tag": "creature",
+									"style": "narrow"
+								}
+							],
+							"id": "081"
+						},
+						{
+							"type": "section",
+							"name": "Dragon Army Dragonnel",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Dragon Army Dragonnel",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Dragon Army Dragonnel",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "082"
+						},
+						{
+							"type": "section",
+							"name": "Dragon Army Officer",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Dragon Army Officer",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Dragon Army Officer",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "083"
+						},
+						{
+							"type": "section",
+							"name": "Dragon Army Soldier",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Dragon Army Soldier",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Dragon Army Soldier",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "084"
+						},
+						{
+							"type": "section",
+							"name": "Greater Death Dragon",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Greater Death Dragon",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Greater Death Dragon",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "085"
+						},
+						{
+							"type": "section",
+							"name": "Istarian Drone",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Istarian Drone",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Istarian Drone",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "086"
+						},
+						{
+							"type": "section",
+							"name": "Kalaman Soldier",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Kalaman Soldier",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Kalaman Soldier",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "087"
+						},
+						{
+							"type": "section",
+							"name": "Kansaldi Fire-Eyes",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Kansaldi Fire-Eyes",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Kansaldi Fire-Eyes",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "088"
+						},
+						{
+							"type": "section",
+							"name": "Kapak Draconian",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Kapak Draconian",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Kapak Draconian",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "08a"
+						},
+						{
+							"type": "section",
+							"name": "Kender Skirmisher",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Kender Skirmisher",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Kender Skirmisher",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "08b"
+						},
+						{
+							"type": "section",
+							"name": "Lesser Death Dragon",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Lesser Death Dragon",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Lesser Death Dragon",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "08c"
+						},
+						{
+							"type": "section",
+							"name": "Lohezet",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Lohezet",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Lohezet",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "08d"
+						},
+						{
+							"type": "section",
+							"name": "Lord Soth",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Lord Soth",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Lord Soth",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "08e"
+						},
+						{
+							"type": "section",
+							"name": "Red Ruin",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Red Ruin",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Red Ruin",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "08f"
+						},
+						{
+							"type": "section",
+							"name": "Sivak Draconian",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Sivak Draconian",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Sivak Draconian",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "090"
+						},
+						{
+							"type": "section",
+							"name": "Skeletal Knight",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Skeletal Knight",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Skeletal Knight",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "21b"
+						},
+						{
+							"type": "section",
+							"name": "Wasteland Dragonnel",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Wasteland Dragonnel",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Wasteland Dragonnel",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "281"
+						},
+						{
+							"type": "section",
+							"name": "Wersten Kern",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Wersten Kern",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Wersten Kern",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "45d"
 						}
 					]
 				}
@@ -26935,6 +27777,156 @@
 								"{@creature Levna Drakehorn|DSotDQ}",
 								"{@creature Tem Temble|DSotDQ}"
 							]
+						},
+						{
+							"type": "section",
+							"name": "Andir Valmakos",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Andir Valmakos",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Andir Valmakos",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "499"
+						},
+						{
+							"type": "section",
+							"name": "Ayik Ur",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Ayik Ur",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Ayik Ur",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "49a"
+						},
+						{
+							"type": "section",
+							"name": "Hrigg Roundrook",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Hrigg Roundrook",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Hrigg Roundrook",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "49b"
+						},
+						{
+							"type": "section",
+							"name": "Iriad",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Iriad",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Iriad",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "49c"
+						},
+						{
+							"type": "section",
+							"name": "Levna Drakehorn",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Levna Drakehorn",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Levna Drakehorn",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "49d"
+						},
+						{
+							"type": "section",
+							"name": "Tem Temble",
+							"entries": [
+								{
+									"type": "statblock",
+									"name": "Tem Temble",
+									"prop": "monsterFluff",
+									"source": "DSotDQ",
+									"data": {
+										"renderCompact": {
+											"isSkipRootName": true
+										}
+									}
+								},
+								{
+									"type": "statblock",
+									"name": "Tem Temble",
+									"tag": "creature",
+									"source": "DSotDQ",
+									"style": "narrow"
+								}
+							],
+							"id": "49f"
 						}
 					]
 				}

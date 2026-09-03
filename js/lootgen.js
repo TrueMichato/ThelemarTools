@@ -1,4 +1,5 @@
 import {LootGenUi} from "./lootgen/lootgen-ui.js";
+import {WrappedRenderer} from "./render-wrapped.js";
 
 class LootGenPage {
 	static _STORAGE_KEY_STATE = "state";
@@ -14,8 +15,8 @@ class LootGenPage {
 		]);
 		await ExcludeUtil.pInitialise();
 
-		const stgLhs = es(`#lootgen-lhs`);
-		const stgRhs = es(`#lootgen-rhs`);
+		const stgLhs = veEs(`#lootgen-lhs`);
+		const stgRhs = veEs(`#lootgen-rhs`);
 
 		const [spells, items] = await Promise.all([
 			this._pLoadSpells(),
@@ -24,6 +25,7 @@ class LootGenPage {
 		this._lootGenUi = new LootGenUi({
 			spells,
 			items,
+			rendererWrapped: new WrappedRenderer(),
 		});
 		await this._lootGenUi.pInit();
 		this._lootGenUi.render({stgLhs, stgRhs});
@@ -34,8 +36,8 @@ class LootGenPage {
 		const savedStateDebounced = MiscUtil.throttle(this._pDoSaveState.bind(this), 100);
 		this._lootGenUi.addHookOnSave(() => savedStateDebounced());
 
-		es(`#wrp-loading`).remove();
-		es(`#wrp-content`).showVe();
+		veEs(`#wrp-loading`).remove();
+		veEs(`#wrp-content`).vee.show();
 
 		window.dispatchEvent(new Event("toolsLoaded"));
 	}

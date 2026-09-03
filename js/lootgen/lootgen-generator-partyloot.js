@@ -1,7 +1,6 @@
 import {LootGenGeneratorBase} from "./lootgen-generator-base.js";
 import {LootGenMagicItem} from "./lootgen-magicitem.js";
 import {LootGenOutputMagicItems} from "./lootgen-output.js";
-import {LootGenRender} from "./lootgen-render.js";
 
 export class LootGenGeneratorPartyLoot extends LootGenGeneratorBase {
 	static _PARTY_LOOT_LEVEL_RANGES = {
@@ -110,7 +109,7 @@ export class LootGenGeneratorPartyLoot extends LootGenGeneratorBase {
 			},
 		);
 
-		const stgDefault = ee`<div class="ve-flex-col ve-w-100">
+		const stgDefault = veT`<div class="ve-flex-col ve-w-100">
 			<label class="ve-split-v-center ve-mb-2">
 				<div class="ve-mr-2 ve-w-66 ve-no-shrink">Character Level</div>
 				${selCharLevel}
@@ -128,7 +127,7 @@ export class LootGenGeneratorPartyLoot extends LootGenGeneratorBase {
 			},
 		);
 
-		const stgExactLevel = ee`<div class="ve-flex-col ve-w-100">
+		const stgExactLevel = veT`<div class="ve-flex-col ve-w-100">
 			<div class="ve-flex-col ve-mb-2">
 				<div class="ve-mb-2">Character Level</div>
 				${sliderLevel}
@@ -137,23 +136,23 @@ export class LootGenGeneratorPartyLoot extends LootGenGeneratorBase {
 		// endregion
 
 		// region Buttons
-		const btnRoll = ee`<button class="ve-btn ve-btn-default ve-btn-xs ve-mr-2">Roll Loot</button>`
-			.onn("click", () => this._pl_pDoHandleClickRollLoot());
+		const btnRoll = veT`<button class="ve-btn ve-btn-default ve-btn-xs ve-mr-2">Roll Loot</button>`
+			.vee.onn("click", () => this._pl_pDoHandleClickRollLoot());
 
-		const btnClear = ee`<button class="ve-btn ve-btn-danger ve-btn-xs">Clear Output</button>`
-			.onn("click", () => this._outputManager.doClearOutput());
+		const btnClear = veT`<button class="ve-btn ve-btn-danger ve-btn-xs">Clear Output</button>`
+			.vee.onn("click", () => this._outputManager.doClearOutput());
 		// endregion
 
 		const hkIsExactLevel = () => {
-			stgDefault.toggleVe(!this._state.pl_isExactLevel);
-			stgExactLevel.toggleVe(this._state.pl_isExactLevel);
+			stgDefault.vee.toggle(!this._state.pl_isExactLevel);
+			stgExactLevel.vee.toggle(this._state.pl_isExactLevel);
 		};
 		this._addHookBase("pl_isExactLevel", hkIsExactLevel);
 		hkIsExactLevel();
 
-		ee`<div class="ve-flex-col ve-py-2 ve-px-3">
+		veT`<div class="ve-flex-col ve-py-2 ve-px-3">
 			<p>
-				Generates a set of magical items for a party, based on the tables and rules in ${LootGenRender.er(`{@book Xanathar's Guide to Everything|XGE|2|awarding magic items}`)}, pages 135-136.
+				Generates a set of magical items for a party, based on the tables and rules in ${this._rendererWrapped.er(`{@book Xanathar's Guide to Everything|XGE|2|awarding magic items}`)}, pages 135-136.
 			</p>
 			<p><i>If &quot;Exact Level&quot; is selected, the output will include a proportional number of items for any partially-completed tier.</i></p>
 
@@ -176,7 +175,7 @@ export class LootGenGeneratorPartyLoot extends LootGenGeneratorBase {
 				${btnRoll}
 				${btnClear}
 			</div>
-		</div>`.appendTo(tabMeta.wrpTab);
+		</div>`.vee.appendTo(tabMeta.wrpTab);
 	}
 
 	async _pl_pDoHandleClickRollLoot () {
@@ -194,6 +193,7 @@ export class LootGenGeneratorPartyLoot extends LootGenGeneratorBase {
 						lootGenMagicItems: breakdown,
 						spells: this._dataManager.getDataSpellsFiltered(),
 						magicItemTable: tableMeta,
+						rendererWrapped: this._rendererWrapped,
 					});
 					breakdown.push(lootItem);
 				}
@@ -215,6 +215,7 @@ export class LootGenGeneratorPartyLoot extends LootGenGeneratorBase {
 			type: `Party Loot: Level ${ptLevel}`,
 			name: `Magic items for a {@b Level ${ptLevel}} Party`,
 			magicItemsByTable,
+			rendererWrapped: this._rendererWrapped,
 		});
 		this._outputManager.doAddOutput({lootOutput});
 	}

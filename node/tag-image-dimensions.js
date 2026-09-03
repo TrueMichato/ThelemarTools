@@ -76,6 +76,7 @@ async function main (
 		dirs,
 		files,
 		convertedBy = null,
+		author = null,
 		filter = null,
 		localBrewDir = null,
 		localBrewDirImg = null,
@@ -89,6 +90,7 @@ async function main (
 			dirs,
 			files,
 			convertedBy,
+			author,
 			filter,
 			fnMutDefaultSelection: ({files, dirs}) => {
 				const addAllFilesFluffDir = (dir) => {
@@ -106,6 +108,7 @@ async function main (
 				files.push("./data/fluff-charcreationoptions.json");
 				files.push("./data/fluff-conditionsdiseases.json");
 				files.push("./data/fluff-feats.json");
+				files.push("./data/fluff-homecrafts.json");
 				files.push("./data/fluff-items.json");
 				files.push("./data/fluff-languages.json");
 				files.push("./data/fluff-objects.json");
@@ -164,6 +167,7 @@ main({
 	dirs: params.dir,
 	files: params.file,
 	convertedBy: params.convertedBy,
+	author: params.author,
 	filter: params.filter,
 	localBrewDir: params.localBrewDir,
 	localBrewDirImg: params.localBrewDirImg,

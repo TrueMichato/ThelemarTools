@@ -491,6 +491,116 @@
 			"hasFluffImages": true
 		},
 		{
+			"name": "Agent of the Ninth Quill",
+			"source": "AU",
+			"page": 21,
+			"edition": "one",
+			"ability": [
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"dex",
+								"int",
+								"cha"
+							],
+							"weights": [
+								2,
+								1
+							]
+						}
+					}
+				},
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"dex",
+								"int",
+								"cha"
+							],
+							"weights": [
+								1,
+								1,
+								1
+							]
+						}
+					}
+				}
+			],
+			"feats": [
+				{
+					"arcane infiltrator|au": true
+				}
+			],
+			"skillProficiencies": [
+				{
+					"arcana": true,
+					"sleight of hand": true
+				}
+			],
+			"toolProficiencies": [
+				{
+					"thieves' tools": true
+				}
+			],
+			"startingEquipment": [
+				{
+					"a": [
+						"dagger|xphb",
+						"light hammer|xphb",
+						"thieves' tools|xphb",
+						"iron spikes|xphb",
+						"rope|xphb",
+						"traveler's clothes|xphb",
+						{
+							"value": 1700
+						}
+					],
+					"b": [
+						{
+							"value": 5000
+						}
+					]
+				}
+			],
+			"entries": [
+				{
+					"type": "list",
+					"style": "list-hang-notitle",
+					"items": [
+						{
+							"type": "item",
+							"name": "Ability Scores:",
+							"entry": "Dexterity, Intelligence, Charisma"
+						},
+						{
+							"type": "item",
+							"name": "Feat:",
+							"entry": "{@feat Arcane Infiltrator|AU}"
+						},
+						{
+							"type": "item",
+							"name": "Skill Proficiencies:",
+							"entry": "{@skill Arcana|XPHB} and {@skill Sleight of Hand|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Tool Proficiencies:",
+							"entry": "{@item Thieves' Tools|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Equipment:",
+							"entry": "Choose A or B: (A) {@item Dagger|XPHB}, {@item Light Hammer|XPHB}, {@item Thieves' Tools|XPHB}, {@item Iron Spikes|XPHB}, {@item Rope|XPHB}, {@item Traveler's Clothes|XPHB}, 17 GP; or (B) 50 GP"
+						}
+					]
+				}
+			],
+			"hasFluff": true,
+			"hasFluffImages": true
+		},
+		{
 			"name": "Anthropologist",
 			"source": "ToA",
 			"page": 191,
@@ -551,7 +661,7 @@
 					"name": "Cultural Chameleon",
 					"type": "entries",
 					"entries": [
-						"Before becoming an adventurer, you spent much of your adult life away from your homeland, living among people different from your kin. You came to understand these foreign cultures and the ways of their people, who eventually treated you as one of their own. One culture had more of an influence on you than any other, shaping your beliefs and customs Choose a race whose culture you've adopted, or roll on the Adopted Culture table.",
+						"Before becoming an adventurer, you spent much of your adult life away from your homeland, living among people different from your kin. You came to understand these foreign cultures and the ways of their people, who eventually treated you as one of their own. One culture had more of an influence on you than any other, shaping your beliefs and customs. Choose a race whose culture you've adopted, or roll on the Adopted Culture table.",
 						{
 							"type": "table",
 							"colLabels": [
@@ -1164,7 +1274,7 @@
 								],
 								[
 									"3",
-									"When I'm not exploring dungeons or ruins. I get jittery and impatient."
+									"When I'm not exploring dungeons or ruins, I get jittery and impatient."
 								],
 								[
 									"4",
@@ -2848,6 +2958,113 @@
 			"hasFluff": true
 		},
 		{
+			"name": "Bejeweled Conclave Spy",
+			"source": "AU",
+			"page": 21,
+			"edition": "one",
+			"ability": [
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"dex",
+								"wis",
+								"cha"
+							],
+							"weights": [
+								2,
+								1
+							]
+						}
+					}
+				},
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"dex",
+								"wis",
+								"cha"
+							],
+							"weights": [
+								1,
+								1,
+								1
+							]
+						}
+					}
+				}
+			],
+			"feats": [
+				{
+					"arcane eloquence|au": true
+				}
+			],
+			"skillProficiencies": [
+				{
+					"deception": true,
+					"perception": true
+				}
+			],
+			"toolProficiencies": [
+				{
+					"disguise kit": true
+				}
+			],
+			"startingEquipment": [
+				{
+					"a": [
+						"disguise kit|xphb",
+						"fine clothes|xphb",
+						"perfume|xphb",
+						{
+							"value": 500
+						}
+					],
+					"b": [
+						{
+							"value": 5000
+						}
+					]
+				}
+			],
+			"entries": [
+				{
+					"type": "list",
+					"style": "list-hang-notitle",
+					"items": [
+						{
+							"type": "item",
+							"name": "Ability Scores:",
+							"entry": "Dexterity, Wisdom, Charisma"
+						},
+						{
+							"type": "item",
+							"name": "Feat:",
+							"entry": "{@feat Arcane Eloquence|AU}"
+						},
+						{
+							"type": "item",
+							"name": "Skill Proficiencies:",
+							"entry": "{@skill Deception|XPHB} and {@skill Perception|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Tool Proficiencies:",
+							"entry": "{@item Disguise Kit|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Equipment:",
+							"entry": "Choose A or B: (A) {@item Disguise Kit|XPHB}, {@item Fine Clothes|XPHB}, {@item Perfume|XPHB}, 5 GP; or (B) 50 GP"
+						}
+					]
+				}
+			],
+			"hasFluff": true,
+			"hasFluffImages": true
+		},
+		{
 			"name": "Boros Legionnaire",
 			"source": "GGR",
 			"page": 40,
@@ -4453,6 +4670,117 @@
 			"hasFluff": true
 		},
 		{
+			"name": "Cosmic Dawn Experiment",
+			"source": "AU",
+			"page": 22,
+			"edition": "one",
+			"ability": [
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"str",
+								"dex",
+								"con"
+							],
+							"weights": [
+								2,
+								1
+							]
+						}
+					}
+				},
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"str",
+								"dex",
+								"con"
+							],
+							"weights": [
+								1,
+								1,
+								1
+							]
+						}
+					}
+				}
+			],
+			"feats": [
+				{
+					"transmuted anatomy|au": true
+				}
+			],
+			"skillProficiencies": [
+				{
+					"athletics": true,
+					"survival": true
+				}
+			],
+			"toolProficiencies": [
+				{
+					"anyArtisansTool": 1
+				}
+			],
+			"startingEquipment": [
+				{
+					"a": [
+						{
+							"equipmentType": "toolArtisan",
+							"displayName": "Artisan's Tools (same as above)"
+						},
+						"backpack|xphb",
+						"robe|xphb",
+						"traveler's clothes|xphb",
+						{
+							"value": 3000
+						}
+					],
+					"b": [
+						{
+							"value": 5000
+						}
+					]
+				}
+			],
+			"entries": [
+				{
+					"type": "list",
+					"style": "list-hang-notitle",
+					"items": [
+						{
+							"type": "item",
+							"name": "Ability Scores:",
+							"entry": "Strength, Dexterity, Constitution"
+						},
+						{
+							"type": "item",
+							"name": "Feat:",
+							"entry": "{@feat Transmuted Anatomy|AU}"
+						},
+						{
+							"type": "item",
+							"name": "Skill Proficiencies:",
+							"entry": "{@skill Athletics|XPHB} and {@skill Survival|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Tool Proficiencies:",
+							"entry": "Choose one kind of {@item Artisan's Tools|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Equipment:",
+							"entry": "Choose A or B: (A) {@item Artisan's Tools|XPHB} (same as above), {@item Backpack|XPHB}, {@item Robe|XPHB}, {@item Traveler's Clothes|XPHB}, 30 GP; or (B) 50 GP"
+						}
+					]
+				}
+			],
+			"hasFluff": true,
+			"hasFluffImages": true
+		},
+		{
 			"name": "Courtier",
 			"source": "SCAG",
 			"page": 146,
@@ -4520,6 +4848,117 @@
 				}
 			],
 			"hasFluff": true
+		},
+		{
+			"name": "Covenant of the Grave Recruit",
+			"source": "AU",
+			"page": 22,
+			"edition": "one",
+			"ability": [
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"str",
+								"int",
+								"wis"
+							],
+							"weights": [
+								2,
+								1
+							]
+						}
+					}
+				},
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"str",
+								"int",
+								"wis"
+							],
+							"weights": [
+								1,
+								1,
+								1
+							]
+						}
+					}
+				}
+			],
+			"feats": [
+				{
+					"arcane undertaker|au": true
+				}
+			],
+			"skillProficiencies": [
+				{
+					"history": true,
+					"medicine": true
+				}
+			],
+			"toolProficiencies": [
+				{
+					"herbalism kit": true
+				}
+			],
+			"startingEquipment": [
+				{
+					"a": [
+						"dagger|xphb",
+						"herbalism kit|xphb",
+						{
+							"item": "book|xphb",
+							"displayName": "Book (anatomy)"
+						},
+						"shovel|xphb",
+						{
+							"value": 1600
+						}
+					],
+					"b": [
+						{
+							"value": 5000
+						}
+					]
+				}
+			],
+			"entries": [
+				{
+					"type": "list",
+					"style": "list-hang-notitle",
+					"items": [
+						{
+							"type": "item",
+							"name": "Ability Scores:",
+							"entry": "Strength, Intelligence, Wisdom"
+						},
+						{
+							"type": "item",
+							"name": "Feat:",
+							"entry": "{@feat Arcane Undertaker|AU}"
+						},
+						{
+							"type": "item",
+							"name": "Skill Proficiencies:",
+							"entry": "{@skill History|XPHB} and {@skill Medicine|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Tool Proficiencies:",
+							"entry": "{@item Herbalism Kit|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Equipment:",
+							"entry": "Choose A or B: (A) {@item Dagger|XPHB}, {@item Herbalism Kit|XPHB}, {@item Book|XPHB} (anatomy), {@item Shovel|XPHB}, 16 GP; or (B) 50 GP"
+						}
+					]
+				}
+			],
+			"hasFluff": true,
+			"hasFluffImages": true
 		},
 		{
 			"name": "Criminal",
@@ -4922,6 +5361,114 @@
 							"type": "item",
 							"name": "Equipment:",
 							"entry": "Choose A or B: (A) {@item Dagger|XPHB|2 Daggers}, {@item Thieves' Tools|XPHB}, {@item Crowbar|XPHB}, {@item Pouch|XPHB|2 Pouches}, {@item Traveler's Clothes|XPHB}, 16 GP; or (B) 50 GP"
+						}
+					]
+				}
+			],
+			"hasFluff": true,
+			"hasFluffImages": true
+		},
+		{
+			"name": "Crucible Storm Chaser",
+			"source": "AU",
+			"page": 23,
+			"edition": "one",
+			"ability": [
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"str",
+								"con",
+								"int"
+							],
+							"weights": [
+								2,
+								1
+							]
+						}
+					}
+				},
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"str",
+								"con",
+								"int"
+							],
+							"weights": [
+								1,
+								1,
+								1
+							]
+						}
+					}
+				}
+			],
+			"feats": [
+				{
+					"arcane overload|au": true
+				}
+			],
+			"skillProficiencies": [
+				{
+					"athletics": true,
+					"nature": true
+				}
+			],
+			"toolProficiencies": [
+				{
+					"glassblower's tools": true
+				}
+			],
+			"startingEquipment": [
+				{
+					"a": [
+						"glassblower's tools|xphb",
+						"backpack|xphb",
+						"rope|xphb",
+						"traveler's clothes|xphb",
+						{
+							"value": 1500
+						}
+					],
+					"b": [
+						{
+							"value": 5000
+						}
+					]
+				}
+			],
+			"entries": [
+				{
+					"type": "list",
+					"style": "list-hang-notitle",
+					"items": [
+						{
+							"type": "item",
+							"name": "Ability Scores:",
+							"entry": "Strength, Constitution, Intelligence"
+						},
+						{
+							"type": "item",
+							"name": "Feat:",
+							"entry": "{@feat Arcane Overload|AU}"
+						},
+						{
+							"type": "item",
+							"name": "Skill Proficiencies:",
+							"entry": "{@skill Athletics|XPHB} and {@skill Nature|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Tool Proficiencies:",
+							"entry": "{@item Glassblower's Tools|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Equipment:",
+							"entry": "Choose A or B: (A) {@item Glassblower's Tools|XPHB}, {@item Backpack|XPHB}, {@item Rope|XPHB}, {@item Traveler's Clothes|XPHB}, 15 GP; or (B) 50 GP"
 						}
 					]
 				}
@@ -6826,6 +7373,121 @@
 			"hasFluff": true
 		},
 		{
+			"name": "Familiar Trainer",
+			"source": "AU",
+			"page": 23,
+			"edition": "one",
+			"ability": [
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"con",
+								"int",
+								"wis"
+							],
+							"weights": [
+								2,
+								1
+							]
+						}
+					}
+				},
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"con",
+								"int",
+								"wis"
+							],
+							"weights": [
+								1,
+								1,
+								1
+							]
+						}
+					}
+				}
+			],
+			"feats": [
+				{
+					"familiar friend|au": true
+				}
+			],
+			"skillProficiencies": [
+				{
+					"animal handling": true,
+					"arcana": true
+				}
+			],
+			"toolProficiencies": [
+				{
+					"anyGamingSet": 1
+				}
+			],
+			"startingEquipment": [
+				{
+					"a": [
+						"quarterstaff|xphb",
+						{
+							"equipmentType": "setGaming",
+							"displayName": "Gaming Set (same as above)"
+						},
+						"bedroll|xphb",
+						"bell|xphb",
+						"string|xphb",
+						"tinderbox|xphb",
+						"traveler's clothes|xphb",
+						"waterskin|xphb",
+						{
+							"value": 4400
+						}
+					],
+					"b": [
+						{
+							"value": 5000
+						}
+					]
+				}
+			],
+			"entries": [
+				{
+					"type": "list",
+					"style": "list-hang-notitle",
+					"items": [
+						{
+							"type": "item",
+							"name": "Ability Scores:",
+							"entry": "Constitution, Intelligence, Wisdom"
+						},
+						{
+							"type": "item",
+							"name": "Feat:",
+							"entry": "{@feat Familiar Friend|AU}"
+						},
+						{
+							"type": "item",
+							"name": "Skill Proficiencies:",
+							"entry": "{@skill Animal Handling|XPHB} and {@skill Arcana|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Tool Proficiencies:",
+							"entry": "Choose one kind of {@item Gaming Set|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Equipment:",
+							"entry": "Choose A or B: (A) {@item Quarterstaff|XPHB}, {@item Gaming Set|XPHB} (same as above), {@item Bedroll|XPHB}, {@item Bell|XPHB}, {@item String|XPHB}, {@item Tinderbox|XPHB}, {@item Traveler's Clothes|XPHB}, {@item Waterskin|XPHB}, 44 GP; or (B) 50 GP"
+						}
+					]
+				}
+			],
+			"hasFluff": true,
+			"hasFluffImages": true
+		},
+		{
 			"name": "Far Traveler",
 			"source": "SCAG",
 			"page": 148,
@@ -7233,7 +7895,7 @@
 						{
 							"type": "item",
 							"name": "Equipment:",
-							"entry": "Choose A or B: (A) {@item Sickle|XPHB}, {@item Carpenter's Tools|XPHB}, {@item Healer's Kit|XPHB}, {@item Iron Pot|XPHB}, {@item Shovel|XPHB}, 30 GP; or (B) 50 GP"
+							"entry": "Choose A or B: (A) {@item Sickle|XPHB}, {@item Carpenter's Tools|XPHB}, {@item Healer's Kit|XPHB}, {@item Iron Pot|XPHB}, {@item Shovel|XPHB}, {@item Traveler's Clothes|XPHB}, 30 GP; or (B) 50 GP"
 						}
 					]
 				}
@@ -10850,6 +11512,140 @@
 		},
 		{
 			"name": "Haunted One",
+			"source": "RHW",
+			"page": 26,
+			"edition": "one",
+			"ability": [
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"con",
+								"wis",
+								"cha"
+							],
+							"weights": [
+								2,
+								1
+							]
+						}
+					}
+				},
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"con",
+								"wis",
+								"cha"
+							],
+							"weights": [
+								1,
+								1,
+								1
+							]
+						}
+					}
+				}
+			],
+			"feats": [
+				{
+					"survivor|rhw": true
+				},
+				{
+					"anyFromCategory": {
+						"category": [
+							"DG"
+						]
+					}
+				}
+			],
+			"skillProficiencies": [
+				{
+					"arcana": true,
+					"survival": true
+				}
+			],
+			"toolProficiencies": [
+				{
+					"anyGamingSet": 1
+				}
+			],
+			"startingEquipment": [
+				{
+					"a": [
+						{
+							"equipmentType": "setGaming",
+							"displayName": "Gaming Set (same as above)"
+						},
+						"crowbar|xphb",
+						{
+							"item": "holy water|xphb",
+							"displayName": "Holy Water (1 flask)"
+						},
+						"mirror|xphb",
+						{
+							"item": "oil|xphb",
+							"displayName": "Oil (2 flasks)"
+						},
+						"signal whistle|xphb",
+						"tinderbox|xphb",
+						"traveler's clothes|xphb",
+						{
+							"item": "torch|xphb",
+							"displayName": "Torches",
+							"quantity": 5
+						},
+						"waterskin|xphb",
+						{
+							"value": 1400
+						}
+					],
+					"b": [
+						{
+							"value": 5000
+						}
+					]
+				}
+			],
+			"entries": [
+				{
+					"type": "list",
+					"style": "list-hang-notitle",
+					"items": [
+						{
+							"type": "item",
+							"name": "Ability Scores:",
+							"entry": "Constitution, Wisdom, Charisma"
+						},
+						{
+							"type": "item",
+							"name": "Feat:",
+							"entry": "{@feat Survivor|RHW} or a {@filter Dark Gift feat of your choice|feats|category=DG}"
+						},
+						{
+							"type": "item",
+							"name": "Skill Proficiencies:",
+							"entry": "{@skill Arcana|XPHB} and {@skill Survival|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Tool Proficiencies:",
+							"entry": "Choose one kind of {@item Gaming Set|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Equipment:",
+							"entry": "Choose A or B: (A) {@item Gaming Set|XPHB} (same as above), {@item Crowbar|XPHB}, {@item Holy Water|XPHB} (1 {@item flask|XPHB}), {@item Mirror|XPHB}, {@item Oil|XPHB}(2 {@item flask|XPHB|flasks}), {@item Signal Whistle|XPHB}, {@item Tinderbox|XPHB}, {@item Traveler's Clothes|XPHB}, 5 {@item Torch|XPHB|Torches}, {@item Waterskin|XPHB}, and 14 GP; or (B) 50 GP"
+						}
+					]
+				}
+			],
+			"hasFluff": true,
+			"hasFluffImages": true
+		},
+		{
+			"name": "Haunted One",
 			"source": "VRGR",
 			"page": 34,
 			"otherSources": [
@@ -10857,6 +11653,9 @@
 					"source": "CoS",
 					"page": 209
 				}
+			],
+			"reprintedAs": [
+				"Haunted One|RHW"
 			],
 			"skillProficiencies": [
 				{
@@ -10974,7 +11773,7 @@
 								],
 								[
 									"6",
-									"You were cursed with lycanthropy and later cured. You are now haunted by the innocents you slaughtered."
+									"You were cursed with {@variantrule Player Characters as Lycanthropes|MM|lycanthropy} and later cured. You are now haunted by the innocents you slaughtered."
 								],
 								[
 									"7",
@@ -11673,6 +12472,117 @@
 							"type": "item",
 							"name": "Equipment:",
 							"entry": "Choose A or B: (A) {@item Quarterstaff|XPHB}, {@item Herbalism Kit|XPHB}, {@item Bedroll|XPHB}, {@item Book|XPHB} (philosophy), {@item Lamp|XPHB}, {@item Oil|XPHB} (3 flasks), {@item Traveler's Clothes|XPHB}, 16 GP; or (B) 50 GP"
+						}
+					]
+				}
+			],
+			"hasFluff": true,
+			"hasFluffImages": true
+		},
+		{
+			"name": "Horizon Weaver Initiate",
+			"source": "AU",
+			"page": 24,
+			"edition": "one",
+			"ability": [
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"dex",
+								"con",
+								"wis"
+							],
+							"weights": [
+								2,
+								1
+							]
+						}
+					}
+				},
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"dex",
+								"con",
+								"wis"
+							],
+							"weights": [
+								1,
+								1,
+								1
+							]
+						}
+					}
+				}
+			],
+			"feats": [
+				{
+					"portal jumper|au": true
+				}
+			],
+			"skillProficiencies": [
+				{
+					"acrobatics": true,
+					"survival": true
+				}
+			],
+			"toolProficiencies": [
+				{
+					"weaver's tools": true
+				}
+			],
+			"startingEquipment": [
+				{
+					"a": [
+						"shortbow|xphb",
+						"arrows (20)|xphb",
+						"weaver's tools|xphb",
+						"map|xphb",
+						"quiver|xphb",
+						"rope|xphb",
+						"traveler's clothes|xphb",
+						{
+							"value": 1800
+						}
+					],
+					"b": [
+						{
+							"value": 5000
+						}
+					]
+				}
+			],
+			"entries": [
+				{
+					"type": "list",
+					"style": "list-hang-notitle",
+					"items": [
+						{
+							"type": "item",
+							"name": "Ability Scores:",
+							"entry": "Dexterity, Constitution, Wisdom"
+						},
+						{
+							"type": "item",
+							"name": "Feat:",
+							"entry": "{@feat Portal Jumper|AU}"
+						},
+						{
+							"type": "item",
+							"name": "Skill Proficiencies:",
+							"entry": "{@skill Acrobatics|XPHB} and {@skill Survival|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Tool Proficiencies:",
+							"entry": "{@item Weaver's Tools|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Equipment:",
+							"entry": "Choose A or B: (A) {@item Shortbow|XPHB}, {@item Arrows (20)|XPHB|20 Arrows}, {@item Weaver's Tools|XPHB}, {@item Map|XPHB}, {@item Quiver|XPHB}, {@item Rope|XPHB}, {@item Traveler's Clothes|XPHB}, 18 GP; or (B) 50 GP"
 						}
 					]
 				}
@@ -14312,8 +15222,131 @@
 		},
 		{
 			"name": "Investigator",
+			"source": "RHW",
+			"page": 26,
+			"edition": "one",
+			"ability": [
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"int",
+								"wis",
+								"cha"
+							],
+							"weights": [
+								2,
+								1
+							]
+						}
+					}
+				},
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"int",
+								"wis",
+								"cha"
+							],
+							"weights": [
+								1,
+								1,
+								1
+							]
+						}
+					}
+				}
+			],
+			"feats": [
+				{
+					"sharp eye|rhw": true
+				},
+				{
+					"anyFromCategory": {
+						"category": [
+							"DG"
+						]
+					}
+				}
+			],
+			"skillProficiencies": [
+				{
+					"insight": true,
+					"investigation": true
+				}
+			],
+			"toolProficiencies": [
+				{
+					"disguise kit": true
+				}
+			],
+			"startingEquipment": [
+				{
+					"a": [
+						"disguise kit|xphb",
+						"manacles|xphb",
+						"shovel|xphb",
+						"traveler's clothes|xphb",
+						{
+							"displayName": "Vials",
+							"item": "vial|xphb",
+							"quantity": 3
+						},
+						{
+							"value": 1600
+						}
+					],
+					"b": [
+						{
+							"value": 5000
+						}
+					]
+				}
+			],
+			"entries": [
+				{
+					"type": "list",
+					"style": "list-hang-notitle",
+					"items": [
+						{
+							"type": "item",
+							"name": "Ability Scores:",
+							"entry": "Intelligence, Wisdom, Charisma"
+						},
+						{
+							"type": "item",
+							"name": "Feat:",
+							"entry": "{@feat Sharp Eye|RHW} or a {@filter Dark Gift feat of your choice|feats|category=DG}"
+						},
+						{
+							"type": "item",
+							"name": "Skill Proficiencies:",
+							"entry": "{@skill Insight|XPHB} and {@skill Investigation|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Tool Proficiencies:",
+							"entry": "{@item Disguise Kit|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Equipment:",
+							"entry": "Choose A or B: (A) {@item Disguise Kit|XPHB}, {@item Manacles|XPHB}, {@item Shovel|XPHB}, {@item Traveler's Clothes|XPHB}, 3 {@item Vial|XPHB|Vials}, and 16 GP; or (B) 50 GP"
+						}
+					]
+				}
+			],
+			"hasFluff": true,
+			"hasFluffImages": true
+		},
+		{
+			"name": "Investigator",
 			"source": "VRGR",
 			"page": 35,
+			"reprintedAs": [
+				"Investigator|RHW"
+			],
 			"skillProficiencies": [
 				{
 					"choose": {
@@ -14856,7 +15889,7 @@
 							]
 						},
 						"Your spells tend to be loud, flashy, or explosive, even when the effect is unremarkable. For example, when you open the portal of a {@spell rope trick} spell, the portal might be outlined by harmless, showy sparkles.",
-						"If you use an arcane focus, it probably takes the form of an intricate device that could include metal gauntlets, glass canisters, copper tubing, and leather straps attaching it to your body. The {@item mizzium apparatus|GGR} described in {@book chapter 5|GGR|4|Mizzium Apparatus} is a magical version of this gear.",
+						"If you use an arcane focus, it probably takes the form of an intricate device that could include metal gauntlets, glass canisters, copper tubing, and leather straps attaching it to your body. The {@item mizzium apparatus|GGR} is a magical version of this gear.",
 						"The {@spell chaos bolt|XGE} spell is a favorite of Izzet spellcasters because of its unpredictable nature."
 					]
 				},
@@ -16542,6 +17575,127 @@
 			"hasFluffImages": true
 		},
 		{
+			"name": "Mist Wanderer",
+			"source": "RHW",
+			"page": 27,
+			"edition": "one",
+			"ability": [
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"dex",
+								"con",
+								"wis"
+							],
+							"weights": [
+								2,
+								1
+							]
+						}
+					}
+				},
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"dex",
+								"con",
+								"wis"
+							],
+							"weights": [
+								1,
+								1,
+								1
+							]
+						}
+					}
+				}
+			],
+			"feats": [
+				{
+					"anyFromCategory": {
+						"category": [
+							"DG"
+						]
+					}
+				}
+			],
+			"skillProficiencies": [
+				{
+					"survival": true,
+					"stealth": true
+				}
+			],
+			"toolProficiencies": [
+				{
+					"anyArtisansTool": 1
+				}
+			],
+			"startingEquipment": [
+				{
+					"a": [
+						{
+							"equipmentType": "toolArtisan",
+							"displayName": "Artisan's Tools (same as above)"
+						},
+						"lamp|xphb",
+						{
+							"item": "oil|xphb",
+							"displayName": "Oil (5 flasks)"
+						},
+						"pouch|xphb",
+						"rope|xphb",
+						"tinderbox|xphb",
+						"traveler's clothes|xphb",
+						{
+							"value": 3000
+						}
+					],
+					"b": [
+						{
+							"value": 5000
+						}
+					]
+				}
+			],
+			"entries": [
+				{
+					"type": "list",
+					"style": "list-hang-notitle",
+					"items": [
+						{
+							"type": "item",
+							"name": "Ability Scores:",
+							"entry": "Dexterity, Constitution, Wisdom"
+						},
+						{
+							"type": "item",
+							"name": "Feat:",
+							"entry": "A {@filter Dark Gift feat of your choice|feats|category=DG} ({@feat Mist Walker|RHW} is recommended)"
+						},
+						{
+							"type": "item",
+							"name": "Skill Proficiencies:",
+							"entry": "{@skill Survival|XPHB} and {@skill Stealth|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Tool Proficiencies:",
+							"entry": "Choose one kind of {@item Artisan's Tools|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Equipment:",
+							"entry": "Choose A or B: (A) {@item Artisan's Tools|XPHB} (same as above), {@item Lamp|XPHB}, {@item Oil|XPHB} (5 flasks), {@item Pouch|XPHB}, {@item Rope|XPHB}, {@item Tinderbox|XPHB}, {@item Traveler's Clothes|XPHB}, and 30 GP; or (B) 50 GP"
+						}
+					]
+				}
+			],
+			"hasFluff": true,
+			"hasFluffImages": true
+		},
+		{
 			"name": "Moonwell Pilgrim",
 			"source": "FRHoF",
 			"page": 33,
@@ -17849,7 +19003,7 @@
 								],
 								[
 									"3",
-									"I once ran twenty-five miles without stopping to warn to my clan of an approaching orc horde. I'd do it again if I had to."
+									"I once ran twenty-five miles without stopping to warn my clan of an approaching orc horde. I'd do it again if I had to."
 								],
 								[
 									"4",
@@ -17988,6 +19142,118 @@
 				}
 			],
 			"hasFluff": true
+		},
+		{
+			"name": "Phantasmic Circus Trouper",
+			"source": "AU",
+			"page": 24,
+			"edition": "one",
+			"ability": [
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"dex",
+								"con",
+								"cha"
+							],
+							"weights": [
+								2,
+								1
+							]
+						}
+					}
+				},
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"dex",
+								"con",
+								"cha"
+							],
+							"weights": [
+								1,
+								1,
+								1
+							]
+						}
+					}
+				}
+			],
+			"feats": [
+				{
+					"arcane artist|au": true
+				}
+			],
+			"skillProficiencies": [
+				{
+					"deception": true,
+					"performance": true
+				}
+			],
+			"toolProficiencies": [
+				{
+					"disguise kit": true
+				}
+			],
+			"startingEquipment": [
+				{
+					"a": [
+						"disguise kit|xphb",
+						{
+							"equipmentType": "setGaming",
+							"displayName": "Gaming Set (any)"
+						},
+						"costume|xphb",
+						"mirror|xphb",
+						"traveler's clothes|xphb",
+						{
+							"value": 1200
+						}
+					],
+					"b": [
+						{
+							"value": 5000
+						}
+					]
+				}
+			],
+			"entries": [
+				{
+					"type": "list",
+					"style": "list-hang-notitle",
+					"items": [
+						{
+							"type": "item",
+							"name": "Ability Scores:",
+							"entry": "Dexterity, Constitution, Charisma"
+						},
+						{
+							"type": "item",
+							"name": "Feat:",
+							"entry": "{@feat Arcane Artist|AU}"
+						},
+						{
+							"type": "item",
+							"name": "Skill Proficiencies:",
+							"entry": "{@skill Deception|XPHB} and {@skill Performance|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Tool Proficiencies:",
+							"entry": "{@item Disguise Kit|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Equipment:",
+							"entry": "Choose A or B: (A) {@item Disguise Kit|XPHB}, {@item Gaming Set|XPHB} (any), {@item Costume|XPHB}, {@item Mirror|XPHB}, {@item Traveler's Clothes|XPHB}, 12 GP; or (B) 50 GP"
+						}
+					]
+				}
+			],
+			"hasFluff": true,
+			"hasFluffImages": true
 		},
 		{
 			"name": "Plaintiff",
@@ -21438,6 +22704,126 @@
 			"hasFluffImages": true
 		},
 		{
+			"name": "Seer Apprentice",
+			"source": "AU",
+			"page": 25,
+			"edition": "one",
+			"ability": [
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"int",
+								"wis",
+								"cha"
+							],
+							"weights": [
+								2,
+								1
+							]
+						}
+					}
+				},
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"int",
+								"wis",
+								"cha"
+							],
+							"weights": [
+								1,
+								1,
+								1
+							]
+						}
+					}
+				}
+			],
+			"feats": [
+				{
+					"arcane omens|au": true
+				}
+			],
+			"skillProficiencies": [
+				{
+					"history": true,
+					"insight": true
+				}
+			],
+			"toolProficiencies": [
+				{
+					"navigator's tools": true
+				}
+			],
+			"startingEquipment": [
+				{
+					"a": [
+						"navigator's tools|xphb",
+						{
+							"displayName": "Candles",
+							"item": "candle|xphb",
+							"quantity": 8
+						},
+						"ink|xphb",
+						"ink pen|xphb",
+						{
+							"item": "parchment|xphb",
+							"displayName": "Parchment (9 sheets)",
+							"quantity": 9
+						},
+						"pouch|xphb",
+						"tinderbox|xphb",
+						"traveler's clothes|xphb",
+						{
+							"value": 1100
+						}
+					],
+					"b": [
+						{
+							"value": 5000
+						}
+					]
+				}
+			],
+			"entries": [
+				{
+					"type": "list",
+					"style": "list-hang-notitle",
+					"items": [
+						{
+							"type": "item",
+							"name": "Ability Scores:",
+							"entry": "Intelligence, Wisdom, Charisma"
+						},
+						{
+							"type": "item",
+							"name": "Feat:",
+							"entry": "{@feat Arcane Omens|AU}"
+						},
+						{
+							"type": "item",
+							"name": "Skill Proficiencies:",
+							"entry": "{@skill History|XPHB} and {@skill Insight|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Tool Proficiencies:",
+							"entry": "{@item Navigator's Tools|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Equipment:",
+							"entry": "Choose A or B: (A) {@item Navigator's Tools|XPHB}, 8 {@item Candle|XPHB|Candles}, {@item Ink|XPHB}, {@item Ink Pen|XPHB}, {@item Parchment|XPHB} (9 sheets), {@item Pouch|XPHB}, {@item Tinderbox|XPHB}, {@item Traveler's Clothes|XPHB}, 11 GP; or (B) 50 GP"
+						}
+					]
+				}
+			],
+			"hasFluff": true,
+			"hasFluffImages": true
+		},
+		{
 			"name": "Selesnya Initiate",
 			"source": "GGR",
 			"page": 86,
@@ -23932,6 +25318,134 @@
 			"hasFluffImages": true
 		},
 		{
+			"name": "Spirit Medium",
+			"source": "RHW",
+			"page": 27,
+			"edition": "one",
+			"ability": [
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"con",
+								"int",
+								"wis"
+							],
+							"weights": [
+								2,
+								1
+							]
+						}
+					}
+				},
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"con",
+								"int",
+								"wis"
+							],
+							"weights": [
+								1,
+								1,
+								1
+							]
+						}
+					}
+				}
+			],
+			"feats": [
+				{
+					"anyFromCategory": {
+						"category": [
+							"DG"
+						]
+					}
+				}
+			],
+			"skillProficiencies": [
+				{
+					"insight": true,
+					"religion": true
+				}
+			],
+			"toolProficiencies": [
+				{
+					"anyGamingSet": 1
+				}
+			],
+			"startingEquipment": [
+				{
+					"a": [
+						"dagger|xphb",
+						{
+							"equipmentType": "setGaming",
+							"displayName": "Gaming Set (same as above)"
+						},
+						"basket|xphb",
+						"bell|xphb",
+						{
+							"displayName": "Candles",
+							"item": "candle|xphb",
+							"quantity": 8
+						},
+						"ink|xphb",
+						"ink pen|xphb",
+						{
+							"item": "paper|xphb",
+							"displayName": "Paper (5 sheets)"
+						},
+						"tinderbox|xphb",
+						"traveler's clothes|xphb",
+						{
+							"value": 3200
+						}
+					],
+					"b": [
+						{
+							"value": 5000
+						}
+					]
+				}
+			],
+			"entries": [
+				{
+					"type": "list",
+					"style": "list-hang-notitle",
+					"items": [
+						{
+							"type": "item",
+							"name": "Ability Scores:",
+							"entry": "Constitution, Intelligence, Wisdom"
+						},
+						{
+							"type": "item",
+							"name": "Feat:",
+							"entry": "A {@filter Dark Gift feat of your choice|feats|category=DG} ({@feat Gathered Whispers|RHW} is recommended)"
+						},
+						{
+							"type": "item",
+							"name": "Skill Proficiencies:",
+							"entry": "{@skill Insight|XPHB} and {@skill Religion|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Tool Proficiencies:",
+							"entry": "Choose one kind of {@item Gaming Set|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Equipment:",
+							"entry": "Choose A or B: (A) {@item Dagger|XPHB}, {@item Gaming Set|XPHB} (same as above), {@item Basket|XPHB}, {@item Bell|XPHB}, 8 Candles, {@item Ink|XPHB}, {@item Ink Pen|XPHB}, {@item Paper|XPHB} (5 sheets), {@item Tinderbox|XPHB}, {@item Traveler's Clothes|XPHB}, and 32 GP; or (B) 50 GP"
+						}
+					]
+				}
+			],
+			"hasFluff": true,
+			"hasFluffImages": true
+		},
+		{
 			"name": "Urban Bounty Hunter",
 			"source": "SCAG",
 			"page": 153,
@@ -24867,7 +26381,7 @@
 								"name": "Feature: Retainers",
 								"type": "entries",
 								"entries": [
-									"You have the service of three retainers loyal to your family. These retainers can be attendants or messengers, and one might be a majordomo. Your retainers are commoners who can perform mundane tasks for you, but they do not fight for you, will not follow you into obviously dangerous areas (such as dungeons), and will leave if they are frequently endangered or abused."
+									"You have the service of three retainers loyal to your family. These retainers can be attendants or messengers, and one might be a majordomo. Your retainers are {@creature commoner||commoners} who can perform mundane tasks for you, but they do not fight for you, will not follow you into obviously dangerous areas (such as dungeons), and will leave if they are frequently endangered or abused."
 								],
 								"data": {
 									"isFeature": true
@@ -25393,6 +26907,122 @@
 									"Fear is a powerful motivator. I will do whatever it takes to prevent those who know what I am from seeing me fail, and from those I care about from knowing what I am."
 								]
 							]
+						}
+					]
+				}
+			],
+			"hasFluff": true,
+			"hasFluffImages": true
+		},
+		{
+			"name": "Ward of the Sheltering Hands",
+			"source": "AU",
+			"page": 25,
+			"edition": "one",
+			"ability": [
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"con",
+								"wis",
+								"cha"
+							],
+							"weights": [
+								2,
+								1
+							]
+						}
+					}
+				},
+				{
+					"choose": {
+						"weighted": {
+							"from": [
+								"con",
+								"wis",
+								"cha"
+							],
+							"weights": [
+								1,
+								1,
+								1
+							]
+						}
+					}
+				}
+			],
+			"feats": [
+				{
+					"arcane safeguard|au": true
+				}
+			],
+			"skillProficiencies": [
+				{
+					"insight": true,
+					"medicine": true
+				}
+			],
+			"toolProficiencies": [
+				{
+					"cook's utensils": true
+				}
+			],
+			"startingEquipment": [
+				{
+					"a": [
+						"cook's utensils|xphb",
+						"blanket|xphb",
+						"healer's kit|xphb",
+						"lamp|xphb",
+						{
+							"item": "oil|xphb",
+							"displayName": "Oil (3 flasks)",
+							"quantity": 3
+						},
+						"tinderbox|xphb",
+						"traveler's clothes|xphb",
+						"waterskin|xphb",
+						{
+							"value": 4000
+						}
+					],
+					"b": [
+						{
+							"value": 5000
+						}
+					]
+				}
+			],
+			"entries": [
+				{
+					"type": "list",
+					"style": "list-hang-notitle",
+					"items": [
+						{
+							"type": "item",
+							"name": "Ability Scores:",
+							"entry": "Constitution, Wisdom, Charisma"
+						},
+						{
+							"type": "item",
+							"name": "Feat:",
+							"entry": "{@feat Arcane Safeguard|AU}"
+						},
+						{
+							"type": "item",
+							"name": "Skill Proficiencies:",
+							"entry": "{@skill Insight|XPHB} and {@skill Medicine|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Tool Proficiencies:",
+							"entry": "{@item Cook's Utensils|XPHB}"
+						},
+						{
+							"type": "item",
+							"name": "Equipment:",
+							"entry": "Choose A or B: (A) {@item Cook's Utensils|XPHB}, {@item Blanket|XPHB}, {@item Healer's Kit|XPHB}, {@item Lamp|XPHB}, {@item Oil|XPHB} (3 flasks), {@item Tinderbox|XPHB}, {@item Traveler's Clothes|XPHB}, {@item Waterskin|XPHB}, 40 GP; or (B) 50 GP"
 						}
 					]
 				}

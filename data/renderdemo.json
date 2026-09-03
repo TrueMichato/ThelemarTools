@@ -65,9 +65,12 @@
 								"Actions: {@action Attack} assumes PHB by default, {@action Tumble|DMG} can have sources added with a pipe, {@action Tumble|DMG|and optional link text added with another pipe}.",
 								"Languages: {@language common} assumes PHB by default, {@language Dambrathan|SCAG} can have sources added with a pipe, {@language Dambrathan|SCAG|and optional link text added with another pipe}.",
 								"Other Character Creation Options: {@charoption Anvilwrought} assumes MOT by default, {@charoption Hollow One|EGW} can have sources added with a pipe, {@charoption Hollow One|EGW|and optional link text added with another pipe}.",
-								"Recipes: {@recipe Elven Bread} assumes Heroes' Feast by default, {@recipe Barovian Garlic Bread|HFFotM} can have sources added with a pipe, {@recipe Barovian Garlic Bread|HFFotM|and optional link text added with another pipe}.",
 								"Decks: {@deck Deck of Many Things} assumes DMG by default, {@deck Deck of Many Things|DMG} can have sources added with a pipe, {@deck Deck of Many Things|DMG|and optional link text added with another pipe}.",
-								"Cards: {@card Vizier|Deck of Many Things} assumes DMG by default, {@card Vizier|Deck of Many Things|DMG} can have sources added with a pipe, {@card Vizier|Deck of Many Things|DMG|and optional link text added with another pipe}."
+								"Cards: {@card Vizier|Deck of Many Things} assumes DMG by default, {@card Vizier|Deck of Many Things|DMG} can have sources added with a pipe, {@card Vizier|Deck of Many Things|DMG|and optional link text added with another pipe}.",
+								"Item properties: {@itemProperty F} assumes Player's Handbook by default, {@itemProperty F|PHB} can have sources added with a pipe, {@itemProperty F|PHB|and optional link text added with another pipe}.",
+								"Item masteries: {@itemMastery Slow} assumes Player's Handbook (2024) by default, {@itemMastery Slow|XPHB} can have sources added with a pipe, {@itemMastery Slow|XPHB|and optional link text added with another pipe}.",
+								"Recipes: {@recipe Elven Bread} assumes Heroes' Feast by default, {@recipe Barovian Garlic Bread|HFFotM} can have sources added with a pipe, {@recipe Barovian Garlic Bread|HFFotM|and optional link text added with another pipe}.",
+								"Crochet Patterns: {@crochet Bag of Holding} assumes Crochet: A Book of Many Patterns by default, {@crochet Bag of Holding|CaBoMP} can have sources added with a pipe, {@crochet Bag of Holding|CaBoMP|and optional link text added with another pipe}."
 							]
 						},
 						{
@@ -119,7 +122,7 @@
 									"type": "list",
 									"items": [
 										"Adventure tags: link to an adventure {@adventure display text|CoS}; a chapter in an adventure {@adventure display text|CoS|2}; a heading in a chapter in an adventure {@adventure display text|CoS|2|Treasure}; or the Nth heading of a given name in a chapter in an adventure {@adventure display text|CoS|2|Treasure|1}",
-										"Book tags: link to a book {@book display text|PHB}; a chapter in a book {@book display text|PHB|2}; a heading in a chapter in a book {@book display text|PHB|2|Age}; or the Nth heading of a given name in a chapter in a book {@book display text|PHB|2|Age|0} (although this is generally unnecessary as, unlike adventures, books don't repeat their headings very often.",
+										"Book tags: link to a book {@book display text|PHB}; a chapter in a book {@book display text|PHB|2}; a heading in a chapter in a book {@book display text|PHB|2|Age}; or the Nth heading of a given name in a chapter in a book {@book display text|PHB|2|Age|0} (although this is generally unnecessary as, unlike adventures, books don't repeat their headings very often).",
 										"Quick Reference tags; {@code &lt;name&gt;|&lt;source&gt;|&lt;chapterIndex&gt;|&lt;headerIndex&gt;|&lt;displayText&gt;}: {@quickref Multiclassing}, {@quickref Multiclassing|PHB}, {@quickref Adventuring Gear|PHB|1}, {@quickref Adventuring Gear|PHB|1|0}, {@quickref Adventuring Gear|PHB|1|0|Display Text}."
 									]
 								}
@@ -854,7 +857,7 @@
 						},
 						{
 							"type": "statblock",
-							"prop": "subclass",
+							"tag": "subclass",
 							"source": "XPHB",
 							"name": "Wild Magic Sorcery",
 							"shortName": "Wild Magic",

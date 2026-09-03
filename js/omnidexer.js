@@ -93,6 +93,7 @@ class Omnidexer {
 	}
 
 	static getProperty (obj, withDots) {
+		if (typeof withDots === "function") return withDots(obj);
 		return MiscUtil.get(obj, ...withDots.split("."));
 	}
 
@@ -599,13 +600,13 @@ class IndexableFileMagicVariants extends IndexableFile {
 		super({
 			category: Parser.CAT_ID_ITEM,
 			file: "magicvariants.json",
-			source: "inherits.source",
-			page: "inherits.page",
+			source: it => SourceUtil.getEntitySource(it),
+			page: it => SourceUtil.getEntityPage(it),
 			listProp: "magicvariant",
 			fluffBaseListProp: "item",
 			baseUrl: "items.html",
 			hashBuilder: (it) => {
-				return UrlUtil.encodeForHash([it.name, it.inherits.source]);
+				return UrlUtil.encodeForHash([it.name, SourceUtil.getEntitySource(it)]);
 			},
 			additionalIndexes: {
 				item: async (indexer, rawVariants) => {
@@ -1287,10 +1288,22 @@ class IndexableFileCharCreationOptions extends IndexableFile {
 class IndexableFileRecipes extends IndexableFile {
 	constructor () {
 		super({
-			category: Parser.CAT_ID_RECIPES,
+			category: Parser.CAT_ID_RECIPE,
 			file: "recipes.json",
 			listProp: "recipe",
 			baseUrl: "recipes.html",
+			isHover: true,
+		});
+	}
+}
+
+class IndexableFileCrochetPatterns extends IndexableFile {
+	constructor () {
+		super({
+			category: Parser.CAT_ID_CROCHET_PATTERN,
+			file: "homecrafts.json",
+			listProp: "crochetPattern",
+			baseUrl: UrlUtil.PG_HOMECRAFTS,
 			isHover: true,
 		});
 	}
@@ -1431,6 +1444,7 @@ Omnidexer.TO_INDEX = [
 	new IndexableFileLanguages(),
 	new IndexableFileCharCreationOptions(),
 	new IndexableFileRecipes(),
+	new IndexableFileCrochetPatterns(),
 	new IndexableFileSkills(),
 	new IndexableFileSenses(),
 ];
