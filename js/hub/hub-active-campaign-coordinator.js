@@ -275,20 +275,28 @@ export class HubActiveCampaignCoordinator {
 				: await this.pVerifySelection({campaignId, signal});
 			if (!this._isCurrent(generation)) return this._state;
 
-			await this._pPersistSelection({campaignId, generation});
+			const persisted = await this._pPersistSelection({campaignId, generation});
 			if (!this._isCurrent(generation)) return this._state;
+			const isPersistedWinnerDifferent = persisted
+				&& (persisted.state !== ACTIVE_CAMPAIGN_STATE_SELECTED || persisted.campaignId !== campaignId);
+			if (isPersistedWinnerDifferent) {
+				if (persisted.state === ACTIVE_CAMPAIGN_STATE_SELECTED && this._host.isResourcePinned?.()) {
+					this._pendingCampaignId = persisted.campaignId;
+					this._host.onPendingSelection?.({campaignId: persisted.campaignId});
+				} else return this._pApplyPersistedWinner(persisted);
+			}
 
 			if (!wantsContext) {
 				this._activeCampaignId = campaignId;
 				this._host.onSelectionVerified?.({campaignId, campaign: verified.campaign});
-				this._setState("active", {trigger, startedAt});
+				this._setState(this._pendingCampaignId ? "switch_pending" : "active", {trigger, startedAt});
 				return this._state;
 			}
 
 			this._setState("activating", {trigger, startedAt});
 			await this._pActivateVerified({campaignId, verified, generation, signal});
 			if (!this._isCurrent(generation)) return this._state;
-			this._setState("active", {trigger, startedAt});
+			this._setState(this._pendingCampaignId ? "switch_pending" : "active", {trigger, startedAt});
 			return this._state;
 		} catch (error) {
 			if (!this._isCurrent(generation)) return this._state;
@@ -339,6 +347,10 @@ export class HubActiveCampaignCoordinator {
 		if (campaign.status !== "active" || !campaign.role) return null;
 		const record = await this._pPersistSelection({campaignId: campaign.id});
 		this._activeCampaignId = campaign.id;
+		if (record && (record.state !== ACTIVE_CAMPAIGN_STATE_SELECTED || record.campaignId !== campaign.id)) {
+			await this._pApplyPersistedWinner(record);
+			return record;
+		}
 		this._setState("active", {trigger: "explicit_url"});
 		return record;
 	}
@@ -357,15 +369,39 @@ export class HubActiveCampaignCoordinator {
 		return record;
 	}
 
+	async _pApplyPersistedWinner (record, {trigger = "storage_event"} = {}) {
+		if (!record) return this._state;
+		if (record.state !== ACTIVE_CAMPAIGN_STATE_SELECTED) {
+			await this.pTeardown({reason: trigger});
+			this._pendingCampaignId = null;
+			this._setState("local", {trigger});
+			return this._state;
+		}
+		if (record.campaignId === this._activeCampaignId) {
+			this._pendingCampaignId = null;
+			this._host.onPendingSelection?.({campaignId: null});
+			this._setState("active", {trigger});
+			return this._state;
+		}
+		return this.pSwitchTo({
+			campaignId: record.campaignId,
+			trigger,
+			isPersistSelection: false,
+		});
+	}
+
 	// #endregion
 
 	// #region failure classification
 
-	async _pHandleFailure ({error, trigger, startedAt, campaignId}) {
+	async _pHandleFailure ({error, trigger, startedAt, campaignId, isRequireRevalidation = false}) {
 		const code = error?.code || "REQUEST_FAILED";
 		if (_isTransient(error)) {
 			// Transient failures prove nothing about access, so the preference is retained.
-			this._setState(code === "REQUEST_ABORTED" ? this._state : "offline_unverified", {trigger, result: "failure", errorCode: code, startedAt});
+			const nextState = code === "REQUEST_ABORTED" && !isRequireRevalidation
+				? this._state
+				: "offline_unverified";
+			this._setState(nextState, {trigger, result: "failure", errorCode: code, startedAt});
 			return this._state;
 		}
 		if (code === "AUTH_REQUIRED") {
@@ -405,9 +441,19 @@ export class HubActiveCampaignCoordinator {
 	 * selection survives while the private surface closes.
 	 */
 	async pHandleSurfaceRoleLoss () {
-		await this._runTeardown(["teardown-generation", "teardown-realtime", "teardown-projections"]);
+		await this.pTeardown({reason: "access_loss"});
 		this._setState("blocked", {trigger: "access_loss", result: "failure", errorCode: "FORBIDDEN"});
 		return this.storedSelection;
+	}
+
+	async pHandleCampaignAccessLoss ({campaignId = this._activeCampaignId, code = "FORBIDDEN"} = {}) {
+		await this._pClearForAccessLoss({campaignId: code === "AUTH_REQUIRED" ? null : campaignId});
+		this._setState(code === "AUTH_REQUIRED" ? "signed_out" : "blocked", {
+			trigger: "access_loss",
+			result: "failure",
+			errorCode: code,
+		});
+		return this._state;
 	}
 
 	// #endregion
@@ -518,7 +564,13 @@ export class HubActiveCampaignCoordinator {
 			if (!this._isCurrent(generation)) return this._state;
 			// A switch adopted from another tab is already durable at its own revision; writing a
 			// fresh higher revision here would be a redundant write and a latent broadcast loop.
-			if (isPersistSelection) await this._pPersistSelection({campaignId, generation});
+			if (isPersistSelection) {
+				const persisted = await this._pPersistSelection({campaignId, generation});
+				if (!this._isCurrent(generation)) return this._state;
+				if (persisted && (persisted.state !== ACTIVE_CAMPAIGN_STATE_SELECTED || persisted.campaignId !== campaignId)) {
+					return this._pApplyPersistedWinner(persisted);
+				}
+			}
 			this._pendingCampaignId = null;
 			this._setState("active", {trigger, startedAt});
 		} catch (error) {
@@ -548,7 +600,7 @@ export class HubActiveCampaignCoordinator {
 		if (this._isDisposed || this._isSuspended) return;
 		const observed = payload?.isStorageSignal ? this._store.read() : payload?.record;
 		if (!observed) return;
-		if (this._accountId && observed.accountId !== this._accountId) return;
+		if (!this._accountId || observed.accountId !== this._accountId) return;
 
 		const previous = this._store.winner;
 		const {winner, didRepairStorage} = await this._store.pAccept(observed);
@@ -557,14 +609,7 @@ export class HubActiveCampaignCoordinator {
 		// losing write converge. Repair never bumps the revision, so this terminates.
 		if (didRepairStorage) this._channel.post(winner);
 		if (!isStrictlyGreaterActiveCampaignRecord(winner, previous)) return;
-
-		if (winner.state !== ACTIVE_CAMPAIGN_STATE_SELECTED) {
-			await this.pTeardown({reason: "broadcast_channel"});
-			this._setState("local", {trigger: "broadcast_channel"});
-			return;
-		}
-		if (winner.campaignId === this._activeCampaignId) return;
-		await this.pSwitchTo({campaignId: winner.campaignId, trigger: "broadcast_channel", isPersistSelection: false});
+		await this._pApplyPersistedWinner(winner, {trigger: "broadcast_channel"});
 	}
 
 	// #endregion
@@ -594,7 +639,13 @@ export class HubActiveCampaignCoordinator {
 			session = await this._pGetSession({signal, isForceRefresh: true});
 		} catch (error) {
 			if (!this._isCurrent(generation)) return this._state;
-			return this._pHandleFailure({error, trigger, startedAt: null, campaignId: null});
+			return this._pHandleFailure({
+				error,
+				trigger,
+				startedAt: null,
+				campaignId: null,
+				isRequireRevalidation: true,
+			});
 		}
 		if (!this._isCurrent(generation)) return this._state;
 
@@ -613,6 +664,24 @@ export class HubActiveCampaignCoordinator {
 		// Route every same-account record through the normal comparison path, tombstones included:
 		// a clear written by another tab while this page was frozen must tear down here too.
 		if (stored) await this._pHandleRemote({record: stored, isStorageSignal: false});
+		if (!this._isCurrent(generation) || !this._activeCampaignId) return this._state;
+
+		try {
+			const verified = await this.pVerifySelection({campaignId: this._activeCampaignId, signal});
+			if (!this._isCurrent(generation)) return this._state;
+			const isSurfaceAuthorized = await this._host.pAuthorizeCampaign?.(verified) ?? true;
+			if (!this._isCurrent(generation)) return this._state;
+			if (!isSurfaceAuthorized) return this.pHandleSurfaceRoleLoss();
+		} catch (error) {
+			if (!this._isCurrent(generation)) return this._state;
+			return this._pHandleFailure({
+				error,
+				trigger,
+				startedAt: null,
+				campaignId: this._activeCampaignId,
+				isRequireRevalidation: true,
+			});
+		}
 		return this._state;
 	}
 

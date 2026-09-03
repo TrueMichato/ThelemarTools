@@ -121,7 +121,7 @@ on **every** character load and reset. Calling `clearCampaignSettingsOverlay()` 
 | Malformed / oversized / unknown schema | Evicted | Per URL |
 | Malformed explicit campaign id | Untouched | Navigation blocked, no fallback |
 | `FORBIDDEN` / `CAMPAIGN_NOT_FOUND` / `MEMBERSHIP_NOT_FOUND` / archived | Cleared **only if it names the candidate** | Torn down **only if that campaign is the one actually active** |
-| DM-only surface loses its role | **Retained** — the campaign is still selectable elsewhere | Workspace and projections close |
+| DM-only surface loses its role | **Retained** — the campaign is still selectable elsewhere | Workspace, realtime, projections, rules, and brew close |
 | `NETWORK_UNAVAILABLE`, `REQUEST_ABORTED`, or 5xx | Retained | `offline_unverified`; no authenticated activation |
 | Host activation throws | Retained for retry | Rules and brew cleared; no partial context left live |
 | Teardown failure | Retained | Fail closed, no next activation |
@@ -136,10 +136,12 @@ documents are never cleared by a campaign-context failure.
 ## BFCache
 
 A persisted `pagehide` **suspends** synchronisation but retains context, rules, and brew. On a
-persisted `pageshow` the coordinator fences a new generation and performs a **fresh** session read
-before trusting anything: a storage reread alone is insufficient, because cross-account records are
-deliberately incomparable and would simply be ignored. If the account signed out or changed while
-the page was frozen, the full ordered teardown runs before any resumed mutation is permitted.
+persisted `pageshow` the coordinator fences a new generation and performs a **fresh** session read,
+then revalidates the active campaign and any surface-specific role before trusting anything: a
+storage reread alone is insufficient, because cross-account records are deliberately incomparable
+and would simply be ignored. If the account signed out, changed, lost campaign access, or lost the
+role required by a private surface while the page was frozen, the full ordered teardown runs before
+any resumed mutation is permitted.
 
 Every same-account stored record is then routed through the normal comparison path — **including
 tombstones**, so a clear written by another tab while this page was frozen is honoured here too.

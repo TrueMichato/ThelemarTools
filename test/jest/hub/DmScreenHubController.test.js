@@ -130,6 +130,7 @@ describe("campaign DM Screen controller", () => {
 	it("closes projections when the current co-DM is demoted", async () => {
 		const realtime = new Observable();
 		const events = [];
+		let surfaceRoleLossCount = 0;
 		const controller = new DmScreenHubController({
 			campaignId: "campaign-1",
 			api: {
@@ -142,6 +143,7 @@ describe("campaign DM Screen controller", () => {
 				}),
 			},
 			document: null,
+			fnOnSurfaceRoleLoss: () => surfaceRoleLossCount++,
 		});
 		await controller.pLoadCampaign();
 		controller.attach({
@@ -161,6 +163,32 @@ describe("campaign DM Screen controller", () => {
 			type: "hubCharacterProjections",
 			payload: {characters: [], roster: []},
 		});
+		expect(surfaceRoleLossCount).toBe(1);
+	});
+
+	it("reports authoritative campaign archival for selection clearing and full teardown", async () => {
+		const realtime = new Observable();
+		const accessLossCodes = [];
+		const controller = new DmScreenHubController({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCampaign: async () => ({
+					name: "Ashen March",
+					status: "active",
+					role: "dm",
+				}),
+			},
+			document: null,
+			fnOnCampaignAccessLoss: ({campaignId, code}) => accessLossCodes.push({campaignId, code}),
+		});
+		await controller.pLoadCampaign();
+		controller.attach({board: {fireBoardEvent: () => {}}, repository: null, realtime});
+
+		realtime.emit("event", {type: "campaign.archived"});
+
+		expect(controller.getState().access).toBe("archived");
+		expect(accessLossCodes).toEqual([{campaignId: "campaign-1", code: "CAMPAIGN_ARCHIVED"}]);
 	});
 
 	it("requests a fresh authoritative projection after character-changing events", async () => {

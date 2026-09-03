@@ -13,6 +13,8 @@ export class DmScreenHubController {
 		fnClearTimeout = timer => clearTimeout(timer),
 		staleAfterMs = DEFAULT_STALE_AFTER_MS,
 		resyncDelayMs = DEFAULT_RESYNC_DELAY_MS,
+		fnOnSurfaceRoleLoss = null,
+		fnOnCampaignAccessLoss = null,
 	}) {
 		if (!campaignId) throw new TypeError(`campaignId is required.`);
 		if (!api) throw new TypeError(`api is required.`);
@@ -24,6 +26,8 @@ export class DmScreenHubController {
 		this._fnClearTimeout = fnClearTimeout;
 		this._staleAfterMs = staleAfterMs;
 		this._resyncDelayMs = resyncDelayMs;
+		this._fnOnSurfaceRoleLoss = fnOnSurfaceRoleLoss;
+		this._fnOnCampaignAccessLoss = fnOnCampaignAccessLoss;
 
 		this._campaign = null;
 		this._board = null;
@@ -183,23 +187,26 @@ export class DmScreenHubController {
 
 	_setAccessError (error) {
 		if (error?.status === 401 || error?.code === "UNAUTHENTICATED") {
-			this._setAccessState({
+			this._handleCampaignAccessLoss({
 				access: "signed_out",
 				message: "Your session expired. Sign in again to reopen this campaign workspace.",
+				code: "AUTH_REQUIRED",
 			});
 			return;
 		}
 		if (error?.status === 403 || error?.code === "FORBIDDEN") {
-			this._setAccessState({
+			this._handleCampaignAccessLoss({
 				access: "permission_denied",
 				message: "You no longer have permission to open this private DM workspace.",
+				code: "FORBIDDEN",
 			});
 			return;
 		}
 		if (error?.status === 404 || ["CAMPAIGN_NOT_FOUND", "MEMBERSHIP_NOT_FOUND"].includes(error?.code)) {
-			this._setAccessState({
+			this._handleCampaignAccessLoss({
 				access: "access_lost",
 				message: "This campaign is unavailable or your membership was removed.",
+				code: error?.code || "CAMPAIGN_NOT_FOUND",
 			});
 			return;
 		}
@@ -295,9 +302,10 @@ export class DmScreenHubController {
 			this._queueProjectionResync();
 		}
 		if (event?.type === "campaign.archived") {
-			this._setAccessState({
+			this._handleCampaignAccessLoss({
 				access: "archived",
 				message: "This campaign was archived. Return to the Campaign Hub for details.",
+				code: "CAMPAIGN_ARCHIVED",
 			});
 			return;
 		}
@@ -306,37 +314,43 @@ export class DmScreenHubController {
 			&& event.aggregateId === this._campaign?.membershipId
 			&& !DM_ROLES.has(event.payload?.role)
 		) {
-			this._setAccessState({
-				access: "permission_denied",
-				message: "Your campaign role changed, so this private DM workspace is now closed.",
-			});
+			this._handleSurfaceRoleLoss("Your campaign role changed, so this private DM workspace is now closed.");
 		}
+	}
+
+	_handleSurfaceRoleLoss (message) {
+		this._setAccessState({access: "permission_denied", message});
+		void this._fnOnSurfaceRoleLoss?.();
+	}
+
+	_handleCampaignAccessLoss ({access, message, code}) {
+		this._setAccessState({access, message});
+		void this._fnOnCampaignAccessLoss?.({campaignId: this._campaignId, code});
 	}
 
 	async _pRevalidateAccess () {
 		try {
 			const session = await this._api.pGetSession();
 			if (!session?.signedIn) {
-				this._setAccessState({
+				this._handleCampaignAccessLoss({
 					access: "signed_out",
 					message: "Your session expired. Sign in again to reopen this campaign workspace.",
+					code: "AUTH_REQUIRED",
 				});
 				return;
 			}
 			const campaign = await this._api.pGetCampaign({campaignId: this._campaignId});
 			this._campaign = campaign;
 			if (campaign.status !== "active") {
-				this._setAccessState({
+				this._handleCampaignAccessLoss({
 					access: "archived",
 					message: "This campaign is archived. Its live DM workspace is no longer available.",
+					code: "CAMPAIGN_ARCHIVED",
 				});
 				return;
 			}
 			if (!DM_ROLES.has(campaign.role)) {
-				this._setAccessState({
-					access: "permission_denied",
-					message: "Your campaign role no longer permits access to this private DM workspace.",
-				});
+				this._handleSurfaceRoleLoss("Your campaign role no longer permits access to this private DM workspace.");
 				return;
 			}
 			this._setAccessState({

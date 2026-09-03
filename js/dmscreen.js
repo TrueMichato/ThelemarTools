@@ -3725,7 +3725,15 @@ window.addEventListener("load", () => {
 		let workspaceRepository = null;
 		const api = new HubApiClient();
 		if (campaignId) {
-			hubController = new DmScreenHubController({campaignId, api});
+			hubController = new DmScreenHubController({
+				campaignId,
+				api,
+				fnOnSurfaceRoleLoss: () => activeCampaign?.pHandleSurfaceRoleLoss(),
+				fnOnCampaignAccessLoss: ({campaignId: lostCampaignId, code}) => activeCampaign?.pHandleCampaignAccessLoss({
+					campaignId: lostCampaignId,
+					code,
+				}),
+			});
 			window.DM_SCREEN_HUB_CONTROLLER = hubController;
 
 			activeCampaign = new HubActiveCampaignCoordinator({
@@ -3736,6 +3744,7 @@ window.addEventListener("load", () => {
 					// selection must not rebind or tear down this private workspace.
 					isResourcePinned: () => true,
 					getExplicitCampaignId: () => campaignId,
+					pAuthorizeCampaign: ({session, campaign}) => !!hubController.adoptVerifiedCampaign({session, campaign}),
 					pPreflightSwitch: async () => ({
 						safe: !workspaceRepository?.hasPendingWrites?.() && !window.DM_SCREEN?.hasPendingDebouncedSave?.(),
 					}),
@@ -3781,6 +3790,13 @@ window.addEventListener("load", () => {
 				});
 				await campaignContext.pActivate();
 				await activeCampaign.adoptVerified({session: verified.session, campaign: verified.campaign});
+				if (activeCampaign.activeCampaignId !== campaignId) {
+					activeCampaign.dispose();
+					campaignContext.dispose();
+					activeCampaign = null;
+					campaignContext = null;
+					return;
+				}
 			} catch (error) {
 				pAbandonBootstrap(error);
 				return;
@@ -3804,12 +3820,14 @@ window.addEventListener("load", () => {
 			}
 		});
 		window.addEventListener("pageshow", event => {
-			if (!event.persisted) return;
-			// Revalidate the account before reconnecting the private workspace stream.
-			activeCampaign?.pResume()
-				.then(() => {
-					if (activeCampaign && !activeCampaign.activeCampaignId) return;
-					window.DM_SCREEN_HUB_REALTIME?.resume?.();
+			if (!event.persisted || !activeCampaign) return;
+			// Revalidate the account, campaign, and DM role before reopening the private stream.
+			activeCampaign.pResume()
+				.then(state => {
+					if (!["active", "switch_pending"].includes(state) || !activeCampaign.activeCampaignId) return;
+					const realtime = window.DM_SCREEN_HUB_REALTIME;
+					if (!realtime) return;
+					return realtime.pConnect().then(() => realtime.setPresence({activity: "viewing_dm_screen"}));
 				})
 				// eslint-disable-next-line no-console
 				.catch(err => console.warn("Failed to resume campaign context:", err));

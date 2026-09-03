@@ -263,6 +263,12 @@ describe("Character Sheet repository seam", () => {
 				resume: jest.fn(),
 				suspend: jest.fn(),
 			},
+			_hubActiveCampaign: {
+				activeCampaignId: "campaign-1",
+				dispose: jest.fn(),
+				pResume: jest.fn(async () => "active"),
+				suspend: jest.fn(),
+			},
 		};
 		try {
 			CharacterSheetPage.prototype._initHubRealtimeTeardown.call(host);
@@ -274,6 +280,14 @@ describe("Character Sheet repository seam", () => {
 			expect(host._hubRealtime.resume).not.toHaveBeenCalled();
 			await Promise.resolve();
 			await Promise.resolve();
+			expect(host._hubActiveCampaign.pResume).toHaveBeenCalledTimes(1);
+			expect(host._hubRealtime.resume).toHaveBeenCalledTimes(1);
+
+			host._hubActiveCampaign.pResume.mockResolvedValueOnce("offline_unverified");
+			listeners.pageshow({persisted: true});
+			await Promise.resolve();
+			await Promise.resolve();
+			expect(host._hubRealtime.resume).toHaveBeenCalledTimes(1);
 
 			listeners.pagehide({persisted: false});
 		} finally {
@@ -282,6 +296,8 @@ describe("Character Sheet repository seam", () => {
 
 		expect(host._hubRealtime.suspend).toHaveBeenCalledTimes(1);
 		expect(host._hubRealtime.resume).toHaveBeenCalledTimes(1);
+		expect(host._hubActiveCampaign.suspend).toHaveBeenCalledTimes(1);
+		expect(host._hubActiveCampaign.dispose).toHaveBeenCalledTimes(1);
 		expect(host._detachHubRealtime).toHaveBeenCalledTimes(1);
 	});
 });

@@ -138,7 +138,7 @@ describe("device-scoped active campaign context contract", () => {
 
 		// The DM Screen verifies and activates campaign context before the Board and realtime.
 		const dmVerify = dmScreen.indexOf("activeCampaign.pVerifyContext({campaignId})");
-		const dmAuthorize = dmScreen.indexOf("hubController.adoptVerifiedCampaign({");
+		const dmAuthorize = dmScreen.indexOf("hubController.adoptVerifiedCampaign({", dmVerify);
 		const dmActivate = dmScreen.indexOf("campaignContext.pActivate()");
 		const dmBoard = dmScreen.indexOf("new Board({workspaceRepository})");
 		const dmRealtime = dmScreen.indexOf("new HubRealtimeClient({campaignId})");
@@ -154,6 +154,15 @@ describe("device-scoped active campaign context contract", () => {
 		// constructed and discarded inline.
 		expect(dmScreen).toContain("campaignContext = new HubCampaignContext({");
 		expect(dmScreen).toContain("campaignContext?.dispose()");
+		expect(dmScreen).toContain("pAuthorizeCampaign: ({session, campaign}) =>");
+		expect(dmScreen).toContain("fnOnSurfaceRoleLoss: () => activeCampaign?.pHandleSurfaceRoleLoss()");
+		expect(dmScreen).toContain("fnOnCampaignAccessLoss: ({campaignId: lostCampaignId, code}) => activeCampaign?.pHandleCampaignAccessLoss({");
+		expect(dmScreen).toContain("activeCampaign.activeCampaignId !== campaignId");
+		const dmResume = dmScreen.indexOf("activeCampaign.pResume()");
+		const dmReconnect = dmScreen.indexOf("realtime.pConnect()", dmResume);
+		expect(dmResume).toBeGreaterThan(-1);
+		expect(dmReconnect).toBeGreaterThan(dmResume);
+		expect(dmScreen.slice(dmResume, dmReconnect)).not.toContain(".resume?.()");
 	});
 
 	it.each(["hub.html", "campaign.html"])("preserves the lightweight %s boot graph", page => {

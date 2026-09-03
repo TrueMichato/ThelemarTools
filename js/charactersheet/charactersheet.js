@@ -498,8 +498,11 @@ class CharacterSheetPage {
 				? this._hubActiveCampaign.pResume()
 				: Promise.resolve(null);
 			pResumed
-				.then(() => {
-					if (this._hubActiveCampaign && !this._hubActiveCampaign.activeCampaignId) return;
+				.then(state => {
+					if (
+						this._hubActiveCampaign
+						&& (!["active", "switch_pending"].includes(state) || !this._hubActiveCampaign.activeCampaignId)
+					) return;
 					this._hubRealtime?.resume();
 				})
 				// eslint-disable-next-line no-console
@@ -515,7 +518,7 @@ class CharacterSheetPage {
 	_getHubActiveCampaignHost () {
 		return {
 			isContextHost: true,
-			isResourcePinned: () => !!this._currentCharacterId && this._isHubCharacter,
+			isResourcePinned: () => !!this._hubCampaignId && this._isHubCharacter,
 			getExplicitCampaignId: () => this._hubCampaignId,
 			// The character repository, realtime sync, and recovery keys are all bound to the
 			// campaign this page was opened with. A remembered selection therefore updates the

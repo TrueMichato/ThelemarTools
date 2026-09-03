@@ -409,22 +409,47 @@ describe("HubActiveCampaignCoordinator", () => {
 		it("keeps the device selection when only a DM-only surface loses its role", async () => {
 			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A, "dm")}});
 			const order = [];
-			const {coordinator, store} = makeCoordinator({
+			const {coordinator, store, created} = makeCoordinator({
 				api,
 				host: {
 					getExplicitCampaignId: () => CAMPAIGN_A,
 					pTeardownRealtime: async () => order.push("realtime"),
 					pTeardownProjections: async () => order.push("projections"),
 					pTeardownRules: async () => order.push("rules"),
+					pTeardownBrew: async () => order.push("brew"),
 				},
 			});
 			await coordinator.pResolve();
 
 			const retained = await coordinator.pHandleSurfaceRoleLoss();
 			// The private surface closes, but general membership is not disproved.
-			expect(order).toEqual(["realtime", "projections"]);
+			expect(order).toEqual(["realtime", "projections", "rules", "brew"]);
 			expect(retained).toMatchObject({campaignId: CAMPAIGN_A, state: "selected"});
 			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({state: "selected"});
+			expect(created[0].isDisposed).toBe(true);
+			expect(coordinator.activeCampaignId).toBeNull();
+		});
+
+		it("clears the device selection and runtime context on authoritative campaign loss", async () => {
+			const order = [];
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A, "dm")}});
+			const {coordinator, store} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					pTeardownRealtime: async () => order.push("realtime"),
+					pTeardownRules: async () => order.push("rules"),
+					pTeardownBrew: async () => order.push("brew"),
+				},
+			});
+			await coordinator.pResolve();
+
+			await coordinator.pHandleCampaignAccessLoss({code: "CAMPAIGN_ARCHIVED"});
+
+			expect(order).toEqual(["realtime", "rules", "brew"]);
+			expect(coordinator.activeCampaignId).toBeNull();
+			expect(coordinator.state).toBe("blocked");
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({state: "cleared"});
 		});
 	});
 
@@ -573,6 +598,93 @@ describe("HubActiveCampaignCoordinator", () => {
 			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_B);
 			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({campaignId: CAMPAIGN_B});
 		});
+
+		it("adopts the durable winner when a lock-free concurrent write beats its selection", async () => {
+			const api = makeApi({campaigns: {
+				[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A),
+				[CAMPAIGN_B]: activeCampaign(CAMPAIGN_B),
+			}});
+			const {coordinator, store, created} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					isResourcePinned: () => false,
+					pPreflightSwitch: async () => ({safe: true}),
+				},
+			});
+			const winner = makeSelectedRecord({
+				accountId: ACCOUNT_A,
+				campaignId: CAMPAIGN_B,
+				revision: 2,
+				updatedAt: Date.now() + 1,
+				writerId: WRITER_B,
+			});
+			store.pSelect = async () => winner;
+
+			await coordinator.pResolve();
+
+			expect(api.calls.filter(call => call.name === "campaign").map(call => call.campaignId))
+				.toEqual([CAMPAIGN_A, CAMPAIGN_B]);
+			expect(created.map(context => context.campaignId)).toEqual([CAMPAIGN_B]);
+			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_B);
+		});
+
+		it("keeps an explicit resource pinned before its heavy data has loaded", async () => {
+			const pending = [];
+			const api = makeApi({campaigns: {
+				[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A),
+				[CAMPAIGN_B]: activeCampaign(CAMPAIGN_B),
+			}});
+			const {coordinator, store, created} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					isResourcePinned: () => true,
+					onPendingSelection: ({campaignId}) => pending.push(campaignId),
+				},
+			});
+			store.pSelect = async () => makeSelectedRecord({
+				accountId: ACCOUNT_A,
+				campaignId: CAMPAIGN_B,
+				revision: 2,
+				updatedAt: Date.now() + 1,
+				writerId: WRITER_B,
+			});
+
+			await coordinator.pResolve();
+
+			expect(created.map(context => context.campaignId)).toEqual([CAMPAIGN_A]);
+			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_A);
+			expect(coordinator.pendingCampaignId).toBe(CAMPAIGN_B);
+			expect(coordinator.state).toBe("switch_pending");
+			expect(pending).toEqual([CAMPAIGN_B]);
+		});
+
+		it("does not retain a verified resource when a concurrent clear wins persistence", async () => {
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+			const {coordinator, store, created} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					isResourcePinned: () => true,
+				},
+			});
+			store.pSelect = async () => ({
+				schemaVersion: 1,
+				accountId: ACCOUNT_A,
+				campaignId: null,
+				state: "cleared",
+				revision: 2,
+				updatedAt: Date.now() + 1,
+				writerId: WRITER_B,
+			});
+
+			await coordinator.pResolve();
+
+			expect(created).toEqual([]);
+			expect(coordinator.activeCampaignId).toBeNull();
+			expect(coordinator.state).toBe("local");
+		});
 	});
 
 	describe("logout", () => {
@@ -615,6 +727,80 @@ describe("HubActiveCampaignCoordinator", () => {
 			expect(order).toEqual([]);
 			expect(created[0].isDisposed).toBe(false);
 			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_A);
+			expect(api.countOf("campaign")).toBe(2);
+			expect(api.countOf("context")).toBe(1);
+		});
+
+		it("revalidates DM authorization before retaining a private surface", async () => {
+			const order = [];
+			const campaign = activeCampaign(CAMPAIGN_A, "dm");
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: campaign}});
+			const {coordinator, store, created} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					pAuthorizeCampaign: ({campaign: verifiedCampaign}) => verifiedCampaign.role === "dm",
+					pTeardownRealtime: async () => order.push("realtime"),
+					pTeardownProjections: async () => order.push("projections"),
+					pTeardownRules: async () => order.push("rules"),
+					pTeardownBrew: async () => order.push("brew"),
+				},
+			});
+			await coordinator.pResolve();
+			order.length = 0;
+
+			coordinator.suspend();
+			campaign.role = "player";
+			await coordinator.pResume();
+
+			expect(order).toEqual(["realtime", "projections", "rules", "brew"]);
+			expect(created[0].isDisposed).toBe(true);
+			expect(coordinator.activeCampaignId).toBeNull();
+			expect(coordinator.state).toBe("blocked");
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({campaignId: CAMPAIGN_A, state: "selected"});
+		});
+
+		it("does not resume private work when mandatory revalidation is aborted", async () => {
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A, "dm")}});
+			const {coordinator} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					pAuthorizeCampaign: () => true,
+				},
+			});
+			await coordinator.pResolve();
+			api.pGetCampaign = async () => { throw apiError("REQUEST_ABORTED", 0); };
+
+			coordinator.suspend();
+			await coordinator.pResume();
+
+			expect(coordinator.state).toBe("offline_unverified");
+			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_A);
+		});
+
+		it("clears a revoked campaign before a frozen page can resume", async () => {
+			const order = [];
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+			const {coordinator, store} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					pTeardownRealtime: async () => order.push("realtime"),
+					pTeardownRules: async () => order.push("rules"),
+					pTeardownBrew: async () => order.push("brew"),
+				},
+			});
+			await coordinator.pResolve();
+			order.length = 0;
+			api.pGetCampaign = async () => { throw apiError("MEMBERSHIP_NOT_FOUND", 404); };
+
+			coordinator.suspend();
+			await coordinator.pResume();
+
+			expect(order).toEqual(["realtime", "rules", "brew"]);
+			expect(coordinator.activeCampaignId).toBeNull();
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({state: "cleared"});
 		});
 
 		it("tears down fully when the account signed out while frozen", async () => {
@@ -811,6 +997,26 @@ describe("HubActiveCampaignCoordinator", () => {
 	});
 
 	describe("cross-tab convergence", () => {
+		it("ignores broadcasts until the authenticated account is established", async () => {
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+			const {coordinator, store} = makeCoordinator({api});
+			await coordinator._pHandleRemote({
+				record: makeSelectedRecord({
+					accountId: ACCOUNT_A,
+					campaignId: CAMPAIGN_A,
+					revision: 99,
+					updatedAt: Date.now(),
+					writerId: WRITER_B,
+				}),
+				isStorageSignal: false,
+			});
+
+			expect(api.calls).toEqual([]);
+			expect(store.read()).toBeNull();
+			expect(coordinator.activeCampaignId).toBeNull();
+			expect(coordinator.state).toBe("unresolved");
+		});
+
 		it("adopts a strictly greater same-account record observed from another tab", async () => {
 			const storage = new FakeStorage();
 			const api = makeApi({campaigns: {
@@ -835,6 +1041,49 @@ describe("HubActiveCampaignCoordinator", () => {
 
 			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_B);
 			expect(store.read()).toMatchObject({campaignId: CAMPAIGN_B, revision: 50});
+		});
+
+		it("clears a stale pending selection when the durable winner returns to the open resource", async () => {
+			const storage = new FakeStorage();
+			const pending = [];
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+			const {coordinator} = makeCoordinator({
+				api,
+				storage,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					isResourcePinned: () => true,
+					onPendingSelection: ({campaignId}) => pending.push(campaignId),
+				},
+			});
+			await coordinator.pResolve();
+
+			await coordinator._pHandleRemote({
+				record: makeSelectedRecord({
+					accountId: ACCOUNT_A,
+					campaignId: CAMPAIGN_B,
+					revision: 50,
+					updatedAt: Date.now() + 10_000,
+					writerId: WRITER_B,
+				}),
+				isStorageSignal: false,
+			});
+			expect(coordinator.state).toBe("switch_pending");
+
+			await coordinator._pHandleRemote({
+				record: makeSelectedRecord({
+					accountId: ACCOUNT_A,
+					campaignId: CAMPAIGN_A,
+					revision: 51,
+					updatedAt: Date.now() + 20_000,
+					writerId: WRITER_B,
+				}),
+				isStorageSignal: false,
+			});
+
+			expect(coordinator.state).toBe("active");
+			expect(coordinator.pendingCampaignId).toBeNull();
+			expect(pending).toEqual([CAMPAIGN_B, null]);
 		});
 
 		it("ignores a record broadcast for a different account", async () => {
