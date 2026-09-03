@@ -43,6 +43,7 @@ import {DmScreenMigrator} from "./dmscreen/dmscreen-migrator.js";
 import {LocalDmWorkspaceRepository} from "./hub/hub-dm-workspace-repository.js";
 import {HubHttpDmWorkspaceRepository} from "./hub/hub-http-dm-workspace-repository.js";
 import {HubCampaignContext} from "./hub/hub-campaign-context.js";
+import {HubActiveCampaignCoordinator} from "./hub/hub-active-campaign-coordinator.js";
 import {HubRealtimeClient} from "./hub/hub-realtime-client.js";
 import {HubApiClient} from "./hub/hub-api-client.js";
 import {DmScreenHubController} from "./dmscreen/dmscreen-hub-controller.js";
@@ -3717,23 +3718,102 @@ class AdventureOrBookView {
 
 window.addEventListener("load", () => {
 	let hubController = null;
+	let activeCampaign = null;
+	let campaignContext = null;
 	(async () => {
 		const campaignId = new URLSearchParams(window.location.search).get("hubCampaign");
 		let workspaceRepository = null;
+		const api = new HubApiClient();
 		if (campaignId) {
-			const api = new HubApiClient();
 			hubController = new DmScreenHubController({campaignId, api});
 			window.DM_SCREEN_HUB_CONTROLLER = hubController;
-			if (!await hubController.pLoadCampaign()) return;
+
+			activeCampaign = new HubActiveCampaignCoordinator({
+				api,
+				host: {
+					isContextHost: true,
+					// An open DM workspace is resource-pinned: another tab changing the device
+					// selection must not rebind or tear down this private workspace.
+					isResourcePinned: () => true,
+					getExplicitCampaignId: () => campaignId,
+					pPreflightSwitch: async () => ({
+						safe: !workspaceRepository?.hasPendingWrites?.() && !window.DM_SCREEN?.hasPendingDebouncedSave?.(),
+					}),
+					pTeardownRealtime: async () => window.DM_SCREEN_HUB_REALTIME?.close?.(),
+					pTeardownProjections: async () => hubController?.detach(),
+					// No rules teardown: the DM Screen does not yet apply campaign rules, so no
+					// stale rules can exist here. Rules application is a tracked follow-up.
+					pTeardownBrew: async () => campaignContext?.dispose(),
+				},
+			});
+			window.DM_SCREEN_ACTIVE_CAMPAIGN = activeCampaign;
+
+			// Every early exit below must release the coordinator's channel and listeners.
+			const pAbandonBootstrap = error => {
+				hubController.handleWorkspaceLoadError(error);
+				activeCampaign?.dispose();
+				campaignContext?.dispose();
+				activeCampaign = null;
+				campaignContext = null;
+			};
+
+			let verified;
+			try {
+				// One session read, then campaign metadata and context in parallel, replacing the
+				// previous four requests (which included two duplicate session reads).
+				verified = await activeCampaign.pVerifyContext({campaignId});
+			} catch (error) {
+				pAbandonBootstrap(error);
+				return;
+			}
+			if (!hubController.adoptVerifiedCampaign({session: verified.session, campaign: verified.campaign})) {
+				activeCampaign.dispose();
+				activeCampaign = null;
+				return;
+			}
 
 			try {
-				await new HubCampaignContext({campaignId, api}).pActivate();
+				campaignContext = new HubCampaignContext({
+					campaignId,
+					api,
+					session: verified.session,
+					context: verified.context,
+				});
+				await campaignContext.pActivate();
+				await activeCampaign.adoptVerified({session: verified.session, campaign: verified.campaign});
 			} catch (error) {
-				hubController.handleWorkspaceLoadError(error);
+				pAbandonBootstrap(error);
 				return;
 			}
 			workspaceRepository = new HubHttpDmWorkspaceRepository({campaignId, api});
+		} else {
+			// A remembered campaign never auto-opens a private DM workspace: that would surprise
+			// non-DM members and would gate local Board initialisation behind an authenticated
+			// fetch. The selection is left untouched and the Board stays fully local.
+			activeCampaign = null;
 		}
+
+		window.addEventListener("pagehide", event => {
+			if (event.persisted) {
+				// BFCache: keep campaign context and brew, pause live work only.
+				activeCampaign?.suspend();
+				window.DM_SCREEN_HUB_REALTIME?.suspend?.();
+			} else {
+				activeCampaign?.dispose();
+				campaignContext?.dispose();
+			}
+		});
+		window.addEventListener("pageshow", event => {
+			if (!event.persisted) return;
+			// Revalidate the account before reconnecting the private workspace stream.
+			activeCampaign?.pResume()
+				.then(() => {
+					if (activeCampaign && !activeCampaign.activeCampaignId) return;
+					window.DM_SCREEN_HUB_REALTIME?.resume?.();
+				})
+				// eslint-disable-next-line no-console
+				.catch(err => console.warn("Failed to resume campaign context:", err));
+		});
 
 		// expose it for dbg purposes
 		window.DM_SCREEN = new Board({workspaceRepository});

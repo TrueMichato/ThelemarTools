@@ -41,7 +41,8 @@ import {CharacterSheetSpawner} from "./charactersheet-spawn-drivers.js";
 import {CharacterSheetCampaign, getCloudCharacterUrl} from "./charactersheet-campaign.js";
 import {LocalCharacterRepository} from "../hub/hub-character-repository.js";
 import {HubHttpCharacterRepository} from "../hub/hub-http-character-repository.js";
-import {HubCampaignContext} from "../hub/hub-campaign-context.js";
+import {HubActiveCampaignCoordinator} from "../hub/hub-active-campaign-coordinator.js";
+import {HubApiClient} from "../hub/hub-api-client.js";
 import {HubRollLogAdapter} from "../hub/hub-roll-log-adapter.js";
 import {CharacterSheetRealtimeCoordinator} from "./charactersheet-realtime.js";
 import {CharacterSheetHubEffects} from "./charactersheet-hub-effects.js";
@@ -83,6 +84,8 @@ class CharacterSheetPage {
 		this._hubCampaignId = hubCampaignId;
 		this._isHubCharacter = isHubCharacter;
 		this._hubCampaignContext = null;
+		this._hubActiveCampaign = null;
+		this._hubApi = null;
 		this._hubContext = null;
 		this._hubRollLogAdapter = null;
 		this._hubEffects = null;
@@ -194,13 +197,47 @@ class CharacterSheetPage {
 		return isAttached;
 	}
 
-	_detachHubRealtime () {
+	// #region Hub teardown owners (ADR 0013)
+	// Each owner maps to exactly one teardown marker and is idempotent, so the coordinator's
+	// ordering proof is not defeated by one call site doing another stage's work.
+
+	/** `teardown-generation`: fence in-flight realtime work. */
+	_fenceHubGeneration () {
 		this._hubRealtimeGeneration++;
-		this._partyInventory?.detach();
+	}
+
+	/** `teardown-realtime`: detach the realtime client only. */
+	_detachHubRealtimeClient () {
 		this._hubRealtime?.detach();
+	}
+
+	/** `teardown-projections`: viewer-scoped projections, party inventory, and reconciliation. */
+	_detachHubProjections () {
+		this._partyInventory?.detach();
 		this._hubEffects?.deactivate();
 		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
 	}
+
+	/**
+	 * `teardown-rules`: remove the campaign settings overlay.
+	 *
+	 * Clearing the overlay alone is not a teardown: `_pLoadCharacter` and `_createNewCharacter`
+	 * re-apply `setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules)`, so a retained
+	 * `_hubContext` would silently reinstall the campaign rules on the next character load.
+	 */
+	_clearHubRules () {
+		this._hubContext = null;
+		this._state.clearCampaignSettingsOverlay();
+	}
+
+	/** Composed detach used by ordinary (non-context-switch) call sites. */
+	_detachHubRealtime () {
+		this._fenceHubGeneration();
+		this._detachHubRealtimeClient();
+		this._detachHubProjections();
+	}
+
+	// #endregion
 
 	// #region Live semantic-operation reconciliation (ADR 0012)
 
@@ -442,21 +479,84 @@ class CharacterSheetPage {
 
 	_initHubRealtimeTeardown () {
 		window.addEventListener("pagehide", event => {
-			if (event.persisted) this._hubRealtime?.suspend();
-			else this._detachHubRealtime();
+			if (event.persisted) {
+				// BFCache: the page may be restored, so campaign context, rules, and brew must
+				// survive. Only synchronisation pauses.
+				this._hubRealtime?.suspend();
+				this._hubActiveCampaign?.suspend();
+			} else {
+				this._detachHubRealtime();
+				this._hubActiveCampaign?.dispose();
+			}
 		});
 		window.addEventListener("pageshow", event => {
-			if (event.persisted) this._hubRealtime?.resume();
+			if (!event.persisted) return;
+			// Revalidate the account BEFORE resuming realtime: the session may have been signed out
+			// or switched while the page was frozen, and resuming first would reopen a private
+			// stream for a viewer who may no longer be authorised.
+			const pResumed = this._hubActiveCampaign
+				? this._hubActiveCampaign.pResume()
+				: Promise.resolve(null);
+			pResumed
+				.then(() => {
+					if (this._hubActiveCampaign && !this._hubActiveCampaign.activeCampaignId) return;
+					this._hubRealtime?.resume();
+				})
+				// eslint-disable-next-line no-console
+				.catch(err => console.warn("Failed to resume campaign context:", err));
 		});
+	}
+
+	/**
+	 * Build the host adapter for the active-campaign coordinator. The Character Sheet is
+	 * resource-pinned: an open campaign character must not be rebound because another tab changed
+	 * the device selection.
+	 */
+	_getHubActiveCampaignHost () {
+		return {
+			isContextHost: true,
+			isResourcePinned: () => !!this._currentCharacterId && this._isHubCharacter,
+			getExplicitCampaignId: () => this._hubCampaignId,
+			// The character repository, realtime sync, and recovery keys are all bound to the
+			// campaign this page was opened with. A remembered selection therefore updates the
+			// device default but must not silently activate a campaign this page is not bound to;
+			// `_pCanonicalizeHubCharacterUrl` performs the authoritative rebind via navigation.
+			shouldActivateContext: ({campaignId}) => campaignId === this._hubCampaignId,
+			pPreflightSwitch: async () => ({safe: !this._characterRepository?.hasPendingWrites?.()}),
+			pOnContextActivated: async ({context}) => {
+				this._hubContext = context;
+				this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
+			},
+			onFenceGeneration: () => this._fenceHubGeneration(),
+			pTeardownRealtime: async () => this._detachHubRealtimeClient(),
+			pTeardownProjections: async () => this._detachHubProjections(),
+			pTeardownRules: async () => this._clearHubRules(),
+		};
 	}
 
 	async pInit () {
 		// eslint-disable-next-line no-console
 		this._pInitLoadingTip().catch(err => console.warn("Failed to init loading tip:", err));
 		if (await this._pCanonicalizeHubCharacterUrl()) return;
-		if (this._hubCampaignId) {
-			this._hubCampaignContext = new HubCampaignContext({campaignId: this._hubCampaignId});
-			this._hubContext = await this._hubCampaignContext.pActivate();
+		// A purely local sheet never creates the coordinator, so local mode issues no request and
+		// a remembered campaign can never apply its rules to a local character.
+		if (this._isHubCharacter) {
+			this._hubApi ||= new HubApiClient();
+			this._hubActiveCampaign = new HubActiveCampaignCoordinator({
+				api: this._hubApi,
+				host: this._getHubActiveCampaignHost(),
+			});
+			// Context activation (rules + brew) must complete before any heavy data load.
+			await this._hubActiveCampaign.pResolve();
+			this._hubCampaignContext = this._hubActiveCampaign.campaignContext;
+			// An explicit campaign that could not be activated must fail loudly, exactly as a failed
+			// `pActivate()` did, rather than silently rendering the character without its campaign
+			// rules and brew.
+			if (this._hubCampaignId && !this._hubCampaignContext) {
+				throw new Error(`This campaign context could not be opened (${this._hubActiveCampaign.state}). Return to the Campaign Hub or reload.`);
+			}
+		}
+		if (this._hubCampaignId && this._hubCampaignContext) {
 			this._hubRealtime ||= this._fnCreateRealtimeCoordinator({
 				campaignId: this._hubCampaignId,
 				isAuthenticated: true,
@@ -464,7 +564,7 @@ class CharacterSheetPage {
 			});
 			this._initHubRealtimeListeners();
 			this._hubRollLogAdapter = new HubRollLogAdapter({
-				api: this._hubCampaignContext.api,
+				api: this._hubApi,
 				campaignId: this._hubCampaignId,
 				getCharacterId: () => this._currentCharacterId,
 			});

@@ -1,4 +1,5 @@
 import {HubApiClient, HubApiError} from "./hub-api-client.js";
+import {HubActiveCampaignCoordinator} from "./hub-active-campaign-coordinator.js";
 import {HubRealtimeClient} from "./hub-realtime-client.js";
 import {renderHubActivityRows} from "./hub-activity-render.js";
 import {
@@ -12,6 +13,28 @@ import {
 } from "./hub-character-view.js";
 
 const api = new HubApiClient();
+
+/**
+ * Lightweight Hub shells keep a device-local active campaign selection, but must never fetch the
+ * campaign context or brew merely to persist it (ADR 0013). `isContextHost: false` selects the
+ * selection-only verification path.
+ */
+const activeCampaign = new HubActiveCampaignCoordinator({
+	api,
+	host: {
+		isContextHost: false,
+		isResourcePinned: () => false,
+		getExplicitCampaignId: () => new URLSearchParams(window.location.search).get("id"),
+	},
+});
+window.addEventListener("pagehide", event => {
+	if (event.persisted) activeCampaign.suspend();
+	else activeCampaign.dispose();
+});
+window.addEventListener("pageshow", event => {
+	// eslint-disable-next-line no-console
+	if (event.persisted) activeCampaign.pResume().catch(err => console.warn("Failed to resume campaign selection:", err));
+});
 const CURRENCY_TYPES = ["cp", "sp", "ep", "gp", "pp"];
 let isCampaignReloadRequired = false;
 
@@ -536,6 +559,11 @@ async function pRenderAccountSessions () {
 async function pInitHubIndex ({session}) {
 	const name = document.getElementById("hub-account-name");
 	if (name) name.textContent = session.account.displayName;
+	// The Hub index has no explicit campaign, so this is where an account-matching stored
+	// selection is actually consumed: it is revalidated through the selection-only path (no
+	// context or brew fetch) and cleared if the campaign was archived or access was lost.
+	// eslint-disable-next-line no-console
+	activeCampaign.pResolve({trigger: "startup", session}).catch(err => console.warn("Failed to resolve campaign selection:", err));
 	document.getElementById("hub-cancel-deletion")?.addEventListener("click", async event => {
 		const button = event.currentTarget;
 		button.disabled = true;
@@ -638,6 +666,9 @@ async function pInitCampaign ({session}) {
 	const campaignId = new URLSearchParams(window.location.search).get("id");
 	if (!campaignId) throw new HubApiError({code: "CAMPAIGN_NOT_FOUND", status: 404});
 	const campaign = await api.pGetCampaign({campaignId});
+	// The session and campaign are already verified here, so recording the selection costs no
+	// additional request and never fetches the campaign context for selection purposes.
+	await activeCampaign.adoptVerified({session, campaign});
 	const [members, characters, snapshot] = await Promise.all([
 		api.pListMembers({campaignId}),
 		api.pListCharacters({campaignId}),
@@ -1726,6 +1757,10 @@ async function pInit () {
 		const session = await api.pGetSession();
 		setHidden(loading, true);
 		if (!session.signedIn) {
+			// A signed-out session writes a clear tombstone for the stored record's account, so no
+			// campaign context stays active in this browser.
+			// eslint-disable-next-line no-console
+			activeCampaign.pResolve({trigger: "logout", session}).catch(err => console.warn("Failed to clear campaign selection:", err));
 			const signIn = document.getElementById("hub-sign-in");
 			if (signIn) {
 				const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -1737,6 +1772,9 @@ async function pInit () {
 		setHidden(signedIn, false);
 		document.getElementById("hub-logout")?.addEventListener("click", async () => {
 			try {
+				// Clear the local selection first: a failed logout request must not leave campaign
+				// context active in this browser.
+				await activeCampaign.pClearSelection({trigger: "logout"});
 				await api.pLogout();
 				window.location.assign("hub.html");
 			} catch (error) {

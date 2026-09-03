@@ -1086,4 +1086,93 @@ export class HubCampaignPage {
 		});
 		expect(response.ok()).toBe(true);
 	}
+
+	// #region Active campaign selection (ADR 0013)
+
+	/** Read the durable device-local selection record, or `null` when nothing is stored. */
+	async getActiveCampaignRecord (): Promise<ActiveCampaignRecord | null> {
+		return this.page.evaluate(() => {
+			const raw = window.localStorage.getItem("hub.activeCampaign.v1");
+			if (!raw) return null;
+			try {
+				return JSON.parse(raw);
+			} catch {
+				return null;
+			}
+		});
+	}
+
+	/** Poll until the stored selection satisfies `predicate`, so tests never sleep on a fixed timer. */
+	async waitForActiveCampaign (predicate: (record: ActiveCampaignRecord | null) => boolean, timeout = 10_000): Promise<ActiveCampaignRecord | null> {
+		await expect.poll(async () => predicate(await this.getActiveCampaignRecord()), {timeout}).toBe(true);
+		return this.getActiveCampaignRecord();
+	}
+
+	async waitForSelectedCampaign (campaignId: string, timeout = 10_000): Promise<void> {
+		await this.waitForActiveCampaign(record => record?.state === "selected" && record?.campaignId === campaignId, timeout);
+	}
+
+	async waitForClearedSelection (timeout = 10_000): Promise<void> {
+		await this.waitForActiveCampaign(record => record?.state === "cleared", timeout);
+	}
+
+	async clearActiveCampaignStorage (): Promise<void> {
+		await this.page.evaluate(() => window.localStorage.removeItem("hub.activeCampaign.v1"));
+	}
+
+	/**
+	 * Click Sign out and capture whether the durable selection was already a tombstone at the
+	 * moment the logout request left the page.
+	 */
+	async signOutCapturingSelectionAtRequest (): Promise<ActiveCampaignRecord | null> {
+		let recordAtRequest: ActiveCampaignRecord | null = null;
+		const onRequest = async (request: Request) => {
+			if (!request.url().includes("/api/logout")) return;
+			recordAtRequest = await this.getActiveCampaignRecord();
+		};
+		this.page.on("request", onRequest);
+		try {
+			await this.page.locator("#hub-logout").click();
+			await expect.poll(() => recordAtRequest !== null, {timeout: 10_000}).toBe(true);
+		} finally {
+			this.page.off("request", onRequest);
+		}
+		return recordAtRequest;
+	}
+
+	/** Drive a BFCache-style persisted hide/show pair without leaving the page. */
+	async simulateBfcacheRoundTrip (): Promise<void> {
+		await this.page.evaluate(() => {
+			window.dispatchEvent(new PageTransitionEvent("pagehide", {persisted: true}));
+			window.dispatchEvent(new PageTransitionEvent("pageshow", {persisted: true}));
+		});
+	}
+
+	/** Campaign rules currently applied to the open character sheet, if any. */
+	async getCampaignSettingsOverlay (): Promise<Record<string, unknown> | null> {
+		return this.page.evaluate(() => {
+			const sheet = (window as any).charSheet;
+			return sheet?._state?._campaignSettingsOverlay ?? null;
+		});
+	}
+
+	async getSheetCampaignId (): Promise<string | null> {
+		return this.page.evaluate(() => (window as any).charSheet?._hubCampaignId ?? null);
+	}
+
+	async getActiveContextState (): Promise<string | null> {
+		return this.page.evaluate(() => (window as any).charSheet?._hubActiveCampaign?.state ?? null);
+	}
+
+	// #endregion
 }
+
+export type ActiveCampaignRecord = {
+	schemaVersion: number;
+	accountId: string;
+	campaignId: string | null;
+	state: "selected" | "cleared";
+	revision: number;
+	updatedAt: number;
+	writerId: string;
+};
