@@ -61,10 +61,13 @@ describe("Google OAuth provider", () => {
 		expect(provider.capabilities).toEqual({pkce: "S256", oidcNonce: true});
 	});
 
-	it("validates the ID token and returns only immutable authority plus bounded presentation", async () => {
+	it.each([
+		"accounts.google.com",
+		"https://accounts.google.com",
+	])("validates the ID token from issuer %s and returns only immutable authority plus bounded presentation", async issuer => {
 		const {jwk, getToken} = await getFixture();
 		const calls = [];
-		const token = await getToken({email: "ignored@example.com", email_verified: true, name: "G".repeat(150)});
+		const token = await getToken({iss: issuer, email: "ignored@example.com", email_verified: true, name: "G".repeat(150)});
 		const provider = new GoogleOAuthProvider({
 			clientId: CLIENT_ID,
 			clientSecret: "secret",

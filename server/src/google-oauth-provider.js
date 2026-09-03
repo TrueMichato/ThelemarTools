@@ -12,7 +12,10 @@ import {
 	pFetchProviderJson,
 } from "./oauth-provider-http.js";
 
-const GOOGLE_ISSUER = "https://accounts.google.com";
+const GOOGLE_ISSUERS = Object.freeze([
+	"accounts.google.com",
+	"https://accounts.google.com",
+]);
 const GOOGLE_AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
@@ -108,7 +111,7 @@ export class GoogleOAuthProvider {
 
 			const {payload} = await this._fnVerify(tokenData.id_token, this._jwks, {
 				algorithms: ["RS256"],
-				issuer: GOOGLE_ISSUER,
+				issuer: GOOGLE_ISSUERS,
 				audience: this._clientId,
 				clockTolerance: 60,
 				maxTokenAge: "10 minutes",
