@@ -15,6 +15,7 @@
 import "./setup.js";
 import {CharacterSheetPartyInventory} from "../../../js/charactersheet/charactersheet-party-inventory.js";
 import {getCarryProfile} from "../../../js/hub/hub-carry-contract.js";
+import {getPartyInventoryRecipients} from "../../../js/charactersheet/charactersheet-party-inventory.js";
 
 /** A composer stub exposing the one element `_syncCarryDelta` writes into. */
 function makeComposer () {
@@ -154,5 +155,68 @@ describe("a recipient's consequence is never fabricated", () => {
 		}));
 		expect(text).toContain("Kael: currently 10 lb of 15");
 		expect(text).not.toMatch(/Kael: 10 → /);
+	});
+});
+
+describe("a lower bound is never rendered as an exact weight", () => {
+	// The same invariant, at the last two places it leaks. A load containing a stack of
+	// unknown weight is *at least* the figure we can add up, and printing it bare states a
+	// precision we do not have — most damagingly when the lower bound already exceeds
+	// capacity, where an unmarked number reads as a settled, exact reading.
+	const indeterminateActor = getCarryProfile({
+		sourceValue: 10,
+		thresholdSourceValue: 10,
+		capacityOverride: 150,
+		grossWeight: 200,
+		unknownStackCount: 2,
+	});
+
+	it("marks BOTH the actor's before and after values", () => {
+		const text = render(makeUi({raw: 5, destinationKind: "party_inventory", characterProfile: indeterminateActor}));
+		expect(text).toContain("You: ≥200 → ≥195 lb of 150");
+		expect(text).not.toContain("You: 200 → 195");
+	});
+
+	it("keeps the truthful Over capacity verdict rather than softening it", () => {
+		// The known part already exceeds capacity, and more weight cannot bring it back under,
+		// so the tier IS settled. Downgrading it to "unknown" would make an overloaded
+		// character read as merely unmeasured.
+		expect(indeterminateActor.status).toBe("over_capacity");
+		expect(render(makeUi({raw: 5, destinationKind: "party_inventory", characterProfile: indeterminateActor}))).toContain("Over capacity");
+	});
+
+	it("leaves an exact actor unmarked", () => {
+		const exact = getCarryProfile({sourceValue: 10, thresholdSourceValue: 10, capacityOverride: 150, grossWeight: 200});
+		const text = render(makeUi({raw: 5, destinationKind: "party_inventory", characterProfile: exact}));
+		expect(text).toContain("You: 200 → 195 lb of 150");
+		expect(text).not.toContain("≥");
+	});
+
+	it("marks a shared recipient's current weight, including over-capacity + unknown", () => {
+		// `state` alone cannot reveal this case: it is a legitimate `over_capacity`.
+		const text = render(makeUi({
+			raw: 5,
+			destinationKind: "character",
+			recipientId: "r1",
+			recipients: [{id: "r1", label: "Kael", summary: "F 3", carry: {carried: 120, capacity: 150, state: "over_capacity", isIndeterminate: true}}],
+		}));
+		expect(text).toContain("Kael: currently ≥120 lb of 150");
+		expect(text).not.toContain("currently 120 lb");
+	});
+
+	it("leaves an exact recipient unmarked", () => {
+		const text = render(makeUi({
+			raw: 5,
+			destinationKind: "character",
+			recipientId: "r1",
+			recipients: [{id: "r1", label: "Kael", summary: "F 3", carry: {carried: 120, capacity: 150, state: "encumbered", isIndeterminate: false}}],
+		}));
+		expect(text).toContain("Kael: currently 120 lb of 150");
+	});
+
+	it("preserves the flag end-to-end from the projection into the recipient list", () => {
+		const projections = [{kind: "peer_profile", id: "r1", data: {identity: {name: "Kael"}, classes: [], carrySummary: {carried: 120, capacity: 150, state: "over_capacity", isIndeterminate: true}}}];
+		const [recipient] = getPartyInventoryRecipients({projections, roster: [{characterId: "r1", targetRef: "r1"}], currentCharacterId: "me"});
+		expect(recipient.carry.isIndeterminate).toBe(true);
 	});
 });

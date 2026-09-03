@@ -453,7 +453,9 @@ describe("defects 7 and 8 — transfer preview math and recipient consequence", 
 
 		const shared = recipients.find(r => r.label === "Shared");
 		const hidden = recipients.find(r => r.label === "Hidden");
-		if (shared) expect(shared.carry).toEqual({carried: 40, capacity: 150, state: "normal"});
+		// `isIndeterminate` travels with the recipient's carry: an over-capacity peer can still
+		// be a lower bound, and dropping the flag rendered their weight as exact.
+		if (shared) expect(shared.carry).toEqual({carried: 40, capacity: 150, state: "normal", isIndeterminate: false});
 		// A withheld load must be absent, not defaulted to zero — zero is a claim.
 		if (hidden) expect(hidden.carry).toBeNull();
 	});

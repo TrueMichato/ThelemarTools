@@ -49,6 +49,21 @@ function formatNumber (value) {
 	return new Intl.NumberFormat(undefined, {maximumFractionDigits: 2}).format(value);
 }
 
+/**
+ * A weight, marked `≥` when the figure is only a lower bound.
+ *
+ * A load containing a stack of unknown weight is not the number we can add up; it is at least
+ * that number. Printing it bare states a precision we do not have — and the omission is least
+ * visible exactly where it matters most, since a lower bound that already exceeds capacity
+ * still reads as a settled, exact reading.
+ * @param {number} value
+ * @param {boolean} isLowerBound
+ * @returns {string}
+ */
+function formatWeight (value, isLowerBound) {
+	return `${isLowerBound ? "≥" : ""}${formatNumber(value)}`;
+}
+
 function getTransferLimit ({container, entry}) {
 	const quantity = getQuantity(entry);
 	if (!quantity) return {maxQuantity: 0, blockers: ["invalid available quantity"]};
@@ -110,7 +125,14 @@ export function getPartyInventoryRecipients ({projections = [], roster = [], cur
 				label: view.name,
 				summary: view.classes.map(cls => `${cls.name}${Number.isFinite(cls.level) ? ` ${cls.level}` : ""}`).join(" / "),
 				carry: isShared
-					? {carried: Number(carry.carried), capacity: Number(carry.capacity), state: typeof carry.state === "string" ? carry.state : null}
+					? {
+						carried: Number(carry.carried),
+						capacity: Number(carry.capacity),
+						state: typeof carry.state === "string" ? carry.state : null,
+						// Independent of `state`: an over-capacity recipient can still be a lower
+						// bound, and dropping this rendered their weight as exact.
+						isIndeterminate: carry.isIndeterminate === true || carry.state === "unknown",
+					}
 					: null,
 			};
 		})
@@ -1026,7 +1048,11 @@ export class CharacterSheetPartyInventory {
 			normal: "Normal",
 		}[level] || level);
 
-		const parts = [`You: ${formatNumber(profile.bodyLoad)} → ${formatNumber(after.bodyLoad)} lb of ${formatNumber(profile.bodyCapacity)}`];
+		// Each side is marked from ITS OWN profile: the before and after states are separately
+		// derived and need not share indeterminacy. The status itself is never softened — a
+		// known lower bound that already exceeds capacity is genuinely over capacity, and
+		// downgrading that truthful verdict would trade one inaccuracy for another.
+		const parts = [`You: ${formatWeight(profile.bodyLoad, profile.isIndeterminate)} → ${formatWeight(after.bodyLoad, after.isIndeterminate)} lb of ${formatNumber(profile.bodyCapacity)}`];
 		parts.push(beforeLevel === afterLevel ? label(afterLevel) : `${label(beforeLevel)} → ${label(afterLevel)}`);
 
 		// The recipient's consequence.
@@ -1042,7 +1068,7 @@ export class CharacterSheetPartyInventory {
 		if (this._draft.kind === "character" && this._draft.destinationKind === "character") {
 			const recipient = this._recipients.find(it => it.id === this._draft.recipientId);
 			if (recipient?.carry) {
-				parts.push(`${recipient.label}: currently ${formatNumber(recipient.carry.carried)} lb of ${formatNumber(recipient.carry.capacity)} — impact not shown (their carry is calculated on their own sheet)`);
+				parts.push(`${recipient.label}: currently ${formatWeight(recipient.carry.carried, recipient.carry.isIndeterminate)} lb of ${formatNumber(recipient.carry.capacity)} — impact not shown (their carry is calculated on their own sheet)`);
 			} else if (recipient) {
 				// Explicit, and deliberately uninformative: "not shared" must not be inferable
 				// as any particular load, and silence would read as "no effect".

@@ -170,8 +170,21 @@ as such and never defaulted to a number.
 | State | Meaning | Rendered as |
 |---|---|---|
 | `known` | trustworthy load and capacity | numbers + level |
-| `indeterminate` | trustworthy, but some item weights are missing | `≥ N lb`, never a hard over-capacity claim |
+| `indeterminate` | trustworthy, but some item weights are missing | `≥ N lb`; a tier is asserted only when the lower bound settles it |
 | `unavailable` | absent, invalid, or basis-mismatched authority | "not synced" — **never** `0` and **never** "Normal" |
+
+`indeterminate` is about the **number**, not the verdict, and the two are decided separately:
+
+- the weight is always marked `≥`, wherever it appears — the actor's before and after values
+  (each from its own profile), a shared recipient's current load, and the party total;
+- the tier is asserted only when the lower bound settles it. Below capacity nothing can be
+  claimed, because the true load could sit in any band above the known one, so the status is
+  `unknown`. Once the *known* part already exceeds capacity the verdict is settled — more
+  weight cannot bring it back under — so `over_capacity` is stated, and it stays marked `≥`
+  because the amount by which it overflows is still unknown.
+
+Softening that verdict to "unknown" would trade one inaccuracy for another: an overloaded
+character would read as merely unmeasured.
 
 Party aggregates count excluded members without estimating them, and nothing is back-derived
 from a total: an excluded member contributes nothing, so no hidden load can be recovered by
