@@ -17,6 +17,7 @@ import {PartyTrackerImporter} from "../../../js/dmscreen/partytracker/dmscreen-p
 import {PartyTrackerCharacter} from "../../../js/dmscreen/partytracker/dmscreen-partytracker-character.js";
 import {PartyTrackerCharacterSerializer} from "../../../js/dmscreen/partytracker/dmscreen-partytracker-serial.js";
 import {getPartyInventoryRecipients} from "../../../js/charactersheet/charactersheet-party-inventory.js";
+import {getPartyCarryAggregate} from "../../../js/hub/hub-carry-contract.js";
 import {DmScreenHubController} from "../../../js/dmscreen/dmscreen-hub-controller.js";
 
 const BASIS = Object.freeze({kind: "detached", settingsDigest: ""});
@@ -341,6 +342,70 @@ describe("defects 5 and 6 — rotation invalidation and stash fencing", () => {
 		await flush();
 
 		expect(h.stash().at(-1).payload.knownWeight).toBe(20);
+	});
+});
+
+/* ── A. Indeterminate survives independently ──────────────────────── */
+
+describe("blocker A — indeterminate is carried independently of encumbrance status", () => {
+	const project = carry => buildCharacterViewModel({abilities: {str: 10}, carry}, {expectedBasis: BASIS}).carrySummary;
+
+	it("status alone cannot express it: a known lower bound can already be over capacity", () => {
+		// This is why the two facts need separate fields. The status is a SAFE
+		// `over_capacity` — the known part already exceeds capacity — while the true load
+		// remains a lower bound, so a consumer inferring indeterminacy from the status would
+		// render this as an exact reading.
+		const summary = project(getCarryBlock({bodyLoad: 500, status: "over_capacity", isIndeterminate: true}));
+		expect(summary.state).toBe("over_capacity");
+		expect(summary.isIndeterminate).toBe(true);
+	});
+
+	it("an exact reading carries no indeterminate flag at all", () => {
+		expect(project(getCarryBlock({bodyLoad: 500, status: "over_capacity"}))).not.toHaveProperty("isIndeterminate");
+	});
+
+	it("the DM envelope carries it too", () => {
+		const character = {data: {carry: getCarryBlock({bodyLoad: 500, status: "over_capacity", isIndeterminate: true})}};
+		expect(getDmCarrySummary({character, expectedBasis: BASIS}).isIndeterminate).toBe(true);
+	});
+
+	it.each([
+		["unknown below capacity", {carried: 120, capacity: 150, state: "unknown", isIndeterminate: true}],
+		["over capacity with unknown stacks", {carried: 500, capacity: 150, state: "over_capacity", isIndeterminate: true}],
+	])("%s is counted as indeterminate by the ACTUAL linked party aggregate", (_label, summary) => {
+		// The aggregate buckets on the reconstructed profile, so an indeterminate member whose
+		// profile claimed `unknownStackCount: 0` was counted as fully known and the totals
+		// silently presented a lower bound as a complete sum.
+		const mapped = PartyTrackerImporter.mapCarrySummary(summary);
+		const member = new PartyTrackerCharacter(PartyTrackerCharacterSerializer.deserialize({csum: mapped}), {}).getCarryState();
+		const aggregate = getPartyCarryAggregate({members: [member]});
+
+		expect(member.state).toBe("indeterminate");
+		expect(aggregate.indeterminateCount).toBe(1);
+		expect(aggregate.knownCount).toBe(0);
+		// Drives the "≥" prefix on the party summary line.
+		expect(aggregate.isTotalPartial).toBe(true);
+	});
+
+	it("an exact member keeps the totals complete (the control)", () => {
+		const mapped = PartyTrackerImporter.mapCarrySummary({carried: 120, capacity: 150, state: "encumbered"});
+		const member = new PartyTrackerCharacter(PartyTrackerCharacterSerializer.deserialize({csum: mapped}), {}).getCarryState();
+		const aggregate = getPartyCarryAggregate({members: [member]});
+		expect(aggregate.knownCount).toBe(1);
+		expect(aggregate.isTotalPartial).toBe(false);
+	});
+
+	it("a mixed party is partial as soon as one member is indeterminate", () => {
+		const build = summary => new PartyTrackerCharacter(
+			PartyTrackerCharacterSerializer.deserialize({csum: PartyTrackerImporter.mapCarrySummary(summary)}), {},
+		).getCarryState();
+		const aggregate = getPartyCarryAggregate({members: [
+			build({carried: 100, capacity: 150, state: "normal"}),
+			build({carried: 500, capacity: 150, state: "over_capacity", isIndeterminate: true}),
+		]});
+		expect(aggregate.knownCount).toBe(1);
+		expect(aggregate.indeterminateCount).toBe(1);
+		expect(aggregate.isTotalPartial).toBe(true);
 	});
 });
 

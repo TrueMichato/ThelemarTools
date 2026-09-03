@@ -127,13 +127,19 @@ export class PartyTrackerCharacter {
 			// the Strength score, Thelemar off capacity, and a table may have disabled them —
 			// so it previously assumed `capacity-only` and reported genuinely encumbered and
 			// heavily-encumbered characters as Normal.
+			// `unknownStackCount` is what makes the reconstructed profile indeterminate. Without
+			// it the profile claimed to be exact and the party aggregate — which buckets on the
+			// profile — counted this member as fully known, so the totals silently presented a
+			// lower bound as a complete sum.
+			const isIndeterminate = linked.isIndeterminate === true || linked.state === "indeterminate";
 			const profile = getCarryProfile({
 				capacityOverride: linked.capacity,
 				grossWeight: linked.carried,
 				thresholdRuleId: "capacity-only",
+				unknownStackCount: isIndeterminate ? 1 : 0,
 			});
 			return {
-				state: linked.state === "indeterminate" ? "indeterminate" : "known",
+				state: isIndeterminate ? "indeterminate" : "known",
 				profile,
 				carried: linked.carried,
 				capacity: linked.capacity,

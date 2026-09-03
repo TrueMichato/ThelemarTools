@@ -410,7 +410,10 @@ export function getPartyCarryAggregate ({members = [], stashWeight = null, stash
 		}
 		const status = getCarryStatus(profile);
 		if (status.isOverCapacity) out.overCapacityCount++;
-		if (profile.isIndeterminate) {
+		// A caller may know a member is indeterminate without that being reconstructible from
+		// the profile alone (a projected summary carries the fact as its own field), so trust
+		// an explicit member state as well.
+		if (profile.isIndeterminate || member?.state === "indeterminate") {
 			out.indeterminateCount++;
 			out.unknownStackCount += profile.unknownStackCount;
 		} else out.knownCount++;

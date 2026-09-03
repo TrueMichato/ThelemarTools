@@ -977,6 +977,12 @@ export class CharacterSheetPartyInventory {
 		// weigh what its steel base entry says, and the carry bar has always counted the
 		// projected figure. Falls back to the raw value for the party stash, whose plain
 		// documents have no sheet context to project through.
+		// TWO weights, because two different systems own them. The acting sheet applies material
+		// projection (a mithril breastplate does not weigh its steel entry), while the party
+		// stash is a plain document whose authoritative summary sums the RAW stored weight.
+		// Using one figure for both made the previewed stash total disagree with the number the
+		// next refresh would show.
+		const rawUnitWeight = Number(entry?.item?.weight);
 		const unitWeight = Number(this._fnProjectItemWeight?.(entry?.item) ?? entry?.item?.weight);
 
 		if (!profile || !Number.isSafeInteger(quantity) || quantity < 1 || !Number.isFinite(unitWeight) || unitWeight < 0) {
@@ -987,6 +993,7 @@ export class CharacterSheetPartyInventory {
 		}
 
 		const moved = unitWeight * quantity;
+		const movedRaw = Number.isFinite(rawUnitWeight) && rawUnitWeight >= 0 ? rawUnitWeight * quantity : null;
 		// Moving OUT of the stash adds to this character; moving out of this character removes.
 		const signedDelta = this._draft.kind === "party_inventory" ? moved : -moved;
 		// Apply the delta to GROSS and FILLABLE weight and let the contract re-derive the
@@ -1022,13 +1029,20 @@ export class CharacterSheetPartyInventory {
 		const parts = [`You: ${formatNumber(profile.bodyLoad)} → ${formatNumber(after.bodyLoad)} lb of ${formatNumber(profile.bodyCapacity)}`];
 		parts.push(beforeLevel === afterLevel ? label(afterLevel) : `${label(beforeLevel)} → ${label(afterLevel)}`);
 
-		// The recipient's consequence, shown only when that character shares their carry.
+		// The recipient's consequence.
+		//
+		// Their CURRENT carry is shown when they share it, but never an after-value: this sheet
+		// holds nothing target-authoritative. The projected weight is this character's material
+		// projection, the recipient may have their own extradimensional container absorbing the
+		// arrival entirely, and their tier rule is not knowable from two numbers. Adding the
+		// delta produced confident fabrications — a target whose body load genuinely stays at 10
+		// was warned as "10 → 30, over capacity". A truthful current reading plus an explicit
+		// "impact not shown" is worth more than a precise-looking guess, and the alternative
+		// would also mean inferring hidden truth about another character.
 		if (this._draft.kind === "character" && this._draft.destinationKind === "character") {
 			const recipient = this._recipients.find(it => it.id === this._draft.recipientId);
 			if (recipient?.carry) {
-				const afterCarried = Math.max(0, recipient.carry.carried + moved);
-				parts.push(`${recipient.label}: ${formatNumber(recipient.carry.carried)} → ${formatNumber(afterCarried)} lb of ${formatNumber(recipient.carry.capacity)}`);
-				if (afterCarried > recipient.carry.capacity) parts.push(`over capacity for ${recipient.label}`);
+				parts.push(`${recipient.label}: currently ${formatNumber(recipient.carry.carried)} lb of ${formatNumber(recipient.carry.capacity)} — impact not shown (their carry is calculated on their own sheet)`);
 			} else if (recipient) {
 				// Explicit, and deliberately uninformative: "not shared" must not be inferable
 				// as any particular load, and silence would read as "no effect".
@@ -1036,10 +1050,16 @@ export class CharacterSheetPartyInventory {
 			}
 		}
 
+		// Stash arithmetic uses the RAW stored weight, matching `getInventoryWeightSummary`,
+		// which is what the authoritative stash refresh will report a moment later.
 		const stash = getInventoryWeightSummary(this._partyInventory?.inventory || []);
-		const stashAfter = this._draft.kind === "party_inventory" ? stash.knownWeight - moved : stash.knownWeight + moved;
 		if (this._draft.kind === "party_inventory" || this._draft.destinationKind === "party_inventory") {
-			parts.push(`Stash: ${formatNumber(stash.knownWeight)} → ${formatNumber(Math.max(0, stashAfter))} lb`);
+			if (movedRaw == null) {
+				parts.push(`Stash: ${formatNumber(stash.knownWeight)} lb — impact unknown (this stack has no recorded weight)`);
+			} else {
+				const stashAfter = this._draft.kind === "party_inventory" ? stash.knownWeight - movedRaw : stash.knownWeight + movedRaw;
+				parts.push(`Stash: ${formatNumber(stash.knownWeight)} → ${formatNumber(Math.max(0, stashAfter))} lb`);
+			}
 		}
 		target.textContent = `${parts.join(" · ")}.`;
 		target.classList.toggle("charsheet__party-inventory-carry-delta--warn", afterLevel === "over_capacity" && beforeLevel !== "over_capacity");

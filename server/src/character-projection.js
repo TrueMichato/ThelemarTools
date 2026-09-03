@@ -325,6 +325,11 @@ export function buildCharacterViewModel (characterData, {expectedBasis = undefin
 		// lower bound, from a confident reading of the same two numbers.
 		const state = toLabel(carryAuthority.status, {maxLength: 40});
 		if (state) carrySummary.state = state;
+		// Carried separately from `state`: when the known lower-bound load already exceeds
+		// capacity the status is a safe `over_capacity`, yet the true load is still unknown, so
+		// a consumer that inferred indeterminacy from the status alone would render that case
+		// as an exact reading.
+		if (carryAuthority.isIndeterminate === true) carrySummary.isIndeterminate = true;
 	}
 
 	const exhaustionLabel = typeof data.exhaustion === "string" ? toLabel(data.exhaustion, {maxLength: 40}) : null;
@@ -520,12 +525,19 @@ const FIELD_VALIDATORS = Object.freeze({
 	},
 	carrySummary: value => {
 		assertPlainObject(value, "carrySummary");
-		assertNoUnknownKeys(value, ["carried", "capacity", "state"], "carrySummary");
+		assertNoUnknownKeys(value, ["carried", "capacity", "state", "isIndeterminate"], "carrySummary");
 		const out = {};
 		for (const key of ["carried", "capacity"]) {
 			if (value[key] !== undefined) out[key] = assertNumber(value[key], `carrySummary.${key}`, {min: 0, max: MAX_WEIGHT});
 		}
 		if (value.state !== undefined) out.state = assertLabel(value.state, "carrySummary.state", {maxLength: 40});
+		// Independent of `state`, and deliberately so: a load whose KNOWN part already exceeds
+		// capacity is safely `over_capacity` while still being a lower bound, so the two facts
+		// cannot share one field without losing one of them.
+		if (value.isIndeterminate !== undefined) {
+			if (typeof value.isIndeterminate !== "boolean") fail(`carrySummary.isIndeterminate must be a boolean.`);
+			out.isIndeterminate = value.isIndeterminate;
+		}
 		if (!Object.keys(out).length) fail(`carrySummary must contain at least one value.`);
 		return out;
 	},
@@ -795,6 +807,7 @@ export function getDmCarrySummary ({character, expectedBasis}) {
 	if (capacity != null) out.capacity = capacity;
 	const state = toLabel(authority.status, {maxLength: 40});
 	if (state) out.state = state;
+	if (authority.isIndeterminate === true) out.isIndeterminate = true;
 	return Object.keys(out).length ? out : undefined;
 }
 

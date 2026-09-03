@@ -127,15 +127,43 @@ owner's next save.
 
 ## What the projection means
 
-`carrySummary` is `{carried, capacity, state}` and carries the **body pair** —
+`carrySummary` is `{carried, capacity, state, isIndeterminate?}` and carries the **body pair** —
 `carried = bodyLoad`, `capacity = bodyCapacity` — so all three describe one thing: physical
 load against physical capacity, which is what encumbrance is judged on. Pairing gross weight
 with body capacity (or either with the bag-inclusive total) would be incoherent the moment a
 Bag of Holding is equipped, and omitting the bag also avoids disclosing that the bearer owns
 one.
 
+`state` is the **authoritative encumbrance level**. A consumer cannot re-derive it from the two
+numbers: PHB keys its tiers off the Strength score, Thelemar off capacity, and a table may have
+disabled tiers entirely — so a local guess reported genuinely encumbered characters as Normal.
+
+`isIndeterminate` is a **separate field, not a status value**, because the two facts are
+independent. When the known part of a load already exceeds capacity the status is a safe
+`over_capacity` *and* the true load is still a lower bound; folding indeterminacy into `state`
+loses one of those and renders that case as exact. `state: "unknown"` is only the
+below-capacity presentation of the same fact, so consumers must read `isIndeterminate` rather
+than infer it from the status.
+
 Carry is **not** in the default `table` sharing preset: an owner opts in before any peer sees
 it.
+
+## The transfer preview speaks for one endpoint at a time
+
+Three systems own the three endpoints of a transfer, and each needs its own arithmetic:
+
+| Endpoint | Weight used | Why |
+|---|---|---|
+| the acting character | material-**projected**, applied to gross *and* fillable weight | it is this sheet's own calculation, and an equipped container absorbs part of the change |
+| the party stash | **raw** stored weight | the stash is a plain document whose authoritative summary sums raw weight; using the projected figure made the preview contradict the very next refresh |
+| a recipient | **none** — current carry only | nothing here is target-authoritative |
+
+A recipient's **after-value is never computed**. The moved weight is this character's material
+projection, the recipient may have a container that absorbs the arrival entirely, and their
+tier rule is unknowable from two numbers — so adding the delta produced confident fabrications
+(a target whose body load genuinely stays at 10 was warned "10 → 30, over capacity"). Their
+shared current carry is shown with an explicit "impact not shown"; a withheld carry is labelled
+as such and never defaulted to a number.
 
 ## Three display states, never conflated
 

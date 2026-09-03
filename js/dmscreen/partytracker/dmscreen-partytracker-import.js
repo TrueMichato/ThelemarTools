@@ -65,8 +65,14 @@ export class PartyTrackerImporter {
 		const capacity = Number(summary.capacity);
 		if (!Number.isFinite(carried) || !Number.isFinite(capacity)) return null;
 		const state = typeof summary.state === "string" ? summary.state : null;
+		// `isIndeterminate` is authoritative and independent; `state === "unknown"` is only the
+		// below-capacity presentation of it. Reading the status alone missed the case where a
+		// known lower-bound load already exceeds capacity — safely `over_capacity`, but still a
+		// lower bound — and rendered it as exact.
+		const isIndeterminate = summary.isIndeterminate === true || state === "unknown";
 		return {
-			state: state === "unknown" ? "indeterminate" : "known",
+			state: isIndeterminate ? "indeterminate" : "known",
+			isIndeterminate,
 			carried,
 			capacity,
 			// A replacement label the owner substituted (e.g. "Hidden") is not an encumbrance
