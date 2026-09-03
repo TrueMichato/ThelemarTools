@@ -272,6 +272,8 @@ describe("campaign hub pages", () => {
 		const source = read("js/hub/hub-page.js");
 		expect(source).toMatch(/^async function renderPendingTransfers/m);
 		expect(source.indexOf("async function renderPendingTransfers")).toBeLessThan(source.indexOf("async function pInitCampaignForms"));
+		expect(source).toContain("const canReject = canAccept || transfer.actorAccountId === session.account.id");
+		expect(source).toContain("canAccept ? \"Reject\" : \"Cancel\"");
 	});
 
 	it("initializes every rules control from the active campaign version", () => {

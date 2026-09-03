@@ -343,16 +343,35 @@ describe("Character Sheet realtime coordinator", () => {
 			id: "unrelated",
 			payload: {...event.payload, sourceKind: "character", sourceId: "other", targetId: "another"},
 		});
+		clients[0].emit("event", {
+			id: "stash-invalidation",
+			campaignId: "campaign-1",
+			sequence: 13,
+			type: "party_inventory.invalidated",
+			aggregateType: "campaign",
+			aggregateId: "campaign-1",
+			payload: {},
+		});
 		await pFlush();
 
-		expect(delivered).toEqual([{
-			eventId: "transfer-event",
-			campaignId: "campaign-1",
-			sequence: 12,
-			type: "transfer.committed",
-			isCurrentCharacterAffected: true,
-			isPartyInventoryAffected: true,
-		}]);
+		expect(delivered).toEqual([
+			{
+				eventId: "transfer-event",
+				campaignId: "campaign-1",
+				sequence: 12,
+				type: "transfer.committed",
+				isCurrentCharacterAffected: true,
+				isPartyInventoryAffected: true,
+			},
+			{
+				eventId: "stash-invalidation",
+				campaignId: "campaign-1",
+				sequence: 13,
+				type: "party_inventory.invalidated",
+				isCurrentCharacterAffected: false,
+				isPartyInventoryAffected: true,
+			},
+		]);
 		expect(JSON.stringify(delivered)).not.toMatch(/private|character-1/);
 	});
 

@@ -27,6 +27,36 @@ describe("Hub inventory contract", () => {
 	});
 
 	it.each([
+		["container contents", {containedItems: ["private-child-id"]}, "contains items"],
+		["hosted Ioun items", {iounSet: ["private-stone-id"]}, "hosts Ioun items"],
+	])("refuses partial movement that would duplicate %s", (_label, item, blocker) => {
+		const entry = {
+			id: "stack-1",
+			quantity: 2,
+			item: {name: "Linked stack", ...item},
+		};
+
+		expect(getInventoryTransferEligibility({
+			container: {inventory: [entry]},
+			entry,
+			quantity: 1,
+		})).toEqual({
+			isEligible: false,
+			blockers: [blocker],
+			maxQuantity: 0,
+		});
+		expect(getInventoryTransferEligibility({
+			container: {inventory: [entry]},
+			entry,
+			quantity: 2,
+		})).toEqual({
+			isEligible: false,
+			blockers: [blocker],
+			maxQuantity: 0,
+		});
+	});
+
+	it.each([
 		["item-granted spell", {spellcasting: {spells: [{itemId: "stack-1"}]}}],
 		["container", {inventory: [{id: "container", quantity: 1, item: {containedItems: ["stack-1"]}}]}],
 		["Ioun bond", {iounBonds: {"stack-1": {bonded: true}}}],

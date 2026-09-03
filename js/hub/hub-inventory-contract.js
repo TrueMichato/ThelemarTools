@@ -8,6 +8,11 @@ const ITEM_REFERENCE_KEYS = new Set([
 	"weaponId",
 ]);
 
+const PARTIAL_TRANSFER_BLOCKERS = new Set([
+	"contains items",
+	"hosts Ioun items",
+]);
+
 function hasItemReference (value, itemId) {
 	if (!value || typeof value !== "object") return false;
 	if (Array.isArray(value)) return value.some(it => hasItemReference(it, itemId));
@@ -64,12 +69,21 @@ export function getInventoryTransferEligibility ({container, entry, quantity = e
 	if (quantity > availableQuantity) {
 		return {isEligible: false, blockers: ["not enough quantity remains"], maxQuantity: availableQuantity};
 	}
-	if (quantity < availableQuantity) return {isEligible: true, blockers: [], maxQuantity: availableQuantity};
 	const blockers = getWholeItemTransferBlockers({container, entry});
+	if (quantity < availableQuantity) {
+		const partialBlockers = blockers.filter(blocker => PARTIAL_TRANSFER_BLOCKERS.has(blocker));
+		return {
+			isEligible: !partialBlockers.length,
+			blockers: partialBlockers,
+			maxQuantity: partialBlockers.length ? 0 : availableQuantity,
+		};
+	}
 	return {
 		isEligible: !blockers.length,
 		blockers,
-		maxQuantity: blockers.length ? Math.max(0, availableQuantity - 1) : availableQuantity,
+		maxQuantity: blockers.length
+			? (blockers.some(blocker => PARTIAL_TRANSFER_BLOCKERS.has(blocker)) ? 0 : Math.max(0, availableQuantity - 1))
+			: availableQuantity,
 	};
 }
 

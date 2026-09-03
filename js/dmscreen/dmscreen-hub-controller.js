@@ -266,6 +266,7 @@ export class DmScreenHubController {
 			"xp.granted",
 			"item.granted",
 			"action.applied",
+			"party_inventory.invalidated",
 			"transfer.reserved",
 			"transfer.committed",
 			"transfer.rejected",

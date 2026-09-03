@@ -193,7 +193,7 @@ arbitrary spell prose.
 | `GET /api/campaigns/:campaignId/party-inventory` | Active member | none | Lazily created party inventory, entries, denomination currency |
 | `GET /api/campaigns/:campaignId/transfers` | Active member | none | Transfers visible to DM, actor, source owner, or target owner |
 | `POST /api/campaigns/:campaignId/transfers` | Active-member mutation; source owner or DM for party source | source/target kind+UUID, <=100 item quantities, nonnegative denomination currency | 201 transfer already in `reserved` state |
-| `POST /api/campaigns/:campaignId/transfers/:transferId/resolve` | Target owner or DM/co-DM mutation | accept/reject | committed or rejected transfer |
+| `POST /api/campaigns/:campaignId/transfers/:transferId/resolve` | Target owner or DM/co-DM; originating actor may reject | accept/reject | committed or rejected transfer |
 
 `sourceKind`/`targetKind` are `character` or `party_inventory`. Empty/insufficient transfers fail before a
 row is committed. Item quantities must be positive finite safe integers within the route schema limit. The
@@ -203,7 +203,8 @@ idempotency key with the same command replays its stored result rather than repe
 
 The server derives item eligibility and stack compatibility from canonical data. A whole stack is refused
 while equipped, attuned, container-linked, spell/component-linked, or otherwise referenced by Character Sheet
-state; a partial move is allowed only when every reference remains valid against the source copy. Such refusals
+state; a partial move is allowed only when every reference remains valid against the source copy and the
+transferred wrapper carries no child/container linkage that would be duplicated. Such refusals
 return `TRANSFER_ITEM_LINKED`. Destination stacks merge only when their complete transferable metadata matches;
 custom names, source/edition, charges, durability, notes, material/variant/component state, and other mutable
 fields therefore remain distinct when they differ.

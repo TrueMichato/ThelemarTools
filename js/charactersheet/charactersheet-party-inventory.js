@@ -11,6 +11,13 @@ import {
 
 const DM_ROLES = new Set(["dm", "co_dm"]);
 const MAX_SEEN_EVENT_KEYS = 2_000;
+const TERMINAL_ACCESS_ERROR_CODES = new Set([
+	"AUTH_REQUIRED",
+	"CAMPAIGN_NOT_FOUND",
+	"CHARACTER_CAMPAIGN_MISMATCH",
+	"CHARACTER_NOT_FOUND",
+	"FORBIDDEN",
+]);
 
 const ERROR_MESSAGES = {
 	CHARACTER_BUSY: "This character is busy with another authoritative change. Wait a moment, then try again.",
@@ -161,6 +168,7 @@ export class CharacterSheetPartyInventory {
 		this._refreshPromise = null;
 		this._partyFetchToken = null;
 		this._scheduledRefresh = false;
+		this._activationRetryTimer = null;
 		this._seenEventKeys = new Set();
 		this._inventoryObserver = null;
 		this._isDecorateScheduled = false;
@@ -175,7 +183,10 @@ export class CharacterSheetPartyInventory {
 		if (!this._realtime?.on) return;
 		this._unsubscribers.push(
 			this._realtime.on("inventoryTransfer", event => this._onInventoryTransfer(event)),
-			this._realtime.on("projectionInvalidated", () => this._scheduleRefresh({character: true})),
+			this._realtime.on("projectionInvalidated", () => {
+				if (this._active?.isActivationPending) void this._pActivate(this._active);
+				else this._scheduleRefresh({party: true});
+			}),
 			this._realtime.on("connectionState", state => this._onConnectionState(state)),
 		);
 	}
@@ -183,27 +194,65 @@ export class CharacterSheetPartyInventory {
 	async pAttach ({characterId, generation}) {
 		this.detach();
 		if (!this._isEnabled || typeof characterId !== "string" || !characterId) return false;
-		const active = {characterId, generation, token: Symbol("party-inventory"), isOwner: false};
+		const active = {
+			characterId,
+			generation,
+			token: Symbol("party-inventory"),
+			isOwner: false,
+			isActivationPending: true,
+			activationPromise: null,
+			needsActivationRetry: false,
+		};
 		this._active = active;
+		return this._pActivate(active);
+	}
 
-		let projection;
-		try {
-			projection = await this._api.pGetCharacterProjection({characterId});
-		} catch {
-			return false;
+	async _pActivate (active) {
+		if (!this._isCurrent(active)) return false;
+		if (active.activationPromise) {
+			active.needsActivationRetry = true;
+			return active.activationPromise;
 		}
-		if (!this._isCurrent(active) || projection?.kind !== "owner_truth") return false;
+		const promise = (async () => {
+			let projection;
+			try {
+				projection = await this._api.pGetCharacterProjection({characterId: active.characterId});
+			} catch (error) {
+				if (TERMINAL_ACCESS_ERROR_CODES.has(error?.code) && this._isCurrent(active)) this.detach();
+				else this._scheduleActivationRetry(active);
+				return false;
+			}
+			if (!this._isCurrent(active)) return false;
+			if (projection?.kind !== "owner_truth") {
+				this.detach();
+				return false;
+			}
 
-		active.isOwner = true;
-		this._mount();
-		this._bindInventoryUi();
-		this._isLoading = true;
-		this._render();
-		await this._pRefreshParty(active);
-		return this._isCurrent(active) && active.isOwner;
+			active.isOwner = true;
+			active.isActivationPending = false;
+			this._clearActivationRetry();
+			this._mount();
+			this._bindInventoryUi();
+			this._isLoading = true;
+			this._render();
+			this._refreshFlags = {character: true, party: true};
+			await this._pDrainRefresh();
+			return this._isCurrent(active) && active.isOwner;
+		})();
+		active.activationPromise = promise;
+		try {
+			return await promise;
+		} finally {
+			if (active.activationPromise === promise) active.activationPromise = null;
+			if (this._isCurrent(active) && active.isActivationPending && active.needsActivationRetry) {
+				active.needsActivationRetry = false;
+				queueMicrotask(() => void this._pActivate(active));
+			}
+		}
 	}
 
 	detach () {
+		this._clearActivationRetry();
 		this._active = null;
 		this._draft = null;
 		this._error = null;
@@ -216,8 +265,10 @@ export class CharacterSheetPartyInventory {
 		this._tokenByItemKey.clear();
 		this._seenEventKeys.clear();
 		this._refreshFlags = {character: false, party: false};
+		this._refreshPromise = null;
 		this._partyFetchToken = null;
 		this._scheduledRefresh = false;
+		this._connectionState = null;
 		this._isLoading = false;
 		this._isSubmitting = false;
 		this._inventoryObserver?.disconnect();
@@ -229,6 +280,23 @@ export class CharacterSheetPartyInventory {
 		}
 		this._root?.remove();
 		this._root = null;
+	}
+
+	_clearActivationRetry () {
+		if (this._activationRetryTimer == null) return;
+		clearTimeout(this._activationRetryTimer);
+		this._activationRetryTimer = null;
+	}
+
+	_scheduleActivationRetry (active) {
+		if (!this._isCurrent(active) || !active.isActivationPending || this._activationRetryTimer != null) return;
+		active.activationRetryCount = (active.activationRetryCount || 0) + 1;
+		const delay = Math.min(1_000 * (2 ** (active.activationRetryCount - 1)), 30_000);
+		this._activationRetryTimer = setTimeout(() => {
+			this._activationRetryTimer = null;
+			if (this._isCurrent(active) && active.isActivationPending) void this._pActivate(active);
+		}, delay);
+		this._activationRetryTimer?.unref?.();
 	}
 
 	destroy () {
@@ -257,6 +325,7 @@ export class CharacterSheetPartyInventory {
 			attrs: {
 				"aria-labelledby": "charsheet-party-inventory-title",
 				"data-charsheet-party-inventory": "",
+				tabindex: -1,
 			},
 		});
 		equipmentSection.insertAdjacentElement("afterend", this._root);
@@ -339,15 +408,16 @@ export class CharacterSheetPartyInventory {
 				: `${getEntryName(entry)} cannot be shared: ${blockers.join(", ")}`);
 			button.title = blockerText || `Move this stack to the party stash or pass it to another campaign character`;
 
-			row.querySelector(".charsheet__item-party-note")?.remove();
-			if (blockerText) {
+			const existingNote = row.querySelector(".charsheet__item-party-note");
+			if (!blockerText) existingNote?.remove();
+			else if (!existingNote) {
 				const note = createElement("span", {
 					className: "charsheet__item-party-note",
 					text: blockerText,
 				});
 				const details = row.querySelector(".charsheet__item-details") || row.querySelector(".charsheet__item-content");
 				details?.append(note);
-			}
+			} else if (existingNote.textContent !== blockerText) existingNote.textContent = blockerText;
 		}
 	}
 
@@ -375,6 +445,7 @@ export class CharacterSheetPartyInventory {
 			quantity: 1,
 			maxQuantity,
 			blockers,
+			entryName: getEntryName(entry),
 			destinationKind: kind === "party_inventory" ? "character" : "party_inventory",
 			recipientId: null,
 			returnToken,
@@ -382,6 +453,7 @@ export class CharacterSheetPartyInventory {
 			resolutionCommandId: getOpaqueToken(),
 			cancellationCommandId: getOpaqueToken(),
 			transfer: null,
+			needsStatusCheck: false,
 		};
 		this._error = null;
 		this._announcement = "";
@@ -399,7 +471,8 @@ export class CharacterSheetPartyInventory {
 	}
 
 	_onInventoryTransfer (event) {
-		if (!this._active?.isOwner || event?.campaignId !== this._campaignId) return;
+		if (!this._active || event?.campaignId !== this._campaignId) return;
+		if (!this._active.isOwner) return;
 		const key = event.eventId || `${event.type}:${event.sequence}`;
 		if (this._seenEventKeys.has(key)) return;
 		this._seenEventKeys.add(key);
@@ -411,8 +484,16 @@ export class CharacterSheetPartyInventory {
 	}
 
 	_onConnectionState (state) {
-		if (!this._active?.isOwner) return;
+		if (!this._active) return;
 		this._connectionState = state?.state || null;
+		if (state?.state === "access_lost") {
+			this.detach();
+			return;
+		}
+		if (!this._active.isOwner) {
+			if (state?.state === "live" && this._active.isActivationPending) void this._pActivate(this._active);
+			return;
+		}
 		if (state?.state === "live") this._scheduleRefresh({character: true, party: true});
 		else if (["reconnecting", "unavailable"].includes(state?.state)) this._render();
 	}
@@ -430,16 +511,18 @@ export class CharacterSheetPartyInventory {
 	}
 
 	async _pDrainRefresh () {
-		if (this._refreshPromise) {
-			const wasSuccessful = await this._refreshPromise;
+		const active = this._active;
+		const existingRefresh = this._refreshPromise;
+		if (existingRefresh?.active === active) {
+			const wasSuccessful = await existingRefresh.promise;
 			if (
-				this._isCurrent()
+				this._isCurrent(active)
 				&& (this._refreshFlags.character || this._refreshFlags.party)
 			) return (await this._pDrainRefresh()) && wasSuccessful;
 			return wasSuccessful;
 		}
-		const active = this._active;
-		this._refreshPromise = (async () => {
+		const refresh = {active, promise: null};
+		refresh.promise = (async () => {
 			let isSuccessful = true;
 			while (
 				this._isCurrent(active)
@@ -458,10 +541,11 @@ export class CharacterSheetPartyInventory {
 			}
 			return isSuccessful;
 		})();
+		this._refreshPromise = refresh;
 		try {
-			return await this._refreshPromise;
+			return await refresh.promise;
 		} finally {
-			this._refreshPromise = null;
+			if (this._refreshPromise === refresh) this._refreshPromise = null;
 			if (
 				this._isCurrent(active)
 				&& (this._refreshFlags.character || this._refreshFlags.party)
@@ -480,6 +564,12 @@ export class CharacterSheetPartyInventory {
 			this._api.pGetCampaignSnapshot({campaignId: this._campaignId}),
 		]);
 		if (!this._isCurrent(active) || this._partyFetchToken !== fetchToken) return false;
+		const accessError = [partyResult, snapshotResult]
+			.find(result => result.status === "rejected" && TERMINAL_ACCESS_ERROR_CODES.has(result.reason?.code));
+		if (accessError) {
+			this.detach();
+			return false;
+		}
 
 		const snapshot = snapshotResult.status === "fulfilled" ? snapshotResult.value : null;
 		const currentProjection = snapshot?.characters?.find(projection => getProjectionId(projection) === active.characterId);
@@ -718,9 +808,14 @@ export class CharacterSheetPartyInventory {
 		const entry = this._getEntry(this._draft);
 		const composer = createElement("form", {
 			className: "charsheet__party-inventory-composer",
-			attrs: {"aria-label": "Confirm inventory transfer"},
+			attrs: {
+				"aria-label": "Confirm inventory transfer",
+				"aria-busy": this._isSubmitting,
+				tabindex: -1,
+				"data-party-inventory-focus": "composer",
+			},
 		});
-		const title = createElement("h5", {text: `Move ${getEntryName(entry)}`});
+		const title = createElement("h5", {text: `Move ${entry ? getEntryName(entry) : this._draft.entryName}`});
 		const fields = createElement("div", {className: "charsheet__party-inventory-fields"});
 
 		const quantityField = createElement("label");
@@ -828,6 +923,7 @@ export class CharacterSheetPartyInventory {
 	_syncComposerSummary (composer) {
 		if (!this._draft) return;
 		const entry = this._getEntry(this._draft);
+		const entryName = entry ? getEntryName(entry) : this._draft.entryName;
 		const quantity = Number(this._draft.quantity);
 		const isQuantityValid = Number.isSafeInteger(quantity) && quantity >= 1 && quantity <= this._draft.maxQuantity;
 		const recipient = this._recipients.find(it => it.id === this._draft.recipientId);
@@ -838,7 +934,7 @@ export class CharacterSheetPartyInventory {
 				: recipient?.label || "the selected character";
 		const summary = composer.querySelector(".charsheet__party-inventory-confirmation");
 		summary.textContent = isQuantityValid
-			? `${quantity} × ${getEntryName(entry)} will move from ${this._draft.kind === "party_inventory" ? "the party stash" : "this character"} to ${destination}.${this._willRequireApproval() ? " The recipient must accept before it arrives." : ""}`
+			? `${quantity} × ${entryName} will move from ${this._draft.kind === "party_inventory" ? "the party stash" : "this character"} to ${destination}.${this._willRequireApproval() ? " The recipient must accept before it arrives." : ""}`
 			: `Enter a whole-number quantity from 1 to ${this._draft.maxQuantity}.`;
 		const submit = composer.querySelector("button[type='submit']");
 		const isReserved = !!this._draft.transfer;
@@ -863,7 +959,8 @@ export class CharacterSheetPartyInventory {
 		this._render();
 		if (!returnToken) return;
 		const returnButton = document.querySelector(`.charsheet__item-party-move[data-token="${CSS.escape(returnToken)}"]`)
-			|| this._root?.querySelector(`[data-party-inventory-focus="stash-${CSS.escape(returnToken)}"]`);
+			|| this._root?.querySelector(`[data-party-inventory-focus="stash-${CSS.escape(returnToken)}"]`)
+			|| this._root?.querySelector(`[data-party-inventory-focus="refresh"]`);
 		returnButton?.focus({preventScroll: true});
 	}
 
@@ -913,28 +1010,63 @@ export class CharacterSheetPartyInventory {
 		if (this._isSubmitting || !this._draft || !this._isCurrent()) return false;
 		const active = this._active;
 		const draft = this._draft;
-		const entry = this._getEntry(draft);
-		const container = this._getContainer(draft.kind);
-		const eligibility = getInventoryTransferEligibility({container, entry, quantity: draft.quantity});
-		if (!eligibility.isEligible) {
-			this._error = getBlockerText({blockers: eligibility.blockers, maxQuantity: eligibility.maxQuantity});
+		const isPartyEndpoint = draft.kind === "party_inventory" || draft.destinationKind === "party_inventory";
+		if (isPartyEndpoint && !this._partyInventory?.id) {
+			this._error = "The party stash is unavailable. Retry the stash refresh before transferring this item.";
 			this._render();
 			return false;
 		}
-		if (
-			draft.kind === "character"
-			&& draft.destinationKind === "character"
-			&& !this._recipients.some(recipient => recipient.id === draft.recipientId)
-		) {
-			this._error = "That recipient is no longer available. Choose another destination.";
-			this._render();
-			return false;
+		if (!draft.transfer) {
+			const entry = this._getEntry(draft);
+			const container = this._getContainer(draft.kind);
+			const eligibility = getInventoryTransferEligibility({container, entry, quantity: draft.quantity});
+			if (!eligibility.isEligible) {
+				this._error = getBlockerText({blockers: eligibility.blockers, maxQuantity: eligibility.maxQuantity});
+				this._render();
+				return false;
+			}
+			if (
+				draft.kind === "character"
+				&& draft.destinationKind === "character"
+				&& !this._recipients.some(recipient => recipient.id === draft.recipientId)
+			) {
+				this._error = "That recipient is no longer available. Choose another destination.";
+				this._render();
+				return false;
+			}
 		}
 
 		this._isSubmitting = true;
 		this._error = null;
 		this._render();
 		try {
+			if (draft.transfer && draft.needsStatusCheck) {
+				const transfers = await this._api.pListTransfers({campaignId: this._campaignId});
+				if (!this._isCurrent(active) || this._draft !== draft) return false;
+				const transfer = transfers.find(it => it.id === draft.transfer.id);
+				if (!transfer) throw Object.assign(new Error("Transfer was not found"), {code: "TRANSFER_NOT_FOUND"});
+				draft.transfer = transfer;
+				draft.needsStatusCheck = false;
+				if (transfer.status !== "reserved") {
+					const messages = {
+						committed: "Transfer complete. Both inventories are up to date.",
+						rejected: "Transfer was rejected. The reserved items were restored.",
+						cancelled: "Transfer was cancelled. The reserved items were restored.",
+						expired: "Transfer expired. The reserved items were restored.",
+					};
+					const message = messages[transfer.status];
+					if (!message) throw Object.assign(new Error("Transfer is no longer pending"), {code: "TRANSFER_NOT_FOUND"});
+					this._refreshFlags.character = true;
+					this._refreshFlags.party = true;
+					if (!await this._pDrainRefresh()) throw Object.assign(new Error("Authoritative refresh failed"), {code: "NETWORK_UNAVAILABLE"});
+					if (!this._isCurrent(active) || this._draft !== draft) return false;
+					this._isSubmitting = false;
+					this._closeDraft();
+					this._fnToast?.({type: transfer.status === "committed" ? "success" : "info", content: message});
+					this._announce(message);
+					return true;
+				}
+			}
 			if (draft.kind === "character" && !draft.transfer) {
 				const isSaved = await this._fnSaveCharacter?.();
 				if (!isSaved) throw Object.assign(new Error("Save failed"), {code: "CHARACTER_BUSY"});
@@ -946,7 +1078,7 @@ export class CharacterSheetPartyInventory {
 					destinationKind: draft.destinationKind,
 					activeCharacterId: active.characterId,
 					recipientId: draft.recipientId,
-					partyInventoryId: this._partyInventory.id,
+					partyInventoryId: this._partyInventory?.id,
 				});
 				const result = await this._api.pProposeTransfer({
 					campaignId: this._campaignId,
@@ -980,13 +1112,13 @@ export class CharacterSheetPartyInventory {
 				? "Transfer reserved. The recipient can accept it from the campaign inbox."
 				: "Transfer complete. Both inventories are up to date.";
 			this._isSubmitting = false;
-			this._draft = null;
+			this._closeDraft();
 			this._fnToast?.({type: "success", content: message});
-			this._render();
 			this._announce(message);
 			return true;
 		} catch (error) {
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
+			if (draft.transfer) draft.needsStatusCheck = true;
 			this._error = getErrorMessage(error);
 			this._render();
 			return false;
@@ -1007,6 +1139,7 @@ export class CharacterSheetPartyInventory {
 	_captureFocus () {
 		const active = document.activeElement;
 		if (!this._root?.contains(active)) return null;
+		if (active === this._root) return {isRoot: true};
 		const key = active.dataset?.partyInventoryFocus;
 		if (!key) return null;
 		return {
@@ -1018,10 +1151,15 @@ export class CharacterSheetPartyInventory {
 
 	_restoreFocus (focus) {
 		if (!focus) return;
-		const next = this._root?.querySelector(`[data-party-inventory-focus="${CSS.escape(focus.key)}"]`);
-		if (!next || next.disabled) return;
-		next.focus({preventScroll: true});
-		if (focus.selectionStart != null && typeof next.setSelectionRange === "function") {
+		const next = focus.key
+			? this._root?.querySelector(`[data-party-inventory-focus="${CSS.escape(focus.key)}"]`)
+			: null;
+		const target = next && !next.disabled
+			? next
+			: this._root?.querySelector(`[data-party-inventory-focus="composer"]`) || this._root;
+		if (!target) return;
+		target.focus({preventScroll: true});
+		if (target === next && focus.selectionStart != null && typeof next.setSelectionRange === "function") {
 			next.setSelectionRange(focus.selectionStart, focus.selectionEnd);
 		}
 	}

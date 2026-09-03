@@ -72,7 +72,8 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 		});
 		await dm.acceptFirstPendingTransfer({
 			campaignId,
-			expectedText: ["Rowan Vale", "1 × Longsword · PHB", "3 CP", "2 SP", "1 EP", "3 GP", "1 PP", "Rowan", "Party inventory"],
+			expectedText: ["Rowan", "1 × Longsword · PHB", "3 CP", "2 SP", "1 EP", "3 GP", "1 PP", "Party inventory"],
+			expectedAbsentText: ["Rowan Vale"],
 		});
 		await dm.expectTransferItemAvailable({sourceName: "Party inventory", itemName: "Longsword"});
 		const transferredCharacter = await player.getCharacter(character.id);

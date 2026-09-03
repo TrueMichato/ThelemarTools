@@ -22,6 +22,7 @@ const _INVENTORY_TRANSFER_EVENT_TYPES = new Set([
 	"transfer.rejected",
 	"transfer.reserved",
 ]);
+const _PARTY_INVENTORY_INVALIDATION_EVENT_TYPE = "party_inventory.invalidated";
 
 export class CharacterSheetRealtimeCoordinator {
 	constructor ({
@@ -230,15 +231,20 @@ export class CharacterSheetRealtimeCoordinator {
 			return;
 		}
 
-		if (_INVENTORY_TRANSFER_EVENT_TYPES.has(event.type)) {
+		if (
+			_INVENTORY_TRANSFER_EVENT_TYPES.has(event.type)
+			|| event.type === _PARTY_INVENTORY_INVALIDATION_EVENT_TYPE
+		) {
 			const sourceKind = event.payload?.sourceKind;
 			const targetKind = event.payload?.targetKind;
-			const isCurrentCharacterAffected = (
-				sourceKind === "character" && event.payload?.sourceId === active.characterId
-			) || (
-				targetKind === "character" && event.payload?.targetId === active.characterId
+			const isPartyInvalidation = event.type === _PARTY_INVENTORY_INVALIDATION_EVENT_TYPE;
+			const isCurrentCharacterAffected = !isPartyInvalidation && (
+				(sourceKind === "character" && event.payload?.sourceId === active.characterId)
+				|| (targetKind === "character" && event.payload?.targetId === active.characterId)
 			);
-			const isPartyInventoryAffected = sourceKind === "party_inventory" || targetKind === "party_inventory";
+			const isPartyInventoryAffected = isPartyInvalidation
+				|| sourceKind === "party_inventory"
+				|| targetKind === "party_inventory";
 			if (isCurrentCharacterAffected || isPartyInventoryAffected) {
 				const eventKey = event.id || `${event.type}:${event.sequence}`;
 				if (active.inventoryEventKeys.has(eventKey)) return;

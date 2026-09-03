@@ -199,6 +199,25 @@ describe("inventory escrow", () => {
 		expect(escrow.items[0].quantity).toBe(3);
 	});
 
+	it("refuses partial stacks whose structural links cannot be partitioned", () => {
+		const linked = normalizeCharacterInventory({
+			inventory: [{
+				id: "quivers",
+				item: {name: "Quiver", containedItems: ["private-arrow-id"]},
+				quantity: 2,
+			}],
+			currency: {},
+		});
+
+		expect(() => removeTransferPayload({
+			container: linked,
+			payload: {items: [{entryId: "quivers", quantity: 1}]},
+		})).toThrow(expect.objectContaining({
+			code: "TRANSFER_ITEM_LINKED",
+			details: {entryId: "quivers", blockers: ["contains items"]},
+		}));
+	});
+
 	it("merges compatible stacks at the destination", () => {
 		const {escrow} = removeTransferPayload({
 			container: source,
@@ -305,7 +324,15 @@ describe("inventory escrow", () => {
 			.toThrow(expect.objectContaining({code: "NUMERIC_INVALID"}));
 	});
 
-	it.each([1.5, Number.MAX_SAFE_INTEGER + 1])("rejects unsafe or fractional quantities: %s", quantity => {
+	it("allows existing fractional stacks without allowing fractional transfer requests", () => {
+		expect(normalizeCharacterInventory({inventory: [{item: {name: "Flour"}, quantity: 0.6667}]}).inventory[0].quantity)
+			.toBe(0.6667);
+		expect(() => removeTransferPayload({container: source, payload: {items: [{entryId: "arrows", quantity: 1.5}]}}))
+			.toThrow(expect.objectContaining({code: "NUMERIC_INVALID"}));
+	});
+
+	it("rejects quantities outside the safe numeric range", () => {
+		const quantity = Number.MAX_SAFE_INTEGER + 1;
 		expect(() => normalizeCharacterInventory({inventory: [{item: {name: "Arrow"}, quantity}]}))
 			.toThrow(expect.objectContaining({code: "NUMERIC_INVALID"}));
 		expect(() => removeTransferPayload({container: source, payload: {items: [{entryId: "arrows", quantity}]}}))

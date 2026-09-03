@@ -1007,10 +1007,19 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer reserved.");
 	}
 
-	async acceptFirstPendingTransfer ({campaignId, expectedText}: {campaignId: string; expectedText: string[]}): Promise<void> {
+	async acceptFirstPendingTransfer ({
+		campaignId,
+		expectedText,
+		expectedAbsentText = [],
+	}: {
+		campaignId: string;
+		expectedText: string[];
+		expectedAbsentText?: string[];
+	}): Promise<void> {
 		await this.gotoCampaign(campaignId);
 		const transfer = this.page.locator("#campaign-pending-transfers .hub-data-row").first();
 		for (const text of expectedText) await expect(transfer).toContainText(text);
+		for (const text of expectedAbsentText) await expect(transfer).not.toContainText(text);
 		const button = this.page.locator("#campaign-pending-transfers button", {hasText: "Accept"}).first();
 		await expect(button).toBeVisible();
 		await button.click();

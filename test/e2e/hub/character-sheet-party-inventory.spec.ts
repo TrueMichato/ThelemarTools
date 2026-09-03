@@ -69,7 +69,8 @@ test("owned Character Sheets reconcile authoritative party inventory across devi
 		await player.focusInventorySearch();
 		await dm.hub.acceptFirstPendingTransfer({
 			campaignId,
-			expectedText: ["Rowan Vale", "2 × Rations · PHB", "Rowan", "Party inventory"],
+			expectedText: ["Rowan", "2 × Rations · PHB", "Party inventory"],
+			expectedAbsentText: ["Rowan Vale"],
 		});
 		await player.expectStashQuantity({itemName: "Rations", quantity: 2});
 		await player.expectInventorySearchStillFocused();
@@ -82,7 +83,8 @@ test("owned Character Sheets reconcile authoritative party inventory across devi
 		});
 		await recipient.hub.acceptFirstPendingTransfer({
 			campaignId,
-			expectedText: ["Rowan Vale", "1 × Rations · PHB", "Rowan", "Mira"],
+			expectedText: ["Rowan", "1 × Rations · PHB", "Mira"],
+			expectedAbsentText: ["Rowan Vale"],
 		});
 		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 2});
 		await recipient.expectCharacterQuantity({characterId: recipientCharacter.id, itemName: "Rations", quantity: 6});

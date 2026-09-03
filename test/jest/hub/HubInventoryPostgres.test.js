@@ -12,6 +12,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 	let dm;
 	let sourceOwner;
 	let targetOwner;
+	let observer;
 	let campaign;
 	let sourceCharacter;
 	let targetCharacter;
@@ -60,6 +61,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		dm = await pCreateAccount("Inventory DM");
 		sourceOwner = await pCreateAccount("Inventory Source");
 		targetOwner = await pCreateAccount("Inventory Target");
+		observer = await pCreateAccount("Inventory Observer");
 		campaign = (await store.pCreateCampaign({
 			accountId: dm.id,
 			name: `${prefix} campaign`,
@@ -67,6 +69,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		})).campaign;
 		await pJoinCampaign(sourceOwner);
 		await pJoinCampaign(targetOwner);
+		await pJoinCampaign(observer);
 
 		sourceCharacter = (await store.pCreateCharacter({
 			accountId: sourceOwner.id,
@@ -76,6 +79,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 				inventory: [
 					{id: "maps", item: {name: "Map", source: "HB", weight: 0.1}, quantity: 4, note: "Secret route"},
 					{id: "linked", item: {name: "Linked Focus", source: "HB"}, quantity: 1, equipped: true},
+					{id: "flour", item: {name: "Flour", source: "HB"}, quantity: 0.6667},
 				],
 				currency: {},
 			},
@@ -116,6 +120,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		const deposit = await store.pProposeTransfer(depositInput);
 		await expect(store.pProposeTransfer(depositInput)).resolves.toEqual(JSON.parse(JSON.stringify(deposit)));
 		expect((await pReadCharacter(sourceOwner.id, sourceCharacter.id)).data.inventory.find(it => it.id === "maps").quantity).toBe(2);
+		expect((await pReadCharacter(sourceOwner.id, sourceCharacter.id)).data.inventory.find(it => it.id === "flour").quantity).toBe(0.6667);
 
 		const acceptDepositInput = {
 			accountId: dm.id,
@@ -158,6 +163,24 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			expect.objectContaining({id: "public-map", note: "Public route", quantity: 1}),
 			expect.objectContaining({note: "Secret route", quantity: 1}),
 		]));
+		const sourceEvent = (await store.pListVisibleEvents({accountId: sourceOwner.id, campaignId: campaign.id}))
+			.find(event => event.aggregateId === directPass.transfer.id && event.type === "transfer.reserved");
+		expect(sourceEvent).toMatchObject({
+			actorAccountId: sourceOwner.id,
+			visibleAccountIds: null,
+			payload: {sourceKind: "character", sourceId: sourceCharacter.id, targetKind: "character"},
+		});
+		expect(sourceEvent.payload).not.toHaveProperty("targetId");
+		const targetEvent = (await store.pListVisibleEvents({accountId: targetOwner.id, campaignId: campaign.id}))
+			.find(event => event.aggregateId === directPass.transfer.id && event.type === "transfer.reserved");
+		expect(targetEvent).toMatchObject({
+			actorAccountId: null,
+			visibleAccountIds: null,
+			payload: {sourceKind: "character", targetKind: "character", targetId: targetCharacter.id},
+		});
+		expect(targetEvent.payload).not.toHaveProperty("sourceId");
+		expect((await store.pListVisibleEvents({accountId: observer.id, campaignId: campaign.id}))
+			.some(event => event.aggregateType === "transfer")).toBe(false);
 
 		const withdraw = await store.pProposeTransfer({
 			accountId: dm.id,
@@ -226,5 +249,27 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		await expect(store.pResolveTransfer(rejectInput)).resolves.toEqual(JSON.parse(JSON.stringify(first)));
 		const restored = await pReadCharacter(sourceOwner.id, sourceCharacter.id);
 		expect(restored.data.inventory.find(it => it.id === "maps")).toEqual(before.data.inventory.find(it => it.id === "maps"));
+
+		const actorCancelled = await store.pProposeTransfer({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: sourceCharacter.id,
+			targetKind: "character",
+			targetId: targetCharacter.id,
+			payload: {items: [{entryId: "maps", quantity: 1}]},
+			idempotencyKey: `${prefix}-actor-cancel`,
+		});
+		const actorCancelInput = {
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			transferId: actorCancelled.transfer.id,
+			decision: "reject",
+			idempotencyKey: `${prefix}-actor-cancel-resolve`,
+		};
+		const cancelled = await store.pResolveTransfer(actorCancelInput);
+		await expect(store.pResolveTransfer(actorCancelInput)).resolves.toEqual(JSON.parse(JSON.stringify(cancelled)));
+		expect((await pReadCharacter(sourceOwner.id, sourceCharacter.id)).data.inventory.find(it => it.id === "maps"))
+			.toEqual(before.data.inventory.find(it => it.id === "maps"));
 	});
 });

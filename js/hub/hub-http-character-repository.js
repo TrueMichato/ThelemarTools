@@ -1,5 +1,5 @@
 import {HubApiClient} from "./hub-api-client.js";
-import {diffJson, rebaseJsonChanges} from "./hub-json-patch.js";
+import {applyJsonPatch, diffJson, rebaseJsonChanges} from "./hub-json-patch.js";
 import {HubBroadcastSync} from "./hub-broadcast-sync.js";
 import {getCharacterOperationRouting} from "./hub-character-operation-events.js";
 import {
@@ -175,31 +175,34 @@ export class HubHttpCharacterRepository {
 			if (canonical.revision < accepted.revision) return {status: "stale"};
 			if (canonical.revision === accepted.revision && !diffJson(accepted.data, canonical.data).length) return {status: "unchanged"};
 
+			this._rebaseConflictForAuthoritative({
+				store: this._conflicts,
+				canonicalId,
+				accepted,
+				canonical,
+			});
+			this._rebaseConflictForAuthoritative({
+				store: this._liveConflicts,
+				canonicalId,
+				accepted,
+				canonical,
+			});
 			const liveData = fnGetLiveData?.();
 			const existingConflict = this._conflicts.get(canonicalId);
 			if (existingConflict) {
-				const next = {
-					...existingConflict,
-					server: structuredClone(canonical.data),
-					serverDocument: structuredClone(canonical),
-				};
-				next.conflicts = rebaseJsonChanges({base: next.base, local: next.local, remote: next.server}).conflicts;
-				next.coverage = {
-					...(next.coverage || {}),
-					server: serializeCoverage(createCoverage({revision: canonical.revision})),
-				};
-				this._conflicts.set(canonicalId, next);
-				return {status: "conflict", conflicts: structuredClone(next.conflicts)};
+				return {status: "conflict", conflicts: structuredClone(existingConflict.conflicts)};
 			}
 
 			const book = this._getCoverageBook(canonicalId);
 			const staged = {};
 			const conflicts = [];
+			const authoritativeDiscarded = {};
 			const stageRebase = (name, local) => {
 				if (local === undefined) return;
-				const rebased = rebaseJsonChanges({base: accepted.data, local, remote: canonical.data});
+				const rebased = this._rebaseAuthoritativeCandidate({base: accepted.data, local, remote: canonical.data});
 				if (rebased.isConflict) conflicts.push(...rebased.conflicts.map(conflict => ({track: name, ...conflict})));
-				else staged[name] = rebased.document;
+				if (rebased.isConflict) authoritativeDiscarded[name] = structuredClone(local);
+				staged[name] = rebased.document;
 			};
 			stageRebase("live", liveData);
 			if (this._latestSubmitted.has(canonicalId)) stageRebase("latestSubmitted", this._latestSubmitted.get(canonicalId));
@@ -222,6 +225,7 @@ export class HubHttpCharacterRepository {
 						local: serializeCoverage(book.live),
 						server: serializeCoverage(createCoverage({revision: canonical.revision})),
 					},
+					authoritativeDiscarded,
 				};
 				this._conflicts.set(canonicalId, recovery);
 				return {status: "conflict", conflicts: structuredClone(conflicts)};
@@ -250,6 +254,7 @@ export class HubHttpCharacterRepository {
 					appliedOperationIds: book.latestSubmitted.appliedOperationIds,
 				});
 			}
+
 			if (Object.hasOwn(staged, "failedWrite")) {
 				this._failedWrites.set(canonicalId, {...staged.failedWrite, id: canonicalId});
 				this._recoveredBases.set(canonicalId, structuredClone(canonical.data));
@@ -267,6 +272,49 @@ export class HubHttpCharacterRepository {
 				liveNext: Object.hasOwn(staged, "live") ? structuredClone(staged.live) : undefined,
 			};
 		});
+	}
+
+	_rebaseAuthoritativeCandidate ({base, local, remote}) {
+		const rebased = rebaseJsonChanges({base, local, remote});
+		if (!rebased.isConflict) return rebased;
+		const conflictingPaths = new Set(rebased.conflicts.map(conflict => conflict.localPath));
+		// A recovery choice may reapply disjoint local edits, but must never overwrite
+		// authoritative escrow changes at an overlapping path.
+		return {
+			...rebased,
+			document: applyJsonPatch(remote, rebased.patches.filter(patch => !conflictingPaths.has(patch.path))),
+		};
+	}
+
+	_rebaseConflictForAuthoritative ({store, canonicalId, accepted, canonical}) {
+		const conflict = store.get(canonicalId);
+		if (!conflict) return;
+		const next = {
+			...conflict,
+			server: structuredClone(canonical.data),
+			serverDocument: structuredClone(canonical),
+			coverage: {...(conflict.coverage || {})},
+			authoritativeDiscarded: {...(conflict.authoritativeDiscarded || {})},
+		};
+		for (const key of ["base", "local"]) {
+			const rebased = this._rebaseAuthoritativeCandidate({
+				base: accepted.data,
+				local: conflict[key],
+				remote: canonical.data,
+			});
+			next[key] = rebased.document;
+			if (rebased.isConflict) next.authoritativeDiscarded[key] = structuredClone(conflict[key]);
+			const coverage = this._getConflictCoverage(conflict, key);
+			coverage.revision = canonical.revision;
+			next.coverage[key] = serializeCoverage(coverage);
+		}
+		const serverCoverage = this._getConflictCoverage(conflict, "server");
+		serverCoverage.revision = canonical.revision;
+		next.coverage.server = serializeCoverage(serverCoverage);
+		const rebased = rebaseJsonChanges({base: next.base, local: next.local, remote: next.server});
+		next.conflicts = rebased.conflicts;
+		next.isResolved = !rebased.isConflict;
+		store.set(canonicalId, next);
 	}
 
 	// #region Operation-aware reconciliation (ADR 0012)

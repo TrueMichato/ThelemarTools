@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import {isDeepStrictEqual} from "node:util";
-import {getWholeItemTransferBlockers} from "../../js/hub/hub-inventory-contract.js";
+import {getInventoryTransferEligibility} from "../../js/hub/hub-inventory-contract.js";
 import {getHealedHp, resolveApplicableMaxHp} from "../../js/hub/hub-semantic-hp.js";
 import {HubStoreError} from "./hub-store-error.js";
 
@@ -55,7 +55,7 @@ export function normalizeInventory (inventory = []) {
 	return inventory.map(entry => ({
 		...structuredClone(entry),
 		id: entry.id || crypto.randomUUID(),
-		quantity: getFiniteNumber(entry.quantity, {label: "Item quantity", fallback: 1, minimum: 1, isInteger: true}),
+		quantity: getFiniteNumber(entry.quantity, {label: "Item quantity", fallback: 1, minimum: Number.MIN_VALUE}),
 	}));
 }
 
@@ -152,16 +152,13 @@ export function removeTransferPayload ({container, payload}) {
 		if (!entry || quantity <= 0 || entry.quantity < quantity) {
 			throw new HubStoreError("TRANSFER_INSUFFICIENT", `Inventory entry is unavailable.`, {status: 409});
 		}
-		const isWholeItem = entry.quantity === quantity;
-		if (isWholeItem) {
-			const blockers = getWholeItemTransferBlockers({container: out, entry});
-			if (blockers.length) {
-				throw new HubStoreError(
-					"TRANSFER_ITEM_LINKED",
-					`Unequip, unattune, and detach this item before transferring it: ${blockers.join(", ")}.`,
-					{status: 409, details: {entryId: entry.id, blockers}},
-				);
-			}
+		const eligibility = getInventoryTransferEligibility({container: out, entry, quantity});
+		if (!eligibility.isEligible) {
+			throw new HubStoreError(
+				"TRANSFER_ITEM_LINKED",
+				`Unequip, unattune, and detach this item before transferring it: ${eligibility.blockers.join(", ")}.`,
+				{status: 409, details: {entryId: entry.id, blockers: eligibility.blockers}},
+			);
 		}
 		escrowItems.push({...structuredClone(entry), quantity, _sourceIndex: sourceIndexes.get(entry.id)});
 		entry.quantity -= quantity;

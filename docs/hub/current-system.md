@@ -146,7 +146,8 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
 - XP/item grants are audited semantic commands; XP does not perform level-up choices.
 - Party currency is denomination-based (`cp`, `sp`, `ep`, `gp`, `pp`).
 - Transfers reserve source assets in escrow before acceptance.
-- Partial stacks preserve the source wrapper identity.
+- Partial stacks preserve the source wrapper identity; wrappers which contain items or host Ioun items cannot
+  split because their structural links are non-fungible.
 - A committed cross-container item receives a new destination identity unless it merges with a deeply
   metadata-compatible stack.
 - Rejection/cancellation restores the original source identity and index.
@@ -157,6 +158,9 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
   open/reconnect/relevant events, and reconcile affected character truth through the HTTP repository rather
   than mutating local state from transfer payloads. Local and signed-out sheets retain the original inventory
   UI and do not install stash listeners or make party-inventory requests.
+- Transfer lifecycle events are restricted to DMs and involved owners, with non-owned endpoint/account
+  identifiers removed per viewer. A metadata-only `party_inventory.invalidated` event tells all members to
+  refresh the shared stash without exposing transfer endpoints.
 - The shared inventory contract exposes transfer eligibility and weight summaries for downstream awarding and
   carry-capacity work without imposing either feature's future UI or policy.
 
