@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import pg from "pg";
 import {applyJsonPatch} from "../../js/hub/hub-json-patch.js";
+import {hasFreshCarryWrite, stripCarryAuthority} from "../../js/hub/hub-carry-authority.js";
+import {getExpectedCarryBasis} from "./carry-basis.js";
 import {getPendingEffectPresentation} from "../../js/hub/hub-effect-presentation.js";
 import {HubStoreError} from "./hub-store-error.js";
 import {
@@ -1369,7 +1371,36 @@ export class PostgresHubStore {
 		const authorizationClass = character.ownerAccountId === accountId
 			? "owner"
 			: (["dm", "co_dm"].includes(row.requester_role) ? "dm" : "peer");
-		return projectCharacterForRequester({character, authorizationClass});
+		const expectedBasis = getExpectedCarryBasis({
+			character,
+			...(await this._pGetCarryBasisContext(character.campaignId)),
+		});
+		return projectCharacterForRequester({character, authorizationClass, expectedBasis});
+	}
+
+	/**
+	 * The campaign's active rules version and brew content hash, which determine whether a
+	 * stored carry summary still describes the world the character is in. Selects only the
+	 * identifying columns — never the brew `content`, which can be a megabyte.
+	 * @param {?string} campaignId
+	 * @returns {Promise<{campaign: ?object, rulesVersion: ?object, brewBundle: ?object}>}
+	 */
+	async _pGetCarryBasisContext (campaignId) {
+		if (!campaignId) return {campaign: null, rulesVersion: null, brewBundle: null};
+		const result = await this._pool.query(`
+			SELECT b.content_hash, r.id AS rules_id, r.rules
+			FROM hub.campaigns c
+			LEFT JOIN hub.brew_bundle_versions b ON b.id = c.active_brew_bundle_version_id
+			LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
+			WHERE c.id = $1
+		`, [campaignId]);
+		if (!result.rowCount) return {campaign: null, rulesVersion: null, brewBundle: null};
+		const row = result.rows[0];
+		return {
+			campaign: {id: campaignId, activeRulesVersionId: row.rules_id || null},
+			rulesVersion: row.rules_id ? {id: row.rules_id, rules: row.rules} : null,
+			brewBundle: row.content_hash ? {contentHash: row.content_hash} : null,
+		};
 	}
 
 	/**
@@ -1395,14 +1426,15 @@ export class PostgresHubStore {
 	 * Project one character, isolating failures so a single corrupt policy cannot abort a
 	 * batch or leak truth into the rest of it.
 	 */
-	_projectOne ({accountId, membership, character}) {
+	_projectOne ({accountId, membership, character, basisContext = null}) {
 		const authorizationClass = character.ownerAccountId === accountId
 			? "owner"
 			: (["dm", "co_dm"].includes(membership.role) ? "dm" : "peer");
+		const expectedBasis = getExpectedCarryBasis({character, ...(basisContext || {})});
 		try {
-			return projectCharacterForRequester({character, authorizationClass});
+			return projectCharacterForRequester({character, authorizationClass, expectedBasis});
 		} catch {
-			return computePeerProfile({character: {...character, projectionPolicy: null}});
+			return computePeerProfile({character: {...character, projectionPolicy: null}, expectedBasis});
 		}
 	}
 
@@ -1437,8 +1469,16 @@ export class PostgresHubStore {
 			WHERE c.campaign_id = $1 AND c.status = 'active'
 			ORDER BY lower(c.data->>'name'), c.id
 		`, [campaignId]);
+		// Resolved once per request and shared by every character, so the list and the
+		// single-character read can never disagree about whether a summary is current.
+		const basisContext = await this._pGetCarryBasisContext(campaignId);
 		return {
-			projections: result.rows.map(row => this._projectOne({accountId, membership, character: getCharacter(row)})),
+			projections: result.rows.map(row => this._projectOne({
+				accountId,
+				membership,
+				character: getCharacter(row),
+				basisContext,
+			})),
 			roster: this._getCampaignRoster({membership, rows: result.rows}),
 		};
 	}
@@ -1731,6 +1771,10 @@ export class PostgresHubStore {
 				});
 			}
 			const data = applyJsonPatch(character.data, patches);
+			// The current sheet writes a fresh `/carry` on every save whose document
+			// otherwise changes, so its absence identifies a writer that predates carry
+			// authority. An allowlist of "carry-relevant paths" could never be complete.
+			if (patches?.length && !hasFreshCarryWrite(patches)) stripCarryAuthority(data);
 			validateCloudCharacterData(data);
 			const updated = await client.query(`
 				UPDATE hub.characters
@@ -3402,6 +3446,9 @@ export class PostgresHubStore {
 			fnMutate: data => {
 				const out = normalizeCharacterInventory(data);
 				out.inventory.push(entry);
+				// The inventory changed with no sheet present to recompute the summary the
+				// sheet had derived from the previous one, so it must not survive.
+				stripCarryAuthority(out);
 				return out;
 			},
 			eventType: "item.granted",
@@ -3530,6 +3577,12 @@ export class PostgresHubStore {
 				character,
 				container: character.data,
 				async pWrite (container) {
+					// The one place a transfer writes a character participant: escrow
+					// reservation, acceptance, and reject / cancel / expiry restore all land
+					// here. Deliberately NOT in `normalizeCharacterInventory()` above, which
+					// also runs for a container that is merely READ (a proposal reads the
+					// target without modifying it) and on create/import.
+					stripCarryAuthority(container);
 					validateCloudCharacterData(container);
 					character.data = container;
 					const updated = await client.query(`UPDATE hub.characters SET data = $2::jsonb, revision = revision + 1, updated_at = now() WHERE id = $1 RETURNING *`, [id, JSON.stringify(character.data)]);

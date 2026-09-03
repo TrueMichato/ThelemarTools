@@ -670,7 +670,29 @@ describe("Integration Tests", () => {
 			state.addItem({name: "Rations (10 days)", weight: 20});
 
 			expect(state.getTotalWeight()).toBe(96);
-			expect(state.getEncumbranceLevel()).toBe("normal"); // Under 80 lbs (STR * 5)
+			// STR 16 → encumbered above STR × 5 = 80 lb, per the PHB variant Encumbrance
+			// rule ("in excess of 5 times your Strength score"). 96 lb is over that.
+			//
+			// This assertion previously expected "normal" while its own comment said
+			// "Under 80 lbs (STR * 5)" — 96 is not under 80. The comment described the real
+			// rule; the assertion passed only because getEncumbranceLevel() used a 50%-of-
+			// capacity threshold (120 lb) that no rulebook defines and that disagreed with
+			// the inventory carry bar rendered beside it, which already used STR × 5.
+			expect(state.getEncumbranceLevel()).toBe("encumbered");
+		});
+
+		it("encumbrance tiers key off the Strength score, not carrying capacity", () => {
+			// PHB "Size and Strength" scales carrying capacity and push/drag/lift; it says
+			// nothing about the variant Encumbrance tiers. So doubling capacity via size
+			// must NOT double the threshold at which a character becomes encumbered.
+			state.setSetting("thelemar_carryWeight", false);
+			state.addItem({name: "Ballast", weight: 81});
+
+			expect(state.getEncumbranceLevel()).toBe("encumbered");
+
+			state.setSize("large");
+			expect(state.getCarryingCapacity()).toBe(480); // capacity doubled...
+			expect(state.getEncumbranceLevel()).toBe("encumbered"); // ...threshold did not
 		});
 	});
 });

@@ -1,5 +1,6 @@
 import {HubStoreError} from "./hub-store-error.js";
 import {getDerivedStats} from "./character-derived-stats.js";
+import {resolveCarryAuthority} from "../../js/hub/hub-carry-authority.js";
 
 /**
  * Authorization-scoped character projections (ADR 0011).
@@ -198,7 +199,7 @@ function getItemName (entry) {
  * Convert a canonical character document into the fixed, type-validated catalog.
  * Every value here is safe to share *if policy allows it*; policy is applied separately.
  */
-export function buildCharacterViewModel (characterData) {
+export function buildCharacterViewModel (characterData, {expectedBasis = undefined} = {}) {
 	const data = characterData && typeof characterData === "object" && !Array.isArray(characterData)
 		? characterData
 		: {};
@@ -292,18 +293,30 @@ export function buildCharacterViewModel (characterData) {
 	};
 
 	const carrySummary = {};
-	const carried = toFiniteNumber(
-		typeof data.currentWeight === "number"
-			? data.currentWeight
-			: inventoryEntries.reduce((acc, entry) => acc + ((toFiniteNumber(entry.weight ?? entry.item?.weight, {min: 0, max: MAX_WEIGHT}) || 0) * (toFiniteNumber(entry.quantity, {min: 0, max: MAX_QUANTITY}) || 1)), 0),
-		{min: 0, max: MAX_WEIGHT},
-	);
-	if (carried != null) carrySummary.carried = carried;
-	const capacityOverride = toFiniteNumber(data.overrides?.carryCapacity, {min: 0, max: MAX_WEIGHT});
-	const capacity = data.overrides?.carryCapacity != null && capacityOverride != null
-		? capacityOverride
-		: toFiniteNumber(abilities.str * 15 * (data.powerfulBuild ? 2 : 1), {min: 0, max: MAX_WEIGHT});
-	if (capacity != null) carrySummary.capacity = capacity;
+	// Carry truth is materialised by `CharacterSheetState.toJson()` and validated here; it
+	// is never recomputed. The previous `abilities.str * 15 * (powerfulBuild ? 2 : 1)` was a
+	// second implementation that knew nothing about the Thelemar passive-Might rule, creature
+	// size, flat bonuses, item multipliers or extradimensional containers — so a DM watching
+	// the Party Tracker saw a different capacity than the player saw on their own sheet.
+	// ADR 0011 requires derived statistics to be read from the authoritative sheet
+	// calculation rather than reimplemented.
+	//
+	// `carried` / `capacity` are deliberately the BODY pair, matching `state`: encumbrance is
+	// judged on physical load against physical capacity, so all three describe one thing.
+	// Pairing gross weight with body capacity (or either with the bag-inclusive total) would
+	// be internally incoherent the moment a Bag of Holding is equipped, and omitting the bag
+	// also avoids disclosing that the bearer owns one.
+	//
+	// When the summary is absent, stale, or unverifiable the whole field is omitted rather
+	// than filled with a guess: a consumer must be able to tell "not synced" from
+	// "carrying nothing".
+	const carryAuthority = resolveCarryAuthority({data, expectedBasis});
+	if (carryAuthority) {
+		const carried = toFiniteNumber(carryAuthority.bodyLoad, {min: 0, max: MAX_WEIGHT});
+		if (carried != null) carrySummary.carried = carried;
+		const capacity = toFiniteNumber(carryAuthority.bodyCapacity, {min: 0, max: MAX_WEIGHT});
+		if (capacity != null) carrySummary.capacity = capacity;
+	}
 
 	const exhaustionLabel = typeof data.exhaustion === "string" ? toLabel(data.exhaustion, {maxLength: 40}) : null;
 	const exhaustion = exhaustionLabel ?? (toFiniteNumber(data.exhaustion ?? data.exhaustionLevel, {min: 0, max: MAX_EXHAUSTION, isInteger: true}) ?? 0);
@@ -586,7 +599,7 @@ export function applyProjectionPolicy ({viewModel, policy}) {
  * Fails closed — a policy that cannot be validated yields an empty `data`, which is
  * indistinguishable from the `private` preset, so a corrupt policy is not enumerable.
  */
-export function computePeerProfile ({character}) {
+export function computePeerProfile ({character, expectedBasis} = {}) {
 	const projectionRevision = Number(character.projectionRevision) || 1;
 	const envelope = {
 		kind: "peer_profile",
@@ -601,7 +614,7 @@ export function computePeerProfile ({character}) {
 	} catch {
 		return {...envelope, data: {}};
 	}
-	const data = applyProjectionPolicy({viewModel: buildCharacterViewModel(character.data), policy});
+	const data = applyProjectionPolicy({viewModel: buildCharacterViewModel(character.data, {expectedBasis}), policy});
 	return {
 		...envelope,
 		...(data.identity && character.targetRef ? {targetRef: character.targetRef} : {}),
@@ -741,8 +754,8 @@ export function canViewSharedCharacterEvent ({character, accountId, role}) {
  * @param {"owner"|"dm"|"peer"} options.authorizationClass resolved by the store
  * @param {Function} options.fnCopy deep-copy used for canonical documents
  */
-export function projectCharacterForRequester ({character, authorizationClass, fnCopy = structuredClone}) {
-	if (authorizationClass === "peer") return computePeerProfile({character});
+export function projectCharacterForRequester ({character, authorizationClass, fnCopy = structuredClone, expectedBasis}) {
+	if (authorizationClass === "peer") return computePeerProfile({character, expectedBasis});
 
 	const isPolicyValid = isValidProjectionPolicy(character.projectionPolicy);
 	// The canonical document is returned without its embedded policy: the owner receives
@@ -768,5 +781,5 @@ export function projectCharacterForRequester ({character, authorizationClass, fn
 			policy: isPolicyValid ? validateProjectionPolicy(character.projectionPolicy) : null,
 		};
 	}
-	return {kind: "dm_truth", ...envelope, peerPreview: computePeerProfile({character})};
+	return {kind: "dm_truth", ...envelope, peerPreview: computePeerProfile({character, expectedBasis})};
 }

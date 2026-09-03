@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 import {applyJsonPatch} from "../../js/hub/hub-json-patch.js";
+import {hasFreshCarryWrite, stripCarryAuthority} from "../../js/hub/hub-carry-authority.js";
+import {getExpectedCarryBasis} from "./carry-basis.js";
 import {getPendingEffectPresentation} from "../../js/hub/hub-effect-presentation.js";
 import {HubStoreError} from "./hub-store-error.js";
 import {canViewEvent} from "./projections.js";
@@ -969,7 +971,33 @@ export class MemoryHubStore {
 	async pGetCharacter ({accountId, characterId}) {
 		const character = this._getCharacterOrThrow(characterId);
 		const authorizationClass = this._getCharacterAuthorizationClass({accountId, character});
-		return projectCharacterForRequester({character, authorizationClass, fnCopy: copy});
+		return projectCharacterForRequester({
+			character,
+			authorizationClass,
+			fnCopy: copy,
+			expectedBasis: this._getExpectedCarryBasis(character),
+		});
+	}
+
+	/**
+	 * The carry basis that is live for this character right now.
+	 *
+	 * Resolved from the campaign's active rules version and brew bundle, which change carry
+	 * inputs without ever touching the character document. Identical in the single-character
+	 * read and the campaign list so a character cannot appear fresh in one and stale in the
+	 * other.
+	 * @param {object} character
+	 * @returns {object}
+	 */
+	_getExpectedCarryBasis (character) {
+		const campaign = character.campaignId ? this._campaigns.get(character.campaignId) : null;
+		const rulesVersion = campaign?.activeRulesVersionId
+			? this._rulesVersions.get(campaign.activeRulesVersionId)
+			: null;
+		const brewBundle = campaign?.activeBrewBundleVersionId
+			? this._brewVersions.get(campaign.activeBrewBundleVersionId)
+			: null;
+		return getExpectedCarryBasis({character, campaign, rulesVersion, brewBundle});
 	}
 
 	async pListCampaignCharacterProjections ({accountId, campaignId}) {
@@ -992,10 +1020,11 @@ export class MemoryHubStore {
 		const authorizationClass = character.ownerAccountId === accountId
 			? "owner"
 			: (["dm", "co_dm"].includes(membership.role) ? "dm" : "peer");
+		const expectedBasis = this._getExpectedCarryBasis(character);
 		try {
-			return projectCharacterForRequester({character, authorizationClass, fnCopy: copy});
+			return projectCharacterForRequester({character, authorizationClass, fnCopy: copy, expectedBasis});
 		} catch {
-			return computePeerProfile({character: {...character, projectionPolicy: null}});
+			return computePeerProfile({character: {...character, projectionPolicy: null}, expectedBasis});
 		}
 	}
 
@@ -1207,6 +1236,13 @@ export class MemoryHubStore {
 			});
 		}
 		const data = applyJsonPatch(character.data, patches);
+		// The current sheet writes a fresh `/carry` on every save whose document otherwise
+		// changes, so its ABSENCE identifies a writer that does not understand carry
+		// authority. Enumerating "carry-relevant paths" instead could never be complete —
+		// passive Might alone depends on skills, expertise, class levels, proficiency bonus,
+		// named modifiers, feature choices and item-derived modifiers — so any allowlist
+		// would silently go stale as inputs are added.
+		if (patches?.length && !hasFreshCarryWrite(patches)) stripCarryAuthority(data);
 		validateCloudCharacterData(data);
 		character.data = data;
 		character.revision++;
@@ -2181,6 +2217,10 @@ export class MemoryHubStore {
 		const data = normalizeCharacterInventory(character.data);
 		const entry = {id: crypto.randomUUID(), item: copy(item), quantity: Math.max(1, Math.floor(quantity))};
 		data.inventory.push(entry);
+		// The inventory just changed underneath a summary the sheet computed for the previous
+		// one, and no sheet is present to recompute it. Drop it: the projection then reports
+		// "not synced" until the owner saves, which is the only honest answer.
+		stripCarryAuthority(data);
 		validateCloudCharacterData(data);
 		character.data = data;
 		character.revision++;
@@ -2217,8 +2257,21 @@ export class MemoryHubStore {
 		return {container: character.data, _character: character};
 	}
 
-	_setTransferContainer ({holder, container, actorAccountId = null}) {
+	/**
+	 * Commit a written transfer container.
+	 *
+	 * This is the ONE place a transfer actually writes a participant, so it is where carry
+	 * authority is invalidated: it covers escrow reservation on the source, acceptance on the
+	 * destination, and the reject / cancel / expiry restore path. Invalidating in
+	 * `_getTransferContainer()` or in `normalizeCharacterInventory()` instead would be wrong
+	 * — both also run for containers that are merely READ (a proposal reads the target
+	 * without modifying it) and for create/import (which would lose a perfectly fresh block
+	 * on first cloud save).
+	 * @param {{holder: object, container: object, actorAccountId?: ?string, isCarryAffecting?: boolean}} params
+	 */
+	_setTransferContainer ({holder, container, actorAccountId = null, isCarryAffecting = true}) {
 		if (holder._character) {
+			if (isCarryAffecting) stripCarryAuthority(container);
 			validateCloudCharacterData(container);
 			holder._character.data = container;
 			holder._character.revision++;

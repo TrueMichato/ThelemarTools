@@ -13,6 +13,25 @@ import {
 
 const CANARY = "CANARY-DO-NOT-SHARE";
 
+/**
+ * The carry basis these fixtures are authored under. `carrySummary` is projected only from
+ * the sheet-materialised `data.carry` block whose basis matches the caller's expectation, so
+ * every test that asserts carry has to state which world it is asking about.
+ */
+const BASIS = Object.freeze({kind: "campaign", rulesVersionId: "rules-1", brewBundleHash: "brew-1", settingsDigest: "digest-1"});
+
+/** A summary as `CharacterSheetState.toJson()` would materialise it. */
+function getCarryAuthority (overrides = {}) {
+	return {
+		schemaVersion: 1,
+		basis: BASIS,
+		bodyCapacity: 150,
+		bodyLoad: 13,
+		status: "normal",
+		...overrides,
+	};
+}
+
 function getCharacterData (overrides = {}) {
 	return {
 		name: "Mira Vale",
@@ -38,6 +57,7 @@ function getCharacterData (overrides = {}) {
 		currency: {gp: 40},
 		notes: {backstory: CANARY},
 		xp: 6500,
+		carry: getCarryAuthority(),
 		...overrides,
 	};
 }
@@ -131,7 +151,7 @@ describe("authorization-scoped character projections", () => {
 					},
 				},
 			});
-			const {data} = computePeerProfile({character});
+			const {data} = computePeerProfile({character, expectedBasis: BASIS});
 
 			expect(data.hp).toEqual({state: "healthy"});
 			expect(data.identity).toEqual({name: "The Masked One"});
@@ -194,11 +214,67 @@ describe("authorization-scoped character projections", () => {
 		});
 
 		it("accepts a full typed replacement for every catalog field", () => {
-			const viewModel = buildCharacterViewModel(getCharacterData());
+			const viewModel = buildCharacterViewModel(getCharacterData(), {expectedBasis: BASIS});
 			for (const field of PROJECTION_FIELD_KEYS) {
 				const policy = {version: 1, preset: "open", overrides: {[field]: {mode: "replace", value: viewModel[field]}}};
 				expect({field, valid: !!validateProjectionPolicy(policy)}).toEqual({field, valid: true});
 			}
+		});
+	});
+
+	describe("carry summary is projected, never recomputed", () => {
+		// The projector used to derive capacity as `abilities.str * 15 * (powerfulBuild ? 2 : 1)`.
+		// That was a second implementation of a formula the Character Sheet owns, and it knew
+		// nothing about the Thelemar passive-Might rule, creature size, flat bonuses, item
+		// multipliers or extradimensional containers — so a DM saw a different capacity than
+		// the player did. ADR 0011 requires reading the authoritative sheet calculation.
+		it("reports the sheet's materialised body pair", () => {
+			const viewModel = buildCharacterViewModel(getCharacterData(), {expectedBasis: BASIS});
+			expect(viewModel.carrySummary).toEqual({carried: 13, capacity: 150});
+		});
+
+		it("does not derive capacity from the Strength score", () => {
+			// STR 10 would have given the old formula 150 by coincidence, so move it: the
+			// projected capacity must follow the materialised summary, not the ability.
+			const data = getCharacterData({abilities: {str: 20, dex: 16, con: 14, int: 8, wis: 15, cha: 12}});
+			const viewModel = buildCharacterViewModel(data, {expectedBasis: BASIS});
+			expect(viewModel.carrySummary.capacity).toBe(150);
+		});
+
+		it("omits the field entirely for a legacy document with no summary", () => {
+			const {carry, ...legacy} = getCharacterData();
+			expect(carry).toBeDefined();
+			// Omission, not zero: a consumer must be able to tell "not synced" from
+			// "carrying nothing", and any fallback formula would be a guess.
+			expect(buildCharacterViewModel(legacy, {expectedBasis: BASIS}).carrySummary).toEqual({});
+		});
+
+		it("omits the field when the campaign rules version has rotated underneath it", () => {
+			const viewModel = buildCharacterViewModel(getCharacterData(), {
+				expectedBasis: {...BASIS, rulesVersionId: "rules-2"},
+			});
+			expect(viewModel.carrySummary).toEqual({});
+		});
+
+		it("omits the field when the brew bundle has rotated, since material weights can change", () => {
+			const viewModel = buildCharacterViewModel(getCharacterData(), {
+				expectedBasis: {...BASIS, brewBundleHash: "brew-2"},
+			});
+			expect(viewModel.carrySummary).toEqual({});
+		});
+
+		it("omits the field when no expected basis can be resolved at all", () => {
+			expect(buildCharacterViewModel(getCharacterData()).carrySummary).toEqual({});
+		});
+
+		it("leaks no formula factors or item truth into the projection", () => {
+			const data = getCharacterData({
+				carry: getCarryAuthority({bodyCapacity: 480, bodyLoad: 100, status: "encumbered"}),
+			});
+			const summary = buildCharacterViewModel(data, {expectedBasis: BASIS}).carrySummary;
+			// Only the body pair crosses the boundary — no multipliers, no bag capacity, no
+			// stack counts a peer could use to reason about hidden inventory.
+			expect(Object.keys(summary).sort()).toEqual(["capacity", "carried"]);
 		});
 	});
 

@@ -8,6 +8,7 @@ export const DEFAULT_CAMPAIGN_RULES = Object.freeze({
 	enableTgtt: true,
 	exhaustionRules: "thelemar",
 	thelemar_carryWeight: true,
+	thelemar_encumbranceTiers: true,
 	thelemar_jumping: true,
 	thelemar_linguisticsBonus: true,
 	thelemar_criticalRolls: true,

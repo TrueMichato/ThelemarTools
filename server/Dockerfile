@@ -39,6 +39,7 @@ COPY --from=dependencies --chown=hub:hub /app/node_modules ./node_modules
 COPY --chown=hub:hub package.json ./
 COPY --chown=hub:hub server ./server
 COPY --chown=hub:hub js/hub/hub-json-patch.js ./js/hub/hub-json-patch.js
+COPY --chown=hub:hub js/hub/hub-carry-authority.js ./js/hub/hub-carry-authority.js
 COPY --chown=hub:hub js/hub/hub-effect-presentation.js ./js/hub/hub-effect-presentation.js
 COPY --chown=hub:hub js/hub/hub-inventory-contract.js ./js/hub/hub-inventory-contract.js
 COPY --chown=hub:hub js/hub/hub-semantic-hp.js ./js/hub/hub-semantic-hp.js

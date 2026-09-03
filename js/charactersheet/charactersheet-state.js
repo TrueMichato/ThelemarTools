@@ -4,6 +4,12 @@
  */
 
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
+import {getCarryProfile, getCarryStatus} from "../hub/hub-carry-contract.js";
+import {
+	CARRY_SCHEMA_VERSION,
+	computeCarrySettingsDigest,
+	createDetachedCarryBasis,
+} from "../hub/hub-carry-authority.js";
 
 /**
  * Utility to parse feature text and extract limited-use information
@@ -5239,6 +5245,11 @@ class CharacterSheetState {
 				enableTgtt: true,
 				// Thelemar homebrew rules - all enabled by default
 				thelemar_carryWeight: true,
+				// TGTT publishes a carrying-capacity maximum but no encumbered /
+				// heavily-encumbered tiers. When enabled (default) the house tiers mirror the
+				// RAW proportions against Thelemar capacity so players still get a warning;
+				// when disabled only the rules-as-written over-capacity consequence applies.
+				thelemar_encumbranceTiers: true,
 				thelemar_jumping: true,
 				thelemar_linguisticsBonus: true,
 				thelemar_criticalRolls: true,
@@ -5322,6 +5333,22 @@ class CharacterSheetState {
 		// so it can never be mistaken for an explicitly-set maximum (which `getMaxHp()` would
 		// then add item bonuses to a second time) and can never carry staleness forward.
 		out.hp = {...out.hp, effectiveMax: this.getMaxHp()};
+		// Materialise the authoritative carry summary alongside the raw inputs.
+		//
+		// Capacity cannot be rederived from this document by anyone else: it depends on
+		// passive Might including passive bonuses, on `projectItemMaterial()` weights gated
+		// behind three material sub-settings, on carry-only active-state size steps, on item
+		// effect multipliers, on equipped extradimensional capacity, and on the fill/body
+		// split — all of which live behind methods on this class. A consumer that read the
+		// document alone would have to reimplement them and would silently diverge, which is
+		// exactly the bug this contract removes (ADR 0011 requires derived statistics to be
+		// read from the authoritative sheet calculation).
+		//
+		// Like `hp.effectiveMax` this is a one-way projection: `loadFromJson()` strips it so
+		// a derived value can never outlive the state it came from. The recorded `basis`
+		// additionally lets a reader detect a summary authored under different campaign
+		// rules, a different brew bundle, or different carry settings.
+		out.carry = this.getCarryAuthoritySummary();
 		if (this._campaignSettingsOverlay && this._campaignSettingsBase) {
 			out.settings ||= {};
 			for (const key of Object.keys(this._campaignSettingsOverlay)) {
@@ -5377,6 +5404,11 @@ class CharacterSheetState {
 		// Strip it on the way in: keeping it would let a stale derived number outlive the state
 		// it was derived from, and it must never be treated as a stored maximum.
 		delete this._data.hp.effectiveMax;
+		// `carry` is a serialization-only projection of the live carry calculation (see
+		// toJson). Strip it on the way in for the same reason: a stale summary must never
+		// become an input, and it must never be mistaken for stored state that the sheet
+		// would then treat as authoritative over its own recomputation.
+		delete this._data.carry;
 		this._data.deathSaves = {...this._getDefaultState().deathSaves, ...this._data.deathSaves};
 		this._data.speed = {...this._getDefaultState().speed, ...this._data.speed};
 		this._data.senses = {...this._getDefaultState().senses, ...this._data.senses};
@@ -36498,10 +36530,49 @@ class CharacterSheetState {
 			if (itemsInWeightlessContainers.has(i.id)) continue; // already bagged
 			if (i.equipped) continue; // worn / wielded gear stays on the body
 			if (i.item?.containerCapacity?.weightless) continue; // a bag cannot stow itself
-			const weight = i.item?.weight || 0;
+			// Material projection must match getTotalWeight(): reading the raw stored weight
+			// here would split a material-projected item inconsistently between bag and body
+			// (a mithril breastplate would be stowed at its steel weight while the same item
+			// counted at its mithril weight in the gross total, leaving a phantom body load).
+			const weight = this.projectItemMaterial(i.item)?.weight || 0;
 			total += weight * (i.quantity || 1);
 		}
 		return total;
+	}
+
+	/**
+	 * How many inventory stacks carry no usable weight.
+	 *
+	 * Applies the SAME material projection and weightless-container rules as
+	 * {@link getTotalWeight}, rather than reading raw `item.weight`: a stack inside a
+	 * weightless container legitimately contributes nothing and must not be reported as
+	 * "unknown", and a material-projected weight is knowable even when the stored one is
+	 * absent. A non-zero count makes the carry profile indeterminate, so the UI shows a
+	 * lower bound instead of a confident total.
+	 * @returns {number}
+	 */
+	getUnknownWeightStackCount () {
+		const itemsInWeightlessContainers = new Set();
+		for (const entry of (this._data.inventory || [])) {
+			const item = entry.item || entry;
+			if (item.containerCapacity?.weightless && item.containedItems?.length) {
+				item.containedItems.forEach(id => itemsInWeightlessContainers.add(id));
+			}
+		}
+
+		let count = 0;
+		for (const i of (this._data.inventory || [])) {
+			if (itemsInWeightlessContainers.has(i.id)) continue;
+			const quantity = Number(i.quantity);
+			if (!Number.isFinite(quantity) || quantity < 0) { count++; continue; }
+			const raw = this.projectItemMaterial(i.item)?.weight;
+			// An absent weight is a legitimate "weighs nothing worth tracking" for most
+			// gear, so only a PRESENT but unusable value counts as unknown.
+			if (raw === undefined || raw === null || raw === "") continue;
+			const weight = Number(raw);
+			if (!Number.isFinite(weight) || weight < 0) count++;
+		}
+		return count;
 	}
 
 	/**
@@ -36560,29 +36631,41 @@ class CharacterSheetState {
 	}
 
 	getCarryingCapacityBreakdown () {
-		// Thelemar rules: passive Might * 10 (base for Small/Medium creatures).
-		// Passive Might = 10 + Might modifier (+ passive bonuses). Might is a
-		// custom TGTT homebrew skill based on STR. Size scaling is applied below
-		// via getSizeCarryMultiplier (Small/Medium = ×1).
+		// Delegates to the shared contract so the Character Sheet, the DM Screen Party
+		// Tracker and the server projection can never disagree about the same character.
+		// This method keeps its historical return shape (the contract profile is a strict
+		// superset), so existing callers and their tests are unaffected.
+		return this.getCarryProfile();
+	}
+
+	/**
+	 * Build the normalized carry input and evaluate it through the shared contract.
+	 *
+	 * Every rules-specific quantity is resolved HERE, using `CharacterSheetState` accessors
+	 * that no other surface has, and handed to the contract as plain numbers. That split is
+	 * what lets the server consume the result without reimplementing any of it.
+	 * @returns {object} A frozen carry profile.
+	 */
+	getCarryProfile () {
+		// Thelemar rules: passive Might × 10. Passive Might = 10 + Might modifier (+ passive
+		// bonuses); Might is a TGTT homebrew skill based on STR. Standard rules: STR × 15.
 		const isThelemar = !!this._data.settings?.thelemar_carryWeight;
-		let sourceValue;
-		let perPoint;
+
+		// The encumbrance tiers key off the STRENGTH SCORE even under the Thelemar capacity
+		// rule, because the PHB variant rule defines them that way and the Thelemar rule
+		// defines no tiers of its own to override them with.
+		const strengthScore = this.getAbilityScore("str");
+
+		let thresholdRuleId;
 		if (isThelemar) {
-			sourceValue = this.getPassiveScore("might");
-			perPoint = 10;
-		} else {
-			// Standard rules: STR score * 15
-			sourceValue = this.getAbilityScore("str");
-			perPoint = 15;
-		}
-		const base = sourceValue * perPoint;
+			// The Thelemar house tiers are opt-out: TGTT publishes no tiers, so a table that
+			// wants only the rules-as-written consequence turns them off and keeps just the
+			// over-capacity warning.
+			thresholdRuleId = this._data.settings?.thelemar_encumbranceTiers === false
+				? "capacity-only"
+				: "thelemar-proportional";
+		} else thresholdRuleId = "phb-variant";
 
-		// Apply size multiplier (RAW 5e rules). Active states may grant a
-		// carry-only size step (e.g. Aurochs Zodiac Form: "count as one size
-		// larger" for carry/push/drag/lift) without changing combat size.
-		const sizeMultiplier = this.getSizeCarryMultiplier();
-
-		const flatBonus = this._data.customModifiers.carryCapacity || 0;
 		let carryMultiplier = this._data.customModifiers.carryCapacityMultiplier || 1;
 		for (const item of this.getItems()) {
 			if (!this._isItemEffectsActive(item)) continue;
@@ -36590,51 +36673,23 @@ class CharacterSheetState {
 				if (effect?.type === "carryCapacityMultiplier") carryMultiplier *= Number(effect.value) || 1;
 			}
 		}
-		// External capacity (Bag of Holding etc.) is extradimensional storage. It is
-		// added to the COMBINED carrying-capacity total for display, but it is NOT
-		// scaled by carryMultiplier / sizeMultiplier (a magic container holds a fixed
-		// weight regardless of the bearer's size or Powerful Build) and — critically —
-		// it must NOT inflate the bearer's physical push/drag/lift (see below).
-		const externalCapacity = this.getExternalCarryCapacity();
-		const bodyCapacity = (base + flatBonus) * carryMultiplier * sizeMultiplier;
-		const total = bodyCapacity + externalCapacity;
 
-		// Implicit carry split (NO manual item assignment). We assume stowable gear
-		// fills the extradimensional container (Bag of Holding) FIRST: the bag holds
-		// up to its capacity worth of fillable gear (bagLoad), and the body carries
-		// the OVERFLOW plus everything that can't be bagged — worn/equipped gear and
-		// the bag's own physical weight (bodyLoad). With no bag equipped the split is
-		// a no-op (bagCapacity 0 → bagLoad 0 → bodyLoad == grossWeight), so behaviour
-		// is identical to a character without any extradimensional storage.
-		const bagCapacity = externalCapacity;
-		const hasExtradimensional = bagCapacity > 0;
-		const grossWeight = this.getTotalWeight();
-		const fillableWeight = hasExtradimensional ? this.getFillableWeight() : 0;
-		const bagLoad = Math.min(fillableWeight, bagCapacity);
-		const bodyLoad = grossWeight - bagLoad;
-
-		return {
+		return getCarryProfile({
 			rule: isThelemar ? "thelemar" : "standard",
-			sourceValue,
-			perPoint,
-			base,
-			flatBonus,
+			thresholdRuleId,
+			sourceValue: isThelemar ? this.getPassiveScore("might") : strengthScore,
+			thresholdSourceValue: strengthScore,
+			size: this.getSize(),
+			carrySizeSteps: this.getCarrySizeBonusFromStates(),
+			flatBonus: this._data.customModifiers.carryCapacity || 0,
 			carryMultiplier,
-			sizeMultiplier,
-			bodyCapacity,
-			externalCapacity,
-			bagCapacity,
-			grossWeight,
-			fillableWeight,
-			bagLoad,
-			bodyLoad,
-			hasExtradimensional,
-			total,
-			// Push/drag/lift is the bearer's RAW Strength-based physical limit
-			// (2× body capacity). Extradimensional storage (Bag of Holding) is NOT a
-			// physical lifting aid, so it never contributes here.
-			pushDragLift: bodyCapacity * 2,
-		};
+			externalCapacity: this.getExternalCarryCapacity(),
+			grossWeight: this.getTotalWeight(),
+			fillableWeight: this.getFillableWeight(),
+			coinCounts: this._data.currency,
+			isCoinWeightCounted: this._data.settings?.countCoinWeight === true,
+			unknownStackCount: this.getUnknownWeightStackCount(),
+		});
 	}
 
 	/**
@@ -36678,23 +36733,89 @@ class CharacterSheetState {
 
 	/**
 	 * Get encumbrance level based on carried weight
-	 * @returns {string} "normal", "encumbered", "heavily_encumbered", or "over_capacity"
+	 * @returns {string} "normal", "encumbered", "heavily_encumbered", "over_capacity", or "unknown"
 	 */
 	getEncumbranceLevel () {
 		// Encumbrance is a measure of physical strain, so it is judged against the
 		// bearer's BODY capacity using the load actually ON the body (bodyLoad). With
 		// the implicit fill-bag-first split, stowable gear notionally rides in the
 		// Bag of Holding and does NOT strain the body; only the overflow plus
-		// worn/equipped gear and the bag's own weight count here. With no bag
-		// equipped, bodyLoad == getTotalWeight(), so behaviour is unchanged.
-		const breakdown = this.getCarryingCapacityBreakdown();
-		const weight = breakdown.bodyLoad;
-		const capacity = breakdown.bodyCapacity;
+		// worn/equipped gear and the bag's own weight count here.
+		//
+		// This previously used its own 50% / 75% thresholds, which were not a rule from
+		// any source and which disagreed with the inventory carry bar beside it: the same
+		// character could read "Encumbered" on the bar (STR × 5) while play mode and the
+		// PDF, both of which call this method, were told "normal". Both now resolve through
+		// the shared contract's threshold policy, so every surface agrees and the PHB
+		// variant rule ("in excess of 5 times your Strength score") is applied verbatim.
+		return getCarryStatus(this.getCarryProfile()).level;
+	}
 
-		if (weight > capacity) return "over_capacity";
-		if (weight > capacity * 0.75) return "heavily_encumbered";
-		if (weight > capacity * 0.5) return "encumbered";
-		return "normal";
+	/**
+	 * Record which campaign rules and brew bundle the carry calculation is running under.
+	 *
+	 * A carry summary authored under one rules version or material catalog does not describe
+	 * a character running under another, and neither of those changes touches the character
+	 * document — so nothing in the document itself could reveal the staleness. Stamping the
+	 * observed context is what lets a reader detect it.
+	 *
+	 * `rulesVersionId` / `brewBundleHash` may legitimately be `null`: a campaign with no
+	 * active rules version is a real observed state, not a placeholder. What matters is that
+	 * it was OBSERVED — if a DM later activates one, the stamp no longer matches and the
+	 * summary correctly falls out of trust.
+	 * @param {?{rulesVersionId?: ?string, brewBundleHash?: ?string}} context Pass `null` to
+	 *   return to the detached (no campaign) basis.
+	 */
+	setCarryAuthorityContext (context) {
+		this._carryAuthorityContext = context
+			? {rulesVersionId: context.rulesVersionId ?? null, brewBundleHash: context.brewBundleHash ?? null}
+			: null;
+	}
+
+	/**
+	 * The basis describing the context this character's carry summary was computed in.
+	 * @returns {object}
+	 */
+	getCarryAuthorityBasis () {
+		const settingsDigest = computeCarrySettingsDigest(this.getSettings());
+		const context = this._carryAuthorityContext;
+		if (!context) return createDetachedCarryBasis({settingsDigest});
+		return {
+			kind: "campaign",
+			rulesVersionId: context.rulesVersionId,
+			brewBundleHash: context.brewBundleHash,
+			settingsDigest,
+		};
+	}
+
+	/**
+	 * The closed, versioned carry summary written into the serialized document.
+	 *
+	 * Only what a consumer needs is emitted: no formula factors that could help reconstruct
+	 * hidden inventory, and no raw item data.
+	 * @returns {object}
+	 */
+	getCarryAuthoritySummary () {
+		const profile = this.getCarryProfile();
+		return {
+			schemaVersion: CARRY_SCHEMA_VERSION,
+			basis: this.getCarryAuthorityBasis(),
+			rule: profile.rule,
+			thresholdRuleId: profile.thresholdRuleId,
+			bodyCapacity: profile.bodyCapacity,
+			externalCapacity: profile.externalCapacity,
+			pushDragLift: profile.pushDragLift,
+			grossWeight: profile.grossWeight,
+			bodyLoad: profile.bodyLoad,
+			bagLoad: profile.bagLoad,
+			fillableWeight: profile.fillableWeight,
+			coinWeight: profile.coinWeight,
+			isCoinWeightCounted: profile.isCoinWeightCounted,
+			unknownStackCount: profile.unknownStackCount,
+			isIndeterminate: profile.isIndeterminate,
+			hasExtradimensional: profile.hasExtradimensional,
+			status: profile.status,
+		};
 	}
 	// #endregion
 
