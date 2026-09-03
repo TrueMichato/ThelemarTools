@@ -3,8 +3,6 @@ import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
 import {
-	decodeSignedState,
-	encodeSignedState,
 	getCsrfToken,
 	getDeterministicToken,
 	getPkceChallenge,
@@ -13,6 +11,11 @@ import {
 	isConstantTimeEqual,
 } from "./security.js";
 import {HubStoreError} from "./hub-store-error.js";
+import {AuthProviderError} from "./auth-provider-error.js";
+import {
+	AUTH_PROVIDER_REGISTRY_CAPABILITY,
+	getLegacyGitHubAuthProviderRegistry,
+} from "./auth-provider-registry.js";
 import {PROJECTION_POLICY_VERSION, PROJECTION_PRESET_KEYS} from "./character-projection.js";
 import {
 	CAMPAIGN_RULES_SCHEMA_VERSION,
@@ -96,7 +99,8 @@ function getSafeReturnTo ({rawReturnTo, appOrigin}) {
 		const url = new URL(rawReturnTo, appOrigin);
 		if (url.origin !== appOrigin) return "/hub.html";
 		if (url.pathname.startsWith("//")) return "/hub.html";
-		return `${url.pathname}${url.search}${url.hash}`;
+		const returnTo = `${url.pathname}${url.search}${url.hash}`;
+		return returnTo.length <= 2_048 ? returnTo : "/hub.html";
 	} catch {
 		return "/hub.html";
 	}
@@ -104,7 +108,8 @@ function getSafeReturnTo ({rawReturnTo, appOrigin}) {
 
 export async function createHubApp ({
 	store,
-	oauthProvider,
+	authProviderRegistry = null,
+	oauthProvider = null,
 	config: rawConfig,
 	logger = false,
 	realtime: realtimeOverride = null,
@@ -112,7 +117,8 @@ export async function createHubApp ({
 	metrics: metricsOverride = null,
 }) {
 	if (!store) throw new TypeError(`store is required.`);
-	if (!oauthProvider) throw new TypeError(`oauthProvider is required.`);
+	if (authProviderRegistry && oauthProvider) throw new TypeError(`Provide authProviderRegistry or oauthProvider, not both.`);
+	const providerRegistry = authProviderRegistry || getLegacyGitHubAuthProviderRegistry(oauthProvider);
 	const config = validateConfig(rawConfig);
 	const metrics = metricsOverride || new HubMetrics();
 	const app = Fastify({
@@ -208,6 +214,9 @@ export async function createHubApp ({
 		outboxDispatcher.stop();
 	});
 	app.setErrorHandler((error, request, reply) => {
+		if (error instanceof AuthProviderError) {
+			return reply.code(error.status).send({error: error.code});
+		}
 		if (error instanceof HubStoreError) {
 			return reply.code(error.status).send({
 				error: error.code,
@@ -372,6 +381,8 @@ export async function createHubApp ({
 	app.get("/api/meta", async () => ({
 		protocolVersion: HUB_PROTOCOL_VERSION,
 		appVersion: process.env.npm_package_version || null,
+		capabilities: [AUTH_PROVIDER_REGISTRY_CAPABILITY],
+		authProviders: providerRegistry.getPublicMetadata(),
 	}));
 
 	app.get("/ws/campaign/:campaignId", {
@@ -402,75 +413,127 @@ export async function createHubApp ({
 		});
 	});
 
-	app.get("/auth/github/start", {
-		config: {rateLimit: {max: 10, timeWindow: "1 minute"}},
-	}, async (request, reply) => {
-		const state = getRandomToken();
-		const verifier = getRandomToken(48);
-		const returnTo = getSafeReturnTo({
-			rawReturnTo: request.query?.returnTo,
-			appOrigin: config.appOrigin,
+	for (const provider of providerRegistry.getAvailableProviders()) {
+		app.get(provider.startPath, {
+			config: {rateLimit: {max: 10, timeWindow: "1 minute"}},
+			schema: {
+				querystring: {
+					type: "object",
+					additionalProperties: false,
+					properties: {returnTo: {type: "string", minLength: 1, maxLength: 2_048}},
+				},
+			},
+		}, async (request, reply) => {
+			const state = getRandomToken();
+			const pkceVerifier = provider.capabilities.pkce ? getRandomToken(48) : null;
+			const oidcNonce = provider.capabilities.oidcNonce ? getRandomToken() : null;
+			const redirectUri = `${config.appOrigin}${provider.callbackPath}`;
+			const returnTo = getSafeReturnTo({
+				rawReturnTo: request.query?.returnTo,
+				appOrigin: config.appOrigin,
+			});
+			const authorizationUrl = provider.getAuthorizationUrl({
+				state,
+				codeChallenge: pkceVerifier == null ? null : getPkceChallenge(pkceVerifier),
+				nonce: oidcNonce,
+				redirectUri,
+			});
+			const transactionId = crypto.randomUUID();
+			await store.pCreateOAuthTransaction({
+				id: transactionId,
+				stateHash: getSha256(state),
+				provider: provider.slug,
+				operation: "sign_in",
+				redirectUri,
+				returnTo,
+				pkceVerifier,
+				oidcNonce,
+				ttlSeconds: config.oauthStateTtlSeconds,
+			});
+			reply.setCookie(OAUTH_COOKIE, transactionId, getCookieOptions({
+				isSecure: config.isSecure,
+				maxAge: config.oauthStateTtlSeconds,
+			}));
+			metrics.observeAuth?.({provider: provider.slug, outcome: "started"});
+			return reply.redirect(authorizationUrl);
 		});
-		const oauthState = encodeSignedState({
-			state,
-			verifier,
-			returnTo,
-			expiresAt: Date.now() + config.oauthStateTtlSeconds * 1000,
-		});
-		reply.setCookie(OAUTH_COOKIE, oauthState, getCookieOptions({
-			isSecure: config.isSecure,
-			maxAge: config.oauthStateTtlSeconds,
-		}));
-		return reply.redirect(oauthProvider.getAuthorizationUrl({
-			state,
-			codeChallenge: getPkceChallenge(verifier),
-			redirectUri: `${config.appOrigin}/auth/github/callback`,
-		}));
-	});
 
-	app.get("/auth/github/callback", {
-		config: {rateLimit: {max: 20, timeWindow: "1 minute"}},
-	}, async (request, reply) => {
-		const encodedState = getSignedCookie(request, OAUTH_COOKIE);
-		if (!encodedState) return reply.code(400).send({error: "INVALID_OAUTH_STATE"});
-		let oauthState;
-		try {
-			oauthState = decodeSignedState(encodedState);
-		} catch {
-			return reply.code(400).send({error: "INVALID_OAUTH_STATE"});
-		}
-		if (oauthState.expiresAt <= Date.now() || request.query?.state !== oauthState.state || !request.query?.code) {
-			return reply.code(400).send({error: "INVALID_OAUTH_STATE"});
-		}
+		app.get(provider.callbackPath, {
+			config: {rateLimit: {max: 20, timeWindow: "1 minute"}},
+			schema: {
+				querystring: {
+					type: "object",
+					additionalProperties: true,
+					properties: {
+						code: {type: "string", minLength: 1, maxLength: 2_048},
+						state: {type: "string", minLength: 1, maxLength: 512},
+						error: {type: "string", maxLength: 200},
+					},
+				},
+			},
+		}, async (request, reply) => {
+			const transactionId = getSignedCookie(request, OAUTH_COOKIE);
+			reply.clearCookie(OAUTH_COOKIE, getClearCookieOptions({isSecure: config.isSecure}));
+			if (!transactionId || typeof request.query?.state !== "string") {
+				metrics.observeAuth?.({provider: provider.slug, outcome: "invalid_state"});
+				return reply.code(400).send({error: "INVALID_OAUTH_STATE"});
+			}
+			const redirectUri = `${config.appOrigin}${provider.callbackPath}`;
+			let transaction;
+			try {
+				transaction = await store.pConsumeOAuthTransaction({
+					id: transactionId,
+					stateHash: getSha256(request.query.state),
+					provider: provider.slug,
+					operation: "sign_in",
+					redirectUri,
+				});
+			} catch (error) {
+				metrics.observeAuth?.({provider: provider.slug, outcome: "invalid_state"});
+				throw error;
+			}
+			if (typeof request.query.code !== "string" || request.query.error) {
+				metrics.observeAuth?.({provider: provider.slug, outcome: "provider_cancelled"});
+				return reply.code(400).send({error: "INVALID_OAUTH_STATE"});
+			}
 
-		const identity = await oauthProvider.pExchangeCode({
-			code: request.query.code,
-			codeVerifier: oauthState.verifier,
-			redirectUri: `${config.appOrigin}/auth/github/callback`,
-		});
-		const isAllowed = config.allowedOAuthSubjects.includes(`${identity.provider}:${identity.providerSubject}`);
-		if (!isAllowed) return reply.code(403).send({error: "ACCOUNT_NOT_ALLOWED"});
+			let identity;
+			try {
+				identity = await provider.pExchangeCodeForIdentity({
+					code: request.query.code,
+					codeVerifier: transaction.pkceVerifier,
+					nonce: transaction.oidcNonce,
+					redirectUri,
+				});
+			} catch (error) {
+				metrics.observeAuth?.({provider: provider.slug, outcome: "provider_error"});
+				if (error instanceof AuthProviderError) throw error;
+				throw new AuthProviderError();
+			}
+			const isAllowed = config.allowedOAuthSubjects.includes(`${identity.provider}:${identity.subject}`);
+			if (!isAllowed) {
+				metrics.observeAuth?.({provider: provider.slug, outcome: "not_allowed"});
+				return reply.code(403).send({error: "ACCOUNT_NOT_ALLOWED"});
+			}
 
-		const priorAuth = await pGetAuth(request);
-		const account = await store.pUpsertOAuthAccount(identity);
-		const token = getRandomToken();
-		await store.pCreateSession({
-			accountId: account.id,
-			tokenHash: getSha256(token),
-			expiresAt: new Date(Date.now() + config.sessionTtlSeconds * 1000),
-			userAgent: request.headers["user-agent"] || null,
+			const priorAuth = await pGetAuth(request);
+			const token = getRandomToken();
+			const completed = await store.pCompleteOAuthSignIn({
+				identity,
+				tokenHash: getSha256(token),
+				expiresAt: new Date(Date.now() + config.sessionTtlSeconds * 1_000),
+				userAgent: request.headers["user-agent"] || null,
+				priorSessionId: priorAuth?.session.id || null,
+			});
+			completed.revokedSessionIds.forEach(sessionId => realtime.closeSession({sessionId}));
+			reply.setCookie(SESSION_COOKIE, token, getCookieOptions({
+				isSecure: config.isSecure,
+				maxAge: config.sessionTtlSeconds,
+			}));
+			metrics.observeAuth?.({provider: provider.slug, outcome: "succeeded"});
+			return reply.redirect(transaction.returnTo);
 		});
-		if (priorAuth) {
-			await store.pRevokeSession({sessionId: priorAuth.session.id});
-			realtime.closeSession({sessionId: priorAuth.session.id});
-		}
-		reply.clearCookie(OAUTH_COOKIE, getClearCookieOptions({isSecure: config.isSecure}));
-		reply.setCookie(SESSION_COOKIE, token, getCookieOptions({
-			isSecure: config.isSecure,
-			maxAge: config.sessionTtlSeconds,
-		}));
-		return reply.redirect(oauthState.returnTo);
-	});
+	}
 
 	app.get("/api/session", async request => {
 		const auth = await pGetAuth(request);

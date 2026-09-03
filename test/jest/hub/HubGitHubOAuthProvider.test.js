@@ -50,4 +50,48 @@ describe("GitHub OAuth provider", () => {
 
 		expect(identity.displayName).toBe("fallback-user");
 	});
+
+	it("returns only the normalized immutable subject at the registry boundary", async () => {
+		const responses = [
+			getJsonResponse({access_token: "callback-only-token"}),
+			getJsonResponse({id: 900719, login: "octo", name: "Octo", email: "ignored@example.com"}),
+		];
+		const provider = new GitHubOAuthProvider({
+			clientId: "client",
+			clientSecret: "secret",
+			fnFetch: async () => responses.shift(),
+		});
+
+		const identity = await provider.pExchangeCodeForIdentity({
+			code: "code",
+			codeVerifier: "verifier",
+			redirectUri: "https://tools.example/auth/github/callback",
+		});
+
+		expect(identity).toEqual({
+			provider: "github",
+			subject: "900719",
+			handle: "octo",
+			displayName: "Octo",
+		});
+		expect(identity).not.toHaveProperty("email");
+		expect(identity).not.toHaveProperty("accessToken");
+	});
+
+	it("fails closed with a stable error when provider responses are invalid", async () => {
+		const provider = new GitHubOAuthProvider({
+			clientId: "client",
+			clientSecret: "secret",
+			fnFetch: async () => ({ok: false, status: 401, json: async () => ({error: "secret-provider-body"})}),
+		});
+
+		await expect(provider.pExchangeCodeForIdentity({
+			code: "code",
+			codeVerifier: "verifier",
+			redirectUri: "https://tools.example/auth/github/callback",
+		})).rejects.toMatchObject({
+			code: "AUTH_PROVIDER_UNAVAILABLE",
+			message: "Authentication provider request failed.",
+		});
+	});
 });
