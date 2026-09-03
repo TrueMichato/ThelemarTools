@@ -366,8 +366,13 @@ describe("Live campaign effects on an open Character Sheet", () => {
 		const saved = {...state.toJson(), id: "character-1"};
 		await repository.pUpsert({character: saved});
 
-		// Only the player's own edit is patched; the effect is already canonical, and neither is lost.
-		expect(api.state.patches).toEqual([{op: "replace", path: "/name", value: "Mira the Bold"}]);
+		// Only the player's own edit is patched; the effect is already canonical, and neither is
+		// lost. The accompanying root `/carry` write is the carry-authority protocol: a
+		// document-changing save from a current client must always re-assert its summary, or
+		// the server treats the writer as carry-unaware and strips it.
+		const substantive = api.state.patches.filter(patch => patch.path !== "/carry");
+		expect(substantive).toEqual([{op: "replace", path: "/name", value: "Mira the Bold"}]);
+		expect(api.state.patches.some(patch => patch.path === "/carry" && patch.op === "replace")).toBe(true);
 	});
 
 	it("applies a duplicated delivery exactly once", async () => {

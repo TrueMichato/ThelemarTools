@@ -1272,6 +1272,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		document.getElementById("campaign-rule-tgtt").checked = !!activeRules.enableTgtt;
 		document.getElementById("campaign-rule-exhaustion").value = activeRules.exhaustionRules;
 		document.getElementById("campaign-rule-carry").checked = !!activeRules.thelemar_carryWeight;
+		document.getElementById("campaign-rule-encumbrance-tiers").checked = activeRules.thelemar_encumbranceTiers !== false;
 		document.getElementById("campaign-rule-jumping").checked = !!activeRules.thelemar_jumping;
 		document.getElementById("campaign-rule-linguistics").checked = !!activeRules.thelemar_linguisticsBonus;
 		document.getElementById("campaign-rule-critical").checked = !!activeRules.thelemar_criticalRolls;
@@ -1730,6 +1731,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 						enableTgtt: document.getElementById("campaign-rule-tgtt").checked,
 						exhaustionRules: document.getElementById("campaign-rule-exhaustion").value,
 						thelemar_carryWeight: document.getElementById("campaign-rule-carry").checked,
+						thelemar_encumbranceTiers: document.getElementById("campaign-rule-encumbrance-tiers").checked,
 						thelemar_jumping: document.getElementById("campaign-rule-jumping").checked,
 						thelemar_linguisticsBonus: document.getElementById("campaign-rule-linguistics").checked,
 						thelemar_criticalRolls: document.getElementById("campaign-rule-critical").checked,

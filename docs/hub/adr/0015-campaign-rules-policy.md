@@ -148,6 +148,7 @@ pass:
 | `tgtt.enabled` | `enabled`: boolean | characterOpen, builder, levelUp, quickBuild, respec, contentFilter, characterWrite, hubAdmin | Projects to `settings.enableTgtt`; content permission remains a separate source rule. |
 | `rules.exhaustion.system` | `system`: one of `2014`, `2024`, `thelemar` | characterOpen, characterWrite, hubAdmin | Projects to `settings.exhaustionRules`; `thelemar` declares a dependency on `tgtt.enabled`. |
 | `tgtt.carry-weight` | `enabled`: boolean | characterOpen, characterWrite, hubAdmin | Projects to `settings.thelemar_carryWeight`. |
+| `tgtt.encumbrance-tiers` | `enabled`: boolean | characterOpen, characterWrite, hubAdmin | Projects to `settings.thelemar_encumbranceTiers`; declares a dependency on `tgtt.carry-weight`. A house extension, since TGTT defines no encumbrance tiers. |
 | `tgtt.jumping` | `enabled`: boolean | characterOpen, characterWrite, hubAdmin | Projects to `settings.thelemar_jumping`. |
 | `tgtt.linguistics-bonus` | `enabled`: boolean | characterOpen, characterWrite, hubAdmin | Projects to `settings.thelemar_linguisticsBonus`. |
 | `tgtt.critical-rolls` | `enabled`: boolean | characterOpen, characterWrite, hubAdmin | Projects to `settings.thelemar_criticalRolls`. |

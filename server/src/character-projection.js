@@ -1,5 +1,6 @@
 import {HubStoreError} from "./hub-store-error.js";
 import {getDerivedStats} from "./character-derived-stats.js";
+import {resolveCarryAuthority} from "../../js/hub/hub-carry-authority.js";
 
 /**
  * Authorization-scoped character projections (ADR 0011).
@@ -198,7 +199,7 @@ function getItemName (entry) {
  * Convert a canonical character document into the fixed, type-validated catalog.
  * Every value here is safe to share *if policy allows it*; policy is applied separately.
  */
-export function buildCharacterViewModel (characterData) {
+export function buildCharacterViewModel (characterData, {expectedBasis = undefined} = {}) {
 	const data = characterData && typeof characterData === "object" && !Array.isArray(characterData)
 		? characterData
 		: {};
@@ -292,18 +293,44 @@ export function buildCharacterViewModel (characterData) {
 	};
 
 	const carrySummary = {};
-	const carried = toFiniteNumber(
-		typeof data.currentWeight === "number"
-			? data.currentWeight
-			: inventoryEntries.reduce((acc, entry) => acc + ((toFiniteNumber(entry.weight ?? entry.item?.weight, {min: 0, max: MAX_WEIGHT}) || 0) * (toFiniteNumber(entry.quantity, {min: 0, max: MAX_QUANTITY}) || 1)), 0),
-		{min: 0, max: MAX_WEIGHT},
-	);
-	if (carried != null) carrySummary.carried = carried;
-	const capacityOverride = toFiniteNumber(data.overrides?.carryCapacity, {min: 0, max: MAX_WEIGHT});
-	const capacity = data.overrides?.carryCapacity != null && capacityOverride != null
-		? capacityOverride
-		: toFiniteNumber(abilities.str * 15 * (data.powerfulBuild ? 2 : 1), {min: 0, max: MAX_WEIGHT});
-	if (capacity != null) carrySummary.capacity = capacity;
+	// Carry truth is materialised by `CharacterSheetState.toJson()` and validated here; it
+	// is never recomputed. The previous `abilities.str * 15 * (powerfulBuild ? 2 : 1)` was a
+	// second implementation that knew nothing about the Thelemar passive-Might rule, creature
+	// size, flat bonuses, item multipliers or extradimensional containers — so a DM watching
+	// the Party Tracker saw a different capacity than the player saw on their own sheet.
+	// ADR 0011 requires derived statistics to be read from the authoritative sheet
+	// calculation rather than reimplemented.
+	//
+	// `carried` / `capacity` are deliberately the BODY pair, matching `state`: encumbrance is
+	// judged on physical load against physical capacity, so all three describe one thing.
+	// Pairing gross weight with body capacity (or either with the bag-inclusive total) would
+	// be internally incoherent the moment a Bag of Holding is equipped, and omitting the bag
+	// also avoids disclosing that the bearer owns one.
+	//
+	// When the summary is absent, stale, or unverifiable the whole field is omitted rather
+	// than filled with a guess: a consumer must be able to tell "not synced" from
+	// "carrying nothing".
+	const carryAuthority = resolveCarryAuthority({data, expectedBasis});
+	if (carryAuthority) {
+		const carried = toFiniteNumber(carryAuthority.bodyLoad, {min: 0, max: MAX_WEIGHT});
+		if (carried != null) carrySummary.carried = carried;
+		const capacity = toFiniteNumber(carryAuthority.bodyCapacity, {min: 0, max: MAX_WEIGHT});
+		if (capacity != null) carrySummary.capacity = capacity;
+		// `state` carries the AUTHORITATIVE encumbrance level. Without it a consumer holds two
+		// numbers and no way to tier them: it cannot know which rule set produced the capacity
+		// (PHB keys its tiers off the Strength score, Thelemar off capacity, and a table may
+		// have turned tiers off entirely), so it would have to guess — and the Party Tracker
+		// guessed `capacity-only`, silently reporting genuinely encumbered characters as
+		// Normal. It also distinguishes `unknown`, where a missing item weight makes the load a
+		// lower bound, from a confident reading of the same two numbers.
+		const state = toLabel(carryAuthority.status, {maxLength: 40});
+		if (state) carrySummary.state = state;
+		// Carried separately from `state`: when the known lower-bound load already exceeds
+		// capacity the status is a safe `over_capacity`, yet the true load is still unknown, so
+		// a consumer that inferred indeterminacy from the status alone would render that case
+		// as an exact reading.
+		if (carryAuthority.isIndeterminate === true) carrySummary.isIndeterminate = true;
+	}
 
 	const exhaustionLabel = typeof data.exhaustion === "string" ? toLabel(data.exhaustion, {maxLength: 40}) : null;
 	const exhaustion = exhaustionLabel ?? (toFiniteNumber(data.exhaustion ?? data.exhaustionLevel, {min: 0, max: MAX_EXHAUSTION, isInteger: true}) ?? 0);
@@ -323,7 +350,11 @@ export function buildCharacterViewModel (characterData) {
 		diseases: toDisplayLabels(data.diseases),
 		exhaustion,
 		inventorySummary,
-		carrySummary,
+		// Absent, not empty. `applyProjectionPolicy` skips `undefined`, so an unresolved
+		// summary leaves no `carrySummary` key at all — which is what "fresh or absent" has to
+		// mean on the wire. An owned `{}` is a third state that reads as "shared but empty",
+		// and a consumer cannot tell it apart from a character who shared nothing.
+		carrySummary: Object.keys(carrySummary).length ? carrySummary : undefined,
 	};
 }
 
@@ -494,12 +525,19 @@ const FIELD_VALIDATORS = Object.freeze({
 	},
 	carrySummary: value => {
 		assertPlainObject(value, "carrySummary");
-		assertNoUnknownKeys(value, ["carried", "capacity", "state"], "carrySummary");
+		assertNoUnknownKeys(value, ["carried", "capacity", "state", "isIndeterminate"], "carrySummary");
 		const out = {};
 		for (const key of ["carried", "capacity"]) {
 			if (value[key] !== undefined) out[key] = assertNumber(value[key], `carrySummary.${key}`, {min: 0, max: MAX_WEIGHT});
 		}
 		if (value.state !== undefined) out.state = assertLabel(value.state, "carrySummary.state", {maxLength: 40});
+		// Independent of `state`, and deliberately so: a load whose KNOWN part already exceeds
+		// capacity is safely `over_capacity` while still being a lower bound, so the two facts
+		// cannot share one field without losing one of them.
+		if (value.isIndeterminate !== undefined) {
+			if (typeof value.isIndeterminate !== "boolean") fail(`carrySummary.isIndeterminate must be a boolean.`);
+			out.isIndeterminate = value.isIndeterminate;
+		}
 		if (!Object.keys(out).length) fail(`carrySummary must contain at least one value.`);
 		return out;
 	},
@@ -586,7 +624,7 @@ export function applyProjectionPolicy ({viewModel, policy}) {
  * Fails closed — a policy that cannot be validated yields an empty `data`, which is
  * indistinguishable from the `private` preset, so a corrupt policy is not enumerable.
  */
-export function computePeerProfile ({character}) {
+export function computePeerProfile ({character, expectedBasis} = {}) {
 	const projectionRevision = Number(character.projectionRevision) || 1;
 	const envelope = {
 		kind: "peer_profile",
@@ -601,7 +639,7 @@ export function computePeerProfile ({character}) {
 	} catch {
 		return {...envelope, data: {}};
 	}
-	const data = applyProjectionPolicy({viewModel: buildCharacterViewModel(character.data), policy});
+	const data = applyProjectionPolicy({viewModel: buildCharacterViewModel(character.data, {expectedBasis}), policy});
 	return {
 		...envelope,
 		...(data.identity && character.targetRef ? {targetRef: character.targetRef} : {}),
@@ -651,8 +689,14 @@ export function getPolicyNotAvailableError () {
 	return new HubStoreError("PROJECTION_POLICY_NOT_AVAILABLE", `Sharing settings are not available for this character.`, {status: 404});
 }
 
-export function getPolicyManagementResponse (character) {
-	const preview = computePeerProfile({character});
+/**
+ * @param {object} character
+ * @param {?object} expectedBasis The live carry basis. Required for the preview to match what
+ *   a peer actually reads: without it `resolveCarryAuthority` fails closed, and the owner is
+ *   shown a preview missing the very carry they just chose to share while peers see it.
+ */
+export function getPolicyManagementResponse (character, {expectedBasis} = {}) {
+	const preview = computePeerProfile({character, expectedBasis});
 	try {
 		return {
 			policy: validateProjectionPolicy(character.projectionPolicy),
@@ -741,8 +785,34 @@ export function canViewSharedCharacterEvent ({character, accountId, role}) {
  * @param {"owner"|"dm"|"peer"} options.authorizationClass resolved by the store
  * @param {Function} options.fnCopy deep-copy used for canonical documents
  */
-export function projectCharacterForRequester ({character, authorizationClass, fnCopy = structuredClone}) {
-	if (authorizationClass === "peer") return computePeerProfile({character});
+/**
+ * The validated carry summary a DM is entitled to, independent of the owner's sharing policy.
+ *
+ * A DM receives canonical truth, so their carry reading must not be routed through
+ * `peerPreview`: that is filtered by the owner's policy, and a character who shares nothing
+ * would leave the DM Screen with no summary and silently fall back to recomputing capacity
+ * from raw inventory — which is precisely the divergent local formula this contract removed.
+ *
+ * Validated through the same fail-closed resolver, so a stale or malformed block yields
+ * `undefined` here exactly as it does for a peer.
+ * @returns {?object} `{carried, capacity, state}` or `undefined`.
+ */
+export function getDmCarrySummary ({character, expectedBasis}) {
+	const authority = resolveCarryAuthority({data: character?.data, expectedBasis});
+	if (!authority) return undefined;
+	const out = {};
+	const carried = toFiniteNumber(authority.bodyLoad, {min: 0, max: MAX_WEIGHT});
+	if (carried != null) out.carried = carried;
+	const capacity = toFiniteNumber(authority.bodyCapacity, {min: 0, max: MAX_WEIGHT});
+	if (capacity != null) out.capacity = capacity;
+	const state = toLabel(authority.status, {maxLength: 40});
+	if (state) out.state = state;
+	if (authority.isIndeterminate === true) out.isIndeterminate = true;
+	return Object.keys(out).length ? out : undefined;
+}
+
+export function projectCharacterForRequester ({character, authorizationClass, fnCopy = structuredClone, expectedBasis}) {
+	if (authorizationClass === "peer") return computePeerProfile({character, expectedBasis});
 
 	const isPolicyValid = isValidProjectionPolicy(character.projectionPolicy);
 	// The canonical document is returned without its embedded policy: the owner receives
@@ -768,5 +838,12 @@ export function projectCharacterForRequester ({character, authorizationClass, fn
 			policy: isPolicyValid ? validateProjectionPolicy(character.projectionPolicy) : null,
 		};
 	}
-	return {kind: "dm_truth", ...envelope, peerPreview: computePeerProfile({character})};
+	return {
+		kind: "dm_truth",
+		...envelope,
+		// Policy-independent: a DM's view of carry must not depend on what the owner chose to
+		// share with peers.
+		carrySummary: getDmCarrySummary({character, expectedBasis}),
+		peerPreview: computePeerProfile({character, expectedBasis}),
+	};
 }

@@ -581,9 +581,92 @@ describe("Carry display reads route through state helpers (no local recompute)",
 		expect(inventorySrc).toMatch(/const bodyLoad = carryBreakdown\.bodyLoad/);
 		expect(inventorySrc).toMatch(/const bodyCapacity = carryBreakdown\.bodyCapacity/);
 		expect(inventorySrc).not.toMatch(/const totalWeight = items\.reduce/);
-		expect(inventorySrc).toMatch(/bodyLoad > bodyCapacity/);
+		// Overload is now judged by the shared contract, which compares bodyLoad against
+		// bodyCapacity for exactly the reason this test was written: extradimensional storage
+		// must never mask physical overload. The panel consumes the verdict instead of
+		// recomputing it, which is also what stopped it disagreeing with play mode and the PDF.
+		expect(inventorySrc).toMatch(/carryBreakdown\.status === "over_capacity"/);
+		expect(inventorySrc).not.toMatch(/strScore \* 5/);
 		// The separate Bag-of-Holding bar is present and gated on hasExtradimensional.
 		expect(inventorySrc).toMatch(/charsheet-carrying-bagfill/);
 		expect(inventorySrc).toMatch(/carryBreakdown\.hasExtradimensional/);
+	});
+});
+
+describe("Encumbrance tiers — the rule source, and the toggle over it", () => {
+	// PHB variant Encumbrance defines its tiers on the STRENGTH SCORE: "in excess of 5 times
+	// your Strength score... in excess of 10 times your Strength score". "Size and Strength"
+	// scales carrying capacity and push/drag/lift and says nothing about these tiers, so
+	// anything that changes capacity must leave them where they are.
+	it("standard tiers are STR x 5 / STR x 10 and do not move with capacity", () => {
+		const state = mkChar({str: 16, thelemar: false});
+		expect(state.getCarryProfile().thresholds).toEqual({encumbered: 80, heavilyEncumbered: 160});
+
+		state.setSize("large");
+		expect(state.getCarryingCapacity()).toBe(480); // capacity doubled
+		expect(state.getCarryProfile().thresholds).toEqual({encumbered: 80, heavilyEncumbered: 160});
+	});
+
+	it("Thelemar tiers default ON as a house extension, proportional to capacity", () => {
+		const state = mkChar({str: 16, thelemar: true});
+		const profile = state.getCarryProfile();
+		// TGTT publishes no tiers of its own; these mirror the RAW proportions so a Thelemar
+		// character still gets a warning before they are simply over their maximum.
+		expect(profile.thresholdRuleId).toBe("thelemar-proportional");
+		expect(profile.thresholds.encumbered).toBeCloseTo(profile.bodyCapacity / 3, 6);
+		expect(profile.thresholds.heavilyEncumbered).toBeCloseTo((profile.bodyCapacity * 2) / 3, 6);
+	});
+
+	it("turning the tiers off leaves only the consequence TGTT actually states", () => {
+		const state = mkChar({str: 16, thelemar: true});
+		state.setSetting("thelemar_encumbranceTiers", false);
+		const profile = state.getCarryProfile();
+		expect(profile.thresholdRuleId).toBe("capacity-only");
+		expect(profile.thresholds).toBeNull();
+
+		// Comfortably loaded: no tier applies, so nothing is reported...
+		state.addItem({name: "Load", weight: profile.bodyCapacity - 1});
+		expect(state.getEncumbranceLevel()).toBe("normal");
+		// ...until the maximum itself is exceeded.
+		state.addItem({name: "Straw", weight: 5});
+		expect(state.getEncumbranceLevel()).toBe("over_capacity");
+	});
+
+	it("the toggle does not touch the standard rule, which has tiers of its own", () => {
+		const state = mkChar({str: 16, thelemar: false});
+		state.setSetting("thelemar_encumbranceTiers", false);
+		expect(state.getCarryProfile().thresholdRuleId).toBe("phb-variant");
+	});
+
+	it("defaults to ON for a character saved before the setting existed", () => {
+		const state = mkChar({str: 16, thelemar: true});
+		delete state._data.settings.thelemar_encumbranceTiers;
+		expect(state.getCarryProfile().thresholdRuleId).toBe("thelemar-proportional");
+	});
+
+	it("survives a save/load round-trip in both positions", () => {
+		for (const value of [true, false]) {
+			const state = mkChar({str: 16, thelemar: true});
+			state.setSetting("thelemar_encumbranceTiers", value);
+			const restored = new CharacterSheetState();
+			restored.loadFromJson(state.toJson());
+			expect(restored.getSettings().thelemar_encumbranceTiers).toBe(value);
+			expect(restored.getCarryProfile().thresholdRuleId).toBe(value ? "thelemar-proportional" : "capacity-only");
+		}
+	});
+
+	it("is reachable from the settings modal, play mode, and the campaign rule catalog", () => {
+		// A setting nobody can find is not a setting. Pin every surface that exposes it.
+		const charsheet = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+		expect(charsheet).toContain("settings-thelemar-encumbrance-tiers");
+		expect(charsheet).toContain(`setSetting("thelemar_encumbranceTiers"`);
+		// ...and it participates in the "Enable All Thelemar Rules" master toggle.
+		expect(charsheet).toContain(`"#settings-thelemar-encumbrance-tiers",`);
+
+		const playmode = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-playmode.js"), "utf8");
+		expect(playmode).toContain("thelemar_encumbranceTiers");
+
+		const campaignRules = readFileSync(resolve(REPO_ROOT, "server/src/campaign-content.js"), "utf8");
+		expect(campaignRules).toContain("thelemar_encumbranceTiers");
 	});
 });

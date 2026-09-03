@@ -48,6 +48,39 @@ export class PartyTrackerImporter {
 	 * @param {object} data — the `data` object of a `peer_profile` envelope
 	 * @returns {object} — deserialized Party Tracker character data
 	 */
+	/**
+	 * Normalise a projected `{carried, capacity, state}` into the tracker's carry shape.
+	 *
+	 * `state` is the AUTHORITATIVE encumbrance level. Reconstructing a tier locally from the
+	 * two numbers is not possible: PHB keys its tiers off the Strength score, Thelemar off
+	 * capacity, and a table can turn tiers off — so a local guess reported genuinely
+	 * encumbered characters as Normal. `unknown` means an item weight is missing, making the
+	 * load a lower bound.
+	 * @param {?object} summary
+	 * @returns {?object} `{state, carried, capacity, level}` or `null` when unusable.
+	 */
+	static mapCarrySummary (summary) {
+		if (!summary || typeof summary !== "object") return null;
+		const carried = Number(summary.carried);
+		const capacity = Number(summary.capacity);
+		if (!Number.isFinite(carried) || !Number.isFinite(capacity)) return null;
+		const state = typeof summary.state === "string" ? summary.state : null;
+		// `isIndeterminate` is authoritative and independent; `state === "unknown"` is only the
+		// below-capacity presentation of it. Reading the status alone missed the case where a
+		// known lower-bound load already exceeds capacity — safely `over_capacity`, but still a
+		// lower bound — and rendered it as exact.
+		const isIndeterminate = summary.isIndeterminate === true || state === "unknown";
+		return {
+			state: isIndeterminate ? "indeterminate" : "known",
+			isIndeterminate,
+			carried,
+			capacity,
+			// A replacement label the owner substituted (e.g. "Hidden") is not an encumbrance
+			// level; fall back to `unknown` rather than rendering it as one.
+			level: ["normal", "encumbered", "heavily_encumbered", "over_capacity", "unknown"].includes(state) ? state : "unknown",
+		};
+	}
+
 	static mapPeerProfile (data) {
 		if (!data || typeof data !== "object") throw new Error("Invalid peer profile data");
 		const abilities = {str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10};
@@ -84,6 +117,12 @@ export class PartyTrackerImporter {
 			ct: [],
 			exh: Number.isFinite(data.exhaustion) ? data.exhaustion : 0,
 			cw: Number(data.carrySummary?.carried) || 0,
+			// The projection carries the sheet's authoritative body pair, or omits the field
+			// entirely when the owner has not shared it or when the summary is no longer
+			// current (an item grant, a transfer, or a campaign rules/brew rotation since
+			// their last save). An absent field must NOT be shown as 0/0 or "Normal": the
+			// tracker renders "not synced", so a DM can tell an unknown load from a light one.
+			csum: this.mapCarrySummary(data.carrySummary) ?? {state: "unavailable"},
 			cnd: (data.conditions || []).map(name => ({n: name, s: null})),
 			dis: (data.diseases || []).map(name => ({n: name, s: null})),
 			nt: "",

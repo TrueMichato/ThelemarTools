@@ -1,4 +1,5 @@
 import {PartyTrackerCharacterSerializer} from "./dmscreen-partytracker-serial.js";
+import {getCarryProfile, getCarryStatus} from "../../hub/hub-carry-contract.js";
 
 export class PartyTrackerCharacter {
 	constructor (data, settings) {
@@ -70,13 +71,90 @@ export class PartyTrackerCharacter {
 	}
 
 	getCarryCapacity () {
-		if (this._data.overrides?.carryCapacity != null) return this._data.overrides.carryCapacity;
-		const mult = this._data.powerfulBuild ? 2 : 1;
-		if (this._settings?.enableTgtt && this._settings?.thelemar_carryWeight) {
-			const passiveMight = this.getPassiveScore("might");
-			return passiveMight * 10 * mult;
+		return this.getCarryProfile().bodyCapacity;
+	}
+
+	/**
+	 * Evaluate this character through the shared carry contract.
+	 *
+	 * Previously this panel recomputed capacity itself and, in doing so, ignored creature
+	 * size, flat bonuses and extradimensional containers — so a Large or bag-carrying
+	 * character showed one capacity here and a different one on their own sheet. The
+	 * arithmetic now lives in one place; this method only maps the tracker's fields onto it.
+	 *
+	 * For a character linked to the Campaign Hub the authoritative profile comes from the
+	 * owner's sheet instead (see {@link getCarryState}); this local derivation covers
+	 * manually-entered characters, which is all the tracker has for them.
+	 * @returns {object} A frozen carry profile.
+	 */
+	getCarryProfile () {
+		const isThelemar = !!(this._settings?.enableTgtt && this._settings?.thelemar_carryWeight);
+		const strengthScore = this._data.abilities?.str ?? 10;
+		return getCarryProfile({
+			rule: isThelemar ? "thelemar" : "standard",
+			thresholdRuleId: isThelemar
+				? (this._settings?.thelemar_encumbranceTiers === false ? "capacity-only" : "thelemar-proportional")
+				: "phb-variant",
+			sourceValue: isThelemar ? this.getPassiveScore("might") : strengthScore,
+			// The PHB variant tiers key off the Strength SCORE even under the Thelemar
+			// capacity rule, because Thelemar defines no tiers to override them with.
+			thresholdSourceValue: strengthScore,
+			size: this._data.size || "medium",
+			carryMultiplier: this._data.powerfulBuild ? 2 : 1,
+			capacityOverride: this._data.overrides?.carryCapacity ?? null,
+			grossWeight: this._data.currentWeight || 0,
+		});
+	}
+
+	/**
+	 * What the tracker should actually display for this character.
+	 *
+	 * Three outcomes are kept distinct, because collapsing them misleads a DM:
+	 *   - `known`         — a trustworthy load and capacity;
+	 *   - `indeterminate` — trustworthy, but some item weights are missing, so the load is a
+	 *                       lower bound;
+	 *   - `unavailable`   — a Hub-linked character whose sheet has not published a current
+	 *                       carry summary. Rendering that as 0/0 or "Normal" would be a
+	 *                       confident lie; it must read as "not synced".
+	 * @returns {{state: string, profile: ?object, carried: ?number, capacity: ?number, level: ?string}}
+	 */
+	getCarryState () {
+		const linked = this._data.carrySummary;
+		if (linked) {
+			if (linked.state === "unavailable") return {state: "unavailable", profile: null, carried: null, capacity: null, level: null};
+			// The encumbrance LEVEL is taken from the projection, never recomputed here. This
+			// row cannot know which tier rule produced that capacity — PHB keys its tiers off
+			// the Strength score, Thelemar off capacity, and a table may have disabled them —
+			// so it previously assumed `capacity-only` and reported genuinely encumbered and
+			// heavily-encumbered characters as Normal.
+			// `unknownStackCount` is what makes the reconstructed profile indeterminate. Without
+			// it the profile claimed to be exact and the party aggregate — which buckets on the
+			// profile — counted this member as fully known, so the totals silently presented a
+			// lower bound as a complete sum.
+			const isIndeterminate = linked.isIndeterminate === true || linked.state === "indeterminate";
+			const profile = getCarryProfile({
+				capacityOverride: linked.capacity,
+				grossWeight: linked.carried,
+				thresholdRuleId: "capacity-only",
+				unknownStackCount: isIndeterminate ? 1 : 0,
+			});
+			return {
+				state: isIndeterminate ? "indeterminate" : "known",
+				profile,
+				carried: linked.carried,
+				capacity: linked.capacity,
+				level: linked.level || getCarryStatus(profile).level,
+			};
 		}
-		return (this._data.abilities?.str ?? 10) * 15 * mult;
+		const profile = this.getCarryProfile();
+		const status = getCarryStatus(profile);
+		return {
+			state: profile.isIndeterminate ? "indeterminate" : "known",
+			profile,
+			carried: profile.bodyLoad,
+			capacity: profile.bodyCapacity,
+			level: status.level,
+		};
 	}
 
 	getSkillBonusRaw (skill) {
@@ -210,10 +288,24 @@ export class PartyTrackerCharacter {
 		const hpTitle = hpMax > 0 ? `HP: ${hpCurrent}${hpTemp > 0 ? ` (+${hpTemp} temp)` : ""} / ${hpMax} (${Math.max(0, hpPct)}%)` : "HP not set";
 
 		/* ----- Personal stats for collapsed row ----- */
-		const carry = this.getCarryCapacity();
-		const curWeight = this._data.currentWeight || 0;
+		const carryState = this.getCarryState();
+		const carry = carryState.capacity ?? 0;
+		const curWeight = carryState.carried ?? 0;
 		const carryPct = carry > 0 ? Math.round((curWeight / carry) * 100) : 0;
-		const carryClass = carryPct > 100 ? "dm-party__char-stat--danger" : carryPct > 75 ? "dm-party__char-stat--warn" : "";
+		// Severity follows the contract's encumbrance level rather than a percentage, so the
+		// tier shown here is the same tier the player's own sheet shows.
+		const carryClass = carryState.state === "unavailable"
+			? "dm-party__char-stat--muted"
+			: (carryState.level === "over_capacity" ? "dm-party__char-stat--danger"
+				: (carryState.level === "heavily_encumbered" || carryState.level === "encumbered" || carryState.level === "unknown" ? "dm-party__char-stat--warn" : ""));
+		const carryText = carryState.state === "unavailable"
+			? "\u2014"
+			: `${carryState.state === "indeterminate" ? "\u2265" : ""}${curWeight}/${carry}`;
+		const carryTitle = carryState.state === "unavailable"
+			// Explicitly not "0 lb": this character's sheet has not published a current carry
+			// summary, which is a different thing from carrying nothing.
+			? "Carry: not synced \u2014 this character's sheet has not published a current carry summary"
+			: `Carry: ${curWeight}/${carry} lb (${carryPct}%)${carryState.state === "indeterminate" ? " \u2014 some item weights are unknown, so this is a minimum" : ""}`;
 
 		const exhaustion = this._data.exhaustionLevel || 0;
 
@@ -262,7 +354,7 @@ export class PartyTrackerCharacter {
 			<span class="dm-party__char-stat" title="Passive Investigation" aria-label="Passive Investigation ${this.getPassiveScore("investigation")}"><span aria-hidden="true">\u{1F50D}</span> ${this.getPassiveScore("investigation")}</span>
 			<span class="dm-party__char-stat" title="Passive Insight" aria-label="Passive Insight ${this.getPassiveScore("insight")}"><span aria-hidden="true">\u{1F4A1}</span> ${this.getPassiveScore("insight")}</span>
 			${passiveLinguistics != null ? ee`<span class="dm-party__char-stat dm-party__char-tgtt-stat" title="Passive Linguistics" aria-label="Passive Linguistics ${passiveLinguistics}"><span aria-hidden="true">\u{1F5E3}</span> ${passiveLinguistics}</span>` : ""}
-			<span class="dm-party__char-stat ${carryClass}" title="Carry: ${curWeight}/${carry} lb (${carryPct}%)" aria-label="Carry weight ${curWeight} of ${carry} pounds, ${carryPct} percent"><span aria-hidden="true">\u{1F3CB}</span> ${curWeight}/${carry}</span>
+			<span class="dm-party__char-stat ${carryClass}" title="${carryTitle}" aria-label="${carryTitle}"><span aria-hidden="true">\u{1F3CB}</span> ${carryText}</span>
 			${sightStr ? ee`<span class="dm-party__char-stat" title="Senses: ${senseEntries.join(", ")}" aria-label="Senses ${senseEntries.join(", ")}"><span aria-hidden="true">\u{1F440}</span> ${sightStr}</span>` : ""}
 			<span class="dm-party__char-stat" title="Long Jump ${jump.longRunning}/${jump.longStanding} ft · High Jump ${jump.highRunning}/${jump.highStanding} ft" aria-label="Long jump ${jump.longRunning} running, ${jump.longStanding} standing feet; high jump ${jump.highRunning} running, ${jump.highStanding} standing feet"><span aria-hidden="true">\u{27A1}</span> ${jump.longRunning}/${jump.longStanding} <span aria-hidden="true">\u{2B06}</span> ${jump.highRunning}/${jump.highStanding}</span>
 			${exhaustion > 0 ? ee`<span class="dm-party__char-stat dm-party__char-stat--danger" title="Exhaustion Level ${exhaustion}" aria-label="Exhaustion level ${exhaustion}"><span aria-hidden="true">\u{1F4A4}</span> ${exhaustion}</span>` : ""}
@@ -509,6 +601,25 @@ export class PartyTrackerCharacter {
 				this._renderExpandedForm();
 				this._doUpdate();
 			});
+		// Size was previously not tracked here at all, so a Large character's capacity was
+		// computed as a Medium one's and silently disagreed with their own sheet.
+		const curSize = this._data.size || "medium";
+		const selSize = ee`<select class="ve-form-control ve-input-xs" style="width: 92px;" aria-label="Creature size (carrying capacity)">
+			${["tiny", "small", "medium", "large", "huge", "gargantuan"].map(size => `<option value="${size}" ${size === curSize ? "selected" : ""}>${size.charAt(0).toUpperCase()}${size.slice(1)}</option>`).join("")}
+		</select>`
+			.onn("change", (e) => {
+				this._data.size = e.target.value;
+				this._renderExpandedForm();
+				this._doUpdate();
+			});
+		const carryState = this.getCarryState();
+		const carryLevelLabel = {
+			over_capacity: "Over capacity",
+			heavily_encumbered: "Heavily encumbered",
+			encumbered: "Encumbered",
+			unknown: "Unknown \u2014 missing item weights",
+			normal: "Normal",
+		}[carryState.level] || "";
 
 		/* ----- Passives with bonus inputs ----- */
 		const wrpPassives = ee`<div class="dm-party__passives-grid"></div>`;
@@ -622,6 +733,8 @@ export class PartyTrackerCharacter {
 
 			<div class="dm-party__derived-bar">
 				<span class="ve-flex-v-center ve-gap-1" title="Carrying Capacity">\u{1F3CB} Carry: ${iptCurrentWeight}<span>/ ${carry} lb</span></span>
+				${carryState.state === "unavailable" ? ee`<span class="ve-small ve-muted" title="This character's sheet has not published a current carry summary">Carry not synced</span>` : ee`<span class="ve-small ve-muted" title="Encumbrance level">${carryLevelLabel}</span>`}
+				<label class="ve-flex-v-center ve-gap-1" title="Creature size — scales carrying capacity (Tiny ×0.5, Large ×2, Huge ×4, Gargantuan ×8)" style="cursor: pointer;"><span class="ve-small">Size</span>${selSize}</label>
 				<label class="ve-flex-v-center ve-gap-1" title="Powerful Build — count as one size larger for carrying capacity (×2)" style="cursor: pointer;">${cbxPowerfulBuild}<span class="ve-small">Powerful Build</span></label>
 				<span title="Long Jump (running / standing)">\u{27A1} L.Jump: ${jump.longRunning}/${jump.longStanding} ft</span>
 				<span title="High Jump (running / standing)">\u{2B06} H.Jump: ${jump.highRunning}/${jump.highStanding} ft</span>

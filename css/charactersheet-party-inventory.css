@@ -305,3 +305,22 @@
 		flex-direction: column;
 	}
 }
+
+/* Advisory carry impact of a proposed transfer. Never a blocker: encumbrance is not an
+   enforced rule, and refusing a transfer on weight would let a rejection disclose a peer's
+   hidden load. */
+.charsheet__party-inventory-carry-delta {
+	margin: 0.35rem 0 0;
+	font-size: 0.85em;
+	opacity: 0.85;
+}
+
+.charsheet__party-inventory-carry-delta--warn {
+	color: #c0392b;
+	opacity: 1;
+	font-weight: 600;
+}
+
+.night-mode .charsheet__party-inventory-carry-delta--warn {
+	color: #ff8a80;
+}

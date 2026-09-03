@@ -1,5 +1,6 @@
 import {HubApiClient} from "./hub-api-client.js";
 import {applyJsonPatch, diffJson, rebaseJsonChanges} from "./hub-json-patch.js";
+import {withRootCarryWrite} from "./hub-carry-authority.js";
 import {HubBroadcastSync} from "./hub-broadcast-sync.js";
 import {getCharacterOperationRouting} from "./hub-character-operation-events.js";
 import {
@@ -1139,7 +1140,10 @@ export class HubHttpCharacterRepository {
 				}
 				desired = submittedRebase.document;
 			}
-			const patches = diffJson(accepted.data, desired);
+			// A recursive diff never emits a whole-block `/carry` op, which is the only signal
+			// the server accepts as "this writer understands carry authority". Without this
+			// normalisation an ordinary save strips the summary it is actually carrying.
+			const patches = withRootCarryWrite({patches: diffJson(accepted.data, desired), document: desired, base: accepted.data});
 			if (!patches.length) {
 				this._syncCoverageToAccepted(canonicalId);
 				return this._getData(accepted);
@@ -1211,7 +1215,11 @@ export class HubHttpCharacterRepository {
 					characterId: canonicalId,
 					baseRevision: canonical.revision,
 					leaseEpoch: leaseNxt.epoch,
-					patches: diffJson(canonical.data, rebased.document),
+					patches: withRootCarryWrite({
+						patches: diffJson(canonical.data, rebased.document),
+						document: rebased.document,
+						base: canonical.data,
+					}),
 					idempotencyKey: commandKeys.patch,
 				});
 			}

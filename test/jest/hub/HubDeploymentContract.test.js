@@ -54,24 +54,93 @@ describe("Hub portable deployment contract", () => {
 		expect(dockerignore).not.toContain("!data");
 	});
 
-	it("packages every shared browser module the server imports", () => {
+	it("packages every shared browser module the server imports, transitively", () => {
 		// A server module importing `../../js/...` that the image never copies boots fine in tests
 		// and then crashes the container with ERR_MODULE_NOT_FOUND. Derive the list instead of
 		// pinning names so a new shared helper cannot be added without being packaged.
+		//
+		// The walk deliberately does THREE things a naive scan does not, each of which has
+		// already shipped a broken image or was one edit away from doing so:
+		//
+		//   1. follows DYNAMIC `await import("../../js/...")`, not just static `from "..."`.
+		//      `character-derived-stats.js` reaches the Character Sheet state that way.
+		//   2. follows imports TRANSITIVELY through the packaged `js/` files themselves. A
+		//      packaged module is not self-contained: `charactersheet-state.js` imports the
+		//      carry contract, so packaging only its direct importer is not enough.
+		//   3. resolves those relative specifiers against the importing file's own directory,
+		//      since inside `js/` they are siblings (`./x.js`) or cousins (`../hub/x.js`)
+		//      rather than the `../../js/...` form used from `server/src`.
 		const testDockerignore = read("server/test.Dockerfile.dockerignore");
 		const serverDir = new URL("../../../server/src/", import.meta.url);
-		const imported = new Set();
+
+		const RE_STATIC = /from\s+"([^"]+)"/g;
+		const RE_DYNAMIC = /\bimport\s*\(\s*"([^"]+)"\s*\)/g;
+
+		const getSpecifiers = source => [
+			...[...source.matchAll(RE_STATIC)].map(m => m[1]),
+			...[...source.matchAll(RE_DYNAMIC)].map(m => m[1]),
+		];
+
+		/** Resolve a relative specifier against a repo-relative directory. */
+		const resolveFrom = (fromDir, specifier) => {
+			if (!specifier.startsWith(".")) return null; // bare package specifier
+			const parts = `${fromDir}/${specifier}`.split("/");
+			const out = [];
+			for (const part of parts) {
+				if (!part || part === ".") continue;
+				if (part === "..") out.pop();
+				else out.push(part);
+			}
+			return out.join("/");
+		};
+
+		const required = new Set();
+		const queue = [];
+
 		for (const file of fs.readdirSync(serverDir).filter(name => name.endsWith(".js"))) {
-			const source = read(`server/src/${file}`);
-			for (const [, specifier] of source.matchAll(/from\s+"\.\.\/\.\.\/(js\/[^"]+)"/g)) imported.add(specifier);
+			for (const specifier of getSpecifiers(read(`server/src/${file}`))) {
+				const resolved = resolveFrom("server/src", specifier);
+				if (!resolved?.startsWith("js/")) continue;
+				if (required.has(resolved)) continue;
+				required.add(resolved);
+				queue.push(resolved);
+			}
 		}
 
-		expect(imported.size).toBeGreaterThan(0);
-		for (const specifier of imported) {
+		while (queue.length) {
+			const current = queue.pop();
+			const dir = current.slice(0, current.lastIndexOf("/"));
+			let source;
+			try {
+				source = read(current);
+			} catch {
+				continue; // a missing file is caught by the packaging assertions below
+			}
+			for (const specifier of getSpecifiers(source)) {
+				const resolved = resolveFrom(dir, specifier);
+				if (!resolved?.startsWith("js/")) continue;
+				if (required.has(resolved)) continue;
+				required.add(resolved);
+				queue.push(resolved);
+			}
+		}
+
+		expect(required.size).toBeGreaterThan(0);
+		for (const specifier of required) {
 			expect(dockerfile).toContain(`COPY --chown=hub:hub ${specifier} ./${specifier}`);
 			expect(dockerignore).toContain(`!${specifier}`);
 			expect(testDockerignore).toContain(`!${specifier}`);
 		}
+	});
+
+	it("the traversal actually reaches a transitive dynamic dependency", () => {
+		// Guards the guard. `character-derived-stats.js` reaches `charactersheet-state.js`
+		// through a dynamic import, and that file in turn imports the carry contract — the
+		// exact two-hop path that shipped an unhealthy BFF. If either link stops being
+		// followed, the test above would silently pass while the image lost a module.
+		expect(read("server/src/character-derived-stats.js")).toMatch(/await import\("\.\.\/\.\.\/js\/charactersheet\/charactersheet-state\.js"\)/);
+		expect(read("js/charactersheet/charactersheet-state.js")).toMatch(/from "\.\.\/hub\/hub-carry-contract\.js"/);
+		expect(dockerfile).toContain("COPY --chown=hub:hub js/hub/hub-carry-contract.js ./js/hub/hub-carry-contract.js");
 	});
 
 	it("keeps event snapshot enrichment inside the packaged server tree", () => {

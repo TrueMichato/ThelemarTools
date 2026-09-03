@@ -204,13 +204,171 @@ describe("campaign DM Screen controller", () => {
 		realtime.emit("event", {type: "character.projection.invalidated", payload: {projectionRevision: 4}});
 		realtime.emit("event", {type: "item.granted"});
 		realtime.emit("event", {type: "transfer.committed"});
-		// Repeated invalidations coalesce into a single scoped refetch.
+		// Repeated invalidations coalesce into a single scoped refetch. There are two
+		// independent coalescers — projections and the party stash — and `transfer.committed`
+		// legitimately feeds both, so each holds at most one pending timer.
 		expect(fetchCount).toBe(0);
-		expect(timers.size).toBe(1);
-		timers.values().next().value();
+		expect(timers.size).toBe(2);
+		for (const fn of [...timers.values()]) fn();
 		await new Promise(resolve => setImmediate(resolve));
 		expect(fetchCount).toBe(1);
 		// ADR 0011: projections come from the HTTP projector, never from a socket resync.
 		expect(requestResyncCount).toBe(0);
+	});
+});
+
+describe("party stash weight path", () => {
+	/**
+	 * `dmscreen.js` calls `pLoadCampaign()` BEFORE `attach()`, so a fetch kicked off during
+	 * load has no Board to publish onto. The controller caches the summary and republishes it
+	 * on attach, which makes the ordering irrelevant and handles re-attach for free.
+	 */
+	function getHarness ({pGetPartyInventory, fnNow} = {}) {
+		const published = [];
+		const timers = new Map();
+		let nextTimerId = 0;
+		const realtime = new Observable();
+		const board = {fireBoardEvent: event => published.push(event)};
+		const controller = new DmScreenHubController({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCampaign: async () => ({name: "C", status: "active", role: "dm"}),
+				pListCampaignCharacterProjections: async () => ({projections: [], roster: []}),
+				pGetPartyInventory: pGetPartyInventory || (async () => ({inventory: []})),
+			},
+			document: null,
+			fnNow,
+			fnSetTimeout: fn => {
+				const id = ++nextTimerId;
+				timers.set(id, fn);
+				return id;
+			},
+			fnClearTimeout: id => timers.delete(id),
+		});
+		const getStashEvents = () => published.filter(it => it.type === "hubPartyInventory");
+		return {controller, board, realtime, timers, published, getStashEvents};
+	}
+
+	const flush = () => new Promise(resolve => setImmediate(resolve));
+
+	it("publishes a summary when the fetch resolves BEFORE attach", async () => {
+		const h = getHarness({
+			pGetPartyInventory: async () => ({inventory: [{quantity: 2, item: {weight: 5}}]}),
+		});
+		await h.controller.pLoadCampaign();
+		await flush();
+		// No Board yet, so nothing could have been published.
+		expect(h.getStashEvents()).toHaveLength(0);
+
+		h.controller.attach({board: h.board, repository: null, realtime: h.realtime});
+		expect(h.getStashEvents().at(-1).payload).toEqual(expect.objectContaining({state: "known", knownWeight: 10, stackCount: 1}));
+	});
+
+	it("publishes when the fetch resolves AFTER attach", async () => {
+		let release;
+		const h = getHarness({pGetPartyInventory: () => new Promise(resolve => { release = resolve; })});
+		await h.controller.pLoadCampaign();
+		h.controller.attach({board: h.board, repository: null, realtime: h.realtime});
+		release({inventory: [{quantity: 1, item: {weight: 7}}]});
+		await flush();
+		expect(h.getStashEvents().at(-1).payload).toEqual(expect.objectContaining({state: "known", knownWeight: 7}));
+	});
+
+	it("republishes the cached summary on re-attach", async () => {
+		const h = getHarness({pGetPartyInventory: async () => ({inventory: [{quantity: 1, item: {weight: 3}}]})});
+		await h.controller.pLoadCampaign();
+		await flush();
+		h.controller.attach({board: h.board, repository: null, realtime: h.realtime});
+		h.controller.detach();
+		h.controller.attach({board: h.board, repository: null, realtime: h.realtime});
+		expect(h.getStashEvents().at(-1).payload).toEqual(expect.objectContaining({state: "known", knownWeight: 3}));
+	});
+
+	it("a late completion after detach() must not publish", async () => {
+		let release;
+		const h = getHarness({pGetPartyInventory: () => new Promise(resolve => { release = resolve; })});
+		await h.controller.pLoadCampaign();
+		h.controller.attach({board: h.board, repository: null, realtime: h.realtime});
+		const before = h.getStashEvents().length;
+
+		h.controller.detach();
+		release({inventory: [{quantity: 99, item: {weight: 99}}]});
+		await flush();
+
+		// The generation bumped on detach, so the in-flight response is discarded rather than
+		// landing on a Board this controller no longer owns.
+		expect(h.getStashEvents()).toHaveLength(before);
+	});
+
+	it("counts stacks with unusable weights instead of silently dropping them", async () => {
+		const h = getHarness({
+			pGetPartyInventory: async () => ({inventory: [
+				{quantity: 1, item: {weight: 4}},
+				{quantity: 1, item: {}},
+				{quantity: "many", item: {weight: 2}},
+			]}),
+		});
+		await h.controller.pLoadCampaign();
+		await flush();
+		h.controller.attach({board: h.board, repository: null, realtime: h.realtime});
+		expect(h.getStashEvents().at(-1).payload).toEqual(expect.objectContaining({knownWeight: 4, unknownStackCount: 2}));
+	});
+
+	it("a transient failure stays retryable", async () => {
+		let shouldFail = true;
+		const h = getHarness({
+			pGetPartyInventory: async () => {
+				if (shouldFail) throw Object.assign(new Error("offline"), {status: 503});
+				return {inventory: [{quantity: 1, item: {weight: 8}}]};
+			},
+		});
+		await h.controller.pLoadCampaign();
+		await flush();
+		h.controller.attach({board: h.board, repository: null, realtime: h.realtime});
+		expect(h.getStashEvents().at(-1).payload.state).toBe("unavailable");
+
+		shouldFail = false;
+		h.realtime.emit("event", {type: "party_inventory.invalidated"});
+		for (const fn of [...h.timers.values()]) fn();
+		await flush();
+		expect(h.getStashEvents().at(-1).payload).toEqual(expect.objectContaining({state: "known", knownWeight: 8}));
+	});
+
+	it("authoritative access loss fences refresh until a new attach", async () => {
+		let calls = 0;
+		const h = getHarness({
+			pGetPartyInventory: async () => {
+				calls++;
+				throw Object.assign(new Error("forbidden"), {status: 403});
+			},
+		});
+		await h.controller.pLoadCampaign();
+		await flush();
+		h.controller.attach({board: h.board, repository: null, realtime: h.realtime});
+		// Let the attach-time refresh settle so the fence is actually in place before the
+		// property under test is exercised.
+		await flush();
+		expect(h.getStashEvents().at(-1).payload.state).toBe("unavailable");
+		const callsAfterAttach = calls;
+
+		// Unlike a network blip there is nothing to retry: the endpoint will keep refusing
+		// until authorization actually changes, which only a new verified attach can reflect.
+		h.realtime.emit("event", {type: "party_inventory.invalidated"});
+		for (const fn of [...h.timers.values()]) fn();
+		await flush();
+		expect(calls).toBe(callsAfterAttach);
+	});
+
+	it("never publishes the stash item list, only its weight", async () => {
+		const h = getHarness({
+			pGetPartyInventory: async () => ({inventory: [{quantity: 1, item: {name: "Crown of Secrets", weight: 2}}]}),
+		});
+		await h.controller.pLoadCampaign();
+		await flush();
+		h.controller.attach({board: h.board, repository: null, realtime: h.realtime});
+		const payload = h.getStashEvents().at(-1).payload;
+		expect(Object.keys(payload).sort()).toEqual(["knownWeight", "stackCount", "state", "unknownStackCount"]);
+		expect(JSON.stringify(payload)).not.toContain("Crown of Secrets");
 	});
 });

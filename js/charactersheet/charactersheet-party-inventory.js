@@ -3,6 +3,7 @@ import {
 	getProjectionView,
 	getTargetableProjections,
 } from "../hub/hub-character-view.js";
+import {getCarryProfile, getCarryStatus} from "../hub/hub-carry-contract.js";
 import {
 	getInventoryStackWeight,
 	getInventoryTransferEligibility,
@@ -46,6 +47,21 @@ function getQuantity (entry) {
 
 function formatNumber (value) {
 	return new Intl.NumberFormat(undefined, {maximumFractionDigits: 2}).format(value);
+}
+
+/**
+ * A weight, marked `≥` when the figure is only a lower bound.
+ *
+ * A load containing a stack of unknown weight is not the number we can add up; it is at least
+ * that number. Printing it bare states a precision we do not have — and the omission is least
+ * visible exactly where it matters most, since a lower bound that already exceeds capacity
+ * still reads as a settled, exact reading.
+ * @param {number} value
+ * @param {boolean} isLowerBound
+ * @returns {string}
+ */
+function formatWeight (value, isLowerBound) {
+	return `${isLowerBound ? "≥" : ""}${formatNumber(value)}`;
 }
 
 function getTransferLimit ({container, entry}) {
@@ -98,10 +114,26 @@ export function getPartyInventoryRecipients ({projections = [], roster = [], cur
 		.filter(projection => getProjectionId(projection) !== currentCharacterId)
 		.map(projection => {
 			const view = getProjectionView(projection);
+			// Preserve the recipient's carry ONLY when they chose to share it. It is absent
+			// from the projection otherwise, so nothing here can reconstruct a withheld load —
+			// the transfer preview simply says nothing about that character, which is what
+			// ADR 0011 requires of any peer-facing carry surface.
+			const carry = view.carrySummary;
+			const isShared = !!carry && Number.isFinite(Number(carry.carried)) && Number.isFinite(Number(carry.capacity));
 			return {
 				id: getProjectionId(projection),
 				label: view.name,
 				summary: view.classes.map(cls => `${cls.name}${Number.isFinite(cls.level) ? ` ${cls.level}` : ""}`).join(" / "),
+				carry: isShared
+					? {
+						carried: Number(carry.carried),
+						capacity: Number(carry.capacity),
+						state: typeof carry.state === "string" ? carry.state : null,
+						// Independent of `state`: an over-capacity recipient can still be a lower
+						// bound, and dropping this rendered their weight as exact.
+						isIndeterminate: carry.isIndeterminate === true || carry.state === "unknown",
+					}
+					: null,
 			};
 		})
 		.filter(recipient => recipient.id && recipient.label)
@@ -134,6 +166,8 @@ export class CharacterSheetPartyInventory {
 		fnAdoptCharacterData,
 		fnSaveCharacter,
 		fnIsCurrentCharacter,
+		fnGetCarryProfile = null,
+		fnProjectItemWeight = null,
 		fnToast = detail => globalThis.JqueryUtil?.doToast?.(detail),
 	}) {
 		this._campaignId = campaignId;
@@ -144,6 +178,12 @@ export class CharacterSheetPartyInventory {
 		this._fnAdoptCharacterData = fnAdoptCharacterData;
 		this._fnSaveCharacter = fnSaveCharacter;
 		this._fnIsCurrentCharacter = fnIsCurrentCharacter;
+		// Supplies the live carry profile so a transfer can be previewed against the same
+		// calculation the carry bar uses. Optional: without it the preview simply omits the
+		// carry line rather than guessing at capacity.
+		this._fnGetCarryProfile = fnGetCarryProfile;
+		// Projects an item's effective weight through the sheet's material rules.
+		this._fnProjectItemWeight = fnProjectItemWeight;
 		this._fnToast = fnToast;
 
 		this._isEnabled = typeof campaignId === "string"
@@ -904,6 +944,14 @@ export class CharacterSheetPartyInventory {
 			attrs: {id: "charsheet-party-inventory-confirmation"},
 		});
 		composer.append(summary);
+		// Advisory only: the Confirm button is never disabled for weight. Encumbrance is not
+		// an enforced rule here (ADR 0015 lists the carry rule as planned with no evaluator),
+		// and blocking on it would also let a rejection disclose a peer's hidden load.
+		const carryDelta = createElement("p", {
+			className: "charsheet__party-inventory-carry-delta",
+			attrs: {id: "charsheet-party-inventory-carry-delta", role: "status", "aria-live": "polite"},
+		});
+		composer.append(carryDelta);
 		if (this._draft.blockers.length) {
 			composer.append(createElement("p", {
 				className: "charsheet__party-inventory-limit-note",
@@ -932,6 +980,133 @@ export class CharacterSheetPartyInventory {
 		return composer;
 	}
 
+	/**
+	 * Show what the proposed move does to this character's carried load, and to the stash.
+	 *
+	 * Only the acting character and the shared stash are described. A recipient's load is
+	 * shown solely when that peer has chosen to share `carrySummary`; it is never derived
+	 * from a difference, because ADR 0011 forbids hidden item truth being inferred from
+	 * transfer previews or encumbrance warnings.
+	 * @param {HTMLElement} composer
+	 */
+	_syncCarryDelta (composer) {
+		const target = composer.querySelector(".charsheet__party-inventory-carry-delta");
+		if (!target || !this._draft) return;
+		const profile = this._fnGetCarryProfile?.();
+		const entry = this._getEntry(this._draft);
+		const quantity = Number(this._draft.quantity);
+		// The MATERIAL-PROJECTED weight, not the stored one: a mithril breastplate does not
+		// weigh what its steel base entry says, and the carry bar has always counted the
+		// projected figure. Falls back to the raw value for the party stash, whose plain
+		// documents have no sheet context to project through.
+		// TWO weights, because two different systems own them. The acting sheet applies material
+		// projection (a mithril breastplate does not weigh its steel entry), while the party
+		// stash is a plain document whose authoritative summary sums the RAW stored weight.
+		// Using one figure for both made the previewed stash total disagree with the number the
+		// next refresh would show.
+		const rawUnitWeight = Number(entry?.item?.weight);
+		const unitWeight = Number(this._fnProjectItemWeight?.(entry?.item) ?? entry?.item?.weight);
+
+		const isMovedWeightKnown = Number.isFinite(unitWeight) && unitWeight >= 0;
+		if (!profile || !entry || !Number.isSafeInteger(quantity) || quantity < 1) {
+			target.textContent = "";
+			return;
+		}
+
+		const moved = isMovedWeightKnown ? unitWeight * quantity : null;
+		const movedRaw = Number.isFinite(rawUnitWeight) && rawUnitWeight >= 0 ? rawUnitWeight * quantity : null;
+		// Moving OUT of the stash adds to this character; moving out of this character removes.
+		const signedDelta = this._draft.kind === "party_inventory" ? moved : -moved;
+		// Apply the delta to GROSS and FILLABLE weight and let the contract re-derive the
+		// split, rather than adding it straight onto `bodyLoad`. With an extradimensional
+		// container equipped those are different numbers: 20 lb of stowable gear arriving into
+		// a bag with spare capacity leaves the body load unchanged, so the naive sum claimed a
+		// 20 lb increase the character would never feel — and, in the other direction, hid the
+		// moment the bag fills and the overflow starts landing on the body.
+		//
+		// A transferable stack is unequipped by definition (the eligibility rules block
+		// equipped and attuned items), so it is bag-eligible unless it is itself a weightless
+		// container, which cannot be stowed inside itself.
+		const isFillable = !entry?.item?.containerCapacity?.weightless;
+		const after = moved == null ? null : getCarryProfile({
+			capacityOverride: profile.bodyCapacity,
+			externalCapacity: profile.externalCapacity,
+			grossWeight: Math.max(0, profile.grossWeight + signedDelta),
+			fillableWeight: Math.max(0, profile.fillableWeight + (isFillable ? signedDelta : 0)),
+			thresholdRuleId: profile.thresholdRuleId,
+			thresholdSourceValue: profile.thresholdSourceValue,
+			unknownStackCount: profile.unknownStackCount,
+		});
+		const beforeLevel = getCarryStatus(profile).level;
+		const afterLevel = after ? getCarryStatus(after).level : null;
+		const label = level => ({
+			over_capacity: "Over capacity",
+			heavily_encumbered: "Heavily encumbered",
+			encumbered: "Encumbered",
+			unknown: "Unknown",
+			normal: "Normal",
+		}[level] || level);
+
+		// Each side is marked from ITS OWN profile: the before and after states are separately
+		// derived and need not share indeterminacy. The status itself is never softened — a
+		// known lower bound that already exceeds capacity is genuinely over capacity, and
+		// downgrading that truthful verdict would trade one inaccuracy for another.
+		// Each line is rendered with its own truthfulness rather than suppressing the whole
+		// message: an unweighed stack makes the ACTOR's consequence unknowable, but the stash's
+		// own totals remain perfectly reportable, and its uncertainty can even DECREASE if that
+		// unweighed stack is what leaves.
+		const parts = [];
+		if (after) {
+			parts.push(`You: ${formatWeight(profile.bodyLoad, profile.isIndeterminate)} → ${formatWeight(after.bodyLoad, after.isIndeterminate)} lb of ${formatNumber(profile.bodyCapacity)}`);
+			parts.push(beforeLevel === afterLevel ? label(afterLevel) : `${label(beforeLevel)} → ${label(afterLevel)}`);
+		} else {
+			parts.push(`You: currently ${formatWeight(profile.bodyLoad, profile.isIndeterminate)} lb of ${formatNumber(profile.bodyCapacity)} — impact unknown (this stack has no recorded weight)`);
+		}
+
+		// The recipient's consequence.
+		//
+		// Their CURRENT carry is shown when they share it, but never an after-value: this sheet
+		// holds nothing target-authoritative. The projected weight is this character's material
+		// projection, the recipient may have their own extradimensional container absorbing the
+		// arrival entirely, and their tier rule is not knowable from two numbers. Adding the
+		// delta produced confident fabrications — a target whose body load genuinely stays at 10
+		// was warned as "10 → 30, over capacity". A truthful current reading plus an explicit
+		// "impact not shown" is worth more than a precise-looking guess, and the alternative
+		// would also mean inferring hidden truth about another character.
+		if (this._draft.kind === "character" && this._draft.destinationKind === "character") {
+			const recipient = this._recipients.find(it => it.id === this._draft.recipientId);
+			if (recipient?.carry) {
+				parts.push(`${recipient.label}: currently ${formatWeight(recipient.carry.carried, recipient.carry.isIndeterminate)} lb of ${formatNumber(recipient.carry.capacity)} — impact not shown (their carry is calculated on their own sheet)`);
+			} else if (recipient) {
+				// Explicit, and deliberately uninformative: "not shared" must not be inferable
+				// as any particular load, and silence would read as "no effect".
+				parts.push(`${recipient.label}: carry not shared`);
+			}
+		}
+
+		// Stash arithmetic uses the RAW stored weight, matching `getInventoryWeightSummary`,
+		// which is what the authoritative stash refresh will report a moment later.
+		const stash = getInventoryWeightSummary(this._partyInventory?.inventory || []);
+		if (this._draft.kind === "party_inventory" || this._draft.destinationKind === "party_inventory") {
+			const isFromStash = this._draft.kind === "party_inventory";
+			// An unweighed stack contributes nothing to the KNOWN total, so moving one leaves
+			// that number untouched — but it does move the uncertainty, and the whole-stack case
+			// can make the stash exact again when the last unweighed stack departs.
+			const isWholeStack = quantity >= (Number(entry?.quantity) || 0);
+			const stashAfterKnown = movedRaw == null
+				? stash.knownWeight
+				: Math.max(0, isFromStash ? stash.knownWeight - movedRaw : stash.knownWeight + movedRaw);
+			let unknownAfter = stash.unknownStackCount;
+			if (movedRaw == null) {
+				if (isFromStash) unknownAfter = isWholeStack ? Math.max(0, unknownAfter - 1) : unknownAfter;
+				else unknownAfter += 1;
+			}
+			parts.push(`Stash: ${formatWeight(stash.knownWeight, stash.unknownStackCount > 0)} → ${formatWeight(stashAfterKnown, unknownAfter > 0)} lb`);
+		}
+		target.textContent = `${parts.join(" · ")}.`;
+		target.classList.toggle("charsheet__party-inventory-carry-delta--warn", afterLevel === "over_capacity" && beforeLevel !== "over_capacity");
+	}
+
 	_syncComposerSummary (composer) {
 		if (!this._draft) return;
 		const entry = this._getEntry(this._draft);
@@ -944,6 +1119,7 @@ export class CharacterSheetPartyInventory {
 			: this._draft.destinationKind === "party_inventory"
 				? "the party stash"
 				: recipient?.label || "the selected character";
+		this._syncCarryDelta(composer);
 		const summary = composer.querySelector(".charsheet__party-inventory-confirmation");
 		summary.textContent = isQuantityValid
 			? `${quantity} × ${entryName} will move from ${this._draft.kind === "party_inventory" ? "the party stash" : "this character"} to ${destination}.${this._willRequireApproval() ? " The recipient must accept before it arrives." : ""}`

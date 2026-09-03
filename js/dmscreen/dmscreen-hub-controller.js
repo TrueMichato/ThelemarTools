@@ -31,7 +31,25 @@ export class DmScreenHubController {
 		this._realtime = null;
 		this._staleTimer = null;
 		this._resyncTimer = null;
+		this._partyInventoryTimer = null;
+		// Monotonic per-request sequence. Two refreshes in the same generation can resolve out
+		// of order (a slow earlier request landing after a fast later one), which would leave
+		// the older weight on screen forever. Only a response at least as new as the newest
+		// already applied may publish.
+		this._partyInventoryRequestSeq = 0;
+		this._partyInventoryAppliedSeq = 0;
 		this._isSyncStale = false;
+		// Monotonic generation. Every in-flight party-inventory request carries the value it
+		// started under; `detach()` and each load/attach bump it, so a response that arrives
+		// after teardown or after the campaign changed is discarded instead of publishing.
+		this._generation = 0;
+		// The last known stash weight summary, cached so `attach()` can publish it even when
+		// the fetch resolved before a Board existed. Held in memory only — linked stash truth
+		// is never written to Board state or localStorage.
+		this._partyInventory = {state: "loading", stackCount: 0, knownWeight: 0, unknownStackCount: 0};
+		// Set once authorization is lost, which is permanent for this generation: unlike a
+		// transient network failure there is nothing to retry until a new verified attach.
+		this._isPartyInventoryFenced = false;
 		this._unsubscribers = [];
 		this._fnRetryWorkspace = null;
 		this._state = {
@@ -83,6 +101,15 @@ export class DmScreenHubController {
 
 		this._state.access = "ready";
 		this._state.message = null;
+		// Started, not awaited: campaign access must not block on the stash. The result is
+		// cached and republished by `attach()`, so it does not matter whether this resolves
+		// before or after the Board exists.
+		//
+		// Deliberately here rather than in `pLoadCampaign()`: `dmscreen.js` adopts an
+		// already-verified campaign through this method directly and never calls
+		// `pLoadCampaign()`, so the fetch would otherwise never fire on the real DM bootstrap.
+		this._isPartyInventoryFenced = false;
+		void this.pRefreshPartyInventory();
 		this._syncBodyState();
 		this._render();
 		return this.campaign;
@@ -108,7 +135,10 @@ export class DmScreenHubController {
 	}
 
 	attach ({board, repository, realtime, fnRetryWorkspace = null}) {
+		// `detach()` bumps the generation, so anything in flight from a previous attachment
+		// is already fenced by the time the new one is wired up.
 		this.detach();
+		this._isPartyInventoryFenced = false;
 		this._board = board;
 		this._repository = repository;
 		this._realtime = realtime;
@@ -126,6 +156,15 @@ export class DmScreenHubController {
 		}
 
 		this._publishBoardStatus();
+		// `dmscreen.js` calls `pLoadCampaign()` BEFORE the Board exists, so a fetch started
+		// there has nowhere to publish. Publishing the cached summary here makes the ordering
+		// irrelevant and handles re-attach for free.
+		this._publishPartyInventory();
+		// The load-time fetch is fenced by the `detach()` above, so if it had not already
+		// produced a summary, start a fresh one now that this attachment owns the Board.
+		// Without this the initial fetch would be discarded every time, because `attach()`
+		// always follows `pLoadCampaign()`.
+		if (this._partyInventory.state !== "known") void this.pRefreshPartyInventory();
 		this._render();
 	}
 
@@ -133,6 +172,11 @@ export class DmScreenHubController {
 		for (const unsubscribe of this._unsubscribers.splice(0)) unsubscribe?.();
 		this._clearStaleTimer();
 		this._clearResyncTimer();
+		this._clearPartyInventoryTimer();
+		// Invalidate in-flight requests as well as pending timers: without this a fetch that
+		// completes after teardown would publish onto a Board this controller no longer owns.
+		this._generation++;
+		this._board = null;
 	}
 
 	/**
@@ -222,6 +266,16 @@ export class DmScreenHubController {
 				type: "hubCharacterProjections",
 				payload: {characters: [], roster: []},
 			});
+			// The stash is campaign-private and must leave the board with the projections. A
+			// demoted co-DM otherwise keeps a live aggregate of a campaign they can no longer
+			// read, and an in-flight response could republish it seconds later. Bumping the
+			// generation fences those responses; the explicit publish replaces the number with
+			// `unavailable` rather than leaving the last known weight on screen.
+			this._clearPartyInventoryTimer();
+			this._generation++;
+			this._isPartyInventoryFenced = true;
+			this._partyInventory = {state: "unavailable", stackCount: 0, knownWeight: 0, unknownStackCount: 0};
+			this._publishPartyInventory();
 		}
 		this._syncBodyState();
 		this._publishBoardStatus();
@@ -291,8 +345,23 @@ export class DmScreenHubController {
 			"transfer.committed",
 			"transfer.rejected",
 			"transfer.cancelled",
+			// Activating a rules version or a brew bundle changes the carry BASIS without
+			// touching any character document, so no character-scoped invalidation is emitted.
+			// Without these the server starts rejecting every stored carry summary while the
+			// DM Screen keeps showing the last accepted numbers indefinitely.
+			"rules.activated",
+			"brew.activated",
 		].includes(event?.type)) {
 			this._queueProjectionResync();
+		}
+		if ([
+			"party_inventory.invalidated",
+			"transfer.committed",
+			"transfer.rejected",
+			"transfer.cancelled",
+			"transfer.reserved",
+		].includes(event?.type)) {
+			this._queuePartyInventoryResync();
 		}
 		if (event?.type === "campaign.archived") {
 			this._setAccessState({
@@ -382,6 +451,78 @@ export class DmScreenHubController {
 		if (this._resyncTimer == null) return;
 		this._fnClearTimeout(this._resyncTimer);
 		this._resyncTimer = null;
+	}
+
+	_clearPartyInventoryTimer () {
+		if (this._partyInventoryTimer == null) return;
+		this._fnClearTimeout(this._partyInventoryTimer);
+		this._partyInventoryTimer = null;
+	}
+
+	/**
+	 * Coalesce party-inventory invalidations into a single refetch, mirroring
+	 * {@link _queueProjectionResync}. A burst of transfers produces one request.
+	 */
+	_queuePartyInventoryResync () {
+		if (this._isPartyInventoryFenced) return;
+		this._clearPartyInventoryTimer();
+		this._partyInventoryTimer = this._fnSetTimeout(() => {
+			this._partyInventoryTimer = null;
+			void this.pRefreshPartyInventory();
+		}, this._resyncDelayMs);
+	}
+
+	/**
+	 * Fetch the shared party stash and cache a WEIGHT SUMMARY of it.
+	 *
+	 * Only aggregate weight is kept and broadcast — never the item list. The Party Tracker
+	 * needs the total to show party carrying load; it has no use for the contents, and not
+	 * carrying them keeps the surface (and the blast radius) minimal.
+	 */
+	async pRefreshPartyInventory () {
+		if (!this._campaignId || this._isPartyInventoryFenced) return;
+		const generation = this._generation;
+		const campaignId = this._campaignId;
+		const seq = ++this._partyInventoryRequestSeq;
+		/** A response may publish only if it is current AND not superseded by a newer one. */
+		const isStale = () => generation !== this._generation
+			|| campaignId !== this._campaignId
+			|| seq <= this._partyInventoryAppliedSeq;
+		try {
+			const partyInventory = await this._api.pGetPartyInventory({campaignId});
+			// Discard a response that lost its race: the controller was detached, re-attached,
+			// or pointed at a different campaign while this request was in flight.
+			if (isStale()) return;
+			const inventory = Array.isArray(partyInventory?.inventory) ? partyInventory.inventory : [];
+			const summary = inventory.reduce((acc, entry) => {
+				const quantity = Number(entry?.quantity);
+				const unitWeight = Number(entry?.item?.weight);
+				if (!Number.isFinite(quantity) || quantity < 0 || !Number.isFinite(unitWeight) || unitWeight < 0) acc.unknownStackCount++;
+				else acc.knownWeight += quantity * unitWeight;
+				return acc;
+			}, {knownWeight: 0, unknownStackCount: 0});
+			this._partyInventory = {
+				state: "known",
+				stackCount: inventory.length,
+				knownWeight: summary.knownWeight,
+				unknownStackCount: summary.unknownStackCount,
+			};
+		} catch (error) {
+			if (isStale()) return;
+			// Losing authorization is not a blip to retry: nothing will change until a new
+			// verified attach/load, and retrying would hammer an endpoint that will keep
+			// refusing. A transient failure stays retryable via the next invalidation.
+			if (error?.status === 401 || error?.status === 403) this._isPartyInventoryFenced = true;
+			this._partyInventory = {state: "unavailable", stackCount: 0, knownWeight: 0, unknownStackCount: 0};
+		}
+		this._partyInventoryAppliedSeq = seq;
+		this._publishPartyInventory();
+	}
+
+	/** Broadcast the cached stash summary, if a Board is currently attached. */
+	_publishPartyInventory () {
+		if (!this._board) return;
+		this._board.fireBoardEvent({type: "hubPartyInventory", payload: {...this._partyInventory}});
 	}
 
 	_publishBoardStatus () {

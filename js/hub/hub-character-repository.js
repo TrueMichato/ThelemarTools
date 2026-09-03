@@ -1,4 +1,5 @@
 import {applyJsonPatch, copyJson, diffJson, rebaseJsonChanges} from "./hub-json-patch.js";
+import {withRootCarryWrite} from "./hub-carry-authority.js";
 
 export class HubRepositoryError extends Error {
 	constructor (code, message, details = {}) {
@@ -382,7 +383,7 @@ export class HubCharacterRepository {
 			accepted = canonical;
 			snapshot = rebased.document;
 		}
-		const patches = diffJson(accepted.data, snapshot);
+		const patches = withRootCarryWrite({patches: diffJson(accepted.data, snapshot), document: snapshot, base: accepted.data});
 		if (!patches.length) return {character: copyJson(accepted), event: null};
 		const result = this._authority.writeCharacterPatch({
 			characterId,

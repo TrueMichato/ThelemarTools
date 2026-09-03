@@ -73,7 +73,7 @@ export function getProjectionView (projection) {
 	// character is treated as truth. Anything with a `kind` must go through the
 	// envelope path above.
 	const character = projection?.kind ? projection.character : projection;
-	if (!character?.data) return {id: projection?.id || null, isTruth: false, name: null, classes: [], hp: null, ac: null};
+	if (!character?.data) return {id: projection?.id || null, isTruth: false, name: null, classes: [], hp: null, ac: null, carrySummary: null};
 	const data = character.data || {};
 	return {
 		id: character.id,
@@ -86,6 +86,10 @@ export function getProjectionView (projection) {
 			? {current: Number(data.hp.current), max: getViewMaxHp(data.hp)}
 			: null,
 		ac: getAcValue(data.ac),
+		// Truth envelopes carry a server-validated summary alongside the document; the raw
+		// `data.carry` block is deliberately NOT read here, because only the server can vouch
+		// that it is still current.
+		carrySummary: projection?.carrySummary && typeof projection.carrySummary === "object" ? {...projection.carrySummary} : null,
 	};
 }
 
@@ -98,6 +102,9 @@ function getPeerView (projection) {
 		classes: (Array.isArray(data.classes) ? data.classes : []).map(cls => ({name: cls.name, level: Number(cls.level)})),
 		hp: data.hp ? {current: Number(data.hp.current), max: getViewMaxHp(data.hp), state: data.hp.state} : null,
 		ac: getAcValue(data.ac),
+		// Present only when this peer shared it; absent otherwise, so no consumer can infer a
+		// withheld carrying load from its shape.
+		carrySummary: data.carrySummary && typeof data.carrySummary === "object" ? {...data.carrySummary} : null,
 	};
 }
 

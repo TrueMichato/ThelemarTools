@@ -6175,10 +6175,15 @@ class CharacterSheetInventory {
 		const bagLoad = carryBreakdown.bagLoad; // weight notionally inside the bag
 		const hasBag = carryBreakdown.hasExtradimensional;
 
-		// For encumbrance thresholds, use standard STR-based calculation
-		const strScore = this._state.getAbilityTotal("str");
-		const encumberedThreshold = strScore * 5;
-		const heavilyEncumberedThreshold = strScore * 10;
+		// Encumbrance tiers come from the shared contract's threshold policy rather than
+		// being recomputed here. The previous local `STR x 5` / `STR x 10` was RAW-correct
+		// but it was a second implementation, and it disagreed with `getEncumbranceLevel()`
+		// (50% / 75% of capacity) which play mode and the PDF read -- so the same character
+		// could be "Encumbered" on this bar and "normal" three panels away. Under the
+		// standard rule the numbers here are unchanged; the difference is that there is now
+		// one source for them, and that the Thelemar rule finally gets tiers of its own
+		// instead of borrowing a Strength score its capacity formula never uses.
+		const thresholds = carryBreakdown.thresholds;
 
 		// Physical-carry readout: on-body load over body capacity. With no bag this
 		// equals total weight over total capacity (unchanged behaviour).
@@ -6200,11 +6205,11 @@ class CharacterSheetInventory {
 			// Update bar colour based on encumbrance (on-body load vs BODY capacity —
 			// extradimensional storage must not mask physical overload).
 			fillEl.classList.remove("encumbered", "heavily-encumbered", "over-capacity");
-			if (bodyLoad > bodyCapacity) {
+			if (carryBreakdown.status === "over_capacity") {
 				fillEl.classList.add("over-capacity");
-			} else if (bodyLoad > heavilyEncumberedThreshold) {
+			} else if (carryBreakdown.status === "heavily_encumbered") {
 				fillEl.classList.add("heavily-encumbered");
-			} else if (bodyLoad > encumberedThreshold) {
+			} else if (carryBreakdown.status === "encumbered") {
 				fillEl.classList.add("encumbered");
 			}
 		}
@@ -6234,20 +6239,44 @@ class CharacterSheetInventory {
 		if (encumbranceStatus) {
 			encumbranceStatus.classList.remove("text-success", "text-warning", "text-danger");
 
-			if (bodyLoad > bodyCapacity) {
-				encumbranceStatus.classList.add("text-danger");
-				encumbranceStatus.textContent = "Over Capacity!";
-			} else if (bodyLoad > heavilyEncumberedThreshold) {
-				encumbranceStatus.classList.add("text-danger");
-				encumbranceStatus.textContent = "Heavily Encumbered";
-			} else if (bodyLoad > encumberedThreshold) {
-				encumbranceStatus.classList.add("text-warning");
-				encumbranceStatus.textContent = "Encumbered";
-			} else {
-				encumbranceStatus.classList.add("text-success");
-				encumbranceStatus.textContent = "Normal";
-			}
+			// `unknown` is a real outcome, not a missing one: a stack whose weight the data
+			// does not give makes the load a lower bound, so claiming a tier would be a
+			// guess. It is surfaced rather than rounded down into a confident "Normal".
+			const STATUS_TEXT = {
+				over_capacity: ["text-danger", "Over Capacity!"],
+				heavily_encumbered: ["text-danger", "Heavily Encumbered"],
+				encumbered: ["text-warning", "Encumbered"],
+				unknown: ["text-warning", "Unknown \u2014 some item weights are missing"],
+				normal: ["text-success", "Normal"],
+			};
+			const [statusClass, statusText] = STATUS_TEXT[carryBreakdown.status] || STATUS_TEXT.normal;
+			encumbranceStatus.classList.add(statusClass);
+			encumbranceStatus.textContent = statusText;
+			encumbranceStatus.title = this._getEncumbranceTooltip(carryBreakdown, thresholds);
 		}
+	}
+
+	/**
+	 * Explain the encumbrance readout: the tiers in force, the coin weight that is shown but
+	 * not counted, and any stacks whose weight is unknown.
+	 * @param {object} breakdown
+	 * @param {?{encumbered: number, heavilyEncumbered: number}} thresholds
+	 * @returns {string}
+	 */
+	_getEncumbranceTooltip (breakdown, thresholds) {
+		const lines = [];
+		if (thresholds) {
+			lines.push(`Encumbered above ${Math.round(thresholds.encumbered)} lb; heavily encumbered above ${Math.round(thresholds.heavilyEncumbered)} lb.`);
+		} else lines.push("No encumbrance tiers apply; only exceeding your maximum has an effect.");
+		if (breakdown.coinWeight > 0) {
+			lines.push(breakdown.isCoinWeightCounted
+				? `Coins: ${breakdown.coinWeight.toFixed(1)} lb (counted).`
+				: `Coins: ${breakdown.coinWeight.toFixed(1)} lb (not counted toward your load).`);
+		}
+		if (breakdown.unknownStackCount > 0) {
+			lines.push(`${breakdown.unknownStackCount} stack${breakdown.unknownStackCount === 1 ? "" : "s"} have no usable weight, so the total shown is a minimum.`);
+		}
+		return lines.join(" ");
 	}
 
 	_updateArmorClass () {
