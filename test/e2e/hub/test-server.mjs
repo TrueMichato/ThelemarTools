@@ -1,5 +1,6 @@
 import {createHubApp, SESSION_COOKIE} from "../../../server/src/app.js";
 import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
+import {createSemanticOperationRegistry} from "../../../server/src/semantic-operation-registry.js";
 import {
 	getCsrfToken,
 	getRandomToken,
@@ -21,9 +22,29 @@ const appOrigin = requireEnv("HUB_APP_ORIGIN");
 const cookieSecret = requireEnv("HUB_COOKIE_SECRET");
 const csrfSecret = requireEnv("HUB_CSRF_SECRET");
 const testAuthSecret = requireEnv("HUB_TEST_AUTH_SECRET");
+const semanticOperationRegistry = createSemanticOperationRegistry({
+	templates: [{
+		sourceEntity: {type: "ability", uid: "steadying word|tst", version: "tst-v1"},
+		effectTemplateId: "ability.steadying-word.heal",
+		cost: "none",
+		display: {label: "Steadying Word"},
+		normalizeChoice: choice => {
+			if (
+				!choice
+				|| Object.keys(choice).some(key => key !== "amount")
+				|| !Number.isInteger(choice.amount)
+				|| choice.amount < 1
+				|| choice.amount > 10
+			) throw new Error("Invalid Campaign Hub E2E effect choice.");
+			return {amount: choice.amount};
+		},
+		deriveOperation: ({choice}) => ({kind: "hp.heal", arguments: {amount: choice.amount}}),
+	}],
+});
 const store = PostgresHubStore.fromConnectionString({
 	connectionString: requireEnv("DATABASE_URL"),
 	ssl: process.env.HUB_DATABASE_SSL !== "false",
+	semanticOperationRegistry,
 });
 await store.pCheckHealth();
 const trustedProxies = (process.env.HUB_TRUST_PROXY || "").split(",").map(it => it.trim()).filter(Boolean);

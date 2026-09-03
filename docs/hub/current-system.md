@@ -30,7 +30,7 @@ The Campaign Hub is an optional online layer over the existing local-first site.
 | DM workspace persistence | `js/hub/hub-http-dm-workspace-repository.js`, `js/hub/hub-dm-workspace-repository.js` | Private Board blobs, leases, recovery drafts, conflict handling |
 | Campaign context | `js/hub/hub-campaign-context.js`, `js/hub/hub-brew-context.js` | Rules and immutable campaign brew activation without personal-brew writes |
 | Realtime | `js/hub/hub-realtime-client.js`, `js/hub/hub-broadcast-sync.js`, `js/charactersheet/charactersheet-realtime.js` | WebSocket resync/presence/events, stale-socket fencing, focused Character Sheet delivery, and same-browser tab coordination |
-| Semantic operations | `js/hub/hub-semantic-operations.js`, `js/hub/hub-store-error.js` | Pure versioned damage/heal/condition/spell-slot catalog shared by the server and the browser so no formula is duplicated |
+| Semantic operations | `js/hub/hub-semantic-operations.js`, `js/hub/hub-effect-presentation.js`, `js/hub/hub-store-error.js` | Pure versioned damage/heal/condition/spell-slot catalog plus privacy-safe approval/effect presentation shared by the server and browser |
 | Operation reconciliation | `js/hub/hub-character-operation-reconciler.js`, `js/hub/hub-http-character-repository.js` | ADR 0012 `B/L -> R/F` transition, per-track coverage, prepare/adopt/commit atomicity, and no-reload resync recovery |
 | Roll bridge | `js/hub/hub-roll-log-adapter.js` | Durable server roll events from Character Sheet rolls |
 | BFF routes | `server/src/app.js` | Auth, schemas, roles, CSRF/origin/protocol checks, HTTP and WebSocket endpoints |
@@ -40,7 +40,7 @@ The Campaign Hub is an optional online layer over the existing local-first site.
 | Realtime authority | `server/src/realtime.js`, `server/src/projections.js` | Presence, resync, visibility filtering, outbox dispatch |
 | Auth/security | `server/src/github-oauth-provider.js`, `server/src/security.js` | OAuth exchange, PKCE, signed state, hashes, tokens, CSRF helpers |
 | Schema/operations | `server/migrations/`, `server/src/migration-runner.js`, `server/scripts/` | Immutable migrations, checksummed ledger, role grants, backup, restore, credential-safe DB access |
-| Character Sheet seams | `js/charactersheet/charactersheet.js`, `charactersheet-state.js`, `charactersheet-rollhistory.js` | Repository selection, context overlay, save/rebase/recovery, campaign roll logging |
+| Character Sheet seams | `js/charactersheet/charactersheet.js`, `charactersheet-hub-effects.js`, `charactersheet-state.js`, `charactersheet-rollhistory.js` | Repository selection, context overlay, save/rebase/recovery, inline effect approvals/notices, campaign roll logging |
 | DM Screen seams | `js/dmscreen.js`, `js/dmscreen/partytracker/` | Workspace repository selection and non-persisted live character projections |
 | PWA policy | `sw-template.js`, `js/hub/hub-route-policy.js` | Network-only handling for same-origin `/api` and `/auth` |
 | Tests | `test/jest/hub/`, selected `test/jest/charactersheet/` and DM Screen suites | Domain, route, auth, concurrency, security, UI contract, and integration-seam regression |
@@ -118,6 +118,15 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
 - The sheet coordinator filters projection invalidations and the exact `character.operation.*` lifecycle
   allowlist to the open target. Delivery is serialized behind saves and fenced on switch, detach, revocation,
   logout, and terminal page hide.
+- The open owner sheet reads pending approvals from
+  `GET /api/campaigns/:campaignId/characters/:characterId/pending-actions`. The route fails closed for a DM,
+  co-DM, peer, or other character owner and projects only an opaque action id, expiry, resolve capability and
+  immutable source/effect/outcome labels. Initial open, reconnect and focus reconciliation prevents a missed
+  socket edge from hiding a decision.
+- Approve/Reject are inline, single-flight and retryable. Approval never mutates the sheet from the resolve
+  response directly; its authoritative `character.operation.applied` envelope enters ADR 0012's serialized
+  reconciliation path as a loopback-delivery fallback. Successful adoption produces a polite, dismissible and
+  time-bounded sheet notice. Blocked adoption produces recovery UI instead.
 - Cursor refs may carry an owner/DM-only `operationWatermark`. Operation events remain deliverable at/below it;
   this substrate exposes the metadata but does not apply operations or replace sheet state.
 
@@ -186,8 +195,8 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
 - invite metadata listing/revocation;
 - owner role changes, owner/co-DM member removal, and non-owner leave;
 - private DM workspace link;
-- immediate DM/co-DM semantic effects; the peer proposal/terminal API exists but its target/approval UI and first
-  successful production template are deferred;
+- immediate DM/co-DM semantic effects and inline target-owner peer approvals/effect notices on an open Character
+  Sheet; target discovery and the first successful production peer template are deferred;
 - XP and item grants;
 - party inventory summary and item/currency transfers.
 

@@ -87,19 +87,17 @@ const makeLifecycleEvent = ({
 		status,
 		...(status === "proposed"
 			? {
-				sourceEntity: {name: "Lay on Hands", source: "PHB"},
-				effectTemplateId: "healing",
-				choice: {amount: 3},
-				sourceDisplaySnapshot: {name: "Lay on Hands"},
-				targetDisplaySnapshot: {name: "Mira"},
-				effectDisplaySnapshot: {summary: "Restore 3 HP"},
+				sourceDisplaySnapshot: {identity: {name: "Aster"}},
+				targetDisplaySnapshot: {identity: {name: "Mira"}},
+				effectDisplaySnapshot: {label: "Lay on Hands"},
+				effectOutcomeLabel: "Restore 3 hit points",
 				expiresAt: "2030-01-01T00:00:00.000Z",
 			}
 			: {
 				reason: "closed",
-				sourceDisplaySnapshot: {name: "Lay on Hands"},
-				targetDisplaySnapshot: {name: "Mira"},
-				effectDisplaySnapshot: {summary: "Restore 3 HP"},
+				sourceDisplaySnapshot: {identity: {name: "Aster"}},
+				targetDisplaySnapshot: {identity: {name: "Mira"}},
+				effectDisplaySnapshot: {label: "Lay on Hands"},
 			}),
 	},
 });
@@ -303,6 +301,18 @@ describe("Character Sheet realtime coordinator", () => {
 		expect(delivered[1]).not.toHaveProperty("actorAccountId");
 		expect(delivered[1].payload).not.toHaveProperty("sourceCharacterId");
 		expect(delivered[1].payload).not.toHaveProperty("hiddenTruth");
+		expect(delivered[0].payload).toEqual({
+			actionId: "operation-1",
+			status: "proposed",
+			expiresAt: "2030-01-01T00:00:00.000Z",
+			presentation: {
+				sourceName: "Aster",
+				effectLabel: "Lay on Hands",
+				outcomeLabel: "Restore 3 hit points",
+			},
+			capabilities: {canApprove: true, canReject: true},
+		});
+		expect(delivered[0].payload).not.toHaveProperty("targetCharacterId");
 	});
 
 	it("fences queued delivery when a sheet is switched and reopened", async () => {

@@ -278,7 +278,17 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#hub-campaign-list")).toContainText(campaignName);
 	}
 
-	async createCharacter ({campaignId, name}: {campaignId: string; name: string}): Promise<any> {
+	async createCharacter ({
+		campaignId,
+		name,
+		hpCurrent = 12,
+		features = [],
+	}: {
+		campaignId: string;
+		name: string;
+		hpCurrent?: number;
+		features?: Array<{name: string; source: string}>;
+	}): Promise<any> {
 		const response = await this.page.request.post("/api/characters", {
 			headers: await this.getMutationHeaders(),
 			data: {
@@ -290,7 +300,8 @@ export class HubCampaignPage {
 					abilities: {str: 10, dex: 10, con: 14, int: 10, wis: 10, cha: 10},
 					classes: [{name: "Fighter", source: "PHB", level: 1}],
 					xp: 0,
-					hp: {current: 12, max: 12, temp: 0},
+					hp: {current: hpCurrent, max: 12, temp: 0},
+					features,
 					spellcasting: {spellSlots: {1: {current: 2, max: 2}}},
 					conditions: [],
 					inventory: [{id: "rations", item: {name: "Rations", source: "PHB"}, quantity: 5}],
@@ -300,6 +311,33 @@ export class HubCampaignPage {
 		});
 		expect(response.ok()).toBe(true);
 		return (await response.json()).character;
+	}
+
+	async createPeerEffect ({
+		campaignId,
+		sourceCharacterId,
+		targetRef,
+		amount,
+	}: {
+		campaignId: string;
+		sourceCharacterId: string;
+		targetRef: string;
+		amount: number;
+	}): Promise<any> {
+		const commandId = crypto.randomUUID();
+		const response = await this.page.request.post(`/api/campaigns/${encodeURIComponent(campaignId)}/actions`, {
+			headers: {...await this.getMutationHeaders(), "idempotency-key": commandId},
+			data: {
+				commandId,
+				sourceCharacterId,
+				sourceEntity: {type: "ability", uid: "steadying word|tst", version: "tst-v1"},
+				effectTemplateId: "ability.steadying-word.heal",
+				choice: {amount},
+				targetRef,
+			},
+		});
+		expect(response.status()).toBe(201);
+		return response.json();
 	}
 
 	async copyLocalCharacterFromSheet ({campaignId, name}: {campaignId: string; name: string}): Promise<any> {
@@ -667,6 +705,13 @@ export class HubCampaignPage {
 			path: `/charactersheet.html?id=${encodeURIComponent(characterId)}&hubCampaign=${encodeURIComponent(campaignId)}`,
 			name,
 		});
+	}
+
+	async waitForCharacterRealtimeLive (): Promise<void> {
+		await expect.poll(
+			() => this.page.evaluate(() => (window as any).charSheet?._hubRealtime?._active?.client?.getConnectionState?.().state),
+			{timeout: 15_000},
+		).toBe("live");
 	}
 
 	async editCharacterHpAndRollInitiative ({campaignId, characterId, name, hp}: {campaignId: string; characterId: string; name: string; hp: number}): Promise<void> {
