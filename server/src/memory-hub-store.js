@@ -32,6 +32,11 @@ import {
 	redactTransferEventForViewer,
 } from "./hub-event-snapshots.js";
 import {createSemanticOperationRegistry} from "./semantic-operation-registry.js";
+import {
+	getAccountDisplayName,
+	getExternalIdentityKey,
+	normalizeExternalIdentity,
+} from "./external-identity.js";
 
 function copy (value) {
 	return value === undefined ? undefined : structuredClone(value);
@@ -48,7 +53,9 @@ export class MemoryHubStore {
 		this._semanticProposalTtlMs = semanticProposalTtlMs;
 		this._accounts = new Map();
 		this._identityToAccount = new Map();
+		this._externalIdentities = new Map();
 		this._sessions = new Map();
+		this._oauthTransactions = new Map();
 		this._campaigns = new Map();
 		this._memberships = new Map();
 		this._audit = [];
@@ -84,6 +91,9 @@ export class MemoryHubStore {
 			outboxOldestAgeSeconds: 0,
 			activeSessions: [...this._sessions.values()].filter(session => !session.revokedAt && new Date(session.expiresAt) > now).length,
 			expiredReceipts: 0,
+			expiredOAuthTransactions: [...this._oauthTransactions.values()]
+				.filter(transaction => transaction.consumedAt || new Date(transaction.expiresAt) <= now)
+				.length,
 			deletionDueAccounts: [...this._accounts.values()].filter(account => account.status === "deletion_requested" && new Date(account.purgeAfter) <= now).length,
 			lastMaintenanceAgeSeconds: last ? Math.max(0, (now - new Date(last.completedAt)) / 1000) : -1,
 			lastBackupAgeSeconds: -1,
@@ -98,6 +108,7 @@ export class MemoryHubStore {
 			commandReceipts: 0,
 			publishedOutbox: 0,
 			sessions: 0,
+			oauthTransactions: await this.pDeleteExpiredOAuthTransactions({limit: batchSize}),
 			invites: 0,
 			leases: {characterLeases: 0, workspaceLeases: 0},
 			accounts: await this.pPurgeDueAccounts({limit: Math.min(batchSize, 100)}),
@@ -115,28 +126,219 @@ export class MemoryHubStore {
 		return result;
 	}
 
-	async pUpsertOAuthAccount ({provider, providerSubject, displayName}) {
-		const identityKey = `${provider}::${providerSubject}`;
+	_resolveOAuthAccount (rawIdentity) {
+		const identity = normalizeExternalIdentity(rawIdentity);
+		const identityKey = getExternalIdentityKey(identity);
+		const now = this._fnNow().toISOString();
 		let accountId = this._identityToAccount.get(identityKey);
+		let externalIdentity;
 		if (!accountId) {
 			accountId = crypto.randomUUID();
 			this._accounts.set(accountId, {
 				id: accountId,
-				displayName,
+				displayName: getAccountDisplayName(identity),
 				status: "active",
 				deletionRequestedAt: null,
 				purgeAfter: null,
-				createdAt: this._fnNow().toISOString(),
+				createdAt: now,
 			});
 			this._identityToAccount.set(identityKey, accountId);
+			externalIdentity = {
+				id: crypto.randomUUID(),
+				accountId,
+				provider: identity.provider,
+				subject: identity.subject,
+				handle: identity.handle,
+				displayName: identity.displayName,
+				createdAt: now,
+				updatedAt: now,
+				lastAuthenticatedAt: now,
+			};
+			this._externalIdentities.set(externalIdentity.id, externalIdentity);
 		} else {
-			this._accounts.get(accountId).displayName = displayName;
+			const account = this._accounts.get(accountId);
+			if (identity.displayName || identity.handle) account.displayName = getAccountDisplayName(identity);
+			externalIdentity = [...this._externalIdentities.values()]
+				.find(it => getExternalIdentityKey(it) === identityKey);
+			externalIdentity.handle = identity.handle;
+			externalIdentity.displayName = identity.displayName;
+			externalIdentity.updatedAt = now;
+			externalIdentity.lastAuthenticatedAt = now;
 		}
-		return copy(this._accounts.get(accountId));
+		return {
+			account: this._accounts.get(accountId),
+			identity: externalIdentity,
+		};
 	}
 
-	async pCreateSession ({accountId, tokenHash, expiresAt, userAgent = null}) {
+	async pUpsertOAuthAccount ({provider, providerSubject, displayName, login = null, handle = null}) {
+		const resolved = this._resolveOAuthAccount({
+			provider,
+			subject: providerSubject,
+			displayName,
+			handle: handle ?? login,
+		});
+		return copy(resolved.account);
+	}
+
+	async pCompleteOAuthSignIn ({
+		identity,
+		tokenHash,
+		expiresAt,
+		userAgent = null,
+		priorSessionId = null,
+	}) {
+		if (this._sessions.has(tokenHash)) throw new HubStoreError("SESSION_TOKEN_CONFLICT", `Session could not be created.`, {status: 409});
+		const resolved = this._resolveOAuthAccount(identity);
+		const session = await this.pCreateSession({
+			accountId: resolved.account.id,
+			tokenHash,
+			expiresAt,
+			userAgent,
+			authenticatedViaIdentityId: resolved.identity.id,
+		});
+		const revokedSessionIds = [];
+		if (priorSessionId && await this.pRevokeSession({sessionId: priorSessionId})) revokedSessionIds.push(priorSessionId);
+		return copy({
+			account: resolved.account,
+			identity: resolved.identity,
+			session,
+			revokedSessionIds,
+		});
+	}
+
+	async pListExternalIdentities ({accountId}) {
+		if (!this._accounts.has(accountId)) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
+		return [...this._externalIdentities.values()]
+			.filter(identity => identity.accountId === accountId)
+			.sort((a, b) => `${a.createdAt}`.localeCompare(`${b.createdAt}`) || a.id.localeCompare(b.id))
+			.map(copy);
+	}
+
+	async pCreateOAuthTransaction ({
+		id,
+		stateHash,
+		provider,
+		operation,
+		initiatingAccountId = null,
+		initiatingSessionId = null,
+		redirectUri,
+		returnTo,
+		pkceVerifier = null,
+		oidcNonce = null,
+		expiresAt = null,
+		ttlSeconds = null,
+	}) {
+		const now = this._fnNow();
+		const resolvedExpiresAt = ttlSeconds == null
+			? expiresAt
+			: new Date(now.getTime() + ttlSeconds * 1_000);
+		const isSignIn = operation === "sign_in";
+		const hasBinding = initiatingAccountId != null && initiatingSessionId != null;
+		if (
+			(expiresAt != null && ttlSeconds != null)
+			|| typeof id !== "string"
+			|| !/^[0-9a-f-]{36}$/i.test(id)
+			|| typeof stateHash !== "string"
+			|| !/^[0-9a-f]{64}$/.test(stateHash)
+			|| typeof provider !== "string"
+			|| !/^[a-z][a-z0-9-]{0,31}$/.test(provider)
+			|| !["sign_in", "reauthenticate", "link"].includes(operation)
+			|| (isSignIn ? hasBinding || initiatingAccountId != null || initiatingSessionId != null : !hasBinding)
+			|| typeof redirectUri !== "string"
+			|| !/^https?:\/\//.test(redirectUri)
+			|| redirectUri.length > 2_048
+			|| typeof returnTo !== "string"
+			|| !returnTo.startsWith("/")
+			|| returnTo.startsWith("//")
+			|| returnTo.length > 2_048
+			|| (ttlSeconds != null && (!Number.isInteger(ttlSeconds) || ttlSeconds < 1 || ttlSeconds > 600))
+			|| !(resolvedExpiresAt instanceof Date)
+			|| resolvedExpiresAt <= now
+			|| resolvedExpiresAt > new Date(now.getTime() + 10 * 60 * 1_000)
+			|| (pkceVerifier != null && (typeof pkceVerifier !== "string" || pkceVerifier.length < 43 || pkceVerifier.length > 128))
+			|| (oidcNonce != null && (typeof oidcNonce !== "string" || oidcNonce.length < 32 || oidcNonce.length > 255))
+		) throw new TypeError(`Invalid OAuth transaction.`);
+		if ([...this._oauthTransactions.values()].some(transaction => transaction.stateHash === stateHash)) {
+			throw new HubStoreError("OAUTH_STATE_CONFLICT", `OAuth transaction could not be created.`, {status: 409});
+		}
+		if (hasBinding) {
+			const session = [...this._sessions.values()]
+				.find(it => it.id === initiatingSessionId && it.accountId === initiatingAccountId);
+			if (!session) throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
+		}
+		const transaction = {
+			id,
+			stateHash,
+			provider,
+			operation,
+			initiatingAccountId,
+			initiatingSessionId,
+			redirectUri,
+			returnTo,
+			pkceVerifier,
+			oidcNonce,
+			authorizationStartedAt: now.toISOString(),
+			expiresAt: resolvedExpiresAt.toISOString(),
+			consumedAt: null,
+			createdAt: now.toISOString(),
+		};
+		this._oauthTransactions.set(id, transaction);
+		return copy(transaction);
+	}
+
+	async pConsumeOAuthTransaction ({
+		id,
+		stateHash,
+		provider,
+		operation,
+		redirectUri,
+	}) {
+		const transaction = this._oauthTransactions.get(id);
+		const expectedHash = Buffer.from(transaction?.stateHash || "", "utf8");
+		const actualHash = Buffer.from(stateHash || "", "utf8");
+		const isHashMatch = expectedHash.length === actualHash.length
+			&& expectedHash.length > 0
+			&& crypto.timingSafeEqual(expectedHash, actualHash);
+		if (
+			!transaction
+			|| transaction.consumedAt
+			|| new Date(transaction.expiresAt) <= this._fnNow()
+			|| !isHashMatch
+			|| transaction.provider !== provider
+			|| transaction.operation !== operation
+			|| transaction.redirectUri !== redirectUri
+		) throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
+		const consumed = copy(transaction);
+		transaction.stateHash = null;
+		transaction.pkceVerifier = null;
+		transaction.oidcNonce = null;
+		transaction.consumedAt = this._fnNow().toISOString();
+		return consumed;
+	}
+
+	async pDeleteExpiredOAuthTransactions ({limit = 1_000} = {}) {
+		const expired = [...this._oauthTransactions.values()]
+			.filter(transaction => new Date(transaction.expiresAt) <= this._fnNow() || transaction.consumedAt)
+			.sort((a, b) => `${a.expiresAt}`.localeCompare(`${b.expiresAt}`) || a.id.localeCompare(b.id))
+			.slice(0, limit);
+		expired.forEach(transaction => this._oauthTransactions.delete(transaction.id));
+		return expired.length;
+	}
+
+	async pCreateSession ({
+		accountId,
+		tokenHash,
+		expiresAt,
+		userAgent = null,
+		authenticatedViaIdentityId = null,
+		recentReauthenticatedAt = null,
+	}) {
 		if (!this._accounts.has(accountId)) throw new Error(`Unknown account.`);
+		if (this._sessions.has(tokenHash)) throw new HubStoreError("SESSION_TOKEN_CONFLICT", `Session could not be created.`, {status: 409});
+		if (authenticatedViaIdentityId != null && this._externalIdentities.get(authenticatedViaIdentityId)?.accountId !== accountId) {
+			throw new HubStoreError("IDENTITY_NOT_FOUND", `Identity was not found.`, {status: 404});
+		}
 		const session = {
 			id: crypto.randomUUID(),
 			accountId,
@@ -146,6 +348,8 @@ export class MemoryHubStore {
 			lastSeenAt: this._fnNow().toISOString(),
 			expiresAt: expiresAt.toISOString(),
 			revokedAt: null,
+			authenticatedViaIdentityId,
+			recentReauthenticatedAt: recentReauthenticatedAt?.toISOString?.() ?? recentReauthenticatedAt,
 		};
 		this._sessions.set(tokenHash, session);
 		return copy(session);
@@ -191,6 +395,8 @@ export class MemoryHubStore {
 				lastSeenAt: session.lastSeenAt,
 				expiresAt: session.expiresAt,
 				revokedAt: session.revokedAt,
+				authenticatedViaIdentityId: session.authenticatedViaIdentityId,
+				recentReauthenticatedAt: session.recentReauthenticatedAt,
 				isCurrent: session.id === currentSessionId,
 			}))
 			.sort((a, b) => `${b.createdAt}`.localeCompare(`${a.createdAt}`));
@@ -2263,6 +2469,8 @@ export class MemoryHubStore {
 			}
 			for (const [hash, session] of this._sessions) if (session.accountId === account.id) this._sessions.delete(hash);
 			for (const [identity, id] of this._identityToAccount) if (id === account.id) this._identityToAccount.delete(identity);
+			for (const [id, identity] of this._externalIdentities) if (identity.accountId === account.id) this._externalIdentities.delete(id);
+			for (const [id, transaction] of this._oauthTransactions) if (transaction.initiatingAccountId === account.id) this._oauthTransactions.delete(id);
 			for (const [key] of this._commandReceipts) if (key.startsWith(`${account.id}::`)) this._commandReceipts.delete(key);
 			for (const [key, membership] of this._memberships) if (membership.accountId === account.id) this._memberships.delete(key);
 			for (const action of this._pendingActions.values()) if (action.actorAccountId === account.id) action.actorAccountId = null;
@@ -2345,6 +2553,10 @@ export class MemoryHubStore {
 		return {
 			exportedAt: this._fnNow().toISOString(),
 			account: copy(account),
+			externalIdentities: await this.pListExternalIdentities({accountId}),
+			sessions: [...this._sessions.values()]
+				.filter(it => it.accountId === accountId)
+				.map(({tokenHash: _tokenHash, ...session}) => copy(session)),
 			memberships: copy(memberships),
 			campaigns: [...campaignIds].map(id => copy(this._campaigns.get(id))),
 			characters: [...this._characters.values()].filter(it => it.ownerAccountId === accountId).map(copy),

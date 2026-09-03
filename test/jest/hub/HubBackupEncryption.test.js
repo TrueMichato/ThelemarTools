@@ -9,6 +9,13 @@ import {
 } from "../../../server/scripts/backup-crypto.mjs";
 
 describe("Hub encrypted backups", () => {
+	it("excludes short-lived OAuth transaction secrets from all backup artifacts", () => {
+		for (const file of ["backup.mjs", "backup-encrypted.mjs"]) {
+			const source = fs.readFileSync(new URL(`../../../server/scripts/${file}`, import.meta.url), "utf8");
+			expect(source).toContain("--exclude-table-data=hub.oauth_transactions");
+		}
+	});
+
 	it("round-trips backup bytes and returns bounded evidence", async () => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hub-backup-test-"));
 		try {

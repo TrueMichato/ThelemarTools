@@ -1,4 +1,5 @@
 import {createHubApp, SESSION_COOKIE} from "../../../server/src/app.js";
+import {AuthProviderRegistry} from "../../../server/src/auth-provider-registry.js";
 import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
 import {createSemanticOperationRegistry} from "../../../server/src/semantic-operation-registry.js";
 import {
@@ -48,20 +49,68 @@ const store = PostgresHubStore.fromConnectionString({
 });
 await store.pCheckHealth();
 const trustedProxies = (process.env.HUB_TRUST_PROXY || "").split(",").map(it => it.trim()).filter(Boolean);
+const deterministicGitHubProvider = {
+	slug: "github",
+	label: "GitHub",
+	startPath: "/auth/github/start",
+	callbackPath: "/auth/github/callback",
+	capabilities: {pkce: "S256", oidcNonce: false},
+	getAuthorizationUrl: ({state, codeChallenge, redirectUri}) => {
+		const url = new URL("/auth/__test/github/authorize", appOrigin);
+		url.searchParams.set("state", state);
+		url.searchParams.set("code_challenge", codeChallenge);
+		url.searchParams.set("redirect_uri", redirectUri);
+		return url.href;
+	},
+	pExchangeCodeForIdentity: async ({code, codeVerifier, redirectUri}) => {
+		if (code !== "hub-e2e-github-code" || codeVerifier?.length < 43 || redirectUri !== `${appOrigin}/auth/github/callback`) {
+			throw new Error("Invalid deterministic GitHub exchange.");
+		}
+		return {
+			provider: "github",
+			subject: "0",
+			handle: "hub-e2e-github",
+			displayName: "Hub E2E GitHub",
+		};
+	},
+};
+const authProviderRegistry = new AuthProviderRegistry({
+	registrations: [{status: "available", provider: deterministicGitHubProvider}],
+});
 
 const app = await createHubApp({
 	store,
-	oauthProvider: {getAuthorizationUrl: () => "", pExchangeCode: async () => { throw new Error("OAuth is disabled in the test BFF."); }},
+	authProviderRegistry,
 	logger: false,
 	isStartOutboxDispatcher: true,
 	config: {
 		appOrigin,
 		cookieSecret,
 		csrfSecret,
-		allowedOAuthSubjects: [],
+		allowedOAuthSubjects: requireEnv("HUB_ALLOWED_OAUTH_SUBJECTS").split(",").map(it => it.trim()).filter(Boolean),
 		trustProxy: trustedProxies.length ? trustedProxies : false,
 		metricsToken: requireEnv("HUB_METRICS_TOKEN"),
 	},
+});
+
+app.get("/auth/__test/github/authorize", {
+	schema: {
+		querystring: {
+			type: "object",
+			required: ["state", "code_challenge", "redirect_uri"],
+			additionalProperties: false,
+			properties: {
+				state: {type: "string", minLength: 1, maxLength: 512},
+				code_challenge: {type: "string", minLength: 43, maxLength: 128},
+				redirect_uri: {type: "string", const: `${appOrigin}/auth/github/callback`},
+			},
+		},
+	},
+}, async (request, reply) => {
+	const callback = new URL(request.query.redirect_uri);
+	callback.searchParams.set("code", "hub-e2e-github-code");
+	callback.searchParams.set("state", request.query.state);
+	return reply.redirect(callback.href);
 });
 
 app.post("/auth/__test/session", {

@@ -170,6 +170,18 @@ Evidence containing secrets or user data belongs in the approved private operati
 
 See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth boundaries, and artifact semantics.
 
+## Provider registry layer 1 evidence
+
+- Registry unit tests prove duplicate/mismatched routes and identities fail closed, configuration errors expose no
+  credential text, and a failed sibling registration does not disable valid GitHub authentication.
+- Memory and PostgreSQL parity tests cover immutable `(provider, subject)` resolution, atomic
+  account/identity/session creation, session provenance, one-time provider/operation/redirect-bound state,
+  expiry/cleanup, orphan rollback, deferred last-identity protection, runtime role access, export, and token
+  absence.
+- The disposable HTTPS/PostgreSQL stack uses a test-image-only deterministic GitHub adapter and local
+  authorization endpoint. No CI test calls GitHub or uses a real provider token; the production image still boots
+  its real GitHub adapter independently.
+
 ## Shipped V2 foundation evidence
 
 - V2-T0 release automation shipped in [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219):

@@ -1,18 +1,21 @@
 # Campaign Hub domain model
 
 > **Status:** Current schema and authority behavior
-> **Last verified:** 2026-09-02
+> **Last verified:** 2026-09-03
 > **Owner:** Campaign Hub maintainers
 
-The authoritative schema is `server/migrations/0001_hub_core.sql`. The PostgreSQL authority is
+The authoritative schema is `server/migrations/0001_hub_core.sql` plus immutable migrations through 0006. The PostgreSQL authority is
 `server/src/postgres-hub-store.js`; `MemoryHubStore` is a deterministic test double, not a production
 security boundary.
 
 ## Identity and tenancy
 
 - Internal ids are UUIDs.
-- External identity is `(provider, provider_subject)`, where GitHub subject is the immutable numeric user id.
-- Username/login is display metadata and is never authorization identity.
+- External identity is `(provider, provider_subject)`. GitHub uses its immutable numeric user id; later adapters
+  must define their own immutable subject normalization.
+- Email, username/login, handle, and display name are metadata and are never authorization or account-selection
+  identity.
+- Every non-deleted account must retain at least one external identity at transaction commit.
 - Campaign-owned rows carry `campaign_id`.
 - Membership is unique per `(campaign_id, account_id)`.
 - Composite foreign keys/triggers enforce that campaign-owned child rows reference objects in the same
@@ -25,8 +28,9 @@ security boundary.
 | Table | Aggregate/purpose | Important invariants | Current use |
 |---|---|---|---|
 | `accounts` | Internal user | display name 1-100; active/suspended/deletion_requested/deleted; paired deletion timestamps | Seven-day request/cancel/purge implemented |
-| `external_identities` | OAuth link | unique provider+subject; cascade with account | GitHub only in private V1 |
-| `sessions` | Browser session | unique token hash; expiry after creation; optional revoke | Hash-only server sessions |
+| `external_identities` | OAuth link | unique provider+subject; bounded metadata; account+identity key; deferred last-identity protection; cascade with account | Registry-ready; GitHub only |
+| `sessions` | Browser session | unique token hash; expiry after creation; optional revoke; same-account identity provenance; recent-reauthentication slot | Hash-only server sessions |
+| `oauth_transactions` | Short-lived OAuth correlation | hash-only one-time state; concrete provider/operation/redirect; optional account/session, PKCE verifier, OIDC nonce; <=10 minutes | Durable GitHub start/callback; later reauth/link-ready |
 | `campaigns` | Campaign root | owner account; active/archived/deleting; monotonic next event sequence | active and archived used; deleting reserved |
 | `memberships` | Account role in campaign | unique campaign+account; dm/co_dm/player/spectator | active, removed, and left used; reinvite reuses row |
 | `invites` | Redeemable role grant | hash-only token, expiry, max/use count, optional revoke | create/list/redeem/revoke/expiry/max-use used |
@@ -215,6 +219,10 @@ stateDiagram-v2
 
 These seeds are implementation allocations, not a public API. New lock classes must avoid accidental overlap
 and document ordering.
+
+OAuth state consumption additionally uses the transaction row's unique state hash and row lock. Account,
+identity, and session creation for an unknown admitted sign-in commit together, so a failed session insert
+cannot leave an orphan identity/account.
 
 ## Character inventory invariant
 

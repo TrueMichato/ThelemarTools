@@ -45,7 +45,7 @@ describe("Campaign Hub multi-provider identity ADR contract", () => {
 
 	it("specifies the additive persistence and rollout migration", () => {
 		for (const required of [
-			"0004_multi_provider_identity.sql",
+			"0006_multi_provider_identity.sql",
 			"UNIQUE (provider, provider_subject)",
 			"authenticated_via_identity_id",
 			"hub.oauth_transactions",

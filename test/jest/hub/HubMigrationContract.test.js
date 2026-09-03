@@ -6,6 +6,7 @@ const sql = fs.readFileSync(migrationUrl, "utf8");
 const lifecycleSql = fs.readFileSync(new URL("../../../server/migrations/0002_lifecycle_administration.sql", import.meta.url), "utf8");
 const operationsSql = fs.readFileSync(new URL("../../../server/migrations/0003_operational_runs.sql", import.meta.url), "utf8");
 const semanticOperationsSql = fs.readFileSync(new URL("../../../server/migrations/0005_semantic_character_operations.sql", import.meta.url), "utf8");
+const identitySql = fs.readFileSync(new URL("../../../server/migrations/0006_multi_provider_identity.sql", import.meta.url), "utf8");
 const postgresStore = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");
 
 describe("campaign hub first migration contract", () => {
@@ -96,7 +97,7 @@ describe("campaign hub first migration contract", () => {
 
 	it("serializes first-time identity creation and idempotent commands", () => {
 		expect(postgresStore.match(/pg_advisory_xact_lock/g)?.length).toBeGreaterThanOrEqual(2);
-		expect(postgresStore).toContain("[provider, providerSubject]");
+		expect(postgresStore).toContain("[identity.provider, identity.subject]");
 		expect(postgresStore).toContain("[accountId, normalized.key]");
 	});
 
@@ -147,5 +148,24 @@ describe("campaign hub first migration contract", () => {
 		expect(semanticOperationsSql).toContain("command_id uuid PRIMARY KEY");
 		expect(semanticOperationsSql).toContain("interval '24 hours'");
 		expect(semanticOperationsSql).toContain("status = 'cancelled'");
+	});
+
+	it("adds provider-neutral identities and one-time OAuth transactions in migration 0006", () => {
+		for (const required of [
+			"provider_handle text",
+			"provider_display_name text",
+			"last_authenticated_at timestamptz",
+			"UNIQUE (account_id, id)",
+			"authenticated_via_identity_id uuid",
+			"recent_reauthenticated_at timestamptz",
+			"CREATE TABLE hub.oauth_transactions",
+			"operation IN ('sign_in', 'reauthenticate', 'link')",
+			"oauth_transactions_session_account_fk",
+			"oauth_transactions_consumption_check",
+			"oauth_transactions_expiry_idx",
+			"DEFERRABLE INITIALLY DEFERRED",
+		]) expect(identitySql).toContain(required);
+		expect(identitySql).not.toMatch(/access_token|refresh_token|id_token/i);
+		expect(identitySql).not.toMatch(/UPDATE hub\.external_identities\s+SET provider_subject/i);
 	});
 });

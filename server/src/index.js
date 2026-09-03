@@ -1,4 +1,8 @@
 import {createHubApp} from "./app.js";
+import {
+	AuthProviderRegistry,
+	createAuthProviderRegistration,
+} from "./auth-provider-registry.js";
 import {getClientIpHeader} from "./client-ip.js";
 import {GitHubOAuthProvider} from "./github-oauth-provider.js";
 import {PostgresHubStore} from "./postgres-hub-store.js";
@@ -22,19 +26,38 @@ function getTrustProxy () {
 	return proxies.length ? proxies : false;
 }
 
+function getConfiguredProviderStatus (slug) {
+	const configured = new Set(getCsv("HUB_AUTH_PROVIDERS").length ? getCsv("HUB_AUTH_PROVIDERS") : ["github"]);
+	const emergencyDisabled = new Set(getCsv("HUB_AUTH_EMERGENCY_DISABLED_PROVIDERS"));
+	for (const value of [...configured, ...emergencyDisabled]) {
+		if (value !== "github") throw new Error(`Unsupported authentication provider "${value}".`);
+	}
+	return configured.has(slug) && !emergencyDisabled.has(slug) ? "available" : "disabled";
+}
+
 const clientIpHeader = getClientIpHeader(process.env.HUB_CLIENT_IP_HEADER);
 const store = PostgresHubStore.fromConnectionString({
 	connectionString: requireEnv("DATABASE_URL"),
 	ssl: process.env.HUB_DATABASE_SSL !== "false",
 });
 await store.pCheckHealth();
-const oauthProvider = new GitHubOAuthProvider({
-	clientId: requireEnv("GITHUB_CLIENT_ID"),
-	clientSecret: requireEnv("GITHUB_CLIENT_SECRET"),
+const authProviderRegistry = new AuthProviderRegistry({
+	registrations: [createAuthProviderRegistration({
+		slug: "github",
+		label: "GitHub",
+		status: getConfiguredProviderStatus("github"),
+		fnCreate: () => new GitHubOAuthProvider({
+			clientId: requireEnv("GITHUB_CLIENT_ID"),
+			clientSecret: requireEnv("GITHUB_CLIENT_SECRET"),
+		}),
+		onConfigurationError: ({slug, code}) => {
+			process.stderr.write(`Authentication provider ${slug} configuration failed (${code}).\n`);
+		},
+	})],
 });
 const app = await createHubApp({
 	store,
-	oauthProvider,
+	authProviderRegistry,
 	logger: {
 		level: process.env.HUB_LOG_LEVEL || "info",
 		redact: {paths: [...HUB_LOG_REDACT_PATHS], censor: "[REDACTED]"},

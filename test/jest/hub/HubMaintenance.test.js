@@ -10,6 +10,7 @@ describe("Hub maintenance", () => {
 			commandReceipts: 0,
 			publishedOutbox: 0,
 			sessions: 0,
+			oauthTransactions: 0,
 			invites: 0,
 			accounts: {purgedAccountIds: [], blockedAccountIds: []},
 		}));

@@ -15,6 +15,7 @@ const result = spawnSync("pg_dump", [
 	"--format=custom",
 	"--no-owner",
 	"--no-privileges",
+	"--exclude-table-data=hub.oauth_transactions",
 	`--file=${resolvedTarget}`,
 ], {stdio: "inherit", env: getPgEnv({databaseUrl})});
 if (result.error) throw result.error;

@@ -160,6 +160,7 @@ try {
 	]);
 	await run("docker", [...composeArgs, "up", "--build", "-d"]);
 	await pWaitForReady();
+	await run("docker", [...composeArgs, "--profile", "backup", "run", "--rm", "backup"]);
 	Object.assign(env, {
 		DATABASE_URL: `postgresql://hub_runtime:${env.HUB_RUNTIME_DB_PASSWORD}@db:5432/hub`,
 		HUB_DATABASE_SSL: "false",
@@ -194,6 +195,7 @@ try {
 		"./node_modules/jest/bin/jest.js",
 		"test/jest/hub/HubSemanticOperationsPostgres.test.js",
 		"test/jest/hub/HubInventoryPostgres.test.js",
+		"test/jest/hub/HubMultiProviderIdentityPostgres.test.js",
 		"--runInBand",
 		"--no-coverage",
 		"--forceExit",

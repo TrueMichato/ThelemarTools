@@ -1,7 +1,7 @@
 # Campaign Hub security model
 
 > **Status:** Implemented private-V1 controls; managed deployment review pending
-> **Last verified:** 2026-09-02
+> **Last verified:** 2026-09-03
 > **Owner:** Campaign Hub maintainers
 
 ## Trust boundaries
@@ -13,10 +13,16 @@
 
 ## Controls implemented
 
-- OAuth authorization uses PKCE, signed/expiring state, stable provider-subject allowlists, and same-origin
-  return paths.
+- OAuth authorization uses a validated concrete-route provider registry, PKCE according to adapter capability,
+  signed browser correlation, hash-only expiring state, atomic one-time transaction consumption, exact redirect
+  binding, stable provider-subject allowlists, and same-origin return paths.
+- Authentication authority is `(provider, immutable subject)`. Email and mutable profile fields are discarded
+  before store lookup and cannot link, admit, merge, or select an account.
+- Authorization codes and provider access/refresh tokens are never persisted. The callback-local access token is
+  discarded after identity lookup; consumed state, PKCE verifier, and nonce values are cleared immediately.
 - Sessions use random tokens stored only as SHA-256 hashes; successful reauthentication revokes the prior
-  browser session.
+  browser session. New sessions record same-account external-identity provenance without changing campaign
+  authorization.
 - Invite tokens are deterministic HMAC values derived from `HUB_CSRF_SECRET`, creator account, campaign, and
   idempotency key so an idempotent retry can reproduce the same raw token while PostgreSQL stores only its
   hash. Compromise/rotation of the CSRF secret therefore also affects invite issuance/recovery.

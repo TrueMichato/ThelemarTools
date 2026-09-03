@@ -1,7 +1,7 @@
 # Campaign Hub data lifecycle
 
 > **Status:** Current behavior plus approved Phase 6 policy
-> **Last verified:** 2026-09-02
+> **Last verified:** 2026-09-03
 > **Owner:** Campaign Hub maintainers
 
 ## Data inventory
@@ -9,8 +9,9 @@
 | Data | Purpose | Visibility | Current retention |
 |---|---|---|---|
 | Internal account id/display name/status | Identity and UI | account; campaign members see display name | account lifetime |
-| GitHub provider subject | Stable login binding | BFF/store only | account lifetime |
-| Session token hash/user agent/timestamps | Authentication/device diagnostics | account/BFF only | expiry/revoke; automated 30-day technical cleanup pending |
+| External provider subject + bounded profile metadata | Stable `(provider, subject)` login binding and own-account presentation | BFF/store; own account export | account lifetime; cascades on purge |
+| OAuth transaction state hash/PKCE verifier/OIDC nonce/bindings | One-time login CSRF and callback binding | BFF/store only; excluded from backups/export/logs | consumed values cleared immediately; row removed by bounded maintenance no later than expiry |
+| Session token hash/user agent/timestamps/identity provenance | Authentication/device diagnostics | account/BFF only | expiry/revoke; automated 30-day technical cleanup |
 | Campaign/member/role | Authorization and campaign roster | active campaign members | campaign/account lifecycle |
 | Invite token hash/role/usage/expiry | Join authorization | creator/authority; raw token returned at creation | expiry/revoke; automated 30-day cleanup pending |
 | Raw invite token in browser | Share/redeem invite and survive OAuth round-trip | visible in creator output/link; recipient URL fragment then `sessionStorage["hub-pending-invite"]` until redemption attempt completes | cleared from URL immediately and from sessionStorage after success or failure |
@@ -94,9 +95,10 @@ characters.
 
 ### Account/session
 
-OAuth creates or updates one account by immutable provider subject. Successful reauthentication creates a new
-session and revokes the prior browser session discovered during callback. Session tokens exist only in
-cookies; PostgreSQL stores hashes.
+OAuth creates or updates one account by immutable `(provider, subject)` and creates account, identity, and
+session atomically. Mutable profile metadata may refresh but never participates in lookup. Successful
+reauthentication creates a new session and revokes the prior browser session discovered during callback. Session
+tokens exist only in cookies; PostgreSQL stores hashes and same-account identity provenance.
 
 ### Campaign
 

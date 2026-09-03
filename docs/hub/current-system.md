@@ -2,7 +2,7 @@
 
 > **Status:** Current implementation reference
 > **Scope:** Private invite-only V1 plus the protocol-v3 semantic-operation server substrate
-> **Last verified:** 2026-09-02
+> **Last verified:** 2026-09-03
 > **Owner:** Campaign Hub maintainers
 
 This document describes what exists in the repository and deployed private Oracle staging now. It is not the
@@ -39,7 +39,7 @@ The Campaign Hub is an optional online layer over the existing local-first site.
 | Test authority | `server/src/memory-hub-store.js` | Deterministic behavioral double for domain/API tests; never used by `server/src/index.js` |
 | Domain helpers | `server/src/hub-actions.js`, `server/src/semantic-operation-registry.js`, `server/src/campaign-content.js`, `server/src/cloud-data-validation.js` | Versioned semantic effects, source-derived template registry, inventory/escrow, rules, brew validation, character sanitization/quotas |
 | Realtime authority | `server/src/realtime.js`, `server/src/projections.js` | Presence, resync, visibility filtering, outbox dispatch |
-| Auth/security | `server/src/github-oauth-provider.js`, `server/src/security.js` | OAuth exchange, PKCE, signed state, hashes, tokens, CSRF helpers |
+| Auth/security | `server/src/auth-provider-registry.js`, `server/src/github-oauth-provider.js`, `server/src/external-identity.js`, `server/src/security.js` | Validated provider registration, GitHub exchange, immutable identity normalization, durable OAuth state, PKCE, hashes, tokens, CSRF helpers |
 | Schema/operations | `server/migrations/`, `server/src/migration-runner.js`, `server/scripts/` | Immutable migrations, checksummed ledger, role grants, backup, restore, credential-safe DB access |
 | Character Sheet seams | `js/charactersheet/charactersheet.js`, `charactersheet-hub-effects.js`, `charactersheet-state.js`, `charactersheet-rollhistory.js` | Repository selection, context overlay, save/rebase/recovery, inline effect approvals/notices, campaign roll logging |
 | DM Screen seams | `js/dmscreen.js`, `js/dmscreen/partytracker/` | Workspace repository selection and non-persisted live character projections |
@@ -56,7 +56,8 @@ flowchart LR
   Browser -->|/api /auth /ws| Edge[Same-origin edge proxy]
   Edge --> BFF[Fastify BFF]
   BFF --> PG[(PostgreSQL)]
-  BFF --> GitHub[GitHub OAuth]
+  BFF --> Registry[Auth provider registry]
+  Registry --> GitHub[GitHub OAuth]
   BFF --> WS[WebSocket connections]
   BFF --> Outbox[Outbox dispatcher]
   Outbox --> WS
@@ -168,6 +169,11 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
 
 - Session and OAuth cookies are httpOnly; production cookies are Secure and `__Host-` scoped.
 - Session tokens are stored only as SHA-256 hashes.
+- OAuth state is hash-only in `oauth_transactions`; provider, operation, redirect, PKCE/nonce requirements, and
+  future account/session bindings are durable for at most ten minutes and consumed atomically. Provider tokens
+  are callback-local and never stored.
+- Accounts resolve only through `(provider, immutable subject)`. Email, login, handle, and display name are
+  presentation metadata and never account-selection inputs.
 - Mutations require exact Origin, CSRF HMAC, protocol version, payload schema, role/ownership authorization,
   and idempotency key.
 - Campaign-owned relationships carry `campaign_id` and tenant-consistency constraints/triggers.
@@ -182,10 +188,14 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
 - Migration status/plan/apply uses a checksummed ledger and advisory lock. Pre-ledger Phase 0-5 databases are
   fingerprinted before recording 0001; application readiness requires the expected migration version.
 - Migration 0003 records bounded maintenance/backup/restore evidence.
-- Protected Prometheus metrics expose aggregate HTTP/WebSocket/outbox/session/deletion/maintenance/recovery
+- Migration 0006 adds provider-neutral identity metadata, session identity provenance, deferred last-identity
+  protection, and transient OAuth transactions without rewriting existing GitHub subjects or account ids.
+- Protected Prometheus metrics expose aggregate HTTP/auth/WebSocket/outbox/session/deletion/maintenance/recovery
   signals. Structured logs use correlation ids and strip query strings/secrets.
-- A singleton maintenance job prunes only technical records and processes due account purges.
+- A singleton maintenance job prunes only technical records, including consumed/expired OAuth transactions, and
+  processes due account purges.
 - Encrypted AES-256-GCM portable backups use the read-only backup role and a separate evidence-writer role.
+  OAuth transaction row data is explicitly excluded from backup artifacts.
 
 ## Implemented UI
 
