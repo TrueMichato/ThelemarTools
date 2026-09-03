@@ -4962,7 +4962,7 @@
 									"page": 40,
 									"id": "142",
 									"entries": [
-										"The five human sculptors here (use the {@creature cultist} stat block) work feverishly to cover for the absence of the colleagues who left for the Tomb of Horrors. If the characters talk to them, the sculptors assume they were sent from the tomb as well, and ask about their missing colleagues. The sculptors share that {@creature Thessalar|IMR} has captured the thieves sent out by {@creature Moghadam|IMR}, including the gemsmith in {@area area 31|151|x}). They also know about the eidolon in area 25, and that this area of the temple is guarded by a two-headed giant called \"the Demogorgon\" (in {@area area 35|15f|x})."
+										"The five human sculptors here (use the {@creature cultist} stat block) work feverishly to cover for the absence of the colleagues who left for the Tomb of Horrors. If the characters talk to them, the sculptors assume they were sent from the tomb as well, and ask about their missing colleagues. The sculptors share that {@creature Thessalar|IMR} has captured the thieves sent out by {@creature Moghadam|IMR}, including the gemsmith in {@area area 31|151|x}. They also know about the eidolon in area 25, and that this area of the temple is guarded by a two-headed giant called \"the Demogorgon\" (in {@area area 35|15f|x})."
 									]
 								},
 								{
@@ -6108,6 +6108,301 @@
 						"{@creature Two-Headed Crocodile|IMR}",
 						"{@creature Two-Headed Owlbear|IMR}"
 					]
+				},
+				{
+					"type": "section",
+					"name": "Barbatos",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Barbatos",
+							"tag": "creature",
+							"source": "IMR",
+							"style": "narrow"
+						}
+					],
+					"id": "1b9"
+				},
+				{
+					"type": "section",
+					"name": "\"The Demogorgon\"",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "\"The Demogorgon\"",
+							"tag": "creature",
+							"source": "IMR",
+							"style": "narrow"
+						}
+					],
+					"id": "1ba"
+				},
+				{
+					"type": "section",
+					"name": "Lynx Creatlach",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Lynx Creatlach",
+							"prop": "monsterFluff",
+							"source": "IMR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Lynx Creatlach",
+							"tag": "creature",
+							"source": "IMR",
+							"style": "narrow"
+						}
+					],
+					"id": "1bb"
+				},
+				{
+					"type": "section",
+					"name": "Sir Ursas",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Sir Ursas",
+							"prop": "monsterFluff",
+							"source": "IMR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Sir Ursas",
+							"tag": "creature",
+							"source": "IMR",
+							"style": "narrow"
+						}
+					],
+					"id": "1bc"
+				},
+				{
+					"type": "section",
+					"name": "Master Thief",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Master Thief",
+							"prop": "monsterFluff",
+							"source": "vgm",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Master Thief",
+							"tag": "creature",
+							"source": "vgm",
+							"style": "narrow"
+						}
+					],
+					"id": "1bd"
+				},
+				{
+					"type": "section",
+					"name": "Moghadam",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Moghadam",
+							"tag": "creature",
+							"source": "IMR",
+							"style": "narrow"
+						}
+					],
+					"id": "1be"
+				},
+				{
+					"type": "section",
+					"name": "Sir Ursas",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Sir Ursas",
+							"prop": "monsterFluff",
+							"source": "IMR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Sir Ursas",
+							"tag": "creature",
+							"source": "IMR",
+							"style": "narrow"
+						}
+					],
+					"id": "1bf"
+				},
+				{
+					"type": "section",
+					"name": "Thessalar",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Thessalar",
+							"prop": "monsterFluff",
+							"source": "IMR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Thessalar",
+							"tag": "creature",
+							"source": "IMR",
+							"style": "narrow"
+						}
+					],
+					"id": "1c0"
+				},
+				{
+					"type": "section",
+					"name": "Neo-Otyugh",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Neo-Otyugh",
+							"prop": "monsterFluff",
+							"source": "IMR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Neo-Otyugh",
+							"tag": "creature",
+							"source": "IMR",
+							"style": "narrow"
+						}
+					],
+					"id": "1c1"
+				},
+				{
+					"type": "section",
+					"name": "Thessalheart Construct",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Thessalheart Construct",
+							"prop": "monsterFluff",
+							"source": "IMR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Thessalheart Construct",
+							"tag": "creature",
+							"source": "IMR",
+							"style": "narrow"
+						}
+					],
+					"id": "1c2"
+				},
+				{
+					"type": "section",
+					"name": "Thessalhydra",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Thessalhydra",
+							"prop": "monsterFluff",
+							"source": "HftT",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Thessalhydra",
+							"tag": "creature",
+							"source": "HftT",
+							"style": "narrow"
+						}
+					],
+					"id": "1c3"
+				},
+				{
+					"type": "section",
+					"name": "Thessalkraken",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Thessalkraken",
+							"prop": "monsterFluff",
+							"source": "IMR",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Thessalkraken",
+							"tag": "creature",
+							"source": "IMR",
+							"style": "narrow"
+						}
+					],
+					"id": "1c4"
+				},
+				{
+					"type": "section",
+					"name": "Two-Headed Crocodile",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Two-Headed Crocodile",
+							"tag": "creature",
+							"source": "IMR",
+							"style": "narrow"
+						}
+					],
+					"id": "1c5"
+				},
+				{
+					"type": "section",
+					"name": "Two-Headed Owlbear",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Two-Headed Owlbear",
+							"tag": "creature",
+							"source": "IMR",
+							"style": "narrow"
+						}
+					],
+					"id": "1c6"
 				}
 			]
 		},
@@ -6133,6 +6428,24 @@
 								"{@item Dust of the Mummy|IMR}",
 								"{@item Thessaltoxin|IMR}"
 							]
+						},
+						{
+							"type": "statblock",
+							"name": "Blood of the Lycanthrope",
+							"tag": "item",
+							"source": "IMR"
+						},
+						{
+							"type": "statblock",
+							"name": "Dust of the Mummy",
+							"tag": "item",
+							"source": "IMR"
+						},
+						{
+							"type": "statblock",
+							"name": "Thessaltoxin",
+							"tag": "item",
+							"source": "IMR"
 						}
 					]
 				},
@@ -6160,6 +6473,78 @@
 								"{@item Thessaltoxin Antidote|IMR}",
 								"{@item The Infernal Machine of Lum the Mad|IMR}"
 							]
+						},
+						{
+							"type": "statblock",
+							"name": "Blood of the Lycanthrope Antidote",
+							"tag": "item",
+							"source": "IMR"
+						},
+						{
+							"type": "statblock",
+							"name": "Bridle of Capturing",
+							"tag": "item",
+							"source": "IMR"
+						},
+						{
+							"type": "statblock",
+							"name": "Claws of the Umber Hulk",
+							"tag": "item",
+							"source": "PotA"
+						},
+						{
+							"type": "statblock",
+							"name": "Helm of Underwater Action",
+							"tag": "item",
+							"source": "GoS"
+						},
+						{
+							"type": "statblock",
+							"name": "Ioun Stone",
+							"tag": "item",
+							"source": "LLK"
+						},
+						{
+							"type": "statblock",
+							"name": "Mummy Rot Antidote",
+							"tag": "item",
+							"source": "IMR"
+						},
+						{
+							"type": "statblock",
+							"name": "Paper Bird",
+							"tag": "item",
+							"source": "WDH"
+						},
+						{
+							"type": "statblock",
+							"name": "Pot of Awakening",
+							"tag": "item",
+							"source": "XGE"
+						},
+						{
+							"type": "statblock",
+							"name": "Ruinblade",
+							"tag": "item",
+							"source": "IMR"
+						},
+						{
+							"type": "statblock",
+							"name": "Spell Gem",
+							"tag": "item",
+							"source": "OotA"
+						},
+						{
+							"type": "statblock",
+							"name": "Thessaltoxin Antidote",
+							"tag": "item",
+							"source": "IMR"
+						},
+						{
+							"type": "statblock",
+							"name": "The Infernal Machine of Lum the Mad",
+							"tag": "item",
+							"source": "IMR"
 						}
 					]
 				}

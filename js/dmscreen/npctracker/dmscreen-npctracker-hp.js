@@ -1,4 +1,4 @@
-import {InitiativeTrackerRowUtil} from "../initiativetracker/dmscreen-initiativetracker-consts.js";
+import {InitiativeTrackerRowUtil} from "../panels/initiativetracker/dmscreen-initiativetracker-consts.js";
 
 export function getNpcTrackerHpInputValue (value) {
 	if (`${value ?? ""}`.trim() === "") return null;

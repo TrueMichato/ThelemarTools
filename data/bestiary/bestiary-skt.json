@@ -5571,6 +5571,10 @@
 			"speed": {
 				"walk": 30
 			},
+			"cr": {
+				"cr": "0",
+				"xp": 0
+			},
 			"action": null,
 			"traitTags": [],
 			"miscTags": [],

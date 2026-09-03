@@ -677,6 +677,8 @@
 		},
 		{
 			"name": "Pral",
+			"isNpc": true,
+			"isNamedCreature": true,
 			"source": "HotB",
 			"page": 6,
 			"size": [

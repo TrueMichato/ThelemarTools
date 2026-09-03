@@ -1,4 +1,4 @@
-import {DmScreenPanelAppBase} from "../dmscreen-panelapp-base.js";
+import {DmScreenPanelAppBase} from "../panels/dmscreen-panelapp-base.js";
 import {ItemCompositionCatalogPicker} from "../../itembuilder/itembuilder-catalog-picker.js";
 import {ItemBuilderCore} from "../../itembuilder/itembuilder-core.js";
 import {ItemBuilderHandoff} from "../../itembuilder/itembuilder-handoff.js";

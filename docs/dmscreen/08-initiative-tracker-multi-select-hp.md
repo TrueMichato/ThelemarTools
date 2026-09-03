@@ -127,11 +127,11 @@ dying tracking DMs already rely on).
 
 | File | Role |
 |---|---|
-| `js/dmscreen/initiativetracker/dmscreen-initiativetracker-consts.js` | `InitiativeTrackerRowUtil.isNonCombatantRow(row)` shared marker predicate + `getHalvedDelta(delta)` 5e save-for-half helper. Consumed by both this PR and (transitively) any future PR that operates on combatant rows. |
+| `js/dmscreen/panels/initiativetracker/dmscreen-initiativetracker-consts.js` | `InitiativeTrackerRowUtil.isNonCombatantRow(row)` shared marker predicate + `getHalvedDelta(delta)` 5e save-for-half helper. Consumed by both this PR and (transitively) any future PR that operates on combatant rows. |
 | `js/utils-ui.js` `UiUtil.getStrNumericModified` | Pure delta-expression parser (extracted from `ComponentUiUtil._getIptNumeric`); returns `{mode, next, delta}`. Used by both the single-row HP input and the bulk bar. |
-| `js/dmscreen/initiativetracker/dmscreen-initiativetracker.js` | Selection state (`_selectedRowIds`, `_lastSelectedRowId`), hooks (`_selectionHooks`), undo stack (`_hpApplyUndoStack`), API (`toggleRowSelection` / `clearSelection` / `_applyHpToSelection` / `_undoLastHpApply` / `_pruneSelection`), and the selection-bar render helper `_render_getWrpSelectionBar`. |
-| `js/dmscreen/initiativetracker/dmscreen-initiativetracker-rowsbase.js` | Adds a `_pPopulateRow_selection` slot in the row skeleton (default no-op). |
-| `js/dmscreen/initiativetracker/dmscreen-initiativetracker-rowsactive.js` | Overrides `_pPopulateRow_selection` to render the checkbox, wire click / shift-click, apply the `.dm-init__row--selected` class, and register/unregister the row-highlight hook. |
+| `js/dmscreen/panels/initiativetracker/dmscreen-initiativetracker.js` | Selection state (`_selectedRowIds`, `_lastSelectedRowId`), hooks (`_selectionHooks`), undo stack (`_hpApplyUndoStack`), API (`toggleRowSelection` / `clearSelection` / `_applyHpToSelection` / `_undoLastHpApply` / `_pruneSelection`), and the selection-bar render helper `_render_getWrpSelectionBar`. |
+| `js/dmscreen/panels/initiativetracker/dmscreen-initiativetracker-rowsbase.js` | Adds a `_pPopulateRow_selection` slot in the row skeleton (default no-op). |
+| `js/dmscreen/panels/initiativetracker/dmscreen-initiativetracker-rowsactive.js` | Overrides `_pPopulateRow_selection` to render the checkbox, wire click / shift-click, apply the `.dm-init__row--selected` class, and register/unregister the row-highlight hook. |
 | `scss/includes/dmscreen-initiative-tracker.scss` | Styles for `.dm-init__wrp-selection-bar`, `.dm-init__wrp-row-checkbox`, `.dm-init__row-checkbox`, `.dm-init__row--selected`. |
 | `test/jest/UiUtilGetStrNumericModified.test.js` | Parser + `getHalvedDelta` + `isNonCombatantRow` coverage. |
 

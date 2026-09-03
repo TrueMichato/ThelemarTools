@@ -1,17 +1,17 @@
 import "../../js/parser.js";
 import "../../js/utils.js";
 import {jest} from "@jest/globals";
-import {InitiativeTrackerRowDataSerializer} from "../../js/dmscreen/initiativetracker/dmscreen-initiativetracker-serial.js";
+import {InitiativeTrackerRowDataSerializer} from "../../js/dmscreen/panels/initiativetracker/dmscreen-initiativetracker-serial.js";
 
 globalThis.RenderableCollectionAsyncGenericRows = class {};
 globalThis.RenderableCollectionGenericRows = class {};
 globalThis.BaseComponent = class {};
 globalThis.ListUtilEntity = class {};
-const {InitiativeTracker} = await import("../../js/dmscreen/initiativetracker/dmscreen-initiativetracker.js");
+const {InitiativeTrackerComponent} = await import("../../js/dmscreen/panels/initiativetracker/dmscreen-initiativetracker.js");
 
 describe("Initiative Tracker NPC append API", () => {
 	it("appends atomically through the canonical row builder", async () => {
-		const tracker = Object.create(InitiativeTracker.prototype);
+		const tracker = Object.create(InitiativeTrackerComponent.prototype);
 		tracker._state = {
 			isLocked: false,
 			rows: [],
@@ -58,7 +58,7 @@ describe("Initiative Tracker NPC append API", () => {
 	});
 
 	it("rejects locked trackers without constructing rows", async () => {
-		const tracker = Object.create(InitiativeTracker.prototype);
+		const tracker = Object.create(InitiativeTrackerComponent.prototype);
 		tracker._state = {isLocked: true, rows: []};
 		tracker._rowStateBuilderActive = {pGetNewRowState: jest.fn()};
 
@@ -71,7 +71,7 @@ describe("Initiative Tracker NPC append API", () => {
 
 	it("does not mutate the tracker when any row cannot be constructed", async () => {
 		const rows = [{id: "existing", entity: {name: "Existing"}}];
-		const tracker = Object.create(InitiativeTracker.prototype);
+		const tracker = Object.create(InitiativeTrackerComponent.prototype);
 		tracker._state = {isLocked: false, rows, sort: "NUMBER", dir: "DESC"};
 		tracker._rowStateBuilderActive = {
 			pGetNewRowState: jest.fn()
@@ -114,7 +114,7 @@ describe("Initiative Tracker NPC append API", () => {
 		globalThis.UiUtil = {
 			getStrNumericModified: () => ({mode: "delta", next: -10, delta: -10}),
 		};
-		const tracker = Object.create(InitiativeTracker.prototype);
+		const tracker = Object.create(InitiativeTrackerComponent.prototype);
 		tracker._state = {
 			isLocked: false,
 			rows: [{id: "npc", entity: {hpCurrent: 20, hpMax: 20, hpTemp: 4}}],

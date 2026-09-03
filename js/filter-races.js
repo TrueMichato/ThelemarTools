@@ -146,6 +146,7 @@ class PageFilterRaces extends PageFilterBase {
 			r.additionalSpells ? "Spellcasting" : null,
 			r.armorProficiencies ? "Armor Proficiency" : null,
 			r.weaponProficiencies ? "Weapon Proficiency" : null,
+			r.languageProficiencies ? "Language Proficiency" : null,
 		].filter(it => it);
 		r._fTraits.push(...(r.traitTags || []));
 		r._fLangs = PageFilterRaces.getLanguageProficiencyTags(r.languageProficiencies);
@@ -155,8 +156,11 @@ class PageFilterRaces extends PageFilterBase {
 		if (r._isBaseRace || !r._isSubRace) r._fMisc.push("Key Species");
 		if (r.lineage) r._fMisc.push("Lineage");
 
-		const ability = r.ability ? Renderer.getAbilityData(r.ability, {isOnlyShort: true, isCurrentLineage: r.lineage === "VRGR"}) : {asTextShort: "None"};
+		const ability = r.ability
+			? Renderer.getAbilityData(r.ability, {isOnlyShort: true, isCurrentLineage: r.lineage === "VRGR"})
+			: new Renderer._AbilityData({asTextShort: "None"});
 		r._slAbility = ability.asTextShort || VeCt.STR_NONE;
+		r._srtAbility = ability.asSortableString;
 
 		if (r.age?.mature != null && r.age?.max != null) r._fAge = [r.age.mature, r.age.max];
 		else if (r.age?.mature != null) r._fAge = r.age.mature;
@@ -306,7 +310,6 @@ class ModalFilterRaces extends ModalFilterBase {
 			eleRow,
 			race.name,
 			{
-				hash,
 				source,
 				sourceJson: race.source,
 				...ListItem.getCommonValues(race),
@@ -316,6 +319,9 @@ class ModalFilterRaces extends ModalFilterBase {
 				alias: PageFilterRaces.getListAliases(race),
 			},
 			{
+				hash,
+				page: race.page,
+				ability: race._srtAbility,
 				cbSel: eleRow.firstElementChild.firstElementChild.firstElementChild,
 				btnShowHidePreview,
 			},

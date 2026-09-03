@@ -98,7 +98,7 @@ class _RenderBestiaryImplBase {
 
 				MiscUtil.copy(entries)
 					.forEach(ent => {
-						if (ent.rendered) return listGroups.push(ent.rendered);
+						if (ent.rendered) return listGroups.push({rendered: ent.rendered});
 
 						if (ent.name && ent.entries) ent.type ||= "item";
 
@@ -385,7 +385,7 @@ class _RenderBestiaryImplBase {
 
 		if (Parser.crToNumber(mon.cr) >= VeCt.CR_UNKNOWN && this._style === "classic") return `<td colspan="3">${ptLabel} <span>\u2014</span></td>`;
 
-		return ee`<td colspan="${this._style !== "classic" ? "6" : "3"}">${ptLabel}
+		return veT`<td colspan="${this._style !== "classic" ? "6" : "3"}">${ptLabel}
 			<span>${Renderer.monster.getChallengeRatingPart(mon, {styleHint: this._style})}</span>
 			${opts.btnScaleCr || ""}
 			${opts.btnResetScaleCr || ""}
@@ -843,7 +843,7 @@ export class RenderBestiary {
 	}
 
 	static getRenderedLegendaryGroup (legGroup) {
-		return ee`
+		return veT`
 		${Renderer.utils.getBorderTr()}
 		${Renderer.utils.getNameTr(legGroup)}
 		<tr><td colspan="6">

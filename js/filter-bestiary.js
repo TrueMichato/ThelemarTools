@@ -788,7 +788,6 @@ class ModalFilterBestiary extends ModalFilterBase {
 			eleRow,
 			mon.name,
 			{
-				hash,
 				source,
 				sourceJson: mon.source,
 				...ListItem.getCommonValues(mon),
@@ -796,6 +795,8 @@ class ModalFilterBestiary extends ModalFilterBase {
 				cr,
 			},
 			{
+				hash,
+				page: mon.page,
 				cbSel: eleRow.firstElementChild.firstElementChild.firstElementChild,
 				btnShowHidePreview,
 			},

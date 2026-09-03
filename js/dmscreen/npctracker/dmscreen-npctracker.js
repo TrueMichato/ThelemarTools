@@ -1,4 +1,4 @@
-import {DmScreenPanelAppBase} from "../dmscreen-panelapp-base.js";
+import {DmScreenPanelAppBase} from "../panels/dmscreen-panelapp-base.js";
 import {NpcTrackerSerializer, removeNpcTrackerGroup} from "./dmscreen-npctracker-serial.js";
 import {NpcTrackerRoster, getNpcTrackerImportedMonsters} from "./dmscreen-npctracker-roster.js";
 import {NpcTrackerDetail} from "./dmscreen-npctracker-detail.js";

@@ -3,7 +3,7 @@ import "../../js/utils.js";
 import "../../js/render.js";
 import "../../js/render-dice.js";
 import "../../js/utils-ui.js";
-import {InitiativeTrackerRowUtil} from "../../js/dmscreen/initiativetracker/dmscreen-initiativetracker-consts.js";
+import {InitiativeTrackerRowUtil} from "../../js/dmscreen/panels/initiativetracker/dmscreen-initiativetracker-consts.js";
 
 // Bulk-apply / initiative-tracker HP delta parser lives in
 // `UiUtil.getStrNumericModified`; this suite covers the same grammar the

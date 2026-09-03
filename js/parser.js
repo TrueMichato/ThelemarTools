@@ -1797,6 +1797,7 @@ Parser.SP_MISC_TAG_TO_FULL = {
 	"RO": "Rollable Effects",
 	"LGTS": "Creates Sunlight",
 	"LGT": "Creates Light",
+	"UA": "Uses Action",
 	"UBA": "Uses Bonus Action",
 	"PS": "Plane Shifting",
 	"OBS": "Obscures Vision",
@@ -1805,6 +1806,7 @@ Parser.SP_MISC_TAG_TO_FULL = {
 	"OBJ": "Affects Objects",
 	"ADV": "Grants Advantage",
 	"PIR": "Permanent If Repeated",
+	"BO": "Burns Objects",
 };
 Parser.spMiscTagToFull = function (type) {
 	return Parser._parse_aToB(Parser.SP_MISC_TAG_TO_FULL, type);
@@ -2274,15 +2276,6 @@ Parser.psiTypeAbvToStylePart = function (type) { // For prerelease/homebrew
 
 Parser.psiOrderToFull = (order) => {
 	return order === undefined ? Parser.PSI_ORDER_NONE : order;
-};
-
-Parser.prereqSpellToFull = function (spell, {isTextOnly = false} = {}) {
-	if (spell) {
-		const [text, suffix] = spell.split("#");
-		if (!suffix) return isTextOnly ? spell : Renderer.get().render(`{@spell ${spell}}`);
-		else if (suffix === "c") return (isTextOnly ? Renderer.stripTags : Renderer.get().render.bind(Renderer.get()))(`{@spell ${text}} cantrip`);
-		else if (suffix === "x") return (isTextOnly ? Renderer.stripTags : Renderer.get().render.bind(Renderer.get()))("{@spell hex} spell or a warlock feature that curses");
-	} else return VeCt.STR_NONE;
 };
 
 Parser.prereqPactToFull = function (pact) {
@@ -3333,6 +3326,13 @@ Parser.VEHICLE_TYPE_TO_FULL = {
 	"INFWAR": "Infernal War Machine",
 	"CREATURE": "Creature",
 	"OBJECT": "Object",
+};
+
+Parser.vehicleTypeToFull = function (vehicleType) {
+	return Parser._parse_aToB(Parser.VEHICLE_TYPE_TO_FULL, vehicleType);
+};
+
+Parser.VEHICLE_UPGRADE_TYPE_TO_FULL = {
 	"SHP:H": "Ship Upgrade, Hull",
 	"SHP:M": "Ship Upgrade, Movement",
 	"SHP:W": "Ship Upgrade, Weapon",
@@ -3343,8 +3343,11 @@ Parser.VEHICLE_TYPE_TO_FULL = {
 	"IWM:G": "Infernal War Machine Upgrade, Gadget",
 };
 
-Parser.vehicleTypeToFull = function (vehicleType) {
-	return Parser._parse_aToB(Parser.VEHICLE_TYPE_TO_FULL, vehicleType);
+Parser.vehicleUpgradeTypeToFull = function (type) {
+	if (Parser.VEHICLE_UPGRADE_TYPE_TO_FULL[type]) return Parser.VEHICLE_UPGRADE_TYPE_TO_FULL[type];
+	if (PrereleaseUtil.getMetaLookup("vehicleUpgradeTypes")?.[type]) return PrereleaseUtil.getMetaLookup("vehicleUpgradeTypes")[type];
+	if (BrewUtil2.getMetaLookup("vehicleUpgradeTypes")?.[type]) return BrewUtil2.getMetaLookup("vehicleUpgradeTypes")[type];
+	return type;
 };
 
 Parser.CROCHET_PATTERN_SKILL_LEVEL_TO_FULL = {
@@ -3516,6 +3519,8 @@ Parser.SRC_LFL = "LFL";
 Parser.SRC_EFA = "EFA";
 Parser.SRC_FFotR = "FFotR";
 Parser.SRC_RHW = "RHW";
+Parser.SRC_AU = "AU";
+Parser.SRC_AUD = "AUD";
 
 Parser.SRC_TD = "TD";
 Parser.SRC_SCREEN = "Screen";
@@ -3722,6 +3727,8 @@ Parser.SOURCE_JSON_TO_FULL[Parser.SRC_LFL] = "Lorwyn: First Light";
 Parser.SOURCE_JSON_TO_FULL[Parser.SRC_EFA] = "Eberron: Forge of the Artificer";
 Parser.SOURCE_JSON_TO_FULL[Parser.SRC_FFotR] = "Fated Flight of the Recluse";
 Parser.SOURCE_JSON_TO_FULL[Parser.SRC_RHW] = "Ravenloft: The Horrors Within";
+Parser.SOURCE_JSON_TO_FULL[Parser.SRC_AU] = "Arcana Unleashed";
+Parser.SOURCE_JSON_TO_FULL[Parser.SRC_AUD] = "Arcana Unleashed: Deadfall";
 Parser.SOURCE_JSON_TO_FULL[Parser.SRC_TD] = "Tarot Deck";
 Parser.SOURCE_JSON_TO_FULL[Parser.SRC_SCREEN] = "Dungeon Master's Screen";
 Parser.SOURCE_JSON_TO_FULL[Parser.SRC_SCREEN_WILDERNESS_KIT] = "Dungeon Master's Screen: Wilderness Kit";
@@ -3905,6 +3912,8 @@ Parser.SOURCE_JSON_TO_ABV[Parser.SRC_LFL] = "LFL";
 Parser.SOURCE_JSON_TO_ABV[Parser.SRC_EFA] = "EFA";
 Parser.SOURCE_JSON_TO_ABV[Parser.SRC_FFotR] = "FFotR";
 Parser.SOURCE_JSON_TO_ABV[Parser.SRC_RHW] = "RHW";
+Parser.SOURCE_JSON_TO_ABV[Parser.SRC_AU] = "AU";
+Parser.SOURCE_JSON_TO_ABV[Parser.SRC_AUD] = "AUD";
 Parser.SOURCE_JSON_TO_ABV[Parser.SRC_TD] = "TD";
 Parser.SOURCE_JSON_TO_ABV[Parser.SRC_SCREEN] = "Scr'14";
 Parser.SOURCE_JSON_TO_ABV[Parser.SRC_SCREEN_WILDERNESS_KIT] = "ScrWild";
@@ -4087,6 +4096,8 @@ Parser.SOURCE_JSON_TO_DATE[Parser.SRC_LFL] = "2025-11-18";
 Parser.SOURCE_JSON_TO_DATE[Parser.SRC_EFA] = "2025-12-09";
 Parser.SOURCE_JSON_TO_DATE[Parser.SRC_FFotR] = "2025-12-09";
 Parser.SOURCE_JSON_TO_DATE[Parser.SRC_RHW] = "2026-06-16";
+Parser.SOURCE_JSON_TO_DATE[Parser.SRC_AU] = "2026-09-15";
+Parser.SOURCE_JSON_TO_DATE[Parser.SRC_AUD] = "2026-09-15";
 Parser.SOURCE_JSON_TO_DATE[Parser.SRC_TD] = "2022-05-24";
 Parser.SOURCE_JSON_TO_DATE[Parser.SRC_SCREEN] = "2015-01-20";
 Parser.SOURCE_JSON_TO_DATE[Parser.SRC_SCREEN_WILDERNESS_KIT] = "2020-11-17";
@@ -4242,6 +4253,7 @@ Parser.SOURCES_ADVENTURES = new Set([
 	Parser.SRC_HotB,
 	Parser.SRC_WttHC,
 	Parser.SRC_FFotR,
+	Parser.SRC_AUD,
 	Parser.SRC_AWM,
 ]);
 Parser.SOURCES_CORE_SUPPLEMENTS = new Set(Object.keys(Parser.SOURCE_JSON_TO_FULL).filter(it => !Parser.SOURCES_ADVENTURES.has(it)));
@@ -4489,6 +4501,7 @@ Parser.SOURCES_AVAILABLE_DOCS_BOOK = {};
 	Parser.SRC_CaBoMP,
 	Parser.SRC_RHW,
 	Parser.SRC_XSCREEN_RHW,
+	Parser.SRC_AU,
 ].forEach(src => {
 	Parser.SOURCES_AVAILABLE_DOCS_BOOK[src] = src;
 	Parser.SOURCES_AVAILABLE_DOCS_BOOK[src.toLowerCase()] = src;
@@ -4603,6 +4616,7 @@ Parser.SOURCES_AVAILABLE_DOCS_ADVENTURE = {};
 	Parser.SRC_WttHC,
 	Parser.SRC_FFotR,
 	Parser.SRC_BQDD,
+	Parser.SRC_AUD,
 ].forEach(src => {
 	Parser.SOURCES_AVAILABLE_DOCS_ADVENTURE[src] = src;
 	Parser.SOURCES_AVAILABLE_DOCS_ADVENTURE[src.toLowerCase()] = src;
@@ -4628,6 +4642,7 @@ Parser.PROP_TO_TAG = {
 };
 Parser._RE_PROP_RAW_PREFIX = /^raw_/;
 Parser.getPropTag = function (prop) {
+	if (!prop) return prop;
 	prop = prop.replace(Parser._RE_PROP_RAW_PREFIX, "");
 	if (Parser.PROP_TO_TAG[prop]) return Parser.PROP_TO_TAG[prop];
 	if (prop?.endsWith("Fluff")) return null;

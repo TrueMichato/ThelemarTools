@@ -1,4 +1,4 @@
-import {DmScreenPanelAppBase} from "./dmscreen-panelapp-base.js";
+import {DmScreenPanelAppBase} from "./panels/dmscreen-panelapp-base.js";
 
 /**
  * DM Screen Dice Calculator panel — a persistent, touch-friendly calculator

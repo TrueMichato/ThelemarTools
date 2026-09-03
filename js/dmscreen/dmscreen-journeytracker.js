@@ -1,4 +1,4 @@
-import {DmScreenPanelAppBase} from "./dmscreen-panelapp-base.js";
+import {DmScreenPanelAppBase} from "./panels/dmscreen-panelapp-base.js";
 import {DmScreenUtil} from "./dmscreen-util.js";
 
 /* ============================================================================================== */

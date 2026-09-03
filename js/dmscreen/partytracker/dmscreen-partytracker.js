@@ -1,4 +1,4 @@
-import {DmScreenPanelAppBase} from "../dmscreen-panelapp-base.js";
+import {DmScreenPanelAppBase} from "../panels/dmscreen-panelapp-base.js";
 import {PartyTrackerCharacterSerializer} from "./dmscreen-partytracker-serial.js";
 import {PartyTrackerCharacter} from "./dmscreen-partytracker-character.js";
 import {PartyTrackerDcCalc} from "./dmscreen-partytracker-dccalc.js";

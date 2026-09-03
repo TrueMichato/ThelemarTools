@@ -359,15 +359,16 @@
 								{
 									"type": "list",
 									"items": [
-										"{@adventure Chapter 11|RoT|3|Chapter 11: Varram the White}: Death to the Wyrmspeakers (Varram)",
+										"{@adventure Chapter 11|RoT|3|Varram the White}: Death to the Wyrmspeakers (Varram)",
 										"{@adventure Chapter 10|RoT|2|Chapter 10: The Sea of Moving Ice}: The Sea of Moving Ice",
 										"{@adventure Chapter 13|RoT|4|First Attack}: The Cult Strikes Back (First Attack)",
-										"{@adventure Chapter 12|RoT|3|Chapter 12: Neronvain}: Death to the Wyrmspeakers (Neronvain)",
+										"{@adventure Chapter 12|RoT|3|Neronvain}: Death to the Wyrmspeakers (Neronvain)",
 										"{@adventure Chapter 13|RoT|4|Second Attack}: The Cult Strikes Back (Second Attack)",
 										"{@adventure Chapter 15|RoT|6}: Xonthal's Tower",
 										"{@adventure Chapter 16|RoT|7}: Mission to Thay (level gain at DM's option)",
 										"{@adventure Chapter 13|RoT|4|Third Attack}: The Cult Strikes Back (Third Attack)"
-									]
+									],
+									"columns": 3
 								},
 								"Leveling up after seven milestones should bring the characters to 14th or 15th level in time for the final battle at the Well of Dragons."
 							]
@@ -473,6 +474,18 @@
 						"{@i Tyranny of Dragons} is a big, sprawling adventure that covers many levels of play and a huge swath of the Forgotten Realms. This book outlines the overall structure of the adventure and presents many chapters and events with which to challenge the characters as they investigate the nefarious plots of the Cult of the Dragon. This is not, however, a script to be read aloud with stage directions that must be followed. {@i Tyranny of Dragons} does not hold your hand and guide you step-by-step from the story's beginning to its inevitable conclusion. Instead, it presents people, creatures, locations, and situations for the adventurers to explore and interact with in a constantly changing, lively way.",
 						"You, the Dungeon Master, play a vital role. The creators of {@i Tyranny of Dragons} have tried to foresee the most likely courses of action that the characters might take in the adventure. However, D&D players are curious and unpredictable, and Faerûn is immense and filled with possibility. In a scenario as open-ended as this one, it is all but guaranteed that at some point during the adventure\u2014and possibly at many points\u2014the players will develop their own ideas about how to handle a situation or how to deal with the cult. And just like that, they'll be off and running in directions that aren't covered by this book. Those kinds of situations put a DM's skill to the test\u2014but they also produce some of the greatest gaming moments and memories."
 					]
+				},
+				{
+					"type": "image",
+					"href": {
+						"type": "internal",
+						"path": "adventure/ToD/map-0.01-the-sword-coast.webp"
+					},
+					"imageType": "map",
+					"title": "Map of the Sword Coast",
+					"width": 2650,
+					"height": 3800,
+					"id": "28d"
 				},
 				{
 					"type": "section",
@@ -684,6 +697,7 @@
 										"type": "internal",
 										"path": "adventure/HotDQ/001-symbol-harpers.webp"
 									},
+									"maxWidth": 250,
 									"width": 579,
 									"height": 1000
 								},
@@ -729,6 +743,7 @@
 										"type": "internal",
 										"path": "adventure/HotDQ/002-ooa08-03.webp"
 									},
+									"maxWidth": 250,
 									"width": 579,
 									"height": 1000
 								},
@@ -775,6 +790,7 @@
 										"type": "internal",
 										"path": "adventure/HotDQ/003-ooa08-05a.webp"
 									},
+									"maxWidth": 250,
 									"width": 577,
 									"height": 1000
 								},
@@ -821,6 +837,7 @@
 										"type": "internal",
 										"path": "adventure/HotDQ/004-symbol-alliance.webp"
 									},
+									"maxWidth": 250,
 									"width": 579,
 									"height": 1000
 								},
@@ -966,6 +983,7 @@
 										"type": "internal",
 										"path": "adventure/HotDQ/005-symbol-zhentarim.webp"
 									},
+									"maxWidth": 250,
 									"width": 579,
 									"height": 1000
 								},
@@ -5350,7 +5368,7 @@
 					"entries": [
 						"A friend of the cultist murdered by Jamna has nurtured a grudge against a character since that incident. Now that their load is safely delivered and the mission is complete, this cultist can seek vengeance for her slain friend.",
 						"At an opportune time, the cultist tries to goad the character into a fight. She'll use any incident she can from their time together, including the murder, to question the character's courage and fighting ability in front of everyone. If the character refuses to bite, the cultist doesn't back down. The NPC wants blood and won't settle for anything less. She draws her sword and attacks. The cultist uses the stats of a {@creature veteran}.",
-						"As far as the other cultists, teamsters, and hired guards are concerned, this is a personal issue between these two. If the character backs down, everyone assumes the character is a coward and treats this character with disrespect for the rest of his or her time at the camp. If other characters jump into the fight at their companion's side, more cultists do the same (treat them as twelve {@creature Guard||guards}. Bog Luck and Ardred Briferhew prevent anyone else from joining in, but they don't mind watching some limited bloodshed to break the boredom.",
+						"As far as the other cultists, teamsters, and hired guards are concerned, this is a personal issue between these two. If the character backs down, everyone assumes the character is a coward and treats this character with disrespect for the rest of his or her time at the camp. If other characters jump into the fight at their companion's side, more cultists do the same (treat them as twelve {@creature Guard||guards}). Bog Luck and Ardred Briferhew prevent anyone else from joining in, but they don't mind watching some limited bloodshed to break the boredom.",
 						"The cultist means to kill the character, and she will if she wins the duel (continuing to stab the body after the character is at 0 hit points) and no one stops her."
 					]
 				}
@@ -12213,7 +12231,7 @@
 												"A heavy oak-and-iron portcullis is drawn up just behind the drawbridge. Two life-sized statues of 18-foot-tall cloud giants\u2014one male and one female\u2014stand behind the portcullis, facing each other within the covered gateway."
 											]
 										},
-										"The winches that raise and lower the drawbridge and portcullis are located in the nearby gate towers; see area 6B for details.",
+										"The winches that raise and lower the drawbridge and portcullis are located in the nearby gate towers; see {@area area 6B|216|x} for details.",
 										"The two statues flanking the portcullis inside the gateway are Huge but otherwise have the statistics of {@creature Stone Golem||stone golems}. Anyone who passes through the gateway without speaking the correct pass-phrase (\"Tiamat, Our Mother and Strength\" or \"Hail {@creature Blagothkus|HotDQ}\") activates one of the golems. If another creature attempts to pass through without speaking the pass-phrase, the second golem animates and attacks. Only a cloud giant can command the golems to return to their posts once activated."
 									]
 								},
@@ -12230,7 +12248,7 @@
 												"These two gate towers are not the same height. The one to the left of the drawbridge is 120 feet tall, while the one to the right of the drawbridge is 80 feet tall."
 											]
 										},
-										"Three {@creature Ogre||ogres} stand atop each tower. Although the ogres are equipped with javelins, they can also fire their javelins from a large ballista on the roof each tower."
+										"Three {@creature Ogre||ogres} stand atop each tower. Although the ogres are equipped with javelins, they can also fire their javelins from a large {@object ballista} on the roof each tower."
 									]
 								},
 								{
@@ -12239,7 +12257,7 @@
 									"page": 93,
 									"id": "218",
 									"entries": [
-										"It takes one action to load and fire a ballista, and a ballista can be fired only once in a given round. An ogre firing a javelin from a ballista makes the following attack instead of its regular javelin attack.",
+										"It takes one action to load and fire a {@object ballista}, and a {@object ballista} can be fired only once in a given round. An ogre firing a javelin from a {@object ballista} makes the following attack instead of its regular javelin attack.",
 										{
 											"type": "entries",
 											"name": "Javelin",
@@ -12249,7 +12267,7 @@
 												"Javelin. {@i Ranged Weapon Attack}: {@hit 7} to hit, range 120 ft./480 ft., one target. {@i Hit}: 14 ({@dice 3d8}) piercing damage."
 											]
 										},
-										"Each ballista has AC 10, hp 50, and immunity to poison and psychic damage."
+										"Each {@object ballista} has AC 10, hp 50, and immunity to poison and psychic damage."
 									]
 								},
 								{
@@ -12258,7 +12276,7 @@
 									"page": 94,
 									"id": "21b",
 									"entries": [
-										"A large trapdoor in the roof of each tower can be pulled open to reveal a staircase of ice that hugs the tower interior and spirals all the way down to the tower's ground floor, where there's a single unlocked, giant-sized door leading to the lower courtyard (area 7) or the cultist barracks ({@area area 9|223|x}).",
+										"A large trapdoor in the roof of each tower can be pulled open to reveal a staircase of ice that hugs the tower interior and spirals all the way down to the tower's ground floor, where there's a single unlocked, giant-sized door leading to the lower courtyard ({@area area 7|21c|x}) or the cultist barracks ({@area area 9|223|x}).",
 										"The winch that raises and lowers the drawbridge is located on the ground floor of the northern tower, while the winch for the portcullis is located in the ground floor of the other. Each winch is manned by one {@creature ogre}, and each ogre has strict orders to guard its winch and not leave its tower even if the general alarm sounds. Turning the crank on a winch is an action and requires a successful {@dc 15} Strength check, and each action spent turning a crank either half-raises or half-lowers the drawbridge or portcullis. (Two actions are required to fully raise or lower either barrier.)"
 									]
 								}
@@ -12416,7 +12434,7 @@
 									"entries": [
 										"{@creature Rezmir|HotDQ} carries keys to this room, the lock on the chest, and to the storeroom ({@area area 13|232|x}). In addition, the chest here is locked and magically attuned to {@creature Rezmir|HotDQ} so that if she dies, its contents are teleported to the Well of Dragons and out of her slayers' hands.",
 										"The chest's padlock can be picked using {@item thieves' tools|PHB} with a successful {@dc 20} Dexterity check. However, the lock is rigged with a poison needle trap that triggers if the check fails by 5 or more. The needle can be found with a successful {@dc 20} Intelligence ({@skill Investigation}) check and can be disarmed with a successful {@dc 15} Dexterity check. A creature triggering the needle trap or failing the Dexterity check by 5 or more is injected with {@item Wyvern Poison} and must make a {@dc 13} Constitution saving throw, taking 24 ({@dice 7d6}) poison damage on a failed save, or half as much damage on a successful one.",
-										"The chest contains the {@item Black Dragon Mask|HotDQ} (see {@adventure appendix C|HotDQ|11}) as well as {@creature Rezmir|HotDQ}'s private collection of gems, jewelry, and coins. The gems and jewelry includes a set of matched peridot stones on a gold chain (400 gp), a silver torc with dragon's heads (200 gp), six moonstones of 50 gp each, and a set of 20 loose pearls, worth a total of 3,000 gp. There's also 600 sp, 200 gp, and 50 pp."
+										"The chest contains the {@item Black Dragon Mask|HotDQ} (see {@adventure appendix C|HotDQ|11}) as well as {@creature Rezmir|HotDQ}'s private collection of gems, jewelry, and coins. The gems and jewelry includes a set of matched peridot stones on a gold chain (400 gp), a silver torc with dragon's heads (200 gp), six {@item Moonstone||moonstones} of 50 gp each, and a set of 20 loose pearls, worth a total of 3,000 gp. There's also 600 sp, 200 gp, and 50 pp."
 									]
 								},
 								{
@@ -12591,7 +12609,7 @@
 										"This tower of pale blue ice is the color of sky on a winter day. Its few windows shimmer like mirrored glass or crystal."
 									]
 								},
-								"The door to this tower is fitted with an iron lock, and {@creature Blagothkus|HotDQ} carries the only key. The lock can be picked with {@item thieves' tools|PHB} and a successful {@dc 15} Dexterity check. Two ogres armed with javelins, rocks, and a ballista stand watch atop this tower. They have long coils of rope they use to climb up and down the tower's exterior.",
+								"The door to this tower is fitted with an iron lock, and {@creature Blagothkus|HotDQ} carries the only key. The lock can be picked with {@item thieves' tools|PHB} and a successful {@dc 15} Dexterity check. Two ogres armed with javelins, rocks, and a {@object ballista} stand watch atop this tower. They have long coils of rope they use to climb up and down the tower's exterior.",
 								"The tower interior is a hollow cylinder 90 feet high, without stairs or ladders to reach the top. Any creature inside the tower that speaks the command word \"Esclarotta\" is instantly teleported to {@area area 21|25f|x}.",
 								{
 									"type": "entries",
@@ -12599,7 +12617,7 @@
 									"page": 97,
 									"id": "23e",
 									"entries": [
-										"If the two ogres standing watch atop this tower begin firing the ballista or dropping some boulders, they get the attention of the ogre guards, cultists, and others in the main castle grounds and courtyard fairly quickly. The alarm is raised as soon as any ogre yells."
+										"If the two ogres standing watch atop this tower begin firing the {@object ballista} or dropping some boulders, they get the attention of the ogre guards, cultists, and others in the main castle grounds and courtyard fairly quickly. The alarm is raised as soon as any ogre yells."
 									]
 								}
 							]
@@ -12946,7 +12964,7 @@
 									"page": 100,
 									"id": "262",
 									"entries": [
-										"Three {@creature Ogre||ogres} guard the tower rooftop, which is furnished with a ballista. See {@area area 6B|216|x} for details."
+										"Three {@creature Ogre||ogres} guard the tower rooftop, which is furnished with a {@object ballista}. See {@area area 6B|216|x} for details."
 									]
 								},
 								{
@@ -13221,7 +13239,20 @@
 							"items": [
 								"{@charoption Cult of the Dragon Infiltrator|HotDQ}",
 								"{@charoption Dragon Scholar|HotDQ}"
-							]
+							],
+							"columns": 3
+						},
+						{
+							"type": "statblock",
+							"name": "Cult of the Dragon Infiltrator",
+							"tag": "charoption",
+							"source": "HotDQ"
+						},
+						{
+							"type": "statblock",
+							"name": "Dragon Scholar",
+							"tag": "charoption",
+							"source": "HotDQ"
 						}
 					]
 				}
@@ -13819,6 +13850,72 @@
 						"{@item Mask of the Dragon Queen|RoT}"
 					],
 					"columns": 4
+				},
+				{
+					"type": "statblock",
+					"name": "Dragontooth Dagger",
+					"tag": "item",
+					"source": "RoT"
+				},
+				{
+					"type": "statblock",
+					"name": "Hazirawn",
+					"tag": "item",
+					"source": "HotDQ"
+				},
+				{
+					"type": "statblock",
+					"name": "Insignia of Claws",
+					"tag": "item",
+					"source": "HotDQ"
+				},
+				{
+					"type": "statblock",
+					"name": "Tankard of Plenty",
+					"tag": "item",
+					"source": "HotDQ"
+				},
+				{
+					"type": "statblock",
+					"name": "Wand of Winter",
+					"tag": "item",
+					"source": "HotDQ"
+				},
+				{
+					"type": "statblock",
+					"name": "Black Dragon Mask",
+					"tag": "item",
+					"source": "HotDQ"
+				},
+				{
+					"type": "statblock",
+					"name": "Blue Dragon Mask",
+					"tag": "item",
+					"source": "RoTOS"
+				},
+				{
+					"type": "statblock",
+					"name": "Green Dragon Mask",
+					"tag": "item",
+					"source": "RoTOS"
+				},
+				{
+					"type": "statblock",
+					"name": "Red Dragon Mask",
+					"tag": "item",
+					"source": "RoTOS"
+				},
+				{
+					"type": "statblock",
+					"name": "White Dragon Mask",
+					"tag": "item",
+					"source": "RoTOS"
+				},
+				{
+					"type": "statblock",
+					"name": "Mask of the Dragon Queen",
+					"tag": "item",
+					"source": "RoT"
 				}
 			]
 		},
@@ -13855,6 +13952,196 @@
 						"{@creature Tiamat|RoT}"
 					],
 					"columns": 4
+				},
+				{
+					"type": "statblock",
+					"name": "Ambush Drake",
+					"tag": "creature",
+					"source": "HotDQ",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Azbara Jos",
+					"tag": "creature",
+					"source": "HotDQ",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Blagothkus",
+					"tag": "creature",
+					"source": "HotDQ",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Captain Othelstan",
+					"tag": "creature",
+					"source": "HotDQ",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Dragonclaw",
+					"tag": "creature",
+					"source": "HotDQ",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Dragonfang",
+					"tag": "creature",
+					"source": "RoT",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Dragonsoul",
+					"tag": "creature",
+					"source": "RoT",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Dragonwing",
+					"tag": "creature",
+					"source": "HotDQ",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Dralmorrer Borngray",
+					"tag": "creature",
+					"source": "HotDQ",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Frulam Mondath",
+					"tag": "creature",
+					"source": "HotDQ",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Guard Drake",
+					"tag": "creature",
+					"source": "HotDQ",
+					"style": "narrow"
+				},
+				{
+					"type": "section",
+					"name": "Ice Toad",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Ice Toad",
+							"prop": "monsterFluff",
+							"source": "RoT",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Ice Toad",
+							"tag": "creature",
+							"source": "RoT",
+							"style": "narrow"
+						}
+					],
+					"id": "28e"
+				},
+				{
+					"type": "statblock",
+					"name": "Jamna Gleamsilver",
+					"tag": "creature",
+					"source": "HotDQ",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Langdedrosa Cyanwrath",
+					"tag": "creature",
+					"source": "HotDQ",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Naergoth Bladelord",
+					"tag": "creature",
+					"source": "RoT",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Neronvain",
+					"tag": "creature",
+					"source": "RoT",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Pharblex Spattergoo",
+					"tag": "creature",
+					"source": "HotDQ",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Rath Modar",
+					"tag": "creature",
+					"source": "HotDQ",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Rezmir",
+					"tag": "creature",
+					"source": "HotDQ",
+					"style": "narrow"
+				},
+				{
+					"type": "section",
+					"name": "Severin",
+					"entries": [
+						{
+							"type": "statblock",
+							"name": "Severin",
+							"prop": "monsterFluff",
+							"source": "RoT",
+							"data": {
+								"renderCompact": {
+									"isSkipRootName": true
+								}
+							}
+						},
+						{
+							"type": "statblock",
+							"name": "Severin",
+							"tag": "creature",
+							"source": "RoT",
+							"style": "narrow"
+						}
+					],
+					"id": "28f"
+				},
+				{
+					"type": "statblock",
+					"name": "Talis the White",
+					"tag": "creature",
+					"source": "HotDQ",
+					"style": "narrow"
+				},
+				{
+					"type": "statblock",
+					"name": "Tiamat",
+					"tag": "creature",
+					"source": "RoT",
+					"style": "narrow"
 				}
 			]
 		},
@@ -13870,8 +14157,8 @@
 						"type": "internal",
 						"path": "adventure/HotDQ/082-tod-e-01.webp"
 					},
-					"width": 2560,
-					"height": 1701
+					"width": 1700,
+					"height": 1329
 				},
 				"Just as most adventurers don't walk into a dragon's lair without a plan, neither were D&D's iconic monsters developed without considerable forethought. This gallery explores some of the behind-the-scenes development that went into creating {@i Tyranny of Dragons}, as well as defining a spectrum of monsters, allies, and enemies that would feature in Dungeons & Dragons offerings for years to come.",
 				"On the following pages, you'll find a number of images designed to serve as story beats in the larger {@i Tyranny of Dragons} campaign. These images were created to define impactful moments in a hypothetical {@i Tyranny of Dragons} tale, one which then could be explored by multiple teams over the course of multiple projects\u2014be they games, fiction, or otherwise. Some elements you'll recognize from the events of the {@i Tyranny of Dragons} adventures, while others were meant to provide inspiration for events parallel stories could detail.",
@@ -13924,8 +14211,8 @@
 								"type": "internal",
 								"path": "adventure/HotDQ/085-tod-e-04.webp"
 							},
-							"width": 2560,
-							"height": 1701
+							"width": 1700,
+							"height": 1335
 						}
 					]
 				},
@@ -14057,8 +14344,8 @@
 												"path": "adventure/HotDQ/092-tod-e-09a.webp"
 											},
 											"title": "Dread Warriors make up the terrifying undead army of the Red Wizards",
-											"width": 1438,
-											"height": 1000
+											"width": 850,
+											"height": 1018
 										},
 										{
 											"type": "image",
@@ -14138,8 +14425,8 @@
 										"path": "adventure/HotDQ/097-tod-e-11a.webp"
 									},
 									"title": "Mask of Tiamat",
-									"width": 1000,
-									"height": 1244
+									"width": 850,
+									"height": 1177
 								},
 								"A dragon mask enhances a person's ability to communicate with dragons of a particular color.",
 								"If the wearer is exceptionally well versed in the behavior and mannerisms of the appropriate color dragon, the mask allows the wearer to become a \"dragon whisperer.\"",
@@ -14153,8 +14440,8 @@
 										"path": "adventure/HotDQ/098-tod-e-11c.webp"
 									},
 									"title": "The Five Dragon Masks (with Wyrmspeaker Regalia)",
-									"width": 2000,
-									"height": 937
+									"width": 850,
+									"height": 1133
 								}
 							]
 						},
@@ -14201,8 +14488,8 @@
 												"path": "adventure/HotDQ/101-tod-e-12c.webp"
 											},
 											"title": "Dragon Cultist: Rogue Ideations",
-											"width": 1376,
-											"height": 1000
+											"width": 850,
+											"height": 643
 										},
 										{
 											"type": "image",
@@ -14211,8 +14498,8 @@
 												"path": "adventure/HotDQ/102-tod-e-12d.webp"
 											},
 											"title": "Cult of the Dragon Masks/Headgear",
-											"width": 1600,
-											"height": 933
+											"width": 1700,
+											"height": 859
 										},
 										{
 											"type": "image",
@@ -14251,8 +14538,8 @@
 												"path": "adventure/HotDQ/106-tod-e-12k.webp"
 											},
 											"title": "2nd Rank & 4th Rank",
-											"width": 1000,
-											"height": 920
+											"width": 850,
+											"height": 754
 										},
 										{
 											"type": "image",
@@ -14311,8 +14598,8 @@
 												"path": "adventure/HotDQ/112-tod-e-12g.webp"
 											},
 											"title": "Dragon Cult Recruiter Formal Wear",
-											"width": 1311,
-											"height": 2000
+											"width": 850,
+											"height": 1315
 										},
 										{
 											"type": "image",
@@ -14367,8 +14654,8 @@
 										"path": "adventure/HotDQ/115-tod-e-13d.webp"
 									},
 									"title": "Drizzt Do'Urden",
-									"width": 1223,
-									"height": 1000
+									"width": 1700,
+									"height": 1412
 								},
 								"The farthest north region along the Sword Coast, Icewind Dale is an unforgiving land where the rugged inhabitants of ten small towns dedicate themselves to carving a living from the ice and snow.",
 								"The drow elf Drizzt Do'Urden numbers among the land's most legendary heroes.",

@@ -1,7 +1,7 @@
 import "../../js/parser.js";
 import "../../js/utils.js";
-import {InitiativeTrackerLairMarkers} from "../../js/dmscreen/initiativetracker/dmscreen-initiativetracker-lairmarkers.js";
-import {InitiativeTrackerRowUtil} from "../../js/dmscreen/initiativetracker/dmscreen-initiativetracker-consts.js";
+import {InitiativeTrackerLairMarkers} from "../../js/dmscreen/panels/initiativetracker/dmscreen-initiativetracker-lairmarkers.js";
+import {InitiativeTrackerRowUtil} from "../../js/dmscreen/panels/initiativetracker/dmscreen-initiativetracker-consts.js";
 
 const LEG_GROUP_DRAGON = {
 	name: "Ancient Red Dragon",
