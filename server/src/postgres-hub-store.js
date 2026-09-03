@@ -34,6 +34,10 @@ import {
 } from "./hub-event-snapshots.js";
 import {createSemanticOperationRegistry} from "./semantic-operation-registry.js";
 import {canViewEvent} from "./projections.js";
+import {
+	getAccountDisplayName,
+	normalizeExternalIdentity,
+} from "./external-identity.js";
 
 const {Pool} = pg;
 
@@ -56,6 +60,41 @@ function getSession (row) {
 		lastSeenAt: row.last_seen_at,
 		expiresAt: row.expires_at,
 		revokedAt: row.revoked_at,
+		authenticatedViaIdentityId: row.authenticated_via_identity_id ?? null,
+		recentReauthenticatedAt: row.recent_reauthenticated_at ?? null,
+	};
+}
+
+function getExternalIdentity (row) {
+	return {
+		id: row.identity_id ?? row.id,
+		accountId: row.account_id,
+		provider: row.provider,
+		subject: row.provider_subject,
+		handle: row.provider_handle ?? null,
+		displayName: row.provider_display_name ?? null,
+		createdAt: row.identity_created_at ?? row.created_at,
+		updatedAt: row.identity_updated_at ?? row.updated_at,
+		lastAuthenticatedAt: row.last_authenticated_at ?? null,
+	};
+}
+
+function getOAuthTransaction (row) {
+	return {
+		id: row.id,
+		stateHash: row.state_hash,
+		provider: row.provider,
+		operation: row.operation,
+		initiatingAccountId: row.initiating_account_id,
+		initiatingSessionId: row.initiating_session_id,
+		redirectUri: row.redirect_uri,
+		returnTo: row.return_to,
+		pkceVerifier: row.pkce_verifier,
+		oidcNonce: row.oidc_nonce,
+		authorizationStartedAt: row.authorization_started_at,
+		expiresAt: row.expires_at,
+		consumedAt: row.consumed_at,
+		createdAt: row.created_at,
 	};
 }
 
@@ -173,45 +212,91 @@ export class PostgresHubStore {
 		return true;
 	}
 
-	async pUpsertOAuthAccount ({provider, providerSubject, displayName}) {
+	async _pResolveOAuthAccount ({client, rawIdentity}) {
+		const identity = normalizeExternalIdentity(rawIdentity);
+		await client.query(`
+			SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 1))
+		`, [identity.provider, identity.subject]);
+		const existing = await client.query(`
+			SELECT
+				a.id, a.display_name, a.status, a.deletion_requested_at, a.purge_after,
+				ei.id AS identity_id, ei.account_id, ei.provider, ei.provider_subject,
+				ei.provider_handle, ei.provider_display_name,
+				ei.created_at AS identity_created_at, ei.updated_at AS identity_updated_at,
+				ei.last_authenticated_at
+			FROM hub.external_identities ei
+			JOIN hub.accounts a ON a.id = ei.account_id
+			WHERE ei.provider = $1 AND ei.provider_subject = $2
+			FOR UPDATE OF a, ei
+		`, [identity.provider, identity.subject]);
+		if (existing.rowCount) {
+			const account = await client.query(`
+				UPDATE hub.accounts
+				SET display_name = COALESCE($2, display_name), updated_at = now()
+				WHERE id = $1
+				RETURNING id, display_name, status, deletion_requested_at, purge_after
+			`, [existing.rows[0].id, identity.displayName || identity.handle]);
+			const externalIdentity = await client.query(`
+				UPDATE hub.external_identities
+				SET provider_handle = $2,
+					provider_display_name = $3,
+					last_authenticated_at = now(),
+					updated_at = now()
+				WHERE id = $1
+				RETURNING
+					id AS identity_id, account_id, provider, provider_subject,
+					provider_handle, provider_display_name,
+					created_at AS identity_created_at, updated_at AS identity_updated_at,
+					last_authenticated_at
+			`, [existing.rows[0].identity_id, identity.handle, identity.displayName]);
+			return {
+				account: getAccount(account.rows[0]),
+				identity: getExternalIdentity(externalIdentity.rows[0]),
+			};
+		}
+
+		const accountId = crypto.randomUUID();
+		const identityId = crypto.randomUUID();
+		const account = await client.query(`
+			INSERT INTO hub.accounts (id, display_name)
+			VALUES ($1, $2)
+			RETURNING id, display_name, status, deletion_requested_at, purge_after
+		`, [accountId, getAccountDisplayName(identity)]);
+		const externalIdentity = await client.query(`
+			INSERT INTO hub.external_identities (
+				id, account_id, provider, provider_subject,
+				provider_handle, provider_display_name, last_authenticated_at
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, now())
+			RETURNING
+				id AS identity_id, account_id, provider, provider_subject,
+				provider_handle, provider_display_name,
+				created_at AS identity_created_at, updated_at AS identity_updated_at,
+				last_authenticated_at
+		`, [
+			identityId,
+			accountId,
+			identity.provider,
+			identity.subject,
+			identity.handle,
+			identity.displayName,
+		]);
+		return {
+			account: getAccount(account.rows[0]),
+			identity: getExternalIdentity(externalIdentity.rows[0]),
+		};
+	}
+
+	async pUpsertOAuthAccount ({provider, providerSubject, displayName, login = null, handle = null}) {
 		const client = await this._pool.connect();
 		try {
 			await client.query("BEGIN");
-			await client.query(`
-				SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 1))
-			`, [provider, providerSubject]);
-			const existing = await client.query(`
-				SELECT a.id, a.display_name, a.status, a.deletion_requested_at, a.purge_after
-				FROM hub.external_identities ei
-				JOIN hub.accounts a ON a.id = ei.account_id
-				WHERE ei.provider = $1 AND ei.provider_subject = $2
-				FOR UPDATE
-			`, [provider, providerSubject]);
-			let account;
-			if (existing.rowCount) {
-				const updated = await client.query(`
-					UPDATE hub.accounts
-					SET display_name = $2, updated_at = now()
-					WHERE id = $1
-					RETURNING id, display_name, status, deletion_requested_at, purge_after
-				`, [existing.rows[0].id, displayName]);
-				account = getAccount(updated.rows[0]);
-			} else {
-				const accountId = crypto.randomUUID();
-				const identityId = crypto.randomUUID();
-				const inserted = await client.query(`
-					INSERT INTO hub.accounts (id, display_name)
-					VALUES ($1, $2)
-					RETURNING id, display_name, status, deletion_requested_at, purge_after
-				`, [accountId, displayName]);
-				await client.query(`
-					INSERT INTO hub.external_identities (id, account_id, provider, provider_subject)
-					VALUES ($1, $2, $3, $4)
-				`, [identityId, accountId, provider, providerSubject]);
-				account = getAccount(inserted.rows[0]);
-			}
+			const resolved = await this._pResolveOAuthAccount({
+				client,
+				rawIdentity: {provider, subject: providerSubject, displayName, handle: handle ?? login},
+			});
 			await client.query("COMMIT");
-			return account;
+			return resolved.account;
 		} catch (error) {
 			await client.query("ROLLBACK");
 			throw error;
@@ -220,13 +305,209 @@ export class PostgresHubStore {
 		}
 	}
 
-	async pCreateSession ({accountId, tokenHash, expiresAt, userAgent = null}) {
+	async pCompleteOAuthSignIn ({
+		identity,
+		tokenHash,
+		expiresAt,
+		userAgent = null,
+		priorSessionId = null,
+	}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const resolved = await this._pResolveOAuthAccount({client, rawIdentity: identity});
+			const sessionId = crypto.randomUUID();
+			const inserted = await client.query(`
+				INSERT INTO hub.sessions (
+					id, account_id, token_hash, expires_at, user_agent,
+					authenticated_via_identity_id
+				)
+				VALUES ($1, $2, decode($3, 'hex'), $4, $5, $6)
+				RETURNING
+					id AS session_id, account_id, user_agent, created_at, last_seen_at,
+					expires_at, revoked_at, authenticated_via_identity_id,
+					recent_reauthenticated_at
+			`, [
+				sessionId,
+				resolved.account.id,
+				tokenHash,
+				expiresAt,
+				userAgent,
+				resolved.identity.id,
+			]);
+			const revokedSessionIds = [];
+			if (priorSessionId) {
+				const revoked = await client.query(`
+					UPDATE hub.sessions
+					SET revoked_at = COALESCE(revoked_at, now())
+					WHERE id = $1 AND id <> $2
+					RETURNING id
+				`, [priorSessionId, sessionId]);
+				revokedSessionIds.push(...revoked.rows.map(row => row.id));
+				if (revokedSessionIds.length) {
+					await client.query(`DELETE FROM hub.character_leases WHERE session_id = ANY($1::uuid[])`, [revokedSessionIds]);
+					await client.query(`DELETE FROM hub.dm_workspace_leases WHERE session_id = ANY($1::uuid[])`, [revokedSessionIds]);
+				}
+			}
+			await client.query("COMMIT");
+			return {
+				account: resolved.account,
+				identity: resolved.identity,
+				session: getSession(inserted.rows[0]),
+				revokedSessionIds,
+			};
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pListExternalIdentities ({accountId}) {
+		const account = await this._pool.query(`SELECT id FROM hub.accounts WHERE id = $1`, [accountId]);
+		if (!account.rows[0]) throw new HubStoreError("ACCOUNT_NOT_FOUND");
+		const result = await this._pool.query(`
+			SELECT
+				id AS identity_id, account_id, provider, provider_subject,
+				provider_handle, provider_display_name,
+				created_at AS identity_created_at, updated_at AS identity_updated_at,
+				last_authenticated_at
+			FROM hub.external_identities
+			WHERE account_id = $1
+			ORDER BY created_at, id
+		`, [accountId]);
+		return result.rows.map(getExternalIdentity);
+	}
+
+	async pCreateOAuthTransaction ({
+		id,
+		stateHash,
+		provider,
+		operation,
+		initiatingAccountId = null,
+		initiatingSessionId = null,
+		redirectUri,
+		returnTo,
+		pkceVerifier = null,
+		oidcNonce = null,
+		expiresAt = null,
+		ttlSeconds = null,
+	}) {
+		if (expiresAt != null && ttlSeconds != null) throw new TypeError(`OAuth transaction requires one expiry source.`);
+		if (ttlSeconds != null && (!Number.isInteger(ttlSeconds) || ttlSeconds < 1 || ttlSeconds > 600)) {
+			throw new TypeError(`OAuth transaction TTL must be between 1 and 600 seconds.`);
+		}
+		if (expiresAt == null && ttlSeconds == null) throw new TypeError(`OAuth transaction expiry is required.`);
+		const result = await this._pool.query(`
+			INSERT INTO hub.oauth_transactions (
+				id, state_hash, provider, operation,
+				initiating_account_id, initiating_session_id,
+				redirect_uri, return_to, pkce_verifier, oidc_nonce, expires_at
+			)
+			VALUES (
+				$1, decode($2, 'hex'), $3, $4, $5, $6, $7, $8, $9, $10,
+				COALESCE($11::timestamptz, now() + ($12::integer * interval '1 second'))
+			)
+			RETURNING *
+		`, [
+			id,
+			stateHash,
+			provider,
+			operation,
+			initiatingAccountId,
+			initiatingSessionId,
+			redirectUri,
+			returnTo,
+			pkceVerifier,
+			oidcNonce,
+			expiresAt,
+			ttlSeconds,
+		]);
+		return getOAuthTransaction(result.rows[0]);
+	}
+
+	async pConsumeOAuthTransaction ({
+		id,
+		stateHash,
+		provider,
+		operation,
+		redirectUri,
+	}) {
+		if (typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+			throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
+		}
+		const result = await this._pool.query(`
+			WITH candidate AS (
+				SELECT *
+				FROM hub.oauth_transactions
+				WHERE id = $1
+					AND state_hash = decode($2, 'hex')
+					AND provider = $3
+					AND operation = $4
+					AND redirect_uri = $5
+					AND consumed_at IS NULL
+					AND expires_at > now()
+				FOR UPDATE
+			),
+			consumed AS (
+				UPDATE hub.oauth_transactions tx
+				SET state_hash = NULL,
+					pkce_verifier = NULL,
+					oidc_nonce = NULL,
+					consumed_at = now()
+				FROM candidate
+				WHERE tx.id = candidate.id
+				RETURNING candidate.*
+			)
+			SELECT * FROM consumed
+		`, [id, stateHash, provider, operation, redirectUri]);
+		if (!result.rowCount) throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
+		return getOAuthTransaction(result.rows[0]);
+	}
+
+	async pDeleteExpiredOAuthTransactions ({limit = 1_000} = {}) {
+		const result = await this._pool.query(`
+			DELETE FROM hub.oauth_transactions
+			WHERE ctid IN (
+				SELECT ctid
+				FROM hub.oauth_transactions
+				WHERE expires_at <= now() OR consumed_at IS NOT NULL
+				ORDER BY expires_at, id
+				LIMIT $1
+			)
+		`, [limit]);
+		return result.rowCount;
+	}
+
+	async pCreateSession ({
+		accountId,
+		tokenHash,
+		expiresAt,
+		userAgent = null,
+		authenticatedViaIdentityId = null,
+		recentReauthenticatedAt = null,
+	}) {
 		const id = crypto.randomUUID();
 		const result = await this._pool.query(`
-			INSERT INTO hub.sessions (id, account_id, token_hash, expires_at, user_agent)
-			VALUES ($1, $2, decode($3, 'hex'), $4, $5)
-			RETURNING id AS session_id, account_id, user_agent, created_at, last_seen_at, expires_at, revoked_at
-		`, [id, accountId, tokenHash, expiresAt, userAgent]);
+			INSERT INTO hub.sessions (
+				id, account_id, token_hash, expires_at, user_agent,
+				authenticated_via_identity_id, recent_reauthenticated_at
+			)
+			VALUES ($1, $2, decode($3, 'hex'), $4, $5, $6, $7)
+			RETURNING
+				id AS session_id, account_id, user_agent, created_at, last_seen_at,
+				expires_at, revoked_at, authenticated_via_identity_id,
+				recent_reauthenticated_at
+		`, [
+			id,
+			accountId,
+			tokenHash,
+			expiresAt,
+			userAgent,
+			authenticatedViaIdentityId,
+			recentReauthenticatedAt,
+		]);
 		return getSession(result.rows[0]);
 	}
 
@@ -240,6 +521,8 @@ export class PostgresHubStore {
 				s.last_seen_at,
 				s.expires_at,
 				s.revoked_at,
+				s.authenticated_via_identity_id,
+				s.recent_reauthenticated_at,
 				a.id,
 				a.display_name,
 				a.status,
@@ -270,6 +553,7 @@ export class PostgresHubStore {
 		const result = await this._pool.query(`
 			SELECT
 				s.id AS session_id, s.account_id, s.user_agent, s.created_at, s.last_seen_at, s.expires_at, s.revoked_at,
+				s.authenticated_via_identity_id, s.recent_reauthenticated_at,
 				a.id, a.display_name, a.status, a.deletion_requested_at, a.purge_after
 			FROM hub.sessions s
 			JOIN hub.accounts a ON a.id = s.account_id
@@ -303,7 +587,10 @@ export class PostgresHubStore {
 
 	async pListSessions ({accountId, currentSessionId = null}) {
 		const result = await this._pool.query(`
-				SELECT id AS session_id, account_id, user_agent, created_at, last_seen_at, expires_at, revoked_at
+				SELECT
+					id AS session_id, account_id, user_agent, created_at, last_seen_at,
+					expires_at, revoked_at, authenticated_via_identity_id,
+					recent_reauthenticated_at
 				FROM hub.sessions
 				WHERE account_id = $1
 				ORDER BY created_at DESC, id
@@ -678,6 +965,7 @@ export class PostgresHubStore {
 				COALESCE((SELECT EXTRACT(EPOCH FROM now() - min(created_at)) FROM hub.outbox_entries WHERE status IN ('pending', 'publishing', 'failed')), 0)::double precision AS outbox_oldest_age_seconds,
 				(SELECT count(*) FROM hub.sessions WHERE revoked_at IS NULL AND expires_at > now())::bigint AS active_sessions,
 				(SELECT count(*) FROM hub.command_receipts WHERE expires_at <= now())::bigint AS expired_receipts,
+				(SELECT count(*) FROM hub.oauth_transactions WHERE expires_at <= now() OR consumed_at IS NOT NULL)::bigint AS expired_oauth_transactions,
 				(SELECT count(*) FROM hub.accounts WHERE status = 'deletion_requested' AND purge_after <= now())::bigint AS deletion_due_accounts,
 				COALESCE((
 					SELECT EXTRACT(EPOCH FROM now() - completed_at)
@@ -708,6 +996,7 @@ export class PostgresHubStore {
 			outboxOldestAgeSeconds: Number(row.outbox_oldest_age_seconds),
 			activeSessions: Number(row.active_sessions),
 			expiredReceipts: Number(row.expired_receipts),
+			expiredOAuthTransactions: Number(row.expired_oauth_transactions),
 			deletionDueAccounts: Number(row.deletion_due_accounts),
 			lastMaintenanceAgeSeconds: Number(row.last_maintenance_age_seconds),
 			lastBackupAgeSeconds: Number(row.last_backup_age_seconds),
@@ -733,6 +1022,7 @@ export class PostgresHubStore {
 					commandReceipts: await this.pDeleteExpiredCommandReceipts({limit: batchSize}),
 					publishedOutbox: await this.pDeletePublishedOutbox({limit: batchSize}),
 					sessions: await this.pDeleteExpiredSessions({limit: batchSize}),
+					oauthTransactions: await this.pDeleteExpiredOAuthTransactions({limit: batchSize}),
 					invites: await this.pDeleteExpiredInvites({limit: batchSize}),
 					leases: await this.pDeleteExpiredLeases({limit: batchSize}),
 					accounts: await this.pPurgeDueAccounts({limit: Math.min(batchSize, 100)}),
@@ -4001,8 +4291,27 @@ export class PostgresHubStore {
 	}
 
 	async pExportAccountData ({accountId}) {
-		const [account, memberships, campaigns, characters, audit] = await Promise.all([
+		const [account, identities, sessions, memberships, campaigns, characters, audit] = await Promise.all([
 			this._pool.query(`SELECT id, display_name, status, deletion_requested_at, purge_after, created_at, updated_at FROM hub.accounts WHERE id = $1`, [accountId]),
+			this._pool.query(`
+				SELECT
+					id AS identity_id, account_id, provider, provider_subject,
+					provider_handle, provider_display_name,
+					created_at AS identity_created_at, updated_at AS identity_updated_at,
+					last_authenticated_at
+				FROM hub.external_identities
+				WHERE account_id = $1
+				ORDER BY created_at, id
+			`, [accountId]),
+			this._pool.query(`
+				SELECT
+					id AS session_id, account_id, user_agent, created_at, last_seen_at,
+					expires_at, revoked_at, authenticated_via_identity_id,
+					recent_reauthenticated_at
+				FROM hub.sessions
+				WHERE account_id = $1
+				ORDER BY created_at, id
+			`, [accountId]),
 			this._pool.query(`SELECT id, campaign_id, account_id, role, status, created_at, updated_at FROM hub.memberships WHERE account_id = $1`, [accountId]),
 			this._pool.query(`
 				SELECT c.*
@@ -4017,6 +4326,8 @@ export class PostgresHubStore {
 		return {
 			exportedAt: new Date().toISOString(),
 			account: getAccount(account.rows[0]),
+			externalIdentities: identities.rows.map(getExternalIdentity),
+			sessions: sessions.rows.map(getSession),
 			memberships: memberships.rows.map(getMembership),
 			campaigns: campaigns.rows,
 			characters: characters.rows.map(getCharacter),

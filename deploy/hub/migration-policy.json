@@ -15,6 +15,21 @@
       "phase": "expand",
       "previousAppCompatible": true,
       "notes": "Adds operational evidence read by newer code and ignored by the previous application."
+    },
+    "0004": {
+      "phase": "expand",
+      "previousAppCompatible": true,
+      "notes": "Adds authorization-scoped character projection policy columns with backward-compatible defaults."
+    },
+    "0005": {
+      "phase": "expand",
+      "previousAppCompatible": true,
+      "notes": "Adds semantic character operation tables and columns without removing the previous action paths."
+    },
+    "0006": {
+      "phase": "expand",
+      "previousAppCompatible": true,
+      "notes": "Adds provider-neutral identity metadata, session provenance, and transient OAuth transactions while preserving GitHub rows and old application reads."
     }
   }
 }
