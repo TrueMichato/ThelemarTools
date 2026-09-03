@@ -1,6 +1,7 @@
 import {DmScreenPanelAppBase} from "../dmscreen-panelapp-base.js";
 import {PartyTrackerCharacterSerializer} from "./dmscreen-partytracker-serial.js";
 import {PartyTrackerCharacter} from "./dmscreen-partytracker-character.js";
+import {getPartyCarryAggregate} from "../../hub/hub-carry-contract.js";
 import {PartyTrackerDcCalc} from "./dmscreen-partytracker-dccalc.js";
 import {PartyTrackerImporter} from "./dmscreen-partytracker-import.js";
 
@@ -41,6 +42,9 @@ export class PartyTracker extends DmScreenPanelAppBase {
 				return;
 			case "hubCampaignStatus":
 				this._comp?.setHubCampaignStatus(payload);
+				return;
+			case "hubPartyInventory":
+				this._comp?.setHubPartyInventory(payload);
 		}
 	}
 }
@@ -63,6 +67,9 @@ class PartyTrackerRoot {
 		this._wrpDcCalc = null;
 		this._showDcCalc = false;
 		this._hubCharacterIds = new Set();
+		// Weight summary only, never the stash contents, and held in memory rather than in
+		// Board state so linked stash truth is not persisted to localStorage.
+		this._hubPartyInventory = null;
 		this._hubCampaignStatus = board.getHubCampaignStatus?.() || null;
 	}
 
@@ -304,6 +311,18 @@ class PartyTrackerRoot {
 		}
 	}
 
+	/**
+	 * Receive the shared party stash weight summary.
+	 *
+	 * Deliberately not persisted into Board state: the stash belongs to the campaign, and a
+	 * DM workspace saved to localStorage should not carry a snapshot of it.
+	 * @param {?object} summary
+	 */
+	setHubPartyInventory (summary) {
+		this._hubPartyInventory = summary || null;
+		this._updateSummary();
+	}
+
 	setHubCampaignStatus (status, {isSkipRender = false} = {}) {
 		const wasHubCampaign = !!this._hubCampaignStatus;
 		this._hubCampaignStatus = status || null;
@@ -389,18 +408,16 @@ class PartyTrackerRoot {
 			return;
 		}
 
-		let totalCapacity = 0;
-		let totalWeight = 0;
 		let totalLevel = 0;
 		let totalHpCurrent = 0;
 		let totalHpMax = 0;
 		let anyHpSet = false;
+		const members = [];
 		for (const c of this._characters) {
 			const data = c.data || c.getSaveableData();
 			const calc = new PartyTrackerCharacter(data, this._settings);
 			totalLevel += calc.getTotalLevel();
-			totalCapacity += calc.getCarryCapacity();
-			totalWeight += data.currentWeight || 0;
+			members.push(calc.getCarryState());
 			if (data.hp?.max > 0) {
 				totalHpCurrent += data.hp.current || 0;
 				totalHpMax += data.hp.max || 0;
@@ -408,14 +425,32 @@ class PartyTrackerRoot {
 			}
 		}
 
+		// Members whose carry is unavailable are counted and excluded, never estimated: a
+		// guessed load would be indistinguishable from a real one, and nothing about a
+		// withheld character can be recovered by subtracting from the total.
+		const carry = getPartyCarryAggregate({
+			members,
+			stashWeight: this._hubPartyInventory?.state === "known" ? this._hubPartyInventory.knownWeight : null,
+			stashUnknownStackCount: this._hubPartyInventory?.unknownStackCount || 0,
+		});
+
 		const avgLevel = Math.round((totalLevel / n) * 10) / 10;
-		const carryPct = totalCapacity > 0 ? Math.round((totalWeight / totalCapacity) * 100) : 0;
+		const carryPct = carry.totalBodyCapacity > 0 ? Math.round((carry.totalBodyLoad / carry.totalBodyCapacity) * 100) : 0;
+		const carryPrefix = carry.isTotalPartial ? "\u2265" : "";
+		const carryNotes = [
+			carry.overCapacityCount ? `${carry.overCapacityCount} over capacity` : null,
+			carry.unavailableCount ? `${carry.unavailableCount} not synced` : null,
+		].filter(Boolean);
 
 		const hpStr = anyHpSet ? ` \u00b7 HP: ${totalHpCurrent}/${totalHpMax}` : "";
 		const sourceStr = this._hubCampaignStatus
 			? ` \u00b7 ${this._hubCharacterIds.size} live \u00b7 ${n - this._hubCharacterIds.size} manual`
 			: "";
-		this._eleSummary.textContent = `${n} char${n !== 1 ? "s" : ""}${sourceStr} \u00b7 Lv ${avgLevel}${hpStr} \u00b7 Carry: ${totalWeight}/${totalCapacity} lb (${carryPct}%)`;
+		const stashStr = this._hubPartyInventory
+			? ` \u00b7 Stash: ${this._hubPartyInventory.state === "known" ? `${Math.round(this._hubPartyInventory.knownWeight * 10) / 10} lb` : "\u2014"}`
+			: "";
+		const notesStr = carryNotes.length ? ` (${carryNotes.join(", ")})` : "";
+		this._eleSummary.textContent = `${n} char${n !== 1 ? "s" : ""}${sourceStr} \u00b7 Lv ${avgLevel}${hpStr} \u00b7 Carry: ${carryPrefix}${Math.round(carry.totalBodyLoad * 10) / 10}/${carry.totalBodyCapacity} lb (${carryPct}%)${notesStr}${stashStr}`;
 	}
 
 	_openSettingsMenu (evt) {
@@ -472,6 +507,7 @@ class PartyTrackerRoot {
 
 			for (const [key, label] of [
 				["thelemar_carryWeight", "Carry Weight (Might-based)"],
+				["thelemar_encumbranceTiers", "Encumbrance Tiers (house rule)"],
 				["thelemar_jumping", "Jump Distances (Athletics-based)"],
 				["thelemar_linguisticsBonus", "Linguistics Bonus (+1/language)"],
 				["thelemar_criticalRolls", "Critical Rolls (Nat 1: \u22125, Nat 20: +5)"],

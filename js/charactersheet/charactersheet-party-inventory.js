@@ -3,6 +3,7 @@ import {
 	getProjectionView,
 	getTargetableProjections,
 } from "../hub/hub-character-view.js";
+import {getCarryProfile, getCarryStatus} from "../hub/hub-carry-contract.js";
 import {
 	getInventoryStackWeight,
 	getInventoryTransferEligibility,
@@ -134,6 +135,7 @@ export class CharacterSheetPartyInventory {
 		fnAdoptCharacterData,
 		fnSaveCharacter,
 		fnIsCurrentCharacter,
+		fnGetCarryProfile = null,
 		fnToast = detail => globalThis.JqueryUtil?.doToast?.(detail),
 	}) {
 		this._campaignId = campaignId;
@@ -144,6 +146,10 @@ export class CharacterSheetPartyInventory {
 		this._fnAdoptCharacterData = fnAdoptCharacterData;
 		this._fnSaveCharacter = fnSaveCharacter;
 		this._fnIsCurrentCharacter = fnIsCurrentCharacter;
+		// Supplies the live carry profile so a transfer can be previewed against the same
+		// calculation the carry bar uses. Optional: without it the preview simply omits the
+		// carry line rather than guessing at capacity.
+		this._fnGetCarryProfile = fnGetCarryProfile;
 		this._fnToast = fnToast;
 
 		this._isEnabled = typeof campaignId === "string"
@@ -904,6 +910,14 @@ export class CharacterSheetPartyInventory {
 			attrs: {id: "charsheet-party-inventory-confirmation"},
 		});
 		composer.append(summary);
+		// Advisory only: the Confirm button is never disabled for weight. Encumbrance is not
+		// an enforced rule here (ADR 0015 lists the carry rule as planned with no evaluator),
+		// and blocking on it would also let a rejection disclose a peer's hidden load.
+		const carryDelta = createElement("p", {
+			className: "charsheet__party-inventory-carry-delta",
+			attrs: {id: "charsheet-party-inventory-carry-delta", role: "status", "aria-live": "polite"},
+		});
+		composer.append(carryDelta);
 		if (this._draft.blockers.length) {
 			composer.append(createElement("p", {
 				className: "charsheet__party-inventory-limit-note",
@@ -932,6 +946,62 @@ export class CharacterSheetPartyInventory {
 		return composer;
 	}
 
+	/**
+	 * Show what the proposed move does to this character's carried load, and to the stash.
+	 *
+	 * Only the acting character and the shared stash are described. A recipient's load is
+	 * shown solely when that peer has chosen to share `carrySummary`; it is never derived
+	 * from a difference, because ADR 0011 forbids hidden item truth being inferred from
+	 * transfer previews or encumbrance warnings.
+	 * @param {HTMLElement} composer
+	 */
+	_syncCarryDelta (composer) {
+		const target = composer.querySelector(".charsheet__party-inventory-carry-delta");
+		if (!target || !this._draft) return;
+		const profile = this._fnGetCarryProfile?.();
+		const entry = this._getEntry(this._draft);
+		const quantity = Number(this._draft.quantity);
+		const unitWeight = Number(entry?.item?.weight);
+
+		if (!profile || !Number.isSafeInteger(quantity) || quantity < 1 || !Number.isFinite(unitWeight) || unitWeight < 0) {
+			// An unknown stack weight makes the consequence unknowable. Saying so is better
+			// than printing a delta of zero, which would read as "this changes nothing".
+			target.textContent = profile && entry ? "Carry impact unknown: this stack has no recorded weight." : "";
+			return;
+		}
+
+		const moved = unitWeight * quantity;
+		// Moving OUT of the stash adds to this character; moving out of this character removes.
+		const signedDelta = this._draft.kind === "party_inventory" ? moved : -moved;
+		const after = getCarryProfile({
+			capacityOverride: profile.bodyCapacity,
+			grossWeight: Math.max(0, profile.bodyLoad + signedDelta),
+			thresholdRuleId: profile.thresholdRuleId,
+			thresholdSourceValue: profile.thresholdSourceValue,
+			unknownStackCount: profile.unknownStackCount,
+		});
+		const beforeLevel = getCarryStatus(profile).level;
+		const afterLevel = getCarryStatus(after).level;
+		const label = level => ({
+			over_capacity: "Over capacity",
+			heavily_encumbered: "Heavily encumbered",
+			encumbered: "Encumbered",
+			unknown: "Unknown",
+			normal: "Normal",
+		}[level] || level);
+
+		const parts = [`You: ${formatNumber(profile.bodyLoad)} → ${formatNumber(after.bodyLoad)} lb of ${formatNumber(profile.bodyCapacity)}`];
+		parts.push(beforeLevel === afterLevel ? label(afterLevel) : `${label(beforeLevel)} → ${label(afterLevel)}`);
+
+		const stash = getInventoryWeightSummary(this._partyInventory?.inventory || []);
+		const stashAfter = this._draft.kind === "party_inventory" ? stash.knownWeight - moved : stash.knownWeight + moved;
+		if (this._draft.kind === "party_inventory" || this._draft.destinationKind === "party_inventory") {
+			parts.push(`Stash: ${formatNumber(stash.knownWeight)} → ${formatNumber(Math.max(0, stashAfter))} lb`);
+		}
+		target.textContent = `${parts.join(" · ")}.`;
+		target.classList.toggle("charsheet__party-inventory-carry-delta--warn", afterLevel === "over_capacity" && beforeLevel !== "over_capacity");
+	}
+
 	_syncComposerSummary (composer) {
 		if (!this._draft) return;
 		const entry = this._getEntry(this._draft);
@@ -944,6 +1014,7 @@ export class CharacterSheetPartyInventory {
 			: this._draft.destinationKind === "party_inventory"
 				? "the party stash"
 				: recipient?.label || "the selected character";
+		this._syncCarryDelta(composer);
 		const summary = composer.querySelector(".charsheet__party-inventory-confirmation");
 		summary.textContent = isQuantityValid
 			? `${quantity} × ${entryName} will move from ${this._draft.kind === "party_inventory" ? "the party stash" : "this character"} to ${destination}.${this._willRequireApproval() ? " The recipient must accept before it arrives." : ""}`

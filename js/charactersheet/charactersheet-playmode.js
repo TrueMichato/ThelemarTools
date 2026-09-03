@@ -5281,6 +5281,7 @@ export class CharacterSheetPlayMode {
 			},
 			...(settings.enableTgtt ? [
 				{key: "thelemar_carryWeight", label: "TGTT Carry Capacity", type: "toggle", value: settings.thelemar_carryWeight},
+				{key: "thelemar_encumbranceTiers", label: "TGTT Encumbrance Tiers", type: "toggle", value: settings.thelemar_encumbranceTiers !== false},
 				{key: "thelemar_jumping", label: "TGTT Jumping Rules", type: "toggle", value: settings.thelemar_jumping},
 				{key: "thelemar_linguisticsBonus", label: "TGTT Linguistics", type: "toggle", value: settings.thelemar_linguisticsBonus},
 				{key: "thelemar_criticalRolls", label: "TGTT Critical Rolls", type: "toggle", value: settings.thelemar_criticalRolls},

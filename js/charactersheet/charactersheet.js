@@ -228,6 +228,9 @@ class CharacterSheetPage {
 	_clearHubRules () {
 		this._hubContext = null;
 		this._state.clearCampaignSettingsOverlay();
+		// Return to the detached basis in lockstep with the overlay: a summary stamped with a
+		// campaign this sheet is no longer in must not keep claiming to be current.
+		this._state.setCarryAuthorityContext(null);
 	}
 
 	/** Composed detach used by ordinary (non-context-switch) call sites. */
@@ -529,6 +532,15 @@ class CharacterSheetPage {
 			pOnContextActivated: async ({context}) => {
 				this._hubContext = context;
 				this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
+				// Stamp the carry summary with the context it was computed under, immediately
+				// beside the overlay whose values feed its settings digest — the two must not
+				// be able to drift. Without this the sheet would keep publishing a `detached`
+				// basis while the server expected a `campaign` one, and every campaign
+				// character's `carrySummary` would be silently withheld as unverifiable.
+				this._state.setCarryAuthorityContext({
+					rulesVersionId: this._hubContext?.rulesVersion?.id ?? null,
+					brewBundleHash: this._hubContext?.brewBundle?.contentHash ?? null,
+				});
 			},
 			onFenceGeneration: () => this._fenceHubGeneration(),
 			pTeardownRealtime: async () => this._detachHubRealtimeClient(),
@@ -608,6 +620,7 @@ class CharacterSheetPage {
 					repository: this._characterRepository,
 					realtime: this._hubRealtime,
 					fnGetCharacterData: () => this._state.toJson(),
+					fnGetCarryProfile: () => this._state.getCarryProfile(),
 					fnAdoptCharacterData: data => {
 						this._state.loadFromJson(data);
 						this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
@@ -19062,6 +19075,7 @@ class CharacterSheetPage {
 
 		// Thelemar homebrew rules
 		const currentThelemar_carryWeight = (/** @type {*} */ (this._state.getSettings()))?.thelemar_carryWeight || false;
+		const currentThelemar_encumbranceTiers = (/** @type {*} */ (this._state.getSettings()))?.thelemar_encumbranceTiers !== false;
 		const currentThelemar_jumping = (/** @type {*} */ (this._state.getSettings()))?.thelemar_jumping || false;
 		const currentThelemar_linguisticsBonus = (/** @type {*} */ (this._state.getSettings()))?.thelemar_linguisticsBonus || false;
 		const currentThelemar_criticalRolls = (/** @type {*} */ (this._state.getSettings()))?.thelemar_criticalRolls || false;
@@ -19088,6 +19102,19 @@ class CharacterSheetPage {
 				<span class="charsheet__settings-checkbox-text">
 					<span class="charsheet__settings-checkbox-title">🎒 Carry Weight</span>
 					<span class="charsheet__settings-checkbox-desc">passive Might × 10</span>
+				</span>
+			</label>
+		</div>`;
+
+		// Thelemar publishes a carrying-capacity maximum but no encumbered / heavily
+		// encumbered tiers, so the tiers below are a house extension rather than a rule.
+		// Turning them off leaves only the consequence Thelemar actually states.
+		const thelemar_encumbranceTiers = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox charsheet__settings-option--sub">
+			<label class="charsheet__settings-checkbox-label">
+				<input type="checkbox" id="settings-thelemar-encumbrance-tiers" ${currentThelemar_encumbranceTiers ? "checked" : ""}>
+				<span class="charsheet__settings-checkbox-text">
+					<span class="charsheet__settings-checkbox-title">⚖️ Encumbrance Tiers</span>
+					<span class="charsheet__settings-checkbox-desc">House rule: encumbered at ⅓ and heavily encumbered at ⅔ of capacity. Off = only exceeding your maximum matters</span>
 				</span>
 			</label>
 		</div>`;
@@ -19348,6 +19375,7 @@ class CharacterSheetPage {
 				${thelemar_masterToggle}
 				<div class="charsheet__settings-thelemar-sub">
 					${thelemar_carryWeight}
+					${thelemar_encumbranceTiers}
 					${thelemar_jumping}
 					${thelemar_linguisticsBonus}
 					${thelemar_criticalRolls}
@@ -19436,6 +19464,7 @@ class CharacterSheetPage {
 		// Thelemar master toggle helper - defined early so exhaustion handler can use it
 		const updateMasterToggleState = () => {
 			const carryChecked = modalInner.querySelector("#settings-thelemar-carry").checked;
+			const encumbranceTiersChecked = modalInner.querySelector("#settings-thelemar-encumbrance-tiers").checked;
 			const jumpingChecked = modalInner.querySelector("#settings-thelemar-jumping").checked;
 			const lingChecked = modalInner.querySelector("#settings-thelemar-linguistics").checked;
 			const critsChecked = modalInner.querySelector("#settings-thelemar-crits").checked;
@@ -19445,7 +19474,7 @@ class CharacterSheetPage {
 			const exhaustionRules = modalInner.querySelector("#settings-exhaustion-rules").value;
 			const exhaustionIsThelemar = exhaustionRules === "thelemar";
 			const tgttEnabled = (/** @type {*} */ (this._state.getSettings()))?.enableTgtt !== false;
-			modalInner.querySelector("#settings-thelemar-all").checked = tgttEnabled && carryChecked && jumpingChecked && lingChecked && critsChecked && asiFeatChecked && itemUtilChecked && spellRarityChecked && exhaustionIsThelemar;
+			modalInner.querySelector("#settings-thelemar-all").checked = tgttEnabled && carryChecked && encumbranceTiersChecked && jumpingChecked && lingChecked && critsChecked && asiFeatChecked && itemUtilChecked && spellRarityChecked && exhaustionIsThelemar;
 		};
 
 		// Exhaustion rules handler
@@ -19465,6 +19494,7 @@ class CharacterSheetPage {
 			// Set all sub-toggles, then fire change events so per-setting handlers run
 			const subToggleIds = [
 				"#settings-thelemar-carry",
+				"#settings-thelemar-encumbrance-tiers",
 				"#settings-thelemar-jumping",
 				"#settings-thelemar-linguistics",
 				"#settings-thelemar-crits",
@@ -19494,6 +19524,14 @@ class CharacterSheetPage {
 			// Update encumbrance display
 			this._inventory?._updateEncumbrance?.();
 			// Also update combat stats which shows carry capacity
+			this._renderCombatStats();
+			updateMasterToggleState();
+		});
+
+		// Thelemar encumbrance tiers handler
+		modalInner.querySelector("#settings-thelemar-encumbrance-tiers").addEventListener("change", (e) => {
+			this._state.setSetting("thelemar_encumbranceTiers", (/** @type {*} */ (e.target)).checked);
+			this._inventory?._updateEncumbrance?.();
 			this._renderCombatStats();
 			updateMasterToggleState();
 		});

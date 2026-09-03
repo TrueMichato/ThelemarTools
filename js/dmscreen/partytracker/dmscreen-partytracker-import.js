@@ -84,6 +84,14 @@ export class PartyTrackerImporter {
 			ct: [],
 			exh: Number.isFinite(data.exhaustion) ? data.exhaustion : 0,
 			cw: Number(data.carrySummary?.carried) || 0,
+			// The projection carries the sheet's authoritative body pair, or omits the field
+			// entirely when the owner has not shared it or when the summary is no longer
+			// current (an item grant, a transfer, or a campaign rules/brew rotation since
+			// their last save). An absent field must NOT be shown as 0/0 or "Normal": the
+			// tracker renders "not synced", so a DM can tell an unknown load from a light one.
+			csum: Number.isFinite(Number(data.carrySummary?.carried)) && Number.isFinite(Number(data.carrySummary?.capacity))
+				? {state: "known", carried: Number(data.carrySummary.carried), capacity: Number(data.carrySummary.capacity)}
+				: {state: "unavailable"},
 			cnd: (data.conditions || []).map(name => ({n: name, s: null})),
 			dis: (data.diseases || []).map(name => ({n: name, s: null})),
 			nt: "",

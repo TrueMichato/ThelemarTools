@@ -177,6 +177,14 @@
 		font-weight: 600;
 	}
 
+	/* An unavailable value is neither good nor bad news -- it is absent. Muted rather than
+	   green, so "not synced" never reads as a healthy zero. */
+	.dm-party__char-stat--muted {
+		background: rgb(108 117 125 / 12%);
+		color: #6c757d;
+		font-style: italic;
+	}
+
 	/* ================================ */
 	/*  Character — expanded card       */
 	/* ================================ */
@@ -991,6 +999,11 @@
 		.dm-party__char-stat--danger {
 			background: rgb(255 107 107 / 20%);
 			color: #ff6b6b;
+		}
+
+		.dm-party__char-stat--muted {
+			background: rgb(173 181 189 / 15%);
+			color: #adb5bd;
 		}
 
 		.dm-party__dc-title {

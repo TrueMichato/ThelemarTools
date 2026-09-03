@@ -141,13 +141,29 @@ getPassiveScore(skill) = 10 + getSkillBonus(skill) + bonuses.passives[skill]
 
 ### Carry Capacity
 
+`getCarryCapacity()` and `getCarryState()` both delegate to the shared
+[carry contract](../hub/carry-contract.md); the tracker holds no capacity formula of its own.
+
 | Rule Set | Formula |
 |----------|---------|
 | Standard 5e | `STR × 15` |
 | TGTT (Might-based) | `getPassiveScore("might") × 10` |
 | Override | Direct value from `overrides.carryCapacity` |
 
+Both are scaled by creature `size` (Tiny ×0.5 … Gargantuan ×8) and by ×2 for Powerful Build.
+Size was previously not tracked here at all, so a Large character's capacity was silently
+computed as a Medium one's and disagreed with their own Character Sheet; `size` (serialized as
+`sz`, default `"medium"`) now backs a select in the expanded form.
+
 `getPassiveScore("might")` = `10 + getSkillBonus("might")` plus any passive bonuses (the raw skill bonus *without* exhaustion penalty).
+
+`getCarryState()` returns one of three states, which the row renders distinctly:
+
+| State | Meaning |
+|---|---|
+| `known` | trustworthy load and capacity |
+| `indeterminate` | trustworthy, but some item weights are missing, so the load is a lower bound (`≥`) |
+| `unavailable` | a Hub-linked character whose sheet has not published a current carry summary — rendered "not synced", never `0` and never "Normal" |
 
 ### Jump Distances
 

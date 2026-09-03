@@ -16,6 +16,8 @@ export class PartyTrackerCharacterSerializer {
 			ct: char.combatTraditions,
 			exh: char.exhaustionLevel,
 			cw: char.currentWeight,
+			csum: char.carrySummary,
+			sz: char.size,
 			pb: char.powerfulBuild,
 			ov: char.overrides,
 			bon: char.bonuses,
@@ -64,6 +66,13 @@ export class PartyTrackerCharacterSerializer {
 			combatTraditions: raw.ct || [],
 			exhaustionLevel: raw.exh ?? 0,
 			currentWeight: raw.cw ?? 0,
+			// Creature size was previously absent entirely, so a Large character's carrying
+			// capacity was silently computed as a Medium one's. Defaults to "medium" so every
+			// existing save deserializes to exactly the behaviour it had.
+			size: raw.sz ?? "medium",
+			// Authoritative carry from a Hub-linked sheet. Absent for manually-entered
+			// characters, whose carry is derived locally instead.
+			carrySummary: raw.csum ?? null,
 			powerfulBuild: !!raw.pb,
 			journeyActions: raw.ja ?? 1,
 			overrides: {
@@ -219,6 +228,7 @@ export class PartyTrackerCharacterSerializer {
 		return {
 			et: settings.enableTgtt,
 			tcw: settings.thelemar_carryWeight,
+			tet: settings.thelemar_encumbranceTiers,
 			tj: settings.thelemar_jumping,
 			tlb: settings.thelemar_linguisticsBonus,
 			tcr: settings.thelemar_criticalRolls,
@@ -230,6 +240,7 @@ export class PartyTrackerCharacterSerializer {
 		return {
 			enableTgtt: raw?.et ?? false,
 			thelemar_carryWeight: raw?.tcw ?? true,
+			thelemar_encumbranceTiers: raw?.tet ?? true,
 			thelemar_jumping: raw?.tj ?? true,
 			thelemar_linguisticsBonus: raw?.tlb ?? true,
 			thelemar_criticalRolls: raw?.tcr ?? true,

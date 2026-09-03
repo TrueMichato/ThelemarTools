@@ -6,6 +6,7 @@ const _RULE_LABELS = {
 	enableTgtt: "Thelemar rules",
 	exhaustionRules: "Exhaustion rules",
 	thelemar_carryWeight: "Thelemar carry weight",
+	thelemar_encumbranceTiers: "Thelemar encumbrance tiers",
 	thelemar_jumping: "Thelemar jumping",
 	thelemar_linguisticsBonus: "Thelemar linguistics bonus",
 	thelemar_criticalRolls: "Thelemar critical rolls",

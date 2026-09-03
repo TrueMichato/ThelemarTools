@@ -62,6 +62,7 @@ All Thelemar variant rules are implemented as toggleable settings:
 |------|-------------|-------------|
 | **Exhaustion** | `exhaustionRules: "thelemar"` | -1 to all d20 rolls and DCs per level, max 10 before death (vs 6 in standard, -2/-4/etc in 2024). **Speed is unaffected** in Thelemar rules. See [Exhaustion contract](#exhaustion-contract-phase-1-doctrine) below. |
 | **Carry Weight** | `thelemar_carryWeight` | passive Might × 10 instead of STR × 15 |
+| **Encumbrance Tiers** | `thelemar_encumbranceTiers` | **House extension.** TGTT publishes a carrying-capacity maximum but no encumbered / heavily-encumbered tiers, so these mirror the RAW proportions (⅓ and ⅔ of capacity). Off leaves only TGTT's stated consequence: exceeding your maximum. See [carry contract](../hub/carry-contract.md) |
 | **Linguistics Bonus** | `thelemar_linguisticsBonus` | +1 Linguistics per known language except Common |
 | **Jumping** | `thelemar_jumping` | Modified high/long jump formulas |
 | **Critical Rolls** | `thelemar_criticalRolls` | Nat 1 auto-fails, nat 20 auto-succeeds (all checks) |
@@ -79,6 +80,7 @@ settings: {
     prioritySources: ["TGTT"],
     enableTgtt: true,
     thelemar_carryWeight: true,
+    thelemar_encumbranceTiers: true,
     thelemar_jumping: true,
     thelemar_linguisticsBonus: true,
     thelemar_criticalRolls: true,

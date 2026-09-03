@@ -118,6 +118,7 @@ Settings are accessed via the gear icon button, which opens a positioned dropdow
 |---------|-----|---------|-------------|
 | Enable Thelemar (TGTT) | `enableTgtt` | `false` | Master toggle for all TGTT homebrew rules |
 | Carry Weight | `thelemar_carryWeight` | `true` | Passive-Might-based carry capacity (passive Might × 10) instead of STR×15 |
+| Encumbrance Tiers | `thelemar_encumbranceTiers` | `true` | House extension: encumbered at ⅓ and heavily encumbered at ⅔ of capacity. TGTT itself defines no tiers |
 | Jump Distances | `thelemar_jumping` | `true` | Athletics-based jump instead of STR-based |
 | Linguistics Bonus | `thelemar_linguisticsBonus` | `true` | +1 per non-Common language to Linguistics |
 | Critical Rolls | `thelemar_criticalRolls` | `true` | Nat 1: −5 effective, Nat 20: +5 effective |
@@ -132,6 +133,7 @@ TGTT sub-toggles are only visible when the master `enableTgtt` toggle is on. Cha
 serializeSettings(settings) → {
   et: enableTgtt,
   tcw: thelemar_carryWeight,
+  tet: thelemar_encumbranceTiers,
   tj: thelemar_jumping,
   tlb: thelemar_linguisticsBonus,
   tcr: thelemar_criticalRolls,
