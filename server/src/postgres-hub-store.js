@@ -27,7 +27,11 @@ import {
 } from "./hub-actions.js";
 import {validateCloudCharacterData, validateCloudValue} from "./cloud-data-validation.js";
 import {HUB_REQUIRED_MIGRATION_VERSION} from "./migration-version.js";
-import {createCharacterDisplayNameSnapshot, enrichEventPayload} from "./hub-event-snapshots.js";
+import {
+	createCharacterDisplayNameSnapshot,
+	enrichEventPayload,
+	redactTransferEventForViewer,
+} from "./hub-event-snapshots.js";
 import {createSemanticOperationRegistry} from "./semantic-operation-registry.js";
 import {canViewEvent} from "./projections.js";
 
@@ -2103,9 +2107,15 @@ export class PostgresHubStore {
 			role: membership.role,
 		}));
 		// Actor redaction needs the target characters' sharing policies, fetched once.
-		const characterIds = [...new Set(visibleRows
-			.filter(row => row.visibility === "all_members" && row.aggregate_type === "character")
-			.map(row => row.aggregate_id))];
+		const characterIds = [...new Set(visibleRows.flatMap(row => {
+			const ids = [];
+			if (row.visibility === "all_members" && row.aggregate_type === "character") ids.push(row.aggregate_id);
+			if (row.aggregate_type === "transfer") {
+				if (row.payload?.sourceKind === "character") ids.push(row.payload.sourceId);
+				if (row.payload?.targetKind === "character") ids.push(row.payload.targetId);
+			}
+			return ids.filter(Boolean);
+		}))];
 		const characters = characterIds.length
 			? (await this._pool.query(`SELECT id, owner_account_id, projection_policy FROM hub.characters WHERE id = ANY($1::uuid[])`, [characterIds])).rows
 			: [];
@@ -2129,7 +2139,12 @@ export class PostgresHubStore {
 			visibleAccountIds: row.visible_account_ids,
 			payload: row.payload,
 			createdAt: row.created_at,
-		}));
+		})).map(event => redactTransferEventForViewer({
+			event,
+			accountId,
+			role: membership.role,
+			getCharacterOwnerId: characterId => charactersById.get(characterId)?.ownerAccountId,
+		})).filter(Boolean);
 		return {
 			events,
 			replay: {
@@ -2154,6 +2169,22 @@ export class PostgresHubStore {
 
 	/** Realtime fanout shares the HTTP read's redaction rather than duplicating it. */
 	async redactEventForViewer ({event, accountId, role}) {
+		if (event.aggregateType === "transfer" && `${event.type || ""}`.startsWith("transfer.")) {
+			const characterIds = [
+				event.payload?.sourceKind === "character" ? event.payload.sourceId : null,
+				event.payload?.targetKind === "character" ? event.payload.targetId : null,
+			].filter(Boolean);
+			const characters = characterIds.length
+				? (await this._pool.query(`SELECT id, owner_account_id FROM hub.characters WHERE id = ANY($1::uuid[])`, [characterIds])).rows
+				: [];
+			const ownerById = new Map(characters.map(character => [character.id, character.owner_account_id]));
+			return redactTransferEventForViewer({
+				event,
+				accountId,
+				role,
+				getCharacterOwnerId: characterId => ownerById.get(characterId),
+			});
+		}
 		if (event.visibility !== "all_members" || event.aggregateType !== "character") return event;
 		const result = await this._pool.query(`SELECT owner_account_id, projection_policy FROM hub.characters WHERE id = $1`, [event.aggregateId]);
 		const character = result.rowCount
@@ -3146,11 +3177,14 @@ export class PostgresHubStore {
 	async _pReadPartyContainer ({client, party}) {
 		const entries = await client.query(`SELECT * FROM hub.inventory_entries WHERE party_inventory_id = $1 ORDER BY created_at, id`, [party.id]);
 		return {
-			inventory: entries.rows.map(row => ({
-				id: row.id,
-				item: row.metadata?.item || {name: row.item_uid.split("|")[0], source: row.item_uid.split("|")[1]},
-				quantity: Number(row.quantity),
-			})),
+			inventory: entries.rows.map(row => {
+				const legacyItem = row.metadata?.item || {name: row.item_uid.split("|")[0], source: row.item_uid.split("|")[1]};
+				return {
+					...(row.metadata?.entry || {item: legacyItem}),
+					id: row.id,
+					quantity: Number(row.quantity),
+				};
+			}),
 			currency: normalizeCurrency(party.currency),
 		};
 	}
@@ -3163,7 +3197,14 @@ export class PostgresHubStore {
 				INSERT INTO hub.inventory_entries (
 					id, campaign_id, party_inventory_id, item_uid, quantity, metadata
 				) VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-			`, [entry.id, party.campaign_id, party.id, `${entry.item?.name || "item"}|${entry.item?.source || ""}`, entry.quantity, JSON.stringify({item: entry.item})]);
+			`, [
+				entry.id,
+				party.campaign_id,
+				party.id,
+				`${entry.item?.name || "item"}|${entry.item?.source || ""}`,
+				entry.quantity,
+				JSON.stringify({entry: Object.fromEntries(Object.entries(entry).filter(([key]) => !["id", "quantity"].includes(key)))}),
+			]);
 		}
 	}
 
@@ -3214,7 +3255,18 @@ export class PostgresHubStore {
 			kind,
 			id,
 			container: await this._pReadPartyContainer({client, party}),
-			pWrite: container => this._pWritePartyContainer({client, party, container}),
+			pWrite: async container => {
+				await this._pWritePartyContainer({client, party, container});
+				await this._pAppendEvent({
+					client,
+					campaignId,
+					actorAccountId: null,
+					type: "party_inventory.invalidated",
+					aggregateType: "campaign",
+					aggregateId: campaignId,
+					payload: {},
+				});
+			},
 		};
 	}
 
@@ -3264,6 +3316,8 @@ export class PostgresHubStore {
 				type: "transfer.cancelled",
 				aggregateType: "transfer",
 				aggregateId: transfer.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: [...new Set([transfer.actorAccountId, actorAccountId].filter(Boolean))],
 				payload: {
 					reason: "target_lifecycle_change",
 					sourceKind: transfer.sourceKind,
@@ -3278,6 +3332,9 @@ export class PostgresHubStore {
 	async _pCancelTransferForLifecycle ({client, row, actorAccountId, reason}) {
 		const transfer = this._getTransfer(row);
 		const source = await this._pGetTransferContainer({client, campaignId: transfer.campaignId, kind: transfer.sourceKind, id: transfer.sourceId, actorAccountId});
+		const targetOwner = transfer.targetKind === "character"
+			? (await client.query(`SELECT owner_account_id FROM hub.characters WHERE id = $1`, [transfer.targetId])).rows[0]?.owner_account_id
+			: null;
 		await source.pWrite(addTransferPayload({container: source.container, escrow: transfer.payload.escrow, isRestore: true}));
 		await client.query(`UPDATE hub.transfers SET status = 'cancelled', updated_at = now() WHERE id = $1`, [transfer.id]);
 		await this._pAppendEvent({
@@ -3287,6 +3344,8 @@ export class PostgresHubStore {
 			type: "transfer.cancelled",
 			aggregateType: "transfer",
 			aggregateId: transfer.id,
+			visibility: "explicit_accounts",
+			visibleAccountIds: [...new Set([transfer.actorAccountId, targetOwner].filter(Boolean))],
 			payload: {
 				reason,
 				sourceKind: transfer.sourceKind,
@@ -3639,7 +3698,17 @@ export class PostgresHubStore {
 				JSON.stringify({escrow: reserved.escrow}),
 			]);
 			const transfer = this._getTransfer(inserted.rows[0]);
-			await this._pAppendEvent({client, campaignId, actorAccountId: accountId, type: "transfer.reserved", aggregateType: "transfer", aggregateId: transferId, payload: {sourceKind, sourceId, targetKind, targetId}});
+			await this._pAppendEvent({
+				client,
+				campaignId,
+				actorAccountId: accountId,
+				type: "transfer.reserved",
+				aggregateType: "transfer",
+				aggregateId: transferId,
+				visibility: "explicit_accounts",
+				visibleAccountIds: [...new Set([accountId, target.ownerAccountId].filter(Boolean))],
+				payload: {sourceKind, sourceId, targetKind, targetId},
+			});
 			const response = {transfer};
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "transfer.propose", response});
 			await client.query("COMMIT");
@@ -3670,9 +3739,10 @@ export class PostgresHubStore {
 			if (!transferResult.rowCount) throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
 			const transfer = this._getTransfer(transferResult.rows[0]);
 			const target = await this._pGetTransferContainer({client, campaignId, kind: transfer.targetKind, id: transfer.targetId, actorAccountId: accountId});
-			const canResolve = transfer.targetKind === "character"
+			const isActorCancelling = decision === "reject" && transfer.actorAccountId === accountId;
+			const canResolve = isActorCancelling || (transfer.targetKind === "character"
 				? target.ownerAccountId === accountId || ["dm", "co_dm"].includes(membership.role)
-				: ["dm", "co_dm"].includes(membership.role);
+				: ["dm", "co_dm"].includes(membership.role));
 			if (!canResolve) throw new HubStoreError("FORBIDDEN", `Cannot resolve this transfer.`, {status: 403});
 			const destination = decision === "accept"
 				? target
@@ -3689,6 +3759,8 @@ export class PostgresHubStore {
 				type: `transfer.${status}`,
 				aggregateType: "transfer",
 				aggregateId: transferId,
+				visibility: "explicit_accounts",
+				visibleAccountIds: [...new Set([transfer.actorAccountId, target.ownerAccountId].filter(Boolean))],
 				payload: {
 					sourceKind: transfer.sourceKind,
 					sourceId: transfer.sourceId,

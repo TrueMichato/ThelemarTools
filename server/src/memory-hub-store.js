@@ -26,7 +26,11 @@ import {
 	removeTransferPayload,
 } from "./hub-actions.js";
 import {validateCloudCharacterData, validateCloudValue} from "./cloud-data-validation.js";
-import {createCharacterDisplayNameSnapshot, enrichEventPayload} from "./hub-event-snapshots.js";
+import {
+	createCharacterDisplayNameSnapshot,
+	enrichEventPayload,
+	redactTransferEventForViewer,
+} from "./hub-event-snapshots.js";
 import {createSemanticOperationRegistry} from "./semantic-operation-registry.js";
 
 function copy (value) {
@@ -541,6 +545,9 @@ export class MemoryHubStore {
 	_cancelTransferForLifecycle ({transfer, actorAccountId, reason}) {
 		if (transfer.status !== "reserved") return;
 		const source = this._getTransferContainer({kind: transfer.sourceKind, id: transfer.sourceId, campaignId: transfer.campaignId});
+		const targetOwnerAccountId = transfer.targetKind === "character"
+			? this._characters.get(transfer.targetId)?.ownerAccountId
+			: null;
 		this._setTransferContainer({
 			holder: source,
 			container: addTransferPayload({container: source.container, escrow: transfer.payload.escrow, isRestore: true}),
@@ -554,6 +561,8 @@ export class MemoryHubStore {
 			type: "transfer.cancelled",
 			aggregateType: "transfer",
 			aggregateId: transfer.id,
+			visibility: "explicit_accounts",
+			visibleAccountIds: [...new Set([transfer.actorAccountId, targetOwnerAccountId].filter(Boolean))],
 			payload: {
 				reason,
 				sourceKind: transfer.sourceKind,
@@ -1364,6 +1373,13 @@ export class MemoryHubStore {
 	 * HTTP read hides.
 	 */
 	redactEventForViewer ({event, accountId, role}) {
+		const transferEvent = redactTransferEventForViewer({
+			event,
+			accountId,
+			role,
+			getCharacterOwnerId: characterId => this._characters.get(characterId)?.ownerAccountId,
+		});
+		if (transferEvent !== event) return transferEvent;
 		if (event.visibility !== "all_members" || event.aggregateType !== "character") return event;
 		const character = this._characters.get(event.aggregateId) || null;
 		// A hidden character contributes no shared rows at all, so no adjacent membership
@@ -2007,6 +2023,14 @@ export class MemoryHubStore {
 			holder._party.inventory = container.inventory;
 			holder._party.currency = container.currency;
 			holder._party.revision++;
+			this._appendEvent({
+				campaignId: holder._party.campaignId,
+				actorAccountId: null,
+				type: "party_inventory.invalidated",
+				aggregateType: "campaign",
+				aggregateId: holder._party.campaignId,
+				payload: {},
+			});
 		}
 	}
 
@@ -2034,7 +2058,16 @@ export class MemoryHubStore {
 			createdAt: this._fnNow().toISOString(),
 		};
 		this._transfers.set(transfer.id, transfer);
-		this._appendEvent({campaignId, actorAccountId: accountId, type: "transfer.reserved", aggregateType: "transfer", aggregateId: transfer.id, payload: {sourceKind, sourceId, targetKind, targetId}});
+		this._appendEvent({
+			campaignId,
+			actorAccountId: accountId,
+			type: "transfer.reserved",
+			aggregateType: "transfer",
+			aggregateId: transfer.id,
+			visibility: "explicit_accounts",
+			visibleAccountIds: [...new Set([accountId, target._character?.ownerAccountId].filter(Boolean))],
+			payload: {sourceKind, sourceId, targetKind, targetId},
+		});
 		return this._setReceipt({accountId, idempotencyKey, response: {transfer}});
 	}
 
@@ -2045,9 +2078,10 @@ export class MemoryHubStore {
 		const transfer = this._transfers.get(transferId);
 		if (!transfer || transfer.campaignId !== campaignId || transfer.status !== "reserved") throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
 		const target = this._getTransferContainer({kind: transfer.targetKind, id: transfer.targetId, campaignId});
-		const canResolve = transfer.targetKind === "character"
+		const isActorCancelling = decision === "reject" && transfer.actorAccountId === accountId;
+		const canResolve = isActorCancelling || (transfer.targetKind === "character"
 			? target._character.ownerAccountId === accountId || ["dm", "co_dm"].includes(membership.role)
-			: ["dm", "co_dm"].includes(membership.role);
+			: ["dm", "co_dm"].includes(membership.role));
 		if (!canResolve) throw new HubStoreError("FORBIDDEN", `Cannot resolve this transfer.`, {status: 403});
 		const destination = decision === "accept"
 			? target
@@ -2066,6 +2100,8 @@ export class MemoryHubStore {
 			type: `transfer.${transfer.status}`,
 			aggregateType: "transfer",
 			aggregateId: transfer.id,
+			visibility: "explicit_accounts",
+			visibleAccountIds: [...new Set([transfer.actorAccountId, target._character?.ownerAccountId].filter(Boolean))],
 			payload: {
 				sourceKind: transfer.sourceKind,
 				sourceId: transfer.sourceId,
@@ -2261,6 +2297,8 @@ export class MemoryHubStore {
 				type: "transfer.cancelled",
 				aggregateType: "transfer",
 				aggregateId: transfer.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: [...new Set([transfer.actorAccountId, character.ownerAccountId].filter(Boolean))],
 				payload: {
 					reason: "target_lifecycle_change",
 					sourceKind: transfer.sourceKind,

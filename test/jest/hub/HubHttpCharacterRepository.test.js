@@ -1,3 +1,4 @@
+import {jest} from "@jest/globals";
 import {HubHttpCharacterRepository} from "../../../js/hub/hub-http-character-repository.js";
 
 describe("HTTP character repository", () => {
@@ -194,6 +195,152 @@ describe("HTTP character repository", () => {
 		expect(repository._conflicts.size).toBe(0);
 		expect(repository._failedWrites.size).toBe(0);
 		expect(repository._recoveryVersions.size).toBe(0);
+	});
+
+	it("rebases authoritative inventory escrow into the live sheet without losing disjoint edits", async () => {
+		let revision = 1;
+		const documents = {
+			1: {id: "server-1", campaignId: "campaign-1", revision: 1, data: {notes: "before", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]}},
+			2: {id: "server-1", campaignId: "campaign-1", revision: 2, data: {notes: "before", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 7}]}},
+		};
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => structuredClone(documents[revision]),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "server-1"});
+		revision = 2;
+		let adopted;
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({notes: "locally edited", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]}),
+			fnAdoptLive: data => adopted = data,
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+
+		expect(adopted).toEqual({notes: "locally edited", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 7}]});
+		expect(repository._accepted.get("server-1")).toEqual(documents[2]);
+	});
+
+	it("rebases live-conflict recovery before it can restore pre-transfer inventory", async () => {
+		let revision = 1;
+		const documents = {
+			1: {id: "server-1", campaignId: "campaign-1", revision: 1, data: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]}},
+			2: {id: "server-1", campaignId: "campaign-1", revision: 2, data: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 7}]}},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(documents[revision]),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		repository.registerLiveConflict({
+			characterId: "server-1",
+			recovery: {
+				base: {notes: "submitted", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]},
+				local: {notes: "live edit", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]},
+				server: documents[1].data,
+				conflicts: [{localPath: "/notes", remotePath: "/notes"}],
+			},
+		});
+		revision = 2;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({notes: "live edit", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]}),
+			fnAdoptLive: jest.fn(),
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+
+		const recovery = repository.getLiveConflictRecovery("server-1");
+		for (const key of ["base", "local", "server"]) expect(recovery[key].inventory[0].quantity).toBe(7);
+		expect(recovery.serverDocument).toEqual(documents[2]);
+		expect(recovery.coverage).toMatchObject({
+			base: {revision: 2},
+			local: {revision: 2},
+			server: {revision: 2},
+		});
+	});
+
+	it("fences an authoritative fetch before it can adopt a different character generation", async () => {
+		let getCount = 0;
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => (++getCount === 1
+				? {id: "server-1", campaignId: "campaign-1", revision: 1, data: {inventory: []}}
+				: {id: "server-1", campaignId: "campaign-1", revision: 2, data: {inventory: [{id: "new", item: {name: "Map"}, quantity: 1}]}}),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "server-1"});
+		const adopt = jest.fn();
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({inventory: []}),
+			fnAdoptLive: adopt,
+			fnIsCurrent: () => false,
+		})).resolves.toEqual({status: "fenced"});
+		expect(adopt).not.toHaveBeenCalled();
+		expect(getCount).toBe(1);
+	});
+
+	it("keeps authoritative escrow in every recovery candidate while preserving the original local export", async () => {
+		let revision = 1;
+		const documents = {
+			1: {id: "server-1", campaignId: "campaign-1", revision: 1, data: {inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]}},
+			2: {id: "server-1", campaignId: "campaign-1", revision: 2, data: {inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 7}]}},
+			3: {id: "server-1", campaignId: "campaign-1", revision: 3, data: {inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 5}]}},
+		};
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => structuredClone(documents[revision]),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "server-1"});
+		revision = 2;
+		const local = {inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 9}]};
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => local,
+			fnAdoptLive: () => { throw new Error("must not adopt"); },
+		})).resolves.toMatchObject({status: "conflict"});
+		let recovery = repository.getConflictRecovery("server-1");
+		expect(recovery).toMatchObject({
+			local: documents[2].data,
+			server: documents[2].data,
+			serverDocument: documents[2],
+			authoritativeDiscarded: {live: local},
+		});
+		expect(repository._accepted.get("server-1")).toEqual(documents[1]);
+
+		revision = 3;
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => local,
+			fnAdoptLive: () => { throw new Error("must not adopt"); },
+		})).resolves.toMatchObject({status: "conflict"});
+		recovery = repository.getConflictRecovery("server-1");
+		for (const key of ["base", "local", "server"]) expect(recovery[key].inventory[0].quantity).toBe(5);
+		expect(recovery.authoritativeDiscarded.live.inventory[0].quantity).toBe(9);
+		expect(recovery.serverDocument).toEqual(documents[3]);
+	});
+
+	it("suppresses duplicate authoritative reconciliation once the revision is accepted", async () => {
+		const document = {id: "server-1", campaignId: "campaign-1", revision: 2, data: {inventory: []}};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {pGetSession: async () => ({signedIn: true}), pGetCharacter: async () => structuredClone(document)},
+		});
+		await repository.pGet({characterId: "server-1"});
+		const adopt = jest.fn();
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({inventory: []}),
+			fnAdoptLive: adopt,
+		})).resolves.toEqual({status: "unchanged"});
+		expect(adopt).not.toHaveBeenCalled();
 	});
 
 	it("patches later queued snapshots after the first create returns a canonical id", async () => {

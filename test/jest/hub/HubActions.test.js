@@ -6,6 +6,10 @@ import {
 	normalizeSemanticOperation,
 	removeTransferPayload,
 } from "../../../server/src/hub-actions.js";
+import {
+	getInventoryTransferEligibility,
+	getInventoryWeightSummary,
+} from "../../../js/hub/hub-inventory-contract.js";
 
 describe("structured effects", () => {
 	it("applies damage through temporary HP and clamps healing", () => {
@@ -195,6 +199,25 @@ describe("inventory escrow", () => {
 		expect(escrow.items[0].quantity).toBe(3);
 	});
 
+	it("refuses partial stacks whose structural links cannot be partitioned", () => {
+		const linked = normalizeCharacterInventory({
+			inventory: [{
+				id: "quivers",
+				item: {name: "Quiver", containedItems: ["private-arrow-id"]},
+				quantity: 2,
+			}],
+			currency: {},
+		});
+
+		expect(() => removeTransferPayload({
+			container: linked,
+			payload: {items: [{entryId: "quivers", quantity: 1}]},
+		})).toThrow(expect.objectContaining({
+			code: "TRANSFER_ITEM_LINKED",
+			details: {entryId: "quivers", blockers: ["contains items"]},
+		}));
+	});
+
 	it("merges compatible stacks at the destination", () => {
 		const {escrow} = removeTransferPayload({
 			container: source,
@@ -228,6 +251,29 @@ describe("inventory escrow", () => {
 		expect(committed.inventory[0].id).not.toBe("custom");
 	});
 
+	it("restores multiple whole stacks to their exact original order", () => {
+		const original = normalizeCharacterInventory({
+			inventory: [
+				{id: "first", item: {name: "First"}, quantity: 1},
+				{id: "second", item: {name: "Second"}, quantity: 1},
+				{id: "third", item: {name: "Third"}, quantity: 1},
+			],
+		});
+		const {container, escrow} = removeTransferPayload({
+			container: original,
+			payload: {
+				items: [
+					{entryId: "second", quantity: 1},
+					{entryId: "first", quantity: 1},
+				],
+			},
+		});
+
+		const restored = addTransferPayload({container, escrow, isRestore: true});
+
+		expect(restored.inventory.map(entry => entry.id)).toEqual(["first", "second", "third"]);
+	});
+
 	it("merges only metadata-compatible stacks", () => {
 		const escrow = {items: [{id: "incoming", item: {name: "Map", source: "HB"}, quantity: 1, note: "Secret route"}], currency: {}};
 		const destination = addTransferPayload({
@@ -243,6 +289,8 @@ describe("inventory escrow", () => {
 		["item effect", data => { data.namedModifiers = [{sourceFeatureId: "item:item"}]; }],
 		["Ioun link", data => { data.inventory[1].item.iounSet = ["item"]; }],
 		["active state", data => { data.activeStates = [{customEffects: [{inventoryItemId: "item"}]}]; }],
+		["granted spell", data => { data.itemGrantedSpells = [{itemId: "item", name: "Light"}]; }],
+		["Ioun bond", data => { data.iounBonds = {item: 3}; }],
 	])("rejects whole-item transfer while an inventory invariant is active: %s", (_label, fnMutate) => {
 		const data = {
 			inventory: [
@@ -254,6 +302,21 @@ describe("inventory escrow", () => {
 		fnMutate(data);
 		expect(() => removeTransferPayload({container: data, payload: {items: [{entryId: "item", quantity: 1}]}}))
 			.toThrow(expect.objectContaining({code: "TRANSFER_ITEM_LINKED"}));
+	});
+
+	it("does not infer an item link from real or legacy concentration records", () => {
+		const {container, escrow} = removeTransferPayload({
+			container: {
+				inventory: [{id: "item", item: {name: "Focus"}, quantity: 1}],
+				currency: {},
+				concentrations: [{id: "spell:Bless", kind: "spell", name: "Bless", source: "PHB"}],
+				concentrating: {spellName: "Bless", spellLevel: 1},
+			},
+			payload: {items: [{entryId: "item", quantity: 1}]},
+		});
+
+		expect(container.inventory).toEqual([]);
+		expect(escrow.items).toEqual([expect.objectContaining({id: "item", quantity: 1})]);
 	});
 
 	it("rejects insufficient item or currency balances", () => {
@@ -273,5 +336,43 @@ describe("inventory escrow", () => {
 			.toThrow(expect.objectContaining({code: "NUMERIC_INVALID"}));
 		expect(() => removeTransferPayload({container: {inventory: [], currency: {gp: value}}, payload: {currency: {gp: 1}}}))
 			.toThrow(expect.objectContaining({code: "NUMERIC_INVALID"}));
+	});
+
+	it("allows existing fractional stacks without allowing fractional transfer requests", () => {
+		expect(normalizeCharacterInventory({inventory: [{item: {name: "Flour"}, quantity: 0.6667}]}).inventory[0].quantity)
+			.toBe(0.6667);
+		expect(() => removeTransferPayload({container: source, payload: {items: [{entryId: "arrows", quantity: 1.5}]}}))
+			.toThrow(expect.objectContaining({code: "NUMERIC_INVALID"}));
+	});
+
+	it("rejects quantities outside the safe numeric range", () => {
+		const quantity = Number.MAX_SAFE_INTEGER + 1;
+		expect(() => normalizeCharacterInventory({inventory: [{item: {name: "Arrow"}, quantity}]}))
+			.toThrow(expect.objectContaining({code: "NUMERIC_INVALID"}));
+		expect(() => removeTransferPayload({container: source, payload: {items: [{entryId: "arrows", quantity}]}}))
+			.toThrow(expect.objectContaining({code: "NUMERIC_INVALID"}));
+	});
+
+	it("shares server eligibility reasons without exposing inventory identities", () => {
+		const container = {
+			inventory: [{id: "secret-entry-id", item: {name: "Arrow"}, quantity: 3, equipped: true}],
+			currency: {},
+		};
+		expect(getInventoryTransferEligibility({container, entry: container.inventory[0], quantity: 2})).toEqual({
+			isEligible: true,
+			blockers: [],
+			maxQuantity: 3,
+		});
+		const whole = getInventoryTransferEligibility({container, entry: container.inventory[0], quantity: 3});
+		expect(whole).toEqual({isEligible: false, blockers: ["equipped"], maxQuantity: 2});
+		expect(JSON.stringify(whole)).not.toContain("secret-entry-id");
+	});
+
+	it("reports exact known inventory weight and unknown stacks separately", () => {
+		expect(getInventoryWeightSummary([
+			{item: {weight: 0.05}, quantity: 20},
+			{item: {weight: 2}, quantity: 3},
+			{item: {}, quantity: 1},
+		])).toEqual({knownWeight: 7, unknownStackCount: 1});
 	});
 });

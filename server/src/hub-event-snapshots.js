@@ -38,6 +38,12 @@ const UNENRICHED_EVENT_TYPES = new Set([
 	"character.operation.rejected",
 	"character.operation.cancelled",
 	"character.operation.expired",
+	"party_inventory.invalidated",
+	"transfer.reserved",
+	"transfer.committed",
+	"transfer.rejected",
+	"transfer.cancelled",
+	"transfer.expired",
 ]);
 
 /**
@@ -103,4 +109,44 @@ export function enrichEventPayload ({payload = {}, aggregateType, aggregateId, g
 		if (snapshots.length) enriched.characterNameSnapshots = snapshots;
 	}
 	return enriched;
+}
+
+export function redactTransferEventForViewer ({event, accountId, role, getCharacterOwnerId}) {
+	if (
+		!event
+		|| event.aggregateType !== "transfer"
+		|| !`${event.type || ""}`.startsWith("transfer.")
+		|| ["dm", "co_dm"].includes(role)
+	) return event;
+
+	const payload = {...(event.payload || {})};
+	const ownsSource = payload.sourceKind === "character"
+		&& getCharacterOwnerId?.(payload.sourceId) === accountId;
+	const ownsTarget = payload.targetKind === "character"
+		&& getCharacterOwnerId?.(payload.targetId) === accountId;
+	const isExplicitRecipient = event.visibility === "explicit_accounts"
+		&& event.visibleAccountIds?.includes(accountId);
+	if (!ownsSource && !ownsTarget && !isExplicitRecipient) return null;
+
+	if (!ownsSource) {
+		delete payload.sourceId;
+		delete payload.sourceCharacterNameSnapshot;
+	}
+	if (!ownsTarget) {
+		delete payload.targetId;
+		delete payload.targetCharacterNameSnapshot;
+	}
+	if (payload.sourceKind === "party_inventory") delete payload.sourceId;
+	if (payload.targetKind === "party_inventory") delete payload.targetId;
+
+	const out = {
+		...event,
+		payload,
+		visibleAccountIds: null,
+	};
+	if (event.actorAccountId !== accountId) {
+		out.actorAccountId = null;
+		delete out.actorDisplayName;
+	}
+	return out;
 }

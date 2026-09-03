@@ -40,6 +40,7 @@ COPY --chown=hub:hub package.json ./
 COPY --chown=hub:hub server ./server
 COPY --chown=hub:hub js/hub/hub-json-patch.js ./js/hub/hub-json-patch.js
 COPY --chown=hub:hub js/hub/hub-effect-presentation.js ./js/hub/hub-effect-presentation.js
+COPY --chown=hub:hub js/hub/hub-inventory-contract.js ./js/hub/hub-inventory-contract.js
 COPY --chown=hub:hub js/hub/hub-semantic-hp.js ./js/hub/hub-semantic-hp.js
 COPY --chown=hub:hub js/hub/hub-semantic-operations.js ./js/hub/hub-semantic-operations.js
 COPY --chown=hub:hub js/hub/hub-store-error.js ./js/hub/hub-store-error.js

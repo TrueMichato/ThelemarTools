@@ -84,6 +84,106 @@ describe("campaign lifecycle and export", () => {
 		})).rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_NOT_FOUND"}));
 	});
 
+	it("keeps transfer events private, lets the actor cancel, and broadcasts only stash invalidation", async () => {
+		const sourceOwner = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "transfer-source", displayName: "Source owner"});
+		const targetOwner = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "transfer-target", displayName: "Target owner"});
+		const observer = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "transfer-observer", displayName: "Observer"});
+		for (const [account, key] of [[sourceOwner, "source"], [targetOwner, "target"], [observer, "observer"]]) {
+			const tokenHash = `transfer-${key}`;
+			await store.pCreateInvite({
+				accountId: owner,
+				campaignId: campaign.id,
+				role: "player",
+				tokenHash,
+				expiresAt: new Date(Date.now() + 10_000),
+				maxUses: 1,
+				idempotencyKey: `transfer-${key}-invite`,
+			});
+			await store.pRedeemInvite({accountId: account.id, tokenHash, idempotencyKey: `transfer-${key}-redeem`});
+		}
+		const source = (await store.pCreateCharacter({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			data: {name: "Private source", inventory: [], currency: {gp: 5}},
+			schemaVersion: 1,
+			clientImportId: "private-source",
+			idempotencyKey: "private-source",
+		})).character;
+		const target = (await store.pCreateCharacter({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			data: {name: "Target", inventory: [], currency: {}},
+			schemaVersion: 1,
+			clientImportId: "private-target",
+			idempotencyKey: "private-target",
+		})).character;
+		const transfer = (await store.pProposeTransfer({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: source.id,
+			targetKind: "character",
+			targetId: target.id,
+			payload: {currency: {gp: 2}},
+			idempotencyKey: "private-transfer",
+		})).transfer;
+
+		const sourceEvent = (await store.pListVisibleEvents({accountId: sourceOwner.id, campaignId: campaign.id}))
+			.find(event => event.aggregateId === transfer.id);
+		expect(sourceEvent).toMatchObject({
+			visibility: "explicit_accounts",
+			visibleAccountIds: null,
+			payload: {sourceKind: "character", sourceId: source.id, targetKind: "character"},
+		});
+		expect(sourceEvent.payload).not.toHaveProperty("targetId");
+		const targetEvent = (await store.pListVisibleEvents({accountId: targetOwner.id, campaignId: campaign.id}))
+			.find(event => event.aggregateId === transfer.id);
+		expect(targetEvent).toMatchObject({
+			actorAccountId: null,
+			visibleAccountIds: null,
+			payload: {sourceKind: "character", targetKind: "character", targetId: target.id},
+		});
+		expect(targetEvent.payload).not.toHaveProperty("sourceId");
+		expect((await store.pListVisibleEvents({accountId: observer.id, campaignId: campaign.id}))
+			.some(event => event.aggregateId === transfer.id)).toBe(false);
+
+		const cancelInput = {
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			transferId: transfer.id,
+			decision: "reject",
+			idempotencyKey: "private-transfer-cancel",
+		};
+		const cancelled = await store.pResolveTransfer(cancelInput);
+		await expect(store.pResolveTransfer(cancelInput)).resolves.toEqual(cancelled);
+		expect((await store.pGetCharacter({accountId: sourceOwner.id, characterId: source.id})).character.data.currency.gp).toBe(5);
+
+		const stash = await store.pGetPartyInventory({accountId: owner, campaignId: campaign.id});
+		const deposit = (await store.pProposeTransfer({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: source.id,
+			targetKind: "party_inventory",
+			targetId: stash.id,
+			payload: {currency: {gp: 1}},
+			idempotencyKey: "private-stash-deposit",
+		})).transfer;
+		await store.pResolveTransfer({
+			accountId: owner,
+			campaignId: campaign.id,
+			transferId: deposit.id,
+			decision: "accept",
+			idempotencyKey: "private-stash-accept",
+		});
+		const observerEvents = await store.pListVisibleEvents({accountId: observer.id, campaignId: campaign.id});
+		expect(observerEvents.find(event => event.type === "party_inventory.invalidated")).toMatchObject({
+			actorAccountId: null,
+			payload: {},
+		});
+		expect(observerEvents.some(event => event.aggregateType === "transfer")).toBe(false);
+	});
+
 	it("reactivates an archived local import instead of returning an unreadable row", async () => {
 		const created = (await store.pCreateCharacter({
 			accountId: owner,

@@ -57,10 +57,11 @@
 | `character.operation.expired` | semantic operation | explicit proposer+target owner | same minimized terminal shape | Bounded 24-hour expiry transitions once |
 | `xp.granted` | character | explicit DM+owner | amount, reason, resulting XP | DM/co-DM also included by visibility policy |
 | `item.granted` | character | explicit DM+owner | granted entry | Entry content is cross-user validated |
-| `transfer.reserved` | transfer | all_members | source/target kinds and ids | Escrow content is not broadcast |
-| `transfer.committed` | transfer | all_members | source/target ids | Destination write complete |
-| `transfer.rejected` | transfer | all_members | source/target ids | Source restored |
-| `transfer.cancelled` | transfer | all_members | lifecycle reason or source/target ids | Source restored |
+| `party_inventory.invalidated` | campaign | all_members | empty | Metadata-only shared-stash refresh signal |
+| `transfer.reserved` | transfer | explicit actor+target owner | source/target kinds; each non-DM sees only owned character endpoint ids | Escrow content and counterpart identities are not broadcast |
+| `transfer.committed` | transfer | explicit actor+target owner | privacy-reduced source/target endpoints | Destination write complete; affected owners refetch authoritative state |
+| `transfer.rejected` | transfer | explicit actor+target owner | privacy-reduced source/target endpoints | Source restored; affected owners refetch authoritative state |
+| `transfer.cancelled` | transfer | explicit actor+target owner | lifecycle reason plus privacy-reduced endpoints | Source restored; affected owners refetch authoritative state |
 
 Legacy pre-v3 `action.*` records may remain as history, but migration 0005 terminalizes arbitrary pending
 structured effects and the protocol-v3 API cannot apply them.

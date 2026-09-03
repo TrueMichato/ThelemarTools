@@ -1125,32 +1125,38 @@ async function renderPendingTransfers ({campaign, campaignId, session, targetCha
 		const main = document.createElement("span");
 		main.className = "hub-data-row__main";
 		const text = document.createElement("span");
-		const actor = getMemberName(members, transfer.actorAccountId);
 		const contents = getTransferContentsDescription(transfer);
-		text.textContent = `${actor} offers ${contents}: ${getContainerName({kind: transfer.sourceKind, id: transfer.sourceId, characters: targetCharacters})} to ${getContainerName({kind: transfer.targetKind, id: transfer.targetId, characters: targetCharacters})}.`;
+		const sourceName = getContainerName({kind: transfer.sourceKind, id: transfer.sourceId, characters: targetCharacters});
+		const targetName = getContainerName({kind: transfer.targetKind, id: transfer.targetId, characters: targetCharacters});
+		text.textContent = `${sourceName} offers ${contents} to ${targetName}.`;
 		const target = transfer.targetKind === "character" ? getCharacterById(targetCharacters, transfer.targetId) : null;
-		const canResolve = isDm || getProjectionOwnerAccountId(target) === session.account.id;
+		const canAccept = isDm || getProjectionOwnerAccountId(target) === session.account.id;
+		const canReject = canAccept || transfer.actorAccountId === session.account.id;
 		const meta = document.createElement("span");
 		meta.className = "hub-data-row__meta";
-		meta.textContent = canResolve ? "Your response is needed" : "Waiting for the recipient";
+		meta.textContent = canAccept
+			? "Your response is needed"
+			: canReject
+				? "Waiting for the recipient; you can cancel this transfer"
+				: "Waiting for the recipient";
 		main.append(text, meta);
 		row.append(main);
-		if (canResolve) {
+		if (canReject) {
 			const controls = document.createElement("span");
 			controls.className = "hub-data-row__controls";
-			for (const decision of ["accept", "reject"]) {
+			for (const decision of [...(canAccept ? ["accept"] : []), "reject"]) {
 				const button = document.createElement("button");
 				button.type = "button";
 				button.className = decision === "accept" ? "hub-button hub-button--primary" : "hub-button";
-				button.textContent = decision === "accept" ? "Accept" : "Reject";
+				button.textContent = decision === "accept" ? "Accept" : canAccept ? "Reject" : "Cancel";
 				button.addEventListener("click", async () => {
-					button.disabled = true;
+					for (const control of controls.querySelectorAll("button")) control.disabled = true;
 					try {
 						await api.pResolveTransfer({campaignId, transferId: transfer.id, decision, idempotencyKey: crypto.randomUUID()});
 						await pRefreshTransferState();
 					} catch (error) {
 						renderError(error);
-						button.disabled = false;
+						for (const control of controls.querySelectorAll("button")) control.disabled = false;
 					}
 				});
 				controls.append(button);

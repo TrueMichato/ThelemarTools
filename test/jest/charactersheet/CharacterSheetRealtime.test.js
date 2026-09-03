@@ -315,6 +315,66 @@ describe("Character Sheet realtime coordinator", () => {
 		expect(delivered[0].payload).not.toHaveProperty("targetCharacterId");
 	});
 
+	it("delivers privacy-safe relevant transfer invalidations once", async () => {
+		const {clients, coordinator} = makeCoordinator();
+		const delivered = [];
+		coordinator.on("inventoryTransfer", value => delivered.push(value));
+		coordinator.attach({characterId: "character-1"});
+		const event = {
+			id: "transfer-event",
+			campaignId: "campaign-1",
+			sequence: 12,
+			type: "transfer.committed",
+			aggregateType: "transfer",
+			aggregateId: "private-transfer-id",
+			actorAccountId: "private-account-id",
+			payload: {
+				sourceKind: "party_inventory",
+				sourceId: "private-party-id",
+				targetKind: "character",
+				targetId: "character-1",
+			},
+		};
+
+		clients[0].emit("event", event);
+		clients[0].emit("event", event);
+		clients[0].emit("event", {
+			...event,
+			id: "unrelated",
+			payload: {...event.payload, sourceKind: "character", sourceId: "other", targetId: "another"},
+		});
+		clients[0].emit("event", {
+			id: "stash-invalidation",
+			campaignId: "campaign-1",
+			sequence: 13,
+			type: "party_inventory.invalidated",
+			aggregateType: "campaign",
+			aggregateId: "campaign-1",
+			payload: {},
+		});
+		await pFlush();
+
+		expect(delivered).toEqual([
+			{
+				eventId: "transfer-event",
+				campaignId: "campaign-1",
+				sequence: 12,
+				type: "transfer.committed",
+				isCurrentCharacterAffected: true,
+				isPartyInventoryAffected: true,
+			},
+			{
+				eventId: "stash-invalidation",
+				campaignId: "campaign-1",
+				sequence: 13,
+				type: "party_inventory.invalidated",
+				isCurrentCharacterAffected: false,
+				isPartyInventoryAffected: true,
+			},
+		]);
+		expect(JSON.stringify(delivered)).not.toMatch(/private|character-1/);
+	});
+
 	it("fences queued delivery when a sheet is switched and reopened", async () => {
 		const queued = [];
 		const repository = {

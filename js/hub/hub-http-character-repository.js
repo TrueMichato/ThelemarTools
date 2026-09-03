@@ -1,5 +1,5 @@
 import {HubApiClient} from "./hub-api-client.js";
-import {diffJson, rebaseJsonChanges} from "./hub-json-patch.js";
+import {applyJsonPatch, diffJson, rebaseJsonChanges} from "./hub-json-patch.js";
 import {HubBroadcastSync} from "./hub-broadcast-sync.js";
 import {getCharacterOperationRouting} from "./hub-character-operation-events.js";
 import {
@@ -148,6 +148,173 @@ export class HubHttpCharacterRepository {
 		if (typeof characterId !== "string" || !characterId) throw new TypeError(`characterId is required.`);
 		if (typeof fnDeliver !== "function") throw new TypeError(`fnDeliver is required.`);
 		return this._pRunMutation(fnDeliver);
+	}
+
+	/**
+	 * Rebase an authoritative document mutation (for example, inventory escrow) into every
+	 * local track. Unlike a projection invalidation, this updates accepted truth and live state
+	 * together; unlike a reload, it preserves disjoint edits made while the sheet was open.
+	 */
+	async pReconcileAuthoritativeCharacter ({
+		characterId,
+		fnGetLiveData = null,
+		fnAdoptLive = null,
+		fnIsCurrent = () => true,
+	} = {}) {
+		if (typeof characterId !== "string" || !characterId) throw new TypeError(`characterId is required.`);
+		const canonicalId = this._canonicalIds.get(characterId) || characterId;
+		return this._pRunMutation(async () => {
+			if (!fnIsCurrent()) return {status: "fenced"};
+			await this._pEnsureSession();
+			const canonical = await this._api.pGetCharacter({characterId: canonicalId});
+			this._assertCharacterScope(canonical);
+			if (!fnIsCurrent()) return {status: "fenced"};
+
+			const accepted = this._accepted.get(canonicalId);
+			if (!accepted) return {status: "unavailable"};
+			if (canonical.revision < accepted.revision) return {status: "stale"};
+			if (canonical.revision === accepted.revision && !diffJson(accepted.data, canonical.data).length) return {status: "unchanged"};
+
+			this._rebaseConflictForAuthoritative({
+				store: this._conflicts,
+				canonicalId,
+				accepted,
+				canonical,
+			});
+			this._rebaseConflictForAuthoritative({
+				store: this._liveConflicts,
+				canonicalId,
+				accepted,
+				canonical,
+			});
+			const liveData = fnGetLiveData?.();
+			const existingConflict = this._conflicts.get(canonicalId);
+			if (existingConflict) {
+				return {status: "conflict", conflicts: structuredClone(existingConflict.conflicts)};
+			}
+
+			const book = this._getCoverageBook(canonicalId);
+			const staged = {};
+			const conflicts = [];
+			const authoritativeDiscarded = {};
+			const stageRebase = (name, local) => {
+				if (local === undefined) return;
+				const rebased = this._rebaseAuthoritativeCandidate({base: accepted.data, local, remote: canonical.data});
+				if (rebased.isConflict) conflicts.push(...rebased.conflicts.map(conflict => ({track: name, ...conflict})));
+				if (rebased.isConflict) authoritativeDiscarded[name] = structuredClone(local);
+				staged[name] = rebased.document;
+			};
+			stageRebase("live", liveData);
+			if (this._latestSubmitted.has(canonicalId)) stageRebase("latestSubmitted", this._latestSubmitted.get(canonicalId));
+			if (this._failedWrites.has(canonicalId)) stageRebase("failedWrite", this._failedWrites.get(canonicalId));
+
+			if (conflicts.length) {
+				const local = staged.live
+					|| liveData
+					|| this._latestSubmitted.get(canonicalId)
+					|| this._failedWrites.get(canonicalId)
+					|| accepted.data;
+				const recovery = {
+					base: structuredClone(accepted.data),
+					local: structuredClone(local),
+					server: structuredClone(canonical.data),
+					serverDocument: structuredClone(canonical),
+					conflicts,
+					coverage: {
+						base: serializeCoverage(this._getAcceptedCoverage(canonicalId)),
+						local: serializeCoverage(book.live),
+						server: serializeCoverage(createCoverage({revision: canonical.revision})),
+					},
+					authoritativeDiscarded,
+				};
+				this._conflicts.set(canonicalId, recovery);
+				return {status: "conflict", conflicts: structuredClone(conflicts)};
+			}
+
+			if (Object.hasOwn(staged, "live") && typeof fnAdoptLive === "function") {
+				try {
+					fnAdoptLive(structuredClone(staged.live));
+				} catch (error) {
+					return {status: "failed", error: {code: "LIVE_ADOPTION_FAILED", message: error?.message}};
+				}
+			}
+
+			this._accepted.set(canonicalId, canonical);
+			const acceptedSequence = this._realtimeCursors.get(canonicalId)?.operationWatermark ?? null;
+			book.live = createCoverage({
+				revision: canonical.revision,
+				acceptedSequence,
+				appliedOperationIds: book.live.appliedOperationIds,
+			});
+			if (Object.hasOwn(staged, "latestSubmitted")) {
+				this._latestSubmitted.set(canonicalId, staged.latestSubmitted);
+				book.latestSubmitted = createCoverage({
+					revision: canonical.revision,
+					acceptedSequence,
+					appliedOperationIds: book.latestSubmitted.appliedOperationIds,
+				});
+			}
+
+			if (Object.hasOwn(staged, "failedWrite")) {
+				this._failedWrites.set(canonicalId, {...staged.failedWrite, id: canonicalId});
+				this._recoveredBases.set(canonicalId, structuredClone(canonical.data));
+				book.failedWrite = createCoverage({
+					revision: canonical.revision,
+					acceptedSequence,
+					appliedOperationIds: book.failedWrite.appliedOperationIds,
+				});
+				book.recoveredBase = this._cloneTrackCoverage(book.failedWrite);
+			}
+			this._writeRecoveryCoverage(canonicalId);
+			return {
+				status: "reconciled",
+				revision: canonical.revision,
+				liveNext: Object.hasOwn(staged, "live") ? structuredClone(staged.live) : undefined,
+			};
+		});
+	}
+
+	_rebaseAuthoritativeCandidate ({base, local, remote}) {
+		const rebased = rebaseJsonChanges({base, local, remote});
+		if (!rebased.isConflict) return rebased;
+		const conflictingPaths = new Set(rebased.conflicts.map(conflict => conflict.localPath));
+		// A recovery choice may reapply disjoint local edits, but must never overwrite
+		// authoritative escrow changes at an overlapping path.
+		return {
+			...rebased,
+			document: applyJsonPatch(remote, rebased.patches.filter(patch => !conflictingPaths.has(patch.path))),
+		};
+	}
+
+	_rebaseConflictForAuthoritative ({store, canonicalId, accepted, canonical}) {
+		const conflict = store.get(canonicalId);
+		if (!conflict) return;
+		const next = {
+			...conflict,
+			server: structuredClone(canonical.data),
+			serverDocument: structuredClone(canonical),
+			coverage: {...(conflict.coverage || {})},
+			authoritativeDiscarded: {...(conflict.authoritativeDiscarded || {})},
+		};
+		for (const key of ["base", "local"]) {
+			const rebased = this._rebaseAuthoritativeCandidate({
+				base: accepted.data,
+				local: conflict[key],
+				remote: canonical.data,
+			});
+			next[key] = rebased.document;
+			if (rebased.isConflict) next.authoritativeDiscarded[key] = structuredClone(conflict[key]);
+			const coverage = this._getConflictCoverage(conflict, key);
+			coverage.revision = canonical.revision;
+			next.coverage[key] = serializeCoverage(coverage);
+		}
+		const serverCoverage = this._getConflictCoverage(conflict, "server");
+		serverCoverage.revision = canonical.revision;
+		next.coverage.server = serializeCoverage(serverCoverage);
+		const rebased = rebaseJsonChanges({base: next.base, local: next.local, remote: next.server});
+		next.conflicts = rebased.conflicts;
+		next.isResolved = !rebased.isConflict;
+		store.set(canonicalId, next);
 	}
 
 	// #region Operation-aware reconciliation (ADR 0012)

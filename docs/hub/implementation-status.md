@@ -119,6 +119,10 @@ pass. Only the host-operations proof and physical one-DM/two-player game day rem
 - Immediate DM/co-DM semantic character operations plus the fail-closed source-derived peer proposal/terminal
   server contract; XP/item grants, party inventory, and escrowed item/currency transfers remain domain-specific.
 - Whole-item transfers preserve Character Sheet invariants, rollback identity, and metadata-safe stack merges.
+- Owned cloud Character Sheets expose the server-authoritative party stash as a separate inventory section,
+  including privacy-safe direct-pass destinations, escrow-backed partial transfers, reconnect/event refresh,
+  repository-safe character reconciliation, accessible stateful controls, and reusable eligibility/weight
+  summaries. Local and signed-out sheets remain unchanged.
 - Character HTML is sanitized at the authority boundary; canonical documents are capped at 1.5 MB after
   every mutation.
 - Idempotency receipts are compact, expire after 24 hours, and have bounded cleanup support.

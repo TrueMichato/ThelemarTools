@@ -6,6 +6,7 @@ import {
 import {
 	createCharacterDisplayNameSnapshot,
 	enrichEventPayload,
+	redactTransferEventForViewer,
 } from "../../../server/src/hub-event-snapshots.js";
 import {renderHubActivityRows} from "../../../js/hub/hub-activity-render.js";
 import {MemoryHubStore} from "../../../server/src/memory-hub-store.js";
@@ -710,5 +711,35 @@ describe("campaign activity event presentation", () => {
 		expect(payload).toEqual({targetCharacterId: "target", sourceKind: "character", sourceId: "source"});
 		expect(JSON.stringify(payload)).not.toContain("account-1");
 		expect(JSON.stringify(payload)).not.toContain("The Hero");
+	});
+
+	it("keeps an explicitly authorized transfer actor after role demotion without exposing counterpart ids", () => {
+		const event = redactTransferEventForViewer({
+			event: {
+				type: "transfer.reserved",
+				aggregateType: "transfer",
+				aggregateId: "transfer-1",
+				visibility: "explicit_accounts",
+				visibleAccountIds: ["former-owner"],
+				actorAccountId: "former-owner",
+				payload: {
+					sourceKind: "character",
+					sourceId: "source-character",
+					targetKind: "character",
+					targetId: "target-character",
+				},
+			},
+			accountId: "former-owner",
+			role: "player",
+			getCharacterOwnerId: () => "another-account",
+		});
+
+		expect(event).toMatchObject({
+			actorAccountId: "former-owner",
+			visibleAccountIds: null,
+			payload: {sourceKind: "character", targetKind: "character"},
+		});
+		expect(event.payload).not.toHaveProperty("sourceId");
+		expect(event.payload).not.toHaveProperty("targetId");
 	});
 });

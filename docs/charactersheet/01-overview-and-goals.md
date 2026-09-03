@@ -32,6 +32,7 @@ Each module handles a specific domain:
 | `combat.js` | Combat actions and rolls |
 | `spells.js` | Spellcasting mechanics |
 | `inventory.js` | Items and equipment |
+| `party-inventory.js` | Owner-only cloud campaign stash and authoritative transfer coordination |
 | `features.js` | Feature display and tracking |
 
 ### 3. **Progressive Enhancement**
@@ -41,6 +42,11 @@ The system provides value at multiple levels:
 1. **Basic**: Store character data, display stats
 2. **Intermediate**: Calculate derived values, track resources
 3. **Advanced**: Roll dice, apply effects, manage combat
+
+Campaign-backed owner sheets progressively add a separate Party Stash inventory section. It refetches
+server-authoritative stacks on open, reconnect, and relevant transfer events, and adopts authoritative character
+changes through the cloud repository. Local, signed-out, detached, and non-owner sheets do not mount the section
+or install its Hub listeners.
 
 ### 4. **Backward Compatibility**
 

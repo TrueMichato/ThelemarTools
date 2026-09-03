@@ -27,6 +27,7 @@ The Campaign Hub is an optional online layer over the existing local-first site.
 | Hub pages | `hub.html`, `campaign.html`, `scss/hub.scss`, `js/hub/hub-page.js` | Session state, campaign list/detail, membership/invite forms, campaign content, actions, grants, transfers |
 | Browser API | `js/hub/hub-api-client.js` | Same-origin JSON requests, CSRF/protocol/idempotency headers, stable API errors |
 | Character persistence | `js/hub/hub-http-character-repository.js`, `js/hub/hub-character-repository.js` | Cloud snapshots, patches, leases, queued bases, conflict recovery, canonical-id adoption |
+| Party inventory | `js/charactersheet/charactersheet-party-inventory.js`, `js/hub/hub-inventory-contract.js` | Owner-only Character Sheet stash presentation, authoritative transfer coordination, shared eligibility and weight summaries |
 | DM workspace persistence | `js/hub/hub-http-dm-workspace-repository.js`, `js/hub/hub-dm-workspace-repository.js` | Private Board blobs, leases, recovery drafts, conflict handling |
 | Campaign context | `js/hub/hub-campaign-context.js`, `js/hub/hub-brew-context.js` | Rules and immutable campaign brew activation without personal-brew writes |
 | Realtime | `js/hub/hub-realtime-client.js`, `js/hub/hub-broadcast-sync.js`, `js/charactersheet/charactersheet-realtime.js` | WebSocket resync/presence/events, stale-socket fencing, focused Character Sheet delivery, and same-browser tab coordination |
@@ -115,9 +116,10 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
 - Party Tracker projections are linked, read-only rows and are excluded from saved Board state.
 - Only an authenticated campaign-backed open Character Sheet character subscribes. Local, signed-out,
   detached-cloud, temporary, and failed-load sheets do not.
-- The sheet coordinator filters projection invalidations and the exact `character.operation.*` lifecycle
-  allowlist to the open target. Delivery is serialized behind saves and fenced on switch, detach, revocation,
-  logout, and terminal page hide.
+- The sheet coordinator filters projection invalidations, the exact `character.operation.*` lifecycle allowlist,
+  and relevant `transfer.*` invalidations to the open target. Delivery is serialized behind saves and fenced on
+  switch, detach, revocation, logout, and terminal page hide. Transfer presentation receives only relevance
+  booleans and event metadata; raw account, transfer, inventory, and character ids are not passed to the stash UI.
 - The open owner sheet reads pending approvals from
   `GET /api/campaigns/:campaignId/characters/:characterId/pending-actions`. The route fails closed for a DM,
   co-DM, peer, or other character owner and projects only an opaque action id, expiry, resolve capability and
@@ -144,13 +146,23 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
 - XP/item grants are audited semantic commands; XP does not perform level-up choices.
 - Party currency is denomination-based (`cp`, `sp`, `ep`, `gp`, `pp`).
 - Transfers reserve source assets in escrow before acceptance.
-- Partial stacks preserve the source wrapper identity.
+- Partial stacks preserve the source wrapper identity; wrappers which contain items or host Ioun items cannot
+  split because their structural links are non-fungible.
 - A committed cross-container item receives a new destination identity unless it merges with a deeply
   metadata-compatible stack.
 - Rejection/cancellation restores the original source identity and index.
 - Whole-item transfer is rejected while the item is equipped, attuned, contained, hosting/using Ioun items,
   selected as ammunition, tracked by item effects, or referenced by an active state. This keeps server
   mutations within Character Sheet invariants without duplicating the sheet's calculation engine.
+- Owned cloud Character Sheets render party inventory as a separate stash section, fetch canonical stacks on
+  open/reconnect/relevant events, and reconcile affected character truth through the HTTP repository rather
+  than mutating local state from transfer payloads. Local and signed-out sheets retain the original inventory
+  UI and do not install stash listeners or make party-inventory requests.
+- Transfer lifecycle events are restricted to DMs and involved owners, with non-owned endpoint/account
+  identifiers removed per viewer. A metadata-only `party_inventory.invalidated` event tells all members to
+  refresh the shared stash without exposing transfer endpoints.
+- The shared inventory contract exposes transfer eligibility and weight summaries for downstream awarding and
+  carry-capacity work without imposing either feature's future UI or policy.
 
 ## Security and durability invariants
 

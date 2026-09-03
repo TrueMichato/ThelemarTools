@@ -193,10 +193,28 @@ arbitrary spell prose.
 | `GET /api/campaigns/:campaignId/party-inventory` | Active member | none | Lazily created party inventory, entries, denomination currency |
 | `GET /api/campaigns/:campaignId/transfers` | Active member | none | Transfers visible to DM, actor, source owner, or target owner |
 | `POST /api/campaigns/:campaignId/transfers` | Active-member mutation; source owner or DM for party source | source/target kind+UUID, <=100 item quantities, nonnegative denomination currency | 201 transfer already in `reserved` state |
-| `POST /api/campaigns/:campaignId/transfers/:transferId/resolve` | Target owner or DM/co-DM mutation | accept/reject | committed or rejected transfer |
+| `POST /api/campaigns/:campaignId/transfers/:transferId/resolve` | Target owner or DM/co-DM; originating actor may reject | accept/reject | committed or rejected transfer |
 
 `sourceKind`/`targetKind` are `character` or `party_inventory`. Empty/insufficient transfers fail before a
-row is committed. Whole linked/equipped items return `TRANSFER_ITEM_LINKED`.
+row is committed. Item quantities must be positive finite safe integers within the route schema limit. The
+authority removes the requested value into escrow before returning `reserved`; acceptance writes that escrow
+to the destination, while rejection or lifecycle cancellation restores the source exactly once. Reusing an
+idempotency key with the same command replays its stored result rather than repeating either mutation.
+
+The server derives item eligibility and stack compatibility from canonical data. A whole stack is refused
+while equipped, attuned, container-linked, spell/component-linked (including a real `itemGrantedSpells[].itemId`
+record), or otherwise referenced by Character Sheet state. Concentration records do not carry source-item
+identity and are not treated as item links. A partial move is allowed only when every reference remains valid
+against the source copy and the transferred wrapper carries no child/container linkage that would be duplicated. Such refusals
+return `TRANSFER_ITEM_LINKED`. Destination stacks merge only when their complete transferable metadata matches;
+custom names, source/edition, charges, durability, notes, material/variant/component state, and other mutable
+fields therefore remain distinct when they differ.
+
+An owned campaign-backed Character Sheet uses these routes directly: it fetches the party stash on open and
+after reconnect or relevant transfer events, proposes character-to-stash and character-to-character moves, and
+lets a DM/co-DM move stash items into the open character. The browser never applies an escrow mutation to two
+documents itself. Character updates are adopted through the HTTP character repository's authoritative
+reconciliation queue. Local, signed-out, detached, and non-owner sheets do not activate this integration.
 
 ## Campaign content routes
 
