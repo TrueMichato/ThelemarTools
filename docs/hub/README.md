@@ -21,6 +21,7 @@ Signed-out character sheets, homebrew, and DM screens remain supported and do no
 | Exact Phase 0-5 working-tree checkpoint | [Checkpoint record](checkpoint.md) |
 | Current capabilities/gates | [Implementation status](implementation-status.md) |
 | Data, ownership, lifecycle | [Domain model](domain-model.md) and [data lifecycle](data-lifecycle.md) |
+| How a browser remembers the active campaign | [Active campaign context](active-campaign-context.md) |
 | Schema evolution and DB roles | [Migration guide](migrations.md) |
 | OCI/Compose and edge contract | [Deployment guide](deployment.md) |
 | Tagged Oracle release | [Deploy and promote runbook](runbooks/deploy-promote.md) |

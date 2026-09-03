@@ -251,7 +251,7 @@ describe("Character Sheet repository seam", () => {
 		expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "character-1"});
 	});
 
-	it("tears down on terminal pagehide and resumes the same subscription after BFCache restoration", () => {
+	it("tears down on terminal pagehide and resumes the same subscription after BFCache restoration", async () => {
 		const listeners = {};
 		const windowPrev = globalThis.window;
 		globalThis.window = {
@@ -268,6 +268,13 @@ describe("Character Sheet repository seam", () => {
 			CharacterSheetPage.prototype._initHubRealtimeTeardown.call(host);
 			listeners.pagehide({persisted: true});
 			listeners.pageshow({persisted: true});
+
+			// The session may have been signed out or switched while the page was frozen, so the
+			// private stream must not reopen until the account has been revalidated (ADR 0013).
+			expect(host._hubRealtime.resume).not.toHaveBeenCalled();
+			await Promise.resolve();
+			await Promise.resolve();
+
 			listeners.pagehide({persisted: false});
 		} finally {
 			globalThis.window = windowPrev;

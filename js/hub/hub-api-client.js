@@ -17,7 +17,11 @@ export class HubApiClient {
 		this._csrfToken = null;
 	}
 
-	async _pRequest (path, {method = "GET", body = null, isMutation = false, idempotencyKey = null} = {}) {
+	static _isAbort (error, signal) {
+		return signal?.aborted || error?.name === "AbortError" || error?.code === 20;
+	}
+
+	async _pRequest (path, {method = "GET", body = null, isMutation = false, idempotencyKey = null, signal = null} = {}) {
 		const headers = {accept: "application/json", "x-hub-protocol-version": "3"};
 		if (body != null) headers["content-type"] = "application/json";
 		if (isMutation) {
@@ -25,6 +29,7 @@ export class HubApiClient {
 			headers["x-csrf-token"] = this._csrfToken;
 			headers["idempotency-key"] = idempotencyKey || crypto.randomUUID();
 		}
+		if (signal?.aborted) throw new HubApiError({code: "REQUEST_ABORTED", status: 0});
 		let response;
 		try {
 			response = await this._fnFetch(path, {
@@ -32,16 +37,29 @@ export class HubApiClient {
 				credentials: "same-origin",
 				headers,
 				body: body == null ? undefined : JSON.stringify(body),
+				signal: signal || undefined,
 			});
 		} catch (error) {
 			if (error instanceof HubApiError) throw error;
+			// A cancellation is not evidence of connectivity loss, so it must never be reported as
+			// `NETWORK_UNAVAILABLE` — that code makes callers retain state on an "offline" path.
 			throw new HubApiError({
-				code: "NETWORK_UNAVAILABLE",
+				code: HubApiClient._isAbort(error, signal) ? "REQUEST_ABORTED" : "NETWORK_UNAVAILABLE",
 				status: 0,
 				cause: error,
 			});
 		}
-		const data = response.status === 204 ? null : await response.json().catch(() => null);
+		// The body read is a second cancellation point: aborting mid-stream rejects here, not above.
+		let data = null;
+		if (response.status !== 204) {
+			try {
+				data = await response.json();
+			} catch (error) {
+				if (HubApiClient._isAbort(error, signal)) throw new HubApiError({code: "REQUEST_ABORTED", status: 0, cause: error});
+				data = null;
+			}
+		}
+		if (signal?.aborted) throw new HubApiError({code: "REQUEST_ABORTED", status: 0});
 		if (!response.ok) {
 			throw new HubApiError({
 				code: data?.error || "REQUEST_FAILED",
@@ -58,8 +76,8 @@ export class HubApiClient {
 		return data;
 	}
 
-	async pGetSession () {
-		const session = await this._pRequest("/api/session");
+	async pGetSession ({signal = null} = {}) {
+		const session = await this._pRequest("/api/session", {signal});
 		this._csrfToken = session?.signedIn ? session.csrfToken : null;
 		return session;
 	}
@@ -109,8 +127,8 @@ export class HubApiClient {
 		});
 	}
 
-	async pGetCampaign ({campaignId}) {
-		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}`)).campaign;
+	async pGetCampaign ({campaignId, signal = null}) {
+		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}`, {signal})).campaign;
 	}
 
 	async pListMembers ({campaignId}) {
@@ -142,8 +160,8 @@ export class HubApiClient {
 		});
 	}
 
-	async pGetCampaignContext ({campaignId}) {
-		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/context`)).context;
+	async pGetCampaignContext ({campaignId, signal = null}) {
+		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/context`, {signal})).context;
 	}
 
 	async pGetCampaignCompatibility ({campaignId}) {

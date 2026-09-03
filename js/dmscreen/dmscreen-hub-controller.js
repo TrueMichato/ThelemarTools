@@ -49,6 +49,45 @@ export class DmScreenHubController {
 	get isBlocked () { return this._state.access !== "ready"; }
 	getState () { return structuredClone(this._state); }
 
+	/**
+	 * Apply an already-verified session and campaign without issuing any request.
+	 *
+	 * The active-context coordinator validates session and campaign once, so the controller must
+	 * not re-read either; doing so previously cost the DM bootstrap two duplicate `GET /api/session`
+	 * calls. All access-state and render behaviour is identical to `pLoadCampaign`.
+	 */
+	adoptVerifiedCampaign ({session, campaign}) {
+		if (!session?.signedIn) {
+			this._setAccessState({
+				access: "signed_out",
+				message: "Sign in to open this campaign DM workspace.",
+			});
+			return null;
+		}
+
+		this._campaign = campaign;
+		if (this._campaign?.status !== "active") {
+			this._setAccessState({
+				access: "archived",
+				message: "This campaign is archived. Its live DM workspace is no longer available.",
+			});
+			return null;
+		}
+		if (!DM_ROLES.has(this._campaign.role)) {
+			this._setAccessState({
+				access: "permission_denied",
+				message: "Only the campaign DM or a co-DM can open this private workspace.",
+			});
+			return null;
+		}
+
+		this._state.access = "ready";
+		this._state.message = null;
+		this._syncBodyState();
+		this._render();
+		return this.campaign;
+	}
+
 	async pLoadCampaign () {
 		try {
 			const session = await this._api.pGetSession();
@@ -60,27 +99,8 @@ export class DmScreenHubController {
 				return null;
 			}
 
-			this._campaign = await this._api.pGetCampaign({campaignId: this._campaignId});
-			if (this._campaign.status !== "active") {
-				this._setAccessState({
-					access: "archived",
-					message: "This campaign is archived. Its live DM workspace is no longer available.",
-				});
-				return null;
-			}
-			if (!DM_ROLES.has(this._campaign.role)) {
-				this._setAccessState({
-					access: "permission_denied",
-					message: "Only the campaign DM or a co-DM can open this private workspace.",
-				});
-				return null;
-			}
-
-			this._state.access = "ready";
-			this._state.message = null;
-			this._syncBodyState();
-			this._render();
-			return this.campaign;
+			const campaign = await this._api.pGetCampaign({campaignId: this._campaignId});
+			return this.adoptVerifiedCampaign({session, campaign});
 		} catch (error) {
 			this._setAccessError(error);
 			return null;

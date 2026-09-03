@@ -14,6 +14,24 @@ describe("device-scoped active campaign context contract", () => {
 	const dmController = read("js/dmscreen/dmscreen-hub-controller.js");
 	const routePolicy = read("js/hub/hub-route-policy.js");
 
+	it("implements the ADR-named storage, channel, and lock keys in shipped code", async () => {
+		const record = await import("../../../js/hub/hub-active-campaign-record.js");
+		expect(record.ACTIVE_CAMPAIGN_STORAGE_KEY).toBe("hub.activeCampaign.v1");
+		expect(record.ACTIVE_CAMPAIGN_CHANNEL_NAME).toBe("hub:active-campaign:v1");
+		expect(record.ACTIVE_CAMPAIGN_WRITE_LOCK).toBe("hub:active-campaign-write:v1");
+		expect(record.ACTIVE_CAMPAIGN_MAX_BYTES).toBe(1024);
+		expect(record.ACTIVE_CAMPAIGN_SCHEMA_VERSION).toBe(1);
+
+		const coordinator = await import("../../../js/hub/hub-active-campaign-coordinator.js");
+		expect(coordinator.TEARDOWN_MARKERS).toEqual([
+			"teardown-generation",
+			"teardown-realtime",
+			"teardown-projections",
+			"teardown-rules",
+			"teardown-brew",
+		]);
+	});
+
 	it("records an accepted, implementation-pending decision with every required contract surface", () => {
 		expect(adr).toMatch(/^Status: Accepted contract; production implementation pending$/m);
 		for (const heading of [
@@ -87,8 +105,11 @@ describe("device-scoped active campaign context contract", () => {
 
 	it("anchors activation and teardown in the existing context owners", () => {
 		expect(campaignContext).toContain("new HubBrewContext");
-		expect(campaignContext).toContain("await this._api.pGetSession()");
-		expect(campaignContext).toContain("await this._api.pGetCampaignContext");
+		// Behavioural, not source-literal: the context loader still reads the session and the
+		// campaign context when they are not injected, and still exposes idempotent disposal.
+		expect(campaignContext).toMatch(/pGetSession\(/);
+		expect(campaignContext).toMatch(/pGetCampaignContext\(/);
+		expect(campaignContext).toMatch(/dispose\s*\(\)/);
 		expect(brewContext).toContain("setBrewTemporary");
 		expect(brewContext).toContain("clearBrewTemporary");
 		expect(realtimeClient).toContain("close ()");
@@ -109,17 +130,30 @@ describe("device-scoped active campaign context contract", () => {
 	});
 
 	it("keeps context activation ahead of heavy Character Sheet and DM Screen startup", () => {
-		const characterActivate = characterSheet.indexOf("this._hubCampaignContext.pActivate()");
+		// The Character Sheet resolves and activates campaign context before loading heavy data.
+		const characterActivate = characterSheet.indexOf("this._hubActiveCampaign.pResolve()");
 		const characterData = characterSheet.indexOf("await this._pLoadData()");
 		expect(characterActivate).toBeGreaterThan(-1);
 		expect(characterActivate).toBeLessThan(characterData);
 
-		const dmActivate = dmScreen.indexOf("new HubCampaignContext({campaignId, api}).pActivate()");
+		// The DM Screen verifies and activates campaign context before the Board and realtime.
+		const dmVerify = dmScreen.indexOf("activeCampaign.pVerifyContext({campaignId})");
+		const dmAuthorize = dmScreen.indexOf("hubController.adoptVerifiedCampaign({");
+		const dmActivate = dmScreen.indexOf("campaignContext.pActivate()");
 		const dmBoard = dmScreen.indexOf("new Board({workspaceRepository})");
 		const dmRealtime = dmScreen.indexOf("new HubRealtimeClient({campaignId})");
-		expect(dmActivate).toBeGreaterThan(-1);
+		expect(dmVerify).toBeGreaterThan(-1);
+		// DM authorization must be settled BEFORE any campaign brew is installed.
+		expect(dmAuthorize).toBeGreaterThan(dmVerify);
+		expect(dmAuthorize).toBeLessThan(dmActivate);
 		expect(dmActivate).toBeLessThan(dmBoard);
 		expect(dmBoard).toBeLessThan(dmRealtime);
+		expect(dmController).toContain("adoptVerifiedCampaign ({session, campaign})");
+		expect(dmController).toContain("DM_ROLES.has(this._campaign.role)");
+		// The context instance is owned explicitly so it can be torn down, rather than being
+		// constructed and discarded inline.
+		expect(dmScreen).toContain("campaignContext = new HubCampaignContext({");
+		expect(dmScreen).toContain("campaignContext?.dispose()");
 	});
 
 	it.each(["hub.html", "campaign.html"])("preserves the lightweight %s boot graph", page => {

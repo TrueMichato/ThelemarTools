@@ -488,6 +488,32 @@ decoration is linear in rendered navigation links and performs no network reques
     the ordered winner. Closing every tab and restarting must remain cleared; the losing selection must not
     resurrect.
 
+## Implementation status
+
+The client core of this contract has shipped. See
+[active-campaign-context.md](../active-campaign-context.md) for the implemented behaviour, key
+formats, host matrix, and test map.
+
+Landed:
+
+- the durable account-bound record, its ordering, and compare-and-repair
+  (`js/hub/hub-active-campaign-record.js`, `js/hub/hub-active-campaign-store.js`);
+- same-browser convergence over `hub:active-campaign:v1` with the `storage` fallback and a
+  terminating broadcast rule (`js/hub/hub-active-campaign-channel.js`);
+- precedence, generation fencing with real cancellation, the ordered teardown protocol, switch
+  preflight, resource pinning, and account-revalidating BFCache resume
+  (`js/hub/hub-active-campaign-coordinator.js`);
+- separate selection-only and heavy-context verification paths, injected `session` and `context` on
+  `HubCampaignContext`, and the removal of the DM bootstrap's duplicate session reads.
+
+Outstanding, and the reason this ADR is not yet marked implemented:
+
+1. `navigation.js` link decoration on ordinary heavy content pages, and automatic heavy activation
+   from a stored-only selection on those pages;
+2. the resource-pinned `switch_pending` visual affordance;
+3. the `offline_unverified` degraded-mode presentation;
+4. DM Screen campaign rules application, which is absent today rather than stale.
+
 ## Consequences
 
 Positive:
