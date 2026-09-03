@@ -11,16 +11,6 @@ const MESSAGE_SELECTION_CHANGED = "selection_changed";
 const MESSAGE_SELECTION_CLEARED = "selection_cleared";
 
 /**
- * Why a selection was cleared. A tombstone is durable and identical regardless of cause, so the
- * cause travels as transient message metadata: a receiver holding an unrelated open resource needs
- * to distinguish "you are signed out" from "someone lost access to a different campaign".
- */
-export const CLEAR_CAUSE_LOGOUT = "logout";
-export const CLEAR_CAUSE_ACCESS_LOSS = "access_loss";
-export const CLEAR_CAUSE_SELECTION = "selection";
-const CLEAR_CAUSES = new Set([CLEAR_CAUSE_LOGOUT, CLEAR_CAUSE_ACCESS_LOSS, CLEAR_CAUSE_SELECTION]);
-
-/**
  * Same-browser selection synchronisation (ADR 0013).
  *
  * Uses the origin-wide `hub:active-campaign:v1` channel rather than the per-campaign lease channel,
@@ -68,17 +58,20 @@ export class HubActiveCampaignChannel {
 		// A tab never reacts to its own write.
 		if (data.writerId === this._writerId) return;
 
+		const isCleared = data.type === MESSAGE_SELECTION_CLEARED;
 		const record = parseActiveCampaignRecord(JSON.stringify({
 			schemaVersion: data.schemaVersion,
 			accountId: data.accountId,
-			campaignId: data.type === MESSAGE_SELECTION_CLEARED ? null : data.campaignId,
-			state: data.type === MESSAGE_SELECTION_CLEARED ? ACTIVE_CAMPAIGN_STATE_CLEARED : "selected",
+			campaignId: isCleared ? null : data.campaignId,
+			state: isCleared ? ACTIVE_CAMPAIGN_STATE_CLEARED : "selected",
+			// `parseActiveCampaignRecord` degrades an absent or unknown cause to `logout`.
+			cause: isCleared ? data.cause : undefined,
 			revision: data.revision,
 			updatedAt: data.updatedAt,
 			writerId: data.writerId,
 		}));
 		if (!record) return;
-		this._emit({record, isStorageSignal: false, cause: CLEAR_CAUSES.has(data.cause) ? data.cause : null});
+		this._emit({record, isStorageSignal: false});
 	}
 
 	_emit (payload) {
@@ -94,11 +87,10 @@ export class HubActiveCampaignChannel {
 	 * raised durable storage; combined with verbatim repair this makes the ordering value monotone
 	 * and bounded, so tabs reach a fixed point instead of ping-ponging writes.
 	 */
-	post (record, {cause = null} = {}) {
+	post (record) {
 		if (this._isClosed || !record || !this._channel?.postMessage) return false;
 		const isCleared = record.state === ACTIVE_CAMPAIGN_STATE_CLEARED;
-		const boundedCause = isCleared && CLEAR_CAUSES.has(cause) ? cause : null;
-		const key = `${getActiveCampaignRecordKey(record)}|${boundedCause || ""}`;
+		const key = getActiveCampaignRecordKey(record);
 		if (key && key === this._lastPostedKey) return false;
 		this._lastPostedKey = key;
 		try {
@@ -110,8 +102,9 @@ export class HubActiveCampaignChannel {
 				revision: record.revision,
 				updatedAt: record.updatedAt,
 				writerId: record.writerId,
-				// Transient routing metadata, never persisted alongside the durable record.
-				...(boundedCause ? {cause: boundedCause} : {}),
+				// Mirrors the durable record; receivers that only see the `storage` fallback read
+				// the same value straight from storage.
+				...(isCleared ? {cause: record.cause} : {}),
 			});
 			return true;
 		} catch {

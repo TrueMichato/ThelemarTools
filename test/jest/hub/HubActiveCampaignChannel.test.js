@@ -146,22 +146,32 @@ describe("HubActiveCampaignChannel", () => {
 		]);
 	});
 
-	it("carries a bounded clear cause so receivers can distinguish logout from access loss", () => {
+	it("carries the durable clear cause so receivers can distinguish logout from access loss", () => {
 		const a = makeChannel(WRITER_A);
 		const b = makeChannel(WRITER_B);
 		const received = [];
 		b.onMessage(payload => received.push(payload));
 
-		const tombstone = makeClearedRecord({accountId: ACCOUNT_A, revision: 3, updatedAt: 3000, writerId: WRITER_A});
-		a.post(tombstone, {cause: "logout"});
-		expect(a._channel.posted[0].cause).toBe("logout");
-		expect(received[0].cause).toBe("logout");
+		a.post(makeClearedRecord({accountId: ACCOUNT_A, revision: 3, updatedAt: 3000, writerId: WRITER_A, cause: "access_loss"}));
+		expect(a._channel.posted[0].cause).toBe("access_loss");
+		expect(received[0].record.cause).toBe("access_loss");
 
-		// An unknown cause is dropped rather than forwarded, and a selection never carries one.
-		a.post(makeClearedRecord({accountId: ACCOUNT_A, revision: 4, updatedAt: 4000, writerId: WRITER_A}), {cause: "something-else"});
+		// A tombstone whose cause is absent or unrecognised degrades to `logout`, so the failure
+		// mode is closed rather than "assume it was safe to defer".
+		a._channel.postMessage({
+			type: "selection_cleared",
+			schemaVersion: ACTIVE_CAMPAIGN_SCHEMA_VERSION,
+			accountId: ACCOUNT_A,
+			campaignId: null,
+			revision: 4,
+			updatedAt: 4000,
+			writerId: WRITER_A,
+		});
+		expect(received[1].record.cause).toBe("logout");
+
+		// A selection never carries a cause.
+		a.post(selected({revision: 5}));
 		expect(a._channel.posted[1].cause).toBeUndefined();
-		a.post(selected({revision: 5}), {cause: "logout"});
-		expect(a._channel.posted[2].cause).toBeUndefined();
 	});
 
 	it("does not loop: repeated receipts of one logical record produce no unbounded rebroadcast", () => {

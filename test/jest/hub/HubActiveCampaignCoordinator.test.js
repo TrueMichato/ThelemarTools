@@ -1,7 +1,7 @@
 import {HubActiveCampaignCoordinator, TEARDOWN_MARKERS} from "../../../js/hub/hub-active-campaign-coordinator.js";
 import {HubActiveCampaignChannel} from "../../../js/hub/hub-active-campaign-channel.js";
 import {HubActiveCampaignStore} from "../../../js/hub/hub-active-campaign-store.js";
-import {makeClearedRecord, makeSelectedRecord} from "../../../js/hub/hub-active-campaign-record.js";
+import {ACTIVE_CAMPAIGN_STORAGE_KEY, makeClearedRecord, makeSelectedRecord} from "../../../js/hub/hub-active-campaign-record.js";
 
 const ACCOUNT_A = "11111111-1111-4111-8111-111111111111";
 const ACCOUNT_B = "22222222-2222-4222-8222-222222222222";
@@ -986,11 +986,12 @@ describe("HubActiveCampaignCoordinator", () => {
 			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_A);
 		});
 
-		const makeRemoteTombstone = () => makeClearedRecord({
+		const makeRemoteTombstone = (cause = "logout") => makeClearedRecord({
 			accountId: ACCOUNT_A,
 			revision: 99,
 			updatedAt: Date.now() + 10_000,
 			writerId: WRITER_B,
+			cause,
 		});
 
 		it("keeps a pinned open resource when another tab clears after losing access elsewhere", async () => {
@@ -1010,7 +1011,7 @@ describe("HubActiveCampaignCoordinator", () => {
 			order.length = 0;
 
 			// Losing access to some *other* campaign must not dismantle this open resource.
-			await coordinator._pHandleRemote({record: makeRemoteTombstone(), isStorageSignal: false, cause: "access_loss"});
+			await coordinator._pHandleRemote({record: makeRemoteTombstone("access_loss"), isStorageSignal: false});
 
 			expect(order).toEqual([]);
 			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_A);
@@ -1035,7 +1036,7 @@ describe("HubActiveCampaignCoordinator", () => {
 			order.length = 0;
 
 			// Logout is a security boundary: pinning never defers it.
-			await coordinator._pHandleRemote({record: makeRemoteTombstone(), isStorageSignal: false, cause: "logout"});
+			await coordinator._pHandleRemote({record: makeRemoteTombstone("logout"), isStorageSignal: false});
 
 			expect(order).toEqual(["realtime", "rules", "brew"]);
 			expect(coordinator.activeCampaignId).toBeNull();
@@ -1057,10 +1058,122 @@ describe("HubActiveCampaignCoordinator", () => {
 			await coordinator.pResolve();
 			order.length = 0;
 
-			await coordinator._pHandleRemote({record: makeRemoteTombstone(), isStorageSignal: false, cause: "access_loss"});
+			await coordinator._pHandleRemote({record: makeRemoteTombstone("access_loss"), isStorageSignal: false});
 
 			expect(order).toEqual(["realtime", "brew"]);
 			expect(coordinator.state).toBe("local");
+		});
+
+		/**
+		 * The delivery-ordering and transport hazards that a transient, message-only cause could
+		 * not survive. The cause lives on the durable record precisely so these hold.
+		 */
+		describe("logout teardown survives every delivery path", () => {
+			const makePinnedHost = order => ({
+				getExplicitCampaignId: () => CAMPAIGN_A,
+				isResourcePinned: () => true,
+				pTeardownRealtime: async () => order.push("realtime"),
+				pTeardownRules: async () => order.push("rules"),
+				pTeardownBrew: async () => order.push("brew"),
+			});
+
+			it("tears down when the storage event lands before the broadcast message", async () => {
+				const order = [];
+				const storage = new FakeStorage();
+				const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+				const {coordinator} = makeCoordinator({api, storage, host: makePinnedHost(order)});
+				await coordinator.pResolve();
+				order.length = 0;
+
+				// Another tab logs out: it writes durable storage, then broadcasts.
+				const remote = new HubActiveCampaignStore({storage, locks: null, writerId: WRITER_B, fnDelay: async () => {}});
+				const tombstone = await remote.pClear({accountId: ACCOUNT_A, cause: "logout"});
+
+				// The storage signal wins the race and carries no payload at all.
+				await coordinator._pHandleRemote({record: null, isStorageSignal: true});
+				expect(order).toEqual(["realtime", "rules", "brew"]);
+				expect(coordinator.activeCampaignId).toBeNull();
+
+				// The later broadcast of the same record is correctly ignored as not-greater, and
+				// must not undo or duplicate the teardown that already happened.
+				order.length = 0;
+				await coordinator._pHandleRemote({record: tombstone, isStorageSignal: false});
+				expect(order).toEqual([]);
+				expect(coordinator.activeCampaignId).toBeNull();
+			});
+
+			it("tears down with no BroadcastChannel at all, over the storage fallback only", async () => {
+				const order = [];
+				const storage = new FakeStorage();
+				const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+				const store = new HubActiveCampaignStore({storage, locks: null, writerId: WRITER_A, fnDelay: async () => {}});
+				// No channel: `fnCreateChannel` returns null, so only `storage` events arrive.
+				const channel = new HubActiveCampaignChannel({
+					writerId: WRITER_A,
+					fnCreateChannel: () => null,
+					target: new FakeTarget(),
+				});
+				expect(channel.hasChannel).toBe(false);
+				const coordinator = new HubActiveCampaignCoordinator({
+					api,
+					host: makePinnedHost(order),
+					store,
+					channel,
+					fnCreateContext: ({campaignId, context}) => ({campaignId, context, isDisposed: false, pActivate: async () => context, dispose () { this.isDisposed = true; }}),
+				});
+				await coordinator.pResolve();
+				order.length = 0;
+
+				const remote = new HubActiveCampaignStore({storage, locks: null, writerId: WRITER_B, fnDelay: async () => {}});
+				await remote.pClear({accountId: ACCOUNT_A, cause: "logout"});
+				await coordinator._pHandleRemote({record: null, isStorageSignal: true});
+
+				expect(order).toEqual(["realtime", "rules", "brew"]);
+				expect(coordinator.activeCampaignId).toBeNull();
+				coordinator.dispose();
+			});
+
+			it("still preserves a pinned resource for an access-loss clear over the storage fallback", async () => {
+				const order = [];
+				const storage = new FakeStorage();
+				const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+				const {coordinator, created} = makeCoordinator({api, storage, host: makePinnedHost(order)});
+				await coordinator.pResolve();
+				order.length = 0;
+
+				const remote = new HubActiveCampaignStore({storage, locks: null, writerId: WRITER_B, fnDelay: async () => {}});
+				await remote.pClear({accountId: ACCOUNT_A, cause: "access_loss"});
+				await coordinator._pHandleRemote({record: null, isStorageSignal: true});
+
+				expect(order).toEqual([]);
+				expect(coordinator.activeCampaignId).toBe(CAMPAIGN_A);
+				expect(coordinator.state).toBe("switch_pending");
+				expect(created[0].isDisposed).toBe(false);
+			});
+
+			it("treats a tombstone with no cause as a logout", async () => {
+				const order = [];
+				const storage = new FakeStorage();
+				const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+				const {coordinator} = makeCoordinator({api, storage, host: makePinnedHost(order)});
+				await coordinator.pResolve();
+				order.length = 0;
+
+				// A record written by an older client, before the cause existed.
+				storage.setItem(ACTIVE_CAMPAIGN_STORAGE_KEY, JSON.stringify({
+					schemaVersion: 1,
+					accountId: ACCOUNT_A,
+					campaignId: null,
+					state: "cleared",
+					revision: 99,
+					updatedAt: Date.now() + 10_000,
+					writerId: WRITER_B,
+				}));
+				await coordinator._pHandleRemote({record: null, isStorageSignal: true});
+
+				expect(order).toEqual(["realtime", "rules", "brew"]);
+				expect(coordinator.activeCampaignId).toBeNull();
+			});
 		});
 	});
 });

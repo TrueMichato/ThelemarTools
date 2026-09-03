@@ -1,9 +1,13 @@
 import {
+	CLEAR_CAUSE_ACCESS_LOSS,
+	CLEAR_CAUSE_LOGOUT,
+	CLEAR_CAUSE_SELECTION,
+	isDeferrableClearCause,
 	isActiveCampaignUuid,
 	isStrictlyGreaterActiveCampaignRecord,
 	ACTIVE_CAMPAIGN_STATE_SELECTED,
 } from "./hub-active-campaign-record.js";
-import {HubActiveCampaignChannel, CLEAR_CAUSE_ACCESS_LOSS, CLEAR_CAUSE_LOGOUT, CLEAR_CAUSE_SELECTION} from "./hub-active-campaign-channel.js";
+import {HubActiveCampaignChannel} from "./hub-active-campaign-channel.js";
 import {HubActiveCampaignStore} from "./hub-active-campaign-store.js";
 import {HubCampaignContext} from "./hub-campaign-context.js";
 
@@ -146,8 +150,8 @@ export class HubActiveCampaignCoordinator {
 		if (!accountId || !isActiveCampaignUuid(accountId)) {
 			const orphan = this._store.read();
 			if (orphan && orphan.state === ACTIVE_CAMPAIGN_STATE_SELECTED) {
-				const cleared = await this._store.pClear({accountId: orphan.accountId});
-				this._channel.post(cleared, {cause: CLEAR_CAUSE_LOGOUT});
+				const cleared = await this._store.pClear({accountId: orphan.accountId, cause: CLEAR_CAUSE_LOGOUT});
+				this._channel.post(cleared);
 			}
 			this._accountId = null;
 			return null;
@@ -158,8 +162,8 @@ export class HubActiveCampaignCoordinator {
 		if (stored && stored.accountId !== accountId) {
 			// A record for another account is treated as no selection and replaced through the same
 			// mutation protocol, so the current account starts from a revision-1 tombstone.
-			const cleared = await this._store.pClear({accountId});
-			this._channel.post(cleared, {cause: CLEAR_CAUSE_LOGOUT});
+			const cleared = await this._store.pClear({accountId, cause: CLEAR_CAUSE_SELECTION});
+			this._channel.post(cleared);
 		}
 		return accountId;
 	}
@@ -411,8 +415,8 @@ export class HubActiveCampaignCoordinator {
 			const stored = this._store.readForAccount(this._accountId);
 			const isMatching = !campaignId || (stored?.state === ACTIVE_CAMPAIGN_STATE_SELECTED && stored.campaignId === campaignId);
 			if (isMatching && stored?.state === ACTIVE_CAMPAIGN_STATE_SELECTED) {
-				const cleared = await this._store.pClear({accountId: this._accountId});
-				this._channel.post(cleared, {cause: CLEAR_CAUSE_ACCESS_LOSS});
+				const cleared = await this._store.pClear({accountId: this._accountId, cause: CLEAR_CAUSE_ACCESS_LOSS});
+				this._channel.post(cleared);
 			}
 		}
 		const isActiveContextLost = !campaignId || campaignId === this._activeCampaignId;
@@ -565,8 +569,8 @@ export class HubActiveCampaignCoordinator {
 		// Fence first so an in-flight select cannot land a higher revision over this tombstone.
 		this._nextGeneration();
 		if (this._accountId) {
-			const cleared = await this._store.pClear({accountId: this._accountId});
-			this._channel.post(cleared, {cause: CLEAR_CAUSE_LOGOUT});
+			const cleared = await this._store.pClear({accountId: this._accountId, cause: CLEAR_CAUSE_LOGOUT});
+			this._channel.post(cleared);
 		}
 		await this.pTeardown({reason: trigger, isFenceGeneration: false});
 		this._setState("signed_out", {trigger});
@@ -588,15 +592,14 @@ export class HubActiveCampaignCoordinator {
 		if (!winner) return;
 		// Rebroadcast only after a repair physically raised storage, so tabs that saw only the
 		// losing write converge. Repair never bumps the revision, so this terminates.
-		if (didRepairStorage) this._channel.post(winner, {cause: payload?.cause});
+		if (didRepairStorage) this._channel.post(winner);
 		if (!isStrictlyGreaterActiveCampaignRecord(winner, previous)) return;
 
 		if (winner.state !== ACTIVE_CAMPAIGN_STATE_SELECTED) {
-			// A tombstone alone does not say *why* the selection was cleared. Logout and account
-			// loss must always tear down, but a clear caused by losing access to some other
-			// campaign must not dismantle an unrelated resource this tab still legitimately holds.
-			const cause = payload?.cause || CLEAR_CAUSE_SELECTION;
-			const isForcedTeardown = cause === CLEAR_CAUSE_LOGOUT
+			// The cause lives on the durable record, so it survives both delivery orderings and the
+			// storage-only fallback, and an absent or unknown cause degrades to `logout`. Deferring
+			// is therefore only possible for a cause we positively recognise as non-logout.
+			const isForcedTeardown = !isDeferrableClearCause(winner.cause)
 				|| !this._activeCampaignId
 				|| !this._host.isResourcePinned?.();
 			if (!isForcedTeardown) {

@@ -27,11 +27,12 @@ The selection is a **device-local preference hint**, bound to one account:
 
 ```json
 {"schemaVersion":1,"accountId":"<uuid>","campaignId":"<uuid>|null","state":"selected|cleared",
- "revision":7,"updatedAt":1788271737000,"writerId":"<uuid>"}
+ "cause":"logout|access_loss|selection","revision":7,"updatedAt":1788271737000,"writerId":"<uuid>"}
 ```
 
-Clearing writes a durable **tombstone** (`state: "cleared"`, `campaignId: null`). `removeItem()` is
-used only to evict a malformed, oversized, or unknown-schema value — never a valid record.
+Clearing writes a durable **tombstone** (`state: "cleared"`, `campaignId: null`) carrying the
+`cause` that produced it; `cause` is absent on a selection. `removeItem()` is used only to evict a
+malformed, oversized, or unknown-schema value — never a valid record.
 
 ## Ordering and convergence
 
@@ -158,12 +159,25 @@ frozen page must never reopen a private stream for a viewer who is no longer aut
 `HubRealtimeClient.suspend()` deliberately retains replay state, and `resume()` reconnects from the
 retained cursor — a restored page continues its subscription instead of going permanently stale.
 
-A remote clear needs to say **why**. A durable tombstone looks identical whether it came from a
-logout or from another tab losing access to an unrelated campaign, so the cause travels as
-transient channel metadata (`logout`, `access_loss`, `selection`). Logout always tears down, pinned
-or not — it is a security boundary. Any other cause lets a resource-pinned host adopt the cleared
-device default and enter `switch_pending` while keeping its open resource, so losing access to
-campaign X cannot dismantle an unrelated open campaign Y.
+A remote clear needs to say **why**, and that reason is part of the **durable record**, not transient
+message metadata:
+
+```json
+{"schemaVersion":1,"accountId":"…","campaignId":null,"state":"cleared","cause":"logout",
+ "revision":8,"updatedAt":…,"writerId":"…"}
+```
+
+A transient signal cannot carry this safely. The `storage` fallback has no payload to attach it to,
+and when both transports deliver the same record the second one is correctly discarded by the
+strict-greater convergence guard — so a message-only cause is lost in exactly the cases that matter.
+Putting it on the record makes the decision identical regardless of delivery order or transport.
+
+`cause` is one of `logout`, `access_loss`, or `selection`, and it **fails closed**: an absent or
+unrecognised value is read as `logout`, so a record written by an older client still tears down.
+Logout always tears down, pinned or not — it is a security boundary. Only a positively recognised
+`access_loss` or `selection` lets a resource-pinned host adopt the cleared device default and enter
+`switch_pending` while keeping its open resource, so losing access to campaign X cannot dismantle an
+unrelated open campaign Y.
 
 Only a non-persisted `pagehide` disposes the coordinator.
 

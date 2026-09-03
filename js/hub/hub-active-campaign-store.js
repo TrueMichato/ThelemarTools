@@ -1,6 +1,7 @@
 import {
 	ACTIVE_CAMPAIGN_STORAGE_KEY,
 	ACTIVE_CAMPAIGN_WRITE_LOCK,
+	CLEAR_CAUSE_LOGOUT,
 	compareActiveCampaignRecords,
 	isActiveCampaignUuid,
 	isSameAccount,
@@ -127,8 +128,8 @@ export class HubActiveCampaignStore {
 		return this._pMutate(accountId, args => makeSelectedRecord({...args, campaignId}));
 	}
 
-	async pClear ({accountId}) {
-		return this._pMutate(accountId, args => makeClearedRecord(args));
+	async pClear ({accountId, cause = CLEAR_CAUSE_LOGOUT}) {
+		return this._pMutate(accountId, args => makeClearedRecord({...args, cause}));
 	}
 
 	/**
