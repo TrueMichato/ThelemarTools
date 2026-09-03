@@ -515,7 +515,10 @@ class CharacterSheetPage {
 	_getHubActiveCampaignHost () {
 		return {
 			isContextHost: true,
-			isResourcePinned: () => !!this._currentCharacterId && this._isHubCharacter,
+			// Pinned from coordinator creation, not from `_currentCharacterId`: that is only set
+			// after heavy initialisation, so a remote selection arriving mid-startup would
+			// otherwise be treated as a free switch and could abort or rebind this page.
+			isResourcePinned: () => true,
 			getExplicitCampaignId: () => this._hubCampaignId,
 			// The character repository, realtime sync, and recovery keys are all bound to the
 			// campaign this page was opened with. A remembered selection therefore updates the

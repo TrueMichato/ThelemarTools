@@ -99,6 +99,15 @@ repositories.
 
 A **resource-pinned** host (an open campaign character, an open DM workspace) adopts a new device
 selection but stays on its own campaign in `switch_pending`. It does not tear down or activate.
+Pinning is decided from coordinator creation, not from state that only exists after heavy
+initialisation, so a remote selection arriving mid-startup cannot abort or rebind the page.
+
+A host may also refuse *activation* while still accepting the selection, via
+`shouldActivateContext`. The Character Sheet uses this: its repository, realtime stream, roll log,
+and URL are bound to the campaign it was opened with, so only that campaign may install context.
+The gate applies to switching as well as startup — otherwise a remote selection could install
+campaign B's rules while every other binding still pointed at A.
+
 A **switchable** host must pass `pPreflightSwitch` — which stops new mutations and checks pending
 writes — before any teardown runs; if it cannot guarantee safety the switch stays pending and the
 current campaign stays active. Logout, account mismatch, and authoritative access loss always tear
@@ -146,6 +155,15 @@ tombstones**, so a clear written by another tab while this page was frozen is ho
 
 Realtime is resumed **after** revalidation completes, and only if the context is still active: a
 frozen page must never reopen a private stream for a viewer who is no longer authorised.
+`HubRealtimeClient.suspend()` deliberately retains replay state, and `resume()` reconnects from the
+retained cursor — a restored page continues its subscription instead of going permanently stale.
+
+A remote clear needs to say **why**. A durable tombstone looks identical whether it came from a
+logout or from another tab losing access to an unrelated campaign, so the cause travels as
+transient channel metadata (`logout`, `access_loss`, `selection`). Logout always tears down, pinned
+or not — it is a security boundary. Any other cause lets a resource-pinned host adopt the cleared
+device default and enter `switch_pending` while keeping its open resource, so losing access to
+campaign X cannot dismantle an unrelated open campaign Y.
 
 Only a non-persisted `pagehide` disposes the coordinator.
 

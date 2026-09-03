@@ -1079,4 +1079,98 @@ describe("hub realtime", () => {
 			lastBatchCount: 1,
 		}));
 	});
+	describe("BFCache suspend and resume", () => {
+		const pMakeClient = async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			class BrowserSocket extends EventEmitter {
+				readyState = 1;
+				sent = [];
+				closed = false;
+				send (message) { this.sent.push(JSON.parse(message)); }
+				close () {
+					this.closed = true;
+					this.readyState = 3;
+					this.emit("close", {code: 1000});
+				}
+				addEventListener (type, listener) { this.on(type, listener); }
+				removeEventListener (type, listener) { this.off(type, listener); }
+			}
+			const sockets = [];
+			const client = new HubRealtimeClient({
+				campaignId: "cmp",
+				location: {protocol: "https:", host: "tools.example"},
+				fnCreateSocket: () => {
+					const socket = new BrowserSocket();
+					sockets.push(socket);
+					queueMicrotask(() => socket.emit("open"));
+					return socket;
+				},
+				fnSetTimeout: () => 1,
+				fnClearTimeout: () => {},
+				fnSetInterval: () => 1,
+				fnClearInterval: () => {},
+			});
+			return {client, sockets};
+		};
+
+		it("reconnects a suspended client so a restored page is not permanently stale", async () => {
+			const {client, sockets} = await pMakeClient();
+			await client.pConnect();
+			expect(sockets).toHaveLength(1);
+
+			// A persisted `pagehide` disconnects and disables reconnect.
+			client.suspend();
+			expect(client.isSuspended).toBe(true);
+			expect(sockets[0].closed).toBe(true);
+			expect(client.getConnectionState().state).toBe("closed");
+
+			// The matching `pageshow` must actually open a new socket, not silently no-op.
+			await client.resume();
+			expect(sockets).toHaveLength(2);
+			expect(client.isSuspended).toBe(false);
+			// Reconnected and re-syncing, rather than stranded in `closed`.
+			expect(client.getConnectionState().state).toBe("syncing");
+
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 0},
+				characterRefs: [],
+				events: [],
+				replay: {scannedThroughSequence: 0, hasMore: false},
+			});
+			expect(client.getConnectionState().state).toBe("live");
+		});
+
+		it("resumes from the retained cursor rather than restarting a cold stream", async () => {
+			const {client, sockets} = await pMakeClient();
+			await client.pConnect();
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 42},
+				characterRefs: [],
+				events: [],
+				replay: {scannedThroughSequence: 42, hasMore: false},
+			});
+
+			client.suspend();
+			await client.resume();
+
+			// `suspend()` keeps replay state on purpose, so the resumed subscription continues
+			// from the retained cursor instead of replaying the campaign from zero.
+			expect(sockets[1].sent).toEqual([{type: "resync", afterSequence: 42}]);
+		});
+
+		it("is inert when the client was never suspended or was permanently closed", async () => {
+			const {client, sockets} = await pMakeClient();
+			await client.pConnect();
+
+			// A `pageshow` without a preceding persisted `pagehide` must not duplicate the socket.
+			expect(client.resume()).toBeNull();
+			expect(sockets).toHaveLength(1);
+
+			client.close();
+			expect(client.resume()).toBeNull();
+			expect(sockets).toHaveLength(1);
+		});
+	});
 });

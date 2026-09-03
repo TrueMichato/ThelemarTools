@@ -3753,7 +3753,7 @@ window.addEventListener("load", () => {
 				hubController.handleWorkspaceLoadError(error);
 				// Route the failure through coordinator classification so an archived or
 				// inaccessible explicit campaign still clears a stored selection naming it.
-				await activeCampaign?.pReportFailure({error, campaignId}).catch(() => {});
+				await activeCampaign?.pReportFailure({error, campaignId, session: verified?.session})?.catch(() => {});
 				activeCampaign?.dispose();
 				campaignContext?.dispose();
 				activeCampaign = null;

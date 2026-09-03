@@ -146,6 +146,24 @@ describe("HubActiveCampaignChannel", () => {
 		]);
 	});
 
+	it("carries a bounded clear cause so receivers can distinguish logout from access loss", () => {
+		const a = makeChannel(WRITER_A);
+		const b = makeChannel(WRITER_B);
+		const received = [];
+		b.onMessage(payload => received.push(payload));
+
+		const tombstone = makeClearedRecord({accountId: ACCOUNT_A, revision: 3, updatedAt: 3000, writerId: WRITER_A});
+		a.post(tombstone, {cause: "logout"});
+		expect(a._channel.posted[0].cause).toBe("logout");
+		expect(received[0].cause).toBe("logout");
+
+		// An unknown cause is dropped rather than forwarded, and a selection never carries one.
+		a.post(makeClearedRecord({accountId: ACCOUNT_A, revision: 4, updatedAt: 4000, writerId: WRITER_A}), {cause: "something-else"});
+		expect(a._channel.posted[1].cause).toBeUndefined();
+		a.post(selected({revision: 5}), {cause: "logout"});
+		expect(a._channel.posted[2].cause).toBeUndefined();
+	});
+
 	it("does not loop: repeated receipts of one logical record produce no unbounded rebroadcast", () => {
 		const a = makeChannel(WRITER_A);
 		const b = makeChannel(WRITER_B);

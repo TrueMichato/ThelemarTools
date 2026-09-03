@@ -11,6 +11,16 @@ const MESSAGE_SELECTION_CHANGED = "selection_changed";
 const MESSAGE_SELECTION_CLEARED = "selection_cleared";
 
 /**
+ * Why a selection was cleared. A tombstone is durable and identical regardless of cause, so the
+ * cause travels as transient message metadata: a receiver holding an unrelated open resource needs
+ * to distinguish "you are signed out" from "someone lost access to a different campaign".
+ */
+export const CLEAR_CAUSE_LOGOUT = "logout";
+export const CLEAR_CAUSE_ACCESS_LOSS = "access_loss";
+export const CLEAR_CAUSE_SELECTION = "selection";
+const CLEAR_CAUSES = new Set([CLEAR_CAUSE_LOGOUT, CLEAR_CAUSE_ACCESS_LOSS, CLEAR_CAUSE_SELECTION]);
+
+/**
  * Same-browser selection synchronisation (ADR 0013).
  *
  * Uses the origin-wide `hub:active-campaign:v1` channel rather than the per-campaign lease channel,
@@ -68,7 +78,7 @@ export class HubActiveCampaignChannel {
 			writerId: data.writerId,
 		}));
 		if (!record) return;
-		this._emit({record, isStorageSignal: false});
+		this._emit({record, isStorageSignal: false, cause: CLEAR_CAUSES.has(data.cause) ? data.cause : null});
 	}
 
 	_emit (payload) {
@@ -84,20 +94,24 @@ export class HubActiveCampaignChannel {
 	 * raised durable storage; combined with verbatim repair this makes the ordering value monotone
 	 * and bounded, so tabs reach a fixed point instead of ping-ponging writes.
 	 */
-	post (record) {
+	post (record, {cause = null} = {}) {
 		if (this._isClosed || !record || !this._channel?.postMessage) return false;
-		const key = getActiveCampaignRecordKey(record);
+		const isCleared = record.state === ACTIVE_CAMPAIGN_STATE_CLEARED;
+		const boundedCause = isCleared && CLEAR_CAUSES.has(cause) ? cause : null;
+		const key = `${getActiveCampaignRecordKey(record)}|${boundedCause || ""}`;
 		if (key && key === this._lastPostedKey) return false;
 		this._lastPostedKey = key;
 		try {
 			this._channel.postMessage({
-				type: record.state === ACTIVE_CAMPAIGN_STATE_CLEARED ? MESSAGE_SELECTION_CLEARED : MESSAGE_SELECTION_CHANGED,
+				type: isCleared ? MESSAGE_SELECTION_CLEARED : MESSAGE_SELECTION_CHANGED,
 				schemaVersion: ACTIVE_CAMPAIGN_SCHEMA_VERSION,
 				accountId: record.accountId,
-				campaignId: record.state === ACTIVE_CAMPAIGN_STATE_CLEARED ? null : record.campaignId,
+				campaignId: isCleared ? null : record.campaignId,
 				revision: record.revision,
 				updatedAt: record.updatedAt,
 				writerId: record.writerId,
+				// Transient routing metadata, never persisted alongside the durable record.
+				...(boundedCause ? {cause: boundedCause} : {}),
 			});
 			return true;
 		} catch {

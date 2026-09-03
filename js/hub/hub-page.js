@@ -670,7 +670,7 @@ async function pInitCampaign ({session}) {
 		campaign = await api.pGetCampaign({campaignId});
 	} catch (error) {
 		// An inaccessible explicit campaign must still invalidate a stored selection naming it.
-		await activeCampaign.pReportFailure({error, campaignId}).catch(() => {});
+		await activeCampaign.pReportFailure({error, campaignId, session}).catch(() => {});
 		throw error;
 	}
 	// The session and campaign are already verified here, so recording the selection costs no

@@ -113,4 +113,26 @@ describe("Character Sheet hub teardown owners", () => {
 			page._clearHubRules();
 		}).not.toThrow();
 	});
+
+	it("is resource-pinned from coordinator creation, before heavy initialisation finishes", () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		const host = page._getHubActiveCampaignHost();
+
+		// `_currentCharacterId` is only set after characters load. If pinning waited for it, a
+		// remote selection arriving mid-startup would be treated as a free switch and could abort
+		// or rebind this page while its URL, repository, and realtime still point at campaign A.
+		expect(page._currentCharacterId).toBeFalsy();
+		expect(host.isResourcePinned()).toBe(true);
+	});
+
+	it("only activates context for the campaign the page is bound to", () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._hubCampaignId = "33333333-3333-4333-8333-333333333333";
+		const host = page._getHubActiveCampaignHost();
+
+		expect(host.shouldActivateContext({campaignId: page._hubCampaignId})).toBe(true);
+		// The repository, realtime, roll log, and URL are bound to `_hubCampaignId`; activating a
+		// different campaign's rules here would desynchronise them.
+		expect(host.shouldActivateContext({campaignId: "44444444-4444-4444-8444-444444444444"})).toBe(false);
+	});
 });

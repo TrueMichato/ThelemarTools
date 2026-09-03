@@ -3,7 +3,7 @@ import {
 	isStrictlyGreaterActiveCampaignRecord,
 	ACTIVE_CAMPAIGN_STATE_SELECTED,
 } from "./hub-active-campaign-record.js";
-import {HubActiveCampaignChannel} from "./hub-active-campaign-channel.js";
+import {HubActiveCampaignChannel, CLEAR_CAUSE_ACCESS_LOSS, CLEAR_CAUSE_LOGOUT, CLEAR_CAUSE_SELECTION} from "./hub-active-campaign-channel.js";
 import {HubActiveCampaignStore} from "./hub-active-campaign-store.js";
 import {HubCampaignContext} from "./hub-campaign-context.js";
 
@@ -147,7 +147,7 @@ export class HubActiveCampaignCoordinator {
 			const orphan = this._store.read();
 			if (orphan && orphan.state === ACTIVE_CAMPAIGN_STATE_SELECTED) {
 				const cleared = await this._store.pClear({accountId: orphan.accountId});
-				this._channel.post(cleared);
+				this._channel.post(cleared, {cause: CLEAR_CAUSE_LOGOUT});
 			}
 			this._accountId = null;
 			return null;
@@ -159,7 +159,7 @@ export class HubActiveCampaignCoordinator {
 			// A record for another account is treated as no selection and replaced through the same
 			// mutation protocol, so the current account starts from a revision-1 tombstone.
 			const cleared = await this._store.pClear({accountId});
-			this._channel.post(cleared);
+			this._channel.post(cleared, {cause: CLEAR_CAUSE_LOGOUT});
 		}
 		return accountId;
 	}
@@ -354,7 +354,11 @@ export class HubActiveCampaignCoordinator {
 	 * candidate that turns out to be archived or inaccessible still invalidates a matching
 	 * stored selection.
 	 */
-	async pReportFailure ({error, campaignId = null, trigger = "explicit_url"}) {
+	async pReportFailure ({error, campaignId = null, trigger = "explicit_url", session = null}) {
+		// Classification clears through the store, which needs an adopted account. On the
+		// host-owned bootstrap paths (`campaign.html`, DM Screen) `pResolve` never ran, so
+		// without this the clear would silently no-op.
+		if (!this._accountId) await this._pAdoptAccount(session || this._session);
 		return this._pHandleFailure({error, trigger, startedAt: null, campaignId});
 	}
 
@@ -408,7 +412,7 @@ export class HubActiveCampaignCoordinator {
 			const isMatching = !campaignId || (stored?.state === ACTIVE_CAMPAIGN_STATE_SELECTED && stored.campaignId === campaignId);
 			if (isMatching && stored?.state === ACTIVE_CAMPAIGN_STATE_SELECTED) {
 				const cleared = await this._store.pClear({accountId: this._accountId});
-				this._channel.post(cleared);
+				this._channel.post(cleared, {cause: CLEAR_CAUSE_ACCESS_LOSS});
 			}
 		}
 		const isActiveContextLost = !campaignId || campaignId === this._activeCampaignId;
@@ -513,16 +517,30 @@ export class HubActiveCampaignCoordinator {
 		const generation = this._nextGeneration();
 		const signal = this._abort.signal;
 		const startedAt = this._fnNow();
+		// A switch must honour the same activation gate as startup resolution: a host may accept a
+		// new device default for selection purposes while refusing to activate its context,
+		// because its repository, realtime, and URL are bound to the campaign it was opened with.
+		const wantsContext = this._host.isContextHost !== false
+			&& this._host.shouldActivateContext?.({campaignId, isExplicit: false}) !== false;
 		let verified;
 		try {
-			verified = this._host.isContextHost === false
-				? await this.pVerifySelection({campaignId, signal})
-				: await this.pVerifyContext({campaignId, signal});
+			verified = wantsContext
+				? await this.pVerifyContext({campaignId, signal})
+				: await this.pVerifySelection({campaignId, signal});
 		} catch (error) {
 			if (!this._isCurrent(generation)) return this._state;
 			return this._pHandleFailure({error, trigger, startedAt, campaignId});
 		}
 		if (!this._isCurrent(generation)) return this._state;
+
+		if (!wantsContext) {
+			// Adopt the device default without disturbing the open resource or its context.
+			if (isPersistSelection) await this._pPersistSelection({campaignId, generation});
+			this._pendingCampaignId = campaignId;
+			this._setState("switch_pending", {trigger, startedAt});
+			this._host.onPendingSelection?.({campaignId});
+			return this._state;
+		}
 
 		if (!await this.pTeardown({reason: trigger, isFenceGeneration: false})) return this._state;
 
@@ -548,7 +566,7 @@ export class HubActiveCampaignCoordinator {
 		this._nextGeneration();
 		if (this._accountId) {
 			const cleared = await this._store.pClear({accountId: this._accountId});
-			this._channel.post(cleared);
+			this._channel.post(cleared, {cause: CLEAR_CAUSE_LOGOUT});
 		}
 		await this.pTeardown({reason: trigger, isFenceGeneration: false});
 		this._setState("signed_out", {trigger});
@@ -570,10 +588,23 @@ export class HubActiveCampaignCoordinator {
 		if (!winner) return;
 		// Rebroadcast only after a repair physically raised storage, so tabs that saw only the
 		// losing write converge. Repair never bumps the revision, so this terminates.
-		if (didRepairStorage) this._channel.post(winner);
+		if (didRepairStorage) this._channel.post(winner, {cause: payload?.cause});
 		if (!isStrictlyGreaterActiveCampaignRecord(winner, previous)) return;
 
 		if (winner.state !== ACTIVE_CAMPAIGN_STATE_SELECTED) {
+			// A tombstone alone does not say *why* the selection was cleared. Logout and account
+			// loss must always tear down, but a clear caused by losing access to some other
+			// campaign must not dismantle an unrelated resource this tab still legitimately holds.
+			const cause = payload?.cause || CLEAR_CAUSE_SELECTION;
+			const isForcedTeardown = cause === CLEAR_CAUSE_LOGOUT
+				|| !this._activeCampaignId
+				|| !this._host.isResourcePinned?.();
+			if (!isForcedTeardown) {
+				this._pendingCampaignId = null;
+				this._setState("switch_pending", {trigger: "broadcast_channel"});
+				this._host.onPendingSelection?.({campaignId: null});
+				return;
+			}
 			await this.pTeardown({reason: "broadcast_channel"});
 			this._setState("local", {trigger: "broadcast_channel"});
 			return;

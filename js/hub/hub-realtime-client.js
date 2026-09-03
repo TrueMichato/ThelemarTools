@@ -22,6 +22,8 @@ export class HubRealtimeClient {
 		this._fnOnListenerError = fnOnListenerError;
 		this._socket = null;
 		this._socketGeneration = 0;
+		this._isSuspended = false;
+		this._isClosed = false;
 		this._pConnecting = null;
 		this._pendingConnectionReject = null;
 		this._shouldReconnect = false;
@@ -327,10 +329,30 @@ export class HubRealtimeClient {
 	}
 
 	suspend () {
+		if (this._isClosed) return;
+		this._isSuspended = true;
+		// Keep replay state: a BFCache restore must resume the same subscription, not a cold one.
 		this._disconnect({isResetReplay: false});
 	}
 
+	/**
+	 * Reconnect after `suspend()`, replaying from the retained cursor.
+	 *
+	 * Without this, a persisted `pagehide` disables reconnect and drops the socket, and the
+	 * matching `pageshow` silently leaves the roster, projections, and presence stale.
+	 */
+	resume () {
+		if (this._isClosed || !this._isSuspended) return null;
+		this._isSuspended = false;
+		if (this._socket || this._pConnecting) return this._pConnecting;
+		return this.pConnect();
+	}
+
+	get isSuspended () { return this._isSuspended; }
+
 	close () {
+		this._isClosed = true;
+		this._isSuspended = false;
 		this._disconnect({isResetReplay: true});
 	}
 }

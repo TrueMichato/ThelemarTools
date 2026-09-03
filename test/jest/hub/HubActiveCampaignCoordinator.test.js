@@ -1,7 +1,7 @@
 import {HubActiveCampaignCoordinator, TEARDOWN_MARKERS} from "../../../js/hub/hub-active-campaign-coordinator.js";
 import {HubActiveCampaignChannel} from "../../../js/hub/hub-active-campaign-channel.js";
 import {HubActiveCampaignStore} from "../../../js/hub/hub-active-campaign-store.js";
-import {makeSelectedRecord} from "../../../js/hub/hub-active-campaign-record.js";
+import {makeClearedRecord, makeSelectedRecord} from "../../../js/hub/hub-active-campaign-record.js";
 
 const ACCOUNT_A = "11111111-1111-4111-8111-111111111111";
 const ACCOUNT_B = "22222222-2222-4222-8222-222222222222";
@@ -222,6 +222,40 @@ describe("HubActiveCampaignCoordinator", () => {
 
 			const {coordinator, store} = makeCoordinator({api, storage});
 			await coordinator.pResolve({session: {signedIn: true, account: {id: ACCOUNT_A}}});
+			await coordinator.pReportFailure({error: apiError("FORBIDDEN", 403), campaignId: CAMPAIGN_A});
+
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({state: "cleared"});
+		});
+
+		it("clears from a fresh coordinator in production ordering, before any resolve", async () => {
+			const storage = new FakeStorage();
+			const api = makeApi();
+			const seed = makeCoordinator({api, storage});
+			await seed.store.pSelect({accountId: ACCOUNT_A, campaignId: CAMPAIGN_A});
+
+			// Production ordering: `campaign.html` and the DM Screen own their bootstrap and call
+			// this BEFORE `pResolve`/`adoptVerified`, so no account has been adopted yet.
+			const {coordinator, store} = makeCoordinator({api, storage});
+			expect(coordinator.accountId).toBeNull();
+			await coordinator.pReportFailure({
+				error: apiError("FORBIDDEN", 403),
+				campaignId: CAMPAIGN_A,
+				session: {signedIn: true, account: {id: ACCOUNT_A}},
+			});
+
+			expect(coordinator.accountId).toBe(ACCOUNT_A);
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({state: "cleared"});
+		});
+
+		it("adopts a session cached by an earlier verification when none is passed", async () => {
+			const storage = new FakeStorage();
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: apiError("FORBIDDEN", 403)}});
+			const seed = makeCoordinator({api, storage});
+			await seed.store.pSelect({accountId: ACCOUNT_A, campaignId: CAMPAIGN_A});
+
+			const {coordinator, store} = makeCoordinator({api, storage});
+			// The DM Screen path: `pVerifyContext` reads and caches the session, then throws.
+			await expect(coordinator.pVerifyContext({campaignId: CAMPAIGN_A})).rejects.toBeDefined();
 			await coordinator.pReportFailure({error: apiError("FORBIDDEN", 403), campaignId: CAMPAIGN_A});
 
 			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({state: "cleared"});
@@ -604,6 +638,78 @@ describe("HubActiveCampaignCoordinator", () => {
 			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_B);
 			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({campaignId: CAMPAIGN_B});
 		});
+
+		it("honours shouldActivateContext on the switch path, not only at startup", async () => {
+			const api = makeApi({campaigns: {
+				[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A),
+				[CAMPAIGN_B]: activeCampaign(CAMPAIGN_B),
+			}});
+			const {coordinator, created} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					// The Character Sheet gate: only the campaign this page was opened with may
+					// activate, because repository/realtime/URL are bound to it.
+					shouldActivateContext: ({campaignId}) => campaignId === CAMPAIGN_A,
+					isResourcePinned: () => false,
+					pPreflightSwitch: async () => ({safe: true}),
+				},
+			});
+			await coordinator.pResolve();
+			const contextCountBefore = created.length;
+			api.calls.length = 0;
+
+			await coordinator.pSwitchTo({campaignId: CAMPAIGN_B, trigger: "broadcast_channel"});
+
+			// The device default moves, but B's context must never be installed here.
+			expect(coordinator.state).toBe("switch_pending");
+			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_A);
+			expect(coordinator.pendingCampaignId).toBe(CAMPAIGN_B);
+			expect(created).toHaveLength(contextCountBefore);
+			expect(api.calls.some(call => call.name === "context")).toBe(false);
+		});
+
+		it("does not let a remote selection disturb a pinned host during heavy initialisation", async () => {
+			const storage = new FakeStorage();
+			const order = [];
+			const api = makeApi({campaigns: {
+				[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A),
+				[CAMPAIGN_B]: activeCampaign(CAMPAIGN_B),
+			}});
+			// Pinning must not depend on state that only exists after heavy init completes.
+			const {coordinator, created} = makeCoordinator({
+				api,
+				storage,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					isResourcePinned: () => true,
+					shouldActivateContext: ({campaignId}) => campaignId === CAMPAIGN_A,
+					pTeardownRealtime: async () => order.push("realtime"),
+					pTeardownRules: async () => order.push("rules"),
+					pTeardownBrew: async () => order.push("brew"),
+				},
+			});
+			await coordinator.pResolve();
+			order.length = 0;
+			const contextCountBefore = created.length;
+
+			// Another tab selects B while this page is still initialising.
+			await coordinator._pHandleRemote({
+				record: makeSelectedRecord({
+					accountId: ACCOUNT_A,
+					campaignId: CAMPAIGN_B,
+					revision: 50,
+					updatedAt: Date.now() + 10_000,
+					writerId: WRITER_B,
+				}),
+				isStorageSignal: false,
+			});
+
+			expect(order).toEqual([]);
+			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_A);
+			expect(coordinator.state).toBe("switch_pending");
+			expect(created).toHaveLength(contextCountBefore);
+		});
 	});
 
 	describe("logout", () => {
@@ -878,6 +984,83 @@ describe("HubActiveCampaignCoordinator", () => {
 				isStorageSignal: false,
 			});
 			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_A);
+		});
+
+		const makeRemoteTombstone = () => makeClearedRecord({
+			accountId: ACCOUNT_A,
+			revision: 99,
+			updatedAt: Date.now() + 10_000,
+			writerId: WRITER_B,
+		});
+
+		it("keeps a pinned open resource when another tab clears after losing access elsewhere", async () => {
+			const order = [];
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+			const {coordinator, created} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					isResourcePinned: () => true,
+					pTeardownRealtime: async () => order.push("realtime"),
+					pTeardownRules: async () => order.push("rules"),
+					pTeardownBrew: async () => order.push("brew"),
+				},
+			});
+			await coordinator.pResolve();
+			order.length = 0;
+
+			// Losing access to some *other* campaign must not dismantle this open resource.
+			await coordinator._pHandleRemote({record: makeRemoteTombstone(), isStorageSignal: false, cause: "access_loss"});
+
+			expect(order).toEqual([]);
+			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_A);
+			expect(coordinator.state).toBe("switch_pending");
+			expect(created[0].isDisposed).toBe(false);
+		});
+
+		it("always tears down a pinned resource when another tab signs out", async () => {
+			const order = [];
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+			const {coordinator} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					isResourcePinned: () => true,
+					pTeardownRealtime: async () => order.push("realtime"),
+					pTeardownRules: async () => order.push("rules"),
+					pTeardownBrew: async () => order.push("brew"),
+				},
+			});
+			await coordinator.pResolve();
+			order.length = 0;
+
+			// Logout is a security boundary: pinning never defers it.
+			await coordinator._pHandleRemote({record: makeRemoteTombstone(), isStorageSignal: false, cause: "logout"});
+
+			expect(order).toEqual(["realtime", "rules", "brew"]);
+			expect(coordinator.activeCampaignId).toBeNull();
+			expect(coordinator.state).toBe("local");
+		});
+
+		it("tears down an unpinned host on any remote clear", async () => {
+			const order = [];
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+			const {coordinator} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					isResourcePinned: () => false,
+					pTeardownRealtime: async () => order.push("realtime"),
+					pTeardownBrew: async () => order.push("brew"),
+				},
+			});
+			await coordinator.pResolve();
+			order.length = 0;
+
+			await coordinator._pHandleRemote({record: makeRemoteTombstone(), isStorageSignal: false, cause: "access_loss"});
+
+			expect(order).toEqual(["realtime", "brew"]);
+			expect(coordinator.state).toBe("local");
 		});
 	});
 });

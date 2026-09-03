@@ -95,7 +95,9 @@ describe("hub performance budgets", () => {
 			"js/hub/hub-active-campaign-coordinator.js",
 		]) {
 			const source = read(path);
-			const imports = [...source.matchAll(/from "([^"]+)"/g)].map(([, specifier]) => specifier);
+			// Match real import statements only; prose in a doc comment can contain `from "…"`.
+			const imports = [...source.matchAll(/^import\s[\s\S]*?from "([^"]+)";$/gm)].map(([, specifier]) => specifier);
+			expect(imports.length).toBeGreaterThanOrEqual(path.endsWith("record.js") ? 0 : 1);
 			for (const specifier of imports) {
 				// Everything must resolve inside `js/hub/`, so the lightweight Hub shells stay light.
 				expect(specifier.startsWith("./")).toBe(true);
