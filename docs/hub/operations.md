@@ -24,15 +24,30 @@ live host before private launch.
 
 4. Create a GitHub OAuth application with callback
    `<HUB_APP_ORIGIN>/auth/github/callback`.
-5. Add allowed numeric GitHub subjects to `HUB_ALLOWED_OAUTH_SUBJECTS`, for example `github:12345678`.
+5. Set `HUB_AUTH_PROVIDERS=github`. `HUB_AUTH_EMERGENCY_DISABLED_PROVIDERS` is an incident-only kill switch;
+   disabling the sole provider intentionally prevents startup.
+6. Add allowed numeric GitHub subjects to `HUB_ALLOWED_OAUTH_SUBJECTS`, for example `github:12345678`.
    Usernames are intentionally unsupported because renamed usernames can be reclaimed.
-6. Serve the static site and BFF behind the same HTTPS origin, forwarding `/api/*` and `/auth/*` to the BFF.
+7. Serve the static site and BFF behind the same HTTPS origin, forwarding `/api/*` and `/auth/*` to the BFF.
    Set `HUB_TRUST_PROXY` only to the exact proxy IP/CIDR list, and configure that proxy to replace incoming
    forwarded headers. Leave it empty for a directly exposed BFF.
-7. Start the BFF with `npm run hub:serve`.
+8. Start the BFF with `npm run hub:serve`.
 
 The process refuses to listen until PostgreSQL is reachable and the required ledger migration exists.
 `/api/health` also returns 503 if readiness fails. See [migrations.md](migrations.md).
+
+Before rolling back to a GitHub-only image, prove every currently admitted account still has an admitted GitHub
+identity:
+
+```bash
+DATABASE_URL=... \
+HUB_ALLOWED_OAUTH_SUBJECTS=github:12345678 \
+HUB_ROLLBACK_SUPPORTED_AUTH_PROVIDERS=github \
+npm run hub:check-auth-rollback
+```
+
+Exit status 2 blocks rollback without exposing account or subject identifiers. Follow the
+[authentication provider registry runbook](runbooks/auth-provider-registry.md).
 
 ## Backup
 

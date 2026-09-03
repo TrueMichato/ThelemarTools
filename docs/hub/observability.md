@@ -1,7 +1,7 @@
 # Campaign Hub observability and SLOs
 
 > **Status:** Metrics/logging deployed; scheduled Oracle operations proof active
-> **Last verified:** 2026-09-01
+> **Last verified:** 2026-09-03
 > **Owner:** Campaign Hub operator
 
 ## Logging contract
@@ -57,12 +57,14 @@ Signals:
 | `hub_process_uptime_seconds` | Gauge | Current BFF process uptime |
 | `hub_http_requests_total` | Counter | Responses by method/template/status |
 | `hub_http_request_duration_milliseconds_sum/count` | Counter pair | Compute route average/rate-window latency |
+| `hub_auth_outcomes_total` | Counter | Bounded provider/outcome counts; never subject, profile, code, state, or token |
 | `hub_websocket_connections` | Gauge | Current authorized sockets |
 | `hub_outbox_pending` | Gauge | Pending/publishing/failed outbox rows |
 | `hub_outbox_failed` | Gauge | Failed rows awaiting retry |
 | `hub_outbox_oldest_age_seconds` | Gauge | Age of oldest undelivered event |
 | `hub_active_sessions` | Gauge | Unrevoked/unexpired sessions |
 | `hub_expired_receipts` | Gauge | Receipts awaiting maintenance |
+| `hub_expired_oauth_transactions` | Gauge | Consumed/expired transaction rows awaiting bounded cleanup |
 | `hub_deletion_due_accounts` | Gauge | Accounts past purge deadline |
 | `hub_last_maintenance_age_seconds` | Gauge | Time since successful maintenance |
 | `hub_last_backup_age_seconds` | Gauge | Time since recorded encrypted backup |

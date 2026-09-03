@@ -13,7 +13,8 @@ a public third-party API. Schemas in `server/src/app.js` are authoritative if th
 ### Authentication
 
 - Session cookie: signed `__Host-hub_session`; httpOnly, SameSite=Lax, Secure in production.
-- OAuth state cookie: signed `__Host-hub_oauth`; httpOnly and short-lived.
+- OAuth correlation cookie: signed `__Host-hub_oauth`; httpOnly and short-lived. State/PKCE live in a
+  provider/operation/redirect-bound one-time server transaction.
 - `GET /api/session` is the bootstrap call. Signed-in responses include the CSRF token.
 - Private reads require an active session. Campaign reads additionally require active membership.
 
@@ -57,12 +58,12 @@ Path/query keys ending in `Id` must be UUID-shaped. Invalid values fail as `INVA
 | Method/path | Access | Input | Result/behavior |
 |---|---|---|---|
 | `GET /api/health` | Public | none | `{ok:true}` or 503 `{ok:false,error:"DATABASE_UNAVAILABLE"}`; verifies DB, migration ledger, and required migration |
-| `GET /api/meta` | Public | none | protocol and package/app version |
-| `GET /auth/github/start` | Public, 10/min | query `returnTo?` | Sets signed OAuth-state cookie and redirects to GitHub PKCE authorization |
-| `GET /auth/github/callback` | OAuth state cookie, 20/min | query `code`, `state` | Exchanges code, enforces numeric-subject allowlist, rotates prior session, sets session cookie, redirects safely |
+| `GET /api/meta` | Public | none | protocol/package version plus additive `auth.provider_registry.v1` capability and bounded provider availability |
+| `GET /auth/github/start` | Public, 10/min | query `returnTo?` | Creates a one-time durable transaction, sets signed correlation cookie, redirects to GitHub PKCE authorization |
+| `GET /auth/github/callback` | OAuth correlation cookie, 20/min | query `code`, `state` | Atomically consumes provider/operation/redirect-bound state, exchanges code, enforces numeric-subject allowlist, atomically resolves account/identity/session, rotates prior session, redirects safely |
 | `GET /api/session` | Public | session cookie optional | `{signedIn:false}` or account + CSRF token |
 | `POST /api/logout` | Mutation security | none | Revokes current session, closes its sockets, clears cookie |
-| `GET /api/account/export` | Authenticated | none | Download containing owned account/membership/campaign/character/audit data |
+| `GET /api/account/export` | Authenticated | none | Download containing owned account/external-identity/session-provenance/membership/campaign/character/audit data; never provider tokens/OAuth transactions |
 | `GET /api/account/sessions` | Authenticated active account | none | Own sessions with current/revoked/activity metadata |
 | `POST /api/account/sessions/:sessionId/revoke` | Authenticated mutation | own session UUID | Revokes session/leases and closes matching sockets |
 | `POST /api/account/sessions/revoke-others` | Authenticated mutation | none | Revokes all other own sessions/leases/sockets |
@@ -241,7 +242,7 @@ Campaign role alone does not permit reading another DM's workspace.
 |---|---|
 | Authentication/security | `AUTH_REQUIRED`, `INVALID_ORIGIN`, `INVALID_CSRF`, `PROTOCOL_UPDATE_REQUIRED`, `ACCOUNT_NOT_ALLOWED`, `ACCOUNT_DELETION_PENDING`, `FORBIDDEN` |
 | Request/idempotency | `INVALID_REQUEST`, `INVALID_ID`, `INVALID_CAMPAIGN_NAME`, `IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_REUSED`, `IDEMPOTENCY_RESULT_GONE`, `PAYLOAD_TOO_LARGE`, `REQUEST_REJECTED` |
-| OAuth | `INVALID_OAUTH_STATE`, `ACCOUNT_NOT_ALLOWED` |
+| OAuth | `INVALID_OAUTH_STATE`, `ACCOUNT_NOT_ALLOWED`, `AUTH_PROVIDER_UNAVAILABLE` |
 | Not found/lifecycle | `ACCOUNT_NOT_FOUND`, `SESSION_NOT_FOUND`, `CAMPAIGN_NOT_FOUND`, `MEMBERSHIP_NOT_FOUND`, `CHARACTER_NOT_FOUND`, `WORKSPACE_NOT_FOUND`, `ACTION_NOT_FOUND`, `TRANSFER_NOT_FOUND`, `BREW_NOT_FOUND`, `RULES_NOT_FOUND`, `INVITE_INVALID`, `INVITE_NOT_FOUND`, `ACCOUNT_DELETION_NOT_PENDING` |
 | Concurrency/lifecycle conflicts | `REVISION_CONFLICT`, `LEASE_HELD`, `LEASE_EXPIRED`, `LEASE_FENCED`, `CHARACTER_BUSY`, `CAMPAIGN_BUSY`, `MEMBERSHIP_OWNER_PROTECTED`, `ACCOUNT_OWNS_CAMPAIGN` |
 | Character/cloud content | `CHARACTER_INVALID`, `CHARACTER_TOO_LARGE`, `CLOUD_DATA_INVALID`, `CLOUD_DATA_TOO_LARGE`, `CLOUD_DATA_TOO_DEEP`, `CLOUD_HTML_FORBIDDEN`, `CLOUD_URL_FORBIDDEN`, `CLOUD_KEY_FORBIDDEN` |

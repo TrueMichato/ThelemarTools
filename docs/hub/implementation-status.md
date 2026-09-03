@@ -1,6 +1,6 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-09-02
+> **Last updated:** 2026-09-03
 > **Owner:** Campaign Hub maintainers
 
 ## Status
@@ -14,6 +14,11 @@ onboarding remains intentionally disabled.
 Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecycle administration, Phase 6C
 migration management, Phase 6D portable deployment, Phase 6E operations, Phase 6F CI/real-stack integration,
 and Phase 6G Oracle deployment are complete.
+
+The first `t7-auth-providers` layer is implemented but not a Discord/Google product release: additive migration
+0006, provider-neutral identity/session provenance, durable one-time OAuth transactions, a validated registry
+running only the compatible GitHub adapter, rollback preflight, and deterministic memory/PostgreSQL/real-stack
+coverage. Discord, Google, reauthentication, and link/unlink remain gated to later reviewed stack layers.
 
 The Oracle deployment now has deliberate one-command release automation in `deploy/hub/release.sh`. It locks
 out concurrent operators, verifies an immutable annotated tag and clean exact checkout, records rollback

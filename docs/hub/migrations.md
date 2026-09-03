@@ -1,7 +1,7 @@
 # Campaign Hub migration guide
 
-> **Status:** Implemented through semantic-operation migration 0005
-> **Last verified:** 2026-09-02
+> **Status:** Implemented through provider-registry migration 0006
+> **Last verified:** 2026-09-03
 > **Owner:** Campaign Hub maintainers
 
 ## Invariants
@@ -94,10 +94,13 @@ Current migrations:
 - 0004 additive character projection policy/revision columns; existing rows adopt the `table` preset.
 - 0005 semantic operations/commands, stable lifecycle-event linkage, random character target references,
   owner/DM operation watermarks, bounded proposal expiry, and terminalization of legacy arbitrary proposals.
+- 0006 provider-neutral identity metadata, session identity provenance, deferred last-identity protection, and
+  durable one-time OAuth transaction bindings/cleanup.
 
+Migration 0006 is additive and leaves existing GitHub subjects, account ids, and old application reads intact.
 Migration 0005 is additive apart from terminalizing legacy `structured_effect` rows still in `proposed`.
-Protocol v3 never resolves those legacy bodies. The disposable PostgreSQL stack applies 0001-0005, grants the
-runtime role, boots the production image against required version 0005, and runs semantic role/replay/
+Protocol v3 never resolves those legacy bodies. The disposable PostgreSQL stack applies 0001-0006, grants the
+runtime role, boots the production image against required version 0006, and runs semantic role/replay/
 concurrency/expiry/lifecycle persistence checks.
 
 ## Readiness

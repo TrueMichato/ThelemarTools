@@ -2,6 +2,10 @@
 
 Status: Accepted for implementation (2026-09-01)
 
+Implementation status: layer 1 uses migration `0006_multi_provider_identity.sql`, routes existing GitHub
+authentication through the runtime registry, and durably binds/consumes short-lived OAuth transactions. Discord,
+Google, and account link/unlink routes remain intentionally unimplemented until the later paired-provider layers.
+
 ## Context
 
 The Campaign Hub currently has one injected `GitHubOAuthProvider`, two concrete routes
@@ -189,7 +193,7 @@ Link and unlink are blocked while the Hub account is suspended, deletion-request
 
 ## OAuth transaction and schema migration
 
-Implement this as an additive `0004_multi_provider_identity.sql` migration before enabling any new provider:
+Implement this as an additive `0006_multi_provider_identity.sql` migration before enabling any new provider:
 
 1. Keep `hub.external_identities.id`, `account_id`, `provider`, `provider_subject`, `created_at`, and
    `UNIQUE (provider, provider_subject)`.

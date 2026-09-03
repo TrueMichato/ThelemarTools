@@ -9,10 +9,18 @@ Use when the prior image supports the current schema:
 
 1. Stop promotion.
 2. Record incident/request/build versions.
-3. Deploy prior immutable BFF/static digests.
-4. Verify required migration compatibility before readiness.
-5. Probe auth, character read/write, WebSocket, outbox, and local-only mode.
-6. Monitor errors/outbox for at least the promotion window.
+3. Run `npm run hub:check-auth-rollback` with the exact providers supported by the target image and the current
+   allowlist. Stop if it reports any blocked account.
+4. Confirm every pending/applied migration is classified in `deploy/hub/migration-policy.json`.
+5. Deploy prior immutable BFF/static digests.
+6. Verify required migration compatibility before readiness.
+7. Probe auth, character read/write, WebSocket, outbox, and local-only mode.
+8. Monitor errors/outbox for at least the promotion window.
+
+Migration 0006 is previous-app-compatible before any currently admitted account relies solely on a provider
+unsupported by the target image. Never infer rollback safety from provider row counts alone; the exact allowlist
+is part of usability. Already de-admitted accounts do not make an otherwise compatible rollback less safe. The
+preflight returns only a count to avoid exposing account/provider subjects in evidence.
 
 ## Database restore rollback
 

@@ -96,7 +96,7 @@ docker compose --env-file .env.hub -f compose.hub.yml down -v --remove-orphans
 | `edge` | local Caddy CA/certificate | fixed private address + public bridge, Caddyfile read-only, persistent CA data | published `8443`, unless-stopped |
 
 Database and static services remain only on `hub-private` (`internal: true`). BFF joins a dedicated
-`hub-egress` bridge for outbound GitHub OAuth API calls but publishes no port. Edge joins `hub-public` for its
+`hub-egress` bridge for outbound registered-provider OAuth API calls (GitHub in layer 1) but publishes no port. Edge joins `hub-public` for its
 host port. Edge and BFF share only `hub-private`, forcing Caddy's `bff` DNS/upstream traffic through the edge's
 fixed private address `172.30.0.10`; BFF trusts exactly that address for forwarded-client IP/rate-limit
 resolution.
@@ -113,6 +113,8 @@ resolution.
 | `HUB_CSRF_SECRET` | BFF | Yes | CSRF and deterministic invite derivation |
 | `HUB_METRICS_TOKEN` | BFF/monitor | Yes | Independent bearer for `/api/metrics` |
 | `HUB_LOG_LEVEL` | BFF | No | Structured log threshold |
+| `HUB_AUTH_PROVIDERS` | BFF | No | Comma-separated normal provider enablement; layer 1 accepts `github` |
+| `HUB_AUTH_EMERGENCY_DISABLED_PROVIDERS` | BFF | No | Emergency provider-specific kill switch; startup fails if no provider remains |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | BFF | Secret (client secret) | OAuth application |
 | `HUB_ALLOWED_OAUTH_SUBJECTS` | BFF | Operationally sensitive | Comma-separated `github:<numeric id>` |
 | `HUB_TRUST_PROXY` | BFF | No | Exact trusted proxy IP/CIDR; local reference uses `172.30.0.10` |
@@ -124,6 +126,10 @@ resolution.
 | `HUB_BACKUP_ENCRYPTION_KEY` | Backup/restore | Yes | Base64 for exactly 32 random bytes |
 | `HUB_IMAGE_VERSION` / `HUB_VCS_REF` | build | No | OCI provenance |
 | `HUB_NPM_REGISTRY` | build | No | Approved package registry/proxy |
+
+The runtime role has CRUD on `oauth_transactions`. PostgreSQL requires the read-only backup role to retain table
+`SELECT` so `pg_dump` can lock and describe the relation, but both backup commands use
+`--exclude-table-data=hub.oauth_transactions`; short-lived state/PKCE/nonce rows cannot become retained archives.
 
 Reference passwords must be URL-safe because Compose interpolates them into local PostgreSQL URLs. Managed
 deployment should inject provider-generated, correctly encoded connection URLs directly.

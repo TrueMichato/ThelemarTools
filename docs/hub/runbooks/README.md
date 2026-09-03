@@ -34,6 +34,7 @@ Runbooks are executable operational procedures. Each final runbook must contain:
 - [Incident declaration and response](incident.md)
 - [Database migration failure](migration-failure.md)
 - [Private OAuth allowlist change](allowlist-change.md)
+- [Authentication provider registry and rollback](auth-provider-registry.md)
 - [Campaign ownership recovery](campaign-ownership-recovery.md)
 
 The procedures are implemented. Private launch still requires installing and drilling the Oracle operations

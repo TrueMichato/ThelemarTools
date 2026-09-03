@@ -1,7 +1,7 @@
 # Campaign Hub architecture
 
 > **Status:** Current architecture with launch gaps called out
-> **Last verified:** 2026-08-24
+> **Last verified:** 2026-09-03
 > **Owner:** Campaign Hub maintainers
 
 ## Principles
@@ -39,10 +39,11 @@ flowchart TB
     Validate[Content/character/domain validation]
     Realtime[HubRealtime]
     Dispatch[Outbox dispatcher]
+    Auth[Auth provider registry]
   end
 
   PG[(PostgreSQL)]
-  OAuth[GitHub OAuth]
+  OAuth[GitHub OAuth adapter]
 
   HubPage --> API
   Sheet --> CharRepo --> API
@@ -53,7 +54,7 @@ flowchart TB
   Board --> Context
   RT <-->|WebSocket| Routes
   API --> Routes
-  Routes --> OAuth
+  Routes --> Auth --> OAuth
   Routes --> Validate --> Store --> PG
   Dispatch --> Store
   Dispatch --> Realtime

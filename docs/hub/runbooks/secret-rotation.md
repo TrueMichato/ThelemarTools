@@ -29,6 +29,9 @@
 
 - rotate provider and BFF secret together;
 - verify callback URL, PKCE, allowlist, session rotation, and GitHub egress.
+- a provider-local rotation failure must not alter identity rows or persist failed token responses;
+- when multiple providers exist, verify unaffected registry entries remain available before disabling the failed
+  entry.
 
 ## Database credentials
 
