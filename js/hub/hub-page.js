@@ -18,9 +18,15 @@ const api = new HubApiClient();
  * Lightweight Hub shells keep a device-local active campaign selection, but must never fetch the
  * campaign context or brew merely to persist it (ADR 0013). `isContextHost: false` selects the
  * selection-only verification path.
+ *
+ * It gets its own `HubApiClient` deliberately. Selection maintenance runs in the background, and a
+ * shared client carries mutable CSRF state — background work must not be able to perturb a
+ * user-initiated mutation on the page. It performs GETs only, and both of its entry points are
+ * handed the page's already-verified session, so this costs no extra `GET /api/session`.
  */
+const activeCampaignApi = new HubApiClient();
 const activeCampaign = new HubActiveCampaignCoordinator({
-	api,
+	api: activeCampaignApi,
 	host: {
 		isContextHost: false,
 		isResourcePinned: () => false,
