@@ -222,26 +222,54 @@
 									<button class="hub-button" type="submit" data-pending-label="Granting...">Grant XP</button>
 									<p id="campaign-xp-form-status" class="hub-inline-status" data-hub-form-status role="status" aria-live="polite"></p>
 								</form>
-								<form id="campaign-item-form" class="hub-form">
-									<h4 class="hub-subheading">Grant item</h4>
-									<label class="hub-label" for="campaign-item-target">Character</label>
-									<select id="campaign-item-target" class="hub-input" name="target" autocomplete="off"></select>
-									<label class="hub-label" for="campaign-item-name">Item name</label>
-									<input id="campaign-item-name" class="hub-input" name="itemName" autocomplete="off" required placeholder="Custom item name">
-									<input id="campaign-item-source" name="itemSource" type="hidden" value="HB">
-									<button id="campaign-item-catalog-open" class="hub-button" type="button">Choose from item catalog</button>
-									<div id="campaign-item-catalog" class="hub-item-catalog ve-hidden">
-										<label class="hub-label" for="campaign-item-catalog-search">Find an item</label>
-										<input id="campaign-item-catalog-search" class="hub-input" type="search" autocomplete="off" placeholder="Type at least 2 characters">
-										<label class="hub-label" for="campaign-item-catalog-results">Matching items</label>
-										<select id="campaign-item-catalog-results" class="hub-input" name="catalogItem" autocomplete="off" size="6"></select>
-										<p id="campaign-item-catalog-status" class="hub-form-hint" aria-live="polite">Type at least 2 characters to search.</p>
-										<button id="campaign-item-catalog-close" class="hub-button" type="button">Close catalog</button>
+								<form id="campaign-item-form" class="hub-form hub-item-award">
+									<div class="hub-item-award__heading">
+										<div>
+											<h4 class="hub-subheading">Award items</h4>
+											<p class="hub-form-hint">Choose one trusted source, then preview the same whole-number quantity for every recipient.</p>
+										</div>
+										<p class="hub-item-award__policy">Carry warnings are advisory. An unavailable warning never exposes a hidden character value.</p>
 									</div>
-									<p id="campaign-item-selection-summary" class="hub-form-hint">Custom item · homebrew source</p>
-									<label class="hub-label" for="campaign-item-quantity">Quantity</label>
-									<input id="campaign-item-quantity" class="hub-input" name="quantity" type="number" inputmode="numeric" min="1" value="1" autocomplete="off">
-									<button class="hub-button" type="submit" data-pending-label="Granting...">Grant item</button>
+									<input id="campaign-item-source-kind" name="sourceKind" type="hidden" value="catalog">
+									<input id="campaign-item-selection-key" name="selectionKey" type="hidden">
+									<div id="campaign-item-source-tabs" class="hub-item-award__tabs" role="tablist" aria-label="Item source">
+										<button id="campaign-item-source-catalog" class="hub-item-award__tab" type="button" role="tab" aria-selected="true" aria-controls="campaign-item-source-panel" data-item-award-source="catalog">Catalog</button>
+										<button id="campaign-item-source-recent" class="hub-item-award__tab" type="button" role="tab" aria-selected="false" aria-controls="campaign-item-source-panel" data-item-award-source="recent" tabindex="-1">Recent</button>
+										<button id="campaign-item-source-campaign" class="hub-item-award__tab" type="button" role="tab" aria-selected="false" aria-controls="campaign-item-source-panel" data-item-award-source="campaign_item" tabindex="-1">Campaign</button>
+										<button id="campaign-item-source-stash" class="hub-item-award__tab" type="button" role="tab" aria-selected="false" aria-controls="campaign-item-source-panel" data-item-award-source="party_inventory" tabindex="-1">Party stash</button>
+									</div>
+									<div id="campaign-item-source-panel" class="hub-item-award__source" role="tabpanel" aria-labelledby="campaign-item-source-catalog">
+										<label id="campaign-item-search-label" class="hub-label" for="campaign-item-search">Search the item catalog</label>
+										<input id="campaign-item-search" class="hub-input" name="itemSearch" type="search" autocomplete="off" placeholder="Type at least 2 characters">
+										<label class="hub-label" for="campaign-item-results">Matching items</label>
+										<select id="campaign-item-results" class="hub-input hub-item-award__results" name="itemResult" autocomplete="off" size="7" aria-describedby="campaign-item-results-status"></select>
+										<div class="hub-item-award__selection-controls">
+											<p id="campaign-item-results-status" class="hub-form-hint" role="status" aria-live="polite">Type at least 2 characters to load and search the catalog.</p>
+											<button id="campaign-item-use-selection" class="hub-button" type="button" disabled>Use selected item</button>
+										</div>
+									</div>
+									<p id="campaign-item-selection-summary" class="hub-item-award__selected" role="status">No item selected.</p>
+									<div class="hub-item-award__columns">
+										<fieldset class="hub-item-award__targets">
+											<legend>Recipients</legend>
+											<div id="campaign-item-targets" class="hub-item-award__target-list"></div>
+											<p id="campaign-item-targets-status" class="hub-form-hint">Select one or more eligible campaign characters.</p>
+										</fieldset>
+										<div class="hub-item-award__details">
+											<label class="hub-label" for="campaign-item-quantity">Quantity for each recipient</label>
+											<input id="campaign-item-quantity" class="hub-input" name="quantity" type="number" inputmode="numeric" min="1" max="100000" step="1" value="1" autocomplete="off" required>
+											<label class="hub-label" for="campaign-item-note">Award note (optional)</label>
+											<textarea id="campaign-item-note" class="hub-input hub-item-award__note" name="note" maxlength="500" rows="3" placeholder="Why the party received this item"></textarea>
+											<p id="campaign-item-note-count" class="hub-form-hint">0 / 500 characters</p>
+										</div>
+										<section class="hub-item-award__preview" aria-labelledby="campaign-item-preview-title" aria-live="polite">
+											<h5 id="campaign-item-preview-title">Award preview</h5>
+											<p id="campaign-item-preview-summary">Choose an item and at least one recipient to preview this award.</p>
+											<ul id="campaign-item-preview-list"></ul>
+											<p id="campaign-item-preview-warning" class="hub-form-hint"></p>
+										</section>
+									</div>
+									<button class="hub-button hub-button--primary hub-item-award__submit" type="submit" data-pending-label="Awarding items..." disabled>Award selected item</button>
 									<p id="campaign-item-form-status" class="hub-inline-status" data-hub-form-status role="status" aria-live="polite"></p>
 								</form>
 							</div>

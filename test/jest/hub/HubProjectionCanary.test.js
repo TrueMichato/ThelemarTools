@@ -181,7 +181,7 @@ describe("projection privacy canaries", () => {
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/characters/${character.id}/item-grants`,
 			headers: headers(dm),
-			payload: {item: {name: "Torch"}, quantity: 1},
+			payload: {item: {name: "Torch", source: "PHB"}, quantity: 1},
 		});
 
 		const events = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/events`, headers: readHeaders(dm)})).json().events;
@@ -439,7 +439,7 @@ describe("projection privacy canaries", () => {
 				method: "POST",
 				url: `/api/campaigns/${campaign.id}/characters/${character.id}/item-grants`,
 				headers: headers(dm),
-				payload: {item: {name: "Torch"}, quantity: 1},
+				payload: {item: {name: "Torch", source: "PHB"}, quantity: 1},
 			}),
 			await app.inject({
 				method: "POST",
@@ -566,7 +566,7 @@ describe("projection privacy canaries", () => {
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/characters/${character.id}/item-grants`,
 			headers: headers(dm, "grant-stable"),
-			payload: {item: {name: "Torch"}, quantity: 1},
+			payload: {item: {name: "Torch", source: "PHB"}, quantity: 1},
 		};
 		const first = await app.inject(request);
 		const retry = await app.inject(request);

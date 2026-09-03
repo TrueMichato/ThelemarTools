@@ -22,6 +22,9 @@ const _INVENTORY_TRANSFER_EVENT_TYPES = new Set([
 	"transfer.rejected",
 	"transfer.reserved",
 ]);
+const _INVENTORY_CHARACTER_MUTATION_EVENT_TYPES = new Set([
+	"item.granted",
+]);
 const _PARTY_INVENTORY_INVALIDATION_EVENT_TYPE = "party_inventory.invalidated";
 
 export class CharacterSheetRealtimeCoordinator {
@@ -233,13 +236,17 @@ export class CharacterSheetRealtimeCoordinator {
 
 		if (
 			_INVENTORY_TRANSFER_EVENT_TYPES.has(event.type)
+			|| _INVENTORY_CHARACTER_MUTATION_EVENT_TYPES.has(event.type)
 			|| event.type === _PARTY_INVENTORY_INVALIDATION_EVENT_TYPE
 		) {
 			const sourceKind = event.payload?.sourceKind;
 			const targetKind = event.payload?.targetKind;
 			const isPartyInvalidation = event.type === _PARTY_INVENTORY_INVALIDATION_EVENT_TYPE;
+			const isDirectCharacterMutation = _INVENTORY_CHARACTER_MUTATION_EVENT_TYPES.has(event.type)
+				&& event.aggregateType === "character";
 			const isCurrentCharacterAffected = !isPartyInvalidation && (
-				(sourceKind === "character" && event.payload?.sourceId === active.characterId)
+				(isDirectCharacterMutation && event.aggregateId === active.characterId)
+				|| (sourceKind === "character" && event.payload?.sourceId === active.characterId)
 				|| (targetKind === "character" && event.payload?.targetId === active.characterId)
 			);
 			const isPartyInventoryAffected = isPartyInvalidation

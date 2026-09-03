@@ -37,7 +37,7 @@ visibility is not authorization.
 | Accept peer proposal | Target owner only | Target owner only | Target owner only; same account may later accept self-target | No |
 | Reject peer proposal | Yes | Yes | Target owner only | No |
 | Cancel peer proposal | Yes | Yes | Own proposal only | No |
-| Grant XP/item | Yes | Yes | No | No |
+| Grant XP or award one item batch to eligible campaign characters | Yes | Yes | No | No |
 | Read party inventory | Yes | Yes | Yes | Yes |
 | Transfer from party inventory | Yes | Yes | No | No |
 | Transfer from character | Own character | Own character | Own character | No |
@@ -66,6 +66,8 @@ account's campaign sockets immediately after the authoritative transaction commi
   grants/effects/transfers.
 - Campaign owner is an account field on the campaign, not a separate role string.
 - Co-DM can perform DM content/grant/workspace operations but cannot transfer ownership or archive as owner.
+- Item awards can target only active characters whose owners remain active campaign members. A hidden peer
+  identity does not prevent DM/co-DM targeting, but preview and events disclose no hidden carry or policy value.
 - Spectator is an authenticated read-only campaign role in current mutation paths.
 - DM/co-DM role alone never approves somebody else's peer proposal. The DM instead issues a distinct direct
   operation with its own actor/command identity.

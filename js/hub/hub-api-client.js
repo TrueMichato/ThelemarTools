@@ -435,6 +435,15 @@ export class HubApiClient {
 		});
 	}
 
+	async pAwardItems ({campaignId, source, targetCharacterIds, quantity = 1, note = null, idempotencyKey}) {
+		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/item-awards`, {
+			method: "POST",
+			body: {source, targetCharacterIds, quantity, note},
+			isMutation: true,
+			idempotencyKey,
+		});
+	}
+
 	async pGetPartyInventory ({campaignId}) {
 		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/party-inventory`)).partyInventory;
 	}

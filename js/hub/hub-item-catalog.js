@@ -10,18 +10,38 @@ function getCampaignItems (content) {
 	return content.flatMap(document => getItemRefs(document?.body || document));
 }
 
+const ITEM_STRING_FIELDS = Object.freeze(["rarity", "typeCode"]);
+const ITEM_NUMBER_FIELDS = Object.freeze(["page", "weight", "value"]);
+
+export function getHubItemSummary (item, {sourceKind = "catalog"} = {}) {
+	const name = typeof item?.name === "string" ? item.name.trim() : "";
+	const source = typeof item?.source === "string" ? item.source.trim() : "";
+	if (!name || !source) return null;
+	const out = {name, source, sourceKind};
+	for (const key of ITEM_STRING_FIELDS) {
+		const value = key === "typeCode" ? item?.typeCode ?? item?.type : item?.[key];
+		if (typeof value === "string" && value.trim()) out[key] = value.trim();
+	}
+	for (const key of ITEM_NUMBER_FIELDS) {
+		const value = Number(item?.[key]);
+		if (Number.isFinite(value) && value >= 0) out[key] = value;
+	}
+	if (["classic", "one"].includes(item?.edition)) out.edition = item.edition;
+	return out;
+}
+
 export function buildHubItemCatalog ({items = {}, baseItems = {}, campaignBrewContent = null} = {}) {
 	const byUid = new Map();
-	for (const item of [
-		...getItemRefs(items),
-		...getItemRefs(baseItems),
-		...getCampaignItems(campaignBrewContent),
+	for (const [sourceKind, entries] of [
+		["catalog", [...getItemRefs(items), ...getItemRefs(baseItems)]],
+		["campaign_item", getCampaignItems(campaignBrewContent)],
 	]) {
-		const name = typeof item?.name === "string" ? item.name.trim() : "";
-		const source = typeof item?.source === "string" ? item.source.trim() : "";
-		if (!name || !source) continue;
-		const uid = `${name}|${source}`.toLowerCase();
-		if (!byUid.has(uid)) byUid.set(uid, {name, source});
+		for (const item of entries) {
+			const summary = getHubItemSummary(item, {sourceKind});
+			if (!summary) continue;
+			const uid = `${summary.name}|${summary.source}`.toLowerCase();
+			if (!byUid.has(uid)) byUid.set(uid, summary);
+		}
 	}
 	return [...byUid.values()]
 		.sort((a, b) => a.name.localeCompare(b.name) || a.source.localeCompare(b.source));

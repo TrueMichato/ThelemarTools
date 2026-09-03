@@ -181,7 +181,7 @@ describe("item grant invalidates", () => {
 			accountId: ctx.dm.id,
 			campaignId: ctx.campaign.id,
 			characterId: ctx.character.id,
-			item: {name: "Anvil", weight: 100},
+			item: {name: "Anvil", source: "HB", weight: 100},
 			idempotencyKey: "g-1",
 		});
 
@@ -197,7 +197,7 @@ describe("item grant invalidates", () => {
 			accountId: ctx.dm.id,
 			campaignId: ctx.campaign.id,
 			characterId: ctx.character.id,
-			item: {name: "Anvil", weight: 100},
+			item: {name: "Anvil", source: "HB", weight: 100},
 			idempotencyKey: "g-1",
 		});
 		expect(await getVisibleCarry({...ctx, characterId: ctx.character.id})).toBeNull();
@@ -402,7 +402,7 @@ describe("single-read and list projections agree", () => {
 			accountId: ctx.dm.id,
 			campaignId: ctx.campaign.id,
 			characterId: ctx.character.id,
-			item: {name: "Anvil", weight: 100},
+			item: {name: "Anvil", source: "HB", weight: 100},
 			idempotencyKey: "g-1",
 		});
 

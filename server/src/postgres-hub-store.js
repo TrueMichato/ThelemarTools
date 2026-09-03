@@ -20,10 +20,17 @@ import {
 	validateProjectionPolicy,
 } from "./character-projection.js";
 import {
+	addAwardedEntryToCharacter,
 	addTransferPayload,
 	applySemanticOperation,
+	getItemAwardIdempotencyKey,
+	getItemAwardTotalQuantity,
+	getSafeItemSummary,
+	normalizeItemAwardRequest,
+	normalizeItemAwardQuantity,
 	normalizeCharacterInventory,
 	normalizeCurrency,
+	normalizeSafeItemSummary,
 	normalizeSemanticOperation,
 	removeTransferPayload,
 } from "./hub-actions.js";
@@ -1083,6 +1090,12 @@ export class PostgresHubStore {
 		const membership = getMembership(result.rows[0]);
 		if (roles && !roles.includes(membership.role)) throw new HubStoreError("FORBIDDEN", `Campaign role is not allowed.`, {status: 403});
 		return membership;
+	}
+
+	async _pLockInventoryParticipants ({client, ids}) {
+		for (const id of [...new Set(ids.filter(Boolean))].sort()) {
+			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [id]);
+		}
 	}
 
 	async _pAppendEvent ({client, eventId = crypto.randomUUID(), campaignId, actorAccountId, type, aggregateType, aggregateId, aggregateRevision = null, visibility = "all_members", visibleAccountIds = null, payload = {}}) {
@@ -3442,8 +3455,10 @@ export class PostgresHubStore {
 	}
 
 	async pGrantItem ({accountId, campaignId, characterId, item, quantity = 1, idempotencyKey}) {
-		validateCloudValue(item, {label: "Granted item"});
-		const entry = {id: crypto.randomUUID(), item: structuredClone(item), quantity: Math.max(1, Math.floor(quantity))};
+		const normalizedItem = normalizeSafeItemSummary(item);
+		normalizeItemAwardQuantity(quantity);
+		validateCloudValue(normalizedItem, {label: "Granted item"});
+		const entry = {id: crypto.randomUUID(), item: structuredClone(normalizedItem), quantity};
 		return this._pGrantCharacterMutation({
 			accountId,
 			campaignId,
@@ -3463,6 +3478,189 @@ export class PostgresHubStore {
 			auditDetails: {entryId: entry.id, quantity: entry.quantity},
 			responseExtra: {entry},
 		});
+	}
+
+	async pAwardItems ({
+		accountId,
+		campaignId,
+		source,
+		targetCharacterIds,
+		quantity,
+		note = null,
+		idempotencyKey,
+	}) {
+		const request = normalizeItemAwardRequest({source, targetCharacterIds, quantity, note});
+		const commandIdempotencyKey = getItemAwardIdempotencyKey({idempotencyKey, campaignId, request});
+		const totalQuantity = getItemAwardTotalQuantity({
+			quantity: request.quantity,
+			targetCount: request.targetCharacterIds.length,
+		});
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockCommand({client, accountId, idempotencyKey: commandIdempotencyKey});
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm"]});
+			const partyParticipant = request.source.kind === "party_inventory"
+				? (await client.query(`SELECT id FROM hub.party_inventories WHERE campaign_id = $1`, [campaignId])).rows[0]?.id
+				: null;
+			await this._pLockInventoryParticipants({
+				client,
+				ids: [...request.targetCharacterIds, partyParticipant],
+			});
+			const targetResult = await client.query(`
+				SELECT c.*
+				FROM hub.characters c
+				JOIN hub.memberships m
+					ON m.campaign_id = c.campaign_id
+					AND m.account_id = c.owner_account_id
+					AND m.status = 'active'
+				WHERE c.campaign_id = $1
+					AND c.id = ANY($2::uuid[])
+					AND c.status = 'active'
+				FOR UPDATE OF c
+			`, [campaignId, request.targetCharacterIds]);
+			if (targetResult.rowCount !== request.targetCharacterIds.length) {
+				throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
+			}
+			const targetsById = new Map(targetResult.rows.map(row => [row.id, getCharacter(row)]));
+			const targetCharacters = request.targetCharacterIds.map(characterId => targetsById.get(characterId));
+
+			let item;
+			let incomingEntry;
+			let party = null;
+			let stagedPartyContainer = null;
+			if (request.source.kind === "party_inventory") {
+				party = await this._pGetOrCreatePartyInventory({client, campaignId});
+				const partyContainer = await this._pReadPartyContainer({client, party});
+				const selected = partyContainer.inventory.find(entry => entry.id === request.source.entryId);
+				if (!selected) {
+					throw new HubStoreError("ITEM_AWARD_SOURCE_NOT_FOUND", `Party inventory entry was not found.`, {status: 404});
+				}
+				item = getSafeItemSummary(selected.item);
+				const removed = removeTransferPayload({
+					container: partyContainer,
+					payload: {items: [{entryId: selected.id, quantity: totalQuantity}]},
+				});
+				incomingEntry = removed.escrow.items[0];
+				stagedPartyContainer = removed.container;
+			} else {
+				item = request.source.item;
+				incomingEntry = {item, quantity: request.quantity};
+			}
+			validateCloudValue(item, {label: "Awarded item"});
+
+			const stagedTargets = targetCharacters.map((character, index) => {
+				const added = addAwardedEntryToCharacter({
+					container: character.data,
+					incoming: {...structuredClone(incomingEntry), quantity: request.quantity},
+				});
+				stripCarryAuthority(added.container);
+				validateCloudCharacterData(added.container);
+				return {index, character, data: added.container, entry: added.entry};
+			});
+
+			const updatedTargets = [];
+			for (const staged of stagedTargets) {
+				const updated = await client.query(`
+					UPDATE hub.characters
+					SET data = $2::jsonb, revision = revision + 1, updated_at = now()
+					WHERE id = $1
+					RETURNING *
+				`, [staged.character.id, JSON.stringify(staged.data)]);
+				updatedTargets.push({...staged, character: getCharacter(updated.rows[0])});
+			}
+			let partyInventoryResponse = null;
+			if (party) {
+				await this._pWritePartyContainer({client, party, container: stagedPartyContainer});
+				partyInventoryResponse = {id: party.id, revision: Number(party.revision) + 1};
+			}
+
+			const awardId = crypto.randomUUID();
+			const response = {
+				awardId,
+				source: {kind: request.source.kind, item: structuredClone(item)},
+				quantity: request.quantity,
+				note: request.note,
+				targets: updatedTargets.map(({index, character, entry}) => ({
+					index,
+					characterId: character.id,
+					entryId: entry.id,
+					quantity: request.quantity,
+					revision: character.revision,
+				})),
+				...(partyInventoryResponse ? {partyInventory: partyInventoryResponse} : {}),
+			};
+			await this._pAppendAudit({
+				client,
+				campaignId,
+				actorAccountId: accountId,
+				action: "item.award_batch",
+				targetType: "campaign",
+				targetId: campaignId,
+				details: {
+					awardId,
+					sourceKind: request.source.kind,
+					item,
+					targetCharacterIds: request.targetCharacterIds,
+					targetCount: request.targetCharacterIds.length,
+					quantity: request.quantity,
+					totalQuantity,
+					note: request.note,
+				},
+			});
+			for (const {index, character, entry} of updatedTargets) {
+				await this._pAppendEvent({
+					client,
+					campaignId,
+					actorAccountId: accountId,
+					type: "item.granted",
+					aggregateType: "character",
+					aggregateId: character.id,
+					aggregateRevision: character.revision,
+					visibility: "explicit_accounts",
+					visibleAccountIds: [...new Set([accountId, character.ownerAccountId])],
+					payload: {
+						awardId,
+						index,
+						targetCount: updatedTargets.length,
+						sourceKind: request.source.kind,
+						note: request.note,
+						entry: {id: entry.id, item: structuredClone(item), quantity: request.quantity},
+					},
+				});
+				await this._pAppendProjectionInvalidation({client, character, actorAccountId: accountId});
+			}
+			if (partyInventoryResponse) {
+				await this._pAppendEvent({
+					client,
+					campaignId,
+					actorAccountId: null,
+					type: "party_inventory.invalidated",
+					aggregateType: "campaign",
+					aggregateId: campaignId,
+					aggregateRevision: partyInventoryResponse.revision,
+					payload: {},
+				});
+			}
+			await this._pSaveReceipt({
+				client,
+				accountId,
+				idempotencyKey: commandIdempotencyKey,
+				commandType: "item.award_batch",
+				response,
+			});
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
 	}
 
 	async _pGrantCharacterMutation ({
@@ -3519,7 +3717,7 @@ export class PostgresHubStore {
 	}
 
 	async _pReadPartyContainer ({client, party}) {
-		const entries = await client.query(`SELECT * FROM hub.inventory_entries WHERE party_inventory_id = $1 ORDER BY created_at, id`, [party.id]);
+		const entries = await client.query(`SELECT * FROM hub.inventory_entries WHERE party_inventory_id = $1 ORDER BY created_at, id FOR UPDATE`, [party.id]);
 		return {
 			inventory: entries.rows.map(row => {
 				const legacyItem = row.metadata?.item || {name: row.item_uid.split("|")[0], source: row.item_uid.split("|")[1]};
@@ -4016,9 +4214,7 @@ export class PostgresHubStore {
 				return prior;
 			}
 			const membership = await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm", "player"]});
-			for (const id of [sourceId, targetId].sort()) {
-				await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [id]);
-			}
+			await this._pLockInventoryParticipants({client, ids: [sourceId, targetId]});
 			const source = await this._pGetTransferContainer({client, campaignId, kind: sourceKind, id: sourceId, actorAccountId: accountId});
 			const target = await this._pGetTransferContainer({client, campaignId, kind: targetKind, id: targetId, actorAccountId: accountId});
 			if (targetKind === "character") {
@@ -4084,7 +4280,7 @@ export class PostgresHubStore {
 			if (!transferLookup.rowCount) throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
 			const transferPre = this._getTransfer(transferLookup.rows[0]);
 			const membership = await this._pGetMembershipForUpdate({client, accountId, campaignId});
-			for (const id of [transferPre.sourceId, transferPre.targetId].sort()) await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [id]);
+			await this._pLockInventoryParticipants({client, ids: [transferPre.sourceId, transferPre.targetId]});
 			const transferResult = await client.query(`SELECT * FROM hub.transfers WHERE campaign_id = $1 AND id = $2 AND status = 'reserved' FOR UPDATE`, [campaignId, transferId]);
 			if (!transferResult.rowCount) throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
 			const transfer = this._getTransfer(transferResult.rows[0]);

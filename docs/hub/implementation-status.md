@@ -126,6 +126,11 @@ pass. Only the host-operations proof and physical one-DM/two-player game day rem
 - Immediate DM/co-DM semantic character operations plus the fail-closed source-derived peer proposal/terminal
   server contract; XP/item grants, party inventory, and escrowed item/currency transfers remain domain-specific.
 - Whole-item transfers preserve Character Sheet invariants, rollback identity, and metadata-safe stack merges.
+- DM/co-DM item awards are one ordered atomic/idempotent batch across one to 50 active campaign characters, from
+  the lazy catalog, authorized recent awards, campaign items, or one authoritative party-stash stack. Safe item
+  metadata, a bounded note, advisory privacy-shaped carry previews, carry invalidation, deterministic audit/event
+  ordering, stash conservation, and live Character Sheet reconciliation are implemented without changing local
+  sheets.
 - Owned cloud Character Sheets expose the server-authoritative party stash as a separate inventory section,
   including privacy-safe direct-pass destinations, escrow-backed partial transfers, reconnect/event refresh,
   repository-safe character reconciliation, accessible stateful controls, and reusable eligibility/weight

@@ -317,6 +317,43 @@ describe("Character Sheet party inventory", () => {
 		expect(repository.pReconcileAuthoritativeCharacter).not.toHaveBeenCalled();
 	});
 
+	it("reconciles an item award into the open owner sheet exactly once without refreshing the stash", () => {
+		const listeners = new Map();
+		const partyInventory = new CharacterSheetPartyInventory({
+			api: {},
+			realtime: {
+				on: jest.fn((type, listener) => {
+					listeners.set(type, listener);
+					return jest.fn();
+				}),
+			},
+			campaignId: "campaign-1",
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {
+			characterId: "character-1",
+			generation: 1,
+			token: Symbol("test"),
+			isOwner: true,
+		};
+		partyInventory._scheduleRefresh = jest.fn();
+		const event = {
+			eventId: "award-event-1",
+			campaignId: "campaign-1",
+			type: "item.granted",
+			sequence: 17,
+			isCurrentCharacterAffected: true,
+			isPartyInventoryAffected: false,
+		};
+
+		listeners.get("inventoryTransfer")(event);
+		listeners.get("inventoryTransfer")(event);
+
+		expect(partyInventory._scheduleRefresh).toHaveBeenCalledTimes(1);
+		expect(partyInventory._scheduleRefresh).toHaveBeenCalledWith({character: true, party: false});
+	});
+
 	it("removes campaign inventory immediately when realtime access is lost", () => {
 		const root = {remove: jest.fn()};
 		const partyInventory = new CharacterSheetPartyInventory({

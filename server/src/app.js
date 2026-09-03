@@ -26,12 +26,29 @@ import {
 import {HubOutboxDispatcher, HubRealtime} from "./realtime.js";
 import {getSafeRequestId, HubMetrics} from "./observability.js";
 import {getClientIpHeader, getRequestClientIp} from "./client-ip.js";
+import {SAFE_ITEM_SUMMARY_FIELDS} from "./hub-actions.js";
 import crypto from "node:crypto";
 
 const {normalizeIP} = rateLimit;
 const SESSION_COOKIE = "__Host-hub_session";
 const OAUTH_COOKIE = "__Host-hub_oauth";
 const HUB_PROTOCOL_VERSION = "3";
+const SAFE_ITEM_SUMMARY_KEYS = new Set(SAFE_ITEM_SUMMARY_FIELDS);
+const getSafeItemSummarySchema = () => ({
+	type: "object",
+	required: ["name", "source"],
+	additionalProperties: false,
+	properties: {
+		name: {type: "string", minLength: 1, maxLength: 200, pattern: "\\S"},
+		source: {type: "string", minLength: 1, maxLength: 50, pattern: "\\S"},
+		page: {type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER},
+		rarity: {type: "string", maxLength: 80},
+		weight: {type: "number", minimum: 0, maximum: Number.MAX_SAFE_INTEGER},
+		value: {type: "number", minimum: 0, maximum: Number.MAX_SAFE_INTEGER},
+		typeCode: {type: "string", maxLength: 80},
+		edition: {type: "string", enum: ["classic", "one"]},
+	},
+});
 const DEFAULT_DM_WORKSPACE = {
 	mv: 0,
 	w: 3,
@@ -297,6 +314,60 @@ export async function createHubApp ({
 		if (request.headers["x-hub-protocol-version"] !== HUB_PROTOCOL_VERSION) {
 			return reply.code(426).send({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: HUB_PROTOCOL_VERSION});
 		}
+	};
+	const hasOnlyKeys = (value, allowedKeys) => (
+		!!value
+		&& typeof value === "object"
+		&& !Array.isArray(value)
+		&& Object.keys(value).every(key => allowedKeys.has(key))
+	);
+	const hasStrictSafeItemTypes = item => (
+		typeof item.name === "string"
+		&& typeof item.source === "string"
+		&& (item.page === undefined || (typeof item.page === "number" && Number.isSafeInteger(item.page)))
+		&& (item.rarity === undefined || typeof item.rarity === "string")
+		&& (item.weight === undefined || (typeof item.weight === "number" && Number.isFinite(item.weight)))
+		&& (item.value === undefined || (typeof item.value === "number" && Number.isFinite(item.value)))
+		&& (item.typeCode === undefined || typeof item.typeCode === "string")
+		&& (item.edition === undefined || typeof item.edition === "string")
+	);
+	const rejectUnknownAwardFields = async (request, reply) => {
+		const body = request.body;
+		if (
+			!hasOnlyKeys(body, new Set(["source", "targetCharacterIds", "quantity", "note"]))
+			|| !Array.isArray(body.targetCharacterIds)
+			|| body.targetCharacterIds.some(id => typeof id !== "string")
+			|| !Number.isSafeInteger(body.quantity)
+			|| (body.note !== undefined && body.note !== null && typeof body.note !== "string")
+		) {
+			return reply.code(400).send({error: "INVALID_REQUEST"});
+		}
+		const source = body.source;
+		const sourceKeys = source?.kind === "party_inventory"
+			? new Set(["kind", "entryId"])
+			: new Set(["kind", "item"]);
+		if (!hasOnlyKeys(source, sourceKeys)) return reply.code(400).send({error: "INVALID_REQUEST"});
+		if (
+			typeof source.kind !== "string"
+			|| (source.kind === "party_inventory" && typeof source.entryId !== "string")
+			|| (
+				source.kind !== "party_inventory"
+				&& (
+					!hasOnlyKeys(source.item, SAFE_ITEM_SUMMARY_KEYS)
+					|| !hasStrictSafeItemTypes(source.item)
+				)
+			)
+		) {
+			return reply.code(400).send({error: "INVALID_REQUEST"});
+		}
+	};
+	const rejectUnknownLegacyItemGrantFields = async (request, reply) => {
+		if (
+			!hasOnlyKeys(request.body, new Set(["item", "quantity"]))
+			|| !hasOnlyKeys(request.body?.item, SAFE_ITEM_SUMMARY_KEYS)
+			|| !hasStrictSafeItemTypes(request.body.item)
+			|| (request.body.quantity !== undefined && !Number.isSafeInteger(request.body.quantity))
+		) return reply.code(400).send({error: "INVALID_REQUEST"});
 	};
 
 	const getIdempotencyKey = request => {
@@ -1054,6 +1125,7 @@ export async function createHubApp ({
 	}));
 
 	app.post("/api/campaigns/:campaignId/characters/:characterId/item-grants", {
+		preValidation: rejectUnknownLegacyItemGrantFields,
 		preHandler: [requireMutationSecurity, requireCampaignRole(["dm", "co_dm"])],
 		schema: {
 			body: {
@@ -1061,7 +1133,7 @@ export async function createHubApp ({
 				required: ["item"],
 				additionalProperties: false,
 				properties: {
-					item: {type: "object"},
+					item: getSafeItemSummarySchema(),
 					quantity: {type: "integer", minimum: 1, maximum: 100000, default: 1},
 				},
 			},
@@ -1072,6 +1144,65 @@ export async function createHubApp ({
 		characterId: request.params.characterId,
 		item: request.body.item,
 		quantity: request.body.quantity || 1,
+		idempotencyKey: getIdempotencyKey(request),
+	}));
+
+	app.post("/api/campaigns/:campaignId/item-awards", {
+		preValidation: rejectUnknownAwardFields,
+		preHandler: [requireMutationSecurity, requireCampaignRole(["dm", "co_dm"])],
+		schema: {
+			params: {
+				type: "object",
+				required: ["campaignId"],
+				additionalProperties: false,
+				properties: {campaignId: {type: "string", format: "uuid"}},
+			},
+			body: {
+				type: "object",
+				required: ["source", "targetCharacterIds", "quantity"],
+				additionalProperties: false,
+				properties: {
+					source: {
+						oneOf: [
+							{
+								type: "object",
+								required: ["kind", "item"],
+								additionalProperties: false,
+								properties: {
+									kind: {type: "string", enum: ["catalog", "recent", "campaign_item"]},
+									item: getSafeItemSummarySchema(),
+								},
+							},
+							{
+								type: "object",
+								required: ["kind", "entryId"],
+								additionalProperties: false,
+								properties: {
+									kind: {type: "string", const: "party_inventory"},
+									entryId: {type: "string", minLength: 1, maxLength: 200},
+								},
+							},
+						],
+					},
+					targetCharacterIds: {
+						type: "array",
+						minItems: 1,
+						maxItems: 50,
+						uniqueItems: true,
+						items: {type: "string", format: "uuid"},
+					},
+					quantity: {type: "integer", minimum: 1, maximum: 100000},
+					note: {type: ["string", "null"], maxLength: 500},
+				},
+			},
+		},
+	}, async request => store.pAwardItems({
+		accountId: request.hubAuth.account.id,
+		campaignId: request.params.campaignId,
+		source: request.body.source,
+		targetCharacterIds: request.body.targetCharacterIds,
+		quantity: request.body.quantity,
+		note: request.body.note ?? null,
 		idempotencyKey: getIdempotencyKey(request),
 	}));
 

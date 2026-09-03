@@ -56,7 +56,7 @@
 | `character.operation.cancelled` | semantic operation | explicit proposer+target owner | same minimized terminal shape | Explicit decision or lifecycle cancellation |
 | `character.operation.expired` | semantic operation | explicit proposer+target owner | same minimized terminal shape | Bounded 24-hour expiry transitions once |
 | `xp.granted` | character | explicit DM+owner | amount, reason, resulting XP | DM/co-DM also included by visibility policy |
-| `item.granted` | character | explicit DM+owner | granted entry | Entry content is cross-user validated |
+| `item.granted` | character | explicit DM actor+owner | `{awardId,index,targetCount,sourceKind,note,entry}` | One deterministic per-target fact; bounded entry/note, followed by that target's projection invalidation |
 | `party_inventory.invalidated` | campaign | all_members | empty | Metadata-only shared-stash refresh signal |
 | `transfer.reserved` | transfer | explicit actor+target owner | source/target kinds; each non-DM sees only owned character endpoint ids | Escrow content and counterpart identities are not broadcast |
 | `transfer.committed` | transfer | explicit actor+target owner | privacy-reduced source/target endpoints | Destination write complete; affected owners refetch authoritative state |
@@ -105,6 +105,10 @@ a catalog field: owner patches, item grants, applied structured effects, both le
 reservation and resolution), archived-import reactivation, and a sharing-policy write. `xp.granted` emits none
 because `xp` is not a catalog field.
 
+An atomic item-award batch emits each `item.granted` and its projection invalidation in request target order,
+then one `party_inventory.invalidated` if the source stash was debited. Retries replay the receipt and emit
+nothing. No campaign-wide batch event exposes the complete recipient list.
+
 Roll history and non-state workflow history are not assumed to be represented by the snapshot.
 Character semantic-operation lifecycle events are delivered even when their sequence is at/before the
 snapshot cursor or an owner/DM character ref's `operationWatermark`. The later live-apply consumer, not the
@@ -141,7 +145,7 @@ Current audit actions include:
 - `rules.created`, `rules.activated`;
 - `dm_workspace.created`, `dm_workspace.updated`;
 - `character.operation.proposed`, `.applied`, `.rejected`, `.cancelled`, `.expired`;
-- `xp.granted`, `item.granted`;
+- `xp.granted`, compatibility `item.granted`, atomic `item.award_batch`;
 - `transfer.committed`, `transfer.rejected`;
 - `session.revoked`, `session.revoked_others`;
 - `account.deletion_requested`, `account.deletion_cancelled`, `account.deletion_purged`.

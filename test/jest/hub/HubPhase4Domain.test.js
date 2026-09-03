@@ -239,10 +239,15 @@ describe("Phase 4 actions, grants, and transfers", () => {
 				clientImportId: "near-limit-target",
 				campaignId: campaign.id,
 				schemaVersion: 1,
-				data: {name: "Near Limit", notes: "x".repeat(1_490_000), inventory: [], currency: {}},
+				data: {name: "Near Limit", notes: "x".repeat(1_499_700), inventory: [], currency: {}},
 			},
 		})).json().character;
-		const largeItem = {name: "Large Journal", source: "HB", entries: ["y".repeat(20_000)]};
+		const largeItem = {
+			name: `Large Journal ${"y".repeat(186)}`,
+			source: "HB",
+			rarity: "z".repeat(80),
+			typeCode: "x".repeat(80),
+		};
 
 		const oversizedGrant = await app.inject({
 			method: "POST",

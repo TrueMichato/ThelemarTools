@@ -20,10 +20,17 @@ import {
 	validateProjectionPolicy,
 } from "./character-projection.js";
 import {
+	addAwardedEntryToCharacter,
 	addTransferPayload,
 	applySemanticOperation,
+	getItemAwardIdempotencyKey,
+	getItemAwardTotalQuantity,
+	getSafeItemSummary,
+	normalizeItemAwardRequest,
+	normalizeItemAwardQuantity,
 	normalizeCharacterInventory,
 	normalizeCurrency,
+	normalizeSafeItemSummary,
 	normalizeSemanticOperation,
 	removeTransferPayload,
 } from "./hub-actions.js";
@@ -1268,7 +1275,7 @@ export class MemoryHubStore {
 		if (prior) return prior;
 		const source = this._getCharacterOrThrow(characterId);
 		if (source.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can clone this character.`, {status: 403});
-		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
 		const clone = {
 			...copy(source),
 			id: crypto.randomUUID(),
@@ -2209,14 +2216,16 @@ export class MemoryHubStore {
 	}
 
 	async pGrantItem ({accountId, campaignId, characterId, item, quantity = 1, idempotencyKey}) {
-		validateCloudValue(item, {label: "Granted item"});
+		const normalizedItem = normalizeSafeItemSummary(item);
+		normalizeItemAwardQuantity(quantity);
+		validateCloudValue(normalizedItem, {label: "Granted item"});
 		const prior = this._getReceipt({accountId, idempotencyKey});
 		if (prior) return prior;
 		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
 		const character = this._getCharacterOrThrow(characterId);
 		if (character.campaignId !== campaignId) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
 		const data = normalizeCharacterInventory(character.data);
-		const entry = {id: crypto.randomUUID(), item: copy(item), quantity: Math.max(1, Math.floor(quantity))};
+		const entry = {id: crypto.randomUUID(), item: copy(normalizedItem), quantity};
 		data.inventory.push(entry);
 		// The inventory just changed underneath a summary the sheet computed for the previous
 		// one, and no sheet is present to recompute it. Drop it: the projection then reports
@@ -2230,6 +2239,160 @@ export class MemoryHubStore {
 		// A granted item changes the inventory and carry summaries.
 		this._commitCharacterMutation({character, actorAccountId: accountId, isRevisionBump: false});
 		return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(character), entry}});
+	}
+
+	async pAwardItems ({
+		accountId,
+		campaignId,
+		source,
+		targetCharacterIds,
+		quantity,
+		note = null,
+		idempotencyKey,
+	}) {
+		const request = normalizeItemAwardRequest({source, targetCharacterIds, quantity, note});
+		const commandIdempotencyKey = getItemAwardIdempotencyKey({idempotencyKey, campaignId, request});
+		const prior = this._getReceipt({accountId, idempotencyKey: commandIdempotencyKey});
+		if (prior) return prior;
+		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
+
+		const targetCharacters = request.targetCharacterIds.map(characterId => {
+			const character = this._characters.get(characterId);
+			const ownerMembership = character
+				? this._memberships.get(`${campaignId}::${character.ownerAccountId}`)
+				: null;
+			if (
+				!character
+				|| character.status !== "active"
+				|| character.campaignId !== campaignId
+				|| ownerMembership?.status !== "active"
+			) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
+			return character;
+		});
+
+		const totalQuantity = getItemAwardTotalQuantity({
+			quantity: request.quantity,
+			targetCount: targetCharacters.length,
+		});
+		let item;
+		let incomingEntry;
+		let stagedPartyInventory = null;
+		let partyInventoryResponse = null;
+		if (request.source.kind === "party_inventory") {
+			const partyInventory = this._partyInventories.get(campaignId);
+			if (!partyInventory) {
+				throw new HubStoreError("ITEM_AWARD_SOURCE_NOT_FOUND", `Party inventory entry was not found.`, {status: 404});
+			}
+			const selected = partyInventory.inventory.find(entry => entry.id === request.source.entryId);
+			if (!selected) {
+				throw new HubStoreError("ITEM_AWARD_SOURCE_NOT_FOUND", `Party inventory entry was not found.`, {status: 404});
+			}
+			item = getSafeItemSummary(selected.item);
+			const removed = removeTransferPayload({
+				container: partyInventory,
+				payload: {items: [{entryId: selected.id, quantity: totalQuantity}]},
+			});
+			incomingEntry = removed.escrow.items[0];
+			stagedPartyInventory = {
+				...copy(partyInventory),
+				inventory: removed.container.inventory,
+				currency: removed.container.currency,
+				revision: partyInventory.revision + 1,
+			};
+			partyInventoryResponse = {id: partyInventory.id, revision: stagedPartyInventory.revision};
+		} else {
+			item = request.source.item;
+			incomingEntry = {item, quantity: request.quantity};
+		}
+		validateCloudValue(item, {label: "Awarded item"});
+
+		const awardId = crypto.randomUUID();
+		const stagedCharacters = targetCharacters.map((character, index) => {
+			const added = addAwardedEntryToCharacter({
+				container: character.data,
+				incoming: {...copy(incomingEntry), quantity: request.quantity},
+			});
+			stripCarryAuthority(added.container);
+			validateCloudCharacterData(added.container);
+			return {
+				index,
+				character: {
+					...copy(character),
+					data: added.container,
+					revision: character.revision + 1,
+					updatedAt: this._fnNow().toISOString(),
+				},
+				entry: added.entry,
+			};
+		});
+
+		for (const staged of stagedCharacters) this._characters.set(staged.character.id, staged.character);
+		if (stagedPartyInventory) this._partyInventories.set(campaignId, stagedPartyInventory);
+
+		const response = {
+			awardId,
+			source: {kind: request.source.kind, item: copy(item)},
+			quantity: request.quantity,
+			note: request.note,
+			targets: stagedCharacters.map(({index, character, entry}) => ({
+				index,
+				characterId: character.id,
+				entryId: entry.id,
+				quantity: request.quantity,
+				revision: character.revision,
+			})),
+			...(partyInventoryResponse ? {partyInventory: partyInventoryResponse} : {}),
+		};
+		this._appendAudit({
+			campaignId,
+			actorAccountId: accountId,
+			action: "item.award_batch",
+			targetType: "campaign",
+			targetId: campaignId,
+			details: {
+				awardId,
+				sourceKind: request.source.kind,
+				item,
+				targetCharacterIds: request.targetCharacterIds,
+				targetCount: request.targetCharacterIds.length,
+				quantity: request.quantity,
+				totalQuantity,
+				note: request.note,
+			},
+		});
+		for (const {index, character, entry} of stagedCharacters) {
+			this._appendEvent({
+				campaignId,
+				actorAccountId: accountId,
+				type: "item.granted",
+				aggregateType: "character",
+				aggregateId: character.id,
+				aggregateRevision: character.revision,
+				visibility: "explicit_accounts",
+				visibleAccountIds: [...new Set([accountId, character.ownerAccountId])],
+				payload: {
+					awardId,
+					index,
+					targetCount: stagedCharacters.length,
+					sourceKind: request.source.kind,
+					note: request.note,
+					entry: {id: entry.id, item: copy(item), quantity: request.quantity},
+				},
+			});
+			this._commitCharacterMutation({character, actorAccountId: accountId, isRevisionBump: false});
+		}
+		if (stagedPartyInventory) {
+			this._appendEvent({
+				campaignId,
+				actorAccountId: null,
+				type: "party_inventory.invalidated",
+				aggregateType: "campaign",
+				aggregateId: campaignId,
+				aggregateRevision: stagedPartyInventory.revision,
+				payload: {},
+			});
+		}
+		return this._setReceipt({accountId, idempotencyKey: commandIdempotencyKey, response});
 	}
 
 	_getPartyInventory (campaignId) {
