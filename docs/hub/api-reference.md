@@ -202,9 +202,10 @@ to the destination, while rejection or lifecycle cancellation restores the sourc
 idempotency key with the same command replays its stored result rather than repeating either mutation.
 
 The server derives item eligibility and stack compatibility from canonical data. A whole stack is refused
-while equipped, attuned, container-linked, spell/component-linked, or otherwise referenced by Character Sheet
-state; a partial move is allowed only when every reference remains valid against the source copy and the
-transferred wrapper carries no child/container linkage that would be duplicated. Such refusals
+while equipped, attuned, container-linked, spell/component-linked (including a real `itemGrantedSpells[].itemId`
+record), or otherwise referenced by Character Sheet state. Concentration records do not carry source-item
+identity and are not treated as item links. A partial move is allowed only when every reference remains valid
+against the source copy and the transferred wrapper carries no child/container linkage that would be duplicated. Such refusals
 return `TRANSFER_ITEM_LINKED`. Destination stacks merge only when their complete transferable metadata matches;
 custom names, source/edition, charges, durability, notes, material/variant/component state, and other mutable
 fields therefore remain distinct when they differ.

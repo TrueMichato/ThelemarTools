@@ -98,6 +98,104 @@ describe("Character Sheet party inventory", () => {
 		expect(partyInventory._partyInventory.inventory).toEqual([]);
 	});
 
+	it("preserves a reconciliation conflict when the party fetch settles last", async () => {
+		let resolveParty;
+		const partyInventory = new CharacterSheetPartyInventory({
+			api: {
+				pGetPartyInventory: jest.fn(() => new Promise(resolve => resolveParty = resolve)),
+				pGetCampaignSnapshot: jest.fn(async () => ({
+					membership: {role: "player"},
+					characters: [{kind: "owner_truth", character: {id: "character-1"}}],
+					roster: [],
+				})),
+			},
+			campaignId: "campaign-1",
+			repository: {pReconcileAuthoritativeCharacter: jest.fn(async () => ({status: "conflict"}))},
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._render = jest.fn();
+		partyInventory._decorateCharacterInventory = jest.fn();
+
+		const refreshingParty = partyInventory._pRefreshParty();
+		await partyInventory._pReconcileCharacter();
+		resolveParty({id: "party-1", inventory: [], currency: {}});
+		await refreshingParty;
+
+		expect(partyInventory._getVisibleError()).toEqual({
+			source: "reconcile",
+			message: expect.stringContaining("Saving is paused"),
+		});
+		expect(partyInventory._partyError).toBeNull();
+	});
+
+	it("preserves a failed authoritative adoption when reconciliation settles after the party fetch", async () => {
+		let resolveReconcile;
+		const partyInventory = new CharacterSheetPartyInventory({
+			api: {
+				pGetPartyInventory: jest.fn(async () => ({id: "party-1", inventory: [], currency: {}})),
+				pGetCampaignSnapshot: jest.fn(async () => ({
+					membership: {role: "player"},
+					characters: [{kind: "owner_truth", character: {id: "character-1"}}],
+					roster: [],
+				})),
+			},
+			campaignId: "campaign-1",
+			repository: {
+				pReconcileAuthoritativeCharacter: jest.fn(() => new Promise(resolve => resolveReconcile = resolve)),
+			},
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._render = jest.fn();
+		partyInventory._decorateCharacterInventory = jest.fn();
+
+		const reconciling = partyInventory._pReconcileCharacter();
+		await partyInventory._pRefreshParty();
+		resolveReconcile({status: "failed"});
+		await reconciling;
+
+		expect(partyInventory._getVisibleError()).toEqual({
+			source: "reconcile",
+			message: expect.stringContaining("could not be applied"),
+		});
+	});
+
+	it("clears only the error channel whose refresh recovered", async () => {
+		const partyInventory = new CharacterSheetPartyInventory({
+			api: {
+				pGetPartyInventory: jest.fn(async () => ({id: "party-1", inventory: [], currency: {}})),
+				pGetCampaignSnapshot: jest.fn(async () => ({
+					membership: {role: "player"},
+					characters: [{kind: "owner_truth", character: {id: "character-1"}}],
+					roster: [],
+				})),
+			},
+			campaignId: "campaign-1",
+			repository: {pReconcileAuthoritativeCharacter: jest.fn(async () => ({status: "unchanged"}))},
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._error = "A transfer action failed.";
+		partyInventory._partyError = "The stash fetch failed.";
+		partyInventory._reconcileError = "Saving is paused.";
+		partyInventory._render = jest.fn();
+		partyInventory._decorateCharacterInventory = jest.fn();
+
+		await partyInventory._pReconcileCharacter();
+		expect(partyInventory._reconcileError).toBeNull();
+		expect(partyInventory._partyError).toBe("The stash fetch failed.");
+		expect(partyInventory._error).toBe("A transfer action failed.");
+
+		await partyInventory._pRefreshParty();
+		expect(partyInventory._partyError).toBeNull();
+		expect(partyInventory._error).toBe("A transfer action failed.");
+		expect(partyInventory._getVisibleError()).toEqual({
+			source: "action",
+			message: "A transfer action failed.",
+		});
+	});
+
 	it("detaches cached party inventory after an authoritative HTTP access failure", async () => {
 		const error = Object.assign(new Error("forbidden"), {code: "FORBIDDEN"});
 		const root = {remove: jest.fn()};

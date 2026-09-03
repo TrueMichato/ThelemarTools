@@ -160,6 +160,8 @@ export class CharacterSheetPartyInventory {
 		this._tokenByItemKey = new Map();
 		this._draft = null;
 		this._error = null;
+		this._reconcileError = null;
+		this._partyError = null;
 		this._announcement = "";
 		this._connectionState = null;
 		this._isLoading = false;
@@ -256,6 +258,8 @@ export class CharacterSheetPartyInventory {
 		this._active = null;
 		this._draft = null;
 		this._error = null;
+		this._reconcileError = null;
+		this._partyError = null;
 		this._announcement = "";
 		this._partyInventory = null;
 		this._role = null;
@@ -588,7 +592,7 @@ export class CharacterSheetPartyInventory {
 			});
 			this._rebuildRecipientTokens();
 		}
-		this._error = partyResult.status === "rejected"
+		this._partyError = partyResult.status === "rejected"
 			? getErrorMessage(partyResult.reason)
 			: snapshotResult.status === "rejected"
 				? getErrorMessage(snapshotResult.reason)
@@ -617,24 +621,30 @@ export class CharacterSheetPartyInventory {
 			fnIsCurrent: () => this._isCurrent(active),
 		});
 		if (!this._isCurrent(active)) return {status: "fenced"};
-		if (result.status === "conflict") {
-			this._error = "The server inventory overlaps unsaved edits on this sheet. Saving is paused until you choose a recovery version.";
-			this._render();
-		} else if (result.status === "failed") {
-			this._error = "The latest authoritative inventory could not be applied. Your current sheet was preserved; retry the sync.";
-			this._render();
-		}
+		const previousError = this._reconcileError;
+		if (result.status === "conflict") this._reconcileError = "The server inventory overlaps unsaved edits on this sheet. Saving is paused until you choose a recovery version.";
+		else if (result.status === "failed") this._reconcileError = "The latest authoritative inventory could not be applied. Your current sheet was preserved; retry the sync.";
+		else if (["reconciled", "stale", "unchanged"].includes(result.status)) this._reconcileError = null;
+		if (this._reconcileError !== previousError) this._render();
 		this._decorateCharacterInventory();
 		return result;
+	}
+
+	_getVisibleError () {
+		if (this._reconcileError) return {source: "reconcile", message: this._reconcileError};
+		if (this._error) return {source: "action", message: this._error};
+		if (this._partyError) return {source: "party", message: this._partyError};
+		return null;
 	}
 
 	_render () {
 		if (!this._root || !this._active?.isOwner) return;
 		const focus = this._captureFocus();
+		const visibleError = this._getVisibleError();
 		this._root.replaceChildren();
 		this._root.append(this._renderHeader());
 
-		if (this._error) this._root.append(this._renderError());
+		if (visibleError) this._root.append(this._renderError(visibleError));
 		if (["reconnecting", "unavailable"].includes(this._connectionState)) {
 			this._root.append(createElement("p", {
 				className: "charsheet__party-inventory-connection",
@@ -645,7 +655,7 @@ export class CharacterSheetPartyInventory {
 
 		if (this._isLoading && !this._partyInventory) this._root.append(this._renderLoading());
 		else if (this._partyInventory) this._root.append(this._renderContents());
-		else if (!this._error) this._root.append(this._renderEmpty("The party stash is not available yet."));
+		else if (!visibleError) this._root.append(this._renderEmpty("The party stash is not available yet."));
 
 		if (this._draft) this._root.append(this._renderComposer());
 		this._root.append(createElement("div", {
@@ -692,19 +702,21 @@ export class CharacterSheetPartyInventory {
 		return header;
 	}
 
-	_renderError () {
+	_renderError ({source, message}) {
 		const error = createElement("div", {
 			className: "charsheet__party-inventory-error",
 			attrs: {role: "alert"},
 		});
-		error.append(createElement("span", {text: this._error}));
+		error.append(createElement("span", {text: message}));
 		const retry = createElement("button", {
 			className: "ve-btn ve-btn-xs ve-btn-default",
 			text: "Retry",
 			attrs: {type: "button", "data-party-inventory-focus": "retry"},
 		});
 		retry.addEventListener("click", () => {
-			this._error = null;
+			if (source === "reconcile") this._reconcileError = null;
+			else if (source === "party") this._partyError = null;
+			else this._error = null;
 			this._scheduleRefresh({character: true, party: true});
 			this._render();
 		});

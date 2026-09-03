@@ -291,7 +291,6 @@ describe("inventory escrow", () => {
 		["active state", data => { data.activeStates = [{customEffects: [{inventoryItemId: "item"}]}]; }],
 		["granted spell", data => { data.itemGrantedSpells = [{itemId: "item", name: "Light"}]; }],
 		["Ioun bond", data => { data.iounBonds = {item: 3}; }],
-		["concentration effect", data => { data.concentration = {sourceFeatureId: "item:item"}; }],
 	])("rejects whole-item transfer while an inventory invariant is active: %s", (_label, fnMutate) => {
 		const data = {
 			inventory: [
@@ -303,6 +302,21 @@ describe("inventory escrow", () => {
 		fnMutate(data);
 		expect(() => removeTransferPayload({container: data, payload: {items: [{entryId: "item", quantity: 1}]}}))
 			.toThrow(expect.objectContaining({code: "TRANSFER_ITEM_LINKED"}));
+	});
+
+	it("does not infer an item link from real or legacy concentration records", () => {
+		const {container, escrow} = removeTransferPayload({
+			container: {
+				inventory: [{id: "item", item: {name: "Focus"}, quantity: 1}],
+				currency: {},
+				concentrations: [{id: "spell:Bless", kind: "spell", name: "Bless", source: "PHB"}],
+				concentrating: {spellName: "Bless", spellLevel: 1},
+			},
+			payload: {items: [{entryId: "item", quantity: 1}]},
+		});
+
+		expect(container.inventory).toEqual([]);
+		expect(escrow.items).toEqual([expect.objectContaining({id: "item", quantity: 1})]);
 	});
 
 	it("rejects insufficient item or currency balances", () => {

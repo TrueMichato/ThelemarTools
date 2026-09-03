@@ -57,10 +57,10 @@ describe("Hub inventory contract", () => {
 	});
 
 	it.each([
-		["item-granted spell", {spellcasting: {spells: [{itemId: "stack-1"}]}}],
+		["item-granted spell", {itemGrantedSpells: [{name: "Fireball", source: "PHB", itemId: "stack-1"}]}],
+		["spell component", {spellcasting: {spells: [{componentItemId: "stack-1"}]}}],
 		["container", {inventory: [{id: "container", quantity: 1, item: {containedItems: ["stack-1"]}}]}],
 		["Ioun bond", {iounBonds: {"stack-1": {bonded: true}}}],
-		["concentration", {concentration: {sourceFeatureId: "item:stack-1"}}],
 	])("refuses a whole stack referenced by %s state", (_label, linkedState) => {
 		const entry = {id: "stack-1", quantity: 1, item: {name: "Focus"}};
 		expect(getInventoryTransferEligibility({
@@ -71,6 +71,21 @@ describe("Hub inventory contract", () => {
 			isEligible: false,
 			blockers: expect.any(Array),
 			maxQuantity: 0,
+		});
+	});
+
+	it("does not invent item linkage from serialized concentration state", () => {
+		const entry = {id: "stack-1", quantity: 1, item: {name: "Focus"}};
+		const container = {
+			inventory: [entry],
+			concentrations: [{id: "spell:Bless", kind: "spell", name: "Bless", source: "PHB"}],
+			concentrating: {spellName: "Bless", spellLevel: 1},
+		};
+
+		expect(getInventoryTransferEligibility({container, entry, quantity: 1})).toEqual({
+			isEligible: true,
+			blockers: [],
+			maxQuantity: 1,
 		});
 	});
 

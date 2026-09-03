@@ -23,16 +23,6 @@ function hasItemReference (value, itemId) {
 	return false;
 }
 
-function hasSourceFeatureReference (value, sourceFeatureId) {
-	if (!value || typeof value !== "object") return false;
-	if (Array.isArray(value)) return value.some(it => hasSourceFeatureReference(it, sourceFeatureId));
-	for (const [key, child] of Object.entries(value)) {
-		if (key === "sourceFeatureId" && child === sourceFeatureId) return true;
-		if (hasSourceFeatureReference(child, sourceFeatureId)) return true;
-	}
-	return false;
-}
-
 export function getWholeItemTransferBlockers ({container, entry}) {
 	const itemId = entry?.id;
 	if (!itemId) return ["missing inventory identity"];
@@ -54,7 +44,6 @@ export function getWholeItemTransferBlockers ({container, entry}) {
 	if (hasItemReference(container?.activeStates, itemId)) blockers.push("active state");
 	if (hasItemReference(container?.itemGrantedSpells, itemId) || hasItemReference(container?.spellcasting, itemId)) blockers.push("spell or component link");
 	if (Object.hasOwn(container?.iounBonds || {}, itemId)) blockers.push("Ioun bond");
-	if (hasSourceFeatureReference(container?.concentration, sourceFeatureId)) blockers.push("concentration effect");
 	return [...new Set(blockers)];
 }
 
