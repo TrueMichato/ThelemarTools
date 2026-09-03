@@ -102,6 +102,7 @@ export const HUB_LOG_REDACT_PATHS = Object.freeze([
 	"res.headers[\"set-cookie\"]",
 	"response.headers[\"set-cookie\"]",
 	"databaseUrl",
+	"clientSecret",
 	"token",
 	"tokenHash",
 	"state",

@@ -15,10 +15,12 @@ Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecyc
 migration management, Phase 6D portable deployment, Phase 6E operations, Phase 6F CI/real-stack integration,
 and Phase 6G Oracle deployment are complete.
 
-The first `t7-auth-providers` layer is implemented but not a Discord/Google product release: additive migration
-0006, provider-neutral identity/session provenance, durable one-time OAuth transactions, a validated registry
-running only the compatible GitHub adapter, rollback preflight, and deterministic memory/PostgreSQL/real-stack
-coverage. Discord, Google, reauthentication, and link/unlink remain gated to later reviewed stack layers.
+The first `t7-auth-providers` layer provides migration 0006, provider-neutral identity/session provenance,
+durable one-time OAuth transactions, and the validated registry. Layer 2 adds production Discord OAuth and
+Google OIDC adapters, bounded provider HTTP/JWKS validation, paired first-enable preflight, signed-out provider
+guidance, and deterministic memory/PostgreSQL/real-stack coverage. Normal production configuration remains
+GitHub-only. Layer 3 still owns explicit reauthentication, link/unlink, last-identity protections, and account
+security UI; layer 4 owns final rollout/runbooks.
 
 The Oracle deployment now has deliberate one-command release automation in `deploy/hub/release.sh`. It locks
 out concurrent operators, verifies an immutable annotated tag and clean exact checkout, records rollback

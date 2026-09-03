@@ -113,10 +113,12 @@ resolution.
 | `HUB_CSRF_SECRET` | BFF | Yes | CSRF and deterministic invite derivation |
 | `HUB_METRICS_TOKEN` | BFF/monitor | Yes | Independent bearer for `/api/metrics` |
 | `HUB_LOG_LEVEL` | BFF | No | Structured log threshold |
-| `HUB_AUTH_PROVIDERS` | BFF | No | Comma-separated normal provider enablement; layer 1 accepts `github` |
+| `HUB_AUTH_PROVIDERS` | BFF | No | Supported slugs `github,discord,google`; Discord and Google normal enablement must be paired; production remains `github` until layer 3 |
 | `HUB_AUTH_EMERGENCY_DISABLED_PROVIDERS` | BFF | No | Emergency provider-specific kill switch; startup fails if no provider remains |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | BFF | Secret (client secret) | OAuth application |
-| `HUB_ALLOWED_OAUTH_SUBJECTS` | BFF | Operationally sensitive | Comma-separated `github:<numeric id>` |
+| `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` | BFF | Secret (client secret) | Discord confidential OAuth application |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | BFF | Secret (client secret) | Google confidential web/OIDC application |
+| `HUB_ALLOWED_OAUTH_SUBJECTS` | BFF | Operationally sensitive | Exact `github:<decimal>`, `discord:<decimal>`, or `google:<opaque sub>` authorities |
 | `HUB_TRUST_PROXY` | BFF | No | Exact trusted proxy IP/CIDR; local reference uses `172.30.0.10` |
 | `HUB_CLIENT_IP_HEADER` | BFF | No | Optional provider-set client address; only `do-connecting-ip` is accepted and it is mutually exclusive with `HUB_TRUST_PROXY` |
 | `HUB_POSTGRES_PASSWORD` | Compose DB/jobs | Yes | Local schema owner |
@@ -156,8 +158,9 @@ socket peer.
 The local Caddy reference uses `tls internal` and persists its local CA under `hub-caddy-data`. Trust that CA
 on a development machine before browser/OAuth testing; `curl --insecure` is acceptable only for local probes.
 The secure origin is required because browsers reject `__Host-` cookies without `Secure`. Production uses a
-publicly trusted certificate and a separate OAuth application whose callback is
-`<HUB_APP_ORIGIN>/auth/github/callback`.
+publicly trusted certificate. Provider consoles must allow only these exact callbacks, without wildcards:
+`<HUB_APP_ORIGIN>/auth/github/callback`, `<HUB_APP_ORIGIN>/auth/discord/callback`, and
+`<HUB_APP_ORIGIN>/auth/google/callback`.
 
 The database health check explicitly probes TCP (`127.0.0.1`) with a 30-second start period. A Unix-socket
 probe can report the temporary initialization server healthy before init-role scripts finish.

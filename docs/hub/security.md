@@ -20,6 +20,12 @@
   before store lookup and cannot link, admit, merge, or select an account.
 - Authorization codes and provider access/refresh tokens are never persisted. The callback-local access token is
   discarded after identity lookup; consumed state, PKCE verifier, and nonce values are cleared immediately.
+- Provider HTTP uses fixed HTTPS endpoints, rejects redirects, times out after five seconds, and caps decoded
+  token/profile JSON at 32 KiB and Google JWKS at 64 KiB. Google accepts only RS256 tokens from
+  `https://accounts.google.com` for the configured audience, with bounded `exp`/`iat`, exact nonce, and opaque
+  `sub`; Discord retains its decimal snowflake as text.
+- A failed or misconfigured adapter exposes only bounded provider status/error codes and cannot disable a healthy
+  sibling. No upstream body, token, profile, subject, or credential is logged or returned.
 - Sessions use random tokens stored only as SHA-256 hashes; successful reauthentication revokes the prior
   browser session. New sessions record same-account external-identity provenance without changing campaign
   authorization.

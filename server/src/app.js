@@ -75,7 +75,10 @@ function validateConfig (config) {
 	if (!config?.cookieSecret || config.cookieSecret.length < 32) throw new TypeError(`config.cookieSecret must be at least 32 characters.`);
 	if (!config?.csrfSecret || config.csrfSecret.length < 32) throw new TypeError(`config.csrfSecret must be at least 32 characters.`);
 	if (config.metricsToken != null && config.metricsToken.length < 32) throw new TypeError(`config.metricsToken must be at least 32 characters.`);
-	const appOrigin = new URL(config.appOrigin).origin;
+	const parsedAppOrigin = new URL(config.appOrigin);
+	const appOrigin = parsedAppOrigin.origin;
+	if (config.appOrigin !== appOrigin) throw new TypeError(`config.appOrigin must be an exact origin.`);
+	if (parsedAppOrigin.protocol !== "https:") throw new TypeError(`config.appOrigin must use HTTPS.`);
 	const clientIpHeader = getClientIpHeader(config.clientIpHeader);
 	if (clientIpHeader && config.trustProxy) {
 		throw new TypeError(`clientIpHeader and trustProxy cannot be enabled together.`);

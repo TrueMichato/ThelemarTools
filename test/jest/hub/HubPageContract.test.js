@@ -230,10 +230,23 @@ describe("campaign hub pages", () => {
 	it("preserves the complete hub URL through signed-out OAuth", () => {
 		expect(hubHtml).toContain("id=\"hub-sign-in\"");
 		const source = read("js/hub/hub-page.js");
+		const providerSource = read("js/hub/hub-auth-providers.js");
 		expect(source).toContain("window.location.search");
+		expect(source).toContain("import(\"./hub-auth-providers.js\")");
+		expect(providerSource).toContain("new URLSearchParams({returnTo})");
 		expect(source).toContain("sessionStorage.setItem(\"hub-pending-invite\"");
 		expect(source).toContain("joinUrl.hash");
 		expect(source).not.toContain("searchParams.set(\"invite\"");
+	});
+
+	it("renders accessible provider controls with explicit duplicate-account guidance", () => {
+		const source = read("js/hub/hub-auth-providers.js");
+		expect(source).toContain(`setAttribute("role", "group")`);
+		expect(source).toContain(`setAttribute("aria-label", "Sign-in providers")`);
+		expect(source).toContain("Sign in with $" + "{provider.label}");
+		expect(source).toContain("Using an unlinked provider creates a separate account");
+		expect(source).toContain("One sign-in provider is temporarily unavailable");
+		expect(source).not.toContain("innerHTML");
 	});
 
 	it("clears a pending invite failure without aborting Hub setup", () => {

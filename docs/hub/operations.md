@@ -33,6 +33,23 @@ live host before private launch.
    forwarded headers. Leave it empty for a directly exposed BFF.
 8. Start the BFF with `npm run hub:serve`.
 
+Layer 2 deploys Discord and Google disabled in normal production. Do not add an existing user's Discord or
+Google subject to the private-cohort allowlist before layer 3's explicit reauthentication and **Link provider**
+flow is deployed: an allowlisted unlinked identity correctly creates a separate account. For isolated staging
+acceptance only, use fresh identities, configure `HUB_AUTH_PROVIDERS=github,discord,google`, and run:
+
+```bash
+HUB_APP_ORIGIN=https://staging.example \
+HUB_METRICS_TOKEN=... \
+npm run hub:check-auth-first-enable
+```
+
+The command requires both providers to be `available`, snapshots their aggregate success counters, and passes
+only after a new complete callback increments each counter. A partial pass, provider reset, malformed response,
+or timeout blocks enablement. It emits no subject, account, profile, or OAuth material. After layer 3, use the
+same paired preflight before first production enablement. Independent emergency disablement is allowed only
+after admission.
+
 The process refuses to listen until PostgreSQL is reachable and the required ledger migration exists.
 `/api/health` also returns 503 if readiness fails. See [migrations.md](migrations.md).
 

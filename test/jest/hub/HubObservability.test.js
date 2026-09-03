@@ -60,6 +60,7 @@ describe("Hub observability", () => {
 			"accessToken",
 			"refreshToken",
 			"idToken",
+			"clientSecret",
 		]) expect(HUB_LOG_REDACT_PATHS).toContain(path);
 	});
 

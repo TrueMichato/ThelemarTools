@@ -22,11 +22,15 @@ const env = {
 	HUB_CSRF_SECRET: crypto.randomBytes(48).toString("base64url"),
 	HUB_METRICS_TOKEN: crypto.randomBytes(32).toString("base64url"),
 	HUB_BACKUP_ENCRYPTION_KEY: crypto.randomBytes(32).toString("base64"),
-	HUB_ALLOWED_OAUTH_SUBJECTS: "github:0",
+	HUB_ALLOWED_OAUTH_SUBJECTS: "github:101,discord:202,google:google-e2e-303",
 	HUB_TEST_AUTH_SECRET: crypto.randomBytes(32).toString("base64url"),
 	HUB_TEST_POSTGRES_PORT: postgresPort,
 	GITHUB_CLIENT_ID: "hub-e2e",
 	GITHUB_CLIENT_SECRET: crypto.randomBytes(24).toString("base64url"),
+	DISCORD_CLIENT_ID: "hub-e2e",
+	DISCORD_CLIENT_SECRET: crypto.randomBytes(24).toString("base64url"),
+	GOOGLE_CLIENT_ID: "hub-e2e",
+	GOOGLE_CLIENT_SECRET: crypto.randomBytes(24).toString("base64url"),
 	HUB_IMAGE_VERSION: "e2e",
 	HUB_VCS_REF: process.env.GITHUB_SHA || "local-e2e",
 	HUB_NPM_REGISTRY: process.env.HUB_NPM_REGISTRY || process.env.npm_config_registry || "https://registry.npmjs.org/",
@@ -103,6 +107,22 @@ async function pWaitForContainerHealthy ({name, timeoutMs = 60_000}) {
 	}
 	await run("docker", ["logs", name], {isAllowFailure: true});
 	throw new Error(`Production BFF smoke container did not become healthy.`);
+}
+
+async function pCheckProductionProviderMetadata ({name}) {
+	const output = await getOutput("docker", [
+		"exec",
+		name,
+		"node",
+		"--input-type=module",
+		"--eval",
+		`const response = await fetch("http://127.0.0.1:5052/api/meta"); if (!response.ok) process.exit(2); process.stdout.write(JSON.stringify(await response.json()));`,
+	]);
+	const metadata = JSON.parse(output);
+	const statuses = Object.fromEntries((metadata.authProviders || []).map(provider => [provider.slug, provider.status]));
+	if (statuses.github !== "available" || statuses.discord !== "available" || statuses.google !== "available") {
+		throw new Error(`Production provider metadata smoke failed.`);
+	}
 }
 
 function cleanup () {
@@ -184,12 +204,18 @@ try {
 		"--env", "HUB_CSRF_SECRET",
 		"--env", "HUB_METRICS_TOKEN",
 		"--env", "HUB_ALLOWED_OAUTH_SUBJECTS",
+		"--env", "HUB_AUTH_PROVIDERS=github,discord,google",
 		"--env", "GITHUB_CLIENT_ID",
 		"--env", "GITHUB_CLIENT_SECRET",
+		"--env", "DISCORD_CLIENT_ID",
+		"--env", "DISCORD_CLIENT_SECRET",
+		"--env", "GOOGLE_CLIENT_ID",
+		"--env", "GOOGLE_CLIENT_SECRET",
 		"--env", "HUB_HOST",
 		baseImage,
 	]);
 	await pWaitForContainerHealthy({name: productionSmokeName});
+	await pCheckProductionProviderMetadata({name: productionSmokeName});
 	await run("node", [
 		"--experimental-vm-modules",
 		"./node_modules/jest/bin/jest.js",

@@ -77,6 +77,7 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(e2eRunner).toContain(`process.once(signal`);
 		expect(e2eRunner).toContain(`cleanup();`);
 		expect(e2eRunner).toContain(`productionSmokeName`);
+		expect(e2eRunner).toContain(`pCheckProductionProviderMetadata`);
 		expect(e2eRunner).toMatch(/catch \(error\)[\s\S]*?composeArgs, "ps", "--all"[\s\S]*?composeArgs, "logs", "--tail=200"/);
 		expect(playwrightConfig).toContain("hub-playwright-results.json");
 		expect(workflow).toContain("test-results/hub-playwright-results.json");
@@ -86,7 +87,9 @@ describe("Hub CI and real-stack test contract", () => {
 	it("scans each Hub credential class for hard-coded assignments", () => {
 		for (const name of [
 			"DATABASE_URL",
+			"DISCORD_CLIENT_SECRET",
 			"GITHUB_CLIENT_SECRET",
+			"GOOGLE_CLIENT_SECRET",
 			"HUB_BACKUP_ENCRYPTION_KEY",
 			"HUB_COOKIE_SECRET",
 			"HUB_CSRF_SECRET",

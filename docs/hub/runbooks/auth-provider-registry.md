@@ -1,6 +1,6 @@
 # Runbook: authentication provider registry and rollback
 
-> **Status:** Layer 1 portable procedure
+> **Status:** Layers 1-2 portable procedure
 > **Owner:** Campaign Hub operator
 > **Last reviewed:** 2026-09-03
 
@@ -39,6 +39,27 @@ Never:
 An unavailable/configuration-error registration must not change another valid provider. Layer 1 has only GitHub,
 so invalid GitHub configuration intentionally prevents startup rather than serving a Hub with no recovery path.
 Do not use the emergency disable variable for routine rollout.
+
+## Layer 2 paired-provider acceptance
+
+Deploy layer 2 with `HUB_AUTH_PROVIDERS=github`. Discord and Google credentials may be provisioned, but normal
+production/private-cohort admission stays disabled until layer 3 supplies explicit reauthentication and
+identity linking. Never allowlist an existing user's unlinked provider subject: it creates a distinct account
+by design.
+
+Before layer 3, live acceptance is limited to isolated staging with fresh test identities:
+
+1. Register exact callbacks `/auth/discord/callback` and `/auth/google/callback`; use Discord scope `identify`
+   and Google scopes `openid profile`.
+2. Configure all three providers and only the fresh staging subjects.
+3. Run `HUB_APP_ORIGIN=... HUB_METRICS_TOKEN=... npm run hub:check-auth-first-enable`.
+4. Complete both printed sign-in journeys. The command passes only if both providers remain available and each
+   aggregate success counter increases after its baseline.
+5. Return staging to GitHub-only.
+
+After layer 3 is deployed, repeat the same paired preflight before first production enablement. A partial result
+blocks enablement. After admission, one failing provider may be emergency-disabled independently while healthy
+providers and existing sessions remain usable.
 
 ## GitHub-only rollback preflight
 
