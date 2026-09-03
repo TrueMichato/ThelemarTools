@@ -159,6 +159,26 @@ describe("Character Sheet Hub effect controls", () => {
 		expect(api.pListCharacterPendingActions).toHaveBeenCalledTimes(2);
 	});
 
+	it("starts a fresh fetch after capability is revoked and restored during an in-flight fetch", async () => {
+		const stale = makeDeferred();
+		api.pListCharacterPendingActions
+			.mockImplementationOnce(() => stale.promise)
+			.mockResolvedValueOnce([makeAction({actionId: "action-restored"})]);
+		controller.activate({characterId: "character-1"});
+		controller.onConnectionState({state: "access_lost"});
+		controller.onConnectionState({state: "live"});
+		await pFlush();
+		expect(api.pListCharacterPendingActions).toHaveBeenCalledTimes(2);
+		expect([...controller._actions.keys()]).toEqual(["action-restored"]);
+		stale.resolve([makeAction({actionId: "action-stale"})]);
+		await pFlush();
+
+		expect(api.pListCharacterPendingActions).toHaveBeenCalledTimes(2);
+		expect([...controller._actions.keys()]).toEqual(["action-restored"]);
+		expect(controller._isLoading).toBe(false);
+		expect(controller._pRefreshActive).toBeNull();
+	});
+
 	it("fences stale fetches when the open character changes", async () => {
 		const first = makeDeferred();
 		const second = makeDeferred();
@@ -245,6 +265,76 @@ describe("Character Sheet Hub effect controls", () => {
 		expect(api.pResolveStructuredAction.mock.calls[0][0].idempotencyKey).toBe("command-1");
 		expect(api.pResolveStructuredAction.mock.calls[1][0].idempotencyKey).toBe("command-1");
 		expect(controller._actions.get("action-1").decisionState).toBe("waiting");
+	});
+
+	it("preserves single-flight decision state across an interleaved refresh and successful resolve", async () => {
+		api.pListCharacterPendingActions.mockResolvedValue([makeAction()]);
+		const response = makeDeferred();
+		api.pResolveStructuredAction.mockImplementation(() => response.promise);
+		controller.activate({characterId: "character-1"});
+		await pFlush();
+
+		const pending = controller.pResolve({actionId: "action-1", decision: "accept"});
+		await controller.pRefresh();
+		expect(controller._actions.get("action-1")).toMatchObject({
+			decisionState: "submitting",
+			decision: "accept",
+			error: null,
+		});
+		await expect(controller.pResolve({actionId: "action-1", decision: "reject"})).resolves.toBe(false);
+		expect(api.pResolveStructuredAction).toHaveBeenCalledTimes(1);
+
+		response.resolve({
+			operation: {status: "applied", operation: makeOperation(), resultingCharacterRevision: 2},
+			eventIds: ["event-1", "event-2"],
+			operationWatermark: 20,
+		});
+		await expect(pending).resolves.toBe(true);
+		expect(controller._actions.get("action-1")).toMatchObject({
+			decisionState: "waiting",
+			decision: "accept",
+			error: null,
+		});
+	});
+
+	it("updates the live refreshed action after an interleaved resolve failure", async () => {
+		api.pListCharacterPendingActions.mockResolvedValue([makeAction()]);
+		const response = makeDeferred();
+		api.pResolveStructuredAction.mockImplementation(() => response.promise);
+		controller.activate({characterId: "character-1"});
+		await pFlush();
+
+		const pending = controller.pResolve({actionId: "action-1", decision: "accept"});
+		const actionBeforeRefresh = controller._actions.get("action-1");
+		await controller.pRefresh();
+		const actionAfterRefresh = controller._actions.get("action-1");
+		expect(actionAfterRefresh).not.toBe(actionBeforeRefresh);
+		response.reject(Object.assign(new Error("offline"), {code: "NETWORK_ERROR"}));
+
+		await expect(pending).resolves.toBe(false);
+		expect(actionAfterRefresh.decisionState).toBeNull();
+		expect(actionAfterRefresh.decision).toBeNull();
+		expect(actionAfterRefresh.error).toContain("Try again");
+		expect(controller._actions.get("action-1")).toBe(actionAfterRefresh);
+	});
+
+	it("preserves newer recovery state when an older resolve later fails", async () => {
+		api.pListCharacterPendingActions.mockResolvedValue([makeAction()]);
+		const response = makeDeferred();
+		api.pResolveStructuredAction.mockImplementation(() => response.promise);
+		controller.activate({characterId: "character-1"});
+		await pFlush();
+
+		const pending = controller.pResolve({actionId: "action-1", decision: "accept"});
+		await controller.pRefresh();
+		controller.onApplicationError({operationId: "action-1"});
+		response.reject(Object.assign(new Error("offline"), {code: "NETWORK_ERROR"}));
+
+		await expect(pending).resolves.toBe(false);
+		expect(controller._actions.get("action-1")).toMatchObject({
+			decisionState: "recovery",
+			error: expect.stringContaining("recovery is required"),
+		});
 	});
 
 	it("fails closed when authorization is lost during a decision", async () => {
@@ -385,6 +475,23 @@ describe("Character Sheet Hub effect controls", () => {
 		}
 		expect(controller._notices.has("error:failed-operation")).toBe(true);
 		expect([...controller._notices.values()].filter(it => it.kind === "success")).toHaveLength(3);
+	});
+
+	it("restores dismiss focus when notices are added or expire", () => {
+		controller.activate({characterId: "character-1"});
+		controller.onApplied({operation: makeOperation({operationId: "first", kind: "hp.damage"})});
+		const replacementDismiss = {focus: jest.fn()};
+		controller._noticesRoot.querySelector = jest.fn(selector => selector.includes("first") ? replacementDismiss : null);
+		document.activeElement = {dataset: {hubNoticeId: "first"}};
+
+		controller.onApplied({operation: makeOperation({operationId: "second", kind: "hp.damage"})});
+		expect(replacementDismiss.focus).toHaveBeenCalledWith({preventScroll: true});
+
+		const remainingDismiss = {focus: jest.fn()};
+		controller._noticesRoot.querySelector = jest.fn(selector => selector === "button" ? remainingDismiss : null);
+		document.activeElement = {dataset: {hubNoticeId: "first"}};
+		timerCallbacks[0]();
+		expect(remainingDismiss.focus).toHaveBeenCalledWith({preventScroll: true});
 	});
 
 	it("reports the authoritative clamped spell-slot restoration outcome", () => {

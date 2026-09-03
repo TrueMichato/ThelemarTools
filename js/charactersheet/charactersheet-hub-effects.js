@@ -130,7 +130,7 @@ export class CharacterSheetHubEffects {
 				}
 				this._isAuthorized = true;
 				this._actions = new Map((actions || [])
-					.map(action => this._getNormalizedAction(action))
+					.map(action => this._getNormalizedActionWithTransientState(action))
 					.filter(Boolean)
 					.map(action => [action.actionId, action]));
 				return true;
@@ -151,12 +151,12 @@ export class CharacterSheetHubEffects {
 				return false;
 			})
 			.finally(() => {
-				if (this._isCurrent(token)) {
-					this._isLoading = false;
-					this._pRefreshActive = null;
-					this._renderApprovals();
-					if (isCollectionStale) void this.pRefresh();
-				}
+				if (this._pRefreshActive !== promise) return;
+				this._isLoading = false;
+				this._pRefreshActive = null;
+				if (this._characterId !== token.characterId) return;
+				this._renderApprovals();
+				if (!this._isCapabilityRevoked && (isCollectionStale || !this._isCurrent(token))) void this.pRefresh();
 			});
 		this._pRefreshActive = promise;
 		return promise;
@@ -181,10 +181,9 @@ export class CharacterSheetHubEffects {
 				void this.pRefresh();
 				return true;
 			}
-			const action = this._getNormalizedAction(event.payload);
+			const action = this._getNormalizedActionWithTransientState(event.payload);
 			if (!action) return false;
-			const current = this._actions.get(action.actionId);
-			this._actions.set(action.actionId, {...action, decisionState: current?.decisionState || null});
+			this._actions.set(action.actionId, action);
 			this._collectionRevision++;
 			this._renderApprovals();
 			return true;
@@ -300,13 +299,17 @@ export class CharacterSheetHubEffects {
 			this._renderApprovals();
 			return true;
 		} catch (error) {
-			if (!this._isCurrent(token) || !this._actions.has(actionId)) return false;
+			if (!this._isCurrent(token)) return false;
+			const currentAction = this._actions.get(actionId);
+			if (!currentAction) return false;
 			if (_CAPABILITY_LOSS_CODES.has(error?.code)) {
 				this._revokeApprovalCapability();
 				return false;
 			}
-			action.decisionState = null;
-			action.error = _getSafeErrorMessage(error).slice(0, _MAX_ERROR_LENGTH);
+			if (currentAction.decisionState !== "submitting" || currentAction.decision !== decision) return false;
+			currentAction.decisionState = null;
+			currentAction.decision = null;
+			currentAction.error = _getSafeErrorMessage(error).slice(0, _MAX_ERROR_LENGTH);
 			this._renderApprovals();
 			if (error?.code === "ACTION_NOT_FOUND") void this.pRefresh();
 			return false;
@@ -326,6 +329,8 @@ export class CharacterSheetHubEffects {
 		this._actions.clear();
 		this._loadError = null;
 		this._collectionRevision++;
+		this._isLoading = false;
+		this._pRefreshActive = null;
 		this._renderApprovals();
 		return !!didChange;
 	}
@@ -354,6 +359,19 @@ export class CharacterSheetHubEffects {
 			capabilities: {canApprove: true, canReject: true},
 			decisionState: null,
 			error: null,
+		};
+	}
+
+	_getNormalizedActionWithTransientState (action) {
+		const normalized = this._getNormalizedAction(action);
+		if (!normalized) return null;
+		const current = this._actions.get(normalized.actionId);
+		if (!current) return normalized;
+		return {
+			...normalized,
+			decisionState: current.decisionState ?? null,
+			decision: current.decision ?? null,
+			error: current.error ?? null,
 		};
 	}
 
@@ -403,6 +421,7 @@ export class CharacterSheetHubEffects {
 
 	_renderNotices () {
 		if (!this._noticesRoot) return;
+		const focusedNoticeId = document.activeElement?.dataset?.hubNoticeId || null;
 		this._noticesRoot.innerHTML = "";
 		for (const notice of this._notices.values()) {
 			const row = e_({
@@ -412,6 +431,7 @@ export class CharacterSheetHubEffects {
 			const text = e_({tag: "span", clazz: "charsheet__hub-effect-notice-text", text: notice.message});
 			const dismiss = e_({tag: "button", clazz: "charsheet__hub-effect-dismiss", text: "×"});
 			dismiss.type = "button";
+			dismiss.dataset.hubNoticeId = notice.id;
 			dismiss.setAttribute("aria-label", "Dismiss campaign effect notification");
 			dismiss.addEventListener("click", () => {
 				this._removeNotice(notice.id);
@@ -419,6 +439,14 @@ export class CharacterSheetHubEffects {
 			});
 			row.append(text, dismiss);
 			this._noticesRoot.append(row);
+		}
+		if (focusedNoticeId) {
+			const selector = `[data-hub-notice-id="${CSS.escape(focusedNoticeId)}"]`;
+			const focusTarget = this._noticesRoot.querySelector(selector)
+				|| this._noticesRoot.querySelector("button")
+				|| this._approvalsRoot?.querySelector("button:not(:disabled)")
+				|| document.getElementById?.("charsheet-ipt-hp-current");
+			focusTarget?.focus({preventScroll: true});
 		}
 		this._updateRootVisibility();
 	}
