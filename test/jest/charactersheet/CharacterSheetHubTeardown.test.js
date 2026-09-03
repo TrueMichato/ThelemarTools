@@ -136,3 +136,87 @@ describe("Character Sheet hub teardown owners", () => {
 		expect(host.shouldActivateContext({campaignId: "44444444-4444-4444-8444-444444444444"})).toBe(false);
 	});
 });
+
+describe("carry authority basis follows the campaign context lifecycle", () => {
+	/**
+	 * REGRESSION. The carry summary is only trusted when the basis it was stamped with matches
+	 * the one the server expects. The server derives `kind: "campaign"` for any character with a
+	 * `campaignId`, so a sheet that never stamps the context keeps publishing `kind: "detached"`,
+	 * the two never match, and `carrySummary` is silently withheld for EVERY campaign character
+	 * — a total, invisible loss of the feature rather than a wrong number.
+	 *
+	 * That is exactly what shipped in the first cut of this branch: `setCarryAuthorityContext()`
+	 * existed with zero production call sites. These tests pin both halves of the lifecycle.
+	 */
+	const CONTEXT = {
+		rulesVersion: {id: "rules-1", rules: CAMPAIGN_RULES},
+		brewBundle: {contentHash: "brew-1"},
+	};
+
+	/** Drive the real activation hook rather than a hand-rolled imitation of it. */
+	async function activate (page, context = CONTEXT) {
+		await page._getHubActiveCampaignHost().pOnContextActivated({context});
+	}
+
+	it("stamps the campaign basis when the context activates", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		expect(page._state.getCarryAuthorityBasis().kind).toBe("detached");
+
+		await activate(page);
+
+		const basis = page._state.getCarryAuthorityBasis();
+		expect(basis).toMatchObject({kind: "campaign", rulesVersionId: "rules-1", brewBundleHash: "brew-1"});
+	});
+
+	it("the stamped basis reaches the serialized document, which is what the server reads", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		await activate(page);
+		expect(page._state.toJson().carry.basis).toMatchObject({
+			kind: "campaign", rulesVersionId: "rules-1", brewBundleHash: "brew-1",
+		});
+	});
+
+	it("records a campaign with no active rules version as an OBSERVATION, not as detached", async () => {
+		// Null here means "there was no active rules version when I saved" — a real state. It
+		// must still be a CAMPAIGN basis, so that activating a rules version later correctly
+		// invalidates every summary authored before it.
+		const page = new CharacterSheetPage({characterRepository: {}});
+		await activate(page, {rulesVersion: null, brewBundle: null});
+		expect(page._state.getCarryAuthorityBasis()).toMatchObject({
+			kind: "campaign", rulesVersionId: null, brewBundleHash: null,
+		});
+	});
+
+	it("returns to the detached basis through rules teardown", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		await activate(page);
+		expect(page._state.getCarryAuthorityBasis().kind).toBe("campaign");
+
+		page._clearHubRules();
+
+		// A summary stamped with a campaign this sheet has left must stop claiming to be current.
+		expect(page._state.getCarryAuthorityBasis().kind).toBe("detached");
+	});
+
+	it("moves in lockstep with the settings overlay, whose values feed the basis digest", async () => {
+		// The digest covers the carry-relevant settings, which the overlay can change. If the
+		// two were wired at different points, a character could carry a digest computed under
+		// one rule set while stamped with another.
+		const page = new CharacterSheetPage({characterRepository: {}});
+		await activate(page);
+		expect(page._state.getSettings().variantEncumbrance).toBe(true);
+		expect(page._state.getCarryAuthorityBasis().kind).toBe("campaign");
+
+		page._clearHubRules();
+		expect(page._state.getSettings().variantEncumbrance).toBeUndefined();
+		expect(page._state.getCarryAuthorityBasis().kind).toBe("detached");
+	});
+
+	it("teardown is idempotent for the basis too", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		await activate(page);
+		page._clearHubRules();
+		expect(() => page._clearHubRules()).not.toThrow();
+		expect(page._state.getCarryAuthorityBasis().kind).toBe("detached");
+	});
+});

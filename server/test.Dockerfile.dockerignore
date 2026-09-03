@@ -11,11 +11,17 @@ server/**/.env*
 !js/hub
 !js/hub/hub-json-patch.js
 !js/hub/hub-carry-authority.js
+!js/hub/hub-carry-contract.js
 !js/hub/hub-effect-presentation.js
 !js/hub/hub-inventory-contract.js
 !js/hub/hub-semantic-hp.js
 !js/hub/hub-semantic-operations.js
 !js/hub/hub-store-error.js
+!js/charactersheet
+!js/charactersheet/charactersheet-state.js
+!js/charactersheet/charactersheet-class-utils.js
+!js/parser.js
+!js/utils.js
 !test
 !test/e2e
 !test/e2e/hub
