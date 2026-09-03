@@ -425,11 +425,13 @@ The second slice implements the client half and freezes these choices:
   character-scoped read. Its projection contains only the opaque action id, expiry, resolve capabilities and
   immutable source, effect, and typed outcome labels; it does not return character/account ids, source entities,
   choices, target refs or hidden character state. Proposal events carry the same presentation-only contract.
-- approval resolution is single-flight and idempotent, but never applies browser state from the HTTP response.
-  The card remains in a waiting state until the authoritative `character.operation.applied` event passes the
-  same prepare/adopt/commit reconciliation. Rejection may remove the card from its authoritative resolve
-  response or terminal event. Open, reconnect, window focus and visible-tab restoration all refresh the
-  owner-scoped collection under a character-generation fence.
+- approval resolution is single-flight and idempotent, but never applies browser state directly from the HTTP response.
+  The card remains in a waiting state while the authoritative `character.operation.applied` envelope passes the
+  same serialized prepare/adopt/commit reconciliation. The successful approval response carries a narrow copy
+  of that applied envelope through this path too, so a missed loopback socket edge cannot strand the open sheet;
+  response-first and event-first delivery are operation-idempotent. Rejection may remove the card from its
+  authoritative resolve response or terminal event. Open, reconnect, window focus and visible-tab restoration
+  all refresh the owner-scoped collection under a character-generation fence.
 - successful notices are emitted only after repository adoption returns `applied`, or after a serialized resync
   returns per-operation adopted before/after outcomes. Duplicate/replayed operations therefore do not announce
   twice, while blocked/rejected adoption shows a persistent recovery error and never a success notice.

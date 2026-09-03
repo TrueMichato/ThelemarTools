@@ -32,6 +32,7 @@ export class CharacterSheetHubEffects {
 		fnCreateId = () => crypto.randomUUID(),
 		fnSetTimeout = (fn, ms) => setTimeout(fn, ms),
 		fnClearTimeout = timer => clearTimeout(timer),
+		fnOnAuthoritativeApproval = null,
 	} = {}) {
 		this._campaignId = campaignId;
 		this._api = api;
@@ -39,6 +40,7 @@ export class CharacterSheetHubEffects {
 		this._fnCreateId = fnCreateId;
 		this._fnSetTimeout = fnSetTimeout;
 		this._fnClearTimeout = fnClearTimeout;
+		this._fnOnAuthoritativeApproval = fnOnAuthoritativeApproval;
 		this._generation = 0;
 		this._collectionRevision = 0;
 		this._characterId = null;
@@ -235,6 +237,18 @@ export class CharacterSheetHubEffects {
 		return true;
 	}
 
+	onAuthoritativeCoverage ({operationId}) {
+		if (!operationId) return false;
+		const didDelete = this._actions.delete(operationId);
+		this._commandIds.delete(`${operationId}:accept`);
+		this._removeNotice(`error:${operationId}`);
+		if (didDelete) {
+			this._collectionRevision++;
+			this._renderApprovals();
+		}
+		return didDelete;
+	}
+
 	async pResolve ({actionId, decision}) {
 		if (!this._characterId || !this._isAuthorized || !["accept", "reject"].includes(decision)) return false;
 		const action = this._actions.get(actionId);
@@ -255,15 +269,31 @@ export class CharacterSheetHubEffects {
 				decision,
 				idempotencyKey: commandId,
 			});
-			if (!this._isCurrent(token) || !this._actions.has(actionId)) return false;
 			const status = response?.operation?.status;
+			if (!this._isCurrent(token)) return false;
+			if (!this._actions.has(actionId) && !(decision === "accept" && status === "applied")) return false;
 			if (decision === "reject" && ["rejected", "cancelled", "expired"].includes(status)) {
 				this._actions.delete(actionId);
 				this._collectionRevision++;
 				this._commandIds.delete(commandKey);
 			} else if (decision === "accept" && status === "applied") {
-				action.decisionState = "waiting";
-				action.error = null;
+				await this._fnOnAuthoritativeApproval?.({
+					actionId,
+					characterId: token.characterId,
+					eventId: response?.eventIds?.[0],
+					sequence: response?.operationWatermark,
+					operation: response?.operation?.operation,
+					resultingCharacterRevision: response?.operation?.resultingCharacterRevision,
+				});
+				if (!this._isCurrent(token)) return false;
+				const currentAction = this._actions.get(actionId);
+				if (!currentAction) return true;
+				// A successful inline adoption removes the action through `onApplied`. A revision gap leaves it
+				// waiting while the same repository path performs its ordered history resync.
+				if (currentAction.decisionState === "submitting") {
+					currentAction.decisionState = "waiting";
+					currentAction.error = null;
+				}
 			} else {
 				throw Object.assign(new Error("Unexpected action response."), {code: "UNEXPECTED_RESPONSE"});
 			}

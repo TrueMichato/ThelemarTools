@@ -88,6 +88,7 @@ class CharacterSheetPage {
 		this._hubRealtime = realtimeCoordinator;
 		this._fnCreateRealtimeCoordinator = fnCreateRealtimeCoordinator;
 		this._characterLoadGeneration = 0;
+		this._hubRealtimeGeneration = 0;
 		this._builder = null;
 		this._combat = null;
 		this._spells = null;
@@ -181,11 +182,13 @@ class CharacterSheetPage {
 	}
 
 	_attachHubRealtime ({characterId = this._currentCharacterId} = {}) {
+		this._hubRealtimeGeneration++;
 		this._hubEffects?.activate({characterId});
 		return this._hubRealtime?.attach({characterId}) || false;
 	}
 
 	_detachHubRealtime () {
+		this._hubRealtimeGeneration++;
 		this._hubRealtime?.detach();
 		this._hubEffects?.deactivate();
 		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
@@ -222,6 +225,7 @@ class CharacterSheetPage {
 	_onHubRealtimeConnectionState (state) {
 		this._hubEffects?.onConnectionState(state);
 		if (!["closed", "access_lost"].includes(state?.state)) return;
+		this._hubRealtimeGeneration++;
 		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
 	}
 
@@ -301,6 +305,9 @@ class CharacterSheetPage {
 			case "resync_required":
 				this._scheduleHubRealtimeResync({characterId: this._currentCharacterId});
 				return true;
+			case "suppressed":
+				this._hubEffects?.onAuthoritativeCoverage({operationId: event.operationId});
+				return true;
 			case "blocked":
 			case "rejected":
 				this._updateSaveIndicator("error");
@@ -327,6 +334,52 @@ class CharacterSheetPage {
 			void this._pRunHubRealtimeResync({characterId});
 		});
 		return true;
+	}
+
+	async _onHubAuthoritativeApproval ({
+		actionId,
+		characterId,
+		eventId,
+		sequence,
+		operation,
+		resultingCharacterRevision,
+	}) {
+		if (characterId !== this._currentCharacterId) return false;
+		const repository = this._characterRepository;
+		if (
+			typeof repository?.pEnqueueRealtimeDelivery !== "function"
+			|| operation?.operationId !== actionId
+			|| operation?.targetCharacterId !== characterId
+			|| typeof eventId !== "string"
+			|| !eventId
+			|| !Number.isInteger(sequence)
+			|| !Number.isInteger(resultingCharacterRevision)
+		) return false;
+		const generation = this._characterLoadGeneration;
+		const realtimeGeneration = this._hubRealtimeGeneration;
+		return repository.pEnqueueRealtimeDelivery({
+			characterId,
+			fnDeliver: () => {
+				if (
+					characterId !== this._currentCharacterId
+					|| generation !== this._characterLoadGeneration
+					|| realtimeGeneration !== this._hubRealtimeGeneration
+				) return false;
+				return this._onHubSemanticOperation({
+					eventId,
+					campaignId: this._hubCampaignId,
+					sequence,
+					type: "character.operation.applied",
+					aggregateType: "character",
+					aggregateId: characterId,
+					aggregateRevision: resultingCharacterRevision,
+					operationId: actionId,
+					targetCharacterId: characterId,
+					status: "applied",
+					payload: {operation, resultingCharacterRevision},
+				});
+			},
+		});
 	}
 
 	async _pRunHubRealtimeResync ({characterId}) {
@@ -499,6 +552,7 @@ class CharacterSheetPage {
 					campaignId: this._hubCampaignId,
 					api: this._hubCampaignContext.api,
 					root: document.getElementById("charsheet-hub-effects"),
+					fnOnAuthoritativeApproval: detail => this._onHubAuthoritativeApproval(detail),
 				});
 				this._hubEffects.init();
 			} catch (e) { console.error("Failed to init campaign effect controls:", e); }

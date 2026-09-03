@@ -172,8 +172,9 @@ No reactive system — renders are explicit. Related modules re-render together 
   state load/render/save or a generic conflict modal.
 - **Hub effect UI**: `CharacterSheetHubEffects` is activated and deactivated with the coordinator's current
   canonical character. Its pending read is owner-only and presentation-only. Approval remains visibly pending
-  until the authoritative applied event completes repository adoption; only that success (or a successful
-  ordered resync) may create an accessible effect notice.
+  until an authoritative applied event completes repository adoption. The approval response carries that same
+  applied envelope through the serialized realtime reconciliation path when loopback delivery is missed; only
+  successful adoption may create an accessible effect notice.
 
 ### Module Init Order
 

@@ -58,6 +58,12 @@ const makeSessionStorage = () => {
 	return {getItem: k => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: k => store.delete(k)};
 };
 
+const makeDeferred = () => {
+	let resolve;
+	const promise = new Promise(res => { resolve = res; });
+	return {promise, resolve};
+};
+
 const makeCharacterDocument = (data, revision = 1) => ({id: "character-1", campaignId: "campaign-1", revision, data});
 
 const makeApi = character => {
@@ -121,6 +127,7 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 		onRealtimeOperation: jest.fn(),
 		onApplied: jest.fn(),
 		onApplicationError: jest.fn(),
+		onAuthoritativeCoverage: jest.fn(),
 	};
 	// The sheet modules destructure `JqueryUtil` at load time, so mutate the shared object rather than
 	// replacing it (see test/jest/charactersheet/setup.js).
@@ -133,6 +140,7 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 		_hubEffects: hubEffects,
 		_currentCharacterId: "character-1",
 		_characterLoadGeneration: 0,
+		_hubRealtimeGeneration: 0,
 		_isHubRealtimeListenersBound: false,
 		_renderCount: 0,
 		_saveIndicator: [],
@@ -149,6 +157,7 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 		"_getHubLiveCharacterData",
 		"_adoptHubLiveCharacterData",
 		"_scheduleHubRealtimeResync",
+		"_onHubAuthoritativeApproval",
 		"_pRunHubRealtimeResync",
 	]) host[name] = CharacterSheetPage.prototype[name].bind(host);
 
@@ -168,6 +177,111 @@ beforeAll(async () => {
 });
 
 describe("Live campaign effects on an open Character Sheet", () => {
+	it("adopts an authoritative approval response when its socket edge is missed", async () => {
+		const {clients, host, hubEffects, state} = await pMakeHarness();
+		const operation = makeAppliedEvent({
+			operationId: "approved-operation",
+			kind: "hp.heal",
+			args: {amount: 4},
+		}).payload.operation;
+
+		await expect(host._onHubAuthoritativeApproval({
+			actionId: "approved-operation",
+			characterId: "character-1",
+			eventId: "approved-event",
+			sequence: 20,
+			operation,
+			resultingCharacterRevision: 2,
+		})).resolves.toBe(true);
+		expect(state.getHp().current).toBe(34);
+
+		clients[0].emit("event", makeAppliedEvent({
+			id: "approved-event",
+			operationId: "approved-operation",
+			kind: "hp.heal",
+			args: {amount: 4},
+		}));
+		await pFlush();
+		expect(state.getHp().current).toBe(34);
+		expect(hubEffects.onApplied).toHaveBeenCalledTimes(1);
+		expect(hubEffects.onApplied).toHaveBeenCalledWith(expect.objectContaining({
+			operation: expect.objectContaining({operationId: "approved-operation"}),
+		}));
+	});
+
+	it("deduplicates an approval response when its socket edge wins the race", async () => {
+		const {clients, host, hubEffects, state} = await pMakeHarness();
+		const event = makeAppliedEvent({
+			id: "approved-event",
+			operationId: "approved-operation",
+			kind: "hp.heal",
+			args: {amount: 4},
+		});
+		clients[0].emit("event", event);
+		await pFlush();
+		expect(state.getHp().current).toBe(34);
+
+		await expect(host._onHubAuthoritativeApproval({
+			actionId: "approved-operation",
+			characterId: "character-1",
+			eventId: "approved-event",
+			sequence: 20,
+			operation: event.payload.operation,
+			resultingCharacterRevision: 2,
+		})).resolves.toBe(true);
+		expect(state.getHp().current).toBe(34);
+		expect(hubEffects.onApplied).toHaveBeenCalledTimes(1);
+		expect(hubEffects.onAuthoritativeCoverage).toHaveBeenCalledWith({operationId: "approved-operation"});
+	});
+
+	it("fences an approval response after the open character changes", async () => {
+		const {host, hubEffects, state} = await pMakeHarness();
+		const operation = makeAppliedEvent({
+			operationId: "approved-operation",
+			kind: "hp.heal",
+			args: {amount: 4},
+		}).payload.operation;
+		host._currentCharacterId = "character-2";
+		host._characterLoadGeneration++;
+
+		await expect(host._onHubAuthoritativeApproval({
+			actionId: "approved-operation",
+			characterId: "character-1",
+			eventId: "approved-event",
+			sequence: 20,
+			operation,
+			resultingCharacterRevision: 2,
+		})).resolves.toBe(false);
+		expect(state.getHp().current).toBe(30);
+		expect(hubEffects.onApplied).not.toHaveBeenCalled();
+	});
+
+	it("fences a queued approval response after realtime access is lost", async () => {
+		const {host, hubEffects, repository, state} = await pMakeHarness();
+		const gate = makeDeferred();
+		repository._pMutationQueue = gate.promise;
+		const operation = makeAppliedEvent({
+			operationId: "approved-operation",
+			kind: "hp.heal",
+			args: {amount: 4},
+		}).payload.operation;
+
+		const pending = host._onHubAuthoritativeApproval({
+			actionId: "approved-operation",
+			characterId: "character-1",
+			eventId: "approved-event",
+			sequence: 20,
+			operation,
+			resultingCharacterRevision: 2,
+		});
+		host._onHubRealtimeConnectionState({state: "access_lost"});
+		gate.resolve();
+
+		await expect(pending).resolves.toBe(false);
+		expect(state.getHp().current).toBe(30);
+		expect(hubEffects.onApplied).not.toHaveBeenCalled();
+	});
+
 	it("applies DM damage to the open sheet without a reload", async () => {
 		const {clients, host, hubEffects, state} = await pMakeHarness();
 		clients[0].emit("event", makeAppliedEvent());

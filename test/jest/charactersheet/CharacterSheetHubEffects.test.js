@@ -41,11 +41,13 @@ describe("Character Sheet Hub effect controls", () => {
 	let listeners;
 	let controller;
 	let timerCallbacks;
+	let onAuthoritativeApproval;
 
 	beforeEach(() => {
 		root = globalThis.e_({tag: "div"});
 		listeners = new Map();
 		timerCallbacks = [];
+		onAuthoritativeApproval = jest.fn();
 		globalThis.window = {
 			addEventListener: jest.fn((type, listener) => listeners.set(`window:${type}`, listener)),
 			removeEventListener: jest.fn(),
@@ -71,6 +73,7 @@ describe("Character Sheet Hub effect controls", () => {
 				return timerCallbacks.length;
 			},
 			fnClearTimeout: jest.fn(),
+			fnOnAuthoritativeApproval: onAuthoritativeApproval,
 		});
 		expect(controller.init()).toBe(true);
 	});
@@ -219,9 +222,14 @@ describe("Character Sheet Hub effect controls", () => {
 	it("keeps decisions single-flight and reuses the command identity after a retry", async () => {
 		api.pListCharacterPendingActions.mockResolvedValue([makeAction()]);
 		const first = makeDeferred();
+		const operation = makeOperation();
 		api.pResolveStructuredAction
 			.mockImplementationOnce(() => first.promise)
-			.mockResolvedValueOnce({operation: {status: "applied"}});
+			.mockResolvedValueOnce({
+				operation: {status: "applied", operation, resultingCharacterRevision: 2},
+				eventIds: ["event-1", "event-2"],
+				operationWatermark: 20,
+			});
 		controller.activate({characterId: "character-1"});
 		await pFlush();
 
@@ -251,14 +259,32 @@ describe("Character Sheet Hub effect controls", () => {
 		expect(root.textContent).not.toContain("hidden");
 	});
 
-	it("does not apply locally on approval and removes only after the authoritative applied event", async () => {
+	it("passes only the authoritative applied envelope to the sheet reconciliation callback", async () => {
 		api.pListCharacterPendingActions.mockResolvedValue([makeAction()]);
-		api.pResolveStructuredAction.mockResolvedValue({operation: {status: "applied"}});
+		const operation = makeOperation();
+		api.pResolveStructuredAction.mockResolvedValue({
+			operation: {
+				status: "applied",
+				operation,
+				resultingCharacterRevision: 2,
+				sourceDisplaySnapshot: {name: "must not escape"},
+			},
+			eventIds: ["event-1", "event-2"],
+			operationWatermark: 20,
+		});
 		controller.activate({characterId: "character-1"});
 		await pFlush();
 		await controller.pResolve({actionId: "action-1", decision: "accept"});
 		expect(controller._actions.has("action-1")).toBe(true);
 		expect(controller._notices.size).toBe(0);
+		expect(onAuthoritativeApproval).toHaveBeenCalledWith({
+			actionId: "action-1",
+			characterId: "character-1",
+			eventId: "event-1",
+			sequence: 20,
+			operation,
+			resultingCharacterRevision: 2,
+		});
 
 		expect(controller.onApplied({
 			operation: makeOperation(),
@@ -267,6 +293,61 @@ describe("Character Sheet Hub effect controls", () => {
 		})).toBe(true);
 		expect(controller._actions.has("action-1")).toBe(false);
 		expect([...controller._notices.values()][0].message).toBe("4 hit points restored by the campaign.");
+	});
+
+	it("forwards the approval response when realtime wins so repository deduplication can prove coverage", async () => {
+		api.pListCharacterPendingActions.mockResolvedValue([makeAction()]);
+		const response = makeDeferred();
+		api.pResolveStructuredAction.mockImplementation(() => response.promise);
+		controller.activate({characterId: "character-1"});
+		await pFlush();
+
+		const pending = controller.pResolve({actionId: "action-1", decision: "accept"});
+		expect(controller.onApplied({
+			operation: makeOperation(),
+			beforeData: {hp: {current: 5, max: 20, temp: 0}},
+			afterData: {hp: {current: 9, max: 20, temp: 0}},
+		})).toBe(true);
+		response.resolve({
+			operation: {status: "applied", operation: makeOperation(), resultingCharacterRevision: 2},
+			eventIds: ["event-1", "event-2"],
+			operationWatermark: 20,
+		});
+
+		await expect(pending).resolves.toBe(true);
+		expect(onAuthoritativeApproval).toHaveBeenCalledTimes(1);
+		expect(controller._notices.size).toBe(1);
+	});
+
+	it("still forwards an applied response when a pending-list refresh removes its card", async () => {
+		api.pListCharacterPendingActions.mockResolvedValueOnce([makeAction()]).mockResolvedValueOnce([]);
+		const response = makeDeferred();
+		api.pResolveStructuredAction.mockImplementation(() => response.promise);
+		controller.activate({characterId: "character-1"});
+		await pFlush();
+
+		const pending = controller.pResolve({actionId: "action-1", decision: "accept"});
+		await controller.pRefresh();
+		expect(controller._actions.has("action-1")).toBe(false);
+		response.resolve({
+			operation: {status: "applied", operation: makeOperation(), resultingCharacterRevision: 2},
+			eventIds: ["event-1", "event-2"],
+			operationWatermark: 20,
+		});
+
+		await expect(pending).resolves.toBe(true);
+		expect(onAuthoritativeApproval).toHaveBeenCalledTimes(1);
+	});
+
+	it("removes a waiting request when repository coverage proves its effect is already adopted", async () => {
+		controller.activate({characterId: "character-1"});
+		controller._actions.set("action-1", controller._getNormalizedAction(makeAction()));
+		controller._commandIds.set("action-1:accept", "command-1");
+
+		expect(controller.onAuthoritativeCoverage({operationId: "action-1"})).toBe(true);
+		expect(controller._actions.has("action-1")).toBe(false);
+		expect(controller._commandIds.has("action-1:accept")).toBe(false);
+		expect(controller._notices.size).toBe(0);
 	});
 
 	it("removes a rejected request from the authoritative response", async () => {

@@ -124,8 +124,9 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
   immutable source/effect/outcome labels. Initial open, reconnect and focus reconciliation prevents a missed
   socket edge from hiding a decision.
 - Approve/Reject are inline, single-flight and retryable. Approval never mutates the sheet from the resolve
-  response; it waits for `character.operation.applied` to complete ADR 0012 reconciliation. Successful adoption
-  produces a polite, dismissible and time-bounded sheet notice. Blocked adoption produces recovery UI instead.
+  response directly; its authoritative `character.operation.applied` envelope enters ADR 0012's serialized
+  reconciliation path as a loopback-delivery fallback. Successful adoption produces a polite, dismissible and
+  time-bounded sheet notice. Blocked adoption produces recovery UI instead.
 - Cursor refs may carry an owner/DM-only `operationWatermark`. Operation events remain deliverable at/below it;
   this substrate exposes the metadata but does not apply operations or replace sheet state.
 
