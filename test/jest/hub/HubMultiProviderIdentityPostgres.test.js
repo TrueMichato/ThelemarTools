@@ -18,6 +18,31 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 
 	afterAll(async () => store?.pClose());
 
+	it("never joins Discord or Google accounts by shared profile metadata", async () => {
+		const prefix = `auth-pg-providers-${process.pid}-${Date.now()}`;
+		const identities = [
+			{provider: "github", providerSubject: `${prefix}-github`},
+			{provider: "discord", providerSubject: `${prefix}-discord`},
+			{provider: "google", providerSubject: `${prefix}-google`},
+		];
+		const accounts = await Promise.all(identities.map(identity => store.pUpsertOAuthAccount({
+			...identity,
+			displayName: "Shared Name",
+			login: "shared-handle",
+			email: "shared@example.com",
+		})));
+
+		expect(new Set(accounts.map(account => account.id)).size).toBe(3);
+		const sameDiscord = await store.pUpsertOAuthAccount({
+			provider: "discord",
+			providerSubject: `${prefix}-discord`,
+			displayName: "Renamed Discord",
+			login: "renamed",
+			email: "changed@example.com",
+		});
+		expect(sameDiscord.id).toBe(accounts[1].id);
+	});
+
 	it("keeps sign-in, provenance, transaction, constraint, and role behavior in one authority", async () => {
 		const prefix = `auth-pg-${process.pid}-${Date.now()}`;
 		const firstTokenHash = crypto.randomBytes(32).toString("hex");

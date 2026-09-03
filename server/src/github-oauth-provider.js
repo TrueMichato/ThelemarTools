@@ -1,20 +1,6 @@
 import {AuthProviderError} from "./auth-provider-error.js";
 import {normalizeExternalIdentity} from "./external-identity.js";
-
-async function pGetJson ({fnFetch, url, options}) {
-	let response;
-	try {
-		response = await fnFetch(url, options);
-	} catch {
-		throw new AuthProviderError();
-	}
-	if (!response?.ok) throw new AuthProviderError();
-	try {
-		return await response.json();
-	} catch {
-		throw new AuthProviderError();
-	}
-}
+import {pFetchProviderJson} from "./oauth-provider-http.js";
 
 export class GitHubOAuthProvider {
 	constructor ({clientId, clientSecret, fnFetch = fetch}) {
@@ -41,7 +27,7 @@ export class GitHubOAuthProvider {
 	}
 
 	async pExchangeCodeForIdentity ({code, codeVerifier, redirectUri}) {
-		const tokenData = await pGetJson({
+		const tokenData = await pFetchProviderJson({
 			fnFetch: this._fnFetch,
 			url: "https://github.com/login/oauth/access_token",
 			options: {
@@ -63,7 +49,7 @@ export class GitHubOAuthProvider {
 			throw new AuthProviderError();
 		}
 
-		const user = await pGetJson({
+		const user = await pFetchProviderJson({
 			fnFetch: this._fnFetch,
 			url: "https://api.github.com/user",
 			options: {

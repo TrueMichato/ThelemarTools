@@ -40,7 +40,7 @@ The Campaign Hub is an optional online layer over the existing local-first site.
 | Test authority | `server/src/memory-hub-store.js` | Deterministic behavioral double for domain/API tests; never used by `server/src/index.js` |
 | Domain helpers | `server/src/hub-actions.js`, `server/src/semantic-operation-registry.js`, `server/src/campaign-content.js`, `server/src/cloud-data-validation.js` | Versioned semantic effects, source-derived template registry, inventory/escrow, rules, brew validation, character sanitization/quotas |
 | Realtime authority | `server/src/realtime.js`, `server/src/projections.js` | Presence, resync, visibility filtering, outbox dispatch |
-| Auth/security | `server/src/auth-provider-registry.js`, `server/src/github-oauth-provider.js`, `server/src/external-identity.js`, `server/src/security.js` | Validated provider registration, GitHub exchange, immutable identity normalization, durable OAuth state, PKCE, hashes, tokens, CSRF helpers |
+| Auth/security | `server/src/auth-provider-registry.js`, `server/src/auth-provider-config.js`, `server/src/*-oauth-provider.js`, `server/src/google-oauth-provider.js`, `server/src/oauth-provider-http.js`, `server/src/external-identity.js`, `server/src/security.js` | Validated provider registration/configuration, bounded GitHub/Discord OAuth and Google OIDC exchange, immutable identity normalization, durable OAuth state, PKCE/nonce, hashes, tokens, CSRF helpers |
 | Schema/operations | `server/migrations/`, `server/src/migration-runner.js`, `server/scripts/` | Immutable migrations, checksummed ledger, role grants, backup, restore, credential-safe DB access |
 | Character Sheet seams | `js/charactersheet/charactersheet.js`, `charactersheet-hub-effects.js`, `charactersheet-state.js`, `charactersheet-rollhistory.js` | Repository selection, context overlay, save/rebase/recovery, inline effect approvals/notices, campaign roll logging |
 | DM Screen seams | `js/dmscreen.js`, `js/dmscreen/partytracker/` | Workspace repository selection and non-persisted live character projections |
@@ -175,6 +175,9 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
   are callback-local and never stored.
 - Accounts resolve only through `(provider, immutable subject)`. Email, login, handle, and display name are
   presentation metadata and never account-selection inputs.
+- Discord uses canonical decimal user-id text and `identify` only. Google uses `openid profile`, RS256 signature,
+  fixed issuer/audience/`azp`, bounded time claims, exact nonce, and opaque case-sensitive `sub`; neither
+  provider requests email for authority.
 - Mutations require exact Origin, CSRF HMAC, protocol version, payload schema, role/ownership authorization,
   and idempotency key.
 - Campaign-owned relationships carry `campaign_id` and tenant-consistency constraints/triggers.

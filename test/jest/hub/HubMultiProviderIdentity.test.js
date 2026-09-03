@@ -33,9 +33,16 @@ describe("Hub provider-neutral identity and OAuth transaction authority", () => 
 			email: "same@example.com",
 		});
 		const sameSubjectDifferentProvider = await store.pUpsertOAuthAccount({
-			provider: "future",
+			provider: "discord",
 			providerSubject: "100",
-			displayName: "Future",
+			displayName: "Discord",
+			email: "same@example.com",
+		});
+		const googleWithSameProfile = await store.pUpsertOAuthAccount({
+			provider: "google",
+			providerSubject: "google-subject",
+			displayName: "Renamed",
+			login: "renamed",
 			email: "same@example.com",
 		});
 
@@ -43,6 +50,13 @@ describe("Hub provider-neutral identity and OAuth transaction authority", () => 
 		expect(renamed.displayName).toBe("Renamed");
 		expect(sameEmailDifferentSubject.id).not.toBe(first.id);
 		expect(sameSubjectDifferentProvider.id).not.toBe(first.id);
+		expect(googleWithSameProfile.id).not.toBe(first.id);
+		expect(new Set([
+			first.id,
+			sameEmailDifferentSubject.id,
+			sameSubjectDifferentProvider.id,
+			googleWithSameProfile.id,
+		]).size).toBe(4);
 	});
 
 	it("creates identity provenance and rotates a prior session atomically", async () => {

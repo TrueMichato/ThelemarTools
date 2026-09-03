@@ -1776,10 +1776,9 @@ async function pInit () {
 			// eslint-disable-next-line no-console
 			activeCampaign.pResolve({trigger: "logout", session}).catch(err => console.warn("Failed to clear campaign selection:", err));
 			const signIn = document.getElementById("hub-sign-in");
-			if (signIn) {
-				const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-				signIn.href = `/auth/github/start?returnTo=${encodeURIComponent(returnTo)}`;
-			}
+			const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+			const {pRenderHubAuthProviders} = await import("./hub-auth-providers.js");
+			await pRenderHubAuthProviders({signIn, returnTo});
 			setHidden(signedOut, false);
 			return;
 		}

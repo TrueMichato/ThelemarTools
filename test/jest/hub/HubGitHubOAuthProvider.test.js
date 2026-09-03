@@ -1,11 +1,10 @@
 import {GitHubOAuthProvider} from "../../../server/src/github-oauth-provider.js";
 
 function getJsonResponse (body) {
-	return {
-		ok: true,
+	return new Response(JSON.stringify(body), {
 		status: 200,
-		async json () { return body; },
-	};
+		headers: {"content-type": "application/json"},
+	});
 }
 
 describe("GitHub OAuth provider", () => {
@@ -82,7 +81,10 @@ describe("GitHub OAuth provider", () => {
 		const provider = new GitHubOAuthProvider({
 			clientId: "client",
 			clientSecret: "secret",
-			fnFetch: async () => ({ok: false, status: 401, json: async () => ({error: "secret-provider-body"})}),
+			fnFetch: async () => new Response(JSON.stringify({error: "secret-provider-body"}), {
+				status: 401,
+				headers: {"content-type": "application/json"},
+			}),
 		});
 
 		await expect(provider.pExchangeCodeForIdentity({
@@ -93,5 +95,27 @@ describe("GitHub OAuth provider", () => {
 			code: "AUTH_PROVIDER_UNAVAILABLE",
 			message: "Authentication provider request failed.",
 		});
+	});
+
+	it("rejects redirects, non-JSON, and oversized provider responses", async () => {
+		for (const response of [
+			new Response("", {status: 302, headers: {location: "https://attacker.example"}}),
+			new Response("token", {status: 200, headers: {"content-type": "text/plain"}}),
+			new Response(JSON.stringify({access_token: "x".repeat(33 * 1024)}), {
+				status: 200,
+				headers: {"content-type": "application/json"},
+			}),
+		]) {
+			const provider = new GitHubOAuthProvider({
+				clientId: "client",
+				clientSecret: "secret",
+				fnFetch: async () => response,
+			});
+			await expect(provider.pExchangeCodeForIdentity({
+				code: "code",
+				codeVerifier: "verifier",
+				redirectUri: "https://tools.example/auth/github/callback",
+			})).rejects.toMatchObject({code: "AUTH_PROVIDER_UNAVAILABLE"});
+		}
 	});
 });

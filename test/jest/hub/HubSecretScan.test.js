@@ -7,6 +7,8 @@ describe("Hub tracked-file secret scan", () => {
 			content: [
 				"HUB_" + `COOKIE_SECRET: "01234567890123456789012345678901"`,
 				"GITHUB_" + "CLIENT_SECRET=actual-client-secret",
+				"DISCORD_" + "CLIENT_SECRET=actual-discord-secret",
+				"GOOGLE_" + "CLIENT_SECRET=actual-google-secret",
 				"DATABASE_" + "URL=postgresql://hub:real-password@database.internal/hub",
 				`token: "${"ghp_"}abcdefghijklmnopqrstuvwxyz1234567890"`,
 				`fine: "${"github_" + "pat_"}abcdefghijklmnopqrstuvwxyz1234567890"`,
@@ -15,6 +17,8 @@ describe("Hub tracked-file secret scan", () => {
 		expect(findings).toEqual(expect.arrayContaining([
 			expect.stringContaining("hard-coded HUB_COOKIE_SECRET"),
 			expect.stringContaining("hard-coded GITHUB_CLIENT_SECRET"),
+			expect.stringContaining("hard-coded DISCORD_CLIENT_SECRET"),
+			expect.stringContaining("hard-coded GOOGLE_CLIENT_SECRET"),
 			expect.stringContaining("hard-coded DATABASE_URL"),
 			expect.stringContaining("GitHub token"),
 			expect.stringContaining("GitHub fine-grained token"),

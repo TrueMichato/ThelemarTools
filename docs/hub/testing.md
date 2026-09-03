@@ -58,8 +58,10 @@ npm run build:sw
 # Production dependency audit
 npm audit --omit=dev --audit-level=high
 
-# Tracked-file secret scan and disposable HTTPS/PostgreSQL E2E
+# Tracked-file secret scan, paired first-enable probe, and disposable HTTPS/PostgreSQL E2E
 npm run hub:check-secrets
+# Against isolated staging with both providers configured:
+# npm run hub:check-auth-first-enable
 npm run test:hub:e2e:stack
 ```
 
@@ -170,7 +172,7 @@ Evidence containing secrets or user data belongs in the approved private operati
 
 See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth boundaries, and artifact semantics.
 
-## Provider registry layer 1 evidence
+## Provider registry layers 1-2 evidence
 
 - Registry unit tests prove duplicate/mismatched routes and identities fail closed, configuration errors expose no
   credential text, and a failed sibling registration does not disable valid GitHub authentication.
@@ -178,9 +180,13 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   account/identity/session creation, session provenance, one-time provider/operation/redirect-bound state,
   expiry/cleanup, orphan rollback, deferred last-identity protection, runtime role access, export, and token
   absence.
-- The disposable HTTPS/PostgreSQL stack uses a test-image-only deterministic GitHub adapter and local
-  authorization endpoint. No CI test calls GitHub or uses a real provider token; the production image still boots
-  its real GitHub adapter independently.
+- Discord tests cover canonical token/profile endpoints, Basic confidential-client exchange, exact `identify`
+  scope, decimal-string snowflakes, profile bounding, and generic failure handling.
+- Google tests use generated RSA keys and deterministic JWKS to cover issuer/audience/`azp`, expiry/issued-at,
+  nonce, `sub`, algorithm/key rotation/cache, and malformed/oversized upstream failures.
+- The disposable HTTPS/PostgreSQL stack uses test-image-only deterministic GitHub, Discord, and Google adapters
+  and local authorization endpoints. CI makes no external provider call and uses no real provider token. The
+  unmodified production image boots all three real adapters and proves readiness without initiating OAuth.
 
 ## Shipped V2 foundation evidence
 

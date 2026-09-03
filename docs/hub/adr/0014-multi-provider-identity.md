@@ -2,9 +2,10 @@
 
 Status: Accepted for implementation (2026-09-01)
 
-Implementation status: layer 1 uses migration `0006_multi_provider_identity.sql`, routes existing GitHub
-authentication through the runtime registry, and durably binds/consumes short-lived OAuth transactions. Discord,
-Google, and account link/unlink routes remain intentionally unimplemented until the later paired-provider layers.
+Implementation status: layer 1 uses migration `0006_multi_provider_identity.sql` and the provider-neutral
+transaction registry. Layer 2 adds Discord OAuth and Google OIDC adapters, bounded provider HTTP/JWKS handling,
+paired configuration, and deterministic acceptance coverage. Production remains GitHub-only until layer 3 adds
+explicit reauthentication and identity link/unlink controls.
 
 ## Context
 
@@ -48,8 +49,9 @@ The following rules are normative:
    the internal account.
 8. The BFF does not persist provider access tokens or refresh tokens after the callback completes.
 
-This ADR does not implement Discord, Google, credentials, public registration, account merging, enterprise
-SSO, recovery codes, or a browser-side authentication SDK.
+This ADR does not add public registration, account merging, enterprise SSO, recovery codes, or a browser-side
+authentication SDK. Discord and Google adapter implementation does not by itself authorize their production
+rollout.
 
 ## Normalized provider identity
 
@@ -225,8 +227,9 @@ Migration and deployment order is:
    allowlist values, sessions, identities, and account ids;
 3. exercise GitHub sign-in, reauthentication, link/unlink invariants, export, deletion, and rollback;
 4. deploy Discord and Google adapters disabled, configure exact callbacks and independent credentials outside
-   Git, and pass the acceptance suite;
-5. enable Discord and Google together.
+   Git, and pass the acceptance suite in isolated staging with fresh test identities;
+5. deploy layer 3 reauthentication/linking before admitting existing users through another provider;
+6. run the paired first-enable preflight and enable Discord and Google together.
 
 ## Sessions, export, deletion, and audit
 

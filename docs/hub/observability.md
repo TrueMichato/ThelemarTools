@@ -23,6 +23,7 @@ Never log:
 - cookies or `Set-Cookie`;
 - Authorization, CSRF, or idempotency headers;
 - OAuth codes/verifiers/state;
+- OAuth/OIDC access, refresh, and ID tokens, nonces, provider response bodies, subjects, and profile fields;
 - invite raw tokens or hashes;
 - database URLs/passwords;
 - character/workspace/brew/request/response bodies;
@@ -76,6 +77,10 @@ Signals:
 Metrics reset with the process for HTTP counters; database-backed operational ages persist.
 Age metrics use `-1` when no successful run has ever been recorded, so a missing backup/drill cannot look
 fresh.
+
+The paired first-enable command reads only `/api/meta` status and
+`hub_auth_outcomes_total{provider,outcome="succeeded"}`. It snapshots both Discord and Google counters and
+requires each to increase; its output is limited to fixed provider slugs, start URLs, and stable status codes.
 
 ## Operational evidence
 

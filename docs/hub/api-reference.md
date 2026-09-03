@@ -15,6 +15,8 @@ a public third-party API. Schemas in `server/src/app.js` are authoritative if th
 - Session cookie: signed `__Host-hub_session`; httpOnly, SameSite=Lax, Secure in production.
 - OAuth correlation cookie: signed `__Host-hub_oauth`; httpOnly and short-lived. State/PKCE live in a
   provider/operation/redirect-bound one-time server transaction.
+- Account authority is only `(provider, immutable subject)`; email and mutable profile fields never select or
+  link an account.
 - `GET /api/session` is the bootstrap call. Signed-in responses include the CSRF token.
 - Private reads require an active session. Campaign reads additionally require active membership.
 
@@ -59,8 +61,8 @@ Path/query keys ending in `Id` must be UUID-shaped. Invalid values fail as `INVA
 |---|---|---|---|
 | `GET /api/health` | Public | none | `{ok:true}` or 503 `{ok:false,error:"DATABASE_UNAVAILABLE"}`; verifies DB, migration ledger, and required migration |
 | `GET /api/meta` | Public | none | protocol/package version plus additive `auth.provider_registry.v1` capability and bounded provider availability |
-| `GET /auth/github/start` | Public, 10/min | query `returnTo?` | Creates a one-time durable transaction, sets signed correlation cookie, redirects to GitHub PKCE authorization |
-| `GET /auth/github/callback` | OAuth correlation cookie, 20/min | query `code`, `state` | Atomically consumes provider/operation/redirect-bound state, exchanges code, enforces numeric-subject allowlist, atomically resolves account/identity/session, rotates prior session, redirects safely |
+| `GET /auth/:provider/start` | Public, 10/min | concrete `github`, `discord`, or `google` route; query `returnTo?` | Creates a one-time durable transaction, sets signed correlation cookie, and redirects using the adapter's declared PKCE/nonce capabilities |
+| `GET /auth/:provider/callback` | OAuth correlation cookie, 20/min | concrete route; query `code`, `state` | Atomically consumes exact provider/operation/redirect-bound state, validates immutable subject, enforces exact allowlist authority, rotates the prior session, and redirects safely |
 | `GET /api/session` | Public | session cookie optional | `{signedIn:false}` or account + CSRF token |
 | `POST /api/logout` | Mutation security | none | Revokes current session, closes its sockets, clears cookie |
 | `GET /api/account/export` | Authenticated | none | Download containing owned account/external-identity/session-provenance/membership/campaign/character/audit data; never provider tokens/OAuth transactions |
@@ -70,6 +72,11 @@ Path/query keys ending in `Id` must be UUID-shaped. Invalid values fail as `INVA
 | `GET /api/account/deletion` | Authenticated, including deletion grace | none | Current deletion status/timestamps |
 | `POST /api/account/deletion/request` | Authenticated mutation | `{confirmation:"DELETE"}` | Blocks active campaign owners; schedules seven-day purge, revokes sessions/cookie |
 | `POST /api/account/deletion/cancel` | Reauthenticated deletion-grace mutation | none | Restores active account before purge begins |
+
+The concrete routes are `/auth/github/*`, `/auth/discord/*`, and `/auth/google/*`; disabled or
+configuration-error providers have no routes. Google validates RS256 signature, fixed issuer/audience/`azp`,
+expiry/issued-at bounds, nonce, and `sub`. Discord validates the `/api/v10/users/@me` decimal user id. Provider
+tokens and response bodies never cross the callback adapter boundary.
 
 ## Campaign routes
 
