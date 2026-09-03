@@ -83,6 +83,27 @@ describeCharacter({
 		{level: 6,  untilLevel: 11, name: "Rage", kind: "resource", resourceMax: 4},
 		{level: 17, name: "Rage", kind: "resource", resourceMax: 6},
 
+		// Minotaur's Powerful Build is the cleanest end-to-end probe of the shared carry
+		// contract: it is a race feature whose only mechanical effect is on carrying
+		// capacity, so it fails loudly if the feature parser, the state adapter, or the
+		// contract stop talking to each other. It also pins the rule that used to be wrong
+		// in three places at once — doubling capacity must NOT double the encumbrance tiers.
+		{
+			level: 1,
+			name: /powerful build/i,
+			kind: "passive",
+			effects: [
+				{kind: "stateCall", method: "getCarryProfile", path: "carryMultiplier", exact: 2},
+				// Capacity is real and finite (the old TGTT bug produced absurd values here).
+				{kind: "stateCall", method: "getCarryProfile", path: "bodyCapacity", min: 1},
+				// Push/drag/lift is twice the BODY capacity, never inflated by containers.
+				{kind: "stateCall", method: "getCarryProfile", path: "pushDragLift", min: 2},
+				// A freshly built character is not encumbered, and every surface that asks
+				// gets this same answer — the inventory bar, play mode, and the PDF all read
+				// through here now.
+				{kind: "stateCall", method: "getEncumbranceLevel", exact: "normal"},
+			],
+		},
 		{
 			level: 1,
 			name: /unarmored defense/i,

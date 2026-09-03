@@ -294,6 +294,20 @@ customStatuses: [
 
 The state provides many methods that calculate derived values from the raw data.
 
+### Carrying capacity and encumbrance
+
+`getCarryProfile()`, `getCarryingCapacityBreakdown()`, `getCarryingCapacity()` and
+`getEncumbranceLevel()` are all thin projections of the shared
+[carry contract](../hub/carry-contract.md). The state's job is to resolve the rules-specific
+inputs — passive Might, size, carry-only active-state size steps, item multipliers, equipped
+extradimensional capacity, material-projected weights — and hand them over as plain numbers;
+the arithmetic itself lives in one place so the Character Sheet, the DM Screen Party Tracker
+and the server projection cannot disagree.
+
+`toJson()` additionally materialises a closed, versioned `carry` block (the authoritative
+summary the Campaign Hub projects) and `loadFromJson()` strips it, exactly as it does for
+`hp.effectiveMax`. **Do not read `_data.carry`** — it exists only on the way out.
+
 ### Proficiency Bonus
 
 ```javascript
