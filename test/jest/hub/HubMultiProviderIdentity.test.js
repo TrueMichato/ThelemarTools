@@ -128,6 +128,41 @@ describe("Hub provider-neutral identity and OAuth transaction authority", () => 
 		expect(await store.pDeleteExpiredOAuthTransactions()).toBe(1);
 	});
 
+	it("keeps OAuth cleanup-backlog metrics aligned with cleanup eligibility", async () => {
+		const consumedId = crypto.randomUUID();
+		const expiredId = crypto.randomUUID();
+		const activeId = crypto.randomUUID();
+		for (const [id, state, expiresIn] of [
+			[consumedId, "consumed-metric", 10 * 60_000],
+			[expiredId, "expired-metric", 60_000],
+			[activeId, "active-metric", 10 * 60_000],
+		]) {
+			await store.pCreateOAuthTransaction({
+				id,
+				stateHash: getSha256(state),
+				provider: "github",
+				operation: "sign_in",
+				redirectUri: "https://tools.example/auth/github/callback",
+				returnTo: "/hub.html",
+				pkceVerifier: "v".repeat(64),
+				expiresAt: new Date(now.getTime() + expiresIn),
+			});
+		}
+		await store.pConsumeOAuthTransaction({
+			id: consumedId,
+			stateHash: getSha256("consumed-metric"),
+			provider: "github",
+			operation: "sign_in",
+			redirectUri: "https://tools.example/auth/github/callback",
+		});
+		now = new Date(now.getTime() + 60_001);
+
+		expect((await store.pGetOperationalMetrics()).expiredOAuthTransactions).toBe(2);
+		expect(await store.pDeleteExpiredOAuthTransactions()).toBe(2);
+		expect((await store.pGetOperationalMetrics()).expiredOAuthTransactions).toBe(0);
+		expect(store._oauthTransactions.has(activeId)).toBe(true);
+	});
+
 	it("rejects expired or improperly account-bound transactions", async () => {
 		const account = await store.pUpsertOAuthAccount({
 			provider: "github",

@@ -91,7 +91,9 @@ export class MemoryHubStore {
 			outboxOldestAgeSeconds: 0,
 			activeSessions: [...this._sessions.values()].filter(session => !session.revokedAt && new Date(session.expiresAt) > now).length,
 			expiredReceipts: 0,
-			expiredOAuthTransactions: [...this._oauthTransactions.values()].filter(transaction => new Date(transaction.expiresAt) <= now).length,
+			expiredOAuthTransactions: [...this._oauthTransactions.values()]
+				.filter(transaction => transaction.consumedAt || new Date(transaction.expiresAt) <= now)
+				.length,
 			deletionDueAccounts: [...this._accounts.values()].filter(account => account.status === "deletion_requested" && new Date(account.purgeAfter) <= now).length,
 			lastMaintenanceAgeSeconds: last ? Math.max(0, (now - new Date(last.completedAt)) / 1000) : -1,
 			lastBackupAgeSeconds: -1,

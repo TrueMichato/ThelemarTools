@@ -114,6 +114,38 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 			oidc_nonce: null,
 			consumed_at: expect.any(Date),
 		}));
+		const activeTransactionId = crypto.randomUUID();
+		await store.pCreateOAuthTransaction({
+			id: activeTransactionId,
+			stateHash: getSha256(`${prefix}-active-state`),
+			provider: "github",
+			operation: "sign_in",
+			redirectUri: "https://tools.example/auth/github/callback",
+			returnTo: "/hub.html",
+			pkceVerifier: "v".repeat(64),
+			expiresAt: new Date(Date.now() + 60_000),
+		});
+		const expiredTransactionId = crypto.randomUUID();
+		await store._pool.query(`
+			INSERT INTO hub.oauth_transactions (
+				id, state_hash, provider, operation, redirect_uri, return_to,
+				pkce_verifier, authorization_started_at, expires_at, created_at
+			)
+			VALUES (
+				$1, decode($2, 'hex'), 'github', 'sign_in',
+				'https://tools.example/auth/github/callback', '/hub.html', $3,
+				now() - interval '2 minutes', now() - interval '1 minute', now() - interval '2 minutes'
+			)
+		`, [expiredTransactionId, getSha256(`${prefix}-expired-state`), "v".repeat(64)]);
+
+		expect((await store.pGetOperationalMetrics()).expiredOAuthTransactions).toBe(2);
+		expect(await store.pDeleteExpiredOAuthTransactions()).toBe(2);
+		expect((await store.pGetOperationalMetrics()).expiredOAuthTransactions).toBe(0);
+		expect((await store._pool.query(
+			`SELECT count(*)::integer AS count FROM hub.oauth_transactions WHERE id = $1`,
+			[activeTransactionId],
+		)).rows[0].count).toBe(1);
+		await store._pool.query(`DELETE FROM hub.oauth_transactions WHERE id = $1`, [activeTransactionId]);
 
 		const conflictTokenHash = crypto.randomBytes(32).toString("hex");
 		await store.pCreateSession({
