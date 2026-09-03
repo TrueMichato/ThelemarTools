@@ -138,13 +138,18 @@ describe("device-scoped active campaign context contract", () => {
 
 		// The DM Screen verifies and activates campaign context before the Board and realtime.
 		const dmVerify = dmScreen.indexOf("activeCampaign.pVerifyContext({campaignId})");
+		const dmAuthorize = dmScreen.indexOf("hubController.adoptVerifiedCampaign({");
 		const dmActivate = dmScreen.indexOf("campaignContext.pActivate()");
 		const dmBoard = dmScreen.indexOf("new Board({workspaceRepository})");
 		const dmRealtime = dmScreen.indexOf("new HubRealtimeClient({campaignId})");
 		expect(dmVerify).toBeGreaterThan(-1);
-		expect(dmActivate).toBeGreaterThan(dmVerify);
+		// DM authorization must be settled BEFORE any campaign brew is installed.
+		expect(dmAuthorize).toBeGreaterThan(dmVerify);
+		expect(dmAuthorize).toBeLessThan(dmActivate);
 		expect(dmActivate).toBeLessThan(dmBoard);
 		expect(dmBoard).toBeLessThan(dmRealtime);
+		expect(dmController).toContain("adoptVerifiedCampaign ({session, campaign})");
+		expect(dmController).toContain("DM_ROLES.has(this._campaign.role)");
 		// The context instance is owned explicitly so it can be torn down, rather than being
 		// constructed and discarded inline.
 		expect(dmScreen).toContain("campaignContext = new HubCampaignContext({");
