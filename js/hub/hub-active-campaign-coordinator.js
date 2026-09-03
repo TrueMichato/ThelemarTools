@@ -336,11 +336,26 @@ export class HubActiveCampaignCoordinator {
 		this._session = session || this._session;
 		const accountId = await this._pAdoptAccount(this._session);
 		if (!accountId || !campaign) return null;
-		if (campaign.status !== "active" || !campaign.role) return null;
+		if (campaign.status !== "active" || !campaign.role) {
+			// An archived or inaccessible explicit campaign must still invalidate a stored
+			// selection naming it, even though this path bypasses `pResolve`.
+			await this._pClearForAccessLoss({campaignId: campaign.id});
+			this._setState("blocked", {trigger: "explicit_url", result: "failure", errorCode: campaign.status !== "active" ? "CAMPAIGN_ARCHIVED" : "MEMBERSHIP_NOT_FOUND"});
+			return null;
+		}
 		const record = await this._pPersistSelection({campaignId: campaign.id});
 		this._activeCampaignId = campaign.id;
 		this._setState("active", {trigger: "explicit_url"});
 		return record;
+	}
+
+	/**
+	 * Classify a failure raised by a host that performed its own bootstrap, so an explicit
+	 * candidate that turns out to be archived or inaccessible still invalidates a matching
+	 * stored selection.
+	 */
+	async pReportFailure ({error, campaignId = null, trigger = "explicit_url"}) {
+		return this._pHandleFailure({error, trigger, startedAt: null, campaignId});
 	}
 
 	async _pPersistSelection ({campaignId, generation = null}) {

@@ -196,6 +196,37 @@ describe("HubActiveCampaignCoordinator", () => {
 			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({campaignId: CAMPAIGN_A});
 		});
 
+		it("clears a matching selection when an adopted campaign turns out to be archived", async () => {
+			const storage = new FakeStorage();
+			const api = makeApi();
+			const seed = makeCoordinator({api, storage});
+			await seed.store.pSelect({accountId: ACCOUNT_A, campaignId: CAMPAIGN_A});
+
+			// `campaign.html` renders an archive read-only, but it must never stay selected.
+			const {coordinator, store} = makeCoordinator({api, storage});
+			const record = await coordinator.adoptVerified({
+				session: {signedIn: true, account: {id: ACCOUNT_A}},
+				campaign: {id: CAMPAIGN_A, status: "archived", role: "dm"},
+			});
+
+			expect(record).toBeNull();
+			expect(coordinator.state).toBe("blocked");
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({state: "cleared"});
+		});
+
+		it("classifies a host-reported bootstrap failure so a stale selection is invalidated", async () => {
+			const storage = new FakeStorage();
+			const api = makeApi();
+			const seed = makeCoordinator({api, storage});
+			await seed.store.pSelect({accountId: ACCOUNT_A, campaignId: CAMPAIGN_A});
+
+			const {coordinator, store} = makeCoordinator({api, storage});
+			await coordinator.pResolve({session: {signedIn: true, account: {id: ACCOUNT_A}}});
+			await coordinator.pReportFailure({error: apiError("FORBIDDEN", 403), campaignId: CAMPAIGN_A});
+
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({state: "cleared"});
+		});
+
 		it("reuses a seeded session instead of issuing a duplicate read", async () => {
 			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
 			const {coordinator} = makeCoordinator({api, host: {getExplicitCampaignId: () => CAMPAIGN_A}});

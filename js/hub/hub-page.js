@@ -665,9 +665,17 @@ async function pInitHubIndex ({session}) {
 async function pInitCampaign ({session}) {
 	const campaignId = new URLSearchParams(window.location.search).get("id");
 	if (!campaignId) throw new HubApiError({code: "CAMPAIGN_NOT_FOUND", status: 404});
-	const campaign = await api.pGetCampaign({campaignId});
+	let campaign;
+	try {
+		campaign = await api.pGetCampaign({campaignId});
+	} catch (error) {
+		// An inaccessible explicit campaign must still invalidate a stored selection naming it.
+		await activeCampaign.pReportFailure({error, campaignId}).catch(() => {});
+		throw error;
+	}
 	// The session and campaign are already verified here, so recording the selection costs no
 	// additional request and never fetches the campaign context for selection purposes.
+	// An archived campaign still renders read-only, but never becomes the active selection.
 	await activeCampaign.adoptVerified({session, campaign});
 	const [members, characters, snapshot] = await Promise.all([
 		api.pListMembers({campaignId}),

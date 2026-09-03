@@ -3749,8 +3749,11 @@ window.addEventListener("load", () => {
 			window.DM_SCREEN_ACTIVE_CAMPAIGN = activeCampaign;
 
 			// Every early exit below must release the coordinator's channel and listeners.
-			const pAbandonBootstrap = error => {
+			const pAbandonBootstrap = async error => {
 				hubController.handleWorkspaceLoadError(error);
+				// Route the failure through coordinator classification so an archived or
+				// inaccessible explicit campaign still clears a stored selection naming it.
+				await activeCampaign?.pReportFailure({error, campaignId}).catch(() => {});
 				activeCampaign?.dispose();
 				campaignContext?.dispose();
 				activeCampaign = null;
@@ -3763,10 +3766,13 @@ window.addEventListener("load", () => {
 				// previous four requests (which included two duplicate session reads).
 				verified = await activeCampaign.pVerifyContext({campaignId});
 			} catch (error) {
-				pAbandonBootstrap(error);
+				await pAbandonBootstrap(error);
 				return;
 			}
 			if (!hubController.adoptVerifiedCampaign({session: verified.session, campaign: verified.campaign})) {
+				// Role or lifecycle refused the private workspace; let the coordinator decide
+				// whether the device selection itself is still valid.
+				await activeCampaign.adoptVerified({session: verified.session, campaign: verified.campaign});
 				activeCampaign.dispose();
 				activeCampaign = null;
 				return;
@@ -3782,7 +3788,7 @@ window.addEventListener("load", () => {
 				await campaignContext.pActivate();
 				await activeCampaign.adoptVerified({session: verified.session, campaign: verified.campaign});
 			} catch (error) {
-				pAbandonBootstrap(error);
+				await pAbandonBootstrap(error);
 				return;
 			}
 			workspaceRepository = new HubHttpDmWorkspaceRepository({campaignId, api});
