@@ -36,6 +36,11 @@
       "iteration": 5,
       "verdict": "FAIL",
       "summary": "Exact HEAD still emits self-invalid decisions and lacks complete create parity, active-policy real-stack transitions, owner-specific mutants, and a clean-tree handoff."
+    },
+    {
+      "iteration": 6,
+      "verdict": "FAIL",
+      "summary": "PostgreSQL and destination owner mutants are false-positive infrastructure kills caused by a missing mutation-sandbox module, and PR evidence overstates them."
     }
   ]
 }
