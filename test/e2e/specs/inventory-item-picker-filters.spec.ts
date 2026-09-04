@@ -94,6 +94,15 @@ test.describe("Add Item picker — filter dropdown positioning", () => {
 			const {button, menu} = charSheet.itemPickerFilterDropdown(kind);
 			await button.click();
 			await expect(menu).toHaveClass(/\bopen\b/);
+
+			// Guard root cause #2 directly: assert the *declared* transition-property set before
+			// waiting for it to settle below. Every geometry check in this suite waits for the
+			// transition to finish first, so a regression back to `transition: all` (which still
+			// ends at the correct final position, just ~200ms late) would slip past all of them —
+			// this is the one place that would catch it.
+			const transitionProps = await charSheet.getFilterMenuTransitionProperties(menu);
+			expect(new Set(transitionProps), `${kind} menu's transition-property regressed to include discrete/positioning properties`).toEqual(new Set(["opacity", "transform", "max-height"]));
+
 			await charSheet.waitForFilterMenuSettled(menu); // let the open transition settle before measuring
 
 			const buttonBox = await button.boundingBox();

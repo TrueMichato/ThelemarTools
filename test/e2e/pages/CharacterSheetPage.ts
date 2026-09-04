@@ -2196,6 +2196,20 @@ export class CharacterSheetPage {
 		}).toPass({timeout: timeoutMs, intervals: [30, 60, 100, 200]});
 	}
 
+	/**
+	 * Reads an open filter menu's computed `transition-property` list. Root cause #2 was
+	 * `transition: all` on `.charsheet__source-multiselect-dropdown`, which swept up discrete
+	 * (non-interpolable) properties like `position`/`top`/`left` and held the menu at its old
+	 * position for ~200ms after every open. Every geometry assertion elsewhere in this suite calls
+	 * `waitForFilterMenuSettled` first, so none of them would notice a regression back to
+	 * `transition: all` (the menu still snaps to the right place once the transition ends) — this
+	 * exists to guard the property list itself, independent of timing.
+	 */
+	async getFilterMenuTransitionProperties (menu: Locator): Promise<string[]> {
+		const raw = await menu.evaluate(el => getComputedStyle(el).transitionProperty);
+		return raw.split(",").map(s => s.trim()).filter(Boolean);
+	}
+
 	/** Open the Features tab's "Add Feat" picker modal and wait for it to render. */
 	async openAddFeatModal (): Promise<void> {
 		await this.switchToTab(this.tabFeatures);
