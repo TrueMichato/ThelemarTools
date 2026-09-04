@@ -15,7 +15,7 @@
     {
       "iteration": 2,
       "verdict": "FAIL",
-      "summary": "PostgreSQL projections fail closed incorrectly, reconnect recovery and path-specific evidence are missing, full gates fail, and no draft PR exists."
+      "summary": "Malformed decisions pass output guards, destination-policy copy and reconnect recovery are broken, full gates fail, and no draft PR exists."
     }
   ]
 }
