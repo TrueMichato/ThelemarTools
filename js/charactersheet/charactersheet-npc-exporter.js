@@ -6596,6 +6596,156 @@ class CharacterSheetNpcExporter {
 	]);
 
 	/**
+	 * The item schema's `itemType` enum, restricted to a fixed vocabulary of type codes
+	 * (some requiring an edition suffix, e.g. `"RG|DMG"`/`"RG|XDMG"`, some bare, e.g. `"S"`).
+	 * The sheet stores a human-readable UI label in `type` ("weapon", "armor", "ring", …)
+	 * which is NOT a member of this enum, so canonicalization below validates every
+	 * candidate code against this Set before shipping it. Mirrored by hand from
+	 * `schema/site/items-shared.json`'s `itemType` def, following the same convention as
+	 * `_SCHEMA_DAMAGE_TYPES`/`_SCHEMA_CONDITIONS` above. Pinned against the real schema by
+	 * `CharacterSheetNpcExporter.companionItems.test.js`, so schema drift fails loudly.
+	 */
+	static _SCHEMA_ITEM_TYPES = new Set([
+		"$|DMG", "$A|DMG", "$A|XDMG", "$C", "$C|XPHB", "$G|DMG", "$G|XDMG", "A", "A|XPHB",
+		"AF|DMG", "AF|XDMG", "AIR|DMG", "AIR|XPHB", "AT", "AT|XPHB", "EXP|DMG", "EXP|XDMG",
+		"FD", "FD|XPHB", "G", "G|XPHB", "GS", "GS|XPHB", "GV|DMG", "GV|XDMG", "HA", "HA|XPHB",
+		"INS", "INS|XPHB", "LA", "LA|XPHB", "M", "M|XPHB", "MA", "MA|XPHB", "MNT", "MNT|XPHB",
+		"OTH", "P", "P|XPHB", "R", "R|XPHB", "RD|DMG", "RD|XDMG", "RG|DMG", "RG|XDMG", "S",
+		"S|XPHB", "SC|DMG", "SC|XPHB", "SCF", "SCF|XPHB", "SHP", "SHP|XPHB", "SPC|AAG", "T",
+		"T|XPHB", "TAH", "TAH|XPHB", "TB|XDMG", "TG", "TG|XDMG", "VEH", "VEH|XPHB", "WD|DMG",
+		"WD|XDMG",
+	]);
+
+	/**
+	 * A narrow, unambiguous word-to-code map for the sheet's own UI type labels — used only
+	 * as the FINAL fallback, after an already-legal incumbent code and a `baseItem` catalog
+	 * lookup have both failed. Deliberately excludes "weapon" and "wand": the sheet's own
+	 * reverse mapper (`_getCustomTypeForItem` in charactersheet-inventory.js) collapses
+	 * `M`/`R`/`A` into a single "weapon" bucket and `WD`/`RD`/legacy-staff into a single
+	 * "wand" bucket, so neither word alone can identify a single real code — guessing one
+	 * would risk shipping a plausible-looking but wrong type. "armor" is handled separately
+	 * via `armorType` (light/medium/heavy is an authoritative sub-classification the sheet
+	 * already stores). Ring/rod/scroll require an edition-suffixed code with no bare form in
+	 * the schema; the suffix is read from the item's own (pre-rewrite) `source`, not guessed.
+	 */
+	static _getLabelMappedItemType (label, source) {
+		switch (label) {
+			case "shield": return "S";
+			case "potion": return "P";
+			case "ring": return source === "XDMG" ? "RG|XDMG" : "RG|DMG";
+			case "rod": return source === "XDMG" ? "RD|XDMG" : "RD|DMG";
+			// Scroll's 2024 suffix is `XPHB`, not `XDMG` — confirmed against both the schema
+			// enum and `Parser.ITM_TYP__ODND_SCROLL`.
+			case "scroll": return source === "XPHB" ? "SC|XPHB" : "SC|DMG";
+			default: return null;
+		}
+	}
+
+	/**
+	 * `armorType` ("light"/"medium"/"heavy") is a sub-classification the sheet already
+	 * stores on custom armor (see `charactersheet-inventory.js`'s `_buildCustomItem`), and
+	 * is an authoritative fact distinct from the coarse "armor" UI label — unlike "weapon"
+	 * (melee vs. ranged vs. ammunition) there is no ambiguity left once `armorType` is known.
+	 * Both codes are valid bare (no edition suffix needed) in either edition.
+	 */
+	static _getArmorTypeItemType (armorType) {
+		switch (armorType) {
+			case "light": return "LA";
+			case "medium": return "MA";
+			case "heavy": return "HA";
+			default: return null;
+		}
+	}
+
+	/**
+	 * Resolve a `baseItem` reference ("name|source") against the loaded item catalog and
+	 * return its real `type`, but only if that type is itself schema-legal — the catalog can
+	 * include brew/prerelease data that is invalid, and adopting it silently would just move
+	 * the bug rather than fix it. Case-insensitive on both segments; last match wins, mirroring
+	 * `CharacterSheetState._migrateInventoryItemMetadata()`'s own Map-building semantics for
+	 * the same catalog.
+	 */
+	static _getBaseItemCatalogType (baseItem, state) {
+		if (typeof baseItem !== "string") return null;
+		const parts = baseItem.split("|");
+		if (parts.length !== 2) return null;
+		const name = parts[0].trim();
+		const source = parts[1].trim();
+		if (!name || !source) return null;
+
+		const catalog = state?._allItems;
+		if (!Array.isArray(catalog)) return null;
+
+		let resolvedType = null;
+		for (const candidate of catalog) {
+			if (!candidate || typeof candidate !== "object") continue;
+			if (typeof candidate.name !== "string" || typeof candidate.source !== "string") continue;
+			if (candidate.name.toLowerCase() !== name.toLowerCase()) continue;
+			if (candidate.source.toLowerCase() !== source.toLowerCase()) continue;
+			resolvedType = candidate.type;
+		}
+		if (typeof resolvedType !== "string") return null;
+		return CharacterSheetNpcExporter._SCHEMA_ITEM_TYPES.has(resolvedType) ? resolvedType : null;
+	}
+
+	/**
+	 * Canonicalize a companion item's `type` (and the related `wondrous`/`staff` flags) so
+	 * the export always ships either a real schema-legal code or, when one genuinely cannot
+	 * be determined, no `type` at all (the schema's `itemType` is optional) plus a warning
+	 * naming the item — never the sheet's human-readable UI label, which the schema rejects.
+	 *
+	 * Resolution order, each step only running if the previous one didn't resolve:
+	 *  1. Keep an already-legal incumbent — checks the RENAMED value first (`typeCode`, if
+	 *     present, already won the earlier rename), then the item's original `type`, so a
+	 *     bogus `typeCode` can never clobber an already-valid raw `type`.
+	 *  2. Resolve via `baseItem` against the real loaded catalog.
+	 *  3. `wondrous` / `staff` are boolean flags in the real schema, not type codes — a
+	 *     weapon-shaped "staff" (has `dmg1`/`weaponCategory`) is, in every real example in
+	 *     this repo's own data, typed as a bare melee weapon (`"M"`) alongside the flag; a
+	 *     non-weapon-shaped one has no type at all, matching classic magic staves exactly.
+	 *     Both outcomes are complete, correct representations, so neither warns.
+	 *  4. `armorType` (light/medium/heavy) resolves "armor" unambiguously.
+	 *  5. The narrow label map above resolves shield/potion/ring/rod/scroll.
+	 *  6. Otherwise the label is genuinely ambiguous ("weapon", "wand", or unrecognized) —
+	 *     `type` is omitted (schema-optional) and an actionable warning is pushed.
+	 */
+	static _getCanonicalItemType (item, renamedType, {state, warnings, itemName} = {}) {
+		const rawType = typeof item?.type === "string" ? item.type : null;
+		const candidateOrder = [renamedType, rawType].filter(v => typeof v === "string" && v);
+		for (const candidate of candidateOrder) {
+			if (CharacterSheetNpcExporter._SCHEMA_ITEM_TYPES.has(candidate)) return {type: candidate};
+		}
+
+		const baseItemType = CharacterSheetNpcExporter._getBaseItemCatalogType(item?.baseItem, state);
+		if (baseItemType) return {type: baseItemType};
+
+		const label = (candidateOrder[0] || "").trim().toLowerCase();
+		// The item's OWN original source (captured before the exporter rewrites `source` to
+		// the companion-document source) is the only authoritative edition signal items carry.
+		const originalSource = typeof item?.source === "string" ? item.source : null;
+
+		if (label === "wondrous") return {wondrous: true};
+
+		if (label === "staff") {
+			const isWeaponShaped = Boolean(item?.dmg1 || item?.weaponCategory);
+			return isWeaponShaped ? {type: "M", staff: true} : {staff: true};
+		}
+
+		if (label === "armor") {
+			const armorTypeCode = CharacterSheetNpcExporter._getArmorTypeItemType(item?.armorType);
+			if (armorTypeCode) return {type: armorTypeCode};
+		} else {
+			const mapped = CharacterSheetNpcExporter._getLabelMappedItemType(label, originalSource);
+			if (mapped) return {type: mapped};
+		}
+
+		if (label && Array.isArray(warnings)) {
+			warnings.push(`Companion item "${itemName || item?.name || "(unnamed)"}" has an unresolvable type ("${label}") with no matching base item; its item type was omitted from the export.`);
+		}
+		return {};
+	}
+
+	/**
 	 * The item schema is `additionalProperties: false`, and a character-sheet item carries
 	 * roughly four times as many properties as the schema allows — sheet-only bookkeeping
 	 * (`effects`, `itemPowers`, `damageRiders`, `socketedGemstones`, per-ability
@@ -7648,7 +7798,7 @@ class CharacterSheetNpcExporter {
 		"perceptionPenaltyToNotice",
 	]);
 
-	static _getSanitizedBrewItem (item, {sourceJson} = {}) {
+	static _getSanitizedBrewItem (item, {sourceJson, state, warnings} = {}) {
 		if (!item || typeof item !== "object") return null;
 
 		const name = this._getSafeName(item.name);
@@ -7682,6 +7832,17 @@ class CharacterSheetNpcExporter {
 		out.source = this._getSafeSourceJson(sourceJson || CharacterSheetNpcExporter._companionItemSource);
 		// `name`, `rarity` and `source` are the schema's only required fields.
 		if (typeof out.rarity !== "string" || !out.rarity.trim()) out.rarity = "none";
+
+		// The rename above may have replaced `type` with a still-invalid human label (no
+		// `typeCode` was present to fix it), or left an invalid label untouched entirely.
+		// Canonicalize against the real schema enum — see `_getCanonicalItemType` — using the
+		// ORIGINAL `item`, not `out` (whose `source` has already been rewritten above to the
+		// companion-document source and can no longer answer an edition question).
+		const canonicalType = this._getCanonicalItemType(item, renamed.type, {state, warnings, itemName: name});
+		if (canonicalType.type) out.type = canonicalType.type;
+		else delete out.type;
+		if (canonicalType.wondrous) out.wondrous = true;
+		if (canonicalType.staff) out.staff = true;
 
 		return out;
 	}
@@ -7772,7 +7933,7 @@ class CharacterSheetNpcExporter {
 			if (seen.has(key)) return;
 			seen.add(key);
 
-			const sanitized = this._getSanitizedBrewItem(item, {sourceJson: source});
+			const sanitized = this._getSanitizedBrewItem(item, {sourceJson: source, state, warnings});
 			if (sanitized) {
 				this._applyComposedItemStats(sanitized, state, wrapper?.id ?? item?.id, item);
 				this._collectItemProvenanceWarnings(item, state, warnings);

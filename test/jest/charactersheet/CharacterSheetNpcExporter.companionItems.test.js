@@ -159,6 +159,176 @@ describe("v20 — the sanitizer produces a schema-legal item", () => {
 	});
 });
 
+/**
+ * v20.1 — regressions derived directly from the reported failing corpus (24 monsters / 15
+ * companion items, including Duralin, Talna and Onger): 14 of 15 items stored a coarse
+ * UI label ("weapon"/"armor"/"ring") in `type` with no `typeCode` to rescue them, which the
+ * whitelist-only sanitizer above shipped verbatim and the real schema's `itemType` enum
+ * rejects outright. Every case here failed before `_getCanonicalItemType` existed: the
+ * sanitizer used to ship the raw label unchanged whenever `typeCode` was absent (see "keeps
+ * the sheet's label when there is no code to replace it" above, which only happens to pass
+ * because "S" is coincidentally itself a legal code).
+ */
+describe("v20.1 — canonicalizing a companion item's type against the real schema enum", () => {
+	const mkState = (allItems) => ({getInventory: () => [], _allItems: allItems});
+
+	const sanitize = (item, opts = {}) =>
+		CharacterSheetNpcExporter._getSanitizedBrewItem(item, {sourceJson: "CSHEET", ...opts});
+
+	it("resolves a bare \"weapon\" label via a matching baseItem in the catalog", () => {
+		// Mirrors 13 of the 15 real corpus items: `type: "weapon"`, no `typeCode`, but a
+		// resolvable `baseItem`.
+		const state = mkState([{name: "Longsword", source: "PHB", type: "M"}]);
+		const warnings = [];
+		const out = sanitize({name: "Talna's Blade", type: "weapon", baseItem: "Longsword|PHB", rarity: "rare"}, {state, warnings});
+		expect(out.type).toBe("M");
+		expect(warnings).toEqual([]);
+	});
+
+	it("resolves baseItem case-insensitively on both name and source", () => {
+		// The real corpus has an item whose `baseItem` source is lowercase ("phb") while the
+		// catalog entry is uppercase ("PHB").
+		const state = mkState([{name: "Chain Mail", source: "PHB", type: "HA"}]);
+		const out = sanitize({name: "Onger's Mail", type: "armor", baseItem: "chain mail|phb", rarity: "none"}, {state});
+		expect(out.type).toBe("HA");
+	});
+
+	it("never trusts a baseItem catalog entry whose own type is itself schema-illegal", () => {
+		const state = mkState([{name: "Bogus Blade", source: "CSHEET", type: "sword"}]);
+		const warnings = [];
+		const out = sanitize({name: "Duralin's Edge", type: "weapon", baseItem: "Bogus Blade|CSHEET", rarity: "rare"}, {state, warnings});
+		expect(out.type).toBeUndefined();
+		expect(warnings.length).toBe(1);
+		expect(warnings[0]).toMatch(/Duralin's Edge/);
+	});
+
+	it("omits type and warns for an unresolvable \"weapon\" label with no baseItem", () => {
+		const warnings = [];
+		const out = sanitize({name: "Mystery Sword", type: "weapon", rarity: "rare"}, {warnings});
+		expect("type" in out).toBe(false);
+		expect(out.type).toBeUndefined();
+		expect(warnings.length).toBe(1);
+		expect(warnings[0]).toMatch(/Mystery Sword/);
+		expect(warnings[0]).toMatch(/weapon/);
+	});
+
+	it("resolves an \"armor\" label with no baseItem via the item's own armorType", () => {
+		// `armorType` (light/medium/heavy) is authoritative and unambiguous, unlike the coarse
+		// "armor" UI label — no baseItem needed.
+		expect(sanitize({name: "A", type: "armor", armorType: "light", rarity: "none"}).type).toBe("LA");
+		expect(sanitize({name: "B", type: "armor", armorType: "medium", rarity: "none"}).type).toBe("MA");
+		expect(sanitize({name: "C", type: "armor", armorType: "heavy", rarity: "none"}).type).toBe("HA");
+	});
+
+	it("omits type and warns for an \"armor\" label with neither armorType nor baseItem", () => {
+		const warnings = [];
+		const out = sanitize({name: "Odd Armor", type: "armor", rarity: "none"}, {warnings});
+		expect(out.type).toBeUndefined();
+		expect(warnings.length).toBe(1);
+	});
+
+	it("maps a bare \"ring\" label to the classic edition-suffixed code by default", () => {
+		// Matches the real corpus's one label-map-only item: Ring of the Assassin Lord, no
+		// baseItem, source not XDMG.
+		const out = sanitize({name: "Ring of the Assassin Lord", type: "ring", source: "DMG", rarity: "very rare"});
+		expect(out.type).toBe("RG|DMG");
+	});
+
+	it("maps a bare \"ring\" label to the 2024 edition-suffixed code when the item's own source is XDMG", () => {
+		const out = sanitize({name: "Modern Ring", type: "ring", source: "XDMG", rarity: "rare"});
+		expect(out.type).toBe("RG|XDMG");
+	});
+
+	it("reads the item's ORIGINAL source for edition detection, not the rewritten companion-doc source", () => {
+		// The sanitizer overwrites `out.source` to the companion document's source further
+		// down; edition detection must use the raw input's `source`, which here differs from
+		// `sourceJson`. If it read the wrong one, this would come back "RG|DMG".
+		const out = sanitize({name: "Edition Ring", type: "ring", source: "XDMG", rarity: "rare"});
+		expect(out.source).toBe("CSHEET");
+		expect(out.type).toBe("RG|XDMG");
+	});
+
+	it("suffixes scroll with XPHB, not XDMG, in the 2024 edition", () => {
+		// Scroll's 2024 suffix genuinely differs from ring/rod/wand's XDMG — verified against
+		// both the schema enum and `Parser.ITM_TYP__ODND_SCROLL`.
+		expect(sanitize({name: "S", type: "scroll", source: "XPHB", rarity: "none"}).type).toBe("SC|XPHB");
+		expect(sanitize({name: "S2", type: "scroll", source: "DMG", rarity: "none"}).type).toBe("SC|DMG");
+	});
+
+	it("maps bare labels needing no edition suffix (shield, potion)", () => {
+		expect(sanitize({name: "Shield", type: "shield", rarity: "none"}).type).toBe("S");
+		expect(sanitize({name: "Potion", type: "potion", rarity: "common"}).type).toBe("P");
+	});
+
+	it("never maps a bare \"wand\" label directly to WD — it is genuinely ambiguous", () => {
+		// The sheet's own custom-item UI collapses wand/rod/legacy-staff into one "wand"
+		// category (`_getCustomTypeForItem` in charactersheet-inventory.js maps
+		// WD/RD/"ST" all back to "wand"), so a bare "wand" label cannot identify a single
+		// real code without a baseItem match.
+		const warnings = [];
+		const out = sanitize({name: "Odd Wand", type: "wand", rarity: "rare"}, {warnings});
+		expect(out.type).toBeUndefined();
+		expect(warnings.length).toBe(1);
+	});
+
+	it("resolves \"wand\" via baseItem when one is present", () => {
+		const state = mkState([{name: "Wand of Magic Missiles", source: "DMG", type: "WD|DMG"}]);
+		const out = sanitize({name: "My Wand", type: "wand", baseItem: "Wand of Magic Missiles|DMG", rarity: "uncommon"}, {state});
+		expect(out.type).toBe("WD|DMG");
+	});
+
+	it("flags a weapon-shaped staff as a bare melee weapon plus the staff flag, without warning", () => {
+		// Every real weapon-shaped staff in this repo's own data (Diamond Staff, Eldritch
+		// Staff, Enspelled Staff) is typed "M" alongside `staff: true` — never R or anything
+		// else, so this is a safe, evidence-backed inference, not a guess.
+		const warnings = [];
+		const out = sanitize({name: "Battle Staff", type: "staff", dmg1: "1d6", rarity: "rare"}, {warnings});
+		expect(out.type).toBe("M");
+		expect(out.staff).toBe(true);
+		expect(warnings).toEqual([]);
+	});
+
+	it("flags a non-weapon-shaped staff with the flag only and no type, without warning", () => {
+		// Matches classic magic staves (e.g. Staff of Power) exactly: `type` absent, `staff:
+		// true` present.
+		const warnings = [];
+		const out = sanitize({name: "Staff of Testing", type: "staff", rarity: "very rare"}, {warnings});
+		expect("type" in out).toBe(false);
+		expect(out.staff).toBe(true);
+		expect(warnings).toEqual([]);
+	});
+
+	it("flags wondrous items without a type and without warning", () => {
+		const warnings = [];
+		const out = sanitize({name: "Trinket", type: "wondrous", rarity: "rare"}, {warnings});
+		expect("type" in out).toBe(false);
+		expect(out.wondrous).toBe(true);
+		expect(warnings).toEqual([]);
+	});
+
+	it("prefers an already-legal incumbent type over baseItem resolution or the label map", () => {
+		// Matches Hecate's Dagger from the real corpus: already `type: "M"`, needs no help.
+		const state = mkState([{name: "Dagger", source: "PHB", type: "M|XPHB"}]);
+		const out = sanitize({name: "Hecate's Dagger", type: "M", baseItem: "Dagger|PHB", rarity: "rare"}, {state});
+		expect(out.type).toBe("M");
+	});
+
+	it("never emits a null type — an omitted optional property is deleted, not nulled", () => {
+		const out = sanitize({name: "No Type Here", type: "weapon", rarity: "none"});
+		expect(out.type).not.toBeNull();
+		expect(Object.prototype.hasOwnProperty.call(out, "type")).toBe(false);
+	});
+
+	it("resolves duplicate baseItem catalog rows with last-match-wins, matching the state's own catalog-merge convention", () => {
+		const state = mkState([
+			{name: "Trick Item", source: "CSHEET", type: "M"},
+			{name: "Trick Item", source: "CSHEET", type: "R"},
+		]);
+		const out = sanitize({name: "Ambiguous", type: "weapon", baseItem: "Trick Item|CSHEET", rarity: "none"}, {state});
+		expect(out.type).toBe("R");
+	});
+});
+
 describe("v20 — the collector ships exactly what the statblock names", () => {
 	const mkState = (items) => ({getInventory: () => items.map(item => ({item}))});
 
