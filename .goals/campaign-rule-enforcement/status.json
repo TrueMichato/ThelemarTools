@@ -16,6 +16,11 @@
       "iteration": 2,
       "verdict": "FAIL",
       "summary": "Malformed decisions pass output guards, destination-policy copy and reconnect recovery are broken, full gates fail, and no draft PR exists."
+    },
+    {
+      "iteration": 3,
+      "verdict": "FAIL",
+      "summary": "Decision outputs remain incompletely closed, reconnect recovery is not wired, parity/mutation evidence and handoff are incomplete, and carry docs contradict enforcement."
     }
   ]
 }
