@@ -2105,7 +2105,7 @@ export class PostgresHubStore {
 			brewBundle: row.brew_id ? {
 				id: row.brew_id,
 				campaignId: row.campaign_id,
-				version: row.brew_version,
+				version: Number(row.brew_version),
 				contentHash: row.content_hash,
 				content: row.content,
 				manifest: row.manifest,
@@ -2114,8 +2114,8 @@ export class PostgresHubStore {
 				...getPublicCampaignRulesVersion({
 					id: row.rules_id,
 					campaignId: row.campaign_id,
-					version: row.rules_version,
-					schemaVersion: row.rules_schema_version,
+					version: Number(row.rules_version),
+					schemaVersion: Number(row.rules_schema_version),
 					rules: row.rules,
 					createdAt: row.rules_created_at,
 				}),
@@ -2172,7 +2172,7 @@ export class PostgresHubStore {
 			brewBundle: row.brew_id
 				? {
 					id: row.brew_id,
-					version: row.brew_version,
+					version: Number(row.brew_version),
 					contentHash: row.content_hash,
 					documentCount: row.manifest?.documentCount || 0,
 				}
@@ -2182,8 +2182,8 @@ export class PostgresHubStore {
 					const version = getPublicCampaignRulesVersion({
 						id: row.rules_id,
 						campaignId: row.campaign_id,
-						version: row.rules_version,
-						schemaVersion: row.rules_schema_version,
+						version: Number(row.rules_version),
+						schemaVersion: Number(row.rules_schema_version),
 						rules: row.rules,
 					});
 					return {id: version.id, version: version.version, rules: version.rules};
@@ -4119,14 +4119,14 @@ export class PostgresHubStore {
 						rulesVersion: context.rules_id
 							? {
 								id: context.rules_id,
-								version: context.rules_version,
-								schemaVersion: context.rules_schema_version,
+								version: Number(context.rules_version),
+								schemaVersion: Number(context.rules_schema_version),
 							}
 							: null,
 						brewBundle: context.brew_id
 							? {
 								id: context.brew_id,
-								version: context.brew_version,
+								version: Number(context.brew_version),
 								contentHash: context.content_hash,
 							}
 							: null,
