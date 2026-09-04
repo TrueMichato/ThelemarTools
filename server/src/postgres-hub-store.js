@@ -1439,7 +1439,12 @@ export class PostgresHubStore {
 	async _pGetCarryBasisContext (campaignId) {
 		if (!campaignId) return {campaign: null, rulesVersion: null, brewBundle: null};
 		const result = await this._pool.query(`
-			SELECT b.content_hash, r.id AS rules_id, r.rules
+			SELECT
+				b.content_hash,
+				r.id AS rules_id,
+				r.version AS rules_version,
+				r.schema_version AS rules_schema_version,
+				r.rules
 			FROM hub.campaigns c
 			LEFT JOIN hub.brew_bundle_versions b ON b.id = c.active_brew_bundle_version_id
 			LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
@@ -1447,9 +1452,17 @@ export class PostgresHubStore {
 		`, [campaignId]);
 		if (!result.rowCount) return {campaign: null, rulesVersion: null, brewBundle: null};
 		const row = result.rows[0];
+		const rulesVersion = row.rules_id
+			? {
+				id: row.rules_id,
+				version: Number(row.rules_version),
+				schemaVersion: Number(row.rules_schema_version),
+				rules: row.rules,
+			}
+			: null;
 		return {
 			campaign: {id: campaignId, activeRulesVersionId: row.rules_id || null},
-			rulesVersion: row.rules_id ? {id: row.rules_id, rules: row.rules} : null,
+			rulesVersion,
 			brewBundle: row.content_hash ? {contentHash: row.content_hash} : null,
 		};
 	}

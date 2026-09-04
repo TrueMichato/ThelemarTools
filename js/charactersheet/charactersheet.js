@@ -106,6 +106,7 @@ class CharacterSheetPage {
 		this._characterLoadGeneration = 0;
 		this._hubRealtimeGeneration = 0;
 		this._hubRulesRefreshGeneration = 0;
+		this._hubRulesRefreshBlocked = false;
 		this._builder = null;
 		this._combat = null;
 		this._spells = null;
@@ -301,11 +302,16 @@ class CharacterSheetPage {
 		const generation = ++this._hubRulesRefreshGeneration;
 		try {
 			const context = await this._hubApi.pGetCampaignContext({campaignId: this._hubCampaignId});
-			if (generation !== this._hubRulesRefreshGeneration || !this._hubContext) return false;
+			if (generation !== this._hubRulesRefreshGeneration) return false;
+			// A failed replacement clears the active context to fail closed. A later
+			// reconnect is still allowed to establish a fresh context; without this
+			// exception, the first transient outage permanently required a reload.
+			if (!this._hubContext && !this._hubRulesRefreshBlocked) return false;
 			if (rulesVersionId && context?.rulesVersion?.id !== rulesVersionId) return false;
 			const overlay = getCampaignSettingsOverlay(context?.rulesVersion?.ruleDecision);
 			if (context?.rulesVersion && !overlay) throw new Error(`Campaign rules are incompatible.`);
 			this._hubContext = context;
+			this._hubRulesRefreshBlocked = false;
 			this._state.setCampaignSettingsOverlay(overlay);
 			this._state.setCarryAuthorityContext({
 				rulesVersionId: context?.rulesVersion?.id ?? null,
@@ -316,6 +322,7 @@ class CharacterSheetPage {
 		} catch (error) {
 			if (generation !== this._hubRulesRefreshGeneration) return false;
 			this._clearHubRules();
+			this._hubRulesRefreshBlocked = true;
 			JqueryUtil.doToast({type: "danger", content: "Campaign rules changed but could not be applied. Reload before continuing."});
 			return false;
 		}
@@ -621,6 +628,7 @@ class CharacterSheetPage {
 			pPreflightSwitch: async () => ({safe: !this._characterRepository?.hasPendingWrites?.()}),
 			pOnContextActivated: async ({context}) => {
 				this._hubContext = context;
+				this._hubRulesRefreshBlocked = false;
 				if (this._hubContext?.rulesVersion && !_getHubRulesOverlay(this._hubContext)) {
 					throw new Error(`Campaign rules are unavailable for this Character Sheet.`);
 				}

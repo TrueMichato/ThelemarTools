@@ -303,6 +303,33 @@ describe("carry authority basis follows the campaign context lifecycle", () => {
 		expect(page._state.getCarryAuthorityBasis().kind).toBe("detached");
 	});
 
+	it("recovers a failed realtime replacement on reconnect without restoring stale rules", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		await activate(page, schemaV2Context("rules-1"));
+		let isOffline = true;
+		page._hubApi = {
+			pGetCampaignContext: async () => {
+				if (isOffline) throw new Error("offline");
+				return schemaV2Context("rules-2", policy => {
+					policy.rules.find(rule => rule.id === "tgtt.jumping").parameters.enabled = false;
+				});
+			},
+		};
+		page._hubCampaignId = "campaign";
+		page._renderCharacter = () => {};
+
+		await page._pRefreshHubRules({rulesVersionId: "rules-2"});
+		expect(page._hubContext).toBeNull();
+		expect(page._hubRulesRefreshBlocked).toBe(true);
+		expect(page._state.getCarryAuthorityBasis().kind).toBe("detached");
+
+		isOffline = false;
+		expect(await page._pRefreshHubRules({rulesVersionId: "rules-2"})).toBe(true);
+		expect(page._hubContext.rulesVersion.id).toBe("rules-2");
+		expect(page._hubRulesRefreshBlocked).toBe(false);
+		expect(page._state.getSettings().thelemar_jumping).toBe(false);
+	});
+
 	it("replaces schema-v2 decisions atomically across master-toggle changes and rollback", async () => {
 		const page = new CharacterSheetPage({characterRepository: {}});
 		const off = schemaV2Context("rules-off", policy => {

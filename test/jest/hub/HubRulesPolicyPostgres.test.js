@@ -231,6 +231,38 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 		expect(postgresEvidence.events.map(event => event.payload.operation)).toEqual(["publish", "publish", "rollback"]);
 	});
 
+	it("supplies the complete active rules identity to carry projections", async () => {
+		const store = new PostgresHubStore({pool});
+		const account = await store.pUpsertOAuthAccount({
+			provider: "test",
+			providerSubject: `rules-projection-${crypto.randomUUID()}`,
+			displayName: "Rules Projection",
+		});
+		const campaign = (await store.pCreateCampaign({
+			accountId: account.id,
+			name: "Rules projection",
+			idempotencyKey: command("rules-projection-campaign"),
+		})).campaign;
+		const published = await store.pCreateAndActivateRulesPolicy({
+			accountId: account.id,
+			campaignId: campaign.id,
+			policy: createDefaultCampaignRulesPolicy(),
+			expectedActiveRulesVersionId: null,
+			idempotencyKey: command("rules-projection-policy"),
+		});
+
+		const basisContext = await store._pGetCarryBasisContext(campaign.id);
+		expect(basisContext.rulesVersion).toMatchObject({
+			id: published.rulesVersion.id,
+			version: published.rulesVersion.version,
+			schemaVersion: 2,
+			rules: expect.objectContaining({
+				schemaVersion: 2,
+				catalogVersion: published.rulesVersion.catalogVersion,
+			}),
+		});
+	});
+
 	it("rejects a stale schema-v2 character create without a partial PostgreSQL write", async () => {
 		const store = new PostgresHubStore({pool});
 		const account = await store.pUpsertOAuthAccount({
