@@ -43,3 +43,31 @@ export function assertCampaignRuleWriteFence ({rulesVersion, data, protocolVersi
 		protocolVersion,
 	});
 }
+
+/**
+ * Prepare a document crossing a campaign boundary without carrying an authority summary from
+ * the source world into the destination. A summary is reusable only when the immutable policy
+ * identity is unchanged; otherwise it is removed so the destination projector fails closed until
+ * the Character Sheet recalculates it under the destination overlay.
+ *
+ * This helper is deliberately shared by the memory and PostgreSQL transition paths. It performs
+ * no writes and returns a cloned document, allowing callers to reject or commit atomically.
+ */
+export function prepareCampaignTransitionData ({data, rulesVersion, protocolVersion = CAMPAIGN_RULE_PROTOCOL_VERSION}) {
+	const prepared = structuredClone(data);
+	if (!prepared?.carry) return prepared;
+	const basis = prepared.carry?.basis;
+	if (
+		rulesVersion
+		&& Number(rulesVersion.schemaVersion) >= 2
+		&& basis?.kind === "campaign"
+		&& basis.rulesVersionId === rulesVersion.id
+	) {
+		assertCampaignRuleWriteFence({rulesVersion, data: prepared, protocolVersion});
+		return prepared;
+	}
+	// A detached, malformed, absent, or source-campaign basis cannot be trusted in the
+	// destination. Dropping only the derived authority block preserves every character input.
+	delete prepared.carry;
+	return prepared;
+}

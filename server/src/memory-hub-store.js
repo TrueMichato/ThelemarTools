@@ -39,7 +39,10 @@ import {
 	getPublicCampaignRulesVersion,
 	normalizeCampaignRulesPolicyForStorage,
 } from "./campaign-content.js";
-import {assertCampaignRuleWriteFence} from "./campaign-rule-authority.js";
+import {
+	assertCampaignRuleWriteFence,
+	prepareCampaignTransitionData,
+} from "./campaign-rule-authority.js";
 import {
 	createCharacterDisplayNameSnapshot,
 	enrichEventPayload,
@@ -1337,6 +1340,14 @@ export class MemoryHubStore {
 		const source = this._getCharacterOrThrow(characterId);
 		if (source.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can clone this character.`, {status: 403});
 		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
+		const destination = this._campaigns.get(campaignId);
+		const destinationRulesVersion = destination?.activeRulesVersionId
+			? this._rulesVersions.get(destination.activeRulesVersionId)
+			: null;
+		const destinationData = prepareCampaignTransitionData({
+			data: source.data,
+			rulesVersion: destinationRulesVersion,
+		});
 		const clone = {
 			...copy(source),
 			id: crypto.randomUUID(),
@@ -1350,7 +1361,7 @@ export class MemoryHubStore {
 			// The owner's sharing choice follows their copy; the revision restarts because
 			// this is a new aggregate.
 			projectionRevision: 1,
-			data: {...copy(source.data), id: undefined, name: `${source.data.name || "Character"} (Copy)`},
+			data: {...destinationData, id: undefined, name: `${source.data.name || "Character"} (Copy)`},
 			createdAt: this._fnNow().toISOString(),
 			updatedAt: this._fnNow().toISOString(),
 		};
@@ -1374,6 +1385,14 @@ export class MemoryHubStore {
 		if ([...this._transfers.values()].some(it => it.status === "reserved" && it.sourceKind === "character" && it.sourceId === characterId)) {
 			throw new HubStoreError("CHARACTER_BUSY", `Resolve outgoing transfers before moving.`, {status: 409});
 		}
+		const destination = this._campaigns.get(campaignId);
+		const destinationRulesVersion = destination?.activeRulesVersionId
+			? this._rulesVersions.get(destination.activeRulesVersionId)
+			: null;
+		const destinationData = prepareCampaignTransitionData({
+			data: character.data,
+			rulesVersion: destinationRulesVersion,
+		});
 		this._cancelIncomingForCharacter({character});
 		for (const operation of this._semanticOperations.values()) {
 			if (
@@ -1386,6 +1405,7 @@ export class MemoryHubStore {
 		const sourceCampaignId = character.campaignId;
 		const characterNameSnapshot = createCharacterDisplayNameSnapshot(character.data?.name);
 		character.campaignId = campaignId;
+		character.data = normalizeCharacterInventory(destinationData);
 		character.targetRef = crypto.randomUUID();
 		if (sourceCampaignId !== campaignId) character.operationWatermark = 0;
 		character.clientImportId = null;

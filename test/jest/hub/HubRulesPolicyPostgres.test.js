@@ -275,7 +275,7 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 			name: "Rules fence",
 			idempotencyKey: command("rules-fence-campaign"),
 		})).campaign;
-		await store.pCreateAndActivateRulesPolicy({
+		const active = await store.pCreateAndActivateRulesPolicy({
 			accountId: account.id,
 			campaignId: campaign.id,
 			policy: createDefaultCampaignRulesPolicy(),
@@ -293,6 +293,47 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 		})).rejects.toEqual(expect.objectContaining({code: "POLICY_VERSION_STALE"}));
 		const count = await pool.query(`SELECT count(*)::integer AS count FROM hub.characters WHERE campaign_id = $1`, [campaign.id]);
 		expect(count.rows[0].count).toBe(0);
+
+		const created = await store.pCreateCharacter({
+			accountId: account.id,
+			campaignId: campaign.id,
+			clientImportId: "current",
+			schemaVersion: 1,
+			data: {carry: {basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}}},
+			protocolVersion: "4",
+			idempotencyKey: command("rules-current-character"),
+		});
+		const session = await store.pCreateSession({
+			accountId: account.id,
+			tokenHash: "b".repeat(64),
+			expiresAt: new Date(Date.now() + 60_000),
+		});
+		const lease = await store.pAcquireCharacterLease({
+			accountId: account.id,
+			sessionId: session.id,
+			characterId: created.character.id,
+		});
+		const evidenceBefore = await pGetPostgresEvidence(pool, campaign.id);
+		for (const {basis, protocolVersion} of [
+			{basis: {kind: "detached", settingsDigest: "digest"}, protocolVersion: "4"},
+			{basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}, protocolVersion: "3"},
+		]) {
+			await expect(store.pPatchCharacter({
+				accountId: account.id,
+				sessionId: session.id,
+				characterId: created.character.id,
+				baseRevision: created.character.revision,
+				leaseEpoch: lease.epoch,
+				patches: [{op: "replace", path: "/carry", value: {schemaVersion: 1, basis}}],
+				protocolVersion,
+				idempotencyKey: command(`rules-patch-${protocolVersion}-${basis.kind}`),
+			})).rejects.toEqual(expect.objectContaining({
+				code: expect.stringMatching(/POLICY_VERSION_STALE|RULES_PROTOCOL_UNSUPPORTED/),
+			}));
+		}
+		const unchanged = await pool.query(`SELECT revision FROM hub.characters WHERE id = $1`, [created.character.id]);
+		expect(Number(unchanged.rows[0].revision)).toBe(created.character.revision);
+		expect(await pGetPostgresEvidence(pool, campaign.id)).toEqual(evidenceBefore);
 	});
 
 	it("serializes concurrent writers against one base and rolls the stale transaction back fully", async () => {

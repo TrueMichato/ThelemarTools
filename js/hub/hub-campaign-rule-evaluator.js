@@ -42,6 +42,9 @@ const _RULE_DECISION_KEYS = new Set([
 	"appliedRules",
 	"errors",
 ]);
+const _POLICY_IDENTITY_KEYS = new Set(["id", "version", "schemaVersion", "catalogVersion"]);
+const _APPLIED_RULE_KEYS = new Set(["id", "ruleSchemaVersion", "mode"]);
+const _ERROR_KEYS = new Set(["code", "ruleId"]);
 const _SURFACES = new Set([
 	"characterOpen",
 	"builder",
@@ -62,6 +65,14 @@ const _SETTING_BY_RULE_ID = Object.freeze({
 	"tgtt.linguistics-bonus": "thelemar_linguisticsBonus",
 	"tgtt.critical-rolls": "thelemar_criticalRolls",
 });
+const _SETTING_KEYS = new Set(Object.values(_SETTING_BY_RULE_ID));
+const _ERROR_CODES = new Set([
+	"RULE_EVALUATOR_INPUT_INVALID", "RULES_VERSION_INVALID", "POLICY_VERSION_STALE",
+	"RULES_SCHEMA_UNSUPPORTED", "RULES_CATALOG_UNSUPPORTED", "RULES_PROTOCOL_UNSUPPORTED",
+	"RULES_CAPABILITY_REQUIRED", "RULES_INVALID", "RULES_UNKNOWN", "RULES_UNAVAILABLE",
+	"RULES_PARAMETER_INVALID", "RULES_MODE_UNSUPPORTED", "RULES_COMBINATION_UNSUPPORTED",
+	"RULES_NOTE_INVALID", "RULE_SURFACE_UNSUPPORTED",
+]);
 const _CATALOG_BY_ID = new Map(CAMPAIGN_RULES_CATALOG.map(rule => [rule.id, rule]));
 
 /**
@@ -87,6 +98,16 @@ function copyObject (value) {
 	}
 }
 
+function copySettings (value) {
+	const input = copyObject(value);
+	return Object.fromEntries(Object.entries(input).filter(([key, setting]) => {
+		if (!_SETTING_KEYS.has(key)) return false;
+		return key === "exhaustionRules"
+			? ["2014", "2024", "thelemar"].includes(setting)
+			: typeof setting === "boolean";
+	}));
+}
+
 function getPolicyIdentity (rulesVersion) {
 	if (
 		!rulesVersion
@@ -95,7 +116,11 @@ function getPolicyIdentity (rulesVersion) {
 		|| !Number.isSafeInteger(rulesVersion.version)
 		|| rulesVersion.version < 1
 		|| !Number.isSafeInteger(rulesVersion.schemaVersion)
+		|| ![1, CAMPAIGN_RULES_POLICY_SCHEMA_VERSION].includes(rulesVersion.schemaVersion)
 		|| !Number.isSafeInteger(rulesVersion.catalogVersion)
+		|| rulesVersion.catalogVersion < 1
+		|| (rulesVersion.schemaVersion === CAMPAIGN_RULES_POLICY_SCHEMA_VERSION
+			&& rulesVersion.catalogVersion !== CAMPAIGN_RULES_CATALOG_VERSION)
 	) return null;
 	return {
 		id: rulesVersion.id,
@@ -105,45 +130,73 @@ function getPolicyIdentity (rulesVersion) {
 	};
 }
 
+function isPlainRecord (value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const prototype = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+}
+
+function isClosedPolicyIdentity (identity) {
+	return isPlainRecord(identity)
+		&& Object.keys(identity).every(key => _POLICY_IDENTITY_KEYS.has(key))
+		&& [..._POLICY_IDENTITY_KEYS].every(key => Object.hasOwn(identity, key))
+		&& getPolicyIdentity(identity) != null;
+}
+
 function isClosedRuleDecision (decision) {
 	if (!decision || typeof decision !== "object" || Array.isArray(decision)) return false;
 	if (
-		Object.keys(decision).some(key => !_RULE_DECISION_KEYS.has(key))
+		[..._RULE_DECISION_KEYS].some(key => !Object.hasOwn(decision, key))
+		|| Object.keys(decision).some(key => !_RULE_DECISION_KEYS.has(key))
 		|| decision.schemaVersion !== 1
 		|| decision.evaluatorVersion !== CAMPAIGN_RULE_EVALUATOR_VERSION
 		|| !["inactive", "compliant", "blocked"].includes(decision.status)
 		|| typeof decision.blocking !== "boolean"
 		|| !_SURFACES.has(decision.surface)
-		|| !decision.effectiveSettings
-		|| typeof decision.effectiveSettings !== "object"
-		|| Array.isArray(decision.effectiveSettings)
+		|| !isPlainRecord(decision.effectiveSettings)
 		|| !Array.isArray(decision.appliedRules)
 		|| decision.appliedRules.length > CAMPAIGN_RULES_CATALOG.length
 		|| !Array.isArray(decision.errors)
 		|| decision.errors.length > CAMPAIGN_RULES_CATALOG.length
 	) return false;
-	if (decision.policyIdentity != null && !getPolicyIdentity(decision.policyIdentity)) return false;
+	if (Object.entries(decision.effectiveSettings).some(([key, value]) => (
+		!_SETTING_KEYS.has(key)
+		|| (key === "exhaustionRules"
+			? !["2014", "2024", "thelemar"].includes(value)
+			: typeof value !== "boolean")
+	))) return false;
+	if (decision.policyIdentity != null && !isClosedPolicyIdentity(decision.policyIdentity)) return false;
 	if (decision.status === "inactive" && (decision.blocking || decision.policyIdentity != null || decision.appliedRules.length || decision.errors.length)) return false;
 	if (decision.status === "compliant" && (decision.blocking || !decision.policyIdentity || decision.errors.length)) return false;
 	if (decision.status === "blocked" && (!decision.blocking || !decision.errors.length)) return false;
-	if (decision.appliedRules.some(rule => (
-		!rule
-		|| typeof rule !== "object"
-		|| Array.isArray(rule)
-		|| Object.keys(rule).some(key => !["id", "ruleSchemaVersion", "mode"].includes(key))
-		|| typeof rule.id !== "string"
-		|| !rule.id
+	const appliedRuleIds = new Set();
+	if (decision.appliedRules.some(rule => {
+		const definition = _CATALOG_BY_ID.get(rule?.id);
+		const isInvalid = !rule
+		|| !isPlainRecord(rule)
+		|| Object.keys(rule).some(key => !_APPLIED_RULE_KEYS.has(key))
+		|| ![..._APPLIED_RULE_KEYS].every(key => Object.hasOwn(rule, key))
+		|| !definition
 		|| !Number.isSafeInteger(rule.ruleSchemaVersion)
+		|| rule.ruleSchemaVersion < 1
+		|| rule.ruleSchemaVersion !== definition.ruleSchemaVersion
 		|| !["legacy", "advisory", "enforced"].includes(rule.mode)
-	))) return false;
+		|| (rule.mode === "enforced" && definition.lifecycle !== "implemented_enforced")
+		|| appliedRuleIds.has(rule.id);
+		appliedRuleIds.add(rule?.id);
+		return isInvalid;
+	})) return false;
 	if (decision.errors.some(error => (
 		!error
-		|| typeof error !== "object"
-		|| Array.isArray(error)
-		|| Object.keys(error).some(key => !["code", "ruleId"].includes(key))
-		|| typeof error.code !== "string"
-		|| !error.code
-		|| (error.ruleId != null && (typeof error.ruleId !== "string" || !error.ruleId))
+		|| !isPlainRecord(error)
+		|| Object.keys(error).some(key => !_ERROR_KEYS.has(key))
+		|| !Object.hasOwn(error, "code")
+		|| !_ERROR_CODES.has(error.code)
+		|| (error.ruleId != null && (
+			typeof error.ruleId !== "string"
+			|| !error.ruleId
+			|| !_CATALOG_BY_ID.has(error.ruleId)
+		))
 	))) return false;
 	return true;
 }
@@ -156,7 +209,7 @@ function blocked ({surface, personalSettings, rulesVersion = null, code, ruleId 
 		blocking: true,
 		surface,
 		policyIdentity: getPolicyIdentity(rulesVersion),
-		effectiveSettings: copyObject(personalSettings),
+		effectiveSettings: copySettings(personalSettings),
 		appliedRules: [],
 		errors: [{code, ...(ruleId ? {ruleId} : {})}],
 	};
@@ -188,7 +241,7 @@ export function evaluateCampaignRules (input = {}) {
 	) {
 		return blocked({surface, personalSettings: input.personalSettings, code: "RULE_EVALUATOR_INPUT_INVALID"});
 	}
-	const personalSettings = copyObject(input.personalSettings);
+	const personalSettings = copySettings(input.personalSettings);
 	const rulesVersion = input.rulesVersion;
 	if (rulesVersion == null) {
 		return {

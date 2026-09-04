@@ -2,7 +2,10 @@ import {readFileSync} from "node:fs";
 import {resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 
-import {assertCampaignRuleWriteFence} from "../../../server/src/campaign-rule-authority.js";
+import {
+	assertCampaignRuleWriteFence,
+	prepareCampaignTransitionData,
+} from "../../../server/src/campaign-rule-authority.js";
 import {createDefaultCampaignRulesPolicy} from "../../../js/hub/hub-campaign-rules.js";
 import {MemoryHubStore} from "../../../server/src/memory-hub-store.js";
 
@@ -93,7 +96,22 @@ describe("campaign rule write authority", () => {
 		for (const file of ["server/src/memory-hub-store.js", "server/src/postgres-hub-store.js"]) {
 			const source = readFileSync(resolve(REPO_ROOT, file), "utf8");
 			expect(source).toContain("assertCampaignRuleWriteFence({");
+			expect(source).toContain("prepareCampaignTransitionData({");
 		}
+	});
+
+	it("drops a source carry summary when a transition crosses policy identity", () => {
+		const source = characterData("rules-old");
+		const prepared = prepareCampaignTransitionData({data: source, rulesVersion: rulesVersion()});
+		expect(prepared).not.toBe(source);
+		expect(prepared.carry).toBeUndefined();
+		expect(source.carry.basis.rulesVersionId).toBe("rules-old");
+	});
+
+	it("keeps a current carry summary for a destination with the same immutable policy", () => {
+		const source = characterData("rules-current");
+		const prepared = prepareCampaignTransitionData({data: source, rulesVersion: rulesVersion()});
+		expect(prepared.carry).toEqual(source.carry);
 	});
 
 	it("rejects a stale schema-v2 create in the memory store without a partial character write", async () => {
@@ -127,5 +145,87 @@ describe("campaign rule write authority", () => {
 			idempotencyKey: "current-create",
 		});
 		expect(created.character.campaignId).toBe(campaign.id);
+
+		const destinationCampaign = (await store.pCreateCampaign({
+			accountId: account.id,
+			name: "Destination",
+			idempotencyKey: "destination-campaign",
+		})).campaign;
+		await store.pCreateAndActivateRulesPolicy({
+			accountId: account.id,
+			campaignId: destinationCampaign.id,
+			policy: createDefaultCampaignRulesPolicy(),
+			expectedActiveRulesVersionId: null,
+			idempotencyKey: "destination-rules",
+		});
+		const cloned = await store.pCloneCharacter({
+			accountId: account.id,
+			characterId: created.character.id,
+			campaignId: destinationCampaign.id,
+			idempotencyKey: "destination-clone",
+		});
+		expect(cloned.character.data.carry).toBeUndefined();
+		expect(store._characters.get(created.character.id).data.carry).toBeDefined();
+
+		const moved = await store.pMoveCharacter({
+			accountId: account.id,
+			characterId: cloned.character.id,
+			campaignId: campaign.id,
+			idempotencyKey: "destination-move",
+		});
+		expect(moved.character.data.carry).toBeUndefined();
+	});
+
+	it("fences stale and old-protocol memory patches without revision or event changes", async () => {
+		const store = new MemoryHubStore();
+		const account = await store.pUpsertOAuthAccount({provider: "test", providerSubject: "rule-patch", displayName: "Rule Patch"});
+		const session = await store.pCreateSession({
+			accountId: account.id,
+			tokenHash: "a".repeat(64),
+			expiresAt: new Date(Date.now() + 60_000),
+		});
+		const campaign = (await store.pCreateCampaign({accountId: account.id, name: "Rules", idempotencyKey: "patch-campaign"})).campaign;
+		const active = await store.pCreateAndActivateRulesPolicy({
+			accountId: account.id,
+			campaignId: campaign.id,
+			policy: createDefaultCampaignRulesPolicy(),
+			expectedActiveRulesVersionId: null,
+			idempotencyKey: "patch-rules",
+		});
+		const created = await store.pCreateCharacter({
+			accountId: account.id,
+			campaignId: campaign.id,
+			clientImportId: "patch-character",
+			schemaVersion: 1,
+			data: characterData(active.rulesVersion.id),
+			protocolVersion: "4",
+			idempotencyKey: "patch-create",
+		});
+		const lease = await store.pAcquireCharacterLease({
+			accountId: account.id,
+			sessionId: session.id,
+			characterId: created.character.id,
+		});
+		const eventCount = store._events.length;
+		for (const {basis, protocolVersion} of [
+			{basis: {kind: "detached", settingsDigest: "digest"}, protocolVersion: "4"},
+			{basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}, protocolVersion: "3"},
+		]) {
+			await expect(store.pPatchCharacter({
+				accountId: account.id,
+				sessionId: session.id,
+				characterId: created.character.id,
+				baseRevision: 1,
+				leaseEpoch: lease.epoch,
+				patches: [{op: "replace", path: "/carry", value: {schemaVersion: 1, basis}}],
+				protocolVersion,
+				idempotencyKey: `patch-${protocolVersion}-${basis.kind}`,
+			})).rejects.toEqual(expect.objectContaining({
+				code: expect.stringMatching(/POLICY_VERSION_STALE|RULES_PROTOCOL_UNSUPPORTED/),
+			}));
+		}
+		const unchanged = store._characters.get(created.character.id);
+		expect(unchanged.revision).toBe(1);
+		expect(store._events).toHaveLength(eventCount);
 	});
 });

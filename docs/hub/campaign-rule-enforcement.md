@@ -26,3 +26,15 @@ Character Sheet and Party Tracker layer the decision over personal settings in m
 personal values only. Teardown drops the decision and restores those values; realtime activation fetches and
 generation-fences a replacement context. The server uses the same evaluator for carry projection and rejects a
 schema-v2 carry write whose recorded rules-version identity is stale before changing canonical character data.
+
+Transition handling is deliberately fail-closed: memory and PostgreSQL clone/attach/move paths resolve and lock
+the destination policy before changing the character. A carry block is retained only when its immutable policy
+identity is the destination identity; detached, malformed, or source-policy blocks are removed from the cloned
+document, leaving all raw character inputs intact until the destination sheet recalculates.
+
+| Evidence | Scope |
+|---|---|
+| `HubCampaignRuleEvaluator` | Closed decision fields, setting domains, catalog/schema identities, stable errors, and TGTT composition |
+| `CharacterSheetHubTeardown` | Activation, rollback, failed replacement, reconnect recovery, stale ordering, and detached teardown |
+| `HubCampaignRuleAuthority` | Protocol/pin fences, no-partial memory writes, and destination transition invalidation |
+| `HubCarryFreshness` / `HubCarryContractParity` | Carry basis and privacy-preserving projection parity |

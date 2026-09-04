@@ -341,6 +341,7 @@ class CharacterSheetPage {
 	_onHubRealtimeConnectionState (state) {
 		this._hubEffects?.onConnectionState(state);
 		this._peerTargeting?.onConnectionState(state);
+		if (state?.state === "live" && this._hubRulesRefreshBlocked) void this._pRefreshHubRules();
 		if (!["closed", "access_lost"].includes(state?.state)) return;
 		this._hubRealtimeGeneration++;
 		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});

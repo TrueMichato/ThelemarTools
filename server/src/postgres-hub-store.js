@@ -39,7 +39,10 @@ import {
 	getPublicCampaignRulesVersion,
 	normalizeCampaignRulesPolicyForStorage,
 } from "./campaign-content.js";
-import {assertCampaignRuleWriteFence} from "./campaign-rule-authority.js";
+import {
+	assertCampaignRuleWriteFence,
+	prepareCampaignTransitionData,
+} from "./campaign-rule-authority.js";
 import {HUB_REQUIRED_MIGRATION_VERSION} from "./migration-version.js";
 import {
 	createCharacterDisplayNameSnapshot,
@@ -1969,6 +1972,26 @@ export class PostgresHubStore {
 			if (!characterResult.rowCount) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
 			const source = getCharacter(characterResult.rows[0]);
 			if (source.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can ${isMove ? "move" : "clone"} this character.`, {status: 403});
+			const destinationRulesResult = await client.query(`
+				SELECT r.id, r.version, r.schema_version, r.rules
+				FROM hub.campaigns c
+				LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
+				WHERE c.id = $1
+				FOR UPDATE OF c
+			`, [campaignId]);
+			const destinationRulesRow = destinationRulesResult.rows[0];
+			const destinationRulesVersion = destinationRulesRow?.id
+				? {
+					id: destinationRulesRow.id,
+					version: Number(destinationRulesRow.version),
+					schemaVersion: Number(destinationRulesRow.schema_version),
+					rules: destinationRulesRow.rules,
+				}
+				: null;
+			const destinationData = prepareCampaignTransitionData({
+				data: source.data,
+				rulesVersion: destinationRulesVersion,
+			});
 
 			let character;
 			let action;
@@ -1987,17 +2010,17 @@ export class PostgresHubStore {
 				if (busy.rowCount) throw new HubStoreError("CHARACTER_BUSY", `Resolve outgoing transfers before moving.`, {status: 409});
 				const updated = await client.query(`
 					UPDATE hub.characters
-					SET campaign_id = $2, client_import_id = NULL, target_ref = gen_random_uuid(),
+					SET campaign_id = $2, client_import_id = NULL, data = $3::jsonb, target_ref = gen_random_uuid(),
 						operation_watermark = CASE WHEN campaign_id IS DISTINCT FROM $2 THEN 0 ELSE operation_watermark END,
 						revision = revision + 1, updated_at = now()
 					WHERE id = $1
 					RETURNING *
-				`, [characterId, campaignId]);
+				`, [characterId, campaignId, JSON.stringify(destinationData)]);
 				character = getCharacter(updated.rows[0]);
 				action = "character.moved";
 			} else {
 				const cloneId = crypto.randomUUID();
-				const data = {...source.data, name: `${source.data.name || "Character"} (Copy)`};
+				const data = {...destinationData, name: `${source.data.name || "Character"} (Copy)`};
 				delete data.id;
 				const inserted = await client.query(`
 					INSERT INTO hub.characters (

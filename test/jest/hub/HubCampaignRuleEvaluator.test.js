@@ -63,7 +63,7 @@ describe("campaign rule evaluator", () => {
 		expect(evaluate(null)).toMatchObject({
 			status: "inactive",
 			blocking: false,
-			effectiveSettings: {enableTgtt: false, localOnly: true},
+			effectiveSettings: {enableTgtt: false},
 		});
 	});
 
@@ -82,7 +82,7 @@ describe("campaign rule evaluator", () => {
 			status: "blocked",
 			blocking: true,
 			errors: [{code}],
-			effectiveSettings: {enableTgtt: false, localOnly: true},
+			effectiveSettings: {enableTgtt: false},
 		});
 	});
 
@@ -129,6 +129,49 @@ describe("campaign rule evaluator", () => {
 			effectiveSettings: {enableTgtt: true},
 		};
 		expect(getCampaignSettingsOverlayFromRulesVersion(version)).toBeNull();
+	});
+
+	it.each([
+		["mistyped settings", {enableTgtt: "yes"}],
+		["unknown settings", {unexpected: true}],
+	])("rejects %s in an otherwise closed decision", (_label, effectiveSettings) => {
+		const version = rulesVersion();
+		version.ruleDecision = {...evaluate(version), effectiveSettings};
+		expect(getCampaignSettingsOverlayFromRulesVersion(version)).toBeNull();
+	});
+
+	it("rejects unknown, invalid, and duplicate applied rules", () => {
+		const version = rulesVersion();
+		const decision = evaluate(version);
+		for (const appliedRules of [
+			[{id: "unknown.rule", ruleSchemaVersion: 1, mode: "advisory"}],
+			[{id: "tgtt.enabled", ruleSchemaVersion: -1, mode: "advisory"}],
+			[decision.appliedRules[0], decision.appliedRules[0]],
+		]) {
+			version.ruleDecision = {...decision, appliedRules};
+			expect(getCampaignSettingsOverlayFromRulesVersion(version)).toBeNull();
+		}
+	});
+
+	it("rejects malformed identity and error envelopes even when their keys look familiar", () => {
+		const version = rulesVersion();
+		const decision = evaluate(version);
+		for (const policyIdentity of [
+			{...decision.policyIdentity, extra: true},
+			{...decision.policyIdentity, catalogVersion: 0},
+			{...decision.policyIdentity, schemaVersion: 99},
+		]) {
+			version.ruleDecision = {...decision, policyIdentity};
+			expect(getCampaignSettingsOverlayFromRulesVersion(version)).toBeNull();
+		}
+		for (const errors of [
+			[{code: "RULES_INVALID", ruleId: "unknown.rule"}],
+			[{code: "RULES_INVALID", extra: true}],
+			[{ruleId: "tgtt.enabled"}],
+		]) {
+			version.ruleDecision = {...decision, status: "blocked", blocking: true, errors};
+			expect(getCampaignSettingsOverlayFromRulesVersion(version)).toBeNull();
+		}
 	});
 
 	it("rejects contradictory Thelemar dependencies instead of partially applying", () => {

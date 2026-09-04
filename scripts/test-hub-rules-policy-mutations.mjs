@@ -62,6 +62,15 @@ async function probeEvaluatorFailClosed ({rules, evaluator}) {
 		blocking: true,
 		effectiveSettings: {enableTgtt: true},
 	}), null);
+	const validDecision = evaluator.evaluateCampaignRules(base);
+	assert.equal(evaluator.getCampaignSettingsOverlay({
+		...validDecision,
+		effectiveSettings: {enableTgtt: "yes"},
+	}), null);
+	assert.equal(evaluator.getCampaignSettingsOverlay({
+		...validDecision,
+		appliedRules: [{id: "unknown.rule", ruleSchemaVersion: -1, mode: "advisory"}],
+	}), null);
 	assert.equal(evaluator.getCampaignSettingsOverlay({
 		status: "compliant",
 		blocking: false,

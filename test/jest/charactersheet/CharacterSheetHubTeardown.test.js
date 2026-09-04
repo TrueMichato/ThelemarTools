@@ -324,7 +324,8 @@ describe("carry authority basis follows the campaign context lifecycle", () => {
 		expect(page._state.getCarryAuthorityBasis().kind).toBe("detached");
 
 		isOffline = false;
-		expect(await page._pRefreshHubRules({rulesVersionId: "rules-2"})).toBe(true);
+		page._onHubRealtimeConnectionState({state: "live"});
+		await new Promise(resolve => setTimeout(resolve, 0));
 		expect(page._hubContext.rulesVersion.id).toBe("rules-2");
 		expect(page._hubRulesRefreshBlocked).toBe(false);
 		expect(page._state.getSettings().thelemar_jumping).toBe(false);

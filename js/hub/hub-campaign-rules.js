@@ -31,10 +31,10 @@ const ENFORCED_RULE_IDS = new Set([
 
 const SURFACES_TGTT_ENFORCED = Object.freeze({
 	characterOpen: "implemented",
-	builder: "implemented",
-	levelUp: "implemented",
-	quickBuild: "implemented",
-	respec: "implemented",
+	builder: "planned",
+	levelUp: "planned",
+	quickBuild: "planned",
+	respec: "planned",
 	contentFilter: "planned",
 	characterWrite: "implemented",
 	hubAdmin: "implemented",
