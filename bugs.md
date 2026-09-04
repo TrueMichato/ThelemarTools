@@ -3,12 +3,12 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
+## Closed Bugs
+
 ### Round 57 — NPC export validity and Add Item filter positioning
 
-- **S1 — NPC export emits invalid companion-item types.** The attached `all-npcs-CSHEET.json` corpus contains 24 monsters and 15 bundled items; 14 items use human-readable `type` values (`weapon`, `armor`, or `ring`) instead of canonical 5etools item-type codes. Duralin, Talna, and Onger are named regressions. S1 owns the NPC exporter, its focused tests, and NPC-export documentation; it must validate the complete payload against the real schemas and load/render every attached monster and item without console errors. S1 must not edit inventory/filter code, CSS, or `bugs.md`.
-- **S2 — Add Item filter dropdowns open away from their controls.** The picker computes viewport coordinates for fixed popovers while the menus remain under a transformed, scrolling modal ancestor, so browser containing-block behavior can displace or clip them. S2 owns the inventory picker, filtered-picker helper only if a shared change is required, scoped character-sheet modal/popover CSS, and mandatory browser regression coverage. Any shared change must re-verify spell/feature picker consumers. S2 must not edit NPC exporter code or `bugs.md`.
-
-## Closed Bugs
+- **NPC export emitted invalid companion-item types:** the exporter now canonicalizes sheet labels through legal incumbent codes, the loaded base-item catalog, armor metadata, and safe label mappings. Ambiguous unresolved types are omitted with an actionable warning instead of exporting invalid values. The reported 24-monster/15-item corpus, including Duralin, Talna, and Onger, is covered by a permanent attachment-driven regression harness.
+- **Add Item filter dropdowns opened away from their controls:** picker modal scrollers no longer establish a fixed-position containing block, filter-menu transitions no longer include positioning properties, and the mobile modal rests without an identity transform. Browser coverage verifies Item filters across desktop, scrolled, mobile, edge, theme, keyboard, and lifecycle cases, plus shared Spell and Feat picker guards.
 
 ### Renderer — uncaught `Item type "armor" not found` crash on unregistered types (`dc157141`)
 
