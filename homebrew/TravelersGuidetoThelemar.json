@@ -144,8 +144,8 @@
 			"source": "TGTT",
 			"ruleType": "V",
 			"entries": [
-				"Every hedge-alchemist in Thelemar can tell you that dragon's blood is potent. Only a guild alchemist can tell you {@i how} \u2014 and even they will argue about it. What they agree on is the count: there are {@b twelve uses} of dragon's blood, and a thirteenth that nobody has written down and lived to publish.",
-				"Blood taken straight from the wyrm is powerful but narrow: it strengthens a spell of the dragon's own element, and nothing more (see {@item Dragon Blood (Wyrmling)|Ar8} and its kin). {@b Distillation} is what opens the rest. The process is neither quick nor forgiving, and it does not make the blood stronger \u2014 it makes it {@i broader}.",
+				"Every hedge-alchemist in Thelemar can tell you that dragon's blood is potent. Only a guild alchemist can tell you {@i how} — and even they will argue about it. What they agree on is the count: there are {@b twelve uses} of dragon's blood, and a thirteenth that nobody has written down and lived to publish.",
+				"Blood taken straight from the wyrm is powerful but narrow: it strengthens a spell of the dragon's own element, and nothing more (see {@item Dragon Blood (Wyrmling)|Ar8} and its kin). {@b Distillation} is what opens the rest. The process is neither quick nor forgiving, and it does not make the blood stronger — it makes it {@i broader}.",
 				{
 					"type": "entries",
 					"name": "Distilling",
@@ -159,7 +159,7 @@
 					"name": "Invoking a Use",
 					"entries": [
 						"Distilled dragon's blood is a variant spell component. When you cast a spell using a vial, you choose which of the twelve uses to invoke. The vial is consumed either way.",
-						"How many you may invoke at once is a question of potency, not of skill \u2014 a wyrmling's blood will give up one use and no more, however good the alchemist.",
+						"How many you may invoke at once is a question of potency, not of skill — a wyrmling's blood will give up one use and no more, however good the alchemist.",
 						{
 							"type": "table",
 							"caption": "Potency",
@@ -293,7 +293,7 @@
 								}
 							]
 						},
-						"{@note The same use can't be invoked twice on one casting, and two vials can't be combined \u2014 blood curdles against blood. Using more than one monstrous component on a casting still risks a wild magic surge as normal.}"
+						"{@note The same use can't be invoked twice on one casting, and two vials can't be combined — blood curdles against blood. Using more than one monstrous component on a casting still risks a wild magic surge as normal.}"
 					]
 				}
 			]
@@ -317,8 +317,8 @@
 					"name": "Renamed or reinterpreted",
 					"entries": [
 						"{@b Marilith Blade Shard} names a table row whose component name had been truncated to a single letter. The effect (striking the same target more than once with {@spell steel wind strike|XGE}) matches a marilith's six blades, and follows the naming of Arcadia 8's own {@item Erinyes Longsword Shards|Ar8}.",
-						"{@b Mirage Arcane} \u2014 the table read \"Arcane MIrage\", which is {@spell mirage arcane} with its words reversed.",
-						"{@b Distilled Dragon's Blood} \u2014 see below.",
+						"{@b Mirage Arcane} — the table read \"Arcane MIrage\", which is {@spell mirage arcane} with its words reversed.",
+						"{@b Distilled Dragon's Blood} — see below.",
 						"The table writes component names with possessives ({@i Glabrezu's Horn}) where Arcadia 8 does not ({@i Glabrezu Horn}), and inverts word order ({@i Mindkiller's Piece of Brain} against {@i Piece of Mindkiller Brain}). These are the same components, not new ones."
 					]
 				},
@@ -327,7 +327,7 @@
 					"name": "Distilled Dragon's Blood, and the Twelve Uses",
 					"entries": [
 						"The supplementary table gave dragon's blood the power to double a spell's range, duration, area {@i and} targets while making its targets vulnerable to its damage type, all at once, for a flat 10,000 gp. That is four metamagics and doubled damage on a single consumable.",
-						"Thelemar instead follows the alchemical tradition of {@variantrule The Twelve Uses of Dragon's Blood|TGTT}, which is now the canonical rule. Arcadia 8's raw {@item Dragon Blood (Wyrmling)|Ar8} and its kin are preserved unchanged \u2014 they remain the narrow, undistilled form \u2014 and Arcadia 8's {@item Dragon Blood (Protection)|Ar8} appears among the twelve as {@i Warding}."
+						"Thelemar instead follows the alchemical tradition of {@variantrule The Twelve Uses of Dragon's Blood|TGTT}, which is now the canonical rule. Arcadia 8's raw {@item Dragon Blood (Wyrmling)|Ar8} and its kin are preserved unchanged — they remain the narrow, undistilled form — and Arcadia 8's {@item Dragon Blood (Protection)|Ar8} appears among the twelve as {@i Warding}."
 					]
 				},
 				{
@@ -915,7 +915,7 @@
 			"source": "TGTT",
 			"page": 0,
 			"entries": [
-				"Some combat methods are stances\u2014sustained combat forms that provide ongoing benefits. A stance method is activated as a bonus action and remains active until you use a bonus action to end it, you activate a different stance, or you are {@condition incapacitated}.",
+				"Some combat methods are stances—sustained combat forms that provide ongoing benefits. A stance method is activated as a bonus action and remains active until you use a bonus action to end it, you activate a different stance, or you are {@condition incapacitated}.",
 				"You can only maintain one stance at a time. Stances do not require {@variantrule concentration|phb}, but maintaining a stance requires you to remain conscious and able to take actions."
 			]
 		},
@@ -1318,7 +1318,7 @@
 			"entries": [
 				"Although The Dreamtime is a dream world, things that affect you there also affect you in the real world. If you are injured or killed in The Dreamtime, your injury or death is just as real as if it occurred in the real world. If you use abilities or spell slots, they are spent even if they stem from physical attributes.",
 				"Beneficial effects do not carry over the same way; you cannot rest or gain hp in the dreamtime while dreamwalking.",
-				"Some abilities refer to regular dreams; in these dreams there is no connection to the real world\u2014your \"real\" self cannot be harmed within another's dream. The only thing you carry out of another person's dream is your memory of the dream events."
+				"Some abilities refer to regular dreams; in these dreams there is no connection to the real world—your \"real\" self cannot be harmed within another's dream. The only thing you carry out of another person's dream is your memory of the dream events."
 			]
 		},
 		{
@@ -1385,7 +1385,7 @@
 			"entries": [
 				"The dreamtime is an ever-changing, ever-morphing landscape. Despite the fact that many abilities allow dreamers and the rare inhabitants to shape their surroundings (intentionally or unintentionally), changes are never consistent enough to stick over time.",
 				"When a dreamer leaves the dreamtime, the changes they created start to erode and disappear, such that the next time they visit, those changes are no longer in effect.",
-				"This rule is true in general, but some abilities (such as the Dreamorph ability) break it\u2014in such a case, the rules of the ability supersede this rule."
+				"This rule is true in general, but some abilities (such as the Dreamorph ability) break it—in such a case, the rules of the ability supersede this rule."
 			]
 		},
 		{
@@ -1394,7 +1394,7 @@
 			"page": 0,
 			"ruleType": "O",
 			"entries": [
-				"In the dreamtime, losing your focus can spell disaster. Every 10 minutes spent inside the dreamtime, a creature must roll a concentration check, with {@dc 15}. On failure, their stray thoughts shape the dreamtime around them\u2014roll {@dice 2d4} on the Dreamtime Consequences table for outcome. Effects last for 1 hour unless stated otherwise.",
+				"In the dreamtime, losing your focus can spell disaster. Every 10 minutes spent inside the dreamtime, a creature must roll a concentration check, with {@dc 15}. On failure, their stray thoughts shape the dreamtime around them—roll {@dice 2d4} on the Dreamtime Consequences table for outcome. Effects last for 1 hour unless stated otherwise.",
 				{
 					"type": "table",
 					"caption": "Dreamtime Consequences",
@@ -2191,7 +2191,7 @@
 			"source": "TGTT",
 			"ability": "wis",
 			"entries": [
-				"Understanding cultures across the world\u2014customs, laws, traditions, social cues, and etiquette.",
+				"Understanding cultures across the world—customs, laws, traditions, social cues, and etiquette.",
 				{
 					"type": "list",
 					"items": [
@@ -3007,7 +3007,7 @@
 			"weight": 0.5,
 			"value": 50000,
 			"entries": [
-				"Raw dragon's blood boosts a spell of the wyrm's own element \u2014 see {@item Dragon Blood (Wyrmling)|Ar8}. Distilled, it does far stranger work.",
+				"Raw dragon's blood boosts a spell of the wyrm's own element — see {@item Dragon Blood (Wyrmling)|Ar8}. Distilled, it does far stranger work.",
 				"When you cast a spell using this component, choose {@b one} of {@variantrule The Twelve Uses of Dragon's Blood|TGTT}."
 			],
 			"miscTags": [
@@ -7672,7 +7672,7 @@
 			],
 			"entries": [
 				"You cloak your dreams in shadowy illusions, making them hard to find for outside forces. This spell hides the caster's dreams from detection, scrying, or manipulation.",
-				"Attempts to observe or interact with the caster's dreams require two separate saving throws\u2014the first is an Intelligence saving throw attempting to locate the dream, and the second is a Wisdom saving throw attempting to breach the veil.",
+				"Attempts to observe or interact with the caster's dreams require two separate saving throws—the first is an Intelligence saving throw attempting to locate the dream, and the second is a Wisdom saving throw attempting to breach the veil.",
 				"Creatures failing the second save take {@damage 5d8} psychic damage and are {@condition stunned} until the end of their next turn."
 			],
 			"damageInflict": [
@@ -11370,7 +11370,7 @@
 					],
 					"rows": [
 						[
-							"\u2014"
+							"—"
 						],
 						[
 							"2"
@@ -16038,7 +16038,7 @@
 								"rows": [
 									[
 										0,
-										"\u2014"
+										"—"
 									],
 									[
 										2,
@@ -18006,12 +18006,12 @@
 					],
 					"rows": [
 						[
-							"\u2014",
-							"\u2014"
+							"—",
+							"—"
 						],
 						[
-							"\u2014",
-							"\u2014"
+							"—",
+							"—"
 						],
 						[
 							"{@dice 1d8}",
@@ -21353,7 +21353,7 @@
 			"classSource": "TGTT",
 			"level": 2,
 			"entries": [
-				"In exchange for forgoing bloodshed\u2014torture, attacking unconscious creatures, and dealing lethal wounds to creatures you reduce to 0 hit points\u2014you are yourself granted mercy. When you have already succeeded on two death saving throws, you have advantage on death saving throws."
+				"In exchange for forgoing bloodshed—torture, attacking unconscious creatures, and dealing lethal wounds to creatures you reduce to 0 hit points—you are yourself granted mercy. When you have already succeeded on two death saving throws, you have advantage on death saving throws."
 			]
 		},
 		{
@@ -23421,7 +23421,7 @@
 			"classSource": "TGTT",
 			"level": 1,
 			"entries": [
-				"Your 1st-level training unlocks tactical methods\u2014disciplined techniques fueled by stamina.",
+				"Your 1st-level training unlocks tactical methods—disciplined techniques fueled by stamina.",
 				{
 					"type": "list",
 					"items": [
@@ -24872,7 +24872,7 @@
 				"Starting at 6th level, you may use your skill in navigating the Dreamtime to shelter other travelers.",
 				"Creatures within 30 feet of you of your choice gain a bonus to their Concentration checks equal to your Constitution modifier (minimum +1).",
 				"In addition, you gain an ability to shield the dreams of yourself and others outside of the Dreamtime. You are aware when someone tries to watch or enter your regular dreams, as well as the dreams of creatures within 30 feet of you.",
-				"You can attempt to stop them from doing so; roll a Concentration check, and the result becomes a DC for their attempt\u2014if they fail, they lose their grasp on the dream and must roll again to find it before making another attempt."
+				"You can attempt to stop them from doing so; roll a Concentration check, and the result becomes a DC for their attempt—if they fail, they lose their grasp on the dream and must roll again to find it before making another attempt."
 			]
 		},
 		{
@@ -24933,9 +24933,9 @@
 			"classSource": "TGTT",
 			"level": 10,
 			"entries": [
-				"At 10th level, you learn the essential truth\u2014that the Dreamtime is only a dream, and all that happens within it can be treated as such.",
+				"At 10th level, you learn the essential truth—that the Dreamtime is only a dream, and all that happens within it can be treated as such.",
 				"While in the Dreamtime, you can use an action to replicate the effect of a spell you know the effect of (meaning you don't need to know how to, or be able to cast it; simply to know the effect you are trying to create). This action is the same as casting the spell, though no spell slot or material components are necessary, nor is the ability to cast a spell.",
-				"If you do, the effects of the spell are still confined to the Dreamtime\u2014you cannot, for example, use this ability to cast {@spell plane shift} to move yourself to the Feywild, nor can you cast {@spell wish} and use it to turn your real body immortal.",
+				"If you do, the effects of the spell are still confined to the Dreamtime—you cannot, for example, use this ability to cast {@spell plane shift} to move yourself to the Feywild, nor can you cast {@spell wish} and use it to turn your real body immortal.",
 				"This ability allows you to cast spells with casting time longer than 1 action in 1 action, but the spell is always cast at the lowest level possible."
 			]
 		},
@@ -24946,7 +24946,7 @@
 			"classSource": "TGTT-IllR",
 			"level": 2,
 			"entries": [
-				"At 2nd level, your infernal training expands into combat methods\u2014martial techniques fueled by hellish stamina.",
+				"At 2nd level, your infernal training expands into combat methods—martial techniques fueled by hellish stamina.",
 				{
 					"type": "list",
 					"items": [
@@ -25324,7 +25324,7 @@
 			"level": 7,
 			"entries": [
 				"{@i Prerequisite: 7th level}",
-				"You gain {@sense blindsight} with a range of 10 feet\u2014you can sense the presence of creatures through infernal perception. You may take this specialty a second time at 11th level or higher to extend the range to 30 feet."
+				"You gain {@sense blindsight} with a range of 10 feet—you can sense the presence of creatures through infernal perception. You may take this specialty a second time at 11th level or higher to extend the range to 30 feet."
 			]
 		},
 		{
@@ -25488,7 +25488,7 @@
 			"level": 3,
 			"header": 1,
 			"entries": [
-				"At 3rd level, you learn magical theory or some of the secrets of nature\u2014typical for practitioners of this elven martial tradition. You choose to gain proficiency in either the {@skill Arcana}, {@skill Religion} or the {@skill Nature} skill, and you choose to learn either the {@spell prestidigitation} or the {@spell druidcraft} cantrip."
+				"At 3rd level, you learn magical theory or some of the secrets of nature—typical for practitioners of this elven martial tradition. You choose to gain proficiency in either the {@skill Arcana}, {@skill Religion} or the {@skill Nature} skill, and you choose to learn either the {@spell prestidigitation} or the {@spell druidcraft} cantrip."
 			]
 		},
 		{
@@ -27389,7 +27389,7 @@
 			"level": 3,
 			"header": 1,
 			"entries": [
-				"When you adopt this Divine Domain at 3rd level, your mental state is irrevocably altered by the twisted power of your god. You gain resistance to psychic damage and become immune to having your thoughts read\u2014a creature attempting to read your mind suffers 1d8 psychic damage. You are also unable to gain the benefit of any spell or ability that allows for mental communication."
+				"When you adopt this Divine Domain at 3rd level, your mental state is irrevocably altered by the twisted power of your god. You gain resistance to psychic damage and become immune to having your thoughts read—a creature attempting to read your mind suffers 1d8 psychic damage. You are also unable to gain the benefit of any spell or ability that allows for mental communication."
 			]
 		},
 		{
@@ -30415,7 +30415,7 @@
 			],
 			"entries": [
 				"{@italic Cost: 1 sorcery point (Passive)}",
-				"When you cast a spell that has an area of effect of 10 feet or more, you can split the area of effect between two different points within the spell range. The split can be of any ratio you desire\u201450:50, 60:40 and so on, but must be in 5 feet increments."
+				"When you cast a spell that has an area of effect of 10 feet or more, you can split the area of effect between two different points within the spell range. The split can be of any ratio you desire—50:50, 60:40 and so on, but must be in 5 feet increments."
 			]
 		},
 		{
@@ -31543,10 +31543,10 @@
 					"name": "Entering a Dream",
 					"entries": [
 						"Entering another person's dream is dangerous, because the dreamer's psyche creates the very reality of the dream, and you risk falling under its control. Once you enter, you are a fixture of the dreamer's imagination. Leaving the dream (back to the Dreamtime) requires a check against {@dc 10}, which can be attempted once every 10 minutes.",
-						"Every 10 minutes in another's dream, you must make a Concentration check ({@dc 10}) if you don't leave. On failure, you become {@condition ensnared|TGTT}\u2014each action you try to take requires a Concentration check contested by the dreamer's Wisdom saving throw. On failure, you cannot take another action for 10 minutes, including attempting to exit, and act in accordance with the narrative of the dream.",
+						"Every 10 minutes in another's dream, you must make a Concentration check ({@dc 10}) if you don't leave. On failure, you become {@condition ensnared|TGTT}—each action you try to take requires a Concentration check contested by the dreamer's Wisdom saving throw. On failure, you cannot take another action for 10 minutes, including attempting to exit, and act in accordance with the narrative of the dream.",
 						"If, while ensnared or rolling against becoming ensnared, you fail by 10 or more, you lose all sense of your own identity, becoming a complete slave of the dreamer's psyche. You cannot exit the dream or attempt any voluntary action until the dreamer wakes up or their dreams move on.",
 						"If there is an intense emotional relationship between yourself and the dreamer, make all Concentration checks inside their dream with a -10 penalty.",
-						"The dreamer usually has no way of knowing that you entered their dream\u2014they may recall dreaming about you when they awake, but cannot be sure you were more than a figment. However, if the dreamer possesses this ability, they know immediately as you enter and can distinguish you from their imagination without fail.",
+						"The dreamer usually has no way of knowing that you entered their dream—they may recall dreaming about you when they awake, but cannot be sure you were more than a figment. However, if the dreamer possesses this ability, they know immediately as you enter and can distinguish you from their imagination without fail.",
 						"You may attempt to make the dreamer aware of your nature with a {@skill Persuasion} check with disadvantage against their Wisdom saving throw. You may also communicate a message; the dreamer must make an Intelligence check ({@dc 15}) upon awakening to recall the message. If expecting such a message or knowing you have this ability, they gain +5 to the roll."
 					]
 				}
@@ -31560,8 +31560,8 @@
 				"DW:C"
 			],
 			"entries": [
-				"You learn the essential talent of a dreamwalker\u2014the alteration of the dream. While inside the Dreamtime or another person's dream, you can shape the reality of the dream realm by force of will.",
-				"You can alter your dress, your equipment, your appearance, or the dress, equipment, or appearance of someone else. In fact, you can alter any person or item that has been dreamed, including effects from the Dreamtime Consequences Table; what you can't change are things \"native\" to the dream world\u2014your surroundings, items you pick up, and objects or buildings. You also can't alter objects or creatures that are physically brought into the Dreamtime from another world (via {@spell plane shift}, for example).",
+				"You learn the essential talent of a dreamwalker—the alteration of the dream. While inside the Dreamtime or another person's dream, you can shape the reality of the dream realm by force of will.",
+				"You can alter your dress, your equipment, your appearance, or the dress, equipment, or appearance of someone else. In fact, you can alter any person or item that has been dreamed, including effects from the Dreamtime Consequences Table; what you can't change are things \"native\" to the dream world—your surroundings, items you pick up, and objects or buildings. You also can't alter objects or creatures that are physically brought into the Dreamtime from another world (via {@spell plane shift}, for example).",
 				{
 					"type": "entries",
 					"name": "Changing Yourself",
@@ -31618,7 +31618,7 @@
 				}
 			],
 			"entries": [
-				"You can travel to any point in The Dreamtime that you can envision\u2014that you have previously seen or been to in either the Dreamtime or the real world.",
+				"You can travel to any point in The Dreamtime that you can envision—that you have previously seen or been to in either the Dreamtime or the real world.",
 				"Traveling in this manner requires an action and a Concentration check ({@dc 15}). You gain a +5 bonus to the roll if you are extremely familiar with the location or can see it from where you currently are in the Dreamtime.",
 				"To another person in the Dreamtime, someone dreamjumping seems to disappear in a blur.",
 				"With a successful {@skill Perception} check ({@dc 25}), you can tell where the person dreamjumped to, and attempt to follow even if you have never seen or been to the target location."
@@ -31750,7 +31750,7 @@
 					"name": "Pulling Into Dreamtime",
 					"entries": [
 						"Using {@optfeature Dreamwatch|TGTT}, enter another person's dream. If you are able to resist being pulled into their dream, you can attempt to pull them into the Dreamtime by making a Concentration check ({@dc 25}). The target receives a Wisdom saving throw (DC = your check result) or an opposed Concentration check, their choice.",
-						"A creature who is being dreamsnatched can choose not to resist and come voluntarily\u2014in such a case, the DC is only 15, and no save is rolled."
+						"A creature who is being dreamsnatched can choose not to resist and come voluntarily—in such a case, the DC is only 15, and no save is rolled."
 					]
 				},
 				{
@@ -31799,7 +31799,7 @@
 				},
 				"You must maintain concentration on the shared dream (as a spell). If broken, the shared dream ends and all participants immediately wake up.",
 				"If a hostile entity or Dreamwalker attempts to invade, they must first locate it using {@optfeature Dreamwatch|TGTT} and then make an opposed Concentration check against you to gain partial control.",
-				"{@b Safety:} The shared dream is inherently safe\u2014no real-world harm can occur unless abilities like {@optfeature Dreamsnatch|TGTT} connect it to The Dreamtime.",
+				"{@b Safety:} The shared dream is inherently safe—no real-world harm can occur unless abilities like {@optfeature Dreamsnatch|TGTT} connect it to The Dreamtime.",
 				"{@b Important:} While actively interacting within the dream, participants cannot benefit from rest."
 			]
 		},
@@ -31825,7 +31825,7 @@
 				}
 			],
 			"entries": [
-				"You develop the ability to protect your dreams from outside influence\u2014to hide your dreams from prying minds and shield them from unwanted attention.",
+				"You develop the ability to protect your dreams from outside influence—to hide your dreams from prying minds and shield them from unwanted attention.",
 				"As a bonus action on your turn or as part of falling asleep, you may activate your dreamveil and gain the following benefits:",
 				{
 					"type": "list",
@@ -31855,7 +31855,7 @@
 			"entries": [
 				"You can enter the Dreamtime while still partially awake in the real world, interacting with both realms simultaneously.",
 				"With a Concentration check ({@dc 20}), you can fall into a sleeplike trance. While in this trance, you may enter the Dreamtime as if you were asleep.",
-				"However, you maintain a vague awareness of your surroundings in the real world, and can converse with people there\u2014perhaps describing what you see in the Dreamtime, or passing questions and answers back and forth between the real world and someone you have met in the Dreamtime.",
+				"However, you maintain a vague awareness of your surroundings in the real world, and can converse with people there—perhaps describing what you see in the Dreamtime, or passing questions and answers back and forth between the real world and someone you have met in the Dreamtime.",
 				"You may not take any actions in the real world other than conversing with those around you. Loud noise, pain, or movement will snap you out of your trance."
 			]
 		}
@@ -31878,7 +31878,7 @@
 			],
 			"entries": [
 				"Common is the language spoken throughout the lands of Thelemar, with each country using a different dialect in addition to the general, \"common\" use. It evolved from the old language of the empire, which is found today only in ancient texts and artifacts.",
-				"The five recognised dialects of Common\u2014Lexalian, Olympian, Jaknian, Clairnian and Hubian\u2014share a common root, yet a speaker of one will have a hard time understanding a speaker of another. Different dialects also colour the accent each speaker brings to the general common.",
+				"The five recognised dialects of Common—Lexalian, Olympian, Jaknian, Clairnian and Hubian—share a common root, yet a speaker of one will have a hard time understanding a speaker of another. Different dialects also colour the accent each speaker brings to the general common.",
 				"Reading and writing are quite widespread throughout Thelemar, with the majority of the population, even in rural villages, being able to read and write in Common. The writing in common has a unique property of including Tone Indicators as an integral part of the writing."
 			]
 		},
@@ -31964,7 +31964,7 @@
 				"Shadowfell denizens"
 			],
 			"entries": [
-				"A corruption of Sylvan, this language is spoken in the Shadow Realm, the home of the enigmatic Lord of Spiders and various shadowy beings. It sounds very similar to Sylvan, but does not exhibit the same property of preventing the speaker from uttering lies\u2014a fact its Descathi speakers above all have learned to turn into a weapon."
+				"A corruption of Sylvan, this language is spoken in the Shadow Realm, the home of the enigmatic Lord of Spiders and various shadowy beings. It sounds very similar to Sylvan, but does not exhibit the same property of preventing the speaker from uttering lies—a fact its Descathi speakers above all have learned to turn into a weapon."
 			]
 		},
 		{
@@ -32031,7 +32031,7 @@
 				"Loxodons"
 			],
 			"entries": [
-				"The ancestral tongue of the Loxodons of the Boundless Jungle, written in the common script but spoken with the deep resonance only their lungs allow. Trunkodon is a language of memory\u2014verbs carry tense markers that reach generations back, and even casual conversation can name the speaker's matriarchal line. It is rarely taught to outsiders, but rarely refused to a guest who asks with respect."
+				"The ancestral tongue of the Loxodons of the Boundless Jungle, written in the common script but spoken with the deep resonance only their lungs allow. Trunkodon is a language of memory—verbs carry tense markers that reach generations back, and even casual conversation can name the speaker's matriarchal line. It is rarely taught to outsiders, but rarely refused to a guest who asks with respect."
 			]
 		},
 		{
@@ -32055,7 +32055,7 @@
 				"Minotaurs"
 			],
 			"entries": [
-				"The herd tongue of the Minotaur clans, one of the Twisted Races that emerged after The Collapse. Minotaur uses the common script but renders it with long, drawn-out vowels and stamping cadences suited to open ground and large gatherings. Oaths spoken in Minotaur are taken with unusual seriousness\u2014to break one is to be cast out of the herd."
+				"The herd tongue of the Minotaur clans, one of the Twisted Races that emerged after The Collapse. Minotaur uses the common script but renders it with long, drawn-out vowels and stamping cadences suited to open ground and large gatherings. Oaths spoken in Minotaur are taken with unusual seriousness—to break one is to be cast out of the herd."
 			]
 		},
 		{
@@ -32083,7 +32083,7 @@
 				"Firbolgs"
 			],
 			"entries": [
-				"The language of fey creatures is elusive and often perplexing, and it is said no amount of studies allows one to speak it fluently. It sounds flowery, with song-like qualities, and a unique trait\u2014lying in Sylvan (by intention) is quite impossible. Clever wordplays and trickery of words still pass, but any attempt to utter a clear falsehood stops in its tracks. Spoken throughout the Feywyld, and also by Centaurs, Satyrs and Firbolgs, all of whom have their origins tied to the Feywyld."
+				"The language of fey creatures is elusive and often perplexing, and it is said no amount of studies allows one to speak it fluently. It sounds flowery, with song-like qualities, and a unique trait—lying in Sylvan (by intention) is quite impossible. Clever wordplays and trickery of words still pass, but any attempt to utter a clear falsehood stops in its tracks. Spoken throughout the Feywyld, and also by Centaurs, Satyrs and Firbolgs, all of whom have their origins tied to the Feywyld."
 			]
 		},
 		{
@@ -32134,7 +32134,7 @@
 				}
 			],
 			"entries": [
-				"Nyuidj (pronounced \"NEW-idge\") are mortal creatures who have developed a profound connection to the Dreamtime. No one truly knows how they came to be\u2014some think they are spirits of the dead that somehow wandered into The Dreamtime and fused with unsuspecting visitors, others think they are creations of travelers who went out of control.",
+				"Nyuidj (pronounced \"NEW-idge\") are mortal creatures who have developed a profound connection to the Dreamtime. No one truly knows how they came to be—some think they are spirits of the dead that somehow wandered into The Dreamtime and fused with unsuspecting visitors, others think they are creations of travelers who went out of control.",
 				{
 					"type": "entries",
 					"name": "Age",
@@ -32994,7 +32994,7 @@
 					"type": "entries",
 					"name": "Enraged",
 					"entries": [
-						"When you are below half your hit point maximum, you can use a bonus action to expand your critical hit range to 19\u201320 for 1 minute. Once you use this trait, you must finish a long rest before you can do so again, and you suffer one level of exhaustion when it ends."
+						"When you are below half your hit point maximum, you can use a bonus action to expand your critical hit range to 19–20 for 1 minute. Once you use this trait, you must finish a long rest before you can do so again, and you suffer one level of exhaustion when it ends."
 					]
 				},
 				{
@@ -34503,7 +34503,7 @@
 				}
 			],
 			"entries": [
-				"As a bonus action while you aren't wearing armor, you can cause this armor to appear in a flash of light around you\u2014instantly donning it. Also as a bonus action while you are wearing this armor, you can cause the armor to vanish entirely, instantly doffing it."
+				"As a bonus action while you aren't wearing armor, you can cause this armor to appear in a flash of light around you—instantly donning it. Also as a bonus action while you are wearing this armor, you can cause the armor to vanish entirely, instantly doffing it."
 			]
 		},
 		{
@@ -35759,7 +35759,7 @@
 			"staminaCost": 2,
 			"actionType": "action",
 			"entries": [
-				"{@b Action (2 Stamina Points)}. Lining up the shots, you carefully pick out your target along a ship's massive frame. Choose a deck or weapon system on a capital ship in your combat zone and make an attack targeting that ship. These attacks have disadvantage if the chosen deck is a bridge or engines deck. Every time you hit with an attack made this way, the target ship makes a Constitution saving throw with a \u20132 penalty for every 10 damage dealt by the attack. On a failed save a deck suffers the deck damaged critical malfunction, or a weapon system suffers the weapon system damaged critical malfunction. A deck that already has the deck damage critical malfunction suffers the deck disabled critical malfunction instead."
+				"{@b Action (2 Stamina Points)}. Lining up the shots, you carefully pick out your target along a ship's massive frame. Choose a deck or weapon system on a capital ship in your combat zone and make an attack targeting that ship. These attacks have disadvantage if the chosen deck is a bridge or engines deck. Every time you hit with an attack made this way, the target ship makes a Constitution saving throw with a –2 penalty for every 10 damage dealt by the attack. On a failed save a deck suffers the deck damaged critical malfunction, or a weapon system suffers the weapon system damaged critical malfunction. A deck that already has the deck damage critical malfunction suffers the deck disabled critical malfunction instead."
 			]
 		},
 		{
@@ -35823,7 +35823,7 @@
 			"staminaCost": 3,
 			"actionType": "action",
 			"entries": [
-				"{@b Action (3 Stamina Points)}. You pull a method either too brilliant or foolhardy for your tail to predict\u2014putting them in your crosshairs. One starfighter of your choice currently locked on to you makes a Wisdom saving throw or its lock on you is broken and you lock on to it instead. While locked on to a target you have advantage on attacks made against it. This lock on ends if you attack a different target or attempt to lock on to a different target."
+				"{@b Action (3 Stamina Points)}. You pull a method either too brilliant or foolhardy for your tail to predict—putting them in your crosshairs. One starfighter of your choice currently locked on to you makes a Wisdom saving throw or its lock on you is broken and you lock on to it instead. While locked on to a target you have advantage on attacks made against it. This lock on ends if you attack a different target or attempt to lock on to a different target."
 			]
 		},
 		{
@@ -35847,7 +35847,7 @@
 			"staminaCost": 2,
 			"actionType": "bonus action",
 			"entries": [
-				"{@b Bonus Action (2 Stamina Points)}. You fly dangerously close to avoid the guns firing above you and line up a perfect shot, but doing so puts you right in the crosshairs of the close range guns. You may only perform this starship method while operating in a combat zone surrounding a capital ship. Until the end of your next turn, any attacks that target you have disadvantage, and you have disadvantage on saving throws against weapons with the {@itemProperty ASF|anti-starfighter} property. Any attacks you make during your next turn have advantage and their critical hit range is increased by 1 (for example a weapon that would score a critical hit on a 20 instead scores a critical hit on an attack roll of 19\u201320)."
+				"{@b Bonus Action (2 Stamina Points)}. You fly dangerously close to avoid the guns firing above you and line up a perfect shot, but doing so puts you right in the crosshairs of the close range guns. You may only perform this starship method while operating in a combat zone surrounding a capital ship. Until the end of your next turn, any attacks that target you have disadvantage, and you have disadvantage on saving throws against weapons with the {@itemProperty ASF|anti-starfighter} property. Any attacks you make during your next turn have advantage and their critical hit range is increased by 1 (for example a weapon that would score a critical hit on a 20 instead scores a critical hit on an attack roll of 19–20)."
 			]
 		},
 		{
@@ -36635,7 +36635,7 @@
 			"staminaCost": 2,
 			"actionType": "reaction",
 			"entries": [
-				"{@b Reaction (2 Stamina Points)}. Even a well-told lie of being harmless only works if you're really believing it when you tell it\u2014and in the midst of a pitched fight it's easy to muster some real feeling to briefly fool a foe. When a creature makes an attack against you, you can use your reaction to make a Deception or nonmusical Performance check with disadvantage, opposed by its Insight check. On a success, the creature is briefly perplexed and targets a different creature with the attack instead"
+				"{@b Reaction (2 Stamina Points)}. Even a well-told lie of being harmless only works if you're really believing it when you tell it—and in the midst of a pitched fight it's easy to muster some real feeling to briefly fool a foe. When a creature makes an attack against you, you can use your reaction to make a Deception or nonmusical Performance check with disadvantage, opposed by its Insight check. On a success, the creature is briefly perplexed and targets a different creature with the attack instead"
 			]
 		},
 		{
@@ -36696,7 +36696,7 @@
 			"staminaCost": 2,
 			"actionType": "action",
 			"entries": [
-				"{@b Action (2 Stamina Points)}. There's truth to the old adage that practice makes perfect\u2014and you have endlessly practiced splashing people. You splash an acid vial, alchemist's fire, or similar liquid onto a target within 5 feet of you, but instead of you making an attack roll, the target makes a Dexterity saving throw. On a successful save, your attack is successful. On a failure, it is a critical hit."
+				"{@b Action (2 Stamina Points)}. There's truth to the old adage that practice makes perfect—and you have endlessly practiced splashing people. You splash an acid vial, alchemist's fire, or similar liquid onto a target within 5 feet of you, but instead of you making an attack roll, the target makes a Dexterity saving throw. On a successful save, your attack is successful. On a failure, it is a critical hit."
 			]
 		},
 		{
@@ -36756,7 +36756,7 @@
 			"staminaCost": 3,
 			"actionType": "bonus action",
 			"entries": [
-				"{@b Bonus Action (3 Stamina Points)}. Suffering in silence is the worst\u2014pain is far easier to bear when you can laugh it off. As long as you are able to speak, did not cast a spell with vocalized components on your last turn, and have an ally who can hear and respond to you, once per round you can reduce the damage you take from an attack or spell by an amount equal to your proficiency bonus. In addition, when you use this stance to reduce the damage you take, you can choose to fall {@condition prone} to reduce the amount of damage you take by an amount equal to twice your proficiency bonus.",
+				"{@b Bonus Action (3 Stamina Points)}. Suffering in silence is the worst—pain is far easier to bear when you can laugh it off. As long as you are able to speak, did not cast a spell with vocalized components on your last turn, and have an ally who can hear and respond to you, once per round you can reduce the damage you take from an attack or spell by an amount equal to your proficiency bonus. In addition, when you use this stance to reduce the damage you take, you can choose to fall {@condition prone} to reduce the amount of damage you take by an amount equal to twice your proficiency bonus.",
 				"This stance lasts until you are {@condition incapacitated|tgtt} or use a bonus action to end it."
 			],
 			"isStance": true
@@ -37075,7 +37075,7 @@
 			"staminaCost": 2,
 			"actionType": "bonus action",
 			"entries": [
-				"{@b Bonus Action (2 Stamina Points)}. A tossed rose, a blown kiss\u2014you acknowledge someone whose eye was caught by your swagger. Choose one creature within 30 feet that can see you. Make a Performance check against the creature's passive Insight. On a success, the creature is fixated on you until the start of your next turn."
+				"{@b Bonus Action (2 Stamina Points)}. A tossed rose, a blown kiss—you acknowledge someone whose eye was caught by your swagger. Choose one creature within 30 feet that can see you. Make a Performance check against the creature's passive Insight. On a success, the creature is fixated on you until the start of your next turn."
 			]
 		},
 		{
@@ -37185,7 +37185,7 @@
 			"staminaCost": 1,
 			"actionType": "action",
 			"entries": [
-				"{@b Action (1 Stamina Point)}. Your unpredictable maneuvering puts your opponent off-balance\u2014when you connect with your weapon they stumble and fall. When you activate this method, you take the Attack action and make a melee weapon attack, as well as any additional attacks granted by Extra Attack. Until the start of your next turn, when you hit with a melee weapon attack against a creature and deal 8 or more damage it makes a Dexterity saving throw or is knocked {@condition prone}."
+				"{@b Action (1 Stamina Point)}. Your unpredictable maneuvering puts your opponent off-balance—when you connect with your weapon they stumble and fall. When you activate this method, you take the Attack action and make a melee weapon attack, as well as any additional attacks granted by Extra Attack. Until the start of your next turn, when you hit with a melee weapon attack against a creature and deal 8 or more damage it makes a Dexterity saving throw or is knocked {@condition prone}."
 			]
 		},
 		{
@@ -37329,7 +37329,7 @@
 			"staminaCost": 2,
 			"actionType": "bonus action",
 			"entries": [
-				"{@b Bonus Action (2 Stamina Points)}. You focus on targeting your enemy's weakest spots. When you make melee weapon attacks, you score critical hits on a roll of 19\u201320. If you already have a feature that increases the range of your critical hits, your critical hit range increases by 1 (maximum 17\u201320). You deal one additional weapon damage die when determining the extra damage for a critical hit with a melee weapon attack.",
+				"{@b Bonus Action (2 Stamina Points)}. You focus on targeting your enemy's weakest spots. When you make melee weapon attacks, you score critical hits on a roll of 19–20. If you already have a feature that increases the range of your critical hits, your critical hit range increases by 1 (maximum 17–20). You deal one additional weapon damage die when determining the extra damage for a critical hit with a melee weapon attack.",
 				"This stance lasts until you are {@condition incapacitated|tgtt} or use a bonus action to end it."
 			],
 			"isStance": true
@@ -37787,7 +37787,7 @@
 			"staminaCost": 1,
 			"actionType": "action",
 			"entries": [
-				"{@b Action (1 Stamina Point)}. The execution and follow through of your strike is exquisite with not an iota of force wasted. When you activate this method, you take the Attack action and make a weapon attack, as well as any additional attacks granted by Extra Attack. Until the start of your next turn, your weapon attacks score a critical hit on a roll of 19\u201320. If you already have a feature that increases the range of your critical hits, your critical hit range increases by 1 (maximum 17\u201320)."
+				"{@b Action (1 Stamina Point)}. The execution and follow through of your strike is exquisite with not an iota of force wasted. When you activate this method, you take the Attack action and make a weapon attack, as well as any additional attacks granted by Extra Attack. Until the start of your next turn, your weapon attacks score a critical hit on a roll of 19–20. If you already have a feature that increases the range of your critical hits, your critical hit range increases by 1 (maximum 17–20)."
 			]
 		},
 		{
@@ -37920,7 +37920,7 @@
 			"staminaCost": 2,
 			"actionType": "bonus action",
 			"entries": [
-				"{@b Bonus Action (2 Stamina Points)}. By relying on your training and countless hours of repetition, you can easily manipulate the battlefield to position yourself where your strikes are able to inflict the most harm. Your weapon attacks score a critical hit on a roll of 18\u201320. If you already have a feature that increases the range of your critical hits, your critical hit range increases by 1 (maximum 17\u201320).",
+				"{@b Bonus Action (2 Stamina Points)}. By relying on your training and countless hours of repetition, you can easily manipulate the battlefield to position yourself where your strikes are able to inflict the most harm. Your weapon attacks score a critical hit on a roll of 18–20. If you already have a feature that increases the range of your critical hits, your critical hit range increases by 1 (maximum 17–20).",
 				"This stance lasts until you are {@condition incapacitated|tgtt} or use a bonus action to end it."
 			],
 			"isStance": true
@@ -38487,7 +38487,7 @@
 			"staminaCost": 2,
 			"actionType": "action",
 			"entries": [
-				"{@b Action (2 Stamina Points)}. You attack with such fury that your enemy's magical defenses wither and fail. When you activate this technique, you take the Attack action and make a weapon attack, as well as any additional attacks granted by Extra Attack. Until the start of your next turn, your weapon attacks score a critical hit on a roll of 19\u201320, and when you score a critical hit against a creature any spell of 3rd-level or lower on the creature ends. If you already have a feature that increases the range of your critical hits, your critical hit range increases by 1 (maximum 17\u201320)."
+				"{@b Action (2 Stamina Points)}. You attack with such fury that your enemy's magical defenses wither and fail. When you activate this technique, you take the Attack action and make a weapon attack, as well as any additional attacks granted by Extra Attack. Until the start of your next turn, your weapon attacks score a critical hit on a roll of 19–20, and when you score a critical hit against a creature any spell of 3rd-level or lower on the creature ends. If you already have a feature that increases the range of your critical hits, your critical hit range increases by 1 (maximum 17–20)."
 			]
 		},
 		{
@@ -38711,7 +38711,7 @@
 			"staminaCost": 1,
 			"actionType": "bonus action",
 			"entries": [
-				"{@b Bonus Action (1 Stamina Point)}. By tapping into your basic survival instincts you not only unleash your potential\u2014you make certain that every strike counts. The minimum result on a damage die rolled with a natural weapon, unarmed strike, or weapon with the {@itemProperty L|XPHB|dual-wielding} property is a 3.",
+				"{@b Bonus Action (1 Stamina Point)}. By tapping into your basic survival instincts you not only unleash your potential—you make certain that every strike counts. The minimum result on a damage die rolled with a natural weapon, unarmed strike, or weapon with the {@itemProperty L|XPHB|dual-wielding} property is a 3.",
 				"This stance lasts until you are {@condition incapacitated|tgtt} or use a bonus action to end it."
 			],
 			"isStance": true
@@ -38878,7 +38878,7 @@
 			"staminaCost": 1,
 			"actionType": "bonus action",
 			"entries": [
-				"{@b Bonus Action (1 Stamina Point)}. What you wield isn't what makes you a deadly combatant\u2014you are the weapon. Attaining mastery of some weaponry has taught you how to focus and bring all that practice to bear even with lethal implements you've never seen before. You gain proficiency with all weapons (including rare weapons).",
+				"{@b Bonus Action (1 Stamina Point)}. What you wield isn't what makes you a deadly combatant—you are the weapon. Attaining mastery of some weaponry has taught you how to focus and bring all that practice to bear even with lethal implements you've never seen before. You gain proficiency with all weapons (including rare weapons).",
 				"This stance lasts until you are {@condition incapacitated|tgtt} or use a bonus action to end it."
 			],
 			"isStance": true
@@ -38923,7 +38923,7 @@
 			"staminaCost": 3,
 			"actionType": "bonus action",
 			"entries": [
-				"{@b Bonus Action (3 Stamina Points)}. You focus on the bond between you and your weapon. Choose a weapon when you learn this combat method. For the next minute, attacks made with the chosen weapon score a critical hit on a roll of 19\u201320 and ignore any damage resistances a target might have. If you already have a feature that increases the range of your critical hits, your critical hit range increases by 1 (maximum 17\u201320)."
+				"{@b Bonus Action (3 Stamina Points)}. You focus on the bond between you and your weapon. Choose a weapon when you learn this combat method. For the next minute, attacks made with the chosen weapon score a critical hit on a roll of 19–20 and ignore any damage resistances a target might have. If you already have a feature that increases the range of your critical hits, your critical hit range increases by 1 (maximum 17–20)."
 			]
 		},
 		{
@@ -39059,7 +39059,7 @@
 			"staminaCost": 2,
 			"actionType": "bonus action",
 			"entries": [
-				"{@b Bonus Action (2 Stamina Points)}. No obstacle can impede you, and no noise can distract you\u2014there is only you, your quarry, and your determination to bring it down. When you activate this method, choose a creature you can see. Until the start of your next turn, weapon attacks you make against the chosen creature ignore any condition, effect, or circumstance that would impose disadvantage."
+				"{@b Bonus Action (2 Stamina Points)}. No obstacle can impede you, and no noise can distract you—there is only you, your quarry, and your determination to bring it down. When you activate this method, choose a creature you can see. Until the start of your next turn, weapon attacks you make against the chosen creature ignore any condition, effect, or circumstance that would impose disadvantage."
 			]
 		},
 		{
@@ -39192,7 +39192,7 @@
 			"degree": 1,
 			"staminaCost": 0,
 			"entries": [
-				"{@b Action}. You can use the Shove method to push a creature away. If you are able to make multiple attacks with the Attack action, this method replaces one of them. The target must be within your reach and be no more than one size category larger than you. The target makes a Strength saving throw against your method DC. On a failure, you deal basic melee damage and push the target a number of feet away from you equal to 5 + 5 for every 5 points it failed its saving throw by. You can move the creature in any direction away from you (to the side, forward, or diagonally away). A creature that is shoved off of a precipice is propelled off of whatever it is standing on\u2014it does not receive any saving throw or ability check to grab onto something to avoid falling down below."
+				"{@b Action}. You can use the Shove method to push a creature away. If you are able to make multiple attacks with the Attack action, this method replaces one of them. The target must be within your reach and be no more than one size category larger than you. The target makes a Strength saving throw against your method DC. On a failure, you deal basic melee damage and push the target a number of feet away from you equal to 5 + 5 for every 5 points it failed its saving throw by. You can move the creature in any direction away from you (to the side, forward, or diagonally away). A creature that is shoved off of a precipice is propelled off of whatever it is standing on—it does not receive any saving throw or ability check to grab onto something to avoid falling down below."
 			]
 		},
 		{
@@ -40449,7 +40449,7 @@
 			"effects": [
 				{
 					"type": "note",
-					"text": "Starmetal has few useful properties by itself, but produces unusual effects when alloyed \u2014 see Mithraline, Orichaline, Darkeline and Steeline."
+					"text": "Starmetal has few useful properties by itself, but produces unusual effects when alloyed — see Mithraline, Orichaline, Darkeline and Steeline."
 				}
 			],
 			"entries": [
@@ -40709,8 +40709,8 @@
 				{
 					"type": "list",
 					"items": [
-						"When you score a critical hit using a ranged weapon made from stout blackwood that has the loading property, you deal an extra 1d4 damage of the weapon's type.",
-						"Once per turn when you hit a creature using a two-handed melee weapon made from stout blackwood, you can make a Strength (Athletics) check contested by the target's Strength (Athletics) or Dexterity (Acrobatics) check (the target chooses the ability to use). If you succeed, you either knock the target prone or push them 5 feet away from you (your choice)."
+						"When you score a critical hit using a ranged weapon made from stout blackwood that has the loading property, you deal an extra 1d4 damage of the weapon’s type.",
+						"Once per turn when you hit a creature using a two-handed melee weapon made from stout blackwood, you can make a Strength (Athletics) check contested by the target’s Strength (Athletics) or Dexterity (Acrobatics) check (the target chooses the ability to use). If you succeed, you either knock the target prone or push them 5 feet away from you (your choice)."
 					]
 				}
 			]
@@ -40770,12 +40770,12 @@
 				}
 			],
 			"entries": [
-				"Found in tropical environments, yellowwood trees grow on hillsides and along rivers and streams. The trees grow tall, reaching above the canopy for light. Due to year-round sun and a wet climate, there are very few rings in the trunks of yellowwood trees. The bark of these trees is dark brown and can be peeled back easily, revealing much lighter wood underneath. The wood of a yellowwood tree is flexible and lightweight. It can be challenging to work with, as it tends to overextend when shaped. Due to yellowwood's density, items made of it are 50 percent lighter than their mundane counterparts.",
+				"Found in tropical environments, yellowwood trees grow on hillsides and along rivers and streams. The trees grow tall, reaching above the canopy for light. Due to year-round sun and a wet climate, there are very few rings in the trunks of yellowwood trees. The bark of these trees is dark brown and can be peeled back easily, revealing much lighter wood underneath. The wood of a yellowwood tree is flexible and lightweight. It can be challenging to work with, as it tends to overextend when shaped. Due to yellowwood’s density, items made of it are 50 percent lighter than their mundane counterparts.",
 				{
 					"type": "list",
 					"items": [
-						"While you're wielding a yellowwood longbow or shortbow, being within 5 feet of a hostile creature doesn't impose disadvantage on your ranged attack rolls.",
-						"When you take the Attack action and attack with a melee weapon made of yellowwood, you can use a bonus action to make an additional attack with that weapon. You don't add your ability modifier to the damage of the bonus attack, unless that modifier is negative."
+						"While you’re wielding a yellowwood longbow or shortbow, being within 5 feet of a hostile creature doesn’t impose disadvantage on your ranged attack rolls.",
+						"When you take the Attack action and attack with a melee weapon made of yellowwood, you can use a bonus action to make an additional attack with that weapon. You don’t add your ability modifier to the damage of the bonus attack, unless that modifier is negative."
 					]
 				}
 			]
@@ -41325,7 +41325,7 @@
 						"armor",
 						"other"
 					],
-					"note": "Creatures take a \u22122 penalty to Wisdom ({@skill Perception}) checks based on sight made to notice the wearer of an outer garment made primarily from Nightsilk."
+					"note": "Creatures take a −2 penalty to Wisdom ({@skill Perception}) checks based on sight made to notice the wearer of an outer garment made primarily from Nightsilk."
 				}
 			],
 			"entries": [
@@ -42305,7 +42305,7 @@
 			"effects": [
 				{
 					"type": "note",
-					"text": "Paradox Metal cannot be magically tracked, and can host souls in a unique fashion \u2014 protecting them from detection and exorcism, but also preventing them from escaping its confines."
+					"text": "Paradox Metal cannot be magically tracked, and can host souls in a unique fashion — protecting them from detection and exorcism, but also preventing them from escaping its confines."
 				}
 			],
 			"entries": [
@@ -43150,13 +43150,13 @@
 					"text": "A creature that spends Hit Dice during a Short Rest while holding Cloudpearl regains additional Hit Points equal to its Proficiency Bonus."
 				},
 				{
-					"type": "shortRestHealingBonus",
-					"role": "focus",
-					"value": "proficiency",
-					"requiresHitDice": true,
-					"note": "Once per Short Rest, however many Hit Dice are spent."
-				},
-				{
+						"type": "shortRestHealingBonus",
+						"role": "focus",
+						"value": "proficiency",
+						"requiresHitDice": true,
+						"note": "Once per Short Rest, however many Hit Dice are spent."
+					},
+					{
 					"type": "condensateInstability",
 					"text": "Cold damage suppresses this benefit until the pearl spends 1 minute in a fire or another source of strong heat."
 				}

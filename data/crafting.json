@@ -15272,7 +15272,7 @@
 				}
 			},
 			"entries": [
-				"Raw dragon's blood boosts a spell of the wyrm's own element\u2014see {@item Dragon Blood (Wyrmling)|Ar8}. Distilled, it does far stranger work.",
+				"Raw dragon's blood boosts a spell of the wyrm's own element \u2014 see {@item Dragon Blood (Wyrmling)|Ar8}. Distilled, it does far stranger work.",
 				"When you cast a spell using this component, choose {@b one} of {@variantrule The Twelve Uses of Dragon's Blood|TGTT}."
 			],
 			"variantComponent": {
@@ -87224,7 +87224,7 @@
 				},
 				{
 					"type": "entries",
-					"name": "Fiends\u2014Demons",
+					"name": "Fiends \u2014 Demons",
 					"entries": [
 						{
 							"type": "table",
@@ -87288,7 +87288,7 @@
 				},
 				{
 					"type": "entries",
-					"name": "Fiends\u2014Devils",
+					"name": "Fiends \u2014 Devils",
 					"entries": [
 						{
 							"type": "table",
@@ -87344,7 +87344,7 @@
 				},
 				{
 					"type": "entries",
-					"name": "Fiends\u2014Other",
+					"name": "Fiends \u2014 Other",
 					"entries": [
 						{
 							"type": "table",
@@ -88986,8 +88986,8 @@
 			"ruleCategory": "components",
 			"ruleType": "V",
 			"entries": [
-				"Every hedge-alchemist in Thelemar can tell you that dragon's blood is potent. Only a guild alchemist can tell you {@i how}\u2014and even they will argue about it. What they agree on is the count: there are {@b twelve uses} of dragon's blood, and a thirteenth that nobody has written down and lived to publish.",
-				"Blood taken straight from the wyrm is powerful but narrow: it strengthens a spell of the dragon's own element, and nothing more (see {@item Dragon Blood (Wyrmling)|Ar8} and its kin). {@b Distillation} is what opens the rest. The process is neither quick nor forgiving, and it does not make the blood stronger\u2014it makes it {@i broader}.",
+				"Every hedge-alchemist in Thelemar can tell you that dragon's blood is potent. Only a guild alchemist can tell you {@i how} \u2014 and even they will argue about it. What they agree on is the count: there are {@b twelve uses} of dragon's blood, and a thirteenth that nobody has written down and lived to publish.",
+				"Blood taken straight from the wyrm is powerful but narrow: it strengthens a spell of the dragon's own element, and nothing more (see {@item Dragon Blood (Wyrmling)|Ar8} and its kin). {@b Distillation} is what opens the rest. The process is neither quick nor forgiving, and it does not make the blood stronger \u2014 it makes it {@i broader}.",
 				{
 					"type": "entries",
 					"name": "Distilling",
@@ -89001,7 +89001,7 @@
 					"name": "Invoking a Use",
 					"entries": [
 						"Distilled dragon's blood is a variant spell component. When you cast a spell using a vial, you choose which of the twelve uses to invoke. The vial is consumed either way.",
-						"How many you may invoke at once is a question of potency, not of skill\u2014a wyrmling's blood will give up one use and no more, however good the alchemist.",
+						"How many you may invoke at once is a question of potency, not of skill \u2014 a wyrmling's blood will give up one use and no more, however good the alchemist.",
 						{
 							"type": "table",
 							"caption": "Potency",
@@ -89187,8 +89187,8 @@
 					"name": "Renamed or reinterpreted",
 					"entries": [
 						"{@b Marilith Blade Shard} names a table row whose component name had been truncated to a single letter. The effect (striking the same target more than once with {@spell steel wind strike|XGE}) matches a marilith's six blades, and follows the naming of Arcadia 8's own {@item Erinyes Longsword Shards|Ar8}.",
-						"{@b Mirage Arcane}\u2014the table read \"Arcane MIrage\", which is {@spell mirage arcane} with its words reversed.",
-						"{@b Distilled Dragon's Blood}\u2014see below.",
+						"{@b Mirage Arcane} \u2014 the table read \"Arcane MIrage\", which is {@spell mirage arcane} with its words reversed.",
+						"{@b Distilled Dragon's Blood} \u2014 see below.",
 						"The table writes component names with possessives ({@i Glabrezu's Horn}) where Arcadia 8 does not ({@i Glabrezu Horn}), and inverts word order ({@i Mindkiller's Piece of Brain} against {@i Piece of Mindkiller Brain}). These are the same components, not new ones."
 					]
 				},
@@ -89197,7 +89197,7 @@
 					"name": "Distilled Dragon's Blood, and the Twelve Uses",
 					"entries": [
 						"The supplementary table gave dragon's blood the power to double a spell's range, duration, area {@i and} targets while making its targets vulnerable to its damage type, all at once, for a flat 10,000 gp. That is four metamagics and doubled damage on a single consumable.",
-						"Thelemar instead follows the alchemical tradition of {@variantrule The Twelve Uses of Dragon's Blood|TGTT}, which is now the canonical rule. Arcadia 8's raw {@item Dragon Blood (Wyrmling)|Ar8} and its kin are preserved unchanged\u2014they remain the narrow, undistilled form\u2014and Arcadia 8's {@item Dragon Blood (Protection)|Ar8} appears among the twelve as {@i Warding}."
+						"Thelemar instead follows the alchemical tradition of {@variantrule The Twelve Uses of Dragon's Blood|TGTT}, which is now the canonical rule. Arcadia 8's raw {@item Dragon Blood (Wyrmling)|Ar8} and its kin are preserved unchanged \u2014 they remain the narrow, undistilled form \u2014 and Arcadia 8's {@item Dragon Blood (Protection)|Ar8} appears among the twelve as {@i Warding}."
 					]
 				},
 				{
@@ -91789,7 +91789,7 @@
 			"effects": [
 				{
 					"type": "note",
-					"text": "Paradox Metal cannot be magically tracked, and can host souls in a unique fashion\u2014protecting them from detection and exorcism, but also preventing them from escaping its confines."
+					"text": "Paradox Metal cannot be magically tracked, and can host souls in a unique fashion \u2014 protecting them from detection and exorcism, but also preventing them from escaping its confines."
 				}
 			],
 			"entries": [
@@ -92338,7 +92338,7 @@
 			"effects": [
 				{
 					"type": "note",
-					"text": "Starmetal has few useful properties by itself, but produces unusual effects when alloyed\u2014see Mithraline, Orichaline, Darkeline and Steeline."
+					"text": "Starmetal has few useful properties by itself, but produces unusual effects when alloyed \u2014 see Mithraline, Orichaline, Darkeline and Steeline."
 				}
 			],
 			"entries": [

@@ -13,7 +13,7 @@
 			"basicRules": true,
 			"entries": [
 				"Chromatic dragons are the most numerous, powerful, and evil of true dragons. They are aggressive, hoarding, and gleefully cruel, the color of their scales betraying their preferred breath weapon and disposition: {@creature Black Dragon|MM|black} (acid, swamps and marshes), {@creature Blue Dragon|MM|blue} (lightning, deserts), {@creature Green Dragon|MM|green} (poison, forests), {@creature Red Dragon|MM|red} (fire, mountains), and {@creature White Dragon|MM|white} (cold, arctic ranges).",
-				"Every chromatic dragon serves as a stronghold-holding tyrant of its region, exacting tribute from the sentient creatures nearby and collecting a hoard of treasure. All chromatic dragons age through five recognized stages\u2014wyrmling, young, adult, ancient, and (rarely) greatwyrm\u2014growing in size, cunning, and magical potency at each step. They are ultimately the children of Tiamat, the five-headed Queen of Evil Dragons."
+				"Every chromatic dragon serves as a stronghold-holding tyrant of its region, exacting tribute from the sentient creatures nearby and collecting a hoard of treasure. All chromatic dragons age through five recognized stages — wyrmling, young, adult, ancient, and (rarely) greatwyrm — growing in size, cunning, and magical potency at each step. They are ultimately the children of Tiamat, the five-headed Queen of Evil Dragons."
 			],
 			"additionalSources": [
 				{
@@ -35,7 +35,7 @@
 				{
 					"name": "Breath Weapon",
 					"entries": [
-						"Each chromatic dragon exhales a devastating cone or line of elemental energy keyed to its color\u2014acid, lightning, poison gas, fire, or cold. The shape, save DC, and damage die scale sharply from wyrmling to ancient."
+						"Each chromatic dragon exhales a devastating cone or line of elemental energy keyed to its color — acid, lightning, poison gas, fire, or cold. The shape, save DC, and damage die scale sharply from wyrmling to ancient."
 					]
 				}
 			]
@@ -48,7 +48,7 @@
 			"basicRules": true,
 			"entries": [
 				"Metallic dragons are noble, honorable, and (with rare exception) good-aligned true dragons whose scales gleam like the metals they take their names from: {@creature Brass Dragon|MM|brass} (fire, deserts), {@creature Bronze Dragon|MM|bronze} (lightning, coastal), {@creature Copper Dragon|MM|copper} (acid, hills and stony rises), {@creature Gold Dragon|MM|gold} (fire, temperate anywhere), and {@creature Silver Dragon|MM|silver} (cold, mountaintops and clouds).",
-				"Metallic dragons are the offspring of Bahamut, the Platinum Dragon and lord of good dragonkind, and are the ancestral foes of the chromatic dragons. All metallics can adopt humanoid or beast forms, allowing them to walk among mortals unseen\u2014many spend their long adult lives as scholars, sages, or wandering guardians before finally retiring to lair as ancients."
+				"Metallic dragons are the offspring of Bahamut, the Platinum Dragon and lord of good dragonkind, and are the ancestral foes of the chromatic dragons. All metallics can adopt humanoid or beast forms, allowing them to walk among mortals unseen — many spend their long adult lives as scholars, sages, or wandering guardians before finally retiring to lair as ancients."
 			],
 			"additionalSources": [
 				{
@@ -70,7 +70,7 @@
 				{
 					"name": "Two Breath Weapons",
 					"entries": [
-						"Uniquely among true dragons, each metallic dragon possesses two breath weapons: one damaging elemental breath, and one non-damaging \"utility\" breath (sleep gas, repulsion gas, slow gas, weakening gas, paralyzing breath, or similar) that reflects the dragon's temperament."
+						"Uniquely among true dragons, each metallic dragon possesses two breath weapons: one damaging elemental breath, and one non-damaging “utility” breath (sleep gas, repulsion gas, slow gas, weakening gas, paralyzing breath, or similar) that reflects the dragon's temperament."
 					]
 				}
 			]
@@ -81,8 +81,8 @@
 			"page": 274,
 			"srd": false,
 			"entries": [
-				"The slaadi are enormous, frog-like humanoids native to Limbo, the plane of pure chaos. They embody unfettered disorder\u2014vicious, capricious, and driven by an ever-shifting compulsion to reproduce, hunt, and multiply. Their society, such as it is, is loosely ruled by the {@creature Slaad, Death|MM|Death Slaadi} and the twin slaad lords Ssendam and Ygorl, but any given slaad is more likely to devour its siblings than serve them.",
-				"Slaadi are categorized by the color of their hides, which corresponds to a rigid ecological hierarchy: {@creature Slaad, Red|MM|Red} and {@creature Slaad, Blue|MM|Blue} are the numerous \"infectors,\" spreading the slaad race through implanted eggs and Chaos Phage; {@creature Slaad, Green|MM|Green} are shape-shifting spies and wanderers; {@creature Slaad, Gray|MM|Gray} and {@creature Slaad, Death|MM|Death} are the powerful, spellcasting elders."
+				"The slaadi are enormous, frog-like humanoids native to Limbo, the plane of pure chaos. They embody unfettered disorder — vicious, capricious, and driven by an ever-shifting compulsion to reproduce, hunt, and multiply. Their society, such as it is, is loosely ruled by the {@creature Slaad, Death|MM|Death Slaadi} and the twin slaad lords Ssendam and Ygorl, but any given slaad is more likely to devour its siblings than serve them.",
+				"Slaadi are categorized by the color of their hides, which corresponds to a rigid ecological hierarchy: {@creature Slaad, Red|MM|Red} and {@creature Slaad, Blue|MM|Blue} are the numerous “infectors,” spreading the slaad race through implanted eggs and Chaos Phage; {@creature Slaad, Green|MM|Green} are shape-shifting spies and wanderers; {@creature Slaad, Gray|MM|Gray} and {@creature Slaad, Death|MM|Death} are the powerful, spellcasting elders."
 			],
 			"additionalSources": [
 				{
@@ -119,8 +119,8 @@
 			"page": 224,
 			"srd": false,
 			"entries": [
-				"Modrons are the geometric, hive-minded constructs of Mechanus, the plane of perfect law and mechanism. Each modron occupies a fixed rung in a rigid hierarchy\u2014{@creature Monodrone|MM|monodrones} (single sphere) do the plane's most menial tasks, {@creature Duodrone|MM|duodrones} carry them out, {@creature Tridrone|MM|tridrones} enforce order among them, {@creature Quadrone|MM|quadrones} command patrols, and {@creature Pentadrone|MM|pentadrones} rule regions.",
-				"Above the base modrons stand the hierarchs: decatons, nonatons, octons, septons, hextons, quintons, quartons, tertians, secundi, and finally the near-divine Primus. When a superior modron is destroyed, an inferior is elevated in its place, its form spontaneously reconfiguring\u2014a process the modrons themselves regard with clockwork indifference. Every seventeen years, a Great Modron March sweeps across the outer planes."
+				"Modrons are the geometric, hive-minded constructs of Mechanus, the plane of perfect law and mechanism. Each modron occupies a fixed rung in a rigid hierarchy — {@creature Monodrone|MM|monodrones} (single sphere) do the plane's most menial tasks, {@creature Duodrone|MM|duodrones} carry them out, {@creature Tridrone|MM|tridrones} enforce order among them, {@creature Quadrone|MM|quadrones} command patrols, and {@creature Pentadrone|MM|pentadrones} rule regions.",
+				"Above the base modrons stand the hierarchs: decatons, nonatons, octons, septons, hextons, quintons, quartons, tertians, secundi, and finally the near-divine Primus. When a superior modron is destroyed, an inferior is elevated in its place, its form spontaneously reconfiguring — a process the modrons themselves regard with clockwork indifference. Every seventeen years, a Great Modron March sweeps across the outer planes."
 			],
 			"additionalSources": [
 				{
@@ -138,7 +138,7 @@
 				{
 					"name": "Disintegration",
 					"entries": [
-						"When a modron dies, its body disintegrates into a fine dust, leaving no trace\u2014a courtesy the hierarchy extends to all of its own, and to no one else."
+						"When a modron dies, its body disintegrates into a fine dust, leaving no trace — a courtesy the hierarchy extends to all of its own, and to no one else."
 					]
 				}
 			]
@@ -169,7 +169,7 @@
 				{
 					"name": "Contracted Service",
 					"entries": [
-						"Every summoned yugoloth serves under a specific, negotiated contract. Break the contract and the yugoloth is under no obligation to obey\u2014typically it turns on the summoner immediately."
+						"Every summoned yugoloth serves under a specific, negotiated contract. Break the contract and the yugoloth is under no obligation to obey — typically it turns on the summoner immediately."
 					]
 				},
 				{
