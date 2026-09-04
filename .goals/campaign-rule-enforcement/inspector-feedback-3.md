@@ -37,26 +37,28 @@
 - [x] DM/party projection parity — verified: Party Tracker uses the same evaluated
   transient settings, gates TGTT subrules with the master toggle, preserves personal
   serialization, and its focused parity tests pass.
-- [x] Authoritative atomic server fencing — verified in implementation and exact-head
-  real-stack behavior: memory and PostgreSQL fetch the active immutable policy inside
-  their write authority, require protocol 4 and the campaign carry basis for schema-v2
-  policy-sensitive writes, and reject before canonical writes. Missing parity cases are
-  recorded under deterministic coverage.
+- [ ] Authoritative atomic server fencing — FAILED in part: create and patch paths in
+  memory and PostgreSQL fetch the active immutable policy inside their write authority,
+  require protocol 4 and the campaign carry basis for schema-v2 policy-sensitive writes,
+  and reject before canonical writes. Clone, attach, and move do not evaluate or re-pin
+  the destination policy at all: both stores copy/move the source document and its old
+  carry basis directly into the destination campaign.
 - [x] Protocol-4/legacy compatibility — verified: current schema-v2 carry writes prove
   protocol 4; schema-v1/no-policy-sensitive legacy writes retain their prior behavior;
   focused Hub and production-derived real-stack tests pass.
-- [x] Non-destructive documents/serialization — verified: local-to-campaign copy
+- [x] Non-destructive documents/serialization — verified for evaluation and local copy:
+  local-to-campaign copy
   fetches the destination context, applies its identity-checked transient overlay to a
   cloned `CharacterSheetState`, stamps the outgoing campaign carry basis, restores
-  personal settings in serialization, and does not mutate the local document. The real
-  copy/move Chromium lifecycle now passes.
+  personal settings in serialization, and   does not mutate the local document. This does not cure the separate stale destination
+  basis in server-side clone/attach/move.
 - [ ] Required deterministic coverage and store parity — FAILED: exact-head tests add
   destination-copy behavior, failed-then-manual-refresh recovery, and PostgreSQL
   projection identity. They still do not behaviorally drive recovery from an actual
   reconnect event, nor provide common memory/PostgreSQL create-and-patch cases for
   detached/missing/stale bases, missing/old protocol, successful current writes, and
   no-partial-write results. Each store has only a stale-create integration case for the
-  new fence.
+  new fence, and there is no destination-policy matrix for clone, attach, or move.
 - [ ] Required mutation evidence — FAILED: all written mutants are killed, including
   the new shallow decision guard mutant. The teardown mutant still changes only
   `getClearedCampaignRulesState()` rather than Character Sheet replacement/teardown,
@@ -64,14 +66,17 @@
   disabling the memory and PostgreSQL transaction fences. There is no mutant for the
   accepted malformed effective-settings/applied-rule outputs or actual reconnect
   recovery.
-- [ ] Full validation — FAILED as literally specified because `npm run test:data`
-  exits 1. This is not an environment block and is not a campaign-rule regression:
+- [ ] Full validation — FAILED: `npm run test:data` exits 1. This is not an environment
+  block and is not a campaign-rule regression:
   clean detached worktrees at both the exact baseline and exact `HEAD` report the same
   424 LinkCheck messages/37 distinct lines in unchanged generated
   `data/crafting.json`/bestiary references. Fixing that unrelated generated content is
   out of scope and `goal.md` explicitly forbids modifying `data/crafting.json`; the
-  failure is documented here rather than falsely called PASS. Every other requested
-  local gate, including the production-derived real stack, passes.
+  failure is documented here rather than falsely called PASS. In addition, a fresh
+  production-derived real-stack run at the inspected source failed 2/23 Chromium tests
+  after all 4 runtime-role PostgreSQL suites passed. CI and an earlier Inspector run at
+  the same SHA passed 23/23, so the gate is demonstrably nondeterministic rather than
+  terminally green.
 - [ ] Independent exact-head Inspector pass — FAILED: this exact-head review found
   blocking output-contract, reconnect, evidence, documentation, and handoff gaps.
 - [ ] Draft PR/remote/CI/final handoff — FAILED in part: PR #241 is the sole draft PR
@@ -96,9 +101,11 @@
 - `npm run test:data` — **FAIL**: the exact baseline and exact HEAD both report the
   same pre-existing generated crafting/bestiary LinkCheck gaps. This is out of product
   scope, but it is neither a passing gate nor an environment block.
-- `npm run test:hub:e2e:stack` — PASS: all 4 runtime-role PostgreSQL suites passed
-  (26 tests), followed by all 23 Chromium tests; the production smoke and cleanup also
-  completed.
+- `npm run test:hub:e2e:stack` — **FAIL on fresh rerun**: all 4 runtime-role PostgreSQL
+  suites passed (26 tests), then Chromium finished 21 passed/2 failed. The failures were
+  the Cure Wounds approval flow (no `applied` state observed) and the private-v1
+  lifecycle (expected HP 11, observed 12). Exact-head CI and an earlier run passed, so
+  this is nondeterministic evidence, not an environment block.
 - `npm audit --omit=dev --audit-level=high` — PASS: 0 vulnerabilities.
 - `npm run hub:check-secrets` — PASS.
 - `npm sbom --omit=dev --sbom-format=cyclonedx` — PASS.
@@ -137,6 +144,13 @@
    Builder commits instead of one. In each, a blank line separates `Assisted-by` from
    `Co-authored-by`, so Git parses only `Co-authored-by` as a trailer. Do not rewrite
    history; use correctly formatted contiguous trailers on future normal commits.
+8. **Destination campaign transitions retain stale rule authority.** Memory and
+   PostgreSQL clone/move paths transfer `source.data` without evaluating the destination
+   rules version or replacing the carry basis. Cover clone, detached attach, and
+   campaign-to-campaign move atomically in both stores and the real stack.
+9. **The real-stack gate is not deterministic.** Although exact-head CI and an earlier
+   Inspector run passed, this fresh run failed 2 of 23 Chromium tests. A required gate
+   that passes only intermittently is not passing deterministic evidence.
 
 ## What Must Be Fixed
 
@@ -144,6 +158,9 @@
 - Wire and behaviorally prove real failure-then-reconnect recovery.
 - Add common memory/PostgreSQL create/patch authority parity and independent
   lifecycle/store-fence mutants.
+- Re-pin or fail closed for clone/attach/move against the destination policy and prove
+  those paths in both stores.
+- Stabilize the two intermittently failing real-stack Chromium flows.
 - Make carry status/docs/surface evidence truthful and consistent.
 - Complete the requested final handoff on the existing draft PR.
 - Keep future commits normal and use one contiguous trailer block.

@@ -21,6 +21,11 @@
       "iteration": 3,
       "verdict": "FAIL",
       "summary": "Decision outputs remain incompletely closed, reconnect recovery is not wired, parity/mutation evidence and handoff are incomplete, and carry docs contradict enforcement."
+    },
+    {
+      "iteration": 3,
+      "verdict": "FAIL",
+      "summary": "Fresh verification also found unfenced destination clone/move behavior and a nondeterministic real-stack failure."
     }
   ]
 }
