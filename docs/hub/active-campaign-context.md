@@ -80,12 +80,15 @@ The DM Screen bootstrap previously issued **four** requests including **two dupl
 | Host | Explicit / resource URL | No URL + stored selection | No URL + tombstone or signed out | Pinned |
 |---|---|---|---|---|
 | `hub.html` / `campaign.html` | Explicit `?id`, adopted at zero request cost | Revalidated through the selection-only path; cleared if archived or inaccessible | Signed out writes a clear tombstone for the stored record's account | No |
-| Character Sheet | Resource-canonical, else `hubCampaign`; activates rules and brew | Device default updates, but context is **not** activated — the repository, realtime sync, and recovery keys are bound to the campaign the page was opened with, and `_pCanonicalizeHubCharacterUrl` performs the authoritative rebind via navigation | Local mode | **Yes** |
-| DM Screen | Explicit `hubCampaign` only | **Never auto-opens a private workspace**; the Board initialises locally and the selection is untouched | Local mode | **Yes** |
+| Character Sheet | Resource-canonical, else `hubCampaign`; activates rules and brew | A bare URL opens the selected campaign repository; `?local=1` preserves the local repository | Local mode | **Yes**, once opened |
+| DM Screen | Explicit `hubCampaign`; DM/co-DM only | A bare URL opens the selected authorized private workspace; `?local=1` preserves the local Board | Local mode | **Yes**, once opened |
+| Ordinary content/build pages | Explicit `hubCampaign` | Activates temporary campaign brew and context before page data/rendering | Existing local/personal-brew behavior | No |
 
-A purely local Character Sheet or DM Screen creates no coordinator, issues no request, and behaves
-exactly as before. A remembered campaign can never apply its rules to a local character, and local
-Board initialisation is never gated behind an authenticated fetch.
+A purely local Character Sheet or DM Screen never resolves an authenticated campaign coordinator,
+issues no request, and behaves exactly as before. Its lightweight navigation adapter is suspended
+for the page lifetime, so storage and BroadcastChannel selections are ignored. A remembered campaign
+can never apply its rules to a local character, and local Board initialisation is never gated behind
+an authenticated fetch.
 
 ## Switching, pinning, and teardown
 
@@ -139,6 +142,12 @@ on **every** character load and reset. Calling `clearCampaignSettingsOverlay()` 
 A failed switch to an inaccessible campaign B therefore never tears down a still-valid, still-open
 campaign A.
 
+At `teardown-projections`, an access-lost Character Sheet resets its private character model and replaces the
+document UI; an access-lost DM Screen drops panels, projections, and campaign context. This happens before
+rules and brew teardown, so no private projection remains visible during cleanup. DM access denials also
+cancel pending debounced Board persistence before clearing panels, preventing concealment from being saved
+as an empty authoritative workspace.
+
 A cancellation is classified as `REQUEST_ABORTED` across the whole request path — including the
 response body read — so it is never mistaken for connectivity loss. Personal brew and local
 documents are never cleared by a campaign-context failure.
@@ -146,10 +155,11 @@ documents are never cleared by a campaign-context failure.
 ## BFCache
 
 A persisted `pagehide` **suspends** synchronisation but retains context, rules, and brew. On a
-persisted `pageshow` the coordinator fences a new generation and performs a **fresh** session read
+persisted `pageshow` the coordinator fences a new generation and performs a **fresh** session and campaign read
 before trusting anything: a storage reread alone is insufficient, because cross-account records are
 deliberately incomparable and would simply be ignored. If the account signed out or changed while
-the page was frozen, the full ordered teardown runs before any resumed mutation is permitted.
+the page was frozen, membership was removed, or the campaign was archived, the full ordered teardown runs
+before any resumed mutation is permitted.
 
 Every same-account stored record is then routed through the normal comparison path — **including
 tombstones**, so a clear written by another tab while this page was frozen is honoured here too.
@@ -189,10 +199,14 @@ Only a non-persisted `pagehide` disposes the coordinator.
 | `js/hub/hub-active-campaign-store.js` | Durable store, Web Lock serialisation, compare-and-repair |
 | `js/hub/hub-active-campaign-channel.js` | Cross-tab channel, storage fallback, disposal |
 | `js/hub/hub-active-campaign-coordinator.js` | Precedence, state machine, fencing, teardown, pinning, BFCache |
+| `js/hub/hub-active-campaign-switcher.js` | Accessible selector and campaign-aware link decoration |
+| `js/hub/hub-site-context.js` | Early ordinary-page activation and shared-navigation adapter |
+| `js/hub/hub-surface-defaults.js` | Bare Character Sheet/DM Screen default routing |
+| `js/hub/hub-capabilities.js` | Active-context protocol capability |
 | `js/hub/hub-campaign-context.js` | Campaign context loader; injected session/context; idempotent `dispose()` |
 
-These four modules import nothing outside `js/hub/`, so the lightweight Hub shells keep their
-two-script boot graph. Their combined transfer size is asserted against the 8 KiB budget in
+The active-selection modules import nothing outside `js/hub/`, so the lightweight Hub shells keep their
+two-script boot graph. The coordinator graph's combined transfer size is asserted against the 8 KiB budget in
 `test/jest/hub/HubPerformanceBudget.test.js`.
 
 ## Tests
@@ -204,24 +218,24 @@ two-script boot graph. Their combined transfer size is asserted against the 8 Ki
 | `HubActiveCampaignChannel.test.js` | Filtering, storage-reread semantics, no write loop, disposal |
 | `HubActiveCampaignCoordinator.test.js` | Precedence, request budgets, abort fencing, invalidation, teardown order, pinning, preflight, BFCache |
 | `HubCampaignContext.test.js` | Zero-request injected activation, idempotent disposal |
-| `CharacterSheetHubTeardown.test.js` | Exclusive teardown owners and the `_hubContext` rules leak |
+| `HubCampaignNavigation.test.js` | URL decoration, explicit local routes, and surface defaults |
+| `HubContentBootstrap.test.js` / `HubSiteContext.test.js` | Pre-data activation, temporary-only brew, capability failure |
+| `CharacterSheetHubTeardown.test.js` / `DmScreenCampaignPrivacy.test.js` | Ordered rules cleanup and private-state concealment |
 | `HubActiveCampaignJourney.test.js` | Real BFF integration: reload, device independence, request counts, logout ordering, pinned convergence |
-| `test/e2e/hub/active-campaign-context.spec.ts` | Real browser: native storage, real `BroadcastChannel`, reload, BFCache, local DM Screen |
+| `test/e2e/hub/active-campaign-context.spec.ts` | Production stack: switcher, native storage/channel, defaults/local routes, pinning, BFCache, revoke/archive |
+| `npm run test:hub:mutations` | Kills generation, teardown-order, account-scope, and local-fallback mutants |
 
-## Not yet implemented
+## Deliberate boundary
 
-These are tracked follow-ups, not oversights:
+V2-T5 carries the currently advertised `sourcePolicy` and `editionPolicy` metadata in
+`HubCampaignPageContext`; it does not filter content, reject builds, rewrite characters, or claim policy
+enforcement. Those behaviors require ADR 0015/V2-T6.
 
-1. **`navigation.js` link decoration** on ordinary heavy content pages, and with it automatic heavy
-   context activation from a stored-only selection. On the Character Sheet this additionally
-   requires rebinding the campaign-scoped repository, realtime sync, and recovery keys, which is
-   why a stored-only selection currently updates the device default without activating context.
-2. **Resource-pinned visual affordance.** The `switch_pending` behaviour ships; the banner telling
-   the user their default changed does not.
-3. **`offline_unverified` presentation.** The classification ships; the degraded-mode UI does not.
-4. **DM Screen campaign rules application.** The DM Screen does not yet apply the returned
-   `rulesVersion` at all, so it registers no rules-teardown owner. Because it never installs
-   campaign rules, no stale rules can exist there.
+## Parallel-change collision surfaces
 
-ADR 0013 therefore remains `Accepted contract; production implementation pending` until (1)–(4)
-land.
+The implementation intentionally adds dedicated modules and no migration, server selection store, or domain
+model. Later house-rule and player-targeting lanes should conflict-check `campaign.html`,
+`js/hub/hub-page.js`, `js/hub/hub-api-client.js`, Hub roadmap/status/traceability/testing documents, and
+`test/e2e/pages/HubCampaignPage.ts` plus the real-stack Hub specs. The context lane owns global navigation and
+active-context lifecycle; later integrations should preserve its capability gate, temporary-brew boundary,
+teardown order, and resource pinning.

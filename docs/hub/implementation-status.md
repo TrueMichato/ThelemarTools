@@ -35,6 +35,12 @@ V2-T0 release-automation implementation is **shipped** by
 Oracle dry run, deliberate release, and induced-failure drills are external host-operations evidence, not
 unfinished T0 implementation; they remain blocked under the first V1 gate below.
 
+V2-T5 whole-site campaign context is implemented: account-bound device selection, lightweight Hub/shared-nav
+switchers, early temporary brew/rules activation, authorized bare Character Sheet and DM Screen defaults,
+explicit local routes, pinned-resource behavior, access-loss concealment, BFCache/reconnect revalidation, and
+server capability `campaign.active_context.v1`. Source/edition policy metadata is exposed but not enforced;
+ADR 0015/V2-T6 remains the enforcement owner.
+
 The focused `t2-effects-server-role` prerequisite slice implements the ADR 0012 server contract without changing
 the roadmap train status: protocol-v3 closed operations, immediate atomic DM/co-DM application, persistent
 command/operation/event identity, owner/DM watermarks, opaque target refs, and the source-derived peer
@@ -104,6 +110,8 @@ pass. Only the host-operations proof and physical one-DM/two-player game day rem
 - Hub-owned surfaces provide a keyboard skip path, persistent semantic page heading, named main and campaign
   regions, labeled form controls, WCAG AA primary-button contrast in day/night themes, and 44 px entry targets.
 - Immutable campaign brew/rules versions and early page context activation.
+- Whole-site active campaign selection with same-profile convergence and independent device choices; local
+  Character Sheets, DM Screens, personal brew, and signed-out pages never inherit stale campaign state.
 - Private per-DM workspaces using the existing Board blob and lease fencing.
 - Authenticated WebSockets, presence, visibility-filtered event replay, snapshots, outbox dispatcher.
 - Campaign pages consume both initial snapshots and visible events, coalesce projection invalidations into one

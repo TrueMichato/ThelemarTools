@@ -1,5 +1,21 @@
 "use strict";
 
+globalThis.HubPageContext ||= (() => {
+	let pContext = null;
+	return {
+		pInit: () => pContext ||= import("./hub/hub-site-context.js")
+			.then(({pInitHubSiteContext}) => pInitHubSiteContext()),
+		async pRenderNavigation ({container}) {
+			const context = await this.pInit();
+			return context.pRenderNavigation({container});
+		},
+		async pGetActiveCampaign () {
+			const context = await this.pInit();
+			return context.activeCampaign;
+		},
+	};
+})();
+
 class NavBar {
 	static _DROP_TIME = 250;
 	static _MIN_MOVE_PX = 3;
@@ -41,7 +57,9 @@ class NavBar {
 
 		NavBar._clearAllTimers();
 
-		NavBar._initAdventureBookElements().then(null);
+		NavBar._initAdventureBookElements()
+			.then(() => globalThis.HubPageContext?.pRenderNavigation?.({container: document.getElementById("navbar")}))
+			.then(null);
 	}
 
 	static _initInstallPrompt () {

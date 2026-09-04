@@ -47,11 +47,17 @@ import {HubActiveCampaignCoordinator} from "./hub/hub-active-campaign-coordinato
 import {HubRealtimeClient} from "./hub/hub-realtime-client.js";
 import {HubApiClient} from "./hub/hub-api-client.js";
 import {DmScreenHubController} from "./dmscreen/dmscreen-hub-controller.js";
+import {
+	concealDmScreenCampaignWorkspace,
+	pHandleDmScreenCampaignAccessLoss,
+} from "./dmscreen/dmscreen-campaign-privacy.js";
+import {HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT} from "./hub/hub-capabilities.js";
+import {getCampaignSurfaceDefaultUrl} from "./hub/hub-surface-defaults.js";
 
 const TITLE_LOADING = "Loading...";
 
 class Board {
-	constructor ({workspaceRepository = null} = {}) {
+	constructor ({workspaceRepository = null, campaignContext = null} = {}) {
 		this.panels = {};
 		this.exiledPanels = [];
 		this.eleScreen = es(`.dm-screen`);
@@ -76,8 +82,10 @@ class Board {
 		this.cbConfirmTabClose = null;
 		this._hubCharacterProjections = [];
 		this._hubCampaignStatus = null;
+		this._hubCampaignContext = campaignContext ? MiscUtil.copyFast(campaignContext) : null;
 		this._saveGeneration = 0;
 		this._savedGeneration = 0;
+		this._isPersistenceFenced = false;
 
 		this._workspaceRepository = workspaceRepository || new LocalDmWorkspaceRepository({
 			storage: StorageUtil,
@@ -662,12 +670,20 @@ class Board {
 	}
 
 	doSaveStateDebounced () {
+		if (this._isPersistenceFenced) return;
 		this._saveGeneration++;
 		this._pDoSaveStateDebounced();
 	}
 
 	hasPendingDebouncedSave () {
+		if (this._isPersistenceFenced) return false;
 		return this._savedGeneration < this._saveGeneration;
+	}
+
+	fenceHubPrivatePersistence () {
+		this._isPersistenceFenced = true;
+		this._pDoSaveStateDebounced.cancel();
+		this._savedGeneration = this._saveGeneration;
 	}
 
 	/* -------------------------------------------- */
@@ -1082,6 +1098,19 @@ class Board {
 
 	getHubCampaignStatus () {
 		return this._hubCampaignStatus ? MiscUtil.copyFast(this._hubCampaignStatus) : null;
+	}
+
+	getHubCampaignContext () {
+		return this._hubCampaignContext ? MiscUtil.copyFast(this._hubCampaignContext) : null;
+	}
+
+	setHubCampaignContext (context) {
+		this._hubCampaignContext = context ? MiscUtil.copyFast(context) : null;
+		this.fireBoardEvent({type: "hubCampaignContext", payload: this.getHubCampaignContext()});
+	}
+
+	concealHubPrivateWorkspace () {
+		concealDmScreenCampaignWorkspace({board: this});
 	}
 }
 
@@ -3721,28 +3750,54 @@ window.addEventListener("load", () => {
 	let activeCampaign = null;
 	let campaignContext = null;
 	(async () => {
+		const siteContext = await globalThis.HubPageContext?.pInit?.();
+		const defaultUrl = getCampaignSurfaceDefaultUrl({
+			href: window.location.href,
+			surface: "dmscreen",
+			campaign: siteContext?.activeCampaign || null,
+		});
+		if (defaultUrl) {
+			window.location.replace(defaultUrl);
+			return;
+		}
 		const campaignId = new URLSearchParams(window.location.search).get("hubCampaign");
+		let verifiedCampaignContext = null;
 		let workspaceRepository = null;
 		const api = new HubApiClient();
 		if (campaignId) {
-			hubController = new DmScreenHubController({campaignId, api});
+			hubController = new DmScreenHubController({
+				campaignId,
+				api,
+				pOnAuthoritativeAccessError: error => pHandleDmScreenCampaignAccessLoss({
+					error,
+					campaignId,
+					coordinator: activeCampaign,
+					controller: hubController,
+					realtime: window.DM_SCREEN_HUB_REALTIME,
+					board: window.DM_SCREEN,
+				}),
+			});
 			window.DM_SCREEN_HUB_CONTROLLER = hubController;
 
 			activeCampaign = new HubActiveCampaignCoordinator({
 				api,
 				host: {
+					requiredCapabilities: [HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT],
 					isContextHost: true,
 					// An open DM workspace is resource-pinned: another tab changing the device
 					// selection must not rebind or tear down this private workspace.
 					isResourcePinned: () => true,
 					getExplicitCampaignId: () => campaignId,
+					isCampaignAuthorized: ({campaign}) => ["dm", "co_dm"].includes(campaign?.role),
 					pPreflightSwitch: async () => ({
 						safe: !workspaceRepository?.hasPendingWrites?.() && !window.DM_SCREEN?.hasPendingDebouncedSave?.(),
 					}),
 					pTeardownRealtime: async () => window.DM_SCREEN_HUB_REALTIME?.close?.(),
-					pTeardownProjections: async () => hubController?.detach(),
-					// No rules teardown: the DM Screen does not yet apply campaign rules, so no
-					// stale rules can exist here. Rules application is a tracked follow-up.
+					pTeardownProjections: async () => {
+						hubController?.detach();
+						window.DM_SCREEN?.concealHubPrivateWorkspace();
+					},
+					pTeardownRules: async () => window.DM_SCREEN?.setHubCampaignContext(null),
 					pTeardownBrew: async () => campaignContext?.dispose(),
 				},
 			});
@@ -3786,6 +3841,12 @@ window.addEventListener("load", () => {
 					context: verified.context,
 				});
 				await campaignContext.pActivate();
+				verifiedCampaignContext = {
+					campaignId,
+					rulesVersion: verified.context.rulesVersion || null,
+					sourcePolicy: verified.context.sourcePolicy || null,
+					editionPolicy: verified.context.editionPolicy || null,
+				};
 				await activeCampaign.adoptVerified({session: verified.session, campaign: verified.campaign});
 			} catch (error) {
 				await pAbandonBootstrap(error);
@@ -3793,9 +3854,8 @@ window.addEventListener("load", () => {
 			}
 			workspaceRepository = new HubHttpDmWorkspaceRepository({campaignId, api});
 		} else {
-			// A remembered campaign never auto-opens a private DM workspace: that would surprise
-			// non-DM members and would gate local Board initialisation behind an authenticated
-			// fetch. The selection is left untouched and the Board stays fully local.
+			// Signed-out users, non-DM campaign members, explicit local URLs, and resource deep
+			// links stay fully local. Only the authorized bare-page default above may navigate.
 			activeCampaign = null;
 		}
 
@@ -3822,7 +3882,10 @@ window.addEventListener("load", () => {
 		});
 
 		// expose it for dbg purposes
-		window.DM_SCREEN = new Board({workspaceRepository});
+		window.DM_SCREEN = new Board({
+			workspaceRepository,
+			campaignContext: verifiedCampaignContext,
+		});
 		Renderer.hover.bindDmScreen(window.DM_SCREEN);
 		if (hubController) {
 			hubController.attach({

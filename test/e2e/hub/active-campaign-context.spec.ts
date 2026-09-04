@@ -53,6 +53,54 @@ test.describe("device-scoped active campaign context", () => {
 		}
 	});
 
+	test("renders an accessible responsive switcher on Hub and ordinary navigation", async ({browser}) => {
+		test.setTimeout(180_000);
+		const context = await browser.newContext(contextOptions);
+		try {
+			const page = new HubCampaignPage(await context.newPage());
+			await page.signInSynthetic({providerSubject: "switcher-dm", displayName: "Switcher DM", secret: secret!});
+			const campaignId = await page.createCampaign("Switcher E2E");
+
+			await page.gotoHub();
+			await page.expectCampaignSwitcher({campaignName: "Switcher E2E", state: "active"});
+			await page.expectCampaignSwitcherResponsive();
+
+			await page.gotoOrdinaryPageWithCampaignContext({
+				path: `/spells.html?hubCampaign=${encodeURIComponent(campaignId)}`,
+				campaignId,
+			});
+			await page.expectCampaignSwitcher({campaignName: "Switcher E2E", state: "active"});
+			await page.expectCampaignSwitcherResponsive();
+
+			await page.selectLocalCampaignContext();
+			expect(await page.getActiveCampaignRecord()).toMatchObject({state: "cleared", campaignId: null});
+		} finally {
+			await context.close();
+		}
+	});
+
+	test("activates a campaign immediately after joining it", async ({browser}) => {
+		test.setTimeout(180_000);
+		const dmContext = await browser.newContext(contextOptions);
+		const playerContext = await browser.newContext(contextOptions);
+		try {
+			const dm = new HubCampaignPage(await dmContext.newPage());
+			await dm.signInSynthetic({providerSubject: "join-dm", displayName: "Join DM", secret: secret!});
+			const campaignId = await dm.createCampaign("Joined Context E2E");
+			const inviteUrl = await dm.createInvite(campaignId);
+
+			const player = new HubCampaignPage(await playerContext.newPage());
+			await player.signInSynthetic({providerSubject: "join-player", displayName: "Join Player", secret: secret!});
+			await player.redeemInvite(inviteUrl, "Joined Context E2E");
+
+			await player.waitForSelectedCampaign(campaignId);
+			await player.expectCampaignSwitcher({campaignName: "Joined Context E2E", state: "active"});
+		} finally {
+			await dmContext.close();
+			await playerContext.close();
+		}
+	});
+
 	test("keeps a second browser profile independent of the first", async ({browser}) => {
 		test.setTimeout(180_000);
 		const first = await browser.newContext(contextOptions);
@@ -154,7 +202,8 @@ test.describe("device-scoped active campaign context", () => {
 			const before = await sheet.getSheetCampaignId();
 			expect(before).toBe(campaignId);
 
-			await sheet.simulateBfcacheRoundTrip();
+			await sheet.suspendForBfcache();
+			await sheet.resumeFromBfcache();
 
 			// A persisted hide/show must not clear the campaign context, rules, or brew.
 			await expect.poll(async () => sheet.getSheetCampaignId(), {timeout: 15_000}).toBe(campaignId);
@@ -166,29 +215,79 @@ test.describe("device-scoped active campaign context", () => {
 		}
 	});
 
-	test("does not auto-open a private DM workspace from a remembered selection", async ({browser}) => {
+	test("defaults bare campaign surfaces while preserving explicit local routes", async ({browser}) => {
 		test.setTimeout(180_000);
 		const context = await browser.newContext(contextOptions);
 		try {
 			const hub = new HubCampaignPage(await context.newPage());
 			await hub.signInSynthetic({providerSubject: "local-dm", displayName: "Local DM", secret: secret!});
 			const campaignId = await hub.createCampaign("Local Board E2E");
+			await hub.createCharacter({campaignId, name: "Default Hero"});
 			await hub.gotoCampaign(campaignId);
 			await hub.waitForSelectedCampaign(campaignId);
 
-			// A bare DM Screen must stay fully local: a device preference is not consent to open a
-			// private workspace, and local Board initialisation is never gated on an authed fetch.
-			const board = new HubCampaignPage(await context.newPage());
-			const workspaceRequests: string[] = [];
-			board.page.on("request", request => {
-				if (request.url().includes("/workspace")) workspaceRequests.push(request.url());
-			});
-			await board.page.goto("/dmscreen.html");
-			await board.page.waitForFunction(() => !!(window as any).DM_SCREEN, undefined, {timeout: 60_000});
+			const sheet = new HubCampaignPage(await context.newPage());
+			await sheet.openBareCharacterSheetDefault(campaignId);
+			const localSheet = new HubCampaignPage(await context.newPage());
+			await localSheet.openLocalCharacterSheet();
 
-			expect(workspaceRequests).toEqual([]);
-			// The remembered selection is untouched.
-			expect(await board.getActiveCampaignRecord()).toMatchObject({campaignId, state: "selected"});
+			const board = new HubCampaignPage(await context.newPage());
+			await board.openBareDmScreenDefault(campaignId);
+			const localBoard = new HubCampaignPage(await context.newPage());
+			await localBoard.openLocalDmScreen();
+
+			expect(await hub.getActiveCampaignRecord()).toMatchObject({campaignId, state: "selected"});
+		} finally {
+			await context.close();
+		}
+	});
+
+	test("conceals a pinned character after membership removal on BFCache resume", async ({browser}) => {
+		test.setTimeout(180_000);
+		const dmContext = await browser.newContext(contextOptions);
+		const playerContext = await browser.newContext(contextOptions);
+		try {
+			const dm = new HubCampaignPage(await dmContext.newPage());
+			await dm.signInSynthetic({providerSubject: "revoke-dm", displayName: "Revoke DM", secret: secret!});
+			const campaignId = await dm.createCampaign("Revoked Context E2E");
+			const invite = await dm.createInviteViaApi(campaignId);
+
+			const player = new HubCampaignPage(await playerContext.newPage());
+			await player.signInSynthetic({providerSubject: "revoke-player", displayName: "Revoked Player", secret: secret!});
+			await player.redeemInviteTokenViaApi(invite);
+			const character = await player.createCharacter({campaignId, name: "Private Revoked Hero"});
+			await player.openCharacterSheet({campaignId, characterId: character.id, name: "Private Revoked Hero"});
+
+			await player.suspendForBfcache();
+			await dm.removeMember({campaignId, displayName: "Revoked Player"});
+			await player.expectPrivateCharacterOpen("Private Revoked Hero");
+			await player.resumeFromBfcache();
+
+			await player.waitForClearedSelection();
+			await player.expectPrivateCharacterConcealed();
+		} finally {
+			await dmContext.close();
+			await playerContext.close();
+		}
+	});
+
+	test("conceals a pinned character after campaign archive on BFCache resume", async ({browser}) => {
+		test.setTimeout(180_000);
+		const context = await browser.newContext(contextOptions);
+		try {
+			const dm = new HubCampaignPage(await context.newPage());
+			await dm.signInSynthetic({providerSubject: "archive-dm", displayName: "Archive DM", secret: secret!});
+			const campaignId = await dm.createCampaign("Archived Context E2E");
+			const character = await dm.createCharacter({campaignId, name: "Private Archived Hero"});
+			await dm.openCharacterSheet({campaignId, characterId: character.id, name: "Private Archived Hero"});
+
+			await dm.suspendForBfcache();
+			await dm.archiveCampaign(campaignId);
+			await dm.expectPrivateCharacterOpen("Private Archived Hero");
+			await dm.resumeFromBfcache();
+
+			await dm.waitForClearedSelection();
+			await dm.expectPrivateCharacterConcealed();
 		} finally {
 			await context.close();
 		}

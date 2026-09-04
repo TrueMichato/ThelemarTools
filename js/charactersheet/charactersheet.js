@@ -43,6 +43,8 @@ import {LocalCharacterRepository} from "../hub/hub-character-repository.js";
 import {HubHttpCharacterRepository} from "../hub/hub-http-character-repository.js";
 import {HubActiveCampaignCoordinator} from "../hub/hub-active-campaign-coordinator.js";
 import {HubApiClient} from "../hub/hub-api-client.js";
+import {HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT} from "../hub/hub-capabilities.js";
+import {getCampaignSurfaceDefaultUrl} from "../hub/hub-surface-defaults.js";
 import {HubRollLogAdapter} from "../hub/hub-roll-log-adapter.js";
 import {CharacterSheetRealtimeCoordinator} from "./charactersheet-realtime.js";
 import {CharacterSheetHubEffects} from "./charactersheet-hub-effects.js";
@@ -216,6 +218,26 @@ class CharacterSheetPage {
 		this._partyInventory?.detach();
 		this._hubEffects?.deactivate();
 		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
+	}
+
+	_concealHubPrivateCharacter () {
+		if (!this._isHubCharacter) return;
+		this._characterLoadGeneration++;
+		this._currentCharacterId = null;
+		this._state.reset();
+		const doc = globalThis.document;
+		if (!doc?.body) return;
+		const main = doc.querySelector("main.charsheet-page");
+		main?.replaceChildren();
+		if (main) main.hidden = true;
+		doc.getElementById("charsheet-campaign-access-ended")?.remove();
+		const message = doc.createElement("div");
+		message.id = "charsheet-campaign-access-ended";
+		message.className = "ve-flex-vh-center ve-h-100 ve-muted";
+		message.setAttribute("role", "alert");
+		message.textContent = "Campaign access ended. Reload or return to the Campaign Hub.";
+		if (main) main.before(message);
+		else doc.body.append(message);
 	}
 
 	/**
@@ -517,6 +539,7 @@ class CharacterSheetPage {
 	 */
 	_getHubActiveCampaignHost () {
 		return {
+			requiredCapabilities: [HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT],
 			isContextHost: true,
 			// Pinned from coordinator creation, not from `_currentCharacterId`: that is only set
 			// after heavy initialisation, so a remote selection arriving mid-startup would
@@ -544,7 +567,10 @@ class CharacterSheetPage {
 			},
 			onFenceGeneration: () => this._fenceHubGeneration(),
 			pTeardownRealtime: async () => this._detachHubRealtimeClient(),
-			pTeardownProjections: async () => this._detachHubProjections(),
+			pTeardownProjections: async () => {
+				this._detachHubProjections();
+				this._concealHubPrivateCharacter();
+			},
 			pTeardownRules: async () => this._clearHubRules(),
 		};
 	}
@@ -4199,6 +4225,15 @@ class CharacterSheetPage {
 			console.error("Save error:", err);
 			// Leave the sync mirror in place: it is the only surviving copy of this write.
 			this._updateSaveIndicator("error");
+			if ([
+				"AUTH_REQUIRED",
+				"FORBIDDEN",
+				"CAMPAIGN_NOT_FOUND",
+				"MEMBERSHIP_NOT_FOUND",
+				"CAMPAIGN_ARCHIVED",
+			].includes(err?.code)) {
+				await this._hubActiveCampaign?.pRevalidate({trigger: "access_loss"});
+			}
 			if (!isInteractiveConflict && ["CHARACTER_LIVE_CONFLICT", "CHARACTER_CONFLICT"].includes(err?.code)) {
 				this._characterRepository.clearRetryableLeaseConflict?.({characterId: this._currentCharacterId});
 				throw err;
@@ -22243,6 +22278,16 @@ window.addEventListener("load", async () => {
 			BrewUtil2.pInit(),
 		]);
 		ExcludeUtil.pInitialise().then(null); // don't await, as this is only used for search
+
+		const defaultUrl = getCampaignSurfaceDefaultUrl({
+			href: window.location.href,
+			surface: "charactersheet",
+			campaign: await globalThis.HubPageContext?.pGetActiveCampaign?.(),
+		});
+		if (defaultUrl) {
+			window.location.replace(defaultUrl);
+			return;
+		}
 
 		const charSheet = new CharacterSheetPage();
 		await charSheet.pInit();

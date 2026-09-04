@@ -190,6 +190,17 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
 
 ## Shipped V2 foundation evidence
 
+- V2-T5 active-context coverage exercises precedence, capability failure, generation fencing, ordered teardown,
+  account isolation, local fallback, same-profile convergence, independent browser profiles, surface defaults,
+  temporary-only campaign brew, Character Sheet/DM Screen privacy teardown, BFCache, reconnect, revoke/archive,
+  responsive switcher states, and production service-worker/static packaging.
+- `npm run test:hub:mutations` copies the lightweight Hub module graph into isolated temporary directories and
+  kills four deliberate mutants: stale-generation acceptance, teardown reordering, cross-account record
+  retention, and inverted local fallback. It never rewrites the working tree.
+- `test/e2e/hub/active-campaign-context.spec.ts` runs against the disposable exact-image HTTPS/PostgreSQL stack,
+  including real `localStorage`, `BroadcastChannel`, Character Sheet, DM Screen, membership, archive, and BFCache
+  behavior.
+
 - V2-T0 release automation shipped in [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219):
   25 focused release/deployment/documentation contracts, shell/Bash/Python validation, and Compose rendering
   passed. The PR explicitly leaves the live Oracle induced-failure drill to V1-G1.

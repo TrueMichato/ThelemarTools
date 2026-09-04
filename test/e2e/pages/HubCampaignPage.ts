@@ -1,4 +1,4 @@
-import {expect, Page, Request} from "@playwright/test";
+import {expect, Page, Request, Route} from "@playwright/test";
 import {waitForToolsLoaded} from "../utils/waitHelpers";
 
 type HubSession = {
@@ -225,7 +225,10 @@ export class HubCampaignPage {
 		await this.page.locator("#hub-campaign-name").fill(name);
 		await this.page.locator("#hub-create-submit").click();
 		await this.page.waitForURL(/campaign\.html\?id=/);
-		return new URL(this.page.url()).searchParams.get("id")!;
+		const campaignId = new URL(this.page.url()).searchParams.get("id")!;
+		await expect(this.page.locator("#campaign-content")).toBeVisible({timeout: 30_000});
+		await this.waitForSelectedCampaign(campaignId);
+		return campaignId;
 	}
 
 	async gotoCampaign (campaignId: string): Promise<void> {
@@ -275,7 +278,11 @@ export class HubCampaignPage {
 
 	async redeemInvite (inviteUrl: string, campaignName: string): Promise<void> {
 		await this.page.goto(inviteUrl);
-		await expect(this.page.locator("#hub-campaign-list")).toContainText(campaignName);
+		await this.page.waitForURL(/campaign\.html\?id=/, {timeout: 30_000});
+		const campaignId = new URL(this.page.url()).searchParams.get("id")!;
+		await expect(this.page.locator("#campaign-content")).toBeVisible({timeout: 30_000});
+		await expect(this.page.locator("#campaign-name")).toHaveText(campaignName);
+		await this.waitForSelectedCampaign(campaignId);
 	}
 
 	async createCharacter ({
@@ -1216,6 +1223,14 @@ export class HubCampaignPage {
 		await expect(row).toBeHidden();
 	}
 
+	async archiveCampaign (campaignId: string): Promise<void> {
+		const response = await this.page.request.post(`/api/campaigns/${encodeURIComponent(campaignId)}/archive`, {
+			headers: await this.getMutationHeaders(),
+			data: {},
+		});
+		expect(response.ok()).toBe(true);
+	}
+
 	async requestDeletion (): Promise<void> {
 		const response = await this.page.request.post("/api/account/deletion/request", {
 			headers: await this.getMutationHeaders(),
@@ -1235,15 +1250,22 @@ export class HubCampaignPage {
 
 	/** Read the durable device-local selection record, or `null` when nothing is stored. */
 	async getActiveCampaignRecord (): Promise<ActiveCampaignRecord | null> {
-		return this.page.evaluate(() => {
-			const raw = window.localStorage.getItem("hub.activeCampaign.v1");
-			if (!raw) return null;
+		for (let attempt = 0; ; ++attempt) {
 			try {
-				return JSON.parse(raw);
-			} catch {
-				return null;
+				return await this.page.evaluate(() => {
+					const raw = window.localStorage.getItem("hub.activeCampaign.v1");
+					if (!raw) return null;
+					try {
+						return JSON.parse(raw);
+					} catch {
+						return null;
+					}
+				});
+			} catch (error) {
+				if (attempt >= 2 || !String(error).includes("Execution context was destroyed")) throw error;
+				await this.page.waitForLoadState("domcontentloaded").catch(() => {});
 			}
-		});
+		}
 	}
 
 	/** Poll until the stored selection satisfies `predicate`, so tests never sleep on a fixed timer. */
@@ -1260,6 +1282,103 @@ export class HubCampaignPage {
 		await this.waitForActiveCampaign(record => record?.state === "cleared", timeout);
 	}
 
+	async expectCampaignSwitcher ({
+		campaignName,
+		state = null,
+	}: {
+		campaignName: string;
+		state?: string | null;
+	}): Promise<void> {
+		const switcher = this.page.locator(".hub-context-switcher");
+		await expect(switcher).toBeVisible({timeout: 30_000});
+		await expect(switcher.getByRole("combobox", {name: "Active campaign context"}))
+			.toHaveValue(await switcher.locator("option", {hasText: campaignName}).getAttribute("value") || "");
+		await expect(switcher.getByRole("status")).toContainText(campaignName);
+		if (state) await expect(switcher).toHaveAttribute("data-state", state);
+	}
+
+	async expectCampaignSwitcherResponsive (): Promise<void> {
+		for (const viewport of [{width: 390, height: 844}, {width: 844, height: 390}]) {
+			await this.page.setViewportSize(viewport);
+			const audit = await this.page.locator(".hub-context-switcher").evaluate(element => {
+				const select = element.querySelector("select");
+				const rect = select?.getBoundingClientRect();
+				return {
+					clientWidth: document.documentElement.clientWidth,
+					scrollWidth: document.documentElement.scrollWidth,
+					selectHeight: rect?.height || 0,
+					ariaLabel: select?.getAttribute("aria-label"),
+					statusLive: element.querySelector("[role='status']")?.getAttribute("aria-live"),
+				};
+			});
+			expect(audit.scrollWidth).toBeLessThanOrEqual(audit.clientWidth);
+			expect(audit.selectHeight).toBeGreaterThanOrEqual(44);
+			expect(audit.ariaLabel).toBe("Active campaign context");
+			expect(audit.statusLive).toBe("polite");
+		}
+		await this.page.setViewportSize({width: 1280, height: 720});
+	}
+
+	async selectLocalCampaignContext (): Promise<void> {
+		await this.page.getByRole("combobox", {name: "Active campaign context"}).selectOption("__local__");
+		await this.waitForClearedSelection();
+	}
+
+	async gotoOrdinaryPageWithCampaignContext ({path, campaignId}: {path: string; campaignId: string}): Promise<void> {
+		await this.page.goto(path);
+		await this.page.waitForFunction(
+			expected => (window as any).HubCampaignPageContext?.campaignId === expected,
+			campaignId,
+			{timeout: 60_000},
+		);
+		await expect(this.page.getByRole("combobox", {name: "Active campaign context"})).toBeVisible();
+	}
+
+	async openBareCharacterSheetDefault (campaignId: string): Promise<void> {
+		await this.page.goto("/charactersheet.html");
+		await this.page.waitForURL(url => url.searchParams.get("hubCampaign") === campaignId, {timeout: 60_000});
+		await this.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+	}
+
+	async openLocalCharacterSheet (): Promise<void> {
+		await this.page.goto("/charactersheet.html?local=1");
+		await this.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+		expect(new URL(this.page.url()).searchParams.get("local")).toBe("1");
+		expect(await this.page.evaluate(() => (window as any).charSheet?._isHubCharacter)).toBe(false);
+		expect(await this.getCampaignSettingsOverlay()).toBeNull();
+	}
+
+	async openBareDmScreenDefault (campaignId: string): Promise<void> {
+		await this.page.goto("/dmscreen.html");
+		await this.page.waitForURL(url => url.searchParams.get("hubCampaign") === campaignId, {timeout: 60_000});
+		await this.page.waitForFunction(() => !!(window as any).DM_SCREEN, undefined, {timeout: 60_000});
+	}
+
+	async openLocalDmScreen (): Promise<void> {
+		await this.page.goto("/dmscreen.html?local=1");
+		await this.page.waitForFunction(() => !!(window as any).DM_SCREEN, undefined, {timeout: 60_000});
+		expect(new URL(this.page.url()).searchParams.get("local")).toBe("1");
+		expect(await this.page.evaluate(() => !!(window as any).DM_SCREEN?._workspaceRepository?.campaignId)).toBe(false);
+	}
+
+	async expectPrivateCharacterConcealed (): Promise<void> {
+		await expect.poll(
+			() => this.page.evaluate(() => ({
+				id: (window as any).charSheet?._currentCharacterId,
+				name: (window as any).charSheet?._state?._data?.name,
+			})),
+			{timeout: 30_000},
+		).toEqual({id: null, name: ""});
+		await expect(this.page.getByRole("alert")).toContainText("Campaign access ended");
+	}
+
+	async expectPrivateCharacterOpen (name: string): Promise<void> {
+		await expect.poll(
+			() => this.page.evaluate(() => (window as any).charSheet?._state?._data?.name),
+			{timeout: 30_000},
+		).toBe(name);
+	}
+
 	async clearActiveCampaignStorage (): Promise<void> {
 		await this.page.evaluate(() => window.localStorage.removeItem("hub.activeCampaign.v1"));
 	}
@@ -1270,24 +1389,42 @@ export class HubCampaignPage {
 	 */
 	async signOutCapturingSelectionAtRequest (): Promise<ActiveCampaignRecord | null> {
 		let recordAtRequest: ActiveCampaignRecord | null = null;
-		const onRequest = async (request: Request) => {
-			if (!request.url().includes("/api/logout")) return;
-			recordAtRequest = await this.getActiveCampaignRecord();
+		let captureError: unknown = null;
+		const routePattern = "**/api/logout";
+		const onRoute = async (route: Route) => {
+			try {
+				recordAtRequest = await this.getActiveCampaignRecord();
+			} catch (error) {
+				captureError = error;
+			} finally {
+				await route.continue();
+			}
 		};
-		this.page.on("request", onRequest);
+		await this.page.route(routePattern, onRoute);
 		try {
 			await this.page.locator("#hub-logout").click();
-			await expect.poll(() => recordAtRequest !== null, {timeout: 10_000}).toBe(true);
+			await expect.poll(() => captureError !== null || recordAtRequest !== null, {timeout: 10_000}).toBe(true);
+			if (captureError) throw captureError;
 		} finally {
-			this.page.off("request", onRequest);
+			await this.page.unroute(routePattern, onRoute);
 		}
 		return recordAtRequest;
 	}
 
-	/** Drive a BFCache-style persisted hide/show pair without leaving the page. */
-	async simulateBfcacheRoundTrip (): Promise<void> {
+	/** Suspend the private page before an out-of-tab mutation, matching persisted pagehide order. */
+	async suspendForBfcache (): Promise<void> {
 		await this.page.evaluate(() => {
 			window.dispatchEvent(new PageTransitionEvent("pagehide", {persisted: true}));
+		});
+		await expect.poll(
+			() => this.page.evaluate(() => (window as any).charSheet?._hubActiveCampaign?._isSuspended),
+			{timeout: 10_000},
+		).toBe(true);
+	}
+
+	/** Resume only after the external mutation, forcing access revalidation before realtime. */
+	async resumeFromBfcache (): Promise<void> {
+		await this.page.evaluate(() => {
 			window.dispatchEvent(new PageTransitionEvent("pageshow", {persisted: true}));
 		});
 	}
