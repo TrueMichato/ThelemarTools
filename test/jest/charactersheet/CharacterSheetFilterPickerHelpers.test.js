@@ -1,6 +1,18 @@
 /**
  * Pure helpers for filtered picker empty/reset grammar.
  * No jsdom in this project — DOM builders use a minimal createElement stub.
+ *
+ * IMPORTANT SCOPE NOTE: `placeAnchoredPopover`'s math here was never the bug behind the
+ * Add Item/Spell/Feat picker filter menus rendering in "random" screen locations — this
+ * suite's fake DOM has no notion of CSS containing blocks, so it cannot see (and never
+ * caught) a real root cause: `will-change: transform` on the shared `.ve-ui-modal__scroller`
+ * establishing a fixed-position containing block for these `position:fixed` menus, which
+ * made the browser resolve their `top`/`left` against the scroller's own box instead of the
+ * viewport. That is fixed in `css/charactersheet.css` (scoped `will-change: scroll-position`
+ * override for scrollers containing `.charsheet__modal-list`) and is covered by real-browser
+ * regression tests in `test/e2e/specs/inventory-item-picker-filters.spec.ts`, which also
+ * exercise the Spell/Feat pickers that share the same markup/CSS. Keep this file limited to
+ * pure math/DOM-stub assertions; containing-block/positioning regressions belong in Playwright.
  */
 
 import "./setup.js";

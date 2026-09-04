@@ -2093,6 +2093,183 @@ export class CharacterSheetPage {
 			return [];
 		});
 	}
+
+	// ──────────────────────────────────────────────────────────────
+	//  Add Item picker — Type/Rarity/Source filter dropdowns
+	//
+	// The picker is a generic `UiUtil.pGetShowModal` instance whose scroller shares markup
+	// (`.charsheet__modal-list`) and CSS with the Spell/Feat pickers' own filter dropdowns.
+	// Only the Item picker's Type/Rarity/Source and the Spell picker's Class/Subclass filters
+	// are positioned by `FilterPickerHelpers.placeAnchoredPopover` (`position:fixed` + computed
+	// viewport coordinates) — the Feat picker's Category/Source filters use a separate,
+	// CSS-only `position:absolute` mechanism local to `_pShowFeatPickerModal` in
+	// charactersheet-features.js, so they are not equivalent despite sharing markup/CSS.
+	// ──────────────────────────────────────────────────────────────
+
+	/** Open the Inventory tab's "Add Item" picker modal and wait for it to render. */
+	async openAddItemModal (): Promise<void> {
+		await this.switchToTab(this.tabInventory);
+		await this.page.locator("#charsheet-btn-add-item").click();
+		await this.itemPickerModal().waitFor({state: "visible"});
+	}
+
+	/** The topmost visible modal — valid while the Add Item picker is open. */
+	itemPickerModal (): Locator {
+		return this.page.locator(".ve-ui-modal__inner:visible").last();
+	}
+
+	/** The Add Item picker's own scrolling ancestor (`.ve-ui-modal__scroller`). */
+	itemPickerScroller (): Locator {
+		return this.page.locator(".ve-ui-modal__scroller:has(.charsheet__modal-list)").last();
+	}
+
+	/** Expand the picker's collapsible "Filters" section (Type/Rarity/Source dropdowns). */
+	async openItemPickerFilters (): Promise<void> {
+		const collapsible = this.itemPickerModal().locator(".charsheet__filter-collapsible");
+		const isOpen = await collapsible.evaluate(el => el.classList.contains("charsheet__filter-collapsible--open")).catch(() => false);
+		if (isOpen) return;
+		await this.itemPickerModal().locator(".charsheet__filter-toggle").click();
+		// `.charsheet__filter-collapsible--open` drives a `max-height`/`opacity` expand transition
+		// (0.25s/0.2s). Callers that immediately check the modal scroller's `scrollHeight` (e.g. to
+		// scroll it) need the section fully expanded first, not just the toggle class flipped.
+		await expect(async () => {
+			const opacity = await collapsible.evaluate(el => Number(getComputedStyle(el).opacity));
+			expect(opacity).toBeGreaterThanOrEqual(0.99);
+		}).toPass({timeout: 3000, intervals: [30, 60, 100, 200]});
+	}
+
+	/**
+	 * Locate one of the Item picker's `.charsheet__source-multiselect` filter widgets by its
+	 * static icon glyph (stable regardless of selection state, unlike the button's text, which
+	 * changes to e.g. "2 selected" once the user deselects an option). `root` defaults to the
+	 * Item picker's own modal; it is only meaningful for another modal that reuses these exact
+	 * Type/Rarity/Source icons, not a general cross-picker lookup (the Spell picker's Class
+	 * filter uses a different icon and is queried directly in its own spec instead).
+	 */
+	itemPickerFilterDropdown (kind: "type" | "rarity" | "source", root: Locator = this.itemPickerModal()): {container: Locator; button: Locator; menu: Locator} {
+		const icon = kind === "type" ? "📦" : kind === "rarity" ? "🌟" : "📚";
+		const container = root.locator(".charsheet__source-multiselect")
+			.filter({has: this.page.locator(".charsheet__source-multiselect-icon", {hasText: icon})});
+		return {
+			container,
+			button: container.locator(".charsheet__source-multiselect-btn"),
+			menu: container.locator(".charsheet__source-multiselect-dropdown"),
+		};
+	}
+
+	/** Read/set the Add Item picker's own scroller scroll position, in page-object terms. */
+	async getItemPickerScrollMetrics (): Promise<{scrollTop: number; scrollHeight: number; clientHeight: number}> {
+		return this.itemPickerScroller().evaluate(el => ({scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight}));
+	}
+
+	/** Scroll the Add Item picker's scroller to the bottom and return the resulting scrollTop. */
+	async scrollItemPickerToBottom (): Promise<number> {
+		return this.itemPickerScroller().evaluate(el => { el.scrollTop = el.scrollHeight; return el.scrollTop; });
+	}
+
+	/**
+	 * Click a locator by dispatching a raw `click` event, bypassing Playwright's actionability
+	 * auto-scroll-into-view. Needed when a test has deliberately scrolled a container and a normal
+	 * `.click()` would silently re-scroll the target into view first, undoing that scroll.
+	 */
+	async clickWithoutAutoScroll (locator: Locator): Promise<void> {
+		await locator.evaluate(el => el.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true})));
+	}
+
+	/** Toggle the site's night-mode theme classes on `<html>`, for day/night parity checks. */
+	async enableNightMode (): Promise<void> {
+		await this.page.evaluate(() => document.documentElement.classList.add("ve-night-mode", "ve-night-mode--standard"));
+	}
+
+	/**
+	 * Wait for a filter dropdown's open/close transition (opacity fade + height slide, driven by
+	 * `--cs-transition-normal`) to fully settle before a caller measures its box. A fixed sleep is
+	 * unreliable here: CSS transitions are wall-clock-timed in principle, but on a contended/shared
+	 * machine this environment has been observed to visibly stretch a nominal 250ms transition well
+	 * past 1s (main-thread/compositor starvation, not a product bug). Polling actual computed
+	 * opacity is robust to both a fast, quiet machine and a slow, loaded one.
+	 */
+	async waitForFilterMenuSettled (menu: Locator, timeoutMs = 5000): Promise<void> {
+		await expect(async () => {
+			const opacity = await menu.evaluate(el => Number(getComputedStyle(el).opacity));
+			expect(opacity).toBeGreaterThanOrEqual(0.99);
+		}).toPass({timeout: timeoutMs, intervals: [30, 60, 100, 200]});
+	}
+
+	/**
+	 * Reads an open filter menu's computed `transition-property` list. Root cause #2 was
+	 * `transition: all` on `.charsheet__source-multiselect-dropdown`, which swept up discrete
+	 * (non-interpolable) properties like `position`/`top`/`left` and held the menu at its old
+	 * position for ~200ms after every open. Every geometry assertion elsewhere in this suite calls
+	 * `waitForFilterMenuSettled` first, so none of them would notice a regression back to
+	 * `transition: all` (the menu still snaps to the right place once the transition ends) — this
+	 * exists to guard the property list itself, independent of timing.
+	 */
+	async getFilterMenuTransitionProperties (menu: Locator): Promise<string[]> {
+		const raw = await menu.evaluate(el => getComputedStyle(el).transitionProperty);
+		return raw.split(",").map(s => s.trim()).filter(Boolean);
+	}
+
+	/** Open the Features tab's "Add Feat" picker modal and wait for it to render. */
+	async openAddFeatModal (): Promise<void> {
+		await this.switchToTab(this.tabFeatures);
+		await this.page.locator("#charsheet-add-feat").click();
+		await this.page.locator(".ve-ui-modal__inner:visible").last().waitFor({state: "visible"});
+	}
+
+	/**
+	 * Locate the Feat picker's Category filter (its only always-present filter dropdown). Unlike
+	 * the Item/Spell pickers, this positions via a local CSS-only `position:absolute` mechanism
+	 * (`_pShowFeatPickerModal`'s `positionDropdown` in charactersheet-features.js), not
+	 * `FilterPickerHelpers.placeAnchoredPopover` — so it was never subject to the containing-block
+	 * bug itself, but its modal shares the touched `.ve-ui-modal__scroller:has(.charsheet__modal-list)`
+	 * CSS rule, so it still needs a sanity check after that rule changes.
+	 */
+	featPickerCategoryDropdown (): {button: Locator; menu: Locator} {
+		const modal = this.page.locator(".ve-ui-modal__inner:visible").last();
+		const container = modal.locator(".charsheet__category-multiselect");
+		return {
+			button: container.locator(".charsheet__source-multiselect-btn"),
+			menu: container.locator(".charsheet__source-multiselect-dropdown"),
+		};
+	}
+
+	/** Open the Spells tab's "Add Spell" picker modal and wait for it to render. */
+	async openAddSpellModal (): Promise<void> {
+		await this.switchToTab(this.tabSpells);
+		await this.page.locator("#charsheet-btn-add-spell").click();
+		await this.page.locator(".ve-ui-modal__inner:visible").last().waitFor({state: "visible"});
+	}
+
+	/**
+	 * Locate the Spell picker's always-visible Class filter (identified by its sword icon).
+	 * Positions via the same `FilterPickerHelpers.placeAnchoredPopover` (`position:fixed` +
+	 * computed viewport coordinates) as the Item picker's Type/Rarity/Source filters, so it is
+	 * subject to the same containing-block fix.
+	 */
+	spellPickerClassDropdown (): {button: Locator; menu: Locator} {
+		const modal = this.page.locator(".ve-ui-modal__inner:visible").last();
+		const classDd = modal.locator(".charsheet__source-multiselect")
+			.filter({has: this.page.locator(".charsheet__source-multiselect-icon", {hasText: "⚔️"})});
+		return {
+			button: classDd.locator(".charsheet__source-multiselect-btn"),
+			menu: classDd.locator(".charsheet__source-multiselect-dropdown"),
+		};
+	}
+
+	/**
+	 * Spawn a character in-memory via `window.charSheet.spawn` (the fast test-setup path — see
+	 * `spawn.spec.ts`) and assert the spawn left nothing unresolved.
+	 */
+	async spawnCharacter (spec: string): Promise<void> {
+		const result = await this.page.evaluate(async (spawnSpec) => {
+			const cs = (globalThis as any).charSheet;
+			const report = await cs.spawn(spawnSpec, {save: false});
+			return {unresolved: report.unresolved, unhandledPrompts: report.unhandledPrompts};
+		}, spec);
+		expect(result.unresolved, `spawn(${spec}) left choices unresolved`).toEqual([]);
+		expect(result.unhandledPrompts, `spawn(${spec}) opened an unhandled prompt`).toEqual([]);
+	}
 }
 
 // ──────────────────────────────────────────────────────────────────
