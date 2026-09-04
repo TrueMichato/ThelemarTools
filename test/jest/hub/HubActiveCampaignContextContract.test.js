@@ -32,8 +32,8 @@ describe("device-scoped active campaign context contract", () => {
 		]);
 	});
 
-	it("records an accepted, implementation-pending decision with every required contract surface", () => {
-		expect(adr).toMatch(/^Status: Accepted contract; production implementation pending$/m);
+	it("records the implemented V2-T5 decision with every required contract surface", () => {
+		expect(adr).toMatch(/^Status: Accepted and implemented \(V2-T5\)$/m);
 		for (const heading of [
 			"## Persistence contract",
 			"## Context precedence",
@@ -50,6 +50,9 @@ describe("device-scoped active campaign context contract", () => {
 			"## Acceptance tests",
 		]) expect(adr).toContain(heading);
 		expect(adr).toContain("ADR 0011");
+		expect(adr).toContain("`campaign.active_context.v1`");
+		expect(adr).toContain("`?local=1`");
+		expect(adr).toContain("ADR 0015 / V2-T6");
 	});
 
 	it("defines account-bound device persistence and deterministic same-browser convergence", () => {
@@ -140,7 +143,7 @@ describe("device-scoped active campaign context contract", () => {
 		const dmVerify = dmScreen.indexOf("activeCampaign.pVerifyContext({campaignId})");
 		const dmAuthorize = dmScreen.indexOf("hubController.adoptVerifiedCampaign({");
 		const dmActivate = dmScreen.indexOf("campaignContext.pActivate()");
-		const dmBoard = dmScreen.indexOf("new Board({workspaceRepository})");
+		const dmBoard = dmScreen.indexOf("new Board({");
 		const dmRealtime = dmScreen.indexOf("new HubRealtimeClient({campaignId})");
 		expect(dmVerify).toBeGreaterThan(-1);
 		// DM authorization must be settled BEFORE any campaign brew is installed.

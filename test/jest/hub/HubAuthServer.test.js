@@ -54,7 +54,7 @@ describe("Hub durable GitHub registry flow", () => {
 		const response = await app.inject({method: "GET", url: "/api/meta"});
 		expect(response.json()).toEqual(expect.objectContaining({
 			protocolVersion: "3",
-			capabilities: ["auth.provider_registry.v1"],
+			capabilities: ["auth.provider_registry.v1", "campaign.active_context.v1"],
 			authProviders: [{
 				slug: "github",
 				label: "GitHub",

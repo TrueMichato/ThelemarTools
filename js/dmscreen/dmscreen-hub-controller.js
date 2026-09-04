@@ -13,6 +13,7 @@ export class DmScreenHubController {
 		fnClearTimeout = timer => clearTimeout(timer),
 		staleAfterMs = DEFAULT_STALE_AFTER_MS,
 		resyncDelayMs = DEFAULT_RESYNC_DELAY_MS,
+		pOnAuthoritativeAccessError = null,
 	}) {
 		if (!campaignId) throw new TypeError(`campaignId is required.`);
 		if (!api) throw new TypeError(`api is required.`);
@@ -24,6 +25,7 @@ export class DmScreenHubController {
 		this._fnClearTimeout = fnClearTimeout;
 		this._staleAfterMs = staleAfterMs;
 		this._resyncDelayMs = resyncDelayMs;
+		this._pOnAuthoritativeAccessError = pOnAuthoritativeAccessError;
 
 		this._campaign = null;
 		this._board = null;
@@ -211,6 +213,11 @@ export class DmScreenHubController {
 	}
 
 	handleWorkspaceLoadError (error) {
+		if (this._isAuthoritativeAccessError(error)) {
+			this._setAccessError(error);
+			void this._pOnAuthoritativeAccessError?.(error);
+			return;
+		}
 		this._state.workspace = "error";
 		this._setAccessState({
 			access: "unavailable",
@@ -219,10 +226,27 @@ export class DmScreenHubController {
 	}
 
 	handleRealtimeError (error) {
+		if (this._isAuthoritativeAccessError(error)) {
+			this._setAccessError(error);
+			void this._pOnAuthoritativeAccessError?.(error);
+			return;
+		}
 		this._state.sync = "stale";
 		this._state.message = this._getErrorMessage(error, "Live party updates are unavailable. The private workspace remains open.");
 		this._publishBoardStatus();
 		this._render();
+	}
+
+	_isAuthoritativeAccessError (error) {
+		return [401, 403, 404].includes(error?.status)
+			|| [
+				"AUTH_REQUIRED",
+				"UNAUTHENTICATED",
+				"FORBIDDEN",
+				"CAMPAIGN_NOT_FOUND",
+				"MEMBERSHIP_NOT_FOUND",
+				"CAMPAIGN_ARCHIVED",
+			].includes(error?.code);
 	}
 
 	_setAccessError (error) {
@@ -240,6 +264,13 @@ export class DmScreenHubController {
 			});
 			return;
 		}
+		if (error?.code === "CAMPAIGN_ARCHIVED") {
+			this._setAccessState({
+				access: "archived",
+				message: "This campaign is archived. Its live DM workspace is no longer available.",
+			});
+			return;
+		}
 		if (error?.status === 404 || ["CAMPAIGN_NOT_FOUND", "MEMBERSHIP_NOT_FOUND"].includes(error?.code)) {
 			this._setAccessState({
 				access: "access_lost",
@@ -251,6 +282,14 @@ export class DmScreenHubController {
 			access: "unavailable",
 			message: this._getErrorMessage(error, "Campaign services are unavailable. Your local DM Screen data was not opened or changed."),
 		});
+	}
+
+	_notifyAuthoritativeAccessLoss (error) {
+		if (this._pOnAuthoritativeAccessError) {
+			void this._pOnAuthoritativeAccessError(error);
+			return;
+		}
+		void this._pRevalidateAccess();
 	}
 
 	_setAccessState ({access, message}) {
@@ -286,6 +325,11 @@ export class DmScreenHubController {
 		if (!state) return;
 		this._state.workspace = state;
 		if (state === "error") {
+			if (this._isAuthoritativeAccessError(error)) {
+				this._setAccessError(error);
+				this._notifyAuthoritativeAccessLoss(error);
+				return;
+			}
 			this._state.message = this._getErrorMessage(error, "The last workspace save failed. Your latest changes remain in this tab.");
 		} else if (state === "conflict") {
 			this._state.message = "This workspace changed on another device. Review which version to keep.";
@@ -319,7 +363,10 @@ export class DmScreenHubController {
 					access: "access_lost",
 					message: reason || "Your session or campaign access changed. Reload or sign in again.",
 				});
-				void this._pRevalidateAccess();
+				this._notifyAuthoritativeAccessLoss(Object.assign(
+					new Error(reason || "Campaign access changed."),
+					{code: "FORBIDDEN", status: 403},
+				));
 				return;
 			default:
 				return;
@@ -368,6 +415,10 @@ export class DmScreenHubController {
 				access: "archived",
 				message: "This campaign was archived. Return to the Campaign Hub for details.",
 			});
+			this._notifyAuthoritativeAccessLoss(Object.assign(
+				new Error("Campaign archived."),
+				{code: "CAMPAIGN_ARCHIVED", status: 409},
+			));
 			return;
 		}
 		if (
@@ -379,6 +430,10 @@ export class DmScreenHubController {
 				access: "permission_denied",
 				message: "Your campaign role changed, so this private DM workspace is now closed.",
 			});
+			this._notifyAuthoritativeAccessLoss(Object.assign(
+				new Error("Campaign role no longer grants DM access."),
+				{code: "DM_ROLE_REQUIRED", status: 403},
+			));
 		}
 	}
 

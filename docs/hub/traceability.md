@@ -31,5 +31,6 @@
 | One BFF replica in private V1 | `provider-comparison.md`; R-15 | single-VM Compose stack is inherently one replica | CI reconnect/replay and Phase 6G deploy-restart drill | shared-fanout ADR required before scale-out |
 | Provider client-IP authenticity | ADR 0009 (superseded); R-08 | `server/src/client-ip.js` retained but inactive on Oracle; Caddy is sole ingress and `HUB_TRUST_PROXY` names its fixed private address | `HubClientIp`, `HubWebSocket`; Phase 6G client-IP drill confirms real addresses reach rate limits | re-enable `HUB_CLIENT_IP_HEADER` only if a managed provider is adopted |
 | Quiet WebSocket survival | ADR 0010; `realtime-protocol.md` | 25-second server ping/pong heartbeat in `HubRealtime` | `HubRealtime`; managed-ingress idle drill pending | reconnect/resync fallback |
+| Whole-site active campaign context | ADR 0013; V2-T5; `active-campaign-context.md` | active-context coordinator/store/channel, switcher, site bootstrap, surface defaults, temporary brew/rules adapters, `campaign.active_context.v1` | coordinator/navigation/bootstrap/privacy Jest; four killed mutants; production-stack active-context Chromium journeys | explicit `?local=1`; reload after blocked teardown |
 
 Use `not implemented` explicitly. A planned row must not be presented as current capability.

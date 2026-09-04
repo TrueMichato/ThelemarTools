@@ -135,6 +135,59 @@ describe("Character Sheet hub teardown owners", () => {
 		// different campaign's rules here would desynchronise them.
 		expect(host.shouldActivateContext({campaignId: "44444444-4444-4444-8444-444444444444"})).toBe(false);
 	});
+
+	it("conceals private character state before later teardown stages run", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._isHubCharacter = true;
+		page._currentCharacterId = "private-character";
+		page._state._data.name = "Private Character";
+		const host = page._getHubActiveCampaignHost();
+
+		await host.pTeardownProjections();
+
+		expect(page._currentCharacterId).toBeNull();
+		expect(page._state._data.name).toBe("");
+	});
+
+	it("places the access-loss alert outside the render-replaceable sheet root", () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._isHubCharacter = true;
+		page._currentCharacterId = "private-character";
+		page._state._data.name = "Private Character";
+		const calls = [];
+		const message = {setAttribute: (...args) => calls.push(["setAttribute", ...args])};
+		const main = {
+			before: value => calls.push(["before", value]),
+			hidden: false,
+			replaceChildren: () => calls.push(["replaceChildren"]),
+		};
+		const staleMessage = {remove: () => calls.push(["removeStale"])};
+		const previousDocument = globalThis.document;
+		globalThis.document = {
+			body: {append: value => calls.push(["append", value])},
+			createElement: () => message,
+			getElementById: () => staleMessage,
+			querySelector: () => main,
+		};
+
+		try {
+			page._concealHubPrivateCharacter();
+		} finally {
+			globalThis.document = previousDocument;
+		}
+
+		expect(calls).toContainEqual(["replaceChildren"]);
+		expect(main.hidden).toBe(true);
+		expect(calls).toContainEqual(["removeStale"]);
+		expect(message).toMatchObject({
+			id: "charsheet-campaign-access-ended",
+			className: "ve-flex-vh-center ve-h-100 ve-muted",
+			textContent: "Campaign access ended. Reload or return to the Campaign Hub.",
+		});
+		expect(calls).toContainEqual(["setAttribute", "role", "alert"]);
+		expect(calls).toContainEqual(["before", message]);
+		expect(calls).not.toContainEqual(["append", message]);
+	});
 });
 
 describe("carry authority basis follows the campaign context lifecycle", () => {

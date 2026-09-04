@@ -43,6 +43,9 @@ export class PartyTracker extends DmScreenPanelAppBase {
 			case "hubCampaignStatus":
 				this._comp?.setHubCampaignStatus(payload);
 				return;
+			case "hubCampaignContext":
+				this._comp?.setHubCampaignContext(payload);
+				return;
 			case "hubPartyInventory":
 				this._comp?.setHubPartyInventory(payload);
 		}
@@ -57,7 +60,8 @@ class PartyTrackerRoot {
 		this._wrpPanel = wrpPanel;
 
 		this._characters = [];
-		this._settings = PartyTrackerCharacterSerializer.deserializeSettings({});
+		this._localSettings = PartyTrackerCharacterSerializer.deserializeSettings({});
+		this._settings = this._getEffectiveSettings();
 		this._dcCalc = null;
 		this._wrpChars = null;
 		this._wrpLinkedRows = null;
@@ -71,6 +75,17 @@ class PartyTrackerRoot {
 		// Board state so linked stash truth is not persisted to localStorage.
 		this._hubPartyInventory = null;
 		this._hubCampaignStatus = board.getHubCampaignStatus?.() || null;
+	}
+
+	_getEffectiveSettings () {
+		const rules = this._board.getHubCampaignContext?.()?.rulesVersion?.rules;
+		return rules ? {...this._localSettings, ...rules} : this._localSettings;
+	}
+
+	setHubCampaignContext () {
+		this._settings = this._getEffectiveSettings();
+		this._characters.forEach(character => character.settings = this._settings);
+		if (this._wrpPanel) this.render(this._wrpPanel);
 	}
 
 	render (eleParent) {
@@ -506,8 +521,12 @@ class PartyTrackerRoot {
 
 	_buildSettingsModal () {
 		const wrp = ee`<div class="dm-party__settings dm-party__settings--floating" role="dialog" aria-modal="false" aria-label="Party Tracker Settings"></div>`;
+		const isCampaignManaged = !!this._board.getHubCampaignContext?.()?.rulesVersion?.rules;
 
-		ee`<div class="dm-party__settings-title">Party Tracker Settings</div>`.appendTo(wrp);
+		ee`<div class="dm-party__settings-title">${isCampaignManaged ? "Campaign Rules" : "Party Tracker Settings"}</div>`.appendTo(wrp);
+		if (isCampaignManaged) {
+			ee`<div class="ve-muted ve-small ve-mb-2">These settings come from the active campaign and are not saved into this DM workspace.</div>`.appendTo(wrp);
+		}
 
 		/* Sub-toggles container — rebuilt when TGTT toggled */
 		const wrpTgtt = ee`<div class="dm-party__settings-group"></div>`;
@@ -523,7 +542,7 @@ class PartyTrackerRoot {
 				["thelemar_linguisticsBonus", "Linguistics Bonus (+1/language)"],
 				["thelemar_criticalRolls", "Critical Rolls (Nat 1: \u22125, Nat 20: +5)"],
 			]) {
-				const cbx = ee`<input type="checkbox" ${this._settings[key] ? "checked" : ""} aria-label="${label}">`
+				const cbx = ee`<input type="checkbox" ${this._settings[key] ? "checked" : ""} ${isCampaignManaged ? "disabled" : ""} aria-label="${label}">`
 					.onn("change", () => {
 						this._settings[key] = cbx.prop("checked");
 						this._refreshAll();
@@ -532,7 +551,7 @@ class PartyTrackerRoot {
 			}
 
 			/* Exhaustion rules */
-			const selExh = ee`<select class="ve-form-control ve-input-xs" style="width: 110px;" aria-label="Exhaustion rule set">
+			const selExh = ee`<select class="ve-form-control ve-input-xs" style="width: 110px;" ${isCampaignManaged ? "disabled" : ""} aria-label="Exhaustion rule set">
 				<option value="thelemar" ${this._settings.exhaustionRules === "thelemar" ? "selected" : ""}>Thelemar</option>
 				<option value="2024" ${this._settings.exhaustionRules === "2024" ? "selected" : ""}>2024</option>
 				<option value="standard" ${this._settings.exhaustionRules === "standard" ? "selected" : ""}>Standard (2014)</option>
@@ -542,7 +561,7 @@ class PartyTrackerRoot {
 		};
 
 		/* TGTT Master Toggle */
-		const cbxTgtt = ee`<input type="checkbox" ${this._settings.enableTgtt ? "checked" : ""} aria-label="Enable Thelemar homebrew rules">`
+		const cbxTgtt = ee`<input type="checkbox" ${this._settings.enableTgtt ? "checked" : ""} ${isCampaignManaged ? "disabled" : ""} aria-label="Enable Thelemar homebrew rules">`
 			.onn("change", () => {
 				this._settings.enableTgtt = cbxTgtt.prop("checked");
 				renderTgttSubToggles();
@@ -573,7 +592,8 @@ class PartyTrackerRoot {
 	/* -------------------------------------------- */
 
 	setStateFrom (toLoad) {
-		this._settings = PartyTrackerCharacterSerializer.deserializeSettings(toLoad?.settings || {});
+		this._localSettings = PartyTrackerCharacterSerializer.deserializeSettings(toLoad?.settings || {});
+		this._settings = this._getEffectiveSettings();
 		this._characters = [];
 		if (toLoad?.characters?.length) {
 			for (const raw of toLoad.characters) {
@@ -585,7 +605,7 @@ class PartyTrackerRoot {
 
 	getSaveableState () {
 		return {
-			settings: PartyTrackerCharacterSerializer.serializeSettings(this._settings),
+			settings: PartyTrackerCharacterSerializer.serializeSettings(this._localSettings),
 			characters: this._characters
 				.filter(c => !this._hubCharacterIds.has(c.data?.id))
 				.map(c => PartyTrackerCharacterSerializer.serialize(c.getSaveableData())),

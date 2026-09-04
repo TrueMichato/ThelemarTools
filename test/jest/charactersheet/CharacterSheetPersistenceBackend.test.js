@@ -48,6 +48,30 @@ function makeFakeBackend () {
 	};
 }
 
+const makeDeferred = () => {
+	let resolve;
+	let reject;
+	const promise = new Promise((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return {promise, resolve, reject};
+};
+
+function makeConcealDocument () {
+	const main = {
+		hidden: false,
+		replaceChildren () {},
+		before () {},
+	};
+	return {
+		body: {append () {}},
+		createElement: () => ({setAttribute () {}}),
+		getElementById: () => null,
+		querySelector: () => main,
+	};
+}
+
 // Install a fake backend onto the real StorageUtil instance, returning a restore fn.
 const _STORAGE_METHODS = ["syncGet", "syncSet", "syncRemove", "pGet", "pSet"];
 function installBackend (backend) {
@@ -235,5 +259,150 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 
 		consoleError.mockRestore();
 		prompt.mockRestore();
+	});
+
+	it("keeps the private model concealed when a save conflict arrives after access loss", async () => {
+		const state = new CharacterSheetState();
+		state.setName("Private Character");
+		const host = makeHost({state});
+		host._currentCharacterId = "private-id";
+		host._characterLoadGeneration = 1;
+		host._isHubCharacter = true;
+		host._reconcileClassFeatures = jest.fn();
+		host._renderCharacter = jest.fn();
+		host._updateSaveIndicator = jest.fn();
+		const loadSpy = jest.spyOn(host._state, "loadFromJson");
+		const deferredUpsert = makeDeferred();
+		const conflict = Object.assign(new Error("Character is being edited on another device."), {
+			code: "CHARACTER_CONFLICT",
+			recovery: {server: {name: "Private Character"}},
+		});
+		host._characterRepository = {
+			isRescueMirrorEnabled: false,
+			pUpsert: jest.fn(() => deferredUpsert.promise),
+			pResolveConflict: jest.fn(),
+		};
+		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean");
+		const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+		const previousDocument = globalThis.document;
+		globalThis.document = makeConcealDocument();
+
+		try {
+			const pendingSave = host._saveCurrentCharacter();
+			CharacterSheetPage.prototype._concealHubPrivateCharacter.call(host);
+			deferredUpsert.reject(conflict);
+
+			await expect(pendingSave).resolves.toBe(false);
+			expect(host._state.toJson().name).toBe("");
+			expect(loadSpy).not.toHaveBeenCalled();
+			expect(host._renderCharacter).not.toHaveBeenCalled();
+			expect(host._updateSaveIndicator).toHaveBeenCalledTimes(1);
+			expect(host._updateSaveIndicator).toHaveBeenCalledWith("saving");
+			expect(prompt).not.toHaveBeenCalled();
+			expect(host._characterRepository.pResolveConflict).not.toHaveBeenCalled();
+		} finally {
+			globalThis.document = previousDocument;
+			consoleError.mockRestore();
+			prompt.mockRestore();
+		}
+	});
+
+	it("does not re-adopt a resolved server document after access loss conceals the character", async () => {
+		const state = new CharacterSheetState();
+		state.setName("Private Character");
+		const host = makeHost({state});
+		host._currentCharacterId = "private-id";
+		host._characterLoadGeneration = 1;
+		host._isHubCharacter = true;
+		host._reconcileClassFeatures = jest.fn();
+		host._renderCharacter = jest.fn();
+		const loadSpy = jest.spyOn(host._state, "loadFromJson");
+		const deferredPrompt = makeDeferred();
+		const deferredResolve = makeDeferred();
+		const conflict = Object.assign(new Error("Character is being edited on another device."), {
+			code: "CHARACTER_CONFLICT",
+			recovery: {server: {name: "Private Character"}},
+		});
+		host._characterRepository = {
+			isRescueMirrorEnabled: false,
+			pUpsert: jest.fn(async () => { throw conflict; }),
+			pResolveConflict: jest.fn(() => deferredResolve.promise),
+		};
+		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockImplementation(() => deferredPrompt.promise);
+		const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+		const previousDocument = globalThis.document;
+		globalThis.document = makeConcealDocument();
+
+		try {
+			const pendingSave = host._saveCurrentCharacter();
+			await Promise.resolve();
+			expect(prompt).toHaveBeenCalledTimes(1);
+
+			deferredPrompt.resolve(false);
+			await Promise.resolve();
+			expect(host._characterRepository.pResolveConflict).toHaveBeenCalledWith({
+				characterId: "private-id",
+				choice: "server",
+			});
+
+			CharacterSheetPage.prototype._concealHubPrivateCharacter.call(host);
+			deferredResolve.resolve({name: "Private Character"});
+
+			await expect(pendingSave).resolves.toBe(false);
+			expect(host._state.toJson().name).toBe("");
+			expect(loadSpy).not.toHaveBeenCalled();
+			expect(host._renderCharacter).not.toHaveBeenCalled();
+		} finally {
+			globalThis.document = previousDocument;
+			consoleError.mockRestore();
+			prompt.mockRestore();
+		}
+	});
+
+	it("does not retry a live-conflict save after access loss conceals the character", async () => {
+		const state = new CharacterSheetState();
+		state.setName("Private Character");
+		const host = makeHost({state});
+		host._currentCharacterId = "private-id";
+		host._characterLoadGeneration = 1;
+		host._isHubCharacter = true;
+		host._reconcileClassFeatures = jest.fn();
+		host._renderCharacter = jest.fn();
+		const loadSpy = jest.spyOn(host._state, "loadFromJson");
+		const deferredPrompt = makeDeferred();
+		const conflict = Object.assign(new Error("Live character edits overlap server changes."), {
+			code: "CHARACTER_LIVE_CONFLICT",
+			recovery: {server: {name: "Private Character"}},
+		});
+		host._characterRepository = {
+			isRescueMirrorEnabled: false,
+			pUpsert: jest.fn(async () => { throw conflict; }),
+			getLiveConflictRecovery: jest.fn(() => conflict.recovery),
+			clearLiveConflict: jest.fn(),
+		};
+		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockImplementation(() => deferredPrompt.promise);
+		const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+		const previousDocument = globalThis.document;
+		globalThis.document = makeConcealDocument();
+
+		try {
+			const pendingSave = host._saveCurrentCharacter();
+			await Promise.resolve();
+			expect(prompt).toHaveBeenCalledTimes(1);
+
+			CharacterSheetPage.prototype._concealHubPrivateCharacter.call(host);
+			deferredPrompt.resolve(true);
+
+			await expect(pendingSave).resolves.toBe(false);
+			expect(host._characterRepository.pUpsert).toHaveBeenCalledTimes(1);
+			expect(host._characterRepository.clearLiveConflict).toHaveBeenCalledWith({characterId: "private-id"});
+			expect(host._state.toJson().name).toBe("");
+			expect(loadSpy).not.toHaveBeenCalled();
+			expect(host._renderCharacter).not.toHaveBeenCalled();
+		} finally {
+			globalThis.document = previousDocument;
+			consoleError.mockRestore();
+			prompt.mockRestore();
+		}
 	});
 });
