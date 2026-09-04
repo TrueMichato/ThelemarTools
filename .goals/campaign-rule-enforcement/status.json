@@ -41,6 +41,11 @@
       "iteration": 6,
       "verdict": "FAIL",
       "summary": "PostgreSQL and destination owner mutants are false-positive infrastructure kills caused by a missing mutation-sandbox module, and PR evidence overstates them."
+    },
+    {
+      "iteration": 5,
+      "verdict": "FAIL",
+      "summary": "Store-owner mutation probes fail on a missing fixture module and are falsely counted as killed; the PR handoff therefore overstates required evidence."
     }
   ]
 }
