@@ -291,8 +291,9 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-rules-policy-loading")).toBeHidden();
 		await expect(this.page.locator("#campaign-rules-form")).toBeHidden();
 		await expect(this.page.locator("#campaign-rules-list .hub-rule-row")).toHaveCount(10);
-		await expect(this.page.locator(".hub-rule-status--planned")).toHaveCount(3);
-		await expect(manager).not.toContainText("Enforced");
+		await expect(this.page.locator("#campaign-rules-list .hub-rule-status--planned")).toHaveCount(3);
+		await expect(this.page.locator("#campaign-rules-list .hub-rule-status--enforced")).toHaveCount(2);
+		await expect(this.page.locator("#campaign-rules-list .hub-rule-status--advisory")).toHaveCount(5);
 
 		const search = this.page.locator("#campaign-rules-search");
 		await search.fill("jumping");
@@ -301,7 +302,7 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-rules-empty")).toBeVisible();
 		await search.fill("");
 		await this.page.locator("#campaign-rules-support").selectOption("advisory");
-		await expect(this.page.locator("#campaign-rules-list .hub-rule-row")).toHaveCount(7);
+		await expect(this.page.locator("#campaign-rules-list .hub-rule-row")).toHaveCount(5);
 		await this.page.locator("#campaign-rules-support").selectOption("all");
 
 		const jumping = this.page.locator("[data-campaign-rule-control='tgtt.jumping']");

@@ -1148,6 +1148,7 @@ export class MemoryHubStore {
 		schemaVersion,
 		clientImportId,
 		idempotencyKey,
+		protocolVersion = null,
 	}) {
 		validateCloudCharacterData(data);
 		const prior = this._getReceipt({accountId, idempotencyKey});
@@ -1157,7 +1158,7 @@ export class MemoryHubStore {
 		const rulesVersion = campaign?.activeRulesVersionId
 			? this._rulesVersions.get(campaign.activeRulesVersionId)
 			: null;
-		if (data?.carry) assertCampaignRuleWriteFence({rulesVersion, data});
+		if (data?.carry) assertCampaignRuleWriteFence({rulesVersion, data, protocolVersion});
 		const imported = [...this._characters.values()].find(it =>
 			it.ownerAccountId === accountId
 			&& it.clientImportId === clientImportId
@@ -1278,6 +1279,7 @@ export class MemoryHubStore {
 		leaseEpoch,
 		patches,
 		idempotencyKey,
+		protocolVersion = null,
 	}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
 		if (prior) return prior;
@@ -1309,7 +1311,7 @@ export class MemoryHubStore {
 		const rulesVersion = campaign?.activeRulesVersionId
 			? this._rulesVersions.get(campaign.activeRulesVersionId)
 			: null;
-		if (data?.carry) assertCampaignRuleWriteFence({rulesVersion, data});
+		if (data?.carry) assertCampaignRuleWriteFence({rulesVersion, data, protocolVersion});
 		validateCloudCharacterData(data);
 		this._setCharacterData({character, data});
 		character.revision++;

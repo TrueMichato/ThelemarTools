@@ -25,7 +25,6 @@ const SUPPORTED_RULE_IDS = Object.freeze([
 ]);
 
 const ENFORCED_RULE_IDS = new Set([
-	"tgtt.enabled",
 	"tgtt.carry-weight",
 	"tgtt.encumbrance-tiers",
 ]);
@@ -36,7 +35,7 @@ const SURFACES_TGTT_ENFORCED = Object.freeze({
 	levelUp: "implemented",
 	quickBuild: "implemented",
 	respec: "implemented",
-	contentFilter: "implemented",
+	contentFilter: "planned",
 	characterWrite: "implemented",
 	hubAdmin: "implemented",
 });
@@ -48,6 +47,17 @@ const SURFACES_TGTT_ADVISORY = Object.freeze({
 	quickBuild: "planned",
 	respec: "planned",
 	contentFilter: "planned",
+	characterWrite: "planned",
+	hubAdmin: "implemented",
+});
+
+const SURFACES_TGTT_MASTER = Object.freeze({
+	characterOpen: "implemented",
+	builder: "implemented",
+	levelUp: "implemented",
+	quickBuild: "implemented",
+	respec: "implemented",
+	contentFilter: "implemented",
 	characterWrite: "planned",
 	hubAdmin: "implemented",
 });
@@ -153,11 +163,11 @@ export const CAMPAIGN_RULES_CATALOG = Object.freeze([
 		title: "Thelemar rules",
 		summary: "Apply the campaign's existing Thelemar settings overlay.",
 		details: "The Character Sheet reads this setting without changing a player's personal settings. Downstream choice enforcement is not included.",
-		lifecycle: "implemented_enforced",
-		supportLabel: "Enforced",
+		lifecycle: "implemented_advisory",
+		supportLabel: "Advisory",
 		isSelectable: true,
 		parameter: {key: "enabled", type: "boolean", label: "Enable Thelemar rules", default: true},
-		implementationStatus: SURFACES_TGTT_ENFORCED,
+		implementationStatus: SURFACES_TGTT_MASTER,
 		compatibility: {requires: [], conflicts: []},
 	},
 	{
@@ -200,7 +210,7 @@ export const CAMPAIGN_RULES_CATALOG = Object.freeze([
 		applicability: {editions: ["2014", "2024"], scope: "campaign"},
 		title: "Thelemar carry capacity",
 		summary: "Use the established Thelemar carry-capacity setting for campaign characters.",
-		details: "The Character Sheet already applies this calculation from the transient campaign settings overlay.",
+		details: "The Character Sheet and DM projection apply this calculation from the transient campaign overlay; protocol-4 carry writes are fenced to the active policy identity.",
 		lifecycle: "implemented_enforced",
 		supportLabel: "Enforced",
 		isSelectable: true,
@@ -215,7 +225,7 @@ export const CAMPAIGN_RULES_CATALOG = Object.freeze([
 		applicability: {editions: ["2014", "2024"], scope: "campaign"},
 		title: "Thelemar encumbrance tiers",
 		summary: "Use the campaign's existing tiered-encumbrance house extension.",
-		details: "This is a ThelemarTools house extension, not a rule published in the Traveler's Guide to Thelemar.",
+		details: "This is a ThelemarTools house extension, not a rule published in the Traveler's Guide to Thelemar. Protocol-4 carry writes are fenced to the active policy identity.",
 		lifecycle: "implemented_enforced",
 		supportLabel: "Enforced",
 		isSelectable: true,

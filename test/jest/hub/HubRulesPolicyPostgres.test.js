@@ -231,6 +231,38 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 		expect(postgresEvidence.events.map(event => event.payload.operation)).toEqual(["publish", "publish", "rollback"]);
 	});
 
+	it("rejects a stale schema-v2 character create without a partial PostgreSQL write", async () => {
+		const store = new PostgresHubStore({pool});
+		const account = await store.pUpsertOAuthAccount({
+			provider: "test",
+			providerSubject: `rules-fence-${crypto.randomUUID()}`,
+			displayName: "Rules Fence",
+		});
+		const campaign = (await store.pCreateCampaign({
+			accountId: account.id,
+			name: "Rules fence",
+			idempotencyKey: command("rules-fence-campaign"),
+		})).campaign;
+		await store.pCreateAndActivateRulesPolicy({
+			accountId: account.id,
+			campaignId: campaign.id,
+			policy: createDefaultCampaignRulesPolicy(),
+			expectedActiveRulesVersionId: null,
+			idempotencyKey: command("rules-fence-policy"),
+		});
+		await expect(store.pCreateCharacter({
+			accountId: account.id,
+			campaignId: campaign.id,
+			clientImportId: "stale",
+			schemaVersion: 1,
+			data: {carry: {basis: {kind: "campaign", rulesVersionId: crypto.randomUUID(), settingsDigest: "digest"}}},
+			protocolVersion: "4",
+			idempotencyKey: command("rules-fence-character"),
+		})).rejects.toEqual(expect.objectContaining({code: "POLICY_VERSION_STALE"}));
+		const count = await pool.query(`SELECT count(*)::integer AS count FROM hub.characters WHERE campaign_id = $1`, [campaign.id]);
+		expect(count.rows[0].count).toBe(0);
+	});
+
 	it("serializes concurrent writers against one base and rolls the stale transaction back fully", async () => {
 		const store = new PostgresHubStore({pool});
 		const account = await store.pUpsertOAuthAccount({
@@ -238,6 +270,7 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 			providerSubject: `rules-concurrency-${crypto.randomUUID()}`,
 			displayName: "Rules Concurrency DM",
 		});
+
 		const campaign = (await store.pCreateCampaign({
 			accountId: account.id,
 			name: "Rules concurrency",

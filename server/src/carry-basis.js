@@ -3,6 +3,7 @@ import {
 	createCampaignCarryBasis,
 	createDetachedCarryBasis,
 } from "../../js/hub/hub-carry-authority.js";
+import {CAMPAIGN_RULE_PROTOCOL_VERSION} from "../../js/hub/hub-campaign-rule-evaluator.js";
 import {getAuthoritativeCampaignRuleDecision} from "./campaign-rule-authority.js";
 
 /**
@@ -41,6 +42,9 @@ export function getExpectedCarryBasis ({character, campaign = null, rulesVersion
 	const decision = getAuthoritativeCampaignRuleDecision({
 		rulesVersion,
 		personalSettings: ownSettings,
+		// This is an internal server projection, not an unversioned client write. It still
+		// names the exact protocol contract used to evaluate the active policy.
+		protocolVersion: CAMPAIGN_RULE_PROTOCOL_VERSION,
 		surface: "characterOpen",
 	});
 	const effectiveSettings = decision.effectiveSettings;

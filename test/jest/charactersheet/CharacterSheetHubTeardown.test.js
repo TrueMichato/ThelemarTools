@@ -7,8 +7,24 @@
  * load. These tests pin the exclusive teardown owners and that leak specifically.
  */
 import "./setup.js";
+import {CAMPAIGN_RULE_PROTOCOL_VERSION, evaluateCampaignRules} from "../../../js/hub/hub-campaign-rule-evaluator.js";
+import {CAMPAIGN_RULES_POLICY_CAPABILITY, createDefaultCampaignRulesPolicy} from "../../../js/hub/hub-campaign-rules.js";
 
 const CAMPAIGN_RULES = {thelemar_carryWeight: false, thelemar_criticalRolls: false};
+
+function schemaV2Context (id, mutate = () => {}) {
+	const policy = createDefaultCampaignRulesPolicy();
+	mutate(policy);
+	const rulesVersion = {id, version: 1, schemaVersion: 2, catalogVersion: 1, rules: policy};
+	rulesVersion.ruleDecision = evaluateCampaignRules({
+		capabilities: [CAMPAIGN_RULES_POLICY_CAPABILITY],
+		personalSettings: {},
+		protocolVersion: CAMPAIGN_RULE_PROTOCOL_VERSION,
+		rulesVersion,
+		surface: "characterOpen",
+	});
+	return {rulesVersion, brewBundle: null};
+}
 
 let CharacterSheetPage;
 let originalCopyFast;
@@ -202,7 +218,7 @@ describe("carry authority basis follows the campaign context lifecycle", () => {
 	 * existed with zero production call sites. These tests pin both halves of the lifecycle.
 	 */
 	const CONTEXT = {
-		rulesVersion: {id: "rules-1", rules: CAMPAIGN_RULES},
+		rulesVersion: {id: "rules-1", version: 1, schemaVersion: 1, catalogVersion: 1, rules: CAMPAIGN_RULES},
 		brewBundle: {contentHash: "brew-1"},
 	};
 
@@ -271,5 +287,64 @@ describe("carry authority basis follows the campaign context lifecycle", () => {
 		page._clearHubRules();
 		expect(() => page._clearHubRules()).not.toThrow();
 		expect(page._state.getCarryAuthorityBasis().kind).toBe("detached");
+	});
+
+	it("drops the retained context when a realtime replacement fails", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		await activate(page);
+		page._hubApi = {pGetCampaignContext: async () => { throw new Error("offline"); }};
+		page._hubCampaignId = "campaign";
+		page._renderCharacter = () => {};
+
+		await page._pRefreshHubRules({rulesVersionId: "rules-2"});
+
+		expect(page._hubContext).toBeNull();
+		expect(page._state.getSettings().thelemar_carryWeight).toBe(true);
+		expect(page._state.getCarryAuthorityBasis().kind).toBe("detached");
+	});
+
+	it("replaces schema-v2 decisions atomically across master-toggle changes and rollback", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		const off = schemaV2Context("rules-off", policy => {
+			policy.rules.find(rule => rule.id === "tgtt.enabled").parameters.enabled = false;
+			policy.rules.find(rule => rule.id === "rules.exhaustion.system").parameters.system = "2024";
+		});
+		await activate(page, off);
+		expect(page._state.getSettings()).toMatchObject({
+			enableTgtt: false,
+			thelemar_carryWeight: false,
+			thelemar_jumping: false,
+		});
+
+		await activate(page, schemaV2Context("rules-on", policy => {
+			policy.rules.find(rule => rule.id === "tgtt.jumping").parameters.enabled = false;
+		}));
+		expect(page._hubContext.rulesVersion.id).toBe("rules-on");
+		expect(page._state.getSettings()).toMatchObject({
+			enableTgtt: true,
+			thelemar_carryWeight: true,
+			thelemar_jumping: false,
+		});
+	});
+
+	it("ignores an older realtime replacement that resolves after the newest one", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		await activate(page, schemaV2Context("rules-1"));
+		let resolveOld;
+		let resolveNew;
+		const oldLoad = new Promise(resolve => resolveOld = resolve);
+		const newLoad = new Promise(resolve => resolveNew = resolve);
+		let call = 0;
+		page._hubApi = {pGetCampaignContext: () => (++call === 1 ? oldLoad : newLoad)};
+		page._hubCampaignId = "campaign";
+		page._renderCharacter = () => {};
+
+		const oldRefresh = page._pRefreshHubRules({rulesVersionId: "rules-2"});
+		const newRefresh = page._pRefreshHubRules({rulesVersionId: "rules-3"});
+		resolveNew(schemaV2Context("rules-3"));
+		expect(await newRefresh).toBe(true);
+		resolveOld(schemaV2Context("rules-2"));
+		expect(await oldRefresh).toBe(false);
+		expect(page._hubContext.rulesVersion.id).toBe("rules-3");
 	});
 });

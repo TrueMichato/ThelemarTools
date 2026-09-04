@@ -427,9 +427,9 @@ describe("basis resolution", () => {
 		const character = {campaignId: "c", data: {settings: {thelemar_carryWeight: true}}};
 		const overlaid = getExpectedCarryBasis({
 			character,
-			rulesVersion: {id: "r1", rules: {thelemar_carryWeight: false}},
+			rulesVersion: {id: "r1", version: 1, schemaVersion: 1, catalogVersion: 1, rules: {thelemar_carryWeight: false}},
 		});
-		const plain = getExpectedCarryBasis({character, rulesVersion: {id: "r1", rules: {thelemar_carryWeight: true}}});
+		const plain = getExpectedCarryBasis({character, rulesVersion: {id: "r1", version: 1, schemaVersion: 1, catalogVersion: 1, rules: {thelemar_carryWeight: true}}});
 		expect(overlaid.settingsDigest).not.toBe(plain.settingsDigest);
 	});
 });

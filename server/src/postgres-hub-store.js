@@ -1600,6 +1600,7 @@ export class PostgresHubStore {
 		schemaVersion,
 		clientImportId,
 		idempotencyKey,
+		protocolVersion = null,
 	}) {
 		validateCloudCharacterData(data);
 		const client = await this._pool.connect();
@@ -1630,6 +1631,7 @@ export class PostgresHubStore {
 						}
 						: null,
 					data,
+					protocolVersion,
 				});
 			}
 			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 3))`, [accountId, clientImportId]);
@@ -1812,6 +1814,7 @@ export class PostgresHubStore {
 		leaseEpoch,
 		patches,
 		idempotencyKey,
+		protocolVersion = null,
 	}) {
 		const client = await this._pool.connect();
 		try {
@@ -1876,6 +1879,7 @@ export class PostgresHubStore {
 						}
 						: null,
 					data,
+					protocolVersion,
 				});
 			}
 			validateCloudCharacterData(data);

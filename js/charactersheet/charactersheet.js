@@ -313,8 +313,7 @@ class CharacterSheetPage {
 			return true;
 		} catch (error) {
 			if (generation !== this._hubRulesRefreshGeneration) return false;
-			this._state.clearCampaignSettingsOverlay();
-			this._state.setCarryAuthorityContext(null);
+			this._clearHubRules();
 			JqueryUtil.doToast({type: "danger", content: "Campaign rules changed but could not be applied. Reload before continuing."});
 			return false;
 		}
@@ -5683,7 +5682,8 @@ class CharacterSheetPage {
 		// Standard rules: Long jump = STR score, High jump = 3 + STR mod
 		// Thelemar rules: Long jump = 8 + Athletics mod, High jump = 2 + Athletics × 0.5
 		// Running jumps require a 10ft running start; standing jumps are half
-		const useThelemarJumping = (/** @type {*} */ (this._state.getSettings()))?.thelemar_jumping;
+		const jumpSettings = /** @type {*} */ (this._state.getSettings());
+		const useThelemarJumping = jumpSettings?.enableTgtt !== false && jumpSettings?.thelemar_jumping;
 
 		let longJumpRunning, highJumpRunning;
 
@@ -5955,10 +5955,10 @@ class CharacterSheetPage {
 		// (R37 #10) Reading speed (TGTT "Reading Books"): show it alongside senses on the
 		// Overview when the TGTT homebrew is enabled. Pages/hour = (1 + INTmod×2) × 30.
 		// Reading Books is a TGTT linguistics rule, so gate on the granular
-		// `thelemar_linguisticsBonus` flag (present in real saves) — falling back to the
-		// newer master `enableTgtt` flag for forward-compatibility.
+		// Linguistics is a TGTT sub-rule, so the master toggle must gate it even when an
+		// older save still contains the granular flag.
 		const csSettings = this._state._data?.settings || {};
-		if (csSettings.enableTgtt || csSettings.thelemar_linguisticsBonus) {
+		if (csSettings.enableTgtt !== false && csSettings.thelemar_linguisticsBonus) {
 			const pages = this._state.getReadingSpeed();
 			const item = document.createElement("div");
 			item.className = "charsheet__sense-item";
@@ -15834,7 +15834,7 @@ class CharacterSheetPage {
 
 		// Thelemar critical rolls rule: Nat 1 = -5, Nat 20 = +5 for non-attack rolls
 		let thelemar_critBonus = 0;
-		if (!isAttack && (/** @type {*} */ (this._state.getSettings()))?.thelemar_criticalRolls) {
+		if (!isAttack && (/** @type {*} */ (this._state.getSettings()))?.enableTgtt !== false && (/** @type {*} */ (this._state.getSettings()))?.thelemar_criticalRolls) {
 			if (roll === 1) thelemar_critBonus = -5;
 			else if (roll === 20) thelemar_critBonus = 5;
 		}
@@ -19883,7 +19883,7 @@ class CharacterSheetPage {
 	 */
 	_ensureLinguisticsSkillIfNeeded () {
 		const settings = (/** @type {*} */ (this._state.getSettings()));
-		if (!settings?.thelemar_linguisticsBonus) return;
+		if (settings?.enableTgtt === false || !settings?.thelemar_linguisticsBonus) return;
 
 		const hasLinguisticsSkill = this._state.getCustomSkills().some(
 			s => s.name.toLowerCase() === "linguistics",

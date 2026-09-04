@@ -8,9 +8,14 @@ async function loadVariant ({name, mutations = {}}) {
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), `hub-rules-mutation-${name}-`));
 	const hubDir = path.join(root, "hub");
 	await fs.cp(path.resolve("js/hub"), hubDir, {recursive: true});
+	await fs.mkdir(path.join(root, "js"), {recursive: true});
+	await fs.cp(path.resolve("js/hub"), path.join(root, "js/hub"), {recursive: true});
+	await fs.mkdir(path.join(root, "server/src"), {recursive: true});
+	await fs.cp(path.resolve("server/src/campaign-rule-authority.js"), path.join(root, "server/src/campaign-rule-authority.js"));
+	await fs.cp(path.resolve("server/src/hub-store-error.js"), path.join(root, "server/src/hub-store-error.js"));
 	await fs.writeFile(path.join(root, "package.json"), JSON.stringify({type: "module"}));
 	for (const [fileName, mutate] of Object.entries(mutations)) {
-		const filePath = path.join(hubDir, fileName);
+		const filePath = path.join(root, fileName.startsWith("server/") ? fileName : `hub/${fileName}`);
 		const source = await fs.readFile(filePath, "utf8");
 		const mutated = mutate(source);
 		if (mutated === source) throw new Error(`${name} mutation did not match ${fileName}.`);
@@ -22,6 +27,7 @@ async function loadVariant ({name, mutations = {}}) {
 		evaluator: await pImport("hub-campaign-rule-evaluator.js"),
 		capabilities: await pImport("hub-capabilities.js"),
 		manager: await pImport("hub-rules-policy-manager.js"),
+		authority: await import(`${pathToFileURL(path.join(root, "server/src/campaign-rule-authority.js")).href}?variant=${encodeURIComponent(name)}`),
 		cleanup: () => fs.rm(root, {recursive: true, force: true}),
 	};
 }
@@ -36,18 +42,50 @@ async function probeEvaluatorFailClosed ({rules, evaluator}) {
 	};
 	const base = {
 		capabilities: [rules.CAMPAIGN_RULES_POLICY_CAPABILITY],
-		personalSettings: {enableTgtt: false},
+		personalSettings: {enableTgtt: true},
 		protocolVersion: evaluator.CAMPAIGN_RULE_PROTOCOL_VERSION,
 		rulesVersion,
 		surface: "characterWrite",
 	};
 	assert.equal(evaluator.evaluateCampaignRules({...base, capabilities: []}).blocking, true);
 	assert.equal(evaluator.evaluateCampaignRules({...base, expectedRulesVersionId: "rules-old"}).blocking, true);
+	assert.equal(evaluator.evaluateCampaignRules({...base, rulesVersion: {...rulesVersion, version: "1"}}).blocking, true);
+	assert.equal(evaluator.evaluateCampaignRules({...base, rulesVersion: {...rulesVersion, unexpected: true}}).blocking, true);
+	const masterOff = structuredClone(rulesVersion);
+	masterOff.rules.rules.find(rule => rule.id === "tgtt.enabled").parameters.enabled = false;
+	masterOff.rules.rules.find(rule => rule.id === "rules.exhaustion.system").parameters.system = "2024";
+	const masterDecision = evaluator.evaluateCampaignRules({...base, rulesVersion: masterOff});
+	assert.equal(masterDecision.effectiveSettings.thelemar_carryWeight, false);
+	assert.equal(masterDecision.effectiveSettings.thelemar_jumping, false);
 	assert.equal(evaluator.getCampaignSettingsOverlay({
 		status: "blocked",
 		blocking: true,
 		effectiveSettings: {enableTgtt: true},
 	}), null);
+}
+
+async function probeServerFence ({rules, authority}) {
+	const rulesVersion = {
+		id: "rules-current",
+		version: 1,
+		schemaVersion: 2,
+		catalogVersion: 1,
+		rules: rules.createDefaultCampaignRulesPolicy(),
+	};
+	const data = {
+		settings: {},
+		carry: {basis: {kind: "campaign", rulesVersionId: "rules-current"}},
+	};
+	assert.doesNotThrow(() => authority.assertCampaignRuleWriteFence({rulesVersion, data, protocolVersion: "4"}));
+	assert.throws(
+		() => authority.assertCampaignRuleWriteFence({rulesVersion,
+			data: {
+				...data,
+				carry: {basis: {kind: "detached"}},
+			},
+			protocolVersion: "4"}),
+		/active rules-version identity/,
+	);
 }
 
 function replaceLast (source, search, replacement) {
@@ -222,6 +260,26 @@ async function probeOptionalImport ({capabilities}) {
 
 const MUTANTS = [
 	{
+		name: "evaluator-envelope-open",
+		probe: probeEvaluatorFailClosed,
+		mutations: {
+			"hub-campaign-rule-evaluator.js": source => source.replace(
+				"unknownRulesVersionKeys.length\n\t\t|| typeof rulesVersion.id",
+				"false\n\t\t|| typeof rulesVersion.id",
+			),
+		},
+	},
+	{
+		name: "evaluator-version-check-disabled",
+		probe: probeEvaluatorFailClosed,
+		mutations: {
+			"hub-campaign-rule-evaluator.js": source => source.replaceAll(
+				"|| !Number.isSafeInteger(rulesVersion.version)\n\t\t|| rulesVersion.version < 1",
+				"|| false\n\t\t|| rulesVersion.version < 1",
+			),
+		},
+	},
+	{
 		name: "evaluator-capability-gate-disabled",
 		probe: probeEvaluatorFailClosed,
 		mutations: {
@@ -248,6 +306,26 @@ const MUTANTS = [
 			"hub-campaign-rule-evaluator.js": source => source.replace(
 				"if (!decision || decision.status !== \"compliant\" || decision.blocking) return null;",
 				"if (!decision) return null;",
+			),
+		},
+	},
+	{
+		name: "evaluator-master-toggle-disabled",
+		probe: probeEvaluatorFailClosed,
+		mutations: {
+			"hub-campaign-rule-evaluator.js": source => source.replace(
+				"if (effectiveSettings.enableTgtt === false) {",
+				"if (false) {",
+			),
+		},
+	},
+	{
+		name: "server-policy-fence-disabled",
+		probe: probeServerFence,
+		mutations: {
+			"server/src/campaign-rule-authority.js": source => source.replace(
+				"if (data.carry?.basis?.kind !== \"campaign\" || typeof data.carry.basis.rulesVersionId !== \"string\" || !data.carry.basis.rulesVersionId) {",
+				"if (false) {",
 			),
 		},
 	},
@@ -328,3 +406,70 @@ for (const mutant of MUTANTS) {
 
 // eslint-disable-next-line no-console
 console.log(`${MUTANTS.length}/${MUTANTS.length} campaign rules policy mutants killed.`);
+
+async function runAuthorityMutant ({name, mutate, probe}) {
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), `hub-rule-authority-mutation-${name}-`));
+	try {
+		await fs.mkdir(path.join(root, "js"), {recursive: true});
+		await fs.mkdir(path.join(root, "server", "src"), {recursive: true});
+		await fs.cp(path.resolve("js/hub"), path.join(root, "js", "hub"), {recursive: true});
+		await fs.copyFile("server/src/hub-store-error.js", path.join(root, "server", "src", "hub-store-error.js"));
+		const source = await fs.readFile("server/src/campaign-rule-authority.js", "utf8");
+		const mutated = mutate(source);
+		if (mutated === source) throw new Error(`${name} authority mutation did not match.`);
+		await fs.writeFile(path.join(root, "server", "src", "campaign-rule-authority.js"), mutated);
+		await fs.writeFile(path.join(root, "package.json"), JSON.stringify({type: "module"}));
+		const authority = await import(`${pathToFileURL(path.join(root, "server", "src", "campaign-rule-authority.js")).href}?variant=${name}`);
+		const rules = await import(`${pathToFileURL(path.join(root, "js", "hub", "hub-campaign-rules.js")).href}?variant=${name}`);
+		let killed = false;
+		try {
+			await probe({authority, rules});
+		} catch {
+			killed = true;
+		}
+		if (!killed) throw new Error(`${name} survived.`);
+		// eslint-disable-next-line no-console
+		console.log(`${name}: KILLED`);
+	} finally {
+		await fs.rm(root, {recursive: true, force: true});
+	}
+}
+
+const getAuthorityFixture = rules => ({
+	id: "rules-current",
+	version: 1,
+	schemaVersion: 2,
+	catalogVersion: 1,
+	rules: rules.createDefaultCampaignRulesPolicy(),
+});
+const authorityBasisProbe = ({authority, rules}) => {
+	assert.throws(() => authority.assertCampaignRuleWriteFence({
+		rulesVersion: getAuthorityFixture(rules),
+		protocolVersion: "4",
+		data: {carry: {basis: {kind: "detached", settingsDigest: "digest"}}},
+	}));
+};
+const authorityProtocolProbe = ({authority, rules}) => {
+	const rulesVersion = {
+		...getAuthorityFixture(rules),
+	};
+	assert.throws(() => authority.assertCampaignRuleWriteFence({
+		rulesVersion,
+		protocolVersion: "3",
+		data: {carry: {basis: {kind: "campaign", rulesVersionId: "rules-current", settingsDigest: "digest"}}},
+	}));
+};
+
+await runAuthorityMutant({
+	name: "server-basis-fence-disabled",
+	probe: authorityBasisProbe,
+	mutate: source => source.replace(
+		"if (data.carry?.basis?.kind !== \"campaign\" || typeof data.carry.basis.rulesVersionId !== \"string\" || !data.carry.basis.rulesVersionId) {",
+		"if (false) {",
+	),
+});
+await runAuthorityMutant({
+	name: "server-protocol-fence-disabled",
+	probe: authorityProtocolProbe,
+	mutate: source => replaceLast(source, "\n\t\tprotocolVersion,", "\n\t\tprotocolVersion: CAMPAIGN_RULE_PROTOCOL_VERSION,"),
+});

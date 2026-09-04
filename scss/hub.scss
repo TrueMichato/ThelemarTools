@@ -1193,6 +1193,12 @@ a.hub-data-row:hover {
 	color: var(--hub-warning);
 }
 
+.hub-rule-status--enforced {
+	border-color: color-mix(in srgb, var(--hub-success) 45%, var(--hub-border));
+	background: color-mix(in srgb, var(--hub-success) 8%, transparent);
+	color: var(--hub-success);
+}
+
 .hub-rule-status--planned {
 	color: var(--hub-text-muted);
 }

@@ -19,6 +19,29 @@ const _INPUT_KEYS = new Set([
 	"rulesVersion",
 	"surface",
 ]);
+const _RULES_VERSION_KEYS = new Set([
+	"id",
+	"campaignId",
+	"version",
+	"schemaVersion",
+	"catalogVersion",
+	"rules",
+	"createdAt",
+	"policy",
+	"policySummary",
+	"ruleDecision",
+]);
+const _RULE_DECISION_KEYS = new Set([
+	"schemaVersion",
+	"evaluatorVersion",
+	"status",
+	"blocking",
+	"surface",
+	"policyIdentity",
+	"effectiveSettings",
+	"appliedRules",
+	"errors",
+]);
 const _SURFACES = new Set([
 	"characterOpen",
 	"builder",
@@ -57,7 +80,34 @@ const _CATALOG_BY_ID = new Map(CAMPAIGN_RULES_CATALOG.map(rule => [rule.id, rule
 
 function copyObject (value) {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-	return structuredClone(value);
+	try {
+		return structuredClone(value);
+	} catch {
+		return {};
+	}
+}
+
+function getPolicyIdentity (rulesVersion) {
+	if (
+		!rulesVersion
+		|| typeof rulesVersion.id !== "string"
+		|| !rulesVersion.id
+		|| !Number.isSafeInteger(rulesVersion.version)
+		|| rulesVersion.version < 1
+		|| !Number.isSafeInteger(rulesVersion.schemaVersion)
+		|| !Number.isSafeInteger(rulesVersion.catalogVersion)
+	) return null;
+	return {
+		id: rulesVersion.id,
+		version: rulesVersion.version,
+		schemaVersion: rulesVersion.schemaVersion,
+		catalogVersion: rulesVersion.catalogVersion,
+	};
+}
+
+function isClosedRuleDecision (decision) {
+	if (!decision || typeof decision !== "object" || Array.isArray(decision)) return false;
+	return !Object.keys(decision).some(key => !_RULE_DECISION_KEYS.has(key));
 }
 
 function blocked ({surface, personalSettings, rulesVersion = null, code, ruleId = null}) {
@@ -67,14 +117,7 @@ function blocked ({surface, personalSettings, rulesVersion = null, code, ruleId 
 		status: "blocked",
 		blocking: true,
 		surface,
-		policyIdentity: rulesVersion?.id
-			? {
-				id: rulesVersion.id,
-				version: Number(rulesVersion.version),
-				schemaVersion: Number(rulesVersion.schemaVersion),
-				catalogVersion: Number(rulesVersion.catalogVersion ?? CAMPAIGN_RULES_CATALOG_VERSION),
-			}
-			: null,
+		policyIdentity: getPolicyIdentity(rulesVersion),
 		effectiveSettings: copyObject(personalSettings),
 		appliedRules: [],
 		errors: [{code, ...(ruleId ? {ruleId} : {})}],
@@ -97,7 +140,14 @@ export function evaluateCampaignRules (input = {}) {
 	}
 	const unknownInputKeys = Object.keys(input).filter(key => !_INPUT_KEYS.has(key));
 	const surface = input.surface || "characterOpen";
-	if (unknownInputKeys.length || !_SURFACES.has(surface)) {
+	if (
+		unknownInputKeys.length
+		|| !_SURFACES.has(surface)
+		|| (input.personalSettings != null && (typeof input.personalSettings !== "object" || Array.isArray(input.personalSettings)))
+		|| (input.capabilities != null && (!Array.isArray(input.capabilities) || input.capabilities.some(capability => typeof capability !== "string")))
+		|| (input.expectedRulesVersionId != null && typeof input.expectedRulesVersionId !== "string")
+		|| (input.protocolVersion != null && !["string", "number"].includes(typeof input.protocolVersion))
+	) {
 		return blocked({surface, personalSettings: input.personalSettings, code: "RULE_EVALUATOR_INPUT_INVALID"});
 	}
 	const personalSettings = copyObject(input.personalSettings);
@@ -115,15 +165,35 @@ export function evaluateCampaignRules (input = {}) {
 			errors: [],
 		};
 	}
-	if (!rulesVersion || typeof rulesVersion !== "object" || Array.isArray(rulesVersion) || !rulesVersion.id) {
+	if (!rulesVersion || typeof rulesVersion !== "object" || Array.isArray(rulesVersion)) {
 		return blocked({surface, personalSettings, rulesVersion, code: "RULES_VERSION_INVALID"});
 	}
+	const unknownRulesVersionKeys = Object.keys(rulesVersion).filter(key => !_RULES_VERSION_KEYS.has(key));
+	const schemaVersion = Object.hasOwn(rulesVersion, "schemaVersion") ? rulesVersion.schemaVersion : 1;
+	const catalogVersion = Object.hasOwn(rulesVersion, "catalogVersion") ? rulesVersion.catalogVersion : CAMPAIGN_RULES_CATALOG_VERSION;
+	const normalizedRulesVersion = {...rulesVersion, schemaVersion, catalogVersion};
+	if (
+		unknownRulesVersionKeys.length
+		|| typeof rulesVersion.id !== "string"
+		|| !rulesVersion.id
+		|| !Number.isSafeInteger(rulesVersion.version)
+		|| rulesVersion.version < 1
+		|| !Number.isSafeInteger(schemaVersion)
+		|| !Number.isSafeInteger(catalogVersion)
+		|| (rulesVersion.campaignId != null && typeof rulesVersion.campaignId !== "string")
+		|| (rulesVersion.createdAt != null && typeof rulesVersion.createdAt !== "string")
+		|| (rulesVersion.policy != null && (typeof rulesVersion.policy !== "object" || Array.isArray(rulesVersion.policy)))
+		|| (rulesVersion.policySummary != null && (typeof rulesVersion.policySummary !== "object" || Array.isArray(rulesVersion.policySummary)))
+		|| (rulesVersion.ruleDecision != null && !isClosedRuleDecision(rulesVersion.ruleDecision))
+	) return blocked({surface, personalSettings, rulesVersion: normalizedRulesVersion, code: "RULES_VERSION_INVALID"});
 	if (input.expectedRulesVersionId != null && input.expectedRulesVersionId !== rulesVersion.id) {
-		return blocked({surface, personalSettings, rulesVersion, code: "POLICY_VERSION_STALE"});
+		return blocked({surface, personalSettings, rulesVersion: normalizedRulesVersion, code: "POLICY_VERSION_STALE"});
 	}
-	const schemaVersion = Number(rulesVersion.schemaVersion ?? 1);
 	if (![1, CAMPAIGN_RULES_POLICY_SCHEMA_VERSION].includes(schemaVersion)) {
-		return blocked({surface, personalSettings, rulesVersion, code: "RULES_SCHEMA_UNSUPPORTED"});
+		return blocked({surface, personalSettings, rulesVersion: normalizedRulesVersion, code: "RULES_SCHEMA_UNSUPPORTED"});
+	}
+	if (schemaVersion === CAMPAIGN_RULES_POLICY_SCHEMA_VERSION && catalogVersion !== CAMPAIGN_RULES_CATALOG_VERSION) {
+		return blocked({surface, personalSettings, rulesVersion: normalizedRulesVersion, code: "RULES_CATALOG_UNSUPPORTED"});
 	}
 	if (schemaVersion === CAMPAIGN_RULES_POLICY_SCHEMA_VERSION) {
 		if (Number(input.protocolVersion) !== CAMPAIGN_RULE_PROTOCOL_VERSION) {
@@ -136,9 +206,10 @@ export function evaluateCampaignRules (input = {}) {
 
 	let policy;
 	try {
+		const policyInput = rulesVersion.policy ?? rulesVersion.rules;
 		policy = schemaVersion === CAMPAIGN_RULES_POLICY_SCHEMA_VERSION
-			? normalizeCampaignRulesPolicy(rulesVersion.rules)
-			: getCampaignRulesPolicy({schemaVersion, rules: rulesVersion.rules});
+			? normalizeCampaignRulesPolicy(policyInput)
+			: getCampaignRulesPolicy({schemaVersion, rules: policyInput});
 	} catch (error) {
 		if (!(error instanceof CampaignRulesPolicyError)) throw error;
 		return blocked({surface, personalSettings, rulesVersion, code: error.code});
@@ -164,6 +235,15 @@ export function evaluateCampaignRules (input = {}) {
 			mode: schemaVersion === 1 ? "legacy" : selection.mode,
 		});
 	}
+	if (effectiveSettings.enableTgtt === false) {
+		for (const key of [
+			"thelemar_carryWeight",
+			"thelemar_encumbranceTiers",
+			"thelemar_jumping",
+			"thelemar_linguisticsBonus",
+			"thelemar_criticalRolls",
+		]) effectiveSettings[key] = false;
+	}
 
 	return {
 		schemaVersion: 1,
@@ -173,9 +253,9 @@ export function evaluateCampaignRules (input = {}) {
 		surface,
 		policyIdentity: {
 			id: rulesVersion.id,
-			version: Number(rulesVersion.version),
+			version: rulesVersion.version,
 			schemaVersion,
-			catalogVersion: Number(policy.catalogVersion),
+			catalogVersion: policy.catalogVersion,
 		},
 		effectiveSettings,
 		appliedRules,
@@ -188,9 +268,53 @@ export function getCampaignSettingsOverlay (decision) {
 	return copyObject(decision.effectiveSettings);
 }
 
+/** Return the complete transient state that must be removed on campaign-rule teardown. */
+export function getClearedCampaignRulesState () {
+	return {
+		hubContext: null,
+		overlay: null,
+		carryAuthorityContext: null,
+	};
+}
+
 export function getCampaignSettingsOverlayFromRulesVersion (rulesVersion) {
 	if (!rulesVersion) return null;
-	if (rulesVersion.ruleDecision) return getCampaignSettingsOverlay(rulesVersion.ruleDecision);
+	if (rulesVersion.ruleDecision) {
+		if (!isClosedRuleDecision(rulesVersion.ruleDecision)) return null;
+		const identity = getPolicyIdentity(rulesVersion);
+		const decisionIdentity = rulesVersion.ruleDecision.policyIdentity;
+		if (
+			!identity
+			|| !decisionIdentity
+			|| identity.id !== decisionIdentity.id
+			|| identity.version !== decisionIdentity.version
+			|| identity.schemaVersion !== decisionIdentity.schemaVersion
+			|| identity.catalogVersion !== decisionIdentity.catalogVersion
+		) return null;
+		return getCampaignSettingsOverlay(rulesVersion.ruleDecision);
+	}
+	// Older browser contexts carried only `{id, rules}`. Keep that schema-v1 adapter explicit
+	// rather than weakening the closed evaluator envelope for direct callers.
+	if (
+		!Object.hasOwn(rulesVersion, "version")
+		&& !Object.hasOwn(rulesVersion, "schemaVersion")
+		&& !Object.hasOwn(rulesVersion, "catalogVersion")
+	) {
+		return getCampaignSettingsOverlay(evaluateCampaignRules({
+			capabilities: [],
+			expectedRulesVersionId: null,
+			personalSettings: {},
+			protocolVersion: CAMPAIGN_RULE_PROTOCOL_VERSION,
+			rulesVersion: {
+				id: typeof rulesVersion.id === "string" && rulesVersion.id ? rulesVersion.id : "legacy",
+				version: 1,
+				schemaVersion: 1,
+				catalogVersion: CAMPAIGN_RULES_CATALOG_VERSION,
+				rules: rulesVersion.rules,
+			},
+			surface: "characterOpen",
+		}));
+	}
 	const legacyDecision = evaluateCampaignRules({
 		capabilities: [],
 		expectedRulesVersionId: rulesVersion.id,

@@ -10,12 +10,13 @@ export function getAuthoritativeCampaignRuleDecision ({
 	personalSettings = {},
 	surface = "characterWrite",
 	expectedRulesVersionId = null,
+	protocolVersion = null,
 }) {
 	const decision = evaluateCampaignRules({
 		capabilities: [CAMPAIGN_RULES_POLICY_CAPABILITY],
 		expectedRulesVersionId,
 		personalSettings,
-		protocolVersion: CAMPAIGN_RULE_PROTOCOL_VERSION,
+		protocolVersion,
 		rulesVersion,
 		surface,
 	});
@@ -29,14 +30,16 @@ export function getAuthoritativeCampaignRuleDecision ({
 	});
 }
 
-export function assertCampaignRuleWriteFence ({rulesVersion, data}) {
+export function assertCampaignRuleWriteFence ({rulesVersion, data, protocolVersion}) {
 	if (!rulesVersion || Number(rulesVersion.schemaVersion) < 2 || !data?.carry) return null;
-	const expectedRulesVersionId = data.carry?.basis?.kind === "campaign"
-		? data.carry.basis.rulesVersionId
-		: null;
+	if (data.carry?.basis?.kind !== "campaign" || typeof data.carry.basis.rulesVersionId !== "string" || !data.carry.basis.rulesVersionId) {
+		throw new HubStoreError("POLICY_VERSION_STALE", "Campaign character write is missing its active rules-version identity.", {status: 409});
+	}
+	const expectedRulesVersionId = data.carry.basis.rulesVersionId;
 	return getAuthoritativeCampaignRuleDecision({
 		rulesVersion,
 		personalSettings: data?.settings,
 		expectedRulesVersionId,
+		protocolVersion,
 	});
 }

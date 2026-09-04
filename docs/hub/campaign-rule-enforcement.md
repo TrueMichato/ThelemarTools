@@ -11,7 +11,7 @@ which returns personal settings unchanged.
 
 | Rule | Product status | Effective surfaces |
 |---|---|---|
-| `tgtt.enabled` | Enforced | Character runtime, Builder, Level Up, Quick Build, Respec, content pickers, DM projection, writes |
+| `tgtt.enabled` | Advisory | Character runtime, Builder, Level Up, Quick Build, Respec, content pickers, and DM projection |
 | `rules.exhaustion.system` | Advisory | Character runtime and DM projection |
 | `tgtt.carry-weight` | Enforced | Character runtime, DM projection, carry-authority writes |
 | `tgtt.encumbrance-tiers` | Enforced | Character runtime, DM projection, carry-authority writes |
