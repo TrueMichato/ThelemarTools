@@ -62,6 +62,12 @@ async function probeEvaluatorFailClosed ({rules, evaluator}) {
 		blocking: true,
 		effectiveSettings: {enableTgtt: true},
 	}), null);
+	assert.equal(evaluator.getCampaignSettingsOverlay({
+		status: "compliant",
+		blocking: false,
+		policyIdentity: {id: "rules-current", version: 1, schemaVersion: 2, catalogVersion: 1},
+		effectiveSettings: {enableTgtt: true},
+	}), null);
 	assert.deepEqual(evaluator.getClearedCampaignRulesState(), {
 		hubContext: null,
 		overlay: null,
@@ -264,6 +270,16 @@ async function probeOptionalImport ({capabilities}) {
 }
 
 const MUTANTS = [
+	{
+		name: "decision-output-validation-disabled",
+		probe: probeEvaluatorFailClosed,
+		mutations: {
+			"hub-campaign-rule-evaluator.js": source => source.replace(
+				"if (!isClosedRuleDecision(decision) || decision.status !== \"compliant\" || decision.blocking) return null;",
+				"if (!decision || decision.status !== \"compliant\" || decision.blocking) return null;",
+			),
+		},
+	},
 	{
 		name: "evaluator-envelope-open",
 		probe: probeEvaluatorFailClosed,
