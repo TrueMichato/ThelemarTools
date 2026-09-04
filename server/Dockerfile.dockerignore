@@ -9,6 +9,7 @@ server/**/.env*
 !server/**/.env*.example
 !js
 !js/hub
+!js/hub/hub-campaign-rules.js
 !js/hub/hub-json-patch.js
 !js/hub/hub-carry-authority.js
 !js/hub/hub-carry-contract.js

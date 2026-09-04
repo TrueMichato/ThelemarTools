@@ -21,8 +21,13 @@ import {
 	CAMPAIGN_RULES_SCHEMA_VERSION,
 	getCampaignBrewHash,
 	normalizeCampaignRules,
+	normalizeCampaignRulesPolicyForStorage,
 	validateCampaignBrewBundle,
 } from "./campaign-content.js";
+import {
+	CAMPAIGN_RULES_POLICY_CAPABILITY,
+	getPublicCampaignRulesCatalog,
+} from "../../js/hub/hub-campaign-rules.js";
 import {HubOutboxDispatcher, HubRealtime} from "./realtime.js";
 import {getSafeRequestId, HubMetrics} from "./observability.js";
 import {getClientIpHeader, getRequestClientIp} from "./client-ip.js";
@@ -455,7 +460,10 @@ export async function createHubApp ({
 	app.get("/api/meta", async () => ({
 		protocolVersion: HUB_PROTOCOL_VERSION,
 		appVersion: process.env.npm_package_version || null,
-		capabilities: [AUTH_PROVIDER_REGISTRY_CAPABILITY],
+		capabilities: [
+			AUTH_PROVIDER_REGISTRY_CAPABILITY,
+			...(config.isCampaignRulesPolicyEnabled ? [CAMPAIGN_RULES_POLICY_CAPABILITY] : []),
+		],
 		authProviders: providerRegistry.getPublicMetadata(),
 	}));
 
@@ -1480,6 +1488,82 @@ export async function createHubApp ({
 		rulesVersionId: request.params.versionId,
 		idempotencyKey: getIdempotencyKey(request),
 	}));
+
+	if (config.isCampaignRulesPolicyEnabled) {
+		const rulesPolicyParamsSchema = {
+			type: "object",
+			required: ["campaignId"],
+			additionalProperties: false,
+			properties: {campaignId: {type: "string", format: "uuid"}},
+		};
+		const nullableVersionIdSchema = {
+			anyOf: [
+				{type: "string", format: "uuid"},
+				{type: "null"},
+			],
+		};
+
+		app.get("/api/campaigns/:campaignId/rules-policy", {
+			preHandler: [requireAuth, requireCampaignRole(["dm", "co_dm"])],
+			schema: {params: rulesPolicyParamsSchema},
+		}, async request => ({
+			catalog: getPublicCampaignRulesCatalog(),
+			management: await store.pGetRulesPolicyManagement({
+				accountId: request.hubAuth.account.id,
+				campaignId: request.params.campaignId,
+			}),
+		}));
+
+		app.post("/api/campaigns/:campaignId/rules-policy", {
+			preHandler: [requireMutationSecurity, requireCampaignRole(["dm", "co_dm"])],
+			config: {rateLimit: {max: 20, timeWindow: "1 minute"}},
+			schema: {
+				params: rulesPolicyParamsSchema,
+				body: {
+					type: "object",
+					required: ["policy", "expectedActiveRulesVersionId"],
+					additionalProperties: false,
+					properties: {
+						policy: {type: "object"},
+						expectedActiveRulesVersionId: nullableVersionIdSchema,
+					},
+				},
+			},
+		}, async (request, reply) => {
+			const policy = normalizeCampaignRulesPolicyForStorage(request.body.policy);
+			const result = await store.pCreateAndActivateRulesPolicy({
+				accountId: request.hubAuth.account.id,
+				campaignId: request.params.campaignId,
+				policy,
+				expectedActiveRulesVersionId: request.body.expectedActiveRulesVersionId,
+				idempotencyKey: getIdempotencyKey(request),
+			});
+			return reply.code(201).send(result);
+		});
+
+		app.post("/api/campaigns/:campaignId/rules-policy/activate", {
+			preHandler: [requireMutationSecurity, requireCampaignRole(["dm", "co_dm"])],
+			config: {rateLimit: {max: 20, timeWindow: "1 minute"}},
+			schema: {
+				params: rulesPolicyParamsSchema,
+				body: {
+					type: "object",
+					required: ["rulesVersionId", "expectedActiveRulesVersionId"],
+					additionalProperties: false,
+					properties: {
+						rulesVersionId: {type: "string", format: "uuid"},
+						expectedActiveRulesVersionId: nullableVersionIdSchema,
+					},
+				},
+			},
+		}, async request => store.pActivateRulesPolicyVersion({
+			accountId: request.hubAuth.account.id,
+			campaignId: request.params.campaignId,
+			rulesVersionId: request.body.rulesVersionId,
+			expectedActiveRulesVersionId: request.body.expectedActiveRulesVersionId,
+			idempotencyKey: getIdempotencyKey(request),
+		}));
+	}
 
 	app.get("/api/campaigns/:campaignId/dm-workspace", {
 		preHandler: [requireAuth, requireCampaignRole(["dm", "co_dm"])],

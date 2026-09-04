@@ -1,7 +1,7 @@
 # Campaign Hub permission matrix
 
 > **Status:** Current private-V1 authorization
-> **Last verified:** 2026-09-02
+> **Last verified:** 2026-09-04
 > **Owner:** Campaign Hub maintainers
 
 The server checks active membership, role, tenant, object ownership, status, and write preconditions. Client UI
@@ -18,7 +18,8 @@ visibility is not authorization.
 | Change member role | Owner only | No | No | No |
 | Remove member | Any non-owner | Player/spectator only | No | No |
 | Leave campaign | Owner must transfer/archive first | Yes | Yes | Yes |
-| Publish/activate rules or brew | Yes | Yes | No | No |
+| Publish/activate legacy rules or brew | Yes | Yes | No | No |
+| Browse/publish/rollback catalog policy when capability-enabled | Yes | Yes | Read bounded active summary only | Read bounded active summary only |
 | Read full campaign character | Any campaign character | Any campaign character | Own only | Own only if one already exists |
 | Read peer character profile | Yes, beside truth as `peerPreview` | Yes, beside truth as `peerPreview` | Yes | Yes |
 | Read own sharing policy | Own character only | Own character only | Own character only | Own character only |
@@ -66,6 +67,8 @@ account's campaign sockets immediately after the authoritative transaction commi
   grants/effects/transfers.
 - Campaign owner is an account field on the campaign, not a separate role string.
 - Co-DM can perform DM content/grant/workspace operations but cannot transfer ownership or archive as owner.
+- Rules-policy authorization is enforced on every server route. Hiding the capability-gated manager is not an
+  authorization control; player/spectator management reads and writes fail without exposing policy details.
 - Item awards can target only active characters whose owners remain active campaign members. A hidden peer
   identity does not prevent DM/co-DM targeting, but preview and events disclose no hidden carry or policy value.
 - Spectator is an authenticated read-only campaign role in current mutation paths.

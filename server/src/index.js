@@ -50,6 +50,7 @@ const app = await createHubApp({
 		trustProxy: getTrustProxy(),
 		metricsToken: requireEnv("HUB_METRICS_TOKEN"),
 		clientIpHeader,
+		isCampaignRulesPolicyEnabled: process.env.HUB_CAMPAIGN_RULES_POLICY_ENABLED === "true",
 	},
 });
 

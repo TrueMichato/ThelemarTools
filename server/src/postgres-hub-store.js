@@ -35,6 +35,10 @@ import {
 	removeTransferPayload,
 } from "./hub-actions.js";
 import {validateCloudCharacterData, validateCloudValue} from "./cloud-data-validation.js";
+import {
+	getPublicCampaignRulesVersion,
+	normalizeCampaignRulesPolicyForStorage,
+} from "./campaign-content.js";
 import {HUB_REQUIRED_MIGRATION_VERSION} from "./migration-version.js";
 import {
 	createCharacterDisplayNameSnapshot,
@@ -2004,7 +2008,8 @@ export class PostgresHubStore {
 				b.id AS brew_id, b.version AS brew_version, b.content_hash,
 				b.content, b.manifest,
 				r.id AS rules_id, r.version AS rules_version,
-				r.schema_version AS rules_schema_version, r.rules
+				r.schema_version AS rules_schema_version, r.rules,
+				r.created_at AS rules_created_at
 			FROM hub.campaigns c
 			LEFT JOIN hub.brew_bundle_versions b ON b.id = c.active_brew_bundle_version_id
 			LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
@@ -2023,11 +2028,14 @@ export class PostgresHubStore {
 				manifest: row.manifest,
 			} : null,
 			rulesVersion: row.rules_id ? {
-				id: row.rules_id,
-				campaignId: row.campaign_id,
-				version: row.rules_version,
-				schemaVersion: row.rules_schema_version,
-				rules: row.rules,
+				...getPublicCampaignRulesVersion({
+					id: row.rules_id,
+					campaignId: row.campaign_id,
+					version: row.rules_version,
+					schemaVersion: row.rules_schema_version,
+					rules: row.rules,
+					createdAt: row.rules_created_at,
+				}),
 			} : null,
 		};
 	}
@@ -2039,7 +2047,7 @@ export class PostgresHubStore {
 			SELECT
 				c.id AS campaign_id,
 				b.id AS brew_id, b.version AS brew_version, b.content_hash, b.manifest,
-				r.id AS rules_id, r.version AS rules_version, r.rules
+				r.id AS rules_id, r.version AS rules_version, r.schema_version AS rules_schema_version, r.rules
 			FROM hub.campaigns c
 			LEFT JOIN hub.brew_bundle_versions b ON b.id = c.active_brew_bundle_version_id
 			LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
@@ -2058,11 +2066,16 @@ export class PostgresHubStore {
 				}
 				: null,
 			rulesVersion: row.rules_id
-				? {
-					id: row.rules_id,
-					version: row.rules_version,
-					rules: row.rules,
-				}
+				? (() => {
+					const version = getPublicCampaignRulesVersion({
+						id: row.rules_id,
+						campaignId: row.campaign_id,
+						version: row.rules_version,
+						schemaVersion: row.rules_schema_version,
+						rules: row.rules,
+					});
+					return {id: version.id, version: version.version, rules: version.rules};
+				})()
 				: null,
 		};
 	}
@@ -2144,12 +2157,14 @@ export class PostgresHubStore {
 			`, [crypto.randomUUID(), campaignId, schemaVersion, JSON.stringify(rules), membership.id]);
 			const row = inserted.rows[0];
 			const response = {rulesVersion: {
-				id: row.id,
-				campaignId: row.campaign_id,
-				version: row.version,
-				schemaVersion: row.schema_version,
-				rules: row.rules,
-				createdAt: row.created_at,
+				...getPublicCampaignRulesVersion({
+					id: row.id,
+					campaignId: row.campaign_id,
+					version: row.version,
+					schemaVersion: row.schema_version,
+					rules: row.rules,
+					createdAt: row.created_at,
+				}, {isIncludePolicy: true}),
 			}};
 			await this._pAppendAudit({client, campaignId, actorAccountId: accountId, action: "rules.created", targetType: "rules_version", targetId: row.id});
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "rules.create", response});
@@ -2165,6 +2180,274 @@ export class PostgresHubStore {
 
 	async pActivateRulesVersion ({accountId, campaignId, rulesVersionId, idempotencyKey}) {
 		return this._pActivateCampaignVersion({accountId, campaignId, versionId: rulesVersionId, idempotencyKey, kind: "rules"});
+	}
+
+	async pGetRulesPolicyManagement ({accountId, campaignId}) {
+		const membership = await this.pGetMembership({accountId, campaignId});
+		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+		if (!["dm", "co_dm"].includes(membership.role)) {
+			throw new HubStoreError("FORBIDDEN", `This campaign role cannot manage rules.`, {status: 403});
+		}
+		const [campaignResult, versionsResult] = await Promise.all([
+			this._pool.query(`
+				SELECT active_rules_version_id
+				FROM hub.campaigns
+				WHERE id = $1 AND status <> 'deleting'
+			`, [campaignId]),
+			this._pool.query(`
+				SELECT *
+				FROM hub.rules_versions
+				WHERE campaign_id = $1
+				ORDER BY version DESC
+			`, [campaignId]),
+		]);
+		if (!campaignResult.rowCount) {
+			throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+		}
+		return {
+			campaignId,
+			activeRulesVersionId: campaignResult.rows[0].active_rules_version_id,
+			versions: versionsResult.rows.map(row => getPublicCampaignRulesVersion({
+				id: row.id,
+				campaignId: row.campaign_id,
+				version: row.version,
+				schemaVersion: row.schema_version,
+				rules: row.rules,
+				createdAt: row.created_at,
+			}, {isIncludePolicy: true})),
+		};
+	}
+
+	async pCreateAndActivateRulesPolicy ({
+		accountId,
+		campaignId,
+		policy,
+		expectedActiveRulesVersionId,
+		idempotencyKey,
+	}) {
+		const normalizedPolicy = normalizeCampaignRulesPolicyForStorage(policy);
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			const membership = await this._pGetMembershipForUpdate({
+				client,
+				accountId,
+				campaignId,
+				roles: ["dm", "co_dm"],
+			});
+			const campaignResult = await client.query(`
+				SELECT active_rules_version_id
+				FROM hub.campaigns
+				WHERE id = $1 AND status = 'active'
+				FOR UPDATE
+			`, [campaignId]);
+			if (!campaignResult.rowCount) {
+				throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+			}
+			const activeRulesVersionId = campaignResult.rows[0].active_rules_version_id;
+			if (activeRulesVersionId !== expectedActiveRulesVersionId) {
+				throw new HubStoreError("RULES_VERSION_STALE", `Campaign rules changed before this policy was activated.`, {
+					status: 409,
+					details: {activeRulesVersionId},
+				});
+			}
+			const previousResult = activeRulesVersionId
+				? await client.query(`SELECT id, version FROM hub.rules_versions WHERE id = $1`, [activeRulesVersionId])
+				: {rows: []};
+			const previous = previousResult.rows[0] || null;
+			const inserted = await client.query(`
+				INSERT INTO hub.rules_versions (
+					id, campaign_id, version, schema_version, rules, created_by_membership_id
+				) VALUES (
+					$1, $2,
+					COALESCE((SELECT max(version) + 1 FROM hub.rules_versions WHERE campaign_id = $2), 1),
+					$3, $4::jsonb, $5
+				)
+				RETURNING *
+			`, [
+				crypto.randomUUID(),
+				campaignId,
+				normalizedPolicy.schemaVersion,
+				JSON.stringify(normalizedPolicy),
+				membership.id,
+			]);
+			const row = inserted.rows[0];
+			await client.query(`
+				UPDATE hub.campaigns
+				SET active_rules_version_id = $2, updated_at = now()
+				WHERE id = $1
+			`, [campaignId, row.id]);
+			await this._pAppendAudit({
+				client,
+				campaignId,
+				actorAccountId: accountId,
+				action: "rules.created",
+				targetType: "rules_version",
+				targetId: row.id,
+				details: {
+					schemaVersion: normalizedPolicy.schemaVersion,
+					catalogVersion: normalizedPolicy.catalogVersion,
+				},
+			});
+			await this._pAppendAudit({
+				client,
+				campaignId,
+				actorAccountId: accountId,
+				action: "rules.activated",
+				targetType: "rules_version",
+				targetId: row.id,
+				details: {previousRulesVersionId: previous?.id || null},
+			});
+			await this._pAppendEvent({
+				client,
+				campaignId,
+				actorAccountId: accountId,
+				type: "rules.activated",
+				aggregateType: "rules_version",
+				aggregateId: row.id,
+				payload: {
+					version: row.version,
+					previousVersion: previous?.version || null,
+					schemaVersion: normalizedPolicy.schemaVersion,
+					catalogVersion: normalizedPolicy.catalogVersion,
+					operation: "publish",
+				},
+			});
+			const response = {
+				rulesVersion: getPublicCampaignRulesVersion({
+					id: row.id,
+					campaignId: row.campaign_id,
+					version: row.version,
+					schemaVersion: row.schema_version,
+					rules: row.rules,
+					createdAt: row.created_at,
+				}, {isIncludePolicy: true}),
+				previousRulesVersionId: previous?.id || null,
+			};
+			await this._pSaveReceipt({
+				client,
+				accountId,
+				idempotencyKey,
+				commandType: "rules.publish",
+				response,
+			});
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pActivateRulesPolicyVersion ({
+		accountId,
+		campaignId,
+		rulesVersionId,
+		expectedActiveRulesVersionId,
+		idempotencyKey,
+	}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm"]});
+			const campaignResult = await client.query(`
+				SELECT active_rules_version_id
+				FROM hub.campaigns
+				WHERE id = $1 AND status = 'active'
+				FOR UPDATE
+			`, [campaignId]);
+			if (!campaignResult.rowCount) {
+				throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+			}
+			const activeRulesVersionId = campaignResult.rows[0].active_rules_version_id;
+			if (activeRulesVersionId !== expectedActiveRulesVersionId) {
+				throw new HubStoreError("RULES_VERSION_STALE", `Campaign rules changed before this rollback was activated.`, {
+					status: 409,
+					details: {activeRulesVersionId},
+				});
+			}
+			if (rulesVersionId === activeRulesVersionId) {
+				throw new HubStoreError("RULES_ALREADY_ACTIVE", `That rules version is already active.`, {status: 409});
+			}
+			const [targetResult, previousResult] = await Promise.all([
+				client.query(`SELECT * FROM hub.rules_versions WHERE campaign_id = $1 AND id = $2`, [campaignId, rulesVersionId]),
+				activeRulesVersionId
+					? client.query(`SELECT id, version FROM hub.rules_versions WHERE id = $1`, [activeRulesVersionId])
+					: Promise.resolve({rows: []}),
+			]);
+			if (!targetResult.rowCount) {
+				throw new HubStoreError("RULES_NOT_FOUND", `Rules version was not found.`, {status: 404});
+			}
+			const row = targetResult.rows[0];
+			const target = getPublicCampaignRulesVersion({
+				id: row.id,
+				campaignId: row.campaign_id,
+				version: row.version,
+				schemaVersion: row.schema_version,
+				rules: row.rules,
+				createdAt: row.created_at,
+			}, {isIncludePolicy: true});
+			const previous = previousResult.rows[0] || null;
+			await client.query(`
+				UPDATE hub.campaigns
+				SET active_rules_version_id = $2, updated_at = now()
+				WHERE id = $1
+			`, [campaignId, row.id]);
+			await this._pAppendAudit({
+				client,
+				campaignId,
+				actorAccountId: accountId,
+				action: "rules.rollback_activated",
+				targetType: "rules_version",
+				targetId: row.id,
+				details: {previousRulesVersionId: previous?.id || null},
+			});
+			await this._pAppendEvent({
+				client,
+				campaignId,
+				actorAccountId: accountId,
+				type: "rules.activated",
+				aggregateType: "rules_version",
+				aggregateId: row.id,
+				payload: {
+					version: row.version,
+					previousVersion: previous?.version || null,
+					schemaVersion: row.schema_version,
+					catalogVersion: target.catalogVersion,
+					operation: "rollback",
+				},
+			});
+			const response = {
+				rulesVersion: target,
+				previousRulesVersionId: previous?.id || null,
+			};
+			await this._pSaveReceipt({
+				client,
+				accountId,
+				idempotencyKey,
+				commandType: "rules.rollback",
+				response,
+			});
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
 	}
 
 	async _pActivateCampaignVersion ({accountId, campaignId, versionId, idempotencyKey, kind}) {
@@ -2185,7 +2468,13 @@ export class PostgresHubStore {
 			const row = version.rows[0];
 			const response = kind === "brew"
 				? {brewBundle: {id: row.id, campaignId: row.campaign_id, version: row.version, contentHash: row.content_hash, content: row.content, manifest: row.manifest}}
-				: {rulesVersion: {id: row.id, campaignId: row.campaign_id, version: row.version, schemaVersion: row.schema_version, rules: row.rules}};
+				: {rulesVersion: getPublicCampaignRulesVersion({
+					id: row.id,
+					campaignId: row.campaign_id,
+					version: row.version,
+					schemaVersion: row.schema_version,
+					rules: row.rules,
+				}, {isIncludePolicy: true})};
 			const action = `${kind}.activated`;
 			await this._pAppendAudit({client, campaignId, actorAccountId: accountId, action, targetType: `${kind}_version`, targetId: versionId});
 			await this._pAppendEvent({client, campaignId, actorAccountId: accountId, type: action, aggregateType: `${kind}_version`, aggregateId: versionId, payload: {version: row.version}});

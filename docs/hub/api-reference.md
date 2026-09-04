@@ -2,7 +2,7 @@
 
 > **Status:** Current private-V1 contract
 > **Wire protocol:** `3`
-> **Last verified:** 2026-09-02
+> **Last verified:** 2026-09-04
 > **Owner:** Campaign Hub maintainers
 
 The browser uses relative same-origin paths through `HubApiClient`. This is an application BFF contract, not
@@ -60,7 +60,7 @@ Path/query keys ending in `Id` must be UUID-shaped. Invalid values fail as `INVA
 | Method/path | Access | Input | Result/behavior |
 |---|---|---|---|
 | `GET /api/health` | Public | none | `{ok:true}` or 503 `{ok:false,error:"DATABASE_UNAVAILABLE"}`; verifies DB, migration ledger, and required migration |
-| `GET /api/meta` | Public | none | protocol/package version plus additive `auth.provider_registry.v1` capability and bounded provider availability |
+| `GET /api/meta` | Public | none | protocol/package version, additive capabilities, and bounded provider availability; `campaign.rules_policy.v1` is present only when the new management surface is enabled |
 | `GET /auth/:provider/start` | Public, 10/min | concrete `github`, `discord`, or `google` route; query `returnTo?` | Creates a one-time durable transaction, sets signed correlation cookie, and redirects using the adapter's declared PKCE/nonce capabilities |
 | `GET /auth/:provider/callback` | OAuth correlation cookie, 20/min | concrete route; query `code`, `state` | Atomically consumes exact provider/operation/redirect-bound state, validates immutable subject, enforces exact allowlist authority, rotates the prior session, and redirects safely |
 | `GET /api/session` | Public | session cookie optional | `{signedIn:false}` or account + CSRF token |
@@ -241,6 +241,20 @@ reconciliation queue. Local, signed-out, detached, and non-owner sheets do not a
 | `POST /api/campaigns/:campaignId/brew-versions/:versionId/activate` | DM/co-DM mutation | none | Campaign pointer + activation event |
 | `POST /api/campaigns/:campaignId/rules-versions` | DM/co-DM mutation | typed rules object | 201 immutable rules version |
 | `POST /api/campaigns/:campaignId/rules-versions/:versionId/activate` | DM/co-DM mutation | none | Campaign pointer + activation event |
+| `GET /api/campaigns/:campaignId/rules-policy` | DM/co-DM; capability-gated | none | Closed catalog plus active immutable version and newest-first history |
+| `POST /api/campaigns/:campaignId/rules-policy` | DM/co-DM mutation; capability-gated | `{policy, expectedActiveRulesVersionId}` | Atomically validates, creates, and activates one immutable schema-v2 version; 201 |
+| `POST /api/campaigns/:campaignId/rules-policy/activate` | DM/co-DM mutation; capability-gated | `{rulesVersionId, expectedActiveRulesVersionId}` | Activates an existing immutable version as a rollback without rewriting it |
+
+Schema-v2 policy publication rejects unknown/duplicate/unavailable rule ids, unsupported catalog/rule schema
+versions or modes, malformed parameters/notes, invalid dependencies, and stale active-version bases. The command
+is idempotent and commits the version, pointer, private audit, ordered metadata-only event/outbox row, and receipt
+in one transaction. The campaign context keeps the legacy flat `rules` projection for old clients and adds only a
+bounded `policySummary`; the full policy and authored notes are returned only on the DM/co-DM management path.
+
+The new routes and management UI are off by default. Existing schema-v1 routes and versions remain readable
+regardless of the capability. No selected schema-v2 rule implies downstream Character Sheet, Builder, DM Screen,
+or server enforcement; the catalog currently labels implemented projections **Advisory** and unavailable future
+source/species/edition controls **Planned**.
 
 ## DM workspace routes
 

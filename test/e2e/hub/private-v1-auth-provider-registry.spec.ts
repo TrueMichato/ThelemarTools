@@ -11,7 +11,7 @@ test("publishes bounded provider metadata and accessible signed-out guidance", a
 	expect(meta.ok()).toBe(true);
 	expect(await meta.json()).toEqual(expect.objectContaining({
 		protocolVersion: "3",
-		capabilities: ["auth.provider_registry.v1"],
+		capabilities: ["auth.provider_registry.v1", "campaign.rules_policy.v1"],
 		authProviders: providers.map(({slug, label}) => ({
 			slug,
 			label,

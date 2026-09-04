@@ -1,6 +1,6 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-09-03
+> **Last updated:** 2026-09-04
 > **Owner:** Campaign Hub maintainers
 
 ## Status
@@ -41,6 +41,12 @@ command/operation/event identity, owner/DM watermarks, opaque target refs, and t
 proposal/terminal state machine. Production deliberately enables no successful `cost=none` peer template;
 Cure Wounds is recognized and rejected as cost-bearing. Character Sheet subscription/rebase, approval/targeting
 UI, costs, monster/multi-target effects, and the first real peer template remain later slices.
+
+The V2-T6 house-rule selection foundation is implemented behind the default-off
+`campaign.rules_policy.v1` capability. It adds a closed schema-v2 catalog, schema-v1 compatibility adapter,
+atomic immutable DM/co-DM publish/rollback, privacy-safe member summaries, and an accessible searchable manager.
+All selectable settings are labeled **Advisory**; source/species/edition entries are unavailable and **Planned**.
+The downstream shared evaluator and full content enforcement are not implemented and V2-T6 is not complete.
 
 - Lifecycle includes invite list/revoke, owner role changes, owner/co-DM member removal, voluntary leave,
   session/device revocation, immediate socket closure, workspace archive/restore, character detachment,
@@ -104,6 +110,9 @@ pass. Only the host-operations proof and physical one-DM/two-player game day rem
 - Hub-owned surfaces provide a keyboard skip path, persistent semantic page heading, named main and campaign
   regions, labeled form controls, WCAG AA primary-button contrast in day/night themes, and 44 px entry targets.
 - Immutable campaign brew/rules versions and early page context activation.
+- Capability-gated, versioned campaign rules catalog/selection with before/after review, immutable rollback,
+  schema-v1 compatibility, stale-base fencing, and privacy-safe read-only member summaries; enforcement remains
+  explicitly out of scope.
 - Private per-DM workspaces using the existing Board blob and lease fencing.
 - Authenticated WebSockets, presence, visibility-filtered event replay, snapshots, outbox dispatcher.
 - Campaign pages consume both initial snapshots and visible events, coalesce projection invalidations into one

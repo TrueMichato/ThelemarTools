@@ -20,6 +20,10 @@ import {
 	filterAwardItems,
 	getAwardCommandFingerprint,
 } from "./hub-item-award.js";
+import {
+	pInitCampaignRulesPolicy,
+	renderCampaignPolicySummary,
+} from "./hub-rules-policy-manager.js";
 
 const api = new HubApiClient();
 
@@ -102,6 +106,16 @@ function getErrorMessage (error) {
 		case "HP_MAX_UNAVAILABLE": return "This character's hit point maximum could not be read, so nothing was applied. Open it in the character sheet once to refresh its totals, then try again.";
 		case "ACTION_NOT_FOUND": return "That effect request is no longer waiting. Reload the campaign inbox to see its latest status.";
 		case "REVISION_CONFLICT": return "This data changed on another device. Your changes were not discarded. Reload and use the recovery choice shown before editing again.";
+		case "RULES_VERSION_STALE": return "Campaign rules changed on another device. Your draft was kept; review it against the refreshed active version.";
+		case "RULES_UNKNOWN": return "That policy contains a rule this server does not recognize. No version was created.";
+		case "RULES_PARAMETER_INVALID":
+		case "RULES_COMBINATION_UNSUPPORTED":
+		case "RULES_MODE_UNSUPPORTED":
+		case "RULES_SCHEMA_UNSUPPORTED":
+		case "RULES_CATALOG_UNSUPPORTED":
+		case "RULES_UNAVAILABLE":
+		case "RULES_INVALID":
+			return "That campaign policy is not supported. Review the highlighted rule settings; no version was created.";
 		case "LEASE_HELD": return "This character or workspace is being edited on another device. Open it read-only or explicitly take over editing there.";
 		case "LEASE_FENCED":
 		case "LEASE_EXPIRED":
@@ -1126,6 +1140,7 @@ function renderCampaignContext (context) {
 			? `${context.rulesVersion.rules.exhaustionRules} exhaustion · version ${context.rulesVersion.version}`
 			: "Not published";
 	}
+	renderCampaignPolicySummary({context});
 }
 
 function renderMemberList ({campaign, campaignId, members, session, pRefresh}) {
@@ -1517,6 +1532,15 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		document.getElementById("campaign-rule-jumping").checked = !!activeRules.thelemar_jumping;
 		document.getElementById("campaign-rule-linguistics").checked = !!activeRules.thelemar_linguisticsBonus;
 		document.getElementById("campaign-rule-critical").checked = !!activeRules.thelemar_criticalRolls;
+	}
+	if (isDm) {
+		void pInitCampaignRulesPolicy({
+			api,
+			campaignId,
+			context,
+			fnRenderCampaignContext: renderCampaignContext,
+			fnRenderError: renderError,
+		}).catch(renderError);
 	}
 	setHidden(inviteForm, !isDm);
 	inviteForm?.addEventListener("submit", async event => {

@@ -1,7 +1,7 @@
 # Campaign Hub traceability matrix
 
 > **Status:** Active; expand with every continuation change
-> **Last verified:** 2026-09-01
+> **Last verified:** 2026-09-04
 > **Owner:** Campaign Hub maintainers
 
 | Requirement/invariant | Decision/reference | Implementation | Primary tests/evidence | Operational reference |
@@ -18,6 +18,7 @@
 | Character projections are authorization-scoped | `adr/0011-authorization-scoped-character-projections.md`, `data-lifecycle.md` | `server/src/character-projection.js`, both stores, `js/hub/hub-character-view.js`, `js/charactersheet/charactersheet-sharing.js` | `HubCharacterProjection`, `HubProjectionPolicy`, `HubProjectionCanary`, `HubProjectionLifecycle`, `HubPartyTrackerProjection` | migration 0004 |
 | Transfers cannot duplicate/lose assets | `domain-model.md` | `hub-actions.js`, transactional store locks/escrow | Hub actions and Phase 4 domain | future stuck-transfer runbook |
 | Multi-target item awards are atomic, private, and retry-safe | ADR 0017; V2-T4 | strict award route, shared inventory helpers, staged memory writes, PostgreSQL locks/transaction, ordered events, Character Sheet reconciliation | `HubItemAward`, API route/domain/PostgreSQL parity, Character Sheet realtime/party inventory, real-stack lifecycle | award troubleshooting row; incident runbook for suspected asset drift |
+| Campaign rules selection is immutable, explainable, compatible, and honestly labeled | ADR 0015; V2-T6 | shared closed catalog/validator/legacy adapter, capability-gated API and manager, memory/PostgreSQL atomic publish/rollback using existing `rules_versions` JSONB | `HubCampaignRulesPolicy`, `HubRulesPolicyApi`, `HubRulesPolicyPostgres`, `HubPageContract`, production-derived lifecycle journey | downstream evaluator/content enforcement explicitly not implemented |
 | Service worker never caches auth/API | `security.md` | Hub route policy + `sw-template.js` | route-policy/service-worker build | stale-client staging scenario |
 | Backup is portable and atomic | `operations.md` | backup/restore/pg-env scripts | local PostgreSQL backup/restore drill | backup/restore runbook |
 | Oracle recovery meets RPO/RTO | ADR 0006; `roadmap.md` V1-G1 | encrypted backup/restore and scheduled-operation tooling implemented; off-machine/isolated proof active | exact-release staging restore/rollback evidence required | backup/restore and rollback runbooks |

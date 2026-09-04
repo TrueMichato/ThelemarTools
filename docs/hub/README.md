@@ -102,7 +102,8 @@ second character or apply the move twice. Local character JSON does not gain Hub
 - [ADR 0012: idempotent semantic character operations](adr/0012-idempotent-semantic-character-operations.md) — contract only
 - [ADR 0013: device-scoped active campaign context](adr/0013-device-scoped-active-campaign-context.md) — contract only
 - [ADR 0014: multi-provider account identity](adr/0014-multi-provider-identity.md) — contract only
-- [ADR 0015: versioned Campaign Hub rules policy](adr/0015-campaign-rules-policy.md) — contract only
+- [ADR 0015: versioned Campaign Hub rules policy](adr/0015-campaign-rules-policy.md) — contract plus
+  capability-gated selection foundation; downstream enforcement pending
 - [ADR 0016: atomic source-cost binding for peer character operations](adr/0016-atomic-peer-source-costs.md) —
   contract only
 - [ADR 0017: atomic DM item-award batches](adr/0017-atomic-dm-item-awards.md)

@@ -666,7 +666,8 @@ describe("Encumbrance tiers — the rule source, and the toggle over it", () => 
 		const playmode = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-playmode.js"), "utf8");
 		expect(playmode).toContain("thelemar_encumbranceTiers");
 
-		const campaignRules = readFileSync(resolve(REPO_ROOT, "server/src/campaign-content.js"), "utf8");
+		const campaignRules = readFileSync(resolve(REPO_ROOT, "js/hub/hub-campaign-rules.js"), "utf8");
+		expect(campaignRules).toContain("\"tgtt.encumbrance-tiers\"");
 		expect(campaignRules).toContain("thelemar_encumbranceTiers");
 	});
 });

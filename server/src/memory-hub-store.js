@@ -36,6 +36,10 @@ import {
 } from "./hub-actions.js";
 import {validateCloudCharacterData, validateCloudValue} from "./cloud-data-validation.js";
 import {
+	getPublicCampaignRulesVersion,
+	normalizeCampaignRulesPolicyForStorage,
+} from "./campaign-content.js";
+import {
 	createCharacterDisplayNameSnapshot,
 	enrichEventPayload,
 	redactTransferEventForViewer,
@@ -1394,7 +1398,7 @@ export class MemoryHubStore {
 		return {
 			campaignId,
 			brewBundle: copy(brew),
-			rulesVersion: copy(rules),
+			rulesVersion: getPublicCampaignRulesVersion(copy(rules)),
 		};
 	}
 
@@ -1468,7 +1472,11 @@ export class MemoryHubStore {
 		};
 		this._rulesVersions.set(rulesVersion.id, rulesVersion);
 		this._appendAudit({campaignId, actorAccountId: accountId, action: "rules.created", targetType: "rules_version", targetId: rulesVersion.id});
-		return this._setReceipt({accountId, idempotencyKey, response: {rulesVersion}});
+		return this._setReceipt({
+			accountId,
+			idempotencyKey,
+			response: {rulesVersion: getPublicCampaignRulesVersion(rulesVersion, {isIncludePolicy: true})},
+		});
 	}
 
 	async pActivateRulesVersion ({accountId, campaignId, rulesVersionId, idempotencyKey}) {
@@ -1480,7 +1488,158 @@ export class MemoryHubStore {
 		this._campaigns.get(campaignId).activeRulesVersionId = rulesVersionId;
 		this._appendAudit({campaignId, actorAccountId: accountId, action: "rules.activated", targetType: "rules_version", targetId: rulesVersionId});
 		this._appendEvent({campaignId, actorAccountId: accountId, type: "rules.activated", aggregateType: "rules_version", aggregateId: rulesVersionId, payload: {version: rulesVersion.version}});
-		return this._setReceipt({accountId, idempotencyKey, response: {rulesVersion}});
+		return this._setReceipt({
+			accountId,
+			idempotencyKey,
+			response: {rulesVersion: getPublicCampaignRulesVersion(rulesVersion, {isIncludePolicy: true})},
+		});
+	}
+
+	async pGetRulesPolicyManagement ({accountId, campaignId}) {
+		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"], isRequireActiveCampaign: false});
+		const campaign = this._campaigns.get(campaignId);
+		const versions = [...this._rulesVersions.values()]
+			.filter(version => version.campaignId === campaignId)
+			.sort((a, b) => b.version - a.version)
+			.map(version => getPublicCampaignRulesVersion(version, {isIncludePolicy: true}));
+		return {
+			campaignId,
+			activeRulesVersionId: campaign.activeRulesVersionId,
+			versions,
+		};
+	}
+
+	async pCreateAndActivateRulesPolicy ({
+		accountId,
+		campaignId,
+		policy,
+		expectedActiveRulesVersionId,
+		idempotencyKey,
+	}) {
+		const prior = this._getReceipt({accountId, idempotencyKey});
+		if (prior) return prior;
+		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
+		const campaign = this._campaigns.get(campaignId);
+		if (campaign.activeRulesVersionId !== expectedActiveRulesVersionId) {
+			throw new HubStoreError("RULES_VERSION_STALE", `Campaign rules changed before this policy was activated.`, {
+				status: 409,
+				details: {activeRulesVersionId: campaign.activeRulesVersionId},
+			});
+		}
+		const normalizedPolicy = normalizeCampaignRulesPolicyForStorage(policy);
+		const previousRulesVersion = campaign.activeRulesVersionId
+			? this._rulesVersions.get(campaign.activeRulesVersionId)
+			: null;
+		const version = Math.max(
+			0,
+			...[...this._rulesVersions.values()]
+				.filter(it => it.campaignId === campaignId)
+				.map(it => it.version),
+		) + 1;
+		const rulesVersion = {
+			id: crypto.randomUUID(),
+			campaignId,
+			version,
+			schemaVersion: normalizedPolicy.schemaVersion,
+			rules: copy(normalizedPolicy),
+			createdAt: this._fnNow().toISOString(),
+		};
+		this._rulesVersions.set(rulesVersion.id, rulesVersion);
+		campaign.activeRulesVersionId = rulesVersion.id;
+		this._appendAudit({
+			campaignId,
+			actorAccountId: accountId,
+			action: "rules.created",
+			targetType: "rules_version",
+			targetId: rulesVersion.id,
+			details: {schemaVersion: normalizedPolicy.schemaVersion, catalogVersion: normalizedPolicy.catalogVersion},
+		});
+		this._appendAudit({
+			campaignId,
+			actorAccountId: accountId,
+			action: "rules.activated",
+			targetType: "rules_version",
+			targetId: rulesVersion.id,
+			details: {previousRulesVersionId: previousRulesVersion?.id || null},
+		});
+		this._appendEvent({
+			campaignId,
+			actorAccountId: accountId,
+			type: "rules.activated",
+			aggregateType: "rules_version",
+			aggregateId: rulesVersion.id,
+			payload: {
+				version: rulesVersion.version,
+				previousVersion: previousRulesVersion?.version || null,
+				schemaVersion: normalizedPolicy.schemaVersion,
+				catalogVersion: normalizedPolicy.catalogVersion,
+				operation: "publish",
+			},
+		});
+		const response = {
+			rulesVersion: getPublicCampaignRulesVersion(rulesVersion, {isIncludePolicy: true}),
+			previousRulesVersionId: previousRulesVersion?.id || null,
+		};
+		return this._setReceipt({accountId, idempotencyKey, response});
+	}
+
+	async pActivateRulesPolicyVersion ({
+		accountId,
+		campaignId,
+		rulesVersionId,
+		expectedActiveRulesVersionId,
+		idempotencyKey,
+	}) {
+		const prior = this._getReceipt({accountId, idempotencyKey});
+		if (prior) return prior;
+		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
+		const campaign = this._campaigns.get(campaignId);
+		if (campaign.activeRulesVersionId !== expectedActiveRulesVersionId) {
+			throw new HubStoreError("RULES_VERSION_STALE", `Campaign rules changed before this rollback was activated.`, {
+				status: 409,
+				details: {activeRulesVersionId: campaign.activeRulesVersionId},
+			});
+		}
+		const target = this._rulesVersions.get(rulesVersionId);
+		if (!target || target.campaignId !== campaignId) {
+			throw new HubStoreError("RULES_NOT_FOUND", `Rules version was not found.`, {status: 404});
+		}
+		if (target.id === campaign.activeRulesVersionId) {
+			throw new HubStoreError("RULES_ALREADY_ACTIVE", `That rules version is already active.`, {status: 409});
+		}
+		// Reading through the adapter proves the target remains compatible before activation.
+		getPublicCampaignRulesVersion(target, {isIncludePolicy: true});
+		const previous = campaign.activeRulesVersionId
+			? this._rulesVersions.get(campaign.activeRulesVersionId)
+			: null;
+		campaign.activeRulesVersionId = target.id;
+		this._appendAudit({
+			campaignId,
+			actorAccountId: accountId,
+			action: "rules.rollback_activated",
+			targetType: "rules_version",
+			targetId: target.id,
+			details: {previousRulesVersionId: previous?.id || null},
+		});
+		this._appendEvent({
+			campaignId,
+			actorAccountId: accountId,
+			type: "rules.activated",
+			aggregateType: "rules_version",
+			aggregateId: target.id,
+			payload: {
+				version: target.version,
+				previousVersion: previous?.version || null,
+				schemaVersion: target.schemaVersion,
+				catalogVersion: getPublicCampaignRulesVersion(target).catalogVersion,
+				operation: "rollback",
+			},
+		});
+		const response = {
+			rulesVersion: getPublicCampaignRulesVersion(target, {isIncludePolicy: true}),
+			previousRulesVersionId: previous?.id || null,
+		};
+		return this._setReceipt({accountId, idempotencyKey, response});
 	}
 
 	async pGetOrCreateDmWorkspace ({accountId, campaignId, defaultState}) {

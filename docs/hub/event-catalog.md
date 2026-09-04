@@ -48,7 +48,7 @@
 | `character.moved` | character | all_members in target | source campaign/character ids | Same character id, new campaign |
 | `character.archived` | character | all_members | empty/default | Character preserved for owner |
 | `brew.activated` | brew bundle version | all_members | version | Context consumers refetch/activate |
-| `rules.activated` | rules version | all_members | version | Context consumers refetch/activate |
+| `rules.activated` | rules version | all_members | version id/number; schema/catalog version and `publish`/`rollback` operation when emitted by policy management | Context consumers refetch/activate; policy body, parameters, notes, and before/after values are never emitted |
 | `roll.logged` | character or campaign | caller-selected all_members/dm_only/actor_and_dm | formula, total, context, detail | Cooperative evidence, not cryptographic roll authority. Activity presentation prefers bounded `detail.title` and selectively renders safe breakdown/result/advantage/critical/spell/ability/target fields. |
 | `character.operation.proposed` | semantic operation | explicit proposer+target owner | `operationId`, `targetCharacterId`, `status`, pinned source/template/choice, safe source/target/effect snapshots, `expiresAt` | DMs also see explicit-account events; canonical source character id and derived low-level operation are omitted |
 | `character.operation.applied` | target character | explicit proposer/DM actor+target owner | normalized operation plus `resultingCharacterRevision` | Aggregate revision equals the resulting revision; payload has no raw actor id or canonical character fields |

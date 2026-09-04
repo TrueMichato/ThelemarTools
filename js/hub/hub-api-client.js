@@ -82,6 +82,10 @@ export class HubApiClient {
 		return session;
 	}
 
+	async pGetMeta ({signal = null} = {}) {
+		return this._pRequest("/api/meta", {signal});
+	}
+
 	async pListCampaigns () {
 		return (await this._pRequest("/api/campaigns")).campaigns;
 	}
@@ -357,6 +361,28 @@ export class HubApiClient {
 	async pActivateRulesVersion ({campaignId, versionId, idempotencyKey}) {
 		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/rules-versions/${encodeURIComponent(versionId)}/activate`, {
 			method: "POST",
+			isMutation: true,
+			idempotencyKey,
+		});
+	}
+
+	async pGetRulesPolicyManagement ({campaignId}) {
+		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/rules-policy`);
+	}
+
+	async pPublishRulesPolicy ({campaignId, policy, expectedActiveRulesVersionId, idempotencyKey}) {
+		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/rules-policy`, {
+			method: "POST",
+			body: {policy, expectedActiveRulesVersionId},
+			isMutation: true,
+			idempotencyKey,
+		});
+	}
+
+	async pActivateRulesPolicyVersion ({campaignId, rulesVersionId, expectedActiveRulesVersionId, idempotencyKey}) {
+		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/rules-policy/activate`, {
+			method: "POST",
+			body: {rulesVersionId, expectedActiveRulesVersionId},
 			isMutation: true,
 			idempotencyKey,
 		});

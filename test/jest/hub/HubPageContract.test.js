@@ -8,6 +8,7 @@ describe("campaign hub pages", () => {
 	const campaignHtml = read("campaign.html");
 	const scss = read("scss/hub.scss");
 	const navigation = read("js/navigation.js");
+	const rulesPolicyManager = read("js/hub/hub-rules-policy-manager.js");
 
 	it("exposes signed-out, loading, error, and signed-in states", () => {
 		for (const id of ["hub-loading", "hub-error", "hub-signed-out", "hub-signed-in"]) {
@@ -309,5 +310,45 @@ describe("campaign hub pages", () => {
 			"thelemar_linguisticsBonus",
 			"thelemar_criticalRolls",
 		]) expect(source).toContain(`activeRules.${key}`);
+	});
+
+	it("provides an accessible, capability-gated rules library and privacy-safe member summary", () => {
+		for (const id of [
+			"campaign-policy-summary",
+			"campaign-policy-summary-status",
+			"campaign-policy-summary-list",
+			"campaign-rules-policy-manager",
+			"campaign-rules-policy-loading",
+			"campaign-rules-search",
+			"campaign-rules-category",
+			"campaign-rules-support",
+			"campaign-rules-results-status",
+			"campaign-rules-list",
+			"campaign-rules-empty",
+			"campaign-rules-review-list",
+			"campaign-rules-validation",
+			"campaign-rules-activate",
+			"campaign-rules-history",
+			"campaign-rules-rollback-review",
+			"campaign-rules-rollback",
+			"campaign-rules-policy-status",
+		]) expect(campaignHtml).toContain(`id="${id}"`);
+		expect(campaignHtml).toContain("role=\"search\"");
+		expect(campaignHtml).toContain("aria-live=\"polite\"");
+		expect(rulesPolicyManager).toContain("CAMPAIGN_RULES_POLICY_CAPABILITY");
+		expect(rulesPolicyManager).toContain("setHidden(this._legacyForm, true)");
+		expect(rulesPolicyManager).not.toContain("innerHTML");
+	});
+
+	it("covers loading, empty, error, offline, conflict, rollback, and long-list rule states", () => {
+		expect(campaignHtml).toContain("Loading rules library...");
+		expect(campaignHtml).toContain("No rules match these filters.");
+		expect(rulesPolicyManager).toContain("The rules library could not be loaded.");
+		expect(rulesPolicyManager).toContain("window.addEventListener(\"offline\"");
+		expect(rulesPolicyManager).toContain("Rules changed elsewhere. Your draft is preserved");
+		expect(campaignHtml).toContain("Activate previous version");
+		expect(scss).toMatch(/\.hub-rules-list\s*\{[\s\S]*max-height:\s*720px;[\s\S]*overflow:\s*auto/);
+		expect(scss).toMatch(/@media \(width <= 720px\)[\s\S]*\.hub-rules-toolbar,[\s\S]*\.hub-rule-row/);
+		expect(scss).toContain(".hub-rule-row__control .hub-setting:has(input:focus-visible)");
 	});
 });
