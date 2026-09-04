@@ -1,0 +1,16 @@
+{
+  "goal_id": "campaign-rule-enforcement",
+  "status": "building",
+  "iteration": 1,
+  "builder_model": "GPT:5.6-Luna",
+  "inspector_model": "GPT:5.6-Sol",
+  "initial_sha": "29eaf1087e3b59ff5184edf8337da340396515c8",
+  "created_at": "2026-09-04T20:43:08.072+03:00",
+  "history": [
+    {
+      "iteration": 1,
+      "verdict": "FAIL",
+      "summary": "Bypassable server fence, stale-context resurrection, overclaimed surfaces, missing evidence, failing gates, and no draft PR."
+    }
+  ]
+}
