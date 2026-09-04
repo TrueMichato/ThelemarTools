@@ -53,6 +53,7 @@ import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js"
 import {getCharacterSaveFence, isCharacterSaveFenceCurrent} from "./charactersheet-persistence-fence.js";
 import {diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
 import {
+	getClearedCampaignRulesState,
 	getCampaignSettingsOverlay,
 	getCampaignSettingsOverlayFromRulesVersion,
 } from "../hub/hub-campaign-rule-evaluator.js";
@@ -260,11 +261,12 @@ class CharacterSheetPage {
 	 */
 	_clearHubRules () {
 		this._hubRulesRefreshGeneration++;
-		this._hubContext = null;
+		const cleared = getClearedCampaignRulesState();
+		this._hubContext = cleared.hubContext;
 		this._state.clearCampaignSettingsOverlay();
 		// Return to the detached basis in lockstep with the overlay: a summary stamped with a
 		// campaign this sheet is no longer in must not keep claiming to be current.
-		this._state.setCarryAuthorityContext(null);
+		this._state.setCarryAuthorityContext(cleared.carryAuthorityContext);
 	}
 
 	/** Composed detach used by ordinary (non-context-switch) call sites. */

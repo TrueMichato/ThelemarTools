@@ -76,6 +76,7 @@ describe("campaign rule evaluator", () => {
 		["a malformed version", {...rulesVersion(), version: "1"}, {}, "RULES_VERSION_INVALID"],
 		["an open envelope", {...rulesVersion(), unexpected: true}, {}, "RULES_VERSION_INVALID"],
 		["a malformed nested decision", {...rulesVersion(), ruleDecision: {unexpected: true}}, {}, "RULES_VERSION_INVALID"],
+		["an invalid protocol type", rulesVersion(), {protocolVersion: {}}, "RULE_EVALUATOR_INPUT_INVALID"],
 	])("fails closed for %s", (_label, version, overrides, code) => {
 		expect(evaluate(version, overrides)).toMatchObject({
 			status: "blocked",

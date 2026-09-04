@@ -62,6 +62,11 @@ async function probeEvaluatorFailClosed ({rules, evaluator}) {
 		blocking: true,
 		effectiveSettings: {enableTgtt: true},
 	}), null);
+	assert.deepEqual(evaluator.getClearedCampaignRulesState(), {
+		hubContext: null,
+		overlay: null,
+		carryAuthorityContext: null,
+	});
 }
 
 async function probeServerFence ({rules, authority}) {
@@ -304,7 +309,7 @@ const MUTANTS = [
 		probe: probeEvaluatorFailClosed,
 		mutations: {
 			"hub-campaign-rule-evaluator.js": source => source.replace(
-				"if (!decision || decision.status !== \"compliant\" || decision.blocking) return null;",
+				"if (!isClosedRuleDecision(decision) || decision.status !== \"compliant\" || decision.blocking) return null;",
 				"if (!decision) return null;",
 			),
 		},
@@ -316,6 +321,16 @@ const MUTANTS = [
 			"hub-campaign-rule-evaluator.js": source => source.replace(
 				"if (effectiveSettings.enableTgtt === false) {",
 				"if (false) {",
+			),
+		},
+	},
+	{
+		name: "character-rules-teardown-disabled",
+		probe: probeEvaluatorFailClosed,
+		mutations: {
+			"hub-campaign-rule-evaluator.js": source => source.replace(
+				"hubContext: null,",
+				"hubContext: {},",
 			),
 		},
 	},

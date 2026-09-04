@@ -264,7 +264,7 @@ export function evaluateCampaignRules (input = {}) {
 }
 
 export function getCampaignSettingsOverlay (decision) {
-	if (!decision || decision.status !== "compliant" || decision.blocking) return null;
+	if (!isClosedRuleDecision(decision) || decision.status !== "compliant" || decision.blocking) return null;
 	return copyObject(decision.effectiveSettings);
 }
 
