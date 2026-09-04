@@ -6,6 +6,22 @@ This document honestly assesses the current limitations and areas for improvemen
 
 While the character sheet has extensive functionality and test coverage, several areas need additional work. This document catalogs these gaps to help contributors prioritize improvements.
 
+### Campaign peer targeting: first supported slice
+
+An authenticated campaign sheet can send **Cure Wounds** from one player-owned character to one privacy-visible
+player-owned campaign character. PHB and XPHB Cure Wounds are supported with a standard spell slot at the selected
+cast level. The server pins the spell/template/rules identity and deterministic healing roll; the target owner
+must approve before one atomic transaction spends the source slot and applies the target healing. Reject, sender
+cancel, expiry, an unavailable target, or an invalidated/unavailable cost spend nothing. The source must remain a
+currently usable class spell, including being prepared for prepared casters. Spending and then restoring the bound
+slot does not revive the old request; the player must ask for fresh consent.
+
+This is intentionally not general spell targeting. Pact slots, free-cast features, Metamagic, variant components,
+material-component spending, concentration/action-economy enforcement, arbitrary abilities/effects,
+monster/NPC targets, party/multi-target resolution, and range automation are not supported by this slice.
+The picker states the touch-range requirement without exposing target HP, defenses, applicability, or other
+private state. Local and signed-out sheets retain the existing local cast flow.
+
 ---
 
 ## Implementation Status

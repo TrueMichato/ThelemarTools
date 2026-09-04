@@ -740,23 +740,123 @@ describe("semantic character operations", () => {
 });
 
 describe("production semantic operation registry", () => {
-	it("recognizes Cure Wounds but rejects its cost before deriving an operation", () => {
+	it("derives a deterministic, standard-slot Cure Wounds operation", () => {
 		const registry = createSemanticOperationRegistry();
-		let caught;
-		try {
-			registry.derive({
-				sourceCharacter: {data: {}},
-				targetCharacter: {id: crypto.randomUUID(), targetRef: crypto.randomUUID(), data: {}},
-				targetRef: crypto.randomUUID(),
-				sourceEntity: {type: "spell", uid: "cure wounds|phb", version: "phb-2014-v1"},
-				effectTemplateId: "spell.cure-wounds.heal",
-				choice: {},
-				sourceProfile: {},
-				targetProfile: {},
-			});
-		} catch (error) {
-			caught = error;
-		}
-		expect(caught).toMatchObject({code: "SOURCE_COST_UNSUPPORTED", status: 409});
+		const targetRef = crypto.randomUUID();
+		const input = {
+			sourceCharacter: {
+				id: crypto.randomUUID(),
+				data: {
+					abilities: {wis: 16},
+					abilityBonuses: {wis: 0},
+					classes: [{name: "Cleric", source: "PHB", level: 1, casterProgression: "full", spellcastingAbility: "wis"}],
+					spellcasting: {
+						ability: "wis",
+						spellsKnown: [{name: "Cure Wounds", source: "PHB", level: 1, prepared: true, sourceClass: "Cleric"}],
+						spellSlots: {1: {current: 1, max: 1}},
+					},
+				},
+			},
+			targetCharacter: {id: crypto.randomUUID(), targetRef, data: {}},
+			targetRef,
+			sourceEntity: {type: "spell", uid: "cure wounds|phb", version: "phb-2014-v1"},
+			effectTemplateId: "spell.cure-wounds.heal",
+			choice: {castLevel: 1},
+			sourceProfile: {},
+			targetProfile: {},
+			effectResolutionSeed: "ab".repeat(32),
+		};
+		const first = registry.derive(input);
+		const second = registry.derive(input);
+		expect(second).toEqual(first);
+		expect(first.sourceCost).toEqual({
+			version: 1,
+			components: [{kind: "spell_slot", pool: "standard", level: 1, amount: 1}],
+		});
+		expect(first.operation).toMatchObject({kind: "hp.heal", arguments: {amount: expect.any(Number)}});
+	});
+
+	it.each([
+		["unprepared", [{name: "Cure Wounds", source: "PHB", level: 1, sourceClass: "Cleric"}], []],
+		["innate", [], [{name: "Cure Wounds", source: "PHB", level: 1}]],
+		["item-granted", [{name: "Cure Wounds", source: "PHB", level: 1, prepared: true, sourceType: "item"}], []],
+	])("rejects %s Cure Wounds entries that are not currently usable class spells", (_label, spellsKnown, innateSpells) => {
+		const registry = createSemanticOperationRegistry();
+		expect(() => registry.derive({
+			sourceCharacter: {
+				id: crypto.randomUUID(),
+				data: {
+					abilities: {wis: 16},
+					abilityBonuses: {wis: 0},
+					classes: [{name: "Cleric", source: "PHB", level: 1, casterProgression: "full", spellcastingAbility: "wis"}],
+					spellcasting: {
+						ability: "wis",
+						spellsKnown,
+						innateSpells,
+						spellSlots: {1: {current: 1, max: 1}},
+					},
+				},
+			},
+			targetCharacter: {id: crypto.randomUUID(), targetRef: "target-ref", data: {}},
+			targetRef: "target-ref",
+			sourceEntity: {type: "spell", uid: "cure wounds|phb", version: "phb-2014-v1"},
+			effectTemplateId: "spell.cure-wounds.heal",
+			choice: {castLevel: 1},
+			sourceProfile: {},
+			targetProfile: {},
+			effectResolutionSeed: "ab".repeat(32),
+		})).toThrow(expect.objectContaining({code: "SOURCE_OR_TARGET_UNAVAILABLE"}));
+	});
+
+	it("uses the owning class ability and the sheet's effective ability-score channels", () => {
+		const registry = createSemanticOperationRegistry();
+		const sourceCharacter = {
+			id: crypto.randomUUID(),
+			data: {
+				abilities: {int: 18, wis: 10},
+				abilityBonuses: {wis: 0},
+				classes: [
+					{name: "Wizard", source: "PHB", level: 1, casterProgression: "full", spellcastingAbility: "int"},
+					{name: "Cleric", source: "PHB", level: 1, casterProgression: "full", spellcastingAbility: "wis"},
+				],
+				customModifiers: {abilityScores: {wis: 2}, abilityScoreStatic: {wis: 20}},
+				directAbilityBonuses: {wis: 2},
+				itemAbilityOverrides: {bonus: {wis: 2}, static: {wis: 19}},
+				activeStates: [{
+					active: true,
+					customEffects: [{type: "abilityDamage", target: "wis", value: 2}],
+				}],
+				spellcasting: {
+					ability: "int",
+					spellsKnown: [{
+						name: "Cure Wounds",
+						source: "PHB",
+						level: 1,
+						prepared: true,
+						sourceClass: "Cleric",
+					}],
+					spellSlots: {1: {current: 1, max: 1}},
+				},
+			},
+		};
+		const targetCharacter = {id: crypto.randomUUID(), targetRef: "target-ref", data: {}};
+		const derive = character => registry.derive({
+			sourceCharacter: character,
+			targetCharacter,
+			targetRef: targetCharacter.targetRef,
+			sourceEntity: {type: "spell", uid: "cure wounds|phb", version: "phb-2014-v1"},
+			effectTemplateId: "spell.cure-wounds.heal",
+			choice: {castLevel: 1},
+			sourceProfile: {},
+			targetProfile: {},
+			effectResolutionSeed: "cd".repeat(32),
+		}).operation.arguments.amount;
+		const baseline = structuredClone(sourceCharacter);
+		baseline.data.customModifiers = {};
+		baseline.data.directAbilityBonuses = {};
+		baseline.data.itemAbilityOverrides = {};
+		baseline.data.activeStates = [];
+
+		expect(derive(sourceCharacter) - derive(baseline)).toBe(4);
 	});
 });

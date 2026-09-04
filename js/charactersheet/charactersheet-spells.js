@@ -2521,15 +2521,32 @@ class CharacterSheetSpells {
 		const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: selectedSlot.level, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
 		if (activeMetamagicChoice?.cancelled) return;
 		if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null, {enforceMaterial: true})) return;
+
+		// Variant spell component selection
+		const variantComponentChoice = await this._resolveVariantComponentChoice({spell, spellData, decision});
+		if (variantComponentChoice?.cancelled) return;
+
+		const peerTargetingResult = await this._page._peerTargeting?.pMaybeProposeSpell({
+			spell,
+			selectedSlot,
+			hasMetamagic: !!activeMetamagicChoice?.metamagic,
+			hasVariantComponent: !!variantComponentChoice?.variantComponent,
+		});
+		if (peerTargetingResult?.handled) {
+			if (peerTargetingResult.proposed) {
+				JqueryUtil.doToast({
+					type: "success",
+					content: `${spell.name} request sent. The spell slot will be spent only if the target approves and the cast is still available.`,
+				});
+			}
+			return;
+		}
+
 		if (!this._spendMetamagicCost(activeMetamagicChoice?.metamagic)) {
 			JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 			return;
 		}
 		if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
-
-		// Variant spell component selection
-		const variantComponentChoice = await this._resolveVariantComponentChoice({spell, spellData, decision});
-		if (variantComponentChoice?.cancelled) return;
 
 		const castMeta = this._getNormalizedCastMeta({
 			spell,

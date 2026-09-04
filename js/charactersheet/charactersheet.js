@@ -46,6 +46,7 @@ import {HubApiClient} from "../hub/hub-api-client.js";
 import {HubRollLogAdapter} from "../hub/hub-roll-log-adapter.js";
 import {CharacterSheetRealtimeCoordinator} from "./charactersheet-realtime.js";
 import {CharacterSheetHubEffects} from "./charactersheet-hub-effects.js";
+import {CharacterSheetPeerTargeting} from "./charactersheet-peer-targeting.js";
 import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js";
 import {diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
 
@@ -89,6 +90,7 @@ class CharacterSheetPage {
 		this._hubContext = null;
 		this._hubRollLogAdapter = null;
 		this._hubEffects = null;
+		this._peerTargeting = null;
 		this._hubRealtime = realtimeCoordinator;
 		this._fnCreateRealtimeCoordinator = fnCreateRealtimeCoordinator;
 		this._partyInventory = null;
@@ -189,6 +191,7 @@ class CharacterSheetPage {
 	_attachHubRealtime ({characterId = this._currentCharacterId} = {}) {
 		this._hubRealtimeGeneration++;
 		this._hubEffects?.activate({characterId});
+		this._peerTargeting?.activate({characterId});
 		const isAttached = this._hubRealtime?.attach({characterId}) || false;
 		void this._partyInventory?.pAttach({
 			characterId,
@@ -215,6 +218,7 @@ class CharacterSheetPage {
 	_detachHubProjections () {
 		this._partyInventory?.detach();
 		this._hubEffects?.deactivate();
+		this._peerTargeting?.deactivate();
 		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
 	}
 
@@ -272,6 +276,7 @@ class CharacterSheetPage {
 
 	_onHubRealtimeConnectionState (state) {
 		this._hubEffects?.onConnectionState(state);
+		this._peerTargeting?.onConnectionState(state);
 		if (!["closed", "access_lost"].includes(state?.state)) return;
 		this._hubRealtimeGeneration++;
 		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
@@ -317,15 +322,25 @@ class CharacterSheetPage {
 	}
 
 	_onHubSemanticOperation (event) {
-		if (!this._currentCharacterId || event.targetCharacterId !== this._currentCharacterId) return false;
-		if (event?.status !== "applied") return this._hubEffects?.onRealtimeOperation(event) || false;
+		if (!this._currentCharacterId) return false;
+		this._peerTargeting?.onRealtimeOperation(event);
+		const characterId = event.characterId || event.targetCharacterId;
+		if (event?.status !== "applied") {
+			if (event.targetCharacterId != null && event.targetCharacterId !== this._currentCharacterId) return false;
+			return this._hubEffects?.onRealtimeOperation(event) || false;
+		}
+		if (characterId !== this._currentCharacterId) return false;
 		const repository = this._characterRepository;
 		if (typeof repository?.applyRealtimeOperation !== "function") return false;
 		const beforeData = this._getHubLiveCharacterData();
 
 		const result = repository.applyRealtimeOperation({
 			characterId: this._currentCharacterId,
+			leg: event.leg || "target",
+			operationId: event.operationId || event.payload?.operation?.operationId,
+			operationLegKey: event.operationLegKey,
 			operation: event.payload?.operation,
+			sourceCost: event.payload?.sourceCost,
 			resultingCharacterRevision: event.payload?.resultingCharacterRevision,
 			eventId: event.eventId,
 			sequence: event.sequence,
@@ -344,17 +359,19 @@ class CharacterSheetPage {
 					// eslint-disable-next-line no-console
 					console.error("Render after campaign effect failed:", error);
 				}
-				this._hubEffects?.onApplied({
-					operation: event.payload?.operation,
-					beforeData,
-					afterData: this._getHubLiveCharacterData(),
-				});
+				if (event.payload?.operation) {
+					this._hubEffects?.onApplied({
+						operation: event.payload.operation,
+						beforeData,
+						afterData: this._getHubLiveCharacterData(),
+					});
+				}
 				return true;
 			case "resync_required":
 				this._scheduleHubRealtimeResync({characterId: this._currentCharacterId});
 				return true;
 			case "suppressed":
-				this._hubEffects?.onAuthoritativeCoverage({operationId: event.operationId});
+				if (event.leg !== "source") this._hubEffects?.onAuthoritativeCoverage({operationId: event.operationId});
 				return true;
 			case "blocked":
 			case "rejected":
@@ -391,13 +408,19 @@ class CharacterSheetPage {
 		sequence,
 		operation,
 		resultingCharacterRevision,
+		leg = "target",
+		sourceCost = null,
 	}) {
 		if (characterId !== this._currentCharacterId) return false;
 		const repository = this._characterRepository;
+		const isTargetLeg = ["target", "combined"].includes(leg);
+		const isSourceLeg = ["source", "combined"].includes(leg);
 		if (
 			typeof repository?.pEnqueueRealtimeDelivery !== "function"
-			|| operation?.operationId !== actionId
-			|| operation?.targetCharacterId !== characterId
+			|| (isTargetLeg && operation?.operationId !== actionId)
+			|| (isTargetLeg && operation?.targetCharacterId !== characterId)
+			|| (!isTargetLeg && leg !== "source")
+			|| (isSourceLeg && (!sourceCost || typeof sourceCost !== "object" || Array.isArray(sourceCost)))
 			|| typeof eventId !== "string"
 			|| !eventId
 			|| !Number.isInteger(sequence)
@@ -417,14 +440,23 @@ class CharacterSheetPage {
 					eventId,
 					campaignId: this._hubCampaignId,
 					sequence,
-					type: "character.operation.applied",
+					type: leg === "source"
+						? "character.operation.source_cost_consumed"
+						: "character.operation.applied",
 					aggregateType: "character",
 					aggregateId: characterId,
 					aggregateRevision: resultingCharacterRevision,
 					operationId: actionId,
+					characterId,
 					targetCharacterId: characterId,
 					status: "applied",
-					payload: {operation, resultingCharacterRevision},
+					leg,
+					payload: {
+						leg,
+						...(isTargetLeg ? {operation} : {}),
+						...(isSourceLeg ? {sourceCost} : {}),
+						resultingCharacterRevision,
+					},
 				});
 			},
 		});
@@ -704,6 +736,18 @@ class CharacterSheetPage {
 				});
 				this._hubEffects.init();
 			} catch (e) { console.error("Failed to init campaign effect controls:", e); }
+			try {
+				this._peerTargeting = new CharacterSheetPeerTargeting({
+					campaignId: this._hubCampaignId,
+					api: this._hubCampaignContext.api,
+					root: document.getElementById("charsheet-peer-targeting"),
+					fnGetCharacterId: () => this._currentCharacterId,
+					fnGetRulesVersionId: () => this._hubContext?.rulesVersion?.id ?? null,
+					fnGetCapability: () => this._hubCampaignContext?.context?.capabilities?.peerSourceCosts ?? null,
+					fnOnAuthoritativeApplied: detail => this._onHubAuthoritativeApproval(detail),
+				});
+				this._peerTargeting.init();
+			} catch (e) { console.error("Failed to init campaign targeting controls:", e); }
 		}
 
 		try {

@@ -78,6 +78,23 @@
 		padding: 0.5rem;
 	}
 
+	body.is-charsheet-mobile .charsheet__peer-actions {
+		padding: 0.5rem;
+	}
+
+	body.is-charsheet-mobile .charsheet__peer-action {
+		align-items: stretch;
+	}
+
+	body.is-charsheet-mobile .charsheet__peer-action .ve-btn,
+	body.is-charsheet-mobile .charsheet__peer-target-controls .ve-btn {
+		min-height: 44px;
+	}
+
+	body.is-charsheet-mobile .charsheet__peer-target-controls {
+		flex-direction: column;
+	}
+
 	body.is-charsheet-mobile .charsheet__hub-approval,
 	body.is-charsheet-mobile .charsheet__hub-approval-error {
 		align-items: stretch;

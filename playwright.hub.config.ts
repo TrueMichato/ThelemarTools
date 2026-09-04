@@ -12,7 +12,7 @@ export default defineConfig({
 	timeout: 90_000,
 	outputDir: "./test-results/hub-playwright-output",
 	use: {
-		baseURL: "https://localhost:8443",
+		baseURL: process.env.HUB_E2E_ORIGIN || "https://localhost:8443",
 		ignoreHTTPSErrors: true,
 		trace: "on-first-retry",
 		screenshot: "only-on-failure",

@@ -27,12 +27,15 @@ import {HubOutboxDispatcher, HubRealtime} from "./realtime.js";
 import {getSafeRequestId, HubMetrics} from "./observability.js";
 import {getClientIpHeader, getRequestClientIp} from "./client-ip.js";
 import {SAFE_ITEM_SUMMARY_FIELDS} from "./hub-actions.js";
+import {PEER_SOURCE_COSTS_PROTOCOL_VERSION} from "../../js/hub/hub-source-costs.js";
 import crypto from "node:crypto";
 
 const {normalizeIP} = rateLimit;
 const SESSION_COOKIE = "__Host-hub_session";
 const OAUTH_COOKIE = "__Host-hub_oauth";
-const HUB_PROTOCOL_VERSION = "3";
+const HUB_PROTOCOL_VERSION = PEER_SOURCE_COSTS_PROTOCOL_VERSION;
+const HUB_LEGACY_PROTOCOL_VERSION = "3";
+const SUPPORTED_HUB_PROTOCOL_VERSIONS = new Set([HUB_LEGACY_PROTOCOL_VERSION, HUB_PROTOCOL_VERSION]);
 const SAFE_ITEM_SUMMARY_KEYS = new Set(SAFE_ITEM_SUMMARY_FIELDS);
 const getSafeItemSummarySchema = () => ({
 	type: "object",
@@ -298,8 +301,19 @@ export async function createHubApp ({
 	const requireProtocolVersion = async (request, reply) => {
 		const auth = await pGetAuth(request);
 		if (!auth) return reply.code(401).send({error: "AUTH_REQUIRED"});
-		if (request.headers["x-hub-protocol-version"] !== HUB_PROTOCOL_VERSION) {
+		if (!SUPPORTED_HUB_PROTOCOL_VERSIONS.has(request.headers["x-hub-protocol-version"])) {
 			return reply.code(426).send({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: HUB_PROTOCOL_VERSION});
+		}
+	};
+
+	const requirePeerSourceCostsProtocol = async (request, reply) => {
+		const auth = await pGetAuth(request);
+		if (!auth) return reply.code(401).send({error: "AUTH_REQUIRED"});
+		if (request.headers["x-hub-protocol-version"] !== PEER_SOURCE_COSTS_PROTOCOL_VERSION) {
+			return reply.code(426).send({
+				error: "PROTOCOL_UPDATE_REQUIRED",
+				protocolVersion: PEER_SOURCE_COSTS_PROTOCOL_VERSION,
+			});
 		}
 	};
 
@@ -311,7 +325,7 @@ export async function createHubApp ({
 		if (!isConstantTimeEqual(request.headers["x-csrf-token"], expected)) {
 			return reply.code(403).send({error: "INVALID_CSRF"});
 		}
-		if (request.headers["x-hub-protocol-version"] !== HUB_PROTOCOL_VERSION) {
+		if (!SUPPORTED_HUB_PROTOCOL_VERSIONS.has(request.headers["x-hub-protocol-version"])) {
 			return reply.code(426).send({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: HUB_PROTOCOL_VERSION});
 		}
 	};
@@ -369,6 +383,46 @@ export async function createHubApp ({
 			|| (request.body.quantity !== undefined && !Number.isSafeInteger(request.body.quantity))
 		) return reply.code(400).send({error: "INVALID_REQUEST"});
 	};
+	const rejectUnknownSemanticActionFields = async (request, reply) => {
+		const body = request.body;
+		if (!hasOnlyKeys(body, new Set([
+			"contractVersion",
+			"commandId",
+			"targetCharacterId",
+			"operation",
+			"sourceCharacterId",
+			"sourceEntity",
+			"effectTemplateId",
+			"choice",
+			"targetRef",
+			"rulesVersionId",
+		]))) return reply.code(400).send({error: "INVALID_REQUEST"});
+		if (
+			body.sourceEntity != null
+			&& !hasOnlyKeys(body.sourceEntity, new Set(["type", "uid", "version"]))
+		) return reply.code(400).send({error: "INVALID_REQUEST"});
+		if (
+			body.choice != null
+			&& !hasOnlyKeys(body.choice, new Set(["amount", "castLevel"]))
+		) return reply.code(400).send({error: "INVALID_REQUEST"});
+		if (body.operation != null) {
+			if (!hasOnlyKeys(body.operation, new Set(["kind", "version", "arguments"]))) {
+				return reply.code(400).send({error: "INVALID_REQUEST"});
+			}
+			if (!hasOnlyKeys(body.operation.arguments, new Set(["amount", "condition", "level"]))) {
+				return reply.code(400).send({error: "INVALID_REQUEST"});
+			}
+			if (
+				body.operation.arguments.condition != null
+				&& !hasOnlyKeys(body.operation.arguments.condition, new Set(["name", "source"]))
+			) return reply.code(400).send({error: "INVALID_REQUEST"});
+		}
+	};
+	const rejectUnknownSemanticResolutionFields = async (request, reply) => {
+		if (!hasOnlyKeys(request.body, new Set(["contractVersion", "commandId", "decision"]))) {
+			return reply.code(400).send({error: "INVALID_REQUEST"});
+		}
+	};
 
 	const getIdempotencyKey = request => {
 		const idempotencyKey = request.headers["idempotency-key"];
@@ -420,6 +474,21 @@ export async function createHubApp ({
 			campaignId: request.params.campaignId,
 		});
 		if (!membership) return reply.code(404).send({error: "CAMPAIGN_NOT_FOUND"});
+		if (request.query.v !== PEER_SOURCE_COSTS_PROTOCOL_VERSION) {
+			const [capability, isProtocol4History] = await Promise.all([
+				store.pGetPeerSourceCostsCapability?.({
+					accountId: auth.account.id,
+					campaignId: request.params.campaignId,
+				}),
+				store.pCampaignRequiresProtocol4?.({campaignId: request.params.campaignId}),
+			]);
+			if (capability?.enabled || isProtocol4History) {
+				return reply.code(426).send({
+					error: "PROTOCOL_UPDATE_REQUIRED",
+					protocolVersion: PEER_SOURCE_COSTS_PROTOCOL_VERSION,
+				});
+			}
+		}
 		request.hubMembership = membership;
 	};
 
@@ -473,7 +542,7 @@ export async function createHubApp ({
 				type: "object",
 				required: ["v"],
 				additionalProperties: false,
-				properties: {v: {type: "string", enum: [HUB_PROTOCOL_VERSION]}},
+				properties: {v: {type: "string", enum: [...SUPPORTED_HUB_PROTOCOL_VERSIONS]}},
 			},
 		},
 	}, (socket, request) => {
@@ -483,6 +552,7 @@ export async function createHubApp ({
 			session: request.hubAuth.session,
 			membership: request.hubMembership,
 			campaignId: request.params.campaignId,
+			protocolVersion: request.query.v,
 			clientIp: request.hubClientIp,
 		});
 	});
@@ -993,13 +1063,39 @@ export async function createHubApp ({
 		}),
 	}));
 
+	app.get("/api/campaigns/:campaignId/characters/:characterId/outgoing-actions", {
+		preHandler: requirePeerSourceCostsProtocol,
+		schema: {
+			params: {
+				type: "object",
+				required: ["campaignId", "characterId"],
+				additionalProperties: false,
+				properties: {
+					campaignId: {type: "string", format: "uuid"},
+					characterId: {type: "string", format: "uuid"},
+				},
+			},
+		},
+	}, async (request, reply) => {
+		reply.header("Cache-Control", "no-store");
+		return {
+			actions: await store.pListCharacterOutgoingActions({
+				accountId: request.hubAuth.account.id,
+				campaignId: request.params.campaignId,
+				characterId: request.params.characterId,
+			}),
+		};
+	});
+
 	app.post("/api/campaigns/:campaignId/actions", {
+		preValidation: rejectUnknownSemanticActionFields,
 		preHandler: requireMutationSecurity,
 		schema: {
 			body: {
 				type: "object",
 				additionalProperties: false,
 				properties: {
+					contractVersion: {type: "integer", const: 1},
 					commandId: {type: "string", format: "uuid"},
 					targetCharacterId: {type: "string", format: "uuid"},
 					operation: {
@@ -1046,17 +1142,38 @@ export async function createHubApp ({
 						maxProperties: 10,
 						properties: {
 							amount: {type: "integer", minimum: 1, maximum: 10},
+							castLevel: {type: "integer", minimum: 1, maximum: 9},
 						},
 					},
 					targetRef: {type: "string", format: "uuid"},
+					rulesVersionId: {type: "string", format: "uuid"},
 				},
 				oneOf: [
-					{required: ["commandId", "targetCharacterId", "operation"]},
-					{required: ["commandId", "sourceCharacterId", "sourceEntity", "effectTemplateId", "choice", "targetRef"]},
+					{
+						required: ["commandId", "targetCharacterId", "operation"],
+						not: {required: ["contractVersion"]},
+					},
+					{
+						required: ["commandId", "sourceCharacterId", "sourceEntity", "effectTemplateId", "choice", "targetRef"],
+						not: {required: ["contractVersion"]},
+					},
+					{
+						required: [
+							"contractVersion",
+							"commandId",
+							"sourceCharacterId",
+							"sourceEntity",
+							"effectTemplateId",
+							"choice",
+							"targetRef",
+							"rulesVersionId",
+						],
+					},
 				],
 			},
 		},
 	}, async (request, reply) => {
+		reply.header("Cache-Control", "no-store");
 		const command = getSemanticCommand(request);
 		const created = await store.pCreateStructuredAction({
 			accountId: request.hubAuth.account.id,
@@ -1069,6 +1186,9 @@ export async function createHubApp ({
 			effectTemplateId: request.body.effectTemplateId,
 			choice: request.body.choice,
 			targetRef: request.body.targetRef,
+			contractVersion: request.body.contractVersion,
+			rulesVersionId: request.body.rulesVersionId,
+			protocolVersion: request.headers["x-hub-protocol-version"],
 			commandId: command.commandId,
 			requestHash: command.requestHash,
 			idempotencyKey: {key: command.commandId, requestHash: command.requestHash},
@@ -1077,6 +1197,7 @@ export async function createHubApp ({
 	});
 
 	app.post("/api/campaigns/:campaignId/actions/:actionId/resolve", {
+		preValidation: rejectUnknownSemanticResolutionFields,
 		preHandler: requireMutationSecurity,
 		schema: {
 			body: {
@@ -1084,12 +1205,14 @@ export async function createHubApp ({
 				required: ["commandId", "decision"],
 				additionalProperties: false,
 				properties: {
+					contractVersion: {type: "integer", const: 1},
 					commandId: {type: "string", format: "uuid"},
 					decision: {type: "string", enum: ["accept", "reject", "cancel"]},
 				},
 			},
 		},
-	}, async request => {
+	}, async (request, reply) => {
+		reply.header("Cache-Control", "no-store");
 		const command = getSemanticCommand(request);
 		return store.pResolveStructuredAction({
 			accountId: request.hubAuth.account.id,
@@ -1097,6 +1220,8 @@ export async function createHubApp ({
 			campaignId: request.params.campaignId,
 			actionId: request.params.actionId,
 			decision: request.body.decision,
+			contractVersion: request.body.contractVersion,
+			protocolVersion: request.headers["x-hub-protocol-version"],
 			...command,
 			idempotencyKey: {key: command.commandId, requestHash: command.requestHash},
 		});
@@ -1819,4 +1944,10 @@ export async function createHubApp ({
 	return app;
 }
 
-export {SESSION_COOKIE, OAUTH_COOKIE, HUB_PROTOCOL_VERSION};
+export {
+	SESSION_COOKIE,
+	OAUTH_COOKIE,
+	HUB_PROTOCOL_VERSION,
+	HUB_LEGACY_PROTOCOL_VERSION,
+	PEER_SOURCE_COSTS_PROTOCOL_VERSION as HUB_PEER_SOURCE_COSTS_PROTOCOL_VERSION,
+};

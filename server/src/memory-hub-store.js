@@ -42,6 +42,23 @@ import {
 } from "./hub-event-snapshots.js";
 import {createSemanticOperationRegistry} from "./semantic-operation-registry.js";
 import {
+	applySourceCost,
+	hasSourceCostBindingChanged,
+	PEER_SOURCE_COSTS_CONTRACT_VERSION,
+	PEER_SOURCE_COSTS_TEMPLATE_REGISTRY_VERSION,
+} from "../../js/hub/hub-source-costs.js";
+import {
+	createPeerSourceCostsGate,
+	getPeerSourceCostFailureForViewer,
+	getPeerSourceCostActionSummary,
+	getPeerSourceCostsCampaignCapability,
+	getPeerSourceCostsRulesPin,
+	getPeerSourceCostState,
+	getPrivateAcceptanceFailureCode,
+	isCanonicalEqual,
+	isPeerSourceCostsPinCurrent,
+} from "./peer-source-cost-authority.js";
+import {
 	getAccountDisplayName,
 	getExternalIdentityKey,
 	normalizeExternalIdentity,
@@ -56,10 +73,12 @@ export class MemoryHubStore {
 		fnNow = () => new Date(),
 		semanticOperationRegistry = createSemanticOperationRegistry(),
 		semanticProposalTtlMs = 24 * 60 * 60 * 1_000,
+		peerSourceCostsEnabled = false,
 	} = {}) {
 		this._fnNow = fnNow;
 		this._semanticOperationRegistry = semanticOperationRegistry;
 		this._semanticProposalTtlMs = semanticProposalTtlMs;
+		this._isPeerSourceCostsEnabled = createPeerSourceCostsGate(peerSourceCostsEnabled);
 		this._accounts = new Map();
 		this._identityToAccount = new Map();
 		this._externalIdentities = new Map();
@@ -85,6 +104,23 @@ export class MemoryHubStore {
 		this._semanticOperationCommands = new Map();
 		this._transfers = new Map();
 		this._operationalRuns = [];
+	}
+
+	_setCharacterData ({character, data}) {
+		for (const operation of this._semanticOperations.values()) {
+			if (
+				operation.status !== "proposed"
+				|| operation.sourceCharacterId !== character.id
+				|| !operation.sourceCost
+				|| operation.sourceCostInvalidated
+			) continue;
+			if (hasSourceCostBindingChanged({
+				beforeData: character.data,
+				afterData: data,
+				sourceCost: operation.sourceCost,
+			})) operation.sourceCostInvalidated = true;
+		}
+		character.data = data;
 	}
 
 	async pCheckHealth () {
@@ -1046,10 +1082,18 @@ export class MemoryHubStore {
 			.filter(character => isDm
 				|| character.ownerAccountId === membership.accountId
 				|| isPeerVisibleIdentity(character))
-			.map(character => ({
-				characterId: character.id,
-				ownerMembershipId: this._memberships.get(`${character.campaignId}::${character.ownerAccountId}`)?.id || null,
-			}));
+			.map(character => {
+				const ownerMembership = this._memberships.get(`${character.campaignId}::${character.ownerAccountId}`);
+				return {
+					characterId: character.id,
+					...(ownerMembership?.status === "active"
+						&& ownerMembership.role === "player"
+						&& character.targetRef
+						? {targetRef: character.targetRef}
+						: {}),
+					ownerMembershipId: ownerMembership?.id || null,
+				};
+			});
 	}
 
 	async pGetProjectionPolicy ({accountId, characterId}) {
@@ -1114,7 +1158,7 @@ export class MemoryHubStore {
 				imported.status = "active";
 				imported.campaignId = campaignId;
 				imported.targetRef = crypto.randomUUID();
-				imported.data = normalizeCharacterInventory(data);
+				this._setCharacterData({character: imported, data: normalizeCharacterInventory(data)});
 				imported.schemaVersion = schemaVersion;
 				imported.revision++;
 				imported.updatedAt = this._fnNow().toISOString();
@@ -1252,7 +1296,7 @@ export class MemoryHubStore {
 		// would silently go stale as inputs are added.
 		if (patches?.length && !hasFreshCarryWrite(patches)) stripCarryAuthority(data);
 		validateCloudCharacterData(data);
-		character.data = data;
+		this._setCharacterData({character, data});
 		character.revision++;
 		if (character.campaignId) {
 			this._appendEvent({
@@ -1395,7 +1439,26 @@ export class MemoryHubStore {
 			campaignId,
 			brewBundle: copy(brew),
 			rulesVersion: copy(rules),
+			capabilities: {
+				peerSourceCosts: getPeerSourceCostsCampaignCapability({
+					isEnabled: Boolean(rules) && this._isPeerSourceCostsEnabled(campaignId),
+				}),
+			},
 		};
+	}
+
+	async pGetPeerSourceCostsCapability ({accountId, campaignId}) {
+		this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
+		const campaign = this._campaigns.get(campaignId);
+		return getPeerSourceCostsCampaignCapability({
+			isEnabled: Boolean(campaign?.activeRulesVersionId) && this._isPeerSourceCostsEnabled(campaignId),
+		});
+	}
+
+	async pCampaignRequiresProtocol4 ({campaignId}) {
+		return [...this._semanticOperations.values()].some(operation =>
+			operation.campaignId === campaignId && operation.sourceCost != null,
+		);
 	}
 
 	async pGetCampaignCompatibility ({accountId, campaignId}) {
@@ -1698,7 +1761,7 @@ export class MemoryHubStore {
 		return copy(response);
 	}
 
-	_getSemanticOperationView (operation) {
+	_getSemanticOperationView (operation, {accountId = null, role = null, source = null, target = null} = {}) {
 		const snapshots = {
 			sourceDisplaySnapshot: copy(operation.sourceDisplaySnapshot),
 			targetDisplaySnapshot: copy(operation.targetDisplaySnapshot),
@@ -1711,16 +1774,61 @@ export class MemoryHubStore {
 			version: operation.version,
 			expiresAt: operation.expiresAt,
 			resultingCharacterRevision: operation.resultingCharacterRevision,
+			resultingTargetCharacterRevision: operation.resultingCharacterRevision,
 			...snapshots,
 		};
-		if (operation.sourceEntity) {
-			Object.assign(out, {
-				sourceEntity: copy(operation.sourceEntity),
-				effectTemplateId: operation.effectTemplateId,
-				choice: copy(operation.choice),
+		if (operation.sourceCost) {
+			const sourceOwnerAccountId = source?.ownerAccountId ?? operation.originActorAccountId;
+			const targetOwnerAccountId = target?.ownerAccountId ?? operation.targetOwnerAccountIdAtProposal;
+			const canViewSource = accountId === sourceOwnerAccountId || ["dm", "co_dm"].includes(role);
+			out.sourceCostState = getPeerSourceCostState(operation.status);
+			out.templateRegistryVersion = operation.templateRegistryVersion;
+			if (canViewSource) {
+				out.sourceResult = {
+					sourceCharacterId: operation.sourceCharacterId,
+					sourceCost: copy(operation.sourceCost),
+					resultingSourceCharacterRevision: operation.resultingSourceCharacterRevision,
+				};
+				if (operation.status === "applied") {
+					const sourceLeg = operation.sourceCharacterId === operation.targetCharacterId ? "combined" : "source";
+					out.sourceResult.leg = sourceLeg;
+					out.sourceResult.operationLegKey = `${operation.id}/${sourceLeg}`;
+					out.sourceResult.appliedEventId = operation.sourceCostEventId ?? operation.appliedEventId;
+				}
+				out.sourceEntity = copy(operation.sourceEntity);
+				out.effectTemplateId = operation.effectTemplateId;
+				out.choice = copy(operation.choice);
+				out.sourceRevisionObserved = operation.sourceRevisionObserved;
+				out.targetRevisionObserved = operation.targetRevisionObserved;
+				out.rulesPin = copy(operation.rulesPin);
+			}
+			const failureCode = getPeerSourceCostFailureForViewer({
+				operation,
+				accountId,
+				role,
+				sourceOwnerAccountId,
+				targetOwnerAccountId,
 			});
+			if (failureCode) out.failureCode = failureCode;
+			Object.assign(out, getPeerSourceCostActionSummary(operation, {
+				canCancel: accountId === operation.originActorAccountId || ["dm", "co_dm"].includes(role),
+			}));
+			if (operation.status === "applied") {
+				out.leg = operation.sourceCharacterId === operation.targetCharacterId ? "combined" : "target";
+				out.operationLegKey = `${operation.id}/${out.leg}`;
+			}
+		}
+		if (operation.sourceEntity) {
+			if (!operation.sourceCost) {
+				Object.assign(out, {
+					sourceEntity: copy(operation.sourceEntity),
+					effectTemplateId: operation.effectTemplateId,
+					choice: copy(operation.choice),
+				});
+			}
 		}
 		if (operation.status === "applied") {
+			out.appliedEventId = operation.appliedEventId;
 			out.operation = {
 				operationId: operation.id,
 				kind: operation.kind,
@@ -1733,7 +1841,41 @@ export class MemoryHubStore {
 	}
 
 	_getSemanticRecipients ({operation, target}) {
-		return [...new Set([operation.originActorAccountId, target?.ownerAccountId].filter(Boolean))];
+		return [...new Set([
+			operation.originActorAccountId,
+			operation.targetOwnerAccountIdAtProposal ?? target?.ownerAccountId,
+			...this._getSemanticDmAccountIds(operation.campaignId),
+		].filter(Boolean))];
+	}
+
+	_getSemanticDmAccountIds (campaignId) {
+		return [...this._memberships.values()]
+			.filter(membership => membership.campaignId === campaignId
+				&& membership.status === "active"
+				&& ["dm", "co_dm"].includes(membership.role))
+			.map(membership => membership.accountId);
+	}
+
+	_getSourceCostRecipients ({operation, source}) {
+		return [...new Set([
+			source?.ownerAccountId ?? operation.originActorAccountId,
+			...this._getSemanticDmAccountIds(operation.campaignId),
+		].filter(Boolean))];
+	}
+
+	_getSemanticLifecyclePayload (operation) {
+		const payload = {
+			operationId: operation.id,
+			status: operation.status,
+			reason: "unavailable",
+			targetDisplaySnapshot: copy(operation.targetDisplaySnapshot),
+			effectDisplaySnapshot: copy(operation.effectDisplaySnapshot),
+		};
+		if (!operation.sourceCost) {
+			payload.targetCharacterId = operation.targetCharacterId;
+			payload.sourceDisplaySnapshot = copy(operation.sourceDisplaySnapshot);
+		}
+		return payload;
 	}
 
 	_cancelSemanticOperationForLifecycle ({operation, actorAccountId}) {
@@ -1759,15 +1901,7 @@ export class MemoryHubStore {
 			aggregateId: operation.id,
 			visibility: "explicit_accounts",
 			visibleAccountIds: this._getSemanticRecipients({operation, target}),
-			payload: {
-				operationId: operation.id,
-				targetCharacterId: operation.targetCharacterId,
-				status: "cancelled",
-				reason: "unavailable",
-				sourceDisplaySnapshot: copy(operation.sourceDisplaySnapshot),
-				targetDisplaySnapshot: copy(operation.targetDisplaySnapshot),
-				effectDisplaySnapshot: copy(operation.effectDisplaySnapshot),
-			},
+			payload: this._getSemanticLifecyclePayload(operation),
 		});
 		operation.terminalEventId = event.id;
 	}
@@ -1800,15 +1934,7 @@ export class MemoryHubStore {
 				aggregateId: operation.id,
 				visibility: "explicit_accounts",
 				visibleAccountIds: this._getSemanticRecipients({operation, target}),
-				payload: {
-					operationId: operation.id,
-					targetCharacterId: operation.targetCharacterId,
-					status: "expired",
-					reason: "unavailable",
-					sourceDisplaySnapshot: copy(operation.sourceDisplaySnapshot),
-					targetDisplaySnapshot: copy(operation.targetDisplaySnapshot),
-					effectDisplaySnapshot: copy(operation.effectDisplaySnapshot),
-				},
+				payload: this._getSemanticLifecyclePayload(operation),
 			});
 			operation.terminalEventId = event.id;
 		}
@@ -1826,12 +1952,15 @@ export class MemoryHubStore {
 		effectTemplateId = null,
 		choice = null,
 		targetRef = null,
+		contractVersion = null,
+		rulesVersionId = null,
+		protocolVersion = null,
 		idempotencyKey,
 	}) {
 		const prior = this._getSemanticCommand({accountId, commandId, idempotencyKey});
 		this._assertSemanticSession({accountId, sessionId});
 		if (prior) return prior;
-		const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+		const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player", "spectator"]});
 		const operationId = crypto.randomUUID();
 		const now = this._fnNow();
 
@@ -1869,7 +1998,7 @@ export class MemoryHubStore {
 				createdAt: now.toISOString(),
 				updatedAt: now.toISOString(),
 			};
-			target.data = data;
+			this._setCharacterData({character: target, data});
 			target.revision++;
 			target.updatedAt = now.toISOString();
 			this._semanticOperations.set(operationId, semanticOperation);
@@ -1915,6 +2044,13 @@ export class MemoryHubStore {
 			});
 		}
 
+		const isCostBearing = this._semanticOperationRegistry.isCostBearing({sourceEntity, effectTemplateId});
+		if (isCostBearing && membership.role !== "player") {
+			throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+		}
+		if (!isCostBearing && membership.role === "spectator") {
+			throw new HubStoreError("OPERATION_FORBIDDEN", `Spectators cannot create peer proposals.`, {status: 403});
+		}
 		const source = this._getCharacterOrThrow(sourceCharacterId);
 		if (source.ownerAccountId !== accountId || source.campaignId !== campaignId) {
 			throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
@@ -1925,11 +2061,38 @@ export class MemoryHubStore {
 			&& character.targetRef === targetRef,
 		);
 		if (!target) throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+		const targetOwnerMembership = this._memberships.get(`${campaignId}::${target.ownerAccountId}`);
+		if (isCostBearing && (
+			targetOwnerMembership?.status !== "active"
+			|| targetOwnerMembership.role !== "player"
+		)) throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
 		try {
 			this._assertTargetable({character: target, accountId, role: membership.role});
 		} catch {
 			throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
 		}
+		if (isCostBearing && `${protocolVersion}` !== "4") {
+			throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 is required.`, {status: 426});
+		}
+		if (isCostBearing && (
+			contractVersion !== PEER_SOURCE_COSTS_CONTRACT_VERSION
+			|| !this._isPeerSourceCostsEnabled(campaignId)
+		)) throw new HubStoreError("CAPABILITY_UNAVAILABLE", `Peer source costs are unavailable.`, {status: 409});
+		if (!isCostBearing && contractVersion != null) {
+			throw new HubStoreError("SOURCE_COST_UNSUPPORTED", `The source cost is not supported.`, {status: 409});
+		}
+		const campaign = this._campaigns.get(campaignId);
+		const rulesVersion = campaign.activeRulesVersionId
+			? this._rulesVersions.get(campaign.activeRulesVersionId)
+			: null;
+		const brewBundle = campaign.activeBrewBundleVersionId
+			? this._brewVersions.get(campaign.activeBrewBundleVersionId)
+			: null;
+		const rulesPin = isCostBearing ? getPeerSourceCostsRulesPin({rulesVersion, brewBundle}) : null;
+		if (isCostBearing && (!rulesPin || rulesPin.rulesVersionId !== rulesVersionId)) {
+			throw new HubStoreError("POLICY_VERSION_STALE", `Campaign rules changed.`, {status: 409});
+		}
+		const effectResolutionSeed = isCostBearing ? crypto.randomBytes(32).toString("hex") : null;
 		const derived = this._semanticOperationRegistry.derive({
 			sourceCharacter: source,
 			targetCharacter: target,
@@ -1940,7 +2103,15 @@ export class MemoryHubStore {
 			sourceProfile: computePeerProfile({character: source}),
 			targetProfile: computePeerProfile({character: target}),
 			operationId,
+			effectResolutionSeed,
 		});
+		if (
+			isCostBearing
+			&& isCanonicalEqual(
+				applySemanticOperation({data: target.data, operation: derived.operation}),
+				target.data,
+			)
+		) throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
 		const expiresAt = new Date(now.getTime() + this._semanticProposalTtlMs).toISOString();
 		const semanticOperation = {
 			id: operationId,
@@ -1948,6 +2119,7 @@ export class MemoryHubStore {
 			originActorAccountId: accountId,
 			sourceCharacterId: source.id,
 			targetCharacterId: target.id,
+			targetOwnerAccountIdAtProposal: isCostBearing ? target.ownerAccountId : null,
 			targetRef,
 			status: "proposed",
 			version: derived.operation.version,
@@ -1959,6 +2131,18 @@ export class MemoryHubStore {
 			sourceDisplaySnapshot: copy(derived.sourceDisplaySnapshot),
 			targetDisplaySnapshot: copy(derived.targetDisplaySnapshot),
 			effectDisplaySnapshot: copy(derived.effectDisplaySnapshot),
+			sourceCostVersion: derived.sourceCost?.version ?? null,
+			sourceCost: copy(derived.sourceCost),
+			rulesVersionId: rulesPin?.rulesVersionId ?? null,
+			rulesPin: copy(rulesPin),
+			templateRegistryVersion: isCostBearing ? PEER_SOURCE_COSTS_TEMPLATE_REGISTRY_VERSION : null,
+			effectResolutionSeed,
+			sourceRevisionObserved: isCostBearing ? source.revision : null,
+			sourceCostInvalidated: false,
+			targetRevisionObserved: isCostBearing ? target.revision : null,
+			resultingSourceCharacterRevision: null,
+			sourceCostEventId: null,
+			privateFailureCode: null,
 			resultingCharacterRevision: null,
 			expiresAt,
 			createdAt: now.toISOString(),
@@ -1980,28 +2164,42 @@ export class MemoryHubStore {
 			aggregateId: operationId,
 			visibility: "explicit_accounts",
 			visibleAccountIds: this._getSemanticRecipients({operation: semanticOperation, target}),
-			payload: {
-				operationId,
-				targetCharacterId: target.id,
-				status: "proposed",
-				sourceDisplaySnapshot: copy(derived.sourceDisplaySnapshot),
-				targetDisplaySnapshot: copy(derived.targetDisplaySnapshot),
-				effectDisplaySnapshot: copy(derived.effectDisplaySnapshot),
-				effectOutcomeLabel: getPendingEffectPresentation({
+			payload: isCostBearing
+				? {
 					operationId,
 					status: "proposed",
-					sourceDisplaySnapshot: derived.sourceDisplaySnapshot,
-					effectDisplaySnapshot: derived.effectDisplaySnapshot,
-					operationKind: derived.operation.kind,
-					operationArguments: derived.operation.arguments,
+					contractVersion: PEER_SOURCE_COSTS_CONTRACT_VERSION,
+					targetDisplaySnapshot: copy(derived.targetDisplaySnapshot),
+					effectDisplaySnapshot: copy(derived.effectDisplaySnapshot),
 					expiresAt,
-				}).presentation.outcomeLabel,
-				expiresAt,
-			},
+				}
+				: {
+					operationId,
+					targetCharacterId: target.id,
+					status: "proposed",
+					sourceDisplaySnapshot: copy(derived.sourceDisplaySnapshot),
+					targetDisplaySnapshot: copy(derived.targetDisplaySnapshot),
+					effectDisplaySnapshot: copy(derived.effectDisplaySnapshot),
+					effectOutcomeLabel: getPendingEffectPresentation({
+						operationId,
+						status: "proposed",
+						sourceDisplaySnapshot: derived.sourceDisplaySnapshot,
+						effectDisplaySnapshot: derived.effectDisplaySnapshot,
+						operationKind: derived.operation.kind,
+						operationArguments: derived.operation.arguments,
+						expiresAt,
+					}).presentation.outcomeLabel,
+					expiresAt,
+				},
 		});
 		semanticOperation.createdEventId = proposedEvent.id;
 		const response = {
-			operation: this._getSemanticOperationView(semanticOperation),
+			operation: this._getSemanticOperationView(semanticOperation, {
+				accountId,
+				role: membership.role,
+				source,
+				target,
+			}),
 			eventIds: [proposedEvent.id],
 		};
 		return this._setSemanticCommand({
@@ -2015,94 +2213,305 @@ export class MemoryHubStore {
 		});
 	}
 
-	async pResolveStructuredAction ({accountId, sessionId, campaignId, commandId, actionId, decision, idempotencyKey}) {
+	async pResolveStructuredAction ({
+		accountId,
+		sessionId,
+		campaignId,
+		commandId,
+		actionId,
+		decision,
+		contractVersion = null,
+		protocolVersion = null,
+		idempotencyKey,
+	}) {
 		const prior = this._getSemanticCommand({accountId, commandId, idempotencyKey});
 		this._assertSemanticSession({accountId, sessionId});
 		if (prior) return prior;
-		const operation = this._semanticOperations.get(actionId);
-		if (!operation || operation.campaignId !== campaignId || operation.status !== "proposed") {
-			throw new HubStoreError("ACTION_NOT_FOUND", `Pending operation was not found.`, {status: 404});
+		if (!["accept", "reject", "cancel"].includes(decision)) {
+			throw new HubStoreError("INVALID_REQUEST", `The resolution decision is invalid.`, {status: 400});
 		}
-		const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
-		const source = this._getCharacterOrThrow(operation.sourceCharacterId);
-		const target = this._getCharacterOrThrow(operation.targetCharacterId);
+		const membership = this._memberships.get(`${campaignId}::${accountId}`);
+		const campaign = this._campaigns.get(campaignId);
+		if (
+			!membership
+			|| membership.status !== "active"
+			|| !["dm", "co_dm", "player"].includes(membership.role)
+			|| campaign?.status !== "active"
+		) throw new HubStoreError("ACTION_NOT_FOUND", `Pending operation was not found.`, {status: 404});
+		const operation = this._semanticOperations.get(actionId);
+		if (!operation || operation.campaignId !== campaignId) throw new HubStoreError("ACTION_NOT_FOUND", `Pending operation was not found.`, {status: 404});
+		const source = this._characters.get(operation.sourceCharacterId);
+		const target = this._characters.get(operation.targetCharacterId);
 		const isDm = ["dm", "co_dm"].includes(membership.role);
-		const isTargetOwner = target.ownerAccountId === accountId;
+		const targetOwnerAccountId = operation.targetOwnerAccountIdAtProposal ?? target?.ownerAccountId;
+		const targetOwnerMembership = this._memberships.get(`${campaignId}::${targetOwnerAccountId}`);
+		const isTargetOwner = targetOwnerAccountId === accountId;
 		const isProposer = operation.originActorAccountId === accountId;
-		if (decision === "accept" && !isTargetOwner) throw new HubStoreError("FORBIDDEN", `Only the target owner may approve.`, {status: 403});
-		if (decision === "reject" && !isTargetOwner && !isDm) throw new HubStoreError("FORBIDDEN", `Cannot reject this proposal.`, {status: 403});
-		if (decision === "cancel" && !isProposer && !isDm) throw new HubStoreError("FORBIDDEN", `Cannot cancel this proposal.`, {status: 403});
+		if (!isDm && !isProposer && !isTargetOwner) throw new HubStoreError("ACTION_NOT_FOUND", `Pending operation was not found.`, {status: 404});
+		if (operation.sourceCost && (
+			contractVersion !== PEER_SOURCE_COSTS_CONTRACT_VERSION
+			|| `${protocolVersion}` !== "4"
+		)) throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 is required.`, {status: 426});
+		if (decision === "accept" && (!isTargetOwner || membership.role !== "player")) {
+			throw new HubStoreError("OPERATION_FORBIDDEN", `Only an active player target owner may approve.`, {status: 403});
+		}
+		if (decision === "reject" && !isTargetOwner && !isDm) throw new HubStoreError("OPERATION_FORBIDDEN", `Cannot reject this proposal.`, {status: 403});
+		if (decision === "cancel" && !isProposer && !isDm) throw new HubStoreError("OPERATION_FORBIDDEN", `Cannot cancel this proposal.`, {status: 403});
 		const commandType = decision;
+
+		if (operation.status !== "proposed") {
+			if (!operation.sourceCost) throw new HubStoreError("ACTION_NOT_FOUND", `Pending operation was not found.`, {status: 404});
+			const response = {
+				operation: this._getSemanticOperationView(operation, {accountId, role: membership.role, source, target}),
+				eventIds: [
+					operation.sourceCostEventId,
+					operation.appliedEventId,
+					operation.terminalEventId,
+				].filter(Boolean),
+				...(operation.status === "applied"
+					? {watermarks: this._getSemanticWatermarksForViewer({operation, accountId, role: membership.role, source, target})}
+					: {}),
+			};
+			return this._setSemanticCommand({
+				accountId,
+				commandId,
+				operationId: operation.id,
+				commandType,
+				idempotencyKey,
+				response,
+				eventIds: response.eventIds,
+			});
+		}
 		if (new Date(operation.expiresAt) <= this._fnNow()) decision = "expire";
 
-		let appliedEvent = null;
-		let invalidationEvent = null;
+		const eventIds = [];
+		let privateFailureCode = null;
+		let sourceNxtData = null;
+		let targetNxtData = null;
 		if (decision === "accept") {
 			const originMembership = this._memberships.get(`${campaignId}::${operation.originActorAccountId}`);
 			const isOriginStillEligible = originMembership?.status === "active"
-				&& ["dm", "co_dm", "player"].includes(originMembership.role)
+				&& (!operation.sourceCost || originMembership.role === "player")
+				&& (operation.sourceCost
+					? targetOwnerMembership?.status === "active" && targetOwnerMembership.role === "player"
+					: true)
+				&& source?.status === "active"
+				&& target?.status === "active"
 				&& source.ownerAccountId === operation.originActorAccountId
 				&& source.campaignId === campaignId
 				&& target.campaignId === campaignId
-				&& target.targetRef === operation.targetRef;
+				&& target.targetRef === operation.targetRef
+				&& target.ownerAccountId === targetOwnerAccountId;
 			if (!isOriginStillEligible) {
-				throw new HubStoreError("PROPOSAL_STALE", `The proposal is no longer applicable.`, {status: 409});
+				privateFailureCode = "SOURCE_COST_UNAVAILABLE";
 			}
-			try {
-				this._assertTargetable({
-					character: target,
-					accountId: operation.originActorAccountId,
-					role: originMembership.role,
-				});
-			} catch {
-				throw new HubStoreError("PROPOSAL_STALE", `The proposal is no longer applicable.`, {status: 409});
-			}
-			let derived;
-			try {
-				derived = this._semanticOperationRegistry.derive({
-					sourceCharacter: source,
-					targetCharacter: target,
-					targetRef: operation.targetRef,
-					sourceEntity: operation.sourceEntity,
-					effectTemplateId: operation.effectTemplateId,
-					choice: operation.choice,
-					sourceProfile: computePeerProfile({character: source}),
-					targetProfile: computePeerProfile({character: target}),
-					operationId: operation.id,
-				});
-			} catch (error) {
-				if (error.code === "SOURCE_COST_UNSUPPORTED" || error.code === "SOURCE_OR_TARGET_UNAVAILABLE") {
-					throw new HubStoreError("PROPOSAL_STALE", `The proposal is no longer applicable.`, {status: 409});
+			if (!privateFailureCode) {
+				try {
+					this._assertTargetable({
+						character: target,
+						accountId: operation.originActorAccountId,
+						role: originMembership.role,
+					});
+				} catch {
+					privateFailureCode = "TARGET_EFFECT_UNAVAILABLE";
 				}
-				throw error;
 			}
-			if (JSON.stringify(derived.operation) !== JSON.stringify({
+			if (operation.sourceCost) {
+				const campaign = this._campaigns.get(campaignId);
+				const rulesVersion = campaign?.activeRulesVersionId
+					? this._rulesVersions.get(campaign.activeRulesVersionId)
+					: null;
+				const brewBundle = campaign?.activeBrewBundleVersionId
+					? this._brewVersions.get(campaign.activeBrewBundleVersionId)
+					: null;
+				const currentPin = getPeerSourceCostsRulesPin({rulesVersion, brewBundle});
+				if (!isPeerSourceCostsPinCurrent({
+					operation,
+					rulesPin: currentPin,
+					isCapabilityEnabled: this._isPeerSourceCostsEnabled(campaignId),
+				})) privateFailureCode = "POLICY_VERSION_STALE";
+			}
+			if (!privateFailureCode && operation.sourceCostInvalidated) {
+				privateFailureCode = "SOURCE_COST_UNAVAILABLE";
+			}
+			if (!privateFailureCode && operation.sourceCost) {
+				try {
+					this._semanticOperationRegistry.getTemplate({
+						sourceEntity: operation.sourceEntity,
+						effectTemplateId: operation.effectTemplateId,
+					});
+				} catch {
+					throw new HubStoreError(
+						"SOURCE_COST_HANDLER_UNAVAILABLE",
+						`The pinned source-cost handler is unavailable.`,
+						{status: 503},
+					);
+				}
+			}
+			let derived = null;
+			if (!privateFailureCode) {
+				try {
+					derived = this._semanticOperationRegistry.derive({
+						sourceCharacter: source,
+						targetCharacter: target,
+						targetRef: operation.targetRef,
+						sourceEntity: operation.sourceEntity,
+						effectTemplateId: operation.effectTemplateId,
+						choice: operation.choice,
+						sourceProfile: computePeerProfile({character: source}),
+						targetProfile: computePeerProfile({character: target}),
+						operationId: operation.id,
+						effectResolutionSeed: operation.effectResolutionSeed,
+					});
+				} catch (error) {
+					if (
+						!operation.sourceCost
+						&& ["SOURCE_COST_UNSUPPORTED", "SOURCE_OR_TARGET_UNAVAILABLE"].includes(error.code)
+					) throw new HubStoreError("PROPOSAL_STALE", `The proposal is no longer applicable.`, {status: 409});
+					privateFailureCode = getPrivateAcceptanceFailureCode(error);
+					if (!privateFailureCode) throw error;
+				}
+			}
+			const expectedOperation = {
 				operationId: operation.id,
 				kind: operation.kind,
 				version: operation.version,
 				targetCharacterId: operation.targetCharacterId,
 				arguments: operation.arguments,
-			})) throw new HubStoreError("PROPOSAL_STALE", `The proposal is no longer applicable.`, {status: 409});
-			const data = applySemanticOperation({data: target.data, operation: derived.operation});
-			validateCloudCharacterData(data);
-			target.data = data;
-			target.revision++;
-			target.updatedAt = this._fnNow().toISOString();
-			operation.status = "applied";
-			operation.resultingCharacterRevision = target.revision;
-			appliedEvent = this._appendEvent({
-				campaignId,
-				actorAccountId: accountId,
-				type: "character.operation.applied",
-				aggregateType: "character",
-				aggregateId: target.id,
-				aggregateRevision: target.revision,
-				visibility: "explicit_accounts",
-				visibleAccountIds: this._getSemanticRecipients({operation, target}),
-				payload: {operation: derived.operation, resultingCharacterRevision: target.revision},
-			});
-			target.operationWatermark = appliedEvent.sequence;
-			invalidationEvent = this._commitCharacterMutation({character: target, actorAccountId: accountId, isRevisionBump: false});
+			};
+			if (
+				!privateFailureCode
+				&& (
+					!isCanonicalEqual(derived.operation, expectedOperation)
+					|| (operation.sourceCost && !isCanonicalEqual(derived.sourceCost, operation.sourceCost))
+					|| !isCanonicalEqual(derived.sourceEntity, operation.sourceEntity)
+					|| derived.effectTemplateId !== operation.effectTemplateId
+					|| !isCanonicalEqual(derived.choice, operation.choice)
+				)
+			) privateFailureCode = "SOURCE_COST_UNAVAILABLE";
+			if (!privateFailureCode) {
+				try {
+					if (operation.sourceCost) {
+						sourceNxtData = applySourceCost({data: source.data, sourceCost: operation.sourceCost}).data;
+					}
+				} catch (error) {
+					privateFailureCode = getPrivateAcceptanceFailureCode(error);
+					if (!privateFailureCode) throw error;
+				}
+			}
+			if (!privateFailureCode) {
+				try {
+					const targetBase = source.id === target.id && sourceNxtData ? sourceNxtData : target.data;
+					targetNxtData = applySemanticOperation({data: targetBase, operation: derived.operation});
+					if (isCanonicalEqual(targetNxtData, targetBase)) {
+						throw new HubStoreError("TARGET_EFFECT_UNAVAILABLE", `The target effect is unavailable.`, {status: 409});
+					}
+					if (source.id === target.id) sourceNxtData = targetNxtData;
+					validateCloudCharacterData(targetNxtData);
+					if (source.id !== target.id && sourceNxtData) validateCloudCharacterData(sourceNxtData);
+				} catch (error) {
+					privateFailureCode = error.code === "TARGET_EFFECT_UNAVAILABLE"
+						? error.code
+						: getPrivateAcceptanceFailureCode(error) || "TARGET_EFFECT_UNAVAILABLE";
+				}
+			}
+			if (privateFailureCode && !operation.sourceCost) {
+				throw new HubStoreError("PROPOSAL_STALE", `The proposal is no longer applicable.`, {status: 409});
+			}
+			if (privateFailureCode) {
+				operation.status = "failed";
+				operation.privateFailureCode = privateFailureCode;
+			} else if (source.id === target.id && operation.sourceCost) {
+				this._setCharacterData({character: target, data: targetNxtData});
+				target.revision++;
+				target.updatedAt = this._fnNow().toISOString();
+				operation.status = "applied";
+				operation.resultingSourceCharacterRevision = target.revision;
+				operation.resultingCharacterRevision = target.revision;
+				const combinedEvent = this._appendEvent({
+					campaignId,
+					actorAccountId: accountId,
+					type: "character.operation.applied",
+					aggregateType: "character",
+					aggregateId: target.id,
+					aggregateRevision: target.revision,
+					visibility: "explicit_accounts",
+					visibleAccountIds: this._getSourceCostRecipients({operation, source}),
+					payload: {
+						leg: "combined",
+						operation: derived.operation,
+						sourceCost: copy(operation.sourceCost),
+						resultingCharacterRevision: target.revision,
+						resultingSourceCharacterRevision: target.revision,
+					},
+				});
+				operation.appliedEventId = combinedEvent.id;
+				target.operationWatermark = combinedEvent.sequence;
+				eventIds.push(combinedEvent.id);
+			} else {
+				if (sourceNxtData) {
+					this._setCharacterData({character: source, data: sourceNxtData});
+					source.revision++;
+					source.updatedAt = this._fnNow().toISOString();
+				}
+				this._setCharacterData({character: target, data: targetNxtData});
+				target.revision++;
+				target.updatedAt = this._fnNow().toISOString();
+				operation.status = "applied";
+				operation.resultingSourceCharacterRevision = operation.sourceCost ? source.revision : null;
+				operation.resultingCharacterRevision = target.revision;
+				if (operation.sourceCost) {
+					const sourceEvent = this._appendEvent({
+						campaignId,
+						actorAccountId: accountId,
+						type: "character.operation.source_cost_consumed",
+						aggregateType: "character",
+						aggregateId: source.id,
+						aggregateRevision: source.revision,
+						visibility: "explicit_accounts",
+						visibleAccountIds: this._getSourceCostRecipients({operation, source}),
+						payload: {
+							operationId: operation.id,
+							leg: "source",
+							sourceCost: copy(operation.sourceCost),
+							resultingSourceCharacterRevision: source.revision,
+						},
+					});
+					operation.sourceCostEventId = sourceEvent.id;
+					source.operationWatermark = sourceEvent.sequence;
+					eventIds.push(sourceEvent.id);
+				}
+				const targetEvent = this._appendEvent({
+					campaignId,
+					actorAccountId: accountId,
+					type: "character.operation.applied",
+					aggregateType: "character",
+					aggregateId: target.id,
+					aggregateRevision: target.revision,
+					visibility: "explicit_accounts",
+					visibleAccountIds: this._getSemanticRecipients({operation, target}),
+					payload: {
+						...(operation.sourceCost ? {leg: "target"} : {}),
+						operation: derived.operation,
+						resultingCharacterRevision: target.revision,
+					},
+				});
+				operation.appliedEventId = targetEvent.id;
+				target.operationWatermark = targetEvent.sequence;
+				eventIds.push(targetEvent.id);
+			}
+			if (operation.status === "applied") {
+				const mutatedCharacters = operation.sourceCost ? [source, target] : [target];
+				for (const character of [...new Map(mutatedCharacters.map(it => [it.id, it])).values()]
+					.sort((left, right) => left.id.localeCompare(right.id))) {
+					const invalidation = this._commitCharacterMutation({
+						character,
+						actorAccountId: accountId,
+						isRevisionBump: false,
+					});
+					if (invalidation) eventIds.push(invalidation.id);
+				}
+			}
 		} else {
 			operation.status = decision === "reject" ? "rejected" : decision === "cancel" ? "cancelled" : "expired";
 		}
@@ -2115,33 +2524,36 @@ export class MemoryHubStore {
 			targetType: "semantic_operation",
 			targetId: operation.id,
 		});
-		const terminalEvent = appliedEvent || this._appendEvent({
-			campaignId,
-			actorAccountId: decision === "expire" ? null : accountId,
-			type: `character.operation.${operation.status}`,
-			aggregateType: "semantic_operation",
-			aggregateId: operation.id,
-			visibility: "explicit_accounts",
-			visibleAccountIds: this._getSemanticRecipients({operation, target}),
-			payload: {
-				operationId: operation.id,
-				targetCharacterId: operation.targetCharacterId,
-				status: operation.status,
-				reason: "unavailable",
-				sourceDisplaySnapshot: copy(operation.sourceDisplaySnapshot),
-				targetDisplaySnapshot: copy(operation.targetDisplaySnapshot),
-				effectDisplaySnapshot: copy(operation.effectDisplaySnapshot),
-			},
-		});
-		if (operation.status === "applied") operation.appliedEventId = terminalEvent.id;
-		else {
+		if (operation.status !== "applied") {
+			const terminalEvent = this._appendEvent({
+				campaignId,
+				actorAccountId: decision === "expire" ? null : accountId,
+				type: `character.operation.${operation.status}`,
+				aggregateType: "semantic_operation",
+				aggregateId: operation.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: this._getSemanticRecipients({operation, target}),
+				payload: this._getSemanticLifecyclePayload(operation),
+			});
 			operation.terminalEventId = terminalEvent.id;
 			operation.terminalReason = "unavailable";
+			eventIds.push(terminalEvent.id);
 		}
 		const response = {
-			operation: this._getSemanticOperationView(operation),
-			eventIds: [terminalEvent.id, invalidationEvent?.id].filter(Boolean),
-			...(operation.status === "applied" ? {operationWatermark: target.operationWatermark} : {}),
+			operation: this._getSemanticOperationView(operation, {accountId, role: membership.role, source, target}),
+			eventIds,
+			...(operation.status === "applied"
+				? {
+					operationWatermark: target.operationWatermark,
+					watermarks: this._getSemanticWatermarksForViewer({
+						operation,
+						accountId,
+						role: membership.role,
+						source,
+						target,
+					}),
+				}
+				: {}),
 		};
 		return this._setSemanticCommand({
 			accountId,
@@ -2154,6 +2566,17 @@ export class MemoryHubStore {
 		});
 	}
 
+	_getSemanticWatermarksForViewer ({operation, accountId, role, source, target}) {
+		const canViewBoth = ["dm", "co_dm"].includes(role) || source?.ownerAccountId === accountId;
+		const characters = canViewBoth
+			? [...new Map([[source?.id, source], [target?.id, target]]).values()]
+			: [target];
+		return characters
+			.filter(Boolean)
+			.map(character => ({characterId: character.id, sequence: character.operationWatermark || 0}))
+			.sort((left, right) => left.characterId.localeCompare(right.characterId));
+	}
+
 	async pListPendingActions ({accountId, campaignId}) {
 		const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
 		this._expireSemanticOperations({campaignId});
@@ -2163,7 +2586,39 @@ export class MemoryHubStore {
 				if (["dm", "co_dm"].includes(membership.role) || operation.originActorAccountId === accountId) return true;
 				return this._characters.get(operation.targetCharacterId)?.ownerAccountId === accountId;
 			})
-			.map(operation => this._getSemanticOperationView(operation));
+			.map(operation => this._getSemanticOperationView(operation, {
+				accountId,
+				role: membership.role,
+				source: this._characters.get(operation.sourceCharacterId),
+				target: this._characters.get(operation.targetCharacterId),
+			}));
+	}
+
+	async pListCharacterOutgoingActions ({accountId, campaignId, characterId}) {
+		this._getMembership({
+			accountId,
+			campaignId,
+			roles: ["dm", "co_dm", "player"],
+			isRequireActiveCampaign: false,
+		});
+		const character = this._characters.get(characterId);
+		if (
+			!character
+			|| character.status !== "active"
+			|| character.campaignId !== campaignId
+			|| character.ownerAccountId !== accountId
+		) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
+		this._expireSemanticOperations({campaignId});
+		return [...this._semanticOperations.values()]
+			.filter(operation =>
+				operation.campaignId === campaignId
+				&& operation.sourceCharacterId === characterId
+				&& operation.originActorAccountId === accountId
+				&& operation.sourceCost != null,
+			)
+			.sort((left, right) => `${right.createdAt}`.localeCompare(`${left.createdAt}`) || left.id.localeCompare(right.id))
+			.slice(0, 100)
+			.map(operation => getPeerSourceCostActionSummary(operation));
 	}
 
 	async pListCharacterPendingActions ({accountId, campaignId, characterId}) {
@@ -2184,17 +2639,25 @@ export class MemoryHubStore {
 				&& operation.targetCharacterId === characterId
 				&& operation.status === "proposed",
 			)
-			.map(operation => getPendingEffectPresentation({
-				operationId: operation.id,
-				status: operation.status,
-				sourceDisplaySnapshot: operation.sourceDisplaySnapshot,
-				effectDisplaySnapshot: operation.effectDisplaySnapshot,
-				operationKind: operation.kind,
-				operationArguments: operation.arguments,
-				expiresAt: operation.expiresAt,
-			}))
-			.filter(Boolean)
-			.map(action => ({...action, capabilities: {canApprove: true, canReject: true}}));
+			.map(operation => {
+				const action = getPendingEffectPresentation({
+					operationId: operation.id,
+					status: operation.status,
+					sourceDisplaySnapshot: operation.sourceDisplaySnapshot,
+					effectDisplaySnapshot: operation.effectDisplaySnapshot,
+					operationKind: operation.kind,
+					operationArguments: operation.arguments,
+					expiresAt: operation.expiresAt,
+				});
+				return action
+					? {
+						...action,
+						...(operation.sourceCost ? {contractVersion: PEER_SOURCE_COSTS_CONTRACT_VERSION} : {}),
+						capabilities: {canApprove: true, canReject: true},
+					}
+					: null;
+			})
+			.filter(Boolean);
 	}
 
 	async pGrantXp ({accountId, campaignId, characterId, amount, reason = null, idempotencyKey}) {
@@ -2206,7 +2669,7 @@ export class MemoryHubStore {
 		const data = structuredClone(character.data);
 		data.xp = Math.max(0, Math.floor(Number(data.xp) || 0) + Math.floor(amount));
 		validateCloudCharacterData(data);
-		character.data = data;
+		this._setCharacterData({character, data});
 		character.revision++;
 		this._appendAudit({campaignId, actorAccountId: accountId, action: "xp.granted", targetType: "character", targetId: characterId, details: {amount, reason}});
 		this._appendEvent({campaignId, actorAccountId: accountId, type: "xp.granted", aggregateType: "character", aggregateId: characterId, aggregateRevision: character.revision, visibility: "explicit_accounts", visibleAccountIds: [...new Set([accountId, character.ownerAccountId])], payload: {amount, reason, xp: character.data.xp}});
@@ -2232,7 +2695,7 @@ export class MemoryHubStore {
 		// "not synced" until the owner saves, which is the only honest answer.
 		stripCarryAuthority(data);
 		validateCloudCharacterData(data);
-		character.data = data;
+		this._setCharacterData({character, data});
 		character.revision++;
 		this._appendAudit({campaignId, actorAccountId: accountId, action: "item.granted", targetType: "character", targetId: characterId, details: {entryId: entry.id, quantity: entry.quantity}});
 		this._appendEvent({campaignId, actorAccountId: accountId, type: "item.granted", aggregateType: "character", aggregateId: characterId, aggregateRevision: character.revision, visibility: "explicit_accounts", visibleAccountIds: [...new Set([accountId, character.ownerAccountId])], payload: {entry}});
@@ -2326,7 +2789,13 @@ export class MemoryHubStore {
 			};
 		});
 
-		for (const staged of stagedCharacters) this._characters.set(staged.character.id, staged.character);
+		for (const staged of stagedCharacters) {
+			this._setCharacterData({
+				character: this._characters.get(staged.character.id),
+				data: staged.character.data,
+			});
+			this._characters.set(staged.character.id, staged.character);
+		}
 		if (stagedPartyInventory) this._partyInventories.set(campaignId, stagedPartyInventory);
 
 		const response = {
@@ -2437,7 +2906,7 @@ export class MemoryHubStore {
 		if (holder._character) {
 			if (isCarryAffecting) stripCarryAuthority(container);
 			validateCloudCharacterData(container);
-			holder._character.data = container;
+			this._setCharacterData({character: holder._character, data: container});
 			holder._character.revision++;
 			// Both reserving escrow and resolving a transfer change the inventory and carry
 			// summaries of the character on either end.

@@ -2,7 +2,7 @@ import {HubApiClient} from "./hub-api-client.js";
 import {applyJsonPatch, diffJson, rebaseJsonChanges} from "./hub-json-patch.js";
 import {withRootCarryWrite} from "./hub-carry-authority.js";
 import {HubBroadcastSync} from "./hub-broadcast-sync.js";
-import {getCharacterOperationRouting} from "./hub-character-operation-events.js";
+import {CHARACTER_OPERATION_LEGS, getCharacterOperationRouting, getOperationLegKey} from "./hub-character-operation-events.js";
 import {
 	BoundedIdSet,
 	COVERAGE_VERSION,
@@ -10,7 +10,8 @@ import {
 	TRACK_DECISION,
 	createCoverage,
 	deserializeCoverage,
-	planAppliedOperation,
+	markCoverageOperationLeg,
+	planOperationLeg,
 	serializeCoverage,
 } from "./hub-character-operation-reconciler.js";
 
@@ -48,11 +49,12 @@ export class HubHttpCharacterRepository {
 		// canonical document and the recovery draft returned alongside it can sit at different revisions.
 		this._coverage = new Map();
 		this._appliedEventIds = new Map();
-		this._appliedOperationIds = new Map();
+		this._appliedOperationLegIds = new Map();
 		this._pendingResync = new Map();
 		this._resyncInFlight = new Set();
 		this._realtimeCursors = new Map();
 		this._saveBlocks = new Map();
+		this._operationConflicts = new Map();
 		// Separate from `_conflicts` on purpose: a live conflict must receive the same operation transform, but
 		// must NOT gate `pUpsert` the way a stored overlap conflict does.
 		this._liveConflicts = new Map();
@@ -71,6 +73,14 @@ export class HubHttpCharacterRepository {
 		const out = structuredClone(character);
 		delete out.id;
 		return out;
+	}
+
+	_getOperationWatermark (characterId, character = null) {
+		const candidates = [
+			character?.operationWatermark,
+			this._realtimeCursors.get(characterId)?.operationWatermark,
+		].filter(Number.isInteger);
+		return candidates.length ? Math.max(...candidates) : null;
 	}
 
 	_assertCharacterScope (character) {
@@ -107,7 +117,7 @@ export class HubHttpCharacterRepository {
 		this._assertCharacterScope(character);
 		this._accepted.set(canonicalId, character);
 		const book = this._getCoverageBook(canonicalId);
-		book.acceptedOperationIds = new BoundedIdSet();
+		book.acceptedOperationLegIds = new BoundedIdSet();
 		const recovery = this._failedWrites.get(characterId) || this.getPendingRecovery(characterId);
 		if (recovery) {
 			this._failedWrites.set(characterId, recovery);
@@ -118,7 +128,7 @@ export class HubHttpCharacterRepository {
 		}
 		book.live = createCoverage({
 			revision: character.revision,
-			acceptedSequence: this._realtimeCursors.get(canonicalId)?.operationWatermark ?? null,
+			acceptedSequence: this._getOperationWatermark(canonicalId, character),
 		});
 		return this._getData(character);
 	}
@@ -127,7 +137,8 @@ export class HubHttpCharacterRepository {
 		return createCoverage({
 			revision: coverage?.revision ?? null,
 			acceptedSequence: coverage?.acceptedSequence ?? null,
-			appliedOperationIds: coverage?.appliedOperationIds,
+			appliedOperationLegIds: coverage?.appliedOperationLegIds,
+			...(!coverage?.appliedOperationLegIds ? {appliedOperationIds: coverage?.appliedOperationIds} : {}),
 		});
 	}
 
@@ -224,7 +235,7 @@ export class HubHttpCharacterRepository {
 					coverage: {
 						base: serializeCoverage(this._getAcceptedCoverage(canonicalId)),
 						local: serializeCoverage(book.live),
-						server: serializeCoverage(createCoverage({revision: canonical.revision})),
+						server: serializeCoverage(createCoverage({revision: canonical.revision, acceptedSequence: this._getOperationWatermark(canonicalId, canonical)})),
 					},
 					authoritativeDiscarded,
 				};
@@ -241,18 +252,18 @@ export class HubHttpCharacterRepository {
 			}
 
 			this._accepted.set(canonicalId, canonical);
-			const acceptedSequence = this._realtimeCursors.get(canonicalId)?.operationWatermark ?? null;
+			const acceptedSequence = this._getOperationWatermark(canonicalId, canonical);
 			book.live = createCoverage({
 				revision: canonical.revision,
 				acceptedSequence,
-				appliedOperationIds: book.live.appliedOperationIds,
+				appliedOperationLegIds: book.live.appliedOperationLegIds,
 			});
 			if (Object.hasOwn(staged, "latestSubmitted")) {
 				this._latestSubmitted.set(canonicalId, staged.latestSubmitted);
 				book.latestSubmitted = createCoverage({
 					revision: canonical.revision,
 					acceptedSequence,
-					appliedOperationIds: book.latestSubmitted.appliedOperationIds,
+					appliedOperationLegIds: book.latestSubmitted.appliedOperationLegIds,
 				});
 			}
 
@@ -262,7 +273,7 @@ export class HubHttpCharacterRepository {
 				book.failedWrite = createCoverage({
 					revision: canonical.revision,
 					acceptedSequence,
-					appliedOperationIds: book.failedWrite.appliedOperationIds,
+					appliedOperationLegIds: book.failedWrite.appliedOperationLegIds,
 				});
 				book.recoveredBase = this._cloneTrackCoverage(book.failedWrite);
 			}
@@ -328,7 +339,7 @@ export class HubHttpCharacterRepository {
 				latestSubmitted: createCoverage(),
 				recoveredBase: createCoverage(),
 				failedWrite: createCoverage(),
-				acceptedOperationIds: new BoundedIdSet(),
+				acceptedOperationLegIds: new BoundedIdSet(),
 			};
 			this._coverage.set(characterId, book);
 		}
@@ -338,9 +349,9 @@ export class HubHttpCharacterRepository {
 	_getAppliedIds (characterId) {
 		let events = this._appliedEventIds.get(characterId);
 		if (!events) this._appliedEventIds.set(characterId, events = new BoundedIdSet());
-		let operations = this._appliedOperationIds.get(characterId);
-		if (!operations) this._appliedOperationIds.set(characterId, operations = new BoundedIdSet());
-		return {events, operations};
+		let operationLegs = this._appliedOperationLegIds.get(characterId);
+		if (!operationLegs) this._appliedOperationLegIds.set(characterId, operationLegs = new BoundedIdSet());
+		return {events, operationLegs};
 	}
 
 	_getAcceptedCoverage (characterId) {
@@ -348,8 +359,8 @@ export class HubHttpCharacterRepository {
 		if (!accepted) return createCoverage();
 		return createCoverage({
 			revision: Number.isInteger(accepted.revision) ? accepted.revision : null,
-			acceptedSequence: this._realtimeCursors.get(characterId)?.operationWatermark ?? null,
-			appliedOperationIds: this._getCoverageBook(characterId).acceptedOperationIds,
+			acceptedSequence: this._getOperationWatermark(characterId, accepted),
+			appliedOperationLegIds: this._getCoverageBook(characterId).acceptedOperationLegIds,
 		});
 	}
 
@@ -361,7 +372,17 @@ export class HubHttpCharacterRepository {
 	recordRealtimeCursor ({characterId, lastSequence = null, revision = null, projectionRevision = null, operationWatermark = null}) {
 		if (typeof characterId !== "string" || !characterId) return false;
 		const canonicalId = this._canonicalIds.get(characterId) || characterId;
-		this._realtimeCursors.set(canonicalId, {lastSequence, revision, projectionRevision, operationWatermark});
+		const previous = this._realtimeCursors.get(canonicalId) || {};
+		const maxKnown = (left, right) => {
+			const values = [left, right].filter(Number.isInteger);
+			return values.length ? Math.max(...values) : null;
+		};
+		this._realtimeCursors.set(canonicalId, {
+			lastSequence: maxKnown(previous.lastSequence, lastSequence),
+			revision: maxKnown(previous.revision, revision),
+			projectionRevision: maxKnown(previous.projectionRevision, projectionRevision),
+			operationWatermark: maxKnown(previous.operationWatermark, operationWatermark),
+		});
 		return true;
 	}
 
@@ -384,6 +405,52 @@ export class HubHttpCharacterRepository {
 		this._saveBlocks.delete(characterId);
 	}
 
+	_recordOperationConflict ({canonicalId, plan, eventId, sequence, liveData, resultingCharacterRevision}) {
+		const accepted = this._accepted.get(canonicalId);
+		const serverData = plan.prepared?.accepted
+			|| (plan.decisions?.accepted === TRACK_DECISION.COVERED ? accepted?.data : null);
+		const isSourceConflict = plan.blockedTransform === CHARACTER_OPERATION_LEGS.SOURCE;
+		const recovery = {
+			kind: isSourceConflict ? "source_resource_conflict" : "operation_live_conflict",
+			operationId: plan.operationId,
+			operationLegKey: plan.operationLegKey,
+			leg: plan.leg,
+			eventId,
+			sequence,
+			resultingCharacterRevision,
+			base: accepted ? structuredClone(accepted.data) : null,
+			local: liveData === undefined ? null : structuredClone(liveData),
+			server: serverData == null ? null : structuredClone(serverData),
+			serverDocument: accepted && serverData != null
+				? {...structuredClone(accepted), data: structuredClone(serverData), revision: resultingCharacterRevision}
+				: null,
+			envelope: {
+				eventId,
+				sequence,
+				leg: plan.leg,
+				operationId: plan.operationId,
+				operation: plan.operation ? structuredClone(plan.operation) : null,
+				sourceCost: plan.sourceCost ? structuredClone(plan.sourceCost) : null,
+				resultingCharacterRevision,
+			},
+			error: structuredClone(plan.error),
+		};
+		this._operationConflicts.set(canonicalId, recovery);
+		this._setSaveBlock(canonicalId, {
+			reason: recovery.kind,
+			code: isSourceConflict ? "SOURCE_COST_LOCAL_CONFLICT" : "OPERATION_LIVE_CONFLICT",
+			message: isSourceConflict
+				? `The source cost was consumed remotely, but the local draft already spent that resource. Reload canonical truth or export the local draft before resolving it.`
+				: `The operation was applied remotely, but it cannot be applied safely to the local draft. Reload canonical truth or export the local draft before resolving it.`,
+		});
+	}
+
+	getOperationConflictRecovery (characterId) {
+		const canonicalId = this._canonicalIds.get(characterId) || characterId;
+		const recovery = this._operationConflicts.get(canonicalId);
+		return recovery ? structuredClone(recovery) : null;
+	}
+
 	/**
 	 * Forget every reconciliation-scoped structure for a character. Called on teardown paths (switch, detach,
 	 * archive, access loss) so pending envelopes and coverage cannot outlive the subscription that produced them.
@@ -392,16 +459,17 @@ export class HubHttpCharacterRepository {
 		if (characterId == null) {
 			this._coverage.clear();
 			this._appliedEventIds.clear();
-			this._appliedOperationIds.clear();
+			this._appliedOperationLegIds.clear();
 			this._pendingResync.clear();
 			this._resyncInFlight.clear();
 			this._realtimeCursors.clear();
 			this._saveBlocks.clear();
 			this._liveConflicts.clear();
+			this._operationConflicts.clear();
 			return true;
 		}
 		const canonicalId = this._canonicalIds.get(characterId) || characterId;
-		for (const map of [this._coverage, this._appliedEventIds, this._appliedOperationIds, this._pendingResync, this._realtimeCursors, this._saveBlocks, this._liveConflicts]) {
+		for (const map of [this._coverage, this._appliedEventIds, this._appliedOperationLegIds, this._pendingResync, this._realtimeCursors, this._saveBlocks, this._liveConflicts, this._operationConflicts]) {
 			map.delete(canonicalId);
 		}
 		this._resyncInFlight.delete(canonicalId);
@@ -447,28 +515,65 @@ export class HubHttpCharacterRepository {
 	 *
 	 * Intended to be invoked synchronously from inside a realtime delivery so it is serialized against saves.
 	 */
-	applyRealtimeOperation ({characterId, operation, resultingCharacterRevision, eventId = null, sequence = null, liveData, fnAdoptLive = null}) {
+	applyRealtimeOperation ({
+		characterId,
+		leg = CHARACTER_OPERATION_LEGS.TARGET,
+		operationId = null,
+		operationLegKey = null,
+		operation = null,
+		sourceCost = null,
+		resultingCharacterRevision,
+		eventId = null,
+		sequence = null,
+		liveData,
+		fnAdoptLive = null,
+	}) {
 		if (typeof characterId !== "string" || !characterId) throw new TypeError(`characterId is required.`);
 		const canonicalId = this._canonicalIds.get(characterId) || characterId;
-		const {events: appliedEventIds, operations: appliedOperationIds} = this._getAppliedIds(canonicalId);
+		const {events: appliedEventIds, operationLegs: appliedOperationLegIds} = this._getAppliedIds(canonicalId);
 
-		const plan = planAppliedOperation({
+		const plan = planOperationLeg({
 			tracks: this._buildReconciliationTracks({canonicalId, liveData}),
+			leg,
+			operationId,
+			operationLegKey,
 			operation,
+			sourceCost,
 			resultingCharacterRevision,
 			eventId,
 			appliedEventIds,
-			appliedOperationIds,
+			appliedOperationLegIds,
 		});
 
 		if (plan.status === RECONCILE_STATUS.RESYNC_REQUIRED) {
 			this._queuePendingResync({
 				canonicalId,
-				envelope: {eventId, sequence, operation, resultingCharacterRevision},
+				envelope: {
+					eventId,
+					sequence,
+					leg,
+					operationId: plan.operationId || operationId || operation?.operationId,
+					operation,
+					sourceCost,
+					resultingCharacterRevision,
+				},
 			});
 			return {status: plan.status, decisions: plan.decisions};
 		}
 		if (plan.status === RECONCILE_STATUS.REJECTED || plan.status === RECONCILE_STATUS.BLOCKED) {
+			const isCanonicalPrepared = plan.decisions?.accepted === TRACK_DECISION.COVERED
+				|| Object.hasOwn(plan.prepared || {}, "accepted");
+			if (plan.status === RECONCILE_STATUS.BLOCKED && isCanonicalPrepared && plan.blockedTrack !== "accepted") {
+				this._recordOperationConflict({
+					canonicalId,
+					plan,
+					eventId,
+					sequence,
+					liveData,
+					resultingCharacterRevision,
+				});
+				return {status: plan.status, error: plan.error, decisions: plan.decisions, recovery: this.getOperationConflictRecovery(canonicalId)};
+			}
 			this._setSaveBlock(canonicalId, {
 				reason: plan.status,
 				code: plan.error?.code || "OPERATION_INVALID",
@@ -477,7 +582,12 @@ export class HubHttpCharacterRepository {
 			return {status: plan.status, error: plan.error, decisions: plan.decisions};
 		}
 		if (plan.status === RECONCILE_STATUS.SUPPRESSED) {
-			this._commitAppliedIds({canonicalId, eventId, operationId: plan.operation?.operationId});
+			this._commitAppliedIds({
+				canonicalId,
+				eventId,
+				operationLegKey: plan.operationLegKey,
+				sequence,
+			});
 			return {status: plan.status, decisions: plan.decisions};
 		}
 
@@ -502,41 +612,49 @@ export class HubHttpCharacterRepository {
 
 	_commitReconciliation ({canonicalId, plan, eventId, sequence}) {
 		const book = this._getCoverageBook(canonicalId);
-		const operationId = plan.operation?.operationId || null;
+		const operationLegKey = plan.operationLegKey;
 		const revision = plan.revisionNext;
 		const staged = plan.staged;
 
 		if (Object.hasOwn(staged, "accepted")) {
 			const accepted = this._accepted.get(canonicalId);
 			this._accepted.set(canonicalId, {...accepted, data: staged.accepted, revision});
-			book.acceptedOperationIds.add(operationId);
+			book.acceptedOperationLegIds.add(operationLegKey);
+		} else if (plan.decisions.accepted === TRACK_DECISION.COVERED) {
+			book.acceptedOperationLegIds.add(operationLegKey);
 		}
 		const advance = (coverage, hasStaged) => {
 			if (!hasStaged && !Number.isInteger(coverage.revision)) return;
 			coverage.revision = Math.max(Number.isInteger(coverage.revision) ? coverage.revision : 0, revision);
-			coverage.appliedOperationIds.add(operationId);
+			markCoverageOperationLeg(coverage, operationLegKey);
+			if (Number.isInteger(sequence)) coverage.acceptedSequence = Math.max(coverage.acceptedSequence || 0, sequence);
+		};
+		const markCovered = coverage => {
+			markCoverageOperationLeg(coverage, operationLegKey);
+			if (Number.isInteger(sequence)) coverage.acceptedSequence = Math.max(coverage.acceptedSequence || 0, sequence);
 		};
 		if (Object.hasOwn(staged, "live")) advance(book.live, true);
+		else if (plan.decisions.live === TRACK_DECISION.COVERED) markCovered(book.live);
 		if (Object.hasOwn(staged, "latestSubmitted")) {
 			this._latestSubmitted.set(canonicalId, staged.latestSubmitted);
 			advance(book.latestSubmitted, true);
-		}
+		} else if (plan.decisions.latestSubmitted === TRACK_DECISION.COVERED) markCovered(book.latestSubmitted);
 		if (Object.hasOwn(staged, "recoveredBase")) {
 			this._recoveredBases.set(canonicalId, staged.recoveredBase);
 			advance(book.recoveredBase, true);
-		}
+		} else if (plan.decisions.recoveredBase === TRACK_DECISION.COVERED) markCovered(book.recoveredBase);
 		if (Object.hasOwn(staged, "failedWrite")) {
 			this._failedWrites.set(canonicalId, {...staged.failedWrite, id: canonicalId});
 			advance(book.failedWrite, true);
-		}
+		} else if (plan.decisions.failedWrite === TRACK_DECISION.COVERED) markCovered(book.failedWrite);
 
-		this._commitConflictReconciliation({canonicalId, plan, revision, operationId});
+		this._commitConflictReconciliation({canonicalId, plan, revision, operationLegKey, sequence});
 		this._writeRecoveryCoverage(canonicalId);
-		if (Number.isInteger(sequence)) {
-			const cursor = this._realtimeCursors.get(canonicalId) || {};
-			this._realtimeCursors.set(canonicalId, {...cursor, operationWatermark: Math.max(cursor.operationWatermark || 0, sequence)});
+		if (this._operationConflicts.get(canonicalId)?.operationLegKey === operationLegKey) {
+			this._operationConflicts.delete(canonicalId);
+			this._clearSaveBlock(canonicalId);
 		}
-		this._commitAppliedIds({canonicalId, eventId, operationId});
+		this._commitAppliedIds({canonicalId, eventId, operationLegKey, sequence});
 	}
 
 	/**
@@ -545,12 +663,12 @@ export class HubHttpCharacterRepository {
 	 * the surviving candidates agree, the overlap is recomputed — an overlap that existed only because of the
 	 * operation disappears, while genuinely conflicting owner edits remain.
 	 */
-	_commitConflictReconciliation ({canonicalId, plan, revision, operationId}) {
-		this._commitOneConflictRecord({store: this._conflicts, prefix: "conflict", canonicalId, plan, revision, operationId, isClearOnResolve: true});
-		this._commitOneConflictRecord({store: this._liveConflicts, prefix: "liveConflict", canonicalId, plan, revision, operationId, isClearOnResolve: false});
+	_commitConflictReconciliation ({canonicalId, plan, revision, operationLegKey, sequence}) {
+		this._commitOneConflictRecord({store: this._conflicts, prefix: "conflict", canonicalId, plan, revision, operationLegKey, sequence, isClearOnResolve: true});
+		this._commitOneConflictRecord({store: this._liveConflicts, prefix: "liveConflict", canonicalId, plan, revision, operationLegKey, sequence, isClearOnResolve: false});
 	}
 
-	_commitOneConflictRecord ({store, prefix, canonicalId, plan, revision, operationId, isClearOnResolve}) {
+	_commitOneConflictRecord ({store, prefix, canonicalId, plan, revision, operationLegKey, sequence, isClearOnResolve}) {
 		const conflict = store.get(canonicalId);
 		if (!conflict) return;
 		const staged = plan.staged;
@@ -563,7 +681,8 @@ export class HubHttpCharacterRepository {
 				next[key] = staged[trackName];
 				coverage.revision = Math.max(Number.isInteger(coverage.revision) ? coverage.revision : 0, revision);
 			}
-			coverage.appliedOperationIds.add(operationId);
+			markCoverageOperationLeg(coverage, operationLegKey);
+			if (Number.isInteger(sequence)) coverage.acceptedSequence = Math.max(coverage.acceptedSequence || 0, sequence);
 			next.coverage[key] = serializeCoverage(coverage);
 		}
 		const serverTrack = `${prefix}Server`;
@@ -581,15 +700,27 @@ export class HubHttpCharacterRepository {
 		store.set(canonicalId, next);
 	}
 
-	_commitAppliedIds ({canonicalId, eventId, operationId}) {
-		const {events, operations} = this._getAppliedIds(canonicalId);
+	_commitAppliedIds ({canonicalId, eventId, operationLegKey, sequence = null}) {
+		const {events, operationLegs} = this._getAppliedIds(canonicalId);
 		if (eventId) events.add(eventId);
-		if (operationId) operations.add(operationId);
+		if (operationLegKey) operationLegs.add(operationLegKey);
+		if (Number.isInteger(sequence)) {
+			const cursor = this._realtimeCursors.get(canonicalId) || {};
+			this._realtimeCursors.set(canonicalId, {...cursor, operationWatermark: Math.max(cursor.operationWatermark || 0, sequence)});
+		}
 	}
 
 	_queuePendingResync ({canonicalId, envelope}) {
 		const pending = this._pendingResync.get(canonicalId) || [];
 		if (envelope.eventId && pending.some(it => it.eventId === envelope.eventId)) return;
+		const operationLegKey = getOperationLegKey({
+			operationId: envelope.operationId || envelope.operation?.operationId,
+			leg: envelope.leg || CHARACTER_OPERATION_LEGS.TARGET,
+		});
+		if (operationLegKey && pending.some(it => getOperationLegKey({
+			operationId: it.operationId || it.operation?.operationId,
+			leg: it.leg || CHARACTER_OPERATION_LEGS.TARGET,
+		}) === operationLegKey)) return;
 		if (pending.length >= _PENDING_RESYNC_LIMIT) {
 			this._setSaveBlock(canonicalId, {
 				reason: "resync_unavailable",
@@ -661,13 +792,17 @@ export class HubHttpCharacterRepository {
 		for (let page = 0; page < _RESYNC_MAX_PAGES; ++page) {
 			const result = await this._api.pListEventPage({campaignId: this._campaignId, afterSequence: cursor, limit: _RESYNC_PAGE_LIMIT});
 			for (const event of result?.events || []) {
-				if (event?.type !== "character.operation.applied") continue;
 				const routing = getCharacterOperationRouting(event);
-				if (!routing) continue;
+				if (!routing || routing.status !== "applied") continue;
 				operations.push({
 					eventId: event.id,
 					sequence: event.sequence,
+					characterId: routing.characterId,
+					leg: routing.leg,
+					operationId: routing.operationId,
+					operationLegKey: routing.operationLegKey,
 					operation: routing.payload.operation,
+					sourceCost: routing.payload.sourceCost,
 					resultingCharacterRevision: routing.payload.resultingCharacterRevision,
 					targetCharacterId: routing.targetCharacterId,
 				});
@@ -721,13 +856,19 @@ export class HubHttpCharacterRepository {
 
 				const known = new Map();
 				for (const entry of history.operations) {
-					if (entry.targetCharacterId === canonicalId) known.set(entry.operation.operationId, entry);
+					if (entry.characterId === canonicalId) known.set(entry.operationLegKey, entry);
 				}
 				for (const envelope of pending) {
-					const operationId = envelope.operation?.operationId;
-					if (operationId && !known.has(operationId)) known.set(operationId, envelope);
+					const operationLegKey = getOperationLegKey({
+						operationId: envelope.operationId || envelope.operation?.operationId,
+						leg: envelope.leg || CHARACTER_OPERATION_LEGS.TARGET,
+					});
+					if (operationLegKey && !known.has(operationLegKey)) known.set(operationLegKey, {...envelope, operationLegKey});
 				}
-				const ordered = [...known.values()].sort((a, b) => a.resultingCharacterRevision - b.resultingCharacterRevision);
+				const ordered = [...known.values()].sort((a, b) => (
+					a.resultingCharacterRevision - b.resultingCharacterRevision
+					|| (a.sequence || 0) - (b.sequence || 0)
+				));
 
 				if (!history.isComplete && ordered.length < pending.length) {
 					this._setSaveBlock(canonicalId, {
@@ -774,7 +915,12 @@ export class HubHttpCharacterRepository {
 				return {
 					status: "recovered",
 					appliedCount: plan.applied.length,
-					appliedOperations: plan.applied.map(entry => structuredClone(entry.operation)),
+					appliedOperations: plan.applied.filter(entry => entry.operation).map(entry => structuredClone(entry.operation)),
+					appliedLegs: plan.applied.map(entry => ({
+						leg: entry.leg,
+						operationId: entry.operationId,
+						operationLegKey: entry.operationLegKey,
+					})),
 					appliedEffects: plan.applied
 						.filter(entry => entry.appliedEffect)
 						.map(entry => structuredClone(entry.appliedEffect)),
@@ -789,7 +935,7 @@ export class HubHttpCharacterRepository {
 	/** Working copies of every track a resync may advance. Nothing here is repository state yet. */
 	_buildResyncWorkingSet ({canonicalId, canonical, liveData}) {
 		const book = this._getCoverageBook(canonicalId);
-		const acceptedSequence = this._realtimeCursors.get(canonicalId)?.operationWatermark ?? null;
+		const acceptedSequence = this._getOperationWatermark(canonicalId, canonical);
 		const working = {
 			accepted: {
 				data: structuredClone(canonical.data),
@@ -825,38 +971,50 @@ export class HubHttpCharacterRepository {
 	 * replays the identical batch instead of finding the earlier operations already marked as covered.
 	 */
 	_planResyncBatch ({canonicalId, working, ordered}) {
-		const {events, operations} = this._getAppliedIds(canonicalId);
+		const {events, operationLegs} = this._getAppliedIds(canonicalId);
 		const workingEvents = events.clone();
-		const workingOperations = operations.clone();
+		const workingOperationLegs = operationLegs.clone();
 		const applied = [];
 
 		for (const entry of ordered) {
 			const liveBefore = working.live ? structuredClone(working.live.data) : null;
-			const plan = planAppliedOperation({
+			const plan = planOperationLeg({
 				tracks: working,
+				leg: entry.leg || CHARACTER_OPERATION_LEGS.TARGET,
+				operationId: entry.operationId || entry.operation?.operationId,
 				operation: entry.operation,
+				sourceCost: entry.sourceCost,
 				resultingCharacterRevision: entry.resultingCharacterRevision,
 				eventId: entry.eventId,
 				appliedEventIds: workingEvents,
-				appliedOperationIds: workingOperations,
+				appliedOperationLegIds: workingOperationLegs,
 			});
 			if (plan.status !== RECONCILE_STATUS.APPLIED && plan.status !== RECONCILE_STATUS.SUPPRESSED) {
 				return {status: plan.status, error: plan.error};
 			}
-			const operationId = plan.operation?.operationId || null;
+			const operationLegKey = plan.operationLegKey;
 			if (plan.status === RECONCILE_STATUS.APPLIED) {
 				for (const [name, next] of Object.entries(plan.staged)) {
 					working[name].data = next;
 					const coverage = working[name].coverage;
 					coverage.revision = Math.max(Number.isInteger(coverage.revision) ? coverage.revision : 0, plan.revisionNext);
-					coverage.appliedOperationIds.add(operationId);
+					markCoverageOperationLeg(coverage, operationLegKey);
+					if (Number.isInteger(entry.sequence)) coverage.acceptedSequence = Math.max(coverage.acceptedSequence || 0, entry.sequence);
 				}
 				for (const [name, decision] of Object.entries(plan.decisions)) {
-					if (decision === TRACK_DECISION.COVERED) working[name].coverage.appliedOperationIds.add(operationId);
+					if (decision !== TRACK_DECISION.COVERED) continue;
+					markCoverageOperationLeg(working[name].coverage, operationLegKey);
+					if (Number.isInteger(entry.sequence)) {
+						working[name].coverage.acceptedSequence = Math.max(working[name].coverage.acceptedSequence || 0, entry.sequence);
+					}
 				}
 				applied.push({
 					...entry,
+					leg: plan.leg,
+					operationId: plan.operationId,
+					operationLegKey,
 					...(Object.hasOwn(plan.staged, "live")
+						&& plan.operation
 						? {
 							appliedEffect: {
 								operation: structuredClone(entry.operation),
@@ -868,9 +1026,9 @@ export class HubHttpCharacterRepository {
 				});
 			}
 			if (entry.eventId) workingEvents.add(entry.eventId);
-			if (operationId) workingOperations.add(operationId);
+			if (operationLegKey) workingOperationLegs.add(operationLegKey);
 		}
-		return {status: "planned", working, workingEvents, workingOperations, applied};
+		return {status: "planned", working, workingEvents, workingOperationLegs, applied};
 	}
 
 	/** Publish a fully planned and already-adopted batch. */
@@ -879,7 +1037,7 @@ export class HubHttpCharacterRepository {
 		const working = plan.working;
 
 		this._accepted.set(canonicalId, {...canonical, data: working.accepted.data, revision: canonical.revision});
-		book.acceptedOperationIds = working.accepted.coverage.appliedOperationIds;
+		book.acceptedOperationLegIds = working.accepted.coverage.appliedOperationLegIds;
 		if (working.live) book.live = working.live.coverage;
 		for (const [name, map, coverageKey] of [
 			["latestSubmitted", this._latestSubmitted, "latestSubmitted"],
@@ -897,7 +1055,7 @@ export class HubHttpCharacterRepository {
 		this._commitResyncConflict({store: this._liveConflicts, prefix: "liveConflict", canonicalId, working, isClearOnResolve: false});
 
 		this._appliedEventIds.set(canonicalId, plan.workingEvents);
-		this._appliedOperationIds.set(canonicalId, plan.workingOperations);
+		this._appliedOperationLegIds.set(canonicalId, plan.workingOperationLegs);
 
 		const sequences = plan.applied.map(entry => entry.sequence).filter(Number.isInteger);
 		if (sequences.length) {
@@ -955,9 +1113,9 @@ export class HubHttpCharacterRepository {
 		const accepted = this._accepted.get(canonicalId);
 		if (!accepted || !Number.isInteger(accepted.revision)) return;
 		const book = this._getCoverageBook(canonicalId);
-		const acceptedSequence = this._realtimeCursors.get(canonicalId)?.operationWatermark ?? null;
-		book.live = createCoverage({revision: accepted.revision, acceptedSequence, appliedOperationIds: book.live.appliedOperationIds});
-		book.latestSubmitted = createCoverage({revision: accepted.revision, acceptedSequence, appliedOperationIds: book.latestSubmitted.appliedOperationIds});
+		const acceptedSequence = this._getOperationWatermark(canonicalId, accepted);
+		book.live = createCoverage({revision: accepted.revision, acceptedSequence, appliedOperationLegIds: book.live.appliedOperationLegIds});
+		book.latestSubmitted = createCoverage({revision: accepted.revision, acceptedSequence, appliedOperationLegIds: book.latestSubmitted.appliedOperationLegIds});
 	}
 
 	/**
@@ -1006,7 +1164,7 @@ export class HubHttpCharacterRepository {
 			map.set(toId, map.get(fromId));
 			map.delete(fromId);
 		}
-		for (const map of [this._coverage, this._appliedEventIds, this._appliedOperationIds, this._pendingResync, this._realtimeCursors, this._saveBlocks, this._liveConflicts]) {
+		for (const map of [this._coverage, this._appliedEventIds, this._appliedOperationLegIds, this._pendingResync, this._realtimeCursors, this._saveBlocks, this._liveConflicts, this._operationConflicts]) {
 			if (!map.has(fromId)) continue;
 			map.set(toId, map.get(fromId));
 			map.delete(fromId);
@@ -1028,6 +1186,13 @@ export class HubHttpCharacterRepository {
 	}
 
 	pUpsert ({character}) {
+		const saveBlock = this.getSaveBlock(character?.id);
+		if (saveBlock) {
+			const error = new Error(saveBlock.message || `Character saving is paused until reconciliation completes.`);
+			error.code = saveBlock.code || "CHARACTER_RECONCILIATION_BLOCKED";
+			error.saveBlock = saveBlock;
+			return Promise.reject(error);
+		}
 		let recoveryKey = `hub-character-recovery:${this._scopeKey}:${character.id}`;
 		const recoveryVersion = (this._recoveryVersions.get(recoveryKey) || 0) + 1;
 		this._recoveryVersions.set(recoveryKey, recoveryVersion);
@@ -1172,7 +1337,7 @@ export class HubHttpCharacterRepository {
 							local: serializeCoverage(submittedSnapshotCoverage),
 							// Freshly fetched canonical truth already contains any operation up to its revision,
 							// so this candidate must never be transformed again.
-							server: serializeCoverage(createCoverage({revision: canonical.revision})),
+							server: serializeCoverage(createCoverage({revision: canonical.revision, acceptedSequence: this._getOperationWatermark(canonicalId, canonical)})),
 						},
 					};
 					this._conflicts.set(canonicalId, recovery);
@@ -1199,7 +1364,7 @@ export class HubHttpCharacterRepository {
 							base: serializeCoverage(this._getAcceptedCoverage(canonicalId)),
 							local: serializeCoverage(submittedSnapshotCoverage),
 							// The revision-conflict refetch already reflects the intervening operation.
-							server: serializeCoverage(createCoverage({revision: canonical.revision})),
+							server: serializeCoverage(createCoverage({revision: canonical.revision, acceptedSequence: this._getOperationWatermark(canonicalId, canonical)})),
 						},
 					};
 					this._conflicts.set(canonicalId, recovery);
@@ -1254,7 +1419,10 @@ export class HubHttpCharacterRepository {
 	}
 
 	hasPendingWrites () {
-		return this._pendingWrites > 0 || this._conflicts.size > 0 || this._failedWrites.size > 0;
+		return this._pendingWrites > 0
+			|| this._conflicts.size > 0
+			|| this._failedWrites.size > 0
+			|| this._operationConflicts.size > 0;
 	}
 
 	getPendingRecovery (characterId) {
@@ -1268,7 +1436,7 @@ export class HubHttpCharacterRepository {
 				// A blob written before coverage metadata existed cannot prove which operations it already
 				// reflects. It is still honoured as a draft, but its unknown coverage forces a resync rather than
 				// a guess in either direction.
-				const isCoverageKnown = parsed.coverageVersion === COVERAGE_VERSION && !!parsed.coverage;
+				const isCoverageKnown = [1, COVERAGE_VERSION].includes(parsed.coverageVersion) && !!parsed.coverage;
 				book.recoveredBase = isCoverageKnown ? deserializeCoverage(parsed.coverage.base) : createCoverage();
 				book.failedWrite = isCoverageKnown ? deserializeCoverage(parsed.coverage.snapshot) : createCoverage();
 				if (parsed.base) this._recoveredBases.set(characterId, parsed.base);

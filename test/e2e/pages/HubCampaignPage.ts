@@ -228,6 +228,34 @@ export class HubCampaignPage {
 		return new URL(this.page.url()).searchParams.get("id")!;
 	}
 
+	async publishDefaultCampaignRulesViaApi (campaignId: string): Promise<string> {
+		const created = await this.page.request.post(
+			`/api/campaigns/${encodeURIComponent(campaignId)}/rules-versions`,
+			{
+				headers: await this.getMutationHeaders(),
+				data: {
+					rules: {
+						enableTgtt: true,
+						exhaustionRules: "thelemar",
+						thelemar_carryWeight: true,
+						thelemar_encumbranceTiers: true,
+						thelemar_jumping: true,
+						thelemar_linguisticsBonus: true,
+						thelemar_criticalRolls: true,
+					},
+				},
+			},
+		);
+		expect(created.ok(), await created.text()).toBe(true);
+		const rulesVersionId = (await created.json()).rulesVersion.id as string;
+		const activated = await this.page.request.post(
+			`/api/campaigns/${encodeURIComponent(campaignId)}/rules-versions/${encodeURIComponent(rulesVersionId)}/activate`,
+			{headers: await this.getMutationHeaders()},
+		);
+		expect(activated.ok(), await activated.text()).toBe(true);
+		return rulesVersionId;
+	}
+
 	async gotoCampaign (campaignId: string): Promise<void> {
 		await this.page.goto(`/campaign.html?id=${encodeURIComponent(campaignId)}`);
 		await expect(this.page.locator("#campaign-content")).toBeVisible({timeout: 30_000});
@@ -283,11 +311,23 @@ export class HubCampaignPage {
 		name,
 		hpCurrent = 12,
 		features = [],
+		className = "Fighter",
+		spellsKnown = [],
 	}: {
 		campaignId: string;
 		name: string;
 		hpCurrent?: number;
 		features?: Array<{name: string; source: string}>;
+		className?: string;
+		spellsKnown?: Array<{
+			id?: string;
+			name: string;
+			source: string;
+			level: number;
+			prepared?: boolean;
+			sourceClass?: string;
+			sourceFeature?: string;
+		}>;
 	}): Promise<any> {
 		const response = await this.page.request.post("/api/characters", {
 			headers: await this.getMutationHeaders(),
@@ -298,11 +338,16 @@ export class HubCampaignPage {
 				data: {
 					name,
 					abilities: {str: 10, dex: 10, con: 14, int: 10, wis: 10, cha: 10},
-					classes: [{name: "Fighter", source: "PHB", level: 1}],
+					abilityBonuses: {str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0},
+					classes: [{name: className, source: "PHB", level: 1}],
 					xp: 0,
 					hp: {current: hpCurrent, max: 12, temp: 0},
 					features,
-					spellcasting: {spellSlots: {1: {current: 2, max: 2}}},
+					spellcasting: {
+						ability: "wis",
+						spellSlots: {1: {current: 2, max: 2}},
+						...(spellsKnown.length ? {spellsKnown, cantripsKnown: []} : {}),
+					},
 					conditions: [],
 					inventory: [{id: "rations", item: {name: "Rations", source: "PHB"}, quantity: 5}],
 					currency: {cp: 8, sp: 6, ep: 4, gp: 10, pp: 2},
@@ -712,6 +757,113 @@ export class HubCampaignPage {
 			() => this.page.evaluate(() => (window as any).charSheet?._hubRealtime?._active?.client?.getConnectionState?.().state),
 			{timeout: 15_000},
 		).toBe("live");
+	}
+
+	async waitForPeerTargetingReady (): Promise<void> {
+		await expect.poll(
+			() => this.page.evaluate(() => (window as any).charSheet?._peerTargeting?._hasCapability?.() === true),
+			{timeout: 15_000},
+		).toBe(true);
+	}
+
+	async castSpellAtPeerTarget ({spellName, targetName}: {spellName: string; targetName: string}): Promise<void> {
+		await this.page.locator('a[href="#charsheet-tab-spells"]').click();
+		const spell = this.page.locator(".charsheet__spell-item").filter({hasText: spellName}).first();
+		await expect(spell).toBeVisible();
+		const castControl = spell.locator(".charsheet__spell-cast");
+		await castControl.click();
+		const picker = this.page.locator(".charsheet__peer-target-picker");
+		await expect(picker).toBeVisible();
+		const dialog = this.page.getByRole("dialog", {name: `Target ${spellName}`});
+		await expect(dialog).toHaveAttribute("aria-modal", "true");
+		await expect(picker).toContainText("within touch range");
+		await expect(picker).toContainText("Hidden hit points and applicability are checked privately");
+		if ((await this.page.viewportSize())?.width === 390) {
+			const box = await dialog.boundingBox();
+			expect(box).not.toBeNull();
+			expect(box!.x).toBeGreaterThanOrEqual(0);
+			expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+		}
+		const targetControl = picker.getByRole("button", {name: `Request ${spellName} for ${targetName}`});
+		await targetControl.focus();
+		await expect(targetControl).toBeFocused();
+		await targetControl.press("Enter");
+		await expect(picker).toBeHidden();
+		await expect(castControl).toBeFocused();
+		await expect.poll(
+			() => this.page.evaluate(({expectedSpellName, expectedTargetName}) => {
+				const targeting = (window as any).charSheet?._peerTargeting;
+				return {
+					outgoing: [...(targeting?._outgoing?.values?.() || [])]
+						.map((action: any) => `${action.presentation?.effectLabel} -> ${action.presentation?.targetName}`),
+					draftErrors: [...(targeting?._drafts?.values?.() || [])]
+						.filter((draft: any) => draft.error)
+						.map((draft: any) => ({code: draft.errorCode, message: draft.error})),
+					expected: `${expectedSpellName} -> ${expectedTargetName}`,
+				};
+			}, {expectedSpellName: spellName, expectedTargetName: targetName}),
+			{timeout: 20_000},
+		).toMatchObject({
+			outgoing: expect.arrayContaining([`${spellName} -> ${targetName}`]),
+			draftErrors: [],
+		});
+	}
+
+	async resolveIncomingPeerSpell ({spellName, decision}: {spellName: string; decision: "Approve" | "Reject"}): Promise<void> {
+		const approvals = this.page.locator("#charsheet-hub-effects");
+		await expect.poll(
+			() => this.page.evaluate(async expectedSpellName => {
+				const sheet = (window as any).charSheet;
+				const actions = await sheet?._hubCampaignContext?.api?.pListCharacterPendingActions?.({
+					campaignId: sheet?._hubCampaignId,
+					characterId: sheet?._currentCharacterId,
+				});
+				return {
+					projected: (actions || []).map((action: any) => action.presentation?.effectLabel),
+					rendered: [...(sheet?._hubEffects?._actions?.values?.() || [])]
+						.map((action: any) => action.presentation?.effectLabel),
+					expectedSpellName,
+				};
+			}, spellName),
+			{timeout: 20_000},
+		).toMatchObject({
+			projected: expect.arrayContaining([spellName]),
+			rendered: expect.arrayContaining([spellName]),
+		});
+		const control = approvals.getByRole("button", {name: new RegExp(`^${decision} ${spellName}`)}).first();
+		await expect(control).toBeVisible();
+		await control.click();
+		await expect(control).toBeHidden({timeout: 20_000});
+	}
+
+	async expectOutgoingPeerSpellStatus ({
+		spellName,
+		targetName,
+		status,
+	}: {
+		spellName: string;
+		targetName: string;
+		status: "applied" | "rejected" | "cancelled" | "expired" | "failed";
+	}): Promise<void> {
+		await expect.poll(
+			() => this.page.evaluate(({expectedSpellName, expectedTargetName}) => {
+				const actions = [...((window as any).charSheet?._peerTargeting?._outgoing?.values?.() || [])];
+				return actions
+					.filter((action: any) =>
+						action.presentation?.effectLabel === expectedSpellName
+						&& action.presentation?.targetName === expectedTargetName)
+					.map((action: any) => action.status);
+			}, {expectedSpellName: spellName, expectedTargetName: targetName}),
+			{timeout: 20_000},
+		).toContain(status);
+	}
+
+	async cancelOutgoingPeerSpell ({spellName, targetName}: {spellName: string; targetName: string}): Promise<void> {
+		const outgoing = this.page.locator("#charsheet-peer-targeting");
+		const control = outgoing.getByRole("button", {name: `Cancel ${spellName} request for ${targetName}`}).last();
+		await expect(control).toBeVisible({timeout: 20_000});
+		await control.click();
+		await this.expectOutgoingPeerSpellStatus({spellName, targetName, status: "cancelled"});
 	}
 
 	async expectLiveAwardArrival ({

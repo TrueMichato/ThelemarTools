@@ -1,7 +1,7 @@
 # Campaign Hub event and audit catalog
 
-> **Status:** Current protocol-v3 catalog
-> **Last verified:** 2026-09-02
+> **Status:** Current protocol-v4 catalog
+> **Last verified:** 2026-09-04
 > **Owner:** Campaign Hub maintainers
 
 ## Domain event envelope
@@ -38,11 +38,13 @@
 | `character.reactivated` | character | all_members | empty | Same scoped import reactivates archived row |
 | `character.patched` | character | actor_and_dm | submitted patches | Private owner/DM state event |
 | `character.projection.invalidated` | character | all_members | `{projectionRevision}` only | Metadata-only ([ADR 0011](adr/0011-authorization-scoped-character-projections.md)). Carries no character field, patch, path, amount, field name or display text — including no name snapshot. Consumers refetch through the scoped HTTP projector |
-| `character.operation.proposed` | semantic operation | explicit proposer+target owner | `{operationId,targetCharacterId,status:"proposed",sourceEntity,effectTemplateId,choice,sourceDisplaySnapshot,targetDisplaySnapshot,effectDisplaySnapshot,expiresAt}` | Stable operation id; DM/co-DM included by policy. Contains no derived low-level operation |
-| `character.operation.applied` | target character | explicit proposer+target owner | `{operation:{operationId,kind,version:1,targetCharacterId,arguments},resultingCharacterRevision}` | `aggregateRevision === resultingCharacterRevision`; direct DM/co-DM application emits only this lifecycle state plus a separate projection invalidation |
-| `character.operation.rejected` | semantic operation | explicit proposer+target owner | `{operationId,targetCharacterId,status:"rejected",reason,sourceDisplaySnapshot,targetDisplaySnapshot,effectDisplaySnapshot}` | Closed uniformly non-enumerating reason in the multi-recipient event |
-| `character.operation.cancelled` | semantic operation | explicit proposer+target owner | `{operationId,targetCharacterId,status:"cancelled",reason,sourceDisplaySnapshot,targetDisplaySnapshot,effectDisplaySnapshot}` | Terminal |
-| `character.operation.expired` | semantic operation | explicit proposer+target owner | `{operationId,targetCharacterId,status:"expired",reason,sourceDisplaySnapshot,targetDisplaySnapshot,effectDisplaySnapshot}` | Terminal |
+| `character.operation.proposed` | semantic operation | explicit proposer+target owner+DMs | Cost-bearing: `{operationId,status,targetDisplaySnapshot,effectDisplaySnapshot,expiresAt}`; cost-free legacy also carries its existing target/source snapshot fields | Cost-bearing payload omits canonical source/target ids, source entity/template/choice, source cost, seed, and derived operation; the target owner refetches its approval projection |
+| `character.operation.source_cost_consumed` | source character | explicit source owner+DMs | `{operationId,leg:"source",sourceCost,resultingSourceCharacterRevision}` | Never visible to target-only peers; stable leg key is `operationId/source` |
+| `character.operation.applied` | target character | explicit workflow participants+DMs | `{leg?:"target"|"combined",operation,resultingCharacterRevision,resultingSourceCharacterRevision?}` | Distinct target leg omits source cost; self-target combined leg includes it and uses one revision |
+| `character.operation.rejected` | semantic operation | explicit proposer+target owner+DMs | `{operationId,status:"rejected",reason:"unavailable",targetDisplaySnapshot,effectDisplaySnapshot}` | No source or target mutation |
+| `character.operation.cancelled` | semantic operation | explicit proposer+target owner+DMs | Same minimized terminal shape | No source or target mutation |
+| `character.operation.expired` | semantic operation | explicit proposer+target owner+DMs | Same minimized terminal shape | No source or target mutation |
+| `character.operation.failed` | semantic operation | explicit proposer+target owner+DMs | Same minimized terminal shape | Atomic acceptance could not proceed; viewer-specific HTTP status may distinguish only an authorized failure class |
 | `character.cloned` | character | all_members | source campaign/character ids | New aggregate id |
 | `character.moved_out` | character | all_members in source | target campaign id | Source-campaign notification |
 | `character.moved` | character | all_members in target | source campaign/character ids | Same character id, new campaign |
@@ -50,11 +52,6 @@
 | `brew.activated` | brew bundle version | all_members | version | Context consumers refetch/activate |
 | `rules.activated` | rules version | all_members | version | Context consumers refetch/activate |
 | `roll.logged` | character or campaign | caller-selected all_members/dm_only/actor_and_dm | formula, total, context, detail | Cooperative evidence, not cryptographic roll authority. Activity presentation prefers bounded `detail.title` and selectively renders safe breakdown/result/advantage/critical/spell/ability/target fields. |
-| `character.operation.proposed` | semantic operation | explicit proposer+target owner | `operationId`, `targetCharacterId`, `status`, pinned source/template/choice, safe source/target/effect snapshots, `expiresAt` | DMs also see explicit-account events; canonical source character id and derived low-level operation are omitted |
-| `character.operation.applied` | target character | explicit proposer/DM actor+target owner | normalized operation plus `resultingCharacterRevision` | Aggregate revision equals the resulting revision; payload has no raw actor id or canonical character fields |
-| `character.operation.rejected` | semantic operation | explicit proposer+target owner | `operationId`, `targetCharacterId`, status, `reason:"unavailable"`, safe snapshots | No character mutation |
-| `character.operation.cancelled` | semantic operation | explicit proposer+target owner | same minimized terminal shape | Explicit decision or lifecycle cancellation |
-| `character.operation.expired` | semantic operation | explicit proposer+target owner | same minimized terminal shape | Bounded 24-hour expiry transitions once |
 | `xp.granted` | character | explicit DM+owner | amount, reason, resulting XP | DM/co-DM also included by visibility policy |
 | `item.granted` | character | explicit DM actor+owner | `{awardId,index,targetCount,sourceKind,note,entry}` | One deterministic per-target fact; bounded entry/note, followed by that target's projection invalidation |
 | `party_inventory.invalidated` | campaign | all_members | empty | Metadata-only shared-stash refresh signal |

@@ -115,6 +115,7 @@ resolution.
 | `HUB_LOG_LEVEL` | BFF | No | Structured log threshold |
 | `HUB_AUTH_PROVIDERS` | BFF | No | Supported slugs `github,discord,google`; Discord and Google normal enablement must be paired; production remains `github` until layer 3 |
 | `HUB_AUTH_EMERGENCY_DISABLED_PROVIDERS` | BFF | No | Emergency provider-specific kill switch; startup fails if no provider remains |
+| `HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS` | BFF | Operationally sensitive | Comma-separated campaign UUID rollout allowlist for protocol-4 peer source costs; `*` is reserved for isolated test stacks |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | BFF | Secret (client secret) | OAuth application |
 | `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` | BFF | Secret (client secret) | Discord confidential OAuth application |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | BFF | Secret (client secret) | Google confidential web/OIDC application |

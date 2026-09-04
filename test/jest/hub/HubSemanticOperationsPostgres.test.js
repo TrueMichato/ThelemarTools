@@ -4,6 +4,7 @@ import pg from "pg";
 import {HubStoreError} from "../../../server/src/hub-store-error.js";
 import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
 import {createSemanticOperationRegistry} from "../../../server/src/semantic-operation-registry.js";
+import {hasSourceCostBindingChanged} from "../../../js/hub/hub-source-costs.js";
 
 const {Pool} = pg;
 
@@ -150,6 +151,35 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 		await pool?.end();
 	});
 
+	test("matches shared feature-resource consent bindings including mirrored uses", async () => {
+		const resourceId = crypto.randomUUID();
+		const featureId = crypto.randomUUID();
+		const component = {
+			kind: "feature_use",
+			resourceId,
+			featureRef: {uid: "blessing|phb"},
+			amount: 1,
+		};
+		const sourceCost = {version: 1, components: [component]};
+		const before = {
+			resources: [{id: resourceId, featureId, featureRef: {uid: "blessing|phb"}, current: 2, max: 3}],
+			features: [{id: featureId, resourceId, uses: {current: 2, max: 3}}],
+			spellcasting: {innateSpells: [{resourceId, uses: {current: 2, max: 3}}]},
+		};
+		const unrelated = {...structuredClone(before), hp: {current: 10, max: 20}};
+		const changedMirror = structuredClone(before);
+		changedMirror.features[0].uses.current = 1;
+		const getSqlBinding = async data => (await pool.query(
+			`SELECT hub.peer_source_cost_binding_value($1::jsonb, $2::jsonb) AS binding`,
+			[data, component],
+		)).rows[0].binding;
+
+		expect(await getSqlBinding(unrelated)).toEqual(await getSqlBinding(before));
+		expect(hasSourceCostBindingChanged({beforeData: before, afterData: unrelated, sourceCost})).toBe(false);
+		expect(await getSqlBinding(changedMirror)).not.toEqual(await getSqlBinding(before));
+		expect(hasSourceCostBindingChanged({beforeData: before, afterData: changedMirror, sourceCost})).toBe(true);
+	});
+
 	test("commits privileged application, replay metadata, and watermark exactly once", async () => {
 		const commandId = crypto.randomUUID();
 		const request = {
@@ -243,6 +273,9 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 		}));
 		const fulfilled = resolutions.filter(result => result.status === "fulfilled");
 		const rejected = resolutions.filter(result => result.status === "rejected");
+		expect(resolutions.map(result => result.status === "fulfilled" ? "fulfilled" : result.reason?.code)).toEqual(
+			expect.arrayContaining(["fulfilled", "ACTION_NOT_FOUND"]),
+		);
 		expect(fulfilled).toHaveLength(1);
 		expect(fulfilled[0].value.operation).toMatchObject({status: "applied", resultingCharacterRevision: 3});
 		expect(rejected).toHaveLength(1);
@@ -647,5 +680,338 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 
 		const persisted = await pool.query(`SELECT data FROM hub.characters WHERE id = $1`, [targetCharacter.id]);
 		expect(persisted.rows[0].data.hp).toEqual({current: 30, max: 20, temp: 0, effectiveMax: 30});
+	});
+
+	test("atomically spends Cure Wounds once and permanently fences spent-then-restored consent", async () => {
+		const {account: casterOwner, session: casterSession} = await pCreateAccountWithSession("Cost Caster");
+		const {account: healedOwner, session: healedSession} = await pCreateAccountWithSession("Cost Target");
+		await pJoinCampaign({account: casterOwner});
+		await pJoinCampaign({account: healedOwner});
+		const rulesVersion = (await store.pCreateRulesVersion({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			schemaVersion: 1,
+			rules: {},
+			idempotencyKey: crypto.randomUUID(),
+		})).rulesVersion;
+		await store.pActivateRulesVersion({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			rulesVersionId: rulesVersion.id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const casterData = getCharacterData({name: "Cost Caster", hpCurrent: 20});
+		casterData.abilities = {str: 10, dex: 10, con: 10, int: 10, wis: 16, cha: 10};
+		casterData.abilityBonuses = {str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0};
+		casterData.classes = [{name: "Cleric", source: "PHB", level: 1, casterProgression: "full", spellcastingAbility: "wis"}];
+		casterData.spellcasting = {
+			ability: "wis",
+			spellsKnown: [{name: "Cure Wounds", source: "PHB", level: 1, prepared: true, sourceClass: "Cleric"}],
+			cantripsKnown: [],
+			innateSpells: [],
+			spellSlots: {1: {current: 1, max: 1}},
+			pactSlots: {current: 0, max: 0, level: 0},
+		};
+		const healedData = getCharacterData({name: "Cost Target", hpCurrent: 5});
+		healedData.hp.effectiveMax = 20;
+		const caster = (await store.pCreateCharacter({
+			accountId: casterOwner.id,
+			campaignId: campaign.id,
+			data: casterData,
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const healed = (await store.pCreateCharacter({
+			accountId: healedOwner.id,
+			campaignId: campaign.id,
+			data: healedData,
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const costStore = new PostgresHubStore({pool, peerSourceCostsEnabled: [campaign.id]});
+		await expect(costStore.pGetCampaignContext({
+			accountId: casterOwner.id,
+			campaignId: campaign.id,
+		})).resolves.toMatchObject({
+			rulesVersion: {id: rulesVersion.id},
+			capabilities: {
+				peerSourceCosts: {
+					enabled: true,
+					contractVersion: 1,
+					protocolVersion: 4,
+					operationVersion: 1,
+					resourceKinds: ["spell_slot", "item_charge", "inventory_quantity", "feature_use"],
+					templateRegistryVersion: "peer-effects-v1",
+				},
+			},
+		});
+		const dmSource = (await store.pCreateCharacter({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			data: structuredClone(casterData),
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const dmTarget = (await store.pCreateCharacter({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			data: getCharacterData({name: "DM-owned Target"}),
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const expectOutOfScopeProposal = async ({account, session, sourceCharacter, targetCharacter}) => {
+			const commandId = crypto.randomUUID();
+			const request = {
+				contractVersion: 1,
+				commandId,
+				sourceCharacterId: sourceCharacter.id,
+				sourceEntity: {type: "spell", uid: "cure wounds|phb", version: "phb-2014-v1"},
+				effectTemplateId: "spell.cure-wounds.heal",
+				choice: {castLevel: 1},
+				targetRef: targetCharacter.targetRef,
+				rulesVersionId: rulesVersion.id,
+			};
+			await expect(costStore.pCreateStructuredAction({
+				accountId: account.id,
+				sessionId: session.id,
+				campaignId: campaign.id,
+				...request,
+				protocolVersion: "4",
+				idempotencyKey: getIdempotency(commandId, request),
+			})).rejects.toMatchObject({code: "SOURCE_OR_TARGET_UNAVAILABLE", status: 404});
+		};
+		await expectOutOfScopeProposal({
+			account: dm,
+			session: dmSession,
+			sourceCharacter: dmSource,
+			targetCharacter: healed,
+		});
+		await expectOutOfScopeProposal({
+			account: casterOwner,
+			session: casterSession,
+			sourceCharacter: caster,
+			targetCharacter: dmTarget,
+		});
+		const proposalCommandId = crypto.randomUUID();
+		const proposalRequest = {
+			contractVersion: 1,
+			commandId: proposalCommandId,
+			sourceCharacterId: caster.id,
+			sourceEntity: {type: "spell", uid: "cure wounds|phb", version: "phb-2014-v1"},
+			effectTemplateId: "spell.cure-wounds.heal",
+			choice: {castLevel: 1},
+			targetRef: healed.targetRef,
+			rulesVersionId: rulesVersion.id,
+		};
+		const proposed = await costStore.pCreateStructuredAction({
+			accountId: casterOwner.id,
+			sessionId: casterSession.id,
+			campaignId: campaign.id,
+			...proposalRequest,
+			protocolVersion: "4",
+			idempotencyKey: getIdempotency(proposalCommandId, proposalRequest),
+		});
+		expect(proposed.operation).toMatchObject({
+			actionId: proposed.operation.operationId,
+			status: "proposed",
+			presentation: {
+				effectLabel: "Cure Wounds",
+				targetName: "Cost Target",
+				outcomeLabel: expect.stringMatching(/^Restore \d+ hit point/),
+			},
+			sourceCostState: "pending",
+			capabilities: {canCancel: true},
+			sourceResult: {sourceCost: {components: [{kind: "spell_slot", level: 1, amount: 1}]}},
+		});
+		await expect(costStore.pListCharacterPendingActions({
+			accountId: healedOwner.id,
+			campaignId: campaign.id,
+			characterId: healed.id,
+		})).resolves.toEqual([expect.objectContaining({
+			actionId: proposed.operation.operationId,
+			contractVersion: 1,
+			presentation: expect.objectContaining({effectLabel: "Cure Wounds", sourceName: "Cost Caster"}),
+			capabilities: {canApprove: true, canReject: true},
+		})]);
+		await expect(costStore.pListCharacterOutgoingActions({
+			accountId: casterOwner.id,
+			campaignId: campaign.id,
+			characterId: caster.id,
+		})).resolves.toEqual([{
+			actionId: proposed.operation.operationId,
+			status: "proposed",
+			expiresAt: expect.any(Date),
+			presentation: {
+				effectLabel: "Cure Wounds",
+				targetName: "Cost Target",
+				outcomeLabel: expect.stringMatching(/^Restore \d+ hit point/),
+			},
+			sourceCostState: "pending",
+			capabilities: {canCancel: true},
+		}]);
+		await expect(costStore.pListCharacterOutgoingActions({
+			accountId: healedOwner.id,
+			campaignId: campaign.id,
+			characterId: caster.id,
+		})).rejects.toMatchObject({code: "CHARACTER_NOT_FOUND", status: 404});
+		const resolve = () => {
+			const commandId = crypto.randomUUID();
+			const request = {
+				contractVersion: 1,
+				commandId,
+				operationId: proposed.operation.operationId,
+				decision: "accept",
+			};
+			return costStore.pResolveStructuredAction({
+				accountId: healedOwner.id,
+				sessionId: healedSession.id,
+				campaignId: campaign.id,
+				commandId,
+				actionId: proposed.operation.operationId,
+				decision: "accept",
+				contractVersion: 1,
+				protocolVersion: "4",
+				idempotencyKey: getIdempotency(commandId, request),
+			});
+		};
+		const [first, second] = await Promise.all([resolve(), resolve()]);
+		expect({
+			status: first.operation.status,
+			failureCode: first.operation.failureCode,
+			sourceCostState: first.operation.sourceCostState,
+		}).toEqual({
+			status: "applied",
+			failureCode: undefined,
+			sourceCostState: "consumed",
+		});
+		expect(first.operation).toMatchObject({
+			status: "applied",
+			leg: "target",
+			operationLegKey: `${proposed.operation.operationId}/target`,
+		});
+		expect(second.operation).toMatchObject({
+			status: "applied",
+			leg: "target",
+			operationLegKey: `${proposed.operation.operationId}/target`,
+		});
+		expect(first.operation).not.toHaveProperty("sourceResult");
+		expect(JSON.stringify(first)).not.toContain("spell_slot");
+
+		const persisted = await pool.query(`
+			SELECT
+				source.revision AS source_revision,
+				source.data->'spellcasting'->'spellSlots'->'1'->>'current' AS slot_current,
+				target.revision AS target_revision,
+				target.data->'hp'->>'current' AS target_hp,
+				so.status,
+				so.source_cost_event_id,
+				so.applied_event_id,
+				(SELECT count(*)::integer
+					FROM hub.domain_events de
+					WHERE de.payload->>'operationId' = so.id::text
+						AND de.event_type = 'character.operation.source_cost_consumed') AS source_event_count,
+				(SELECT count(*)::integer
+					FROM hub.semantic_operation_commands soc
+					WHERE soc.operation_id = so.id) AS command_count
+			FROM hub.semantic_operations so
+			JOIN hub.characters source ON source.id = so.source_character_id
+			JOIN hub.characters target ON target.id = so.target_character_id
+			WHERE so.id = $1
+		`, [proposed.operation.operationId]);
+		expect(persisted.rows[0]).toMatchObject({
+			source_revision: "2",
+			slot_current: "0",
+			target_revision: "2",
+			status: "applied",
+			source_cost_event_id: expect.any(String),
+			applied_event_id: expect.any(String),
+			source_event_count: 1,
+			command_count: 3,
+		});
+		expect(Number(persisted.rows[0].target_hp)).toBeGreaterThan(5);
+		await expect(costStore.pListCharacterOutgoingActions({
+			accountId: casterOwner.id,
+			campaignId: campaign.id,
+			characterId: caster.id,
+		})).resolves.toEqual([
+			expect.objectContaining({
+				actionId: proposed.operation.operationId,
+				status: "applied",
+				sourceCostState: "consumed",
+				capabilities: {canCancel: false},
+			}),
+		]);
+
+		await pool.query(`
+			UPDATE hub.characters
+			SET data = jsonb_set(data, '{spellcasting,spellSlots,1,current}', '1'::jsonb)
+			WHERE id = $1
+		`, [caster.id]);
+		const abaCommandId = crypto.randomUUID();
+		const abaRequest = {
+			...proposalRequest,
+			commandId: abaCommandId,
+		};
+		const abaProposal = await costStore.pCreateStructuredAction({
+			accountId: casterOwner.id,
+			sessionId: casterSession.id,
+			campaignId: campaign.id,
+			...abaRequest,
+			protocolVersion: "4",
+			idempotencyKey: getIdempotency(abaCommandId, abaRequest),
+		});
+		const hpBeforeAba = Number((await pool.query(
+			`SELECT data->'hp'->>'current' AS hp FROM hub.characters WHERE id = $1`,
+			[healed.id],
+		)).rows[0].hp);
+		for (const current of [0, 1]) {
+			await pool.query(`
+				UPDATE hub.characters
+				SET data = jsonb_set(data, '{spellcasting,spellSlots,1,current}', to_jsonb($2::integer))
+				WHERE id = $1
+			`, [caster.id, current]);
+		}
+		const abaResolveCommandId = crypto.randomUUID();
+		const abaResolveRequest = {
+			contractVersion: 1,
+			commandId: abaResolveCommandId,
+			operationId: abaProposal.operation.operationId,
+			decision: "accept",
+		};
+		const abaResult = await costStore.pResolveStructuredAction({
+			accountId: healedOwner.id,
+			sessionId: healedSession.id,
+			campaignId: campaign.id,
+			commandId: abaResolveCommandId,
+			actionId: abaProposal.operation.operationId,
+			decision: "accept",
+			contractVersion: 1,
+			protocolVersion: "4",
+			idempotencyKey: getIdempotency(abaResolveCommandId, abaResolveRequest),
+		});
+		expect(abaResult.operation).toMatchObject({
+			status: "failed",
+			sourceCostState: "not_consumed",
+			failureCode: "unavailable",
+		});
+		const abaPersisted = await pool.query(`
+			SELECT
+				so.source_cost_invalidated,
+				source.data->'spellcasting'->'spellSlots'->'1'->>'current' AS slot_current,
+				target.data->'hp'->>'current' AS target_hp
+			FROM hub.semantic_operations so
+			JOIN hub.characters source ON source.id = so.source_character_id
+			JOIN hub.characters target ON target.id = so.target_character_id
+			WHERE so.id = $1
+		`, [abaProposal.operation.operationId]);
+		expect(abaPersisted.rows[0]).toMatchObject({
+			source_cost_invalidated: true,
+			slot_current: "1",
+			target_hp: String(hpBeforeAba),
+		});
 	});
 });

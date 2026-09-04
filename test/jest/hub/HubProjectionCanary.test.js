@@ -315,7 +315,8 @@ describe("projection privacy canaries", () => {
 		const result = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/character-projections`, headers: readHeaders(peerA)})).json();
 		const entry = result.roster.find(it => it.characterId === character.id);
 
-		expect(Object.keys(entry).sort()).toEqual(["characterId", "ownerMembershipId"]);
+		expect(Object.keys(entry).sort()).toEqual(["characterId", "ownerMembershipId", "targetRef"]);
+		expect(entry.targetRef).toBe(character.targetRef);
 		expect(JSON.stringify(result.roster)).not.toContain("ownerAccountId");
 	});
 

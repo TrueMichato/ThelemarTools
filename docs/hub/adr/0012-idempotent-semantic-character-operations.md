@@ -2,12 +2,11 @@
 
 Status: Accepted architecture contract; source-cost reservation superseded by ADR 0016 (2026-09-03)
 
-Implementation: The protocol-v3 server/store/API/event substrate is implemented. DM/co-DM operations apply
-immediately; the source-derived peer proposal state machine exists but has no successful production `cost=none`
-template. Character Sheet operation-aware reconciliation (`B/L -> R/F`) is implemented and live: an applied
-operation is applied to an already-open canonical campaign sheet without a reload. The open sheet also shows
-post-adoption effect notices and owner-only inline peer approval controls. Target discovery and the ADR 0016 peer
-source-cost implementation remain separate follow-up work.
+Implementation: The original protocol-v3 server/store/API/event substrate is implemented. Protocol 4 and
+[ADR 0016](0016-atomic-peer-source-costs.md) now add the first successful cost-bearing production template:
+PHB/XPHB Cure Wounds with one standard spell slot, one player-owned target, and atomic source/target acceptance.
+Character Sheet operation-aware reconciliation (`B/L -> R/F`) is implemented for source, target, and combined
+self-target legs.
 
 ## Context
 
@@ -380,13 +379,15 @@ architecture, and conflict-recovery tests.
 
 The first implementation slice freezes these server-owned choices:
 
-- lifecycle events are `character.operation.proposed`, `.applied`, `.rejected`, `.cancelled`, and `.expired`;
-- semantic operation version is exactly `1`; Hub wire compatibility is independently fenced by protocol `3`;
+- lifecycle events are `character.operation.proposed`, `.source_cost_consumed`, `.applied`, `.rejected`,
+  `.cancelled`, `.expired`, and `.failed`;
+- semantic operation version is exactly `1`; cost-free substrate compatibility is protocol `3`, while ADR 0016
+  operation legs and cost-bearing APIs require protocol `4`;
 - proposal expiry is bounded to 24 hours;
 - `commandId` equals `Idempotency-Key`, while proposal and resolution commands have distinct command ids and one
   stable `operationId`;
-- production recognizes PHB/XPHB Cure Wounds as cost-bearing and rejects it with
-  `SOURCE_COST_UNSUPPORTED`; no successful production peer template is enabled;
+- protocol 4 enables PHB/XPHB Cure Wounds with one standard spell-slot source cost; other production peer
+  templates remain unsupported;
 - constructor-injected `cost=none` templates exist only as a test seam for memory/PostgreSQL parity;
 - terminal shared events expose only `unavailable`;
 - target references rotate on detach/move/archive/reactivation boundaries and are exposed to peers only through
@@ -462,7 +463,7 @@ implemented.
 - **Let peers submit generic operations for approval:** consent cannot prove an actual ability/spell source,
   derive trusted effects, or make stale source/cost state valid.
 - **Partially support peer source costs without ADR 0016 atomic acceptance:** retries and concurrent proposals
-  could double-spend actor resources; unsupported cost-bearing templates fail closed until the approval-time
-  cost/effect transaction exists.
+  could double-spend actor resources; every cost-bearing template must use the approval-time cost/effect
+  transaction.
 - **Ignore operations while a conflict modal is open:** the later modal choice could silently undo canonical
   state.

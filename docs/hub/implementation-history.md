@@ -276,3 +276,18 @@ its spell-slot/action cost is not yet reservable, and no unsafe automatic Surviv
 A constructor-only cost-free template proves memory/PostgreSQL parity without creating a production escape
 hatch. Character Sheet subscription/reconciliation and successful player effect UX remain separate roadmap
 slices.
+
+## V2-T7 first product slice: atomic player Cure Wounds
+
+ADR 0016 supersedes the earlier reservation follow-up with no pre-acceptance reservation. Migration 0007 and the
+protocol-4 authority now pin PHB/XPHB Cure Wounds, the active rules/content identity, deterministic seed, selected
+cast level, and a closed standard-slot cost. The campaign Character Sheet discovers opaque eligible player
+targets through authorized projections, proposes from the real cast path before any local mutation, and renders
+target approval plus source-side lifecycle/recovery status.
+
+Acceptance locks and rederives current campaign, memberships, source, target, operation, and leases, then consumes
+the source slot and applies healing in one memory/PostgreSQL transaction. Distinct characters emit source and
+target operation legs; self-target emits one combined leg. Character Sheet reconciliation preserves unsaved and
+in-flight local edits and deduplicates resolve-loopback, live, replay, and resync delivery. This is not all of
+V2-T7: NPC/monster, multi-target/party, arbitrary effect, broader ability/resource, and partial-resolution work
+remains.

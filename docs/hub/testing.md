@@ -1,7 +1,7 @@
 # Campaign Hub testing guide
 
 > **Status:** Current automated and real-stack coverage plus managed-staging gates
-> **Last verified:** 2026-08-31
+> **Last verified:** 2026-09-04
 > **Owner:** Campaign Hub maintainers
 
 ## Test layers
@@ -14,11 +14,11 @@
 | BFF/domain API | `HubServerApp.test.js`, `HubPhase1Domain.test.js` through `HubPhase4Domain.test.js`, `HubLifecycle.test.js`, `HubSemanticOperations.test.js` | Auth, campaigns, characters, content, semantic operation roles/replay/privacy/lifecycle, realtime actions |
 | Authorization/security | `HubAuthorizationMatrix.test.js`, `HubXssContract.test.js`, `HubInviteRoleSafety.test.js`, `HubRouteContract.test.js` | Tenancy, roles, XSS, schemas, route policy |
 | Realtime | `HubRealtime.test.js`, `HubWebSocket.test.js`, `HubBroadcastSync.test.js` | Visibility, replay, presence, observable connection state, stale-socket fencing, terminal policy closure, sockets, tabs |
-| Operation reconciliation | `HubCharacterOperationReconciler.test.js`, `HubCharacterOperationReconciliation.test.js`, `CharacterSheetRealtimeApply.test.js` | Pure `B/L -> R/F` transition, per-track coverage classification, prepare/adopt/commit atomicity, conflict-candidate classification, and no-reload resync recovery |
+| Operation reconciliation | `HubCharacterOperationReconciler.test.js`, `HubCharacterOperationReconciliation.test.js`, `CharacterSheetRealtimeApply.test.js` | Pure per-source/target/combined-leg `B/L -> R/F` transition, coverage classification, prepare/adopt/commit atomicity, dirty/in-flight save rebasing, dedupe, and no-reload resync recovery |
 | Integration seams | `CharacterSheetRealtime.test.js`, Character Sheet repository/rules/roll-history tests; `DmScreenHubController.test.js`; `HubPartyTrackerProjection.test.js` | Authenticated/canonical sheet subscription gates, target filtering, save-queue delivery, remote removal and access-loss fencing, BFCache suspend/resume, fail-safe move recovery, existing page behavior, Campaign DM Screen access/recovery, live/manual Party Tracker separation, and local/Hub isolation |
 | Static UI/PWA contracts | `HubPageContract.test.js`, `HubRoutePolicy.test.js`, `HubPerformanceBudget.test.js` | Required states, boot order, navigation, service-worker and fixed limits |
-| Database contract | `HubMigrationContract.test.js`, `HubSemanticOperationsPostgres.test.js`, local PostgreSQL drills | Schema clauses and real migration/transaction/locking/replay/expiry/restore |
-| Real-stack browser | `test/e2e/hub/`, `test/e2e/pages/HubCampaignPage.ts` | Multi-user lifecycle, Character Sheet copy/attach/clone/move, leases, keyboard focus, phone reflow, labels/touch targets, and six-member/replay/quota/contention budgets |
+| Database contract | `HubMigrationContract.test.js`, `HubSemanticOperationsPostgres.test.js`, local PostgreSQL drills | Schema clauses, runtime-role grants, source/target lock ordering, atomic cost/effect, replay, expiry, and restore |
+| Real-stack browser | `test/e2e/hub/`, `test/e2e/pages/HubCampaignPage.ts` | Multi-user lifecycle, Character Sheet copy/attach/clone/move, real Cure Wounds reject/cancel/accept/self-target effects, leases, reconnect, keyboard focus, phone reflow, labels/touch targets, and six-member/replay/quota/contention budgets |
 | CI/supply chain | `.github/workflows/hub.yml`, `HubCiContract.test.js` | Pinned actions, deterministic gates, SBOM/image/provenance and test-auth isolation |
 
 ## Current commands
@@ -68,8 +68,8 @@ npm run test:hub:e2e:stack
 The disposable stack exposes PostgreSQL only on a random loopback port for the duration of the run. Before
 browser journeys, it executes `HubSemanticOperationsPostgres.test.js` against the migrated runtime role. That
 suite proves concurrent exact replay, one applied revision/event, mutated-body rejection, explicit target-owner
-approval under competing commands, no source mutation, owner/DM watermark persistence, bounded expiry,
-lifecycle cancellation, and minimized explicit-recipient terminal payloads.
+approval under competing commands, atomic source-slot decrement plus target healing, source/target/combined
+watermarks, bounded expiry, lifecycle cancellation, and minimized explicit-recipient terminal payloads.
 
 Memory and real-PostgreSQL tests put 501 privacy-redacted character events before a visible semantic lifecycle
 event and prove replay advances by the server-scanned sequence even when a page returns fewer than its limit.
@@ -85,9 +85,10 @@ error during replay must close/reconnect, preserve its replay marker, and recove
 The memory semantic suite additionally covers every version-1 kind, player generic-operation denial,
 DM/co-DM immediate application, self-target explicit approval, DM non-owner approval denial, unsupported and
 stale source cost/policy, apply-time targetability, target-ref rotation, revocation cleanup, and projection
-privacy canaries. Production
-registry tests assert that recognized Cure Wounds templates fail closed and that no request/configuration can
-enable the constructor-only synthetic test template.
+privacy canaries. Protocol-4 source-cost suites additionally prove PHB/XPHB Cure Wounds derivation, no mutation
+before consent, slot decrement plus healing, reject/cancel/expiry no-op behavior, concurrent last-slot
+serialization, permanent spent-then-restored slot invalidation, class/preparation/casting-ability derivation,
+self-target combined writes, capability skew, per-leg dedupe, and privacy-shaped failures.
 
 ## Test data rules
 

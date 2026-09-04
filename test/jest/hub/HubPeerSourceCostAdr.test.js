@@ -12,11 +12,12 @@ const adr0012 = fs.readFileSync(
 const normalizedAdr0012 = adr0012.replace(/\s+/g, " ");
 
 describe("Campaign Hub peer source-cost ADR contract", () => {
-	it("is explicitly a contract rather than runtime evidence", () => {
-		expect(adr).toMatch(/^Status: Accepted as an implementation contract \(2026-09-02\); not implemented$/m);
+	it("records the complete first Cure Wounds slice without claiming broader targeting", () => {
+		expect(adr).toMatch(/^Status: Accepted; first protocol-4 Cure Wounds client\/server slice implemented \(2026-09-04\)$/m);
 		expect(normalizedAdr).toContain("This ADR extends ADR 0012");
-		expect(normalizedAdr).toContain("This ADR does not implement player targeting");
-		expect(normalizedAdr).toContain("protocol-v3 substrate deliberately admits only");
+		expect(normalizedAdr).toContain("The first implementation slice includes");
+		expect(normalizedAdr).toContain("original protocol-v3 substrate deliberately admitted only");
+		expect(normalizedAdr).toContain("Multi-target orchestration, party/NPC targets, generic effects");
 	});
 
 	it("supersedes ADR 0012's reservation direction with one unambiguous model", () => {

@@ -68,8 +68,8 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(provenanceWriter).toContain("migration: HUB_REQUIRED_MIGRATION_VERSION");
 		expect(provenanceWriter).not.toMatch(/protocol: "\d+"/);
 		expect(provenanceWriter).not.toMatch(/migration: "\d+"/);
-		expect(HUB_PROTOCOL_VERSION).toBe("3");
-		expect(HUB_REQUIRED_MIGRATION_VERSION).toBe("0006");
+		expect(HUB_PROTOCOL_VERSION).toBe("4");
+		expect(HUB_REQUIRED_MIGRATION_VERSION).toBe("0007");
 	});
 
 	it("isolates every E2E Compose run and records success evidence", () => {
@@ -107,6 +107,8 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(testServer).toContain(`process.env.NODE_ENV !== "test"`);
 		expect(testServer).toContain(`HUB_TEST_AUTH_ENABLED`);
 		expect(testServer).toContain(`HUB_TEST_AUTH_SECRET`);
+		expect(testServer).toMatch(/createSemanticOperationRegistry\(\{\s*additionalTemplates:/);
+		expect(testServer).not.toMatch(/createSemanticOperationRegistry\(\{\s*templates:/);
 		expect(composeOverride).toContain(`NODE_ENV: test`);
 		expect(composeOverride).toContain(`HUB_TEST_AUTH_ENABLED: "true"`);
 	});

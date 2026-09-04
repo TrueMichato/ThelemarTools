@@ -86,6 +86,7 @@ services:
       HUB_LOG_LEVEL: ${HUB_LOG_LEVEL:-info}
       HUB_AUTH_PROVIDERS: ${HUB_AUTH_PROVIDERS:-github}
       HUB_AUTH_EMERGENCY_DISABLED_PROVIDERS: ${HUB_AUTH_EMERGENCY_DISABLED_PROVIDERS:-}
+      HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS: ${HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS:-}
       DATABASE_URL: postgresql://hub_runtime:${HUB_RUNTIME_DB_PASSWORD}@db:5432/hub
       HUB_DATABASE_SSL: "false"
       HUB_TRUST_PROXY: ${HUB_TRUST_PROXY:-172.30.0.10}
@@ -114,7 +115,7 @@ services:
     image: caddy:2.8.4-alpine
     restart: unless-stopped
     ports:
-      - "8443:8443"
+      - "${HUB_EDGE_PORT:-8443}:8443"
     volumes:
       - ./deploy/hub/Caddyfile:/etc/caddy/Caddyfile:ro
       - hub-caddy-data:/data
@@ -126,7 +127,7 @@ services:
         condition: service_started
     networks:
       hub-private:
-        ipv4_address: 172.30.0.10
+        ipv4_address: ${HUB_EDGE_PRIVATE_IP:-172.30.0.10}
       hub-public:
 
   maintenance:
@@ -184,6 +185,6 @@ networks:
     internal: true
     ipam:
       config:
-        - subnet: 172.30.0.0/24
+        - subnet: ${HUB_PRIVATE_SUBNET:-172.30.0.0/24}
   hub-public:
   hub-egress:

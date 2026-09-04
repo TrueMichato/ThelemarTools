@@ -324,25 +324,33 @@ Acceptance:
 - policy changes identify affected entities before activation and are auditable/reversible by version;
 - stale clients cannot bypass current policy.
 
-### V2-T7 — player targeting (**source-cost contract shipped; next implementation**)
+### V2-T7 — player targeting (**first one-to-one player slice implemented; broader targeting active**)
 
 Dependency: V2-T2. Integrations with V2-T3/T4 activate only when those capabilities are also enabled.
 
-Deliver:
+Implemented first slice:
 
-- explicit single-player, multi-player, character, and party targeting for supported DM actions;
-- audience-aware realtime/inbox/activity behavior and recipient confirmation;
-- online/offline, membership-change, cancellation, and partial-resolution semantics;
-- implement the accepted [atomic source-cost contract](adr/0016-atomic-peer-source-costs.md) for peer
-  abilities/spells that consume a spell slot, charge, item quantity, or limited use; the initial
-  cost-free/fail-closed templates do not satisfy the full "cast spells on each other" capability.
+- from an authenticated campaign Character Sheet, cast PHB/XPHB Cure Wounds using one selected standard spell
+  slot from one player-owned source character against one privacy-visible player-owned campaign character;
+- explicit target-owner accept/reject, proposer cancel, bounded expiry, lifecycle cancellation, outgoing status,
+  reconnect/resync recovery, and audience-scoped activity;
+- [ADR 0016](adr/0016-atomic-peer-source-costs.md) acceptance atomically consumes the source slot and applies the
+  deterministic healing exactly once; self-targeting uses one combined character revision/operation leg;
+- protocol/capability mismatch, stale membership/rules/character state, unavailable cost, and inapplicable healing
+  fail closed without partial mutation or hidden-state disclosure.
+
+Still to deliver before the whole track is shipped:
+
+- multi-target and party resolution, NPC/monster targets, broader player abilities/spells and source-resource
+  kinds, and supported DM target-set workflows;
+- partial-resolution semantics for target sets larger than one.
 
 Acceptance:
 
 - only authorized targets see private requests or details;
 - target sets are fixed and auditable for each command, with explicit behavior when membership changes;
 - retries cannot duplicate work and partial completion is visible and recoverable;
-- T7/full peer casting cannot be marked **shipped** while only cost-free templates exist;
+- the implemented Cure Wounds slice does not mark all of V2-T7 **shipped**;
 - at least one peer ability/spell with a slot, charge, or use cost commits the source cost and target effect
   atomically exactly once;
 - reject, cancel, and expiry consume no source cost; concurrent or unavailable cost fails without any target

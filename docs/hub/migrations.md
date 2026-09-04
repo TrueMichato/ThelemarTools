@@ -96,12 +96,16 @@ Current migrations:
   owner/DM operation watermarks, bounded proposal expiry, and terminalization of legacy arbitrary proposals.
 - 0006 provider-neutral identity metadata, session identity provenance, deferred last-identity protection, and
   durable one-time OAuth transaction bindings/cleanup.
+- 0007 atomic peer source-cost bindings, deterministic derivation pins, source-result/event linkage, terminal
+  `failed` state, and source/target revision observations for protocol-4 operation legs.
 
-Migration 0006 is additive and leaves existing GitHub subjects, account ids, and old application reads intact.
+Migration 0007 is additive and keeps protocol-3 cost-free rows readable while new source-cost rows require a
+protocol-4 application. Migration 0006 is additive and leaves existing GitHub subjects, account ids, and old
+application reads intact.
 Migration 0005 is additive apart from terminalizing legacy `structured_effect` rows still in `proposed`.
-Protocol v3 never resolves those legacy bodies. The disposable PostgreSQL stack applies 0001-0006, grants the
-runtime role, boots the production image against required version 0006, and runs semantic role/replay/
-concurrency/expiry/lifecycle persistence checks.
+Protocol v3 never resolves those legacy bodies. The disposable PostgreSQL stack applies 0001-0007, grants the
+runtime role, boots the production image against required version 0007, and runs semantic role/replay/
+source-cost atomicity/concurrency/expiry/lifecycle persistence checks.
 
 ## Readiness
 
