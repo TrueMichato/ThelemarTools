@@ -22,12 +22,8 @@ import {
 	filterAwardItems,
 	getAwardCommandFingerprint,
 } from "./hub-item-award.js";
-import {
-	pInitCampaignRulesPolicy,
-	renderCampaignPolicySummary,
-} from "./hub-rules-policy-manager.js";
-
 const api = new HubApiClient();
+let campaignRulesPolicyModule = null;
 
 /**
  * Lightweight Hub shells keep a device-local active campaign selection, but must never fetch the
@@ -955,6 +951,7 @@ async function pInitHubIndex ({session}) {
 async function pInitCampaign ({session}) {
 	const campaignId = new URLSearchParams(window.location.search).get("id");
 	if (!campaignId) throw new HubApiError({code: "CAMPAIGN_NOT_FOUND", status: 404});
+	campaignRulesPolicyModule = await import("./hub-rules-policy-manager.js");
 	let campaign;
 	try {
 		campaign = await api.pGetCampaign({campaignId});
@@ -1183,7 +1180,7 @@ function renderCampaignContext (context) {
 			? `${context.rulesVersion.rules.exhaustionRules} exhaustion · version ${context.rulesVersion.version}`
 			: "Not published";
 	}
-	renderCampaignPolicySummary({context});
+	campaignRulesPolicyModule?.renderCampaignPolicySummary({context});
 }
 
 function renderMemberList ({campaign, campaignId, members, session, pRefresh}) {
@@ -1577,7 +1574,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		document.getElementById("campaign-rule-critical").checked = !!activeRules.thelemar_criticalRolls;
 	}
 	const rulesPolicyManagerPromise = isDm
-		? pInitCampaignRulesPolicy({
+		? campaignRulesPolicyModule.pInitCampaignRulesPolicy({
 			api,
 			campaignId,
 			context,
