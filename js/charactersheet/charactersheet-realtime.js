@@ -273,8 +273,12 @@ export class CharacterSheetRealtimeCoordinator {
 		}
 
 		const routing = getCharacterOperationRouting(event);
-		if (!routing || routing.targetCharacterId !== active.characterId) return;
-		const operationKey = `${event.type}:${routing.operationId}`;
+		if (!routing || (routing.characterId != null && routing.characterId !== active.characterId)) return;
+		// Event ids fence transport redelivery within one attachment. Stable operation-leg dedupe belongs to the
+		// repository, so a second envelope for the same leg can still advance durable history/cursor metadata.
+		const operationKey = routing.operationLegKey
+			? event.id || routing.operationLegKey
+			: `${event.type}:${routing.operationId}`;
 		if (active.operationKeys.has(operationKey)) return;
 		active.operationKeys.add(operationKey);
 		if (active.operationKeys.size > 2_000) active.operationKeys.delete(active.operationKeys.values().next().value);
@@ -288,7 +292,10 @@ export class CharacterSheetRealtimeCoordinator {
 				aggregateType: event.aggregateType,
 				aggregateId: event.aggregateId,
 				aggregateRevision: event.aggregateRevision,
+				characterId: routing.characterId,
+				leg: routing.leg,
 				operationId: routing.operationId,
+				operationLegKey: routing.operationLegKey,
 				targetCharacterId: routing.targetCharacterId,
 				status: routing.status,
 				payload: routing.payload,

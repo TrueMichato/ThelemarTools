@@ -52,8 +52,10 @@
   fails as `SOURCE_OR_TARGET_UNAVAILABLE` at creation and `PROPOSAL_STALE` at apply, without identifying the
   failed predicate. Transfer targeting retains its non-enumerating not-found behavior.
 - Generic semantic `kind`/`arguments` are privileged to DM/co-DM/internal authority. Player effects must resolve
-  through a closed server template and explicit target-owner approval, including self-targeting. Recognized
-  source costs fail closed before persistence and again before application.
+  through a closed server template and explicit target-owner approval, including self-targeting. Protocol-4
+  Cure Wounds binds one standard spell slot; the private seed, source-cost binding, resource ids/values, true
+  target state, and failed eligibility predicate never enter target/peer projections. Source costs fail closed
+  before persistence and are revalidated inside atomic acceptance.
 - Semantic creation/resolution revalidates the authenticated session, active account/campaign/membership/role,
   source/target truth, template policy, and approval authority inside one transaction. Stable command ids are
   actor/body bound, and no unsupported/stale operation can partially mutate character/event/outbox state.

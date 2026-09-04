@@ -41,18 +41,27 @@ explicit local routes, pinned-resource behavior, access-loss concealment, BFCach
 server capability `campaign.active_context.v1`. Source/edition policy metadata is exposed but not enforced;
 ADR 0015/V2-T6 remains the enforcement owner.
 
-The focused `t2-effects-server-role` prerequisite slice implements the ADR 0012 server contract without changing
+The focused `t2-effects-server-role` prerequisite slice established the ADR 0012 server contract without changing
 the roadmap train status: protocol-v3 closed operations, immediate atomic DM/co-DM application, persistent
 command/operation/event identity, owner/DM watermarks, opaque target refs, and the source-derived peer
 proposal/terminal state machine. Production deliberately enables no successful `cost=none` peer template;
-Cure Wounds is recognized and rejected as cost-bearing. Character Sheet subscription/rebase, approval/targeting
-UI, costs, monster/multi-target effects, and the first real peer template remain later slices.
+Cure Wounds was recognized and rejected as cost-bearing until the ADR 0016 slice below.
 
 The V2-T6 house-rule selection foundation is implemented behind the default-off
 `campaign.rules_policy.v1` capability. It adds a closed schema-v2 catalog, schema-v1 compatibility adapter,
 atomic immutable DM/co-DM publish/rollback, privacy-safe member summaries, and an accessible searchable manager.
 All selectable settings are labeled **Advisory**; source/species/edition entries are unavailable and **Planned**.
 The downstream shared evaluator and full content enforcement are not implemented and V2-T6 is not complete.
+
+The first V2-T7 product slice extends the ADR 0012 substrate with ADR 0016 protocol-4 source costs. A player can
+cast PHB/XPHB Cure Wounds from an authenticated campaign Character Sheet, spend one selected standard spell slot,
+and target one privacy-visible player-owned campaign character. The target owner explicitly accepts or rejects;
+the proposer can cancel; expiry and lifecycle cancellation consume nothing. Acceptance rederives under current
+locks and commits the slot decrement plus deterministic healing atomically exactly once. The spell must remain a
+currently usable class spell (including preparation where required), and changing the bound slot permanently
+invalidates that proposal even if the slot is later restored. Source, target, and combined self-target operation
+legs reconcile through unsaved/in-flight local edits and reconnect/resync. V2-T7 remains active: NPC/monster,
+party/multi-target, generic-effect, broader spell/ability/resource, and partial-resolution work is not implemented.
 
 - Lifecycle includes invite list/revoke, owner role changes, owner/co-DM member removal, voluntary leave,
   session/device revocation, immediate socket closure, workspace archive/restore, character detachment,

@@ -13,11 +13,11 @@ const makeSessionStorage = (seed = {}) => {
 	};
 };
 
-const makeCharacterData = ({current = 10, max = 20, temp = 0, name = "Mira"} = {}) => ({
+const makeCharacterData = ({current = 10, max = 20, temp = 0, name = "Mira", slotCurrent = 2, slotMax = 2} = {}) => ({
 	name,
 	hp: {current, max, temp},
 	conditions: [],
-	spellcasting: {spellSlots: {1: {current: 2, max: 2}}},
+	spellcasting: {spellSlots: {1: {current: slotCurrent, max: slotMax}}},
 });
 
 const makeOperation = ({kind = "hp.damage", args = {amount: 4}, operationId = "operation-1"} = {}) => ({
@@ -39,6 +39,27 @@ const makeAppliedEvent = ({operationId = "operation-1", sequence = 20, revision 
 	payload: {
 		operation: {operationId, kind, version: 1, targetCharacterId: "character-1", arguments: args},
 		resultingCharacterRevision: revision,
+	},
+});
+
+const makeSourceCost = ({amount = 1} = {}) => ({
+	version: 1,
+	components: [{kind: "spell_slot", pool: "standard", level: 1, amount}],
+});
+
+const makeSourceEvent = ({operationId = "operation-1", sequence = 20, revision = 2, amount = 1, id = "source-event-1"} = {}) => ({
+	id,
+	campaignId: "campaign-1",
+	sequence,
+	type: "character.operation.source_cost_consumed",
+	aggregateType: "character",
+	aggregateId: "character-1",
+	aggregateRevision: revision,
+	payload: {
+		operationId,
+		leg: "source",
+		sourceCost: makeSourceCost({amount}),
+		resultingSourceCharacterRevision: revision,
 	},
 });
 
@@ -73,6 +94,150 @@ const makeRepository = ({api, sessionStorage = makeSessionStorage()} = {}) => {
 };
 
 describe("Repository operation reconciliation", () => {
+	it("consumes a source spell slot on accepted and dirty live tracks", () => {
+		const api = makeApi({character: {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData()}});
+		const repository = makeRepository({api});
+		repository._accepted.set("character-1", {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData()});
+		repository._getCoverageBook("character-1").live.revision = 1;
+		let live = makeCharacterData({name: "Dirty source"});
+
+		const result = repository.applyRealtimeOperation({
+			characterId: "character-1",
+			leg: "source",
+			operationId: "operation-1",
+			sourceCost: makeSourceCost(),
+			resultingCharacterRevision: 2,
+			eventId: "source-event-1",
+			sequence: 20,
+			liveData: live,
+			fnAdoptLive: next => { live = next; },
+		});
+
+		expect(result.status).toBe("applied");
+		expect(repository._accepted.get("character-1")).toMatchObject({
+			revision: 2,
+			data: {spellcasting: {spellSlots: {1: {current: 1}}}},
+		});
+		expect(live).toMatchObject({
+			name: "Dirty source",
+			spellcasting: {spellSlots: {1: {current: 1}}},
+		});
+	});
+
+	it("applies a combined self leg once at one resulting revision", () => {
+		const api = makeApi({character: {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData()}});
+		const repository = makeRepository({api});
+		repository._accepted.set("character-1", {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData()});
+		repository._getCoverageBook("character-1").live.revision = 1;
+		let live = makeCharacterData({current: 8});
+		const deliver = eventId => repository.applyRealtimeOperation({
+			characterId: "character-1",
+			leg: "combined",
+			operation: makeOperation({kind: "hp.heal", args: {amount: 5}}),
+			sourceCost: makeSourceCost(),
+			resultingCharacterRevision: 2,
+			eventId,
+			sequence: 20,
+			liveData: live,
+			fnAdoptLive: next => { live = next; },
+		});
+
+		expect(deliver("combined-event").status).toBe("applied");
+		expect(deliver("combined-replay").status).toBe("suppressed");
+		expect(repository._accepted.get("character-1")).toMatchObject({
+			revision: 2,
+			data: {hp: {current: 15}, spellcasting: {spellSlots: {1: {current: 1}}}},
+		});
+		expect(live).toMatchObject({hp: {current: 13}, spellcasting: {spellSlots: {1: {current: 1}}}});
+	});
+
+	it("suppresses duplicate source legs while advancing event history and the cursor", () => {
+		const api = makeApi({character: {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData()}});
+		const repository = makeRepository({api});
+		repository._accepted.set("character-1", {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData()});
+		repository._getCoverageBook("character-1").live.revision = 1;
+		let live = makeCharacterData();
+		const deliver = ({eventId, sequence}) => repository.applyRealtimeOperation({
+			characterId: "character-1",
+			leg: "source",
+			operationId: "operation-1",
+			sourceCost: makeSourceCost(),
+			resultingCharacterRevision: 2,
+			eventId,
+			sequence,
+			liveData: live,
+			fnAdoptLive: next => { live = next; },
+		});
+
+		expect(deliver({eventId: "source-event", sequence: 20}).status).toBe("applied");
+		expect(deliver({eventId: "source-replay", sequence: 25}).status).toBe("suppressed");
+		expect(live.spellcasting.spellSlots[1].current).toBe(1);
+		expect(repository._appliedEventIds.get("character-1").has("source-replay")).toBe(true);
+		expect(repository._appliedOperationLegIds.get("character-1").has("operation-1/source")).toBe(true);
+		expect(repository._realtimeCursors.get("character-1").operationWatermark).toBe(25);
+	});
+
+	it.each([
+		["source", {operationId: "operation-1", sourceCost: makeSourceCost()}, data => data.spellcasting.spellSlots[1].current, 1],
+		["target", {operation: makeOperation()}, data => data.hp.current, 6],
+	])("carries a %s leg through the in-flight latest-submitted track", (leg, envelope, getValue, expected) => {
+		const api = makeApi({character: {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData()}});
+		const repository = makeRepository({api});
+		repository._accepted.set("character-1", {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData()});
+		repository._latestSubmitted.set("character-1", makeCharacterData({name: "In flight"}));
+		const book = repository._getCoverageBook("character-1");
+		book.latestSubmitted.revision = 1;
+		book.live.revision = 1;
+
+		const result = repository.applyRealtimeOperation({
+			characterId: "character-1",
+			leg,
+			...envelope,
+			resultingCharacterRevision: 2,
+			eventId: `${leg}-event`,
+			liveData: makeCharacterData({name: "Newer dirty edit"}),
+			fnAdoptLive: () => {},
+		});
+
+		expect(result.status).toBe("applied");
+		expect(repository._latestSubmitted.get("character-1").name).toBe("In flight");
+		expect(getValue(repository._latestSubmitted.get("character-1"))).toBe(expected);
+	});
+
+	it("preserves B/L/R and blocks saving on a source local double-spend", async () => {
+		const base = makeCharacterData({slotCurrent: 1});
+		const local = makeCharacterData({slotCurrent: 0, name: "Local spent"});
+		const api = makeApi({character: {id: "character-1", campaignId: "campaign-1", revision: 1, data: base}});
+		const repository = makeRepository({api});
+		repository._accepted.set("character-1", {id: "character-1", campaignId: "campaign-1", revision: 1, data: base});
+		repository._getCoverageBook("character-1").live.revision = 1;
+
+		const result = repository.applyRealtimeOperation({
+			characterId: "character-1",
+			leg: "source",
+			operationId: "operation-1",
+			sourceCost: makeSourceCost(),
+			resultingCharacterRevision: 2,
+			eventId: "source-event",
+			sequence: 20,
+			liveData: local,
+			fnAdoptLive: () => { throw new Error("must not adopt a partial plan"); },
+		});
+
+		expect(result.status).toBe("blocked");
+		expect(repository._accepted.get("character-1")).toMatchObject({revision: 1, data: {spellcasting: {spellSlots: {1: {current: 1}}}}});
+		expect(repository.getSaveBlock("character-1")).toMatchObject({reason: "source_resource_conflict", code: "SOURCE_COST_LOCAL_CONFLICT"});
+		expect(repository.hasPendingWrites()).toBe(true);
+		expect(repository.getOperationConflictRecovery("character-1")).toMatchObject({
+			operationLegKey: "operation-1/source",
+			base: {spellcasting: {spellSlots: {1: {current: 1}}}},
+			local: {name: "Local spent", spellcasting: {spellSlots: {1: {current: 0}}}},
+			server: {spellcasting: {spellSlots: {1: {current: 0}}}},
+		});
+		await expect(repository.pUpsert({character: {...local, id: "character-1"}}))
+			.rejects.toMatchObject({code: "SOURCE_COST_LOCAL_CONFLICT"});
+	});
+
 	it("advances the accepted base and the live document together", () => {
 		const api = makeApi({character: {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData()}});
 		const repository = makeRepository({api});
@@ -402,6 +567,85 @@ describe("Repository resync recovery", () => {
 		expect(repository.hasPendingResync("character-1")).toBe(false);
 		expect(repository.isSaveBlocked("character-1")).toBe(false);
 	});
+
+	it("uses a fetched protocol-4 watermark to suppress an already-canonical source leg", async () => {
+		const api = makeApi({
+			character: {
+				id: "character-1",
+				campaignId: "campaign-1",
+				revision: 2,
+				operationWatermark: 20,
+				data: makeCharacterData({slotCurrent: 1}),
+			},
+		});
+		const repository = makeRepository({api});
+		let live = await repository.pGet({characterId: "character-1"});
+
+		const result = repository.applyRealtimeOperation({
+			characterId: "character-1",
+			leg: "source",
+			operationId: "operation-1",
+			sourceCost: makeSourceCost(),
+			resultingCharacterRevision: 2,
+			eventId: "source-event",
+			sequence: 20,
+			liveData: live,
+			fnAdoptLive: next => { live = next; },
+		});
+
+		expect(result.status).toBe("suppressed");
+		expect(live.spellcasting.spellSlots[1].current).toBe(1);
+		expect(repository._appliedOperationLegIds.get("character-1").has("operation-1/source")).toBe(true);
+		expect(repository._realtimeCursors.get("character-1").operationWatermark).toBe(20);
+	});
+
+	it("replays missing source legs in revision and sequence order after reconnect", async () => {
+		const api = makeApi({
+			character: {
+				id: "character-1",
+				campaignId: "campaign-1",
+				revision: 3,
+				operationWatermark: 21,
+				data: makeCharacterData({slotCurrent: 1, slotMax: 3}),
+			},
+			events: [
+				makeSourceEvent({operationId: "operation-1", sequence: 20, revision: 2}),
+				makeSourceEvent({operationId: "operation-2", sequence: 21, revision: 3, id: "source-event-2"}),
+			],
+		});
+		const repository = makeRepository({api});
+		await repository.pGet({characterId: "character-1"});
+		const book = repository._getCoverageBook("character-1");
+		book.live.revision = 1;
+		book.live.acceptedSequence = 10;
+		let live = makeCharacterData({slotCurrent: 3, slotMax: 3, name: "Offline edit"});
+
+		const queued = repository.applyRealtimeOperation({
+			characterId: "character-1",
+			leg: "source",
+			operationId: "operation-2",
+			sourceCost: makeSourceCost(),
+			resultingCharacterRevision: 3,
+			eventId: "source-event-2",
+			sequence: 21,
+			liveData: live,
+			fnAdoptLive: () => {},
+		});
+		expect(queued.status).toBe("resync_required");
+
+		const recovered = await repository.pRunPendingResync({
+			characterId: "character-1",
+			fnGetLiveData: () => live,
+			fnAdoptLive: next => { live = next; },
+		});
+		expect(recovered.status).toBe("recovered");
+		expect(recovered.appliedLegs).toEqual([
+			{leg: "source", operationId: "operation-1", operationLegKey: "operation-1/source"},
+			{leg: "source", operationId: "operation-2", operationLegKey: "operation-2/source"},
+		]);
+		expect(recovered.appliedEffects).toEqual([]);
+		expect(live).toMatchObject({name: "Offline edit", spellcasting: {spellSlots: {1: {current: 1}}}});
+	});
 });
 
 describe("Failed save followed by a live effect", () => {
@@ -577,7 +821,7 @@ describe("Resync batch atomicity", () => {
 		// The earlier, individually replayable operations must not have been committed on their own.
 		expect(repository._accepted.get("character-1")).toEqual(acceptedBefore);
 		expect(repository._getCoverageBook("character-1").live.revision).toBe(liveCoverageBefore);
-		expect(repository._appliedOperationIds.get("character-1")?.has("operation-1")).toBeFalsy();
+		expect(repository._appliedOperationLegIds.get("character-1")?.has("operation-1/target")).toBeFalsy();
 		expect(repository.isSaveBlocked("character-1")).toBe(true);
 		expect(repository.hasPendingResync("character-1")).toBe(true);
 	});

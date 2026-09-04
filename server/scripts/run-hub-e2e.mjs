@@ -1,6 +1,7 @@
 import {spawn} from "node:child_process";
 import crypto from "node:crypto";
 import https from "node:https";
+import net from "node:net";
 
 const runId = `${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
 const projectName = `hub-e2e-${runId}`;
@@ -9,11 +10,8 @@ const externalBaseImage = process.env.HUB_TEST_BASE_IMAGE?.trim() || null;
 const baseImage = externalBaseImage || `thelemartools-hub-bff:e2e-${runId}`;
 const testBffImage = `${projectName}-test-bff:latest`;
 const productionSmokeName = `${projectName}-production-smoke`;
-const postgresPort = `${20_000 + crypto.randomInt(10_000)}`;
 const env = {
 	...process.env,
-	HUB_APP_ORIGIN: "https://localhost:8443",
-	HUB_TRUST_PROXY: "172.30.0.10",
 	HUB_POSTGRES_PASSWORD: crypto.randomBytes(24).toString("base64url"),
 	HUB_RUNTIME_DB_PASSWORD: crypto.randomBytes(24).toString("base64url"),
 	HUB_BACKUP_DB_PASSWORD: crypto.randomBytes(24).toString("base64url"),
@@ -23,8 +21,8 @@ const env = {
 	HUB_METRICS_TOKEN: crypto.randomBytes(32).toString("base64url"),
 	HUB_BACKUP_ENCRYPTION_KEY: crypto.randomBytes(32).toString("base64"),
 	HUB_ALLOWED_OAUTH_SUBJECTS: "github:101,discord:202,google:google-e2e-303",
+	HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS: "*",
 	HUB_TEST_AUTH_SECRET: crypto.randomBytes(32).toString("base64url"),
-	HUB_TEST_POSTGRES_PORT: postgresPort,
 	GITHUB_CLIENT_ID: "hub-e2e",
 	GITHUB_CLIENT_SECRET: crypto.randomBytes(24).toString("base64url"),
 	DISCORD_CLIENT_ID: "hub-e2e",
@@ -74,11 +72,90 @@ async function getOutput (command, args) {
 	return (await pRun(command, args, {isCapture: true})).stdout;
 }
 
+function pGetAvailableLoopbackPort () {
+	return new Promise((resolve, reject) => {
+		const server = net.createServer();
+		server.unref();
+		server.once("error", reject);
+		server.listen({host: "127.0.0.1", port: 0}, () => {
+			const address = server.address();
+			server.close(error => {
+				if (error) return reject(error);
+				if (!address || typeof address === "string") return reject(new Error(`Could not allocate a loopback port.`));
+				resolve(`${address.port}`);
+			});
+		});
+	});
+}
+
+function getIpv4Range (cidr) {
+	const [address, prefixRaw] = `${cidr}`.split("/");
+	const octets = address?.split(".").map(Number);
+	const prefix = Number(prefixRaw);
+	if (octets?.length !== 4 || octets.some(octet => !Number.isInteger(octet) || octet < 0 || octet > 255)) return null;
+	if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return null;
+	const value = octets.reduce((out, octet) => ((out << 8) | octet) >>> 0, 0);
+	const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+	const start = (value & mask) >>> 0;
+	return {start, end: (start | (~mask >>> 0)) >>> 0};
+}
+
+function isIpv4RangeOverlap (left, right) {
+	return left.start <= right.end && right.start <= left.end;
+}
+
+async function pAssignPrivateNetwork () {
+	const networkIds = (await getOutput("docker", ["network", "ls", "--format", "{{.ID}}"]))
+		.split(/\s+/g)
+		.filter(Boolean);
+	const existingRanges = [];
+	if (networkIds.length) {
+		const output = await getOutput("docker", [
+			"network",
+			"inspect",
+			"--format",
+			"{{range .IPAM.Config}}{{println .Subnet}}{{end}}",
+			...networkIds,
+		]);
+		for (const subnet of output.split(/\s+/g).filter(Boolean)) {
+			const range = getIpv4Range(subnet);
+			if (range) existingRanges.push(range);
+		}
+	}
+
+	const candidateCount = 40 * 256;
+	const startIndex = crypto.randomInt(candidateCount);
+	for (let offset = 0; offset < candidateCount; offset++) {
+		const index = (startIndex + offset) % candidateCount;
+		const secondOctet = 200 + Math.floor(index / 256);
+		const thirdOctet = index % 256;
+		const subnet = `10.${secondOctet}.${thirdOctet}.0/24`;
+		const range = getIpv4Range(subnet);
+		if (existingRanges.some(existing => isIpv4RangeOverlap(existing, range))) continue;
+		env.HUB_PRIVATE_SUBNET = subnet;
+		env.HUB_EDGE_PRIVATE_IP = `10.${secondOctet}.${thirdOctet}.10`;
+		env.HUB_TRUST_PROXY = env.HUB_EDGE_PRIVATE_IP;
+		return;
+	}
+	throw new Error(`No non-overlapping private Docker subnet is available for Campaign Hub E2E.`);
+}
+
+async function pAssignLoopbackPorts () {
+	const [edgePort, postgresPort] = await Promise.all([
+		pGetAvailableLoopbackPort(),
+		pGetAvailableLoopbackPort(),
+	]);
+	env.HUB_EDGE_PORT = edgePort;
+	env.HUB_APP_ORIGIN = `https://localhost:${edgePort}`;
+	env.HUB_E2E_ORIGIN = env.HUB_APP_ORIGIN;
+	env.HUB_TEST_POSTGRES_PORT = postgresPort;
+}
+
 async function pWaitForReady ({timeoutMs = 180_000} = {}) {
 	const startedAt = Date.now();
 	while (Date.now() - startedAt < timeoutMs) {
 		const isReady = await new Promise(resolve => {
-			const request = https.get("https://localhost:8443/api/ready", {rejectUnauthorized: false}, response => {
+			const request = https.get(`${env.HUB_APP_ORIGIN}/api/ready`, {rejectUnauthorized: false}, response => {
 				response.resume();
 				resolve(response.statusCode === 200);
 			});
@@ -158,6 +235,8 @@ for (const [signal, exitCode] of [["SIGINT", 130], ["SIGTERM", 143]]) {
 
 let exitCode = 0;
 try {
+	await pAssignLoopbackPorts();
+	await pAssignPrivateNetwork();
 	if (externalBaseImage) {
 		await getOutput("docker", ["image", "inspect", baseImage]);
 	} else {
@@ -178,14 +257,22 @@ try {
 		"-t", testBffImage,
 		".",
 	]);
-	await run("docker", [...composeArgs, "up", "--build", "-d"]);
+	if (externalBaseImage) {
+		await run("docker", ["image", "tag", baseImage, `${projectName}-migrate:latest`]);
+		await run("docker", ["image", "tag", baseImage, `${projectName}-grant-roles:latest`]);
+		await run("docker", ["image", "tag", testBffImage, `${projectName}-bff:latest`]);
+		await run("docker", [...composeArgs, "build", "static"]);
+		await run("docker", [...composeArgs, "up", "--no-build", "-d"]);
+	} else {
+		await run("docker", [...composeArgs, "up", "--build", "-d"]);
+	}
 	await pWaitForReady();
 	await run("docker", [...composeArgs, "--profile", "backup", "run", "--rm", "backup"]);
 	Object.assign(env, {
 		DATABASE_URL: `postgresql://hub_runtime:${env.HUB_RUNTIME_DB_PASSWORD}@db:5432/hub`,
 		HUB_DATABASE_SSL: "false",
 		HUB_HOST: "0.0.0.0",
-		HUB_TEST_POSTGRES_URL: `postgresql://hub_runtime:${env.HUB_RUNTIME_DB_PASSWORD}@127.0.0.1:${postgresPort}/hub`,
+		HUB_TEST_POSTGRES_URL: `postgresql://hub_runtime:${env.HUB_RUNTIME_DB_PASSWORD}@127.0.0.1:${env.HUB_TEST_POSTGRES_PORT}/hub`,
 	});
 	await run("docker", [
 		"run", "--detach",
@@ -204,6 +291,7 @@ try {
 		"--env", "HUB_CSRF_SECRET",
 		"--env", "HUB_METRICS_TOKEN",
 		"--env", "HUB_ALLOWED_OAUTH_SUBJECTS",
+		"--env", "HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS",
 		"--env", "HUB_AUTH_PROVIDERS=github,discord,google",
 		"--env", "GITHUB_CLIENT_ID",
 		"--env", "GITHUB_CLIENT_SECRET",
@@ -227,7 +315,13 @@ try {
 		"--no-coverage",
 		"--forceExit",
 	]);
-	exitCode = await run("npx", ["playwright", "test", "--config", "playwright.hub.config.ts"], {isAllowFailure: true});
+	exitCode = await run("npx", [
+		"playwright",
+		"test",
+		"--config",
+		"playwright.hub.config.ts",
+		...process.argv.slice(2),
+	], {isAllowFailure: true});
 	if (exitCode === 0) {
 		await run("docker", [...composeArgs, "restart", "bff"]);
 		await pWaitForReady();

@@ -87,7 +87,7 @@ describe("Hub lifecycle API", () => {
 				targetRef: crypto.randomUUID(),
 			},
 		});
-		expect(denied.statusCode).toBe(403);
+		expect(denied.statusCode).toBe(404);
 
 		const sessions = await app.inject({method: "GET", url: "/api/account/sessions", headers: {cookie: player.cookie}});
 		expect(sessions.json().sessions.some(session => session.isCurrent)).toBe(true);

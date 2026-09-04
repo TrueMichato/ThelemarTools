@@ -1,14 +1,15 @@
 # ADR 0016: Atomic source-cost binding for peer character operations
 
-Status: Accepted as an implementation contract (2026-09-02); not implemented
+Status: Accepted; first protocol-4 Cure Wounds client/server slice implemented (2026-09-04)
 
 ## Context
 
 [ADR 0012](0012-idempotent-semantic-character-operations.md) defines source-derived peer proposals, explicit
 target-owner approval, stable command/operation/event identity, and operation-aware Character Sheet
-reconciliation. Its protocol-v3 substrate deliberately admits only `cost=none` test templates. Production
-recognizes PHB/XPHB Cure Wounds but rejects it with `SOURCE_COST_UNSUPPORTED` because consuming a source spell
-slot separately from applying target healing could double-spend, charge without effect, or apply free healing.
+reconciliation. Its original protocol-v3 substrate deliberately admitted only `cost=none` test templates and
+rejected PHB/XPHB Cure Wounds with `SOURCE_COST_UNSUPPORTED`: consuming a source spell slot separately from
+applying target healing could double-spend, charge without effect, or apply free healing. This ADR defines the
+protocol-4 transaction which makes that first cost-bearing template safe.
 
 The current authority also has adjacent but different mechanisms:
 
@@ -36,8 +37,15 @@ normative for the protocol-3 `cost=none` substrate and its command, approval, op
 semantics. Transfer escrow is unaffected because it moves ownership of an asset rather than paying a deferred
 spell/ability cost.
 
-This ADR does not implement player targeting, multi-target orchestration, UI, schema migrations, or runtime
-handlers.
+The first implementation slice includes migration `0007`, memory/PostgreSQL authority, operation-leg
+reconciliation, and campaign Character Sheet targeting/approval for one source-derived Cure Wounds cast against
+one player-owned target. Multi-target orchestration, party/NPC targets, generic effects, and broader
+resource-template rollout remain outside the slice.
+
+The production Cure Wounds template in this slice binds only a selected standard spell slot. Pact-slot casting is
+fail-closed until the canonical cast flow persists an unambiguous standard-versus-pact selection the authority can
+pin and rederive; the shared version-1 cost handler can apply a pinned pact descriptor, but the production registry
+does not guess one.
 
 ## Decision
 
@@ -45,8 +53,9 @@ handlers.
 
 The first implementation governed by this contract supports:
 
-- exactly one active campaign source character owned by the proposing account;
-- exactly one active campaign target character selected by its opaque `targetRef`;
+- exactly one active campaign source character owned by a proposing account whose membership role is `player`;
+- exactly one active campaign target character selected by its opaque `targetRef` and owned by another active
+  `player` membership (or the same active player for self-targeting);
 - exactly one server-registry source entity/template/choice;
 - one server-resolved source-cost bundle containing one or more supported persistent resource components;
 - exactly one ADR 0012 versioned target semantic operation;
@@ -165,14 +174,17 @@ The existing ADR 0012 role policy remains:
 
 | Action | Authorized actor |
 |---|---|
-| Create peer proposal | Active DM/co-DM/player who owns the active source character; spectator denied |
+| Create peer proposal | Active player who owns the active source character and selects an active player-owned target |
 | Inspect pending/terminal request | Proposer, target owner, DM/co-DM |
 | Accept | Active target owner in a DM/co-DM/player role; self-target still needs this distinct command |
 | Reject | Target owner or DM/co-DM |
 | Cancel | Proposer or DM/co-DM; lifecycle authority may cancel automatically |
 | Expire | Server deadline worker, or the first otherwise-authorized request that observes the elapsed deadline |
 
-DM/co-DM authority still does not approve a peer proposal on somebody else's behalf. A DM who wants the effect
+The first shipped cost-bearing slice is player-character to player-character only. DM/co-DM/spectator-owned
+characters, NPCs, and monsters fail proposal creation through the same non-enumerating source/target outcome, and
+both pinned owner memberships are rechecked as active `player` roles before acceptance. DM/co-DM authority still
+does not approve a peer proposal on somebody else's behalf. A DM who wants the effect
 issues a direct ADR 0012 operation under the DM's own command identity. Character ownership, not campaign role,
 authorizes source spending and target-owner acceptance. A role change, membership removal, campaign archive,
 character move/archive, target-ref rotation, or ownership change is rechecked in the winning transaction.
@@ -466,7 +478,9 @@ documents, private failure classes, or target effective deltas. The applied even
 mutually exclusive for a cost-bearing request.
 
 These shapes require Hub protocol 4. Protocol 3 clients must not ignore the source leg and then save its spent
-resource back. They receive `PROTOCOL_UPDATE_REQUIRED` before cost-bearing APIs or protocol-4 event delivery.
+resource back. Cost-bearing mutations, outgoing reads, and protocol-4 event delivery return
+`PROTOCOL_UPDATE_REQUIRED`; shared inbox reads retain legacy compatibility by omitting cost-bearing rows while
+preserving cost-free protocol-3 actions.
 
 The shared source-cost module defines `C`; ADR 0012 defines target effect `E`. Reconciliation is:
 
@@ -563,6 +577,15 @@ Target-owner projection omits `sourceResult`, source revision, and cost descript
 coarse and independently authorized by the terminal outcome. Self-target owner receives the combined result.
 Responses are `Cache-Control: no-store` and vary by authenticated authorization; a stored internal command result
 is projected at read/retry time rather than persisting one actor's broader response for another actor.
+
+The protocol-4 source-owner status surface is
+`GET /api/campaigns/:campaignId/characters/:characterId/outgoing-actions`. It returns at most 100 recent
+cost-bearing actions for that owned character, each shaped exactly as
+`{actionId,status,expiresAt,presentation:{effectLabel,targetName,outcomeLabel},sourceCostState,capabilities:{canCancel}}`.
+It contains no target id/ref, character state, cost descriptor, or failure detail. Campaign character roster
+entries carry the independently authorized opaque `targetRef` only while their owner has an active `player`
+membership; other visible roster entries omit it. The owner/DM/peer visibility filter remains the ADR 0011
+targetability boundary.
 
 Stable errors/statuses are:
 
@@ -688,7 +711,7 @@ character ids in route labels, or document paths.
 
 ## Verification plan
 
-Implementation is not complete until all of the following pass.
+Any release implementing this ADR must pass all of the following.
 
 ### Shared and memory authority
 

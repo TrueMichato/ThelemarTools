@@ -315,6 +315,39 @@ describe("Character Sheet realtime coordinator", () => {
 		expect(delivered[0].payload).not.toHaveProperty("targetCharacterId");
 	});
 
+	it("routes a privacy-minimized cost-bearing proposal as an unscoped refresh signal", async () => {
+		const {clients, coordinator} = makeCoordinator();
+		const delivered = [];
+		coordinator.on("semanticOperation", value => delivered.push(value));
+		coordinator.attach({characterId: "character-1"});
+
+		clients[0].emit("event", {
+			id: "cost-proposal",
+			campaignId: "campaign-1",
+			sequence: 9,
+			type: "character.operation.proposed",
+			aggregateType: "semantic_operation",
+			aggregateId: "operation-cost",
+			payload: {
+				operationId: "operation-cost",
+				status: "proposed",
+				contractVersion: 1,
+				targetDisplaySnapshot: {identity: {name: "Campaign character"}},
+				effectDisplaySnapshot: {label: "Cure Wounds"},
+				expiresAt: "2030-01-01T00:00:00.000Z",
+			},
+		});
+		await pFlush();
+
+		expect(delivered).toEqual([expect.objectContaining({
+			operationId: "operation-cost",
+			characterId: null,
+			targetCharacterId: null,
+			status: "proposed",
+			payload: {contractVersion: 1},
+		})]);
+	});
+
 	it("delivers privacy-safe relevant transfer invalidations once", async () => {
 		const {clients, coordinator} = makeCoordinator();
 		const delivered = [];

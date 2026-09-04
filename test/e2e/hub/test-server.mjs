@@ -25,7 +25,7 @@ const cookieSecret = requireEnv("HUB_COOKIE_SECRET");
 const csrfSecret = requireEnv("HUB_CSRF_SECRET");
 const testAuthSecret = requireEnv("HUB_TEST_AUTH_SECRET");
 const semanticOperationRegistry = createSemanticOperationRegistry({
-	templates: [{
+	additionalTemplates: [{
 		sourceEntity: {type: "ability", uid: "steadying word|tst", version: "tst-v1"},
 		effectTemplateId: "ability.steadying-word.heal",
 		cost: "none",
@@ -47,6 +47,10 @@ const store = PostgresHubStore.fromConnectionString({
 	connectionString: requireEnv("DATABASE_URL"),
 	ssl: process.env.HUB_DATABASE_SSL !== "false",
 	semanticOperationRegistry,
+	peerSourceCostsEnabled: (process.env.HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS || "")
+		.split(",")
+		.map(it => it.trim())
+		.filter(Boolean),
 });
 await store.pCheckHealth();
 const trustedProxies = (process.env.HUB_TRUST_PROXY || "").split(",").map(it => it.trim()).filter(Boolean);

@@ -174,8 +174,13 @@ export class CharacterSheetHubEffects {
 	}
 
 	onRealtimeOperation (event) {
-		if (!this._characterId || event?.targetCharacterId !== this._characterId) return false;
+		if (!this._characterId || (event?.targetCharacterId != null && event.targetCharacterId !== this._characterId)) return false;
 		if (event.status === "proposed") {
+			if (event.targetCharacterId == null) {
+				this._collectionRevision++;
+				void this.pRefresh();
+				return true;
+			}
 			if (!this._isAuthorized) {
 				this._collectionRevision++;
 				void this.pRefresh();
@@ -188,7 +193,7 @@ export class CharacterSheetHubEffects {
 			this._renderApprovals();
 			return true;
 		}
-		if (["rejected", "cancelled", "expired"].includes(event.status)) {
+		if (["rejected", "cancelled", "expired", "failed"].includes(event.status)) {
 			const didDelete = this._actions.delete(event.operationId);
 			if (didDelete) {
 				this._collectionRevision++;
@@ -207,6 +212,7 @@ export class CharacterSheetHubEffects {
 		) return false;
 		if (this._actions.delete(operation.operationId)) this._collectionRevision++;
 		this._commandIds.delete(`${operation.operationId}:accept`);
+		this._commandIds.delete(`${operation.operationId}:reject`);
 		this._removeNotice(`error:${operation.operationId}`);
 		const notice = getAppliedEffectNotice({operation, beforeData, afterData});
 		if (!notice) {
@@ -240,6 +246,7 @@ export class CharacterSheetHubEffects {
 		if (!operationId) return false;
 		const didDelete = this._actions.delete(operationId);
 		this._commandIds.delete(`${operationId}:accept`);
+		this._commandIds.delete(`${operationId}:reject`);
 		this._removeNotice(`error:${operationId}`);
 		if (didDelete) {
 			this._collectionRevision++;
@@ -266,23 +273,28 @@ export class CharacterSheetHubEffects {
 				campaignId: this._campaignId,
 				actionId,
 				decision,
+				contractVersion: action.contractVersion,
 				idempotencyKey: commandId,
 			});
 			const status = response?.operation?.status;
 			if (!this._isCurrent(token)) return false;
-			if (!this._actions.has(actionId) && !(decision === "accept" && status === "applied")) return false;
-			if (decision === "reject" && ["rejected", "cancelled", "expired"].includes(status)) {
-				this._actions.delete(actionId);
-				this._collectionRevision++;
-				this._commandIds.delete(commandKey);
-			} else if (decision === "accept" && status === "applied") {
+			if (!this._actions.has(actionId) && status !== "applied") return false;
+			if (status === "applied") {
+				const sourceResult = response?.operation?.sourceResult;
+				const leg = response?.operation?.leg || sourceResult?.leg || "target";
+				const sequence = response?.watermarks?.find(watermark => watermark.characterId === token.characterId)?.sequence ??
+					response?.operationWatermark;
 				await this._fnOnAuthoritativeApproval?.({
 					actionId,
 					characterId: token.characterId,
-					eventId: response?.eventIds?.[0],
-					sequence: response?.operationWatermark,
+					eventId: leg === "source" ? sourceResult?.appliedEventId : response?.operation?.appliedEventId,
+					sequence,
 					operation: response?.operation?.operation,
-					resultingCharacterRevision: response?.operation?.resultingCharacterRevision,
+					resultingCharacterRevision: leg === "source"
+						? sourceResult?.resultingSourceCharacterRevision
+						: response?.operation?.resultingCharacterRevision,
+					leg,
+					sourceCost: sourceResult?.sourceCost,
 				});
 				if (!this._isCurrent(token)) return false;
 				const currentAction = this._actions.get(actionId);
@@ -293,6 +305,10 @@ export class CharacterSheetHubEffects {
 					currentAction.decisionState = "waiting";
 					currentAction.error = null;
 				}
+			} else if (["rejected", "cancelled", "expired", "failed"].includes(status)) {
+				this._actions.delete(actionId);
+				this._collectionRevision++;
+				this._commandIds.delete(commandKey);
 			} else {
 				throw Object.assign(new Error("Unexpected action response."), {code: "UNEXPECTED_RESPONSE"});
 			}
@@ -347,6 +363,7 @@ export class CharacterSheetHubEffects {
 		) return null;
 		return {
 			actionId: action.actionId,
+			contractVersion: action.contractVersion === 1 ? 1 : null,
 			status: "proposed",
 			expiresAt: typeof action.expiresAt === "string" ? action.expiresAt : null,
 			presentation: {

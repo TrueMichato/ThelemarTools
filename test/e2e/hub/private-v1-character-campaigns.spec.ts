@@ -171,3 +171,105 @@ test("an open character sheet resolves peer effects and adopts authoritative out
 		await Promise.all([dmContext.close(), sourceContext.close(), targetContext.close()]);
 	}
 });
+
+test("players target Cure Wounds with approval-time source costs and atomic effects", async ({browser}) => {
+	test.setTimeout(240_000);
+	const secret = process.env.HUB_TEST_AUTH_SECRET;
+	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
+
+	const contextOptions = {
+		baseURL: process.env.HUB_E2E_ORIGIN || "https://localhost:8443",
+		ignoreHTTPSErrors: true,
+	};
+	const dmContext = await browser.newContext(contextOptions);
+	const sourceContext = await browser.newContext(contextOptions);
+	const targetContext = await browser.newContext(contextOptions);
+	try {
+		const dm = new HubCampaignPage(await dmContext.newPage());
+		const source = new HubCampaignPage(await sourceContext.newPage());
+		const target = new HubCampaignPage(await targetContext.newPage());
+		await dm.signInSynthetic({providerSubject: "targeting-ui-dm", displayName: "Targeting UI DM", secret});
+		await source.signInSynthetic({providerSubject: "targeting-ui-source", displayName: "Aster", secret});
+		await target.signInSynthetic({providerSubject: "targeting-ui-target", displayName: "Bryn", secret});
+
+		const campaignId = await dm.createCampaign("Cure Wounds Targeting E2E");
+		await dm.publishDefaultCampaignRulesViaApi(campaignId);
+		await source.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
+		await target.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
+		const sourceCharacter = await source.createCharacter({
+			campaignId,
+			name: "Aster",
+			hpCurrent: 4,
+			className: "Cleric",
+			spellsKnown: [{
+				id: "cure-wounds|PHB",
+				name: "Cure Wounds",
+				source: "PHB",
+				level: 1,
+				prepared: true,
+				sourceClass: "Cleric",
+				sourceFeature: "Prepared Spells",
+			}],
+		});
+		const targetCharacter = await target.createCharacter({campaignId, name: "Bryn", hpCurrent: 3});
+
+		await Promise.all([
+			source.openCharacterSheet({campaignId, characterId: sourceCharacter.id, name: "Aster"}),
+			target.openCharacterSheet({campaignId, characterId: targetCharacter.id, name: "Bryn"}),
+		]);
+		await Promise.all([
+			source.waitForCharacterRealtimeLive(),
+			target.waitForCharacterRealtimeLive(),
+			source.waitForPeerTargetingReady(),
+		]);
+		await source.page.setViewportSize({width: 390, height: 844});
+		await expect.poll(async () => {
+			const data = (await source.getCharacter(sourceCharacter.id)).data;
+			const targetData = (await target.getCharacter(targetCharacter.id)).data;
+			return {
+				ability: data.spellcasting?.ability,
+				abilityScore: data.abilities?.wis,
+				abilityBonus: data.abilityBonuses?.wis,
+				cureWounds: data.spellcasting?.spellsKnown?.some((spell: any) =>
+					spell.name === "Cure Wounds" && spell.source === "PHB"),
+				slots: data.spellcasting?.spellSlots?.[1]?.current,
+				targetHp: targetData.hp?.current,
+				targetMaxHp: targetData.hp?.effectiveMax ?? targetData.hp?.max,
+			};
+		}).toEqual({
+			ability: "wis",
+			abilityScore: 10,
+			abilityBonus: 0,
+			cureWounds: true,
+			slots: 2,
+			targetHp: 3,
+			targetMaxHp: 12,
+		});
+
+		await source.castSpellAtPeerTarget({spellName: "Cure Wounds", targetName: "Bryn"});
+		await expect.poll(async () => (await source.getCharacter(sourceCharacter.id)).data.spellcasting.spellSlots[1].current).toBe(2);
+		await target.resolveIncomingPeerSpell({spellName: "Cure Wounds", decision: "Reject"});
+		await source.expectOutgoingPeerSpellStatus({spellName: "Cure Wounds", targetName: "Bryn", status: "rejected"});
+		await expect.poll(async () => (await source.getCharacter(sourceCharacter.id)).data.spellcasting.spellSlots[1].current).toBe(2);
+		expect((await target.getCharacter(targetCharacter.id)).data.hp.current).toBe(3);
+
+		await source.castSpellAtPeerTarget({spellName: "Cure Wounds", targetName: "Bryn"});
+		await source.cancelOutgoingPeerSpell({spellName: "Cure Wounds", targetName: "Bryn"});
+		await expect.poll(async () => (await source.getCharacter(sourceCharacter.id)).data.spellcasting.spellSlots[1].current).toBe(2);
+		expect((await target.getCharacter(targetCharacter.id)).data.hp.current).toBe(3);
+
+		await source.castSpellAtPeerTarget({spellName: "Cure Wounds", targetName: "Bryn"});
+		await target.resolveIncomingPeerSpell({spellName: "Cure Wounds", decision: "Approve"});
+		await source.expectOutgoingPeerSpellStatus({spellName: "Cure Wounds", targetName: "Bryn", status: "applied"});
+		await expect.poll(async () => (await source.getCharacter(sourceCharacter.id)).data.spellcasting.spellSlots[1].current).toBe(1);
+		await expect.poll(async () => (await target.getCharacter(targetCharacter.id)).data.hp.current).toBeGreaterThan(3);
+		await expect.poll(() => target.page.locator("#charsheet-ipt-hp-current").inputValue()).not.toBe("3");
+
+		await source.castSpellAtPeerTarget({spellName: "Cure Wounds", targetName: "Aster"});
+		await source.resolveIncomingPeerSpell({spellName: "Cure Wounds", decision: "Approve"});
+		await expect.poll(async () => (await source.getCharacter(sourceCharacter.id)).data.spellcasting.spellSlots[1].current).toBe(0);
+		await expect.poll(async () => (await source.getCharacter(sourceCharacter.id)).data.hp.current).toBeGreaterThan(4);
+	} finally {
+		await Promise.all([dmContext.close(), sourceContext.close(), targetContext.close()]);
+	}
+});

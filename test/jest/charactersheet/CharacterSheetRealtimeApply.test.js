@@ -39,6 +39,7 @@ const makeAppliedEvent = ({
 	kind = "hp.damage",
 	args = {amount: 4},
 	targetCharacterId = "character-1",
+	leg = null,
 } = {}) => ({
 	id,
 	campaignId: "campaign-1",
@@ -48,8 +49,61 @@ const makeAppliedEvent = ({
 	aggregateId: targetCharacterId,
 	aggregateRevision: revision,
 	payload: {
+		...(leg ? {leg} : {}),
 		operation: {operationId, kind, version: 1, targetCharacterId, arguments: args},
 		resultingCharacterRevision: revision,
+	},
+});
+
+const makeSourceCost = () => ({
+	version: 1,
+	components: [{kind: "spell_slot", pool: "standard", level: 1, amount: 1}],
+});
+
+const makeSourceEvent = ({
+	id = "source-event-1",
+	operationId = "operation-1",
+	sequence = 20,
+	revision = 2,
+} = {}) => ({
+	id,
+	campaignId: "campaign-1",
+	sequence,
+	type: "character.operation.source_cost_consumed",
+	aggregateType: "character",
+	aggregateId: "character-1",
+	aggregateRevision: revision,
+	payload: {
+		operationId,
+		leg: "source",
+		sourceCost: makeSourceCost(),
+		resultingSourceCharacterRevision: revision,
+	},
+});
+
+const makeCombinedEvent = () => ({
+	...makeAppliedEvent({kind: "hp.heal", args: {amount: 4}}),
+	payload: {
+		...makeAppliedEvent({kind: "hp.heal", args: {amount: 4}}).payload,
+		leg: "combined",
+		sourceCost: makeSourceCost(),
+	},
+});
+
+const makeFailedEvent = () => ({
+	id: "failed-event",
+	campaignId: "campaign-1",
+	sequence: 20,
+	type: "character.operation.failed",
+	aggregateType: "semantic_operation",
+	aggregateId: "operation-1",
+	aggregateRevision: 2,
+	payload: {
+		operationId: "operation-1",
+		status: "failed",
+		reason: "unavailable",
+		targetDisplaySnapshot: {label: "Mira"},
+		effectDisplaySnapshot: {label: "Heal"},
 	},
 });
 
@@ -129,6 +183,7 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 		onApplicationError: jest.fn(),
 		onAuthoritativeCoverage: jest.fn(),
 	};
+	const peerTargeting = {onConnectionState: jest.fn(), onRealtimeOperation: jest.fn()};
 	// The sheet modules destructure `JqueryUtil` at load time, so mutate the shared object rather than
 	// replacing it (see test/jest/charactersheet/setup.js).
 	globalThis.JqueryUtil.doToast = message => toasts.push(message);
@@ -138,6 +193,7 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 		_characterRepository: repository,
 		_hubRealtime: coordinator,
 		_hubEffects: hubEffects,
+		_peerTargeting: peerTargeting,
 		_currentCharacterId: "character-1",
 		_characterLoadGeneration: 0,
 		_hubRealtimeGeneration: 0,
@@ -165,7 +221,7 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 	await repository.pGet({characterId: "character-1"});
 	coordinator.attach({characterId: "character-1"});
 
-	return {api, clients, coordinator, host, hubEffects, repository, state, toasts};
+	return {api, clients, coordinator, host, hubEffects, peerTargeting, repository, state, toasts};
 };
 
 const pFlush = () => new Promise(resolve => setImmediate(resolve));
@@ -207,6 +263,43 @@ describe("Live campaign effects on an open Character Sheet", () => {
 		expect(hubEffects.onApplied).toHaveBeenCalledWith(expect.objectContaining({
 			operation: expect.objectContaining({operationId: "approved-operation"}),
 		}));
+	});
+
+	it("adopts the authoritative source leg from HTTP when its socket edge is missed", async () => {
+		const {host, state} = await pMakeHarness();
+
+		await expect(host._onHubAuthoritativeApproval({
+			actionId: "approved-operation",
+			characterId: "character-1",
+			eventId: "source-event",
+			leg: "source",
+			sequence: 20,
+			sourceCost: makeSourceCost(),
+			resultingCharacterRevision: 2,
+		})).resolves.toBe(true);
+		expect(state.getSpellSlotsCurrent(1)).toBe(1);
+	});
+
+	it("adopts an authoritative combined HTTP leg as one self-target revision", async () => {
+		const {host, state} = await pMakeHarness();
+		const operation = makeAppliedEvent({
+			operationId: "approved-operation",
+			kind: "hp.heal",
+			args: {amount: 4},
+		}).payload.operation;
+
+		await expect(host._onHubAuthoritativeApproval({
+			actionId: "approved-operation",
+			characterId: "character-1",
+			eventId: "combined-event",
+			leg: "combined",
+			sequence: 20,
+			operation,
+			sourceCost: makeSourceCost(),
+			resultingCharacterRevision: 2,
+		})).resolves.toBe(true);
+		expect(state.getCurrentHp()).toBe(34);
+		expect(state.getSpellSlotsCurrent(1)).toBe(1);
 	});
 
 	it("deduplicates an approval response when its socket edge wins the race", async () => {
@@ -284,7 +377,7 @@ describe("Live campaign effects on an open Character Sheet", () => {
 
 	it("applies DM damage to the open sheet without a reload", async () => {
 		const {clients, host, hubEffects, state} = await pMakeHarness();
-		clients[0].emit("event", makeAppliedEvent());
+		clients[0].emit("event", makeAppliedEvent({leg: "target"}));
 		await pFlush();
 
 		expect(state.getCurrentHp()).toBe(26);
@@ -294,6 +387,61 @@ describe("Live campaign effects on an open Character Sheet", () => {
 			beforeData: expect.objectContaining({hp: expect.objectContaining({current: 30})}),
 			afterData: expect.objectContaining({hp: expect.objectContaining({current: 26})}),
 		}));
+	});
+
+	it("consumes an accepted peer source cost on the open sheet", async () => {
+		const {clients, state} = await pMakeHarness();
+		clients[0].emit("event", makeSourceEvent());
+		await pFlush();
+
+		expect(state.getSpellSlotsCurrent(1)).toBe(1);
+	});
+
+	it("applies a combined self operation exactly once", async () => {
+		const {clients, coordinator, state} = await pMakeHarness();
+		clients[0].emit("event", makeCombinedEvent());
+		await pFlush();
+		expect(state.getCurrentHp()).toBe(34);
+		expect(state.getSpellSlotsCurrent(1)).toBe(1);
+
+		coordinator.attach({characterId: "character-1"});
+		clients[1].emit("event", makeCombinedEvent());
+		await pFlush();
+		expect(state.getCurrentHp()).toBe(34);
+		expect(state.getSpellSlotsCurrent(1)).toBe(1);
+	});
+
+	it("adopts a combined self operation from HTTP before a missed realtime event, then dedupes the replay", async () => {
+		const {clients, host, state} = await pMakeHarness();
+		const event = makeCombinedEvent();
+		await host._onHubAuthoritativeApproval({
+			actionId: "operation-1",
+			characterId: "character-1",
+			eventId: event.id,
+			sequence: event.sequence,
+			operation: event.payload.operation,
+			resultingCharacterRevision: event.payload.resultingCharacterRevision,
+			leg: "combined",
+			sourceCost: event.payload.sourceCost,
+		});
+		await pFlush();
+		expect(state.getCurrentHp()).toBe(34);
+		expect(state.getSpellSlotsCurrent(1)).toBe(1);
+
+		clients[0].emit("event", event);
+		await pFlush();
+		expect(state.getCurrentHp()).toBe(34);
+		expect(state.getSpellSlotsCurrent(1)).toBe(1);
+	});
+
+	it("routes a failed lifecycle without mutating the character", async () => {
+		const {clients, peerTargeting, state} = await pMakeHarness();
+		const before = state.toJson();
+		clients[0].emit("event", makeFailedEvent());
+		await pFlush();
+
+		expect(state.toJson()).toEqual(before);
+		expect(peerTargeting.onRealtimeOperation).toHaveBeenCalledWith(expect.objectContaining({status: "failed"}));
 	});
 
 	it("consumes temporary hit points before current hit points", async () => {

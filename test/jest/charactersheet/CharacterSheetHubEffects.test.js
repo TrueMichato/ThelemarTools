@@ -9,6 +9,7 @@ const makeAction = ({
 	outcomeLabel = "Restore 4 hit points",
 } = {}) => ({
 	actionId,
+	contractVersion: 1,
 	status: "proposed",
 	expiresAt: "2026-01-02T00:00:00.000Z",
 	presentation: {sourceName, effectLabel, outcomeLabel},
@@ -130,8 +131,7 @@ describe("Character Sheet Hub effect controls", () => {
 		controller.activate({characterId: "character-1"});
 		controller.onRealtimeOperation({
 			status: "proposed",
-			targetCharacterId: "character-1",
-			payload: makeAction({actionId: "action-new"}),
+			operationId: "action-new",
 		});
 		initial.resolve([]);
 		await pFlush();
@@ -357,6 +357,7 @@ describe("Character Sheet Hub effect controls", () => {
 				status: "applied",
 				operation,
 				resultingCharacterRevision: 2,
+				appliedEventId: "target-event",
 				sourceDisplaySnapshot: {name: "must not escape"},
 			},
 			eventIds: ["event-1", "event-2"],
@@ -370,10 +371,12 @@ describe("Character Sheet Hub effect controls", () => {
 		expect(onAuthoritativeApproval).toHaveBeenCalledWith({
 			actionId: "action-1",
 			characterId: "character-1",
-			eventId: "event-1",
+			eventId: "target-event",
+			leg: "target",
 			sequence: 20,
 			operation,
 			resultingCharacterRevision: 2,
+			sourceCost: undefined,
 		});
 
 		expect(controller.onApplied({
@@ -427,6 +430,78 @@ describe("Character Sheet Hub effect controls", () => {
 
 		await expect(pending).resolves.toBe(true);
 		expect(onAuthoritativeApproval).toHaveBeenCalledTimes(1);
+	});
+
+	it("reconciles an applied operation when rejection loses the race to acceptance", async () => {
+		api.pListCharacterPendingActions.mockResolvedValue([makeAction()]);
+		const operation = makeOperation();
+		api.pResolveStructuredAction.mockResolvedValue({
+			operation: {
+				status: "applied",
+				operation,
+				resultingCharacterRevision: 2,
+				appliedEventId: "target-event",
+			},
+			operationWatermark: 20,
+		});
+		controller.activate({characterId: "character-1"});
+		await pFlush();
+
+		await expect(controller.pResolve({actionId: "action-1", decision: "reject"})).resolves.toBe(true);
+		expect(onAuthoritativeApproval).toHaveBeenCalledWith(expect.objectContaining({
+			actionId: "action-1",
+			leg: "target",
+			eventId: "target-event",
+			operation,
+		}));
+		expect(controller._actions.has("action-1")).toBe(true);
+	});
+
+	it("forwards a combined self-target envelope with its source cost", async () => {
+		api.pListCharacterPendingActions.mockResolvedValue([makeAction()]);
+		const operation = makeOperation();
+		const sourceCost = {
+			version: 1,
+			components: [{kind: "spell_slot", pool: "standard", level: 1, amount: 1}],
+		};
+		api.pResolveStructuredAction.mockResolvedValue({
+			operation: {
+				status: "applied",
+				leg: "combined",
+				operation,
+				sourceResult: {sourceCost, resultingSourceCharacterRevision: 2},
+				resultingCharacterRevision: 2,
+				appliedEventId: "combined-event",
+			},
+			operationWatermark: 20,
+		});
+		controller.activate({characterId: "character-1"});
+		await pFlush();
+
+		await expect(controller.pResolve({actionId: "action-1", decision: "accept"})).resolves.toBe(true);
+		expect(onAuthoritativeApproval).toHaveBeenCalledWith({
+			actionId: "action-1",
+			characterId: "character-1",
+			eventId: "combined-event",
+			leg: "combined",
+			sequence: 20,
+			operation,
+			sourceCost,
+			resultingCharacterRevision: 2,
+		});
+	});
+
+	it("removes a failed terminal request from the actionable inbox", async () => {
+		api.pListCharacterPendingActions.mockResolvedValue([makeAction()]);
+		api.pResolveStructuredAction.mockResolvedValue({
+			operation: {status: "failed", failureCode: "unavailable"},
+		});
+		controller.activate({characterId: "character-1"});
+		await pFlush();
+
+		await expect(controller.pResolve({actionId: "action-1", decision: "accept"})).resolves.toBe(true);
+		expect(controller._actions.has("action-1")).toBe(false);
+		expect(root.textContent).not.toContain("Accept");
 	});
 
 	it("removes a waiting request when repository coverage proves its effect is already adopted", async () => {

@@ -173,7 +173,7 @@ describe("Campaign Hub documentation contract", () => {
 			"post-clamp effective delta",
 			"bounded, non-null expiry",
 			"rejection of peer-authored `kind`",
-			"Implementation: The protocol-v3 server/store/API/event substrate is implemented.",
+			"Implementation: The original protocol-v3 server/store/API/event substrate is implemented.",
 		]) expect(markdown).toContain(anchor);
 	});
 

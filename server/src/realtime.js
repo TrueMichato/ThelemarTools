@@ -5,6 +5,20 @@ function sendJson (socket, message) {
 	socket.send(JSON.stringify(message));
 }
 
+export function requiresHubProtocol4Event (event) {
+	if (event?.type === "character.operation.source_cost_consumed") return true;
+	if (event?.type === "character.operation.failed") return true;
+	if (["source", "target", "combined"].includes(event?.payload?.leg)) return true;
+	return [
+		"character.operation.proposed",
+		"character.operation.rejected",
+		"character.operation.cancelled",
+		"character.operation.expired",
+	].includes(event?.type)
+		&& typeof event?.payload?.status === "string"
+		&& event.payload.targetCharacterId == null;
+}
+
 function isMessageRateLimitExceeded ({connection, isReplayContinuation = false}) {
 	const now = Date.now();
 	if (now - connection.messageWindowStartedAt >= 1000) {
@@ -35,7 +49,7 @@ export class HubRealtime {
 		return this._connections.size;
 	}
 
-	addConnection ({socket, account, session, membership, campaignId, clientIp = null}) {
+	addConnection ({socket, account, session, membership, campaignId, protocolVersion = "3", clientIp = null}) {
 		const connection = {
 			socket,
 			accountId: account.id,
@@ -44,6 +58,7 @@ export class HubRealtime {
 			membershipId: membership.id,
 			role: membership.role,
 			campaignId,
+			protocolVersion,
 			clientIp,
 			connectedAt: this._fnNow().toISOString(),
 			activity: "idle",
@@ -155,6 +170,13 @@ export class HubRealtime {
 				afterSequence: Number(message.afterSequence) || 0,
 				limit: 500,
 			});
+			if (
+				connection.protocolVersion !== "4"
+				&& eventPage.events.some(requiresHubProtocol4Event)
+			) {
+				connection.socket.close(1008, "Protocol update required");
+				return;
+			}
 			connection.replayContinuationAfterSequence = eventPage.replay.hasMore
 				? eventPage.replay.scannedThroughSequence
 				: null;
@@ -188,6 +210,10 @@ export class HubRealtime {
 				: event;
 			// A null outcome means this viewer may not see the event at all.
 			if (!viewerEvent) continue;
+			if (connection.protocolVersion !== "4" && requiresHubProtocol4Event(viewerEvent)) {
+				connection.socket.close(1008, "Protocol update required");
+				continue;
+			}
 			sendJson(connection.socket, {type: "event", event: viewerEvent});
 		}
 	}

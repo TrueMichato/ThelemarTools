@@ -10,7 +10,7 @@ test("publishes bounded provider metadata and accessible signed-out guidance", a
 	const meta = await page.request.get("/api/meta");
 	expect(meta.ok()).toBe(true);
 	expect(await meta.json()).toEqual(expect.objectContaining({
-		protocolVersion: "3",
+		protocolVersion: "4",
 		capabilities: [
 			"auth.provider_registry.v1",
 			"campaign.active_context.v1",

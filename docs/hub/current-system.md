@@ -1,8 +1,8 @@
 # Campaign Hub current system
 
 > **Status:** Current implementation reference
-> **Scope:** Private invite-only V1 plus the protocol-v3 semantic-operation server substrate
-> **Last verified:** 2026-09-03
+> **Scope:** Private invite-only V1 plus protocol-4 player-to-player Cure Wounds targeting
+> **Last verified:** 2026-09-04
 > **Owner:** Campaign Hub maintainers
 
 This document describes what exists in the repository and deployed private Oracle staging now. It is not the
@@ -132,19 +132,20 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
   reconciliation path as a loopback-delivery fallback. Successful adoption produces a polite, dismissible and
   time-bounded sheet notice. Blocked adoption produces recovery UI instead.
 - Cursor refs may carry an owner/DM-only `operationWatermark`. Operation events remain deliverable at/below it;
-  this substrate exposes the metadata but does not apply operations or replace sheet state.
+  per-leg reconciliation classifies fetched coverage, rebases unsaved local edits, and deduplicates loopback,
+  replay, and live delivery without replacing sheet state.
 
 ## Multiplayer mutations
 
-- Protocol-v3 semantic operations support damage, healing, condition add/remove, and spell-slot spend/restore.
+- Protocol-4 semantic operations support damage, healing, condition add/remove, and spell-slot spend/restore.
   Generic typed operations are DM/co-DM-only and apply immediately with one revision/event/outbox transaction.
 - Player effects are source-derived from a closed server registry and always proposed for later explicit
   target-owner approval, including self-target. The state machine supports reject/cancel/24-hour expiry and
-  lifecycle cleanup. No successful production cost-free peer template is enabled yet; recognized Cure Wounds
-  costs fail closed.
-- [ADR 0016](adr/0016-atomic-peer-source-costs.md) defines the future approval-time atomic source-cost contract,
-  typed resource catalog, two-character/self-target revisions, and privacy-scoped reconciliation. It is a
-  contract only: protocol 3 still consumes no peer source cost and admits no cost-bearing production template.
+  lifecycle cleanup.
+- [ADR 0016](adr/0016-atomic-peer-source-costs.md) is implemented for PHB/XPHB Cure Wounds using one standard
+  spell slot. Proposal reserves/spends nothing; acceptance atomically consumes the slot and heals one
+  player-owned character, or does neither. Self-targeting uses one combined revision. Pact slots, arbitrary
+  abilities/effects, NPCs/monsters, and multi-target/party resolution remain fail-closed.
 - XP/item grants are audited semantic commands; XP does not perform level-up choices.
 - Party currency is denomination-based (`cp`, `sp`, `ep`, `gp`, `pp`).
 - Transfers reserve source assets in escrow before acceptance.

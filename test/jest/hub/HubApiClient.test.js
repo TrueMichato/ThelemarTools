@@ -47,9 +47,50 @@ describe("hub API client", () => {
 				headers: expect.objectContaining({
 					"x-csrf-token": "csrf-1",
 					"idempotency-key": "stable-key",
+					"x-hub-protocol-version": "4",
 				}),
 			}),
 		}));
+	});
+
+	it("pins cost-bearing peer proposals and reads source-owner status", async () => {
+		const calls = [];
+		const client = new HubApiClient({
+			fnFetch: async (path, opts = {}) => {
+				calls.push({path, opts});
+				if (path === "/api/session") return getResponse({body: {signedIn: true, csrfToken: "csrf-1"}});
+				if (path.endsWith("/outgoing-actions")) return getResponse({body: {actions: [{actionId: "action-1"}]}});
+				return getResponse({status: 201, body: {operation: {operationId: "action-1"}}});
+			},
+		});
+		await client.pGetSession();
+		await client.pCreatePeerAction({
+			campaignId: "campaign-1",
+			contractVersion: 1,
+			sourceCharacterId: "source-1",
+			sourceEntity: {type: "spell", uid: "cure wounds|phb", version: "phb-2014-v1"},
+			effectTemplateId: "spell.cure-wounds.heal",
+			choice: {castLevel: 2},
+			targetRef: "opaque-target",
+			rulesVersionId: "rules-1",
+			idempotencyKey: "peer-command-1",
+		});
+		await expect(client.pListCharacterOutgoingActions({
+			campaignId: "campaign-1",
+			characterId: "source-1",
+		})).resolves.toEqual([{actionId: "action-1"}]);
+
+		expect(JSON.parse(calls[1].opts.body)).toEqual({
+			contractVersion: 1,
+			commandId: "peer-command-1",
+			sourceCharacterId: "source-1",
+			sourceEntity: {type: "spell", uid: "cure wounds|phb", version: "phb-2014-v1"},
+			effectTemplateId: "spell.cure-wounds.heal",
+			choice: {castLevel: 2},
+			targetRef: "opaque-target",
+			rulesVersionId: "rules-1",
+		});
+		expect(calls[2].path).toBe("/api/campaigns/campaign-1/characters/source-1/outgoing-actions");
 	});
 
 	it("refuses a mutation before session bootstrap", async () => {

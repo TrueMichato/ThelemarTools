@@ -152,9 +152,11 @@ Character data is sanitized/validated and capped at 1.5 MB after the resulting m
 | Method/path | Authorization | Input | Result |
 |---|---|---|---|
 | `POST /api/campaigns/:campaignId/rolls` | Active-member mutation; character owner or DM when character supplied | characterId?, formula <=200, numeric total, context <=100, visibility, detail | Durable `roll.logged` event; activity uses a bounded semantic `detail.title` and selected detail fields |
-| `GET /api/campaigns/:campaignId/actions` | Active member | none | Proposed semantic operations visible to DM/co-DM, proposer, or target owner |
+| `GET /api/campaigns/:campaignId/actions` | Active member | none | Proposed semantic operations visible to DM/co-DM, proposer, or target owner; protocol 3 omits cost-bearing rows |
+| `GET /api/campaigns/:campaignId/characters/:characterId/pending-actions` | Active owner of that character | none | Privacy-safe approval cards; protocol-4 cost-bearing cards include `contractVersion:1`, while protocol 3 preserves only legacy cost-free cards |
+| `GET /api/campaigns/:campaignId/characters/:characterId/outgoing-actions` | Active source owner; protocol 4 | none | Bounded source-side status/cancel/recovery summaries for cost-bearing requests |
 | `POST /api/campaigns/:campaignId/actions` | DM/co-DM/player mutation; spectator denied | Direct DM/co-DM command or source-derived peer proposal, below | 201 stable operation/lifecycle metadata; direct authority is already `applied`, peer authority is `proposed` |
-| `POST /api/campaigns/:campaignId/actions/:operationId/resolve` | Target owner, proposer, or DM/co-DM according to decision | `{commandId, decision}` where decision is `accept`, `reject`, or `cancel` | Stable operation/lifecycle metadata; acceptance returns the applied revision/watermark |
+| `POST /api/campaigns/:campaignId/actions/:operationId/resolve` | Target owner, proposer, or DM/co-DM according to decision | `{contractVersion?,commandId,decision}` where decision is `accept`, `reject`, or `cancel` | Stable operation/lifecycle metadata; acceptance returns the applied target event identity, revision, and authorized watermarks |
 | `POST /api/campaigns/:campaignId/characters/:characterId/xp-grants` | DM/co-DM mutation | integer amount 1-1,000,000; reason <=500 | Updated character |
 | `POST /api/campaigns/:campaignId/characters/:characterId/item-grants` | DM/co-DM mutation | bounded safe item summary; quantity 1-100,000 | Compatibility route: updated character + stable entry |
 | `POST /api/campaigns/:campaignId/item-awards` | DM/co-DM mutation | source union; 1-50 ordered unique character UUIDs; quantity 1-100,000 each; note <=500 | One atomic award response in request target order |
@@ -184,12 +186,14 @@ Source-derived peer body:
 
 ```json
 {
+  "contractVersion": 1,
   "commandId": "uuid",
   "sourceCharacterId": "uuid",
-  "sourceEntity": {"type": "ability", "uid": "name|source", "version": "content-version"},
-  "effectTemplateId": "server-template-id",
-  "choice": {},
-  "targetRef": "opaque-uuid"
+  "sourceEntity": {"type": "spell", "uid": "cure wounds|phb", "version": "phb-2014-v1"},
+  "effectTemplateId": "spell.cure-wounds.heal",
+  "choice": {"castLevel": 1},
+  "targetRef": "opaque-uuid",
+  "rulesVersionId": "uuid"
 }
 ```
 
@@ -197,8 +201,12 @@ The version-1 catalog is `hp.damage`, `hp.heal`, `condition.add`, `condition.rem
 `spell_slot.restore`. Players cannot submit generic `kind`/`arguments`. Peer proposals rederive from the pinned
 server template at creation and approval, always require a later explicit target-owner acceptance (including
 self-target), and expire after at most 24 hours. DMs/co-DMs may reject/cancel but may accept only when they own
-the target. The production registry currently enables no successful `cost=none` peer template; recognized
-cost-bearing Cure Wounds requests fail with `SOURCE_COST_UNSUPPORTED` before row creation and again at apply.
+the target. Protocol 4 and the exact advertised `peerSourceCosts` capability enable PHB/XPHB Cure Wounds with one
+standard slot at the selected cast level. The private deterministic seed, source-cost descriptor, source resource
+identity/value, and target truth never appear in peer projections. Proposal neither consumes a source cost nor
+tests the effect against hidden target state; acceptance commits source and target mutations in one transaction
+or records a privacy-shaped unavailable outcome without spending. Pact slots and other production templates
+remain unsupported.
 An otherwise-authorized resolution command received after the deadline performs the single `expired` transition
 and returns its stable terminal metadata; retries replay that response. The authority does not interpret
 arbitrary spell prose.

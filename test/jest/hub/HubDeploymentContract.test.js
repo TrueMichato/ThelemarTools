@@ -166,8 +166,10 @@ describe("Hub portable deployment contract", () => {
 		expect(compose).toContain("hub-egress:");
 		expect(compose).toContain("172.30.0.10");
 		expect(compose).toMatch(/bff:[\s\S]*?networks:\n\s+- hub-private\n\s+- hub-egress[\s\S]*?static:/);
-		expect(compose).toMatch(/edge:[\s\S]*?networks:\n\s+hub-private:\n\s+ipv4_address: 172\.30\.0\.10\n\s+hub-public:/);
+		expect(compose).toMatch(/edge:[\s\S]*?networks:\n\s+hub-private:\n\s+ipv4_address: \$\{HUB_EDGE_PRIVATE_IP:-172\.30\.0\.10\}\n\s+hub-public:/);
 		expect(compose).toMatch(/HUB_TRUST_PROXY: \$\{HUB_TRUST_PROXY:-172\.30\.0\.10}/);
+		expect(compose).toContain("subnet: $" + "{HUB_PRIVATE_SUBNET:-172.30.0.0/24}");
+		expect(compose).toContain("$" + "{HUB_EDGE_PORT:-8443}:8443");
 	});
 
 	it("runs every BFF-image service without package-manager tooling", () => {

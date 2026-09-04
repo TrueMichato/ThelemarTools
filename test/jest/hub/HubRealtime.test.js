@@ -107,6 +107,34 @@ describe("hub realtime", () => {
 		expect(player.sent.filter(message => message.type === "event")).toHaveLength(0);
 	});
 
+	it("never delivers a protocol-4 operation leg to a protocol-3 socket", async () => {
+		const realtime = new HubRealtime({store: {
+			pGetMembership: async () => ({role: "player"}),
+			pGetSessionById: async () => ({session: {}, account: {}}),
+		}});
+		const legacy = new FakeSocket();
+		const current = new FakeSocket();
+		for (const [socket, protocolVersion] of [[legacy, "3"], [current, "4"]]) {
+			realtime.addConnection({
+				socket,
+				account: {id: protocolVersion, displayName: protocolVersion},
+				session: {id: protocolVersion},
+				membership: {id: protocolVersion, role: "player"},
+				campaignId: "cmp",
+				protocolVersion,
+			});
+			socket.sent.length = 0;
+		}
+		await realtime.pPublishEvent({
+			campaignId: "cmp",
+			visibility: "all_members",
+			type: "character.operation.source_cost_consumed",
+			payload: {operationId: "operation", leg: "source"},
+		});
+		expect(legacy.closeEvents).toContainEqual({code: 1008, reason: "Protocol update required"});
+		expect(current.sent).toContainEqual(expect.objectContaining({type: "event"}));
+	});
+
 	it("closes sockets whose session was revoked before publication", async () => {
 		const realtime = new HubRealtime({store: {
 			pGetSessionById: async () => null,

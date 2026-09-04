@@ -159,6 +159,46 @@ describe("Spellcasting flow — Bug #2: sorcery-point refund on a cancelled cast
 	});
 });
 
+describe("Spellcasting flow — campaign peer targeting", () => {
+	it("returns after proposal creation without mutating the local slot or cast history", async () => {
+		const spells = makeSpells();
+		const setSpellSlots = jest.fn();
+		spells._state = {
+			getSpells: () => [{id: "cure-wounds", name: "Cure Wounds", source: "PHB", level: 1}],
+			isConcentrating: () => false,
+			canCastAsRitual: () => false,
+			getPactSlots: () => ({current: 0, max: 0, level: 0}),
+			getSpellSlotsCurrent: level => level === 1 ? 1 : 0,
+			getSpellSlotsMax: level => level === 1 ? 2 : 0,
+			setSpellSlots,
+			getNoSlotCastResourcesForSpell: () => [],
+		};
+		spells._allSpells = [{name: "Cure Wounds", source: "PHB", level: 1, duration: [{type: "instant"}], components: {v: true, s: true}}];
+		spells._resolveMetamagicChoice = jest.fn(async () => ({cancelled: false, metamagic: null}));
+		spells._resolveVariantComponentChoice = jest.fn(async () => ({cancelled: false, variantComponent: null}));
+		spells._pHandleCastingConstraints = jest.fn(async () => true);
+		spells._showCastResult = jest.fn();
+		spells._page._peerTargeting = {
+			pMaybeProposeSpell: jest.fn(async () => ({handled: true, proposed: true})),
+		};
+
+		await spells._castSpell("cure-wounds", {
+			withMetamagic: false,
+			decision: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true},
+		});
+
+		expect(spells._page._peerTargeting.pMaybeProposeSpell).toHaveBeenCalledWith({
+			spell: {id: "cure-wounds", name: "Cure Wounds", source: "PHB", level: 1},
+			selectedSlot: expect.objectContaining({level: 1, isPact: false}),
+			hasMetamagic: false,
+			hasVariantComponent: false,
+		});
+		expect(setSpellSlots).not.toHaveBeenCalled();
+		expect(spells._showCastResult).not.toHaveBeenCalled();
+		expect(spells._page.saveCharacter).not.toHaveBeenCalled();
+	});
+});
+
 describe("Spellcasting flow — Bug #2/#9: spell-row cast buttons", () => {
 	let spells;
 

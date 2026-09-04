@@ -7,6 +7,7 @@ const lifecycleSql = fs.readFileSync(new URL("../../../server/migrations/0002_li
 const operationsSql = fs.readFileSync(new URL("../../../server/migrations/0003_operational_runs.sql", import.meta.url), "utf8");
 const semanticOperationsSql = fs.readFileSync(new URL("../../../server/migrations/0005_semantic_character_operations.sql", import.meta.url), "utf8");
 const identitySql = fs.readFileSync(new URL("../../../server/migrations/0006_multi_provider_identity.sql", import.meta.url), "utf8");
+const peerSourceCostsSql = fs.readFileSync(new URL("../../../server/migrations/0007_peer_source_costs.sql", import.meta.url), "utf8");
 const postgresStore = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");
 
 describe("campaign hub first migration contract", () => {
@@ -167,5 +168,32 @@ describe("campaign hub first migration contract", () => {
 		]) expect(identitySql).toContain(required);
 		expect(identitySql).not.toMatch(/access_token|refresh_token|id_token/i);
 		expect(identitySql).not.toMatch(/UPDATE hub\.external_identities\s+SET provider_subject/i);
+	});
+
+	it("adds constrained, retention-safe peer source-cost authority in migration 0007", () => {
+		for (const required of [
+			"'failed'",
+			"target_owner_account_id_at_proposal uuid",
+			"source_cost_version integer",
+			"source_cost jsonb",
+			"rules_version_id uuid",
+			"rules_pin jsonb",
+			"template_registry_version text",
+			"effect_resolution_seed bytea",
+			"octet_length(effect_resolution_seed) = 32",
+			"source_revision_observed bigint",
+			"target_revision_observed bigint",
+			"resulting_source_character_revision bigint",
+			"source_cost_event_id uuid",
+			"source_cost_invalidated boolean",
+			"private_failure_code text",
+			"ON DELETE RESTRICT",
+			"semantic_operations_source_result_check",
+			"semantic_operations_live_template_idx",
+			"peer_source_cost_binding_value",
+			"mark_peer_source_cost_invalidated",
+			"characters_peer_source_cost_invalidation",
+		]) expect(peerSourceCostsSql).toContain(required);
+		expect(peerSourceCostsSql).not.toMatch(/CREATE INDEX[\s\S]*source_cost\s*\)/);
 	});
 });

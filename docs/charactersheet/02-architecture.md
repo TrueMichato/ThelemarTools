@@ -271,6 +271,21 @@ toJson(), loadFromJson()
 - Ritual casting
 - Concentration tracking
 
+### CharacterSheetPeerTargeting (`charactersheet-peer-targeting.js`)
+
+**Role**: Campaign-only sender coordination for accepted peer spell/effect templates
+
+**Responsibilities**:
+- Fail closed unless the campaign advertises the exact protocol-4 source-cost capability
+- Discover targets through authorization-scoped projections and submit only opaque `targetRef`
+- Keep proposal/cancel command identities stable across retries
+- Render source-owner pending and terminal status without target truth or source resource internals
+- Refetch on reconnect/focus and fence stale responses on character switches
+
+The spell module calls this coordinator after slot and casting-option selection but before any local resource
+mutation. A handled campaign proposal returns immediately; ordinary, unsupported, local, and signed-out casts
+continue through the pre-existing local flow.
+
 ### CharacterSheetInventory (`charactersheet-inventory.js`)
 
 **Role**: Item and equipment management

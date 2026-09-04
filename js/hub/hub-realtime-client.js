@@ -99,7 +99,7 @@ export class HubRealtimeClient {
 			this._hasBaseline = false;
 			if (this._resyncStartSequence == null) this._bufferedEvents = [];
 			const protocol = this._location.protocol === "https:" ? "wss:" : "ws:";
-			const url = `${protocol}//${this._location.host}/ws/campaign/${encodeURIComponent(this._campaignId)}?v=3`;
+			const url = `${protocol}//${this._location.host}/ws/campaign/${encodeURIComponent(this._campaignId)}?v=4`;
 			const socket = this._fnCreateSocket(url);
 			this._socket = socket;
 			let isOpened = false;

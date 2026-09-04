@@ -26,6 +26,7 @@ const clientIpHeader = getClientIpHeader(process.env.HUB_CLIENT_IP_HEADER);
 const store = PostgresHubStore.fromConnectionString({
 	connectionString: requireEnv("DATABASE_URL"),
 	ssl: process.env.HUB_DATABASE_SSL !== "false",
+	peerSourceCostsEnabled: getCsv("HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS"),
 });
 await store.pCheckHealth();
 const {authProviderRegistry, allowedOAuthSubjects} = createAuthProviderConfiguration({

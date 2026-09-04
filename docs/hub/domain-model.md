@@ -43,7 +43,7 @@ security boundary.
 | `party_inventories` | Shared campaign container | one per campaign; revision; denomination JSON currency | lazily created |
 | `inventory_entries` | Relational party inventory rows and future character-entry model | exactly one character/party parent; quantity >0; metadata JSON | current store writes party rows; character inventory remains embedded JSON |
 | `pending_actions` | Legacy pre-v3 structured effect workflow | actor, optional target character, status, payload, optional expiry | legacy history only; migration 0005 cancels arbitrary proposed rows |
-| `semantic_operations` | Versioned character intent lifecycle | one target, optional source, pinned template/choice, status, resulting revision, stable lifecycle event ids, <=24h proposal expiry | direct applied operation or proposed -> applied/rejected/cancelled/expired |
+| `semantic_operations` | Versioned character intent lifecycle | one target, optional source, pinned template/choice/rules/content, optional closed source cost and deterministic seed, source/target result linkage, <=24h proposal expiry | direct applied operation or proposed -> applied/rejected/cancelled/expired/failed |
 | `semantic_operation_commands` | Persistent exactly-once command result | global command id, actor/body hash, operation, command type, response/event ids | create/resolve replay and mutated-body rejection |
 | `transfers` | Escrowed asset workflow | exactly one source and target container, status, escrow payload | created directly as reserved -> committed/rejected/cancelled; proposed/accepted/expired reserved |
 | `domain_events` | Ordered client-visible history | unique campaign sequence; visibility and explicit-recipient constraint | replay/live fanout |
@@ -181,10 +181,13 @@ stateDiagram-v2
   proposed --> rejected: reject
   proposed --> cancelled: proposer/DM or lifecycle change
   proposed --> expired: bounded 24-hour deadline
+  proposed --> failed: stale/unavailable atomic acceptance
 ```
 
 Direct DM/co-DM commands begin and end at `applied`; they do not create a `proposed` row. Acceptance has a
-distinct command id but retains the proposal's operation id. Reject/cancel/expire are terminal.
+distinct command id but retains the proposal's operation id. Reject/cancel/expire/failed are terminal. A
+cost-bearing acceptance changes source and target together, or neither; self-targeting writes one combined
+revision.
 
 ### Transfer
 

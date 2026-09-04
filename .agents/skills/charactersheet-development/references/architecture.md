@@ -118,6 +118,11 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   Reconciles a privacy-safe server projection on open/reconnect/focus, fences async
 │   work by character generation, and never applies an effect from an HTTP response.
 │
+├── CharacterSheetPeerTargeting (charactersheet-peer-targeting.js)
+│   Campaign-only source-side targeting for exact accepted templates. Discovers only
+│   privacy-visible target identities, submits opaque targetRef values, preserves
+│   proposal/cancel command identity across retries, and renders outgoing lifecycle.
+│
 ├── CharacterSheetSpellPicker (charactersheet-spell-picker.js, ~1,200 lines, all static)
 │   Reusable spell selection UI for Builder, LevelUp, QuickBuild.
 │
@@ -482,6 +487,19 @@ Reconciliation is `R = E(B)`, `F = E(L)`, `nextSave = diff(R, F)`:
   truth containing the operation while returning an older recovery draft as live state.
 - An unprovable delivery blocks autosave and schedules a serialized no-reload recovery
   (`pRunPendingResync`) rather than guessing or writing blindly.
+
+Protocol-4 cost-bearing peer operations extend this with per-character operation legs:
+
+- `operationId/source` applies the shared pure source-cost transform to the source track.
+- `operationId/target` applies the semantic target effect to the target track.
+- `operationId/combined` applies cost then effect once for self-targeting and advances one revision.
+- coverage is `appliedOperationLegIds`; legacy protocol-3 operation ids migrate as target-leg coverage.
+- a local resource conflict after canonical acceptance blocks autosave and keeps the recovery draft visible;
+  it never reapplies the operation or silently overwrites the authoritative source spend.
+
+`CharacterSheetPeerTargeting` is invoked from the real spell-use path after cast-option validation but before
+local resource mutation. It is gated by the exact campaign `peerSourceCosts` capability tuple. Unsupported
+templates/options and local/signed-out sheets continue through the existing local cast path unchanged.
 
 ## Key Integration Points
 

@@ -1,14 +1,14 @@
 # Campaign Hub realtime protocol
 
 > **Status:** Current private-V1 wire protocol
-> **Protocol version:** `3`
-> **Last verified:** 2026-09-02
+> **Protocol version:** `4`
+> **Last verified:** 2026-09-04
 > **Owner:** Campaign Hub maintainers
 
 ## Connection
 
 ```text
-GET /ws/campaign/{campaignId}?v=3
+GET /ws/campaign/{campaignId}?v=4
 Origin: <exact HUB_APP_ORIGIN>
 Cookie: __Host-hub_session=...
 ```
@@ -16,7 +16,7 @@ Cookie: __Host-hub_session=...
 Upgrade requires:
 
 - UUID campaign id;
-- query protocol `v=3`;
+- query protocol `v=4`;
 - exact Origin;
 - valid signed/unexpired session;
 - active campaign membership.
@@ -178,10 +178,12 @@ Presence is ephemeral and not written to the event log.
 The Character Sheet allowlist is:
 
 - `character.operation.proposed`;
+- `character.operation.source_cost_consumed`;
 - `character.operation.applied`;
 - `character.operation.rejected`;
 - `character.operation.cancelled`;
-- `character.operation.expired`.
+- `character.operation.expired`;
+- `character.operation.failed`.
 
 An applied event targets the character aggregate. Its `aggregateRevision` equals
 `payload.resultingCharacterRevision`; the payload is
@@ -253,13 +255,16 @@ The lifecycle allowlist is:
 - `character.operation.cancelled`;
 - `character.operation.expired`.
 
-Every lifecycle event includes a stable `operationId` and `targetCharacterId`. Proposal/terminal events aggregate
-on the semantic operation and use `explicit_accounts` for proposer plus target owner; existing visibility policy
-also includes DM/co-DM. Terminal payloads expose only `reason:"unavailable"` plus immutable safe display
-snapshots. Applied events aggregate on the target character and carry exactly:
+Every lifecycle event includes a stable `operationId`; protocol-4 cost-bearing proposal/terminal events
+intentionally omit canonical source/target character ids. They aggregate on the semantic operation and use
+`explicit_accounts` for proposer plus target owner; existing visibility policy also includes DM/co-DM. The target
+sheet refetches its owner-only pending projection when this minimized event arrives. Terminal payloads expose
+only `reason:"unavailable"` plus immutable safe target/effect display snapshots. Distinct-character acceptance
+emits a source-owner/DM-only `source` leg followed by a target `applied` leg; self-target emits one `combined` leg.
 
 ```json
 {
+  "leg": "target",
   "operation": {
     "operationId": "uuid",
     "kind": "hp.heal",
@@ -277,6 +282,10 @@ already reflected by owner/DM canonical truth. It does not suppress delivery: ev
 still arrive for history and dirty-local reconciliation, while a clean fetched base does not apply them twice.
 Because event sequences are campaign-local, moving a character to another campaign or detaching it resets the
 watermark to zero before that character is exposed in the new campaign context.
+
+Protocol-4 Character Sheet clients deduplicate by `operationId/source`, `operationId/target`, or
+`operationId/combined`. The source leg carries the closed source-cost descriptor only to the source owner and
+DM/co-DM; the target leg never exposes source resource ids or values.
 
 ## Client resync algorithm
 

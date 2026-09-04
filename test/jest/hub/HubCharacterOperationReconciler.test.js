@@ -1,12 +1,14 @@
 import {jest} from "@jest/globals";
 import {
 	BoundedIdSet,
+	CHARACTER_OPERATION_LEGS,
 	RECONCILE_STATUS,
 	TRACK_DECISION,
 	classifyTrack,
 	createCoverage,
 	deserializeCoverage,
 	planAppliedOperation,
+	planOperationLeg,
 	serializeCoverage,
 	validateDeliveredOperation,
 } from "../../../js/hub/hub-character-operation-reconciler.js";
@@ -26,6 +28,11 @@ const makeOperation = ({kind = "hp.damage", args = {amount: 3}, operationId = "o
 	version: 1,
 	targetCharacterId: "character-1",
 	arguments: args,
+});
+
+const makeSourceCost = ({level = 1, amount = 1} = {}) => ({
+	version: 1,
+	components: [{kind: "spell_slot", pool: "standard", level, amount}],
 });
 
 const planOne = ({tracks, operation, resultingCharacterRevision = 5, ...rest}) => planAppliedOperation({
@@ -201,11 +208,138 @@ describe("Per-track coverage classification", () => {
 		expect(restored.appliedOperationIds.has("b")).toBe(true);
 	});
 
+	it("migrates protocol-3 operation ids to target legs only", () => {
+		const restored = deserializeCoverage({
+			revision: 4,
+			acceptedSequence: 11,
+			appliedOperationIds: ["legacy-operation"],
+		});
+		expect(restored.appliedOperationLegIds.has("legacy-operation/target")).toBe(true);
+		expect(restored.appliedOperationLegIds.has("legacy-operation/source")).toBe(false);
+		expect(serializeCoverage(restored)).toMatchObject({
+			appliedOperationIds: ["legacy-operation"],
+			appliedOperationLegIds: ["legacy-operation/target"],
+		});
+	});
+
 	it("evicts the oldest ids beyond its bound while keeping the newest", () => {
 		const ids = new BoundedIdSet({ids: [], limit: 3});
 		["a", "b", "c", "d"].forEach(id => ids.add(id));
 		expect(ids.has("a")).toBe(false);
 		expect(ids.has("d")).toBe(true);
+	});
+
+	describe("ADR 0016 operation legs", () => {
+		it("applies a source cost to accepted and dirty live tracks", () => {
+			const live = makeCharacter({slots: {1: {current: 2, max: 2}}});
+			live.name = "Unsaved name";
+			const plan = planOperationLeg({
+				tracks: {
+					accepted: {data: makeCharacter({slots: {1: {current: 2, max: 2}}}), coverage: createCoverage({revision: 1})},
+					live: {data: live, coverage: createCoverage({revision: 1})},
+				},
+				leg: CHARACTER_OPERATION_LEGS.SOURCE,
+				operationId: "operation-1",
+				sourceCost: makeSourceCost(),
+				resultingCharacterRevision: 2,
+			});
+
+			expect(plan.status).toBe(RECONCILE_STATUS.APPLIED);
+			expect(plan.operationLegKey).toBe("operation-1/source");
+			expect(plan.staged.accepted.spellcasting.spellSlots[1].current).toBe(1);
+			expect(plan.staged.live).toMatchObject({
+				name: "Unsaved name",
+				spellcasting: {spellSlots: {1: {current: 1}}},
+			});
+		});
+
+		it("applies a self-target combined transform as E(C(data)) in one revision", () => {
+			const plan = planOperationLeg({
+				tracks: {
+					accepted: {data: makeCharacter({current: 10}), coverage: createCoverage({revision: 1})},
+					live: {data: makeCharacter({current: 8}), coverage: createCoverage({revision: 1})},
+				},
+				leg: CHARACTER_OPERATION_LEGS.COMBINED,
+				operation: makeOperation({kind: "hp.heal", args: {amount: 5}}),
+				sourceCost: makeSourceCost(),
+				resultingCharacterRevision: 2,
+			});
+
+			expect(plan.status).toBe(RECONCILE_STATUS.APPLIED);
+			expect(plan.operationLegKey).toBe("operation-1/combined");
+			expect(plan.revisionNext).toBe(2);
+			expect(plan.staged.accepted.hp.current).toBe(15);
+			expect(plan.staged.accepted.spellcasting.spellSlots[1].current).toBe(1);
+			expect(plan.staged.live.hp.current).toBe(13);
+			expect(plan.staged.live.spellcasting.spellSlots[1].current).toBe(1);
+		});
+
+		it("dedupes by leg rather than suppressing another leg with the same operation id", () => {
+			const appliedOperationLegIds = new BoundedIdSet({ids: ["operation-1/source"]});
+			const tracks = {accepted: {data: makeCharacter(), coverage: createCoverage({revision: 1, appliedOperationLegIds: ["operation-1/source"]})}};
+
+			const duplicateSource = planOperationLeg({
+				tracks,
+				leg: CHARACTER_OPERATION_LEGS.SOURCE,
+				operationId: "operation-1",
+				sourceCost: makeSourceCost(),
+				resultingCharacterRevision: 2,
+				appliedOperationLegIds,
+			});
+			const target = planOperationLeg({
+				tracks,
+				leg: CHARACTER_OPERATION_LEGS.TARGET,
+				operation: makeOperation(),
+				resultingCharacterRevision: 2,
+				appliedOperationLegIds,
+			});
+
+			expect(duplicateSource.status).toBe(RECONCILE_STATUS.SUPPRESSED);
+			expect(target.status).toBe(RECONCILE_STATUS.APPLIED);
+			expect(target.staged.accepted.hp.current).toBe(7);
+		});
+
+		it("rejects a delivered operation-leg identity that does not match its operation and leg", () => {
+			const plan = planOperationLeg({
+				tracks: {accepted: {data: makeCharacter(), coverage: createCoverage({revision: 1})}},
+				leg: CHARACTER_OPERATION_LEGS.SOURCE,
+				operationId: "operation-1",
+				operationLegKey: "operation-1/target",
+				sourceCost: makeSourceCost(),
+				resultingCharacterRevision: 2,
+			});
+
+			expect(plan).toMatchObject({
+				status: RECONCILE_STATUS.REJECTED,
+				error: {code: "OPERATION_INVALID"},
+			});
+		});
+
+		it("blocks atomically when canonical C(B) succeeds but dirty C(L) cannot spend", () => {
+			const accepted = makeCharacter({slots: {1: {current: 1, max: 2}}});
+			const live = makeCharacter({slots: {1: {current: 0, max: 2}}});
+			const plan = planOperationLeg({
+				tracks: {
+					accepted: {data: accepted, coverage: createCoverage({revision: 1})},
+					live: {data: live, coverage: createCoverage({revision: 1})},
+				},
+				leg: CHARACTER_OPERATION_LEGS.SOURCE,
+				operationId: "operation-1",
+				sourceCost: makeSourceCost(),
+				resultingCharacterRevision: 2,
+			});
+
+			expect(plan).toMatchObject({
+				status: RECONCILE_STATUS.BLOCKED,
+				blockedTrack: "live",
+				blockedTransform: "source",
+				error: {code: "SOURCE_COST_UNAVAILABLE"},
+			});
+			expect(plan.staged).toBeUndefined();
+			expect(plan.prepared.accepted.spellcasting.spellSlots[1].current).toBe(0);
+			expect(accepted.spellcasting.spellSlots[1].current).toBe(1);
+			expect(live.spellcasting.spellSlots[1].current).toBe(0);
+		});
 	});
 });
 

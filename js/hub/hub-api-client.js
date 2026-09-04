@@ -22,7 +22,7 @@ export class HubApiClient {
 	}
 
 	async _pRequest (path, {method = "GET", body = null, isMutation = false, idempotencyKey = null, signal = null} = {}) {
-		const headers = {accept: "application/json", "x-hub-protocol-version": "3"};
+		const headers = {accept: "application/json", "x-hub-protocol-version": "4"};
 		if (body != null) headers["content-type"] = "application/json";
 		if (isMutation) {
 			if (!this._csrfToken) throw new HubApiError({code: "CSRF_NOT_READY", status: 0});
@@ -429,21 +429,27 @@ export class HubApiClient {
 		});
 	}
 
-	async pCreatePeerAction ({campaignId, sourceCharacterId, sourceEntity, effectTemplateId, choice, targetRef, idempotencyKey}) {
+	async pCreatePeerAction ({campaignId, contractVersion = 1, sourceCharacterId, sourceEntity, effectTemplateId, choice, targetRef, rulesVersionId, idempotencyKey}) {
 		const commandId = idempotencyKey || crypto.randomUUID();
 		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/actions`, {
 			method: "POST",
-			body: {commandId, sourceCharacterId, sourceEntity, effectTemplateId, choice, targetRef},
+			body: {contractVersion, commandId, sourceCharacterId, sourceEntity, effectTemplateId, choice, targetRef, rulesVersionId},
 			isMutation: true,
 			idempotencyKey: commandId,
 		});
 	}
 
-	async pResolveStructuredAction ({campaignId, actionId, decision, idempotencyKey}) {
+	async pListCharacterOutgoingActions ({campaignId, characterId}) {
+		return (await this._pRequest(
+			`/api/campaigns/${encodeURIComponent(campaignId)}/characters/${encodeURIComponent(characterId)}/outgoing-actions`,
+		)).actions;
+	}
+
+	async pResolveStructuredAction ({campaignId, actionId, decision, contractVersion = null, idempotencyKey}) {
 		const commandId = idempotencyKey || crypto.randomUUID();
 		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/actions/${encodeURIComponent(actionId)}/resolve`, {
 			method: "POST",
-			body: {commandId, decision},
+			body: {commandId, decision, ...(contractVersion == null ? {} : {contractVersion})},
 			isMutation: true,
 			idempotencyKey: commandId,
 		});
