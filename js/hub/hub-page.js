@@ -940,7 +940,7 @@ async function pInitCampaign ({session}) {
 		api.pListCharacters({campaignId}),
 		api.pGetCampaignSnapshot({campaignId}),
 	]);
-	const [context, events] = await Promise.all([
+	const [contextInitial, events] = await Promise.all([
 		api.pGetCampaignContext({campaignId}),
 		api.pListEvents({
 			campaignId,
@@ -948,6 +948,7 @@ async function pInitCampaign ({session}) {
 			limit: 50,
 		}),
 	]);
+	let context = contextInitial;
 	const pRefreshMembers = async () => renderMemberList({
 		campaign,
 		campaignId,
@@ -998,7 +999,7 @@ async function pInitCampaign ({session}) {
 		document.title = `${campaign.name} - Campaign Hub - ThelemarTools`;
 		return;
 	}
-	const {pRefreshTransferState} = await pInitCampaignForms({
+	const {pRefreshTransferState, rulesPolicyManagerPromise} = await pInitCampaignForms({
 		campaign,
 		campaignId,
 		session,
@@ -1019,12 +1020,15 @@ async function pInitCampaign ({session}) {
 	let refreshTimer = null;
 	let isRefreshing = false;
 	let isRefreshQueued = false;
+	let isCampaignContextRefreshQueued = false;
 	const pRefreshLiveViews = async () => {
 		if (isCampaignReloadRequired || !navigator.onLine) return;
 		if (isRefreshing) {
 			isRefreshQueued = true;
 			return;
 		}
+		const isRefreshCampaignContext = isCampaignContextRefreshQueued;
+		isCampaignContextRefreshQueued = false;
 		isRefreshing = true;
 		try {
 			const [membersNxt, charactersNxt, snapshotNxt] = await Promise.all([
@@ -1059,6 +1063,11 @@ async function pInitCampaign ({session}) {
 				roster: liveRoster,
 			});
 			renderRecentActivity({events: liveEvents, characters: liveCharacters, members: membersNxt});
+			if (isRefreshCampaignContext) {
+				context = await api.pGetCampaignContext({campaignId});
+				renderCampaignContext(context);
+				void rulesPolicyManagerPromise.then(manager => manager?.replaceContext(context));
+			}
 			await Promise.all([
 				renderPendingActions({campaign, campaignId, session, targetCharacters: liveCharacters, members: membersNxt, roster: liveRoster}),
 				pRefreshTransferState({
@@ -1078,8 +1087,9 @@ async function pInitCampaign ({session}) {
 			}
 		}
 	};
-	const queueLiveRefresh = () => {
+	const queueLiveRefresh = ({isCampaignContextRefresh = false} = {}) => {
 		if (isCampaignReloadRequired) return;
+		if (isCampaignContextRefresh) isCampaignContextRefreshQueued = true;
 		if (refreshTimer != null) window.clearTimeout(refreshTimer);
 		refreshTimer = window.setTimeout(() => {
 			refreshTimer = null;
@@ -1098,7 +1108,7 @@ async function pInitCampaign ({session}) {
 		// event, including an invalidation, is coalesced into one authorization-scoped
 		// HTTP refetch that *replaces* the roster rather than merging into it, so a
 		// previously broader projection cannot survive a narrowed sharing policy.
-		queueLiveRefresh();
+		queueLiveRefresh({isCampaignContextRefresh: event.type === "rules.activated"});
 	});
 	realtime.on("cursor", baseline => {
 		if ((baseline?.cursor?.lastSequence || 0) >= liveLastSequence) {
@@ -1533,15 +1543,18 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		document.getElementById("campaign-rule-linguistics").checked = !!activeRules.thelemar_linguisticsBonus;
 		document.getElementById("campaign-rule-critical").checked = !!activeRules.thelemar_criticalRolls;
 	}
-	if (isDm) {
-		void pInitCampaignRulesPolicy({
+	const rulesPolicyManagerPromise = isDm
+		? pInitCampaignRulesPolicy({
 			api,
 			campaignId,
 			context,
 			fnRenderCampaignContext: renderCampaignContext,
 			fnRenderError: renderError,
-		}).catch(renderError);
-	}
+		}).catch(error => {
+			renderError(error);
+			return null;
+		})
+		: Promise.resolve(null);
 	setHidden(inviteForm, !isDm);
 	inviteForm?.addEventListener("submit", async event => {
 		event.preventDefault();
@@ -2053,7 +2066,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		}
 	});
 
-	return {pRefreshTransferState};
+	return {pRefreshTransferState, rulesPolicyManagerPromise};
 }
 
 async function pInit () {

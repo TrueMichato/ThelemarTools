@@ -135,6 +135,117 @@ describe("Campaign rules policy API", () => {
 		})).statusCode).toBe(201);
 	});
 
+	it("reads an existing schema-v1 false-TGTT/default-Thelemar version with the capability on or off", async () => {
+		const dm = await pSignIn(IDENTITIES.dm);
+		const campaign = await pCreateCampaign(dm);
+		const legacyVersion = {
+			id: "legacy-false-tgtt",
+			campaignId: campaign.id,
+			version: 1,
+			schemaVersion: 1,
+			rules: {enableTgtt: false},
+			createdAt: "2026-01-01T00:00:00.000Z",
+		};
+		store._rulesVersions.set(legacyVersion.id, legacyVersion);
+		store._campaigns.get(campaign.id).activeRulesVersionId = legacyVersion.id;
+
+		const readContext = async session => app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/context`,
+			headers: {cookie: session.cookie},
+		});
+		const enabled = await readContext(dm);
+		expect(enabled.statusCode).toBe(200);
+		expect(enabled.json().context.rulesVersion.rules).toEqual({
+			enableTgtt: false,
+			exhaustionRules: "thelemar",
+			thelemar_carryWeight: true,
+			thelemar_encumbranceTiers: true,
+			thelemar_jumping: true,
+			thelemar_linguisticsBonus: true,
+			thelemar_criticalRolls: true,
+		});
+
+		await app.close();
+		app = await createHubApp({
+			store,
+			oauthProvider: {
+				getAuthorizationUrl: ({state}) => `https://github.example/?state=${state}`,
+				pExchangeCode: async () => identity,
+			},
+			config: {
+				appOrigin: ORIGIN,
+				cookieSecret: "c".repeat(32),
+				csrfSecret: "s".repeat(32),
+				allowedOAuthSubjects: Object.values(IDENTITIES).map(it => `${it.provider}:${it.providerSubject}`),
+			},
+		});
+		const dmWithoutCapability = await pSignIn(IDENTITIES.dm);
+		const disabled = await readContext(dmWithoutCapability);
+		expect(disabled.statusCode).toBe(200);
+		expect(disabled.json()).toEqual(enabled.json());
+	});
+
+	it("keeps memory legacy create and activation all-or-none when public adaptation fails", async () => {
+		const dm = await pSignIn(IDENTITIES.dm);
+		const campaign = await pCreateCampaign(dm);
+		const createKey = {key: "legacy-create-retry", requestHash: "legacy-create-retry"};
+		await expect(store.pCreateRulesVersion({
+			accountId: dm.account.id,
+			campaignId: campaign.id,
+			schemaVersion: 1,
+			rules: {unknown: true},
+			idempotencyKey: createKey,
+		})).rejects.toEqual(expect.objectContaining({code: "RULES_INVALID"}));
+		expect(store._rulesVersions.size).toBe(0);
+		expect(store._audit.filter(entry => entry.action.startsWith("rules."))).toHaveLength(0);
+		expect(store._commandReceipts.has(`${dm.account.id}::${createKey.key}`)).toBe(false);
+
+		const retried = await store.pCreateRulesVersion({
+			accountId: dm.account.id,
+			campaignId: campaign.id,
+			schemaVersion: 1,
+			rules: {enableTgtt: false},
+			idempotencyKey: createKey,
+		});
+		expect(retried.rulesVersion.version).toBe(1);
+		expect(store._rulesVersions.size).toBe(1);
+		expect(store._audit.filter(entry => entry.action === "rules.created")).toHaveLength(1);
+
+		const corruptVersion = {
+			id: "corrupt-legacy",
+			campaignId: campaign.id,
+			version: 2,
+			schemaVersion: 1,
+			rules: {unknown: true},
+			createdAt: "2026-01-01T00:00:00.000Z",
+		};
+		store._rulesVersions.set(corruptVersion.id, corruptVersion);
+		const activateKey = {key: "legacy-activate-retry", requestHash: "legacy-activate-retry"};
+		await expect(store.pActivateRulesVersion({
+			accountId: dm.account.id,
+			campaignId: campaign.id,
+			rulesVersionId: corruptVersion.id,
+			idempotencyKey: activateKey,
+		})).rejects.toEqual(expect.objectContaining({code: "RULES_INVALID"}));
+		expect(store._campaigns.get(campaign.id).activeRulesVersionId).toBeNull();
+		expect(store._audit.filter(entry => entry.action === "rules.activated")).toHaveLength(0);
+		expect(store._events.filter(event => event.type === "rules.activated")).toHaveLength(0);
+		expect(store._commandReceipts.has(`${dm.account.id}::${activateKey.key}`)).toBe(false);
+
+		corruptVersion.rules = {enableTgtt: false};
+		const activated = await store.pActivateRulesVersion({
+			accountId: dm.account.id,
+			campaignId: campaign.id,
+			rulesVersionId: corruptVersion.id,
+			idempotencyKey: activateKey,
+		});
+		expect(activated.rulesVersion.id).toBe(corruptVersion.id);
+		expect(store._campaigns.get(campaign.id).activeRulesVersionId).toBe(corruptVersion.id);
+		expect(store._audit.filter(entry => entry.action === "rules.activated")).toHaveLength(1);
+		expect(store._events.filter(event => event.type === "rules.activated")).toHaveLength(1);
+	});
+
 	it("creates and activates one immutable version atomically with private audit and event evidence", async () => {
 		const dm = await pSignIn(IDENTITIES.dm);
 		const campaign = await pCreateCampaign(dm);

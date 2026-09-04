@@ -299,11 +299,14 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-policy-summary")).toContainText("Thelemar jumping");
 		await expect(this.page.locator("#campaign-policy-summary")).toContainText("Off · Advisory");
 
+		await this.page.locator("[data-campaign-rule-control='tgtt.critical-rolls']").uncheck();
+		await expect(this.page.locator("#campaign-rules-review-list")).toContainText("Thelemar critical rolls");
 		await this.page.context().setOffline(true);
 		await expect(this.page.locator("#campaign-rules-policy-status")).toContainText("Offline");
 		await expect(this.page.locator("#campaign-rules-activate")).toBeDisabled();
 		await this.page.context().setOffline(false);
 		await expect(this.page.locator("#campaign-rules-policy-status")).toContainText("Back online");
+		await expect(this.page.locator("#campaign-rules-activate")).toBeDisabled();
 		await this.page.reload();
 		await expect(this.page.locator("#campaign-content")).toBeVisible();
 		await this.openCampaignAdministration("Rules and homebrew");
@@ -350,6 +353,36 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-rules-policy-manager")).toBeHidden();
 		await expect(this.page.locator("#campaign-rules-form")).toBeHidden();
 		await expect(summary).not.toContainText(/account|created by|note/i);
+	}
+
+	async publishCampaignRuleViaApi ({
+		campaignId,
+		ruleId,
+		parameter,
+		value,
+	}: {
+		campaignId: string;
+		ruleId: string;
+		parameter: string;
+		value: boolean | string;
+	}): Promise<void> {
+		const managementResponse = await this.page.request.get(`/api/campaigns/${encodeURIComponent(campaignId)}/rules-policy`);
+		expect(managementResponse.ok()).toBe(true);
+		const {management} = await managementResponse.json();
+		const active = management.versions.find((version: any) => version.id === management.activeRulesVersionId);
+		const policy = structuredClone(active.policy);
+		policy.rules.find((rule: any) => rule.id === ruleId).parameters[parameter] = value;
+		const response = await this.page.request.post(`/api/campaigns/${encodeURIComponent(campaignId)}/rules-policy`, {
+			headers: await this.getMutationHeaders(),
+			data: {policy, expectedActiveRulesVersionId: active.id},
+		});
+		expect(response.status()).toBe(201);
+	}
+
+	async expectLiveCampaignPolicySummary ({title, value}: {title: string; value: string}): Promise<void> {
+		const summary = this.page.locator("#campaign-policy-summary");
+		await expect(summary).toContainText(title);
+		await expect(summary).toContainText(value);
 	}
 
 	async createInviteViaApi (campaignId: string, role = "player"): Promise<string> {

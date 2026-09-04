@@ -12,6 +12,60 @@ function command (key, requestHash = `hash:${key}`) {
 	return {key, requestHash};
 }
 
+function getSqlText (query) {
+	return typeof query === "string" ? query : query.text;
+}
+
+function createRulesManagementInterleavingPool ({pool, pPublish}) {
+	let resolveVersionsRead;
+	let resolvePublished;
+	const pVersionsRead = new Promise(resolve => resolveVersionsRead = resolve);
+	const pPublished = new Promise(resolve => resolvePublished = resolve);
+	let publishPromise = null;
+	const pTriggerPublish = () => {
+		publishPromise ||= pPublish().finally(resolvePublished);
+		return publishPromise;
+	};
+	const isPointerRead = query => {
+		const sql = getSqlText(query);
+		return sql.includes("SELECT active_rules_version_id")
+			&& sql.includes("FROM hub.campaigns")
+			&& !sql.includes("FOR UPDATE");
+	};
+	const isVersionHistoryRead = query => {
+		const sql = getSqlText(query);
+		return sql.includes("FROM hub.rules_versions")
+			&& sql.includes("ORDER BY version DESC");
+	};
+	return {
+		query: async (query, values) => {
+			if (isPointerRead(query)) {
+				await pVersionsRead;
+				await pTriggerPublish();
+				return pool.query(query, values);
+			}
+			if (isVersionHistoryRead(query)) {
+				const result = await pool.query(query, values);
+				resolveVersionsRead();
+				await pPublished;
+				return result;
+			}
+			return pool.query(query, values);
+		},
+		connect: async () => {
+			const client = await pool.connect();
+			return {
+				query: async (query, values) => {
+					const result = await client.query(query, values);
+					if (isPointerRead(query)) await pTriggerPublish();
+					return result;
+				},
+				release: () => client.release(),
+			};
+		},
+	};
+}
+
 function normalizeDynamicValues (value) {
 	const replacements = new Map();
 	let uuidIx = 0;
@@ -220,5 +274,49 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 		expect(evidence.audit).toHaveLength(2);
 		expect(evidence.events).toHaveLength(1);
 		expect(evidence.outboxCount).toBe(2);
+	});
+
+	it("keeps the active pointer and version history in one snapshot during a concurrent publish", async () => {
+		const writer = new PostgresHubStore({pool});
+		const account = await writer.pUpsertOAuthAccount({
+			provider: "test",
+			providerSubject: `rules-management-snapshot-${crypto.randomUUID()}`,
+			displayName: "Rules Snapshot DM",
+		});
+		const campaign = (await writer.pCreateCampaign({
+			accountId: account.id,
+			name: "Rules management snapshot",
+			idempotencyKey: command("snapshot-campaign"),
+		})).campaign;
+		const first = await writer.pCreateAndActivateRulesPolicy({
+			accountId: account.id,
+			campaignId: campaign.id,
+			policy: createDefaultCampaignRulesPolicy(),
+			expectedActiveRulesVersionId: null,
+			idempotencyKey: command("snapshot-publish-first"),
+		});
+		const changed = createDefaultCampaignRulesPolicy();
+		changed.rules.find(rule => rule.id === "tgtt.jumping").parameters.enabled = false;
+		const interleavingPool = createRulesManagementInterleavingPool({
+			pool,
+			pPublish: () => writer.pCreateAndActivateRulesPolicy({
+				accountId: account.id,
+				campaignId: campaign.id,
+				policy: changed,
+				expectedActiveRulesVersionId: first.rulesVersion.id,
+				idempotencyKey: command("snapshot-publish-second"),
+			}),
+		});
+		const reader = new PostgresHubStore({pool: interleavingPool});
+
+		const management = await reader.pGetRulesPolicyManagement({
+			accountId: account.id,
+			campaignId: campaign.id,
+		});
+		expect(management.activeRulesVersionId).toBe(first.rulesVersion.id);
+		expect(management.versions.map(version => version.id)).toEqual([first.rulesVersion.id]);
+		const afterPublish = await writer.pGetRulesPolicyManagement({accountId: account.id, campaignId: campaign.id});
+		expect(afterPublish.activeRulesVersionId).not.toBe(management.activeRulesVersionId);
+		expect(afterPublish.versions.some(version => version.id === afterPublish.activeRulesVersionId)).toBe(true);
 	});
 });

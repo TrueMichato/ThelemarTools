@@ -1470,12 +1470,13 @@ export class MemoryHubStore {
 			rules: copy(rules),
 			createdAt: this._fnNow().toISOString(),
 		};
+		const response = {rulesVersion: getPublicCampaignRulesVersion(rulesVersion, {isIncludePolicy: true})};
 		this._rulesVersions.set(rulesVersion.id, rulesVersion);
 		this._appendAudit({campaignId, actorAccountId: accountId, action: "rules.created", targetType: "rules_version", targetId: rulesVersion.id});
 		return this._setReceipt({
 			accountId,
 			idempotencyKey,
-			response: {rulesVersion: getPublicCampaignRulesVersion(rulesVersion, {isIncludePolicy: true})},
+			response,
 		});
 	}
 
@@ -1485,13 +1486,14 @@ export class MemoryHubStore {
 		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
 		const rulesVersion = this._rulesVersions.get(rulesVersionId);
 		if (!rulesVersion || rulesVersion.campaignId !== campaignId) throw new HubStoreError("RULES_NOT_FOUND", `Rules version was not found.`, {status: 404});
+		const response = {rulesVersion: getPublicCampaignRulesVersion(rulesVersion, {isIncludePolicy: true})};
 		this._campaigns.get(campaignId).activeRulesVersionId = rulesVersionId;
 		this._appendAudit({campaignId, actorAccountId: accountId, action: "rules.activated", targetType: "rules_version", targetId: rulesVersionId});
 		this._appendEvent({campaignId, actorAccountId: accountId, type: "rules.activated", aggregateType: "rules_version", aggregateId: rulesVersionId, payload: {version: rulesVersion.version}});
 		return this._setReceipt({
 			accountId,
 			idempotencyKey,
-			response: {rulesVersion: getPublicCampaignRulesVersion(rulesVersion, {isIncludePolicy: true})},
+			response,
 		});
 	}
 

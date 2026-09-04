@@ -351,4 +351,11 @@ describe("campaign hub pages", () => {
 		expect(scss).toMatch(/@media \(width <= 720px\)[\s\S]*\.hub-rules-toolbar,[\s\S]*\.hub-rule-row/);
 		expect(scss).toContain(".hub-rule-row__control .hub-setting:has(input:focus-visible)");
 	});
+
+	it("refetches authorization-scoped campaign context after a rules activation event", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("event.type === \"rules.activated\"");
+		expect(source).toMatch(/isCampaignContextRefreshQueued[\s\S]*api\.pGetCampaignContext\(\{campaignId\}\)/);
+		expect(source).toContain("renderCampaignContext(context)");
+	});
 });

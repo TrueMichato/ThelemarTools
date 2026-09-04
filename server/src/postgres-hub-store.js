@@ -2183,39 +2183,54 @@ export class PostgresHubStore {
 	}
 
 	async pGetRulesPolicyManagement ({accountId, campaignId}) {
-		const membership = await this.pGetMembership({accountId, campaignId});
-		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
-		if (!["dm", "co_dm"].includes(membership.role)) {
-			throw new HubStoreError("FORBIDDEN", `This campaign role cannot manage rules.`, {status: 403});
-		}
-		const [campaignResult, versionsResult] = await Promise.all([
-			this._pool.query(`
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+			const membershipResult = await client.query(`
+				SELECT role
+				FROM hub.memberships
+				WHERE campaign_id = $1 AND account_id = $2 AND status = 'active'
+			`, [campaignId, accountId]);
+			if (!membershipResult.rowCount) {
+				throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+			}
+			if (!["dm", "co_dm"].includes(membershipResult.rows[0].role)) {
+				throw new HubStoreError("FORBIDDEN", `This campaign role cannot manage rules.`, {status: 403});
+			}
+			const campaignResult = await client.query(`
 				SELECT active_rules_version_id
 				FROM hub.campaigns
 				WHERE id = $1 AND status <> 'deleting'
-			`, [campaignId]),
-			this._pool.query(`
+			`, [campaignId]);
+			if (!campaignResult.rowCount) {
+				throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+			}
+			const versionsResult = await client.query(`
 				SELECT *
 				FROM hub.rules_versions
 				WHERE campaign_id = $1
 				ORDER BY version DESC
-			`, [campaignId]),
-		]);
-		if (!campaignResult.rowCount) {
-			throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+			`, [campaignId]);
+			const response = {
+				campaignId,
+				activeRulesVersionId: campaignResult.rows[0].active_rules_version_id,
+				versions: versionsResult.rows.map(row => getPublicCampaignRulesVersion({
+					id: row.id,
+					campaignId: row.campaign_id,
+					version: row.version,
+					schemaVersion: row.schema_version,
+					rules: row.rules,
+					createdAt: row.created_at,
+				}, {isIncludePolicy: true})),
+			};
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
 		}
-		return {
-			campaignId,
-			activeRulesVersionId: campaignResult.rows[0].active_rules_version_id,
-			versions: versionsResult.rows.map(row => getPublicCampaignRulesVersion({
-				id: row.id,
-				campaignId: row.campaign_id,
-				version: row.version,
-				schemaVersion: row.schema_version,
-				rules: row.rules,
-				createdAt: row.created_at,
-			}, {isIncludePolicy: true})),
-		};
 	}
 
 	async pCreateAndActivateRulesPolicy ({

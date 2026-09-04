@@ -104,6 +104,7 @@ export class HubRulesPolicyManager {
 		this._supportStatus = STATUS_ALL;
 		this._isBusy = false;
 		this._isOffline = !navigator.onLine;
+		this._isPolicyRefreshRequired = this._isOffline;
 	}
 
 	async pInit () {
@@ -139,16 +140,27 @@ export class HubRulesPolicyManager {
 		document.getElementById("campaign-rules-activate")?.addEventListener("click", () => void this._pPublish());
 		document.getElementById("campaign-rules-history")?.addEventListener("change", () => this._renderRollbackReview());
 		document.getElementById("campaign-rules-rollback")?.addEventListener("click", () => void this._pRollback());
-		window.addEventListener("offline", () => {
-			this._isOffline = true;
-			this._renderReview();
-			this._setStatus("Offline. Current policy remains visible, but activation is unavailable.", true);
-		});
-		window.addEventListener("online", () => {
-			this._isOffline = false;
-			this._renderReview();
-			this._setStatus("Back online. Reload policy history before activating changes.", true);
-		});
+		window.addEventListener("offline", () => this._handleOffline());
+		window.addEventListener("online", () => this._handleOnline());
+	}
+
+	_handleOffline () {
+		this._isOffline = true;
+		this._isPolicyRefreshRequired = true;
+		this._renderReview();
+		this._renderRollbackReview();
+		this._setStatus("Offline. Current policy remains visible, but activation is unavailable.", true);
+	}
+
+	_handleOnline () {
+		this._isOffline = false;
+		this._renderReview();
+		this._renderRollbackReview();
+		this._setStatus("Back online. Reload policy history before activating changes.", true);
+	}
+
+	_isMutationUnavailable () {
+		return this._isBusy || this._isOffline || this._isPolicyRefreshRequired;
 	}
 
 	async _pLoad ({preservedDraft = null, conflictMessage = ""} = {}) {
@@ -159,6 +171,7 @@ export class HubRulesPolicyManager {
 			this._management = response.management;
 			const active = getActiveVersion(this._management);
 			this._draft = preservedDraft || structuredClone(active?.policy || createDefaultCampaignRulesPolicy());
+			this._isPolicyRefreshRequired = false;
 			this._renderFilters();
 			this._renderCatalog();
 			this._renderHistory();
@@ -327,8 +340,7 @@ export class HubRulesPolicyManager {
 			setHidden(validation, !validationMessage);
 		}
 		if (activate) {
-			activate.disabled = this._isBusy
-				|| this._isOffline
+			activate.disabled = this._isMutationUnavailable()
 				|| !!validationMessage
 				|| (!!active && !isLegacyUpgrade && !changes.length);
 		}
@@ -370,11 +382,11 @@ export class HubRulesPolicyManager {
 				text: `${change.title}: ${change.before} to ${change.after}`,
 			}))
 			: [document.createTextNode("This version has the same projected settings but preserves its earlier immutable record.")]));
-		button.disabled = this._isBusy || this._isOffline;
+		button.disabled = this._isMutationUnavailable();
 	}
 
 	async _pPublish () {
-		if (this._isBusy || this._isOffline) return;
+		if (this._isMutationUnavailable()) return;
 		this._isBusy = true;
 		this._renderReview();
 		this._setStatus("Activating a new immutable policy version...");
@@ -408,7 +420,7 @@ export class HubRulesPolicyManager {
 
 	async _pRollback () {
 		const select = document.getElementById("campaign-rules-history");
-		if (this._isBusy || this._isOffline || !select?.value) return;
+		if (this._isMutationUnavailable() || !select?.value) return;
 		this._isBusy = true;
 		this._renderReview();
 		this._renderRollbackReview();
@@ -446,6 +458,10 @@ export class HubRulesPolicyManager {
 			},
 		};
 		this._fnRenderCampaignContext(this._context);
+	}
+
+	replaceContext (context) {
+		this._context = context;
 	}
 }
 

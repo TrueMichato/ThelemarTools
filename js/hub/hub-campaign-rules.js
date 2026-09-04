@@ -354,7 +354,7 @@ function validateCompatibility (policy) {
 	}
 }
 
-export function normalizeCampaignRulesPolicy (policy) {
+function normalizeCampaignRulesPolicyInternal (policy, {isValidateCompatibility = true} = {}) {
 	assertPlainObject(policy, "RULES_INVALID", "Campaign policy must be an object.");
 	assertOnlyKeys(policy, new Set(["schemaVersion", "catalogVersion", "rules", "notes"]), "RULES_INVALID", "Unsupported campaign policy fields.");
 	if (policy.schemaVersion !== CAMPAIGN_RULES_POLICY_SCHEMA_VERSION) {
@@ -431,8 +431,12 @@ export function normalizeCampaignRulesPolicy (policy) {
 		rules,
 		notes,
 	};
-	validateCompatibility(normalized);
+	if (isValidateCompatibility) validateCompatibility(normalized);
 	return normalized;
+}
+
+export function normalizeCampaignRulesPolicy (policy) {
+	return normalizeCampaignRulesPolicyInternal(policy);
 }
 
 export function adaptLegacyCampaignRules (rules) {
@@ -447,12 +451,12 @@ export function adaptLegacyCampaignRules (rules) {
 			parameters: {[definition.parameter.key]: settings[settingKey]},
 		};
 	});
-	return normalizeCampaignRulesPolicy({
+	return normalizeCampaignRulesPolicyInternal({
 		schemaVersion: CAMPAIGN_RULES_POLICY_SCHEMA_VERSION,
 		catalogVersion: CAMPAIGN_RULES_CATALOG_VERSION,
 		rules: selections,
 		notes: [],
-	});
+	}, {isValidateCompatibility: false});
 }
 
 export function createDefaultCampaignRulesPolicy () {
@@ -477,7 +481,7 @@ export function projectCampaignSettings ({schemaVersion, rules}) {
 }
 
 export function getCampaignRulesPolicySummary (policy) {
-	const normalized = normalizeCampaignRulesPolicy(policy);
+	const normalized = normalizeCampaignRulesPolicyInternal(policy, {isValidateCompatibility: false});
 	return {
 		catalogVersion: normalized.catalogVersion,
 		rules: normalized.rules.map(selection => {
@@ -493,7 +497,7 @@ export function getCampaignRulesPolicySummary (policy) {
 }
 
 export function diffCampaignRulesPolicies ({before, after}) {
-	const beforeMap = getSelectionMap(normalizeCampaignRulesPolicy(before));
+	const beforeMap = getSelectionMap(normalizeCampaignRulesPolicyInternal(before, {isValidateCompatibility: false}));
 	const afterNormalized = normalizeCampaignRulesPolicy(after);
 	return afterNormalized.rules.flatMap(selection => {
 		const definition = CATALOG_BY_ID.get(selection.id);

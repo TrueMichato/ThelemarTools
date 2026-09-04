@@ -88,6 +88,24 @@ describe("Campaign rules policy catalog", () => {
 		});
 	});
 
+	it("keeps every schema-v1 accepted default combination readable without weakening schema-v2 publication", () => {
+		const legacy = {enableTgtt: false};
+		const policy = adaptLegacyCampaignRules(legacy);
+		expect(policy.rules.find(rule => rule.id === "tgtt.enabled").parameters.enabled).toBe(false);
+		expect(policy.rules.find(rule => rule.id === "rules.exhaustion.system").parameters.system).toBe("thelemar");
+		expect(projectCampaignSettings({schemaVersion: 1, rules: legacy})).toEqual({
+			...DEFAULT_CAMPAIGN_SETTINGS,
+			enableTgtt: false,
+		});
+		expect(getCampaignRulesPolicySummary(policy).rules).toEqual(expect.arrayContaining([
+			expect.objectContaining({id: "tgtt.enabled", value: "Off"}),
+			expect.objectContaining({id: "rules.exhaustion.system", value: "Thelemar"}),
+		]));
+		expect(() => normalizeCampaignRulesPolicy(policy)).toThrow(expect.objectContaining({
+			code: "RULES_COMBINATION_UNSUPPORTED",
+		}));
+	});
+
 	it("rejects unknown, unavailable, malformed, duplicate, and falsely-enforced selections", () => {
 		const cases = [
 			{
