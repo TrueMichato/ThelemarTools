@@ -1973,9 +1973,10 @@ export class PostgresHubStore {
 			const source = getCharacter(characterResult.rows[0]);
 			if (source.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can ${isMove ? "move" : "clone"} this character.`, {status: 403});
 			const destinationRulesResult = await client.query(`
-				SELECT r.id, r.version, r.schema_version, r.rules
+				SELECT r.id, r.version, r.schema_version, r.rules, b.content_hash
 				FROM hub.campaigns c
 				LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
+				LEFT JOIN hub.brew_bundle_versions b ON b.id = c.active_brew_bundle_version_id
 				WHERE c.id = $1
 				FOR UPDATE OF c
 			`, [campaignId]);
@@ -1991,6 +1992,7 @@ export class PostgresHubStore {
 			const destinationData = prepareCampaignTransitionData({
 				data: source.data,
 				rulesVersion: destinationRulesVersion,
+				brewBundleHash: destinationRulesRow?.content_hash ?? null,
 			});
 
 			let character;

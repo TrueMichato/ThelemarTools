@@ -181,6 +181,8 @@ function isClosedRuleDecision (decision) {
 		|| rule.ruleSchemaVersion < 1
 		|| rule.ruleSchemaVersion !== definition.ruleSchemaVersion
 		|| !["legacy", "advisory", "enforced"].includes(rule.mode)
+		|| (decision.policyIdentity?.schemaVersion === 1 && rule.mode !== "legacy")
+		|| (decision.policyIdentity?.schemaVersion === CAMPAIGN_RULES_POLICY_SCHEMA_VERSION && rule.mode === "legacy")
 		|| (rule.mode === "enforced" && definition.lifecycle !== "implemented_enforced")
 		|| appliedRuleIds.has(rule.id);
 		appliedRuleIds.add(rule?.id);

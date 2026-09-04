@@ -340,6 +340,26 @@ const MUTANTS = [
 		},
 	},
 	{
+		name: "evaluator-settings-domain-disabled",
+		probe: probeEvaluatorFailClosed,
+		mutations: {
+			"hub-campaign-rule-evaluator.js": source => source.replace(
+				"if (Object.entries(decision.effectiveSettings).some(([key, value]) => (",
+				"if (false && Object.entries(decision.effectiveSettings).some(([key, value]) => (",
+			),
+		},
+	},
+	{
+		name: "evaluator-applied-rule-catalog-disabled",
+		probe: probeEvaluatorFailClosed,
+		mutations: {
+			"hub-campaign-rule-evaluator.js": source => source.replace(
+				"\t\treturn isInvalid;\n\t})) return false;",
+				"\t\treturn false;\n\t})) return false;",
+			),
+		},
+	},
+	{
 		name: "evaluator-master-toggle-disabled",
 		probe: probeEvaluatorFailClosed,
 		mutations: {

@@ -1344,9 +1344,13 @@ export class MemoryHubStore {
 		const destinationRulesVersion = destination?.activeRulesVersionId
 			? this._rulesVersions.get(destination.activeRulesVersionId)
 			: null;
+		const destinationBrewBundle = destination?.activeBrewBundleVersionId
+			? this._brewVersions.get(destination.activeBrewBundleVersionId)
+			: null;
 		const destinationData = prepareCampaignTransitionData({
 			data: source.data,
 			rulesVersion: destinationRulesVersion,
+			brewBundleHash: destinationBrewBundle?.contentHash ?? null,
 		});
 		const clone = {
 			...copy(source),
@@ -1389,9 +1393,13 @@ export class MemoryHubStore {
 		const destinationRulesVersion = destination?.activeRulesVersionId
 			? this._rulesVersions.get(destination.activeRulesVersionId)
 			: null;
+		const destinationBrewBundle = destination?.activeBrewBundleVersionId
+			? this._brewVersions.get(destination.activeBrewBundleVersionId)
+			: null;
 		const destinationData = prepareCampaignTransitionData({
 			data: character.data,
 			rulesVersion: destinationRulesVersion,
+			brewBundleHash: destinationBrewBundle?.contentHash ?? null,
 		});
 		this._cancelIncomingForCharacter({character});
 		for (const operation of this._semanticOperations.values()) {

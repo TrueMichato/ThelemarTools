@@ -53,7 +53,12 @@ export function assertCampaignRuleWriteFence ({rulesVersion, data, protocolVersi
  * This helper is deliberately shared by the memory and PostgreSQL transition paths. It performs
  * no writes and returns a cloned document, allowing callers to reject or commit atomically.
  */
-export function prepareCampaignTransitionData ({data, rulesVersion, protocolVersion = CAMPAIGN_RULE_PROTOCOL_VERSION}) {
+export function prepareCampaignTransitionData ({
+	data,
+	rulesVersion,
+	brewBundleHash = null,
+	protocolVersion = CAMPAIGN_RULE_PROTOCOL_VERSION,
+}) {
 	const prepared = structuredClone(data);
 	if (!prepared?.carry) return prepared;
 	const basis = prepared.carry?.basis;
@@ -62,6 +67,7 @@ export function prepareCampaignTransitionData ({data, rulesVersion, protocolVers
 		&& Number(rulesVersion.schemaVersion) >= 2
 		&& basis?.kind === "campaign"
 		&& basis.rulesVersionId === rulesVersion.id
+		&& basis.brewBundleHash === brewBundleHash
 	) {
 		assertCampaignRuleWriteFence({rulesVersion, data: prepared, protocolVersion});
 		return prepared;
