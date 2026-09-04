@@ -107,7 +107,45 @@ function getPolicyIdentity (rulesVersion) {
 
 function isClosedRuleDecision (decision) {
 	if (!decision || typeof decision !== "object" || Array.isArray(decision)) return false;
-	return !Object.keys(decision).some(key => !_RULE_DECISION_KEYS.has(key));
+	if (
+		Object.keys(decision).some(key => !_RULE_DECISION_KEYS.has(key))
+		|| decision.schemaVersion !== 1
+		|| decision.evaluatorVersion !== CAMPAIGN_RULE_EVALUATOR_VERSION
+		|| !["inactive", "compliant", "blocked"].includes(decision.status)
+		|| typeof decision.blocking !== "boolean"
+		|| !_SURFACES.has(decision.surface)
+		|| !decision.effectiveSettings
+		|| typeof decision.effectiveSettings !== "object"
+		|| Array.isArray(decision.effectiveSettings)
+		|| !Array.isArray(decision.appliedRules)
+		|| decision.appliedRules.length > CAMPAIGN_RULES_CATALOG.length
+		|| !Array.isArray(decision.errors)
+		|| decision.errors.length > CAMPAIGN_RULES_CATALOG.length
+	) return false;
+	if (decision.policyIdentity != null && !getPolicyIdentity(decision.policyIdentity)) return false;
+	if (decision.status === "inactive" && (decision.blocking || decision.policyIdentity != null || decision.appliedRules.length || decision.errors.length)) return false;
+	if (decision.status === "compliant" && (decision.blocking || !decision.policyIdentity || decision.errors.length)) return false;
+	if (decision.status === "blocked" && (!decision.blocking || !decision.errors.length)) return false;
+	if (decision.appliedRules.some(rule => (
+		!rule
+		|| typeof rule !== "object"
+		|| Array.isArray(rule)
+		|| Object.keys(rule).some(key => !["id", "ruleSchemaVersion", "mode"].includes(key))
+		|| typeof rule.id !== "string"
+		|| !rule.id
+		|| !Number.isSafeInteger(rule.ruleSchemaVersion)
+		|| !["legacy", "advisory", "enforced"].includes(rule.mode)
+	))) return false;
+	if (decision.errors.some(error => (
+		!error
+		|| typeof error !== "object"
+		|| Array.isArray(error)
+		|| Object.keys(error).some(key => !["code", "ruleId"].includes(key))
+		|| typeof error.code !== "string"
+		|| !error.code
+		|| (error.ruleId != null && (typeof error.ruleId !== "string" || !error.ruleId))
+	))) return false;
+	return true;
 }
 
 function blocked ({surface, personalSettings, rulesVersion = null, code, ruleId = null}) {

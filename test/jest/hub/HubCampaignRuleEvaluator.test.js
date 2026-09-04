@@ -120,6 +120,17 @@ describe("campaign rule evaluator", () => {
 		expect(getCampaignSettingsOverlayFromRulesVersion(version)).toBeNull();
 	});
 
+	it("rejects an allowed-key decision which omits required contract fields", () => {
+		const version = rulesVersion();
+		version.ruleDecision = {
+			status: "compliant",
+			blocking: false,
+			policyIdentity: {id: "rules-1", version: 1, schemaVersion: 2, catalogVersion: 1},
+			effectiveSettings: {enableTgtt: true},
+		};
+		expect(getCampaignSettingsOverlayFromRulesVersion(version)).toBeNull();
+	});
+
 	it("rejects contradictory Thelemar dependencies instead of partially applying", () => {
 		const version = rulesVersion(policy => {
 			policy.rules.find(rule => rule.id === "tgtt.carry-weight").parameters.enabled = false;

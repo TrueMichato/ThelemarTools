@@ -308,7 +308,7 @@ class CharacterSheetPage {
 			// exception, the first transient outage permanently required a reload.
 			if (!this._hubContext && !this._hubRulesRefreshBlocked) return false;
 			if (rulesVersionId && context?.rulesVersion?.id !== rulesVersionId) return false;
-			const overlay = getCampaignSettingsOverlay(context?.rulesVersion?.ruleDecision);
+			const overlay = _getHubRulesOverlay(context);
 			if (context?.rulesVersion && !overlay) throw new Error(`Campaign rules are incompatible.`);
 			this._hubContext = context;
 			this._hubRulesRefreshBlocked = false;
