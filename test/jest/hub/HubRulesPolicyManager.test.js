@@ -16,6 +16,7 @@ function getManager (overrides = {}) {
 		_isLoading: false,
 		_isOffline: false,
 		_isPolicyRefreshRequired: false,
+		_isReadOnlyAfterAccessChange: false,
 		_policyLoadGeneration: 0,
 		_pendingPolicyLoads: 0,
 		_setLoading: jest.fn(),
@@ -32,8 +33,12 @@ function getManager (overrides = {}) {
 
 function getDeferred () {
 	let resolve;
-	const promise = new Promise(resolve_ => resolve = resolve_);
-	return {promise, resolve};
+	let reject;
+	const promise = new Promise((resolve_, reject_) => {
+		resolve = resolve_;
+		reject = reject_;
+	});
+	return {promise, reject, resolve};
 }
 
 function getElement (overrides = {}) {
@@ -186,7 +191,7 @@ describe("HubRulesPolicyManager busy controls", () => {
 				? {pPublishRulesPolicy: jest.fn().mockReturnValue(delayed.promise)}
 				: {pActivateRulesPolicyVersion: jest.fn().mockReturnValue(delayed.promise)},
 			_pRefreshContext: jest.fn(),
-			_pLoad: jest.fn(),
+			_pLoad: jest.fn().mockResolvedValue(true),
 		});
 
 		const pending = operation === "publish" ? manager._pPublish() : manager._pRollback();
@@ -199,5 +204,120 @@ describe("HubRulesPolicyManager busy controls", () => {
 		expect(manager._isBusy).toBe(false);
 		expect(controls.map(control => control.disabled)).toEqual([false, false, true]);
 		expect(root.setAttribute).toHaveBeenLastCalledWith("aria-busy", "false");
+	});
+
+	it.each([
+		["publish", "AUTH_REQUIRED"],
+		["publish", "FORBIDDEN"],
+		["publish", "CAMPAIGN_NOT_FOUND"],
+		["rollback", "AUTH_REQUIRED"],
+		["rollback", "FORBIDDEN"],
+		["rollback", "CAMPAIGN_NOT_FOUND"],
+	])("keeps every policy control read-only after %s loses access with %s", async (operation, code) => {
+		const delayed = getDeferred();
+		const controls = {
+			catalogInput: getElement(),
+			activate: getElement(),
+			history: getElement({value: "legacy"}),
+			rollback: getElement(),
+		};
+		const root = getElement({
+			querySelectorAll: jest.fn().mockReturnValue(Object.values(controls)),
+		});
+		globalThis.document = {
+			getElementById: id => id === "campaign-rules-history" ? controls.history : null,
+		};
+		const manager = getManager({
+			_root: root,
+			_management: {activeRulesVersionId: "active", versions: []},
+			_draft: createDefaultCampaignRulesPolicy(),
+			_api: operation === "publish"
+				? {pPublishRulesPolicy: jest.fn().mockReturnValue(delayed.promise)}
+				: {pActivateRulesPolicyVersion: jest.fn().mockReturnValue(delayed.promise)},
+			_fnRenderError: jest.fn(() => {
+				for (const control of Object.values(controls)) control.disabled = true;
+			}),
+		});
+
+		const pending = operation === "publish" ? manager._pPublish() : manager._pRollback();
+		manager._renderCatalog.mockClear();
+		manager._renderHistory.mockClear();
+		manager._renderReview.mockClear();
+		delayed.reject(Object.assign(new Error(code), {code}));
+		await pending;
+
+		expect(manager._isReadOnlyAfterAccessChange).toBe(true);
+		expect(manager._isMutationUnavailable()).toBe(true);
+		expect(Object.values(controls).every(control => control.disabled)).toBe(true);
+		expect(manager._renderCatalog).not.toHaveBeenCalled();
+		expect(manager._renderHistory).not.toHaveBeenCalled();
+		expect(manager._renderReview).not.toHaveBeenCalled();
+	});
+
+	it.each(["publish", "rollback"])("restores policy controls after an ordinary %s error", async operation => {
+		const delayed = getDeferred();
+		const controls = [
+			getElement(),
+			getElement(),
+			getElement({disabled: true}),
+		];
+		const history = getElement({value: "legacy"});
+		const root = getElement({
+			querySelectorAll: jest.fn().mockReturnValue(controls),
+		});
+		globalThis.document = {getElementById: id => id === "campaign-rules-history" ? history : null};
+		const manager = getManager({
+			_root: root,
+			_management: {activeRulesVersionId: "active", versions: []},
+			_draft: createDefaultCampaignRulesPolicy(),
+			_api: operation === "publish"
+				? {pPublishRulesPolicy: jest.fn().mockReturnValue(delayed.promise)}
+				: {pActivateRulesPolicyVersion: jest.fn().mockReturnValue(delayed.promise)},
+		});
+
+		const pending = operation === "publish" ? manager._pPublish() : manager._pRollback();
+		delayed.reject(Object.assign(new Error("Service unavailable"), {code: "SERVICE_UNAVAILABLE"}));
+		await pending;
+
+		expect(manager._isReadOnlyAfterAccessChange).toBe(false);
+		expect(controls.map(control => control.disabled)).toEqual([false, false, true]);
+	});
+
+	it.each(["publish", "rollback"])("does not overwrite terminal access status when %s reload loses access", async operation => {
+		const controls = [
+			getElement(),
+			getElement(),
+			getElement(),
+		];
+		const history = getElement({value: "legacy"});
+		const root = getElement({
+			querySelectorAll: jest.fn().mockReturnValue(controls),
+		});
+		globalThis.document = {getElementById: id => id === "campaign-rules-history" ? history : null};
+		const mutationResult = {rulesVersion: {version: 2}};
+		const manager = getManager({
+			_root: root,
+			_management: {activeRulesVersionId: "active", versions: []},
+			_draft: createDefaultCampaignRulesPolicy(),
+			_api: {
+				pGetRulesPolicyManagement: jest.fn().mockRejectedValue(Object.assign(new Error("Access removed"), {code: "CAMPAIGN_NOT_FOUND"})),
+				...(operation === "publish"
+					? {pPublishRulesPolicy: jest.fn().mockResolvedValue(mutationResult)}
+					: {pActivateRulesPolicyVersion: jest.fn().mockResolvedValue(mutationResult)}),
+			},
+			_pRefreshContext: jest.fn(),
+			_fnRenderError: jest.fn(() => {
+				for (const control of controls) control.disabled = true;
+			}),
+		});
+
+		await (operation === "publish" ? manager._pPublish() : manager._pRollback());
+
+		expect(manager._setStatus).toHaveBeenLastCalledWith(
+			"The rules library could not be loaded. No campaign settings were changed.",
+			true,
+		);
+		expect(manager._isReadOnlyAfterAccessChange).toBe(true);
+		expect(controls.every(control => control.disabled)).toBe(true);
 	});
 });

@@ -131,6 +131,47 @@ async function probeBusyControls ({manager: {HubRulesPolicyManager}}) {
 	assert.equal(button.disabled, true, "policy actions remained enabled while busy");
 }
 
+async function probeTerminalAccessLock ({manager: {HubRulesPolicyManager}}) {
+	let rejectPublish;
+	const publish = new Promise((resolve, reject) => rejectPublish = reject);
+	const controls = [
+		{dataset: {}, disabled: false},
+		{dataset: {}, disabled: false},
+		{dataset: {}, disabled: false},
+		{dataset: {}, disabled: false},
+	];
+	const instance = Object.assign(Object.create(HubRulesPolicyManager.prototype), {
+		_api: {pPublishRulesPolicy: () => publish},
+		_campaignId: "campaign",
+		_management: {activeRulesVersionId: "active", versions: []},
+		_draft: {rules: []},
+		_isBusy: false,
+		_isLoading: false,
+		_isOffline: false,
+		_isPolicyRefreshRequired: false,
+		_isReadOnlyAfterAccessChange: false,
+		_root: {
+			querySelectorAll: () => controls,
+			setAttribute: () => {},
+		},
+		_setStatus: () => {},
+		_renderCatalog: () => {},
+		_renderHistory: () => {},
+		_renderReview: () => {},
+		_fnRenderError: () => {
+			for (const control of controls) control.disabled = true;
+		},
+	});
+
+	const pending = instance._pPublish();
+	rejectPublish(Object.assign(new Error("access removed"), {code: "FORBIDDEN"}));
+	await pending;
+
+	assert.equal(instance._isReadOnlyAfterAccessChange, true, "terminal access loss did not persist read-only state");
+	assert.equal(instance._isMutationUnavailable(), true, "terminal access loss did not fence later mutations");
+	assert.equal(controls.every(control => control.disabled), true, "busy cleanup re-enabled policy controls after access loss");
+}
+
 async function probeOptionalImport ({capabilities}) {
 	let importCount = 0;
 	const disabled = await capabilities.pLoadHubCapabilityModule({
@@ -187,6 +228,16 @@ const MUTANTS = [
 			"hub-rules-policy-manager.js": source => source.replace(
 				"querySelectorAll(\"input, select, button\")",
 				"querySelectorAll(\"button\")",
+			),
+		},
+	},
+	{
+		name: "terminal-access-lock-disabled",
+		probe: probeTerminalAccessLock,
+		mutations: {
+			"hub-rules-policy-manager.js": source => source.replace(
+				"if (TERMINAL_ACCESS_ERROR_CODES.has(error?.code)) this._isReadOnlyAfterAccessChange = true;",
+				"if (TERMINAL_ACCESS_ERROR_CODES.has(error?.code)) this._isReadOnlyAfterAccessChange = false;",
 			),
 		},
 	},

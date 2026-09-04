@@ -200,8 +200,9 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
 - `npm run test:hub:mutations` copies the relevant lightweight modules into isolated temporary directories and
   kills seven active-context mutants (stale-generation acceptance, teardown reordering, cross-account record
   retention, inverted local fallback, pinned-campaign reselection loss, Character Sheet save-fence removal,
-  and DM workspace save-fence removal) plus five rules-policy mutants (strict historical diffs, missing
-  encumbrance dependency, stale reconnect loads, editable busy controls, and hidden optional-chunk failure).
+  and DM workspace save-fence removal) plus six rules-policy mutants (strict historical diffs, missing
+  encumbrance dependency, stale reconnect loads, editable busy controls, terminal access-lock loss, and hidden
+  optional-chunk failure).
   It never rewrites the working tree.
 - `test/e2e/hub/active-campaign-context.spec.ts` runs against the disposable exact-image HTTPS/PostgreSQL stack,
   including real `localStorage`, `BroadcastChannel`, Character Sheet, DM Screen, membership, archive, and BFCache

@@ -9,6 +9,7 @@ import {
 
 const CATEGORY_ALL = "all";
 const STATUS_ALL = "all";
+const TERMINAL_ACCESS_ERROR_CODES = new Set(["AUTH_REQUIRED", "CAMPAIGN_NOT_FOUND", "FORBIDDEN"]);
 
 function setHidden (element, isHidden) {
 	element?.classList.toggle("ve-hidden", isHidden);
@@ -85,6 +86,7 @@ export class HubRulesPolicyManager {
 		this._isLoading = false;
 		this._isOffline = !navigator.onLine;
 		this._isPolicyRefreshRequired = this._isOffline;
+		this._isReadOnlyAfterAccessChange = false;
 		this._policyLoadGeneration = 0;
 		this._pendingPolicyLoads = 0;
 	}
@@ -135,7 +137,18 @@ export class HubRulesPolicyManager {
 	}
 
 	_isMutationUnavailable () {
-		return this._isBusy || this._isOffline || this._isPolicyRefreshRequired;
+		return this._isBusy
+			|| this._isOffline
+			|| this._isPolicyRefreshRequired
+			|| this._isReadOnlyAfterAccessChange;
+	}
+
+	_isPolicyControlReadOnly () {
+		return this._isBusy || this._isReadOnlyAfterAccessChange;
+	}
+
+	_setReadOnlyAfterAccessChange (error) {
+		if (TERMINAL_ACCESS_ERROR_CODES.has(error?.code)) this._isReadOnlyAfterAccessChange = true;
 	}
 
 	async _pLoad ({preservedDraft = null, conflictMessage = ""} = {}) {
@@ -165,6 +178,7 @@ export class HubRulesPolicyManager {
 		} catch (error) {
 			if (loadGeneration !== this._policyLoadGeneration) return false;
 			this._setStatus("The rules library could not be loaded. No campaign settings were changed.", true);
+			this._setReadOnlyAfterAccessChange(error);
 			this._fnRenderError(error);
 			return false;
 		} finally {
@@ -192,10 +206,11 @@ export class HubRulesPolicyManager {
 				control.disabled = true;
 				continue;
 			}
-			control.disabled = control.dataset.hubPolicyDisabledBeforeBusy === "true";
+			control.disabled = this._isReadOnlyAfterAccessChange
+				|| control.dataset.hubPolicyDisabledBeforeBusy === "true";
 			delete control.dataset.hubPolicyDisabledBeforeBusy;
 		}
-		if (!isBusy && this._management && this._draft) {
+		if (!isBusy && !this._isReadOnlyAfterAccessChange && this._management && this._draft) {
 			this._renderCatalog();
 			this._renderHistory();
 			this._renderReview();
@@ -277,7 +292,7 @@ export class HubRulesPolicyManager {
 				},
 			});
 			input.checked = !!getPolicyValue(this._draft, definition);
-			input.disabled = this._isBusy;
+			input.disabled = this._isPolicyControlReadOnly();
 			input.addEventListener("change", () => {
 				getSelection(this._draft, definition.id).parameters[definition.parameter.key] = input.checked;
 				this._renderReview();
@@ -297,7 +312,7 @@ export class HubRulesPolicyManager {
 			});
 			for (const option of definition.parameter.options) select.add(new Option(option.label, option.value));
 			select.value = getPolicyValue(this._draft, definition);
-			select.disabled = this._isBusy;
+			select.disabled = this._isPolicyControlReadOnly();
 			select.addEventListener("change", () => {
 				getSelection(this._draft, definition.id).parameters[definition.parameter.key] = select.value;
 				this._renderReview();
@@ -366,7 +381,7 @@ export class HubRulesPolicyManager {
 				version.id,
 			));
 		}
-		select.disabled = this._isBusy || !inactive.length;
+		select.disabled = this._isPolicyControlReadOnly() || !inactive.length;
 		this._renderRollbackReview();
 	}
 
@@ -418,7 +433,7 @@ export class HubRulesPolicyManager {
 				idempotencyKey: crypto.randomUUID(),
 			});
 			await this._pRefreshContext(result.rulesVersion);
-			await this._pLoad();
+			if (!await this._pLoad()) return;
 			this._setStatus(`Version ${result.rulesVersion.version} is active. Players can read the updated advisory policy summary.`);
 		} catch (error) {
 			if (error?.code === "RULES_VERSION_STALE") {
@@ -429,6 +444,7 @@ export class HubRulesPolicyManager {
 				});
 			} else {
 				this._setStatus("The policy was not activated. No campaign settings changed.", true);
+				this._setReadOnlyAfterAccessChange(error);
 				this._fnRenderError(error);
 			}
 		} finally {
@@ -451,13 +467,14 @@ export class HubRulesPolicyManager {
 				idempotencyKey: crypto.randomUUID(),
 			});
 			await this._pRefreshContext(result.rulesVersion);
-			await this._pLoad();
+			if (!await this._pLoad()) return;
 			this._setStatus(`Version ${result.rulesVersion.version} is active again. No historical version was modified.`);
 		} catch (error) {
 			if (error?.code === "RULES_VERSION_STALE") {
 				await this._pLoad({conflictMessage: "Rules changed elsewhere. History was refreshed; choose the rollback version again."});
 			} else {
 				this._setStatus("The previous version was not activated. No campaign settings changed.", true);
+				this._setReadOnlyAfterAccessChange(error);
 				this._fnRenderError(error);
 			}
 		} finally {
