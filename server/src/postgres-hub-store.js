@@ -2225,7 +2225,7 @@ export class PostgresHubStore {
 			const response = {brewBundle: {
 				id: row.id,
 				campaignId: row.campaign_id,
-				version: row.version,
+				version: Number(row.version),
 				contentHash: row.content_hash,
 				content: row.content,
 				manifest: row.manifest,
@@ -2272,7 +2272,7 @@ export class PostgresHubStore {
 				...getPublicCampaignRulesVersion({
 					id: row.id,
 					campaignId: row.campaign_id,
-					version: row.version,
+					version: Number(row.version),
 					schemaVersion: row.schema_version,
 					rules: row.rules,
 					createdAt: row.created_at,
@@ -2329,7 +2329,7 @@ export class PostgresHubStore {
 				versions: versionsResult.rows.map(row => getPublicCampaignRulesVersion({
 					id: row.id,
 					campaignId: row.campaign_id,
-					version: row.version,
+					version: Number(row.version),
 					schemaVersion: row.schema_version,
 					rules: row.rules,
 					createdAt: row.created_at,
@@ -2438,7 +2438,7 @@ export class PostgresHubStore {
 				aggregateType: "rules_version",
 				aggregateId: row.id,
 				payload: {
-					version: row.version,
+					version: Number(row.version),
 					previousVersion: previous?.version || null,
 					schemaVersion: normalizedPolicy.schemaVersion,
 					catalogVersion: normalizedPolicy.catalogVersion,
@@ -2449,7 +2449,7 @@ export class PostgresHubStore {
 				rulesVersion: getPublicCampaignRulesVersion({
 					id: row.id,
 					campaignId: row.campaign_id,
-					version: row.version,
+					version: Number(row.version),
 					schemaVersion: row.schema_version,
 					rules: row.rules,
 					createdAt: row.created_at,
@@ -2521,7 +2521,7 @@ export class PostgresHubStore {
 			const target = getPublicCampaignRulesVersion({
 				id: row.id,
 				campaignId: row.campaign_id,
-				version: row.version,
+				version: Number(row.version),
 				schemaVersion: row.schema_version,
 				rules: row.rules,
 				createdAt: row.created_at,
@@ -2549,7 +2549,7 @@ export class PostgresHubStore {
 				aggregateType: "rules_version",
 				aggregateId: row.id,
 				payload: {
-					version: row.version,
+					version: Number(row.version),
 					previousVersion: previous?.version || null,
 					schemaVersion: row.schema_version,
 					catalogVersion: target.catalogVersion,
@@ -2594,11 +2594,11 @@ export class PostgresHubStore {
 			await client.query(`UPDATE hub.campaigns SET ${column} = $2, updated_at = now() WHERE id = $1`, [campaignId, versionId]);
 			const row = version.rows[0];
 			const response = kind === "brew"
-				? {brewBundle: {id: row.id, campaignId: row.campaign_id, version: row.version, contentHash: row.content_hash, content: row.content, manifest: row.manifest}}
+				? {brewBundle: {id: row.id, campaignId: row.campaign_id, version: Number(row.version), contentHash: row.content_hash, content: row.content, manifest: row.manifest}}
 				: {rulesVersion: getPublicCampaignRulesVersion({
 					id: row.id,
 					campaignId: row.campaign_id,
-					version: row.version,
+					version: Number(row.version),
 					schemaVersion: row.schema_version,
 					rules: row.rules,
 				}, {isIncludePolicy: true})};
@@ -3157,7 +3157,7 @@ export class PostgresHubStore {
 			targetOwnerAccountIdAtProposal: row.target_owner_account_id_at_proposal,
 			targetRef: row.target_ref,
 			status: row.status,
-			version: row.version,
+			version: Number(row.version),
 			kind: row.kind,
 			arguments: row.arguments,
 			sourceEntity: row.source_entity,
