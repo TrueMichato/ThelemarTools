@@ -970,7 +970,14 @@
 		max-height: calc(var(--vh, 1vh) * 85);
 		border-radius: var(--cs-radius-xl, 24px) var(--cs-radius-xl, 24px) 0 0;
 		margin: 0;
-		transform: translateY(0);
+		/* Resting value is `none`, not a no-op `translateY(0)`: any non-`none` transform (even an
+		   identity one) establishes a CSS containing block for `position:fixed` descendants, which
+		   broke the Item/Spell pickers' filter popovers here (their JS-computed viewport coordinates
+		   were resolving against this modal's box instead of the viewport). The slide-up animation
+		   below still animates `transform` from 100% to 0 during its 0.3s run — `animation-fill-mode`
+		   defaults to `none`, so once it ends the computed value reverts to this resting rule anyway,
+		   making `none` and `translateY(0)` visually identical at rest. Confirmed live in-browser. */
+		transform: none;
 		animation: charsheet-mobile-slideUp 0.3s ease;
 	}
 

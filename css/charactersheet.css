@@ -14924,20 +14924,29 @@ body.is-charsheet-page .ve-ui-modal__scroller:has(.charsheet__speed-modal-conten
 	gap: 0.25rem;
 }
 
-/* Performance: isolate modal scroller paint/layout from page */
+/* Perf: isolate modal-scroller paint/layout from the page. Item/Spell/Feat pickers share
+   `.charsheet__modal-list` and need to stay scrollable, so they keep this; other dropdown-filter
+   modals opt out below since they don't scroll. */
 body.is-charsheet-page .ve-ui-modal__scroller {
 	will-change: transform;
 }
 
-/* Remove containment for modals with dropdown filters — but NOT the item picker which needs to scroll */
 body.is-charsheet-page .ve-ui-modal__scroller:has(.charsheet__source-multiselect):not(:has(.charsheet__modal-list)) {
 	contain: none;
 	overflow: visible;
 }
 
-/* Item picker modal scroller: override overflow:visible so the modal scrolls when filters are expanded.
-   Dropdowns use position:absolute near the top and fit within the scrollable viewport. */
+/* `will-change: transform` above establishes a CSS containing block for `position:fixed`
+   descendants, which broke the Item/Spell pickers' filter popovers (positioned via
+   `FilterPickerHelpers.placeAnchoredPopover`) — their viewport-computed coordinates were resolving
+   against the scroller's box instead of the real viewport. `will-change: scroll-position` keeps the
+   same compositor perf hint without creating that containing block. (Feat picker filters use a
+   separate CSS-only `position:absolute` mechanism — see `_pShowFeatPickerModal` in
+   charactersheet-features.js — so they were never affected, but share this scroller rule.)
+   Also overrides overflow:visible above so the modal scrolls when filters are expanded — dropdowns
+   use position:absolute near the top and fit within the scrollable viewport. */
 body.is-charsheet-page .ve-ui-modal__scroller:has(.charsheet__modal-list) {
+	will-change: scroll-position;
 	height: 100%;
 	min-height: 0;
 	overflow-y: auto !important;
@@ -15439,7 +15448,15 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 	opacity: 0;
 	transform: translateY(-8px);
-	transition: all var(--cs-transition-normal, 0.2s ease);
+	/* Only animate the show/hide affordances (opacity/slide/height) — never `position`/`top`/`left`.
+	   Those are discrete (non-interpolable) properties, so `transition: all` held the old
+	   absolute-positioned value for nearly the whole duration and only snapped to the new
+	   `position:fixed` + JS-computed coordinates (`placeAnchoredPopover` in
+	   charactersheet-filter-picker-helpers.js) right at the end, rendering the menu far from its
+	   button for ~200ms after every open. Confirmed live via mid-transition measurement. */
+	transition: opacity var(--cs-transition-normal, 0.2s ease),
+		transform var(--cs-transition-normal, 0.2s ease),
+		max-height var(--cs-transition-normal, 0.2s ease);
 	z-index: 9999;
 	pointer-events: none;
 }
