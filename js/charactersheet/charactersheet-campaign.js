@@ -218,6 +218,7 @@ export class CharacterSheetCampaign {
 			character: this._page._state.toJson(),
 			availableSources: this._page._hubContext?.contentCatalog?.sources,
 			availableSpecies: this._page._hubContext?.contentCatalog?.species,
+			sourceEditions: this._page._hubContext?.contentCatalog?.sourceEditions,
 			rulesVersionId: this._page._hubContext.rulesVersion.id,
 			limit: 6,
 		});

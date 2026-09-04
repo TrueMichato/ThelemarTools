@@ -83,6 +83,36 @@ function getControl ({
 }
 
 describe("Character Sheet campaign control", () => {
+	it("uses the full source-edition catalog when deciding whether to show policy warnings", () => {
+		const root = {append: jest.fn()};
+		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {
+			_root: root,
+			_page: {
+				_currentCharacterId: "character-1",
+				_state: {
+					toJson: () => ({
+						classes: [{name: "Fighter", source: "PHB", level: 1}],
+						spellcasting: {spellsKnown: [{name: "Absorb Elements", source: "XGE"}]},
+					}),
+				},
+				_hubContext: {
+					rulesVersion: {
+						id: "rules-1",
+						contentPolicy: {version: 1, sources: [], species: [], editions: ["2014", "2024"]},
+					},
+					contentCatalog: {
+						sources: ["PHB", "XGE"],
+						species: [],
+						sourceEditions: {PHB: "2014", XGE: "2014"},
+					},
+				},
+			},
+		});
+
+		expect(() => control._renderContentPolicyWarnings()).not.toThrow();
+		expect(root.append).not.toHaveBeenCalled();
+	});
+
 	it("offers only active campaigns whose role may own a character", () => {
 		const campaigns = [
 			{id: "spectator", name: "Spectator", role: "spectator", status: "active"},

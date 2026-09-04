@@ -270,6 +270,14 @@ class CharacterSheetPage {
 		this._state.setCarryAuthorityContext(null);
 	}
 
+	_teardownHubRules () {
+		this._hubContextGeneration++;
+		this._hubContextRefreshActiveGeneration = null;
+		this._isHubContextRefreshing = false;
+		this._isHubContextRevalidationRequired = false;
+		this._clearHubRules({isUnavailable: true});
+	}
+
 	/** Composed detach used by ordinary (non-context-switch) call sites. */
 	_detachHubRealtime () {
 		this._fenceHubGeneration();
@@ -673,7 +681,7 @@ class CharacterSheetPage {
 				this._detachHubProjections();
 				this._concealHubPrivateCharacter();
 			},
-			pTeardownRules: async () => this._clearHubRules(),
+			pTeardownRules: async () => this._teardownHubRules(),
 		};
 	}
 

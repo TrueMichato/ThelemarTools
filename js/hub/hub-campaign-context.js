@@ -43,7 +43,7 @@ export class HubCampaignContext {
 	async pRefresh ({signal = null, fnIsCurrent = () => true} = {}) {
 		if (this._isDisposed) throw new Error(`This campaign context has been disposed.`);
 		const context = await this._api.pGetCampaignContext({campaignId: this._campaignId, signal});
-		if (!fnIsCurrent()) return null;
+		if (this._isDisposed || !fnIsCurrent()) return null;
 		this._injectedContext = null;
 		this._context = context;
 		if (this._context.brewBundle) {

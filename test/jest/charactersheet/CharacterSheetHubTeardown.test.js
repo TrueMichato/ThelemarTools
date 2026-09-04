@@ -404,6 +404,25 @@ describe("Character Sheet campaign content context lifecycle", () => {
 		expect(page._isHubContextRefreshing).toBe(false);
 		expect(page.filterByAllowedSources(getContentCandidates())).toEqual([]);
 	});
+
+	it("fences an in-flight context refresh during rules teardown", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._applyHubContext(makeContentContext());
+		page._campaign = {render: jest.fn()};
+		page._renderCharacter = jest.fn();
+		const refresh = deferred();
+		page._hubCampaignContext = {pRefresh: jest.fn(() => refresh.promise)};
+
+		page._onHubCampaignContextChanged({type: "rules.activated", aggregateId: "rules-2"});
+		await page._getHubActiveCampaignHost().pTeardownRules();
+		refresh.resolve(makeContentContext({id: "rules-2"}));
+		await pFlushPromises();
+
+		expect(page._hubContext).toBeNull();
+		expect(page._isHubContextUnavailable).toBe(true);
+		expect(page._isHubContextRefreshing).toBe(false);
+		expect(page._renderCharacter).not.toHaveBeenCalled();
+	});
 });
 
 describe("carry authority basis follows the campaign context lifecycle", () => {
