@@ -46,6 +46,11 @@
       "iteration": 5,
       "verdict": "FAIL",
       "summary": "Store-owner mutation probes fail on a missing fixture module and are falsely counted as killed; the PR handoff therefore overstates required evidence."
+    },
+    {
+      "iteration": 7,
+      "verdict": "FAIL",
+      "summary": "Runtime ReferenceErrors inside owner operations are wrapped as AssertionErrors and still falsely counted as mutation kills."
     }
   ]
 }
