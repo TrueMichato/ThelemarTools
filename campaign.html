@@ -350,6 +350,14 @@
 						<summary>Rules and homebrew</summary>
 						<div class="hub-disclosure__content">
 							<p class="hub-campaign-section__description">Published campaign content is available to every campaign character without changing personal settings.</p>
+							<section id="campaign-policy-summary" class="hub-policy-summary" aria-labelledby="campaign-policy-summary-title">
+								<div class="hub-policy-summary__heading">
+									<h4 id="campaign-policy-summary-title" class="hub-subheading">Campaign policy</h4>
+									<span class="hub-rule-status hub-rule-status--advisory">Read only</span>
+								</div>
+								<p id="campaign-policy-summary-status" class="hub-campaign-section__description">Loading campaign policy...</p>
+								<dl id="campaign-policy-summary-list" class="hub-policy-summary__list ve-hidden"></dl>
+							</section>
 							<section id="campaign-dm-controls" class="ve-hidden">
 								<div class="hub-settings-grid">
 									<form id="campaign-brew-form" class="hub-form">
@@ -376,6 +384,58 @@
 										<button class="hub-button" type="submit" data-pending-label="Publishing...">Publish rules</button>
 										<p id="campaign-rules-form-status" class="hub-inline-status" data-hub-form-status role="status" aria-live="polite"></p>
 									</form>
+									<section id="campaign-rules-policy-manager" class="hub-rules-policy ve-hidden" aria-labelledby="campaign-rules-policy-title" aria-busy="true">
+										<div class="hub-rules-policy__heading">
+											<div>
+												<h4 id="campaign-rules-policy-title" class="hub-subheading">Campaign rules library</h4>
+												<p class="hub-campaign-section__description">Browse support honestly, review changes, then activate one immutable version.</p>
+											</div>
+											<span class="hub-rule-status hub-rule-status--advisory">Selection foundation</span>
+										</div>
+										<p id="campaign-rules-policy-loading" class="hub-inline-status" role="status">Loading rules library...</p>
+										<div id="campaign-rules-policy-content" class="ve-hidden">
+											<div class="hub-rules-toolbar" role="search" aria-label="Filter campaign rules">
+												<div class="hub-rules-toolbar__search">
+													<label class="hub-label" for="campaign-rules-search">Search rules</label>
+													<input id="campaign-rules-search" class="hub-input" type="search" autocomplete="off" placeholder="Search by name or effect">
+												</div>
+												<div>
+													<label class="hub-label" for="campaign-rules-category">Category</label>
+													<select id="campaign-rules-category" class="hub-input">
+														<option value="all">All categories</option>
+													</select>
+												</div>
+												<div>
+													<label class="hub-label" for="campaign-rules-support">Support</label>
+													<select id="campaign-rules-support" class="hub-input">
+														<option value="all">All support states</option>
+														<option value="advisory">Advisory</option>
+														<option value="planned">Planned</option>
+													</select>
+												</div>
+											</div>
+											<p id="campaign-rules-results-status" class="sr-only" role="status" aria-live="polite"></p>
+											<div id="campaign-rules-list" class="hub-rules-list" aria-label="Campaign rule catalog"></div>
+											<p id="campaign-rules-empty" class="hub-empty hub-empty--compact ve-hidden">No rules match these filters. Clear the search or choose another category.</p>
+											<section class="hub-policy-review" aria-labelledby="campaign-rules-review-title">
+												<h5 id="campaign-rules-review-title" class="hub-rule-row__title">Before and after</h5>
+												<ul id="campaign-rules-review-list" class="hub-policy-review__list"></ul>
+												<p id="campaign-rules-review-empty" class="hub-campaign-section__description">No changes to activate.</p>
+												<p id="campaign-rules-validation" class="hub-inline-status hub-inline-status--error ve-hidden" role="alert"></p>
+												<button id="campaign-rules-activate" class="hub-button" type="button" disabled>Activate new version</button>
+											</section>
+											<section class="hub-policy-history" aria-labelledby="campaign-rules-history-title">
+												<h5 id="campaign-rules-history-title" class="hub-rule-row__title">Version history</h5>
+												<label class="hub-label" for="campaign-rules-history">Previous version</label>
+												<select id="campaign-rules-history" class="hub-input" disabled>
+													<option value="">No previous versions</option>
+												</select>
+												<div id="campaign-rules-rollback-review" class="hub-policy-history__review">Choose a previous version to review its setting changes.</div>
+												<button id="campaign-rules-rollback" class="hub-button hub-button--secondary" type="button" disabled>Activate previous version</button>
+											</section>
+											<p id="campaign-rules-policy-status" class="hub-inline-status" role="status" aria-live="polite"></p>
+										</div>
+									</section>
 								</div>
 							</section>
 							<p id="campaign-content-managed-note">Your Dungeon Master manages campaign rules and homebrew.</p>

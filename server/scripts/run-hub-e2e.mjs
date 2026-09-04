@@ -310,6 +310,7 @@ try {
 		"test/jest/hub/HubSemanticOperationsPostgres.test.js",
 		"test/jest/hub/HubInventoryPostgres.test.js",
 		"test/jest/hub/HubMultiProviderIdentityPostgres.test.js",
+		"test/jest/hub/HubRulesPolicyPostgres.test.js",
 		"--runInBand",
 		"--no-coverage",
 		"--forceExit",

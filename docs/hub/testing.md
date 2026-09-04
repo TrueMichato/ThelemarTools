@@ -66,10 +66,13 @@ npm run test:hub:e2e:stack
 ```
 
 The disposable stack exposes PostgreSQL only on a random loopback port for the duration of the run. Before
-browser journeys, it executes `HubSemanticOperationsPostgres.test.js` against the migrated runtime role. That
-suite proves concurrent exact replay, one applied revision/event, mutated-body rejection, explicit target-owner
-approval under competing commands, atomic source-slot decrement plus target healing, source/target/combined
-watermarks, bounded expiry, lifecycle cancellation, and minimized explicit-recipient terminal payloads.
+browser journeys, it executes the semantic-operation, inventory, provider-identity, and rules-policy PostgreSQL
+suites against the migrated runtime role. The rules-policy parity suite proves the exact memory/PostgreSQL
+response, compatibility projection, audit, ordered-event, outbox, stale-base concurrency, and rollback behavior
+without adding a migration. The semantic suite proves concurrent exact replay, one applied revision/event,
+mutated-body rejection, explicit target-owner approval under competing commands, atomic source-slot decrement plus
+target healing, source/target/combined watermarks, bounded expiry, lifecycle cancellation, and minimized
+explicit-recipient terminal payloads.
 
 Memory and real-PostgreSQL tests put 501 privacy-redacted character events before a visible semantic lifecycle
 event and prove replay advances by the server-scanned sequence even when a page returns fewer than its limit.
@@ -191,6 +194,21 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
 
 ## Shipped V2 foundation evidence
 
+- V2-T5 active-context coverage exercises precedence, capability failure, generation fencing, ordered teardown,
+  account isolation, local fallback, same-profile convergence, independent browser profiles, surface defaults,
+  temporary-only campaign brew, Character Sheet/DM Screen privacy teardown, BFCache, reconnect, revoke/archive,
+  responsive switcher states, and production service-worker/static packaging.
+- `npm run test:hub:mutations` copies the relevant lightweight modules into isolated temporary directories and
+  kills seven active-context mutants (stale-generation acceptance, teardown reordering, cross-account record
+  retention, inverted local fallback, pinned-campaign reselection loss, Character Sheet save-fence removal,
+  and DM workspace save-fence removal) plus six rules-policy mutants (strict historical diffs, missing
+  encumbrance dependency, stale reconnect loads, editable busy controls, terminal access-lock loss, and hidden
+  optional-chunk failure).
+  It never rewrites the working tree.
+- `test/e2e/hub/active-campaign-context.spec.ts` runs against the disposable exact-image HTTPS/PostgreSQL stack,
+  including real `localStorage`, `BroadcastChannel`, Character Sheet, DM Screen, membership, archive, and BFCache
+  behavior.
+
 - V2-T0 release automation shipped in [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219):
   25 focused release/deployment/documentation contracts, shell/Bash/Python validation, and Compose rendering
   passed. The PR explicitly leaves the live Oracle induced-failure drill to V1-G1.
@@ -222,6 +240,11 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
 - Real-stack Playwright verifies the skip link moves keyboard focus to the main landmark, the Hub and campaign
   retain a semantic `h1`, Hub-owned controls have accessible names, entry controls retain 44 px targets, and
   signed-out/campaign layouts do not overflow at 390x844 portrait or 844x390 landscape.
+- The capability-gated rules journey publishes two advisory policies, detects and recovers a stale base while
+  preserving the local draft, rolls back to an immutable earlier version, and verifies the player receives only
+  the bounded read-only summary. Catalog/policy/API contracts mutation-check role denial, unknown ids, malformed
+  parameters, false enforcement labels, unavailable planned selections, version/catalog/base fencing,
+  idempotency-key reuse, concurrent writers, and rollback evidence.
 - The Character Sheet campaign flow verifies that opening the campaign panel moves focus to its destination
   picker and closing it restores focus to the replacement toggle.
 - Failure-state hardening classifies fetch rejection, malformed success, and unreadable 503 responses without

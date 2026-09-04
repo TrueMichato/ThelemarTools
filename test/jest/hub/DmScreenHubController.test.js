@@ -100,6 +100,84 @@ describe("campaign DM Screen controller", () => {
 		}));
 	});
 
+	it("routes authoritative projection access loss back to the context coordinator", async () => {
+		const errors = [];
+		const controller = new DmScreenHubController({
+			campaignId: "campaign-1",
+			api: {
+				pListCampaignCharacterProjections: async () => {
+					throw Object.assign(new Error("membership removed"), {code: "MEMBERSHIP_NOT_FOUND", status: 404});
+				},
+			},
+			document: null,
+			pOnAuthoritativeAccessError: async error => errors.push(error.code),
+		});
+		controller.attach({
+			board: {fireBoardEvent: () => {}},
+			repository: null,
+			realtime: null,
+		});
+
+		await controller.pRefreshProjections();
+		await Promise.resolve();
+
+		expect(errors).toEqual(["MEMBERSHIP_NOT_FOUND"]);
+		expect(controller.getState()).toMatchObject({access: "access_lost", sync: "stopped"});
+	});
+
+	it("routes an authoritative workspace save failure back to the context coordinator", async () => {
+		const errors = [];
+		let emitStatus;
+		const controller = new DmScreenHubController({
+			campaignId: "campaign-1",
+			api: {},
+			document: null,
+			pOnAuthoritativeAccessError: async error => errors.push(error.code),
+		});
+		controller.attach({
+			board: {fireBoardEvent: () => {}},
+			repository: {
+				onStatus: listener => {
+					emitStatus = listener;
+					return () => {};
+				},
+			},
+			realtime: null,
+		});
+
+		emitStatus({
+			state: "error",
+			error: Object.assign(new Error("membership removed"), {code: "MEMBERSHIP_NOT_FOUND", status: 404}),
+		});
+		await Promise.resolve();
+
+		expect(errors).toEqual(["MEMBERSHIP_NOT_FOUND"]);
+		expect(controller.getState()).toMatchObject({access: "access_lost", sync: "stopped", workspace: "error"});
+	});
+
+	it("routes realtime access loss and archive events through coordinator teardown", async () => {
+		const errors = [];
+		const realtime = new Observable();
+		const controller = new DmScreenHubController({
+			campaignId: "campaign-1",
+			api: {},
+			document: null,
+			pOnAuthoritativeAccessError: async error => errors.push(error.code),
+		});
+		controller.attach({
+			board: {fireBoardEvent: () => {}},
+			repository: null,
+			realtime,
+		});
+
+		realtime.emit("state", {state: "access_lost"});
+		realtime.emit("event", {type: "campaign.archived"});
+		await Promise.resolve();
+
+		expect(errors).toEqual(["FORBIDDEN", "CAMPAIGN_ARCHIVED"]);
+		expect(controller.getState()).toMatchObject({access: "archived", sync: "stopped"});
+	});
+
 	it("schedules a coalesced refetch with browser-safe timers", async () => {
 		const {DmScreenHubController} = await import("../../../js/dmscreen/dmscreen-hub-controller.js");
 		let fetchCount = 0;
@@ -130,6 +208,7 @@ describe("campaign DM Screen controller", () => {
 	it("closes projections when the current co-DM is demoted", async () => {
 		const realtime = new Observable();
 		const events = [];
+		const accessErrors = [];
 		const controller = new DmScreenHubController({
 			campaignId: "campaign-1",
 			api: {
@@ -142,6 +221,7 @@ describe("campaign DM Screen controller", () => {
 				}),
 			},
 			document: null,
+			pOnAuthoritativeAccessError: async error => accessErrors.push(error.code),
 		});
 		await controller.pLoadCampaign();
 		controller.attach({
@@ -161,6 +241,8 @@ describe("campaign DM Screen controller", () => {
 			type: "hubCharacterProjections",
 			payload: {characters: [], roster: []},
 		});
+		await Promise.resolve();
+		expect(accessErrors).toEqual(["DM_ROLE_REQUIRED"]);
 	});
 
 	it("requests a fresh authoritative projection after character-changing events", async () => {

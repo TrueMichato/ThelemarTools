@@ -36,9 +36,21 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 		const campaignId = await dm.createCampaign("Ashen March E2E");
 		await dm.expectLightweightCampaignBoot(campaignId);
 		await dm.expectAccessibleResponsiveCampaign(campaignId);
+		await dm.expectRulesPolicySelectionJourney(campaignId);
 		await dm.expectOfflineReconnectPosture(campaignId);
 		const inviteUrl = await dm.createInvite(campaignId);
 		await player.redeemInvite(inviteUrl, "Ashen March E2E");
+		await player.expectReadOnlyCampaignPolicySummary(campaignId);
+		await dm.publishCampaignRuleViaApi({
+			campaignId,
+			ruleId: "tgtt.critical-rolls",
+			parameter: "enabled",
+			value: false,
+		});
+		await player.expectLiveCampaignPolicySummary({
+			title: "Thelemar critical rolls",
+			value: "Off · Advisory",
+		});
 		await player.expectCampaignDmScreenDenied(campaignId);
 
 		const character = await player.copyLocalCharacterFromSheet({campaignId, name: "Rowan"});

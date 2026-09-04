@@ -35,7 +35,7 @@ security boundary.
 | `memberships` | Account role in campaign | unique campaign+account; dm/co_dm/player/spectator | active, removed, and left used; reinvite reuses row |
 | `invites` | Redeemable role grant | hash-only token, expiry, max/use count, optional revoke | create/list/redeem/revoke/expiry/max-use used |
 | `brew_bundle_versions` | Immutable campaign brew | campaign version and content hash unique; creator membership | content stored in JSONB; `object_key` reserved |
-| `rules_versions` | Immutable typed campaign rules | campaign version unique; schema version | create/activate used |
+| `rules_versions` | Immutable typed campaign rules/policy | campaign version unique; schema version; schema-v1 settings remain readable; schema-v2 closed-catalog policy stored in existing JSONB | legacy create/activate plus capability-gated atomic publish/rollback |
 | `characters` | Canonical character document | owner, optional campaign, schema version, revision, lease epoch, JSON data, random target ref, operation watermark | active/archive/reactivate/clone/move |
 | `character_leases` | One active editor | one row/character; session; epoch; expiry | acquired/taken over/reused; expired rows are passive |
 | `dm_workspaces` | Private DM Board document | one per owner membership/campaign; revision/epoch; archive timestamp | archived on removal and restored on reinvite/access |
@@ -63,6 +63,11 @@ is a blocking dependency. Account export exists; deletion lifecycle is Phase 6B.
 
 Owns memberships, invites, content versions, DM workspaces, party inventory, actions, transfers, ordered
 events, and outbox. Audit rows retain history with nullable campaign reference.
+
+Rules versions are append-only. Schema-v2 publication locks the campaign, compares the expected active version,
+inserts the validated policy, advances the campaign pointer, and writes audit/event/outbox/idempotency evidence in
+one commit. Rollback changes only the active pointer to an existing version. Public context projects either schema
+to the legacy flat settings object and a bounded summary; the full schema-v2 policy is management-only.
 
 ### Character
 

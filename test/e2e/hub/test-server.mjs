@@ -113,6 +113,7 @@ const app = await createHubApp({
 		allowedOAuthSubjects: requireEnv("HUB_ALLOWED_OAUTH_SUBJECTS").split(",").map(it => it.trim()).filter(Boolean),
 		trustProxy: trustedProxies.length ? trustedProxies : false,
 		metricsToken: requireEnv("HUB_METRICS_TOKEN"),
+		isCampaignRulesPolicyEnabled: true,
 	},
 });
 

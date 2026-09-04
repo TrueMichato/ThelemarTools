@@ -50,7 +50,7 @@
 | `character.moved` | character | all_members in target | source campaign/character ids | Same character id, new campaign |
 | `character.archived` | character | all_members | empty/default | Character preserved for owner |
 | `brew.activated` | brew bundle version | all_members | version | Context consumers refetch/activate |
-| `rules.activated` | rules version | all_members | version | Context consumers refetch/activate |
+| `rules.activated` | rules version | all_members | version id/number; schema/catalog version and `publish`/`rollback` operation when emitted by policy management | Context consumers refetch/activate; policy body, parameters, notes, and before/after values are never emitted |
 | `roll.logged` | character or campaign | caller-selected all_members/dm_only/actor_and_dm | formula, total, context, detail | Cooperative evidence, not cryptographic roll authority. Activity presentation prefers bounded `detail.title` and selectively renders safe breakdown/result/advantage/critical/spell/ability/target fields. |
 | `xp.granted` | character | explicit DM+owner | amount, reason, resulting XP | DM/co-DM also included by visibility policy |
 | `item.granted` | character | explicit DM actor+owner | `{awardId,index,targetCount,sourceKind,note,entry}` | One deterministic per-target fact; bounded entry/note, followed by that target's projection invalidation |
