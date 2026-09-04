@@ -376,6 +376,7 @@ export class DmScreenHubController {
 	}
 
 	_handleCampaignEvent (event) {
+		if (event?.type === "rules.activated") void this._pRefreshCampaignContext({rulesVersionId: event.aggregateId});
 		if ([
 			"character.created",
 			"character.cloned",
@@ -401,6 +402,7 @@ export class DmScreenHubController {
 		].includes(event?.type)) {
 			this._queueProjectionResync();
 		}
+
 		if ([
 			"party_inventory.invalidated",
 			"transfer.committed",
@@ -434,6 +436,24 @@ export class DmScreenHubController {
 				new Error("Campaign role no longer grants DM access."),
 				{code: "DM_ROLE_REQUIRED", status: 403},
 			));
+		}
+	}
+
+	async _pRefreshCampaignContext ({rulesVersionId = null} = {}) {
+		const generation = ++this._generation;
+		try {
+			const context = await this._api.pGetCampaignContext({campaignId: this._campaignId});
+			if (generation !== this._generation || !this._board) return false;
+			if (rulesVersionId && context?.rulesVersion?.id !== rulesVersionId) return false;
+			if (context?.rulesVersion?.ruleDecision?.blocking) {
+				this._board?.setHubCampaignContext?.(null);
+				return false;
+			}
+			this._board.setHubCampaignContext?.(context);
+			return true;
+		} catch {
+			if (generation === this._generation) this._board?.setHubCampaignContext?.(null);
+			return false;
 		}
 	}
 

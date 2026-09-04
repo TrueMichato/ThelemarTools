@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import {HubStoreError} from "./hub-store-error.js";
 import {validateCloudValue} from "./cloud-data-validation.js";
 import {
+	CAMPAIGN_RULES_POLICY_CAPABILITY,
 	CampaignRulesPolicyError,
 	DEFAULT_CAMPAIGN_SETTINGS,
 	getCampaignRulesPolicy,
@@ -9,6 +10,10 @@ import {
 	normalizeCampaignRulesPolicy,
 	projectCampaignSettings,
 } from "../../js/hub/hub-campaign-rules.js";
+import {
+	CAMPAIGN_RULE_PROTOCOL_VERSION,
+	evaluateCampaignRules,
+} from "../../js/hub/hub-campaign-rule-evaluator.js";
 
 export const CAMPAIGN_RULES_SCHEMA_VERSION = 1;
 
@@ -171,6 +176,13 @@ export function getPublicCampaignRulesVersion (rulesVersion, {isIncludePolicy = 
 			}),
 			...(isIncludePolicy ? {policy} : {}),
 			policySummary: getCampaignRulesPolicySummary(policy),
+			ruleDecision: evaluateCampaignRules({
+				capabilities: [CAMPAIGN_RULES_POLICY_CAPABILITY],
+				personalSettings: {},
+				protocolVersion: CAMPAIGN_RULE_PROTOCOL_VERSION,
+				rulesVersion,
+				surface: "characterOpen",
+			}),
 		};
 	} catch (error) {
 		if (!(error instanceof CampaignRulesPolicyError)) throw error;

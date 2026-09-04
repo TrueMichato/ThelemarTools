@@ -8,7 +8,7 @@
  */
 import "./setup.js";
 
-const CAMPAIGN_RULES = {variantEncumbrance: true, criticalHitTables: true};
+const CAMPAIGN_RULES = {thelemar_carryWeight: false, thelemar_criticalRolls: false};
 
 let CharacterSheetPage;
 let originalCopyFast;
@@ -43,7 +43,7 @@ function makePage () {
 describe("Character Sheet hub teardown owners", () => {
 	it("applies campaign rules as a settings overlay while the context is active", () => {
 		const page = makePage();
-		expect(page._state.getSettings().variantEncumbrance).toBe(true);
+		expect(page._state.getSettings().thelemar_carryWeight).toBe(false);
 	});
 
 	it("clears campaign rules and drops the context so a later load cannot reinstall them", () => {
@@ -52,19 +52,19 @@ describe("Character Sheet hub teardown owners", () => {
 		page._clearHubRules();
 
 		expect(page._hubContext).toBeNull();
-		expect(page._state.getSettings().variantEncumbrance).toBeUndefined();
+		expect(page._state.getSettings().thelemar_carryWeight).toBe(true);
 
 		// This is the exact re-application performed by `_pLoadCharacter` / `_createNewCharacter`.
 		page._state.clearCampaignSettingsOverlay();
 		page._state.setCampaignSettingsOverlay(page._hubContext?.rulesVersion?.rules);
-		expect(page._state.getSettings().variantEncumbrance).toBeUndefined();
+		expect(page._state.getSettings().thelemar_carryWeight).toBe(true);
 	});
 
 	it("is idempotent", () => {
 		const page = makePage();
 		page._clearHubRules();
 		expect(() => page._clearHubRules()).not.toThrow();
-		expect(page._state.getSettings().variantEncumbrance).toBeUndefined();
+		expect(page._state.getSettings().thelemar_carryWeight).toBe(true);
 	});
 
 	it("keeps each teardown owner exclusive so no stage does another stage's work", () => {
@@ -257,11 +257,11 @@ describe("carry authority basis follows the campaign context lifecycle", () => {
 		// one rule set while stamped with another.
 		const page = new CharacterSheetPage({characterRepository: {}});
 		await activate(page);
-		expect(page._state.getSettings().variantEncumbrance).toBe(true);
+		expect(page._state.getSettings().thelemar_carryWeight).toBe(false);
 		expect(page._state.getCarryAuthorityBasis().kind).toBe("campaign");
 
 		page._clearHubRules();
-		expect(page._state.getSettings().variantEncumbrance).toBeUndefined();
+		expect(page._state.getSettings().thelemar_carryWeight).toBe(true);
 		expect(page._state.getCarryAuthorityBasis().kind).toBe("detached");
 	});
 

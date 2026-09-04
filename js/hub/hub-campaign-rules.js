@@ -14,7 +14,7 @@ export const DEFAULT_CAMPAIGN_SETTINGS = Object.freeze({
 	thelemar_criticalRolls: true,
 });
 
-const IMPLEMENTED_RULE_IDS = Object.freeze([
+const SUPPORTED_RULE_IDS = Object.freeze([
 	"tgtt.enabled",
 	"rules.exhaustion.system",
 	"tgtt.carry-weight",
@@ -24,7 +24,24 @@ const IMPLEMENTED_RULE_IDS = Object.freeze([
 	"tgtt.critical-rolls",
 ]);
 
-const SURFACES_TGTT = Object.freeze({
+const ENFORCED_RULE_IDS = new Set([
+	"tgtt.enabled",
+	"tgtt.carry-weight",
+	"tgtt.encumbrance-tiers",
+]);
+
+const SURFACES_TGTT_ENFORCED = Object.freeze({
+	characterOpen: "implemented",
+	builder: "implemented",
+	levelUp: "implemented",
+	quickBuild: "implemented",
+	respec: "implemented",
+	contentFilter: "implemented",
+	characterWrite: "implemented",
+	hubAdmin: "implemented",
+});
+
+const SURFACES_TGTT_ADVISORY = Object.freeze({
 	characterOpen: "implemented",
 	builder: "planned",
 	levelUp: "planned",
@@ -48,7 +65,7 @@ const SURFACES_CONTENT = Object.freeze({
 
 /**
  * @typedef {"content"|"core"|"thelemar"} CampaignRuleCategory
- * @typedef {"implemented_advisory"|"informational_planned"|"unavailable"} CampaignRuleLifecycle
+ * @typedef {"implemented_enforced"|"implemented_advisory"|"informational_planned"|"unavailable"} CampaignRuleLifecycle
  * @typedef {"boolean"|"enum"|"string_list"|"uid_list"} CampaignRuleParameterType
  * @typedef {{
  *   id: string,
@@ -136,11 +153,11 @@ export const CAMPAIGN_RULES_CATALOG = Object.freeze([
 		title: "Thelemar rules",
 		summary: "Apply the campaign's existing Thelemar settings overlay.",
 		details: "The Character Sheet reads this setting without changing a player's personal settings. Downstream choice enforcement is not included.",
-		lifecycle: "implemented_advisory",
-		supportLabel: "Advisory",
+		lifecycle: "implemented_enforced",
+		supportLabel: "Enforced",
 		isSelectable: true,
 		parameter: {key: "enabled", type: "boolean", label: "Enable Thelemar rules", default: true},
-		implementationStatus: SURFACES_TGTT,
+		implementationStatus: SURFACES_TGTT_ENFORCED,
 		compatibility: {requires: [], conflicts: []},
 	},
 	{
@@ -165,7 +182,7 @@ export const CAMPAIGN_RULES_CATALOG = Object.freeze([
 				{value: "2014", label: "2014 rules"},
 			],
 		},
-		implementationStatus: SURFACES_TGTT,
+		implementationStatus: SURFACES_TGTT_ADVISORY,
 		compatibility: {
 			requires: [{
 				id: "tgtt.enabled",
@@ -184,11 +201,11 @@ export const CAMPAIGN_RULES_CATALOG = Object.freeze([
 		title: "Thelemar carry capacity",
 		summary: "Use the established Thelemar carry-capacity setting for campaign characters.",
 		details: "The Character Sheet already applies this calculation from the transient campaign settings overlay.",
-		lifecycle: "implemented_advisory",
-		supportLabel: "Advisory",
+		lifecycle: "implemented_enforced",
+		supportLabel: "Enforced",
 		isSelectable: true,
 		parameter: {key: "enabled", type: "boolean", label: "Enable Thelemar carry capacity", default: true},
-		implementationStatus: SURFACES_TGTT,
+		implementationStatus: SURFACES_TGTT_ENFORCED,
 		compatibility: {requires: [], conflicts: []},
 	},
 	{
@@ -199,11 +216,11 @@ export const CAMPAIGN_RULES_CATALOG = Object.freeze([
 		title: "Thelemar encumbrance tiers",
 		summary: "Use the campaign's existing tiered-encumbrance house extension.",
 		details: "This is a ThelemarTools house extension, not a rule published in the Traveler's Guide to Thelemar.",
-		lifecycle: "implemented_advisory",
-		supportLabel: "Advisory",
+		lifecycle: "implemented_enforced",
+		supportLabel: "Enforced",
 		isSelectable: true,
 		parameter: {key: "enabled", type: "boolean", label: "Enable encumbrance tiers", default: true},
-		implementationStatus: SURFACES_TGTT,
+		implementationStatus: SURFACES_TGTT_ENFORCED,
 		compatibility: {
 			requires: [{
 				id: "tgtt.carry-weight",
@@ -226,7 +243,7 @@ export const CAMPAIGN_RULES_CATALOG = Object.freeze([
 		supportLabel: "Advisory",
 		isSelectable: true,
 		parameter: {key: "enabled", type: "boolean", label: "Enable Thelemar jumping", default: true},
-		implementationStatus: SURFACES_TGTT,
+		implementationStatus: SURFACES_TGTT_ADVISORY,
 		compatibility: {requires: [], conflicts: []},
 	},
 	{
@@ -241,7 +258,7 @@ export const CAMPAIGN_RULES_CATALOG = Object.freeze([
 		supportLabel: "Advisory",
 		isSelectable: true,
 		parameter: {key: "enabled", type: "boolean", label: "Enable Linguistics bonus", default: true},
-		implementationStatus: SURFACES_TGTT,
+		implementationStatus: SURFACES_TGTT_ADVISORY,
 		compatibility: {requires: [], conflicts: []},
 	},
 	{
@@ -256,7 +273,7 @@ export const CAMPAIGN_RULES_CATALOG = Object.freeze([
 		supportLabel: "Advisory",
 		isSelectable: true,
 		parameter: {key: "enabled", type: "boolean", label: "Enable Thelemar critical rolls", default: true},
-		implementationStatus: SURFACES_TGTT,
+		implementationStatus: SURFACES_TGTT_ADVISORY,
 		compatibility: {requires: [], conflicts: []},
 	},
 ].map(definition => Object.freeze(definition)));
@@ -401,17 +418,20 @@ function normalizeCampaignRulesPolicyInternal (policy, {isValidateCompatibility 
 		if (selection.ruleSchemaVersion !== definition.ruleSchemaVersion) {
 			throw new CampaignRulesPolicyError("RULES_SCHEMA_UNSUPPORTED", `Campaign rule "${selection.id}" uses an unsupported schema version.`);
 		}
-		if (selection.mode !== "advisory") {
-			throw new CampaignRulesPolicyError("RULES_MODE_UNSUPPORTED", `Campaign rule "${selection.id}" is advisory and cannot be marked enforced.`);
+		if (
+			!["advisory", "enforced"].includes(selection.mode)
+			|| (selection.mode === "enforced" && definition.lifecycle !== "implemented_enforced")
+		) {
+			throw new CampaignRulesPolicyError("RULES_MODE_UNSUPPORTED", `Campaign rule "${selection.id}" has an unsupported mode.`);
 		}
 		return {
 			id: selection.id,
 			ruleSchemaVersion: selection.ruleSchemaVersion,
-			mode: "advisory",
+			mode: selection.mode,
 			parameters: normalizeRuleParameters(definition, selection.parameters),
 		};
 	});
-	const missingRuleIds = IMPLEMENTED_RULE_IDS.filter(id => !seenRuleIds.has(id));
+	const missingRuleIds = SUPPORTED_RULE_IDS.filter(id => !seenRuleIds.has(id));
 	if (missingRuleIds.length) {
 		throw new CampaignRulesPolicyError("RULES_INVALID", "Campaign policy is missing supported rule selections.", {details: {ruleIds: missingRuleIds}});
 	}
@@ -451,7 +471,7 @@ export function normalizeCampaignRulesPolicy (policy) {
 
 export function adaptLegacyCampaignRules (rules) {
 	const settings = normalizeLegacySettings(rules);
-	const selections = IMPLEMENTED_RULE_IDS.map(id => {
+	const selections = SUPPORTED_RULE_IDS.map(id => {
 		const definition = CATALOG_BY_ID.get(id);
 		const settingKey = SETTING_BY_RULE_ID[id];
 		return {
@@ -470,7 +490,11 @@ export function adaptLegacyCampaignRules (rules) {
 }
 
 export function createDefaultCampaignRulesPolicy () {
-	return adaptLegacyCampaignRules(DEFAULT_CAMPAIGN_SETTINGS);
+	const policy = adaptLegacyCampaignRules(DEFAULT_CAMPAIGN_SETTINGS);
+	policy.rules.forEach(rule => {
+		if (ENFORCED_RULE_IDS.has(rule.id)) rule.mode = "enforced";
+	});
+	return policy;
 }
 
 export function getCampaignRulesPolicy ({schemaVersion, rules}) {
@@ -500,7 +524,7 @@ export function getCampaignRulesPolicySummary (policy) {
 				id: selection.id,
 				title: definition.title,
 				value: getRuleValueLabel(definition, selection.parameters[definition.parameter.key]),
-				supportLabel: definition.supportLabel,
+				supportLabel: selection.mode === "enforced" ? "Enforced" : "Advisory",
 			};
 		}),
 	};

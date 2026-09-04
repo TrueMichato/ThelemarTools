@@ -6,10 +6,10 @@ const adr = fs.readFileSync(
 );
 
 describe("Campaign Hub rules-policy ADR contract", () => {
-	it("is explicitly a target contract rather than implementation evidence", () => {
-		expect(adr).toMatch(/^Status: Accepted as the target contract; rules engine not implemented$/m);
+	it("distinguishes implemented settings enforcement from planned content gating", () => {
+		expect(adr).toMatch(/^Status: Accepted; TGTT and exhaustion settings enforcement implemented, content gating planned$/m);
+		expect(adr).toContain("source, species, and edition enforcement remain outside that subset");
 		expect(adr).toContain("The catalog entries introduced by this ADR remain `planned`");
-		expect(adr).toContain("This ADR defines that contract. It does not add a rules evaluator");
 	});
 
 	it.each([

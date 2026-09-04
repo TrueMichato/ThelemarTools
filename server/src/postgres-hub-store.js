@@ -39,6 +39,7 @@ import {
 	getPublicCampaignRulesVersion,
 	normalizeCampaignRulesPolicyForStorage,
 } from "./campaign-content.js";
+import {assertCampaignRuleWriteFence} from "./campaign-rule-authority.js";
 import {HUB_REQUIRED_MIGRATION_VERSION} from "./migration-version.js";
 import {
 	createCharacterDisplayNameSnapshot,
@@ -1610,6 +1611,27 @@ export class PostgresHubStore {
 				return prior;
 			}
 			if (campaignId) await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+			if (campaignId && data.carry) {
+				const rulesResult = await client.query(`
+					SELECT r.id, r.version, r.schema_version, r.rules
+					FROM hub.campaigns c
+					LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
+					WHERE c.id = $1
+					FOR UPDATE OF c
+				`, [campaignId]);
+				const row = rulesResult.rows[0];
+				assertCampaignRuleWriteFence({
+					rulesVersion: row?.id
+						? {
+							id: row.id,
+							version: Number(row.version),
+							schemaVersion: Number(row.schema_version),
+							rules: row.rules,
+						}
+						: null,
+					data,
+				});
+			}
 			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 3))`, [accountId, clientImportId]);
 			const existing = await client.query(`
 				SELECT * FROM hub.characters
@@ -1835,6 +1857,27 @@ export class PostgresHubStore {
 			// otherwise changes, so its absence identifies a writer that predates carry
 			// authority. An allowlist of "carry-relevant paths" could never be complete.
 			if (patches?.length && !hasFreshCarryWrite(patches)) stripCarryAuthority(data);
+			if (character.campaignId && data.carry) {
+				const rulesResult = await client.query(`
+					SELECT r.id, r.version, r.schema_version, r.rules
+					FROM hub.campaigns c
+					LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
+					WHERE c.id = $1
+					FOR UPDATE OF c
+				`, [character.campaignId]);
+				const row = rulesResult.rows[0];
+				assertCampaignRuleWriteFence({
+					rulesVersion: row?.id
+						? {
+							id: row.id,
+							version: Number(row.version),
+							schemaVersion: Number(row.schema_version),
+							rules: row.rules,
+						}
+						: null,
+					data,
+				});
+			}
 			validateCloudCharacterData(data);
 			const updated = await client.query(`
 				UPDATE hub.characters

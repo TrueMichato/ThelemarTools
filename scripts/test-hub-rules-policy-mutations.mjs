@@ -19,10 +19,35 @@ async function loadVariant ({name, mutations = {}}) {
 	const pImport = fileName => import(`${pathToFileURL(path.join(hubDir, fileName)).href}?variant=${encodeURIComponent(name)}`);
 	return {
 		rules: await pImport("hub-campaign-rules.js"),
+		evaluator: await pImport("hub-campaign-rule-evaluator.js"),
 		capabilities: await pImport("hub-capabilities.js"),
 		manager: await pImport("hub-rules-policy-manager.js"),
 		cleanup: () => fs.rm(root, {recursive: true, force: true}),
 	};
+}
+
+async function probeEvaluatorFailClosed ({rules, evaluator}) {
+	const rulesVersion = {
+		id: "rules-current",
+		version: 1,
+		schemaVersion: 2,
+		catalogVersion: 1,
+		rules: rules.createDefaultCampaignRulesPolicy(),
+	};
+	const base = {
+		capabilities: [rules.CAMPAIGN_RULES_POLICY_CAPABILITY],
+		personalSettings: {enableTgtt: false},
+		protocolVersion: evaluator.CAMPAIGN_RULE_PROTOCOL_VERSION,
+		rulesVersion,
+		surface: "characterWrite",
+	};
+	assert.equal(evaluator.evaluateCampaignRules({...base, capabilities: []}).blocking, true);
+	assert.equal(evaluator.evaluateCampaignRules({...base, expectedRulesVersionId: "rules-old"}).blocking, true);
+	assert.equal(evaluator.getCampaignSettingsOverlay({
+		status: "blocked",
+		blocking: true,
+		effectiveSettings: {enableTgtt: true},
+	}), null);
 }
 
 function replaceLast (source, search, replacement) {
@@ -196,6 +221,36 @@ async function probeOptionalImport ({capabilities}) {
 }
 
 const MUTANTS = [
+	{
+		name: "evaluator-capability-gate-disabled",
+		probe: probeEvaluatorFailClosed,
+		mutations: {
+			"hub-campaign-rule-evaluator.js": source => source.replace(
+				"if (!Array.isArray(input.capabilities) || !input.capabilities.includes(CAMPAIGN_RULES_POLICY_CAPABILITY)) {",
+				"if (false) {",
+			),
+		},
+	},
+	{
+		name: "evaluator-policy-fence-disabled",
+		probe: probeEvaluatorFailClosed,
+		mutations: {
+			"hub-campaign-rule-evaluator.js": source => source.replace(
+				"if (input.expectedRulesVersionId != null && input.expectedRulesVersionId !== rulesVersion.id) {",
+				"if (false) {",
+			),
+		},
+	},
+	{
+		name: "evaluator-blocked-overlay-leak",
+		probe: probeEvaluatorFailClosed,
+		mutations: {
+			"hub-campaign-rule-evaluator.js": source => source.replace(
+				"if (!decision || decision.status !== \"compliant\" || decision.blocking) return null;",
+				"if (!decision) return null;",
+			),
+		},
+	},
 	{
 		name: "historical-diff-strict",
 		probe: probeHistoricalDiff,

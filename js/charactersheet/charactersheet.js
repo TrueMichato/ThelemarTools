@@ -52,8 +52,13 @@ import {CharacterSheetPeerTargeting} from "./charactersheet-peer-targeting.js";
 import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js";
 import {getCharacterSaveFence, isCharacterSaveFenceCurrent} from "./charactersheet-persistence-fence.js";
 import {diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
+import {
+	getCampaignSettingsOverlay,
+	getCampaignSettingsOverlayFromRulesVersion,
+} from "../hub/hub-campaign-rule-evaluator.js";
 
 const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, StorageUtil, DataUtil, BrewUtil2, PrereleaseUtil} = /** @type {*} */ (globalThis);
+const _getHubRulesOverlay = hubContext => getCampaignSettingsOverlayFromRulesVersion(hubContext?.rulesVersion);
 
 /**
  * Character Sheet - Main Controller
@@ -99,6 +104,7 @@ class CharacterSheetPage {
 		this._partyInventory = null;
 		this._characterLoadGeneration = 0;
 		this._hubRealtimeGeneration = 0;
+		this._hubRulesRefreshGeneration = 0;
 		this._builder = null;
 		this._combat = null;
 		this._spells = null;
@@ -253,6 +259,7 @@ class CharacterSheetPage {
 	 * `_hubContext` would silently reinstall the campaign rules on the next character load.
 	 */
 	_clearHubRules () {
+		this._hubRulesRefreshGeneration++;
 		this._hubContext = null;
 		this._state.clearCampaignSettingsOverlay();
 		// Return to the detached basis in lockstep with the overlay: a summary stamped with a
@@ -284,7 +291,33 @@ class CharacterSheetPage {
 		this._hubRealtime.on("semanticOperation", event => this._onHubSemanticOperation(event));
 		this._hubRealtime.on("connectionState", state => this._onHubRealtimeConnectionState(state));
 		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
+		this._hubRealtime.on("rulesChanged", event => { void this._pRefreshHubRules(event); });
 		return true;
+	}
+
+	async _pRefreshHubRules ({rulesVersionId = null} = {}) {
+		const generation = ++this._hubRulesRefreshGeneration;
+		try {
+			const context = await this._hubApi.pGetCampaignContext({campaignId: this._hubCampaignId});
+			if (generation !== this._hubRulesRefreshGeneration || !this._hubContext) return false;
+			if (rulesVersionId && context?.rulesVersion?.id !== rulesVersionId) return false;
+			const overlay = getCampaignSettingsOverlay(context?.rulesVersion?.ruleDecision);
+			if (context?.rulesVersion && !overlay) throw new Error(`Campaign rules are incompatible.`);
+			this._hubContext = context;
+			this._state.setCampaignSettingsOverlay(overlay);
+			this._state.setCarryAuthorityContext({
+				rulesVersionId: context?.rulesVersion?.id ?? null,
+				brewBundleHash: context?.brewBundle?.contentHash ?? null,
+			});
+			this._renderCharacter();
+			return true;
+		} catch (error) {
+			if (generation !== this._hubRulesRefreshGeneration) return false;
+			this._state.clearCampaignSettingsOverlay();
+			this._state.setCarryAuthorityContext(null);
+			JqueryUtil.doToast({type: "danger", content: "Campaign rules changed but could not be applied. Reload before continuing."});
+			return false;
+		}
 	}
 
 	_onHubRealtimeCursor (metadata) {
@@ -587,7 +620,10 @@ class CharacterSheetPage {
 			pPreflightSwitch: async () => ({safe: !this._characterRepository?.hasPendingWrites?.()}),
 			pOnContextActivated: async ({context}) => {
 				this._hubContext = context;
-				this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
+				if (this._hubContext?.rulesVersion && !_getHubRulesOverlay(this._hubContext)) {
+					throw new Error(`Campaign rules are unavailable for this Character Sheet.`);
+				}
+				this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 				// Stamp the carry summary with the context it was computed under, immediately
 				// beside the overlay whose values feed its settings digest — the two must not
 				// be able to drift. Without this the sheet would keep publishing a `detached`
@@ -683,7 +719,7 @@ class CharacterSheetPage {
 					fnProjectItemWeight: item => this._state.projectItemMaterial(item)?.weight,
 					fnAdoptCharacterData: data => {
 						this._state.loadFromJson(data);
-						this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
+						this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 						this._reconcileClassFeatures();
 						this._renderCharacter();
 					},
@@ -2298,7 +2334,7 @@ class CharacterSheetPage {
 			this._isLevelUpBannerDismissed = false;
 			this._state.clearCampaignSettingsOverlay();
 			this._state.loadFromJson(character);
-			this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
+			this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 
 			// Backfill any class features missing from `_data.features` (e.g. on
 			// saves migrated from older formats). Idempotent. The result tells us whether
@@ -2362,7 +2398,7 @@ class CharacterSheetPage {
 		this._isLevelUpBannerDismissed = false;
 		this._state.clearCampaignSettingsOverlay();
 		this._state.reset();
-		this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
+		this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 		this._state.setClassFeatureCatalog(this._classFeatures || [], this._subclassFeatures || [], this._optionalFeaturesData || []);
 		this._state.setId(this._currentCharacterId);
 		this._renderCharacter();

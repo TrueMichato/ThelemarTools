@@ -100,7 +100,9 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
   rejected.
 - Campaign brew is installed as a temporary page overlay. It never calls `BrewUtil2.pSetBrew()` and therefore
   cannot replace personal brew.
-- Rules are typed/versioned runtime overlays.
+- Supported TGTT and exhaustion rules are evaluated by one typed, versioned, fail-closed browser/server contract.
+- Schema-v2 policy decisions are protocol/capability gated and policy-sensitive carry writes are fenced by the
+  active immutable rules-version identity.
 - Campaign rule overlays are stripped from character serialization.
 - Character documents accept the Character Sheet's existing rendered feature HTML only after server-side
   sanitization. Unknown markup is escaped; scripts, active attributes, unsafe URLs, images, inline styles,

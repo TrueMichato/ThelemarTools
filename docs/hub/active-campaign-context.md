@@ -123,7 +123,7 @@ down immediately, pinned or not.
 
 ### The rules-teardown trap
 
-The Character Sheet re-applies `setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules)`
+The Character Sheet re-applies the evaluator's `rulesVersion.ruleDecision.effectiveSettings`
 on **every** character load and reset. Calling `clearCampaignSettingsOverlay()` alone is therefore
 **not** a teardown — the next character load silently reinstalls the campaign rules. The
 `teardown-rules` owner must also null `_hubContext`. This is pinned by
@@ -240,7 +240,8 @@ two-script boot graph. The coordinator graph's combined transfer size is asserte
 
 V2-T5 carries the currently advertised `sourcePolicy` and `editionPolicy` metadata in
 `HubCampaignPageContext`; it does not filter content, reject builds, rewrite characters, or claim policy
-enforcement. Those behaviors require ADR 0015/V2-T6.
+enforcement. ADR 0015/V2-T6 now enforces the supported TGTT/exhaustion settings only; source, species, and
+edition filtering remain planned.
 
 ## Parallel-change collision surfaces
 

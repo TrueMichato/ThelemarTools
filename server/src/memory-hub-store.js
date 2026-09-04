@@ -39,6 +39,7 @@ import {
 	getPublicCampaignRulesVersion,
 	normalizeCampaignRulesPolicyForStorage,
 } from "./campaign-content.js";
+import {assertCampaignRuleWriteFence} from "./campaign-rule-authority.js";
 import {
 	createCharacterDisplayNameSnapshot,
 	enrichEventPayload,
@@ -1152,6 +1153,11 @@ export class MemoryHubStore {
 		const prior = this._getReceipt({accountId, idempotencyKey});
 		if (prior) return prior;
 		if (campaignId) this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+		const campaign = campaignId ? this._campaigns.get(campaignId) : null;
+		const rulesVersion = campaign?.activeRulesVersionId
+			? this._rulesVersions.get(campaign.activeRulesVersionId)
+			: null;
+		if (data?.carry) assertCampaignRuleWriteFence({rulesVersion, data});
 		const imported = [...this._characters.values()].find(it =>
 			it.ownerAccountId === accountId
 			&& it.clientImportId === clientImportId
@@ -1299,6 +1305,11 @@ export class MemoryHubStore {
 		// named modifiers, feature choices and item-derived modifiers — so any allowlist
 		// would silently go stale as inputs are added.
 		if (patches?.length && !hasFreshCarryWrite(patches)) stripCarryAuthority(data);
+		const campaign = character.campaignId ? this._campaigns.get(character.campaignId) : null;
+		const rulesVersion = campaign?.activeRulesVersionId
+			? this._rulesVersions.get(campaign.activeRulesVersionId)
+			: null;
+		if (data?.carry) assertCampaignRuleWriteFence({rulesVersion, data});
 		validateCloudCharacterData(data);
 		this._setCharacterData({character, data});
 		character.revision++;

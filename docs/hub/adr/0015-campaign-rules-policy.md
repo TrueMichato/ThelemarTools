@@ -1,6 +1,6 @@
 # ADR 0015: Versioned Campaign Hub rules policy
 
-Status: Accepted as the target contract; rules engine not implemented
+Status: Accepted; TGTT and exhaustion settings enforcement implemented, content gating planned
 
 ## Context
 
@@ -16,12 +16,12 @@ ADR 0013 owns the site-wide campaign-context activation and teardown lifecycle. 
 lifecycle for policy pinning, evaluation, compliance reports, and policy-derived candidate caches; it does not
 create an independent context lifecycle.
 
-The current rules document is schema version 1. `server/src/campaign-content.js` normalizes six settings
+Legacy rules documents use schema version 1. `server/src/campaign-content.js` normalizes seven settings
 (`enableTgtt`, `exhaustionRules`, carry weight, jumping, linguistics, and critical rolls), and the Character
 Sheet projects those settings through `CharacterSheetState.setCampaignSettingsOverlay()`. The overlay is
 effective at runtime, cannot be changed by the character while active, and is removed by `toJson()`.
 
-This is useful policy projection, but it is not an enforcement engine:
+The shared evaluator now enforces the supported TGTT/exhaustion projection. Content identity rules remain planned:
 
 - `CharacterSheetBuilder`, `CharacterSheetLevelUp`, and `CharacterSheetQuickBuild` already use
   `CharacterSheetPage.filterByAllowedSources()` at many candidate-picking surfaces, but a UI filter is not an
@@ -36,8 +36,8 @@ This is useful policy projection, but it is not an enforcement engine:
   or item data would corrupt the character and violate the local-first model.
 
 The words "rule", "setting", "note", and "enforced" therefore need a stable contract before implementation.
-This ADR defines that contract. It does not add a rules evaluator, new blocking behavior, or new labels to the
-product.
+This ADR defines that contract. `hub-campaign-rule-evaluator.js` implements its closed, data-only settings subset;
+source, species, and edition enforcement remain outside that subset.
 
 ## Decision
 

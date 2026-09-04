@@ -3,7 +3,7 @@ import {
 	createCampaignCarryBasis,
 	createDetachedCarryBasis,
 } from "../../js/hub/hub-carry-authority.js";
-import {normalizeCampaignRules} from "./campaign-content.js";
+import {getAuthoritativeCampaignRuleDecision} from "./campaign-rule-authority.js";
 
 /**
  * The basis a character's carry summary must match in order to be trusted right now.
@@ -38,8 +38,12 @@ export function getExpectedCarryBasis ({character, campaign = null, rulesVersion
 		return createDetachedCarryBasis({settingsDigest: computeCarrySettingsDigest(ownSettings)});
 	}
 
-	const campaignRules = rulesVersion?.rules ? normalizeCampaignRules(rulesVersion.rules) : null;
-	const effectiveSettings = campaignRules ? {...ownSettings, ...campaignRules} : ownSettings;
+	const decision = getAuthoritativeCampaignRuleDecision({
+		rulesVersion,
+		personalSettings: ownSettings,
+		surface: "characterOpen",
+	});
+	const effectiveSettings = decision.effectiveSettings;
 
 	return createCampaignCarryBasis({
 		// A campaign with no active rules version or no brew bundle yields null here, which
