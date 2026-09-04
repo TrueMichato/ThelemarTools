@@ -63,7 +63,7 @@ async function probeMemoryStoreFence ({rules, pImportServer}) {
 		expectedActiveRulesVersionId: null,
 		idempotencyKey: "rules",
 	});
-	await assert.rejects(store.pCreateCharacter({
+	await expectRejectionCode(store.pCreateCharacter({
 		accountId: account.id,
 		campaignId: campaign.id,
 		clientImportId: "stale",
@@ -71,7 +71,18 @@ async function probeMemoryStoreFence ({rules, pImportServer}) {
 		data: {carry: {basis: {kind: "campaign", rulesVersionId: "stale", settingsDigest: "digest"}}},
 		protocolVersion: "4",
 		idempotencyKey: "character",
-	}), error => error?.code === "POLICY_VERSION_STALE");
+	}), "POLICY_VERSION_STALE");
+}
+
+async function expectRejectionCode (promise, expectedCode) {
+	let rejection = null;
+	try {
+		await promise;
+	} catch (error) {
+		rejection = error;
+	}
+	if (isInfrastructureError(rejection)) throw rejection;
+	assert.equal(rejection?.code, expectedCode);
 }
 
 function getPolicyFenceFixture (rules) {
@@ -137,7 +148,7 @@ function createPostgresFenceStore ({PostgresHubStore, rules, characterRow = null
 async function probePostgresCreateFence ({rules, pImportServer}) {
 	const {PostgresHubStore} = await pImportServer("postgres-hub-store.js");
 	const store = createPostgresFenceStore({PostgresHubStore, rules});
-	await assert.rejects(store.pCreateCharacter({
+	await expectRejectionCode(store.pCreateCharacter({
 		accountId: "account",
 		campaignId: "campaign",
 		clientImportId: "import",
@@ -145,7 +156,7 @@ async function probePostgresCreateFence ({rules, pImportServer}) {
 		data: getStaleCarryData(),
 		protocolVersion: "4",
 		idempotencyKey: "create",
-	}), error => error?.code === "POLICY_VERSION_STALE");
+	}), "POLICY_VERSION_STALE");
 }
 
 async function probePostgresPatchFence ({rules, pImportServer}) {
@@ -164,7 +175,7 @@ async function probePostgresPatchFence ({rules, pImportServer}) {
 		operation_watermark: 0,
 	};
 	const store = createPostgresFenceStore({PostgresHubStore, rules, characterRow});
-	await assert.rejects(store.pPatchCharacter({
+	await expectRejectionCode(store.pPatchCharacter({
 		accountId: "account",
 		sessionId: "session",
 		characterId: "character",
@@ -173,7 +184,7 @@ async function probePostgresPatchFence ({rules, pImportServer}) {
 		patches: [{op: "replace", path: "/carry", value: characterRow.data.carry}],
 		idempotencyKey: "patch",
 		protocolVersion: "4",
-	}), error => error?.code === "POLICY_VERSION_STALE");
+	}), "POLICY_VERSION_STALE");
 }
 
 async function probeTransitionOwners ({rules, pImportServer}) {
@@ -706,9 +717,24 @@ const MUTANTS = [
 	},
 ];
 
-function isProbeAssertionFailure (error) {
-	return error?.name === "AssertionError" || error?.code === "ERR_ASSERTION";
+function isInfrastructureError (error) {
+	const original = error?.actual instanceof Error ? error.actual : error;
+	return original?.code === "ERR_MODULE_NOT_FOUND"
+		|| ["SyntaxError", "ReferenceError"].includes(original?.name);
 }
+
+function isProbeAssertionFailure (error) {
+	return !isInfrastructureError(error)
+		&& (error?.name === "AssertionError" || error?.code === "ERR_ASSERTION");
+}
+
+let wrappedInfrastructureError;
+try {
+	await assert.rejects(Promise.reject(new ReferenceError("synthetic infrastructure failure")), () => false);
+} catch (error) {
+	wrappedInfrastructureError = error;
+}
+assert.equal(isProbeAssertionFailure(wrappedInfrastructureError), false);
 
 for (const mutant of MUTANTS) {
 	let variant;
