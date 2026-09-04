@@ -2220,6 +2220,29 @@ export class CharacterSheetPage {
 		};
 	}
 
+	/** Open the Spells tab's "Add Spell" picker modal and wait for it to render. */
+	async openAddSpellModal (): Promise<void> {
+		await this.switchToTab(this.tabSpells);
+		await this.page.locator("#charsheet-btn-add-spell").click();
+		await this.page.locator(".ve-ui-modal__inner:visible").last().waitFor({state: "visible"});
+	}
+
+	/**
+	 * Locate the Spell picker's always-visible Class filter (identified by its sword icon).
+	 * Positions via the same `FilterPickerHelpers.placeAnchoredPopover` (`position:fixed` +
+	 * computed viewport coordinates) as the Item picker's Type/Rarity/Source filters, so it is
+	 * subject to the same containing-block fix.
+	 */
+	spellPickerClassDropdown (): {button: Locator; menu: Locator} {
+		const modal = this.page.locator(".ve-ui-modal__inner:visible").last();
+		const classDd = modal.locator(".charsheet__source-multiselect")
+			.filter({has: this.page.locator(".charsheet__source-multiselect-icon", {hasText: "⚔️"})});
+		return {
+			button: classDd.locator(".charsheet__source-multiselect-btn"),
+			menu: classDd.locator(".charsheet__source-multiselect-dropdown"),
+		};
+	}
+
 	/**
 	 * Spawn a character in-memory via `window.charSheet.spawn` (the fast test-setup path — see
 	 * `spawn.spec.ts`) and assert the spawn left nothing unresolved.

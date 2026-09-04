@@ -1,4 +1,4 @@
-import {expect, test, Page, Locator} from "@playwright/test";
+import {expect, test, Page} from "@playwright/test";
 import {CharacterSheetPage} from "../pages/CharacterSheetPage";
 import {clearCharacterStorage} from "../utils/characterStorage";
 
@@ -363,17 +363,9 @@ test.describe("Spell picker — Class filter (shared fix regression guard)", () 
 	test("Class filter dropdown anchors correctly under its button", async ({page}) => {
 		const consoleErrors = trackConsoleErrors(page);
 		const charSheet = await spawnAndGoto(page, "cleric//1");
-		await charSheet.switchToTab(charSheet.tabSpells);
+		await charSheet.openAddSpellModal();
 
-		await page.locator("#charsheet-btn-add-spell").click();
-		const modal: Locator = page.locator(".ve-ui-modal__inner:visible").last();
-		await modal.waitFor({state: "visible"});
-
-		const classDd = modal.locator(".charsheet__source-multiselect")
-			.filter({has: page.locator(".charsheet__source-multiselect-icon", {hasText: "⚔️"})});
-		const button = classDd.locator(".charsheet__source-multiselect-btn");
-		const menu = classDd.locator(".charsheet__source-multiselect-dropdown");
-
+		const {button, menu} = charSheet.spellPickerClassDropdown();
 		await button.click();
 		await expect(menu).toHaveClass(/\bopen\b/);
 		await charSheet.waitForFilterMenuSettled(menu);
