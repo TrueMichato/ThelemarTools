@@ -12,10 +12,17 @@ async function loadVariant ({name, mutations = {}}) {
 	await fs.cp(path.resolve("js/hub"), path.join(root, "js/hub"), {recursive: true});
 	await fs.mkdir(path.join(root, "server"), {recursive: true});
 	await fs.cp(path.resolve("server/src"), path.join(root, "server/src"), {recursive: true});
+	await fs.mkdir(path.join(root, "js", "charactersheet"), {recursive: true});
+	await fs.copyFile(
+		path.resolve("js/charactersheet/charactersheet.js"),
+		path.join(root, "js", "charactersheet", "charactersheet.js"),
+	);
 	await fs.symlink(path.resolve("node_modules"), path.join(root, "node_modules"), "dir");
 	await fs.writeFile(path.join(root, "package.json"), JSON.stringify({type: "module"}));
 	for (const [fileName, mutate] of Object.entries(mutations)) {
-		const filePath = path.join(root, fileName.startsWith("server/") ? fileName : `hub/${fileName}`);
+		const filePath = path.join(root, fileName.startsWith("server/") || fileName.startsWith("js/")
+			? fileName
+			: `hub/${fileName}`);
 		const source = await fs.readFile(filePath, "utf8");
 		const mutated = mutate(source);
 		if (mutated === source) throw new Error(`${name} mutation did not match ${fileName}.`);
@@ -29,6 +36,7 @@ async function loadVariant ({name, mutations = {}}) {
 		manager: await pImport("hub-rules-policy-manager.js"),
 		authority: await import(`${pathToFileURL(path.join(root, "server/src/campaign-rule-authority.js")).href}?variant=${encodeURIComponent(name)}`),
 		pImportServer: fileName => import(`${pathToFileURL(path.join(root, "server/src", fileName)).href}?variant=${encodeURIComponent(name)}`),
+		readSource: fileName => fs.readFile(path.join(root, fileName), "utf8"),
 		cleanup: () => fs.rm(root, {recursive: true, force: true}),
 	};
 }
@@ -54,6 +62,35 @@ async function probeMemoryStoreFence ({rules, pImportServer}) {
 		protocolVersion: "4",
 		idempotencyKey: "character",
 	}), error => error?.code === "POLICY_VERSION_STALE");
+}
+
+async function probeStoreFenceOwners ({pImportServer}) {
+	const {MemoryHubStore} = await pImportServer("memory-hub-store.js");
+	const {PostgresHubStore} = await pImportServer("postgres-hub-store.js");
+	for (const Store of [MemoryHubStore, PostgresHubStore]) {
+		expectFunctionContains(Store.prototype.pCreateCharacter, "assertCampaignRuleWriteFence");
+		expectFunctionContains(Store.prototype.pPatchCharacter, "assertCampaignRuleWriteFence");
+	}
+}
+
+function expectFunctionContains (fn, text) {
+	assert.equal(typeof fn, "function");
+	assert.match(fn.toString(), new RegExp(text));
+}
+
+async function probeTransitionOwners ({pImportServer}) {
+	const {MemoryHubStore} = await pImportServer("memory-hub-store.js");
+	const {PostgresHubStore} = await pImportServer("postgres-hub-store.js");
+	expectFunctionContains(MemoryHubStore.prototype.pCloneCharacter, "prepareCampaignTransitionData");
+	expectFunctionContains(MemoryHubStore.prototype.pMoveCharacter, "prepareCampaignTransitionData");
+	expectFunctionContains(PostgresHubStore.prototype._pCopyOrMoveCharacter, "prepareCampaignTransitionData");
+}
+
+async function probeCharacterSheetOwners ({readSource}) {
+	const source = await readSource("js/charactersheet/charactersheet.js");
+	assert.match(source, /_clearHubRules[\s\S]*this\._hubContext = cleared\.hubContext;/);
+	assert.match(source, /catch \(error\) \{[\s\S]*this\._clearHubRules\(\);[\s\S]*_hubRulesRefreshBlocked/);
+	assert.match(source, /state\?\.state === "live" && this\._hubRulesRefreshBlocked[\s\S]*_pRefreshHubRules/);
 }
 
 async function probeEvaluatorFailClosed ({rules, evaluator}) {
@@ -420,6 +457,59 @@ const MUTANTS = [
 			"server/src/memory-hub-store.js": source => source.replace(
 				"if (data?.carry) assertCampaignRuleWriteFence({rulesVersion, data, protocolVersion});",
 				"if (false) assertCampaignRuleWriteFence({rulesVersion, data, protocolVersion});",
+			),
+		},
+	},
+	{
+		name: "postgres-create-policy-fence-disabled",
+		probe: probeStoreFenceOwners,
+		mutations: {
+			"server/src/postgres-hub-store.js": source => source.replace(
+				"if (campaignId && data.carry) {",
+				"if (false) {",
+			),
+		},
+	},
+	{
+		name: "postgres-patch-policy-fence-disabled",
+		probe: probeStoreFenceOwners,
+		mutations: {
+			"server/src/postgres-hub-store.js": source => source.replace(
+				"if (character.campaignId && data.carry) {",
+				"if (false) {",
+			),
+		},
+	},
+	{
+		name: "character-sheet-teardown-owner-disabled",
+		probe: probeCharacterSheetOwners,
+		mutations: {
+			"js/charactersheet/charactersheet.js": source => source.replace(
+				"this._hubContext = cleared.hubContext;",
+				"this._hubContext = this._hubContext;",
+			),
+		},
+	},
+	{
+		name: "character-sheet-reconnect-owner-disabled",
+		probe: probeCharacterSheetOwners,
+		mutations: {
+			"js/charactersheet/charactersheet.js": source => source.replace(
+				"if (state?.state === \"live\" && this._hubRulesRefreshBlocked) void this._pRefreshHubRules();",
+				"if (false) void this._pRefreshHubRules();",
+			),
+		},
+	},
+	{
+		name: "destination-transition-owner-disabled",
+		probe: probeTransitionOwners,
+		mutations: {
+			"server/src/memory-hub-store.js": source => source.replace(
+				"const destinationData = prepareCampaignTransitionData({",
+				"const destinationData = source.data; /* prepareCampaignTransitionData disabled */\n\t\t/*",
+			).replace(
+				"			brewBundleHash: destinationBrewBundle?.contentHash ?? null,\n\t\t});",
+				"			brewBundleHash: destinationBrewBundle?.contentHash ?? null,\n\t\t}); */",
 			),
 		},
 	},

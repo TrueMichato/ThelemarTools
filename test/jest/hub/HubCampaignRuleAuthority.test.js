@@ -125,6 +125,26 @@ describe("campaign rule write authority", () => {
 			expectedActiveRulesVersionId: null,
 			idempotencyKey: "rules",
 		});
+		const eventCountBeforeInvalidCreates = store._events.length;
+		for (const {label, basis, protocolVersion, code} of [
+			{label: "missing identity", basis: {kind: "campaign", settingsDigest: "digest"}, protocolVersion: "4", code: "POLICY_VERSION_STALE"},
+			{label: "detached", basis: {kind: "detached", settingsDigest: "digest"}, protocolVersion: "4", code: "POLICY_VERSION_STALE"},
+			{label: "stale identity", basis: {kind: "campaign", rulesVersionId: "rules-old", settingsDigest: "digest"}, protocolVersion: "4", code: "POLICY_VERSION_STALE"},
+			{label: "old protocol", basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}, protocolVersion: "3", code: "RULES_PROTOCOL_UNSUPPORTED"},
+			{label: "omitted protocol", basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}, protocolVersion: null, code: "RULES_PROTOCOL_UNSUPPORTED"},
+		]) {
+			await expect(store.pCreateCharacter({
+				accountId: account.id,
+				campaignId: campaign.id,
+				clientImportId: `invalid-${label}`,
+				schemaVersion: 1,
+				data: {carry: {schemaVersion: 1, basis}},
+				protocolVersion,
+				idempotencyKey: `invalid-create-${label}`,
+			})).rejects.toEqual(expect.objectContaining({code}));
+		}
+		expect(store._characters.size).toBe(0);
+		expect(store._events).toHaveLength(eventCountBeforeInvalidCreates);
 		await expect(store.pCreateCharacter({
 			accountId: account.id,
 			campaignId: campaign.id,
@@ -158,6 +178,21 @@ describe("campaign rule write authority", () => {
 			expectedActiveRulesVersionId: null,
 			idempotencyKey: "destination-rules",
 		});
+		const detached = await store.pCreateCharacter({
+			accountId: account.id,
+			campaignId: null,
+			clientImportId: "detached-attach",
+			schemaVersion: 1,
+			data: {name: "Detached", carry: {schemaVersion: 1, basis: {kind: "detached"}}},
+			idempotencyKey: "detached-attach-create",
+		});
+		const attached = await store.pMoveCharacter({
+			accountId: account.id,
+			characterId: detached.character.id,
+			campaignId: destinationCampaign.id,
+			idempotencyKey: "detached-attach-move",
+		});
+		expect(attached.character.data.carry).toBeUndefined();
 		const cloned = await store.pCloneCharacter({
 			accountId: account.id,
 			characterId: created.character.id,

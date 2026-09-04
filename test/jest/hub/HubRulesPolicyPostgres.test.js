@@ -282,6 +282,25 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 			expectedActiveRulesVersionId: null,
 			idempotencyKey: command("rules-fence-policy"),
 		});
+		for (const {label, basis, protocolVersion, code} of [
+			{label: "missing", basis: {kind: "campaign", settingsDigest: "digest"}, protocolVersion: "4", code: "POLICY_VERSION_STALE"},
+			{label: "detached", basis: {kind: "detached", settingsDigest: "digest"}, protocolVersion: "4", code: "POLICY_VERSION_STALE"},
+			{label: "stale", basis: {kind: "campaign", rulesVersionId: crypto.randomUUID(), settingsDigest: "digest"}, protocolVersion: "4", code: "POLICY_VERSION_STALE"},
+			{label: "old-protocol", basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}, protocolVersion: "3", code: "RULES_PROTOCOL_UNSUPPORTED"},
+			{label: "omitted-protocol", basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}, protocolVersion: null, code: "RULES_PROTOCOL_UNSUPPORTED"},
+		]) {
+			await expect(store.pCreateCharacter({
+				accountId: account.id,
+				campaignId: campaign.id,
+				clientImportId: `invalid-${label}-${crypto.randomUUID()}`,
+				schemaVersion: 1,
+				data: {carry: {schemaVersion: 1, basis}},
+				protocolVersion,
+				idempotencyKey: command(`rules-invalid-create-${label}`),
+			})).rejects.toEqual(expect.objectContaining({code}));
+		}
+		const invalidCount = await pool.query(`SELECT count(*)::integer AS count FROM hub.characters WHERE campaign_id = $1`, [campaign.id]);
+		expect(invalidCount.rows[0].count).toBe(0);
 		await expect(store.pCreateCharacter({
 			accountId: account.id,
 			campaignId: campaign.id,
@@ -365,6 +384,21 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 			expectedActiveRulesVersionId: null,
 			idempotencyKey: command("rules-destination-policy"),
 		});
+		const detached = await store.pCreateCharacter({
+			accountId: account.id,
+			campaignId: null,
+			clientImportId: `rules-detached-${crypto.randomUUID()}`,
+			schemaVersion: 1,
+			data: {name: "Detached", carry: {schemaVersion: 1, basis: {kind: "detached"}}},
+			idempotencyKey: command("rules-detached-create"),
+		});
+		const attached = await store.pMoveCharacter({
+			accountId: account.id,
+			characterId: detached.character.id,
+			campaignId: destination.id,
+			idempotencyKey: command("rules-detached-attach"),
+		});
+		expect(attached.character.data.carry).toBeUndefined();
 		await store.pReleaseCharacterLease({
 			accountId: account.id,
 			sessionId: session.id,

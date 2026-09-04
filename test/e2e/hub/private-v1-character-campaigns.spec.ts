@@ -26,6 +26,8 @@ test("campaign characters recover from detachment and copy or move safely", asyn
 		const sourceInvite = await dm.createInviteViaApi(sourceCampaignId);
 		await player.redeemInviteTokenViaApi(sourceInvite);
 		const targetCampaignId = await dm.createCampaign("Glass Fen E2E");
+		await dm.publishDefaultCampaignRulesViaApi(sourceCampaignId);
+		await dm.publishDefaultCampaignRulesViaApi(targetCampaignId);
 		const targetInvite = await dm.createInviteViaApi(targetCampaignId);
 		await player.redeemInviteTokenViaApi(targetInvite);
 
@@ -52,6 +54,7 @@ test("campaign characters recover from detachment and copy or move safely", asyn
 		});
 		expect(clone.id).not.toBe(character.id);
 		expect(clone.campaignId).toBe(targetCampaignId);
+		expect(clone.data.carry).toBeUndefined();
 		expect((await player.getCharacter(character.id)).campaignId).toBe(sourceCampaignId);
 
 		await player.prepareCharacterMove({
@@ -72,6 +75,7 @@ test("campaign characters recover from detachment and copy or move safely", asyn
 		});
 		const canonicalBeforeReplay = await player.getCharacter(character.id);
 		expect(canonicalBeforeReplay.campaignId).toBe(targetCampaignId);
+		expect(canonicalBeforeReplay.data.carry).toBeUndefined();
 		const replay = await player.replayCharacterMove({
 			characterId: character.id,
 			campaignId: targetCampaignId,

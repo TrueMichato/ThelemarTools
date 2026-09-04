@@ -76,6 +76,17 @@ describe("campaign rule evaluator", () => {
 		expect(() => structuredClone(decision)).not.toThrow();
 	});
 
+	it("normalizes an invalid requested surface to the declared error surface", () => {
+		const decision = evaluateCampaignRules({surface: "futureSurface"});
+		expect(decision).toMatchObject({
+			status: "blocked",
+			blocking: true,
+			surface: "characterOpen",
+			errors: [{code: "RULE_EVALUATOR_INPUT_INVALID"}],
+		});
+		expect(decision.surface).toBe("characterOpen");
+	});
+
 	it.each([
 		["a stale policy pin", rulesVersion(), {expectedRulesVersionId: "rules-older"}, "POLICY_VERSION_STALE"],
 		["a missing capability", rulesVersion(), {capabilities: []}, "RULES_CAPABILITY_REQUIRED"],

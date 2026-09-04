@@ -52,8 +52,8 @@ The V2-T6 house-rule selection foundation is implemented behind the default-off
 atomic immutable DM/co-DM publish/rollback, privacy-safe member summaries, and an accessible searchable manager.
 The shared evaluator now promotes only carry-weight and encumbrance-tier calculation/projection and
 policy-fenced carry writes to **Enforced** on their proven surfaces. Other selectable settings remain
-**Advisory**; source/species/edition entries are unavailable and **Planned**. Builder and level-up
-choice enforcement, plus full content enforcement, are not implemented and remain outside this slice.
+**Advisory**; source/species/edition entries are unavailable and **Planned**. Unsupported Builder and level-up choice enforcement, plus full content enforcement, are not implemented and remain
+outside this slice; the supported carry calculation and identity fence are implemented on the surfaces listed above.
 
 The first V2-T7 product slice extends the ADR 0012 substrate with ADR 0016 protocol-4 source costs. A player can
 cast PHB/XPHB Cure Wounds from an authenticated campaign Character Sheet, spend one selected standard spell slot,

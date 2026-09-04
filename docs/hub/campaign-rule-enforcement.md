@@ -36,5 +36,7 @@ document, leaving all raw character inputs intact until the destination sheet re
 |---|---|
 | `HubCampaignRuleEvaluator` | Closed decision fields, setting domains, catalog/schema identities, stable errors, and TGTT composition |
 | `CharacterSheetHubTeardown` | Activation, rollback, failed replacement, reconnect recovery, stale ordering, and detached teardown |
-| `HubCampaignRuleAuthority` | Protocol/pin fences, no-partial memory writes, and destination transition invalidation |
+| `HubCampaignRuleAuthority` | Protocol/pin fences, no-partial memory writes, destination transition invalidation, and the shared create/patch basis matrix |
+| `HubRulesPolicyPostgres` | PostgreSQL transaction parity for missing, detached, stale, current, and protocol-mismatched bases, including clone/attach/move under active destination policy |
+| `private-v1-character-campaigns.spec.ts` | Production-derived active-policy attach, clone, and move journey |
 | `HubCarryFreshness` / `HubCarryContractParity` | Carry basis and privacy-preserving projection parity |

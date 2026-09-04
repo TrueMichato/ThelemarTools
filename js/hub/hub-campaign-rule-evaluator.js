@@ -204,12 +204,13 @@ function isClosedRuleDecision (decision) {
 }
 
 function blocked ({surface, personalSettings, rulesVersion = null, code, ruleId = null}) {
+	const normalizedSurface = _SURFACES.has(surface) ? surface : "characterOpen";
 	return {
 		schemaVersion: 1,
 		evaluatorVersion: CAMPAIGN_RULE_EVALUATOR_VERSION,
 		status: "blocked",
 		blocking: true,
-		surface,
+		surface: normalizedSurface,
 		policyIdentity: getPolicyIdentity(rulesVersion),
 		effectiveSettings: copySettings(personalSettings),
 		appliedRules: [],
