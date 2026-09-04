@@ -26,6 +26,11 @@
       "iteration": 3,
       "verdict": "FAIL",
       "summary": "Fresh verification also found unfenced destination clone/move behavior and a nondeterministic real-stack failure."
+    },
+    {
+      "iteration": 4,
+      "verdict": "FAIL",
+      "summary": "Closed-output, documentation, store-parity, mutation-owner, data-gate, and final-handoff evidence remain incomplete."
     }
   ]
 }
