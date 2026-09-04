@@ -321,6 +321,34 @@ describe("v20.1 — canonicalizing a companion item's type against the real sche
 		expect(warnings).toEqual([]);
 	});
 
+	it("does not let a stale but legal typeCode override the item's edited category", () => {
+		const warnings = [];
+		const out = sanitize({name: "Former Blade", type: "potion", typeCode: "M", rarity: "common"}, {warnings});
+		expect(out.type).toBe("P");
+		expect(warnings).toEqual([]);
+	});
+
+	it("does not let a stale baseItem override the item's edited category", () => {
+		const state = mkState([{name: "Longsword", source: "PHB", type: "M"}]);
+		const out = sanitize({name: "Former Sword", type: "potion", baseItem: "Longsword|PHB", rarity: "common"}, {state});
+		expect(out.type).toBe("P");
+	});
+
+	it("preserves an edition-specific typeCode when it matches the current category", () => {
+		const out = sanitize({name: "Modern Ring", type: "ring", typeCode: "RG|XDMG", source: "Custom", rarity: "rare"});
+		expect(out.type).toBe("RG|XDMG");
+	});
+
+	it("preserves an edition-specific rod code when it matches the current category", () => {
+		const out = sanitize({name: "Modern Rod", type: "rod", typeCode: "RD|XDMG", source: "Custom", rarity: "rare"});
+		expect(out.type).toBe("RD|XDMG");
+	});
+
+	it("preserves an edition-specific armor code when it matches armorType", () => {
+		const out = sanitize({name: "Modern Plate", type: "armor", typeCode: "HA|XPHB", armorType: "heavy", rarity: "rare"});
+		expect(out.type).toBe("HA|XPHB");
+	});
+
 	it("never emits a null type — an omitted optional property is deleted, not nulled", () => {
 		const out = sanitize({name: "No Type Here", type: "weapon", rarity: "none"});
 		expect(out.type).not.toBeNull();

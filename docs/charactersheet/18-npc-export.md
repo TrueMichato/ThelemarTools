@@ -2242,9 +2242,13 @@ Hecate's Dagger (v20's own worked example) had ever gone through the picker.
 The fix is a resolution *order*, not a bigger rename map — a human label is evidence for a
 type, never the type itself:
 
-1. **An already-legal value wins outright.** If `typeCode` (or a prior-run `type`) is
-   already one of the schema's 66 codes, it ships unchanged. Nothing downstream runs.
-2. **`baseItem` is the strongest signal.** `"plate armor|phb"` resolves against the
+1. **A schema-code `type` wins outright; preserved metadata must match the current category.**
+   If `type` is already one of the schema's 66 codes, it ships unchanged. When `type` is
+   instead the sheet's UI category, a legal `typeCode` or `baseItem` is accepted only when
+   its code is compatible with that category. The custom-item editor intentionally preserves
+   fields its form does not model, so after a category change an old but schema-legal
+   `typeCode: "M"` must not make the newly edited `type: "potion"` export as a melee weapon.
+2. **A compatible `baseItem` is the strongest remaining signal.** `"plate armor|phb"` resolves against the
    sheet's own loaded item catalog (`state._allItems` — the merge of `data/items.json`
    **and** `data/items-base.json`'s `baseitem` array, exactly like production's
    `DataUtil.item.loadJSON()` pipeline hands the sheet); the match's own `type` is

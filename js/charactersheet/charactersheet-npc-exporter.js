@@ -6616,6 +6616,10 @@ class CharacterSheetNpcExporter {
 		"WD|XDMG",
 	]);
 
+	static _SHEET_ITEM_TYPE_LABELS = new Set([
+		"armor", "gear", "potion", "ring", "rod", "scroll", "shield", "staff", "wand", "weapon", "wondrous",
+	]);
+
 	/**
 	 * A narrow, unambiguous word-to-code map for the sheet's own UI type labels — used only
 	 * as the FINAL fallback, after an already-legal incumbent code and a `baseItem` catalog
@@ -6658,6 +6662,30 @@ class CharacterSheetNpcExporter {
 	}
 
 	/**
+	 * Return whether a schema type code can represent the sheet's current custom-item category.
+	 * The editor preserves catalog metadata which its form does not model, so `typeCode`/`baseItem`
+	 * may describe the item's old category after the user changes it.
+	 */
+	static _isItemTypeCompatibleWithLabel (type, label) {
+		if (!CharacterSheetNpcExporter._SCHEMA_ITEM_TYPES.has(type)) return false;
+		const typeBase = type.split("|")[0];
+
+		switch (label) {
+			case "weapon": return ["M", "R", "A"].includes(typeBase);
+			case "armor": return ["LA", "MA", "HA"].includes(typeBase);
+			case "shield": return typeBase === "S";
+			case "potion": return typeBase === "P";
+			case "scroll": return typeBase === "SC";
+			case "ring": return typeBase === "RG";
+			case "rod": return typeBase === "RD";
+			case "wand": return ["WD", "RD"].includes(typeBase);
+			case "gear":
+				return !["M", "R", "A", "LA", "MA", "HA", "S", "P", "SC", "RG", "WD", "RD"].includes(typeBase);
+			default: return false;
+		}
+	}
+
+	/**
 	 * Resolve a `baseItem` reference ("name|source") against the loaded item catalog and
 	 * return its real `type`, but only if that type is itself schema-legal — the catalog can
 	 * include brew/prerelease data that is invalid, and adopting it silently would just move
@@ -6695,36 +6723,31 @@ class CharacterSheetNpcExporter {
 	 * naming the item — never the sheet's human-readable UI label, which the schema rejects.
 	 *
 	 * Resolution order, each step only running if the previous one didn't resolve:
-	 *  1. Keep an already-legal incumbent — checks the RENAMED value first (`typeCode`, if
-	 *     present, already won the earlier rename), then the item's original `type`, so a
-	 *     bogus `typeCode` can never clobber an already-valid raw `type`.
-	 *  2. Resolve via `baseItem` against the real loaded catalog.
-	 *  3. `wondrous` / `staff` are boolean flags in the real schema, not type codes — a
+	 *  1. Keep a schema-code `type` unchanged. For a sheet UI label, only accept a legal
+	 *     `typeCode`/`baseItem` whose code is compatible with that current category; the item
+	 *     editor can preserve otherwise-valid metadata from the category the item used to have.
+	 *  2. `wondrous` / `staff` are boolean flags in the real schema, not type codes — a
 	 *     weapon-shaped "staff" (has `dmg1`/`weaponCategory`) is, in every real example in
 	 *     this repo's own data, typed as a bare melee weapon (`"M"`) alongside the flag; a
 	 *     non-weapon-shaped one has no type at all, matching classic magic staves exactly.
 	 *     Both outcomes are complete, correct representations, so neither warns.
-	 *  4. `armorType` (light/medium/heavy) resolves "armor" unambiguously.
-	 *  5. The narrow label map above resolves shield/potion/ring/rod/scroll.
-	 *  6. Otherwise the label is genuinely ambiguous ("weapon", "wand", or unrecognized) —
+	 *  3. `armorType` (light/medium/heavy) resolves "armor" unambiguously.
+	 *  4. The narrow label map above resolves shield/potion/ring/rod/scroll.
+	 *  5. Otherwise the label is genuinely ambiguous ("weapon", "wand", or unrecognized) —
 	 *     `type` is omitted (schema-optional) and an actionable warning is pushed.
 	 */
 	static _getCanonicalItemType (item, renamedType, {state, warnings, itemName} = {}) {
 		const rawType = typeof item?.type === "string" ? item.type : null;
 		const candidateOrder = [renamedType, rawType].filter(v => typeof v === "string" && v);
-		for (const candidate of candidateOrder) {
-			if (CharacterSheetNpcExporter._SCHEMA_ITEM_TYPES.has(candidate)) return {type: candidate};
-		}
-
 		const baseItemType = CharacterSheetNpcExporter._getBaseItemCatalogType(item?.baseItem, state);
-		if (baseItemType) return {type: baseItemType};
-
-		// Once no candidate is a legal schema code, prefer the raw semantic label. An invalid
-		// legacy `typeCode` (for example `"W"`) must not mask a recoverable `type: "wondrous"`.
 		const label = (rawType || candidateOrder[0] || "").trim().toLowerCase();
 		// The item's OWN original source (captured before the exporter rewrites `source` to
 		// the companion-document source) is the only authoritative edition signal items carry.
 		const originalSource = typeof item?.source === "string" ? item.source : null;
+
+		// A raw schema code is authoritative. Otherwise, the sheet's semantic category is
+		// authoritative and preserved metadata must first prove it still describes that category.
+		if (rawType && CharacterSheetNpcExporter._SCHEMA_ITEM_TYPES.has(rawType)) return {type: rawType};
 
 		if (label === "wondrous") return {wondrous: true};
 
@@ -6735,10 +6758,30 @@ class CharacterSheetNpcExporter {
 
 		if (label === "armor") {
 			const armorTypeCode = CharacterSheetNpcExporter._getArmorTypeItemType(item?.armorType);
-			if (armorTypeCode) return {type: armorTypeCode};
-		} else {
+			if (armorTypeCode) {
+				const editionSpecificType = [...candidateOrder, baseItemType]
+					.find(type => CharacterSheetNpcExporter._SCHEMA_ITEM_TYPES.has(type) && type.split("|")[0] === armorTypeCode);
+				return {type: editionSpecificType || armorTypeCode};
+			}
+		}
+
+		const compatibleType = [...candidateOrder, baseItemType]
+			.find(type => CharacterSheetNpcExporter._isItemTypeCompatibleWithLabel(type, label));
+		if (compatibleType) return {type: compatibleType};
+
+		if (label !== "armor") {
 			const mapped = CharacterSheetNpcExporter._getLabelMappedItemType(label, originalSource);
 			if (mapped) return {type: mapped};
+		}
+
+		// Non-sheet data can arrive with a valid incumbent or base item but no UI category label.
+		// Do not use this escape hatch for a recognized sheet label: any legal-but-incompatible
+		// metadata there is precisely the stale edit state this method must reject.
+		if (!CharacterSheetNpcExporter._SHEET_ITEM_TYPE_LABELS.has(label)) {
+			for (const candidate of candidateOrder) {
+				if (CharacterSheetNpcExporter._SCHEMA_ITEM_TYPES.has(candidate)) return {type: candidate};
+			}
+			if (baseItemType) return {type: baseItemType};
 		}
 
 		if (label && Array.isArray(warnings)) {
