@@ -6098,7 +6098,7 @@ class CharacterSheetBuilder {
 	 * @param {*} cls
 	 */
 	_renderClassOptionalFeatures (cls) {
-		const allOptFeaturesRaw = this._page.getOptionalFeatures();
+		const allOptFeaturesRaw = this._page.filterByAllowedSources(this._page.getOptionalFeatures());
 		const allOptFeatures = this._filterOptFeaturesByEdition(allOptFeaturesRaw, cls?.source);
 		const container = e_({outer: `<div class="charsheet__builder-optional-features mt-3"></div>`});
 
@@ -6145,7 +6145,7 @@ class CharacterSheetBuilder {
 	 */
 	_renderCombatMethodsSelection (container, cls, optFeatProg, methodCount, name, featureKey, allOptFeatures) {
 		// Merge combatMethod entities into the available method pool
-		const combatMethodEntities = this._page.getCombatMethodEntities?.() || [];
+		const combatMethodEntities = this._page.filterByAllowedSources(this._page.getCombatMethodEntities?.() || []);
 		const allMethods = [...allOptFeatures, ...combatMethodEntities];
 
 		// Get traditions filtered by what the class has access to

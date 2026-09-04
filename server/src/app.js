@@ -24,6 +24,7 @@ import {
 	normalizeCampaignRulesPolicyForStorage,
 	validateCampaignBrewBundle,
 } from "./campaign-content.js";
+import {pGetCampaignContentCatalog} from "./campaign-content-policy.js";
 import {
 	CAMPAIGN_RULES_POLICY_CAPABILITY,
 	getPublicCampaignRulesCatalog,
@@ -362,7 +363,7 @@ export async function createHubApp ({
 	const rejectUnknownAwardFields = async (request, reply) => {
 		const body = request.body;
 		if (
-			!hasOnlyKeys(body, new Set(["source", "targetCharacterIds", "quantity", "note"]))
+			!hasOnlyKeys(body, new Set(["source", "targetCharacterIds", "quantity", "note", "rulesVersionId"]))
 			|| !Array.isArray(body.targetCharacterIds)
 			|| body.targetCharacterIds.some(id => typeof id !== "string")
 			|| !Number.isSafeInteger(body.quantity)
@@ -391,7 +392,7 @@ export async function createHubApp ({
 	};
 	const rejectUnknownLegacyItemGrantFields = async (request, reply) => {
 		if (
-			!hasOnlyKeys(request.body, new Set(["item", "quantity"]))
+			!hasOnlyKeys(request.body, new Set(["item", "quantity", "rulesVersionId"]))
 			|| !hasOnlyKeys(request.body?.item, SAFE_ITEM_SUMMARY_KEYS)
 			|| !hasStrictSafeItemTypes(request.body.item)
 			|| (request.body.quantity !== undefined && !Number.isSafeInteger(request.body.quantity))
@@ -934,12 +935,18 @@ export async function createHubApp ({
 				properties: {campaignId: {type: "string", format: "uuid"}},
 			},
 		},
-	}, async request => ({
-		context: await store.pGetCampaignContext({
+	}, async request => {
+		const context = await store.pGetCampaignContext({
 			accountId: request.hubAuth.account.id,
 			campaignId: request.params.campaignId,
-		}),
-	}));
+		});
+		return {
+			context: {
+				...context,
+				contentCatalog: await pGetCampaignContentCatalog({brewBundle: context.brewBundle}),
+			},
+		};
+	});
 
 	app.get("/api/campaigns/:campaignId/compatibility", {
 		preHandler: requireAuth,
@@ -1291,6 +1298,7 @@ export async function createHubApp ({
 				properties: {
 					item: getSafeItemSummarySchema(),
 					quantity: {type: "integer", minimum: 1, maximum: 100000, default: 1},
+					rulesVersionId: {type: ["string", "null"], format: "uuid"},
 				},
 			},
 		},
@@ -1300,6 +1308,7 @@ export async function createHubApp ({
 		characterId: request.params.characterId,
 		item: request.body.item,
 		quantity: request.body.quantity || 1,
+		rulesVersionId: request.body.rulesVersionId || null,
 		idempotencyKey: getIdempotencyKey(request),
 	}));
 
@@ -1349,6 +1358,7 @@ export async function createHubApp ({
 					},
 					quantity: {type: "integer", minimum: 1, maximum: 100000},
 					note: {type: ["string", "null"], maxLength: 500},
+					rulesVersionId: {type: ["string", "null"], format: "uuid"},
 				},
 			},
 		},
@@ -1359,6 +1369,7 @@ export async function createHubApp ({
 		targetCharacterIds: request.body.targetCharacterIds,
 		quantity: request.body.quantity,
 		note: request.body.note ?? null,
+		rulesVersionId: request.body.rulesVersionId || null,
 		idempotencyKey: getIdempotencyKey(request),
 	}));
 
@@ -1436,7 +1447,10 @@ export async function createHubApp ({
 				type: "object",
 				required: ["decision"],
 				additionalProperties: false,
-				properties: {decision: {type: "string", enum: ["accept", "reject"]}},
+				properties: {
+					decision: {type: "string", enum: ["accept", "reject"]},
+					rulesVersionId: {type: ["string", "null"], format: "uuid"},
+				},
 			},
 		},
 	}, async request => store.pResolveTransfer({
@@ -1444,6 +1458,7 @@ export async function createHubApp ({
 		campaignId: request.params.campaignId,
 		transferId: request.params.transferId,
 		decision: request.body.decision,
+		rulesVersionId: request.body.rulesVersionId,
 		idempotencyKey: getIdempotencyKey(request),
 	}));
 
@@ -1654,13 +1669,23 @@ export async function createHubApp ({
 		app.get("/api/campaigns/:campaignId/rules-policy", {
 			preHandler: [requireAuth, requireCampaignRole(["dm", "co_dm"])],
 			schema: {params: rulesPolicyParamsSchema},
-		}, async request => ({
-			catalog: getPublicCampaignRulesCatalog(),
-			management: await store.pGetRulesPolicyManagement({
-				accountId: request.hubAuth.account.id,
-				campaignId: request.params.campaignId,
-			}),
-		}));
+		}, async request => {
+			const [management, context] = await Promise.all([
+				store.pGetRulesPolicyManagement({
+					accountId: request.hubAuth.account.id,
+					campaignId: request.params.campaignId,
+				}),
+				store.pGetCampaignContext({
+					accountId: request.hubAuth.account.id,
+					campaignId: request.params.campaignId,
+				}),
+			]);
+			return {
+				catalog: getPublicCampaignRulesCatalog(),
+				contentCatalog: await pGetCampaignContentCatalog({brewBundle: context.brewBundle}),
+				management,
+			};
+		});
 
 		app.post("/api/campaigns/:campaignId/rules-policy", {
 			preHandler: [requireMutationSecurity, requireCampaignRole(["dm", "co_dm"])],
@@ -1838,6 +1863,7 @@ export async function createHubApp ({
 					campaignId: {type: ["string", "null"], format: "uuid"},
 					schemaVersion: {type: "integer", minimum: 1},
 					data: {type: "object"},
+					rulesVersionId: {type: ["string", "null"], format: "uuid"},
 				},
 			},
 		},
@@ -1848,6 +1874,7 @@ export async function createHubApp ({
 			data: request.body.data,
 			schemaVersion: request.body.schemaVersion,
 			clientImportId: request.body.clientImportId,
+			rulesVersionId: request.body.rulesVersionId || null,
 			idempotencyKey: getIdempotencyKey(request),
 		});
 		return reply.code(201).send(created);
@@ -1994,6 +2021,7 @@ export async function createHubApp ({
 							},
 						},
 					},
+					rulesVersionId: {type: ["string", "null"], format: "uuid"},
 				},
 			},
 		},
@@ -2004,6 +2032,7 @@ export async function createHubApp ({
 		baseRevision: request.body.baseRevision,
 		leaseEpoch: request.body.leaseEpoch,
 		patches: request.body.patches,
+		rulesVersionId: request.body.rulesVersionId || null,
 		idempotencyKey: getIdempotencyKey(request),
 	}));
 
@@ -2037,13 +2066,17 @@ export async function createHubApp ({
 					type: "object",
 					required: ["campaignId"],
 					additionalProperties: false,
-					properties: {campaignId: {type: "string", format: "uuid"}},
+					properties: {
+						campaignId: {type: "string", format: "uuid"},
+						rulesVersionId: {type: ["string", "null"], format: "uuid"},
+					},
 				},
 			},
 		}, async request => store[action === "clone" ? "pCloneCharacter" : "pMoveCharacter"]({
 			accountId: request.hubAuth.account.id,
 			characterId: request.params.characterId,
 			campaignId: request.body.campaignId,
+			rulesVersionId: request.body.rulesVersionId || null,
 			idempotencyKey: getIdempotencyKey(request),
 		}));
 	}

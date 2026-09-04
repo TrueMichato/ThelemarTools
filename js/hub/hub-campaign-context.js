@@ -40,6 +40,22 @@ export class HubCampaignContext {
 		return this.context;
 	}
 
+	async pRefresh ({signal = null, fnIsCurrent = () => true} = {}) {
+		if (this._isDisposed) throw new Error(`This campaign context has been disposed.`);
+		const context = await this._api.pGetCampaignContext({campaignId: this._campaignId, signal});
+		if (!fnIsCurrent()) return null;
+		this._injectedContext = null;
+		this._context = context;
+		if (this._context.brewBundle) {
+			this._brewContext.activate({
+				campaignId: this._campaignId,
+				bundleHash: this._context.brewBundle.contentHash,
+				brewDocs: this._context.brewBundle.content,
+			});
+		} else this._brewContext.clear();
+		return this.context;
+	}
+
 	/**
 	 * Idempotent cleanup. Clears the campaign brew overlay only; personal, site, and prerelease
 	 * content are never touched.

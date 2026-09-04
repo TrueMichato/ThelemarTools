@@ -19,7 +19,8 @@
 | One-player Cure Wounds targeting is consented, atomic, private, and exactly-once | ADR 0016; V2-T7 | source-cost registry/authority, migration 0007, protocol-4 operation legs, Character Sheet targeting/approval coordinators | `HubSourceCosts`, `HubPeerSourceCostsAuthority`, PostgreSQL semantic authority, operation reconciliation, spell-flow, three-user Chromium journey | source-cost rollout gate and ADR 0016 rollback procedure |
 | Transfers cannot duplicate/lose assets | `domain-model.md` | `hub-actions.js`, transactional store locks/escrow | Hub actions and Phase 4 domain | future stuck-transfer runbook |
 | Multi-target item awards are atomic, private, and retry-safe | ADR 0017; V2-T4 | strict award route, shared inventory helpers, staged memory writes, PostgreSQL locks/transaction, ordered events, Character Sheet reconciliation | `HubItemAward`, API route/domain/PostgreSQL parity, Character Sheet realtime/party inventory, real-stack lifecycle | award troubleshooting row; incident runbook for suspected asset drift |
-| Campaign rules selection is immutable, explainable, compatible, and honestly labeled | ADR 0015; V2-T6 | shared closed catalog/validator/legacy adapter, capability-gated API and manager, memory/PostgreSQL atomic publish/rollback using existing `rules_versions` JSONB | `HubCampaignRulesPolicy`, `HubRulesPolicyApi`, `HubRulesPolicyPostgres`, `HubPageContract`, production-derived lifecycle journey | downstream evaluator/content enforcement explicitly not implemented |
+| Campaign rules selection is immutable, explainable, compatible, and honestly labeled | ADR 0015; V2-T6 | shared closed catalog/validator/legacy adapter, capability-gated API and manager, memory/PostgreSQL atomic publish/rollback using existing `rules_versions` JSONB | `HubCampaignRulesPolicy`, `HubRulesPolicyApi`, `HubRulesPolicyPostgres`, `HubPageContract`, production-derived lifecycle journey | content rules enforced; non-content rules remain advisory |
+| New campaign content obeys source/species/edition policy without rewriting legacy characters | ADR 0015; V2-T6 | `js/hub/hub-content-policy.js`, `server/src/campaign-content-policy.js`, generated site/campaign-brew catalog, Character Sheet candidate filters, memory/PostgreSQL admission and delta gates | `HubCampaignContentGating`, `HubRulesPolicyPostgres`, Character Sheet content/teardown suites, content-policy mutation suite, production-stack Chromium content journey | existing `rules_versions`; no migration |
 | Service worker never caches auth/API | `security.md` | Hub route policy + `sw-template.js` | route-policy/service-worker build | stale-client staging scenario |
 | Backup is portable and atomic | `operations.md` | backup/restore/pg-env scripts | local PostgreSQL backup/restore drill | backup/restore runbook |
 | Oracle recovery meets RPO/RTO | ADR 0006; `roadmap.md` V1-G1 | encrypted backup/restore and scheduled-operation tooling implemented; off-machine/isolated proof active | exact-release staging restore/rollback evidence required | backup/restore and rollback runbooks |
@@ -36,3 +37,31 @@
 | Whole-site active campaign context | ADR 0013; V2-T5; `active-campaign-context.md` | active-context coordinator/store/channel, switcher, site bootstrap, surface defaults, temporary brew/rules adapters, `campaign.active_context.v1` | coordinator/navigation/bootstrap/privacy Jest; four killed mutants; production-stack active-context Chromium journeys | explicit `?local=1`; reload after blocked teardown |
 
 Use `not implemented` explicitly. A planned row must not be presented as current capability.
+
+## Content rule-by-surface compliance
+
+| Rule | Admin/publication | Candidate UI | Existing character | New/admitted character | Authoritative delta/semantic writes | Context lifecycle |
+|---|---|---|---|---|---|---|
+| `content.sources.allowed` | Canonical IDs must exist in the generated site catalog or active campaign brew catalog; aliases normalize before immutable publication | Filters race/species, class/subclass, background, feat, optional-feature, combat-method, spell, and item candidates | Bounded UID/rule warning; play, unrelated edits, removals, and existing stack changes remain available | Create/import/clone/attach/cross-campaign move rejects unknown or disallowed sources | Direct patches, item grants/awards, and accepted transfers into characters re-evaluate introduced `kind + uid` multiplicity under the exact active version | Rollback/reconnect/switch/access loss clears prior candidates and reports by generation; local/signed-out behavior is unchanged |
+| `content.species.allowed` | Canonical case-insensitive `name\|source`; base, subrace, and named variant identities must be catalogued | Builder and replacement surfaces show only permitted canonical species identities | Existing race/species remains usable and is never rewritten | Whole-document admission rejects disallowed, unknown, or malformed species identities | Replacing/adding race or subrace is blocking; removing it is permitted | Same teardown and version fence as source policy |
+| `content.editions.allowed` | Exactly 2014, 2024, or both; unknown edition metadata fails closed | All governed candidate pools intersect edition with source/species policy | PHB/XPHB conflicts are grandfathered and reported | New/admitted documents must use only enabled editions | Every introduced governed identity, including spells/features/items, must resolve to an enabled edition | Same teardown and version fence as source policy |
+
+Campaign brew augments only the active campaign content universe. It does not mutate personal brew, and personal
+brew absent from the active bundle cannot satisfy campaign admission. Browser filtering is explanatory only;
+the server rechecks the same normalized policy in the authoritative transaction.
+
+## Content-policy integration collision map
+
+| Shared hotspot | Content-policy ownership | Descendant integration requirement |
+|---|---|---|
+| `js/hub/hub-campaign-rules.js`, `hub-rules-policy-manager.js`, `campaign.html`, `scss/hub.scss` | Stable content IDs, enforced labels, typed source/species/edition controls | Preserve non-content rules as advisory until their lane supplies independent enforcement; merge catalog/UI changes additively |
+| `js/hub/hub-campaign-context.js`, `hub-site-context.js`, `js/charactersheet/charactersheet.js` | Content catalog/policy projection and generation-fenced filter/report teardown | Preserve V2-T5 activation order, temporary brew boundary, pinning, and access-loss cleanup |
+| `js/charactersheet/charactersheet-builder.js`, `charactersheet-levelup.js` | Content-specific candidate projection and final authoritative save behavior | Compose with house-rule evaluators; do not replace the centralized content filter or trust picker state |
+| `server/src/app.js`, `memory-hub-store.js`, `postgres-hub-store.js` | Rules-version pin plus admission/delta checks for character writes, grants/awards, and transfer acceptance | Keep checks inside existing authorization/lock/transaction boundaries; rejected writes emit no content/private event |
+| `test/e2e/pages/HubCampaignPage.ts`, `CharacterSheetPage.ts`, Hub/Character Sheet policy tests | Content fixtures, bypass/grandfather/teardown assertions | Retain content cases when resolving parallel rules-lane fixture/page-object edits |
+| Hub/Character Sheet status, testing, traceability, and architecture docs | Truthful content-enforced/non-content-advisory boundary | Resolve wording as a descendant merge; do not regress content rules to Planned or claim all house rules enforced |
+
+The content-specific modules (`js/hub/hub-content-policy.js`,
+`server/src/campaign-content-policy.js`, `server/scripts/generate-content-catalog.mjs`, and
+`server/data/campaign-content-site-catalog.json`) are isolated from non-content rule evaluation. Migration
+`server/migrations/0007*` is untouched; immutable `rules_versions` storage is sufficient.

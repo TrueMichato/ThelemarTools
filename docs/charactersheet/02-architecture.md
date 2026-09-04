@@ -96,6 +96,25 @@ sheet has implemented the later operation-aware `B/L -> R/F` live-edit reconcili
 coordination, banners, or peer approval UI. Until that client slice lands, ordinary local behavior and existing
 Hub repository save/rebase behavior remain unchanged.
 
+### Campaign Hub content-policy boundary
+
+An authenticated campaign Character Sheet receives typed content-policy version 1 plus the generated site and
+active campaign-brew catalog from `HubCampaignContext`. `CharacterSheetPage.filterByAllowedSources()` delegates
+to the shared `js/hub/hub-content-policy.js` evaluator, so Builder, Level Up, Quick Build, supported Respec
+replacement flows, and spell/feat/item/class/species pickers intersect source, canonical species UID, and
+2014/2024 edition policy.
+
+Picker filtering is not authority. Every campaign character admission and policy-sensitive server delta is
+re-evaluated against the exact active rules-version ID. A loaded legacy character is evaluated as a report:
+existing noncompliant identities remain playable and removable, and the campaign panel renders at most six
+sorted actionable warnings. A write compares prior and candidate canonical `kind + uid` multiplicity, so
+unrelated play edits remain valid while newly introduced disallowed or unknown content is rejected.
+
+Campaign brew is a temporary availability overlay and never mutates personal brew. Personal content absent
+from the campaign bundle cannot widen policy. Context rollback, reconnect refresh, campaign switch, logout,
+access loss, or explicit local navigation generation-fences pending loads and removes stale content filters and
+reports. Signed-out and `?local=1` repositories retain the pre-Hub behavior.
+
 ### 1. Initialization Flow
 
 ```

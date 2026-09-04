@@ -52,6 +52,7 @@ import {CharacterSheetPeerTargeting} from "./charactersheet-peer-targeting.js";
 import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js";
 import {getCharacterSaveFence, isCharacterSaveFenceCurrent} from "./charactersheet-persistence-fence.js";
 import {diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
+import {filterCampaignContentEntities} from "../hub/hub-content-policy.js";
 
 const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, StorageUtil, DataUtil, BrewUtil2, PrereleaseUtil} = /** @type {*} */ (globalThis);
 
@@ -83,7 +84,10 @@ class CharacterSheetPage {
 		const isHubCharacter = !!hubCampaignId || hubParams.get("hubCharacter") === "1";
 		this._characterRepository = characterRepository
 			|| (isHubCharacter
-				? new HubHttpCharacterRepository({campaignId: hubCampaignId})
+				? new HubHttpCharacterRepository({
+					campaignId: hubCampaignId,
+					fnGetRulesVersionId: () => this._hubContext?.rulesVersion?.id || null,
+				})
 				: new LocalCharacterRepository({storage: StorageUtil}));
 		this._hubCampaignId = hubCampaignId;
 		this._isHubCharacter = isHubCharacter;
@@ -99,6 +103,11 @@ class CharacterSheetPage {
 		this._partyInventory = null;
 		this._characterLoadGeneration = 0;
 		this._hubRealtimeGeneration = 0;
+		this._hubContextGeneration = 0;
+		this._hubContextRefreshActiveGeneration = null;
+		this._isHubContextRefreshing = false;
+		this._isHubContextUnavailable = false;
+		this._isHubContextRevalidationRequired = false;
 		this._builder = null;
 		this._combat = null;
 		this._spells = null;
@@ -252,8 +261,9 @@ class CharacterSheetPage {
 	 * re-apply `setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules)`, so a retained
 	 * `_hubContext` would silently reinstall the campaign rules on the next character load.
 	 */
-	_clearHubRules () {
+	_clearHubRules ({isUnavailable = false} = {}) {
 		this._hubContext = null;
+		this._isHubContextUnavailable = isUnavailable;
 		this._state.clearCampaignSettingsOverlay();
 		// Return to the detached basis in lockstep with the overlay: a summary stamped with a
 		// campaign this sheet is no longer in must not keep claiming to be current.
@@ -283,6 +293,7 @@ class CharacterSheetPage {
 		this._hubRealtime.on("cursor", metadata => this._onHubRealtimeCursor(metadata));
 		this._hubRealtime.on("semanticOperation", event => this._onHubSemanticOperation(event));
 		this._hubRealtime.on("connectionState", state => this._onHubRealtimeConnectionState(state));
+		this._hubRealtime.on("campaignContextChanged", event => this._onHubCampaignContextChanged(event));
 		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
 		return true;
 	}
@@ -300,9 +311,72 @@ class CharacterSheetPage {
 	_onHubRealtimeConnectionState (state) {
 		this._hubEffects?.onConnectionState(state);
 		this._peerTargeting?.onConnectionState(state);
+		if (state?.state === "live" && this._isHubContextRevalidationRequired) {
+			this._isHubContextRevalidationRequired = false;
+			this._onHubCampaignContextChanged({type: "reconnected"});
+		}
 		if (!["closed", "access_lost"].includes(state?.state)) return;
 		this._hubRealtimeGeneration++;
+		this._hubContextGeneration++;
+		this._hubContextRefreshActiveGeneration = null;
+		this._isHubContextRefreshing = false;
 		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
+		this._isHubContextRevalidationRequired = state.state === "closed";
+		this._clearHubRules?.({isUnavailable: true});
+		this._campaign?.render();
+	}
+
+	_applyHubContext (context) {
+		this._hubContext = context;
+		this._state.setCampaignSettingsOverlay(context?.rulesVersion?.rules);
+		this._state.setCarryAuthorityContext({
+			rulesVersionId: context?.rulesVersion?.id ?? null,
+			brewBundleHash: context?.brewBundle?.contentHash ?? null,
+		});
+	}
+
+	_onHubCampaignContextChanged (event = null) {
+		if (!this._hubCampaignContext) return;
+		if (
+			event?.type === "campaign.cursor"
+			&& (event.rulesVersionId ?? null) === (this._hubContext?.rulesVersion?.id ?? null)
+			&& (event.brewBundleVersionId ?? null) === (this._hubContext?.brewBundle?.id ?? null)
+		) return;
+		const activeContextId = event?.type === "rules.activated"
+			? this._hubContext?.rulesVersion?.id
+			: event?.type === "brew.activated"
+				? this._hubContext?.brewBundle?.id
+				: null;
+		if (event?.aggregateId && event.aggregateId === activeContextId) return;
+		const generation = ++this._hubContextGeneration;
+		this._hubContextRefreshActiveGeneration = generation;
+		this._isHubContextRefreshing = true;
+		this._clearHubRules();
+		this._campaign?.render();
+		void this._hubCampaignContext.pRefresh({
+			fnIsCurrent: () => generation === this._hubContextGeneration,
+		})
+			.then(context => {
+				if (!context || generation !== this._hubContextGeneration) return;
+				this._applyHubContext(context);
+				this._isHubContextUnavailable = false;
+				this._renderCharacter();
+				this._campaign?.render();
+			})
+			.catch(() => {
+				if (generation !== this._hubContextGeneration) return;
+				this._isHubContextUnavailable = true;
+				this._isHubContextRevalidationRequired = true;
+				JqueryUtil.doToast({
+					type: "danger",
+					content: "Campaign content rules changed, but the new policy could not be loaded. New content choices remain blocked until you reconnect or reload.",
+				});
+			})
+			.finally(() => {
+				if (this._hubContextRefreshActiveGeneration !== generation) return;
+				this._hubContextRefreshActiveGeneration = null;
+				this._isHubContextRefreshing = false;
+			});
 	}
 
 	_onHubRealtimeDeliveryError (detail) {
@@ -586,17 +660,12 @@ class CharacterSheetPage {
 			shouldActivateContext: ({campaignId}) => campaignId === this._hubCampaignId,
 			pPreflightSwitch: async () => ({safe: !this._characterRepository?.hasPendingWrites?.()}),
 			pOnContextActivated: async ({context}) => {
-				this._hubContext = context;
-				this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
+				this._applyHubContext(context);
 				// Stamp the carry summary with the context it was computed under, immediately
 				// beside the overlay whose values feed its settings digest — the two must not
 				// be able to drift. Without this the sheet would keep publishing a `detached`
 				// basis while the server expected a `campaign` one, and every campaign
 				// character's `carrySummary` would be silently withheld as unverifiable.
-				this._state.setCarryAuthorityContext({
-					rulesVersionId: this._hubContext?.rulesVersion?.id ?? null,
-					brewBundleHash: this._hubContext?.brewBundle?.contentHash ?? null,
-				});
 			},
 			onFenceGeneration: () => this._fenceHubGeneration(),
 			pTeardownRealtime: async () => this._detachHubRealtimeClient(),
@@ -688,6 +757,7 @@ class CharacterSheetPage {
 						this._renderCharacter();
 					},
 					fnSaveCharacter: () => this._saveCurrentCharacter({isInteractiveConflict: false}),
+					fnGetRulesVersionId: () => this._hubContext?.rulesVersion?.id ?? null,
 					fnIsCurrentCharacter: ({characterId, generation}) => (
 						this._currentCharacterId === characterId
 						&& this._characterLoadGeneration === generation
@@ -19886,9 +19956,17 @@ class CharacterSheetPage {
 	 * @returns {Array} Filtered array
 	 */
 	filterByAllowedSources (entities) {
+		if (this._isHubContextRefreshing || this._isHubContextUnavailable) return [];
 		// First filter by allowed sources
 		const allowed = this._state.getAllowedSources();
 		let filtered = allowed ? entities.filter(e => allowed.includes(e.source)) : entities;
+		filtered = filterCampaignContentEntities({
+			contentPolicy: this._hubContext?.rulesVersion?.contentPolicy,
+			entities: filtered,
+			availableSources: this._hubContext?.contentCatalog?.sources,
+			availableSpecies: this._hubContext?.contentCatalog?.species,
+			sourceEditions: this._hubContext?.contentCatalog?.sourceEditions,
+		});
 
 		// Then apply priority filtering if set
 		const priority = this._state.getPrioritySources();
@@ -19961,6 +20039,13 @@ class CharacterSheetPage {
 		const augmented = filtered.slice();
 		for (const spell of all) {
 			if (filteredSet.has(spell)) continue;
+			if (!filterCampaignContentEntities({
+				contentPolicy: this._hubContext?.rulesVersion?.contentPolicy,
+				entities: [spell],
+				availableSources: this._hubContext?.contentCatalog?.sources,
+				availableSpecies: this._hubContext?.contentCatalog?.species,
+				sourceEditions: this._hubContext?.contentCatalog?.sourceEditions,
+			}).length) continue;
 			const isGranted = grants.some(({className, subclass, subclassChoice, additionalClassNames}) => {
 				if (subclass && CharacterSheetClassUtils.subclassAdditionalSpellsIncludeSpell(spell, subclass, {subclassChoice})) return true;
 				if (additionalClassNames.length && additionalClassNames.some(n => CharacterSheetClassUtils.spellIsForClass(spell, n))) return true;

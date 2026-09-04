@@ -77,6 +77,7 @@ export class HubRulesPolicyManager {
 		this._root = document.getElementById("campaign-rules-policy-manager");
 		this._legacyForm = document.getElementById("campaign-rules-form");
 		this._catalog = null;
+		this._contentCatalog = null;
 		this._management = null;
 		this._draft = null;
 		this._search = "";
@@ -159,6 +160,7 @@ export class HubRulesPolicyManager {
 			const response = await this._api.pGetRulesPolicyManagement({campaignId: this._campaignId});
 			if (loadGeneration !== this._policyLoadGeneration || this._isOffline) return false;
 			this._catalog = response.catalog;
+			this._contentCatalog = response.contentCatalog;
 			this._management = response.management;
 			const active = getActiveVersion(this._management);
 			this._draft = preservedDraft || structuredClone(active?.policy || createDefaultCampaignRulesPolicy());
@@ -170,7 +172,7 @@ export class HubRulesPolicyManager {
 			this._setStatus(
 				conflictMessage
 					|| (active
-						? `Version ${active.version} is active. Advisory means supported tools read the setting, not that every campaign surface enforces it.`
+						? `Version ${active.version} is active. Enforced content rules block new choices; advisory rules are read by supported tools only.`
 						: "No version is active. Review the defaults, then activate the first immutable policy version."),
 				!!conflictMessage,
 			);
@@ -299,6 +301,61 @@ export class HubRulesPolicyManager {
 			});
 			label.append(input, document.createTextNode(definition.parameter.label));
 			control.append(label);
+		} else if (definition.id === "content.editions.allowed") {
+			const id = `campaign-rule-policy-${definition.id.replaceAll(".", "-")}`;
+			const label = createElement("label", {
+				className: "hub-label",
+				text: definition.parameter.label,
+				attrs: {for: id},
+			});
+			const select = createElement("select", {
+				className: "hub-input",
+				attrs: {id, "data-campaign-rule-control": definition.id},
+			});
+			select.add(new Option("Mixed (2014 and 2024)", "2014,2024"));
+			select.add(new Option("2014 only", "2014"));
+			select.add(new Option("2024 only", "2024"));
+			select.value = getPolicyValue(this._draft, definition).join(",");
+			select.disabled = this._isPolicyControlReadOnly();
+			select.addEventListener("change", () => {
+				getSelection(this._draft, definition.id).parameters[definition.parameter.key] = select.value.split(",");
+				this._renderReview();
+			});
+			control.append(label, select);
+		} else if (["string_list", "uid_list"].includes(definition.parameter.type)) {
+			const id = `campaign-rule-policy-${definition.id.replaceAll(".", "-")}`;
+			const label = createElement("label", {
+				className: "hub-label",
+				text: definition.parameter.label,
+				attrs: {for: id},
+			});
+			const select = createElement("select", {
+				className: "hub-input",
+				attrs: {
+					id,
+					multiple: "multiple",
+					size: definition.parameter.type === "uid_list" ? "10" : "7",
+					"data-campaign-rule-control": definition.id,
+				},
+			});
+			const values = definition.parameter.type === "uid_list"
+				? this._contentCatalog?.species || []
+				: this._contentCatalog?.sources || [];
+			const selected = new Set(getPolicyValue(this._draft, definition));
+			for (const value of values) {
+				const option = new Option(value, value, false, selected.has(value));
+				select.add(option);
+			}
+			select.disabled = this._isPolicyControlReadOnly();
+			select.addEventListener("change", () => {
+				getSelection(this._draft, definition.id).parameters[definition.parameter.key] = [...select.selectedOptions].map(option => option.value);
+				this._renderReview();
+			});
+			const help = createElement("span", {
+				className: "hub-rule-row__meta",
+				text: `Select none to allow all ${definition.parameter.type === "uid_list" ? "species variants" : "available sources"}. Use Shift or Command/Ctrl for multiple selections.`,
+			});
+			control.append(label, select, help);
 		} else {
 			const id = `campaign-rule-policy-${definition.id.replaceAll(".", "-")}`;
 			const label = createElement("label", {

@@ -315,9 +315,9 @@ Implemented slice:
   capability gate `campaign.active_context.v1`;
 - authorized bare Character Sheet/DM Screen defaults, deterministic pinned resources, access-loss concealment,
   BFCache/reconnect revalidation, production-stack Chromium coverage, and four killed high-risk mutants.
-V2-T5 exposes source/edition policy metadata only. ADR 0015/V2-T6 remains the owner of policy enforcement.
+V2-T5 owns context transport and teardown; ADR 0015/V2-T6 now consumes that metadata for content enforcement.
 
-### V2-T6 — enforced campaign rules/source/species/edition policy (**selection foundation shipped; enforcement pending**)
+### V2-T6 — enforced campaign rules/source/species/edition policy (**content policy implemented; non-content enforcement pending**)
 
 Dependencies: V2-T2 and V2-T5.
 
@@ -339,7 +339,7 @@ Acceptance:
 Implemented selection-foundation slice:
 
 - a closed, versioned catalog exposes stable rule ids, applicability, parameters, defaults, and truthful
-  **Advisory** or **Planned** lifecycle labels;
+  **Enforced** content or **Advisory** non-content lifecycle labels;
 - DM/co-DM management supports search/filter, before/after review, atomic immutable publication, stale-base
   fencing, and activation of an earlier version without rewriting history;
 - schema-v1 TGTT/exhaustion/carry versions remain readable and project to the same legacy settings shape;
@@ -347,9 +347,21 @@ Implemented selection-foundation slice:
   DM management path;
 - `campaign.rules_policy.v1` keeps the new management surface disabled until rollout evidence is accepted.
 
-This slice does **not** enforce selected rules. Source/species/edition entries remain visible but unavailable and
-**Planned**. The shared evaluator, create/import/attach/move/award enforcement, grandfather rules, and Character
-Sheet/Builder/DM Screen enforcement remain later T6 work and must not be inferred from selection state.
+Implemented content-policy slice:
+
+- DM/co-DM source, species/race identity, and 2014-only/2024-only/mixed edition controls are selectable and
+  published as typed content-policy version 1 inside immutable rules versions;
+- campaign and personal-brew availability are separate: active campaign brew augments campaign pages without
+  mutating personal brew, while absent personal sources cannot widen the campaign;
+- Builder, Quick Build, Level Up, Respec, spell/feat/item/class/species candidate projection, imports, clone/
+  attach/move admission, direct character deltas, grants/awards, and accepted transfers into characters fail
+  closed on newly disallowed or unknown identities;
+- existing campaign characters remain playable and receive bounded grandfather warnings; unrelated edits and
+  removals remain valid, and policy activation/rollback never rewrites character data;
+- exact active rules-version fencing, memory/PostgreSQL parity, privacy-shaped events/summaries, reconnect/
+  rollback/campaign-switch teardown, production-stack Chromium, and mutation tests cover authority boundaries.
+
+Non-content house-rule behavior remains advisory and belongs to the separate rules-enforcement slice.
 
 ### V2-T7 — player targeting (**first one-to-one player slice implemented; broader targeting active**)
 

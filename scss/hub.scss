@@ -1193,6 +1193,12 @@ a.hub-data-row:hover {
 	color: var(--hub-warning);
 }
 
+.hub-rule-status--enforced {
+	border-color: #1f7a4d;
+	background: #e7f6ee;
+	color: #155d3a;
+}
+
 .hub-rule-status--planned {
 	color: var(--hub-text-muted);
 }

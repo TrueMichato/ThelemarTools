@@ -218,13 +218,16 @@ arbitrary spell prose.
 | `GET /api/campaigns/:campaignId/party-inventory` | Active member | none | Lazily created party inventory, entries, denomination currency |
 | `GET /api/campaigns/:campaignId/transfers` | Active member | none | Transfers visible to DM, actor, source owner, or target owner |
 | `POST /api/campaigns/:campaignId/transfers` | Active-member mutation; source owner or DM for party source | source/target kind+UUID, <=100 item quantities, nonnegative denomination currency | 201 transfer already in `reserved` state |
-| `POST /api/campaigns/:campaignId/transfers/:transferId/resolve` | Target owner or DM/co-DM; originating actor may reject | accept/reject | committed or rejected transfer |
+| `POST /api/campaigns/:campaignId/transfers/:transferId/resolve` | Target owner or DM/co-DM; originating actor may reject | accept/reject plus active `rulesVersionId` when accepting into a character under restrictive content policy | committed or rejected transfer |
 
 `sourceKind`/`targetKind` are `character` or `party_inventory`. Empty/insufficient transfers fail before a
 row is committed. Item quantities must be positive finite safe integers within the route schema limit. The
 authority removes the requested value into escrow before returning `reserved`; acceptance writes that escrow
 to the destination, while rejection or lifecycle cancellation restores the source exactly once. Reusing an
 idempotency key with the same command replays its stored result rather than repeating either mutation.
+Acceptance into a character compares the resulting authoritative document with its prior state and rejects a
+new disallowed/unknown item identity or stale rules pin before destination, resolution, audit, event, outbox, or
+receipt changes. The reserved escrow remains available for an exact reject/cancel restoration.
 
 The server derives item eligibility and stack compatibility from canonical data. A whole stack is refused
 while equipped, attuned, container-linked, spell/component-linked (including a real `itemGrantedSpells[].itemId`
@@ -260,9 +263,10 @@ in one transaction. The campaign context keeps the legacy flat `rules` projectio
 bounded `policySummary`; the full policy and authored notes are returned only on the DM/co-DM management path.
 
 The new routes and management UI are off by default. Existing schema-v1 routes and versions remain readable
-regardless of the capability. No selected schema-v2 rule implies downstream Character Sheet, Builder, DM Screen,
-or server enforcement; the catalog currently labels implemented projections **Advisory** and unavailable future
-source/species/edition controls **Planned**.
+regardless of the capability. The catalog labels source/species/edition rules **Enforced**: Character Sheet
+candidate surfaces filter them and authoritative campaign admissions/deltas recheck them under the active
+rules-version pin. Other selected controls remain **Advisory** until their independent rules-enforcement slice
+lands; DM Screen receives the projection but this content slice adds no DM Screen choice surface.
 
 ## DM workspace routes
 

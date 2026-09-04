@@ -8,7 +8,8 @@
 	"private": true,
 	"scripts": {
 		"version-bump": "npm version -m \"chore(version): bump\"",
-		"gen": "node node/generate-all.js",
+		"gen": "node node/generate-all.js && npm run gen:hub-content-catalog",
+		"gen:hub-content-catalog": "node server/scripts/generate-content-catalog.mjs",
 		"gen:crafting": "node node/generate-crafting-data.js",
 		"gen:search-index": "node node/generate-search-index.js",
 		"gen:pages": "node node/generate-pages.js",
@@ -82,7 +83,7 @@
 		"hub:restore": "node server/scripts/restore.mjs",
 		"hub:restore:encrypted": "node server/scripts/restore-encrypted.mjs",
 		"test:hub": "node --localstorage-file test/localstorage.tmp --experimental-vm-modules node_modules/jest/bin/jest.js test/jest/hub/ --no-coverage --forceExit",
-		"test:hub:mutations": "node scripts/test-hub-active-context-mutations.mjs && node scripts/test-hub-rules-policy-mutations.mjs",
+		"test:hub:mutations": "node scripts/test-hub-active-context-mutations.mjs && node scripts/test-hub-rules-policy-mutations.mjs && node scripts/test-hub-content-policy-mutations.mjs",
 		"test:hub:e2e:stack": "node server/scripts/run-hub-e2e.mjs"
 	},
 	"lint-staged": {

@@ -1736,6 +1736,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 				clientImportId: character.id,
 				campaignId,
 				data: character,
+				rulesVersionId: context.rulesVersion?.id || null,
 				idempotencyKey: crypto.randomUUID(),
 			});
 			const charactersNxt = await api.pListCharacters({campaignId});
@@ -1984,6 +1985,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					result = await api.pAwardItems({
 						campaignId,
 						...submission,
+						rulesVersionId: context.rulesVersion?.id || null,
 						idempotencyKey,
 					});
 				},

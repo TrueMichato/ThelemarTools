@@ -1,6 +1,6 @@
 # ADR 0015: Versioned Campaign Hub rules policy
 
-Status: Accepted as the target contract; rules engine not implemented
+Status: Accepted; source/species/edition policy implemented, non-content enforcement remains separate
 
 ## Context
 
@@ -16,12 +16,14 @@ ADR 0013 owns the site-wide campaign-context activation and teardown lifecycle. 
 lifecycle for policy pinning, evaluation, compliance reports, and policy-derived candidate caches; it does not
 create an independent context lifecycle.
 
-The current rules document is schema version 1. `server/src/campaign-content.js` normalizes six settings
-(`enableTgtt`, `exhaustionRules`, carry weight, jumping, linguistics, and critical rolls), and the Character
-Sheet projects those settings through `CharacterSheetState.setCampaignSettingsOverlay()`. The overlay is
-effective at runtime, cannot be changed by the character while active, and is removed by `toJson()`.
+Historical rules documents use schema version 1. The Hub reads those versions through the compatibility
+adapter. New publications use schema version 2, whose three content rules embed content-policy version 1.
+`server/src/campaign-content.js` still normalizes the six established settings (`enableTgtt`,
+`exhaustionRules`, carry weight, jumping, linguistics, and critical rolls), and the Character Sheet projects
+those settings through `CharacterSheetState.setCampaignSettingsOverlay()`.
 
-This is useful policy projection, but it is not an enforcement engine:
+The settings projection is not a non-content rules engine. Source/species/edition policy is enforced by the
+separate shared content evaluator and authoritative store adapters:
 
 - `CharacterSheetBuilder`, `CharacterSheetLevelUp`, and `CharacterSheetQuickBuild` already use
   `CharacterSheetPage.filterByAllowedSources()` at many candidate-picking surfaces, but a UI filter is not an
@@ -35,9 +37,9 @@ This is useful policy projection, but it is not an enforcement engine:
 - Existing characters are full documents. Automatically deleting their race/species, class, feature, spell,
   or item data would corrupt the character and violate the local-first model.
 
-The words "rule", "setting", "note", and "enforced" therefore need a stable contract before implementation.
-This ADR defines that contract. It does not add a rules evaluator, new blocking behavior, or new labels to the
-product.
+The words "rule", "setting", "note", and "enforced" therefore have the stable contract below. The three content
+rules have completed their implementation gates; the TGTT and exhaustion controls remain truthfully
+**Advisory** and are not made authoritative by this content-policy slice.
 
 ## Decision
 
@@ -93,8 +95,8 @@ Each `implementationStatus` surface value is one of:
 The aggregate status is the least-capable required surface. A rule may be displayed as **Enforced** only when
 all of its required enforcement surfaces are `implemented`, the server supports the rule, and the active
 policy selects `mode: "enforced"`. A partially implemented rule is labeled **Advisory** or **Unavailable**,
-never Enforced. The catalog entries introduced by this ADR remain `planned`; this document is not
-implementation evidence.
+never Enforced. The source, species, and edition entries are enforced; the remaining catalog entries are
+advisory projections.
 
 Catalog entries with `kind: "note"` are prohibited. Notes use the separate policy `notes` collection below,
 have no `mode`, and can never produce a violation. This keeps descriptive table guidance distinct from rules.
@@ -137,13 +139,12 @@ parameters, upgrading a rule schema, changing modes, or editing notes creates a 
 
 ### Initial catalog
 
-The first policy implementation must define these stable IDs. All are `planned` until their acceptance gates
-pass:
+The catalog defines these stable IDs:
 
 | Rule ID | Parameters | Required surfaces | Compatibility intent |
 |---|---|---|---|
-| `content.sources.allowed` | `sources`: unique source abbreviations; non-empty when present | builder, levelUp, quickBuild, respec, contentFilter, characterWrite, hubAdmin | Entity/source resolver and active brew manifest must understand every source. |
-| `content.species.allowed` | `species`: unique case-insensitive `name\|source` UIDs; non-empty when present | builder, respec, contentFilter, characterWrite, hubAdmin | Applies to race/species and subrace identities through one canonical resolver. |
+| `content.sources.allowed` | `sources`: unique source abbreviations; empty means all available | builder, levelUp, quickBuild, respec, contentFilter, characterWrite, hubAdmin | Entity/source resolver and active brew manifest must understand every source. |
+| `content.species.allowed` | `species`: unique case-insensitive `name\|source` UIDs; empty means all available | builder, respec, contentFilter, characterWrite, hubAdmin | Applies to race/species and subrace identities through one canonical resolver. |
 | `content.editions.allowed` | `editions`: non-empty subset of `["2014", "2024"]` | builder, levelUp, quickBuild, respec, contentFilter, characterWrite, hubAdmin | Uses canonical entity edition metadata; unknown edition is not guessed at the UI boundary. |
 | `tgtt.enabled` | `enabled`: boolean | characterOpen, builder, levelUp, quickBuild, respec, contentFilter, characterWrite, hubAdmin | Projects to `settings.enableTgtt`; content permission remains a separate source rule. |
 | `rules.exhaustion.system` | `system`: one of `2014`, `2024`, `thelemar` | characterOpen, characterWrite, hubAdmin | Projects to `settings.exhaustionRules`; `thelemar` declares a dependency on `tgtt.enabled`. |
@@ -153,9 +154,20 @@ pass:
 | `tgtt.linguistics-bonus` | `enabled`: boolean | characterOpen, characterWrite, hubAdmin | Projects to `settings.thelemar_linguisticsBonus`. |
 | `tgtt.critical-rolls` | `enabled`: boolean | characterOpen, characterWrite, hubAdmin | Projects to `settings.thelemar_criticalRolls`. |
 
-An omitted content rule means "no campaign restriction" for that dimension. An empty allowlist is invalid
-rather than an accidental "allow nothing." Rule-specific compatibility declares whether an entity kind can be
-evaluated; the evaluator returns `unknown` instead of inventing an edition or UID.
+An omitted source/species rule or an empty source/species list means no additional restriction among content
+available to the campaign. The edition rule is always a non-empty `["2014"]`, `["2024"]`, or
+`["2014", "2024"]`, displayed as 2014-only, 2024-only, or mixed. Unknown IDs and unresolvable edition/identity
+metadata fail publication or a newly governed choice rather than being guessed.
+
+Source IDs are case-insensitive after canonicalization. `PHB14`/`PHB2014`, `DMG14`/`DMG2014`, and
+`MM14`/`MM2014` canonicalize to `PHB`, `DMG`, and `MM`; their 2024 counterparts canonicalize to `XPHB`,
+`XDMG`, and `XMM`. TGTT edition aliases canonicalize to `TGTT-2014` or `TGTT-2024`. A homebrew source is
+available only when it is in the active immutable campaign brew bundle, and it is permitted only when its
+canonical source is also allowed. Personal brew that is not in that bundle never widens campaign policy.
+
+Species identity is the canonical case-insensitive `name|source` UID. Merged subraces use the parent source;
+named subraces/variants remain distinct, and unnamed runtime bases normalize to the generated `(Base)` identity
+(for example, `Human (Base)|PHB`).
 
 ### Composition and precedence
 
@@ -176,11 +188,10 @@ Campaign brew availability does not imply policy permission. Campaign sources pa
 `content.sources.allowed` by their canonical source abbreviation. Conversely, a permitted source does not
 make absent content available.
 
-Intrinsic dependencies and automatic grants are evaluated separately from user choices. A spell, feature, or
-item reference automatically granted by an otherwise valid selected entity is retained as a dependency and is
-reported with that provenance; it is not misclassified as a forbidden new pick. A user choosing that same
-entity independently must satisfy the normal content rules. This preserves the existing subclass-granted spell
-behavior without making source filters porous.
+Intrinsic dependencies and automatic grants retain provenance in reports, but client-supplied provenance is
+never an authorization bypass. The complete newly introduced delta must comply. Candidate projections may keep
+an intrinsic grant visible while editing, but the authoritative character write still rejects a disallowed or
+unclassifiable introduced identity.
 
 TGTT calculations remain in `CharacterSheetState` and its existing feature/effect helpers. The policy layer
 only selects effective settings, candidate eligibility, and compliance. It must not implement carry capacity,
@@ -195,7 +206,8 @@ Policy evaluates both the complete character and the current operation:
 |---|---|
 | Open/play an existing character | Evaluate the full document, show visible flags, and keep play controls available. |
 | Activate a stricter policy | Recompute reports; never rewrite character documents. |
-| Import, copy, attach, or move an existing character | Admit the intact document with a compatibility report; future choices use the destination policy. |
+| Import, copy, attach, or cross-campaign move | Treat the whole document as a new destination admission and reject disallowed or unknown content. |
+| Existing character already attached to this campaign | Keep it playable, report current violations, and evaluate only identities added beyond the prior document. |
 | Create a new build | Every policy-governed initial choice must comply before authoritative creation. |
 | Level up | Only choices introduced or replaced by the level-up must comply; pre-existing violations remain grandfathered. |
 | Quick Build | Every choice introduced by the batch must comply; pre-existing violations remain grandfathered. |
@@ -222,40 +234,33 @@ with edition when the resolved entity declares one) plus provenance needed to di
 entity/version. Quantity, currency value, equipment/attunement state, and container position do not create a
 new content identity.
 
-An **already-admitted item identity** is one that is present in the prior authoritative character or party
-inventory state, or carries immutable grandfather provenance proving that the same identity was admitted before
-the currently active rules version. Grandfather provenance records the admitting campaign/rules version and
-content identity; a client cannot mint, rewrite, or strip it. Its representation may evolve, but it remains
-server-owned metadata and must survive character serialization, relational inventory storage, and transfer
-escrow.
+An **already-admitted character content identity** is one present in that character's prior authoritative
+document. The evaluator compares canonical `kind + uid` multiplicity; mutable provenance fields cannot create a
+grandfather exception.
 
 The boundaries are:
 
 - Changing quantity, equipped/attuned state, or container placement for an already-admitted identity may remain
   a routine mutation, subject to inventory, lease, revision, ownership, and recalculation invariants.
 - Introducing a new item identity is a governed delta. This includes direct character document patches, DM
-  grants/awards, party-stash creation or moves, transfers, import adjuncts, batch commands, and stale or
-  bypassed clients. It must satisfy the same authoritative current source/edition policy unless the server can
-  verify explicit grandfather provenance established before that policy/version.
+  grants/awards, accepted transfers into characters, import adjuncts, batch commands, and stale or bypassed
+  clients. It must satisfy the current source/edition policy.
 - A character import, campaign attach/move, or whole-document admission may grandfather its existing item
   identities only through the explicit compatibility/admission flow. Adding another item to that admitted
   document later is not covered by the document's age.
-- DM grants/awards, transfers, and party-stash commands cannot rely on picker or catalog filtering. Their server
-  transaction pins/rechecks the active rules version and evaluates every introduced identity before any
-  inventory, escrow, audit, event, outbox, or receipt write commits.
-- Moving an existing grandfathered item between an eligible character and the campaign party stash preserves
-  its canonical identity, bundle/version metadata, and grandfather provenance. Its visible warning follows the
-  item in both containers. The move neither deletes it nor launders it into a compliant identity.
-- A transferred item retains its prior admission provenance. If the destination campaign/policy cannot accept
-  that provenance through an explicit cross-campaign admission flow, the transfer is rejected without removing
-  the source item.
-- A stale policy pin returns `POLICY_VERSION_STALE` before inventory state changes. Batch grants/awards and
+- DM grants/awards and accepted transfers into characters cannot rely on picker or catalog filtering. Their
+  server transaction pins/rechecks the active rules version and evaluates every introduced identity before the
+  destination, audit, event, outbox, or receipt write commits.
+- Reserving a transfer out of a character remains an allowed removal. Reject/cancel restores the exact escrow
+  to its source without a content-policy pin. A later accepted transfer from a party stash into a character is
+  a new destination delta and does not launder a grandfathered identity.
+- A stale policy pin returns `RULES_VERSION_STALE` before destination inventory state changes. Batch grants/awards and
   multi-item transfers are all-or-none: one blocked, unknown, stale, or malformed item rejects the entire
   policy-sensitive batch, so no subset of item identities is added.
 
-Compliance reports for grandfathered inventory violations include the item identity, current container,
-admitting rules version/provenance, and `grandfathered` disposition. Reports never expose private character
-details to an actor who lacks permission for that container.
+Compliance reports for grandfathered inventory violations include the canonical item identity, rule, edition,
+provenance classification, and `grandfathered` disposition. Reports never expose character names or private
+document details through campaign events or member summaries.
 
 ### Shared evaluator boundary
 
@@ -292,59 +297,35 @@ metadata, but it may not use a weaker rule implementation.
 
 ### Compliance report
 
-Every evaluation returns this versioned shape:
+Character reports return this deterministic bounded version-1 shape:
 
 ```json
 {
-  "schemaVersion": 1,
-  "evaluatorVersion": "1",
-  "campaignId": "campaign-uuid",
-  "rulesVersion": {
-    "id": "rules-version-uuid",
-    "version": 7,
-    "schemaVersion": 2,
-    "catalogVersion": 1
-  },
-  "subject": {
-    "type": "character",
-    "id": "character-uuid",
-    "revision": 14
-  },
-  "surface": "levelUp",
-  "status": "noncompliant",
-  "blocking": true,
-  "violations": [
+  "version": 1,
+  "rulesVersionId": "rules-version-uuid",
+  "total": 1,
+  "findings": [
     {
       "ruleId": "content.sources.allowed",
-      "ruleSchemaVersion": 1,
-      "code": "SOURCE_NOT_ALLOWED",
-      "title": "Allowed sources",
-      "disposition": "blocking",
-      "path": "/classes/1/subclass",
+      "code": "CONTENT_SOURCE_NOT_ALLOWED",
+      "disposition": "grandfathered",
+      "provenance": "user_choice",
       "entity": {
         "uid": "Example Subclass|HBX",
-        "name": "Example Subclass",
         "source": "HBX",
-        "edition": "2014"
-      },
-      "explanation": "HBX is not allowed for new campaign choices.",
-      "remediation": "Choose a subclass from an allowed source."
+        "edition": "2014",
+        "kind": "subclass"
+      }
     }
   ],
-  "notes": [],
-  "unknownRules": [],
-  "inputFingerprint": "sha256:...",
-  "evaluatedAt": "2026-09-01T12:00:00.000Z"
+  "isTruncated": false
 }
 ```
 
-`status` is `compliant`, `noncompliant`, or `unknown`. Violation `disposition` is `blocking`,
-`grandfathered`, or `advisory`. `blocking` is derived from the operation and dispositions, never set
-independently by a caller. Informational `notes` are copied from the active policy and never appear in
-`violations`. `unknownRules` contains IDs/schema versions the evaluator cannot safely interpret.
-
-Paths identify normalized choice projections, not arbitrary renderer DOM paths. Explanations and remediation
-are safe text from the catalog plus structured entity facts; campaign-authored HTML is not accepted.
+Findings are sorted by stable kind and UID, capped at ten on server summaries and six in the Character Sheet
+warning. Mutation reports use `blocking`; loaded-character reports use `grandfathered`. The Character Sheet
+turns each finding into actionable safe text explaining that the identity may be kept, used, or removed but
+cannot be added again. The server exposes counts and rule IDs, not character names or authored document text.
 
 ### Version pinning and migration
 
@@ -354,10 +335,11 @@ Every campaign page pins the complete active tuple:
 
 Policy-sensitive browser submissions include the pinned `rulesVersion.id`. The server evaluates against the
 currently active version inside the authoritative transaction. If the pin is stale, it returns
-`POLICY_VERSION_STALE` with the current version and a fresh report; the browser refreshes candidate lists and
-asks the user to review the affected choice. No item, escrow, event, or receipt in a policy-sensitive batch is
-partially committed. Routine play mutations with no governed-choice delta are not discarded solely because a
-DM changed policy during the request.
+`RULES_VERSION_STALE` with the current version; the browser refreshes candidate lists and
+asks the user to review the affected choice. No destination item, accepted-transfer resolution, event, or
+receipt in a policy-sensitive batch is partially committed. Transfer escrow already reserved by an earlier
+proposal remains safely rejectable/restorable. Routine play mutations with no governed-choice delta are not
+discarded solely because a DM changed policy during the request.
 
 Rules schema version 1 remains readable. A one-way adapter maps its six keys to the stable TGTT catalog IDs for
 projection/reporting. The adapter does not mutate historical `rules_versions` rows and does not claim source,
@@ -414,9 +396,9 @@ gates pass:
 - **AG-03 Evaluator parity:** browser/server golden vectors cover compliant, blocking, grandfathered,
   advisory, unknown, intrinsic grant, contradictory, admitted-item, and newly-introduced-item cases across
   direct patch, grant/award, transfer, and party-stash projections.
-- **AG-04 Character preservation:** policy activation, context switch, import, attach, copy, move, and rollback
-  never auto-remove content or persist campaign projections into character JSON; grandfather item identity,
-  bundle metadata, and admission provenance survive character/stash moves and transfer escrow.
+- **AG-04 Character preservation:** policy activation, context switch, rejected import/attach/copy/move, and
+  rollback never auto-remove content or persist campaign projections into character JSON; rejected/cancelled
+  transfer escrow restores exactly to its source.
 - **AG-05 Existing play:** a noncompliant existing character is visibly flagged and can perform routine play
   mutations, including allowed changes to an admitted item, without weakening authorization, lease, revision,
   inventory, provenance, or schema checks.

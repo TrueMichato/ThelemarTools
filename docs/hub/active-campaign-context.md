@@ -236,17 +236,19 @@ two-script boot graph. The coordinator graph's combined transfer size is asserte
 | `test/e2e/hub/active-campaign-context.spec.ts` | Production stack: switcher/reselection, native storage/channel, defaults/local routes, pinning, in-flight conflict/access-loss order, BFCache, revoke/archive |
 | `npm run test:hub:mutations` | Kills generation, teardown-order, account-scope, local-fallback, pinned-reselection, Character Sheet save-fence, and DM workspace save-fence mutants |
 
-## Deliberate boundary
+## Content-policy consumer
 
-V2-T5 carries the currently advertised `sourcePolicy` and `editionPolicy` metadata in
-`HubCampaignPageContext`; it does not filter content, reject builds, rewrite characters, or claim policy
-enforcement. Those behaviors require ADR 0015/V2-T6.
+V2-T5 still owns only context transport and teardown. ADR 0015/V2-T6 consumes the active rules version,
+content catalog, source/edition metadata, and campaign brew bundle to filter choices and fence authoritative
+writes. Rules-version activation, rollback, reconnect, campaign switch, logout, or access loss increments the
+context generation and immediately removes stale filters/reports before another context or local mode can load.
+No campaign policy is written into local character JSON or personal brew.
 
 ## Parallel-change collision surfaces
 
-The implementation intentionally adds dedicated modules and no migration, server selection store, or domain
-model. Later house-rule and player-targeting lanes should conflict-check `campaign.html`,
-`js/hub/hub-page.js`, `js/hub/hub-api-client.js`, Hub roadmap/status/traceability/testing documents, and
-`test/e2e/pages/HubCampaignPage.ts` plus the real-stack Hub specs. The context lane owns global navigation and
-active-context lifecycle; later integrations should preserve its capability gate, temporary-brew boundary,
-teardown order, and resource pinning.
+The content-policy implementation adds dedicated evaluator/catalog modules and no migration. Later house-rule
+and player-targeting lanes should conflict-check `campaign.html`, `js/hub/hub-page.js`,
+`js/hub/hub-api-client.js`, Hub roadmap/status/traceability/testing documents,
+`test/e2e/pages/HubCampaignPage.ts`, and the real-stack Hub specs. The context lane owns global navigation and
+active-context lifecycle; later integrations must preserve its capability gate, temporary-brew boundary,
+teardown generation, and resource pinning.

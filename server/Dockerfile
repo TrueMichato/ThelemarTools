@@ -43,6 +43,7 @@ COPY --chown=hub:hub js/hub/hub-carry-authority.js ./js/hub/hub-carry-authority.
 COPY --chown=hub:hub js/hub/hub-carry-contract.js ./js/hub/hub-carry-contract.js
 COPY --chown=hub:hub js/hub/hub-capabilities.js ./js/hub/hub-capabilities.js
 COPY --chown=hub:hub js/hub/hub-campaign-rules.js ./js/hub/hub-campaign-rules.js
+COPY --chown=hub:hub js/hub/hub-content-policy.js ./js/hub/hub-content-policy.js
 COPY --chown=hub:hub js/hub/hub-effect-presentation.js ./js/hub/hub-effect-presentation.js
 COPY --chown=hub:hub js/hub/hub-inventory-contract.js ./js/hub/hub-inventory-contract.js
 COPY --chown=hub:hub js/hub/hub-semantic-hp.js ./js/hub/hub-semantic-hp.js

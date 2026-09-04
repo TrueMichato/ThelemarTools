@@ -133,6 +133,92 @@ export class CharacterSheetPage {
 		await waitForToolsLoaded(this.page);
 	}
 
+	async gotoCampaignCharacter ({campaignId, characterId}: {campaignId: string; characterId: string}): Promise<void> {
+		await this.page.goto(`/charactersheet.html?hubCampaign=${encodeURIComponent(campaignId)}&id=${encodeURIComponent(characterId)}`);
+		await waitForToolsLoaded(this.page);
+		await expect(this.characterName).toBeVisible();
+	}
+
+	async gotoCampaignBuilder (campaignId: string): Promise<void> {
+		await this.page.goto(`/charactersheet.html?hubCampaign=${encodeURIComponent(campaignId)}`);
+		await waitForToolsLoaded(this.page);
+		await this.btnNew.click();
+		await this.switchToTab(this.tabBuilder);
+		await expect(this.page.locator("#charsheet-builder")).toBeVisible();
+		await this.page.locator("#builder-name-step").fill("Policy Candidate");
+		await this.page.locator("#charsheet-builder-next").click();
+		await expect(this.page.locator("#builder-race-list")).toBeVisible();
+	}
+
+	async expectCampaignBuilderSources ({allowed, denied}: {allowed: string; denied: string}): Promise<void> {
+		const items = this.page.locator("#builder-race-list .charsheet__builder-list-item-source");
+		if (!await items.count()) {
+			const diagnostic = await this.page.evaluate(() => {
+				const sheet = (globalThis as any).charSheet;
+				return {
+					isRefreshing: sheet?._isHubContextRefreshing,
+					isUnavailable: sheet?._isHubContextUnavailable,
+					contentPolicy: sheet?._hubContext?.rulesVersion?.contentPolicy,
+					contentCatalog: sheet?._hubContext?.contentCatalog,
+					humanCandidates: (sheet?.getRaces?.() || [])
+						.filter((race: any) => `${race.name}`.includes("Human"))
+						.map((race: any) => ({
+							name: race.name,
+							source: race.source,
+							edition: race.edition,
+							_baseName: race._baseName,
+							_baseSource: race._baseSource,
+							_isBaseRace: race._isBaseRace,
+							_rawName: race._rawName,
+						})),
+				};
+			});
+			throw new Error(`Campaign builder rendered no species candidates: ${JSON.stringify(diagnostic)}`);
+		}
+		await expect(items.filter({hasText: allowed}).first()).toBeVisible();
+		await expect(items.filter({hasText: denied})).toHaveCount(0);
+	}
+
+	async expectCampaignBuilderRaces ({allowed, denied}: {allowed: string; denied: string}): Promise<void> {
+		const items = this.page.locator("#builder-race-list .charsheet__builder-list-item-name");
+		await expect(items.filter({hasText: new RegExp(`^${allowed}\\b`)}).first()).toBeVisible();
+		await expect(items.filter({hasText: new RegExp(`^${denied}\\b`)})).toHaveCount(0);
+	}
+
+	async expectCampaignPolicyWarning ({source, visible = true}: {source: string; visible?: boolean}): Promise<void> {
+		const warning = this.page.locator(".charsheet__campaign-policy-warning");
+		if (!visible) {
+			await expect(warning).toHaveCount(0);
+			return;
+		}
+		await expect(warning).toBeVisible();
+		await expect(warning).toContainText(source);
+		await expect(warning).toContainText("keep, use, or remove");
+	}
+
+	async renameCharacter (name: string): Promise<void> {
+		await this.characterName.fill(name);
+		await this.characterName.press("Enter");
+		await expect(this.characterName).toHaveValue(name);
+	}
+
+	async expectMulticlassSources ({allowed, denied}: {allowed: string; denied: string}): Promise<void> {
+		const multiclass = this.page.locator("#charsheet-btn-multiclass");
+		await expect(multiclass).toBeVisible();
+		await multiclass.click();
+		const picker = this.page.getByRole("dialog", {name: /Add New Class \(Multiclass\)/});
+		await expect(picker).toBeVisible();
+		const sources = picker.locator(".charsheet__levelup-option-header .ve-muted");
+		await expect(sources.filter({hasText: allowed}).first()).toBeVisible();
+		await expect(sources.filter({hasText: denied})).toHaveCount(0);
+		await this.page.getByRole("button", {name: "Cancel"}).last().click();
+	}
+
+	async startNewCharacter (): Promise<void> {
+		await this.page.locator("#charsheet-sel-character").selectOption("");
+		await expect(this.page.locator("#charsheet-builder")).toBeVisible();
+	}
+
 	async switchToTab (tab: Locator): Promise<void> {
 		// The optional top-level "Abilities" tab is hidden by default (the
 		// `showAbilitiesTab` setting is off — Overview already surfaces ability

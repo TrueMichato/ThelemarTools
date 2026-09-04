@@ -11,6 +11,7 @@ server/**/.env*
 !js/hub
 !js/hub/hub-capabilities.js
 !js/hub/hub-campaign-rules.js
+!js/hub/hub-content-policy.js
 !js/hub/hub-json-patch.js
 !js/hub/hub-carry-authority.js
 !js/hub/hub-carry-contract.js

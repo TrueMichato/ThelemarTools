@@ -6,6 +6,7 @@ import {
 	DEFAULT_CAMPAIGN_SETTINGS,
 	getCampaignRulesPolicy,
 	getCampaignRulesPolicySummary,
+	getCampaignRulesContentPolicy,
 	normalizeCampaignRulesPolicy,
 	projectCampaignSettings,
 } from "../../js/hub/hub-campaign-rules.js";
@@ -170,6 +171,7 @@ export function getPublicCampaignRulesVersion (rulesVersion, {isIncludePolicy = 
 				rules: rulesVersion.rules,
 			}),
 			...(isIncludePolicy ? {policy} : {}),
+			contentPolicy: getCampaignRulesContentPolicy(policy),
 			policySummary: getCampaignRulesPolicySummary(policy),
 		};
 	} catch (error) {

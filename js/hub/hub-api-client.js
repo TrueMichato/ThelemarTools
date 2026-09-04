@@ -272,10 +272,10 @@ export class HubApiClient {
 		});
 	}
 
-	async pCreateCharacter ({clientImportId, campaignId = null, schemaVersion = 1, data, idempotencyKey}) {
+	async pCreateCharacter ({clientImportId, campaignId = null, schemaVersion = 1, data, rulesVersionId = null, idempotencyKey}) {
 		return this._pRequest("/api/characters", {
 			method: "POST",
-			body: {clientImportId, campaignId, schemaVersion, data},
+			body: {clientImportId, campaignId, schemaVersion, data, ...(rulesVersionId ? {rulesVersionId} : {})},
 			isMutation: true,
 			idempotencyKey,
 		});
@@ -297,28 +297,31 @@ export class HubApiClient {
 		});
 	}
 
-	async pPatchCharacter ({characterId, baseRevision, leaseEpoch, patches, idempotencyKey}) {
+	async pPatchCharacter ({characterId, baseRevision, leaseEpoch, patches, rulesVersionId = null, idempotencyKey}) {
 		return this._pRequest(`/api/characters/${encodeURIComponent(characterId)}`, {
 			method: "PATCH",
-			body: {baseRevision, leaseEpoch, patches},
+			body: {baseRevision, leaseEpoch, patches, ...(rulesVersionId ? {rulesVersionId} : {})},
 			isMutation: true,
 			idempotencyKey,
 		});
 	}
 
-	async pCloneCharacter ({characterId, campaignId, idempotencyKey}) {
+	async pCloneCharacter ({characterId, campaignId, rulesVersionId = null, idempotencyKey}) {
 		return this._pRequest(`/api/characters/${encodeURIComponent(characterId)}/clone`, {
 			method: "POST",
-			body: {campaignId},
+			body: {campaignId, ...(rulesVersionId ? {rulesVersionId} : {})},
 			isMutation: true,
 			idempotencyKey,
 		});
 	}
 
-	async pMoveCharacter ({characterId, campaignId, idempotencyKey}) {
+	async pMoveCharacter ({characterId, campaignId, rulesVersionId = null, idempotencyKey}) {
 		return this._pRequest(`/api/characters/${encodeURIComponent(characterId)}/move`, {
 			method: "POST",
-			body: {campaignId},
+			body: {
+				campaignId,
+				...(rulesVersionId == null ? {} : {rulesVersionId}),
+			},
 			isMutation: true,
 			idempotencyKey,
 		});
@@ -461,16 +464,16 @@ export class HubApiClient {
 		});
 	}
 
-	async pGrantItem ({campaignId, characterId, item, quantity = 1, idempotencyKey}) {
+	async pGrantItem ({campaignId, characterId, item, quantity = 1, rulesVersionId = null, idempotencyKey}) {
 		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/characters/${encodeURIComponent(characterId)}/item-grants`, {
-			method: "POST", body: {item, quantity}, isMutation: true, idempotencyKey,
+			method: "POST", body: {item, quantity, ...(rulesVersionId ? {rulesVersionId} : {})}, isMutation: true, idempotencyKey,
 		});
 	}
 
-	async pAwardItems ({campaignId, source, targetCharacterIds, quantity = 1, note = null, idempotencyKey}) {
+	async pAwardItems ({campaignId, source, targetCharacterIds, quantity = 1, note = null, rulesVersionId = null, idempotencyKey}) {
 		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/item-awards`, {
 			method: "POST",
-			body: {source, targetCharacterIds, quantity, note},
+			body: {source, targetCharacterIds, quantity, note, ...(rulesVersionId ? {rulesVersionId} : {})},
 			isMutation: true,
 			idempotencyKey,
 		});
@@ -490,9 +493,12 @@ export class HubApiClient {
 		});
 	}
 
-	async pResolveTransfer ({campaignId, transferId, decision, idempotencyKey}) {
+	async pResolveTransfer ({campaignId, transferId, decision, rulesVersionId = null, idempotencyKey}) {
 		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/transfers/${encodeURIComponent(transferId)}/resolve`, {
-			method: "POST", body: {decision}, isMutation: true, idempotencyKey,
+			method: "POST",
+			body: {decision, ...(rulesVersionId == null ? {} : {rulesVersionId})},
+			isMutation: true,
+			idempotencyKey,
 		});
 	}
 

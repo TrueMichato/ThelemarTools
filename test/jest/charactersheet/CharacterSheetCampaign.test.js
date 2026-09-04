@@ -121,6 +121,7 @@ describe("Character Sheet campaign control", () => {
 			campaignId: "campaign-1",
 			data: {name: "Mira", hp: {current: 12}},
 			idempotencyKey: expect.any(String),
+			rulesVersionId: "rules-campaign-1",
 		});
 		expect(control._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=cloud-1&hubCampaign=campaign-1");
 		expect(control._feedback).toEqual({
@@ -166,6 +167,7 @@ describe("Character Sheet campaign control", () => {
 			characterId: "cloud-source",
 			campaignId: "campaign-2",
 			idempotencyKey: expect.any(String),
+			rulesVersionId: "rules-campaign-2",
 		});
 		expect(control._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=clone-1&hubCampaign=campaign-2");
 	});
@@ -212,7 +214,7 @@ describe("Character Sheet campaign control", () => {
 		const {control, page} = getControl();
 		page._currentCharacterId = "cloud-source";
 		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
-		control._movePreview = {campaignId: "campaign-2", report: {}};
+		control._movePreview = {campaignId: "campaign-2", report: {}, rulesVersionId: "rules-campaign-2"};
 
 		await control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});
 
@@ -222,6 +224,7 @@ describe("Character Sheet campaign control", () => {
 		expect(control._api.pMoveCharacter).toHaveBeenCalledWith({
 			characterId: "cloud-source",
 			campaignId: "campaign-2",
+			rulesVersionId: "rules-campaign-2",
 			idempotencyKey: expect.any(String),
 		});
 		expect(control._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=cloud-source&hubCampaign=campaign-2");
@@ -270,6 +273,7 @@ describe("Character Sheet campaign control", () => {
 		expect(control._api.pMoveCharacter).toHaveBeenCalledWith({
 			characterId: "cloud-detached",
 			campaignId: "campaign-2",
+			rulesVersionId: "rules-campaign-2",
 			idempotencyKey: expect.any(String),
 		});
 		expect(control._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=cloud-detached&hubCampaign=campaign-2");

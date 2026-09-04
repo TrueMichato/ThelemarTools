@@ -48,19 +48,18 @@ describe("Campaign rules policy catalog", () => {
 				title: expect.any(String),
 				summary: expect.any(String),
 				details: expect.any(String),
-				lifecycle: expect.stringMatching(/^(implemented_advisory|informational_planned|unavailable)$/),
-				supportLabel: expect.stringMatching(/^(Advisory|Planned)$/),
+				lifecycle: expect.stringMatching(/^(implemented_enforced|implemented_advisory|informational_planned|unavailable)$/),
+				supportLabel: expect.stringMatching(/^(Enforced|Advisory|Planned)$/),
 				parameter: expect.objectContaining({key: expect.any(String), type: expect.any(String)}),
 				implementationStatus: expect.any(Object),
 				compatibility: expect.any(Object),
 			}));
-			expect(JSON.stringify(rule)).not.toMatch(/enforced/i);
 		}
 		expect(CAMPAIGN_RULES_CATALOG.filter(rule => rule.category === "content"))
 			.toEqual(expect.arrayContaining([
-				expect.objectContaining({id: "content.sources.allowed", isSelectable: false, supportLabel: "Planned"}),
-				expect.objectContaining({id: "content.species.allowed", isSelectable: false, supportLabel: "Planned"}),
-				expect.objectContaining({id: "content.editions.allowed", isSelectable: false, supportLabel: "Planned"}),
+				expect.objectContaining({id: "content.sources.allowed", isSelectable: true, supportLabel: "Enforced"}),
+				expect.objectContaining({id: "content.species.allowed", isSelectable: true, supportLabel: "Enforced"}),
+				expect.objectContaining({id: "content.editions.allowed", isSelectable: true, supportLabel: "Enforced"}),
 			]));
 	});
 
@@ -106,20 +105,11 @@ describe("Campaign rules policy catalog", () => {
 		}));
 	});
 
-	it("rejects unknown, unavailable, malformed, duplicate, and falsely-enforced selections", () => {
+	it("rejects unknown, malformed, duplicate, and incorrectly-modeled selections", () => {
 		const cases = [
 			{
 				code: "RULES_UNKNOWN",
 				mutate: policy => policy.rules[0].id = "unknown.rule",
-			},
-			{
-				code: "RULES_UNAVAILABLE",
-				mutate: policy => policy.rules.push({
-					id: "content.sources.allowed",
-					ruleSchemaVersion: 1,
-					mode: "advisory",
-					parameters: {sources: ["PHB"]},
-				}),
 			},
 			{
 				code: "RULES_PARAMETER_INVALID",
@@ -131,7 +121,7 @@ describe("Campaign rules policy catalog", () => {
 			},
 			{
 				code: "RULES_MODE_UNSUPPORTED",
-				mutate: policy => policy.rules[0].mode = "enforced",
+				mutate: policy => policy.rules[0].mode = "advisory",
 			},
 		];
 		for (const {code, mutate} of cases) {

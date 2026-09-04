@@ -279,7 +279,7 @@ describe("Campaign rules policy API", () => {
 		expect(playerContext).toEqual(dmContext);
 		expect(playerContext.rulesVersion.rules).toEqual(created.rules);
 		expect(playerContext.rulesVersion.policy).toBeUndefined();
-		expect(playerContext.rulesVersion.policySummary.rules).toHaveLength(7);
+		expect(playerContext.rulesVersion.policySummary.rules).toHaveLength(10);
 
 		const evidence = {
 			audit: store._audit.filter(entry => entry.campaignId === campaign.id && entry.action.startsWith("rules.")),
