@@ -41,6 +41,7 @@ COPY --chown=hub:hub server ./server
 COPY --chown=hub:hub js/hub/hub-json-patch.js ./js/hub/hub-json-patch.js
 COPY --chown=hub:hub js/hub/hub-carry-authority.js ./js/hub/hub-carry-authority.js
 COPY --chown=hub:hub js/hub/hub-carry-contract.js ./js/hub/hub-carry-contract.js
+COPY --chown=hub:hub js/hub/hub-capabilities.js ./js/hub/hub-capabilities.js
 COPY --chown=hub:hub js/hub/hub-campaign-rules.js ./js/hub/hub-campaign-rules.js
 COPY --chown=hub:hub js/hub/hub-effect-presentation.js ./js/hub/hub-effect-presentation.js
 COPY --chown=hub:hub js/hub/hub-inventory-contract.js ./js/hub/hub-inventory-contract.js
