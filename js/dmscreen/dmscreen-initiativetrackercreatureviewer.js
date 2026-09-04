@@ -1,6 +1,8 @@
 import {DmScreenUtil} from "./dmscreen-util.js";
 import {PANEL_TYP_INITIATIVE_TRACKER} from "./dmscreen-consts.js";
 import {DmScreenPanelAppBase} from "./panels/dmscreen-panelapp-base.js";
+import {BESTIARY_QUICK_ACTIONS_REGISTRY} from "../bestiary/bestiary-quick-actions-engine.js";
+import {BestiaryQuickActionsUi} from "../bestiary/bestiary-quick-actions-ui.js";
 
 export class InitiativeTrackerCreatureViewer extends DmScreenPanelAppBase {
 	constructor (...args) {
@@ -41,6 +43,7 @@ class InitiativeTrackerCreatureViewerComponent extends BaseComponent {
 	/* -------------------------------------------- */
 
 	onDestroy () {
+		this._bqaUnsubscribe?.();
 		if (!this._trackerLinked) return;
 		this._trackerLinked.doDisconnectCreatureViewer({creatureViewer: this});
 		this._state.isActive = false;
@@ -161,7 +164,7 @@ class InitiativeTrackerCreatureViewerComponent extends BaseComponent {
 		const lock = new VeLock({name: "Creature display"});
 
 		const hkCreature = async () => {
-			const mon = (this._state.creatureName && this._state.creatureSource)
+			const monBase = (this._state.creatureName && this._state.creatureSource)
 				? await DmScreenUtil.pGetScaledCreature({
 					name: this._state.creatureName,
 					source: this._state.creatureSource,
@@ -171,10 +174,19 @@ class InitiativeTrackerCreatureViewerComponent extends BaseComponent {
 				})
 				: null;
 
-			if (!mon) return dispCreature.innerHTML = `<div class="ve-dnd-font ve-italic ve-small-caps ve-muted ve-flex-vh-center ve-w-100 ve-h-100">No active creature.</div>`;
+			if (!monBase) return dispCreature.innerHTML = `<div class="ve-dnd-font ve-italic ve-small-caps ve-muted ve-flex-vh-center ve-w-100 ve-h-100">No active creature.</div>`;
 
-			dispCreature.innerHTML = `<table class="ve-w-100 ve-stats"><tbody>${Renderer.monster.getCompactRenderedString(mon, {isShowScalers: false})}</tbody></table>`;
+			const mon = BESTIARY_QUICK_ACTIONS_REGISTRY.getOverride({monster: monBase});
+			dispCreature.innerHTML = `<table class="ve-w-100 ve-stats"><tbody>${Renderer.monster.getCompactRenderedString(mon, {
+				isShowScalers: false,
+				htmlControlRhs: BestiaryQuickActionsUi.getButtonHtml({monster: monBase}),
+			})}</tbody></table>`;
 			Renderer.statblockCollapse.apply(dispCreature);
+			dispCreature.querySelector("[data-bqa-open]")
+				?.addEventListener("click", evt => {
+					evt.stopPropagation();
+					BestiaryQuickActionsUi.pOpen({monster: monBase}).then(null);
+				});
 		};
 
 		this._addHookBase("creaturePulse", async () => {
@@ -185,6 +197,10 @@ class InitiativeTrackerCreatureViewerComponent extends BaseComponent {
 				lock.unlock();
 			}
 		})().then(null);
+
+		this._bqaUnsubscribe = BESTIARY_QUICK_ACTIONS_REGISTRY.subscribe(() => {
+			this._state.creaturePulse = !this._state.creaturePulse;
+		});
 
 		const stg = veT`<div class="ve-flex-col ve-w-100 ve-h-100 ve-min-h-0 ve-overflow-y-auto">
 			${dispCreature}

@@ -17,6 +17,8 @@ import {PanelContentManagerFactory} from "./panels/dmscreen-panels.js";
 import {adventureLoader, bookLoader, RuleLoader} from "./dmscreen-corpusloader.js";
 import {AdventureOrBookView} from "./panels/dmscreen-panels-legacy.js";
 import {Panzoom} from "../utils-ui/utils-ui-panzoom.js";
+import {BESTIARY_QUICK_ACTIONS_REGISTRY} from "../bestiary/bestiary-quick-actions-engine.js";
+import {BestiaryQuickActionsUi} from "../bestiary/bestiary-quick-actions-ui.js";
 
 const _TITLE_LOADING = "Loading...";
 
@@ -52,6 +54,12 @@ export class Panel {
 		this.pnlTabs = null;
 
 		this._exileElementMetas = null;
+
+		this._bqaUnsubscribe = BESTIARY_QUICK_ACTIONS_REGISTRY.subscribe(() => {
+			this.tabDatas
+				.filter(tabData => !tabData?.isDeleted)
+				.forEach(tabData => tabData?.fnBqaRerender?.());
+		});
 	}
 
 	static async fromSavedState (board, saved) {
@@ -210,14 +218,21 @@ export class Panel {
 				return this.doPopulate_Error({message: `Failed to load <code>${hash}</code> from page <code>${page}</code>! (Content does not exist.)`}, title);
 			}
 
-			const fn = Renderer.hover.getFnRenderCompact(page);
-
 			const eleContentInner = veT`<div class="panel-content-wrapper-inner"></div>`;
 			const eleContentStats = veT`<table class="ve-w-100 ve-stats"></table>`.vee.appendTo(eleContentInner);
-			eleContentStats.vee.appends(fn(it));
+			const fn = Renderer.hover.getFnRenderCompact(page);
+			const fnBqaRerender = it.__prop === "monster"
+				? () => this._stats_renderMonsterWithQuickActions({
+					monsterBase: it,
+					eleContentStats,
+					renderOpts: {isShowScalers: true},
+				})
+				: null;
+			if (fnBqaRerender) fnBqaRerender();
+			else eleContentStats.vee.appends(fn(it));
 
 			const fnBind = Renderer.hover.getFnBindListenersCompact(page);
-			if (fnBind) {
+			if (fnBind && !fnBqaRerender) {
 				const bindOpts = page === UrlUtil.PG_DECKS
 					? {
 						deckState: {
@@ -246,8 +261,25 @@ export class Panel {
 				title: title || it.name,
 				tabCanRename: true,
 				tabRenamed: !!title,
+				fnBqaRerender,
 			});
 		});
+	}
+
+	_stats_renderMonsterWithQuickActions ({monsterBase, eleContentStats, renderOpts}) {
+		const monster = BESTIARY_QUICK_ACTIONS_REGISTRY.getOverride({monster: monsterBase});
+		eleContentStats.vee.empty().vee.appends(Renderer.monster.getCompactRenderedString(monster, {
+			...renderOpts,
+			htmlControlRhs: BestiaryQuickActionsUi.getButtonHtml({monster: monsterBase}),
+		}));
+		this._stats_doUpdateSummonScaleDropdowns(monsterBase, eleContentStats);
+		Renderer.statblockCollapse.apply(eleContentStats);
+		eleContentStats.querySelector("[data-bqa-open]")
+			?.addEventListener("click", evt => {
+				evt.stopPropagation();
+				BestiaryQuickActionsUi.pOpen({monster: monsterBase}).then(null);
+			});
+		return monster;
 	}
 
 	_onClickBtnScaleCrPrev = null;
@@ -275,8 +307,12 @@ export class Panel {
 					const originalCr = Parser.crToNumber(mon.cr) === targetCr;
 
 					const doRender = (toRender) => {
-						eleContentStats.vee.empty().vee.appends(Renderer.monster.getCompactRenderedString(toRender, {isShowScalers: true, isScaledCr: !originalCr}));
-						Renderer.statblockCollapse.apply(eleContentStats);
+						const fnBqaRerender = () => this._stats_renderMonsterWithQuickActions({
+							monsterBase: toRender,
+							eleContentStats,
+							renderOpts: {isShowScalers: true, isScaledCr: !originalCr},
+						});
+						const rendered = fnBqaRerender();
 
 						const nxtMeta = {
 							...meta,
@@ -289,8 +325,9 @@ export class Panel {
 							type: originalCr ? PANEL_TYP_STATS : PANEL_TYP_CREATURE_SCALED_CR,
 							contentMeta: nxtMeta,
 							eleContent: eleContentInner,
-							title: toRender._displayName || toRender.name,
+							title: rendered._displayName || rendered.name,
 							tabCanRename: true,
+							fnBqaRerender,
 						});
 					};
 
@@ -312,8 +349,12 @@ export class Panel {
 			if (!btnReset) return;
 
 			evt.stopPropagation();
-			eleContentStats.vee.empty().vee.appends(Renderer.monster.getCompactRenderedString(mon, {isShowScalers: true, isScaledCr: false}));
-			Renderer.statblockCollapse.apply(eleContentStats);
+			const fnBqaRerender = () => this._stats_renderMonsterWithQuickActions({
+				monsterBase: mon,
+				eleContentStats,
+				renderOpts: {isShowScalers: true, isScaledCr: false},
+			});
+			fnBqaRerender();
 			this.setTab({
 				ix: this.tabIndex,
 				type: PANEL_TYP_STATS,
@@ -321,6 +362,7 @@ export class Panel {
 				eleContent: eleContentInner,
 				title: mon.name,
 				tabCanRename: true,
+				fnBqaRerender,
 			});
 		};
 
@@ -350,8 +392,12 @@ export class Panel {
 
 				ScaleSpellSummonedCreature.scale(mon, spellLevel)
 					.then(toRender => {
-						eleContentStats.vee.empty().vee.appends(Renderer.monster.getCompactRenderedString(toRender, {isShowScalers: true, isScaledSpellSummon: true}));
-						Renderer.statblockCollapse.apply(eleContentStats);
+						const fnBqaRerender = () => this._stats_renderMonsterWithQuickActions({
+							monsterBase: toRender,
+							eleContentStats,
+							renderOpts: {isShowScalers: true, isScaledSpellSummon: true},
+						});
+						fnBqaRerender();
 
 						this._stats_doUpdateSummonScaleDropdowns(toRender, eleContentStats);
 
@@ -362,11 +408,16 @@ export class Panel {
 							eleContent: eleContentInner,
 							title: mon._displayName || mon.name,
 							tabCanRename: true,
+							fnBqaRerender,
 						});
 					});
 			} else {
-				eleContentStats.vee.empty().vee.appends(Renderer.monster.getCompactRenderedString(mon, {isShowScalers: true, isScaledCr: false, isScaledSpellSummon: false}));
-				Renderer.statblockCollapse.apply(eleContentStats);
+				const fnBqaRerender = () => this._stats_renderMonsterWithQuickActions({
+					monsterBase: mon,
+					eleContentStats,
+					renderOpts: {isShowScalers: true, isScaledCr: false, isScaledSpellSummon: false},
+				});
+				fnBqaRerender();
 
 				this._stats_doUpdateSummonScaleDropdowns(mon, eleContentStats);
 
@@ -377,6 +428,7 @@ export class Panel {
 					eleContent: eleContentInner,
 					title: mon.name,
 					tabCanRename: true,
+					fnBqaRerender,
 				});
 			}
 		};
@@ -400,8 +452,12 @@ export class Panel {
 
 				ScaleClassSummonedCreature.scale(mon, classLevel)
 					.then(toRender => {
-						eleContentStats.vee.empty().vee.appends(Renderer.monster.getCompactRenderedString(toRender, {isShowScalers: true, isScaledClassSummon: true}));
-						Renderer.statblockCollapse.apply(eleContentStats);
+						const fnBqaRerender = () => this._stats_renderMonsterWithQuickActions({
+							monsterBase: toRender,
+							eleContentStats,
+							renderOpts: {isShowScalers: true, isScaledClassSummon: true},
+						});
+						fnBqaRerender();
 
 						this._stats_doUpdateSummonScaleDropdowns(toRender, eleContentStats);
 
@@ -412,11 +468,16 @@ export class Panel {
 							eleContent: eleContentInner,
 							title: mon._displayName || mon.name,
 							tabCanRename: true,
+							fnBqaRerender,
 						});
 					});
 			} else {
-				eleContentStats.vee.empty().vee.appends(Renderer.monster.getCompactRenderedString(mon, {isShowScalers: true, isScaledCr: false, isScaledClassSummon: false}));
-				Renderer.statblockCollapse.apply(eleContentStats);
+				const fnBqaRerender = () => this._stats_renderMonsterWithQuickActions({
+					monsterBase: mon,
+					eleContentStats,
+					renderOpts: {isShowScalers: true, isScaledCr: false, isScaledClassSummon: false},
+				});
+				fnBqaRerender();
 
 				this._stats_doUpdateSummonScaleDropdowns(mon, eleContentStats);
 
@@ -427,6 +488,7 @@ export class Panel {
 					eleContent: eleContentInner,
 					title: mon.name,
 					tabCanRename: true,
+					fnBqaRerender,
 				});
 			}
 		};
@@ -460,8 +522,12 @@ export class Panel {
 			ScaleCreature.scale(it, targetCr).then(initialRender => {
 				const eleContentInner = veT`<div class="panel-content-wrapper-inner"></div>`;
 				const eleContentStats = veT`<table class="ve-w-100 ve-stats"></table>`.vee.appendTo(eleContentInner);
-				eleContentStats.vee.appends(Renderer.monster.getCompactRenderedString(initialRender, {isShowScalers: true, isScaledCr: true}));
-				Renderer.statblockCollapse.apply(eleContentStats);
+				const fnBqaRerender = () => this._stats_renderMonsterWithQuickActions({
+					monsterBase: initialRender,
+					eleContentStats,
+					renderOpts: {isShowScalers: true, isScaledCr: true},
+				});
+				fnBqaRerender();
 
 				this._stats_bindCrScaleClickHandler(it, meta, eleContentInner, eleContentStats);
 
@@ -473,6 +539,7 @@ export class Panel {
 					title: title || initialRender._displayName || initialRender.name,
 					tabCanRename: true,
 					tabRenamed: !!title,
+					fnBqaRerender,
 				});
 			});
 		});
@@ -492,7 +559,12 @@ export class Panel {
 			ScaleSpellSummonedCreature.scale(it, summonSpellLevel).then(scaledMon => {
 				const eleContentInner = veT`<div class="panel-content-wrapper-inner"></div>`;
 				const eleContentStats = veT`<table class="ve-w-100 ve-stats"></table>`.vee.appendTo(eleContentInner);
-				eleContentStats.vee.appends(Renderer.monster.getCompactRenderedString(scaledMon, {isShowScalers: true, isScaledSpellSummon: true}));
+				const fnBqaRerender = () => this._stats_renderMonsterWithQuickActions({
+					monsterBase: scaledMon,
+					eleContentStats,
+					renderOpts: {isShowScalers: true, isScaledSpellSummon: true},
+				});
+				fnBqaRerender();
 
 				this._stats_doUpdateSummonScaleDropdowns(scaledMon, eleContentStats);
 
@@ -506,6 +578,7 @@ export class Panel {
 					title: title || scaledMon._displayName || scaledMon.name,
 					tabCanRename: true,
 					tabRenamed: !!title,
+					fnBqaRerender,
 				});
 			});
 		});
@@ -525,7 +598,12 @@ export class Panel {
 			ScaleClassSummonedCreature.scale(it, summonClassLevel).then(scaledMon => {
 				const eleContentInner = veT`<div class="panel-content-wrapper-inner"></div>`;
 				const eleContentStats = veT`<table class="ve-w-100 ve-stats"></table>`.vee.appendTo(eleContentInner);
-				eleContentStats.vee.appends(Renderer.monster.getCompactRenderedString(scaledMon, {isShowScalers: true, isScaledClassSummon: true}));
+				const fnBqaRerender = () => this._stats_renderMonsterWithQuickActions({
+					monsterBase: scaledMon,
+					eleContentStats,
+					renderOpts: {isShowScalers: true, isScaledClassSummon: true},
+				});
+				fnBqaRerender();
 
 				this._stats_doUpdateSummonScaleDropdowns(scaledMon, eleContentStats);
 
@@ -539,6 +617,7 @@ export class Panel {
 					title: title || scaledMon._displayName || scaledMon.name,
 					tabCanRename: true,
 					tabRenamed: !!title,
+					fnBqaRerender,
 				});
 			});
 		});
@@ -616,6 +695,7 @@ export class Panel {
 			title,
 			tabCanRename,
 			tabRenamed,
+			fnBqaRerender,
 		},
 	) {
 		const ix = this.isTabs ? this.getNextTabIndex() : 0;
@@ -628,6 +708,7 @@ export class Panel {
 			title: title,
 			tabCanRename: tabCanRename,
 			tabRenamed: tabRenamed,
+			fnBqaRerender,
 		});
 	}
 
@@ -1326,6 +1407,7 @@ export class Panel {
 			title,
 			tabCanRename,
 			tabRenamed,
+			fnBqaRerender,
 		},
 	) {
 		if (ix === null) ix = 0;
@@ -1346,6 +1428,7 @@ export class Panel {
 				title: title,
 				tabCanRename: !!tabCanRename,
 				tabRenamed: !!tabRenamed,
+				fnBqaRerender,
 			};
 			if (btnOld) this.tabDatas[ix].tabButton = btnOld;
 
@@ -1428,6 +1511,7 @@ export class Panel {
 
 	destroy () {
 		// do cleanup
+		this._bqaUnsubscribe?.();
 		if (this.type === PANEL_TYP_ROLLBOX) Renderer.dice.unbindDmScreenPanel();
 
 		const fnsOnDestroy = this.tabDatas
