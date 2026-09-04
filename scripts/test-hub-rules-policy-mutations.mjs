@@ -74,26 +74,146 @@ async function probeMemoryStoreFence ({rules, pImportServer}) {
 	}), error => error?.code === "POLICY_VERSION_STALE");
 }
 
-async function probeStoreFenceOwners ({pImportServer}) {
-	const {MemoryHubStore} = await pImportServer("memory-hub-store.js");
-	const {PostgresHubStore} = await pImportServer("postgres-hub-store.js");
-	for (const Store of [MemoryHubStore, PostgresHubStore]) {
-		expectFunctionContains(Store.prototype.pCreateCharacter, "assertCampaignRuleWriteFence");
-		expectFunctionContains(Store.prototype.pPatchCharacter, "assertCampaignRuleWriteFence");
-	}
+function getPolicyFenceFixture (rules) {
+	return {
+		id: "rules-current",
+		version: 1,
+		schema_version: 2,
+		rules: rules.createDefaultCampaignRulesPolicy(),
+	};
 }
 
-function expectFunctionContains (fn, text) {
-	assert.equal(typeof fn, "function");
-	assert.match(fn.toString(), new RegExp(text));
+function getStaleCarryData () {
+	return {
+		settings: {},
+		carry: {basis: {kind: "campaign", rulesVersionId: "rules-stale", settingsDigest: "digest"}},
+	};
 }
 
-async function probeTransitionOwners ({pImportServer}) {
-	const {MemoryHubStore} = await pImportServer("memory-hub-store.js");
+function createPostgresFenceStore ({PostgresHubStore, rules, characterRow = null}) {
+	const policyRow = getPolicyFenceFixture(rules);
+	const sentinel = Object.assign(new Error("the operation passed its policy fence"), {
+		code: "POST_FENCE_SENTINEL",
+	});
+	const client = {
+		query: async query => {
+			const sql = typeof query === "string" ? query : query.text;
+			if (sql === "BEGIN" || sql === "ROLLBACK") return {rows: [], rowCount: 0};
+			if (sql.includes("SELECT r.id, r.version, r.schema_version, r.rules")) {
+				return {rows: [policyRow], rowCount: 1};
+			}
+			if (sql.includes("SELECT campaign_id FROM hub.characters")) {
+				return {rows: [{campaign_id: "campaign"}], rowCount: 1};
+			}
+			if (characterRow && sql.includes("SELECT * FROM hub.characters")) {
+				return {rows: [characterRow], rowCount: 1};
+			}
+			if (characterRow && sql.includes("FROM hub.character_leases")) {
+				return {
+					rows: [{
+						session_id: "session",
+						epoch: 1,
+						expires_at: new Date(Date.now() + 60_000),
+					}],
+					rowCount: 1,
+				};
+			}
+			throw sentinel;
+		},
+		release: () => {},
+	};
+	const store = new PostgresHubStore({
+		pool: {
+			query: async () => ({rows: [], rowCount: 0}),
+			connect: async () => client,
+			on: () => {},
+		},
+	});
+	store._pLockCommand = async () => null;
+	store._pGetMembershipForUpdate = async () => {};
+	return store;
+}
+
+async function probePostgresCreateFence ({rules, pImportServer}) {
 	const {PostgresHubStore} = await pImportServer("postgres-hub-store.js");
-	expectFunctionContains(MemoryHubStore.prototype.pCloneCharacter, "prepareCampaignTransitionData");
-	expectFunctionContains(MemoryHubStore.prototype.pMoveCharacter, "prepareCampaignTransitionData");
-	expectFunctionContains(PostgresHubStore.prototype._pCopyOrMoveCharacter, "prepareCampaignTransitionData");
+	const store = createPostgresFenceStore({PostgresHubStore, rules});
+	await assert.rejects(store.pCreateCharacter({
+		accountId: "account",
+		campaignId: "campaign",
+		clientImportId: "import",
+		schemaVersion: 1,
+		data: getStaleCarryData(),
+		protocolVersion: "4",
+		idempotencyKey: "create",
+	}), error => error?.code === "POLICY_VERSION_STALE");
+}
+
+async function probePostgresPatchFence ({rules, pImportServer}) {
+	const {PostgresHubStore} = await pImportServer("postgres-hub-store.js");
+	const characterRow = {
+		id: "character",
+		owner_account_id: "account",
+		campaign_id: "campaign",
+		status: "active",
+		schema_version: 1,
+		revision: 1,
+		lease_epoch: 1,
+		data: getStaleCarryData(),
+		projection_policy: {},
+		projection_revision: 1,
+		operation_watermark: 0,
+	};
+	const store = createPostgresFenceStore({PostgresHubStore, rules, characterRow});
+	await assert.rejects(store.pPatchCharacter({
+		accountId: "account",
+		sessionId: "session",
+		characterId: "character",
+		baseRevision: 1,
+		leaseEpoch: 1,
+		patches: [{op: "replace", path: "/carry", value: characterRow.data.carry}],
+		idempotencyKey: "patch",
+		protocolVersion: "4",
+	}), error => error?.code === "POLICY_VERSION_STALE");
+}
+
+async function probeTransitionOwners ({rules, pImportServer}) {
+	const {MemoryHubStore} = await pImportServer("memory-hub-store.js");
+	const store = new MemoryHubStore();
+	const account = await store.pUpsertOAuthAccount({
+		provider: "test",
+		providerSubject: "transition-mutant",
+		displayName: "Transition Mutant",
+	});
+	const campaign = (await store.pCreateCampaign({
+		accountId: account.id,
+		name: "Destination",
+		idempotencyKey: "destination-campaign",
+	})).campaign;
+	await store.pCreateAndActivateRulesPolicy({
+		accountId: account.id,
+		campaignId: campaign.id,
+		policy: rules.createDefaultCampaignRulesPolicy(),
+		expectedActiveRulesVersionId: null,
+		idempotencyKey: "destination-rules",
+	});
+	const source = (await store.pCreateCharacter({
+		accountId: account.id,
+		campaignId: null,
+		clientImportId: "source",
+		schemaVersion: 1,
+		data: {name: "Source", settings: {}},
+		idempotencyKey: "source-character",
+	})).character;
+	const staleCarry = getStaleCarryData().carry;
+	store._characters.get(source.id).data.carry = staleCarry;
+	const cloned = await store.pCloneCharacter({
+		accountId: account.id,
+		characterId: source.id,
+		campaignId: campaign.id,
+		idempotencyKey: "clone",
+	});
+	assert.equal(cloned.character.data.carry, undefined, "clone retained source campaign carry authority");
+	assert.deepEqual(store._characters.get(source.id).data.carry, staleCarry, "transition rewrote source character data");
 }
 
 async function probeCharacterSheetOwners ({readSource}) {
@@ -197,11 +317,15 @@ function mutateEncumbranceRequirement (source) {
 async function probeHistoricalDiff ({rules}) {
 	const active = rules.createDefaultCampaignRulesPolicy();
 	const historical = rules.adaptLegacyCampaignRules({enableTgtt: false});
-	assert.deepEqual(rules.diffCampaignRulesPolicies({
-		before: active,
-		after: historical,
-		isAfterStoredPolicy: true,
-	}), [{
+	let diff;
+	assert.doesNotThrow(() => {
+		diff = rules.diffCampaignRulesPolicies({
+			before: active,
+			after: historical,
+			isAfterStoredPolicy: true,
+		});
+	});
+	assert.deepEqual(diff, [{
 		ruleId: "tgtt.enabled",
 		title: "Thelemar rules",
 		before: "On",
@@ -472,7 +596,7 @@ const MUTANTS = [
 	},
 	{
 		name: "postgres-create-policy-fence-disabled",
-		probe: probeStoreFenceOwners,
+		probe: probePostgresCreateFence,
 		mutations: {
 			"server/src/postgres-hub-store.js": source => source.replace(
 				"assertCampaignRuleWriteFence({",
@@ -482,7 +606,7 @@ const MUTANTS = [
 	},
 	{
 		name: "postgres-patch-policy-fence-disabled",
-		probe: probeStoreFenceOwners,
+		probe: probePostgresPatchFence,
 		mutations: {
 			"server/src/postgres-hub-store.js": source => replaceLast(
 				source,
@@ -582,14 +706,23 @@ const MUTANTS = [
 	},
 ];
 
+function isProbeAssertionFailure (error) {
+	return error?.name === "AssertionError" || error?.code === "ERR_ASSERTION";
+}
+
 for (const mutant of MUTANTS) {
-	const variant = await loadVariant(mutant);
+	let variant;
+	try {
+		variant = await loadVariant(mutant);
+	} catch (error) {
+		throw new Error(`${mutant.name} fixture/import failed.`, {cause: error});
+	}
 	try {
 		let killed = false;
 		try {
 			await mutant.probe(variant);
 		} catch (error) {
-			if (error?.code === "ERR_MODULE_NOT_FOUND" || ["SyntaxError", "ReferenceError"].includes(error?.name)) {
+			if (!isProbeAssertionFailure(error)) {
 				throw new Error(`${mutant.name} probe failed before its assertion.`, {cause: error});
 			}
 			killed = true;
@@ -623,7 +756,7 @@ async function runAuthorityMutant ({name, mutate, probe}) {
 		try {
 			await probe({authority, rules});
 		} catch (error) {
-			if (error?.code === "ERR_MODULE_NOT_FOUND" || ["SyntaxError", "ReferenceError"].includes(error?.name)) {
+			if (!isProbeAssertionFailure(error)) {
 				throw new Error(`${name} authority probe failed before its assertion.`, {cause: error});
 			}
 			killed = true;
