@@ -1,7 +1,7 @@
 {
   "goal_id": "campaign-rule-enforcement",
-  "status": "building",
-  "iteration": 2,
+  "status": "completed",
+  "iteration": 8,
   "builder_model": "GPT:5.6-Luna",
   "inspector_model": "GPT:5.6-Sol",
   "initial_sha": "29eaf1087e3b59ff5184edf8337da340396515c8",
