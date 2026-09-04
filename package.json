@@ -82,6 +82,7 @@
 		"hub:restore": "node server/scripts/restore.mjs",
 		"hub:restore:encrypted": "node server/scripts/restore-encrypted.mjs",
 		"test:hub": "node --localstorage-file test/localstorage.tmp --experimental-vm-modules node_modules/jest/bin/jest.js test/jest/hub/ --no-coverage --forceExit",
+		"test:hub:mutations": "node scripts/test-hub-active-context-mutations.mjs",
 		"test:hub:e2e:stack": "node server/scripts/run-hub-e2e.mjs"
 	},
 	"lint-staged": {

@@ -316,6 +316,9 @@ describe("active campaign context against the real BFF", () => {
 
 		// The device selection follows tab B...
 		expect(JSON.parse(device.getItem(ACTIVE_CAMPAIGN_STORAGE_KEY))).toMatchObject({campaignId: other.id});
+		for (let i = 0; i < 50 && tabA.coordinator.state !== "switch_pending"; ++i) {
+			await new Promise(resolve => setTimeout(resolve, 10));
+		}
 		// ...while tab A keeps its own resource and its own rules and brew.
 		expect(tabA.coordinator.state).toBe("switch_pending");
 		expect(tabA.coordinator.activeCampaignId).toBe(open.id);

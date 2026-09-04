@@ -28,7 +28,7 @@ const ALLOWED_RESULTS = new Set(["success", "failure", "refused"]);
 const ALLOWED_ERROR_CODES = new Set([
 	"AUTH_REQUIRED", "FORBIDDEN", "CAMPAIGN_NOT_FOUND", "MEMBERSHIP_NOT_FOUND", "CAMPAIGN_ARCHIVED",
 	"CAMPAIGN_ID_INVALID", "NETWORK_UNAVAILABLE", "REQUEST_ABORTED", "RESPONSE_INVALID",
-	"REQUEST_FAILED", "TEARDOWN_FAILED", "UNSAFE_PENDING_WRITES",
+	"REQUEST_FAILED", "TEARDOWN_FAILED", "UNSAFE_PENDING_WRITES", "PROTOCOL_UPDATE_REQUIRED",
 ]);
 
 /** Keep telemetry cardinality bounded: an unexpected label degrades to `other`, never a raw id. */
@@ -86,6 +86,7 @@ export class HubActiveCampaignCoordinator {
 		this._lastTeardownMarker = null;
 		this._isDisposed = false;
 		this._isSuspended = false;
+		this._listeners = new Set();
 
 		this._unsubscribeChannel = this._channel.onMessage(payload => {
 			void this._pHandleRemote(payload);
@@ -100,22 +101,43 @@ export class HubActiveCampaignCoordinator {
 	get lastTeardownMarker () { return this._lastTeardownMarker; }
 	get campaignContext () { return this._campaignContext; }
 	get storedSelection () { return this._accountId ? this._store.readForAccount(this._accountId) : null; }
+	get session () { return this._session; }
+
+	getSnapshot () {
+		return Object.freeze({
+			state: this._state,
+			accountId: this._accountId,
+			activeCampaignId: this._activeCampaignId,
+			pendingCampaignId: this._pendingCampaignId,
+			storedSelection: this.storedSelection,
+		});
+	}
+
+	subscribe (listener, {isEmitCurrent = true} = {}) {
+		if (typeof listener !== "function") throw new TypeError(`listener must be a function.`);
+		this._listeners.add(listener);
+		if (isEmitCurrent) listener(this.getSnapshot());
+		return () => this._listeners.delete(listener);
+	}
 
 	_setState (next, {trigger = "startup", result = "success", errorCode = null, startedAt = null} = {}) {
 		const from = this._state;
 		this._state = next;
-		if (!this._fnObserve) return;
-		// Bounded labels only: no campaign id, account id, name, URL, rules, or brew.
-		this._fnObserve({
-			name: "hub_active_context_transition",
-			from,
-			to: next,
-			trigger: _boundedLabel(trigger, ALLOWED_TRIGGERS),
-			result: _boundedLabel(result, ALLOWED_RESULTS),
-			durationMs: startedAt == null ? null : Math.max(0, Math.trunc(this._fnNow() - startedAt)),
-			errorCode: _boundedLabel(errorCode, ALLOWED_ERROR_CODES),
-			requestId: null,
-		});
+		if (this._fnObserve) {
+			// Bounded labels only: no campaign id, account id, name, URL, rules, or brew.
+			this._fnObserve({
+				name: "hub_active_context_transition",
+				from,
+				to: next,
+				trigger: _boundedLabel(trigger, ALLOWED_TRIGGERS),
+				result: _boundedLabel(result, ALLOWED_RESULTS),
+				durationMs: startedAt == null ? null : Math.max(0, Math.trunc(this._fnNow() - startedAt)),
+				errorCode: _boundedLabel(errorCode, ALLOWED_ERROR_CODES),
+				requestId: null,
+			});
+		}
+		const snapshot = this.getSnapshot();
+		for (const listener of this._listeners) listener(snapshot);
 	}
 
 	/** Begin a new fenced operation; every older in-flight operation becomes stale. */
@@ -180,6 +202,7 @@ export class HubActiveCampaignCoordinator {
 		if (!isActiveCampaignUuid(campaignId)) throw Object.assign(new Error(`Malformed campaign id.`), {code: "CAMPAIGN_ID_INVALID"});
 		const session = await this._pGetSession({signal});
 		if (!session?.signedIn) throw Object.assign(new Error(`Sign in required.`), {code: "AUTH_REQUIRED"});
+		this._assertRequiredCapabilities(session);
 		const campaign = await this._api.pGetCampaign({campaignId, signal});
 		this._assertCampaignUsable(campaign);
 		return {session, campaign};
@@ -194,6 +217,7 @@ export class HubActiveCampaignCoordinator {
 		if (!isActiveCampaignUuid(campaignId)) throw Object.assign(new Error(`Malformed campaign id.`), {code: "CAMPAIGN_ID_INVALID"});
 		const session = await this._pGetSession({signal});
 		if (!session?.signedIn) throw Object.assign(new Error(`Sign in required.`), {code: "AUTH_REQUIRED"});
+		this._assertRequiredCapabilities(session);
 		const [campaign, context] = await Promise.all([
 			this._api.pGetCampaign({campaignId, signal}),
 			this._api.pGetCampaignContext({campaignId, signal}),
@@ -206,6 +230,18 @@ export class HubActiveCampaignCoordinator {
 		if (!campaign) throw Object.assign(new Error(`Campaign unavailable.`), {code: "CAMPAIGN_NOT_FOUND"});
 		if (campaign.status !== "active") throw Object.assign(new Error(`Campaign is archived.`), {code: "CAMPAIGN_ARCHIVED"});
 		if (!campaign.role) throw Object.assign(new Error(`Membership required.`), {code: "MEMBERSHIP_NOT_FOUND"});
+	}
+
+	_assertRequiredCapabilities (session) {
+		const required = this._host.requiredCapabilities || [];
+		if (!required.length) return;
+		const advertised = new Set(session?.capabilities || []);
+		const missing = required.filter(capability => !advertised.has(capability));
+		if (!missing.length) return;
+		throw Object.assign(new Error(`Campaign context is not supported by this server.`), {
+			code: "PROTOCOL_UPDATE_REQUIRED",
+			status: 426,
+		});
 	}
 
 	// #endregion
@@ -239,13 +275,17 @@ export class HubActiveCampaignCoordinator {
 			const resourceCampaignId = await this._host.pGetResourceCampaignId?.();
 			if (!this._isCurrent(generation)) return this._state;
 
-			const explicitCampaignId = this._host.getExplicitCampaignId?.() ?? null;
+			const isExplicitLocal = this._host.isExplicitLocal?.() === true;
+			const explicitCampaignId = isExplicitLocal ? null : (this._host.getExplicitCampaignId?.() ?? null);
 			const stored = this._store.readForAccount(accountId);
 
 			let candidate = null;
 			let candidateTrigger = trigger;
 			let isExplicit = false;
-			if (resourceCampaignId) {
+			if (isExplicitLocal) {
+				candidateTrigger = "explicit_url";
+				isExplicit = true;
+			} else if (resourceCampaignId) {
 				candidate = resourceCampaignId;
 				candidateTrigger = "resource_canonical";
 				isExplicit = true;
@@ -340,6 +380,12 @@ export class HubActiveCampaignCoordinator {
 		this._session = session || this._session;
 		const accountId = await this._pAdoptAccount(this._session);
 		if (!accountId || !campaign) return null;
+		try {
+			this._assertRequiredCapabilities(this._session);
+		} catch (error) {
+			this._setState("blocked", {trigger: "explicit_url", result: "failure", errorCode: error.code});
+			return null;
+		}
 		if (campaign.status !== "active" || !campaign.role) {
 			// An archived or inaccessible explicit campaign must still invalidate a stored
 			// selection naming it, even though this path bypasses `pResolve`.
@@ -501,17 +547,18 @@ export class HubActiveCampaignCoordinator {
 			this._setState("blocked", {trigger, result: "failure", errorCode: "CAMPAIGN_ID_INVALID"});
 			return this._state;
 		}
-		if (campaignId === this._activeCampaignId) return this._state;
-
-		this._pendingCampaignId = campaignId;
-		if (this._host.isResourcePinned?.()) {
-			// The new default is recorded and surfaced, but the open resource keeps its own context.
-			this._setState("switch_pending", {trigger});
-			this._host.onPendingSelection?.({campaignId});
+		const stored = this.storedSelection;
+		const isRuntimeCampaignActive = campaignId === this._activeCampaignId;
+		const isAlreadySelected = stored?.state === ACTIVE_CAMPAIGN_STATE_SELECTED
+			&& stored.campaignId === campaignId;
+		if (isRuntimeCampaignActive && isAlreadySelected && this._state === "active" && this._pendingCampaignId == null) {
 			return this._state;
 		}
 
-		const preflight = await this._host.pPreflightSwitch?.({campaignId});
+		this._pendingCampaignId = campaignId;
+		const isResourcePinned = this._host.isResourcePinned?.() === true;
+
+		const preflight = isResourcePinned ? null : await this._host.pPreflightSwitch?.({campaignId});
 		if (preflight && preflight.safe === false) {
 			this._setState("switch_pending", {trigger, result: "refused", errorCode: preflight.reason || "UNSAFE_PENDING_WRITES"});
 			this._host.onPendingSelection?.({campaignId});
@@ -524,7 +571,8 @@ export class HubActiveCampaignCoordinator {
 		// A switch must honour the same activation gate as startup resolution: a host may accept a
 		// new device default for selection purposes while refusing to activate its context,
 		// because its repository, realtime, and URL are bound to the campaign it was opened with.
-		const wantsContext = this._host.isContextHost !== false
+		const wantsContext = !isResourcePinned
+			&& this._host.isContextHost !== false
 			&& this._host.shouldActivateContext?.({campaignId, isExplicit: false}) !== false;
 		let verified;
 		try {
@@ -537,8 +585,32 @@ export class HubActiveCampaignCoordinator {
 		}
 		if (!this._isCurrent(generation)) return this._state;
 
-		if (!wantsContext) {
+		if (isRuntimeCampaignActive) {
+			if (isPersistSelection) await this._pPersistSelection({campaignId, generation});
+			if (!this._isCurrent(generation)) return this._state;
+			this._pendingCampaignId = null;
+			this._host.onSelectionVerified?.({campaignId, campaign: verified.campaign});
+			this._setState("active", {trigger, startedAt});
+			return this._state;
+		}
+
+		if (isResourcePinned) {
 			// Adopt the device default without disturbing the open resource or its context.
+			if (isPersistSelection) await this._pPersistSelection({campaignId, generation});
+			this._pendingCampaignId = campaignId;
+			this._setState("switch_pending", {trigger, startedAt});
+			this._host.onPendingSelection?.({campaignId});
+			return this._state;
+		}
+		if (this._host.isContextHost === false) {
+			if (isPersistSelection) await this._pPersistSelection({campaignId, generation});
+			this._activeCampaignId = campaignId;
+			this._pendingCampaignId = null;
+			this._host.onSelectionVerified?.({campaignId, campaign: verified.campaign});
+			this._setState("active", {trigger, startedAt});
+			return this._state;
+		}
+		if (!wantsContext) {
 			if (isPersistSelection) await this._pPersistSelection({campaignId, generation});
 			this._pendingCampaignId = campaignId;
 			this._setState("switch_pending", {trigger, startedAt});
@@ -561,6 +633,41 @@ export class HubActiveCampaignCoordinator {
 		} catch (error) {
 			return this._pHandleFailure({error, trigger, startedAt, campaignId});
 		}
+		return this._state;
+	}
+
+	/**
+	 * Select local/no-campaign mode. Resource-pinned hosts keep the open resource while recording
+	 * local mode as the device default; switchable hosts run the full teardown before going local.
+	 */
+	async pSwitchToLocal ({trigger = "picker", isPersistSelection = true} = {}) {
+		if (this._isDisposed) return this._state;
+		const isResourcePinned = this._host.isResourcePinned?.() === true;
+		const preflight = isResourcePinned ? null : await this._host.pPreflightSwitch?.({campaignId: null});
+		if (preflight && preflight.safe === false) {
+			this._pendingCampaignId = null;
+			this._setState("switch_pending", {trigger, result: "refused", errorCode: preflight.reason || "UNSAFE_PENDING_WRITES"});
+			this._host.onPendingSelection?.({campaignId: null});
+			return this._state;
+		}
+
+		const generation = this._nextGeneration();
+		if (isPersistSelection && this._accountId) {
+			const cleared = await this._store.pClear({accountId: this._accountId, cause: CLEAR_CAUSE_SELECTION});
+			if (!this._isCurrent(generation)) return this._state;
+			this._channel.post(cleared);
+		}
+
+		this._pendingCampaignId = null;
+		if (isResourcePinned) {
+			this._setState("switch_pending", {trigger});
+			this._host.onPendingSelection?.({campaignId: null});
+			return this._state;
+		}
+
+		if (!await this.pTeardown({reason: trigger, isFenceGeneration: false})) return this._state;
+		if (!this._isCurrent(generation)) return this._state;
+		this._setState("local", {trigger});
 		return this._state;
 	}
 
@@ -612,7 +719,11 @@ export class HubActiveCampaignCoordinator {
 			this._setState("local", {trigger: "broadcast_channel"});
 			return;
 		}
-		if (winner.campaignId === this._activeCampaignId) return;
+		if (winner.campaignId === this._activeCampaignId) {
+			this._pendingCampaignId = null;
+			this._setState("active", {trigger: "broadcast_channel"});
+			return;
+		}
 		await this.pSwitchTo({campaignId: winner.campaignId, trigger: "broadcast_channel", isPersistSelection: false});
 	}
 
@@ -626,14 +737,12 @@ export class HubActiveCampaignCoordinator {
 	}
 
 	/**
-	 * Persisted `pageshow`: the session may have changed while the page was frozen, so a storage
-	 * reread alone is insufficient — cross-account records are deliberately incomparable and would
-	 * be ignored. Revalidate the account before trusting anything, and tear down fully on a
-	 * signed-out or switched account before any resumed mutation is permitted.
+	 * Revalidate the live account and campaign without replacing an already-installed rules/brew
+	 * context. Used after BFCache and reconnect boundaries, where access may have been revoked or
+	 * the campaign archived while the page was unable to observe realtime invalidations.
 	 */
-	async pResume ({trigger = "startup"} = {}) {
+	async pRevalidate ({trigger = "retry"} = {}) {
 		if (this._isDisposed) return this._state;
-		this._isSuspended = false;
 		const generation = this._nextGeneration();
 		const signal = this._abort.signal;
 		const previousAccountId = this._accountId;
@@ -659,10 +768,39 @@ export class HubActiveCampaignCoordinator {
 
 		await this._pAdoptAccount(session);
 		const stored = this._store.readForAccount(accountId);
-		// Route every same-account record through the normal comparison path, tombstones included:
-		// a clear written by another tab while this page was frozen must tear down here too.
 		if (stored) await this._pHandleRemote({record: stored, isStorageSignal: false});
-		return this._state;
+		if (!this._isCurrent(generation)) return this._state;
+
+		const campaignId = this._activeCampaignId;
+		if (!campaignId) {
+			if (stored?.state === ACTIVE_CAMPAIGN_STATE_SELECTED) return this.pResolve({trigger, session});
+			this._setState("local", {trigger});
+			return this._state;
+		}
+
+		try {
+			const verified = await this.pVerifySelection({campaignId, signal});
+			if (!this._isCurrent(generation)) return this._state;
+			if (this._host.isCampaignAuthorized?.({campaign: verified.campaign}) === false) {
+				return this.pHandleSurfaceRoleLoss();
+			}
+			this._host.onSelectionVerified?.({campaignId, campaign: verified.campaign});
+			this._setState("active", {trigger});
+			return this._state;
+		} catch (error) {
+			if (!this._isCurrent(generation)) return this._state;
+			return this._pHandleFailure({error, trigger, startedAt: null, campaignId});
+		}
+	}
+
+	/**
+	 * Persisted `pageshow`: the session may have changed while the page was frozen, so a storage
+	 * reread alone is insufficient — cross-account records are deliberately incomparable and would
+	 * be ignored. Revalidate the account and active campaign before private synchronisation resumes.
+	 */
+	async pResume ({trigger = "startup"} = {}) {
+		this._isSuspended = false;
+		return this.pRevalidate({trigger});
 	}
 
 	dispose () {
@@ -677,6 +815,7 @@ export class HubActiveCampaignCoordinator {
 		this._campaignContext?.dispose();
 		this._campaignContext = null;
 		this._store.reset();
+		this._listeners.clear();
 	}
 
 	// #endregion

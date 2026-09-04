@@ -30,6 +30,9 @@ jobs:
       - name: Hub unit and contract tests
         run: npm run test:hub
 
+      - name: Active campaign context mutation tests
+        run: npm run test:hub:mutations
+
       - name: JavaScript lint
         run: npm run test:js
 
@@ -115,6 +118,7 @@ jobs:
           test/jest/charactersheet/CharacterSheetPersistenceBackend.test.js
           test/jest/charactersheet/CharacterSheetRepositorySeam.test.js
           test/jest/charactersheet/CharacterSheetCampaignRules.test.js
+          test/jest/charactersheet/CharacterSheetHubTeardown.test.js
           test/jest/charactersheet/CharacterSheetRollHistory.test.js
           --no-coverage --forceExit
 
@@ -127,6 +131,8 @@ jobs:
           test/jest/DmScreenInitiativeTrackerNpcAppend.test.js
           test/jest/DmScreenLairMarkers.test.js
           test/jest/dmscreen/DmScreenNpcTrackerUx.test.js
+          test/jest/dmscreen/DmScreenCampaignPrivacy.test.js
+          test/jest/dmscreen/PartyTrackerCampaignRules.test.js
           test/jest/hub/HubPartyTrackerProjection.test.js
           --no-coverage --forceExit
 

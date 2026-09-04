@@ -1,5 +1,7 @@
 import {HubApiClient, HubApiError} from "./hub-api-client.js";
 import {HubActiveCampaignCoordinator} from "./hub-active-campaign-coordinator.js";
+import {HubActiveCampaignSwitcher} from "./hub-active-campaign-switcher.js";
+import {HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT} from "./hub-capabilities.js";
 import {HubRealtimeClient} from "./hub-realtime-client.js";
 import {renderHubActivityRows} from "./hub-activity-render.js";
 import {
@@ -41,14 +43,38 @@ const activeCampaignApi = new HubApiClient();
 const activeCampaign = new HubActiveCampaignCoordinator({
 	api: activeCampaignApi,
 	host: {
+		requiredCapabilities: [HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT],
 		isContextHost: false,
-		isResourcePinned: () => false,
+		isResourcePinned: () => document.body?.dataset.hubView === "campaign",
 		getExplicitCampaignId: () => new URLSearchParams(window.location.search).get("id"),
 	},
 });
+let activeCampaignSwitcher = null;
+
+async function pRenderActiveCampaignSwitcher () {
+	let host = document.querySelector(".hub-context-switcher-host");
+	if (!host) {
+		host = document.createElement("li");
+		host.className = "hub-context-switcher-host";
+		document.querySelector(".hub-nav__list")?.append(host);
+	}
+	if (!host?.isConnected) return;
+	activeCampaignSwitcher ||= new HubActiveCampaignSwitcher({
+		coordinator: activeCampaign,
+		pListCampaigns: () => activeCampaignApi.pListCampaigns(),
+		getOpenSelectionUrl: ({campaignId}) => campaignId
+			? `campaign.html?id=${encodeURIComponent(campaignId)}`
+			: "hub.html",
+	});
+	await activeCampaignSwitcher.pRender({container: host, variant: "hub"});
+}
+
 window.addEventListener("pagehide", event => {
 	if (event.persisted) activeCampaign.suspend();
-	else activeCampaign.dispose();
+	else {
+		activeCampaignSwitcher?.dispose();
+		activeCampaign.dispose();
+	}
 });
 window.addEventListener("pageshow", event => {
 	// eslint-disable-next-line no-console
@@ -821,7 +847,8 @@ async function pInitHubIndex ({session}) {
 	// selection is actually consumed: it is revalidated through the selection-only path (no
 	// context or brew fetch) and cleared if the campaign was archived or access was lost.
 	// eslint-disable-next-line no-console
-	activeCampaign.pResolve({trigger: "startup", session}).catch(err => console.warn("Failed to resolve campaign selection:", err));
+	await activeCampaign.pResolve({trigger: "startup", session});
+	await pRenderActiveCampaignSwitcher();
 	document.getElementById("hub-cancel-deletion")?.addEventListener("click", async event => {
 		const button = event.currentTarget;
 		button.disabled = true;
@@ -851,8 +878,13 @@ async function pInitHubIndex ({session}) {
 	const inviteToken = sessionStorage.getItem("hub-pending-invite");
 	if (inviteToken) {
 		try {
-			await api.pRedeemInvite({token: inviteToken, idempotencyKey: crypto.randomUUID()});
-			renderCampaignList(await api.pListCampaigns());
+			const redeemed = await api.pRedeemInvite({token: inviteToken, idempotencyKey: crypto.randomUUID()});
+			const campaignId = redeemed.membership?.campaignId;
+			if (!campaignId) throw new HubApiError({code: "RESPONSE_INVALID", status: 200});
+			const campaign = await api.pGetCampaign({campaignId});
+			await activeCampaign.adoptVerified({session, campaign});
+			window.location.assign(`campaign.html?id=${encodeURIComponent(campaignId)}`);
+			return;
 		} catch (error) {
 			renderError(error);
 		} finally {
@@ -935,6 +967,7 @@ async function pInitCampaign ({session}) {
 	// additional request and never fetches the campaign context for selection purposes.
 	// An archived campaign still renders read-only, but never becomes the active selection.
 	await activeCampaign.adoptVerified({session, campaign});
+	await pRenderActiveCampaignSwitcher();
 	const [members, characters, snapshot] = await Promise.all([
 		api.pListMembers({campaignId}),
 		api.pListCharacters({campaignId}),
@@ -2085,8 +2118,8 @@ async function pInit () {
 		if (!session.signedIn) {
 			// A signed-out session writes a clear tombstone for the stored record's account, so no
 			// campaign context stays active in this browser.
-			// eslint-disable-next-line no-console
-			activeCampaign.pResolve({trigger: "logout", session}).catch(err => console.warn("Failed to clear campaign selection:", err));
+			await activeCampaign.pResolve({trigger: "logout", session});
+			await pRenderActiveCampaignSwitcher();
 			const signIn = document.getElementById("hub-sign-in");
 			const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
 			const {pRenderHubAuthProviders} = await import("./hub-auth-providers.js");

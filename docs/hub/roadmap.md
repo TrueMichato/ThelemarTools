@@ -288,7 +288,7 @@ Implemented slice:
 Remaining T4 scope includes the broader first-class player party-inventory experience and enforced campaign carry
 policy. Advisory warnings do not claim that those later policy decisions are active.
 
-### V2-T5 — whole-site campaign context per browser/device (**contract shipped; next enablement**)
+### V2-T5 — whole-site campaign context per browser/device (**implemented**)
 
 Dependency: V2-T2 for privacy-safe context summaries.
 
@@ -304,6 +304,19 @@ Acceptance:
 - switching or losing access clears prior campaign overlays and private projections before new page data loads;
 - signed-out/local-only pages remain unchanged and never inherit stale campaign state;
 - tabs converge safely within a browser profile, while explicit campaign deep links remain deterministic.
+
+Implemented slice:
+
+- one account-bound, device-local selection coordinator shared by Hub, ordinary navigation, Character Sheet, and
+  DM Screen, with `BroadcastChannel`/storage convergence and explicit `?local=1` routes;
+- lightweight accessible switchers on Hub and shared navigation without importing the heavy data/render graph
+  into Hub-owned shells;
+- pre-data temporary brew/rules/policy activation, complete ordered teardown, generation/abort fencing, and
+  capability gate `campaign.active_context.v1`;
+- authorized bare Character Sheet/DM Screen defaults, deterministic pinned resources, access-loss concealment,
+  BFCache/reconnect revalidation, production-stack Chromium coverage, and four killed high-risk mutants.
+V2-T5 exposes source/edition policy metadata only. ADR 0015/V2-T6 remains the owner of policy enforcement.
+V2-T5 exposes source/edition policy metadata only. ADR 0015/V2-T6 remains the owner of policy enforcement.
 
 ### V2-T6 — enforced campaign rules/source/species/edition policy (**selection foundation shipped; enforcement pending**)
 

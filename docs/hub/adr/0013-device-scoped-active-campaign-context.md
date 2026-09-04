@@ -1,12 +1,12 @@
 # ADR 0013: Active campaign context is device- and account-scoped
 
-Status: Accepted contract; production implementation pending
+Status: Accepted and implemented (V2-T5)
 
 Date: 2026-09-01
 
 ## Context
 
-Campaign-aware pages currently require explicit URL context:
+Campaign-aware pages support explicit URL context:
 
 - `campaign.html?id=<campaignId>` opens a Campaign Hub detail page;
 - `charactersheet.html?...&hubCampaign=<campaignId>` selects the Hub character repository, activates
@@ -20,10 +20,10 @@ content-addressed `BrewUtil2` overlay. It never writes personal brew. The Charac
 as a non-serialized settings overlay. The DM Screen starts campaign brew before Board initialization, but does
 not yet retain and apply the returned rules version.
 
-This explicit-only model is safe but incomplete. Following an ordinary `navigation.js` link loses campaign
-context unless each caller manually copies `hubCampaign`. The lightweight `hub.html` and `campaign.html` pages
-cannot solve that by importing `navigation.js`, `BrewUtil2`, the renderer, filters, or data loaders: their
-dedicated boot graph is an intentional performance and privacy boundary.
+V2-T5 extends that explicit model with an account-bound device selection, a lightweight switcher, and early
+whole-site activation. Ordinary navigation preserves `hubCampaign`; the lightweight `hub.html` and
+`campaign.html` pages render the same selection control without importing `navigation.js`, `BrewUtil2`, the
+renderer, filters, or data loaders. Their dedicated boot graph remains a performance and privacy boundary.
 
 The service worker adds another boundary. Same-origin `/api`, `/auth`, Hub shells, and `js/hub/` are
 `NetworkOnly`; ordinary content pages and their static data may be precached. An active-campaign preference may
@@ -35,7 +35,7 @@ WebSocket, repositories, rules, brew, and projections can leak one campaign into
 viewer-scoped realtime/projection privacy boundary; this ADR requires that state to be torn down during a
 context switch.
 
-This ADR defines the browser contract only. It deliberately does not implement production behavior.
+The production implementation is capability-gated by `campaign.active_context.v1`.
 
 ## Definitions
 
@@ -146,8 +146,9 @@ that campaign.
 
 ## Context precedence
 
-Resolution occurs once during page startup and again only for an explicit switch or a synchronized selection
-change.
+Resolution occurs during page startup and after an explicit switch or synchronized selection change. BFCache
+resume and reconnect boundaries revalidate the live account and active campaign without replacing a still-valid
+installed context.
 
 | Priority | Candidate | Behavior |
 |---:|---|---|
@@ -177,6 +178,9 @@ The canonical URL forms remain:
 
 The implementation must preserve unrelated query parameters and fragments. It must not decorate external URLs,
 downloads, OAuth/auth routes, hash-only links, or local-only resource URLs.
+
+`?local=1` is the explicit local/no-campaign route for Character Sheet and DM Screen. It outranks a stored
+selection and is never decorated with `hubCampaign`.
 
 `navigation.js` remains the navigation owner on ordinary heavy pages. It may decorate campaign-capable links
 from an already-validated effective context, but it must not perform authenticated fetches, activate brew, or
@@ -340,6 +344,8 @@ site/prerelease + personal brew + one temporary campaign bundle -> existing proc
   adapter during teardown.
 - Lightweight Hub pages display rules/brew metadata from API responses only. They do not activate render-time
   brew or rules.
+- Source and edition policy metadata may be exposed to page adapters, but V2-T5 does not enforce it. Enforcement,
+  grandfathering, and mutation-boundary rejection remain ADR 0015 / V2-T6 work.
 
 ## Cache and offline behavior
 
@@ -447,7 +453,8 @@ decoration is linear in rendered navigation links and performs no network reques
 - Cross-device independence avoids surprising a live table on one device when a user researches another
   campaign elsewhere.
 - Full teardown prevents stale viewer-shaped data from surviving an account, membership, role, or campaign
-  boundary.
+  boundary. Character Sheet clears the in-memory campaign character and replaces its document UI at
+  `teardown-projections`; DM Screen removes panels, projections, and campaign context before rules or brew clear.
 
 ## Acceptance tests
 

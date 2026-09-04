@@ -2,6 +2,11 @@ import {BrewUtil2Base} from "./utils-brew-base.js";
 import {BrewDoc} from "./utils-brew-models.js";
 
 export class BrewUtil2_ extends BrewUtil2Base {
+	async pInit () {
+		await super.pInit();
+		await globalThis.HubPageContext?.pInit?.();
+	}
+
 	_STORAGE_KEY_LEGACY = "HOMEBREW_STORAGE";
 	_STORAGE_KEY_LEGACY_META = "HOMEBREW_META_STORAGE";
 

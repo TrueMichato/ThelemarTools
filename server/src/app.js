@@ -32,6 +32,7 @@ import {HubOutboxDispatcher, HubRealtime} from "./realtime.js";
 import {getSafeRequestId, HubMetrics} from "./observability.js";
 import {getClientIpHeader, getRequestClientIp} from "./client-ip.js";
 import {SAFE_ITEM_SUMMARY_FIELDS} from "./hub-actions.js";
+import {ACTIVE_CAMPAIGN_CONTEXT_CAPABILITY} from "./hub-capabilities.js";
 import crypto from "node:crypto";
 
 const {normalizeIP} = rateLimit;
@@ -462,6 +463,7 @@ export async function createHubApp ({
 		appVersion: process.env.npm_package_version || null,
 		capabilities: [
 			AUTH_PROVIDER_REGISTRY_CAPABILITY,
+			ACTIVE_CAMPAIGN_CONTEXT_CAPABILITY,
 			...(config.isCampaignRulesPolicyEnabled ? [CAMPAIGN_RULES_POLICY_CAPABILITY] : []),
 		],
 		authProviders: providerRegistry.getPublicMetadata(),
@@ -630,6 +632,7 @@ export async function createHubApp ({
 				purgeAfter: auth.account.purgeAfter,
 			},
 			csrfToken: getCsrfToken({csrfSecret: config.csrfSecret, sessionId: auth.session.id}),
+			capabilities: [ACTIVE_CAMPAIGN_CONTEXT_CAPABILITY],
 		};
 	});
 

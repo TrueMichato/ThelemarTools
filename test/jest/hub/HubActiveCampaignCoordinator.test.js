@@ -145,6 +145,28 @@ describe("HubActiveCampaignCoordinator", () => {
 			expect(api.countOf("context")).toBe(0);
 		});
 
+		it("uses an explicit local route instead of an account-matching stored selection", async () => {
+			const storage = new FakeStorage();
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+			const seed = makeCoordinator({api, storage});
+			await seed.store.pSelect({accountId: ACCOUNT_A, campaignId: CAMPAIGN_A});
+
+			const {coordinator} = makeCoordinator({
+				api,
+				storage,
+				host: {
+					isExplicitLocal: () => true,
+					getExplicitCampaignId: () => CAMPAIGN_B,
+				},
+			});
+			await coordinator.pResolve();
+
+			expect(coordinator.state).toBe("local");
+			expect(coordinator.activeCampaignId).toBeNull();
+			expect(api.countOf("campaign")).toBe(0);
+			expect(api.countOf("context")).toBe(0);
+		});
+
 		it("blocks a malformed explicit candidate without falling through to the stored selection", async () => {
 			const storage = new FakeStorage();
 			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
@@ -194,6 +216,46 @@ describe("HubActiveCampaignCoordinator", () => {
 			});
 			expect(api.calls).toHaveLength(0);
 			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({campaignId: CAMPAIGN_A});
+		});
+
+		it("fails closed before campaign or context reads when the server omits a required capability", async () => {
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+			const {coordinator} = makeCoordinator({
+				api,
+				host: {
+					requiredCapabilities: ["campaign.active_context.v1"],
+					getExplicitCampaignId: () => CAMPAIGN_A,
+				},
+			});
+
+			await coordinator.pResolve();
+
+			expect(coordinator.state).toBe("blocked");
+			expect(api.countOf("campaign")).toBe(0);
+			expect(api.countOf("context")).toBe(0);
+		});
+
+		it("accepts a server-advertised active-context capability", async () => {
+			const api = makeApi({
+				session: {
+					signedIn: true,
+					account: {id: ACCOUNT_A},
+					capabilities: ["campaign.active_context.v1"],
+				},
+				campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)},
+			});
+			const {coordinator} = makeCoordinator({
+				api,
+				host: {
+					requiredCapabilities: ["campaign.active_context.v1"],
+					getExplicitCampaignId: () => CAMPAIGN_A,
+				},
+			});
+
+			await coordinator.pResolve();
+
+			expect(coordinator.state).toBe("active");
+			expect(api.countOf("context")).toBe(1);
 		});
 
 		it("clears a matching selection when an adopted campaign turns out to be archived", async () => {
@@ -571,7 +633,7 @@ describe("HubActiveCampaignCoordinator", () => {
 				[CAMPAIGN_B]: activeCampaign(CAMPAIGN_B),
 			}});
 			const pending = [];
-			const {coordinator} = makeCoordinator({
+			const {coordinator, store} = makeCoordinator({
 				api,
 				host: {
 					getExplicitCampaignId: () => CAMPAIGN_A,
@@ -591,6 +653,142 @@ describe("HubActiveCampaignCoordinator", () => {
 			expect(coordinator.pendingCampaignId).toBe(CAMPAIGN_B);
 			expect(order).toEqual([]);
 			expect(pending).toEqual([CAMPAIGN_B]);
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({
+				state: "selected",
+				campaignId: CAMPAIGN_B,
+			});
+		});
+
+		it("restores a pinned runtime campaign as the device selection after another campaign was selected", async () => {
+			const order = [];
+			const api = makeApi({campaigns: {
+				[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A),
+				[CAMPAIGN_B]: activeCampaign(CAMPAIGN_B),
+			}});
+			const {coordinator, store} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					isResourcePinned: () => true,
+					pTeardownRealtime: async () => order.push("realtime"),
+					pTeardownRules: async () => order.push("rules"),
+					pTeardownBrew: async () => order.push("brew"),
+				},
+			});
+			await coordinator.pResolve();
+
+			await coordinator.pSwitchTo({campaignId: CAMPAIGN_B});
+			expect(coordinator.state).toBe("switch_pending");
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({campaignId: CAMPAIGN_B});
+
+			await coordinator.pSwitchTo({campaignId: CAMPAIGN_A});
+
+			expect(order).toEqual([]);
+			expect(coordinator.state).toBe("active");
+			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_A);
+			expect(coordinator.pendingCampaignId).toBeNull();
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({
+				state: "selected",
+				campaignId: CAMPAIGN_A,
+			});
+		});
+
+		it("restores a pinned runtime campaign as the device selection after local mode was selected", async () => {
+			const order = [];
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+			const {coordinator, store} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					isResourcePinned: () => true,
+					pTeardownRealtime: async () => order.push("realtime"),
+					pTeardownRules: async () => order.push("rules"),
+					pTeardownBrew: async () => order.push("brew"),
+				},
+			});
+			await coordinator.pResolve();
+
+			await coordinator.pSwitchToLocal();
+			expect(coordinator.state).toBe("switch_pending");
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({state: "cleared"});
+
+			await coordinator.pSwitchTo({campaignId: CAMPAIGN_A});
+
+			expect(order).toEqual([]);
+			expect(coordinator.state).toBe("active");
+			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_A);
+			expect(coordinator.pendingCampaignId).toBeNull();
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({
+				state: "selected",
+				campaignId: CAMPAIGN_A,
+			});
+		});
+
+		it("switches a selection-only host immediately instead of leaving a false pending state", async () => {
+			const api = makeApi({campaigns: {
+				[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A),
+				[CAMPAIGN_B]: activeCampaign(CAMPAIGN_B),
+			}});
+			const {coordinator, store} = makeCoordinator({
+				api,
+				host: {
+					isContextHost: false,
+					getExplicitCampaignId: () => CAMPAIGN_A,
+				},
+			});
+			await coordinator.pResolve();
+
+			await coordinator.pSwitchTo({campaignId: CAMPAIGN_B});
+
+			expect(coordinator.state).toBe("active");
+			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_B);
+			expect(coordinator.pendingCampaignId).toBeNull();
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({campaignId: CAMPAIGN_B});
+		});
+
+		it("tears down a switchable context before entering explicit local mode", async () => {
+			const order = [];
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+			const {coordinator, store} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					pTeardownRealtime: async () => order.push("realtime"),
+					pTeardownProjections: async () => order.push("projections"),
+					pTeardownRules: async () => order.push("rules"),
+					pTeardownBrew: async () => order.push("brew"),
+				},
+			});
+			await coordinator.pResolve();
+
+			await coordinator.pSwitchToLocal();
+
+			expect(order).toEqual(["realtime", "projections", "rules", "brew"]);
+			expect(coordinator.state).toBe("local");
+			expect(coordinator.activeCampaignId).toBeNull();
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({state: "cleared", cause: "selection"});
+		});
+
+		it("records local mode without tearing down a pinned resource", async () => {
+			const order = [];
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+			const {coordinator, store} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					isResourcePinned: () => true,
+					pTeardownRules: async () => order.push("rules"),
+					pTeardownBrew: async () => order.push("brew"),
+				},
+			});
+			await coordinator.pResolve();
+
+			await coordinator.pSwitchToLocal();
+
+			expect(order).toEqual([]);
+			expect(coordinator.state).toBe("switch_pending");
+			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_A);
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({state: "cleared", cause: "selection"});
 		});
 
 		it("refuses an unsafe switch and keeps the current campaign active with no teardown", async () => {
@@ -754,6 +952,58 @@ describe("HubActiveCampaignCoordinator", () => {
 			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_A);
 		});
 
+		it("tears down private state when the active campaign was archived while frozen", async () => {
+			const order = [];
+			const campaign = activeCampaign(CAMPAIGN_A);
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: campaign}});
+			const {coordinator, store} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					pTeardownRealtime: async () => order.push("realtime"),
+					pTeardownProjections: async () => order.push("projections"),
+					pTeardownRules: async () => order.push("rules"),
+					pTeardownBrew: async () => order.push("brew"),
+				},
+			});
+			await coordinator.pResolve();
+			order.length = 0;
+
+			coordinator.suspend();
+			campaign.status = "archived";
+			await coordinator.pResume();
+
+			expect(order).toEqual(["realtime", "projections", "rules", "brew"]);
+			expect(coordinator.activeCampaignId).toBeNull();
+			expect(coordinator.state).toBe("blocked");
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({state: "cleared", cause: "access_loss"});
+		});
+
+		it("closes a role-gated surface but preserves the device selection after demotion", async () => {
+			const order = [];
+			const campaign = activeCampaign(CAMPAIGN_A, "dm");
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: campaign}});
+			const {coordinator, store} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					isCampaignAuthorized: ({campaign: verified}) => ["dm", "co_dm"].includes(verified.role),
+					pTeardownRealtime: async () => order.push("realtime"),
+					pTeardownProjections: async () => order.push("projections"),
+				},
+			});
+			await coordinator.pResolve();
+			order.length = 0;
+
+			campaign.role = "player";
+			await coordinator.pRevalidate({trigger: "access_loss"});
+
+			expect(order).toEqual(["realtime", "projections"]);
+			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_A);
+			expect(coordinator.state).toBe("blocked");
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({state: "selected", campaignId: CAMPAIGN_A});
+		});
+
 		it("tears down fully when the account signed out while frozen", async () => {
 			const order = [];
 			let session = {signedIn: true, account: {id: ACCOUNT_A}};
@@ -862,6 +1112,22 @@ describe("HubActiveCampaignCoordinator", () => {
 	});
 
 	describe("observability and disposal", () => {
+		it("publishes immutable state snapshots for local and remote UI convergence", async () => {
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+			const {coordinator} = makeCoordinator({api, host: {isContextHost: false}});
+			const snapshots = [];
+			const unsubscribe = coordinator.subscribe(snapshot => snapshots.push(snapshot));
+
+			await coordinator.pResolve();
+			await coordinator.pSwitchTo({campaignId: CAMPAIGN_A});
+			unsubscribe();
+			await coordinator.pSwitchToLocal();
+
+			expect(Object.isFrozen(snapshots[0])).toBe(true);
+			expect(snapshots.some(snapshot => snapshot.state === "active" && snapshot.activeCampaignId === CAMPAIGN_A)).toBe(true);
+			expect(snapshots.at(-1).state).toBe("active");
+		});
+
 		it("emits bounded transition labels with no campaign or account identifiers", async () => {
 			const events = [];
 			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
