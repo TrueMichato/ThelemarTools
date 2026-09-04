@@ -17,6 +17,16 @@ async function loadVariant ({name, mutations = {}}) {
 		path.resolve("js/charactersheet/charactersheet.js"),
 		path.join(root, "js", "charactersheet", "charactersheet.js"),
 	);
+	for (const fileName of [
+		"parser.js",
+		"utils.js",
+		"charactersheet/charactersheet-state.js",
+		"charactersheet/charactersheet-class-utils.js",
+	]) {
+		const target = path.join(root, "js", fileName);
+		await fs.mkdir(path.dirname(target), {recursive: true});
+		await fs.copyFile(path.resolve("js", fileName), target);
+	}
 	await fs.symlink(path.resolve("node_modules"), path.join(root, "node_modules"), "dir");
 	await fs.writeFile(path.join(root, "package.json"), JSON.stringify({type: "module"}));
 	for (const [fileName, mutate] of Object.entries(mutations)) {
@@ -465,8 +475,8 @@ const MUTANTS = [
 		probe: probeStoreFenceOwners,
 		mutations: {
 			"server/src/postgres-hub-store.js": source => source.replace(
-				"if (campaignId && data.carry) {",
-				"if (false) {",
+				"assertCampaignRuleWriteFence({",
+				"void ({",
 			),
 		},
 	},
@@ -474,9 +484,10 @@ const MUTANTS = [
 		name: "postgres-patch-policy-fence-disabled",
 		probe: probeStoreFenceOwners,
 		mutations: {
-			"server/src/postgres-hub-store.js": source => source.replace(
-				"if (character.campaignId && data.carry) {",
-				"if (false) {",
+			"server/src/postgres-hub-store.js": source => replaceLast(
+				source,
+				"assertCampaignRuleWriteFence({",
+				"void ({",
 			),
 		},
 	},
@@ -506,7 +517,7 @@ const MUTANTS = [
 		mutations: {
 			"server/src/memory-hub-store.js": source => source.replace(
 				"const destinationData = prepareCampaignTransitionData({",
-				"const destinationData = source.data; /* prepareCampaignTransitionData disabled */\n\t\t/*",
+				"const destinationData = source.data; /* transition disabled */\n\t\t/*",
 			).replace(
 				"			brewBundleHash: destinationBrewBundle?.contentHash ?? null,\n\t\t});",
 				"			brewBundleHash: destinationBrewBundle?.contentHash ?? null,\n\t\t}); */",
@@ -577,7 +588,10 @@ for (const mutant of MUTANTS) {
 		let killed = false;
 		try {
 			await mutant.probe(variant);
-		} catch {
+		} catch (error) {
+			if (error?.code === "ERR_MODULE_NOT_FOUND" || ["SyntaxError", "ReferenceError"].includes(error?.name)) {
+				throw new Error(`${mutant.name} probe failed before its assertion.`, {cause: error});
+			}
 			killed = true;
 		}
 		if (!killed) throw new Error(`${mutant.name} survived.`);
@@ -608,7 +622,10 @@ async function runAuthorityMutant ({name, mutate, probe}) {
 		let killed = false;
 		try {
 			await probe({authority, rules});
-		} catch {
+		} catch (error) {
+			if (error?.code === "ERR_MODULE_NOT_FOUND" || ["SyntaxError", "ReferenceError"].includes(error?.name)) {
+				throw new Error(`${name} authority probe failed before its assertion.`, {cause: error});
+			}
 			killed = true;
 		}
 		if (!killed) throw new Error(`${name} survived.`);
