@@ -56,6 +56,11 @@
       "iteration": 8,
       "verdict": "PASS",
       "summary": "Mutation probes preserve and reject infrastructure errors, the synthetic diagnostic fails nonzero, and exact local, remote, PR, CI, and clean-tree handoff evidence passes."
+    },
+    {
+      "iteration": 7,
+      "verdict": "FAIL",
+      "summary": "The PR body misstates the identical data-gate count and overstates a Chromium run that completed with two flaky tests."
     }
   ]
 }
