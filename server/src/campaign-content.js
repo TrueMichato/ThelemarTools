@@ -160,19 +160,22 @@ export function normalizeCampaignRules (rules) {
 export function getPublicCampaignRulesVersion (rulesVersion, {isIncludePolicy = false} = {}) {
 	if (!rulesVersion) return null;
 	try {
-		const policy = getCampaignRulesPolicy({
-			schemaVersion: rulesVersion.schemaVersion,
-			rules: rulesVersion.rules,
-		});
-		return {
+		const publicRulesVersion = {
 			...rulesVersion,
 			...(rulesVersion.createdAt == null
 				? {}
 				: {createdAt: new Date(rulesVersion.createdAt).toISOString()}),
+		};
+		const policy = getCampaignRulesPolicy({
+			schemaVersion: publicRulesVersion.schemaVersion,
+			rules: publicRulesVersion.rules,
+		});
+		return {
+			...publicRulesVersion,
 			catalogVersion: policy.catalogVersion,
 			rules: projectCampaignSettings({
-				schemaVersion: rulesVersion.schemaVersion,
-				rules: rulesVersion.rules,
+				schemaVersion: publicRulesVersion.schemaVersion,
+				rules: publicRulesVersion.rules,
 			}),
 			...(isIncludePolicy ? {policy} : {}),
 			policySummary: getCampaignRulesPolicySummary(policy),
@@ -180,7 +183,7 @@ export function getPublicCampaignRulesVersion (rulesVersion, {isIncludePolicy = 
 				capabilities: [CAMPAIGN_RULES_POLICY_CAPABILITY],
 				personalSettings: {},
 				protocolVersion: CAMPAIGN_RULE_PROTOCOL_VERSION,
-				rulesVersion,
+				rulesVersion: publicRulesVersion,
 				surface: "characterOpen",
 			}),
 		};
