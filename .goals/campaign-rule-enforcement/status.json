@@ -11,6 +11,11 @@
       "iteration": 1,
       "verdict": "FAIL",
       "summary": "Bypassable server fence, stale-context resurrection, overclaimed surfaces, missing evidence, failing gates, and no draft PR."
+    },
+    {
+      "iteration": 2,
+      "verdict": "FAIL",
+      "summary": "PostgreSQL projections fail closed incorrectly, reconnect recovery and path-specific evidence are missing, full gates fail, and no draft PR exists."
     }
   ]
 }
