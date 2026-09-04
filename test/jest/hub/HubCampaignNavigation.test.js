@@ -2,6 +2,8 @@ import {HubActiveCampaignSwitcher, getCampaignAwareNavUrl} from "../../../js/hub
 import {getCampaignSurfaceDefaultUrl} from "../../../js/hub/hub-surface-defaults.js";
 
 const CAMPAIGN = "33333333-3333-4333-8333-333333333333";
+const OTHER_CAMPAIGN = "44444444-4444-4444-8444-444444444444";
+const ACCOUNT = "11111111-1111-4111-8111-111111111111";
 const BASE = "https://tools.example/spells.html?foo=bar#hash";
 
 describe("campaign-aware navigation", () => {
@@ -63,6 +65,30 @@ describe("campaign-aware navigation", () => {
 		expect(switcher._campaigns).toEqual([
 			{id: "campaign-current", name: "Current Account", status: "active", role: "player"},
 		]);
+	});
+
+	it.each([
+		["another campaign", {state: "selected", campaignId: OTHER_CAMPAIGN}],
+		["local mode", {state: "cleared", campaignId: null}],
+	])("reflects a pinned runtime campaign after it is reselected from %s", (_label, initialSelection) => {
+		let storedSelection = {accountId: ACCOUNT, ...initialSelection};
+		const coordinator = {
+			state: "switch_pending",
+			accountId: ACCOUNT,
+			activeCampaignId: CAMPAIGN,
+			pendingCampaignId: initialSelection.campaignId,
+			get storedSelection () { return storedSelection; },
+		};
+		const switcher = new HubActiveCampaignSwitcher({
+			coordinator,
+			pListCampaigns: async () => [],
+		});
+		expect(switcher._getSelectedValue()).toBe(initialSelection.campaignId || "__local__");
+
+		storedSelection = {accountId: ACCOUNT, state: "selected", campaignId: CAMPAIGN};
+		coordinator.state = "active";
+		coordinator.pendingCampaignId = null;
+		expect(switcher._getSelectedValue()).toBe(CAMPAIGN);
 	});
 });
 

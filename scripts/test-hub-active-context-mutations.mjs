@@ -43,7 +43,7 @@ function getContextFactory () {
 	});
 }
 
-async function loadVariant ({name, mutate = source => source}) {
+async function loadCoordinatorVariant ({name, mutate = source => source}) {
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), `hub-context-mutation-${name}-`));
 	const hubDir = path.join(root, "hub");
 	await fs.cp(path.resolve("js/hub"), hubDir, {recursive: true});
@@ -51,7 +51,7 @@ async function loadVariant ({name, mutate = source => source}) {
 	const coordinatorPath = path.join(hubDir, "hub-active-campaign-coordinator.js");
 	const source = await fs.readFile(coordinatorPath, "utf8");
 	const mutated = mutate(source);
-	if (mutated === source && name !== "baseline") throw new Error(`${name} mutation did not match source.`);
+	if (mutated === source && !name.startsWith("baseline")) throw new Error(`${name} mutation did not match source.`);
 	await fs.writeFile(coordinatorPath, mutated);
 	const [{HubActiveCampaignCoordinator, TEARDOWN_MARKERS}, {HubActiveCampaignStore}] = await Promise.all([
 		import(`${pathToFileURL(coordinatorPath).href}?variant=${encodeURIComponent(name)}`),
@@ -61,6 +61,23 @@ async function loadVariant ({name, mutate = source => source}) {
 		HubActiveCampaignCoordinator,
 		HubActiveCampaignStore,
 		TEARDOWN_MARKERS,
+		cleanup: () => fs.rm(root, {recursive: true, force: true}),
+	};
+}
+
+async function loadModuleVariant ({name, sourcePath, mutate = source => source}) {
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), `hub-context-mutation-${name}-`));
+	await fs.writeFile(path.join(root, "package.json"), JSON.stringify({type: "module"}));
+	const sourcePathAbsolute = path.resolve(sourcePath);
+	const moduleDir = path.join(root, path.basename(path.dirname(sourcePathAbsolute)));
+	await fs.cp(path.dirname(sourcePathAbsolute), moduleDir, {recursive: true});
+	const modulePath = path.join(moduleDir, path.basename(sourcePathAbsolute));
+	const source = await fs.readFile(modulePath, "utf8");
+	const mutated = mutate(source);
+	if (mutated === source && !name.startsWith("baseline")) throw new Error(`${name} mutation did not match source.`);
+	await fs.writeFile(modulePath, mutated);
+	return {
+		module: await import(`${pathToFileURL(modulePath).href}?variant=${encodeURIComponent(name)}`),
 		cleanup: () => fs.rm(root, {recursive: true, force: true}),
 	};
 }
@@ -179,7 +196,90 @@ async function probeLocalFallback (Variant) {
 	coordinator.dispose();
 }
 
-const mutations = [
+async function probePinnedReselection (Variant) {
+	const api = getApi({campaigns: {
+		[CAMPAIGN_A]: {id: CAMPAIGN_A, status: "active", role: "dm"},
+		[CAMPAIGN_B]: {id: CAMPAIGN_B, status: "active", role: "dm"},
+	}});
+	const {coordinator, store} = getCoordinator({
+		Variant,
+		api,
+		host: {
+			getExplicitCampaignId: () => CAMPAIGN_A,
+			isResourcePinned: () => true,
+		},
+	});
+	await coordinator.pResolve();
+
+	await coordinator.pSwitchTo({campaignId: CAMPAIGN_B});
+	await coordinator.pSwitchTo({campaignId: CAMPAIGN_A});
+	assert.equal(coordinator.state, "active");
+	assert.equal(coordinator.pendingCampaignId, null);
+	assert.equal(store.readForAccount(ACCOUNT_A)?.campaignId, CAMPAIGN_A);
+
+	await coordinator.pSwitchToLocal();
+	await coordinator.pSwitchTo({campaignId: CAMPAIGN_A});
+	assert.equal(coordinator.state, "active");
+	assert.equal(coordinator.pendingCampaignId, null);
+	assert.equal(store.readForAccount(ACCOUNT_A)?.campaignId, CAMPAIGN_A);
+	coordinator.dispose();
+}
+
+async function probeCharacterSaveFence (Variant) {
+	const sheet = {_currentCharacterId: "private-character", _characterLoadGeneration: 1};
+	const saveFence = Variant.getCharacterSaveFence(sheet);
+	sheet._characterLoadGeneration++;
+	assert.equal(
+		Variant.isCharacterSaveFenceCurrent({sheet, saveFence}),
+		false,
+		"a save fence survived character teardown",
+	);
+}
+
+async function probeDmScreenSaveFence (Variant) {
+	let rejectSave;
+	const pendingSave = new Promise((_resolve, reject) => { rejectSave = reject; });
+	let promptCount = 0;
+	const originals = {
+		InputUiUtil: globalThis.InputUiUtil,
+		DataUtil: globalThis.DataUtil,
+		JqueryUtil: globalThis.JqueryUtil,
+		VeCt: globalThis.VeCt,
+	};
+	globalThis.InputUiUtil = {pGetUserBoolean: async () => { promptCount++; return null; }};
+	globalThis.DataUtil = {userDownload: () => {}};
+	globalThis.JqueryUtil = {doToast: () => {}};
+	globalThis.VeCt = {STR_SEE_CONSOLE: "See console."};
+	const board = {
+		_workspaceRepository: {
+			pSet: async () => pendingSave,
+			pResolveConflict: async () => null,
+		},
+		getSaveableState: () => ({private: true}),
+		_saveGeneration: 1,
+		_savedGeneration: 0,
+		_isPersistenceFenced: false,
+	};
+	try {
+		const operation = Variant.pDoDmScreenWorkspaceSave({board, saveGeneration: 1});
+		board._isPersistenceFenced = true;
+		const conflict = Object.assign(new Error("conflict"), {
+			code: "WORKSPACE_CONFLICT",
+			recovery: {local: {private: true}},
+		});
+		rejectSave(conflict);
+		await operation;
+		assert.equal(promptCount, 0, "a fenced workspace save opened a conflict prompt");
+		assert.equal(board._savedGeneration, 0, "a fenced workspace save mutated saved state");
+	} finally {
+		globalThis.InputUiUtil = originals.InputUiUtil;
+		globalThis.DataUtil = originals.DataUtil;
+		globalThis.JqueryUtil = originals.JqueryUtil;
+		globalThis.VeCt = originals.VeCt;
+	}
+}
+
+const coordinatorMutations = [
 	{
 		name: "generation-fence",
 		probe: probeGeneration,
@@ -209,18 +309,47 @@ const mutations = [
 		probe: probeLocalFallback,
 		mutate: source => source.replace("if (!candidate) {", "if (candidate) {"),
 	},
+	{
+		name: "pinned-reselection",
+		probe: probePinnedReselection,
+		mutate: source => source.replace(
+			"if (isRuntimeCampaignActive && isAlreadySelected && this._state === \"active\" && this._pendingCampaignId == null) {",
+			"if (isRuntimeCampaignActive) {",
+		),
+	},
 ];
 
-const baseline = await loadVariant({name: "baseline"});
+const moduleMutations = [
+	{
+		name: "character-save-fence",
+		sourcePath: "js/charactersheet/charactersheet-persistence-fence.js",
+		probe: probeCharacterSaveFence,
+		mutate: source => source.replace(
+			"return sheet._currentCharacterId === saveFence.characterId\n\t\t&& sheet._characterLoadGeneration === saveFence.loadGeneration;",
+			"return true;",
+		),
+	},
+	{
+		name: "dmscreen-save-fence",
+		sourcePath: "js/dmscreen/dmscreen-workspace-persistence.js",
+		probe: probeDmScreenSaveFence,
+		mutate: source => source.replace(
+			"return !board._isPersistenceFenced && saveGeneration === board._saveGeneration;",
+			"return true;",
+		),
+	},
+];
+
+const baseline = await loadCoordinatorVariant({name: "baseline"});
 try {
-	for (const {probe} of mutations) await probe(baseline);
+	for (const {probe} of coordinatorMutations) await probe(baseline);
 } finally {
 	await baseline.cleanup();
 }
 
 const survivors = [];
-for (const mutation of mutations) {
-	const variant = await loadVariant(mutation);
+for (const mutation of coordinatorMutations) {
+	const variant = await loadCoordinatorVariant(mutation);
 	try {
 		await mutation.probe(variant);
 		survivors.push(mutation.name);
@@ -232,5 +361,29 @@ for (const mutation of mutations) {
 	}
 }
 
+for (const mutation of moduleMutations) {
+	const baselineModule = await loadModuleVariant({
+		name: `baseline-${mutation.name}`,
+		sourcePath: mutation.sourcePath,
+	});
+	try {
+		await mutation.probe(baselineModule.module);
+	} finally {
+		await baselineModule.cleanup();
+	}
+
+	const variant = await loadModuleVariant(mutation);
+	try {
+		await mutation.probe(variant.module);
+		survivors.push(mutation.name);
+		process.stderr.write(`SURVIVED ${mutation.name}\n`);
+	} catch {
+		process.stdout.write(`KILLED ${mutation.name}\n`);
+	} finally {
+		await variant.cleanup();
+	}
+}
+
 assert.deepEqual(survivors, [], `Mutation survivors: ${survivors.join(", ")}`);
-process.stdout.write(`${mutations.length}/${mutations.length} high-risk active-context mutants killed.\n`);
+const mutationCount = coordinatorMutations.length + moduleMutations.length;
+process.stdout.write(`${mutationCount}/${mutationCount} high-risk active-context mutants killed.\n`);

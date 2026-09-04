@@ -194,9 +194,10 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   account isolation, local fallback, same-profile convergence, independent browser profiles, surface defaults,
   temporary-only campaign brew, Character Sheet/DM Screen privacy teardown, BFCache, reconnect, revoke/archive,
   responsive switcher states, and production service-worker/static packaging.
-- `npm run test:hub:mutations` copies the lightweight Hub module graph into isolated temporary directories and
-  kills four deliberate mutants: stale-generation acceptance, teardown reordering, cross-account record
-  retention, and inverted local fallback. It never rewrites the working tree.
+- `npm run test:hub:mutations` copies the relevant lightweight modules into isolated temporary directories and
+  kills seven deliberate mutants: stale-generation acceptance, teardown reordering, cross-account record
+  retention, inverted local fallback, pinned-campaign reselection loss, Character Sheet save-fence removal,
+  and DM workspace save-fence removal. It never rewrites the working tree.
 - `test/e2e/hub/active-campaign-context.spec.ts` runs against the disposable exact-image HTTPS/PostgreSQL stack,
   including real `localStorage`, `BroadcastChannel`, Character Sheet, DM Screen, membership, archive, and BFCache
   behavior.

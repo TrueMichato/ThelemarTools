@@ -105,6 +105,10 @@ A **resource-pinned** host (an open campaign character, an open DM workspace) ad
 selection but stays on its own campaign in `switch_pending`. It does not tear down or activate.
 Pinning is decided from coordinator creation, not from state that only exists after heavy
 initialisation, so a remote selection arriving mid-startup cannot abort or rebind the page.
+If the user reselects the campaign already backing the pinned resource, the coordinator verifies
+and restores that campaign as the durable device default, clears the pending selection, and returns
+to `active` without tearing down or reloading the open resource. This applies after either another
+campaign or explicit local mode was selected.
 
 A host may also refuse *activation* while still accepting the selection, via
 `shouldActivateContext`. The Character Sheet uses this: its repository, realtime stream, roll log,
@@ -124,6 +128,12 @@ on **every** character load and reset. Calling `clearCampaignSettingsOverlay()` 
 **not** a teardown — the next character load silently reinstalls the campaign rules. The
 `teardown-rules` owner must also null `_hubContext`. This is pinned by
 `test/jest/charactersheet/CharacterSheetHubTeardown.test.js`.
+
+Private persistence is fenced independently from realtime teardown. Character saves capture both
+the character identity and load generation before their first await; DM workspace saves capture the
+Board save generation. Conflict prompts, recovery downloads, retries, server-document adoption,
+panel hydration, save indicators, and other post-await effects recheck those fences. Access loss
+therefore wins even when a conflict response or panel loader was already in flight.
 
 ## Invalidation
 
@@ -220,10 +230,11 @@ two-script boot graph. The coordinator graph's combined transfer size is asserte
 | `HubCampaignContext.test.js` | Zero-request injected activation, idempotent disposal |
 | `HubCampaignNavigation.test.js` | URL decoration, explicit local routes, and surface defaults |
 | `HubContentBootstrap.test.js` / `HubSiteContext.test.js` | Pre-data activation, temporary-only brew, capability failure |
-| `CharacterSheetHubTeardown.test.js` / `DmScreenCampaignPrivacy.test.js` | Ordered rules cleanup and private-state concealment |
+| `CharacterSheetHubTeardown.test.js` / `CharacterSheetPersistenceBackend.test.js` | Ordered rules cleanup and in-flight character-save conflict fencing |
+| `DmScreenCampaignPrivacy.test.js` / `DmScreenWorkspacePersistence.test.js` | Private Board concealment and conflict/panel-hydration fencing |
 | `HubActiveCampaignJourney.test.js` | Real BFF integration: reload, device independence, request counts, logout ordering, pinned convergence |
-| `test/e2e/hub/active-campaign-context.spec.ts` | Production stack: switcher, native storage/channel, defaults/local routes, pinning, BFCache, revoke/archive |
-| `npm run test:hub:mutations` | Kills generation, teardown-order, account-scope, and local-fallback mutants |
+| `test/e2e/hub/active-campaign-context.spec.ts` | Production stack: switcher/reselection, native storage/channel, defaults/local routes, pinning, in-flight conflict/access-loss order, BFCache, revoke/archive |
+| `npm run test:hub:mutations` | Kills generation, teardown-order, account-scope, local-fallback, pinned-reselection, Character Sheet save-fence, and DM workspace save-fence mutants |
 
 ## Deliberate boundary
 

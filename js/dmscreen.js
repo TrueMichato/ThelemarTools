@@ -51,6 +51,12 @@ import {
 	concealDmScreenCampaignWorkspace,
 	pHandleDmScreenCampaignAccessLoss,
 } from "./dmscreen/dmscreen-campaign-privacy.js";
+import {
+	hasPendingDmScreenSave,
+	markDmScreenSavePending,
+	pApplyDmScreenLoadedState,
+	pDoDmScreenWorkspaceSave,
+} from "./dmscreen/dmscreen-workspace-persistence.js";
 import {HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT} from "./hub/hub-capabilities.js";
 import {getCampaignSurfaceDefaultUrl} from "./hub/hub-surface-defaults.js";
 
@@ -93,33 +99,7 @@ class Board {
 		});
 		this._pDoSaveStateDebounced = MiscUtil.debounce(async () => {
 			const saveGeneration = this._saveGeneration;
-			try {
-				await this._workspaceRepository.pSet(this.getSaveableState());
-				this._savedGeneration = Math.max(this._savedGeneration, saveGeneration);
-			} catch (error) {
-				if (error?.code === "WORKSPACE_CONFLICT" && this._workspaceRepository.pResolveConflict) {
-					const choice = await InputUiUtil.pGetUserBoolean({
-						title: "DM Workspace Changed on Another Device",
-						htmlDescription: "Your local workspace overlaps a newer server version. Use your local workspace, or load the server workspace?",
-						textYes: "Use Local",
-						textNo: "Use Server",
-					});
-					if (choice == null) {
-						DataUtil.userDownload("dm-workspace-conflict-local", error.recovery.local, {fileType: "dm-screen"});
-						return;
-					}
-					const resolved = await this._workspaceRepository.pResolveConflict({choice: choice ? "local" : "server"});
-					if (!choice && resolved) await this.pDoLoadStateFrom(resolved);
-					this._savedGeneration = Math.max(this._savedGeneration, saveGeneration);
-					return;
-				}
-				// eslint-disable-next-line no-console
-				console.error("Failed to save DM screen:", error);
-				JqueryUtil.doToast({
-					content: `Failed to save DM screen. ${VeCt.STR_SEE_CONSOLE}`,
-					type: "danger",
-				});
-			}
+			await pDoDmScreenWorkspaceSave({board: this, saveGeneration});
 		}, VeCt.DUR_DEBOUNCE_SAVE);
 	}
 
@@ -670,14 +650,12 @@ class Board {
 	}
 
 	doSaveStateDebounced () {
-		if (this._isPersistenceFenced) return;
-		this._saveGeneration++;
+		if (!markDmScreenSavePending({board: this})) return;
 		this._pDoSaveStateDebounced();
 	}
 
 	hasPendingDebouncedSave () {
-		if (this._isPersistenceFenced) return false;
-		return this._savedGeneration < this._saveGeneration;
+		return hasPendingDmScreenSave({board: this});
 	}
 
 	fenceHubPrivatePersistence () {
@@ -780,57 +758,15 @@ class Board {
 		};
 	}
 
-	async pDoLoadStateFrom (save, {isOptionallyPromptCombine = false, isCombine = false} = {}) {
+	async pDoLoadStateFrom (save, {isOptionallyPromptCombine = false, isCombine = false, fnCanApply = null} = {}) {
 		const {state, isCombined} = await this._pDoLoadStateFrom_pGetLoadableState({save, isOptionallyPromptCombine, isCombine});
 		if (state == null) return;
-
-		const {width, height} = this._pDoLoadStateFrom_getStretchedWidthHeight({state, isCombined});
-
-		this.doReset({width, height});
-
-		if (this.cbConfirmTabClose) this.cbConfirmTabClose.prop("checked", !!state.ctc);
-		if ((state.fs !== !!this.isFullscreen)) this.doToggleFullscreen({val: !!state.fs});
-		if ((state.lk !== !!this.isLocked)) this.doToggleLocked({val: !!state.lk});
-
-		this._idSaveSlotActive = state.sla ?? "1";
-		this._saveSlotStates = state.sls ?? {[this._idSaveSlotActive]: {}};
-
-		const saveSlotStateActive = state.sls?.[state.sla] || {};
-
-		// re-exile
-		const toReExile = (saveSlotStateActive.ex || [])
-			.filter(Boolean)
-			.reverse();
-		for (const saved of toReExile) {
-			const panel = await Panel.fromSavedState(this, saved);
-			if (!panel) continue;
-
-			this.panels[panel.id] = panel;
-			this.fireBoardEvent({type: "panelIdSetActive", payload: {type: panel.type}});
-			panel.exile();
-		}
-
-		// reload
-		// fill content first; empties can fill any remaining space
-		const toReload = (saveSlotStateActive.ps || [])
-			.filter(Boolean)
-			// Drop empty panels
-			.filter(saved => saved.t !== PANEL_TYP_EMPTY)
-			// Drop panels which would be outside the visible area
-			.filter(saved => (saved.x < this.width) && (saved.y < this.height));
-		for (const saved of toReload) {
-			const panel = await Panel.fromSavedState(this, saved);
-			if (!panel) continue;
-
-			this.panels[panel.id] = panel;
-			this.fireBoardEvent({type: "panelIdSetActive", payload: {type: panel.type}});
-		}
-
-		this.doCheckFillSpaces();
-
-		this.sideMenu.setSaveSlotInfo({
-			idSaveSlotActive: this._idSaveSlotActive,
-			saveSlotStates: this._saveSlotStates,
+		await pApplyDmScreenLoadedState({
+			board: this,
+			state,
+			isCombined,
+			fnCanApply: fnCanApply || (() => true),
+			pFnLoadPanelFromSavedState: ({board, saved, fnCanApply}) => Panel.fromSavedState(board, saved, {fnCanApply}),
 		});
 	}
 
@@ -1146,17 +1082,27 @@ class Panel {
 		this.pnlTabs = null;
 	}
 
-	static async fromSavedState (board, saved) {
+	static async fromSavedState (board, saved, {fnCanApply = null} = {}) {
+		fnCanApply ||= () => true;
+		if (!fnCanApply()) return null;
+
 		const existing = board.getPanels(saved.x, saved.y, saved.w, saved.h);
 		if (saved.t === PANEL_TYP_EMPTY && existing.length) return null; // cull empties
 		else if (existing.length) existing.forEach(p => p.destroy()); // prefer more recent panels
 		const panel = new Panel(board, saved.x, saved.y, saved.w, saved.h);
 		panel.render();
 
+		const handleStalePanel = () => {
+			if (fnCanApply()) return false;
+			panel.destroy();
+			return true;
+		};
+
 		const pLoadState = async (saved, skipSetTab, ixTab) => {
 			// TODO(Future) refactor other panels to use this
 			const isViaPcm = await PanelContentManagerFactory.pFromSavedState({board, saved, ixTab, panel});
-			if (isViaPcm) return;
+			if (handleStalePanel()) return null;
+			if (isViaPcm) return panel;
 
 			const handleTabRenamed = (panel) => {
 				if (saved.r != null) panel.tabDatas[ixTab].tabRenamed = true;
@@ -1171,6 +1117,7 @@ class Panel {
 					const hash = saved.c.u;
 					const drawnIxs = Array.isArray(saved.c.d) ? saved.c.d : undefined;
 					await panel.doPopulate_Stats(page, source, hash, skipSetTab, saved.r, drawnIxs);
+					if (handleStalePanel()) return null;
 					handleTabRenamed(panel);
 					return panel;
 				}
@@ -1180,6 +1127,7 @@ class Panel {
 					const hash = saved.c.u;
 					const cr = saved.c.cr;
 					await panel.doPopulate_StatsScaledCr(page, source, hash, cr, skipSetTab, saved.r);
+					if (handleStalePanel()) return null;
 					handleTabRenamed(panel);
 					return panel;
 				}
@@ -1189,6 +1137,7 @@ class Panel {
 					const hash = saved.c.u;
 					const summonSpellLevel = saved.c.ssl;
 					await panel.doPopulate_StatsScaledSpellSummonLevel(page, source, hash, summonSpellLevel, skipSetTab, saved.r);
+					if (handleStalePanel()) return null;
 					handleTabRenamed(panel);
 					return panel;
 				}
@@ -1198,6 +1147,7 @@ class Panel {
 					const hash = saved.c.u;
 					const summonClassLevel = saved.c.csl;
 					await panel.doPopulate_StatsScaledClassSummonLevel(page, source, hash, summonClassLevel, skipSetTab, saved.r);
+					if (handleStalePanel()) return null;
 					handleTabRenamed(panel);
 					return panel;
 				}
@@ -1206,6 +1156,7 @@ class Panel {
 					const chapter = saved.c.c;
 					const header = saved.c.h;
 					await panel.doPopulate_Rules(book, chapter, header, skipSetTab, saved.r);
+					if (handleStalePanel()) return null;
 					handleTabRenamed(panel);
 					return panel;
 				}
@@ -1213,6 +1164,7 @@ class Panel {
 					const adventure = saved.c.a;
 					const chapter = saved.c.c;
 					await panel.doPopulate_Adventures(adventure, chapter, skipSetTab, saved.r);
+					if (handleStalePanel()) return null;
 					handleTabRenamed(panel);
 					return panel;
 				}
@@ -1220,6 +1172,7 @@ class Panel {
 					const book = saved.c.b;
 					const chapter = saved.c.c;
 					await panel.doPopulate_Books(book, chapter, skipSetTab, saved.r);
+					if (handleStalePanel()) return null;
 					handleTabRenamed(panel);
 					return panel;
 				}
@@ -1269,13 +1222,15 @@ class Panel {
 
 			for (let ix = 0; ix < saved.a.length; ++ix) {
 				const tab = saved.a[ix];
-				await pLoadState(tab, true, ix);
+				if (!await pLoadState(tab, true, ix)) return null;
 			}
+			if (handleStalePanel()) return null;
 			panel.setActiveTab(saved.b);
 		} else {
-			await pLoadState(saved);
+			if (!await pLoadState(saved)) return null;
 		}
 
+		if (handleStalePanel()) return null;
 		return panel;
 	}
 

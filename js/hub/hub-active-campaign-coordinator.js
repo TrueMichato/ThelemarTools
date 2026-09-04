@@ -547,7 +547,13 @@ export class HubActiveCampaignCoordinator {
 			this._setState("blocked", {trigger, result: "failure", errorCode: "CAMPAIGN_ID_INVALID"});
 			return this._state;
 		}
-		if (campaignId === this._activeCampaignId) return this._state;
+		const stored = this.storedSelection;
+		const isRuntimeCampaignActive = campaignId === this._activeCampaignId;
+		const isAlreadySelected = stored?.state === ACTIVE_CAMPAIGN_STATE_SELECTED
+			&& stored.campaignId === campaignId;
+		if (isRuntimeCampaignActive && isAlreadySelected && this._state === "active" && this._pendingCampaignId == null) {
+			return this._state;
+		}
 
 		this._pendingCampaignId = campaignId;
 		const isResourcePinned = this._host.isResourcePinned?.() === true;
@@ -578,6 +584,15 @@ export class HubActiveCampaignCoordinator {
 			return this._pHandleFailure({error, trigger, startedAt, campaignId});
 		}
 		if (!this._isCurrent(generation)) return this._state;
+
+		if (isRuntimeCampaignActive) {
+			if (isPersistSelection) await this._pPersistSelection({campaignId, generation});
+			if (!this._isCurrent(generation)) return this._state;
+			this._pendingCampaignId = null;
+			this._host.onSelectionVerified?.({campaignId, campaign: verified.campaign});
+			this._setState("active", {trigger, startedAt});
+			return this._state;
+		}
 
 		if (isResourcePinned) {
 			// Adopt the device default without disturbing the open resource or its context.
@@ -704,7 +719,11 @@ export class HubActiveCampaignCoordinator {
 			this._setState("local", {trigger: "broadcast_channel"});
 			return;
 		}
-		if (winner.campaignId === this._activeCampaignId) return;
+		if (winner.campaignId === this._activeCampaignId) {
+			this._pendingCampaignId = null;
+			this._setState("active", {trigger: "broadcast_channel"});
+			return;
+		}
 		await this.pSwitchTo({campaignId: winner.campaignId, trigger: "broadcast_channel", isPersistSelection: false});
 	}
 

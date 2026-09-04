@@ -1324,6 +1324,11 @@ export class HubCampaignPage {
 		await this.waitForClearedSelection();
 	}
 
+	async selectCampaignContext (campaignId: string): Promise<void> {
+		await this.page.getByRole("combobox", {name: "Active campaign context"}).selectOption(campaignId);
+		await this.waitForSelectedCampaign(campaignId);
+	}
+
 	async gotoOrdinaryPageWithCampaignContext ({path, campaignId}: {path: string; campaignId: string}): Promise<void> {
 		await this.page.goto(path);
 		await this.page.waitForFunction(
@@ -1361,6 +1366,15 @@ export class HubCampaignPage {
 		expect(await this.page.evaluate(() => !!(window as any).DM_SCREEN?._workspaceRepository?.campaignId)).toBe(false);
 	}
 
+	async revalidatePrivateSurfaceCampaignAccess (): Promise<void> {
+		await this.page.evaluate(async () => {
+			const coordinator = (window as any).charSheet?._hubActiveCampaign
+				|| (window as any).DM_SCREEN_ACTIVE_CAMPAIGN;
+			if (!coordinator) throw new Error("Private surface campaign coordinator is unavailable.");
+			await coordinator.pRevalidate({trigger: "access_loss"});
+		});
+	}
+
 	async expectPrivateCharacterConcealed (): Promise<void> {
 		await expect.poll(
 			() => this.page.evaluate(() => ({
@@ -1377,6 +1391,157 @@ export class HubCampaignPage {
 			() => this.page.evaluate(() => (window as any).charSheet?._state?._data?.name),
 			{timeout: 30_000},
 		).toBe(name);
+	}
+
+	async startDeferredCharacterConflictSave (): Promise<void> {
+		await this.page.evaluate(() => {
+			const sheet = (window as any).charSheet;
+			const repository = sheet?._characterRepository;
+			if (!sheet || !repository) throw new Error("Character Sheet repository is unavailable.");
+
+			let release;
+			const gate = new Promise<void>(resolve => release = resolve);
+			const privateDocument = sheet._state.toJson();
+			const originalUpsert = repository.pUpsert;
+			const originalResolveConflict = repository.pResolveConflict;
+			const originalPrompt = (window as any).InputUiUtil.pGetUserBoolean;
+			const operation = {
+				started: false,
+				promptCount: 0,
+				resolveCount: 0,
+				release,
+				promise: null as Promise<unknown> | null,
+			};
+			(window as any).__hubDeferredCharacterSave = operation;
+
+			repository.pUpsert = async () => {
+				operation.started = true;
+				await gate;
+				throw Object.assign(new Error("Character changed on another device."), {
+					code: "CHARACTER_CONFLICT",
+					recovery: {local: privateDocument, server: privateDocument},
+				});
+			};
+			repository.pResolveConflict = async () => {
+				operation.resolveCount++;
+				return privateDocument;
+			};
+			(window as any).InputUiUtil.pGetUserBoolean = async () => {
+				operation.promptCount++;
+				return false;
+			};
+
+			operation.promise = sheet._saveCurrentCharacter()
+				.finally(() => {
+					repository.pUpsert = originalUpsert;
+					repository.pResolveConflict = originalResolveConflict;
+					(window as any).InputUiUtil.pGetUserBoolean = originalPrompt;
+				});
+		});
+		await this.page.waitForFunction(() => (window as any).__hubDeferredCharacterSave?.started, undefined, {timeout: 30_000});
+	}
+
+	async releaseDeferredCharacterConflictSave (): Promise<{promptCount: number; resolveCount: number; name: string; characterId: string | null}> {
+		return this.page.evaluate(async () => {
+			const operation = (window as any).__hubDeferredCharacterSave;
+			if (!operation?.promise || !operation.release) throw new Error("Deferred Character Sheet save is unavailable.");
+			operation.release();
+			await operation.promise;
+			return {
+				promptCount: operation.promptCount,
+				resolveCount: operation.resolveCount,
+				name: (window as any).charSheet?._state?._data?.name,
+				characterId: (window as any).charSheet?._currentCharacterId ?? null,
+			};
+		});
+	}
+
+	async startDeferredDmWorkspaceConflictSave (): Promise<void> {
+		await this.page.evaluate(async () => {
+			const board = (window as any).DM_SCREEN;
+			const repository = board?._workspaceRepository;
+			if (!board || !repository) throw new Error("DM workspace repository is unavailable.");
+
+			let release;
+			const gate = new Promise<void>(resolve => release = resolve);
+			const originalSet = repository.pSet;
+			const originalResolveConflict = repository.pResolveConflict;
+			const originalPrompt = (window as any).InputUiUtil.pGetUserBoolean;
+			const state = board.getSaveableState();
+			const resolved = {
+				...state,
+				w: state.w || 3,
+				h: state.h || 2,
+				sla: "1",
+				sls: {
+					"1": {
+						ps: [{x: 0, y: 0, w: 1, h: 1, t: 99, r: "Private panel"}],
+						ex: [],
+					},
+				},
+			};
+			const operation = {
+				started: false,
+				promptCount: 0,
+				resolveCount: 0,
+				release,
+				promise: null as Promise<unknown> | null,
+			};
+			(window as any).__hubDeferredDmSave = operation;
+
+			repository.pSet = async () => {
+				operation.started = true;
+				await gate;
+				throw Object.assign(new Error("Workspace changed on another device."), {
+					code: "WORKSPACE_CONFLICT",
+					recovery: {local: resolved, server: resolved},
+				});
+			};
+			repository.pResolveConflict = async () => {
+				operation.resolveCount++;
+				return resolved;
+			};
+			(window as any).InputUiUtil.pGetUserBoolean = async () => {
+				operation.promptCount++;
+				return false;
+			};
+
+			const {pDoDmScreenWorkspaceSave} = await import("/js/dmscreen/dmscreen-workspace-persistence.js");
+			operation.promise = pDoDmScreenWorkspaceSave({
+				board,
+				saveGeneration: board._saveGeneration,
+			}).finally(() => {
+				repository.pSet = originalSet;
+				repository.pResolveConflict = originalResolveConflict;
+				(window as any).InputUiUtil.pGetUserBoolean = originalPrompt;
+			});
+		});
+		await this.page.waitForFunction(() => (window as any).__hubDeferredDmSave?.started, undefined, {timeout: 30_000});
+	}
+
+	async releaseDeferredDmWorkspaceConflictSave (): Promise<{promptCount: number; resolveCount: number; panelCount: number}> {
+		return this.page.evaluate(async () => {
+			const operation = (window as any).__hubDeferredDmSave;
+			if (!operation?.promise || !operation.release) throw new Error("Deferred DM workspace save is unavailable.");
+			operation.release();
+			await operation.promise;
+			return {
+				promptCount: operation.promptCount,
+				resolveCount: operation.resolveCount,
+				panelCount: Object.keys((window as any).DM_SCREEN?.panels || {}).length,
+			};
+		});
+	}
+
+	async expectPrivateDmWorkspaceConcealed (): Promise<void> {
+		await expect.poll(
+			() => this.page.evaluate(() => ({
+				panelCount: Object.keys((window as any).DM_SCREEN?.panels || {}).length,
+				projectionCount: (window as any).DM_SCREEN?._hubCharacterProjections?.length || 0,
+			})),
+			{timeout: 30_000},
+		).toEqual({panelCount: 0, projectionCount: 0});
+		await expect(this.page.locator(".dm-screen")).toContainText("Campaign access ended");
 	}
 
 	async clearActiveCampaignStorage (): Promise<void> {

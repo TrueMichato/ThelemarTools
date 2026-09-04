@@ -181,6 +181,22 @@ test.describe("device-scoped active campaign context", () => {
 			// ...and enters `switch_pending` rather than tearing down or activating anything.
 			await expect.poll(async () => sheet.getActiveContextState(), {timeout: 15_000})
 				.toBe("switch_pending");
+
+			// Reselecting the pinned resource restores it as the device default without rebinding.
+			await sheet.selectCampaignContext(openCampaign);
+			await expect.poll(async () => sheet.getActiveContextState(), {timeout: 15_000})
+				.toBe("active");
+			expect(await sheet.getSheetCampaignId()).toBe(openCampaign);
+
+			// The same recovery works after another tab selects explicit local mode.
+			await other.selectLocalCampaignContext();
+			await sheet.waitForClearedSelection();
+			await expect.poll(async () => sheet.getActiveContextState(), {timeout: 15_000})
+				.toBe("switch_pending");
+			await sheet.selectCampaignContext(openCampaign);
+			await expect.poll(async () => sheet.getActiveContextState(), {timeout: 15_000})
+				.toBe("active");
+			expect(await sheet.getSheetCampaignId()).toBe(openCampaign);
 		} finally {
 			await context.close();
 		}
@@ -268,6 +284,66 @@ test.describe("device-scoped active campaign context", () => {
 		} finally {
 			await dmContext.close();
 			await playerContext.close();
+		}
+	});
+
+	test("fences in-flight Character Sheet and DM workspace conflicts before access-loss concealment", async ({browser}) => {
+		test.setTimeout(240_000);
+		const ownerContext = await browser.newContext(contextOptions);
+		const collaboratorContext = await browser.newContext(contextOptions);
+		try {
+			const owner = new HubCampaignPage(await ownerContext.newPage());
+			await owner.signInSynthetic({providerSubject: "conflict-owner", displayName: "Conflict Owner", secret: secret!});
+			const campaignId = await owner.createCampaign("Conflict Fence E2E");
+			const invite = await owner.createInviteViaApi(campaignId, "co_dm");
+
+			const collaborator = new HubCampaignPage(await collaboratorContext.newPage());
+			await collaborator.signInSynthetic({
+				providerSubject: "conflict-collaborator",
+				displayName: "Conflict Collaborator",
+				secret: secret!,
+			});
+			await collaborator.redeemInviteTokenViaApi(invite);
+			const character = await collaborator.createCharacter({campaignId, name: "Private Conflict Hero"});
+
+			const sheet = new HubCampaignPage(await collaboratorContext.newPage());
+			await sheet.openCharacterSheet({campaignId, characterId: character.id, name: "Private Conflict Hero"});
+			const board = new HubCampaignPage(await collaboratorContext.newPage());
+			await board.openBareDmScreenDefault(campaignId);
+
+			await sheet.startDeferredCharacterConflictSave();
+			await board.startDeferredDmWorkspaceConflictSave();
+
+			await owner.removeMember({campaignId, displayName: "Conflict Collaborator"});
+			await Promise.all([
+				sheet.revalidatePrivateSurfaceCampaignAccess(),
+				board.revalidatePrivateSurfaceCampaignAccess(),
+			]);
+			await Promise.all([
+				sheet.waitForClearedSelection(),
+				board.waitForClearedSelection(),
+				sheet.expectPrivateCharacterConcealed(),
+				board.expectPrivateDmWorkspaceConcealed(),
+			]);
+
+			const [characterOutcome, boardOutcome] = await Promise.all([
+				sheet.releaseDeferredCharacterConflictSave(),
+				board.releaseDeferredDmWorkspaceConflictSave(),
+			]);
+			expect(characterOutcome).toEqual({
+				promptCount: 0,
+				resolveCount: 0,
+				name: "",
+				characterId: null,
+			});
+			expect(boardOutcome).toEqual({
+				promptCount: 0,
+				resolveCount: 0,
+				panelCount: 0,
+			});
+		} finally {
+			await ownerContext.close();
+			await collaboratorContext.close();
 		}
 	});
 

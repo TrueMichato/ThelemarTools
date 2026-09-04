@@ -49,6 +49,7 @@ import {HubRollLogAdapter} from "../hub/hub-roll-log-adapter.js";
 import {CharacterSheetRealtimeCoordinator} from "./charactersheet-realtime.js";
 import {CharacterSheetHubEffects} from "./charactersheet-hub-effects.js";
 import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js";
+import {getCharacterSaveFence, isCharacterSaveFenceCurrent} from "./charactersheet-persistence-fence.js";
 import {diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
 
 const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, StorageUtil, DataUtil, BrewUtil2, PrereleaseUtil} = /** @type {*} */ (globalThis);
@@ -4147,6 +4148,8 @@ class CharacterSheetPage {
 
 	async _saveCurrentCharacter ({isInteractiveConflict = true} = {}) {
 		if (!this._currentCharacterId) return;
+		const saveFence = getCharacterSaveFence(this);
+		const isSaveCurrent = () => isCharacterSaveFenceCurrent({sheet: this, saveFence});
 
 		// A campaign effect that could not be reconciled leaves this character un-saveable until recovery
 		// completes. Writing anyway would push a document that silently undoes the server-authoritative effect.
@@ -4171,13 +4174,16 @@ class CharacterSheetPage {
 
 		try {
 			const persisted = await this._characterRepository.pUpsert({character: charData});
+			if (!isSaveCurrent()) return false;
 			if (persisted?.id && persisted.id !== charData.id && this._currentCharacterId === charData.id) {
 				this._currentCharacterId = persisted.id;
+				saveFence.characterId = persisted.id;
 				this._state.setId?.(persisted.id);
 				const url = new URL(window.location.href);
 				url.searchParams.set("id", persisted.id);
 				window.history?.replaceState?.({}, "", url);
 				await this._pLoadCharacters?.();
+				if (!isSaveCurrent()) return false;
 				if (this._selCharacter) this._selCharacter.value = persisted.id;
 				this._attachHubRealtime?.({characterId: persisted.id});
 			}
@@ -4199,7 +4205,7 @@ class CharacterSheetPage {
 						conflict.recovery = {base: submitted, local: live, server: canonical, conflicts: rebased.conflicts};
 						// Registered so a campaign effect arriving while the modal is open transforms these
 						// candidates too, instead of the choice resolving against a stale captured snapshot.
-						this._characterRepository.registerLiveConflict?.({characterId: this._currentCharacterId, recovery: conflict.recovery});
+						this._characterRepository.registerLiveConflict?.({characterId: saveFence.characterId, recovery: conflict.recovery});
 						throw conflict;
 					}
 					this._state.loadFromJson({...rebased.document, id: persisted.id});
@@ -4221,6 +4227,7 @@ class CharacterSheetPage {
 			this._updateSaveIndicator("saved");
 			return true;
 		} catch (err) {
+			if (!isSaveCurrent()) return false;
 			// eslint-disable-next-line no-console
 			console.error("Save error:", err);
 			// Leave the sync mirror in place: it is the only surviving copy of this write.
@@ -4233,9 +4240,10 @@ class CharacterSheetPage {
 				"CAMPAIGN_ARCHIVED",
 			].includes(err?.code)) {
 				await this._hubActiveCampaign?.pRevalidate({trigger: "access_loss"});
+				if (!isSaveCurrent()) return false;
 			}
 			if (!isInteractiveConflict && ["CHARACTER_LIVE_CONFLICT", "CHARACTER_CONFLICT"].includes(err?.code)) {
-				this._characterRepository.clearRetryableLeaseConflict?.({characterId: this._currentCharacterId});
+				this._characterRepository.clearRetryableLeaseConflict?.({characterId: saveFence.characterId});
 				throw err;
 			}
 			if (err?.code === "CHARACTER_LIVE_CONFLICT") {
@@ -4247,12 +4255,13 @@ class CharacterSheetPage {
 				});
 				// A campaign effect may have arrived while the modal was open; the registered record carries that
 				// transform, so resolve against it rather than the snapshot captured before the prompt.
-				const recovery = this._characterRepository.getLiveConflictRecovery?.(this._currentCharacterId) || err.recovery;
+				const recovery = this._characterRepository.getLiveConflictRecovery?.(saveFence.characterId) || err.recovery;
+				this._characterRepository.clearLiveConflict?.({characterId: saveFence.characterId});
+				if (!isSaveCurrent()) return false;
 				if (choice == null) {
 					DataUtil.userDownload("character-live-conflict-recovery", recovery, {fileType: "character-conflict"});
 					return false;
 				}
-				this._characterRepository.clearLiveConflict?.({characterId: this._currentCharacterId});
 				if (choice) return this._saveCurrentCharacter();
 				this._state.loadFromJson(recovery.server);
 				this._reconcileClassFeatures();
@@ -4267,14 +4276,16 @@ class CharacterSheetPage {
 					textYes: "Use Local",
 					textNo: "Use Server",
 				});
+				if (!isSaveCurrent()) return false;
 				if (choice == null) {
 					DataUtil.userDownload("character-conflict-recovery", err.recovery, {fileType: "character-conflict"});
 					return false;
 				}
 				const resolved = await this._characterRepository.pResolveConflict({
-					characterId: this._currentCharacterId,
+					characterId: saveFence.characterId,
 					choice: choice ? "local" : "server",
 				});
+				if (!isSaveCurrent()) return false;
 				if (resolved) {
 					this._state.loadFromJson(resolved);
 					this._renderCharacter();

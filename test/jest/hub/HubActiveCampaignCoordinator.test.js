@@ -659,6 +659,71 @@ describe("HubActiveCampaignCoordinator", () => {
 			});
 		});
 
+		it("restores a pinned runtime campaign as the device selection after another campaign was selected", async () => {
+			const order = [];
+			const api = makeApi({campaigns: {
+				[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A),
+				[CAMPAIGN_B]: activeCampaign(CAMPAIGN_B),
+			}});
+			const {coordinator, store} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					isResourcePinned: () => true,
+					pTeardownRealtime: async () => order.push("realtime"),
+					pTeardownRules: async () => order.push("rules"),
+					pTeardownBrew: async () => order.push("brew"),
+				},
+			});
+			await coordinator.pResolve();
+
+			await coordinator.pSwitchTo({campaignId: CAMPAIGN_B});
+			expect(coordinator.state).toBe("switch_pending");
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({campaignId: CAMPAIGN_B});
+
+			await coordinator.pSwitchTo({campaignId: CAMPAIGN_A});
+
+			expect(order).toEqual([]);
+			expect(coordinator.state).toBe("active");
+			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_A);
+			expect(coordinator.pendingCampaignId).toBeNull();
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({
+				state: "selected",
+				campaignId: CAMPAIGN_A,
+			});
+		});
+
+		it("restores a pinned runtime campaign as the device selection after local mode was selected", async () => {
+			const order = [];
+			const api = makeApi({campaigns: {[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A)}});
+			const {coordinator, store} = makeCoordinator({
+				api,
+				host: {
+					getExplicitCampaignId: () => CAMPAIGN_A,
+					isResourcePinned: () => true,
+					pTeardownRealtime: async () => order.push("realtime"),
+					pTeardownRules: async () => order.push("rules"),
+					pTeardownBrew: async () => order.push("brew"),
+				},
+			});
+			await coordinator.pResolve();
+
+			await coordinator.pSwitchToLocal();
+			expect(coordinator.state).toBe("switch_pending");
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({state: "cleared"});
+
+			await coordinator.pSwitchTo({campaignId: CAMPAIGN_A});
+
+			expect(order).toEqual([]);
+			expect(coordinator.state).toBe("active");
+			expect(coordinator.activeCampaignId).toBe(CAMPAIGN_A);
+			expect(coordinator.pendingCampaignId).toBeNull();
+			expect(store.readForAccount(ACCOUNT_A)).toMatchObject({
+				state: "selected",
+				campaignId: CAMPAIGN_A,
+			});
+		});
+
 		it("switches a selection-only host immediately instead of leaving a false pending state", async () => {
 			const api = makeApi({campaigns: {
 				[CAMPAIGN_A]: activeCampaign(CAMPAIGN_A),
