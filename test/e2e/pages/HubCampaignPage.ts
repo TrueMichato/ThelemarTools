@@ -237,9 +237,11 @@ export class HubCampaignPage {
 	}
 
 	private async openCampaignAdministration (name: string): Promise<void> {
-		const disclosure = this.page.locator(".hub-disclosure", {hasText: name});
+		const disclosure = this.page.locator(".hub-disclosure").filter({
+			has: this.page.locator(":scope > summary").filter({hasText: name}),
+		});
 		if (!await disclosure.evaluate(element => (element as HTMLDetailsElement).open)) {
-			await disclosure.locator("summary").click();
+			await disclosure.locator(":scope > summary").click();
 		}
 	}
 
@@ -251,6 +253,139 @@ export class HubCampaignPage {
 		const output = this.page.locator("#campaign-invite-output");
 		await expect(output).not.toHaveValue("");
 		return output.inputValue();
+	}
+
+	async expectRulesPolicySelectionJourney (campaignId: string): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		await this.openCampaignAdministration("Rules and homebrew");
+		const manager = this.page.locator("#campaign-rules-policy-manager");
+		await expect(manager).toBeVisible();
+		await expect(this.page.locator("#campaign-rules-policy-loading")).toBeHidden();
+		await expect(this.page.locator("#campaign-rules-form")).toBeHidden();
+		await expect(this.page.locator("#campaign-rules-list .hub-rule-row")).toHaveCount(10);
+		await expect(this.page.locator(".hub-rule-status--planned")).toHaveCount(3);
+		await expect(manager).not.toContainText("Enforced");
+
+		const search = this.page.locator("#campaign-rules-search");
+		await search.fill("jumping");
+		await expect(this.page.locator("#campaign-rules-list .hub-rule-row")).toHaveCount(1);
+		await search.fill("no matching campaign rule");
+		await expect(this.page.locator("#campaign-rules-empty")).toBeVisible();
+		await search.fill("");
+		await this.page.locator("#campaign-rules-support").selectOption("advisory");
+		await expect(this.page.locator("#campaign-rules-list .hub-rule-row")).toHaveCount(7);
+		await this.page.locator("#campaign-rules-support").selectOption("all");
+
+		const jumping = this.page.locator("[data-campaign-rule-control='tgtt.jumping']");
+		await jumping.uncheck();
+		await expect(this.page.locator("#campaign-rules-review-list")).toContainText("Thelemar jumping");
+		await expect(this.page.locator("#campaign-rules-review-list")).toContainText("On to Off");
+
+		await this.page.setViewportSize({width: 390, height: 844});
+		const mobileAudit = await manager.evaluate(element => {
+			const rect = element.getBoundingClientRect();
+			const labels = [...element.querySelectorAll<HTMLElement>(".hub-rule-row__control .hub-setting")];
+			return {
+				right: Math.ceil(rect.right),
+				viewportWidth: document.documentElement.clientWidth,
+				labelHeights: labels.map(label => Math.round(label.getBoundingClientRect().height)),
+			};
+		});
+		expect(mobileAudit.right).toBeLessThanOrEqual(mobileAudit.viewportWidth);
+		expect(mobileAudit.labelHeights.every(height => height >= 44)).toBe(true);
+		await search.focus();
+		await expect(search).toBeFocused();
+		await this.page.setViewportSize({width: 1280, height: 720});
+
+		await this.page.locator("#campaign-rules-activate").click();
+		await expect(this.page.locator("#campaign-rules-policy-status")).toContainText("Version 1 is active");
+		await expect(this.page.locator("#campaign-policy-summary")).toContainText("Thelemar jumping");
+		await expect(this.page.locator("#campaign-policy-summary")).toContainText("Off · Advisory");
+
+		await this.page.locator("[data-campaign-rule-control='tgtt.critical-rolls']").uncheck();
+		await expect(this.page.locator("#campaign-rules-review-list")).toContainText("Thelemar critical rolls");
+		await this.page.context().setOffline(true);
+		await expect(this.page.locator("#campaign-rules-policy-status")).toContainText("Offline");
+		await expect(this.page.locator("#campaign-rules-activate")).toBeDisabled();
+		await this.page.context().setOffline(false);
+		await expect(this.page.locator("#campaign-rules-policy-status")).toContainText("Back online");
+		await expect(this.page.locator("#campaign-rules-activate")).toBeDisabled();
+		await this.page.reload();
+		await expect(this.page.locator("#campaign-content")).toBeVisible();
+		await this.openCampaignAdministration("Rules and homebrew");
+		await expect(manager).toBeVisible();
+
+		const managementResponse = await this.page.request.get(`/api/campaigns/${encodeURIComponent(campaignId)}/rules-policy`);
+		expect(managementResponse.ok()).toBe(true);
+		const managementBody = await managementResponse.json();
+		const active = managementBody.management.versions.find((version: any) => version.id === managementBody.management.activeRulesVersionId);
+		const externalPolicy = structuredClone(active.policy);
+		externalPolicy.rules.find((rule: any) => rule.id === "tgtt.linguistics-bonus").parameters.enabled = false;
+		const externalPublish = await this.page.request.post(`/api/campaigns/${encodeURIComponent(campaignId)}/rules-policy`, {
+			headers: await this.getMutationHeaders(),
+			data: {policy: externalPolicy, expectedActiveRulesVersionId: active.id},
+		});
+		expect(externalPublish.status()).toBe(201);
+
+		await this.page.locator("[data-campaign-rule-control='tgtt.critical-rolls']").uncheck();
+		await this.page.locator("#campaign-rules-activate").click();
+		await expect(this.page.locator("#campaign-rules-policy-status")).toContainText("Your draft is preserved");
+		await expect(this.page.locator("#campaign-rules-review-list")).toContainText("Thelemar critical rolls");
+
+		await this.page.reload();
+		await expect(this.page.locator("#campaign-content")).toBeVisible();
+		await this.openCampaignAdministration("Rules and homebrew");
+		await expect(manager).toBeVisible();
+		await expect(this.page.locator("#campaign-rules-history")).toBeEnabled();
+		const versionOneValue = await this.page.locator("#campaign-rules-history option", {hasText: "Version 1"}).getAttribute("value");
+		expect(versionOneValue).toBeTruthy();
+		await this.page.locator("#campaign-rules-history").selectOption(versionOneValue!);
+		await expect(this.page.locator("#campaign-rules-rollback-review")).toContainText("Linguistics bonus");
+		await this.page.locator("#campaign-rules-rollback").click();
+		await expect(this.page.locator("#campaign-rules-policy-status")).toContainText("Version 1 is active again");
+	}
+
+	async expectReadOnlyCampaignPolicySummary (campaignId: string): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		await this.openCampaignAdministration("Rules and homebrew");
+		const summary = this.page.locator("#campaign-policy-summary");
+		await expect(summary).toBeVisible();
+		await expect(summary).toContainText("Version 1");
+		await expect(summary).toContainText("Thelemar jumping");
+		await expect(summary).toContainText("Off · Advisory");
+		await expect(this.page.locator("#campaign-rules-policy-manager")).toBeHidden();
+		await expect(this.page.locator("#campaign-rules-form")).toBeHidden();
+		await expect(summary).not.toContainText(/account|created by|note/i);
+	}
+
+	async publishCampaignRuleViaApi ({
+		campaignId,
+		ruleId,
+		parameter,
+		value,
+	}: {
+		campaignId: string;
+		ruleId: string;
+		parameter: string;
+		value: boolean | string;
+	}): Promise<void> {
+		const managementResponse = await this.page.request.get(`/api/campaigns/${encodeURIComponent(campaignId)}/rules-policy`);
+		expect(managementResponse.ok()).toBe(true);
+		const {management} = await managementResponse.json();
+		const active = management.versions.find((version: any) => version.id === management.activeRulesVersionId);
+		const policy = structuredClone(active.policy);
+		policy.rules.find((rule: any) => rule.id === ruleId).parameters[parameter] = value;
+		const response = await this.page.request.post(`/api/campaigns/${encodeURIComponent(campaignId)}/rules-policy`, {
+			headers: await this.getMutationHeaders(),
+			data: {policy, expectedActiveRulesVersionId: active.id},
+		});
+		expect(response.status()).toBe(201);
+	}
+
+	async expectLiveCampaignPolicySummary ({title, value}: {title: string; value: string}): Promise<void> {
+		const summary = this.page.locator("#campaign-policy-summary");
+		await expect(summary).toContainText(title);
+		await expect(summary).toContainText(value);
 	}
 
 	async createInviteViaApi (campaignId: string, role = "player"): Promise<string> {

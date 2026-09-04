@@ -14,6 +14,7 @@ test("publishes bounded provider metadata and accessible signed-out guidance", a
 		capabilities: [
 			"auth.provider_registry.v1",
 			"campaign.active_context.v1",
+			"campaign.rules_policy.v1",
 		],
 		authProviders: providers.map(({slug, label}) => ({
 			slug,

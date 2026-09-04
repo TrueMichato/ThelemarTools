@@ -1,18 +1,18 @@
 import crypto from "node:crypto";
 import {HubStoreError} from "./hub-store-error.js";
 import {validateCloudValue} from "./cloud-data-validation.js";
+import {
+	CampaignRulesPolicyError,
+	DEFAULT_CAMPAIGN_SETTINGS,
+	getCampaignRulesPolicy,
+	getCampaignRulesPolicySummary,
+	normalizeCampaignRulesPolicy,
+	projectCampaignSettings,
+} from "../../js/hub/hub-campaign-rules.js";
 
 export const CAMPAIGN_RULES_SCHEMA_VERSION = 1;
 
-export const DEFAULT_CAMPAIGN_RULES = Object.freeze({
-	enableTgtt: true,
-	exhaustionRules: "thelemar",
-	thelemar_carryWeight: true,
-	thelemar_encumbranceTiers: true,
-	thelemar_jumping: true,
-	thelemar_linguisticsBonus: true,
-	thelemar_criticalRolls: true,
-});
+export const DEFAULT_CAMPAIGN_RULES = DEFAULT_CAMPAIGN_SETTINGS;
 
 const _RULE_KEYS = new Set(Object.keys(DEFAULT_CAMPAIGN_RULES));
 const _MAX_BUNDLE_BYTES = 1024 * 1024;
@@ -125,6 +125,14 @@ export function getCampaignBrewHash (brewDocs) {
 }
 
 export function normalizeCampaignRules (rules) {
+	if (rules?.schemaVersion === 2) {
+		try {
+			return projectCampaignSettings({schemaVersion: 2, rules});
+		} catch (error) {
+			if (!(error instanceof CampaignRulesPolicyError)) throw error;
+			throw new HubStoreError(error.code, error.message, {details: error.details});
+		}
+	}
 	if (!rules || typeof rules !== "object" || Array.isArray(rules)) {
 		throw new HubStoreError("RULES_INVALID", `Campaign rules must be an object.`);
 	}
@@ -142,4 +150,39 @@ export function normalizeCampaignRules (rules) {
 		out[key] = value;
 	}
 	return out;
+}
+
+export function getPublicCampaignRulesVersion (rulesVersion, {isIncludePolicy = false} = {}) {
+	if (!rulesVersion) return null;
+	try {
+		const policy = getCampaignRulesPolicy({
+			schemaVersion: rulesVersion.schemaVersion,
+			rules: rulesVersion.rules,
+		});
+		return {
+			...rulesVersion,
+			...(rulesVersion.createdAt == null
+				? {}
+				: {createdAt: new Date(rulesVersion.createdAt).toISOString()}),
+			catalogVersion: policy.catalogVersion,
+			rules: projectCampaignSettings({
+				schemaVersion: rulesVersion.schemaVersion,
+				rules: rulesVersion.rules,
+			}),
+			...(isIncludePolicy ? {policy} : {}),
+			policySummary: getCampaignRulesPolicySummary(policy),
+		};
+	} catch (error) {
+		if (!(error instanceof CampaignRulesPolicyError)) throw error;
+		throw new HubStoreError(error.code, error.message, {details: error.details});
+	}
+}
+
+export function normalizeCampaignRulesPolicyForStorage (policy) {
+	try {
+		return normalizeCampaignRulesPolicy(policy);
+	} catch (error) {
+		if (!(error instanceof CampaignRulesPolicyError)) throw error;
+		throw new HubStoreError(error.code, error.message, {details: error.details});
+	}
 }

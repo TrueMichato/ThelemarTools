@@ -1,7 +1,11 @@
 import {HubApiClient, HubApiError} from "./hub-api-client.js";
 import {HubActiveCampaignCoordinator} from "./hub-active-campaign-coordinator.js";
 import {HubActiveCampaignSwitcher} from "./hub-active-campaign-switcher.js";
-import {HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT} from "./hub-capabilities.js";
+import {
+	HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT,
+	HUB_CAPABILITY_CAMPAIGN_RULES_POLICY,
+	pLoadHubCapabilityModule,
+} from "./hub-capabilities.js";
 import {HubRealtimeClient} from "./hub-realtime-client.js";
 import {renderHubActivityRows} from "./hub-activity-render.js";
 import {
@@ -22,7 +26,6 @@ import {
 	filterAwardItems,
 	getAwardCommandFingerprint,
 } from "./hub-item-award.js";
-
 const api = new HubApiClient();
 
 /**
@@ -128,6 +131,16 @@ function getErrorMessage (error) {
 		case "HP_MAX_UNAVAILABLE": return "This character's hit point maximum could not be read, so nothing was applied. Open it in the character sheet once to refresh its totals, then try again.";
 		case "ACTION_NOT_FOUND": return "That effect request is no longer waiting. Reload the campaign inbox to see its latest status.";
 		case "REVISION_CONFLICT": return "This data changed on another device. Your changes were not discarded. Reload and use the recovery choice shown before editing again.";
+		case "RULES_VERSION_STALE": return "Campaign rules changed on another device. Your draft was kept; review it against the refreshed active version.";
+		case "RULES_UNKNOWN": return "That policy contains a rule this server does not recognize. No version was created.";
+		case "RULES_PARAMETER_INVALID":
+		case "RULES_COMBINATION_UNSUPPORTED":
+		case "RULES_MODE_UNSUPPORTED":
+		case "RULES_SCHEMA_UNSUPPORTED":
+		case "RULES_CATALOG_UNSUPPORTED":
+		case "RULES_UNAVAILABLE":
+		case "RULES_INVALID":
+			return "That campaign policy is not supported. Review the highlighted rule settings; no version was created.";
 		case "LEASE_HELD": return "This character or workspace is being edited on another device. Open it read-only or explicitly take over editing there.";
 		case "LEASE_FENCED":
 		case "LEASE_EXPIRED":
@@ -959,7 +972,7 @@ async function pInitCampaign ({session}) {
 		api.pListCharacters({campaignId}),
 		api.pGetCampaignSnapshot({campaignId}),
 	]);
-	const [context, events] = await Promise.all([
+	const [contextInitial, events] = await Promise.all([
 		api.pGetCampaignContext({campaignId}),
 		api.pListEvents({
 			campaignId,
@@ -967,6 +980,7 @@ async function pInitCampaign ({session}) {
 			limit: 50,
 		}),
 	]);
+	let context = contextInitial;
 	const pRefreshMembers = async () => renderMemberList({
 		campaign,
 		campaignId,
@@ -1017,7 +1031,7 @@ async function pInitCampaign ({session}) {
 		document.title = `${campaign.name} - Campaign Hub - ThelemarTools`;
 		return;
 	}
-	const {pRefreshTransferState} = await pInitCampaignForms({
+	const {pRefreshTransferState, rulesPolicyManagerPromise} = await pInitCampaignForms({
 		campaign,
 		campaignId,
 		session,
@@ -1038,12 +1052,15 @@ async function pInitCampaign ({session}) {
 	let refreshTimer = null;
 	let isRefreshing = false;
 	let isRefreshQueued = false;
+	let isCampaignContextRefreshQueued = false;
 	const pRefreshLiveViews = async () => {
 		if (isCampaignReloadRequired || !navigator.onLine) return;
 		if (isRefreshing) {
 			isRefreshQueued = true;
 			return;
 		}
+		const isRefreshCampaignContext = isCampaignContextRefreshQueued;
+		isCampaignContextRefreshQueued = false;
 		isRefreshing = true;
 		try {
 			const [membersNxt, charactersNxt, snapshotNxt] = await Promise.all([
@@ -1078,6 +1095,11 @@ async function pInitCampaign ({session}) {
 				roster: liveRoster,
 			});
 			renderRecentActivity({events: liveEvents, characters: liveCharacters, members: membersNxt});
+			if (isRefreshCampaignContext) {
+				context = await api.pGetCampaignContext({campaignId});
+				renderCampaignContext(context);
+				void rulesPolicyManagerPromise.then(manager => manager?.replaceContext(context));
+			}
 			await Promise.all([
 				renderPendingActions({campaign, campaignId, session, targetCharacters: liveCharacters, members: membersNxt, roster: liveRoster}),
 				pRefreshTransferState({
@@ -1097,8 +1119,9 @@ async function pInitCampaign ({session}) {
 			}
 		}
 	};
-	const queueLiveRefresh = () => {
+	const queueLiveRefresh = ({isCampaignContextRefresh = false} = {}) => {
 		if (isCampaignReloadRequired) return;
+		if (isCampaignContextRefresh) isCampaignContextRefreshQueued = true;
 		if (refreshTimer != null) window.clearTimeout(refreshTimer);
 		refreshTimer = window.setTimeout(() => {
 			refreshTimer = null;
@@ -1117,7 +1140,7 @@ async function pInitCampaign ({session}) {
 		// event, including an invalidation, is coalesced into one authorization-scoped
 		// HTTP refetch that *replaces* the roster rather than merging into it, so a
 		// previously broader projection cannot survive a narrowed sharing policy.
-		queueLiveRefresh();
+		queueLiveRefresh({isCampaignContextRefresh: event.type === "rules.activated"});
 	});
 	realtime.on("cursor", baseline => {
 		if ((baseline?.cursor?.lastSequence || 0) >= liveLastSequence) {
@@ -1158,6 +1181,65 @@ function renderCampaignContext (context) {
 		rules.textContent = context.rulesVersion
 			? `${context.rulesVersion.rules.exhaustionRules} exhaustion · version ${context.rulesVersion.version}`
 			: "Not published";
+	}
+	renderCampaignPolicySummary({context});
+}
+
+function renderCampaignPolicySummary ({context}) {
+	const list = document.getElementById("campaign-policy-summary-list");
+	const status = document.getElementById("campaign-policy-summary-status");
+	if (!list || !status) return;
+	const version = context?.rulesVersion;
+	list.replaceChildren();
+	if (!version) {
+		status.textContent = "No campaign policy has been published.";
+		setHidden(list, true);
+		return;
+	}
+	status.textContent = `Version ${version.version}. Campaign choices are temporary overlays and do not change personal settings.`;
+	setHidden(list, false);
+	for (const rule of version.policySummary?.rules || []) {
+		const item = document.createElement("div");
+		item.className = "hub-policy-summary__item";
+		const term = document.createElement("dt");
+		term.textContent = rule.title;
+		const description = document.createElement("dd");
+		description.textContent = `${rule.value} · ${rule.supportLabel}`;
+		item.append(term, description);
+		list.append(item);
+	}
+}
+
+function renderCampaignRulesPolicyUnavailable () {
+	const root = document.getElementById("campaign-rules-policy-manager");
+	const loading = document.getElementById("campaign-rules-policy-loading");
+	const content = document.getElementById("campaign-rules-policy-content");
+	const legacyForm = document.getElementById("campaign-rules-form");
+	if (!root || !loading) return;
+	setHidden(root, false);
+	setHidden(content, true);
+	setHidden(legacyForm, false);
+	loading.textContent = "Rules library unavailable. The existing rules editor remains available; no campaign settings were changed.";
+	loading.classList.add("hub-inline-status--error");
+	root.setAttribute("aria-busy", "false");
+}
+
+async function pInitCampaignRulesPolicySurface (options) {
+	const loaded = await pLoadHubCapabilityModule({
+		capability: HUB_CAPABILITY_CAMPAIGN_RULES_POLICY,
+		pGetMeta: () => api.pGetMeta(),
+		pImport: () => import("./hub-rules-policy-manager.js"),
+	});
+	if (loaded.status === "disabled") return null;
+	if (loaded.status === "unavailable") {
+		renderCampaignRulesPolicyUnavailable();
+		return null;
+	}
+	try {
+		return await loaded.module.pInitCampaignRulesPolicy({...options, isCapabilityEnabled: true});
+	} catch {
+		renderCampaignRulesPolicyUnavailable();
+		return null;
 	}
 }
 
@@ -1551,6 +1633,18 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		document.getElementById("campaign-rule-linguistics").checked = !!activeRules.thelemar_linguisticsBonus;
 		document.getElementById("campaign-rule-critical").checked = !!activeRules.thelemar_criticalRolls;
 	}
+	const rulesPolicyManagerPromise = isDm
+		? pInitCampaignRulesPolicySurface({
+			api,
+			campaignId,
+			context,
+			fnRenderCampaignContext: renderCampaignContext,
+			fnRenderError: renderError,
+		}).catch(error => {
+			renderError(error);
+			return null;
+		})
+		: Promise.resolve(null);
 	setHidden(inviteForm, !isDm);
 	inviteForm?.addEventListener("submit", async event => {
 		event.preventDefault();
@@ -2062,7 +2156,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		}
 	});
 
-	return {pRefreshTransferState};
+	return {pRefreshTransferState, rulesPolicyManagerPromise};
 }
 
 async function pInit () {

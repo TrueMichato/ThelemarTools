@@ -315,10 +315,10 @@ Implemented slice:
   capability gate `campaign.active_context.v1`;
 - authorized bare Character Sheet/DM Screen defaults, deterministic pinned resources, access-loss concealment,
   BFCache/reconnect revalidation, production-stack Chromium coverage, and four killed high-risk mutants.
-
+V2-T5 exposes source/edition policy metadata only. ADR 0015/V2-T6 remains the owner of policy enforcement.
 V2-T5 exposes source/edition policy metadata only. ADR 0015/V2-T6 remains the owner of policy enforcement.
 
-### V2-T6 — enforced campaign rules/source/species/edition policy (**contract shipped; next enablement**)
+### V2-T6 — enforced campaign rules/source/species/edition policy (**selection foundation shipped; enforcement pending**)
 
 Dependencies: V2-T2 and V2-T5.
 
@@ -336,6 +336,21 @@ Acceptance:
   documented grandfather rules and display warnings;
 - policy changes identify affected entities before activation and are auditable/reversible by version;
 - stale clients cannot bypass current policy.
+
+Implemented selection-foundation slice:
+
+- a closed, versioned catalog exposes stable rule ids, applicability, parameters, defaults, and truthful
+  **Advisory** or **Planned** lifecycle labels;
+- DM/co-DM management supports search/filter, before/after review, atomic immutable publication, stale-base
+  fencing, and activation of an earlier version without rewriting history;
+- schema-v1 TGTT/exhaustion/carry versions remain readable and project to the same legacy settings shape;
+- players receive a bounded read-only summary, while authored notes and complete policy bodies stay on the
+  DM management path;
+- `campaign.rules_policy.v1` keeps the new management surface disabled until rollout evidence is accepted.
+
+This slice does **not** enforce selected rules. Source/species/edition entries remain visible but unavailable and
+**Planned**. The shared evaluator, create/import/attach/move/award enforcement, grandfather rules, and Character
+Sheet/Builder/DM Screen enforcement remain later T6 work and must not be inferred from selection state.
 
 ### V2-T7 — player targeting (**source-cost contract shipped; next implementation**)
 
