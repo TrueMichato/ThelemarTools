@@ -2229,6 +2229,97 @@ a negative assertion that could not fail. The controls failed on the same wordin
 exposed it. **When a value is normalized between fixture and assertion, a negative
 assertion written against the pre-normalized form is vacuous by construction.**
 
+### v40 — a companion item's `type` is a schema code, not the sheet's own word for it
+
+A user's combined export of 24 monsters and 15 companion items showed the v20 gap for
+what it actually was: `typeCode → type` only fires when the sheet **itself** populated
+`typeCode`, and it only ever does that for an item added through the catalog picker.
+An item the user built from a `baseItem` reference, or authored free-hand, carries only
+the sheet's own display word — `type: "weapon"`, `"armor"`, `"ring"` — and the rename had
+nothing to rename. **14 of the 15 items in the reported corpus were this shape**; only
+Hecate's Dagger (v20's own worked example) had ever gone through the picker.
+
+The fix is a resolution *order*, not a bigger rename map — a human label is evidence for a
+type, never the type itself:
+
+1. **An already-legal value wins outright.** If `typeCode` (or a prior-run `type`) is
+   already one of the schema's 66 codes, it ships unchanged. Nothing downstream runs.
+2. **`baseItem` is the strongest signal.** `"plate armor|phb"` resolves against the
+   sheet's own loaded item catalog (`state._allItems` — the merge of `data/items.json`
+   **and** `data/items-base.json`'s `baseitem` array, exactly like production's
+   `DataUtil.item.loadJSON()` pipeline hands the sheet); the match's own `type` is
+   validated against the schema enum before being trusted, so a corrupt catalog entry
+   cannot leak through. Case-insensitive, last-match-wins — the same semantics
+   `CharacterSheetState._migrateInventoryItemMetadata` already uses for this exact map.
+3. **`armorType` derives the code when there is no `baseItem`.** `light`/`medium`/`heavy`
+   → `LA`/`MA`/`HA` — the field the sheet's own armor UI already asks for, so this is
+   reading data that already exists rather than inferring anything.
+4. **A narrow label map covers the five words that are genuinely unambiguous**: `shield`,
+   `potion`, `ring`, `rod`, `scroll`. `weapon` and `wand` are deliberately **not** on this
+   list.
+5. **Otherwise the `type` key is omitted — never set to `null`** — and a warning names the
+   item. An omitted `type` is schema-legal (the property is optional); a `null` is not.
+
+**Two label-to-code moves that looked obvious and are not:**
+
+- **`staff` → `"ST"` does not exist.** There is no such code in the schema. The real
+  items that read "staff" in the corpus (Diamond Staff, Eldritch Staff, Enspelled Staff)
+  are `type: "M"` with a separate boolean `staff: true` flag — a weapon-shaped staff is a
+  melee weapon *tagged* as a staff, not a fifth armor-adjacent category. A staff item with
+  no weapon shape (no `dmg1`/`weaponCategory`) gets `staff: true` alone, no `type` — the
+  `Staff of Power` shape.
+- **`wand` → `"WD"` is unsafe**, even though `WD` is a real code. The sheet's own reverse
+  mapper (`_getCustomTypeForItem` in `charactersheet-inventory.js`) collapses `WD`, `RD`,
+  and the legacy `"ST"` string all into one UI category called `"wand"` — so a bare
+  `type: "wand"` on the sheet does not tell you *which* of three codes it started life as.
+  Guessing `WD` would sometimes be wrong in a way nothing downstream could catch. It falls
+  through to omit + warn, same as an unresolvable `weapon`.
+
+**Ground-truthing the reported names.** Duralin references exactly one sheet-authored
+item — `+2 Plate Armor`, `baseItem: "plate armor|phb"`, no `armorType` field — which now
+resolves to `"HA"` via step 2. Talna and Onger, also named in the report, turned out to
+reference **zero** CSHEET-sourced items each: every `{@item}` tag on both statblocks
+already points at a real catalog or homebrew entity. Bundling nothing for them is the
+correct behaviour, not a gap — `buildCompanionItems` only ever bundles what a tag names
+(v20), and neither statblock names anything of its own.
+
+**Validating against the real thing, not a hand-written mirror of it.** The existing
+`_SCHEMA_ITEM_TYPES` set (kept, and still the fast unit-test path) is a literal copy of
+the schema enum, which means it can drift silently the way the whitelist already has a
+test guarding against. `test/util-npc-export-schema.js` compiles the actual
+`5etools-utils` bestiary and item schemas via the same `UtilAjv`/sibling-registration
+pattern `test/util-combatmethods-schema.js` already uses, and
+`CharacterSheetNpcExporter.schemaValidation.test.js` runs every new fixture through the
+real compiled validator, not the mirror. It `describe.skip`s when
+`node_modules/5etools-utils` is absent (a genuine, documented environment gap here — see
+Testing below) rather than reporting green on an assertion it never made.
+
+**What v40 taught.**
+
+- **A rename is only as good as the field it renames from.** v20 correctly identified
+  that a rename beats a whitelist for a mislabeled property — but a rename that depends on
+  a field (`typeCode`) the sheet doesn't always populate is a rename that doesn't always
+  fire. The fix had to add resolution paths *before* the rename could be trusted alone,
+  not replace it.
+- **A human word is a case for a code, not a code.** Every one of the five safe label
+  mappings (`shield`/`potion`/`ring`/`rod`/`scroll`) was verified against real schema
+  values before being written down; `weapon`/`wand`/`staff` all failed that check for
+  different reasons, and each reason is a different piece of sheet or schema behaviour
+  worth knowing on its own.
+- **`state._allItems` needs both item files.** `data/items.json` holds specific/magic
+  items; mundane gear a `baseItem` ref names (`"plate armor|phb"`, `"longsword|phb"`)
+  lives in `data/items-base.json`'s `baseitem` array. A resolution test built on only the
+  first file will report a real resolution as a false failure.
+- **An "external reference" check is a different claim than a "missing reference" check.**
+  A first draft of the attachment-corpus harness asserted every `{@item name|SOURCE}` tag
+  resolved against a small, hand-picked set of catalogs — and failed on 75 tags that were
+  never supposed to resolve locally in the first place (v20's own `getExternalItemSources`
+  contract: third-party brew is *reported*, not required to be on hand). The harness now
+  asserts the CSHEET-sourced tags are never dangling (a real regression guard) and that
+  external sources are surfaced via the existing mechanism (a scale test of an existing
+  contract) — it does not attempt to prove every homebrew catalog on a user's machine is
+  present in this repo.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 
@@ -2336,6 +2427,28 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
   when an always-on aura applies (a Paladin's Aura of Protection is not in
   `getSaveBreakdown`), but never less, and any excess must be explained by a trait on the
   block.
+
+- **Companion-item type canonicalization** (v40):
+  `CharacterSheetNpcExporter.companionItems.test.js`'s `v20.1` describe covers the five
+  resolution paths against the hand-mirrored schema-enum set (`baseItem` catalog match,
+  case-insensitive/last-match-wins, illegal-catalog-type rejection, `armorType` derivation,
+  the five-word safe label map, weapon-shaped vs non-weapon-shaped `staff`, `wand`/bare
+  `weapon` omit-and-warn, incumbent-preservation priority, the `type: null` prohibition).
+  `CharacterSheetNpcExporter.schemaValidation.test.js` runs the same fixtures through the
+  **real, AJV-compiled** item and bestiary schemas via `test/util-npc-export-schema.js`
+  (mirrors `test/util-combatmethods-schema.js`'s registration pattern) —
+  `describe.skip`s when `node_modules/5etools-utils` is absent, so it reports skip rather
+  than a false green when the dependency can't be resolved.
+  `CharacterSheetNpcExporter.attachmentCorpus.test.js` is a local-only integration harness
+  for a full reported failing corpus (never committed): set
+  `NPC_EXPORT_ATTACHMENT_PATH=/absolute/path/to/corpus.json` (shape `{_meta, monster:[],
+  item:[]}`) to run it; it `describe.skip`s otherwise, so CI stays green without the file.
+  It asserts the raw corpus is genuinely schema-invalid before normalization, that every
+  item normalizes to a legal type or a documented omission, per-item coverage for every
+  `baseItem`-bearing item plus the one label-map-only item and the one already-canonical
+  item, explicit named-character coverage, that no `{@item name|CSHEET}` tag is left
+  dangling across the whole corpus, and — when `5etools-utils` is present — that the
+  normalized item document and the monster document both pass real schema validation.
 
 ### Manual checklist
 
@@ -2477,6 +2590,16 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
   failed to shift it. `npm run serve:dev` (`http-server -c-1`) sends `no-store`. A
   cache-busted `import("…?bust=" + Date.now())` is the quickest way to tell "my fix is
   wrong" apart from "the page is stale".
+- **Real-schema validation depends on an environment that can actually install
+  `5etools-utils`.** `package.json` pins `^0.16.43`; some environments' npm registry
+  mirrors only reach an older `0.16.36`, and forcing that version in isolation (bypassing
+  the lockfile) pulls a newer, ESM-only `htmlparser2` transitively through
+  `sanitize-html` that Jest's CommonJS loader cannot `require()` — trading one gap for a
+  worse one. `CharacterSheetNpcExporter.schemaValidation.test.js` and the AJV-gated cases
+  in `CharacterSheetNpcExporter.attachmentCorpus.test.js` correctly `describe.skip`
+  themselves in that state rather than reporting a false green; the hand-mirrored
+  `_SCHEMA_ITEM_TYPES` set is the fallback source of truth in an environment where the
+  real dependency cannot be installed cleanly.
 
 ## Key files
 
@@ -2488,4 +2611,7 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
 | `test/jest/charactersheet/CharacterSheetNpcExporter.matrix.test.js` | Class × systems coverage |
 | `test/jest/charactersheet/CharacterSheetNpcExporter.materials.test.js` | Material & upgrade routing, bundle composition |
 | `test/jest/charactersheet/CharacterSheetNpcExporter.realsaves.test.js` | Contract tests against real saves in `npc-exports/` (skipped when absent) |
+| `test/jest/charactersheet/CharacterSheetNpcExporter.schemaValidation.test.js` | Companion-item fixtures validated against the real AJV-compiled schema (skipped when `5etools-utils` is absent) |
+| `test/jest/charactersheet/CharacterSheetNpcExporter.attachmentCorpus.test.js` | Local-only integration harness for a full reported failing corpus (env-var-gated, never committed) |
+| `test/util-npc-export-schema.js` | Standalone `UtilAjv`-based bestiary/item schema compiler, mirrors `test/util-combatmethods-schema.js` |
 | `.agents/skills/charactersheet-development/references/subsystem-details.md` | Agent quick ref |
