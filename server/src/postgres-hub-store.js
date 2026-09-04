@@ -3182,6 +3182,9 @@ export class PostgresHubStore {
 				out.targetRevisionObserved = operation.targetRevisionObserved;
 				out.rulesPin = operation.rulesPin;
 			}
+			Object.assign(out, getPeerSourceCostActionSummary(operation, {
+				canCancel: accountId === operation.originActorAccountId || ["dm", "co_dm"].includes(role),
+			}));
 			const failureCode = getPeerSourceCostFailureForViewer({
 				operation,
 				accountId,
@@ -3190,9 +3193,6 @@ export class PostgresHubStore {
 				targetOwnerAccountId,
 			});
 			if (failureCode) out.failureCode = failureCode;
-			Object.assign(out, getPeerSourceCostActionSummary(operation, {
-				canCancel: accountId === operation.originActorAccountId || ["dm", "co_dm"].includes(role),
-			}));
 			if (operation.status === "applied") {
 				out.leg = operation.sourceCharacterId === operation.targetCharacterId ? "combined" : "target";
 				out.operationLegKey = `${operation.id}/${out.leg}`;
@@ -3560,13 +3560,6 @@ export class PostgresHubStore {
 				operationId,
 				effectResolutionSeed,
 			});
-			if (
-				isCostBearing
-				&& isCanonicalEqual(
-					applySemanticOperation({data: target.data, operation: derived.operation}),
-					target.data,
-				)
-			) throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
 			const expiresAt = (await client.query(`
 				SELECT now() + ($1::bigint * interval '1 millisecond') AS expires_at
 			`, [this._semanticProposalTtlMs])).rows[0].expires_at;
@@ -4174,9 +4167,8 @@ export class PostgresHubStore {
 						validateCloudCharacterData(targetData);
 						if (source.id !== target.id && sourceData) validateCloudCharacterData(sourceData);
 					} catch (error) {
-						privateFailureCode = error.code === "TARGET_EFFECT_UNAVAILABLE"
-							? error.code
-							: getPrivateAcceptanceFailureCode(error) || "TARGET_EFFECT_UNAVAILABLE";
+						privateFailureCode = getPrivateAcceptanceFailureCode(error, {leg: "target"});
+						if (!privateFailureCode) throw error;
 					}
 				}
 

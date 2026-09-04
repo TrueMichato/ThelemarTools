@@ -1013,5 +1013,83 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 			slot_current: "1",
 			target_hp: String(hpBeforeAba),
 		});
+
+		for (const scenario of [
+			{label: "full", hp: {current: 20, max: 20, effectiveMax: 20, temp: 0}},
+			{label: "malformed", hp: {current: "hidden", max: 20, temp: 0}},
+			{label: "missing", hp: null},
+		]) {
+			if (scenario.hp == null) {
+				await pool.query(`UPDATE hub.characters SET data = data - 'hp' WHERE id = $1`, [healed.id]);
+			} else {
+				await pool.query(
+					`UPDATE hub.characters SET data = jsonb_set(data, '{hp}', $2::jsonb) WHERE id = $1`,
+					[healed.id, JSON.stringify(scenario.hp)],
+				);
+			}
+			const commandId = crypto.randomUUID();
+			const request = {...proposalRequest, commandId};
+			const proposal = await costStore.pCreateStructuredAction({
+				accountId: casterOwner.id,
+				sessionId: casterSession.id,
+				campaignId: campaign.id,
+				...request,
+				protocolVersion: "4",
+				idempotencyKey: getIdempotency(commandId, request),
+			});
+			expect(proposal.operation).toMatchObject({
+				status: "proposed",
+				sourceCostState: "pending",
+			});
+
+			const resolveCommandId = crypto.randomUUID();
+			const resolveRequest = {
+				contractVersion: 1,
+				commandId: resolveCommandId,
+				operationId: proposal.operation.operationId,
+				decision: "accept",
+			};
+			const failed = await costStore.pResolveStructuredAction({
+				accountId: healedOwner.id,
+				sessionId: healedSession.id,
+				campaignId: campaign.id,
+				commandId: resolveCommandId,
+				actionId: proposal.operation.operationId,
+				decision: "accept",
+				contractVersion: 1,
+				protocolVersion: "4",
+				idempotencyKey: getIdempotency(resolveCommandId, resolveRequest),
+			});
+			expect(failed.operation).toMatchObject({
+				status: "failed",
+				sourceCostState: "not_consumed",
+				failureCode: "TARGET_EFFECT_UNAVAILABLE",
+			});
+			const persistedFailure = await pool.query(`
+				SELECT
+					so.private_failure_code,
+					source.data->'spellcasting'->'spellSlots'->'1'->>'current' AS slot_current,
+					target.data->'hp' AS target_hp
+				FROM hub.semantic_operations so
+				JOIN hub.characters source ON source.id = so.source_character_id
+				JOIN hub.characters target ON target.id = so.target_character_id
+				WHERE so.id = $1
+			`, [proposal.operation.operationId]);
+			expect(persistedFailure.rows[0]).toMatchObject({
+				private_failure_code: "TARGET_EFFECT_UNAVAILABLE",
+				slot_current: "1",
+				target_hp: scenario.hp,
+			});
+			const outgoing = await costStore.pListCharacterOutgoingActions({
+				accountId: casterOwner.id,
+				campaignId: campaign.id,
+				characterId: caster.id,
+			});
+			expect(outgoing.find(action => action.actionId === proposal.operation.operationId)).toMatchObject({
+				status: "failed",
+				sourceCostState: "not_consumed",
+				failureCode: "unavailable",
+			});
+		}
 	});
 });

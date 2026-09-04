@@ -43,6 +43,14 @@ const HUB_PROTOCOL_VERSION = PEER_SOURCE_COSTS_PROTOCOL_VERSION;
 const HUB_LEGACY_PROTOCOL_VERSION = "3";
 const SUPPORTED_HUB_PROTOCOL_VERSIONS = new Set([HUB_LEGACY_PROTOCOL_VERSION, HUB_PROTOCOL_VERSION]);
 const SAFE_ITEM_SUMMARY_KEYS = new Set(SAFE_ITEM_SUMMARY_FIELDS);
+const getProtocolCompatiblePendingActions = ({actions, protocolVersion}) => {
+	if (protocolVersion !== HUB_LEGACY_PROTOCOL_VERSION) return actions;
+	return actions.filter(action =>
+		action?.contractVersion == null
+		&& action?.sourceCostState == null
+		&& action?.templateRegistryVersion == null,
+	);
+};
 const getSafeItemSummarySchema = () => ({
 	type: "object",
 	required: ["name", "source"],
@@ -1046,12 +1054,18 @@ export async function createHubApp ({
 
 	app.get("/api/campaigns/:campaignId/actions", {
 		preHandler: requireProtocolVersion,
-	}, async request => ({
-		actions: await store.pListPendingActions({
+	}, async request => {
+		const actions = await store.pListPendingActions({
 			accountId: request.hubAuth.account.id,
 			campaignId: request.params.campaignId,
-		}),
-	}));
+		});
+		return {
+			actions: getProtocolCompatiblePendingActions({
+				actions,
+				protocolVersion: request.headers["x-hub-protocol-version"],
+			}),
+		};
+	});
 
 	app.get("/api/campaigns/:campaignId/characters/:characterId/pending-actions", {
 		preHandler: requireProtocolVersion,
@@ -1066,13 +1080,19 @@ export async function createHubApp ({
 				},
 			},
 		},
-	}, async request => ({
-		actions: await store.pListCharacterPendingActions({
+	}, async request => {
+		const actions = await store.pListCharacterPendingActions({
 			accountId: request.hubAuth.account.id,
 			campaignId: request.params.campaignId,
 			characterId: request.params.characterId,
-		}),
-	}));
+		});
+		return {
+			actions: getProtocolCompatiblePendingActions({
+				actions,
+				protocolVersion: request.headers["x-hub-protocol-version"],
+			}),
+		};
+	});
 
 	app.get("/api/campaigns/:campaignId/characters/:characterId/outgoing-actions", {
 		preHandler: requirePeerSourceCostsProtocol,

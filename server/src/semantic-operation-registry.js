@@ -77,10 +77,7 @@ function isUsableLeveledSpell ({data, spell}) {
 		|| spell.isInnate === true
 	) return false;
 	const owner = findSpellOwnerClass({data, spell});
-	if (!owner) {
-		return (spell.prepared === true || spell.alwaysPrepared === true)
-			&& SPELLCASTING_ABILITIES.has(data.spellcasting?.ability);
-	}
+	if (!owner) return false;
 	const model = getClassSpellcastingModel(owner);
 	if (model === "known") return true;
 	if (model === "prepared") return spell.prepared === true || spell.alwaysPrepared === true;
@@ -108,8 +105,7 @@ function getSpellcastingAbility ({data, spell}) {
 		const fallback = CLASS_SPELLCASTING_ABILITIES.get(String(owner.name || "").toLowerCase());
 		if (fallback) return fallback;
 	}
-	const globalAbility = String(data.spellcasting?.ability || "").toLowerCase();
-	return SPELLCASTING_ABILITIES.has(globalAbility) ? globalAbility : null;
+	return null;
 }
 
 function getAbilityScore ({data, ability}) {

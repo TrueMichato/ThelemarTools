@@ -288,6 +288,61 @@ describe("peer source-cost memory authority", () => {
 		expect(new Set(accepted.eventIds).size).toBe(accepted.eventIds.length);
 	});
 
+	it("makes wounded, full, malformed, and missing target HP indistinguishable until acceptance", async () => {
+		const proposalShapes = [];
+		for (const scenario of [
+			{label: "wounded", hp: {current: 5, max: 30, effectiveMax: 30, temp: 0}, status: "applied"},
+			{label: "full", hp: {current: 30, max: 30, effectiveMax: 30, temp: 0}, status: "failed"},
+			{label: "malformed", hp: {current: "hidden", max: 30, temp: 0}, status: "failed"},
+			{label: "missing", hp: null, status: "failed"},
+		]) {
+			const ctx = await fixture();
+			const target = ctx.store._characters.get(ctx.target.id);
+			if (scenario.hp == null) delete target.data.hp;
+			else target.data.hp = structuredClone(scenario.hp);
+			const sourceBefore = structuredClone(ctx.store._characters.get(ctx.source.id));
+			const targetBefore = structuredClone(target);
+
+			const proposed = await ctx.propose();
+			proposalShapes.push({
+				status: proposed.operation.status,
+				sourceCostState: proposed.operation.sourceCostState,
+				effectLabel: proposed.operation.presentation.effectLabel,
+				targetName: proposed.operation.presentation.targetName,
+				canCancel: proposed.operation.capabilities.canCancel,
+			});
+			expect(ctx.store._characters.get(ctx.source.id)).toEqual(sourceBefore);
+			expect(ctx.store._characters.get(ctx.target.id)).toEqual(targetBefore);
+
+			const resolved = await ctx.resolve({operationId: proposed.operation.operationId});
+			expect(resolved.operation.status).toBe(scenario.status);
+			if (scenario.status === "applied") {
+				expect(resolved.operation.sourceCostState).toBe("consumed");
+				continue;
+			}
+			expect(resolved.operation).toMatchObject({
+				sourceCostState: "not_consumed",
+				failureCode: "TARGET_EFFECT_UNAVAILABLE",
+			});
+			expect(ctx.store._characters.get(ctx.source.id)).toEqual(sourceBefore);
+			expect(ctx.store._characters.get(ctx.target.id)).toEqual(targetBefore);
+			const [sourceView] = await ctx.store.pListCharacterOutgoingActions({
+				accountId: ctx.sourceOwner.account.id,
+				campaignId: ctx.campaign.id,
+				characterId: ctx.source.id,
+			});
+			expect(sourceView).toMatchObject({
+				actionId: proposed.operation.operationId,
+				status: "failed",
+				failureCode: "unavailable",
+				sourceCostState: "not_consumed",
+			});
+			expect(ctx.store._semanticOperations.get(proposed.operation.operationId).privateFailureCode)
+				.toBe("TARGET_EFFECT_UNAVAILABLE");
+		}
+		expect(new Set(proposalShapes.map(shape => JSON.stringify(shape))).size).toBe(1);
+	});
+
 	it.each(["reject", "cancel", "expire"])("%s is terminal and consumes nothing", async decision => {
 		const ctx = await fixture();
 		const proposed = await ctx.propose();
@@ -822,6 +877,32 @@ describe("peer source-cost memory authority", () => {
 		expect(invalid.statusCode).toBe(400);
 		expect(invalid.json()).toEqual({error: "INVALID_REQUEST"});
 
+		const storedTarget = ctx.store._characters.get(ctx.target.id);
+		storedTarget.data.hp.current = storedTarget.data.hp.max;
+		const fullHpCommandId = crypto.randomUUID();
+		const fullHpProposal = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${ctx.campaign.id}/actions`,
+			headers: headers(sourceSession, fullHpCommandId),
+			payload: {...proposal, commandId: fullHpCommandId},
+		});
+		expect(fullHpProposal.statusCode).toBe(201);
+		const fullHpResolveCommandId = crypto.randomUUID();
+		const fullHpResolution = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${ctx.campaign.id}/actions/${fullHpProposal.json().operation.operationId}/resolve`,
+			headers: headers(targetSession, fullHpResolveCommandId),
+			payload: {contractVersion: 1, commandId: fullHpResolveCommandId, decision: "accept"},
+		});
+		expect(fullHpResolution.statusCode).toBe(200);
+		expect(fullHpResolution.json().operation).toMatchObject({
+			status: "failed",
+			sourceCostState: "not_consumed",
+			failureCode: "TARGET_EFFECT_UNAVAILABLE",
+		});
+		expect(ctx.store._characters.get(ctx.source.id).data.spellcasting.spellSlots[1].current).toBe(1);
+		storedTarget.data.hp.current = 5;
+
 		const validCommandId = crypto.randomUUID();
 		const created = await app.inject({
 			method: "POST",
@@ -855,6 +936,20 @@ describe("peer source-cost memory authority", () => {
 			presentation: expect.objectContaining({effectLabel: "Cure Wounds", sourceName: "Aster"}),
 			capabilities: {canApprove: true, canReject: true},
 		})]);
+		const outdatedPending = await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${ctx.campaign.id}/characters/${ctx.target.id}/pending-actions`,
+			headers: {cookie: targetSession.cookie, "x-hub-protocol-version": "3"},
+		});
+		expect(outdatedPending.statusCode).toBe(200);
+		expect(outdatedPending.json()).toEqual({actions: []});
+		const outdatedGlobal = await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${ctx.campaign.id}/actions`,
+			headers: {cookie: targetSession.cookie, "x-hub-protocol-version": "3"},
+		});
+		expect(outdatedGlobal.statusCode).toBe(200);
+		expect(outdatedGlobal.json()).toEqual({actions: []});
 
 		const outdatedOutgoing = await app.inject({
 			method: "GET",
@@ -869,7 +964,7 @@ describe("peer source-cost memory authority", () => {
 		});
 		expect(outgoing.statusCode).toBe(200);
 		expect(outgoing.headers["cache-control"]).toBe("no-store");
-		expect(outgoing.json().actions).toEqual([{
+		expect(outgoing.json().actions).toEqual(expect.arrayContaining([{
 			actionId: operationId,
 			status: "proposed",
 			expiresAt: expect.any(String),
@@ -880,7 +975,13 @@ describe("peer source-cost memory authority", () => {
 			},
 			sourceCostState: "pending",
 			capabilities: {canCancel: true},
-		}]);
+		}]));
+		expect(outgoing.json().actions.find(action => action.actionId === fullHpProposal.json().operation.operationId))
+			.toMatchObject({
+				status: "failed",
+				sourceCostState: "not_consumed",
+				failureCode: "unavailable",
+			});
 		expect(JSON.stringify(outgoing.json())).not.toContain(ctx.target.id);
 		const targetCannotReadOutgoing = await app.inject({
 			method: "GET",

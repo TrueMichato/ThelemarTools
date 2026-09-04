@@ -62,12 +62,14 @@ export function isPeerSourceCostsPinCurrent ({
 		&& isCanonicalEqual(operation.rulesPin, rulesPin);
 }
 
-export function getPrivateAcceptanceFailureCode (error) {
+export function getPrivateAcceptanceFailureCode (error, {leg = "source"} = {}) {
+	if (error?.code === "OPERATION_STATE_INVALID") {
+		return leg === "target" ? "TARGET_EFFECT_UNAVAILABLE" : "SOURCE_COST_UNAVAILABLE";
+	}
 	if ([
 		"SOURCE_COST_UNAVAILABLE",
 		"SOURCE_OR_TARGET_UNAVAILABLE",
 		"RESOURCE_INSUFFICIENT",
-		"OPERATION_STATE_INVALID",
 	].includes(error?.code)) return "SOURCE_COST_UNAVAILABLE";
 	if ([
 		"HP_MAX_UNAVAILABLE",
@@ -131,6 +133,7 @@ export function getPeerSourceCostActionSummary (operation, {canCancel = operatio
 			),
 		},
 		sourceCostState: getPeerSourceCostState(operation.status),
+		...(operation.status === "failed" ? {failureCode: "unavailable"} : {}),
 		capabilities: {canCancel: operation.status === "proposed" && canCancel},
 	};
 }

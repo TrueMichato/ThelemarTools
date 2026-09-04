@@ -257,6 +257,9 @@ export class CharacterSheetPeerTargeting {
 					resultingCharacterRevision: sourceResult.resultingSourceCharacterRevision,
 					leg: sourceResult.leg || "source",
 					sourceCost: sourceResult.sourceCost,
+					...(sourceResult.leg === "combined"
+						? {operation: response?.operation?.operation}
+						: {}),
 				});
 			}
 			if (!this._isCurrent(token)) return false;

@@ -478,7 +478,9 @@ documents, private failure classes, or target effective deltas. The applied even
 mutually exclusive for a cost-bearing request.
 
 These shapes require Hub protocol 4. Protocol 3 clients must not ignore the source leg and then save its spent
-resource back. They receive `PROTOCOL_UPDATE_REQUIRED` before cost-bearing APIs or protocol-4 event delivery.
+resource back. Cost-bearing mutations, outgoing reads, and protocol-4 event delivery return
+`PROTOCOL_UPDATE_REQUIRED`; shared inbox reads retain legacy compatibility by omitting cost-bearing rows while
+preserving cost-free protocol-3 actions.
 
 The shared source-cost module defines `C`; ADR 0012 defines target effect `E`. Reconciliation is:
 

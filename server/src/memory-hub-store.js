@@ -1963,6 +1963,9 @@ export class MemoryHubStore {
 				out.targetRevisionObserved = operation.targetRevisionObserved;
 				out.rulesPin = copy(operation.rulesPin);
 			}
+			Object.assign(out, getPeerSourceCostActionSummary(operation, {
+				canCancel: accountId === operation.originActorAccountId || ["dm", "co_dm"].includes(role),
+			}));
 			const failureCode = getPeerSourceCostFailureForViewer({
 				operation,
 				accountId,
@@ -1971,9 +1974,6 @@ export class MemoryHubStore {
 				targetOwnerAccountId,
 			});
 			if (failureCode) out.failureCode = failureCode;
-			Object.assign(out, getPeerSourceCostActionSummary(operation, {
-				canCancel: accountId === operation.originActorAccountId || ["dm", "co_dm"].includes(role),
-			}));
 			if (operation.status === "applied") {
 				out.leg = operation.sourceCharacterId === operation.targetCharacterId ? "combined" : "target";
 				out.operationLegKey = `${operation.id}/${out.leg}`;
@@ -2266,13 +2266,6 @@ export class MemoryHubStore {
 			operationId,
 			effectResolutionSeed,
 		});
-		if (
-			isCostBearing
-			&& isCanonicalEqual(
-				applySemanticOperation({data: target.data, operation: derived.operation}),
-				target.data,
-			)
-		) throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
 		const expiresAt = new Date(now.getTime() + this._semanticProposalTtlMs).toISOString();
 		const semanticOperation = {
 			id: operationId,
@@ -2571,9 +2564,8 @@ export class MemoryHubStore {
 					validateCloudCharacterData(targetNxtData);
 					if (source.id !== target.id && sourceNxtData) validateCloudCharacterData(sourceNxtData);
 				} catch (error) {
-					privateFailureCode = error.code === "TARGET_EFFECT_UNAVAILABLE"
-						? error.code
-						: getPrivateAcceptanceFailureCode(error) || "TARGET_EFFECT_UNAVAILABLE";
+					privateFailureCode = getPrivateAcceptanceFailureCode(error, {leg: "target"});
+					if (!privateFailureCode) throw error;
 				}
 			}
 			if (privateFailureCode && !operation.sourceCost) {

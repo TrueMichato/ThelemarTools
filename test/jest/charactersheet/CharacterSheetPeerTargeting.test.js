@@ -293,6 +293,55 @@ describe("Character Sheet peer targeting", () => {
 		});
 	});
 
+	it("adopts the combined operation when self-target cancellation loses to acceptance", async () => {
+		await pFlush();
+		controller._outgoing.set("operation-self", controller._normalizeOutgoing({
+			actionId: "operation-self",
+			sourceCharacterId: "source-character",
+			status: "proposed",
+			presentation: {effectLabel: "Cure Wounds", targetName: "Aster", outcomeLabel: "Healing"},
+			sourceCostState: "pending",
+			canCancel: true,
+		}));
+		const sourceCost = {
+			version: 1,
+			components: [{kind: "spell_slot", pool: "standard", level: 1, amount: 1}],
+		};
+		const operation = {
+			operationId: "operation-self",
+			kind: "hp.heal",
+			version: 1,
+			targetCharacterId: "source-character",
+			arguments: {amount: 8},
+		};
+		api.pResolveStructuredAction.mockResolvedValue({
+			operation: {
+				operationId: "operation-self",
+				status: "applied",
+				operation,
+				sourceResult: {
+					appliedEventId: "combined-event",
+					resultingSourceCharacterRevision: 2,
+					leg: "combined",
+					sourceCost,
+				},
+			},
+			watermarks: [{characterId: "source-character", sequence: 21}],
+		});
+
+		expect(await controller.pCancel({actionId: "operation-self"})).toBe(true);
+		expect(onAuthoritativeApproval).toHaveBeenCalledWith({
+			actionId: "operation-self",
+			characterId: "source-character",
+			eventId: "combined-event",
+			leg: "combined",
+			sequence: 21,
+			sourceCost,
+			operation,
+			resultingCharacterRevision: 2,
+		});
+	});
+
 	it("refetches instead of applying an outgoing list read stale to realtime state", async () => {
 		await pFlush();
 		const stale = makeDeferred();

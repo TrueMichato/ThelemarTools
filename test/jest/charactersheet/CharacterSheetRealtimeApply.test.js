@@ -411,6 +411,29 @@ describe("Live campaign effects on an open Character Sheet", () => {
 		expect(state.getSpellSlotsCurrent(1)).toBe(1);
 	});
 
+	it("adopts a combined self operation from HTTP before a missed realtime event, then dedupes the replay", async () => {
+		const {clients, host, state} = await pMakeHarness();
+		const event = makeCombinedEvent();
+		await host._onHubAuthoritativeApproval({
+			actionId: "operation-1",
+			characterId: "character-1",
+			eventId: event.id,
+			sequence: event.sequence,
+			operation: event.payload.operation,
+			resultingCharacterRevision: event.payload.resultingCharacterRevision,
+			leg: "combined",
+			sourceCost: event.payload.sourceCost,
+		});
+		await pFlush();
+		expect(state.getCurrentHp()).toBe(34);
+		expect(state.getSpellSlotsCurrent(1)).toBe(1);
+
+		clients[0].emit("event", event);
+		await pFlush();
+		expect(state.getCurrentHp()).toBe(34);
+		expect(state.getSpellSlotsCurrent(1)).toBe(1);
+	});
+
 	it("routes a failed lifecycle without mutating the character", async () => {
 		const {clients, peerTargeting, state} = await pMakeHarness();
 		const before = state.toJson();
