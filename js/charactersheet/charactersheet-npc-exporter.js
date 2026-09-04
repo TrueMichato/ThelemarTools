@@ -6719,7 +6719,9 @@ class CharacterSheetNpcExporter {
 		const baseItemType = CharacterSheetNpcExporter._getBaseItemCatalogType(item?.baseItem, state);
 		if (baseItemType) return {type: baseItemType};
 
-		const label = (candidateOrder[0] || "").trim().toLowerCase();
+		// Once no candidate is a legal schema code, prefer the raw semantic label. An invalid
+		// legacy `typeCode` (for example `"W"`) must not mask a recoverable `type: "wondrous"`.
+		const label = (rawType || candidateOrder[0] || "").trim().toLowerCase();
 		// The item's OWN original source (captured before the exporter rewrites `source` to
 		// the companion-document source) is the only authoritative edition signal items carry.
 		const originalSource = typeof item?.source === "string" ? item.source : null;

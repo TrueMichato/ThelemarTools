@@ -313,6 +313,14 @@ describe("v20.1 — canonicalizing a companion item's type against the real sche
 		expect(out.type).toBe("M");
 	});
 
+	it("does not let an invalid legacy typeCode mask a recoverable raw label", () => {
+		const warnings = [];
+		const out = sanitize({name: "Legacy Relic", type: "wondrous", typeCode: "W", rarity: "rare"}, {warnings});
+		expect(out.type).toBeUndefined();
+		expect(out.wondrous).toBe(true);
+		expect(warnings).toEqual([]);
+	});
+
 	it("never emits a null type — an omitted optional property is deleted, not nulled", () => {
 		const out = sanitize({name: "No Type Here", type: "weapon", rarity: "none"});
 		expect(out.type).not.toBeNull();
