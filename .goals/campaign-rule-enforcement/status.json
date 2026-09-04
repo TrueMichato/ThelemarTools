@@ -61,6 +61,11 @@
       "iteration": 7,
       "verdict": "FAIL",
       "summary": "The PR body misstates the identical data-gate count and overstates a Chromium run that completed with two flaky tests."
+    },
+    {
+      "iteration": 8,
+      "verdict": "PASS",
+      "summary": "The corrected PR body, owner-level mutation evidence, exact product ancestry and scope, terminal CI, draft state, and clean handoff all pass with the documented 424-link data exception."
     }
   ]
 }
