@@ -3,6 +3,8 @@ import {EncounterBuilderComponentBestiary} from "./bestiary/bestiary-encounterbu
 import {EncounterBuilderUiBestiary} from "./bestiary/bestiary-encounterbuilder-ui.js";
 import {EncounterBuilderSublistPlugin} from "./bestiary/bestiary-encounterbuilder-sublistplugin.js";
 import {RenderCompareCreatures} from "./bestiary/bestiary-compare.js";
+import {BESTIARY_QUICK_ACTIONS_REGISTRY} from "./bestiary/bestiary-quick-actions-engine.js";
+import {BestiaryQuickActionsUi} from "./bestiary/bestiary-quick-actions-ui.js";
 import {RenderBestiary} from "./render-bestiary.js";
 import {EncounterBuilderRulesClassic} from "./encounterbuilder/rules/encounterbuilder-rules-classic.js";
 import {EncounterBuilderRulesOne} from "./encounterbuilder/rules/encounterbuilder-rules-one.js";
@@ -478,6 +480,12 @@ class BestiaryPage extends ListPageMultiSource {
 			fnHasToken: Renderer.monster.hasToken.bind(Renderer.monster),
 			fnGetTokenUrl: Renderer.monster.getTokenUrl.bind(Renderer.monster),
 		});
+
+		BESTIARY_QUICK_ACTIONS_REGISTRY.subscribe(({key}) => {
+			if (!this._lastRender.entityBase) return;
+			if (key !== BESTIARY_QUICK_ACTIONS_REGISTRY.getKey({monster: this._lastRender.entityBase})) return;
+			this._reRenderCurrent();
+		});
 	}
 
 	get _bindOtherButtonsOptions () {
@@ -874,7 +882,7 @@ class BestiaryPage extends ListPageMultiSource {
 	}
 
 	_reRenderCurrent () {
-		const mon = this._lastRender.entity;
+		const mon = this._lastRender.entityBase || this._lastRender.entity;
 		if (!mon) {
 			// Nothing loaded yet — just make sure the fluff pane is hidden.
 			this._setWideModeVisuals({isActive: false});
@@ -1038,6 +1046,10 @@ class BestiaryPage extends ListPageMultiSource {
 	}
 
 	_renderStatblock (mon, {isScaledCr = false, isScaledSpellSummon = false, isScaledClassSummon = false} = {}) {
+		const monBase = mon;
+		mon = BESTIARY_QUICK_ACTIONS_REGISTRY.getOverride({monster: monBase});
+
+		this._lastRender.entityBase = monBase;
 		this._lastRender.entity = mon;
 		this._lastRender.isScaledCr = isScaledCr;
 		this._lastRender.isScaledSpellSummon = isScaledSpellSummon;
@@ -1065,7 +1077,7 @@ class BestiaryPage extends ListPageMultiSource {
 				if (this._btnProf) this._wrpBtnProf.vee.appends(this._btnProf);
 				this._tokenDisplay.doShow();
 			},
-			fnPopulate: () => this._renderStatblock_doBuildStatsTab({mon, isScaledCr, isScaledSpellSummon, isScaledClassSummon}),
+			fnPopulate: () => this._renderStatblock_doBuildStatsTab({mon, monBase, isScaledCr, isScaledSpellSummon, isScaledClassSummon}),
 			isVisible: true,
 		});
 
@@ -1135,6 +1147,7 @@ class BestiaryPage extends ListPageMultiSource {
 	_renderStatblock_doBuildStatsTab (
 		{
 			mon,
+			monBase,
 			isScaledCr,
 			isScaledSpellSummon,
 			isScaledClassSummon,
@@ -1253,8 +1266,23 @@ class BestiaryPage extends ListPageMultiSource {
 			Renderer.get().addPlugin("string_@dc", pluginDc);
 			Renderer.get().addPlugin("dice", pluginDice);
 
-			this._pgContent.empty().appends(RenderBestiary.getRenderedCreature(mon, {btnScaleCr, btnResetScaleCr, selSummonSpellLevel, selSummonClassLevel, classLevelScalerClass: mon.summonedByClass}));
+			this._pgContent.empty().appends(RenderBestiary.getRenderedCreature(mon, {
+				btnScaleCr,
+				btnResetScaleCr,
+				selSummonSpellLevel,
+				selSummonClassLevel,
+				classLevelScalerClass: mon.summonedByClass,
+				htmlControlRhs: BestiaryQuickActionsUi.getButtonHtml({monster: monBase}),
+			}));
 			Renderer.statblockCollapse.apply(this._pgContent);
+			this._pgContent.querySelector("[data-bqa-open]")
+				?.addEventListener("click", evt => {
+					evt.stopPropagation();
+					BestiaryQuickActionsUi.pOpen({
+						monster: monBase,
+						pFnOnSave: savedMonster => this._pAddQuickActionsSavedMonster(savedMonster),
+					}).then(null);
+				});
 		} finally {
 			Renderer.get().removePlugin("dice", pluginDice);
 			Renderer.get().removePlugin("string_@dc", pluginDc);
@@ -1262,6 +1290,26 @@ class BestiaryPage extends ListPageMultiSource {
 		// endregion
 
 		this._tokenDisplay.render(mon);
+	}
+
+	async _pAddQuickActionsSavedMonster (savedMonster) {
+		const ixExisting = this._dataList.findIndex(mon =>
+			mon.name === savedMonster.name
+			&& mon.source === savedMonster.source);
+		if (!~ixExisting) {
+			this._addData({monster: [savedMonster]});
+			return;
+		}
+
+		const existing = this._dataList[ixExisting];
+		Object.keys(existing).forEach(key => delete existing[key]);
+		Object.assign(existing, savedMonster);
+		Renderer.monster.updateParsed(existing);
+		if (this._lastRender.entityBase?.name === existing.name && this._lastRender.entityBase?.source === existing.source) {
+			this._reRenderCurrent();
+		}
+		this.primaryLists.forEach(list => list.update());
+		this.handleFilterChange();
 	}
 
 	static _addSpacesToDiceExp (exp) {
