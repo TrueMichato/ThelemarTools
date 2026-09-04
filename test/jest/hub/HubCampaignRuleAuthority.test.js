@@ -208,7 +208,10 @@ describe("campaign rule write authority", () => {
 		});
 		const eventCount = store._events.length;
 		for (const {basis, protocolVersion} of [
+			{basis: {kind: "campaign", settingsDigest: "digest"}, protocolVersion: "4"},
 			{basis: {kind: "detached", settingsDigest: "digest"}, protocolVersion: "4"},
+			{basis: {kind: "campaign", rulesVersionId: "rules-stale", settingsDigest: "digest"}, protocolVersion: "4"},
+			{basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}, protocolVersion: null},
 			{basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}, protocolVersion: "3"},
 		]) {
 			await expect(store.pPatchCharacter({
@@ -227,5 +230,17 @@ describe("campaign rule write authority", () => {
 		const unchanged = store._characters.get(created.character.id);
 		expect(unchanged.revision).toBe(1);
 		expect(store._events).toHaveLength(eventCount);
+		const patched = await store.pPatchCharacter({
+			accountId: account.id,
+			sessionId: session.id,
+			characterId: created.character.id,
+			baseRevision: 1,
+			leaseEpoch: lease.epoch,
+			patches: [{op: "replace", path: "/carry", value: characterData(active.rulesVersion.id).carry}],
+			protocolVersion: "4",
+			idempotencyKey: "patch-current",
+		});
+		expect(patched.character.revision).toBe(2);
+		expect(store._events.length).toBeGreaterThan(eventCount);
 	});
 });

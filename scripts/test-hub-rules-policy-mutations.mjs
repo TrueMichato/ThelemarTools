@@ -10,9 +10,9 @@ async function loadVariant ({name, mutations = {}}) {
 	await fs.cp(path.resolve("js/hub"), hubDir, {recursive: true});
 	await fs.mkdir(path.join(root, "js"), {recursive: true});
 	await fs.cp(path.resolve("js/hub"), path.join(root, "js/hub"), {recursive: true});
-	await fs.mkdir(path.join(root, "server/src"), {recursive: true});
-	await fs.cp(path.resolve("server/src/campaign-rule-authority.js"), path.join(root, "server/src/campaign-rule-authority.js"));
-	await fs.cp(path.resolve("server/src/hub-store-error.js"), path.join(root, "server/src/hub-store-error.js"));
+	await fs.mkdir(path.join(root, "server"), {recursive: true});
+	await fs.cp(path.resolve("server/src"), path.join(root, "server/src"), {recursive: true});
+	await fs.symlink(path.resolve("node_modules"), path.join(root, "node_modules"), "dir");
 	await fs.writeFile(path.join(root, "package.json"), JSON.stringify({type: "module"}));
 	for (const [fileName, mutate] of Object.entries(mutations)) {
 		const filePath = path.join(root, fileName.startsWith("server/") ? fileName : `hub/${fileName}`);
@@ -28,8 +28,32 @@ async function loadVariant ({name, mutations = {}}) {
 		capabilities: await pImport("hub-capabilities.js"),
 		manager: await pImport("hub-rules-policy-manager.js"),
 		authority: await import(`${pathToFileURL(path.join(root, "server/src/campaign-rule-authority.js")).href}?variant=${encodeURIComponent(name)}`),
+		pImportServer: fileName => import(`${pathToFileURL(path.join(root, "server/src", fileName)).href}?variant=${encodeURIComponent(name)}`),
 		cleanup: () => fs.rm(root, {recursive: true, force: true}),
 	};
+}
+
+async function probeMemoryStoreFence ({rules, pImportServer}) {
+	const {MemoryHubStore} = await pImportServer("memory-hub-store.js");
+	const store = new MemoryHubStore();
+	const account = await store.pUpsertOAuthAccount({provider: "test", providerSubject: "mutant", displayName: "Mutant"});
+	const campaign = (await store.pCreateCampaign({accountId: account.id, name: "Mutant", idempotencyKey: "campaign"})).campaign;
+	await store.pCreateAndActivateRulesPolicy({
+		accountId: account.id,
+		campaignId: campaign.id,
+		policy: rules.createDefaultCampaignRulesPolicy(),
+		expectedActiveRulesVersionId: null,
+		idempotencyKey: "rules",
+	});
+	await assert.rejects(store.pCreateCharacter({
+		accountId: account.id,
+		campaignId: campaign.id,
+		clientImportId: "stale",
+		schemaVersion: 1,
+		data: {carry: {basis: {kind: "campaign", rulesVersionId: "stale", settingsDigest: "digest"}}},
+		protocolVersion: "4",
+		idempotencyKey: "character",
+	}), error => error?.code === "POLICY_VERSION_STALE");
 }
 
 async function probeEvaluatorFailClosed ({rules, evaluator}) {
@@ -386,6 +410,16 @@ const MUTANTS = [
 			"server/src/campaign-rule-authority.js": source => source.replace(
 				"if (data.carry?.basis?.kind !== \"campaign\" || typeof data.carry.basis.rulesVersionId !== \"string\" || !data.carry.basis.rulesVersionId) {",
 				"if (false) {",
+			),
+		},
+	},
+	{
+		name: "memory-store-policy-fence-disabled",
+		probe: probeMemoryStoreFence,
+		mutations: {
+			"server/src/memory-hub-store.js": source => source.replace(
+				"if (data?.carry) assertCampaignRuleWriteFence({rulesVersion, data, protocolVersion});",
+				"if (false) assertCampaignRuleWriteFence({rulesVersion, data, protocolVersion});",
 			),
 		},
 	},

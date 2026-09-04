@@ -229,7 +229,7 @@ function blocked ({surface, personalSettings, rulesVersion = null, code, ruleId 
  */
 export function evaluateCampaignRules (input = {}) {
 	if (!input || typeof input !== "object" || Array.isArray(input)) {
-		return blocked({surface: "unknown", personalSettings: {}, code: "RULE_EVALUATOR_INPUT_INVALID"});
+		return blocked({surface: "characterOpen", personalSettings: {}, code: "RULE_EVALUATOR_INPUT_INVALID"});
 	}
 	const unknownInputKeys = Object.keys(input).filter(key => !_INPUT_KEYS.has(key));
 	const surface = input.surface || "characterOpen";

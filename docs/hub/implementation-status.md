@@ -128,8 +128,8 @@ pass. Only the host-operations proof and physical one-DM/two-player game day rem
   regions, labeled form controls, WCAG AA primary-button contrast in day/night themes, and 44 px entry targets.
 - Immutable campaign brew/rules versions and early page context activation.
 - Capability-gated, versioned campaign rules catalog/selection with before/after review, immutable rollback,
-  schema-v1 compatibility, stale-base fencing, and privacy-safe read-only member summaries; enforcement remains
-  explicitly out of scope.
+  schema-v1 compatibility, stale-base fencing, privacy-safe read-only member summaries, and enforced carry
+  calculation/policy-identity fencing. Other settings remain advisory and content gating remains planned.
 - Whole-site active campaign selection with same-profile convergence and independent device choices; local
   Character Sheets, DM Screens, personal brew, and signed-out pages never inherit stale campaign state.
 - Private per-DM workspaces using the existing Board blob and lease fencing.

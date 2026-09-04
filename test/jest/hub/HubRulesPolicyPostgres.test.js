@@ -315,7 +315,10 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 		});
 		const evidenceBefore = await pGetPostgresEvidence(pool, campaign.id);
 		for (const {basis, protocolVersion} of [
+			{basis: {kind: "campaign", settingsDigest: "digest"}, protocolVersion: "4"},
 			{basis: {kind: "detached", settingsDigest: "digest"}, protocolVersion: "4"},
+			{basis: {kind: "campaign", rulesVersionId: crypto.randomUUID(), settingsDigest: "digest"}, protocolVersion: "4"},
+			{basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}, protocolVersion: null},
 			{basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}, protocolVersion: "3"},
 		]) {
 			await expect(store.pPatchCharacter({
@@ -334,6 +337,53 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 		const unchanged = await pool.query(`SELECT revision FROM hub.characters WHERE id = $1`, [created.character.id]);
 		expect(Number(unchanged.rows[0].revision)).toBe(created.character.revision);
 		expect(await pGetPostgresEvidence(pool, campaign.id)).toEqual(evidenceBefore);
+		const patched = await store.pPatchCharacter({
+			accountId: account.id,
+			sessionId: session.id,
+			characterId: created.character.id,
+			baseRevision: created.character.revision,
+			leaseEpoch: lease.epoch,
+			patches: [{
+				op: "replace",
+				path: "/carry",
+				value: {schemaVersion: 1, basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}},
+			}],
+			protocolVersion: "4",
+			idempotencyKey: command("rules-patch-current"),
+		});
+		expect(patched.character.revision).toBe(created.character.revision + 1);
+
+		const destination = (await store.pCreateCampaign({
+			accountId: account.id,
+			name: "Rules destination",
+			idempotencyKey: command("rules-destination-campaign"),
+		})).campaign;
+		await store.pCreateAndActivateRulesPolicy({
+			accountId: account.id,
+			campaignId: destination.id,
+			policy: createDefaultCampaignRulesPolicy(),
+			expectedActiveRulesVersionId: null,
+			idempotencyKey: command("rules-destination-policy"),
+		});
+		await store.pReleaseCharacterLease({
+			accountId: account.id,
+			sessionId: session.id,
+			characterId: created.character.id,
+		});
+		const cloned = await store.pCloneCharacter({
+			accountId: account.id,
+			characterId: created.character.id,
+			campaignId: destination.id,
+			idempotencyKey: command("rules-destination-clone"),
+		});
+		expect(cloned.character.data.carry).toBeUndefined();
+		const moved = await store.pMoveCharacter({
+			accountId: account.id,
+			characterId: cloned.character.id,
+			campaignId: campaign.id,
+			idempotencyKey: command("rules-destination-move"),
+		});
+		expect(moved.character.data.carry).toBeUndefined();
 	});
 
 	it("serializes concurrent writers against one base and rolls the stale transaction back fully", async () => {

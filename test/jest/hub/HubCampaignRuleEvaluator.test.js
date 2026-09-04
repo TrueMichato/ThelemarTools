@@ -60,11 +60,20 @@ describe("campaign rule evaluator", () => {
 	});
 
 	it("leaves explicit local mode unchanged", () => {
-		expect(evaluate(null)).toMatchObject({
+		const decision = evaluate(null);
+		expect(decision).toMatchObject({
 			status: "inactive",
 			blocking: false,
 			effectiveSettings: {enableTgtt: false},
 		});
+		expect(decision.surface).toBe("characterOpen");
+		expect(getCampaignSettingsOverlayFromRulesVersion(null)).toBeNull();
+	});
+
+	it("emits a contract-valid blocked decision for malformed top-level input", () => {
+		const decision = evaluateCampaignRules(null);
+		expect(decision).toMatchObject({status: "blocked", surface: "characterOpen"});
+		expect(() => structuredClone(decision)).not.toThrow();
 	});
 
 	it.each([
