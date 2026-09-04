@@ -1,4 +1,6 @@
-export const CAMPAIGN_RULES_POLICY_CAPABILITY = "campaign.rules_policy.v1";
+import {HUB_CAPABILITY_CAMPAIGN_RULES_POLICY} from "./hub-capabilities.js";
+
+export const CAMPAIGN_RULES_POLICY_CAPABILITY = HUB_CAPABILITY_CAMPAIGN_RULES_POLICY;
 export const CAMPAIGN_RULES_POLICY_SCHEMA_VERSION = 2;
 export const CAMPAIGN_RULES_CATALOG_VERSION = 1;
 
@@ -202,7 +204,15 @@ export const CAMPAIGN_RULES_CATALOG = Object.freeze([
 		isSelectable: true,
 		parameter: {key: "enabled", type: "boolean", label: "Enable encumbrance tiers", default: true},
 		implementationStatus: SURFACES_TGTT,
-		compatibility: {requires: [], conflicts: []},
+		compatibility: {
+			requires: [{
+				id: "tgtt.carry-weight",
+				parameter: "enabled",
+				equals: true,
+				when: {parameter: "enabled", equals: true},
+			}],
+			conflicts: [],
+		},
 	},
 	{
 		id: "tgtt.jumping",
@@ -465,7 +475,7 @@ export function createDefaultCampaignRulesPolicy () {
 
 export function getCampaignRulesPolicy ({schemaVersion, rules}) {
 	if (schemaVersion === CAMPAIGN_RULES_POLICY_SCHEMA_VERSION || rules?.schemaVersion === CAMPAIGN_RULES_POLICY_SCHEMA_VERSION) {
-		return normalizeCampaignRulesPolicy(rules);
+		return normalizeCampaignRulesPolicyInternal(rules, {isValidateCompatibility: false});
 	}
 	return adaptLegacyCampaignRules(rules);
 }
@@ -496,9 +506,9 @@ export function getCampaignRulesPolicySummary (policy) {
 	};
 }
 
-export function diffCampaignRulesPolicies ({before, after}) {
+export function diffCampaignRulesPolicies ({before, after, isAfterStoredPolicy = false}) {
 	const beforeMap = getSelectionMap(normalizeCampaignRulesPolicyInternal(before, {isValidateCompatibility: false}));
-	const afterNormalized = normalizeCampaignRulesPolicy(after);
+	const afterNormalized = normalizeCampaignRulesPolicyInternal(after, {isValidateCompatibility: !isAfterStoredPolicy});
 	return afterNormalized.rules.flatMap(selection => {
 		const definition = CATALOG_BY_ID.get(selection.id);
 		const key = definition.parameter.key;

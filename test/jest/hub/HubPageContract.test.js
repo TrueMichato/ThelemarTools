@@ -313,6 +313,7 @@ describe("campaign hub pages", () => {
 	});
 
 	it("provides an accessible, capability-gated rules library and privacy-safe member summary", () => {
+		const source = read("js/hub/hub-page.js");
 		for (const id of [
 			"campaign-policy-summary",
 			"campaign-policy-summary-status",
@@ -335,15 +336,21 @@ describe("campaign hub pages", () => {
 		]) expect(campaignHtml).toContain(`id="${id}"`);
 		expect(campaignHtml).toContain("role=\"search\"");
 		expect(campaignHtml).toContain("aria-live=\"polite\"");
-		expect(rulesPolicyManager).toContain("CAMPAIGN_RULES_POLICY_CAPABILITY");
+		expect(source).toContain("HUB_CAPABILITY_CAMPAIGN_RULES_POLICY");
+		expect(source).toContain("pLoadHubCapabilityModule");
+		expect(source).toContain("pImport: () => import(\"./hub-rules-policy-manager.js\")");
+		expect(source).not.toContain("from \"./hub-rules-policy-manager.js\"");
+		expect(rulesPolicyManager).toContain("this._isCapabilityEnabled");
 		expect(rulesPolicyManager).toContain("setHidden(this._legacyForm, true)");
 		expect(rulesPolicyManager).not.toContain("innerHTML");
 	});
 
 	it("covers loading, empty, error, offline, conflict, rollback, and long-list rule states", () => {
+		const source = read("js/hub/hub-page.js");
 		expect(campaignHtml).toContain("Loading rules library...");
 		expect(campaignHtml).toContain("No rules match these filters.");
 		expect(rulesPolicyManager).toContain("The rules library could not be loaded.");
+		expect(source).toContain("Rules library unavailable. The existing rules editor remains available");
 		expect(rulesPolicyManager).toContain("window.addEventListener(\"offline\"");
 		expect(rulesPolicyManager).toContain("Rules changed elsewhere. Your draft is preserved");
 		expect(campaignHtml).toContain("Activate previous version");

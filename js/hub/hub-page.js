@@ -1,7 +1,11 @@
 import {HubApiClient, HubApiError} from "./hub-api-client.js";
 import {HubActiveCampaignCoordinator} from "./hub-active-campaign-coordinator.js";
 import {HubActiveCampaignSwitcher} from "./hub-active-campaign-switcher.js";
-import {HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT} from "./hub-capabilities.js";
+import {
+	HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT,
+	HUB_CAPABILITY_CAMPAIGN_RULES_POLICY,
+	pLoadHubCapabilityModule,
+} from "./hub-capabilities.js";
 import {HubRealtimeClient} from "./hub-realtime-client.js";
 import {renderHubActivityRows} from "./hub-activity-render.js";
 import {
@@ -23,7 +27,6 @@ import {
 	getAwardCommandFingerprint,
 } from "./hub-item-award.js";
 const api = new HubApiClient();
-let campaignRulesPolicyModule = null;
 
 /**
  * Lightweight Hub shells keep a device-local active campaign selection, but must never fetch the
@@ -951,7 +954,6 @@ async function pInitHubIndex ({session}) {
 async function pInitCampaign ({session}) {
 	const campaignId = new URLSearchParams(window.location.search).get("id");
 	if (!campaignId) throw new HubApiError({code: "CAMPAIGN_NOT_FOUND", status: 404});
-	campaignRulesPolicyModule = await import("./hub-rules-policy-manager.js");
 	let campaign;
 	try {
 		campaign = await api.pGetCampaign({campaignId});
@@ -1180,7 +1182,65 @@ function renderCampaignContext (context) {
 			? `${context.rulesVersion.rules.exhaustionRules} exhaustion · version ${context.rulesVersion.version}`
 			: "Not published";
 	}
-	campaignRulesPolicyModule?.renderCampaignPolicySummary({context});
+	renderCampaignPolicySummary({context});
+}
+
+function renderCampaignPolicySummary ({context}) {
+	const list = document.getElementById("campaign-policy-summary-list");
+	const status = document.getElementById("campaign-policy-summary-status");
+	if (!list || !status) return;
+	const version = context?.rulesVersion;
+	list.replaceChildren();
+	if (!version) {
+		status.textContent = "No campaign policy has been published.";
+		setHidden(list, true);
+		return;
+	}
+	status.textContent = `Version ${version.version}. Campaign choices are temporary overlays and do not change personal settings.`;
+	setHidden(list, false);
+	for (const rule of version.policySummary?.rules || []) {
+		const item = document.createElement("div");
+		item.className = "hub-policy-summary__item";
+		const term = document.createElement("dt");
+		term.textContent = rule.title;
+		const description = document.createElement("dd");
+		description.textContent = `${rule.value} · ${rule.supportLabel}`;
+		item.append(term, description);
+		list.append(item);
+	}
+}
+
+function renderCampaignRulesPolicyUnavailable () {
+	const root = document.getElementById("campaign-rules-policy-manager");
+	const loading = document.getElementById("campaign-rules-policy-loading");
+	const content = document.getElementById("campaign-rules-policy-content");
+	const legacyForm = document.getElementById("campaign-rules-form");
+	if (!root || !loading) return;
+	setHidden(root, false);
+	setHidden(content, true);
+	setHidden(legacyForm, false);
+	loading.textContent = "Rules library unavailable. The existing rules editor remains available; no campaign settings were changed.";
+	loading.classList.add("hub-inline-status--error");
+	root.setAttribute("aria-busy", "false");
+}
+
+async function pInitCampaignRulesPolicySurface (options) {
+	const loaded = await pLoadHubCapabilityModule({
+		capability: HUB_CAPABILITY_CAMPAIGN_RULES_POLICY,
+		pGetMeta: () => api.pGetMeta(),
+		pImport: () => import("./hub-rules-policy-manager.js"),
+	});
+	if (loaded.status === "disabled") return null;
+	if (loaded.status === "unavailable") {
+		renderCampaignRulesPolicyUnavailable();
+		return null;
+	}
+	try {
+		return await loaded.module.pInitCampaignRulesPolicy({...options, isCapabilityEnabled: true});
+	} catch {
+		renderCampaignRulesPolicyUnavailable();
+		return null;
+	}
 }
 
 function renderMemberList ({campaign, campaignId, members, session, pRefresh}) {
@@ -1574,7 +1634,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		document.getElementById("campaign-rule-critical").checked = !!activeRules.thelemar_criticalRolls;
 	}
 	const rulesPolicyManagerPromise = isDm
-		? campaignRulesPolicyModule.pInitCampaignRulesPolicy({
+		? pInitCampaignRulesPolicySurface({
 			api,
 			campaignId,
 			context,

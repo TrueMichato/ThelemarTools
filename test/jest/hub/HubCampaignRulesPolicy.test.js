@@ -153,6 +153,32 @@ describe("Campaign rules policy catalog", () => {
 		const validTgttOff = getPolicyWith("tgtt.enabled", false);
 		validTgttOff.rules.find(rule => rule.id === "rules.exhaustion.system").parameters.system = "2024";
 		expect(normalizeCampaignRulesPolicy(validTgttOff)).toEqual(validTgttOff);
+
+		const carryOff = getPolicyWith("tgtt.carry-weight", false);
+		expect(() => normalizeCampaignRulesPolicy(carryOff)).toThrow(expect.objectContaining({
+			code: "RULES_COMBINATION_UNSUPPORTED",
+			details: {ruleId: "tgtt.encumbrance-tiers", requiresRuleId: "tgtt.carry-weight"},
+		}));
+		carryOff.rules.find(rule => rule.id === "tgtt.encumbrance-tiers").parameters.enabled = false;
+		expect(normalizeCampaignRulesPolicy(carryOff)).toEqual(carryOff);
+
+		const legacyCarryCombination = {
+			thelemar_carryWeight: false,
+			thelemar_encumbranceTiers: true,
+		};
+		expect(projectCampaignSettings({schemaVersion: 1, rules: legacyCarryCombination})).toEqual({
+			...DEFAULT_CAMPAIGN_SETTINGS,
+			...legacyCarryCombination,
+		});
+		const historicalV2 = createDefaultCampaignRulesPolicy();
+		historicalV2.rules.find(rule => rule.id === "tgtt.carry-weight").parameters.enabled = false;
+		expect(() => normalizeCampaignRulesPolicy(historicalV2)).toThrow(expect.objectContaining({
+			code: "RULES_COMBINATION_UNSUPPORTED",
+		}));
+		expect(projectCampaignSettings({schemaVersion: 2, rules: historicalV2})).toEqual({
+			...DEFAULT_CAMPAIGN_SETTINGS,
+			thelemar_carryWeight: false,
+		});
 	});
 
 	it("produces bounded player summaries and explainable before/after diffs", () => {
@@ -166,6 +192,24 @@ describe("Campaign rules policy catalog", () => {
 		expect(diffCampaignRulesPolicies({before, after})).toEqual([{
 			ruleId: "tgtt.jumping",
 			title: "Thelemar jumping",
+			before: "On",
+			after: "Off",
+		}]);
+	});
+
+	it("diffs already-stored legacy targets compatibly without weakening publication validation", () => {
+		const active = createDefaultCampaignRulesPolicy();
+		const historical = adaptLegacyCampaignRules({enableTgtt: false});
+		expect(() => diffCampaignRulesPolicies({before: active, after: historical})).toThrow(expect.objectContaining({
+			code: "RULES_COMBINATION_UNSUPPORTED",
+		}));
+		expect(diffCampaignRulesPolicies({
+			before: active,
+			after: historical,
+			isAfterStoredPolicy: true,
+		})).toEqual([{
+			ruleId: "tgtt.enabled",
+			title: "Thelemar rules",
 			before: "On",
 			after: "Off",
 		}]);

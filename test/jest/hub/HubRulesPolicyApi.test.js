@@ -143,7 +143,11 @@ describe("Campaign rules policy API", () => {
 			campaignId: campaign.id,
 			version: 1,
 			schemaVersion: 1,
-			rules: {enableTgtt: false},
+			rules: {
+				enableTgtt: false,
+				thelemar_carryWeight: false,
+				thelemar_encumbranceTiers: true,
+			},
 			createdAt: "2026-01-01T00:00:00.000Z",
 		};
 		store._rulesVersions.set(legacyVersion.id, legacyVersion);
@@ -159,7 +163,7 @@ describe("Campaign rules policy API", () => {
 		expect(enabled.json().context.rulesVersion.rules).toEqual({
 			enableTgtt: false,
 			exhaustionRules: "thelemar",
-			thelemar_carryWeight: true,
+			thelemar_carryWeight: false,
 			thelemar_encumbranceTiers: true,
 			thelemar_jumping: true,
 			thelemar_linguisticsBonus: true,
@@ -417,9 +421,12 @@ describe("Campaign rules policy API", () => {
 		unsafe.notes = [{id: "unsafe", title: "Unsafe", explanation: "<script>alert(1)</script>"}];
 		const incompatible = createDefaultCampaignRulesPolicy();
 		incompatible.rules.find(rule => rule.id === "tgtt.enabled").parameters.enabled = false;
+		const incompatibleCarry = createDefaultCampaignRulesPolicy();
+		incompatibleCarry.rules.find(rule => rule.id === "tgtt.carry-weight").parameters.enabled = false;
 		for (const [policy, code] of [
 			[unsafe, "RULES_NOTE_INVALID"],
 			[incompatible, "RULES_COMBINATION_UNSUPPORTED"],
+			[incompatibleCarry, "RULES_COMBINATION_UNSUPPORTED"],
 		]) {
 			const response = await publishRequest({dm, campaign, policy});
 			expect(response.statusCode).toBe(400);
@@ -487,5 +494,66 @@ describe("Campaign rules policy API", () => {
 			targetId: legacyVersion.id,
 		}));
 		expect(store._events.at(-1).payload.operation).toBe("rollback");
+	});
+
+	it("accepts rollback to a compatibility-tolerant legacy policy that strict publication rejects", async () => {
+		const dm = await pSignIn(IDENTITIES.dm);
+		const campaign = await pCreateCampaign(dm);
+		const legacyVersion = (await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/rules-versions`,
+			headers: headers(dm),
+			payload: {rules: {enableTgtt: false}},
+		})).json().rulesVersion;
+		await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/rules-versions/${legacyVersion.id}/activate`,
+			headers: headers(dm),
+		});
+
+		const current = await publishRequest({
+			dm,
+			campaign,
+			policy: createDefaultCampaignRulesPolicy(),
+			expectedActiveRulesVersionId: legacyVersion.id,
+		});
+		expect(current.statusCode).toBe(201);
+
+		const management = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/rules-policy`,
+			headers: {cookie: dm.cookie},
+		})).json().management;
+		const historical = management.versions.find(version => version.id === legacyVersion.id);
+		expect(historical.policy.rules.find(rule => rule.id === "tgtt.enabled").parameters.enabled).toBe(false);
+		expect(historical.policy.rules.find(rule => rule.id === "rules.exhaustion.system").parameters.system).toBe("thelemar");
+
+		const strictPublish = await publishRequest({
+			dm,
+			campaign,
+			policy: historical.policy,
+			expectedActiveRulesVersionId: current.json().rulesVersion.id,
+		});
+		expect(strictPublish.statusCode).toBe(400);
+		expect(strictPublish.json().error).toBe("RULES_COMBINATION_UNSUPPORTED");
+
+		const rollback = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/rules-policy/activate`,
+			headers: headers(dm),
+			payload: {
+				rulesVersionId: legacyVersion.id,
+				expectedActiveRulesVersionId: current.json().rulesVersion.id,
+			},
+		});
+		expect(rollback.statusCode).toBe(200);
+		expect(rollback.json().rulesVersion).toEqual(expect.objectContaining({
+			id: legacyVersion.id,
+			schemaVersion: 1,
+			rules: expect.objectContaining({
+				enableTgtt: false,
+				exhaustionRules: "thelemar",
+			}),
+		}));
 	});
 });

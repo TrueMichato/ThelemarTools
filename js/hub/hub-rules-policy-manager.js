@@ -1,5 +1,4 @@
 import {
-	CAMPAIGN_RULES_POLICY_CAPABILITY,
 	CAMPAIGN_RULES_POLICY_SCHEMA_VERSION,
 	CampaignRulesPolicyError,
 	createDefaultCampaignRulesPolicy,
@@ -52,33 +51,11 @@ function getPolicyCompatibilityMessage (error) {
 		if (error.details?.ruleId === "rules.exhaustion.system") {
 			return "Thelemar exhaustion requires Thelemar rules to be on.";
 		}
+		if (error.details?.ruleId === "tgtt.encumbrance-tiers") {
+			return "Encumbrance tiers require Thelemar carry capacity to be on.";
+		}
 	}
 	return error.message;
-}
-
-export function renderCampaignPolicySummary ({context}) {
-	const root = document.getElementById("campaign-policy-summary");
-	const list = document.getElementById("campaign-policy-summary-list");
-	const status = document.getElementById("campaign-policy-summary-status");
-	if (!root || !list || !status) return;
-	const version = context?.rulesVersion;
-	list.replaceChildren();
-	if (!version) {
-		status.textContent = "No campaign policy has been published.";
-		setHidden(list, true);
-		return;
-	}
-	const summary = version.policySummary;
-	status.textContent = `Version ${version.version}. Campaign choices are temporary overlays and do not change personal settings.`;
-	setHidden(list, false);
-	for (const rule of summary?.rules || []) {
-		const item = createElement("div", {className: "hub-policy-summary__item"});
-		item.append(
-			createElement("dt", {text: rule.title}),
-			createElement("dd", {text: `${rule.value} · ${rule.supportLabel}`}),
-		);
-		list.append(item);
-	}
 }
 
 export class HubRulesPolicyManager {
@@ -88,12 +65,14 @@ export class HubRulesPolicyManager {
 		context,
 		fnRenderCampaignContext,
 		fnRenderError,
+		isCapabilityEnabled = false,
 	}) {
 		this._api = api;
 		this._campaignId = campaignId;
 		this._context = context;
 		this._fnRenderCampaignContext = fnRenderCampaignContext;
 		this._fnRenderError = fnRenderError;
+		this._isCapabilityEnabled = isCapabilityEnabled;
 		this._root = document.getElementById("campaign-rules-policy-manager");
 		this._legacyForm = document.getElementById("campaign-rules-form");
 		this._catalog = null;
@@ -103,21 +82,15 @@ export class HubRulesPolicyManager {
 		this._category = CATEGORY_ALL;
 		this._supportStatus = STATUS_ALL;
 		this._isBusy = false;
+		this._isLoading = false;
 		this._isOffline = !navigator.onLine;
 		this._isPolicyRefreshRequired = this._isOffline;
+		this._policyLoadGeneration = 0;
+		this._pendingPolicyLoads = 0;
 	}
 
 	async pInit () {
-		if (!this._root) return;
-		renderCampaignPolicySummary({context: this._context});
-		let meta;
-		try {
-			meta = await this._api.pGetMeta();
-		} catch (error) {
-			this._setStatus("The rules library could not be checked. The existing rules editor remains available.", true);
-			return;
-		}
-		if (!meta.capabilities?.includes(CAMPAIGN_RULES_POLICY_CAPABILITY)) return;
+		if (!this._root || !this._isCapabilityEnabled) return;
 		setHidden(this._legacyForm, true);
 		setHidden(this._root, false);
 		this._bindStaticControls();
@@ -145,6 +118,7 @@ export class HubRulesPolicyManager {
 	}
 
 	_handleOffline () {
+		this._policyLoadGeneration++;
 		this._isOffline = true;
 		this._isPolicyRefreshRequired = true;
 		this._renderReview();
@@ -153,6 +127,7 @@ export class HubRulesPolicyManager {
 	}
 
 	_handleOnline () {
+		this._policyLoadGeneration++;
 		this._isOffline = false;
 		this._renderReview();
 		this._renderRollbackReview();
@@ -164,9 +139,12 @@ export class HubRulesPolicyManager {
 	}
 
 	async _pLoad ({preservedDraft = null, conflictMessage = ""} = {}) {
+		const loadGeneration = ++this._policyLoadGeneration;
+		this._pendingPolicyLoads++;
 		this._setLoading(true);
 		try {
 			const response = await this._api.pGetRulesPolicyManagement({campaignId: this._campaignId});
+			if (loadGeneration !== this._policyLoadGeneration || this._isOffline) return false;
 			this._catalog = response.catalog;
 			this._management = response.management;
 			const active = getActiveVersion(this._management);
@@ -183,18 +161,46 @@ export class HubRulesPolicyManager {
 						: "No version is active. Review the defaults, then activate the first immutable policy version."),
 				!!conflictMessage,
 			);
+			return true;
 		} catch (error) {
+			if (loadGeneration !== this._policyLoadGeneration) return false;
 			this._setStatus("The rules library could not be loaded. No campaign settings were changed.", true);
 			this._fnRenderError(error);
+			return false;
 		} finally {
-			this._setLoading(false);
+			this._pendingPolicyLoads = Math.max(0, this._pendingPolicyLoads - 1);
+			this._setLoading(this._pendingPolicyLoads > 0);
 		}
 	}
 
 	_setLoading (isLoading) {
+		this._isLoading = isLoading;
 		setHidden(document.getElementById("campaign-rules-policy-loading"), !isLoading);
 		setHidden(document.getElementById("campaign-rules-policy-content"), isLoading);
-		this._root.setAttribute("aria-busy", `${isLoading}`);
+		this._syncAriaBusy();
+	}
+
+	_syncAriaBusy () {
+		this._root?.setAttribute("aria-busy", `${this._isLoading || this._isBusy}`);
+	}
+
+	_setBusy (isBusy) {
+		this._isBusy = isBusy;
+		for (const control of this._root?.querySelectorAll("input, select, button") || []) {
+			if (isBusy) {
+				control.dataset.hubPolicyDisabledBeforeBusy = `${control.disabled}`;
+				control.disabled = true;
+				continue;
+			}
+			control.disabled = control.dataset.hubPolicyDisabledBeforeBusy === "true";
+			delete control.dataset.hubPolicyDisabledBeforeBusy;
+		}
+		if (!isBusy && this._management && this._draft) {
+			this._renderCatalog();
+			this._renderHistory();
+			this._renderReview();
+		}
+		this._syncAriaBusy();
 	}
 
 	_setStatus (message, isError = false) {
@@ -271,6 +277,7 @@ export class HubRulesPolicyManager {
 				},
 			});
 			input.checked = !!getPolicyValue(this._draft, definition);
+			input.disabled = this._isBusy;
 			input.addEventListener("change", () => {
 				getSelection(this._draft, definition.id).parameters[definition.parameter.key] = input.checked;
 				this._renderReview();
@@ -290,6 +297,7 @@ export class HubRulesPolicyManager {
 			});
 			for (const option of definition.parameter.options) select.add(new Option(option.label, option.value));
 			select.value = getPolicyValue(this._draft, definition);
+			select.disabled = this._isBusy;
 			select.addEventListener("change", () => {
 				getSelection(this._draft, definition.id).parameters[definition.parameter.key] = select.value;
 				this._renderReview();
@@ -358,7 +366,7 @@ export class HubRulesPolicyManager {
 				version.id,
 			));
 		}
-		select.disabled = !inactive.length;
+		select.disabled = this._isBusy || !inactive.length;
 		this._renderRollbackReview();
 	}
 
@@ -375,7 +383,19 @@ export class HubRulesPolicyManager {
 			button.disabled = true;
 			return;
 		}
-		const changes = diffCampaignRulesPolicies({before: active.policy, after: target.policy});
+		let changes;
+		try {
+			changes = diffCampaignRulesPolicies({
+				before: active.policy,
+				after: target.policy,
+				isAfterStoredPolicy: true,
+			});
+		} catch {
+			output.textContent = "This historical policy cannot be previewed safely. No version was activated.";
+			button.disabled = true;
+			this._setStatus("The selected historical policy is unavailable for preview.", true);
+			return;
+		}
 		output.append(...(changes.length
 			? changes.map(change => createElement("span", {
 				className: "hub-policy-change",
@@ -387,7 +407,7 @@ export class HubRulesPolicyManager {
 
 	async _pPublish () {
 		if (this._isMutationUnavailable()) return;
-		this._isBusy = true;
+		this._setBusy(true);
 		this._renderReview();
 		this._setStatus("Activating a new immutable policy version...");
 		try {
@@ -412,16 +432,14 @@ export class HubRulesPolicyManager {
 				this._fnRenderError(error);
 			}
 		} finally {
-			this._isBusy = false;
-			this._renderReview();
-			this._renderRollbackReview();
+			this._setBusy(false);
 		}
 	}
 
 	async _pRollback () {
 		const select = document.getElementById("campaign-rules-history");
 		if (this._isMutationUnavailable() || !select?.value) return;
-		this._isBusy = true;
+		this._setBusy(true);
 		this._renderReview();
 		this._renderRollbackReview();
 		this._setStatus("Activating the selected previous version...");
@@ -443,9 +461,7 @@ export class HubRulesPolicyManager {
 				this._fnRenderError(error);
 			}
 		} finally {
-			this._isBusy = false;
-			this._renderReview();
-			this._renderRollbackReview();
+			this._setBusy(false);
 		}
 	}
 
