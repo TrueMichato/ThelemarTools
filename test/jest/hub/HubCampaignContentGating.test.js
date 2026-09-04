@@ -15,7 +15,7 @@ import {
 import {MemoryHubStore} from "../../../server/src/memory-hub-store.js";
 
 const AVAILABLE_SOURCES = ["PHB", "XPHB", "DMG", "CMP"];
-const AVAILABLE_SPECIES = ["Human|PHB", "Elf (High)|PHB", "Elf|XPHB", "Firbolg|CMP"];
+const AVAILABLE_SPECIES = ["Human|PHB", "Elf (High)|PHB", "Elf (High)|XPHB", "Elf|XPHB", "Firbolg|CMP"];
 
 function getContentPolicy ({
 	sources = ["PHB"],
@@ -49,14 +49,15 @@ describe("Campaign content policy evaluator", () => {
 		})).toEqual(expect.objectContaining({isAllowed: true}));
 		expect(evaluateCampaignContentEntity({
 			contentPolicy: getContentPolicy({sources: [], editions: ["2014"]}),
-			entity: {name: "Human", source: "XPHB", edition: "one"},
+			entity: {name: "Human", source: "XPHB", edition: "classic"},
 			kind: "species",
 			availableSources: AVAILABLE_SOURCES,
 			availableSpecies: AVAILABLE_SPECIES,
+			sourceEditions: {PHB: "2014", XPHB: "2024"},
 		})).toEqual(expect.objectContaining({
 			isAllowed: false,
 			violations: expect.arrayContaining([
-				expect.objectContaining({code: "CONTENT_EDITION_NOT_ALLOWED"}),
+				expect.objectContaining({code: "CONTENT_EDITION_UNKNOWN"}),
 			]),
 		}));
 	});
@@ -126,6 +127,37 @@ describe("Campaign content policy evaluator", () => {
 			]),
 		}));
 		expect(JSON.stringify(report)).not.toContain(legacy.name);
+	});
+
+	it("treats species-base and edition changes as new choices rather than grandfathered content", () => {
+		const speciesBefore = {
+			race: {name: "High", source: "PHB", _baseName: "Elf", _baseSource: "PHB"},
+		};
+		const speciesAfter = structuredClone(speciesBefore);
+		speciesAfter.race._baseSource = "XPHB";
+		expect(getCharacterCampaignContentMutationCompliance({
+			contentPolicy: getContentPolicy(),
+			before: speciesBefore,
+			after: speciesAfter,
+			availableSources: AVAILABLE_SOURCES,
+			availableSpecies: AVAILABLE_SPECIES,
+			sourceEditions: {PHB: "2014", XPHB: "2024"},
+		}).findings).toEqual(expect.arrayContaining([
+			expect.objectContaining({code: "CONTENT_SOURCE_NOT_ALLOWED", disposition: "blocking"}),
+			expect.objectContaining({code: "CONTENT_EDITION_NOT_ALLOWED", disposition: "blocking"}),
+		]));
+
+		const editionBefore = {feats: [{name: "Campaign Feat", source: "CMP", edition: "classic"}]};
+		const editionAfter = {feats: [{name: "Campaign Feat", source: "CMP", edition: "one"}]};
+		expect(getCharacterCampaignContentMutationCompliance({
+			contentPolicy: getContentPolicy({sources: ["CMP"]}),
+			before: editionBefore,
+			after: editionAfter,
+			availableSources: AVAILABLE_SOURCES,
+			sourceEditions: {CMP: "2014"},
+		}).findings).toEqual([
+			expect.objectContaining({code: "CONTENT_EDITION_UNKNOWN", disposition: "blocking"}),
+		]);
 	});
 
 	it("rejects client-asserted intrinsic grants and bounds legacy reports", () => {
@@ -365,5 +397,58 @@ describe("Memory campaign content enforcement", () => {
 			rulesVersionId,
 			idempotencyKey: crypto.randomUUID(),
 		})).rejects.toEqual(expect.objectContaining({code: "CONTENT_POLICY_VIOLATION"}));
+	});
+
+	it("rechecks membership after asynchronous content enforcement before committing", async () => {
+		const player = await store.pUpsertOAuthAccount({
+			provider: "test",
+			providerSubject: crypto.randomUUID(),
+			displayName: "Player",
+		});
+		const tokenHash = crypto.createHash("sha256").update("content-race-invite").digest("hex");
+		await store.pCreateInvite({
+			accountId: account.id,
+			campaignId: campaign.id,
+			role: "player",
+			tokenHash,
+			expiresAt: new Date(Date.now() + 60_000),
+			maxUses: 1,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const {membership} = await store.pRedeemInvite({
+			accountId: player.id,
+			tokenHash,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const pGetEnforcement = store._pGetCampaignContentEnforcement.bind(store);
+		let releaseEnforcement;
+		let markEnforcementStarted;
+		const enforcementStarted = new Promise(resolve => markEnforcementStarted = resolve);
+		const enforcementGate = new Promise(resolve => releaseEnforcement = resolve);
+		store._pGetCampaignContentEnforcement = async campaignId => {
+			markEnforcementStarted();
+			await enforcementGate;
+			return pGetEnforcement(campaignId);
+		};
+
+		const pending = store.pCreateCharacter({
+			accountId: player.id,
+			campaignId: campaign.id,
+			data: {name: "Removed player character", race: {name: "Human", source: "PHB"}},
+			schemaVersion: 1,
+			clientImportId: "membership-race",
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await enforcementStarted;
+		await store.pRemoveMember({
+			accountId: account.id,
+			campaignId: campaign.id,
+			membershipId: membership.id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		releaseEnforcement();
+
+		await expect(pending).rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_NOT_FOUND"}));
+		expect([...store._characters.values()].filter(character => character.ownerAccountId === player.id)).toHaveLength(0);
 	});
 });

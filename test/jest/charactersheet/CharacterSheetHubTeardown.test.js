@@ -240,6 +240,27 @@ describe("Character Sheet campaign content context lifecycle", () => {
 		]);
 	});
 
+	it("applies the server default catalog boundary before a campaign publishes rules", () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._applyHubContext({
+			rulesVersion: null,
+			brewBundle: null,
+			contentCatalog: {
+				sources: ["PHB", "XPHB"],
+				species: ["Human (Base)|PHB", "Elf|XPHB"],
+				sourceEditions: {PHB: "2014", XPHB: "2024"},
+			},
+		});
+
+		expect(page.filterByAllowedSources([
+			...getContentCandidates(),
+			{name: "Personal feat", source: "PERSONAL", __prop: "feat", edition: "classic"},
+		])).toEqual([
+			expect.objectContaining({name: "Human", source: "PHB"}),
+			expect.objectContaining({name: "Elf", source: "XPHB"}),
+		]);
+	});
+
 	it("blocks candidates immediately during refresh and activates only the refreshed policy", async () => {
 		const page = new CharacterSheetPage({characterRepository: {}});
 		page._applyHubContext(makeContentContext());

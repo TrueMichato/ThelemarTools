@@ -62,6 +62,34 @@ async function probeGrandfathering (variant) {
 	assert.equal(report.total, 0, "mutable client provenance turned grandfathered content into a new admission");
 }
 
+async function probeEditionSpoofing (variant) {
+	const {evaluateCampaignContentEntity} = await variant.pImport("js/hub/hub-content-policy.js");
+	const result = evaluateCampaignContentEntity({
+		contentPolicy: {version: 1, sources: [], species: [], editions: ["2014"]},
+		entity: {name: "Spoofed feat", source: "XPHB", edition: "classic"},
+		kind: "feat",
+		availableSources: ["PHB", "XPHB"],
+		sourceEditions: {PHB: "2014", XPHB: "2024"},
+	});
+	assert.equal(result.isAllowed, false, "client edition metadata overrode the authoritative source catalog");
+}
+
+async function probeGrandfatheredReplacement (variant) {
+	const {getCharacterCampaignContentMutationCompliance} = await variant.pImport("js/hub/hub-content-policy.js");
+	const before = {race: {name: "High", source: "PHB", _baseName: "Elf", _baseSource: "PHB"}};
+	const after = structuredClone(before);
+	after.race._baseSource = "XPHB";
+	const report = getCharacterCampaignContentMutationCompliance({
+		contentPolicy: {version: 1, sources: ["PHB"], species: [], editions: ["2014"]},
+		before,
+		after,
+		availableSources: ["PHB", "XPHB"],
+		availableSpecies: ["Elf (High)|PHB", "Elf (High)|XPHB"],
+		sourceEditions: {PHB: "2014", XPHB: "2024"},
+	});
+	assert.ok(report.total > 0, "a species identity replacement inherited the old content exemption");
+}
+
 async function probeVersionFence (variant) {
 	const {assertCampaignContentPolicyVersion} = await variant.pImport("server/src/campaign-content-policy.js");
 	assert.throws(
@@ -137,8 +165,28 @@ const MUTANTS = [
 		probe: probeGrandfathering,
 		mutations: {
 			"js/hub/hub-content-policy.js": source => source.replace(
-				"return `" + "$" + "{entry.kind}\\u0000" + "$" + "{normalizeComparable(entry.uid)}`;",
-				"return `" + "$" + "{entry.kind}\\u0000" + "$" + "{entry.provenance}\\u0000" + "$" + "{normalizeComparable(entry.uid)}`;",
+				"\t\tentry.kind,\n\t\tnormalizeComparable(result.entity.uid)",
+				"\t\tentry.kind,\n\t\tentry.provenance,\n\t\tnormalizeComparable(result.entity.uid)",
+			),
+		},
+	},
+	{
+		name: "client-edition-overrides-catalog",
+		probe: probeEditionSpoofing,
+		mutations: {
+			"js/hub/hub-content-policy.js": source => source.replace(
+				"\tif (authoritativeEdition && declaredEdition && authoritativeEdition !== declaredEdition) return null;\n\treturn authoritativeEdition || declaredEdition;",
+				"\treturn declaredEdition || authoritativeEdition;",
+			),
+		},
+	},
+	{
+		name: "grandfathering-ignores-species-identity",
+		probe: probeGrandfatheredReplacement,
+		mutations: {
+			"js/hub/hub-content-policy.js": source => source.replace(
+				/function getContentCountKey \(\{entry, result\}\) \{[\s\S]*?\n\}\n\nfunction sortFindings/,
+				"function getContentCountKey ({entry}) {\n\treturn `" + "$" + "{entry.kind}\\u0000" + "$" + "{normalizeComparable(entry.uid)}`;\n}\n\nfunction sortFindings",
 			),
 		},
 	},

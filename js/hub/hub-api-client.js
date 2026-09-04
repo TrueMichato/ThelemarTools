@@ -493,13 +493,24 @@ export class HubApiClient {
 		});
 	}
 
-	async pResolveTransfer ({campaignId, transferId, decision, rulesVersionId = null, idempotencyKey}) {
-		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/transfers/${encodeURIComponent(transferId)}/resolve`, {
+	async pResolveTransfer ({campaignId, transferId, decision, rulesVersionId, idempotencyKey}) {
+		const pResolve = pin => this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/transfers/${encodeURIComponent(transferId)}/resolve`, {
 			method: "POST",
-			body: {decision, ...(rulesVersionId == null ? {} : {rulesVersionId})},
+			body: {decision, ...(pin == null ? {} : {rulesVersionId: pin})},
 			isMutation: true,
 			idempotencyKey,
 		});
+		if (decision !== "accept") return pResolve(rulesVersionId);
+		let pin = rulesVersionId;
+		if (pin === undefined) pin = (await this.pGetCampaignContext({campaignId})).rulesVersion?.id || null;
+		try {
+			return await pResolve(pin);
+		} catch (error) {
+			if (error?.code !== "RULES_VERSION_STALE") throw error;
+			const refreshedPin = (await this.pGetCampaignContext({campaignId})).rulesVersion?.id || null;
+			if (refreshedPin === pin) throw error;
+			return pResolve(refreshedPin);
+		}
 	}
 
 	async pLogout () {

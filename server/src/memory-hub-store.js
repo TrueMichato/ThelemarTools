@@ -1181,6 +1181,7 @@ export class MemoryHubStore {
 			const enforcement = await this._pGetCampaignContentEnforcement(campaignId);
 			const resumedPrior = this._getReceipt({accountId, idempotencyKey});
 			if (resumedPrior) return resumedPrior;
+			this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
 			assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
 			assertNewCharacterCampaignContent({
 				...enforcement,
@@ -1314,14 +1315,19 @@ export class MemoryHubStore {
 		if (prior) return prior;
 		let character = this._getCharacterOrThrow(characterId);
 		if (character.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can edit this character.`, {status: 403});
-		if (character.campaignId) this._getMembership({accountId, campaignId: character.campaignId, roles: ["dm", "co_dm", "player"]});
-		const enforcement = character.campaignId
-			? await this._pGetCampaignContentEnforcement(character.campaignId)
+		const enforcedCampaignId = character.campaignId;
+		if (enforcedCampaignId) this._getMembership({accountId, campaignId: enforcedCampaignId, roles: ["dm", "co_dm", "player"]});
+		const enforcement = enforcedCampaignId
+			? await this._pGetCampaignContentEnforcement(enforcedCampaignId)
 			: null;
 		const resumedPrior = this._getReceipt({accountId, idempotencyKey});
 		if (resumedPrior) return resumedPrior;
 		character = this._getCharacterOrThrow(characterId);
 		if (character.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can edit this character.`, {status: 403});
+		if (enforcedCampaignId) {
+			this._getMembership({accountId, campaignId: enforcedCampaignId, roles: ["dm", "co_dm", "player"]});
+			if (character.campaignId !== enforcedCampaignId) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+		}
 		const lease = this._characterLeases.get(characterId);
 		if (!lease || new Date(lease.expiresAt) <= this._fnNow()) {
 			throw new HubStoreError("LEASE_EXPIRED", `Character edit lease expired.`, {status: 409});
@@ -1382,6 +1388,7 @@ export class MemoryHubStore {
 		if (resumedPrior) return resumedPrior;
 		source = this._getCharacterOrThrow(characterId);
 		if (source.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can clone this character.`, {status: 403});
+		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
 		assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
 		assertNewCharacterCampaignContent({
 			...enforcement,
@@ -2941,6 +2948,7 @@ export class MemoryHubStore {
 		const enforcement = await this._pGetCampaignContentEnforcement(campaignId);
 		const resumedPrior = this._getReceipt({accountId, idempotencyKey});
 		if (resumedPrior) return resumedPrior;
+		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
 		const character = this._getCharacterOrThrow(characterId);
 		if (character.campaignId !== campaignId) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
 		const data = normalizeCharacterInventory(character.data);
@@ -2985,6 +2993,7 @@ export class MemoryHubStore {
 		const enforcement = await this._pGetCampaignContentEnforcement(campaignId);
 		const resumedPrior = this._getReceipt({accountId, idempotencyKey: commandIdempotencyKey});
 		if (resumedPrior) return resumedPrior;
+		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
 
 		const targetCharacters = request.targetCharacterIds.map(characterId => {
 			const character = this._characters.get(characterId);

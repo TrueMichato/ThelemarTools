@@ -1,5 +1,5 @@
 import {HubApiClient, HubApiError} from "../hub/hub-api-client.js";
-import {getCharacterCampaignContentCompliance} from "../hub/hub-content-policy.js";
+import {getCampaignContentPolicy, getCharacterCampaignContentCompliance} from "../hub/hub-content-policy.js";
 import {CharacterSheetSharing} from "./charactersheet-sharing.js";
 
 const _CAMPAIGN_ROLES = new Set(["dm", "co_dm", "player"]);
@@ -211,8 +211,8 @@ export class CharacterSheetCampaign {
 	}
 
 	_renderContentPolicyWarnings () {
-		const contentPolicy = this._page._hubContext?.rulesVersion?.contentPolicy;
-		if (!contentPolicy || !this._page._currentCharacterId) return;
+		if (!this._page._hubContext || !this._page._currentCharacterId) return;
+		const contentPolicy = getCampaignContentPolicy(this._page._hubContext.rulesVersion?.contentPolicy);
 		const report = getCharacterCampaignContentCompliance({
 			contentPolicy,
 			character: this._page._state.toJson(),

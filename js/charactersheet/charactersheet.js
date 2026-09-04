@@ -52,7 +52,7 @@ import {CharacterSheetPeerTargeting} from "./charactersheet-peer-targeting.js";
 import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js";
 import {getCharacterSaveFence, isCharacterSaveFenceCurrent} from "./charactersheet-persistence-fence.js";
 import {diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
-import {filterCampaignContentEntities} from "../hub/hub-content-policy.js";
+import {filterCampaignContentEntities, getCampaignContentPolicy} from "../hub/hub-content-policy.js";
 
 const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, StorageUtil, DataUtil, BrewUtil2, PrereleaseUtil} = /** @type {*} */ (globalThis);
 
@@ -19969,7 +19969,9 @@ class CharacterSheetPage {
 		const allowed = this._state.getAllowedSources();
 		let filtered = allowed ? entities.filter(e => allowed.includes(e.source)) : entities;
 		filtered = filterCampaignContentEntities({
-			contentPolicy: this._hubContext?.rulesVersion?.contentPolicy,
+			contentPolicy: this._hubContext
+				? getCampaignContentPolicy(this._hubContext.rulesVersion?.contentPolicy)
+				: null,
 			entities: filtered,
 			availableSources: this._hubContext?.contentCatalog?.sources,
 			availableSpecies: this._hubContext?.contentCatalog?.species,
@@ -20048,7 +20050,9 @@ class CharacterSheetPage {
 		for (const spell of all) {
 			if (filteredSet.has(spell)) continue;
 			if (!filterCampaignContentEntities({
-				contentPolicy: this._hubContext?.rulesVersion?.contentPolicy,
+				contentPolicy: this._hubContext
+					? getCampaignContentPolicy(this._hubContext.rulesVersion?.contentPolicy)
+					: null,
 				entities: [spell],
 				availableSources: this._hubContext?.contentCatalog?.sources,
 				availableSpecies: this._hubContext?.contentCatalog?.species,

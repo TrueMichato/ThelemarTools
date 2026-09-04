@@ -95,14 +95,19 @@ export function canonicalizeCampaignSpeciesUid (value, {knownSpecies = null, kno
 
 export function getCampaignEntityEdition (entity, {sourceEditions = null} = {}) {
 	if (!entity || typeof entity !== "object") return null;
-	if (entity.edition === "classic" || entity.edition === "2014") return "2014";
-	if (entity.edition === "one" || entity.edition === "2024") return "2024";
-	if (entity.edition != null) return null;
 	const source = canonicalizeCampaignSourceId(entity.source);
 	const sourceEdition = sourceEditions instanceof Map
 		? sourceEditions.get(source)
 		: sourceEditions?.[source];
-	return sourceEdition || _SOURCE_EDITIONS[source] || null;
+	const authoritativeEdition = sourceEdition || _SOURCE_EDITIONS[source] || null;
+	const declaredEdition = entity.edition === "classic" || entity.edition === "2014"
+		? "2014"
+		: entity.edition === "one" || entity.edition === "2024"
+			? "2024"
+			: null;
+	if (entity.edition != null && !declaredEdition) return null;
+	if (authoritativeEdition && declaredEdition && authoritativeEdition !== declaredEdition) return null;
+	return authoritativeEdition || declaredEdition;
 }
 
 export function getCampaignEntityUid (entity) {
@@ -187,7 +192,12 @@ export function evaluateCampaignContentEntity ({
 		? getCampaignSpeciesUid(entity, {knownSpecies: availableSpecies})
 		: getCampaignEntityUid(entity);
 	const source = canonicalizeCampaignSourceId(resolvedKind === "species" ? entity?._baseSource || entity?.source : entity?.source);
-	const edition = getCampaignEntityEdition(entity, {sourceEditions});
+	const edition = getCampaignEntityEdition(
+		resolvedKind === "species"
+			? {...entity, source: entity?._baseSource || entity?.source}
+			: entity,
+		{sourceEditions},
+	);
 	const violations = [];
 
 	if (!uid || !source) {
@@ -291,8 +301,21 @@ export function extractCharacterCampaignContent (character) {
 	return out;
 }
 
-function getContentCountKey (entry) {
-	return `${entry.kind}\u0000${normalizeComparable(entry.uid)}`;
+function getContentCountKey ({entry, result}) {
+	const entity = entry.entity || {};
+	const invalidUid = [
+		entity.name,
+		entity.source,
+		entity._baseName,
+		entity._baseSource,
+	].map(normalizeComparable).join("|");
+	const edition = result.entity.edition || `invalid:${normalizeComparable(entity.edition)}`;
+	return [
+		entry.kind,
+		normalizeComparable(result.entity.uid) || `invalid:${invalidUid}`,
+		normalizeComparable(result.entity.source) || `invalid:${normalizeComparable(entity.source)}`,
+		edition,
+	].join("\u0000");
 }
 
 function sortFindings (findings) {
@@ -365,16 +388,6 @@ export function getCharacterCampaignContentMutationCompliance ({
 		: availableSpecies;
 	const beforeCounts = new Map();
 	for (const entry of extractCharacterCampaignContent(before)) {
-		const key = getContentCountKey(entry);
-		beforeCounts.set(key, (beforeCounts.get(key) || 0) + 1);
-	}
-	const seenAfter = new Map();
-	const findings = [];
-	for (const entry of extractCharacterCampaignContent(after)) {
-		const key = getContentCountKey(entry);
-		const count = (seenAfter.get(key) || 0) + 1;
-		seenAfter.set(key, count);
-		if (count <= (beforeCounts.get(key) || 0)) continue;
 		const result = evaluateCampaignContentEntity({
 			contentPolicy,
 			entity: entry.entity,
@@ -383,6 +396,24 @@ export function getCharacterCampaignContentMutationCompliance ({
 			availableSpecies: knownSpecies,
 			sourceEditions,
 		});
+		const key = getContentCountKey({entry, result});
+		beforeCounts.set(key, (beforeCounts.get(key) || 0) + 1);
+	}
+	const seenAfter = new Map();
+	const findings = [];
+	for (const entry of extractCharacterCampaignContent(after)) {
+		const result = evaluateCampaignContentEntity({
+			contentPolicy,
+			entity: entry.entity,
+			kind: entry.kind,
+			availableSources: knownSources,
+			availableSpecies: knownSpecies,
+			sourceEditions,
+		});
+		const key = getContentCountKey({entry, result});
+		const count = (seenAfter.get(key) || 0) + 1;
+		seenAfter.set(key, count);
+		if (count <= (beforeCounts.get(key) || 0)) continue;
 		findings.push(...result.violations.map(violation => ({
 			...violation,
 			entity: result.entity,
