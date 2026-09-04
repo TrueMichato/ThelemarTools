@@ -3,7 +3,10 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None currently tracked._
+### Round 57 — NPC export validity and Add Item filter positioning
+
+- **S1 — NPC export emits invalid companion-item types.** The attached `all-npcs-CSHEET.json` corpus contains 24 monsters and 15 bundled items; 14 items use human-readable `type` values (`weapon`, `armor`, or `ring`) instead of canonical 5etools item-type codes. Duralin, Talna, and Onger are named regressions. S1 owns the NPC exporter, its focused tests, and NPC-export documentation; it must validate the complete payload against the real schemas and load/render every attached monster and item without console errors. S1 must not edit inventory/filter code, CSS, or `bugs.md`.
+- **S2 — Add Item filter dropdowns open away from their controls.** The picker computes viewport coordinates for fixed popovers while the menus remain under a transformed, scrolling modal ancestor, so browser containing-block behavior can displace or clip them. S2 owns the inventory picker, filtered-picker helper only if a shared change is required, scoped character-sheet modal/popover CSS, and mandatory browser regression coverage. Any shared change must re-verify spell/feature picker consumers. S2 must not edit NPC exporter code or `bugs.md`.
 
 ## Closed Bugs
 
