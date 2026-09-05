@@ -1,7 +1,7 @@
 # Campaign Overview redesign brief
 
 Status: shipped in [PR #243](https://github.com/TrueMichato/ThelemarTools/pull/243), merged as
-`b8d31d3416b934cc9275b859b5932db050005351` from reviewed head
+`b8d31d3416b934cc9275b859b5932db050005351` from final PR head
 `c8d5f0333d1bd8f7867b91c7ecb7170a9838671b`. The overview now uses the approved **Pinned session brief**
 composition while preserving the existing V1 mutations, authority boundaries, privacy projections, and recovery
 states. This merged head is not yet promoted to the older recorded Oracle staging release.

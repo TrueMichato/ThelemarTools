@@ -11,8 +11,10 @@ checks pass. Phase 6G deployment is complete. The controlled one-DM/two-player t
 host-operations proof and the physical game day described in the [living roadmap](roadmap.md). Semi-public
 onboarding remains intentionally disabled.
 
-The repository has advanced beyond that deployed release. [PR #242](https://github.com/TrueMichato/ThelemarTools/pull/242)
-merged campaign content and carry enforcement as `168d6e9ac36c11e2c938f21a4324b803f3f2fb61`, and
+The repository has advanced beyond that deployed release. [PR #241](https://github.com/TrueMichato/ThelemarTools/pull/241)
+merged carry/encumbrance enforcement as `de5acaabfa6cc64ce804bb43b94b74ccf3bc2714`;
+[PR #242](https://github.com/TrueMichato/ThelemarTools/pull/242) then integrated source/species/edition content
+enforcement as `168d6e9ac36c11e2c938f21a4324b803f3f2fb61`, and
 [PR #243](https://github.com/TrueMichato/ThelemarTools/pull/243) merged the role-adaptive Campaign Overview and
 authority hardening as `b8d31d3416b934cc9275b859b5932db050005351` from head
 `c8d5f0333d1bd8f7867b91c7ecb7170a9838671b`. That merged head is **not yet deployed** to Oracle.
