@@ -522,6 +522,7 @@ flowchart LR
   T7 -. Cure Wounds slice .-> T9
   T0 --> ENABLE[Gate: enable new V2 product scope on Oracle]
   T1 -. accepted .-> ENABLE
+  T2 -. accepted .-> ENABLE
   T3 -. accepted .-> ENABLE
   T4 -. accepted .-> ENABLE
   T5 -. accepted .-> ENABLE
