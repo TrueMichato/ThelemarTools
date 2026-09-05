@@ -253,8 +253,8 @@ globalThis.Parser = globalThis.Parser || {
 
 // Mock MiscUtil if needed
 globalThis.MiscUtil = globalThis.MiscUtil || {
-	copyFast: (obj) => JSON.parse(JSON.stringify(obj)),
-	copy: (obj) => JSON.parse(JSON.stringify(obj)),
+	copyFast: (obj) => obj === undefined ? undefined : JSON.parse(JSON.stringify(obj)),
+	copy: (obj) => obj === undefined ? undefined : JSON.parse(JSON.stringify(obj)),
 	getProperty: (obj, path) => {
 		const parts = path.split(".");
 		let current = obj;

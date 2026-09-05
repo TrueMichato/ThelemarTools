@@ -235,29 +235,53 @@ describe("Character Sheet realtime coordinator", () => {
 		]);
 	});
 
-	it.each(["rules.activated", "brew.activated"])("forwards %s identity for context replay deduplication", async type => {
+	it("forwards brew activation identity for context replay deduplication", async () => {
 		const {clients, coordinator} = makeCoordinator();
 		const changes = [];
 		coordinator.on("campaignContextChanged", value => changes.push(value));
 		coordinator.attach({characterId: "character-1"});
 
 		clients[0].emit("event", {
-			id: `event-${type}`,
+			id: "event-brew.activated",
 			campaignId: "campaign-1",
 			sequence: 4,
-			type,
-			aggregateType: type === "rules.activated" ? "rules_version" : "brew_bundle_version",
-			aggregateId: `active-${type}`,
+			type: "brew.activated",
+			aggregateType: "brew_bundle_version",
+			aggregateId: "active-brew.activated",
 			payload: {version: 1},
 		});
 		await pFlush();
 
 		expect(changes).toEqual([{
-			eventId: `event-${type}`,
+			eventId: "event-brew.activated",
 			campaignId: "campaign-1",
 			sequence: 4,
-			type,
-			aggregateId: `active-${type}`,
+			type: "brew.activated",
+			aggregateId: "active-brew.activated",
+		}]);
+	});
+
+	it("routes rules activation through the version-fenced rules refresh", async () => {
+		const {clients, coordinator} = makeCoordinator();
+		const changes = [];
+		coordinator.on("rulesChanged", value => changes.push(value));
+		coordinator.attach({characterId: "character-1"});
+
+		clients[0].emit("event", {
+			id: "event-rules.activated",
+			campaignId: "campaign-1",
+			sequence: 4,
+			type: "rules.activated",
+			aggregateType: "rules_version",
+			aggregateId: "active-rules.activated",
+			payload: {version: 1},
+		});
+		await pFlush();
+
+		expect(changes).toEqual([{
+			campaignId: "campaign-1",
+			rulesVersionId: "active-rules.activated",
+			sequence: 4,
 		}]);
 	});
 

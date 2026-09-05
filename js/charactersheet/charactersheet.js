@@ -53,8 +53,13 @@ import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js"
 import {getCharacterSaveFence, isCharacterSaveFenceCurrent} from "./charactersheet-persistence-fence.js";
 import {diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
 import {filterCampaignContentEntities, getCampaignContentPolicy} from "../hub/hub-content-policy.js";
+import {
+	getClearedCampaignRulesState,
+	getCampaignSettingsOverlayFromRulesVersion,
+} from "../hub/hub-campaign-rule-evaluator.js";
 
 const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, StorageUtil, DataUtil, BrewUtil2, PrereleaseUtil} = /** @type {*} */ (globalThis);
+const _getHubRulesOverlay = hubContext => getCampaignSettingsOverlayFromRulesVersion(hubContext?.rulesVersion);
 
 /**
  * Character Sheet - Main Controller
@@ -108,6 +113,9 @@ class CharacterSheetPage {
 		this._isHubContextRefreshing = false;
 		this._isHubContextUnavailable = false;
 		this._isHubContextRevalidationRequired = false;
+		this._hubRulesRefreshGeneration = 0;
+		this._hubRulesRefreshBlocked = false;
+		this._hubRulesPendingVersionId = null;
 		this._builder = null;
 		this._combat = null;
 		this._spells = null;
@@ -261,13 +269,17 @@ class CharacterSheetPage {
 	 * re-apply `setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules)`, so a retained
 	 * `_hubContext` would silently reinstall the campaign rules on the next character load.
 	 */
-	_clearHubRules ({isUnavailable = false} = {}) {
-		this._hubContext = null;
+	_clearHubRules ({isUnavailable = false, isFenceRefresh = true} = {}) {
+		if (isFenceRefresh) this._hubRulesRefreshGeneration++;
+		this._hubRulesRefreshBlocked = false;
+		this._hubRulesPendingVersionId = null;
+		const cleared = getClearedCampaignRulesState();
+		this._hubContext = cleared.hubContext;
 		this._isHubContextUnavailable = isUnavailable;
 		this._state.clearCampaignSettingsOverlay();
 		// Return to the detached basis in lockstep with the overlay: a summary stamped with a
 		// campaign this sheet is no longer in must not keep claiming to be current.
-		this._state.setCarryAuthorityContext(null);
+		this._state.setCarryAuthorityContext(cleared.carryAuthorityContext);
 	}
 
 	_teardownHubRules () {
@@ -303,7 +315,59 @@ class CharacterSheetPage {
 		this._hubRealtime.on("connectionState", state => this._onHubRealtimeConnectionState(state));
 		this._hubRealtime.on("campaignContextChanged", event => this._onHubCampaignContextChanged(event));
 		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
+		this._hubRealtime.on("rulesChanged", event => { void this._pRefreshHubRules(event); });
 		return true;
+	}
+
+	async _pRefreshHubRules ({rulesVersionId = null} = {}) {
+		const expectedRulesVersionId = rulesVersionId ?? this._hubRulesPendingVersionId;
+		const generation = ++this._hubRulesRefreshGeneration;
+		const contextGeneration = ++this._hubContextGeneration;
+		this._hubContextRefreshActiveGeneration = contextGeneration;
+		this._isHubContextRefreshing = true;
+		this._clearHubRules({isUnavailable: true, isFenceRefresh: false});
+		this._hubRulesRefreshBlocked = true;
+		this._hubRulesPendingVersionId = expectedRulesVersionId;
+		this._campaign?.render();
+		try {
+			const context = this._hubCampaignContext?.pRefresh
+				? await this._hubCampaignContext.pRefresh({
+					fnIsCurrent: () => (
+						generation === this._hubRulesRefreshGeneration
+						&& contextGeneration === this._hubContextGeneration
+					),
+				})
+				: await this._hubApi.pGetCampaignContext({campaignId: this._hubCampaignId});
+			if (
+				!context
+				|| generation !== this._hubRulesRefreshGeneration
+				|| contextGeneration !== this._hubContextGeneration
+			) return false;
+			if (expectedRulesVersionId && context?.rulesVersion?.id !== expectedRulesVersionId) {
+				throw new Error(`Campaign rules activation did not resolve to the expected version.`);
+			}
+			this._applyHubContext(context);
+			this._renderCharacter();
+			this._campaign?.render();
+			return true;
+		} catch (error) {
+			if (
+				generation !== this._hubRulesRefreshGeneration
+				|| contextGeneration !== this._hubContextGeneration
+			) return false;
+			this._clearHubRules({isUnavailable: true, isFenceRefresh: false});
+			this._hubRulesRefreshBlocked = true;
+			this._hubRulesPendingVersionId = expectedRulesVersionId;
+			this._isHubContextRevalidationRequired = true;
+			JqueryUtil.doToast({type: "danger", content: "Campaign rules changed but could not be applied. Reload before continuing."});
+			this._campaign?.render();
+			return false;
+		} finally {
+			if (this._hubContextRefreshActiveGeneration === contextGeneration) {
+				this._hubContextRefreshActiveGeneration = null;
+				this._isHubContextRefreshing = false;
+			}
+		}
 	}
 
 	_onHubRealtimeCursor (metadata) {
@@ -319,9 +383,11 @@ class CharacterSheetPage {
 	_onHubRealtimeConnectionState (state) {
 		this._hubEffects?.onConnectionState(state);
 		this._peerTargeting?.onConnectionState(state);
-		if (state?.state === "live" && this._isHubContextRevalidationRequired) {
+		if (state?.state === "live" && this._isHubContextRevalidationRequired && this._hubCampaignContext) {
 			this._isHubContextRevalidationRequired = false;
 			this._onHubCampaignContextChanged({type: "reconnected"});
+		} else if (state?.state === "live" && this._hubRulesRefreshBlocked) {
+			void this._pRefreshHubRules();
 		}
 		if (state?.state === "access_lost") {
 			// Fail closed synchronously; the coordinator then performs the full ordered teardown.
@@ -352,8 +418,14 @@ class CharacterSheetPage {
 	}
 
 	_applyHubContext (context) {
+		const overlay = _getHubRulesOverlay(context);
+		if (context?.rulesVersion && !overlay) throw new Error(`Campaign rules are incompatible.`);
 		this._hubContext = context;
-		this._state.setCampaignSettingsOverlay(context?.rulesVersion?.rules);
+		this._isHubContextUnavailable = false;
+		this._isHubContextRevalidationRequired = false;
+		this._hubRulesRefreshBlocked = false;
+		this._hubRulesPendingVersionId = null;
+		this._state.setCampaignSettingsOverlay(overlay);
 		this._state.setCarryAuthorityContext({
 			rulesVersionId: context?.rulesVersion?.id ?? null,
 			brewBundleHash: context?.brewBundle?.contentHash ?? null,
@@ -778,7 +850,7 @@ class CharacterSheetPage {
 					fnProjectItemWeight: item => this._state.projectItemMaterial(item)?.weight,
 					fnAdoptCharacterData: data => {
 						this._state.loadFromJson(data);
-						this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
+						this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 						this._reconcileClassFeatures();
 						this._renderCharacter();
 					},
@@ -2394,7 +2466,7 @@ class CharacterSheetPage {
 			this._isLevelUpBannerDismissed = false;
 			this._state.clearCampaignSettingsOverlay();
 			this._state.loadFromJson(character);
-			this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
+			this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 
 			// Backfill any class features missing from `_data.features` (e.g. on
 			// saves migrated from older formats). Idempotent. The result tells us whether
@@ -2458,7 +2530,7 @@ class CharacterSheetPage {
 		this._isLevelUpBannerDismissed = false;
 		this._state.clearCampaignSettingsOverlay();
 		this._state.reset();
-		this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
+		this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 		this._state.setClassFeatureCatalog(this._classFeatures || [], this._subclassFeatures || [], this._optionalFeaturesData || []);
 		this._state.setId(this._currentCharacterId);
 		this._renderCharacter();
@@ -5743,7 +5815,8 @@ class CharacterSheetPage {
 		// Standard rules: Long jump = STR score, High jump = 3 + STR mod
 		// Thelemar rules: Long jump = 8 + Athletics mod, High jump = 2 + Athletics × 0.5
 		// Running jumps require a 10ft running start; standing jumps are half
-		const useThelemarJumping = (/** @type {*} */ (this._state.getSettings()))?.thelemar_jumping;
+		const jumpSettings = /** @type {*} */ (this._state.getSettings());
+		const useThelemarJumping = jumpSettings?.enableTgtt !== false && jumpSettings?.thelemar_jumping;
 
 		let longJumpRunning, highJumpRunning;
 
@@ -6015,10 +6088,10 @@ class CharacterSheetPage {
 		// (R37 #10) Reading speed (TGTT "Reading Books"): show it alongside senses on the
 		// Overview when the TGTT homebrew is enabled. Pages/hour = (1 + INTmod×2) × 30.
 		// Reading Books is a TGTT linguistics rule, so gate on the granular
-		// `thelemar_linguisticsBonus` flag (present in real saves) — falling back to the
-		// newer master `enableTgtt` flag for forward-compatibility.
+		// Linguistics is a TGTT sub-rule, so the master toggle must gate it even when an
+		// older save still contains the granular flag.
 		const csSettings = this._state._data?.settings || {};
-		if (csSettings.enableTgtt || csSettings.thelemar_linguisticsBonus) {
+		if (csSettings.enableTgtt !== false && csSettings.thelemar_linguisticsBonus) {
 			const pages = this._state.getReadingSpeed();
 			const item = document.createElement("div");
 			item.className = "charsheet__sense-item";
@@ -15894,7 +15967,7 @@ class CharacterSheetPage {
 
 		// Thelemar critical rolls rule: Nat 1 = -5, Nat 20 = +5 for non-attack rolls
 		let thelemar_critBonus = 0;
-		if (!isAttack && (/** @type {*} */ (this._state.getSettings()))?.thelemar_criticalRolls) {
+		if (!isAttack && (/** @type {*} */ (this._state.getSettings()))?.enableTgtt !== false && (/** @type {*} */ (this._state.getSettings()))?.thelemar_criticalRolls) {
 			if (roll === 1) thelemar_critBonus = -5;
 			else if (roll === 20) thelemar_critBonus = 5;
 		}
@@ -19943,7 +20016,7 @@ class CharacterSheetPage {
 	 */
 	_ensureLinguisticsSkillIfNeeded () {
 		const settings = (/** @type {*} */ (this._state.getSettings()));
-		if (!settings?.thelemar_linguisticsBonus) return;
+		if (settings?.enableTgtt === false || !settings?.thelemar_linguisticsBonus) return;
 
 		const hasLinguisticsSkill = this._state.getCustomSkills().some(
 			s => s.name.toLowerCase() === "linguistics",

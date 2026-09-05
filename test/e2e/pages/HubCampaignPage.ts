@@ -291,9 +291,10 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-rules-policy-loading")).toBeHidden();
 		await expect(this.page.locator("#campaign-rules-form")).toBeHidden();
 		await expect(this.page.locator("#campaign-rules-list .hub-rule-row")).toHaveCount(10);
-		await expect(this.page.locator(".hub-rule-status--enforced")).toHaveCount(3);
+		await expect(this.page.locator("#campaign-rules-list .hub-rule-status--enforced")).toHaveCount(5);
 		await expect(this.page.locator(".hub-rule-status--planned")).toHaveCount(0);
 		await expect(manager).toContainText("Enforced");
+		await expect(this.page.locator("#campaign-rules-list .hub-rule-status--advisory")).toHaveCount(5);
 
 		const search = this.page.locator("#campaign-rules-search");
 		await search.fill("jumping");
@@ -302,7 +303,7 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-rules-empty")).toBeVisible();
 		await search.fill("");
 		await this.page.locator("#campaign-rules-support").selectOption("advisory");
-		await expect(this.page.locator("#campaign-rules-list .hub-rule-row")).toHaveCount(7);
+		await expect(this.page.locator("#campaign-rules-list .hub-rule-row")).toHaveCount(5);
 		await this.page.locator("#campaign-rules-support").selectOption("all");
 
 		const jumping = this.page.locator("[data-campaign-rule-control='tgtt.jumping']");
@@ -804,7 +805,7 @@ export class HubCampaignPage {
 	}: {
 		characterId: string;
 		targetCampaignId: string;
-	}): Promise<{idempotencyKey: string}> {
+	}): Promise<{idempotencyKey: string; rulesVersionId: string | null}> {
 		const panel = this.page.locator("#charsheet-campaign-panel");
 		await panel.getByLabel("I understand that this moves the character instead of creating a copy.").check();
 		const responsePromise = this.page.waitForResponse(response =>
@@ -815,7 +816,9 @@ export class HubCampaignPage {
 		await panel.locator("button", {hasText: "Move character"}).click();
 		const moveResponse = await responsePromise;
 		const idempotencyKey = moveResponse.request().headers()["idempotency-key"];
+		const requestData = moveResponse.request().postDataJSON() as {campaignId?: string; rulesVersionId?: string | null};
 		expect(idempotencyKey).toBeTruthy();
+		expect(requestData.campaignId).toBe(targetCampaignId);
 		await this.page.waitForURL(url =>
 			url.searchParams.get("id") === characterId
 			&& url.searchParams.get("hubCampaign") === targetCampaignId,
@@ -827,7 +830,7 @@ export class HubCampaignPage {
 			}),
 			{timeout: 30_000},
 		).toBe(true);
-		return {idempotencyKey};
+		return {idempotencyKey, rulesVersionId: requestData.rulesVersionId ?? null};
 	}
 
 	async acquireCharacterLease (characterId: string): Promise<void> {
@@ -851,16 +854,18 @@ export class HubCampaignPage {
 		characterId,
 		campaignId,
 		idempotencyKey,
+		rulesVersionId,
 	}: {
 		characterId: string;
 		campaignId: string;
 		idempotencyKey: string;
+		rulesVersionId: string | null;
 	}): Promise<any> {
 		const headers = await this.getMutationHeaders();
 		headers["idempotency-key"] = idempotencyKey;
 		const response = await this.page.request.post(`/api/characters/${encodeURIComponent(characterId)}/move`, {
 			headers,
-			data: {campaignId},
+			data: {campaignId, rulesVersionId},
 		});
 		expect(response.ok()).toBe(true);
 		return response.json();

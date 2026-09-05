@@ -1,6 +1,8 @@
 import {HubApiClient, HubApiError} from "../hub/hub-api-client.js";
 import {getCampaignContentPolicy, getCharacterCampaignContentCompliance} from "../hub/hub-content-policy.js";
 import {CharacterSheetSharing} from "./charactersheet-sharing.js";
+import {CharacterSheetState} from "./charactersheet-state.js";
+import {getCampaignSettingsOverlayFromRulesVersion} from "../hub/hub-campaign-rule-evaluator.js";
 
 const _CAMPAIGN_ROLES = new Set(["dm", "co_dm", "player"]);
 const _RULE_LABELS = {
@@ -40,6 +42,23 @@ export function getCloudCharacterData (character) {
 	delete out.id;
 	delete out._savedAt;
 	return out;
+}
+
+export function getCampaignPreparedCharacterData ({data, context}) {
+	const overlay = getCampaignSettingsOverlayFromRulesVersion(context?.rulesVersion);
+	if (context?.rulesVersion && !overlay) {
+		const error = new Error("Campaign rules are unavailable for this character.");
+		error.code = "RULES_VERSION_INVALID";
+		throw error;
+	}
+	const state = new CharacterSheetState();
+	state.loadFromJson(structuredClone(data));
+	state.setCampaignSettingsOverlay(overlay);
+	state.setCarryAuthorityContext({
+		rulesVersionId: context?.rulesVersion?.id ?? null,
+		brewBundleHash: context?.brewBundle?.contentHash ?? null,
+	});
+	return getCloudCharacterData(state.toJson());
 }
 
 export function getCampaignControlErrorMessage (error) {
@@ -519,12 +538,15 @@ export class CharacterSheetCampaign {
 		try {
 			if (!await this._page._saveCurrentCharacter()) throw new Error("LOCAL_SAVE_FAILED");
 			const command = this._getPendingCommand({kind: "copy-local", characterId, campaignId});
-			const target = await this._api.pGetCampaignCompatibility({campaignId});
+			const context = await this._api.pGetCampaignContext({campaignId});
 			const result = await this._api.pCreateCharacter({
 				clientImportId: characterId,
 				campaignId,
-				data: getCloudCharacterData(this._page._state.toJson()),
-				rulesVersionId: target.rulesVersion?.id || null,
+				data: getCampaignPreparedCharacterData({
+					data: this._page._state.toJson(),
+					context,
+				}),
+				rulesVersionId: context.rulesVersion?.id || null,
 				idempotencyKey: command.idempotencyKey,
 			});
 			this._feedback = {type: "success", text: "Cloud copy created. Your local original is unchanged."};

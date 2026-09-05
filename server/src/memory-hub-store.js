@@ -49,6 +49,10 @@ import {
 	pGetCampaignContentEnforcement,
 } from "./campaign-content-policy.js";
 import {
+	assertCampaignRuleWriteFence,
+	prepareCampaignTransitionData,
+} from "./campaign-rule-authority.js";
+import {
 	createCharacterDisplayNameSnapshot,
 	enrichEventPayload,
 	redactTransferEventForViewer,
@@ -1177,6 +1181,7 @@ export class MemoryHubStore {
 		clientImportId,
 		rulesVersionId = null,
 		idempotencyKey,
+		protocolVersion = null,
 	}) {
 		validateCloudCharacterData(data);
 		const prior = this._getReceipt({accountId, idempotencyKey});
@@ -1194,11 +1199,19 @@ export class MemoryHubStore {
 				rulesVersionId: enforcement.activeRulesVersionId,
 			});
 		}
+		const campaign = campaignId ? this._campaigns.get(campaignId) : null;
+		const rulesVersion = campaign?.activeRulesVersionId
+			? this._rulesVersions.get(campaign.activeRulesVersionId)
+			: null;
 		const imported = [...this._characters.values()].find(it =>
 			it.ownerAccountId === accountId
 			&& it.clientImportId === clientImportId
 			&& it.campaignId === campaignId,
 		);
+		if (imported?.status === "active") {
+			return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(imported)}});
+		}
+		if (data?.carry) assertCampaignRuleWriteFence({rulesVersion, data, protocolVersion});
 		if (imported) {
 			if (imported.status === "archived") {
 				imported.status = "active";
@@ -1315,6 +1328,7 @@ export class MemoryHubStore {
 		patches,
 		rulesVersionId = null,
 		idempotencyKey,
+		protocolVersion = null,
 	}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
 		if (prior) return prior;
@@ -1354,6 +1368,11 @@ export class MemoryHubStore {
 		// named modifiers, feature choices and item-derived modifiers — so any allowlist
 		// would silently go stale as inputs are added.
 		if (patches?.length && !hasFreshCarryWrite(patches)) stripCarryAuthority(data);
+		const campaign = character.campaignId ? this._campaigns.get(character.campaignId) : null;
+		const rulesVersion = campaign?.activeRulesVersionId
+			? this._rulesVersions.get(campaign.activeRulesVersionId)
+			: null;
+		if (data?.carry) assertCampaignRuleWriteFence({rulesVersion, data, protocolVersion});
 		validateCloudCharacterData(data);
 		if (enforcement) {
 			assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
@@ -1400,6 +1419,18 @@ export class MemoryHubStore {
 			character: source.data,
 			rulesVersionId: enforcement.activeRulesVersionId,
 		});
+		const destination = this._campaigns.get(campaignId);
+		const destinationRulesVersion = destination?.activeRulesVersionId
+			? this._rulesVersions.get(destination.activeRulesVersionId)
+			: null;
+		const destinationBrewBundle = destination?.activeBrewBundleVersionId
+			? this._brewVersions.get(destination.activeBrewBundleVersionId)
+			: null;
+		const destinationData = prepareCampaignTransitionData({
+			data: source.data,
+			rulesVersion: destinationRulesVersion,
+			brewBundleHash: destinationBrewBundle?.contentHash ?? null,
+		});
 		const clone = {
 			...copy(source),
 			id: crypto.randomUUID(),
@@ -1413,7 +1444,7 @@ export class MemoryHubStore {
 			// The owner's sharing choice follows their copy; the revision restarts because
 			// this is a new aggregate.
 			projectionRevision: 1,
-			data: {...copy(source.data), id: undefined, name: `${source.data.name || "Character"} (Copy)`},
+			data: {...destinationData, id: undefined, name: `${source.data.name || "Character"} (Copy)`},
 			createdAt: this._fnNow().toISOString(),
 			updatedAt: this._fnNow().toISOString(),
 		};
@@ -1451,6 +1482,18 @@ export class MemoryHubStore {
 		if ([...this._transfers.values()].some(it => it.status === "reserved" && it.sourceKind === "character" && it.sourceId === characterId)) {
 			throw new HubStoreError("CHARACTER_BUSY", `Resolve outgoing transfers before moving.`, {status: 409});
 		}
+		const destination = this._campaigns.get(campaignId);
+		const destinationRulesVersion = destination?.activeRulesVersionId
+			? this._rulesVersions.get(destination.activeRulesVersionId)
+			: null;
+		const destinationBrewBundle = destination?.activeBrewBundleVersionId
+			? this._brewVersions.get(destination.activeBrewBundleVersionId)
+			: null;
+		const destinationData = prepareCampaignTransitionData({
+			data: character.data,
+			rulesVersion: destinationRulesVersion,
+			brewBundleHash: destinationBrewBundle?.contentHash ?? null,
+		});
 		this._cancelIncomingForCharacter({character});
 		for (const operation of this._semanticOperations.values()) {
 			if (
@@ -1463,6 +1506,7 @@ export class MemoryHubStore {
 		const sourceCampaignId = character.campaignId;
 		const characterNameSnapshot = createCharacterDisplayNameSnapshot(character.data?.name);
 		character.campaignId = campaignId;
+		character.data = normalizeCharacterInventory(destinationData);
 		character.targetRef = crypto.randomUUID();
 		if (sourceCampaignId !== campaignId) character.operationWatermark = 0;
 		character.clientImportId = null;

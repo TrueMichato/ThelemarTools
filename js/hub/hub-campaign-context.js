@@ -30,6 +30,11 @@ export class HubCampaignContext {
 		if (!session.signedIn) throw new Error(`Sign in to open a campaign context.`);
 		this._session = session;
 		this._context = this._injectedContext || await this._api.pGetCampaignContext({campaignId: this._campaignId, signal});
+		if (this._context.rulesVersion?.ruleDecision?.blocking) {
+			const error = new Error(`Campaign rules are not compatible with this client.`);
+			error.code = this._context.rulesVersion.ruleDecision.errors?.[0]?.code || "RULES_UNAVAILABLE";
+			throw error;
+		}
 		if (this._context.brewBundle) {
 			this._brewContext.activate({
 				campaignId: this._campaignId,

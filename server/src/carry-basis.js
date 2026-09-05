@@ -3,7 +3,8 @@ import {
 	createCampaignCarryBasis,
 	createDetachedCarryBasis,
 } from "../../js/hub/hub-carry-authority.js";
-import {normalizeCampaignRules} from "./campaign-content.js";
+import {CAMPAIGN_RULE_PROTOCOL_VERSION} from "../../js/hub/hub-campaign-rule-evaluator.js";
+import {getAuthoritativeCampaignRuleDecision} from "./campaign-rule-authority.js";
 
 /**
  * The basis a character's carry summary must match in order to be trusted right now.
@@ -38,8 +39,15 @@ export function getExpectedCarryBasis ({character, campaign = null, rulesVersion
 		return createDetachedCarryBasis({settingsDigest: computeCarrySettingsDigest(ownSettings)});
 	}
 
-	const campaignRules = rulesVersion?.rules ? normalizeCampaignRules(rulesVersion.rules) : null;
-	const effectiveSettings = campaignRules ? {...ownSettings, ...campaignRules} : ownSettings;
+	const decision = getAuthoritativeCampaignRuleDecision({
+		rulesVersion,
+		personalSettings: ownSettings,
+		// This is an internal server projection, not an unversioned client write. It still
+		// names the exact protocol contract used to evaluate the active policy.
+		protocolVersion: CAMPAIGN_RULE_PROTOCOL_VERSION,
+		surface: "characterOpen",
+	});
+	const effectiveSettings = {...ownSettings, ...decision.effectiveSettings};
 
 	return createCampaignCarryBasis({
 		// A campaign with no active rules version or no brew bundle yields null here, which

@@ -123,6 +123,10 @@ describe("Campaign rules policy catalog", () => {
 				code: "RULES_MODE_UNSUPPORTED",
 				mutate: policy => policy.rules[0].mode = "advisory",
 			},
+			{
+				code: "RULES_MODE_UNSUPPORTED",
+				mutate: policy => policy.rules.find(rule => rule.id === "rules.exhaustion.system").mode = "enforced",
+			},
 		];
 		for (const {code, mutate} of cases) {
 			const policy = createDefaultCampaignRulesPolicy();

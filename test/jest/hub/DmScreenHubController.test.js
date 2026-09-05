@@ -100,6 +100,99 @@ describe("campaign DM Screen controller", () => {
 		}));
 	});
 
+	it("retries a failed rules-context refresh when realtime returns live", async () => {
+		const realtime = new Observable();
+		const contexts = [];
+		let contextFetchCount = 0;
+		const context = {
+			rulesVersion: {id: "rules-2", ruleDecision: {blocking: false}},
+			brewBundle: null,
+		};
+		const controller = new DmScreenHubController({
+			campaignId: "campaign-1",
+			api: {
+				pGetCampaignContext: async () => {
+					contextFetchCount++;
+					if (contextFetchCount === 1) throw new Error("offline");
+					return context;
+				},
+				pGetPartyInventory: async () => ({inventory: [], currency: {}}),
+			},
+			document: null,
+			fnSetTimeout: () => 1,
+			fnClearTimeout: () => {},
+		});
+		controller.attach({
+			board: {
+				fireBoardEvent: () => {},
+				setHubCampaignContext: value => contexts.push(value),
+			},
+			repository: null,
+			realtime,
+		});
+
+		realtime.emit("event", {
+			type: "rules.activated",
+			aggregateId: "rules-2",
+		});
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(contextFetchCount).toBe(1);
+		expect(contexts).toEqual([null]);
+
+		realtime.emit("state", {state: "reconnecting"});
+		await Promise.resolve();
+		expect(contextFetchCount).toBe(1);
+
+		realtime.emit("state", {state: "live"});
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(contextFetchCount).toBe(2);
+		expect(contexts).toEqual([null, context]);
+	});
+
+	it("does not let a stale refresh failure reopen a retry after a newer refresh wins", async () => {
+		const realtime = new Observable();
+		const contexts = [];
+		const requests = [];
+		const controller = new DmScreenHubController({
+			campaignId: "campaign-1",
+			api: {
+				pGetCampaignContext: () => new Promise((resolve, reject) => requests.push({resolve, reject})),
+			},
+			document: null,
+		});
+		controller.attach({
+			board: {
+				fireBoardEvent: () => {},
+				setHubCampaignContext: value => contexts.push(value),
+			},
+			repository: null,
+			realtime,
+		});
+
+		realtime.emit("event", {type: "rules.activated", aggregateId: "rules-1"});
+		realtime.emit("event", {type: "rules.activated", aggregateId: "rules-2"});
+		expect(requests).toHaveLength(2);
+
+		const currentContext = {rulesVersion: {id: "rules-2", ruleDecision: {blocking: false}}};
+		requests[1].resolve(currentContext);
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(contexts).toEqual([currentContext]);
+
+		requests[0].reject(new Error("offline"));
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(contexts).toEqual([currentContext]);
+
+		realtime.emit("state", {state: "live"});
+		await Promise.resolve();
+		expect(requests).toHaveLength(2);
+	});
+
 	it("routes authoritative projection access loss back to the context coordinator", async () => {
 		const errors = [];
 		const controller = new DmScreenHubController({

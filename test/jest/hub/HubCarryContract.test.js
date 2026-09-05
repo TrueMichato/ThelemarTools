@@ -353,12 +353,12 @@ describe("enforcement", () => {
 		expect(enforcement.reasons).toContain("over_capacity");
 	});
 
-	it("an enforced policy is reported unavailable rather than blocking, since no evaluator exists", () => {
+	it("reports an enforced calculation policy without blocking play or leaking inventory truth", () => {
 		const enforcement = getCarryEnforcement({
 			profile: getStandard({grossWeight: 300}),
 			policy: {mode: "enforced"},
 		});
-		expect(enforcement.disposition).toBe("unavailable");
+		expect(enforcement.disposition).toBe("enforced");
 		expect(enforcement.isBlocking).toBe(false);
 	});
 });

@@ -437,15 +437,9 @@ export function getPartyCarryAggregate ({members = [], stashWeight = null, stash
 /**
  * Whether the active policy may block on carry, and why.
  *
- * Always advisory today, by two independent constraints. ADR 0015 lists `tgtt.carry-weight`
- * as `planned` with no rules evaluator, and a rule may only be labelled *Enforced* once all
- * of its required surfaces are `implemented` — so no campaign can legitimately demand
- * enforcement yet. Independently, ADR 0011 forbids letting hidden item truth be inferred
- * from "transfer previews… encumbrance warnings, capacity formulas, or resource-specific
- * failures", so a blocking carry check would itself be a disclosure channel.
- *
- * The seam exists so the future evaluator has somewhere to plug in; it adds no blocking
- * behaviour now.
+ * Policy enforcement selects the campaign's carry calculation and fences peer-visible
+ * summaries by policy identity. It never blocks play for being over capacity, which would
+ * disclose hidden inventory truth across ADR 0011 privacy boundaries.
  * @param {{profile?: object, policy?: object}} params
  * @returns {{disposition: string, isBlocking: boolean, reasons: string[]}}
  */
@@ -456,10 +450,8 @@ export function getCarryEnforcement ({profile, policy = null} = {}) {
 	else if (status?.level === CARRY_STATUS.heavilyEncumbered) reasons.push("heavily_encumbered");
 	else if (status?.level === CARRY_STATUS.encumbered) reasons.push("encumbered");
 
-	// An unsupported or unknown rule is never given an Enforced label (ADR 0015): existing
-	// play stays available rather than being blocked by a rule nothing can evaluate.
 	if (policy && policy.mode === "enforced") {
-		return Object.freeze({disposition: "unavailable", isBlocking: false, reasons: Object.freeze(reasons)});
+		return Object.freeze({disposition: "enforced", isBlocking: false, reasons: Object.freeze(reasons)});
 	}
 	return Object.freeze({disposition: "advisory", isBlocking: false, reasons: Object.freeze(reasons)});
 }

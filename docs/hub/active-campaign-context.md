@@ -123,7 +123,7 @@ down immediately, pinned or not.
 
 ### The rules-teardown trap
 
-The Character Sheet re-applies `setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules)`
+The Character Sheet re-applies the evaluator's `rulesVersion.ruleDecision.effectiveSettings`
 on **every** character load and reset. Calling `clearCampaignSettingsOverlay()` alone is therefore
 **not** a teardown — the next character load silently reinstalls the campaign rules. The
 `teardown-rules` owner must also null `_hubContext`. This is pinned by
@@ -238,11 +238,15 @@ two-script boot graph. The coordinator graph's combined transfer size is asserte
 
 ## Content-policy consumer
 
-V2-T5 still owns only context transport and teardown. ADR 0015/V2-T6 consumes the active rules version,
-content catalog, source/edition metadata, and campaign brew bundle to filter choices and fence authoritative
-writes. Rules-version activation, rollback, reconnect, campaign switch, logout, or access loss increments the
-context generation and immediately removes stale filters/reports before another context or local mode can load.
-No campaign policy is written into local character JSON or personal brew.
+V2-T5 still owns only context transport and teardown; it carries the currently advertised `sourcePolicy` and
+`editionPolicy` metadata in `HubCampaignPageContext` but does not itself filter content or claim enforcement.
+ADR 0015/V2-T6 consumes the active rules version, content catalog, source/edition metadata, and campaign brew
+bundle to filter choices and fence authoritative writes for source, species, and edition. It also enforces the
+carry-weight/encumbrance-tier settings subset and fences carry writes to the active policy identity. The
+remaining TGTT/exhaustion/jumping/linguistics/critical-rolls settings remain advisory. Rules-version activation,
+rollback, reconnect, campaign switch, logout, or access loss increments the context generation and immediately
+removes stale filters/reports before another context or local mode can load. No campaign policy is written into
+local character JSON or personal brew.
 
 ## Parallel-change collision surfaces
 

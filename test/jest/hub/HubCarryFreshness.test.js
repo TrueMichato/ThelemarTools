@@ -23,9 +23,21 @@ import {MemoryHubStore} from "../../../server/src/memory-hub-store.js";
 import {getExpectedCarryBasis} from "../../../server/src/carry-basis.js";
 import {resolveCarryAuthority} from "../../../js/hub/hub-carry-authority.js";
 import {computeCarrySettingsDigest} from "../../../js/hub/hub-carry-authority.js";
+import "../charactersheet/setup.js";
+import "../../../js/charactersheet/charactersheet-state.js";
+import {
+	CAMPAIGN_RULES_POLICY_CAPABILITY,
+	createDefaultCampaignRulesPolicy,
+} from "../../../js/hub/hub-campaign-rules.js";
+import {
+	CAMPAIGN_RULE_PROTOCOL_VERSION,
+	evaluateCampaignRules,
+	getCampaignSettingsOverlayFromRulesVersion,
+} from "../../../js/hub/hub-campaign-rule-evaluator.js";
 import fs from "node:fs";
 
 const read = path => fs.readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
+const CharacterSheetState = globalThis.CharacterSheetState;
 
 /** A summary shaped exactly as `CharacterSheetState.toJson()` materialises one. */
 function getCarryBlock (overrides = {}) {
@@ -427,10 +439,89 @@ describe("basis resolution", () => {
 		const character = {campaignId: "c", data: {settings: {thelemar_carryWeight: true}}};
 		const overlaid = getExpectedCarryBasis({
 			character,
-			rulesVersion: {id: "r1", rules: {thelemar_carryWeight: false}},
+			rulesVersion: {id: "r1", version: 1, schemaVersion: 1, catalogVersion: 1, rules: {thelemar_carryWeight: false}},
 		});
-		const plain = getExpectedCarryBasis({character, rulesVersion: {id: "r1", rules: {thelemar_carryWeight: true}}});
+		const plain = getExpectedCarryBasis({character, rulesVersion: {id: "r1", version: 1, schemaVersion: 1, catalogVersion: 1, rules: {thelemar_carryWeight: true}}});
 		expect(overlaid.settingsDigest).not.toBe(plain.settingsDigest);
+	});
+
+	it("preserves personal material settings when matching a real Character Sheet basis", () => {
+		const policy = createDefaultCampaignRulesPolicy();
+		const rulesVersion = {id: "rules-v2", version: 1, schemaVersion: 2, catalogVersion: 1, rules: policy};
+		rulesVersion.ruleDecision = evaluateCampaignRules({
+			capabilities: [CAMPAIGN_RULES_POLICY_CAPABILITY],
+			personalSettings: {},
+			protocolVersion: CAMPAIGN_RULE_PROTOCOL_VERSION,
+			rulesVersion,
+			surface: "characterOpen",
+		});
+		const state = new CharacterSheetState();
+		state.setSetting("enableMaterials", true);
+		state.setSetting("materials_weightFromDensity", true);
+		state.setSetting("materials_degradation", true);
+		state.setCampaignSettingsOverlay(getCampaignSettingsOverlayFromRulesVersion(rulesVersion));
+		state.setCarryAuthorityContext({rulesVersionId: rulesVersion.id, brewBundleHash: null});
+		const data = state.toJson();
+		const clientBasis = state.getCarryAuthorityBasis();
+		const serverBasis = getExpectedCarryBasis({
+			character: {campaignId: "campaign", data},
+			rulesVersion,
+		});
+
+		expect(serverBasis).toEqual(clientBasis);
+		expect(serverBasis.settingsDigest).toContain("enableMaterials=true");
+		expect(resolveCarryAuthority({data, expectedBasis: serverBasis})).not.toBeNull();
+	});
+
+	it("keeps the owner and DM carry projection synced with default material settings", async () => {
+		const store = new MemoryHubStore();
+		const dm = await store.pUpsertOAuthAccount({provider: "test", providerSubject: "digest-dm", displayName: "Digest DM"});
+		const player = await store.pUpsertOAuthAccount({provider: "test", providerSubject: "digest-player", displayName: "Digest Player"});
+		const {campaign} = await store.pCreateCampaign({accountId: dm.id, name: "Digest", idempotencyKey: "digest-campaign"});
+		await store.pCreateInvite({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			role: "player",
+			tokenHash: "digest-token",
+			expiresAt: new Date(Date.now() + 60_000),
+			maxUses: 1,
+			idempotencyKey: "digest-invite",
+		});
+		await store.pRedeemInvite({accountId: player.id, tokenHash: "digest-token", idempotencyKey: "digest-redeem"});
+		const published = await store.pCreateAndActivateRulesPolicy({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			policy: createDefaultCampaignRulesPolicy(),
+			expectedActiveRulesVersionId: null,
+			idempotencyKey: "digest-rules",
+		});
+		const state = new CharacterSheetState();
+		state.setName("Bearer");
+		state.setSetting("enableMaterials", true);
+		state.setSetting("materials_weightFromDensity", true);
+		state.setSetting("materials_degradation", true);
+		state.setCampaignSettingsOverlay(getCampaignSettingsOverlayFromRulesVersion(published.rulesVersion));
+		state.setCarryAuthorityContext({rulesVersionId: published.rulesVersion.id, brewBundleHash: null});
+		const {character} = await store.pCreateCharacter({
+			accountId: player.id,
+			campaignId: campaign.id,
+			data: state.toJson(),
+			schemaVersion: 1,
+			clientImportId: "digest-character",
+			protocolVersion: "4",
+			idempotencyKey: "digest-create",
+		});
+		await store.pSetProjectionPolicy({
+			accountId: player.id,
+			characterId: character.id,
+			policy: {version: 1, preset: "table", overrides: {carrySummary: {mode: "share"}}},
+			expectedProjectionRevision: character.projectionRevision,
+			idempotencyKey: "digest-share",
+		});
+
+		const owner = await store.pGetCharacter({accountId: player.id, characterId: character.id});
+		expect(owner.character.data.carry.basis.settingsDigest).toContain("enableMaterials=true");
+		expect(await getVisibleCarry({store, dm, campaign, characterId: character.id})).not.toBeNull();
 	});
 });
 

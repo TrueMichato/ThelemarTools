@@ -1,6 +1,6 @@
 # ADR 0015: Versioned Campaign Hub rules policy
 
-Status: Accepted; source/species/edition policy implemented, non-content enforcement remains separate
+Status: Accepted; source/species/edition policy and carry/encumbrance-tier settings enforcement implemented; other non-content settings remain advisory
 
 ## Context
 
@@ -20,10 +20,13 @@ Historical rules documents use schema version 1. The Hub reads those versions th
 adapter. New publications use schema version 2, whose three content rules embed content-policy version 1.
 `server/src/campaign-content.js` still normalizes the six established settings (`enableTgtt`,
 `exhaustionRules`, carry weight, jumping, linguistics, and critical rolls), and the Character Sheet projects
-those settings through `CharacterSheetState.setCampaignSettingsOverlay()`.
+those settings through `CharacterSheetState.setCampaignSettingsOverlay()`. The overlay is effective at runtime,
+cannot be changed by the character while active, and is removed by `toJson()`.
 
-The settings projection is not a non-content rules engine. Source/species/edition policy is enforced by the
-separate shared content evaluator and authoritative store adapters:
+The settings projection is not a full non-content rules engine. Source/species/edition policy is enforced by
+the separate shared content evaluator and authoritative store adapters. The shared evaluator additionally
+enforces the carry-weight/encumbrance-tier settings subset and its policy-fenced carry writes; the remaining
+TGTT/exhaustion/jumping/linguistics/critical-rolls projections remain advisory:
 
 - `CharacterSheetBuilder`, `CharacterSheetLevelUp`, and `CharacterSheetQuickBuild` already use
   `CharacterSheetPage.filterByAllowedSources()` at many candidate-picking surfaces, but a UI filter is not an
@@ -38,8 +41,10 @@ separate shared content evaluator and authoritative store adapters:
   or item data would corrupt the character and violate the local-first model.
 
 The words "rule", "setting", "note", and "enforced" therefore have the stable contract below. The three content
-rules have completed their implementation gates; the TGTT and exhaustion controls remain truthfully
-**Advisory** and are not made authoritative by this content-policy slice.
+rules have completed their implementation gates via the shared content evaluator.
+`hub-campaign-rule-evaluator.js` implements its closed, data-only settings subset and additionally promotes
+`tgtt.carry-weight` and `tgtt.encumbrance-tiers` to **Enforced** on their proven surfaces. The remaining
+TGTT/exhaustion/jumping/linguistics/critical-rolls settings remain truthfully **Advisory**.
 
 ## Decision
 
@@ -95,8 +100,8 @@ Each `implementationStatus` surface value is one of:
 The aggregate status is the least-capable required surface. A rule may be displayed as **Enforced** only when
 all of its required enforcement surfaces are `implemented`, the server supports the rule, and the active
 policy selects `mode: "enforced"`. A partially implemented rule is labeled **Advisory** or **Unavailable**,
-never Enforced. The source, species, and edition entries are enforced; the remaining catalog entries are
-advisory projections.
+never Enforced. The source, species, edition, carry-weight, and encumbrance-tier entries are enforced; the
+remaining catalog entries are advisory projections.
 
 Catalog entries with `kind: "note"` are prohibited. Notes use the separate policy `notes` collection below,
 have no `mode`, and can never produce a violation. This keeps descriptive table guidance distinct from rules.

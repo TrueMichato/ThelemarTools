@@ -48,6 +48,10 @@ import {
 	pGetCampaignContentCatalog,
 	pGetCampaignContentEnforcement,
 } from "./campaign-content-policy.js";
+import {
+	assertCampaignRuleWriteFence,
+	prepareCampaignTransitionData,
+} from "./campaign-rule-authority.js";
 import {HUB_REQUIRED_MIGRATION_VERSION} from "./migration-version.js";
 import {
 	createCharacterDisplayNameSnapshot,
@@ -1447,7 +1451,12 @@ export class PostgresHubStore {
 	async _pGetCarryBasisContext (campaignId) {
 		if (!campaignId) return {campaign: null, rulesVersion: null, brewBundle: null};
 		const result = await this._pool.query(`
-			SELECT b.content_hash, r.id AS rules_id, r.rules
+			SELECT
+				b.content_hash,
+				r.id AS rules_id,
+				r.version AS rules_version,
+				r.schema_version AS rules_schema_version,
+				r.rules
 			FROM hub.campaigns c
 			LEFT JOIN hub.brew_bundle_versions b ON b.id = c.active_brew_bundle_version_id
 			LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
@@ -1455,9 +1464,17 @@ export class PostgresHubStore {
 		`, [campaignId]);
 		if (!result.rowCount) return {campaign: null, rulesVersion: null, brewBundle: null};
 		const row = result.rows[0];
+		const rulesVersion = row.rules_id
+			? {
+				id: row.rules_id,
+				version: Number(row.rules_version),
+				schemaVersion: Number(row.rules_schema_version),
+				rules: row.rules,
+			}
+			: null;
 		return {
 			campaign: {id: campaignId, activeRulesVersionId: row.rules_id || null},
-			rulesVersion: row.rules_id ? {id: row.rules_id, rules: row.rules} : null,
+			rulesVersion,
 			brewBundle: row.content_hash ? {contentHash: row.content_hash} : null,
 		};
 	}
@@ -1636,6 +1653,7 @@ export class PostgresHubStore {
 		clientImportId,
 		rulesVersionId = null,
 		idempotencyKey,
+		protocolVersion = null,
 	}) {
 		validateCloudCharacterData(data);
 		const client = await this._pool.connect();
@@ -1657,7 +1675,40 @@ export class PostgresHubStore {
 				});
 			}
 			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 3))`, [accountId, clientImportId]);
-			const existing = await client.query(`
+			let existing = await client.query(`
+				SELECT * FROM hub.characters
+				WHERE owner_account_id = $1 AND client_import_id = $2
+					AND campaign_id IS NOT DISTINCT FROM $3
+			`, [accountId, clientImportId, campaignId]);
+			if (existing.rows[0]?.status === "active") {
+				const response = {character: stripProjectionPolicy(getCharacter(existing.rows[0]))};
+				await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "character.create", response});
+				await client.query("COMMIT");
+				return response;
+			}
+			if (campaignId && data.carry) {
+				const rulesResult = await client.query(`
+					SELECT r.id, r.version, r.schema_version, r.rules
+					FROM hub.campaigns c
+					LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
+					WHERE c.id = $1
+					FOR UPDATE OF c
+				`, [campaignId]);
+				const row = rulesResult.rows[0];
+				assertCampaignRuleWriteFence({
+					rulesVersion: row?.id
+						? {
+							id: row.id,
+							version: Number(row.version),
+							schemaVersion: Number(row.schema_version),
+							rules: row.rules,
+						}
+						: null,
+					data,
+					protocolVersion,
+				});
+			}
+			existing = await client.query(`
 				SELECT * FROM hub.characters
 				WHERE owner_account_id = $1 AND client_import_id = $2
 					AND campaign_id IS NOT DISTINCT FROM $3
@@ -1837,6 +1888,7 @@ export class PostgresHubStore {
 		patches,
 		rulesVersionId = null,
 		idempotencyKey,
+		protocolVersion = null,
 	}) {
 		const client = await this._pool.connect();
 		try {
@@ -1882,6 +1934,28 @@ export class PostgresHubStore {
 			// otherwise changes, so its absence identifies a writer that predates carry
 			// authority. An allowlist of "carry-relevant paths" could never be complete.
 			if (patches?.length && !hasFreshCarryWrite(patches)) stripCarryAuthority(data);
+			if (character.campaignId && data.carry) {
+				const rulesResult = await client.query(`
+					SELECT r.id, r.version, r.schema_version, r.rules
+					FROM hub.campaigns c
+					LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
+					WHERE c.id = $1
+					FOR UPDATE OF c
+				`, [character.campaignId]);
+				const row = rulesResult.rows[0];
+				assertCampaignRuleWriteFence({
+					rulesVersion: row?.id
+						? {
+							id: row.id,
+							version: Number(row.version),
+							schemaVersion: Number(row.schema_version),
+							rules: row.rules,
+						}
+						: null,
+					data,
+					protocolVersion,
+				});
+			}
 			validateCloudCharacterData(data);
 			if (character.campaignId) {
 				const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId: character.campaignId});
@@ -1975,6 +2049,28 @@ export class PostgresHubStore {
 					rulesVersionId: enforcement.activeRulesVersionId,
 				});
 			}
+			const destinationRulesResult = await client.query(`
+				SELECT r.id, r.version, r.schema_version, r.rules, b.content_hash
+				FROM hub.campaigns c
+				LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
+				LEFT JOIN hub.brew_bundle_versions b ON b.id = c.active_brew_bundle_version_id
+				WHERE c.id = $1
+				FOR UPDATE OF c
+			`, [campaignId]);
+			const destinationRulesRow = destinationRulesResult.rows[0];
+			const destinationRulesVersion = destinationRulesRow?.id
+				? {
+					id: destinationRulesRow.id,
+					version: Number(destinationRulesRow.version),
+					schemaVersion: Number(destinationRulesRow.schema_version),
+					rules: destinationRulesRow.rules,
+				}
+				: null;
+			const destinationData = prepareCampaignTransitionData({
+				data: source.data,
+				rulesVersion: destinationRulesVersion,
+				brewBundleHash: destinationRulesRow?.content_hash ?? null,
+			});
 
 			let character;
 			let action;
@@ -1993,17 +2089,17 @@ export class PostgresHubStore {
 				if (busy.rowCount) throw new HubStoreError("CHARACTER_BUSY", `Resolve outgoing transfers before moving.`, {status: 409});
 				const updated = await client.query(`
 					UPDATE hub.characters
-					SET campaign_id = $2, client_import_id = NULL, target_ref = gen_random_uuid(),
+					SET campaign_id = $2, client_import_id = NULL, data = $3::jsonb, target_ref = gen_random_uuid(),
 						operation_watermark = CASE WHEN campaign_id IS DISTINCT FROM $2 THEN 0 ELSE operation_watermark END,
 						revision = revision + 1, updated_at = now()
 					WHERE id = $1
 					RETURNING *
-				`, [characterId, campaignId]);
+				`, [characterId, campaignId, JSON.stringify(destinationData)]);
 				character = getCharacter(updated.rows[0]);
 				action = "character.moved";
 			} else {
 				const cloneId = crypto.randomUUID();
-				const data = {...source.data, name: `${source.data.name || "Character"} (Copy)`};
+				const data = {...destinationData, name: `${source.data.name || "Character"} (Copy)`};
 				delete data.id;
 				const inserted = await client.query(`
 					INSERT INTO hub.characters (
@@ -2124,7 +2220,7 @@ export class PostgresHubStore {
 			brewBundle: row.brew_id ? {
 				id: row.brew_id,
 				campaignId: row.campaign_id,
-				version: row.brew_version,
+				version: Number(row.brew_version),
 				contentHash: row.content_hash,
 				content: row.content,
 				manifest: row.manifest,
@@ -2133,8 +2229,8 @@ export class PostgresHubStore {
 				...getPublicCampaignRulesVersion({
 					id: row.rules_id,
 					campaignId: row.campaign_id,
-					version: row.rules_version,
-					schemaVersion: row.rules_schema_version,
+					version: Number(row.rules_version),
+					schemaVersion: Number(row.rules_schema_version),
 					rules: row.rules,
 					createdAt: row.rules_created_at,
 				}),
@@ -2191,7 +2287,7 @@ export class PostgresHubStore {
 			brewBundle: row.brew_id
 				? {
 					id: row.brew_id,
-					version: row.brew_version,
+					version: Number(row.brew_version),
 					contentHash: row.content_hash,
 					documentCount: row.manifest?.documentCount || 0,
 				}
@@ -2201,8 +2297,8 @@ export class PostgresHubStore {
 					const version = getPublicCampaignRulesVersion({
 						id: row.rules_id,
 						campaignId: row.campaign_id,
-						version: row.rules_version,
-						schemaVersion: row.rules_schema_version,
+						version: Number(row.rules_version),
+						schemaVersion: Number(row.rules_schema_version),
 						rules: row.rules,
 					});
 					return {id: version.id, version: version.version, rules: version.rules};
@@ -2244,7 +2340,7 @@ export class PostgresHubStore {
 			const response = {brewBundle: {
 				id: row.id,
 				campaignId: row.campaign_id,
-				version: row.version,
+				version: Number(row.version),
 				contentHash: row.content_hash,
 				content: row.content,
 				manifest: row.manifest,
@@ -2291,7 +2387,7 @@ export class PostgresHubStore {
 				...getPublicCampaignRulesVersion({
 					id: row.id,
 					campaignId: row.campaign_id,
-					version: row.version,
+					version: Number(row.version),
 					schemaVersion: row.schema_version,
 					rules: row.rules,
 					createdAt: row.created_at,
@@ -2348,7 +2444,7 @@ export class PostgresHubStore {
 				versions: versionsResult.rows.map(row => getPublicCampaignRulesVersion({
 					id: row.id,
 					campaignId: row.campaign_id,
-					version: row.version,
+					version: Number(row.version),
 					schemaVersion: row.schema_version,
 					rules: row.rules,
 					createdAt: row.created_at,
@@ -2466,7 +2562,7 @@ export class PostgresHubStore {
 				aggregateType: "rules_version",
 				aggregateId: row.id,
 				payload: {
-					version: row.version,
+					version: Number(row.version),
 					previousVersion: previous?.version || null,
 					schemaVersion: normalizedPolicy.schemaVersion,
 					catalogVersion: normalizedPolicy.catalogVersion,
@@ -2477,7 +2573,7 @@ export class PostgresHubStore {
 				rulesVersion: getPublicCampaignRulesVersion({
 					id: row.id,
 					campaignId: row.campaign_id,
-					version: row.version,
+					version: Number(row.version),
 					schemaVersion: row.schema_version,
 					rules: row.rules,
 					createdAt: row.created_at,
@@ -2549,7 +2645,7 @@ export class PostgresHubStore {
 			const target = getPublicCampaignRulesVersion({
 				id: row.id,
 				campaignId: row.campaign_id,
-				version: row.version,
+				version: Number(row.version),
 				schemaVersion: row.schema_version,
 				rules: row.rules,
 				createdAt: row.created_at,
@@ -2577,7 +2673,7 @@ export class PostgresHubStore {
 				aggregateType: "rules_version",
 				aggregateId: row.id,
 				payload: {
-					version: row.version,
+					version: Number(row.version),
 					previousVersion: previous?.version || null,
 					schemaVersion: row.schema_version,
 					catalogVersion: target.catalogVersion,
@@ -2637,11 +2733,11 @@ export class PostgresHubStore {
 			await client.query(`UPDATE hub.campaigns SET ${column} = $2, updated_at = now() WHERE id = $1`, [campaignId, versionId]);
 			const row = version.rows[0];
 			const response = kind === "brew"
-				? {brewBundle: {id: row.id, campaignId: row.campaign_id, version: row.version, contentHash: row.content_hash, content: row.content, manifest: row.manifest}}
+				? {brewBundle: {id: row.id, campaignId: row.campaign_id, version: Number(row.version), contentHash: row.content_hash, content: row.content, manifest: row.manifest}}
 				: {rulesVersion: getPublicCampaignRulesVersion({
 					id: row.id,
 					campaignId: row.campaign_id,
-					version: row.version,
+					version: Number(row.version),
 					schemaVersion: row.schema_version,
 					rules: row.rules,
 				}, {isIncludePolicy: true})};
@@ -3207,7 +3303,7 @@ export class PostgresHubStore {
 			targetOwnerAccountIdAtProposal: row.target_owner_account_id_at_proposal,
 			targetRef: row.target_ref,
 			status: row.status,
-			version: row.version,
+			version: Number(row.version),
 			kind: row.kind,
 			arguments: row.arguments,
 			sourceEntity: row.source_entity,
@@ -4169,14 +4265,14 @@ export class PostgresHubStore {
 						rulesVersion: context.rules_id
 							? {
 								id: context.rules_id,
-								version: context.rules_version,
-								schemaVersion: context.rules_schema_version,
+								version: Number(context.rules_version),
+								schemaVersion: Number(context.rules_schema_version),
 							}
 							: null,
 						brewBundle: context.brew_id
 							? {
 								id: context.brew_id,
-								version: context.brew_version,
+								version: Number(context.brew_version),
 								contentHash: context.content_hash,
 							}
 							: null,

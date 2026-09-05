@@ -1,3 +1,4 @@
+import "./setup.js";
 import {jest} from "@jest/globals";
 import {
 	CharacterSheetCampaign,
@@ -6,6 +7,7 @@ import {
 	getCampaignControlErrorMessage,
 	getCloudCharacterUrl,
 	getCloudCharacterData,
+	getCampaignPreparedCharacterData,
 	getEligibleCharacterCampaigns,
 } from "../../../js/charactersheet/charactersheet-campaign.js";
 import {HubApiError} from "../../../js/hub/hub-api-client.js";
@@ -43,6 +45,17 @@ function getControl ({
 		_page: page,
 		_api: {
 			pCreateCharacter: jest.fn(async () => createResult),
+			pGetCampaignContext: jest.fn(async ({campaignId}) => ({
+				campaignId,
+				rulesVersion: {
+					id: `rules-${campaignId}`,
+					version: 1,
+					schemaVersion: 1,
+					catalogVersion: 1,
+					rules: {thelemar_carryWeight: false},
+				},
+				brewBundle: null,
+			})),
 			pCloneCharacter: jest.fn(async () => createResult),
 			pGetCampaignCompatibility: jest.fn(async ({campaignId}) => ({
 				campaignId,
@@ -185,18 +198,47 @@ describe("Character Sheet campaign control", () => {
 		await control._pCopyLocalCharacter({campaignId: "campaign-1"});
 
 		expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(1);
-		expect(control._api.pCreateCharacter).toHaveBeenCalledWith({
+		expect(control._api.pCreateCharacter).toHaveBeenCalledWith(expect.objectContaining({
 			clientImportId: "local-1",
 			campaignId: "campaign-1",
-			data: {name: "Mira", hp: {current: 12}},
 			idempotencyKey: expect.any(String),
 			rulesVersionId: "rules-campaign-1",
+		}));
+		const submitted = control._api.pCreateCharacter.mock.calls[0][0].data;
+		expect(submitted).toMatchObject({
+			name: "Mira",
+			hp: {current: 12},
+			carry: {basis: {kind: "campaign", rulesVersionId: "rules-campaign-1"}},
 		});
 		expect(control._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=cloud-1&hubCampaign=campaign-1");
 		expect(control._feedback).toEqual({
 			type: "success",
 			text: "Cloud copy created. Your local original is unchanged.",
 		});
+	});
+
+	it("prepares a destination-pinned copy without mutating the local document", () => {
+		const local = {name: "Mira", settings: {thelemar_carryWeight: true}};
+		const prepared = getCampaignPreparedCharacterData({
+			data: local,
+			context: {
+				rulesVersion: {
+					id: "rules-destination",
+					version: 1,
+					schemaVersion: 1,
+					catalogVersion: 1,
+					rules: {thelemar_carryWeight: false},
+				},
+				brewBundle: {contentHash: "brew-destination"},
+			},
+		});
+		expect(prepared.carry.basis).toMatchObject({
+			kind: "campaign",
+			rulesVersionId: "rules-destination",
+			brewBundleHash: "brew-destination",
+		});
+		expect(prepared.settings.thelemar_carryWeight).toBe(true);
+		expect(local).toEqual({name: "Mira", settings: {thelemar_carryWeight: true}});
 	});
 
 	it("does not upload when the local save fails", async () => {

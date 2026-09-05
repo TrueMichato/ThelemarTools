@@ -1876,6 +1876,7 @@ export async function createHubApp ({
 			clientImportId: request.body.clientImportId,
 			rulesVersionId: request.body.rulesVersionId || null,
 			idempotencyKey: getIdempotencyKey(request),
+			protocolVersion: request.headers["x-hub-protocol-version"],
 		});
 		return reply.code(201).send(created);
 	});
@@ -2034,6 +2035,7 @@ export async function createHubApp ({
 		patches: request.body.patches,
 		rulesVersionId: request.body.rulesVersionId || null,
 		idempotencyKey: getIdempotencyKey(request),
+		protocolVersion: request.headers["x-hub-protocol-version"],
 	}));
 
 	app.delete("/api/characters/:characterId", {

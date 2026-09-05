@@ -205,13 +205,19 @@ subtraction.
 
 ## Enforcement
 
-Advisory only, by two independent constraints. ADR 0015 lists `tgtt.carry-weight` as `planned`
-with no rules evaluator, and a rule may only be labelled *Enforced* once all its required
-surfaces are `implemented`. Independently, ADR 0011 forbids hidden item truth being inferred
-from "transfer previews… encumbrance warnings, capacity formulas, or resource-specific
-failures" — so a blocking carry check would itself be a disclosure channel. The server never
-rejects a transfer on carry grounds, and the transfer composer never disables Confirm for
-weight.
+The campaign evaluator enforces the selected carry calculation and fences peer-visible summaries
+by the active immutable policy identity. Over-capacity remains advisory and non-blocking:
+ADR 0011 forbids hidden item truth being inferred from transfer failures, so blocking on carry
+state would itself be a disclosure channel. The server never rejects a transfer merely for
+being over capacity.
+
+The catalog therefore marks `tgtt.carry-weight` and `tgtt.encumbrance-tiers` **Enforced** only
+for the currently proven `characterOpen`, `dmProjection`, and `characterWrite` surfaces. Builder,
+level-up, quick-build, and respec are not claimed surfaces for these rules yet. The shared
+schema-v2 evaluator is the only source of the transient calculation overlay; it never writes
+campaign values into a personal character document. A clone, attach, or campaign move that
+crosses policy identity removes the derived carry authority block atomically, preserving the
+character inputs and requiring a fresh Character Sheet calculation before a summary is shown.
 
 ## Tests
 

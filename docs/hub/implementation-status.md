@@ -50,11 +50,14 @@ Cure Wounds was recognized and rejected as cost-bearing until the ADR 0016 slice
 The V2-T6 selection foundation and source/species/edition content-policy slice are implemented behind the default-off
 `campaign.rules_policy.v1` capability. It adds a closed schema-v2 catalog, schema-v1 compatibility adapter,
 atomic immutable DM/co-DM publish/rollback, privacy-safe member summaries, and an accessible searchable manager.
-Source/species/edition controls are labeled **Enforced** and use content-policy version 1; other selectable
-settings remain **Advisory**. Shared browser/server evaluation filters relevant Character Sheet choices,
-reports legacy violations without rewriting characters, and rejects newly disallowed admissions/deltas,
-including import, move/clone, direct patch, grant/award, and transfer acceptance. V2-T6 is not complete until
-the separate non-content rules-enforcement lane lands.
+Source/species/edition controls are labeled **Enforced** and use content-policy version 1. The shared evaluator
+additionally promotes carry-weight and encumbrance-tier calculation/projection and policy-fenced carry writes
+to **Enforced** on their proven surfaces. Other selectable settings (`tgtt.enabled`, exhaustion, jumping,
+linguistics, and critical rolls) remain **Advisory**. Shared browser/server evaluation filters relevant
+Character Sheet choices, reports legacy violations without rewriting characters, and rejects newly disallowed
+admissions/deltas, including import, move/clone, direct patch, grant/award, and transfer acceptance, across
+both the content-identity and carry rule sets. Builder/level-up choice enforcement for non-carry settings
+remains outside this slice.
 
 The first V2-T7 product slice extends the ADR 0012 substrate with ADR 0016 protocol-4 source costs. A player can
 cast PHB/XPHB Cure Wounds from an authenticated campaign Character Sheet, spend one selected standard spell slot,
@@ -129,8 +132,9 @@ pass. Only the host-operations proof and physical one-DM/two-player game day rem
   regions, labeled form controls, WCAG AA primary-button contrast in day/night themes, and 44 px entry targets.
 - Immutable campaign brew/rules versions and early page context activation.
 - Capability-gated, versioned campaign rules catalog/selection with before/after review, immutable rollback,
-  schema-v1 compatibility, stale-base fencing, and privacy-safe read-only member summaries. Source/species/
-  edition rules are enforced; non-content house rules remain advisory.
+  schema-v1 compatibility, stale-base fencing, privacy-safe read-only member summaries, enforced
+  source/species/edition content controls, and enforced carry calculation/policy-identity fencing. Other
+  TGTT/exhaustion/jumping/linguistics/critical-rolls settings remain advisory.
 - Campaign content policy filters Character Sheet build/level-up/respec/Quick Build and content candidates,
   blocks disallowed new admissions and authoritative deltas in memory/PostgreSQL, and shows bounded actionable
   grandfather warnings without changing existing character documents or local/personal-brew behavior.

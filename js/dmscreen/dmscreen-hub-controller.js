@@ -40,6 +40,10 @@ export class DmScreenHubController {
 		// already applied may publish.
 		this._partyInventoryRequestSeq = 0;
 		this._partyInventoryAppliedSeq = 0;
+		this._campaignContextRefreshGeneration = 0;
+		// A pending refresh is recorded only after a request fails or returns a stale
+		// rules version. The request generation fences this retry from older failures.
+		this._pendingCampaignContextRefresh = null;
 		this._isSyncStale = false;
 		// Monotonic generation. Every in-flight party-inventory request carries the value it
 		// started under; `detach()` and each load/attach bump it, so a response that arrives
@@ -154,7 +158,10 @@ export class DmScreenHubController {
 			this._unsubscribers.push(realtime.on("event", event => this._handleCampaignEvent(event)));
 			// A resync baseline now carries only a cursor and cache-invalidation refs, so the
 			// projections themselves are refetched over HTTP.
-			this._unsubscribers.push(realtime.on("cursor", () => this._queueProjectionResync()));
+			this._unsubscribers.push(realtime.on("cursor", () => {
+				this._queueProjectionResync();
+				this._retryPendingCampaignContext();
+			}));
 		}
 
 		this._publishBoardStatus();
@@ -178,6 +185,8 @@ export class DmScreenHubController {
 		// Invalidate in-flight requests as well as pending timers: without this a fetch that
 		// completes after teardown would publish onto a Board this controller no longer owns.
 		this._generation++;
+		this._campaignContextRefreshGeneration++;
+		this._pendingCampaignContextRefresh = null;
 		this._board = null;
 	}
 
@@ -353,6 +362,7 @@ export class DmScreenHubController {
 				this._isSyncStale = false;
 				this._state.lastSyncedAt ||= Date.now();
 				this._clearStaleTimer();
+				this._retryPendingCampaignContext();
 				break;
 			case "reconnecting":
 				this._state.sync = this._isSyncStale ? "stale" : "reconnecting";
@@ -376,6 +386,9 @@ export class DmScreenHubController {
 	}
 
 	_handleCampaignEvent (event) {
+		if (event?.type === "rules.activated") {
+			void this._pRefreshCampaignContext({rulesVersionId: event.aggregateId});
+		}
 		if ([
 			"character.created",
 			"character.cloned",
@@ -401,6 +414,7 @@ export class DmScreenHubController {
 		].includes(event?.type)) {
 			this._queueProjectionResync();
 		}
+
 		if ([
 			"party_inventory.invalidated",
 			"transfer.committed",
@@ -435,6 +449,42 @@ export class DmScreenHubController {
 				{code: "DM_ROLE_REQUIRED", status: 403},
 			));
 		}
+	}
+
+	async _pRefreshCampaignContext ({rulesVersionId = null} = {}) {
+		const expectedRulesVersionId = rulesVersionId ?? this._pendingCampaignContextRefresh?.rulesVersionId ?? null;
+		const generation = ++this._campaignContextRefreshGeneration;
+		try {
+			const context = await this._api.pGetCampaignContext({campaignId: this._campaignId});
+			if (generation !== this._campaignContextRefreshGeneration || !this._board) return false;
+			if (expectedRulesVersionId && context?.rulesVersion?.id !== expectedRulesVersionId) {
+				this._board.setHubCampaignContext?.(null);
+				this._pendingCampaignContextRefresh = {generation, rulesVersionId: expectedRulesVersionId};
+				return false;
+			}
+			if (context?.rulesVersion?.ruleDecision?.blocking) {
+				this._board?.setHubCampaignContext?.(null);
+				this._pendingCampaignContextRefresh = null;
+				return false;
+			}
+			this._board.setHubCampaignContext?.(context);
+			this._pendingCampaignContextRefresh = null;
+			return true;
+		} catch {
+			if (generation === this._campaignContextRefreshGeneration) {
+				this._board?.setHubCampaignContext?.(null);
+				if (this._board) {
+					this._pendingCampaignContextRefresh = {generation, rulesVersionId: expectedRulesVersionId};
+				}
+			}
+			return false;
+		}
+	}
+
+	_retryPendingCampaignContext () {
+		const pending = this._pendingCampaignContextRefresh;
+		if (!pending || pending.generation !== this._campaignContextRefreshGeneration || !this._board) return;
+		void this._pRefreshCampaignContext({rulesVersionId: pending.rulesVersionId});
 	}
 
 	async _pRevalidateAccess () {

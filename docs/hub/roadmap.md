@@ -317,7 +317,7 @@ Implemented slice:
   BFCache/reconnect revalidation, production-stack Chromium coverage, and four killed high-risk mutants.
 V2-T5 owns context transport and teardown; ADR 0015/V2-T6 now consumes that metadata for content enforcement.
 
-### V2-T6 — enforced campaign rules/source/species/edition policy (**content policy implemented; non-content enforcement pending**)
+### V2-T6 — enforced campaign rules/source/species/edition policy (**content policy and carry/encumbrance enforcement implemented; other non-content rules remain advisory/planned**)
 
 Dependencies: V2-T2 and V2-T5.
 
@@ -336,16 +336,20 @@ Acceptance:
 - policy changes identify affected entities before activation and are auditable/reversible by version;
 - stale clients cannot bypass current policy.
 
-Implemented selection-foundation slice:
+Implemented rules slice:
 
 - a closed, versioned catalog exposes stable rule ids, applicability, parameters, defaults, and truthful
-  **Enforced** content or **Advisory** non-content lifecycle labels;
+  **Enforced**, **Advisory**, or **Planned** lifecycle labels;
 - DM/co-DM management supports search/filter, before/after review, atomic immutable publication, stale-base
   fencing, and activation of an earlier version without rewriting history;
 - schema-v1 TGTT/exhaustion/carry versions remain readable and project to the same legacy settings shape;
 - players receive a bounded read-only summary, while authored notes and complete policy bodies stay on the
   DM management path;
-- `campaign.rules_policy.v1` keeps the new management surface disabled until rollout evidence is accepted.
+- one pure browser/server evaluator capability-, protocol-, schema-, catalog-, rule-version-, surface-, and
+  active-policy-pin gates effective TGTT/exhaustion settings;
+- Character Sheet runtime/build flows and DM Party Tracker consume only the transient evaluated projection;
+  activation, teardown, rollback, reconnect, and realtime replacement never persist campaign settings;
+- policy-sensitive carry summaries are fenced by the active immutable rules-version identity in both stores.
 
 Implemented content-policy slice:
 
@@ -361,7 +365,9 @@ Implemented content-policy slice:
 - exact active rules-version fencing, memory/PostgreSQL parity, privacy-shaped events/summaries, reconnect/
   rollback/campaign-switch teardown, production-stack Chromium, and mutation tests cover authority boundaries.
 
-Non-content house-rule behavior remains advisory and belongs to the separate rules-enforcement slice.
+Carry-weight and encumbrance-tier settings are also **Enforced** (calculation/projection plus policy-fenced
+carry writes on their proven surfaces); remaining non-content house-rule behavior (`tgtt.enabled`, exhaustion,
+jumping, linguistics, and critical rolls) stays advisory.
 
 ### V2-T7 — player targeting (**first one-to-one player slice implemented; broader targeting active**)
 

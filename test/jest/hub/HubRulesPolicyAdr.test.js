@@ -6,10 +6,10 @@ const adr = fs.readFileSync(
 );
 
 describe("Campaign Hub rules-policy ADR contract", () => {
-	it("distinguishes implemented content enforcement from separate non-content rules", () => {
-		expect(adr).toMatch(/^Status: Accepted; source\/species\/edition policy implemented, non-content enforcement remains separate$/m);
-		expect(adr).toContain("The source, species, and edition entries are enforced");
-		expect(adr).toContain("remaining catalog entries are");
+	it("distinguishes enforced content and carry rules from advisory settings", () => {
+		expect(adr).toMatch(/^Status: Accepted; source\/species\/edition policy and carry\/encumbrance-tier settings enforcement implemented; other non-content settings remain advisory$/m);
+		expect(adr).toContain("The source, species, edition, carry-weight, and encumbrance-tier entries are enforced");
+		expect(adr).toContain("remaining catalog entries are advisory projections");
 	});
 
 	it.each([

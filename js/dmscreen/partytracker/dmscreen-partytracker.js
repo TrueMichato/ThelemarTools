@@ -4,6 +4,7 @@ import {PartyTrackerCharacter} from "./dmscreen-partytracker-character.js";
 import {getPartyCarryAggregate} from "../../hub/hub-carry-contract.js";
 import {PartyTrackerDcCalc} from "./dmscreen-partytracker-dccalc.js";
 import {PartyTrackerImporter} from "./dmscreen-partytracker-import.js";
+import {getCampaignSettingsOverlayFromRulesVersion} from "../../hub/hub-campaign-rule-evaluator.js";
 
 export class PartyTracker extends DmScreenPanelAppBase {
 	constructor (...args) {
@@ -78,7 +79,7 @@ class PartyTrackerRoot {
 	}
 
 	_getEffectiveSettings () {
-		const rules = this._board.getHubCampaignContext?.()?.rulesVersion?.rules;
+		const rules = getCampaignSettingsOverlayFromRulesVersion(this._board.getHubCampaignContext?.()?.rulesVersion);
 		return rules ? {...this._localSettings, ...rules} : this._localSettings;
 	}
 
@@ -521,7 +522,7 @@ class PartyTrackerRoot {
 
 	_buildSettingsModal () {
 		const wrp = ee`<div class="dm-party__settings dm-party__settings--floating" role="dialog" aria-modal="false" aria-label="Party Tracker Settings"></div>`;
-		const isCampaignManaged = !!this._board.getHubCampaignContext?.()?.rulesVersion?.rules;
+		const isCampaignManaged = this._board.getHubCampaignContext?.()?.rulesVersion?.ruleDecision?.status === "compliant";
 
 		ee`<div class="dm-party__settings-title">${isCampaignManaged ? "Campaign Rules" : "Party Tracker Settings"}</div>`.appendTo(wrp);
 		if (isCampaignManaged) {

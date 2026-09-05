@@ -1194,9 +1194,9 @@ a.hub-data-row:hover {
 }
 
 .hub-rule-status--enforced {
-	border-color: #1f7a4d;
-	background: #e7f6ee;
-	color: #155d3a;
+	border-color: color-mix(in srgb, var(--hub-success) 45%, var(--hub-border));
+	background: color-mix(in srgb, var(--hub-success) 8%, transparent);
+	color: var(--hub-success);
 }
 
 .hub-rule-status--planned {
