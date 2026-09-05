@@ -26,7 +26,7 @@ const csrfSecret = requireEnv("HUB_CSRF_SECRET");
 const testAuthSecret = requireEnv("HUB_TEST_AUTH_SECRET");
 const semanticOperationRegistry = createSemanticOperationRegistry({
 	additionalTemplates: [{
-		sourceEntity: {type: "ability", uid: "steadying word|tst", version: "tst-v1"},
+		sourceEntity: {type: "ability", uid: "steadying word|phb", version: "tst-v1"},
 		effectTemplateId: "ability.steadying-word.heal",
 		cost: "none",
 		display: {label: "Steadying Word"},

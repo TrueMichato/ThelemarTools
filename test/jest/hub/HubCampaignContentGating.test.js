@@ -60,6 +60,18 @@ describe("Campaign content policy evaluator", () => {
 				expect.objectContaining({code: "CONTENT_EDITION_UNKNOWN"}),
 			]),
 		}));
+		expect(evaluateCampaignContentEntity({
+			contentPolicy: getContentPolicy({sources: [], editions: ["2024"]}),
+			entity: {name: "Spoofed feat", source: "phb", edition: "one"},
+			kind: "feat",
+			availableSources: AVAILABLE_SOURCES,
+			sourceEditions: {PHB: "2014", XPHB: "2024"},
+		})).toEqual(expect.objectContaining({
+			isAllowed: false,
+			violations: expect.arrayContaining([
+				expect.objectContaining({code: "CONTENT_EDITION_UNKNOWN"}),
+			]),
+		}));
 	});
 
 	it("treats each species variant as a distinct name|source identity", () => {
@@ -191,6 +203,51 @@ describe("Campaign content policy evaluator", () => {
 		expect(report.findings.map(it => it.entity.uid)).toEqual([...report.findings.map(it => it.entity.uid)].sort());
 	});
 
+	it("enforces every newly added source-bearing feature", () => {
+		const report = getCharacterCampaignContentMutationCompliance({
+			contentPolicy: getContentPolicy({sources: ["XPHB"], editions: ["2024"]}),
+			before: {features: []},
+			after: {
+				features: [{name: "Action Surge", source: "PHB", edition: "classic", featureType: "Class"}],
+			},
+			availableSources: AVAILABLE_SOURCES,
+			sourceEditions: {PHB: "2014", XPHB: "2024"},
+		});
+		expect(report.findings).toEqual(expect.arrayContaining([
+			expect.objectContaining({code: "CONTENT_SOURCE_NOT_ALLOWED", disposition: "blocking"}),
+			expect.objectContaining({code: "CONTENT_EDITION_NOT_ALLOWED", disposition: "blocking"}),
+		]));
+	});
+
+	it("permits deterministic feature repair for an unchanged legacy root but not level-up grants", () => {
+		const contentPolicy = getContentPolicy({sources: ["PHB"], editions: ["2014"]});
+		const before = {classes: [{name: "Fighter", source: "XPHB", level: 1}], features: []};
+		const repaired = {
+			classes: [{name: "Fighter", source: "XPHB", level: 1}],
+			features: [{name: "Fighting Style", source: "XPHB", edition: "one", featureType: "Class"}],
+		};
+		expect(getCharacterCampaignContentMutationCompliance({
+			contentPolicy,
+			before,
+			after: repaired,
+			availableSources: AVAILABLE_SOURCES,
+			sourceEditions: {PHB: "2014", XPHB: "2024"},
+		}).total).toBe(0);
+
+		const levelled = structuredClone(repaired);
+		levelled.classes[0].level = 2;
+		expect(getCharacterCampaignContentMutationCompliance({
+			contentPolicy,
+			before,
+			after: levelled,
+			availableSources: AVAILABLE_SOURCES,
+			sourceEditions: {PHB: "2014", XPHB: "2024"},
+		}).findings).toEqual(expect.arrayContaining([
+			expect.objectContaining({code: "CONTENT_SOURCE_NOT_ALLOWED", disposition: "blocking"}),
+			expect.objectContaining({code: "CONTENT_EDITION_NOT_ALLOWED", disposition: "blocking"}),
+		]));
+	});
+
 	it("fails closed when an entity omits its source identity", () => {
 		const report = getCharacterCampaignContentMutationCompliance({
 			contentPolicy: getContentPolicy(),
@@ -236,6 +293,28 @@ describe("Campaign content policy evaluator", () => {
 			FRHoF: "2024",
 			XPHB: "2024",
 		}));
+		await expect(pGetCampaignContentCatalog({
+			brewBundle: {
+				content: [{
+					head: {filename: "spoofed-phb.json"},
+					body: {
+						_meta: {
+							edition: "one",
+							sources: [{json: "PHB", abbreviation: "PHB", full: "Spoofed PHB"}],
+						},
+						feat: [{name: "Spoofed feat", source: "PHB"}],
+					},
+				}],
+			},
+		})).rejects.toEqual(expect.objectContaining({code: "BREW_INVALID"}));
+		await expect(pGetCampaignContentCatalog({
+			brewBundle: {
+				content: [
+					{body: {_meta: {edition: "classic", sources: [{json: "CMP", edition: "classic"}]}}},
+					{body: {_meta: {edition: "one", sources: [{json: "cmp", edition: "one"}]}}},
+				],
+			},
+		})).rejects.toEqual(expect.objectContaining({code: "BREW_INVALID"}));
 	});
 });
 
@@ -450,5 +529,57 @@ describe("Memory campaign content enforcement", () => {
 
 		await expect(pending).rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_NOT_FOUND"}));
 		expect([...store._characters.values()].filter(character => character.ownerAccountId === player.id)).toHaveLength(0);
+	});
+
+	it("rechecks co-DM authorization after catalog loading before publishing policy", async () => {
+		const coDm = await store.pUpsertOAuthAccount({
+			provider: "test",
+			providerSubject: crypto.randomUUID(),
+			displayName: "Co-DM",
+		});
+		const tokenHash = crypto.createHash("sha256").update("content-policy-race-invite").digest("hex");
+		await store.pCreateInvite({
+			accountId: account.id,
+			campaignId: campaign.id,
+			role: "co_dm",
+			tokenHash,
+			expiresAt: new Date(Date.now() + 60_000),
+			maxUses: 1,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const {membership} = await store.pRedeemInvite({
+			accountId: coDm.id,
+			tokenHash,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const pGetCatalog = store._pGetCampaignContentCatalog.bind(store);
+		let releaseCatalog;
+		let markCatalogStarted;
+		const catalogStarted = new Promise(resolve => markCatalogStarted = resolve);
+		const catalogGate = new Promise(resolve => releaseCatalog = resolve);
+		store._pGetCampaignContentCatalog = async args => {
+			markCatalogStarted();
+			await catalogGate;
+			return pGetCatalog(args);
+		};
+
+		const pending = store.pCreateAndActivateRulesPolicy({
+			accountId: coDm.id,
+			campaignId: campaign.id,
+			policy: createDefaultCampaignRulesPolicy(),
+			expectedActiveRulesVersionId: null,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await catalogStarted;
+		await store.pRemoveMember({
+			accountId: account.id,
+			campaignId: campaign.id,
+			membershipId: membership.id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		releaseCatalog();
+
+		await expect(pending).rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_NOT_FOUND"}));
+		expect(store._rulesVersions.size).toBe(0);
 	});
 });

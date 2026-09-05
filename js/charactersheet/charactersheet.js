@@ -323,7 +323,24 @@ class CharacterSheetPage {
 			this._isHubContextRevalidationRequired = false;
 			this._onHubCampaignContextChanged({type: "reconnected"});
 		}
-		if (!["closed", "access_lost"].includes(state?.state)) return;
+		if (state?.state === "access_lost") {
+			// Fail closed synchronously; the coordinator then performs the full ordered teardown.
+			this._teardownHubRules();
+			if (this._hubActiveCampaign?.pHandleAccessLoss) {
+				void this._hubActiveCampaign.pHandleAccessLoss({campaignId: this._hubCampaignId})
+					// eslint-disable-next-line no-console
+					.catch(error => console.error("Failed to tear down inaccessible campaign context:", error));
+			} else {
+				this._fenceHubGeneration();
+				this._detachHubRealtimeClient();
+				this._detachHubProjections();
+				this._concealHubPrivateCharacter();
+				this._hubCampaignContext?.dispose?.();
+				this._hubCampaignContext = null;
+			}
+			return;
+		}
+		if (state?.state !== "closed") return;
 		this._hubRealtimeGeneration++;
 		this._hubContextGeneration++;
 		this._hubContextRefreshActiveGeneration = null;
@@ -682,6 +699,7 @@ class CharacterSheetPage {
 				this._concealHubPrivateCharacter();
 			},
 			pTeardownRules: async () => this._teardownHubRules(),
+			pTeardownBrew: async () => this._hubCampaignContext = null,
 		};
 	}
 

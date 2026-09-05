@@ -113,6 +113,45 @@ describe("Character Sheet campaign control", () => {
 		expect(root.append).not.toHaveBeenCalled();
 	});
 
+	it("renders default-policy warnings without an active rules version", () => {
+		const documentPrev = globalThis.document;
+		globalThis.document = {
+			createElement: () => ({
+				append: jest.fn(),
+				setAttribute: jest.fn(),
+				className: "",
+				textContent: "",
+			}),
+		};
+		const root = {append: jest.fn()};
+		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {
+			_root: root,
+			_page: {
+				_currentCharacterId: "character-1",
+				_state: {
+					toJson: () => ({
+						feats: [{name: "Personal feat", source: "PERSONAL", edition: "classic"}],
+					}),
+				},
+				_hubContext: {
+					rulesVersion: null,
+					contentCatalog: {
+						sources: ["PHB"],
+						species: [],
+						sourceEditions: {PHB: "2014"},
+					},
+				},
+			},
+		});
+
+		try {
+			expect(() => control._renderContentPolicyWarnings()).not.toThrow();
+			expect(root.append).toHaveBeenCalledTimes(1);
+		} finally {
+			globalThis.document = documentPrev;
+		}
+	});
+
 	it("offers only active campaigns whose role may own a character", () => {
 		const campaigns = [
 			{id: "spectator", name: "Spectator", role: "spectator", status: "active"},

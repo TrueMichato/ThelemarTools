@@ -33,7 +33,7 @@ function getCharacterData ({name, hpCurrent = 5, features = []}) {
 function getTestRegistry () {
 	return createSemanticOperationRegistry({
 		templates: [{
-			sourceEntity: {type: "ability", uid: "steadying word|tst", version: "tst-v1"},
+			sourceEntity: {type: "ability", uid: "steadying word|phb", version: "tst-v1"},
 			effectTemplateId: "ability.steadying-word.heal",
 			cost: "none",
 			display: {label: "Steadying Word"},
@@ -131,7 +131,7 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 			campaignId: campaign.id,
 			data: getCharacterData({
 				name: "Source",
-				features: [{name: "Steadying Word", source: "TST"}],
+				features: [{name: "Steadying Word", source: "PHB"}],
 			}),
 			schemaVersion: 1,
 			clientImportId: crypto.randomUUID(),
@@ -243,7 +243,7 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 		const request = {
 			commandId,
 			sourceCharacterId: sourceCharacter.id,
-			sourceEntity: {type: "ability", uid: "steadying word|tst", version: "tst-v1"},
+			sourceEntity: {type: "ability", uid: "steadying word|phb", version: "tst-v1"},
 			effectTemplateId: "ability.steadying-word.heal",
 			choice: {amount: 3},
 			targetRef: targetCharacter.targetRef,
@@ -310,7 +310,7 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 		const request = {
 			commandId,
 			sourceCharacterId: sourceCharacter.id,
-			sourceEntity: {type: "ability", uid: "steadying word|tst", version: "tst-v1"},
+			sourceEntity: {type: "ability", uid: "steadying word|phb", version: "tst-v1"},
 			effectTemplateId: "ability.steadying-word.heal",
 			choice: {amount: 2},
 			targetRef: targetCharacter.targetRef,
@@ -368,7 +368,7 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 		const request = {
 			commandId,
 			sourceCharacterId: sourceCharacter.id,
-			sourceEntity: {type: "ability", uid: "steadying word|tst", version: "tst-v1"},
+			sourceEntity: {type: "ability", uid: "steadying word|phb", version: "tst-v1"},
 			effectTemplateId: "ability.steadying-word.heal",
 			choice: {amount: 3},
 			targetRef: privateTarget.targetRef,
@@ -476,7 +476,7 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 			const request = {
 				commandId,
 				sourceCharacterId: sourceCharacter.id,
-				sourceEntity: {type: "ability", uid: "steadying word|tst", version: "tst-v1"},
+				sourceEntity: {type: "ability", uid: "steadying word|phb", version: "tst-v1"},
 				effectTemplateId: "ability.steadying-word.heal",
 				choice: {amount},
 				targetRef: targetCharacter.targetRef,

@@ -9,7 +9,7 @@ const IDENTITIES = {
 	source: {provider: "github", providerSubject: "semantic-source", login: "semantic-source", displayName: "Source"},
 	target: {provider: "github", providerSubject: "semantic-target", login: "semantic-target", displayName: "Target"},
 };
-const SOURCE_ENTITY = {type: "ability", uid: "test blessing|tst", version: "test-v1"};
+const SOURCE_ENTITY = {type: "ability", uid: "test blessing|phb", version: "test-v1"};
 const EFFECT_TEMPLATE_ID = "test.blessing.heal";
 
 function getTestTemplate ({cost = "none"} = {}) {
@@ -139,7 +139,7 @@ describe("semantic character operations", () => {
 						name: key === "source" ? "Aster" : "Bryn",
 						hp: {current: key === "source" ? 14 : 5, max: 20, temp: 0},
 						conditions: [],
-						features: key === "source" ? [{name: "Test Blessing", source: "TST"}] : [],
+						features: key === "source" ? [{name: "Test Blessing", source: "PHB"}] : [],
 						spellcasting: {spellSlots: {1: {current: 2, max: 2}}},
 					},
 				},

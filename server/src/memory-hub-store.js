@@ -36,6 +36,7 @@ import {
 } from "./hub-actions.js";
 import {validateCloudCharacterData, validateCloudValue} from "./cloud-data-validation.js";
 import {
+	CAMPAIGN_RULES_SCHEMA_VERSION,
 	getPublicCampaignRulesVersion,
 	normalizeCampaignRulesPolicyForStorage,
 } from "./campaign-content.js";
@@ -1071,6 +1072,10 @@ export class MemoryHubStore {
 		}
 	}
 
+	async _pGetCampaignContentCatalog ({brewBundle = null} = {}) {
+		return pGetCampaignContentCatalog({brewBundle});
+	}
+
 	async pListCampaignCharacterProjections ({accountId, campaignId}) {
 		const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
 		const characters = [...this._characters.values()]
@@ -1634,6 +1639,15 @@ export class MemoryHubStore {
 		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
 		const rulesVersion = this._rulesVersions.get(rulesVersionId);
 		if (!rulesVersion || rulesVersion.campaignId !== campaignId) throw new HubStoreError("RULES_NOT_FOUND", `Rules version was not found.`, {status: 404});
+		const activeRulesVersion = this._campaigns.get(campaignId).activeRulesVersionId
+			? this._rulesVersions.get(this._campaigns.get(campaignId).activeRulesVersionId)
+			: null;
+		if (
+			rulesVersion.schemaVersion !== CAMPAIGN_RULES_SCHEMA_VERSION
+			|| (activeRulesVersion && activeRulesVersion.schemaVersion !== CAMPAIGN_RULES_SCHEMA_VERSION)
+		) {
+			throw new HubStoreError("RULES_POLICY_REQUIRED", `Use the version-fenced campaign policy activation endpoint.`, {status: 409});
+		}
 		const response = {rulesVersion: getPublicCampaignRulesVersion(rulesVersion, {isIncludePolicy: true})};
 		this._campaigns.get(campaignId).activeRulesVersionId = rulesVersionId;
 		this._appendAudit({campaignId, actorAccountId: accountId, action: "rules.activated", targetType: "rules_version", targetId: rulesVersionId});
@@ -1683,10 +1697,11 @@ export class MemoryHubStore {
 		const normalizedPolicy = normalizeCampaignRulesPolicyForStorage(policy);
 		assertCampaignContentPolicyCatalog({
 			policy: normalizedPolicy,
-			contentCatalog: await pGetCampaignContentCatalog({brewBundle}),
+			contentCatalog: await this._pGetCampaignContentCatalog({brewBundle}),
 		});
 		const resumedPrior = this._getReceipt({accountId, idempotencyKey});
 		if (resumedPrior) return resumedPrior;
+		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
 		if (campaign.activeRulesVersionId !== expectedActiveRulesVersionId) {
 			throw new HubStoreError("RULES_VERSION_STALE", `Campaign rules changed before this policy was activated.`, {
 				status: 409,

@@ -36,6 +36,7 @@ import {
 } from "./hub-actions.js";
 import {validateCloudCharacterData, validateCloudValue} from "./cloud-data-validation.js";
 import {
+	CAMPAIGN_RULES_SCHEMA_VERSION,
 	getPublicCampaignRulesVersion,
 	normalizeCampaignRulesPolicyForStorage,
 } from "./campaign-content.js";
@@ -2618,6 +2619,21 @@ export class PostgresHubStore {
 			const column = kind === "brew" ? "active_brew_bundle_version_id" : "active_rules_version_id";
 			const version = await client.query(`SELECT * FROM hub.${table} WHERE campaign_id = $1 AND id = $2`, [campaignId, versionId]);
 			if (!version.rowCount) throw new HubStoreError(kind === "brew" ? "BREW_NOT_FOUND" : "RULES_NOT_FOUND", `Campaign version was not found.`, {status: 404});
+			if (kind === "rules") {
+				const active = await client.query(`
+					SELECT r.schema_version
+					FROM hub.campaigns c
+					LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
+					WHERE c.id = $1
+					FOR UPDATE OF c
+				`, [campaignId]);
+				if (
+					Number(version.rows[0].schema_version) !== CAMPAIGN_RULES_SCHEMA_VERSION
+					|| (active.rows[0]?.schema_version != null && Number(active.rows[0].schema_version) !== CAMPAIGN_RULES_SCHEMA_VERSION)
+				) {
+					throw new HubStoreError("RULES_POLICY_REQUIRED", `Use the version-fenced campaign policy activation endpoint.`, {status: 409});
+				}
+			}
 			await client.query(`UPDATE hub.campaigns SET ${column} = $2, updated_at = now() WHERE id = $1`, [campaignId, versionId]);
 			const row = version.rows[0];
 			const response = kind === "brew"

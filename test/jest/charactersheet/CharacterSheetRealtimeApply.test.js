@@ -194,6 +194,9 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 		_hubRealtime: coordinator,
 		_hubEffects: hubEffects,
 		_peerTargeting: peerTargeting,
+		_hubCampaignId: "campaign-1",
+		_hubActiveCampaign: {pHandleAccessLoss: jest.fn(async () => {})},
+		_teardownHubRules: jest.fn(),
 		_currentCharacterId: "character-1",
 		_characterLoadGeneration: 0,
 		_hubRealtimeGeneration: 0,
@@ -204,6 +207,7 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 		_reconcileClassFeatures: () => ({}),
 		_updateSaveIndicator: function (status) { this._saveIndicator.push(status); },
 	};
+	host._hubActiveCampaign.pHandleAccessLoss.mockImplementation(async () => { host._characterLoadGeneration++; });
 	for (const name of [
 		"_initHubRealtimeListeners",
 		"_onHubRealtimeCursor",
@@ -368,6 +372,8 @@ describe("Live campaign effects on an open Character Sheet", () => {
 			resultingCharacterRevision: 2,
 		});
 		host._onHubRealtimeConnectionState({state: "access_lost"});
+		expect(host._teardownHubRules).toHaveBeenCalledTimes(1);
+		expect(host._hubActiveCampaign.pHandleAccessLoss).toHaveBeenCalledWith({campaignId: "campaign-1"});
 		gate.resolve();
 
 		await expect(pending).resolves.toBe(false);

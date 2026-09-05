@@ -334,6 +334,13 @@ async function pRunScenario (store, label) {
 		name: `${label} rules`,
 		idempotencyKey: command(`${label}:campaign`),
 	})).campaign;
+	const legacy = await store.pCreateRulesVersion({
+		accountId: account.id,
+		campaignId: campaign.id,
+		schemaVersion: 1,
+		rules: {enableTgtt: false},
+		idempotencyKey: command(`${label}:legacy`),
+	});
 	const initialPolicy = createDefaultCampaignRulesPolicy();
 	const first = await store.pCreateAndActivateRulesPolicy({
 		accountId: account.id,
@@ -358,6 +365,12 @@ async function pRunScenario (store, label) {
 		expectedActiveRulesVersionId: first.rulesVersion.id,
 		idempotencyKey: command(`${label}:publish:2`),
 	});
+	const legacyActivationCode = await pGetErrorCode(store.pActivateRulesVersion({
+		accountId: account.id,
+		campaignId: campaign.id,
+		rulesVersionId: legacy.rulesVersion.id,
+		idempotencyKey: command(`${label}:legacy:activate`),
+	}));
 	const rolledBack = await store.pActivateRulesPolicyVersion({
 		accountId: account.id,
 		campaignId: campaign.id,
@@ -371,6 +384,7 @@ async function pRunScenario (store, label) {
 		first,
 		replay,
 		second,
+		legacyActivationCode,
 		rolledBack,
 		management: await store.pGetRulesPolicyManagement({accountId: account.id, campaignId: campaign.id}),
 		context: await store.pGetCampaignContext({accountId: account.id, campaignId: campaign.id}),
@@ -454,11 +468,12 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 		const memory = await pRunScenario(memoryStore, "memory");
 		const postgres = await pRunScenario(postgresStore, "postgres");
 
-		for (const key of ["first", "replay", "second", "rolledBack", "management", "context"]) {
+		for (const key of ["first", "replay", "second", "legacyActivationCode", "rolledBack", "management", "context"]) {
 			expect(normalizeDynamicValues(postgres[key])).toEqual(normalizeDynamicValues(memory[key]));
 		}
 		expect(postgres.first).toEqual(postgres.replay);
-		expect(postgres.management.versions.map(version => version.version)).toEqual([2, 1]);
+		expect(postgres.legacyActivationCode).toBe("RULES_POLICY_REQUIRED");
+		expect(postgres.management.versions.map(version => version.version)).toEqual([3, 2, 1]);
 		expect(postgres.context.rulesVersion.id).toBe(postgres.first.rulesVersion.id);
 		expect(postgres.context.rulesVersion.policy).toBeUndefined();
 

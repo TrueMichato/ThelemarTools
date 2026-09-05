@@ -43,21 +43,39 @@ function getEdition (value) {
 	return null;
 }
 
-function addDocumentToCatalog (catalog, document, {fnGetSourceEdition = null, defaultEdition = null} = {}) {
+function addDocumentToCatalog (catalog, document, {
+	fnGetSourceEdition = null,
+	defaultEdition = null,
+	protectedSources = null,
+} = {}) {
 	const documentEdition = getEdition(document?._meta?.edition);
-	const addSource = (value, {metadata = null} = {}) => {
+	const addSource = (value, {metadata = null, isDeclaration = false} = {}) => {
 		const id = canonicalizeCampaignSourceId(value);
 		if (!id) return null;
-		catalog.sources.add(id);
 		const edition = getEdition(metadata?.edition)
 			|| fnGetSourceEdition?.(id)
 			|| documentEdition
 			|| defaultEdition;
-		if (edition) catalog.sourceEditions.set(id, edition);
-		return id;
+		const protectedId = protectedSources && [...protectedSources]
+			.find(source => source.toLowerCase() === id.toLowerCase());
+		if (protectedId) {
+			if (isDeclaration) {
+				throw new HubStoreError("BREW_INVALID", `Campaign homebrew cannot redeclare an official source.`);
+			}
+			return protectedId;
+		}
+		const existingId = [...catalog.sources].find(source => source.toLowerCase() === id.toLowerCase());
+		const canonicalId = existingId || id;
+		const existingEdition = catalog.sourceEditions.get(canonicalId);
+		if (protectedSources && existingEdition && edition && existingEdition !== edition) {
+			throw new HubStoreError("BREW_INVALID", `Campaign homebrew contains conflicting editions for one source.`);
+		}
+		catalog.sources.add(canonicalId);
+		if (edition) catalog.sourceEditions.set(canonicalId, edition);
+		return canonicalId;
 	};
 	for (const source of document?._meta?.sources || []) {
-		addSource(source?.json, {metadata: source});
+		addSource(source?.json, {metadata: source, isDeclaration: true});
 	}
 	walk(document, entity => {
 		addSource(entity.source);
@@ -188,8 +206,12 @@ async function pGetSiteCatalog () {
 
 export async function pGetCampaignContentCatalog ({brewBundle = null} = {}) {
 	const catalog = await pGetSiteCatalog();
+	const protectedSources = new Set(catalog.sources);
 	for (const document of brewBundle?.content || []) {
-		addDocumentToCatalog(catalog, document?.body || document, {defaultEdition: "2014"});
+		addDocumentToCatalog(catalog, document?.body || document, {
+			defaultEdition: "2014",
+			protectedSources,
+		});
 	}
 	return {
 		version: 1,

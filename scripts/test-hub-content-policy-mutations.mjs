@@ -9,6 +9,7 @@ async function loadVariant ({name, mutations = {}}) {
 	await Promise.all([
 		fs.cp(path.resolve("js/hub"), path.join(root, "js/hub"), {recursive: true}),
 		fs.cp(path.resolve("server/src"), path.join(root, "server/src"), {recursive: true}),
+		fs.cp(path.resolve("server/data"), path.join(root, "server/data"), {recursive: true}),
 		fs.mkdir(path.join(root, "js/charactersheet"), {recursive: true}),
 	]);
 	await Promise.all([
@@ -72,6 +73,65 @@ async function probeEditionSpoofing (variant) {
 		sourceEditions: {PHB: "2014", XPHB: "2024"},
 	});
 	assert.equal(result.isAllowed, false, "client edition metadata overrode the authoritative source catalog");
+}
+
+async function probeCaseVariantSource (variant) {
+	const {evaluateCampaignContentEntity} = await variant.pImport("js/hub/hub-content-policy.js");
+	const result = evaluateCampaignContentEntity({
+		contentPolicy: {version: 1, sources: [], species: [], editions: ["2024"]},
+		entity: {name: "Case-variant feat", source: "phb", edition: "one"},
+		kind: "feat",
+		availableSources: ["PHB", "XPHB"],
+		sourceEditions: {PHB: "2014", XPHB: "2024"},
+	});
+	assert.equal(result.isAllowed, false, "a case-variant source bypassed canonical edition lookup");
+}
+
+async function probeSourceBearingFeature (variant) {
+	const {getCharacterCampaignContentMutationCompliance} = await variant.pImport("js/hub/hub-content-policy.js");
+	const report = getCharacterCampaignContentMutationCompliance({
+		contentPolicy: {version: 1, sources: ["XPHB"], species: [], editions: ["2024"]},
+		before: {features: []},
+		after: {features: [{name: "Action Surge", source: "PHB", edition: "classic", featureType: "Class"}]},
+		availableSources: ["PHB", "XPHB"],
+		sourceEditions: {PHB: "2014", XPHB: "2024"},
+	});
+	assert.ok(report.total > 0, "a source-bearing non-optional feature bypassed admission");
+}
+
+async function probeDerivedFeatureLevelFence (variant) {
+	const {getCharacterCampaignContentMutationCompliance} = await variant.pImport("js/hub/hub-content-policy.js");
+	const before = {classes: [{name: "Fighter", source: "XPHB", level: 1}], features: []};
+	const getReport = after => getCharacterCampaignContentMutationCompliance({
+		contentPolicy: {version: 1, sources: ["PHB"], species: [], editions: ["2014"]},
+		before,
+		after,
+		availableSources: ["PHB", "XPHB"],
+		sourceEditions: {PHB: "2014", XPHB: "2024"},
+	});
+	assert.equal(getReport({
+		classes: [{name: "Fighter", source: "XPHB", level: 1}],
+		features: [{name: "Fighting Style", source: "XPHB", edition: "one", featureType: "Class"}],
+	}).total, 0, "an unchanged legacy class could not persist deterministic feature repair");
+	assert.ok(getReport({
+		classes: [{name: "Fighter", source: "XPHB", level: 2}],
+		features: [{name: "Action Surge", source: "XPHB", edition: "one", featureType: "Class"}],
+	}).total > 0, "a legacy class level-up inherited the old feature exemption");
+}
+
+async function probeOfficialSourceProtection (variant) {
+	const {pGetCampaignContentCatalog} = await variant.pImport("server/src/campaign-content-policy.js");
+	const catalog = await pGetCampaignContentCatalog({
+		brewBundle: {
+			content: [{
+				body: {
+					_meta: {edition: "one"},
+					feat: [{name: "Campaign feat referencing PHB", source: "PHB"}],
+				},
+			}],
+		},
+	});
+	assert.equal(catalog.sourceEditions.PHB, "2014", "campaign brew overwrote an official source edition");
 }
 
 async function probeGrandfatheredReplacement (variant) {
@@ -149,6 +209,30 @@ async function probeTeardownFence (variant) {
 	assert.equal(page._hubContextRefreshActiveGeneration, null, "disconnect retained a stale refresh generation");
 }
 
+async function probeAccessLossTeardown (variant) {
+	const source = await fs.readFile(path.join(variant.root, "js/charactersheet/charactersheet.js"), "utf8");
+	const methods = getCharacterSheetLifecycleMethods(source);
+	// eslint-disable-next-line no-new-func
+	const lifecycle = Function("JqueryUtil", `"use strict"; return ({${methods}});`)({doToast: () => {}});
+	let teardownCalls = 0;
+	const page = {
+		...lifecycle,
+		_hubEffects: null,
+		_peerTargeting: null,
+		_hubCampaignId: "campaign-1",
+		_hubActiveCampaign: {
+			pHandleAccessLoss: async ({campaignId}) => {
+				assert.equal(campaignId, "campaign-1");
+				teardownCalls++;
+			},
+		},
+		_teardownHubRules: () => {},
+	};
+	page._onHubRealtimeConnectionState({state: "access_lost"});
+	await Promise.resolve();
+	assert.equal(teardownCalls, 1, "realtime access loss skipped authoritative campaign teardown");
+}
+
 const MUTANTS = [
 	{
 		name: "picker-filter-bypassed",
@@ -181,6 +265,46 @@ const MUTANTS = [
 		},
 	},
 	{
+		name: "case-variant-source-skips-catalog",
+		probe: probeCaseVariantSource,
+		mutations: {
+			"js/hub/hub-content-policy.js": source => source.replace(
+				"\tconst source = getKnownCanonical(rawSource, availableSources) || rawSource;",
+				"\tconst source = rawSource;",
+			),
+		},
+	},
+	{
+		name: "source-bearing-feature-omitted",
+		probe: probeSourceBearingFeature,
+		mutations: {
+			"js/hub/hub-content-policy.js": source => source.replace(
+				/\tfor \(const feature of character\?\.features \|\| \[\]\) \{[\s\S]*?\n\t\}/,
+				"\taddAll((character?.features || []).filter(feature => feature?.featureType === \"Optional Feature\"), \"optionalFeature\");",
+			),
+		},
+	},
+	{
+		name: "derived-feature-level-fence-removed",
+		probe: probeDerivedFeatureLevelFence,
+		mutations: {
+			"js/hub/hub-content-policy.js": source => source.replace(
+				"\n\t\t\t&& Number(clsBefore.level || 0) === Number(clsAfter.level || 0),",
+				",",
+			),
+		},
+	},
+	{
+		name: "campaign-brew-overwrites-official-edition",
+		probe: probeOfficialSourceProtection,
+		mutations: {
+			"server/src/campaign-content-policy.js": source => source.replace(
+				/\t\tif \(protectedId\) \{[\s\S]*?\n\t\t\}/,
+				"\t\tif (protectedId) {\n\t\t\tif (edition) catalog.sourceEditions.set(protectedId, edition);\n\t\t\treturn protectedId;\n\t\t}",
+			),
+		},
+	},
+	{
 		name: "grandfathering-ignores-species-identity",
 		probe: probeGrandfatheredReplacement,
 		mutations: {
@@ -197,6 +321,16 @@ const MUTANTS = [
 			"js/charactersheet/charactersheet.js": source => source.replace(
 				"\t\tthis._hubContextRefreshActiveGeneration = null;\n\t\tthis._isHubContextRefreshing = false;\n\t\tthis._characterRepository?.clearRealtimeReconciliation?.",
 				"\t\tthis._characterRepository?.clearRealtimeReconciliation?.",
+			),
+		},
+	},
+	{
+		name: "access-loss-full-teardown-skipped",
+		probe: probeAccessLossTeardown,
+		mutations: {
+			"js/charactersheet/charactersheet.js": source => source.replace(
+				"\t\t\tif (this._hubActiveCampaign?.pHandleAccessLoss) {",
+				"\t\t\tif (false && this._hubActiveCampaign?.pHandleAccessLoss) {",
 			),
 		},
 	},

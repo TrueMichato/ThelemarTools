@@ -219,7 +219,7 @@ export class CharacterSheetCampaign {
 			availableSources: this._page._hubContext?.contentCatalog?.sources,
 			availableSpecies: this._page._hubContext?.contentCatalog?.species,
 			sourceEditions: this._page._hubContext?.contentCatalog?.sourceEditions,
-			rulesVersionId: this._page._hubContext.rulesVersion.id,
+			rulesVersionId: this._page._hubContext.rulesVersion?.id ?? null,
 			limit: 6,
 		});
 		if (!report.total) return;

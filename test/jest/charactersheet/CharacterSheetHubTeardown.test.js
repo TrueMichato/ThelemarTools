@@ -389,6 +389,7 @@ describe("Character Sheet campaign content context lifecycle", () => {
 				? makeContentContext({sources: ["XPHB"], species: ["Elf|XPHB"], editions: ["2024"], id: "rules-reconnected"})
 				: null),
 		};
+		const campaignContext = page._hubCampaignContext;
 
 		page._onHubRealtimeConnectionState({state: "closed"});
 		expect(page.filterByAllowedSources(getContentCandidates())).toEqual([]);
@@ -407,7 +408,24 @@ describe("Character Sheet campaign content context lifecycle", () => {
 		expect(page._hubContext).toBeNull();
 		expect(page._isHubContextUnavailable).toBe(true);
 		expect(page.filterByAllowedSources(getContentCandidates())).toEqual([]);
-		expect(page._hubCampaignContext.pRefresh).toHaveBeenCalledTimes(1);
+		expect(campaignContext.pRefresh).toHaveBeenCalledTimes(1);
+		expect(page._hubCampaignContext).toBeNull();
+	});
+
+	it("routes realtime access loss through the full campaign teardown", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._hubCampaignId = "campaign-1";
+		page._applyHubContext(makeContentContext());
+		page._campaign = {render: jest.fn()};
+		page._hubActiveCampaign = {pHandleAccessLoss: jest.fn(async () => {})};
+
+		page._onHubRealtimeConnectionState({state: "access_lost"});
+		await pFlushPromises();
+
+		expect(page._hubActiveCampaign.pHandleAccessLoss).toHaveBeenCalledWith({campaignId: "campaign-1"});
+		expect(page._hubContext).toBeNull();
+		expect(page._isHubContextUnavailable).toBe(true);
+		expect(page._campaign.render).not.toHaveBeenCalled();
 	});
 
 	it("keeps candidates blocked after a failed refresh until a later successful revalidation", async () => {

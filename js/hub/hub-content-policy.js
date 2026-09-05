@@ -188,14 +188,16 @@ export function evaluateCampaignContentEntity ({
 }) {
 	const policy = getCampaignContentPolicy({contentPolicy});
 	const resolvedKind = kind || inferCampaignContentKind(entity);
+	const rawSource = canonicalizeCampaignSourceId(resolvedKind === "species" ? entity?._baseSource || entity?.source : entity?.source);
+	const source = getKnownCanonical(rawSource, availableSources) || rawSource;
+	const normalizedEntity = resolvedKind === "species"
+		? {...entity, source, _baseSource: source}
+		: {...entity, source};
 	const uid = resolvedKind === "species"
-		? getCampaignSpeciesUid(entity, {knownSpecies: availableSpecies})
-		: getCampaignEntityUid(entity);
-	const source = canonicalizeCampaignSourceId(resolvedKind === "species" ? entity?._baseSource || entity?.source : entity?.source);
+		? getCampaignSpeciesUid(normalizedEntity, {knownSpecies: availableSpecies})
+		: getCampaignEntityUid(normalizedEntity);
 	const edition = getCampaignEntityEdition(
-		resolvedKind === "species"
-			? {...entity, source: entity?._baseSource || entity?.source}
-			: entity,
+		normalizedEntity,
 		{sourceEditions},
 	);
 	const violations = [];
@@ -264,6 +266,13 @@ function getSpellProvenance (spell, fallback = "user_choice") {
 	return fallback;
 }
 
+function getFeatureProvenance (feature) {
+	const featureType = normalizeComparable(feature?.featureType);
+	if (featureType === "optional feature") return "user_choice";
+	if (["class", "subclass", "species", "race", "background"].includes(featureType)) return "derived_feature";
+	return "user_choice";
+}
+
 export function extractCharacterCampaignContent (character) {
 	const out = [];
 	const add = (entity, kind, provenance = "user_choice") => {
@@ -285,10 +294,14 @@ export function extractCharacterCampaignContent (character) {
 		add(cls?.subclass, "subclass");
 	}
 	addAll(character?.feats, "feat");
-	addAll(
-		(character?.features || []).filter(feature => feature?.featureType === "Optional Feature"),
-		"optionalFeature",
-	);
+	for (const feature of character?.features || []) {
+		if (typeof feature?.source !== "string" || !feature.source.trim()) continue;
+		add(
+			feature,
+			normalizeComparable(feature.featureType) === "optional feature" ? "optionalFeature" : "content",
+			getFeatureProvenance(feature),
+		);
+	}
 	for (const row of character?.inventory || []) add(row?.item, "item");
 
 	const spellcasting = character?.spellcasting || {};
@@ -299,6 +312,46 @@ export function extractCharacterCampaignContent (character) {
 	addAll(spellcasting.signatureSpells, "spell");
 	addAll(spellcasting.scribingSpellbook, "spell");
 	return out;
+}
+
+function isSameEntityIdentity (a, b) {
+	return normalizeComparable(a?.name) === normalizeComparable(b?.name)
+		&& normalizeComparable(a?._baseName) === normalizeComparable(b?._baseName)
+		&& normalizeComparable(a?._baseSource || a?.source) === normalizeComparable(b?._baseSource || b?.source);
+}
+
+function isStableDerivedFeatureGrant ({feature, before, after}) {
+	if (getFeatureProvenance(feature) !== "derived_feature") return false;
+	const source = normalizeComparable(feature.source);
+	const featureType = normalizeComparable(feature.featureType);
+	if (featureType === "class") {
+		return (before?.classes || []).some(clsBefore => (after?.classes || []).some(clsAfter =>
+			isSameEntityIdentity(clsBefore, clsAfter)
+			&& normalizeComparable(clsBefore.source) === source
+			&& Number(clsBefore.level || 0) === Number(clsAfter.level || 0),
+		));
+	}
+	if (featureType === "subclass") {
+		return (before?.classes || []).some(clsBefore => (after?.classes || []).some(clsAfter =>
+			isSameEntityIdentity(clsBefore, clsAfter)
+			&& isSameEntityIdentity(clsBefore.subclass, clsAfter.subclass)
+			&& normalizeComparable(clsBefore.subclass?.source) === source
+			&& Number(clsBefore.level || 0) === Number(clsAfter.level || 0),
+		));
+	}
+	if (featureType === "species" || featureType === "race") {
+		return [before?.race, before?.subrace].filter(Boolean).some(rootBefore =>
+			[after?.race, after?.subrace].filter(Boolean).some(rootAfter =>
+				isSameEntityIdentity(rootBefore, rootAfter)
+				&& normalizeComparable(rootBefore._baseSource || rootBefore.source) === source,
+			),
+		);
+	}
+	if (featureType === "background") {
+		return isSameEntityIdentity(before?.background, after?.background)
+			&& normalizeComparable(before?.background?.source) === source;
+	}
+	return false;
 }
 
 function getContentCountKey ({entry, result}) {
@@ -414,6 +467,7 @@ export function getCharacterCampaignContentMutationCompliance ({
 		const count = (seenAfter.get(key) || 0) + 1;
 		seenAfter.set(key, count);
 		if (count <= (beforeCounts.get(key) || 0)) continue;
+		if (entry.provenance === "derived_feature" && isStableDerivedFeatureGrant({feature: entry.entity, before, after})) continue;
 		findings.push(...result.violations.map(violation => ({
 			...violation,
 			entity: result.entity,

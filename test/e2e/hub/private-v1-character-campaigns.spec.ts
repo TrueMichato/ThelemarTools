@@ -120,7 +120,7 @@ test("an open character sheet resolves peer effects and adopts authoritative out
 		const sourceCharacter = await source.createCharacter({
 			campaignId,
 			name: "Aster",
-			features: [{name: "Steadying Word", source: "TST"}],
+			features: [{name: "Steadying Word", source: "PHB"}],
 		});
 		const targetCharacter = await target.createCharacter({campaignId, name: "Bryn", hpCurrent: 5});
 		const targetProjection = await target.getCharacterProjection(targetCharacter.id);

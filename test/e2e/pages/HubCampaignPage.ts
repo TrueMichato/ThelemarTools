@@ -604,7 +604,7 @@ export class HubCampaignPage {
 			data: {
 				commandId,
 				sourceCharacterId,
-				sourceEntity: {type: "ability", uid: "steadying word|tst", version: "tst-v1"},
+				sourceEntity: {type: "ability", uid: "steadying word|phb", version: "tst-v1"},
 				effectTemplateId: "ability.steadying-word.heal",
 				choice: {amount},
 				targetRef,
@@ -1101,7 +1101,7 @@ export class HubCampaignPage {
 			projected: expect.arrayContaining([spellName]),
 			rendered: expect.arrayContaining([spellName]),
 		});
-		const control = approvals.getByRole("button", {name: new RegExp(`^${decision} ${spellName}`)}).first();
+		const control = approvals.getByRole("button", {name: new RegExp(`^${decision} ${spellName}`)}).last();
 		await expect(control).toBeVisible();
 		await control.click();
 		await expect(control).toBeHidden({timeout: 20_000});

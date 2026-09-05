@@ -457,6 +457,8 @@ export class HubActiveCampaignCoordinator {
 	 * still-valid, still-open A.
 	 */
 	async _pClearForAccessLoss ({campaignId}) {
+		const isActiveContextLost = !campaignId || campaignId === this._activeCampaignId;
+		if (isActiveContextLost) await this.pTeardown({reason: "access_loss"});
 		if (this._accountId) {
 			const stored = this._store.readForAccount(this._accountId);
 			const isMatching = !campaignId || (stored?.state === ACTIVE_CAMPAIGN_STATE_SELECTED && stored.campaignId === campaignId);
@@ -465,8 +467,12 @@ export class HubActiveCampaignCoordinator {
 				this._channel.post(cleared);
 			}
 		}
-		const isActiveContextLost = !campaignId || campaignId === this._activeCampaignId;
-		if (isActiveContextLost) await this.pTeardown({reason: "access_loss"});
+	}
+
+	async pHandleAccessLoss ({campaignId = this._activeCampaignId} = {}) {
+		await this._pClearForAccessLoss({campaignId});
+		this._setState("blocked", {trigger: "access_loss", result: "failure", errorCode: "FORBIDDEN"});
+		return this._state;
 	}
 
 	/**
