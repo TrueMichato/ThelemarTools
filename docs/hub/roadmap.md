@@ -1,7 +1,7 @@
 # Campaign Hub living roadmap
 
 > **Status:** Authoritative living roadmap
-> **Last reviewed:** 2026-09-01
+> **Last reviewed:** 2026-09-05
 > **Owner:** Campaign Hub maintainers
 
 This is the single source of truth for Campaign Hub delivery status, sequencing, dependencies, and acceptance
@@ -30,13 +30,21 @@ rather than inferring deployment or enablement from merged code.
 | **shipped** | Phase 6G Oracle deployment | Release `hub-staging-2026-09-01` at `8f181712` is deployed to the private Oracle Always Free environment; HTTPS, GitHub OAuth, PostgreSQL, static, BFF, API, and WebSocket smoke checks pass |
 | **shipped** | V2-T0 release-automation implementation | [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219) merged the deliberate tagged Oracle release path; its real-host drills remain blocked under V1-G1 |
 | **shipped** | V2-T1 legible activity history | [PR #218](https://github.com/TrueMichato/ThelemarTools/pull/218) merged semantic titles, privacy-safe display-name snapshots, historical fallback, and lifecycle coverage |
-| **shipped** | V2 decision-record precursors | ADRs 0011-0016 define the approved projection, semantic-operation, device-context, identity-provider, rules-policy, and atomic peer source-cost contracts; implementation remains gated per train |
+| **shipped** | Coordinated implementation closeout | All 59 planned implementation todos are complete. [PR #241](https://github.com/TrueMichato/ThelemarTools/pull/241) merged carry/encumbrance enforcement as `de5acaabfa6cc64ce804bb43b94b74ccf3bc2714`; [PR #242](https://github.com/TrueMichato/ThelemarTools/pull/242) integrated source/species/edition content enforcement as `168d6e9ac36c11e2c938f21a4324b803f3f2fb61`; [PR #243](https://github.com/TrueMichato/ThelemarTools/pull/243) merged the role-adaptive Campaign Overview and authority hardening as `b8d31d3416b934cc9275b859b5932db050005351` |
+| **shipped** | V2-T2 projection/privacy foundation | Authorization-scoped projection storage, fetch, invalidation, sharing controls, and privacy tests are implemented |
+| **shipped** | V2-T5 whole-site campaign context | Device-scoped selection, cross-tab convergence, temporary rules/brew activation, and ordered teardown are implemented |
+| **shipped** | V2-T9 Campaign Overview redesign | The pinned session brief, role-specific continuation action, preserved workbench, responsive/accessibility coverage, and authority hardening are merged in PR #243 |
 | **active** | V1 external Oracle host-operations proof | Blocked pending real-host release/induced-failure evidence, timers, encrypted off-machine backup, isolated restore, and rollback proof |
 | **active** | V1 physical game day | Blocked on V1-G1; complete the one-DM/two-player session on physical devices and record the go/no-go evidence |
-| **active** | V2-T2 projection/privacy foundation | Architecture/contract work remains active after ADR 0011; feature implementation and enablement are not shipped |
-| **active** | V2-T4 party inventory, carry, and item awards | The atomic DM multi-character award slice is implemented; broader player/party inventory and carry policy work remains |
-| **next** | V2 feature enablement | Enable each accepted train independently after its architecture, capability, and operational gates pass |
+| **active** | V2-T4 party inventory, carry, and item awards | Player stash/direct-transfer and DM atomic-award slices are implemented, with shared carry summaries and enforced carry/content boundaries; broader unified party/DM inventory UX remains |
+| **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
+| **active** | V2-T7 player targeting | The one-player PHB/XPHB Cure Wounds slice is implemented; broader spells, abilities, resources, party/multi-target, and NPC/monster targeting remain |
+| **active** | Remaining V2 scope | V2-T3 still requires broader Character Sheet effect implementation and enablement; the remaining T4/T7 scope and V2-T8 account linking/rollout retain their own acceptance gates |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
+
+The merged repository head is `b8d31d3416b934cc9275b859b5932db050005351` (PR #243, head
+`c8d5f0333d1bd8f7867b91c7ecb7170a9838671b`). It is **not** the Oracle deployment. Oracle still runs the
+older recorded release above until an operator deliberately promotes a verified descendant release during V1-G1.
 
 ## V1 launch closeout
 
@@ -52,7 +60,9 @@ Scope:
 - pull an encrypted backup to a second trusted machine without granting the staging host write access;
 - restore that backup to an isolated target and prove representative Hub workflows within RPO <=24 hours and
   RTO <=4 hours;
-- rehearse rollback against release `hub-staging-2026-09-01` at `8f181712`, including application,
+- dry-run and deliberately promote a verified release containing merged head
+  `b8d31d3416b934cc9275b859b5932db050005351`;
+- rehearse rollback to release `hub-staging-2026-09-01` at `8f181712`, including application,
   migration-compatibility, readiness, and WebSocket recovery checks.
 
 Acceptance:
@@ -190,7 +200,8 @@ Purpose: establish the versioned contract all richer live campaign features use.
 
 Shipped as [ADR 0011](adr/0011-authorization-scoped-character-projections.md): `server/src/character-projection.js`
 holds the versioned catalog, presets and overrides; migration `0004` persists per-character policy;
-`HUB_PROTOCOL_VERSION` is `2`; `character.projection.updated` is replaced by metadata-only
+the T2 rollout introduced protocol 2 and the current merged implementation has since advanced to protocol 4;
+`character.projection.updated` is replaced by metadata-only
 `character.projection.invalidated`; resync carries a cursor and cache-invalidation refs only; and owners
 configure sharing from the Character Sheet campaign panel against a server-computed preview.
 
@@ -221,7 +232,7 @@ Acceptance:
   inaccessible;
 - projection generation cannot mutate or persist the canonical character/Board document.
 
-### V2-T3 — live semantic effects on the Character Sheet (**next — feature enablement**)
+### V2-T3 — live semantic effects on the Character Sheet (**active — server/reconciliation slices implemented; broader Character Sheet effects remain**)
 
 Dependency: V2-T2.
 
@@ -257,7 +268,7 @@ Acceptance:
 - unsupported or policy-forbidden effects do not partially mutate a character;
 - local sheets and campaigns without the capability retain current behavior.
 
-### V2-T4 — party inventory, carry, and item awards (**active — DM award slice implemented**)
+### V2-T4 — party inventory, carry, and item awards (**active — player stash/transfer/carry and DM award slices shipped**)
 
 Dependency: V2-T2. It reuses the existing authoritative party inventory, grant, and transfer primitives.
 
@@ -278,17 +289,22 @@ Acceptance:
 
 Implemented slice:
 
+- owned cloud Character Sheets render the authoritative party stash, support privacy-safe direct-pass
+  destinations and escrow-backed partial transfers, and reconcile character truth after terminal outcomes;
 - one atomic idempotent DM/co-DM batch from catalog, recent awards, campaign items, or the authoritative stash;
 - ordered multi-character grants, one conserved stash debit, strict safe item summaries, bounded notes, and carry
   invalidation;
-- privacy-safe known/lower-bound/unavailable preview states and live authoritative Character Sheet arrival;
+- shared eligibility/weight summaries, policy-version-fenced carry writes, and privacy-safe
+  known/lower-bound/unavailable preview states;
+- source/species/edition content admission is enforced for grants, awards, and accepted transfers into characters;
 - memory/PostgreSQL parity, authorization/idempotency/contention/event ordering, rendered UI, and real-stack
   coverage.
 
-Remaining T4 scope includes the broader first-class player party-inventory experience and enforced campaign carry
-policy. Advisory warnings do not claim that those later policy decisions are active.
+Remaining T4 scope includes a unified first-class DM/party inventory experience and policy-complete
+capacity-warning/recovery UX across every future move and award path. The shipped character/stash transfer and DM
+award slices do not claim that broader experience is complete.
 
-### V2-T5 — whole-site campaign context per browser/device (**implemented**)
+### V2-T5 — whole-site campaign context per browser/device (**shipped**)
 
 Dependency: V2-T2 for privacy-safe context summaries.
 
@@ -317,7 +333,7 @@ Implemented slice:
   BFCache/reconnect revalidation, production-stack Chromium coverage, and four killed high-risk mutants.
 V2-T5 owns context transport and teardown; ADR 0015/V2-T6 now consumes that metadata for content enforcement.
 
-### V2-T6 — enforced campaign rules/source/species/edition policy (**content policy and carry/encumbrance enforcement implemented; other non-content rules remain advisory/planned**)
+### V2-T6 — enforced campaign rules/source/species/edition policy (**active — content and carry enforcement shipped; other non-content rules remain advisory**)
 
 Dependencies: V2-T2 and V2-T5.
 
@@ -403,7 +419,7 @@ Acceptance:
 - source-cost and target failures remain privacy-preserving and non-enumerating;
 - disabled downstream capabilities cannot be targeted through API or stale UI.
 
-### V2-T8 — Discord and Google identity-provider framework (**contract shipped; next enablement**)
+### V2-T8 — Discord and Google identity-provider framework (**active — adapters/framework shipped; account linking and rollout incomplete**)
 
 Deliver:
 
@@ -412,6 +428,20 @@ Deliver:
 - linking only from an authenticated Hub session after fresh reauthentication;
 - safe link, unlink, collision, recovery, allowlist, invite, session-revocation, audit, export, and deletion
   behavior across every linked identity.
+
+Implemented:
+
+- provider-neutral identity/session provenance, durable one-time OAuth transactions, and the validated provider
+  registry;
+- bounded Discord OAuth and Google OIDC adapters with provider-specific claim, PKCE/nonce, JWKS, and failure
+  validation;
+- deterministic memory/PostgreSQL/production-stack coverage while normal production configuration remains
+  GitHub-only.
+
+Still to deliver:
+
+- explicit reauthentication, link/unlink, last-identity protection, account-security UI, operator runbooks, and
+  separately approved provider rollout.
 
 Acceptance:
 
@@ -425,10 +455,12 @@ Acceptance:
   behave consistently regardless of which linked identity established the session;
 - provider rollout is separately gated and GitHub remains available until migration evidence supports a change.
 
-### V2-T9 — Campaign Overview critique and redesign (**next — feature enablement**)
+### V2-T9 — Campaign Overview critique and redesign (**shipped**)
 
-Dependencies: V2-T1 is shipped; V2-T2 through V2-T7 should have stable user-facing contracts before the final
-redesign. The critique may begin earlier but must be refreshed against the accepted capabilities.
+Shipped in [PR #243](https://github.com/TrueMichato/ThelemarTools/pull/243), merged as
+`b8d31d3416b934cc9275b859b5932db050005351` from final PR head
+`c8d5f0333d1bd8f7867b91c7ecb7170a9838671b`. The implementation consumes the accepted T1/T2/T4/T5/T6/T7
+surfaces without claiming the unfinished portions of T3, T4, T7, or T8.
 
 Design evidence and decisions: [Campaign Overview redesign brief](campaign-overview-redesign-brief.md).
 
@@ -438,7 +470,8 @@ Deliver:
    accessibility, failure states, and cognitive load;
 2. an evidence-backed redesign of Campaign Overview around DM/player jobs, the legible activity log, live
    capabilities, policy, inventory, targeting, and context;
-3. staged rollout with old/new task completion and regression comparison.
+3. a one-surface rollout that preserves incumbent task access and compares the redesigned route against the
+   existing capability, role, state, responsive, and accessibility contracts.
 
 Acceptance:
 
@@ -447,6 +480,23 @@ Acceptance:
 - keyboard, screen-reader, contrast, 390 px portrait, mobile landscape, loading/empty/error/offline, and long-data
   states pass;
 - redesign does not weaken authorization, privacy, local mode, or operational observability.
+
+Implemented:
+
+- a role-adaptive pinned session brief leads with campaign identity, party readiness, attention, recent activity,
+  and one role-specific next action;
+- existing effects, transfers, XP, item awards, membership, homebrew, and rules capabilities remain available
+  through progressive disclosure;
+- zero/one/many-character launch behavior is explicit, spectators and archived campaigns remain read-only, and
+  desktop/mobile day/night states retain accessible hierarchy;
+- historical role replay is fenced against current authority, archived bootstrap and event parity remain readable,
+  archived mutations are closed in both stores, and PostgreSQL cursor/snapshot authority is transactionally
+  consistent.
+- The earlier dual-surface/coexistence comparison criterion is superseded: PR #243 replaced the same
+  `campaign.html` route without introducing a second implementation or feature flag. Equivalence evidence comes
+  from preserved incumbent controls, static page contracts, role/launch/read-only state coverage, and
+  production-stack desktop/mobile day/night screenshots. No simultaneous old/new UI or user task-completion study
+  occurred or is claimed.
 
 ## Dependencies and release order
 
@@ -459,26 +509,27 @@ flowchart LR
   subgraph Engineering[V2 engineering in parallel]
     T0[V2-T0 implementation shipped]
     T1[V2-T1 shipped]
-    T2[V2-T2 active]
-    P13[ADR 0013 shipped] --> T5[V2-T5 whole-site context]
-    P14[ADR 0014 shipped] --> T8[V2-T8 provider framework]
-    P15[ADR 0015 shipped] --> T6[V2-T6 policy enforcement]
-    P16[ADR 0016 shipped] --> T7[V2-T7 targeting]
+    T2[V2-T2 shipped]
+    P13[ADR 0013 shipped] --> T5[V2-T5 shipped]
+    P14[ADR 0014 shipped] --> T8[V2-T8 adapters shipped; linking next]
+    P15[ADR 0015 shipped] --> T6[V2-T6 active; content/carry shipped]
+    P16[ADR 0016 shipped] --> T7[V2-T7 active; Cure Wounds shipped]
   end
-  T2 --> T3[V2-T3 live effects]
-  T2 --> T4[V2-T4 inventory/carry/awards]
+  T2 --> T3[V2-T3 active; broader effects remain]
+  T2 --> T4[V2-T4 active; current slices shipped]
   T2 --> T5
-  T2 --> T7[V2-T7 targeting]
+  T2 --> T7
   T5 --> T6
   T2 --> T6
-  T1 --> T9[V2-T9 overview redesign]
-  T3 --> T9
-  T4 --> T9
+  T1 --> T9[V2-T9 shipped]
+  T2 -. shipped contract .-> T9
+  T4 -. shipped slices .-> T9
   T5 --> T9
-  T6 --> T9
-  T7 --> T9
+  T6 -. shipped slices .-> T9
+  T7 -. Cure Wounds slice .-> T9
   T0 --> ENABLE[Gate: enable new V2 product scope on Oracle]
   T1 -. accepted .-> ENABLE
+  T2 -. accepted .-> ENABLE
   T3 -. accepted .-> ENABLE
   T4 -. accepted .-> ENABLE
   T5 -. accepted .-> ENABLE
@@ -490,11 +541,11 @@ flowchart LR
 ```
 
 V1-G1/G2 intentionally have no dependency edge into V2 engineering. They gate private-pilot expansion, not
-implementation or merge. V2-T0 implementation and V2-T1 are shipped; T2 remains active; and the
-T5/T6/T7-source-cost/T8 decision-record precursors are shipped contracts. T0 plus V1-G1's live operational proof
-gate enabling new V2 product scope on Oracle. V2-T3, T4, T5, and T7 can be engineered independently after T2's
-applicable contracts land; T6 requires both T2 and T5. T9's critique can start earlier, but the final redesign follows stable product
-contracts to avoid designing around temporary screens.
+implementation or merge. V2-T0, T1, T2, T5, and T9 are shipped. T4 has shipped player-stash/transfer/carry and
+DM-award slices; T6 has shipped content/carry enforcement while its other non-content rules remain Advisory; T7 has
+shipped only the narrow Cure Wounds slice. T8's provider adapters/framework exist, but account linking and rollout
+remain incomplete. T0 plus V1-G1's live operational proof gate promotion of the merged head and any newly merged V2
+product scope on Oracle.
 
 ## Deferred horizons A-F
 

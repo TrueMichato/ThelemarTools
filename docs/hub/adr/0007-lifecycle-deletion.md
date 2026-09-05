@@ -1,6 +1,7 @@
 # ADR 0007: Administrative lifecycle and seven-day account deletion
 
-Status: Implemented; automated scheduling/monitoring pending Phase 6E
+Status: Implemented, including automated scheduling/monitoring support; target-environment execution evidence
+pending V1-G1
 
 ## Context
 

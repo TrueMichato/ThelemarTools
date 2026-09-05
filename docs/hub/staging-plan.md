@@ -1,7 +1,7 @@
 # Campaign Hub staging plan
 
 > **Status:** Release deployed; host-operations proof and physical game day remain
-> **Last reviewed:** 2026-09-01
+> **Last reviewed:** 2026-09-05
 > **Owner:** Campaign Hub maintainers
 
 ## Objectives
@@ -16,6 +16,9 @@ environment and must not use copied production characters.
 - Caddy terminates public HTTPS and keeps the static site, API, OAuth, and WebSocket routes on one origin.
 - GitHub OAuth, PostgreSQL, campaign creation, and the basic deployment smoke checks pass.
 - Release `hub-staging-2026-09-01` at `8f181712` is deployed; Phase 6G is complete.
+- Repository head `b8d31d3416b934cc9275b859b5932db050005351` (merged PRs #242 and #243) is not yet promoted. Current
+  Oracle behavior is evidence for the older recorded release only; V1-G1 owns the next deliberate promotion and
+  host-operations/recovery proof.
 - The instance must not be stopped, resized, detached, or recreated while replacement ARM capacity is
   unavailable; normal guest reboots are allowed.
 - The staging-baseline repair, lightweight Hub boot, Character Sheet-native campaign linking, role-aware

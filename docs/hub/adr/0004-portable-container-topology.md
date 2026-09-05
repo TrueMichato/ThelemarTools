@@ -1,6 +1,7 @@
 # ADR 0004: Portable OCI and same-origin edge topology
 
-Status: Implemented and locally verified; managed-provider adaptation pending Phase 6G
+Status: Implemented, locally verified, and deployed on Oracle in Phase 6G; future provider changes require new
+adaptation evidence
 
 ## Context
 

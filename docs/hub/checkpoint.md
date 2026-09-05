@@ -6,6 +6,11 @@
 > **Base/HEAD at capture:** `c91554179649944665a52b7ed5a82d4af5a5eb8c`
 > **Owner:** Campaign Hub maintainers
 
+> **Historical snapshot:** The no-push/no-PR and Phase 6G-pending statements below were accurate at capture.
+> They are intentionally preserved. Current status lives in the [living roadmap](roadmap.md): Phase 6G is complete,
+> PRs #242/#243 are merged through `b8d31d3416b934cc9275b859b5932db050005351`, and that newer head is not yet
+> promoted over the recorded Oracle staging release.
+
 ## Why this document exists
 
 The Phase 0-5 implementation began as a large working tree based directly on

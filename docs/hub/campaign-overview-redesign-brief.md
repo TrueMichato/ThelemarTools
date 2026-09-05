@@ -1,7 +1,10 @@
 # Campaign Overview redesign brief
 
-Status: implemented as the final Campaign Hub lane. The overview now uses the approved **Pinned session brief**
-composition while preserving the existing V1 mutations, authority boundaries, privacy projections, and recovery states.
+Status: shipped in [PR #243](https://github.com/TrueMichato/ThelemarTools/pull/243), merged as
+`b8d31d3416b934cc9275b859b5932db050005351` from final PR head
+`c8d5f0333d1bd8f7867b91c7ecb7170a9838671b`. The overview now uses the approved **Pinned session brief**
+composition while preserving the existing V1 mutations, authority boundaries, privacy projections, and recovery
+states. This merged head is not yet promoted to the older recorded Oracle staging release.
 
 ## Purpose and timing
 
@@ -35,7 +38,9 @@ This was a dual-agent critique, not user research. The local static environment 
 API, so no authentic populated campaign data loaded. Assessment A instead exercised source-faithful representative
 DM/player states at 1440 px and 390 px. Assessment B injected the detector in an automated tab. No durable visual
 overlay remains because the critique-only servers were stopped, and this brief does not claim screenshots or observed
-user behavior.
+user behavior from that preliminary critique. PR #243's later production-stack E2E run separately attached
+desktop/mobile day/night screenshots for DM, player, and read-only states; those implementation artifacts support the
+one-surface regression evidence below, not a user study or old/new coexistence comparison.
 
 The static detector returned zero findings. The authenticated-but-hidden DOM scan reported 58 hits across 54 elements:
 52 `undersized-ui-text`, 5 `tiny-text`, and 1 `overused-font`. The Inter finding is a false positive because Inter is
@@ -188,8 +193,20 @@ prefer the DM workspace, but equivalent contextual flows are not assumed and no 
 lane. The existing Hub API, authorization, protocol/version fences, policy enforcement, privacy projections,
 idempotency behavior, and personal-versus-campaign storage boundaries remain unchanged. Campaign Overview foregrounds
 summaries, attention, activity, readiness, policy visibility, and setup; mutations are findable but subordinate.
+The merge also hardens the authority underneath the redesign: historical role replay cannot override the current
+role, archived campaigns bootstrap with authorized read-only/event parity while every mutation path remains closed,
+and PostgreSQL cursor/snapshot authority is read from one repeatable transaction.
 
-## Staged migration
+## Rollout decision and evidence
+
+The original brief proposed old/new coexistence and task-completion comparison. PR #243 instead used a one-surface
+rollout on the existing `campaign.html` route: it changed information hierarchy without adding a second authority,
+API, or feature-flagged UI. The coexistence criterion is therefore superseded, not claimed as completed.
+
+Safety was established by preserving every incumbent action path behind progressive disclosure, static contracts
+for the old capabilities and new hierarchy, production-stack role and launch-state journeys, archived/read-only
+authority tests, and desktop/mobile day/night screenshots. This is contract/regression/visual comparison evidence;
+it is not a user study or simultaneous old/new task-completion measurement.
 
 1. **Stabilize responsibilities:** shipped tracks define authorization, capability, failure, reconnect, privacy, and
    observability behavior; the overview consumes those contracts without broadening them.
@@ -230,8 +247,10 @@ sections use the same component positions to avoid focus and layout jumps.
   preserve trust, state whether data changed, and provide retry or a concrete recovery route.
 - **Long data:** long campaign and character names, large parties, long activity histories, many attention items, and
   extensive setup data wrap, paginate, filter, or collapse without obscuring primary work.
-- **Migration safety:** old and new task completion are compared during coexistence; removing legacy forms does not
-  weaken authorization, privacy, local mode, observability, or any accepted player/DM capability.
+- **One-surface rollout safety:** incumbent task controls remain reachable and contract/E2E/visual evidence covers
+  role, launch, read-only, responsive, and authority states. No old/new coexistence or user task-completion study is
+  claimed; removing a legacy path still must not weaken authorization, privacy, local mode, observability, or any
+  accepted player/DM capability.
 
 The archived [full Impeccable critique](../../.impeccable/critique/2026-09-01T13-25-49Z__campaign-html.md) is the
 evidence record for this brief.

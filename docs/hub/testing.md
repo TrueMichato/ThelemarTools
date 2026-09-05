@@ -1,7 +1,7 @@
 # Campaign Hub testing guide
 
 > **Status:** Current automated and real-stack coverage plus managed-staging gates
-> **Last verified:** 2026-09-04
+> **Last verified:** 2026-09-05
 > **Owner:** Campaign Hub maintainers
 
 ## Test layers
@@ -17,6 +17,7 @@
 | Operation reconciliation | `HubCharacterOperationReconciler.test.js`, `HubCharacterOperationReconciliation.test.js`, `CharacterSheetRealtimeApply.test.js` | Pure per-source/target/combined-leg `B/L -> R/F` transition, coverage classification, prepare/adopt/commit atomicity, dirty/in-flight save rebasing, dedupe, and no-reload resync recovery |
 | Integration seams | `CharacterSheetRealtime.test.js`, Character Sheet repository/rules/roll-history tests; `DmScreenHubController.test.js`; `HubPartyTrackerProjection.test.js` | Authenticated/canonical sheet subscription gates, target filtering, save-queue delivery, remote removal and access-loss fencing, BFCache suspend/resume, fail-safe move recovery, existing page behavior, Campaign DM Screen access/recovery, live/manual Party Tracker separation, and local/Hub isolation |
 | Static UI/PWA contracts | `HubPageContract.test.js`, `HubRoutePolicy.test.js`, `HubPerformanceBudget.test.js` | Required states, boot order, navigation, service-worker and fixed limits |
+| Campaign Overview/authority | `HubPageContract.test.js`, `HubLifecycle*.test.js`, `HubRealtime.test.js`, `HubInventoryPostgres.test.js`, `campaign-overview.spec.ts` | Pinned session brief, role-specific launch, preserved workbench, historical-role replay fencing, archived read-only parity/mutation closure, and transactional cursor consistency |
 | Database contract | `HubMigrationContract.test.js`, `HubSemanticOperationsPostgres.test.js`, local PostgreSQL drills | Schema clauses, runtime-role grants, source/target lock ordering, atomic cost/effect, replay, expiry, and restore |
 | Real-stack browser | `test/e2e/hub/`, `test/e2e/pages/HubCampaignPage.ts` | Multi-user lifecycle, Character Sheet copy/attach/clone/move, real Cure Wounds reject/cancel/accept/self-target effects, leases, reconnect, keyboard focus, phone reflow, labels/touch targets, and six-member/replay/quota/contention budgets |
 | CI/supply chain | `.github/workflows/hub.yml`, `HubCiContract.test.js` | Pinned actions, deterministic gates, SBOM/image/provenance and test-auth isolation |
@@ -109,7 +110,9 @@ self-target combined writes, capability skew, per-leg dedupe, and privacy-shaped
 The shipped V2-T0 release-automation implementation and V2-T1 activity history do not clear external Oracle
 or physical-table gates. V1-G1 still requires the real-host dry run, deliberate release, induced lock/backup/
 compatible-rollback failures, redacted evidence, uninterrupted Foundry, scheduled host operations, encrypted
-off-machine backup, isolated restore, and break-glass decision rehearsal. V1-G2 remains blocked on V1-G1 and
+off-machine backup, isolated restore, and break-glass decision rehearsal. The deliberate release must promote a
+verified tag containing merged head `b8d31d3416b934cc9275b859b5932db050005351`; the current Oracle release does
+not prove that newer code. V1-G2 remains blocked on V1-G1 and
 requires the physical one-DM/two-player game day. Synthetic CI never substitutes for these gates.
 
 ## Evidence record
@@ -223,6 +226,24 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
 - V2-T1 activity history shipped in [PR #218](https://github.com/TrueMichato/ThelemarTools/pull/218):
   75 targeted presentation/deployment/Character Sheet roll-history tests, the full Hub suite, disposable
   PostgreSQL lifecycle integration, JavaScript lint, style lint, and all four Hub CI jobs passed.
+
+## 2026-09-05 merged-head evidence
+
+- [PR #242](https://github.com/TrueMichato/ThelemarTools/pull/242), merged as
+  `168d6e9ac36c11e2c938f21a4324b803f3f2fb61`, reported 93 Hub suites / 1,230 tests, 677 full Jest suites /
+  17,800 tests, 7/7 active-context, 6/6 rules-policy, and 11/11 content-policy mutants killed, 25 migrated
+  runtime-role PostgreSQL tests, and 24 production-derived Chromium journeys.
+- [PR #243](https://github.com/TrueMichato/ThelemarTools/pull/243), merged as
+  `b8d31d3416b934cc9275b859b5932db050005351` from head
+  `c8d5f0333d1bd8f7867b91c7ecb7170a9838671b`, reran the complete Hub suite, mutations (7/7 active-context,
+  28/28 rules-policy, 12/12 content-policy), 31 PostgreSQL gate tests, 25 Chromium journeys, JavaScript/style
+  lint, production builds, secret scan, dependency audit, and bounded desktop/mobile day/night review.
+- PR #243's pre-push full-Jest handoff recorded 678 passing suites plus two nested-Git release-fixture failures;
+  those fixtures then passed 17/17 directly. It also recorded the checkout's existing `npm run test:data`
+  LinkCheck discrepancy as 550 missing links (534 in generated `data/crafting.json`, 16 elsewhere). Those
+  environment-specific observations are preserved rather than advertised as a verified exact current baseline.
+- These are merged-code records, not Oracle deployment evidence. V1-G1 must promote and exercise a verified
+  descendant release before the newer behavior can be claimed on staging.
 
 ## Phase 6G preparation evidence
 

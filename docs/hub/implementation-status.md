@@ -1,6 +1,6 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-09-04
+> **Last updated:** 2026-09-05
 > **Owner:** Campaign Hub maintainers
 
 ## Status
@@ -11,9 +11,21 @@ checks pass. Phase 6G deployment is complete. The controlled one-DM/two-player t
 host-operations proof and the physical game day described in the [living roadmap](roadmap.md). Semi-public
 onboarding remains intentionally disabled.
 
+The repository has advanced beyond that deployed release. [PR #241](https://github.com/TrueMichato/ThelemarTools/pull/241)
+merged carry/encumbrance enforcement as `de5acaabfa6cc64ce804bb43b94b74ccf3bc2714`;
+[PR #242](https://github.com/TrueMichato/ThelemarTools/pull/242) then integrated source/species/edition content
+enforcement as `168d6e9ac36c11e2c938f21a4324b803f3f2fb61`, and
+[PR #243](https://github.com/TrueMichato/ThelemarTools/pull/243) merged the role-adaptive Campaign Overview and
+authority hardening as `b8d31d3416b934cc9275b859b5932db050005351` from head
+`c8d5f0333d1bd8f7867b91c7ecb7170a9838671b`. That merged head is **not yet deployed** to Oracle.
+
 Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecycle administration, Phase 6C
 migration management, Phase 6D portable deployment, Phase 6E operations, Phase 6F CI/real-stack integration,
 and Phase 6G Oracle deployment are complete.
+
+All 59 planned implementation todos in the coordinating program are complete. The only remaining V1 gates are
+operator/human evidence: V1-G1 Oracle host-operations and recovery proof, followed by V1-G2's physical
+one-DM/two-player game day and explicit private-launch go/no-go.
 
 The first `t7-auth-providers` layer provides migration 0006, provider-neutral identity/session provenance,
 durable one-time OAuth transactions, and the validated registry. Layer 2 adds production Discord OAuth and
@@ -34,6 +46,9 @@ V2-T0 release-automation implementation is **shipped** by
 **shipped** by [PR #218](https://github.com/TrueMichato/ThelemarTools/pull/218). The release script's live
 Oracle dry run, deliberate release, and induced-failure drills are external host-operations evidence, not
 unfinished T0 implementation; they remain blocked under the first V1 gate below.
+
+V2-T2 projection/privacy is shipped: versioned authorization-scoped projections, metadata-only realtime
+invalidations, owner/DM/peer views, sharing controls, and fail-closed privacy coverage are implemented.
 
 V2-T5 whole-site campaign context is implemented: account-bound device selection, lightweight Hub/shared-nav
 switchers, early temporary brew/rules activation, authorized bare Character Sheet and DM Screen defaults,
@@ -69,14 +84,22 @@ invalidates that proposal even if the slot is later restored. Source, target, an
 legs reconcile through unsaved/in-flight local edits and reconnect/resync. V2-T7 remains active: NPC/monster,
 party/multi-target, generic-effect, broader spell/ability/resource, and partial-resolution work is not implemented.
 
+V2-T9 Campaign Overview is shipped by PR #243. The page is now a role-adaptive pinned session brief centered on
+campaign identity, party readiness, attention, recent activity, and one role-specific next action. Existing effects,
+transfers, XP, item awards, membership, homebrew, and rules capabilities remain available through progressive
+disclosure. The same merge fences historical role replay against current authority, preserves archived read-only
+bootstrap/event parity, closes archived mutation paths in both stores, and reads PostgreSQL cursor/snapshot authority
+from one transactionally consistent view.
+
 - Lifecycle includes invite list/revoke, owner role changes, owner/co-DM member removal, voluntary leave,
   session/device revocation, immediate socket closure, workspace archive/restore, character detachment,
   escrow/action cleanup, and seven-day deletion request/cancel/purge with blocked-id reporting.
 - Migration management includes immutable/checksummed files, advisory locking, baseline detection,
   status/plan/apply, migration-aware readiness, runtime/backup role grants, migration 0002, and
   fresh/baseline/concurrent/failure/checksum/restored-database drills.
-- The complete Hub suite passes 45 suites / 315 tests; affected Character Sheet persistence tests, repository
-  JS lint, and Hub SCSS build/lint pass. Four real PostgreSQL/HTTPS browser journeys pass.
+- The merged PR handoffs record the targeted Hub, Character Sheet, mutation, PostgreSQL, browser, lint, build,
+  security, and supply-chain evidence summarized under [Final verification](#final-verification). Historical
+  milestone totals below remain historical rather than being relabeled as a current baseline.
 
 Phase 6D portable deployment is implemented and locally verified: non-root/read-only BFF image, reproducible
 static image with release-built service workers, PostgreSQL 17, one-shot migration/role grants,
@@ -122,9 +145,9 @@ pass. Only the host-operations proof and physical one-DM/two-player game day rem
 - Local/cloud Character Sheet repository switch, non-destructive claim, clone, move, archive, lease takeover.
 - Character Sheet-native local copy, detached-character recovery, clone-by-default campaign reuse, and
   compatibility-gated explicit move with another-device lease refusal.
-- Role-aware campaign operation surface: player characters and party status, DM live roster/workspace access,
-  permission-aware inbox controls, recent activity, campaign setup status, copyable invites, and disclosed
-  administration sections.
+- Role-adaptive Campaign Overview: a pinned session brief with campaign identity, one role-specific continuation
+  action, party readiness, attention, recent activity, explicit zero/one/many-character launch behavior, and
+  progressive disclosure for the preserved campaign workbench and administration surfaces.
 - Human-readable campaign interactions: source inventory stack selection, all five currency denominations,
   named action/transfer inbox entries, spell-slot proposals with spell/action context, and a lazy DM item
   catalog combining core and active campaign-brew items.
@@ -185,6 +208,8 @@ pass. Only the host-operations proof and physical one-DM/two-player game day rem
   outages, protocol skew, access loss, quotas, resources, transfers, leases, and revision conflicts.
 - Campaign pages retain loaded data while offline, require a refresh after reconnecting, offer a direct reload
   for protocol skew, and become read-only immediately after session, membership, or permission loss.
+- Archived campaigns bootstrap for authorized readers as read-only views, reject every mutation path in memory and
+  PostgreSQL, preserve idempotent replay, and keep cursor/snapshot authority transactionally consistent.
 - Oracle-ready systemd timers for maintenance, encrypted backup, and five-minute host checks; a host bind mount
   for encrypted archives; and a non-destructive off-machine pull script.
 - Operator-triggered Oracle release automation with process locking, UID/GID 1001 backup mapping, immutable
@@ -192,6 +217,20 @@ pass. Only the host-operations proof and physical one-DM/two-player game day rem
   protected endpoint/static asset checks, and redacted evidence.
 
 ## Final verification
+
+The phase-specific counts below are preserved as the evidence recorded at those milestones; they are not silently
+rewritten into a current whole-repository baseline. The latest merged handoffs add:
+
+- PR #242: 93 Hub suites / 1,230 tests, 677 full Jest suites / 17,800 tests, 7/7 active-context, 6/6 rules-policy,
+  and 11/11 content-policy mutants killed, plus 25 migrated runtime-role PostgreSQL tests and 24
+  production-derived Chromium journeys.
+- PR #243: complete Hub, mutation (7/7 active-context, 28/28 rules-policy, 12/12 content-policy), production-stack
+  PostgreSQL/Chromium, JavaScript/style/build/security, and bounded desktop/mobile day/night review gates. Its
+  pre-push full-Jest handoff recorded 678 passing suites plus two nested-Git fixture failures that then passed
+  17/17 directly.
+- PR #243 also recorded the existing `npm run test:data` LinkCheck discrepancy as 550 missing links in that
+  checkout (534 from generated `data/crafting.json`, 16 elsewhere). This document does not present that
+  environment-specific count as a newly verified current baseline.
 
 - Blocker-only security/correctness review: no unresolved high-severity findings.
 - Complete broad Jest gate: 601 suites and 17,495 tests passed. The Phase 6A Hub gate passes
@@ -253,7 +292,8 @@ pass. Only the host-operations proof and physical one-DM/two-player game day rem
 ## Remaining V1 gates
 
 1. **Host-operations proof:** run the shipped release automation's Oracle dry run and deliberate release against
-   the next verified `hub-*` tag; prove lock contention, pre-cutover backup failure, compatible app rollback,
+   the next verified `hub-*` tag containing merged head
+   `b8d31d3416b934cc9275b859b5932db050005351`; prove lock contention, pre-cutover backup failure, compatible app rollback,
    redacted evidence, uninterrupted Foundry, timers, encrypted off-machine backup, isolated restore,
    monitoring/alerts, and the schema-incompatible break-glass decision without restoring over production.
 2. **Physical game day:** complete and record the private one-DM/two-player session with real GitHub OAuth and
