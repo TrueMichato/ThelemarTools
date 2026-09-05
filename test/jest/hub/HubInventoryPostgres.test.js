@@ -27,21 +27,29 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		});
 	}
 
-	async function pJoinCampaign (account) {
+	async function pJoinSpecificCampaign ({owner, targetCampaign, account}) {
 		const tokenHash = crypto.randomBytes(32).toString("hex");
 		await store.pCreateInvite({
-			accountId: dm.id,
-			campaignId: campaign.id,
+			accountId: owner.id,
+			campaignId: targetCampaign.id,
 			role: "player",
 			tokenHash,
 			expiresAt: new Date(Date.now() + 60_000),
 			maxUses: 1,
 			idempotencyKey: crypto.randomUUID(),
 		});
-		await store.pRedeemInvite({
+		return (await store.pRedeemInvite({
 			accountId: account.id,
 			tokenHash,
 			idempotencyKey: crypto.randomUUID(),
+		})).membership;
+	}
+
+	async function pJoinCampaign (account) {
+		return pJoinSpecificCampaign({
+			owner: dm,
+			targetCampaign: campaign,
+			account,
 		});
 	}
 
@@ -165,6 +173,27 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			name: `${prefix} archive fence`,
 			idempotencyKey: crypto.randomUUID(),
 		})).campaign;
+		const removedAccount = await pCreateAccount("Archive Removed");
+		const leftAccount = await pCreateAccount("Archive Left");
+		const retainedAccount = await pCreateAccount("Archive Retained");
+		const retainedLeaver = await pCreateAccount("Archive Retained Leaver");
+		const removedMembership = await pJoinSpecificCampaign({owner: archiveOwner, targetCampaign: archiveCampaign, account: removedAccount});
+		await pJoinSpecificCampaign({owner: archiveOwner, targetCampaign: archiveCampaign, account: leftAccount});
+		const retainedMembership = await pJoinSpecificCampaign({owner: archiveOwner, targetCampaign: archiveCampaign, account: retainedAccount});
+		await pJoinSpecificCampaign({owner: archiveOwner, targetCampaign: archiveCampaign, account: retainedLeaver});
+		const removeInput = {
+			accountId: archiveOwner.id,
+			campaignId: archiveCampaign.id,
+			membershipId: removedMembership.id,
+			idempotencyKey: crypto.randomUUID(),
+		};
+		const leaveInput = {
+			accountId: leftAccount.id,
+			campaignId: archiveCampaign.id,
+			idempotencyKey: crypto.randomUUID(),
+		};
+		const removed = await store.pRemoveMember(removeInput);
+		const left = await store.pLeaveCampaign(leaveInput);
 		const archiveInput = {
 			accountId: archiveOwner.id,
 			campaignId: archiveCampaign.id,
@@ -172,16 +201,36 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		};
 		const archived = await store.pArchiveCampaign(archiveInput);
 		await expect(store.pArchiveCampaign(archiveInput)).resolves.toEqual(archived);
+		await expect(store.pRemoveMember(removeInput)).resolves.toEqual(removed);
+		await expect(store.pLeaveCampaign(leaveInput)).resolves.toEqual(left);
 		await expect(store.pArchiveCampaign({
 			...archiveInput,
+			idempotencyKey: crypto.randomUUID(),
+		})).rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_NOT_FOUND"}));
+		await expect(store.pRemoveMember({
+			accountId: archiveOwner.id,
+			campaignId: archiveCampaign.id,
+			membershipId: retainedMembership.id,
+			idempotencyKey: crypto.randomUUID(),
+		})).rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_NOT_FOUND"}));
+		await expect(store.pLeaveCampaign({
+			accountId: retainedLeaver.id,
+			campaignId: archiveCampaign.id,
 			idempotencyKey: crypto.randomUUID(),
 		})).rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_NOT_FOUND"}));
 		const evidence = await pool.query(`
 			SELECT
 				(SELECT count(*)::integer FROM hub.domain_events WHERE campaign_id = $1 AND type = 'campaign.archived') AS event_count,
-				(SELECT count(*)::integer FROM hub.audit_entries WHERE campaign_id = $1 AND action = 'campaign.archived') AS audit_count
-		`, [archiveCampaign.id]);
-		expect(evidence.rows[0]).toEqual({event_count: 1, audit_count: 1});
+				(SELECT count(*)::integer FROM hub.audit_entries WHERE campaign_id = $1 AND action = 'campaign.archived') AS audit_count,
+				(SELECT count(*)::integer FROM hub.memberships WHERE campaign_id = $1 AND account_id = $2 AND status = 'active') AS retained_count,
+				(SELECT count(*)::integer FROM hub.memberships WHERE campaign_id = $1 AND account_id = $3 AND status = 'active') AS retained_leaver_count
+		`, [archiveCampaign.id, retainedAccount.id, retainedLeaver.id]);
+		expect(evidence.rows[0]).toEqual({
+			event_count: 1,
+			audit_count: 1,
+			retained_count: 1,
+			retained_leaver_count: 1,
+		});
 	});
 
 	test("preserves metadata and idempotency through character, stash, and direct-pass escrow", async () => {

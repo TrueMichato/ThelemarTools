@@ -70,6 +70,7 @@ describe("campaign lifecycle and export", () => {
 		await expect(store.pArchiveCampaign({accountId: owner, campaignId: campaign.id, idempotencyKey: "archive-1"}))
 			.rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_BUSY"}));
 		await store.pResolveTransfer({accountId: successor, campaignId: campaign.id, transferId: transfer.id, decision: "reject", idempotencyKey: "reject"});
+		const successorMembership = await store.pGetMembership({accountId: successor, campaignId: campaign.id});
 		const archived = await store.pArchiveCampaign({accountId: owner, campaignId: campaign.id, idempotencyKey: "archive-2"});
 		expect(archived.campaign.status).toBe("archived");
 		expect((await store.pGetCharacter({accountId: owner, characterId: source.id})).character.campaignId).toBeNull();
@@ -89,6 +90,18 @@ describe("campaign lifecycle and export", () => {
 			maxUses: 1,
 			idempotencyKey: "invite-after-archive",
 		})).rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_NOT_FOUND"}));
+		await expect(store.pRemoveMember({
+			accountId: owner,
+			campaignId: campaign.id,
+			membershipId: successorMembership.id,
+			idempotencyKey: "remove-after-archive",
+		})).rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_NOT_FOUND"}));
+		await expect(store.pLeaveCampaign({
+			accountId: successor,
+			campaignId: campaign.id,
+			idempotencyKey: "leave-after-archive",
+		})).rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_NOT_FOUND"}));
+		expect((await store.pGetMembership({accountId: successor, campaignId: campaign.id})).status).toBe("active");
 	});
 
 	it("keeps transfer events private, lets the actor cancel, and broadcasts only stash invalidation", async () => {
