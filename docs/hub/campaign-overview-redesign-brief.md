@@ -150,7 +150,7 @@ Campaign Overview
 
 The player primary action depends on campaign-character count:
 
-- **Zero:** **Add a campaign character** opens focused onboarding with create, import, and attach paths.
+- **Zero:** **Add a local character copy** moves focus to the existing campaign-copy import.
 - **One:** **Open _character name_** opens that character directly.
 - **Many:** **Choose a character** opens an accessible chooser, then opens the explicit selection. It never silently
   chooses or opens the first character.

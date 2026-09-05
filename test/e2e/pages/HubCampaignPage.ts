@@ -7,7 +7,7 @@ type HubSession = {
 	csrfToken: string;
 };
 
-type CampaignPrimaryAction = "dm" | "character" | "character-setup" | "read-only";
+type CampaignPrimaryAction = "dm" | "character" | "character-setup" | "character-choice" | "read-only";
 
 export class HubCampaignPage {
 	readonly page: Page;
@@ -116,21 +116,29 @@ export class HubCampaignPage {
 		campaignId,
 		role,
 		primaryAction,
+		characterName,
+		campaignStatus = "active",
 	}: {
 		campaignId: string;
 		role: "dm" | "co_dm" | "player" | "spectator";
 		primaryAction: CampaignPrimaryAction;
+		characterName?: string;
+		campaignStatus?: "active" | "archived";
 	}): Promise<void> {
 		await this.gotoCampaign(campaignId);
 		await expect(this.page.locator("#campaign-content")).toHaveAttribute("data-campaign-role", role);
+		await expect(this.page.locator("#campaign-status")).toContainText(new RegExp(campaignStatus, "i"));
 		await expect(this.page.locator("#campaign-manifest-panel")).toBeVisible();
-		await expect(this.page.locator("#campaign-inbox-panel")).toBeVisible();
-		await expect(this.page.locator("#campaign-attention-summary")).toHaveText(/request/);
+		if (campaignStatus === "active") {
+			await expect(this.page.locator("#campaign-inbox-panel")).toBeVisible();
+			await expect(this.page.locator("#campaign-attention-summary")).toHaveText(/request/);
+		} else await expect(this.page.locator("#campaign-inbox-panel")).toBeHidden();
 
 		const primarySelectors: Record<CampaignPrimaryAction, string> = {
 			dm: "#campaign-open-dm-screen",
 			character: "#campaign-open-primary-character",
 			"character-setup": "#campaign-open-character-setup",
+			"character-choice": "#campaign-open-character-setup",
 			"read-only": "#campaign-primary-readonly",
 		};
 		await expect(this.page.locator(primarySelectors[primaryAction])).toBeVisible();
@@ -138,6 +146,24 @@ export class HubCampaignPage {
 			elements.filter(element => (element as HTMLElement).getClientRects().length > 0).length,
 		);
 		expect(visiblePrimaryCount).toBe(1);
+		if (primaryAction === "character") {
+			if (characterName) await expect(this.page.locator(primarySelectors.character)).toContainText(characterName);
+			await expect(this.page.locator(primarySelectors.character)).toHaveAttribute("href", /charactersheet\.html\?id=/);
+		}
+		if (primaryAction === "character-setup") {
+			const setup = this.page.locator(primarySelectors["character-setup"]);
+			await expect(setup).toHaveText("Add a local character copy");
+			await expect(setup).toHaveAttribute("href", "#campaign-upload-local");
+			await setup.click();
+			await expect(this.page.locator("#campaign-upload-local")).toBeFocused();
+		}
+		if (primaryAction === "character-choice") {
+			const chooser = this.page.locator(primarySelectors["character-choice"]);
+			await expect(chooser).toHaveText("Choose a character");
+			await expect(chooser).toHaveAttribute("href", "#campaign-character-list");
+			await chooser.click();
+			await expect(this.page.locator("#campaign-character-list a").first()).toBeFocused();
+		}
 
 		const workbench = this.page.locator("#campaign-workbench");
 		if (primaryAction === "read-only") {
@@ -1727,6 +1753,30 @@ export class HubCampaignPage {
 			data: {},
 		});
 		expect(response.ok()).toBe(true);
+	}
+
+	async changeMemberRoleViaApi ({
+		campaignId,
+		displayName,
+		role,
+	}: {
+		campaignId: string;
+		displayName: string;
+		role: "co_dm" | "player" | "spectator";
+	}): Promise<void> {
+		const response = await this.page.request.get(`/api/campaigns/${encodeURIComponent(campaignId)}/members`);
+		expect(response.ok()).toBe(true);
+		const members = (await response.json()).members as Array<{id: string; displayName: string}>;
+		const membership = members.find(member => member.displayName === displayName);
+		expect(membership, `Expected campaign membership for ${displayName}`).toBeTruthy();
+		const roleResponse = await this.page.request.patch(
+			`/api/campaigns/${encodeURIComponent(campaignId)}/members/${encodeURIComponent(membership!.id)}`,
+			{
+				headers: await this.getMutationHeaders(),
+				data: {role},
+			},
+		);
+		expect(roleResponse.ok()).toBe(true);
 	}
 
 	async requestDeletion (): Promise<void> {

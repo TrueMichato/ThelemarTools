@@ -776,15 +776,20 @@ function applyCampaignRoleLayout ({campaign, characters}) {
 	const primaryCharacter = document.getElementById("campaign-open-primary-character");
 	const characterSetup = document.getElementById("campaign-open-character-setup");
 	const readonlyPrimary = document.getElementById("campaign-primary-readonly");
-	const firstCharacter = !isDm ? characters[0] : null;
-	if (primaryCharacter && firstCharacter) {
-		primaryCharacter.href = `charactersheet.html?id=${encodeURIComponent(firstCharacter.id)}&hubCampaign=${encodeURIComponent(campaign.id)}`;
-		primaryCharacter.textContent = `Open ${getCharacterName(firstCharacter)}`;
+	const playerCharacters = campaign.status === "active" && campaign.role === "player" ? characters : [];
+	const primaryPlayerCharacter = playerCharacters.length === 1 ? playerCharacters[0] : null;
+	if (primaryCharacter && primaryPlayerCharacter) {
+		primaryCharacter.href = `charactersheet.html?id=${encodeURIComponent(primaryPlayerCharacter.id)}&hubCampaign=${encodeURIComponent(campaign.id)}`;
+		primaryCharacter.textContent = `Open ${getCharacterName(primaryPlayerCharacter)}`;
 	}
-	if (characterSetup) characterSetup.href = `charactersheet.html?hubCampaign=${encodeURIComponent(campaign.id)}`;
-	setHidden(primaryCharacter, !firstCharacter);
-	setHidden(characterSetup, campaign.status !== "active" || isDm || isSpectator || !!firstCharacter);
-	setHidden(readonlyPrimary, !isSpectator && !(isDm && campaign.status !== "active"));
+	if (characterSetup && playerCharacters.length !== 1) {
+		const hasCharacterChoices = playerCharacters.length > 1;
+		characterSetup.href = hasCharacterChoices ? "#campaign-character-list" : "#campaign-upload-local";
+		characterSetup.textContent = hasCharacterChoices ? "Choose a character" : "Add a local character copy";
+	}
+	setHidden(primaryCharacter, !primaryPlayerCharacter);
+	setHidden(characterSetup, campaign.status !== "active" || campaign.role !== "player" || playerCharacters.length === 1);
+	setHidden(readonlyPrimary, !isSpectator && campaign.status === "active");
 
 	const workbenchDescription = document.getElementById("campaign-workbench-description");
 	if (workbenchDescription) {
@@ -805,6 +810,15 @@ function initCampaignWorkbenchLinks () {
 			requestAnimationFrame(() => document.getElementById(targetId)?.querySelector("select, input, button")?.focus());
 		});
 	}
+
+	document.getElementById("campaign-open-character-setup")?.addEventListener("click", event => {
+		const targetId = event.currentTarget.getAttribute("href")?.slice(1);
+		if (!targetId) return;
+		requestAnimationFrame(() => {
+			const target = document.getElementById(targetId);
+			(target?.matches("button, a, input, select, textarea") ? target : target?.querySelector("a, button, input, select, textarea"))?.focus();
+		});
+	});
 }
 
 function setFormStatus ({formId, message = "", isError = false}) {

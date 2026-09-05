@@ -21,7 +21,7 @@ async function pCaptureOverview ({
 	helper: HubCampaignPage;
 	campaignId: string;
 	label: string;
-	primaryAction: "dm" | "character" | "character-setup" | "read-only";
+	primaryAction: "dm" | "character" | "character-setup" | "character-choice" | "read-only";
 	role: "dm" | "co_dm" | "player" | "spectator";
 	testInfo: TestInfo;
 	theme: "day" | "night";
@@ -61,7 +61,13 @@ test("campaign overview remains role-aware across responsive day and night state
 	const watchErrors = (page: Page) => {
 		page.on("pageerror", error => pageErrors.push(error.message));
 		page.on("console", message => {
-			if (message.type() === "error") pageErrors.push(message.text());
+			if (message.type() === "error") {
+				const source = message.location().url;
+				pageErrors.push(source ? `${message.text()} (${source})` : message.text());
+			}
+		});
+		page.on("response", response => {
+			if (response.status() >= 400) pageErrors.push(`HTTP ${response.status()}: ${new URL(response.url()).pathname}`);
 		});
 	};
 
@@ -73,14 +79,17 @@ test("campaign overview remains role-aware across responsive day and night state
 
 		await dm.signInSynthetic({providerSubject: "overview-dm", displayName: "Dungeon Master", secret});
 		await player.signInSynthetic({providerSubject: "overview-player", displayName: "Rowan Vale", secret});
-		await spectator.signInSynthetic({providerSubject: "overview-spectator", displayName: "Table Observer", secret});
+		await spectator.signInSynthetic({providerSubject: "overview-spectator", displayName: "Former Player Observer", secret});
 		const campaignId = await dm.createCampaign("The Fellowship of the Unreasonably Long Ashen March");
 
 		const playerInvite = await dm.createInviteViaApi(campaignId, "player");
-		const spectatorInvite = await dm.createInviteViaApi(campaignId, "spectator");
+		const spectatorInvite = await dm.createInviteViaApi(campaignId, "player");
 		await player.redeemInviteTokenViaApi(playerInvite);
 		await spectator.redeemInviteTokenViaApi(spectatorInvite);
 		await player.createCharacter({campaignId, name: "Rowan of the Far-Wandering Lantern"});
+		await player.createCharacter({campaignId, name: "Morrow Quill, Keeper of the Second Watch"});
+		await spectator.createCharacter({campaignId, name: "Retained Watcher"});
+		await dm.changeMemberRoleViaApi({campaignId, displayName: "Former Player Observer", role: "spectator"});
 		for (let i = 1; i <= 6; ++i) {
 			await dm.createCharacter({campaignId, name: `Expedition Member ${i} with a Long Table Name`});
 		}
@@ -99,7 +108,7 @@ test("campaign overview remains role-aware across responsive day and night state
 			helper: player,
 			campaignId,
 			label: "campaign-overview-desktop-night",
-			primaryAction: "character",
+			primaryAction: "character-choice",
 			role: "player",
 			testInfo,
 			theme: "night",
@@ -124,6 +133,13 @@ test("campaign overview remains role-aware across responsive day and night state
 			testInfo,
 			theme: "day",
 			viewport: {width: 390, height: 844},
+		});
+		await dm.archiveCampaign(campaignId);
+		await player.expectRoleAdaptiveCampaignOverview({
+			campaignId,
+			role: "player",
+			primaryAction: "read-only",
+			campaignStatus: "archived",
 		});
 		const unexpectedPageErrors = pageErrors.filter(message =>
 			!/^Failed to register a ServiceWorker .* An SSL certificate error occurred when fetching the script\.$/.test(message),

@@ -145,14 +145,19 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("setHidden(document.getElementById(\"campaign-workbench\"), !canPlay)");
 		expect(source).toContain("setHidden(document.getElementById(\"campaign-shared-actions\"), !canPlay)");
 		expect(source).toContain("setHidden(document.getElementById(\"campaign-characters-panel\"), isSpectator)");
-		expect(source).toContain("setHidden(characterSetup, campaign.status !== \"active\" || isDm || isSpectator || !!firstCharacter)");
-		expect(source).toContain("setHidden(readonlyPrimary, !isSpectator");
+		expect(source).toContain("campaign.status === \"active\" && campaign.role === \"player\" ? characters : []");
+		expect(source).toContain("playerCharacters.length === 1");
+		expect(source).toContain("hasCharacterChoices ? \"Choose a character\" : \"Add a local character copy\"");
+		expect(source).toContain("characterSetup.href = hasCharacterChoices ? \"#campaign-character-list\" : \"#campaign-upload-local\"");
+		expect(source).toContain("setHidden(characterSetup, campaign.status !== \"active\" || campaign.role !== \"player\" || playerCharacters.length === 1)");
+		expect(source).toContain("setHidden(readonlyPrimary, !isSpectator && campaign.status === \"active\")");
 		for (const id of [
 			"campaign-open-primary-character",
 			"campaign-open-character-setup",
 			"campaign-open-dm-screen",
 			"campaign-primary-readonly",
 		]) expect(campaignHtml).toContain(`id="${id}"`);
+		expect(campaignHtml).toContain('id="campaign-open-character-setup" class="hub-button hub-button--primary ve-hidden" href="#campaign-upload-local"');
 	});
 
 	it("opens campaign actions before moving keyboard focus to a requested task", () => {
@@ -160,6 +165,8 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("initCampaignWorkbenchLinks()");
 		expect(source).toContain("if (workbench) workbench.open = true");
 		expect(source).toContain("requestAnimationFrame(() => document.getElementById(targetId)?.querySelector(\"select, input, button\")?.focus())");
+		expect(source).toContain('document.getElementById("campaign-open-character-setup")?.addEventListener("click"');
+		expect(source).toContain('target?.querySelector("a, button, input, select, textarea")');
 		expect(campaignHtml).toContain("href=\"#campaign-action-form\"");
 		expect(campaignHtml).toContain("href=\"#campaign-transfer-form\"");
 	});
