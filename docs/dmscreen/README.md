@@ -16,6 +16,7 @@ Developer documentation for custom panels in the 5etools DM Screen (`dmscreen.ht
 | [Initiative Tracker — Multi-Select HP](./08-initiative-tracker-multi-select-hp.md) | Bulk-apply HP workflow (Fireball / save-for-half), selection state, `UiUtil.getStrNumericModified` |
 | [Item Builder](./09-item-builder.md) | Build and export custom magic items from the DM Screen |
 | [NPC Manager](./10-npc-manager.md) | NPC roster, roleplay detail, persistent groups, and batch rolling |
+| [Bestiary Quick Actions](../bestiary-quick-actions.md) | Temporary creature overrides shared with statblock panels and the Initiative Tracker creature viewer |
 
 ## System at a Glance
 

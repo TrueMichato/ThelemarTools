@@ -12,6 +12,7 @@ class _RenderBestiaryImplBase {
 	 * @param {HTMLElementExtended} [opts.btnResetScaleCr]
 	 * @param {HTMLElementExtended} [opts.selSummonSpellLevel]
 	 * @param {HTMLElementExtended} [opts.selSummonClassLevel]
+	 * @param {string} [opts.htmlControlRhs]
 	 * @param {boolean} [opts.isSkipExcludesRender]
 	 * @param {boolean} [opts.isSkipTokenRender]
 	 *
@@ -144,6 +145,7 @@ class _RenderBestiaryImplBase {
 			isSkipExcludesRender,
 
 			isInlinedToken,
+			htmlControlRhs,
 
 			entsAction,
 			entsBonusAction,
@@ -155,7 +157,7 @@ class _RenderBestiaryImplBase {
 	) {
 		return {
 			htmlPtIsExcluded: this._getCommonHtmlParts_isExcluded({mon, isSkipExcludesRender}),
-			htmlPtName: this._getCommonHtmlParts_name({mon, isInlinedToken}),
+			htmlPtName: this._getCommonHtmlParts_name({mon, isInlinedToken, htmlControlRhs}),
 			htmlPtSizeTypeAlignment: this._getCommonHtmlParts_sizeTypeAlignment({mon, renderer, isInlinedToken}),
 
 			htmlPtHitPoints: this._getCommonHtmlParts_hitPoints({mon, isInlinedToken}),
@@ -191,11 +193,12 @@ class _RenderBestiaryImplBase {
 		return Renderer.utils.getExcludedTr({entity: mon, dataProp: "monster", page: UrlUtil.PG_BESTIARY});
 	}
 
-	_getCommonHtmlParts_name ({mon, isInlinedToken}) {
+	_getCommonHtmlParts_name ({mon, isInlinedToken, htmlControlRhs}) {
+		const ptSound = mon.soundClip ? this._getBtnPronounceHtml({mon}) : "";
 		return Renderer.utils.getNameTr(
 			mon,
 			{
-				htmlControlRhs: mon.soundClip ? this._getBtnPronounceHtml({mon}) : "",
+				htmlControlRhs: `${ptSound}${htmlControlRhs || ""}`,
 				isInlinedToken,
 				page: UrlUtil.PG_BESTIARY,
 				extensionData: {
@@ -528,6 +531,7 @@ class _RenderBestiaryImplClassic extends _RenderBestiaryImplBase {
 			isSkipExcludesRender: opts.isSkipExcludesRender,
 
 			isInlinedToken,
+			htmlControlRhs: opts.htmlControlRhs,
 
 			entsAction,
 			entsBonusAction,
@@ -735,6 +739,7 @@ class _RenderBestiaryImplOne extends _RenderBestiaryImplBase {
 			isSkipExcludesRender: opts.isSkipExcludesRender,
 
 			isInlinedToken,
+			htmlControlRhs: opts.htmlControlRhs,
 
 			entsAction,
 			entsBonusAction,

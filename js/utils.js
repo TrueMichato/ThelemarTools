@@ -7035,6 +7035,7 @@ globalThis.DataUtil = class {
 
 		static getLegendaryGroup (mon) {
 			if (!mon.legendaryGroup?.source || !mon.legendaryGroup?.name) return null;
+			if (mon.legendaryGroup.lairActions || mon.legendaryGroup.regionalEffects || mon.legendaryGroup.mythicEncounter) return mon.legendaryGroup;
 			return DataLoader.getFromCache("legendaryGroup", mon.legendaryGroup.source, UrlUtil.URL_TO_HASH_BUILDER["legendaryGroup"](mon.legendaryGroup));
 		}
 

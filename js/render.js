@@ -10093,6 +10093,7 @@ class _RenderCompactBestiaryImplBase {
 	 * @param [opts.isScaledCr]
 	 * @param [opts.isScaledSpellSummon]
 	 * @param [opts.isScaledClassSummon]
+	 * @param {string} [opts.htmlControlRhs]
 	 *
 	 * @return {string}
 	 */
@@ -10210,6 +10211,13 @@ class _RenderCompactBestiaryImplBase {
 	}
 
 	_getCommonHtmlParts_name ({mon, opts, isInlinedToken}) {
+		const htmlControlRhs = [
+			opts.htmlControlRhs,
+			opts.isEmbeddedEntity ? "" : Renderer.utils.getBtnToggleTwoColHtml(),
+		]
+			.filter(Boolean)
+			.join("");
+
 		return Renderer.utils.getNameTr(
 			mon, {
 				page: opts.page || UrlUtil.PG_BESTIARY,
@@ -10220,7 +10228,7 @@ class _RenderCompactBestiaryImplBase {
 				},
 				isInlinedToken,
 				isEmbeddedEntity: opts.isEmbeddedEntity,
-				htmlControlRhs: opts.isEmbeddedEntity ? "" : Renderer.utils.getBtnToggleTwoColHtml(),
+				htmlControlRhs,
 			},
 		);
 	}
