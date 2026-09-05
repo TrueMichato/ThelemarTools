@@ -220,7 +220,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		})).rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_NOT_FOUND"}));
 		const evidence = await pool.query(`
 			SELECT
-				(SELECT count(*)::integer FROM hub.domain_events WHERE campaign_id = $1 AND type = 'campaign.archived') AS event_count,
+				(SELECT count(*)::integer FROM hub.domain_events WHERE campaign_id = $1 AND event_type = 'campaign.archived') AS event_count,
 				(SELECT count(*)::integer FROM hub.audit_entries WHERE campaign_id = $1 AND action = 'campaign.archived') AS audit_count,
 				(SELECT count(*)::integer FROM hub.memberships WHERE campaign_id = $1 AND account_id = $2 AND status = 'active') AS retained_count,
 				(SELECT count(*)::integer FROM hub.memberships WHERE campaign_id = $1 AND account_id = $3 AND status = 'active') AS retained_leaver_count
