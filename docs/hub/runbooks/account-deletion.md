@@ -26,7 +26,9 @@ Grace lasts seven days.
 
 ## Purge
 
-Until Phase 6E schedules it, run bounded purge as the runtime authority:
+Until V1-G1 installs, enables, observes, and verifies `thelemar-hub-maintenance.timer` on Oracle through the
+[host-operations procedure](oracle-operations.md#2-install-the-systemd-units), run bounded purge manually as the
+runtime authority:
 
 ```bash
 DATABASE_URL=... HUB_PURGE_LIMIT=100 npm run hub:purge-accounts

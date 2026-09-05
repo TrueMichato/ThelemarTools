@@ -195,7 +195,16 @@ The merge also hardens the authority underneath the redesign: historical role re
 role, archived campaigns bootstrap with authorized read-only/event parity while every mutation path remains closed,
 and PostgreSQL cursor/snapshot authority is read from one repeatable transaction.
 
-## Staged migration
+## Rollout decision and evidence
+
+The original brief proposed old/new coexistence and task-completion comparison. PR #243 instead used a one-surface
+rollout on the existing `campaign.html` route: it changed information hierarchy without adding a second authority,
+API, or feature-flagged UI. The coexistence criterion is therefore superseded, not claimed as completed.
+
+Safety was established by preserving every incumbent action path behind progressive disclosure, static contracts
+for the old capabilities and new hierarchy, production-stack role and launch-state journeys, archived/read-only
+authority tests, and desktop/mobile day/night screenshots. This is contract/regression/visual comparison evidence;
+it is not a user study or simultaneous old/new task-completion measurement.
 
 1. **Stabilize responsibilities:** shipped tracks define authorization, capability, failure, reconnect, privacy, and
    observability behavior; the overview consumes those contracts without broadening them.
@@ -236,8 +245,10 @@ sections use the same component positions to avoid focus and layout jumps.
   preserve trust, state whether data changed, and provide retry or a concrete recovery route.
 - **Long data:** long campaign and character names, large parties, long activity histories, many attention items, and
   extensive setup data wrap, paginate, filter, or collapse without obscuring primary work.
-- **Migration safety:** old and new task completion are compared during coexistence; removing legacy forms does not
-  weaken authorization, privacy, local mode, observability, or any accepted player/DM capability.
+- **One-surface rollout safety:** incumbent task controls remain reachable and contract/E2E/visual evidence covers
+  role, launch, read-only, responsive, and authority states. No old/new coexistence or user task-completion study is
+  claimed; removing a legacy path still must not weaken authorization, privacy, local mode, observability, or any
+  accepted player/DM capability.
 
 The archived [full Impeccable critique](../../.impeccable/critique/2026-09-01T13-25-49Z__campaign-html.md) is the
 evidence record for this brief.

@@ -470,7 +470,8 @@ Deliver:
    accessibility, failure states, and cognitive load;
 2. an evidence-backed redesign of Campaign Overview around DM/player jobs, the legible activity log, live
    capabilities, policy, inventory, targeting, and context;
-3. staged rollout with old/new task completion and regression comparison.
+3. a one-surface rollout that preserves incumbent task access and compares the redesigned route against the
+   existing capability, role, state, responsive, and accessibility contracts.
 
 Acceptance:
 
@@ -491,6 +492,11 @@ Implemented:
 - historical role replay is fenced against current authority, archived bootstrap and event parity remain readable,
   archived mutations are closed in both stores, and PostgreSQL cursor/snapshot authority is transactionally
   consistent.
+- The earlier dual-surface/coexistence comparison criterion is superseded: PR #243 replaced the same
+  `campaign.html` route without introducing a second implementation or feature flag. Equivalence evidence comes
+  from preserved incumbent controls, static page contracts, role/launch/read-only state coverage, and
+  production-stack desktop/mobile day/night screenshots. No simultaneous old/new UI or user task-completion study
+  occurred or is claimed.
 
 ## Dependencies and release order
 

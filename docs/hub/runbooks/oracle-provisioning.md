@@ -1,20 +1,42 @@
 # Runbook: Oracle Cloud Always Free provisioning
 
-> **Status:** Phase 6G complete; recorded staging release deployed; V1-G1 host-operations/recovery proof pending
+> **Status:** Historical Phase 6G provisioning record; current release/rollback delegated to immutable automation;
+> V1-G1 host-operations/recovery proof pending
 > **Severity:** Operational proof, not an incident
 > **Owner:** Campaign Hub maintainers
-> **Last drill date:** never — update this line the first time the runbook is followed end to end
+> **Last drill date:** never — retain until the V1-G1 host-operations/recovery drill completes
 > **Estimated time:** 60–90 minutes, most of it waiting
 
 ## Purpose
 
-Provision a single Oracle Cloud "Always Free" ARM virtual machine and run the portable Campaign Hub stack
-on it at a public HTTPS address, at $0/month recurring cost.
+Record how the single Oracle Cloud "Always Free" ARM virtual machine was provisioned for the portable Campaign Hub
+stack at a public HTTPS address, at $0/month recurring cost.
 
 This runbook produced the private **staging** environment for release `hub-staging-2026-09-01` at `8f181712`.
 Do not expand it to a real private campaign until V1-G1 host-operations/recovery proof and V1-G2's physical game
 day/go-no-go in the [living roadmap](../roadmap.md) have passed. The repository's newer merged head is not deployed
 until an operator deliberately promotes a verified release.
+
+## Current operator boundary
+
+The provisioning steps below are retained as the historical record of how the Oracle host was first prepared.
+They are **not** the current deployment, rollback, disposal, or service-retirement procedure.
+
+On the existing staging host:
+
+- keep Foundry running and reachable on port 30000; the release preflight refuses to proceed without that listener;
+- do not disable Foundry or its supervisor, remove port 30000 from either firewall, delete Foundry data, terminate
+  the instance, or repurpose the host;
+- do not deploy a moving branch, run raw `docker compose up --build`, or manually choose release images;
+- do not run `docker compose down -v`, delete Hub volumes, or treat rollback as environment disposal;
+- promote only an immutable annotated `hub-*` tag with
+  [`deploy/hub/release.sh`](deploy-promote.md), and use the checked-in [rollback](rollback.md) and
+  [backup/restore](backup-restore.md) procedures for recovery;
+- install, enable, observe, and verify host timers through
+  [Oracle host operations](oracle-operations.md) as V1-G1 evidence.
+
+Any later text describing Foundry removal, closing port 30000, branch-based Compose deployment, or destructive
+disposal is superseded by this boundary and must not be executed against the current host.
 
 ---
 
@@ -163,7 +185,7 @@ This single rule determines everything below. Each candidate change is judged on
 | Change OCPU/memory (resize shape) | Forces a reboot **and** re-checks host capacity | **Do not do this** |
 | Detach/attach a boot volume | Yes | Never — this is the trap to avoid |
 
-### C-ALT.0 — Audit what the Foundry guide may have configured
+### C-ALT.0 — Historical audit of the original Foundry host
 
 This instance was built following the
 [Foundry VTT Always Free Oracle guide](https://foundryvtt.wiki/en/setup/hosting/always-free-oracle). That
@@ -181,44 +203,23 @@ original installation. Verify each item before treating it as complete.
 
 **Potential conflicts — check them rather than assuming they exist:**
 
-1. **An old host-level Caddy would conflict if it owned ports 80 or 443.**
-   This stack runs its own Caddy inside Docker, bound to those ports. Check before changing anything:
+1. **An unexpected host-level listener on ports 80 or 443 is now an incident/preflight failure.**
+   The deployed stack runs Caddy inside Docker. Inspection is safe:
 
 ```bash
 sudo systemctl status caddy --no-pager 2>/dev/null || true
 sudo ss -tlnp | grep -E ':(80|443)\b'
 ```
 
-   For this reused VM, the live check on 2026-08-30 showed only Foundry on port 30000; ports 80 and 443 were
-   free. If that is still true, **do nothing** here. If the second command now shows `caddy` owning either
-   port, disable only that old service and check again:
+   The 2026-08-30 observation is historical. If an unexpected listener now appears, stop and use the
+   [incident](incident.md) and [deploy/promote](deploy-promote.md) runbooks; do not disable services from this
+   provisioning record.
 
-```bash
-sudo systemctl disable --now caddy
-sudo ss -tlnp | grep -E ':(80|443)\b'   # expect no output
-```
-
-   Do not reuse a host-level Caddy without deliberately redesigning the deployment. The documented stack
-   keeps its Caddyfile, certificate state, and internal service names inside the container; retaining the host
-   service would create an undocumented second deployment model.
-
-2. **Port 30000 is open in both firewalls and must be closed.**
-   That is Foundry's application port. Nothing in this stack listens on it, and leaving it open is an
-   unnecessary exposure once Foundry is gone.
-
-   First list the rules with line numbers. If the exact Foundry multiport rule exists at line `<N>`, confirm
-   that line is the one about to be replaced, then replace it in place rather than deleting and reinserting
-   at a guessed position:
-
-```bash
-  sudo iptables -L INPUT --line-numbers -n
-   sudo iptables -R INPUT <N> -m state --state NEW -p tcp \
-     --match multiport --dports 80,443 -j ACCEPT
-```
-
-   If the exact rule is not present, do not improvise; follow D2 from the machine's current ruleset. Remove
-   `30000` from the OCI ingress rule separately. Keep the current SSH session open, verify a second new SSH
-   session works, and only then run `sudo netfilter-persistent save`.
+2. **Port 30000 must remain available for Foundry.**
+   The immutable release workflow checks that Foundry is listening before and after every promotion and verifies
+   that Hub Compose does not own the port. Inspecting the rules is safe, but do not remove or rewrite the port
+   30000 ingress from this runbook. Any future Foundry retirement or exposure change requires a separate reviewed
+   migration plan and corresponding release-contract change.
 
 **Deliberate divergence — leave it as it is:**
 
@@ -352,16 +353,12 @@ Do not add `GRUB_TERMINAL`, `GRUB_SERIAL_COMMAND`, or guessed kernel parameters 
 serial output and the change has been separately reviewed. A malformed GRUB change is more dangerous than
 the condition it is meant to prevent.
 
-#### Take backups, but understand their limit
+#### Historical boot-volume backup note
 
 Verify whether the Foundry guide's automatic boot-volume policy actually exists; the guide is not evidence
-that the step completed. Before a manual backup, stop Foundry and host Caddy, flush writes, and then create a
-**Full** boot-volume backup:
-
-```bash
-sudo systemctl stop foundry caddy 2>/dev/null || true
-sync
-```
+that the step completed. Do **not** stop Foundry or Caddy to follow this historical note. Current application
+backup, isolated restore, and release evidence comes from [Oracle host operations](oracle-operations.md),
+[backup/restore](backup-restore.md), and [deploy/promote](deploy-promote.md).
 
 In OCI: **Storage → Block Storage → Boot Volumes → your volume → Create Backup → Full**. Always Free includes
 up to five volume backups, but verify current usage before creating one. This backup protects the data for a
@@ -496,83 +493,17 @@ If the exact condition is an empty INPUT chain with policy DROP, temporarily run
 `sudo netplan apply`. Reinstalling `netplan.io` requires working networking or a matching cached package, so
 it is not an offline first-aid command.
 
-### C-ALT.4 — Remove the Foundry software
+### C-ALT.4 — Superseded Foundry-retirement plan (**do not execute**)
 
-First identify exactly what owns the Foundry listener. Do not kill the reported PID directly: if systemd or
-another supervisor owns it, the process may immediately restart with a new PID.
+The original provisioning draft planned to retire Foundry and reclaim port 30000. That plan was superseded by
+the immutable release workflow before the recorded Oracle release. Foundry now remains an explicit protected
+co-tenant: `deploy/hub/release.sh` requires its listener before and after promotion and rejects any Hub Compose
+configuration that references port 30000.
 
-```bash
-sudo ss -tlnp | grep -E ':(80|443|30000)\b'
-# Substitute the Node PID reported on port 30000:
-sudo systemctl status <PID> --no-pager
-ps -o pid,ppid,user,lstart,cmd -p <PID>
-sudo sh -c "tr '\0' ' ' </proc/<PID>/cmdline; echo"
-cat /proc/<PID>/cgroup
-```
-
-If `systemctl status <PID>` names a unit—for the referenced Foundry guide it is commonly
-`foundryvtt.service`—disable that exact unit:
-
-```bash
-sudo systemctl disable --now foundryvtt.service   # replace only if status showed another unit
-sudo systemctl is-enabled foundryvtt.service      # expect: disabled
-sudo systemctl is-active foundryvtt.service       # expect: inactive
-```
-
-If no unit is named, stop here and identify the supervisor from the parent PID/cgroup output (for example,
-PM2, a user service, Docker, or a login shell). Disable the supervisor's persistent entry rather than killing
-Node. Do not proceed until its restart mechanism is understood.
-
-**This deployment's observed case:** PID 1016 belongs to `pm2-ubuntu.service`; PM2 manages one application
-named `foundry` and resurrects it from `/home/ubuntu/.pm2` at boot. `pm2 describe foundry` confirmed:
-
-- application/runtime files: `/home/ubuntu/foundry`;
-- persistent Foundry worlds, configuration and uploads: `/home/ubuntu/foundryuserdata`;
-- logs: `/home/ubuntu/.pm2/logs/foundry-{out,error}.log`.
-
-Do not delete `foundryuserdata` merely because the runtime is retired. Copy it off-VM first, or deliberately
-record that it is no longer needed. Removing the PM2 process does not delete any of these files.
-
-Remove Foundry from PM2's saved process list, and then disable the systemd unit:
-
-```bash
-pm2 list
-pm2 describe foundry
-sudo sh -c "tr '\0' ' ' </proc/$(pgrep -f '/home/ubuntu/foundry/resources/app/main.js' | head -1)/cmdline; echo"
-
-pm2 delete foundry
-pm2 save --force
-sudo systemctl disable --now pm2-ubuntu.service
-
-systemctl is-enabled pm2-ubuntu.service  # expect: disabled
-systemctl is-active pm2-ubuntu.service   # expect: inactive
-```
-
-Run the `pm2` commands as `ubuntu`, not with `sudo`; the process store is `/home/ubuntu/.pm2`. Do not run
-another `pm2` command after disabling the service, because the CLI may start a new per-user PM2 daemon.
-Leaving the disabled service and PM2 package installed temporarily is harmless; remove them only after the
-Hub survives a reboot.
-
-Ports 80 and 443 being absent from the first `ss` output means no current listener, but Caddy might still be
-enabled and return after reboot. Disable it if installed:
-
-```bash
-if systemctl list-unit-files caddy.service --no-legend 2>/dev/null | grep -q caddy; then
-  sudo systemctl disable --now caddy.service
-fi
-sudo ss -tlnp | grep -E ':(80|443|30000)\b' || echo "Ports 80, 443 and 30000 are free"
-```
-
-Only after all three ports are free should you reclaim disk. Foundry's application and user-data directories
-are commonly under `/home/ubuntu/foundry*` or `/srv/foundry*`; list them before deleting so you keep any world
-data you still care about:
-
-```bash
-sudo du -sh /home/ubuntu/* /srv/* /opt/* 2>/dev/null | sort -h | tail -30
-```
-
-Leave the OS, SSH configuration, users, `iptables` rules for 80/443, and the Node.js install alone. Node is
-harmless, and re-editing firewall rules over SSH on a machine you cannot stop is a needless risk.
+Do not disable Foundry, PM2, or a Foundry systemd unit; do not delete its runtime/user-data directories; and do
+not close port 30000. A future retirement would be a separate migration with backup, availability, firewall,
+release-contract, and rollback review. This historical provisioning runbook provides no authorization or commands
+for that change.
 
 ### C-ALT.5 — What happens next (C-ALT path)
 
@@ -606,10 +537,10 @@ prevent every Oracle-side interruption, but it avoids leaving the VM stopped aft
 Continue in this order:
 
 1. Read **C9** so the idle-reclamation risk is understood; there is no immediate command to run.
-2. In **D1**, inspect the existing Foundry VCN rules instead of creating another subnet. Keep/open TCP 80 and
-   443; remove TCP 30000 after Foundry is stopped. Use an NSG only if another VNIC shares the subnet.
-3. In **D2**, inspect the existing host `iptables` rules. Keep the 80/443 ACCEPT rule and remove 30000. Do not
-   add duplicates.
+2. In **D1**, inspect the existing Foundry VCN rules instead of creating another subnet. Keep TCP 80, 443, and
+   the protected Foundry port 30000 unchanged. Use an NSG only if another VNIC shares the subnet.
+3. In **D2**, inspect the existing host `iptables` rules without rewriting them. Keep the working 80/443 and
+   Foundry 30000 paths; any firewall change is a separately reviewed operation.
 4. Follow **Part E** to install Docker once from its supported Jammy repository.
 5. In **Part F**, point `campaignhub.duckdns.org` at `129.159.151.68`. As of 2026-08-30 it resolves to
    `46.121.39.154`, so it is not ready for certificate issuance. Rotate the previously exposed DuckDNS token
@@ -1148,34 +1079,20 @@ again.
 
 ---
 
-## Part H — Deploy
+## Historical Part H — first bootstrap (**non-executable for current releases**)
 
-Run every command in this part **inside the SSH session on the Oracle VM**, as the normal `ubuntu` user. Do
-not run it in the terminal on your Mac, and do not use `sudo` to create the repository or environment file.
+> **STOP:** The commands in H1-H3 document the original first bootstrap only. Do not use them to update the
+> current host. In particular, do not check out/pull a moving branch and do not run raw Compose build/up.
+> Current deployment requires an immutable annotated `hub-*` tag and
+> [`deploy/hub/release.sh`](deploy-promote.md), which preserves Foundry, verifies backup/migration/rollback
+> preconditions, binds exact image IDs, and records release evidence.
 
-```bash
-cd /home/ubuntu
-git clone https://github.com/TrueMichato/ThelemarTools.git
-cd ThelemarTools
-git checkout multiplayer-hub      # later: the release tag
-git pull --ff-only origin multiplayer-hub
-```
+The first bootstrap cloned the repository into `/home/ubuntu/ThelemarTools` and prepared the original release
+configuration there. Its branch checkout was not an immutable release procedure and is intentionally omitted.
+Current operators must begin with the clean-checkout and annotated-tag preflight in
+[deploy/promote](deploy-promote.md).
 
-Confirm that this is the repository root:
-
-```bash
-pwd
-ls compose.hub.yml compose.hub.public.yml
-```
-
-Expected:
-
-```text
-/home/ubuntu/ThelemarTools
-compose.hub.public.yml  compose.hub.yml
-```
-
-### H1 — Create `.env.hub` once
+### Historical H1 — initial `.env.hub` creation (**do not repeat**)
 
 `.env.hub` is a private configuration file used by Docker Compose. Create it in the repository root, beside
 `compose.hub.yml`:
@@ -1186,6 +1103,11 @@ compose.hub.public.yml  compose.hub.yml
 
 It contains passwords and the GitHub OAuth client secret. The repository's `.gitignore` excludes this file,
 but it must still never be committed, pasted into chat, or included in screenshots.
+
+The remaining H1/H2 material records how the file and off-host recovery key were originally created. Do not rerun
+the generation block on the deployed environment: changing database passwords or the backup key would break the
+existing database or make retained backups unreadable. Current release automation preserves the existing file and
+verifies its required ownership and values.
 
 First, collect the three values that cannot be generated. Run these commands and answer each prompt:
 
@@ -1285,7 +1207,7 @@ If Docker Compose reports an unset variable, do not start the stack. Edit only t
 > passwords while the existing database still expects the old ones. Keep this same file for upgrades and
 > restarts. If one setting later changes, edit that line only.
 
-### H2 — Save the recovery secret off the VM
+### Historical H2 — recovery-secret custody
 
 `HUB_BACKUP_ENCRYPTION_KEY` is the only key that can decrypt this deployment's encrypted database backups.
 If the VM is lost and the key existed only on that VM, the backups are unusable. Print only that line, copy
@@ -1302,14 +1224,12 @@ Do not put the key in chat, email, a GitHub issue, or another file in the reposi
 address on the private network. `HUB_CLIENT_IP_HEADER` stays unset — it exists only for managed platforms
 that inject their own client-IP header, and enabling it here would let clients spoof their address.
 
-### H3 — Build and start
+### Historical H3 — first build and start (**command superseded**)
 
-The first build takes roughly 5–10 minutes on 1 OCPU:
-
-```bash
-docker compose -f compose.hub.yml -f compose.hub.public.yml --env-file .env.hub up -d --build
-docker compose -f compose.hub.yml -f compose.hub.public.yml --env-file .env.hub ps
-```
+The first bootstrap built and started the Compose stack directly. That raw Compose command is intentionally
+omitted because it does not prove immutable tag/SHA/image identity, release provenance, backup freshness, migration
+safety, Foundry continuity, or rollback compatibility. Every current promotion must use
+[deploy/promote](deploy-promote.md).
 
 Migrations run automatically as a one-shot `migrate` container before the BFF starts, and the BFF refuses
 to start against an unexpected schema.
@@ -1321,9 +1241,14 @@ persistent `hub-caddy-data` Docker volume. It also renews the certificate automa
 
 ---
 
-## Verification
+## Historical first-bootstrap verification
 
-Run all of these before declaring success.
+These checks are retained as Phase 6G history, not as sufficient current release evidence. Current operators
+must use the complete preflight/post-cutover checks and evidence emitted by [deploy/promote](deploy-promote.md),
+then collect scheduled host evidence through [Oracle host operations](oracle-operations.md).
+
+The first bootstrap used the following checks. They remain useful diagnostic observations, but they do not replace
+the current immutable release evidence.
 
 ```bash
 # On the VM
@@ -1359,15 +1284,11 @@ Then in a browser:
 
 ## Rollback
 
-Nothing here mutates existing systems, so rollback is disposal:
-
-```bash
-docker compose -f compose.hub.yml -f compose.hub.public.yml --env-file .env.hub down       # keeps volumes
-docker compose -f compose.hub.yml -f compose.hub.public.yml --env-file .env.hub down -v    # destroys data
-```
-
-Terminating the instance and deleting the VCN returns the tenancy to its prior state. If the new-instance
-path created a reserved public IP, release it separately under **Networking → Reserved IPs**.
+The original pre-data provisioning draft treated rollback as disposal. That is no longer valid for the deployed
+staging environment. Do not run raw Compose `down`, do not delete volumes, and do not terminate the instance or
+network. Use [deploy/promote](deploy-promote.md) for automatic schema-compatible application rollback and
+[rollback](rollback.md) plus [backup/restore](backup-restore.md) for explicit recovery. Database restore is always
+to an isolated target first; never restore over the staging database.
 
 ---
 
