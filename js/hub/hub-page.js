@@ -869,7 +869,7 @@ async function pRenderAccountSessions () {
 					await api.pRevokeSession({sessionId: session.id, idempotencyKey: crypto.randomUUID()});
 					await pRenderAccountSessions();
 				} catch (error) {
-					renderError(error);
+					if (!isCampaignReloadRequired) renderError(error);
 					button.disabled = false;
 				}
 			});
@@ -1172,11 +1172,22 @@ async function pInitCampaign ({session}) {
 			void pRefreshLiveViews();
 		}, 250);
 	};
+	const reloadForAuthorityChange = () => {
+		if (isCampaignReloadRequired) return;
+		isCampaignReloadRequired = true;
+		if (refreshTimer != null) {
+			window.clearTimeout(refreshTimer);
+			refreshTimer = null;
+		}
+		realtime.close();
+		window.location.reload();
+	};
 	realtime.on("event", event => {
-		if (event.type === "campaign.archived") {
-			isCampaignReloadRequired = true;
-			realtime.close();
-			window.location.reload();
+		const isOwnRoleChange = event.type === "membership.role_changed"
+			&& event.payload?.accountId === session.account.id
+			&& event.payload?.role !== campaign.role;
+		if (event.type === "campaign.archived" || isOwnRoleChange) {
+			reloadForAuthorityChange();
 			return;
 		}
 		if (!isCampaignReloadRequired && navigator.onLine) {
@@ -1193,6 +1204,10 @@ async function pInitCampaign ({session}) {
 		queueLiveRefresh({isCampaignContextRefresh: event.type === "rules.activated"});
 	});
 	realtime.on("cursor", baseline => {
+		if (baseline?.membership?.role && baseline.membership.role !== campaign.role) {
+			reloadForAuthorityChange();
+			return;
+		}
 		if ((baseline?.cursor?.lastSequence || 0) >= liveLastSequence) {
 			liveLastSequence = baseline.cursor.lastSequence;
 		}

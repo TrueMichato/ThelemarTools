@@ -58,15 +58,20 @@ test("campaign overview remains role-aware across responsive day and night state
 	const playerContext = await browser.newContext(contextOptions);
 	const spectatorContext = await browser.newContext(contextOptions);
 	const pageErrors: string[] = [];
+	let archiveTransitionCampaignId: string | null = null;
+	const isExpectedArchiveReadFailure = (url: string) => archiveTransitionCampaignId != null
+		&& new URL(url).pathname.startsWith(`/api/campaigns/${archiveTransitionCampaignId}/`);
 	const watchErrors = (page: Page) => {
 		page.on("pageerror", error => pageErrors.push(error.message));
 		page.on("console", message => {
 			if (message.type() === "error") {
 				const source = message.location().url;
+				if (source && isExpectedArchiveReadFailure(source)) return;
 				pageErrors.push(source ? `${message.text()} (${source})` : message.text());
 			}
 		});
 		page.on("response", response => {
+			if (response.status() === 404 && isExpectedArchiveReadFailure(response.url())) return;
 			if (response.status() >= 400) pageErrors.push(`HTTP ${response.status()}: ${new URL(response.url()).pathname}`);
 		});
 	};
@@ -100,7 +105,17 @@ test("campaign overview remains role-aware across responsive day and night state
 		await player.createCharacter({campaignId, name: "Morrow Quill, Keeper of the Second Watch"});
 		await player.expectCampaignPrimaryAction({primaryAction: "character-choice"});
 		await spectator.createCharacter({campaignId, name: "Retained Watcher"});
+		await spectator.expectRoleAdaptiveCampaignOverview({
+			campaignId,
+			role: "player",
+			primaryAction: "character",
+			characterName: "Retained Watcher",
+		});
+		await expect(spectator.page.locator("#campaign-connection-status")).toHaveText("Live updates connected");
 		await dm.changeMemberRoleViaApi({campaignId, displayName: "Former Player Observer", role: "spectator"});
+		await expect(spectator.page.locator("#campaign-content")).toHaveAttribute("data-campaign-role", "spectator", {timeout: 15_000});
+		await spectator.expectCampaignPrimaryAction({primaryAction: "read-only"});
+		await expect(spectator.page.locator("#campaign-workbench")).toBeHidden();
 		for (let i = 1; i <= 6; ++i) {
 			await dm.createCharacter({campaignId, name: `Expedition Member ${i} with a Long Table Name`});
 		}
@@ -145,6 +160,8 @@ test("campaign overview remains role-aware across responsive day and night state
 			theme: "day",
 			viewport: {width: 390, height: 844},
 		});
+		// Archival intentionally invalidates any authorization-scoped reads already in flight.
+		archiveTransitionCampaignId = campaignId;
 		await dm.archiveCampaign(campaignId);
 		await player.expectRoleAdaptiveCampaignOverview({
 			campaignId,

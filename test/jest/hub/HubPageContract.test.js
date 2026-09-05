@@ -194,8 +194,11 @@ describe("campaign hub pages", () => {
 		// invalidation is coalesced into an authorization-scoped HTTP refetch.
 		expect(source).not.toContain("event.payload?.character");
 		expect(source).not.toContain("character.projection.updated");
-		expect(source).toContain('if (event.type === "campaign.archived")');
-		expect(source).toContain("window.location.reload()");
+		expect(source).toContain("const reloadForAuthorityChange = () =>");
+		expect(source).toContain('event.type === "membership.role_changed"');
+		expect(source).toContain("event.payload?.accountId === session.account.id");
+		expect(source).toContain("event.payload?.role !== campaign.role");
+		expect(source).toContain("baseline.membership.role !== campaign.role");
 		expect(source).toContain("if (isCampaignReloadRequired) return;");
 		expect(source).toContain("snapshotNxt.lastSequence >= liveLastSequence");
 		expect(source).toContain("liveEvents = [...liveEvents.filter");
