@@ -5126,6 +5126,24 @@ export class PostgresHubStore {
 		});
 	}
 
+	async _pCancelTransfersForLifecycle ({client, campaignId, affectedAccountId, characterIds, actorAccountId, reason}) {
+		const transfers = await client.query(`
+			SELECT *
+			FROM hub.transfers
+			WHERE campaign_id = $1 AND status = 'reserved'
+				AND (
+					actor_account_id = $2
+					OR source_character_id = ANY($3::uuid[])
+					OR target_character_id = ANY($3::uuid[])
+				)
+			ORDER BY id
+			FOR UPDATE
+		`, [campaignId, affectedAccountId, characterIds]);
+		for (const row of transfers.rows) {
+			await this._pCancelTransferForLifecycle({client, row, actorAccountId, reason});
+		}
+	}
+
 	async _pCancelSemanticOperationsForLifecycle ({
 		client,
 		campaignId,
@@ -5210,21 +5228,14 @@ export class PostgresHubStore {
 			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [characterId]);
 		}
 
-		const transfers = await client.query(`
-			SELECT *
-			FROM hub.transfers
-			WHERE campaign_id = $1 AND status = 'reserved'
-				AND (
-					actor_account_id = $2
-					OR source_character_id = ANY($3::uuid[])
-					OR target_character_id = ANY($3::uuid[])
-				)
-			ORDER BY id
-			FOR UPDATE
-		`, [campaignId, membership.accountId, characterIds]);
-		for (const row of transfers.rows) {
-			await this._pCancelTransferForLifecycle({client, row, actorAccountId, reason: "membership_lifecycle"});
-		}
+		await this._pCancelTransfersForLifecycle({
+			client,
+			campaignId,
+			affectedAccountId: membership.accountId,
+			characterIds,
+			actorAccountId,
+			reason: "membership_lifecycle",
+		});
 
 		const actions = await client.query(`
 			SELECT pa.*, c.owner_account_id AS target_owner_account_id
@@ -5347,6 +5358,14 @@ export class PostgresHubStore {
 					actorAccountId: accountId,
 					affectedAccountId: target.account_id,
 					characterIds: characters.rows.map(row => row.id),
+				});
+				await this._pCancelTransfersForLifecycle({
+					client,
+					campaignId,
+					affectedAccountId: target.account_id,
+					characterIds: characters.rows.map(row => row.id),
+					actorAccountId: accountId,
+					reason: "membership_role_changed",
 				});
 			}
 			const updated = await client.query(`UPDATE hub.memberships SET role = $2, updated_at = now() WHERE id = $1 RETURNING id, campaign_id, account_id, role, status`, [membershipId, role]);
@@ -5524,7 +5543,7 @@ export class PostgresHubStore {
 			const transferLookup = await client.query(`SELECT * FROM hub.transfers WHERE campaign_id = $1 AND id = $2 AND status = 'reserved'`, [campaignId, transferId]);
 			if (!transferLookup.rowCount) throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
 			const transferPre = this._getTransfer(transferLookup.rows[0]);
-			const membership = await this._pGetMembershipForUpdate({client, accountId, campaignId});
+			const membership = await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm", "player"]});
 			await this._pLockInventoryParticipants({client, ids: [transferPre.sourceId, transferPre.targetId]});
 			const transferResult = await client.query(`SELECT * FROM hub.transfers WHERE campaign_id = $1 AND id = $2 AND status = 'reserved' FOR UPDATE`, [campaignId, transferId]);
 			if (!transferResult.rowCount) throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});

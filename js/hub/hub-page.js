@@ -816,7 +816,7 @@ function initCampaignWorkbenchLinks () {
 		if (!targetId) return;
 		requestAnimationFrame(() => {
 			const target = document.getElementById(targetId);
-			(target?.matches("button, a, input, select, textarea") ? target : target?.querySelector("a, button, input, select, textarea"))?.focus();
+			(target?.matches("[tabindex], button, a, input, select, textarea") ? target : target?.querySelector("a, button, input, select, textarea"))?.focus();
 		});
 	});
 }
@@ -1128,6 +1128,7 @@ async function pInitCampaign ({session}) {
 				liveLastSequence = snapshotNxt.lastSequence;
 			}
 			renderCharacterList({campaignId, characters: charactersNxt});
+			applyCampaignRoleLayout({campaign, characters: charactersNxt});
 			renderPartyRoster({
 				campaignId,
 				characters: liveCharacters,
@@ -1142,6 +1143,7 @@ async function pInitCampaign ({session}) {
 				renderCampaignContext(context);
 				void rulesPolicyManagerPromise.then(manager => manager?.replaceContext(context));
 			}
+			if (isCampaignReloadRequired) return;
 			await Promise.all([
 				renderPendingActions({campaign, campaignId, session, targetCharacters: liveCharacters, members: membersNxt, roster: liveRoster}),
 				pRefreshTransferState({
@@ -1171,6 +1173,12 @@ async function pInitCampaign ({session}) {
 		}, 250);
 	};
 	realtime.on("event", event => {
+		if (event.type === "campaign.archived") {
+			isCampaignReloadRequired = true;
+			realtime.close();
+			window.location.reload();
+			return;
+		}
 		if (!isCampaignReloadRequired && navigator.onLine) {
 			liveLastSequence = Math.max(liveLastSequence, event.sequence || 0);
 			liveEvents = [...liveEvents.filter(existing => existing.id !== event.id), event]
@@ -1505,8 +1513,8 @@ function updateInboxCount ({kind, count}) {
 	const summary = document.getElementById("campaign-attention-summary");
 	if (summary) {
 		summary.textContent = total
-			? `${total} ${total === 1 ? "request needs" : "requests need"} a response.`
-			: "No requests need a response.";
+			? `${total} pending ${total === 1 ? "request" : "requests"}.`
+			: "No pending requests.";
 	}
 }
 
@@ -1581,8 +1589,9 @@ async function renderPendingTransfers ({campaign, campaignId, session, targetCha
 		const targetName = getContainerName({kind: transfer.targetKind, id: transfer.targetId, characters: targetCharacters});
 		text.textContent = `${sourceName} offers ${contents} to ${targetName}.`;
 		const target = transfer.targetKind === "character" ? getCharacterById(targetCharacters, transfer.targetId) : null;
-		const canAccept = isDm || getProjectionOwnerAccountId(target) === session.account.id;
-		const canReject = canAccept || transfer.actorAccountId === session.account.id;
+		const canAct = isDm || campaign.role === "player";
+		const canAccept = canAct && (isDm || getProjectionOwnerAccountId(target) === session.account.id);
+		const canReject = canAct && (canAccept || transfer.actorAccountId === session.account.id);
 		const meta = document.createElement("span");
 		meta.className = "hub-data-row__meta";
 		meta.textContent = canAccept

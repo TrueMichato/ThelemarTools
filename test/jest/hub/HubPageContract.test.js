@@ -151,6 +151,8 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("characterSetup.href = hasCharacterChoices ? \"#campaign-character-list\" : \"#campaign-upload-local\"");
 		expect(source).toContain("setHidden(characterSetup, campaign.status !== \"active\" || campaign.role !== \"player\" || playerCharacters.length === 1)");
 		expect(source).toContain("setHidden(readonlyPrimary, !isSpectator && campaign.status === \"active\")");
+		expect(source).toContain("renderCharacterList({campaignId, characters: charactersNxt});");
+		expect(source).toContain("applyCampaignRoleLayout({campaign, characters: charactersNxt});");
 		for (const id of [
 			"campaign-open-primary-character",
 			"campaign-open-character-setup",
@@ -166,7 +168,8 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("if (workbench) workbench.open = true");
 		expect(source).toContain("requestAnimationFrame(() => document.getElementById(targetId)?.querySelector(\"select, input, button\")?.focus())");
 		expect(source).toContain('document.getElementById("campaign-open-character-setup")?.addEventListener("click"');
-		expect(source).toContain('target?.querySelector("a, button, input, select, textarea")');
+		expect(source).toContain('target?.matches("[tabindex], button, a, input, select, textarea")');
+		expect(campaignHtml).toContain('id="campaign-character-list" class="hub-data-list hub-data-list--flush" tabindex="-1" aria-labelledby="campaign-character-title"');
 		expect(campaignHtml).toContain("href=\"#campaign-action-form\"");
 		expect(campaignHtml).toContain("href=\"#campaign-transfer-form\"");
 	});
@@ -176,7 +179,8 @@ describe("campaign hub pages", () => {
 		expect(campaignHtml).toContain("id=\"campaign-attention-summary\"");
 		expect(campaignHtml).toContain("data-attention=\"clear\"");
 		expect(source).toContain("panel.dataset.attention = total ? \"pending\" : \"clear\"");
-		expect(source).toContain("requests need");
+		expect(source).toContain("pending ${total === 1 ? \"request\" : \"requests\"}");
+		expect(source).toContain("const canAct = isDm || campaign.role === \"player\"");
 		expect(scss).toContain(".hub-campaign-attention[data-attention=\"pending\"] .hub-count");
 	});
 
@@ -190,6 +194,9 @@ describe("campaign hub pages", () => {
 		// invalidation is coalesced into an authorization-scoped HTTP refetch.
 		expect(source).not.toContain("event.payload?.character");
 		expect(source).not.toContain("character.projection.updated");
+		expect(source).toContain('if (event.type === "campaign.archived")');
+		expect(source).toContain("window.location.reload()");
+		expect(source).toContain("if (isCampaignReloadRequired) return;");
 		expect(source).toContain("snapshotNxt.lastSequence >= liveLastSequence");
 		expect(source).toContain("liveEvents = [...liveEvents.filter");
 		expect(source).toContain("renderRecentActivity({events: liveEvents");
@@ -366,7 +373,7 @@ describe("campaign hub pages", () => {
 		const source = read("js/hub/hub-page.js");
 		expect(source).toMatch(/^async function renderPendingTransfers/m);
 		expect(source.indexOf("async function renderPendingTransfers")).toBeLessThan(source.indexOf("async function pInitCampaignForms"));
-		expect(source).toContain("const canReject = canAccept || transfer.actorAccountId === session.account.id");
+		expect(source).toContain("const canReject = canAct && (canAccept || transfer.actorAccountId === session.account.id)");
 		expect(source).toContain("canAccept ? \"Reject\" : \"Cancel\"");
 	});
 

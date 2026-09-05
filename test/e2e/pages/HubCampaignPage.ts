@@ -134,6 +134,29 @@ export class HubCampaignPage {
 			await expect(this.page.locator("#campaign-attention-summary")).toHaveText(/request/);
 		} else await expect(this.page.locator("#campaign-inbox-panel")).toBeHidden();
 
+		await this.expectCampaignPrimaryAction({primaryAction, characterName});
+
+		const workbench = this.page.locator("#campaign-workbench");
+		if (primaryAction === "read-only") {
+			await expect(workbench).toBeHidden();
+			return;
+		}
+		await expect(workbench).not.toHaveAttribute("open", "");
+		const summary = workbench.locator(":scope > summary");
+		await summary.focus();
+		await summary.press("Enter");
+		await expect(workbench).toHaveAttribute("open", "");
+		await summary.press("Enter");
+		await expect(workbench).not.toHaveAttribute("open", "");
+	}
+
+	async expectCampaignPrimaryAction ({
+		primaryAction,
+		characterName,
+	}: {
+		primaryAction: CampaignPrimaryAction;
+		characterName?: string;
+	}): Promise<void> {
 		const primarySelectors: Record<CampaignPrimaryAction, string> = {
 			dm: "#campaign-open-dm-screen",
 			character: "#campaign-open-primary-character",
@@ -141,7 +164,7 @@ export class HubCampaignPage {
 			"character-choice": "#campaign-open-character-setup",
 			"read-only": "#campaign-primary-readonly",
 		};
-		await expect(this.page.locator(primarySelectors[primaryAction])).toBeVisible();
+		await expect(this.page.locator(primarySelectors[primaryAction])).toBeVisible({timeout: 15_000});
 		const visiblePrimaryCount = await this.page.locator(Object.values(primarySelectors).join(", ")).evaluateAll(elements =>
 			elements.filter(element => (element as HTMLElement).getClientRects().length > 0).length,
 		);
@@ -162,21 +185,8 @@ export class HubCampaignPage {
 			await expect(chooser).toHaveText("Choose a character");
 			await expect(chooser).toHaveAttribute("href", "#campaign-character-list");
 			await chooser.click();
-			await expect(this.page.locator("#campaign-character-list a").first()).toBeFocused();
+			await expect(this.page.locator("#campaign-character-list")).toBeFocused();
 		}
-
-		const workbench = this.page.locator("#campaign-workbench");
-		if (primaryAction === "read-only") {
-			await expect(workbench).toBeHidden();
-			return;
-		}
-		await expect(workbench).not.toHaveAttribute("open", "");
-		const summary = workbench.locator(":scope > summary");
-		await summary.focus();
-		await summary.press("Enter");
-		await expect(workbench).toHaveAttribute("open", "");
-		await summary.press("Enter");
-		await expect(workbench).not.toHaveAttribute("open", "");
 	}
 
 	async expectOfflineReconnectPosture (campaignId: string): Promise<void> {

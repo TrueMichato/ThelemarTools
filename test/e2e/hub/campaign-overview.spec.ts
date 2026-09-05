@@ -86,8 +86,19 @@ test("campaign overview remains role-aware across responsive day and night state
 		const spectatorInvite = await dm.createInviteViaApi(campaignId, "player");
 		await player.redeemInviteTokenViaApi(playerInvite);
 		await spectator.redeemInviteTokenViaApi(spectatorInvite);
+		await player.expectRoleAdaptiveCampaignOverview({
+			campaignId,
+			role: "player",
+			primaryAction: "character-setup",
+		});
+		await expect(player.page.locator("#campaign-connection-status")).toHaveText("Live updates connected");
 		await player.createCharacter({campaignId, name: "Rowan of the Far-Wandering Lantern"});
+		await player.expectCampaignPrimaryAction({
+			primaryAction: "character",
+			characterName: "Rowan of the Far-Wandering Lantern",
+		});
 		await player.createCharacter({campaignId, name: "Morrow Quill, Keeper of the Second Watch"});
+		await player.expectCampaignPrimaryAction({primaryAction: "character-choice"});
 		await spectator.createCharacter({campaignId, name: "Retained Watcher"});
 		await dm.changeMemberRoleViaApi({campaignId, displayName: "Former Player Observer", role: "spectator"});
 		for (let i = 1; i <= 6; ++i) {

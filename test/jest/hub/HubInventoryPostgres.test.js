@@ -555,4 +555,64 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			expect.objectContaining({item: {name: `${prefix} contention ration`, source: "PHB", weight: 0.1}, quantity: 9}),
 		]);
 	});
+
+	test("cancels reserved transfers on spectator downgrade and rejects later resolution", async () => {
+		const source = (await store.pCreateCharacter({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			data: {name: `${prefix} role source`, inventory: [], currency: {gp: 4}},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const target = (await store.pCreateCharacter({
+			accountId: observer.id,
+			campaignId: campaign.id,
+			data: {name: `${prefix} role target`, inventory: [], currency: {}},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const reserved = (await store.pProposeTransfer({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: source.id,
+			targetKind: "character",
+			targetId: target.id,
+			payload: {currency: {gp: 2}},
+			idempotencyKey: crypto.randomUUID(),
+		})).transfer;
+		const membership = await store.pGetMembership({accountId: observer.id, campaignId: campaign.id});
+
+		await store.pChangeMemberRole({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			membershipId: membership.id,
+			role: "spectator",
+			idempotencyKey: crypto.randomUUID(),
+		});
+
+		expect((await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === reserved.id).status).toBe("cancelled");
+		expect((await pReadCharacter(dm.id, source.id)).data.currency.gp).toBe(4);
+
+		const afterDowngrade = (await store.pProposeTransfer({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: source.id,
+			targetKind: "character",
+			targetId: target.id,
+			payload: {currency: {gp: 1}},
+			idempotencyKey: crypto.randomUUID(),
+		})).transfer;
+		await expect(store.pResolveTransfer({
+			accountId: observer.id,
+			campaignId: campaign.id,
+			transferId: afterDowngrade.id,
+			decision: "accept",
+			idempotencyKey: crypto.randomUUID(),
+		})).rejects.toMatchObject({code: "FORBIDDEN"});
+	});
 });
