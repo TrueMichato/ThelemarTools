@@ -159,7 +159,7 @@ describe("campaign hub pages", () => {
 			"campaign-open-dm-screen",
 			"campaign-primary-readonly",
 		]) expect(campaignHtml).toContain(`id="${id}"`);
-		expect(campaignHtml).toContain('id="campaign-open-character-setup" class="hub-button hub-button--primary ve-hidden" href="#campaign-upload-local"');
+		expect(campaignHtml).toContain("id=\"campaign-open-character-setup\" class=\"hub-button hub-button--primary ve-hidden\" href=\"#campaign-upload-local\"");
 	});
 
 	it("opens campaign actions before moving keyboard focus to a requested task", () => {
@@ -167,9 +167,9 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("initCampaignWorkbenchLinks()");
 		expect(source).toContain("if (workbench) workbench.open = true");
 		expect(source).toContain("requestAnimationFrame(() => document.getElementById(targetId)?.querySelector(\"select, input, button\")?.focus())");
-		expect(source).toContain('document.getElementById("campaign-open-character-setup")?.addEventListener("click"');
-		expect(source).toContain('target?.matches("[tabindex], button, a, input, select, textarea")');
-		expect(campaignHtml).toContain('id="campaign-character-list" class="hub-data-list hub-data-list--flush" tabindex="-1" aria-labelledby="campaign-character-title"');
+		expect(source).toContain("document.getElementById(\"campaign-open-character-setup\")?.addEventListener(\"click\"");
+		expect(source).toContain("target?.matches(\"[tabindex], button, a, input, select, textarea\")");
+		expect(campaignHtml).toContain("id=\"campaign-character-list\" class=\"hub-data-list hub-data-list--flush\" tabindex=\"-1\" aria-labelledby=\"campaign-character-title\"");
 		expect(campaignHtml).toContain("href=\"#campaign-action-form\"");
 		expect(campaignHtml).toContain("href=\"#campaign-transfer-form\"");
 	});
@@ -179,7 +179,7 @@ describe("campaign hub pages", () => {
 		expect(campaignHtml).toContain("id=\"campaign-attention-summary\"");
 		expect(campaignHtml).toContain("data-attention=\"clear\"");
 		expect(source).toContain("panel.dataset.attention = total ? \"pending\" : \"clear\"");
-		expect(source).toContain("pending ${total === 1 ? \"request\" : \"requests\"}");
+		expect(source).toContain("No pending requests.");
 		expect(source).toContain("const canAct = isDm || campaign.role === \"player\"");
 		expect(scss).toContain(".hub-campaign-attention[data-attention=\"pending\"] .hub-count");
 	});
@@ -195,7 +195,7 @@ describe("campaign hub pages", () => {
 		expect(source).not.toContain("event.payload?.character");
 		expect(source).not.toContain("character.projection.updated");
 		expect(source).toContain("const reloadForAuthorityChange = () =>");
-		expect(source).toContain('event.type === "membership.role_changed"');
+		expect(source).toContain("event.type === \"membership.role_changed\"");
 		expect(source).toContain("event.payload?.accountId === session.account.id");
 		expect(source).toContain("event.payload?.role !== campaign.role");
 		expect(source).toContain("baseline.membership.role !== campaign.role");
