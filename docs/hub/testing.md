@@ -206,8 +206,9 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   retention, inverted local fallback, pinned-campaign reselection loss, Character Sheet save-fence removal,
   and DM workspace save-fence removal) plus six rules-policy mutants (strict historical diffs, missing
   encumbrance dependency, stale reconnect loads, editable busy controls, terminal access-lock loss, and hidden
-  optional-chunk failure) and four content-policy mutants (source bypass, edition bypass, grandfather-delta
-  bypass, and invalid-identity fail-open).
+  optional-chunk failure) and twelve content-policy mutants (candidate/source/edition bypasses, canonical identity
+  and grandfather-delta mistakes, official-source spoofing, feature-level fencing, context teardown/access-loss,
+  policy-version fencing, and refresh-time custom-content fail-open).
   It never rewrites the working tree.
 - `test/e2e/hub/active-campaign-context.spec.ts` runs against the disposable exact-image HTTPS/PostgreSQL stack,
   including real `localStorage`, `BroadcastChannel`, Character Sheet, DM Screen, membership, archive, and BFCache

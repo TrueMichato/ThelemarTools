@@ -265,6 +265,16 @@ describe("Campaign content policy evaluator", () => {
 	it("includes active campaign brew sources and merged species variants in the publication catalog", async () => {
 		const generated = await pGetCampaignContentCatalog();
 		expect(generated).toEqual(await pBuildCampaignContentSiteCatalog());
+		expect(generated.sources).toEqual(expect.arrayContaining(["COMCRAF", "Arcadia11", "CaBoMP", "TGTT", "TGTT-2024"]));
+		expect(generated.species).toContain("Nyuidj|TGTT");
+		expect(generated.sourceEditions).toEqual(expect.objectContaining({
+			COMCRAF: "2014",
+			Arcadia11: "2014",
+			CaBoMP: "2024",
+			TGTT: "2024",
+			"TGTT-2014": "2014",
+			"TGTT-2024": "2024",
+		}));
 
 		const catalog = await pGetCampaignContentCatalog({
 			brewBundle: {
@@ -316,6 +326,25 @@ describe("Campaign content policy evaluator", () => {
 			},
 		})).rejects.toEqual(expect.objectContaining({code: "BREW_INVALID"}));
 	});
+
+	it("reuses a content-addressed campaign catalog without traversing the bundle again", async () => {
+		const brewBundle = {
+			id: crypto.randomUUID(),
+			contentHash: "a".repeat(64),
+			content: [{
+				body: {
+					_meta: {sources: [{json: "CACHE", abbreviation: "CACHE", full: "Cache"}]},
+					feat: [{name: "Cached feat", source: "CACHE"}],
+				},
+			}],
+		};
+		const first = await pGetCampaignContentCatalog({brewBundle});
+		Object.defineProperty(brewBundle, "content", {
+			get: () => { throw new Error("cached campaign brew was traversed twice"); },
+		});
+
+		expect(await pGetCampaignContentCatalog({brewBundle})).toEqual(first);
+	});
 });
 
 describe("Memory campaign content enforcement", () => {
@@ -335,6 +364,28 @@ describe("Memory campaign content enforcement", () => {
 			name: "Content policy",
 			idempotencyKey: crypto.randomUUID(),
 		})).campaign;
+	});
+
+	it("admits repository-bundled and generated character content before a restrictive policy exists", async () => {
+		const character = (await store.pCreateCharacter({
+			accountId: account.id,
+			campaignId: campaign.id,
+			data: {
+				name: "Bundled content",
+				race: {name: "Nyuidj", source: "TGTT"},
+				inventory: [{
+					id: "crafting-material",
+					item: {name: "Aarakocra Feathers", source: "COMCRAF"},
+					quantity: 1,
+				}],
+			},
+			schemaVersion: 1,
+			clientImportId: "bundled-content",
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+
+		expect(character.data.race.source).toBe("TGTT");
+		expect(character.data.inventory[0].item.source).toBe("COMCRAF");
 	});
 
 	it("rejects invalid brew before create or historical activation side effects", async () => {

@@ -52,7 +52,7 @@ import {CharacterSheetPeerTargeting} from "./charactersheet-peer-targeting.js";
 import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js";
 import {getCharacterSaveFence, isCharacterSaveFenceCurrent} from "./charactersheet-persistence-fence.js";
 import {diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
-import {filterCampaignContentEntities, getCampaignContentPolicy} from "../hub/hub-content-policy.js";
+import {filterCampaignContentEntities, getCampaignContentPolicy, getCampaignEntityUid} from "../hub/hub-content-policy.js";
 import {
 	getClearedCampaignRulesState,
 	getCampaignSettingsOverlayFromRulesVersion,
@@ -20079,8 +20079,8 @@ class CharacterSheetPage {
 	}
 
 	isCampaignContentEntityAllowed (entity) {
+		if (this._isHubContextRefreshing || this._isHubContextUnavailable || this._isHubContextRevalidationRequired) return false;
 		if (!this._hubContext) return true;
-		if (this._isHubContextRefreshing || this._isHubContextUnavailable) return false;
 		return !!filterCampaignContentEntities({
 			contentPolicy: getCampaignContentPolicy(this._hubContext.rulesVersion?.contentPolicy),
 			entities: [entity],
@@ -20088,6 +20088,15 @@ class CharacterSheetPage {
 			availableSpecies: this._hubContext.contentCatalog?.species,
 			sourceEditions: this._hubContext.contentCatalog?.sourceEditions,
 		}).length;
+	}
+
+	isCampaignContentMutationAllowed ({before = null, after}) {
+		if (this._isHubContextRefreshing || this._isHubContextUnavailable || this._isHubContextRevalidationRequired) return false;
+		if (!this._hubContext) return true;
+		const beforeUid = before ? getCampaignEntityUid(before) : null;
+		const afterUid = getCampaignEntityUid(after);
+		if (beforeUid && afterUid && beforeUid.toLowerCase() === afterUid.toLowerCase()) return true;
+		return this.isCampaignContentEntityAllowed(after);
 	}
 
 	/**

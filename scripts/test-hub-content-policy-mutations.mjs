@@ -233,6 +233,17 @@ async function probeAccessLossTeardown (variant) {
 	assert.equal(teardownCalls, 1, "realtime access loss skipped authoritative campaign teardown");
 }
 
+async function probeEntityMutationRefreshFence (variant) {
+	const source = await fs.readFile(path.join(variant.root, "js/charactersheet/charactersheet.js"), "utf8");
+	const gateStart = source.indexOf("\tisCampaignContentEntityAllowed (");
+	const failClosed = source.indexOf(
+		"\t\tif (this._isHubContextRefreshing || this._isHubContextUnavailable || this._isHubContextRevalidationRequired) return false;",
+		gateStart,
+	);
+	const localFallback = source.indexOf("\t\tif (!this._hubContext) return true;", gateStart);
+	assert.ok(gateStart >= 0 && failClosed > gateStart && localFallback > failClosed, "a missing context failed open before campaign policy revalidation was fenced");
+}
+
 const MUTANTS = [
 	{
 		name: "picker-filter-bypassed",
@@ -341,6 +352,16 @@ const MUTANTS = [
 			"server/src/campaign-content-policy.js": source => source.replace(
 				"\tif (rulesVersionId === activeRulesVersionId) return;",
 				"\treturn;",
+			),
+		},
+	},
+	{
+		name: "custom-content-refresh-fence-disabled",
+		probe: probeEntityMutationRefreshFence,
+		mutations: {
+			"js/charactersheet/charactersheet.js": source => source.replace(
+				"\t\tif (this._isHubContextRefreshing || this._isHubContextUnavailable || this._isHubContextRevalidationRequired) return false;\n\t\tif (!this._hubContext) return true;",
+				"\t\tif (!this._hubContext) return true;\n\t\tif (this._isHubContextRefreshing || this._isHubContextUnavailable || this._isHubContextRevalidationRequired) return false;",
 			),
 		},
 	},

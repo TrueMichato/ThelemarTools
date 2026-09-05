@@ -8270,6 +8270,14 @@ class CharacterSheetBuilder {
 	}
 
 	_isCampaignCustomBackgroundAllowed (background) {
+		if (
+			this._page._isHubContextRefreshing
+			|| this._page._isHubContextUnavailable
+			|| this._page._isHubContextRevalidationRequired
+		) return false;
+		if (this._page.isCampaignContentMutationAllowed) {
+			return !!this._page.isCampaignContentMutationAllowed({after: background});
+		}
 		if (!this._page._hubContext) return true;
 		return !!this._page.isCampaignContentEntityAllowed?.(background);
 	}

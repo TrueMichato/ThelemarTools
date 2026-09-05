@@ -136,6 +136,7 @@ class CharacterSheetCrafting {
 	 */
 	_addMaterialToInventory (material, quantity) {
 		const key = CharacterSheetState.normaliseMaterialKey(material.name);
+		const item = this._getHarvestedMaterialItem(material);
 
 		// Match the exact part first, then any other stack that is itself a crafting material —
 		// which is what lets "Aboleth Eye" and "Aboleth Eye (1 lb)" from two books share a pile.
@@ -146,13 +147,20 @@ class CharacterSheetCrafting {
 		const candidates = this._state.getInventory().filter(inv => CharacterSheetState.normaliseMaterialKey(inv.item?.name) === key);
 		const existing = candidates.find(inv => inv.item?.name === material.name)
 			|| candidates.find(inv => inv.item?._isCraftingMaterial);
+		if (!this._isCampaignItemMutationAllowed({after: item})) return null;
 
 		if (existing) {
 			this._state.setItemQuantity(existing.id, (existing.quantity || 1) + quantity);
 			return existing;
 		}
 
-		this._state.addItem({
+		this._state.addItem(item, quantity);
+
+		return this._state.getInventory().find(inv => inv.item?.name === material.name) || null;
+	}
+
+	_getHarvestedMaterialItem (material) {
+		return {
 			name: material.name,
 			source: material.source,
 			type: "G",
@@ -162,9 +170,20 @@ class CharacterSheetCrafting {
 			entries: material.entries || [],
 			_isCraftingMaterial: true,
 			...(material.variantComponent ? {variantComponent: material.variantComponent} : {}),
-		}, quantity);
+		};
+	}
 
-		return this._state.getInventory().find(inv => inv.item?.name === material.name) || null;
+	_isCampaignItemMutationAllowed ({before = null, after}) {
+		if (this._page?._inventory?._isCampaignItemMutationAllowed) {
+			return this._page._inventory._isCampaignItemMutationAllowed({before, after});
+		}
+		if (
+			this._page?._isHubContextRefreshing
+			|| this._page?._isHubContextUnavailable
+			|| this._page?._isHubContextRevalidationRequired
+		) return false;
+		if (!this._page?._hubContext) return true;
+		return !!this._page.isCampaignContentMutationAllowed?.({before, after});
 	}
 
 	/** How many of a material the character currently carries. */
@@ -462,6 +481,8 @@ class CharacterSheetCrafting {
 	async pRollHarvest (material) {
 		const dc = material.harvest?.dc;
 		if (dc == null) return;
+		const prospectiveItem = this._getHarvestedMaterialItem(material);
+		if (!this._isCampaignItemMutationAllowed({after: prospectiveItem})) return;
 
 		if (!await this._pConfirmHarvestStake(material, dc)) return;
 
@@ -478,7 +499,7 @@ class CharacterSheetCrafting {
 		}
 
 		const quantity = this._rollQuantity(material.harvest);
-		this._addMaterialToInventory(material, quantity);
+		if (!this._addMaterialToInventory(material, quantity)) return;
 
 		this._page.saveCharacter();
 		this._page._inventory?.render?.();
@@ -910,6 +931,7 @@ class CharacterSheetCrafting {
 	 * the Scribe Spell modal's three-way shape — do it, do it anyway, or back out.
 	 */
 	async pCommitCraft (recipe, status) {
+		if (!this._isCampaignItemMutationAllowed({after: this._getCraftedItem(recipe)})) return;
 		const settings = this._state.getSettings() || {};
 		const advisory = this._getCrafterAdvisory(recipe.crafter);
 		const rarityAdvisory = this._getRarityAdvisory(recipe.rarity);
@@ -977,9 +999,11 @@ class CharacterSheetCrafting {
 		});
 
 		if (choice === "cancel") return;
+		const craftedItem = this._getCraftedItem(recipe, {material: materialRef});
+		if (!this._isCampaignItemMutationAllowed({after: craftedItem})) return;
 
 		const ledger = this._consumeIngredients(status.ingredients);
-		this._addCraftedItem(recipe, {material: materialRef});
+		this._state.addItem(craftedItem, 1);
 
 		this._page.saveCharacter();
 		this._page._inventory?.render?.();
@@ -1055,6 +1079,7 @@ class CharacterSheetCrafting {
 	async pCookDish (recipe, status) {
 		const dc = recipe.craftDC;
 		if (dc == null) return this.pCommitCraft(recipe, status);
+		if (!this._isCampaignItemMutationAllowed({after: this._getCookedDishItem(recipe, "success")})) return;
 
 		const settings = this._state.getSettings() || {};
 
@@ -1104,9 +1129,12 @@ class CharacterSheetCrafting {
 
 		const tier = this.constructor.getCookTier(result, dc);
 		const outcome = this.constructor.getCookOutcome(recipe, tier);
+		const cookedItem = this._getCookedDishItem(recipe, tier);
+		if (!this._isCampaignItemMutationAllowed({after: cookedItem})) return;
 
 		const ledger = this._consumeIngredients(status.ingredients);
-		const dishName = this._addCookedDish(recipe, tier);
+		this._state.addItem(cookedItem, 1);
+		const dishName = cookedItem.name;
 		this._page.saveCharacter();
 		this._page._inventory?.render?.();
 
@@ -1139,12 +1167,19 @@ class CharacterSheetCrafting {
 	 * @returns {string} The name it went in under, so an undo can find it again.
 	 */
 	_addCookedDish (recipe, tier) {
+		const item = this._getCookedDishItem(recipe, tier);
+		if (!this._isCampaignItemMutationAllowed({after: item})) return null;
+		this._state.addItem(item, 1);
+		return item.name;
+	}
+
+	_getCookedDishItem (recipe, tier) {
 		const label = this.constructor._COOK_TIER_LABELS[tier] || "Success";
 		const name = `${recipe.name} (${label})`;
 		const real = (this._page.getItems() || []).find(it => it.name === recipe.name && it.source === recipe.source);
 		const benefits = this.constructor.getCookedBenefitEntries(recipe, tier);
 
-		this._state.addItem({
+		return {
 			name,
 			source: recipe.source,
 			type: Parser.ITM_TYP_ABV__FOOD_AND_DRINK,
@@ -1156,9 +1191,7 @@ class CharacterSheetCrafting {
 				...(benefits.length ? benefits : [{type: "entries", name: `${label}:`, entries: ["No recorded benefit."]}]),
 			],
 			cookedTier: tier,
-		}, 1);
-
-		return name;
+		};
 	}
 
 	/**
@@ -1421,6 +1454,13 @@ class CharacterSheetCrafting {
 	 * @param {{name: string, source: string}|null} [opts.material] Material chosen at the workbench.
 	 */
 	_addCraftedItem (recipe, {material = null} = {}) {
+		const item = this._getCraftedItem(recipe, {material});
+		if (!this._isCampaignItemMutationAllowed({after: item})) return null;
+		this._state.addItem(item, 1);
+		return item;
+	}
+
+	_getCraftedItem (recipe, {material = null} = {}) {
 		const real = (this._page.getItems() || []).find(it => it.name === recipe.name && it.source === recipe.source);
 
 		const base = real ? {...real} : {
@@ -1437,7 +1477,7 @@ class CharacterSheetCrafting {
 		base._craftedFrom = {recipe: recipe.name, source: recipe.source, ...(material ? {material} : {})};
 		if (material) base.material = material;
 
-		this._state.addItem(base, 1);
+		return base;
 	}
 
 	/**

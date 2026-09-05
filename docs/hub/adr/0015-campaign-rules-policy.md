@@ -166,9 +166,11 @@ metadata fail publication or a newly governed choice rather than being guessed.
 
 Source IDs are case-insensitive after canonicalization. `PHB14`/`PHB2014`, `DMG14`/`DMG2014`, and
 `MM14`/`MM2014` canonicalize to `PHB`, `DMG`, and `MM`; their 2024 counterparts canonicalize to `XPHB`,
-`XDMG`, and `XMM`. TGTT edition aliases canonicalize to `TGTT-2014` or `TGTT-2024`. A homebrew source is
-available only when it is in the active immutable campaign brew bundle, and it is permitted only when its
-canonical source is also allowed. Personal brew that is not in that bundle never widens campaign policy.
+`XDMG`, and `XMM`. TGTT edition aliases canonicalize to `TGTT-2014` or `TGTT-2024`. Repository-bundled
+content listed by the local `homebrew/index.json`, plus generated character-facing crafting data, is part of
+the versioned site catalog. Any other homebrew source is available only when it is in the active immutable
+campaign brew bundle, and it is permitted only when its canonical source is also allowed. Personal brew that
+is neither bundled site content nor in that campaign bundle never widens campaign policy.
 
 Species identity is the canonical case-insensitive `name|source` UID. Merged subraces use the parent source;
 named subraces/variants remain distinct, and unnamed runtime bases normalize to the generated `(Base)` identity
@@ -194,6 +196,8 @@ Campaign brew availability does not imply policy permission. Campaign sources pa
 make absent content available. Brew bundle shape/security validation and authoritative content-catalog validation
 run before a bundle is stored. Activation repeats both checks inside the store transaction so a historical bundle
 which has become incompatible cannot change the active pointer or produce an audit, event, outbox row, or receipt.
+Merged campaign catalogs use case-insensitive source indexes and a bounded content-hash cache, so repeated context
+reads and writes do not synchronously re-walk the active immutable bundle.
 
 Intrinsic dependencies and automatic grants retain provenance in reports, but client-supplied provenance is
 never an authorization bypass. The complete newly introduced delta must comply. Candidate projections may keep

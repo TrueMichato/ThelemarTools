@@ -13,10 +13,14 @@ import {getCampaignRulesContentPolicy} from "../../js/hub/hub-campaign-rules.js"
 import {HubStoreError} from "./hub-store-error.js";
 
 const _DATA_ROOT = fileURLToPath(new URL("../../data/", import.meta.url));
+const _LOCAL_BREW_ROOT = fileURLToPath(new URL("../../homebrew/", import.meta.url));
+const _LOCAL_BREW_INDEX_PATH = fileURLToPath(new URL("../../homebrew/index.json", import.meta.url));
 const _SITE_CATALOG_PATH = fileURLToPath(new URL("../data/campaign-content-site-catalog.json", import.meta.url));
 const _ROOT_CONTENT_FILES = [
 	"backgrounds.json",
+	"crafting.json",
 	"feats.json",
+	"homecrafts.json",
 	"items-base.json",
 	"items.json",
 	"items-variant-components-ar8.json",
@@ -24,8 +28,21 @@ const _ROOT_CONTENT_FILES = [
 	"optionalfeatures.json",
 	"races.json",
 ];
-const _SOURCE_EDITION_OVERRIDES = Object.freeze({Ar8: "2014"});
+const _SOURCE_EDITION_OVERRIDES = Object.freeze({
+	Ar8: "2014",
+	Arcadia11: "2014",
+	COMCRAF: "2014",
+	HHbH: "2014",
+	HHHVI: "2014",
+	HHHVII: "2014",
+	HHHVIII: "2014",
+	TGTT: "2024",
+	"TGTT-2014": "2014",
+	"TGTT-2024": "2024",
+});
+const _MAX_CAMPAIGN_CATALOG_CACHE_ENTRIES = 64;
 let _siteCatalogPromise = null;
+const _campaignCatalogCache = new Map();
 
 function walk (value, fnVisit) {
 	if (Array.isArray(value)) {
@@ -47,7 +64,11 @@ function addDocumentToCatalog (catalog, document, {
 	fnGetSourceEdition = null,
 	defaultEdition = null,
 	protectedSources = null,
+	protectedSourceIdsByLower = null,
 } = {}) {
+	catalog.sourceIdsByLower ||= new Map([...catalog.sources].map(source => [source.toLowerCase(), source]));
+	const protectedIdsByLower = protectedSourceIdsByLower
+		|| (protectedSources && new Map([...protectedSources].map(source => [source.toLowerCase(), source])));
 	const documentEdition = getEdition(document?._meta?.edition);
 	const addSource = (value, {metadata = null, isDeclaration = false} = {}) => {
 		const id = canonicalizeCampaignSourceId(value);
@@ -56,21 +77,21 @@ function addDocumentToCatalog (catalog, document, {
 			|| fnGetSourceEdition?.(id)
 			|| documentEdition
 			|| defaultEdition;
-		const protectedId = protectedSources && [...protectedSources]
-			.find(source => source.toLowerCase() === id.toLowerCase());
+		const protectedId = protectedIdsByLower?.get(id.toLowerCase());
 		if (protectedId) {
 			if (isDeclaration) {
 				throw new HubStoreError("BREW_INVALID", `Campaign homebrew cannot redeclare an official source.`);
 			}
 			return protectedId;
 		}
-		const existingId = [...catalog.sources].find(source => source.toLowerCase() === id.toLowerCase());
+		const existingId = catalog.sourceIdsByLower.get(id.toLowerCase());
 		const canonicalId = existingId || id;
 		const existingEdition = catalog.sourceEditions.get(canonicalId);
 		if (protectedSources && existingEdition && edition && existingEdition !== edition) {
 			throw new HubStoreError("BREW_INVALID", `Campaign homebrew contains conflicting editions for one source.`);
 		}
 		catalog.sources.add(canonicalId);
+		catalog.sourceIdsByLower.set(canonicalId.toLowerCase(), canonicalId);
 		if (edition) catalog.sourceEditions.set(canonicalId, edition);
 		return canonicalId;
 	};
@@ -87,7 +108,9 @@ function addDocumentToCatalog (catalog, document, {
 		return `${match[1]}(${match[2].slice(1, -1)}; ${subraceName})`;
 	};
 	const addSpecies = (name, source) => {
-		const uid = canonicalizeCampaignSpeciesUid(`${name || ""}|${source || ""}`);
+		const canonicalSource = addSource(source);
+		if (!canonicalSource) return;
+		const uid = canonicalizeCampaignSpeciesUid(`${name || ""}|${canonicalSource}`);
 		if (uid) catalog.species.add(uid);
 	};
 	const addVersions = entity => {
@@ -146,17 +169,22 @@ async function pReadJson (path) {
 export async function pBuildCampaignContentSiteCatalog () {
 	await import("../../js/parser.js");
 	const threshold = new Date(globalThis.Parser.sourceJsonToDate(globalThis.Parser.SRC_XPHB));
-	const catalog = {sources: new Set(), species: new Set(), sourceEditions: new Map()};
+	const catalog = {sources: new Set(), species: new Set(), sourceEditions: new Map(), sourceIdsByLower: new Map()};
 	const classFiles = (await readdir(`${_DATA_ROOT}/class`))
 		.filter(name => /^class-.*\.json$/.test(name))
 		.map(name => `${_DATA_ROOT}/class/${name}`);
 	const spellFiles = (await readdir(`${_DATA_ROOT}/spells`))
 		.filter(name => /^spells-.*\.json$/.test(name))
 		.map(name => `${_DATA_ROOT}/spells/${name}`);
+	const localBrewIndex = await pReadJson(_LOCAL_BREW_INDEX_PATH);
+	const localBrewFiles = (localBrewIndex?.toImport || [])
+		.filter(name => typeof name === "string" && /^[^/\\]+\.json$/i.test(name))
+		.map(name => `${_LOCAL_BREW_ROOT}/${name}`);
 	const documents = await Promise.all([
 		..._ROOT_CONTENT_FILES.map(name => pReadJson(`${_DATA_ROOT}/${name}`)),
 		...classFiles.map(pReadJson),
 		...spellFiles.map(pReadJson),
+		...localBrewFiles.map(pReadJson),
 	]);
 	for (const document of documents) {
 		addDocumentToCatalog(catalog, document, {
@@ -166,6 +194,7 @@ export async function pBuildCampaignContentSiteCatalog () {
 				if (!date) return null;
 				return new Date(date) < threshold ? "2014" : "2024";
 			},
+			defaultEdition: "2014",
 		});
 	}
 	return {
@@ -193,6 +222,7 @@ async function pGetSiteCatalog () {
 				sources: new Set(generated.sources),
 				species: new Set(generated.species),
 				sourceEditions: new Map(Object.entries(generated.sourceEditions)),
+				sourceIdsByLower: new Map(generated.sources.map(source => [source.toLowerCase(), source])),
 			};
 		})();
 	}
@@ -201,24 +231,53 @@ async function pGetSiteCatalog () {
 		sources: new Set(catalog.sources),
 		species: new Set(catalog.species),
 		sourceEditions: new Map(catalog.sourceEditions),
+		sourceIdsByLower: new Map(catalog.sourceIdsByLower),
 	};
 }
 
-export async function pGetCampaignContentCatalog ({brewBundle = null} = {}) {
-	const catalog = await pGetSiteCatalog();
-	const protectedSources = new Set(catalog.sources);
-	for (const document of brewBundle?.content || []) {
-		addDocumentToCatalog(catalog, document?.body || document, {
-			defaultEdition: "2014",
-			protectedSources,
-		});
-	}
+function getCatalogOutput (catalog) {
 	return {
 		version: 1,
 		sources: [...catalog.sources].sort((a, b) => a.localeCompare(b)),
 		species: [...catalog.species].sort((a, b) => a.localeCompare(b)),
 		sourceEditions: Object.fromEntries([...catalog.sourceEditions].sort(([a], [b]) => a.localeCompare(b))),
 	};
+}
+
+function getCachedCampaignCatalog (contentHash) {
+	if (typeof contentHash !== "string" || !/^[a-f0-9]{64}$/i.test(contentHash)) return null;
+	const cached = _campaignCatalogCache.get(contentHash);
+	if (!cached) return null;
+	_campaignCatalogCache.delete(contentHash);
+	_campaignCatalogCache.set(contentHash, cached);
+	return structuredClone(cached);
+}
+
+function setCachedCampaignCatalog (contentHash, catalog) {
+	if (typeof contentHash !== "string" || !/^[a-f0-9]{64}$/i.test(contentHash)) return;
+	_campaignCatalogCache.delete(contentHash);
+	_campaignCatalogCache.set(contentHash, structuredClone(catalog));
+	while (_campaignCatalogCache.size > _MAX_CAMPAIGN_CATALOG_CACHE_ENTRIES) {
+		_campaignCatalogCache.delete(_campaignCatalogCache.keys().next().value);
+	}
+}
+
+export async function pGetCampaignContentCatalog ({brewBundle = null} = {}) {
+	const cached = getCachedCampaignCatalog(brewBundle?.contentHash);
+	if (cached) return cached;
+	const catalog = await pGetSiteCatalog();
+	const protectedSources = new Set(catalog.sources);
+	const protectedSourceIdsByLower = new Map(catalog.sourceIdsByLower);
+	for (const document of brewBundle?.content || []) {
+		addDocumentToCatalog(catalog, document?.body || document, {
+			defaultEdition: "2014",
+			protectedSources,
+			protectedSourceIdsByLower,
+		});
+	}
+	const output = getCatalogOutput(catalog);
+	setCachedCampaignCatalog(brewBundle?.contentHash, output);
+	return output;
 }
 
 export async function pGetCampaignContentEnforcement ({rulesVersion = null, brewBundle = null} = {}) {

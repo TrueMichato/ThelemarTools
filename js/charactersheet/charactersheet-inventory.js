@@ -1922,10 +1922,17 @@ class CharacterSheetInventory {
 	}
 
 	_isCampaignItemMutationAllowed ({before = null, after}) {
-		if (!this._page?._hubContext) return true;
-		const getIdentity = item => `${String(item?.name || "").trim().toLowerCase()}|${String(item?.source || "").trim().toLowerCase()}`;
-		if (before && getIdentity(before) === getIdentity(after)) return true;
-		if (this._page.isCampaignContentEntityAllowed?.(after)) return true;
+		const isUnavailable = this._page?._isHubContextRefreshing
+			|| this._page?._isHubContextUnavailable
+			|| this._page?._isHubContextRevalidationRequired;
+		if (!isUnavailable) {
+			if (this._page?.isCampaignContentMutationAllowed) {
+				if (this._page.isCampaignContentMutationAllowed({before, after})) return true;
+			} else {
+				const getIdentity = item => `${String(item?.name || "").trim().toLowerCase()}|${String(item?.source || "").trim().toLowerCase()}`;
+				if (!this._page?._hubContext || (before && getIdentity(before) === getIdentity(after)) || this._page.isCampaignContentEntityAllowed?.(after)) return true;
+			}
+		}
 		JqueryUtil.doToast({
 			type: "warning",
 			content: "That item change uses content this campaign does not allow. Existing off-policy items can still be edited without changing their name or source.",

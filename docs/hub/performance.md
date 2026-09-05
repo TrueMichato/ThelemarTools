@@ -36,6 +36,9 @@ requires revalidation for every unversioned static response.
 
 Campaign brew also passes the shared cloud-value traversal. Effective errors are `BREW_TOO_DEEP` for the
 brew-specific depth 101-150 range and `CLOUD_DATA_TOO_DEEP` beyond the shared depth 150 ceiling.
+Campaign content catalogs index canonical source IDs during their single bounded traversal and cache at most 64
+merged catalogs by immutable bundle content hash. Context reads and character writes therefore clone a small
+catalog projection instead of re-walking the active brew document on every request.
 
 Idempotency receipts retain only a character reference for character-returning commands and expire after
 24 hours. Retrying such a command returns the current canonical character; it never reapplies the mutation.

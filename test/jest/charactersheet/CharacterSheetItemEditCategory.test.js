@@ -150,6 +150,20 @@ describe("_mergeEditedItem (skip-undefined overlay)", () => {
 			expect(saveCharacter).not.toHaveBeenCalled();
 		});
 
+		test("blocks a new custom item while campaign context is being revalidated", () => {
+			const state = newState();
+			const saveCharacter = jest.fn();
+			const inv = makeInventory(state, {
+				_hubContext: null,
+				_isHubContextRevalidationRequired: true,
+				saveCharacter,
+			});
+
+			expect(inv._saveCustomItem("Stale-policy item", 1, 1, {type: "gear"})).toBeUndefined();
+			expect(state.getItems()).toEqual([]);
+			expect(saveCharacter).not.toHaveBeenCalled();
+		});
+
 		test("preserves source identity when editing catalog and grandfathered items", () => {
 			const state = newState();
 			const saveCharacter = jest.fn();

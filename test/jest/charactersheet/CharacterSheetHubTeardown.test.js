@@ -458,6 +458,8 @@ describe("Character Sheet campaign content context lifecycle", () => {
 		expect(page._isHubContextRevalidationRequired).toBe(true);
 		expect(page._isHubContextRefreshing).toBe(false);
 		expect(page.filterByAllowedSources(getContentCandidates())).toEqual([]);
+		expect(page.isCampaignContentEntityAllowed({name: "Custom", source: "Custom"})).toBe(false);
+		expect(page.isCampaignContentMutationAllowed({after: {name: "Custom", source: "Custom"}})).toBe(false);
 	});
 
 	it("fences an in-flight context refresh during rules teardown", async () => {

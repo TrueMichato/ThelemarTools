@@ -114,6 +114,13 @@ describe("Custom background instrument sub-picker (Bug #2)", () => {
 		expect(builder._isCampaignCustomBackgroundAllowed(background)).toBe(false);
 		builder._page.isCampaignContentEntityAllowed = () => true;
 		expect(builder._isCampaignCustomBackgroundAllowed(background)).toBe(true);
+
+		builder._page = {
+			_hubContext: null,
+			_isHubContextRevalidationRequired: true,
+			isCampaignContentEntityAllowed: () => true,
+		};
+		expect(builder._isCampaignCustomBackgroundAllowed(background)).toBe(false);
 	});
 });
 

@@ -1486,6 +1486,8 @@ export class PostgresHubStore {
 				r.id AS rules_id,
 				r.schema_version AS rules_schema_version,
 				r.rules,
+				b.id AS brew_id,
+				b.content_hash AS brew_content_hash,
 				b.content AS brew_content
 			FROM hub.campaigns c
 			LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
@@ -1503,7 +1505,13 @@ export class PostgresHubStore {
 					rules: row.rules,
 				}
 				: null,
-			brewBundle: row.brew_content ? {content: row.brew_content} : null,
+			brewBundle: row.brew_content
+				? {
+					id: row.brew_id,
+					contentHash: row.brew_content_hash,
+					content: row.brew_content,
+				}
+				: null,
 		});
 	}
 
