@@ -73,6 +73,13 @@ describe("campaign lifecycle and export", () => {
 		const archived = await store.pArchiveCampaign({accountId: owner, campaignId: campaign.id, idempotencyKey: "archive-2"});
 		expect(archived.campaign.status).toBe("archived");
 		expect((await store.pGetCharacter({accountId: owner, characterId: source.id})).character.campaignId).toBeNull();
+		const archivedEvents = () => store.getDomainEvents().filter(event => event.type === "campaign.archived");
+		expect(archivedEvents()).toHaveLength(1);
+		await expect(store.pArchiveCampaign({accountId: owner, campaignId: campaign.id, idempotencyKey: "archive-2"}))
+			.resolves.toEqual(archived);
+		await expect(store.pArchiveCampaign({accountId: owner, campaignId: campaign.id, idempotencyKey: "archive-3"}))
+			.rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_NOT_FOUND"}));
+		expect(archivedEvents()).toHaveLength(1);
 		await expect(store.pCreateInvite({
 			accountId: owner,
 			campaignId: campaign.id,

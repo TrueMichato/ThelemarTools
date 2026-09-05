@@ -3656,6 +3656,7 @@ export class MemoryHubStore {
 		if (prior) return prior;
 		const campaign = this._campaigns.get(campaignId);
 		if (!campaign || campaign.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the campaign owner can archive it.`, {status: 403});
+		if (campaign.status !== "active") throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 		if ([...this._transfers.values()].some(it => it.campaignId === campaignId && it.status === "reserved")) {
 			throw new HubStoreError("CAMPAIGN_BUSY", `Resolve reserved transfers before archiving.`, {status: 409});
 		}

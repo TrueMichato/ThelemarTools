@@ -158,6 +158,32 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		await pool?.end();
 	});
 
+	test("keeps an archived campaign mutation-closed while preserving idempotent replay", async () => {
+		const archiveOwner = await pCreateAccount("Archive Owner");
+		const archiveCampaign = (await store.pCreateCampaign({
+			accountId: archiveOwner.id,
+			name: `${prefix} archive fence`,
+			idempotencyKey: crypto.randomUUID(),
+		})).campaign;
+		const archiveInput = {
+			accountId: archiveOwner.id,
+			campaignId: archiveCampaign.id,
+			idempotencyKey: crypto.randomUUID(),
+		};
+		const archived = await store.pArchiveCampaign(archiveInput);
+		await expect(store.pArchiveCampaign(archiveInput)).resolves.toEqual(archived);
+		await expect(store.pArchiveCampaign({
+			...archiveInput,
+			idempotencyKey: crypto.randomUUID(),
+		})).rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_NOT_FOUND"}));
+		const evidence = await pool.query(`
+			SELECT
+				(SELECT count(*)::integer FROM hub.domain_events WHERE campaign_id = $1 AND type = 'campaign.archived') AS event_count,
+				(SELECT count(*)::integer FROM hub.audit_entries WHERE campaign_id = $1 AND action = 'campaign.archived') AS audit_count
+		`, [archiveCampaign.id]);
+		expect(evidence.rows[0]).toEqual({event_count: 1, audit_count: 1});
+	});
+
 	test("preserves metadata and idempotency through character, stash, and direct-pass escrow", async () => {
 		const depositInput = {
 			accountId: sourceOwner.id,

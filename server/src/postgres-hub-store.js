@@ -5928,6 +5928,7 @@ export class PostgresHubStore {
 			const campaignResult = await client.query(`SELECT * FROM hub.campaigns WHERE id = $1 FOR UPDATE`, [campaignId]);
 			const campaign = campaignResult.rows[0];
 			if (!campaign || campaign.owner_account_id !== accountId) throw new HubStoreError("FORBIDDEN", `Only the campaign owner can archive it.`, {status: 403});
+			if (campaign.status !== "active") throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 			const reserved = await client.query(`SELECT 1 FROM hub.transfers WHERE campaign_id = $1 AND status = 'reserved' LIMIT 1 FOR UPDATE`, [campaignId]);
 			if (reserved.rowCount) throw new HubStoreError("CAMPAIGN_BUSY", `Resolve reserved transfers before archiving.`, {status: 409});
 			await this._pCancelSemanticOperationsForLifecycle({
