@@ -4280,6 +4280,12 @@ UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_TABLES] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_VEHICLES] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_ACTIONS] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_LANGUAGES] = UrlUtil.URL_TO_HASH_GENERIC;
+UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_NAMES] = (it) => UrlUtil.encodeArrayForHash(it.name, it.source, it.option ?? "");
+UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_ENCOUNTERGEN] = (it) => {
+	const hashParts = [it.name, it.source, `${it.minlvl ?? 0}-${it.maxlvl ?? 0}-${it.caption || ""}`];
+	if (it.captionPrefix || it.captionSuffix) hashParts.push(it.captionPrefix ?? "", it.captionSuffix ?? "");
+	return UrlUtil.encodeArrayForHash(...hashParts);
+};
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CHAR_CREATION_OPTIONS] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_RECIPES] = (it) => `${UrlUtil.encodeArrayForHash(it.name, it.source)}${it._scaleFactor ? `${HASH_PART_SEP}${VeCt.HASH_SCALED}${HASH_SUB_KV_SEP}${it._scaleFactor}` : ""}`;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_HOMECRAFTS] = UrlUtil.URL_TO_HASH_GENERIC;

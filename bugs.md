@@ -5,6 +5,13 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Closed Bugs
 
+### Round 58 — Encounter/Names table hashes and Items magic-row rendering
+
+- **Encounter Generator crashed with `No encoder found for page encountergen.html`:** `UrlUtil` now registers a stable encoder for encounter tables using name, source, level range, caption, and—where present—the caption prefix/suffix that distinguish Planar and Sigil tables. A corpus-wide guard proves all 93 shipped encounter tables have unique hashes, so same-name groups remain individually selectable and deep-linkable.
+- **Names had the same latent missing-encoder crash:** name-table hashes now include name, source, and option, with all 61 shipped tables covered by the uniqueness guard.
+- **Official magic items appeared absent and their information looked blank:** the data was loaded, but five magic-row cells passed the unsupported `text` option to the vanilla element helper instead of `txt`. The row now renders name, type, weight, value, and attunement correctly; browser coverage verifies official non-TGTT items and the full row-to-detail path.
+- **Investigated but intentionally not changed:** the deployed `sw-injector.js` 404 comes from branch-based Pages publishing omitting generated service-worker assets, and the `Permissions-Policy: attribution-reporting` warning is external to these functional regressions. Deployment repair was explicitly left out of this round.
+
 ### Round 57 — NPC export validity and Add Item filter positioning
 
 - **NPC export emitted invalid companion-item types:** the exporter now canonicalizes sheet labels through legal incumbent codes, the loaded base-item catalog, armor metadata, and safe label mappings. Ambiguous unresolved types are omitted with an actionable warning instead of exporting invalid values. The reported 24-monster/15-item corpus, including Duralin, Talna, and Onger, is covered by a permanent attachment-driven regression harness.
