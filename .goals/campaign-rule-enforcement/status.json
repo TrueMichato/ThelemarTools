@@ -66,6 +66,11 @@
       "iteration": 8,
       "verdict": "PASS",
       "summary": "The corrected PR body, owner-level mutation evidence, exact product ancestry and scope, terminal CI, draft state, and clean handoff all pass with the documented 424-link data exception."
+    },
+    {
+      "iteration": 9,
+      "verdict": "PASS",
+      "summary": "Exact-head DM context retry fencing, deterministic coverage, unchanged data baseline, and sole draft PR terminal state all pass."
     }
   ]
 }
