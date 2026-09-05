@@ -39,7 +39,7 @@ rather than inferring deployment or enablement from merged code.
 | **active** | V2-T4 party inventory, carry, and item awards | Player stash/direct-transfer and DM atomic-award slices are implemented, with shared carry summaries and enforced carry/content boundaries; broader unified party/DM inventory UX remains |
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
 | **active** | V2-T7 player targeting | The one-player PHB/XPHB Cure Wounds slice is implemented; broader spells, abilities, resources, party/multi-target, and NPC/monster targeting remain |
-| **next** | Remaining V2 scope | V2-T3 feature enablement, the remaining T4/T7 scope, and V2-T8 account linking/rollout retain their own acceptance gates |
+| **active** | Remaining V2 scope | V2-T3 still requires broader Character Sheet effect implementation and enablement; the remaining T4/T7 scope and V2-T8 account linking/rollout retain their own acceptance gates |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
 
 The merged repository head is `b8d31d3416b934cc9275b859b5932db050005351` (PR #243, head
@@ -231,7 +231,7 @@ Acceptance:
   inaccessible;
 - projection generation cannot mutate or persist the canonical character/Board document.
 
-### V2-T3 — live semantic effects on the Character Sheet (**next — feature enablement**)
+### V2-T3 — live semantic effects on the Character Sheet (**active — server/reconciliation slices implemented; broader Character Sheet effects remain**)
 
 Dependency: V2-T2.
 
@@ -508,7 +508,7 @@ flowchart LR
     P15[ADR 0015 shipped] --> T6[V2-T6 active; content/carry shipped]
     P16[ADR 0016 shipped] --> T7[V2-T7 active; Cure Wounds shipped]
   end
-  T2 --> T3[V2-T3 live effects]
+  T2 --> T3[V2-T3 active; broader effects remain]
   T2 --> T4[V2-T4 active; current slices shipped]
   T2 --> T5
   T2 --> T7
