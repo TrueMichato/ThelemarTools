@@ -350,6 +350,10 @@ Rules schema version 1 remains readable. A one-way adapter maps its six keys to 
 projection/reporting. The adapter does not mutate historical `rules_versions` rows and does not claim source,
 species, or edition enforcement that schema version 1 never represented.
 
+Schema-version-2 policies published before carry-weight and encumbrance-tier enforcement remain readable with
+their recorded `advisory` modes. Read-time normalization preserves those modes and never rewrites the immutable
+row; new publication requires the current enforced modes.
+
 Structural changes create a new policy `schemaVersion`. Semantic or parameter changes to one rule create a new
 `ruleSchemaVersion`. Catalog copy changes that do not alter semantics create a new `catalogVersion`. An
 activation is refused if an enforced rule is unknown, incompatible, contradictory, or not implemented on all

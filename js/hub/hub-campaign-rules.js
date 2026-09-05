@@ -46,6 +46,11 @@ const ENFORCED_RULE_IDS = new Set([
 	"tgtt.encumbrance-tiers",
 ]);
 
+const HISTORICAL_ADVISORY_RULE_IDS = new Set([
+	"tgtt.carry-weight",
+	"tgtt.encumbrance-tiers",
+]);
+
 const SURFACES_TGTT_ENFORCED = Object.freeze({
 	characterOpen: "implemented",
 	builder: "planned",
@@ -440,7 +445,13 @@ function validateCompatibility (policy) {
 	}
 }
 
-function normalizeCampaignRulesPolicyInternal (policy, {isValidateCompatibility = true} = {}) {
+function normalizeCampaignRulesPolicyInternal (
+	policy,
+	{
+		isAllowHistoricalAdvisoryModes = false,
+		isValidateCompatibility = true,
+	} = {},
+) {
 	assertPlainObject(policy, "RULES_INVALID", "Campaign policy must be an object.");
 	assertOnlyKeys(policy, new Set(["schemaVersion", "catalogVersion", "rules", "notes"]), "RULES_INVALID", "Unsupported campaign policy fields.");
 	if (policy.schemaVersion !== CAMPAIGN_RULES_POLICY_SCHEMA_VERSION) {
@@ -478,13 +489,16 @@ function normalizeCampaignRulesPolicyInternal (policy, {isValidateCompatibility 
 			throw new CampaignRulesPolicyError("RULES_SCHEMA_UNSUPPORTED", `Campaign rule "${selection.id}" uses an unsupported schema version.`);
 		}
 		const supportedMode = definition.lifecycle === "implemented_enforced" ? "enforced" : "advisory";
-		if (selection.mode !== supportedMode) {
+		const isHistoricalAdvisoryMode = isAllowHistoricalAdvisoryModes
+			&& selection.mode === "advisory"
+			&& HISTORICAL_ADVISORY_RULE_IDS.has(selection.id);
+		if (selection.mode !== supportedMode && !isHistoricalAdvisoryMode) {
 			throw new CampaignRulesPolicyError("RULES_MODE_UNSUPPORTED", `Campaign rule "${selection.id}" must use "${supportedMode}" mode.`);
 		}
 		return {
 			id: selection.id,
 			ruleSchemaVersion: selection.ruleSchemaVersion,
-			mode: supportedMode,
+			mode: isHistoricalAdvisoryMode ? "advisory" : supportedMode,
 			parameters: normalizeRuleParameters(definition, selection.parameters),
 		};
 	});
@@ -568,9 +582,12 @@ export function createDefaultCampaignRulesPolicy () {
 	return policy;
 }
 
-export function getCampaignRulesPolicy ({schemaVersion, rules}) {
+export function getCampaignRulesPolicy ({schemaVersion, rules, isValidateCompatibility = false}) {
 	if (schemaVersion === CAMPAIGN_RULES_POLICY_SCHEMA_VERSION || rules?.schemaVersion === CAMPAIGN_RULES_POLICY_SCHEMA_VERSION) {
-		return normalizeCampaignRulesPolicyInternal(rules, {isValidateCompatibility: false});
+		return normalizeCampaignRulesPolicyInternal(rules, {
+			isAllowHistoricalAdvisoryModes: true,
+			isValidateCompatibility,
+		});
 	}
 	return adaptLegacyCampaignRules(rules);
 }
@@ -587,7 +604,10 @@ export function projectCampaignSettings ({schemaVersion, rules}) {
 }
 
 export function getCampaignRulesPolicySummary (policy) {
-	const normalized = normalizeCampaignRulesPolicyInternal(policy, {isValidateCompatibility: false});
+	const normalized = normalizeCampaignRulesPolicyInternal(policy, {
+		isAllowHistoricalAdvisoryModes: true,
+		isValidateCompatibility: false,
+	});
 	return {
 		catalogVersion: normalized.catalogVersion,
 		rules: normalized.rules.map(selection => {
@@ -604,14 +624,23 @@ export function getCampaignRulesPolicySummary (policy) {
 
 export function getCampaignRulesContentPolicy (policy) {
 	const normalized = policy?.schemaVersion === CAMPAIGN_RULES_POLICY_SCHEMA_VERSION && Array.isArray(policy.rules)
-		? normalizeCampaignRulesPolicyInternal(policy, {isValidateCompatibility: false})
+		? normalizeCampaignRulesPolicyInternal(policy, {
+			isAllowHistoricalAdvisoryModes: true,
+			isValidateCompatibility: false,
+		})
 		: getCampaignRulesPolicy(policy);
 	return getCampaignContentPolicy(normalized);
 }
 
 export function diffCampaignRulesPolicies ({before, after, isAfterStoredPolicy = false}) {
-	const beforeMap = getSelectionMap(normalizeCampaignRulesPolicyInternal(before, {isValidateCompatibility: false}));
-	const afterNormalized = normalizeCampaignRulesPolicyInternal(after, {isValidateCompatibility: !isAfterStoredPolicy});
+	const beforeMap = getSelectionMap(normalizeCampaignRulesPolicyInternal(before, {
+		isAllowHistoricalAdvisoryModes: true,
+		isValidateCompatibility: false,
+	}));
+	const afterNormalized = normalizeCampaignRulesPolicyInternal(after, {
+		isAllowHistoricalAdvisoryModes: isAfterStoredPolicy,
+		isValidateCompatibility: !isAfterStoredPolicy,
+	});
 	return afterNormalized.rules.flatMap(selection => {
 		const definition = CATALOG_BY_ID.get(selection.id);
 		const key = definition.parameter.key;

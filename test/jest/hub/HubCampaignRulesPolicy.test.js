@@ -7,6 +7,7 @@ import {
 	adaptLegacyCampaignRules,
 	createDefaultCampaignRulesPolicy,
 	diffCampaignRulesPolicies,
+	getCampaignRulesPolicy,
 	getCampaignRulesPolicySummary,
 	normalizeCampaignRulesPolicy,
 	projectCampaignSettings,
@@ -103,6 +104,26 @@ describe("Campaign rules policy catalog", () => {
 		expect(() => normalizeCampaignRulesPolicy(policy)).toThrow(expect.objectContaining({
 			code: "RULES_COMBINATION_UNSUPPORTED",
 		}));
+	});
+
+	it("keeps pre-enforcement schema-v2 carry modes readable without accepting them for new publication", () => {
+		const historical = createDefaultCampaignRulesPolicy();
+		historical.rules.find(rule => rule.id === "tgtt.carry-weight").mode = "advisory";
+		historical.rules.find(rule => rule.id === "tgtt.encumbrance-tiers").mode = "advisory";
+
+		expect(() => normalizeCampaignRulesPolicy(historical)).toThrow(expect.objectContaining({
+			code: "RULES_MODE_UNSUPPORTED",
+		}));
+		const readable = getCampaignRulesPolicy({schemaVersion: 2, rules: historical});
+		expect(readable.rules.filter(rule => ["tgtt.carry-weight", "tgtt.encumbrance-tiers"].includes(rule.id)))
+			.toEqual([
+				expect.objectContaining({id: "tgtt.carry-weight", mode: "advisory"}),
+				expect.objectContaining({id: "tgtt.encumbrance-tiers", mode: "advisory"}),
+			]);
+		expect(getCampaignRulesPolicySummary(historical).rules).toEqual(expect.arrayContaining([
+			expect.objectContaining({id: "tgtt.carry-weight", supportLabel: "Advisory"}),
+			expect.objectContaining({id: "tgtt.encumbrance-tiers", supportLabel: "Advisory"}),
+		]));
 	});
 
 	it("rejects unknown, malformed, duplicate, and incorrectly-modeled selections", () => {

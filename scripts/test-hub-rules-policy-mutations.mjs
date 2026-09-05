@@ -822,8 +822,8 @@ const MUTANTS = [
 		probe: probeHistoricalDiff,
 		mutations: {
 			"hub-campaign-rules.js": source => source.replace(
-				"const afterNormalized = normalizeCampaignRulesPolicyInternal(after, {isValidateCompatibility: !isAfterStoredPolicy});",
-				"const afterNormalized = normalizeCampaignRulesPolicyInternal(after, {isValidateCompatibility: true});",
+				"isValidateCompatibility: !isAfterStoredPolicy,",
+				"isValidateCompatibility: true,",
 			),
 		},
 	},

@@ -7,6 +7,7 @@ import {
 	prepareCampaignTransitionData,
 } from "../../../server/src/campaign-rule-authority.js";
 import {createDefaultCampaignRulesPolicy} from "../../../js/hub/hub-campaign-rules.js";
+import {getPublicCampaignRulesVersion} from "../../../server/src/campaign-content.js";
 import {MemoryHubStore} from "../../../server/src/memory-hub-store.js";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
@@ -90,6 +91,28 @@ describe("campaign rule write authority", () => {
 			rulesVersion: {...rulesVersion(), schemaVersion: 1, rules: {enableTgtt: false}},
 			data: {settings: {enableTgtt: true}},
 		})).toBeNull();
+	});
+
+	it("reads pre-enforcement schema-v2 carry modes without rewriting their immutable labels", () => {
+		const historical = rulesVersion();
+		historical.rules.rules.find(rule => rule.id === "tgtt.carry-weight").mode = "advisory";
+		historical.rules.rules.find(rule => rule.id === "tgtt.encumbrance-tiers").mode = "advisory";
+
+		expect(getPublicCampaignRulesVersion(historical)).toEqual(expect.objectContaining({
+			policySummary: expect.objectContaining({
+				rules: expect.arrayContaining([
+					expect.objectContaining({id: "tgtt.carry-weight", supportLabel: "Advisory"}),
+					expect.objectContaining({id: "tgtt.encumbrance-tiers", supportLabel: "Advisory"}),
+				]),
+			}),
+			ruleDecision: expect.objectContaining({
+				status: "compliant",
+				appliedRules: expect.arrayContaining([
+					expect.objectContaining({id: "tgtt.carry-weight", mode: "advisory"}),
+					expect.objectContaining({id: "tgtt.encumbrance-tiers", mode: "advisory"}),
+				]),
+			}),
+		}));
 	});
 
 	it("uses the same authority helper in memory and PostgreSQL transactions", () => {

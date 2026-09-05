@@ -181,16 +181,96 @@ describe("campaign DM Screen controller", () => {
 		requests[1].resolve(currentContext);
 		await Promise.resolve();
 		await Promise.resolve();
-		expect(contexts).toEqual([currentContext]);
+		expect(contexts).toEqual([null, currentContext]);
 
 		requests[0].reject(new Error("offline"));
 		await Promise.resolve();
 		await Promise.resolve();
-		expect(contexts).toEqual([currentContext]);
+		expect(contexts).toEqual([null, currentContext]);
 
 		realtime.emit("state", {state: "live"});
 		await Promise.resolve();
 		expect(requests).toHaveLength(2);
+	});
+
+	it("uses resync cursor identities to replace stale rules and brew context", async () => {
+		const realtime = new Observable();
+		const contexts = [];
+		const context = {
+			rulesVersion: {id: "rules-2", ruleDecision: {blocking: false}},
+			brewBundle: {id: "brew-2"},
+		};
+		let contextFetchCount = 0;
+		const controller = new DmScreenHubController({
+			campaignId: "campaign-1",
+			api: {
+				pGetCampaignContext: async () => {
+					contextFetchCount++;
+					return context;
+				},
+			},
+			document: null,
+			fnSetTimeout: () => 1,
+			fnClearTimeout: () => {},
+		});
+		controller.attach({
+			board: {
+				fireBoardEvent: () => {},
+				getHubCampaignContext: () => ({
+					rulesVersion: {id: "rules-1"},
+					brewBundle: {id: "brew-1"},
+				}),
+				setHubCampaignContext: value => contexts.push(value),
+			},
+			repository: null,
+			realtime,
+		});
+
+		realtime.emit("cursor", {
+			cursor: {campaignId: "campaign-1", lastSequence: 4},
+			campaign: {
+				activeRulesVersionId: "rules-2",
+				activeBrewBundleVersionId: "brew-2",
+			},
+			characterRefs: [],
+		});
+		expect(contexts).toEqual([null]);
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(contextFetchCount).toBe(1);
+		expect(contexts).toEqual([null, context]);
+	});
+
+	it("invalidates and refreshes campaign context when brew activation arrives live", async () => {
+		const realtime = new Observable();
+		const contexts = [];
+		const context = {
+			rulesVersion: {id: "rules-1", ruleDecision: {blocking: false}},
+			brewBundle: {id: "brew-2"},
+		};
+		const controller = new DmScreenHubController({
+			campaignId: "campaign-1",
+			api: {pGetCampaignContext: async () => context},
+			document: null,
+			fnSetTimeout: () => 1,
+			fnClearTimeout: () => {},
+		});
+		controller.attach({
+			board: {
+				fireBoardEvent: () => {},
+				setHubCampaignContext: value => contexts.push(value),
+			},
+			repository: null,
+			realtime,
+		});
+
+		realtime.emit("event", {type: "brew.activated", aggregateId: "brew-2"});
+		expect(contexts).toEqual([null]);
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(contexts).toEqual([null, context]);
 	});
 
 	it("routes authoritative projection access loss back to the context coordinator", async () => {
