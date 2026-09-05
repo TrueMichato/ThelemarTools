@@ -92,6 +92,66 @@ describe("Hub lifecycle administration", () => {
 		expect(changed.membership.role).toBe("spectator");
 	});
 
+	it("cancels a member's reserved transfers on spectator downgrade and keeps resolution read-only", async () => {
+		const source = (await store.pCreateCharacter({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			clientImportId: "role-change-source",
+			schemaVersion: 1,
+			data: {name: "Role change source", inventory: [], currency: {gp: 4}},
+			idempotencyKey: key("role-change-source"),
+		})).character;
+		const target = (await store.pCreateCharacter({
+			accountId: observer.id,
+			campaignId: campaign.id,
+			clientImportId: "role-change-target",
+			schemaVersion: 1,
+			data: {name: "Role change target", inventory: [], currency: {}},
+			idempotencyKey: key("role-change-target"),
+		})).character;
+		const reserved = (await store.pProposeTransfer({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: source.id,
+			targetKind: "character",
+			targetId: target.id,
+			payload: {currency: {gp: 2}},
+			idempotencyKey: key("role-change-transfer"),
+		})).transfer;
+		const membership = await store.pGetMembership({accountId: observer.id, campaignId: campaign.id});
+
+		await store.pChangeMemberRole({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			membershipId: membership.id,
+			role: "spectator",
+			idempotencyKey: key("role-change"),
+		});
+
+		expect((await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === reserved.id).status).toBe("cancelled");
+		expect((await store.pGetCharacter({accountId: dm.id, characterId: source.id})).character.data.currency.gp).toBe(4);
+
+		const afterDowngrade = (await store.pProposeTransfer({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: source.id,
+			targetKind: "character",
+			targetId: target.id,
+			payload: {currency: {gp: 1}},
+			idempotencyKey: key("spectator-target-transfer"),
+		})).transfer;
+		await expect(store.pResolveTransfer({
+			accountId: observer.id,
+			campaignId: campaign.id,
+			transferId: afterDowngrade.id,
+			decision: "accept",
+			idempotencyKey: key("spectator-accept"),
+		})).rejects.toMatchObject({code: "FORBIDDEN"});
+	});
+
 	it("removes a member atomically, restores escrow, and detaches owned characters", async () => {
 		const character = (await store.pCreateCharacter({
 			accountId: player.id,

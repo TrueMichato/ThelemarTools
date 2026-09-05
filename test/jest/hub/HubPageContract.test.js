@@ -35,20 +35,53 @@ describe("campaign hub pages", () => {
 		for (const id of ["campaign-invite-list", "campaign-leave"]) expect(campaignHtml).toContain(`id="${id}"`);
 	});
 
-	it("organizes the campaign around role-aware play tasks before administration", () => {
+	it("organizes the campaign as a pinned session brief before administration", () => {
 		for (const id of [
+			"campaign-manifest-panel",
 			"campaign-characters-panel",
 			"campaign-party-panel",
 			"campaign-inbox-panel",
+			"campaign-workbench",
 			"campaign-shared-actions",
 			"campaign-activity-panel",
 			"campaign-dm-controls",
 		]) expect(campaignHtml).toContain(`id="${id}"`);
-		expect(campaignHtml.indexOf("id=\"campaign-characters-panel\""))
+		expect(campaignHtml).toContain("CAMPAIGN HUB DIRECTION CONTRACT");
+		expect(campaignHtml).toContain("Pinned session brief");
+		expect(campaignHtml.indexOf("id=\"campaign-manifest-panel\""))
 			.toBeLessThan(campaignHtml.indexOf("class=\"hub-campaign-admin\""));
+		expect(campaignHtml.indexOf("id=\"campaign-inbox-panel\""))
+			.toBeLessThan(campaignHtml.indexOf("id=\"campaign-manifest-panel\""));
+		expect(campaignHtml.indexOf("id=\"campaign-manifest-panel\""))
+			.toBeLessThan(campaignHtml.indexOf("id=\"campaign-activity-panel\""));
+		expect(campaignHtml.indexOf("id=\"campaign-activity-panel\""))
+			.toBeLessThan(campaignHtml.indexOf("id=\"campaign-workbench\""));
+		expect(campaignHtml).toMatch(/<details id="campaign-workbench"[\s\S]*?<summary aria-describedby="campaign-workbench-description">/);
+		expect(campaignHtml).not.toMatch(/<details id="campaign-workbench"[^>]*\sopen(?:\s|>)/);
 		expect(campaignHtml).toContain("<details class=\"hub-disclosure\">");
 		expect(campaignHtml).toContain("People and invitations");
 		expect(campaignHtml).toContain("Rules and homebrew");
+		expect(campaignHtml).not.toContain("<dialog");
+	});
+
+	it("preserves every campaign action behind semantic progressive disclosure", () => {
+		for (const id of [
+			"campaign-upload-local",
+			"campaign-action-form",
+			"campaign-transfer-form",
+			"campaign-xp-form",
+			"campaign-item-form",
+			"campaign-member-list",
+			"campaign-invite-form",
+			"campaign-leave",
+			"campaign-brew-form",
+			"campaign-rules-form",
+			"campaign-rules-policy-manager",
+		]) expect(campaignHtml).toContain(`id="${id}"`);
+		expect(campaignHtml.indexOf("id=\"campaign-workbench\""))
+			.toBeLessThan(campaignHtml.indexOf("id=\"campaign-shared-actions\""));
+		expect(campaignHtml.indexOf("class=\"hub-campaign-admin\""))
+			.toBeLessThan(campaignHtml.indexOf("id=\"campaign-member-list\""));
 	});
 
 	it("provides explicit campaign loading, connection, empty, and mutation feedback", () => {
@@ -109,8 +142,46 @@ describe("campaign hub pages", () => {
 		const source = read("js/hub/hub-page.js");
 		expect(source).toContain("applyCampaignRoleLayout({campaign, characters})");
 		expect(source).toContain("setHidden(document.getElementById(\"campaign-open-dm-screen\"), !isDm)");
+		expect(source).toContain("setHidden(document.getElementById(\"campaign-workbench\"), !canPlay)");
 		expect(source).toContain("setHidden(document.getElementById(\"campaign-shared-actions\"), !canPlay)");
 		expect(source).toContain("setHidden(document.getElementById(\"campaign-characters-panel\"), isSpectator)");
+		expect(source).toContain("campaign.status === \"active\" && campaign.role === \"player\" ? characters : []");
+		expect(source).toContain("playerCharacters.length === 1");
+		expect(source).toContain("hasCharacterChoices ? \"Choose a character\" : \"Add a local character copy\"");
+		expect(source).toContain("characterSetup.href = hasCharacterChoices ? \"#campaign-character-list\" : \"#campaign-upload-local\"");
+		expect(source).toContain("setHidden(characterSetup, campaign.status !== \"active\" || campaign.role !== \"player\" || playerCharacters.length === 1)");
+		expect(source).toContain("setHidden(readonlyPrimary, !isSpectator && campaign.status === \"active\")");
+		expect(source).toContain("renderCharacterList({campaignId, characters: charactersNxt});");
+		expect(source).toContain("applyCampaignRoleLayout({campaign, characters: charactersNxt});");
+		for (const id of [
+			"campaign-open-primary-character",
+			"campaign-open-character-setup",
+			"campaign-open-dm-screen",
+			"campaign-primary-readonly",
+		]) expect(campaignHtml).toContain(`id="${id}"`);
+		expect(campaignHtml).toContain("id=\"campaign-open-character-setup\" class=\"hub-button hub-button--primary ve-hidden\" href=\"#campaign-upload-local\"");
+	});
+
+	it("opens campaign actions before moving keyboard focus to a requested task", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("initCampaignWorkbenchLinks()");
+		expect(source).toContain("if (workbench) workbench.open = true");
+		expect(source).toContain("requestAnimationFrame(() => document.getElementById(targetId)?.querySelector(\"select, input, button\")?.focus())");
+		expect(source).toContain("document.getElementById(\"campaign-open-character-setup\")?.addEventListener(\"click\"");
+		expect(source).toContain("target?.matches(\"[tabindex], button, a, input, select, textarea\")");
+		expect(campaignHtml).toContain("id=\"campaign-character-list\" class=\"hub-data-list hub-data-list--flush\" tabindex=\"-1\" aria-labelledby=\"campaign-character-title\"");
+		expect(campaignHtml).toContain("href=\"#campaign-action-form\"");
+		expect(campaignHtml).toContain("href=\"#campaign-transfer-form\"");
+	});
+
+	it("announces attention with text as well as restrained semantic color", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(campaignHtml).toContain("id=\"campaign-attention-summary\"");
+		expect(campaignHtml).toContain("data-attention=\"clear\"");
+		expect(source).toContain("panel.dataset.attention = total ? \"pending\" : \"clear\"");
+		expect(source).toContain("No pending requests.");
+		expect(source).toContain("const canAct = isDm || campaign.role === \"player\"");
+		expect(scss).toContain(".hub-campaign-attention[data-attention=\"pending\"] .hub-count");
 	});
 
 	it("renders a named inbox, recent activity, and copyable invite result", () => {
@@ -123,6 +194,16 @@ describe("campaign hub pages", () => {
 		// invalidation is coalesced into an authorization-scoped HTTP refetch.
 		expect(source).not.toContain("event.payload?.character");
 		expect(source).not.toContain("character.projection.updated");
+		expect(source).toContain("const reloadForAuthorityChange = () =>");
+		expect(source).toContain("event.type === \"membership.role_changed\"");
+		expect(source).toContain("event.payload?.accountId === session.account.id");
+		expect(source).toContain("event.payload?.role !== campaign.role");
+		expect(source).toContain("isRealtimeEventCoveredByBaseline({");
+		expect(source).toContain("baselineSequence: authorityBaselineSequence");
+		expect(source).toContain("isOwnRoleChange && !isOwnRoleChangeCoveredByBaseline");
+		expect(source).toContain("authorityBaselineSequence = Math.max(authorityBaselineSequence, baseline?.cursor?.lastSequence || 0)");
+		expect(source).toContain("baseline.membership.role !== campaign.role");
+		expect(source).toContain("if (isCampaignReloadRequired) return;");
 		expect(source).toContain("snapshotNxt.lastSequence >= liveLastSequence");
 		expect(source).toContain("liveEvents = [...liveEvents.filter");
 		expect(source).toContain("renderRecentActivity({events: liveEvents");
@@ -272,6 +353,9 @@ describe("campaign hub pages", () => {
 		expect(scss).toContain(":focus-visible");
 		expect(scss).toContain("@media (prefers-reduced-motion: reduce)");
 		expect(scss).toContain("--hub-primary: #5f62e9");
+		expect(scss).toMatch(/\.hub-campaign-layout\s*\{[\s\S]*"manifest attention"[\s\S]*"manifest session"/);
+		expect(scss).toMatch(/@media \(width <= 900px\)[\s\S]*"attention" auto[\s\S]*"manifest" auto[\s\S]*"session" auto/);
+		expect(scss).not.toMatch(/\.hub-rail-section--tools\s*\{\s*display:\s*none/);
 		for (const html of [hubHtml, campaignHtml]) {
 			expect(html).toContain("class=\"hub-skip-link\"");
 			expect(html).toContain("id=\"main-content\"");
@@ -296,7 +380,7 @@ describe("campaign hub pages", () => {
 		const source = read("js/hub/hub-page.js");
 		expect(source).toMatch(/^async function renderPendingTransfers/m);
 		expect(source.indexOf("async function renderPendingTransfers")).toBeLessThan(source.indexOf("async function pInitCampaignForms"));
-		expect(source).toContain("const canReject = canAccept || transfer.actorAccountId === session.account.id");
+		expect(source).toContain("const canReject = canAct && (canAccept || transfer.actorAccountId === session.account.id)");
 		expect(source).toContain("canAccept ? \"Reject\" : \"Cancel\"");
 	});
 

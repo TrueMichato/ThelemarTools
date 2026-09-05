@@ -1,8 +1,7 @@
 # Campaign Overview redesign brief
 
-Status: design direction approved. The authoritative roadmap merged in PR #211, release automation shipped in PR #219,
-and activity history shipped in PR #218. Implementation waits for V2-T2 through V2-T7 to establish the remaining
-stable user-facing responsibilities.
+Status: implemented as the final Campaign Hub lane. The overview now uses the approved **Pinned session brief**
+composition while preserving the existing V1 mutations, authority boundaries, privacy projections, and recovery states.
 
 ## Purpose and timing
 
@@ -10,12 +9,19 @@ Campaign Overview should answer two questions quickly: **Is this campaign ready?
 It should orient players and DMs, summarize campaign state, and expose setup without becoming another active-play
 workspace.
 
-This PR records design decisions only. It does not implement UI or polish temporary forms. Activity history is now
-shipped; final implementation starts after the remaining tracks establish their accepted responsibilities. T5
-campaign context remains a whole-site capability. T6 policy remains authoritative in the Hub/API and is enforced
-consistently by Builder, LevelUp, Character Sheet, and DM surfaces. Only character-specific active-play actions move
-from Campaign Overview to contextual Character Sheet and DM Screen flows. The redesign must then be refreshed against
-those shipped capabilities rather than preserve temporary controls.
+The implemented overview is an Operate-mode surface for the live shared campaign. T5 campaign context remains a
+whole-site capability. T6 policy remains authoritative in the Hub/API and is enforced consistently by Builder,
+LevelUp, Character Sheet, and DM surfaces. This lane changes information architecture and the minimum client behavior
+needed to support it; it does not move or weaken server-owned operations.
+
+## Implemented direction
+
+The page reads as the brief for one table rather than a settings portal. Campaign identity, connection, role, and one
+role-specific continuation action lead. A dominant party manifest sits beside attention and a compact session/setup
+rail. Recent activity follows. Effects, transfers, XP, and item awards remain available in the **Campaign actions**
+disclosure, while people, invitations, homebrew, rules, and policy management remain in **Administration**. Native
+`details` disclosures preserve keyboard behavior without modal interruption. On narrow screens, the sequence is
+identity and primary action, attention, manifest, session/setup, activity, campaign actions, then administration.
 
 ## Method and evidence
 
@@ -112,14 +118,16 @@ Campaign Overview
 |- Campaign header
 |  |- name - role - connection/capability state
 |  `- one role-primary action
-|- Attention queue
-|  `- approvals - policy warnings - invitations - recoverable failures
 |- Party roster
 |  `- one character model with owner/access/privacy/compliance badges
+|- Attention queue
+|  `- approvals - policy warnings - invitations - recoverable failures
 |- Session snapshot
 |  `- party readiness - shared inventory summary - next-session information
 |- Recent activity
 |  `- character-first events with filtering and pagination
+|- Campaign actions
+|  `- preserved effects - transfers - XP - item awards (collapsed)
 `- Setup and administration
    |- people and invitations
    |- rules and source policy
@@ -137,12 +145,12 @@ Campaign Overview
    mutation.
 4. **Setup:** people, rules/source policy, homebrew, lifecycle, and export behind progressive disclosure.
 5. **Global:** campaign switching, account controls, and local mode in the shell rather than the campaign task area.
-6. **Legacy during migration only:** generic active-play forms in a labeled disclosure, never competing with the
-   primary action.
+6. **Contextual operations:** generic active-play forms remain in a labeled disclosure so no accepted capability is
+   lost, but they never compete with the primary action.
 
 The player primary action depends on campaign-character count:
 
-- **Zero:** **Add a campaign character** opens focused onboarding with create, import, and attach paths.
+- **Zero:** **Add a local character copy** moves focus to the existing campaign-copy import.
 - **One:** **Open _character name_** opens that character directly.
 - **Many:** **Choose a character** opens an accessible chooser, then opens the explicit selection. It never silently
   chooses or opens the first character.
@@ -174,32 +182,25 @@ present the same information priority rather than preserving desktop form densit
 
 ## Architecture decision
 
-The final Campaign Overview **removes generic effect, transfer, XP, and item-grant forms** after equivalent Character
-Sheet and DM Screen flows ship. Do not polish those temporary forms into permanent Campaign Overview components.
-Character-specific effects, approvals, inventory, and transfers belong with the Character Sheet; DM actions and
-session awards belong with the DM Screen or contextual sheet actions. This relocation does not narrow authority: T5
-campaign context remains whole-site, while T6 policy remains authoritative at Hub/API mutation boundaries and across
-Builder, LevelUp, Character Sheet, and DM enforcement surfaces. Campaign Overview retains summaries, attention,
-activity, readiness, policy visibility and configuration, and setup.
+The final Campaign Overview preserves generic effect, transfer, XP, and item-grant forms behind one collapsed
+**Campaign actions** disclosure. Character-specific work should still prefer the Character Sheet and DMs should still
+prefer the DM workspace, but equivalent contextual flows are not assumed and no accepted capability is removed in this
+lane. The existing Hub API, authorization, protocol/version fences, policy enforcement, privacy projections,
+idempotency behavior, and personal-versus-campaign storage boundaries remain unchanged. Campaign Overview foregrounds
+summaries, attention, activity, readiness, policy visibility, and setup; mutations are findable but subordinate.
 
 ## Staged migration
 
-1. **Stabilize responsibilities:** Track 1 activity is shipped in PR #218. Finish and accept Track 2
-   projection/privacy, Track 4 inventory/carry/awards, Track 5 whole-site context, and Track 6 policy enforcement
-   before implementation. Track 3 live effects and Track 7 targeting must also have stable user-facing contracts
-   before the final redesign. Together these define authorization, capability, failure, reconnect, privacy, and
-   observability behavior.
-2. **Ship equivalent contextual flows:** move character-specific active-play effect, grant, transfer, XP, and item
-   actions to Character Sheet and DM Screen with impact preview and recovery. Keep T5 context whole-site and T6 policy
-   authoritative across the Hub/API and every enforcing UI.
-3. **Coexist temporarily:** place remaining Campaign Overview forms behind a clearly labeled legacy disclosure and
-   compare old/new task completion and regressions. Do not visually polish the legacy path.
-4. **Reshape Campaign Overview:** implement the target component map around role-primary action, attention, roster,
-   readiness, activity, and setup.
-5. **Remove legacy forms:** delete them only after equivalent flows meet acceptance criteria and migration evidence
-   shows no required task was lost.
-6. **Run the bounded final pass:** refresh the critique against authenticated data, then polish only the stable final
-   composition.
+1. **Stabilize responsibilities:** shipped tracks define authorization, capability, failure, reconnect, privacy, and
+   observability behavior; the overview consumes those contracts without broadening them.
+2. **Reshape Campaign Overview:** implemented the role-primary action, manifest, attention, session/setup rail,
+   activity, collapsed campaign actions, and administration hierarchy.
+3. **Preserve mutation access:** kept every incumbent effect, transfer, XP, item, membership, homebrew, and rules path
+   reachable through progressive disclosure.
+4. **Keep contextual evolution independent:** future Character Sheet or DM Screen replacements can be evaluated on
+   their own evidence; this overview does not pre-emptively delete fallback capability.
+5. **Run bounded QA:** validate authenticated desktop/mobile day/night states and retain the release gates described in
+   the Hub testing guide.
 
 ## State matrix
 

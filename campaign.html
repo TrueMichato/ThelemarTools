@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 	<meta charset="utf-8">
-	<meta name="description" content="Manage a campaign's members, characters, homebrew, rules, and DM workspaces.">
+	<meta name="description" content="See campaign readiness, attention, activity, shared play, and administration in one role-aware overview.">
 	<meta http-equiv="X-UA-Compatible" content="IE=edge">
 	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 	<meta name="mobile-web-app-capable" content="yes">
@@ -49,17 +49,20 @@
 				<a id="hub-sign-in" class="hub-button hub-button--primary" href="/auth/github/start">Sign in with GitHub</a>
 			</div>
 		</section>
+		<!--
+		CAMPAIGN HUB DIRECTION CONTRACT
+		THESIS: A role-adaptive session brief that refuses the long operations/settings dump.
+		OWN-WORLD: Existing slate/indigo, Cinzel campaign identity and Inter UI, neutral full-border surfaces,
+		restrained semantic colors, no decorative SaaS cards or nested cards.
+		STORY: Establish campaign, connection, and role; show party readiness and attention; then activity.
+		Open contextual play and management work only when needed.
+		FIRST VIEWPORT: Campaign identity and role-specific primary launch, a dominant party manifest/readiness
+		area, and a compact attention/session rail; activity and setup follow without scrolling through forms.
+		FORM: Assigned grounded candidate 5, "Pinned session brief," seed a3c924ff.
+		-->
 		<section id="hub-signed-in" class="hub-state ve-hidden">
 			<div id="campaign-loading" class="hub-state--centered">Loading campaign...</div>
 			<div id="campaign-content" class="ve-hidden">
-				<div class="hub-toolbar">
-					<a class="hub-button" href="hub.html">All campaigns</a>
-					<div class="hub-toolbar__identity">
-						<span class="hub-label">Signed in as</span>
-						<span id="campaign-account" class="hub-toolbar__name"></span>
-					</div>
-					<button id="hub-logout" class="hub-button" type="button">Sign out</button>
-				</div>
 				<div class="hub-campaign-header">
 					<div class="hub-campaign-header__main">
 						<div>
@@ -69,25 +72,65 @@
 								<span id="campaign-status" class="hub-badge hub-badge--status"></span>
 								<span id="campaign-connection-status" class="hub-connection" data-state="loading" role="status">Connecting...</span>
 							</div>
+							<p class="hub-campaign-header__summary">Your table at a glance: who is ready, what needs attention, and where play continues.</p>
 						</div>
 						<div class="hub-button-row hub-campaign-header__actions">
-							<a id="campaign-open-primary-character" class="hub-button ve-hidden" href="charactersheet.html">Open character sheet</a>
+							<a id="campaign-open-primary-character" class="hub-button hub-button--primary ve-hidden" href="charactersheet.html">Open character sheet</a>
+							<a id="campaign-open-character-setup" class="hub-button hub-button--primary ve-hidden" href="#campaign-upload-local">Add a local character copy</a>
 							<a id="campaign-open-dm-screen" class="hub-button hub-button--primary ve-hidden" href="dmscreen.html">Open DM workspace</a>
+							<span id="campaign-primary-readonly" class="hub-primary-readonly ve-hidden">Read-only campaign view</span>
 						</div>
 					</div>
 				</div>
+				<div class="hub-toolbar hub-toolbar--campaign">
+					<a class="hub-button" href="hub.html">All campaigns</a>
+					<div class="hub-toolbar__identity">
+						<span class="hub-label">Signed in as</span>
+						<span id="campaign-account" class="hub-toolbar__name"></span>
+					</div>
+					<button id="hub-logout" class="hub-button" type="button">Sign out</button>
+				</div>
 
 				<div class="hub-campaign-layout">
+					<section id="campaign-inbox-panel" class="hub-campaign-section hub-campaign-attention" aria-labelledby="campaign-attention-title" data-attention="clear">
+						<div class="hub-section-heading">
+							<div>
+								<h3 id="campaign-attention-title" class="hub-campaign-section__title">Needs attention</h3>
+								<p id="campaign-attention-summary" class="hub-campaign-section__description" role="status" aria-live="polite">No pending requests.</p>
+							</div>
+							<span id="campaign-inbox-count" class="hub-count" aria-label="Pending request count">0</span>
+						</div>
+						<div class="hub-inbox-grid">
+							<div>
+								<h4 class="hub-subheading">Effects</h4>
+								<div id="campaign-pending-actions" class="hub-data-list hub-data-list--flush"></div>
+								<p id="campaign-pending-actions-empty" class="hub-empty hub-empty--compact ve-hidden">No effect requests are waiting.</p>
+							</div>
+							<div>
+								<h4 class="hub-subheading">Transfers</h4>
+								<div id="campaign-pending-transfers" class="hub-data-list hub-data-list--flush"></div>
+								<p id="campaign-pending-transfers-empty" class="hub-empty hub-empty--compact ve-hidden">No item or currency transfers are waiting.</p>
+							</div>
+						</div>
+					</section>
+
 					<div class="hub-campaign-main">
-						<section id="campaign-characters-panel" class="hub-campaign-section">
+						<section id="campaign-manifest-panel" class="hub-campaign-section hub-campaign-manifest" aria-labelledby="campaign-manifest-title">
+							<div class="hub-section-heading hub-section-heading--manifest">
+								<div>
+									<h3 id="campaign-manifest-title" class="hub-campaign-section__title">Party manifest</h3>
+									<p class="hub-campaign-section__description">The table roster, ownership, and latest shared readiness in one place.</p>
+								</div>
+							</div>
+							<div id="campaign-characters-panel" class="hub-manifest-group">
 							<div class="hub-section-heading">
 								<div>
-									<h3 id="campaign-character-title" class="hub-campaign-section__title">Characters</h3>
+									<h4 id="campaign-character-title" class="hub-campaign-section__title">Characters</h4>
 									<p id="campaign-character-description" class="hub-campaign-section__description"></p>
 								</div>
 								<span id="campaign-character-count" class="hub-count" aria-label="Character count">0</span>
 							</div>
-							<div id="campaign-character-list" class="hub-data-list hub-data-list--flush"></div>
+							<div id="campaign-character-list" class="hub-data-list hub-data-list--flush" tabindex="-1" aria-labelledby="campaign-character-title"></div>
 							<p id="campaign-character-empty" class="hub-empty hub-empty--compact ve-hidden"></p>
 							<button id="campaign-upload-local" class="hub-button" type="button">Add a local character copy</button>
 							<div id="campaign-upload-local-controls" class="hub-local-copy ve-hidden">
@@ -99,46 +142,76 @@
 								</div>
 							</div>
 							<p id="campaign-upload-local-status" class="hub-inline-status" role="status" aria-live="polite"></p>
-						</section>
+							</div>
 
-						<section id="campaign-party-panel" class="hub-campaign-section">
+							<div id="campaign-party-panel" class="hub-manifest-group">
 							<div class="hub-section-heading">
 								<div>
-									<h3 class="hub-campaign-section__title">Party roster</h3>
+									<h4 class="hub-campaign-section__title">Party readiness</h4>
 									<p class="hub-campaign-section__description">Player-visible status from the latest campaign snapshot.</p>
 								</div>
 								<span id="campaign-party-count" class="hub-count" aria-label="Party character count">0</span>
 							</div>
 							<div id="campaign-party-roster" class="hub-data-list hub-data-list--flush"></div>
 							<p id="campaign-party-empty" class="hub-empty hub-empty--compact ve-hidden">No campaign characters have joined the party yet.</p>
-						</section>
-
-						<section id="campaign-inbox-panel" class="hub-campaign-section">
-							<div class="hub-section-heading">
-								<div>
-									<h3 class="hub-campaign-section__title">Inbox</h3>
-									<p class="hub-campaign-section__description">Requests that are waiting for a player or DM.</p>
-								</div>
-								<span id="campaign-inbox-count" class="hub-count" aria-label="Pending request count">0</span>
-							</div>
-							<div class="hub-inbox-grid">
-								<div>
-									<h4 class="hub-subheading">Effects</h4>
-									<div id="campaign-pending-actions" class="hub-data-list hub-data-list--flush"></div>
-									<p id="campaign-pending-actions-empty" class="hub-empty hub-empty--compact ve-hidden">No effect requests are waiting.</p>
-								</div>
-								<div>
-									<h4 class="hub-subheading">Transfers</h4>
-									<div id="campaign-pending-transfers" class="hub-data-list hub-data-list--flush"></div>
-									<p id="campaign-pending-transfers-empty" class="hub-empty hub-empty--compact ve-hidden">No item or currency transfers are waiting.</p>
-								</div>
 							</div>
 						</section>
+					</div>
 
-						<section id="campaign-shared-actions" class="hub-campaign-section">
+					<aside class="hub-campaign-rail" aria-label="Session brief and campaign setup">
+						<section class="hub-rail-section hub-rail-section--tools">
+							<h3 class="hub-rail-section__title">Session brief</h3>
+							<p id="campaign-role-guidance" class="hub-rail-section__description"></p>
+							<div class="hub-quick-actions">
+								<a id="campaign-jump-effect" class="hub-button" href="#campaign-action-form">Propose effect</a>
+								<a id="campaign-jump-transfer" class="hub-button" href="#campaign-transfer-form">Give item or currency</a>
+							</div>
+						</section>
+						<section class="hub-rail-section">
+							<h3 class="hub-rail-section__title">Party inventory</h3>
+							<p id="campaign-party-inventory-status" class="hub-rail-section__description">Loading shared supplies...</p>
+						</section>
+						<section class="hub-rail-section">
+							<h3 class="hub-rail-section__title">Setup health</h3>
+							<dl class="hub-status-list">
+								<div>
+									<dt>Members</dt>
+									<dd id="campaign-member-summary">Loading...</dd>
+								</div>
+								<div>
+									<dt>Homebrew</dt>
+									<dd id="campaign-brew-status">Loading...</dd>
+								</div>
+								<div>
+									<dt>Rules</dt>
+									<dd id="campaign-rules-status">Loading...</dd>
+								</div>
+							</dl>
+						</section>
+					</aside>
+				</div>
+
+				<section id="campaign-activity-panel" class="hub-campaign-section">
+					<div class="hub-section-heading">
+						<div>
+							<h3 class="hub-campaign-section__title">Recent activity</h3>
+							<p class="hub-campaign-section__description">The latest campaign changes visible to you.</p>
+						</div>
+					</div>
+					<div id="campaign-activity-list" class="hub-activity-list"></div>
+					<p id="campaign-activity-empty" class="hub-empty hub-empty--compact ve-hidden">Campaign activity will appear here as the table gets moving.</p>
+				</section>
+
+						<details id="campaign-workbench" class="hub-disclosure hub-disclosure--workbench">
+							<summary aria-describedby="campaign-workbench-description">
+								<span>Campaign actions</span>
+								<span id="campaign-workbench-description">Effects, transfers, XP, and item awards</span>
+							</summary>
+							<div class="hub-disclosure__content hub-disclosure__content--workbench">
+						<section id="campaign-shared-actions" class="hub-campaign-section hub-campaign-section--embedded">
 							<div class="hub-section-heading">
 								<div>
-									<h3 class="hub-campaign-section__title">At the table</h3>
+									<h3 class="hub-campaign-section__title">At-the-table actions</h3>
 									<p class="hub-campaign-section__description">Apply a DM effect or pass something to another character without editing their sheet.</p>
 								</div>
 							</div>
@@ -274,54 +347,11 @@
 								</form>
 							</div>
 						</section>
-
-						<section id="campaign-activity-panel" class="hub-campaign-section">
-							<div class="hub-section-heading">
-								<div>
-									<h3 class="hub-campaign-section__title">Recent activity</h3>
-									<p class="hub-campaign-section__description">The latest campaign changes visible to you.</p>
-								</div>
 							</div>
-							<div id="campaign-activity-list" class="hub-activity-list"></div>
-							<p id="campaign-activity-empty" class="hub-empty hub-empty--compact ve-hidden">Campaign activity will appear here as the table gets moving.</p>
-						</section>
-					</div>
-
-					<aside class="hub-campaign-rail" aria-label="Campaign status and shortcuts">
-						<section class="hub-rail-section hub-rail-section--tools">
-							<h3 class="hub-rail-section__title">Campaign tools</h3>
-							<p id="campaign-role-guidance" class="hub-rail-section__description"></p>
-							<div class="hub-quick-actions">
-								<a id="campaign-jump-effect" class="hub-button" href="#campaign-action-form">Propose effect</a>
-								<a id="campaign-jump-transfer" class="hub-button" href="#campaign-transfer-form">Give item or currency</a>
-							</div>
-						</section>
-						<section class="hub-rail-section">
-							<h3 class="hub-rail-section__title">Party inventory</h3>
-							<p id="campaign-party-inventory-status" class="hub-rail-section__description">Loading shared supplies...</p>
-						</section>
-						<section class="hub-rail-section">
-							<h3 class="hub-rail-section__title">Campaign setup</h3>
-							<dl class="hub-status-list">
-								<div>
-									<dt>Members</dt>
-									<dd id="campaign-member-summary">Loading...</dd>
-								</div>
-								<div>
-									<dt>Homebrew</dt>
-									<dd id="campaign-brew-status">Loading...</dd>
-								</div>
-								<div>
-									<dt>Rules</dt>
-									<dd id="campaign-rules-status">Loading...</dd>
-								</div>
-							</dl>
-						</section>
-					</aside>
-				</div>
+						</details>
 
 				<div class="hub-campaign-admin">
-					<h3 class="hub-campaign-admin__title">Campaign administration</h3>
+					<h3 class="hub-campaign-admin__title">Administration</h3>
 					<details class="hub-disclosure">
 						<summary>People and invitations</summary>
 						<div class="hub-disclosure__content">

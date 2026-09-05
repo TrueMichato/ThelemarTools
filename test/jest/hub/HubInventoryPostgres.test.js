@@ -27,21 +27,29 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		});
 	}
 
-	async function pJoinCampaign (account) {
+	async function pJoinSpecificCampaign ({owner, targetCampaign, account}) {
 		const tokenHash = crypto.randomBytes(32).toString("hex");
 		await store.pCreateInvite({
-			accountId: dm.id,
-			campaignId: campaign.id,
+			accountId: owner.id,
+			campaignId: targetCampaign.id,
 			role: "player",
 			tokenHash,
 			expiresAt: new Date(Date.now() + 60_000),
 			maxUses: 1,
 			idempotencyKey: crypto.randomUUID(),
 		});
-		await store.pRedeemInvite({
+		return (await store.pRedeemInvite({
 			accountId: account.id,
 			tokenHash,
 			idempotencyKey: crypto.randomUUID(),
+		})).membership;
+	}
+
+	async function pJoinCampaign (account) {
+		return pJoinSpecificCampaign({
+			owner: dm,
+			targetCampaign: campaign,
+			account,
 		});
 	}
 
@@ -156,6 +164,73 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 
 	afterAll(async () => {
 		await pool?.end();
+	});
+
+	test("keeps an archived campaign mutation-closed while preserving idempotent replay", async () => {
+		const archiveOwner = await pCreateAccount("Archive Owner");
+		const archiveCampaign = (await store.pCreateCampaign({
+			accountId: archiveOwner.id,
+			name: `${prefix} archive fence`,
+			idempotencyKey: crypto.randomUUID(),
+		})).campaign;
+		const removedAccount = await pCreateAccount("Archive Removed");
+		const leftAccount = await pCreateAccount("Archive Left");
+		const retainedAccount = await pCreateAccount("Archive Retained");
+		const retainedLeaver = await pCreateAccount("Archive Retained Leaver");
+		const removedMembership = await pJoinSpecificCampaign({owner: archiveOwner, targetCampaign: archiveCampaign, account: removedAccount});
+		await pJoinSpecificCampaign({owner: archiveOwner, targetCampaign: archiveCampaign, account: leftAccount});
+		const retainedMembership = await pJoinSpecificCampaign({owner: archiveOwner, targetCampaign: archiveCampaign, account: retainedAccount});
+		await pJoinSpecificCampaign({owner: archiveOwner, targetCampaign: archiveCampaign, account: retainedLeaver});
+		const removeInput = {
+			accountId: archiveOwner.id,
+			campaignId: archiveCampaign.id,
+			membershipId: removedMembership.id,
+			idempotencyKey: crypto.randomUUID(),
+		};
+		const leaveInput = {
+			accountId: leftAccount.id,
+			campaignId: archiveCampaign.id,
+			idempotencyKey: crypto.randomUUID(),
+		};
+		const removed = await store.pRemoveMember(removeInput);
+		const left = await store.pLeaveCampaign(leaveInput);
+		const archiveInput = {
+			accountId: archiveOwner.id,
+			campaignId: archiveCampaign.id,
+			idempotencyKey: crypto.randomUUID(),
+		};
+		const archived = await store.pArchiveCampaign(archiveInput);
+		await expect(store.pArchiveCampaign(archiveInput)).resolves.toEqual(JSON.parse(JSON.stringify(archived)));
+		await expect(store.pRemoveMember(removeInput)).resolves.toEqual(JSON.parse(JSON.stringify(removed)));
+		await expect(store.pLeaveCampaign(leaveInput)).resolves.toEqual(JSON.parse(JSON.stringify(left)));
+		await expect(store.pArchiveCampaign({
+			...archiveInput,
+			idempotencyKey: crypto.randomUUID(),
+		})).rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_NOT_FOUND"}));
+		await expect(store.pRemoveMember({
+			accountId: archiveOwner.id,
+			campaignId: archiveCampaign.id,
+			membershipId: retainedMembership.id,
+			idempotencyKey: crypto.randomUUID(),
+		})).rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_NOT_FOUND"}));
+		await expect(store.pLeaveCampaign({
+			accountId: retainedLeaver.id,
+			campaignId: archiveCampaign.id,
+			idempotencyKey: crypto.randomUUID(),
+		})).rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_NOT_FOUND"}));
+		const evidence = await pool.query(`
+			SELECT
+				(SELECT count(*)::integer FROM hub.domain_events WHERE campaign_id = $1 AND event_type = 'campaign.archived') AS event_count,
+				(SELECT count(*)::integer FROM hub.audit_entries WHERE campaign_id = $1 AND action = 'campaign.archived') AS audit_count,
+				(SELECT count(*)::integer FROM hub.memberships WHERE campaign_id = $1 AND account_id = $2 AND status = 'active') AS retained_count,
+				(SELECT count(*)::integer FROM hub.memberships WHERE campaign_id = $1 AND account_id = $3 AND status = 'active') AS retained_leaver_count
+		`, [archiveCampaign.id, retainedAccount.id, retainedLeaver.id]);
+		expect(evidence.rows[0]).toEqual({
+			event_count: 1,
+			audit_count: 1,
+			retained_count: 1,
+			retained_leaver_count: 1,
+		});
 	});
 
 	test("preserves metadata and idempotency through character, stash, and direct-pass escrow", async () => {
@@ -554,5 +629,65 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		expect((await pReadCharacter(targetOwner.id, target.id)).data.inventory).toEqual([
 			expect.objectContaining({item: {name: `${prefix} contention ration`, source: "PHB", weight: 0.1}, quantity: 9}),
 		]);
+	});
+
+	test("cancels reserved transfers on spectator downgrade and rejects later resolution", async () => {
+		const source = (await store.pCreateCharacter({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			data: {name: `${prefix} role source`, inventory: [], currency: {gp: 4}},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const target = (await store.pCreateCharacter({
+			accountId: observer.id,
+			campaignId: campaign.id,
+			data: {name: `${prefix} role target`, inventory: [], currency: {}},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const reserved = (await store.pProposeTransfer({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: source.id,
+			targetKind: "character",
+			targetId: target.id,
+			payload: {currency: {gp: 2}},
+			idempotencyKey: crypto.randomUUID(),
+		})).transfer;
+		const membership = await store.pGetMembership({accountId: observer.id, campaignId: campaign.id});
+
+		await store.pChangeMemberRole({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			membershipId: membership.id,
+			role: "spectator",
+			idempotencyKey: crypto.randomUUID(),
+		});
+
+		expect((await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === reserved.id).status).toBe("cancelled");
+		expect((await pReadCharacter(dm.id, source.id)).data.currency.gp).toBe(4);
+
+		const afterDowngrade = (await store.pProposeTransfer({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: source.id,
+			targetKind: "character",
+			targetId: target.id,
+			payload: {currency: {gp: 1}},
+			idempotencyKey: crypto.randomUUID(),
+		})).transfer;
+		await expect(store.pResolveTransfer({
+			accountId: observer.id,
+			campaignId: campaign.id,
+			transferId: afterDowngrade.id,
+			decision: "accept",
+			idempotencyKey: crypto.randomUUID(),
+		})).rejects.toMatchObject({code: "FORBIDDEN"});
 	});
 });

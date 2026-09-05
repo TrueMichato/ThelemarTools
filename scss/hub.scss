@@ -657,13 +657,13 @@
 }
 
 .hub-campaign-header {
-	padding: 24px;
+	padding: 28px 32px;
 	border-bottom: 1px solid var(--hub-border);
 }
 
 .hub-campaign-header__main {
 	display: flex;
-	align-items: flex-end;
+	align-items: center;
 	justify-content: space-between;
 	gap: 24px;
 }
@@ -675,10 +675,32 @@
 .hub-campaign-header__title {
 	margin: 0 0 8px;
 	font-family: Cinzel, Georgia, serif;
-	font-size: 2.5rem;
+	font-size: clamp(1.5rem, 9vw, 2.5rem);
 	font-weight: 700;
-	line-height: 1;
+	line-height: 1.08;
 	color: var(--hub-text);
+	overflow-wrap: anywhere;
+	text-wrap: balance;
+}
+
+.hub-campaign-header__summary {
+	max-width: 62ch;
+	margin: 12px 0 0;
+	color: var(--hub-text-secondary);
+	line-height: 1.55;
+}
+
+.hub-toolbar--campaign {
+	background: var(--hub-recessed);
+}
+
+.hub-primary-readonly {
+	display: inline-flex;
+	min-height: 44px;
+	align-items: center;
+	padding: 10px 0;
+	color: var(--hub-text-secondary);
+	font-weight: 700;
 }
 
 .hub-campaign-meta {
@@ -740,16 +762,23 @@
 
 .hub-campaign-layout {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+	grid-template:
+		"manifest attention" auto
+		"manifest session" auto
+		/ minmax(0, 1fr) minmax(300px, 360px);
+	align-items: start;
 }
 
 .hub-campaign-main {
+	grid-area: manifest;
 	min-width: 0;
 }
 
 .hub-campaign-rail {
+	grid-area: session;
 	align-self: start;
 	border-left: 1px solid var(--hub-border);
+	border-bottom: 1px solid var(--hub-border);
 	background: var(--hub-recessed);
 }
 
@@ -758,8 +787,37 @@
 	border-bottom: 1px solid var(--hub-border);
 }
 
-.hub-campaign-section:last-child {
-	border-bottom: 0;
+.hub-campaign-manifest {
+	align-self: stretch;
+}
+
+.hub-campaign-attention {
+	grid-area: attention;
+	border-left: 1px solid var(--hub-border);
+	background: var(--hub-recessed);
+}
+
+.hub-campaign-attention[data-attention="pending"] .hub-count {
+	border-color: color-mix(in srgb, var(--hub-warning) 35%, var(--hub-border));
+	background: color-mix(in srgb, var(--hub-warning) 10%, var(--hub-surface));
+	color: var(--hub-warning);
+}
+
+.hub-manifest-group {
+	padding-top: 20px;
+	border-top: 1px solid var(--hub-border);
+}
+
+.hub-manifest-group + .hub-manifest-group {
+	margin-top: 24px;
+}
+
+.hub-manifest-group .hub-campaign-section__title {
+	font-size: 1rem;
+}
+
+.hub-section-heading--manifest {
+	margin-bottom: 20px;
 }
 
 .hub-campaign-section__title {
@@ -902,6 +960,10 @@
 	background: var(--hub-surface);
 }
 
+.hub-disclosure--workbench {
+	border-top: 0;
+}
+
 .hub-disclosure:last-child {
 	border-bottom: 1px solid var(--hub-border);
 }
@@ -910,11 +972,20 @@
 	display: flex;
 	min-height: 48px;
 	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
 	padding: 10px 14px;
 	color: var(--hub-text);
 	cursor: pointer;
 	font-weight: 700;
 	touch-action: manipulation;
+}
+
+.hub-disclosure summary > span:last-child {
+	color: var(--hub-text-secondary);
+	font-size: 0.8125rem;
+	font-weight: 500;
+	text-align: right;
 }
 
 .hub-disclosure summary:hover {
@@ -928,6 +999,15 @@
 
 .hub-disclosure__content {
 	padding: 4px 14px 18px;
+}
+
+.hub-disclosure__content--workbench {
+	padding: 0;
+	border-top: 1px solid var(--hub-border);
+}
+
+.hub-campaign-section--embedded {
+	border-bottom: 0;
 }
 
 .hub-form--bounded {
@@ -1376,14 +1456,25 @@ a.hub-data-row:hover {
 
 @media (width <= 900px) {
 	.hub-campaign-layout {
-		grid-template-columns: 1fr;
+		grid-template:
+			"attention" auto
+			"manifest" auto
+			"session" auto
+			/ minmax(0, 1fr);
+	}
+
+	.hub-campaign-manifest {
+		border-right: 0;
+	}
+
+	.hub-campaign-attention,
+	.hub-campaign-rail {
+		border-left: 0;
 	}
 
 	.hub-campaign-rail {
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
-		border-top: 1px solid var(--hub-border);
-		border-left: 0;
 	}
 
 	.hub-rail-section {
@@ -1499,6 +1590,10 @@ a.hub-data-row:hover {
 		flex: 1 1 180px;
 	}
 
+	.hub-campaign-header__actions .hub-primary-readonly {
+		width: 100%;
+	}
+
 	.hub-campaign-actions {
 		grid-template-columns: 1fr;
 	}
@@ -1595,12 +1690,18 @@ a.hub-data-row:hover {
 		border-bottom: 1px solid var(--hub-border);
 	}
 
-	.hub-rail-section--tools {
-		display: none;
-	}
-
 	.hub-campaign-admin {
 		padding: 16px;
+	}
+
+	.hub-disclosure summary {
+		align-items: flex-start;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.hub-disclosure summary > span:last-child {
+		text-align: left;
 	}
 
 	.hub-activity-row {

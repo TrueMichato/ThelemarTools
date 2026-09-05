@@ -2,6 +2,7 @@ import {EventEmitter} from "node:events";
 import {HubOutboxDispatcher, HubRealtime} from "../../../server/src/realtime.js";
 import {canViewEvent} from "../../../server/src/projections.js";
 import {computePeerProfile, getDefaultProjectionPolicy} from "../../../server/src/character-projection.js";
+import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
 
 class FakeSocket extends EventEmitter {
 	readyState = 1;
@@ -182,6 +183,73 @@ describe("hub realtime", () => {
 	});
 
 	describe("realtime client ordering", () => {
+		it("reads PostgreSQL cursor authority and sequence from one repeatable-read snapshot", async () => {
+			const queries = [];
+			let isReleased = false;
+			let poolQueryCount = 0;
+			const client = {
+				query: async (sql, params = []) => {
+					queries.push({sql: sql.trim().replaceAll(/\s+/g, " "), params});
+					if (sql.startsWith("BEGIN")) return {rows: [], rowCount: 0};
+					if (sql.includes("FROM hub.memberships")) {
+						return {
+							rows: [{
+								id: "membership-1",
+								campaign_id: "cmp",
+								account_id: "account-1",
+								role: "player",
+								status: "active",
+							}],
+							rowCount: 1,
+						};
+					}
+					if (sql.includes("FROM hub.campaigns")) {
+						return {
+							rows: [{
+								id: "cmp",
+								owner_account_id: "dm-1",
+								name: "Snapshot",
+								status: "active",
+								created_at: new Date("2026-09-05T00:00:00.000Z"),
+								active_rules_version_id: null,
+								active_brew_bundle_version_id: null,
+							}],
+							rowCount: 1,
+						};
+					}
+					if (sql.includes("FROM hub.characters")) return {rows: [], rowCount: 0};
+					if (sql.includes("FROM hub.domain_events")) return {rows: [{sequence: "2"}], rowCount: 1};
+					if (sql === "COMMIT") return {rows: [], rowCount: 0};
+					throw new Error(`Unexpected query: ${sql}`);
+				},
+				release: () => { isReleased = true; },
+			};
+			const pool = {
+				connect: async () => client,
+				query: async () => {
+					poolQueryCount++;
+					throw new Error("Cursor read escaped its transaction.");
+				},
+				on: () => {},
+			};
+			const store = new PostgresHubStore({pool});
+
+			await expect(store.pGetCampaignCursor({accountId: "account-1", campaignId: "cmp"})).resolves.toEqual(expect.objectContaining({
+				cursor: {campaignId: "cmp", lastSequence: 2},
+				membership: expect.objectContaining({accountId: "account-1", role: "player"}),
+			}));
+			expect(queries.map(({sql}) => sql)).toEqual([
+				"BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY",
+				expect.stringContaining("FROM hub.memberships"),
+				expect.stringContaining("FROM hub.campaigns"),
+				expect.stringContaining("FROM hub.characters"),
+				expect.stringContaining("FROM hub.domain_events"),
+				"COMMIT",
+			]);
+			expect(poolQueryCount).toBe(0);
+			expect(isReleased).toBe(true);
+		});
+
 		it("reaches the live state even when a consumer listener throws", async () => {
 			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
 			const errors = [];
@@ -248,6 +316,51 @@ describe("hub realtime", () => {
 				activeBrewBundleVersionId: "brew-1",
 			}));
 			expect(events).toEqual([{id: "roll-1", sequence: 4, type: "roll.logged"}]);
+		});
+
+		it("lets consumers omit snapshot-covered role history while receiving a later live authority change", async () => {
+			const {
+				HubRealtimeClient,
+				isRealtimeEventCoveredByBaseline,
+			} = await import("../../../js/hub/hub-realtime-client.js");
+			const client = new HubRealtimeClient({campaignId: "cmp", location: {protocol: "https:", host: "tools.example"}});
+			const baselines = [];
+			const events = [];
+			let authorityBaselineSequence = 0;
+			client.on("cursor", baseline => {
+				baselines.push(baseline);
+				authorityBaselineSequence = Math.max(authorityBaselineSequence, baseline.cursor?.lastSequence || 0);
+			});
+			client.on("event", event => {
+				if (!isRealtimeEventCoveredByBaseline({event, baselineSequence: authorityBaselineSequence})) events.push(event);
+			});
+
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 2},
+				campaign: {id: "cmp", status: "active"},
+				membership: {accountId: "account-1", role: "player"},
+				characterRefs: [],
+				events: [
+					{id: "role-spectator", sequence: 1, type: "membership.role_changed", payload: {accountId: "account-1", role: "spectator"}},
+					{id: "role-player", sequence: 2, type: "membership.role_changed", payload: {accountId: "account-1", role: "player"}},
+				],
+			});
+
+			expect(baselines).toEqual([expect.objectContaining({
+				membership: {accountId: "account-1", role: "player"},
+			})]);
+			expect(events).toEqual([]);
+
+			const liveDowngrade = {
+				id: "role-live-spectator",
+				sequence: 3,
+				type: "membership.role_changed",
+				payload: {accountId: "account-1", role: "spectator"},
+			};
+			client._handleMessage({type: "event", event: liveDowngrade});
+
+			expect(events).toEqual([liveDowngrade]);
 		});
 
 		it("continues replay from the server-scanned sequence even when a page has no visible events", async () => {

@@ -2971,42 +2971,56 @@ export class PostgresHubStore {
 	 * document or peer profile — those come from the scoped HTTP projector.
 	 */
 	async pGetCampaignCursor ({accountId, campaignId}) {
-		const membership = await this.pGetMembership({accountId, campaignId});
-		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
-		const [campaignResult, characterResult, sequenceResult] = await Promise.all([
-			this._pool.query(`
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+			const membershipResult = await client.query(`
+				SELECT id, campaign_id, account_id, role, status
+				FROM hub.memberships
+				WHERE campaign_id = $1 AND account_id = $2 AND status = 'active'
+			`, [campaignId, accountId]);
+			if (!membershipResult.rowCount) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+			const membership = getMembership(membershipResult.rows[0]);
+			const campaignResult = await client.query(`
 				SELECT id, owner_account_id, name, status, created_at,
 					active_rules_version_id, active_brew_bundle_version_id
 				FROM hub.campaigns
 				WHERE id = $1
-			`, [campaignId]),
-			this._pool.query(`SELECT id, owner_account_id, revision, projection_revision, operation_watermark FROM hub.characters WHERE campaign_id = $1 AND status = 'active' ORDER BY id`, [campaignId]),
-			this._pool.query(`SELECT COALESCE(max(sequence), 0) AS sequence FROM hub.domain_events WHERE campaign_id = $1`, [campaignId]),
-		]);
-		const campaign = campaignResult.rows[0];
-		return {
-			cursor: {campaignId, lastSequence: Number(sequenceResult.rows[0].sequence)},
-			campaign: campaign
-				? {
-					id: campaign.id,
-					ownerAccountId: campaign.owner_account_id,
-					name: campaign.name,
-					status: campaign.status,
-					createdAt: campaign.created_at,
-					activeRulesVersionId: campaign.active_rules_version_id,
-					activeBrewBundleVersionId: campaign.active_brew_bundle_version_id,
-				}
-				: null,
-			membership,
-			characterRefs: characterResult.rows.map(row => ({
-				id: row.id,
-				revision: Number(row.revision),
-				projectionRevision: Number(row.projection_revision ?? 1),
-				...(["dm", "co_dm"].includes(membership.role) || row.owner_account_id === accountId
-					? {operationWatermark: Number(row.operation_watermark ?? 0)}
-					: {}),
-			})),
-		};
+			`, [campaignId]);
+			const characterResult = await client.query(`SELECT id, owner_account_id, revision, projection_revision, operation_watermark FROM hub.characters WHERE campaign_id = $1 AND status = 'active' ORDER BY id`, [campaignId]);
+			const sequenceResult = await client.query(`SELECT COALESCE(max(sequence), 0) AS sequence FROM hub.domain_events WHERE campaign_id = $1`, [campaignId]);
+			const campaign = campaignResult.rows[0];
+			const cursor = {
+				cursor: {campaignId, lastSequence: Number(sequenceResult.rows[0].sequence)},
+				campaign: campaign
+					? {
+						id: campaign.id,
+						ownerAccountId: campaign.owner_account_id,
+						name: campaign.name,
+						status: campaign.status,
+						createdAt: campaign.created_at,
+						activeRulesVersionId: campaign.active_rules_version_id,
+						activeBrewBundleVersionId: campaign.active_brew_bundle_version_id,
+					}
+					: null,
+				membership,
+				characterRefs: characterResult.rows.map(row => ({
+					id: row.id,
+					revision: Number(row.revision),
+					projectionRevision: Number(row.projection_revision ?? 1),
+					...(["dm", "co_dm"].includes(membership.role) || row.owner_account_id === accountId
+						? {operationWatermark: Number(row.operation_watermark ?? 0)}
+						: {}),
+				})),
+			};
+			await client.query("COMMIT");
+			return cursor;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
 	}
 
 	async pListVisibleEvents ({accountId, campaignId, afterSequence = 0, limit = 500}) {
@@ -5126,6 +5140,24 @@ export class PostgresHubStore {
 		});
 	}
 
+	async _pCancelTransfersForLifecycle ({client, campaignId, affectedAccountId, characterIds, actorAccountId, reason}) {
+		const transfers = await client.query(`
+			SELECT *
+			FROM hub.transfers
+			WHERE campaign_id = $1 AND status = 'reserved'
+				AND (
+					actor_account_id = $2
+					OR source_character_id = ANY($3::uuid[])
+					OR target_character_id = ANY($3::uuid[])
+				)
+			ORDER BY id
+			FOR UPDATE
+		`, [campaignId, affectedAccountId, characterIds]);
+		for (const row of transfers.rows) {
+			await this._pCancelTransferForLifecycle({client, row, actorAccountId, reason});
+		}
+	}
+
 	async _pCancelSemanticOperationsForLifecycle ({
 		client,
 		campaignId,
@@ -5210,21 +5242,14 @@ export class PostgresHubStore {
 			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [characterId]);
 		}
 
-		const transfers = await client.query(`
-			SELECT *
-			FROM hub.transfers
-			WHERE campaign_id = $1 AND status = 'reserved'
-				AND (
-					actor_account_id = $2
-					OR source_character_id = ANY($3::uuid[])
-					OR target_character_id = ANY($3::uuid[])
-				)
-			ORDER BY id
-			FOR UPDATE
-		`, [campaignId, membership.accountId, characterIds]);
-		for (const row of transfers.rows) {
-			await this._pCancelTransferForLifecycle({client, row, actorAccountId, reason: "membership_lifecycle"});
-		}
+		await this._pCancelTransfersForLifecycle({
+			client,
+			campaignId,
+			affectedAccountId: membership.accountId,
+			characterIds,
+			actorAccountId,
+			reason: "membership_lifecycle",
+		});
 
 		const actions = await client.query(`
 			SELECT pa.*, c.owner_account_id AS target_owner_account_id
@@ -5348,6 +5373,14 @@ export class PostgresHubStore {
 					affectedAccountId: target.account_id,
 					characterIds: characters.rows.map(row => row.id),
 				});
+				await this._pCancelTransfersForLifecycle({
+					client,
+					campaignId,
+					affectedAccountId: target.account_id,
+					characterIds: characters.rows.map(row => row.id),
+					actorAccountId: accountId,
+					reason: "membership_role_changed",
+				});
 			}
 			const updated = await client.query(`UPDATE hub.memberships SET role = $2, updated_at = now() WHERE id = $1 RETURNING id, campaign_id, account_id, role, status`, [membershipId, role]);
 			const membership = getMembership(updated.rows[0]);
@@ -5375,7 +5408,7 @@ export class PostgresHubStore {
 				return prior;
 			}
 			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [campaignId]);
-			const campaign = (await client.query(`SELECT * FROM hub.campaigns WHERE id = $1 FOR UPDATE`, [campaignId])).rows[0];
+			const campaign = (await client.query(`SELECT * FROM hub.campaigns WHERE id = $1 AND status = 'active' FOR UPDATE`, [campaignId])).rows[0];
 			if (!campaign) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 			const targetDiscovery = (await client.query(`
 				SELECT account_id
@@ -5426,7 +5459,7 @@ export class PostgresHubStore {
 				return prior;
 			}
 			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [campaignId]);
-			const campaign = (await client.query(`SELECT * FROM hub.campaigns WHERE id = $1 FOR UPDATE`, [campaignId])).rows[0];
+			const campaign = (await client.query(`SELECT * FROM hub.campaigns WHERE id = $1 AND status = 'active' FOR UPDATE`, [campaignId])).rows[0];
 			if (!campaign) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 			const membership = (await this._pLockSemanticMemberships({
 				client,
@@ -5524,7 +5557,7 @@ export class PostgresHubStore {
 			const transferLookup = await client.query(`SELECT * FROM hub.transfers WHERE campaign_id = $1 AND id = $2 AND status = 'reserved'`, [campaignId, transferId]);
 			if (!transferLookup.rowCount) throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
 			const transferPre = this._getTransfer(transferLookup.rows[0]);
-			const membership = await this._pGetMembershipForUpdate({client, accountId, campaignId});
+			const membership = await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm", "player"]});
 			await this._pLockInventoryParticipants({client, ids: [transferPre.sourceId, transferPre.targetId]});
 			const transferResult = await client.query(`SELECT * FROM hub.transfers WHERE campaign_id = $1 AND id = $2 AND status = 'reserved' FOR UPDATE`, [campaignId, transferId]);
 			if (!transferResult.rowCount) throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
@@ -5895,6 +5928,7 @@ export class PostgresHubStore {
 			const campaignResult = await client.query(`SELECT * FROM hub.campaigns WHERE id = $1 FOR UPDATE`, [campaignId]);
 			const campaign = campaignResult.rows[0];
 			if (!campaign || campaign.owner_account_id !== accountId) throw new HubStoreError("FORBIDDEN", `Only the campaign owner can archive it.`, {status: 403});
+			if (campaign.status !== "active") throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 			const reserved = await client.query(`SELECT 1 FROM hub.transfers WHERE campaign_id = $1 AND status = 'reserved' LIMIT 1 FOR UPDATE`, [campaignId]);
 			if (reserved.rowCount) throw new HubStoreError("CAMPAIGN_BUSY", `Resolve reserved transfers before archiving.`, {status: 409});
 			await this._pCancelSemanticOperationsForLifecycle({

@@ -6,7 +6,7 @@ import {
 	HUB_CAPABILITY_CAMPAIGN_RULES_POLICY,
 	pLoadHubCapabilityModule,
 } from "./hub-capabilities.js";
-import {HubRealtimeClient} from "./hub-realtime-client.js";
+import {HubRealtimeClient, isRealtimeEventCoveredByBaseline} from "./hub-realtime-client.js";
 import {renderHubActivityRows} from "./hub-activity-render.js";
 import {
 	getOwnerMembershipId,
@@ -749,20 +749,21 @@ function applyCampaignRoleLayout ({campaign, characters}) {
 	const guidance = document.getElementById("campaign-role-guidance");
 	if (isDm) {
 		if (title) title.textContent = "Live character roster";
-		if (description) description.textContent = "Open any campaign character or move directly into the live DM workspace.";
-		if (guidance) guidance.textContent = "Keep play moving from the live workspace, then return here for requests and campaign setup.";
+		if (description) description.textContent = "Open any campaign character or continue into the live DM workspace.";
+		if (guidance) guidance.textContent = "Lead the session in the DM workspace. Return here for requests, shared supplies, and setup health.";
 	} else {
 		if (title) title.textContent = "My characters";
 		if (description) description.textContent = "Your cloud characters for this campaign. Local originals remain independent.";
 		if (guidance) {
 			guidance.textContent = isSpectator
-				? "Follow the party roster and campaign activity. Gameplay controls are reserved for players and DMs."
-				: "Open your character, check requests, or send a transfer to another player.";
+				? "Follow party readiness and recent activity. Gameplay and management controls stay read only."
+				: "Continue on your character sheet, respond to requests, or share something with the party.";
 		}
 	}
 
 	setHidden(document.getElementById("campaign-characters-panel"), isSpectator);
 	setHidden(document.getElementById("campaign-party-panel"), isDm);
+	setHidden(document.getElementById("campaign-workbench"), !canPlay);
 	setHidden(document.getElementById("campaign-shared-actions"), !canPlay);
 	setHidden(document.getElementById("campaign-action-form"), !isDm);
 	setHidden(document.getElementById("campaign-jump-effect"), !isDm);
@@ -773,12 +774,51 @@ function applyCampaignRoleLayout ({campaign, characters}) {
 	setHidden(document.getElementById("campaign-upload-local"), !canPlay);
 
 	const primaryCharacter = document.getElementById("campaign-open-primary-character");
-	const firstCharacter = !isDm ? characters[0] : null;
-	if (primaryCharacter && firstCharacter) {
-		primaryCharacter.href = `charactersheet.html?id=${encodeURIComponent(firstCharacter.id)}&hubCampaign=${encodeURIComponent(campaign.id)}`;
-		primaryCharacter.textContent = `Open ${getCharacterName(firstCharacter)}`;
+	const characterSetup = document.getElementById("campaign-open-character-setup");
+	const readonlyPrimary = document.getElementById("campaign-primary-readonly");
+	const playerCharacters = campaign.status === "active" && campaign.role === "player" ? characters : [];
+	const primaryPlayerCharacter = playerCharacters.length === 1 ? playerCharacters[0] : null;
+	if (primaryCharacter && primaryPlayerCharacter) {
+		primaryCharacter.href = `charactersheet.html?id=${encodeURIComponent(primaryPlayerCharacter.id)}&hubCampaign=${encodeURIComponent(campaign.id)}`;
+		primaryCharacter.textContent = `Open ${getCharacterName(primaryPlayerCharacter)}`;
 	}
-	setHidden(primaryCharacter, !firstCharacter);
+	if (characterSetup && playerCharacters.length !== 1) {
+		const hasCharacterChoices = playerCharacters.length > 1;
+		characterSetup.href = hasCharacterChoices ? "#campaign-character-list" : "#campaign-upload-local";
+		characterSetup.textContent = hasCharacterChoices ? "Choose a character" : "Add a local character copy";
+	}
+	setHidden(primaryCharacter, !primaryPlayerCharacter);
+	setHidden(characterSetup, campaign.status !== "active" || campaign.role !== "player" || playerCharacters.length === 1);
+	setHidden(readonlyPrimary, !isSpectator && campaign.status === "active");
+
+	const workbenchDescription = document.getElementById("campaign-workbench-description");
+	if (workbenchDescription) {
+		workbenchDescription.textContent = isDm
+			? "Effects, transfers, XP, and item awards"
+			: "Item and currency transfers";
+	}
+}
+
+function initCampaignWorkbenchLinks () {
+	for (const [linkId, targetId] of [
+		["campaign-jump-effect", "campaign-action-form"],
+		["campaign-jump-transfer", "campaign-transfer-form"],
+	]) {
+		document.getElementById(linkId)?.addEventListener("click", () => {
+			const workbench = document.getElementById("campaign-workbench");
+			if (workbench) workbench.open = true;
+			requestAnimationFrame(() => document.getElementById(targetId)?.querySelector("select, input, button")?.focus());
+		});
+	}
+
+	document.getElementById("campaign-open-character-setup")?.addEventListener("click", event => {
+		const targetId = event.currentTarget.getAttribute("href")?.slice(1);
+		if (!targetId) return;
+		requestAnimationFrame(() => {
+			const target = document.getElementById(targetId);
+			(target?.matches("[tabindex], button, a, input, select, textarea") ? target : target?.querySelector("a, button, input, select, textarea"))?.focus();
+		});
+	});
 }
 
 function setFormStatus ({formId, message = "", isError = false}) {
@@ -829,7 +869,7 @@ async function pRenderAccountSessions () {
 					await api.pRevokeSession({sessionId: session.id, idempotencyKey: crypto.randomUUID()});
 					await pRenderAccountSessions();
 				} catch (error) {
-					renderError(error);
+					if (!isCampaignReloadRequired) renderError(error);
 					button.disabled = false;
 				}
 			});
@@ -1013,12 +1053,14 @@ async function pInitCampaign ({session}) {
 	renderRecentActivity({events, characters: snapshot.characters, members});
 	renderCampaignContext(context);
 	applyCampaignRoleLayout({campaign, characters});
+	initCampaignWorkbenchLinks();
 	if (campaign.status !== "active") {
 		setHidden(document.getElementById("campaign-invite-form"), true);
 		setHidden(document.getElementById("campaign-upload-local"), true);
 		setHidden(document.getElementById("campaign-dm-controls"), true);
 		setHidden(document.getElementById("campaign-open-dm-screen"), true);
 		setHidden(document.getElementById("campaign-inbox-panel"), true);
+		setHidden(document.getElementById("campaign-workbench"), true);
 		setHidden(document.getElementById("campaign-shared-actions"), true);
 		setHidden(document.getElementById("campaign-leave"), true);
 		setHidden(document.getElementById("campaign-jump-effect"), true);
@@ -1049,6 +1091,7 @@ async function pInitCampaign ({session}) {
 	let liveCharacters = snapshot.characters;
 	let liveRoster = snapshot.roster || [];
 	let liveLastSequence = snapshot.lastSequence;
+	let authorityBaselineSequence = snapshot.lastSequence || 0;
 	let refreshTimer = null;
 	let isRefreshing = false;
 	let isRefreshQueued = false;
@@ -1086,6 +1129,7 @@ async function pInitCampaign ({session}) {
 				liveLastSequence = snapshotNxt.lastSequence;
 			}
 			renderCharacterList({campaignId, characters: charactersNxt});
+			applyCampaignRoleLayout({campaign, characters: charactersNxt});
 			renderPartyRoster({
 				campaignId,
 				characters: liveCharacters,
@@ -1100,6 +1144,7 @@ async function pInitCampaign ({session}) {
 				renderCampaignContext(context);
 				void rulesPolicyManagerPromise.then(manager => manager?.replaceContext(context));
 			}
+			if (isCampaignReloadRequired) return;
 			await Promise.all([
 				renderPendingActions({campaign, campaignId, session, targetCharacters: liveCharacters, members: membersNxt, roster: liveRoster}),
 				pRefreshTransferState({
@@ -1128,7 +1173,28 @@ async function pInitCampaign ({session}) {
 			void pRefreshLiveViews();
 		}, 250);
 	};
+	const reloadForAuthorityChange = () => {
+		if (isCampaignReloadRequired) return;
+		isCampaignReloadRequired = true;
+		if (refreshTimer != null) {
+			window.clearTimeout(refreshTimer);
+			refreshTimer = null;
+		}
+		realtime.close();
+		window.location.reload();
+	};
 	realtime.on("event", event => {
+		const isOwnRoleChange = event.type === "membership.role_changed"
+			&& event.payload?.accountId === session.account.id
+			&& event.payload?.role !== campaign.role;
+		const isOwnRoleChangeCoveredByBaseline = isOwnRoleChange && isRealtimeEventCoveredByBaseline({
+			event,
+			baselineSequence: authorityBaselineSequence,
+		});
+		if (event.type === "campaign.archived" || (isOwnRoleChange && !isOwnRoleChangeCoveredByBaseline)) {
+			reloadForAuthorityChange();
+			return;
+		}
 		if (!isCampaignReloadRequired && navigator.onLine) {
 			liveLastSequence = Math.max(liveLastSequence, event.sequence || 0);
 			liveEvents = [...liveEvents.filter(existing => existing.id !== event.id), event]
@@ -1143,6 +1209,11 @@ async function pInitCampaign ({session}) {
 		queueLiveRefresh({isCampaignContextRefresh: event.type === "rules.activated"});
 	});
 	realtime.on("cursor", baseline => {
+		authorityBaselineSequence = Math.max(authorityBaselineSequence, baseline?.cursor?.lastSequence || 0);
+		if (baseline?.membership?.role && baseline.membership.role !== campaign.role) {
+			reloadForAuthorityChange();
+			return;
+		}
 		if ((baseline?.cursor?.lastSequence || 0) >= liveLastSequence) {
 			liveLastSequence = baseline.cursor.lastSequence;
 		}
@@ -1456,7 +1527,16 @@ function updateInboxCount ({kind, count}) {
 	const element = document.getElementById("campaign-inbox-count");
 	if (!element) return;
 	element.dataset[kind] = `${count}`;
-	element.textContent = `${Number(element.dataset.actions || 0) + Number(element.dataset.transfers || 0)}`;
+	const total = Number(element.dataset.actions || 0) + Number(element.dataset.transfers || 0);
+	element.textContent = `${total}`;
+	const panel = document.getElementById("campaign-inbox-panel");
+	if (panel) panel.dataset.attention = total ? "pending" : "clear";
+	const summary = document.getElementById("campaign-attention-summary");
+	if (summary) {
+		summary.textContent = total
+			? `${total} pending ${total === 1 ? "request" : "requests"}.`
+			: "No pending requests.";
+	}
 }
 
 async function renderPendingActions ({campaign, campaignId, session, targetCharacters, members, roster = null}) {
@@ -1530,8 +1610,9 @@ async function renderPendingTransfers ({campaign, campaignId, session, targetCha
 		const targetName = getContainerName({kind: transfer.targetKind, id: transfer.targetId, characters: targetCharacters});
 		text.textContent = `${sourceName} offers ${contents} to ${targetName}.`;
 		const target = transfer.targetKind === "character" ? getCharacterById(targetCharacters, transfer.targetId) : null;
-		const canAccept = isDm || getProjectionOwnerAccountId(target) === session.account.id;
-		const canReject = canAccept || transfer.actorAccountId === session.account.id;
+		const canAct = isDm || campaign.role === "player";
+		const canAccept = canAct && (isDm || getProjectionOwnerAccountId(target) === session.account.id);
+		const canReject = canAct && (canAccept || transfer.actorAccountId === session.account.id);
 		const meta = document.createElement("span");
 		meta.className = "hub-data-row__meta";
 		meta.textContent = canAccept
