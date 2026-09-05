@@ -38,7 +38,9 @@ This was a dual-agent critique, not user research. The local static environment 
 API, so no authentic populated campaign data loaded. Assessment A instead exercised source-faithful representative
 DM/player states at 1440 px and 390 px. Assessment B injected the detector in an automated tab. No durable visual
 overlay remains because the critique-only servers were stopped, and this brief does not claim screenshots or observed
-user behavior.
+user behavior from that preliminary critique. PR #243's later production-stack E2E run separately attached
+desktop/mobile day/night screenshots for DM, player, and read-only states; those implementation artifacts support the
+one-surface regression evidence below, not a user study or old/new coexistence comparison.
 
 The static detector returned zero findings. The authenticated-but-hidden DOM scan reported 58 hits across 54 elements:
 52 `undersized-ui-text`, 5 `tiny-text`, and 1 `overused-font`. The Inter finding is a false positive because Inter is
