@@ -1,3 +1,9 @@
+export function isRealtimeEventCoveredByBaseline ({event, baselineSequence}) {
+	return Number.isSafeInteger(event?.sequence)
+		&& Number.isSafeInteger(baselineSequence)
+		&& event.sequence <= baselineSequence;
+}
+
 export class HubRealtimeClient {
 	constructor ({
 		campaignId,

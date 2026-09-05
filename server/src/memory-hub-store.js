@@ -1034,7 +1034,7 @@ export class MemoryHubStore {
 	}
 
 	async pListCharacters ({accountId, campaignId = null}) {
-		if (campaignId) this._getMembership({accountId, campaignId});
+		if (campaignId) this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
 		return [...this._characters.values()]
 			.filter(it => it.status === "active")
 			.filter(it => campaignId ? it.campaignId === campaignId : it.ownerAccountId === accountId)

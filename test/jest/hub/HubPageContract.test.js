@@ -198,6 +198,10 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("event.type === \"membership.role_changed\"");
 		expect(source).toContain("event.payload?.accountId === session.account.id");
 		expect(source).toContain("event.payload?.role !== campaign.role");
+		expect(source).toContain("isRealtimeEventCoveredByBaseline({");
+		expect(source).toContain("baselineSequence: authorityBaselineSequence");
+		expect(source).toContain("isOwnRoleChange && !isOwnRoleChangeCoveredByBaseline");
+		expect(source).toContain("authorityBaselineSequence = Math.max(authorityBaselineSequence, baseline?.cursor?.lastSequence || 0)");
 		expect(source).toContain("baseline.membership.role !== campaign.role");
 		expect(source).toContain("if (isCampaignReloadRequired) return;");
 		expect(source).toContain("snapshotNxt.lastSequence >= liveLastSequence");

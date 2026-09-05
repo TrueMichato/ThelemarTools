@@ -250,6 +250,51 @@ describe("hub realtime", () => {
 			expect(events).toEqual([{id: "roll-1", sequence: 4, type: "roll.logged"}]);
 		});
 
+		it("lets consumers omit snapshot-covered role history while receiving a later live authority change", async () => {
+			const {
+				HubRealtimeClient,
+				isRealtimeEventCoveredByBaseline,
+			} = await import("../../../js/hub/hub-realtime-client.js");
+			const client = new HubRealtimeClient({campaignId: "cmp", location: {protocol: "https:", host: "tools.example"}});
+			const baselines = [];
+			const events = [];
+			let authorityBaselineSequence = 0;
+			client.on("cursor", baseline => {
+				baselines.push(baseline);
+				authorityBaselineSequence = Math.max(authorityBaselineSequence, baseline.cursor?.lastSequence || 0);
+			});
+			client.on("event", event => {
+				if (!isRealtimeEventCoveredByBaseline({event, baselineSequence: authorityBaselineSequence})) events.push(event);
+			});
+
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 2},
+				campaign: {id: "cmp", status: "active"},
+				membership: {accountId: "account-1", role: "player"},
+				characterRefs: [],
+				events: [
+					{id: "role-spectator", sequence: 1, type: "membership.role_changed", payload: {accountId: "account-1", role: "spectator"}},
+					{id: "role-player", sequence: 2, type: "membership.role_changed", payload: {accountId: "account-1", role: "player"}},
+				],
+			});
+
+			expect(baselines).toEqual([expect.objectContaining({
+				membership: {accountId: "account-1", role: "player"},
+			})]);
+			expect(events).toEqual([]);
+
+			const liveDowngrade = {
+				id: "role-live-spectator",
+				sequence: 3,
+				type: "membership.role_changed",
+				payload: {accountId: "account-1", role: "spectator"},
+			};
+			client._handleMessage({type: "event", event: liveDowngrade});
+
+			expect(events).toEqual([liveDowngrade]);
+		});
+
 		it("continues replay from the server-scanned sequence even when a page has no visible events", async () => {
 			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
 			const sent = [];

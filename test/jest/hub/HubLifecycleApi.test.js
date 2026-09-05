@@ -6,6 +6,7 @@ const ORIGIN = "https://tools.example";
 const identities = {
 	dm: {provider: "github", providerSubject: "1", login: "dm", displayName: "DM"},
 	player: {provider: "github", providerSubject: "2", login: "player", displayName: "Player"},
+	outsider: {provider: "github", providerSubject: "3", login: "outsider", displayName: "Outsider"},
 };
 
 function cookie (response, name) {
@@ -23,7 +24,7 @@ describe("Hub lifecycle API", () => {
 		app = await createHubApp({
 			store: new MemoryHubStore(),
 			oauthProvider: {getAuthorizationUrl: ({state}) => `https://x/?state=${state}`, pExchangeCode: async () => identity},
-			config: {appOrigin: ORIGIN, cookieSecret: "x".repeat(32), csrfSecret: "y".repeat(32), allowedOAuthSubjects: ["github:1", "github:2"]},
+			config: {appOrigin: ORIGIN, cookieSecret: "x".repeat(32), csrfSecret: "y".repeat(32), allowedOAuthSubjects: ["github:1", "github:2", "github:3"]},
 		});
 	});
 
@@ -118,5 +119,50 @@ describe("Hub lifecycle API", () => {
 		});
 		expect(cancelled.json().deletion.status).toBe("active");
 		expect((await app.inject({method: "GET", url: "/api/campaigns", headers: {cookie: grace.cookie}})).statusCode).toBe(200);
+	});
+
+	it("bootstraps an archived campaign from the memory store without exposing it to outsiders", async () => {
+		const {dm, player, campaign} = await setupCampaign();
+		const outsider = await signIn(identities.outsider);
+		const created = await app.inject({
+			method: "POST",
+			url: "/api/characters",
+			headers: headers(player),
+			payload: {
+				clientImportId: "archived-bootstrap-character",
+				campaignId: campaign.id,
+				schemaVersion: 1,
+				data: {name: "Archived Hero"},
+			},
+		});
+		expect(created.statusCode).toBe(201);
+		expect((await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/archive`,
+			headers: headers(dm),
+		})).statusCode).toBe(200);
+
+		const authorizedReads = await Promise.all([
+			app.inject({method: "GET", url: `/api/campaigns/${campaign.id}`, headers: {cookie: player.cookie}}),
+			app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/members`, headers: {cookie: player.cookie}}),
+			app.inject({method: "GET", url: `/api/characters?campaignId=${campaign.id}`, headers: headers(player)}),
+			app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/snapshot`, headers: headers(player)}),
+			app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/context`, headers: {cookie: player.cookie}}),
+			app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/events`, headers: {cookie: player.cookie}}),
+		]);
+		expect(authorizedReads.map(response => response.statusCode)).toEqual([200, 200, 200, 200, 200, 200]);
+		expect(authorizedReads[0].json().campaign.status).toBe("archived");
+		expect(authorizedReads[2].json().characters).toEqual([]);
+		expect(authorizedReads[3].json().snapshot).toEqual(expect.objectContaining({
+			campaign: expect.objectContaining({status: "archived"}),
+			characters: [],
+		}));
+
+		const unauthorizedReads = await Promise.all([
+			app.inject({method: "GET", url: `/api/campaigns/${campaign.id}`, headers: {cookie: outsider.cookie}}),
+			app.inject({method: "GET", url: `/api/characters?campaignId=${campaign.id}`, headers: headers(outsider)}),
+		]);
+		expect(unauthorizedReads.map(response => response.statusCode)).toEqual([404, 404]);
+		expect(unauthorizedReads.map(response => response.json().error)).toEqual(["CAMPAIGN_NOT_FOUND", "CAMPAIGN_NOT_FOUND"]);
 	});
 });

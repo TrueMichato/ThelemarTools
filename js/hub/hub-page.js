@@ -6,7 +6,7 @@ import {
 	HUB_CAPABILITY_CAMPAIGN_RULES_POLICY,
 	pLoadHubCapabilityModule,
 } from "./hub-capabilities.js";
-import {HubRealtimeClient} from "./hub-realtime-client.js";
+import {HubRealtimeClient, isRealtimeEventCoveredByBaseline} from "./hub-realtime-client.js";
 import {renderHubActivityRows} from "./hub-activity-render.js";
 import {
 	getOwnerMembershipId,
@@ -1091,6 +1091,7 @@ async function pInitCampaign ({session}) {
 	let liveCharacters = snapshot.characters;
 	let liveRoster = snapshot.roster || [];
 	let liveLastSequence = snapshot.lastSequence;
+	let authorityBaselineSequence = snapshot.lastSequence || 0;
 	let refreshTimer = null;
 	let isRefreshing = false;
 	let isRefreshQueued = false;
@@ -1186,7 +1187,11 @@ async function pInitCampaign ({session}) {
 		const isOwnRoleChange = event.type === "membership.role_changed"
 			&& event.payload?.accountId === session.account.id
 			&& event.payload?.role !== campaign.role;
-		if (event.type === "campaign.archived" || isOwnRoleChange) {
+		const isOwnRoleChangeCoveredByBaseline = isOwnRoleChange && isRealtimeEventCoveredByBaseline({
+			event,
+			baselineSequence: authorityBaselineSequence,
+		});
+		if (event.type === "campaign.archived" || (isOwnRoleChange && !isOwnRoleChangeCoveredByBaseline)) {
 			reloadForAuthorityChange();
 			return;
 		}
@@ -1204,6 +1209,7 @@ async function pInitCampaign ({session}) {
 		queueLiveRefresh({isCampaignContextRefresh: event.type === "rules.activated"});
 	});
 	realtime.on("cursor", baseline => {
+		authorityBaselineSequence = Math.max(authorityBaselineSequence, baseline?.cursor?.lastSequence || 0);
 		if (baseline?.membership?.role && baseline.membership.role !== campaign.role) {
 			reloadForAuthorityChange();
 			return;

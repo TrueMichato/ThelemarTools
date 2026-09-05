@@ -112,6 +112,16 @@ test("campaign overview remains role-aware across responsive day and night state
 			characterName: "Retained Watcher",
 		});
 		await expect(spectator.page.locator("#campaign-connection-status")).toHaveText("Live updates connected");
+		await spectator.page.goto("/hub.html");
+		await dm.changeMemberRoleViaApi({campaignId, displayName: "Former Player Observer", role: "spectator"});
+		await dm.changeMemberRoleViaApi({campaignId, displayName: "Former Player Observer", role: "player"});
+		await spectator.expectRoleAdaptiveCampaignOverview({
+			campaignId,
+			role: "player",
+			primaryAction: "character",
+			characterName: "Retained Watcher",
+		});
+		await expect(spectator.page.locator("#campaign-connection-status")).toHaveText("Live updates connected");
 		await dm.changeMemberRoleViaApi({campaignId, displayName: "Former Player Observer", role: "spectator"});
 		await expect(spectator.page.locator("#campaign-content")).toHaveAttribute("data-campaign-role", "spectator", {timeout: 15_000});
 		await spectator.expectCampaignPrimaryAction({primaryAction: "read-only"});
