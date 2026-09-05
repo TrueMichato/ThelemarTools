@@ -39,6 +39,7 @@ import {
 	CAMPAIGN_RULES_SCHEMA_VERSION,
 	getPublicCampaignRulesVersion,
 	normalizeCampaignRulesPolicyForStorage,
+	validateCampaignBrewBundle,
 } from "./campaign-content.js";
 import {
 	assertCharacterCampaignContentMutation,
@@ -1186,12 +1187,28 @@ export class MemoryHubStore {
 		validateCloudCharacterData(data);
 		const prior = this._getReceipt({accountId, idempotencyKey});
 		if (prior) return prior;
+		if (campaignId) this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+		let imported = [...this._characters.values()].find(it =>
+			it.ownerAccountId === accountId
+			&& it.clientImportId === clientImportId
+			&& it.campaignId === campaignId,
+		);
+		if (imported?.status === "active") {
+			return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(imported)}});
+		}
 		if (campaignId) {
-			this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
 			const enforcement = await this._pGetCampaignContentEnforcement(campaignId);
 			const resumedPrior = this._getReceipt({accountId, idempotencyKey});
 			if (resumedPrior) return resumedPrior;
 			this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+			imported = [...this._characters.values()].find(it =>
+				it.ownerAccountId === accountId
+				&& it.clientImportId === clientImportId
+				&& it.campaignId === campaignId,
+			);
+			if (imported?.status === "active") {
+				return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(imported)}});
+			}
 			assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
 			assertNewCharacterCampaignContent({
 				...enforcement,
@@ -1203,14 +1220,6 @@ export class MemoryHubStore {
 		const rulesVersion = campaign?.activeRulesVersionId
 			? this._rulesVersions.get(campaign.activeRulesVersionId)
 			: null;
-		const imported = [...this._characters.values()].find(it =>
-			it.ownerAccountId === accountId
-			&& it.clientImportId === clientImportId
-			&& it.campaignId === campaignId,
-		);
-		if (imported?.status === "active") {
-			return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(imported)}});
-		}
 		if (data?.carry) assertCampaignRuleWriteFence({rulesVersion, data, protocolVersion});
 		if (imported) {
 			if (imported.status === "archived") {
@@ -1625,6 +1634,11 @@ export class MemoryHubStore {
 		const prior = this._getReceipt({accountId, idempotencyKey});
 		if (prior) return prior;
 		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
+		validateCampaignBrewBundle(content);
+		await this._pGetCampaignContentCatalog({brewBundle: {content}});
+		const resumedPrior = this._getReceipt({accountId, idempotencyKey});
+		if (resumedPrior) return resumedPrior;
+		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
 		const existing = [...this._brewVersions.values()].find(it => it.campaignId === campaignId && it.contentHash === contentHash);
 		if (existing) return this._setReceipt({accountId, idempotencyKey, response: {brewBundle: existing}});
 		const version = Math.max(0, ...[...this._brewVersions.values()].filter(it => it.campaignId === campaignId).map(it => it.version)) + 1;
@@ -1648,6 +1662,11 @@ export class MemoryHubStore {
 		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
 		const brewBundle = this._brewVersions.get(brewBundleId);
 		if (!brewBundle || brewBundle.campaignId !== campaignId) throw new HubStoreError("BREW_NOT_FOUND", `Brew bundle was not found.`, {status: 404});
+		validateCampaignBrewBundle(brewBundle.content);
+		await this._pGetCampaignContentCatalog({brewBundle});
+		const resumedPrior = this._getReceipt({accountId, idempotencyKey});
+		if (resumedPrior) return resumedPrior;
+		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
 		this._campaigns.get(campaignId).activeBrewBundleVersionId = brewBundleId;
 		this._appendAudit({campaignId, actorAccountId: accountId, action: "brew.activated", targetType: "brew_bundle_version", targetId: brewBundleId});
 		this._appendEvent({campaignId, actorAccountId: accountId, type: "brew.activated", aggregateType: "brew_bundle_version", aggregateId: brewBundleId, payload: {contentHash: brewBundle.contentHash, version: brewBundle.version}});

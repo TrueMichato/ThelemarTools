@@ -3723,6 +3723,10 @@ window.addEventListener("load", () => {
 			hubController = new DmScreenHubController({
 				campaignId,
 				api,
+				pRefreshCampaignContext: options => {
+					if (!campaignContext) throw new Error("Campaign context is unavailable.");
+					return campaignContext.pRefresh(options);
+				},
 				pOnAuthoritativeAccessError: error => pHandleDmScreenCampaignAccessLoss({
 					error,
 					campaignId,
@@ -3798,6 +3802,12 @@ window.addEventListener("load", () => {
 				await campaignContext.pActivate();
 				verifiedCampaignContext = {
 					campaignId,
+					brewBundle: verified.context.brewBundle
+						? {
+							id: verified.context.brewBundle.id,
+							contentHash: verified.context.brewBundle.contentHash,
+						}
+						: null,
 					rulesVersion: verified.context.rulesVersion || null,
 					sourcePolicy: verified.context.sourcePolicy || null,
 					editionPolicy: verified.context.editionPolicy || null,

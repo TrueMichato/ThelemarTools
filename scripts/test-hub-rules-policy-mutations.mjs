@@ -627,7 +627,7 @@ const MUTANTS = [
 		name: "existing-import-order-disabled",
 		probe: probeExistingImportOrder,
 		mutations: {
-			"server/src/memory-hub-store.js": source => source.replace(
+			"server/src/memory-hub-store.js": source => source.replaceAll(
 				"if (imported?.status === \"active\") {",
 				"if (false) {",
 			),

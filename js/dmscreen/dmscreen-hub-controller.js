@@ -14,6 +14,7 @@ export class DmScreenHubController {
 		staleAfterMs = DEFAULT_STALE_AFTER_MS,
 		resyncDelayMs = DEFAULT_RESYNC_DELAY_MS,
 		pOnAuthoritativeAccessError = null,
+		pRefreshCampaignContext = null,
 	}) {
 		if (!campaignId) throw new TypeError(`campaignId is required.`);
 		if (!api) throw new TypeError(`api is required.`);
@@ -26,6 +27,7 @@ export class DmScreenHubController {
 		this._staleAfterMs = staleAfterMs;
 		this._resyncDelayMs = resyncDelayMs;
 		this._pOnAuthoritativeAccessError = pOnAuthoritativeAccessError;
+		this._pRefreshCampaignContextOwner = pRefreshCampaignContext;
 
 		this._campaign = null;
 		this._board = null;
@@ -471,8 +473,8 @@ export class DmScreenHubController {
 		const rulesVersionId = baseline.campaign.activeRulesVersionId ?? null;
 		const brewBundleVersionId = baseline.campaign.activeBrewBundleVersionId ?? null;
 		const currentContext = this._board?.getHubCampaignContext?.();
-		const currentRulesVersionId = this._campaign?.activeRulesVersionId ?? currentContext?.rulesVersion?.id ?? null;
-		const currentBrewBundleVersionId = this._campaign?.activeBrewBundleVersionId ?? currentContext?.brewBundle?.id ?? null;
+		const currentRulesVersionId = currentContext?.rulesVersion?.id ?? null;
+		const currentBrewBundleVersionId = currentContext?.brewBundle?.id ?? null;
 		if (
 			currentRulesVersionId === rulesVersionId
 			&& currentBrewBundleVersionId === brewBundleVersionId
@@ -503,7 +505,14 @@ export class DmScreenHubController {
 		const generation = ++this._campaignContextRefreshGeneration;
 		this._clearCampaignContext();
 		try {
-			const context = await this._api.pGetCampaignContext({campaignId: this._campaignId});
+			const refreshOptions = {
+				fnIsCurrent: () => generation === this._campaignContextRefreshGeneration && !!this._board,
+				...(isRulesVersionPinned ? {expectedRulesVersionId} : {}),
+				...(isBrewBundleVersionPinned ? {expectedBrewBundleVersionId} : {}),
+			};
+			const context = this._pRefreshCampaignContextOwner
+				? await this._pRefreshCampaignContextOwner(refreshOptions)
+				: await this._api.pGetCampaignContext({campaignId: this._campaignId});
 			if (generation !== this._campaignContextRefreshGeneration || !this._board) return false;
 			const isRulesVersionMismatch = isRulesVersionPinned
 				&& (context?.rulesVersion?.id ?? null) !== expectedRulesVersionId;

@@ -191,7 +191,9 @@ Rules compose in this order:
 
 Campaign brew availability does not imply policy permission. Campaign sources participate in
 `content.sources.allowed` by their canonical source abbreviation. Conversely, a permitted source does not
-make absent content available.
+make absent content available. Brew bundle shape/security validation and authoritative content-catalog validation
+run before a bundle is stored. Activation repeats both checks inside the store transaction so a historical bundle
+which has become incompatible cannot change the active pointer or produce an audit, event, outbox row, or receipt.
 
 Intrinsic dependencies and automatic grants retain provenance in reports, but client-supplied provenance is
 never an authorization bypass. The complete newly introduced delta must comply. Candidate projections may keep
@@ -226,6 +228,11 @@ The flag must identify the relevant rule and entity; a generic red badge is insu
 New builds, level-ups, Quick Builds, respec replacements, and any other newly selected governed content must
 comply. Candidate lists should hide or disable invalid options with an explanation, but the final commit is
 validated again. A stale, bypassed, or incomplete browser filter cannot create a valid write.
+
+An import command whose `(owner, campaign, clientImportId)` already names an active character is an exact replay:
+after authorization and import-key locking it returns that existing character without evaluating the discarded
+incoming document against a newer policy. Reactivating an archived import is a new admission and must satisfy the
+current content policy and version fence.
 
 Content is never auto-removed. No policy activation or evaluation may delete or replace a species/race, class,
 subclass, feat, feature, spell, item, language, or stored choice. Remediation is an explicit user action. The
@@ -352,7 +359,8 @@ species, or edition enforcement that schema version 1 never represented.
 
 Schema-version-2 policies published before carry-weight and encumbrance-tier enforcement remain readable with
 their recorded `advisory` modes. Read-time normalization preserves those modes and never rewrites the immutable
-row; new publication requires the current enforced modes.
+row; the policy editor upgrades only its mutable publication draft and shows the mode change explicitly. New
+publication requires the current enforced modes.
 
 Structural changes create a new policy `schemaVersion`. Semantic or parameter changes to one rule create a new
 `ruleSchemaVersion`. Catalog copy changes that do not alter semantics create a new `catalogVersion`. An
@@ -380,7 +388,10 @@ switch it must:
 6. remove campaign-scoped subscriptions/listeners before activating the next context.
 
 Late results carry their context generation and are ignored if it no longer matches. No campaign policy,
-report, or brew-derived candidate may appear in another campaign or in local mode.
+report, or brew-derived candidate may appear in another campaign or in local mode. Realtime DM refreshes route
+through the owning `HubCampaignContext`, clear the temporary overlay before fetching, and require the exact
+rules/brew identities announced by the event or resync cursor. Cursor comparisons use the context actually applied
+to the Board, not concurrently fetched campaign metadata.
 
 ### Rollback
 

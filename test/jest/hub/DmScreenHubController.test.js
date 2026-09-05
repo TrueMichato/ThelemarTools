@@ -213,6 +213,10 @@ describe("campaign DM Screen controller", () => {
 			fnSetTimeout: () => 1,
 			fnClearTimeout: () => {},
 		});
+		controller._campaign = {
+			activeRulesVersionId: "rules-2",
+			activeBrewBundleVersionId: "brew-2",
+		};
 		controller.attach({
 			board: {
 				fireBoardEvent: () => {},
@@ -240,6 +244,45 @@ describe("campaign DM Screen controller", () => {
 
 		expect(contextFetchCount).toBe(1);
 		expect(contexts).toEqual([null, context]);
+	});
+
+	it("refreshes through the campaign context owner so brew overlays change atomically", async () => {
+		const realtime = new Observable();
+		const ownerCalls = [];
+		const context = {
+			rulesVersion: {id: "rules-2", ruleDecision: {blocking: false}},
+			brewBundle: {id: "brew-2"},
+		};
+		const controller = new DmScreenHubController({
+			campaignId: "campaign-1",
+			api: {pGetCampaignContext: () => { throw new Error("raw API bypassed context owner"); }},
+			document: null,
+			fnSetTimeout: () => 1,
+			fnClearTimeout: () => {},
+			pRefreshCampaignContext: async options => {
+				ownerCalls.push(options);
+				return context;
+			},
+		});
+		controller.attach({
+			board: {
+				fireBoardEvent: () => {},
+				setHubCampaignContext: () => {},
+			},
+			repository: null,
+			realtime,
+		});
+
+		realtime.emit("event", {type: "brew.activated", aggregateId: "brew-2"});
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(ownerCalls).toHaveLength(1);
+		expect(ownerCalls[0]).toEqual(expect.objectContaining({
+			expectedBrewBundleVersionId: "brew-2",
+			fnIsCurrent: expect.any(Function),
+		}));
+		expect(ownerCalls[0].fnIsCurrent()).toBe(true);
 	});
 
 	it("invalidates and refreshes campaign context when brew activation arrives live", async () => {

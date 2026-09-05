@@ -337,6 +337,50 @@ describe("Memory campaign content enforcement", () => {
 		})).campaign;
 	});
 
+	it("rejects invalid brew before create or historical activation side effects", async () => {
+		const invalidContent = [{
+			head: {filename: "spoofed-phb.json"},
+			body: {
+				_meta: {
+					edition: "one",
+					sources: [{json: "PHB", abbreviation: "PHB", full: "Spoofed PHB"}],
+				},
+				feat: [{name: "Spoofed feat", source: "PHB"}],
+			},
+		}];
+
+		await expect(store.pCreateBrewBundleVersion({
+			accountId: account.id,
+			campaignId: campaign.id,
+			contentHash: "invalid-create",
+			content: invalidContent,
+			manifest: [],
+			idempotencyKey: "brew-validation:create",
+		})).rejects.toEqual(expect.objectContaining({code: "BREW_INVALID"}));
+		expect(store._brewVersions.size).toBe(0);
+
+		const historicalId = crypto.randomUUID();
+		store._brewVersions.set(historicalId, {
+			id: historicalId,
+			campaignId: campaign.id,
+			version: 1,
+			contentHash: "invalid-history",
+			content: invalidContent,
+			manifest: [],
+			createdAt: new Date().toISOString(),
+		});
+		const eventsBefore = store._events.length;
+		await expect(store.pActivateBrewBundleVersion({
+			accountId: account.id,
+			campaignId: campaign.id,
+			brewBundleId: historicalId,
+			idempotencyKey: "brew-validation:activate",
+		})).rejects.toEqual(expect.objectContaining({code: "BREW_INVALID"}));
+		expect(store._campaigns.get(campaign.id).activeBrewBundleVersionId).toBeNull();
+		expect(store._events).toHaveLength(eventsBefore);
+		expect(store._commandReceipts.has(`${account.id}:brew-validation:activate`)).toBe(false);
+	});
+
 	it("enforces imports, direct writes, version fences, and grandfathered unrelated edits without leaking events", async () => {
 		const legacy = (await store.pCreateCharacter({
 			accountId: account.id,

@@ -46,6 +46,17 @@ function getRuleSearchText (definition) {
 	].join(" ").toLowerCase();
 }
 
+function getPublicationDraft ({catalog, policy}) {
+	const draft = structuredClone(policy || createDefaultCampaignRulesPolicy());
+	const enforcedRuleIds = new Set((catalog?.rules || [])
+		.filter(definition => definition.lifecycle === "implemented_enforced")
+		.map(definition => definition.id));
+	for (const selection of draft.rules || []) {
+		if (enforcedRuleIds.has(selection.id)) selection.mode = "enforced";
+	}
+	return draft;
+}
+
 function getPolicyCompatibilityMessage (error) {
 	if (!(error instanceof CampaignRulesPolicyError)) return "Review the selected rule values.";
 	if (error.code === "RULES_COMBINATION_UNSUPPORTED") {
@@ -163,7 +174,10 @@ export class HubRulesPolicyManager {
 			this._contentCatalog = response.contentCatalog;
 			this._management = response.management;
 			const active = getActiveVersion(this._management);
-			this._draft = preservedDraft || structuredClone(active?.policy || createDefaultCampaignRulesPolicy());
+			this._draft = getPublicationDraft({
+				catalog: this._catalog,
+				policy: preservedDraft || active?.policy,
+			});
 			this._isPolicyRefreshRequired = false;
 			this._renderFilters();
 			this._renderCatalog();

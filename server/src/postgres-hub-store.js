@@ -39,6 +39,7 @@ import {
 	CAMPAIGN_RULES_SCHEMA_VERSION,
 	getPublicCampaignRulesVersion,
 	normalizeCampaignRulesPolicyForStorage,
+	validateCampaignBrewBundle,
 } from "./campaign-content.js";
 import {
 	assertCharacterCampaignContentMutation,
@@ -1664,16 +1665,7 @@ export class PostgresHubStore {
 				await client.query("COMMIT");
 				return prior;
 			}
-			if (campaignId) {
-				await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm", "player"]});
-				const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId});
-				assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
-				assertNewCharacterCampaignContent({
-					...enforcement,
-					character: data,
-					rulesVersionId: enforcement.activeRulesVersionId,
-				});
-			}
+			if (campaignId) await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm", "player"]});
 			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 3))`, [accountId, clientImportId]);
 			let existing = await client.query(`
 				SELECT * FROM hub.characters
@@ -1685,6 +1677,15 @@ export class PostgresHubStore {
 				await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "character.create", response});
 				await client.query("COMMIT");
 				return response;
+			}
+			if (campaignId) {
+				const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId});
+				assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+				assertNewCharacterCampaignContent({
+					...enforcement,
+					character: data,
+					rulesVersionId: enforcement.activeRulesVersionId,
+				});
 			}
 			if (campaignId && data.carry) {
 				const rulesResult = await client.query(`
@@ -2318,6 +2319,8 @@ export class PostgresHubStore {
 			}
 			const membership = await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm"]});
 			await client.query(`SELECT id FROM hub.campaigns WHERE id = $1 FOR UPDATE`, [campaignId]);
+			validateCampaignBrewBundle(content);
+			await pGetCampaignContentCatalog({brewBundle: {content}});
 			const existing = await client.query(`
 				SELECT * FROM hub.brew_bundle_versions
 				WHERE campaign_id = $1 AND content_hash = $2
@@ -2715,7 +2718,10 @@ export class PostgresHubStore {
 			const column = kind === "brew" ? "active_brew_bundle_version_id" : "active_rules_version_id";
 			const version = await client.query(`SELECT * FROM hub.${table} WHERE campaign_id = $1 AND id = $2`, [campaignId, versionId]);
 			if (!version.rowCount) throw new HubStoreError(kind === "brew" ? "BREW_NOT_FOUND" : "RULES_NOT_FOUND", `Campaign version was not found.`, {status: 404});
-			if (kind === "rules") {
+			if (kind === "brew") {
+				validateCampaignBrewBundle(version.rows[0].content);
+				await pGetCampaignContentCatalog({brewBundle: {content: version.rows[0].content}});
+			} else {
 				const active = await client.query(`
 					SELECT r.schema_version
 					FROM hub.campaigns c

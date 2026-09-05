@@ -124,6 +124,13 @@ describe("Campaign rules policy catalog", () => {
 			expect.objectContaining({id: "tgtt.carry-weight", supportLabel: "Advisory"}),
 			expect.objectContaining({id: "tgtt.encumbrance-tiers", supportLabel: "Advisory"}),
 		]));
+		const publicationDraft = structuredClone(historical);
+		publicationDraft.rules.find(rule => rule.id === "tgtt.carry-weight").mode = "enforced";
+		publicationDraft.rules.find(rule => rule.id === "tgtt.encumbrance-tiers").mode = "enforced";
+		expect(diffCampaignRulesPolicies({before: historical, after: publicationDraft})).toEqual([
+			expect.objectContaining({ruleId: "tgtt.carry-weight", before: "On (Advisory)", after: "On (Enforced)"}),
+			expect.objectContaining({ruleId: "tgtt.encumbrance-tiers", before: "On (Advisory)", after: "On (Enforced)"}),
+		]);
 	});
 
 	it("rejects unknown, malformed, duplicate, and incorrectly-modeled selections", () => {

@@ -644,14 +644,21 @@ export function diffCampaignRulesPolicies ({before, after, isAfterStoredPolicy =
 	return afterNormalized.rules.flatMap(selection => {
 		const definition = CATALOG_BY_ID.get(selection.id);
 		const key = definition.parameter.key;
-		const beforeValue = beforeMap.get(selection.id)?.parameters[key];
+		const beforeSelection = beforeMap.get(selection.id);
+		const beforeValue = beforeSelection?.parameters[key];
 		const afterValue = selection.parameters[key];
-		if (JSON.stringify(beforeValue) === JSON.stringify(afterValue)) return [];
+		const isModeChanged = beforeSelection?.mode !== selection.mode;
+		if (JSON.stringify(beforeValue) === JSON.stringify(afterValue) && !isModeChanged) return [];
+		const getLabel = (value, mode) => {
+			const valueLabel = getRuleValueLabel(definition, value);
+			if (!isModeChanged) return valueLabel;
+			return `${valueLabel} (${mode === "enforced" ? "Enforced" : "Advisory"})`;
+		};
 		return [{
 			ruleId: selection.id,
 			title: definition.title,
-			before: getRuleValueLabel(definition, beforeValue),
-			after: getRuleValueLabel(definition, afterValue),
+			before: getLabel(beforeValue, beforeSelection?.mode),
+			after: getLabel(afterValue, selection.mode),
 		}];
 	});
 }

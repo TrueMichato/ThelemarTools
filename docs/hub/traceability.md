@@ -51,15 +51,18 @@ brew absent from the active bundle cannot satisfy campaign admission. Browser fi
 the server rechecks the same normalized policy in the authoritative transaction. Official source identity and
 edition metadata are reserved; conflicting custom-source declarations fail closed. Publication rechecks
 authorization after asynchronous catalog loading in memory, while PostgreSQL keeps the equivalent check inside
-its locked transaction. The legacy activation route accepts only schema-v1 targets and cannot replace an active
-schema-v2 policy; rollback of schema-v2 content policy publishes a new immutable schema-v2 version.
+its locked transaction. Brew create and activation both revalidate the complete catalog; activation does so before
+any active pointer, audit, event, outbox, or receipt write. Exact active-import replay returns the stored character
+after authorization/locking but before evaluating discarded input; archived reactivation remains a new admission.
+The legacy activation route accepts only schema-v1 targets and cannot replace an active schema-v2 policy; rollback
+of schema-v2 content policy publishes a new immutable schema-v2 version.
 
 ## Content-policy integration collision map
 
 | Shared hotspot | Content-policy ownership | Descendant integration requirement |
 |---|---|---|
 | `js/hub/hub-campaign-rules.js`, `hub-rules-policy-manager.js`, `campaign.html`, `scss/hub.scss` | Stable content IDs, enforced labels, typed source/species/edition controls | Preserve non-content rules as advisory until their lane supplies independent enforcement; merge catalog/UI changes additively |
-| `js/hub/hub-campaign-context.js`, `hub-active-campaign-coordinator.js`, `hub-site-context.js`, `js/charactersheet/charactersheet.js` | Content catalog/policy projection, immediate fail-closed access loss, and generation-fenced full filter/report teardown | Preserve V2-T5 activation order, temporary brew boundary, pinning, and coordinator-owned teardown order |
+| `js/hub/hub-campaign-context.js`, `js/dmscreen/dmscreen-hub-controller.js`, `hub-active-campaign-coordinator.js`, `hub-site-context.js`, `js/charactersheet/charactersheet.js` | Content catalog/policy projection, owner-mediated DM brew refresh, immediate fail-closed access loss, and generation-fenced full filter/report teardown | Preserve V2-T5 activation order, temporary brew boundary, exact rules/brew cursor pinning, and coordinator-owned teardown order |
 | `js/charactersheet/charactersheet-builder.js`, `charactersheet-levelup.js` | Content-specific candidate projection and final authoritative save behavior | Compose with house-rule evaluators; do not replace the centralized content filter or trust picker state |
 | `server/src/app.js`, `memory-hub-store.js`, `postgres-hub-store.js` | Rules-version pin, schema-v2 activation fence, publication reauthorization, and admission/delta checks for character writes, grants/awards, and transfer acceptance | Keep checks inside existing authorization/lock/transaction boundaries; preserve memory/PostgreSQL response and evidence parity; rejected writes emit no content/private event |
 | `test/e2e/pages/HubCampaignPage.ts`, `CharacterSheetPage.ts`, Hub/Character Sheet policy tests | Content fixtures, bypass/grandfather/teardown assertions | Retain content cases when resolving parallel rules-lane fixture/page-object edits |
