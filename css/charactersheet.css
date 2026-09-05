@@ -349,6 +349,7 @@ body.is-charsheet-page .ve-ui-modal__scroller > .ve-flex.ve-w-100.ve-mb-1 {
 }
 
 .charsheet__campaign-feedback,
+.charsheet__campaign-policy-warning,
 .charsheet__campaign-panel {
 	grid-column: 1 / -1;
 }
@@ -364,6 +365,21 @@ body.is-charsheet-page .ve-ui-modal__scroller > .ve-flex.ve-w-100.ve-mb-1 {
 
 .charsheet__campaign-feedback--success {
 	color: var(--cs-success-text, #6ee7b7);
+}
+
+.charsheet__campaign-policy-warning {
+	padding: var(--cs-space-sm, 8px) var(--cs-space-md, 16px);
+	border: 1px solid var(--cs-warning, #d97706);
+	border-radius: var(--cs-radius-sm, 6px);
+	background: color-mix(in srgb, var(--cs-warning, #d97706) 14%, transparent);
+	color: var(--cs-text-primary, #f1f5f9);
+	font-size: var(--cs-text-xs, 0.75rem);
+	line-height: var(--cs-leading-snug, 1.4);
+}
+
+.charsheet__campaign-policy-warning ul {
+	margin: var(--cs-space-xs, 4px) 0 0;
+	padding-left: 1.25rem;
 }
 
 .charsheet__campaign-panel {

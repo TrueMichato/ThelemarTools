@@ -116,13 +116,19 @@ describe("Character Sheet realtime coordinator", () => {
 	it("delivers cursor and invalidation metadata for only the open character", async () => {
 		const {clients, coordinator} = makeCoordinator();
 		const cursors = [];
+		const contextChanges = [];
 		const invalidations = [];
 		coordinator.on("cursor", value => cursors.push(value));
+		coordinator.on("campaignContextChanged", value => contextChanges.push(value));
 		coordinator.on("projectionInvalidated", value => invalidations.push(value));
 		coordinator.attach({characterId: "character-1"});
 
 		clients[0].emit("cursor", {
 			cursor: {campaignId: "campaign-1", lastSequence: 12},
+			campaign: {
+				activeRulesVersionId: "rules-1",
+				activeBrewBundleVersionId: null,
+			},
 			characterRefs: [
 				{id: "other", revision: 9, projectionRevision: 5, operationWatermark: 8},
 				{id: "character-1", revision: 4, projectionRevision: 2, operationWatermark: 10},
@@ -162,6 +168,13 @@ describe("Character Sheet realtime coordinator", () => {
 			projectionRevision: 2,
 			operationWatermark: 10,
 		}]);
+		expect(contextChanges).toEqual([{
+			type: "campaign.cursor",
+			campaignId: "campaign-1",
+			sequence: 12,
+			rulesVersionId: "rules-1",
+			brewBundleVersionId: null,
+		}]);
 		expect(invalidations).toEqual([
 			expect.objectContaining({
 				source: "cursor",
@@ -198,6 +211,78 @@ describe("Character Sheet realtime coordinator", () => {
 		expect(cursors).toHaveLength(2);
 		expect(cursors[0]).not.toHaveProperty("operationWatermark");
 		expect(cursors[1].operationWatermark).toBe(0);
+	});
+
+	it("classifies cursor-only document revisions without consuming semantic-operation revisions", async () => {
+		const {clients, coordinator} = makeCoordinator();
+		const invalidations = [];
+		coordinator.on("projectionInvalidated", value => invalidations.push(value));
+		coordinator.attach({characterId: "character-1"});
+		const emitCursor = ({lastSequence, revision, projectionRevision, operationWatermark}) => clients[0].emit("cursor", {
+			cursor: {campaignId: "campaign-1", lastSequence},
+			characterRefs: [{id: "character-1", revision, projectionRevision, operationWatermark}],
+		});
+
+		emitCursor({lastSequence: 4, revision: 1, projectionRevision: 1, operationWatermark: 0});
+		emitCursor({lastSequence: 5, revision: 2, projectionRevision: 2, operationWatermark: 0});
+		emitCursor({lastSequence: 6, revision: 3, projectionRevision: 3, operationWatermark: 6});
+		await pFlush();
+
+		expect(invalidations.map(({isCharacterDocumentChanged}) => isCharacterDocumentChanged)).toEqual([
+			false,
+			true,
+			false,
+		]);
+	});
+
+	it("forwards brew activation identity for context replay deduplication", async () => {
+		const {clients, coordinator} = makeCoordinator();
+		const changes = [];
+		coordinator.on("campaignContextChanged", value => changes.push(value));
+		coordinator.attach({characterId: "character-1"});
+
+		clients[0].emit("event", {
+			id: "event-brew.activated",
+			campaignId: "campaign-1",
+			sequence: 4,
+			type: "brew.activated",
+			aggregateType: "brew_bundle_version",
+			aggregateId: "active-brew.activated",
+			payload: {version: 1},
+		});
+		await pFlush();
+
+		expect(changes).toEqual([{
+			eventId: "event-brew.activated",
+			campaignId: "campaign-1",
+			sequence: 4,
+			type: "brew.activated",
+			aggregateId: "active-brew.activated",
+		}]);
+	});
+
+	it("routes rules activation through the version-fenced rules refresh", async () => {
+		const {clients, coordinator} = makeCoordinator();
+		const changes = [];
+		coordinator.on("rulesChanged", value => changes.push(value));
+		coordinator.attach({characterId: "character-1"});
+
+		clients[0].emit("event", {
+			id: "event-rules.activated",
+			campaignId: "campaign-1",
+			sequence: 4,
+			type: "rules.activated",
+			aggregateType: "rules_version",
+			aggregateId: "active-rules.activated",
+			payload: {version: 1},
+		});
+		await pFlush();
+
+		expect(changes).toEqual([{
+			campaignId: "campaign-1",
+			rulesVersionId: "active-rules.activated",
+			sequence: 4,
+		}]);
 	});
 
 	it("delivers already-replayed operations before a missing character ref tears down the sheet", async () => {

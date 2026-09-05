@@ -221,6 +221,47 @@ describe("HTTP character repository", () => {
 		expect(repository._accepted.get("server-1")).toEqual(documents[2]);
 	});
 
+	it("does not treat a recomputed derived carry block as an inventory conflict", async () => {
+		let revision = 1;
+		const carry = grossWeight => ({schemaVersion: 1, grossWeight});
+		const documents = {
+			1: {
+				id: "server-1",
+				campaignId: "campaign-1",
+				revision: 1,
+				data: {notes: "before", inventory: [], carry: carry(0)},
+			},
+			2: {
+				id: "server-1",
+				campaignId: "campaign-1",
+				revision: 2,
+				data: {notes: "before", inventory: [{id: "sword", item: {name: "Sword"}, quantity: 1}]},
+			},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(documents[revision]),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		revision = 2;
+		let adopted;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({notes: "locally edited", inventory: [], carry: carry(1)}),
+			fnAdoptLive: data => adopted = data,
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+
+		expect(adopted).toEqual({
+			notes: "locally edited",
+			inventory: [{id: "sword", item: {name: "Sword"}, quantity: 1}],
+		});
+		expect(repository._conflicts.size).toBe(0);
+	});
+
 	it("rebases live-conflict recovery before it can restore pre-transfer inventory", async () => {
 		let revision = 1;
 		const documents = {

@@ -291,8 +291,9 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-rules-policy-loading")).toBeHidden();
 		await expect(this.page.locator("#campaign-rules-form")).toBeHidden();
 		await expect(this.page.locator("#campaign-rules-list .hub-rule-row")).toHaveCount(10);
-		await expect(this.page.locator("#campaign-rules-list .hub-rule-status--planned")).toHaveCount(3);
-		await expect(this.page.locator("#campaign-rules-list .hub-rule-status--enforced")).toHaveCount(2);
+		await expect(this.page.locator("#campaign-rules-list .hub-rule-status--enforced")).toHaveCount(5);
+		await expect(this.page.locator(".hub-rule-status--planned")).toHaveCount(0);
+		await expect(manager).toContainText("Enforced");
 		await expect(this.page.locator("#campaign-rules-list .hub-rule-status--advisory")).toHaveCount(5);
 
 		const search = this.page.locator("#campaign-rules-search");
@@ -411,6 +412,51 @@ export class HubCampaignPage {
 		expect(response.status()).toBe(201);
 	}
 
+	async publishContentPolicyViaApi ({
+		campaignId,
+		sources,
+		species,
+		editions,
+	}: {
+		campaignId: string;
+		sources: string[];
+		species: string[];
+		editions: Array<"2014" | "2024">;
+	}): Promise<{rulesVersionId: string; previousRulesVersionId: string}> {
+		const managementResponse = await this.page.request.get(`/api/campaigns/${encodeURIComponent(campaignId)}/rules-policy`);
+		expect(managementResponse.ok()).toBe(true);
+		const {management} = await managementResponse.json();
+		const active = management.versions.find((version: any) => version.id === management.activeRulesVersionId);
+		expect(active).toBeTruthy();
+		const policy = structuredClone(active.policy);
+		policy.rules.find((rule: any) => rule.id === "content.sources.allowed").parameters.sources = sources;
+		policy.rules.find((rule: any) => rule.id === "content.species.allowed").parameters.species = species;
+		policy.rules.find((rule: any) => rule.id === "content.editions.allowed").parameters.editions = editions;
+		const response = await this.page.request.post(`/api/campaigns/${encodeURIComponent(campaignId)}/rules-policy`, {
+			headers: await this.getMutationHeaders(),
+			data: {policy, expectedActiveRulesVersionId: active.id},
+		});
+		const published = await response.json();
+		expect(response.status(), JSON.stringify(published)).toBe(201);
+		return {rulesVersionId: published.rulesVersion.id, previousRulesVersionId: active.id};
+	}
+
+	async activateRulesPolicyVersionViaApi ({
+		campaignId,
+		rulesVersionId,
+		expectedActiveRulesVersionId,
+	}: {
+		campaignId: string;
+		rulesVersionId: string;
+		expectedActiveRulesVersionId: string;
+	}): Promise<void> {
+		const response = await this.page.request.post(`/api/campaigns/${encodeURIComponent(campaignId)}/rules-policy/activate`, {
+			headers: await this.getMutationHeaders(),
+			data: {rulesVersionId, expectedActiveRulesVersionId},
+		});
+		expect(response.ok(), await response.text()).toBe(true);
+	}
+
 	async expectLiveCampaignPolicySummary ({title, value}: {title: string; value: string}): Promise<void> {
 		const summary = this.page.locator("#campaign-policy-summary");
 		await expect(summary).toContainText(title);
@@ -455,13 +501,18 @@ export class HubCampaignPage {
 		hpCurrent = 12,
 		features = [],
 		className = "Fighter",
+		classSource = "PHB",
+		race = null,
 		spellsKnown = [],
+		rulesVersionId = null,
 	}: {
 		campaignId: string;
 		name: string;
 		hpCurrent?: number;
 		features?: Array<{name: string; source: string}>;
 		className?: string;
+		classSource?: string;
+		race?: {name: string; source: string; edition?: string} | null;
 		spellsKnown?: Array<{
 			id?: string;
 			name: string;
@@ -471,6 +522,7 @@ export class HubCampaignPage {
 			sourceClass?: string;
 			sourceFeature?: string;
 		}>;
+		rulesVersionId?: string | null;
 	}): Promise<any> {
 		const response = await this.page.request.post("/api/characters", {
 			headers: await this.getMutationHeaders(),
@@ -478,11 +530,13 @@ export class HubCampaignPage {
 				clientImportId: `e2e-${crypto.randomUUID()}`,
 				campaignId,
 				schemaVersion: 1,
+				...(rulesVersionId ? {rulesVersionId} : {}),
 				data: {
 					name,
 					abilities: {str: 10, dex: 10, con: 14, int: 10, wis: 10, cha: 10},
 					abilityBonuses: {str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0},
-					classes: [{name: className, source: "PHB", level: 1}],
+					...(race ? {race} : {}),
+					classes: [{name: className, source: classSource, level: 1}],
 					xp: 0,
 					hp: {current: hpCurrent, max: 12, temp: 0},
 					features,
@@ -499,6 +553,39 @@ export class HubCampaignPage {
 		});
 		expect(response.ok()).toBe(true);
 		return (await response.json()).character;
+	}
+
+	async expectDirectCharacterAdmissionRejected ({
+		campaignId,
+		rulesVersionId,
+		name,
+		source,
+	}: {
+		campaignId: string;
+		rulesVersionId: string;
+		name: string;
+		source: string;
+	}): Promise<void> {
+		const response = await this.page.request.post("/api/characters", {
+			headers: await this.getMutationHeaders(),
+			data: {
+				clientImportId: `e2e-denied-${crypto.randomUUID()}`,
+				campaignId,
+				rulesVersionId,
+				schemaVersion: 1,
+				data: {
+					name,
+					abilities: {str: 10, dex: 10, con: 14, int: 10, wis: 10, cha: 10},
+					classes: [{name: "Fighter", source, level: 1}],
+					hp: {current: 12, max: 12, temp: 0},
+					inventory: [],
+				},
+			},
+		});
+		expect(response.status()).toBe(409);
+		const body = await response.json();
+		expect(body.error).toBe("CONTENT_POLICY_VIOLATION");
+		expect(JSON.stringify(body)).not.toContain(name);
 	}
 
 	async createPeerEffect ({
@@ -518,7 +605,7 @@ export class HubCampaignPage {
 			data: {
 				commandId,
 				sourceCharacterId,
-				sourceEntity: {type: "ability", uid: "steadying word|tst", version: "tst-v1"},
+				sourceEntity: {type: "ability", uid: "steadying word|phb", version: "tst-v1"},
 				effectTemplateId: "ability.steadying-word.heal",
 				choice: {amount},
 				targetRef,
@@ -583,6 +670,48 @@ export class HubCampaignPage {
 		);
 		expect(localCharacters).toContainEqual(expect.objectContaining({id: localId, name}));
 		return character;
+	}
+
+	async expectLocalCharacterCopyRejectedByContentPolicy ({
+		campaignId,
+		name,
+		source,
+	}: {
+		campaignId: string;
+		name: string;
+		source: string;
+	}): Promise<void> {
+		const localId = `local-denied-${crypto.randomUUID()}`;
+		const localCharacter = {
+			id: localId,
+			name,
+			abilities: {str: 10, dex: 10, con: 14, int: 10, wis: 10, cha: 10},
+			classes: [{name: "Fighter", source, level: 1}],
+			hp: {current: 12, max: 12, temp: 0},
+			inventory: [],
+		};
+		await this.page.goto("/charactersheet.html?local=1");
+		await waitForToolsLoaded(this.page);
+		await this.page.evaluate(
+			async character => (window as any).StorageUtil.pSet("charsheet-characters", [character]),
+			localCharacter,
+		);
+		await this._gotoCharacterSheetAndWaitForName({
+			path: `/charactersheet.html?local=1&id=${encodeURIComponent(localId)}`,
+			name,
+		});
+		const toggle = this.page.locator("#charsheet-campaign button[aria-controls='charsheet-campaign-panel']");
+		await expect(toggle).toHaveText("Add to campaign");
+		await toggle.click();
+		await this.page.locator("#charsheet-campaign-panel select").selectOption(campaignId);
+		await this.page.locator("#charsheet-campaign-panel button", {hasText: "Create cloud copy"}).click();
+		await expect(this.page.locator("#charsheet-campaign [role='alert']")).toContainText("adds content the campaign does not allow");
+		expect(new URL(this.page.url()).searchParams.get("id")).toBe(localId);
+		expect(new URL(this.page.url()).searchParams.get("local")).toBe("1");
+		const localCharacters = await this.page.evaluate(
+			async () => (window as any).StorageUtil.pGet("charsheet-characters"),
+		);
+		expect(localCharacters).toContainEqual(expect.objectContaining({id: localId, name}));
 	}
 
 	async expectDetachedCharacterInHub ({characterId, name}: {characterId: string; name: string}): Promise<void> {
@@ -676,7 +805,7 @@ export class HubCampaignPage {
 	}: {
 		characterId: string;
 		targetCampaignId: string;
-	}): Promise<{idempotencyKey: string}> {
+	}): Promise<{idempotencyKey: string; rulesVersionId: string | null}> {
 		const panel = this.page.locator("#charsheet-campaign-panel");
 		await panel.getByLabel("I understand that this moves the character instead of creating a copy.").check();
 		const responsePromise = this.page.waitForResponse(response =>
@@ -687,7 +816,9 @@ export class HubCampaignPage {
 		await panel.locator("button", {hasText: "Move character"}).click();
 		const moveResponse = await responsePromise;
 		const idempotencyKey = moveResponse.request().headers()["idempotency-key"];
+		const requestData = moveResponse.request().postDataJSON() as {campaignId?: string; rulesVersionId?: string | null};
 		expect(idempotencyKey).toBeTruthy();
+		expect(requestData.campaignId).toBe(targetCampaignId);
 		await this.page.waitForURL(url =>
 			url.searchParams.get("id") === characterId
 			&& url.searchParams.get("hubCampaign") === targetCampaignId,
@@ -699,7 +830,7 @@ export class HubCampaignPage {
 			}),
 			{timeout: 30_000},
 		).toBe(true);
-		return {idempotencyKey};
+		return {idempotencyKey, rulesVersionId: requestData.rulesVersionId ?? null};
 	}
 
 	async acquireCharacterLease (characterId: string): Promise<void> {
@@ -723,16 +854,18 @@ export class HubCampaignPage {
 		characterId,
 		campaignId,
 		idempotencyKey,
+		rulesVersionId,
 	}: {
 		characterId: string;
 		campaignId: string;
 		idempotencyKey: string;
+		rulesVersionId: string | null;
 	}): Promise<any> {
 		const headers = await this.getMutationHeaders();
 		headers["idempotency-key"] = idempotencyKey;
 		const response = await this.page.request.post(`/api/characters/${encodeURIComponent(characterId)}/move`, {
 			headers,
-			data: {campaignId},
+			data: {campaignId, rulesVersionId},
 		});
 		expect(response.ok()).toBe(true);
 		return response.json();
@@ -973,7 +1106,7 @@ export class HubCampaignPage {
 			projected: expect.arrayContaining([spellName]),
 			rendered: expect.arrayContaining([spellName]),
 		});
-		const control = approvals.getByRole("button", {name: new RegExp(`^${decision} ${spellName}`)}).first();
+		const control = approvals.getByRole("button", {name: new RegExp(`^${decision} ${spellName}`)}).last();
 		await expect(control).toBeVisible();
 		await control.click();
 		await expect(control).toBeHidden({timeout: 20_000});
@@ -1031,9 +1164,12 @@ export class HubCampaignPage {
 
 	async editCharacterHpAndRollInitiative ({campaignId, characterId, name, hp}: {campaignId: string; characterId: string; name: string; hp: number}): Promise<void> {
 		await this.openCharacterSheet({campaignId, characterId, name});
-		await this.page.locator("#charsheet-ipt-hp-current").fill(`${hp}`);
-		await this.page.locator("#charsheet-ipt-hp-current").blur();
-		await expect.poll(async () => (await this.getCharacter(characterId)).data.hp.current).toBe(hp);
+		await this.waitForCharacterRealtimeLive();
+		await this.page.locator("#charsheet-ipt-hp-current").evaluate((input: HTMLInputElement, value) => {
+			input.value = `${value}`;
+			input.dispatchEvent(new Event("change", {bubbles: true}));
+		}, hp);
+		await expect.poll(async () => (await this.getCharacter(characterId)).data.hp.current, {timeout: 15_000}).toBe(hp);
 		await this.page.locator("#charsheet-box-initiative").click();
 		await expect.poll(async () => (await this.getEvents(campaignId))
 			.filter(event => event.type === "roll.logged" && event.aggregateId === characterId)

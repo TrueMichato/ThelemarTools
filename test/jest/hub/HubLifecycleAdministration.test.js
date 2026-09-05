@@ -100,7 +100,7 @@ describe("Hub lifecycle administration", () => {
 			schemaVersion: 1,
 			data: {
 				name: "Player Character",
-				inventory: [{id: "map", item: {name: "Map", source: "HB"}, quantity: 1}],
+				inventory: [{id: "map", item: {name: "Map", source: "PHB"}, quantity: 1}],
 				currency: {gp: 4},
 			},
 			idempotencyKey: key("character"),

@@ -166,6 +166,7 @@ export class CharacterSheetPartyInventory {
 		fnAdoptCharacterData,
 		fnSaveCharacter,
 		fnIsCurrentCharacter,
+		fnGetRulesVersionId = () => null,
 		fnGetCarryProfile = null,
 		fnProjectItemWeight = null,
 		fnToast = detail => globalThis.JqueryUtil?.doToast?.(detail),
@@ -178,6 +179,7 @@ export class CharacterSheetPartyInventory {
 		this._fnAdoptCharacterData = fnAdoptCharacterData;
 		this._fnSaveCharacter = fnSaveCharacter;
 		this._fnIsCurrentCharacter = fnIsCurrentCharacter;
+		this._fnGetRulesVersionId = fnGetRulesVersionId;
 		// Supplies the live carry profile so a transfer can be previewed against the same
 		// calculation the carry bar uses. Optional: without it the preview simply omits the
 		// carry line rather than guessing at capacity.
@@ -225,9 +227,14 @@ export class CharacterSheetPartyInventory {
 		if (!this._realtime?.on) return;
 		this._unsubscribers.push(
 			this._realtime.on("inventoryTransfer", event => this._onInventoryTransfer(event)),
-			this._realtime.on("projectionInvalidated", () => {
+			this._realtime.on("projectionInvalidated", event => {
 				if (this._active?.isActivationPending) void this._pActivate(this._active);
-				else this._scheduleRefresh({party: true});
+				else {
+					this._scheduleRefresh({
+						...(event?.isCharacterDocumentChanged === true ? {character: true} : {}),
+						party: true,
+					});
+				}
 			}),
 			this._realtime.on("connectionState", state => this._onConnectionState(state)),
 		);
@@ -1284,10 +1291,12 @@ export class CharacterSheetPartyInventory {
 			}
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
 			if (DM_ROLES.has(this._role)) {
+				const rulesVersionId = this._fnGetRulesVersionId();
 				await this._api.pResolveTransfer({
 					campaignId: this._campaignId,
 					transferId: draft.transfer.id,
 					decision: "accept",
+					...(rulesVersionId == null ? {} : {rulesVersionId}),
 					idempotencyKey: draft.resolutionCommandId,
 				});
 			}

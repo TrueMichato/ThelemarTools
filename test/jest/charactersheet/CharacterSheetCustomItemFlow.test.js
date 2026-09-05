@@ -530,7 +530,7 @@ describe("Editing a catalog item converts it to custom in place", () => {
 		const after = state.getInventory().find(w => w.id === id);
 		expect(after).toBeTruthy();
 		expect(after.item._isCustom).toBe(true); // converted to custom
-		expect(after.item.source).toBe("Custom");
+		expect(after.item.source).toBe("DMG");
 		expect(after.item.name).toBe("Cloak of Protection");
 		// Wrapper metadata preserved
 		expect(after.quantity).toBe(2);

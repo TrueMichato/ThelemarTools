@@ -529,8 +529,9 @@ describe("HubActiveCampaignCoordinator", () => {
 			api.pGetCampaign = async () => { throw apiError("FORBIDDEN", 403); };
 			await coordinator.pSwitchTo({campaignId: CAMPAIGN_A, trigger: "retry"});
 			// Same campaign, so `pSwitchTo` short-circuits; drive the loss directly instead.
-			await coordinator._pClearForAccessLoss({campaignId: CAMPAIGN_A});
+			await coordinator.pHandleAccessLoss({campaignId: CAMPAIGN_A});
 			expect(order).toContain("brew");
+			expect(coordinator.state).toBe("blocked");
 		});
 
 		it("keeps the device selection when only a DM-only surface loses its role", async () => {

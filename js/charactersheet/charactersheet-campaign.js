@@ -1,4 +1,5 @@
 import {HubApiClient, HubApiError} from "../hub/hub-api-client.js";
+import {getCampaignContentPolicy, getCharacterCampaignContentCompliance} from "../hub/hub-content-policy.js";
 import {CharacterSheetSharing} from "./charactersheet-sharing.js";
 import {CharacterSheetState} from "./charactersheet-state.js";
 import {getCampaignSettingsOverlayFromRulesVersion} from "../hub/hub-campaign-rule-evaluator.js";
@@ -79,6 +80,8 @@ export function getCampaignControlErrorMessage (error) {
 			? "Another device is editing this character. Close it there or wait for its editor to expire before moving."
 			: "This character changed elsewhere. Resolve the sync conflict before changing campaigns.";
 		case "REVISION_CONFLICT": return "This character changed elsewhere. Resolve the sync conflict before changing campaigns.";
+		case "RULES_VERSION_STALE": return "Campaign content rules changed before this update finished. Reload the campaign context and try again.";
+		case "CONTENT_POLICY_VIOLATION": return "That update adds content the campaign does not allow. Existing off-policy choices remain usable and removable.";
 		default: return "The Campaign Hub could not complete that request. Your current character was not changed; try again.";
 	}
 }
@@ -216,6 +219,7 @@ export class CharacterSheetCampaign {
 				attrs: {role: this._feedback.type === "error" ? "alert" : "status"},
 			}));
 		}
+		this._renderContentPolicyWarnings();
 
 		if (this._isExpanded) this._root.append(this._getExpandedPanel({isCloud}));
 		// Sharing is only meaningful for a cloud character attached to a campaign: there
@@ -223,6 +227,37 @@ export class CharacterSheetCampaign {
 		if (isCloud && this._currentCharacter?.campaignId && this._sharing) {
 			this._root.append(this._sharing.render({fnRerender: () => this.render()}));
 		}
+	}
+
+	_renderContentPolicyWarnings () {
+		if (!this._page._hubContext || !this._page._currentCharacterId) return;
+		const contentPolicy = getCampaignContentPolicy(this._page._hubContext.rulesVersion?.contentPolicy);
+		const report = getCharacterCampaignContentCompliance({
+			contentPolicy,
+			character: this._page._state.toJson(),
+			availableSources: this._page._hubContext?.contentCatalog?.sources,
+			availableSpecies: this._page._hubContext?.contentCatalog?.species,
+			sourceEditions: this._page._hubContext?.contentCatalog?.sourceEditions,
+			rulesVersionId: this._page._hubContext.rulesVersion?.id ?? null,
+			limit: 6,
+		});
+		if (!report.total) return;
+		const warning = createElement("section", {
+			className: "charsheet__campaign-policy-warning",
+			attrs: {role: "status", "aria-live": "polite"},
+		});
+		warning.append(createElement("strong", {
+			text: `${report.total} grandfathered content ${report.total === 1 ? "warning" : "warnings"}`,
+		}));
+		const list = createElement("ul");
+		for (const finding of report.findings) {
+			list.append(createElement("li", {
+				text: `${finding.entity.uid || "Unknown content"} is outside the active ${finding.ruleId}. You can keep, use, or remove it, but cannot add it again.`,
+			}));
+		}
+		if (report.isTruncated) list.append(createElement("li", {text: "Additional warnings are hidden; export the character before replacing legacy content."}));
+		warning.append(list);
+		this._root.append(warning);
 	}
 
 	/** Load the owner's sharing policy once the character's campaign context is known. */
@@ -484,6 +519,7 @@ export class CharacterSheetCampaign {
 			this._movePreview = {
 				campaignId,
 				report: getCampaignCompatibilityReport({source, target}),
+				rulesVersionId: target.rulesVersion?.id || null,
 			};
 		} catch (error) {
 			this._feedback = {type: "error", text: getCampaignControlErrorMessage(error)};
@@ -510,6 +546,7 @@ export class CharacterSheetCampaign {
 					data: this._page._state.toJson(),
 					context,
 				}),
+				rulesVersionId: context.rulesVersion?.id || null,
 				idempotencyKey: command.idempotencyKey,
 			});
 			this._feedback = {type: "success", text: "Cloud copy created. Your local original is unchanged."};
@@ -537,9 +574,11 @@ export class CharacterSheetCampaign {
 		try {
 			if (!await this._page._saveCurrentCharacter({isInteractiveConflict: false})) throw new Error("CLOUD_SAVE_FAILED");
 			const command = this._getPendingCommand({kind: "clone-cloud", characterId, campaignId});
+			const target = await this._api.pGetCampaignCompatibility({campaignId});
 			const result = await this._api.pCloneCharacter({
 				characterId,
 				campaignId,
+				rulesVersionId: target.rulesVersion?.id || null,
 				idempotencyKey: command.idempotencyKey,
 			});
 			this._feedback = {type: "success", text: "Cloud copy created. This campaign character is unchanged."};
@@ -573,9 +612,13 @@ export class CharacterSheetCampaign {
 			this._page._detachHubRealtime?.();
 			isRealtimeDetached = true;
 			const command = this._getPendingCommand({kind: isDetached ? "attach-cloud" : "move-cloud", characterId, campaignId});
+			const targetRulesVersionId = isDetached
+				? (await this._api.pGetCampaignCompatibility({campaignId})).rulesVersion?.id || null
+				: this._movePreview?.rulesVersionId || null;
 			const result = await this._api.pMoveCharacter({
 				characterId,
 				campaignId,
+				rulesVersionId: targetRulesVersionId,
 				idempotencyKey: command.idempotencyKey,
 			});
 			this._feedback = {

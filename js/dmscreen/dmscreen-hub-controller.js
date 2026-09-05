@@ -14,6 +14,7 @@ export class DmScreenHubController {
 		staleAfterMs = DEFAULT_STALE_AFTER_MS,
 		resyncDelayMs = DEFAULT_RESYNC_DELAY_MS,
 		pOnAuthoritativeAccessError = null,
+		pRefreshCampaignContext = null,
 	}) {
 		if (!campaignId) throw new TypeError(`campaignId is required.`);
 		if (!api) throw new TypeError(`api is required.`);
@@ -26,6 +27,7 @@ export class DmScreenHubController {
 		this._staleAfterMs = staleAfterMs;
 		this._resyncDelayMs = resyncDelayMs;
 		this._pOnAuthoritativeAccessError = pOnAuthoritativeAccessError;
+		this._pRefreshCampaignContextOwner = pRefreshCampaignContext;
 
 		this._campaign = null;
 		this._board = null;
@@ -44,6 +46,7 @@ export class DmScreenHubController {
 		// A pending refresh is recorded only after a request fails or returns a stale
 		// rules version. The request generation fences this retry from older failures.
 		this._pendingCampaignContextRefresh = null;
+		this._isCampaignContextCleared = false;
 		this._isSyncStale = false;
 		// Monotonic generation. Every in-flight party-inventory request carries the value it
 		// started under; `detach()` and each load/attach bump it, so a response that arrives
@@ -146,6 +149,7 @@ export class DmScreenHubController {
 		this.detach();
 		this._isPartyInventoryFenced = false;
 		this._board = board;
+		this._isCampaignContextCleared = false;
 		this._repository = repository;
 		this._realtime = realtime;
 		this._fnRetryWorkspace = fnRetryWorkspace;
@@ -158,9 +162,9 @@ export class DmScreenHubController {
 			this._unsubscribers.push(realtime.on("event", event => this._handleCampaignEvent(event)));
 			// A resync baseline now carries only a cursor and cache-invalidation refs, so the
 			// projections themselves are refetched over HTTP.
-			this._unsubscribers.push(realtime.on("cursor", () => {
+			this._unsubscribers.push(realtime.on("cursor", baseline => {
 				this._queueProjectionResync();
-				this._retryPendingCampaignContext();
+				this._handleCampaignCursor(baseline);
 			}));
 		}
 
@@ -187,6 +191,7 @@ export class DmScreenHubController {
 		this._generation++;
 		this._campaignContextRefreshGeneration++;
 		this._pendingCampaignContextRefresh = null;
+		this._isCampaignContextCleared = false;
 		this._board = null;
 	}
 
@@ -389,6 +394,9 @@ export class DmScreenHubController {
 		if (event?.type === "rules.activated") {
 			void this._pRefreshCampaignContext({rulesVersionId: event.aggregateId});
 		}
+		if (event?.type === "brew.activated") {
+			void this._pRefreshCampaignContext({brewBundleVersionId: event.aggregateId});
+		}
 		if ([
 			"character.created",
 			"character.cloned",
@@ -451,40 +459,111 @@ export class DmScreenHubController {
 		}
 	}
 
-	async _pRefreshCampaignContext ({rulesVersionId = null} = {}) {
-		const expectedRulesVersionId = rulesVersionId ?? this._pendingCampaignContextRefresh?.rulesVersionId ?? null;
+	_handleCampaignCursor (baseline) {
+		if (baseline?.cursor?.campaignId !== this._campaignId) return;
+		if (
+			!baseline.campaign
+			|| !Object.hasOwn(baseline.campaign, "activeRulesVersionId")
+			|| !Object.hasOwn(baseline.campaign, "activeBrewBundleVersionId")
+		) {
+			this._retryPendingCampaignContext();
+			return;
+		}
+
+		const rulesVersionId = baseline.campaign.activeRulesVersionId ?? null;
+		const brewBundleVersionId = baseline.campaign.activeBrewBundleVersionId ?? null;
+		const currentContext = this._board?.getHubCampaignContext?.();
+		const currentRulesVersionId = currentContext?.rulesVersion?.id ?? null;
+		const currentBrewBundleVersionId = currentContext?.brewBundle?.id ?? null;
+		if (
+			currentRulesVersionId === rulesVersionId
+			&& currentBrewBundleVersionId === brewBundleVersionId
+		) {
+			this._retryPendingCampaignContext();
+			return;
+		}
+
+		if (this._campaign) {
+			this._campaign.activeRulesVersionId = rulesVersionId;
+			this._campaign.activeBrewBundleVersionId = brewBundleVersionId;
+		}
+		void this._pRefreshCampaignContext({rulesVersionId, brewBundleVersionId});
+	}
+
+	async _pRefreshCampaignContext (expectations = {}) {
+		const pending = this._pendingCampaignContextRefresh;
+		const isRulesVersionPinned = Object.hasOwn(expectations, "rulesVersionId")
+			|| Object.hasOwn(pending || {}, "rulesVersionId");
+		const isBrewBundleVersionPinned = Object.hasOwn(expectations, "brewBundleVersionId")
+			|| Object.hasOwn(pending || {}, "brewBundleVersionId");
+		const expectedRulesVersionId = Object.hasOwn(expectations, "rulesVersionId")
+			? expectations.rulesVersionId
+			: pending?.rulesVersionId;
+		const expectedBrewBundleVersionId = Object.hasOwn(expectations, "brewBundleVersionId")
+			? expectations.brewBundleVersionId
+			: pending?.brewBundleVersionId;
 		const generation = ++this._campaignContextRefreshGeneration;
+		this._clearCampaignContext();
 		try {
-			const context = await this._api.pGetCampaignContext({campaignId: this._campaignId});
+			const refreshOptions = {
+				fnIsCurrent: () => generation === this._campaignContextRefreshGeneration && !!this._board,
+				...(isRulesVersionPinned ? {expectedRulesVersionId} : {}),
+				...(isBrewBundleVersionPinned ? {expectedBrewBundleVersionId} : {}),
+			};
+			const context = this._pRefreshCampaignContextOwner
+				? await this._pRefreshCampaignContextOwner(refreshOptions)
+				: await this._api.pGetCampaignContext({campaignId: this._campaignId});
 			if (generation !== this._campaignContextRefreshGeneration || !this._board) return false;
-			if (expectedRulesVersionId && context?.rulesVersion?.id !== expectedRulesVersionId) {
-				this._board.setHubCampaignContext?.(null);
-				this._pendingCampaignContextRefresh = {generation, rulesVersionId: expectedRulesVersionId};
+			const isRulesVersionMismatch = isRulesVersionPinned
+				&& (context?.rulesVersion?.id ?? null) !== expectedRulesVersionId;
+			const isBrewBundleVersionMismatch = isBrewBundleVersionPinned
+				&& (context?.brewBundle?.id ?? null) !== expectedBrewBundleVersionId;
+			if (isRulesVersionMismatch || isBrewBundleVersionMismatch) {
+				this._pendingCampaignContextRefresh = {
+					generation,
+					...(isRulesVersionPinned ? {rulesVersionId: expectedRulesVersionId} : {}),
+					...(isBrewBundleVersionPinned ? {brewBundleVersionId: expectedBrewBundleVersionId} : {}),
+				};
 				return false;
 			}
 			if (context?.rulesVersion?.ruleDecision?.blocking) {
-				this._board?.setHubCampaignContext?.(null);
+				this._clearCampaignContext();
 				this._pendingCampaignContextRefresh = null;
 				return false;
 			}
+			if (this._campaign) {
+				this._campaign.activeRulesVersionId = context?.rulesVersion?.id ?? null;
+				this._campaign.activeBrewBundleVersionId = context?.brewBundle?.id ?? null;
+			}
 			this._board.setHubCampaignContext?.(context);
+			this._isCampaignContextCleared = false;
 			this._pendingCampaignContextRefresh = null;
 			return true;
 		} catch {
 			if (generation === this._campaignContextRefreshGeneration) {
-				this._board?.setHubCampaignContext?.(null);
 				if (this._board) {
-					this._pendingCampaignContextRefresh = {generation, rulesVersionId: expectedRulesVersionId};
+					this._pendingCampaignContextRefresh = {
+						generation,
+						...(isRulesVersionPinned ? {rulesVersionId: expectedRulesVersionId} : {}),
+						...(isBrewBundleVersionPinned ? {brewBundleVersionId: expectedBrewBundleVersionId} : {}),
+					};
 				}
 			}
 			return false;
 		}
 	}
 
+	_clearCampaignContext () {
+		if (this._isCampaignContextCleared || typeof this._board?.setHubCampaignContext !== "function") return;
+		this._board.setHubCampaignContext(null);
+		this._isCampaignContextCleared = true;
+	}
+
 	_retryPendingCampaignContext () {
 		const pending = this._pendingCampaignContextRefresh;
 		if (!pending || pending.generation !== this._campaignContextRefreshGeneration || !this._board) return;
-		void this._pRefreshCampaignContext({rulesVersionId: pending.rulesVersionId});
+		const {generation: _generation, ...expectations} = pending;
+		void this._pRefreshCampaignContext(expectations);
 	}
 
 	async _pRevalidateAccess () {

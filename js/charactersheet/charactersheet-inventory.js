@@ -1913,11 +1913,31 @@ class CharacterSheetInventory {
 
 	_addCustomItem (name, quantity = 1, weight = 0, options = {}) {
 		const newItem = this._buildCustomItem(name, quantity, weight, options);
+		if (!this._isCampaignItemMutationAllowed({after: newItem})) return undefined;
 
 		this._state.addItem(newItem);
 		this._renderItemList();
 		this._page.saveCharacter();
 		this._refreshCombatAmmoViews();
+	}
+
+	_isCampaignItemMutationAllowed ({before = null, after}) {
+		const isUnavailable = this._page?._isHubContextRefreshing
+			|| this._page?._isHubContextUnavailable
+			|| this._page?._isHubContextRevalidationRequired;
+		if (!isUnavailable) {
+			if (this._page?.isCampaignContentMutationAllowed) {
+				if (this._page.isCampaignContentMutationAllowed({before, after})) return true;
+			} else {
+				const getIdentity = item => `${String(item?.name || "").trim().toLowerCase()}|${String(item?.source || "").trim().toLowerCase()}`;
+				if (!this._page?._hubContext || (before && getIdentity(before) === getIdentity(after)) || this._page.isCampaignContentEntityAllowed?.(after)) return true;
+			}
+		}
+		JqueryUtil.doToast({
+			type: "warning",
+			content: "That item change uses content this campaign does not allow. Existing off-policy items can still be edited without changing their name or source.",
+		});
+		return false;
 	}
 
 	/**
@@ -2076,11 +2096,18 @@ class CharacterSheetInventory {
 	 */
 	_saveCustomItem (name, quantity, weight, options, editItemId = null) {
 		const newItem = this._buildCustomItem(name, quantity, weight, options);
+		const oldItem = editItemId
+			? this._state.getItems().find(i => i.id === editItemId)
+			: null;
+		if (oldItem) {
+			if (oldItem.source == null) delete newItem.source;
+			else newItem.source = oldItem.source;
+		}
+		if (!this._isCampaignItemMutationAllowed({before: oldItem, after: newItem})) return undefined;
 
 		if (editItemId) {
 			// Capture remaining charges BEFORE replacing — _buildCustomItem resets chargesCurrent to
 			// full, which would silently refill a depleted item on edit.
-			const oldItem = this._state.getItems().find(i => i.id === editItemId);
 			const oldChargesCurrent = oldItem?.chargesCurrent;
 
 			// Merge the rebuilt payload onto the ORIGINAL item rather than replacing it wholesale.
@@ -2099,11 +2126,7 @@ class CharacterSheetInventory {
 			const mergeBase = this._state.getItems().find(i => i.id === editItemId) || oldItem;
 			const merged = this._mergeEditedItem(mergeBase, newItem);
 			merged.iounBaseBonuses = null;
-			// The editor stamps every edited row as "Custom", which erases where the item came
-			// from. Record the original source once so provenance-keyed lookups (the Ioun host
-			// registry, and anything added later) still resolve after an edit.
-			merged._baseSource = mergeBase?._baseSource
-				|| (mergeBase?.source && mergeBase.source !== merged.source ? mergeBase.source : undefined);
+			merged._baseSource = mergeBase?._baseSource;
 
 			// Preserve the original quantity unless the form explicitly changed it
 			this._state.replaceItem(editItemId, merged);
@@ -4117,7 +4140,8 @@ class CharacterSheetInventory {
 				if (pendingGemstone) options._pendingGemstone = pendingGemstone;
 			}
 
-			this._saveCustomItem(name, quantity, weight, options, editItemId);
+			const savedItemId = this._saveCustomItem(name, quantity, weight, options, editItemId);
+			if (!savedItemId) return;
 			JqueryUtil.doToast({type: "success", content: isEdit ? `Updated ${name}!` : `Created ${name}!`});
 			doClose(true);
 		});
@@ -5346,7 +5370,8 @@ class CharacterSheetInventory {
 				contents.push({
 					item: {
 						name: entry.special,
-						source: "Custom",
+						source: pack.source || "Custom",
+						...(pack.edition ? {edition: pack.edition} : {}),
 						type: "G",
 						rarity: "none",
 						_isCustom: true,

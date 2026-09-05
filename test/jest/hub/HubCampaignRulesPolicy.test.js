@@ -7,6 +7,7 @@ import {
 	adaptLegacyCampaignRules,
 	createDefaultCampaignRulesPolicy,
 	diffCampaignRulesPolicies,
+	getCampaignRulesPolicy,
 	getCampaignRulesPolicySummary,
 	normalizeCampaignRulesPolicy,
 	projectCampaignSettings,
@@ -54,13 +55,12 @@ describe("Campaign rules policy catalog", () => {
 				implementationStatus: expect.any(Object),
 				compatibility: expect.any(Object),
 			}));
-			if (rule.category === "content") expect(JSON.stringify(rule)).not.toMatch(/enforced/i);
 		}
 		expect(CAMPAIGN_RULES_CATALOG.filter(rule => rule.category === "content"))
 			.toEqual(expect.arrayContaining([
-				expect.objectContaining({id: "content.sources.allowed", isSelectable: false, supportLabel: "Planned"}),
-				expect.objectContaining({id: "content.species.allowed", isSelectable: false, supportLabel: "Planned"}),
-				expect.objectContaining({id: "content.editions.allowed", isSelectable: false, supportLabel: "Planned"}),
+				expect.objectContaining({id: "content.sources.allowed", isSelectable: true, supportLabel: "Enforced"}),
+				expect.objectContaining({id: "content.species.allowed", isSelectable: true, supportLabel: "Enforced"}),
+				expect.objectContaining({id: "content.editions.allowed", isSelectable: true, supportLabel: "Enforced"}),
 			]));
 	});
 
@@ -106,20 +106,38 @@ describe("Campaign rules policy catalog", () => {
 		}));
 	});
 
-	it("rejects unknown, unavailable, malformed, duplicate, and falsely-enforced selections", () => {
+	it("keeps pre-enforcement schema-v2 carry modes readable without accepting them for new publication", () => {
+		const historical = createDefaultCampaignRulesPolicy();
+		historical.rules.find(rule => rule.id === "tgtt.carry-weight").mode = "advisory";
+		historical.rules.find(rule => rule.id === "tgtt.encumbrance-tiers").mode = "advisory";
+
+		expect(() => normalizeCampaignRulesPolicy(historical)).toThrow(expect.objectContaining({
+			code: "RULES_MODE_UNSUPPORTED",
+		}));
+		const readable = getCampaignRulesPolicy({schemaVersion: 2, rules: historical});
+		expect(readable.rules.filter(rule => ["tgtt.carry-weight", "tgtt.encumbrance-tiers"].includes(rule.id)))
+			.toEqual([
+				expect.objectContaining({id: "tgtt.carry-weight", mode: "advisory"}),
+				expect.objectContaining({id: "tgtt.encumbrance-tiers", mode: "advisory"}),
+			]);
+		expect(getCampaignRulesPolicySummary(historical).rules).toEqual(expect.arrayContaining([
+			expect.objectContaining({id: "tgtt.carry-weight", supportLabel: "Advisory"}),
+			expect.objectContaining({id: "tgtt.encumbrance-tiers", supportLabel: "Advisory"}),
+		]));
+		const publicationDraft = structuredClone(historical);
+		publicationDraft.rules.find(rule => rule.id === "tgtt.carry-weight").mode = "enforced";
+		publicationDraft.rules.find(rule => rule.id === "tgtt.encumbrance-tiers").mode = "enforced";
+		expect(diffCampaignRulesPolicies({before: historical, after: publicationDraft})).toEqual([
+			expect.objectContaining({ruleId: "tgtt.carry-weight", before: "On (Advisory)", after: "On (Enforced)"}),
+			expect.objectContaining({ruleId: "tgtt.encumbrance-tiers", before: "On (Advisory)", after: "On (Enforced)"}),
+		]);
+	});
+
+	it("rejects unknown, malformed, duplicate, and incorrectly-modeled selections", () => {
 		const cases = [
 			{
 				code: "RULES_UNKNOWN",
 				mutate: policy => policy.rules[0].id = "unknown.rule",
-			},
-			{
-				code: "RULES_UNAVAILABLE",
-				mutate: policy => policy.rules.push({
-					id: "content.sources.allowed",
-					ruleSchemaVersion: 1,
-					mode: "advisory",
-					parameters: {sources: ["PHB"]},
-				}),
 			},
 			{
 				code: "RULES_PARAMETER_INVALID",
@@ -128,6 +146,10 @@ describe("Campaign rules policy catalog", () => {
 			{
 				code: "RULES_INVALID",
 				mutate: policy => policy.rules.push(structuredClone(policy.rules[0])),
+			},
+			{
+				code: "RULES_MODE_UNSUPPORTED",
+				mutate: policy => policy.rules[0].mode = "advisory",
 			},
 			{
 				code: "RULES_MODE_UNSUPPORTED",

@@ -315,9 +315,9 @@ Implemented slice:
   capability gate `campaign.active_context.v1`;
 - authorized bare Character Sheet/DM Screen defaults, deterministic pinned resources, access-loss concealment,
   BFCache/reconnect revalidation, production-stack Chromium coverage, and four killed high-risk mutants.
-V2-T5 exposes source/edition policy metadata only. ADR 0015/V2-T6 remains the owner of policy enforcement.
+V2-T5 owns context transport and teardown; ADR 0015/V2-T6 now consumes that metadata for content enforcement.
 
-### V2-T6 — enforced campaign rules/source/species/edition policy (**TGTT/exhaustion enforcement implemented; content gating pending**)
+### V2-T6 — enforced campaign rules/source/species/edition policy (**content policy and carry/encumbrance enforcement implemented; other non-content rules remain advisory/planned**)
 
 Dependencies: V2-T2 and V2-T5.
 
@@ -351,9 +351,23 @@ Implemented rules slice:
   activation, teardown, rollback, reconnect, and realtime replacement never persist campaign settings;
 - policy-sensitive carry summaries are fenced by the active immutable rules-version identity in both stores.
 
-Source/species/edition entries remain visible but unavailable and **Planned**. Their create/import/attach/move/
-award enforcement, entity-level grandfather reports, and content-picker filtering remain the separate content
-gating lane and must not be inferred from TGTT/exhaustion enforcement.
+Implemented content-policy slice:
+
+- DM/co-DM source, species/race identity, and 2014-only/2024-only/mixed edition controls are selectable and
+  published as typed content-policy version 1 inside immutable rules versions;
+- campaign and personal-brew availability are separate: active campaign brew augments campaign pages without
+  mutating personal brew, while absent personal sources cannot widen the campaign;
+- Builder, Quick Build, Level Up, Respec, spell/feat/item/class/species candidate projection, imports, clone/
+  attach/move admission, direct character deltas, grants/awards, and accepted transfers into characters fail
+  closed on newly disallowed or unknown identities;
+- existing campaign characters remain playable and receive bounded grandfather warnings; unrelated edits and
+  removals remain valid, and policy activation/rollback never rewrites character data;
+- exact active rules-version fencing, memory/PostgreSQL parity, privacy-shaped events/summaries, reconnect/
+  rollback/campaign-switch teardown, production-stack Chromium, and mutation tests cover authority boundaries.
+
+Carry-weight and encumbrance-tier settings are also **Enforced** (calculation/projection plus policy-fenced
+carry writes on their proven surfaces); remaining non-content house-rule behavior (`tgtt.enabled`, exhaustion,
+jumping, linguistics, and critical rolls) stays advisory.
 
 ### V2-T7 — player targeting (**first one-to-one player slice implemented; broader targeting active**)
 

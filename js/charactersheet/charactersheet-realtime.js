@@ -3,6 +3,7 @@ import {getCharacterOperationRouting} from "../hub/hub-character-operation-event
 
 const _LISTENER_TYPES = new Set([
 	"connectionState",
+	"campaignContextChanged",
 	"cursor",
 	"deliveryError",
 	"inventoryTransfer",
@@ -98,6 +99,7 @@ export class CharacterSheetRealtimeCoordinator {
 			isSuspended: false,
 			inventoryEventKeys: new Set(),
 			operationKeys: new Set(),
+			cursorMetadata: null,
 			projectionCursorKey: null,
 			unsubscribers: [],
 		};
@@ -164,6 +166,22 @@ export class CharacterSheetRealtimeCoordinator {
 	_handleCursor (active, baseline) {
 		if (!this._isCurrent(active)) return;
 		if (baseline.cursor?.campaignId !== this._campaignId) return;
+		if (
+			baseline.campaign
+			&& Object.hasOwn(baseline.campaign, "activeRulesVersionId")
+			&& Object.hasOwn(baseline.campaign, "activeBrewBundleVersionId")
+		) {
+			this._enqueue(active, {
+				type: "campaignContextChanged",
+				value: {
+					type: "campaign.cursor",
+					campaignId: this._campaignId,
+					sequence: baseline.cursor?.lastSequence || 0,
+					rulesVersionId: baseline.campaign.activeRulesVersionId ?? null,
+					brewBundleVersionId: baseline.campaign.activeBrewBundleVersionId ?? null,
+				},
+			});
+		}
 		const characterRef = baseline.characterRefs?.find(ref => ref?.id === active.characterId);
 		if (!characterRef) {
 			this._queueDetach(active, {
@@ -182,6 +200,12 @@ export class CharacterSheetRealtimeCoordinator {
 			...(hasOperationWatermark ? {operationWatermark: characterRef.operationWatermark} : {}),
 		};
 		const operationWatermarkKey = hasOperationWatermark ? characterRef.operationWatermark : "absent";
+		const previousMetadata = active.cursorMetadata;
+		active.cursorMetadata = metadata;
+		const previousOperationWatermarkKey = previousMetadata?.operationWatermark ?? "absent";
+		const isCharacterDocumentChanged = previousMetadata != null
+			&& metadata.revision !== previousMetadata.revision
+			&& operationWatermarkKey === previousOperationWatermarkKey;
 		const cursorKey = `${metadata.lastSequence}:${metadata.revision}:${metadata.projectionRevision}:${operationWatermarkKey}`;
 		if (active.cursorKey !== cursorKey) {
 			active.cursorKey = cursorKey;
@@ -195,14 +219,13 @@ export class CharacterSheetRealtimeCoordinator {
 			active.projectionCursorKey = projectionCursorKey;
 			this._enqueue(active, {
 				type: "projectionInvalidated",
-				value: {...metadata, source: "cursor"},
+				value: {...metadata, source: "cursor", isCharacterDocumentChanged},
 			});
 		}
 	}
 
 	_handleEvent (active, event) {
 		if (!this._isCurrent(active) || event?.campaignId !== this._campaignId) return;
-
 		if (event.type === "rules.activated" && event.aggregateType === "rules_version") {
 			this._enqueue(active, {
 				type: "rulesChanged",
@@ -210,6 +233,20 @@ export class CharacterSheetRealtimeCoordinator {
 					campaignId: this._campaignId,
 					rulesVersionId: event.aggregateId,
 					sequence: event.sequence,
+				},
+			});
+			return;
+		}
+
+		if (event.type === "brew.activated") {
+			this._enqueue(active, {
+				type: "campaignContextChanged",
+				value: {
+					eventId: event.id,
+					campaignId: this._campaignId,
+					sequence: event.sequence,
+					type: event.type,
+					aggregateId: event.aggregateId,
 				},
 			});
 			return;

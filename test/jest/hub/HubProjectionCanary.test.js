@@ -15,8 +15,8 @@ const IDENTITIES = {
 
 const CHARACTER_DATA = {
 	name: "Mira Vale",
-	race: {name: "Elf"},
-	classes: [{name: "Ranger", level: 5}],
+	race: {name: "Elf", source: "PHB"},
+	classes: [{name: "Ranger", source: "PHB", level: 5}],
 	abilities: {str: 10, dex: 16, con: 14, int: 8, wis: 15, cha: 12},
 	saveProficiencies: ["dex"],
 	skillProficiencies: {stealth: 1},

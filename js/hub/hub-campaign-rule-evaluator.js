@@ -5,7 +5,6 @@ import {
 	CAMPAIGN_RULES_POLICY_SCHEMA_VERSION,
 	CampaignRulesPolicyError,
 	getCampaignRulesPolicy,
-	normalizeCampaignRulesPolicy,
 } from "./hub-campaign-rules.js";
 
 export const CAMPAIGN_RULE_EVALUATOR_VERSION = "1";
@@ -301,9 +300,11 @@ export function evaluateCampaignRules (input = {}) {
 	let policy;
 	try {
 		const policyInput = rulesVersion.policy ?? rulesVersion.rules;
-		policy = schemaVersion === CAMPAIGN_RULES_POLICY_SCHEMA_VERSION
-			? normalizeCampaignRulesPolicy(policyInput)
-			: getCampaignRulesPolicy({schemaVersion, rules: policyInput});
+		policy = getCampaignRulesPolicy({
+			schemaVersion,
+			rules: policyInput,
+			isValidateCompatibility: schemaVersion === CAMPAIGN_RULES_POLICY_SCHEMA_VERSION,
+		});
 	} catch (error) {
 		if (!(error instanceof CampaignRulesPolicyError)) throw error;
 		return blocked({surface, personalSettings, rulesVersion, code: error.code});

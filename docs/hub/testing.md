@@ -20,6 +20,7 @@
 | Database contract | `HubMigrationContract.test.js`, `HubSemanticOperationsPostgres.test.js`, local PostgreSQL drills | Schema clauses, runtime-role grants, source/target lock ordering, atomic cost/effect, replay, expiry, and restore |
 | Real-stack browser | `test/e2e/hub/`, `test/e2e/pages/HubCampaignPage.ts` | Multi-user lifecycle, Character Sheet copy/attach/clone/move, real Cure Wounds reject/cancel/accept/self-target effects, leases, reconnect, keyboard focus, phone reflow, labels/touch targets, and six-member/replay/quota/contention budgets |
 | CI/supply chain | `.github/workflows/hub.yml`, `HubCiContract.test.js` | Pinned actions, deterministic gates, SBOM/image/provenance and test-auth isolation |
+| Content policy | `HubCampaignContentGating.test.js`, `HubRulesPolicyPostgres.test.js`, Character Sheet content/teardown tests | Canonical aliases, campaign brew, editions/species variants, grandfathering, imports/direct writes/grants/awards/transfers, stale pins, rollback, privacy, and memory/PostgreSQL parity |
 
 ## Current commands
 
@@ -69,7 +70,9 @@ The disposable stack exposes PostgreSQL only on a random loopback port for the d
 browser journeys, it executes the semantic-operation, inventory, provider-identity, and rules-policy PostgreSQL
 suites against the migrated runtime role. The rules-policy parity suite proves the exact memory/PostgreSQL
 response, compatibility projection, audit, ordered-event, outbox, stale-base concurrency, and rollback behavior
-without adding a migration. The semantic suite proves concurrent exact replay, one applied revision/event,
+without adding a migration. Its content scenario additionally proves whole-document admission, grandfathered
+unrelated edits, direct patch/grant/award/transfer rejection, transfer stale-pin fencing and escrow restoration,
+privacy-safe rejected writes, and rollback admission. The semantic suite proves concurrent exact replay, one applied revision/event,
 mutated-body rejection, explicit target-owner approval under competing commands, atomic source-slot decrement plus
 target healing, source/target/combined watermarks, bounded expiry, lifecycle cancellation, and minimized
 explicit-recipient terminal payloads.
@@ -203,11 +206,16 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   retention, inverted local fallback, pinned-campaign reselection loss, Character Sheet save-fence removal,
   and DM workspace save-fence removal) plus six rules-policy mutants (strict historical diffs, missing
   encumbrance dependency, stale reconnect loads, editable busy controls, terminal access-lock loss, and hidden
-  optional-chunk failure).
+  optional-chunk failure) and twelve content-policy mutants (candidate/source/edition bypasses, canonical identity
+  and grandfather-delta mistakes, official-source spoofing, feature-level fencing, context teardown/access-loss,
+  policy-version fencing, and refresh-time custom-content fail-open).
   It never rewrites the working tree.
 - `test/e2e/hub/active-campaign-context.spec.ts` runs against the disposable exact-image HTTPS/PostgreSQL stack,
   including real `localStorage`, `BroadcastChannel`, Character Sheet, DM Screen, membership, archive, and BFCache
   behavior.
+- `test/e2e/hub/campaign-content-gating.spec.ts` drives the production-derived Character Sheet Builder,
+  multiclass Level Up, import, direct API rejection, legacy warning/unrelated edit, immutable rollback,
+  multi-tab convergence, and explicit local restoration against the real HTTPS/PostgreSQL stack.
 
 - V2-T0 release automation shipped in [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219):
   25 focused release/deployment/documentation contracts, shell/Bash/Python validation, and Compose rendering

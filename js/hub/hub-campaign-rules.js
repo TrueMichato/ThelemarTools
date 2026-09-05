@@ -1,4 +1,11 @@
 import {HUB_CAPABILITY_CAMPAIGN_RULES_POLICY} from "./hub-capabilities.js";
+import {
+	CAMPAIGN_CONTENT_EDITIONS,
+	CAMPAIGN_CONTENT_RULE_IDS,
+	canonicalizeCampaignSourceId,
+	canonicalizeCampaignSpeciesUid,
+	getCampaignContentPolicy,
+} from "./hub-content-policy.js";
 
 export const CAMPAIGN_RULES_POLICY_CAPABILITY = HUB_CAPABILITY_CAMPAIGN_RULES_POLICY;
 export const CAMPAIGN_RULES_POLICY_SCHEMA_VERSION = 2;
@@ -14,7 +21,14 @@ export const DEFAULT_CAMPAIGN_SETTINGS = Object.freeze({
 	thelemar_criticalRolls: true,
 });
 
+const CONTENT_RULE_IDS = Object.freeze([
+	CAMPAIGN_CONTENT_RULE_IDS.sources,
+	CAMPAIGN_CONTENT_RULE_IDS.species,
+	CAMPAIGN_CONTENT_RULE_IDS.editions,
+]);
+
 const SUPPORTED_RULE_IDS = Object.freeze([
+	...CONTENT_RULE_IDS,
 	"tgtt.enabled",
 	"rules.exhaustion.system",
 	"tgtt.carry-weight",
@@ -24,7 +38,15 @@ const SUPPORTED_RULE_IDS = Object.freeze([
 	"tgtt.critical-rolls",
 ]);
 
+const REQUIRED_HISTORICAL_RULE_IDS = Object.freeze(SUPPORTED_RULE_IDS.filter(id => !id.startsWith("content.")));
+
 const ENFORCED_RULE_IDS = new Set([
+	...CONTENT_RULE_IDS,
+	"tgtt.carry-weight",
+	"tgtt.encumbrance-tiers",
+]);
+
+const HISTORICAL_ADVISORY_RULE_IDS = new Set([
 	"tgtt.carry-weight",
 	"tgtt.encumbrance-tiers",
 ]);
@@ -63,14 +85,14 @@ const SURFACES_TGTT_MASTER = Object.freeze({
 });
 
 const SURFACES_CONTENT = Object.freeze({
-	characterOpen: "planned",
-	builder: "planned",
-	levelUp: "planned",
-	quickBuild: "planned",
-	respec: "planned",
-	contentFilter: "planned",
-	characterWrite: "planned",
-	hubAdmin: "planned",
+	characterOpen: "implemented",
+	builder: "implemented",
+	levelUp: "implemented",
+	quickBuild: "implemented",
+	respec: "implemented",
+	contentFilter: "implemented",
+	characterWrite: "implemented",
+	hubAdmin: "implemented",
 });
 
 /**
@@ -110,11 +132,11 @@ export const CAMPAIGN_RULES_CATALOG = Object.freeze([
 		applicability: {editions: ["2014", "2024"], scope: "campaign"},
 		title: "Allowed sources",
 		summary: "Limit new campaign choices to named books and campaign sources.",
-		details: "Source enforcement is planned. This catalog entry is visible for planning but cannot be selected yet.",
-		lifecycle: "informational_planned",
-		supportLabel: "Planned",
-		isSelectable: false,
-		parameter: {key: "sources", type: "string_list", label: "Sources", default: [], maxItems: 100},
+		details: "Only new choices are blocked. Existing content remains usable and is reported as grandfathered. Leave the list empty to allow every available site or campaign source.",
+		lifecycle: "implemented_enforced",
+		supportLabel: "Enforced",
+		isSelectable: true,
+		parameter: {key: "sources", type: "string_list", label: "Source IDs", default: [], maxItems: 100},
 		implementationStatus: SURFACES_CONTENT,
 		compatibility: {requires: [], conflicts: []},
 	},
@@ -125,11 +147,11 @@ export const CAMPAIGN_RULES_CATALOG = Object.freeze([
 		applicability: {editions: ["2014", "2024"], scope: "campaign"},
 		title: "Allowed species",
 		summary: "Limit new characters to selected species and source identities.",
-		details: "Species enforcement is planned. Existing characters will not be changed when support is added.",
-		lifecycle: "informational_planned",
-		supportLabel: "Planned",
-		isSelectable: false,
-		parameter: {key: "species", type: "uid_list", label: "Species", default: [], maxItems: 100},
+		details: "Use canonical name|source identities, including each subrace or variant separately. Existing characters remain playable. Leave empty to allow every available species.",
+		lifecycle: "implemented_enforced",
+		supportLabel: "Enforced",
+		isSelectable: true,
+		parameter: {key: "species", type: "uid_list", label: "Species IDs", default: [], maxItems: 100},
 		implementationStatus: SURFACES_CONTENT,
 		compatibility: {requires: [], conflicts: []},
 	},
@@ -140,10 +162,10 @@ export const CAMPAIGN_RULES_CATALOG = Object.freeze([
 		applicability: {editions: ["2014", "2024"], scope: "campaign"},
 		title: "Allowed editions",
 		summary: "Limit new campaign choices to the 2014 rules, 2024 rules, or both.",
-		details: "Edition enforcement is planned. This selection stays unavailable until all required surfaces can honor it.",
-		lifecycle: "informational_planned",
-		supportLabel: "Planned",
-		isSelectable: false,
+		details: "2014-only permits classic entities, 2024-only permits one-edition entities, and mixed permits both. Existing off-policy choices remain usable.",
+		lifecycle: "implemented_enforced",
+		supportLabel: "Enforced",
+		isSelectable: true,
 		parameter: {
 			key: "editions",
 			type: "string_list",
@@ -325,6 +347,16 @@ function assertOnlyKeys (value, allowed, code, message) {
 
 function getRuleValueLabel (definition, value) {
 	if (definition.parameter.type === "boolean") return value ? "On" : "Off";
+	if (definition.id === CAMPAIGN_CONTENT_RULE_IDS.editions) {
+		if (value?.length === 2) return "Mixed (2014 and 2024)";
+		if (value?.[0] === "2014") return "2014 only";
+		if (value?.[0] === "2024") return "2024 only";
+	}
+	if (["string_list", "uid_list"].includes(definition.parameter.type)) {
+		if (!value?.length) return "All available";
+		const shown = value.slice(0, 5).join(", ");
+		return value.length > 5 ? `${shown} and ${value.length - 5} more` : shown;
+	}
 	return definition.parameter.options?.find(option => option.value === value)?.label || `${value}`;
 }
 
@@ -367,6 +399,28 @@ function normalizeRuleParameters (definition, parameters) {
 	if (definition.parameter.type === "enum" && !definition.parameter.options.some(option => option.value === value)) {
 		throw new CampaignRulesPolicyError("RULES_PARAMETER_INVALID", `Rule "${definition.id}" has an unsupported value.`);
 	}
+	if (["string_list", "uid_list"].includes(definition.parameter.type)) {
+		if (!Array.isArray(value) || value.length > definition.parameter.maxItems) {
+			throw new CampaignRulesPolicyError("RULES_PARAMETER_INVALID", `Rule "${definition.id}" requires a bounded list.`);
+		}
+		const normalized = value.map(item => definition.parameter.type === "uid_list"
+			? canonicalizeCampaignSpeciesUid(item)
+			: canonicalizeCampaignSourceId(item));
+		if (normalized.some(item => item == null)) {
+			throw new CampaignRulesPolicyError("RULES_PARAMETER_INVALID", `Rule "${definition.id}" contains an invalid identity.`);
+		}
+		const deduped = [...new Map(normalized.map(item => [item.toLowerCase(), item])).values()];
+		if (deduped.length !== normalized.length) {
+			throw new CampaignRulesPolicyError("RULES_PARAMETER_INVALID", `Rule "${definition.id}" contains duplicate identities.`);
+		}
+		if (definition.id === CAMPAIGN_CONTENT_RULE_IDS.editions) {
+			if (!deduped.length || deduped.some(item => !CAMPAIGN_CONTENT_EDITIONS.includes(item))) {
+				throw new CampaignRulesPolicyError("RULES_PARAMETER_INVALID", `Allowed editions must be 2014, 2024, or both.`);
+			}
+			deduped.sort((a, b) => CAMPAIGN_CONTENT_EDITIONS.indexOf(a) - CAMPAIGN_CONTENT_EDITIONS.indexOf(b));
+		} else deduped.sort((a, b) => a.localeCompare(b));
+		return {[definition.parameter.key]: deduped};
+	}
 	return {[definition.parameter.key]: copy(value)};
 }
 
@@ -391,7 +445,13 @@ function validateCompatibility (policy) {
 	}
 }
 
-function normalizeCampaignRulesPolicyInternal (policy, {isValidateCompatibility = true} = {}) {
+function normalizeCampaignRulesPolicyInternal (
+	policy,
+	{
+		isAllowHistoricalAdvisoryModes = false,
+		isValidateCompatibility = true,
+	} = {},
+) {
 	assertPlainObject(policy, "RULES_INVALID", "Campaign policy must be an object.");
 	assertOnlyKeys(policy, new Set(["schemaVersion", "catalogVersion", "rules", "notes"]), "RULES_INVALID", "Unsupported campaign policy fields.");
 	if (policy.schemaVersion !== CAMPAIGN_RULES_POLICY_SCHEMA_VERSION) {
@@ -428,22 +488,33 @@ function normalizeCampaignRulesPolicyInternal (policy, {isValidateCompatibility 
 		if (selection.ruleSchemaVersion !== definition.ruleSchemaVersion) {
 			throw new CampaignRulesPolicyError("RULES_SCHEMA_UNSUPPORTED", `Campaign rule "${selection.id}" uses an unsupported schema version.`);
 		}
-		if (
-			!["advisory", "enforced"].includes(selection.mode)
-			|| (selection.mode === "enforced" && definition.lifecycle !== "implemented_enforced")
-		) {
-			throw new CampaignRulesPolicyError("RULES_MODE_UNSUPPORTED", `Campaign rule "${selection.id}" has an unsupported mode.`);
+		const supportedMode = definition.lifecycle === "implemented_enforced" ? "enforced" : "advisory";
+		const isHistoricalAdvisoryMode = isAllowHistoricalAdvisoryModes
+			&& selection.mode === "advisory"
+			&& HISTORICAL_ADVISORY_RULE_IDS.has(selection.id);
+		if (selection.mode !== supportedMode && !isHistoricalAdvisoryMode) {
+			throw new CampaignRulesPolicyError("RULES_MODE_UNSUPPORTED", `Campaign rule "${selection.id}" must use "${supportedMode}" mode.`);
 		}
 		return {
 			id: selection.id,
 			ruleSchemaVersion: selection.ruleSchemaVersion,
-			mode: selection.mode,
+			mode: isHistoricalAdvisoryMode ? "advisory" : supportedMode,
 			parameters: normalizeRuleParameters(definition, selection.parameters),
 		};
 	});
-	const missingRuleIds = SUPPORTED_RULE_IDS.filter(id => !seenRuleIds.has(id));
+	const missingRuleIds = REQUIRED_HISTORICAL_RULE_IDS.filter(id => !seenRuleIds.has(id));
 	if (missingRuleIds.length) {
 		throw new CampaignRulesPolicyError("RULES_INVALID", "Campaign policy is missing supported rule selections.", {details: {ruleIds: missingRuleIds}});
+	}
+	for (const id of CONTENT_RULE_IDS) {
+		if (seenRuleIds.has(id)) continue;
+		const definition = CATALOG_BY_ID.get(id);
+		rules.unshift({
+			id,
+			ruleSchemaVersion: definition.ruleSchemaVersion,
+			mode: "enforced",
+			parameters: {[definition.parameter.key]: copy(definition.parameter.default)},
+		});
 	}
 
 	const seenNoteIds = new Set();
@@ -487,8 +558,12 @@ export function adaptLegacyCampaignRules (rules) {
 		return {
 			id,
 			ruleSchemaVersion: definition.ruleSchemaVersion,
-			mode: "advisory",
-			parameters: {[definition.parameter.key]: settings[settingKey]},
+			mode: definition.lifecycle === "implemented_enforced" ? "enforced" : "advisory",
+			parameters: {
+				[definition.parameter.key]: settingKey == null
+					? copy(definition.parameter.default)
+					: settings[settingKey],
+			},
 		};
 	});
 	return normalizeCampaignRulesPolicyInternal({
@@ -507,9 +582,12 @@ export function createDefaultCampaignRulesPolicy () {
 	return policy;
 }
 
-export function getCampaignRulesPolicy ({schemaVersion, rules}) {
+export function getCampaignRulesPolicy ({schemaVersion, rules, isValidateCompatibility = false}) {
 	if (schemaVersion === CAMPAIGN_RULES_POLICY_SCHEMA_VERSION || rules?.schemaVersion === CAMPAIGN_RULES_POLICY_SCHEMA_VERSION) {
-		return normalizeCampaignRulesPolicyInternal(rules, {isValidateCompatibility: false});
+		return normalizeCampaignRulesPolicyInternal(rules, {
+			isAllowHistoricalAdvisoryModes: true,
+			isValidateCompatibility,
+		});
 	}
 	return adaptLegacyCampaignRules(rules);
 }
@@ -519,13 +597,17 @@ export function projectCampaignSettings ({schemaVersion, rules}) {
 	const out = {...DEFAULT_CAMPAIGN_SETTINGS};
 	for (const selection of policy.rules) {
 		const definition = CATALOG_BY_ID.get(selection.id);
+		if (!SETTING_BY_RULE_ID[selection.id]) continue;
 		out[SETTING_BY_RULE_ID[selection.id]] = selection.parameters[definition.parameter.key];
 	}
 	return out;
 }
 
 export function getCampaignRulesPolicySummary (policy) {
-	const normalized = normalizeCampaignRulesPolicyInternal(policy, {isValidateCompatibility: false});
+	const normalized = normalizeCampaignRulesPolicyInternal(policy, {
+		isAllowHistoricalAdvisoryModes: true,
+		isValidateCompatibility: false,
+	});
 	return {
 		catalogVersion: normalized.catalogVersion,
 		rules: normalized.rules.map(selection => {
@@ -540,20 +622,43 @@ export function getCampaignRulesPolicySummary (policy) {
 	};
 }
 
+export function getCampaignRulesContentPolicy (policy) {
+	const normalized = policy?.schemaVersion === CAMPAIGN_RULES_POLICY_SCHEMA_VERSION && Array.isArray(policy.rules)
+		? normalizeCampaignRulesPolicyInternal(policy, {
+			isAllowHistoricalAdvisoryModes: true,
+			isValidateCompatibility: false,
+		})
+		: getCampaignRulesPolicy(policy);
+	return getCampaignContentPolicy(normalized);
+}
+
 export function diffCampaignRulesPolicies ({before, after, isAfterStoredPolicy = false}) {
-	const beforeMap = getSelectionMap(normalizeCampaignRulesPolicyInternal(before, {isValidateCompatibility: false}));
-	const afterNormalized = normalizeCampaignRulesPolicyInternal(after, {isValidateCompatibility: !isAfterStoredPolicy});
+	const beforeMap = getSelectionMap(normalizeCampaignRulesPolicyInternal(before, {
+		isAllowHistoricalAdvisoryModes: true,
+		isValidateCompatibility: false,
+	}));
+	const afterNormalized = normalizeCampaignRulesPolicyInternal(after, {
+		isAllowHistoricalAdvisoryModes: isAfterStoredPolicy,
+		isValidateCompatibility: !isAfterStoredPolicy,
+	});
 	return afterNormalized.rules.flatMap(selection => {
 		const definition = CATALOG_BY_ID.get(selection.id);
 		const key = definition.parameter.key;
-		const beforeValue = beforeMap.get(selection.id)?.parameters[key];
+		const beforeSelection = beforeMap.get(selection.id);
+		const beforeValue = beforeSelection?.parameters[key];
 		const afterValue = selection.parameters[key];
-		if (JSON.stringify(beforeValue) === JSON.stringify(afterValue)) return [];
+		const isModeChanged = beforeSelection?.mode !== selection.mode;
+		if (JSON.stringify(beforeValue) === JSON.stringify(afterValue) && !isModeChanged) return [];
+		const getLabel = (value, mode) => {
+			const valueLabel = getRuleValueLabel(definition, value);
+			if (!isModeChanged) return valueLabel;
+			return `${valueLabel} (${mode === "enforced" ? "Enforced" : "Advisory"})`;
+		};
 		return [{
 			ruleId: selection.id,
 			title: definition.title,
-			before: getRuleValueLabel(definition, beforeValue),
-			after: getRuleValueLabel(definition, afterValue),
+			before: getLabel(beforeValue, beforeSelection?.mode),
+			after: getLabel(afterValue, selection.mode),
 		}];
 	});
 }

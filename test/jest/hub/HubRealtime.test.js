@@ -218,6 +218,38 @@ describe("hub realtime", () => {
 			expect(client._lastSequence).toBe(11);
 		});
 
+		it("uses the cursor for active context and omits snapshot-covered activation history", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			const client = new HubRealtimeClient({campaignId: "cmp", location: {protocol: "https:", host: "tools.example"}});
+			const baselines = [];
+			const events = [];
+			client.on("cursor", baseline => baselines.push(baseline));
+			client.on("event", event => events.push(event));
+
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 4},
+				campaign: {
+					id: "cmp",
+					activeRulesVersionId: "rules-2",
+					activeBrewBundleVersionId: "brew-1",
+				},
+				characterRefs: [],
+				events: [
+					{id: "rules-1", sequence: 1, type: "rules.activated", aggregateId: "rules-1"},
+					{id: "rules-2", sequence: 2, type: "rules.activated", aggregateId: "rules-2"},
+					{id: "brew-1", sequence: 3, type: "brew.activated", aggregateId: "brew-1"},
+					{id: "roll-1", sequence: 4, type: "roll.logged"},
+				],
+			});
+
+			expect(baselines[0].campaign).toEqual(expect.objectContaining({
+				activeRulesVersionId: "rules-2",
+				activeBrewBundleVersionId: "brew-1",
+			}));
+			expect(events).toEqual([{id: "roll-1", sequence: 4, type: "roll.logged"}]);
+		});
+
 		it("continues replay from the server-scanned sequence even when a page has no visible events", async () => {
 			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
 			const sent = [];

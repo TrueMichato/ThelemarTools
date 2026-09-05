@@ -110,6 +110,40 @@ describe("hub API client", () => {
 		}));
 	});
 
+	it("pins transfer acceptance to the current policy and retries once after a concurrent activation", async () => {
+		const calls = [];
+		let contextReads = 0;
+		let resolveWrites = 0;
+		const client = new HubApiClient({
+			fnFetch: async (path, opts = {}) => {
+				calls.push({path, opts});
+				if (path === "/api/session") return getResponse({body: {signedIn: true, csrfToken: "csrf-1"}});
+				if (path.endsWith("/context")) {
+					contextReads++;
+					return getResponse({body: {context: {rulesVersion: {id: `rules-${contextReads}`}}}});
+				}
+				if (path.endsWith("/resolve")) {
+					resolveWrites++;
+					if (resolveWrites === 1) return getResponse({status: 409, body: {error: "RULES_VERSION_STALE"}});
+					return getResponse({body: {transfer: {id: "transfer-1", status: "committed"}}});
+				}
+				throw new Error(`Unexpected request: ${path}`);
+			},
+		});
+		await client.pGetSession();
+
+		await expect(client.pResolveTransfer({
+			campaignId: "campaign-1",
+			transferId: "transfer-1",
+			decision: "accept",
+			idempotencyKey: "accept-1",
+		})).resolves.toEqual({transfer: {id: "transfer-1", status: "committed"}});
+
+		const resolveCalls = calls.filter(call => call.path.endsWith("/resolve"));
+		expect(resolveCalls.map(call => JSON.parse(call.opts.body).rulesVersionId)).toEqual(["rules-1", "rules-2"]);
+		expect(resolveCalls.map(call => call.opts.headers["idempotency-key"])).toEqual(["accept-1", "accept-1"]);
+	});
+
 	it("normalizes browser fetch failures without leaking browser-specific messages", async () => {
 		const original = new TypeError("Load failed");
 		const client = new HubApiClient({

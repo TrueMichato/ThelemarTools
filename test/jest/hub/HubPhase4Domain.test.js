@@ -244,7 +244,7 @@ describe("Phase 4 actions, grants, and transfers", () => {
 		})).json().character;
 		const largeItem = {
 			name: `Large Journal ${"y".repeat(186)}`,
-			source: "HB",
+			source: "PHB",
 			rarity: "z".repeat(80),
 			typeCode: "x".repeat(80),
 		};

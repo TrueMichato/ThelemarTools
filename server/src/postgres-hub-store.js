@@ -36,9 +36,19 @@ import {
 } from "./hub-actions.js";
 import {validateCloudCharacterData, validateCloudValue} from "./cloud-data-validation.js";
 import {
+	CAMPAIGN_RULES_SCHEMA_VERSION,
 	getPublicCampaignRulesVersion,
 	normalizeCampaignRulesPolicyForStorage,
+	validateCampaignBrewBundle,
 } from "./campaign-content.js";
+import {
+	assertCharacterCampaignContentMutation,
+	assertCampaignContentPolicyCatalog,
+	assertCampaignContentPolicyVersion,
+	assertNewCharacterCampaignContent,
+	pGetCampaignContentCatalog,
+	pGetCampaignContentEnforcement,
+} from "./campaign-content-policy.js";
 import {
 	assertCampaignRuleWriteFence,
 	prepareCampaignTransitionData,
@@ -1470,6 +1480,41 @@ export class PostgresHubStore {
 		};
 	}
 
+	async _pGetCampaignContentEnforcement ({client, campaignId, isCampaignWriteLock = false}) {
+		const result = await client.query(`
+			SELECT
+				r.id AS rules_id,
+				r.schema_version AS rules_schema_version,
+				r.rules,
+				b.id AS brew_id,
+				b.content_hash AS brew_content_hash,
+				b.content AS brew_content
+			FROM hub.campaigns c
+			LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
+			LEFT JOIN hub.brew_bundle_versions b ON b.id = c.active_brew_bundle_version_id
+			WHERE c.id = $1 AND c.status <> 'deleting'
+			${isCampaignWriteLock ? "FOR UPDATE OF c" : "FOR SHARE OF c"}
+		`, [campaignId]);
+		if (!result.rowCount) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+		const row = result.rows[0];
+		return pGetCampaignContentEnforcement({
+			rulesVersion: row.rules_id
+				? {
+					id: row.rules_id,
+					schemaVersion: row.rules_schema_version,
+					rules: row.rules,
+				}
+				: null,
+			brewBundle: row.brew_content
+				? {
+					id: row.brew_id,
+					contentHash: row.brew_content_hash,
+					content: row.brew_content,
+				}
+				: null,
+		});
+	}
+
 	/**
 	 * Emit the metadata-only ADR 0011 invalidation. This is the only place PostgreSQL
 	 * announces that a character's projection may have changed, so a new mutation cannot
@@ -1615,6 +1660,7 @@ export class PostgresHubStore {
 		data,
 		schemaVersion,
 		clientImportId,
+		rulesVersionId = null,
 		idempotencyKey,
 		protocolVersion = null,
 	}) {
@@ -1639,6 +1685,15 @@ export class PostgresHubStore {
 				await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "character.create", response});
 				await client.query("COMMIT");
 				return response;
+			}
+			if (campaignId) {
+				const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId, isCampaignWriteLock: true});
+				assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+				assertNewCharacterCampaignContent({
+					...enforcement,
+					character: data,
+					rulesVersionId: enforcement.activeRulesVersionId,
+				});
 			}
 			if (campaignId && data.carry) {
 				const rulesResult = await client.query(`
@@ -1840,6 +1895,7 @@ export class PostgresHubStore {
 		baseRevision,
 		leaseEpoch,
 		patches,
+		rulesVersionId = null,
 		idempotencyKey,
 		protocolVersion = null,
 	}) {
@@ -1910,6 +1966,16 @@ export class PostgresHubStore {
 				});
 			}
 			validateCloudCharacterData(data);
+			if (character.campaignId) {
+				const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId: character.campaignId});
+				assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+				assertCharacterCampaignContentMutation({
+					...enforcement,
+					before: character.data,
+					after: data,
+					rulesVersionId: enforcement.activeRulesVersionId,
+				});
+			}
 			const updated = await client.query(`
 				UPDATE hub.characters
 				SET data = $2::jsonb, revision = revision + 1, updated_at = now()
@@ -1943,15 +2009,15 @@ export class PostgresHubStore {
 		}
 	}
 
-	async pCloneCharacter ({accountId, characterId, campaignId, idempotencyKey}) {
-		return this._pCopyOrMoveCharacter({accountId, characterId, campaignId, idempotencyKey, isMove: false});
+	async pCloneCharacter ({accountId, characterId, campaignId, rulesVersionId = null, idempotencyKey}) {
+		return this._pCopyOrMoveCharacter({accountId, characterId, campaignId, rulesVersionId, idempotencyKey, isMove: false});
 	}
 
-	async pMoveCharacter ({accountId, characterId, campaignId, idempotencyKey}) {
-		return this._pCopyOrMoveCharacter({accountId, characterId, campaignId, idempotencyKey, isMove: true});
+	async pMoveCharacter ({accountId, characterId, campaignId, rulesVersionId = null, idempotencyKey}) {
+		return this._pCopyOrMoveCharacter({accountId, characterId, campaignId, rulesVersionId, idempotencyKey, isMove: true});
 	}
 
-	async _pCopyOrMoveCharacter ({accountId, characterId, campaignId, idempotencyKey, isMove}) {
+	async _pCopyOrMoveCharacter ({accountId, characterId, campaignId, rulesVersionId = null, idempotencyKey, isMove}) {
 		const client = await this._pool.connect();
 		try {
 			await client.query("BEGIN");
@@ -1983,6 +2049,15 @@ export class PostgresHubStore {
 			if (!characterResult.rowCount) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
 			const source = getCharacter(characterResult.rows[0]);
 			if (source.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can ${isMove ? "move" : "clone"} this character.`, {status: 403});
+			if (!isMove || source.campaignId !== campaignId) {
+				const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId, isCampaignWriteLock: true});
+				assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+				assertNewCharacterCampaignContent({
+					...enforcement,
+					character: source.data,
+					rulesVersionId: enforcement.activeRulesVersionId,
+				});
+			}
 			const destinationRulesResult = await client.query(`
 				SELECT r.id, r.version, r.schema_version, r.rules, b.content_hash
 				FROM hub.campaigns c
@@ -2252,6 +2327,8 @@ export class PostgresHubStore {
 			}
 			const membership = await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm"]});
 			await client.query(`SELECT id FROM hub.campaigns WHERE id = $1 FOR UPDATE`, [campaignId]);
+			validateCampaignBrewBundle(content);
+			await pGetCampaignContentCatalog({brewBundle: {content}});
 			const existing = await client.query(`
 				SELECT * FROM hub.brew_bundle_versions
 				WHERE campaign_id = $1 AND content_hash = $2
@@ -2401,7 +2478,6 @@ export class PostgresHubStore {
 		expectedActiveRulesVersionId,
 		idempotencyKey,
 	}) {
-		const normalizedPolicy = normalizeCampaignRulesPolicyForStorage(policy);
 		const client = await this._pool.connect();
 		try {
 			await client.query("BEGIN");
@@ -2417,14 +2493,24 @@ export class PostgresHubStore {
 				roles: ["dm", "co_dm"],
 			});
 			const campaignResult = await client.query(`
-				SELECT active_rules_version_id
-				FROM hub.campaigns
-				WHERE id = $1 AND status = 'active'
-				FOR UPDATE
+				SELECT c.active_rules_version_id, b.content AS brew_content
+				FROM hub.campaigns c
+				LEFT JOIN hub.brew_bundle_versions b ON b.id = c.active_brew_bundle_version_id
+				WHERE c.id = $1 AND c.status = 'active'
+				FOR UPDATE OF c
 			`, [campaignId]);
 			if (!campaignResult.rowCount) {
 				throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 			}
+			const normalizedPolicy = normalizeCampaignRulesPolicyForStorage(policy);
+			assertCampaignContentPolicyCatalog({
+				policy: normalizedPolicy,
+				contentCatalog: await pGetCampaignContentCatalog({
+					brewBundle: campaignResult.rows[0].brew_content
+						? {content: campaignResult.rows[0].brew_content}
+						: null,
+				}),
+			});
 			const activeRulesVersionId = campaignResult.rows[0].active_rules_version_id;
 			if (activeRulesVersionId !== expectedActiveRulesVersionId) {
 				throw new HubStoreError("RULES_VERSION_STALE", `Campaign rules changed before this policy was activated.`, {
@@ -2640,6 +2726,24 @@ export class PostgresHubStore {
 			const column = kind === "brew" ? "active_brew_bundle_version_id" : "active_rules_version_id";
 			const version = await client.query(`SELECT * FROM hub.${table} WHERE campaign_id = $1 AND id = $2`, [campaignId, versionId]);
 			if (!version.rowCount) throw new HubStoreError(kind === "brew" ? "BREW_NOT_FOUND" : "RULES_NOT_FOUND", `Campaign version was not found.`, {status: 404});
+			if (kind === "brew") {
+				validateCampaignBrewBundle(version.rows[0].content);
+				await pGetCampaignContentCatalog({brewBundle: {content: version.rows[0].content}});
+			} else {
+				const active = await client.query(`
+					SELECT r.schema_version
+					FROM hub.campaigns c
+					LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
+					WHERE c.id = $1
+					FOR UPDATE OF c
+				`, [campaignId]);
+				if (
+					Number(version.rows[0].schema_version) !== CAMPAIGN_RULES_SCHEMA_VERSION
+					|| (active.rows[0]?.schema_version != null && Number(active.rows[0].schema_version) !== CAMPAIGN_RULES_SCHEMA_VERSION)
+				) {
+					throw new HubStoreError("RULES_POLICY_REQUIRED", `Use the version-fenced campaign policy activation endpoint.`, {status: 409});
+				}
+			}
 			await client.query(`UPDATE hub.campaigns SET ${column} = $2, updated_at = now() WHERE id = $1`, [campaignId, versionId]);
 			const row = version.rows[0];
 			const response = kind === "brew"
@@ -2870,7 +2974,12 @@ export class PostgresHubStore {
 		const membership = await this.pGetMembership({accountId, campaignId});
 		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 		const [campaignResult, characterResult, sequenceResult] = await Promise.all([
-			this._pool.query(`SELECT id, owner_account_id, name, status, created_at FROM hub.campaigns WHERE id = $1`, [campaignId]),
+			this._pool.query(`
+				SELECT id, owner_account_id, name, status, created_at,
+					active_rules_version_id, active_brew_bundle_version_id
+				FROM hub.campaigns
+				WHERE id = $1
+			`, [campaignId]),
 			this._pool.query(`SELECT id, owner_account_id, revision, projection_revision, operation_watermark FROM hub.characters WHERE campaign_id = $1 AND status = 'active' ORDER BY id`, [campaignId]),
 			this._pool.query(`SELECT COALESCE(max(sequence), 0) AS sequence FROM hub.domain_events WHERE campaign_id = $1`, [campaignId]),
 		]);
@@ -2884,6 +2993,8 @@ export class PostgresHubStore {
 					name: campaign.name,
 					status: campaign.status,
 					createdAt: campaign.created_at,
+					activeRulesVersionId: campaign.active_rules_version_id,
+					activeBrewBundleVersionId: campaign.active_brew_bundle_version_id,
 				}
 				: null,
 			membership,
@@ -4540,7 +4651,7 @@ export class PostgresHubStore {
 		});
 	}
 
-	async pGrantItem ({accountId, campaignId, characterId, item, quantity = 1, idempotencyKey}) {
+	async pGrantItem ({accountId, campaignId, characterId, item, quantity = 1, rulesVersionId = null, idempotencyKey}) {
 		const normalizedItem = normalizeSafeItemSummary(item);
 		normalizeItemAwardQuantity(quantity);
 		validateCloudValue(normalizedItem, {label: "Granted item"});
@@ -4563,6 +4674,8 @@ export class PostgresHubStore {
 			eventPayload: () => ({entry}),
 			auditDetails: {entryId: entry.id, quantity: entry.quantity},
 			responseExtra: {entry},
+			rulesVersionId,
+			isContentMutation: true,
 		});
 	}
 
@@ -4573,6 +4686,7 @@ export class PostgresHubStore {
 		targetCharacterIds,
 		quantity,
 		note = null,
+		rulesVersionId = null,
 		idempotencyKey,
 	}) {
 		const request = normalizeItemAwardRequest({source, targetCharacterIds, quantity, note});
@@ -4648,6 +4762,16 @@ export class PostgresHubStore {
 				validateCloudCharacterData(added.container);
 				return {index, character, data: added.container, entry: added.entry};
 			});
+			const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId});
+			assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+			for (const staged of stagedTargets) {
+				assertCharacterCampaignContentMutation({
+					...enforcement,
+					before: staged.character.data,
+					after: staged.data,
+					rulesVersionId: enforcement.activeRulesVersionId,
+				});
+			}
 
 			const updatedTargets = [];
 			for (const staged of stagedTargets) {
@@ -4761,6 +4885,8 @@ export class PostgresHubStore {
 		auditDetails,
 		responseExtra = {},
 		isProjectionAffecting = true,
+		rulesVersionId = null,
+		isContentMutation = false,
 	}) {
 		const client = await this._pool.connect();
 		try {
@@ -4776,6 +4902,16 @@ export class PostgresHubStore {
 			if (!characterResult.rowCount) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
 			const data = fnMutate(characterResult.rows[0].data);
 			validateCloudCharacterData(data);
+			if (isContentMutation) {
+				const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId});
+				assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+				assertCharacterCampaignContentMutation({
+					...enforcement,
+					before: characterResult.rows[0].data,
+					after: data,
+					rulesVersionId: enforcement.activeRulesVersionId,
+				});
+			}
 			const updated = await client.query(`UPDATE hub.characters SET data = $2::jsonb, revision = revision + 1, updated_at = now() WHERE id = $1 RETURNING *`, [characterId, JSON.stringify(data)]);
 			const character = getCharacter(updated.rows[0]);
 			await this._pAppendAudit({client, campaignId, actorAccountId: accountId, action: eventType, targetType: "character", targetId: characterId, details: auditDetails});
@@ -5376,7 +5512,7 @@ export class PostgresHubStore {
 		}
 	}
 
-	async pResolveTransfer ({accountId, campaignId, transferId, decision, idempotencyKey}) {
+	async pResolveTransfer ({accountId, campaignId, transferId, decision, rulesVersionId = null, idempotencyKey}) {
 		const client = await this._pool.connect();
 		try {
 			await client.query("BEGIN");
@@ -5402,7 +5538,22 @@ export class PostgresHubStore {
 			const destination = decision === "accept"
 				? target
 				: await this._pGetTransferContainer({client, campaignId, kind: transfer.sourceKind, id: transfer.sourceId, actorAccountId: accountId});
-			await destination.pWrite(addTransferPayload({container: destination.container, escrow: transfer.payload.escrow, isRestore: decision !== "accept"}));
+			const after = addTransferPayload({
+				container: destination.container,
+				escrow: transfer.payload.escrow,
+				isRestore: decision !== "accept",
+			});
+			if (decision === "accept" && destination.character) {
+				const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId});
+				assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+				assertCharacterCampaignContentMutation({
+					...enforcement,
+					before: destination.container,
+					after,
+					rulesVersionId: enforcement.activeRulesVersionId,
+				});
+			}
+			await destination.pWrite(after);
 			const status = decision === "accept" ? "committed" : "rejected";
 			const updated = await client.query(`UPDATE hub.transfers SET status = $2, updated_at = now() WHERE id = $1 RETURNING *`, [transferId, status]);
 			const transferNxt = this._getTransfer(updated.rows[0]);

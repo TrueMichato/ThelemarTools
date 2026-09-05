@@ -3,6 +3,7 @@ import {jest} from "@jest/globals";
 import {
 	adaptLegacyCampaignRules,
 	createDefaultCampaignRulesPolicy,
+	getPublicCampaignRulesCatalog,
 } from "../../../js/hub/hub-campaign-rules.js";
 import {HubRulesPolicyManager} from "../../../js/hub/hub-rules-policy-manager.js";
 
@@ -125,6 +126,28 @@ describe("HubRulesPolicyManager historical preview", () => {
 
 	beforeEach(() => previousDocument = globalThis.document);
 	afterEach(() => globalThis.document = previousDocument);
+
+	it("upgrades historical advisory carry modes in a new publication draft", async () => {
+		const historicalPolicy = createDefaultCampaignRulesPolicy();
+		historicalPolicy.rules.find(rule => rule.id === "tgtt.carry-weight").mode = "advisory";
+		historicalPolicy.rules.find(rule => rule.id === "tgtt.encumbrance-tiers").mode = "advisory";
+		const manager = getManager({
+			_api: {
+				pGetRulesPolicyManagement: jest.fn().mockResolvedValue({
+					catalog: getPublicCampaignRulesCatalog(),
+					contentCatalog: {sources: [], species: [], sourceEditions: {}},
+					management: {
+						activeRulesVersionId: "historical",
+						versions: [{id: "historical", schemaVersion: 2, policy: historicalPolicy}],
+					},
+				}),
+			},
+		});
+
+		await expect(manager._pLoad()).resolves.toBe(true);
+		expect(manager._draft.rules.find(rule => rule.id === "tgtt.carry-weight").mode).toBe("enforced");
+		expect(manager._draft.rules.find(rule => rule.id === "tgtt.encumbrance-tiers").mode).toBe("enforced");
+	});
 
 	it("previews and enables rollback to an exact compatibility-tolerant legacy policy", () => {
 		const active = {

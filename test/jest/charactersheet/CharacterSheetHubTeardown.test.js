@@ -7,6 +7,7 @@
  * load. These tests pin the exclusive teardown owners and that leak specifically.
  */
 import "./setup.js";
+import {jest} from "@jest/globals";
 import {CAMPAIGN_RULE_PROTOCOL_VERSION, evaluateCampaignRules} from "../../../js/hub/hub-campaign-rule-evaluator.js";
 import {CAMPAIGN_RULES_POLICY_CAPABILITY, createDefaultCampaignRulesPolicy} from "../../../js/hub/hub-campaign-rules.js";
 
@@ -54,6 +55,43 @@ function makePage () {
 	page._hubContext = {rulesVersion: {rules: CAMPAIGN_RULES}};
 	page._state.setCampaignSettingsOverlay(page._hubContext.rulesVersion.rules);
 	return page;
+}
+
+function makeContentContext ({sources = ["PHB"], species = ["Human (Base)|PHB"], editions = ["2014"], id = "rules-1"} = {}) {
+	return {
+		rulesVersion: {
+			id,
+			rules: {},
+			contentPolicy: {version: 1, sources, species, editions},
+		},
+		contentCatalog: {
+			sources: ["PHB", "XPHB"],
+			species: ["Human (Base)|PHB", "Elf|PHB", "Elf|XPHB"],
+			sourceEditions: {PHB: "2014", XPHB: "2024"},
+		},
+	};
+}
+
+function getContentCandidates () {
+	return [
+		{name: "Human", source: "PHB", edition: "classic", __prop: "race", _baseName: "Human", _baseSource: "PHB"},
+		{name: "Elf", source: "PHB", edition: "classic", __prop: "race"},
+		{name: "Elf", source: "XPHB", edition: "one", __prop: "race"},
+	];
+}
+
+function deferred () {
+	let resolve;
+	let reject;
+	const promise = new Promise((resolve_, reject_) => {
+		resolve = resolve_;
+		reject = reject_;
+	});
+	return {promise, resolve, reject};
+}
+
+async function pFlushPromises () {
+	await new Promise(resolve => setTimeout(resolve, 0));
 }
 
 describe("Character Sheet hub teardown owners", () => {
@@ -203,6 +241,244 @@ describe("Character Sheet hub teardown owners", () => {
 		expect(calls).toContainEqual(["setAttribute", "role", "alert"]);
 		expect(calls).toContainEqual(["before", message]);
 		expect(calls).not.toContainEqual(["append", message]);
+	});
+});
+
+describe("Character Sheet campaign content context lifecycle", () => {
+	it("intersects source, edition, and species policy while leaving local sheets unchanged", () => {
+		const localPage = new CharacterSheetPage({characterRepository: {}});
+		expect(localPage.filterByAllowedSources(getContentCandidates())).toEqual(getContentCandidates());
+
+		const campaignPage = new CharacterSheetPage({characterRepository: {}});
+		campaignPage._applyHubContext(makeContentContext());
+		expect(campaignPage.filterByAllowedSources(getContentCandidates())).toEqual([
+			expect.objectContaining({name: "Human", source: "PHB", _baseName: "Human"}),
+		]);
+	});
+
+	it("applies the server default catalog boundary before a campaign publishes rules", () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._applyHubContext({
+			rulesVersion: null,
+			brewBundle: null,
+			contentCatalog: {
+				sources: ["PHB", "XPHB"],
+				species: ["Human (Base)|PHB", "Elf|XPHB"],
+				sourceEditions: {PHB: "2014", XPHB: "2024"},
+			},
+		});
+
+		expect(page.filterByAllowedSources([
+			...getContentCandidates(),
+			{name: "Personal feat", source: "PERSONAL", __prop: "feat", edition: "classic"},
+		])).toEqual([
+			expect.objectContaining({name: "Human", source: "PHB"}),
+			expect.objectContaining({name: "Elf", source: "XPHB"}),
+		]);
+	});
+
+	it("blocks candidates immediately during refresh and activates only the refreshed policy", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._applyHubContext(makeContentContext());
+		page._renderCharacter = jest.fn();
+		page._campaign = {render: jest.fn()};
+		const refresh = deferred();
+		page._hubCampaignContext = {pRefresh: jest.fn(() => refresh.promise)};
+
+		page._onHubCampaignContextChanged();
+
+		expect(page._isHubContextRefreshing).toBe(true);
+		expect(page._hubContext).toBeNull();
+		expect(page.filterByAllowedSources(getContentCandidates())).toEqual([]);
+
+		refresh.resolve(makeContentContext({
+			sources: ["XPHB"],
+			species: ["Elf|XPHB"],
+			editions: ["2024"],
+			id: "rules-2",
+		}));
+		await pFlushPromises();
+
+		expect(page._isHubContextRefreshing).toBe(false);
+		expect(page._hubContext.rulesVersion.id).toBe("rules-2");
+		expect(page.filterByAllowedSources(getContentCandidates())).toEqual([
+			expect.objectContaining({name: "Elf", source: "XPHB"}),
+		]);
+		expect(page._renderCharacter).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([
+		{type: "rules.activated", aggregateId: "rules-1"},
+		{type: "brew.activated", aggregateId: "brew-1"},
+	])("ignores a replay of the already-active $type context", ({type, aggregateId}) => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._applyHubContext({
+			...makeContentContext(),
+			brewBundle: {id: "brew-1", contentHash: "hash-1"},
+		});
+		page._campaign = {render: jest.fn()};
+		page._hubCampaignContext = {pRefresh: jest.fn()};
+
+		page._onHubCampaignContextChanged({type, aggregateId});
+
+		expect(page._hubCampaignContext.pRefresh).not.toHaveBeenCalled();
+		expect(page._hubContext.rulesVersion.id).toBe("rules-1");
+		expect(page._isHubContextRefreshing).toBe(false);
+	});
+
+	it("ignores an authoritative cursor that matches the active context", () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._applyHubContext({
+			...makeContentContext(),
+			brewBundle: {id: "brew-1", contentHash: "hash-1"},
+		});
+		page._campaign = {render: jest.fn()};
+		page._hubCampaignContext = {pRefresh: jest.fn()};
+
+		page._onHubCampaignContextChanged({
+			type: "campaign.cursor",
+			rulesVersionId: "rules-1",
+			brewBundleVersionId: "brew-1",
+		});
+
+		expect(page._hubCampaignContext.pRefresh).not.toHaveBeenCalled();
+		expect(page._hubContext.rulesVersion.id).toBe("rules-1");
+	});
+
+	it("lets the newest activation supersede an in-flight context refresh", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._applyHubContext(makeContentContext());
+		page._renderCharacter = jest.fn();
+		page._campaign = {render: jest.fn()};
+		const first = deferred();
+		const second = deferred();
+		page._hubCampaignContext = {
+			pRefresh: jest.fn()
+				.mockReturnValueOnce(first.promise)
+				.mockReturnValueOnce(second.promise),
+		};
+
+		page._onHubCampaignContextChanged({type: "rules.activated", aggregateId: "rules-2"});
+		page._onHubCampaignContextChanged({type: "rules.activated", aggregateId: "rules-3"});
+		first.resolve(makeContentContext({id: "rules-2"}));
+		second.resolve(makeContentContext({
+			sources: ["XPHB"],
+			species: ["Elf|XPHB"],
+			editions: ["2024"],
+			id: "rules-3",
+		}));
+		await pFlushPromises();
+
+		expect(page._hubContext.rulesVersion.id).toBe("rules-3");
+		expect(page._isHubContextRefreshing).toBe(false);
+		expect(page._renderCharacter).toHaveBeenCalledTimes(1);
+	});
+
+	it("discards a stale refresh after disconnect and cannot remain refresh-locked", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._applyHubContext(makeContentContext());
+		page._campaign = {render: jest.fn()};
+		page._characterRepository = {clearRealtimeReconciliation: jest.fn()};
+		const refresh = deferred();
+		page._hubCampaignContext = {pRefresh: jest.fn(() => refresh.promise)};
+
+		page._onHubCampaignContextChanged();
+		page._onHubRealtimeConnectionState({state: "closed"});
+		refresh.resolve(makeContentContext({sources: ["XPHB"], species: ["Elf|XPHB"], editions: ["2024"], id: "stale"}));
+		await pFlushPromises();
+
+		expect(page._hubContext).toBeNull();
+		expect(page._isHubContextUnavailable).toBe(true);
+		expect(page._isHubContextRefreshing).toBe(false);
+		expect(page._hubContextRefreshActiveGeneration).toBeNull();
+		expect(page.filterByAllowedSources(getContentCandidates())).toEqual([]);
+	});
+
+	it("revalidates a closed connection on live but never reuses policy after access loss", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._applyHubContext(makeContentContext());
+		page._renderCharacter = jest.fn();
+		page._campaign = {render: jest.fn()};
+		page._characterRepository = {clearRealtimeReconciliation: jest.fn()};
+		page._hubCampaignContext = {
+			pRefresh: jest.fn(async ({fnIsCurrent}) => fnIsCurrent()
+				? makeContentContext({sources: ["XPHB"], species: ["Elf|XPHB"], editions: ["2024"], id: "rules-reconnected"})
+				: null),
+		};
+		const campaignContext = page._hubCampaignContext;
+
+		page._onHubRealtimeConnectionState({state: "closed"});
+		expect(page.filterByAllowedSources(getContentCandidates())).toEqual([]);
+		page._onHubRealtimeConnectionState({state: "live"});
+		await pFlushPromises();
+
+		expect(page._hubContext.rulesVersion.id).toBe("rules-reconnected");
+		expect(page.filterByAllowedSources(getContentCandidates())).toEqual([
+			expect.objectContaining({name: "Elf", source: "XPHB"}),
+		]);
+
+		page._onHubRealtimeConnectionState({state: "access_lost"});
+		page._onHubRealtimeConnectionState({state: "live"});
+		await pFlushPromises();
+
+		expect(page._hubContext).toBeNull();
+		expect(page._isHubContextUnavailable).toBe(true);
+		expect(page.filterByAllowedSources(getContentCandidates())).toEqual([]);
+		expect(campaignContext.pRefresh).toHaveBeenCalledTimes(1);
+		expect(page._hubCampaignContext).toBeNull();
+	});
+
+	it("routes realtime access loss through the full campaign teardown", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._hubCampaignId = "campaign-1";
+		page._applyHubContext(makeContentContext());
+		page._campaign = {render: jest.fn()};
+		page._hubActiveCampaign = {pHandleAccessLoss: jest.fn(async () => {})};
+
+		page._onHubRealtimeConnectionState({state: "access_lost"});
+		await pFlushPromises();
+
+		expect(page._hubActiveCampaign.pHandleAccessLoss).toHaveBeenCalledWith({campaignId: "campaign-1"});
+		expect(page._hubContext).toBeNull();
+		expect(page._isHubContextUnavailable).toBe(true);
+		expect(page._campaign.render).not.toHaveBeenCalled();
+	});
+
+	it("keeps candidates blocked after a failed refresh until a later successful revalidation", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._applyHubContext(makeContentContext());
+		page._campaign = {render: jest.fn()};
+		page._hubCampaignContext = {pRefresh: jest.fn(async () => { throw new Error("offline"); })};
+
+		page._onHubCampaignContextChanged();
+		await pFlushPromises();
+
+		expect(page._hubContext).toBeNull();
+		expect(page._isHubContextUnavailable).toBe(true);
+		expect(page._isHubContextRevalidationRequired).toBe(true);
+		expect(page._isHubContextRefreshing).toBe(false);
+		expect(page.filterByAllowedSources(getContentCandidates())).toEqual([]);
+		expect(page.isCampaignContentEntityAllowed({name: "Custom", source: "Custom"})).toBe(false);
+		expect(page.isCampaignContentMutationAllowed({after: {name: "Custom", source: "Custom"}})).toBe(false);
+	});
+
+	it("fences an in-flight context refresh during rules teardown", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._applyHubContext(makeContentContext());
+		page._campaign = {render: jest.fn()};
+		page._renderCharacter = jest.fn();
+		const refresh = deferred();
+		page._hubCampaignContext = {pRefresh: jest.fn(() => refresh.promise)};
+
+		page._onHubCampaignContextChanged({type: "rules.activated", aggregateId: "rules-2"});
+		await page._getHubActiveCampaignHost().pTeardownRules();
+		refresh.resolve(makeContentContext({id: "rules-2"}));
+		await pFlushPromises();
+
+		expect(page._hubContext).toBeNull();
+		expect(page._isHubContextUnavailable).toBe(true);
+		expect(page._isHubContextRefreshing).toBe(false);
+		expect(page._renderCharacter).not.toHaveBeenCalled();
 	});
 });
 

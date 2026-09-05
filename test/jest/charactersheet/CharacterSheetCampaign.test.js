@@ -96,6 +96,75 @@ function getControl ({
 }
 
 describe("Character Sheet campaign control", () => {
+	it("uses the full source-edition catalog when deciding whether to show policy warnings", () => {
+		const root = {append: jest.fn()};
+		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {
+			_root: root,
+			_page: {
+				_currentCharacterId: "character-1",
+				_state: {
+					toJson: () => ({
+						classes: [{name: "Fighter", source: "PHB", level: 1}],
+						spellcasting: {spellsKnown: [{name: "Absorb Elements", source: "XGE"}]},
+					}),
+				},
+				_hubContext: {
+					rulesVersion: {
+						id: "rules-1",
+						contentPolicy: {version: 1, sources: [], species: [], editions: ["2014", "2024"]},
+					},
+					contentCatalog: {
+						sources: ["PHB", "XGE"],
+						species: [],
+						sourceEditions: {PHB: "2014", XGE: "2014"},
+					},
+				},
+			},
+		});
+
+		expect(() => control._renderContentPolicyWarnings()).not.toThrow();
+		expect(root.append).not.toHaveBeenCalled();
+	});
+
+	it("renders default-policy warnings without an active rules version", () => {
+		const documentPrev = globalThis.document;
+		globalThis.document = {
+			createElement: () => ({
+				append: jest.fn(),
+				setAttribute: jest.fn(),
+				className: "",
+				textContent: "",
+			}),
+		};
+		const root = {append: jest.fn()};
+		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {
+			_root: root,
+			_page: {
+				_currentCharacterId: "character-1",
+				_state: {
+					toJson: () => ({
+						feats: [{name: "Personal feat", source: "PERSONAL", edition: "classic"}],
+					}),
+				},
+				_hubContext: {
+					rulesVersion: null,
+					contentCatalog: {
+						sources: ["PHB"],
+						species: [],
+						sourceEditions: {PHB: "2014"},
+					},
+				},
+			},
+		});
+
+		try {
+			expect(() => control._renderContentPolicyWarnings()).not.toThrow();
+			expect(root.append).toHaveBeenCalledTimes(1);
+		} finally {
+			globalThis.document = documentPrev;
+		}
+	});
+
 	it("offers only active campaigns whose role may own a character", () => {
 		const campaigns = [
 			{id: "spectator", name: "Spectator", role: "spectator", status: "active"},
@@ -133,6 +202,7 @@ describe("Character Sheet campaign control", () => {
 			clientImportId: "local-1",
 			campaignId: "campaign-1",
 			idempotencyKey: expect.any(String),
+			rulesVersionId: "rules-campaign-1",
 		}));
 		const submitted = control._api.pCreateCharacter.mock.calls[0][0].data;
 		expect(submitted).toMatchObject({
@@ -208,6 +278,7 @@ describe("Character Sheet campaign control", () => {
 			characterId: "cloud-source",
 			campaignId: "campaign-2",
 			idempotencyKey: expect.any(String),
+			rulesVersionId: "rules-campaign-2",
 		});
 		expect(control._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=clone-1&hubCampaign=campaign-2");
 	});
@@ -254,7 +325,7 @@ describe("Character Sheet campaign control", () => {
 		const {control, page} = getControl();
 		page._currentCharacterId = "cloud-source";
 		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
-		control._movePreview = {campaignId: "campaign-2", report: {}};
+		control._movePreview = {campaignId: "campaign-2", report: {}, rulesVersionId: "rules-campaign-2"};
 
 		await control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});
 
@@ -264,6 +335,7 @@ describe("Character Sheet campaign control", () => {
 		expect(control._api.pMoveCharacter).toHaveBeenCalledWith({
 			characterId: "cloud-source",
 			campaignId: "campaign-2",
+			rulesVersionId: "rules-campaign-2",
 			idempotencyKey: expect.any(String),
 		});
 		expect(control._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=cloud-source&hubCampaign=campaign-2");
@@ -312,6 +384,7 @@ describe("Character Sheet campaign control", () => {
 		expect(control._api.pMoveCharacter).toHaveBeenCalledWith({
 			characterId: "cloud-detached",
 			campaignId: "campaign-2",
+			rulesVersionId: "rules-campaign-2",
 			idempotencyKey: expect.any(String),
 		});
 		expect(control._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=cloud-detached&hubCampaign=campaign-2");

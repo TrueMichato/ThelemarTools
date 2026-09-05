@@ -71,7 +71,7 @@ describe("projection lifecycle safety", () => {
 				clientImportId: "lifecycle",
 				campaignId: campaign.id,
 				schemaVersion: 1,
-				data: {name: "Mira", abilities: {str: 10}, classes: [{name: "Ranger", level: 3}], notes: {backstory: CANARY}},
+				data: {name: "Mira", abilities: {str: 10}, classes: [{name: "Ranger", source: "PHB", level: 3}], notes: {backstory: CANARY}},
 			},
 		})).json().character;
 		const members = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/members`, headers: readHeaders(dm)})).json();

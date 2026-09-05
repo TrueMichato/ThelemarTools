@@ -6098,7 +6098,7 @@ class CharacterSheetBuilder {
 	 * @param {*} cls
 	 */
 	_renderClassOptionalFeatures (cls) {
-		const allOptFeaturesRaw = this._page.getOptionalFeatures();
+		const allOptFeaturesRaw = this._page.filterByAllowedSources(this._page.getOptionalFeatures());
 		const allOptFeatures = this._filterOptFeaturesByEdition(allOptFeaturesRaw, cls?.source);
 		const container = e_({outer: `<div class="charsheet__builder-optional-features mt-3"></div>`});
 
@@ -6145,7 +6145,7 @@ class CharacterSheetBuilder {
 	 */
 	_renderCombatMethodsSelection (container, cls, optFeatProg, methodCount, name, featureKey, allOptFeatures) {
 		// Merge combatMethod entities into the available method pool
-		const combatMethodEntities = this._page.getCombatMethodEntities?.() || [];
+		const combatMethodEntities = this._page.filterByAllowedSources(this._page.getCombatMethodEntities?.() || []);
 		const allMethods = [...allOptFeatures, ...combatMethodEntities];
 
 		// Get traditions filtered by what the class has access to
@@ -8231,7 +8231,15 @@ class CharacterSheetBuilder {
 			}
 
 			// Build the custom background object
-			this._customBackground = this._buildCustomBackground();
+			const customBackground = this._buildCustomBackground();
+			if (!this._isCampaignCustomBackgroundAllowed(customBackground)) {
+				JqueryUtil.doToast({
+					type: "warning",
+					content: "Custom backgrounds are unavailable in this campaign. Ask a DM to publish the background as campaign homebrew.",
+				});
+				return;
+			}
+			this._customBackground = customBackground;
 			this._selectedBackground = this._customBackground;
 
 			// Re-render the list to show the custom background
@@ -8261,6 +8269,19 @@ class CharacterSheetBuilder {
 		this._customBackgroundData.skills = selected;
 	}
 
+	_isCampaignCustomBackgroundAllowed (background) {
+		if (
+			this._page._isHubContextRefreshing
+			|| this._page._isHubContextUnavailable
+			|| this._page._isHubContextRevalidationRequired
+		) return false;
+		if (this._page.isCampaignContentMutationAllowed) {
+			return !!this._page.isCampaignContentMutationAllowed({after: background});
+		}
+		if (!this._page._hubContext) return true;
+		return !!this._page.isCampaignContentEntityAllowed?.(background);
+	}
+
 	/**
 	 * @param {*} list
 	 * @param {*} filter
@@ -8271,7 +8292,7 @@ class CharacterSheetBuilder {
 		const filterLower = (filter || "").toLowerCase();
 
 		// Add custom background at top if exists
-		if (this._customBackground) {
+		if (this._customBackground && this._isCampaignCustomBackgroundAllowed(this._customBackground)) {
 			const isSelected = this._selectedBackground === this._customBackground;
 			const customItem = e_({outer: `
 				<div class="charsheet__builder-list-item ${isSelected ? "active" : ""}">

@@ -1552,7 +1552,16 @@ async function renderPendingTransfers ({campaign, campaignId, session, targetCha
 				button.addEventListener("click", async () => {
 					for (const control of controls.querySelectorAll("button")) control.disabled = true;
 					try {
-						await api.pResolveTransfer({campaignId, transferId: transfer.id, decision, idempotencyKey: crypto.randomUUID()});
+						const currentContext = decision === "accept"
+							? await api.pGetCampaignContext({campaignId})
+							: null;
+						await api.pResolveTransfer({
+							campaignId,
+							transferId: transfer.id,
+							decision,
+							rulesVersionId: currentContext?.rulesVersion?.id || null,
+							idempotencyKey: crypto.randomUUID(),
+						});
 						await pRefreshTransferState();
 					} catch (error) {
 						renderError(error);
@@ -1736,6 +1745,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 				clientImportId: character.id,
 				campaignId,
 				data: character,
+				rulesVersionId: context.rulesVersion?.id || null,
 				idempotencyKey: crypto.randomUUID(),
 			});
 			const charactersNxt = await api.pListCharacters({campaignId});
@@ -1984,6 +1994,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					result = await api.pAwardItems({
 						campaignId,
 						...submission,
+						rulesVersionId: context.rulesVersion?.id || null,
 						idempotencyKey,
 					});
 				},

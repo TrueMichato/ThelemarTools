@@ -69,7 +69,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 				name: `${name} donor`,
 				inventory: [{
 					id: donorEntryId,
-					item: item || {name, source: "HB", weight: 0.1},
+					item: item || {name, source: "PHB", weight: 0.1},
 					quantity,
 					...entryMetadata,
 				}],
@@ -129,9 +129,9 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			data: {
 				name: "Source",
 				inventory: [
-					{id: "maps", item: {name: "Map", source: "HB", weight: 0.1}, quantity: 4, note: "Secret route"},
-					{id: "linked", item: {name: "Linked Focus", source: "HB"}, quantity: 1, equipped: true},
-					{id: "flour", item: {name: "Flour", source: "HB"}, quantity: 0.6667},
+					{id: "maps", item: {name: "Map", source: "PHB", weight: 0.1}, quantity: 4, note: "Secret route"},
+					{id: "linked", item: {name: "Linked Focus", source: "PHB"}, quantity: 1, equipped: true},
+					{id: "flour", item: {name: "Flour", source: "PHB"}, quantity: 0.6667},
 				],
 				currency: {},
 			},
@@ -144,7 +144,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			campaignId: campaign.id,
 			data: {
 				name: "Target",
-				inventory: [{id: "public-map", item: {name: "Map", source: "HB", weight: 0.1}, quantity: 1, note: "Public route"}],
+				inventory: [{id: "public-map", item: {name: "Map", source: "PHB", weight: 0.1}, quantity: 1, note: "Public route"}],
 				currency: {},
 			},
 			schemaVersion: 1,
@@ -186,7 +186,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		let stash = await store.pGetPartyInventory({accountId: sourceOwner.id, campaignId: campaign.id});
 		expect(stash.inventory).toEqual([
 			expect.objectContaining({
-				item: {name: "Map", source: "HB", weight: 0.1},
+				item: {name: "Map", source: "PHB", weight: 0.1},
 				note: "Secret route",
 				quantity: 2,
 			}),
@@ -328,9 +328,9 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 	test("awards a party stack in stable target order with exact conservation and event pairing", async () => {
 		const richItem = {
 			name: `${prefix} bolts`,
-			source: "HB",
+			source: "PHB",
 			weight: 0.1,
-			material: {name: "Star iron", source: "HB"},
+			material: {name: "Star iron", source: "PHB"},
 			charges: {current: 4, max: 6},
 			custom: {maker: "Rook"},
 		};
@@ -360,7 +360,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		expect(response.targets.map(target => target.index)).toEqual([0, 1]);
 		expect(response.source).toEqual({
 			kind: "party_inventory",
-			item: {name: `${prefix} bolts`, source: "HB", weight: 0.1},
+			item: {name: `${prefix} bolts`, source: "PHB", weight: 0.1},
 		});
 		expect((await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id}))
 			.inventory.find(entry => entry.id === seeded.entry.id).quantity).toBe(6);
@@ -390,7 +390,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		]);
 		const grantEvents = events.slice(firstGrantIndex, firstGrantIndex + 5).filter(event => event.type === "item.granted");
 		for (const event of grantEvents) {
-			expect(event.payload.entry.item).toEqual({name: richItem.name, source: "HB", weight: 0.1});
+			expect(event.payload.entry.item).toEqual({name: richItem.name, source: "PHB", weight: 0.1});
 			expect(event.payload.entry.item).not.toHaveProperty("material");
 			expect(event.payload.entry).not.toHaveProperty("note");
 		}
@@ -406,7 +406,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		const target = await pCreateTargetCharacter(`${prefix} authorization target`);
 		const award = {
 			campaignId: campaign.id,
-			source: {kind: "catalog", item: {name: `${prefix} authorization token`, source: "HB"}},
+			source: {kind: "catalog", item: {name: `${prefix} authorization token`, source: "PHB"}},
 			targetCharacterIds: [target.id],
 			quantity: 1,
 		};
@@ -464,7 +464,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		const input = {
 			accountId: dm.id,
 			campaignId: campaign.id,
-			source: {kind: "catalog", item: {name: `${prefix} token`, source: "HB"}},
+			source: {kind: "catalog", item: {name: `${prefix} token`, source: "PHB"}},
 			targetCharacterIds: [firstTarget.id, secondTarget.id],
 			quantity: 3,
 			note: null,
@@ -552,7 +552,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			idempotencyKey: `${prefix}-contention-resolve`,
 		});
 		expect((await pReadCharacter(targetOwner.id, target.id)).data.inventory).toEqual([
-			expect.objectContaining({item: {name: `${prefix} contention ration`, source: "HB", weight: 0.1}, quantity: 9}),
+			expect.objectContaining({item: {name: `${prefix} contention ration`, source: "PHB", weight: 0.1}, quantity: 9}),
 		]);
 	});
 });

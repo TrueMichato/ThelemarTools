@@ -26,6 +26,10 @@ books contain.
 Crafting consumes through the same `setItemQuantity` / `removeItem` calls the variant-component
 cast picker reads. An Aboleth Eye spent on a Lens of Forgotten History disappears from the cast
 picker with **no code in between** — there is nothing to synchronise because nothing is separate.
+For campaign characters, harvest, craft, and cook outputs pass the same campaign item admission
+gate before prompts, rolls, ingredients, or local inventory are mutated, then recheck at commit
+time. Existing stacks remain usable, while a stale context or newly disallowed source blocks a
+new output.
 
 Any change that introduces a private material store will desync from casting the moment anyone
 touches it. `test/jest/charactersheet/CharacterSheetVariantComponentInvariant.test.js` locks this,

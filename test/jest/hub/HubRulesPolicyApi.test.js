@@ -190,6 +190,33 @@ describe("Campaign rules policy API", () => {
 		expect(disabled.json()).toEqual(enabled.json());
 	});
 
+	it("keeps legacy activation from replacing an active version-fenced policy", async () => {
+		const dm = await pSignIn(IDENTITIES.dm);
+		const campaign = await pCreateCampaign(dm);
+		const legacy = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/rules-versions`,
+			headers: headers(dm),
+			payload: {rules: {enableTgtt: false}},
+		});
+		expect(legacy.statusCode).toBe(201);
+		const published = await publishRequest({
+			dm,
+			campaign,
+			policy: createDefaultCampaignRulesPolicy(),
+		});
+		expect(published.statusCode).toBe(201);
+
+		const denied = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/rules-versions/${legacy.json().rulesVersion.id}/activate`,
+			headers: headers(dm),
+		});
+		expect(denied.statusCode).toBe(409);
+		expect(denied.json().error).toBe("RULES_POLICY_REQUIRED");
+		expect(store._campaigns.get(campaign.id).activeRulesVersionId).toBe(published.json().rulesVersion.id);
+	});
+
 	it("keeps memory legacy create and activation all-or-none when public adaptation fails", async () => {
 		const dm = await pSignIn(IDENTITIES.dm);
 		const campaign = await pCreateCampaign(dm);
@@ -279,7 +306,7 @@ describe("Campaign rules policy API", () => {
 		expect(playerContext).toEqual(dmContext);
 		expect(playerContext.rulesVersion.rules).toEqual(created.rules);
 		expect(playerContext.rulesVersion.policy).toBeUndefined();
-		expect(playerContext.rulesVersion.policySummary.rules).toHaveLength(7);
+		expect(playerContext.rulesVersion.policySummary.rules).toHaveLength(10);
 
 		const evidence = {
 			audit: store._audit.filter(entry => entry.campaignId === campaign.id && entry.action.startsWith("rules.")),

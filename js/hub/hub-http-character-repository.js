@@ -22,10 +22,16 @@ const _RESYNC_MAX_PAGES = 50;
 export class HubHttpCharacterRepository {
 	isRescueMirrorEnabled = false;
 
-	constructor ({campaignId = null, api = new HubApiClient(), broadcastSync = null}) {
+	constructor ({
+		campaignId = null,
+		api = new HubApiClient(),
+		broadcastSync = null,
+		fnGetRulesVersionId = () => null,
+	}) {
 		if (campaignId != null && (typeof campaignId !== "string" || !campaignId)) throw new TypeError(`campaignId must be a non-empty string or null.`);
 		this._campaignId = campaignId;
 		this._api = api;
+		this._fnGetRulesVersionId = fnGetRulesVersionId;
 		this._scopeKey = campaignId || "detached";
 		this._broadcastSync = broadcastSync || (
 			!campaignId || typeof BroadcastChannel === "undefined"
@@ -287,7 +293,21 @@ export class HubHttpCharacterRepository {
 	}
 
 	_rebaseAuthoritativeCandidate ({base, local, remote}) {
-		const rebased = rebaseJsonChanges({base, local, remote});
+		const withoutDerivedCarry = document => {
+			if (!document || typeof document !== "object" || Array.isArray(document)) return document;
+			const out = {...document};
+			delete out.carry;
+			return out;
+		};
+		// Carry is a one-way Character Sheet projection, not editable character state. Server-side
+		// inventory mutations deliberately remove it, while the live sheet may independently
+		// recompute it as data finishes loading; those concurrent derived changes must not block
+		// adoption of the authoritative inventory that the next serialization will summarize.
+		const rebased = rebaseJsonChanges({
+			base: withoutDerivedCarry(base),
+			local: withoutDerivedCarry(local),
+			remote: withoutDerivedCarry(remote),
+		});
 		if (!rebased.isConflict) return rebased;
 		const conflictingPaths = new Set(rebased.conflicts.map(conflict => conflict.localPath));
 		// A recovery choice may reapply disjoint local edits, but must never overwrite
@@ -1268,6 +1288,7 @@ export class HubHttpCharacterRepository {
 						clientImportId: requestedId,
 						campaignId: this._campaignId,
 						data: this._getSnapshotData(characterNxt),
+						rulesVersionId: this._fnGetRulesVersionId(),
 						idempotencyKey: commandKeys.create,
 					});
 					this._canonicalIds.set(requestedId, created.character.id);
@@ -1321,6 +1342,7 @@ export class HubHttpCharacterRepository {
 					baseRevision: accepted.revision,
 					leaseEpoch: lease.epoch,
 					patches,
+					rulesVersionId: this._fnGetRulesVersionId(),
 					idempotencyKey: commandKeys.patch,
 				});
 			} catch (error) {
@@ -1385,6 +1407,7 @@ export class HubHttpCharacterRepository {
 						document: rebased.document,
 						base: canonical.data,
 					}),
+					rulesVersionId: this._fnGetRulesVersionId(),
 					idempotencyKey: commandKeys.patch,
 				});
 			}

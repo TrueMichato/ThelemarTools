@@ -61,7 +61,7 @@ function getCharacterData (overrides = {}) {
 		name: "Bearer",
 		abilities: {str: 16, dex: 10, con: 10, int: 10, wis: 10, cha: 10},
 		hp: {current: 10, max: 10, temp: 0},
-		inventory: [{id: "i1", item: {name: "Rope", weight: 10}, quantity: 1}],
+		inventory: [{id: "i1", item: {name: "Rope", source: "PHB", weight: 10}, quantity: 1}],
 		currency: {gp: 0},
 		carry: getCarryBlock(),
 		...overrides,
@@ -193,7 +193,7 @@ describe("item grant invalidates", () => {
 			accountId: ctx.dm.id,
 			campaignId: ctx.campaign.id,
 			characterId: ctx.character.id,
-			item: {name: "Anvil", source: "HB", weight: 100},
+			item: {name: "Anvil", source: "PHB", weight: 100},
 			idempotencyKey: "g-1",
 		});
 
@@ -209,7 +209,7 @@ describe("item grant invalidates", () => {
 			accountId: ctx.dm.id,
 			campaignId: ctx.campaign.id,
 			characterId: ctx.character.id,
-			item: {name: "Anvil", source: "HB", weight: 100},
+			item: {name: "Anvil", source: "PHB", weight: 100},
 			idempotencyKey: "g-1",
 		});
 		expect(await getVisibleCarry({...ctx, characterId: ctx.character.id})).toBeNull();
@@ -344,7 +344,7 @@ describe("mixed-version patch protocol", () => {
 
 	it("an old client's inventory patch fails closed", async () => {
 		const ctx = await setup();
-		await patch(ctx, [{op: "add", path: "/inventory/-", value: {id: "i2", item: {name: "Rock", weight: 50}, quantity: 1}}], "p-1");
+		await patch(ctx, [{op: "add", path: "/inventory/-", value: {id: "i2", item: {name: "Rock", source: "PHB", weight: 50}, quantity: 1}}], "p-1");
 		expect(getStoredCarry(ctx.store, ctx.character.id)).toBeUndefined();
 	});
 
@@ -414,7 +414,7 @@ describe("single-read and list projections agree", () => {
 			accountId: ctx.dm.id,
 			campaignId: ctx.campaign.id,
 			characterId: ctx.character.id,
-			item: {name: "Anvil", source: "HB", weight: 100},
+			item: {name: "Anvil", source: "PHB", weight: 100},
 			idempotencyKey: "g-1",
 		});
 

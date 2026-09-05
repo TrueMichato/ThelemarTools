@@ -8,6 +8,7 @@
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-crafting.js";
+import {jest} from "@jest/globals";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetCrafting = globalThis.CharacterSheetCrafting;
@@ -193,6 +194,35 @@ describe("Crafting flows", () => {
 
 			const matches = state.getMatchingVariantComponents({name: "Legend Lore", source: "PHB"});
 			expect(matches).toHaveLength(1);
+		});
+
+		it("blocks harvested, crafted, and cooked items before campaign-local mutation", () => {
+			page._hubContext = {};
+			page._inventory._isCampaignItemMutationAllowed = () => false;
+
+			expect(crafting._addMaterialToInventory(MATERIAL("Denied Material"), 1)).toBeNull();
+			expect(crafting._addCraftedItem(RECIPE("Denied Craft", []))).toBeNull();
+			expect(crafting._addCookedDish(RECIPE("Denied Dish", [], {source: "Arcadia11"}), "success")).toBeNull();
+			expect(state.getInventory()).toEqual([]);
+		});
+
+		it("blocks disallowed harvest, craft, and cook operations before prompts, rolls, or spending", async () => {
+			page._hubContext = {};
+			page._inventory._isCampaignItemMutationAllowed = () => false;
+			page._rollSkillCheck = jest.fn();
+			crafting._pConfirmHarvestStake = jest.fn();
+			crafting._pThreeWay = jest.fn();
+			const consumeIngredients = jest.spyOn(crafting, "_consumeIngredients");
+
+			await crafting.pRollHarvest(MATERIAL("Denied Material"));
+			await crafting.pCommitCraft(RECIPE("Denied Craft", []), {});
+			await crafting.pCookDish(RECIPE("Denied Dish", [], {source: "Arcadia11", craftDC: 12}), {});
+
+			expect(crafting._pConfirmHarvestStake).not.toHaveBeenCalled();
+			expect(crafting._pThreeWay).not.toHaveBeenCalled();
+			expect(page._rollSkillCheck).not.toHaveBeenCalled();
+			expect(consumeIngredients).not.toHaveBeenCalled();
+			expect(state.getInventory()).toEqual([]);
 		});
 	});
 

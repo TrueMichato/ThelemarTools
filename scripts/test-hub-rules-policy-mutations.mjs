@@ -12,6 +12,11 @@ async function loadVariant ({name, mutations = {}}) {
 	await fs.cp(path.resolve("js/hub"), path.join(root, "js/hub"), {recursive: true});
 	await fs.mkdir(path.join(root, "server"), {recursive: true});
 	await fs.cp(path.resolve("server/src"), path.join(root, "server/src"), {recursive: true});
+	await fs.mkdir(path.join(root, "server", "data"), {recursive: true});
+	await fs.copyFile(
+		path.resolve("server/data/campaign-content-site-catalog.json"),
+		path.join(root, "server", "data", "campaign-content-site-catalog.json"),
+	);
 	await fs.mkdir(path.join(root, "js", "charactersheet"), {recursive: true});
 	await fs.copyFile(
 		path.resolve("js/charactersheet/charactersheet.js"),
@@ -613,8 +618,8 @@ const MUTANTS = [
 		probe: probeCharacterSheetOwners,
 		mutations: {
 			"js/charactersheet/charactersheet.js": source => source.replace(
-				"this._hubRulesRefreshBlocked = true;\n\t\t\t\tthis._hubRulesPendingVersionId = expectedRulesVersionId;\n\t\t\t\treturn false;",
-				"this._hubRulesRefreshBlocked = true;\n\t\t\t\tthis._hubRulesPendingVersionId = null;\n\t\t\t\treturn false;",
+				"this._hubRulesRefreshBlocked = true;\n\t\t\tthis._hubRulesPendingVersionId = expectedRulesVersionId;\n\t\t\tthis._isHubContextRevalidationRequired = true;",
+				"this._hubRulesRefreshBlocked = true;\n\t\t\tthis._hubRulesPendingVersionId = null;\n\t\t\tthis._isHubContextRevalidationRequired = true;",
 			),
 		},
 	},
@@ -622,7 +627,7 @@ const MUTANTS = [
 		name: "existing-import-order-disabled",
 		probe: probeExistingImportOrder,
 		mutations: {
-			"server/src/memory-hub-store.js": source => source.replace(
+			"server/src/memory-hub-store.js": source => source.replaceAll(
 				"if (imported?.status === \"active\") {",
 				"if (false) {",
 			),
@@ -794,8 +799,8 @@ const MUTANTS = [
 		probe: probeCharacterSheetOwners,
 		mutations: {
 			"js/charactersheet/charactersheet.js": source => source.replace(
-				"if (state?.state === \"live\" && this._hubRulesRefreshBlocked) void this._pRefreshHubRules();",
-				"if (false) void this._pRefreshHubRules();",
+				"} else if (state?.state === \"live\" && this._hubRulesRefreshBlocked) {",
+				"} else if (false) {",
 			),
 		},
 	},
@@ -817,8 +822,8 @@ const MUTANTS = [
 		probe: probeHistoricalDiff,
 		mutations: {
 			"hub-campaign-rules.js": source => source.replace(
-				"const afterNormalized = normalizeCampaignRulesPolicyInternal(after, {isValidateCompatibility: !isAfterStoredPolicy});",
-				"const afterNormalized = normalizeCampaignRulesPolicyInternal(after, {isValidateCompatibility: true});",
+				"isValidateCompatibility: !isAfterStoredPolicy,",
+				"isValidateCompatibility: true,",
 			),
 		},
 	},

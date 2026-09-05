@@ -52,9 +52,9 @@ import {CharacterSheetPeerTargeting} from "./charactersheet-peer-targeting.js";
 import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js";
 import {getCharacterSaveFence, isCharacterSaveFenceCurrent} from "./charactersheet-persistence-fence.js";
 import {diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
+import {filterCampaignContentEntities, getCampaignContentPolicy, getCampaignEntityUid} from "../hub/hub-content-policy.js";
 import {
 	getClearedCampaignRulesState,
-	getCampaignSettingsOverlay,
 	getCampaignSettingsOverlayFromRulesVersion,
 } from "../hub/hub-campaign-rule-evaluator.js";
 
@@ -89,7 +89,10 @@ class CharacterSheetPage {
 		const isHubCharacter = !!hubCampaignId || hubParams.get("hubCharacter") === "1";
 		this._characterRepository = characterRepository
 			|| (isHubCharacter
-				? new HubHttpCharacterRepository({campaignId: hubCampaignId})
+				? new HubHttpCharacterRepository({
+					campaignId: hubCampaignId,
+					fnGetRulesVersionId: () => this._hubContext?.rulesVersion?.id || null,
+				})
 				: new LocalCharacterRepository({storage: StorageUtil}));
 		this._hubCampaignId = hubCampaignId;
 		this._isHubCharacter = isHubCharacter;
@@ -105,6 +108,11 @@ class CharacterSheetPage {
 		this._partyInventory = null;
 		this._characterLoadGeneration = 0;
 		this._hubRealtimeGeneration = 0;
+		this._hubContextGeneration = 0;
+		this._hubContextRefreshActiveGeneration = null;
+		this._isHubContextRefreshing = false;
+		this._isHubContextUnavailable = false;
+		this._isHubContextRevalidationRequired = false;
 		this._hubRulesRefreshGeneration = 0;
 		this._hubRulesRefreshBlocked = false;
 		this._hubRulesPendingVersionId = null;
@@ -261,16 +269,25 @@ class CharacterSheetPage {
 	 * re-apply `setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules)`, so a retained
 	 * `_hubContext` would silently reinstall the campaign rules on the next character load.
 	 */
-	_clearHubRules () {
-		this._hubRulesRefreshGeneration++;
+	_clearHubRules ({isUnavailable = false, isFenceRefresh = true} = {}) {
+		if (isFenceRefresh) this._hubRulesRefreshGeneration++;
 		this._hubRulesRefreshBlocked = false;
 		this._hubRulesPendingVersionId = null;
 		const cleared = getClearedCampaignRulesState();
 		this._hubContext = cleared.hubContext;
+		this._isHubContextUnavailable = isUnavailable;
 		this._state.clearCampaignSettingsOverlay();
 		// Return to the detached basis in lockstep with the overlay: a summary stamped with a
 		// campaign this sheet is no longer in must not keep claiming to be current.
 		this._state.setCarryAuthorityContext(cleared.carryAuthorityContext);
+	}
+
+	_teardownHubRules () {
+		this._hubContextGeneration++;
+		this._hubContextRefreshActiveGeneration = null;
+		this._isHubContextRefreshing = false;
+		this._isHubContextRevalidationRequired = false;
+		this._clearHubRules({isUnavailable: true});
 	}
 
 	/** Composed detach used by ordinary (non-context-switch) call sites. */
@@ -296,6 +313,7 @@ class CharacterSheetPage {
 		this._hubRealtime.on("cursor", metadata => this._onHubRealtimeCursor(metadata));
 		this._hubRealtime.on("semanticOperation", event => this._onHubSemanticOperation(event));
 		this._hubRealtime.on("connectionState", state => this._onHubRealtimeConnectionState(state));
+		this._hubRealtime.on("campaignContextChanged", event => this._onHubCampaignContextChanged(event));
 		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
 		this._hubRealtime.on("rulesChanged", event => { void this._pRefreshHubRules(event); });
 		return true;
@@ -304,38 +322,51 @@ class CharacterSheetPage {
 	async _pRefreshHubRules ({rulesVersionId = null} = {}) {
 		const expectedRulesVersionId = rulesVersionId ?? this._hubRulesPendingVersionId;
 		const generation = ++this._hubRulesRefreshGeneration;
+		const contextGeneration = ++this._hubContextGeneration;
+		this._hubContextRefreshActiveGeneration = contextGeneration;
+		this._isHubContextRefreshing = true;
+		this._clearHubRules({isUnavailable: true, isFenceRefresh: false});
+		this._hubRulesRefreshBlocked = true;
+		this._hubRulesPendingVersionId = expectedRulesVersionId;
+		this._campaign?.render();
 		try {
-			const context = await this._hubApi.pGetCampaignContext({campaignId: this._hubCampaignId});
-			if (generation !== this._hubRulesRefreshGeneration) return false;
-			// A failed replacement clears the active context to fail closed. A later
-			// reconnect is still allowed to establish a fresh context; without this
-			// exception, the first transient outage permanently required a reload.
-			if (!this._hubContext && !this._hubRulesRefreshBlocked) return false;
+			const context = this._hubCampaignContext?.pRefresh
+				? await this._hubCampaignContext.pRefresh({
+					fnIsCurrent: () => (
+						generation === this._hubRulesRefreshGeneration
+						&& contextGeneration === this._hubContextGeneration
+					),
+				})
+				: await this._hubApi.pGetCampaignContext({campaignId: this._hubCampaignId});
+			if (
+				!context
+				|| generation !== this._hubRulesRefreshGeneration
+				|| contextGeneration !== this._hubContextGeneration
+			) return false;
 			if (expectedRulesVersionId && context?.rulesVersion?.id !== expectedRulesVersionId) {
-				this._clearHubRules();
-				this._hubRulesRefreshBlocked = true;
-				this._hubRulesPendingVersionId = expectedRulesVersionId;
-				return false;
+				throw new Error(`Campaign rules activation did not resolve to the expected version.`);
 			}
-			const overlay = _getHubRulesOverlay(context);
-			if (context?.rulesVersion && !overlay) throw new Error(`Campaign rules are incompatible.`);
-			this._hubContext = context;
-			this._hubRulesRefreshBlocked = false;
-			this._hubRulesPendingVersionId = null;
-			this._state.setCampaignSettingsOverlay(overlay);
-			this._state.setCarryAuthorityContext({
-				rulesVersionId: context?.rulesVersion?.id ?? null,
-				brewBundleHash: context?.brewBundle?.contentHash ?? null,
-			});
+			this._applyHubContext(context);
 			this._renderCharacter();
+			this._campaign?.render();
 			return true;
 		} catch (error) {
-			if (generation !== this._hubRulesRefreshGeneration) return false;
-			this._clearHubRules();
+			if (
+				generation !== this._hubRulesRefreshGeneration
+				|| contextGeneration !== this._hubContextGeneration
+			) return false;
+			this._clearHubRules({isUnavailable: true, isFenceRefresh: false});
 			this._hubRulesRefreshBlocked = true;
 			this._hubRulesPendingVersionId = expectedRulesVersionId;
+			this._isHubContextRevalidationRequired = true;
 			JqueryUtil.doToast({type: "danger", content: "Campaign rules changed but could not be applied. Reload before continuing."});
+			this._campaign?.render();
 			return false;
+		} finally {
+			if (this._hubContextRefreshActiveGeneration === contextGeneration) {
+				this._hubContextRefreshActiveGeneration = null;
+				this._isHubContextRefreshing = false;
+			}
 		}
 	}
 
@@ -352,10 +383,97 @@ class CharacterSheetPage {
 	_onHubRealtimeConnectionState (state) {
 		this._hubEffects?.onConnectionState(state);
 		this._peerTargeting?.onConnectionState(state);
-		if (state?.state === "live" && this._hubRulesRefreshBlocked) void this._pRefreshHubRules();
-		if (!["closed", "access_lost"].includes(state?.state)) return;
+		if (state?.state === "live" && this._isHubContextRevalidationRequired && this._hubCampaignContext) {
+			this._isHubContextRevalidationRequired = false;
+			this._onHubCampaignContextChanged({type: "reconnected"});
+		} else if (state?.state === "live" && this._hubRulesRefreshBlocked) {
+			void this._pRefreshHubRules();
+		}
+		if (state?.state === "access_lost") {
+			// Fail closed synchronously; the coordinator then performs the full ordered teardown.
+			this._teardownHubRules();
+			if (this._hubActiveCampaign?.pHandleAccessLoss) {
+				void this._hubActiveCampaign.pHandleAccessLoss({campaignId: this._hubCampaignId})
+					// eslint-disable-next-line no-console
+					.catch(error => console.error("Failed to tear down inaccessible campaign context:", error));
+			} else {
+				this._fenceHubGeneration();
+				this._detachHubRealtimeClient();
+				this._detachHubProjections();
+				this._concealHubPrivateCharacter();
+				this._hubCampaignContext?.dispose?.();
+				this._hubCampaignContext = null;
+			}
+			return;
+		}
+		if (state?.state !== "closed") return;
 		this._hubRealtimeGeneration++;
+		this._hubContextGeneration++;
+		this._hubContextRefreshActiveGeneration = null;
+		this._isHubContextRefreshing = false;
 		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
+		this._isHubContextRevalidationRequired = state.state === "closed";
+		this._clearHubRules?.({isUnavailable: true});
+		this._campaign?.render();
+	}
+
+	_applyHubContext (context) {
+		const overlay = _getHubRulesOverlay(context);
+		if (context?.rulesVersion && !overlay) throw new Error(`Campaign rules are incompatible.`);
+		this._hubContext = context;
+		this._isHubContextUnavailable = false;
+		this._isHubContextRevalidationRequired = false;
+		this._hubRulesRefreshBlocked = false;
+		this._hubRulesPendingVersionId = null;
+		this._state.setCampaignSettingsOverlay(overlay);
+		this._state.setCarryAuthorityContext({
+			rulesVersionId: context?.rulesVersion?.id ?? null,
+			brewBundleHash: context?.brewBundle?.contentHash ?? null,
+		});
+	}
+
+	_onHubCampaignContextChanged (event = null) {
+		if (!this._hubCampaignContext) return;
+		if (
+			event?.type === "campaign.cursor"
+			&& (event.rulesVersionId ?? null) === (this._hubContext?.rulesVersion?.id ?? null)
+			&& (event.brewBundleVersionId ?? null) === (this._hubContext?.brewBundle?.id ?? null)
+		) return;
+		const activeContextId = event?.type === "rules.activated"
+			? this._hubContext?.rulesVersion?.id
+			: event?.type === "brew.activated"
+				? this._hubContext?.brewBundle?.id
+				: null;
+		if (event?.aggregateId && event.aggregateId === activeContextId) return;
+		const generation = ++this._hubContextGeneration;
+		this._hubContextRefreshActiveGeneration = generation;
+		this._isHubContextRefreshing = true;
+		this._clearHubRules();
+		this._campaign?.render();
+		void this._hubCampaignContext.pRefresh({
+			fnIsCurrent: () => generation === this._hubContextGeneration,
+		})
+			.then(context => {
+				if (!context || generation !== this._hubContextGeneration) return;
+				this._applyHubContext(context);
+				this._isHubContextUnavailable = false;
+				this._renderCharacter();
+				this._campaign?.render();
+			})
+			.catch(() => {
+				if (generation !== this._hubContextGeneration) return;
+				this._isHubContextUnavailable = true;
+				this._isHubContextRevalidationRequired = true;
+				JqueryUtil.doToast({
+					type: "danger",
+					content: "Campaign content rules changed, but the new policy could not be loaded. New content choices remain blocked until you reconnect or reload.",
+				});
+			})
+			.finally(() => {
+				if (this._hubContextRefreshActiveGeneration !== generation) return;
+				this._hubContextRefreshActiveGeneration = null;
+				this._isHubContextRefreshing = false;
+			});
 	}
 
 	_onHubRealtimeDeliveryError (detail) {
@@ -639,22 +757,12 @@ class CharacterSheetPage {
 			shouldActivateContext: ({campaignId}) => campaignId === this._hubCampaignId,
 			pPreflightSwitch: async () => ({safe: !this._characterRepository?.hasPendingWrites?.()}),
 			pOnContextActivated: async ({context}) => {
-				this._hubContext = context;
-				this._hubRulesRefreshBlocked = false;
-				this._hubRulesPendingVersionId = null;
-				if (this._hubContext?.rulesVersion && !_getHubRulesOverlay(this._hubContext)) {
-					throw new Error(`Campaign rules are unavailable for this Character Sheet.`);
-				}
-				this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
+				this._applyHubContext(context);
 				// Stamp the carry summary with the context it was computed under, immediately
 				// beside the overlay whose values feed its settings digest — the two must not
 				// be able to drift. Without this the sheet would keep publishing a `detached`
 				// basis while the server expected a `campaign` one, and every campaign
 				// character's `carrySummary` would be silently withheld as unverifiable.
-				this._state.setCarryAuthorityContext({
-					rulesVersionId: this._hubContext?.rulesVersion?.id ?? null,
-					brewBundleHash: this._hubContext?.brewBundle?.contentHash ?? null,
-				});
 			},
 			onFenceGeneration: () => this._fenceHubGeneration(),
 			pTeardownRealtime: async () => this._detachHubRealtimeClient(),
@@ -662,7 +770,8 @@ class CharacterSheetPage {
 				this._detachHubProjections();
 				this._concealHubPrivateCharacter();
 			},
-			pTeardownRules: async () => this._clearHubRules(),
+			pTeardownRules: async () => this._teardownHubRules(),
+			pTeardownBrew: async () => this._hubCampaignContext = null,
 		};
 	}
 
@@ -746,6 +855,7 @@ class CharacterSheetPage {
 						this._renderCharacter();
 					},
 					fnSaveCharacter: () => this._saveCurrentCharacter({isInteractiveConflict: false}),
+					fnGetRulesVersionId: () => this._hubContext?.rulesVersion?.id ?? null,
 					fnIsCurrentCharacter: ({characterId, generation}) => (
 						this._currentCharacterId === characterId
 						&& this._characterLoadGeneration === generation
@@ -19945,9 +20055,19 @@ class CharacterSheetPage {
 	 * @returns {Array} Filtered array
 	 */
 	filterByAllowedSources (entities) {
+		if (this._isHubContextRefreshing || this._isHubContextUnavailable) return [];
 		// First filter by allowed sources
 		const allowed = this._state.getAllowedSources();
 		let filtered = allowed ? entities.filter(e => allowed.includes(e.source)) : entities;
+		filtered = filterCampaignContentEntities({
+			contentPolicy: this._hubContext
+				? getCampaignContentPolicy(this._hubContext.rulesVersion?.contentPolicy)
+				: null,
+			entities: filtered,
+			availableSources: this._hubContext?.contentCatalog?.sources,
+			availableSpecies: this._hubContext?.contentCatalog?.species,
+			sourceEditions: this._hubContext?.contentCatalog?.sourceEditions,
+		});
 
 		// Then apply priority filtering if set
 		const priority = this._state.getPrioritySources();
@@ -19956,6 +20076,27 @@ class CharacterSheetPage {
 		}
 
 		return filtered;
+	}
+
+	isCampaignContentEntityAllowed (entity) {
+		if (this._isHubContextRefreshing || this._isHubContextUnavailable || this._isHubContextRevalidationRequired) return false;
+		if (!this._hubContext) return true;
+		return !!filterCampaignContentEntities({
+			contentPolicy: getCampaignContentPolicy(this._hubContext.rulesVersion?.contentPolicy),
+			entities: [entity],
+			availableSources: this._hubContext.contentCatalog?.sources,
+			availableSpecies: this._hubContext.contentCatalog?.species,
+			sourceEditions: this._hubContext.contentCatalog?.sourceEditions,
+		}).length;
+	}
+
+	isCampaignContentMutationAllowed ({before = null, after}) {
+		if (this._isHubContextRefreshing || this._isHubContextUnavailable || this._isHubContextRevalidationRequired) return false;
+		if (!this._hubContext) return true;
+		const beforeUid = before ? getCampaignEntityUid(before) : null;
+		const afterUid = getCampaignEntityUid(after);
+		if (beforeUid && afterUid && beforeUid.toLowerCase() === afterUid.toLowerCase()) return true;
+		return this.isCampaignContentEntityAllowed(after);
 	}
 
 	/**
@@ -19994,6 +20135,7 @@ class CharacterSheetPage {
 		if (!Array.isArray(all) || !all.length) return filtered;
 		// Skip the walk entirely when no source filter is active — `filtered === all`.
 		if (filtered === all || filtered.length === all.length) return filtered;
+		if (this._isHubContextRefreshing || this._isHubContextUnavailable) return filtered;
 
 		let classes;
 		try { classes = this._state?.getClasses?.() || []; } catch (e) { classes = []; }
@@ -20017,9 +20159,19 @@ class CharacterSheetPage {
 		if (!grants.length) return filtered;
 
 		const filteredSet = new Set(filtered);
+		const campaignAllowedSet = this._hubContext
+			? new Set(filterCampaignContentEntities({
+				contentPolicy: getCampaignContentPolicy(this._hubContext.rulesVersion?.contentPolicy),
+				entities: all,
+				availableSources: this._hubContext.contentCatalog?.sources,
+				availableSpecies: this._hubContext.contentCatalog?.species,
+				sourceEditions: this._hubContext.contentCatalog?.sourceEditions,
+			}))
+			: null;
 		const augmented = filtered.slice();
 		for (const spell of all) {
 			if (filteredSet.has(spell)) continue;
+			if (campaignAllowedSet && !campaignAllowedSet.has(spell)) continue;
 			const isGranted = grants.some(({className, subclass, subclassChoice, additionalClassNames}) => {
 				if (subclass && CharacterSheetClassUtils.subclassAdditionalSpellsIncludeSpell(spell, subclass, {subclassChoice})) return true;
 				if (additionalClassNames.length && additionalClassNames.some(n => CharacterSheetClassUtils.spellIsForClass(spell, n))) return true;

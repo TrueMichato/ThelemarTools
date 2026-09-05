@@ -108,4 +108,64 @@ describe("HubCampaignContext", () => {
 		// A disposed context must not silently reinstall brew.
 		await expect(context.pActivate()).rejects.toThrow(/disposed/);
 	});
+
+	it("does not reinstall campaign brew when an in-flight refresh resolves after disposal", async () => {
+		let resolveRefresh;
+		const refresh = new Promise(resolve => resolveRefresh = resolve);
+		const brewUtil = makeBrewUtil();
+		const context = new HubCampaignContext({
+			campaignId: CAMPAIGN_A,
+			api: {pGetCampaignContext: () => refresh},
+			brewUtil,
+			session: {signedIn: true, account: {id: "a"}},
+			context: bundleContext,
+		});
+		await context.pActivate();
+		brewUtil.calls.length = 0;
+
+		const pending = context.pRefresh();
+		context.dispose();
+		resolveRefresh({
+			rulesVersion: {id: "rules-2", rules: {}},
+			brewBundle: {contentHash: "hash-2", content: [{head: {}, body: {new: true}}]},
+		});
+
+		await expect(pending).resolves.toBeNull();
+		expect(context.context).toBeNull();
+		expect(brewUtil.calls).toEqual([{name: "clear"}, {name: "clear"}]);
+	});
+
+	it("clears stale brew before refresh and applies only the expected version identities", async () => {
+		const brewUtil = makeBrewUtil();
+		const nextContext = {
+			rulesVersion: {id: "rules-2", rules: {}},
+			brewBundle: {id: "brew-2", contentHash: "hash-2", content: [{head: {}, body: {new: true}}]},
+		};
+		const context = new HubCampaignContext({
+			campaignId: CAMPAIGN_A,
+			api: {pGetCampaignContext: async () => nextContext},
+			brewUtil,
+			session: {signedIn: true, account: {id: "a"}},
+			context: bundleContext,
+		});
+		await context.pActivate();
+		brewUtil.calls.length = 0;
+
+		await expect(context.pRefresh({
+			expectedRulesVersionId: "rules-stale",
+			expectedBrewBundleVersionId: "brew-2",
+		})).rejects.toEqual(expect.objectContaining({code: "CAMPAIGN_CONTEXT_STALE"}));
+		expect(context.context).toBeNull();
+		expect(brewUtil.calls).toEqual([{name: "clear"}]);
+
+		await expect(context.pRefresh({
+			expectedRulesVersionId: "rules-2",
+			expectedBrewBundleVersionId: "brew-2",
+		})).resolves.toEqual(nextContext);
+		expect(brewUtil.calls).toEqual([
+			{name: "clear"},
+			{name: "clear"},
+			{name: "set", cacheKey: `${CAMPAIGN_A}::hash-2`, count: 1},
+		]);
+	});
 });

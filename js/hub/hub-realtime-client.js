@@ -239,6 +239,8 @@ export class HubRealtimeClient {
 					"xp.granted",
 					"item.granted",
 					"action.applied",
+					"rules.activated",
+					"brew.activated",
 				].includes(event.type)) continue;
 				this._rememberEvent(event);
 				this._emit("event", event);

@@ -110,7 +110,7 @@ describe("Campaign Hub item award domain", () => {
 		const existingId = crypto.randomUUID();
 		const item = {
 			name: "Charged Blade",
-			source: "HB",
+			source: "PHB",
 			material: {name: "Star iron", source: "HB"},
 			charges: {current: 3, max: 5},
 			custom: {maker: "Rook"},
@@ -328,10 +328,10 @@ describe("Campaign Hub item award domain", () => {
 		const existingId = crypto.randomUUID();
 		const authoritativeItem = {
 			name: "Silvered Arrow",
-			source: "HB",
+			source: "PHB",
 			page: 4,
 			weight: 0.05,
-			material: {name: "Moon silver", source: "HB"},
+			material: {name: "Moon silver", source: "PHB"},
 			charges: {current: 3, max: 5},
 			entries: ["Rich transferable content"],
 			custom: {maker: "Rook"},
@@ -361,7 +361,7 @@ describe("Campaign Hub item award domain", () => {
 		});
 		expect(result.source).toEqual({
 			kind: "party_inventory",
-			item: {name: "Silvered Arrow", source: "HB", page: 4, weight: 0.05},
+			item: {name: "Silvered Arrow", source: "PHB", page: 4, weight: 0.05},
 		});
 		expect(result.partyInventory).toEqual({id: party.id, revision: party.revision + 1});
 		expect(result.targets[0].entryId).toBe(existingId);
@@ -390,7 +390,7 @@ describe("Campaign Hub item award domain", () => {
 		for (const event of awardEvents.filter(event => event.type === "item.granted")) {
 			expect(event.payload.entry.item).toEqual({
 				name: "Silvered Arrow",
-				source: "HB",
+				source: "PHB",
 				page: 4,
 				weight: 0.05,
 			});

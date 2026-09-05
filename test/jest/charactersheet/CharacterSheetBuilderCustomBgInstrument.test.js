@@ -103,6 +103,25 @@ describe("Custom background instrument sub-picker (Bug #2)", () => {
 		buildBg(data);
 		expect(data.tools).toEqual(["Musical Instrument"]);
 	});
+
+	test("keeps local custom backgrounds but blocks campaign-disallowed custom content", () => {
+		const background = buildBg(BASE);
+		const builder = Object.create(CharacterSheetBuilder.prototype);
+		builder._page = {_hubContext: null};
+		expect(builder._isCampaignCustomBackgroundAllowed(background)).toBe(true);
+
+		builder._page = {_hubContext: {}, isCampaignContentEntityAllowed: () => false};
+		expect(builder._isCampaignCustomBackgroundAllowed(background)).toBe(false);
+		builder._page.isCampaignContentEntityAllowed = () => true;
+		expect(builder._isCampaignCustomBackgroundAllowed(background)).toBe(true);
+
+		builder._page = {
+			_hubContext: null,
+			_isHubContextRevalidationRequired: true,
+			isCampaignContentEntityAllowed: () => true,
+		};
+		expect(builder._isCampaignCustomBackgroundAllowed(background)).toBe(false);
+	});
 });
 
 describe("Custom background creator — sub-picker wiring (Bug #2 source-pin)", () => {

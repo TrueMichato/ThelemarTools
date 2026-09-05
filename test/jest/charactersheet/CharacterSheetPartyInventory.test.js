@@ -317,6 +317,37 @@ describe("Character Sheet party inventory", () => {
 		expect(repository.pReconcileAuthoritativeCharacter).not.toHaveBeenCalled();
 	});
 
+	it("reconciles a cursor-covered non-semantic character revision", () => {
+		const listeners = new Map();
+		const partyInventory = new CharacterSheetPartyInventory({
+			api: {},
+			realtime: {
+				on: jest.fn((type, listener) => {
+					listeners.set(type, listener);
+					return jest.fn();
+				}),
+			},
+			campaignId: "campaign-1",
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {
+			characterId: "character-1",
+			generation: 1,
+			token: Symbol("test"),
+			isOwner: true,
+		};
+		partyInventory._scheduleRefresh = jest.fn();
+
+		listeners.get("projectionInvalidated")({
+			characterId: "character-1",
+			source: "cursor",
+			isCharacterDocumentChanged: true,
+		});
+
+		expect(partyInventory._scheduleRefresh).toHaveBeenCalledWith({character: true, party: true});
+	});
+
 	it("reconciles an item award into the open owner sheet exactly once without refreshing the stash", () => {
 		const listeners = new Map();
 		const partyInventory = new CharacterSheetPartyInventory({

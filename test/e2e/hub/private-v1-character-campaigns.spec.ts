@@ -80,6 +80,7 @@ test("campaign characters recover from detachment and copy or move safely", asyn
 			characterId: character.id,
 			campaignId: targetCampaignId,
 			idempotencyKey: moved.idempotencyKey,
+			rulesVersionId: moved.rulesVersionId,
 		});
 		expect(replay.character.id).toBe(character.id);
 		expect(replay.character.campaignId).toBe(targetCampaignId);
@@ -124,7 +125,7 @@ test("an open character sheet resolves peer effects and adopts authoritative out
 		const sourceCharacter = await source.createCharacter({
 			campaignId,
 			name: "Aster",
-			features: [{name: "Steadying Word", source: "TST"}],
+			features: [{name: "Steadying Word", source: "PHB"}],
 		});
 		const targetCharacter = await target.createCharacter({campaignId, name: "Bryn", hpCurrent: 5});
 		const targetProjection = await target.getCharacterProjection(targetCharacter.id);
