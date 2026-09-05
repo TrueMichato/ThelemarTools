@@ -1651,7 +1651,7 @@ ${body}
 		const jumpMult = this._state.getJumpMultiplierFromStates?.() ?? 1;
 		let longJump, highJump;
 
-		if (settings.thelemar_jumping) {
+		if (settings.enableTgtt !== false && settings.thelemar_jumping) {
 			const athleticsMod = this._state.getSkillMod("athletics");
 			longJump = Math.floor((8 + athleticsMod) * jumpMult);
 			highJump = Math.max(0, Math.floor((2 + athleticsMod * 0.5) * jumpMult));

@@ -1,0 +1,216 @@
+import {
+	CAMPAIGN_RULE_PROTOCOL_VERSION,
+	evaluateCampaignRules,
+	getCampaignSettingsOverlayFromRulesVersion,
+} from "../../../js/hub/hub-campaign-rule-evaluator.js";
+import {
+	CAMPAIGN_RULES_POLICY_CAPABILITY,
+	createDefaultCampaignRulesPolicy,
+} from "../../../js/hub/hub-campaign-rules.js";
+
+function rulesVersion (mutate = () => {}) {
+	const rules = createDefaultCampaignRulesPolicy();
+	mutate(rules);
+	return {id: "rules-1", version: 1, schemaVersion: 2, catalogVersion: 1, rules};
+}
+
+function evaluate (version, overrides = {}) {
+	return evaluateCampaignRules({
+		capabilities: [CAMPAIGN_RULES_POLICY_CAPABILITY],
+		personalSettings: {enableTgtt: false, localOnly: true},
+		protocolVersion: CAMPAIGN_RULE_PROTOCOL_VERSION,
+		rulesVersion: version,
+		surface: "characterOpen",
+		...overrides,
+	});
+}
+
+describe("campaign rule evaluator", () => {
+	it("applies supported enforced rules over personal defaults without mutating them", () => {
+		const personalSettings = {enableTgtt: true, thelemar_jumping: true};
+		const version = rulesVersion(policy => {
+			policy.rules.find(rule => rule.id === "tgtt.enabled").parameters.enabled = false;
+			policy.rules.find(rule => rule.id === "rules.exhaustion.system").parameters.system = "2024";
+			policy.rules.find(rule => rule.id === "tgtt.jumping").parameters.enabled = false;
+		});
+
+		const decision = evaluate(version, {personalSettings});
+		expect(decision).toMatchObject({
+			status: "compliant",
+			blocking: false,
+			effectiveSettings: {enableTgtt: false, exhaustionRules: "2024", thelemar_jumping: false},
+		});
+
+		expect(personalSettings).toEqual({enableTgtt: true, thelemar_jumping: true});
+	});
+
+	it("makes TGTT subrules inert when the campaign master toggle is off", () => {
+		const version = rulesVersion(policy => {
+			policy.rules.find(rule => rule.id === "tgtt.enabled").parameters.enabled = false;
+			policy.rules.find(rule => rule.id === "rules.exhaustion.system").parameters.system = "2024";
+		});
+		expect(evaluate(version).effectiveSettings).toMatchObject({
+			enableTgtt: false,
+			thelemar_carryWeight: false,
+			thelemar_encumbranceTiers: false,
+			thelemar_jumping: false,
+			thelemar_linguisticsBonus: false,
+			thelemar_criticalRolls: false,
+		});
+	});
+
+	it("leaves explicit local mode unchanged", () => {
+		const decision = evaluate(null);
+		expect(decision).toMatchObject({
+			status: "inactive",
+			blocking: false,
+			effectiveSettings: {enableTgtt: false},
+		});
+		expect(decision.surface).toBe("characterOpen");
+		expect(getCampaignSettingsOverlayFromRulesVersion(null)).toBeNull();
+	});
+
+	it("emits a contract-valid blocked decision for malformed top-level input", () => {
+		const decision = evaluateCampaignRules(null);
+		expect(decision).toMatchObject({status: "blocked", surface: "characterOpen"});
+		expect(() => structuredClone(decision)).not.toThrow();
+	});
+
+	it("normalizes an invalid requested surface to the declared error surface", () => {
+		const decision = evaluateCampaignRules({surface: "futureSurface"});
+		expect(decision).toMatchObject({
+			status: "blocked",
+			blocking: true,
+			surface: "characterOpen",
+			errors: [{code: "RULE_EVALUATOR_INPUT_INVALID"}],
+		});
+		expect(decision.surface).toBe("characterOpen");
+	});
+
+	it.each([
+		["a stale policy pin", rulesVersion(), {expectedRulesVersionId: "rules-older"}, "POLICY_VERSION_STALE"],
+		["a missing capability", rulesVersion(), {capabilities: []}, "RULES_CAPABILITY_REQUIRED"],
+		["an old protocol", rulesVersion(), {protocolVersion: 3}, "RULES_PROTOCOL_UNSUPPORTED"],
+		["a future schema", {...rulesVersion(), schemaVersion: 99}, {}, "RULES_SCHEMA_UNSUPPORTED"],
+		["a future catalog", {...rulesVersion(), catalogVersion: 99}, {}, "RULES_CATALOG_UNSUPPORTED"],
+		["a malformed version", {...rulesVersion(), version: "1"}, {}, "RULES_VERSION_INVALID"],
+		["an open envelope", {...rulesVersion(), unexpected: true}, {}, "RULES_VERSION_INVALID"],
+		["a malformed nested decision", {...rulesVersion(), ruleDecision: {unexpected: true}}, {}, "RULES_VERSION_INVALID"],
+		["an invalid protocol type", rulesVersion(), {protocolVersion: {}}, "RULE_EVALUATOR_INPUT_INVALID"],
+	])("fails closed for %s", (_label, version, overrides, code) => {
+		expect(evaluate(version, overrides)).toMatchObject({
+			status: "blocked",
+			blocking: true,
+			errors: [{code}],
+			effectiveSettings: {enableTgtt: false},
+		});
+	});
+
+	it("preserves schema-v1 and pre-decision browser contexts", () => {
+		const legacy = {
+			id: "legacy",
+			version: 2,
+			schemaVersion: 1,
+			rules: {enableTgtt: false, exhaustionRules: "2014"},
+		};
+		expect(evaluate(legacy).effectiveSettings).toMatchObject({enableTgtt: false, exhaustionRules: "2014"});
+		expect(getCampaignSettingsOverlayFromRulesVersion(legacy)).toMatchObject({enableTgtt: false, exhaustionRules: "2014"});
+	});
+
+	it.each([2, 99])("rejects schema %s envelopes without an authoritative decision", schemaVersion => {
+		expect(getCampaignSettingsOverlayFromRulesVersion({
+			id: "rules-flat",
+			version: 1,
+			schemaVersion,
+			catalogVersion: 1,
+			rules: {enableTgtt: false},
+		})).toBeNull();
+	});
+
+	it("evaluates the closed policy member of a public schema-v2 envelope", () => {
+		const policy = createDefaultCampaignRulesPolicy();
+		const version = {
+			id: "public-v2",
+			version: 3,
+			schemaVersion: 2,
+			catalogVersion: 1,
+			rules: {enableTgtt: false},
+			policy,
+		};
+		expect(evaluate(version).status).toBe("compliant");
+		expect(evaluate(version).effectiveSettings.enableTgtt).toBe(true);
+	});
+
+	it("rejects a stale or mismatched public decision instead of applying its overlay", () => {
+		const version = rulesVersion();
+		version.ruleDecision = {
+			...evaluate(version),
+			policyIdentity: {...evaluate(version).policyIdentity, id: "other"},
+		};
+		expect(getCampaignSettingsOverlayFromRulesVersion(version)).toBeNull();
+	});
+
+	it("rejects an allowed-key decision which omits required contract fields", () => {
+		const version = rulesVersion();
+		version.ruleDecision = {
+			status: "compliant",
+			blocking: false,
+			policyIdentity: {id: "rules-1", version: 1, schemaVersion: 2, catalogVersion: 1},
+			effectiveSettings: {enableTgtt: true},
+		};
+		expect(getCampaignSettingsOverlayFromRulesVersion(version)).toBeNull();
+	});
+
+	it.each([
+		["mistyped settings", {enableTgtt: "yes"}],
+		["unknown settings", {unexpected: true}],
+	])("rejects %s in an otherwise closed decision", (_label, effectiveSettings) => {
+		const version = rulesVersion();
+		version.ruleDecision = {...evaluate(version), effectiveSettings};
+		expect(getCampaignSettingsOverlayFromRulesVersion(version)).toBeNull();
+	});
+
+	it("rejects unknown, invalid, and duplicate applied rules", () => {
+		const version = rulesVersion();
+		const decision = evaluate(version);
+		for (const appliedRules of [
+			[{id: "unknown.rule", ruleSchemaVersion: 1, mode: "advisory"}],
+			[{id: "tgtt.enabled", ruleSchemaVersion: -1, mode: "advisory"}],
+			[decision.appliedRules[0], decision.appliedRules[0]],
+		]) {
+			version.ruleDecision = {...decision, appliedRules};
+			expect(getCampaignSettingsOverlayFromRulesVersion(version)).toBeNull();
+		}
+	});
+
+	it("rejects malformed identity and error envelopes even when their keys look familiar", () => {
+		const version = rulesVersion();
+		const decision = evaluate(version);
+		for (const policyIdentity of [
+			{...decision.policyIdentity, extra: true},
+			{...decision.policyIdentity, catalogVersion: 0},
+			{...decision.policyIdentity, schemaVersion: 99},
+		]) {
+			version.ruleDecision = {...decision, policyIdentity};
+			expect(getCampaignSettingsOverlayFromRulesVersion(version)).toBeNull();
+		}
+		for (const errors of [
+			[{code: "RULES_INVALID", ruleId: "unknown.rule"}],
+			[{code: "RULES_INVALID", extra: true}],
+			[{ruleId: "tgtt.enabled"}],
+		]) {
+			version.ruleDecision = {...decision, status: "blocked", blocking: true, errors};
+			expect(getCampaignSettingsOverlayFromRulesVersion(version)).toBeNull();
+		}
+	});
+
+	it("rejects contradictory Thelemar dependencies instead of partially applying", () => {
+		const version = rulesVersion(policy => {
+			policy.rules.find(rule => rule.id === "tgtt.carry-weight").parameters.enabled = false;
+		});
+		expect(evaluate(version)).toMatchObject({
+			status: "blocked",
+			errors: [{code: "RULES_COMBINATION_UNSUPPORTED"}],
+		});
+	});
+});

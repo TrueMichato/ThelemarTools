@@ -7,6 +7,7 @@ const _LISTENER_TYPES = new Set([
 	"deliveryError",
 	"inventoryTransfer",
 	"projectionInvalidated",
+	"rulesChanged",
 	"semanticOperation",
 ]);
 
@@ -201,6 +202,18 @@ export class CharacterSheetRealtimeCoordinator {
 
 	_handleEvent (active, event) {
 		if (!this._isCurrent(active) || event?.campaignId !== this._campaignId) return;
+
+		if (event.type === "rules.activated" && event.aggregateType === "rules_version") {
+			this._enqueue(active, {
+				type: "rulesChanged",
+				value: {
+					campaignId: this._campaignId,
+					rulesVersionId: event.aggregateId,
+					sequence: event.sequence,
+				},
+			});
+			return;
+		}
 
 		if (
 			_CHARACTER_TEARDOWN_EVENT_TYPES.has(event.type)

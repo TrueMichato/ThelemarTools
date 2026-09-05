@@ -52,8 +52,14 @@ import {CharacterSheetPeerTargeting} from "./charactersheet-peer-targeting.js";
 import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js";
 import {getCharacterSaveFence, isCharacterSaveFenceCurrent} from "./charactersheet-persistence-fence.js";
 import {diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
+import {
+	getClearedCampaignRulesState,
+	getCampaignSettingsOverlay,
+	getCampaignSettingsOverlayFromRulesVersion,
+} from "../hub/hub-campaign-rule-evaluator.js";
 
 const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, StorageUtil, DataUtil, BrewUtil2, PrereleaseUtil} = /** @type {*} */ (globalThis);
+const _getHubRulesOverlay = hubContext => getCampaignSettingsOverlayFromRulesVersion(hubContext?.rulesVersion);
 
 /**
  * Character Sheet - Main Controller
@@ -99,6 +105,9 @@ class CharacterSheetPage {
 		this._partyInventory = null;
 		this._characterLoadGeneration = 0;
 		this._hubRealtimeGeneration = 0;
+		this._hubRulesRefreshGeneration = 0;
+		this._hubRulesRefreshBlocked = false;
+		this._hubRulesPendingVersionId = null;
 		this._builder = null;
 		this._combat = null;
 		this._spells = null;
@@ -253,11 +262,15 @@ class CharacterSheetPage {
 	 * `_hubContext` would silently reinstall the campaign rules on the next character load.
 	 */
 	_clearHubRules () {
-		this._hubContext = null;
+		this._hubRulesRefreshGeneration++;
+		this._hubRulesRefreshBlocked = false;
+		this._hubRulesPendingVersionId = null;
+		const cleared = getClearedCampaignRulesState();
+		this._hubContext = cleared.hubContext;
 		this._state.clearCampaignSettingsOverlay();
 		// Return to the detached basis in lockstep with the overlay: a summary stamped with a
 		// campaign this sheet is no longer in must not keep claiming to be current.
-		this._state.setCarryAuthorityContext(null);
+		this._state.setCarryAuthorityContext(cleared.carryAuthorityContext);
 	}
 
 	/** Composed detach used by ordinary (non-context-switch) call sites. */
@@ -284,7 +297,46 @@ class CharacterSheetPage {
 		this._hubRealtime.on("semanticOperation", event => this._onHubSemanticOperation(event));
 		this._hubRealtime.on("connectionState", state => this._onHubRealtimeConnectionState(state));
 		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
+		this._hubRealtime.on("rulesChanged", event => { void this._pRefreshHubRules(event); });
 		return true;
+	}
+
+	async _pRefreshHubRules ({rulesVersionId = null} = {}) {
+		const expectedRulesVersionId = rulesVersionId ?? this._hubRulesPendingVersionId;
+		const generation = ++this._hubRulesRefreshGeneration;
+		try {
+			const context = await this._hubApi.pGetCampaignContext({campaignId: this._hubCampaignId});
+			if (generation !== this._hubRulesRefreshGeneration) return false;
+			// A failed replacement clears the active context to fail closed. A later
+			// reconnect is still allowed to establish a fresh context; without this
+			// exception, the first transient outage permanently required a reload.
+			if (!this._hubContext && !this._hubRulesRefreshBlocked) return false;
+			if (expectedRulesVersionId && context?.rulesVersion?.id !== expectedRulesVersionId) {
+				this._clearHubRules();
+				this._hubRulesRefreshBlocked = true;
+				this._hubRulesPendingVersionId = expectedRulesVersionId;
+				return false;
+			}
+			const overlay = _getHubRulesOverlay(context);
+			if (context?.rulesVersion && !overlay) throw new Error(`Campaign rules are incompatible.`);
+			this._hubContext = context;
+			this._hubRulesRefreshBlocked = false;
+			this._hubRulesPendingVersionId = null;
+			this._state.setCampaignSettingsOverlay(overlay);
+			this._state.setCarryAuthorityContext({
+				rulesVersionId: context?.rulesVersion?.id ?? null,
+				brewBundleHash: context?.brewBundle?.contentHash ?? null,
+			});
+			this._renderCharacter();
+			return true;
+		} catch (error) {
+			if (generation !== this._hubRulesRefreshGeneration) return false;
+			this._clearHubRules();
+			this._hubRulesRefreshBlocked = true;
+			this._hubRulesPendingVersionId = expectedRulesVersionId;
+			JqueryUtil.doToast({type: "danger", content: "Campaign rules changed but could not be applied. Reload before continuing."});
+			return false;
+		}
 	}
 
 	_onHubRealtimeCursor (metadata) {
@@ -300,6 +352,7 @@ class CharacterSheetPage {
 	_onHubRealtimeConnectionState (state) {
 		this._hubEffects?.onConnectionState(state);
 		this._peerTargeting?.onConnectionState(state);
+		if (state?.state === "live" && this._hubRulesRefreshBlocked) void this._pRefreshHubRules();
 		if (!["closed", "access_lost"].includes(state?.state)) return;
 		this._hubRealtimeGeneration++;
 		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
@@ -587,7 +640,12 @@ class CharacterSheetPage {
 			pPreflightSwitch: async () => ({safe: !this._characterRepository?.hasPendingWrites?.()}),
 			pOnContextActivated: async ({context}) => {
 				this._hubContext = context;
-				this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
+				this._hubRulesRefreshBlocked = false;
+				this._hubRulesPendingVersionId = null;
+				if (this._hubContext?.rulesVersion && !_getHubRulesOverlay(this._hubContext)) {
+					throw new Error(`Campaign rules are unavailable for this Character Sheet.`);
+				}
+				this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 				// Stamp the carry summary with the context it was computed under, immediately
 				// beside the overlay whose values feed its settings digest — the two must not
 				// be able to drift. Without this the sheet would keep publishing a `detached`
@@ -683,7 +741,7 @@ class CharacterSheetPage {
 					fnProjectItemWeight: item => this._state.projectItemMaterial(item)?.weight,
 					fnAdoptCharacterData: data => {
 						this._state.loadFromJson(data);
-						this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
+						this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 						this._reconcileClassFeatures();
 						this._renderCharacter();
 					},
@@ -2298,7 +2356,7 @@ class CharacterSheetPage {
 			this._isLevelUpBannerDismissed = false;
 			this._state.clearCampaignSettingsOverlay();
 			this._state.loadFromJson(character);
-			this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
+			this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 
 			// Backfill any class features missing from `_data.features` (e.g. on
 			// saves migrated from older formats). Idempotent. The result tells us whether
@@ -2362,7 +2420,7 @@ class CharacterSheetPage {
 		this._isLevelUpBannerDismissed = false;
 		this._state.clearCampaignSettingsOverlay();
 		this._state.reset();
-		this._state.setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules);
+		this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 		this._state.setClassFeatureCatalog(this._classFeatures || [], this._subclassFeatures || [], this._optionalFeaturesData || []);
 		this._state.setId(this._currentCharacterId);
 		this._renderCharacter();
@@ -5647,7 +5705,8 @@ class CharacterSheetPage {
 		// Standard rules: Long jump = STR score, High jump = 3 + STR mod
 		// Thelemar rules: Long jump = 8 + Athletics mod, High jump = 2 + Athletics × 0.5
 		// Running jumps require a 10ft running start; standing jumps are half
-		const useThelemarJumping = (/** @type {*} */ (this._state.getSettings()))?.thelemar_jumping;
+		const jumpSettings = /** @type {*} */ (this._state.getSettings());
+		const useThelemarJumping = jumpSettings?.enableTgtt !== false && jumpSettings?.thelemar_jumping;
 
 		let longJumpRunning, highJumpRunning;
 
@@ -5919,10 +5978,10 @@ class CharacterSheetPage {
 		// (R37 #10) Reading speed (TGTT "Reading Books"): show it alongside senses on the
 		// Overview when the TGTT homebrew is enabled. Pages/hour = (1 + INTmod×2) × 30.
 		// Reading Books is a TGTT linguistics rule, so gate on the granular
-		// `thelemar_linguisticsBonus` flag (present in real saves) — falling back to the
-		// newer master `enableTgtt` flag for forward-compatibility.
+		// Linguistics is a TGTT sub-rule, so the master toggle must gate it even when an
+		// older save still contains the granular flag.
 		const csSettings = this._state._data?.settings || {};
-		if (csSettings.enableTgtt || csSettings.thelemar_linguisticsBonus) {
+		if (csSettings.enableTgtt !== false && csSettings.thelemar_linguisticsBonus) {
 			const pages = this._state.getReadingSpeed();
 			const item = document.createElement("div");
 			item.className = "charsheet__sense-item";
@@ -15798,7 +15857,7 @@ class CharacterSheetPage {
 
 		// Thelemar critical rolls rule: Nat 1 = -5, Nat 20 = +5 for non-attack rolls
 		let thelemar_critBonus = 0;
-		if (!isAttack && (/** @type {*} */ (this._state.getSettings()))?.thelemar_criticalRolls) {
+		if (!isAttack && (/** @type {*} */ (this._state.getSettings()))?.enableTgtt !== false && (/** @type {*} */ (this._state.getSettings()))?.thelemar_criticalRolls) {
 			if (roll === 1) thelemar_critBonus = -5;
 			else if (roll === 20) thelemar_critBonus = 5;
 		}
@@ -19847,7 +19906,7 @@ class CharacterSheetPage {
 	 */
 	_ensureLinguisticsSkillIfNeeded () {
 		const settings = (/** @type {*} */ (this._state.getSettings()));
-		if (!settings?.thelemar_linguisticsBonus) return;
+		if (settings?.enableTgtt === false || !settings?.thelemar_linguisticsBonus) return;
 
 		const hasLinguisticsSkill = this._state.getCustomSkills().some(
 			s => s.name.toLowerCase() === "linguistics",

@@ -1,0 +1,76 @@
+{
+  "goal_id": "campaign-rule-enforcement",
+  "status": "completed",
+  "iteration": 8,
+  "builder_model": "GPT:5.6-Luna",
+  "inspector_model": "GPT:5.6-Sol",
+  "initial_sha": "29eaf1087e3b59ff5184edf8337da340396515c8",
+  "created_at": "2026-09-04T20:43:08.072+03:00",
+  "history": [
+    {
+      "iteration": 1,
+      "verdict": "FAIL",
+      "summary": "Bypassable server fence, stale-context resurrection, overclaimed surfaces, missing evidence, failing gates, and no draft PR."
+    },
+    {
+      "iteration": 2,
+      "verdict": "FAIL",
+      "summary": "Malformed decisions pass output guards, destination-policy copy and reconnect recovery are broken, full gates fail, and no draft PR exists."
+    },
+    {
+      "iteration": 3,
+      "verdict": "FAIL",
+      "summary": "Decision outputs remain incompletely closed, reconnect recovery is not wired, parity/mutation evidence and handoff are incomplete, and carry docs contradict enforcement."
+    },
+    {
+      "iteration": 3,
+      "verdict": "FAIL",
+      "summary": "Fresh verification also found unfenced destination clone/move behavior and a nondeterministic real-stack failure."
+    },
+    {
+      "iteration": 4,
+      "verdict": "FAIL",
+      "summary": "Closed-output, documentation, store-parity, mutation-owner, data-gate, and final-handoff evidence remain incomplete."
+    },
+    {
+      "iteration": 5,
+      "verdict": "FAIL",
+      "summary": "Exact HEAD still emits self-invalid decisions and lacks complete create parity, active-policy real-stack transitions, owner-specific mutants, and a clean-tree handoff."
+    },
+    {
+      "iteration": 6,
+      "verdict": "FAIL",
+      "summary": "PostgreSQL and destination owner mutants are false-positive infrastructure kills caused by a missing mutation-sandbox module, and PR evidence overstates them."
+    },
+    {
+      "iteration": 5,
+      "verdict": "FAIL",
+      "summary": "Store-owner mutation probes fail on a missing fixture module and are falsely counted as killed; the PR handoff therefore overstates required evidence."
+    },
+    {
+      "iteration": 7,
+      "verdict": "FAIL",
+      "summary": "Runtime ReferenceErrors inside owner operations are wrapped as AssertionErrors and still falsely counted as mutation kills."
+    },
+    {
+      "iteration": 8,
+      "verdict": "PASS",
+      "summary": "Mutation probes preserve and reject infrastructure errors, the synthetic diagnostic fails nonzero, and exact local, remote, PR, CI, and clean-tree handoff evidence passes."
+    },
+    {
+      "iteration": 7,
+      "verdict": "FAIL",
+      "summary": "The PR body misstates the identical data-gate count and overstates a Chromium run that completed with two flaky tests."
+    },
+    {
+      "iteration": 8,
+      "verdict": "PASS",
+      "summary": "The corrected PR body, owner-level mutation evidence, exact product ancestry and scope, terminal CI, draft state, and clean handoff all pass with the documented 424-link data exception."
+    },
+    {
+      "iteration": 9,
+      "verdict": "PASS",
+      "summary": "Exact-head DM context retry fencing, deterministic coverage, unchanged data baseline, and sole draft PR terminal state all pass."
+    }
+  ]
+}

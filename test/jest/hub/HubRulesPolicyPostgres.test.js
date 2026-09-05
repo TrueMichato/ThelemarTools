@@ -4,6 +4,7 @@ import pg from "pg";
 import {createDefaultCampaignRulesPolicy} from "../../../js/hub/hub-campaign-rules.js";
 import {MemoryHubStore} from "../../../server/src/memory-hub-store.js";
 import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
+import {getExpectedCarryBasis} from "../../../server/src/carry-basis.js";
 
 const {Pool} = pg;
 const describePostgres = process.env.HUB_TEST_POSTGRES_URL ? describe : describe.skip;
@@ -231,6 +232,209 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 		expect(postgresEvidence.events.map(event => event.payload.operation)).toEqual(["publish", "publish", "rollback"]);
 	});
 
+	it("supplies the complete active rules identity to carry projections", async () => {
+		const store = new PostgresHubStore({pool});
+		const account = await store.pUpsertOAuthAccount({
+			provider: "test",
+			providerSubject: `rules-projection-${crypto.randomUUID()}`,
+			displayName: "Rules Projection",
+		});
+		const campaign = (await store.pCreateCampaign({
+			accountId: account.id,
+			name: "Rules projection",
+			idempotencyKey: command("rules-projection-campaign"),
+		})).campaign;
+		const published = await store.pCreateAndActivateRulesPolicy({
+			accountId: account.id,
+			campaignId: campaign.id,
+			policy: createDefaultCampaignRulesPolicy(),
+			expectedActiveRulesVersionId: null,
+			idempotencyKey: command("rules-projection-policy"),
+		});
+
+		const basisContext = await store._pGetCarryBasisContext(campaign.id);
+		expect(basisContext.rulesVersion).toMatchObject({
+			id: published.rulesVersion.id,
+			version: published.rulesVersion.version,
+			schemaVersion: 2,
+			rules: expect.objectContaining({
+				schemaVersion: 2,
+				catalogVersion: published.rulesVersion.catalogVersion,
+			}),
+		});
+		const basis = getExpectedCarryBasis({
+			character: {
+				campaignId: campaign.id,
+				data: {settings: {
+					enableMaterials: true,
+					materials_weightFromDensity: true,
+					materials_degradation: true,
+				}},
+			},
+			...basisContext,
+		});
+		expect(basis.settingsDigest).toContain("enableMaterials=true");
+		expect(basis.settingsDigest).toContain("materials_weightFromDensity=true");
+		expect(basis.settingsDigest).toContain("materials_degradation=true");
+	});
+
+	it("rejects a stale schema-v2 character create without a partial PostgreSQL write", async () => {
+		const store = new PostgresHubStore({pool});
+		const account = await store.pUpsertOAuthAccount({
+			provider: "test",
+			providerSubject: `rules-fence-${crypto.randomUUID()}`,
+			displayName: "Rules Fence",
+		});
+		const campaign = (await store.pCreateCampaign({
+			accountId: account.id,
+			name: "Rules fence",
+			idempotencyKey: command("rules-fence-campaign"),
+		})).campaign;
+		const active = await store.pCreateAndActivateRulesPolicy({
+			accountId: account.id,
+			campaignId: campaign.id,
+			policy: createDefaultCampaignRulesPolicy(),
+			expectedActiveRulesVersionId: null,
+			idempotencyKey: command("rules-fence-policy"),
+		});
+		for (const {label, basis, protocolVersion, code} of [
+			{label: "missing", basis: {kind: "campaign", settingsDigest: "digest"}, protocolVersion: "4", code: "POLICY_VERSION_STALE"},
+			{label: "detached", basis: {kind: "detached", settingsDigest: "digest"}, protocolVersion: "4", code: "POLICY_VERSION_STALE"},
+			{label: "stale", basis: {kind: "campaign", rulesVersionId: crypto.randomUUID(), settingsDigest: "digest"}, protocolVersion: "4", code: "POLICY_VERSION_STALE"},
+			{label: "old-protocol", basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}, protocolVersion: "3", code: "RULES_PROTOCOL_UNSUPPORTED"},
+			{label: "omitted-protocol", basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}, protocolVersion: null, code: "RULES_PROTOCOL_UNSUPPORTED"},
+		]) {
+			await expect(store.pCreateCharacter({
+				accountId: account.id,
+				campaignId: campaign.id,
+				clientImportId: `invalid-${label}-${crypto.randomUUID()}`,
+				schemaVersion: 1,
+				data: {carry: {schemaVersion: 1, basis}},
+				protocolVersion,
+				idempotencyKey: command(`rules-invalid-create-${label}`),
+			})).rejects.toEqual(expect.objectContaining({code}));
+		}
+		const invalidCount = await pool.query(`SELECT count(*)::integer AS count FROM hub.characters WHERE campaign_id = $1`, [campaign.id]);
+		expect(invalidCount.rows[0].count).toBe(0);
+		await expect(store.pCreateCharacter({
+			accountId: account.id,
+			campaignId: campaign.id,
+			clientImportId: "stale",
+			schemaVersion: 1,
+			data: {carry: {basis: {kind: "campaign", rulesVersionId: crypto.randomUUID(), settingsDigest: "digest"}}},
+			protocolVersion: "4",
+			idempotencyKey: command("rules-fence-character"),
+		})).rejects.toEqual(expect.objectContaining({code: "POLICY_VERSION_STALE"}));
+		const count = await pool.query(`SELECT count(*)::integer AS count FROM hub.characters WHERE campaign_id = $1`, [campaign.id]);
+		expect(count.rows[0].count).toBe(0);
+
+		const created = await store.pCreateCharacter({
+			accountId: account.id,
+			campaignId: campaign.id,
+			clientImportId: "current",
+			schemaVersion: 1,
+			data: {carry: {basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}}},
+			protocolVersion: "4",
+			idempotencyKey: command("rules-current-character"),
+		});
+		const session = await store.pCreateSession({
+			accountId: account.id,
+			tokenHash: "b".repeat(64),
+			expiresAt: new Date(Date.now() + 60_000),
+		});
+		const lease = await store.pAcquireCharacterLease({
+			accountId: account.id,
+			sessionId: session.id,
+			characterId: created.character.id,
+		});
+		const evidenceBefore = await pGetPostgresEvidence(pool, campaign.id);
+		for (const {basis, protocolVersion} of [
+			{basis: {kind: "campaign", settingsDigest: "digest"}, protocolVersion: "4"},
+			{basis: {kind: "detached", settingsDigest: "digest"}, protocolVersion: "4"},
+			{basis: {kind: "campaign", rulesVersionId: crypto.randomUUID(), settingsDigest: "digest"}, protocolVersion: "4"},
+			{basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}, protocolVersion: null},
+			{basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}, protocolVersion: "3"},
+		]) {
+			await expect(store.pPatchCharacter({
+				accountId: account.id,
+				sessionId: session.id,
+				characterId: created.character.id,
+				baseRevision: created.character.revision,
+				leaseEpoch: lease.epoch,
+				patches: [{op: "replace", path: "/carry", value: {schemaVersion: 1, basis}}],
+				protocolVersion,
+				idempotencyKey: command(`rules-patch-${protocolVersion}-${basis.kind}`),
+			})).rejects.toEqual(expect.objectContaining({
+				code: expect.stringMatching(/POLICY_VERSION_STALE|RULES_PROTOCOL_UNSUPPORTED/),
+			}));
+		}
+		const unchanged = await pool.query(`SELECT revision FROM hub.characters WHERE id = $1`, [created.character.id]);
+		expect(Number(unchanged.rows[0].revision)).toBe(created.character.revision);
+		expect(await pGetPostgresEvidence(pool, campaign.id)).toEqual(evidenceBefore);
+		const patched = await store.pPatchCharacter({
+			accountId: account.id,
+			sessionId: session.id,
+			characterId: created.character.id,
+			baseRevision: created.character.revision,
+			leaseEpoch: lease.epoch,
+			patches: [{
+				op: "replace",
+				path: "/carry",
+				value: {schemaVersion: 1, basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}},
+			}],
+			protocolVersion: "4",
+			idempotencyKey: command("rules-patch-current"),
+		});
+		expect(patched.character.revision).toBe(created.character.revision + 1);
+
+		const destination = (await store.pCreateCampaign({
+			accountId: account.id,
+			name: "Rules destination",
+			idempotencyKey: command("rules-destination-campaign"),
+		})).campaign;
+		await store.pCreateAndActivateRulesPolicy({
+			accountId: account.id,
+			campaignId: destination.id,
+			policy: createDefaultCampaignRulesPolicy(),
+			expectedActiveRulesVersionId: null,
+			idempotencyKey: command("rules-destination-policy"),
+		});
+		const detached = await store.pCreateCharacter({
+			accountId: account.id,
+			campaignId: null,
+			clientImportId: `rules-detached-${crypto.randomUUID()}`,
+			schemaVersion: 1,
+			data: {name: "Detached", carry: {schemaVersion: 1, basis: {kind: "detached"}}},
+			idempotencyKey: command("rules-detached-create"),
+		});
+		const attached = await store.pMoveCharacter({
+			accountId: account.id,
+			characterId: detached.character.id,
+			campaignId: destination.id,
+			idempotencyKey: command("rules-detached-attach"),
+		});
+		expect(attached.character.data.carry).toBeUndefined();
+		await store.pReleaseCharacterLease({
+			accountId: account.id,
+			sessionId: session.id,
+			characterId: created.character.id,
+		});
+		const cloned = await store.pCloneCharacter({
+			accountId: account.id,
+			characterId: created.character.id,
+			campaignId: destination.id,
+			idempotencyKey: command("rules-destination-clone"),
+		});
+		expect(cloned.character.data.carry).toBeUndefined();
+		const moved = await store.pMoveCharacter({
+			accountId: account.id,
+			characterId: cloned.character.id,
+			campaignId: campaign.id,
+			idempotencyKey: command("rules-destination-move"),
+		});
+		expect(moved.character.data.carry).toBeUndefined();
+	});
+
 	it("serializes concurrent writers against one base and rolls the stale transaction back fully", async () => {
 		const store = new PostgresHubStore({pool});
 		const account = await store.pUpsertOAuthAccount({
@@ -238,6 +442,7 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 			providerSubject: `rules-concurrency-${crypto.randomUUID()}`,
 			displayName: "Rules Concurrency DM",
 		});
+
 		const campaign = (await store.pCreateCampaign({
 			accountId: account.id,
 			name: "Rules concurrency",
@@ -274,6 +479,72 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 		expect(evidence.audit).toHaveLength(2);
 		expect(evidence.events).toHaveLength(1);
 		expect(evidence.outboxCount).toBe(2);
+	});
+
+	it("returns an active existing import before fencing discarded PostgreSQL input", async () => {
+		const store = new PostgresHubStore({pool});
+		const account = await store.pUpsertOAuthAccount({
+			provider: "test",
+			providerSubject: `existing-import-${crypto.randomUUID()}`,
+			displayName: "Existing Import",
+		});
+		const campaign = (await store.pCreateCampaign({
+			accountId: account.id,
+			name: "Existing import",
+			idempotencyKey: command("existing-campaign"),
+		})).campaign;
+		const first = await store.pCreateAndActivateRulesPolicy({
+			accountId: account.id,
+			campaignId: campaign.id,
+			policy: createDefaultCampaignRulesPolicy(),
+			expectedActiveRulesVersionId: null,
+			idempotencyKey: command("existing-rules-1"),
+		});
+		const staleData = {carry: {schemaVersion: 1, basis: {kind: "campaign", rulesVersionId: first.rulesVersion.id, settingsDigest: "digest"}}};
+		const created = await store.pCreateCharacter({
+			accountId: account.id,
+			campaignId: campaign.id,
+			clientImportId: "same-import",
+			schemaVersion: 1,
+			data: staleData,
+			protocolVersion: "4",
+			idempotencyKey: command("existing-create"),
+		});
+		const changed = createDefaultCampaignRulesPolicy();
+		changed.rules.find(rule => rule.id === "tgtt.carry-weight").parameters.enabled = false;
+		changed.rules.find(rule => rule.id === "tgtt.encumbrance-tiers").parameters.enabled = false;
+		await store.pCreateAndActivateRulesPolicy({
+			accountId: account.id,
+			campaignId: campaign.id,
+			policy: changed,
+			expectedActiveRulesVersionId: first.rulesVersion.id,
+			idempotencyKey: command("existing-rules-2"),
+		});
+
+		const replayed = await store.pCreateCharacter({
+			accountId: account.id,
+			campaignId: campaign.id,
+			clientImportId: "same-import",
+			schemaVersion: 1,
+			data: staleData,
+			protocolVersion: "4",
+			idempotencyKey: command("existing-replay"),
+		});
+		expect(replayed.character.id).toBe(created.character.id);
+		expect(replayed.character.revision).toBe(created.character.revision);
+
+		await store.pArchiveCharacter({accountId: account.id, characterId: created.character.id, idempotencyKey: command("existing-archive")});
+		await expect(store.pCreateCharacter({
+			accountId: account.id,
+			campaignId: campaign.id,
+			clientImportId: "same-import",
+			schemaVersion: 1,
+			data: staleData,
+			protocolVersion: "4",
+			idempotencyKey: command("existing-reactivate"),
+		})).rejects.toEqual(expect.objectContaining({code: "POLICY_VERSION_STALE"}));
+		const archived = await pool.query(`SELECT status FROM hub.characters WHERE id = $1`, [created.character.id]);
+		expect(archived.rows[0].status).toBe("archived");
 	});
 
 	it("keeps the active pointer and version history in one snapshot during a concurrent publish", async () => {

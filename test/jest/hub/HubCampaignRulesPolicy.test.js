@@ -48,13 +48,13 @@ describe("Campaign rules policy catalog", () => {
 				title: expect.any(String),
 				summary: expect.any(String),
 				details: expect.any(String),
-				lifecycle: expect.stringMatching(/^(implemented_advisory|informational_planned|unavailable)$/),
-				supportLabel: expect.stringMatching(/^(Advisory|Planned)$/),
+				lifecycle: expect.stringMatching(/^(implemented_enforced|implemented_advisory|informational_planned|unavailable)$/),
+				supportLabel: expect.stringMatching(/^(Enforced|Advisory|Planned)$/),
 				parameter: expect.objectContaining({key: expect.any(String), type: expect.any(String)}),
 				implementationStatus: expect.any(Object),
 				compatibility: expect.any(Object),
 			}));
-			expect(JSON.stringify(rule)).not.toMatch(/enforced/i);
+			if (rule.category === "content") expect(JSON.stringify(rule)).not.toMatch(/enforced/i);
 		}
 		expect(CAMPAIGN_RULES_CATALOG.filter(rule => rule.category === "content"))
 			.toEqual(expect.arrayContaining([
@@ -131,7 +131,7 @@ describe("Campaign rules policy catalog", () => {
 			},
 			{
 				code: "RULES_MODE_UNSUPPORTED",
-				mutate: policy => policy.rules[0].mode = "enforced",
+				mutate: policy => policy.rules.find(rule => rule.id === "rules.exhaustion.system").mode = "enforced",
 			},
 		];
 		for (const {code, mutate} of cases) {

@@ -11672,7 +11672,7 @@ class CharacterSheetState {
 		});
 
 		// Thelemar rules: Linguistics gets +1 for each language known (except Common)
-		if (skill === "linguistics" && this._data.settings?.thelemar_linguisticsBonus) {
+		if (skill === "linguistics" && this._data.settings?.enableTgtt !== false && this._data.settings?.thelemar_linguisticsBonus) {
 			const languages = this._data.languages || [];
 			const languageBonus = languages.filter(lang => lang.toLowerCase() !== "common").length;
 			if (languageBonus) out.push({name: "Linguistics (languages known)", value: languageBonus});
@@ -11736,7 +11736,7 @@ class CharacterSheetState {
 		total += this.getSkillBonusFromStates(skill, this.getSkillAbility(skill));
 
 		// Thelemar rules: Linguistics gets +1 for each language known (except Common)
-		if (skill === "linguistics" && this._data.settings?.thelemar_linguisticsBonus) {
+		if (skill === "linguistics" && this._data.settings?.enableTgtt !== false && this._data.settings?.thelemar_linguisticsBonus) {
 			const languages = this._data.languages || [];
 			total += languages.filter(lang => lang.toLowerCase() !== "common").length;
 		}
@@ -36649,7 +36649,7 @@ class CharacterSheetState {
 	getCarryProfile () {
 		// Thelemar rules: passive Might × 10. Passive Might = 10 + Might modifier (+ passive
 		// bonuses); Might is a TGTT homebrew skill based on STR. Standard rules: STR × 15.
-		const isThelemar = !!this._data.settings?.thelemar_carryWeight;
+		const isThelemar = this._data.settings?.enableTgtt !== false && !!this._data.settings?.thelemar_carryWeight;
 
 		// The encumbrance tiers key off the STRENGTH SCORE even under the Thelemar capacity
 		// rule, because the PHB variant rule defines them that way and the Thelemar rule

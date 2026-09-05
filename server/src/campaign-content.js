@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import {HubStoreError} from "./hub-store-error.js";
 import {validateCloudValue} from "./cloud-data-validation.js";
 import {
+	CAMPAIGN_RULES_POLICY_CAPABILITY,
 	CampaignRulesPolicyError,
 	DEFAULT_CAMPAIGN_SETTINGS,
 	getCampaignRulesPolicy,
@@ -9,6 +10,10 @@ import {
 	normalizeCampaignRulesPolicy,
 	projectCampaignSettings,
 } from "../../js/hub/hub-campaign-rules.js";
+import {
+	CAMPAIGN_RULE_PROTOCOL_VERSION,
+	evaluateCampaignRules,
+} from "../../js/hub/hub-campaign-rule-evaluator.js";
 
 export const CAMPAIGN_RULES_SCHEMA_VERSION = 1;
 
@@ -155,22 +160,32 @@ export function normalizeCampaignRules (rules) {
 export function getPublicCampaignRulesVersion (rulesVersion, {isIncludePolicy = false} = {}) {
 	if (!rulesVersion) return null;
 	try {
-		const policy = getCampaignRulesPolicy({
-			schemaVersion: rulesVersion.schemaVersion,
-			rules: rulesVersion.rules,
-		});
-		return {
+		const publicRulesVersion = {
 			...rulesVersion,
 			...(rulesVersion.createdAt == null
 				? {}
 				: {createdAt: new Date(rulesVersion.createdAt).toISOString()}),
+		};
+		const policy = getCampaignRulesPolicy({
+			schemaVersion: publicRulesVersion.schemaVersion,
+			rules: publicRulesVersion.rules,
+		});
+		return {
+			...publicRulesVersion,
 			catalogVersion: policy.catalogVersion,
 			rules: projectCampaignSettings({
-				schemaVersion: rulesVersion.schemaVersion,
-				rules: rulesVersion.rules,
+				schemaVersion: publicRulesVersion.schemaVersion,
+				rules: publicRulesVersion.rules,
 			}),
 			...(isIncludePolicy ? {policy} : {}),
 			policySummary: getCampaignRulesPolicySummary(policy),
+			ruleDecision: evaluateCampaignRules({
+				capabilities: [CAMPAIGN_RULES_POLICY_CAPABILITY],
+				personalSettings: {},
+				protocolVersion: CAMPAIGN_RULE_PROTOCOL_VERSION,
+				rulesVersion: publicRulesVersion,
+				surface: "characterOpen",
+			}),
 		};
 	} catch (error) {
 		if (!(error instanceof CampaignRulesPolicyError)) throw error;

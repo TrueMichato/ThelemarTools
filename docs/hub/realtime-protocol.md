@@ -245,6 +245,11 @@ id (falling back to sequence/type) and track the highest sequence. Character She
 deduplicate each lifecycle state by `type + operationId`, while allowing distinct states for the same
 operation to pass in order.
 
+`rules.activated` invalidates the effective campaign-rule decision. Character Sheet and DM Screen clients fetch
+the current context, generation-fence the response, replace the prior decision, and then recompute their transient
+settings projection. An older response cannot overwrite a later activation, and a blocked decision clears the
+projection rather than preserving stale rule effects.
+
 ### Semantic character operations
 
 The lifecycle allowlist is:

@@ -50,8 +50,10 @@ Cure Wounds was recognized and rejected as cost-bearing until the ADR 0016 slice
 The V2-T6 house-rule selection foundation is implemented behind the default-off
 `campaign.rules_policy.v1` capability. It adds a closed schema-v2 catalog, schema-v1 compatibility adapter,
 atomic immutable DM/co-DM publish/rollback, privacy-safe member summaries, and an accessible searchable manager.
-All selectable settings are labeled **Advisory**; source/species/edition entries are unavailable and **Planned**.
-The downstream shared evaluator and full content enforcement are not implemented and V2-T6 is not complete.
+The shared evaluator now promotes only carry-weight and encumbrance-tier calculation/projection and
+policy-fenced carry writes to **Enforced** on their proven surfaces. Other selectable settings remain
+**Advisory**; source/species/edition entries are unavailable and **Planned**. Unsupported Builder and level-up choice enforcement, plus full content enforcement, are not implemented and remain
+outside this slice; the supported carry calculation and identity fence are implemented on the surfaces listed above.
 
 The first V2-T7 product slice extends the ADR 0012 substrate with ADR 0016 protocol-4 source costs. A player can
 cast PHB/XPHB Cure Wounds from an authenticated campaign Character Sheet, spend one selected standard spell slot,
@@ -126,8 +128,8 @@ pass. Only the host-operations proof and physical one-DM/two-player game day rem
   regions, labeled form controls, WCAG AA primary-button contrast in day/night themes, and 44 px entry targets.
 - Immutable campaign brew/rules versions and early page context activation.
 - Capability-gated, versioned campaign rules catalog/selection with before/after review, immutable rollback,
-  schema-v1 compatibility, stale-base fencing, and privacy-safe read-only member summaries; enforcement remains
-  explicitly out of scope.
+  schema-v1 compatibility, stale-base fencing, privacy-safe read-only member summaries, and enforced carry
+  calculation/policy-identity fencing. Other settings remain advisory and content gating remains planned.
 - Whole-site active campaign selection with same-profile convergence and independent device choices; local
   Character Sheets, DM Screens, personal brew, and signed-out pages never inherit stale campaign state.
 - Private per-DM workspaces using the existing Board blob and lease fencing.
