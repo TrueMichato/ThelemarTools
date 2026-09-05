@@ -200,9 +200,9 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			idempotencyKey: crypto.randomUUID(),
 		};
 		const archived = await store.pArchiveCampaign(archiveInput);
-		await expect(store.pArchiveCampaign(archiveInput)).resolves.toEqual(archived);
-		await expect(store.pRemoveMember(removeInput)).resolves.toEqual(removed);
-		await expect(store.pLeaveCampaign(leaveInput)).resolves.toEqual(left);
+		await expect(store.pArchiveCampaign(archiveInput)).resolves.toEqual(JSON.parse(JSON.stringify(archived)));
+		await expect(store.pRemoveMember(removeInput)).resolves.toEqual(JSON.parse(JSON.stringify(removed)));
+		await expect(store.pLeaveCampaign(leaveInput)).resolves.toEqual(JSON.parse(JSON.stringify(left)));
 		await expect(store.pArchiveCampaign({
 			...archiveInput,
 			idempotencyKey: crypto.randomUUID(),
