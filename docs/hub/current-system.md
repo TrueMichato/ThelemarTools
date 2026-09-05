@@ -1,13 +1,15 @@
 # Campaign Hub current system
 
 > **Status:** Current implementation reference
-> **Scope:** Private invite-only V1 plus protocol-4 player-to-player Cure Wounds targeting
-> **Last verified:** 2026-09-04
+> **Scope:** Repository implementation through PRs #242/#243; deployed Oracle baseline identified separately
+> **Last verified:** 2026-09-05
 > **Owner:** Campaign Hub maintainers
 
-This document describes what exists in the repository and deployed private Oracle staging now. It is not the
-delivery plan. Start here when changing Hub behavior, then follow the linked domain, protocol, security,
-operations, and [living roadmap](roadmap.md) references.
+This document describes what exists in the repository. It is not the delivery plan, and repository implementation
+must not be confused with target-environment promotion. Oracle still runs release `hub-staging-2026-09-01` at
+`8f181712`; merged repository head `b8d31d3416b934cc9275b859b5932db050005351` is not yet deployed. Start here
+when changing Hub behavior, then follow the linked domain, protocol, security, operations, and
+[living roadmap](roadmap.md) references.
 
 ## Product boundary
 
@@ -217,7 +219,10 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
 
 `campaign.html` supports:
 
-- campaign/member/character overview;
+- a role-adaptive pinned session brief with campaign identity, party readiness, attention, recent activity, and
+  one role-specific next action;
+- explicit zero/one/many-character launch behavior, preserved campaign actions/administration through progressive
+  disclosure, and authorized archived read-only bootstrap;
 - invite creation;
 - local-character upload;
 - campaign brew and rules publication/activation;
@@ -225,7 +230,8 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed
 - owner role changes, owner/co-DM member removal, and non-owner leave;
 - private DM workspace link;
 - immediate DM/co-DM semantic effects and inline target-owner peer approvals/effect notices on an open Character
-  Sheet; target discovery and the first successful production peer template are deferred;
+  Sheet; the first production peer template supports one-player PHB/XPHB Cure Wounds with an atomic standard-slot
+  cost, while broader abilities, resources, party/multi-target, and NPC/monster targeting remain unavailable;
 - XP and item grants;
 - party inventory summary and item/currency transfers.
 
@@ -263,6 +269,7 @@ limits, and WebSocket context; live ingress spoofing evidence is still required.
 
 ## Deployment status
 
-The implementation and Phase 6G Oracle deployment are complete through release `hub-staging-2026-09-01` at
-`8f181712`. Before expanding the allowlist, complete the host-operations proof and physical one-DM/two-player
-game day/go-no-go in the [living roadmap](roadmap.md).
+Phase 6G is complete for release `hub-staging-2026-09-01` at `8f181712`. The newer implementation merged through
+`b8d31d3416b934cc9275b859b5932db050005351` has not been promoted to Oracle. Before expanding the allowlist,
+complete V1-G1's deliberate exact-release promotion and host-operations/recovery proof, then V1-G2's physical
+one-DM/two-player game day and explicit go/no-go in the [living roadmap](roadmap.md).

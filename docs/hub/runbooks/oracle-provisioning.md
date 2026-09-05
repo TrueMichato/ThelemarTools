@@ -1,7 +1,7 @@
 # Runbook: Oracle Cloud Always Free provisioning
 
-> **Status:** In execution for Phase 6G; C-ALT adopted, no Hub data deployed yet
-> **Severity:** Planned change, not an incident
+> **Status:** Phase 6G complete; recorded staging release deployed; V1-G1 host-operations/recovery proof pending
+> **Severity:** Operational proof, not an incident
 > **Owner:** Campaign Hub maintainers
 > **Last drill date:** never — update this line the first time the runbook is followed end to end
 > **Estimated time:** 60–90 minutes, most of it waiting
@@ -11,8 +11,10 @@
 Provision a single Oracle Cloud "Always Free" ARM virtual machine and run the portable Campaign Hub stack
 on it at a public HTTPS address, at $0/month recurring cost.
 
-This runbook produces a **staging** environment. Do not put a real campaign on it until the Phase 6G drills
-and the Phase 6H game day in [private-v1-roadmap.md](../private-v1-roadmap.md) have passed.
+This runbook produced the private **staging** environment for release `hub-staging-2026-09-01` at `8f181712`.
+Do not expand it to a real private campaign until V1-G1 host-operations/recovery proof and V1-G2's physical game
+day/go-no-go in the [living roadmap](../roadmap.md) have passed. The repository's newer merged head is not deployed
+until an operator deliberately promotes a verified release.
 
 ---
 

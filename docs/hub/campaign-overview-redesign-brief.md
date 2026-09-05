@@ -1,7 +1,10 @@
 # Campaign Overview redesign brief
 
-Status: implemented as the final Campaign Hub lane. The overview now uses the approved **Pinned session brief**
-composition while preserving the existing V1 mutations, authority boundaries, privacy projections, and recovery states.
+Status: shipped in [PR #243](https://github.com/TrueMichato/ThelemarTools/pull/243), merged as
+`b8d31d3416b934cc9275b859b5932db050005351` from reviewed head
+`c8d5f0333d1bd8f7867b91c7ecb7170a9838671b`. The overview now uses the approved **Pinned session brief**
+composition while preserving the existing V1 mutations, authority boundaries, privacy projections, and recovery
+states. This merged head is not yet promoted to the older recorded Oracle staging release.
 
 ## Purpose and timing
 
@@ -188,6 +191,9 @@ prefer the DM workspace, but equivalent contextual flows are not assumed and no 
 lane. The existing Hub API, authorization, protocol/version fences, policy enforcement, privacy projections,
 idempotency behavior, and personal-versus-campaign storage boundaries remain unchanged. Campaign Overview foregrounds
 summaries, attention, activity, readiness, policy visibility, and setup; mutations are findable but subordinate.
+The merge also hardens the authority underneath the redesign: historical role replay cannot override the current
+role, archived campaigns bootstrap with authorized read-only/event parity while every mutation path remains closed,
+and PostgreSQL cursor/snapshot authority is read from one repeatable transaction.
 
 ## Staged migration
 

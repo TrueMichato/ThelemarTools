@@ -3,10 +3,11 @@
 The Campaign Hub is an optional online layer over the existing local-first 5etools experience.
 Signed-out character sheets, homebrew, and DM screens remain supported and do not use hub storage.
 
-> **Implementation:** Private invite-only V1 plus shipped tagged release automation and legible activity history
+> **Implementation:** Coordinated implementation program complete through merged PRs #242 and #243
 > **Deployment:** Release `hub-staging-2026-09-01` at `8f181712` is live on private Oracle staging; host-
-> operations proof and the physical one-DM/two-player game day remain gated
-> **Last verified:** 2026-09-01
+> operations proof and the physical one-DM/two-player game day remain gated. Merged head
+> `b8d31d3416b934cc9275b859b5932db050005351` is not yet promoted
+> **Last verified:** 2026-09-05
 > **Owner:** Campaign Hub maintainers
 
 ## Start here
@@ -15,7 +16,7 @@ Signed-out character sheets, homebrew, and DM screens remain supported and do no
 |---|---|
 | What exists now | [Current system](current-system.md) |
 | What ships next and why | [Living roadmap](roadmap.md) |
-| Why Campaign Overview must change | [Campaign Overview redesign brief](campaign-overview-redesign-brief.md) |
+| Campaign Overview design and implementation record | [Campaign Overview redesign brief](campaign-overview-redesign-brief.md) |
 | Why it is structured this way | [Architecture](architecture.md) and [ADRs](#architecture-decisions) |
 | What was implemented and why | [Implementation history](implementation-history.md) |
 | Exact Phase 0-5 working-tree checkpoint | [Checkpoint record](checkpoint.md) |
@@ -98,24 +99,25 @@ second character or apply the move twice. Local character JSON does not gain Hub
 - [ADR 0008: CI and artifact provenance](adr/0008-ci-provenance.md)
 - [ADR 0009: managed staging provider](adr/0009-managed-staging-provider.md) — superseded
 - [ADR 0010: Oracle Cloud Always Free hosting](adr/0010-oracle-always-free-hosting.md)
-- [ADR 0011: authorization-scoped character projections](adr/0011-authorization-scoped-character-projections.md) — contract only
-- [ADR 0012: idempotent semantic character operations](adr/0012-idempotent-semantic-character-operations.md) — contract only
+- [ADR 0011: authorization-scoped character projections](adr/0011-authorization-scoped-character-projections.md) — implemented
+- [ADR 0012: idempotent semantic character operations](adr/0012-idempotent-semantic-character-operations.md) — protocol substrate implemented; broader T3 scope remains
 - [ADR 0013: device-scoped active campaign context](adr/0013-device-scoped-active-campaign-context.md)
-- [ADR 0014: multi-provider account identity](adr/0014-multi-provider-identity.md) — contract only
-- [ADR 0015: versioned Campaign Hub rules policy](adr/0015-campaign-rules-policy.md) — contract plus
-  capability-gated selection foundation; downstream enforcement pending
+- [ADR 0014: multi-provider account identity](adr/0014-multi-provider-identity.md) — adapters/framework implemented; account linking and rollout pending
+- [ADR 0015: versioned Campaign Hub rules policy](adr/0015-campaign-rules-policy.md) — selection plus
+  source/species/edition and carry/encumbrance enforcement implemented; other non-content rules remain advisory
 - [ADR 0016: atomic source-cost binding for peer character operations](adr/0016-atomic-peer-source-costs.md) —
-  contract only
+  implemented for the narrow PHB/XPHB Cure Wounds slice
 - [ADR 0017: atomic DM item-award batches](adr/0017-atomic-dm-item-awards.md)
 
 ADRs 0001-0008 describe implemented portable architecture and launch-readiness decisions. ADR 0009 proposed
 a paid managed provider and was superseded on cost grounds by ADR 0010, which selects Oracle Cloud Always
-Free; it is retained as the evaluation of record for the paid upgrade path. ADR 0013 is implemented by V2-T5;
-the other ADRs 0011-0016 include accepted architecture contracts whose status lines distinguish shipped
-substrate from future implementation. In
-particular, ADR 0016 defines source-cost atomicity for peer operations but does not enable cost-bearing player
-targeting. ADR 0017 records the implemented V2-T4 DM award slice and its atomic batch, source-trust, preview,
-event, and reconciliation contracts.
+Free; it is retained as the evaluation of record for the paid upgrade path. ADRs 0011 and 0013 are implemented
+by V2-T2 and V2-T5. ADR 0012's protocol substrate is implemented while broader T3 effects remain gated. ADR 0014
+has provider-neutral GitHub/Discord/Google adapter layers but not account-linking rollout. ADR 0015 now enforces
+source/species/edition and carry/encumbrance on its proven surfaces while the other non-content rules remain
+Advisory. ADR 0016 source-cost atomicity is implemented only for one-player PHB/XPHB Cure Wounds; broader
+targeting remains active. ADR 0017 records the implemented V2-T4 DM award slice and its atomic batch,
+source-trust, preview, event, and reconciliation contracts.
 
 ## Local BFF setup
 
