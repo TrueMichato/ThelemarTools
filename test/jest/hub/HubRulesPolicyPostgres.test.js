@@ -167,6 +167,17 @@ async function pRunContentScenario (store, label) {
 		rulesVersionId: null,
 		idempotencyKey: command(`${label}:content:existing-replay`),
 	})).character;
+	await store.pAwardItems({
+		accountId: account.id,
+		campaignId: campaign.id,
+		source: {kind: "catalog", item: {name: "Legacy item", source: "XPHB", edition: "one"}},
+		targetCharacterIds: [legacy.id],
+		quantity: 1,
+		rulesVersionId,
+		idempotencyKey: command(`${label}:content:legacy-top-up`),
+	});
+	const legacyAwardQuantity = (await store.pGetCharacter({accountId: account.id, characterId: legacy.id}))
+		.character.data.inventory.find(entry => entry.id === "legacy-item")?.quantity;
 	const allowed = (await store.pCreateCharacter({
 		accountId: account.id,
 		campaignId: campaign.id,
@@ -324,6 +335,7 @@ async function pRunContentScenario (store, label) {
 		},
 		rejectedEventDelta: eventsAfterRejectedWrites - eventsBeforeRejectedWrites,
 		replayedExistingImport: replayedLegacy.id === legacy.id && replayedLegacy.revision === legacy.revision,
+		legacyAwardQuantity,
 		restoredLegacyItem: (await store.pGetCharacter({accountId: account.id, characterId: legacy.id}))
 			.character.data.inventory.some(entry => entry.id === "legacy-item"),
 		detachedCampaignId: (await store.pGetCharacter({accountId: account.id, characterId: detached.id})).character.campaignId,
@@ -517,6 +529,7 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 			unrelated: {name: "Legacy renamed", raceSource: "XPHB"},
 			rejectedEventDelta: 0,
 			replayedExistingImport: true,
+			legacyAwardQuantity: 2,
 			restoredLegacyItem: true,
 			detachedCampaignId: null,
 			rolledBackToFirstVersion: true,
@@ -726,6 +739,42 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 			idempotencyKey: command("rules-destination-move"),
 		});
 		expect(moved.character.data.carry).toBeUndefined();
+	});
+
+	it("serializes concurrent policy-fenced character creates without lock upgrades", async () => {
+		const store = new PostgresHubStore({pool});
+		const account = await store.pUpsertOAuthAccount({
+			provider: "test",
+			providerSubject: `concurrent-content-create-${crypto.randomUUID()}`,
+			displayName: "Concurrent Content Create",
+		});
+		const campaign = (await store.pCreateCampaign({
+			accountId: account.id,
+			name: "Concurrent content create",
+			idempotencyKey: command("concurrent-content-campaign"),
+		})).campaign;
+		const active = await store.pCreateAndActivateRulesPolicy({
+			accountId: account.id,
+			campaignId: campaign.id,
+			policy: createDefaultCampaignRulesPolicy(),
+			expectedActiveRulesVersionId: null,
+			idempotencyKey: command("concurrent-content-policy"),
+		});
+		const makeCreate = index => store.pCreateCharacter({
+			accountId: account.id,
+			campaignId: campaign.id,
+			clientImportId: `concurrent-${index}`,
+			schemaVersion: 1,
+			data: {
+				name: `Concurrent ${index}`,
+				carry: {basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}},
+			},
+			protocolVersion: "4",
+			idempotencyKey: command(`concurrent-content-create-${index}`),
+		});
+
+		const created = await Promise.all([makeCreate(1), makeCreate(2)]);
+		expect(new Set(created.map(result => result.character.id)).size).toBe(2);
 	});
 
 	it("serializes concurrent writers against one base and rolls the stale transaction back fully", async () => {

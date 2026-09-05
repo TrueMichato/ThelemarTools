@@ -3123,22 +3123,6 @@ export class MemoryHubStore {
 		}
 		validateCloudValue(item, {label: "Awarded item"});
 		assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
-		for (const character of targetCharacters) {
-			const after = normalizeCharacterInventory(character.data);
-			after.inventory.push({
-				...copy(incomingEntry),
-				id: crypto.randomUUID(),
-				item: copy(item),
-			});
-			assertCharacterCampaignContentMutation({
-				...enforcement,
-				before: character.data,
-				after,
-				rulesVersionId: enforcement.activeRulesVersionId,
-			});
-		}
-
-		const awardId = crypto.randomUUID();
 		const stagedCharacters = targetCharacters.map((character, index) => {
 			const added = addAwardedEntryToCharacter({
 				container: character.data,
@@ -3157,7 +3141,16 @@ export class MemoryHubStore {
 				entry: added.entry,
 			};
 		});
+		for (const staged of stagedCharacters) {
+			assertCharacterCampaignContentMutation({
+				...enforcement,
+				before: targetCharacters[staged.index].data,
+				after: staged.character.data,
+				rulesVersionId: enforcement.activeRulesVersionId,
+			});
+		}
 
+		const awardId = crypto.randomUUID();
 		for (const staged of stagedCharacters) {
 			this._setCharacterData({
 				character: this._characters.get(staged.character.id),

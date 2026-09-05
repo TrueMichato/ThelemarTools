@@ -254,6 +254,10 @@ The boundaries are:
 
 - Changing quantity, equipped/attuned state, or container placement for an already-admitted identity may remain
   a routine mutation, subject to inventory, lease, revision, ownership, and recalculation invariants.
+- The custom-item editor blocks a newly unknown campaign identity before local state changes. Editing an existing
+  item preserves its source identity; an unchanged grandfathered identity remains editable, while renaming an
+  off-policy custom identity remains a new blocked choice. Custom backgrounds follow the same pre-mutation gate,
+  and prose-only equipment-pack entries inherit the pack source rather than inventing a personal source.
 - Introducing a new item identity is a governed delta. This includes direct character document patches, DM
   grants/awards, accepted transfers into characters, import adjuncts, batch commands, and stale or bypassed
   clients. It must satisfy the current source/edition policy.
@@ -262,7 +266,8 @@ The boundaries are:
   document later is not covered by the document's age.
 - DM grants/awards and accepted transfers into characters cannot rely on picker or catalog filtering. Their
   server transaction pins/rechecks the active rules version and evaluates every introduced identity before the
-  destination, audit, event, outbox, or receipt write commits.
+  destination, audit, event, outbox, or receipt write commits. Awarding more quantity into an existing
+  grandfathered stack is an existing-stack mutation, not a synthetic second identity, in both stores.
 - Reserving a transfer out of a character remains an allowed removal. Reject/cancel restores the exact escrow
   to its source without a content-policy pin. A later accepted transfer from a party stash into a character is
   a new destination delta and does not launder a grandfathered identity.
@@ -352,6 +357,8 @@ asks the user to review the affected choice. No destination item, accepted-trans
 receipt in a policy-sensitive batch is partially committed. Transfer escrow already reserved by an earlier
 proposal remains safely rejectable/restorable. Routine play mutations with no governed-choice delta are not
 discarded solely because a DM changed policy during the request.
+PostgreSQL admissions that also establish carry authority take the campaign write lock at their first policy read;
+they never upgrade a shared campaign-row lock after another concurrent admission has acquired the same lock.
 
 Rules schema version 1 remains readable. A one-way adapter maps its six keys to the stable TGTT catalog IDs for
 projection/reporting. The adapter does not mutate historical `rules_versions` rows and does not claim source,

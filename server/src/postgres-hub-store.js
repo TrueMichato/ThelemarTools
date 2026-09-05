@@ -1480,7 +1480,7 @@ export class PostgresHubStore {
 		};
 	}
 
-	async _pGetCampaignContentEnforcement ({client, campaignId}) {
+	async _pGetCampaignContentEnforcement ({client, campaignId, isCampaignWriteLock = false}) {
 		const result = await client.query(`
 			SELECT
 				r.id AS rules_id,
@@ -1491,7 +1491,7 @@ export class PostgresHubStore {
 			LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
 			LEFT JOIN hub.brew_bundle_versions b ON b.id = c.active_brew_bundle_version_id
 			WHERE c.id = $1 AND c.status <> 'deleting'
-			FOR SHARE OF c
+			${isCampaignWriteLock ? "FOR UPDATE OF c" : "FOR SHARE OF c"}
 		`, [campaignId]);
 		if (!result.rowCount) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 		const row = result.rows[0];
@@ -1679,7 +1679,7 @@ export class PostgresHubStore {
 				return response;
 			}
 			if (campaignId) {
-				const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId});
+				const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId, isCampaignWriteLock: true});
 				assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
 				assertNewCharacterCampaignContent({
 					...enforcement,
@@ -2042,7 +2042,7 @@ export class PostgresHubStore {
 			const source = getCharacter(characterResult.rows[0]);
 			if (source.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can ${isMove ? "move" : "clone"} this character.`, {status: 403});
 			if (!isMove || source.campaignId !== campaignId) {
-				const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId});
+				const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId, isCampaignWriteLock: true});
 				assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
 				assertNewCharacterCampaignContent({
 					...enforcement,

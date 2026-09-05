@@ -20,6 +20,7 @@ import "../../../js/render.js";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
 
 const repo = path.resolve(process.cwd());
+const PAGE_SOURCE = fs.readFileSync(path.join(repo, "js/charactersheet/charactersheet.js"), "utf8");
 
 function loadLocal (relPath) {
 	const full = path.join(repo, relPath);
@@ -129,6 +130,16 @@ describe("Phase 8: source-restricted spell pool gets augmented with subclass gra
 		const wiz = loadLocal("data/class/class-wizard.json");
 		wizClass = wiz.class.find(c => c.name === "Wizard" && c.source === "PHB");
 		chronurgyEgw = wiz.subclass.find(sc => sc.shortName === "Chronurgy" && sc.source === "EGW");
+	});
+
+	it("batch-filters the campaign spell pool once before checking subclass grants", () => {
+		const start = PAGE_SOURCE.indexOf("_augmentSpellPoolWithSubclassGrants (");
+		const end = PAGE_SOURCE.indexOf("_applyPriorityFilter (", start);
+		const methodSource = PAGE_SOURCE.slice(start, end);
+		expect(start).toBeGreaterThan(-1);
+		expect(end).toBeGreaterThan(start);
+		expect(methodSource.match(/filterCampaignContentEntities\(/g)).toHaveLength(1);
+		expect(methodSource).toContain("new Set(filterCampaignContentEntities");
 	});
 
 	it("Divine Soul Sorcerer (restricted to TGTT/XPHB) still sees Guidance from PHB", () => {

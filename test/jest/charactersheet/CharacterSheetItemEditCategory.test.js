@@ -18,6 +18,7 @@
  */
 
 import "./setup.js";
+import {jest} from "@jest/globals";
 
 if (typeof globalThis.document === "undefined") {
 	globalThis.document = {
@@ -60,12 +61,13 @@ function newState () {
 	return state;
 }
 
-function makeInventory (state) {
+function makeInventory (state, pageOverrides = {}) {
 	const inv = new CharacterSheetInventory({getState: () => state});
 	const page = {
 		getState: () => state,
 		renderCharacter: () => inv.syncItemDerivedState?.(),
 		saveCharacter: () => {},
+		...pageOverrides,
 	};
 	inv._page = page;
 	inv.setItems([]);
@@ -131,6 +133,59 @@ describe("_mergeEditedItem (skip-undefined overlay)", () => {
 		const merged = inv._mergeEditedItem({a: 1, b: "keep"}, {a: 2, b: undefined});
 		expect(merged.a).toBe(2);
 		expect(merged.b).toBe("keep");
+	});
+
+	describe("Campaign custom-item policy", () => {
+		test("blocks a new custom item before mutating local state", () => {
+			const state = newState();
+			const saveCharacter = jest.fn();
+			const inv = makeInventory(state, {
+				_hubContext: {},
+				isCampaignContentEntityAllowed: () => false,
+				saveCharacter,
+			});
+
+			expect(inv._saveCustomItem("Unsupported custom item", 1, 1, {type: "gear"})).toBeUndefined();
+			expect(state.getItems()).toEqual([]);
+			expect(saveCharacter).not.toHaveBeenCalled();
+		});
+
+		test("preserves source identity when editing catalog and grandfathered items", () => {
+			const state = newState();
+			const saveCharacter = jest.fn();
+			const inv = makeInventory(state, {
+				_hubContext: {},
+				isCampaignContentEntityAllowed: item => item.source === "PHB",
+				saveCharacter,
+			});
+			state.addItem(makeInventoryWeapon({source: "PHB"}));
+			const catalogId = lastId(state);
+			expect(inv._saveCustomItem("Renamed Blade", 1, 5, {type: "weapon", dmg1: "1d8", dmgType: "S"}, catalogId)).toBe(catalogId);
+			expect(state.getItems().find(item => item.id === catalogId).source).toBe("PHB");
+
+			state.addItem(makeInventoryWeapon({name: "Legacy Blade", source: "XPHB"}));
+			const legacyId = lastId(state);
+			expect(inv._saveCustomItem("Legacy Blade", 1, 5, {type: "weapon", dmg1: "1d8", dmgType: "S"}, legacyId)).toBe(legacyId);
+			expect(state.getItems().find(item => item.id === legacyId).source).toBe("XPHB");
+			expect(saveCharacter).toHaveBeenCalledTimes(2);
+		});
+
+		test("blocks a renamed off-policy item before mutating its grandfathered identity", () => {
+			const state = newState();
+			const saveCharacter = jest.fn();
+			const inv = makeInventory(state, {
+				_hubContext: {},
+				isCampaignContentEntityAllowed: () => false,
+				saveCharacter,
+			});
+			state.addItem(makeInventoryWeapon({name: "Legacy Blade", source: "XPHB"}));
+			const legacyId = lastId(state);
+			const before = structuredClone(state.getItems().find(item => item.id === legacyId));
+
+			expect(inv._saveCustomItem("Renamed Legacy Blade", 1, 5, {type: "weapon", dmg1: "1d8", dmgType: "S"}, legacyId)).toBeUndefined();
+			expect(state.getItems().find(item => item.id === legacyId)).toEqual(before);
+			expect(saveCharacter).not.toHaveBeenCalled();
+		});
 	});
 
 	test("applies explicit clears (null / false / 0 / [])", () => {

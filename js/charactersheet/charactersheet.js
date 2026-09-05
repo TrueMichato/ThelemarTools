@@ -20078,6 +20078,18 @@ class CharacterSheetPage {
 		return filtered;
 	}
 
+	isCampaignContentEntityAllowed (entity) {
+		if (!this._hubContext) return true;
+		if (this._isHubContextRefreshing || this._isHubContextUnavailable) return false;
+		return !!filterCampaignContentEntities({
+			contentPolicy: getCampaignContentPolicy(this._hubContext.rulesVersion?.contentPolicy),
+			entities: [entity],
+			availableSources: this._hubContext.contentCatalog?.sources,
+			availableSpecies: this._hubContext.contentCatalog?.species,
+			sourceEditions: this._hubContext.contentCatalog?.sourceEditions,
+		}).length;
+	}
+
 	/**
 	 * Get spell data with source filtering, priority filtering, and Thelemar rarity/legality tags applied.
 	 * Single entry point for all spell picker consumers.
@@ -20114,6 +20126,7 @@ class CharacterSheetPage {
 		if (!Array.isArray(all) || !all.length) return filtered;
 		// Skip the walk entirely when no source filter is active — `filtered === all`.
 		if (filtered === all || filtered.length === all.length) return filtered;
+		if (this._isHubContextRefreshing || this._isHubContextUnavailable) return filtered;
 
 		let classes;
 		try { classes = this._state?.getClasses?.() || []; } catch (e) { classes = []; }
@@ -20137,18 +20150,19 @@ class CharacterSheetPage {
 		if (!grants.length) return filtered;
 
 		const filteredSet = new Set(filtered);
+		const campaignAllowedSet = this._hubContext
+			? new Set(filterCampaignContentEntities({
+				contentPolicy: getCampaignContentPolicy(this._hubContext.rulesVersion?.contentPolicy),
+				entities: all,
+				availableSources: this._hubContext.contentCatalog?.sources,
+				availableSpecies: this._hubContext.contentCatalog?.species,
+				sourceEditions: this._hubContext.contentCatalog?.sourceEditions,
+			}))
+			: null;
 		const augmented = filtered.slice();
 		for (const spell of all) {
 			if (filteredSet.has(spell)) continue;
-			if (!filterCampaignContentEntities({
-				contentPolicy: this._hubContext
-					? getCampaignContentPolicy(this._hubContext.rulesVersion?.contentPolicy)
-					: null,
-				entities: [spell],
-				availableSources: this._hubContext?.contentCatalog?.sources,
-				availableSpecies: this._hubContext?.contentCatalog?.species,
-				sourceEditions: this._hubContext?.contentCatalog?.sourceEditions,
-			}).length) continue;
+			if (campaignAllowedSet && !campaignAllowedSet.has(spell)) continue;
 			const isGranted = grants.some(({className, subclass, subclassChoice, additionalClassNames}) => {
 				if (subclass && CharacterSheetClassUtils.subclassAdditionalSpellsIncludeSpell(spell, subclass, {subclassChoice})) return true;
 				if (additionalClassNames.length && additionalClassNames.some(n => CharacterSheetClassUtils.spellIsForClass(spell, n))) return true;
