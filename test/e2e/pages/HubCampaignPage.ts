@@ -7,6 +7,8 @@ type HubSession = {
 	csrfToken: string;
 };
 
+type CampaignPrimaryAction = "dm" | "character" | "character-setup" | "read-only";
+
 export class HubCampaignPage {
 	readonly page: Page;
 
@@ -88,9 +90,67 @@ export class HubCampaignPage {
 		await this.gotoCampaign(campaignId);
 		await expect(this.page.locator("main h1")).toHaveText("Campaign Hub");
 		await this._expectCurrentHubSurfaceAccessible();
+		const mobileOrder = await this.page.evaluate(() => [
+			"campaign-manifest-panel",
+			"campaign-inbox-panel",
+			"campaign-activity-panel",
+			"campaign-workbench",
+		].map(id => Math.round(document.getElementById(id)!.getBoundingClientRect().top)));
+		expect(mobileOrder).toEqual([...mobileOrder].sort((a, b) => a - b));
 		await this.page.setViewportSize({width: 844, height: 390});
 		await this._expectCurrentHubSurfaceAccessible();
 		await this.page.setViewportSize({width: 1280, height: 720});
+		const desktopPlacement = await this.page.evaluate(() => {
+			const manifest = document.getElementById("campaign-manifest-panel")!.getBoundingClientRect();
+			const attention = document.getElementById("campaign-inbox-panel")!.getBoundingClientRect();
+			const activity = document.getElementById("campaign-activity-panel")!.getBoundingClientRect();
+			return {
+				isAttentionRail: attention.left >= manifest.right - 1,
+				isActivityAfterBrief: activity.top >= manifest.bottom - 1,
+			};
+		});
+		expect(desktopPlacement).toEqual({isAttentionRail: true, isActivityAfterBrief: true});
+	}
+
+	async expectRoleAdaptiveCampaignOverview ({
+		campaignId,
+		role,
+		primaryAction,
+	}: {
+		campaignId: string;
+		role: "dm" | "co_dm" | "player" | "spectator";
+		primaryAction: CampaignPrimaryAction;
+	}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		await expect(this.page.locator("#campaign-content")).toHaveAttribute("data-campaign-role", role);
+		await expect(this.page.locator("#campaign-manifest-panel")).toBeVisible();
+		await expect(this.page.locator("#campaign-inbox-panel")).toBeVisible();
+		await expect(this.page.locator("#campaign-attention-summary")).toHaveText(/request/);
+
+		const primarySelectors: Record<CampaignPrimaryAction, string> = {
+			dm: "#campaign-open-dm-screen",
+			character: "#campaign-open-primary-character",
+			"character-setup": "#campaign-open-character-setup",
+			"read-only": "#campaign-primary-readonly",
+		};
+		await expect(this.page.locator(primarySelectors[primaryAction])).toBeVisible();
+		const visiblePrimaryCount = await this.page.locator(Object.values(primarySelectors).join(", ")).evaluateAll(elements =>
+			elements.filter(element => (element as HTMLElement).getClientRects().length > 0).length,
+		);
+		expect(visiblePrimaryCount).toBe(1);
+
+		const workbench = this.page.locator("#campaign-workbench");
+		if (primaryAction === "read-only") {
+			await expect(workbench).toBeHidden();
+			return;
+		}
+		await expect(workbench).not.toHaveAttribute("open", "");
+		const summary = workbench.locator(":scope > summary");
+		await summary.focus();
+		await summary.press("Enter");
+		await expect(workbench).toHaveAttribute("open", "");
+		await summary.press("Enter");
+		await expect(workbench).not.toHaveAttribute("open", "");
 	}
 
 	async expectOfflineReconnectPosture (campaignId: string): Promise<void> {
@@ -264,7 +324,7 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-content")).toBeVisible({timeout: 30_000});
 	}
 
-	private async openCampaignAdministration (name: string): Promise<void> {
+	private async openCampaignDisclosure (name: string): Promise<void> {
 		const disclosure = this.page.locator(".hub-disclosure").filter({
 			has: this.page.locator(":scope > summary").filter({hasText: name}),
 		});
@@ -273,9 +333,13 @@ export class HubCampaignPage {
 		}
 	}
 
+	private async openCampaignWorkbench (): Promise<void> {
+		await this.openCampaignDisclosure("Campaign actions");
+	}
+
 	async createInvite (campaignId: string, role = "player"): Promise<string> {
 		await this.gotoCampaign(campaignId);
-		await this.openCampaignAdministration("People and invitations");
+		await this.openCampaignDisclosure("People and invitations");
 		await this.page.locator("#campaign-invite-role").selectOption(role);
 		await this.page.locator("#campaign-invite-form button[type='submit']").click();
 		const output = this.page.locator("#campaign-invite-output");
@@ -285,7 +349,7 @@ export class HubCampaignPage {
 
 	async expectRulesPolicySelectionJourney (campaignId: string): Promise<void> {
 		await this.gotoCampaign(campaignId);
-		await this.openCampaignAdministration("Rules and homebrew");
+		await this.openCampaignDisclosure("Rules and homebrew");
 		const manager = this.page.locator("#campaign-rules-policy-manager");
 		await expect(manager).toBeVisible();
 		await expect(this.page.locator("#campaign-rules-policy-loading")).toBeHidden();
@@ -342,7 +406,7 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-rules-activate")).toBeDisabled();
 		await this.page.reload();
 		await expect(this.page.locator("#campaign-content")).toBeVisible();
-		await this.openCampaignAdministration("Rules and homebrew");
+		await this.openCampaignDisclosure("Rules and homebrew");
 		await expect(manager).toBeVisible();
 
 		const managementResponse = await this.page.request.get(`/api/campaigns/${encodeURIComponent(campaignId)}/rules-policy`);
@@ -364,7 +428,7 @@ export class HubCampaignPage {
 
 		await this.page.reload();
 		await expect(this.page.locator("#campaign-content")).toBeVisible();
-		await this.openCampaignAdministration("Rules and homebrew");
+		await this.openCampaignDisclosure("Rules and homebrew");
 		await expect(manager).toBeVisible();
 		await expect(this.page.locator("#campaign-rules-history")).toBeEnabled();
 		const versionOneValue = await this.page.locator("#campaign-rules-history option", {hasText: "Version 1"}).getAttribute("value");
@@ -377,7 +441,7 @@ export class HubCampaignPage {
 
 	async expectReadOnlyCampaignPolicySummary (campaignId: string): Promise<void> {
 		await this.gotoCampaign(campaignId);
-		await this.openCampaignAdministration("Rules and homebrew");
+		await this.openCampaignDisclosure("Rules and homebrew");
 		const summary = this.page.locator("#campaign-policy-summary");
 		await expect(summary).toBeVisible();
 		await expect(summary).toContainText("Version 1");
@@ -1314,6 +1378,7 @@ export class HubCampaignPage {
 
 	async grantXp ({campaignId, characterName, amount}: {campaignId: string; characterName: string; amount: number}): Promise<void> {
 		await this.gotoCampaign(campaignId);
+		await this.openCampaignWorkbench();
 		await this.page.locator("#campaign-xp-target").selectOption({label: characterName});
 		await this.page.locator("#campaign-xp-amount").fill(`${amount}`);
 		await this.page.locator("#campaign-xp-form button[type='submit']").click();
@@ -1347,6 +1412,7 @@ export class HubCampaignPage {
 		note?: string;
 	}): Promise<void> {
 		await this.gotoCampaign(campaignId);
+		await this.openCampaignWorkbench();
 		await expect(this.page.locator("#campaign-transfer-source option")).toHaveText(["Party inventory"]);
 		const catalogTab = this.page.locator("#campaign-item-source-catalog");
 		const stashTab = this.page.locator("#campaign-item-source-stash");
@@ -1445,6 +1511,7 @@ export class HubCampaignPage {
 		quantity: number;
 	}): Promise<void> {
 		await this.gotoCampaign(campaignId);
+		await this.openCampaignWorkbench();
 		await this.page.locator("#campaign-item-source-stash").click();
 		await this.page.locator("#campaign-item-results").selectOption({
 			label: `${itemName} — ${source} · ${quantity * characterNames.length} available`,
@@ -1459,6 +1526,7 @@ export class HubCampaignPage {
 
 	async applyDamage ({campaignId, characterName, amount}: {campaignId: string; characterName: string; amount: number}): Promise<void> {
 		await this.gotoCampaign(campaignId);
+		await this.openCampaignWorkbench();
 		await this.page.locator("#campaign-action-target").selectOption({label: characterName});
 		await this.page.locator("#campaign-action-type").selectOption("damage");
 		await this.page.locator("#campaign-action-value").fill(`${amount}`);
@@ -1468,6 +1536,7 @@ export class HubCampaignPage {
 
 	async spendSpellSlot ({campaignId, characterName, level, amount}: {campaignId: string; characterName: string; level: number; amount: number}): Promise<void> {
 		await this.gotoCampaign(campaignId);
+		await this.openCampaignWorkbench();
 		await this.page.locator("#campaign-action-target").selectOption({label: characterName});
 		await this.page.locator("#campaign-action-type").selectOption("spell_slot_spend");
 		await this.page.locator("#campaign-action-slot-level").selectOption(`${level}`);
@@ -1489,6 +1558,7 @@ export class HubCampaignPage {
 			const page = await context.newPage();
 			const helper = new HubCampaignPage(page);
 			await helper.gotoCampaign(campaignId);
+			await helper.openCampaignWorkbench();
 			const apiUrl = "**/api/**";
 			let intercepted = false;
 			await page.route(apiUrl, async route => {
@@ -1520,6 +1590,7 @@ export class HubCampaignPage {
 
 	async expectInsufficientSpellSlotSpend ({campaignId, characterName, level, amount}: {campaignId: string; characterName: string; level: number; amount: number}): Promise<void> {
 		await this.gotoCampaign(campaignId);
+		await this.openCampaignWorkbench();
 		await this.page.locator("#campaign-action-target").selectOption({label: characterName});
 		await this.page.locator("#campaign-action-type").selectOption("spell_slot_spend");
 		await this.page.locator("#campaign-action-slot-level").selectOption(`${level}`);
@@ -1530,6 +1601,7 @@ export class HubCampaignPage {
 
 	async expectInsufficientTransferFeedback ({campaignId, characterName}: {campaignId: string; characterName: string}): Promise<void> {
 		await this.gotoCampaign(campaignId);
+		await this.openCampaignWorkbench();
 		await this.page.locator("#campaign-transfer-source").selectOption({label: characterName});
 		await this.page.locator("#campaign-transfer-target").selectOption({label: "Party inventory"});
 		await this.page.locator("#campaign-transfer-gp").fill("999");
@@ -1567,6 +1639,7 @@ export class HubCampaignPage {
 		currency: Partial<Record<"cp" | "sp" | "ep" | "gp" | "pp", number>>;
 	}): Promise<void> {
 		await this.gotoCampaign(campaignId);
+		await this.openCampaignWorkbench();
 		await this.page.locator("#campaign-transfer-source").selectOption({label: characterName});
 		expect(await this.page.locator("#campaign-transfer-target").inputValue())
 			.not.toBe(await this.page.locator("#campaign-transfer-source").inputValue());
@@ -1602,6 +1675,7 @@ export class HubCampaignPage {
 	}
 
 	async expectTransferItemAvailable ({sourceName, itemName}: {sourceName: string; itemName: string}): Promise<void> {
+		await this.openCampaignWorkbench();
 		await this.page.locator("#campaign-transfer-source").selectOption({label: sourceName});
 		await expect(this.page.locator("#campaign-transfer-entry option", {hasText: itemName})).toContainText("available");
 	}
@@ -1640,7 +1714,7 @@ export class HubCampaignPage {
 
 	async removeMember ({campaignId, displayName}: {campaignId: string; displayName: string}): Promise<void> {
 		await this.gotoCampaign(campaignId);
-		await this.openCampaignAdministration("People and invitations");
+		await this.openCampaignDisclosure("People and invitations");
 		const row = this.page.locator("#campaign-member-list .hub-data-row", {hasText: displayName});
 		this.page.once("dialog", dialog => dialog.accept());
 		await row.locator("button", {hasText: "Remove"}).click();

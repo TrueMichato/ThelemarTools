@@ -19,11 +19,13 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 	};
 	const dmContext = await browser.newContext(contextOptions);
 	const playerContext = await browser.newContext(contextOptions);
+	const spectatorContext = await browser.newContext(contextOptions);
 	const secondDeviceContext = await browser.newContext(contextOptions);
 	const graceContext = await browser.newContext(contextOptions);
 	try {
 		const dm = new HubCampaignPage(await dmContext.newPage());
 		const player = new HubCampaignPage(await playerContext.newPage());
+		const spectator = new HubCampaignPage(await spectatorContext.newPage());
 		const secondDevice = new HubCampaignPage(await secondDeviceContext.newPage());
 		const grace = new HubCampaignPage(await graceContext.newPage());
 
@@ -35,11 +37,17 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 		await dm.expectOrdinaryReadLatency();
 		const campaignId = await dm.createCampaign("Ashen March E2E");
 		await dm.expectLightweightCampaignBoot(campaignId);
+		await dm.expectRoleAdaptiveCampaignOverview({campaignId, role: "dm", primaryAction: "dm"});
 		await dm.expectAccessibleResponsiveCampaign(campaignId);
 		await dm.expectRulesPolicySelectionJourney(campaignId);
 		await dm.expectOfflineReconnectPosture(campaignId);
 		const inviteUrl = await dm.createInvite(campaignId);
 		await player.redeemInvite(inviteUrl, "Ashen March E2E");
+		await player.expectRoleAdaptiveCampaignOverview({campaignId, role: "player", primaryAction: "character-setup"});
+		const spectatorInviteUrl = await dm.createInvite(campaignId, "spectator");
+		await spectator.signInSynthetic({providerSubject: "spectator", displayName: "Table Observer", secret});
+		await spectator.redeemInvite(spectatorInviteUrl, "Ashen March E2E");
+		await spectator.expectRoleAdaptiveCampaignOverview({campaignId, role: "spectator", primaryAction: "read-only"});
 		await player.expectReadOnlyCampaignPolicySummary(campaignId);
 		await dm.publishCampaignRuleViaApi({
 			campaignId,
@@ -54,6 +62,7 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 		await player.expectCampaignDmScreenDenied(campaignId);
 
 		const character = await player.copyLocalCharacterFromSheet({campaignId, name: "Rowan"});
+		await player.expectRoleAdaptiveCampaignOverview({campaignId, role: "player", primaryAction: "character"});
 		await dm.expectProtocolUpgradeRecovery({campaignId, characterName: "Rowan"});
 		await dm.expectCampaignPartyTrackerProjection({campaignId, name: "Rowan"});
 		await dm.gotoCampaign(campaignId);
@@ -147,6 +156,7 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 		await Promise.all([
 			pCloseContext(dmContext),
 			pCloseContext(playerContext),
+			pCloseContext(spectatorContext),
 			pCloseContext(secondDeviceContext),
 			pCloseContext(graceContext),
 		]);

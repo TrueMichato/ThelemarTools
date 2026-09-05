@@ -749,20 +749,21 @@ function applyCampaignRoleLayout ({campaign, characters}) {
 	const guidance = document.getElementById("campaign-role-guidance");
 	if (isDm) {
 		if (title) title.textContent = "Live character roster";
-		if (description) description.textContent = "Open any campaign character or move directly into the live DM workspace.";
-		if (guidance) guidance.textContent = "Keep play moving from the live workspace, then return here for requests and campaign setup.";
+		if (description) description.textContent = "Open any campaign character or continue into the live DM workspace.";
+		if (guidance) guidance.textContent = "Lead the session in the DM workspace. Return here for requests, shared supplies, and setup health.";
 	} else {
 		if (title) title.textContent = "My characters";
 		if (description) description.textContent = "Your cloud characters for this campaign. Local originals remain independent.";
 		if (guidance) {
 			guidance.textContent = isSpectator
-				? "Follow the party roster and campaign activity. Gameplay controls are reserved for players and DMs."
-				: "Open your character, check requests, or send a transfer to another player.";
+				? "Follow party readiness and recent activity. Gameplay and management controls stay read only."
+				: "Continue on your character sheet, respond to requests, or share something with the party.";
 		}
 	}
 
 	setHidden(document.getElementById("campaign-characters-panel"), isSpectator);
 	setHidden(document.getElementById("campaign-party-panel"), isDm);
+	setHidden(document.getElementById("campaign-workbench"), !canPlay);
 	setHidden(document.getElementById("campaign-shared-actions"), !canPlay);
 	setHidden(document.getElementById("campaign-action-form"), !isDm);
 	setHidden(document.getElementById("campaign-jump-effect"), !isDm);
@@ -773,12 +774,37 @@ function applyCampaignRoleLayout ({campaign, characters}) {
 	setHidden(document.getElementById("campaign-upload-local"), !canPlay);
 
 	const primaryCharacter = document.getElementById("campaign-open-primary-character");
+	const characterSetup = document.getElementById("campaign-open-character-setup");
+	const readonlyPrimary = document.getElementById("campaign-primary-readonly");
 	const firstCharacter = !isDm ? characters[0] : null;
 	if (primaryCharacter && firstCharacter) {
 		primaryCharacter.href = `charactersheet.html?id=${encodeURIComponent(firstCharacter.id)}&hubCampaign=${encodeURIComponent(campaign.id)}`;
 		primaryCharacter.textContent = `Open ${getCharacterName(firstCharacter)}`;
 	}
+	if (characterSetup) characterSetup.href = `charactersheet.html?hubCampaign=${encodeURIComponent(campaign.id)}`;
 	setHidden(primaryCharacter, !firstCharacter);
+	setHidden(characterSetup, campaign.status !== "active" || isDm || isSpectator || !!firstCharacter);
+	setHidden(readonlyPrimary, !isSpectator && !(isDm && campaign.status !== "active"));
+
+	const workbenchDescription = document.getElementById("campaign-workbench-description");
+	if (workbenchDescription) {
+		workbenchDescription.textContent = isDm
+			? "Effects, transfers, XP, and item awards"
+			: "Item and currency transfers";
+	}
+}
+
+function initCampaignWorkbenchLinks () {
+	for (const [linkId, targetId] of [
+		["campaign-jump-effect", "campaign-action-form"],
+		["campaign-jump-transfer", "campaign-transfer-form"],
+	]) {
+		document.getElementById(linkId)?.addEventListener("click", () => {
+			const workbench = document.getElementById("campaign-workbench");
+			if (workbench) workbench.open = true;
+			requestAnimationFrame(() => document.getElementById(targetId)?.querySelector("select, input, button")?.focus());
+		});
+	}
 }
 
 function setFormStatus ({formId, message = "", isError = false}) {
@@ -1013,12 +1039,14 @@ async function pInitCampaign ({session}) {
 	renderRecentActivity({events, characters: snapshot.characters, members});
 	renderCampaignContext(context);
 	applyCampaignRoleLayout({campaign, characters});
+	initCampaignWorkbenchLinks();
 	if (campaign.status !== "active") {
 		setHidden(document.getElementById("campaign-invite-form"), true);
 		setHidden(document.getElementById("campaign-upload-local"), true);
 		setHidden(document.getElementById("campaign-dm-controls"), true);
 		setHidden(document.getElementById("campaign-open-dm-screen"), true);
 		setHidden(document.getElementById("campaign-inbox-panel"), true);
+		setHidden(document.getElementById("campaign-workbench"), true);
 		setHidden(document.getElementById("campaign-shared-actions"), true);
 		setHidden(document.getElementById("campaign-leave"), true);
 		setHidden(document.getElementById("campaign-jump-effect"), true);
@@ -1456,7 +1484,16 @@ function updateInboxCount ({kind, count}) {
 	const element = document.getElementById("campaign-inbox-count");
 	if (!element) return;
 	element.dataset[kind] = `${count}`;
-	element.textContent = `${Number(element.dataset.actions || 0) + Number(element.dataset.transfers || 0)}`;
+	const total = Number(element.dataset.actions || 0) + Number(element.dataset.transfers || 0);
+	element.textContent = `${total}`;
+	const panel = document.getElementById("campaign-inbox-panel");
+	if (panel) panel.dataset.attention = total ? "pending" : "clear";
+	const summary = document.getElementById("campaign-attention-summary");
+	if (summary) {
+		summary.textContent = total
+			? `${total} ${total === 1 ? "request needs" : "requests need"} a response.`
+			: "No requests need a response.";
+	}
 }
 
 async function renderPendingActions ({campaign, campaignId, session, targetCharacters, members, roster = null}) {
