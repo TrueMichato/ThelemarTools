@@ -44,4 +44,4 @@ Collect only:
 - backup identifier and restore tool versions.
 
 If confidentiality, authorization, inventory duplication/loss, or restore integrity is uncertain, stop
-mutations for the affected campaign/environment and follow the incident runbook once Phase 6E creates it.
+mutations for the affected campaign/environment and follow the [incident runbook](runbooks/incident.md).

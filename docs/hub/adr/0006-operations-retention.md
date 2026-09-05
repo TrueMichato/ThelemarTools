@@ -1,6 +1,7 @@
 # ADR 0006: Portable observability and technical-record retention
 
-Status: Implemented portable foundation; provider scheduling/alerts pending Phase 6G
+Status: Portable implementation and Oracle units deployed; scheduled execution, alert, off-machine backup, and
+isolated-restore proof pending V1-G1
 
 > **Narrowed by [ADR 0010](0010-oracle-always-free-hosting.md) (2026-08-27):** the selected host runs
 > self-managed PostgreSQL, so **managed PITR is not available**. Requirement 6 below is satisfied by the

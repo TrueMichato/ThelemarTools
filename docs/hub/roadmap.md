@@ -200,7 +200,8 @@ Purpose: establish the versioned contract all richer live campaign features use.
 
 Shipped as [ADR 0011](adr/0011-authorization-scoped-character-projections.md): `server/src/character-projection.js`
 holds the versioned catalog, presets and overrides; migration `0004` persists per-character policy;
-`HUB_PROTOCOL_VERSION` is `2`; `character.projection.updated` is replaced by metadata-only
+the T2 rollout introduced protocol 2 and the current merged implementation has since advanced to protocol 4;
+`character.projection.updated` is replaced by metadata-only
 `character.projection.invalidated`; resync carries a cursor and cache-invalidation refs only; and owners
 configure sharing from the Character Sheet campaign panel against a server-computed preview.
 

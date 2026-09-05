@@ -1,6 +1,6 @@
 # Runbook: account deletion grace and purge
 
-> **Status:** Current private-V1 procedure; scheduling/alerts pending Phase 6E
+> **Status:** Current private-V1 procedure; target-environment scheduling/alert evidence pending V1-G1
 > **Last drilled:** 2026-08-24 in memory/API/PostgreSQL tests
 > **Owner:** Campaign Hub operator
 
