@@ -22,7 +22,7 @@ export class ItemsPage {
 		await this.page.waitForFunction(
 			() => (globalThis as any).dbg_page?._magicList?.items?.length > 0,
 			null,
-			{timeout: 120_000},
+			{timeout: 45_000},
 		);
 
 		const tgttToggle = this.page.locator("#tgtt-toggle-btn");

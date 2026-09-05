@@ -111,8 +111,12 @@ describe("UrlUtil table-page hash builders", () => {
 	it("generates unique hashes for every table in the names and encounters datasets", () => {
 		const names = JSON.parse(fs.readFileSync("data/names.json", "utf8"));
 		const encounters = JSON.parse(fs.readFileSync("data/encounters.json", "utf8"));
+		const nameTables = getFlattenedTables(names.name);
+		const encounterTables = getFlattenedTables(encounters.encounter);
 
-		expectUniqueHashes({page: UrlUtil.PG_NAMES, entities: getFlattenedTables(names.name)});
-		expectUniqueHashes({page: UrlUtil.PG_ENCOUNTERGEN, entities: getFlattenedTables(encounters.encounter)});
+		expect(nameTables).toHaveLength(61);
+		expect(encounterTables).toHaveLength(93);
+		expectUniqueHashes({page: UrlUtil.PG_NAMES, entities: nameTables});
+		expectUniqueHashes({page: UrlUtil.PG_ENCOUNTERGEN, entities: encounterTables});
 	});
 });
