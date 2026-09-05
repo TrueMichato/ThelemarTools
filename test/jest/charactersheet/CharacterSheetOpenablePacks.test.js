@@ -92,7 +92,7 @@ describe("Openable equipment packs", () => {
 		expect(result.contents[2]).toMatchObject({
 			item: {
 				name: "10 feet of string",
-				source: "Custom",
+				source: "XPHB",
 				_isCustom: true,
 				_fromPack: "Explorer's Pack|XPHB",
 			},
