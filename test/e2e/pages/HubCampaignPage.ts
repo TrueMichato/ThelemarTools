@@ -91,8 +91,8 @@ export class HubCampaignPage {
 		await expect(this.page.locator("main h1")).toHaveText("Campaign Hub");
 		await this._expectCurrentHubSurfaceAccessible();
 		const mobileOrder = await this.page.evaluate(() => [
-			"campaign-manifest-panel",
 			"campaign-inbox-panel",
+			"campaign-manifest-panel",
 			"campaign-activity-panel",
 			"campaign-workbench",
 		].map(id => Math.round(document.getElementById(id)!.getBoundingClientRect().top)));

@@ -21,7 +21,7 @@ role-specific continuation action lead. A dominant party manifest sits beside at
 rail. Recent activity follows. Effects, transfers, XP, and item awards remain available in the **Campaign actions**
 disclosure, while people, invitations, homebrew, rules, and policy management remain in **Administration**. Native
 `details` disclosures preserve keyboard behavior without modal interruption. On narrow screens, the sequence is
-identity and primary action, manifest, attention, activity, session/setup, campaign actions, then administration.
+identity and primary action, attention, manifest, session/setup, activity, campaign actions, then administration.
 
 ## Method and evidence
 

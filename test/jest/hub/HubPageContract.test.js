@@ -50,9 +50,9 @@ describe("campaign hub pages", () => {
 		expect(campaignHtml).toContain("Pinned session brief");
 		expect(campaignHtml.indexOf("id=\"campaign-manifest-panel\""))
 			.toBeLessThan(campaignHtml.indexOf("class=\"hub-campaign-admin\""));
-		expect(campaignHtml.indexOf("id=\"campaign-manifest-panel\""))
-			.toBeLessThan(campaignHtml.indexOf("id=\"campaign-inbox-panel\""));
 		expect(campaignHtml.indexOf("id=\"campaign-inbox-panel\""))
+			.toBeLessThan(campaignHtml.indexOf("id=\"campaign-manifest-panel\""));
+		expect(campaignHtml.indexOf("id=\"campaign-manifest-panel\""))
 			.toBeLessThan(campaignHtml.indexOf("id=\"campaign-activity-panel\""));
 		expect(campaignHtml.indexOf("id=\"campaign-activity-panel\""))
 			.toBeLessThan(campaignHtml.indexOf("id=\"campaign-workbench\""));
@@ -332,8 +332,8 @@ describe("campaign hub pages", () => {
 		expect(scss).toContain(":focus-visible");
 		expect(scss).toContain("@media (prefers-reduced-motion: reduce)");
 		expect(scss).toContain("--hub-primary: #5f62e9");
-		expect(scss).toMatch(/\.hub-campaign-layout\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\) minmax\(300px, 360px\)/);
-		expect(scss).toMatch(/@media \(width <= 900px\)[\s\S]*\.hub-campaign-layout\s*\{\s*grid-template-columns: minmax\(0, 1fr\)/);
+		expect(scss).toMatch(/\.hub-campaign-layout\s*\{[\s\S]*"manifest attention"[\s\S]*"manifest session"/);
+		expect(scss).toMatch(/@media \(width <= 900px\)[\s\S]*"attention" auto[\s\S]*"manifest" auto[\s\S]*"session" auto/);
 		expect(scss).not.toMatch(/\.hub-rail-section--tools\s*\{\s*display:\s*none/);
 		for (const html of [hubHtml, campaignHtml]) {
 			expect(html).toContain("class=\"hub-skip-link\"");

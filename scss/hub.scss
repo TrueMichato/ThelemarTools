@@ -762,15 +762,20 @@
 
 .hub-campaign-layout {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+	grid-template:
+		"manifest attention" auto
+		"manifest session" auto
+		/ minmax(0, 1fr) minmax(300px, 360px);
 	align-items: start;
 }
 
 .hub-campaign-main {
+	grid-area: manifest;
 	min-width: 0;
 }
 
 .hub-campaign-rail {
+	grid-area: session;
 	align-self: start;
 	border-left: 1px solid var(--hub-border);
 	border-bottom: 1px solid var(--hub-border);
@@ -787,6 +792,8 @@
 }
 
 .hub-campaign-attention {
+	grid-area: attention;
+	border-left: 1px solid var(--hub-border);
 	background: var(--hub-recessed);
 }
 
@@ -1449,17 +1456,25 @@ a.hub-data-row:hover {
 
 @media (width <= 900px) {
 	.hub-campaign-layout {
-		grid-template-columns: minmax(0, 1fr);
+		grid-template:
+			"attention" auto
+			"manifest" auto
+			"session" auto
+			/ minmax(0, 1fr);
 	}
 
 	.hub-campaign-manifest {
 		border-right: 0;
 	}
 
+	.hub-campaign-attention,
+	.hub-campaign-rail {
+		border-left: 0;
+	}
+
 	.hub-campaign-rail {
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
-		border-left: 0;
 	}
 
 	.hub-rail-section {

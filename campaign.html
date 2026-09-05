@@ -92,6 +92,28 @@
 				</div>
 
 				<div class="hub-campaign-layout">
+					<section id="campaign-inbox-panel" class="hub-campaign-section hub-campaign-attention" aria-labelledby="campaign-attention-title" data-attention="clear">
+						<div class="hub-section-heading">
+							<div>
+								<h3 id="campaign-attention-title" class="hub-campaign-section__title">Needs attention</h3>
+								<p id="campaign-attention-summary" class="hub-campaign-section__description" role="status" aria-live="polite">No requests need a response.</p>
+							</div>
+							<span id="campaign-inbox-count" class="hub-count" aria-label="Pending request count">0</span>
+						</div>
+						<div class="hub-inbox-grid">
+							<div>
+								<h4 class="hub-subheading">Effects</h4>
+								<div id="campaign-pending-actions" class="hub-data-list hub-data-list--flush"></div>
+								<p id="campaign-pending-actions-empty" class="hub-empty hub-empty--compact ve-hidden">No effect requests are waiting.</p>
+							</div>
+							<div>
+								<h4 class="hub-subheading">Transfers</h4>
+								<div id="campaign-pending-transfers" class="hub-data-list hub-data-list--flush"></div>
+								<p id="campaign-pending-transfers-empty" class="hub-empty hub-empty--compact ve-hidden">No item or currency transfers are waiting.</p>
+							</div>
+						</div>
+					</section>
+
 					<div class="hub-campaign-main">
 						<section id="campaign-manifest-panel" class="hub-campaign-section hub-campaign-manifest" aria-labelledby="campaign-manifest-title">
 							<div class="hub-section-heading hub-section-heading--manifest">
@@ -137,28 +159,6 @@
 					</div>
 
 					<aside class="hub-campaign-rail" aria-label="Session brief and campaign setup">
-						<section id="campaign-inbox-panel" class="hub-campaign-section hub-campaign-attention" aria-labelledby="campaign-attention-title" data-attention="clear">
-							<div class="hub-section-heading">
-								<div>
-									<h3 id="campaign-attention-title" class="hub-campaign-section__title">Needs attention</h3>
-									<p id="campaign-attention-summary" class="hub-campaign-section__description" role="status" aria-live="polite">No requests need a response.</p>
-								</div>
-								<span id="campaign-inbox-count" class="hub-count" aria-label="Pending request count">0</span>
-							</div>
-							<div class="hub-inbox-grid">
-								<div>
-									<h4 class="hub-subheading">Effects</h4>
-									<div id="campaign-pending-actions" class="hub-data-list hub-data-list--flush"></div>
-									<p id="campaign-pending-actions-empty" class="hub-empty hub-empty--compact ve-hidden">No effect requests are waiting.</p>
-								</div>
-								<div>
-									<h4 class="hub-subheading">Transfers</h4>
-									<div id="campaign-pending-transfers" class="hub-data-list hub-data-list--flush"></div>
-									<p id="campaign-pending-transfers-empty" class="hub-empty hub-empty--compact ve-hidden">No item or currency transfers are waiting.</p>
-								</div>
-							</div>
-						</section>
-
 						<section class="hub-rail-section hub-rail-section--tools">
 							<h3 class="hub-rail-section__title">Session brief</h3>
 							<p id="campaign-role-guidance" class="hub-rail-section__description"></p>
