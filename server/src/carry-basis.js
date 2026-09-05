@@ -47,7 +47,7 @@ export function getExpectedCarryBasis ({character, campaign = null, rulesVersion
 		protocolVersion: CAMPAIGN_RULE_PROTOCOL_VERSION,
 		surface: "characterOpen",
 	});
-	const effectiveSettings = decision.effectiveSettings;
+	const effectiveSettings = {...ownSettings, ...decision.effectiveSettings};
 
 	return createCampaignCarryBasis({
 		// A campaign with no active rules version or no brew bundle yields null here, which

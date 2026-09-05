@@ -232,6 +232,98 @@ async function probeCharacterSheetOwners ({readSource}) {
 	assert.match(source, /_clearHubRules[\s\S]*this\._hubContext = cleared\.hubContext;/);
 	assert.match(source, /catch \(error\) \{[\s\S]*this\._clearHubRules\(\);[\s\S]*_hubRulesRefreshBlocked/);
 	assert.match(source, /state\?\.state === "live" && this\._hubRulesRefreshBlocked[\s\S]*_pRefreshHubRules/);
+	assert.match(
+		source,
+		/if \(expectedRulesVersionId && context\?\.rulesVersion\?\.id !== expectedRulesVersionId\) \{\s*this\._clearHubRules\(\);\s*this\._hubRulesRefreshBlocked = true;\s*this\._hubRulesPendingVersionId = expectedRulesVersionId;\s*return false;/,
+	);
+}
+
+async function probeCarrySettingsDigest ({rules, pImportServer}) {
+	const {getExpectedCarryBasis} = await pImportServer("carry-basis.js");
+	const rulesVersion = {
+		id: "rules-current",
+		version: 1,
+		schemaVersion: 2,
+		catalogVersion: 1,
+		rules: rules.createDefaultCampaignRulesPolicy(),
+	};
+	const basis = getExpectedCarryBasis({
+		character: {
+			campaignId: "campaign",
+			data: {settings: {
+				enableMaterials: true,
+				materials_weightFromDensity: true,
+				materials_degradation: true,
+			}},
+		},
+		rulesVersion,
+	});
+	assert.match(basis.settingsDigest, /enableMaterials=true/);
+	assert.match(basis.settingsDigest, /materials_weightFromDensity=true/);
+	assert.match(basis.settingsDigest, /materials_degradation=true/);
+}
+
+async function probeExistingImportOrder ({rules, pImportServer}) {
+	const {MemoryHubStore} = await pImportServer("memory-hub-store.js");
+	const store = new MemoryHubStore();
+	const account = await store.pUpsertOAuthAccount({provider: "test", providerSubject: "existing", displayName: "Existing"});
+	const campaign = (await store.pCreateCampaign({accountId: account.id, name: "Existing", idempotencyKey: "campaign"})).campaign;
+	const first = await store.pCreateAndActivateRulesPolicy({
+		accountId: account.id,
+		campaignId: campaign.id,
+		policy: rules.createDefaultCampaignRulesPolicy(),
+		expectedActiveRulesVersionId: null,
+		idempotencyKey: "rules-1",
+	});
+	const staleData = {carry: {schemaVersion: 1, basis: {kind: "campaign", rulesVersionId: first.rulesVersion.id, settingsDigest: "digest"}}};
+	const created = await store.pCreateCharacter({
+		accountId: account.id,
+		campaignId: campaign.id,
+		clientImportId: "same",
+		schemaVersion: 1,
+		data: staleData,
+		protocolVersion: "4",
+		idempotencyKey: "create",
+	});
+	const changed = rules.createDefaultCampaignRulesPolicy();
+	changed.rules.find(rule => rule.id === "tgtt.carry-weight").parameters.enabled = false;
+	changed.rules.find(rule => rule.id === "tgtt.encumbrance-tiers").parameters.enabled = false;
+	await store.pCreateAndActivateRulesPolicy({
+		accountId: account.id,
+		campaignId: campaign.id,
+		policy: changed,
+		expectedActiveRulesVersionId: first.rulesVersion.id,
+		idempotencyKey: "rules-2",
+	});
+	let replay;
+	try {
+		replay = await store.pCreateCharacter({
+			accountId: account.id,
+			campaignId: campaign.id,
+			clientImportId: "same",
+			schemaVersion: 1,
+			data: staleData,
+			protocolVersion: "4",
+			idempotencyKey: "replay",
+		});
+	} catch (error) {
+		if (isInfrastructureError(error)) throw error;
+		assert.fail(`existing import was rejected with ${error?.code || error?.name}`);
+	}
+	assert.equal(replay.character.id, created.character.id);
+}
+
+async function probeExistingImportOwners ({pImportServer}) {
+	const {MemoryHubStore} = await pImportServer("memory-hub-store.js");
+	const {PostgresHubStore} = await pImportServer("postgres-hub-store.js");
+	const memorySource = MemoryHubStore.prototype.pCreateCharacter.toString();
+	const postgresSource = PostgresHubStore.prototype.pCreateCharacter.toString();
+	const memoryExistingIx = memorySource.indexOf("imported?.status === \"active\"");
+	const memoryFenceIx = memorySource.indexOf("assertCampaignRuleWriteFence");
+	const postgresExistingIx = postgresSource.indexOf("existing.rows[0]?.status === \"active\"");
+	const postgresFenceIx = postgresSource.indexOf("assertCampaignRuleWriteFence");
+	assert.ok(memoryExistingIx >= 0 && memoryExistingIx < memoryFenceIx);
+	assert.ok(postgresExistingIx >= 0 && postgresExistingIx < postgresFenceIx);
 }
 
 async function probeEvaluatorFailClosed ({rules, evaluator}) {
@@ -253,6 +345,17 @@ async function probeEvaluatorFailClosed ({rules, evaluator}) {
 	assert.equal(evaluator.evaluateCampaignRules({...base, expectedRulesVersionId: "rules-old"}).blocking, true);
 	assert.equal(evaluator.evaluateCampaignRules({...base, rulesVersion: {...rulesVersion, version: "1"}}).blocking, true);
 	assert.equal(evaluator.evaluateCampaignRules({...base, rulesVersion: {...rulesVersion, unexpected: true}}).blocking, true);
+	assert.equal(evaluator.getCampaignSettingsOverlayFromRulesVersion({
+		id: "flat-v2",
+		version: 1,
+		schemaVersion: 2,
+		catalogVersion: 1,
+		rules: {enableTgtt: false},
+	}), null);
+	assert.equal(evaluator.getCampaignSettingsOverlayFromRulesVersion({
+		id: "legacy",
+		rules: {enableTgtt: false},
+	}).enableTgtt, false);
 	const masterOff = structuredClone(rulesVersion);
 	masterOff.rules.rules.find(rule => rule.id === "tgtt.enabled").parameters.enabled = false;
 	masterOff.rules.rules.find(rule => rule.id === "rules.exhaustion.system").parameters.system = "2024";
@@ -485,6 +588,56 @@ async function probeOptionalImport ({capabilities}) {
 }
 
 const MUTANTS = [
+	{
+		name: "carry-material-settings-digest-disabled",
+		probe: probeCarrySettingsDigest,
+		mutations: {
+			"server/src/carry-basis.js": source => source.replace(
+				"const effectiveSettings = {...ownSettings, ...decision.effectiveSettings};",
+				"const effectiveSettings = decision.effectiveSettings;",
+			),
+		},
+	},
+	{
+		name: "schema-v2-fallback-enabled",
+		probe: probeEvaluatorFailClosed,
+		mutations: {
+			"hub-campaign-rule-evaluator.js": source => source.replace(
+				"if (rulesVersion.schemaVersion !== 1) return null;",
+				"rulesVersion = {...rulesVersion, schemaVersion: 1};",
+			),
+		},
+	},
+	{
+		name: "character-sheet-version-lag-clear-disabled",
+		probe: probeCharacterSheetOwners,
+		mutations: {
+			"js/charactersheet/charactersheet.js": source => source.replace(
+				"this._hubRulesRefreshBlocked = true;\n\t\t\t\tthis._hubRulesPendingVersionId = expectedRulesVersionId;\n\t\t\t\treturn false;",
+				"this._hubRulesRefreshBlocked = true;\n\t\t\t\tthis._hubRulesPendingVersionId = null;\n\t\t\t\treturn false;",
+			),
+		},
+	},
+	{
+		name: "existing-import-order-disabled",
+		probe: probeExistingImportOrder,
+		mutations: {
+			"server/src/memory-hub-store.js": source => source.replace(
+				"if (imported?.status === \"active\") {",
+				"if (false) {",
+			),
+		},
+	},
+	{
+		name: "postgres-existing-import-order-disabled",
+		probe: probeExistingImportOwners,
+		mutations: {
+			"server/src/postgres-hub-store.js": source => source.replace(
+				"if (existing.rows[0]?.status === \"active\") {",
+				"if (false) {",
+			),
+		},
+	},
 	{
 		name: "decision-output-validation-disabled",
 		probe: probeEvaluatorFailClosed,

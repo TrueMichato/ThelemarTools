@@ -1161,12 +1161,15 @@ export class MemoryHubStore {
 		const rulesVersion = campaign?.activeRulesVersionId
 			? this._rulesVersions.get(campaign.activeRulesVersionId)
 			: null;
-		if (data?.carry) assertCampaignRuleWriteFence({rulesVersion, data, protocolVersion});
 		const imported = [...this._characters.values()].find(it =>
 			it.ownerAccountId === accountId
 			&& it.clientImportId === clientImportId
 			&& it.campaignId === campaignId,
 		);
+		if (imported?.status === "active") {
+			return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(imported)}});
+		}
+		if (data?.carry) assertCampaignRuleWriteFence({rulesVersion, data, protocolVersion});
 		if (imported) {
 			if (imported.status === "archived") {
 				imported.status = "active";

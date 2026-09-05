@@ -117,6 +117,16 @@ describe("campaign rule evaluator", () => {
 		expect(getCampaignSettingsOverlayFromRulesVersion(legacy)).toMatchObject({enableTgtt: false, exhaustionRules: "2014"});
 	});
 
+	it.each([2, 99])("rejects schema %s envelopes without an authoritative decision", schemaVersion => {
+		expect(getCampaignSettingsOverlayFromRulesVersion({
+			id: "rules-flat",
+			version: 1,
+			schemaVersion,
+			catalogVersion: 1,
+			rules: {enableTgtt: false},
+		})).toBeNull();
+	});
+
 	it("evaluates the closed policy member of a public schema-v2 envelope", () => {
 		const policy = createDefaultCampaignRulesPolicy();
 		const version = {

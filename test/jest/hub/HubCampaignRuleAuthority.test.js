@@ -278,4 +278,60 @@ describe("campaign rule write authority", () => {
 		expect(patched.character.revision).toBe(2);
 		expect(store._events.length).toBeGreaterThan(eventCount);
 	});
+
+	it("returns an active existing import before fencing discarded incoming data", async () => {
+		const store = new MemoryHubStore();
+		const account = await store.pUpsertOAuthAccount({provider: "test", providerSubject: "existing-import", displayName: "Existing Import"});
+		const campaign = (await store.pCreateCampaign({accountId: account.id, name: "Rules", idempotencyKey: "existing-campaign"})).campaign;
+		const first = await store.pCreateAndActivateRulesPolicy({
+			accountId: account.id,
+			campaignId: campaign.id,
+			policy: createDefaultCampaignRulesPolicy(),
+			expectedActiveRulesVersionId: null,
+			idempotencyKey: "existing-rules-1",
+		});
+		const created = await store.pCreateCharacter({
+			accountId: account.id,
+			campaignId: campaign.id,
+			clientImportId: "same-import",
+			schemaVersion: 1,
+			data: characterData(first.rulesVersion.id),
+			protocolVersion: "4",
+			idempotencyKey: "existing-create",
+		});
+		const changed = createDefaultCampaignRulesPolicy();
+		changed.rules.find(rule => rule.id === "tgtt.carry-weight").parameters.enabled = false;
+		changed.rules.find(rule => rule.id === "tgtt.encumbrance-tiers").parameters.enabled = false;
+		await store.pCreateAndActivateRulesPolicy({
+			accountId: account.id,
+			campaignId: campaign.id,
+			policy: changed,
+			expectedActiveRulesVersionId: first.rulesVersion.id,
+			idempotencyKey: "existing-rules-2",
+		});
+
+		const replayed = await store.pCreateCharacter({
+			accountId: account.id,
+			campaignId: campaign.id,
+			clientImportId: "same-import",
+			schemaVersion: 1,
+			data: characterData(first.rulesVersion.id),
+			protocolVersion: "4",
+			idempotencyKey: "existing-replay",
+		});
+		expect(replayed.character.id).toBe(created.character.id);
+		expect(replayed.character.revision).toBe(created.character.revision);
+
+		await store.pArchiveCharacter({accountId: account.id, characterId: created.character.id, idempotencyKey: "existing-archive"});
+		await expect(store.pCreateCharacter({
+			accountId: account.id,
+			campaignId: campaign.id,
+			clientImportId: "same-import",
+			schemaVersion: 1,
+			data: characterData(first.rulesVersion.id),
+			protocolVersion: "4",
+			idempotencyKey: "existing-reactivate",
+		})).rejects.toEqual(expect.objectContaining({code: "POLICY_VERSION_STALE"}));
+		expect(store._characters.get(created.character.id).status).toBe("archived");
+	});
 });

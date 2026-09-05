@@ -331,6 +331,36 @@ describe("carry authority basis follows the campaign context lifecycle", () => {
 		expect(page._state.getSettings().thelemar_jumping).toBe(false);
 	});
 
+	it("clears a lagging policy response and retries the expected version on live", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		await activate(page, schemaV2Context("rules-1"));
+		let isCurrent = false;
+		page._hubApi = {
+			pGetCampaignContext: async () => isCurrent
+				? schemaV2Context("rules-2")
+				: schemaV2Context("rules-1"),
+		};
+		page._hubCampaignId = "campaign";
+		page._renderCharacter = () => {};
+
+		expect(await page._pRefreshHubRules({rulesVersionId: "rules-2"})).toBe(false);
+		expect(page._hubContext).toBeNull();
+		expect(page._hubRulesRefreshBlocked).toBe(true);
+		expect(page._hubRulesPendingVersionId).toBe("rules-2");
+		expect(page._state.getCarryAuthorityBasis().kind).toBe("detached");
+
+		isCurrent = true;
+		page._onHubRealtimeConnectionState({state: "live"});
+		await new Promise(resolve => setTimeout(resolve, 0));
+		expect(page._hubContext.rulesVersion.id).toBe("rules-2");
+		expect(page._hubRulesRefreshBlocked).toBe(false);
+		expect(page._hubRulesPendingVersionId).toBeNull();
+
+		page._clearHubRules();
+		expect(page._hubRulesPendingVersionId).toBeNull();
+		expect(page._hubRulesRefreshBlocked).toBe(false);
+	});
+
 	it("replaces schema-v2 decisions atomically across master-toggle changes and rollback", async () => {
 		const page = new CharacterSheetPage({characterRepository: {}});
 		const off = schemaV2Context("rules-off", policy => {

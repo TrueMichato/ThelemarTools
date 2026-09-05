@@ -107,6 +107,7 @@ class CharacterSheetPage {
 		this._hubRealtimeGeneration = 0;
 		this._hubRulesRefreshGeneration = 0;
 		this._hubRulesRefreshBlocked = false;
+		this._hubRulesPendingVersionId = null;
 		this._builder = null;
 		this._combat = null;
 		this._spells = null;
@@ -262,6 +263,8 @@ class CharacterSheetPage {
 	 */
 	_clearHubRules () {
 		this._hubRulesRefreshGeneration++;
+		this._hubRulesRefreshBlocked = false;
+		this._hubRulesPendingVersionId = null;
 		const cleared = getClearedCampaignRulesState();
 		this._hubContext = cleared.hubContext;
 		this._state.clearCampaignSettingsOverlay();
@@ -299,6 +302,7 @@ class CharacterSheetPage {
 	}
 
 	async _pRefreshHubRules ({rulesVersionId = null} = {}) {
+		const expectedRulesVersionId = rulesVersionId ?? this._hubRulesPendingVersionId;
 		const generation = ++this._hubRulesRefreshGeneration;
 		try {
 			const context = await this._hubApi.pGetCampaignContext({campaignId: this._hubCampaignId});
@@ -307,11 +311,17 @@ class CharacterSheetPage {
 			// reconnect is still allowed to establish a fresh context; without this
 			// exception, the first transient outage permanently required a reload.
 			if (!this._hubContext && !this._hubRulesRefreshBlocked) return false;
-			if (rulesVersionId && context?.rulesVersion?.id !== rulesVersionId) return false;
+			if (expectedRulesVersionId && context?.rulesVersion?.id !== expectedRulesVersionId) {
+				this._clearHubRules();
+				this._hubRulesRefreshBlocked = true;
+				this._hubRulesPendingVersionId = expectedRulesVersionId;
+				return false;
+			}
 			const overlay = _getHubRulesOverlay(context);
 			if (context?.rulesVersion && !overlay) throw new Error(`Campaign rules are incompatible.`);
 			this._hubContext = context;
 			this._hubRulesRefreshBlocked = false;
+			this._hubRulesPendingVersionId = null;
 			this._state.setCampaignSettingsOverlay(overlay);
 			this._state.setCarryAuthorityContext({
 				rulesVersionId: context?.rulesVersion?.id ?? null,
@@ -323,6 +333,7 @@ class CharacterSheetPage {
 			if (generation !== this._hubRulesRefreshGeneration) return false;
 			this._clearHubRules();
 			this._hubRulesRefreshBlocked = true;
+			this._hubRulesPendingVersionId = expectedRulesVersionId;
 			JqueryUtil.doToast({type: "danger", content: "Campaign rules changed but could not be applied. Reload before continuing."});
 			return false;
 		}
@@ -630,6 +641,7 @@ class CharacterSheetPage {
 			pOnContextActivated: async ({context}) => {
 				this._hubContext = context;
 				this._hubRulesRefreshBlocked = false;
+				this._hubRulesPendingVersionId = null;
 				if (this._hubContext?.rulesVersion && !_getHubRulesOverlay(this._hubContext)) {
 					throw new Error(`Campaign rules are unavailable for this Character Sheet.`);
 				}

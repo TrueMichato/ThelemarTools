@@ -4,6 +4,7 @@ import pg from "pg";
 import {createDefaultCampaignRulesPolicy} from "../../../js/hub/hub-campaign-rules.js";
 import {MemoryHubStore} from "../../../server/src/memory-hub-store.js";
 import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
+import {getExpectedCarryBasis} from "../../../server/src/carry-basis.js";
 
 const {Pool} = pg;
 const describePostgres = process.env.HUB_TEST_POSTGRES_URL ? describe : describe.skip;
@@ -261,6 +262,20 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 				catalogVersion: published.rulesVersion.catalogVersion,
 			}),
 		});
+		const basis = getExpectedCarryBasis({
+			character: {
+				campaignId: campaign.id,
+				data: {settings: {
+					enableMaterials: true,
+					materials_weightFromDensity: true,
+					materials_degradation: true,
+				}},
+			},
+			...basisContext,
+		});
+		expect(basis.settingsDigest).toContain("enableMaterials=true");
+		expect(basis.settingsDigest).toContain("materials_weightFromDensity=true");
+		expect(basis.settingsDigest).toContain("materials_degradation=true");
 	});
 
 	it("rejects a stale schema-v2 character create without a partial PostgreSQL write", async () => {
@@ -426,6 +441,72 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 			provider: "test",
 			providerSubject: `rules-concurrency-${crypto.randomUUID()}`,
 			displayName: "Rules Concurrency DM",
+		});
+
+		it("returns an active existing import before fencing discarded PostgreSQL input", async () => {
+			const store = new PostgresHubStore({pool});
+			const account = await store.pUpsertOAuthAccount({
+				provider: "test",
+				providerSubject: `existing-import-${crypto.randomUUID()}`,
+				displayName: "Existing Import",
+			});
+			const campaign = (await store.pCreateCampaign({
+				accountId: account.id,
+				name: "Existing import",
+				idempotencyKey: command("existing-campaign"),
+			})).campaign;
+			const first = await store.pCreateAndActivateRulesPolicy({
+				accountId: account.id,
+				campaignId: campaign.id,
+				policy: createDefaultCampaignRulesPolicy(),
+				expectedActiveRulesVersionId: null,
+				idempotencyKey: command("existing-rules-1"),
+			});
+			const staleData = {carry: {schemaVersion: 1, basis: {kind: "campaign", rulesVersionId: first.rulesVersion.id, settingsDigest: "digest"}}};
+			const created = await store.pCreateCharacter({
+				accountId: account.id,
+				campaignId: campaign.id,
+				clientImportId: "same-import",
+				schemaVersion: 1,
+				data: staleData,
+				protocolVersion: "4",
+				idempotencyKey: command("existing-create"),
+			});
+			const changed = createDefaultCampaignRulesPolicy();
+			changed.rules.find(rule => rule.id === "tgtt.carry-weight").parameters.enabled = false;
+			changed.rules.find(rule => rule.id === "tgtt.encumbrance-tiers").parameters.enabled = false;
+			await store.pCreateAndActivateRulesPolicy({
+				accountId: account.id,
+				campaignId: campaign.id,
+				policy: changed,
+				expectedActiveRulesVersionId: first.rulesVersion.id,
+				idempotencyKey: command("existing-rules-2"),
+			});
+
+			const replayed = await store.pCreateCharacter({
+				accountId: account.id,
+				campaignId: campaign.id,
+				clientImportId: "same-import",
+				schemaVersion: 1,
+				data: staleData,
+				protocolVersion: "4",
+				idempotencyKey: command("existing-replay"),
+			});
+			expect(replayed.character.id).toBe(created.character.id);
+			expect(replayed.character.revision).toBe(created.character.revision);
+
+			await store.pArchiveCharacter({accountId: account.id, characterId: created.character.id, idempotencyKey: command("existing-archive")});
+			await expect(store.pCreateCharacter({
+				accountId: account.id,
+				campaignId: campaign.id,
+				clientImportId: "same-import",
+				schemaVersion: 1,
+				data: staleData,
+				protocolVersion: "4",
+				idempotencyKey: command("existing-reactivate"),
+			})).rejects.toEqual(expect.objectContaining({code: "POLICY_VERSION_STALE"}));
+			const archived = await pool.query(`SELECT status FROM hub.characters WHERE id = $1`, [created.character.id]);
+			expect(archived.rows[0].status).toBe("archived");
 		});
 
 		const campaign = (await store.pCreateCampaign({

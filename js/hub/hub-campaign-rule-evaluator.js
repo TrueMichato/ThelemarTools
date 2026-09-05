@@ -409,6 +409,7 @@ export function getCampaignSettingsOverlayFromRulesVersion (rulesVersion) {
 			surface: "characterOpen",
 		}));
 	}
+	if (rulesVersion.schemaVersion !== 1) return null;
 	const legacyDecision = evaluateCampaignRules({
 		capabilities: [],
 		expectedRulesVersionId: rulesVersion.id,
@@ -416,7 +417,7 @@ export function getCampaignSettingsOverlayFromRulesVersion (rulesVersion) {
 		protocolVersion: CAMPAIGN_RULE_PROTOCOL_VERSION,
 		rulesVersion: {
 			...rulesVersion,
-			schemaVersion: 1,
+			catalogVersion: rulesVersion.catalogVersion ?? CAMPAIGN_RULES_CATALOG_VERSION,
 		},
 		surface: "characterOpen",
 	});

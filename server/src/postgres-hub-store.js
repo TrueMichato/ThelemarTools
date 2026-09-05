@@ -1628,6 +1628,18 @@ export class PostgresHubStore {
 				return prior;
 			}
 			if (campaignId) await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 3))`, [accountId, clientImportId]);
+			let existing = await client.query(`
+				SELECT * FROM hub.characters
+				WHERE owner_account_id = $1 AND client_import_id = $2
+					AND campaign_id IS NOT DISTINCT FROM $3
+			`, [accountId, clientImportId, campaignId]);
+			if (existing.rows[0]?.status === "active") {
+				const response = {character: stripProjectionPolicy(getCharacter(existing.rows[0]))};
+				await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "character.create", response});
+				await client.query("COMMIT");
+				return response;
+			}
 			if (campaignId && data.carry) {
 				const rulesResult = await client.query(`
 					SELECT r.id, r.version, r.schema_version, r.rules
@@ -1650,8 +1662,7 @@ export class PostgresHubStore {
 					protocolVersion,
 				});
 			}
-			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 3))`, [accountId, clientImportId]);
-			const existing = await client.query(`
+			existing = await client.query(`
 				SELECT * FROM hub.characters
 				WHERE owner_account_id = $1 AND client_import_id = $2
 					AND campaign_id IS NOT DISTINCT FROM $3
