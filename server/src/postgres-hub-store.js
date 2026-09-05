@@ -2971,42 +2971,56 @@ export class PostgresHubStore {
 	 * document or peer profile — those come from the scoped HTTP projector.
 	 */
 	async pGetCampaignCursor ({accountId, campaignId}) {
-		const membership = await this.pGetMembership({accountId, campaignId});
-		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
-		const [campaignResult, characterResult, sequenceResult] = await Promise.all([
-			this._pool.query(`
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+			const membershipResult = await client.query(`
+				SELECT id, campaign_id, account_id, role, status
+				FROM hub.memberships
+				WHERE campaign_id = $1 AND account_id = $2 AND status = 'active'
+			`, [campaignId, accountId]);
+			if (!membershipResult.rowCount) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+			const membership = getMembership(membershipResult.rows[0]);
+			const campaignResult = await client.query(`
 				SELECT id, owner_account_id, name, status, created_at,
 					active_rules_version_id, active_brew_bundle_version_id
 				FROM hub.campaigns
 				WHERE id = $1
-			`, [campaignId]),
-			this._pool.query(`SELECT id, owner_account_id, revision, projection_revision, operation_watermark FROM hub.characters WHERE campaign_id = $1 AND status = 'active' ORDER BY id`, [campaignId]),
-			this._pool.query(`SELECT COALESCE(max(sequence), 0) AS sequence FROM hub.domain_events WHERE campaign_id = $1`, [campaignId]),
-		]);
-		const campaign = campaignResult.rows[0];
-		return {
-			cursor: {campaignId, lastSequence: Number(sequenceResult.rows[0].sequence)},
-			campaign: campaign
-				? {
-					id: campaign.id,
-					ownerAccountId: campaign.owner_account_id,
-					name: campaign.name,
-					status: campaign.status,
-					createdAt: campaign.created_at,
-					activeRulesVersionId: campaign.active_rules_version_id,
-					activeBrewBundleVersionId: campaign.active_brew_bundle_version_id,
-				}
-				: null,
-			membership,
-			characterRefs: characterResult.rows.map(row => ({
-				id: row.id,
-				revision: Number(row.revision),
-				projectionRevision: Number(row.projection_revision ?? 1),
-				...(["dm", "co_dm"].includes(membership.role) || row.owner_account_id === accountId
-					? {operationWatermark: Number(row.operation_watermark ?? 0)}
-					: {}),
-			})),
-		};
+			`, [campaignId]);
+			const characterResult = await client.query(`SELECT id, owner_account_id, revision, projection_revision, operation_watermark FROM hub.characters WHERE campaign_id = $1 AND status = 'active' ORDER BY id`, [campaignId]);
+			const sequenceResult = await client.query(`SELECT COALESCE(max(sequence), 0) AS sequence FROM hub.domain_events WHERE campaign_id = $1`, [campaignId]);
+			const campaign = campaignResult.rows[0];
+			const cursor = {
+				cursor: {campaignId, lastSequence: Number(sequenceResult.rows[0].sequence)},
+				campaign: campaign
+					? {
+						id: campaign.id,
+						ownerAccountId: campaign.owner_account_id,
+						name: campaign.name,
+						status: campaign.status,
+						createdAt: campaign.created_at,
+						activeRulesVersionId: campaign.active_rules_version_id,
+						activeBrewBundleVersionId: campaign.active_brew_bundle_version_id,
+					}
+					: null,
+				membership,
+				characterRefs: characterResult.rows.map(row => ({
+					id: row.id,
+					revision: Number(row.revision),
+					projectionRevision: Number(row.projection_revision ?? 1),
+					...(["dm", "co_dm"].includes(membership.role) || row.owner_account_id === accountId
+						? {operationWatermark: Number(row.operation_watermark ?? 0)}
+						: {}),
+				})),
+			};
+			await client.query("COMMIT");
+			return cursor;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
 	}
 
 	async pListVisibleEvents ({accountId, campaignId, afterSequence = 0, limit = 500}) {
