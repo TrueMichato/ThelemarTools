@@ -15,9 +15,8 @@ The monitor checks readiness, protected metrics, WebSocket, TLS, Compose service
 outbox, maintenance age, backup age, and restore-drill age. A first run remains unhealthy until an isolated
 restore drill records evidence.
 
-Foundry is not covered by the five-minute monitor. `release.sh` verifies its listener during release preflight
-and post-release verification; every non-release host procedure must perform the runbook's explicit manual
-port-30000 check rather than assuming continuous monitoring.
+The host is now dedicated to the Hub after Foundry was intentionally decommissioned. `release.sh` validates
+that the rendered Compose model contains only named Hub services; it does not perform host-wide cleanup.
 
 Thresholds include:
 
@@ -34,7 +33,7 @@ V1-G1 is not implementation work. It requires live-host evidence for:
 
 - release dry run and deliberate promotion of an exact verified descendant tag;
 - lock contention, pre-cutover backup failure, and compatible post-cutover rollback failure drills;
-- uninterrupted Foundry listener;
+- Hub-only service isolation with no destructive Compose or volume teardown;
 - scheduled maintenance/backup/monitor runs;
 - encrypted off-machine copy;
 - isolated restore within RPO <=24h and RTO <=4h;
@@ -59,7 +58,7 @@ Record:
 - image/Compose/provenance identities;
 - migration plan/applied versions and compatibility;
 - encrypted backup filename/hash/size and restore target/duration;
-- TLS/WebSocket/metrics/Foundry/one-replica checks;
+- TLS/WebSocket/metrics/Hub-service-scope/one-replica checks;
 - failure phase, traffic/schema mutation state, rollback result;
 - defects, waivers, user impact, and go/no-go.
 
@@ -84,7 +83,8 @@ Use `docs/hub/runbooks/README.md` and select the exact current procedure:
 - `member-removal.md`, `account-deletion.md`, `campaign-ownership-recovery.md`: live lifecycle operator actions;
   account purge uses the checked-in `hub:purge-accounts` path rather than ad hoc database deletion, and
   exceptional ownership recovery requires explicit authorization and a reviewed one-off transaction;
-- `oracle-provisioning.md`: host-specific reference; its no-stop/Foundry rules apply even after provisioning.
+- `oracle-provisioning.md`: historical Phase 6G record; its Foundry coexistence sections are superseded, while
+  its protected-host cautions remain relevant.
 
 Each runbook action must preserve its stated prerequisites, stop conditions, verification, rollback, evidence,
 and escalation owner.

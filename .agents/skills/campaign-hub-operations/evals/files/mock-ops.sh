@@ -18,7 +18,8 @@ environment=disposable-local-mock
 network_access=disabled
 shared_host=true
 operator_authorization=absent
-foundry_listener=30000
+host_role=hub-only
+compose_scope=hub-services-only
 boot_volume_gb=100
 root_usage_percent=12
 EOF

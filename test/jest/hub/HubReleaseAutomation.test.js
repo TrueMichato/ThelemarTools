@@ -11,6 +11,45 @@ function makeTempDir () {
 	return fs.mkdtempSync(path.join(os.tmpdir(), "hub-release-test-"));
 }
 
+function getIsolatedGitEnv (baseEnv = process.env) {
+	const env = {...baseEnv};
+	const exactKeys = new Set([
+		"GIT_ALLOW_PROTOCOL",
+		"GIT_ALTERNATE_OBJECT_DIRECTORIES",
+		"GIT_COMMON_DIR",
+		"GIT_CONFIG",
+		"GIT_CONFIG_COUNT",
+		"GIT_CONFIG_GLOBAL",
+		"GIT_CONFIG_NOSYSTEM",
+		"GIT_CONFIG_PARAMETERS",
+		"GIT_CONFIG_SYSTEM",
+		"GIT_DIR",
+		"GIT_INDEX_FILE",
+		"GIT_OBJECT_DIRECTORY",
+		"GIT_PREFIX",
+		"GIT_PROTOCOL_FROM_USER",
+		"GIT_WORK_TREE",
+	]);
+	for (const key of Object.keys(env)) {
+		if (exactKeys.has(key) || /^GIT_CONFIG_(?:KEY|VALUE)_\d+$/.test(key)) delete env[key];
+	}
+	env.GIT_CONFIG_NOSYSTEM = "1";
+	env.GIT_CONFIG_GLOBAL = os.devNull;
+	env.GIT_CONFIG_COUNT = "1";
+	env.GIT_CONFIG_KEY_0 = "protocol.file.allow";
+	env.GIT_CONFIG_VALUE_0 = "always";
+	return env;
+}
+
+function runGit (args, options = {}) {
+	const {env = process.env, ...spawnOptions} = options;
+	return spawnSync("git", args, {...spawnOptions, env: getIsolatedGitEnv(env)});
+}
+
+function runGitShell (script, baseEnv = process.env) {
+	return spawnSync("bash", ["-c", script], {encoding: "utf8", env: getIsolatedGitEnv(baseEnv)});
+}
+
 function runSimulation ({
 	dir,
 	failPhase,
@@ -51,6 +90,57 @@ function runSimulation ({
 }
 
 describe("Campaign Hub deliberate release automation", () => {
+	it("isolates disposable Git fixtures from hostile inherited config", () => {
+		const hostileEnv = {
+			...process.env,
+			GIT_ALLOW_PROTOCOL: "https:ssh",
+			GIT_CONFIG: "/tmp/hostile-git-config",
+			GIT_CONFIG_PARAMETERS: "'protocol.file.allow'='never'",
+			GIT_CONFIG_COUNT: "1",
+			GIT_CONFIG_KEY_0: "protocol.file.allow",
+			GIT_CONFIG_VALUE_0: "never",
+			GIT_CONFIG_KEY_9: "core.hooksPath",
+			GIT_CONFIG_VALUE_9: "/tmp/hostile-hooks",
+			GIT_PROTOCOL_FROM_USER: "0",
+		};
+		const isolated = getIsolatedGitEnv(hostileEnv);
+
+		expect(isolated).toMatchObject({
+			GIT_CONFIG_NOSYSTEM: "1",
+			GIT_CONFIG_GLOBAL: os.devNull,
+			GIT_CONFIG_COUNT: "1",
+			GIT_CONFIG_KEY_0: "protocol.file.allow",
+			GIT_CONFIG_VALUE_0: "always",
+		});
+		for (const key of [
+			"GIT_ALLOW_PROTOCOL",
+			"GIT_CONFIG",
+			"GIT_CONFIG_PARAMETERS",
+			"GIT_CONFIG_KEY_9",
+			"GIT_CONFIG_VALUE_9",
+			"GIT_PROTOCOL_FROM_USER",
+		]) expect(isolated).not.toHaveProperty(key);
+
+		const dir = makeTempDir();
+		try {
+			const remote = path.join(dir, "remote.git");
+			const checkout = path.join(dir, "checkout");
+			expect(runGit(["init", "--bare", remote], {env: hostileEnv}).status).toBe(0);
+			expect(runGit(["init", checkout], {env: hostileEnv}).status).toBe(0);
+			for (const args of [
+				["-C", checkout, "config", "user.name", "Release Test"],
+				["-C", checkout, "config", "user.email", "release@example.invalid"],
+				["-C", checkout, "remote", "add", "origin", remote],
+			]) expect(runGit(args, {env: hostileEnv}).status).toBe(0);
+			fs.writeFileSync(path.join(checkout, "file"), "release\n");
+			expect(runGit(["-C", checkout, "add", "file"], {env: hostileEnv}).status).toBe(0);
+			expect(runGit(["-C", checkout, "commit", "-m", "release"], {env: hostileEnv}).status).toBe(0);
+			expect(runGit(["-C", checkout, "push", "origin", "HEAD"], {env: hostileEnv}).status).toBe(0);
+		} finally {
+			fs.rmSync(dir, {recursive: true, force: true});
+		}
+	});
+
 	it("refuses ambient simulation without test mode and creates no release evidence", () => {
 		const dir = makeTempDir();
 		try {
@@ -137,29 +227,29 @@ describe("Campaign Hub deliberate release automation", () => {
 		try {
 			const remote = path.join(dir, "remote.git");
 			const checkout = path.join(dir, "checkout");
-			expect(spawnSync("git", ["init", "--bare", remote]).status).toBe(0);
-			expect(spawnSync("git", ["init", checkout]).status).toBe(0);
+			expect(runGit(["init", "--bare", remote]).status).toBe(0);
+			expect(runGit(["init", checkout]).status).toBe(0);
 			for (const args of [
 				["-C", checkout, "config", "user.name", "Release Test"],
 				["-C", checkout, "config", "user.email", "release@example.invalid"],
 				["-C", checkout, "remote", "add", "origin", remote],
-			]) expect(spawnSync("git", args).status).toBe(0);
+			]) expect(runGit(args).status).toBe(0);
 			fs.writeFileSync(path.join(checkout, "file"), "release\n");
-			expect(spawnSync("git", ["-C", checkout, "add", "file"]).status).toBe(0);
-			expect(spawnSync("git", ["-C", checkout, "commit", "-m", "release"]).status).toBe(0);
-			expect(spawnSync("git", ["-C", checkout, "tag", "-a", "hub-test", "-m", "verified"]).status).toBe(0);
-			expect(spawnSync("git", ["-C", checkout, "push", "origin", "HEAD", "refs/tags/hub-test"]).status).toBe(0);
-			const expectedSha = spawnSync("git", ["-C", checkout, "rev-parse", "HEAD"], {encoding: "utf8"}).stdout.trim();
+			expect(runGit(["-C", checkout, "add", "file"]).status).toBe(0);
+			expect(runGit(["-C", checkout, "commit", "-m", "release"]).status).toBe(0);
+			expect(runGit(["-C", checkout, "tag", "-a", "hub-test", "-m", "verified"]).status).toBe(0);
+			expect(runGit(["-C", checkout, "push", "origin", "HEAD", "refs/tags/hub-test"]).status).toBe(0);
+			const expectedSha = runGit(["-C", checkout, "rev-parse", "HEAD"], {encoding: "utf8"}).stdout.trim();
 			const script = `source ${JSON.stringify(releaseScript)}; resolve_remote_tag ${JSON.stringify(checkout)} hub-test`;
-			const result = spawnSync("bash", ["-c", script], {encoding: "utf8"});
+			const result = runGitShell(script);
 			expect(result.status).toBe(0);
 			expect(result.stdout.trim().split("\t")).toEqual([expect.stringMatching(/^[0-9a-f]{40}$/), expectedSha]);
 
-			expect(spawnSync("git", ["-C", checkout, "tag", "hub-lightweight"]).status).toBe(0);
-			expect(spawnSync("git", ["-C", checkout, "push", "origin", "refs/tags/hub-lightweight"]).status).toBe(0);
-			const mismatch = spawnSync("bash", ["-c",
+			expect(runGit(["-C", checkout, "tag", "hub-lightweight"]).status).toBe(0);
+			expect(runGit(["-C", checkout, "push", "origin", "refs/tags/hub-lightweight"]).status).toBe(0);
+			const mismatch = runGitShell(
 				`source ${JSON.stringify(releaseScript)}; resolve_remote_tag ${JSON.stringify(checkout)} hub-lightweight`,
-			], {encoding: "utf8"});
+			);
 			expect(mismatch.status).not.toBe(0);
 			expect(mismatch.stderr).toMatch(/must be an annotated tag/);
 		} finally {
@@ -167,44 +257,78 @@ describe("Campaign Hub deliberate release automation", () => {
 		}
 	});
 
+	it("rejects services outside the dedicated Hub Compose scope", () => {
+		const allowed = spawnSync("bash", ["-c", [
+			`source ${JSON.stringify(releaseScript)}`,
+			"compose_current () {",
+			"  [[ \"$*\" == \"--profile * config --quiet\" ]] && return 0",
+			"  [[ \"$*\" == \"--profile * config --services\" ]] && printf '%s\\n' db migrate grant-roles bff static edge maintenance backup",
+			"}",
+			"assert_compose_safe",
+		].join("\n")], {encoding: "utf8"});
+		expect(allowed.status).toBe(0);
+
+		const unrelated = spawnSync("bash", ["-c", [
+			`source ${JSON.stringify(releaseScript)}`,
+			"compose_current () {",
+			"  [[ \"$*\" == \"--profile * config --quiet\" ]] && return 0",
+			"  [[ \"$*\" == \"--profile * config --services\" ]] && printf '%s\\n' db bff unrelated-service",
+			"}",
+			"assert_compose_safe",
+		].join("\n")], {encoding: "utf8"});
+		expect(unrelated.status).not.toBe(0);
+		expect(unrelated.stderr).toMatch(/non-Hub service: unrelated-service/);
+
+		const enumerationFailure = spawnSync("bash", ["-c", [
+			`source ${JSON.stringify(releaseScript)}`,
+			"compose_current () {",
+			"  [[ \"$*\" == \"--profile * config --quiet\" ]] && return 0",
+			"  return 42",
+			"}",
+			"assert_compose_safe",
+		].join("\n")], {encoding: "utf8"});
+		expect(enumerationFailure.status).not.toBe(0);
+		expect(enumerationFailure.stderr).toMatch(/could not enumerate the complete Hub Compose service scope/);
+	});
+
 	it("rejects dirty release source and local/origin tag identity drift", () => {
 		const dir = makeTempDir();
 		try {
 			const remote = path.join(dir, "remote.git");
 			const checkout = path.join(dir, "checkout");
-			expect(spawnSync("git", ["init", "--bare", remote]).status).toBe(0);
-			expect(spawnSync("git", ["init", checkout]).status).toBe(0);
+			expect(runGit(["init", "--bare", remote]).status).toBe(0);
+			expect(runGit(["init", checkout]).status).toBe(0);
 			for (const args of [
 				["-C", checkout, "config", "user.name", "Release Test"],
 				["-C", checkout, "config", "user.email", "release@example.invalid"],
 				["-C", checkout, "remote", "add", "origin", remote],
-			]) expect(spawnSync("git", args).status).toBe(0);
+			]) expect(runGit(args).status).toBe(0);
 			fs.writeFileSync(path.join(checkout, "file"), "one\n");
-			expect(spawnSync("git", ["-C", checkout, "add", "file"]).status).toBe(0);
-			expect(spawnSync("git", ["-C", checkout, "commit", "-m", "one"]).status).toBe(0);
-			expect(spawnSync("git", ["-C", checkout, "tag", "-a", "hub-test", "-m", "one"]).status).toBe(0);
-			expect(spawnSync("git", ["-C", checkout, "push", "origin", "HEAD", "refs/tags/hub-test"]).status).toBe(0);
-			const originalObject = spawnSync("git", ["-C", checkout, "rev-parse", "refs/tags/hub-test"], {encoding: "utf8"}).stdout.trim();
+			expect(runGit(["-C", checkout, "add", "file"]).status).toBe(0);
+			expect(runGit(["-C", checkout, "commit", "-m", "one"]).status).toBe(0);
+			expect(runGit(["-C", checkout, "tag", "-a", "hub-test", "-m", "one"]).status).toBe(0);
+			expect(runGit(["-C", checkout, "push", "origin", "HEAD", "refs/tags/hub-test"]).status).toBe(0);
+			const originalObject = runGit(["-C", checkout, "rev-parse", "refs/tags/hub-test"], {encoding: "utf8"}).stdout.trim();
 
 			fs.writeFileSync(path.join(checkout, "dirty"), "untracked\n");
-			const dirty = spawnSync("bash", ["-c",
+			const dirty = runGitShell(
 				`source ${JSON.stringify(releaseScript)}; ROOT=${JSON.stringify(checkout)}; assert_clean_root`,
-			], {encoding: "utf8"});
+			);
 			expect(dirty.status).not.toBe(0);
 			expect(dirty.stderr).toMatch(/deployment checkout is dirty/);
 			fs.rmSync(path.join(checkout, "dirty"));
 
 			fs.writeFileSync(path.join(checkout, "file"), "two\n");
-			expect(spawnSync("git", ["-C", checkout, "commit", "-am", "two"]).status).toBe(0);
-			expect(spawnSync("git", ["-C", checkout, "tag", "-fa", "hub-test", "-m", "two"]).status).toBe(0);
-			expect(spawnSync("git", ["-C", checkout, "push", "--force", "origin", "refs/tags/hub-test"]).status).toBe(0);
+			expect(runGit(["-C", checkout, "commit", "-am", "two"]).status).toBe(0);
+			expect(runGit(["-C", checkout, "tag", "-fa", "hub-test", "-m", "two"]).status).toBe(0);
+			expect(runGit(["-C", checkout, "push", "--force", "origin", "refs/tags/hub-test"]).status).toBe(0);
 			const script = [
 				`source ${JSON.stringify(releaseScript)}`,
 				`pair="$(resolve_remote_tag ${JSON.stringify(checkout)} hub-test)"`,
 				`remote_object="\${pair%%$'\\t'*}"`,
 				`[[ "$remote_object" == ${JSON.stringify(originalObject)} ]] || fail "local and origin tag identities do not match"`,
 			].join("; ");
-			const mismatch = spawnSync("bash", ["-c", script], {encoding: "utf8"});
+			const mismatch = runGitShell(script);
 			expect(mismatch.status).not.toBe(0);
 			expect(mismatch.stderr).toMatch(/local and origin tag identities do not match/);
 		} finally {
@@ -448,16 +572,21 @@ describe("Campaign Hub deliberate release automation", () => {
 		}
 	});
 
-	it("pins expand/deploy/contract rules and never mutates Foundry or reverses migrations", () => {
+	it("pins Hub-only release scope and never tears down the environment or reverses migrations", () => {
 		const source = fs.readFileSync(releaseScript, "utf8");
 		const policy = JSON.parse(fs.readFileSync(path.join(repoRoot, "deploy/hub/migration-policy.json"), "utf8"));
 		const releaseCompose = fs.readFileSync(path.join(repoRoot, "compose.hub.release.yml"), "utf8");
 		expect(source).toContain("flock -n 9");
 		expect(source).toContain("git -C \"$ROOT\" verify-tag");
 		expect(source.match(/assert_compose_safe/g)?.length).toBeGreaterThanOrEqual(3);
+		expect(source.match(/assert_release_compose_safe/g)?.length).toBeGreaterThanOrEqual(3);
+		expect(source).toContain("release Compose configuration contains non-Hub service");
 		expect(source).toContain("restore_candidate_image_tags");
 		expect(source).toContain("wait_for_public_ready");
 		expect(source).toContain("assert_candidate_images");
+		expect(source).toContain("compose_release up -d --no-deps --force-recreate --wait bff static");
+		expect(source).toContain("compose_release up -d --no-deps --force-recreate edge");
+		expect(source).toContain("compose_current stop bff");
 		for (const variable of [
 			"HUB_RELEASE_MIGRATE_IMAGE",
 			"HUB_RELEASE_GRANT_ROLES_IMAGE",
@@ -466,8 +595,10 @@ describe("Campaign Hub deliberate release automation", () => {
 		]) expect(releaseCompose).toContain(`\${${variable}:?`);
 		expect(source).toContain("contract migration");
 		expect(source).toContain("never run a down migration");
-		expect(source).not.toMatch(/docker compose[\s\S]{0,120}\bdown\b/);
-		expect(source).not.toMatch(/systemctl\s+(?:stop|restart)\s+foundry/i);
+		expect(source).not.toMatch(/compose_(?:current|release)\s+(?:down|rm)\b/);
+		expect(source).not.toMatch(/docker\s+compose[\s\S]{0,120}\bdown\b/);
+		expect(source).not.toMatch(/docker\s+volume\s+(?:rm|prune)\b/);
+		expect(source).not.toMatch(/Foundry|HUB_FOUNDRY_PORT|30000/i);
 		expect(source).not.toMatch(/^\s*chown\b/m);
 		expect(Object.values(policy.migrations).every(entry => ["expand", "contract"].includes(entry.phase))).toBe(true);
 	});

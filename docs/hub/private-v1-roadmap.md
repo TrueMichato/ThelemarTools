@@ -152,8 +152,8 @@ Decision progress:
 - a $0 recurring-cost constraint was set; free tiers re-evaluated and Oracle Cloud Always Free selected;
 - ADR 0010 accepted (supersedes ADR 0009); public Compose overlay and provisioning runbook added;
 - provider client-IP adapter and 25-second WebSocket heartbeat implemented;
-- the existing Foundry VM was safely repurposed on Ubuntu 22.04 LTS because replacement ARM capacity was
-  unavailable;
+- the former Foundry VM was safely repurposed on Ubuntu 22.04 LTS because replacement ARM capacity was
+  unavailable; Foundry was later intentionally decommissioned, leaving the host dedicated to the Hub;
 - private same-origin HTTPS, GitHub OAuth, PostgreSQL, static, BFF, and WebSocket staging is live;
 - the release candidate has a role-aware campaign operation page with player/DM task ordering, a permission-
   aware inbox, recent activity, copyable invites, and secondary administration disclosures;

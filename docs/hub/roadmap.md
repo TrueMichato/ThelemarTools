@@ -1,7 +1,7 @@
 # Campaign Hub living roadmap
 
 > **Status:** Authoritative living roadmap
-> **Last reviewed:** 2026-09-05
+> **Last reviewed:** 2026-09-06
 > **Owner:** Campaign Hub maintainers
 
 This is the single source of truth for Campaign Hub delivery status, sequencing, dependencies, and acceptance
@@ -27,7 +27,7 @@ rather than inferring deployment or enablement from merged code.
 | Status | Milestone | Evidence or remaining decision |
 |---|---|---|
 | **shipped** | Private invite-only Hub implementation through Phase 6F | Server, browser, Character Sheet, DM Screen, lifecycle, migration, operations, CI, and real-stack evidence are summarized in [implementation status](implementation-status.md) |
-| **shipped** | Phase 6G Oracle deployment | Release `hub-staging-2026-09-01` at `8f181712` is deployed to the private Oracle Always Free environment; HTTPS, GitHub OAuth, PostgreSQL, static, BFF, API, and WebSocket smoke checks pass |
+| **shipped** | Phase 6G Oracle deployment | Release `hub-staging-2026-09-01` at `8f181712` is deployed to the private Hub-only Oracle Always Free environment; HTTPS, GitHub OAuth, PostgreSQL, static, BFF, API, and WebSocket smoke checks pass |
 | **shipped** | V2-T0 release-automation implementation | [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219) merged the deliberate tagged Oracle release path; its real-host drills remain blocked under V1-G1 |
 | **shipped** | V2-T1 legible activity history | [PR #218](https://github.com/TrueMichato/ThelemarTools/pull/218) merged semantic titles, privacy-safe display-name snapshots, historical fallback, and lifecycle coverage |
 | **shipped** | Coordinated implementation closeout | All 59 planned implementation todos are complete. [PR #241](https://github.com/TrueMichato/ThelemarTools/pull/241) merged carry/encumbrance enforcement as `de5acaabfa6cc64ce804bb43b94b74ccf3bc2714`; [PR #242](https://github.com/TrueMichato/ThelemarTools/pull/242) integrated source/species/edition content enforcement as `168d6e9ac36c11e2c938f21a4324b803f3f2fb61`; [PR #243](https://github.com/TrueMichato/ThelemarTools/pull/243) merged the role-adaptive Campaign Overview and authority hardening as `b8d31d3416b934cc9275b859b5932db050005351` |
@@ -62,6 +62,8 @@ Scope:
   RTO <=4 hours;
 - dry-run and deliberately promote a verified release containing merged head
   `b8d31d3416b934cc9275b859b5932db050005351`;
+- prove release operations remain confined to the named Hub Compose services and never use destructive
+  environment or volume teardown;
 - rehearse rollback to release `hub-staging-2026-09-01` at `8f181712`, including application,
   migration-compatibility, readiness, and WebSocket recovery checks.
 
@@ -72,6 +74,8 @@ Acceptance:
 - the isolated restore is readable, migration-current, and completes within the recovery objectives;
 - rollback follows the repository runbooks and restores a healthy exact-release service without ad hoc database
   edits;
+- release evidence shows only Hub services were recreated or stopped, with no Compose `down`, service-wide
+  cleanup, or volume deletion;
 - evidence records timestamps, release, migration version, operator, duration, outcome, and follow-up issues
   without secrets or private campaign content.
 

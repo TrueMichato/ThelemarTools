@@ -1,13 +1,14 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-09-05
+> **Last updated:** 2026-09-06
 > **Owner:** Campaign Hub maintainers
 
 ## Status
 
-Private invite-only V1 release `hub-staging-2026-09-01` at `8f181712` is deployed on a reused Oracle Always
-Free ARM instance. The same-origin HTTPS, GitHub OAuth, PostgreSQL, static site, BFF, API, and WebSocket smoke
-checks pass. Phase 6G deployment is complete. The controlled one-DM/two-player test remains gated on
+Private invite-only V1 release `hub-staging-2026-09-01` at `8f181712` is deployed on a reused, Hub-only Oracle
+Always Free ARM instance. Foundry was intentionally decommissioned and is not a release prerequisite. The
+same-origin HTTPS, GitHub OAuth, PostgreSQL, static site, BFF, API, and WebSocket smoke checks pass. Phase 6G
+deployment is complete. The controlled one-DM/two-player test remains gated on
 host-operations proof and the physical game day described in the [living roadmap](roadmap.md). Semi-public
 onboarding remains intentionally disabled.
 
@@ -39,7 +40,8 @@ out concurrent operators, verifies an immutable annotated tag and clean exact ch
 identity, creates and reads an encrypted pre-release backup, enforces expand/deploy/contract migration
 compatibility, applies the checked-in Compose overlays, performs complete public/runtime/static/backup checks,
 and emits redacted machine/human evidence. It can automatically roll back only compatible application images;
-it never reverses migrations, restores a database, changes filesystem ownership, or touches Foundry.
+it never reverses migrations, restores a database, changes filesystem ownership, performs destructive Compose
+or volume teardown, or mutates services outside the Hub Compose project.
 
 V2-T0 release-automation implementation is **shipped** by
 [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219), and V2-T1 legible activity history is
@@ -135,8 +137,9 @@ than registry digest, because the free tier is ARM while CI runners are x86 (ADR
 
 The guarded `do-connecting-ip` adapter and 25-second WebSocket heartbeat are implemented and pass the full
 real-stack gate; the adapter stays disabled on Oracle, where Caddy is the sole ingress. Release
-`hub-staging-2026-09-01` at `8f181712` is live on the repurposed Foundry VM and its deployment smoke checks
-pass. Only the host-operations proof and physical one-DM/two-player game day remain before the V1 go/no-go.
+`hub-staging-2026-09-01` at `8f181712` is live on the Oracle VM originally repurposed from Foundry. Foundry has
+since been intentionally decommissioned, leaving a Hub-only host; the deployment smoke checks pass. Only the
+host-operations proof and physical one-DM/two-player game day remain before the V1 go/no-go.
 
 ## Implemented
 
@@ -294,8 +297,9 @@ rewritten into a current whole-repository baseline. The latest merged handoffs a
 1. **Host-operations proof:** run the shipped release automation's Oracle dry run and deliberate release against
    the next verified `hub-*` tag containing merged head
    `b8d31d3416b934cc9275b859b5932db050005351`; prove lock contention, pre-cutover backup failure, compatible app rollback,
-   redacted evidence, uninterrupted Foundry, timers, encrypted off-machine backup, isolated restore,
-   monitoring/alerts, and the schema-incompatible break-glass decision without restoring over production.
+   redacted evidence, Hub-only service isolation without destructive Compose/volume teardown, timers, encrypted
+   off-machine backup, isolated restore, monitoring/alerts, and the schema-incompatible break-glass decision
+   without restoring over production.
 2. **Physical game day:** complete and record the private one-DM/two-player session with real GitHub OAuth and
    physical devices, then make an explicit go/no-go decision.
 

@@ -1,13 +1,13 @@
 ---
 name: campaign-hub-operations
-description: "Operate, release, recover, and review the live or staged Campaign Hub deployment in TrueMichato/ThelemarTools. Use for Oracle Always Free A1 work, deploy/hub/release.sh, immutable release tags, Foundry coexistence on port 30000, release-time migrations/roles, backups, isolated restores, rollback, timers, monitoring, staging, V1 evidence/game days, break glass, secret/session rotation, allowlist/provider enablement, and determining what is deployed or enabled. Lifecycle terms trigger this skill only for executing or reviewing deployed operator work: bounded account purge, live member-removal incident/runbook verification, or explicitly authorized one-off ownership recovery. Also use for changes to Hub release/backup/restore/operator automation. Do not use for account-deletion, member-removal, or ownership-transfer/recovery endpoint/store/UI/test implementation; that is campaign-hub-development. Do not use for unrelated Docker/OCI/OAuth work."
+description: "Operate, release, recover, and review the live or staged Campaign Hub deployment in TrueMichato/ThelemarTools. Use for Oracle Always Free A1 work, deploy/hub/release.sh, immutable release tags, Hub-only Compose/service isolation, release-time migrations/roles, backups, isolated restores, rollback, timers, monitoring, staging, V1 evidence/game days, break glass, secret/session rotation, allowlist/provider enablement, and determining what is deployed or enabled. Lifecycle terms trigger this skill only for executing or reviewing deployed operator work: bounded account purge, live member-removal incident/runbook verification, or explicitly authorized one-off ownership recovery. Also use for changes to Hub release/backup/restore/operator automation. Do not use for account-deletion, member-removal, or ownership-transfer/recovery endpoint/store/UI/test implementation; that is campaign-hub-development. Do not use for unrelated Docker/OCI/OAuth work."
 ---
 
 # Campaign Hub Operations
 
-This skill protects an irreplaceable reused Oracle host and its co-tenant Foundry service. Default to read-only
-inspection, exact identity, and fail-closed stops. A working-looking ad hoc command is not an acceptable release
-or recovery procedure.
+This skill protects an irreplaceable reused, Hub-only Oracle host. Default to read-only inspection, exact
+identity, and fail-closed stops. A working-looking ad hoc command is not an acceptable release or recovery
+procedure.
 
 ## Start here
 
@@ -15,7 +15,7 @@ Read the reference matching the task:
 
 | Work | Reference |
 |---|---|
-| Oracle host, Foundry, exact tag promotion, release automation, rollback decision | [Oracle safety and release](./references/oracle-safety-and-release.md) |
+| Oracle host, Hub service isolation, exact tag promotion, release automation, rollback decision | [Oracle safety and release](./references/oracle-safety-and-release.md) |
 | Migrations, roles, backups, isolated restore | [Recovery, migrations and roles](./references/recovery-migrations-and-roles.md) |
 | Timers, monitoring, lifecycle/incident recovery, staging/game-day gates, runbook routing and evidence | [Evidence and runbooks](./references/evidence-and-runbooks.md) |
 
@@ -49,9 +49,9 @@ target, command, expected effect, stop conditions, and recovery path before aski
 - **Online boot-volume expansion is not shape resize.** It is allowed only when the runbook directs it and the
   human explicitly approves it; identify the real root device, use OCI's documented online rescan/grow
   procedure, verify filesystem growth, and never detach the volume. The current 100 GB volume does not need it.
-- **Do not independently stop or reconfigure Foundry.** Preserve its service, data, firewall path, and port
-  `30000`; after an approved host Reboot/Reset, verify the listener and user-facing service before proceeding.
-  Hub Compose must never reference that port.
+- **Keep release automation scoped to the Hub.** The host is Hub-only, but release and rollback may recreate only
+  the named Hub application services, may stop only the Hub BFF on the incompatible failure path, and must never
+  use Compose `down`, remove services or volumes, or perform host-wide cleanup.
 - **Never deploy a moving branch, lightweight tag, dirty checkout, raw Compose build, or manually chosen image.**
   Promotion uses an immutable annotated `hub-*` tag and `deploy/hub/release.sh`.
 - **Never pass `--yes` or type `RELEASE <tag> <sha>` on the operator's behalf.** The human operator must run the
@@ -67,7 +67,7 @@ target, command, expected effect, stop conditions, and recovery path before aski
 - **Never rewrite coordinated release history.** Use normal descendant commits and immutable release tags; do
   not rebase, amend, reset, squash, force-push, or move a reviewed tag.
 - Stop on dirty source, tag/SHA drift, missing migration policy, unhealthy current service, missing/old backup or
-  restore evidence, Foundry listener failure, role mismatch, privacy regression, outbox aging, or ambiguous target.
+  restore evidence, non-Hub Compose services, role mismatch, privacy regression, outbox aging, or ambiguous target.
 
 ## Operational method
 
@@ -78,8 +78,8 @@ target, command, expected effect, stop conditions, and recovery path before aski
 3. **Read the current runbook and script:** commands in prose are secondary to checked-in automation and its
    tests. Confirm the runbook still matches the script.
 4. **Run read-only preflight:** inspect current health, clean checkout, tag reachability, backup/restore age,
-   disk, migrations/policy, roles, TLS/WebSocket/metrics, one-replica state, and Foundry listener without running
-   the release script.
+   disk, migrations/policy, roles, TLS/WebSocket/metrics, one-replica state, and Hub Compose service scope
+   without running the release script.
 5. **Stop for authorization** before the first external mutation, including a shared-host `release.sh --dry-run`.
 6. **Use the narrow automated path.** Let `release.sh`, migration tools, backup scripts, or named runbook own the
    action. Do not improvise equivalent shell.

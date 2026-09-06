@@ -11,7 +11,7 @@
   account with `HUB_BACKUP_UID=1001` and `HUB_BACKUP_GID=1001`;
 - Hub, migration, container, security, and documentation gates passed;
 - backup age <26h and last restore drill <35d;
-- Foundry remains available on port 30000 and is outside every Hub Compose operation;
+- the host is dedicated to the Hub, and the rendered Compose model contains only the named Hub services;
 - at least 4 GiB free on the release filesystem and 1 GiB on the backup filesystem.
 
 ## Procedure
@@ -23,10 +23,10 @@ From the repository root, inspect the read-only path first:
 ```
 
 The dry run locks the release path, validates the host/current deployment/tag, checks live HTTPS/WebSocket/
-metrics through `monitor-host.sh`, verifies Foundry is listening, checks out the candidate, revalidates the
-candidate Compose rendering, builds its exact source, and produces the migration compatibility plan. It does
-not create a backup, apply migrations, grant roles, or recreate services; it restores the previous checkout
-and every pre-build Compose image tag after planning.
+metrics through `monitor-host.sh`, verifies the Compose model remains confined to the Hub service allowlist,
+checks out the candidate, revalidates the candidate Compose rendering, builds its exact source, and produces
+the migration compatibility plan. It does not create a backup, apply migrations, grant roles, or recreate
+services; it restores the previous checkout and every pre-build Compose image tag after planning.
 
 Run the deliberate release:
 
@@ -45,7 +45,7 @@ by the Oracle host.
 Strict phases are: process lock; preflight/current health; rollback capture; encrypted backup plus
 authentication/hash/`pg_restore --list` verification; immutable checkout; candidate build and migration plan;
 operator approval; forward migration and role grants; BFF/static/edge cutover; then complete health, TLS,
-WebSocket, metrics, migration, container, icon, service-worker, backup-age, and Foundry checks. JSON and text
+WebSocket, metrics, migration, container, icon, service-worker, and backup-age checks. JSON and text
 evidence are mode 0600 under `~/.local/state/thelemar-hub/releases/`.
 
 `compose.hub.release.yml` binds migration, grant, BFF, and static services to the exact image IDs captured after
@@ -53,13 +53,14 @@ the candidate build. The script revalidates those IDs and the BFF revision label
 so mutable local Compose tags cannot replace the reviewed candidate during operator approval.
 
 `--repair-backup-ids` may change only `HUB_BACKUP_UID` and `HUB_BACKUP_GID` in `.env.hub`. It never runs
-`chown`, and no release command stops, restarts, or configures Foundry.
+`chown`. Release commands recreate only BFF, static, and edge, may stop only the Hub BFF on the incompatible
+failure path, and never run Compose `down`, remove services, or delete volumes.
 
 ## Stop conditions
 
 - lock contention, dirty source, lightweight/moved/unreachable tag, or source/tag SHA drift;
 - wrong repository/root/user/UID/GID, permissive `.env.hub`, missing/relative backup path, or low disk;
-- current health/TLS/WebSocket/metrics/container/backup evidence failure or missing Foundry listener;
+- current health/TLS/WebSocket/metrics/container/backup evidence failure or a non-Hub Compose service;
 - migration checksum/plan mismatch or pending migration without explicit release-policy metadata;
 - any contract-phase migration;
 - backup/restore evidence missing;
@@ -85,7 +86,6 @@ Operator overrides are deliberately explicit:
 | `HUB_RELEASE_LOCK_FILE` | `/run/lock/thelemar-hub-release.lock` | Host process lock |
 | `HUB_RELEASE_EVIDENCE_DIR` | `~/.local/state/thelemar-hub/releases` | Private durable evidence root |
 | `HUB_RELEASE_REQUIRE_SIGNED_TAG` | `0` | Set to `1` to require `git verify-tag` |
-| `HUB_FOUNDRY_PORT` | `30000` | Listener that must remain present and absent from Hub Compose |
 
 `HUB_RELEASE_MIGRATE_IMAGE`, `HUB_RELEASE_GRANT_ROLES_IMAGE`, `HUB_RELEASE_BFF_IMAGE`, and
 `HUB_RELEASE_STATIC_IMAGE` are internal immutable IDs set by the script; operators must not preconfigure them.

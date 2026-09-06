@@ -199,9 +199,11 @@ base stack:
 | `deploy/hub/Caddyfile.public` | Serves `{$HUB_PUBLIC_DOMAIN}` with Caddy-managed public HTTPS, keeping the same `/api`, `/auth`, `/ws` → `bff:5052` routing and static fallback |
 | `compose.hub.public.yml` | Overlay replacing the edge service's published ports with `80`/`443` and swapping in the public Caddyfile |
 
-```bash
-docker compose --env-file .env.hub -f compose.hub.yml -f compose.hub.public.yml up --build -d
-```
+On the current Oracle host, do not start this overlay with raw Compose. Inspect it with
+`docker compose ... config`, then promote an immutable annotated `hub-*` tag through
+[deploy/promote](runbooks/deploy-promote.md), which owns backup, migration compatibility, exact image
+selection, cutover, rollback, and evidence. Raw `up --build` is limited to the disposable local reference
+stack above or a separately reviewed first-bootstrap procedure.
 
 Both `HUB_PUBLIC_DOMAIN` and `HUB_ACME_EMAIL` are required and fail fast if unset.
 
@@ -217,8 +219,9 @@ Keep port 80 open even though application traffic redirects to HTTPS. It provide
 HTTP certificate-challenge path; port 443 also permits the TLS-ALPN challenge. Caddy selects an available
 challenge and renews certificates automatically.
 
-For a full click-by-click provisioning path see
-[runbooks/oracle-provisioning.md](runbooks/oracle-provisioning.md).
+For current Oracle operations see [deploy/promote](runbooks/deploy-promote.md) and
+[Oracle host operations](runbooks/oracle-operations.md). The
+[Phase 6G provisioning record](runbooks/oracle-provisioning.md) is retained for historical context only.
 
 ## Oracle deployment requirements
 

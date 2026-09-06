@@ -1,7 +1,7 @@
 # Campaign Hub staging plan
 
 > **Status:** Release deployed; host-operations proof and physical game day remain
-> **Last reviewed:** 2026-09-05
+> **Last reviewed:** 2026-09-06
 > **Owner:** Campaign Hub maintainers
 
 ## Objectives
@@ -13,6 +13,7 @@ environment and must not use copied production characters.
 ## Current environment
 
 - A reused Oracle Always Free ARM VM runs the private staging stack on Ubuntu 22.04 LTS.
+- The host is Hub-only. Foundry was intentionally decommissioned and port 30000 is not a release prerequisite.
 - Caddy terminates public HTTPS and keeps the static site, API, OAuth, and WebSocket routes on one origin.
 - GitHub OAuth, PostgreSQL, campaign creation, and the basic deployment smoke checks pass.
 - Release `hub-staging-2026-09-01` at `8f181712` is deployed; Phase 6G is complete.

@@ -1,10 +1,12 @@
 # Campaign Hub operations
 
 > **Status:** Current portable procedures plus Oracle host installation runbook
-> **Last verified:** 2026-08-31
+> **Last verified:** 2026-09-06
 > **Owner:** Campaign Hub maintainers
 
-The commands below have been exercised locally against PostgreSQL 17. The reused Oracle deployment uses
+The commands below have been exercised locally against PostgreSQL 17. The reused Oracle host is now dedicated
+to the Campaign Hub after Foundry was intentionally decommissioned; release automation remains scoped to the
+named Hub Compose services and does not perform host-wide cleanup. The deployment uses
 nightly encrypted portable backups rather than managed PITR. Installation, off-machine copying, monitoring,
 and the isolated restore drill are defined in
 [Oracle host operations](runbooks/oracle-operations.md); the resulting evidence must still be produced on the
