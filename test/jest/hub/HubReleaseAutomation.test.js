@@ -14,6 +14,7 @@ function makeTempDir () {
 function getIsolatedGitEnv (baseEnv = process.env) {
 	const env = {...baseEnv};
 	const exactKeys = new Set([
+		"GIT_ALLOW_PROTOCOL",
 		"GIT_ALTERNATE_OBJECT_DIRECTORIES",
 		"GIT_COMMON_DIR",
 		"GIT_CONFIG",
@@ -92,6 +93,7 @@ describe("Campaign Hub deliberate release automation", () => {
 	it("isolates disposable Git fixtures from hostile inherited config", () => {
 		const hostileEnv = {
 			...process.env,
+			GIT_ALLOW_PROTOCOL: "https:ssh",
 			GIT_CONFIG: "/tmp/hostile-git-config",
 			GIT_CONFIG_PARAMETERS: "'protocol.file.allow'='never'",
 			GIT_CONFIG_COUNT: "1",
@@ -111,6 +113,7 @@ describe("Campaign Hub deliberate release automation", () => {
 			GIT_CONFIG_VALUE_0: "always",
 		});
 		for (const key of [
+			"GIT_ALLOW_PROTOCOL",
 			"GIT_CONFIG",
 			"GIT_CONFIG_PARAMETERS",
 			"GIT_CONFIG_KEY_9",
