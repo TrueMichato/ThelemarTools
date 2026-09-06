@@ -1,0 +1,63 @@
+{
+  "skill_name": "campaign-hub-development",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "We need a new Campaign Hub endpoint that lets a DM expire a proposed semantic operation early. Give me a change plan that identifies every authority, parity, event, idempotency, lifecycle, migration, documentation, and test surface that must move together. Do not edit files.",
+      "expected_output": "A source-led plan that treats the BFF/store transaction as authority, covers MemoryHubStore and PostgresHubStore parity, stable command/idempotency behavior, privacy-shaped terminal events, lifecycle interactions, protocol/capability considerations, and targeted/PostgreSQL/E2E evidence.",
+      "files": [],
+      "expectations": [
+        "The plan identifies server/src/app.js and both MemoryHubStore and PostgresHubStore as required authority/parity surfaces.",
+        "The plan covers stable command or idempotency identity, transaction ordering, audit/event/outbox behavior, and retry semantics.",
+        "The plan reviews event audience and non-enumerating privacy rather than exposing hidden target or source state.",
+        "The plan includes lifecycle/concurrency cases and executable PostgreSQL evidence, not memory-only tests.",
+        "The plan distinguishes current scope from unsupported broader semantic effects.",
+        "The plan covers an immutable migration and release-policy update when the persisted command vocabulary changes.",
+        "The plan updates the API, event/realtime, security, status, migration, and traceability documentation surfaces."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "A campaign Party Tracker sometimes shows stale or over-shared character data after character.projection.invalidated. Review the likely fix path and test strategy without changing code.",
+      "expected_output": "A privacy-first diagnosis that keeps invalidations metadata-only, refetches through the authorization-scoped projector, replaces rather than merges views, handles replay cursors/generation fencing/access loss, and checks DM Screen integration without persisting projections into the Board.",
+      "files": [],
+      "expectations": [
+        "The response states that character.projection.invalidated must remain metadata-only and must not carry character fields.",
+        "The response routes refresh through authorization-scoped HTTP projection fetch and replacement, not client-side field merging.",
+        "The response covers sequence or generation fencing, reconnect/replay, and access-loss cleanup.",
+        "The response preserves the rule that linked Party Tracker projections are read-only and excluded from serialized Board state.",
+        "The response names focused Hub/DM Screen tests and real-stack coverage for privacy or cross-user behavior."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Implementing enforced campaign exhaustion rules sounds small because the DM already selects an exhaustion mode. Explain the safe architecture and acceptance plan, including Character Sheet and DM Screen integration, without editing files.",
+      "expected_output": "A plan that recognizes exhaustion is currently advisory, requires a versioned capability and full surface evidence before relabeling it enforced, preserves transient overlays/local mode, keeps server enforcement authoritative, and routes Character Sheet/DM Screen details through their dedicated skills.",
+      "files": [],
+      "expectations": [
+        "The response explicitly says exhaustion is currently advisory and must not be called enforced before every applicable surface passes.",
+        "The response requires immutable rules-version identity, protocol/capability fail-closed behavior, and authoritative server checks.",
+        "The response preserves local/signed-out behavior and prevents campaign overlays from persisting into character or Board data.",
+        "The response addresses both Character Sheet and DM Screen integration and routes to their dedicated guidance.",
+        "The response includes memory/PostgreSQL parity, mutation testing, and relevant real-stack E2E.",
+        "The response requires Character Sheet and Party Tracker exhaustion formulas to remain in parity rather than independently diverge.",
+        "The response handles incompatible existing exhaustion state without silent clamping or rewrite and blocks campaign-bound actions while policy state is unavailable."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Review a Campaign Hub lifecycle proposal that adds account deletion, member removal, and ownership recovery product changes, but also requires receipt idempotency on every private mutation including logout and all lease operations. Explain the correct authority, idempotency, parity, and test boundaries without editing files or performing live operations.",
+      "expected_output": "A development-focused review that keeps lifecycle endpoint/store/UI/test work in the product skill, applies receipts to durable commands, preserves common mutation security on ephemeral controls without inventing receipts, verifies exact current route exceptions, and routes only live purge or one-off recovery execution to operations.",
+      "files": [],
+      "expectations": [
+        "The response classifies account-deletion, member-removal, and ownership-transfer/recovery endpoint, store, UI, event, and test changes as Campaign Hub product development rather than live operations.",
+        "The response requires session, exact Origin, CSRF, supported protocol, schema, and role checks for private mutations.",
+        "The response requires actor/body-bound idempotency and receipts for durable commands such as account deletion request/cancel, member removal, ownership transfer, and account session revocation.",
+        "The response rejects a blanket receipt requirement for POST /api/logout, character lease acquire/release, and DM-workspace lease acquire, and notes that the current API has no separate DM-workspace lease release route.",
+        "The response verifies server/src/app.js and both MemoryHubStore/PostgresHubStore implementations instead of assuming all mutation routes share one contract.",
+        "The response requires targeted route/store/parity tests for retries and reused keys on durable commands while preserving explicit ephemeral lease/logout behavior.",
+        "The response routes only deployed due-account purge, live member-removal verification, or explicitly authorized one-off ownership recovery execution to campaign-hub-operations."
+      ]
+    }
+  ]
+}
