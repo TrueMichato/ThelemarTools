@@ -43,6 +43,21 @@
         "The response requires Character Sheet and Party Tracker exhaustion formulas to remain in parity rather than independently diverge.",
         "The response handles incompatible existing exhaustion state without silent clamping or rewrite and blocks campaign-bound actions while policy state is unavailable."
       ]
+    },
+    {
+      "id": 4,
+      "prompt": "Review a Campaign Hub lifecycle proposal that adds account deletion, member removal, and ownership recovery product changes, but also requires receipt idempotency on every private mutation including logout and all lease operations. Explain the correct authority, idempotency, parity, and test boundaries without editing files or performing live operations.",
+      "expected_output": "A development-focused review that keeps lifecycle endpoint/store/UI/test work in the product skill, applies receipts to durable commands, preserves common mutation security on ephemeral controls without inventing receipts, verifies exact current route exceptions, and routes only live purge or one-off recovery execution to operations.",
+      "files": [],
+      "expectations": [
+        "The response classifies account-deletion, member-removal, and ownership-transfer/recovery endpoint, store, UI, event, and test changes as Campaign Hub product development rather than live operations.",
+        "The response requires session, exact Origin, CSRF, supported protocol, schema, and role checks for private mutations.",
+        "The response requires actor/body-bound idempotency and receipts for durable commands such as account deletion request/cancel, member removal, ownership transfer, and account session revocation.",
+        "The response rejects a blanket receipt requirement for POST /api/logout, character lease acquire/release, and DM-workspace lease acquire, and notes that the current API has no separate DM-workspace lease release route.",
+        "The response verifies server/src/app.js and both MemoryHubStore/PostgresHubStore implementations instead of assuming all mutation routes share one contract.",
+        "The response requires targeted route/store/parity tests for retries and reused keys on durable commands while preserving explicit ephemeral lease/logout behavior.",
+        "The response routes only deployed due-account purge, live member-removal verification, or explicitly authorized one-off ownership recovery execution to campaign-hub-operations."
+      ]
     }
   ]
 }

@@ -81,9 +81,14 @@ Use `docs/hub/runbooks/README.md` and select the exact current procedure:
 - `secret-rotation.md`, `session-compromise.md`, `allowlist-change.md`: security/access changes;
 - `auth-provider-registry.md`: provider enablement and rollback; use the checked-in
   `hub:check-auth-first-enable` and `hub:check-auth-rollback` preflights where the runbook requires them;
-- `member-removal.md`, `account-deletion.md`, `campaign-ownership-recovery.md`: lifecycle operations; account
-  purge uses the checked-in `hub:purge-accounts` path rather than ad hoc database deletion;
+- `member-removal.md`, `account-deletion.md`, `campaign-ownership-recovery.md`: live lifecycle operator actions;
+  account purge uses the checked-in `hub:purge-accounts` path rather than ad hoc database deletion, and
+  exceptional ownership recovery requires explicit authorization and a reviewed one-off transaction;
 - `oracle-provisioning.md`: host-specific reference; its no-stop/Foundry rules apply even after provisioning.
 
 Each runbook action must preserve its stated prerequisites, stop conditions, verification, rollback, evidence,
 and escalation owner.
+
+Do not route ordinary lifecycle feature implementation here merely because its name appears in a runbook.
+Account-deletion, member-removal, ownership-transfer/recovery, and purge endpoint/store/UI/event/test work belongs
+to `campaign-hub-development`; this skill owns execution and review of the deployed operator procedure.

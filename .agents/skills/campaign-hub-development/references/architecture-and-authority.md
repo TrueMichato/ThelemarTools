@@ -23,13 +23,27 @@ For every new or changed mutation, locate and verify:
 1. exact route schema and authorization in `server/src/app.js`;
 2. stable capability/protocol gate and error shape;
 3. validation before mutation and revalidation inside the authoritative transaction;
-4. idempotency key and request hash semantics;
+4. whether this is a durable command/receipt-backed flow and, if so, its idempotency key and request hash
+   semantics;
 5. aggregate and advisory/row lock order;
 6. canonical write plus audit/event/outbox/receipt ordering;
 7. matching memory and PostgreSQL results, including rejected writes;
 8. lifecycle cancellation/cleanup;
 9. privacy-shaped response, event, log, and metric labels;
 10. exact retry, concurrent winner, stale-version, and rollback behavior.
+
+Durable lifecycle, document, policy, inventory, transfer, award, and semantic-operation commands use
+`getIdempotencyKey()` and a command receipt where their store contract requires one. Scope review findings to
+those receipt-backed flows. Current explicitly ephemeral control paths still use the common mutation-security
+prehandler but do not create receipts:
+
+- `POST /api/logout`;
+- character lease acquire/release;
+- DM-workspace lease acquire (there is no separate release route in the current API).
+
+Account session revoke/revoke-others, account deletion request/cancel, member removal, campaign leave/archive,
+and ownership transfer are durable commands and do pass idempotency identity to the stores. Reverify
+`server/src/app.js` and both store implementations before extending either list.
 
 Do not edit an applied migration. Add the next immutable checksummed migration and propose the matching
 migration-policy change alongside readiness, roles, tests, rollback compatibility, and records. The author must

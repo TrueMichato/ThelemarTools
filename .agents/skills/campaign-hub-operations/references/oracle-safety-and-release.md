@@ -5,10 +5,16 @@
 The private staging stack reuses an Oracle Always Free A1 VM on Ubuntu 22.04. Replacement ARM capacity is not
 assumed available.
 
-- Do not stop, resize, recreate, terminate, detach/attach the boot volume, run guest `poweroff`, or perform an OS
-  release upgrade. Planned reboot is allowed.
-- Foundry is a protected co-tenant. It must remain running on port `30000`; do not alter its service, data,
-  firewall path, or listener.
+- Never use OCI Stop, guest `shutdown -h`, `poweroff`, `halt`, or `systemctl poweroff`; never recreate,
+  terminate, shape-resize, or detach/attach the boot volume. Those actions re-enter scarce ARM capacity or
+  destroy the protected host allocation.
+- `sudo reboot`, OCI **Reboot**, and OCI **Reset** preserve the host allocation, but use them only when the
+  current runbook directs the action and the human explicitly approves it.
+- Online boot-volume expansion does not require a stop. Use it only when the runbook directs it and the human
+  explicitly approves it; identify the real root device with `findmnt`/`lsblk`, follow OCI's documented
+  rescan/grow procedure, and verify filesystem growth. The current 100 GB volume has ample headroom.
+- Foundry is a protected co-tenant. Do not independently stop or alter its service, data, firewall path, or
+  port `30000`; after an approved host reboot/reset, verify the listener and service before continuing.
 - Keep exactly one Hub BFF replica because realtime fanout is process-local.
 
 Primary sources: ADR 0010, `docs/hub/runbooks/oracle-provisioning.md`,

@@ -1,6 +1,6 @@
 ---
 name: campaign-hub-operations
-description: "Operate, release, recover, and review the Campaign Hub deployment in TrueMichato/ThelemarTools. Use whenever work involves the Oracle Always Free A1 host, deploy/hub/release.sh, immutable Hub release tags, Foundry coexistence on port 30000, migrations or database roles during release, encrypted backups, isolated restores, rollback, systemd maintenance/backup/monitor timers, alerts, staging, V1-G1 host evidence, V1-G2 game day, break glass, secret/session rotation, allowlist or OAuth-provider enablement, member removal, account deletion, campaign ownership recovery, or determining whether merged Hub code is deployed and enabled. Also use for changes to Hub release/backup/restore automation. Do not use for generic Docker/OCI or OAuth work unrelated to the deployed Campaign Hub, or for ordinary Hub product implementation."
+description: "Operate, release, recover, and review the live or staged Campaign Hub deployment in TrueMichato/ThelemarTools. Use for Oracle Always Free A1 work, deploy/hub/release.sh, immutable release tags, Foundry coexistence on port 30000, release-time migrations/roles, backups, isolated restores, rollback, timers, monitoring, staging, V1 evidence/game days, break glass, secret/session rotation, allowlist/provider enablement, and determining what is deployed or enabled. Lifecycle terms trigger this skill only for executing or reviewing deployed operator work: bounded account purge, live member-removal incident/runbook verification, or explicitly authorized one-off ownership recovery. Also use for changes to Hub release/backup/restore/operator automation. Do not use for account-deletion, member-removal, or ownership-transfer/recovery endpoint/store/UI/test implementation; that is campaign-hub-development. Do not use for unrelated Docker/OCI/OAuth work."
 ---
 
 # Campaign Hub Operations
@@ -16,8 +16,8 @@ Read the reference matching the task:
 | Work | Reference |
 |---|---|
 | Oracle host, Foundry, exact tag promotion, release automation, rollback decision | [Oracle safety and release](./references/oracle-safety-and-release.md) |
-| Migrations, roles, backups, isolated restore, lifecycle/incident recovery | [Recovery, migrations and roles](./references/recovery-migrations-and-roles.md) |
-| Timers, monitoring, staging/game-day gates, runbook routing and evidence | [Evidence and runbooks](./references/evidence-and-runbooks.md) |
+| Migrations, roles, backups, isolated restore | [Recovery, migrations and roles](./references/recovery-migrations-and-roles.md) |
+| Timers, monitoring, lifecycle/incident recovery, staging/game-day gates, runbook routing and evidence | [Evidence and runbooks](./references/evidence-and-runbooks.md) |
 
 Always verify current `docs/hub/roadmap.md`, `implementation-status.md`, `operations.md`, `staging-plan.md`,
 `security.md`, the relevant runbook, and the exact scripts before proposing commands.
@@ -43,10 +43,15 @@ target, command, expected effect, stop conditions, and recovery path before aski
 
 ## Hard stops
 
-- **Never stop, resize, recreate, terminate, or detach the Oracle A1 instance or boot volume.** Planned guest
-  reboot is the only allowed power-cycle action while replacement ARM capacity is unavailable.
-- **Never interrupt or reconfigure Foundry.** It must remain listening on port `30000`, and Hub Compose must not
-  reference that port.
+- **Never Stop, power off, halt, recreate, terminate, shape-resize, or detach/attach the Oracle A1 instance or
+  boot volume.** `sudo reboot`, OCI **Reboot**, or OCI **Reset** are allowed only when the current runbook directs
+  them and the human explicitly approves the exact action.
+- **Online boot-volume expansion is not shape resize.** It is allowed only when the runbook directs it and the
+  human explicitly approves it; identify the real root device, use OCI's documented online rescan/grow
+  procedure, verify filesystem growth, and never detach the volume. The current 100 GB volume does not need it.
+- **Do not independently stop or reconfigure Foundry.** Preserve its service, data, firewall path, and port
+  `30000`; after an approved host Reboot/Reset, verify the listener and user-facing service before proceeding.
+  Hub Compose must never reference that port.
 - **Never deploy a moving branch, lightweight tag, dirty checkout, raw Compose build, or manually chosen image.**
   Promotion uses an immutable annotated `hub-*` tag and `deploy/hub/release.sh`.
 - **Never pass `--yes` or type `RELEASE <tag> <sha>` on the operator's behalf.** The human operator must run the
@@ -92,7 +97,11 @@ Reverify this before every operation. Do not quote historical CI/test totals as 
 ## Routing
 
 - Use `campaign-hub-development` for Hub endpoints, stores, realtime, product capabilities, Character Sheet/
-  DM Screen integration, or lifecycle code.
+  DM Screen integration, or lifecycle product code—including account deletion, member removal, ownership
+  transfer/recovery, purge authority, browser UI/API client, events, and tests.
+- Use this skill for lifecycle only when executing or reviewing the live runbook/operator action, such as the
+  bounded due-account purge, live removal verification, or an authorized one-off ownership recovery.
 - Use this skill as well when changing release, migration, backup, restore, timer, monitor, or operational
-  evidence code—the safety contract is part of implementation review.
+  evidence code—the safety contract is part of implementation review. For `server/scripts/purge-accounts.mjs`,
+  load this skill for operator safety and `campaign-hub-development` for lifecycle/store authority.
 - Generic Docker/OCI work with no Campaign Hub deployment context does not belong here.

@@ -8,7 +8,10 @@
   {"query":"Collect V1-G1 host-operations proof and prepare the V1-G2 one-DM/two-player game day.","should_trigger":true},
   {"query":"Review a change to deploy/hub/release.sh for unsafe tag, backup, migration, or rollback behavior.","should_trigger":true},
   {"query":"Rotate the Campaign Hub OAuth secret and session secrets on Oracle using the current runbook.","should_trigger":true},
-  {"query":"Purge a deleted Campaign Hub account on Oracle and recover ownership for any campaigns it leaves behind.","should_trigger":true},
+  {"query":"Run the bounded due-account purge on the deployed Oracle Campaign Hub and capture redacted evidence for blocked accounts.","should_trigger":true},
+  {"query":"Use the live member-removal runbook to verify that a removed player's sockets, leases, transfers, and workspace were cleaned up on staging.","should_trigger":true},
+  {"query":"Perform an explicitly authorized one-off ownership recovery for an incapacitated Campaign Hub owner on the live database and preserve audit/event/outbox evidence.","should_trigger":true},
+  {"query":"A production deletion purge is blocked by an owned campaign. Diagnose the deployed record and follow the operator escalation procedure; do not change product code.","should_trigger":true},
   {"query":"Can we scale Campaign Hub to two BFF replicas on the current Oracle deployment?","should_trigger":true},
   {"query":"Add a new campaign semantic-operation endpoint and keep MemoryHubStore/PostgresHubStore in parity.","should_trigger":false},
   {"query":"Fix a Hub realtime projection privacy bug in the Party Tracker UI.","should_trigger":false},
@@ -19,5 +22,9 @@
   {"query":"Create an item JSON entry for a homebrew magic sword.","should_trigger":false},
   {"query":"Debug a failing TGTT character-build Playwright test.","should_trigger":false},
   {"query":"Show my GitHub Actions minutes and billing quota.","should_trigger":false},
-  {"query":"Change the Campaign Hub rules-policy API and add store parity tests, but do not deploy it.","should_trigger":false}
+  {"query":"Change the Campaign Hub rules-policy API and add store parity tests, but do not deploy it.","should_trigger":false},
+  {"query":"Implement the Campaign Hub account-deletion request, cancel, and due-purge authority across app.js, both stores, realtime closure, and lifecycle tests. Do not run the purge on Oracle.","should_trigger":false},
+  {"query":"The DELETE /api/campaigns/:campaignId/members/:membershipId flow leaves escrow and a DM workspace behind. Fix the endpoint, MemoryHubStore/PostgresHubStore transaction, Hub UI, and parity tests.","should_trigger":false},
+  {"query":"Add a supported Campaign Hub ownership-recovery product flow with audited owner transfer, API client/UI, event contracts, and store parity instead of relying on one-off SQL.","should_trigger":false},
+  {"query":"Review this PR called 'account deletion runbook follow-up': it actually changes pRequestAccountDeletion, pPurgeDueAccounts, the browser confirmation UI, and Jest coverage, with no deployment work.","should_trigger":false}
 ]

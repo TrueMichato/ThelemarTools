@@ -67,6 +67,26 @@ and policy parity/mutation tests.
 
 Use `5etools-data` when entity/source/edition/brew semantics are part of the change.
 
+## Lifecycle product code versus live operations
+
+Route by the artifact and authority boundary, not by lifecycle keywords:
+
+- Product implementation and review belongs to `campaign-hub-development`: account-deletion request/cancel and
+  purge authority, member-removal transactions, ownership transfer or a future supported recovery feature,
+  route schemas, both stores, Hub UI/API client, realtime closure, audit/event/outbox/receipt behavior, and tests.
+- Live execution and operator review belongs to `campaign-hub-operations`: running the bounded due-account purge,
+  verifying a live member-removal incident, or performing an explicitly authorized one-off ownership recovery
+  under the current runbook.
+
+Normal ownership transfer is an audited product command. The current private V1 service has no unaudited
+operator override; exceptional incapacitated-owner recovery is a reviewed one-off transaction preserving owner/
+DM membership, audit, event, and outbox semantics. A recurring recovery need should become an authoritative
+product feature rather than an accumulating runbook shortcut.
+
+Primary sources: `docs/hub/runbooks/account-deletion.md`, `member-removal.md`,
+`campaign-ownership-recovery.md`, `server/src/app.js`, both stores, `js/hub/hub-page.js`,
+`js/hub/hub-api-client.js`, and the lifecycle administration/API/projection tests.
+
 ## Inventory, awards and targeting
 
 - Transfers use authoritative escrow. Reservation removes the source; terminal accept writes the target, while

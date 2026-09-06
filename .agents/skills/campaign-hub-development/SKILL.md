@@ -1,6 +1,6 @@
 ---
 name: campaign-hub-development
-description: "Develop, review, debug, and test Campaign Hub product code in TrueMichato/ThelemarTools. Use whenever work touches Hub browser pages, the Fastify BFF, MemoryHubStore/PostgresHubStore parity, Hub HTTP or WebSocket protocols, capabilities, privacy projections, campaign context/rules/content, Character Sheet or DM Screen Hub integration, semantic operations, player targeting, party inventory/transfers/awards, OAuth identity, lifecycle, or Hub Jest/Playwright tests—even when the prompt only names a Hub endpoint, store method, campaign character, party stash, realtime event, or active campaign. Route live Oracle release, backup, restore, rollback, timers, staging, security/access runbooks, account deletion, ownership recovery, and game-day operations to campaign-hub-operations. Do not use for generic Fastify/OAuth/Docker work outside this repository's Campaign Hub, local-only Character Sheet or standalone DM Screen work with no Hub involvement, or pure 5etools data/schema authoring."
+description: "Develop, review, debug, and test Campaign Hub product code in TrueMichato/ThelemarTools. Use whenever work touches Hub browser pages, the Fastify BFF, MemoryHubStore/PostgresHubStore parity, HTTP/WebSocket protocols, capabilities, privacy projections, campaign context/rules/content, Character Sheet or DM Screen Hub integration, semantic operations, targeting, inventory/transfers/awards, OAuth identity, or lifecycle product code. Lifecycle product work includes account-deletion request/cancel/purge logic, member-removal, ownership-transfer/recovery endpoints, stores, UI, events, and tests—even when the prompt only says deletion, removal, purge, or recovery. Route execution or review of live/deployed Oracle purges, one-off ownership recovery, runbooks, releases, backups, restores, timers, staging, and game-day operator work to campaign-hub-operations. Do not use for unrelated Fastify/OAuth/Docker, local-only Character Sheet or DM Screen work, or pure 5etools data/schema authoring."
 ---
 
 # Campaign Hub Development
@@ -43,8 +43,10 @@ milestone counts or historical ADR context.
 
 - Signed-out and explicit local mode remain first-class and do not require Hub storage.
 - The browser is untrusted. PostgreSQL is production authority; `MemoryHubStore` is the deterministic test double.
-- Private mutations require session, exact Origin, CSRF, supported protocol, schema/role checks, and an
-  actor/body-bound idempotency key.
+- Private mutations require session, exact Origin, CSRF, supported protocol, schema, and role checks. Durable
+  command/receipt-backed flows additionally require an actor/body-bound idempotency key; do not invent receipt
+  requirements for explicitly ephemeral logout or lease-control routes when the authoritative route/store
+  contract omits them.
 - Document writes use revision, one-editor lease, and monotonic fencing epoch. Do not introduce simultaneous
   co-editing through a side path.
 - Canonical write, receipt/command identity, audit, domain event, and outbox effects commit atomically where the
@@ -95,9 +97,12 @@ milestone counts or historical ADR context.
 - Use `troubleshooting` for unexpected runtime/test failures after loading this Hub contract.
 - Use `e2e-character-tests` only for the generated TGTT character-build suite. Hub multi-user Playwright journeys
   use `test/e2e/hub/` and `docs/hub/testing.md`.
-- Use `campaign-hub-operations` for live Oracle, release, migration execution, backup, restore, rollback, timers,
-  monitoring, staging evidence, security/access runbooks, account deletion, ownership recovery, or game-day work.
-  Load it as well when changing release, migration, backup, restore, timer, monitor, or operational-evidence code.
+- Use `campaign-hub-operations` for executing or reviewing live/deployed Oracle work: releases, migration
+  execution, backups, restores, rollback, timers, monitoring, staging evidence, account purge, exceptional
+  one-off ownership recovery, security/access runbooks, and game days. Keep account-deletion, member-removal, or
+  ownership-transfer/recovery endpoint/store/UI/test implementation in this development skill. Load both only
+  when a code change also modifies release, migration, backup, restore, timer, monitor, evidence automation, or
+  the operator-facing `server/scripts/purge-accounts.mjs` path.
 
 ## Minimum verification
 
