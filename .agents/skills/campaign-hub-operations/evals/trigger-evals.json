@@ -1,0 +1,23 @@
+[
+  {"query":"Promote the reviewed Campaign Hub commit to the Oracle A1 staging host and capture release evidence.","should_trigger":true},
+  {"query":"Run a dry run of deploy/hub/release.sh for a new annotated hub-staging tag and check rollback compatibility.","should_trigger":true},
+  {"query":"Our Hub backup is 31 hours old; inspect the Oracle timers and off-machine copy process.","should_trigger":true},
+  {"query":"Plan an isolated PostgreSQL restore drill for Campaign Hub without touching the live database.","should_trigger":true},
+  {"query":"The latest Hub release failed after an expand migration. Decide whether application rollback is safe.","should_trigger":true},
+  {"query":"Verify Foundry stays on port 30000 while we deploy the Campaign Hub Compose stack.","should_trigger":true},
+  {"query":"Collect V1-G1 host-operations proof and prepare the V1-G2 one-DM/two-player game day.","should_trigger":true},
+  {"query":"Review a change to deploy/hub/release.sh for unsafe tag, backup, migration, or rollback behavior.","should_trigger":true},
+  {"query":"Rotate the Campaign Hub OAuth secret and session secrets on Oracle using the current runbook.","should_trigger":true},
+  {"query":"Purge a deleted Campaign Hub account on Oracle and recover ownership for any campaigns it leaves behind.","should_trigger":true},
+  {"query":"Can we scale Campaign Hub to two BFF replicas on the current Oracle deployment?","should_trigger":true},
+  {"query":"Add a new campaign semantic-operation endpoint and keep MemoryHubStore/PostgresHubStore in parity.","should_trigger":false},
+  {"query":"Fix a Hub realtime projection privacy bug in the Party Tracker UI.","should_trigger":false},
+  {"query":"Write a Docker Compose file for a generic local Postgres and Redis development environment.","should_trigger":false},
+  {"query":"Explain how OAuth account linking should work in a new SaaS application.","should_trigger":false},
+  {"query":"Add a spell-slot picker to the local Character Sheet.","should_trigger":false},
+  {"query":"Improve the standalone DM Screen weather panel layout on mobile.","should_trigger":false},
+  {"query":"Create an item JSON entry for a homebrew magic sword.","should_trigger":false},
+  {"query":"Debug a failing TGTT character-build Playwright test.","should_trigger":false},
+  {"query":"Show my GitHub Actions minutes and billing quota.","should_trigger":false},
+  {"query":"Change the Campaign Hub rules-policy API and add store parity tests, but do not deploy it.","should_trigger":false}
+]

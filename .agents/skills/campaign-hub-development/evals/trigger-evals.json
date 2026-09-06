@@ -1,0 +1,23 @@
+[
+  {"query":"Add a Campaign Hub endpoint for a DM to cancel a pending semantic effect, including MemoryHubStore/PostgresHubStore parity and replay behavior.","should_trigger":true},
+  {"query":"The Hub Party Tracker leaks a character field after a projection invalidation and reconnect. Find the privacy bug.","should_trigger":true},
+  {"query":"Make campaign source/species/edition policy block a newly selected feat during Character Sheet level-up.","should_trigger":true},
+  {"query":"Review the active-campaign switch teardown between campaign rules, temporary brew, realtime, and the open character.","should_trigger":true},
+  {"query":"Extend the Hub item-award batch so a co-DM can award from the party stash without duplicating inventory.","should_trigger":true},
+  {"query":"Why do the in-memory and PostgreSQL Hub stores return different events for the same transfer rejection?","should_trigger":true},
+  {"query":"Add a second player spell to Campaign Hub peer targeting with an atomic resource cost and target consent.","should_trigger":true},
+  {"query":"Change the Hub WebSocket replay cursor and projection refresh logic without leaking hidden character fields.","should_trigger":true},
+  {"query":"Implement account linking for the existing Discord and Google Hub adapters without auto-merging by email.","should_trigger":true},
+  {"query":"A campaign archive leaves an editor lease and pending transfer behind. Trace and fix the Hub lifecycle transaction.","should_trigger":true},
+  {"query":"Add a new PHB spell entry and validate its @damage tags in data/spells.","should_trigger":false},
+  {"query":"Fix the local Character Sheet rage toggle; this character is not connected to a campaign.","should_trigger":false},
+  {"query":"The standalone DM Screen Journey Tracker weather card does not rerender after changing pace.","should_trigger":false},
+  {"query":"Write a generic Fastify OAuth callback tutorial for a new unrelated service.","should_trigger":false},
+  {"query":"Optimize a Docker Compose stack for a small Redis-backed blog.","should_trigger":false},
+  {"query":"Add a comprehensive TGTT level 1-20 character build Playwright spec for a new subclass.","should_trigger":false},
+  {"query":"Create a monster JSON schema and add a homebrew dragon.","should_trigger":false},
+  {"query":"Promote the current Campaign Hub release to the Oracle A1 host and verify backups and Foundry.","should_trigger":false},
+  {"query":"Run the Campaign Hub isolated restore drill and record V1-G1 evidence.","should_trigger":false},
+  {"query":"Purge a deleted Campaign Hub account on Oracle and recover ownership for any campaigns it leaves behind.","should_trigger":false},
+  {"query":"Check this user's GitHub Actions minutes and billing quota.","should_trigger":false}
+]
