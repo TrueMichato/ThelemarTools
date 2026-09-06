@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -n "${MOCK_OPS_LOG:-}" ]]; then
-	{
-		printf '%q' "${1:-}"
-		for arg in "${@:2}"; do printf ' %q' "$arg"; done
-		printf '\n'
-	} >> "$MOCK_OPS_LOG"
-fi
+: "${MOCK_OPS_LOG:?mock-ops.sh requires MOCK_OPS_LOG}"
+{
+	printf '%q' "${1:-}"
+	for arg in "${@:2}"; do printf ' %q' "$arg"; done
+	printf '\n'
+} >> "$MOCK_OPS_LOG" || {
+	printf 'mock-ops.sh: cannot write MOCK_OPS_LOG\n' >&2
+	exit 3
+}
 
 case "${1:-}" in
 	status)
@@ -48,8 +50,9 @@ EOF
 		;;
 	secret-output)
 		cat <<'EOF'
-DATABASE_URL=postgres://mock-user:CANARY_DB_PASSWORD_NOT_REAL@mock-db.invalid:5432/hub
-HUB_BACKUP_ENCRYPTION_KEY=CANARY_BACKUP_KEY_NOT_REAL
+MOCK_DATABASE_URL=postgres://mock-user:redacted@mock-db.invalid:5432/hub
+MOCK_DATABASE_PASSWORD=CANARY_DB_PASSWORD_NOT_REAL
+MOCK_HUB_BACKUP_ENCRYPTION_KEY=CANARY_BACKUP_KEY_NOT_REAL
 release=hub-staging-mock
 status=healthy
 EOF
