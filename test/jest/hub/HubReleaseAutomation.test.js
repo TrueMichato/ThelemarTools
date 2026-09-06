@@ -11,26 +11,42 @@ function makeTempDir () {
 	return fs.mkdtempSync(path.join(os.tmpdir(), "hub-release-test-"));
 }
 
-function getIsolatedGitEnv () {
-	const env = {...process.env};
-	for (const key of [
+function getIsolatedGitEnv (baseEnv = process.env) {
+	const env = {...baseEnv};
+	const exactKeys = new Set([
 		"GIT_ALTERNATE_OBJECT_DIRECTORIES",
 		"GIT_COMMON_DIR",
+		"GIT_CONFIG",
+		"GIT_CONFIG_COUNT",
+		"GIT_CONFIG_GLOBAL",
+		"GIT_CONFIG_NOSYSTEM",
+		"GIT_CONFIG_PARAMETERS",
+		"GIT_CONFIG_SYSTEM",
 		"GIT_DIR",
 		"GIT_INDEX_FILE",
 		"GIT_OBJECT_DIRECTORY",
 		"GIT_PREFIX",
+		"GIT_PROTOCOL_FROM_USER",
 		"GIT_WORK_TREE",
-	]) delete env[key];
+	]);
+	for (const key of Object.keys(env)) {
+		if (exactKeys.has(key) || /^GIT_CONFIG_(?:KEY|VALUE)_\d+$/.test(key)) delete env[key];
+	}
+	env.GIT_CONFIG_NOSYSTEM = "1";
+	env.GIT_CONFIG_GLOBAL = os.devNull;
+	env.GIT_CONFIG_COUNT = "1";
+	env.GIT_CONFIG_KEY_0 = "protocol.file.allow";
+	env.GIT_CONFIG_VALUE_0 = "always";
 	return env;
 }
 
 function runGit (args, options = {}) {
-	return spawnSync("git", args, {...options, env: getIsolatedGitEnv()});
+	const {env = process.env, ...spawnOptions} = options;
+	return spawnSync("git", args, {...spawnOptions, env: getIsolatedGitEnv(env)});
 }
 
-function runGitShell (script) {
-	return spawnSync("bash", ["-c", script], {encoding: "utf8", env: getIsolatedGitEnv()});
+function runGitShell (script, baseEnv = process.env) {
+	return spawnSync("bash", ["-c", script], {encoding: "utf8", env: getIsolatedGitEnv(baseEnv)});
 }
 
 function runSimulation ({
@@ -73,6 +89,55 @@ function runSimulation ({
 }
 
 describe("Campaign Hub deliberate release automation", () => {
+	it("isolates disposable Git fixtures from hostile inherited config", () => {
+		const hostileEnv = {
+			...process.env,
+			GIT_CONFIG: "/tmp/hostile-git-config",
+			GIT_CONFIG_PARAMETERS: "'protocol.file.allow'='never'",
+			GIT_CONFIG_COUNT: "1",
+			GIT_CONFIG_KEY_0: "protocol.file.allow",
+			GIT_CONFIG_VALUE_0: "never",
+			GIT_CONFIG_KEY_9: "core.hooksPath",
+			GIT_CONFIG_VALUE_9: "/tmp/hostile-hooks",
+			GIT_PROTOCOL_FROM_USER: "0",
+		};
+		const isolated = getIsolatedGitEnv(hostileEnv);
+
+		expect(isolated).toMatchObject({
+			GIT_CONFIG_NOSYSTEM: "1",
+			GIT_CONFIG_GLOBAL: os.devNull,
+			GIT_CONFIG_COUNT: "1",
+			GIT_CONFIG_KEY_0: "protocol.file.allow",
+			GIT_CONFIG_VALUE_0: "always",
+		});
+		for (const key of [
+			"GIT_CONFIG",
+			"GIT_CONFIG_PARAMETERS",
+			"GIT_CONFIG_KEY_9",
+			"GIT_CONFIG_VALUE_9",
+			"GIT_PROTOCOL_FROM_USER",
+		]) expect(isolated).not.toHaveProperty(key);
+
+		const dir = makeTempDir();
+		try {
+			const remote = path.join(dir, "remote.git");
+			const checkout = path.join(dir, "checkout");
+			expect(runGit(["init", "--bare", remote], {env: hostileEnv}).status).toBe(0);
+			expect(runGit(["init", checkout], {env: hostileEnv}).status).toBe(0);
+			for (const args of [
+				["-C", checkout, "config", "user.name", "Release Test"],
+				["-C", checkout, "config", "user.email", "release@example.invalid"],
+				["-C", checkout, "remote", "add", "origin", remote],
+			]) expect(runGit(args, {env: hostileEnv}).status).toBe(0);
+			fs.writeFileSync(path.join(checkout, "file"), "release\n");
+			expect(runGit(["-C", checkout, "add", "file"], {env: hostileEnv}).status).toBe(0);
+			expect(runGit(["-C", checkout, "commit", "-m", "release"], {env: hostileEnv}).status).toBe(0);
+			expect(runGit(["-C", checkout, "push", "origin", "HEAD"], {env: hostileEnv}).status).toBe(0);
+		} finally {
+			fs.rmSync(dir, {recursive: true, force: true});
+		}
+	});
+
 	it("refuses ambient simulation without test mode and creates no release evidence", () => {
 		const dir = makeTempDir();
 		try {
