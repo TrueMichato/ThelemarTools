@@ -4,7 +4,7 @@
   {"query":"Our Hub backup is 31 hours old; inspect the Oracle timers and off-machine copy process.","should_trigger":true},
   {"query":"Plan an isolated PostgreSQL restore drill for Campaign Hub without touching the live database.","should_trigger":true},
   {"query":"The latest Hub release failed after an expand migration. Decide whether application rollback is safe.","should_trigger":true},
-  {"query":"Verify Foundry stays on port 30000 while we deploy the Campaign Hub Compose stack.","should_trigger":true},
+  {"query":"Verify the Oracle release can recreate only Campaign Hub services and cannot tear down Compose volumes.","should_trigger":true},
   {"query":"Collect V1-G1 host-operations proof and prepare the V1-G2 one-DM/two-player game day.","should_trigger":true},
   {"query":"Review a change to deploy/hub/release.sh for unsafe tag, backup, migration, or rollback behavior.","should_trigger":true},
   {"query":"Rotate the Campaign Hub OAuth secret and session secrets on Oracle using the current runbook.","should_trigger":true},

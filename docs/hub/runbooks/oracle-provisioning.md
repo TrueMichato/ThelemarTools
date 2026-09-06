@@ -7,6 +7,12 @@
 > **Last drill date:** never — retain until the V1-G1 host-operations/recovery drill completes
 > **Estimated time:** 60–90 minutes, most of it waiting
 
+> **Supersession notice (2026-09-06):** Foundry was intentionally decommissioned after this Phase 6G
+> provisioning record was written. All coexistence instructions below that require Foundry to remain running,
+> preserve port 30000, or verify its listener are historical only and must not be used as current release or
+> operations requirements. Current procedures are
+> [deploy/promote](deploy-promote.md) and [Oracle host operations](oracle-operations.md).
+
 ## Purpose
 
 Record how the single Oracle Cloud "Always Free" ARM virtual machine was provisioned for the portable Campaign Hub
@@ -24,9 +30,8 @@ They are **not** the current deployment, rollback, disposal, or service-retireme
 
 On the existing staging host:
 
-- keep Foundry running and reachable on port 30000; the release preflight refuses to proceed without that listener;
-- do not disable Foundry or its supervisor, remove port 30000 from either firewall, delete Foundry data, terminate
-  the instance, or repurpose the host;
+- treat the host as Hub-only; do not restore Foundry or reopen port 30000 as a release prerequisite;
+- do not terminate, resize, recreate, or detach the instance or boot volume;
 - do not deploy a moving branch, run raw `docker compose up --build`, or manually choose release images;
 - do not run `docker compose down -v`, delete Hub volumes, or treat rollback as environment disposal;
 - promote only an immutable annotated `hub-*` tag with
@@ -35,8 +40,9 @@ On the existing staging host:
 - install, enable, observe, and verify host timers through
   [Oracle host operations](oracle-operations.md) as V1-G1 evidence.
 
-Any later text describing Foundry removal, closing port 30000, branch-based Compose deployment, or destructive
-disposal is superseded by this boundary and must not be executed against the current host.
+Any later text requiring Foundry continuity or port 30000 is superseded by this boundary. Historical Foundry
+commands remain below only to explain the original Phase 6G host state; they must not be replayed. Branch-based
+Compose deployment and destructive disposal are likewise not current procedures.
 
 ---
 
@@ -215,11 +221,10 @@ sudo ss -tlnp | grep -E ':(80|443)\b'
    [incident](incident.md) and [deploy/promote](deploy-promote.md) runbooks; do not disable services from this
    provisioning record.
 
-2. **Port 30000 must remain available for Foundry.**
-   The immutable release workflow checks that Foundry is listening before and after every promotion and verifies
-   that Hub Compose does not own the port. Inspecting the rules is safe, but do not remove or rewrite the port
-   30000 ingress from this runbook. Any future Foundry retirement or exposure change requires a separate reviewed
-   migration plan and corresponding release-contract change.
+2. **Historical Phase 6G state: port 30000 remained available for Foundry.**
+   At the time of the recorded deployment, the immutable release workflow checked the listener and kept Hub
+   Compose off that port. Foundry was later intentionally decommissioned, and the current release workflow no
+   longer requires or checks port 30000. Do not use this historical section to restore that service or ingress.
 
 **Deliberate divergence — leave it as it is:**
 
@@ -355,17 +360,18 @@ the condition it is meant to prevent.
 
 #### Historical boot-volume backup note
 
-Verify whether the Foundry guide's automatic boot-volume policy actually exists; the guide is not evidence
-that the step completed. Do **not** stop Foundry or Caddy to follow this historical note. Current application
-backup, isolated restore, and release evidence comes from [Oracle host operations](oracle-operations.md),
-[backup/restore](backup-restore.md), and [deploy/promote](deploy-promote.md).
+Verify whether the Foundry guide's automatic boot-volume policy actually existed; the guide is not evidence
+that the step completed. At the time of this record, neither Foundry nor Caddy was to be stopped for this note.
+Current application backup, isolated restore, and release evidence comes from
+[Oracle host operations](oracle-operations.md), [backup/restore](backup-restore.md), and
+[deploy/promote](deploy-promote.md).
 
 In OCI: **Storage → Block Storage → Boot Volumes → your volume → Create Backup → Full**. Always Free includes
 up to five volume backups, but verify current usage before creating one. This backup protects the data for a
 future restore; it does not provide same-day rollback while capacity is unavailable.
 
-Copy irreplaceable Foundry data and the configuration inventory to storage outside this VM as well. A backup
-that exists only on the boot volume does not survive losing the host.
+The Phase 6G procedure copied irreplaceable Foundry data and the configuration inventory outside this VM before
+later decommissioning. A backup that exists only on the boot volume does not survive losing the host.
 
 #### Adopted path — fully patch and verify Ubuntu 22.04
 
@@ -493,17 +499,15 @@ If the exact condition is an empty INPUT chain with policy DROP, temporarily run
 `sudo netplan apply`. Reinstalling `netplan.io` requires working networking or a matching cached package, so
 it is not an offline first-aid command.
 
-### C-ALT.4 — Superseded Foundry-retirement plan (**do not execute**)
+### C-ALT.4 — Historical Foundry-retirement plan (**completed later; do not replay**)
 
-The original provisioning draft planned to retire Foundry and reclaim port 30000. That plan was superseded by
-the immutable release workflow before the recorded Oracle release. Foundry now remains an explicit protected
-co-tenant: `deploy/hub/release.sh` requires its listener before and after promotion and rejects any Hub Compose
-configuration that references port 30000.
+The original provisioning draft planned to retire Foundry and reclaim port 30000. That plan was temporarily
+superseded by the coexistence workflow used for the recorded Oracle release. Foundry was later intentionally
+decommissioned, and the current `deploy/hub/release.sh` validates a Hub-only Compose service scope without a
+Foundry listener or port-30000 requirement.
 
-Do not disable Foundry, PM2, or a Foundry systemd unit; do not delete its runtime/user-data directories; and do
-not close port 30000. A future retirement would be a separate migration with backup, availability, firewall,
-release-contract, and rollback review. This historical provisioning runbook provides no authorization or commands
-for that change.
+This historical provisioning record is not authorization to repeat cleanup, restore Foundry, or change current
+firewall state. Use the current release and Oracle operations runbooks for all live-host actions.
 
 ### C-ALT.5 — What happens next (C-ALT path)
 
@@ -537,10 +541,11 @@ prevent every Oracle-side interruption, but it avoids leaving the VM stopped aft
 Continue in this order:
 
 1. Read **C9** so the idle-reclamation risk is understood; there is no immediate command to run.
-2. In **D1**, inspect the existing Foundry VCN rules instead of creating another subnet. Keep TCP 80, 443, and
-   the protected Foundry port 30000 unchanged. Use an NSG only if another VNIC shares the subnet.
-3. In **D2**, inspect the existing host `iptables` rules without rewriting them. Keep the working 80/443 and
-   Foundry 30000 paths; any firewall change is a separately reviewed operation.
+2. In **D1**, the Phase 6G procedure inspected the existing Foundry VCN rules instead of creating another
+   subnet and kept TCP 80, 443, and 30000 unchanged. That port-30000 requirement is now superseded.
+3. In **D2**, the Phase 6G procedure inspected the existing host `iptables` rules without rewriting them and
+   kept the then-working 80/443 and Foundry 30000 paths. Current firewall changes require a separate reviewed
+   operation under the current runbook.
 4. Follow **Part E** to install Docker once from its supported Jammy repository.
 5. In **Part F**, point `campaignhub.duckdns.org` at `129.159.151.68`. As of 2026-08-30 it resolves to
    `46.121.39.154`, so it is not ready for certificate issuance. Rotate the previously exposed DuckDNS token
@@ -866,12 +871,11 @@ A security list applies to **every instance in the subnet**. If this subnet hold
 edit the security list. If it holds anything else — a second instance, or a future one — prefer a **network
 security group (NSG)**, which attaches to a single VNIC and keeps the blast radius to this instance alone.
 
-> **New-instance path only.** This tenancy has two VCNs: `Thelemar` (the terminated wiki's,
-> now empty) and `thelemar_foundry` (which still runs the Foundry instance). Place the hub in
-> **`public subnet-Thelemar`** — the empty one. Then the subnet holds only the hub, Option 1 below is safe,
-> and opening 80/443 cannot affect Foundry. Placing it in the Foundry subnet would exchange a one-line
-> security-list edit for a permanent shared-exposure problem (R-17). Never use a *private* subnet: those
-> prohibit public IPs, so the host would be unreachable and ACME validation could never succeed.
+> **Historical new-instance path only.** At the time of this record, the tenancy had two VCNs: `Thelemar`
+> (the terminated wiki's, then empty) and `thelemar_foundry` (then hosting Foundry). The unused path would
+> have placed the Hub in **`public subnet-Thelemar`** to avoid shared exposure. It does not describe the
+> current Hub-only host. Never use a *private* subnet for a public deployment: those prohibit public IPs,
+> so the host would be unreachable and ACME validation could never succeed.
 > `oci-retry-launch.sh` hides private subnets and will not let you pick one by accident. **For C-ALT, keep
 > the existing VNIC/subnet and use the verification in C-ALT.5.**
 
@@ -1084,8 +1088,8 @@ again.
 > **STOP:** The commands in H1-H3 document the original first bootstrap only. Do not use them to update the
 > current host. In particular, do not check out/pull a moving branch and do not run raw Compose build/up.
 > Current deployment requires an immutable annotated `hub-*` tag and
-> [`deploy/hub/release.sh`](deploy-promote.md), which preserves Foundry, verifies backup/migration/rollback
-> preconditions, binds exact image IDs, and records release evidence.
+> [`deploy/hub/release.sh`](deploy-promote.md), which enforces the Hub-only service boundary, verifies
+> backup/migration/rollback preconditions, binds exact image IDs, and records release evidence.
 
 The first bootstrap cloned the repository into `/home/ubuntu/ThelemarTools` and prepared the original release
 configuration there. Its branch checkout was not an immutable release procedure and is intentionally omitted.
@@ -1228,7 +1232,7 @@ that inject their own client-IP header, and enabling it here would let clients s
 
 The first bootstrap built and started the Compose stack directly. That raw Compose command is intentionally
 omitted because it does not prove immutable tag/SHA/image identity, release provenance, backup freshness, migration
-safety, Foundry continuity, or rollback compatibility. Every current promotion must use
+safety, Hub-only service isolation, or rollback compatibility. Every current promotion must use
 [deploy/promote](deploy-promote.md).
 
 Migrations run automatically as a one-shot `migrate` container before the BFF starts, and the BFF refuses

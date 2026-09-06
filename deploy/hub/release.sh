@@ -11,7 +11,6 @@ EXPECTED_BRANCH="${HUB_RELEASE_EXPECTED_BRANCH:-multiplayer-hub}"
 EXPECTED_HOST_USER="${HUB_RELEASE_EXPECTED_HOST_USER:-ubuntu}"
 EXPECTED_HOST_UID="${HUB_RELEASE_EXPECTED_HOST_UID:-1001}"
 EXPECTED_HOST_GID="${HUB_RELEASE_EXPECTED_HOST_GID:-1001}"
-FOUNDRY_PORT="${HUB_FOUNDRY_PORT:-30000}"
 MIN_ROOT_FREE_KB="${HUB_RELEASE_MIN_ROOT_FREE_KB:-4194304}"
 MIN_BACKUP_FREE_KB="${HUB_RELEASE_MIN_BACKUP_FREE_KB:-1048576}"
 LOCK_FILE="${HUB_RELEASE_LOCK_FILE:-/run/lock/thelemar-hub-release.lock}"
@@ -157,22 +156,31 @@ resolve_remote_tag () {
 	printf '%s\t%s\n' "$remote_tag_object" "$remote_sha"
 }
 
-assert_foundry_listening () {
-	command -v ss >/dev/null 2>&1 || fail "ss is required to protect the Foundry listener"
-	ss -ltn | awk -v port=":${FOUNDRY_PORT}" 'NR > 1 && $4 ~ (port "$") {found = 1} END {exit !found}' \
-		|| fail "Foundry is not listening on port ${FOUNDRY_PORT}; release refuses to proceed"
+assert_hub_compose_scope () {
+	local compose_function="$1"
+	local services
+	local service
+	"$compose_function" --profile "*" config --quiet
+	services="$("$compose_function" --profile "*" config --services)" \
+		|| fail "could not enumerate the complete Hub Compose service scope"
+	while IFS= read -r service; do
+		case "$service" in
+			db|migrate|grant-roles|bff|static|edge|maintenance|backup) ;;
+			"") ;;
+			*)
+				fail "release Compose configuration contains non-Hub service: ${service}"
+				return 1
+				;;
+		esac
+	done <<<"$services"
 }
 
 assert_compose_safe () {
-	compose_current config --quiet
-	! compose_current config | grep -Eq "(^|[^0-9])${FOUNDRY_PORT}([^0-9]|$)" \
-		|| fail "Campaign Hub Compose configuration must not reference Foundry port ${FOUNDRY_PORT}"
+	assert_hub_compose_scope compose_current
 }
 
 assert_release_compose_safe () {
-	compose_release config --quiet
-	! compose_release config | grep -Eq "(^|[^0-9])${FOUNDRY_PORT}([^0-9]|$)" \
-		|| fail "release Compose configuration must not reference Foundry port ${FOUNDRY_PORT}"
+	assert_hub_compose_scope compose_release
 }
 
 wait_for_public_ready () {
@@ -357,7 +365,6 @@ rollback_application () {
 	export HUB_VCS_REF="$PREVIOUS_SHA"
 	compose_current up -d --no-deps --force-recreate --wait bff static || return 1
 	compose_current up -d --no-deps --force-recreate edge || return 1
-	assert_foundry_listening || return 1
 	export_monitor_environment || return 1
 	wait_for_public_ready || return 1
 	"$ROOT/deploy/hub/monitor-host.sh" || return 1
@@ -457,13 +464,12 @@ phase_preflight () {
 		deploy/hub/migration-policy.json; do
 		[[ -f "$ROOT/$required" ]] || fail "required release file is missing: ${required}"
 	done
-	for required in git docker curl openssl python3 flock df stat awk sed ss; do
+	for required in git docker curl openssl python3 flock df stat awk sed; do
 		command -v "$required" >/dev/null 2>&1 || fail "required command is missing: ${required}"
 	done
 	docker info >/dev/null
 	docker compose version >/dev/null
 	assert_compose_safe
-	assert_foundry_listening
 
 	local actual_user actual_uid actual_gid
 	actual_user="$(id -un)"
@@ -538,7 +544,6 @@ phase_record_rollback () {
 		"$ROOT/deploy/hub/migration-policy.json")"
 	record env_file_sha256 "$(sha256_file "$ENV_FILE")"
 	record readiness_before passed
-	record foundry_before "listening:${FOUNDRY_PORT}"
 	capture_candidate_image_tags
 }
 
@@ -736,7 +741,6 @@ phase_verify () {
 		printf '%s\n' "$running_services" | grep -qx "$service" \
 			|| fail "Compose service ${service} is not running"
 	done
-	assert_foundry_listening
 	local newest_backup
 	newest_backup="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'hub-*.dump.enc' -mmin -1560 -print | sort | tail -n 1)"
 	[[ -n "$newest_backup" ]] || fail "no encrypted backup is newer than 26 hours"
@@ -745,7 +749,6 @@ phase_verify () {
 	record tls_websocket_metrics_after passed
 	record static_assets_after passed
 	record backup_age_after passed
-	record foundry_after "listening:${FOUNDRY_PORT}"
 	record deployed_bff_image_id "$(docker inspect --format '{{.Image}}' "$(compose_release ps -q bff)")"
 	record deployed_static_image_id "$(docker inspect --format '{{.Image}}' "$(compose_release ps -q static)")"
 }

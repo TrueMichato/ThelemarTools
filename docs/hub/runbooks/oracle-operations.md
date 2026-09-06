@@ -4,7 +4,8 @@
 > **Owner:** Campaign Hub operator
 
 This procedure adds scheduled maintenance, encrypted backups, off-machine copies, and five-minute health
-checks without stopping or resizing the Oracle instance.
+checks without stopping or resizing the Oracle instance. The host is now dedicated to the Campaign Hub after
+Foundry was intentionally decommissioned.
 
 ## Safety rules
 
@@ -203,20 +204,23 @@ cd /home/ubuntu/ThelemarTools
 The command records the immutable tag object/full SHA, previous tag/SHA, BFF/static image IDs and repo digests,
 Compose/Caddy/migration-policy hash, migration status/plan, durable `schema_mutated` state and exact
 planned/applied migration versions, `.env.hub` SHA-256 (never contents), verified encrypted backup
-filename/hash/size, readiness, TLS/WebSocket/metrics, static assets, backup age, Foundry port, timestamps, and
+filename/hash/size, readiness, TLS/WebSocket/metrics, static assets, backup age, timestamps, and
 rollback result. Evidence is redacted and mode 0600 under
 `~/.local/state/thelemar-hub/releases/`.
 
-The command never invokes Compose `down`, never recreates PostgreSQL, and never controls Foundry or port 30000.
-An application rollback re-tags the captured BFF/static images and keeps the current database. Incompatible
-or contract migrations are normally rejected before apply. Stopping only the Hub BFF and printing
+The command never invokes Compose `down`, removes services or volumes, or recreates PostgreSQL. It validates
+that the Compose model contains only named Hub services, recreates only BFF/static/edge, and may stop only the
+Hub BFF on the incompatible failure path. An application rollback re-tags the captured BFF/static images and
+keeps the current database. Incompatible or contract migrations are normally rejected before apply. Stopping
+only the Hub BFF and printing
 isolated-restore instructions is a defense-in-depth response to unexpected post-cutover compatibility drift;
 no automatic path reverses a migration or restores over production.
 
 After this automation merges, the operator must still run a real-host induced-failure drill: lock contention,
 failed backup before cutover, and a forced post-cutover health failure with compatible application rollback.
-Record the evidence paths, service/image state, database migration state, and uninterrupted Foundry listener.
-Do not claim the release gate complete from local simulations.
+Record the evidence paths, Hub service/image state, database migration state, and confirmation that no
+destructive Compose or volume operation occurred. Do not claim the release gate complete from local
+simulations.
 
 ## Stop conditions
 

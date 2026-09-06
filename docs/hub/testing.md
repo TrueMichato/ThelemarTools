@@ -1,7 +1,7 @@
 # Campaign Hub testing guide
 
 > **Status:** Current automated and real-stack coverage plus managed-staging gates
-> **Last verified:** 2026-09-05
+> **Last verified:** 2026-09-06
 > **Owner:** Campaign Hub maintainers
 
 ## Test layers
@@ -109,8 +109,9 @@ self-target combined writes, capability skew, per-leg dedupe, and privacy-shaped
 
 The shipped V2-T0 release-automation implementation and V2-T1 activity history do not clear external Oracle
 or physical-table gates. V1-G1 still requires the real-host dry run, deliberate release, induced lock/backup/
-compatible-rollback failures, redacted evidence, uninterrupted Foundry, scheduled host operations, encrypted
-off-machine backup, isolated restore, and break-glass decision rehearsal. The deliberate release must promote a
+compatible-rollback failures, redacted evidence, Hub-only service isolation without destructive Compose or
+volume teardown, scheduled host operations, encrypted off-machine backup, isolated restore, and break-glass
+decision rehearsal. The deliberate release must promote a
 verified tag containing merged head `b8d31d3416b934cc9275b859b5932db050005351`; the current Oracle release does
 not prove that newer code. V1-G2 remains blocked on V1-G1 and
 requires the physical one-DM/two-player game day. Synthetic CI never substitutes for these gates.

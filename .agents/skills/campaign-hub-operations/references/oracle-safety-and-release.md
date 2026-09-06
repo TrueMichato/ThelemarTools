@@ -13,8 +13,8 @@ assumed available.
 - Online boot-volume expansion does not require a stop. Use it only when the runbook directs it and the human
   explicitly approves it; identify the real root device with `findmnt`/`lsblk`, follow OCI's documented
   rescan/grow procedure, and verify filesystem growth. The current 100 GB volume has ample headroom.
-- Foundry is a protected co-tenant. Do not independently stop or alter its service, data, firewall path, or
-  port `30000`; after an approved host reboot/reset, verify the listener and service before continuing.
+- The host is dedicated to the Hub after Foundry was intentionally decommissioned. Release and rollback remain
+  confined to named Hub services; never use the Hub procedure for host-wide cleanup.
 - Keep exactly one Hub BFF replica because realtime fanout is process-local.
 
 Primary sources: ADR 0010, `docs/hub/runbooks/oracle-provisioning.md`,
@@ -32,7 +32,7 @@ Only deploy a reviewed commit reachable from `origin/multiplayer-hub` through an
 The dry run does not apply migrations, grant roles, create a backup, or recreate services. It is not a
 read-only host inspection: it takes the release lock, temporarily checks out the candidate, builds images,
 writes evidence, and runs a migration-plan container against the live database connection. Complete ordinary
-read-only health/disk/tag/Foundry preflight first, then obtain explicit authorization before running it on the
+read-only health/disk/tag/Compose-scope preflight first, then obtain explicit authorization before running it on the
 shared host.
 
 The mutating invocation requires the typed confirmation:
@@ -50,7 +50,7 @@ The script owns:
 
 - process lock and host/current health checks;
 - immutable tag object/SHA verification and exact checkout;
-- Foundry listener and Compose port exclusion;
+- Hub-only Compose service-scope validation;
 - encrypted pre-release backup authentication/hash/list verification;
 - migration policy/plan and previous-app compatibility;
 - exact candidate image IDs and revision labels;
@@ -70,7 +70,7 @@ Stop before mutation on:
 - wrong repository/root/user/UID/GID or permissive `.env.hub`;
 - low release/backup disk;
 - current readiness/TLS/WebSocket/metrics/container/backup failure;
-- missing Foundry listener or any Hub Compose reference to port 30000;
+- any non-Hub service in the rendered Compose model;
 - pending migration missing an explicit entry in `deploy/hub/migration-policy.json`;
 - contract migration, incompatible previous application, or checksum drift;
 - BFF using owner database role;
