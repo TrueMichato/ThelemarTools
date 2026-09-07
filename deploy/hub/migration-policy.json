@@ -30,6 +30,11 @@
       "phase": "expand",
       "previousAppCompatible": true,
       "notes": "Adds provider-neutral identity metadata, session provenance, and transient OAuth transactions while preserving GitHub rows and old application reads."
+    },
+    "0007": {
+      "phase": "expand",
+      "previousAppCompatible": true,
+      "notes": "Adds nullable/defaulted peer source-cost authority, terminal failure state, indexes, and invalidation triggers while preserving protocol-3 cost-free rows and previous application reads."
     }
   }
 }

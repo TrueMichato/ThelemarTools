@@ -592,7 +592,9 @@ describe("Campaign Hub deliberate release automation", () => {
 			"HUB_RELEASE_GRANT_ROLES_IMAGE",
 			"HUB_RELEASE_BFF_IMAGE",
 			"HUB_RELEASE_STATIC_IMAGE",
+			"HUB_RELEASE_BACKUP_IMAGE",
 		]) expect(releaseCompose).toContain(`\${${variable}:?`);
+		expect(releaseCompose).toContain("build: !reset null");
 		expect(source).toContain("contract migration");
 		expect(source).toContain("never run a down migration");
 		expect(source).not.toMatch(/compose_(?:current|release)\s+(?:down|rm)\b/);

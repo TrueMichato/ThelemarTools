@@ -76,9 +76,10 @@ Stop before mutation on:
 - BFF using owner database role;
 - privacy/authorization regression or aging outbox.
 
-At creation baseline, migration `0007_peer_source_costs.sql` exists while `migration-policy.json` ends at
-`0006`. Treat promotion as blocked until that mismatch is intentionally reviewed and corrected; do not bypass
-the release helper.
+Every immutable SQL migration must have an explicit entry in `migration-policy.json`. Migration `0007` is
+classified as a previous-app-compatible expand migration because its nullable/defaulted source-cost authority
+preserves protocol-3 cost-free rows and previous application reads. Any future coverage mismatch blocks
+promotion; do not bypass the release helper.
 
 ## Rollback decision
 
