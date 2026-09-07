@@ -34,6 +34,10 @@ immutable image with no build or pull path, and restores the legacy checkout on 
 the dry run returns to the legacy tag, run the same command without `--dry-run`; the human must enter the normal
 typed release confirmation.
 
+Legacy OCI revision labels may contain either the full commit SHA or a unique Git abbreviation. Both validation
+layers resolve the label through the deployment repository and require it to identify the exact rollback commit;
+missing, malformed, ambiguous, or unrelated labels fail closed.
+
 Do not use the wrapper after the first successful release. Do not copy candidate files into the legacy
 checkout, run a moving branch, or check out the candidate before the wrapper captures the rollback boundary.
 

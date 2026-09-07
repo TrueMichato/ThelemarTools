@@ -158,6 +158,32 @@ describe("Campaign Hub first initialized release", () => {
 		expect(drift.stderr).toMatch(/backup image changed/);
 	});
 
+	it.each([
+		["first-release wrapper", firstReleaseScript],
+		["release engine", releaseScript],
+	])("accepts only revision labels that uniquely resolve to the rollback commit in the %s", (_name, script) => {
+		const source = fs.readFileSync(script, "utf8");
+		expect(source).toContain("revision_resolves_to_commit \"$bff_revision\" \"$PREVIOUS_SHA\"");
+		expect(source).toContain("revision_resolves_to_commit \"$backup_revision\" \"$PREVIOUS_SHA\"");
+
+		const dir = makeTempDir();
+		try {
+			const {checkout, previousSha, targetSha} = createTaggedFixture(dir);
+			const result = spawnSync("bash", ["-c", [
+				`source ${JSON.stringify(script)}`,
+				`ROOT=${JSON.stringify(checkout)}`,
+				`revision_resolves_to_commit ${JSON.stringify(previousSha.slice(0, 8))} ${JSON.stringify(previousSha)}`,
+				`revision_resolves_to_commit ${JSON.stringify(previousSha)} ${JSON.stringify(previousSha)}`,
+				`if revision_resolves_to_commit ${JSON.stringify(previousSha.slice(0, 6))} ${JSON.stringify(previousSha)}; then exit 91; fi`,
+				`if revision_resolves_to_commit ${JSON.stringify(targetSha.slice(0, 8))} ${JSON.stringify(previousSha)}; then exit 92; fi`,
+				`if revision_resolves_to_commit not-a-revision ${JSON.stringify(previousSha)}; then exit 93; fi`,
+			].join("\n")], {encoding: "utf8", env: getIsolatedGitEnv()});
+			expect(result.status).toBe(0);
+		} finally {
+			fs.rmSync(dir, {recursive: true, force: true});
+		}
+	});
+
 	it("restores the legacy checkout when a first-use preflight fails", () => {
 		const dir = makeTempDir();
 		try {

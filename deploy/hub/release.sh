@@ -82,6 +82,15 @@ fail () {
 	return 1
 }
 
+revision_resolves_to_commit () {
+	local revision="$1"
+	local expected_sha="$2"
+	local resolved
+	[[ "$revision" =~ ^[0-9a-f]{7,40}$ ]] || return 1
+	resolved="$(git -C "$ROOT" rev-parse --verify --quiet "${revision}^{commit}")" || return 1
+	[[ "$resolved" == "$expected_sha" ]]
+}
+
 trace () {
 	[[ -n "$TRACE_FILE" ]] || return 0
 	printf '%s\n' "$1" >>"$TRACE_FILE"
@@ -372,9 +381,9 @@ validate_first_use_image_handoff () {
 		|| fail "backup image changed after the first-release handoff"
 	bff_revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$actual_bff_image_id")"
 	backup_revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$actual_backup_image_id")"
-	[[ "$bff_revision" == "$PREVIOUS_SHA" ]] \
+	revision_resolves_to_commit "$bff_revision" "$PREVIOUS_SHA" \
 		|| fail "running BFF image revision does not match the first-release rollback SHA"
-	[[ "$backup_revision" == "$PREVIOUS_SHA" ]] \
+	revision_resolves_to_commit "$backup_revision" "$PREVIOUS_SHA" \
 		|| fail "backup image revision does not match the first-release rollback SHA"
 }
 

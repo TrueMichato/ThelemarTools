@@ -35,6 +35,15 @@ fail () {
 	return 1
 }
 
+revision_resolves_to_commit () {
+	local revision="$1"
+	local expected_sha="$2"
+	local resolved
+	[[ "$revision" =~ ^[0-9a-f]{7,40}$ ]] || return 1
+	resolved="$(git -C "$ROOT" rev-parse --verify --quiet "${revision}^{commit}")" || return 1
+	[[ "$resolved" == "$expected_sha" ]]
+}
+
 normalize_origin () {
 	printf '%s' "$1" | sed -E \
 		-e 's#^git@github\.com:#https://github.com/#' \
@@ -181,9 +190,9 @@ main () {
 	require_image_id "backup image" "$backup_image_id"
 	bff_revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$bff_image_id")"
 	backup_revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$backup_image_id")"
-	[[ "$bff_revision" == "$PREVIOUS_SHA" ]] \
+	revision_resolves_to_commit "$bff_revision" "$PREVIOUS_SHA" \
 		|| fail "running BFF image revision does not match the legacy checkout"
-	[[ "$backup_revision" == "$PREVIOUS_SHA" ]] \
+	revision_resolves_to_commit "$backup_revision" "$PREVIOUS_SHA" \
 		|| fail "backup image revision does not match the legacy checkout"
 
 	trap restore_checkout_on_exec_failure EXIT
