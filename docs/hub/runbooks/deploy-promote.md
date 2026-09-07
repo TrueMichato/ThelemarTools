@@ -16,6 +16,27 @@
 
 ## Procedure
 
+### First initialized release only
+
+Use this path only when the clean, tagged deployment predates `deploy/hub/release.sh`. Fetch the reviewed
+candidate tag without changing the checkout, then execute the wrapper directly from that immutable tag:
+
+```bash
+git fetch --no-tags origin refs/tags/hub-staging-YYYY-MM-DD:refs/tags/hub-staging-YYYY-MM-DD
+bash <(git show hub-staging-YYYY-MM-DD:deploy/hub/first-release.sh) \
+  --dry-run hub-staging-YYYY-MM-DD
+```
+
+The wrapper holds the normal release lock, captures the legacy SHA/tag and running BFF/static/backup image IDs,
+hashes the legacy Compose/Caddy tree, checks out the candidate, and hands those values to the existing release
+engine. The release engine revalidates the complete handoff, pins the prerelease backup to the captured
+immutable image with no build or pull path, and restores the legacy checkout on any pre-cutover failure. After
+the dry run returns to the legacy tag, run the same command without `--dry-run`; the human must enter the normal
+typed release confirmation.
+
+Do not use the wrapper after the first successful release. Do not copy candidate files into the legacy
+checkout, run a moving branch, or check out the candidate before the wrapper captures the rollback boundary.
+
 From the repository root, inspect the read-only path first:
 
 ```bash
@@ -48,9 +69,12 @@ operator approval; forward migration and role grants; BFF/static/edge cutover; t
 WebSocket, metrics, migration, container, icon, service-worker, and backup-age checks. JSON and text
 evidence are mode 0600 under `~/.local/state/thelemar-hub/releases/`.
 
-`compose.hub.release.yml` binds migration, grant, BFF, and static services to the exact image IDs captured after
-the candidate build. The script revalidates those IDs and the BFF revision label immediately before migration,
-so mutable local Compose tags cannot replace the reviewed candidate during operator approval.
+`compose.hub.release.yml` binds the prerelease backup to the exact current operations image and binds migration,
+grant, BFF, and static services to the exact image IDs captured after the candidate build. It removes the
+backup build path and uses `--pull never`; the script revalidates candidate IDs and the BFF revision label
+immediately before migration, so mutable local Compose tags cannot replace reviewed images. The candidate
+operations image is built with the other release images, restored to the previous tag after a dry run or
+pre-cutover failure, and retained only after a successful release for subsequent backups.
 
 `--repair-backup-ids` may change only `HUB_BACKUP_UID` and `HUB_BACKUP_GID` in `.env.hub`. It never runs
 `chown`. Release commands recreate only BFF, static, and edge, may stop only the Hub BFF on the incompatible

@@ -9,6 +9,11 @@ const semanticOperationsSql = fs.readFileSync(new URL("../../../server/migration
 const identitySql = fs.readFileSync(new URL("../../../server/migrations/0006_multi_provider_identity.sql", import.meta.url), "utf8");
 const peerSourceCostsSql = fs.readFileSync(new URL("../../../server/migrations/0007_peer_source_costs.sql", import.meta.url), "utf8");
 const postgresStore = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");
+const migrationPolicy = JSON.parse(fs.readFileSync(new URL("../../../deploy/hub/migration-policy.json", import.meta.url), "utf8"));
+const migrationVersions = fs.readdirSync(new URL("../../../server/migrations/", import.meta.url))
+	.map(filename => /^(\d{4})_.*\.sql$/.exec(filename)?.[1])
+	.filter(Boolean)
+	.sort();
 
 describe("campaign hub first migration contract", () => {
 	it.each([
@@ -195,5 +200,13 @@ describe("campaign hub first migration contract", () => {
 			"characters_peer_source_cost_invalidation",
 		]) expect(peerSourceCostsSql).toContain(required);
 		expect(peerSourceCostsSql).not.toMatch(/CREATE INDEX[\s\S]*source_cost\s*\)/);
+	});
+
+	it("classifies every immutable migration for release rollback compatibility", () => {
+		expect(Object.keys(migrationPolicy.migrations).sort()).toEqual(migrationVersions);
+		expect(migrationPolicy.migrations["0007"]).toMatchObject({
+			phase: "expand",
+			previousAppCompatible: true,
+		});
 	});
 });

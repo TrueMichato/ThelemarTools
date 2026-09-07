@@ -34,6 +34,7 @@ PREVIOUS_SHA=""
 PREVIOUS_TAG=""
 PREVIOUS_BFF_CONTAINER=""
 PREVIOUS_STATIC_CONTAINER=""
+PREVIOUS_BACKUP_IMAGE_ID=""
 ROLLBACK_COMPATIBLE="true"
 TRAFFIC_MUTATED="false"
 SCHEMA_MUTATED="false"
@@ -46,6 +47,14 @@ REPAIR_BACKUP_IDS="false"
 ALLOW_REDEPLOY="false"
 TEST_MODE="${HUB_RELEASE_TEST_MODE:-0}"
 SIMULATE="${HUB_RELEASE_SIMULATE:-0}"
+FIRST_USE="${HUB_RELEASE_FIRST_USE:-0}"
+INHERITED_LOCK_FD="${HUB_RELEASE_INHERITED_LOCK_FD:-}"
+FIRST_USE_PREVIOUS_SHA="${HUB_RELEASE_PREVIOUS_SHA:-}"
+FIRST_USE_PREVIOUS_TAG="${HUB_RELEASE_PREVIOUS_TAG:-}"
+FIRST_USE_PREVIOUS_BFF_IMAGE_ID="${HUB_RELEASE_PREVIOUS_BFF_IMAGE_ID:-}"
+FIRST_USE_PREVIOUS_STATIC_IMAGE_ID="${HUB_RELEASE_PREVIOUS_STATIC_IMAGE_ID:-}"
+FIRST_USE_PREVIOUS_BACKUP_IMAGE_ID="${HUB_RELEASE_PREVIOUS_BACKUP_IMAGE_ID:-}"
+FIRST_USE_PREVIOUS_CONFIG_SHA256="${HUB_RELEASE_PREVIOUS_CONFIG_SHA256:-}"
 EXIT_RECORDED="false"
 declare -a PREBUILD_IMAGE_IDS=()
 declare -a CANDIDATE_IMAGE_REFS=()
@@ -197,7 +206,7 @@ wait_for_public_ready () {
 }
 
 capture_candidate_image_tags () {
-	local project_name image_ref
+	local project_name image_ref image_id backup_repo_digests
 	project_name="$(compose_current config | awk '$1 == "name:" {print $2; exit}')"
 	[[ -n "$project_name" ]] || fail "could not resolve the Compose project name"
 	CANDIDATE_IMAGE_REFS=(
@@ -205,12 +214,27 @@ capture_candidate_image_tags () {
 		"${project_name}-grant-roles"
 		"${project_name}-bff"
 		"${project_name}-static"
+		"${project_name}-backup"
 	)
 	local index
 	for index in "${!CANDIDATE_IMAGE_REFS[@]}"; do
 		image_ref="${CANDIDATE_IMAGE_REFS[$index]}"
-		PREBUILD_IMAGE_IDS[index]="$(docker image inspect --format '{{.Id}}' "$image_ref" 2>/dev/null || true)"
+		image_id="$(docker image inspect --format '{{.Id}}' "$image_ref")" \
+			|| fail "current release image is missing: ${image_ref}"
+		[[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "current release image is not immutable: ${image_ref}"
+		PREBUILD_IMAGE_IDS[index]="$image_id"
 	done
+	PREVIOUS_BACKUP_IMAGE_ID="${PREBUILD_IMAGE_IDS[4]}"
+	backup_repo_digests="$(docker image inspect --format '{{json .RepoDigests}}' "$PREVIOUS_BACKUP_IMAGE_ID")"
+	record previous_backup_image_id "$PREVIOUS_BACKUP_IMAGE_ID"
+	record previous_backup_image_ref "${CANDIDATE_IMAGE_REFS[4]}"
+	record previous_backup_repo_digests "$backup_repo_digests"
+	export HUB_RELEASE_MIGRATE_IMAGE="${PREBUILD_IMAGE_IDS[0]}"
+	export HUB_RELEASE_GRANT_ROLES_IMAGE="${PREBUILD_IMAGE_IDS[1]}"
+	export HUB_RELEASE_BFF_IMAGE="${PREBUILD_IMAGE_IDS[2]}"
+	export HUB_RELEASE_STATIC_IMAGE="${PREBUILD_IMAGE_IDS[3]}"
+	export HUB_RELEASE_BACKUP_IMAGE="$PREVIOUS_BACKUP_IMAGE_ID"
+	assert_release_compose_safe
 }
 
 capture_candidate_images () {
@@ -222,7 +246,7 @@ capture_candidate_images () {
 			|| fail "candidate image was not built: ${image_ref}"
 		CANDIDATE_IMAGE_IDS[index]="$image_id"
 		record "candidate_image_${index}" "$image_id"
-		if ((index < 3)); then
+		if ((index < 3 || index == 4)); then
 			revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image_id")"
 			[[ "$revision" == "$TARGET_SHA" ]] \
 				|| fail "candidate image ${image_ref} revision label does not match ${TARGET_SHA}"
@@ -232,6 +256,7 @@ capture_candidate_images () {
 	export HUB_RELEASE_GRANT_ROLES_IMAGE="${CANDIDATE_IMAGE_IDS[1]}"
 	export HUB_RELEASE_BFF_IMAGE="${CANDIDATE_IMAGE_IDS[2]}"
 	export HUB_RELEASE_STATIC_IMAGE="${CANDIDATE_IMAGE_IDS[3]}"
+	export HUB_RELEASE_BACKUP_IMAGE="${CANDIDATE_IMAGE_IDS[4]}"
 	assert_release_compose_safe
 }
 
@@ -244,6 +269,9 @@ assert_candidate_images () {
 	[[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
 		"$HUB_RELEASE_BFF_IMAGE")" == "$TARGET_SHA" ]] \
 		|| fail "approved BFF image revision no longer matches the verified tag"
+	[[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
+		"$HUB_RELEASE_BACKUP_IMAGE")" == "$TARGET_SHA" ]] \
+		|| fail "approved backup image revision no longer matches the verified tag"
 	assert_release_compose_safe
 }
 
@@ -265,6 +293,89 @@ assert_clean_root () {
 	status="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)"
 	[[ -z "$status" ]] || fail "deployment checkout is dirty; commit/remove release-source changes first"
 	[[ ! -f "$ROOT/.git/MERGE_HEAD" ]] || fail "deployment checkout has an unfinished merge"
+}
+
+validate_first_use_environment () {
+	local -a handoff=(
+		"$INHERITED_LOCK_FD"
+		"$FIRST_USE_PREVIOUS_SHA"
+		"$FIRST_USE_PREVIOUS_TAG"
+		"$FIRST_USE_PREVIOUS_BFF_IMAGE_ID"
+		"$FIRST_USE_PREVIOUS_STATIC_IMAGE_ID"
+		"$FIRST_USE_PREVIOUS_BACKUP_IMAGE_ID"
+		"$FIRST_USE_PREVIOUS_CONFIG_SHA256"
+	)
+	if [[ "$FIRST_USE" == "1" ]]; then
+		local value
+		for value in "${handoff[@]}"; do
+			[[ -n "$value" ]] || fail "first-release handoff is incomplete"
+		done
+		[[ "$INHERITED_LOCK_FD" == "9" ]] || fail "first-release handoff must inherit release lock FD 9"
+		[[ "$FIRST_USE_PREVIOUS_SHA" =~ ^[0-9a-f]{40}$ ]] || fail "first-release previous SHA is invalid"
+		[[ "$FIRST_USE_PREVIOUS_TAG" =~ ^hub-[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
+			|| fail "first-release previous tag is invalid"
+		for value in \
+			"$FIRST_USE_PREVIOUS_BFF_IMAGE_ID" \
+			"$FIRST_USE_PREVIOUS_STATIC_IMAGE_ID" \
+			"$FIRST_USE_PREVIOUS_BACKUP_IMAGE_ID"; do
+			[[ "$value" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "first-release image handoff is invalid"
+		done
+		[[ "$FIRST_USE_PREVIOUS_CONFIG_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+			|| fail "first-release previous config hash is invalid"
+		return 0
+	fi
+	[[ "$FIRST_USE" == "0" ]] || fail "HUB_RELEASE_FIRST_USE must be 0 or 1"
+	local value
+	for value in "${handoff[@]}"; do
+		[[ -z "$value" ]] || fail "first-release handoff variables require HUB_RELEASE_FIRST_USE=1"
+	done
+}
+
+configure_previous_release_identity () {
+	if [[ "$FIRST_USE" == "1" ]]; then
+		[[ "$(git -C "$ROOT" rev-parse HEAD)" == "$TARGET_SHA" ]] \
+			|| fail "first-release candidate checkout does not match ${TARGET_SHA}"
+		PREVIOUS_SHA="$FIRST_USE_PREVIOUS_SHA"
+		PREVIOUS_TAG="$FIRST_USE_PREVIOUS_TAG"
+		[[ "$PREVIOUS_SHA" != "$TARGET_SHA" ]] || fail "first-release previous SHA matches the candidate"
+		[[ "$(git -C "$ROOT" cat-file -t "refs/tags/${PREVIOUS_TAG}")" == "tag" ]] \
+			|| fail "first-release rollback tag ${PREVIOUS_TAG} is not annotated"
+		[[ "$(git -C "$ROOT" rev-parse "refs/tags/${PREVIOUS_TAG}^{}")" == "$PREVIOUS_SHA" ]] \
+			|| fail "first-release rollback tag does not resolve to ${PREVIOUS_SHA}"
+		git -C "$ROOT" merge-base --is-ancestor "$PREVIOUS_SHA" "$TARGET_SHA" \
+			|| fail "first-release candidate does not descend from ${PREVIOUS_SHA}"
+		SOURCE_CHECKED_OUT="true"
+		return 0
+	fi
+
+	PREVIOUS_SHA="$(git -C "$ROOT" rev-parse HEAD)"
+	PREVIOUS_TAG="$(git -C "$ROOT" describe --tags --exact-match "$PREVIOUS_SHA" 2>/dev/null || true)"
+	[[ -n "$PREVIOUS_TAG" ]] || fail "current deployment HEAD must have an exact rollback tag"
+	[[ "$(git -C "$ROOT" cat-file -t "refs/tags/${PREVIOUS_TAG}")" == "tag" ]] \
+		|| fail "current rollback tag ${PREVIOUS_TAG} is not annotated"
+	if [[ "$TARGET_SHA" == "$PREVIOUS_SHA" && "$ALLOW_REDEPLOY" != "true" ]]; then
+		fail "${TAG} is already deployed; use --allow-redeploy for an explicit rebuild"
+	fi
+}
+
+validate_first_use_image_handoff () {
+	local actual_bff_image_id="$1"
+	local actual_static_image_id="$2"
+	local actual_backup_image_id="$3"
+	local bff_revision backup_revision
+	[[ "$FIRST_USE" == "1" ]] || return 0
+	[[ "$actual_bff_image_id" == "$FIRST_USE_PREVIOUS_BFF_IMAGE_ID" ]] \
+		|| fail "running BFF image changed after the first-release handoff"
+	[[ "$actual_static_image_id" == "$FIRST_USE_PREVIOUS_STATIC_IMAGE_ID" ]] \
+		|| fail "running static image changed after the first-release handoff"
+	[[ "$actual_backup_image_id" == "$FIRST_USE_PREVIOUS_BACKUP_IMAGE_ID" ]] \
+		|| fail "backup image changed after the first-release handoff"
+	bff_revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$actual_bff_image_id")"
+	backup_revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$actual_backup_image_id")"
+	[[ "$bff_revision" == "$PREVIOUS_SHA" ]] \
+		|| fail "running BFF image revision does not match the first-release rollback SHA"
+	[[ "$backup_revision" == "$PREVIOUS_SHA" ]] \
+		|| fail "backup image revision does not match the first-release rollback SHA"
 }
 
 validate_backup_identity () {
@@ -429,6 +540,19 @@ cleanup () {
 	fi
 }
 
+early_first_use_cleanup () {
+	local status="$?"
+	trap - EXIT
+	set +e
+	if [[ "$status" -ne 0 \
+		&& "$FIRST_USE" == "1" \
+		&& -n "$ROOT" \
+		&& "$PREVIOUS_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+		git -C "$ROOT" checkout --detach "$PREVIOUS_SHA" >/dev/null 2>&1 || true
+	fi
+	exit "$status"
+}
+
 export_monitor_environment () {
 	export HUB_PUBLIC_DOMAIN HUB_METRICS_TOKEN
 	HUB_PUBLIC_DOMAIN="$(env_value HUB_PUBLIC_DOMAIN)"
@@ -511,40 +635,50 @@ phase_preflight () {
 	if [[ "${HUB_RELEASE_REQUIRE_SIGNED_TAG:-0}" == "1" ]]; then
 		git -C "$ROOT" verify-tag "$TAG"
 	fi
-
-	PREVIOUS_SHA="$(git -C "$ROOT" rev-parse HEAD)"
-	PREVIOUS_TAG="$(git -C "$ROOT" describe --tags --exact-match "$PREVIOUS_SHA" 2>/dev/null || true)"
-	[[ -n "$PREVIOUS_TAG" ]] || fail "current deployment HEAD must have an exact rollback tag"
-	[[ "$(git -C "$ROOT" cat-file -t "refs/tags/${PREVIOUS_TAG}")" == "tag" ]] \
-		|| fail "current rollback tag ${PREVIOUS_TAG} is not annotated"
-	if [[ "$TARGET_SHA" == "$PREVIOUS_SHA" && "$ALLOW_REDEPLOY" != "true" ]]; then
-		fail "${TAG} is already deployed; use --allow-redeploy for an explicit rebuild"
-	fi
+	configure_previous_release_identity
 
 	export_monitor_environment
 	"$ROOT/deploy/hub/monitor-host.sh"
 }
 
 phase_record_rollback () {
+	local bff_evidence static_evidence actual_bff_image_id actual_static_image_id
 	PREVIOUS_BFF_CONTAINER="$(compose_current ps -q bff)"
 	PREVIOUS_STATIC_CONTAINER="$(compose_current ps -q static)"
 	[[ -n "$PREVIOUS_BFF_CONTAINER" && -n "$PREVIOUS_STATIC_CONTAINER" ]] \
 		|| fail "running BFF/static containers are required for rollback"
-	get_container_image_evidence "$PREVIOUS_BFF_CONTAINER" previous_bff >/dev/null
-	get_container_image_evidence "$PREVIOUS_STATIC_CONTAINER" previous_static >/dev/null
+	bff_evidence="$(get_container_image_evidence "$PREVIOUS_BFF_CONTAINER" previous_bff)"
+	static_evidence="$(get_container_image_evidence "$PREVIOUS_STATIC_CONTAINER" previous_static)"
+	IFS=$'\t' read -r actual_bff_image_id _ <<<"$bff_evidence"
+	IFS=$'\t' read -r actual_static_image_id _ <<<"$static_evidence"
+	capture_candidate_image_tags
+	[[ "${PREBUILD_IMAGE_IDS[2]}" == "$actual_bff_image_id" ]] \
+		|| fail "current BFF image tag does not match the running rollback image"
+	[[ "${PREBUILD_IMAGE_IDS[3]}" == "$actual_static_image_id" ]] \
+		|| fail "current static image tag does not match the running rollback image"
+	validate_first_use_image_handoff \
+		"$actual_bff_image_id" \
+		"$actual_static_image_id" \
+		"$PREVIOUS_BACKUP_IMAGE_ID"
 
 	local migration_status="${RELEASE_DIR}/migration-before.json"
-	compose_current run --rm --no-deps migrate node server/scripts/migrate.mjs status >"$migration_status"
+	compose_release run --interactive=false -T --rm --no-deps --pull never migrate \
+		node server/scripts/migrate.mjs status >"$migration_status"
 	record previous_migration_status_sha256 "$(sha256_file "$migration_status")"
-	record previous_config_sha256 "$(hash_files \
-		"$ROOT/compose.hub.yml" \
-		"$ROOT/compose.hub.public.yml" \
-		"$ROOT/compose.hub.release.yml" \
-		"$ROOT/deploy/hub/Caddyfile.public" \
-		"$ROOT/deploy/hub/migration-policy.json")"
+	if [[ "$FIRST_USE" == "1" ]]; then
+		record previous_config_sha256 "$FIRST_USE_PREVIOUS_CONFIG_SHA256"
+		record previous_config_scope "git-ls-tree:compose.hub.yml,compose.hub.public.yml,deploy/hub/Caddyfile.public"
+	else
+		record previous_config_sha256 "$(hash_files \
+			"$ROOT/compose.hub.yml" \
+			"$ROOT/compose.hub.public.yml" \
+			"$ROOT/compose.hub.release.yml" \
+			"$ROOT/deploy/hub/Caddyfile.public" \
+			"$ROOT/deploy/hub/migration-policy.json")"
+		record previous_config_scope "release-files"
+	fi
 	record env_file_sha256 "$(sha256_file "$ENV_FILE")"
 	record readiness_before passed
-	capture_candidate_image_tags
 }
 
 phase_backup () {
@@ -558,7 +692,7 @@ phase_backup () {
 		record backup_status dry-run
 		return 0
 	fi
-	compose_current --profile backup run --rm --no-deps backup \
+	compose_release --profile backup run --interactive=false -T --rm --no-deps --pull never backup \
 		node server/scripts/backup-encrypted.mjs "$container_backup"
 	local host_backup="${BACKUP_DIR}/${backup_name}"
 	[[ -f "$host_backup" ]] || fail "encrypted backup was not created at ${host_backup}"
@@ -566,7 +700,7 @@ phase_backup () {
 		|| fail "encrypted backup envelope header is invalid"
 	# The quoted program must be passed to Node verbatim; shell expansion would be unsafe here.
 	# shellcheck disable=SC2016
-	compose_current --profile backup run --rm --no-deps backup \
+	compose_release --profile backup run --interactive=false -T --rm --no-deps --pull never backup \
 		node --input-type=module -e '
 			import fs from "node:fs";
 			import os from "node:os";
@@ -612,7 +746,7 @@ phase_checkout () {
 phase_migration_plan () {
 	export HUB_IMAGE_VERSION="$TAG"
 	export HUB_VCS_REF="$TARGET_SHA"
-	compose_current build migrate grant-roles bff static
+	compose_current build migrate grant-roles bff static backup
 	capture_candidate_images
 	local plan="${RELEASE_DIR}/migration-plan.json"
 	local summary="${RELEASE_DIR}/migration-summary.json"
@@ -831,12 +965,23 @@ parse_arguments () {
 
 main () {
 	parse_arguments "$@"
+	if [[ "$FIRST_USE" == "1" ]]; then
+		ROOT="$(git -C "$SCRIPT_DIR/../.." rev-parse --show-toplevel)"
+		ROOT="$(cd "$ROOT" && pwd -P)"
+		PREVIOUS_SHA="$FIRST_USE_PREVIOUS_SHA"
+		PREVIOUS_TAG="$FIRST_USE_PREVIOUS_TAG"
+		SOURCE_CHECKED_OUT="true"
+		trap early_first_use_cleanup EXIT
+	fi
+	validate_first_use_environment
 	if [[ "$SIMULATE" == "1" && "$TEST_MODE" != "1" ]]; then
 		fail "HUB_RELEASE_SIMULATE is available only with HUB_RELEASE_TEST_MODE=1"
 		exit 2
 	fi
 	mkdir -p "$(dirname "$LOCK_FILE")"
-	exec 9>"$LOCK_FILE"
+	if [[ "$FIRST_USE" != "1" ]]; then
+		exec 9>"$LOCK_FILE"
+	fi
 	if command -v flock >/dev/null 2>&1; then
 		flock -n 9 || {
 			printf '[hub-release] ERROR: another Campaign Hub release holds %s\n' "$LOCK_FILE" >&2
@@ -874,6 +1019,7 @@ main () {
 	record rollback_attempted false
 	record rollback_compatible unknown
 	record simulation "$([[ "$SIMULATE" == "1" ]] && printf true || printf false)"
+	record first_use "$([[ "$FIRST_USE" == "1" ]] && printf true || printf false)"
 	trap cleanup EXIT
 	trap 'exit $?' ERR
 	trap 'exit 129' HUP

@@ -12,3 +12,7 @@ services:
 
   static:
     image: ${HUB_RELEASE_STATIC_IMAGE:?set by deploy/hub/release.sh}
+
+  backup:
+    image: ${HUB_RELEASE_BACKUP_IMAGE:?set by deploy/hub/release.sh}
+    build: !reset null
