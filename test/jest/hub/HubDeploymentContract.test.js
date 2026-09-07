@@ -1,3 +1,4 @@
+import {spawnSync} from "node:child_process";
 import fs from "node:fs";
 
 const read = path => fs.readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
@@ -260,6 +261,27 @@ describe("Hub portable deployment contract", () => {
 			"hub_last_restore_drill_age_seconds",
 		]) expect(monitor).toContain(metric);
 		expect(monitor).not.toContain("character");
+	});
+
+	it("uses a portable load-average variable and enforces the CPU threshold", () => {
+		const program = "BEGIN {exit !(cpus > 0 && load_value <= cpus * 2)}";
+		expect(monitor).not.toMatch(/\b-v load=/);
+		expect(monitor).toContain("-v load_value=\"$load_one\"");
+		expect(monitor).toContain(program);
+
+		for (const [loadValue, cpuCount, expectedStatus] of [
+			["0.10", "1", 0],
+			["2.00", "1", 0],
+			["2.01", "1", 1],
+			["0.10", "0", 1],
+		]) {
+			const result = spawnSync("awk", [
+				"-v", `load_value=${loadValue}`,
+				"-v", `cpus=${cpuCount}`,
+				program,
+			]);
+			expect(result.status).toBe(expectedStatus);
+		}
 	});
 
 	it("keeps local secrets out of Git and the BFF image context", () => {

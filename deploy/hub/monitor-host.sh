@@ -77,7 +77,7 @@ awk -v available="$memory_available" -v total="$memory_total" 'BEGIN {exit !(tot
 
 load_one="$(awk '{print $1}' /proc/loadavg)"
 cpu_count="$(getconf _NPROCESSORS_ONLN)"
-awk -v load="$load_one" -v cpus="$cpu_count" 'BEGIN {exit !(cpus > 0 && load <= cpus * 2)}' \
+awk -v load_value="$load_one" -v cpus="$cpu_count" 'BEGIN {exit !(cpus > 0 && load_value <= cpus * 2)}' \
 	|| fail "one-minute load ${load_one} exceeds twice the ${cpu_count}-CPU capacity"
 
 running_services="$(docker compose \
