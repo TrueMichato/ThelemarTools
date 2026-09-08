@@ -98,6 +98,10 @@ function runImagePreservationScenario ({body, failTagTarget = ""}) {
 		"        printf '{}\\n'",
 		"      fi",
 		"      ;;",
+		"    \"image ls\")",
+		`      local ref="${getShellExpansion("!#")}"`,
+		"      test_get_image \"$ref\" 2>/dev/null || return 0",
+		"      ;;",
 		"    \"image tag\")",
 		"      local source_ref=\"$3\"",
 		"      local target_ref=\"$4\"",
@@ -711,6 +715,55 @@ describe("Campaign Hub deliberate release automation", () => {
 			expect(result.stdout).toContain("partial_cleanup=passed");
 			expect(result.stderr).toMatch(/could not preserve current release image: hub-bff/);
 			expect(result.state).not.toContain("previous_images_preserved\ttrue");
+		} finally {
+			fs.rmSync(result.dir, {recursive: true, force: true});
+		}
+	});
+
+	it("treats already-absent preservation tags as cleaned", () => {
+		const result = runImagePreservationScenario({body: [
+			"preserve_candidate_image_tags",
+			`first_hold="${getShellExpansion("PREBUILD_IMAGE_PRESERVATION_REFS[0]")}"`,
+			"test_remove_image \"$first_hold\"",
+			"remove_candidate_image_preservation_tags",
+			`[[ "${getShellExpansion("#PREBUILD_IMAGE_PRESERVATION_REFS[@]")}" == 0 ]]`,
+			"printf 'idempotent_cleanup=passed\\n'",
+		].join("\n")});
+		try {
+			expect(result.status).toBe(0);
+			expect(result.stdout).toContain("idempotent_cleanup=passed");
+			expect(result.stderr).toBe("");
+		} finally {
+			fs.rmSync(result.dir, {recursive: true, force: true});
+		}
+	});
+
+	it("records successful first-use recovery after a partial preservation failure cleans itself", () => {
+		const failedTarget = "hub-bff:hub-release-preserve-20260907T230000Z-hub-test-123";
+		const result = runImagePreservationScenario({
+			failTagTarget: failedTarget,
+			body: [
+				"ROOT=/deployment",
+				`PREVIOUS_SHA=${"a".repeat(40)}`,
+				"SOURCE_CHECKED_OUT=true",
+				"SIMULATE=0",
+				"TRAFFIC_MUTATED=false",
+				"SCHEMA_MUTATED=false",
+				"CURRENT_PHASE=record-rollback",
+				"TRACE_FILE=",
+				"render_evidence () { :; }",
+				"git () {",
+				"  [[ \"$*\" == \"-C /deployment checkout --detach $PREVIOUS_SHA\" ]]",
+				"}",
+				"if preserve_candidate_image_tags; then exit 80; fi",
+				"handle_failure 41",
+			].join("\n"),
+		});
+		try {
+			expect(result.status).toBe(41);
+			expect(result.state).toContain("pretraffic_recovery\tsucceeded");
+			expect(result.state).not.toContain("pretraffic_recovery\tfailed");
+			expect(result.stderr).not.toMatch(/Failed to restore the previous checkout\/image tags/);
 		} finally {
 			fs.rmSync(result.dir, {recursive: true, force: true});
 		}

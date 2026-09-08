@@ -250,16 +250,43 @@ capture_candidate_image_tags () {
 }
 
 remove_candidate_image_preservation_tags () {
-	local preservation_ref
+	local index preservation_ref matching_ids
 	local failed="false"
-	for preservation_ref in "${PREBUILD_IMAGE_PRESERVATION_REFS[@]}"; do
+	for index in "${!PREBUILD_IMAGE_PRESERVATION_REFS[@]}"; do
+		preservation_ref="${PREBUILD_IMAGE_PRESERVATION_REFS[$index]}"
 		[[ -n "$preservation_ref" ]] || continue
-		if ! docker image rm "$preservation_ref" >/dev/null; then
+		if docker image inspect "$preservation_ref" >/dev/null 2>&1; then
+			if docker image rm "$preservation_ref" >/dev/null; then
+				PREBUILD_IMAGE_PRESERVATION_REFS[index]=""
+				continue
+			fi
 			log "Failed to remove preserved image tag ${preservation_ref}."
 			failed="true"
+			continue
+		fi
+		if ! matching_ids="$(docker image ls --quiet --no-trunc "$preservation_ref")"; then
+			log "Failed to determine whether preserved image tag ${preservation_ref} still exists."
+			failed="true"
+		elif [[ -n "$matching_ids" ]]; then
+			log "Preserved image tag ${preservation_ref} exists but could not be inspected."
+			failed="true"
+		else
+			PREBUILD_IMAGE_PRESERVATION_REFS[index]=""
 		fi
 	done
-	[[ "$failed" == "false" ]]
+	if [[ "$failed" == "false" ]]; then
+		PREBUILD_IMAGE_PRESERVATION_REFS=()
+		return 0
+	fi
+	return 1
+}
+
+candidate_image_tags_are_preserved () {
+	local index
+	((${#CANDIDATE_IMAGE_REFS[@]})) || return 1
+	for index in "${!CANDIDATE_IMAGE_REFS[@]}"; do
+		[[ -n "${PREBUILD_IMAGE_PRESERVATION_REFS[$index]:-}" ]] || return 1
+	done
 }
 
 preserve_candidate_image_tags () {
@@ -607,8 +634,16 @@ handle_failure () {
 			log "Schema migrations ${APPLIED_MIGRATIONS} were applied, but traffic was not cut over; the compatible previous application remains running."
 			log "The database was not reversed or restored. Correct the release and move forward."
 		fi
-		if git -C "$ROOT" checkout --detach "$PREVIOUS_SHA" >/dev/null 2>&1 \
-			&& restore_candidate_image_tags >/dev/null 2>&1; then
+		local pretraffic_recovered="false"
+		if git -C "$ROOT" checkout --detach "$PREVIOUS_SHA" >/dev/null 2>&1; then
+			SOURCE_CHECKED_OUT="false"
+			if candidate_image_tags_are_preserved; then
+				restore_candidate_image_tags >/dev/null 2>&1 && pretraffic_recovered="true"
+			elif remove_candidate_image_preservation_tags >/dev/null 2>&1; then
+				pretraffic_recovered="true"
+			fi
+		fi
+		if [[ "$pretraffic_recovered" == "true" ]]; then
 			replace_record pretraffic_recovery succeeded
 		else
 			replace_record pretraffic_recovery failed
