@@ -54,24 +54,31 @@ function getShellExpansion (expression) {
 	return "$" + `{${expression}}`;
 }
 
-function runImagePreservationScenario ({body, failTagTarget = ""}) {
+function runImagePreservationScenario ({body, failTagTarget = "", failRemoveTarget = ""}) {
 	const dir = makeTempDir();
 	const state = path.join(dir, "state.tsv");
 	const imageState = path.join(dir, "images.tsv");
+	const deploymentRoot = path.join(dir, "deployment");
+	const monitorScript = path.join(deploymentRoot, "deploy/hub/monitor-host.sh");
 	const oldMigrate = `sha256:${"1".repeat(64)}`;
 	const oldBff = `sha256:${"2".repeat(64)}`;
 	const candidateMigrate = `sha256:${"3".repeat(64)}`;
 	const candidateBff = `sha256:${"4".repeat(64)}`;
 	fs.writeFileSync(imageState, `hub-migrate\t${oldMigrate}\nhub-bff\t${oldBff}\n`);
+	fs.mkdirSync(path.dirname(monitorScript), {recursive: true});
+	fs.writeFileSync(monitorScript, "#!/usr/bin/env bash\nprintf 'monitor:passed\\n'\n");
+	fs.chmodSync(monitorScript, 0o700);
 	const result = spawnSync("bash", ["-c", [
 		`source ${JSON.stringify(releaseScript)}`,
 		`STATE_FILE=${JSON.stringify(state)}`,
 		`TEST_IMAGE_STATE=${JSON.stringify(imageState)}`,
+		`TEST_DEPLOYMENT_ROOT=${JSON.stringify(deploymentRoot)}`,
 		`RELEASE_ID=${JSON.stringify("20260907T230000Z-hub-test-123")}`,
 		": >\"$STATE_FILE\"",
 		"CANDIDATE_IMAGE_REFS=(hub-migrate hub-bff)",
 		`PREBUILD_IMAGE_IDS=(${oldMigrate} ${oldBff})`,
 		`TEST_FAIL_TAG_TARGET=${JSON.stringify(failTagTarget)}`,
+		`TEST_FAIL_REMOVE_TARGET=${JSON.stringify(failRemoveTarget)}`,
 		"test_get_image () {",
 		"  awk -F '\\t' -v ref=\"$1\" '$1 == ref {print $2; found = 1; exit} END {if (!found) exit 1}' \"$TEST_IMAGE_STATE\"",
 		"}",
@@ -112,6 +119,7 @@ function runImagePreservationScenario ({body, failTagTarget = ""}) {
 		"      ;;",
 		"    \"image rm\")",
 		"      local ref=\"$3\"",
+		"      [[ \"$ref\" != \"$TEST_FAIL_REMOVE_TARGET\" ]] || return 92",
 		"      test_remove_image \"$ref\"",
 		"      ;;",
 		"    *) return 99 ;;",
@@ -659,7 +667,7 @@ describe("Campaign Hub deliberate release automation", () => {
 			`second_hold="${getShellExpansion("PREBUILD_IMAGE_PRESERVATION_REFS[1]")}"`,
 			"test_set_image hub-migrate \"$CANDIDATE_MIGRATE\"",
 			"test_set_image hub-bff \"$CANDIDATE_BFF\"",
-			"restore_candidate_image_tags",
+			"restore_candidate_image_tags_and_cleanup",
 			"printf 'migrate=%s\\nbff=%s\\n' \"$(test_get_image hub-migrate)\" \"$(test_get_image hub-bff)\"",
 			"! test_get_image \"$first_hold\" >/dev/null",
 			"! test_get_image \"$second_hold\" >/dev/null",
@@ -671,6 +679,43 @@ describe("Campaign Hub deliberate release automation", () => {
 			expect(result.state).toContain("previous_images_preserved\tfalse");
 			expect(result.state).toContain("previous_image_0_preservation_ref\thub-migrate:hub-release-preserve-");
 			expect(result.state).toContain("previous_image_1_preservation_ref\thub-bff:hub-release-preserve-");
+		} finally {
+			fs.rmSync(result.dir, {recursive: true, force: true});
+		}
+	});
+
+	it("continues post-cutover rollback when only preservation-tag cleanup fails", () => {
+		const failedTarget = "hub-migrate:hub-release-preserve-20260907T230000Z-hub-test-123";
+		const result = runImagePreservationScenario({
+			failRemoveTarget: failedTarget,
+			body: [
+				"preserve_candidate_image_tags",
+				"test_set_image hub-migrate \"$CANDIDATE_MIGRATE\"",
+				"test_set_image hub-bff \"$CANDIDATE_BFF\"",
+				"ROOT=\"$TEST_DEPLOYMENT_ROOT\"",
+				`PREVIOUS_SHA=${"a".repeat(40)}`,
+				"PREVIOUS_TAG=hub-previous",
+				"TRACE_FILE=",
+				"git () {",
+				"  [[ \"$*\" == \"-C $ROOT checkout --detach $PREVIOUS_SHA\" ]]",
+				"}",
+				"compose_current () { printf 'compose:%s\\n' \"$*\"; }",
+				"export_monitor_environment () { :; }",
+				"wait_for_public_ready () { :; }",
+				"rollback_application",
+				"printf 'migrate=%s\\nbff=%s\\n' \"$(test_get_image hub-migrate)\" \"$(test_get_image hub-bff)\"",
+			].join("\n"),
+		});
+		try {
+			expect(result.status).toBe(0);
+			expect(result.stdout).toContain("compose:up -d --no-deps --force-recreate --wait bff static");
+			expect(result.stdout).toContain("compose:up -d --no-deps --force-recreate edge");
+			expect(result.stdout).toContain("monitor:passed");
+			expect(result.stdout).toContain(`migrate=sha256:${"1".repeat(64)}`);
+			expect(result.stdout).toContain(`bff=sha256:${"2".repeat(64)}`);
+			expect(result.stdout).toMatch(/preservation-tag cleanup failed/);
+			expect(result.state).toContain("rollback_preservation_cleanup\tfailed");
+			expect(result.state).toContain("rollback_result\tsucceeded");
 		} finally {
 			fs.rmSync(result.dir, {recursive: true, force: true});
 		}

@@ -148,7 +148,9 @@ the script restores the previous checkout/image tags but never reverses or resto
 
 After cutover, the script automatically rolls back only the BFF/static application images and source when
 every applied migration declares the previous app compatible. It never reverses migrations and never restores
-a backup automatically.
+a backup automatically. Once all previous mutable image tags are restored and verified, a failure to delete a
+temporary preservation tag is recorded for manual cleanup but does not prevent the previous BFF/static/edge
+services from being recreated and verified.
 
 Normal planning rejects schema-incompatible or contract migrations before apply/cutover. The BFF-stop and
 isolated-restore instruction path is defense in depth for unexpected compatibility drift after traffic

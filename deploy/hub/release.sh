@@ -397,6 +397,10 @@ restore_candidate_image_tags () {
 		restored_id="$(docker image inspect --format '{{.Id}}' "$image_ref")" || return 1
 		[[ "$restored_id" == "$old_id" ]] || return 1
 	done
+}
+
+restore_candidate_image_tags_and_cleanup () {
+	restore_candidate_image_tags || return 1
 	remove_candidate_image_preservation_tags || return 1
 	replace_record previous_images_preserved false
 }
@@ -585,6 +589,13 @@ rollback_application () {
 	git -C "$ROOT" checkout --detach "$PREVIOUS_SHA" >/dev/null || return 1
 	SOURCE_CHECKED_OUT="false"
 	restore_candidate_image_tags || return 1
+	if remove_candidate_image_preservation_tags; then
+		replace_record previous_images_preserved false
+		replace_record rollback_preservation_cleanup succeeded
+	else
+		replace_record rollback_preservation_cleanup failed
+		log "Previous image tags were restored, but preservation-tag cleanup failed; remove the recorded preservation references manually after rollback verification."
+	fi
 	export HUB_IMAGE_VERSION="$PREVIOUS_TAG"
 	export HUB_VCS_REF="$PREVIOUS_SHA"
 	compose_current up -d --no-deps --force-recreate --wait bff static || return 1
@@ -638,7 +649,7 @@ handle_failure () {
 		if git -C "$ROOT" checkout --detach "$PREVIOUS_SHA" >/dev/null 2>&1; then
 			SOURCE_CHECKED_OUT="false"
 			if candidate_image_tags_are_preserved; then
-				restore_candidate_image_tags >/dev/null 2>&1 && pretraffic_recovered="true"
+				restore_candidate_image_tags_and_cleanup >/dev/null 2>&1 && pretraffic_recovered="true"
 			elif remove_candidate_image_preservation_tags >/dev/null 2>&1; then
 				pretraffic_recovered="true"
 			fi
@@ -917,7 +928,7 @@ phase_approval () {
 	if [[ "$DRY_RUN" == "true" ]]; then
 		log "DRY RUN complete: no backup, migration, role, or service mutation was performed."
 		git -C "$ROOT" checkout --detach "$PREVIOUS_SHA" >/dev/null
-		restore_candidate_image_tags
+		restore_candidate_image_tags_and_cleanup
 		SOURCE_CHECKED_OUT="false"
 		return 0
 	fi
