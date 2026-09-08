@@ -13,7 +13,9 @@ LABEL org.opencontainers.image.source="https://github.com/TrueMichato/ThelemarTo
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 WORKDIR /app
 COPY --chown=postgres:postgres server/scripts ./server/scripts
-RUN mkdir -p /backups \
+RUN find /app/server/scripts -type d -exec chmod 0755 {} + \
+	&& find /app/server/scripts -type f -exec chmod 0644 {} + \
+	&& mkdir -p /backups \
 	&& chown postgres:postgres /backups
 
 USER postgres

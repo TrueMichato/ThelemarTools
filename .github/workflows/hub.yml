@@ -30,6 +30,9 @@ jobs:
       - name: Hub unit and contract tests
         run: npm run test:hub
 
+      - name: Backup operations image permission contract
+        run: npm run test:hub:ops-image
+
       - name: Active campaign context mutation tests
         run: npm run test:hub:mutations
 
