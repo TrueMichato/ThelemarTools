@@ -230,6 +230,8 @@ describe("Hub portable deployment contract", () => {
 		expect(compose).toContain("server/scripts/maintenance.mjs");
 		expect(compose).toContain("backup-encrypted.mjs");
 		expect(opsDockerfile).toContain("FROM postgres:17.6-bookworm");
+		expect(opsDockerfile).toContain("find /app/server/scripts -type d -exec chmod 0755 {} +");
+		expect(opsDockerfile).toContain("find /app/server/scripts -type f -exec chmod 0644 {} +");
 		expect(opsDockerfile).toContain("USER postgres");
 		expect(opsDockerignore).toContain("!server/scripts/**");
 	});
