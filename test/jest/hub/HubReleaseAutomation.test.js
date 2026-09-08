@@ -50,6 +50,94 @@ function runGitShell (script, baseEnv = process.env) {
 	return spawnSync("bash", ["-c", script], {encoding: "utf8", env: getIsolatedGitEnv(baseEnv)});
 }
 
+function getShellExpansion (expression) {
+	return "$" + `{${expression}}`;
+}
+
+function runImagePreservationScenario ({body, failTagTarget = "", failRemoveTarget = ""}) {
+	const dir = makeTempDir();
+	const state = path.join(dir, "state.tsv");
+	const imageState = path.join(dir, "images.tsv");
+	const deploymentRoot = path.join(dir, "deployment");
+	const monitorScript = path.join(deploymentRoot, "deploy/hub/monitor-host.sh");
+	const oldMigrate = `sha256:${"1".repeat(64)}`;
+	const oldBff = `sha256:${"2".repeat(64)}`;
+	const candidateMigrate = `sha256:${"3".repeat(64)}`;
+	const candidateBff = `sha256:${"4".repeat(64)}`;
+	fs.writeFileSync(imageState, `hub-migrate\t${oldMigrate}\nhub-bff\t${oldBff}\n`);
+	fs.mkdirSync(path.dirname(monitorScript), {recursive: true});
+	fs.writeFileSync(monitorScript, "#!/usr/bin/env bash\nprintf 'monitor:passed\\n'\n");
+	fs.chmodSync(monitorScript, 0o700);
+	const result = spawnSync("bash", ["-c", [
+		`source ${JSON.stringify(releaseScript)}`,
+		`STATE_FILE=${JSON.stringify(state)}`,
+		`TEST_IMAGE_STATE=${JSON.stringify(imageState)}`,
+		`TEST_DEPLOYMENT_ROOT=${JSON.stringify(deploymentRoot)}`,
+		`RELEASE_ID=${JSON.stringify("20260907T230000Z-hub-test-123")}`,
+		": >\"$STATE_FILE\"",
+		"CANDIDATE_IMAGE_REFS=(hub-migrate hub-bff)",
+		`PREBUILD_IMAGE_IDS=(${oldMigrate} ${oldBff})`,
+		`TEST_FAIL_TAG_TARGET=${JSON.stringify(failTagTarget)}`,
+		`TEST_FAIL_REMOVE_TARGET=${JSON.stringify(failRemoveTarget)}`,
+		"test_get_image () {",
+		"  awk -F '\\t' -v ref=\"$1\" '$1 == ref {print $2; found = 1; exit} END {if (!found) exit 1}' \"$TEST_IMAGE_STATE\"",
+		"}",
+		"test_set_image () {",
+		`  awk -F '\\t' -v ref="$1" '$1 != ref' "$TEST_IMAGE_STATE" >"${getShellExpansion("TEST_IMAGE_STATE")}.new"`,
+		`  printf '%s\\t%s\\n' "$1" "$2" >>"${getShellExpansion("TEST_IMAGE_STATE")}.new"`,
+		`  mv "${getShellExpansion("TEST_IMAGE_STATE")}.new" "$TEST_IMAGE_STATE"`,
+		"}",
+		"test_remove_image () {",
+		"  test_get_image \"$1\" >/dev/null || return 1",
+		`  awk -F '\\t' -v ref="$1" '$1 != ref' "$TEST_IMAGE_STATE" >"${getShellExpansion("TEST_IMAGE_STATE")}.new"`,
+		`  mv "${getShellExpansion("TEST_IMAGE_STATE")}.new" "$TEST_IMAGE_STATE"`,
+		"}",
+		"docker () {",
+		`  local operation="${getShellExpansion("1:-")} ${getShellExpansion("2:-")}"`,
+		"  case \"$operation\" in",
+		"    \"image inspect\")",
+		`      local ref="${getShellExpansion("!#")}"`,
+		"      local image_id",
+		"      image_id=\"$(test_get_image \"$ref\")\" || return 1",
+		"      if [[ \" $* \" == *\" --format \"* ]]; then",
+		"        printf '%s\\n' \"$image_id\"",
+		"      else",
+		"        printf '{}\\n'",
+		"      fi",
+		"      ;;",
+		"    \"image ls\")",
+		`      local ref="${getShellExpansion("!#")}"`,
+		"      test_get_image \"$ref\" 2>/dev/null || return 0",
+		"      ;;",
+		"    \"image tag\")",
+		"      local source_ref=\"$3\"",
+		"      local target_ref=\"$4\"",
+		"      local image_id",
+		"      image_id=\"$(test_get_image \"$source_ref\")\" || return 1",
+		"      [[ \"$target_ref\" != \"$TEST_FAIL_TAG_TARGET\" ]] || return 91",
+		"      test_set_image \"$target_ref\" \"$image_id\"",
+		"      ;;",
+		"    \"image rm\")",
+		"      local ref=\"$3\"",
+		"      [[ \"$ref\" != \"$TEST_FAIL_REMOVE_TARGET\" ]] || return 92",
+		"      test_remove_image \"$ref\"",
+		"      ;;",
+		"    *) return 99 ;;",
+		"  esac",
+		"}",
+		`OLD_MIGRATE=${oldMigrate}`,
+		`OLD_BFF=${oldBff}`,
+		`CANDIDATE_MIGRATE=${candidateMigrate}`,
+		`CANDIDATE_BFF=${candidateBff}`,
+		body,
+	].join("\n")], {encoding: "utf8"});
+	return {
+		...result,
+		dir,
+		state: fs.existsSync(state) ? fs.readFileSync(state, "utf8") : "",
+	};
+}
+
 function runSimulation ({
 	dir,
 	failPhase,
@@ -572,6 +660,160 @@ describe("Campaign Hub deliberate release automation", () => {
 		}
 	});
 
+	it("preserves previous images and verifies every hold before restoring mutable tags", () => {
+		const result = runImagePreservationScenario({body: [
+			"preserve_candidate_image_tags",
+			`first_hold="${getShellExpansion("PREBUILD_IMAGE_PRESERVATION_REFS[0]")}"`,
+			`second_hold="${getShellExpansion("PREBUILD_IMAGE_PRESERVATION_REFS[1]")}"`,
+			"test_set_image hub-migrate \"$CANDIDATE_MIGRATE\"",
+			"test_set_image hub-bff \"$CANDIDATE_BFF\"",
+			"restore_candidate_image_tags_and_cleanup",
+			"printf 'migrate=%s\\nbff=%s\\n' \"$(test_get_image hub-migrate)\" \"$(test_get_image hub-bff)\"",
+			"! test_get_image \"$first_hold\" >/dev/null",
+			"! test_get_image \"$second_hold\" >/dev/null",
+		].join("\n")});
+		try {
+			expect(result.status).toBe(0);
+			expect(result.stdout).toContain(`migrate=sha256:${"1".repeat(64)}`);
+			expect(result.stdout).toContain(`bff=sha256:${"2".repeat(64)}`);
+			expect(result.state).toContain("previous_images_preserved\tfalse");
+			expect(result.state).toContain("previous_image_0_preservation_ref\thub-migrate:hub-release-preserve-");
+			expect(result.state).toContain("previous_image_1_preservation_ref\thub-bff:hub-release-preserve-");
+		} finally {
+			fs.rmSync(result.dir, {recursive: true, force: true});
+		}
+	});
+
+	it("continues post-cutover rollback when only preservation-tag cleanup fails", () => {
+		const failedTarget = "hub-migrate:hub-release-preserve-20260907T230000Z-hub-test-123";
+		const result = runImagePreservationScenario({
+			failRemoveTarget: failedTarget,
+			body: [
+				"preserve_candidate_image_tags",
+				"test_set_image hub-migrate \"$CANDIDATE_MIGRATE\"",
+				"test_set_image hub-bff \"$CANDIDATE_BFF\"",
+				"ROOT=\"$TEST_DEPLOYMENT_ROOT\"",
+				`PREVIOUS_SHA=${"a".repeat(40)}`,
+				"PREVIOUS_TAG=hub-previous",
+				"TRACE_FILE=",
+				"git () {",
+				"  [[ \"$*\" == \"-C $ROOT checkout --detach $PREVIOUS_SHA\" ]]",
+				"}",
+				"compose_current () { printf 'compose:%s\\n' \"$*\"; }",
+				"export_monitor_environment () { :; }",
+				"wait_for_public_ready () { :; }",
+				"rollback_application",
+				"printf 'migrate=%s\\nbff=%s\\n' \"$(test_get_image hub-migrate)\" \"$(test_get_image hub-bff)\"",
+			].join("\n"),
+		});
+		try {
+			expect(result.status).toBe(0);
+			expect(result.stdout).toContain("compose:up -d --no-deps --force-recreate --wait bff static");
+			expect(result.stdout).toContain("compose:up -d --no-deps --force-recreate edge");
+			expect(result.stdout).toContain("monitor:passed");
+			expect(result.stdout).toContain(`migrate=sha256:${"1".repeat(64)}`);
+			expect(result.stdout).toContain(`bff=sha256:${"2".repeat(64)}`);
+			expect(result.stdout).toMatch(/preservation-tag cleanup failed/);
+			expect(result.state).toContain("rollback_preservation_cleanup\tfailed");
+			expect(result.state).toContain("rollback_result\tsucceeded");
+		} finally {
+			fs.rmSync(result.dir, {recursive: true, force: true});
+		}
+	});
+
+	it("does not partially restore mutable tags when any preserved image is missing", () => {
+		const result = runImagePreservationScenario({body: [
+			"preserve_candidate_image_tags",
+			`first_hold="${getShellExpansion("PREBUILD_IMAGE_PRESERVATION_REFS[0]")}"`,
+			`second_hold="${getShellExpansion("PREBUILD_IMAGE_PRESERVATION_REFS[1]")}"`,
+			"test_set_image hub-migrate \"$CANDIDATE_MIGRATE\"",
+			"test_set_image hub-bff \"$CANDIDATE_BFF\"",
+			"test_remove_image \"$second_hold\"",
+			"if restore_candidate_image_tags; then exit 80; fi",
+			"printf 'migrate=%s\\nbff=%s\\nfirst_hold=%s\\n' \\",
+			"  \"$(test_get_image hub-migrate)\" \"$(test_get_image hub-bff)\" \"$(test_get_image \"$first_hold\")\"",
+		].join("\n")});
+		try {
+			expect(result.status).toBe(0);
+			expect(result.stdout).toContain(`migrate=sha256:${"3".repeat(64)}`);
+			expect(result.stdout).toContain(`bff=sha256:${"4".repeat(64)}`);
+			expect(result.stdout).toContain(`first_hold=sha256:${"1".repeat(64)}`);
+			expect(result.state).toContain("previous_images_preserved\ttrue");
+		} finally {
+			fs.rmSync(result.dir, {recursive: true, force: true});
+		}
+	});
+
+	it("removes partial preservation tags when preservation creation fails", () => {
+		const failedTarget = "hub-bff:hub-release-preserve-20260907T230000Z-hub-test-123";
+		const result = runImagePreservationScenario({
+			failTagTarget: failedTarget,
+			body: [
+				"if preserve_candidate_image_tags; then exit 80; fi",
+				`first_hold="hub-migrate:hub-release-preserve-${getShellExpansion("RELEASE_ID")}"`,
+				"! test_get_image \"$first_hold\" >/dev/null",
+				"printf 'partial_cleanup=passed\\n'",
+			].join("\n"),
+		});
+		try {
+			expect(result.status).toBe(0);
+			expect(result.stdout).toContain("partial_cleanup=passed");
+			expect(result.stderr).toMatch(/could not preserve current release image: hub-bff/);
+			expect(result.state).not.toContain("previous_images_preserved\ttrue");
+		} finally {
+			fs.rmSync(result.dir, {recursive: true, force: true});
+		}
+	});
+
+	it("treats already-absent preservation tags as cleaned", () => {
+		const result = runImagePreservationScenario({body: [
+			"preserve_candidate_image_tags",
+			`first_hold="${getShellExpansion("PREBUILD_IMAGE_PRESERVATION_REFS[0]")}"`,
+			"test_remove_image \"$first_hold\"",
+			"remove_candidate_image_preservation_tags",
+			`[[ "${getShellExpansion("#PREBUILD_IMAGE_PRESERVATION_REFS[@]")}" == 0 ]]`,
+			"printf 'idempotent_cleanup=passed\\n'",
+		].join("\n")});
+		try {
+			expect(result.status).toBe(0);
+			expect(result.stdout).toContain("idempotent_cleanup=passed");
+			expect(result.stderr).toBe("");
+		} finally {
+			fs.rmSync(result.dir, {recursive: true, force: true});
+		}
+	});
+
+	it("records successful first-use recovery after a partial preservation failure cleans itself", () => {
+		const failedTarget = "hub-bff:hub-release-preserve-20260907T230000Z-hub-test-123";
+		const result = runImagePreservationScenario({
+			failTagTarget: failedTarget,
+			body: [
+				"ROOT=/deployment",
+				`PREVIOUS_SHA=${"a".repeat(40)}`,
+				"SOURCE_CHECKED_OUT=true",
+				"SIMULATE=0",
+				"TRAFFIC_MUTATED=false",
+				"SCHEMA_MUTATED=false",
+				"CURRENT_PHASE=record-rollback",
+				"TRACE_FILE=",
+				"render_evidence () { :; }",
+				"git () {",
+				"  [[ \"$*\" == \"-C /deployment checkout --detach $PREVIOUS_SHA\" ]]",
+				"}",
+				"if preserve_candidate_image_tags; then exit 80; fi",
+				"handle_failure 41",
+			].join("\n"),
+		});
+		try {
+			expect(result.status).toBe(41);
+			expect(result.state).toContain("pretraffic_recovery\tsucceeded");
+			expect(result.state).not.toContain("pretraffic_recovery\tfailed");
+			expect(result.stderr).not.toMatch(/Failed to restore the previous checkout\/image tags/);
+		} finally {
+			fs.rmSync(result.dir, {recursive: true, force: true});
+		}
+	});
+
 	it("pins Hub-only release scope and never tears down the environment or reverses migrations", () => {
 		const source = fs.readFileSync(releaseScript, "utf8");
 		const policy = JSON.parse(fs.readFileSync(path.join(repoRoot, "deploy/hub/migration-policy.json"), "utf8"));
@@ -581,6 +823,7 @@ describe("Campaign Hub deliberate release automation", () => {
 		expect(source.match(/assert_compose_safe/g)?.length).toBeGreaterThanOrEqual(3);
 		expect(source.match(/assert_release_compose_safe/g)?.length).toBeGreaterThanOrEqual(3);
 		expect(source).toContain("release Compose configuration contains non-Hub service");
+		expect(source).toContain("preserve_candidate_image_tags");
 		expect(source).toContain("restore_candidate_image_tags");
 		expect(source).toContain("wait_for_public_ready");
 		expect(source).toContain("assert_candidate_images");
@@ -602,6 +845,8 @@ describe("Campaign Hub deliberate release automation", () => {
 		expect(source).not.toMatch(/docker\s+volume\s+(?:rm|prune)\b/);
 		expect(source).not.toMatch(/Foundry|HUB_FOUNDRY_PORT|30000/i);
 		expect(source).not.toMatch(/^\s*chown\b/m);
+		const finalization = source.slice(source.indexOf("phase_finalize ()"), source.indexOf("run_phase ()"));
+		expect(finalization).not.toContain("remove_candidate_image_preservation_tags");
 		expect(Object.values(policy.migrations).every(entry => ["expand", "contract"].includes(entry.phase))).toBe(true);
 	});
 });

@@ -51,7 +51,10 @@ The dry run locks the release path, validates the host/current deployment/tag, c
 metrics through `monitor-host.sh`, verifies the Compose model remains confined to the Hub service allowlist,
 checks out the candidate, revalidates the candidate Compose rendering, builds its exact source, and produces
 the migration compatibility plan. It does not create a backup, apply migrations, grant roles, or recreate
-services; it restores the previous checkout and every pre-build Compose image tag after planning.
+services. Before building, it keeps every pre-build Compose image alive under a unique
+`hub-release-preserve-<release-id>` tag. A dry run verifies all five preserved image identities before restoring
+the first mutable tag, restores the previous checkout and all mutable image tags, then removes those temporary
+preservation tags.
 
 Run the deliberate release:
 
@@ -78,7 +81,9 @@ grant, BFF, and static services to the exact image IDs captured after the candid
 backup build path and uses `--pull never`; the script revalidates candidate IDs and the BFF revision label
 immediately before migration, so mutable local Compose tags cannot replace reviewed images. The candidate
 operations image is built with the other release images, restored to the previous tag after a dry run or
-pre-cutover failure, and retained only after a successful release for subsequent backups.
+pre-cutover failure, and retained only after a successful release for subsequent backups. After a successful
+release, the previous five images remain available under the unique preservation references recorded in the
+release evidence, so a later application rollback does not depend on an otherwise unreferenced Docker image ID.
 
 `--repair-backup-ids` may change only `HUB_BACKUP_UID` and `HUB_BACKUP_GID` in `.env.hub`. It never runs
 `chown`. Release commands recreate only BFF, static, and edge, may stop only the Hub BFF on the incompatible
@@ -143,7 +148,9 @@ the script restores the previous checkout/image tags but never reverses or resto
 
 After cutover, the script automatically rolls back only the BFF/static application images and source when
 every applied migration declares the previous app compatible. It never reverses migrations and never restores
-a backup automatically.
+a backup automatically. Once all previous mutable image tags are restored and verified, a failure to delete a
+temporary preservation tag is recorded for manual cleanup but does not prevent the previous BFF/static/edge
+services from being recreated and verified.
 
 Normal planning rejects schema-incompatible or contract migrations before apply/cutover. The BFF-stop and
 isolated-restore instruction path is defense in depth for unexpected compatibility drift after traffic

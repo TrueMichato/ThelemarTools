@@ -57,6 +57,7 @@ FIRST_USE_PREVIOUS_BACKUP_IMAGE_ID="${HUB_RELEASE_PREVIOUS_BACKUP_IMAGE_ID:-}"
 FIRST_USE_PREVIOUS_CONFIG_SHA256="${HUB_RELEASE_PREVIOUS_CONFIG_SHA256:-}"
 EXIT_RECORDED="false"
 declare -a PREBUILD_IMAGE_IDS=()
+declare -a PREBUILD_IMAGE_PRESERVATION_REFS=()
 declare -a CANDIDATE_IMAGE_REFS=()
 declare -a CANDIDATE_IMAGE_IDS=()
 
@@ -218,6 +219,8 @@ capture_candidate_image_tags () {
 	local project_name image_ref image_id backup_repo_digests
 	project_name="$(compose_current config | awk '$1 == "name:" {print $2; exit}')"
 	[[ -n "$project_name" ]] || fail "could not resolve the Compose project name"
+	PREBUILD_IMAGE_IDS=()
+	PREBUILD_IMAGE_PRESERVATION_REFS=()
 	CANDIDATE_IMAGE_REFS=(
 		"${project_name}-migrate"
 		"${project_name}-grant-roles"
@@ -244,6 +247,96 @@ capture_candidate_image_tags () {
 	export HUB_RELEASE_STATIC_IMAGE="${PREBUILD_IMAGE_IDS[3]}"
 	export HUB_RELEASE_BACKUP_IMAGE="$PREVIOUS_BACKUP_IMAGE_ID"
 	assert_release_compose_safe
+}
+
+remove_candidate_image_preservation_tags () {
+	local index preservation_ref matching_ids
+	local failed="false"
+	for index in "${!PREBUILD_IMAGE_PRESERVATION_REFS[@]}"; do
+		preservation_ref="${PREBUILD_IMAGE_PRESERVATION_REFS[$index]}"
+		[[ -n "$preservation_ref" ]] || continue
+		if docker image inspect "$preservation_ref" >/dev/null 2>&1; then
+			if docker image rm "$preservation_ref" >/dev/null; then
+				PREBUILD_IMAGE_PRESERVATION_REFS[index]=""
+				continue
+			fi
+			log "Failed to remove preserved image tag ${preservation_ref}."
+			failed="true"
+			continue
+		fi
+		if ! matching_ids="$(docker image ls --quiet --no-trunc "$preservation_ref")"; then
+			log "Failed to determine whether preserved image tag ${preservation_ref} still exists."
+			failed="true"
+		elif [[ -n "$matching_ids" ]]; then
+			log "Preserved image tag ${preservation_ref} exists but could not be inspected."
+			failed="true"
+		else
+			PREBUILD_IMAGE_PRESERVATION_REFS[index]=""
+		fi
+	done
+	if [[ "$failed" == "false" ]]; then
+		PREBUILD_IMAGE_PRESERVATION_REFS=()
+		return 0
+	fi
+	return 1
+}
+
+candidate_image_tags_are_preserved () {
+	local index
+	((${#CANDIDATE_IMAGE_REFS[@]})) || return 1
+	for index in "${!CANDIDATE_IMAGE_REFS[@]}"; do
+		[[ -n "${PREBUILD_IMAGE_PRESERVATION_REFS[$index]:-}" ]] || return 1
+	done
+}
+
+preserve_candidate_image_tags () {
+	local preservation_suffix="hub-release-preserve-${RELEASE_ID}"
+	local index image_ref old_id preservation_ref preservation_id
+	[[ "${#preservation_suffix}" -le 128 ]] \
+		|| fail "release identity is too long for Docker preservation tags"
+	for index in "${!CANDIDATE_IMAGE_REFS[@]}"; do
+		image_ref="${CANDIDATE_IMAGE_REFS[$index]}"
+		old_id="${PREBUILD_IMAGE_IDS[$index]}"
+		preservation_ref="${image_ref}:${preservation_suffix}"
+		if docker image inspect "$preservation_ref" >/dev/null 2>&1; then
+			if ! remove_candidate_image_preservation_tags; then
+				fail "preservation tag collision detected, and earlier preservation tags require manual cleanup"
+				return 1
+			fi
+			fail "preservation image tag already exists: ${preservation_ref}"
+			return 1
+		fi
+		if ! docker image tag "$image_ref" "$preservation_ref" >/dev/null; then
+			if ! remove_candidate_image_preservation_tags; then
+				fail "could not preserve ${image_ref}, and partial preservation tags require manual cleanup"
+				return 1
+			fi
+			fail "could not preserve current release image: ${image_ref}"
+			return 1
+		fi
+		PREBUILD_IMAGE_PRESERVATION_REFS[index]="$preservation_ref"
+		preservation_id="$(docker image inspect --format '{{.Id}}' "$preservation_ref")" || {
+			if ! remove_candidate_image_preservation_tags; then
+				fail "could not verify ${preservation_ref}, and partial preservation tags require manual cleanup"
+				return 1
+			fi
+			fail "could not verify preserved release image: ${preservation_ref}"
+			return 1
+		}
+		if [[ "$preservation_id" != "$old_id" ]]; then
+			if ! remove_candidate_image_preservation_tags; then
+				fail "preserved image identity changed, and partial preservation tags require manual cleanup"
+				return 1
+			fi
+			fail "preserved image identity changed for ${image_ref}"
+			return 1
+		fi
+	done
+	for index in "${!CANDIDATE_IMAGE_REFS[@]}"; do
+		record "previous_image_${index}_id" "${PREBUILD_IMAGE_IDS[$index]}"
+		record "previous_image_${index}_preservation_ref" "${PREBUILD_IMAGE_PRESERVATION_REFS[$index]}"
+	done
+	record previous_images_preserved true
 }
 
 capture_candidate_images () {
@@ -285,16 +378,31 @@ assert_candidate_images () {
 }
 
 restore_candidate_image_tags () {
-	local index image_ref old_id
+	local index image_ref old_id preservation_ref preserved_id restored_id
+	for index in "${!CANDIDATE_IMAGE_REFS[@]}"; do
+		old_id="${PREBUILD_IMAGE_IDS[$index]:-}"
+		preservation_ref="${PREBUILD_IMAGE_PRESERVATION_REFS[$index]:-}"
+		[[ -n "$old_id" && -n "$preservation_ref" ]] || return 1
+		preserved_id="$(docker image inspect --format '{{.Id}}' "$preservation_ref")" || return 1
+		[[ "$preserved_id" == "$old_id" ]] || return 1
+	done
 	for index in "${!CANDIDATE_IMAGE_REFS[@]}"; do
 		image_ref="${CANDIDATE_IMAGE_REFS[$index]}"
-		old_id="${PREBUILD_IMAGE_IDS[$index]:-}"
-		if [[ -n "$old_id" ]]; then
-			docker image tag "$old_id" "$image_ref" >/dev/null || return 1
-		else
-			docker image rm "$image_ref" >/dev/null 2>&1 || true
-		fi
+		preservation_ref="${PREBUILD_IMAGE_PRESERVATION_REFS[$index]}"
+		docker image tag "$preservation_ref" "$image_ref" >/dev/null || return 1
 	done
+	for index in "${!CANDIDATE_IMAGE_REFS[@]}"; do
+		image_ref="${CANDIDATE_IMAGE_REFS[$index]}"
+		old_id="${PREBUILD_IMAGE_IDS[$index]}"
+		restored_id="$(docker image inspect --format '{{.Id}}' "$image_ref")" || return 1
+		[[ "$restored_id" == "$old_id" ]] || return 1
+	done
+}
+
+restore_candidate_image_tags_and_cleanup () {
+	restore_candidate_image_tags || return 1
+	remove_candidate_image_preservation_tags || return 1
+	replace_record previous_images_preserved false
 }
 
 assert_clean_root () {
@@ -481,6 +589,13 @@ rollback_application () {
 	git -C "$ROOT" checkout --detach "$PREVIOUS_SHA" >/dev/null || return 1
 	SOURCE_CHECKED_OUT="false"
 	restore_candidate_image_tags || return 1
+	if remove_candidate_image_preservation_tags; then
+		replace_record previous_images_preserved false
+		replace_record rollback_preservation_cleanup succeeded
+	else
+		replace_record rollback_preservation_cleanup failed
+		log "Previous image tags were restored, but preservation-tag cleanup failed; remove the recorded preservation references manually after rollback verification."
+	fi
 	export HUB_IMAGE_VERSION="$PREVIOUS_TAG"
 	export HUB_VCS_REF="$PREVIOUS_SHA"
 	compose_current up -d --no-deps --force-recreate --wait bff static || return 1
@@ -530,12 +645,28 @@ handle_failure () {
 			log "Schema migrations ${APPLIED_MIGRATIONS} were applied, but traffic was not cut over; the compatible previous application remains running."
 			log "The database was not reversed or restored. Correct the release and move forward."
 		fi
-		if git -C "$ROOT" checkout --detach "$PREVIOUS_SHA" >/dev/null 2>&1 \
-			&& restore_candidate_image_tags >/dev/null 2>&1; then
+		local pretraffic_recovered="false"
+		if git -C "$ROOT" checkout --detach "$PREVIOUS_SHA" >/dev/null 2>&1; then
+			SOURCE_CHECKED_OUT="false"
+			if candidate_image_tags_are_preserved; then
+				restore_candidate_image_tags_and_cleanup >/dev/null 2>&1 && pretraffic_recovered="true"
+			elif remove_candidate_image_preservation_tags >/dev/null 2>&1; then
+				pretraffic_recovered="true"
+			fi
+		fi
+		if [[ "$pretraffic_recovered" == "true" ]]; then
 			replace_record pretraffic_recovery succeeded
 		else
 			replace_record pretraffic_recovery failed
 			log "Failed to restore the previous checkout/image tags; running containers were not recreated."
+		fi
+	elif ((${#PREBUILD_IMAGE_PRESERVATION_REFS[@]})); then
+		if remove_candidate_image_preservation_tags; then
+			replace_record previous_images_preserved false
+			replace_record pretraffic_recovery succeeded
+		else
+			replace_record pretraffic_recovery failed
+			log "Failed to remove pre-build preservation tags; running containers and mutable image tags were not changed."
 		fi
 	fi
 	[[ -n "$STATE_FILE" && -f "$STATE_FILE" ]] && render_evidence
@@ -669,6 +800,7 @@ phase_record_rollback () {
 		"$actual_bff_image_id" \
 		"$actual_static_image_id" \
 		"$PREVIOUS_BACKUP_IMAGE_ID"
+	preserve_candidate_image_tags
 
 	local migration_status="${RELEASE_DIR}/migration-before.json"
 	compose_release run --interactive=false -T --rm --no-deps --pull never migrate \
@@ -796,7 +928,7 @@ phase_approval () {
 	if [[ "$DRY_RUN" == "true" ]]; then
 		log "DRY RUN complete: no backup, migration, role, or service mutation was performed."
 		git -C "$ROOT" checkout --detach "$PREVIOUS_SHA" >/dev/null
-		restore_candidate_image_tags
+		restore_candidate_image_tags_and_cleanup
 		SOURCE_CHECKED_OUT="false"
 		return 0
 	fi
