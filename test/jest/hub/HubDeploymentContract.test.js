@@ -20,9 +20,11 @@ describe("Hub portable deployment contract", () => {
 	const pullBackups = read("deploy/hub/pull-backups.sh");
 	const backupService = read("deploy/hub/systemd/thelemar-hub-backup.service");
 	const backupTimer = read("deploy/hub/systemd/thelemar-hub-backup.timer");
+	const maintenanceService = read("deploy/hub/systemd/thelemar-hub-maintenance.service");
 	const maintenanceTimer = read("deploy/hub/systemd/thelemar-hub-maintenance.timer");
 	const monitorTimer = read("deploy/hub/systemd/thelemar-hub-monitor.timer");
 	const oracleOperations = read("docs/hub/runbooks/oracle-operations.md");
+	const backupRestore = read("docs/hub/runbooks/backup-restore.md");
 
 	it("builds a separate pinned non-root Node BFF image with safe health checking", () => {
 		expect(dockerfile).toContain("FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e");
@@ -176,11 +178,13 @@ describe("Hub portable deployment contract", () => {
 	it("runs every BFF-image service without package-manager tooling", () => {
 		const serviceBlocks = [...compose.matchAll(/^ {2}([a-z0-9-]+):\n([\s\S]*?)(?=^ {2}[a-z0-9-]+:|^volumes:)/gm)]
 			.filter(([, , block]) => block.includes("dockerfile: server/Dockerfile"));
-		expect(serviceBlocks.map(([, name]) => name)).toEqual(["migrate", "grant-roles", "bff", "maintenance"]);
+		expect(serviceBlocks.map(([, name]) => name)).toEqual(["migrate", "grant-roles", "bff"]);
 		for (const [, , block] of serviceBlocks) expect(block).not.toMatch(/\b(?:npm|npx|corepack|yarn|yarnpkg)\b/);
 		expect(compose).toContain(`command: ["node", "server/scripts/migrate.mjs"]`);
 		expect(compose).toContain(`command: ["node", "server/scripts/grant-roles.mjs"]`);
 		expect(compose).toContain(`command: ["node", "server/scripts/maintenance.mjs"]`);
+		expect(compose).toMatch(/maintenance:\n[\s\S]*?image: thelemartools-hub-bff[\s\S]*?command: \["node", "server\/scripts\/maintenance\.mjs"\]/);
+		expect(compose).not.toMatch(/maintenance:\n[\s\S]*?build:[\s\S]*?command: \["node", "server\/scripts\/maintenance\.mjs"\]/);
 	});
 
 	it("keeps API, auth, WebSocket, and static traffic on one edge origin", () => {
@@ -229,6 +233,7 @@ describe("Hub portable deployment contract", () => {
 		expect(compose).toContain(`profiles: ["backup"]`);
 		expect(compose).toContain("server/scripts/maintenance.mjs");
 		expect(compose).toContain("backup-encrypted.mjs");
+		expect(backupRestore).toMatch(/--profile backup \\\n\s+run --interactive=false -T --rm --no-deps --pull never backup/);
 		expect(opsDockerfile).toContain("FROM postgres:17.6-bookworm");
 		expect(opsDockerfile).toContain("find /app/server/scripts -type d -exec chmod 0755 {} +");
 		expect(opsDockerfile).toContain("find /app/server/scripts -type f -exec chmod 0644 {} +");
@@ -249,8 +254,36 @@ describe("Hub portable deployment contract", () => {
 
 	it("ships persistent Oracle maintenance, backup, and monitoring timers", () => {
 		for (const timer of [backupTimer, maintenanceTimer, monitorTimer]) expect(timer).toContain("Persistent=true");
-		expect(backupService).toContain("RuntimeDirectory=thelemar-hub");
-		expect(backupService).toContain("/usr/bin/flock -n /run/thelemar-hub/backup.lock");
+		for (const {
+			source,
+			image,
+			lock,
+			profile,
+			service,
+		} of [
+				{
+					source: maintenanceService,
+					image: "thelemartools-hub-bff",
+					lock: "maintenance.lock",
+					profile: "maintenance",
+					service: "maintenance",
+				},
+				{
+					source: backupService,
+					image: "thelemartools-hub-backup",
+					lock: "backup.lock",
+					profile: "backup",
+					service: "backup",
+				},
+			]) {
+			expect(source).toContain("RuntimeDirectory=thelemar-hub");
+			expect(source).toContain(`ExecStartPre=/usr/bin/docker image inspect --format={{.Id}} ${image}`);
+			const execStart = source.match(/^ExecStart=(.+)$/m)?.[1];
+			expect(execStart).toBe(
+				`/usr/bin/flock -n /run/thelemar-hub/${lock} /usr/bin/docker compose --env-file .env.hub -f compose.hub.yml -f compose.hub.public.yml --profile ${profile} run --interactive=false -T --rm --no-deps --pull never ${service}`,
+			);
+			expect(execStart).not.toMatch(/\s--build(?:\s|$)/);
+		}
 		expect(monitor).toMatch(/curl --silent --show-error --fail --max-time 15 "\$\{base_url\}\/api\/ready"/);
 		expect(monitor).toMatch(/--header "Authorization: Bearer \$\{HUB_METRICS_TOKEN\}"/);
 		expect(monitor).toMatch(/--header "Origin: \$\{base_url\}"/);

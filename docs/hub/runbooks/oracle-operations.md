@@ -71,6 +71,10 @@ systemctl list-timers 'thelemar-hub-*' --all
 
 The timers run maintenance around 01:15 UTC, backup around 02:15 UTC, and monitoring every five minutes.
 `Persistent=true` catches up a missed daily run after a reboot. `flock` prevents duplicate jobs.
+The maintenance and backup services first require their released image to exist, then run noninteractively with
+dependency startup and image pulls disabled. Maintenance reuses the released BFF image because both execute the
+same server runtime. If an image is missing, stop and repair the release image catalog; do not let scheduled work
+build replacement images from the checkout.
 
 ## 3. Drill each job now
 

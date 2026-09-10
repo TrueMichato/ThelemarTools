@@ -8,6 +8,7 @@ Type=oneshot
 User=ubuntu
 RuntimeDirectory=thelemar-hub
 WorkingDirectory=/home/ubuntu/ThelemarTools
-ExecStart=/usr/bin/flock -n /run/thelemar-hub/maintenance.lock /usr/bin/docker compose --env-file .env.hub -f compose.hub.yml -f compose.hub.public.yml --profile maintenance run --rm maintenance
+ExecStartPre=/usr/bin/docker image inspect --format={{.Id}} thelemartools-hub-bff
+ExecStart=/usr/bin/flock -n /run/thelemar-hub/maintenance.lock /usr/bin/docker compose --env-file .env.hub -f compose.hub.yml -f compose.hub.public.yml --profile maintenance run --interactive=false -T --rm --no-deps --pull never maintenance
 TimeoutStartSec=1h
 Nice=10
