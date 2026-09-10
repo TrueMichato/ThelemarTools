@@ -8,6 +8,7 @@ Type=oneshot
 User=ubuntu
 RuntimeDirectory=thelemar-hub
 WorkingDirectory=/home/ubuntu/ThelemarTools
-ExecStart=/usr/bin/flock -n /run/thelemar-hub/backup.lock /usr/bin/docker compose --env-file .env.hub -f compose.hub.yml -f compose.hub.public.yml --profile backup run --rm backup
+ExecStartPre=/usr/bin/docker image inspect --format={{.Id}} thelemartools-hub-backup
+ExecStart=/usr/bin/flock -n /run/thelemar-hub/backup.lock /usr/bin/docker compose --env-file .env.hub -f compose.hub.yml -f compose.hub.public.yml --profile backup run --interactive=false -T --rm --no-deps --pull never backup
 TimeoutStartSec=2h
 Nice=10

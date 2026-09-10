@@ -132,13 +132,7 @@ services:
 
   maintenance:
     profiles: ["maintenance"]
-    build:
-      context: .
-      dockerfile: server/Dockerfile
-      args:
-        VERSION: ${HUB_IMAGE_VERSION:-dev}
-        VCS_REF: ${HUB_VCS_REF:-local}
-        NPM_REGISTRY: ${HUB_NPM_REGISTRY:-https://registry.npmjs.org/}
+    image: thelemartools-hub-bff
     command: ["node", "server/scripts/maintenance.mjs"]
     environment:
       DATABASE_URL: postgresql://hub_runtime:${HUB_RUNTIME_DB_PASSWORD}@db:5432/hub

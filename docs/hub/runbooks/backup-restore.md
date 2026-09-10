@@ -17,7 +17,8 @@ Local reference:
 
 ```bash
 HUB_BACKUP_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
-docker compose --profile backup --env-file .env.hub -f compose.hub.yml run --rm backup
+docker compose --env-file .env.hub -f compose.hub.yml --profile backup \
+  run --interactive=false -T --rm --no-deps --pull never backup
 ```
 
 The script:
