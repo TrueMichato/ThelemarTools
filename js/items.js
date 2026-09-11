@@ -1,7 +1,14 @@
 import {RenderItems} from "./render-items.js";
 import {ItemBuilderCore} from "./itembuilder/itembuilder-core.js";
+import {CharacterSheetItemTransfer} from "./charactersheet/charactersheet-item-transfer.js";
 
 let _pCompositionCatalogs;
+const _escapeHtml = value => String(value ?? "")
+	.replace(/&/g, "&amp;")
+	.replace(/</g, "&lt;")
+	.replace(/>/g, "&gt;")
+	.replace(/"/g, "&quot;")
+	.replace(/'/g, "&#39;");
 
 async function _pGetCompositionCatalogs () {
 	_pCompositionCatalogs ||= Promise.all([
@@ -458,6 +465,189 @@ class ItemsPage extends ListPage {
 
 	_renderStats_doBuildStatsTab ({ent}) {
 		this._pgContent.vee.empty().vee.appends(RenderItems.getRenderedItem(ent));
+		this._bindAddToCharacterButton();
+	}
+
+	_bindAddToCharacterButton () {
+		const btn = this._getOrTabRightButton(
+			"add-to-character",
+			"glyphicon-user",
+			{title: "Add this item to a saved character"},
+		);
+		btn.classList.add("ve-itm__btn-add-character");
+		if (!btn.querySelector(".ve-itm__btn-add-character-label")) {
+			btn.append(veE({
+				tag: "span",
+				clazz: "ve-itm__btn-add-character-label",
+				txt: "Add to Character",
+			}));
+		}
+		if (btn.dataset.isItemTransferBound) return;
+		btn.dataset.isItemTransferBound = "true";
+		btn.addEventListener("click", () => this._pAddCurrentItemToCharacter({btn}));
+	}
+
+	async _pAddCurrentItemToCharacter ({btn}) {
+		const item = this._lastRender?.entity;
+		if (!item) return;
+
+		btn.disabled = true;
+		btn.setAttribute("aria-busy", "true");
+		try {
+			const characters = await CharacterSheetItemTransfer.pGetCharacters();
+			if (!characters.length) {
+				const isCreate = await InputUiUtil.pGetUserBoolean({
+					title: "No Saved Characters",
+					htmlDescription: `<div>Create a character before adding <b>${_escapeHtml(item.name)}</b> to an inventory.</div>`,
+					textYes: "Create Character",
+					textNo: "Cancel",
+				});
+				if (isCreate) window.open("charactersheet.html", "_blank", "noopener");
+				return;
+			}
+
+			const character = await InputUiUtil.pGetUserEnum({
+				title: `Add ${item.name} to...`,
+				htmlDescription: "Choose the character who should receive one unequipped copy.",
+				values: characters,
+				fnDisplay: CharacterSheetItemTransfer.getCharacterLabel,
+				isResolveItem: true,
+			});
+			if (!character) return;
+
+			const configuredItem = await this._pGetItemForCharacterTransfer(item);
+			if (!configuredItem) return;
+
+			await CharacterSheetItemTransfer.pQueue({
+				characterId: character.id,
+				item: configuredItem,
+			});
+			JqueryUtil.doToast({
+				type: "success",
+				content: `Added ${item.name} to ${character.name || "Unnamed Character"}.`,
+			});
+		} catch (error) {
+			// eslint-disable-next-line no-console
+			console.error("[Items] Failed to add item to character:", error);
+			JqueryUtil.doToast({
+				type: "danger",
+				content: `Could not add ${item.name} to the character. ${error.message || VeCt.STR_SEE_CONSOLE}`,
+			});
+		} finally {
+			btn.disabled = false;
+			btn.removeAttribute("aria-busy");
+		}
+	}
+
+	async _pGetItemForCharacterTransfer (item) {
+		let configured = MiscUtil.copyFast(item._compositionRaw || item);
+		const {CharacterSheetState} = await import("./charactersheet/charactersheet-state.js");
+
+		if (
+			configured.spellScrollLevel != null
+			&& !configured.attachedSpells
+			&& !configured.selectedSpell
+		) {
+			const selectedSpell = await this._pChooseTransferSpell(configured);
+			if (!selectedSpell) return null;
+			configured.selectedSpell = {
+				name: selectedSpell.name,
+				source: selectedSpell.source || Parser.SRC_PHB,
+				level: Number(selectedSpell.level ?? configured.spellScrollLevel ?? 0),
+			};
+		}
+
+		if (configured.ability?.choose?.length && !CharacterSheetState._hasResolvedItemAbilityChoices(configured)) {
+			const selectedAbilityChoices = await this._pChooseTransferAbilities(configured);
+			if (!selectedAbilityChoices) return null;
+			configured.selectedAbilityChoices = selectedAbilityChoices;
+		}
+
+		if (configured.grantsLanguage && !CharacterSheetState.getItemGrantedLanguages(configured).length) {
+			const selectedLanguage = await this._pChooseTransferLanguage(configured);
+			if (!selectedLanguage) return null;
+			configured.selectedLanguage = selectedLanguage;
+		}
+
+		return configured;
+	}
+
+	async _pChooseTransferSpell (item) {
+		const [siteSpells, prerelease, brew] = await Promise.all([
+			DataUtil.spell.pLoadAll(),
+			PrereleaseUtil.pGetBrewProcessed().catch(() => ({})),
+			BrewUtil2.pGetBrewProcessed().catch(() => ({})),
+		]);
+		const seen = new Set();
+		const candidates = [
+			...(siteSpells || []),
+			...(prerelease.spell || []),
+			...(brew.spell || []),
+		]
+			.filter(spell => Number(spell.level) === Number(item.spellScrollLevel))
+			.filter(spell => {
+				const key = `${spell.name}|${spell.source}`.toLowerCase();
+				if (seen.has(key)) return false;
+				seen.add(key);
+				return true;
+			})
+			.sort((a, b) => SortUtil.ascSortLower(a.name, b.name) || SortUtil.ascSortLower(a.source, b.source));
+
+		const spellLevel = Number(item.spellScrollLevel);
+		const spellLevelText = spellLevel === 0 ? "cantrip" : `level ${spellLevel} spell`;
+		if (!candidates.length) throw new Error(`No ${spellLevelText}s are available.`);
+		return InputUiUtil.pGetUserEnum({
+			title: `Choose the Spell for ${item.name}`,
+			htmlDescription: `Choose the ${spellLevelText} contained in this item.`,
+			values: candidates,
+			fnDisplay: spell => `${spell.name} (${Parser.sourceJsonToAbv(spell.source)})`,
+			isResolveItem: true,
+		});
+	}
+
+	async _pChooseTransferAbilities (item) {
+		const selected = [];
+		for (const choice of item.ability.choose) {
+			const count = Math.max(1, Number(choice.count) || 1);
+			const amount = Number(choice.amount) || 1;
+			for (let i = 0; i < count; i++) {
+				const available = (choice.from || []).filter(ability => !selected.some(it => it.ability === ability));
+				if (!available.length) return null;
+				const ability = await InputUiUtil.pGetUserEnum({
+					title: `Choose an Ability for ${item.name}`,
+					htmlDescription: `Choose ${count > 1 ? `${i + 1} of ${count}: ` : ""}an ability to increase by ${amount}.`,
+					values: available,
+					fnDisplay: value => Parser.attAbvToFull(value),
+					isResolveItem: true,
+				});
+				if (!ability) return null;
+				selected.push({ability, amount});
+			}
+		}
+		return selected;
+	}
+
+	async _pChooseTransferLanguage (item) {
+		const [siteData, prerelease, brew] = await Promise.all([
+			DataUtil.loadJSON("data/languages.json"),
+			PrereleaseUtil.pGetBrewProcessed().catch(() => ({})),
+			BrewUtil2.pGetBrewProcessed().catch(() => ({})),
+		]);
+		const values = [...new Set([
+			...(siteData.language || []),
+			...(prerelease.language || []),
+			...(brew.language || []),
+		].map(language => language?.name).filter(Boolean))]
+			.sort(SortUtil.ascSortLower);
+		if (!values.length) throw new Error(`No languages are available for ${item.name}.`);
+
+		return InputUiUtil.pGetUserEnum({
+			title: `Choose a Language for ${item.name}`,
+			htmlDescription: "Choose the language granted while this item is equipped and active.",
+			values,
+			fnDisplay: value => value,
+			isResolveItem: true,
+		});
 	}
 
 	async _pOnLoad_pInitPrimaryLists () {

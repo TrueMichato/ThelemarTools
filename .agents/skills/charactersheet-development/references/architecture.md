@@ -145,6 +145,16 @@ User action → Module event handler → state.setX() → module.render() → pa
 
 No reactive system — renders are explicit. Related modules re-render together (e.g., adding a feature triggers combat + features re-render).
 
+### Cross-Page Item Transfers
+
+The Items page never rewrites a saved character document directly. It queues a
+targeted operation through `CharacterSheetItemTransfer`; the Character Sheet
+consumes it on character load or via a live `BroadcastChannel` notification,
+normalizes the catalog entity with `CharacterSheetItemUtils`, calls
+`CharacterSheetState.addItem()`, saves, and only then acknowledges the transfer.
+Stable transfer IDs persisted on the character make retries idempotent and avoid
+last-writer-wins data loss from another open tab.
+
 ### Event Communication
 
 - **Vanilla DOM events**: Handlers bound via `element.addEventListener("click", handler)`. Event delegation uses `e.target.closest(".selector")` pattern.

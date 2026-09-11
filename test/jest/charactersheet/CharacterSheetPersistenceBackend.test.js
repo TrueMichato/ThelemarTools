@@ -11,10 +11,12 @@
 // controllable dual-backend fake StorageUtil, plus a state-layer roundtrip guard.
 
 import "./setup.js";
+import {jest} from "@jest/globals";
 
 const REPO_ROOT = new URL("../../../", import.meta.url).pathname;
 
 let CharacterSheetPage;
+let CharacterSheetItemTransfer;
 let CharacterSheetState;
 
 // A fake dual-backend with genuinely SEPARATE sync (localStorage) and async (IndexedDB)
@@ -73,6 +75,7 @@ function makeHost ({state} = {}) {
 		_clearActiveCharacterMirror: proto._clearActiveCharacterMirror,
 		_reconcilePersistedCharacter: proto._reconcilePersistedCharacter,
 		_saveCurrentCharacter: proto._saveCurrentCharacter,
+		_pAcknowledgeItemTransfers: proto._pAcknowledgeItemTransfers,
 	};
 	return host;
 }
@@ -85,6 +88,7 @@ beforeAll(async () => {
 	globalThis.window = globalThis.window || {addEventListener: () => {}, location: {search: "", href: "http://test/"}};
 	globalThis.document = globalThis.document || {getElementById: () => null, querySelector: () => null, addEventListener: () => {}};
 	CharacterSheetState = (await import(`${REPO_ROOT}js/charactersheet/charactersheet-state.js`)).CharacterSheetState;
+	CharacterSheetItemTransfer = (await import(`${REPO_ROOT}js/charactersheet/charactersheet-item-transfer.js`)).CharacterSheetItemTransfer;
 	CharacterSheetPage = (await import(`${REPO_ROOT}js/charactersheet/charactersheet.js`)).CharacterSheetPage;
 });
 
@@ -204,5 +208,23 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 		const saved = canonical.find(c => c.id === "clean-id");
 		expect(saved).toBeTruthy();
 		expect(typeof saved._savedAt).toBe("number");
+	});
+
+	it("does not turn a saved transfer into a load failure when acknowledgement fails", async () => {
+		const host = makeHost();
+		const originalAcknowledge = CharacterSheetItemTransfer.pAcknowledge;
+		const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+		CharacterSheetItemTransfer.pAcknowledge = async () => { throw new Error("storage unavailable"); };
+
+		try {
+			await expect(host._pAcknowledgeItemTransfers(["transfer-1"])).resolves.toBe(false);
+			expect(warn).toHaveBeenCalledWith(
+				expect.stringContaining("queue cleanup failed"),
+				expect.any(Error),
+			);
+		} finally {
+			CharacterSheetItemTransfer.pAcknowledge = originalAcknowledge;
+			warn.mockRestore();
+		}
 	});
 });

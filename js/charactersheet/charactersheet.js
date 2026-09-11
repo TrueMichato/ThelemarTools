@@ -23,6 +23,7 @@ import {CharacterSheetProfPicker} from "./charactersheet-prof-editor.js";
 import {CharacterSheetUpgrades} from "./charactersheet-upgrades.js";
 import {CharacterSheetMaterials} from "./charactersheet-materials.js";
 import {CharacterSheetPlayMode} from "./charactersheet-playmode.js";
+import {CharacterSheetItemTransfer} from "./charactersheet-item-transfer.js";
 import * as CharacterSheetBuffPickerHelpers from "./charactersheet-buffpicker-helpers.js";
 
 const _dedupeCompositionCatalog = entities => {
@@ -258,6 +259,7 @@ class CharacterSheetPage {
 		// level/school instead of being stored as lean `level: null` refs that
 		// the level-grouped spell list silently drops.
 		this._state.setSpellData(this._spellsData);
+		this._initItemTransferListener();
 
 		// Check for character in URL
 		const urlParams = new URLSearchParams(window.location.search);
@@ -1703,6 +1705,22 @@ class CharacterSheetPage {
 			this._currentCharacterId = charId;
 			this._isLevelUpBannerDismissed = false;
 			this._state.loadFromJson(character);
+			let transferResult = {applied: [], acknowledgeIds: [], failed: []};
+			try {
+				transferResult = await CharacterSheetItemTransfer.pApplyPendingToState({
+					characterId: charId,
+					state: this._state,
+				});
+			} catch (error) {
+				// eslint-disable-next-line no-console
+				console.error("[CharSheet] Failed to read pending item transfers:", error);
+				JqueryUtil.doToast({type: "danger", content: "Could not check for items sent from the Items page. Reload to retry."});
+			}
+			if (transferResult.failed.length) {
+				// eslint-disable-next-line no-console
+				console.error("[CharSheet] Some item transfers could not be applied:", transferResult.failed);
+				JqueryUtil.doToast({type: "danger", content: "One or more sent items could not be added. The transfer remains queued for retry."});
+			}
 
 			// Backfill any class features missing from `_data.features` (e.g. on
 			// saves migrated from older formats). Idempotent. The result tells us whether
@@ -1722,12 +1740,15 @@ class CharacterSheetPage {
 			// concurrent character switch: only save if THIS load is still the active character
 			// (the await above can interleave with another load).
 			const needsSave = mirrorWon
+				|| transferResult.applied.length
 				|| (reconcileResult && (reconcileResult.added > 0 || reconcileResult.backfilled > 0));
 			if (needsSave && this._currentCharacterId === charId) {
-				await this._saveCurrentCharacter();
+				const isSaved = await this._saveCurrentCharacter({isReturnStatus: true});
+				if (isSaved) await this._pAcknowledgeItemTransfers(transferResult.acknowledgeIds);
 			} else if (this._currentCharacterId === charId) {
 				// Nothing to persist, but the mirror (if any) now agrees with canonical — clear it.
 				this._clearActiveCharacterMirror(charId);
+				await this._pAcknowledgeItemTransfers(transferResult.acknowledgeIds);
 			}
 
 			// Apply saved section layout
@@ -2105,6 +2126,7 @@ class CharacterSheetPage {
 
 	async _onDeleteCharacter () {
 		if (!this._currentCharacterId) return;
+		const deletedCharacterId = this._currentCharacterId;
 
 		const confirm = await InputUiUtil.pGetUserBoolean({
 			title: "Delete Character",
@@ -2118,6 +2140,7 @@ class CharacterSheetPage {
 		let characters = await StorageUtil.pGet("charsheet-characters") || [];
 		characters = characters.filter(c => c.id !== this._currentCharacterId);
 		await StorageUtil.pSet("charsheet-characters", characters);
+		await CharacterSheetItemTransfer.pRemoveForCharacters({characterIds: [deletedCharacterId]});
 
 		this._createNewCharacter();
 		await this._pLoadCharacters();
@@ -2192,6 +2215,7 @@ class CharacterSheetPage {
 		const selectedIds = new Set(selected.map(c => c.id));
 		const remaining = characters.filter(c => !selectedIds.has(c.id));
 		await StorageUtil.pSet("charsheet-characters", remaining);
+		await CharacterSheetItemTransfer.pRemoveForCharacters({characterIds: selectedIds});
 
 		// If the currently loaded character was deleted, switch to a new blank character
 		if (this._currentCharacterId && selectedIds.has(this._currentCharacterId)) {
@@ -3542,8 +3566,8 @@ class CharacterSheetPage {
 		return {chosen: mirrorWon ? mirror : canonical, mirrorWon};
 	}
 
-	async _saveCurrentCharacter () {
-		if (!this._currentCharacterId) return;
+	async _saveCurrentCharacter ({isReturnStatus = false} = {}) {
+		if (!this._currentCharacterId) return isReturnStatus ? false : undefined;
 
 		// Show saving indicator
 		this._updateSaveIndicator("saving");
@@ -3575,12 +3599,65 @@ class CharacterSheetPage {
 
 			// Show saved indicator
 			this._updateSaveIndicator("saved");
+			return isReturnStatus ? true : undefined;
 		} catch (err) {
 			// eslint-disable-next-line no-console
 			console.error("Save error:", err);
 			// Leave the sync mirror in place: it is the only surviving copy of this write.
 			this._updateSaveIndicator("error");
+			return isReturnStatus ? false : undefined;
 		}
+	}
+
+	_initItemTransferListener () {
+		this._disposeItemTransferListener?.();
+		this._disposeItemTransferListener = CharacterSheetItemTransfer.subscribe(({characterId}) => {
+			if (!characterId || characterId !== this._currentCharacterId) return;
+			this._pApplyLiveItemTransfers().catch(error => {
+				// eslint-disable-next-line no-console
+				console.error("[CharSheet] Failed to apply an item transfer:", error);
+				JqueryUtil.doToast({type: "danger", content: "An item was sent to this character, but could not be added. Reload to retry."});
+			});
+		});
+	}
+
+	async _pAcknowledgeItemTransfers (transferIds) {
+		try {
+			await CharacterSheetItemTransfer.pAcknowledge({transferIds});
+			return true;
+		} catch (error) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet] Item transfer was saved, but queue cleanup failed; retry remains idempotent:", error);
+			return false;
+		}
+	}
+
+	async _pApplyLiveItemTransfers () {
+		if (!this._currentCharacterId) return;
+		const result = await CharacterSheetItemTransfer.pApplyPendingToState({
+			characterId: this._currentCharacterId,
+			state: this._state,
+		});
+		if (result.failed.length) {
+			// eslint-disable-next-line no-console
+			console.error("[CharSheet] Some live item transfers could not be applied:", result.failed);
+			JqueryUtil.doToast({type: "danger", content: "A sent item could not be added. Reload to retry."});
+		}
+		if (!result.acknowledgeIds.length) return;
+
+		if (result.applied.length) this._renderCharacter();
+		const isSaved = await this._saveCurrentCharacter({isReturnStatus: true});
+		if (!isSaved) return;
+		await this._pAcknowledgeItemTransfers(result.acknowledgeIds);
+
+		if (!result.applied.length) return;
+		const names = result.applied.map(transfer => transfer.item?.name || "Item");
+		JqueryUtil.doToast({
+			type: "success",
+			content: names.length === 1
+				? `${names[0]} was added to this character.`
+				: `${names.length} items were added to this character.`,
+		});
 	}
 
 	/**

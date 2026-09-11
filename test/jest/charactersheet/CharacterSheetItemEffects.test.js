@@ -261,6 +261,7 @@ describe("Bug #8 — shared catalog & effects editor (one pipeline for items + a
 
 describe("Bug #8 — custom-item modal wiring (source-pinned)", () => {
 	const invSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-inventory.js"), "utf8");
+	const itemUtilsSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-item-utils.js"), "utf8");
 	const abilSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-customabilities.js"), "utf8");
 
 	it("the custom-item modal mounts the shared effects editor", () => {
@@ -286,7 +287,8 @@ describe("Bug #8 — custom-item modal wiring (source-pinned)", () => {
 	it("catalog item add copies effects[] onto the inventory payload (not only custom items)", () => {
 		// Regression: TGTT artifacts (e.g. Gae Bolg) ship effects in brew data; if _addItem
 		// drops them, equip never reaches _registerItemEffects.
-		expect(invSrc).toMatch(/effects:\s*Array\.isArray\(item\.effects\)/);
+		expect(invSrc).toContain("CharacterSheetItemUtils.getNormalizedCatalogItem");
+		expect(itemUtilsSrc).toMatch(/effects:\s*sourceItem\.effects\s*\?\s*MiscUtil\.copyFast\(sourceItem\.effects\)/);
 	});
 });
 

@@ -3,6 +3,7 @@
  * Handles items, equipment, currency, and encumbrance
  */
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import {CharacterSheetItemUtils} from "./charactersheet-item-utils.js";
 import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
 
 const {e_, ee} = /** @type {*} */ (globalThis);
@@ -1452,7 +1453,7 @@ class CharacterSheetInventory {
 	}
 
 	_isVariantComponent (item) {
-		return !!(item.variantComponent?.spellEffects?.length);
+		return CharacterSheetItemUtils.isVariantComponent(item);
 	}
 
 	/**
@@ -1607,33 +1608,11 @@ class CharacterSheetInventory {
 	}
 
 	_isWeapon (item) {
-		const typeBase = item.type?.split("|")[0];
-		return item.weapon || typeBase === "M" || typeBase === "R" || !!item.weaponCategory;
+		return CharacterSheetItemUtils.isWeapon(item);
 	}
 
 	_getItemType (item) {
-		// Real item type codes carry a source suffix (e.g. "RG|DMG", "WD|XDMG", "M|XPHB"), so
-		// every comparison must use `typeBase`, NOT an exact `item.type === "RG"` match — the
-		// exact form silently dropped rings/wands/rods/staves/potions into "gear". Boolean flags
-		// (e.g. a DMG Staff of Power carries `staff:true` and NO type) are handled alongside.
-		const typeBase = item.type?.split("|")[0];
-		if (this._isVariantComponent(item)) return "component";
-		if (this._isWeapon(item)) return "weapon";
-		// Check both armor flag and armor type codes
-		if (item.armor || ["LA", "MA", "HA"].includes(typeBase)) return "armor";
-		if (typeBase === "S") return "armor"; // Shield
-		if (typeBase === "P") return "potion";
-		if (typeBase === "SC") return "scroll";
-		if (typeBase === "WD") return "wand";
-		if (typeBase === "ST" || item.staff) return "staff";
-		if (typeBase === "RD") return "rod";
-		if (typeBase === "RG") return "ring";
-		if (item.wondrous) return "wondrous";
-		if (typeBase === "AT" || typeBase === "T") return "tool";
-		if (typeBase === "G" || typeBase === "SCF") return "gear";
-		if (typeBase === "$G") return "gemstone";
-		if (item._isEmpoweredGemstone) return "gemstone";
-		return "gear";
+		return CharacterSheetItemUtils.getItemType(item);
 	}
 
 	_getItemTypeTag (item) {
@@ -1677,222 +1656,11 @@ class CharacterSheetInventory {
 	 * @returns {number} The parsed bonus as a number
 	 */
 	_parseBonus (bonus) {
-		if (bonus == null) return 0;
-		if (typeof bonus === "number") return bonus;
-		const parsed = parseInt(bonus.toString().replace(/\s/g, ""), 10);
-		return isNaN(parsed) ? 0 : parsed;
-	}
-
-	/**
-	 * Detect vestige tier from item name or properties
-	 * Vestiges of Divergence (EGW) and Arms of the Betrayers have dormant/awakened/exalted states
-	 * @param {object} item - The item data
-	 * @returns {string|null} "dormant", "awakened", "exalted", or null
-	 */
-	_detectVestigeTier (item) {
-		const name = item.name?.toLowerCase() || "";
-		if (name.includes("(dormant)")) return "dormant";
-		if (name.includes("(awakened)")) return "awakened";
-		if (name.includes("(exalted)")) return "exalted";
-
-		// Check for Vestige property tag
-		if (item.property?.includes("Vst|EGW")) return "dormant";
-
-		return null;
-	}
-
-	/**
-	 * Check if item is a spell-storing item (like Ring of Spell Storing)
-	 * @param {object} item - The item data
-	 * @returns {number|null} Max spell levels storable, or null if not spell-storing
-	 */
-	_detectSpellStoringCapacity (item) {
-		const name = item.name?.toLowerCase() || "";
-		// Ring of Spell Storing stores up to 5 levels
-		if (name.includes("ring of spell storing")) return 5;
-		// Could add more spell-storing items here
-		return item.maxSpellLevels || null;
+		return CharacterSheetItemUtils.parseBonus(bonus);
 	}
 
 	_addItem (item) {
-		// Check if item is armor by type (LA, MA, HA) or armor flag
-		const itemTypeBase = item.type?.split("|")[0];
-		const isArmor = item.armor || ["LA", "MA", "HA"].includes(itemTypeBase);
-
-		// Determine armor type for AC calculation
-		let armorType = null;
-		if (isArmor) {
-			if (itemTypeBase === "HA") {
-				armorType = "heavy";
-			} else if (itemTypeBase === "MA") {
-				armorType = "medium";
-			} else if (itemTypeBase === "LA") {
-				armorType = "light";
-			}
-		}
-
-		// Check if item is a shield (type "S" or "S|source")
-		const isShield = itemTypeBase === "S";
-
-		const newItem = {
-			name: item.name,
-			source: item.source,
-			quantity: 1,
-			equipped: false,
-			attuned: false,
-			weight: item.weight || 0,
-			value: item.value || 0,
-			type: this._getItemType(item),
-			typeCode: item.typeCode || item.type || null,
-			scfType: item.scfType || null,
-			requiresAttunement: item.reqAttune || false,
-			// Weapon properties. `weapon` is the boolean both the inventory categorizer
-			// (_getItemCategory) and Combat attack-detection (filter(i => i.weapon)) key off,
-			// so derive it from `_isWeapon()` — a `type:"M"`/`type:"R"` artifact (e.g. Gae Bolg)
-			// carries NO `weapon:true` flag, and `item.weapon || false` would drop it into
-			// "Other" AND deny it an attack.
-			weapon: this._isWeapon(item),
-			weaponCategory: item.weaponCategory,
-			// Base-item reference (e.g. "shortbow|phb") for magic weapons derived from a base
-			// weapon. Drives base-item detection for effects scoped to a weapon TYPE (e.g.
-			// Bracers of Archery → any longbow/shortbow, including a "Frost Shortbow").
-			baseItem: item.baseItem || null,
-			damage: item.dmg1 ? `${this._state.getWeaponDamageDie(item)} ${Parser.dmgTypeToFull(item.dmgType)}` : null,
-			dmg1: item.dmg1 || null,
-			dmg2: item.dmg2 || null,
-			handsUsed: item.dmg2 ? (Math.max(1, Math.floor(Number(item.handsUsed))) || 1) : 1,
-			dmgType: item.dmgType || null,
-			properties: item.property || [],
-			mastery: item.mastery || [],
-			range: item.range ? `${item.range}` : null,
-			reach: item.reach ?? null,
-			bonusWeapon: this._parseBonus(item.bonusWeapon),
-			bonusWeaponAttack: this._parseBonus(item.bonusWeaponAttack),
-			bonusWeaponDamage: this._parseBonus(item.bonusWeaponDamage),
-			// Armor properties
-			armor: isArmor,
-			armorType: armorType,
-			ac: item.ac || null,
-			dexterityMax: item.dexterityMax ?? null, // Max DEX bonus for medium armor (null = unlimited for light, 0 for heavy)
-			stealth: item.stealth || false, // true = disadvantage on stealth
-			strength: item.strength || null, // Min STR requirement (e.g., "15" for plate)
-			shield: isShield,
-			bonusAc: this._parseBonus(item.bonusAc),
-			// Spell bonuses
-			bonusSpellAttack: this._parseBonus(item.bonusSpellAttack),
-			bonusSpellSaveDc: this._parseBonus(item.bonusSpellSaveDc),
-			// Save bonuses
-			bonusSavingThrow: this._parseBonus(item.bonusSavingThrow),
-			bonusSavingThrowStr: this._parseBonus(item.bonusSavingThrow_str),
-			bonusSavingThrowDex: this._parseBonus(item.bonusSavingThrow_dex),
-			bonusSavingThrowCon: this._parseBonus(item.bonusSavingThrow_con),
-			bonusSavingThrowInt: this._parseBonus(item.bonusSavingThrow_int),
-			bonusSavingThrowWis: this._parseBonus(item.bonusSavingThrow_wis),
-			bonusSavingThrowCha: this._parseBonus(item.bonusSavingThrow_cha),
-			// Ability bonuses
-			bonusAbilityCheck: this._parseBonus(item.bonusAbilityCheck),
-			// Per-ability ability-check bonuses, mirroring the per-ability saving-throw family
-			// above. Needed by any item that scopes its bonus to named abilities rather than
-			// all six (e.g. the Ioun Blade's "+1 to Intelligence, Wisdom, and Charisma checks
-			// and saving throws"); without these, only the saves half is expressible.
-			bonusAbilityCheckStr: this._parseBonus(item.bonusAbilityCheck_str),
-			bonusAbilityCheckDex: this._parseBonus(item.bonusAbilityCheck_dex),
-			bonusAbilityCheckCon: this._parseBonus(item.bonusAbilityCheck_con),
-			bonusAbilityCheckInt: this._parseBonus(item.bonusAbilityCheck_int),
-			bonusAbilityCheckWis: this._parseBonus(item.bonusAbilityCheck_wis),
-			bonusAbilityCheckCha: this._parseBonus(item.bonusAbilityCheck_cha),
-			// Additional bonus types
-			bonusProficiencyBonus: this._parseBonus(item.bonusProficiencyBonus),
-			bonusSavingThrowConcentration: this._parseBonus(item.bonusSavingThrowConcentration),
-			bonusSpellDamage: this._parseBonus(item.bonusSpellDamage),
-			bonusWeaponCritDamage: this._parseBonus(item.bonusWeaponCritDamage),
-			// Critical hit threshold (e.g., 19 for critting on 19-20)
-			critThreshold: item.critThreshold || null,
-			// Defensive properties
-			resist: item.resist || null,
-			immune: item.immune || null,
-			vulnerable: item.vulnerable || null,
-			conditionImmune: item.conditionImmune || null,
-			// Speed modification
-			modifySpeed: item.modifySpeed || null,
-			// Senses granted by the item (e.g., structured darkvision); prose senses are parsed from entries
-			senses: item.senses || null,
-			// Ability score modifications from items (e.g., Gauntlets of Ogre Power, Belt of Giant Strength)
-			ability: item.ability || null,
-			selectedAbilityChoices: item.selectedAbilityChoices ? MiscUtil.copyFast(item.selectedAbilityChoices) : null,
-			// Item-granted spells (e.g., Staff of the Magi, Wand of Fireballs)
-			attachedSpells: item.attachedSpells || null,
-			spellScrollLevel: item.spellScrollLevel ?? null,
-			selectedSpell: item.selectedSpell ? MiscUtil.copyFast(item.selectedSpell) : null,
-			// Spellcasting focus for classes
-			focus: item.focus ?? null,
-			light: item.light ? MiscUtil.copyFast(item.light) : null,
-			grantsLanguage: !!item.grantsLanguage,
-			selectedLanguage: item.selectedLanguage || null,
-			// Charges
-			charges: item.charges ?? null,
-			chargesCurrent: typeof item.charges === "number" ? item.charges : null,
-			recharge: item.recharge || null, // "dawn", "restShort", "restLong", etc.
-			rechargeAmount: item.rechargeAmount || null, // e.g., "{@dice 1d6 + 1}" or a number
-			chargeName: item.chargeName || null, // e.g. "Stone-Caught Magic"
-			// Standing extra weapon damage (Spear of Lugh +4d12 radiant, etc.)
-			bonusDamageDice: item.bonusDamageDice || null,
-			bonusDamageType: item.bonusDamageType || null,
-			damageRiders: Array.isArray(item.damageRiders) && item.damageRiders.length
-				? JSON.parse(JSON.stringify(item.damageRiders))
-				: undefined,
-			// Start-of-turn regeneration (Ring of Greater Regeneration, etc.)
-			regeneration: item.regeneration
-				? JSON.parse(JSON.stringify(item.regeneration))
-				: null,
-			// Choose-N spell immunities (Necklace of Goibhnie Threefold Spellward, etc.)
-			spellImmunitySlots: item.spellImmunitySlots
-				? JSON.parse(JSON.stringify(item.spellImmunitySlots))
-				: null,
-			chosenSpellImmunities: Array.isArray(item.chosenSpellImmunities)
-				? JSON.parse(JSON.stringify(item.chosenSpellImmunities))
-				: [],
-			// Magic item properties
-			rarity: item.rarity,
-			// Special item flags
-			curse: item.curse || false, // true = item is cursed
-			sentient: item.sentient || false, // true = item is sentient
-			grantsProficiency: item.grantsProficiency || false, // true = grants proficiency when equipped
-			// Container properties (e.g., Bag of Holding, Portable Hole)
-			containerCapacity: item.containerCapacity || null, // {weight: [500], volume: [64], weightless: true}
-			containedItems: [], // Array of item IDs stored inside this container
-			// Vestige of Divergence tier (items that progress in power)
-			vestigeTier: this._detectVestigeTier(item), // "dormant", "awakened", "exalted", or null
-			// Spell storing (e.g., Ring of Spell Storing)
-			storedSpells: [], // [{spell, level, saveDc, attackBonus, ability, casterName}]
-			maxSpellLevels: this._detectSpellStoringCapacity(item), // Max total spell levels (5 for Ring of Spell Storing)
-			// Item Upgrades (TCAH weapon/armor tags)
-			appliedUpgrades: [], // [{name, source, upgradeType, costPaid, appliedAt}]
-			// Socketed Gemstones (TGTT empowered gemstones)
-			socketedGemstones: [], // [{name, source, gemName, rarity, upgradeType, entries, charges, chargesCurrent, chargesMax, recharge, socketedAt}]
-			// Ioun Stone settings (Ioun Blade and any item declared a host). `_variantName` is
-			// the stable identity of a generic variant — "Ioun Longsword" never says "Ioun
-			// Blade" — and the host registry is keyed on it, so it must survive the copy.
-			_variantName: item._variantName || null,
-			// Provenance, so registry lookups survive the ⚙ editor stamping the row "Custom".
-			_baseSource: item._baseSource || null,
-			iounHost: item.iounHost ? JSON.parse(JSON.stringify(item.iounHost)) : null,
-			iounSettings: item.iounSettings ?? null,
-			iounSet: [], // inventory ids of the stones seated in this item's settings
-			iounBaseBonuses: null, // pristine bonus values, so materialisation never compounds
-			// Variant spell component data (Arcadia 8)
-			variantComponent: item.variantComponent || null,
-			// Structured catalog effects (same schema as custom items/abilities). Required so
-			// homebrew/site items that ship `effects[]` (e.g. Gae Bolg initiative PB) register
-			// through `_registerItemEffects` when equipped/attuned.
-			effects: Array.isArray(item.effects) && item.effects.length
-				? JSON.parse(JSON.stringify(item.effects))
-				: undefined,
-			// Prose description — needed so prose-expressed effects (senses, defenses, speed,
-			// ability, save bonuses) can be parsed and applied. Without this, prose-only items
-			// (e.g. Goggles of Night) would lose all of their mechanical text once in inventory.
-			entries: item.entries || null,
-		};
+		const newItem = CharacterSheetItemUtils.getNormalizedCatalogItem({item, state: this._state});
 
 		this._state.addItem(newItem);
 		this._renderItemList();
