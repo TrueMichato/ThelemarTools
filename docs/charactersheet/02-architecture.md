@@ -125,7 +125,29 @@ User Action (e.g., "Add Class")
 └──────────────────┘
 ```
 
-### 3. Calculation Flow
+### 3. Cross-Page Item Transfer
+
+`items.html` can send the currently viewed item to a saved character without
+rewriting the character document directly:
+
+```
+ItemsPage
+  → CharacterSheetItemTransfer.pQueue()
+  → durable per-character transfer record
+  → CharacterSheetPage load/live notification
+  → CharacterSheetItemUtils normalization
+  → CharacterSheetState.addItem()
+  → save character
+  → acknowledge transfer
+```
+
+The queue is intentional. Character saves are whole documents, so directly
+editing `charsheet-characters` from another page could be overwritten by an
+already-open sheet with older in-memory state. Transfer IDs are recorded on the
+character until acknowledgement, making consumption idempotent across refreshes,
+retries, and interrupted saves.
+
+### 4. Calculation Flow
 
 When a derived value is needed (e.g., spell save DC):
 
@@ -210,6 +232,16 @@ isStateTypeActive()
 // Serialization
 toJson(), loadFromJson()
 ```
+
+### Item Transfer Helpers
+
+- `charactersheet-item-utils.js` is the shared catalog-item normalization seam.
+  Both the Character Sheet inventory picker and cross-page transfers must use it.
+- `charactersheet-item-transfer.js` owns saved-character labels, the durable
+  transfer queue, live-tab notification, idempotent state application, and
+  acknowledgement.
+- A transfer is acknowledged only after the receiving character saves
+  successfully. Failed or interrupted operations remain queued for retry.
 
 ### CharacterSheetBuilder (`charactersheet-builder.js`)
 
