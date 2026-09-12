@@ -351,35 +351,33 @@ class ItemsPage extends ListPage {
 		const type = item._textTypes.join(", ").toTitleCase();
 
 		if (item._fIsMundane) {
-			const eleLi = veE({
-				tag: "div",
-				clazz: `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`,
-				click: (evt) => this._mundaneList.doSelect(listItem, evt),
-				contextmenu: (evt) => this._openContextMenu(evt, this._mundaneList, listItem),
-				children: [
-					veE({
-						tag: "a",
-						href: `#${hash}`,
-						clazz: "ve-lst__row-border ve-lst__row-inner",
-						children: [
-							veE({tag: "span", clazz: `ve-col-3-5 ve-pl-0 ve-pr-1 ve-bold`, txt: item.name}),
-							veE({tag: "span", clazz: `ve-col-4-5 ve-px-1`, txt: type}),
-							veE({tag: "span", clazz: `ve-col-1-5 ve-px-1 ve-text-center`, txt: item._l_value}),
-							veE({tag: "span", clazz: `ve-col-1-5 ve-px-1 ve-text-center`, txt: item._l_weight}),
-							veE({
-								tag: "span",
-								clazz: `ve-col-1 ve-text-center ${Parser.sourceJsonToSourceClassname(item.source)} ve-pl-1 ve-pr-0`,
-								title: `${Parser.sourceJsonToFull(item.source)}${Renderer.utils.getSourceSubText(item)}`,
-								txt: source,
-							}),
-						],
-					}),
-				],
-			});
-
 			const listItem = new ListItem(
 				itI,
-				eleLi,
+				() => veE({
+					tag: "div",
+					clazz: `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`,
+					click: (evt) => this._mundaneList.doSelect(listItem, evt),
+					contextmenu: (evt) => this._openContextMenu(evt, this._mundaneList, listItem),
+					children: [
+						veE({
+							tag: "a",
+							href: `#${hash}`,
+							clazz: "ve-lst__row-border ve-lst__row-inner",
+							children: [
+								veE({tag: "span", clazz: `ve-col-3-5 ve-pl-0 ve-pr-1 ve-bold`, txt: item.name}),
+								veE({tag: "span", clazz: `ve-col-4-5 ve-px-1`, txt: type}),
+								veE({tag: "span", clazz: `ve-col-1-5 ve-px-1 ve-text-center`, txt: item._l_value}),
+								veE({tag: "span", clazz: `ve-col-1-5 ve-px-1 ve-text-center`, txt: item._l_weight}),
+								veE({
+									tag: "span",
+									clazz: `ve-col-1 ve-text-center ${Parser.sourceJsonToSourceClassname(item.source)} ve-pl-1 ve-pr-0`,
+									title: `${Parser.sourceJsonToFull(item.source)}${Renderer.utils.getSourceSubText(item)}`,
+									txt: source,
+								}),
+							],
+						}),
+					],
+				}),
 				item.name,
 				{
 					source,
@@ -397,42 +395,40 @@ class ItemsPage extends ListPage {
 
 			return {mundane: listItem};
 		} else {
-			const eleLi = veE({
-				tag: "div",
-				clazz: `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`,
-				click: (evt) => this._magicList.doSelect(listItem, evt),
-				contextmenu: (evt) => this._openContextMenu(evt, this._magicList, listItem),
-				children: [
-					veE({
-						tag: "a",
-						href: `#${hash}`,
-						clazz: "ve-lst__row-border ve-lst__row-inner",
-						children: [
-							e_({tag: "span", clazz: `ve-col-3-5 ve-pl-0 ve-bold`, txt: item.name}),
-							e_({tag: "span", clazz: `ve-col-2-5`, txt: type}),
-							e_({tag: "span", clazz: `ve-col-1-5 ve-text-center`, txt: item._l_weight}),
-							e_({tag: "span", clazz: `ve-col-1-5 ve-text-center`, txt: item._l_value}),
-							e_({tag: "span", clazz: `ve-col-0-6 ve-text-center`, txt: item._attunementCategory !== VeCt.STR_NO_ATTUNEMENT ? "×" : ""}),
-							e_({
-								tag: "span",
-								clazz: `ve-col-1-4 ve-text-center ${item.rarity ? `ve-itm__rarity-${item.rarity}` : ""}`,
-								title: (item.rarity || "").toTitleCase(),
-								txt: Parser.itemRarityToShort(item.rarity) || "",
-							}),
-							veE({
-								tag: "span",
-								clazz: `ve-col-1 ve-text-center ${Parser.sourceJsonToSourceClassname(item.source)} ve-pr-0`,
-								title: `${Parser.sourceJsonToFull(item.source)}${Renderer.utils.getSourceSubText(item)}`,
-								txt: source,
-							}),
-						],
-					}),
-				],
-			});
-
 			const listItem = new ListItem(
 				itI,
-				eleLi,
+				() => veE({
+					tag: "div",
+					clazz: `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`,
+					click: (evt) => this._magicList.doSelect(listItem, evt),
+					contextmenu: (evt) => this._openContextMenu(evt, this._magicList, listItem),
+					children: [
+						veE({
+							tag: "a",
+							href: `#${hash}`,
+							clazz: "ve-lst__row-border ve-lst__row-inner",
+							children: [
+								e_({tag: "span", clazz: `ve-col-3-5 ve-pl-0 ve-bold`, txt: item.name}),
+								e_({tag: "span", clazz: `ve-col-2-5`, txt: type}),
+								e_({tag: "span", clazz: `ve-col-1-5 ve-text-center`, txt: item._l_weight}),
+								e_({tag: "span", clazz: `ve-col-1-5 ve-text-center`, txt: item._l_value}),
+								e_({tag: "span", clazz: `ve-col-0-6 ve-text-center`, txt: item._attunementCategory !== VeCt.STR_NO_ATTUNEMENT ? "×" : ""}),
+								e_({
+									tag: "span",
+									clazz: `ve-col-1-4 ve-text-center ${item.rarity ? `ve-itm__rarity-${item.rarity}` : ""}`,
+									title: (item.rarity || "").toTitleCase(),
+									txt: Parser.itemRarityToShort(item.rarity) || "",
+								}),
+								veE({
+									tag: "span",
+									clazz: `ve-col-1 ve-text-center ${Parser.sourceJsonToSourceClassname(item.source)} ve-pr-0`,
+									title: `${Parser.sourceJsonToFull(item.source)}${Renderer.utils.getSourceSubText(item)}`,
+									txt: source,
+								}),
+							],
+						}),
+					],
+				}),
 				item.name,
 				{
 					source,

@@ -6,7 +6,7 @@
  * Loads a set of content pages in a real Chromium browser and records the numbers we use to
  * decide whether a performance change actually helped:
  *
- *   - time to a populated list (the moment the page becomes usable)
+ *   - lifecycle/logical-list readiness followed by a two-frame response boundary
  *   - total main-thread long-task time, and the largest single long task
  *   - request count, bytes transferred, and how many requests went to remote homebrew hosts
  *   - how long `BrewUtil2` spent fetching / processing homebrew
@@ -24,18 +24,18 @@
 
 import fs from "fs";
 import path from "path";
-import {fileURLToPath} from "url";
-import {spawn} from "child_process";
 import {chromium} from "playwright";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, "..", "..");
+import {installInstrumentation, collectLogicalLists} from "./browser-harness.mjs";
+import {startLocalServer, REPO_ROOT} from "./server.mjs";
+import {SCHEMA_VERSION, READINESS_VERSION, compactLogicalLists, compatibilityErrors, correctnessErrors} from "./results.mjs";
+import {observeErrors} from "./errors.mjs";
+import {measureInteractions} from "./interactions.mjs";
 
 const DEFAULT_PAGES = ["bestiary", "spells", "items", "classes", "crafting"];
 const DEFAULT_ORIGIN = "http://localhost:5050";
 
-/** Port used by `--serve`. Deliberately not 5050 so it can't collide with a dev server. */
-const SERVE_PORT = 5099;
+/** Port zero atomically acquires a unique port, without reusing a running dev server. */
+const SERVE_PORT = 0;
 
 /** GitHub Pages serves everything with `max-age=600` and that cannot be configured. Matching it
  * locally keeps `--serve` measurements comparable with production ones. */
@@ -44,14 +44,6 @@ const SERVE_MAX_AGE_SECONDS = 600;
 /** Hosts that serve homebrew from outside our own origin. Counted separately because they are
  * uncacheable by our service worker and sit on the critical path. */
 const REMOTE_BREW_HOST_RE = /githubusercontent\.com|(?:^|\/\/)(?:www\.)?github\.com/;
-
-/** Rows only appear once the list has been built, so this is our "page is usable" signal.
- * Pages differ hugely in row count (classes has 33, items has 5734), so rather than a fixed
- * threshold we wait for the count to stop growing. */
-const LIST_ROW_SELECTOR = ".ve-lst__row";
-
-/** How long the row count must hold steady before we call the list built. */
-const LIST_STABLE_MS = 250;
 
 /* ---------------------------------------------------------------------------------------------
  * Argument parsing
@@ -70,6 +62,10 @@ function parseArgs (argv) {
 		coldOnly: false,
 		serve: false,
 		noisePct: 5,
+		port: SERVE_PORT,
+		viewport: {width: 1440, height: 1000},
+		cpuThrottle: 1,
+		interactions: false,
 	};
 
 	for (let i = 0; i < argv.length; ++i) {
@@ -92,12 +88,23 @@ function parseArgs (argv) {
 			case "--cold-only": out.coldOnly = true; break;
 			case "--serve": out.serve = true; break;
 			case "--noise": out.noisePct = Number(next()); break;
+			case "--port": out.port = Number(next()); break;
+			case "--width": out.viewport.width = Number(next()); break;
+			case "--height": out.viewport.height = Number(next()); break;
+			case "--cpu-throttle": out.cpuThrottle = Number(next()); break;
+			case "--interactions": out.interactions = true; break;
 			case "--help": case "-h": printHelpAndExit(); break;
 			default: throw new Error(`Unknown argument: ${arg}`);
 		}
 	}
 
-	if (!Number.isFinite(out.runs) || out.runs < 1) throw new Error(`--runs must be a positive integer`);
+	if (!Number.isInteger(out.runs) || out.runs < 1) throw new Error(`--runs must be a positive integer`);
+	if (!Number.isInteger(out.port) || out.port < 0 || out.port > 65535) throw new Error("--port must be 0..65535");
+	if (out.cpuThrottle < 1 || !Number.isFinite(out.cpuThrottle)) throw new Error("--cpu-throttle must be >= 1");
+	if (!Number.isFinite(out.timeoutMs) || out.timeoutMs <= 0) throw new Error("--timeout must be positive");
+	if (!Number.isFinite(out.noisePct) || out.noisePct < 0) throw new Error("--noise must be nonnegative");
+	if (!out.pages.length) throw new Error("--pages must contain at least one page");
+	if (Object.values(out.viewport).some(it => !Number.isInteger(it) || it < 1)) throw new Error("Viewport dimensions must be positive integers");
 	return out;
 }
 
@@ -117,81 +124,14 @@ Page-load performance harness.
   --serve             Start a local server on this checkout (port ${SERVE_PORT}, max-age=${SERVE_MAX_AGE_SECONDS})
                       and measure that instead of --origin. Use this to measure code changes.
   --noise <pct>       Ignore deltas smaller than this percentage. Default: 5
+  --port <n>          Local server port; 0 (default) acquires a unique free port.
+  --width <px>        Viewport width (1440).
+  --height <px>       Viewport height (1000).
+  --cpu-throttle <n>  Chromium CPU slowdown factor (1).
+  --interactions     Also exercise search/clear/sort/source/scroll/far reveal on items/spells/feats.
 `.trim());
 	process.exit(0);
 }
-
-/* ---------------------------------------------------------------------------------------------
- * In-page instrumentation
- *
- * This runs before any application script, so it can wrap BrewUtil2 as soon as it appears and
- * observe long tasks from the very start of the load.
- * ------------------------------------------------------------------------------------------ */
-
-const INIT_SCRIPT = `
-(() => {
-	const H = globalThis.__perfHarness = {
-		longTasks: [],
-		brew: {rawMs: null, processedMs: null, calls: 0},
-		firstRowMs: null,
-		listReadyMs: null,
-		listRows: 0,
-	};
-
-	try {
-		new PerformanceObserver((list) => {
-			for (const entry of list.getEntries()) H.longTasks.push({start: entry.startTime, duration: entry.duration});
-		}).observe({entryTypes: ["longtask"]});
-	} catch (ignored) { /* longtask unsupported */ }
-
-	// BrewUtil2 is created during module evaluation, so poll for it rather than racing the import.
-	const wrapBrew = () => {
-		const B = globalThis.BrewUtil2;
-		if (!B || B.__perfWrapped) return !!B;
-		B.__perfWrapped = true;
-
-		const wrap = (methodName, bucket) => {
-			const original = B[methodName];
-			if (typeof original !== "function") return;
-			B[methodName] = async function (...args) {
-				const t0 = performance.now();
-				try { return await original.apply(this, args); } finally {
-					H.brew[bucket] = (H.brew[bucket] || 0) + (performance.now() - t0);
-					if (bucket === "processedMs") H.brew.calls++;
-				}
-			};
-		};
-
-		wrap("_pGetBrewRaw_", "rawMs");
-		wrap("_pGetBrewProcessed_", "processedMs");
-		return true;
-	};
-
-	const brewPoll = setInterval(() => { if (wrapBrew()) clearInterval(brewPoll); }, 5);
-	setTimeout(() => clearInterval(brewPoll), 30000);
-
-	// Wait for the row count to appear and then stop changing, rather than for a fixed row count:
-	// pages legitimately range from 33 rows (classes) to 5734 (items).
-	let lastCount = 0;
-	let stableSince = null;
-	const listPoll = setInterval(() => {
-		const n = document.querySelectorAll(${JSON.stringify(LIST_ROW_SELECTOR)}).length;
-
-		if (n === 0) return;
-		if (H.firstRowMs == null) H.firstRowMs = performance.now();
-
-		if (n !== lastCount) { lastCount = n; stableSince = performance.now(); return; }
-		if (stableSince == null) { stableSince = performance.now(); return; }
-
-		if (performance.now() - stableSince >= ${LIST_STABLE_MS}) {
-			H.listReadyMs = stableSince;
-			H.listRows = n;
-			clearInterval(listPoll);
-		}
-	}, 25);
-	setTimeout(() => clearInterval(listPoll), 120000);
-})();
-`;
 
 /* ---------------------------------------------------------------------------------------------
  * Collection
@@ -229,7 +169,12 @@ const COLLECT_FN = `(async () => {
 	return {
 		firstRowMs: H.firstRowMs == null ? null : Math.round(H.firstRowMs),
 		listReadyMs: H.listReadyMs == null ? null : Math.round(H.listReadyMs),
-		listRows: H.listRows || 0,
+		toolsLoadedMs: H.toolsLoadedMs == null ? null : Math.round(H.toolsLoadedMs),
+		rowBuilderMs: Math.round(H.rowBuilderMs),
+		rowBuilderCalls: H.rowBuilderCalls,
+		instrumentation: H.reach,
+		loadPhases: H.phases,
+		instrumentationErrors: H.errors,
 		longTaskTotalMs: Math.round(longTasks.reduce((acc, t) => acc + t.duration, 0)),
 		longTaskCount: longTasks.length,
 		longTaskMaxMs: longTasks.length ? Math.round(Math.max(...longTasks.map(t => t.duration))) : 0,
@@ -247,20 +192,15 @@ const COLLECT_FN = `(async () => {
 	};
 })()`;
 
-async function measureOnce ({context, url, timeoutMs, isClearCache = false}) {
+async function measureOnce ({context, url, timeoutMs, cpuThrottle = 1, isClearCache = false, isLocal = false, interactions = false, pageName}) {
 	const page = await context.newPage();
-	const consoleErrors = [];
-	page.on("pageerror", err => consoleErrors.push(String(err?.message ?? err)));
-	page.on("console", msg => { if (msg.type() === "error") consoleErrors.push(msg.text()); });
+	const {consoleErrors, requestErrors, warnings} = observeErrors(page, {isLocal});
 
 	try {
-		// Browser contexts share Chromium's HTTP cache, so a fresh context is *not* a cold cache.
-		// Clear it explicitly, otherwise every page after the first measures as warm.
-		if (isClearCache) {
-			const cdp = await context.newCDPSession(page);
-			await cdp.send("Network.clearBrowserCache");
-			await cdp.detach();
-		}
+		// Explicitly clear the HTTP cache; do not infer cache state from context creation.
+		const cdp = await context.newCDPSession(page);
+		if (isClearCache) await cdp.send("Network.clearBrowserCache");
+		await cdp.send("Emulation.setCPUThrottlingRate", {rate: cpuThrottle});
 
 		await page.goto(url, {waitUntil: "commit", timeout: timeoutMs});
 
@@ -271,13 +211,53 @@ async function measureOnce ({context, url, timeoutMs, isClearCache = false}) {
 				null,
 				{timeout: timeoutMs},
 			);
-		} catch (e) { timedOut = true; }
+		} catch (e) {
+			if (e.name !== "TimeoutError") throw e;
+			timedOut = true;
+		}
 
 		// Let any tail work settle so long-task totals aren't truncated mid-task.
 		await page.waitForTimeout(500);
 
 		const result = await page.evaluate(COLLECT_FN);
-		return {...result, timedOut, consoleErrors: consoleErrors.slice(0, 10)};
+		const logical = compactLogicalLists(await page.evaluate(collectLogicalLists));
+		const failures = [
+			...logical.errors,
+			...Object.entries(result.instrumentation).filter(([, reached]) => !reached).map(([key]) => `Instrumentation not reached: ${key}`),
+			...requestErrors,
+			...consoleErrors,
+			...logical.lists.flatMap(list => list.duplicateIdentities.map(id => `Duplicate identity in ${list.id}: ${id}`)),
+		];
+		if (timedOut) failures.push("Readiness timed out");
+		if (!logical.counter.ok) failures.push("UI count does not match logical rows");
+		if (!result.rowBuilderCalls) failures.push("No row-builder calls observed");
+		if (!result.brewProcessedCalls || result.brewRawMs == null) failures.push("Homebrew hooks installed but not called");
+		if (result.brewProps?.__error || !result.brewProps) failures.push("Homebrew correctness collection failed");
+		let interactionResults = null;
+		if (interactions && !failures.length) {
+			try {
+				interactionResults = await measureInteractions(page, {pageName, timeoutMs});
+				failures.push(...requestErrors, ...consoleErrors);
+			} catch (e) {
+				interactionResults = {error: e.message};
+				failures.push(`Interaction failed: ${e.message}`);
+			}
+		}
+		const sum = key => logical.lists.reduce((n, list) => n + (list[key] || 0), 0);
+		return {
+			...result,
+			logical,
+			timedOut,
+			consoleErrors,
+			requestErrors,
+			failures,
+			warnings,
+			interactions: interactionResults,
+			listRows: sum("mountedRows"),
+			logicalLoadedRows: sum("loadedCount"),
+			logicalMatchingRows: sum("matchingCount"),
+			materializedRows: logical.lists.some(list => list.materializedRows == null) ? null : sum("materializedRows"),
+		};
 	} finally {
 		await page.close();
 	}
@@ -299,6 +279,7 @@ const MEDIAN_METRICS = [
 	"brewRawMs", "brewProcessedMs", "requestCount", "remoteBrewRequestCount",
 	"remoteBrewLastEndMs", "servedFromCacheCount", "bytesTransferred", "bytesDecoded",
 	"domContentLoadedMs",
+	"toolsLoadedMs", "logicalLoadedRows", "logicalMatchingRows", "materializedRows", "rowBuilderMs", "rowBuilderCalls",
 ];
 
 function summarise (runs) {
@@ -308,6 +289,15 @@ function summarise (runs) {
 	// Correctness data is taken from the last successful run; it should be identical across runs.
 	const withProps = [...runs].reverse().find(r => r.brewProps);
 	summary.brewProps = withProps ? withProps.brewProps : null;
+	summary.logical = runs.at(-1)?.logical;
+	summary.runs = runs;
+	summary.failures = [...new Set(runs.flatMap(r => r.failures))];
+	for (const run of runs) summary.failures.push(...correctnessErrors(runs[0], run).map(error => `Run-to-run drift: ${error}`));
+	summary.interactions = (runs[0]?.interactions?.scenarios || []).map(scenario => ({
+		name: scenario.name,
+		skipped: scenario.skipped ?? null,
+		responseMs: median(runs.map(run => run.interactions?.scenarios?.find(it => it.name === scenario.name)?.responseMs)),
+	}));
 
 	summary.timedOutRuns = runs.filter(r => r.timedOut).length;
 	summary.consoleErrors = [...new Set(runs.flatMap(r => r.consoleErrors || []))].slice(0, 10);
@@ -323,7 +313,7 @@ const fmtMb = v => v == null ? "-" : `${(v / 1048576).toFixed(2)}MB`;
 const fmtNum = v => v == null ? "-" : String(v);
 
 function printResults (results) {
-	const header = ["page", "phase", "firstRow", "usable", "longTasks", "maxTask", "brewProc", "reqs", "remoteBrew", "transfer", "rows"];
+	const header = ["page", "phase", "firstRow", "ready-v2", "longTasks", "maxTask", "brewProc", "reqs", "remoteBrew", "transfer", "loaded", "matching", "mounted"];
 	const rows = [header];
 
 	for (const [pageName, phases] of Object.entries(results.pages)) {
@@ -331,7 +321,7 @@ function printResults (results) {
 			rows.push([
 				pageName, phaseName, fmtMs(s.firstRowMs), fmtMs(s.listReadyMs), fmtMs(s.longTaskTotalMs), fmtMs(s.longTaskMaxMs),
 				fmtMs(s.brewProcessedMs), fmtNum(s.requestCount), fmtNum(s.remoteBrewRequestCount),
-				fmtMb(s.bytesTransferred), fmtNum(s.listRows),
+				fmtMb(s.bytesTransferred), fmtNum(s.logicalLoadedRows), fmtNum(s.logicalMatchingRows), fmtNum(s.listRows),
 			]);
 		}
 	}
@@ -353,9 +343,14 @@ const LOWER_IS_BETTER = new Set([
 	"requestCount", "remoteBrewRequestCount", "remoteBrewLastEndMs", "bytesTransferred",
 ]);
 
-const COMPARED_METRICS = ["firstRowMs", "listReadyMs", "longTaskTotalMs", "longTaskMaxMs", "brewProcessedMs", "requestCount", "remoteBrewRequestCount", "bytesTransferred"];
+const COMPARED_METRICS = ["listReadyMs", "longTaskTotalMs", "longTaskMaxMs", "brewProcessedMs", "requestCount", "remoteBrewRequestCount", "bytesTransferred"];
 
 function printComparison (baseline, current, noisePct) {
+	const incompatibilities = compatibilityErrors(baseline, current);
+	if (incompatibilities.length) {
+		console.error(`\nComparison refused:\n${incompatibilities.join("\n")}`);
+		return incompatibilities.length;
+	}
 	console.log(`\nComparison vs baseline (${baseline.label || baseline.startedAt}); ignoring deltas below ${noisePct}%\n`);
 
 	const rows = [["page", "phase", "metric", "before", "after", "delta"]];
@@ -365,6 +360,9 @@ function printComparison (baseline, current, noisePct) {
 		for (const [phaseName, after] of Object.entries(phases)) {
 			const before = baseline.pages?.[pageName]?.[phaseName];
 			if (!before) continue;
+			const errors = correctnessErrors(before.runs?.[0] || before, after.runs?.[0] || after);
+			regressions += errors.length;
+			for (const error of errors) console.error(`${pageName} ${phaseName}: ${error}`);
 
 			for (const metric of COMPARED_METRICS) {
 				const b = before[metric];
@@ -383,13 +381,21 @@ function printComparison (baseline, current, noisePct) {
 					`${pct > 0 ? "+" : ""}${pct.toFixed(1)}%  ${better ? "better" : "WORSE"}`,
 				]);
 			}
+			for (const scenario of after.interactions || []) {
+				const previous = before.interactions?.find(it => it.name === scenario.name);
+				if (!previous?.responseMs || scenario.responseMs == null) continue;
+				const pct = 100 * (scenario.responseMs - previous.responseMs) / previous.responseMs;
+				if (Math.abs(pct) < noisePct) continue;
+				if (pct > 0) regressions++;
+				rows.push([pageName, phaseName, `interaction:${scenario.name}`, fmtMs(previous.responseMs), fmtMs(scenario.responseMs), `${pct.toFixed(1)}% ${pct > 0 ? "WORSE" : "better"}`]);
+			}
 		}
 	}
 
 	if (rows.length === 1) console.log(`No metric moved by more than ${noisePct}%.`);
 	else printTable(rows);
 
-	printCorrectnessDiff(baseline, current);
+	if (printCorrectnessDiff(baseline, current)) regressions++;
 	return regressions;
 }
 
@@ -423,67 +429,38 @@ function printCorrectnessDiff (baseline, current) {
 }
 
 /* ---------------------------------------------------------------------------------------------
- * Local server (--serve)
- * ------------------------------------------------------------------------------------------ */
-
-/**
- * Serve this checkout with production-like cache headers so local measurements of code changes
- * are comparable with measurements of the deployed site.
- */
-async function startLocalServer () {
-	const child = spawn(
-		process.execPath,
-		[
-			path.join(REPO_ROOT, "node_modules", "http-server", "bin", "http-server"),
-			REPO_ROOT,
-			"-p", String(SERVE_PORT),
-			"-c", String(SERVE_MAX_AGE_SECONDS),
-			"--cors",
-			"--silent",
-		],
-		{cwd: REPO_ROOT, stdio: "ignore"},
-	);
-
-	const origin = `http://localhost:${SERVE_PORT}`;
-	const deadline = Date.now() + 20_000;
-
-	for (;;) {
-		if (child.exitCode != null) throw new Error(`Local server exited with code ${child.exitCode}`);
-		try {
-			const res = await fetch(`${origin}/bestiary.html`, {method: "HEAD"});
-			if (res.ok) break;
-		} catch (ignored) { /* not up yet */ }
-
-		if (Date.now() > deadline) {
-			child.kill();
-			throw new Error(`Local server did not start on port ${SERVE_PORT} within 20s`);
-		}
-		await new Promise(resolve => setTimeout(resolve, 250));
-	}
-
-	console.log(`Started local server on ${origin} (max-age=${SERVE_MAX_AGE_SECONDS})`);
-	return {origin, stop: () => child.kill()};
-}
-
-/* ---------------------------------------------------------------------------------------------
  * Main
  * ------------------------------------------------------------------------------------------ */
 
 async function main () {
 	const opts = parseArgs(process.argv.slice(2));
 
-	const server = opts.serve ? await startLocalServer() : null;
+	const server = opts.serve ? await startLocalServer({port: opts.port}) : null;
 	if (server) opts.origin = server.origin;
 
 	console.log(`Measuring ${opts.origin}`);
 	console.log(`Pages: ${opts.pages.join(", ")}  |  runs per phase: ${opts.runs}\n`);
 
-	const browser = await chromium.launch({headless: !opts.headed});
+	let browser;
+	try {
+		browser = await chromium.launch({headless: !opts.headed});
+	} catch (e) {
+		server?.stop();
+		throw e;
+	}
 	const results = {
 		label: opts.label,
 		origin: opts.origin,
 		startedAt: new Date().toISOString(),
 		runsPerPhase: opts.runs,
+		schemaVersion: SCHEMA_VERSION,
+		readinessVersion: READINESS_VERSION,
+		viewport: opts.viewport,
+		cpuThrottle: opts.cpuThrottle,
+		browserVersion: browser.version(),
+		localServer: opts.serve,
+		interactionsEnabled: opts.interactions,
+		storagePolicy: "fresh-context-per-cold-run; warm-context-primed-once; service-workers-blocked",
 		pages: {},
 	};
 
@@ -492,23 +469,46 @@ async function main () {
 			const url = `${opts.origin}/${pageName}.html`;
 			results.pages[pageName] = {};
 
-			// A fresh context per phase gives us a genuinely empty HTTP cache for the cold pass.
+			// Cold runs each get fresh origin storage plus an explicit HTTP-cache clear.
 			const phases = opts.coldOnly ? ["cold"] : ["cold", "warm"];
 			for (const phase of phases) {
-				const context = await browser.newContext();
-				await context.addInitScript(INIT_SCRIPT);
+				const newContext = async () => {
+					const context = await browser.newContext({viewport: opts.viewport, serviceWorkers: "block"});
+					await context.addInitScript(installInstrumentation);
+					return context;
+				};
+				const context = await newContext();
 
 				try {
+					let prime = null;
 					// The warm phase gets one unmeasured priming load to populate the HTTP cache.
-					if (phase === "warm") await measureOnce({context, url, timeoutMs: opts.timeoutMs});
+					if (phase === "warm") {
+						prime = await measureOnce({context, url, timeoutMs: opts.timeoutMs, cpuThrottle: opts.cpuThrottle, isLocal: opts.serve});
+						if (prime.failures.length) console.error(`Warm priming failures: ${prime.failures.join("; ")}`);
+					}
 
 					const runs = [];
 					for (let i = 0; i < opts.runs; ++i) {
 						process.stdout.write(`  ${pageName} ${phase} run ${i + 1}/${opts.runs}\r`);
-						runs.push(await measureOnce({context, url, timeoutMs: opts.timeoutMs, isClearCache: phase === "cold"}));
+						const runContext = phase === "cold" ? await newContext() : context;
+						try {
+							runs.push(await measureOnce({
+								context: runContext,
+								url,
+								timeoutMs: opts.timeoutMs,
+								cpuThrottle: opts.cpuThrottle,
+								isClearCache: phase === "cold",
+								isLocal: opts.serve,
+								interactions: opts.interactions,
+								pageName,
+							}));
+						} finally {
+							if (phase === "cold") await runContext.close();
+						}
 					}
 
 					results.pages[pageName][phase] = summarise(runs);
+					if (prime?.failures.length) results.pages[pageName][phase].failures.push(...prime.failures.map(it => `Warm priming: ${it}`));
 				} finally {
 					await context.close();
 				}
@@ -526,10 +526,17 @@ async function main () {
 	printResults(results);
 
 	let regressions = 0;
+	for (const [pageName, phases] of Object.entries(results.pages)) {
+		for (const [phase, summary] of Object.entries(phases)) {
+			if (!summary.failures.length) continue;
+			regressions += summary.failures.length;
+			console.error(`\n${pageName} ${phase} failures:\n${summary.failures.join("\n")}`);
+		}
+	}
 	if (opts.baseline) {
 		const baselinePath = path.resolve(REPO_ROOT, opts.baseline);
 		if (!fs.existsSync(baselinePath)) throw new Error(`Baseline file not found: ${baselinePath}`);
-		regressions = printComparison(JSON.parse(fs.readFileSync(baselinePath, "utf8")), results, opts.noisePct);
+		regressions += printComparison(JSON.parse(fs.readFileSync(baselinePath, "utf8")), results, opts.noisePct);
 	}
 
 	if (opts.out) {
@@ -540,7 +547,7 @@ async function main () {
 	}
 
 	if (regressions) {
-		console.log(`\n${regressions} metric(s) regressed by more than ${opts.noisePct}%.`);
+		console.log(`\n${regressions} validation/comparison failure(s), including metrics regressing by more than ${opts.noisePct}%.`);
 		process.exitCode = 1;
 	}
 }

@@ -76,22 +76,26 @@ class CultsBoonsPage extends ListPage {
 		it._lType = it.__prop === "cult" ? "Cult" : "Boon";
 		it._lSubType = it.type || "\u2014";
 
-		const eleLi = document.createElement("div");
-		eleLi.className = `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`;
-
 		const source = Parser.sourceJsonToAbv(it.source);
 		const hash = UrlUtil.autoEncodeHash(it);
 
-		eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
+		const listItem = new ListItem(
+			bcI,
+			() => {
+				const eleLi = document.createElement("div");
+				eleLi.className = `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`;
+
+				eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
 			<span class="ve-col-2 ve-text-center ve-pl-0">${it._lType}</span>
 			<span class="ve-col-2 ve-px-1 ve-text-center">${it._lSubType}</span>
 			<span class="ve-bold ve-col-6 ve-px-1">${it.name}</span>
 			<span class="ve-col-2 ve-text-center ${Parser.sourceJsonToSourceClassname(it.source)} ve-pl-1 ve-pr-0" title="${Parser.sourceJsonToFull(it.source)}">${source}</span>
 		</a>`;
 
-		const listItem = new ListItem(
-			bcI,
-			eleLi,
+				eleLi.addEventListener("click", (evt) => this._list.doSelect(listItem, evt));
+				eleLi.addEventListener("contextmenu", (evt) => this._openContextMenu(evt, this._list, listItem));
+				return eleLi;
+			},
 			it.name,
 			{
 				source,
@@ -105,9 +109,6 @@ class CultsBoonsPage extends ListPage {
 				isExcluded,
 			},
 		);
-
-		eleLi.addEventListener("click", (evt) => this._list.doSelect(listItem, evt));
-		eleLi.addEventListener("contextmenu", (evt) => this._openContextMenu(evt, this._list, listItem));
 
 		return listItem;
 	}

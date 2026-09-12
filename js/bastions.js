@@ -113,14 +113,17 @@ class BastionsPage extends ListPage {
 	getListItem (ent, ixEnt, isExcluded) {
 		this._pageFilter.mutateAndAddToFilters(ent, isExcluded);
 
-		const eleLi = document.createElement("div");
-		eleLi.className = `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`;
-
 		const hash = UrlUtil.autoEncodeHash(ent);
 		const source = Parser.sourceJsonToAbv(ent.source);
 		const facilityType = (ent.facilityType || "Unknown").toTitleCase();
 
-		eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
+		const listItem = new ListItem(
+			ixEnt,
+			() => {
+				const eleLi = document.createElement("div");
+				eleLi.className = `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`;
+
+				eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
 			<span class="ve-col-2 ve-text-center ve-pl-0 ve-pr-1">${facilityType}</span>
 			<span class="ve-bold ve-col-3 ve-px-1">${ent.name}</span>
 			<span class="ve-col-1 ve-text-center ve-px-1 ${ent.level == null ? "ve-italic" : ""}">${ent.level || "\u2014"}</span>
@@ -128,9 +131,10 @@ class BastionsPage extends ListPage {
 			<span class="ve-col-2 ve-text-center ${Parser.sourceJsonToSourceClassname(ent.source)}  ve-pl-1 ve-pr-0" title="${Parser.sourceJsonToFull(ent.source)}">${source}</span>
 		</a>`;
 
-		const listItem = new ListItem(
-			ixEnt,
-			eleLi,
+				eleLi.addEventListener("click", (evt) => this._list.doSelect(listItem, evt));
+				eleLi.addEventListener("contextmenu", (evt) => this._openContextMenu(evt, this._list, listItem));
+				return eleLi;
+			},
 			ent.name,
 			{
 				source,
@@ -145,9 +149,6 @@ class BastionsPage extends ListPage {
 				isExcluded,
 			},
 		);
-
-		eleLi.addEventListener("click", (evt) => this._list.doSelect(listItem, evt));
-		eleLi.addEventListener("contextmenu", (evt) => this._openContextMenu(evt, this._list, listItem));
 
 		return listItem;
 	}

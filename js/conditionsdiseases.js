@@ -72,26 +72,31 @@ class ConditionsDiseasesPage extends ListPage {
 	getListItem (it, cdI, isExcluded) {
 		this._pageFilter.mutateAndAddToFilters(it, isExcluded);
 
-		const eleLi = document.createElement("div");
-		eleLi.className = `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`;
-
 		const source = Parser.sourceJsonToAbv(it.source);
 		const hash = UrlUtil.autoEncodeHash(it);
 
-		eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
-			<span class="ve-col-0-3 ve-px-0 ve-flex-vh-center ve-lst__btn-toggle-expand ve-self-flex-stretch ve-no-select">[+]</span>
-			<span class="ve-col-3 ve-px-1 ve-text-center">${it.type || PageFilterConditionsDiseases.getDisplayProp(it.__prop)}</span>
-			<span class="ve-bold ve-col-6-7 ve-px-1">${it.name}</span>
-			<span class="ve-col-2 ve-text-center ${Parser.sourceJsonToSourceClassname(it.source)} ve-pr-0" title="${Parser.sourceJsonToFull(it.source)}">${source}</span>
-		</a>
-		<div class="ve-flex ve-hidden ve-relative ve-accordion__wrp-preview">
-			<div class="ve-vr-0 ve-absolute ve-accordion__vr-preview"></div>
-			<div class="ve-flex-col ve-py-3 ve-ml-4 ve-accordion__wrp-preview-inner"></div>
-		</div>`;
-
 		const listItem = new ListItem(
 			cdI,
-			eleLi,
+			() => {
+				const eleLi = document.createElement("div");
+				eleLi.className = `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`;
+
+				eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
+					<span class="ve-col-0-3 ve-px-0 ve-flex-vh-center ve-lst__btn-toggle-expand ve-self-flex-stretch ve-no-select">[+]</span>
+					<span class="ve-col-3 ve-px-1 ve-text-center">${it.type || PageFilterConditionsDiseases.getDisplayProp(it.__prop)}</span>
+					<span class="ve-bold ve-col-6-7 ve-px-1">${it.name}</span>
+					<span class="ve-col-2 ve-text-center ${Parser.sourceJsonToSourceClassname(it.source)} ve-pr-0" title="${Parser.sourceJsonToFull(it.source)}">${source}</span>
+				</a>
+				<div class="ve-flex ve-hidden ve-relative ve-accordion__wrp-preview">
+					<div class="ve-vr-0 ve-absolute ve-accordion__vr-preview"></div>
+					<div class="ve-flex-col ve-py-3 ve-ml-4 ve-accordion__wrp-preview-inner"></div>
+				</div>`;
+
+				eleLi.addEventListener("click", (evt) => this._list.doSelect(listItem, evt));
+				eleLi.addEventListener("contextmenu", (evt) => this._openContextMenu(evt, this._list, listItem));
+
+				return eleLi;
+			},
 			it.name,
 			{
 				source,
@@ -104,9 +109,6 @@ class ConditionsDiseasesPage extends ListPage {
 				isExcluded,
 			},
 		);
-
-		eleLi.addEventListener("click", (evt) => this._list.doSelect(listItem, evt));
-		eleLi.addEventListener("contextmenu", (evt) => this._openContextMenu(evt, this._list, listItem));
 
 		return listItem;
 	}

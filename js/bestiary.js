@@ -523,36 +523,34 @@ class BestiaryPage extends ListPageMultiSource {
 		const type = _BestiaryUtil.getListDisplayType(mon);
 		const cr = mon._pCr;
 
-		const eleLi = veE({
-			tag: "div",
-			clazz: `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`,
-			click: (evt) => this._handleBestiaryLiClick(evt, listItem),
-			contextmenu: (evt) => this._handleBestiaryLiContext(evt, listItem),
-			children: [
-				veE({
-					tag: "a",
-					href: `#${hash}`,
-					clazz: "ve-lst__row-border ve-lst__row-inner",
-					click: evt => this._handleBestiaryLinkClick(evt),
-					children: [
-						this._encounterBuilder.getButtons(mI),
-						veE({tag: "span", clazz: `best-ecgen__name ve-bold ve-col-4-2 ve-pl-0 ve-pr-1`, txt: mon.name}),
-						veE({tag: "span", clazz: `ve-col-4-1 ve-px-1`, txt: type}),
-						veE({tag: "span", clazz: `ve-col-1-7 ve-px-1 ve-text-center`, txt: cr}),
-						veE({
-							tag: "span",
-							clazz: `ve-col-2 ve-text-center ${Parser.sourceJsonToSourceClassname(mon.source)} ve-pl-1 ve-pr-0`,
-							title: `${Parser.sourceJsonToFull(mon.source)}${Renderer.utils.getSourceSubText(mon)}`,
-							txt: source,
-						}),
-					],
-				}),
-			],
-		});
-
 		const listItem = new ListItem(
 			mI,
-			eleLi,
+			() => veE({
+				tag: "div",
+				clazz: `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`,
+				click: (evt) => this._handleBestiaryLiClick(evt, listItem),
+				contextmenu: (evt) => this._handleBestiaryLiContext(evt, listItem),
+				children: [
+					veE({
+						tag: "a",
+						href: `#${hash}`,
+						clazz: "ve-lst__row-border ve-lst__row-inner",
+						click: evt => this._handleBestiaryLinkClick(evt),
+						children: [
+							this._encounterBuilder.getButtons(mI),
+							veE({tag: "span", clazz: `best-ecgen__name ve-bold ve-col-4-2 ve-pl-0 ve-pr-1`, txt: mon.name}),
+							veE({tag: "span", clazz: `ve-col-4-1 ve-px-1`, txt: type}),
+							veE({tag: "span", clazz: `ve-col-1-7 ve-px-1 ve-text-center`, txt: cr}),
+							veE({
+								tag: "span",
+								clazz: `ve-col-2 ve-text-center ${Parser.sourceJsonToSourceClassname(mon.source)} ve-pl-1 ve-pr-0`,
+								title: `${Parser.sourceJsonToFull(mon.source)}${Renderer.utils.getSourceSubText(mon)}`,
+								txt: source,
+							}),
+						],
+					}),
+				],
+			}),
 			mon.name,
 			{
 				source,

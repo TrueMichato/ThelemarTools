@@ -1068,6 +1068,7 @@ class ListPageSettingsManager extends ListPageStateManager {
 
 class ListPage {
 	static _LAZY_ENTITY_COUNT_THRESHOLD = 20_000;
+	static _STORAGE_KEY_LIST_RENDERING = "listRenderingMode";
 
 	/**
 	 * @param opts Options object.
@@ -1131,10 +1132,12 @@ class ListPage {
 		this._contextMenuList = null;
 
 		this._seenHashes = new Set();
+		this._listRenderingMode = "automatic";
 	}
 
 	get primaryLists () { return [this._list]; }
 	get dataList_ () { return this._dataList; }
+	get isVirtualListPage () { return globalThis.ListPageConfig.isVirtualPage(UrlUtil.getCurrentPage()); }
 
 	set sublistManager (val) {
 		this._sublistManager = val;
@@ -1153,6 +1156,10 @@ class ListPage {
 		await ExcludeUtil.pInitialise();
 
 		await this._pOnLoad_pInitSettingsManager();
+		if (this.isVirtualListPage) {
+			const mode = await StorageUtil.pGetForPage(ListPage._STORAGE_KEY_LIST_RENDERING);
+			this._listRenderingMode = mode === "all" ? "all" : "automatic";
+		}
 
 		let data;
 		// For pages which can load data without filter state, load the data early
@@ -1162,6 +1169,7 @@ class ListPage {
 		}
 
 		await this._pOnLoad_pInitPrimaryLists();
+		if (this.isVirtualListPage) this._initListRenderingCompatibility();
 
 		// For pages which cannot load data without filter state, load the data late
 		if (this._isLoadDataAfterFilterInit) {
@@ -1228,6 +1236,43 @@ class ListPage {
 
 		await this._compSettings.pInit();
 		this._compSettings.bindBtnOpen({btn: document.getElementById("btn-list-settings")});
+	}
+
+	_initListRenderingCompatibility () {
+		const reason = this.primaryLists.find(list => list.renderingUnsupportedReason)?.renderingUnsupportedReason;
+		if (!reason) return;
+		JqueryUtil.doToast({
+			type: "warning",
+			content: reason,
+			isAutoHide: false,
+		});
+	}
+
+	async _pHandleClick_listRendering () {
+		const reason = this.primaryLists.find(list => list.renderingUnsupportedReason)?.renderingUnsupportedReason;
+		const elePost = veT`<div>
+			<p><b>Automatic</b> keeps nearby rows rendered for faster scrolling and filtering. The list search, filters, selection, and exports still include every matching entry.</p>
+			<p>Browser Find only searches rendered rows in Automatic mode. Choose <b>Render all rows</b> for browser Find or assistive technology that needs the complete list in the page. Large lists may take longer to render.</p>
+			<p>Your choice is saved for this page. Search, filters, sorting, selection, and expanded previews are preserved.</p>
+			${reason ? veE({tag: "p", clazz: "ve-bold", txt: reason}) : null}
+		</div>`;
+		const mode = await InputUiUtil.pGetUserEnum({
+			title: "List Rendering",
+			values: ["automatic", "all"],
+			default: this._listRenderingMode,
+			isResolveItem: true,
+			fnDisplay: it => it === "all" ? "Render all rows" : "Automatic",
+			elePost,
+		});
+		if (mode == null) return;
+		await this._pSetListRenderingMode({mode});
+	}
+
+	async _pSetListRenderingMode ({mode}) {
+		if (mode !== "automatic" && mode !== "all") throw new Error(`Unknown list rendering mode "${mode}"`);
+		this._listRenderingMode = mode;
+		this.primaryLists.forEach(list => list.setRenderingMode({isRenderAll: mode === "all"}));
+		await StorageUtil.pSetForPage(ListPage._STORAGE_KEY_LIST_RENDERING, mode);
 	}
 
 	async _pOnLoad_pInitPrimaryLists () {
@@ -1415,36 +1460,45 @@ class ListPage {
 
 				this.primaryLists.forEach(list => {
 					list.visibleItems.forEach(listItem => {
-						const {btnToggleExpand, dispExpandedOuter, dispExpandedInner} = this._getPreviewEles(listItem);
-
-						if (!isExpand) return this._doPreviewCollapse({dispExpandedOuter, btnToggleExpand, dispExpandedInner});
-
-						if (btnToggleExpand.innerHTML !== `[+]`) return;
-						this._doPreviewExpand({listItem, dispExpandedOuter, btnToggleExpand, dispExpandedInner});
+						listItem.data.isPreviewExpanded = isExpand;
 					});
+					list.refreshRenderedItems();
 				});
 			});
 	}
 
 	/** Requires a "[+]" button as the first list column, and the item to contain a second hidden display element. */
 	_doBindPreview (listItem) {
-		const {btnToggleExpand, dispExpandedOuter, dispExpandedInner} = this._getPreviewEles(listItem);
+		listItem.data.isPreviewExpanded ??= false;
+		listItem.addElementInitializer(ele => {
+			const {btnToggleExpand, dispExpandedOuter, dispExpandedInner} = this._getPreviewEles(listItem, ele);
 
-		dispExpandedOuter.addEventListener("click", evt => {
-			evt.stopPropagation();
+			dispExpandedOuter.addEventListener("click", evt => evt.stopPropagation());
+			btnToggleExpand.setAttribute("aria-expanded", "false");
+			btnToggleExpand.setAttribute("aria-label", `Expand preview: ${listItem.name}`);
+			btnToggleExpand.title = "Expand preview";
+			btnToggleExpand.setAttribute("role", "button");
+			btnToggleExpand.setAttribute("tabindex", "0");
+			btnToggleExpand.addEventListener("keydown", evt => {
+				if (evt.key !== "Enter" && evt.key !== " ") return;
+				evt.stopPropagation();
+				evt.preventDefault();
+				btnToggleExpand.click();
+			});
+
+			btnToggleExpand.addEventListener("click", evt => {
+				evt.stopPropagation();
+				evt.preventDefault();
+
+				this._doPreviewToggle({listItem, btnToggleExpand, dispExpandedInner, dispExpandedOuter});
+			});
 		});
-
-		btnToggleExpand.addEventListener("click", evt => {
-			evt.stopPropagation();
-			evt.preventDefault();
-
-			this._doPreviewToggle({listItem, btnToggleExpand, dispExpandedInner, dispExpandedOuter});
-		});
+		listItem.addElementRenderHook(ele => this._renderPreview(listItem, ele));
 	}
 
-	_getPreviewEles (listItem) {
-		const btnToggleExpand = listItem.ele.firstElementChild.firstElementChild;
-		const dispExpandedOuter = listItem.ele.lastElementChild;
+	_getPreviewEles (listItem, ele = listItem.ele) {
+		const btnToggleExpand = ele.firstElementChild.firstElementChild;
+		const dispExpandedOuter = ele.lastElementChild;
 		const dispExpandedInner = dispExpandedOuter.lastElementChild;
 
 		return {
@@ -1454,21 +1508,40 @@ class ListPage {
 		};
 	}
 
+	_renderPreview (listItem, ele) {
+		const meta = this._getPreviewEles(listItem, ele);
+		const isRenderedExpanded = meta.btnToggleExpand.getAttribute("aria-expanded") === "true";
+		if (!!listItem.data.isPreviewExpanded === isRenderedExpanded) return;
+		if (listItem.data.isPreviewExpanded) this._doPreviewExpand({listItem, ...meta});
+		else this._doPreviewCollapse({listItem, ...meta});
+	}
+
 	_doPreviewToggle ({listItem, btnToggleExpand, dispExpandedInner, dispExpandedOuter}) {
-		const isExpand = btnToggleExpand.innerHTML === `[+]`;
+		const isExpand = !listItem.data.isPreviewExpanded;
 		if (isExpand) this._doPreviewExpand({listItem, dispExpandedOuter, btnToggleExpand, dispExpandedInner});
-		else this._doPreviewCollapse({dispExpandedOuter, btnToggleExpand, dispExpandedInner});
+		else this._doPreviewCollapse({listItem, dispExpandedOuter, btnToggleExpand, dispExpandedInner});
+		this.primaryLists.find(list => list.items.includes(listItem))?.refreshRenderedItems();
 	}
 
 	_doPreviewExpand ({listItem, dispExpandedOuter, btnToggleExpand, dispExpandedInner}) {
+		listItem.data.isPreviewExpanded = true;
 		dispExpandedOuter.classList.remove("ve-hidden");
 		btnToggleExpand.innerHTML = `[\u2212]`;
-		Renderer.hover.getHoverContent_stats(UrlUtil.getCurrentPage(), this._dataList[listItem.ix]).vee.appendTo(dispExpandedInner);
+		btnToggleExpand.setAttribute("aria-expanded", "true");
+		btnToggleExpand.setAttribute("aria-label", `Collapse preview: ${listItem.name}`);
+		btnToggleExpand.title = "Collapse preview";
+		if (!dispExpandedInner.childNodes.length) {
+			Renderer.hover.getHoverContent_stats(UrlUtil.getCurrentPage(), this._dataList[listItem.ix]).vee.appendTo(dispExpandedInner);
+		}
 	}
 
-	_doPreviewCollapse ({dispExpandedOuter, btnToggleExpand, dispExpandedInner}) {
+	_doPreviewCollapse ({listItem, dispExpandedOuter, btnToggleExpand, dispExpandedInner}) {
+		listItem.data.isPreviewExpanded = false;
 		dispExpandedOuter.classList.add("ve-hidden");
 		btnToggleExpand.innerHTML = `[+]`;
+		btnToggleExpand.setAttribute("aria-expanded", "false");
+		btnToggleExpand.setAttribute("aria-label", `Expand preview: ${listItem.name}`);
+		btnToggleExpand.title = "Expand preview";
 		dispExpandedInner.innerHTML = "";
 	}
 
@@ -1511,8 +1584,9 @@ class ListPage {
 					const rollX = RollerUtil.roll(allLists.length);
 					const list = allLists[rollX];
 					const rollY = RollerUtil.roll(list.visibleItems.length);
-					window.location.hash = veE(list.visibleItems[rollY].ele).vee.find(`a`).vee.attr("href");
-					if (!isScrollablePage) list.visibleItems[rollY].ele.scrollIntoView();
+					const item = list.visibleItems[rollY];
+					window.location.hash = Hist.getListItemHash(item);
+					if (!isScrollablePage) list.scrollToItem(item, {align: "nearest"});
 				}
 			});
 
@@ -1614,7 +1688,9 @@ class ListPage {
 		const helpText = [];
 		if (isBindFindHotkey) helpText.push(`Hotkey: f.`);
 
-		const list = new List({iptSearch, wrpList, syntax, helpText, ...optsList});
+		if (this.isVirtualListPage) helpText.push(`Automatic list rendering keeps nearby rows in the page. Browser Find only searches rendered rows; use this search or Other Options → List rendering → Render all rows.`);
+		const list = new List({iptSearch, wrpList, syntax, helpText, ...optsList, isVirtual: this.isVirtualListPage});
+		if (this.isVirtualListPage && this._listRenderingMode === "all") list.setRenderingMode({isRenderAll: true});
 
 		if (isBindFindHotkey) {
 			veE({ele: document.body})
@@ -1663,19 +1739,7 @@ class ListPage {
 	_initList_scrollToItem () {
 		const toShow = Hist.getSelectedListElementWithLocation();
 		if (!toShow) return;
-
-		const {scrollTop: parentScroll, height: parentHeight} = toShow.list.getScrollWrpInfo();
-		const posInParent = toShow.item.ele.offsetTop;
-		const height = toShow.item.ele.getBoundingClientRect().height;
-
-		const parentRangeMin = parentScroll;
-		const parentRangeMax = parentScroll + parentHeight;
-
-		const isAboveMin = posInParent >= parentRangeMin;
-		const isBelowMax = (posInParent + height) <= parentRangeMax;
-		if (isAboveMin && isBelowMax) return;
-		if (isAboveMin) return toShow.list.setScrollWrpTop(posInParent - parentHeight + height);
-		if (isBelowMax) return toShow.item.ele.scrollIntoView();
+		toShow.list.scrollToItem(toShow.item, {align: "nearest"});
 	}
 
 	_initList_bindWindowHandlers () {
@@ -1723,7 +1787,10 @@ class ListPage {
 				// m: expand/collapse current selection
 				case "m": {
 					if (EventUtil.isInInput(evt)) return;
+					if (!this._isPreviewable) return;
 					const it = Hist.getSelectedListElementWithLocation();
+					if (!it || !it.list.visibleItems.includes(it.item)) return;
+					it.list.scrollToItem(it.item, {align: "nearest"});
 					veE(it.item.ele.firstElementChild.firstElementChild).vee.trigger("click");
 				}
 			}
@@ -1740,6 +1807,7 @@ class ListPage {
 		if (!~ixVisible) {
 			// If the currently-selected item is not visible, jump to the top/bottom of the list
 			const listsWithVisibleItems = lists.filter(list => list.visibleItems.length);
+			if (!listsWithVisibleItems.length) return;
 			const tgtItem = dir === 1
 				? listsWithVisibleItems[0].visibleItems[0]
 				: listsWithVisibleItems.last().visibleItems.last();
@@ -1990,6 +2058,17 @@ class ListPage {
 				},
 			),
 		);
+
+		if (this.isVirtualListPage) {
+			contextOptions.push(
+				null,
+				new ContextUtil.Action(
+					"List rendering\u2026",
+					() => this._pHandleClick_listRendering(),
+					{title: "Choose Automatic or Render all rows for browser Find and accessibility compatibility."},
+				),
+			);
+		}
 
 		const menu = ContextUtil.getMenu(contextOptions);
 		btnOptions
