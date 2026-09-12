@@ -2247,6 +2247,40 @@ class CharacterSheetSpells {
 		return true;
 	}
 
+	async _pResolveGamblerCastReceipt (resolution) {
+		if (!resolution) return {resolution, cancelled: false};
+		let current = resolution;
+		if (current.status === "awaiting-choice") {
+			const options = [current.tableRoll?.roll, current.tableRoll?.secondRoll].filter(Number.isInteger);
+			const values = options.map((roll, ix) => `Result ${roll}: ${ix ? current.tableRoll.secondEffect : current.tableRoll.effect}`);
+			const selected = await InputUiUtil.pGetUserEnum({
+				title: "Gambler's Folly — Choose Gambling Table Result",
+				htmlDescription: `<div><strong>${current.spellName || "Spell"}</strong> rolled twice. Choose which result applies.</div>`,
+				values,
+				fnDisplay: value => value,
+				isResolveItem: true,
+			});
+			if (selected == null) return {resolution: current, cancelled: true};
+			const choice = values.indexOf(selected) + 1;
+			current = this._state.chooseGamblerTableResult?.(current.resolutionId, choice) || current;
+		}
+		if (current.status === "awaiting-confirmation") {
+			const confirmed = await InputUiUtil.pGetUserBoolean({
+				title: `Gambler's Folly — ${current.descriptor?.transaction === "freeSpell" ? "Color Spray" : "Delayed Spell"}`,
+				htmlDescription: `<div>${current.descriptor?.text || "Confirm this Gambling Table result before the cast proceeds."}</div>`,
+				textYes: "Apply result",
+				textNo: "Cancel cast",
+			});
+			if (!confirmed) return {resolution: current, cancelled: true};
+			current = this._state.applyGamblingTableResolution?.(current.resolutionId, {confirmAutomatic: true}) || current;
+		}
+		return {
+			resolution: current,
+			cancelled: false,
+			deferCast: current.delayedCast != null || current.descriptor?.transaction === "delayedCast",
+		};
+	}
+
 	async _castSpell (spellId, {withMetamagic, decision = null} = {}) {
 		// Metamagic prompt runs unless the caller explicitly opts out (withMetamagic === false).
 		// Default (undefined) preserves legacy behaviour for callers that pass only a spellId
@@ -2522,12 +2556,6 @@ class CharacterSheetSpells {
 		const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: selectedSlot.level, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
 		if (activeMetamagicChoice?.cancelled) return;
 		if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null, {enforceMaterial: true})) return;
-		if (!this._spendMetamagicCost(activeMetamagicChoice?.metamagic)) {
-			JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
-			return;
-		}
-		if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
-
 		// Variant spell component selection
 		const variantComponentChoice = await this._resolveVariantComponentChoice({spell, spellData, decision});
 		if (variantComponentChoice?.cancelled) return;
@@ -2553,6 +2581,26 @@ class CharacterSheetSpells {
 			});
 			if (gamblerCastResolution) castMeta.gamblerCastResolution = gamblerCastResolution;
 		}
+		const gamblerResolutionDecision = await this._pResolveGamblerCastReceipt(gamblerCastResolution);
+		if (gamblerResolutionDecision.cancelled) {
+			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
+			return;
+		}
+		if (gamblerResolutionDecision.resolution) {
+			gamblerCastResolution = gamblerResolutionDecision.resolution;
+			castMeta.gamblerCastResolution = gamblerCastResolution;
+		}
+		const deferGamblerCast = !!gamblerResolutionDecision.deferCast;
+
+		// Resolve all cast-scoped Gambling Table decisions before spending any
+		// metamagic, consuming a component, or mutating a spell slot. Cancelling
+		// a pending choice must be a true no-op for the rest of the cast setup.
+		if (!this._spendMetamagicCost(activeMetamagicChoice?.metamagic)) {
+			JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
+			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
+			return;
+		}
+		if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
 		// Handle variant component slot modifications (noSlot / lowerSlot)
 		let skipSlotConsumption = false;
@@ -2602,18 +2650,20 @@ class CharacterSheetSpells {
 		}
 
 		const effectiveSlotLevel = this._state.getDaemonologistEffectiveCastLevel?.(spell, selectedSlot.level) ?? selectedSlot.level;
-		const castResult = await this._showCastResult(
-			spell,
-			effectiveSlotLevel,
-			selectedSlot.isPact,
-			false,
-			{
-				...castMeta,
-				...(effectiveSlotLevel !== selectedSlot.level
-					? {daemonologistActualSlotLevel: selectedSlot.level, daemonologistImprovedSpell: true}
-					: {}),
-			},
-		);
+		const castResult = deferGamblerCast
+			? {cancelled: false}
+			: await this._showCastResult(
+				spell,
+				effectiveSlotLevel,
+				selectedSlot.isPact,
+				false,
+				{
+					...castMeta,
+					...(effectiveSlotLevel !== selectedSlot.level
+						? {daemonologistActualSlotLevel: selectedSlot.level, daemonologistImprovedSpell: true}
+						: {}),
+				},
+			);
 
 		// If user cancelled (e.g. target selection), refund the slot / resource
 		if (castResult?.cancelled) {
@@ -2644,7 +2694,40 @@ class CharacterSheetSpells {
 			}
 			return;
 		}
-		if (gamblerCastResolution) this._state.commitGamblerCastResolution?.(gamblerCastResolution.resolutionId);
+		if (gamblerCastResolution) {
+			const descriptor = gamblerCastResolution.descriptor;
+			let canCommit = true;
+			if (descriptor?.automation === "automatic") {
+				gamblerCastResolution = this._state.applyGamblingTableResolution?.(gamblerCastResolution.resolutionId, {confirmAutomatic: true}) || gamblerCastResolution;
+			} else if (descriptor?.automation === "manual") {
+				const acknowledge = await InputUiUtil.pGetUserBoolean({
+					title: "Gambler's Folly — Manual Resolution",
+					htmlDescription: `<div>${descriptor.text}</div><div class="ve-small mt-2">${descriptor.instructions}</div>`,
+					textYes: "Mark resolved",
+					textNo: "Leave pending",
+				});
+				if (acknowledge) gamblerCastResolution = this._state.acknowledgeGamblingTableResolution?.(gamblerCastResolution.resolutionId) || gamblerCastResolution;
+				else canCommit = false;
+			}
+			if (canCommit) this._state.commitGamblerCastResolution?.(gamblerCastResolution.resolutionId);
+		}
+		if (gamblerCastResolution?.freeSpell) {
+			const freeSpell = this._state.getSpells?.().find(s =>
+				s.name?.toLowerCase() === gamblerCastResolution.freeSpell.name.toLowerCase()
+				&& (!gamblerCastResolution.freeSpell.source || s.source === gamblerCastResolution.freeSpell.source),
+			);
+			if (freeSpell) {
+				await this._showCastResult(
+					freeSpell,
+					gamblerCastResolution.freeSpell.slotLevel || freeSpell.level || 1,
+					false,
+					false,
+					{gamblerFreeSpell: true},
+				);
+			} else {
+				JqueryUtil.doToast({type: "warning", content: `${gamblerCastResolution.freeSpell.name} is unavailable for this free cast.`});
+			}
+		}
 
 		// Set concentration if spell requires it
 		const vcRemovesConcN = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
@@ -4440,6 +4523,49 @@ class CharacterSheetSpells {
 			isMinHeight0: true,
 			isWidth100: true,
 		});
+
+		// Receipt-specific queue. Cast receipts are intentionally separate from the
+		// global last-roll record so Master of Fortune choices survive a save/load
+		// and can be completed from the same accessible modal.
+		const pending = this._state.getPendingGamblerCastResolutions?.() || [];
+		if (pending.length) {
+			const receiptSection = e_({outer: `<section class="gambler-pending-receipts mb-3" aria-labelledby="gambler-pending-heading">
+				<h4 id="gambler-pending-heading" class="mb-2">Pending Gambler cast resolutions</h4>
+				<div class="gambler-pending-receipt-list"></div>
+			</section>`});
+			const list = receiptSection.querySelector(".gambler-pending-receipt-list");
+			pending.forEach(receipt => {
+				const row = e_({outer: `<div class="ve-flex-v-center mb-2 p-2" style="gap: 8px; border: 1px solid var(--rgb-border-grey); border-radius: 6px;" data-resolution-id="${receipt.resolutionId}">
+					<div class="ve-flex-col" style="min-width: 0; flex: 1;">
+						<strong>${receipt.spellName || "Spell cast"}</strong>
+						<span class="ve-small ve-muted">${receipt.tableRoll?.chosenRoll ? `d100 ${receipt.tableRoll.chosenRoll}: ${receipt.tableRoll.chosenEffect}` : "Awaiting Gambling Table resolution"}</span>
+					</div>
+					<div class="gambler-receipt-actions"></div>
+				</div>`});
+				const actions = row.querySelector(".gambler-receipt-actions");
+				const addButton = (label, handler, cls = "btn-default") => {
+					const btn = e_({outer: `<button type="button" class="btn btn-xs ${cls}">${label}</button>`});
+					btn.addEventListener("click", () => {
+						handler();
+						row.querySelector("span").textContent = "Resolution updated — close and reopen to refresh.";
+						actions.replaceChildren();
+						void this._page?.saveCharacter?.();
+					});
+					actions.append(btn);
+				};
+				if (receipt.status === "awaiting-choice") {
+					addButton(`Keep ${receipt.tableRoll?.roll}`, () => this._state.chooseGamblerTableResult?.(receipt.resolutionId, 1), "btn-primary");
+					addButton(`Keep ${receipt.tableRoll?.secondRoll}`, () => this._state.chooseGamblerTableResult?.(receipt.resolutionId, 2), "btn-primary");
+				} else if (receipt.status === "awaiting-confirmation") {
+					addButton("Apply", () => this._state.applyGamblingTableResolution?.(receipt.resolutionId, {confirmAutomatic: true}), "btn-primary");
+					addButton("Cancel", () => this._state.cancelGamblerCastResolution?.(receipt.resolutionId), "btn-danger");
+				} else if (receipt.status === "ready" && receipt.descriptor?.automation === "manual") {
+					addButton("Acknowledge", () => this._state.acknowledgeGamblingTableResolution?.(receipt.resolutionId), "btn-primary");
+				}
+				list.append(row);
+			});
+			modalInner.append(receiptSection);
+		}
 
 		// Roll button and result display
 		const rollSection = e_({outer: `

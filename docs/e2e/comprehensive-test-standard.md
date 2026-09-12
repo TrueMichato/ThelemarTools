@@ -150,3 +150,14 @@ node scripts/auditE2eCoverage.mjs
 The script reports per-spec EffectCheck coverage (effects + helpers +
 reason-comments) and flags specs below 80%. Either backfill effects
 or add `// no measurable derived effect: <reason>` comments.
+
+## Receipt-driven subclass mechanics
+
+Subclasses with deferred outcomes must test the persisted state transition,
+not only the feature label. For TGTT Gambler this includes a deterministic
+cast
+receipt, the slot transaction (including result 49 preservation), Master of
+Fortune choice/confirmation, cancellation, save/load restoration, and the
+real effect or durable manual acknowledgement for the selected table row.
+The browser probe should use the page object or shared effect helper; direct
+state calls belong in Jest regression coverage.

@@ -440,6 +440,7 @@ describe("TGTT Gambler Subclass", () => {
 
 			// Use remaining
 			for (let i = 1; i < pb; i++) {
+				state.resetBonusAction();
 				state.useExtraLuck();
 			}
 			expect(state.getExtraLuckUses().remaining).toBe(0);
@@ -465,6 +466,7 @@ describe("TGTT Gambler Subclass", () => {
 
 			// Exhaust uses
 			for (let i = 0; i < pb; i++) {
+				state.resetBonusAction();
 				state.useExtraLuck();
 			}
 			expect(state.getExtraLuckUses().remaining).toBe(0);
@@ -569,6 +571,7 @@ describe("TGTT Gambler Subclass", () => {
 
 			// Exhaust all resources
 			for (let i = 0; i < elPb; i++) {
+				state.resetBonusAction();
 				state.useExtraLuck();
 			}
 			for (let i = 0; i < mofPb; i++) {

@@ -197,6 +197,12 @@ describeCharacter({
 			effects: [
 				{kind: "featureCalculation", property: "hasGamblerFolly", exact: true},
 				{kind: "stateCall", method: "rollGamblingTable", path: "effect"},
+				// A deterministic losing cast creates a receipt before any slot
+				// mutation. At L17 the receipt is intentionally choice-bearing,
+				// so the slot transaction is asserted in Jest after choosing 49.
+				{kind: "stateCall", method: "setGamblerRollScenario", args: [{modifierRolls: [1, 1], betRoll: 4, tableRoll: 49}], ignoreResult: true},
+				{kind: "stateCall", method: "createGamblerCastResolution", args: [{spell: {id: "e2e-gambler", name: "E2E Gambler Spell"}, slotLevel: 1}], path: "bet.won", exact: false},
+				{kind: "stateCall", method: "getPendingGamblerCastResolutions", path: "0.resolutionId"},
 			],
 		},
 		// Gambler's Spellcasting: warlock-list cantrips + the subclass's
@@ -318,6 +324,11 @@ describeCharacter({
 					path: "effectiveRoll",
 					exact: 20,
 				},
+				// Master of Fortune receipts are choice-bearing and remain durable
+				// until the receipt-specific chooser applies one of the two rolls.
+				{kind: "stateCall", method: "setGamblerRollSequence", args: [[1, 4, 12, 88]], ignoreResult: true},
+				{kind: "stateCall", method: "createGamblerCastResolution", args: [{spell: {id: "e2e-master", name: "E2E Master Spell"}, slotLevel: 1}], path: "status", exact: "awaiting-choice"},
+				{kind: "stateCall", method: "chooseLatestGamblerTableResult", args: [2], path: "status", exact: "ready"},
 			],
 		},
 		// CS-BUG-017: specialty pick count short past L11. Keep the helper

@@ -136,6 +136,17 @@ describe("Gambler's Tools (L3)", () => {
 		expect(names.some(n => /cards/i.test(n))).toBe(true);
 	});
 
+	it("gates same-named subclasses by TGTT source and cleans synthesized artifacts", () => {
+		buildGambler(3);
+		expect(state.getFeatureCalculations().hasGamblerFolly).toBe(true);
+		expect(state.getItems().filter(i => i._isGamblerWeapon)).toHaveLength(3);
+
+		state._data.classes[0].source = "PHB";
+		state._data.classes[0].subclass.source = "PHB";
+		expect(state.getFeatureCalculations().hasGamblerFolly).toBeFalsy();
+		expect(state.getItems().filter(i => i._isGamblerWeapon)).toHaveLength(0);
+	});
+
 	it("surfaces the coin ricochet as a structured attack rider (not just item prose)", () => {
 		buildGambler(3);
 		const coins = state.getItems().find(i => i._isGamblerWeapon && /coins/i.test(i.name));
@@ -407,7 +418,10 @@ describe("Extra Luck + Master of Fortune resources", () => {
 	it("refuses to spend an exhausted pool", () => {
 		buildGambler(9);
 		const max = state.getProficiencyBonus();
-		for (let i = 0; i < max; i++) expect(state.useExtraLuck()).toBeTruthy();
+		for (let i = 0; i < max; i++) {
+			state.resetBonusAction();
+			expect(state.useExtraLuck()).toBeTruthy();
+		}
 		expect(state.getExtraLuckUses().remaining).toBe(0);
 		expect(state.useExtraLuck()).toBeFalsy();
 		expect(findRes("Extra Luck").current).toBe(0);
@@ -637,6 +651,52 @@ describe("Versatile Gambler (L13)", () => {
 				expect(descriptors[roll]).toEqual(expect.objectContaining({roll, id: `gambler-table-${roll}`}));
 				expect(["automatic", "confirm", "manual"]).toContain(descriptors[roll].automation);
 			}
+		});
+
+		it.each([
+			[2, "modifier"],
+			[4, "modifier"],
+			[5, "activeState"],
+			[9, "condition"],
+			[10, "condition"],
+			[13, "modifier"],
+			[20, "activeState"],
+			[22, "activeState"],
+			[25, "activeState"],
+			[27, "activeState"],
+			[32, "condition"],
+			[33, "spellTransaction"],
+			[49, "spellTransaction"],
+			[61, "spellTransaction"],
+		])("uses a canonical executable descriptor for row %i", (roll, effectType) => {
+			const descriptor = CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[roll];
+			expect(descriptor.effectType).toBe(effectType);
+			expect(descriptor.text).toBeTruthy();
+		});
+
+		it("applies self modifiers and conditions through the real state effect paths", () => {
+			buildGambler(3);
+			const makeReceipt = roll => {
+				state.setGamblerRollSource({nextInt: max => max === 100 ? roll : max === 4 ? 4 : 1});
+				return state.createGamblerCastResolution({spell: {id: `spell-${roll}`, name: "Test Spell"}, slotLevel: 1});
+			};
+			const modifierReceipt = makeReceipt(2);
+			expect(state.applyGamblingTableResolution(modifierReceipt.resolutionId, {confirmAutomatic: true}).status).toBe("applied");
+			expect(state.getNamedModifiers().some(m => m.sourceFeatureId === `gambler-table:${modifierReceipt.resolutionId}`)).toBe(true);
+
+			const conditionReceipt = makeReceipt(9);
+			state.applyGamblingTableResolution(conditionReceipt.resolutionId, {confirmAutomatic: true});
+			expect(state.getConditions().some(c => c.name === "Prone")).toBe(true);
+		});
+
+		it("executes confirmation transactions instead of acknowledging them", () => {
+			buildGambler(3);
+			state.setGamblerRollSource({nextInt: max => max === 100 ? 33 : max === 4 ? 4 : 1});
+			const receipt = state.createGamblerCastResolution({spell: {id: "color-test", name: "Fire Bolt"}, slotLevel: 1});
+			expect(receipt.status).toBe("awaiting-confirmation");
+			const applied = state.applyGamblingTableResolution(receipt.resolutionId, {confirmAutomatic: true});
+			expect(applied.status).toBe("applied");
+			expect(applied.freeSpell.name).toBe("Color Spray");
 		});
 	});
 

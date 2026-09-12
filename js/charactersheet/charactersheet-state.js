@@ -18520,6 +18520,37 @@ class CharacterSheetState {
 		this._gamblerRollSource = source && typeof source.nextInt === "function" ? source : null;
 	}
 
+	/**
+	 * Install a finite deterministic queue for browser/E2E probes. This is the
+	 * serializable-friendly companion to setGamblerRollSource; production callers
+	 * continue to use Math.random when the queue is exhausted.
+	 * @param {number[]} values
+	 */
+	setGamblerRollSequence (values = []) {
+		const queue = Array.isArray(values) ? [...values] : [];
+		this.setGamblerRollSource({nextInt: max => queue.length ? queue.shift() : max});
+	}
+
+	/**
+	 * Install context-aware deterministic cast rolls for browser probes. This
+	 * avoids coupling a test to whether Versatile Gambler currently rolls one
+	 * or two modifier dice.
+	 * @param {{modifierRolls?:number[], betRoll?:number, tableRoll?:number}} scenario
+	 */
+	setGamblerRollScenario (scenario = {}) {
+		const modifierRolls = Array.isArray(scenario.modifierRolls) ? [...scenario.modifierRolls] : [];
+		const betRoll = Number.isFinite(scenario.betRoll) ? scenario.betRoll : null;
+		const tableRoll = Number.isFinite(scenario.tableRoll) ? scenario.tableRoll : null;
+		this.setGamblerRollSource({
+			nextInt: (max, context = "") => {
+				if (context.startsWith("cast-modifier") && modifierRolls.length) return modifierRolls.shift();
+				if (context === "bet" && betRoll != null) return betRoll;
+				if (context.startsWith("table") && tableRoll != null) return tableRoll;
+				return max;
+			},
+		});
+	}
+
 	setRollSource (source = null) { this.setGamblerRollSource(source); }
 
 	/**
@@ -18811,8 +18842,8 @@ class CharacterSheetState {
 			modifier: {...modifier, dice: modifierDice},
 			bet,
 			tableRoll: table,
-			descriptor,
-			slotTransaction: descriptor?.transaction === "preserveSlot" ? "preserve" : "consume",
+			descriptor: table?.needsChoice ? null : descriptor,
+			slotTransaction: table?.needsChoice ? null : (descriptor?.transaction === "preserveSlot" ? "preserve" : "consume"),
 			status: table?.needsChoice ? "awaiting-choice" : descriptor?.automation === "confirm" ? "awaiting-confirmation" : "ready",
 			createdAt: Date.now(),
 		};
@@ -18828,12 +18859,25 @@ class CharacterSheetState {
 	chooseGamblerTableResult (resolutionId, choice) {
 		const resolution = this._data.spellcasting.gamblerPendingCastResolutions.find(r => r.resolutionId === resolutionId);
 		if (!resolution?.tableRoll?.needsChoice) return null;
-		const picked = this.chooseGamblingTableResult(choice);
-		if (!picked) return null;
-		resolution.tableRoll = this._data.spellcasting.gamblerLastTableRoll;
-		resolution.descriptor = CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[picked.roll] || null;
+		const table = resolution.tableRoll;
+		const useSecond = choice === 2 && table.secondRoll != null;
+		const pickedRoll = useSecond ? table.secondRoll : table.roll;
+		const pickedEffect = useSecond ? table.secondEffect : table.effect;
+		table.chosenRoll = pickedRoll;
+		table.chosenEffect = pickedEffect;
+		table.needsChoice = false;
+		table.status = "pending";
+		table.descriptor = CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[pickedRoll] || null;
+		resolution.descriptor = table.descriptor;
 		resolution.status = resolution.descriptor?.automation === "confirm" ? "awaiting-confirmation" : "ready";
+		resolution.slotTransaction = resolution.descriptor?.transaction === "preserveSlot" ? "preserve" : "consume";
 		return MiscUtil.copyFast(resolution);
+	}
+
+	chooseLatestGamblerTableResult (choice = 1) {
+		const latest = [...(this._data.spellcasting.gamblerPendingCastResolutions || [])].reverse()
+			.find(r => r.status === "awaiting-choice");
+		return latest ? this.chooseGamblerTableResult(latest.resolutionId, choice) : null;
 	}
 
 	/**
@@ -18850,17 +18894,58 @@ class CharacterSheetState {
 		const descriptor = resolution.descriptor;
 		if (!descriptor) return null;
 		if (descriptor.automation === "automatic") {
-			if (descriptor.effectType === "condition") this.addCondition(descriptor.condition);
+			const sourceFeatureId = `gambler-table:${resolution.resolutionId}`;
+			if (descriptor.effectType === "condition") {
+				this.addCondition({name: descriptor.condition, source: "TGTT"});
+			} else if (descriptor.effectType === "modifier") {
+				this.addNamedModifier({
+					...descriptor.modifier,
+					name: `Gambler's Folly (${descriptor.roll})`,
+					sourceFeatureId,
+				});
+			} else if (descriptor.effectType === "activeState") {
+				this.activateState("custom", {
+					sourceFeatureId,
+					name: descriptor.stateName || `Gambler's Folly (${descriptor.roll})`,
+					description: descriptor.text,
+					duration: descriptor.duration,
+					customEffects: descriptor.effects || [],
+				});
+			} else if (descriptor.effectType === "spellTransaction") {
+				resolution.spellTransaction = descriptor.transaction;
+				if (descriptor.transaction === "freeSpell") {
+					resolution.freeSpell = {name: "Color Spray", source: "PHB", slotLevel: 1};
+				} else if (descriptor.transaction === "delayedCast") {
+					resolution.delayedCast = {rounds: this._rollGamblerRandomInt(4, "delayed-cast"), spellName: resolution.spellName};
+				}
+			}
 			resolution.status = "applied";
 			resolution.appliedAt = Date.now();
 			return MiscUtil.copyFast(resolution);
 		}
+
 		if (descriptor.automation === "manual" || descriptor.automation === "confirm") {
+			if (descriptor.automation === "confirm") {
+				if (descriptor.transaction === "freeSpell") resolution.freeSpell = {name: "Color Spray", source: "PHB", slotLevel: 1};
+				if (descriptor.transaction === "delayedCast") {
+					resolution.delayedCast = {rounds: this._rollGamblerRandomInt(4, "delayed-cast"), spellName: resolution.spellName};
+				}
+				resolution.status = "applied";
+				resolution.appliedAt = Date.now();
+				return MiscUtil.copyFast(resolution);
+			}
+
 			resolution.status = "acknowledged";
 			resolution.acknowledgedAt = Date.now();
 			return MiscUtil.copyFast(resolution);
 		}
 		return MiscUtil.copyFast(resolution);
+	}
+
+	applyLatestGamblingTableResolution ({confirmAutomatic = true} = {}) {
+		const latest = [...(this._data.spellcasting.gamblerPendingCastResolutions || [])].reverse()
+			.find(r => ["ready", "awaiting-confirmation"].includes(r.status));
+		return latest ? this.applyGamblingTableResolution(latest.resolutionId, {confirmAutomatic}) : null;
 	}
 
 	/**
@@ -19055,11 +19140,12 @@ class CharacterSheetState {
 	 * Use Extra Luck (L9 feature) - grants advantage, triggers d100 roll.
 	 * @returns {boolean} True if successful, false if no uses remaining
 	 */
-	useExtraLuck ({consumeBonusAction = false} = {}) {
+	useExtraLuck ({consumeBonusAction = true} = {}) {
 		if (consumeBonusAction && !this.isBonusActionAvailable()) return false;
-		const resource = this._spendGamblerResource("gamblerExtraLuck");
+		const resource = this._getGamblerResourceUses("gamblerExtraLuck");
 		if (!resource) return false;
-		if (consumeBonusAction) this.spendBonusAction();
+		if (consumeBonusAction && !this.spendBonusAction()) return false;
+		if (!this._spendGamblerResource("gamblerExtraLuck")) return false;
 		// Trigger d100 roll on the Gambling Table
 		this.rollGamblingTable();
 		return true;
@@ -19957,6 +20043,12 @@ class CharacterSheetState {
 							// TGTT Gambler (Rogue Subclass) - Unique Rolling Spellcasting
 							// =====================================================================
 							case "Gambler": {
+								if (String(cls.source || "").toUpperCase() !== "TGTT"
+									|| String(cls.subclass?.source || "").toUpperCase() !== "TGTT"
+									|| this.getSettings()?.enableTgtt === false) {
+									this._cleanupGamblerArtifacts();
+									break;
+								}
 								// Gambler's Tools (level 3) - tool proficiencies and weapon options
 								if (level >= 3) {
 									calculations.hasGamblerTools = true;
@@ -19976,7 +20068,7 @@ class CharacterSheetState {
 									calculations.gamblerSpellsPreparedDice = level >= 13 ? "3d6" : "2d4";
 
 									// Gambling Modifier: roll 1d6 (or 2d4 at 13+) per spell cast
-									calculations.gamblerModifierDice = level >= 13 ? "2d4" : "1d6";
+									calculations.gamblerModifierDice = CharacterSheetGamblerRules.getModifierDice(level);
 
 									// Spell DC and attack are: 8 + prof + (roll) and prof + (roll)
 									// We show the formula, not a static value
@@ -32975,11 +33067,19 @@ class CharacterSheetState {
 	 * Uses _isGamblerWeapon marker to detect existing weapons and prevent duplicates.
 	 */
 	_injectGamblerWeapons () {
-		// Check if any Gambler weapons already exist (by marker)
-		const hasGamblerWeapons = this._data.inventory.some(
-			invItem => invItem.item._isGamblerWeapon,
-		);
-		if (hasGamblerWeapons) return; // Already injected
+		const validGambler = !!this._getGamblerClass() && (this._getGamblerClass()?.level || 0) >= 3;
+		if (!validGambler) {
+			this._cleanupGamblerArtifacts();
+			return;
+		}
+		// Reconcile only synthesized rows: preserve ordinary items and allow a
+		// player to remove/re-add the generated suite without duplication.
+		const templates = new Map(CharacterSheetState.GAMBLER_WEAPONS.map(i => [i.name, i]));
+		this._data.inventory = (this._data.inventory || []).filter(invItem => {
+			if (!invItem?.item?._isGamblerWeapon) return true;
+			return templates.has(invItem.item.name);
+		});
+		const existing = new Set(this._data.inventory.filter(i => i.item?._isGamblerWeapon).map(i => i.item.name));
 
 		// Inject all Gambler weapons, EQUIPPED. Gambler's Tools is the subclass's weapon
 		// suite — the cards/dice/coins are the gambler's arms and their spellcasting focus,
@@ -32987,7 +33087,7 @@ class CharacterSheetState {
 		// inventory. They are weightless trinkets (0.01-0.1 lb) with no AC or attunement
 		// impact, and the guard above means a player who unequips them is never overridden.
 		for (const weaponTemplate of CharacterSheetState.GAMBLER_WEAPONS) {
-			this.addItem({...weaponTemplate}, 1, true, false);
+			if (!existing.has(weaponTemplate.name)) this.addItem({...weaponTemplate}, 1, true, false);
 		}
 	}
 
@@ -38814,8 +38914,28 @@ class CharacterSheetState {
 			const sub = cls?.subclass;
 			if (!sub) return false;
 			const name = (sub.shortName || sub.name || "").toLowerCase();
-			return name === "gambler";
+			return name === "gambler"
+				&& String(cls.source || "").toUpperCase() === "TGTT"
+				&& String(sub.source || "").toUpperCase() === "TGTT"
+				&& this.getSettings()?.enableTgtt !== false;
 		}) || null;
+	}
+
+	/**
+	 * Remove all synthesized Gambler artifacts when a TGTT Gambler is removed or
+	 * the TGTT master switch is disabled. User-owned items are never touched.
+	 */
+	_cleanupGamblerArtifacts () {
+		const before = this._data.inventory?.length || 0;
+		this._data.inventory = (this._data.inventory || []).filter(i => !i?.item?._isGamblerWeapon);
+		if (before !== this._data.inventory.length) this._recalculateItemBonuses?.();
+		this._data.resources = (this._data.resources || []).filter(r => !String(r.resourceType || "").startsWith("gambler"));
+		if (this._data.spellcasting) {
+			this._data.spellcasting.gamblerPendingCastResolutions = [];
+			this._data.spellcasting.gamblerCastHistory = [];
+			this._data.spellcasting.gamblerLastBet = null;
+			this._data.spellcasting.gamblerLastTableRoll = null;
+		}
 	}
 
 	/**
@@ -38837,6 +38957,10 @@ class CharacterSheetState {
 		const level = this._getGamblerClass()?.level || 0;
 		const max = this.getProficiencyBonus();
 		this._data.resources = this._data.resources || [];
+		if (!this._getGamblerClass()) {
+			this._cleanupGamblerArtifacts();
+			return;
+		}
 		if (level < 3) {
 			this._data.spellcasting.gamblerPendingCastResolutions = [];
 			this._data.spellcasting.gamblerCastHistory = [];

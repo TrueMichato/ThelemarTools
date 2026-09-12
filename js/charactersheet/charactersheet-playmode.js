@@ -1510,6 +1510,7 @@ export class CharacterSheetPlayMode {
 		this._setIconLabel(reset, "refresh", " Reset turn");
 		this._makeClickable(reset, "Reset turn (restore all actions)", () => {
 			this._actionEconomy = {action: true, bonus: true, reaction: true, movement: true};
+			this._state.resetBonusAction?.();
 			this._renderActionEconomy();
 			this._logActivity("turn", "New turn started");
 		});

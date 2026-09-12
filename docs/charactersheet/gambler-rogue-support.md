@@ -14,8 +14,9 @@ tables, rather than the generic third-caster progression.
   cast-scoped modifier, Gambling Table result, and slot transaction, so attacks
   and saves produced by the cast cannot roll different modifiers.
 - Result 49 is represented as a slot-preserving transaction before the slot is
-  spent. Result 33 and other confirmation outcomes remain pending until the
-  player acknowledges them.
+  spent. Result 33 creates a confirmed free Color Spray transaction, while
+  result 61 records a deterministic delayed-cast transaction. Choice and
+  confirmation outcomes block the cast until the player resolves them.
 - Extra Luck is offered only when a bonus action is available. Applying it
   spends one resource use and the bonus action atomically; declining or
   cancelling an offer spends neither.
@@ -25,11 +26,20 @@ tables, rather than the generic third-caster progression.
 
 ## Gambling Table boundary
 
-All 100 published rows have descriptors in
-`CharacterSheetGamblerRules`. Safe self effects use the existing condition and
-active-state systems. Target, world, narrative, and DM-adjudicated outcomes
-are durable manual resolutions with the published row text and explicit
-acknowledgement instructions; they are never silently discarded.
+All 100 published rows have canonical descriptors in
+`CharacterSheetGamblerRules`. Safe self effects (including Persuasion
+disadvantage, initiative penalties, Light, Prone/Blinded/Invisible,
+Reduce/speed changes, levitation, X-ray vision, Silence, and the two spell
+transactions) use the existing condition, modifier, active-state, and receipt
+systems. Target, world, narrative, and DM-adjudicated outcomes remain durable
+manual resolutions with the published row text and explicit acknowledgement
+instructions; they are never silently discarded.
+
+Pending cast receipts are available in the Gambling Table modal, which exposes
+keyboard-labelled controls for Master of Fortune choices, confirmation,
+manual acknowledgement, and cancellation. The receipt queue is persisted with
+the character, so closing/reopening or saving/loading does not lose a required
+choice.
 
 ## Deterministic tests
 
@@ -37,4 +47,3 @@ Production rolls use the normal random source. Tests can install a runtime-only
 source with `state.setGamblerRollSource({nextInt(max, context) { ... }})`.
 The source is never serialized, so saved characters retain outcomes without
 retaining test callbacks or queues.
-
