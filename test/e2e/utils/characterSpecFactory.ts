@@ -181,7 +181,9 @@ export interface CharacterSpec {
 			targetName?: string;
 			size?: string;
 			distance?: number;
-			effect?: "grapple" | "restrain" | "shove" | "control-shove";
+			effect?: "target" | "grapple" | "restrain" | "shove" | "control-shove";
+			finalDistance?: number;
+			shoveDirection?: string;
 		};
 		/** If true, skip the entire usage spec (e.g. blocked by a bug). */
 		skip?: boolean;
@@ -648,7 +650,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 				}
 
 				if (usage.targetLifecycle && !(usage.targetLifecycle as any).skip) {
-					const tl = usage.targetLifecycle as {targetName?: string; size?: string; distance?: number; effect?: string};
+					const tl = usage.targetLifecycle as {targetName?: string; size?: string; distance?: number; effect?: "target" | "grapple" | "restrain" | "shove" | "control-shove"; finalDistance?: number; shoveDirection?: string};
 					const calc = await page.evaluate(() => (globalThis as any).charSheet?._state?.getFeatureCalculations?.() ?? {});
 					if (!calc.hasManifestChains) {
 						throw new Error("targetLifecycle requires a Chained Fury build with Manifest Chains");
@@ -658,10 +660,22 @@ export function describeCharacter (spec: CharacterSpec): void {
 						size: tl.size || "medium",
 						distance: tl.distance ?? 10,
 						effect: tl.effect || "restrain",
+						finalDistance: tl.finalDistance,
+						shoveDirection: tl.shoveDirection,
 					});
 					expect(applied, "the real attack/modal path should create a target effect").toBeTruthy();
 					const targets = await charSheet.getChainedTargets();
-					expect(targets.some(t => t.id === applied.id && (t.grappled || t.restrained))).toBe(true);
+					expect(targets.some(t => t.id === applied.id && (tl.effect === "target" ? !t.grappled && !t.restrained : (t.grappled || t.restrained)))).toBe(true);
+					if (tl.effect === "restrain") {
+						expect(applied.recurringDamage?.amount, "restraint damage should use current Barbarian level").toBe(atLevel);
+					}
+					const roundTrip = await page.evaluate(() => {
+						const cs: any = (globalThis as any).charSheet;
+						const json = cs?._state?.toJson?.();
+						cs?._state?.loadFromJson?.(json);
+						return cs?._state?.getTargetEffects?.() ?? [];
+					});
+					expect(roundTrip.some((t: any) => t.id === applied.id)).toBe(true);
 					expect(await charSheet.releaseChainedTarget(applied.id)).toBe(true);
 					expect((await charSheet.getChainedTargets()).some(t => t.id === applied.id)).toBe(false);
 				}

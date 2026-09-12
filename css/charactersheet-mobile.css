@@ -2014,4 +2014,21 @@
 		width: min(100%, 32rem);
 		padding-bottom: env(safe-area-inset-bottom);
 	}
+
+	.cs-combat-target-effect > .ve-flex-h-right {
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: .5rem;
+		margin-left: 0 !important;
+	}
+
+	.cs-combat-target-effect > .ve-flex-h-right > * {
+		margin-left: 0 !important;
+		width: 100%;
+	}
+
+	.cs-combat-target-warning {
+		color: var(--cs-warning, #a15c00);
+		font-weight: 600;
+	}
 }

@@ -2035,7 +2035,8 @@ class CharacterSheetCombat {
 		const sourceFeature = (attack.sourceFeature || "").trim().toLowerCase();
 		return options.filter(opt => {
 			if (opt?.attackSourceFeature && opt.attackSourceFeature.toLowerCase() !== sourceFeature) return false;
-			if (opt?.requiresState && !this._state.isStateTypeActive?.(opt.requiresState)) return false;
+			const requiredStates = opt?.requiresStates || (opt?.requiresState ? [opt.requiresState] : []);
+			if (requiredStates.some(requiredId => !this._state.isStateTypeActive?.(requiredId))) return false;
 			return true;
 		});
 	}
@@ -2058,6 +2059,7 @@ class CharacterSheetCombat {
 			if (opt.save?.dc) bits.push(`DC ${opt.save.dc} ${Parser.attAbvToFull(opt.save.ability).slice(0, 3).toUpperCase()}`);
 			return bits.join(" — ");
 		});
+		const hasTargetAware = options.some(opt => opt.targetAware && opt.targetEffect?.source);
 
 		const didHit = await InputUiUtil.pGetUserBoolean({
 			title: `${ctx.attack?.name || "Attack"} — On Hit`,
@@ -2069,14 +2071,16 @@ class CharacterSheetCombat {
 
 		const picked = await InputUiUtil.pGetUserEnum(/** @type {*} */ ({
 			title: `${ctx.attack?.name || "Attack"} — Choose an On-Hit Effect`,
-			values: [...labels, "Skip"],
+			values: [...labels, ...(hasTargetAware ? ["Track target only"] : []), "Skip"],
 			isResolveItem: false,
 		}));
-		if (picked == null || picked >= options.length) return;
+		if (picked == null || picked > options.length || (picked === options.length && !hasTargetAware)) return;
 
-		const opt = options[picked];
+		const opt = picked === options.length
+			? {name: "Track target only", targetAware: true, targetEffect: {source: "chained-fury", effect: "target"}}
+			: options[picked];
 		if (opt.targetAware && opt.targetEffect?.source) {
-			await this._pOfferChainedTargetEffect(ctx, opt);
+			await this._pOfferTargetEffect(ctx, opt);
 			return;
 		}
 		const parts = [opt.description || opt.name];
@@ -2094,7 +2098,7 @@ class CharacterSheetCombat {
 	 * CharacterSheetState, so Combat and Play Mode remain synchronized and a
 	 * save/load round-trip preserves the effect.
 	 */
-	async _pOfferChainedTargetEffect (ctx, opt) {
+	async _pOfferTargetEffect (ctx, opt) {
 		const state = this._state;
 		const existing = state.getChainedTargets?.() || [];
 		const trigger = typeof document !== "undefined" ? document.activeElement : null;
@@ -2103,6 +2107,10 @@ class CharacterSheetCombat {
 			isMinHeight0: true,
 			cbClose: () => csRestoreModalFocus(trigger),
 		});
+		// Let the modal host finish attaching before replacing its contents. This
+		// keeps the follow-up target form deterministic when the on-hit enum and
+		// target modal are opened in the same task.
+		await new Promise(resolve => setTimeout(resolve, 0));
 
 		await new Promise(resolve => {
 			let resolved = false;
@@ -2138,6 +2146,12 @@ class CharacterSheetCombat {
 					<label class="ve-form-label">Grapple save total (optional)
 						<input class="form-control" data-grapple-save aria-label="Target Strength or Dexterity save total" type="number" placeholder="Leave blank if failed">
 					</label>` : ""}
+					${opt.targetEffect?.effect === "control-shove" ? `<label class="ve-form-label">Final distance (ft.)
+						<input class="form-control" data-final-distance aria-label="Declared final distance in feet" type="number" min="0" max="${state.getFeatureCalculations()?.chainRange || 30}" value="${state.getFeatureCalculations()?.chainRange || 0}">
+					</label>
+					<label class="ve-form-label">Shove direction
+						<select class="form-control" data-shove-direction aria-label="Declared shove direction"><option value="away">Away</option><option value="toward">Toward</option><option value="lateral">Lateral</option></select>
+					</label>` : ""}
 					${opt.targetEffect?.effect === "restrain" ? `<label class="ve-form-label">STR save total (optional)
 						<input class="form-control" data-restraint-save aria-label="Target Strength save total" type="number" placeholder="Leave blank if failed">
 					</label>` : ""}
@@ -2172,6 +2186,8 @@ class CharacterSheetCombat {
 					grappleSaveAbility: modalInner.querySelector("[data-grapple-ability]")?.value || "str",
 					grappleSaveTotal: modalInner.querySelector("[data-grapple-save]")?.value === "" ? null : Number(modalInner.querySelector("[data-grapple-save]")?.value),
 					restraintSaveTotal: restraintSave === "" || restraintSave == null ? null : Number(restraintSave),
+					finalDistance: modalInner.querySelector("[data-final-distance]")?.value === "" ? null : Number(modalInner.querySelector("[data-final-distance]")?.value),
+					shoveDirection: modalInner.querySelector("[data-shove-direction]")?.value || null,
 				});
 				if (!result.ok) {
 					JqueryUtil.doToast({type: "warning", content: `Cannot apply chain effect: ${result.reason || "invalid target"}`});
@@ -2184,6 +2200,10 @@ class CharacterSheetCombat {
 			});
 			csFocusModalOnOpen(modalInner, {preferSelector: "[data-target-name]"});
 		});
+	}
+
+	_pOfferChainedTargetEffect (ctx, opt) {
+		return this._pOfferTargetEffect(ctx, opt);
 	}
 
 	/**
@@ -4005,7 +4025,8 @@ class CharacterSheetCombat {
 		let best = base;
 		for (const allowance of allowances) {
 			if ((allowance.sourceFeature || "").toLowerCase() !== sourceFeature) continue;
-			if (allowance.requiresState && !this._state.isStateTypeActive?.(allowance.requiresState)) continue;
+			const requiredStates = allowance.requiresStates || (allowance.requiresState ? [allowance.requiresState] : []);
+			if (requiredStates.some(requiredId => !this._state.isStateTypeActive?.(requiredId))) continue;
 			// The bigger budget is conditional on EVERY attack-action attack this turn
 			// coming from the same feature ("…if all the attacks are made with your chains").
 			if (![...used].every(id => id === sourceFeature)) continue;
@@ -4076,7 +4097,8 @@ class CharacterSheetCombat {
 		let best = null;
 		for (const allowance of allowances) {
 			if ((allowance.sourceFeature || "").toLowerCase() !== sourceFeature) continue;
-			if (allowance.requiresState && !this._state.isStateTypeActive?.(allowance.requiresState)) continue;
+			const requiredStates = allowance.requiresStates || (allowance.requiresState ? [allowance.requiresState] : []);
+			if (requiredStates.some(requiredId => !this._state.isStateTypeActive?.(requiredId))) continue;
 			const count = Number(allowance.count) || 0;
 			if (count > base) best = Math.max(best || 0, count);
 		}
@@ -6927,7 +6949,8 @@ class CharacterSheetCombat {
 			distance.max = String(calc.chainRange || 30);
 			distance.value = target.distance ?? "";
 			distance.className = "form-control input-xs ml-1";
-			distance.style.width = "5rem";
+			distance.style.width = "min(5rem, 100%)";
+			distance.style.maxWidth = "100%";
 			distance.style.minHeight = "44px";
 			distance.setAttribute("aria-label", `New distance for ${target.targetName} in feet`);
 			row.appendChild(distance);
@@ -6982,6 +7005,13 @@ class CharacterSheetCombat {
 					this._page.saveCharacter?.();
 				});
 				row.appendChild(repeat);
+			}
+			if (target.distance != null && Number(target.distance) > Number(calc.chainRange || 0)) {
+				const warning = document.createElement("span");
+				warning.className = "ve-small cs-combat-target-warning";
+				warning.setAttribute("role", "status");
+				warning.textContent = "Out of range — effect released";
+				row.appendChild(warning);
 			}
 			const escape = document.createElement("button");
 			escape.type = "button";

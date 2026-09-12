@@ -1811,10 +1811,12 @@ export class CharacterSheetPage {
 	 * proves the same controls a player uses persist and render the effect.
 	 */
 	async rollSpectralChainsTargetEffect (options: {
-		effect?: "grapple" | "restrain" | "shove" | "control-shove";
+		effect?: "target" | "grapple" | "restrain" | "shove" | "control-shove";
 		targetName?: string;
 		size?: string;
 		distance?: number;
+		finalDistance?: number;
+		shoveDirection?: string;
 	} = {}): Promise<any> {
 		// Rage is a resource-backed bonus-action state in the sheet. Spend the
 		// real resource first, then use the same state transition the resource
@@ -1830,9 +1832,12 @@ export class CharacterSheetPage {
 		const attack = await this.clickAttackRoll(/Spectral Chains/i);
 		if (!attack.clicked || attack.threwError) throw new Error(`Spectral Chains attack did not click: ${attack.errorMessage || "not found"}`);
 		await this.confirmPrompt("Hit");
-		const enumModal = this.page.locator(".ve-ui-modal__inner:visible, .ui-modal__inner:visible").last();
+		const needle = effect === "target" ? "Track target only" : effect === "restrain" ? "Chain Imprisonment" : effect === "control-shove" ? "Chain Control" : effect === "shove" ? "Shove" : "Grapple";
+		const enumModal = this.page.locator(".ve-ui-modal__inner:visible, .ui-modal__inner:visible")
+			.filter({has: this.page.locator("select option", {hasText: needle})})
+			.last();
 		const select = enumModal.locator("select").first();
-		const needle = effect === "restrain" ? "Chain Imprisonment" : effect === "control-shove" ? "Chain Control" : effect === "shove" ? "Shove" : "Grapple";
+		await enumModal.waitFor({state: "visible", timeout: 10000});
 		const value = await select.locator("option").evaluateAll((opts, text) => {
 			const option = opts.find((it: HTMLOptionElement) => it.textContent?.toLowerCase().includes(String(text).toLowerCase()));
 			return option?.value ?? null;
@@ -1841,11 +1846,17 @@ export class CharacterSheetPage {
 		await select.selectOption(value);
 		await enumModal.getByRole("button", {name: /ok|confirm|apply/i}).first().click();
 
-		const modal = this.page.locator(".ve-ui-modal__inner:visible, .ui-modal__inner:visible").last();
-		await modal.locator("[data-target-name]").fill(options.targetName || "Playwright target");
+		const targetName = this.page.locator("[data-target-name]").last();
+		await targetName.waitFor({state: "attached", timeout: 10000});
+		const modal = targetName.locator("xpath=ancestor::*[contains(@class, 'ui-modal__inner') or contains(@class, 've-ui-modal__inner')][1]");
+		await targetName.fill(options.targetName || "Playwright target");
 		await modal.locator("[data-target-size]").selectOption(options.size || "medium");
 		await modal.locator("[data-target-distance]").fill(String(options.distance ?? 10));
 		if (effect === "restrain") await modal.locator("[data-restraint-save]").fill("1");
+		if (effect === "control-shove") {
+			await modal.locator("[data-final-distance]").fill(String(options.finalDistance ?? ((options.distance ?? 10) + 10)));
+			await modal.locator("[data-shove-direction]").selectOption(options.shoveDirection || "away");
+		}
 		await modal.locator("[data-act=apply]").click();
 		await this.page.waitForTimeout(250);
 		const targets = await this.getChainedTargets();

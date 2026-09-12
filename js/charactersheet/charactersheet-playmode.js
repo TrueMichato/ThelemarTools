@@ -1233,7 +1233,8 @@ export class CharacterSheetPlayMode {
 		const card = this._makeCard(this._elActionsHub, "feature", "Chained Targets");
 		const lede = this._ce("div", "pm-card__lede ve-muted ve-small", card);
 		const occupied = this._state.getChainedTargetState?.().used ?? targets.filter(it => it.chainIndex != null).length;
-		lede.textContent = `${occupied}/${calc.chainCount || 0} chains occupied · reach ${calc.chainRange || 0} ft.`;
+		const movement = this._state.getChainedMovementState?.() || {};
+		lede.textContent = `${occupied}/${calc.chainCount || 0} chains occupied · reach ${calc.chainRange || 0} ft. · chain movement ${movement.remaining ?? 0}/${movement.allowance ?? 0} ft.${movement.doubled ? " (doubled)" : ""}`;
 		if (!targets.length) {
 			this._ce("div", "ve-muted ve-small", card).textContent = "No creatures chained. Use a target-aware rider after a Spectral Chains hit.";
 			return;
@@ -1269,10 +1270,14 @@ export class CharacterSheetPlayMode {
 			move.textContent = "Move";
 			move.style.minHeight = "44px";
 			move.setAttribute("aria-label", `Move ${target.targetName} within chain range`);
+			const doubleLabel = this._ce("label", "pm-chained-target__double", row);
+			doubleLabel.innerHTML = `<input type="checkbox" data-double-movement aria-label="Spend bonus action to double chain-only movement"> Double movement`;
 			this._makeClickable(move, `Move ${target.targetName} within chain range`, () => {
-				const result = this._state.moveChainedTarget(target.id, Number(distance.value));
+				const doubleMovement = !!doubleLabel.querySelector("[data-double-movement]")?.checked;
+				const result = this._state.moveChainedTarget(target.id, Number(distance.value), {doubleMovement});
 				if (!result.ok) JqueryUtil.doToast({type: "warning", content: `Cannot move target: ${result.reason || "invalid distance"}`});
 				else {
+					if (doubleMovement && result.bonusActionUsed) this._consumeActionType("bonus");
 					this._page._saveCurrentCharacter?.();
 					this.render();
 				}
@@ -1308,7 +1313,12 @@ export class CharacterSheetPlayMode {
 			escape.style.minHeight = "44px";
 			escape.setAttribute("aria-label", `Resolve escape for ${target.targetName}`);
 			this._makeClickable(escape, `Resolve escape for ${target.targetName}`, async () => {
-				const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({title: `${target.targetName} — Escape`, isMinHeight0: true});
+				const trigger = document.activeElement;
+				const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+					title: `${target.targetName} — Escape`,
+					isMinHeight0: true,
+					cbClose: () => csRestoreModalFocus(trigger),
+				});
 				modalInner.innerHTML = `<div class="cs-combat-target-effect" role="form" aria-label="Chained target escape">
 					<p class="ve-small ve-muted">Strength or Dexterity against DC ${this._state.getFeatureCalculations?.()?.chainGrappleDc || target.escapeDc}.</p>
 					<label class="ve-form-label">Escape ability <select class="form-control" data-escape-ability aria-label="Escape ability"><option value="str">Strength</option><option value="dex">Dexterity</option></select></label>

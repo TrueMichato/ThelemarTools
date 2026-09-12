@@ -129,4 +129,70 @@ describe("CharacterSheet target/effect lifecycle", () => {
 		expect(level14.moveChainedTarget(free.id, 30, {doubleMovement: true})).toMatchObject({ok: true, movementCost: 30, dragMultiplier: 1});
 		expect(level14.resolveChainedTargetTurn(free.id, 1, {repeat: true})).toMatchObject({ok: false});
 	});
+
+	it("requires the canonical TGTT subclass/source and both active chain states", () => {
+		const wrongSource = makeFury(6);
+		wrongSource.getClasses()[0].subclass.source = "OTHER";
+		expect(wrongSource.getFeatureCalculations().hasManifestChains).toBeFalsy();
+		expect(wrongSource.activateState("manifestChains")).toBeNull();
+
+		const state = makeFury(6);
+		state.deactivateState("rage");
+		expect(state.getFeatureGrantedAttacks()).toEqual([]);
+		expect(state.applyChainedTargetEffect({targetName: "No rage", distance: 5}).reason).toBe("chains-inactive");
+	});
+
+	it("persists target-only hits without consuming a chain and rejects unavailable riders", () => {
+		const state = makeFury(3);
+		const tracked = state.applyChainedTargetEffect({targetName: "Tracked", distance: 10, effect: "target"});
+		expect(tracked).toMatchObject({ok: true, grappled: false, restrained: false});
+		expect(state.getChainedTargetState().used).toBe(0);
+		expect(state.applyChainedTargetEffect({targetName: "Illegal", distance: 10, effect: "restrain"}).reason).toBe("effect-unavailable");
+	});
+
+	it("releases stale effects instead of clamping them and reconciles derived values/capacity", () => {
+		const state = makeFury(14);
+		const targets = [1, 2, 3, 4].map(i => state.createChainedTarget({targetName: `T${i}`, distance: 10}).target);
+		expect(state.getChainedTargetState().used).toBe(4);
+		state.getClasses()[0].level = 10;
+		state.reconcileTargetEffects();
+		expect(state.getChainedTargetState().used).toBe(2);
+		expect(state.getChainedTargets().filter(t => t.restrained).length).toBe(0);
+
+		const target = state.getChainedTargets()[0];
+		state.upsertTargetEffect({id: target.id, distance: 999});
+		state.reconcileTargetEffects();
+		expect(state.getChainedTargets().find(t => t.id === target.id)).toMatchObject({grappled: false, chainIndex: null});
+	});
+
+	it("uses one doubled movement pool across multiple moves and releases out-of-range moves", () => {
+		const state = makeFury(14);
+		const target = state.createChainedTarget({targetName: "Mover", distance: 0}).target;
+		expect(state.moveChainedTarget(target.id, 25, {doubleMovement: true})).toMatchObject({ok: true});
+		expect(state.moveChainedTarget(target.id, 30)).toMatchObject({ok: true});
+		const released = state.moveChainedTarget(target.id, 31);
+		expect(released).toMatchObject({ok: false, released: true, reason: "out-of-range-released"});
+		expect(state.getChainedTargets().find(t => t.id === target.id)).toMatchObject({grappled: false, chainIndex: null});
+	});
+
+	it("accepts and validates Chain Control's declared final position and direction", () => {
+		const state = makeFury(10);
+		expect(state.applyChainedTargetEffect({
+			targetName: "Control",
+			distance: 20,
+			effect: "control-shove",
+			riderId: "chains-control-shove",
+			shoveDistance: 10,
+			finalDistance: 15,
+			shoveDirection: "toward",
+		})).toMatchObject({ok: true, finalDistance: 15, shoveDirection: "toward"});
+		expect(state.applyChainedTargetEffect({
+			targetName: "Too far",
+			distance: 20,
+			effect: "control-shove",
+			riderId: "chains-control-shove",
+			finalDistance: 26,
+			shoveDirection: "away",
+		})).toMatchObject({ok: false, reason: "shove-out-of-range"});
+	});
 });
