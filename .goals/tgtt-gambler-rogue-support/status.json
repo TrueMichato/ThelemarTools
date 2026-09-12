@@ -1,7 +1,7 @@
 {
   "goal_id": "tgtt-gambler-rogue-support",
   "status": "building",
-  "iteration": 2,
+  "iteration": 3,
   "builder_model": "GPT:5.6-Luna",
   "inspector_model": "GPT:5.6-Sol",
   "initial_sha": "4a84b403c9f0c5e2e091673859e8f5d2585c492c",
@@ -16,6 +16,11 @@
       "iteration": 2,
       "verdict": "FAIL",
       "summary": "MEGA Playwright and repository gates fail; table effects, delayed/free cast handling, action economy, source gating, restored flows, and regression coverage remain incomplete."
+    },
+    {
+      "iteration": 3,
+      "verdict": "FAIL",
+      "summary": "Real browser probes expose broken result-49/result-61 casting, incomplete canonical effects, source-gating and restored-receipt defects, non-atomic fortune spending, weak regression coverage, and red repository gates."
     }
   ]
 }
