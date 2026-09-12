@@ -14317,6 +14317,15 @@ class CharacterSheetState {
 		return [
 			...this._getFeatureInitiativeBonuses().map(it => ({...it, sourceType: "feature"})),
 			...this.getMaterialInitiativeBonuses().map(it => ({...it, sourceType: "itemMaterial"})),
+			...(this._data.activeStates || [])
+				.filter(state => state.active)
+				.flatMap(state => (state.customEffects || [])
+					.filter(effect => effect.type === "bonus" && effect.target === "initiative")
+					.map(effect => ({
+						name: state.name || state.stateTypeId || "Active state",
+						value: Number(effect.value) || 0,
+						sourceType: "activeState",
+					}))),
 		];
 	}
 
@@ -15026,12 +15035,13 @@ class CharacterSheetState {
 			// ability: null / abilityLabel: "Rolled" plus saveDcFormula and
 			// attackBonusFormula). Any NEW consumer of this function must handle
 			// the rolled case explicitly rather than trusting this return value.
-			case "Gambler":
 			case "Architect of Ruin": return "cha";
 			// Order of the Profane Soul casts pact magic using its hemocraft ability
 			// (Intelligence or Wisdom, whichever the Blood Hunter chose at level 1).
 			case "Order of the Profane Soul": return this._getHemocraftAbility();
 		}
+
+		if (this._isGamblerClassEntry(cls)) return "cha";
 
 		// Prefer the ability stored on the class data (covers 2024 + homebrew).
 		if (cls.spellcastingAbility) return cls.spellcastingAbility;
@@ -15068,9 +15078,12 @@ class CharacterSheetState {
 		const keys = [spell.sourceClass, spell.sourceSubclass].filter(Boolean).map(s => s.toLowerCase());
 		if (keys.length) {
 			for (const cls of this._data.classes || []) {
+				const isGamblerKey = keys.includes("gambler");
+				if (isGamblerKey && !this._isGamblerClassEntry(cls)) continue;
 				const clsKeys = [cls.name, cls.subclass?.name].filter(Boolean).map(s => s.toLowerCase());
-				// Gambler spells are stamped sourceClass:"Gambler"; match the subclass.
-				if (cls.subclass?.name === "Gambler") clsKeys.push("gambler");
+				// Gambler spells are stamped sourceClass:"Gambler"; only the
+				// source-qualified TGTT subclass may claim that key.
+				if (this._isGamblerClassEntry(cls)) clsKeys.push("gambler");
 				if (clsKeys.some(k => keys.includes(k))) {
 					const ability = this.getSpellcastingAbilityForClass(cls);
 					if (ability) return ability;
@@ -15208,7 +15221,7 @@ class CharacterSheetState {
 		const subclassName = cls.subclass?.name;
 
 		// Gambler (TGTT Rogue subclass) — 1/3 caster using Warlock spell list with rolled prepared count
-		if (subclassName === "Gambler") {
+		if (this._isGamblerClassEntry(cls)) {
 			if (level < 3) return null;
 			const calcs = this.getFeatureCalculations();
 			const rolledMax = this.getGamblerPreparedCount();
@@ -16079,9 +16092,14 @@ class CharacterSheetState {
 	 * @returns {string[]}
 	 */
 	_getClassMatchKeys (cls) {
-		const keys = [cls.name, cls.subclass?.name].filter(Boolean).map(s => s.toLowerCase());
+		const keys = [cls.name].filter(Boolean).map(s => s.toLowerCase());
+		if (!this._isGamblerClassEntry(cls)) {
+			if (cls.subclass?.name) keys.push(cls.subclass.name.toLowerCase());
+		} else if (cls.subclass?.name) {
+			keys.push(cls.subclass.name.toLowerCase());
+		}
 		// Gambler spells are stamped sourceClass:"Gambler" regardless of the base class.
-		if (cls.subclass?.name === "Gambler") keys.push("gambler");
+		if (this._isGamblerClassEntry(cls)) keys.push("gambler");
 		return [...new Set(keys)];
 	}
 
@@ -18652,7 +18670,7 @@ class CharacterSheetState {
 		if (clearPrepared) {
 			// Clear prepared status from Gambler spells (not cantrips)
 			this._data.spellcasting.spellsKnown
-				.filter(s => s.sourceClass === "Gambler" || s.sourceSubclass === "Gambler")
+				.filter(s => this.isTgttGamblerSpell(s))
 				.forEach(s => { s.prepared = false; });
 		}
 	}
@@ -18673,7 +18691,7 @@ class CharacterSheetState {
 	 */
 	getGamblerCurrentPreparedCount () {
 		return this._data.spellcasting.spellsKnown
-			.filter(s => (s.sourceClass === "Gambler" || s.sourceSubclass === "Gambler") && s.prepared && s.level > 0)
+			.filter(s => this.isTgttGamblerSpell(s) && s.prepared && s.level > 0)
 			.length;
 	}
 
@@ -18852,6 +18870,29 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Put an Extra Luck/Master of Fortune table roll through the same durable
+	 * receipt lifecycle as a spell cast. This prevents the global last-roll modal
+	 * from losing a choice or effect application after save/load.
+	 */
+	createGamblerFortuneResolution (tableRoll, source = "fortune") {
+		if (!tableRoll) return null;
+		const resolution = {
+			resolutionId: CryptUtil.uid(),
+			spellId: null,
+			spellName: source,
+			fortuneSource: source,
+			slotLevel: 0,
+			tableRoll: MiscUtil.copyFast(tableRoll),
+			descriptor: tableRoll.needsChoice ? null : (CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[tableRoll.chosenRoll] || null),
+			slotTransaction: "none",
+			status: tableRoll.needsChoice ? "awaiting-choice" : "ready",
+			createdAt: Date.now(),
+		};
+		this._data.spellcasting.gamblerPendingCastResolutions.push(resolution);
+		return MiscUtil.copyFast(resolution);
+	}
+
+	/**
 	 * @param {string} resolutionId
 	 * @param {1|2} choice
 	 * @returns {object|null}
@@ -18916,10 +18957,18 @@ class CharacterSheetState {
 				if (descriptor.transaction === "freeSpell") {
 					resolution.freeSpell = {name: "Color Spray", source: "PHB", slotLevel: 1};
 				} else if (descriptor.transaction === "delayedCast") {
-					resolution.delayedCast = {rounds: this._rollGamblerRandomInt(4, "delayed-cast"), spellName: resolution.spellName};
+					resolution.delayedCast = {
+						rounds: this._rollGamblerRandomInt(4, "delayed-cast"),
+						spellName: resolution.spellName,
+						status: "unresolved",
+					};
+					// Keep the receipt durable until the player explicitly resumes
+					// it from the restored Gambling Table UI. A delayed result is
+					// never silently discarded by the normal cast cleanup path.
+					resolution.status = "delayed";
 				}
 			}
-			resolution.status = "applied";
+			if (resolution.status !== "delayed") resolution.status = "applied";
 			resolution.appliedAt = Date.now();
 			return MiscUtil.copyFast(resolution);
 		}
@@ -18928,9 +18977,14 @@ class CharacterSheetState {
 			if (descriptor.automation === "confirm") {
 				if (descriptor.transaction === "freeSpell") resolution.freeSpell = {name: "Color Spray", source: "PHB", slotLevel: 1};
 				if (descriptor.transaction === "delayedCast") {
-					resolution.delayedCast = {rounds: this._rollGamblerRandomInt(4, "delayed-cast"), spellName: resolution.spellName};
+					resolution.delayedCast = {
+						rounds: this._rollGamblerRandomInt(4, "delayed-cast"),
+						spellName: resolution.spellName,
+						status: "unresolved",
+					};
+					resolution.status = "delayed";
 				}
-				resolution.status = "applied";
+				if (resolution.status !== "delayed") resolution.status = "applied";
 				resolution.appliedAt = Date.now();
 				return MiscUtil.copyFast(resolution);
 			}
@@ -18965,6 +19019,24 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Resume a durable delayed Gambling Table result after save/load. This is
+	 * deliberately explicit: the receipt remains pending until the user chooses
+	 * to continue, then the normal commit/cleanup path may run.
+	 * @param {string} resolutionId
+	 * @returns {object|null}
+	 */
+	resumeGamblerDelayedCast (resolutionId) {
+		const resolution = (this._data.spellcasting.gamblerPendingCastResolutions || [])
+			.find(r => r.resolutionId === resolutionId);
+		if (!resolution?.delayedCast || resolution.status !== "delayed") return null;
+		resolution.delayedCast.status = "resumed";
+		resolution.delayedCast.resumedAt = Date.now();
+		resolution.status = "ready";
+		resolution.resumedAt = Date.now();
+		return MiscUtil.copyFast(resolution);
+	}
+
+	/**
 	 * Commit a cast receipt. Slot mutation belongs to the spell module, so this
 	 * method only validates/records the receipt and makes it idempotent.
 	 * @param {string} resolutionId
@@ -18974,7 +19046,7 @@ class CharacterSheetState {
 		const pending = this._data.spellcasting.gamblerPendingCastResolutions || [];
 		const resolution = pending.find(r => r.resolutionId === resolutionId);
 		if (!resolution) return (this._data.spellcasting.gamblerCastHistory || []).find(r => r.resolutionId === resolutionId) || null;
-		if (resolution.status === "awaiting-choice" || resolution.status === "awaiting-confirmation") return null;
+		if (resolution.status === "awaiting-choice" || resolution.status === "awaiting-confirmation" || resolution.status === "delayed") return null;
 		resolution.status = "committed";
 		resolution.committedAt = Date.now();
 		this._data.spellcasting.gamblerCastHistory.push(MiscUtil.copyFast(resolution));
@@ -19110,25 +19182,31 @@ class CharacterSheetState {
 			case "gamblerExtraLuck": {
 				if (!this.useExtraLuck({consumeBonusAction: true})) return fail;
 				const secondDie = this._rollGamblerRandomInt(20, "extra-luck");
+				const tableRoll = this.getGamblerLastTableRoll();
+				const receipt = this.createGamblerFortuneResolution(tableRoll, "Extra Luck");
 				return {
 					applied: true,
 					name: "Extra Luck",
 					naturalRoll: Math.max(natural, secondDie),
 					effectiveRoll: Math.max(effective, secondDie),
 					secondDie,
-					tableRoll: this.getGamblerLastTableRoll(),
+					tableRoll,
+					resolutionId: receipt?.resolutionId,
 					remaining: this.getExtraLuckUses()?.remaining ?? 0,
 				};
 			}
 			case "gamblerMasterOfFortune": {
 				if (natural !== 1) return fail;
 				if (!this.useMasterOfFortune()) return fail;
+				const tableRoll = this.getGamblerLastTableRoll();
+				const receipt = this.createGamblerFortuneResolution(tableRoll, "Master of Fortune");
 				return {
 					applied: true,
 					name: "Master of Fortune",
 					naturalRoll: 20,
 					effectiveRoll: 20,
-					tableRoll: this.getGamblerLastTableRoll(),
+					tableRoll,
+					resolutionId: receipt?.resolutionId,
 					remaining: this.getMasterOfFortuneUses()?.remaining ?? 0,
 				};
 			}
@@ -19140,11 +19218,14 @@ class CharacterSheetState {
 	 * Use Extra Luck (L9 feature) - grants advantage, triggers d100 roll.
 	 * @returns {boolean} True if successful, false if no uses remaining
 	 */
-	useExtraLuck ({consumeBonusAction = true} = {}) {
-		if (consumeBonusAction && !this.isBonusActionAvailable()) return false;
+	useExtraLuck () {
+		// Extra Luck is always a bonus-action feature. Do not accept a caller
+		// supplied bypass flag: Play Mode, interventions, and restored saves
+		// must all obey the same economy.
+		if (!this.isBonusActionAvailable()) return false;
 		const resource = this._getGamblerResourceUses("gamblerExtraLuck");
 		if (!resource) return false;
-		if (consumeBonusAction && !this.spendBonusAction()) return false;
+		if (!this.spendBonusAction()) return false;
 		if (!this._spendGamblerResource("gamblerExtraLuck")) return false;
 		// Trigger d100 roll on the Gambling Table
 		this.rollGamblingTable();
@@ -38911,14 +38992,41 @@ class CharacterSheetState {
 	/** @returns {object|null} The Rogue class entry whose subclass is the TGTT Gambler. */
 	_getGamblerClass () {
 		return (this._data.classes || []).find(cls => {
-			const sub = cls?.subclass;
-			if (!sub) return false;
-			const name = (sub.shortName || sub.name || "").toLowerCase();
-			return name === "gambler"
-				&& String(cls.source || "").toUpperCase() === "TGTT"
-				&& String(sub.source || "").toUpperCase() === "TGTT"
-				&& this.getSettings()?.enableTgtt !== false;
+			return this._isGamblerClassEntry(cls);
 		}) || null;
+	}
+
+	/**
+	 * Source-aware Gambler identity. A name-only subclass match is unsafe because
+	 * homebrew repositories commonly reuse the short name "Gambler".
+	 * @param {object|null} cls
+	 * @returns {boolean}
+	 */
+	_isGamblerClassEntry (cls) {
+		const sub = cls?.subclass;
+		if (!sub) return false;
+		const name = (sub.shortName || sub.name || "").toLowerCase();
+		return name === "gambler"
+			&& String(cls.name || "").toLowerCase() === "rogue"
+			&& String(cls.source || "").toUpperCase() === "TGTT"
+			&& String(sub.source || "").toUpperCase() === "TGTT"
+			&& this.getSettings()?.enableTgtt !== false;
+	}
+
+	/**
+	 * Source-aware check for a spell attributed to the TGTT Gambler.
+	 * @param {object|null} spell
+	 * @returns {boolean}
+	 */
+	isTgttGamblerSpell (spell) {
+		if (!spell) return false;
+		const sourceClass = String(spell.sourceClass || "").toLowerCase();
+		const sourceSubclass = String(spell.sourceSubclass || "").toLowerCase();
+		if (sourceClass !== "gambler" || (sourceSubclass && sourceSubclass !== "gambler")) return false;
+		// The calculation override is also used by cast-path unit probes, but in
+		// production it is only true for a source-qualified TGTT Gambler.
+		return this._getGamblerClass() != null
+			|| this.getFeatureCalculations?.().hasGamblerSpellcasting === true;
 	}
 
 	/**

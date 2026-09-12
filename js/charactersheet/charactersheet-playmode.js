@@ -191,7 +191,16 @@ export class CharacterSheetPlayMode {
 		this._state = page.getState();
 
 		// UI state (not persisted — resets on load)
-		this._actionEconomy = {action: true, bonus: true, reaction: true, movement: true};
+		const actionEconomy = {action: true, reaction: true, movement: true};
+		Object.defineProperty(actionEconomy, "bonus", {
+			enumerable: true,
+			get: () => this._state.isBonusActionAvailable?.() !== false,
+			set: value => {
+				if (value) this._state.resetBonusAction?.();
+				else this._state.spendBonusAction?.();
+			},
+		});
+		this._actionEconomy = actionEconomy;
 		this._expandedSections = {skills: false};
 		this._openDrawer = null; // "spells" | "gear" | "reference" | "notes" | "companions" | null
 		this._activityLog = []; // [{time, icon, text}]
@@ -1379,7 +1388,8 @@ export class CharacterSheetPlayMode {
 					}
 					const used = await this._page._inventory?._pInvokeItemPower?.(power.itemId, power.id);
 					if (!used) return;
-					if (["action", "bonus", "reaction"].includes(group.key)) this._actionEconomy[group.key] = false;
+					if (group.key === "bonus") this._state.spendBonusAction?.();
+					else if (["action", "reaction"].includes(group.key)) this._actionEconomy[group.key] = false;
 					this._logActivity("feature", `${power.kind === "spell" ? "Cast" : "Invoked"} ${power.name} from ${power.itemName}`);
 					this._renderActionsHub();
 				});
@@ -1487,11 +1497,16 @@ export class CharacterSheetPlayMode {
 		];
 
 		slots.forEach(slot => {
-			const avail = this._actionEconomy[slot.key];
+			const avail = slot.key === "bonus"
+				? this._state.isBonusActionAvailable?.() !== false
+				: this._actionEconomy[slot.key];
 			const el = this._ce("div", `pm-economy__slot pm-economy__slot--${avail ? "available" : "used"}`, row);
 			el.replaceChildren(this._icon(slot.icon), document.createTextNode(` ${slot.label}`));
 			this._makeClickable(el, `${avail ? "Use" : "Restore"} ${slot.label}`, () => {
-				this._actionEconomy[slot.key] = !this._actionEconomy[slot.key];
+				if (slot.key === "bonus") {
+					if (avail) this._state.spendBonusAction?.();
+					else this._state.resetBonusAction?.();
+				} else this._actionEconomy[slot.key] = !this._actionEconomy[slot.key];
 				this._renderActionEconomy();
 			});
 		});
@@ -1509,8 +1524,10 @@ export class CharacterSheetPlayMode {
 		const reset = this._ce("span", "pm-economy__reset", row);
 		this._setIconLabel(reset, "refresh", " Reset turn");
 		this._makeClickable(reset, "Reset turn (restore all actions)", () => {
-			this._actionEconomy = {action: true, bonus: true, reaction: true, movement: true};
 			this._state.resetBonusAction?.();
+			this._actionEconomy.action = true;
+			this._actionEconomy.reaction = true;
+			this._actionEconomy.movement = true;
 			this._renderActionEconomy();
 			this._logActivity("turn", "New turn started");
 		});

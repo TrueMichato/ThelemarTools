@@ -527,6 +527,17 @@ describe("TGTT Gambler Subclass", () => {
 			expect(lastRoll).not.toBeNull();
 		});
 
+		it("cannot bypass the bonus-action cost through a caller option", () => {
+			createExtraLuckGambler();
+			state.spendBonusAction();
+			const before = state.getExtraLuckUses().remaining;
+			expect(state.useExtraLuck({consumeBonusAction: false})).toBe(false);
+			expect(state.getExtraLuckUses().remaining).toBe(before);
+			state.resetBonusAction();
+			expect(state.useExtraLuck({consumeBonusAction: false})).toBe(true);
+			expect(state.isBonusActionAvailable()).toBe(false);
+		});
+
 		it("should roll twice on d100 table (choose result)", () => {
 			createMasterGambler();
 			// Force different rolls

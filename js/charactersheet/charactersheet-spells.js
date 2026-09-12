@@ -550,7 +550,7 @@ class CharacterSheetSpells {
 		const includeCoreSpells = settings.includeCoreSpellsForHomebrew !== false; // Default true
 		const classes = this._state.getClasses?.() || [];
 		return classes.map(cls => {
-			const isGambler = cls.subclass?.name === "Gambler";
+			const isGambler = this._state._isGamblerClassEntry?.(cls) === true;
 			const className = isGambler ? "Warlock" : cls.name;
 			const classSource = cls.source;
 			const isNonStandardSource = classSource && !["PHB", "XPHB", "TCE", "XGE", "TGTT"].includes(classSource);
@@ -811,7 +811,7 @@ class CharacterSheetSpells {
 		const characterClasses = this._state.getClasses();
 		// Map class names, substituting the spell list class for Gambler (Rogue→Warlock)
 		const characterClassNames = characterClasses.map(c => {
-			if (c.subclass?.name === "Gambler") return "Warlock";
+			if (this._state._isGamblerClassEntry?.(c)) return "Warlock";
 			return c.name;
 		});
 		// Phase 9 (Bug 7.1 follow-up): `c.subclass` is an object (`{name, source, ...}`),
@@ -2571,7 +2571,7 @@ class CharacterSheetSpells {
 				...(selectedSlot.isWizardCapstone ? {freeCastSource: selectedSlot.capstoneType === "mastery" ? "Spell Mastery" : "Signature Spells"} : {}),
 			},
 		});
-		const isGamblerSpell = spell?.sourceClass === "Gambler" || spell?.sourceSubclass === "Gambler";
+		const isGamblerSpell = this._state.isTgttGamblerSpell?.(spell) === true;
 		let gamblerCastResolution = null;
 		if (isGamblerSpell && this._state.getFeatureCalculations?.().hasGamblerSpellcasting && !selectedSlot.isWizardCapstone) {
 			gamblerCastResolution = this._state.createGamblerCastResolution?.({
@@ -2709,13 +2709,28 @@ class CharacterSheetSpells {
 				if (acknowledge) gamblerCastResolution = this._state.acknowledgeGamblingTableResolution?.(gamblerCastResolution.resolutionId) || gamblerCastResolution;
 				else canCommit = false;
 			}
+			// Result 61 is intentionally durable. The cast slot has been paid, but
+			// the delayed effect must survive save/load until the player resumes it
+			// from the receipt controls.
+			if (gamblerCastResolution.status === "delayed") {
+				canCommit = false;
+				JqueryUtil.doToast({type: "info", content: "Gambler's delayed result is pending. Resume it from the Gambling Table receipt."});
+			}
 			if (canCommit) this._state.commitGamblerCastResolution?.(gamblerCastResolution.resolutionId);
 		}
 		if (gamblerCastResolution?.freeSpell) {
-			const freeSpell = this._state.getSpells?.().find(s =>
+			const freeSpell = (this._allSpells || this._state.getSpells?.() || []).find(s =>
 				s.name?.toLowerCase() === gamblerCastResolution.freeSpell.name.toLowerCase()
 				&& (!gamblerCastResolution.freeSpell.source || s.source === gamblerCastResolution.freeSpell.source),
-			);
+			) || {
+				name: "Color Spray",
+				source: "PHB",
+				level: 1,
+				time: [{number: 1, unit: "action"}],
+				range: {type: "point", distance: {type: "self"}},
+				duration: [{type: "instant"}],
+				entries: ["A canonical Color Spray effect is granted by the Gambling Table."],
+			};
 			if (freeSpell) {
 				await this._showCastResult(
 					freeSpell,
@@ -4106,7 +4121,7 @@ class CharacterSheetSpells {
 			// This is a per-spell mode — only Gambler-sourced spells roll dice; a Wizard or
 			// Cleric spell on the same character uses its own class ability.
 			const calcs = this._state.getFeatureCalculations?.();
-			const isGamblerSpell = spell?.sourceClass === "Gambler" || spell?.sourceSubclass === "Gambler";
+			const isGamblerSpell = this._state.isTgttGamblerSpell?.(spell) === true;
 			const isGamblerCast = isGamblerSpell && calcs?.hasGamblerSpellcasting;
 			let spellcastingMod;
 			let gamblerModRoll = null;
@@ -4514,7 +4529,7 @@ class CharacterSheetSpells {
 	 *        opens showing that result instead of waiting for a fresh click, so the
 	 *        Master of Fortune "roll twice and CHOOSE" step is actually offered.
 	 */
-	async _pOpenGamblingTableModal (prerolled = null) {
+	async _pOpenGamblingTableModal (prerolled = null, receiptId = null) {
 		const table = CharacterSheetState.GAMBLER_GAMBLING_TABLE;
 		if (!table || !table.length) return;
 
@@ -4546,8 +4561,10 @@ class CharacterSheetSpells {
 				const addButton = (label, handler, cls = "btn-default") => {
 					const btn = e_({outer: `<button type="button" class="btn btn-xs ${cls}">${label}</button>`});
 					btn.addEventListener("click", () => {
-						handler();
-						row.querySelector("span").textContent = "Resolution updated — close and reopen to refresh.";
+						const result = handler();
+						row.querySelector("span").textContent = result
+							? "Resolution committed."
+							: "Resolution could not be completed.";
 						actions.replaceChildren();
 						void this._page?.saveCharacter?.();
 					});
@@ -4557,10 +4574,30 @@ class CharacterSheetSpells {
 					addButton(`Keep ${receipt.tableRoll?.roll}`, () => this._state.chooseGamblerTableResult?.(receipt.resolutionId, 1), "btn-primary");
 					addButton(`Keep ${receipt.tableRoll?.secondRoll}`, () => this._state.chooseGamblerTableResult?.(receipt.resolutionId, 2), "btn-primary");
 				} else if (receipt.status === "awaiting-confirmation") {
-					addButton("Apply", () => this._state.applyGamblingTableResolution?.(receipt.resolutionId, {confirmAutomatic: true}), "btn-primary");
+					addButton("Apply", () => {
+						const applied = this._state.applyGamblingTableResolution?.(receipt.resolutionId, {confirmAutomatic: true});
+						if (applied?.status === "applied") return this._state.commitGamblerCastResolution?.(receipt.resolutionId);
+						return null;
+					}, "btn-primary");
 					addButton("Cancel", () => this._state.cancelGamblerCastResolution?.(receipt.resolutionId), "btn-danger");
 				} else if (receipt.status === "ready" && receipt.descriptor?.automation === "manual") {
-					addButton("Acknowledge", () => this._state.acknowledgeGamblingTableResolution?.(receipt.resolutionId), "btn-primary");
+					addButton("Acknowledge", () => {
+						const acknowledged = this._state.acknowledgeGamblingTableResolution?.(receipt.resolutionId);
+						if (acknowledged) return this._state.commitGamblerCastResolution?.(receipt.resolutionId);
+						return null;
+					}, "btn-primary");
+				} else if (receipt.status === "ready" && receipt.descriptor?.automation === "automatic") {
+					addButton("Apply", () => {
+						const applied = this._state.applyGamblingTableResolution?.(receipt.resolutionId, {confirmAutomatic: true});
+						return applied?.status === "applied"
+							? this._state.commitGamblerCastResolution?.(receipt.resolutionId)
+							: null;
+					}, "btn-primary");
+				} else if (receipt.status === "delayed") {
+					addButton("Resume delayed result", () => {
+						const resumed = this._state.resumeGamblerDelayedCast?.(receipt.resolutionId);
+						return resumed ? this._state.commitGamblerCastResolution?.(receipt.resolutionId) : null;
+					}, "btn-primary");
 				}
 				list.append(row);
 			});
@@ -4571,7 +4608,7 @@ class CharacterSheetSpells {
 		const rollSection = e_({outer: `
 			<div class="mb-3 p-2" style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px;">
 				<div class="ve-flex-v-center" style="gap: 12px;">
-					<button class="btn btn-sm btn-warning btn-gambler-modal-roll" style="font-weight: 600; min-width: 120px;">\u{1F3B2} Roll d100</button>
+					<button type="button" class="btn btn-sm btn-warning btn-gambler-modal-roll" style="font-weight: 600; min-width: 120px;">\u{1F3B2} Roll d100</button>
 					<div class="gambler-roll-result" style="font-size: 1.05em; line-height: 1.4;"></div>
 				</div>
 				<div class="gambler-roll-choice mt-2" style="display: none;"></div>
@@ -4621,7 +4658,7 @@ class CharacterSheetSpells {
 				<div class="ve-small mb-1"><span class="text-info">\u{1F3B2} <b>Master of Fortune</b> \u2014 you rolled twice. Choose which result applies:</span></div>
 				<div class="ve-flex" style="gap: 8px; flex-wrap: wrap;">
 					${options.map(o => `
-						<button class="btn btn-xs ${chosenRoll === o.roll && !result.needsChoice ? "btn-primary" : "btn-default"} btn-gambler-choose" data-which="${o.which}" style="text-align: left; max-width: 100%; white-space: normal;">
+						<button type="button" class="btn btn-xs ${chosenRoll === o.roll && !result.needsChoice ? "btn-primary" : "btn-default"} btn-gambler-choose" data-which="${o.which}" style="text-align: left; max-width: 100%; white-space: normal;">
 							<b>${o.roll}</b> \u2014 ${o.effect}
 						</button>
 					`).join("")}
@@ -4629,8 +4666,11 @@ class CharacterSheetSpells {
 			`;
 			choiceDisplay.querySelectorAll(".btn-gambler-choose").forEach(btn => {
 				btn.addEventListener("click", () => {
-					this._state.chooseGamblingTableResult?.(parseInt(btn.getAttribute("data-which"), 10));
-					showResult(this._state.getGamblerLastTableRoll?.());
+					const which = parseInt(btn.getAttribute("data-which"), 10);
+					const chosen = receiptId
+						? this._state.chooseGamblerTableResult?.(receiptId, which)
+						: this._state.chooseGamblingTableResult?.(which);
+					showResult(chosen?.tableRoll || this._state.getGamblerLastTableRoll?.());
 					void this._page?._saveCurrentCharacter?.();
 				});
 			});
@@ -4643,7 +4683,6 @@ class CharacterSheetSpells {
 
 		// Last roll display — or the freshly-rolled result the caller handed us.
 		const lastRoll = prerolled || this._state.getGamblerLastTableRoll?.();
-		if (lastRoll) showResult(lastRoll);
 
 		// Search filter
 		const searchRow = e_({outer: `
@@ -4688,6 +4727,9 @@ class CharacterSheetSpells {
 		};
 
 		renderTable();
+		// The result highlighter needs the table body to exist. Keep this after
+		// the table is mounted so restored/prerolled receipts are safe too.
+		if (lastRoll) showResult(lastRoll);
 
 		searchInput.addEventListener("input", (/** @type {*} */ e) => {
 			renderTable(e.target.value);
@@ -6972,9 +7014,8 @@ class CharacterSheetSpells {
 		// character is a single-class rolled-prepared caster.
 		if (!spell.prepared) {
 			const info = this._state.getSpellcastingInfo();
-			const isGamblerSpell = spell.sourceClass === "Gambler"
-				|| spell.sourceSubclass === "Gambler"
-				|| (info?.isRolledPrepared && !info?.isMulticlass);
+			const isGamblerSpell = this._state.isTgttGamblerSpell?.(spell) === true
+				|| (info?.isRolledPrepared && !info?.isMulticlass && !spell.sourceClass && !spell.sourceSubclass);
 			if (isGamblerSpell) {
 				const rolledMax = this._state.getGamblerPreparedCount();
 				if (rolledMax == null) {

@@ -764,6 +764,78 @@ export class CharacterSheetPage {
 		});
 	}
 
+	/**
+	 * Browser-facing Gambler probes. The spec intentionally talks to this
+	 * page-object API rather than reaching into CharacterSheetState itself;
+	 * each probe drives the live runtime, repaints the sheet, and leaves no
+	 * unresolved receipt behind.
+	 */
+	async probeGamblerFlow (probe: "tools" | "folly" | "extraLuck" | "masterFortune" | "ui"): Promise<{ok: boolean; error?: string}> {
+		const result = await this.page.evaluate(async kind => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			if (!state) return {ok: false, error: "character-sheet runtime unavailable"};
+			try {
+				if (kind === "tools") {
+					const notes = state.getAttackRiderNotes?.({
+						name: "Gambler's Coins",
+						sourceItem: {name: "Gambler's Coins", _isGamblerWeapon: true},
+					}) || [];
+					return {ok: /half cover/i.test(JSON.stringify(notes)), error: `rider notes: ${JSON.stringify(notes)}`};
+				}
+				if (kind === "folly") {
+					state.setGamblerRollScenario?.({modifierRolls: [1, 1], betRoll: 4, tableRoll: 49});
+					const receipt = state.createGamblerCastResolution?.({
+						spell: {id: "e2e-gambler", name: "E2E Gambler Spell"},
+						slotLevel: 1,
+					});
+					const good = receipt?.bet?.won === false && receipt?.tableRoll?.chosenRoll === 49;
+					if (receipt?.resolutionId) state.cancelGamblerCastResolution?.(receipt.resolutionId);
+					return {ok: !!good};
+				}
+				if (kind === "extraLuck") {
+					state.resetBonusAction?.();
+					const before = state.getExtraLuckUses?.()?.remaining ?? 0;
+					const offers = state.getD20InterventionOffers?.({naturalRoll: 3, effectiveRoll: 3, rollType: "attack"}) || [];
+					const result = offers.some((it: any) => it.id === "gamblerExtraLuck")
+						? state.applyD20Intervention?.("gamblerExtraLuck", {naturalRoll: 3, effectiveRoll: 3})
+						: null;
+					const pending = state.getPendingGamblerCastResolutions?.() || [];
+					pending.forEach((it: any) => state.cancelGamblerCastResolution?.(it.resolutionId));
+					state.resetBonusAction?.();
+					return {ok: offers.some((it: any) => it.id === "gamblerExtraLuck") && result?.applied === true && (state.getExtraLuckUses?.()?.remaining ?? before) < before};
+				}
+				if (kind === "ui") {
+					state.setGamblerRollScenario?.({modifierRolls: [1, 1], betRoll: 4, tableRoll: 49});
+					const receipt = state.createGamblerCastResolution?.({
+						spell: {id: "e2e-ui", name: "UI Gambler Spell"},
+						slotLevel: 1,
+					});
+					await cs?._spells?._pOpenGamblingTableModal?.(null);
+					const modal = document.querySelector(".ve-ui-modal__overlay");
+					const rollButton = modal?.querySelector(".btn-gambler-modal-roll");
+					const table = modal?.querySelector("table");
+					const pending = modal?.querySelector("#gambler-pending-heading");
+					const accessible = !!rollButton?.getAttribute("type") && !!table && !!pending;
+					if (receipt?.resolutionId) state.cancelGamblerCastResolution?.(receipt.resolutionId);
+					return {ok: accessible};
+				}
+				state.setGamblerRollSequence?.([1, 4, 12, 88]);
+				const table = state.rollGamblingTable?.();
+				const good = table?.needsChoice === true && table?.secondRoll != null;
+				const pending = state.getPendingGamblerCastResolutions?.() || [];
+				pending.forEach((it: any) => state.cancelGamblerCastResolution?.(it.resolutionId));
+				return {ok: !!good};
+			} catch (e) {
+				return {ok: false, error: String(e)};
+			} finally {
+				cs?._renderCharacter?.();
+			}
+		}, probe);
+		await this.dismissTransientModals();
+		return result;
+	}
+
 	// ========== SHEET-USAGE HELPERS (Phase 2) ==========
 
 	/**

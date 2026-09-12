@@ -56,16 +56,22 @@ function createTableEffects (entries = []) {
 		10: {scope: "self", effectType: "condition", condition: "Blinded", duration: "1 round"},
 		13: {
 			scope: "self",
-			effectType: "modifier",
-			modifier: {type: "speed:all", value: -0.5, mode: "multiplier"},
+			effectType: "activeState",
+			stateId: "gamblerReduce",
+			stateName: "Gambler's Folly: Reduce",
+			effects: [
+				{type: "sizeChange", value: -1},
+				{type: "speedMultiplier", value: 0.5},
+			],
 			duration: "10 minutes",
 		},
 		20: {
 			scope: "self",
 			effectType: "activeState",
 			stateId: "gamblerEnlargedFeet",
-			stateName: "Gambler's Folly: Enlarged Feet",
+			stateName: "Gambler's Folly: Reduce (Enlarged Feet)",
 			effects: [
+				{type: "sizeChange", value: -1},
 				{type: "speedMultiplier", value: 0.5},
 				{type: "bonus", target: "initiative", value: -4},
 			],

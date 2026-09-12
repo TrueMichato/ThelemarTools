@@ -659,7 +659,7 @@ describe("Versatile Gambler (L13)", () => {
 			[5, "activeState"],
 			[9, "condition"],
 			[10, "condition"],
-			[13, "modifier"],
+			[13, "activeState"],
 			[20, "activeState"],
 			[22, "activeState"],
 			[25, "activeState"],
@@ -697,6 +697,31 @@ describe("Versatile Gambler (L13)", () => {
 			const applied = state.applyGamblingTableResolution(receipt.resolutionId, {confirmAutomatic: true});
 			expect(applied.status).toBe("applied");
 			expect(applied.freeSpell.name).toBe("Color Spray");
+		});
+
+		it("models Reduce and enlarged-feet results as executable movement states", () => {
+			const reduce = CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[13];
+			const feet = CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[20];
+			expect(reduce.effects).toEqual(expect.arrayContaining([
+				{type: "sizeChange", value: -1},
+				{type: "speedMultiplier", value: 0.5},
+			]));
+			expect(feet.effects).toEqual(expect.arrayContaining([
+				{type: "sizeChange", value: -1},
+				{type: "speedMultiplier", value: 0.5},
+				{type: "bonus", target: "initiative", value: -4},
+			]));
+		});
+
+		it("keeps delayed result 61 pending until an explicit resume", () => {
+			buildGambler(3);
+			state.setGamblerRollSource({nextInt: max => max === 100 ? 61 : max === 4 ? 4 : 1});
+			const receipt = state.createGamblerCastResolution({spell: {id: "delay-test", name: "Fire Bolt"}, slotLevel: 1});
+			const applied = state.applyGamblingTableResolution(receipt.resolutionId, {confirmAutomatic: true});
+			expect(applied.status).toBe("delayed");
+			expect(state.commitGamblerCastResolution(receipt.resolutionId)).toBeNull();
+			expect(state.resumeGamblerDelayedCast(receipt.resolutionId).status).toBe("ready");
+			expect(state.commitGamblerCastResolution(receipt.resolutionId).status).toBe("committed");
 		});
 	});
 

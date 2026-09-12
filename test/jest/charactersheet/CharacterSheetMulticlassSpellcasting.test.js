@@ -62,7 +62,7 @@ describe("getSpellcastingAbilityForClass", () => {
 	test("subclass casters override the base ability", () => {
 		expect(state.getSpellcastingAbilityForClass({name: "Fighter", subclass: {name: "Eldritch Knight"}})).toBe("int");
 		expect(state.getSpellcastingAbilityForClass({name: "Rogue", subclass: {name: "Arcane Trickster"}})).toBe("int");
-		expect(state.getSpellcastingAbilityForClass({name: "Rogue", subclass: {name: "Gambler"}})).toBe("cha");
+		expect(state.getSpellcastingAbilityForClass({name: "Rogue", source: "TGTT", subclass: {name: "Gambler", source: "TGTT"}})).toBe("cha");
 		expect(state.getSpellcastingAbilityForClass({name: "Illrigger", subclass: {name: "Architect of Ruin"}})).toBe("cha");
 	});
 	test("returns null for a non-caster", () => {

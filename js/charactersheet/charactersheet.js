@@ -15726,7 +15726,7 @@ class CharacterSheetPage {
 
 		// The Gambling Table roll may need a choice (Master of Fortune rolls twice), and
 		// the spend has to be persisted + repainted like any other resource expenditure.
-		if (result.tableRoll) void this._pResolveGamblingTableRoll(result.tableRoll);
+		if (result.tableRoll) void this._pResolveGamblingTableRoll(result.tableRoll, result.resolutionId);
 		this._renderResources?.();
 		void this._saveCurrentCharacter?.();
 
@@ -15756,9 +15756,9 @@ class CharacterSheetPage {
 	 * roll gets its "choose one" modal. Safe no-op when the spells module is absent.
 	 * @param {object} tableRoll
 	 */
-	async _pResolveGamblingTableRoll (tableRoll) {
+	async _pResolveGamblingTableRoll (tableRoll, resolutionId = null) {
 		try {
-			await this._spells?._pOpenGamblingTableModal?.(tableRoll);
+			await this._spells?._pOpenGamblingTableModal?.(tableRoll, resolutionId);
 		} catch (e) {
 			// eslint-disable-next-line no-console
 			console.error("[CharSheet] Gambling Table modal error", e);

@@ -831,6 +831,7 @@ export type EffectCheck = _EffectCommon & (
 		 */
 		isNull?: boolean;
 	}
+	| {kind: "gamblerProbe"; probe: "tools" | "folly" | "extraLuck" | "masterFortune" | "ui"}
 	| {kind: "proficiency"; proficiencyType: "armor" | "weapon"; includes: string}
 	| {kind: "featureUsesEqualAbilityMod"; feature: string; ability: AblKey; minimum?: number; recharge: "short" | "long"}
 	// `damageTypes` / `saveAbility` are optional so the same probe covers HEALING actions
@@ -1491,6 +1492,11 @@ async function _runPassiveOrRollEffect (
 			if (!e.ignoreResult && e.exact === undefined && e.min === undefined && e.contains === undefined && actual == null) {
 				throw new Error(`${label} is absent`);
 			}
+			return;
+		}
+		case "gamblerProbe": {
+			const result = await charSheet.probeGamblerFlow(e.probe);
+			if (!result?.ok) throw new Error(`Gambler ${e.probe} probe failed: ${result?.error || "unknown error"}`);
 			return;
 		}
 		case "proficiency": {
