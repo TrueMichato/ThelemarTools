@@ -1391,9 +1391,12 @@ class CharacterSheetCombat {
 		// "attack" — doing so would wrongly bubble a SPECIFIC effect (e.g. Reckless's
 		// "attack:melee:str") onto every roll, granting advantage to ranged attacks.
 		let stateMode;
+		const pendingAttackStates = (this._state.getPendingAttackRiders?.() || [])
+			.filter(rider => rider.qualifier !== "nextAttackAction" || !attack.isSpell);
 		const maneuverAdvantage = !!this._pendingBattleMasterAttackAdvantage;
 		const shadowTargetAdvantage = !!this._shadowKnightDarkTarget && !!attack.isManifestShadowWeapon;
-		const hasAdvantage = this._state.hasAdvantageFromStates?.(attackType) || maneuverAdvantage || shadowTargetAdvantage;
+		const pendingAttackAdvantage = pendingAttackStates.some(state => state.advantage);
+		const hasAdvantage = this._state.hasAdvantageFromStates?.(attackType) || maneuverAdvantage || shadowTargetAdvantage || pendingAttackAdvantage;
 		const resoluteWeaponDisadvantage = this._state.isStateTypeActive?.("resoluteStance") && !attack.isSpell;
 		const hasDisadvantage = this._state.hasDisadvantageFromStates?.(attackType) || resoluteWeaponDisadvantage;
 		if (hasAdvantage && !hasDisadvantage) stateMode = "advantage";
@@ -1544,7 +1547,23 @@ class CharacterSheetCombat {
 			}
 		}
 
-		// Consume "next attack only" states (e.g. Steady Aim grants advantage on ONE attack)
+		const activeStateDamageRiders = pendingAttackStates
+			.map(rider => ({
+				name: rider.source,
+				dice: rider.damageDice,
+				damageType: rider.damageType,
+			}))
+			.filter(rider => rider.dice);
+		if (activeStateDamageRiders.length) {
+			this._pendingActiveStateDamageRiders = {
+				attackId,
+				rollId: attackRollId,
+				riders: activeStateDamageRiders,
+			};
+		}
+		this._state.consumePendingAttackRiders?.({stateIds: pendingAttackStates.map(rider => rider.stateId)});
+
+		// Consume "next attack only" states (e.g. Steady Aim or Laughing Lunge).
 		this._consumeOnAttackStates();
 
 		// Generic post-attack extension point. Captured context is passed to each
@@ -2960,13 +2979,14 @@ class CharacterSheetCombat {
 		for (const state of activeStates) {
 			if (!state.active) continue;
 			const typeDef = CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId];
-			if (!typeDef?.consumeOnAttack) continue;
+			if (!typeDef?.consumeOnAttack && !state.consumeOnAttack) continue;
 
 			// Most consume-on-attack states only lose their advantage component (Steady Aim).
 			// States whose rules end on any attack (Shadow Sneak invisibility, the
 			// Improved Shadowcasting attack permission) deactivate completely.
-			const endsOnAttack = typeDef.endConditions?.some(condition => /make an attack|until.*attack/i.test(condition));
-			const remaining = (typeDef.effects || []).filter(e => e.type !== "advantage");
+			const endsOnAttack = state.consumeOnAttack
+				|| typeDef?.endConditions?.some(condition => /make an attack|until.*attack/i.test(condition));
+			const remaining = (typeDef?.effects || []).filter(e => e.type !== "advantage");
 			if (!endsOnAttack && remaining.length > 0) {
 				// Keep the state active but without advantage
 				this._state.updateActiveStateEffects?.(state.stateTypeId, remaining);
@@ -3223,6 +3243,16 @@ class CharacterSheetCombat {
 		let riderDamageTotal = 0;
 		const riderParts = [];
 		const usedRiderIds = [];
+		const pendingStateRiders = this._pendingActiveStateDamageRiders?.attackId === attackId
+			? this._pendingActiveStateDamageRiders.riders || []
+			: [];
+		for (const rider of pendingStateRiders) {
+			const riderRoll = rollTypedDamage(rider.dice, rider.damageType || weaponDamageType);
+			riderDamageTotal += riderRoll.total;
+			riderParts.push({name: rider.name, dice: rider.dice, total: riderRoll.total, type: rider.damageType || weaponDamageType});
+			riderRollsForAnim.push(riderRoll);
+		}
+		if (pendingStateRiders.length) this._pendingActiveStateDamageRiders = null;
 		// Active ammunition (Bug #3): resolved once so its flat bonus folds into the
 		// weapon-typed total and its dice ride the riderParts pipeline. Null = Regular.
 		const ammoForDamage = !attack.isSpell ? this._getSelectedAmmoForWeapon(attack.sourceItem?.id) : null;
@@ -7458,7 +7488,22 @@ class CharacterSheetCombat {
 			});
 		}
 
-		// (6) Standard actions — append universal rules options after the
+		// (6) Feature rules which replace a normal action cost.
+		for (const override of this._state.getActionEconomyOverrides?.() || []) {
+			const type = this._normalizeActionType(override.cost);
+			if (!["action", "bonus", "reaction"].includes(type)) continue;
+			push(type, {
+				kind: "feature",
+				id: `override:${override.activity}:${override.source}`,
+				name: override.activity,
+				source: override.source,
+				subtitle: override.targets ? `${override.source} · up to ${override.targets} targets` : override.source,
+				actionType: type,
+				entity: {name: override.activity, description: `${override.source}: use this as a ${type} action instead of ${override.normalCost || "its normal cost"}.`},
+			});
+		}
+
+		// (7) Standard actions — append universal rules options after the
 		// character-specific affordances already collected above.
 		for (const action of this._getStandardActionEconomyEntities()) {
 			for (const type of this._getStandardActionTypes(action)) {
@@ -7656,6 +7701,17 @@ class CharacterSheetCombat {
 
 		if (section) section.style.display = "";
 		container.innerHTML = "";
+
+		const movementOverrides = this._state.getMovementOverrides?.() || [];
+		if (movementOverrides.length) {
+			const movement = e_({tag: "div", clazz: "ve-small ve-muted mb-2"});
+			movement.textContent = movementOverrides.map(override => {
+				if (override.kind === "hostileSpacePermission") return `${override.source}: move through hostile creatures' spaces this turn`;
+				if (override.costFeet != null) return `${override.source}: ${override.activity} costs ${override.costFeet} ft.`;
+				return `${override.source}: ${override.activity}`;
+			}).join(" · ");
+			container.appendChild(movement);
+		}
 
 		const kindMeta = CharacterSheetCombat.ACTION_ECONOMY_KIND_META;
 		const columns = [
@@ -12113,6 +12169,7 @@ class CharacterSheetCombat {
 				this._sneakAttackEnabled = false;
 				this._sneakAttackHasAdjacentAlly = false;
 				this._lastAttackContext = null;
+				this._pendingActiveStateDamageRiders = null;
 				this._handOfHarmUsedThisTurn = false;
 				this._flankingEnabled = false;
 				this._resetTurnActionUsage();

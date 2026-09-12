@@ -2356,10 +2356,7 @@ class CharacterSheetFeatures {
 
 			// Use button - decrease current by 1
 			row.querySelector(".charsheet__resource-use-btn").addEventListener("click", () => {
-				if (resource.current > 0) {
-					this._state.setResourceCurrent(resource.id, resource.current - 1);
-					this._renderResources();
-				}
+				void this._page?._pUseResource?.(resource.id);
 			});
 
 			// Restore button - increase current by 1

@@ -468,69 +468,25 @@ class CharacterSheetQuickBuild {
 	}
 
 	_getOptionalFeatureGains (classData, classLevel, runningCounts, subclassData = null) {
-		const gains = [];
-
-		const classProgressions = classData.optionalfeatureProgression || [];
-		const classFeatureTypeSet = new Set(classProgressions.flatMap(p => p.featureType || []));
-		const progressions = [...classProgressions];
-
-		// Merge subclass-level progressions (Arcane Shot "AS", Maneuvers "MV:B", etc.),
-		// skipping CTM:* (handled elsewhere) and any type shared with a class-level
-		// progression (shared-count hazard, e.g. Champion "FS:F").
-		const subclassProgressions = subclassData?.optionalfeatureProgression || [];
-		for (const p of subclassProgressions) {
-			const types = p.featureType || [];
-			if (types.some(ft => ft.startsWith?.("CTM:"))) continue;
-			if (types.some(ft => classFeatureTypeSet.has(ft))) continue;
-			progressions.push(p);
-		}
-
-		if (!progressions.length) return gains;
-
-		progressions.forEach(optFeatProg => {
-			const featureTypes = optFeatProg.featureType || [];
-			const name = optFeatProg.name || featureTypes.map(ft => ft.replace(/:/g, " ")).join(", ");
-			const key = featureTypes.join("_");
-
-			let countAtLevel = 0;
-			if (Array.isArray(optFeatProg.progression)) {
-				countAtLevel = optFeatProg.progression[classLevel - 1] || 0;
-			} else if (typeof optFeatProg.progression === "object") {
-				// Object format: find highest key <= classLevel
-				let highest = 0;
-				for (const [lvlStr, count] of Object.entries(optFeatProg.progression)) {
-					const lvl = parseInt(lvlStr);
-					if (lvl <= classLevel && lvl > highest) {
-						highest = lvl;
-						countAtLevel = count;
-					}
-				}
-				if (highest === 0) countAtLevel = 0;
-			}
-
-			// How many do we already have from previous levels in quick build + existing?
-			const existingCount = runningCounts[key] || 0;
-			const existingFromCharacter = this._state.getFeatures().filter(f =>
-				f.featureType === "Optional Feature"
-				&& f.optionalFeatureTypes?.some(ft => featureTypes.some(pt => ft === pt || ft.startsWith(pt))),
-			).length;
-
-			const totalExisting = existingCount + existingFromCharacter;
-			const newCount = countAtLevel - totalExisting;
-
-			if (newCount > 0) {
-				gains.push({
-					featureTypes,
-					name,
-					currentCount: totalExisting,
-					totalCount: countAtLevel,
-					newCount,
-					required: optFeatProg.required || false,
+		const synthetic = [];
+		for (const [key, count] of Object.entries(runningCounts || {})) {
+			const featureTypes = key.split("_").filter(Boolean);
+			for (let i = 0; i < Number(count || 0); ++i) {
+				synthetic.push({
+					id: `quickbuild-${key}-${i}`,
+					name: `Quick Build ${key} ${i + 1}`,
+					featureType: "Optional Feature",
+					optionalFeatureTypes: featureTypes,
 				});
 			}
-		});
-
-		return gains;
+		}
+		const stateView = {
+			getFeatures: () => [...(this._state.getFeatures?.() || []), ...synthetic],
+		};
+		return CharacterSheetClassUtils
+			.getOptionalFeatureGains(classData, 0, classLevel, stateView, subclassData)
+			.filter(gain => gain.newCount > 0)
+			.map(gain => ({...gain, replacementCount: 0, replacementLabel: null}));
 	}
 
 	_getFeatureOptionsForLevel (features, level) {

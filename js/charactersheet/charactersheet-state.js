@@ -3969,12 +3969,9 @@ const FeatureEffectRegistry = {
 	 * fully expressed by their DC + save ability on the activation row.
 	 */
 	_registerJesterActEffects () {
-		// === DAZZLING DISGUISE — advantage on Deception for an hour after a 1-minute setup.
-		// Conditional (not a flat always-on advantage) because the disguise has to have
-		// been put on; the conditional-modifier prompt surfaces it per roll.
-		this.register("Dazzling Disguise", [
-			{type: "skillAdvantage", skill: "deception", conditional: "while your Dazzling Disguise is worn (1 hour)"},
-		]);
+		// Jester's Act effects are activation-scoped. Registering Dazzling Disguise here
+		// made its Deception advantage available merely for knowing the Act; the active
+		// custom state now carries that effect for the Act's one-hour duration instead.
 	},
 
 	/**
@@ -5703,6 +5700,7 @@ class CharacterSheetState {
 		// but did not fully reconstruct runtime feature state.
 		this._reapplyHistoryOptionalFeatures();
 		this._reapplyHistoryFeatureChoices();
+		this._migrateActiveStateRuntimeMetadata();
 		this._syncTunedMetamagicsToKnownOptions();
 
 		// Ensure unarmed strike exists for all characters
@@ -25348,32 +25346,34 @@ class CharacterSheetState {
 							// TGTT College of Jesters (Bard Subclass)
 							// =====================================================================
 							case "College of Jesters": {
-								// Combat Methods — auto-grant Comedic Jabs tradition
-								calculations.hasJesterCombatMethods = true;
-								if (!calculations._subclassGrantedTraditions) calculations._subclassGrantedTraditions = [];
-								calculations._subclassGrantedTraditions.push(
-									{tradition: "Comedic Jabs", source: "College of Jesters: Combat Methods"},
-								);
-
-								// Calculate Performance skill bonus for Act DC
-								// Performance = CHA mod + proficiency (+ expertise if chosen)
-								const performanceProfBonus = profBonus; // Guaranteed at level 3
-								const hasPerformanceExpertise = this.getSkillProficiency("performance") === 2;
-								const performanceExpertise = hasPerformanceExpertise ? profBonus : 0;
-								const performanceSkillBonus = chaMod + performanceProfBonus + performanceExpertise;
-
 								// Bonus Proficiencies (level 3) - Performance + choice of Acrobatics/Persuasion
 								calculations.hasJesterBonusProficiencies = true;
 
-								// Jester's Acts (level 3) - Acts Known: 3 at 3, 4 at 6, 5 at 14
+								// Jester's Acts use the subclass table and the shared Performance
+								// helper, so progression/DC cannot drift between calculation and UI APIs.
 								calculations.hasJesterActs = true;
-								calculations.jesterActsKnown = level >= 14 ? 5 : level >= 6 ? 4 : 3;
-
-								// Act DC = 8 + Performance skill bonus (unique formula!)
-								calculations.jesterActDcBase = 8 + performanceSkillBonus - exhaustionPenalty;
-
-								// Get known acts with their effects
+								calculations.jesterActsKnown = this.getJesterActsKnown();
+								calculations.jesterActDcBase = this.getJesterActBaseDc();
 								calculations.jesterActs = this.getJesterActs();
+								for (const act of calculations.jesterActs.filter(it => it.grantsSpell)) {
+									const fullSpell = this._resolveFullSpellData({name: act.grantsSpell, source: Parser.SRC_PHB});
+									const spellMeta = fullSpell ? this._deriveSpellEnrichment(fullSpell) : null;
+									calculations.resourceCastSpells = [
+										...(calculations.resourceCastSpells || []),
+										{
+											spell: spellMeta?.name || act.grantsSpell,
+											source: spellMeta?.source || Parser.SRC_PHB,
+											level: spellMeta?.level ?? null,
+											cost: act.bardicInspirationCost || 1,
+											resource: "Bardic Inspiration",
+											grantedBy: act.name,
+											castingTime: spellMeta?.castingTime || "action",
+											concentration: !!spellMeta?.concentration,
+											ignoresMaterialComponents: true,
+											note: "Cast without expending a spell slot or using material components.",
+										},
+									];
+								}
 
 								// Gifted Acrobat (level 6) - climbing speed, escape grapple bonus action
 								if (level >= 6) {
@@ -43489,6 +43489,53 @@ class CharacterSheetState {
 		(this._data.features || []).forEach(feature => this._remintFeatureUsesFromText(feature));
 	}
 
+	/**
+	 * Backfill runtime descriptors onto active custom states written before their
+	 * originating feature exposed data-driven attack/action/movement contracts.
+	 * Existing persisted values always win.
+	 */
+	_migrateActiveStateRuntimeMetadata () {
+		this._data.activeStates = (this._data.activeStates || []).filter(state => {
+			if (state?.stateTypeId !== "custom" || !state.sourceFeatureId) return true;
+			const feature = (this._data.features || []).find(it => it.id === state.sourceFeatureId);
+			if (!feature) {
+				const isOrphanedJesterAct = (this._optionalFeatureCatalog || []).some(it =>
+					it?.featureType?.includes?.("JA")
+					&& String(it.name || "").toLowerCase() === String(state.name || "").toLowerCase(),
+				);
+				return !isOrphanedJesterAct;
+			}
+			const activationInfo = CharacterSheetState.detectActivatableFeature(this._hydrateJesterActProse(feature));
+			if (!activationInfo) return true;
+
+			const hasRuntimeState = activationInfo.isToggle
+				|| activationInfo.effects?.length
+				|| activationInfo.pendingAttack
+				|| activationInfo.actionBenefit
+				|| activationInfo.movementOverride
+				|| activationInfo.addsConditions?.length;
+			if (activationInfo.isJesterAct && !hasRuntimeState) return false;
+
+			if (!state.duration && activationInfo.duration) state.duration = activationInfo.duration;
+			if (!state.customEffects?.length && activationInfo.effects?.length) state.customEffects = MiscUtil.copyFast(activationInfo.effects);
+			if (!state.pendingAttack && activationInfo.pendingAttack) state.pendingAttack = MiscUtil.copyFast(activationInfo.pendingAttack);
+			if (!state.actionBenefit && activationInfo.actionBenefit) state.actionBenefit = MiscUtil.copyFast(activationInfo.actionBenefit);
+			if (state.actionBenefit?.action && !state.actionBenefit.activity) {
+				const activity = String(state.actionBenefit.action);
+				state.actionBenefit = {
+					...state.actionBenefit,
+					activity: activity ? `${activity[0].toUpperCase()}${activity.slice(1)}` : "Activity",
+					normalCost: state.actionBenefit.normalCost || "action",
+					cost: state.actionBenefit.cost || "bonus",
+				};
+				delete state.actionBenefit.action;
+			}
+			if (!state.movementOverride && activationInfo.movementOverride) state.movementOverride = MiscUtil.copyFast(activationInfo.movementOverride);
+			if (state.consumeOnAttack == null && activationInfo.pendingAttack?.consume === "onAttack") state.consumeOnAttack = true;
+			return true;
+		});
+	}
+
 	_reapplyHistoryOptionalFeatures () {
 		const history = [...(this._data.levelHistory || [])].sort((a, b) => a.level - b.level);
 		if (!history.length) return;
@@ -44755,6 +44802,7 @@ class CharacterSheetState {
 		this._subclassFeatureCatalog = Array.isArray(subclassFeatures) ? subclassFeatures : [];
 		this._optionalFeatureCatalog = Array.isArray(optionalFeatures) ? optionalFeatures : [];
 		this._reapplyHistoryFeatureChoices();
+		this._migrateActiveStateRuntimeMetadata();
 	}
 
 	/**
@@ -46043,6 +46091,9 @@ class CharacterSheetState {
 			// Remove associated modifiers (by ID and by name for orphaned modifiers)
 			this.removeModifiersByFeature(feature.id);
 			this.removeModifiersByName(feature.name);
+			for (const state of (this._data.activeStates || []).filter(it => it.sourceFeatureId === feature.id)) {
+				this.removeActiveState(state.id);
+			}
 
 			// Cascade-remove any feats granted by this optional feature
 			// (e.g. Lessons of the First Ones invocation → its Origin Feat).
@@ -48321,6 +48372,101 @@ class CharacterSheetState {
 		if (bardLevel >= 14) return 5;
 		if (bardLevel >= 6) return 4;
 		return 3;
+	}
+
+	/**
+	 * Optional effects which may ride on one use of a named resource.
+	 * The trigger is derived from feature prose, while each feature's own use pool
+	 * remains an independent eligibility gate.
+	 * @param {string} resourceName
+	 * @returns {Array<object>}
+	 */
+	getResourceUseAugments (resourceName) {
+		const wanted = String(resourceName || "").toLowerCase();
+		if (!wanted) return [];
+		return this.getActivatableFeatures()
+			.filter(row => String(row.activationInfo?.resourceTrigger?.resourceName || "").toLowerCase() === wanted)
+			.map(row => {
+				const ownUses = row.feature?.uses || null;
+				const available = !ownUses || (ownUses.current ?? 0) > 0;
+				return {
+					...row,
+					available,
+					unavailableReason: available ? null : `${row.feature.name} has no uses remaining.`,
+					ownUses: ownUses ? {...ownUses} : null,
+				};
+			});
+	}
+
+	/**
+	 * Atomically spend a base resource use and, when applicable, one use from the
+	 * selected augment's own pool.
+	 * @param {string} resourceId
+	 * @param {object} [opts]
+	 * @param {string|null} [opts.augmentFeatureId]
+	 * @returns {{ok:boolean, error?:string, resourceRemaining?:number, augmentUsesRemaining?:number|null}}
+	 */
+	spendResourceUse (resourceId, {augmentFeatureId = null} = {}) {
+		const resource = (this.getResources() || []).find(it => it.id === resourceId);
+		if (!resource || resource.current <= 0) return {ok: false, error: `${resource?.name || "Resource"} has no uses remaining.`};
+
+		const augment = augmentFeatureId
+			? (this._data.features || []).find(it => it.id === augmentFeatureId)
+			: null;
+		if (augmentFeatureId && !augment) return {ok: false, error: "The selected resource rider is no longer available."};
+		if (augment?.uses && (augment.uses.current ?? 0) <= 0) {
+			return {ok: false, error: `${augment.name} has no uses remaining.`};
+		}
+
+		const resourceRemaining = resource.current - 1;
+		const augmentUsesRemaining = augment?.uses ? augment.uses.current - 1 : null;
+		this.setResourceCurrent(resource.id, resourceRemaining);
+		if (augment?.uses) this.setFeatureUses(augment.id, augmentUsesRemaining);
+		return {
+			ok: true,
+			resourceRemaining,
+			augmentUsesRemaining,
+		};
+	}
+
+	/**
+	 * Rules which replace a normal action cost with another cost.
+	 * @returns {Array<object>}
+	 */
+	getActionEconomyOverrides () {
+		const out = [];
+		if (this.hasJesterActs() && this.getClassLevel("Bard") >= 6) {
+			out.push({
+				activity: "Escape a Grapple",
+				normalCost: "action",
+				cost: "bonus",
+				source: "Gifted Acrobat",
+			});
+		}
+		for (const state of this.getActiveStates().filter(it => it.active && it.actionBenefit)) {
+			out.push({...state.actionBenefit, source: state.name, stateId: state.id});
+		}
+		return out;
+	}
+
+	/**
+	 * Active and standing movement-rule overrides.
+	 * @returns {Array<object>}
+	 */
+	getMovementOverrides () {
+		const out = [];
+		if (this.hasJesterActs() && this.getClassLevel("Bard") >= 6) {
+			out.push({
+				activity: "Stand from Prone",
+				normalCost: "half speed",
+				costFeet: 10,
+				source: "Gifted Acrobat",
+			});
+		}
+		for (const state of this.getActiveStates().filter(it => it.active && it.movementOverride)) {
+			out.push({...state.movementOverride, source: state.name, stateId: state.id});
+		}
+		return out;
 	}
 
 	/**
@@ -57841,6 +57987,55 @@ class CharacterSheetState {
 		};
 	}
 
+	/**
+	 * Build a generic "when you use resource X" trigger descriptor.
+	 * @param {string} text lower-cased, tag-stripped feature text
+	 * @returns {object|null}
+	 */
+	static _buildResourceTriggerInfo (text) {
+		if (!/\bwhen you use your bardic inspiration\b/i.test(text || "")) return null;
+		return {
+			resourceName: "Bardic Inspiration",
+			timing: "onUse",
+			consumesBaseUse: true,
+		};
+	}
+
+	/**
+	 * Describe an effect that resolves against creatures the sheet does not model.
+	 * The controller presents this contract without fabricating enemy rolls or state.
+	 */
+	static _buildTargetResolutionInfo (rawText, text, {saveAbility = null, range = null, condition = null, dcSource = null} = {}) {
+		if (!text) return null;
+		const hasExternalOutcome = saveAbility
+			|| /\b(?:impose disadvantage on the next attack roll|attacks? against (?:a|the) creature|unable to take reactions)\b/i.test(text);
+		if (!hasExternalOutcome) return null;
+
+		const summary = String(rawText || "")
+			.replace(/\{@(?:condition|skill|spell|damage|dice)\s+([^}|]+)(?:\|[^}]*)?\}/gi, "$1")
+			.replace(/<[^>]*>/g, " ")
+			.replace(/\s+/g, " ")
+			.trim();
+		const targets = /\beach hostile creature\b/i.test(text)
+			? "allHostile"
+			: /\bcreatures within\b/i.test(text)
+				? "allCreatures"
+				: /\bup to five creatures\b/i.test(text)
+					? "upToFive"
+					: "one";
+		const durationMatch = text.match(/\b(until (?:the )?(?:start|end) of (?:their|its|your) next turn|for the next hour|for 1 hour)\b/i);
+
+		return {
+			targets,
+			range,
+			saveAbility,
+			dcSource: saveAbility ? dcSource : null,
+			onFailure: condition ? [{type: "condition", condition}] : [],
+			duration: durationMatch ? durationMatch[1] : null,
+			summary,
+		};
+	}
+
 	static _buildJesterActActivationInfo (feature, rawText, text) {
 		if (!text) return null;
 
@@ -57901,15 +58096,52 @@ class CharacterSheetState {
 		const acBonusScale = /bonus to (?:your )?ac equal to your proficiency bonus/i.test(text)
 			? "proficiency"
 			: null;
+		const actionBenefit = /disengage from up to five creatures/i.test(text)
+			? {activity: "Disengage", normalCost: "action", cost: "bonus", targets: 5, duration: "rest of the turn"}
+			: null;
+		const movementOverride = /move through the space of hostile creatures/i.test(text)
+			? {kind: "hostileSpacePermission", duration: "rest of the turn"}
+			: null;
+		const damageMatch = /\{@damage\s+([^}|]+)/i.exec(rawText || "")
+			|| /\badditional\s+(\d+d\d+(?:\s*[+-]\s*\d+)?)\s+([a-z]+)\s+damage/i.exec(text);
+		const pendingAttack = activationAction === "attack"
+			? {
+				qualifier: "nextAttackAction",
+				advantage: /\bwith advantage\b/i.test(text),
+				damageDice: damageMatch?.[1]?.trim() || null,
+				damageType: damageMatch?.[2]?.toLowerCase() || (/psychic damage/i.test(text) ? "psychic" : null),
+				consume: "onAttack",
+			}
+			: null;
 
-		// Acts whose benefit persists past the instant of use are toggles, so the sheet can
-		// show "this is currently running" and apply the state's effects while it is.
+		const parsedEffects = this.parseEffectsFromDescription(rawText) || [];
+		const effects = [];
+		if (/advantage on charisma\s*\(\s*(?:\{@skill\s+)?deception(?:\|[^}]*)?\}?\s*\)\s+checks/i.test(text)) {
+			effects.push({type: "advantage", target: "skill:deception"});
+		}
+		if (acBonusScale) {
+			const acEffect = parsedEffects.find(it => it.type === "bonus" && it.target === "ac");
+			if (acEffect) effects.push(acEffect);
+		}
+
+		// Only SELF-facing benefits become active states. A target's condition may last
+		// until its next turn, but that duration belongs in targetResolution and must not
+		// create a fake state (or apply the target's penalties to the Jester).
 		let duration = null;
 		if (/for the next hour|for 1 hour/i.test(text)) duration = "1 hour";
 		else if (/until the start of your next turn/i.test(text)) duration = "until the start of your next turn";
 		else if (/for the rest of the turn/i.test(text)) duration = "rest of the turn";
-		const isToggle = duration != null;
-
+		else if (actionBenefit?.duration) duration = actionBenefit.duration;
+		else if (pendingAttack) duration = "until your next attack";
+		const hasSelfState = !!(effects.length || actionBenefit || movementOverride || pendingAttack);
+		const isToggle = hasSelfState;
+		const resourceTrigger = this._buildResourceTriggerInfo(text);
+		const targetResolution = this._buildTargetResolutionInfo(rawText, text, {
+			saveAbility,
+			range: rangeMatch ? Number(rangeMatch[1]) : null,
+			condition,
+			dcSource: "jesterAct",
+		});
 		return {
 			stateTypeId: "custom",
 			isCustom: true,
@@ -57928,9 +58160,14 @@ class CharacterSheetState {
 			condition,
 			grantsSpell,
 			acBonusScale,
+			targetResolution,
+			resourceTrigger,
+			pendingAttack,
+			actionBenefit,
+			movementOverride,
 			bardicInspirationCost: bardicInspirationCost || null,
 			usesBardicInspiration: !!bardicInspirationCost || usesInspirationProse,
-			effects: this.parseEffectsFromDescription(rawText) || [],
+			effects,
 		};
 	}
 
@@ -60252,6 +60489,15 @@ class CharacterSheetState {
 				const flat = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
 				const rolled = CharacterSheetState._buildRolledSaveDcInfo(flat);
 				if (rolled) activationInfo.rolledSaveDc = rolled;
+				if (!activationInfo.resourceTrigger) activationInfo.resourceTrigger = CharacterSheetState._buildResourceTriggerInfo(flat);
+				if (!activationInfo.targetResolution && (activationInfo.rolledSaveDc || activationInfo.isJesterAct)) {
+					activationInfo.targetResolution = CharacterSheetState._buildTargetResolutionInfo(rawText, flat, {
+						saveAbility: activationInfo.rolledSaveDc?.saveAbility || activationInfo.saveAbility || null,
+						range: activationInfo.rolledSaveDc?.range ?? activationInfo.range ?? null,
+						condition: activationInfo.condition || null,
+						dcSource: activationInfo.rolledSaveDc ? "rolledCheck" : "jesterAct",
+					});
+				}
 			}
 
 			activatables.push({
@@ -60923,6 +61169,11 @@ class CharacterSheetState {
 			if (options.placement !== undefined) existing.placement = options.placement;
 			if (options.weaponId !== undefined) existing.weaponId = options.weaponId;
 			if (options.weaponName !== undefined) existing.weaponName = options.weaponName;
+			if (options.consumeOnAttack !== undefined) existing.consumeOnAttack = options.consumeOnAttack;
+			if (options.pendingAttack !== undefined) existing.pendingAttack = options.pendingAttack;
+			if (options.actionBenefit !== undefined) existing.actionBenefit = options.actionBenefit;
+			if (options.movementOverride !== undefined) existing.movementOverride = options.movementOverride;
+			if (options.duration) existing.duration = options.duration;
 			// Re-parse duration on reactivation
 			const dur = options.duration || existing.duration;
 			existing.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(dur) : null;
@@ -60968,6 +61219,10 @@ class CharacterSheetState {
 			placement: options.placement || null,
 			weaponId: options.weaponId || null,
 			weaponName: options.weaponName || null,
+			consumeOnAttack: !!options.consumeOnAttack,
+			pendingAttack: options.pendingAttack || null,
+			actionBenefit: options.actionBenefit || null,
+			movementOverride: options.movementOverride || null,
 			// Self-imposed drawback conditions this state applies while active. Curated
 			// states declare them on their ACTIVE_STATE_TYPES entry; CUSTOM (generically
 			// detected) toggles carry them here instead, parsed from the feature text.
@@ -61010,6 +61265,28 @@ class CharacterSheetState {
 			return state.active;
 		}
 		return false;
+	}
+
+	/**
+	 * Pending one-shot attack riders carried by serialized active states.
+	 * @returns {Array<object>}
+	 */
+	getPendingAttackRiders () {
+		return this.getActiveStates()
+			.filter(state => state.active && state.pendingAttack?.qualifier === "nextAttackAction")
+			.map(state => ({stateId: state.id, source: state.name, ...state.pendingAttack}));
+	}
+
+	/**
+	 * Consume every pending rider attached to the attack being made.
+	 * @returns {Array<object>} the riders that were consumed
+	 */
+	consumePendingAttackRiders ({stateIds = null} = {}) {
+		const allowedIds = stateIds ? new Set(stateIds) : null;
+		const riders = this.getPendingAttackRiders()
+			.filter(rider => !allowedIds || allowedIds.has(rider.stateId));
+		for (const rider of riders) this.removeActiveState(rider.stateId);
+		return riders;
 	}
 
 	/**
@@ -61111,6 +61388,13 @@ class CharacterSheetState {
 			if (options.beastData !== undefined) existing.beastData = options.beastData;
 			if (options.zodiacForm !== undefined) existing.zodiacForm = options.zodiacForm;
 			if (options.placement !== undefined) existing.placement = options.placement;
+			if (options.weaponId !== undefined) existing.weaponId = options.weaponId;
+			if (options.weaponName !== undefined) existing.weaponName = options.weaponName;
+			if (options.consumeOnAttack !== undefined) existing.consumeOnAttack = options.consumeOnAttack;
+			if (options.pendingAttack !== undefined) existing.pendingAttack = options.pendingAttack;
+			if (options.actionBenefit !== undefined) existing.actionBenefit = options.actionBenefit;
+			if (options.movementOverride !== undefined) existing.movementOverride = options.movementOverride;
+			if (options.duration) existing.duration = options.duration;
 			// Re-parse duration on reactivation
 			const dur = options.duration || existing.duration;
 			existing.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(dur) : null;
@@ -61457,7 +61741,7 @@ class CharacterSheetState {
 		if (s === "instantaneous" || s === "instant") return 0;
 
 		// Turn-scoped durations
-		if (/\bthis turn\b/.test(s) || /\buntil the end of your turn\b/.test(s) || /\buntil end of turn\b/.test(s)) return 1;
+		if (/\bthis turn\b/.test(s) || /\b(?:for )?(?:the )?rest of (?:your|the) turn\b/.test(s) || /\buntil the end of your turn\b/.test(s) || /\buntil end of turn\b/.test(s)) return 1;
 		if (/\buntil (?:the )?start of (?:your )?next turn\b/.test(s)) return 1;
 		if (/\buntil (?:the )?end of (?:your )?next turn\b/.test(s)) return 1;
 
@@ -61519,7 +61803,7 @@ class CharacterSheetState {
 		for (const state of this._data.activeStates) {
 			// Fully deactivate transient "consume on attack" states (e.g. Steady Aim)
 			const typeDef = CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId];
-			if (state.active && typeDef?.consumeOnAttack) {
+			if (state.active && (state.consumeOnAttack || typeDef?.consumeOnAttack)) {
 				state.active = false;
 				delete state.customEffects;
 			}

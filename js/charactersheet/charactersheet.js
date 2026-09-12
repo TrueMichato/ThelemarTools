@@ -8089,13 +8089,7 @@ class CharacterSheetPage {
 			`});
 
 			row.querySelector(".charsheet__resource-use-btn").addEventListener("click", () => {
-				if (resource.current > 0) {
-					this._state.setResourceCurrent(resource.id, resource.current - 1);
-					this._saveCurrentCharacter();
-					this._renderResources();
-					this._renderActiveStates(); // Refresh active states to update Activate button states
-					if (this._features) this._features._renderResources();
-				}
+				void this._pUseResource(resource.id);
 			});
 
 			row.querySelector(".charsheet__resource-restore-btn").addEventListener("click", () => {
@@ -12637,17 +12631,157 @@ class CharacterSheetPage {
 	 */
 	async _pResolveRolledSaveDc (feature, spec) {
 		const result = await this._rollSkillCheck(spec.skill, spec.skillLabel, null, spec.ability);
-		if (!result) return false;
+		if (!result) return null;
 		const saveFull = typeof Parser !== "undefined" ? Parser.attAbvToFull(spec.saveAbility) : String(spec.saveAbility).toUpperCase();
 		const rangeTxt = spec.range ? ` within ${spec.range} ft.` : "";
 		JqueryUtil.doToast({
 			type: "info",
 			content: `${feature?.name || "Ability"}: creatures${rangeTxt} must make a DC ${result.total} ${saveFull} saving throw (your ${spec.skillLabel} check result).`,
 		});
+		return {dc: result.total, roll: result};
+	}
+
+	/**
+	 * Present an external target-resolution contract without pretending the sheet
+	 * owns the target's save roll or condition state.
+	 */
+	_pPresentTargetResolution (feature, spec, {dc = null} = {}) {
+		if (!spec) return;
+		const targetLabel = {
+			one: "One creature",
+			allHostile: "Each hostile creature",
+			allCreatures: "Each creature",
+			upToFive: "Up to five creatures",
+		}[spec.targets] || "Target";
+		const save = spec.saveAbility
+			? ` DC ${dc ?? "—"} ${Parser.attAbvToFull(spec.saveAbility)} save.`
+			: "";
+		const range = spec.range ? ` within ${spec.range} ft.` : "";
+		const summary = CharacterSheetClassUtils.escapeHtml(spec.summary || feature?.description || "");
+		JqueryUtil.doToast({
+			type: "info",
+			content: `<strong>${CharacterSheetClassUtils.escapeHtml(feature?.name || "Ability")}</strong>: ${targetLabel}${range}.${save}${summary ? `<div class="ve-small mt-1">${summary}</div>` : ""}`,
+		});
+	}
+
+	async _pChooseResourceUseAugment (resource, augments, {preselectedAugmentId = null} = {}) {
+		const {eleModalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: `Use ${resource.name}`,
+			isMinHeight0: true,
+			isUncappedHeight: true,
+		});
+		let selectedId = preselectedAugmentId || "";
+		let committed = false;
+		const options = [
+			{feature: null, label: `Plain ${resource.name}`, available: true, description: "Spend the resource without an additional rider."},
+			...augments.map(it => ({
+				...it,
+				label: it.feature.name,
+				description: it.activationInfo?.targetResolution?.summary || it.feature.description || "",
+			})),
+		];
+		const list = e_({outer: `<div class="ve-flex-col p-2" role="radiogroup" aria-label="${CharacterSheetClassUtils.escapeHtml(resource.name)} options"></div>`});
+		for (const option of options) {
+			const id = option.feature?.id || "";
+			const inputId = `resource-augment-${String(id || "plain").replace(/[^a-z0-9_-]/gi, "-")}`;
+			const checked = selectedId === id;
+			const row = e_({outer: `
+				<label class="ve-flex-v-center p-2 mb-2" style="gap:.5rem;border:1px solid var(--cs-border);border-radius:4px;${option.available === false ? "opacity:.6;" : ""}">
+					<input type="radio" name="resource-augment" id="${inputId}" value="${CharacterSheetClassUtils.escapeHtml(id)}" ${checked ? "checked" : ""} ${option.available === false ? "disabled" : ""}>
+					<span class="ve-flex-col">
+						<span class="bold">${CharacterSheetClassUtils.escapeHtml(option.label)}</span>
+						<span class="ve-small ve-muted">${CharacterSheetClassUtils.escapeHtml(option.unavailableReason || option.description || "")}</span>
+					</span>
+				</label>
+			`});
+			row.querySelector("input")?.addEventListener("change", () => { selectedId = id; });
+			list.append(row);
+		}
+		const controls = e_({outer: `<div class="ve-flex-v-center mt-2" style="gap:.5rem;">
+			<button class="ve-btn ve-btn-primary" type="button">Use 1 ${CharacterSheetClassUtils.escapeHtml(resource.name)}</button>
+			<button class="ve-btn ve-btn-default" type="button">Cancel</button>
+		</div>`});
+		controls.children[0].addEventListener("click", () => {
+			committed = true;
+			doClose(true);
+		});
+		controls.children[1].addEventListener("click", () => doClose(false));
+		eleModalInner.append(list, controls);
+		await pGetResolved();
+		if (!committed) return null;
+		return options.find(it => (it.feature?.id || "") === selectedId) || options[0];
+	}
+
+	/**
+	 * Canonical resource-use transaction. Resource panels and "when you use X"
+	 * features both route here so riders cannot double-spend or bypass their own uses.
+	 */
+	async _pUseResource (resourceId, {preselectedAugmentId = null} = {}) {
+		const resource = (this._state.getResources() || []).find(it => it.id === resourceId);
+		if (!resource || resource.current <= 0) {
+			JqueryUtil.doToast({type: "warning", content: `${resource?.name || "Resource"} has no uses remaining.`});
+			return false;
+		}
+
+		const augments = this._state.getResourceUseAugments?.(resource.name) || [];
+		const choice = augments.length
+			? await this._pChooseResourceUseAugment(resource, augments, {preselectedAugmentId})
+			: {feature: null};
+		if (!choice) return false;
+		if (choice.available === false) {
+			JqueryUtil.doToast({type: "warning", content: choice.unavailableReason});
+			return false;
+		}
+
+		let resolvedSaveDc = null;
+		if (choice.activationInfo?.rolledSaveDc) {
+			const resolved = await this._pResolveRolledSaveDc(choice.feature, choice.activationInfo.rolledSaveDc);
+			if (!resolved) return false;
+			resolvedSaveDc = resolved.dc;
+		}
+
+		const spent = this._state.spendResourceUse(resource.id, {augmentFeatureId: choice.feature?.id || null});
+		if (!spent.ok) {
+			JqueryUtil.doToast({type: "warning", content: spent.error});
+			return false;
+		}
+
+		if (choice.feature) {
+			const af = choice;
+			const stateType = af.activationInfo?.stateType || CharacterSheetState.ACTIVE_STATE_TYPES[af.stateTypeId];
+			await this._activateFeatureState(
+				af.feature,
+				af.stateTypeId,
+				stateType,
+				null,
+				0,
+				{
+					...af.activationInfo,
+					resourceTriggerResolved: true,
+					rolledSaveDc: null,
+					resolvedSaveDc,
+				},
+			);
+		} else {
+			await this._saveCurrentCharacter?.();
+			this._renderResources();
+			this._renderActiveStates();
+			this._features?._renderResources?.();
+		}
 		return true;
 	}
 
 	async _activateFeatureState (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
+		if (activationInfo?.resourceTrigger && !activationInfo.resourceTriggerResolved) {
+			const triggerResource = (this._state.getResources() || []).find(it =>
+				String(it.name || "").toLowerCase() === String(activationInfo.resourceTrigger.resourceName || "").toLowerCase());
+			if (!triggerResource) {
+				JqueryUtil.doToast({type: "warning", content: `${activationInfo.resourceTrigger.resourceName} is unavailable.`});
+				return;
+			}
+			await this._pUseResource(triggerResource.id, {preselectedAugmentId: feature.id});
+			return;
+		}
 		let variableSpend = null;
 		if (stateType?.variablePointSpend) {
 			const calculations = this._state.getFeatureCalculations();
@@ -12855,9 +12989,11 @@ class CharacterSheetPage {
 		// result"). Rolled BEFORE any resource is deducted, so cancelling the
 		// roll costs nothing. The sheet reports the resulting DC rather than
 		// silently applying a static one that the feature never had.
+		let resolvedSaveDc = activationInfo?.resolvedSaveDc ?? null;
 		if (activationInfo?.rolledSaveDc) {
-			const proceed = await this._pResolveRolledSaveDc(feature, activationInfo.rolledSaveDc);
-			if (!proceed) return;
+			const resolved = await this._pResolveRolledSaveDc(feature, activationInfo.rolledSaveDc);
+			if (!resolved) return;
+			resolvedSaveDc = resolved.dc;
 		}
 
 		// Deduct resource cost if applicable
@@ -12896,6 +13032,10 @@ class CharacterSheetPage {
 		}
 
 		const interactionMode = activationInfo?.interactionMode || (activationInfo?.isToggle ? "toggle" : "limited");
+		if (activationInfo?.targetResolution) {
+			const dc = resolvedSaveDc ?? (activationInfo.targetResolution.dcSource === "jesterAct" ? activationInfo.actDc : null);
+			this._pPresentTargetResolution(feature, activationInfo.targetResolution, {dc});
+		}
 
 		// Passive features should not create active states.
 		if (interactionMode === "passive") {
@@ -12918,17 +13058,28 @@ class CharacterSheetPage {
 			? (metadataEffects?.length ? metadataEffects : CharacterSheetState.parseEffectsFromDescription(feature.description))
 			: null;
 
-		// Limited/trigger/instant abilities consume resources and may apply one-off effects,
-		// but should not persist as toggle states.
+		// Limited/trigger/instant abilities consume resources and may apply one-off effects.
+		// Most resolve immediately, but some publish a short-lived runtime contract (for
+		// example, a next-attack rider or an until-end-of-turn movement/action benefit).
 		if (interactionMode === "limited" || interactionMode === "trigger" || interactionMode === "instant") {
-			if (parsedEffects?.length) {
+			const hasRuntimeState = parsedEffects?.length
+				|| activationInfo?.pendingAttack
+				|| activationInfo?.actionBenefit
+				|| activationInfo?.movementOverride
+				|| activationInfo?.addsConditions?.length;
+			if (hasRuntimeState) {
 				this._state.addActiveState("custom", {
 					name: feature.name,
 					icon: "⚡",
 					sourceFeatureId: feature.id,
 					description: feature.description,
-					customEffects: parsedEffects,
+					customEffects: parsedEffects?.length ? parsedEffects : null,
+					addsConditions: activationInfo?.addsConditions || null,
 					duration: activationInfo?.duration || "Instant",
+					consumeOnAttack: activationInfo?.pendingAttack?.consume === "onAttack",
+					pendingAttack: activationInfo?.pendingAttack || null,
+					actionBenefit: activationInfo?.actionBenefit || null,
+					movementOverride: activationInfo?.movementOverride || null,
 				});
 			}
 
@@ -12949,6 +13100,11 @@ class CharacterSheetPage {
 				description: feature.description,
 				customEffects: parsedEffects?.length > 0 ? parsedEffects : null,
 				addsConditions: activationInfo?.addsConditions || null,
+				duration: activationInfo?.duration || null,
+				consumeOnAttack: activationInfo?.pendingAttack?.consume === "onAttack",
+				pendingAttack: activationInfo?.pendingAttack || null,
+				actionBenefit: activationInfo?.actionBenefit || null,
+				movementOverride: activationInfo?.movementOverride || null,
 			});
 		} else {
 			// For known state types, pass feature info but only use parsed effects for generic types
@@ -12957,6 +13113,7 @@ class CharacterSheetPage {
 				resourceId: resource?.id,
 				name: feature.name,
 				description: feature.description,
+				duration: activationInfo?.duration || stateType?.duration || null,
 				// Only use parsed effects for generic state types (like combatStance)
 				// Non-generic types (like recklessAttack, rage) use their predefined effects
 				customEffects: weaponScopedEffects || (shouldParseEffects && parsedEffects?.length > 0 ? parsedEffects : null),
