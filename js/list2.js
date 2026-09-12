@@ -1,4 +1,8 @@
 import {List2SyntaxParser} from "./list2/list2-syntaxparser.js";
+import {ListVirtualRenderer} from "./list2/list2-virtual.js";
+import {ListPageConfig} from "./list2/list2-page-config.js";
+
+globalThis.ListPageConfig = ListPageConfig;
 
 class _ListHelpers {
 	static getSearchText (text) {
@@ -29,14 +33,18 @@ export class ListItem {
 
 	/**
 	 * @param ix External ID information (e.g. the location of the entry this ListItem represents in a list of entries)
-	 * @param ele An element.
+	 * @param ele An element, or a factory which creates a fresh element when needed.
 	 * @param name A name for this item.
 	 * @param values A dictionary of indexed values for this item.
 	 * @param [data] An optional dictionary of additional data to store with the item (not indexed).
 	 */
 	constructor (ix, ele, name, values, data) {
 		this.ix = ix;
-		this.ele = ele;
+		this._fnGetEle = typeof ele === "function" ? ele : null;
+		this._ele = this._fnGetEle ? null : ele;
+		this._elementInitializers = [];
+		this._elementRenderHooks = [];
+		this.onElementCreated = null;
 		this.name = name;
 		this.values = values || {};
 		this.data = data || {};
@@ -45,6 +53,43 @@ export class ListItem {
 		this.mutRegenSearchText();
 
 		this._isSelected = false;
+	}
+
+	get ele () {
+		if (this._ele || !this._fnGetEle) return this._ele;
+		const ele = this._fnGetEle();
+		if (!ele?.classList) throw new Error(`Element factory for "${this.name}" did not return an element.`);
+		this._ele = ele;
+		if (this._isSelected) ele.classList.add("list-multi-selected");
+		this._elementInitializers.forEach(fn => fn(ele));
+		this.onElementCreated?.(this);
+		return ele;
+	}
+
+	set ele (ele) {
+		this._ele = ele;
+		this._fnGetEle = null;
+	}
+
+	peekEle () { return this._ele; }
+
+	addElementInitializer (fn) {
+		this._elementInitializers.push(fn);
+		if (this._ele) fn(this._ele);
+	}
+
+	addElementRenderHook (fn) {
+		this._elementRenderHooks.push(fn);
+	}
+
+	runElementRenderHooks () {
+		this._elementRenderHooks.forEach(fn => fn(this.ele));
+	}
+
+	disposeElement () {
+		if (!this._fnGetEle) return;
+		this._ele?.remove();
+		this._ele = null;
 	}
 
 	mutRegenSearchText () {
@@ -61,8 +106,8 @@ export class ListItem {
 		if (this._isSelected === val) return;
 		this._isSelected = val;
 
-		if (this._isSelected) this.ele.classList.add("list-multi-selected");
-		else this.ele.classList.remove("list-multi-selected");
+		if (this._isSelected) this._ele?.classList.add("list-multi-selected");
+		else this._ele?.classList.remove("list-multi-selected");
 	}
 
 	get isSelected () { return this._isSelected; }
@@ -120,6 +165,7 @@ export class List {
 	 * @param [opts.syntax] A dictionary of search syntax prefixes, each with an item "to display" checker function.
 	 * @param [opts.isFuzzy]
 	 * @param [opts.isSkipSearchKeybindingEnter]
+	 * @param [opts.isVirtual] Enable measured windowing for compatible reference lists.
 	 * @param {array} [opts.helpText]
 	 */
 	constructor (opts) {
@@ -158,10 +204,22 @@ export class List {
 		this._lastSelection = null;
 		this._isMultiSelection = false;
 		// endregion
+
+		this._virtualRenderer = null;
+		this.renderingUnsupportedReason = null;
+		if (opts.isVirtual) {
+			if (typeof ResizeObserver === "undefined") {
+				this.renderingUnsupportedReason = "This browser does not support ResizeObserver. All list rows will be rendered.";
+				// eslint-disable-next-line no-console
+				console.warn(this.renderingUnsupportedReason);
+			} else this._virtualRenderer = new ListVirtualRenderer({list: this, wrpList: this._wrpList});
+		}
 	}
 
 	get items () { return this._items; }
 	get visibleItems () { return this._sortedItems; }
+	get renderedItems () { return this._virtualRenderer?.renderedItems || this._sortedItems; }
+	get isVirtualRendering () { return !!this._virtualRenderer?.isVirtual; }
 	get sortBy () { return this._sortBy; }
 	get sortDir () { return this._sortDir; }
 	set nextList (list) { this._nextList = list; }
@@ -181,6 +239,31 @@ export class List {
 
 	setScrollWrpTop (val) {
 		this._wrpList.scrollTop = val;
+		this._virtualRenderer?.refresh();
+	}
+
+	scrollToItem (item, opts = {}) {
+		if (this._virtualRenderer) return this._virtualRenderer.scrollToItem(item, opts);
+		if (!this.visibleItems.includes(item)) return false;
+		item.ele.scrollIntoView({block: opts.align === "start" ? "start" : "nearest"});
+		if (opts.isFocus) item.ele.querySelector("a[href], button, [tabindex]")?.focus({preventScroll: true});
+		return true;
+	}
+
+	setRenderingMode (opts) {
+		this._virtualRenderer?.setRenderingMode(opts);
+	}
+
+	refreshRenderedItems () {
+		if (this._virtualRenderer) return this._virtualRenderer.refresh();
+		this._sortedItems.forEach(item => item.runElementRenderHooks?.());
+		this._trigger("rendered");
+	}
+
+	destroy () {
+		this._virtualRenderer?.destroy();
+		this._items.forEach(item => item.onElementCreated = null);
+		this._eventHandlers = {};
 	}
 
 	init ({isLazySearch = false} = {}) {
@@ -248,8 +331,10 @@ export class List {
 
 		evt._List__isHandled = true;
 
+		this.scrollToItem(firstVisibleItem);
 		veE(firstVisibleItem.ele).vee.trigger("click");
-		if (firstVisibleItem.data.hash) window.location.hash = firstVisibleItem.data.hash;
+		const hash = firstVisibleItem.data.hashCurr ?? firstVisibleItem.data.hash;
+		if (hash) window.location.hash = hash;
 	}
 
 	_initFuzzySearch () {
@@ -470,11 +555,21 @@ export class List {
 	}
 
 	_doRender () {
+		if (this._virtualRenderer) {
+			this._virtualRenderer.update(this._sortedItems);
+			this._isDirty = false;
+			this._trigger("updated");
+			return;
+		}
 		const len = this._sortedItems.length;
 
 		this._wrpList.innerHTML = "";
 		const frag = document.createDocumentFragment();
-		for (let i = 0; i < len; ++i) frag.appendChild(this._sortedItems[i].ele);
+		for (let i = 0; i < len; ++i) {
+			const item = this._sortedItems[i];
+			item.runElementRenderHooks?.();
+			frag.appendChild(item.ele);
+		}
 		this._wrpList.appendChild(frag);
 
 		this._isDirty = false;
@@ -515,6 +610,10 @@ export class List {
 	addItem (listItem) {
 		this._isDirty = true;
 		this._items.push(listItem);
+		if (this._virtualRenderer) {
+			listItem.onElementCreated = item => this._virtualRenderer.onMaterialize(item);
+			if (listItem.peekEle()) this._virtualRenderer.onMaterialize(listItem);
+		}
 
 		if (this._isFuzzy) this._fuzzySearch.addDoc({ix: listItem.ix, s: listItem.searchText});
 	}
@@ -530,6 +629,10 @@ export class List {
 
 		this._isDirty = true;
 		const removed = this._items.splice(ixItem, 1);
+		if (this._virtualRenderer) {
+			this._virtualRenderer.removeItem(removed[0]);
+			removed[0].onElementCreated = null;
+		}
 
 		if (this._isFuzzy) this._fuzzySearch.removeDocByRef(ix);
 
@@ -552,12 +655,24 @@ export class List {
 
 		this._isDirty = true;
 		this._items = itemsNxt;
+		if (this._virtualRenderer) {
+			itemsToRemove.forEach(item => {
+				this._virtualRenderer.removeItem(item);
+				item.onElementCreated = null;
+			});
+		}
 
 		if (this._isFuzzy) itemsToRemove.forEach(li => this._fuzzySearch.removeDocByRef(li.ix));
 	}
 
 	removeAllItems () {
 		this._isDirty = true;
+		if (this._virtualRenderer) {
+			this._items.forEach(item => {
+				this._virtualRenderer.removeItem(item);
+				item.onElementCreated = null;
+			});
+		}
 		this._items = [];
 		if (this._isFuzzy) this._initFuzzySearch();
 	}

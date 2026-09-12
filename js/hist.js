@@ -44,6 +44,7 @@ class Hist {
 				else {
 					this.lastLoadedId = listItem.ix;
 					this._pLoadHash(listItem.ix);
+					if (this._listPage.isVirtualListPage) this._listPage._initList_scrollToItem();
 					document.title = `${listItem.name ? `${listItem.name} - ` : ""}5etools`;
 				}
 			}
@@ -104,6 +105,12 @@ class Hist {
 		}
 	}
 
+	static getListItemHash (listItem) {
+		return listItem.data.hashCurr ??
+			listItem.data.hash ??
+			listItem.ele?.querySelector("a[href]")?.getAttribute("href")?.replace(/^#/, "");
+	}
+
 	static _freshLoad () {
 		// Wait for any unknown hash handling to resolve. This avoids the case where an async homebrew load
 		//   fails to reload the page, as the hash was over-eagerly reset while the load took place.
@@ -111,8 +118,12 @@ class Hist {
 			.then(() => {
 				// defer this, in case the list needs to filter first
 				setTimeout(() => {
-					const goTo = veEs("#listcontainer").vee.findAll(".list a")[0]?.vee.attr("href");
-					if (!goTo) return;
+					const list = this._listPage.primaryLists.find(it => it.visibleItems.length);
+					const item = list?.visibleItems[0];
+					if (!item) return;
+					const hash = this.getListItemHash(item);
+					if (!hash) return;
+					const goTo = hash.startsWith("#") ? hash : `#${hash}`;
 
 					const parts = location.hash.split(HASH_PART_SEP);
 					const fullHash = `${goTo}${parts.length > 1 ? `${HASH_PART_SEP}${parts.slice(1).join(HASH_PART_SEP)}` : ""}`;

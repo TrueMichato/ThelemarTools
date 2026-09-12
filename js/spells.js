@@ -335,43 +335,41 @@ class SpellsPage extends ListPageMultiSource {
 		const concentration = spell._isConc ? "×" : "";
 		const range = Parser.spRangeToFull(spell.range, {isDisplaySelfArea: true});
 
-		const eleLi = veE({
-			tag: "div",
-			clazz: `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`,
-			click: (evt) => this._list.doSelect(listItem, evt),
-			contextmenu: (evt) => this._openContextMenu(evt, this._list, listItem),
-			children: [
-				veE({
-					tag: "a",
-					href: `#${hash}`,
-					clazz: "ve-lst__row-border ve-lst__row-inner",
-					children: [
-						veE({tag: "span", clazz: `ve-bold ve-col-2-9 ve-pl-0 ve-pr-1`, txt: spell.name}),
-						veE({tag: "span", clazz: `ve-col-1-5 ve-px-1 ve-text-center`, txt: PageFilterSpells.getTblLevelStr(spell)}),
-						veE({tag: "span", clazz: `ve-col-1-7 ve-px-1 ve-text-center`, txt: time}),
-						veE({
-							tag: "span",
-							clazz: `ve-col-1-2 ve-px-1 ${schoolClassName} ve-text-center`,
-							title: Parser.spSchoolAndSubschoolsAbvsToFull(spell.school, spell.subschools),
-							style: Parser.spSchoolAbvToStylePart(spell.school),
-							txt: school,
-						}),
-						veE({tag: "span", clazz: `ve-col-0-6 ve-px-1 ve-text-center`, title: "Concentration", txt: concentration}),
-						veE({tag: "span", clazz: `ve-col-2-4 ve-px-1 ve-text-right`, txt: range}),
-						veE({
-							tag: "span",
-							clazz: `ve-col-1-7 ve-text-center ${Parser.sourceJsonToSourceClassname(spell.source)} ve-pl-1 ve-pr-0`,
-							title: `${Parser.sourceJsonToFull(spell.source)}${Renderer.utils.getSourceSubText(spell)}`,
-							txt: source,
-						}),
-					],
-				}),
-			],
-		});
-
 		const listItem = new ListItem(
 			spI,
-			eleLi,
+			() => veE({
+				tag: "div",
+				clazz: `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`,
+				click: (evt) => this._list.doSelect(listItem, evt),
+				contextmenu: (evt) => this._openContextMenu(evt, this._list, listItem),
+				children: [
+					veE({
+						tag: "a",
+						href: `#${hash}`,
+						clazz: "ve-lst__row-border ve-lst__row-inner",
+						children: [
+							veE({tag: "span", clazz: `ve-bold ve-col-2-9 ve-pl-0 ve-pr-1`, txt: spell.name}),
+							veE({tag: "span", clazz: `ve-col-1-5 ve-px-1 ve-text-center`, txt: PageFilterSpells.getTblLevelStr(spell)}),
+							veE({tag: "span", clazz: `ve-col-1-7 ve-px-1 ve-text-center`, txt: time}),
+							veE({
+								tag: "span",
+								clazz: `ve-col-1-2 ve-px-1 ${schoolClassName} ve-text-center`,
+								title: Parser.spSchoolAndSubschoolsAbvsToFull(spell.school, spell.subschools),
+								style: Parser.spSchoolAbvToStylePart(spell.school),
+								txt: school,
+							}),
+							veE({tag: "span", clazz: `ve-col-0-6 ve-px-1 ve-text-center`, title: "Concentration", txt: concentration}),
+							veE({tag: "span", clazz: `ve-col-2-4 ve-px-1 ve-text-right`, txt: range}),
+							veE({
+								tag: "span",
+								clazz: `ve-col-1-7 ve-text-center ${Parser.sourceJsonToSourceClassname(spell.source)} ve-pl-1 ve-pr-0`,
+								title: `${Parser.sourceJsonToFull(spell.source)}${Renderer.utils.getSourceSubText(spell)}`,
+								txt: source,
+							}),
+						],
+					}),
+				],
+			}),
 			spell.name,
 			{
 				source,

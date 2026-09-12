@@ -82,21 +82,25 @@ class RecipesPage extends ListPage {
 	getListItem (ent, rpI, isExcluded) {
 		this._pageFilter.mutateAndAddToFilters(ent, isExcluded);
 
-		const eleLi = document.createElement("div");
-		eleLi.className = `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`;
-
 		const source = Parser.sourceJsonToAbv(ent.source);
 		const hash = UrlUtil.autoEncodeHash(ent);
 
-		eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
+		const listItem = new ListItem(
+			rpI,
+			() => {
+				const eleLi = document.createElement("div");
+				eleLi.className = `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`;
+
+				eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
 			<span class="ve-col-6 ve-bold ve-pl-0 ve-pr-1">${ent.name}</span>
 			<span class="ve-col-4 ve-px-1 ve-text-center">${ent.type || "\u2014"}</span>
 			<span class="ve-col-2 ve-text-center ${Parser.sourceJsonToSourceClassname(ent.source)} ve-pl-1 ve-pr-0" title="${Parser.sourceJsonToFull(ent.source)}">${source}</span>
 		</a>`;
 
-		const listItem = new ListItem(
-			rpI,
-			eleLi,
+				eleLi.addEventListener("click", (evt) => this._list.doSelect(listItem, evt));
+				eleLi.addEventListener("contextmenu", (evt) => this._openContextMenu(evt, this._list, listItem));
+				return eleLi;
+			},
 			ent.name,
 			{
 				source,
@@ -110,9 +114,6 @@ class RecipesPage extends ListPage {
 				isExcluded,
 			},
 		);
-
-		eleLi.addEventListener("click", (evt) => this._list.doSelect(listItem, evt));
-		eleLi.addEventListener("contextmenu", (evt) => this._openContextMenu(evt, this._list, listItem));
 
 		return listItem;
 	}

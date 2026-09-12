@@ -83,25 +83,29 @@ class HomeCraftsPage extends ListPage {
 	getListItem (ent, ixEnt, isExcluded) {
 		this._pageFilter.mutateAndAddToFilters(ent, isExcluded);
 
-		const eleLi = document.createElement("div");
-		eleLi.className = `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`;
-
 		const hash = UrlUtil.autoEncodeHash(ent);
 		const source = Parser.sourceJsonToAbv(ent.source);
 		const type = Parser.getPropDisplayName(ent.__prop);
-		const typeShort = PageFilterHomeCrafts.getTypeAbbreviation(ent.__prop);
 		const category = (ent.patternType || "Unknown").toTitleCase();
 
-		eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
+		const listItem = new ListItem(
+			ixEnt,
+			() => {
+				const eleLi = document.createElement("div");
+				eleLi.className = `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`;
+
+				const typeShort = PageFilterHomeCrafts.getTypeAbbreviation(ent.__prop);
+				eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
 			<span class="ve-col-1-5 ve-pl-0 ve-pr-1 ve-text-center" title="${type.qq()}">${typeShort}</span>
 			<span class="ve-col-5 ve-bold ve-px-1">${ent.name}</span>
 			<span class="ve-col-3-5 ve-px-1 ve-text-center">${category}</span>
 			<span class="ve-col-2 ve-text-center ${Parser.sourceJsonToSourceClassname(ent.source)} ve-pl-1 ve-pr-0" title="${Parser.sourceJsonToFull(ent.source)}">${source}</span>
 		</a>`;
 
-		const listItem = new ListItem(
-			ixEnt,
-			eleLi,
+				eleLi.addEventListener("click", (evt) => this._list.doSelect(listItem, evt));
+				eleLi.addEventListener("contextmenu", (evt) => this._openContextMenu(evt, this._list, listItem));
+				return eleLi;
+			},
 			ent.name,
 			{
 				source,
@@ -115,9 +119,6 @@ class HomeCraftsPage extends ListPage {
 				isExcluded,
 			},
 		);
-
-		eleLi.addEventListener("click", (evt) => this._list.doSelect(listItem, evt));
-		eleLi.addEventListener("contextmenu", (evt) => this._openContextMenu(evt, this._list, listItem));
 
 		return listItem;
 	}

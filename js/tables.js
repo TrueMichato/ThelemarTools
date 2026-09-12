@@ -122,25 +122,30 @@ class TablesPage extends ListPage {
 	getListItem (it, tbI, isExcluded) {
 		this._pageFilter.mutateAndAddToFilters(it, isExcluded);
 
-		const eleLi = document.createElement("div");
-		eleLi.className = `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`;
-
 		const source = Parser.sourceJsonToAbv(it.source);
 		const hash = UrlUtil.autoEncodeHash(it);
 
-		eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
-			<span class="ve-col-0-5 ve-px-0 ve-flex-vh-center ve-lst__btn-toggle-expand ve-self-flex-stretch ve-no-select">[+]</span>
-			<span class="ve-bold ve-col-9-5 ve-px-1">${it.name}</span>
-			<span class="ve-col-2 ve-text-center ${Parser.sourceJsonToSourceClassname(it.source)} ve-pl-1 ve-pr-0" title="${Parser.sourceJsonToFull(it.source)}">${source}</span>
-		</a>
-		<div class="ve-flex ve-hidden ve-relative ve-accordion__wrp-preview">
-			<div class="ve-vr-0 ve-absolute ve-accordion__vr-preview"></div>
-			<div class="ve-flex-col ve-py-3 ve-ml-4 ve-accordion__wrp-preview-inner"></div>
-		</div>`;
-
 		const listItem = new ListItem(
 			tbI,
-			eleLi,
+			() => {
+				const eleLi = document.createElement("div");
+				eleLi.className = `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`;
+
+				eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
+					<span class="ve-col-0-5 ve-px-0 ve-flex-vh-center ve-lst__btn-toggle-expand ve-self-flex-stretch ve-no-select">[+]</span>
+					<span class="ve-bold ve-col-9-5 ve-px-1">${it.name}</span>
+					<span class="ve-col-2 ve-text-center ${Parser.sourceJsonToSourceClassname(it.source)} ve-pl-1 ve-pr-0" title="${Parser.sourceJsonToFull(it.source)}">${source}</span>
+				</a>
+				<div class="ve-flex ve-hidden ve-relative ve-accordion__wrp-preview">
+					<div class="ve-vr-0 ve-absolute ve-accordion__vr-preview"></div>
+					<div class="ve-flex-col ve-py-3 ve-ml-4 ve-accordion__wrp-preview-inner"></div>
+				</div>`;
+
+				eleLi.addEventListener("click", (evt) => this._list.doSelect(listItem, evt));
+				eleLi.addEventListener("contextmenu", (evt) => this._openContextMenu(evt, this._list, listItem));
+
+				return eleLi;
+			},
 			it.name,
 			{
 				source,
@@ -153,9 +158,6 @@ class TablesPage extends ListPage {
 				isExcluded,
 			},
 		);
-
-		eleLi.addEventListener("click", (evt) => this._list.doSelect(listItem, evt));
-		eleLi.addEventListener("contextmenu", (evt) => this._openContextMenu(evt, this._list, listItem));
 
 		return listItem;
 	}

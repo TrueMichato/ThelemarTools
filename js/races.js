@@ -103,28 +103,33 @@ class RacesPage extends ListPage {
 
 		this._pageFilter.mutateAndAddToFilters(race, isExcluded);
 
-		const eleLi = document.createElement("div");
-		eleLi.className = `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`;
-
 		const {sizeText, sizeShortText} = PageFilterRaces.getSizeDisplayInfo(race.size);
 
 		const source = Parser.sourceJsonToAbv(race.source);
 
-		eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
-			<span class="ve-col-0-4 ve-px-0 ve-flex-vh-center ve-lst__btn-toggle-expand ve-self-flex-stretch ve-no-select">[+]</span>
-			<span class="ve-bold ve-col-4-4 ve-pl-0 ve-pr-1">${race.name}</span>
-			<span class="ve-col-3-6 ve-px-1 ${race._slAbility === VeCt.STR_NONE || race._slAbility === "Lineage" ? "ve-italic" : ""}">${race._slAbility}</span>
-			<span class="ve-col-1-6 ve-px-1 ve-text-center" title="${sizeText}">${sizeShortText}</span>
-			<span class="ve-col-2 ve-text-center ${Parser.sourceJsonToSourceClassname(race.source)} ve-pl-1 ve-pr-0" title="${Parser.sourceJsonToFull(race.source)}">${source}</span>
-		</a>
-		<div class="ve-flex ve-hidden ve-relative ve-accordion__wrp-preview">
-			<div class="ve-vr-0 ve-absolute ve-accordion__vr-preview"></div>
-			<div class="ve-flex-col ve-py-3 ve-ml-4 ve-accordion__wrp-preview-inner"></div>
-		</div>`;
-
 		const listItem = new ListItem(
 			rcI,
-			eleLi,
+			() => {
+				const eleLi = document.createElement("div");
+				eleLi.className = `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`;
+
+				eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
+					<span class="ve-col-0-4 ve-px-0 ve-flex-vh-center ve-lst__btn-toggle-expand ve-self-flex-stretch ve-no-select">[+]</span>
+					<span class="ve-bold ve-col-4-4 ve-pl-0 ve-pr-1">${race.name}</span>
+					<span class="ve-col-3-6 ve-px-1 ${race._slAbility === VeCt.STR_NONE || race._slAbility === "Lineage" ? "ve-italic" : ""}">${race._slAbility}</span>
+					<span class="ve-col-1-6 ve-px-1 ve-text-center" title="${sizeText}">${sizeShortText}</span>
+					<span class="ve-col-2 ve-text-center ${Parser.sourceJsonToSourceClassname(race.source)} ve-pl-1 ve-pr-0" title="${Parser.sourceJsonToFull(race.source)}">${source}</span>
+				</a>
+				<div class="ve-flex ve-hidden ve-relative ve-accordion__wrp-preview">
+					<div class="ve-vr-0 ve-absolute ve-accordion__vr-preview"></div>
+					<div class="ve-flex-col ve-py-3 ve-ml-4 ve-accordion__wrp-preview-inner"></div>
+				</div>`;
+
+				eleLi.addEventListener("click", (evt) => this._list.doSelect(listItem, evt));
+				eleLi.addEventListener("contextmenu", (evt) => this._openContextMenu(evt, this._list, listItem));
+
+				return eleLi;
+			},
 			race.name,
 			{
 				source,
@@ -141,9 +146,6 @@ class RacesPage extends ListPage {
 				isExcluded,
 			},
 		);
-
-		eleLi.addEventListener("click", (evt) => this._list.doSelect(listItem, evt));
-		eleLi.addEventListener("contextmenu", (evt) => this._openContextMenu(evt, this._list, listItem));
 
 		return listItem;
 	}

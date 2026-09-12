@@ -89,28 +89,33 @@ class FeatsPage extends ListPage {
 	getListItem (feat, ftI, isExcluded) {
 		this._pageFilter.mutateAndAddToFilters(feat, isExcluded);
 
-		const eleLi = document.createElement("div");
-		eleLi.className = `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`;
-
 		const source = Parser.sourceJsonToAbv(feat.source);
 		const hash = UrlUtil.autoEncodeHash(feat);
 
-		eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
-			<span class="ve-col-0-3 ve-px-0 ve-flex-vh-center ve-lst__btn-toggle-expand ve-self-flex-stretch ve-no-select">[+]</span>
-			<span class="ve-bold ve-col-3-2 ve-px-1">${feat.name}</span>
-			<span class="ve-col-1-3 ve-px-1 ve-text-center ${feat.category == null ? "ve-italic" : ""}" ${feat.category ? `title="${Parser.featCategoryToFull(feat.category).qq()}"` : ""}>${feat.category || "\u2014"}</span>
-			<span class="ve-col-2-5 ve-px-1 ${feat._slAbility === VeCt.STR_NONE ? "ve-italic " : ""}">${feat._slAbility}</span>
-			<span class="ve-col-3 ve-px-1 ${feat._slPrereq === VeCt.STR_NONE ? "ve-italic " : ""}">${feat._slPrereq}</span>
-			<span class="ve-col-1-7 ve-text-center ${Parser.sourceJsonToSourceClassname(feat.source)} ve-pl-1 ve-pr-0" title="${Parser.sourceJsonToFull(feat.source)}">${source}</span>
-		</a>
-		<div class="ve-flex ve-hidden ve-relative ve-accordion__wrp-preview">
-			<div class="ve-vr-0 ve-absolute ve-accordion__vr-preview"></div>
-			<div class="ve-flex-col ve-py-3 ve-ml-4 ve-accordion__wrp-preview-inner"></div>
-		</div>`;
-
 		const listItem = new ListItem(
 			ftI,
-			eleLi,
+			() => {
+				const eleLi = document.createElement("div");
+				eleLi.className = `ve-lst__row ve-flex-col ${isExcluded ? "ve-lst__row--blocklisted" : ""}`;
+
+				eleLi.innerHTML = `<a href="#${hash}" class="ve-lst__row-border ve-lst__row-inner">
+					<span class="ve-col-0-3 ve-px-0 ve-flex-vh-center ve-lst__btn-toggle-expand ve-self-flex-stretch ve-no-select">[+]</span>
+					<span class="ve-bold ve-col-3-2 ve-px-1">${feat.name}</span>
+					<span class="ve-col-1-3 ve-px-1 ve-text-center ${feat.category == null ? "ve-italic" : ""}" ${feat.category ? `title="${Parser.featCategoryToFull(feat.category).qq()}"` : ""}>${feat.category || "\u2014"}</span>
+					<span class="ve-col-2-5 ve-px-1 ${feat._slAbility === VeCt.STR_NONE ? "ve-italic " : ""}">${feat._slAbility}</span>
+					<span class="ve-col-3 ve-px-1 ${feat._slPrereq === VeCt.STR_NONE ? "ve-italic " : ""}">${feat._slPrereq}</span>
+					<span class="ve-col-1-7 ve-text-center ${Parser.sourceJsonToSourceClassname(feat.source)} ve-pl-1 ve-pr-0" title="${Parser.sourceJsonToFull(feat.source)}">${source}</span>
+				</a>
+				<div class="ve-flex ve-hidden ve-relative ve-accordion__wrp-preview">
+					<div class="ve-vr-0 ve-absolute ve-accordion__vr-preview"></div>
+					<div class="ve-flex-col ve-py-3 ve-ml-4 ve-accordion__wrp-preview-inner"></div>
+				</div>`;
+
+				eleLi.addEventListener("click", (evt) => this._list.doSelect(listItem, evt));
+				eleLi.addEventListener("contextmenu", (evt) => this._openContextMenu(evt, this._list, listItem));
+
+				return eleLi;
+			},
 			feat.name,
 			{
 				source,
@@ -126,9 +131,6 @@ class FeatsPage extends ListPage {
 				isExcluded,
 			},
 		);
-
-		eleLi.addEventListener("click", (evt) => this._list.doSelect(listItem, evt));
-		eleLi.addEventListener("contextmenu", (evt) => this._openContextMenu(evt, this._list, listItem));
 
 		return listItem;
 	}

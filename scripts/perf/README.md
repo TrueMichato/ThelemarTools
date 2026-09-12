@@ -1,109 +1,163 @@
-# Page-load performance harness
+# Browser performance harness
 
-Two complementary tools:
+See [Reference-list rendering](../../docs/list-virtualization.md) for the virtual
+row lifecycle, compatibility option, rollout boundary, and measured results.
 
-- **`measure.mjs`** — tells you *whether* a change helped, and proves it broke nothing.
-- **`profile.mjs`** — tells you *where to look next*.
+- **`measure.mjs`** measures load/interaction response and checks logical content.
+- **`profile.mjs`** ranks sampled CPU self time during a real page load.
 
-They exist so that performance work can be judged on numbers rather than intuition — a previous
-optimisation attempt on this codebase made load times *worse*, and there was no way to tell until
-users noticed.
+Requires the existing `playwright` and `http-server` development dependencies and Playwright
+Chromium. Run benchmarks sequentially, without other browser tests or CPU-heavy jobs.
 
-## Quick start
-
-```bash
-# Baseline the deployed site
-node scripts/perf/measure.mjs \
-  --origin https://truemichato.github.io/ThelemarTools \
-  --label before --out perf-before.json
-
-# ...make a change, then measure this checkout locally
-node scripts/perf/measure.mjs --serve \
-  --label after --baseline perf-before.json --out perf-after.json
-```
-
-`--serve` starts a throwaway `http-server` on port 5099 against this checkout, with
-`max-age=600` to match what GitHub Pages sends. It shuts the server down when the run finishes.
-
-## Finding the next thing to fix
-
-`measure.mjs` will tell you a page is slow, but not why. `profile.mjs` CPU-profiles a real page
-load and ranks functions by **self time**:
+## Repeatable before/after measurements
 
 ```bash
-node scripts/perf/profile.mjs --serve --page items
-node scripts/perf/profile.mjs --url https://truemichato.github.io/ThelemarTools/bestiary.html
+# Run this BEFORE changing application code.
+node scripts/perf/measure.mjs --serve --pages items,spells,feats \
+  --runs 3 --label before --out perf-before-v2.json
+
+# After the application change, use identical flags and the same machine.
+node scripts/perf/measure.mjs --serve --pages items,spells,feats \
+  --runs 3 --label after --baseline perf-before-v2.json --out perf-after-v2.json
+
+# Optional interaction recipes (use the flag for BOTH baseline and candidate).
+node scripts/perf/measure.mjs --serve --pages items,spells,feats \
+  --runs 3 --interactions --out perf-interactions-v2.json
+
+# CPU-throttled/narrow-viewport results form a SEPARATE comparison series.
+node scripts/perf/measure.mjs --serve --pages items,spells,feats \
+  --width 390 --height 844 --cpu-throttle 4 --out perf-narrow-v2.json
 ```
 
-```
-  self%      self   function
-  -----   -------   --------
-   15.7%    1243ms   (program)  @ :0
-    8.0%     633ms   (idle)  @ :0
-    7.0%     557ms   _add32  @ js/utils.js:8705      <- MD5 internals
-    6.0%     471ms   getOrModify  @ js/utils.js:1295
-    4.5%     355ms   String.toUrlified  @ js/utils.js:206
-```
+`--serve` binds this checkout to an OS-assigned, unique loopback port. `--port 5099` selects a
+specific port instead; an occupied port fails rather than accidentally measuring another
+checkout. The server verifies that it serves this checkout's `items.html`, uses `max-age=600`,
+and closes on completion. No persistent process or separate dev server is needed.
 
-Reading it:
+Without `--serve`, use `--origin https://example.com/tools` or a running local origin (default:
+`http://localhost:5050`). `--help` lists all options. The default suite remains
+`bestiary,spells,items,classes,crafting`; Classes is intentionally **not** required to virtualize.
 
-- High **self** time = the function is doing the work itself, and is a candidate.
-- `(program)` is native work — JSON parsing, script compilation, GC. Not directly actionable.
-- `(idle)` is waiting on the network. Not main-thread work.
-- Watch for *families* of related frames. The MD5 internals above (`_add32`, `_cmn`, `_ff`, `_gg`,
-  `_hh`, `_ii`, `_md5blk`, `_md5cycle`) each looked small, but summed to ~1.57 s — 20% of the page
-  load. Ranking by individual self time alone would have buried it.
+## Readiness and schema version
 
-This is how the two largest wins so far were found: a full-payload MD5 run on every page load, and
-a quadratic `_copy` parent search.
+Results have `schemaVersion: 2` and `readinessVersion: "toolsLoaded-logical-paint-v2"`.
+**Old row-stability/threshold baselines are incompatible.** Rebaseline unchanged application
+code with v2; do not compare old `listReadyMs` values to new ones.
 
-## What it measures
+The browser init script listens for `toolsLoaded` **before application scripts run**. It then
+checks that `dbg_page.primaryLists` are initialized/not dirty, have a nonempty loaded dataset,
+and keep the same logical loaded/matching arrays and counts across two animation frames.
+Standard pages must also display the correct `matching/loaded` result counter.
+Classes, Names and Encounter Generator have an explicitly reported custom-counter exception;
+they still require the lifecycle signal and logical lists. Arbitrary custom pages without
+these contracts fail instead of falling back to mounted-row stability.
 
-| Metric | Meaning |
+Two animation-frame callbacks allow a paint between callbacks. This is a **response proxy**,
+not a guaranteed presentation timestamp, INP, or another Core Web Vital. Mounted rows are
+never a readiness threshold. A valid filter can produce zero matches.
+
+## Measurements
+
+| Field | Meaning |
 |---|---|
-| `listReadyMs` | Time until the list has ≥100 rows. This is the "page is usable" moment. |
-| `longTaskTotalMs` | Total main-thread long-task time. The best proxy for "the page felt janky". |
-| `longTaskMaxMs` | Largest single long task — a 1 s task is far worse than ten 100 ms tasks. |
-| `brewRawMs` / `brewProcessedMs` | Time inside `BrewUtil2._pGetBrewRaw_` / `_pGetBrewProcessed_`. |
-| `requestCount` / `bytesTransferred` | Network volume. |
-| `remoteBrewRequestCount` | Requests to `raw.githubusercontent.com` — homebrew fetched cross-origin. |
-| `servedFromCacheCount` | Requests satisfied without hitting the network. |
-| `brewProps` | Entity count per homebrew prop. **A correctness check, not a perf metric.** |
+| `firstRowMs` | First observed row, descriptive only; not a readiness/comparison gate. |
+| `toolsLoadedMs` | Application lifecycle event timestamp. |
+| `listReadyMs` | Lifecycle + logical/counter checks + two-frame endpoint. |
+| `logicalLoadedRows` | All registered primary-list items, not every raw data entity. |
+| `logicalMatchingRows` | All matching/sorted items, including unmounted matches. |
+| `listRows` / `logical.lists[].mountedRows` | Mounted primary rows only; sublists excluded. |
+| Per-list `renderedLogicalRows` / `isVirtualRendering` | Public renderer diagnostics where supported; `null` on legacy lists. |
+| `materializedRows` / per-list `materializedElements` | Retained row trees/descendant elements, including detached trees; `null` if safely unobservable. |
+| `rowBuilderMs` / `rowBuilderCalls` | Synchronous `getListItem` time/calls, **including metadata/filter work**, not just DOM. |
+| `loadPhases` | Reached page loading hooks, by method name; phases may overlap other metrics. |
+| `longTaskTotalMs` / `longTaskMaxMs` / `longTaskCount` | Main-thread long tasks through the load collection window. |
+| `brewRawMs` / `brewProcessedMs` | Wrapped BrewUtil2 load/processing time; nested calls are not exclusive CPU time. |
+| `requestCount`, `bytesTransferred`, `bytesDecoded`, `servedFromCacheCount` | Resource Timing network metrics; cross-origin timing restrictions apply. |
+| `remoteBrewRequestCount` | Requests to GitHub/GitHubusercontent hosts. |
+| `brewProps` | Processed homebrew counts, a correctness signal rather than a speed metric. |
 
-Each page is measured in two phases: `cold` (empty HTTP cache) and `warm` (one unmeasured priming
-load first). Each phase runs `--runs` times and reports the median.
+Load collection includes the existing 500 ms post-readiness tail for delayed observer/task
+delivery. Logical identity/materialization traversal happens **after** this timing window;
+it never reads a lazy `.ele` getter. It prefers `peekEle()`; a `null` return is an
+unmaterialized row, **not** permission to fall back to `.ele`. Only legacy items without
+`peekEle` use eager `ele` or `_ele` own data properties.
+It does not estimate cumulative DOM construction/cache eviction when no safe diagnostic
+surface exists. Row-builder calls are not a substitute for materialized-tree counts.
 
-## The correctness check
+`pages.<page>.<phase>.runs` retains every observation, instrumentation reach, warnings, errors,
+source configuration and per-list correctness digests. Top-level phase timings are medians.
+Viewport, Chromium version, CPU throttling, origin, storage policy and enabled scenarios are
+recorded. A missing hook/call, timeout, unexpected console/page/network error, missing hash,
+duplicate identity, result-counter mismatch, or inconsistent run is a failure.
 
-`brewProps` records how many entities each homebrew prop resolved to (`monster: 2503`,
-`item: 4006`, and so on across ~63 props). When `--baseline` is supplied, the harness diffs these
-counts and prints any that moved.
+The one development-resource exception is a missing local `/sw-injector.js`, a generated
+optional service-worker bootstrap. Its 404/aborted request/resource-console error are retained
+as warnings. Data failures and JavaScript exceptions are **never** covered by this exception.
+Service workers are blocked in both tools for controlled cache behavior.
 
-**Any difference is a failure.** It means a change dropped, duplicated or failed to merge
-homebrew content. A performance win that changes these numbers is not a win.
+## Content correctness
 
-## Reading the output
+The harness uses each registered row's **actual page hash**, entity `__prop` discriminator,
+and optional `customHashId`, rather than assuming `name|source` uniquely identifies everything.
+It SHA-256 hashes ordered loaded and matching identity arrays per list and across primary
+lists. Duplicate identities and matching objects absent from loaded items are rejected.
 
-The comparison table only prints metrics that moved by more than `--noise` percent (default 5).
-Anything smaller is within run-to-run variance and should not be interpreted. The process exits
-non-zero if any compared metric regressed beyond that threshold.
+Within a phase, every run must have identical identities/order, homebrew counts and source
+configuration. Before/after comparisons also check these values and interaction outcomes.
+A digest detects a dropped/duplicated/reordered row; it does not prove the complete underlying
+entity payload or exported content is unchanged. Export/selection behavior needs separate
+functional tests. Dataset changes upstream require investigation and a new controlled baseline,
+not acceptance as a performance improvement.
 
-## Pitfalls
+## Optional interaction scenarios
 
-These cost real time to discover; please don't re-learn them.
+`--interactions` currently has tested recipes for Items, Spells and Feats. Other pages remain
+in the load suite with an explicit interaction skip. Each recipe uses actual browser input:
 
-- **Only compare same-origin runs.** `localStorage` and IndexedDB are per-origin, so a browser
-  that has homebrew stored on one origin and not another is not running the same test. Repeated
-  40 MB loads also build up GC pressure that skews cross-origin comparisons badly.
-- **Don't compare `bytesTransferred` between `--serve` and the deployed site.** `http-server`
-  does not gzip; GitHub Pages does. The same payload measures ~15.8 MB locally and ~3.2 MB
-  deployed. CPU metrics *are* comparable; byte counts are not.
-- **Use at least 3 runs.** With `--runs 1`, long-task totals routinely vary by ±5%.
-- **Node micro-benchmarks run 3–5× optimistic** versus the browser (warm JIT, no GC pressure, no
-  competing parse work). Use the browser numbers for decisions.
-- List rows are `.ve-lst__row`, not `.lst__row`.
-- `ListPage`, `ListUtil`, `Omnisearch` and `MultiSource` are ES-module-scoped and are *not* on
-  `window`. `List`, `FilterBox`, `Renderer`, `DataLoader` and `BrewUtil2` are global, which is why
-  the instrumentation hooks `BrewUtil2`.
-- Chrome refuses to connect to port 5060 (`ERR_UNSAFE_PORT`).
-- An HTTPS page cannot `fetch` from `http://localhost` — it hangs silently with no console error.
+1. Type `longsword`, `fireball`, or `alert`; require a nonempty narrower logical result and an
+   observed logical update.
+2. Click the clear-search control; require exact restoration of ordered matching identities.
+3. Click Name sort for each primary list; require direction/order change with unchanged counts.
+4. Click an included **real source mini-pill** associated with matching entities; verify source
+   state and logical results change. If none is visible, report a skip, never a made-up timing.
+5. Wheel each scrollable primary list; require scroll position movement. Non-scrollable lists skip.
+6. Establish a first-row deep link, then press `k` to wrap to a far result; require the actual
+   target hash and a mounted row intersecting the list viewport.
+
+Scenarios report trusted-input-to-two-frame `responseMs`, logical update count, long-task
+total/max, and full-result digests separately from initial loading. They never call internal
+search/sort/filter setters to manufacture a successful input result. Deep-link setup and final
+UI Reset are untimed; Reset verifies/restores initial matching identities before the next warm
+run. These are single repeatable responses, **not** a sustained scroll/jank benchmark or
+proof of bounded caching over a full-dataset traversal.
+
+## Cache policy and comparison caveats
+
+- Each cold run gets fresh origin storage and an explicit Chromium HTTP-cache clear.
+- Warm runs share a context after one unmeasured priming load; origin storage and HTTP cache
+  are warm. Priming errors fail the phase. No personal browser profile/storage is imported.
+- Site defaults may automatically load remote homebrew. Source configuration and homebrew
+  counts make this visible; this is not implicitly a site-data-only benchmark.
+- Only compare the same configuration and browser version. Two harness-owned fresh loopback
+  servers may differ in port; other cross-origin comparisons are refused.
+- Local `http-server` does not gzip like production. Do not compare local byte counts with
+  deployed transfers. Remote timing restrictions can hide transfer sizes.
+- Default noise threshold is 5%; use at least three runs and repeat noisy results.
+- A nonzero exit means validation/comparison failure or a regression beyond the threshold.
+  A small DOM or a lower load time cannot override a failed correctness check.
+
+## CPU profiling and harness tests
+
+```bash
+node scripts/perf/profile.mjs --serve --page items --top 30
+node scripts/perf/profile.mjs --url https://example.com/tools/bestiary.html
+node --test scripts/perf/*.test.mjs
+npx eslint scripts/perf/*.mjs
+```
+
+The profiler shares lifecycle readiness, viewport/CPU flags, identity checks and error
+instrumentation. It prints loaded/matching/mounted counts plus the matching digest.
+High **self time** identifies candidate functions; `(program)` includes native work such as
+JSON parsing/compilation/GC, while `(idle)` is waiting. Sampling overhead means profile spans
+are not directly comparable with measurement load times. Method instrumentation itself also
+adds overhead; before and after runs must use the same harness.
