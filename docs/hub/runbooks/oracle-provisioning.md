@@ -1,10 +1,9 @@
 # Runbook: Oracle Cloud Always Free provisioning
 
-> **Status:** Historical Phase 6G provisioning record; current release/rollback delegated to immutable automation;
-> V1-G1 host-operations/recovery proof pending
+> **Status:** Historical Phase 6G provisioning record; current release/rollback delegated to immutable automation
 > **Severity:** Operational proof, not an incident
 > **Owner:** Campaign Hub maintainers
-> **Last drill date:** never — retain until the V1-G1 host-operations/recovery drill completes
+> **Last operational verification:** 2026-09-12; provisioning steps below remain historical
 > **Estimated time:** 60–90 minutes, most of it waiting
 
 > **Supersession notice (2026-09-06):** Foundry was intentionally decommissioned after this Phase 6G
@@ -18,10 +17,11 @@
 Record how the single Oracle Cloud "Always Free" ARM virtual machine was provisioned for the portable Campaign Hub
 stack at a public HTTPS address, at $0/month recurring cost.
 
-This runbook produced the private **staging** environment for release `hub-staging-2026-09-01` at `8f181712`.
-Do not expand it to a real private campaign until V1-G1 host-operations/recovery proof and V1-G2's physical game
-day/go-no-go in the [living roadmap](../roadmap.md) have passed. The repository's newer merged head is not deployed
-until an operator deliberately promotes a verified release.
+This runbook produced the original private **staging** environment. Oracle now runs annotated release
+`hub-staging-2026-09-10-r7` at `77d955c053dcdfe949235620db93f7eba477af34`. Do not expand it to a real
+private campaign until V1-G1's first genuine daily timer evidence and V1-G2's physical game-day/go-no-go in the
+[living roadmap](../roadmap.md) have passed. Later repository changes are not deployed until an operator
+deliberately promotes a verified release.
 
 ## Current operator boundary
 
@@ -37,8 +37,9 @@ On the existing staging host:
 - promote only an immutable annotated `hub-*` tag with
   [`deploy/hub/release.sh`](deploy-promote.md), and use the checked-in [rollback](rollback.md) and
   [backup/restore](backup-restore.md) procedures for recovery;
-- install, enable, observe, and verify host timers through
-  [Oracle host operations](oracle-operations.md) as V1-G1 evidence.
+- observe and verify the installed host timers through
+  [Oracle host operations](oracle-operations.md); the first genuine daily maintenance/backup executions remain
+  V1-G1 evidence.
 
 Any later text requiring Foundry continuity or port 30000 is superseded by this boundary. Historical Foundry
 commands remain below only to explain the original Phase 6G host state; they must not be replayed. Branch-based

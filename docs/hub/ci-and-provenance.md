@@ -1,7 +1,7 @@
 # Campaign Hub CI, test boundary, and artifact provenance
 
 > **Status:** Implemented for Phase 6F; tagged Oracle promotion deployed
-> **Last verified:** 2026-09-01
+> **Last verified:** 2026-09-12
 > **Owner:** Campaign Hub maintainers
 
 ## Workflow contract
@@ -9,8 +9,9 @@
 `.github/workflows/hub.yml` runs on pull requests and manual dispatch. Every third-party action is pinned to
 a full reviewed commit SHA. Deployment remains intentionally absent from this workflow. Phase 6G deployed a
 verified git tag to the ARM Oracle host under ADR 0008/0010. V2-T0 protected release automation shipped in
-[PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219); only the V1-G1 live Oracle release and
-induced-failure proof remains. Expansion stays disabled until the V1 go/no-go.
+[PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219). The r7 live Oracle release and induced-failure
+proof passed; only the first genuine scheduled daily maintenance and backup executions remain for V1-G1.
+Expansion stays disabled until the V1 go/no-go.
 
 | Job | Gates | Failure owner |
 |---|---|---|
@@ -90,8 +91,9 @@ step rather than being silently ignored.
 
 Never promote from an untrusted pull request artifact. Staging promotion requires an approved branch/run and
 records source SHA/tag, applicable archive hash or image id, SBOMs, migration version, test run, operator, and
-time. Release `hub-staging-2026-09-01` at `8f181712` is the deployed baseline. Automated promotion remains
-V2-T0; expansion remains disabled until the explicit V1 go decision.
+time. Annotated release `hub-staging-2026-09-10-r7` at
+`77d955c053dcdfe949235620db93f7eba477af34` is the deployed baseline. The automated promotion path is proven;
+expansion remains disabled until the explicit V1 go decision.
 
 ## Local commands
 

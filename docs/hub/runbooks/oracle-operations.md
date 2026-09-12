@@ -1,11 +1,19 @@
 # Runbook: Oracle host operations for the Campaign Hub
 
-> **Status:** Scheduled operations and deliberate release automation implemented; live drills pending
+> **Status:** Release r7 deployed; manual operations and recovery drills passed; first daily timer evidence pending
+> **Last drilled:** 2026-09-12
 > **Owner:** Campaign Hub operator
 
 This procedure adds scheduled maintenance, encrypted backups, off-machine copies, and five-minute health
 checks without stopping or resizing the Oracle instance. The host is now dedicated to the Campaign Hub after
 Foundry was intentionally decommissioned.
+
+The current deployed release is the annotated tag `hub-staging-2026-09-10-r7` (tag object
+`a65fec81eba3cd147fd44b54e617bf83d4a707f8`, commit
+`77d955c053dcdfe949235620db93f7eba477af34`). Manual maintenance and backup runs, five-minute monitoring,
+off-machine backup copying, an isolated authenticated restore, and an exact-r6 application rollback rehearsal
+passed on 2026-09-12. V1-G1 remains open until the first genuine daily maintenance and backup timer activations
+are observed after their scheduled windows; do not substitute another manual start for that evidence.
 
 ## Safety rules
 
@@ -60,17 +68,24 @@ differs, edit the copied units—not the repository copies—before enabling the
 ```bash
 cd /home/ubuntu/ThelemarTools
 chmod 750 deploy/hub/monitor-host.sh deploy/hub/pull-backups.sh
+sha256sum deploy/hub/systemd/thelemar-hub-*
 sudo cp deploy/hub/systemd/thelemar-hub-* /etc/systemd/system/
+sha256sum /etc/systemd/system/thelemar-hub-*
 sudo systemctl daemon-reload
-sudo systemctl enable --now \
-  thelemar-hub-maintenance.timer \
-  thelemar-hub-backup.timer \
-  thelemar-hub-monitor.timer
+systemctl list-timers 'thelemar-hub-*' --all
+sudo systemctl enable --now thelemar-hub-maintenance.timer
+systemctl list-timers thelemar-hub-maintenance.timer --all
+sudo systemctl enable --now thelemar-hub-backup.timer
+systemctl list-timers thelemar-hub-backup.timer --all
+sudo systemctl enable --now thelemar-hub-monitor.timer
 systemctl list-timers 'thelemar-hub-*' --all
 ```
 
 The timers run maintenance around 01:15 UTC, backup around 02:15 UTC, and monitoring every five minutes.
-`Persistent=true` catches up a missed daily run after a reboot. `flock` prevents duplicate jobs.
+Inspect `LastTriggerUSec`, `NextElapseUSecRealtime`, and the service journal after each enable. `Persistent=true`
+may immediately catch up a missed daily run after a reboot or first installation; this is expected, but it must
+not be mistaken for the next genuine scheduled run. The checked-in `flock` lock prevents overlapping duplicate
+jobs.
 The maintenance and backup services first require their released image to exist, then run noninteractively with
 dependency startup and image pulls disabled. Maintenance reuses the released BFF image because both execute the
 same server runtime. If an image is missing, stop and repair the release image catalog; do not let scheduled work
@@ -96,7 +111,14 @@ ls -lh .hub-backups/
 
 The monitor fails if readiness, the protected metrics route, the WebSocket route, TLS lifetime, Compose
 services, disk, memory, CPU load, outbox, maintenance age, backup age, or restore-drill age crosses its
-threshold. A first run is expected to fail on `hub_last_restore_drill_age_seconds = -1` until Step 5 succeeds.
+threshold. A first run is expected to fail on stale or missing evidence until maintenance, backup, and restore
+have succeeded. When Healthchecks.io is used, create one five-minute check with a ten-minute grace period and
+email alerting. Store its success and failure URLs only in `.env.hub`; the UUID-bearing URLs are secrets. The
+monitor sends empty POST bodies and no campaign, character, account, or error content.
+
+For the launch gate, manual success is not enough. After the next daily windows, verify a new service invocation,
+journal entry, operational-run row, and encrypted archive whose timestamps follow the scheduled timer trigger.
+If the wall-clock window has not occurred, schedule a bounded follow-up rather than sleeping or claiming success.
 
 ## 4. Pull an off-machine copy
 
@@ -111,7 +133,9 @@ HUB_BACKUP_LOCAL_DIR="$HOME/ThelemarTools-hub-backups" \
 ```
 
 The script copies only new encrypted archives, does not delete remote or local files, rejects a collection
-whose newest archive is older than 30 hours, and prints the newest archive's SHA-256.
+whose newest archive is older than 30 hours, and prints the newest archive's SHA-256. "Newest" is determined by
+file modification time across both `hub-YYYY...` scheduled names and `hub-prerelease-...` release names; lexical
+filename order is not a safe freshness signal.
 
 Schedule this command on that second computer after 03:00 UTC. Treat a missed run as a high-severity backup
 alert. Store the encryption key separately from both the VM and archive directory. Retain at least 14 daily
@@ -119,71 +143,43 @@ and 3 monthly archives within available storage.
 
 ## 5. Perform an isolated restore drill
 
-Choose an archive, generate a temporary drill password, and create a throwaway PostgreSQL container on the
-private Compose network:
+Follow the full [encrypted backup and restore drill](backup-restore.md). The Oracle-specific rules proven on
+2026-09-12 are:
 
-```bash
-cd /home/ubuntu/ThelemarTools
-export DRILL_PASSWORD="$(openssl rand -base64 24)"
-docker run -d --name hub-restore-drill \
-  --network thelemartools_hub-private \
-  -e POSTGRES_PASSWORD="$DRILL_PASSWORD" \
-  -e POSTGRES_DB=hub_restore \
-  postgres:17.6-bookworm
-until docker exec hub-restore-drill pg_isready -U postgres -d hub_restore; do sleep 2; done
-```
+1. Start one continuous RTO clock **before** archive selection or access. Measure RPO separately from the
+   selected archive timestamp.
+2. Create a unique internal drill network and a named PostgreSQL 17.6 volume. Do not attach the restored
+   database to the production Compose network.
+3. Discover the actual production private-network name from the running database container when the temporary
+   restore runner must write bounded `restore_drill` evidence. Do not hard-code
+   `thelemartools_hub-private`; the current Compose project creates `thelemartools-hub_hub-private`.
+4. Generate URL-safe temporary database passwords, for example `openssl rand -hex 24`. Raw Base64 can contain
+   `/`, `+`, or `=` and must not be interpolated unescaped into a PostgreSQL URL.
+5. The host archive is `0600` and the released operations image runs as non-root `postgres`. Do not weaken the
+   source archive permissions. Stage an encrypted, hash-verified copy in a drill-only volume owned by the image's
+   `postgres` user, mount that volume read-only, and remove it during exact cleanup.
+6. Use the exact released backup, migrate, grant-role, BFF, and static image IDs. Run migrations and grants
+   against only the restored database; require the complete ledger, zero pending migrations, valid constraints,
+   and runtime-role readiness.
+7. Use `HUB_APP_ORIGIN=https://localhost:8443` behind the isolated Caddy edge. The BFF rejects an HTTP origin in
+   this production-shaped configuration.
+8. Derive the test-only BFF from the exact released BFF with `server/test.Dockerfile`; keep it on the isolated
+   database and a loopback-only edge. It must require both `NODE_ENV=test` and
+   `HUB_TEST_AUTH_ENABLED=true`. Never add a test-auth switch to the production image or containers.
+9. Exercise authenticated session, campaign and character reads/writes, inventory/shared interaction,
+   cross-character targeting, and a cross-user/campaign denial. Then rehearse the preserved prior application
+   images against the current schema and return the isolated environment to the current release.
+10. With separate approval, remove only resources carrying the unique drill label/name. Finish the RTO clock
+    after teardown and redacted evidence finalization; retain no temporary credentials or session cookies.
 
-Restore through the operations image. Replace the archive name:
-
-```bash
-docker compose --env-file .env.hub \
-  -f compose.hub.yml -f compose.hub.public.yml \
-  --profile backup run --rm --no-deps \
-  -e DATABASE_URL="postgresql://postgres:${DRILL_PASSWORD}@hub-restore-drill:5432/hub_restore" \
-  -e HUB_RESTORE_CONFIRM=RESTORE \
-  backup \
-  node server/scripts/restore-encrypted.mjs /backups/hub-YYYYMMDDTHHMMSSZ.dump.enc
-```
-
-Verify the migration ledger, representative rows, and constraints without printing character or homebrew
-bodies:
-
-```bash
-docker exec hub-restore-drill psql -U postgres -d hub_restore -c \
-  'SELECT version, filename, applied_at FROM hub.schema_migrations ORDER BY version;'
-docker exec hub-restore-drill psql -U postgres -d hub_restore -c \
-  'SELECT (SELECT count(*) FROM hub.campaigns) campaigns,
-          (SELECT count(*) FROM hub.characters) characters,
-          (SELECT count(*) FROM hub.dm_workspaces) workspaces,
-          (SELECT count(*) FROM hub.domain_events) events;'
-docker exec hub-restore-drill psql -U postgres -d hub_restore -c \
-  'SELECT c.id, c.name, count(ch.id) character_count
-     FROM hub.campaigns c LEFT JOIN hub.characters ch ON ch.campaign_id = c.id
-    GROUP BY c.id, c.name ORDER BY c.created_at DESC LIMIT 3;'
-```
-
-Start an isolated BFF readiness check against the restored database:
-
-```bash
-docker compose --env-file .env.hub \
-  -f compose.hub.yml -f compose.hub.public.yml \
-  run --rm --no-deps -p 127.0.0.1:5053:5052 \
-  -e DATABASE_URL="postgresql://postgres:${DRILL_PASSWORD}@hub-restore-drill:5432/hub_restore" \
-  -e HUB_APP_ORIGIN=http://127.0.0.1:5053 \
-  bff
-```
-
-From a second SSH shell, run `curl -fsS http://127.0.0.1:5053/api/ready`, then stop the foreground BFF with
-Ctrl-C. Record the archive SHA-256, duration, row counts, migration version, representative campaign IDs, and
-result in the private operations record.
-
-Delete only the named drill container:
-
-```bash
-docker rm -f hub-restore-drill
-unset DRILL_PASSWORD
-sudo systemctl start thelemar-hub-monitor.service
-```
+The 2026-09-12 r7 drill used `hub-20260912T092100Z.dump.enc`, SHA-256
+`a7737d5bb752805221020f295bd8efef71e9cd8fd496afd9dfc87f804ee80273`. RPO was 3,865 seconds and continuous
+RTO was 6,772 seconds. Four production-derived authenticated browser scenarios passed, exact preserved-r6
+application reads passed against schema `0007`, the isolated environment returned to r7, and every disposable
+resource was removed. The redacted host evidence is mode `0600` at
+`~/.local/state/thelemar-hub/recovery-evidence/hub-rto-20260912T102525Z.json`, SHA-256
+`f5d20e6ac3b3af5c2613dcd93086e52fdc260ea2678dd5abc35b43f9421fad00`. Do not copy its deleted temporary
+credential state into documentation.
 
 ## 6. Daily and release checks
 
@@ -220,11 +216,11 @@ only the Hub BFF and printing
 isolated-restore instructions is a defense-in-depth response to unexpected post-cutover compatibility drift;
 no automatic path reverses a migration or restores over production.
 
-After this automation merges, the operator must still run a real-host induced-failure drill: lock contention,
-failed backup before cutover, and a forced post-cutover health failure with compatible application rollback.
-Record the evidence paths, Hub service/image state, database migration state, and confirmation that no
-destructive Compose or volume operation occurred. Do not claim the release gate complete from local
-simulations.
+The r7 release qualification completed the live Oracle dry-run/release and induced-failure coverage: lock
+contention, failed backup before cutover, and forced post-cutover health failure with compatible application
+rollback. Retain the redacted release evidence under `~/.local/state/thelemar-hub/releases/`; do not repeat these
+host mutations merely to close V1-G1. The remaining V1-G1 evidence is the first genuine scheduled daily
+maintenance and backup executions.
 
 ## Stop conditions
 

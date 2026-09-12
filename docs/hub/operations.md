@@ -1,7 +1,7 @@
 # Campaign Hub operations
 
 > **Status:** Current portable procedures plus Oracle host installation runbook
-> **Last verified:** 2026-09-06
+> **Last verified:** 2026-09-12
 > **Owner:** Campaign Hub maintainers
 
 The commands below have been exercised locally against PostgreSQL 17. The reused Oracle host is now dedicated
@@ -9,8 +9,9 @@ to the Campaign Hub after Foundry was intentionally decommissioned; release auto
 named Hub Compose services and does not perform host-wide cleanup. The deployment uses
 nightly encrypted portable backups rather than managed PITR. Installation, off-machine copying, monitoring,
 and the isolated restore drill are defined in
-[Oracle host operations](runbooks/oracle-operations.md); the resulting evidence must still be produced on the
-live host before private launch.
+[Oracle host operations](runbooks/oracle-operations.md). Manual operations, monitoring, off-machine copying,
+authenticated recovery, and exact-release rollback passed on Oracle on 2026-09-12. The first genuine daily
+maintenance and backup timer executions still must be observed before private launch.
 
 ## Local/initial setup
 
@@ -97,8 +98,9 @@ After restore:
 4. Record the backup timestamp, restore duration, checks, and operator.
 5. Destroy the drill database.
 
-Private V1 cannot be considered launch-ready until this drill is executed against the deployed Oracle
-PostgreSQL stack and meets the documented RPO/RTO.
+The 2026-09-12 Oracle drill met the documented objectives: RPO 3,865 seconds and continuous RTO 6,772 seconds,
+with exact-r7 authenticated workflows, exact-r6 compatibility on schema `0007`, exact-r7 return, and complete
+disposable cleanup. Repeat at least every 35 days and after a material recovery-path change.
 
 ## Retention and quotas
 
@@ -157,9 +159,9 @@ use the schema owner. The backup command should use the read-only backup role wh
 
 ## Current launch gaps
 
-- prove the checked-in Oracle maintenance, backup, and monitor timers under scheduled execution;
-- complete an encrypted off-machine pull from a second trusted computer;
-- complete and record an isolated restore and rollback against release `hub-staging-2026-09-01` at `8f181712`;
-- complete the physical one-DM/two-player game day after the host-operations proof passes.
+- prove the first genuine scheduled daily maintenance and backup executions; the five-minute monitor schedule
+  has already passed;
+- complete the physical [one-DM/two-player game day](runbooks/private-game-day.md) after the scheduled
+  maintenance/backup proof passes.
 
 See the [living roadmap](roadmap.md) and [runbooks](runbooks/README.md).

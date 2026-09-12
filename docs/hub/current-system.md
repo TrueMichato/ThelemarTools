@@ -1,14 +1,15 @@
 # Campaign Hub current system
 
 > **Status:** Current implementation reference
-> **Scope:** Repository implementation through PRs #242/#243; deployed Oracle baseline identified separately
-> **Last verified:** 2026-09-05
+> **Scope:** Repository implementation through PR #253; deployed Oracle baseline identified separately
+> **Last verified:** 2026-09-12
 > **Owner:** Campaign Hub maintainers
 
 This document describes what exists in the repository. It is not the delivery plan, and repository implementation
-must not be confused with target-environment promotion. Oracle still runs release `hub-staging-2026-09-01` at
-`8f181712`; merged repository head `b8d31d3416b934cc9275b859b5932db050005351` is not yet deployed. Start here
-when changing Hub behavior, then follow the linked domain, protocol, security, operations, and
+must not be confused with target-environment promotion. Oracle runs annotated release
+`hub-staging-2026-09-10-r7` at `77d955c053dcdfe949235620db93f7eba477af34`; later repository changes are not
+deployed evidence until separately promoted. Start here when changing Hub behavior, then follow the linked
+domain, protocol, security, operations, and
 [living roadmap](roadmap.md) references.
 
 ## Product boundary
@@ -67,8 +68,8 @@ flowchart LR
 ```
 
 The repository contains a dedicated BFF OCI image and a PostgreSQL/migrator/role-grant/BFF/static/same-origin-
-edge Compose topology verified locally and deployed on Oracle. Phase 6G deployed release
-`hub-staging-2026-09-01` at `8f181712` to the private staging environment.
+edge Compose topology verified locally and deployed on Oracle. Phase 6G currently runs release
+`hub-staging-2026-09-10-r7` at `77d955c053dcdfe949235620db93f7eba477af34` in the private staging environment.
 
 ## Character persistence
 
@@ -269,7 +270,9 @@ limits, and WebSocket context; live ingress spoofing evidence is still required.
 
 ## Deployment status
 
-Phase 6G is complete for release `hub-staging-2026-09-01` at `8f181712`. The newer implementation merged through
-`b8d31d3416b934cc9275b859b5932db050005351` has not been promoted to Oracle. Before expanding the allowlist,
-complete V1-G1's deliberate exact-release promotion and host-operations/recovery proof, then V1-G2's physical
-one-DM/two-player game day and explicit go/no-go in the [living roadmap](roadmap.md).
+Phase 6G is complete for release `hub-staging-2026-09-10-r7` at
+`77d955c053dcdfe949235620db93f7eba477af34`. Its manual operations, off-machine backup, authenticated restore,
+RPO/RTO, exact-r6 rollback, and exact-r7 return are proven. Before expanding the allowlist, finish V1-G1's first
+genuine daily maintenance/backup timer evidence, then execute V1-G2's
+[one-DM/two-player game day](runbooks/private-game-day.md) and explicit go/no-go in the
+[living roadmap](roadmap.md).

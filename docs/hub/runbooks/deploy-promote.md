@@ -1,6 +1,6 @@
 # Runbook: deploy and promote
 
-> **Status:** Oracle one-command release implemented; live induced-failure drill pending
+> **Status:** Oracle one-command release and live induced-failure drill verified for r7
 > **Owner:** Campaign Hub operator
 
 ## Preconditions
