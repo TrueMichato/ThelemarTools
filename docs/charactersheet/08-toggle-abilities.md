@@ -1563,3 +1563,8 @@ is a companion-record flag. See [Beastheart](./22-beastheart.md) §2.2.
 ---
 
 *Previous: [Spellcasting](./07-spellcasting.md) | Next: [Testing Strategy](./09-testing-strategy.md)*
+
+
+## Chained Fury
+
+Rage and Manifest Chains are separate toggles. Spectral Chains on-hit riders open the target-aware modal; selecting grapple, shove, Chain Imprisonment, or Chain Control does not silently mutate a target. The modal records target name, size, distance, save totals, and final shove distance. Ending Rage, ending Manifest Chains, resting, or releasing a target clears active chain effects and occupancy.

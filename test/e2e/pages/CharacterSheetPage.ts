@@ -1799,9 +1799,57 @@ export class CharacterSheetPage {
 				try { btn.click(); return {clicked: true, threwError: false}; } catch (e: any) {
 					return {clicked: true, threwError: true, errorMessage: String(e?.message ?? e)};
 				}
+
 			}
 			return {clicked: false, threwError: false};
 		}, {src: reSrc, flags: reFlags});
+	}
+
+	/**
+	 * Exercise the production Spectral Chains attack → hit confirmation → target
+	 * effect modal path. This intentionally does not call the state target API; it
+	 * proves the same controls a player uses persist and render the effect.
+	 */
+	async rollSpectralChainsTargetEffect (options: {
+		effect?: "grapple" | "restrain" | "shove" | "control-shove";
+		targetName?: string;
+		size?: string;
+		distance?: number;
+	} = {}): Promise<any> {
+		// Rage is a resource-backed bonus-action state in the sheet. Spend the
+		// real resource first, then use the same state transition the resource
+		// control invokes when the compact usage surface hides the toggle row.
+		await this.useResourceByName("Rage");
+		await this.page.evaluate(() => {
+			const state: any = (globalThis as any).charSheet?._state;
+			state?.activateState?.("rage");
+			state?.activateState?.("manifestChains");
+			(globalThis as any).charSheet?._renderCharacter?.();
+		});
+		const effect = options.effect || "restrain";
+		const attack = await this.clickAttackRoll(/Spectral Chains/i);
+		if (!attack.clicked || attack.threwError) throw new Error(`Spectral Chains attack did not click: ${attack.errorMessage || "not found"}`);
+		await this.confirmPrompt("Hit");
+		const enumModal = this.page.locator(".ve-ui-modal__inner:visible, .ui-modal__inner:visible").last();
+		const select = enumModal.locator("select").first();
+		const needle = effect === "restrain" ? "Chain Imprisonment" : effect === "control-shove" ? "Chain Control" : effect === "shove" ? "Shove" : "Grapple";
+		const value = await select.locator("option").evaluateAll((opts, text) => {
+			const option = opts.find((it: HTMLOptionElement) => it.textContent?.toLowerCase().includes(String(text).toLowerCase()));
+			return option?.value ?? null;
+		}, needle);
+		if (value == null) throw new Error(`No on-hit option matched ${needle}`);
+		await select.selectOption(value);
+		await enumModal.getByRole("button", {name: /ok|confirm|apply/i}).first().click();
+
+		const modal = this.page.locator(".ve-ui-modal__inner:visible, .ui-modal__inner:visible").last();
+		await modal.locator("[data-target-name]").fill(options.targetName || "Playwright target");
+		await modal.locator("[data-target-size]").selectOption(options.size || "medium");
+		await modal.locator("[data-target-distance]").fill(String(options.distance ?? 10));
+		if (effect === "restrain") await modal.locator("[data-restraint-save]").fill("1");
+		await modal.locator("[data-act=apply]").click();
+		await this.page.waitForTimeout(250);
+		const targets = await this.getChainedTargets();
+		return targets.find((it: any) => it.targetName === (options.targetName || "Playwright target")) || null;
 	}
 
 	/** Click the initiative roll button on the Combat tab; throws-aware. */

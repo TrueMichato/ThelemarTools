@@ -2075,7 +2075,7 @@ class CharacterSheetCombat {
 		if (picked == null || picked >= options.length) return;
 
 		const opt = options[picked];
-		if (opt.targetAware && opt.id.startsWith("chains-")) {
+		if (opt.targetAware && opt.targetEffect?.source) {
 			await this._pOfferChainedTargetEffect(ctx, opt);
 			return;
 		}
@@ -2132,7 +2132,13 @@ class CharacterSheetCombat {
 					<label class="ve-form-label">Distance (ft.)
 						<input class="form-control" data-target-distance aria-label="Target distance in feet" type="number" min="0" max="${state.getFeatureCalculations()?.chainRange || 30}" value="${state.getFeatureCalculations()?.chainRange || 0}">
 					</label>
-					${opt.id === "chains-restrain" ? `<label class="ve-form-label">STR save total (optional)
+					${opt.targetEffect?.effect === "grapple" || opt.targetEffect?.effect === "restrain" || opt.targetEffect?.effect === "control-shove" ? `<label class="ve-form-label">Grapple save ability
+						<select class="form-control" data-grapple-ability aria-label="Grapple save ability"><option value="str">Strength</option><option value="dex">Dexterity</option></select>
+					</label>
+					<label class="ve-form-label">Grapple save total (optional)
+						<input class="form-control" data-grapple-save aria-label="Target Strength or Dexterity save total" type="number" placeholder="Leave blank if failed">
+					</label>` : ""}
+					${opt.targetEffect?.effect === "restrain" ? `<label class="ve-form-label">STR save total (optional)
 						<input class="form-control" data-restraint-save aria-label="Target Strength save total" type="number" placeholder="Leave blank if failed">
 					</label>` : ""}
 					<div class="ve-flex-h-right mt-2">
@@ -2162,7 +2168,9 @@ class CharacterSheetCombat {
 					size: sizeInput.value,
 					distance: Number(distanceInput.value),
 					riderId: opt.id,
-					effect: opt.id === "chains-restrain" ? "restrain" : opt.id === "chains-control-shove" ? "control-shove" : opt.id === "chains-shove" ? "shove" : "grapple",
+					effect: opt.targetEffect?.effect || "grapple",
+					grappleSaveAbility: modalInner.querySelector("[data-grapple-ability]")?.value || "str",
+					grappleSaveTotal: modalInner.querySelector("[data-grapple-save]")?.value === "" ? null : Number(modalInner.querySelector("[data-grapple-save]")?.value),
 					restraintSaveTotal: restraintSave === "" || restraintSave == null ? null : Number(restraintSave),
 				});
 				if (!result.ok) {
@@ -4076,7 +4084,7 @@ class CharacterSheetCombat {
 	}
 
 	_canRollAttackActionAttack (attack) {
-		if (!this._state?.isInCombat?.() || !this._state.isStateTypeActive?.("awakenedAstralSelf") || !this._isAttackActionRoll(attack)) return true;
+		if (!this._state?.isInCombat?.() || !this._isAttackActionRoll(attack)) return true;
 		const count = this._turnAttackUsage?.attackActionCount || 0;
 		return count < this._getAttackActionAllowance(attack);
 	}
@@ -6883,7 +6891,8 @@ class CharacterSheetCombat {
 		}
 		const summary = document.createElement("div");
 		summary.className = "ve-muted ve-small mb-2";
-		summary.textContent = `${targets.length}/${calc.chainCount || 0} chains occupied · reach ${calc.chainRange || 0} ft.`;
+		const occupied = this._state.getChainedTargetState?.().used ?? targets.filter(it => it.chainIndex != null).length;
+		summary.textContent = `${occupied}/${calc.chainCount || 0} chains occupied · reach ${calc.chainRange || 0} ft.`;
 		container.appendChild(summary);
 		for (const target of targets) {
 			const row = document.createElement("div");
@@ -6896,7 +6905,8 @@ class CharacterSheetCombat {
 			row.appendChild(label);
 			const meta = document.createElement("span");
 			meta.className = "ve-muted ve-small";
-			meta.textContent = `${target.size}${target.restrained ? " · restrained" : " · grappled"}${target.distance != null ? ` · ${target.distance} ft.` : ""}`;
+			const status = target.restrained ? "restrained" : target.grappled ? "grappled" : target.shoved ? "shoved (no chain)" : "tracked";
+			meta.textContent = `${target.size} · ${status}${target.distance != null ? ` · ${target.distance} ft.` : ""}`;
 			row.appendChild(meta);
 			const release = document.createElement("button");
 			release.type = "button";
@@ -6928,14 +6938,24 @@ class CharacterSheetCombat {
 			move.style.minHeight = "44px";
 			move.setAttribute("aria-label", `Move ${target.targetName} within chain range`);
 			move.addEventListener("click", () => {
-				const result = this._state.moveChainedTarget(target.id, Number(distance.value));
+				const doubleMovement = !!row.querySelector("[data-double-movement]")?.checked;
+				if (doubleMovement && !this._isActionTypeAvailable("bonus")) {
+					JqueryUtil.doToast({type: "warning", content: "Your bonus action has already been used this turn."});
+					return;
+				}
+				const result = this._state.moveChainedTarget(target.id, Number(distance.value), {doubleMovement});
 				if (!result.ok) JqueryUtil.doToast({type: "warning", content: `Cannot move target: ${result.reason || "invalid distance"}`});
 				else {
+					if (doubleMovement) this._consumeActionType("bonus");
 					this._page.saveCharacter?.();
 					this.renderChainedTargets();
 				}
 			});
 			row.appendChild(move);
+			const doubleLabel = document.createElement("label");
+			doubleLabel.className = "ve-muted ve-small ml-1";
+			doubleLabel.innerHTML = `<input type="checkbox" data-double-movement aria-label="Spend bonus action to double chain-only movement"> Double`;
+			row.appendChild(doubleLabel);
 			if (target.restrained && target.recurringDamage?.amount) {
 				const damage = document.createElement("button");
 				damage.type = "button";
@@ -6950,6 +6970,18 @@ class CharacterSheetCombat {
 					this._page.saveCharacter?.();
 				});
 				row.appendChild(damage);
+				const repeat = document.createElement("button");
+				repeat.type = "button";
+				repeat.className = "ve-btn ve-btn-xs ve-btn-default ml-1";
+				repeat.textContent = "Repeat";
+				repeat.style.minHeight = "44px";
+				repeat.setAttribute("aria-label", `Repeat recurring damage for ${target.targetName}`);
+				repeat.addEventListener("click", () => {
+					const result = this._state.resolveChainedTargetTurn(target.id, this._state.getCombatRound?.(), {repeat: true});
+					if (result.damage) JqueryUtil.doToast({type: "warning", content: `${target.targetName} takes ${result.damage} ${result.damageType} damage again.`});
+					this._page.saveCharacter?.();
+				});
+				row.appendChild(repeat);
 			}
 			const escape = document.createElement("button");
 			escape.type = "button";
@@ -6958,14 +6990,41 @@ class CharacterSheetCombat {
 			escape.style.minHeight = "44px";
 			escape.setAttribute("aria-label", `Resolve escape for ${target.targetName}`);
 			escape.addEventListener("click", async () => {
-				const raw = await InputUiUtil.pGetUserNumber({title: `${target.targetName} — Escape Check`, min: 0, int: true});
-				if (raw == null) return;
-				const result = this._state.escapeChainedTarget(target.id, raw);
-				if (result.escaped) {
-					JqueryUtil.doToast({type: "success", content: `${target.targetName} escaped the chains.`});
-					this._page.saveCharacter?.();
-					this.renderChainedTargets();
-				} else JqueryUtil.doToast({type: "info", content: `${target.targetName} remains chained (escape DC ${result.dc}).`});
+				const trigger = document.activeElement;
+				const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+					title: `${target.targetName} — Escape`,
+					isMinHeight0: true,
+					cbClose: () => csRestoreModalFocus(trigger),
+				});
+				modalInner.innerHTML = `
+					<div class="cs-combat-target-effect" role="form" aria-label="Chained target escape">
+						<p class="ve-small ve-muted">The target may use Strength or Dexterity against the current grapple DC (${this._state.getFeatureCalculations?.()?.chainGrappleDc || target.escapeDc}).</p>
+						<label class="ve-form-label">Escape ability
+							<select class="form-control" data-escape-ability aria-label="Escape ability">
+								<option value="str">Strength</option><option value="dex">Dexterity</option>
+							</select>
+						</label>
+						<label class="ve-form-label">Save total
+							<input class="form-control" data-escape-total aria-label="Escape save total" type="number" min="0" inputmode="numeric">
+						</label>
+						<div class="ve-flex-h-right mt-2">
+							<button type="button" class="cs-combat-btn" data-act="cancel">Cancel</button>
+							<button type="button" class="cs-combat-btn cs-combat-btn--primary ml-2" data-act="apply">Resolve escape</button>
+						</div>
+					</div>`;
+				modalInner.querySelector("[data-act=cancel]").addEventListener("click", doClose);
+				modalInner.querySelector("[data-act=apply]").addEventListener("click", () => {
+					const raw = modalInner.querySelector("[data-escape-total]").value;
+					if (raw === "") return;
+					const result = this._state.escapeChainedTarget(target.id, Number(raw), {ability: modalInner.querySelector("[data-escape-ability]").value});
+					if (result.escaped) {
+						JqueryUtil.doToast({type: "success", content: `${target.targetName} escaped the chains.`});
+						this._page.saveCharacter?.();
+						doClose();
+						this.renderChainedTargets();
+					} else JqueryUtil.doToast({type: "info", content: `${target.targetName} remains chained (escape DC ${result.dc}).`});
+				});
+				csFocusModalOnOpen(modalInner, {preferSelector: "[data-escape-total]"});
 			});
 			row.appendChild(escape);
 			container.appendChild(row);

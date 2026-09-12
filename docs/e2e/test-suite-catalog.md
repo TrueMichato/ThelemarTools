@@ -73,3 +73,8 @@ the skill reference at
 4. Update
    [`test/e2e/specs/README.md`](../../test/e2e/specs/README.md) to
    match.
+
+
+### Chained Fury target lifecycle
+
+`tgtt-chained-fury-barbarian-minotaur.spec.ts` drives the real Combat-tab Spectral Chains attack, hit confirmation, target-aware effect picker, resource-backed Rage and Manifest Chains toggles, and persisted target controls. The shared page object owns the UI interaction so coverage does not bypass the attack/modal pipeline with direct state mutation.

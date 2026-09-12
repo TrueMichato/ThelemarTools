@@ -653,24 +653,17 @@ export function describeCharacter (spec: CharacterSpec): void {
 					if (!calc.hasManifestChains) {
 						throw new Error("targetLifecycle requires a Chained Fury build with Manifest Chains");
 					}
-					await page.evaluate(() => {
-						const cs: any = (globalThis as any).charSheet;
-						cs?._state?.activateState?.("rage");
-						cs?._state?.activateState?.("manifestChains");
-						cs?._renderCharacter?.();
-					});
-					const applied = await charSheet.applyChainedTargetEffect({
+					const applied = await charSheet.rollSpectralChainsTargetEffect({
 						targetName: tl.targetName || "Playwright target",
 						size: tl.size || "medium",
 						distance: tl.distance ?? 10,
 						effect: tl.effect || "restrain",
-						riderId: tl.effect === "restrain" ? "chains-restrain" : tl.effect === "control-shove" ? "chains-control-shove" : tl.effect === "shove" ? "chains-shove" : "chains-grapple",
 					});
-					expect(applied?.ok, `target-aware chain rider should create a target effect (${applied?.reason || "unknown"})`).toBe(true);
+					expect(applied, "the real attack/modal path should create a target effect").toBeTruthy();
 					const targets = await charSheet.getChainedTargets();
-					expect(targets.some(t => t.id === applied.target.id && t.grappled)).toBe(true);
-					expect(await charSheet.releaseChainedTarget(applied.target.id)).toBe(true);
-					expect(await charSheet.getChainedTargets()).toHaveLength(0);
+					expect(targets.some(t => t.id === applied.id && (t.grappled || t.restrained))).toBe(true);
+					expect(await charSheet.releaseChainedTarget(applied.id)).toBe(true);
+					expect((await charSheet.getChainedTargets()).some(t => t.id === applied.id)).toBe(false);
 				}
 			});
 		}

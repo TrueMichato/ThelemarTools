@@ -5302,6 +5302,10 @@ class CharacterSheetState {
 			// features which explicitly opt into this collection can persist target state
 			// without creating a second source of truth outside CharacterSheetState.
 			targetEffects: [], // [{id, source, targetName, ...effect fields}]
+			// Per-turn accounting for chain-only movement. This is deliberately kept in
+			// CharacterSheetState so Combat, Play Mode, and headless callers share one
+			// source of truth for the bonus-action doubling rule.
+			chainedMovementUsage: {round: null, movementUsed: 0, bonusActionUsed: false},
 		};
 	}
 
@@ -5410,6 +5414,15 @@ class CharacterSheetState {
 			.filter(it => it && typeof it === "object")
 			.map(it => this._normalizeTargetEffect(it))
 			.filter(Boolean);
+		if (!this._data.chainedMovementUsage || typeof this._data.chainedMovementUsage !== "object") {
+			this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false};
+		} else {
+			this._data.chainedMovementUsage = {
+				round: this._data.chainedMovementUsage.round == null ? null : Number(this._data.chainedMovementUsage.round),
+				movementUsed: Math.max(0, Number(this._data.chainedMovementUsage.movementUsed) || 0),
+				bonusActionUsed: !!this._data.chainedMovementUsage.bonusActionUsed,
+			};
+		}
 
 		// Ensure chosenSubfeatures array exists (legacy saves predate structured choices)
 		if (!Array.isArray(this._data.chosenSubfeatures)) {
@@ -21041,6 +21054,7 @@ class CharacterSheetState {
 									name: "Grapple with the chains",
 									attackSourceFeature: "Manifest Chains",
 									targetAware: true,
+									targetEffect: {source: "chained-fury", effect: "grapple"},
 									description: `Grapple the target in addition to dealing damage. You count as ${calculations.chainGrappleSizeBonus} size ${calculations.chainGrappleSizeBonus === 1 ? "category" : "categories"} larger for the grapple.`,
 								});
 								onHit.push({
@@ -21048,6 +21062,7 @@ class CharacterSheetState {
 									name: "Shove with the chains",
 									attackSourceFeature: "Manifest Chains",
 									targetAware: true,
+									targetEffect: {source: "chained-fury", effect: "shove"},
 									description: "Shove the target in addition to dealing damage.",
 								});
 
@@ -21062,6 +21077,7 @@ class CharacterSheetState {
 										name: "Chain Imprisonment (restrain)",
 										attackSourceFeature: "Manifest Chains",
 										targetAware: true,
+										targetEffect: {source: "chained-fury", effect: "restrain"},
 										description: `On a successful grapple, the target must succeed on a Strength saving throw or be restrained until the grapple ends, taking ${level} force damage at the start of each of its turns.`,
 										save: {ability: "str", dc: calculations.chainRestrainDc},
 										recurringDamage: {amount: level, type: "force", when: "start of each of its turns"},
@@ -21077,6 +21093,7 @@ class CharacterSheetState {
 										name: "Chain Control (10 ft. reposition)",
 										attackSourceFeature: "Manifest Chains",
 										targetAware: true,
+										targetEffect: {source: "chained-fury", effect: "control-shove"},
 										description: "On a successful grapple, immediately shove the target 10 feet in any direction, provided it ends within the chains' reach.",
 									});
 								}
@@ -29504,6 +29521,7 @@ class CharacterSheetState {
 		// Rebuild gated conditional save-advantage modifiers from learned combat methods
 		// (e.g. Iron Will). Idempotent; surfaces in the conditional-modifier opt-in picker.
 		this._syncCombatMethodConditionalModifiers();
+		this.reconcileTargetEffects();
 
 		return appliedEffects;
 	}
@@ -61516,6 +61534,7 @@ class CharacterSheetState {
 	startCombat () {
 		this._data.inCombat = true;
 		this._data.combatRound = 1;
+		this._data.chainedMovementUsage = {round: 1, movementUsed: 0, bonusActionUsed: false};
 		this._data.sanguineMasteryLastRerollRound = null;
 		this.applyHybridRegenerationAtTurnStart();
 		this.applyTurnStartEffects();
@@ -61540,6 +61559,7 @@ class CharacterSheetState {
 		this._data.sanguineMasteryLastRerollRound = null;
 		this._data.hybridBloodlustTurnStartRound = null;
 		this._data.hybridBloodlustTurnStartCheck = null;
+		this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false};
 
 		for (const state of this._data.activeStates) {
 			// Fully deactivate transient "consume on attack" states (e.g. Steady Aim)
@@ -61563,6 +61583,7 @@ class CharacterSheetState {
 		if (!this._data.inCombat) return [];
 
 		this._data.combatRound++;
+		this._data.chainedMovementUsage = {round: this._data.combatRound, movementUsed: 0, bonusActionUsed: false};
 		this._data.sanguineMasteryLastRerollRound = null;
 		this.applyHybridRegenerationAtTurnStart();
 		this.applyTurnStartEffects();
@@ -62734,6 +62755,10 @@ class CharacterSheetState {
 		const distance = Number(raw.distance);
 		const declaredDistance = Number(raw.declaredDistance);
 		const chainIndex = Number(raw.chainIndex);
+		const effects = raw.effects && typeof raw.effects === "object" ? raw.effects : {};
+		const grappleEffect = effects.grapple && typeof effects.grapple === "object" ? effects.grapple : {};
+		const shoveEffect = effects.shove && typeof effects.shove === "object" ? effects.shove : {};
+		const restraintEffect = effects.restraint && typeof effects.restraint === "object" ? effects.restraint : {};
 		return {
 			id,
 			source: raw.source || null,
@@ -62755,10 +62780,29 @@ class CharacterSheetState {
 			lastRecurringDamageTurn: raw.lastRecurringDamageTurn == null ? null : Number(raw.lastRecurringDamageTurn),
 			createdAt: Number(raw.createdAt) || Date.now(),
 			updatedAt: Number(raw.updatedAt) || Date.now(),
+			// Keep the effect layers separate from the target identity. The legacy
+			// booleans below are retained as compatibility aliases for old saves and
+			// callers, but chain occupancy is derived from the grapple layer only.
+			effects: {
+				grapple: {
+					active: grappleEffect.active == null ? !!raw.grappled : !!grappleEffect.active,
+					ability: grappleEffect.ability === "dex" ? "dex" : "str",
+					dc: grappleEffect.dc == null ? (raw.escapeDc == null ? null : Number(raw.escapeDc)) : Number(grappleEffect.dc),
+				},
+				shove: {
+					active: shoveEffect.active == null ? !!raw.shoved : !!shoveEffect.active,
+					distance: Math.max(0, Number(shoveEffect.distance == null ? raw.shoveDistance : shoveEffect.distance) || 0),
+				},
+				restraint: {
+					active: restraintEffect.active == null ? !!raw.restrained : !!restraintEffect.active,
+					dc: restraintEffect.dc == null ? (raw.restraintDc == null ? null : Number(raw.restraintDc)) : Number(restraintEffect.dc),
+				},
+			},
 		};
 	}
 
 	getTargetEffects (opts = {}) {
+		this.reconcileTargetEffects();
 		const source = opts.source?.toLowerCase();
 		return this._data.targetEffects
 			.filter(it => !source || String(it.source || "").toLowerCase() === source)
@@ -62804,6 +62848,14 @@ class CharacterSheetState {
 		return this.getTargetEffects({source: "chained-fury"});
 	}
 
+	getChainedTargetOccupants () {
+		this.reconcileTargetEffects();
+		return this._data.targetEffects
+			.filter(it => String(it.source || "").toLowerCase() === "chained-fury")
+			.filter(it => it.effects?.grapple?.active && it.chainIndex != null)
+			.map(it => MiscUtil.copyFast(it));
+	}
+
 	getChainedTargetCapacity () {
 		return this.getFeatureCalculations()?.chainCount || 0;
 	}
@@ -62813,7 +62865,8 @@ class CharacterSheetState {
 		return {
 			available: this.isStateTypeActive("manifestChains") && this.isStateTypeActive("rage"),
 			capacity: calc.chainCount || 0,
-			used: this.getChainedTargets().length,
+			used: this.getChainedTargetOccupants().length,
+			availableChains: Math.max(0, (calc.chainCount || 0) - this.getChainedTargetOccupants().length),
 			range: calc.chainRange || 0,
 			grappleDc: calc.chainGrappleDc || null,
 			restraintDc: calc.chainRestrainDc || null,
@@ -62822,37 +62875,48 @@ class CharacterSheetState {
 
 	applyChainedTargetEffect ({
 		targetId, targetName, name, size = "medium", distance = null, effect = "grapple",
-		riderId, restraintSaveTotal = null, shoveDistance = null,
+		riderId, restraintSaveTotal = null, shoveDistance = null, grappleSaveTotal = null,
+		grappleSaveAbility = "str",
 	} = {}) {
 		const calc = this.getFeatureCalculations() || {};
 		if (!calc.hasManifestChains || !this.isStateTypeActive("rage") || !this.isStateTypeActive("manifestChains")) {
 			return {ok: false, reason: "chains-inactive"};
 		}
 		const existing = targetId ? this._data.targetEffects.find(it => it.id === targetId) : null;
-		if (!existing && this.getChainedTargets().length >= (calc.chainCount || 0)) return {ok: false, reason: "chain-capacity"};
+		const existingGrapple = !!existing?.effects?.grapple?.active || !!existing?.grappled;
+		const wantsGrapple = effect !== "shove" && effect !== "shove-only";
+		if (!existingGrapple && wantsGrapple && this.getChainedTargetOccupants().length >= (calc.chainCount || 0)) return {ok: false, reason: "chain-capacity"};
 		const maxSize = this.getGrappleSizeCategory()?.maxTargetSize;
 		const sizeRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(size).toLowerCase());
 		const maxRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(maxSize || "gargantuan").toLowerCase());
 		if (!calc.grappleSizeUnlimited && maxRank >= 0 && sizeRank > maxRank) return {ok: false, reason: "target-too-large", maxSize};
 		const range = Number(calc.chainRange) || 0;
-		if (distance != null && Number(distance) > range) return {ok: false, reason: "out-of-range", range};
+		if (distance != null && (Number(distance) < 0 || Number(distance) > range)) return {ok: false, reason: "out-of-range", range};
 
 		const id = targetId || `chain-target-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 		const isRestrain = effect === "restrain" || riderId === "chains-restrain";
 		const isShove = effect === "shove" || effect === "control-shove" || riderId === "chains-control-shove";
+		const grappleAbility = grappleSaveAbility === "dex" ? "dex" : "str";
+		const grappleDc = Number(calc.chainGrappleDc) || null;
+		const grappleSucceeded = !wantsGrapple || grappleSaveTotal == null || Number(grappleSaveTotal) < grappleDc;
+		const grappled = wantsGrapple && grappleSucceeded;
 		const restraintDc = calc.chainRestrainDc || null;
-		const restraintSuccess = !isRestrain || restraintSaveTotal == null || Number(restraintSaveTotal) < restraintDc;
+		const restraintSuccess = grappled && (!isRestrain || restraintSaveTotal == null || Number(restraintSaveTotal) < restraintDc);
+		const finalShoveDistance = shoveDistance == null ? (isShove ? (calc.chainShoveDistance || 0) : 0) : Number(shoveDistance);
+		if (isShove && (finalShoveDistance < 0 || Number(distance || existing?.distance || 0) + finalShoveDistance > range)) {
+			return {ok: false, reason: "shove-out-of-range", range, finalDistance: Number(distance || existing?.distance || 0) + finalShoveDistance};
+		}
 		const target = this.upsertTargetEffect({
 			id,
 			source: "chained-fury",
 			effectType: "chained-fury",
 			targetName: targetName || name || existing?.targetName || "Target",
 			size,
-			distance,
-			grappled: true,
+			grappled,
 			restrained: isRestrain && restraintSuccess,
 			shoved: isShove,
-			shoveDistance: shoveDistance == null ? (isShove ? (calc.chainShoveDistance || 0) : 0) : shoveDistance,
+			shoveDistance: finalShoveDistance,
+			distance: distance == null && existing ? existing.distance : (distance == null ? 0 : distance),
 			recurringDamage: isRestrain && restraintSuccess && calc.chainRestrainDamage
 				? {
 					amount: calc.chainRestrainDamage,
@@ -62860,15 +62924,23 @@ class CharacterSheetState {
 					when: "start of each of its turns",
 				}
 				: null,
-			chainIndex: existing?.chainIndex ?? this.getChainedTargets().length,
-			escapeDc: calc.chainGrappleDc || null,
+			chainIndex: grappled ? (existing?.chainIndex ?? this.getChainedTargetOccupants().length) : null,
+			escapeDc: grappleDc,
 			restraintDc,
+			effects: {
+				grapple: {active: grappled, ability: grappleAbility, dc: grappleDc},
+				shove: {active: isShove, distance: finalShoveDistance},
+				restraint: {active: restraintSuccess, dc: restraintDc},
+			},
 		});
 		return {
 			ok: !!target,
 			target,
-			grappled: true,
+			grappled,
 			restrained: !!target?.restrained,
+			grappleSaveSuccess: grappleSucceeded,
+			grappleDc,
+			grappleSaveAbility: grappleAbility,
 			restraintSaveSuccess: restraintSuccess,
 			saveDc: restraintDc,
 		};
@@ -62878,28 +62950,68 @@ class CharacterSheetState {
 	resolveChainedTargetEffect (opts = {}) { return this.applyChainedTargetEffect(opts); }
 	releaseChainedTarget (id) { return this.removeTargetEffect(id); }
 
-	escapeChainedTarget (id, saveTotal = null) {
+	escapeChainedTarget (id, saveTotal = null, {ability = "str"} = {}) {
 		const target = this._data.targetEffects.find(it => it.id === id);
 		if (!target) return {ok: false, reason: "not-found"};
-		if (target.escapeDc != null && saveTotal != null && Number(saveTotal) < target.escapeDc) return {ok: false, escaped: false, dc: target.escapeDc};
-		this.removeTargetEffect(id);
-		return {ok: true, escaped: true};
+		const dc = Number(this.getFeatureCalculations()?.chainGrappleDc) || target.effects?.grapple?.dc || target.escapeDc;
+		const resolvedAbility = ability === "dex" ? "dex" : "str";
+		if (saveTotal != null && Number(saveTotal) < dc) return {ok: false, escaped: false, dc, ability: resolvedAbility};
+		target.grappled = false;
+		target.restrained = false;
+		target.shoved = false;
+		target.recurringDamage = null;
+		target.chainIndex = null;
+		target.effects = {
+			grapple: {active: false, ability: target.effects?.grapple?.ability || "str", dc},
+			shove: {active: false, distance: 0},
+			restraint: {active: false, dc: target.effects?.restraint?.dc ?? target.restraintDc},
+		};
+		target.updatedAt = Date.now();
+		return {ok: true, escaped: true, target: MiscUtil.copyFast(target), dc, ability: resolvedAbility};
 	}
 
-	moveChainedTarget (id, distance) {
+	moveChainedTarget (id, distance, options = {}) {
 		const target = this._data.targetEffects.find(it => it.id === id);
 		if (!target) return {ok: false, reason: "not-found"};
+		if (!target.effects?.grapple?.active || target.chainIndex == null) return {ok: false, reason: "not-grappled"};
 		const range = Number(this.getFeatureCalculations()?.chainRange) || 0;
 		if (Number(distance) < 0 || Number(distance) > range) return {ok: false, reason: "out-of-range", range};
+		const previousDistance = Number(target.distance) || 0;
+		const finalDistance = Number(distance);
+		const delta = Math.abs(finalDistance - previousDistance);
+		const targetRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(target.size || "medium").toLowerCase());
+		const grapplerRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(this.getGrappleSizeCategory()?.effective || "medium").toLowerCase());
+		const canMoveFullSpeed = !!this.getFeatureCalculations()?.chainFreeMovement;
+		const dragMultiplier = canMoveFullSpeed || grapplerRank - targetRank >= 2 ? 1 : 2;
+		const movementCost = delta * dragMultiplier;
+		const round = Number(this._data.combatRound) || 0;
+		if (this._data.chainedMovementUsage.round !== round) {
+			this._data.chainedMovementUsage = {round, movementUsed: 0, bonusActionUsed: false};
+		}
+		const speed = Number(this.getSpeed?.("walk")) || 30;
+		const doubleMovement = !!options.doubleMovement;
+		const available = speed * (doubleMovement ? 2 : 1) - this._data.chainedMovementUsage.movementUsed;
+		if (movementCost > available) return {ok: false, reason: "movement-exceeded", speed, movementCost, available};
+		if (doubleMovement && this._data.chainedMovementUsage.bonusActionUsed) return {ok: false, reason: "bonus-action-used"};
+		this._data.chainedMovementUsage.movementUsed += movementCost;
+		if (doubleMovement) this._data.chainedMovementUsage.bonusActionUsed = true;
 		target.distance = Number(distance);
+		target.movementCost = movementCost;
+		target.dragMultiplier = dragMultiplier;
 		target.updatedAt = Date.now();
-		return {ok: true, target: MiscUtil.copyFast(target)};
+		return {
+			ok: true,
+			target: MiscUtil.copyFast(target),
+			movementCost,
+			dragMultiplier,
+			bonusActionUsed: doubleMovement,
+		};
 	}
 
-	resolveChainedTargetTurn (id, turn = this._data.combatRound) {
+	resolveChainedTargetTurn (id, turn = this._data.combatRound, {repeat = false} = {}) {
 		const target = this._data.targetEffects.find(it => it.id === id);
 		if (!target || !target.restrained || !target.recurringDamage) return {ok: false, damage: 0};
-		if (target.lastRecurringDamageTurn === turn) return {ok: true, damage: 0, alreadyResolved: true};
+		if (!repeat && target.lastRecurringDamageTurn === turn) return {ok: true, damage: 0, alreadyResolved: true};
 		target.lastRecurringDamageTurn = turn;
 		target.updatedAt = Date.now();
 		return {ok: true, damage: target.recurringDamage.amount, damageType: target.recurringDamage.type};
@@ -62908,12 +63020,31 @@ class CharacterSheetState {
 	reconcileTargetEffects () {
 		const calc = this.getFeatureCalculations() || {};
 		const legal = calc.hasManifestChains && this.isStateTypeActive("rage") && this.isStateTypeActive("manifestChains");
-		if (!legal) this.clearTargetEffects("chained-fury");
-		else {
+		if (!legal) {
+			this.clearTargetEffects("chained-fury");
+		} else {
 			const max = calc.chainRange || 0;
 			for (const target of [...this._data.targetEffects]) {
-				if (target.source === "chained-fury" && target.distance != null && target.distance > max) this.removeTargetEffect(target.id);
-				else if (target.source === "chained-fury" && !target.grappled) this.removeTargetEffect(target.id);
+				if (target.source !== "chained-fury") continue;
+				const grappled = !!target.effects?.grapple?.active;
+				if (target.distance != null && target.distance > max) {
+					target.distance = Math.min(max, target.distance);
+				}
+				if (grappled && target.chainIndex == null) {
+					target.chainIndex = this._data.targetEffects
+						.filter(it => it !== target && it.source === "chained-fury" && it.effects?.grapple?.active && it.chainIndex != null)
+						.length;
+				}
+				if (!grappled) target.chainIndex = null;
+				target.escapeDc = calc.chainGrappleDc || null;
+				target.effects.grapple.dc = calc.chainGrappleDc || null;
+				target.restraintDc = calc.chainRestrainDc || null;
+				target.effects.restraint.dc = calc.chainRestrainDc || null;
+				if (target.restrained && !calc.hasChainImprisonment) {
+					target.restrained = false;
+					target.effects.restraint.active = false;
+					target.recurringDamage = null;
+				}
 			}
 		}
 	}
@@ -66362,6 +66493,8 @@ class CharacterSheetState {
 	onShortRest () {
 		// Clear active states that end on rest
 		this.clearStatesOnRest("short");
+		this.clearChainedFuryTargets();
+		this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false};
 
 		// Recover short rest resources (includes Ki/Focus Points)
 		this.recoverResources("short");
@@ -66394,6 +66527,8 @@ class CharacterSheetState {
 	onLongRest (options = {}) {
 		// Clear active states that end on rest
 		this.clearStatesOnRest("long");
+		this.clearChainedFuryTargets();
+		this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false};
 
 		// Recover all HP
 		this._data.hp.current = this.getMaxHp();

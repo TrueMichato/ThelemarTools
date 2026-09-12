@@ -26,7 +26,7 @@ describeCharacter({
 	],
 	signatureToggle: /rage|reckless attack|chained/i,
 	usage: {
-		atLevel: 5,
+		atLevel: 11,
 		useResourceName: "Rage",
 		attackName: /greataxe|battleaxe|maul/i,
 		skillRoll: {name: "Athletics"},

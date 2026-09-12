@@ -1232,7 +1232,8 @@ export class CharacterSheetPlayMode {
 		if (!available && !targets.length) return;
 		const card = this._makeCard(this._elActionsHub, "feature", "Chained Targets");
 		const lede = this._ce("div", "pm-card__lede ve-muted ve-small", card);
-		lede.textContent = `${targets.length}/${calc.chainCount || 0} chains occupied · reach ${calc.chainRange || 0} ft.`;
+		const occupied = this._state.getChainedTargetState?.().used ?? targets.filter(it => it.chainIndex != null).length;
+		lede.textContent = `${occupied}/${calc.chainCount || 0} chains occupied · reach ${calc.chainRange || 0} ft.`;
 		if (!targets.length) {
 			this._ce("div", "ve-muted ve-small", card).textContent = "No creatures chained. Use a target-aware rider after a Spectral Chains hit.";
 			return;
@@ -1244,7 +1245,7 @@ export class CharacterSheetPlayMode {
 			const name = this._ce("span", "pm-chained-target__name", row);
 			name.textContent = target.targetName;
 			const meta = this._ce("span", "pm-chained-target__meta", row);
-			meta.textContent = `${target.size} · ${target.restrained ? "restrained" : "grappled"}${target.distance != null ? ` · ${target.distance} ft.` : ""}`;
+			meta.textContent = `${target.size} · ${target.restrained ? "restrained" : target.grappled ? "grappled" : target.shoved ? "shoved (no chain)" : "tracked"}${target.distance != null ? ` · ${target.distance} ft.` : ""}`;
 			const release = this._ce("button", "pm-chained-target__release", row);
 			release.type = "button";
 			release.textContent = "Release";
@@ -1289,6 +1290,17 @@ export class CharacterSheetPlayMode {
 					this._page._saveCurrentCharacter?.();
 					this.render();
 				});
+				const repeat = this._ce("button", "pm-chained-target__repeat", row);
+				repeat.type = "button";
+				repeat.textContent = "Repeat";
+				repeat.style.minHeight = "44px";
+				repeat.setAttribute("aria-label", `Repeat recurring damage for ${target.targetName}`);
+				this._makeClickable(repeat, `Repeat recurring damage for ${target.targetName}`, () => {
+					const result = this._state.resolveChainedTargetTurn(target.id, this._state.getCombatRound?.(), {repeat: true});
+					if (result.damage) JqueryUtil.doToast({type: "warning", content: `${target.targetName} takes ${result.damage} ${result.damageType} damage again.`});
+					this._page._saveCurrentCharacter?.();
+					this.render();
+				});
 			}
 			const escape = this._ce("button", "pm-chained-target__escape", row);
 			escape.type = "button";
@@ -1296,14 +1308,26 @@ export class CharacterSheetPlayMode {
 			escape.style.minHeight = "44px";
 			escape.setAttribute("aria-label", `Resolve escape for ${target.targetName}`);
 			this._makeClickable(escape, `Resolve escape for ${target.targetName}`, async () => {
-				const raw = await InputUiUtil.pGetUserNumber({title: `${target.targetName} — Escape Check`, min: 0, int: true});
-				if (raw == null) return;
-				const result = this._state.escapeChainedTarget(target.id, raw);
-				if (result.escaped) {
-					JqueryUtil.doToast({type: "success", content: `${target.targetName} escaped the chains.`});
-					this._page._saveCurrentCharacter?.();
-					this.render();
-				} else JqueryUtil.doToast({type: "info", content: `${target.targetName} remains chained (escape DC ${result.dc}).`});
+				const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({title: `${target.targetName} — Escape`, isMinHeight0: true});
+				modalInner.innerHTML = `<div class="cs-combat-target-effect" role="form" aria-label="Chained target escape">
+					<p class="ve-small ve-muted">Strength or Dexterity against DC ${this._state.getFeatureCalculations?.()?.chainGrappleDc || target.escapeDc}.</p>
+					<label class="ve-form-label">Escape ability <select class="form-control" data-escape-ability aria-label="Escape ability"><option value="str">Strength</option><option value="dex">Dexterity</option></select></label>
+					<label class="ve-form-label">Save total <input class="form-control" data-escape-total aria-label="Escape save total" type="number" min="0" inputmode="numeric"></label>
+					<div class="ve-flex-h-right mt-2"><button type="button" class="cs-combat-btn" data-act="cancel">Cancel</button><button type="button" class="cs-combat-btn cs-combat-btn--primary ml-2" data-act="apply">Resolve escape</button></div>
+				</div>`;
+				modalInner.querySelector("[data-act=cancel]").addEventListener("click", doClose);
+				modalInner.querySelector("[data-act=apply]").addEventListener("click", () => {
+					const raw = modalInner.querySelector("[data-escape-total]").value;
+					if (raw === "") return;
+					const result = this._state.escapeChainedTarget(target.id, Number(raw), {ability: modalInner.querySelector("[data-escape-ability]").value});
+					if (result.escaped) {
+						JqueryUtil.doToast({type: "success", content: `${target.targetName} escaped the chains.`});
+						this._page._saveCurrentCharacter?.();
+						doClose();
+						this.render();
+					} else JqueryUtil.doToast({type: "info", content: `${target.targetName} remains chained (escape DC ${result.dc}).`});
+				});
+				csFocusModalOnOpen(modalInner, {preferSelector: "[data-escape-total]"});
 			});
 		}
 	}

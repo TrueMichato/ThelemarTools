@@ -885,3 +885,8 @@ The extractor deliberately skips comment lines: the JSDoc for the modifier shape
 ---
 
 *Previous: [Components Reference](./03-components-reference.md) | Next: [Feature Calculations](./05-feature-calculations.md)*
+
+
+## Chained Fury target effects
+
+Target identity is persisted separately from active effects. Chained Fury records may remain as no-rider or shove-only records while chain occupancy counts only targets with an active grapple effect and a chain slot. Grapple and escape checks accept Strength or Dexterity against the current combat-method DC; Chain Imprisonment keeps its separate Strength save DC. Load, class/subclass changes, level changes, teardown, and rests reconcile derived DCs, range, size, occupancy, and recurring-damage state.

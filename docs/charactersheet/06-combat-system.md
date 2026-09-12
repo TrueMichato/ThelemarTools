@@ -753,3 +753,8 @@ The dice settings dropdown (in `charactersheet.html` near L256) has a **"Skip co
 ---
 
 *Previous: [Feature Calculations](./05-feature-calculations.md) | Next: [Spellcasting](./07-spellcasting.md)*
+
+
+## Data-driven attack allowances and target riders
+
+Attack-action allowances apply to every qualifying feature attack. Chained Fury Unchained Fury grants a third attack only while every Attack-action attack uses Manifest Chains; mixed sequences return to the normal allowance. Target-aware on-hit riders declare target-effect metadata instead of relying on feature-id prefixes. The target modal records identity, grapple/shove/restrain effects, range, final shove position, and accessible Strength/Dexterity escape resolution. Repeating recurring damage is an explicit override.

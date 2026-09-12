@@ -11,6 +11,7 @@ const makeFury = (level = 6) => {
 	state.setAbilityBase("str", 18);
 	state.setAbilityBase("dex", 14);
 	state.setAbilityBase("con", 16);
+	state.setSpeed("walk", 30);
 	state.addClass({
 		name: "Barbarian",
 		source: "TGTT",
@@ -27,10 +28,12 @@ const makeFury = (level = 6) => {
 
 describe("CharacterSheet target/effect lifecycle", () => {
 	it("opts Chained Fury riders into persistence without changing generic rider shape", () => {
-		const state = makeFury(3);
+		const state = makeFury(6);
 		const options = state.getFeatureCalculations().attackOnHitOptions;
 		expect(options.find(o => o.id === "chains-grapple").targetAware).toBe(true);
 		expect(options.find(o => o.id === "chains-shove").targetAware).toBe(true);
+		expect(options.find(o => o.id === "chains-grapple").targetEffect).toEqual({source: "chained-fury", effect: "grapple"});
+		expect(options.find(o => o.id === "chains-restrain").targetEffect).toEqual({source: "chained-fury", effect: "restrain"});
 		expect(options.find(o => o.id === "chains-grapple").description).toContain("Grapple");
 	});
 
@@ -70,7 +73,8 @@ describe("CharacterSheet target/effect lifecycle", () => {
 		expect(state.escapeChainedTarget(target.id, 1)).toMatchObject({ok: false, escaped: false});
 		expect(state.escapeChainedTarget(target.id, 30)).toMatchObject({ok: true, escaped: true});
 		const second = state.createChainedTarget({targetName: "Cultist", distance: 10}).target;
-		expect(state.getChainedTargets()).toHaveLength(1);
+		expect(state.getChainedTargets()).toHaveLength(2);
+		expect(state.getChainedTargetState().used).toBe(1);
 		state.deactivateState("rage");
 		expect(state.getChainedTargets()).toHaveLength(0);
 		expect(second).toBeDefined();
@@ -82,6 +86,47 @@ describe("CharacterSheet target/effect lifecycle", () => {
 		json.targetEffects = [{id: "stale", source: "chained-fury", targetName: "Stale", size: "not-a-size"}];
 		const restored = new CharacterSheetState();
 		restored.loadFromJson(json);
-		expect(restored.getTargetEffects()).toEqual([]);
+		expect(restored.getTargetEffects()).toHaveLength(1);
+		expect(restored.getChainedTargetState().used).toBe(0);
+	});
+
+	it("resolves grapple and escape with either Strength or Dexterity against the live method DC", () => {
+		const state = makeFury(6);
+		const failed = state.applyChainedTargetEffect({
+			targetName: "Dextrous target",
+			distance: 10,
+			grappleSaveAbility: "dex",
+			grappleSaveTotal: state.getFeatureCalculations().chainGrappleDc,
+		});
+		expect(failed).toMatchObject({ok: true, grappled: false, grappleSaveSuccess: false});
+		const target = state.createChainedTarget({targetName: "Escaper", distance: 10}).target;
+		state.setAbilityBase("str", 20);
+		expect(state.escapeChainedTarget(target.id, 15, {ability: "dex"})).toMatchObject({ok: false, escaped: false, dc: 16});
+		expect(state.escapeChainedTarget(target.id, 16, {ability: "dex"})).toMatchObject({ok: true, escaped: true, ability: "dex"});
+	});
+
+	it("keeps shove-only records out of chain occupancy and validates the final shove distance", () => {
+		const state = makeFury(10);
+		const shove = state.applyChainedTargetEffect({targetName: "Shoved", distance: 10, effect: "shove", riderId: "chains-shove"});
+		expect(shove).toMatchObject({ok: true, grappled: false});
+		expect(state.getChainedTargetState().used).toBe(0);
+		expect(state.applyChainedTargetEffect({
+			targetName: "Control",
+			distance: 20,
+			effect: "control-shove",
+			riderId: "chains-control-shove",
+			shoveDistance: 10,
+		})).toMatchObject({ok: false, reason: "shove-out-of-range", finalDistance: 30});
+	});
+
+	it("accounts for drag movement, doubled chain-only movement, and the level-14 exception", () => {
+		const pre14 = makeFury(10);
+		const target = pre14.createChainedTarget({targetName: "Large", size: "large", distance: 0}).target;
+		expect(pre14.moveChainedTarget(target.id, 15)).toMatchObject({ok: true, movementCost: 30, dragMultiplier: 2});
+		expect(pre14.moveChainedTarget(target.id, 25)).toMatchObject({ok: false, reason: "movement-exceeded"});
+		const level14 = makeFury(14);
+		const free = level14.createChainedTarget({targetName: "Huge", size: "huge", distance: 0}).target;
+		expect(level14.moveChainedTarget(free.id, 30, {doubleMovement: true})).toMatchObject({ok: true, movementCost: 30, dragMultiplier: 1});
+		expect(level14.resolveChainedTargetTurn(free.id, 1, {repeat: true})).toMatchObject({ok: false});
 	});
 });

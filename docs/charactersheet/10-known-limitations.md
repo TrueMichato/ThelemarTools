@@ -1095,3 +1095,8 @@ are **never** bundled — they have a real home, and copying them would launder
 someone else's content. Their hovers work only for a reader who has that brew
 installed, which the export reports as an informational note rather than a
 warning.
+
+
+## Chained Fury status
+
+The sheet tracks Chained Fury target identity and active effects in persisted state. Movement uses current walking speed and normal grapple drag cost; Unchained Fury removes the extra drag surcharge but does not remove movement accounting. Optional bonus-action doubling is tracked per combat round. Combat and Play Mode expose keyboard-reachable, 44px target controls with safe-area spacing on mobile.

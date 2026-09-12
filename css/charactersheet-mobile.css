@@ -1985,3 +1985,33 @@
 		transition-duration: 0.01ms !important;
 	}
 }
+@media (max-width: 600px) {
+	.charsheet__chained-target-row,
+	.pm-chained-target {
+		display: grid;
+		grid-template-columns: 1fr;
+		align-items: stretch;
+		gap: .5rem;
+		padding: .65rem 0;
+	}
+
+	.charsheet__chained-target-row > *,
+	.pm-chained-target > * {
+		margin-left: 0 !important;
+		width: 100%;
+	}
+
+	.charsheet__chained-target-row button,
+	.charsheet__chained-target-row input,
+	.charsheet__chained-target-row select,
+	.pm-chained-target button,
+	.pm-chained-target input,
+	.pm-chained-target select {
+		min-height: 44px;
+	}
+
+	.cs-combat-target-effect {
+		width: min(100%, 32rem);
+		padding-bottom: env(safe-area-inset-bottom);
+	}
+}
