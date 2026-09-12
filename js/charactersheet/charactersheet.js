@@ -4171,10 +4171,7 @@ class CharacterSheetPage {
 			const effective = breakdown.total;
 			(/** @type {*} */ (document.getElementById(`charsheet-ability-${abl}-score`))).textContent = score;
 			const modCell = /** @type {*} */ (document.getElementById(`charsheet-ability-${abl}-mod`));
-			const tooltipLines = breakdown.components.map(comp => `${comp.icon} ${comp.name}: ${comp.value >= 0 ? "+" : ""}${comp.value}`);
-			tooltipLines.push(`─────────\n🎯 Total: ${this._formatMod(effective)}`);
-			if (canonical !== effective) tooltipLines.push(`(intrinsic: ${this._formatMod(canonical)})`);
-			const tooltip = tooltipLines.join("\n");
+			const tooltip = this._formatD20BreakdownTooltip(breakdown);
 			// Pass the breakdown as the effective span's tooltip so hovering the
 			// effective (+N) value shows the SAME breakdown as the canonical value
 			// (the inner span title would otherwise override the cell's title).
@@ -4226,10 +4223,7 @@ class CharacterSheetPage {
 			const breakdown = this._state.getSaveBreakdown(abl);
 			const effective = breakdown.total;
 			const canonical = breakdown.canonical ?? breakdown.total;
-			const tooltipLines = breakdown.components.map(comp => `${comp.icon} ${comp.name}: ${comp.value >= 0 ? "+" : ""}${comp.value}`);
-			tooltipLines.push(`─────────\n🎯 Total: ${this._formatMod(effective)}`);
-			if (canonical !== effective) tooltipLines.push(`(intrinsic: ${this._formatMod(canonical)})`);
-			const tooltip = tooltipLines.join("\n");
+			const tooltip = this._formatD20BreakdownTooltip(breakdown);
 			// Pass the breakdown as the effective span's tooltip so hovering the
 			// effective (+N) value shows the SAME breakdown as the row title.
 			const modHtml = this._formatModWithEffective(canonical, effective, {titleEffective: tooltip});
@@ -4297,10 +4291,7 @@ class CharacterSheetPage {
 			const breakdown = this._state.getSkillBreakdown(skillKey);
 			const effective = breakdown.total;
 			const canonical = breakdown.canonical ?? breakdown.total;
-			const tooltipLines = breakdown.components.map(comp => `${comp.icon} ${comp.name}: ${comp.value >= 0 ? "+" : ""}${comp.value}`);
-			tooltipLines.push(`─────────\n🎯 Total: ${this._formatMod(effective)}`);
-			if (canonical !== effective) tooltipLines.push(`(intrinsic: ${this._formatMod(canonical)})`);
-			const skillTooltip = tooltipLines.join("\n");
+			const skillTooltip = this._formatD20BreakdownTooltip(breakdown);
 			// Pass the breakdown as the effective span's tooltip so hovering the
 			// effective (+N) value shows the SAME breakdown as the row title.
 			const modHtml = this._formatModWithEffective(canonical, effective, {titleEffective: skillTooltip});
@@ -4903,17 +4894,26 @@ class CharacterSheetPage {
 		return true;
 	}
 
+	_renderInitiativeStat () {
+		const breakdown = this._state.getInitiativeBreakdown();
+		const effective = breakdown.total;
+		const canonical = breakdown.canonical ?? effective;
+		const tooltip = this._formatD20BreakdownTooltip(breakdown, {
+			trailingLines: ["Click to roll Initiative (Shift=Adv, Ctrl=Dis)"],
+		});
+
+		const display = document.getElementById("charsheet-disp-initiative");
+		if (display) display.innerHTML = this._formatModWithEffective(canonical, effective, {titleEffective: tooltip});
+		document.getElementById("charsheet-box-initiative")?.setAttribute("title", tooltip);
+	}
+
 	_renderCombatStats () {
 		// AC with breakdown
 		const acBreakdown = this._state.getAcBreakdown();
 		(/** @type {*} */ (document.getElementById("charsheet-disp-ac"))).textContent = acBreakdown.total;
 		this._renderAcBreakdown(acBreakdown);
 
-		const initBreakdown = this._state.getInitiativeBreakdown();
-		const initEffective = initBreakdown.total;
-		const initCanonical = initBreakdown.canonical ?? initEffective;
-		(/** @type {*} */ (document.getElementById("charsheet-disp-initiative"))).innerHTML = this._formatModWithEffective(initCanonical, initEffective);
-		this._renderStatBreakdown("#charsheet-initiative-breakdown", initBreakdown);
+		this._renderInitiativeStat();
 
 		// Calculate speed with exhaustion penalty
 		const exhaustion = this._state.getExhaustion();
@@ -6096,7 +6096,7 @@ class CharacterSheetPage {
 		if (initMod !== 0) {
 			initBox.classList.add(initMod > 0 ? "charsheet__combat-stat--modified-positive" : "charsheet__combat-stat--modified-negative");
 		}
-		initBox.setAttribute("title", initMod !== 0 ? `Initiative modified by ${initMod >= 0 ? "+" : ""}${initMod}` : "Click to roll Initiative (Shift=Adv, Ctrl=Dis)");
+		// The full dynamic title is owned by _renderInitiativeStat().
 
 		// Speed indicator
 		const speedBox = document.getElementById("charsheet-box-speed");
@@ -17548,6 +17548,33 @@ class CharacterSheetPage {
 		const effectiveStr = fmt(eff);
 		const title = (opts.titleEffective || "Effective bonus (with active mods)").replace(/"/g, "&quot;");
 		return `${canonicalStr}<span class="charsheet__mod-effective ${dirClass}" title="${title}">(${effectiveStr})</span>`;
+	}
+
+	/**
+	 * Format the native hover tooltip shared by ability checks, saves, skills,
+	 * and initiative.
+	 *
+	 * @param {{total?: number, canonical?: number, components?: Array<{icon?: string, name: string, value: number}>, diceBonuses?: Array<{dice: string, sign?: number, source: string}>}} breakdown
+	 * @param {{totalIcon?: string, totalLabel?: string, trailingLines?: string[]}} [opts]
+	 * @returns {string}
+	 */
+	_formatD20BreakdownTooltip (breakdown, opts = {}) {
+		const effective = Number(breakdown?.total) || 0;
+		const canonical = breakdown?.canonical == null ? effective : Number(breakdown.canonical) || 0;
+		const lines = (breakdown?.components || []).map(comp => {
+			const icon = comp.icon ? `${comp.icon} ` : "";
+			return `${icon}${comp.name}: ${this._formatMod(comp.value)}`;
+		});
+
+		(breakdown?.diceBonuses || []).forEach(die => {
+			const sign = die.sign < 0 ? "−" : "+";
+			lines.push(`🎲 ${die.source}: ${sign}${die.dice}`);
+		});
+
+		lines.push(`─────────\n${opts.totalIcon || "🎯"} ${opts.totalLabel || "Total"}: ${this._formatMod(effective)}`);
+		if (canonical !== effective) lines.push(`(intrinsic: ${this._formatMod(canonical)})`);
+		lines.push(...(opts.trailingLines || []).filter(Boolean));
+		return lines.join("\n");
 	}
 
 	/**

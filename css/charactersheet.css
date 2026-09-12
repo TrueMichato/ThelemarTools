@@ -4717,8 +4717,7 @@ body[data-font="readable"] {
 
 .charsheet__combat-stat--ac:hover .charsheet__ac-breakdown,
 .charsheet__combat-stat--ac.is-expanded .charsheet__ac-breakdown,
-.charsheet__combat-stat--speed:hover .charsheet__stat-breakdown,
-.charsheet__combat-stat--initiative:hover .charsheet__stat-breakdown {
+.charsheet__combat-stat--speed:hover .charsheet__stat-breakdown {
 	opacity: 1;
 	visibility: visible;
 	pointer-events: auto;
