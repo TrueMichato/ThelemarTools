@@ -1,0 +1,16 @@
+{
+  "goal_id": "tgtt-gambler-rogue-support",
+  "status": "building",
+  "iteration": 1,
+  "builder_model": "GPT:5.6-Luna",
+  "inspector_model": "GPT:5.6-Sol",
+  "initial_sha": "4a84b403c9f0c5e2e091673859e8f5d2585c492c",
+  "created_at": "2026-09-12T21:39:56.873+03:00",
+  "history": [
+    {
+      "iteration": 1,
+      "verdict": "FAIL",
+      "summary": "Playwright and repository gates fail; Gambling Table effects, pending cast UI, atomic resolution, source gating, respec cleanup, and regression coverage are incomplete."
+    }
+  ]
+}
