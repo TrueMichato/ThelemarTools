@@ -48,6 +48,44 @@ function makeCombat (overrides = {}) {
 	return combat;
 }
 
+function makeRollableCombat () {
+	const combat = makeCombat({
+		state: {
+			getAttacks: () => [{id: "atk-1", name: "Sword", isMelee: true, abilityMod: "str", range: "melee"}],
+			getTemporaryAttacks: () => [],
+			getActiveStateAttacks: () => [],
+			getWeaponAbilityMod: () => 3,
+			getProficiencyBonus: () => 2,
+			getAbilityMod: () => 3,
+			getAttackModifierContributions: () => [],
+			getBonusFromStates: () => 0,
+			getCriticalRange: () => 20,
+			getFeatureCalculations: () => ({}),
+			hasAdvantageFromStates: () => false,
+			hasDisadvantageFromStates: () => false,
+			aggregateModifiers: () => ({conditionalsAvailable: [], advantage: false, disadvantage: false}),
+			isStateTypeActive: () => false,
+		},
+		page: {
+			rollD20: (opts = {}) => ({roll: 10, mode: opts.mode || "normal"}),
+			getModeLabel: () => "",
+			formatD20Breakdown: () => "",
+			pAnimateD20: () => {},
+			showDiceResult: () => null,
+			_offerGuidedStrikePostAttack: () => {},
+		},
+	});
+	combat._battleTacticToggles = {};
+	combat._flankingEnabled = false;
+	combat._renderSneakAttackToggle = () => {};
+	combat._isSneakAttackAvailableThisTurn = () => false;
+	combat._runPostAttackHooks = async () => {};
+	combat._consumeOnAttackStates = () => {};
+	combat._getSelectedAmmoForWeapon = () => null;
+	combat._getCombatLocalAttackBonus = () => ({bonus: 0, parts: []});
+	return combat;
+}
+
 describe("_armChannelSpellRider", () => {
 	it("arms a transient rider with the on-hit dice for the given weapon", () => {
 		const combat = makeCombat();
@@ -147,18 +185,28 @@ describe("_clearPendingSpellRider (discard)", () => {
 });
 
 describe("fresh attack roll discards an un-consumed rider", () => {
-	it("_rollAttack clears a pending rider before rolling", () => {
-		const combat = makeCombat();
+	it("_rollAttack clears a pending rider once the replacement attack is committed", async () => {
+		const combat = makeRollableCombat();
 		combat._pendingSpellRider = {attackId: "atk-1", dice: "1d8"};
-		combat._cachedAttacks = [];
-		combat._state.getAttacks = () => [{id: "atk-1", name: "Sword", range: "5 ft."}];
-		combat._state.getTemporaryAttacks = () => [];
-		combat._state.getActiveStateAttacks = () => [];
-		// Throw right AFTER the discard guard (which runs before any bonus math) so we
-		// don't have to mock the whole roll pipeline; the clear must already have happened.
-		combat._state.getWeaponAbilityMod = () => { throw new Error("stop"); };
-		expect(() => combat._rollAttack("atk-1", {})).toThrow("stop");
+		await expect(combat._rollAttack("atk-1", {})).resolves.toBe(true);
 		expect(combat._pendingSpellRider).toBeNull();
+	});
+
+	it("_rollAttack preserves a pending rider when conditional selection cancels", async () => {
+		const combat = makeRollableCombat();
+		const rider = {attackId: "atk-1", dice: "1d8"};
+		combat._pendingSpellRider = rider;
+		combat._state.aggregateModifiers = () => ({
+			conditionalsAvailable: [{id: "target-ogre", name: "Target: Ogre", advantage: true}],
+			advantage: false,
+			disadvantage: false,
+		});
+		combat._page._pPickConditionalModifiers = jest.fn(async () => ({cancelled: true, selected: []}));
+		combat._page.rollD20 = jest.fn(combat._page.rollD20);
+
+		await expect(combat._rollAttack("atk-1", {})).resolves.toBe(false);
+		expect(combat._pendingSpellRider).toBe(rider);
+		expect(combat._page.rollD20).not.toHaveBeenCalled();
 	});
 });
 

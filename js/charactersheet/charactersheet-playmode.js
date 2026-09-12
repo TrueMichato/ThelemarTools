@@ -1539,14 +1539,55 @@ export class CharacterSheetPlayMode {
 				dur.textContent = `${state.roundsRemaining}r`;
 			}
 
-			this._makeClickable(el, `${state.active ? "Deactivate" : "Activate"} ${state.name || state.type}`, () => {
-				this._state.toggleActiveState(state.id);
-				this._logActivity("fire", `${!state.active ? "Activated" : "Deactivated"} ${state.name || state.type}`);
+			this._makeClickable(el, `${state.active ? "Deactivate" : "Activate"} ${state.name || state.type}`, async () => {
+				const isChanged = await this._pToggleActiveState(state);
+				if (!isChanged) return;
+				this._logActivity("fire", `${state.active ? "Activated" : "Deactivated"} ${state.name || state.type}`);
 				// Re-render both status bar (conditions/concentration may change) and actions hub
 				this._renderStatusBar();
 				this._renderActionsHub();
 			});
 		});
+	}
+
+	async _pToggleActiveState (state) {
+		const wasActive = !!state.active;
+		let isPageActivation = false;
+
+		if (wasActive) {
+			if (state.stateTypeId === "custom") this._state.toggleActiveState(state.id);
+			else this._state.deactivateState(state.stateTypeId, {reason: "manual"});
+			await this._page?._pDrainPendingStateEndSaves?.();
+		} else {
+			const activatableFeature = this._state.getActivatableFeatures?.()
+				.find(it => state.stateTypeId === "custom"
+					? it.feature?.id === state.sourceFeatureId
+					: it.stateTypeId === state.stateTypeId);
+			if (activatableFeature && this._page?._activateFeatureState) {
+				isPageActivation = true;
+				const stateType = activatableFeature.activationInfo?.stateType
+					|| this._state.constructor?.ACTIVE_STATE_TYPES?.[activatableFeature.stateTypeId];
+				const resourceCost = activatableFeature.resource?.cost ??
+					activatableFeature.activationInfo?.resourceCost ??
+					stateType?.resourceCost ??
+					1;
+				await this._page._activateFeatureState(
+					activatableFeature.feature,
+					activatableFeature.stateTypeId,
+					stateType,
+					activatableFeature.resource,
+					resourceCost,
+					activatableFeature.activationInfo,
+				);
+			} else this._state.toggleActiveState(state.id);
+		}
+
+		const isChanged = wasActive !== !!state.active;
+		if (!isChanged) return false;
+
+		if (!isPageActivation) await this._page?._saveCurrentCharacter?.();
+		this._page?._renderActiveStates?.();
+		return true;
 	}
 
 	_renderCombatMethods () {

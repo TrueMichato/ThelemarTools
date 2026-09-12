@@ -470,7 +470,10 @@ The AC bonus, Acrobatics advantage and melee Sneak-Attack licence are **not**
 calculations — they are effects on the `dancing` active state, so they exist
 only while the Dance is running. Read them via `getBonusFromStates("ac")`,
 `getSkillAdvantageState("acrobatics")` and
-`canSneakAttackWithoutAdvantage({isMelee})`. There is deliberately no
+`canSneakAttackWithoutAdvantage({isMelee})`. Tantalizing Shivers and Percussive
+Strike attack advantage is likewise not a global calculation: named affected
+creatures live in active-state `targets`, and each becomes a default-off
+conditional modifier (`when attacking <target>`). There is deliberately no
 `hasSnakeCharmer` — no such feature exists in the TGTT data.
 
 **Assassin**

@@ -6928,6 +6928,25 @@ body[data-font="readable"] {
 	color: var(--cs-text-primary, var(--rgb-text));
 }
 
+.charsheet__state-targets,
+.charsheet__combat-state-targets {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 0.25rem;
+	min-width: 0;
+}
+
+.charsheet__state-target,
+.charsheet__combat-state-targets {
+	padding: 0.1rem 0.45rem;
+	border: 1px solid rgba(99, 102, 241, 0.35);
+	border-radius: var(--cs-radius-full, 9999px);
+	background: rgba(99, 102, 241, 0.12);
+	color: var(--cs-text-primary, var(--rgb-text));
+	font-size: 0.75rem;
+	line-height: 1.35;
+}
+
 .charsheet__state-status {
 	font-style: italic;
 	color: var(--cs-text-muted, var(--rgb-text-muted));
@@ -22160,6 +22179,35 @@ body:not(.ve-night-mode) .charsheet__socket-modal .badge-secondary { --cs-badge-
 
 .ve-night-mode .charsheet__cond-pick-chip--dis {
 	color: #f87171;
+}
+
+/* ============================================================
+   Named Target Picker (target-scoped active-state effects)
+   ============================================================ */
+.charsheet__target-picker {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	padding: 0.25rem 0.125rem;
+}
+
+.charsheet__target-picker-lede {
+	margin: 0 0 0.25rem;
+	line-height: 1.5;
+}
+
+.charsheet__target-picker-label {
+	font-weight: 700;
+}
+
+.charsheet__target-picker-input {
+	width: 100%;
+	min-height: 2.5rem;
+	resize: vertical;
+}
+
+.charsheet__target-picker-error:empty {
+	display: none;
 }
 
 /* ==========================================================================

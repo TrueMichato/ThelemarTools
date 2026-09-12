@@ -516,6 +516,7 @@ void globalThis;
  * @property {*} customModifiers
  * @property {Array<NamedModifier>} namedModifiers
  * @property {Array<ToggleAbilityState>} activeStates
+ * @property {Array<PendingStateEndSave>} pendingStateEndSaves
  * @property {Array<*>} tunedMetamagics
  * @property {Object<string, *>} [settings]
  */
@@ -547,14 +548,39 @@ void globalThis;
  * Active toggle/state entry (Rage, Bladesong, etc.) — `_data.activeStates`.
  *
  * @typedef {object} ToggleAbilityState
- * @property {string} type - One of the 24 supported state types.
+ * @property {string} stateTypeId
  * @property {string} [id]
  * @property {boolean} [active]
+ * @property {string} [name]
+ * @property {Array<ActiveStateTarget>} [targets]
  * @property {*} [meta]
  * @property {number} [usesRemaining]
  * @property {string} [sourceFeature]
  * @property {string} [sourceClass]
  * @property {number} [activatedAt]
+ */
+
+/**
+ * A named creature affected by a character-owned active state. Statuses are
+ * reminders only; they are not added to the character's own conditions.
+ *
+ * @typedef {object} ActiveStateTarget
+ * @property {string} id
+ * @property {string} name
+ * @property {string | null} [source]
+ * @property {string[]} [statuses]
+ * @property {boolean} [grantsAttackAdvantage]
+ */
+
+/**
+ * A serialized saving throw that must be resolved after an active state ends.
+ *
+ * @typedef {object} PendingStateEndSave
+ * @property {string} id
+ * @property {string | null} stateId
+ * @property {string} stateTypeId
+ * @property {string} reason
+ * @property {number} queuedAt
  */
 
 /**

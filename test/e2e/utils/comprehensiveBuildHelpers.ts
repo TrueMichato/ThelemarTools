@@ -900,6 +900,15 @@ export type EffectCheck = _EffectCommon & (
 		resourceName?: string;
 		resourceCost?: number;
 	}
+	| {
+		kind: "targetedFeatureActivation";
+		feature: string;
+		stateTypeId: string;
+		targets: string[];
+		prerequisiteStateTypeId?: string;
+		contestWon?: boolean;
+		conditionalRollType?: string;
+	}
 
 	// === Roll: clicking the button doesn't throw ===
 	| {kind: "rollAbilityCheck"; ability: AblKey}
@@ -1533,6 +1542,50 @@ async function _runPassiveOrRollEffect (
 			}
 			if (e.resourceCost != null && info.resourceCost !== e.resourceCost) {
 				throw new Error(`${e.feature} resourceCost=${info.resourceCost}, expected ${e.resourceCost}`);
+			}
+			return;
+		}
+		case "targetedFeatureActivation": {
+			await charSheet.page.evaluate(stateTypeId => {
+				const state: any = (globalThis as any).charSheet?._state;
+				if (state?.isStateTypeActive?.(stateTypeId)) state.deactivateState(stateTypeId, {reason: "test reset"});
+				state._data.pendingStateEndSaves = [];
+				(globalThis as any).charSheet?._renderActiveStates?.();
+			}, e.stateTypeId);
+			if (e.prerequisiteStateTypeId) {
+				await charSheet.page.evaluate(stateTypeId => {
+					(globalThis as any).charSheet?._state?.activateState?.(stateTypeId);
+					(globalThis as any).charSheet?._renderActiveStates?.();
+				}, e.prerequisiteStateTypeId);
+			}
+			await charSheet.activateFeatureWithTargets(e.feature, e.targets, {contestWon: e.contestWon !== false});
+			const result = await charSheet.page.evaluate(({stateTypeId, targets, rollType}) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				const active = state?.getActiveStates?.().find((it: any) => it.active && it.stateTypeId === stateTypeId);
+				const actualTargets = (active?.targets || []).map((it: any) => String(it.name || ""));
+				const probe = rollType ? state?.aggregateModifiers?.(rollType) : null;
+				return {
+					active: !!active,
+					actualTargets,
+					defaultAdvantage: !!probe?.advantage,
+					conditionals: (probe?.conditionalsAvailable || []).map((it: any) => ({
+						name: String(it.name || ""),
+						conditional: String(it.conditional || ""),
+						advantage: !!it.advantage,
+					})),
+					expectedTargets: targets,
+				};
+			}, {stateTypeId: e.stateTypeId, targets: e.targets, rollType: e.conditionalRollType || null});
+			if (!result.active) throw new Error(`${e.feature} did not activate ${e.stateTypeId}`);
+			if (JSON.stringify(result.actualTargets) !== JSON.stringify(result.expectedTargets)) {
+				throw new Error(`${e.feature} targets=${JSON.stringify(result.actualTargets)}, expected ${JSON.stringify(result.expectedTargets)}`);
+			}
+			if (e.conditionalRollType) {
+				if (result.defaultAdvantage) throw new Error(`${e.feature} leaked target advantage onto the default ${e.conditionalRollType} roll`);
+				for (const target of e.targets) {
+					const conditional = result.conditionals.find((it: any) => it.conditional.toLowerCase().includes(target.toLowerCase()));
+					if (!conditional?.advantage) throw new Error(`${e.feature} did not offer target-scoped advantage for ${target}`);
+				}
 			}
 			return;
 		}
@@ -2975,17 +3028,22 @@ export async function assertFeaturesMatrix (
 	// the next at the same level), after the gated block (which runs BEFORE the
 	// loop, so an end-of-function restore would close the door after it), and
 	// once at the end as the backstop.
-	const exhaustionAtEntry = await charSheet.page.evaluate(() => {
-		return (globalThis as any).charSheet?._state?.getExhaustion?.() ?? 0;
-	}).catch(() => 0);
-	const restoreExhaustion = async () => {
-		await charSheet.page.evaluate((lvl) => {
+	const probeStateAtEntry = await charSheet.page.evaluate(() => {
+		const st: any = (globalThis as any).charSheet?._state;
+		return {
+			exhaustion: st?.getExhaustion?.() ?? 0,
+			pendingStateEndSaves: structuredClone(st?._data?.pendingStateEndSaves || []),
+		};
+	}).catch(() => ({exhaustion: 0, pendingStateEndSaves: []}));
+	const restoreProbeState = async () => {
+		await charSheet.page.evaluate(({exhaustion, pendingStateEndSaves}) => {
 			const st: any = (globalThis as any).charSheet?._state;
-			if (st?.getExhaustion?.() !== lvl) {
-				st?.setExhaustion?.(lvl);
+			if (st?.getExhaustion?.() !== exhaustion) {
+				st?.setExhaustion?.(exhaustion);
 				(globalThis as any).charSheet?._renderCharacter?.();
 			}
-		}, exhaustionAtEntry).catch(() => { /* swallow */ });
+			if (st?._data) st._data.pendingStateEndSaves = structuredClone(pendingStateEndSaves);
+		}, probeStateAtEntry).catch(() => { /* swallow */ });
 	};
 
 	// A toggle declaring `requiresStates` is deliberately HIDDEN by
@@ -3012,7 +3070,7 @@ export async function assertFeaturesMatrix (
 		// level — every subsequent probe then measures an exhausted build, which
 		// under Thelemar rules is -1 to every feature DC. Restore before the loop
 		// rather than only at the end, or the backstop closes the door after it.
-		await restoreExhaustion();
+		await restoreProbeState();
 	}
 
 	for (const fc of matrix) {
@@ -3500,11 +3558,11 @@ export async function assertFeaturesMatrix (
 			// level of exhaustion into every later row at the same level —
 			// which, under Thelemar rules, is -1 to every feature DC and made
 			// a correct Percussive Strike DC of 13 read as 12.
-			await restoreExhaustion();
+			await restoreProbeState();
 		}
 	}
 
-	await restoreExhaustion();
+	await restoreProbeState();
 
 	if (errors.length) {
 		throw new Error(`featuresMatrix at L${currentLevel} (${errors.length} failures):\n  - ${errors.join("\n  - ")}`);

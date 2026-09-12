@@ -17,6 +17,7 @@
  * spell attacks via hierarchical matching.
  */
 
+import {jest} from "@jest/globals";
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-combat.js";
@@ -74,13 +75,13 @@ const RANGED_DEX = {id: "bow", name: "Longbow", isRanged: true, abilityMod: "dex
 const FINESSE = {id: "dagger", name: "Dagger", isMelee: true, type: "melee", abilityMod: "finesse", range: "melee", damage: "1d4", damageType: "piercing"};
 
 describe("#7 _rollRecklessAttack — activates state then rolls with scoped advantage", () => {
-	it("activates recklessAttack when off, persists once, and rolls a melee-STR attack with advantage", () => {
+	it("activates recklessAttack when off, persists once, and rolls a melee-STR attack with advantage", async () => {
 		const {state, combat, rollModes, refreshCounts} = mkRecklessCombat();
 		state.addAttack(MELEE_STR);
 
 		expect(state.isStateTypeActive("recklessAttack")).toBe(false);
 
-		const ok = combat._rollRecklessAttack("sword", null);
+		const ok = await combat._rollRecklessAttack("sword", null);
 
 		expect(ok).toBe(true);
 		// State was flipped on and left on.
@@ -94,12 +95,12 @@ describe("#7 _rollRecklessAttack — activates state then rolls with scoped adva
 		expect(refreshCounts.activeStates).toBe(1);
 	});
 
-	it("is idempotent when already reckless — rolls again with advantage but does NOT re-persist/re-render", () => {
+	it("is idempotent when already reckless — rolls again with advantage but does NOT re-persist/re-render", async () => {
 		const {state, combat, rollModes, refreshCounts} = mkRecklessCombat();
 		state.addAttack(MELEE_STR);
 		state.activateState("recklessAttack");
 
-		const ok = combat._rollRecklessAttack("sword", null);
+		const ok = await combat._rollRecklessAttack("sword", null);
 
 		expect(ok).toBe(true);
 		expect(state.isStateTypeActive("recklessAttack")).toBe(true);
@@ -110,11 +111,11 @@ describe("#7 _rollRecklessAttack — activates state then rolls with scoped adva
 		expect(refreshCounts.quickButtons).toBe(0);
 	});
 
-	it("does NOT leak advantage onto a RANGED attack even while reckless is active", () => {
+	it("does NOT leak advantage onto a RANGED attack even while reckless is active", async () => {
 		const {state, combat, rollModes} = mkRecklessCombat();
 		state.addAttack(RANGED_DEX);
 
-		const ok = combat._rollRecklessAttack("bow", null);
+		const ok = await combat._rollRecklessAttack("bow", null);
 
 		expect(ok).toBe(true);
 		expect(state.isStateTypeActive("recklessAttack")).toBe(true);
@@ -156,16 +157,38 @@ describe("#7 _rollRecklessAttack — activates state then rolls with scoped adva
 		expect(rollModes).toEqual([undefined]); // adv + disadv → normal
 	});
 
-	it("bails without touching state for an unknown attackId (never flips reckless on with no roll)", () => {
+	it("bails without touching state for an unknown attackId (never flips reckless on with no roll)", async () => {
 		const {state, combat, rollModes, refreshCounts} = mkRecklessCombat();
 		state.addAttack(MELEE_STR);
 
-		const ok = combat._rollRecklessAttack("does-not-exist", null);
+		const ok = await combat._rollRecklessAttack("does-not-exist", null);
 
 		expect(ok).toBe(false);
 		expect(state.isStateTypeActive("recklessAttack")).toBe(false);
 		expect(rollModes.length).toBe(0);
 		expect(refreshCounts.save).toBe(0);
+	});
+
+	it("rolls back a provisional Reckless Attack when target selection cancels", async () => {
+		const {state, combat, rollModes, refreshCounts} = mkRecklessCombat();
+		state.addAttack(MELEE_STR);
+		state.aggregateModifiers = jest.fn(() => ({
+			total: 0,
+			advantage: false,
+			disadvantage: false,
+			conditionalsAvailable: [{id: "target-ogre", name: "Target: Ogre", advantage: true}],
+		}));
+		combat._page._pPickConditionalModifiers = jest.fn(async () => ({cancelled: true, selected: []}));
+
+		const ok = await combat._rollRecklessAttack("sword", null);
+
+		expect(ok).toBe(false);
+		expect(state.isStateTypeActive("recklessAttack")).toBe(false);
+		expect(rollModes).toEqual([]);
+		expect(refreshCounts.save).toBe(0);
+		expect(refreshCounts.renderStates).toBe(0);
+		expect(refreshCounts.quickButtons).toBe(0);
+		expect(refreshCounts.activeStates).toBe(0);
 	});
 });
 
@@ -212,16 +235,38 @@ describe("#7 _rollAttack — reckless advantage still cancels with disadvantage"
 		return {combat, rollModes};
 	}
 
-	it("advantage alone → the d20 rolls with advantage", () => {
+	it("advantage alone → the d20 rolls with advantage", async () => {
 		const {combat, rollModes} = mkModeCombat({advantage: true, disadvantage: false});
-		expect(combat._rollAttack("sword", null)).toBe(true);
+		await expect(combat._rollAttack("sword", null)).resolves.toBe(true);
 		expect(rollModes).toEqual(["advantage"]);
 	});
 
-	it("advantage AND disadvantage → they cancel to a normal roll (no forced advantage)", () => {
+	it("advantage AND disadvantage → they cancel to a normal roll (no forced advantage)", async () => {
 		const {combat, rollModes} = mkModeCombat({advantage: true, disadvantage: true});
-		expect(combat._rollAttack("sword", null)).toBe(true);
+		await expect(combat._rollAttack("sword", null)).resolves.toBe(true);
 		expect(rollModes).toEqual([undefined]); // normal — neither adv nor disadv
+	});
+
+	it("offers named active-state targets and applies advantage only when selected", async () => {
+		const {state, combat, rollModes} = mkRecklessCombat();
+		state.addAttack(MELEE_STR);
+		state.addActiveState("custom", {
+			name: "Targeted Effect",
+			sourceFeatureId: "targeted-effect",
+			targets: [{name: "Bandit Captain", source: "Targeted Effect", grantsAttackAdvantage: true}],
+		});
+		let offeredConditionals = [];
+		combat._page._pPickConditionalModifiers = async ({conditionalsAvailable}) => {
+			offeredConditionals = conditionalsAvailable;
+			return {
+				appliedConditionalIds: new Set([conditionalsAvailable[0].id]),
+				applied: [conditionalsAvailable[0]],
+				cancelled: false,
+			};
+		};
+		await expect(combat._rollAttack("sword", null)).resolves.toBe(true);
+		expect(offeredConditionals).toEqual([expect.objectContaining({conditional: "when attacking Bandit Captain"})]);
+		expect(rollModes).toEqual(["advantage"]);
 	});
 });
 

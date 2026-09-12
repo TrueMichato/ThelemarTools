@@ -1338,7 +1338,7 @@ class CharacterSheetCombat {
 		return key;
 	}
 
-	_rollAttack (attackId, event, opts = {}) {
+	async _rollAttack (attackId, event, opts = {}) {
 		const attacks = this._state.getAttacks();
 		let attack = attacks.find(a => a.id === attackId);
 		if (!attack && this._cachedAttacks?.length) {
@@ -1360,12 +1360,6 @@ class CharacterSheetCombat {
 			return false;
 		}
 
-		// A fresh attack roll discards any pending channeled-spell on-hit rider that has
-		// not yet been consumed by a damage roll (Booming/Green-Flame Blade timing: the
-		// on-hit damage must ride the SAME attack's damage roll). The ✨ button arms the
-		// rider AFTER calling this method, so its own roll is never self-cleared.
-		if (this._pendingSpellRider) this._clearPendingSpellRider();
-
 		// Active ammunition (Bug #3). The selected quiver ammo's bonuses ride BOTH
 		// the attack and the damage roll, but ammo is consumed ONLY on the damage
 		// roll — a to-hit roll never spends a round. "Regular" (no selection) adds
@@ -1384,6 +1378,21 @@ class CharacterSheetCombat {
 		// Attack → "attack:melee:str") correctly apply to a STR-used finesse weapon.
 		const abilityUsed = this._resolveAttackAbilityKey(attack, isMelee);
 		const attackType = `attack:${isMelee ? "melee" : "ranged"}:${abilityUsed}`;
+		const conditionalProbe = this._state.aggregateModifiers?.(attackType) || {};
+		let appliedConditionalIds = new Set();
+		let appliedConditionals = [];
+		if (conditionalProbe.conditionalsAvailable?.length) {
+			const picked = await this._page._pPickConditionalModifiers?.({
+				rollLabel: attack.name || "Attack",
+				conditionalsAvailable: conditionalProbe.conditionalsAvailable,
+			});
+			if (picked?.cancelled) return false;
+			appliedConditionalIds = picked?.appliedConditionalIds || new Set();
+			appliedConditionals = picked?.applied || [];
+		}
+		const conditionalAggregate = appliedConditionalIds.size
+			? this._state.aggregateModifiers(attackType, {appliedConditionalIds})
+			: conditionalProbe;
 
 		// Check for advantage/disadvantage from active states and conditions. The
 		// hierarchical matcher in hasAdvantageFromStates already resolves a generic
@@ -1393,9 +1402,14 @@ class CharacterSheetCombat {
 		let stateMode;
 		const maneuverAdvantage = !!this._pendingBattleMasterAttackAdvantage;
 		const shadowTargetAdvantage = !!this._shadowKnightDarkTarget && !!attack.isManifestShadowWeapon;
-		const hasAdvantage = this._state.hasAdvantageFromStates?.(attackType) || maneuverAdvantage || shadowTargetAdvantage;
+		const hasAdvantage = this._state.hasAdvantageFromStates?.(attackType)
+			|| conditionalAggregate.advantage
+			|| maneuverAdvantage
+			|| shadowTargetAdvantage;
 		const resoluteWeaponDisadvantage = this._state.isStateTypeActive?.("resoluteStance") && !attack.isSpell;
-		const hasDisadvantage = this._state.hasDisadvantageFromStates?.(attackType) || resoluteWeaponDisadvantage;
+		const hasDisadvantage = this._state.hasDisadvantageFromStates?.(attackType)
+			|| conditionalAggregate.disadvantage
+			|| resoluteWeaponDisadvantage;
 		if (hasAdvantage && !hasDisadvantage) stateMode = "advantage";
 		else if (hasDisadvantage && !hasAdvantage) stateMode = "disadvantage";
 
@@ -1410,6 +1424,7 @@ class CharacterSheetCombat {
 		// modifiers to both. Itemized so each source breaks out in the result.
 		const attackContributions = this._state.getAttackModifierContributions?.({isMelee}) || [];
 		const featureAttackBonus = attackContributions.reduce((sum, c) => sum + (c.value || 0), 0);
+		const conditionalAttackBonus = appliedConditionals.reduce((sum, conditional) => sum + (conditional.bonus || 0), 0);
 
 		// Get bonus from active states (activated abilities like combat stances)
 		const stateAttackBonus = this._state.getBonusFromStates?.("attack", {weaponId: attack.riteWeaponId || attack.id}) || 0;
@@ -1425,8 +1440,15 @@ class CharacterSheetCombat {
 		const extraBonus = (opts?.extraBonus && Number.isFinite(opts.extraBonus.value)) ? opts.extraBonus : null;
 		const extraBonusValue = extraBonus ? extraBonus.value : 0;
 
-		const totalBonus = abilityMod + profBonus + (attack.attackBonus || 0) + featureAttackBonus + stateAttackBonus + localAttackBonus + extraBonusValue + ammoAttackBonus;
+		const totalBonus = abilityMod + profBonus + (attack.attackBonus || 0) + featureAttackBonus + conditionalAttackBonus + stateAttackBonus + localAttackBonus + extraBonusValue + ammoAttackBonus;
 		const exhaustionPenalty = this._state._getExhaustionD20Penalty?.() || 0;
+
+		// A committed fresh attack roll discards any pending channeled-spell
+		// on-hit rider that has not yet been consumed by a damage roll
+		// (Booming/Green-Flame Blade timing: the on-hit damage must ride the SAME
+		// attack's damage roll). Keep it armed while cancellable pre-roll prompts
+		// are open; cancelling a conditional choice is not an attack.
+		if (this._pendingSpellRider) this._clearPendingSpellRider();
 
 		// Roll d20 with advantage/disadvantage support (state mode can be overridden by shift/ctrl keys)
 		const rollResult = this._page.rollD20({event, mode: stateMode, isAttack: true});
@@ -1448,6 +1470,8 @@ class CharacterSheetCombat {
 			resultClass = "charsheet__dice-result-total--fumble";
 			resultNote = "Critical Miss!";
 		}
+		const conditionalNote = this._page._formatAppliedConditionalsNote?.(appliedConditionals);
+		if (conditionalNote) resultNote = resultNote ? `${resultNote}\n${conditionalNote}` : conditionalNote;
 
 		// Build state effect label for display
 		const stateEffectLabel = this._getStateEffectLabel(hasAdvantage, hasDisadvantage);
@@ -1580,19 +1604,33 @@ class CharacterSheetCombat {
 	 * character's next turn), matching the existing quick-toggle behaviour.
 	 * @param {string} attackId
 	 * @param {*} event
-	 * @returns {boolean}
+	 * @returns {Promise<boolean>}
 	 */
-	_rollRecklessAttack (attackId, event) {
+	async _rollRecklessAttack (attackId, event) {
 		// Validate the attack first so we never flip the state on without a roll.
 		const attack = this._findAttackById?.(attackId);
 		if (!attack) return this._rollAttack(attackId, event);
 
-		// Activate once (idempotent): only when not already reckless, so repeated
-		// reckless rolls in the same turn don't spam saves/re-renders.
-		if (!this._state.isStateTypeActive?.("recklessAttack")) {
-			this._state.activateState?.("recklessAttack");
-			// Refresh the state-dependent displays + persist, mirroring the dodge/rage
-			// quick-toggle path (Reckless also grants enemies advantage against you).
+		// Activate provisionally so the normal roll pipeline sees the scoped
+		// advantage. Commit the UI/persistence only after all cancellable pre-roll
+		// prompts succeed; otherwise a cancelled attack must not expose the
+		// character to enemy advantage.
+		const didActivate = !this._state.isStateTypeActive?.("recklessAttack");
+		if (didActivate) this._state.activateState?.("recklessAttack");
+
+		let didRoll;
+		try {
+			didRoll = await this._rollAttack(attackId, event);
+		} catch (e) {
+			if (didActivate) this._state.deactivateState?.("recklessAttack", {reason: "cancelled attack"});
+			throw e;
+		}
+		if (didRoll === false) {
+			if (didActivate) this._state.deactivateState?.("recklessAttack", {reason: "cancelled attack"});
+			return false;
+		}
+
+		if (didActivate) {
 			this.renderCombatStates?.();
 			this.renderCombatEffects?.();
 			this.renderCombatDefenses?.();
@@ -1600,8 +1638,7 @@ class CharacterSheetCombat {
 			this._page?._saveCurrentCharacter?.();
 			this._updateQuickButtonStates?.();
 		}
-
-		return this._rollAttack(attackId, event);
+		return didRoll;
 	}
 
 	/**
@@ -5067,7 +5104,8 @@ class CharacterSheetCombat {
 		}
 
 		// Roll the weapon attack first (this clears any stale rider), THEN arm the new one.
-		this._rollAttack(attackId, event);
+		const didRoll = await this._rollAttack(attackId, event);
+		if (didRoll === false) return;
 		this._armChannelSpellRider(attackId, choice);
 	}
 
@@ -5103,7 +5141,7 @@ class CharacterSheetCombat {
 			attack = eligibleAttacks[picked];
 		}
 
-		const didRoll = this._rollAttack(attack.id, event);
+		const didRoll = await this._rollAttack(attack.id, event);
 		if (didRoll === false) return false;
 		this._armChannelSpellRider(attack.id, choice);
 		return true;
@@ -11459,10 +11497,14 @@ class CharacterSheetCombat {
 						roundsLabel = ` <span class="ve-small ve-muted" title="${state.roundsRemaining} rounds left">(${state.roundsRemaining}r)</span>`;
 					}
 				}
+				const targetNames = (state.targets || []).map(target => target.name).filter(Boolean);
+				const targetsLabel = targetNames.length
+					? ` <span class="charsheet__combat-state-targets" title="${`Affected targets: ${targetNames.join(", ")}`.qq()}">🎯 ${targetNames.map(name => name.qq()).join(", ")}</span>`
+					: "";
 
 				const stateEl = e_({outer: `
 					<div class="charsheet__combat-state-item badge ${this._getStateBadgeClass(state.stateTypeId)} mr-1 mb-1" data-state-id="${state.id}" title="${tooltip}">
-						${state.icon || stateType?.icon || "⚡"} <span class="charsheet__state-name-link">${stateNameHtml}</span>${roundsLabel}
+						${state.icon || stateType?.icon || "⚡"} <span class="charsheet__state-name-link">${stateNameHtml}</span>${roundsLabel}${targetsLabel}
 						${stateType?.activationAction ? `<span class="ve-small" style="opacity: 0.7"> (${this._getActionTypeShortLabel(stateType.activationAction)})</span>` : ""}
 						${triggerHtml}
 						${isEndable ? `<span class="charsheet__state-remove ml-1" title="End">&times;</span>` : ""}
@@ -11475,7 +11517,7 @@ class CharacterSheetCombat {
 				});
 
 				if (isEndable) {
-					stateEl.querySelector(".charsheet__state-remove")?.addEventListener("click", (/** @type {*} */ e) => {
+					stateEl.querySelector(".charsheet__state-remove")?.addEventListener("click", async (/** @type {*} */ e) => {
 						e.stopPropagation();
 						if (state.stateTypeId === "sunShield" && !this._tryConsumeStateToggleAction(stateType)) return;
 						// (R47-a) Divine Favor narrative-boon toggles end via the OWNED path so
@@ -11498,12 +11540,13 @@ class CharacterSheetCombat {
 							// Sync custom abilities panel
 							this._page._customAbilitiesPanel?.render?.();
 						} else {
-							this._state.deactivateState(state.stateTypeId);
+							this._state.deactivateState(state.stateTypeId, {reason: "manual"});
 							// Bridge combat stance deactivation to the stance-specific system
 							if (state.stateTypeId === "combatStance") {
 								this._state.deactivateStance();
 							}
 						}
+						await this._page._pDrainPendingStateEndSaves?.();
 						this.renderCombatStates();
 						this.renderCombatDefenses();
 						this.renderCombatEffects();
@@ -11595,7 +11638,7 @@ class CharacterSheetCombat {
 		this._initCombatTracker();
 	}
 
-	_activateCombatFeature (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
+	async _activateCombatFeature (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
 		// (R47-a) Divine Favor narrative boons are activatable, duration-tracked TOGGLES routed
 		// through the OWNED toggleDivineFavorBoonState() so the created active state carries the
 		// boon's parsed duration/round countdown — the generic _activateFeatureState pipeline
@@ -11612,7 +11655,7 @@ class CharacterSheetCombat {
 			this._page._renderCharacter?.();
 			return;
 		}
-		this._page._activateFeatureState?.(feature, stateTypeId, stateType, resource, resourceCost, activationInfo);
+		await this._page._activateFeatureState?.(feature, stateTypeId, stateType, resource, resourceCost, activationInfo);
 		this.renderCombatStates();
 		this._page._renderActiveStates?.();
 		if (feature.isCustomAbility) {

@@ -72,6 +72,10 @@ static ACTIVE_STATE_TYPES = {
 | `effectsBuilder` | string | Name of a `CharacterSheetState` method returning level-correct effects; overrides `effects` on activation |
 | `requiresStates` | array | State type ids that must be active for this toggle to be offered; dropped automatically when a prerequisite ends |
 | `endSave` | object | `{ability, dc, onFailure, label}` — a save rolled when the state ends |
+| `endTriggers` | object | Structured automatic teardown rules, currently exact condition names, armor categories, and duration |
+| `targeting` | object | Named-target capture for a state activated directly |
+| `onActivateTargeting` | object | Named-target capture attached to the parent state when a rider fires as that state begins |
+| `tracksActionEconomy` | boolean | Consume the declared action type when activated during tracked combat |
 
 ### Astral Self state lifecycle
 
@@ -183,6 +187,28 @@ Grants the benefit of a named action (`"disengage"`, `"dodge"`, `"dash"`, …)
 without spending the action. Read via `hasActionBenefitFromStates(action)`.
 First customer: Fluid Step (Belly Dancer 13).
 
+### Named target effects
+
+Active-state instances may carry `targets`, an array of
+`{id, name, source, statuses, grantsAttackAdvantage}` records. These records
+model creatures affected by a character-owned feature without pretending the
+sheet owns enemy HP, turns, or conditions. Target statuses render as reminders;
+they are never added to the character's own condition list.
+
+When `grantsAttackAdvantage` is true, the state emits one conditional attack
+modifier per named target. It is off by default and appears in the standard
+pre-roll conditional picker as `when attacking <name>`. The player must opt in
+for the matching target; activating the state never grants blanket advantage.
+
+The Belly Dancer uses both targeting modes:
+
+- Tantalizing Shivers records its one contested target on the
+  `tantalizingShivers` state.
+- Percussive Strike is not a separate toggle. The legacy registry key
+  `percussiveStrike` remains non-activatable for save compatibility. At level 17, starting the
+  `dancing` state records every hostile creature that failed its Wisdom save on
+  that Dance instance.
+
 ### Level-dependent effects (`effectsBuilder`)
 
 A state type's literal `effects` array is static, but many features change
@@ -216,17 +242,15 @@ that reads `ACTIVE_STATE_TYPES[x].effects` without an activation.
 `getActivatableFeatures()` until its prerequisite state is running, and
 `deactivateState` drops dependents automatically when the prerequisite ends.
 This is how "while Dancing" abilities are gated — no bespoke visibility
-logic required. Both Belly Dancer dependents use it:
+logic required. Tantalizing Shivers uses it:
 
 - `tantalizingShivers` (Tantalizing Shivers, 9) — a bonus action that first
-  resolves a contested check (see `contestedCheck` below), then grants
-  attack advantage for 1 round.
-- `percussiveStrike` (Percussive Strike, 17) — a free action granting attack
-  advantage for as long as the Dance lasts; its save DC is
-  `getPercussiveStrikeDc()` = 8 + PB + CHA.
+  resolves a contested check (see `contestedCheck` below), then records the
+  affected target for 1 round.
 
-Neither appears in `getActivatableFeatures()` until `dancing` is running,
-and both are dropped when it ends.
+It does not appear in `getActivatableFeatures()` until `dancing` is running,
+and it is dropped when the Dance ends. Percussive Strike is an activation-time
+rider on `dancing`, so it never enters the activatable list.
 
 ### End-of-state saving throws (`endSave`)
 
@@ -242,12 +266,15 @@ endSave: {
 }
 ```
 
-`getStateEndSave(stateTypeId)` returns the descriptor;
-`resolveStateEndSave(stateTypeId, {total})` applies the consequences and
-returns `{success, dc, ability, exhaustionGained}`. The UI wiring lives in
-`charactersheet.js` `_pResolveStateEndSave`, called from the "End" button on
-an active state — the roll is made *after* deactivation so the state's own
-bonuses don't inflate it.
+`getStateEndSave(stateTypeId)` returns the descriptor. Every active-to-inactive
+path enqueues a serialized `_data.pendingStateEndSaves` entry; this includes
+manual ending, prerequisite teardown, exact condition triggers, armor triggers,
+and combat-round expiry. Overview, Combat, and Play Mode all use this canonical
+deactivation path. The page drains that queue through
+`_pResolveStateEndSave`, then `resolvePendingStateEndSave` applies the
+consequence and removes the queue entry. The roll is made *after* deactivation
+so the state's own bonuses cannot inflate it, and saving/reloading between the
+ending and the roll cannot lose the required consequence.
 
 ### Activation-time contested checks (`activationInfo.contestedCheck`)
 
@@ -263,12 +290,13 @@ contestedCheck: {
 }
 ```
 
-`_activateFeatureState` rolls the character's side through
-`_rollSkillCheck(skill, label, null, ability)` **before** deducting any
-resource, then asks whether it beat the opposed roll. Losing the contest —
-or cancelling — costs nothing. The opposing creature is not modelled by the
-sheet, so the sheet rolls honestly and asks for the outcome rather than
-inventing one.
+`_activateFeatureState` first gathers any cancelable target input, then rolls
+the character's side through `_rollSkillCheck(skill, label, null, ability)`.
+Resources are not deducted for a failed contest. If the state declares
+`tracksActionEconomy`, however, beginning the contest consumes its action type
+even when the contest is lost (Tantalizing Shivers spends its Bonus Action).
+The opposing creature is not modelled by the sheet, so the sheet rolls honestly
+and asks for the outcome rather than inventing one.
 
 
 ### Activation-time rolled save DCs (`activationInfo.rolledSaveDc`)

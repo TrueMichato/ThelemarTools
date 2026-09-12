@@ -256,12 +256,31 @@ describe("Rogue / The Belly Dancer (TGTT) — effect-level", () => {
 			expect(state.getTantalizingShiversContest()).toBeNull();
 		});
 
-		it("grants ADVANTAGE ON ATTACKS while active", () => {
+		it("offers advantage only when the named affected target is selected for the attack", () => {
 			const state = makeBellyDancer(9);
 			state.activateState("dancing");
 			expect(state.hasAdvantageFromStates("attack")).toBe(false);
-			state.activateState("tantalizingShivers");
-			expect(state.hasAdvantageFromStates("attack")).toBe(true);
+			state.activateState("tantalizingShivers", {
+				targets: [{
+					name: "Bandit Captain",
+					source: "Tantalizing Shivers",
+					statuses: ["Charmed", "Incapacitated", "Speed 0"],
+					grantsAttackAdvantage: true,
+				}],
+			});
+
+			const probe = state.aggregateModifiers("attack:melee:dex");
+			expect(probe.advantage).toBe(false);
+			expect(probe.conditionalsAvailable).toHaveLength(1);
+			expect(probe.conditionalsAvailable[0]).toMatchObject({
+				advantage: true,
+				conditional: "when attacking Bandit Captain",
+			});
+
+			const applied = state.aggregateModifiers("attack:melee:dex", {
+				appliedConditionalIds: new Set([probe.conditionalsAvailable[0].id]),
+			});
+			expect(applied.advantage).toBe(true);
 		});
 
 		it("ends automatically when the Dance ends", () => {
@@ -331,27 +350,135 @@ describe("Rogue / The Belly Dancer (TGTT) — effect-level", () => {
 			expect(makeBellyDancer(16).getPercussiveStrikeDc()).toBeNull();
 		});
 
-		it("is HIDDEN until the Dance is running, then surfaced as a toggle", () => {
+		it("is never surfaced as a standalone toggle", () => {
 			const state = makeBellyDancer(17);
 			expect(state.getActivatableFeatures().some(a => a.feature.name === "Percussive Strike")).toBe(false);
 			state.activateState("dancing");
-			expect(state.getActivatableFeatures().some(a => a.feature.name === "Percussive Strike")).toBe(true);
+			expect(state.getActivatableFeatures().some(a => a.feature.name === "Percussive Strike")).toBe(false);
 		});
 
-		it("grants ADVANTAGE ON ATTACKS while active", () => {
+		it("CS-BUG-171 (FIXED): stores failed save targets on the Dance and gates advantage per target", () => {
 			const state = makeBellyDancer(17);
-			state.activateState("dancing");
+			state.activateState("dancing", {
+				targets: [
+					{name: "Ogre", source: "Percussive Strike", statuses: ["Failed Wisdom save"], grantsAttackAdvantage: true},
+					{name: "Cultist", source: "Percussive Strike", statuses: ["Failed Wisdom save"], grantsAttackAdvantage: true},
+				],
+			});
 			expect(state.hasAdvantageFromStates("attack")).toBe(false);
-			state.activateState("percussiveStrike");
-			expect(state.hasAdvantageFromStates("attack")).toBe(true);
+			const probe = state.aggregateModifiers("attack:melee:dex");
+			expect(probe.conditionalsAvailable.map(it => it.conditional)).toEqual([
+				"when attacking Ogre",
+				"when attacking Cultist",
+			]);
+			const applied = state.aggregateModifiers("attack:melee:dex", {
+				appliedConditionalIds: new Set([probe.conditionalsAvailable[1].id]),
+			});
+			expect(applied.advantage).toBe(true);
+			state.deactivateState("dancing");
+			expect(state.aggregateModifiers("attack:melee:dex").conditionalsAvailable).toHaveLength(0);
 		});
 
-		it("ends when the Dance ends (it lasts 'as long as the Dance is active')", () => {
+		it("replaces historical Dance targets when the Dance is reactivated", () => {
 			const state = makeBellyDancer(17);
-			state.activateState("dancing");
-			state.activateState("percussiveStrike");
+			state.activateState("dancing", {
+				targets: [{name: "Ogre", source: "Percussive Strike", grantsAttackAdvantage: true}],
+			});
+			state.deactivateState("dancing", {skipEndSave: true});
+			state.activateState("dancing", {
+				targets: [{name: "Cult Fanatic", source: "Percussive Strike", grantsAttackAdvantage: true}],
+			});
+
+			expect(state.getActiveStateTargets("dancing").map(it => it.name)).toEqual(["Cult Fanatic"]);
+		});
+
+		it("stops offering historical Percussive targets after level 17 support is lost", () => {
+			const state = makeBellyDancer(17);
+			state.activateState("dancing", {
+				targets: [{name: "Ogre", source: "Percussive Strike", grantsAttackAdvantage: true}],
+			});
+			expect(state.aggregateModifiers("attack:melee:dex").conditionalsAvailable).toHaveLength(1);
+
 			state.deactivateState("dancing");
-			expect(state.isStateTypeActive("percussiveStrike")).toBe(false);
+			state.getClasses()[0].level = 16;
+			expect(state.getFeatureCalculations().hasPercussiveStrike).toBeFalsy();
+			expect(state.aggregateModifiers("attack:melee:dex").conditionalsAvailable).toHaveLength(0);
+
+			state.activateState("dancing");
+			expect(state.getActiveStateTargets("dancing")).toEqual([]);
+			expect(state.aggregateModifiers("attack:melee:dex").conditionalsAvailable).toHaveLength(0);
+		});
+	});
+
+	describe("Dance teardown and end-save queue", () => {
+		it.each(["Restrained", "Paralyzed", "Incapacitated"])("ends the Dance when %s is applied", condition => {
+			const state = makeBellyDancer(9);
+			state.activateState("dancing");
+			state.activateState("tantalizingShivers", {
+				targets: [{name: "Target", source: "Tantalizing Shivers", grantsAttackAdvantage: true}],
+			});
+			state.addCondition(condition);
+			expect(state.isDancing()).toBe(false);
+			expect(state.isStateTypeActive("tantalizingShivers")).toBe(false);
+			expect(state.getPendingStateEndSaves()).toHaveLength(1);
+		});
+
+		it("ends the Dance when heavy armor is donned, but not for light or medium armor", () => {
+			const state = makeBellyDancer(3);
+			state.activateState("dancing");
+			state.setArmor({name: "Leather", type: "LA"});
+			expect(state.isDancing()).toBe(true);
+			state.setArmor({name: "Breastplate", type: "MA"});
+			expect(state.isDancing()).toBe(true);
+			state.setArmor({name: "Plate", type: "HA"});
+			expect(state.isDancing()).toBe(false);
+			expect(state.getPendingStateEndSaves()).toHaveLength(1);
+		});
+
+		it("ends the Dance when an equipped inventory item updates the armor snapshot to heavy", () => {
+			const state = makeBellyDancer(3);
+			state.activateState("dancing");
+
+			state.addItem({
+				name: "Plate",
+				source: "PHB",
+				type: "armor",
+				armor: true,
+				armorType: "heavy",
+				ac: 18,
+			}, 1, true);
+
+			expect(state.isDancing()).toBe(false);
+			expect(state.getPendingStateEndSaves()).toHaveLength(1);
+		});
+
+		it("expires after ten tracked combat rounds and queues exactly one save", () => {
+			const state = makeBellyDancer(3);
+			state.startCombat();
+			state.activateState("dancing");
+			for (let i = 0; i < 9; ++i) {
+				expect(state.advanceRound()).not.toContain("Dance of the Country");
+			}
+			expect(state.advanceRound()).toContain("Dancing");
+			expect(state.isDancing()).toBe(false);
+			expect(state.getPendingStateEndSaves()).toHaveLength(1);
+		});
+
+		it("resolves a queued failed save once and persists the queue across reload", () => {
+			const state = makeBellyDancer(3);
+			state.activateState("dancing");
+			state.deactivateState("dancing", {reason: "manual"});
+
+			const reloaded = new CharacterSheetState();
+			reloaded.loadFromJson(JSON.parse(JSON.stringify(state.toJson())));
+			const pending = reloaded.getPendingStateEndSaves();
+			expect(pending).toHaveLength(1);
+			expect(pending[0]).toMatchObject({stateTypeId: "dancing", reason: "manual"});
+
+			const outcome = reloaded.resolvePendingStateEndSave(pending[0].id, 5);
+			expect(outcome).toMatchObject({success: false, exhaustionGained: 1});
+			expect(reloaded.getPendingStateEndSaves()).toHaveLength(0);
+			expect(reloaded.getExhaustion()).toBe(1);
 		});
 	});
 
@@ -359,24 +486,43 @@ describe("Rogue / The Belly Dancer (TGTT) — effect-level", () => {
 	// Persistence
 	// ==========================================================
 	describe("save / load round-trip", () => {
-		it("preserves every active Belly Dancer state and its mechanical effects", () => {
+		it("preserves active Belly Dancer targets and their scoped mechanical effects", () => {
 			const state = makeBellyDancer(17, {cha: 16, dex: 18});
-			state.activateState("dancing");
-			state.activateState("tantalizingShivers");
-			state.activateState("percussiveStrike");
+			state.activateState("dancing", {
+				targets: [{name: "Ogre", source: "Percussive Strike", grantsAttackAdvantage: true}],
+			});
+			state.activateState("tantalizingShivers", {
+				targets: [{name: "Cultist", source: "Tantalizing Shivers", grantsAttackAdvantage: true}],
+			});
 			const acBefore = state.getAc();
 
 			const reloaded = new CharacterSheetState();
 			reloaded.loadFromJson(JSON.parse(JSON.stringify(state.toJson())));
 
 			expect(reloaded.getActiveStates().map(s => s.stateTypeId).sort())
-				.toEqual(["dancing", "percussiveStrike", "tantalizingShivers"]);
+				.toEqual(["dancing", "tantalizingShivers"]);
 			expect(reloaded.getAc()).toBe(acBefore);
 			expect(reloaded.canSneakAttackWithoutAdvantage({isMelee: true})).toBe(true);
 			expect(reloaded.hasActionBenefitFromStates("disengage")).toBe(true);
-			expect(reloaded.hasAdvantageFromStates("attack")).toBe(true);
+			expect(reloaded.hasAdvantageFromStates("attack")).toBe(false);
+			expect(reloaded.aggregateModifiers("attack:melee:dex").conditionalsAvailable).toHaveLength(2);
 			expect(reloaded.getSkillAdvantageState("acrobatics").advantage).toBe(true);
 			expect(reloaded.getPercussiveStrikeDc()).toBe(17);
+		});
+
+		it("retires legacy standalone Percussive Strike states without granting blanket advantage", () => {
+			const state = makeBellyDancer(17);
+			const saved = JSON.parse(JSON.stringify(state.toJson()));
+			saved.activeStates = [{
+				id: "legacy-percussive",
+				stateTypeId: "percussiveStrike",
+				name: "Percussive Strike",
+				active: true,
+			}];
+			const reloaded = new CharacterSheetState();
+			reloaded.loadFromJson(saved);
+			expect(reloaded.getActiveStates()).toHaveLength(0);
+			expect(reloaded.hasAdvantageFromStates("attack")).toBe(false);
 		});
 
 		it("preserves the Dance resource pool", () => {
@@ -418,6 +564,21 @@ describe("Rogue / The Belly Dancer (TGTT) — effect-level", () => {
 			state.activateState("dancing");
 			// Exactly one +3, not +6.
 			expect(state.getAc()).toBe(before + 3);
+		});
+
+		it("does not activate a same-named subclass from a non-TGTT source", () => {
+			const state = makeBellyDancer(3);
+			state._data.classes[0].subclass.source = "HB";
+			expect(state.getFeatureCalculations().hasDanceOfTheCountry).toBeFalsy();
+			expect(state.getDancingEffects()).toEqual([]);
+			const imitation = {
+				name: "Dance of the Country",
+				source: "HB",
+				subclassName: "The Belly Dancer",
+				subclassShortName: "Belly Dancer",
+				description: "As a bonus action, start Dance of the Country.",
+			};
+			expect(CharacterSheetState.detectActivatableFeature(imitation)?.stateTypeId).not.toBe("dancing");
 		});
 	});
 });
