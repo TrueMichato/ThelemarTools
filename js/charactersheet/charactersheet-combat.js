@@ -3994,11 +3994,19 @@ class CharacterSheetCombat {
 		return !this._turnActionUsage?.[actionType];
 	}
 
+	isActionTypeAvailable (actionType) {
+		return this._isActionTypeAvailable(actionType);
+	}
+
 	_consumeActionType (actionType) {
 		if (!this._state?.isInCombat?.()) return;
 		if (!actionType || actionType === "free") return;
 		if (!this._turnActionUsage) this._resetTurnActionUsage();
 		if (Object.hasOwn(this._turnActionUsage, actionType)) this._turnActionUsage[actionType] = true;
+	}
+
+	consumeActionType (actionType) {
+		this._consumeActionType(actionType);
 	}
 
 	_getFeatureActionType (feature) {
@@ -8189,10 +8197,14 @@ class CharacterSheetCombat {
 			// so every current and future classified ability routes here automatically. Monk
 			// abilities (Patient Defense, Flurry of Blows, Hand of Healing/Harm, Step of the Wind,
 			// Whirlpool Strike) are NOT classified activatable abilities and fall through unchanged.
-			if (this._page?._getActivatableAbilityForFeature?.(feature)) {
+			const activatableAbility = this._page?._getActivatableAbilityForFeature?.(feature);
+			if (activatableAbility) {
 				const handled = await this._page._pUseFeatureAbility(feature);
 				if (handled) {
-					this._consumeActionType(actionType);
+					// Structured interactions own an atomic choose/validate/commit flow in
+					// CharacterSheetPage. Do not consume their action a second time here,
+					// and do not charge a cancelled modal.
+					if (!activatableAbility.activationInfo?.interactionKind) this._consumeActionType(actionType);
 					this.renderCombatActions();
 					this.renderCombatResources();
 					this._page._renderFeatures?.();
@@ -11318,6 +11330,7 @@ class CharacterSheetCombat {
 
 		// Update combat tracker controls
 		this._updateCombatTrackerUI();
+		this._renderTurnOrderSummary();
 
 		container.innerHTML = "";
 
@@ -11459,12 +11472,21 @@ class CharacterSheetCombat {
 						roundsLabel = ` <span class="ve-small ve-muted" title="${state.roundsRemaining} rounds left">(${state.roundsRemaining}r)</span>`;
 					}
 				}
+				const isTemporalVision = state.stateTypeId === "eyesOfFuturePast" && state.temporalView;
+				const temporalLabel = isTemporalVision
+					? ` <span class="ve-small">${state.temporalView.direction ? state.temporalView.direction.toTitleCase() : "Direction required"} · ${Math.max(1, Number(state.temporalView.offsetHours) || 1)}h</span>`
+					: "";
+				const temporalControls = isTemporalVision && state.temporalView.decisionPending
+					? `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__temporal-hold ml-1">Hold</button>
+						<button class="ve-btn ve-btn-xs ve-btn-info charsheet__temporal-advance ml-1">Advance</button>`
+					: "";
 
 				const stateEl = e_({outer: `
 					<div class="charsheet__combat-state-item badge ${this._getStateBadgeClass(state.stateTypeId)} mr-1 mb-1" data-state-id="${state.id}" title="${tooltip}">
-						${state.icon || stateType?.icon || "⚡"} <span class="charsheet__state-name-link">${stateNameHtml}</span>${roundsLabel}
+						${state.icon || stateType?.icon || "⚡"} <span class="charsheet__state-name-link">${stateNameHtml}</span>${temporalLabel}${roundsLabel}
 						${stateType?.activationAction ? `<span class="ve-small" style="opacity: 0.7"> (${this._getActionTypeShortLabel(stateType.activationAction)})</span>` : ""}
 						${triggerHtml}
+						${temporalControls}
 						${isEndable ? `<span class="charsheet__state-remove ml-1" title="End">&times;</span>` : ""}
 					</div>
 				`});
@@ -11472,6 +11494,20 @@ class CharacterSheetCombat {
 				stateEl.querySelector(".charsheet__state-trigger")?.addEventListener("click", (/** @type {*} */ e) => {
 					e.stopPropagation();
 					this._useActiveStateTrigger(state.stateTypeId);
+				});
+				stateEl.querySelector(".charsheet__temporal-hold")?.addEventListener("click", (/** @type {*} */ e) => {
+					e.stopPropagation();
+					if (!this._state.resolveTemporalViewRoundChoice("hold")) return;
+					this.renderCombatStates();
+					this._page._renderActiveStates?.();
+					this._page._saveCurrentCharacter?.();
+				});
+				stateEl.querySelector(".charsheet__temporal-advance")?.addEventListener("click", (/** @type {*} */ e) => {
+					e.stopPropagation();
+					if (!this._state.resolveTemporalViewRoundChoice("advance")) return;
+					this.renderCombatStates();
+					this._page._renderActiveStates?.();
+					this._page._saveCurrentCharacter?.();
 				});
 
 				if (isEndable) {
@@ -12080,6 +12116,122 @@ class CharacterSheetCombat {
 		}
 	}
 
+	_renderTurnOrderSummary () {
+		const container = document.getElementById("charsheet-combat-turn-order");
+		if (!container) return;
+		const roster = this._state?.getCombatTurnOrder?.() || [];
+		container.innerHTML = "";
+		if (!roster.length) {
+			container.append(e_({outer: `<div class="ve-muted ve-small">No turn order yet. Add combatants before using initiative-changing features.</div>`}));
+			return;
+		}
+
+		const list = e_({outer: `<ol class="charsheet__turn-order-list"></ol>`});
+		for (const participant of roster) {
+			const row = e_({outer: `<li class="charsheet__turn-order-item${participant.hasActed ? " charsheet__turn-order-item--acted" : ""}">
+				<span class="charsheet__turn-order-initiative">${participant.initiative}</span>
+				<span class="charsheet__turn-order-name"></span>
+				<button type="button" class="ve-btn ve-btn-xs ${participant.hasActed ? "ve-btn-default" : "ve-btn-primary"}" data-role="acted">${participant.hasActed ? "Acted" : "Mark acted"}</button>
+			</li>`});
+			row.querySelector(".charsheet__turn-order-name").textContent = participant.name;
+			row.querySelector(`[data-role="acted"]`).addEventListener("click", () => {
+				this._state.markCombatTurnOrderParticipantActed(participant.id, !participant.hasActed);
+				this._renderTurnOrderSummary();
+				this._page._saveCurrentCharacter?.();
+			});
+			list.append(row);
+		}
+		container.append(list);
+	}
+
+	async pShowTurnOrderModal () {
+		const trigger = typeof document !== "undefined" ? document.activeElement : null;
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: "Manage Turn Order",
+			isMinHeight0: true,
+		});
+		const body = e_({outer: `<div>
+			<p class="ve-muted mb-3">Track only the names, initiative values, and whether each creature has acted this round.</p>
+			<div class="charsheet__turn-order-add mb-3">
+				<label><span class="ve-bold">Creature</span><input class="form-control input-xs mt-1" data-role="name" placeholder="Creature name"></label>
+				<label><span class="ve-bold">Initiative</span><input class="form-control input-xs mt-1" data-role="initiative" type="number" step="1" value="10"></label>
+				<button type="button" class="ve-btn ve-btn-primary" data-role="add">Add</button>
+			</div>
+			<div data-role="list"></div>
+			<div class="charsheet__modal-actions mt-3">
+				<button type="button" class="ve-btn ve-btn-primary" data-role="done">Done</button>
+			</div>
+		</div>`});
+		const list = body.querySelector(`[data-role="list"]`);
+		const inputName = body.querySelector(`[data-role="name"]`);
+		const inputInitiative = body.querySelector(`[data-role="initiative"]`);
+		const renderList = () => {
+			list.innerHTML = "";
+			const roster = this._state.getCombatTurnOrder();
+			if (!roster.length) {
+				list.append(e_({outer: `<div class="ve-muted ve-text-center py-3">No combatants added.</div>`}));
+				return;
+			}
+			for (const participant of roster) {
+				const row = e_({outer: `<div class="charsheet__turn-order-editor-row">
+					<input class="form-control input-xs" data-role="name" aria-label="Creature name">
+					<input class="form-control input-xs" data-role="initiative" type="number" step="1" aria-label="Initiative">
+					<label class="ve-flex-v-center"><input type="checkbox" data-role="acted"> <span class="ml-1">Acted</span></label>
+					<button type="button" class="ve-btn ve-btn-xs ve-btn-danger" data-role="remove" aria-label="Remove combatant">Remove</button>
+				</div>`});
+				const name = row.querySelector(`[data-role="name"]`);
+				const initiative = row.querySelector(`[data-role="initiative"]`);
+				const acted = row.querySelector(`[data-role="acted"]`);
+				name.value = participant.name;
+				initiative.value = participant.initiative;
+				acted.checked = participant.hasActed;
+				const saveRow = () => {
+					this._state.upsertCombatTurnOrderParticipant({
+						id: participant.id,
+						name: name.value,
+						initiative: initiative.value,
+						hasActed: acted.checked,
+					});
+					renderList();
+					this._renderTurnOrderSummary();
+					this._page._saveCurrentCharacter?.();
+				};
+				name.addEventListener("change", saveRow);
+				initiative.addEventListener("change", saveRow);
+				acted.addEventListener("change", saveRow);
+				row.querySelector(`[data-role="remove"]`).addEventListener("click", () => {
+					this._state.removeCombatTurnOrderParticipant(participant.id);
+					renderList();
+					this._renderTurnOrderSummary();
+					this._page._saveCurrentCharacter?.();
+				});
+				list.append(row);
+			}
+		};
+		body.querySelector(`[data-role="add"]`).addEventListener("click", () => {
+			const id = this._state.upsertCombatTurnOrderParticipant({
+				name: inputName.value,
+				initiative: inputInitiative.value,
+			});
+			if (!id) {
+				JqueryUtil.doToast({type: "warning", content: "Enter a creature name and numeric initiative."});
+				return;
+			}
+			inputName.value = "";
+			renderList();
+			this._renderTurnOrderSummary();
+			this._page._saveCurrentCharacter?.();
+			inputName.focus();
+		});
+		body.querySelector(`[data-role="done"]`).addEventListener("click", () => doClose(true));
+		modalInner.append(body);
+		renderList();
+		csFocusModalOnOpen(modalInner);
+		await pGetResolved();
+		csRestoreModalFocus(trigger);
+		this._renderTurnOrderSummary();
+	}
+
 	/**
 	 * Surface a toast for any turn-start effects applied by the most recent
 	 * `startCombat()`/`advanceRound()` call (Heroic Warrior's Heroic Inspiration
@@ -12105,6 +12257,7 @@ class CharacterSheetCombat {
 	_initCombatTracker () {
 		if (this._combatTrackerInitialised) return;
 		this._combatTrackerInitialised = true;
+		document.getElementById("charsheet-combat-turn-order-manage").onclick = () => this.pShowTurnOrderModal();
 
 		document.getElementById("charsheet-combat-start").onclick = () => {
 			if (this._state.isInCombat?.()) {

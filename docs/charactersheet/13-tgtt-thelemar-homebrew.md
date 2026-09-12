@@ -294,7 +294,7 @@ adding a 14th act inherits the behaviour for free.
 | **Darkness** | ✅ Complete | `darknessChannelRange`, `umbralStrikeDamage` |
 | **Lust** | ✅ Complete | `charmingPresenceDc`, `seductiveAuraRange` |
 | **Madness** | ✅ Complete | `maddingTouchDamage`, `contagiousMadnessRange` |
-| **Time** | ✅ Complete | See [Time Domain](#time-domain-full-surface) below — implemented as real mechanics (domain spells, initiative modifier, resource pools, cantrip damage, self-imposed condition), not calc keys |
+| **Time** | ✅ Complete | See [Time Domain](#time-domain-full-surface) below — domain spells, turn-order swap, external-roll reaction, temporal-vision state, cantrip damage, and age handling are all player-operable mechanics |
 
 #### Time Domain — full surface
 
@@ -305,17 +305,18 @@ domain at L3, not L1) plus a **17** tier added for Temporal Mastery.
 | Level | Feature | Mechanical implementation |
 |---|---|---|
 | 3 | Time Domain | Wrapper; pulls in the three L3 features via `refSubclassFeature` |
-| 3 | Chronological Interference | Bonus-action limited-use ability on a PB-scaled pool (2/3/3/6 at L3/5/8/17). The initiative *swap* itself is DM-side — the sheet spends the use |
-| 3 | Right on Time | `+WIS` initiative modifier, read by `getInitiative()` |
-| 3 | Time Domain Spells | `additionalSpells.prepared` → always-prepared, via the generic subclass path |
-| 3 | CD: Temporal Manipulation | Reaction; surfaced by the generic `"Channel Divinity: <Option>"` handler and bound to the shared Channel Divinity pool |
-| 6 | Eyes of the Future Past | Bonus-action toggle on a `max(1, wisMod)` pool that applies **Blinded** to its own owner while active and releases it on end (see `addsConditions` below) |
-| 8 | Potent Spellcasting | `+WIS` to cleric cantrip damage, read by `getCantripDamageBonus` |
-| 17 | Temporal Mastery | Adds *time stop* and *time ravage* to the always-prepared domain list (data-driven, the `"17"` tier) |
+| 3 | Chronological Interference | Bonus-action limited-use ability on a PB-scaled pool (2/3/3/6 at L3/5/8/17). The Combat tab's lightweight Turn Order roster selects two distinct creatures that have not acted, previews the result, and swaps their stored positions and initiative values only on confirmation |
+| 3 | Right on Time | One dynamic `+WIS` initiative modifier, read consistently by `getInitiative()` and modifier breakdowns; legacy duplicate numeric rows are removed on load |
+| 3 | Time Domain Spells | `additionalSpells.prepared` → always-prepared Cleric spells, preserving the canonical PHB/EGW sources and locked against unpreparing |
+| 3 | CD: Temporal Manipulation | Reaction modal requiring a target plus Advantage/Disadvantage; confirmation spends one shared Channel Divinity use and records the external result without creating a self modifier or active state |
+| 6 | Eyes of the Future Past | Curated bonus-action state on a `max(1, wisMod)` pool. Activation chooses Past/Future at one hour; each later round offers Hold/Advance; the state tracks its 10-round duration and owns the **Blinded** condition it applies and removes |
+| 8 | Potent Spellcasting | `+WIS` to Cleric cantrip damage through `getCantripDamageBonus`; if the character also chose the XPHB Blessed Strikes option, the two canonical grants display as one effect with both provenances and never double the bonus |
+| 17 | Temporal Mastery | Adds *time stop* and *time ravage* to the always-prepared domain list; Long Rest offers no change/younger/older age choices, and the feature card resolves magical aging as Ignore/Accept |
+| 2/6/18 | Shared Channel Divinity | TGTT follows XPHB progression: 2/3/4 uses. A Short Rest restores one expended use; a Long Rest restores all |
 
-Deliberately **not** modelled: Chronological Interference's swap of two
-creatures' initiative order, because the sheet does not track other creatures'
-initiative. Only the use-spend is implemented.
+The Turn Order roster is intentionally narrow: name, initiative, order, and
+whether a creature has acted. It exists to resolve Chronological Interference
+without duplicating the DM Screen's encounter-management responsibilities.
 
 ##### Convention: `addsConditions` on generically-detected toggles
 
@@ -326,7 +327,10 @@ extracts the condition from the feature text, the toggle detector attaches it
 to the activation info as `addsConditions`, and `addActiveState` applies and
 releases it. Only self-directed phrasings match; negations and immunity
 clauses ("you are immune to being blinded", "you can't be blinded") are
-rejected. Prefer this over adding a bespoke state type.
+rejected. Prefer this over adding a bespoke state type unless the feature needs
+additional persisted lifecycle data; Eyes of the Future Past is the example
+exception because it stores direction, hour offset, pending round choice, and
+duration.
 
 ### ✅ Ranger Conclaves
 

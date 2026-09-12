@@ -247,6 +247,41 @@ describe("Cleric — Blessed Strikes / Improved Blessed Strikes", () => {
 		expect(riders[0].damageType).toBe("radiant"); // NOT thunder
 		expect(riders[0].damageTypeChoices).toEqual(["necrotic", "radiant"]);
 	});
+
+	it("reopens an ambiguous legacy Blessed Strikes choice without removing a domain Potent Spellcasting grant", () => {
+		const save = state.toJson();
+		save.classes = [{name: "Cleric", source: "TGTT", level: 8}];
+		save.features = [
+			{...F_DIVINE_ORDER, id: "blessed-parent", name: "Blessed Strikes", level: 7},
+			{id: "divine-strike", name: "Divine Strike", source: "XPHB", className: "Cleric", level: 7, parentFeature: "Blessed Strikes"},
+			{id: "blessed-potent", name: "Potent Spellcasting", source: "XPHB", className: "Cleric", level: 7, parentFeature: "Blessed Strikes"},
+			{id: "time-potent", name: "Potent Spellcasting", source: "TGTT", className: "Cleric", subclassShortName: "Time", level: 8},
+		];
+		save.chosenSubfeatures = [
+			{parent: "Blessed Strikes", parentSource: "XPHB", level: 7, name: "Divine Strike", source: "XPHB"},
+			{parent: "Blessed Strikes", parentSource: "XPHB", level: 7, name: "Potent Spellcasting", source: "XPHB"},
+		];
+
+		state.loadFromJson(save);
+
+		expect(state.getFeatures().filter(it => it.parentFeature === "Blessed Strikes")).toHaveLength(0);
+		expect(state.getFeatures().some(it => it.id === "time-potent")).toBe(true);
+		expect(state.getChosenSubfeatures().filter(it => it.parent === "Blessed Strikes")).toHaveLength(0);
+		expect(state.getPendingFeatureChoices().filter(it => it.featureName === "Blessed Strikes")).toHaveLength(1);
+		expect(state.toJson().migrationFlags.blessedStrikesChoiceReset).toBe(true);
+	});
+
+	it("merges canonical duplicate Potent Spellcasting grants for display while retaining both state records", () => {
+		const features = [
+			{id: "blessed-potent", name: "Potent Spellcasting", source: "XPHB", className: "Cleric", level: 7, parentFeature: "Blessed Strikes"},
+			{id: "time-potent", name: "Potent Spellcasting", source: "TGTT", className: "Cleric", subclassShortName: "Time", level: 8},
+		];
+		const display = CharacterSheetClassUtils.mergeEquivalentFeaturesForDisplay(features);
+		expect(display).toHaveLength(1);
+		expect(display[0]).toMatchObject({id: "time-potent"});
+		expect(display[0].provenanceSources).toHaveLength(2);
+		expect(features).toHaveLength(2);
+	});
 });
 
 // =========================================================================

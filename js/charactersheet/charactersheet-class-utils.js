@@ -5638,12 +5638,30 @@ class CharacterSheetClassUtils {
 	 * @returns {{regularFeatures: Array<*>, optionalFeatures: Array<*>, autoGrantedCombatMethods: Array<*>, standaloneFeatures: Array<*>, featureOptions: Array<*>}}
 	 */
 	static partitionClassFeaturesForDisplay (/** @type {*[]} */ features = []) {
-		const regularFeatures = features.filter(f => f.featureType !== "Optional Feature");
+		const regularFeatures = CharacterSheetClassUtils.mergeEquivalentFeaturesForDisplay(features.filter(f => f.featureType !== "Optional Feature"));
 		const optionalFeatures = features.filter(f => f.featureType === "Optional Feature");
 		const autoGrantedCombatMethods = regularFeatures.filter(f => CharacterSheetClassUtils.isCombatMethod(f));
 		const standaloneFeatures = regularFeatures.filter(f => !f.parentFeature && !CharacterSheetClassUtils.isCombatMethod(f));
 		const featureOptions = regularFeatures.filter(f => f.parentFeature && !CharacterSheetClassUtils.isCombatMethod(f));
 		return {regularFeatures, optionalFeatures, autoGrantedCombatMethods, standaloneFeatures, featureOptions};
+	}
+
+	static mergeEquivalentFeaturesForDisplay (/** @type {*[]} */ features = []) {
+		const potentSpellcasting = features.filter(feature =>
+			String(feature.name || "").toLowerCase() === "potent spellcasting"
+			&& String(feature.className || "").toLowerCase() === "cleric");
+		const blessedOption = potentSpellcasting.find(feature => String(feature.parentFeature || "").toLowerCase() === "blessed strikes");
+		const domainGrant = potentSpellcasting.find(feature => !feature.parentFeature);
+		if (!blessedOption || !domainGrant) return [...features];
+
+		const merged = {
+			...domainGrant,
+			provenanceSources: [
+				{feature: blessedOption.parentFeature, level: blessedOption.level, source: blessedOption.source},
+				{feature: domainGrant.subclassShortName || domainGrant.subclassName || "Divine Domain", level: domainGrant.level, source: domainGrant.source},
+			],
+		};
+		return features.filter(feature => !potentSpellcasting.includes(feature)).concat(merged);
 	}
 
 	/**

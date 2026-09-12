@@ -45,6 +45,21 @@ class CharacterSheetModal {
 	].join(", ");
 
 	/**
+	 * Focus the first actionable control after a caller has populated a modal.
+	 * @param {HTMLElement} eleModalInner
+	 * @param {{preferSelector?: string}} [opts]
+	 * @returns {HTMLElement|null}
+	 */
+	static focusFirst (eleModalInner, {preferSelector} = {}) {
+		if (!eleModalInner || typeof eleModalInner.querySelector !== "function") return null;
+		const elePreferred = preferSelector ? eleModalInner.querySelector(preferSelector) : null;
+		const ele = elePreferred || eleModalInner.querySelector(CharacterSheetModal._FOCUSABLE_SELECTOR);
+		if (!ele || typeof ele.focus !== "function") return null;
+		try { ele.focus(); } catch (e) { void e; }
+		return ele;
+	}
+
+	/**
 	 * Drop-in replacement for `UiUtil.pGetShowModal`.
 	 *
 	 * @param {object} [opts] Passed through untouched, minus the options this owns.

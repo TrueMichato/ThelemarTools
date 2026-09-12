@@ -1571,10 +1571,10 @@ describe("Cleric Core Class Features (XPHB 2024)", () => {
 	});
 
 	describe("Channel Divinity (XPHB)", () => {
-		it("should have same Channel Divinity uses as PHB", () => {
+		it("should have three Channel Divinity uses at level 6", () => {
 			state.addClass({ name: "Cleric", source: "XPHB", level: 6 });
 			const calculations = state.getFeatureCalculations();
-			expect(calculations.channelDivinityUses).toBe(2);
+			expect(calculations.channelDivinityUses).toBe(3);
 		});
 	});
 

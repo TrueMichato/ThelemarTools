@@ -11,6 +11,10 @@
  * `getFeatureCalculations()`. The pre-existing Cleric suite only checked the
  * calculation, which is exactly why this bug went unnoticed.
  *
+ * TGTT and XPHB Clerics use the 2024 progression: 2 / 3 / 4 uses at
+ * levels 2 / 6 / 18, recovering one expended use on a Short Rest and
+ * all uses on a Long Rest.
+ *
  * CS-BUG-078 later made the reconciler authoritative in BOTH directions: the same
  * grant-time parser also OVER-counts, because the 2014 Cleric's level-2 prose already
  * advertises the 6th- and 18th-level tiers. The original "never lowers a pool that is
@@ -158,6 +162,49 @@ describe("Channel Divinity use scaling (CS-BUG-033)", () => {
 		state.onShortRest();
 
 		expect(getChannelDivinityResource().current).toBe(3);
+	});
+
+	describe.each(["XPHB", "TGTT"])("%s Cleric", source => {
+		it.each([
+			[2, 2],
+			[5, 2],
+			[6, 3],
+			[17, 3],
+			[18, 4],
+		])("has the 2024 maximum at level %i", (level, expected) => {
+			state.addClass({name: "Cleric", source, level});
+			addChannelDivinity({current: 1, max: 1});
+
+			expect(getChannelDivinityResource()).toMatchObject({
+				max: expected,
+				shortRestRecovery: 1,
+			});
+			expect(state.getFeatureCalculations().channelDivinityUses).toBe(expected);
+		});
+
+		it("restores exactly one expended use on a Short Rest", () => {
+			state.addClass({name: "Cleric", source, level: 18});
+			addChannelDivinity({current: 0, max: 1});
+			getChannelDivinityResource().current = 0;
+			state.getFeatures().find(f => f.name === "Channel Divinity").uses.current = 0;
+
+			state.onShortRest();
+
+			expect(getChannelDivinityResource().current).toBe(1);
+			expect(state.getFeatures().find(f => f.name === "Channel Divinity").uses.current).toBe(1);
+		});
+
+		it("restores all uses on a Long Rest", () => {
+			state.addClass({name: "Cleric", source, level: 18});
+			addChannelDivinity({current: 0, max: 1});
+			getChannelDivinityResource().current = 0;
+			state.getFeatures().find(f => f.name === "Channel Divinity").uses.current = 0;
+
+			state.onLongRest();
+
+			expect(getChannelDivinityResource().current).toBe(4);
+			expect(state.getFeatures().find(f => f.name === "Channel Divinity").uses.current).toBe(4);
+		});
 	});
 
 	describe("Paladin", () => {
