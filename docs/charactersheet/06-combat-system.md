@@ -280,70 +280,36 @@ _rollDamage(attackId, isCritical = false) {
 ### Rolling Initiative
 
 ```javascript
-_rollInitiative(event) {
-    const isAdvantage = event.shiftKey;
-    const isDisadvantage = event.ctrlKey || event.metaKey;
-    
-    // Base initiative modifier
-    let mod = this._state.getInitiativeMod();
-    
-    // Roll
-    const roll1 = Renderer.dice.randomNumber(1, 20);
-    const roll2 = (isAdvantage || isDisadvantage) 
-        ? Renderer.dice.randomNumber(1, 20) 
-        : null;
-    
-    let finalRoll = roll1;
-    if (isAdvantage) finalRoll = Math.max(roll1, roll2);
-    if (isDisadvantage) finalRoll = Math.min(roll1, roll2);
-    
-    const total = finalRoll + mod;
-    
-    // Update state
-    this._state.setCurrentInitiative(total);
-    
-    // Feral Instinct: advantage on initiative rolls
-    // (Handled by UI allowing shift-click)
-    
-    // Display result
-    this._displayInitiativeRoll({
-        roll1, roll2, finalRoll, mod, total,
-        isAdvantage, isDisadvantage,
-    });
-}
+const mod = state.getInitiative();
+const mode = state.getInitiativeRollMode();
+const bonusDice = state.getRollBonusDiceFromStates("initiative");
+
+// The controller rolls the d20 using the resolved advantage/disadvantage mode,
+// adds the flat modifier once, then rolls and adds each bonus die.
 ```
 
 ### Initiative Modifiers
 
-Several features affect initiative:
+`CharacterSheetState.getInitiative()` assembles the flat pre-exhaustion modifier:
+the Dexterity modifier, Jack of All Trades when applicable, custom initiative
+modifiers, named feature bonuses, and equipped item-material bonuses.
+`getInitiativeBreakdown()` separates the intrinsic (`canonical`) portion from the
+situational effective total and applies exhaustion only to that effective total.
 
 ```javascript
-// In CharacterSheetState.getInitiativeMod()
-getInitiativeMod() {
-    let mod = this.getAbilityMod("dex");
-    
-    const calc = this.getFeatureCalculations();
-    
-    // Swashbuckler's Rakish Audacity
-    if (calc.hasRakishAudacity) {
-        mod += this.getAbilityMod("cha");
-    }
-    
-    // Alert feat
-    if (this.hasFeat("Alert")) {
-        mod += this._isXphbFeat("Alert") 
-            ? this.getProficiencyBonus() 
-            : 5;
-    }
-    
-    // Aura of the Sentinel (Watchers Paladin)
-    if (calc.hasAuraOfTheSentinel) {
-        mod += this.getProficiencyBonus();
-    }
-    
-    return mod;
-}
+const breakdown = state.getInitiativeBreakdown();
+// {
+//   canonical, // intrinsic flat modifier
+//   total,     // effective flat modifier after situational penalties
+//   components: [{name, value, icon, isCanonical}],
+//   diceBonuses: [{source, dice, sign}],
+// }
 ```
+
+The Overview initiative card formats this breakdown into the same native hover
+tooltip used by skill rows. The tooltip lists every named contribution, any
+roll-time bonus dice, the effective total, and the intrinsic total when those
+two values differ. Clicking the card still rolls initiative.
 
 > **Note:** Buff *dice* bonuses such as **Gift of Alacrity** (`1d8` initiative) are
 > **not** added here as a flat number. Because they are a random die they can't
