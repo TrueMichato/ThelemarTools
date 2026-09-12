@@ -1214,6 +1214,7 @@ export class CharacterSheetPlayMode {
 		this._renderFavoritesBar();
 		this._renderActionEconomy();
 		this._renderActiveStates();
+		this._renderChainedTargets();
 		this._renderCombatMethods();
 		this._renderAttacks();
 		this._renderItemPowers();
@@ -1222,6 +1223,89 @@ export class CharacterSheetPlayMode {
 		this._renderFeaturesQuick();
 		this._renderCrafting();
 		this._renderResources();
+	}
+
+	_renderChainedTargets () {
+		const targets = this._state.getChainedTargets?.() || [];
+		const calc = this._state.getFeatureCalculations?.() || {};
+		const available = !!calc.hasManifestChains && this._state.isStateTypeActive?.("rage") && this._state.isStateTypeActive?.("manifestChains");
+		if (!available && !targets.length) return;
+		const card = this._makeCard(this._elActionsHub, "feature", "Chained Targets");
+		const lede = this._ce("div", "pm-card__lede ve-muted ve-small", card);
+		lede.textContent = `${targets.length}/${calc.chainCount || 0} chains occupied · reach ${calc.chainRange || 0} ft.`;
+		if (!targets.length) {
+			this._ce("div", "ve-muted ve-small", card).textContent = "No creatures chained. Use a target-aware rider after a Spectral Chains hit.";
+			return;
+		}
+		for (const target of targets) {
+			const row = this._ce("div", "pm-chained-target", card);
+			row.setAttribute("role", "group");
+			row.setAttribute("aria-label", `${target.targetName}, chained target`);
+			const name = this._ce("span", "pm-chained-target__name", row);
+			name.textContent = target.targetName;
+			const meta = this._ce("span", "pm-chained-target__meta", row);
+			meta.textContent = `${target.size} · ${target.restrained ? "restrained" : "grappled"}${target.distance != null ? ` · ${target.distance} ft.` : ""}`;
+			const release = this._ce("button", "pm-chained-target__release", row);
+			release.type = "button";
+			release.textContent = "Release";
+			release.style.minHeight = "44px";
+			release.setAttribute("aria-label", `Release chained target ${target.targetName}`);
+			this._makeClickable(release, `Release chained target ${target.targetName}`, () => {
+				this._state.releaseChainedTarget(target.id);
+				this._page._saveCurrentCharacter?.();
+				this.render();
+			});
+			const distance = this._ce("input", "pm-chained-target__distance", row);
+			distance.type = "number";
+			distance.min = "0";
+			distance.max = String(calc.chainRange || 30);
+			distance.value = target.distance ?? "";
+			distance.inputMode = "numeric";
+			distance.setAttribute("aria-label", `New distance for ${target.targetName} in feet`);
+			distance.style.minHeight = "44px";
+			const move = this._ce("button", "pm-chained-target__move", row);
+			move.type = "button";
+			move.textContent = "Move";
+			move.style.minHeight = "44px";
+			move.setAttribute("aria-label", `Move ${target.targetName} within chain range`);
+			this._makeClickable(move, `Move ${target.targetName} within chain range`, () => {
+				const result = this._state.moveChainedTarget(target.id, Number(distance.value));
+				if (!result.ok) JqueryUtil.doToast({type: "warning", content: `Cannot move target: ${result.reason || "invalid distance"}`});
+				else {
+					this._page._saveCurrentCharacter?.();
+					this.render();
+				}
+			});
+			if (target.restrained && target.recurringDamage?.amount) {
+				const resolve = this._ce("button", "pm-chained-target__resolve", row);
+				resolve.type = "button";
+				resolve.textContent = `Resolve Turn (${target.recurringDamage.amount})`;
+				resolve.style.minHeight = "44px";
+				resolve.setAttribute("aria-label", `Resolve recurring damage for ${target.targetName}`);
+				this._makeClickable(resolve, `Resolve recurring damage for ${target.targetName}`, () => {
+					const result = this._state.resolveChainedTargetTurn(target.id);
+					if (result.damage) JqueryUtil.doToast({type: "warning", content: `${target.targetName} takes ${result.damage} ${result.damageType} damage.`});
+					else JqueryUtil.doToast({type: "info", content: "Recurring damage already resolved for this turn."});
+					this._page._saveCurrentCharacter?.();
+					this.render();
+				});
+			}
+			const escape = this._ce("button", "pm-chained-target__escape", row);
+			escape.type = "button";
+			escape.textContent = "Escape";
+			escape.style.minHeight = "44px";
+			escape.setAttribute("aria-label", `Resolve escape for ${target.targetName}`);
+			this._makeClickable(escape, `Resolve escape for ${target.targetName}`, async () => {
+				const raw = await InputUiUtil.pGetUserNumber({title: `${target.targetName} — Escape Check`, min: 0, int: true});
+				if (raw == null) return;
+				const result = this._state.escapeChainedTarget(target.id, raw);
+				if (result.escaped) {
+					JqueryUtil.doToast({type: "success", content: `${target.targetName} escaped the chains.`});
+					this._page._saveCurrentCharacter?.();
+					this.render();
+				} else JqueryUtil.doToast({type: "info", content: `${target.targetName} remains chained (escape DC ${result.dc}).`});
+			});
+		}
 	}
 
 	/**

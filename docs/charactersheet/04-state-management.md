@@ -278,6 +278,21 @@ activeStates: [
     },
 ],
 
+// Opt-in target/effect records (for features such as TGTT Chained Fury).
+// Prompt-only attack riders do not create entries here.
+targetEffects: [
+    {
+        id: "chain-target-...",
+        source: "chained-fury",
+        targetName: "Ogre",
+        size: "large",
+        distance: 15,
+        grappled: true,
+        restrained: true,
+        recurringDamage: {amount: 6, type: "force"},
+    },
+],
+
 // D&D Conditions
 conditions: ["exhaustion-1", "frightened"],
 exhaustionLevel: 1,

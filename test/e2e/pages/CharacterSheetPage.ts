@@ -923,6 +923,35 @@ export class CharacterSheetPage {
 		return out;
 	}
 
+	/** Read persisted opt-in target effects through the live character-sheet state. */
+	async getChainedTargets (): Promise<any[]> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			return cs?._state?.getChainedTargets?.() ?? [];
+		});
+	}
+
+	/** Apply a target-aware Chained Fury rider through the live state API. */
+	async applyChainedTargetEffect (options: Record<string, unknown>): Promise<any> {
+		return this.page.evaluate((opts) => {
+			const cs: any = (globalThis as any).charSheet;
+			const result = cs?._state?.applyChainedTargetEffect?.(opts);
+			cs?._saveCurrentCharacter?.();
+			cs?._renderCharacter?.();
+			return result ?? {ok: false, reason: !cs ? "character-sheet-global-missing" : !cs._state ? "character-sheet-state-missing" : "target-effect-api-missing"};
+		}, options);
+	}
+
+	async releaseChainedTarget (id: string): Promise<boolean> {
+		return this.page.evaluate((targetId) => {
+			const cs: any = (globalThis as any).charSheet;
+			const result = cs?._state?.releaseChainedTarget?.(targetId) ?? false;
+			cs?._saveCurrentCharacter?.();
+			cs?._renderCharacter?.();
+			return result;
+		}, id);
+	}
+
 	/**
 	 * List the resource names rendered on the sheet.
 	 *

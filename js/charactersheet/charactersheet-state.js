@@ -5297,6 +5297,11 @@ class CharacterSheetState {
 			// Play Mode (alternative intent-based UI)
 			viewMode: "full", // "full" | "play"
 			favorites: [], // [{id, type, name, icon, detail, ref}] — pinned actions for quick access
+
+			// Generic opt-in target/effect tracking. Most attack riders remain prompt-only;
+			// features which explicitly opt into this collection can persist target state
+			// without creating a second source of truth outside CharacterSheetState.
+			targetEffects: [], // [{id, source, targetName, ...effect fields}]
 		};
 	}
 
@@ -5400,6 +5405,11 @@ class CharacterSheetState {
 		if (!Array.isArray(this._data.activeStates)) {
 			this._data.activeStates = [];
 		}
+		if (!Array.isArray(this._data.targetEffects)) this._data.targetEffects = [];
+		this._data.targetEffects = this._data.targetEffects
+			.filter(it => it && typeof it === "object")
+			.map(it => this._normalizeTargetEffect(it))
+			.filter(Boolean);
 
 		// Ensure chosenSubfeatures array exists (legacy saves predate structured choices)
 		if (!Array.isArray(this._data.chosenSubfeatures)) {
@@ -6130,6 +6140,10 @@ class CharacterSheetState {
 		// editions by one subclass collapses to the edition matching that subclass. Runs LAST
 		// so it sees the fully-enriched, relocated arrays. Idempotent.
 		this._sweepDedupStoredSpells();
+		// Reconcile opt-in target effects after classes, levels, and active states
+		// have been restored. This removes stale Chained Fury effects from old
+		// saves when Rage/Manifest Chains/source legality no longer applies.
+		this.reconcileTargetEffects();
 	}
 
 	/**
@@ -20983,6 +20997,10 @@ class CharacterSheetState {
 								calculations.chainRange = tableRange ??
 									(level >= 14 ? 30 : level >= 10 ? 25 : level >= 6 ? 20 : 15);
 								calculations.chainCount = level >= 14 ? 4 : 2;
+								// Escape DC is the character's current grapple/method DC. Keep
+								// this separate from Chain Imprisonment's STR save DC.
+								calculations.chainGrappleDc = calculations.combatMethodDc
+									|| (8 + profBonus + Math.max(this.getAbilityMod("str"), this.getAbilityMod("dex")));
 								// "You count as 1 size category larger" (2 at L10) when grappling
 								// or moving a grappled creature. Fed to getGrappleSizeCategory().
 								calculations.chainGrappleSizeBonus = level >= 10 ? 2 : 1;
@@ -21022,12 +21040,14 @@ class CharacterSheetState {
 									id: "chains-grapple",
 									name: "Grapple with the chains",
 									attackSourceFeature: "Manifest Chains",
+									targetAware: true,
 									description: `Grapple the target in addition to dealing damage. You count as ${calculations.chainGrappleSizeBonus} size ${calculations.chainGrappleSizeBonus === 1 ? "category" : "categories"} larger for the grapple.`,
 								});
 								onHit.push({
 									id: "chains-shove",
 									name: "Shove with the chains",
 									attackSourceFeature: "Manifest Chains",
+									targetAware: true,
 									description: "Shove the target in addition to dealing damage.",
 								});
 
@@ -21041,6 +21061,7 @@ class CharacterSheetState {
 										id: "chains-restrain",
 										name: "Chain Imprisonment (restrain)",
 										attackSourceFeature: "Manifest Chains",
+										targetAware: true,
 										description: `On a successful grapple, the target must succeed on a Strength saving throw or be restrained until the grapple ends, taking ${level} force damage at the start of each of its turns.`,
 										save: {ability: "str", dc: calculations.chainRestrainDc},
 										recurringDamage: {amount: level, type: "force", when: "start of each of its turns"},
@@ -21055,6 +21076,7 @@ class CharacterSheetState {
 										id: "chains-control-shove",
 										name: "Chain Control (10 ft. reposition)",
 										attackSourceFeature: "Manifest Chains",
+										targetAware: true,
 										description: "On a successful grapple, immediately shove the target 10 feet in any direction, provided it ends within the chains' reach.",
 									});
 								}
@@ -61376,6 +61398,9 @@ class CharacterSheetState {
 			this._data.activeMutagens = [];
 			delete this._data.mutagenIgnoredDrawback;
 		}
+		// Chained Fury targets are sustained by Rage + Manifest Chains. Ending
+		// either source tears down every persisted chain effect immediately.
+		if (stateTypeId === "rage" || stateTypeId === "manifestChains") this.clearTargetEffects("chained-fury");
 	}
 
 	_deactivateStatesForEndCondition ({isIncapacitated = false, isDead = false} = {}) {
@@ -62691,6 +62716,210 @@ class CharacterSheetState {
 		}
 		return abilityKey;
 	}
+
+	/**
+	 * Normalize one persisted target/effect entry. Feature code opts in by supplying
+	 * a `source`; unrelated on-hit riders remain prompt-only.
+	 * @param {*} raw
+	 * @returns {object|null}
+	 * @private
+	 */
+	_normalizeTargetEffect (raw) {
+		if (!raw || typeof raw !== "object") return null;
+		const id = String(raw.id || "").trim();
+		if (!id) return null;
+		const sizeNames = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
+		const size = String(raw.size || "medium").toLowerCase();
+		const normalizedSize = sizeNames.includes(size) ? size : "medium";
+		const distance = Number(raw.distance);
+		const declaredDistance = Number(raw.declaredDistance);
+		const chainIndex = Number(raw.chainIndex);
+		return {
+			id,
+			source: raw.source || null,
+			effectType: raw.effectType || "target",
+			targetName: String(raw.targetName || raw.name || "Target"),
+			size: normalizedSize,
+			declaredDistance: Number.isFinite(declaredDistance) && declaredDistance >= 0 ? declaredDistance : (Number.isFinite(distance) && distance >= 0 ? distance : null),
+			distance: Number.isFinite(distance) && distance >= 0 ? distance : (Number.isFinite(declaredDistance) && declaredDistance >= 0 ? declaredDistance : null),
+			grappled: !!raw.grappled,
+			restrained: !!raw.restrained,
+			shoved: !!raw.shoved,
+			shoveDistance: Math.max(0, Number(raw.shoveDistance) || 0),
+			recurringDamage: raw.recurringDamage && typeof raw.recurringDamage === "object"
+				? {amount: Math.max(0, Number(raw.recurringDamage.amount) || 0), type: raw.recurringDamage.type || "force", when: raw.recurringDamage.when || "start of each of its turns"}
+				: null,
+			chainIndex: Number.isFinite(chainIndex) && chainIndex >= 0 ? chainIndex : null,
+			escapeDc: raw.escapeDc == null ? null : Number(raw.escapeDc),
+			restraintDc: raw.restraintDc == null ? null : Number(raw.restraintDc),
+			lastRecurringDamageTurn: raw.lastRecurringDamageTurn == null ? null : Number(raw.lastRecurringDamageTurn),
+			createdAt: Number(raw.createdAt) || Date.now(),
+			updatedAt: Number(raw.updatedAt) || Date.now(),
+		};
+	}
+
+	getTargetEffects (opts = {}) {
+		const source = opts.source?.toLowerCase();
+		return this._data.targetEffects
+			.filter(it => !source || String(it.source || "").toLowerCase() === source)
+			.map(it => MiscUtil.copyFast(it));
+	}
+
+	getTargetEffect (id) {
+		const target = this._data.targetEffects.find(it => it.id === id);
+		return target ? MiscUtil.copyFast(target) : null;
+	}
+
+	upsertTargetEffect (target = {}) {
+		const id = String(target.id || `target-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+		const existingIndex = this._data.targetEffects.findIndex(it => it.id === id);
+		const normalized = this._normalizeTargetEffect({
+			...(existingIndex >= 0 ? this._data.targetEffects[existingIndex] : {}),
+			...target,
+			id,
+			updatedAt: Date.now(),
+		});
+		if (!normalized) return null;
+		if (existingIndex >= 0) this._data.targetEffects[existingIndex] = normalized;
+		else this._data.targetEffects.push(normalized);
+		return MiscUtil.copyFast(normalized);
+	}
+
+	removeTargetEffect (id) {
+		const index = this._data.targetEffects.findIndex(it => it.id === id);
+		if (index < 0) return false;
+		this._data.targetEffects.splice(index, 1);
+		return true;
+	}
+
+	clearTargetEffects (source = null) {
+		if (!source) this._data.targetEffects = [];
+		else {
+			const normalized = String(source).toLowerCase();
+			this._data.targetEffects = this._data.targetEffects.filter(it => String(it.source || "").toLowerCase() !== normalized);
+		}
+	}
+
+	getChainedTargets () {
+		return this.getTargetEffects({source: "chained-fury"});
+	}
+
+	getChainedTargetCapacity () {
+		return this.getFeatureCalculations()?.chainCount || 0;
+	}
+
+	getChainedTargetState () {
+		const calc = this.getFeatureCalculations() || {};
+		return {
+			available: this.isStateTypeActive("manifestChains") && this.isStateTypeActive("rage"),
+			capacity: calc.chainCount || 0,
+			used: this.getChainedTargets().length,
+			range: calc.chainRange || 0,
+			grappleDc: calc.chainGrappleDc || null,
+			restraintDc: calc.chainRestrainDc || null,
+		};
+	}
+
+	applyChainedTargetEffect ({
+		targetId, targetName, name, size = "medium", distance = null, effect = "grapple",
+		riderId, restraintSaveTotal = null, shoveDistance = null,
+	} = {}) {
+		const calc = this.getFeatureCalculations() || {};
+		if (!calc.hasManifestChains || !this.isStateTypeActive("rage") || !this.isStateTypeActive("manifestChains")) {
+			return {ok: false, reason: "chains-inactive"};
+		}
+		const existing = targetId ? this._data.targetEffects.find(it => it.id === targetId) : null;
+		if (!existing && this.getChainedTargets().length >= (calc.chainCount || 0)) return {ok: false, reason: "chain-capacity"};
+		const maxSize = this.getGrappleSizeCategory()?.maxTargetSize;
+		const sizeRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(size).toLowerCase());
+		const maxRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(maxSize || "gargantuan").toLowerCase());
+		if (!calc.grappleSizeUnlimited && maxRank >= 0 && sizeRank > maxRank) return {ok: false, reason: "target-too-large", maxSize};
+		const range = Number(calc.chainRange) || 0;
+		if (distance != null && Number(distance) > range) return {ok: false, reason: "out-of-range", range};
+
+		const id = targetId || `chain-target-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+		const isRestrain = effect === "restrain" || riderId === "chains-restrain";
+		const isShove = effect === "shove" || effect === "control-shove" || riderId === "chains-control-shove";
+		const restraintDc = calc.chainRestrainDc || null;
+		const restraintSuccess = !isRestrain || restraintSaveTotal == null || Number(restraintSaveTotal) < restraintDc;
+		const target = this.upsertTargetEffect({
+			id,
+			source: "chained-fury",
+			effectType: "chained-fury",
+			targetName: targetName || name || existing?.targetName || "Target",
+			size,
+			distance,
+			grappled: true,
+			restrained: isRestrain && restraintSuccess,
+			shoved: isShove,
+			shoveDistance: shoveDistance == null ? (isShove ? (calc.chainShoveDistance || 0) : 0) : shoveDistance,
+			recurringDamage: isRestrain && restraintSuccess && calc.chainRestrainDamage
+				? {
+					amount: calc.chainRestrainDamage,
+					type: "force",
+					when: "start of each of its turns",
+				}
+				: null,
+			chainIndex: existing?.chainIndex ?? this.getChainedTargets().length,
+			escapeDc: calc.chainGrappleDc || null,
+			restraintDc,
+		});
+		return {
+			ok: !!target,
+			target,
+			grappled: true,
+			restrained: !!target?.restrained,
+			restraintSaveSuccess: restraintSuccess,
+			saveDc: restraintDc,
+		};
+	}
+
+	createChainedTarget (opts = {}) { return this.applyChainedTargetEffect(opts); }
+	resolveChainedTargetEffect (opts = {}) { return this.applyChainedTargetEffect(opts); }
+	releaseChainedTarget (id) { return this.removeTargetEffect(id); }
+
+	escapeChainedTarget (id, saveTotal = null) {
+		const target = this._data.targetEffects.find(it => it.id === id);
+		if (!target) return {ok: false, reason: "not-found"};
+		if (target.escapeDc != null && saveTotal != null && Number(saveTotal) < target.escapeDc) return {ok: false, escaped: false, dc: target.escapeDc};
+		this.removeTargetEffect(id);
+		return {ok: true, escaped: true};
+	}
+
+	moveChainedTarget (id, distance) {
+		const target = this._data.targetEffects.find(it => it.id === id);
+		if (!target) return {ok: false, reason: "not-found"};
+		const range = Number(this.getFeatureCalculations()?.chainRange) || 0;
+		if (Number(distance) < 0 || Number(distance) > range) return {ok: false, reason: "out-of-range", range};
+		target.distance = Number(distance);
+		target.updatedAt = Date.now();
+		return {ok: true, target: MiscUtil.copyFast(target)};
+	}
+
+	resolveChainedTargetTurn (id, turn = this._data.combatRound) {
+		const target = this._data.targetEffects.find(it => it.id === id);
+		if (!target || !target.restrained || !target.recurringDamage) return {ok: false, damage: 0};
+		if (target.lastRecurringDamageTurn === turn) return {ok: true, damage: 0, alreadyResolved: true};
+		target.lastRecurringDamageTurn = turn;
+		target.updatedAt = Date.now();
+		return {ok: true, damage: target.recurringDamage.amount, damageType: target.recurringDamage.type};
+	}
+
+	reconcileTargetEffects () {
+		const calc = this.getFeatureCalculations() || {};
+		const legal = calc.hasManifestChains && this.isStateTypeActive("rage") && this.isStateTypeActive("manifestChains");
+		if (!legal) this.clearTargetEffects("chained-fury");
+		else {
+			const max = calc.chainRange || 0;
+			for (const target of [...this._data.targetEffects]) {
+				if (target.source === "chained-fury" && target.distance != null && target.distance > max) this.removeTargetEffect(target.id);
+				else if (target.source === "chained-fury" && !target.grappled) this.removeTargetEffect(target.id);
+			}
+		}
+	}
+
+	getChainedFuryTargets () { return this.getChainedTargets(); }
+	clearChainedFuryTargets () { return this.clearTargetEffects("chained-fury"); }
 
 	/**
 	 * Effective size category used when grappling or shoving, and when moving a

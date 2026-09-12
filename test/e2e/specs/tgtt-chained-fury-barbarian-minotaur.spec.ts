@@ -37,6 +37,12 @@ describeCharacter({
 		deathSaves: true,
 		applyCondition: {skip: true}, // blocked by CS-BUG-009 (addCondition hangs render — to retest after fix)
 		featAbility: {skip: true},
+		targetLifecycle: {
+			targetName: "Playwright ogre",
+			size: "large",
+			distance: 15,
+			effect: "restrain",
+		},
 	},
 	milestones: {
 		1:  {totalLevel: 1,  expectToggles: [/rage/i], expectResources: {"Rage": 2}},

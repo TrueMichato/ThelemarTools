@@ -176,6 +176,13 @@ export interface CharacterSpec {
 		 * doesn't take the feat.
 		 */
 		featAbility?: {featureName: string | RegExp; expectDelta?: "ac" | "dc" | "attack"} | {skip: true};
+		/** Opt-in Chained Fury target lifecycle probe at the usage level. */
+		targetLifecycle?: {skip: true; reason?: string} | {
+			targetName?: string;
+			size?: string;
+			distance?: number;
+			effect?: "grapple" | "restrain" | "shove" | "control-shove";
+		};
 		/** If true, skip the entire usage spec (e.g. blocked by a bug). */
 		skip?: boolean;
 	};
@@ -638,6 +645,32 @@ export function describeCharacter (spec: CharacterSpec): void {
 					} else if (fa.expectDelta === "dc") {
 						expect(Math.abs(delta.dcDelta), `feat ${fa.featureName} should affect DC`).toBeGreaterThan(0);
 					}
+				}
+
+				if (usage.targetLifecycle && !(usage.targetLifecycle as any).skip) {
+					const tl = usage.targetLifecycle as {targetName?: string; size?: string; distance?: number; effect?: string};
+					const calc = await page.evaluate(() => (globalThis as any).charSheet?._state?.getFeatureCalculations?.() ?? {});
+					if (!calc.hasManifestChains) {
+						throw new Error("targetLifecycle requires a Chained Fury build with Manifest Chains");
+					}
+					await page.evaluate(() => {
+						const cs: any = (globalThis as any).charSheet;
+						cs?._state?.activateState?.("rage");
+						cs?._state?.activateState?.("manifestChains");
+						cs?._renderCharacter?.();
+					});
+					const applied = await charSheet.applyChainedTargetEffect({
+						targetName: tl.targetName || "Playwright target",
+						size: tl.size || "medium",
+						distance: tl.distance ?? 10,
+						effect: tl.effect || "restrain",
+						riderId: tl.effect === "restrain" ? "chains-restrain" : tl.effect === "control-shove" ? "chains-control-shove" : tl.effect === "shove" ? "chains-shove" : "chains-grapple",
+					});
+					expect(applied?.ok, `target-aware chain rider should create a target effect (${applied?.reason || "unknown"})`).toBe(true);
+					const targets = await charSheet.getChainedTargets();
+					expect(targets.some(t => t.id === applied.target.id && t.grappled)).toBe(true);
+					expect(await charSheet.releaseChainedTarget(applied.target.id)).toBe(true);
+					expect(await charSheet.getChainedTargets()).toHaveLength(0);
 				}
 			});
 		}

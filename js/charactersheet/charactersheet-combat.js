@@ -2075,6 +2075,10 @@ class CharacterSheetCombat {
 		if (picked == null || picked >= options.length) return;
 
 		const opt = options[picked];
+		if (opt.targetAware && opt.id.startsWith("chains-")) {
+			await this._pOfferChainedTargetEffect(ctx, opt);
+			return;
+		}
 		const parts = [opt.description || opt.name];
 		if (opt.save?.dc) {
 			parts.push(`Save: DC ${opt.save.dc} ${Parser.attAbvToFull(opt.save.ability)}.`);
@@ -2083,6 +2087,95 @@ class CharacterSheetCombat {
 			parts.push(`Recurring: ${opt.recurringDamage.amount} ${opt.recurringDamage.type || ""} damage at the ${opt.recurringDamage.when || "start of each of its turns"}.`);
 		}
 		JqueryUtil.doToast({type: "success", content: `${opt.name}: ${parts.join(" ")}`});
+	}
+
+	/**
+	 * Resolve an opt-in target-aware rider. The target record is owned by
+	 * CharacterSheetState, so Combat and Play Mode remain synchronized and a
+	 * save/load round-trip preserves the effect.
+	 */
+	async _pOfferChainedTargetEffect (ctx, opt) {
+		const state = this._state;
+		const existing = state.getChainedTargets?.() || [];
+		const trigger = typeof document !== "undefined" ? document.activeElement : null;
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: `${opt.name} — Choose Target`,
+			isMinHeight0: true,
+			cbClose: () => csRestoreModalFocus(trigger),
+		});
+
+		await new Promise(resolve => {
+			let resolved = false;
+			const finish = () => {
+				if (resolved) return false;
+				resolved = true;
+				resolve();
+				return true;
+			};
+			const targetOptions = existing.map(t => `<option value="${t.id}">${t.targetName} (${t.size})</option>`).join("");
+			modalInner.innerHTML = `
+				<div class="cs-combat-target-effect" role="form" aria-label="Chained Fury target effect">
+					<p class="ve-small ve-muted">Track the creature hit by your Spectral Chains. Targets remain until released, escaped, moved beyond range, or Rage/Manifest Chains ends.</p>
+					<label class="ve-form-label">Existing target
+						<select class="form-control" data-target-id aria-label="Existing chained target">
+							<option value="">New target</option>${targetOptions}
+						</select>
+					</label>
+					<label class="ve-form-label">Target name
+						<input class="form-control" data-target-name aria-label="Target name" placeholder="Goblin, ogre, ...">
+					</label>
+					<label class="ve-form-label">Size
+						<select class="form-control" data-target-size aria-label="Target size">
+							${["tiny", "small", "medium", "large", "huge", "gargantuan"].map(s => `<option value="${s}">${s[0].toUpperCase() + s.slice(1)}</option>`).join("")}
+						</select>
+					</label>
+					<label class="ve-form-label">Distance (ft.)
+						<input class="form-control" data-target-distance aria-label="Target distance in feet" type="number" min="0" max="${state.getFeatureCalculations()?.chainRange || 30}" value="${state.getFeatureCalculations()?.chainRange || 0}">
+					</label>
+					${opt.id === "chains-restrain" ? `<label class="ve-form-label">STR save total (optional)
+						<input class="form-control" data-restraint-save aria-label="Target Strength save total" type="number" placeholder="Leave blank if failed">
+					</label>` : ""}
+					<div class="ve-flex-h-right mt-2">
+						<button class="cs-combat-btn" data-act="cancel">Cancel</button>
+						<button class="cs-combat-btn cs-combat-btn--primary ml-2" data-act="apply">Apply effect</button>
+					</div>
+				</div>`;
+
+			const targetSelect = modalInner.querySelector("[data-target-id]");
+			const nameInput = modalInner.querySelector("[data-target-name]");
+			const sizeInput = modalInner.querySelector("[data-target-size]");
+			const distanceInput = modalInner.querySelector("[data-target-distance]");
+			targetSelect.addEventListener("change", () => {
+				const target = existing.find(t => t.id === targetSelect.value);
+				if (!target) return;
+				nameInput.value = target.targetName;
+				sizeInput.value = target.size;
+				distanceInput.value = target.distance ?? "";
+			});
+			modalInner.querySelector("[data-act=cancel]").addEventListener("click", () => { finish(); doClose(); });
+			modalInner.querySelector("[data-act=apply]").addEventListener("click", () => {
+				const targetId = targetSelect.value || undefined;
+				const restraintSave = modalInner.querySelector("[data-restraint-save]")?.value;
+				const result = state.applyChainedTargetEffect({
+					targetId,
+					targetName: nameInput.value.trim() || undefined,
+					size: sizeInput.value,
+					distance: Number(distanceInput.value),
+					riderId: opt.id,
+					effect: opt.id === "chains-restrain" ? "restrain" : opt.id === "chains-control-shove" ? "control-shove" : opt.id === "chains-shove" ? "shove" : "grapple",
+					restraintSaveTotal: restraintSave === "" || restraintSave == null ? null : Number(restraintSave),
+				});
+				if (!result.ok) {
+					JqueryUtil.doToast({type: "warning", content: `Cannot apply chain effect: ${result.reason || "invalid target"}`});
+					return;
+				}
+				finish();
+				doClose();
+				JqueryUtil.doToast({type: "success", content: `${opt.name} applied to ${result.target.targetName}.`});
+				this._page.renderCharacter?.();
+			});
+			csFocusModalOnOpen(modalInner, {preferSelector: "[data-target-name]"});
+		});
 	}
 
 	/**
@@ -6721,6 +6814,7 @@ class CharacterSheetCombat {
 		this._runRenderSteps([
 			() => this.renderAttacks(),
 			() => this.renderCombatQuiver(),
+			() => this.renderChainedTargets(),
 			() => this.renderCombatConsumables(),
 			() => this.renderDeathSaves(),
 			() => this.renderCombatChanneledSpell(),
@@ -6768,6 +6862,113 @@ class CharacterSheetCombat {
 				// eslint-disable-next-line no-console
 				console.error("Combat render step failed:", e);
 			}
+		}
+	}
+
+	renderChainedTargets () {
+		const section = document.getElementById("charsheet-combat-chained-targets-section");
+		const container = document.getElementById("charsheet-combat-chained-targets");
+		if (!section || !container) return;
+		container.setAttribute("role", "region");
+		container.setAttribute("aria-live", "polite");
+		container.setAttribute("aria-label", "Chained Fury targets");
+		const targets = this._state.getChainedTargets?.() || [];
+		const calc = this._state.getFeatureCalculations?.() || {};
+		const isAvailable = !!calc.hasManifestChains && this._state.isStateTypeActive?.("manifestChains") && this._state.isStateTypeActive?.("rage");
+		section.style.display = isAvailable || targets.length ? "" : "none";
+		container.innerHTML = "";
+		if (!targets.length) {
+			container.innerHTML = `<div class="ve-muted ve-small">No creatures chained. Choose a target-aware rider after a Spectral Chains hit.</div>`;
+			return;
+		}
+		const summary = document.createElement("div");
+		summary.className = "ve-muted ve-small mb-2";
+		summary.textContent = `${targets.length}/${calc.chainCount || 0} chains occupied · reach ${calc.chainRange || 0} ft.`;
+		container.appendChild(summary);
+		for (const target of targets) {
+			const row = document.createElement("div");
+			row.className = "charsheet__chained-target-row ve-flex-v-center ve-flex-wrap gap-1";
+			row.setAttribute("role", "group");
+			row.setAttribute("aria-label", `${target.targetName}, chained target`);
+			const label = document.createElement("span");
+			label.className = "bold";
+			label.textContent = target.targetName;
+			row.appendChild(label);
+			const meta = document.createElement("span");
+			meta.className = "ve-muted ve-small";
+			meta.textContent = `${target.size}${target.restrained ? " · restrained" : " · grappled"}${target.distance != null ? ` · ${target.distance} ft.` : ""}`;
+			row.appendChild(meta);
+			const release = document.createElement("button");
+			release.type = "button";
+			release.className = "ve-btn ve-btn-xs ve-btn-default ml-auto";
+			release.textContent = "Release";
+			release.style.minHeight = "44px";
+			release.title = `Release ${target.targetName}`;
+			release.setAttribute("aria-label", `Release chained target ${target.targetName}`);
+			release.addEventListener("click", () => {
+				this._state.releaseChainedTarget(target.id);
+				this._page.saveCharacter?.();
+				this.renderChainedTargets();
+			});
+			row.appendChild(release);
+			const distance = document.createElement("input");
+			distance.type = "number";
+			distance.min = "0";
+			distance.max = String(calc.chainRange || 30);
+			distance.value = target.distance ?? "";
+			distance.className = "form-control input-xs ml-1";
+			distance.style.width = "5rem";
+			distance.style.minHeight = "44px";
+			distance.setAttribute("aria-label", `New distance for ${target.targetName} in feet`);
+			row.appendChild(distance);
+			const move = document.createElement("button");
+			move.type = "button";
+			move.className = "ve-btn ve-btn-xs ve-btn-default ml-1";
+			move.textContent = "Move";
+			move.style.minHeight = "44px";
+			move.setAttribute("aria-label", `Move ${target.targetName} within chain range`);
+			move.addEventListener("click", () => {
+				const result = this._state.moveChainedTarget(target.id, Number(distance.value));
+				if (!result.ok) JqueryUtil.doToast({type: "warning", content: `Cannot move target: ${result.reason || "invalid distance"}`});
+				else {
+					this._page.saveCharacter?.();
+					this.renderChainedTargets();
+				}
+			});
+			row.appendChild(move);
+			if (target.restrained && target.recurringDamage?.amount) {
+				const damage = document.createElement("button");
+				damage.type = "button";
+				damage.className = "ve-btn ve-btn-xs ve-btn-warning ml-1";
+				damage.textContent = `Turn damage (${target.recurringDamage.amount})`;
+				damage.style.minHeight = "44px";
+				damage.setAttribute("aria-label", `Resolve recurring damage for ${target.targetName}`);
+				damage.addEventListener("click", () => {
+					const result = this._state.resolveChainedTargetTurn(target.id);
+					if (result.damage) JqueryUtil.doToast({type: "warning", content: `${target.targetName} takes ${result.damage} ${result.damageType} damage.`});
+					else JqueryUtil.doToast({type: "info", content: "Recurring damage already resolved for this turn."});
+					this._page.saveCharacter?.();
+				});
+				row.appendChild(damage);
+			}
+			const escape = document.createElement("button");
+			escape.type = "button";
+			escape.className = "ve-btn ve-btn-xs ve-btn-default ml-1";
+			escape.textContent = "Escape";
+			escape.style.minHeight = "44px";
+			escape.setAttribute("aria-label", `Resolve escape for ${target.targetName}`);
+			escape.addEventListener("click", async () => {
+				const raw = await InputUiUtil.pGetUserNumber({title: `${target.targetName} — Escape Check`, min: 0, int: true});
+				if (raw == null) return;
+				const result = this._state.escapeChainedTarget(target.id, raw);
+				if (result.escaped) {
+					JqueryUtil.doToast({type: "success", content: `${target.targetName} escaped the chains.`});
+					this._page.saveCharacter?.();
+					this.renderChainedTargets();
+				} else JqueryUtil.doToast({type: "info", content: `${target.targetName} remains chained (escape DC ${result.dc}).`});
+			});
+			row.appendChild(escape);
+			container.appendChild(row);
 		}
 	}
 

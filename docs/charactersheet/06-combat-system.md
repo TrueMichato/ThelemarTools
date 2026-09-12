@@ -134,6 +134,16 @@ to permit a third Astral Arms attack only while the current Attack action
 contains exclusively Astral Arms attacks. Empowered Arms uses the shared
 once-per-turn damage-rider path and is scoped to the same feature-owned row.
 
+TGTT Path of the Chained Fury is the first opt-in persisted target/effect
+integration. A Spectral Chains on-hit choice opens an accessible target form
+and stores the result in `CharacterSheetState.targetEffects`. The Combat tab
+and Play Mode render the same records, including chain occupancy, target size,
+range, grappled/restrained state, recurring force damage, and Release controls.
+`CharacterSheetState` owns the lifecycle: escape/release, movement beyond chain
+range, save/load reconciliation, and ending Rage or Manifest Chains all remove
+invalid effects. Existing prompt-only `attackOnHitOptions` remain unchanged
+unless an option explicitly declares `targetAware: true`.
+
 ### Attack Bonus Calculation
 
 ```javascript
