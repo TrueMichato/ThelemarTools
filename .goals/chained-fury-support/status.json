@@ -1,0 +1,16 @@
+{
+  "goal_id": "chained-fury-support",
+  "status": "inspecting",
+  "iteration": 1,
+  "builder_model": "GPT:5.6-Luna",
+  "inspector_model": "GPT:5.6-Sol",
+  "initial_sha": "4a84b403c9f0c5e2e091673859e8f5d2585c492c",
+  "created_at": "2026-09-12T21:39:56.766+03:00",
+  "history": [
+    {
+      "iteration": 1,
+      "verdict": "FAIL",
+      "summary": "Target saves, movement/action economy, teardown/recalculation, attack gating, responsive UI, and true E2E lifecycle coverage remain incomplete."
+    }
+  ]
+}
