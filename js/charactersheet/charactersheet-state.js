@@ -4,6 +4,7 @@
  */
 
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
+import {CharacterSheetGamblerRules} from "./charactersheet-gambler.js";
 
 /**
  * Utility to parse feature text and extract limited-use information
@@ -4315,6 +4316,8 @@ class CharacterSheetState {
 
 	constructor () {
 		this._data = this._getDefaultState();
+		// Runtime-only seam for deterministic Gambler tests. Never serialized.
+		this._gamblerRollSource = null;
 		// Optional full spell database, injected by the controller after data
 		// load (`setSpellData`). Used to enrich subclass/feature-granted spells
 		// with their real level/school/metadata so they render and persist
@@ -4930,6 +4933,8 @@ class CharacterSheetState {
 				gamblerLastTableRoll: null, // {roll, effect, timestamp}
 				gamblerExtraLuckUsed: 0, // Uses of Extra Luck (L9) today
 				gamblerMasterFortuneUsed: 0, // Uses of Master of Fortune nat-1-to-20 (L17) today
+				gamblerPendingCastResolutions: [], // runtime-independent pending cast/table obligations
+				gamblerCastHistory: [], // committed cast receipts, capped by the state layer
 				// Spell Scribing Adept (TGTT) — mini-spellbook for Bard/Sorcerer/Warlock
 				scribingSpellbook: [], // [{id, name, source, level, school, ...}]
 				scribingMemorizedSpellId: null, // ID of currently memorized spell
@@ -5297,12 +5302,15 @@ class CharacterSheetState {
 			// Play Mode (alternative intent-based UI)
 			viewMode: "full", // "full" | "play"
 			favorites: [], // [{id, type, name, icon, detail, ref}] — pinned actions for quick access
+			actionEconomy: {bonusActionAvailable: true},
 		};
 	}
 
 	// #region Core State Management
 	reset () {
 		this._data = this._getDefaultState();
+		// Runtime-only seam for deterministic Gambler tests. Never serialized.
+		this._gamblerRollSource = null;
 	}
 
 	toJson () {
@@ -5348,6 +5356,9 @@ class CharacterSheetState {
 		this._data.speed = {...this._getDefaultState().speed, ...this._data.speed};
 		this._data.senses = {...this._getDefaultState().senses, ...this._data.senses};
 		this._data.spellcasting = {...this._getDefaultState().spellcasting, ...this._data.spellcasting};
+		if (!Array.isArray(this._data.spellcasting.gamblerPendingCastResolutions)) this._data.spellcasting.gamblerPendingCastResolutions = [];
+		if (!Array.isArray(this._data.spellcasting.gamblerCastHistory)) this._data.spellcasting.gamblerCastHistory = [];
+		this._data.actionEconomy = {...this._getDefaultState().actionEconomy, ...this._data.actionEconomy};
 		this._data.currency = {...this._getDefaultState().currency, ...this._data.currency};
 		this._data.notes = {...this._getDefaultState().notes, ...this._data.notes};
 		this._data.appearance = {...this._getDefaultState().appearance, ...this._data.appearance};
@@ -18500,6 +18511,58 @@ class CharacterSheetState {
 
 	// #region Gambler Spellcasting Management
 	/**
+	 * Install a per-sheet integer source for Gambler rolls. The source is
+	 * deliberately runtime-only; save files retain outcomes, never a queue or
+	 * callback. `nextInt(maxInclusive, context)` must return 1..maxInclusive.
+	 * @param {{nextInt: function(number, string): number}|null} source
+	 */
+	setGamblerRollSource (source = null) {
+		this._gamblerRollSource = source && typeof source.nextInt === "function" ? source : null;
+	}
+
+	setRollSource (source = null) { this.setGamblerRollSource(source); }
+
+	/**
+	 * @param {number} maxInclusive
+	 * @param {string} [context]
+	 * @returns {number}
+	 * @private
+	 */
+	_rollGamblerRandomInt (maxInclusive, context = "gambler") {
+		const max = Math.max(1, Math.floor(Number(maxInclusive) || 1));
+		const supplied = this._gamblerRollSource?.nextInt?.(max, context);
+		if (Number.isFinite(supplied)) return Math.max(1, Math.min(max, Math.floor(supplied)));
+		return Math.floor(Math.random() * max) + 1;
+	}
+
+	_rollRandomInt (maxInclusive, context = "gambler") {
+		return this._rollGamblerRandomInt(maxInclusive, context);
+	}
+
+	/**
+	 * @param {number} count
+	 * @param {number} faces
+	 * @param {string} [context]
+	 * @returns {{rolls:number[], total:number}}
+	 * @private
+	 */
+	_rollGamblerDice (count, faces, context = "gambler") {
+		const rolls = Array.from({length: count}, (_, ix) => this._rollGamblerRandomInt(faces, `${context}:${ix + 1}`));
+		return {rolls, total: rolls.reduce((sum, roll) => sum + roll, 0)};
+	}
+
+	_rollDice (count, faces, context = "gambler") {
+		return this._rollGamblerDice(count, faces, context);
+	}
+
+	/**
+	 * Expose the runtime seam to browser-side E2E helpers without exposing the
+	 * callback in persisted state.
+	 * @returns {boolean}
+	 */
+	hasGamblerRollSource () { return !!this._gamblerRollSource; }
+
+	/**
 	 * Roll for Gambler's daily prepared spell count.
 	 * Gambler prepares 2d4 spells (3d6 at level 13+) after each long rest.
 	 * @returns {{dice: string, rolls: number[], total: number}} Roll details
@@ -18519,10 +18582,9 @@ class CharacterSheetState {
 
 		// Roll each die individually for display
 		const rolls = [];
-		for (let i = 0; i < count; i++) {
-			rolls.push(Math.floor(Math.random() * sides) + 1);
-		}
-		const total = rolls.reduce((sum, r) => sum + r, 0);
+		const rolled = this._rollGamblerDice(count, sides, "prepared");
+		rolled.rolls.forEach(roll => rolls.push(roll));
+		const total = rolled.total;
 
 		const rollDetails = {dice: diceStr, rolls, total};
 		this._data.spellcasting.gamblerPreparedRolled = total;
@@ -18619,7 +18681,7 @@ class CharacterSheetState {
 			odds = "1/2";
 		}
 
-		const roll = Math.floor(Math.random() * die) + 1;
+		const roll = this._rollGamblerRandomInt(die, "bet");
 		const won = !losesOn.includes(roll);
 
 		const result = {
@@ -18668,17 +18730,18 @@ class CharacterSheetState {
 		const calcs = this.getFeatureCalculations();
 		if (!calcs.hasGamblerFolly) return null;
 
-		const roll = Math.floor(Math.random() * 100) + 1;
+		const roll = this._rollGamblerRandomInt(100, "table");
 		const effect = CharacterSheetState.GAMBLER_GAMBLING_TABLE[roll - 1] || "Unknown effect";
 
 		// Master of Fortune: roll twice on table
 		let secondRoll, secondEffect;
 		if (calcs.hasMasterOfFortune) {
-			secondRoll = Math.floor(Math.random() * 100) + 1;
+			secondRoll = this._rollGamblerRandomInt(100, "table:master");
 			secondEffect = CharacterSheetState.GAMBLER_GAMBLING_TABLE[secondRoll - 1] || "Unknown effect";
 		}
 
 		const result = {
+			resolutionId: CryptUtil.uid(),
 			roll,
 			effect,
 			...(secondRoll && {secondRoll, secondEffect}),
@@ -18687,6 +18750,8 @@ class CharacterSheetState {
 			chosenRoll: roll,
 			chosenEffect: effect,
 			needsChoice: !!secondRoll,
+			status: secondRoll ? "awaiting-choice" : "pending",
+			descriptor: CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[roll] || null,
 			timestamp: Date.now(),
 		};
 		this._data.spellcasting.gamblerLastTableRoll = result;
@@ -18705,7 +18770,140 @@ class CharacterSheetState {
 		last.chosenRoll = useSecond ? last.secondRoll : last.roll;
 		last.chosenEffect = useSecond ? last.secondEffect : last.effect;
 		last.needsChoice = false;
+		last.status = "pending";
+		last.descriptor = CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[last.chosenRoll] || null;
 		return {roll: last.chosenRoll, effect: last.chosenEffect};
+	}
+
+	/**
+	 * Build one atomic Gambler spell cast receipt. No slot is mutated here.
+	 * A caller commits the receipt only after any required result choice or
+	 * confirmation has been resolved.
+	 *
+	 * @param {{spell?: object, slotLevel:number, usesGamblerFocus?:boolean}} args
+	 * @returns {object|null}
+	 */
+	createGamblerCastResolution ({spell = null, slotLevel = 1, usesGamblerFocus = true} = {}) {
+		const calcs = this.getFeatureCalculations();
+		if (!calcs.hasGamblerFolly || !usesGamblerFocus || slotLevel <= 0) return null;
+		const modifierDice = calcs.gamblerModifierDice || "1d6";
+		const modifier = CharacterSheetGamblerRules.rollModifier({
+			level: this._getGamblerClass()?.level || 3,
+			nextInt: max => this._rollGamblerRandomInt(max, "cast-modifier"),
+		});
+		const bet = CharacterSheetGamblerRules.rollBet({
+			spellLevel: slotLevel,
+			nextInt: max => this._rollGamblerRandomInt(max, "bet"),
+		});
+		this._data.spellcasting.gamblerLastBet = {
+			...bet,
+			slotLevel,
+			diceType: bet.diceType,
+			timestamp: Date.now(),
+		};
+		const table = bet.won ? null : this.rollGamblingTable();
+		const descriptor = table ? CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[table.chosenRoll] : null;
+		const resolution = {
+			resolutionId: CryptUtil.uid(),
+			spellId: spell?.id || null,
+			spellName: spell?.name || null,
+			slotLevel,
+			modifier: {...modifier, dice: modifierDice},
+			bet,
+			tableRoll: table,
+			descriptor,
+			slotTransaction: descriptor?.transaction === "preserveSlot" ? "preserve" : "consume",
+			status: table?.needsChoice ? "awaiting-choice" : descriptor?.automation === "confirm" ? "awaiting-confirmation" : "ready",
+			createdAt: Date.now(),
+		};
+		this._data.spellcasting.gamblerPendingCastResolutions.push(resolution);
+		return MiscUtil.copyFast(resolution);
+	}
+
+	/**
+	 * @param {string} resolutionId
+	 * @param {1|2} choice
+	 * @returns {object|null}
+	 */
+	chooseGamblerTableResult (resolutionId, choice) {
+		const resolution = this._data.spellcasting.gamblerPendingCastResolutions.find(r => r.resolutionId === resolutionId);
+		if (!resolution?.tableRoll?.needsChoice) return null;
+		const picked = this.chooseGamblingTableResult(choice);
+		if (!picked) return null;
+		resolution.tableRoll = this._data.spellcasting.gamblerLastTableRoll;
+		resolution.descriptor = CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[picked.roll] || null;
+		resolution.status = resolution.descriptor?.automation === "confirm" ? "awaiting-confirmation" : "ready";
+		return MiscUtil.copyFast(resolution);
+	}
+
+	/**
+	 * Apply a safe self-result or acknowledge a manual one. This is intentionally
+	 * conservative: unsupported target/world outcomes remain visible and durable.
+	 * @param {string} resolutionId
+	 * @param {{confirmAutomatic?:boolean}} [opts]
+	 * @returns {object|null}
+	 */
+	applyGamblingTableResolution (resolutionId, {confirmAutomatic = false} = {}) {
+		const resolution = this._data.spellcasting.gamblerPendingCastResolutions.find(r => r.resolutionId === resolutionId);
+		if (!resolution || resolution.status === "applied" || resolution.status === "acknowledged") return resolution ? MiscUtil.copyFast(resolution) : null;
+		if (resolution.status === "awaiting-choice" || (resolution.status === "awaiting-confirmation" && !confirmAutomatic)) return MiscUtil.copyFast(resolution);
+		const descriptor = resolution.descriptor;
+		if (!descriptor) return null;
+		if (descriptor.automation === "automatic") {
+			if (descriptor.effectType === "condition") this.addCondition(descriptor.condition);
+			resolution.status = "applied";
+			resolution.appliedAt = Date.now();
+			return MiscUtil.copyFast(resolution);
+		}
+		if (descriptor.automation === "manual" || descriptor.automation === "confirm") {
+			resolution.status = "acknowledged";
+			resolution.acknowledgedAt = Date.now();
+			return MiscUtil.copyFast(resolution);
+		}
+		return MiscUtil.copyFast(resolution);
+	}
+
+	/**
+	 * @param {string} resolutionId
+	 * @returns {object|null}
+	 */
+	acknowledgeGamblingTableResolution (resolutionId) {
+		const resolution = this._data.spellcasting.gamblerPendingCastResolutions.find(r => r.resolutionId === resolutionId);
+		if (!resolution || resolution.status === "awaiting-choice") return null;
+		resolution.status = "acknowledged";
+		resolution.acknowledgedAt = Date.now();
+		return MiscUtil.copyFast(resolution);
+	}
+
+	getPendingGamblerCastResolutions () {
+		return MiscUtil.copyFast(this._data.spellcasting.gamblerPendingCastResolutions || []);
+	}
+
+	/**
+	 * Commit a cast receipt. Slot mutation belongs to the spell module, so this
+	 * method only validates/records the receipt and makes it idempotent.
+	 * @param {string} resolutionId
+	 * @returns {object|null}
+	 */
+	commitGamblerCastResolution (resolutionId) {
+		const pending = this._data.spellcasting.gamblerPendingCastResolutions || [];
+		const resolution = pending.find(r => r.resolutionId === resolutionId);
+		if (!resolution) return (this._data.spellcasting.gamblerCastHistory || []).find(r => r.resolutionId === resolutionId) || null;
+		if (resolution.status === "awaiting-choice" || resolution.status === "awaiting-confirmation") return null;
+		resolution.status = "committed";
+		resolution.committedAt = Date.now();
+		this._data.spellcasting.gamblerCastHistory.push(MiscUtil.copyFast(resolution));
+		if (this._data.spellcasting.gamblerCastHistory.length > 50) this._data.spellcasting.gamblerCastHistory.shift();
+		this._data.spellcasting.gamblerPendingCastResolutions = pending.filter(r => r.resolutionId !== resolutionId);
+		return MiscUtil.copyFast(resolution);
+	}
+
+	cancelGamblerCastResolution (resolutionId) {
+		const pending = this._data.spellcasting.gamblerPendingCastResolutions || [];
+		const ix = pending.findIndex(r => r.resolutionId === resolutionId);
+		if (ix < 0) return false;
+		pending.splice(ix, 1);
+		return true;
 	}
 
 	/**
@@ -18776,7 +18974,7 @@ class CharacterSheetState {
 		// die that is plausibly worth rescuing (configurable) and never on an existing
 		// advantage roll (which it could not improve).
 		const extraLuck = this.getExtraLuckUses();
-		if (extraLuck && extraLuck.remaining > 0 && !isAdvantage) {
+		if (extraLuck && extraLuck.remaining > 0 && !isAdvantage && this.isBonusActionAvailable()) {
 			const threshold = Number.isFinite(settings.gamblerLuckPromptThreshold)
 				? settings.gamblerLuckPromptThreshold
 				: CharacterSheetState.GAMBLER_LUCK_PROMPT_THRESHOLD;
@@ -18825,8 +19023,8 @@ class CharacterSheetState {
 
 		switch (id) {
 			case "gamblerExtraLuck": {
-				if (!this.useExtraLuck()) return fail;
-				const secondDie = Math.floor(Math.random() * 20) + 1;
+				if (!this.useExtraLuck({consumeBonusAction: true})) return fail;
+				const secondDie = this._rollGamblerRandomInt(20, "extra-luck");
 				return {
 					applied: true,
 					name: "Extra Luck",
@@ -18857,12 +19055,28 @@ class CharacterSheetState {
 	 * Use Extra Luck (L9 feature) - grants advantage, triggers d100 roll.
 	 * @returns {boolean} True if successful, false if no uses remaining
 	 */
-	useExtraLuck () {
+	useExtraLuck ({consumeBonusAction = false} = {}) {
+		if (consumeBonusAction && !this.isBonusActionAvailable()) return false;
 		const resource = this._spendGamblerResource("gamblerExtraLuck");
 		if (!resource) return false;
+		if (consumeBonusAction) this.spendBonusAction();
 		// Trigger d100 roll on the Gambling Table
 		this.rollGamblingTable();
 		return true;
+	}
+
+	isBonusActionAvailable () {
+		return this._data.actionEconomy?.bonusActionAvailable !== false;
+	}
+
+	spendBonusAction () {
+		if (!this.isBonusActionAvailable()) return false;
+		this._data.actionEconomy.bonusActionAvailable = false;
+		return true;
+	}
+
+	resetBonusAction () {
+		this._data.actionEconomy.bonusActionAvailable = true;
 	}
 
 	/**
@@ -38623,6 +38837,12 @@ class CharacterSheetState {
 		const level = this._getGamblerClass()?.level || 0;
 		const max = this.getProficiencyBonus();
 		this._data.resources = this._data.resources || [];
+		if (level < 3) {
+			this._data.spellcasting.gamblerPendingCastResolutions = [];
+			this._data.spellcasting.gamblerCastHistory = [];
+			this._data.spellcasting.gamblerLastBet = null;
+			this._data.spellcasting.gamblerLastTableRoll = null;
+		}
 
 		const ensure = ({name, resourceType, minLevel, legacyUsedKey}) => {
 			if (level < minLevel) {
@@ -54623,6 +54843,8 @@ class CharacterSheetState {
 		"Nothing happens",
 		"Spell effectiveness (range, duration, area of effect, damage, etc.) is doubled",
 	];
+
+	static GAMBLER_GAMBLING_TABLE_EFFECTS = CharacterSheetGamblerRules.createTableEffects(CharacterSheetState.GAMBLER_GAMBLING_TABLE);
 
 	/**
 	 * Zodiac Form constellation definitions (Circle of the Zodiac, TGTT).

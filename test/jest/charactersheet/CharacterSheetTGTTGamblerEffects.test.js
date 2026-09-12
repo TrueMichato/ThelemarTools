@@ -576,6 +576,70 @@ describe("Versatile Gambler (L13)", () => {
 		expect(calcs.gamblerSpellAttackFormula).toBe(`${state.getProficiencyBonus()} + 2d4`);
 	});
 
+	describe("Gambler deterministic rolls and cast receipts", () => {
+		it("routes all Gambler randomness through the per-sheet roll source", () => {
+			buildGambler(13);
+			const calls = [];
+			const queue = [1, 6, 3, 20, 49];
+			state.setGamblerRollSource({
+				nextInt: (max, context) => {
+					calls.push({max, context});
+					return queue.shift();
+				},
+			});
+
+			const prepared = state.rollGamblerPreparedSpells();
+			expect(prepared.rolls).toEqual([1, 6, 3]);
+			expect(calls.map(it => it.context)).toEqual(["prepared:1", "prepared:2", "prepared:3"]);
+
+			const intervention = state.applyD20Intervention("gamblerExtraLuck", {naturalRoll: 1});
+			expect(intervention.applied).toBe(true);
+			expect(intervention.secondDie).toBe(20);
+			expect(state.isBonusActionAvailable()).toBe(false);
+			expect(state.applyD20Intervention("gamblerExtraLuck", {naturalRoll: 1}).applied).toBe(false);
+		});
+
+		it("creates an atomic losing bet receipt and preserves the slot for table result 49", () => {
+			buildGambler(3);
+			const queue = [1, 4, 49];
+			state.setGamblerRollSource({nextInt: () => queue.shift()});
+			const receipt = state.createGamblerCastResolution({
+				spell: {id: "test-spell", name: "Test Spell"},
+				slotLevel: 1,
+			});
+
+			expect(receipt.bet.won).toBe(false);
+			expect(receipt.tableRoll.roll).toBe(49);
+			expect(receipt.descriptor.transaction).toBe("preserveSlot");
+			expect(receipt.slotTransaction).toBe("preserve");
+			expect(state.getPendingGamblerCastResolutions()).toHaveLength(1);
+			expect(state.commitGamblerCastResolution(receipt.resolutionId).status).toBe("committed");
+			expect(state.getPendingGamblerCastResolutions()).toHaveLength(0);
+		});
+
+		it("persists pending cast receipts and cleans them when the Gambler subclass disappears", () => {
+			buildGambler(3);
+			state.setGamblerRollSource({nextInt: max => max === 6 ? 1 : max === 4 ? 4 : 49});
+			const receipt = state.createGamblerCastResolution({spell: {name: "Test Spell"}, slotLevel: 1});
+			const loaded = new CharacterSheetState();
+			loaded.loadFromJson(state.toJson());
+			expect(loaded.getPendingGamblerCastResolutions()).toHaveLength(1);
+			loaded._data.classes = [];
+			loaded._ensureGamblerResources();
+			expect(loaded.getPendingGamblerCastResolutions()).toHaveLength(0);
+			expect(receipt.resolutionId).toBeTruthy();
+		});
+
+		it("defines an explicit descriptor for every published Gambling Table row", () => {
+			const descriptors = CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS;
+			expect(Object.keys(descriptors)).toHaveLength(100);
+			for (let roll = 1; roll <= 100; roll++) {
+				expect(descriptors[roll]).toEqual(expect.objectContaining({roll, id: `gambler-table-${roll}`}));
+				expect(["automatic", "confirm", "manual"]).toContain(descriptors[roll].automation);
+			}
+		});
+	});
+
 	it("keeps the rolled prepared count inside the upgraded dice range", () => {
 		buildGambler(13);
 		for (let i = 0; i < 40; i++) {

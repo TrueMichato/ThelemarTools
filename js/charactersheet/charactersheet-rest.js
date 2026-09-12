@@ -920,6 +920,7 @@ class CharacterSheetRest {
 			if (calcs.hasGamblerFolly) {
 				this._state.resetGamblerDailyResources();
 			}
+			this._state.resetBonusAction?.();
 
 			// Apply Hunter's Prey option swap, if changed
 			huntersPreySwap?.apply();

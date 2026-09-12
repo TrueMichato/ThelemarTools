@@ -1,5 +1,6 @@
 import {CharacterSheetModal} from "./charactersheet-modal.js";
 import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
+import {CharacterSheetGamblerRules} from "./charactersheet-gambler.js";
 
 /**
  * sourceFeature values assigned to player-chosen spells by the Builder, LevelUp, and QuickBuild flows.
@@ -2542,6 +2543,16 @@ class CharacterSheetSpells {
 				...(selectedSlot.isWizardCapstone ? {freeCastSource: selectedSlot.capstoneType === "mastery" ? "Spell Mastery" : "Signature Spells"} : {}),
 			},
 		});
+		const isGamblerSpell = spell?.sourceClass === "Gambler" || spell?.sourceSubclass === "Gambler";
+		let gamblerCastResolution = null;
+		if (isGamblerSpell && this._state.getFeatureCalculations?.().hasGamblerSpellcasting && !selectedSlot.isWizardCapstone) {
+			gamblerCastResolution = this._state.createGamblerCastResolution?.({
+				spell,
+				slotLevel: selectedSlot.level,
+				usesGamblerFocus: !selectedSlot.isNoSlotResource,
+			});
+			if (gamblerCastResolution) castMeta.gamblerCastResolution = gamblerCastResolution;
+		}
 
 		// Handle variant component slot modifications (noSlot / lowerSlot)
 		let skipSlotConsumption = false;
@@ -2563,6 +2574,7 @@ class CharacterSheetSpells {
 				this._state.consumeVariantComponent(id);
 			}
 		}
+		if (gamblerCastResolution?.slotTransaction === "preserve") skipSlotConsumption = true;
 
 		// Consume the selected slot (or no-slot resource).
 		// A no-slot resource (e.g. Star Map) is the player's chosen cast vehicle,
@@ -2605,6 +2617,7 @@ class CharacterSheetSpells {
 
 		// If user cancelled (e.g. target selection), refund the slot / resource
 		if (castResult?.cancelled) {
+			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
 			// Refund any sorcery points spent on metamagic for this cast.
 			// setSorceryPoints takes an object — passing a bare number would set
 			// BOTH current and max, corrupting the pool's max on a non-full refund.
@@ -2631,6 +2644,7 @@ class CharacterSheetSpells {
 			}
 			return;
 		}
+		if (gamblerCastResolution) this._state.commitGamblerCastResolution?.(gamblerCastResolution.resolutionId);
 
 		// Set concentration if spell requires it
 		const vcRemovesConcN = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
@@ -4018,8 +4032,13 @@ class CharacterSheetSpells {
 				|| this._state.getSpellcastingAbility()
 				|| "int";
 			if (isGamblerCast && calcs.gamblerModifierDice) {
-				const rollTotal = Renderer.dice.parseRandomise2(calcs.gamblerModifierDice);
-				gamblerModRoll = {total: rollTotal, dice: calcs.gamblerModifierDice};
+				const suppliedRoll = normalizedCastMeta.gamblerCastResolution?.modifier;
+				const rollTotal = suppliedRoll?.total ?? this._state._rollGamblerDice?.(
+					CharacterSheetGamblerRules.parseDice(calcs.gamblerModifierDice)?.count || 1,
+					CharacterSheetGamblerRules.parseDice(calcs.gamblerModifierDice)?.faces || 6,
+					"cast-modifier",
+				)?.total ?? Renderer.dice.parseRandomise2(calcs.gamblerModifierDice);
+				gamblerModRoll = suppliedRoll || {total: rollTotal, dice: calcs.gamblerModifierDice};
 				spellcastingMod = rollTotal;
 			} else {
 				spellcastingMod = this._state.getAbilityMod(castingAbility);
@@ -4259,8 +4278,17 @@ class CharacterSheetSpells {
 			toastContent += `<br><span class="text-warning">⚡ ${feywildSurgeResult.effect}</span>`;
 		}
 
-		// Gambler's Folly - automatic bet roll on spell cast (TGTT Gambler subclass)
-		const gamblerFollyResult = await this._handleGamblerFolly(spell, slotLevel);
+		// Gambler's Folly is resolved before slot consumption so the same receipt
+		// drives the wager, modifier, table result, and slot transaction.
+		const gamblerResolution = normalizedCastMeta.gamblerCastResolution;
+		const gamblerFollyResult = gamblerResolution
+			? {
+				roll: gamblerResolution.bet.roll,
+				die: gamblerResolution.bet.die,
+				won: gamblerResolution.bet.won,
+				html: `<br><hr class="hr-1"><span class="text-warning">\u{1F3B2} <b>Gambler's Folly:</b></span><br>Bet Roll: <b>${gamblerResolution.bet.roll}</b> on d${gamblerResolution.bet.die} ${gamblerResolution.bet.won ? "<span class=\"text-success\"><b>Won!</b> \u2713</span>" : `<span class="text-danger"><b>Lost!</b> Roll d100 on Gambling Table</span><br><span class="text-info">\u{1F3B0} <b>d100:</b> ${gamblerResolution.tableRoll?.roll ?? "pending"}</span><br>${gamblerResolution.descriptor?.text || ""}`}`,
+			}
+			: await this._handleGamblerFolly(spell, slotLevel);
 		let hasGamblerFolly = false;
 		if (gamblerFollyResult) {
 			toastContent += gamblerFollyResult.html;
