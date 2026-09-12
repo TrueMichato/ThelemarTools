@@ -11,6 +11,11 @@
       "iteration": 1,
       "verdict": "FAIL",
       "summary": "Playwright and repository gates fail; Gambling Table effects, pending cast UI, atomic resolution, source gating, respec cleanup, and regression coverage are incomplete."
+    },
+    {
+      "iteration": 2,
+      "verdict": "FAIL",
+      "summary": "MEGA Playwright and repository gates fail; table effects, delayed/free cast handling, action economy, source gating, restored flows, and regression coverage remain incomplete."
     }
   ]
 }
