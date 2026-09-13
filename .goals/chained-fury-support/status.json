@@ -1,6 +1,6 @@
 {
   "goal_id": "chained-fury-support",
-  "status": "building",
+  "status": "complete",
   "iteration": 7,
   "builder_model": "GPT:5.6-Luna",
   "inspector_model": "GPT:5.6-Sol",
@@ -36,6 +36,11 @@
       "iteration": 6,
       "verdict": "FAIL",
       "summary": "Per-slot restore and mobile layout are fixed, but Play Mode duplicates action cards, modal focus still falls to BODY, and E2E release/duplicate-damage checks remain non-proving."
+    },
+    {
+      "iteration": 7,
+      "verdict": "PASS",
+      "summary": "All remaining runtime gaps are fixed: Play Mode keeps one synchronized action card, Spectral Chains cancel restores row focus, and E2E proves active-grapple Release plus duplicate/repeat recurring damage."
     }
   ]
 }
