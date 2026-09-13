@@ -26,6 +26,11 @@
       "iteration": 4,
       "verdict": "FAIL",
       "summary": "Fresh E2E passes, but action economy remains split, metadata and generic dispatch are incomplete, E2E bypasses required UI branches, and mobile modal focus/layout remain broken."
+    },
+    {
+      "iteration": 5,
+      "verdict": "FAIL",
+      "summary": "Core state fixes and real rider selection pass, but Play Mode restores all action slots, mobile footer/focus remain wrong, and E2E assertions still omit or fake key lifecycle behavior."
     }
   ]
 }
