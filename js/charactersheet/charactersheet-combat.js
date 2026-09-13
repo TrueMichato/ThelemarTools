@@ -302,10 +302,28 @@ function csFocusModalOnOpen (modalInner, {preferSelector} = {}) {
  * opening the modal.
  * @param {Element|null} trigger
  */
-function csRestoreModalFocus (trigger) {
-	if (trigger && trigger.isConnected && typeof (/** @type {*} */ (trigger).focus) === "function") {
-		try { /** @type {*} */ (trigger).focus(); } catch (ignored) { /* jsdom */ }
-	}
+function csRestoreModalFocus (trigger, getFallback = null) {
+	setTimeout(() => {
+		const target = trigger?.isConnected
+			? trigger
+			: (typeof getFallback === "function" ? getFallback() : null);
+		if (target && target.isConnected && typeof (/** @type {*} */ (target).focus) === "function") {
+			try { /** @type {*} */ (target).focus({preventScroll: true}); } catch (ignored) { /* jsdom */ }
+		}
+	}, 0);
+}
+
+function csGetAttackFocusTrigger (attack) {
+	const attackId = attack?.id;
+	if (typeof document === "undefined") return null;
+	const rows = [...(document.querySelectorAll?.(".charsheet__attack-item") || [])];
+	const attackName = String(attack?.name || "").trim().toLowerCase();
+	const row = (attackId ? rows.find(it => it.dataset?.attackId === String(attackId)) : null)
+		|| (attackName
+			? rows.find(it => (it.querySelector?.(".charsheet__attack-name")?.textContent || it.textContent || "")
+				.toLowerCase().includes(attackName))
+			: null);
+	return row?.querySelector?.(".charsheet__attack-roll, button, [role=button]") || null;
 }
 
 class CharacterSheetCombat {
@@ -1338,7 +1356,7 @@ class CharacterSheetCombat {
 		return key;
 	}
 
-	_rollAttack (attackId, event, opts = {}) {
+	async _rollAttack (attackId, event, opts = {}) {
 		const attacks = this._state.getAttacks();
 		let attack = attacks.find(a => a.id === attackId);
 		if (!attack && this._cachedAttacks?.length) {
@@ -1360,12 +1378,6 @@ class CharacterSheetCombat {
 			return false;
 		}
 
-		// A fresh attack roll discards any pending channeled-spell on-hit rider that has
-		// not yet been consumed by a damage roll (Booming/Green-Flame Blade timing: the
-		// on-hit damage must ride the SAME attack's damage roll). The ✨ button arms the
-		// rider AFTER calling this method, so its own roll is never self-cleared.
-		if (this._pendingSpellRider) this._clearPendingSpellRider();
-
 		// Active ammunition (Bug #3). The selected quiver ammo's bonuses ride BOTH
 		// the attack and the damage roll, but ammo is consumed ONLY on the damage
 		// roll — a to-hit roll never spends a round. "Regular" (no selection) adds
@@ -1384,6 +1396,21 @@ class CharacterSheetCombat {
 		// Attack → "attack:melee:str") correctly apply to a STR-used finesse weapon.
 		const abilityUsed = this._resolveAttackAbilityKey(attack, isMelee);
 		const attackType = `attack:${isMelee ? "melee" : "ranged"}:${abilityUsed}`;
+		const conditionalProbe = this._state.aggregateModifiers?.(attackType) || {};
+		let appliedConditionalIds = new Set();
+		let appliedConditionals = [];
+		if (conditionalProbe.conditionalsAvailable?.length) {
+			const picked = await this._page._pPickConditionalModifiers?.({
+				rollLabel: attack.name || "Attack",
+				conditionalsAvailable: conditionalProbe.conditionalsAvailable,
+			});
+			if (picked?.cancelled) return false;
+			appliedConditionalIds = picked?.appliedConditionalIds || new Set();
+			appliedConditionals = picked?.applied || [];
+		}
+		const conditionalAggregate = appliedConditionalIds.size
+			? this._state.aggregateModifiers(attackType, {appliedConditionalIds})
+			: conditionalProbe;
 
 		// Check for advantage/disadvantage from active states and conditions. The
 		// hierarchical matcher in hasAdvantageFromStates already resolves a generic
@@ -1391,11 +1418,20 @@ class CharacterSheetCombat {
 		// "attack" — doing so would wrongly bubble a SPECIFIC effect (e.g. Reckless's
 		// "attack:melee:str") onto every roll, granting advantage to ranged attacks.
 		let stateMode;
+		const pendingAttackStates = (this._state.getPendingAttackRiders?.() || [])
+			.filter(rider => rider.qualifier !== "nextAttackAction" || !attack.isSpell);
 		const maneuverAdvantage = !!this._pendingBattleMasterAttackAdvantage;
 		const shadowTargetAdvantage = !!this._shadowKnightDarkTarget && !!attack.isManifestShadowWeapon;
-		const hasAdvantage = this._state.hasAdvantageFromStates?.(attackType) || maneuverAdvantage || shadowTargetAdvantage;
+		const pendingAttackAdvantage = pendingAttackStates.some(state => state.advantage);
+		const hasAdvantage = this._state.hasAdvantageFromStates?.(attackType)
+			|| conditionalAggregate.advantage
+			|| maneuverAdvantage
+			|| shadowTargetAdvantage
+			|| pendingAttackAdvantage;
 		const resoluteWeaponDisadvantage = this._state.isStateTypeActive?.("resoluteStance") && !attack.isSpell;
-		const hasDisadvantage = this._state.hasDisadvantageFromStates?.(attackType) || resoluteWeaponDisadvantage;
+		const hasDisadvantage = this._state.hasDisadvantageFromStates?.(attackType)
+			|| conditionalAggregate.disadvantage
+			|| resoluteWeaponDisadvantage;
 		if (hasAdvantage && !hasDisadvantage) stateMode = "advantage";
 		else if (hasDisadvantage && !hasAdvantage) stateMode = "disadvantage";
 
@@ -1410,6 +1446,7 @@ class CharacterSheetCombat {
 		// modifiers to both. Itemized so each source breaks out in the result.
 		const attackContributions = this._state.getAttackModifierContributions?.({isMelee}) || [];
 		const featureAttackBonus = attackContributions.reduce((sum, c) => sum + (c.value || 0), 0);
+		const conditionalAttackBonus = appliedConditionals.reduce((sum, conditional) => sum + (conditional.bonus || 0), 0);
 
 		// Get bonus from active states (activated abilities like combat stances)
 		const stateAttackBonus = this._state.getBonusFromStates?.("attack", {weaponId: attack.riteWeaponId || attack.id}) || 0;
@@ -1425,8 +1462,15 @@ class CharacterSheetCombat {
 		const extraBonus = (opts?.extraBonus && Number.isFinite(opts.extraBonus.value)) ? opts.extraBonus : null;
 		const extraBonusValue = extraBonus ? extraBonus.value : 0;
 
-		const totalBonus = abilityMod + profBonus + (attack.attackBonus || 0) + featureAttackBonus + stateAttackBonus + localAttackBonus + extraBonusValue + ammoAttackBonus;
+		const totalBonus = abilityMod + profBonus + (attack.attackBonus || 0) + featureAttackBonus + conditionalAttackBonus + stateAttackBonus + localAttackBonus + extraBonusValue + ammoAttackBonus;
 		const exhaustionPenalty = this._state._getExhaustionD20Penalty?.() || 0;
+
+		// A committed fresh attack roll discards any pending channeled-spell
+		// on-hit rider that has not yet been consumed by a damage roll
+		// (Booming/Green-Flame Blade timing: the on-hit damage must ride the SAME
+		// attack's damage roll). Keep it armed while cancellable pre-roll prompts
+		// are open; cancelling a conditional choice is not an attack.
+		if (this._pendingSpellRider) this._clearPendingSpellRider();
 
 		// Roll d20 with advantage/disadvantage support (state mode can be overridden by shift/ctrl keys)
 		const rollResult = this._page.rollD20({event, mode: stateMode, isAttack: true});
@@ -1448,6 +1492,8 @@ class CharacterSheetCombat {
 			resultClass = "charsheet__dice-result-total--fumble";
 			resultNote = "Critical Miss!";
 		}
+		const conditionalNote = this._page._formatAppliedConditionalsNote?.(appliedConditionals);
+		if (conditionalNote) resultNote = resultNote ? `${resultNote}\n${conditionalNote}` : conditionalNote;
 
 		// Build state effect label for display
 		const stateEffectLabel = this._getStateEffectLabel(hasAdvantage, hasDisadvantage);
@@ -1544,7 +1590,23 @@ class CharacterSheetCombat {
 			}
 		}
 
-		// Consume "next attack only" states (e.g. Steady Aim grants advantage on ONE attack)
+		const activeStateDamageRiders = pendingAttackStates
+			.map(rider => ({
+				name: rider.source,
+				dice: rider.damageDice,
+				damageType: rider.damageType,
+			}))
+			.filter(rider => rider.dice);
+		if (activeStateDamageRiders.length) {
+			this._pendingActiveStateDamageRiders = {
+				attackId,
+				rollId: attackRollId,
+				riders: activeStateDamageRiders,
+			};
+		}
+		this._state.consumePendingAttackRiders?.({stateIds: pendingAttackStates.map(rider => rider.stateId)});
+
+		// Consume "next attack only" states (e.g. Steady Aim or Laughing Lunge).
 		this._consumeOnAttackStates();
 
 		// Generic post-attack extension point. Captured context is passed to each
@@ -1580,19 +1642,33 @@ class CharacterSheetCombat {
 	 * character's next turn), matching the existing quick-toggle behaviour.
 	 * @param {string} attackId
 	 * @param {*} event
-	 * @returns {boolean}
+	 * @returns {Promise<boolean>}
 	 */
-	_rollRecklessAttack (attackId, event) {
+	async _rollRecklessAttack (attackId, event) {
 		// Validate the attack first so we never flip the state on without a roll.
 		const attack = this._findAttackById?.(attackId);
 		if (!attack) return this._rollAttack(attackId, event);
 
-		// Activate once (idempotent): only when not already reckless, so repeated
-		// reckless rolls in the same turn don't spam saves/re-renders.
-		if (!this._state.isStateTypeActive?.("recklessAttack")) {
-			this._state.activateState?.("recklessAttack");
-			// Refresh the state-dependent displays + persist, mirroring the dodge/rage
-			// quick-toggle path (Reckless also grants enemies advantage against you).
+		// Activate provisionally so the normal roll pipeline sees the scoped
+		// advantage. Commit the UI/persistence only after all cancellable pre-roll
+		// prompts succeed; otherwise a cancelled attack must not expose the
+		// character to enemy advantage.
+		const didActivate = !this._state.isStateTypeActive?.("recklessAttack");
+		if (didActivate) this._state.activateState?.("recklessAttack");
+
+		let didRoll;
+		try {
+			didRoll = await this._rollAttack(attackId, event);
+		} catch (e) {
+			if (didActivate) this._state.deactivateState?.("recklessAttack", {reason: "cancelled attack"});
+			throw e;
+		}
+		if (didRoll === false) {
+			if (didActivate) this._state.deactivateState?.("recklessAttack", {reason: "cancelled attack"});
+			return false;
+		}
+
+		if (didActivate) {
 			this.renderCombatStates?.();
 			this.renderCombatEffects?.();
 			this.renderCombatDefenses?.();
@@ -1600,8 +1676,7 @@ class CharacterSheetCombat {
 			this._page?._saveCurrentCharacter?.();
 			this._updateQuickButtonStates?.();
 		}
-
-		return this._rollAttack(attackId, event);
+		return didRoll;
 	}
 
 	/**
@@ -2035,7 +2110,8 @@ class CharacterSheetCombat {
 		const sourceFeature = (attack.sourceFeature || "").trim().toLowerCase();
 		return options.filter(opt => {
 			if (opt?.attackSourceFeature && opt.attackSourceFeature.toLowerCase() !== sourceFeature) return false;
-			if (opt?.requiresState && !this._state.isStateTypeActive?.(opt.requiresState)) return false;
+			const requiredStates = opt?.requiresStates || (opt?.requiresState ? [opt.requiresState] : []);
+			if (requiredStates.some(requiredId => !this._state.isStateTypeActive?.(requiredId))) return false;
 			return true;
 		});
 	}
@@ -2052,12 +2128,15 @@ class CharacterSheetCombat {
 	async _pOfferFeatureOnHitOptions (ctx) {
 		const options = this._getEligibleOnHitOptions(ctx.attack);
 		if (!options.length) return;
+		const focusTrigger = csGetAttackFocusTrigger(ctx.attack)
+			|| document?.activeElement?.closest?.("button, [role=button]");
 
 		const labels = options.map(opt => {
 			const bits = [opt.name];
 			if (opt.save?.dc) bits.push(`DC ${opt.save.dc} ${Parser.attAbvToFull(opt.save.ability).slice(0, 3).toUpperCase()}`);
 			return bits.join(" — ");
 		});
+		const hasTargetAware = options.some(opt => opt.targetAware && opt.targetEffect?.source);
 
 		const didHit = await InputUiUtil.pGetUserBoolean({
 			title: `${ctx.attack?.name || "Attack"} — On Hit`,
@@ -2069,12 +2148,27 @@ class CharacterSheetCombat {
 
 		const picked = await InputUiUtil.pGetUserEnum(/** @type {*} */ ({
 			title: `${ctx.attack?.name || "Attack"} — Choose an On-Hit Effect`,
-			values: [...labels, "Skip"],
+			values: [...labels, ...(hasTargetAware ? ["Track target only"] : []), "Skip"],
 			isResolveItem: false,
 		}));
-		if (picked == null || picked >= options.length) return;
+		if (picked == null || picked > options.length || (picked === options.length && !hasTargetAware)) return;
 
-		const opt = options[picked];
+		const opt = picked === options.length
+			? (() => {
+				const base = options.find(it => it.targetAware && it.targetEffect?.source);
+				return base ? {
+					...base,
+					id: "target-only",
+					name: "Track target only",
+					targetEffect: {...base.targetEffect, effect: "target"},
+				} : null;
+			})()
+			: options[picked];
+		if (!opt) return;
+		if (opt.targetAware && opt.targetEffect?.source) {
+			await this._pOfferTargetEffect({...ctx, focusTrigger}, opt);
+			return;
+		}
 		const parts = [opt.description || opt.name];
 		if (opt.save?.dc) {
 			parts.push(`Save: DC ${opt.save.dc} ${Parser.attAbvToFull(opt.save.ability)}.`);
@@ -2083,6 +2177,140 @@ class CharacterSheetCombat {
 			parts.push(`Recurring: ${opt.recurringDamage.amount} ${opt.recurringDamage.type || ""} damage at the ${opt.recurringDamage.when || "start of each of its turns"}.`);
 		}
 		JqueryUtil.doToast({type: "success", content: `${opt.name}: ${parts.join(" ")}`});
+	}
+
+	/**
+	 * Resolve an opt-in target-aware rider. The target record is owned by
+	 * CharacterSheetState, so Combat and Play Mode remain synchronized and a
+	 * save/load round-trip preserves the effect.
+	 */
+	async _pOfferTargetEffect (ctx, opt) {
+		const state = this._state;
+		const source = String(opt.targetEffect?.source || "").trim().toLowerCase();
+		const effect = String(opt.targetEffect?.effect || "target").trim().toLowerCase();
+		const metadata = state.getTargetEffectMetadata?.(source, effect) || {};
+		const existing = state.getTargetEffects?.({source}) || [];
+		const trigger = ctx.focusTrigger?.isConnected
+			? ctx.focusTrigger
+			: csGetAttackFocusTrigger(ctx.attack);
+		// InputUiUtil resolves its promise as soon as the enum choice is made, while
+		// the closing modal can remain mounted for one animation frame. Wait for that
+		// previous dialog to leave the document before opening the target form; otherwise
+		// its cleanup can close the newly-created target modal as well.
+		await new Promise(resolve => {
+			const started = performance.now();
+			const waitForPreviousModal = () => {
+				const hasVisibleModal = [...(document?.querySelectorAll?.(".ve-ui-modal__inner, .ui-modal__inner") || [])]
+					.some(el => el.offsetParent !== null);
+				if (!hasVisibleModal || performance.now() - started >= 1000) return resolve();
+				setTimeout(waitForPreviousModal, 16);
+			};
+			waitForPreviousModal();
+		});
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: `${opt.name} — Choose Target`,
+			isMinHeight0: true,
+			focusRestoreTarget: trigger,
+			getFocusRestoreTarget: () => csGetAttackFocusTrigger(ctx.attack),
+		});
+		modalInner.classList.add("cs-combat-target-modal");
+		modalInner.style.maxHeight = "calc(100dvh - 2rem)";
+		modalInner.style.overflowY = "auto";
+		modalInner.style.boxSizing = "border-box";
+		modalInner.style.paddingBottom = "max(1.5rem, env(safe-area-inset-bottom, 0px))";
+		await new Promise(resolve => {
+			let resolved = false;
+			const finish = () => {
+				if (resolved) return false;
+				resolved = true;
+				resolve();
+				return true;
+			};
+			const targetOptions = existing.map(t => `<option value="${t.id}">${t.targetName} (${t.size})</option>`).join("");
+			modalInner.innerHTML = `
+				<div class="cs-combat-target-effect" role="form" aria-label="Target effect">
+					<p class="ve-small ve-muted">${metadata.prompt || "Record the creature affected by this target-aware effect."}</p>
+					<label class="ve-form-label">Existing target
+						<select class="form-control" data-target-id aria-label="Existing target">
+							<option value="">New target</option>${targetOptions}
+						</select>
+					</label>
+					<label class="ve-form-label">Target name
+						<input class="form-control" data-target-name aria-label="Target name" placeholder="Goblin, ogre, ...">
+					</label>
+					<label class="ve-form-label">Size
+						<select class="form-control" data-target-size aria-label="Target size">
+							${["tiny", "small", "medium", "large", "huge", "gargantuan"].map(s => `<option value="${s}">${s[0].toUpperCase() + s.slice(1)}</option>`).join("")}
+						</select>
+					</label>
+					<label class="ve-form-label">Distance (ft.)
+						<input class="form-control" data-target-distance aria-label="Target distance in feet" type="number" min="0" max="${metadata.range || 30}" value="${metadata.range || 0}">
+					</label>
+					${opt.targetEffect?.effect === "grapple" || opt.targetEffect?.effect === "restrain" || opt.targetEffect?.effect === "control-shove" ? `<label class="ve-form-label">Grapple save ability
+						<select class="form-control" data-grapple-ability aria-label="Grapple save ability"><option value="str">Strength</option><option value="dex">Dexterity</option></select>
+					</label>
+					<label class="ve-form-label">Grapple save total (optional)
+						<input class="form-control" data-grapple-save aria-label="Target Strength or Dexterity save total" type="number" placeholder="Leave blank if failed">
+					</label>` : ""}
+					${opt.targetEffect?.effect === "control-shove" ? `<label class="ve-form-label">Final distance (ft.)
+						<input class="form-control" data-final-distance aria-label="Declared final distance in feet" type="number" min="0" max="${state.getFeatureCalculations()?.chainRange || 30}" value="${state.getFeatureCalculations()?.chainRange || 0}">
+					</label>
+					<label class="ve-form-label">Shove direction
+						<select class="form-control" data-shove-direction aria-label="Declared shove direction"><option value="away">Away</option><option value="toward">Toward</option><option value="lateral">Lateral</option></select>
+					</label>` : ""}
+					${opt.targetEffect?.effect === "restrain" ? `<label class="ve-form-label">STR save total (optional)
+						<input class="form-control" data-restraint-save aria-label="Target Strength save total" type="number" placeholder="Leave blank if failed">
+					</label>` : ""}
+					<div class="ve-flex-h-right cs-combat-target-modal__footer mt-2">
+						<button class="cs-combat-btn" data-act="cancel">Cancel</button>
+						<button class="cs-combat-btn cs-combat-btn--primary ml-2" data-act="apply">Apply effect</button>
+					</div>
+				</div>`;
+			const targetSelect = modalInner.querySelector("[data-target-id]");
+			const nameInput = modalInner.querySelector("[data-target-name]");
+			const sizeInput = modalInner.querySelector("[data-target-size]");
+			const distanceInput = modalInner.querySelector("[data-target-distance]");
+			targetSelect.addEventListener("change", () => {
+				const target = existing.find(t => t.id === targetSelect.value);
+				if (!target) return;
+				nameInput.value = target.targetName;
+				sizeInput.value = target.size;
+				distanceInput.value = target.distance ?? "";
+			});
+			modalInner.querySelector("[data-act=cancel]").addEventListener("click", async () => { finish(); await doClose(); });
+			modalInner.querySelector("[data-act=apply]").addEventListener("click", async () => {
+				const targetId = targetSelect.value || undefined;
+				const restraintSave = modalInner.querySelector("[data-restraint-save]")?.value;
+				const result = state.applyTargetEffect({
+					targetId,
+					source,
+					targetName: nameInput.value.trim() || undefined,
+					size: sizeInput.value,
+					distance: Number(distanceInput.value),
+					riderId: opt.id,
+					targetEffect: {...opt.targetEffect, source, effect},
+					effect,
+					grappleSaveAbility: modalInner.querySelector("[data-grapple-ability]")?.value || "str",
+					grappleSaveTotal: modalInner.querySelector("[data-grapple-save]")?.value === "" ? null : Number(modalInner.querySelector("[data-grapple-save]")?.value),
+					restraintSaveTotal: restraintSave === "" || restraintSave == null ? null : Number(restraintSave),
+					finalDistance: modalInner.querySelector("[data-final-distance]")?.value === "" ? null : Number(modalInner.querySelector("[data-final-distance]")?.value),
+					shoveDirection: modalInner.querySelector("[data-shove-direction]")?.value || null,
+				});
+				if (!result.ok) {
+					JqueryUtil.doToast({type: "warning", content: `Cannot apply target effect: ${result.reason || "invalid target"}`});
+					return;
+				}
+				finish();
+				await doClose();
+				JqueryUtil.doToast({type: "success", content: `${opt.name} applied to ${result.target.targetName}.`});
+				this._page.renderCharacter?.();
+			});
+			csFocusModalOnOpen(modalInner, {preferSelector: "[data-target-name]"});
+		});
+	}
+
+	_pOfferChainedTargetEffect (ctx, opt) {
+		return this._pOfferTargetEffect(ctx, opt);
 	}
 
 	/**
@@ -2960,13 +3188,14 @@ class CharacterSheetCombat {
 		for (const state of activeStates) {
 			if (!state.active) continue;
 			const typeDef = CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId];
-			if (!typeDef?.consumeOnAttack) continue;
+			if (!typeDef?.consumeOnAttack && !state.consumeOnAttack) continue;
 
 			// Most consume-on-attack states only lose their advantage component (Steady Aim).
 			// States whose rules end on any attack (Shadow Sneak invisibility, the
 			// Improved Shadowcasting attack permission) deactivate completely.
-			const endsOnAttack = typeDef.endConditions?.some(condition => /make an attack|until.*attack/i.test(condition));
-			const remaining = (typeDef.effects || []).filter(e => e.type !== "advantage");
+			const endsOnAttack = state.consumeOnAttack
+				|| typeDef?.endConditions?.some(condition => /make an attack|until.*attack/i.test(condition));
+			const remaining = (typeDef?.effects || []).filter(e => e.type !== "advantage");
 			if (!endsOnAttack && remaining.length > 0) {
 				// Keep the state active but without advantage
 				this._state.updateActiveStateEffects?.(state.stateTypeId, remaining);
@@ -3223,6 +3452,16 @@ class CharacterSheetCombat {
 		let riderDamageTotal = 0;
 		const riderParts = [];
 		const usedRiderIds = [];
+		const pendingStateRiders = this._pendingActiveStateDamageRiders?.attackId === attackId
+			? this._pendingActiveStateDamageRiders.riders || []
+			: [];
+		for (const rider of pendingStateRiders) {
+			const riderRoll = rollTypedDamage(rider.dice, rider.damageType || weaponDamageType);
+			riderDamageTotal += riderRoll.total;
+			riderParts.push({name: rider.name, dice: rider.dice, total: riderRoll.total, type: rider.damageType || weaponDamageType});
+			riderRollsForAnim.push(riderRoll);
+		}
+		if (pendingStateRiders.length) this._pendingActiveStateDamageRiders = null;
 		// Active ammunition (Bug #3): resolved once so its flat bonus folds into the
 		// weapon-typed total and its dice ride the riderParts pipeline. Null = Regular.
 		const ammoForDamage = !attack.isSpell ? this._getSelectedAmmoForWeapon(attack.sourceItem?.id) : null;
@@ -3726,6 +3965,7 @@ class CharacterSheetCombat {
 
 	_resetTurnActionUsage () {
 		this._turnActionUsage = {action: false, bonus: false, reaction: false};
+		this._state?.resetActionEconomy?.();
 		this._turnAttackUsage = {hasAttackAction: false, attackActionCount: 0, attackActionFeatureIds: new Set()};
 		this._handOfHarmUsedThisTurn = false;
 		this._relentlessUsedThisTurn = false;
@@ -3904,7 +4144,8 @@ class CharacterSheetCombat {
 		let best = base;
 		for (const allowance of allowances) {
 			if ((allowance.sourceFeature || "").toLowerCase() !== sourceFeature) continue;
-			if (allowance.requiresState && !this._state.isStateTypeActive?.(allowance.requiresState)) continue;
+			const requiredStates = allowance.requiresStates || (allowance.requiresState ? [allowance.requiresState] : []);
+			if (requiredStates.some(requiredId => !this._state.isStateTypeActive?.(requiredId))) continue;
 			// The bigger budget is conditional on EVERY attack-action attack this turn
 			// coming from the same feature ("…if all the attacks are made with your chains").
 			if (![...used].every(id => id === sourceFeature)) continue;
@@ -3975,7 +4216,8 @@ class CharacterSheetCombat {
 		let best = null;
 		for (const allowance of allowances) {
 			if ((allowance.sourceFeature || "").toLowerCase() !== sourceFeature) continue;
-			if (allowance.requiresState && !this._state.isStateTypeActive?.(allowance.requiresState)) continue;
+			const requiredStates = allowance.requiresStates || (allowance.requiresState ? [allowance.requiresState] : []);
+			if (requiredStates.some(requiredId => !this._state.isStateTypeActive?.(requiredId))) continue;
 			const count = Number(allowance.count) || 0;
 			if (count > base) best = Math.max(best || 0, count);
 		}
@@ -3983,22 +4225,40 @@ class CharacterSheetCombat {
 	}
 
 	_canRollAttackActionAttack (attack) {
-		if (!this._state?.isInCombat?.() || !this._state.isStateTypeActive?.("awakenedAstralSelf") || !this._isAttackActionRoll(attack)) return true;
+		if (!this._state?.isInCombat?.() || !this._isAttackActionRoll(attack)) return true;
 		const count = this._turnAttackUsage?.attackActionCount || 0;
 		return count < this._getAttackActionAllowance(attack);
 	}
 
 	_isActionTypeAvailable (actionType) {
-		if (!this._state?.isInCombat?.()) return true;
 		if (!actionType || actionType === "free") return true;
+		if (this._state?.isInCombat && !this._state.isInCombat()) return true;
+		if (typeof this._state?.isActionTypeAvailable === "function") {
+			return this._state.isActionTypeAvailable(actionType);
+		}
 		return !this._turnActionUsage?.[actionType];
 	}
 
+	isActionTypeAvailable (actionType) {
+		return this._isActionTypeAvailable(actionType);
+	}
+
 	_consumeActionType (actionType) {
-		if (!this._state?.isInCombat?.()) return;
 		if (!actionType || actionType === "free") return;
+		if (this._state?.isInCombat && !this._state.isInCombat()) return true;
+		if (typeof this._state?.consumeActionType === "function") {
+			const consumed = this._state.consumeActionType(actionType);
+			if (!consumed) return false;
+			if (this._turnActionUsage) this._turnActionUsage[actionType] = true;
+			return true;
+		}
 		if (!this._turnActionUsage) this._resetTurnActionUsage();
 		if (Object.hasOwn(this._turnActionUsage, actionType)) this._turnActionUsage[actionType] = true;
+		return true;
+	}
+
+	consumeActionType (actionType) {
+		this._consumeActionType(actionType);
 	}
 
 	_getFeatureActionType (feature) {
@@ -5067,7 +5327,8 @@ class CharacterSheetCombat {
 		}
 
 		// Roll the weapon attack first (this clears any stale rider), THEN arm the new one.
-		this._rollAttack(attackId, event);
+		const didRoll = await this._rollAttack(attackId, event);
+		if (didRoll === false) return;
 		this._armChannelSpellRider(attackId, choice);
 	}
 
@@ -5103,7 +5364,7 @@ class CharacterSheetCombat {
 			attack = eligibleAttacks[picked];
 		}
 
-		const didRoll = this._rollAttack(attack.id, event);
+		const didRoll = await this._rollAttack(attack.id, event);
 		if (didRoll === false) return false;
 		this._armChannelSpellRider(attack.id, choice);
 		return true;
@@ -6721,6 +6982,7 @@ class CharacterSheetCombat {
 		this._runRenderSteps([
 			() => this.renderAttacks(),
 			() => this.renderCombatQuiver(),
+			() => this.renderChainedTargets(),
 			() => this.renderCombatConsumables(),
 			() => this.renderDeathSaves(),
 			() => this.renderCombatChanneledSpell(),
@@ -6768,6 +7030,184 @@ class CharacterSheetCombat {
 				// eslint-disable-next-line no-console
 				console.error("Combat render step failed:", e);
 			}
+		}
+	}
+
+	renderChainedTargets () {
+		const section = document.getElementById("charsheet-combat-chained-targets-section");
+		const container = document.getElementById("charsheet-combat-chained-targets");
+		if (!section || !container) return;
+		container.setAttribute("role", "region");
+		container.setAttribute("aria-live", "polite");
+		container.setAttribute("aria-label", "Chained Fury targets");
+		const targets = this._state.getChainedTargets?.() || [];
+		const calc = this._state.getFeatureCalculations?.() || {};
+		const isAvailable = !!calc.hasManifestChains && this._state.isStateTypeActive?.("manifestChains") && this._state.isStateTypeActive?.("rage");
+		section.style.display = isAvailable || targets.length ? "" : "none";
+		container.innerHTML = "";
+		if (!targets.length) {
+			container.innerHTML = `<div class="ve-muted ve-small">No creatures chained. Choose a target-aware rider after a Spectral Chains hit.</div>`;
+			return;
+		}
+		const summary = document.createElement("div");
+		summary.className = "ve-muted ve-small mb-2";
+		const occupied = this._state.getChainedTargetState?.().used ?? targets.filter(it => it.chainIndex != null).length;
+		summary.textContent = `${occupied}/${calc.chainCount || 0} chains occupied · reach ${calc.chainRange || 0} ft.`;
+		container.appendChild(summary);
+		if (occupied >= Number(calc.chainCount || 0)) {
+			const warning = document.createElement("div");
+			warning.className = "ve-small cs-combat-target-warning mb-2";
+			warning.setAttribute("role", "status");
+			warning.textContent = "Chain capacity reached — release a grapple before adding another.";
+			container.appendChild(warning);
+		}
+		for (const target of targets) {
+			const row = document.createElement("div");
+			row.className = "charsheet__chained-target-row ve-flex-v-center ve-flex-wrap gap-1";
+			row.dataset.targetId = target.id;
+			row.setAttribute("role", "group");
+			row.setAttribute("aria-label", `${target.targetName}, chained target`);
+			const label = document.createElement("span");
+			label.className = "bold";
+			label.textContent = target.targetName;
+			row.appendChild(label);
+			const meta = document.createElement("span");
+			meta.className = "ve-muted ve-small";
+			const status = target.restrained ? "restrained" : target.grappled ? "grappled" : target.shoved ? "shoved (no chain)" : "tracked";
+			meta.textContent = `${target.size} · ${status}${target.distance != null ? ` · ${target.distance} ft.` : ""}`;
+			row.appendChild(meta);
+			const release = document.createElement("button");
+			release.type = "button";
+			release.className = "ve-btn ve-btn-xs ve-btn-default ml-auto";
+			release.textContent = "Release";
+			release.style.minHeight = "44px";
+			release.title = `Release ${target.targetName}`;
+			release.setAttribute("aria-label", `Release chained target ${target.targetName}`);
+			release.addEventListener("click", () => {
+				this._state.releaseChainedTarget(target.id);
+				this._page.saveCharacter?.();
+				this.renderChainedTargets();
+			});
+			row.appendChild(release);
+			const distance = document.createElement("input");
+			distance.type = "number";
+			distance.min = "0";
+			distance.max = String(calc.chainRange || 30);
+			distance.value = target.distance ?? "";
+			distance.className = "form-control input-xs ml-1";
+			distance.style.width = "min(5rem, 100%)";
+			distance.style.maxWidth = "100%";
+			distance.style.minHeight = "44px";
+			distance.setAttribute("aria-label", `New distance for ${target.targetName} in feet`);
+			row.appendChild(distance);
+			const move = document.createElement("button");
+			move.type = "button";
+			move.className = "ve-btn ve-btn-xs ve-btn-default ml-1";
+			move.textContent = "Move";
+			move.style.minHeight = "44px";
+			move.setAttribute("aria-label", `Move ${target.targetName} within chain range`);
+			move.addEventListener("click", () => {
+				const doubleMovement = !!row.querySelector("[data-double-movement]")?.checked;
+				if (doubleMovement && !this._isActionTypeAvailable("bonus")) {
+					JqueryUtil.doToast({type: "warning", content: "Your bonus action has already been used this turn."});
+					return;
+				}
+				const result = this._state.moveChainedTarget(target.id, Number(distance.value), {doubleMovement});
+				if (!result.ok) JqueryUtil.doToast({type: "warning", content: `Cannot move target: ${result.reason || "invalid distance"}`});
+				else {
+					this._page.saveCharacter?.();
+					this.renderChainedTargets();
+				}
+			});
+			row.appendChild(move);
+			const doubleLabel = document.createElement("label");
+			doubleLabel.className = "ve-muted ve-small ml-1";
+			doubleLabel.innerHTML = `<input type="checkbox" data-double-movement aria-label="Spend bonus action to double chain-only movement"> Double`;
+			row.appendChild(doubleLabel);
+			if (target.restrained && target.recurringDamage?.amount) {
+				const damage = document.createElement("button");
+				damage.type = "button";
+				damage.className = "ve-btn ve-btn-xs ve-btn-warning ml-1";
+				damage.textContent = `Turn damage (${target.recurringDamage.amount})`;
+				damage.style.minHeight = "44px";
+				damage.setAttribute("aria-label", `Resolve recurring damage for ${target.targetName}`);
+				damage.addEventListener("click", () => {
+					const result = this._state.resolveChainedTargetTurn(target.id);
+					if (result.damage) JqueryUtil.doToast({type: "warning", content: `${target.targetName} takes ${result.damage} ${result.damageType} damage.`});
+					else JqueryUtil.doToast({type: "info", content: "Recurring damage already resolved for this turn."});
+					this._page.saveCharacter?.();
+				});
+				row.appendChild(damage);
+				const repeat = document.createElement("button");
+				repeat.type = "button";
+				repeat.className = "ve-btn ve-btn-xs ve-btn-default ml-1";
+				repeat.textContent = "Repeat";
+				repeat.style.minHeight = "44px";
+				repeat.setAttribute("aria-label", `Repeat recurring damage for ${target.targetName}`);
+				repeat.addEventListener("click", () => {
+					const result = this._state.resolveChainedTargetTurn(target.id, this._state.getCombatRound?.(), {repeat: true});
+					if (result.damage) JqueryUtil.doToast({type: "warning", content: `${target.targetName} takes ${result.damage} ${result.damageType} damage again.`});
+					this._page.saveCharacter?.();
+				});
+				row.appendChild(repeat);
+			}
+			if (target.distance != null && Number(target.distance) > Number(calc.chainRange || 0)) {
+				const warning = document.createElement("span");
+				warning.className = "ve-small cs-combat-target-warning";
+				warning.setAttribute("role", "status");
+				warning.textContent = "Out of range — effect released";
+				row.appendChild(warning);
+			}
+			const escape = document.createElement("button");
+			escape.type = "button";
+			escape.className = "ve-btn ve-btn-xs ve-btn-default ml-1";
+			escape.textContent = "Escape";
+			escape.style.minHeight = "44px";
+			escape.setAttribute("aria-label", `Resolve escape for ${target.targetName}`);
+			escape.addEventListener("click", async () => {
+				const trigger = document.activeElement;
+				const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+					title: `${target.targetName} — Escape`,
+					isMinHeight0: true,
+					cbClose: () => csRestoreModalFocus(trigger),
+				});
+				modalInner.classList.add("cs-combat-target-modal");
+				modalInner.style.maxHeight = "calc(100dvh - 2rem)";
+				modalInner.style.overflowY = "auto";
+				modalInner.style.boxSizing = "border-box";
+				modalInner.style.paddingBottom = "max(1.5rem, env(safe-area-inset-bottom, 0px))";
+				modalInner.innerHTML = `
+					<div class="cs-combat-target-effect" role="form" aria-label="Chained target escape">
+						<p class="ve-small ve-muted">The target may use Strength or Dexterity against the current grapple DC (${this._state.getFeatureCalculations?.()?.chainGrappleDc || target.escapeDc}).</p>
+						<label class="ve-form-label">Escape ability
+							<select class="form-control" data-escape-ability aria-label="Escape ability">
+								<option value="str">Strength</option><option value="dex">Dexterity</option>
+							</select>
+						</label>
+						<label class="ve-form-label">Save total
+							<input class="form-control" data-escape-total aria-label="Escape save total" type="number" min="0" inputmode="numeric">
+						</label>
+						<div class="ve-flex-h-right cs-combat-target-modal__footer mt-2">
+							<button type="button" class="cs-combat-btn" data-act="cancel">Cancel</button>
+							<button type="button" class="cs-combat-btn cs-combat-btn--primary ml-2" data-act="apply">Resolve escape</button>
+						</div>
+					</div>`;
+				modalInner.querySelector("[data-act=cancel]").addEventListener("click", doClose);
+				modalInner.querySelector("[data-act=apply]").addEventListener("click", () => {
+					const raw = modalInner.querySelector("[data-escape-total]").value;
+					if (raw === "") return;
+					const result = this._state.escapeChainedTarget(target.id, Number(raw), {ability: modalInner.querySelector("[data-escape-ability]").value});
+					if (result.escaped) {
+						JqueryUtil.doToast({type: "success", content: `${target.targetName} escaped the chains.`});
+						this._page.saveCharacter?.();
+						doClose();
+						this.renderChainedTargets();
+					} else JqueryUtil.doToast({type: "info", content: `${target.targetName} remains chained (escape DC ${result.dc}).`});
+				});
+				csFocusModalOnOpen(modalInner, {preferSelector: "[data-escape-total]"});
+			});
+			row.appendChild(escape);
+			container.appendChild(row);
 		}
 	}
 
@@ -7458,7 +7898,22 @@ class CharacterSheetCombat {
 			});
 		}
 
-		// (6) Standard actions — append universal rules options after the
+		// (6) Feature rules which replace a normal action cost.
+		for (const override of this._state.getActionEconomyOverrides?.() || []) {
+			const type = this._normalizeActionType(override.cost);
+			if (!["action", "bonus", "reaction"].includes(type)) continue;
+			push(type, {
+				kind: "feature",
+				id: `override:${override.activity}:${override.source}`,
+				name: override.activity,
+				source: override.source,
+				subtitle: override.targets ? `${override.source} · up to ${override.targets} targets` : override.source,
+				actionType: type,
+				entity: {name: override.activity, description: `${override.source}: use this as a ${type} action instead of ${override.normalCost || "its normal cost"}.`},
+			});
+		}
+
+		// (7) Standard actions — append universal rules options after the
 		// character-specific affordances already collected above.
 		for (const action of this._getStandardActionEconomyEntities()) {
 			for (const type of this._getStandardActionTypes(action)) {
@@ -7656,6 +8111,17 @@ class CharacterSheetCombat {
 
 		if (section) section.style.display = "";
 		container.innerHTML = "";
+
+		const movementOverrides = this._state.getMovementOverrides?.() || [];
+		if (movementOverrides.length) {
+			const movement = e_({tag: "div", clazz: "ve-small ve-muted mb-2"});
+			movement.textContent = movementOverrides.map(override => {
+				if (override.kind === "hostileSpacePermission") return `${override.source}: move through hostile creatures' spaces this turn`;
+				if (override.costFeet != null) return `${override.source}: ${override.activity} costs ${override.costFeet} ft.`;
+				return `${override.source}: ${override.activity}`;
+			}).join(" · ");
+			container.appendChild(movement);
+		}
 
 		const kindMeta = CharacterSheetCombat.ACTION_ECONOMY_KIND_META;
 		const columns = [
@@ -8189,10 +8655,14 @@ class CharacterSheetCombat {
 			// so every current and future classified ability routes here automatically. Monk
 			// abilities (Patient Defense, Flurry of Blows, Hand of Healing/Harm, Step of the Wind,
 			// Whirlpool Strike) are NOT classified activatable abilities and fall through unchanged.
-			if (this._page?._getActivatableAbilityForFeature?.(feature)) {
+			const activatableAbility = this._page?._getActivatableAbilityForFeature?.(feature);
+			if (activatableAbility) {
 				const handled = await this._page._pUseFeatureAbility(feature);
 				if (handled) {
-					this._consumeActionType(actionType);
+					// Structured interactions own an atomic choose/validate/commit flow in
+					// CharacterSheetPage. Do not consume their action a second time here,
+					// and do not charge a cancelled modal.
+					if (!activatableAbility.activationInfo?.interactionKind) this._consumeActionType(actionType);
 					this.renderCombatActions();
 					this.renderCombatResources();
 					this._page._renderFeatures?.();
@@ -11318,6 +11788,7 @@ class CharacterSheetCombat {
 
 		// Update combat tracker controls
 		this._updateCombatTrackerUI();
+		this._renderTurnOrderSummary();
 
 		container.innerHTML = "";
 
@@ -11459,12 +11930,25 @@ class CharacterSheetCombat {
 						roundsLabel = ` <span class="ve-small ve-muted" title="${state.roundsRemaining} rounds left">(${state.roundsRemaining}r)</span>`;
 					}
 				}
+				const isTemporalVision = state.stateTypeId === "eyesOfFuturePast" && state.temporalView;
+				const temporalLabel = isTemporalVision
+					? ` <span class="ve-small">${state.temporalView.direction ? state.temporalView.direction.toTitleCase() : "Direction required"} · ${Math.max(1, Number(state.temporalView.offsetHours) || 1)}h</span>`
+					: "";
+				const temporalControls = isTemporalVision && state.temporalView.decisionPending
+					? `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__temporal-hold ml-1">Hold</button>
+						<button class="ve-btn ve-btn-xs ve-btn-info charsheet__temporal-advance ml-1">Advance</button>`
+					: "";
+				const targetNames = (state.targets || []).map(target => target.name).filter(Boolean);
+				const targetsLabel = targetNames.length
+					? ` <span class="charsheet__combat-state-targets" title="${`Affected targets: ${targetNames.join(", ")}`.qq()}">🎯 ${targetNames.map(name => name.qq()).join(", ")}</span>`
+					: "";
 
 				const stateEl = e_({outer: `
 					<div class="charsheet__combat-state-item badge ${this._getStateBadgeClass(state.stateTypeId)} mr-1 mb-1" data-state-id="${state.id}" title="${tooltip}">
-						${state.icon || stateType?.icon || "⚡"} <span class="charsheet__state-name-link">${stateNameHtml}</span>${roundsLabel}
+						${state.icon || stateType?.icon || "⚡"} <span class="charsheet__state-name-link">${stateNameHtml}</span>${temporalLabel}${roundsLabel}${targetsLabel}
 						${stateType?.activationAction ? `<span class="ve-small" style="opacity: 0.7"> (${this._getActionTypeShortLabel(stateType.activationAction)})</span>` : ""}
 						${triggerHtml}
+						${temporalControls}
 						${isEndable ? `<span class="charsheet__state-remove ml-1" title="End">&times;</span>` : ""}
 					</div>
 				`});
@@ -11473,9 +11957,23 @@ class CharacterSheetCombat {
 					e.stopPropagation();
 					this._useActiveStateTrigger(state.stateTypeId);
 				});
+				stateEl.querySelector(".charsheet__temporal-hold")?.addEventListener("click", (/** @type {*} */ e) => {
+					e.stopPropagation();
+					if (!this._state.resolveTemporalViewRoundChoice("hold")) return;
+					this.renderCombatStates();
+					this._page._renderActiveStates?.();
+					this._page._saveCurrentCharacter?.();
+				});
+				stateEl.querySelector(".charsheet__temporal-advance")?.addEventListener("click", (/** @type {*} */ e) => {
+					e.stopPropagation();
+					if (!this._state.resolveTemporalViewRoundChoice("advance")) return;
+					this.renderCombatStates();
+					this._page._renderActiveStates?.();
+					this._page._saveCurrentCharacter?.();
+				});
 
 				if (isEndable) {
-					stateEl.querySelector(".charsheet__state-remove")?.addEventListener("click", (/** @type {*} */ e) => {
+					stateEl.querySelector(".charsheet__state-remove")?.addEventListener("click", async (/** @type {*} */ e) => {
 						e.stopPropagation();
 						if (state.stateTypeId === "sunShield" && !this._tryConsumeStateToggleAction(stateType)) return;
 						// (R47-a) Divine Favor narrative-boon toggles end via the OWNED path so
@@ -11498,12 +11996,13 @@ class CharacterSheetCombat {
 							// Sync custom abilities panel
 							this._page._customAbilitiesPanel?.render?.();
 						} else {
-							this._state.deactivateState(state.stateTypeId);
+							this._state.deactivateState(state.stateTypeId, {reason: "manual"});
 							// Bridge combat stance deactivation to the stance-specific system
 							if (state.stateTypeId === "combatStance") {
 								this._state.deactivateStance();
 							}
 						}
+						await this._page._pDrainPendingStateEndSaves?.();
 						this.renderCombatStates();
 						this.renderCombatDefenses();
 						this.renderCombatEffects();
@@ -11595,7 +12094,7 @@ class CharacterSheetCombat {
 		this._initCombatTracker();
 	}
 
-	_activateCombatFeature (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
+	async _activateCombatFeature (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
 		// (R47-a) Divine Favor narrative boons are activatable, duration-tracked TOGGLES routed
 		// through the OWNED toggleDivineFavorBoonState() so the created active state carries the
 		// boon's parsed duration/round countdown — the generic _activateFeatureState pipeline
@@ -11612,7 +12111,7 @@ class CharacterSheetCombat {
 			this._page._renderCharacter?.();
 			return;
 		}
-		this._page._activateFeatureState?.(feature, stateTypeId, stateType, resource, resourceCost, activationInfo);
+		await this._page._activateFeatureState?.(feature, stateTypeId, stateType, resource, resourceCost, activationInfo);
 		this.renderCombatStates();
 		this._page._renderActiveStates?.();
 		if (feature.isCustomAbility) {
@@ -12080,6 +12579,122 @@ class CharacterSheetCombat {
 		}
 	}
 
+	_renderTurnOrderSummary () {
+		const container = document.getElementById("charsheet-combat-turn-order");
+		if (!container) return;
+		const roster = this._state?.getCombatTurnOrder?.() || [];
+		container.innerHTML = "";
+		if (!roster.length) {
+			container.append(e_({outer: `<div class="ve-muted ve-small">No turn order yet. Add combatants before using initiative-changing features.</div>`}));
+			return;
+		}
+
+		const list = e_({outer: `<ol class="charsheet__turn-order-list"></ol>`});
+		for (const participant of roster) {
+			const row = e_({outer: `<li class="charsheet__turn-order-item${participant.hasActed ? " charsheet__turn-order-item--acted" : ""}">
+				<span class="charsheet__turn-order-initiative">${participant.initiative}</span>
+				<span class="charsheet__turn-order-name"></span>
+				<button type="button" class="ve-btn ve-btn-xs ${participant.hasActed ? "ve-btn-default" : "ve-btn-primary"}" data-role="acted">${participant.hasActed ? "Acted" : "Mark acted"}</button>
+			</li>`});
+			row.querySelector(".charsheet__turn-order-name").textContent = participant.name;
+			row.querySelector(`[data-role="acted"]`).addEventListener("click", () => {
+				this._state.markCombatTurnOrderParticipantActed(participant.id, !participant.hasActed);
+				this._renderTurnOrderSummary();
+				this._page._saveCurrentCharacter?.();
+			});
+			list.append(row);
+		}
+		container.append(list);
+	}
+
+	async pShowTurnOrderModal () {
+		const trigger = typeof document !== "undefined" ? document.activeElement : null;
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: "Manage Turn Order",
+			isMinHeight0: true,
+		});
+		const body = e_({outer: `<div>
+			<p class="ve-muted mb-3">Track only the names, initiative values, and whether each creature has acted this round.</p>
+			<div class="charsheet__turn-order-add mb-3">
+				<label><span class="ve-bold">Creature</span><input class="form-control input-xs mt-1" data-role="name" placeholder="Creature name"></label>
+				<label><span class="ve-bold">Initiative</span><input class="form-control input-xs mt-1" data-role="initiative" type="number" step="1" value="10"></label>
+				<button type="button" class="ve-btn ve-btn-primary" data-role="add">Add</button>
+			</div>
+			<div data-role="list"></div>
+			<div class="charsheet__modal-actions mt-3">
+				<button type="button" class="ve-btn ve-btn-primary" data-role="done">Done</button>
+			</div>
+		</div>`});
+		const list = body.querySelector(`[data-role="list"]`);
+		const inputName = body.querySelector(`[data-role="name"]`);
+		const inputInitiative = body.querySelector(`[data-role="initiative"]`);
+		const renderList = () => {
+			list.innerHTML = "";
+			const roster = this._state.getCombatTurnOrder();
+			if (!roster.length) {
+				list.append(e_({outer: `<div class="ve-muted ve-text-center py-3">No combatants added.</div>`}));
+				return;
+			}
+			for (const participant of roster) {
+				const row = e_({outer: `<div class="charsheet__turn-order-editor-row">
+					<input class="form-control input-xs" data-role="name" aria-label="Creature name">
+					<input class="form-control input-xs" data-role="initiative" type="number" step="1" aria-label="Initiative">
+					<label class="ve-flex-v-center"><input type="checkbox" data-role="acted"> <span class="ml-1">Acted</span></label>
+					<button type="button" class="ve-btn ve-btn-xs ve-btn-danger" data-role="remove" aria-label="Remove combatant">Remove</button>
+				</div>`});
+				const name = row.querySelector(`[data-role="name"]`);
+				const initiative = row.querySelector(`[data-role="initiative"]`);
+				const acted = row.querySelector(`[data-role="acted"]`);
+				name.value = participant.name;
+				initiative.value = participant.initiative;
+				acted.checked = participant.hasActed;
+				const saveRow = () => {
+					this._state.upsertCombatTurnOrderParticipant({
+						id: participant.id,
+						name: name.value,
+						initiative: initiative.value,
+						hasActed: acted.checked,
+					});
+					renderList();
+					this._renderTurnOrderSummary();
+					this._page._saveCurrentCharacter?.();
+				};
+				name.addEventListener("change", saveRow);
+				initiative.addEventListener("change", saveRow);
+				acted.addEventListener("change", saveRow);
+				row.querySelector(`[data-role="remove"]`).addEventListener("click", () => {
+					this._state.removeCombatTurnOrderParticipant(participant.id);
+					renderList();
+					this._renderTurnOrderSummary();
+					this._page._saveCurrentCharacter?.();
+				});
+				list.append(row);
+			}
+		};
+		body.querySelector(`[data-role="add"]`).addEventListener("click", () => {
+			const id = this._state.upsertCombatTurnOrderParticipant({
+				name: inputName.value,
+				initiative: inputInitiative.value,
+			});
+			if (!id) {
+				JqueryUtil.doToast({type: "warning", content: "Enter a creature name and numeric initiative."});
+				return;
+			}
+			inputName.value = "";
+			renderList();
+			this._renderTurnOrderSummary();
+			this._page._saveCurrentCharacter?.();
+			inputName.focus();
+		});
+		body.querySelector(`[data-role="done"]`).addEventListener("click", () => doClose(true));
+		modalInner.append(body);
+		renderList();
+		csFocusModalOnOpen(modalInner);
+		await pGetResolved();
+		csRestoreModalFocus(trigger);
+		this._renderTurnOrderSummary();
+	}
+
 	/**
 	 * Surface a toast for any turn-start effects applied by the most recent
 	 * `startCombat()`/`advanceRound()` call (Heroic Warrior's Heroic Inspiration
@@ -12105,6 +12720,7 @@ class CharacterSheetCombat {
 	_initCombatTracker () {
 		if (this._combatTrackerInitialised) return;
 		this._combatTrackerInitialised = true;
+		document.getElementById("charsheet-combat-turn-order-manage").onclick = () => this.pShowTurnOrderModal();
 
 		document.getElementById("charsheet-combat-start").onclick = () => {
 			if (this._state.isInCombat?.()) {
@@ -12113,6 +12729,7 @@ class CharacterSheetCombat {
 				this._sneakAttackEnabled = false;
 				this._sneakAttackHasAdjacentAlly = false;
 				this._lastAttackContext = null;
+				this._pendingActiveStateDamageRiders = null;
 				this._handOfHarmUsedThisTurn = false;
 				this._flankingEnabled = false;
 				this._resetTurnActionUsage();

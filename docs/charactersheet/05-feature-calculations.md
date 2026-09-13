@@ -12,6 +12,15 @@ This document provides comprehensive documentation for `getFeatureCalculations()
 - Ability scores
 - Proficiency bonus
 
+### TGTT Gambler source identity
+
+Gambler-only calculations are source-qualified, not name-qualified. A
+calculation may use the TGTT Gambler progression only when the class is Rogue
+from `TGTT`, the subclass is Gambler from `TGTT`, and the `enableTgtt` setting
+is on. This same identity gate is consumed by spell-level limits, prepared
+spell attribution, cantrip/resource reconciliation, and synthesized Gambler
+artifacts; a same-named PHB or homebrew subclass must remain an ordinary Rogue.
+
 ## Return Value Structure
 
 The method returns a flat object with boolean flags and computed values:
@@ -470,7 +479,10 @@ The AC bonus, Acrobatics advantage and melee Sneak-Attack licence are **not**
 calculations — they are effects on the `dancing` active state, so they exist
 only while the Dance is running. Read them via `getBonusFromStates("ac")`,
 `getSkillAdvantageState("acrobatics")` and
-`canSneakAttackWithoutAdvantage({isMelee})`. There is deliberately no
+`canSneakAttackWithoutAdvantage({isMelee})`. Tantalizing Shivers and Percussive
+Strike attack advantage is likewise not a global calculation: named affected
+creatures live in active-state `targets`, and each becomes a default-off
+conditional modifier (`when attacking <target>`). There is deliberately no
 `hasSnakeCharmer` — no such feature exists in the TGTT data.
 
 **Assassin**

@@ -1,7 +1,9 @@
 import "./setup.js";
+import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-combat.js";
 
 const CharacterSheetCombat = globalThis.CharacterSheetCombat;
+const CharacterSheetState = globalThis.CharacterSheetState;
 
 describe("CharacterSheetCombat action economy gating", () => {
 	let combat;
@@ -15,6 +17,7 @@ describe("CharacterSheetCombat action economy gating", () => {
 		toasts = [];
 		useCustomAbilityCalls = 0;
 		featureList = [];
+		const actionUsage = {action: false, bonus: false, reaction: false};
 
 		globalThis.JqueryUtil = {
 			doToast: (payload) => toasts.push(payload),
@@ -22,6 +25,23 @@ describe("CharacterSheetCombat action economy gating", () => {
 
 		const mockState = {
 			isInCombat: () => inCombat,
+			isActionTypeAvailable: (type) => type === "free" || !actionUsage[type],
+			consumeActionType: (type) => {
+				if (type === "free") return true;
+				if (actionUsage[type]) return false;
+				actionUsage[type] = true;
+				return true;
+			},
+			restoreActionType: (type) => {
+				if (!Object.hasOwn(actionUsage, type)) return false;
+				actionUsage[type] = false;
+				return true;
+			},
+			resetActionEconomy: () => {
+				actionUsage.action = false;
+				actionUsage.bonus = false;
+				actionUsage.reaction = false;
+			},
 			getFeatures: () => featureList,
 			canUseCustomAbility: () => true,
 			useCustomAbility: () => {
@@ -71,12 +91,44 @@ describe("CharacterSheetCombat action economy gating", () => {
 		expect(warningToasts.some(t => /bonus action/i.test(t.content))).toBe(true);
 	});
 
+	it("tracks Belly Dancer Dance and Tantalizing Shivers as bonus-action states", () => {
+		for (const stateTypeId of ["dancing", "tantalizingShivers"]) {
+			const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[stateTypeId];
+			expect(stateType).toMatchObject({activationAction: "bonus", tracksActionEconomy: true});
+		}
+
+		const dance = CharacterSheetState.ACTIVE_STATE_TYPES.dancing;
+		expect(combat._tryConsumeStateToggleAction(dance)).toBe(true);
+		expect(combat._tryConsumeStateToggleAction(dance)).toBe(false);
+		expect(toasts.some(t => t.type === "warning" && /bonus action/i.test(t.content))).toBe(true);
+	});
+
 	it("resets per-turn action economy on round reset", () => {
 		combat._consumeActionType("bonus");
 		expect(combat._isActionTypeAvailable("bonus")).toBe(false);
 
 		combat._resetTurnActionUsage();
 		expect(combat._isActionTypeAvailable("bonus")).toBe(true);
+	});
+
+	it("keeps Combat and CharacterSheetState bonus-action ledgers synchronized", () => {
+		combat._state.consumeActionType("bonus");
+		expect(combat._isActionTypeAvailable("bonus")).toBe(false);
+		combat._resetTurnActionUsage();
+		expect(combat._isActionTypeAvailable("bonus")).toBe(true);
+		combat._consumeActionType("bonus");
+		expect(combat._state.isActionTypeAvailable("bonus")).toBe(false);
+	});
+
+	it("restores only the requested action slot", () => {
+		combat._state.consumeActionType("action");
+		combat._state.consumeActionType("bonus");
+		combat._state.consumeActionType("reaction");
+
+		expect(combat._state.restoreActionType("bonus")).toBe(true);
+		expect(combat._state.isActionTypeAvailable("action")).toBe(false);
+		expect(combat._state.isActionTypeAvailable("bonus")).toBe(true);
+		expect(combat._state.isActionTypeAvailable("reaction")).toBe(false);
 	});
 
 	it("initializes _handOfHarmUsedThisTurn as false", () => {

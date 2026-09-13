@@ -793,6 +793,7 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "speed"; type?: SpeedType; min?: number; exact?: number}
 	| {kind: "speedEquals"; left: SpeedType; right: SpeedType}
 	| {kind: "initiative"; min?: number; exact?: number}
+	| {kind: "combatActionEconomyText"; includes: string[]}
 	| {kind: "featureCalculation"; property: string; min?: number; exact?: number | string | boolean; isNull?: boolean}
 	// Assert a `getFeatureCalculations()` number is DERIVED from a live
 	// character statistic rather than hard-coded. Far stronger than a
@@ -831,8 +832,27 @@ export type EffectCheck = _EffectCommon & (
 		 */
 		isNull?: boolean;
 	}
+	| {kind: "gamblerProbe"; probe: "tools" | "folly" | "extraLuck" | "masterFortune" | "ui"}
 	| {kind: "proficiency"; proficiencyType: "armor" | "weapon"; includes: string}
 	| {kind: "featureUsesEqualAbilityMod"; feature: string; ability: AblKey; minimum?: number; recharge: "short" | "long"}
+	| {
+		kind: "featureUseRuntime";
+		feature: string;
+		toastIncludes?: string[];
+		resource?: {name: string; delta: number};
+		featureUseDelta?: number;
+		acDelta?: number;
+		acDeltaMin?: number;
+		combatTextIncludes?: string[];
+		activeState?: {
+			duration?: string;
+			effect?: {type: string; target: string};
+			actionBenefit?: {activity: string; cost: string; targets?: number};
+			movementOverride?: {kind: string};
+		};
+		activeSpell?: {name: string; concentration?: boolean};
+		attack?: {name: string | RegExp; mode: "advantage" | "normal"; riderDice?: string; riderDamageType?: string; consumed?: boolean};
+	}
 	// `damageTypes` / `saveAbility` are optional so the same probe covers HEALING actions
 	// (Turn the Tide) and saves whose DC is inherited from the character rather than
 	// written into the prose (`saveDcFromCharacter`).
@@ -899,6 +919,15 @@ export type EffectCheck = _EffectCommon & (
 		activationAction?: string;
 		resourceName?: string;
 		resourceCost?: number;
+	}
+	| {
+		kind: "targetedFeatureActivation";
+		feature: string;
+		stateTypeId: string;
+		targets: string[];
+		prerequisiteStateTypeId?: string;
+		contestWon?: boolean;
+		conditionalRollType?: string;
 	}
 
 	// === Roll: clicking the button doesn't throw ===
@@ -1180,6 +1209,18 @@ export type EffectCheck = _EffectCommon & (
 	 * case, that a use is NOT consumed when the first roll already succeeded.
 	 */
 	| {kind: "manifestationAdeptReroll"; feature: string; order: number; roll: number; rerollResult: number; expectRoll: number; expectStrain: number; expectSpend: boolean; powerType?: string}
+
+	// Time Domain Cleric integration probes. The generic metadata/resource probes remain
+	// reusable; the modal flows are feature-specific because they deliberately exercise
+	// the production UI's atomic cancel/confirm behavior.
+	| {kind: "alwaysPreparedSpell"; spellName: string; expectedLevel: number; sourceFeature: string; sourceClass: string}
+	| {kind: "dynamicInitiativeAbilityBonus"; featureName: string; ability: AblKey}
+	| {kind: "partialShortRestRestore"; resourceName: string; restoreAmount: number}
+	| {kind: "cantripDamageBonus"; spellName: string; featureName: string; ability: AblKey}
+	| {kind: "chronologicalInterferenceFlow"; featureName: string}
+	| {kind: "temporalManipulationFlow"; featureName: string}
+	| {kind: "eyesOfFuturePastFlow"; featureName: string}
+	| {kind: "temporalMasteryAgeFlows"; featureName: string}
 );
 
 const _TOGGLE_EFFECT_KINDS = new Set([
@@ -1193,6 +1234,7 @@ const _TOGGLE_EFFECT_KINDS = new Set([
 	"toggleAddsCondition",
 	"toggleAddsAttack",
 ]);
+let _gamblerUiProbeCompleted = false;
 
 function _checkNumeric (
 	actual: number,
@@ -1212,6 +1254,7 @@ function _hasDamageType (list: string[], dt: string): boolean {
 async function _runPassiveOrRollEffect (
 	charSheet: CharacterSheetPage,
 	e: EffectCheck,
+	currentLevel?: number,
 ): Promise<void> {
 	switch (e.kind) {
 		case "saveBonus": {
@@ -1493,6 +1536,18 @@ async function _runPassiveOrRollEffect (
 			}
 			return;
 		}
+		case "gamblerProbe": {
+			// The MEGA matrix rechecks the L3 row at every later level. Run the
+			// expensive real-browser lifecycle once per matrix invocation; later
+			// levels have additional fortune prompts and do not represent the
+			// owning lifecycle.
+			if ((e.probe === "ui" || e.probe === "folly") && (currentLevel || 0) > 3) return;
+			if (e.probe === "ui" && _gamblerUiProbeCompleted) return;
+			const result = await charSheet.probeGamblerFlow(e.probe);
+			if (!result?.ok) throw new Error(`Gambler ${e.probe} probe failed: ${result?.error || "unknown error"}`);
+			if (e.probe === "ui") _gamblerUiProbeCompleted = true;
+			return;
+		}
 		case "proficiency": {
 			const proficiencies = await charSheet.page.evaluate((type) => {
 				const state: any = (globalThis as any).charSheet?._state;
@@ -1516,6 +1571,99 @@ async function _runPassiveOrRollEffect (
 			if (uses.recharge !== e.recharge) throw new Error(`${e.feature} recharge=${uses.recharge}, expected ${e.recharge}`);
 			return;
 		}
+		case "featureUseRuntime": {
+			const result = await charSheet.probeFeatureUseRuntime(e.feature, {
+				attackName: e.attack?.name,
+				captureCombatActionEconomy: !!e.combatTextIncludes?.length,
+			});
+			if (!result.clicked) throw new Error(`${e.feature}: no visible Use or Activate control`);
+			if (result.runtimeErrors.length) throw new Error(`${e.feature}: activation logged browser errors: ${JSON.stringify(result.runtimeErrors)}`);
+			for (const text of e.toastIncludes || []) {
+				if (!result.toastText.toLowerCase().includes(text.toLowerCase())) {
+					throw new Error(`${e.feature}: visible result did not include "${text}". toast="${result.toastText}" activation=${JSON.stringify(result.activationInfo)} resources=${JSON.stringify({before: result.beforeResources, after: result.afterResources})} errors=${JSON.stringify(result.runtimeErrors)}`);
+				}
+			}
+			if (e.resource) {
+				const before = result.beforeResources[e.resource.name];
+				const after = result.afterResources[e.resource.name];
+				if (before == null || after == null) throw new Error(`${e.feature}: resource "${e.resource.name}" was not present`);
+				if (before - after !== e.resource.delta) {
+					throw new Error(`${e.feature}: ${e.resource.name} changed ${before}→${after}, expected delta ${e.resource.delta}`);
+				}
+			}
+			if (e.featureUseDelta != null) {
+				if (result.beforeFeatureUses == null || result.afterFeatureUses == null) throw new Error(`${e.feature}: feature uses were not available`);
+				if (result.beforeFeatureUses - result.afterFeatureUses !== e.featureUseDelta) {
+					throw new Error(`${e.feature}: feature uses changed ${result.beforeFeatureUses}→${result.afterFeatureUses}, expected delta ${e.featureUseDelta}`);
+				}
+			}
+			if (e.acDelta != null && result.afterAc - result.beforeAc !== e.acDelta) {
+				throw new Error(`${e.feature}: AC changed ${result.beforeAc}→${result.afterAc}, expected delta ${e.acDelta}`);
+			}
+			if (e.acDeltaMin != null && result.afterAc - result.beforeAc < e.acDeltaMin) {
+				throw new Error(`${e.feature}: AC changed ${result.beforeAc}→${result.afterAc}, expected delta >= ${e.acDeltaMin}`);
+			}
+			for (const expected of e.combatTextIncludes || []) {
+				if (!result.combatActionEconomyText?.toLowerCase().includes(expected.toLowerCase())) {
+					throw new Error(`${e.feature}: Combat action economy did not include "${expected}". text="${result.combatActionEconomyText || ""}"`);
+				}
+			}
+			if (e.activeState) {
+				const state = result.activeState;
+				if (!state) throw new Error(`${e.feature}: activation created no active state`);
+				if (e.activeState.duration != null && state.duration !== e.activeState.duration) {
+					throw new Error(`${e.feature}: duration=${state.duration}, expected ${e.activeState.duration}`);
+				}
+				if (e.activeState.effect && !(state.customEffects || []).some((it: any) =>
+					it.type === e.activeState?.effect?.type && it.target === e.activeState?.effect?.target)) {
+					throw new Error(`${e.feature}: active state is missing ${e.activeState.effect.type}:${e.activeState.effect.target}`);
+				}
+				if (e.activeState.actionBenefit) {
+					const actual = state.actionBenefit;
+					if (actual?.activity !== e.activeState.actionBenefit.activity
+						|| actual?.cost !== e.activeState.actionBenefit.cost
+						|| (e.activeState.actionBenefit.targets != null && actual?.targets !== e.activeState.actionBenefit.targets)) {
+						throw new Error(`${e.feature}: action benefit=${JSON.stringify(actual)}, expected ${JSON.stringify(e.activeState.actionBenefit)}`);
+					}
+				}
+				if (e.activeState.movementOverride && state.movementOverride?.kind !== e.activeState.movementOverride.kind) {
+					throw new Error(`${e.feature}: movement override=${JSON.stringify(state.movementOverride)}, expected ${JSON.stringify(e.activeState.movementOverride)}`);
+				}
+			}
+			if (e.activeSpell) {
+				const active = result.activeResourceCastSpells.find((it: any) => String(it.spell).toLowerCase() === e.activeSpell?.name.toLowerCase());
+				if (!active) throw new Error(`${e.feature}: ${e.activeSpell.name} was not recorded as an active resource cast`);
+				if (e.activeSpell.concentration != null && !!active.concentration !== e.activeSpell.concentration) {
+					throw new Error(`${e.feature}: ${e.activeSpell.name} concentration=${!!active.concentration}, expected ${e.activeSpell.concentration}`);
+				}
+				if (e.activeSpell.concentration && String(result.concentration?.spellName || result.concentration?.name || "").toLowerCase() !== e.activeSpell.name.toLowerCase()) {
+					throw new Error(`${e.feature}: ${e.activeSpell.name} did not become the active concentration spell`);
+				}
+			}
+			if (e.attack) {
+				if (!result.attack?.clicked || result.attack.threwError) {
+					throw new Error(`${e.feature}: attack probe failed${result.attack?.errorMessage ? `: ${result.attack.errorMessage}` : ""}`);
+				}
+				if (result.attack.mode !== e.attack.mode) throw new Error(`${e.feature}: attack mode=${result.attack.mode}, expected ${e.attack.mode}`);
+				if (e.attack.riderDice) {
+					const rider = result.attack.damageRiders.find((it: any) => it.dice === e.attack?.riderDice && it.damageType === e.attack?.riderDamageType);
+					if (!rider) throw new Error(`${e.feature}: pending damage riders=${JSON.stringify(result.attack.damageRiders)}`);
+				}
+				if (e.attack.consumed != null && result.attack.stateStillActive === e.attack.consumed) {
+					throw new Error(`${e.feature}: one-shot state consumed=${!result.attack.stateStillActive}, expected ${e.attack.consumed}`);
+				}
+			}
+			return;
+		}
+		case "combatActionEconomyText": {
+			const text = await charSheet.getCombatActionEconomyText();
+			for (const expected of e.includes) {
+				if (!text.toLowerCase().includes(expected.toLowerCase())) {
+					throw new Error(`Combat action economy did not include "${expected}". text="${text}"`);
+				}
+			}
+			return;
+		}
 		case "featureActivation": {
 			const info = await charSheet.page.evaluate((featureName) => {
 				const state: any = (globalThis as any).charSheet?._state;
@@ -1533,6 +1681,50 @@ async function _runPassiveOrRollEffect (
 			}
 			if (e.resourceCost != null && info.resourceCost !== e.resourceCost) {
 				throw new Error(`${e.feature} resourceCost=${info.resourceCost}, expected ${e.resourceCost}`);
+			}
+			return;
+		}
+		case "targetedFeatureActivation": {
+			await charSheet.page.evaluate(stateTypeId => {
+				const state: any = (globalThis as any).charSheet?._state;
+				if (state?.isStateTypeActive?.(stateTypeId)) state.deactivateState(stateTypeId, {reason: "test reset"});
+				state._data.pendingStateEndSaves = [];
+				(globalThis as any).charSheet?._renderActiveStates?.();
+			}, e.stateTypeId);
+			if (e.prerequisiteStateTypeId) {
+				await charSheet.page.evaluate(stateTypeId => {
+					(globalThis as any).charSheet?._state?.activateState?.(stateTypeId);
+					(globalThis as any).charSheet?._renderActiveStates?.();
+				}, e.prerequisiteStateTypeId);
+			}
+			await charSheet.activateFeatureWithTargets(e.feature, e.targets, {contestWon: e.contestWon !== false});
+			const result = await charSheet.page.evaluate(({stateTypeId, targets, rollType}) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				const active = state?.getActiveStates?.().find((it: any) => it.active && it.stateTypeId === stateTypeId);
+				const actualTargets = (active?.targets || []).map((it: any) => String(it.name || ""));
+				const probe = rollType ? state?.aggregateModifiers?.(rollType) : null;
+				return {
+					active: !!active,
+					actualTargets,
+					defaultAdvantage: !!probe?.advantage,
+					conditionals: (probe?.conditionalsAvailable || []).map((it: any) => ({
+						name: String(it.name || ""),
+						conditional: String(it.conditional || ""),
+						advantage: !!it.advantage,
+					})),
+					expectedTargets: targets,
+				};
+			}, {stateTypeId: e.stateTypeId, targets: e.targets, rollType: e.conditionalRollType || null});
+			if (!result.active) throw new Error(`${e.feature} did not activate ${e.stateTypeId}`);
+			if (JSON.stringify(result.actualTargets) !== JSON.stringify(result.expectedTargets)) {
+				throw new Error(`${e.feature} targets=${JSON.stringify(result.actualTargets)}, expected ${JSON.stringify(result.expectedTargets)}`);
+			}
+			if (e.conditionalRollType) {
+				if (result.defaultAdvantage) throw new Error(`${e.feature} leaked target advantage onto the default ${e.conditionalRollType} roll`);
+				for (const target of e.targets) {
+					const conditional = result.conditionals.find((it: any) => it.conditional.toLowerCase().includes(target.toLowerCase()));
+					if (!conditional?.advantage) throw new Error(`${e.feature} did not offer target-scoped advantage for ${target}`);
+				}
 			}
 			return;
 		}
@@ -2788,6 +2980,30 @@ async function _runPassiveOrRollEffect (
 			}
 			return;
 		}
+		case "alwaysPreparedSpell":
+			await charSheet.probeAlwaysPreparedSpell(e);
+			return;
+		case "dynamicInitiativeAbilityBonus":
+			await charSheet.probeDynamicInitiativeAbilityBonus(e);
+			return;
+		case "partialShortRestRestore":
+			await charSheet.probePartialShortRestRestore(e);
+			return;
+		case "cantripDamageBonus":
+			await charSheet.probeCantripDamageBonus(e);
+			return;
+		case "chronologicalInterferenceFlow":
+			await charSheet.probeChronologicalInterference(e.featureName);
+			return;
+		case "temporalManipulationFlow":
+			await charSheet.probeTemporalManipulation(e.featureName);
+			return;
+		case "eyesOfFuturePastFlow":
+			await charSheet.probeEyesOfFuturePast(e.featureName);
+			return;
+		case "temporalMasteryAgeFlows":
+			await charSheet.probeTemporalMasteryAgeFlows(e.featureName);
+			return;
 	}
 }
 
@@ -2975,17 +3191,22 @@ export async function assertFeaturesMatrix (
 	// the next at the same level), after the gated block (which runs BEFORE the
 	// loop, so an end-of-function restore would close the door after it), and
 	// once at the end as the backstop.
-	const exhaustionAtEntry = await charSheet.page.evaluate(() => {
-		return (globalThis as any).charSheet?._state?.getExhaustion?.() ?? 0;
-	}).catch(() => 0);
-	const restoreExhaustion = async () => {
-		await charSheet.page.evaluate((lvl) => {
+	const probeStateAtEntry = await charSheet.page.evaluate(() => {
+		const st: any = (globalThis as any).charSheet?._state;
+		return {
+			exhaustion: st?.getExhaustion?.() ?? 0,
+			pendingStateEndSaves: structuredClone(st?._data?.pendingStateEndSaves || []),
+		};
+	}).catch(() => ({exhaustion: 0, pendingStateEndSaves: []}));
+	const restoreProbeState = async () => {
+		await charSheet.page.evaluate(({exhaustion, pendingStateEndSaves}) => {
 			const st: any = (globalThis as any).charSheet?._state;
-			if (st?.getExhaustion?.() !== lvl) {
-				st?.setExhaustion?.(lvl);
+			if (st?.getExhaustion?.() !== exhaustion) {
+				st?.setExhaustion?.(exhaustion);
 				(globalThis as any).charSheet?._renderCharacter?.();
 			}
-		}, exhaustionAtEntry).catch(() => { /* swallow */ });
+			if (st?._data) st._data.pendingStateEndSaves = structuredClone(pendingStateEndSaves);
+		}, probeStateAtEntry).catch(() => { /* swallow */ });
 	};
 
 	// A toggle declaring `requiresStates` is deliberately HIDDEN by
@@ -3012,7 +3233,7 @@ export async function assertFeaturesMatrix (
 		// level — every subsequent probe then measures an exhausted build, which
 		// under Thelemar rules is -1 to every feature DC. Restore before the loop
 		// rather than only at the end, or the backstop closes the door after it.
-		await restoreExhaustion();
+		await restoreProbeState();
 	}
 
 	for (const fc of matrix) {
@@ -3339,7 +3560,7 @@ export async function assertFeaturesMatrix (
 				const toggleEffects = expandedEffects.filter(e => _TOGGLE_EFFECT_KINDS.has(e.kind));
 
 				for (const eff of passiveOrRoll) {
-					try { await _runPassiveOrRollEffect(charSheet, eff); }
+					try { await _runPassiveOrRollEffect(charSheet, eff, currentLevel); }
 					catch (eErr: any) { errors.push(`${label} effect ${eff.kind}: ${eErr.message}`); }
 				}
 
@@ -3500,11 +3721,11 @@ export async function assertFeaturesMatrix (
 			// level of exhaustion into every later row at the same level —
 			// which, under Thelemar rules, is -1 to every feature DC and made
 			// a correct Percussive Strike DC of 13 read as 12.
-			await restoreExhaustion();
+			await restoreProbeState();
 		}
 	}
 
-	await restoreExhaustion();
+	await restoreProbeState();
 
 	if (errors.length) {
 		throw new Error(`featuresMatrix at L${currentLevel} (${errors.length} failures):\n  - ${errors.join("\n  - ")}`);

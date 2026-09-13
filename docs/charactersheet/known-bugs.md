@@ -4677,12 +4677,15 @@ the wrong assertion stayed green — i.e. the data was bent to fit the assertion
 
 ## CS-BUG-104 — a *resolved* `Blessed Strikes` choice still materialises both options, contradicting the parser's own `count: 1` — and a TGTT domain turns that into a visible duplicate
 
-**Status:** **Fixed for newly-derived characters; NOT retroactive.** The
+**Status:** **Fixed, including legacy saves.** The
 materialisation site now defers to the parser's verdict instead of re-deriving
 one from the entry shape. Pinned in both directions by
 `test/jest/charactersheet/CharacterSheetSubfeatureChoiceMaterialisation.test.js`.
-**A character saved before `8839135c` keeps the duplicate rows forever** —
-`loadFromJson` never re-derives features from class data. See **CS-BUG-110**.
+Legacy saves where both options and both choice records were persisted are now
+treated as ambiguous: load removes only the stale Blessed Strikes children and
+records, queues the existing choose-one picker again, and persists a one-time
+migration marker. A Time Domain subclass's separate L8 Potent Spellcasting
+grant is retained.
 
 > **The parser was never the defect.** `FeatureChoiceParser.extractChoices()`
 > returned `{count: 1, options: [Divine Strike, Potent Spellcasting]}` for
@@ -6244,9 +6247,10 @@ number to itself.
 
 ## CS-BUG-110 — CS-BUG-104's fix is prospective, so a character saved before it keeps the duplicate choose-one rows forever
 
-**Status:** Open. Display-only. Measured end-to-end by the `plan-cs-bug-018-skips`
-session; the *proposed* repair in that report is recorded below **and corrected**,
-because it does not fix either measured case.
+**Status:** Fixed. Legacy saves with both Blessed Strikes options are repaired
+by `CharacterSheetState._migrateAmbiguousBlessedStrikes()`: the ambiguous
+children and choice records are removed, the canonical picker is queued once,
+and unrelated same-named subclass grants are retained.
 
 **Reproduction (a full round trip, not an inference).** On the fixed tree:
 
@@ -6304,12 +6308,13 @@ subfeature for **every materialised row**. A pre-fix save therefore has *both*
 options recorded as chosen, so `chosenSubfeatures` cannot arbitrate. (Same
 circularity already noted in CS-BUG-104's evidence section.)
 
-**Severity is display-only and unchanged from CS-BUG-104's own finding:** the L7
-rows assign no calc keys, and `blessedStrikesDamage: "1d8"` comes from the
-surviving row either way. Filed rather than fixed because a wrong one-liner here
-would look like a fix, pass a dedup-shaped test, and change nothing.
+**Resolution:** this is not repaired with identity deduplication. The migration
+detects the contradictory option set, clears only the `parentFeature:
+"Blessed Strikes"` children and records, and reopens the choice. The separate
+Time Domain L8 Potent Spellcasting record remains; display normalization merges
+its equivalent provenance only when both canonical grants apply.
 
-### It does not self-heal on level-up — measured through the real wizard
+### Historical behavior before the load migration
 
 The open question above was whether a subsequent level-up would re-derive the
 row set and silently repair a pre-`8839135c` save. **It does not.** Measured by
@@ -6480,7 +6485,7 @@ string. So *"no mechanism exists"* and *"the mechanism exists and one caller is
 hardcoded"* invite very different triage, and this entry previously read as the
 first.
 
-**What this correction deliberately does NOT do.**
+**What this historical correction deliberately did NOT do.**
 
 - It does **not** claim the bug is repaired. Only the *removal* half is
   measured. Whether the post-fix pending-choice machinery then re-offers the
@@ -6509,6 +6514,15 @@ since narrowing means no group is produced). `_data.features` rows are
 unaffected, and display and mechanics read those, so this is believed benign —
 recorded because it will show up in save diffs and should not surprise the next
 reader.
+
+### Fix as landed
+
+`loadFromJson()` now detects the unresolvable two-option Blessed Strikes state,
+removes the option children and their contradictory choice records, and queues
+the normal structured choice again. The repair is parent-scoped, so a separate
+Time Domain L8 Potent Spellcasting feature is preserved. A persisted migration
+flag prevents repeated resets, and a focused Cleric-choice regression verifies
+the queued picker and retained subclass grant.
 
 ## CS-BUG-111 — the rest-restore probes have a silent-pass branch; measured reachable, exercised 24×, fired 0×
 
@@ -7530,7 +7544,7 @@ unperformed.
 
 ## CS-BUG-118 — a feature caught by BOTH the initiative text-parse and a curated calc effect mints two modifier rows; the totals only stay correct because the two numeric chokepoints disagree
 
-**Severity:** low today, latent-high. **Status:** open, measured, pinned by a test.
+**Severity:** low today, latent-high. **Status:** fixed and migration-covered.
 
 **Renumbered from CS-BUG-115.** Two sessions independently claimed 115 while
 working in parallel branches; the entries merged cleanly because they sit at
@@ -7550,7 +7564,7 @@ your initiative" — is captured twice:
 The `alreadyProcessed("Right on Time")` guard at `:26807` does not suppress the
 second row, because the text-parsed one is added through a different path.
 
-### Measurement
+### Historical measurement
 
 Cleric 3 / Time Domain / WIS 16 / DEX 10, features attached from the real
 homebrew, `applyClassFeatureEffects()` run:
@@ -7591,22 +7605,14 @@ covers Temporal Awareness (Chronurgy), Dread Ambusher (Gloom Stalker) and
 Rakish Audacity (Swashbuckler) through a different route; their prose should be
 checked against the `:1230` pattern before that route is unified.
 
-### Pin
+### Resolution and pin
 
 `test/jest/charactersheet/CharacterSheetTGTT.test.js` →
-*"does not double-count initiative despite the duplicate modifier row
-(CS-BUG-118)"* asserts both rows exist, exactly one is `0`, and
-`getInitiative()` is 3 and not 6. It fails loudly if a future fix doubles the
-value instead of removing the duplicate.
-
-### Not fixed here because
-
-The cheap fixes are both wrong. Suppressing the curated row breaks initiative
-outright (the surviving row contributes 0 to the total). Making the helpers
-agree changes the value of *every* named modifier carrying `abilityMod`
-(skill bonuses, temp HP, …) that currently contributes 0 to the cached totals —
-a repo-wide behavioural change that needs its own measurement pass, not a
-drive-by in a subclass task.
+*"stores one live Right on Time modifier row (CS-BUG-118)"* asserts one dynamic
+`abilityMod: "wis"` row and an initiative total of +3. Both numeric readers now
+resolve live ability modifiers through the same logic, the curated snapshot row
+is no longer emitted, and `_migrateRightOnTimeModifiers()` removes only the
+obsolete numeric twin from old saves.
 
 ---
 
@@ -7713,7 +7719,7 @@ suppressed L4+ coverage for the whole TGTT suite.
 
 ## CS-BUG-119 — "action-economy" feature grants are computed into write-only `calculations` keys with zero product consumers
 
-**Status**: Open (documented, not fixed — no generic surface exists yet)
+**Status**: **Fixed (College of Jesters completeness pass)**
 **Surfaced**: College of Jesters (TGTT) full-support audit, Gifted Acrobat (L6).
 **Component**: Character Sheet · `charactersheet-state.js` · `getFeatureCalculations()`.
 
@@ -7727,66 +7733,20 @@ grants three things:
 | Grant | Surface | Effective? |
 |---|---|---|
 | Climbing speed equal to walking speed | `speed:climb` `equalToWalk` modifier | **Yes** |
-| Escaping a grapple costs a bonus action | `calculations.escapeGrappleBonusAction` | **No** |
-| Standing from prone costs 10 ft | `calculations.standFromProneCost` | **No** |
+| Escaping a grapple costs a bonus action | `getActionEconomyOverrides()` | **Yes** |
+| Standing from prone costs 10 ft | `getMovementOverrides()` | **Yes** |
 
-### Measurement
+### Fix
 
-Both keys are produced in exactly one place and consumed in exactly one
-place — and the only consumer is a unit test asserting the producer:
+The state now exposes generic `getActionEconomyOverrides()` and
+`getMovementOverrides()` contracts. Gifted Acrobat feeds those contracts,
+and the Combat tab renders the resulting action and movement notes rather
+than leaving the calculation keys write-only. Jester Acts that temporarily
+change action or movement rules use the same contracts.
 
-```
-$ grep -rn "escapeGrappleBonusAction\|standFromProneCost" js/ test/
-js/charactersheet/charactersheet-state.js:23532:  calculations.escapeGrappleBonusAction = true;
-js/charactersheet/charactersheet-state.js:23533:  calculations.standFromProneCost = 10;
-test/jest/charactersheet/CharacterSheetTGTT.test.js:9303:  expect(calcs.escapeGrappleBonusAction).toBe(true);
-test/jest/charactersheet/CharacterSheetTGTT.test.js:9304:  expect(calcs.standFromProneCost).toBe(10);
-```
-
-**2 product references, 0 product consumers.** Nothing renders them,
-nothing rolls with them, nothing gates on them. The test passes and the
-feature is inert — the exact failure mode the "a test can pass while the
-feature is inert" rule exists to catch.
-
-The absence is structural, not a Jester oversight. There is no
-movement-cost or action-economy vocabulary in the sheet at all:
-
-```
-$ grep -rn "movementCost\|proneCost\|standFromProne\|grappleEscape" js/charactersheet/ | wc -l
-0   # (the two lines above are the only near-matches, and they are the producer)
-```
-
-`getSpeedBreakdown()` and the 15 `get*Speed*` accessors all model speed as
-a **distance per type**; none model the *cost* of an action, and there is
-no `getMovementCostOverrides()` / `getBonusActionGrants()` equivalent.
-
-### Why it is not fixed here
-
-Fixing it properly means adding a new generic surface (a movement-cost /
-action-economy override registry, plus somewhere on Overview or Combat to
-render it) that every class with the same shape would feed — Rogue's
-Cunning Action, Monk's Step of the Wind, Barbarian's Fast Movement riders,
-Tabaxi's Feline Agility. Special-casing Gifted Acrobat into a bespoke
-renderer would violate the generic-architecture rule in
-`.github/instructions/charactersheet.instructions.md` and leave the same
-hole for every other feature of this shape.
-
-### Scope
-
-Not Jester-specific. Any feature whose entire effect is "X costs a bonus
-action instead of an action" or "Y costs N ft instead of half your speed"
-currently has nowhere to land. Grep `calculations\.` in the class-feature
-block for other write-only keys before designing the fix.
-
-### Suggested fix
-
-1. Add `state.getActionEconomyOverrides()` returning
-   `[{what, from, to, source}]`, fed by the same feature-parse path.
-2. Render them as a short list on the Combat tab (next to Actions) and in
-   the Overview feature summary.
-3. Add an `actionEconomy` EffectCheck kind to
-   `test/e2e/utils/comprehensiveBuildHelpers.ts` so E2E can assert them,
-   and re-point the Gifted Acrobat row at it.
+The Jester Playwright matrix checks both Gifted Acrobat overrides through
+the shared state API, while the Jester runtime Jest suite covers the same
+contracts together with the turn-scoped Act variants.
 
 ---
 
@@ -10160,3 +10120,57 @@ emitted and three tests failed. The collision in the real save depends on
 the two `sourceName`s agreeing **by two different routes** (`featuresById`
 lookup vs the `mod.name` fallback). A fixture that simply names both
 "Dueling" passes while exercising a shape the sheet never produces.
+
+---
+
+## CS-BUG-171 — Belly Dancer mechanics rendered without complete stateful support — FIXED
+
+**Symptom.** A TGTT Belly Dancer could see its subclass prose, but several
+rules were absent or over-broad on the live sheet: Dance termination did
+not cover its exact conditions, heavy armor, or ten-round duration;
+Tantalizing Shivers and Percussive Strike could grant blanket attack
+advantage without identifying a target; Percussive Strike appeared as an
+independent toggle instead of resolving when the Dance began; and ending
+the Dance could lose its DC 10 Constitution save.
+
+**Root cause.** The active-state model had no reusable named-target
+metadata or persisted queue for consequences that occur when a state
+ends. Combat attacks also skipped the conditional-modifier picker used
+by Overview attacks, and Belly Dancer feature detection was not fully
+source-gated to TGTT.
+
+**Fixed.** Active states now support normalized, persisted named targets
+and target-scoped conditional attack modifiers. Dance activation records
+Percussive Strike failures, Tantalizing Shivers runs its target choice
+and contest transactionally, both tracked activations consume the proper
+Bonus Action in combat, and every Dance teardown path uses the shared
+deactivation pipeline to enqueue exactly one persisted end save. The
+implementation also adds TGTT source isolation, legacy Percussive-state
+migration, exact condition/heavy-armor/duration endings, and shared
+conditional selection in Combat attack rolls.
+
+**Regression coverage.**
+
+- `CharacterSheetBellyDancer.test.js` pins every subclass calculation,
+  target scope, teardown trigger, resource recovery, migration, and
+  save/load invariant.
+- `CharacterSheetBellyDancerActivation.test.js` pins cancellation,
+  action-spend ordering, failed contests, and queued-save drainage.
+- `CharacterSheetCombatActionEconomy.test.js` and
+  `CharacterSheetRecklessAttack.test.js` pin Bonus Action and Combat
+  conditional-roll behavior.
+- `tgtt-belly-dancer-rogue-jaknian.spec.ts` drives the real L1-20 UI,
+  including named Tantalizing and Percussive targets and default-off
+  target advantage.
+
+---
+
+## CS-BUG-172 — TGTT Gambler fortune resources and table scopes — FIXED
+
+Iteration 7 now verifies every one of the 100 Gambling Table rows against the
+canonical TGTT source, including the previously mis-scoped rows 19, 29, 68,
+69, 71, 75, 80, and 87. Row 11 is an executable, expiring self-state rather
+than a manual-only acknowledgement. Gambler-owned typed and legacy resources,
+pending receipts, and table effects are removed on respec or when TGTT is
+disabled without removing unrelated same-named resources. Focused Jest and
+rendered browser probes cover these invariants.

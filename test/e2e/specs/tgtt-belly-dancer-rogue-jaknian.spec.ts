@@ -16,6 +16,9 @@ import {buildSpecialtyChecks, buildWeaponMasteryChecks, withSkipReason} from "..
 describeCharacter({
 	preset: PRESET_FULL_BELLY_DANCER_JAKNIAN,
 	displayName: "Belly Dancer Rogue Jaknian",
+	megaCheckpoints: [3, 5, 9, 11, 13, 17, 20],
+	megaTimeoutMs: 900_000,
+	featureMatrixDedicatedOnly: true,
 	signatureToggle: /dance of the country|dance/i,
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
@@ -40,11 +43,12 @@ describeCharacter({
 		5:  {totalLevel: 5,  minMaxHp: 30, expectResources: {"Dance of the Country": 3}},
 		// L9 and L13 are sampled so the Tantalizing Shivers and Fluid Step
 		// rows have a checkpoint inside their windows. Without them those
-		// subclass features had no live check at any level.
+		// subclass features had no live check at any level. `megaCheckpoints`
+		// makes these additional milestone keys executable.
 		9:  {totalLevel: 9,  minMaxHp: 48, expectResources: {"Dance of the Country": 4}},
 		11: {totalLevel: 11, minMaxHp: 60, expectToggles: [/tantalizing shivers|shivers/i]},
 		13: {totalLevel: 13, minMaxHp: 70, expectResources: {"Dance of the Country": 5}},
-		17: {totalLevel: 17, minMaxHp: 90, expectToggles: [/percussive strike|percussive/i]},
+		17: {totalLevel: 17, minMaxHp: 90, expectToggles: [/dance of the country|dance/i]},
 		20: {totalLevel: 20, minMaxHp: 100},
 	},
 	featuresMatrix: [
@@ -170,6 +174,7 @@ describeCharacter({
 			kind: "toggle",
 			toggleDelta: "ac",
 			effects: [
+				{kind: "featureActivation", feature: "Dance of the Country", activationAction: "bonus"},
 				// "a bonus to AC equal to your Charisma modifier (minimum of
 				// +1)". Jaknian's CHA mod is negative at L3, so the floor is
 				// exactly what this build exercises — without it the probe
@@ -257,25 +262,33 @@ describeCharacter({
 		//   - the contest descriptor is null outside the Dance and
 		//     populated inside it (the "while Dancing" clause),
 		//   - the contest modifier is the live Performance modifier,
-		//   - activating it grants advantage on ATTACKS,
+		//   - winning records the named target and exposes opt-in advantage
+		//     against that target only,
 		//   - it drops automatically when the Dance ends.
 		{
 			level: 9,
 			name: /tantalizing shivers/i,
 			kind: "passive",
 			effects: [
+				{kind: "featureActivation", feature: "Tantalizing Shivers", activationAction: "bonus", resourceCost: 0},
 				{kind: "featureCalculation", property: "hasTantalizingShivers", exact: true},
 				// Outside the Dance there is no contest to run
 				// ("a bonus action while Dancing").
+				{kind: "stateCall", method: "deactivateState", args: ["dancing"], ignoreResult: true},
 				{kind: "stateCall", method: "getTantalizingShiversContest", isNull: true},
 				{kind: "stateCall", method: "activateState", args: ["dancing"], ignoreResult: true},
 				{kind: "stateCall", method: "getTantalizingShiversContest", path: "skill", exact: "performance"},
 				{kind: "stateCall", method: "getTantalizingShiversContest", path: "ability", exact: "cha"},
 				{kind: "stateCall", method: "getTantalizingShiversContest", path: "opposedBy", contains: "Insight"},
-				// Advantage on attacks only once the Shivers land.
-				{kind: "stateCall", method: "hasAdvantageFromStates", args: ["attack"], exact: false},
-				{kind: "stateCall", method: "activateState", args: ["tantalizingShivers"], ignoreResult: true},
-				{kind: "stateCall", method: "hasAdvantageFromStates", args: ["attack"], exact: true},
+				{
+					kind: "targetedFeatureActivation",
+					feature: "Tantalizing Shivers",
+					stateTypeId: "tantalizingShivers",
+					prerequisiteStateTypeId: "dancing",
+					targets: ["Bandit Captain"],
+					contestWon: true,
+					conditionalRollType: "attack:melee:dex",
+				},
 				// Ending the Dance ends its dependents.
 				{kind: "stateCall", method: "deactivateState", args: ["dancing"], ignoreResult: true},
 				{kind: "stateCall", method: "isStateTypeActive", args: ["tantalizingShivers"], exact: false},
@@ -309,7 +322,8 @@ describeCharacter({
 		// the rest of the Dance.
 		//
 		// The DC is asserted to be DERIVED (8 + PB + CHA), not a constant,
-		// and the toggle is asserted to be gated behind an active Dance.
+		// and Dance activation itself records failed targets; Percussive Strike
+		// never appears as an independent toggle.
 		{
 			level: 17,
 			untilLevel: 19,
@@ -330,13 +344,15 @@ describeCharacter({
 				// constant; this one only proves the METHOD returns the same
 				// live number as the calculation key.
 				{kind: "stateCall", method: "getPercussiveStrikeDc", min: 13},
-				// Gated behind the Dance, and grants attack advantage.
-				{kind: "stateCall", method: "activateState", args: ["dancing"], ignoreResult: true},
-				{kind: "stateCall", method: "hasAdvantageFromStates", args: ["attack"], exact: false},
-				{kind: "stateCall", method: "activateState", args: ["percussiveStrike"], ignoreResult: true},
-				{kind: "stateCall", method: "hasAdvantageFromStates", args: ["attack"], exact: true},
+				{
+					kind: "targetedFeatureActivation",
+					feature: "Dance of the Country",
+					stateTypeId: "dancing",
+					targets: ["Ogre", "Cult Fanatic"],
+					conditionalRollType: "attack:melee:dex",
+				},
+				{kind: "stateCall", method: "getActiveStateTargets", args: ["dancing"], contains: "Percussive Strike"},
 				{kind: "stateCall", method: "deactivateState", args: ["dancing"], ignoreResult: true},
-				{kind: "stateCall", method: "isStateTypeActive", args: ["percussiveStrike"], exact: false},
 			],
 		},
 		// Jaknian race traits (Trade Secrets: Persuasion or Investigation

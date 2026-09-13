@@ -6928,6 +6928,25 @@ body[data-font="readable"] {
 	color: var(--cs-text-primary, var(--rgb-text));
 }
 
+.charsheet__state-targets,
+.charsheet__combat-state-targets {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 0.25rem;
+	min-width: 0;
+}
+
+.charsheet__state-target,
+.charsheet__combat-state-targets {
+	padding: 0.1rem 0.45rem;
+	border: 1px solid rgba(99, 102, 241, 0.35);
+	border-radius: var(--cs-radius-full, 9999px);
+	background: rgba(99, 102, 241, 0.12);
+	color: var(--cs-text-primary, var(--rgb-text));
+	font-size: 0.75rem;
+	line-height: 1.35;
+}
+
 .charsheet__state-status {
 	font-style: italic;
 	color: var(--cs-text-muted, var(--rgb-text-muted));
@@ -6937,6 +6956,125 @@ body[data-font="readable"] {
 	display: flex;
 	align-items: center;
 	gap: var(--cs-space-xs, 0.25rem);
+}
+
+.charsheet__turn-order-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-xs, 0.25rem);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.charsheet__turn-order-item,
+.charsheet__turn-order-editor-row {
+	display: grid;
+	grid-template-columns: minmax(2.5rem, auto) minmax(0, 1fr) auto;
+	align-items: center;
+	gap: var(--cs-space-sm, 0.5rem);
+	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-md, 8px);
+	background: var(--cs-bg-surface, var(--rgb-bg-alt));
+}
+
+.charsheet__turn-order-editor-row {
+	grid-template-columns: minmax(8rem, 1fr) 6rem auto auto;
+	margin-bottom: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__turn-order-item--acted {
+	opacity: 0.65;
+}
+
+.charsheet__turn-order-initiative {
+	font-weight: 700;
+	text-align: center;
+}
+
+.charsheet__turn-order-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.charsheet__turn-order-add,
+.charsheet__temporal-target-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 7rem auto;
+	align-items: end;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__temporal-target-grid {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.charsheet__turn-order-add > label,
+.charsheet__temporal-target-grid > label {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+}
+
+.charsheet__temporal-choice-group {
+	display: grid;
+	gap: var(--cs-space-sm, 0.5rem);
+	padding: 0;
+	border: 0;
+}
+
+.charsheet__temporal-choice {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--cs-space-sm, 0.5rem);
+	min-height: 44px;
+	padding: var(--cs-space-sm, 0.5rem);
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-md, 8px);
+	cursor: pointer;
+}
+
+.charsheet__temporal-choice:has(input:checked) {
+	border-color: var(--cs-accent-primary, #2563eb);
+	background: color-mix(in srgb, var(--cs-accent-primary, #2563eb) 12%, transparent);
+}
+
+.charsheet__temporal-choice span {
+	display: flex;
+	flex-direction: column;
+}
+
+.charsheet__modal-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+@media (max-width: 640px) {
+	.charsheet__combat-tracker {
+		flex-wrap: wrap;
+		gap: var(--cs-space-xs, 0.25rem);
+	}
+
+	.charsheet__turn-order-add,
+	.charsheet__temporal-target-grid,
+	.charsheet__turn-order-editor-row {
+		grid-template-columns: 1fr;
+	}
+
+	.charsheet__modal-actions {
+		position: sticky;
+		bottom: 0;
+		padding-top: var(--cs-space-sm, 0.5rem);
+		background: var(--cs-bg-base, var(--rgb-bg));
+	}
+
+	.charsheet__modal-actions .ve-btn {
+		min-height: 44px;
+		flex: 1;
+	}
 }
 
 .charsheet__state-quick-activate {
@@ -22162,6 +22300,35 @@ body:not(.ve-night-mode) .charsheet__socket-modal .badge-secondary { --cs-badge-
 	color: #f87171;
 }
 
+/* ============================================================
+   Named Target Picker (target-scoped active-state effects)
+   ============================================================ */
+.charsheet__target-picker {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	padding: 0.25rem 0.125rem;
+}
+
+.charsheet__target-picker-lede {
+	margin: 0 0 0.25rem;
+	line-height: 1.5;
+}
+
+.charsheet__target-picker-label {
+	font-weight: 700;
+}
+
+.charsheet__target-picker-input {
+	width: 100%;
+	min-height: 2.5rem;
+	resize: vertical;
+}
+
+.charsheet__target-picker-error:empty {
+	display: none;
+}
+
 /* ==========================================================================
    Red Cant decision modal (Illrigger Hellspeaker "Moloch's Interdiction" boon).
    A polished, dark-themed prompt shown when a sub-10 Charisma die can be raised
@@ -26911,4 +27078,77 @@ color: var(--cs-text-primary, #f1f5f9);
 	opacity: 1;
 	background: var(--cs-danger, #dc3545);
 	color: #fff;
+}
+
+.charsheet__chained-target-row {
+	display: flex;
+	align-items: center;
+	gap: .35rem;
+	flex-wrap: wrap;
+	padding: .4rem 0;
+	border-bottom: 1px solid var(--cs-border, #ccc);
+}
+
+.charsheet__chained-target-row .form-control {
+	min-height: 44px;
+}
+
+.cs-combat-target-effect {
+	display: grid;
+	gap: .65rem;
+	max-width: 32rem;
+}
+
+.cs-combat-target-effect .form-control,
+.cs-combat-target-effect button {
+	min-height: 44px;
+}
+
+.pm-chained-target {
+	display: grid;
+	grid-template-columns: minmax(8rem, 1fr) auto;
+	gap: .35rem;
+	align-items: center;
+	padding: .45rem 0;
+	border-bottom: 1px solid var(--cs-border, #ccc);
+}
+
+.pm-chained-target__meta {
+	grid-column: 1 / -1;
+	color: var(--cs-muted, #666);
+}
+
+.gambler-choice-radiogroup {
+	display: grid;
+	gap: 0.5rem;
+}
+
+.gambler-choice-option {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	min-height: 44px;
+	padding: 0.45rem 0.65rem;
+	border: 1px solid var(--rgb-border-grey);
+	border-radius: 0.35rem;
+	cursor: pointer;
+}
+
+.gambler-choice-option input {
+	flex: 0 0 auto;
+	width: 20px;
+	height: 20px;
+}
+
+.gambler-choice-option:focus-within {
+	outline: 2px solid var(--rgb-link-color);
+	outline-offset: 2px;
+}
+
+.gambler-pending-receipt-list button {
+	min-height: 44px;
+}
+
+.charsheet__gambler-open-receipts {
+	min-height: 44px;
 }

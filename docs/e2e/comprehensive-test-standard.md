@@ -90,6 +90,17 @@ for the canonical numbered list (currently **22 checks**).  At a glance:
 21. Battle Tactics / class-option pickers: pickActivatable **+ per-pick effect** (Metamagic, Invocations, Acts, Tricks, Strikes, Pact Boons, Dreamwalker)
 22. **Per-feature effect coverage** *(new, applies to every entry)* — every non-cinematic `featuresMatrix` row must attach at least one `EffectCheck` (or carry a `// no measurable derived effect: <reason>` comment).  Existence-only assertions are insufficient.
 
+### Gambler lifecycle coverage
+
+The Gambler Rogue spec additionally needs real browser interaction coverage for
+the cast/receipt boundary: click a leveled spell's rendered Cast control,
+assert slot/output/resource/receipt transitions for result 49 and delayed
+result 61, verify the cast-scoped modifier in rendered output, restore and
+resolve a pending choice, observe automatic effect expiry, and verify source
+removal cleans applied table artifacts. State APIs may seed deterministic RNG
+and read durable assertions, but they must not replace the user-facing cast,
+choice, apply, resume, or cleanup interactions.
+
 > **Effect verification is a first-class requirement.**  When a feature
 > grants advantage on a save, prove the advantage flag flips.  When a
 > toggle adds INT to AC, snapshot AC, toggle, assert the delta.  When a
@@ -150,3 +161,16 @@ node scripts/auditE2eCoverage.mjs
 The script reports per-spec EffectCheck coverage (effects + helpers +
 reason-comments) and flags specs below 80%. Either backfill effects
 or add `// no measurable derived effect: <reason>` comments.
+
+## Receipt-driven subclass mechanics
+
+Subclasses with deferred outcomes must test the persisted state transition,
+not only the feature label. For TGTT Gambler this includes a deterministic
+cast
+receipt, the slot transaction (including result 49 preservation), Master of
+Fortune choice/confirmation, cancellation, save/load restoration, and the
+real effect or durable manual acknowledgement for the selected table row. The
+browser probe also confirms the rendered Respec surface is available before
+loading source-removed and wrong-source save variants through the normal
+deserialization/reconciliation path; focused Respec Jest owns the modal's
+subclass-change transaction itself.

@@ -1,5 +1,6 @@
 import {CharacterSheetModal} from "./charactersheet-modal.js";
 import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
+import {CharacterSheetGamblerRules} from "./charactersheet-gambler.js";
 
 /**
  * sourceFeature values assigned to player-chosen spells by the Builder, LevelUp, and QuickBuild flows.
@@ -308,6 +309,12 @@ class CharacterSheetSpells {
 			this._castSpell(spellId, {withMetamagic: false, decision: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true}});
 		});
 
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			const btn = e.target.closest(".charsheet__gambler-open-receipts");
+			if (!btn) return;
+			void this._pOpenGamblingTableModal();
+		});
+
 		// Cast w/ Metamagic button (offers the active-metamagic picker before casting — the one
 		// path that legitimately needs slot/upcast + metamagic selection, plus the optional
 		// Feywild Shard discharge toggle when a shard is attuned)
@@ -549,7 +556,7 @@ class CharacterSheetSpells {
 		const includeCoreSpells = settings.includeCoreSpellsForHomebrew !== false; // Default true
 		const classes = this._state.getClasses?.() || [];
 		return classes.map(cls => {
-			const isGambler = cls.subclass?.name === "Gambler";
+			const isGambler = this._state._isGamblerClassEntry?.(cls) === true;
 			const className = isGambler ? "Warlock" : cls.name;
 			const classSource = cls.source;
 			const isNonStandardSource = classSource && !["PHB", "XPHB", "TCE", "XGE", "TGTT"].includes(classSource);
@@ -574,6 +581,18 @@ class CharacterSheetSpells {
 	}
 
 	_getMaxSpellLevel (classInfo, characterLevel) {
+		// Gambler is a TGTT Rogue subclass, not a reusable name-only caster
+		// progression. Reject same-named entries before honoring persisted
+		// casterProgression data.
+		if (String(classInfo?.subclass?.name || "").toLowerCase() === "gambler") {
+			const isCanonicalGambler = String(classInfo?.name || "").toLowerCase() === "rogue"
+				&& String(classInfo?.source || "").toUpperCase() === "TGTT"
+				&& String(classInfo?.subclass?.source || "").toUpperCase() === "TGTT"
+				&& this._state.getSettings?.().enableTgtt !== false
+				&& this._state._isGamblerClassEntry?.(classInfo) === true;
+			if (!isCanonicalGambler) return 0;
+		}
+
 		// Get the per-class level (not total character level) for spell level limits
 		const classLevel = this._state.getClassLevel(classInfo.name) || characterLevel;
 
@@ -586,7 +605,7 @@ class CharacterSheetSpells {
 		// Fallback: hardcoded class name lookup for classes without casterProgression field
 		const fullCasters = ["Bard", "Cleric", "Druid", "Sorcerer", "Wizard"];
 		const halfCasters = ["Paladin", "Ranger", "Artificer"];
-		const thirdCasters = ["Eldritch Knight", "Arcane Trickster", "Gambler", "Architect of Ruin"];
+		const thirdCasters = ["Eldritch Knight", "Arcane Trickster", "Architect of Ruin"];
 
 		const className = classInfo.name;
 		const subclassName = classInfo.subclass?.name;
@@ -611,7 +630,11 @@ class CharacterSheetSpells {
 			// Full caster: use full level
 		} else if (halfCasters.includes(className)) {
 			casterLevel = Math.floor(classLevel / 2);
-		} else if (thirdCasters.includes(subclassName)) {
+		} else if (thirdCasters.includes(subclassName)
+			|| (
+				subclassName === "Gambler"
+				&& this._state._isGamblerClassEntry?.(classInfo) === true
+			)) {
 			casterLevel = Math.floor(classLevel / 3);
 		} else {
 			return 0; // Non-caster
@@ -638,7 +661,6 @@ class CharacterSheetSpells {
 			isMinHeight0: true,
 			isWidth100: true,
 		});
-
 		// Spell tracking status bar - shows cantrips and spells known/prepared
 		const statusBar = e_({tag: "div", clazz: "charsheet__modal-status-bar", style: "display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 12px; background: rgba(var(--rgb-bg-text), 0.05); border-radius: 6px; margin-bottom: 12px; font-size: 0.85em;"});
 		modalInner.append(statusBar);
@@ -810,7 +832,7 @@ class CharacterSheetSpells {
 		const characterClasses = this._state.getClasses();
 		// Map class names, substituting the spell list class for Gambler (Rogue→Warlock)
 		const characterClassNames = characterClasses.map(c => {
-			if (c.subclass?.name === "Gambler") return "Warlock";
+			if (this._state._isGamblerClassEntry?.(c)) return "Warlock";
 			return c.name;
 		});
 		// Phase 9 (Bug 7.1 follow-up): `c.subclass` is an object (`{name, source, ...}`),
@@ -2246,6 +2268,77 @@ class CharacterSheetSpells {
 		return true;
 	}
 
+	async _pResolveGamblerCastReceipt (resolution) {
+		if (!resolution) return {resolution, cancelled: false};
+		let current = resolution;
+		if (current.status === "awaiting-choice") {
+			const options = [current.tableRoll?.roll, current.tableRoll?.secondRoll].filter(Number.isInteger);
+			const values = options.map((roll, ix) => `Result ${roll}: ${ix ? current.tableRoll.secondEffect : current.tableRoll.effect}`);
+			const selected = await InputUiUtil.pGetUserEnum({
+				title: "Gambler's Folly — Choose Gambling Table Result",
+				htmlDescription: `<div><strong>${current.spellName || "Spell"}</strong> rolled twice. Choose which result applies.</div>`,
+				values,
+				fnDisplay: value => value,
+				isResolveItem: true,
+			});
+			if (selected == null) return {resolution: current, cancelled: true};
+			const choice = values.indexOf(selected) + 1;
+			current = this._state.chooseGamblerTableResult?.(current.resolutionId, choice) || current;
+		}
+		if (current.status === "awaiting-confirmation") {
+			const confirmed = await InputUiUtil.pGetUserBoolean({
+				title: `Gambler's Folly — ${current.descriptor?.transaction === "freeSpell" ? "Color Spray" : "Delayed Spell"}`,
+				htmlDescription: `<div>${current.descriptor?.text || "Confirm this Gambling Table result before the cast proceeds."}</div>`,
+				textYes: "Apply result",
+				textNo: "Cancel cast",
+			});
+			if (!confirmed) return {resolution: current, cancelled: true};
+			current = this._state.applyGamblingTableResolution?.(current.resolutionId, {confirmAutomatic: true}) || current;
+		}
+		return {
+			resolution: current,
+			cancelled: false,
+			deferCast: current.delayedCast != null || current.descriptor?.transaction === "delayedCast",
+		};
+	}
+
+	/**
+	 * Execute a persisted result-61 cast exactly once. The receipt already owns
+	 * the original spell, slot level, wager, and modifier, so this path never
+	 * creates a second bet or consumes another slot.
+	 */
+	async _pResumeGamblerDelayedCast (resolutionId) {
+		const pending = this._state.getPendingGamblerCastResolutions?.() || [];
+		const receipt = pending.find(r => r.resolutionId === resolutionId);
+		if (!receipt?.delayedCast || receipt.status !== "delayed") return null;
+		const resumed = this._state.resumeGamblerDelayedCast?.(resolutionId);
+		if (!resumed) return null;
+		const spell = resumed.spell || this._state.getSpells?.().find(s => s.id === resumed.spellId);
+		if (!spell) {
+			this._state.restoreGamblerDelayedCast?.(resolutionId);
+			return null;
+		}
+		const castResult = await this._showCastResult(
+			spell,
+			resumed.slotLevel,
+			!!resumed.castMeta?.isPact,
+			false,
+			{
+				...(resumed.castMeta || {}),
+				gamblerCastResolution: resumed,
+			},
+		);
+		if (castResult?.cancelled) {
+			this._state.restoreGamblerDelayedCast?.(resolutionId);
+			return null;
+		}
+		const completed = this._state.completeGamblerDelayedCast?.(resolutionId);
+		if (!completed) return null;
+		const committed = this._state.commitGamblerCastResolution?.(resolutionId);
+		await this._page?.saveCharacter?.();
+		return committed || completed;
+	}
+
 	async _castSpell (spellId, {withMetamagic, decision = null} = {}) {
 		// Metamagic prompt runs unless the caller explicitly opts out (withMetamagic === false).
 		// Default (undefined) preserves legacy behaviour for callers that pass only a spellId
@@ -2521,12 +2614,6 @@ class CharacterSheetSpells {
 		const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: selectedSlot.level, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
 		if (activeMetamagicChoice?.cancelled) return;
 		if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null, {enforceMaterial: true})) return;
-		if (!this._spendMetamagicCost(activeMetamagicChoice?.metamagic)) {
-			JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
-			return;
-		}
-		if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
-
 		// Variant spell component selection
 		const variantComponentChoice = await this._resolveVariantComponentChoice({spell, spellData, decision});
 		if (variantComponentChoice?.cancelled) return;
@@ -2542,6 +2629,40 @@ class CharacterSheetSpells {
 				...(selectedSlot.isWizardCapstone ? {freeCastSource: selectedSlot.capstoneType === "mastery" ? "Spell Mastery" : "Signature Spells"} : {}),
 			},
 		});
+		const isGamblerSpell = this._state.isTgttGamblerSpell?.(spell) === true;
+		let gamblerCastResolution = null;
+		if (isGamblerSpell && this._state.getFeatureCalculations?.().hasGamblerSpellcasting && !selectedSlot.isWizardCapstone) {
+			gamblerCastResolution = this._state.createGamblerCastResolution?.({
+				spell,
+				slotLevel: selectedSlot.level,
+				usesGamblerFocus: !selectedSlot.isNoSlotResource,
+				castMeta: {
+					...castMeta,
+					isPact: !!selectedSlot.isPact,
+				},
+			});
+			if (gamblerCastResolution) castMeta.gamblerCastResolution = gamblerCastResolution;
+		}
+		const gamblerResolutionDecision = await this._pResolveGamblerCastReceipt(gamblerCastResolution);
+		if (gamblerResolutionDecision.cancelled) {
+			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
+			return;
+		}
+		if (gamblerResolutionDecision.resolution) {
+			gamblerCastResolution = gamblerResolutionDecision.resolution;
+			castMeta.gamblerCastResolution = gamblerCastResolution;
+		}
+		const deferGamblerCast = !!gamblerResolutionDecision.deferCast;
+
+		// Resolve all cast-scoped Gambling Table decisions before spending any
+		// metamagic, consuming a component, or mutating a spell slot. Cancelling
+		// a pending choice must be a true no-op for the rest of the cast setup.
+		if (!this._spendMetamagicCost(activeMetamagicChoice?.metamagic)) {
+			JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
+			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
+			return;
+		}
+		if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
 		// Handle variant component slot modifications (noSlot / lowerSlot)
 		let skipSlotConsumption = false;
@@ -2562,6 +2683,17 @@ class CharacterSheetSpells {
 			for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
 				this._state.consumeVariantComponent(id);
 			}
+		}
+		if (gamblerCastResolution?.slotTransaction === "preserve") skipSlotConsumption = true;
+
+		// Result 49 is an atomic failed cast: preserve the chosen slot and do not
+		// run spell targeting, attack rolls, saves, damage, or concentration.
+		if (gamblerCastResolution?.slotTransaction === "preserve") {
+			gamblerCastResolution = this._state.applyGamblingTableResolution?.(
+				gamblerCastResolution.resolutionId,
+				{confirmAutomatic: true},
+			) || gamblerCastResolution;
+			castMeta.gamblerCastResolution = gamblerCastResolution;
 		}
 
 		// Consume the selected slot (or no-slot resource).
@@ -2590,21 +2722,24 @@ class CharacterSheetSpells {
 		}
 
 		const effectiveSlotLevel = this._state.getDaemonologistEffectiveCastLevel?.(spell, selectedSlot.level) ?? selectedSlot.level;
-		const castResult = await this._showCastResult(
-			spell,
-			effectiveSlotLevel,
-			selectedSlot.isPact,
-			false,
-			{
-				...castMeta,
-				...(effectiveSlotLevel !== selectedSlot.level
-					? {daemonologistActualSlotLevel: selectedSlot.level, daemonologistImprovedSpell: true}
-					: {}),
-			},
-		);
+		const castResult = deferGamblerCast || gamblerCastResolution?.slotTransaction === "preserve"
+			? {cancelled: false}
+			: await this._showCastResult(
+				spell,
+				effectiveSlotLevel,
+				selectedSlot.isPact,
+				false,
+				{
+					...castMeta,
+					...(effectiveSlotLevel !== selectedSlot.level
+						? {daemonologistActualSlotLevel: selectedSlot.level, daemonologistImprovedSpell: true}
+						: {}),
+				},
+			);
 
 		// If user cancelled (e.g. target selection), refund the slot / resource
 		if (castResult?.cancelled) {
+			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
 			// Refund any sorcery points spent on metamagic for this cast.
 			// setSorceryPoints takes an object — passing a bare number would set
 			// BOTH current and max, corrupting the pool's max on a non-full refund.
@@ -2629,6 +2764,64 @@ class CharacterSheetSpells {
 					this._state.setSpellSlots(selectedSlot.level, this._state.getSpellSlotsMax(selectedSlot.level), current + 1);
 				}
 			}
+			return;
+		}
+		if (gamblerCastResolution) {
+			const descriptor = gamblerCastResolution.descriptor;
+			let canCommit = true;
+			if (descriptor?.automation === "automatic") {
+				gamblerCastResolution = this._state.applyGamblingTableResolution?.(gamblerCastResolution.resolutionId, {confirmAutomatic: true}) || gamblerCastResolution;
+			} else if (descriptor?.automation === "manual") {
+				const acknowledge = await InputUiUtil.pGetUserBoolean({
+					title: "Gambler's Folly — Manual Resolution",
+					htmlDescription: `<div>${descriptor.text}</div><div class="ve-small mt-2">${descriptor.instructions}</div>`,
+					textYes: "Mark resolved",
+					textNo: "Leave pending",
+				});
+				if (acknowledge) gamblerCastResolution = this._state.acknowledgeGamblingTableResolution?.(gamblerCastResolution.resolutionId) || gamblerCastResolution;
+				else canCommit = false;
+			}
+			// Result 61 is intentionally durable. The cast slot has been paid, but
+			// the delayed effect must survive save/load until the player resumes it
+			// from the receipt controls.
+			if (gamblerCastResolution.status === "delayed") {
+				canCommit = false;
+				JqueryUtil.doToast({type: "info", content: "Gambler's delayed result is pending. Resume it from the Gambling Table receipt."});
+			}
+			if (canCommit) this._state.commitGamblerCastResolution?.(gamblerCastResolution.resolutionId);
+		}
+		if (gamblerCastResolution?.freeSpell) {
+			const freeSpell = (this._allSpells || this._state.getSpells?.() || []).find(s =>
+				s.name?.toLowerCase() === gamblerCastResolution.freeSpell.name.toLowerCase()
+				&& (!gamblerCastResolution.freeSpell.source || s.source === gamblerCastResolution.freeSpell.source),
+			) || {
+				name: "Color Spray",
+				source: "PHB",
+				level: 1,
+				time: [{number: 1, unit: "action"}],
+				range: {type: "point", distance: {type: "self"}},
+				duration: [{type: "instant"}],
+				entries: ["A canonical Color Spray effect is granted by the Gambling Table."],
+			};
+			if (freeSpell) {
+				await this._showCastResult(
+					freeSpell,
+					gamblerCastResolution.freeSpell.slotLevel || freeSpell.level || 1,
+					false,
+					false,
+					{gamblerFreeSpell: true},
+				);
+			} else {
+				JqueryUtil.doToast({type: "warning", content: `${gamblerCastResolution.freeSpell.name} is unavailable for this free cast.`});
+			}
+		}
+
+		// Result 49 never reaches the spell effect pipeline.
+		if (gamblerCastResolution?.slotTransaction === "preserve") {
+			if (gamblerCastResolution) this._state.commitGamblerCastResolution?.(gamblerCastResolution.resolutionId);
+			this.renderSlots();
+			this._page._renderQuickSpells();
+			this._page.saveCharacter();
 			return;
 		}
 
@@ -4009,7 +4202,7 @@ class CharacterSheetSpells {
 			// This is a per-spell mode — only Gambler-sourced spells roll dice; a Wizard or
 			// Cleric spell on the same character uses its own class ability.
 			const calcs = this._state.getFeatureCalculations?.();
-			const isGamblerSpell = spell?.sourceClass === "Gambler" || spell?.sourceSubclass === "Gambler";
+			const isGamblerSpell = this._state.isTgttGamblerSpell?.(spell) === true;
 			const isGamblerCast = isGamblerSpell && calcs?.hasGamblerSpellcasting;
 			let spellcastingMod;
 			let gamblerModRoll = null;
@@ -4018,8 +4211,13 @@ class CharacterSheetSpells {
 				|| this._state.getSpellcastingAbility()
 				|| "int";
 			if (isGamblerCast && calcs.gamblerModifierDice) {
-				const rollTotal = Renderer.dice.parseRandomise2(calcs.gamblerModifierDice);
-				gamblerModRoll = {total: rollTotal, dice: calcs.gamblerModifierDice};
+				const suppliedRoll = normalizedCastMeta.gamblerCastResolution?.modifier;
+				const rollTotal = suppliedRoll?.total ?? this._state._rollGamblerDice?.(
+					CharacterSheetGamblerRules.parseDice(calcs.gamblerModifierDice)?.count || 1,
+					CharacterSheetGamblerRules.parseDice(calcs.gamblerModifierDice)?.faces || 6,
+					"cast-modifier",
+				)?.total ?? Renderer.dice.parseRandomise2(calcs.gamblerModifierDice);
+				gamblerModRoll = suppliedRoll || {total: rollTotal, dice: calcs.gamblerModifierDice};
 				spellcastingMod = rollTotal;
 			} else {
 				spellcastingMod = this._state.getAbilityMod(castingAbility);
@@ -4259,8 +4457,17 @@ class CharacterSheetSpells {
 			toastContent += `<br><span class="text-warning">⚡ ${feywildSurgeResult.effect}</span>`;
 		}
 
-		// Gambler's Folly - automatic bet roll on spell cast (TGTT Gambler subclass)
-		const gamblerFollyResult = await this._handleGamblerFolly(spell, slotLevel);
+		// Gambler's Folly is resolved before slot consumption so the same receipt
+		// drives the wager, modifier, table result, and slot transaction.
+		const gamblerResolution = normalizedCastMeta.gamblerCastResolution;
+		const gamblerFollyResult = gamblerResolution
+			? {
+				roll: gamblerResolution.bet.roll,
+				die: gamblerResolution.bet.die,
+				won: gamblerResolution.bet.won,
+				html: `<br><hr class="hr-1"><span class="text-warning">\u{1F3B2} <b>Gambler's Folly:</b></span><br>Bet Roll: <b>${gamblerResolution.bet.roll}</b> on d${gamblerResolution.bet.die} ${gamblerResolution.bet.won ? "<span class=\"text-success\"><b>Won!</b> \u2713</span>" : `<span class="text-danger"><b>Lost!</b> Roll d100 on Gambling Table</span><br><span class="text-info">\u{1F3B0} <b>d100:</b> ${gamblerResolution.tableRoll?.roll ?? "pending"}</span><br>${gamblerResolution.descriptor?.text || ""}`}`,
+			}
+			: await this._handleGamblerFolly(spell, slotLevel);
 		let hasGamblerFolly = false;
 		if (gamblerFollyResult) {
 			toastContent += gamblerFollyResult.html;
@@ -4403,7 +4610,7 @@ class CharacterSheetSpells {
 	 *        opens showing that result instead of waiting for a fresh click, so the
 	 *        Master of Fortune "roll twice and CHOOSE" step is actually offered.
 	 */
-	async _pOpenGamblingTableModal (prerolled = null) {
+	async _pOpenGamblingTableModal (prerolled = null, receiptId = null) {
 		const table = CharacterSheetState.GAMBLER_GAMBLING_TABLE;
 		if (!table || !table.length) return;
 
@@ -4413,12 +4620,109 @@ class CharacterSheetSpells {
 			isWidth100: true,
 		});
 
+		// Receipt-specific queue. Cast receipts are intentionally separate from the
+		// global last-roll record so Master of Fortune choices survive a save/load
+		// and can be completed from the same accessible modal.
+		const pending = this._state.getPendingGamblerCastResolutions?.() || [];
+		const receiptRenderers = new Map();
+		const activeReceiptId = receiptId
+			|| (prerolled?.resolutionId ? prerolled.resolutionId : null)
+			|| [...pending].reverse().find(receipt => receipt.status === "awaiting-choice")?.resolutionId
+			|| null;
+		if (pending.length) {
+			const receiptSection = e_({outer: `<section class="gambler-pending-receipts mb-3" aria-labelledby="gambler-pending-heading">
+				<h4 id="gambler-pending-heading" class="mb-2">Pending Gambler cast resolutions</h4>
+				<div class="gambler-pending-receipt-list"></div>
+			</section>`});
+			const list = receiptSection.querySelector(".gambler-pending-receipt-list");
+			pending.forEach(receipt => {
+				const row = e_({outer: `<div class="ve-flex-v-center mb-2 p-2" style="gap: 8px; border: 1px solid var(--rgb-border-grey); border-radius: 6px;" data-resolution-id="${receipt.resolutionId}">
+					<div class="ve-flex-col" style="min-width: 0; flex: 1;">
+						<strong>${receipt.spellName || "Spell cast"}</strong>
+						<span class="ve-small ve-muted">${receipt.tableRoll?.chosenRoll ? `d100 ${receipt.tableRoll.chosenRoll}: ${receipt.tableRoll.chosenEffect}` : "Awaiting Gambling Table resolution"}</span>
+					</div>
+					<div class="gambler-receipt-actions"></div>
+				</div>`});
+				const actions = row.querySelector(".gambler-receipt-actions");
+				const statusText = (current) => {
+					if (!current) return "Resolution cancelled.";
+					if (current.status === "awaiting-choice") return "Choose which result applies.";
+					if (current.status === "awaiting-confirmation") return "Confirm this result.";
+					if (current.status === "delayed") return "Delayed cast is ready to resume.";
+					if (current.status === "resuming") return "Casting the delayed spell…";
+					if (current.status === "committed") return "Resolution committed.";
+					if (current.status === "applied") return "Result applied; commit the cast.";
+					if (current.status === "acknowledged") return "Result acknowledged; commit the cast.";
+					return "Resolution ready.";
+				};
+				let renderReceiptActions;
+				const addButton = (label, handler, cls = "btn-default") => {
+					const action = label.toLowerCase().replace(/\s+/g, "-");
+					const btn = e_({outer: `<button type="button" class="btn btn-xs ${cls}" style="min-height: 44px; min-width: 44px;" data-gambler-action="${action}" data-resolution-id="${receipt.resolutionId}">${label}</button>`});
+					btn.addEventListener("click", async () => {
+						btn.disabled = true;
+						const result = await handler();
+						const live = this._state.getPendingGamblerCastResolutions?.()
+							.find(r => r.resolutionId === receipt.resolutionId) || (result?.status === "committed" ? result : null);
+						row.querySelector("span").textContent = statusText(live);
+						renderReceiptActions(live);
+						await this._page?.saveCharacter?.();
+					});
+					actions.append(btn);
+				};
+				renderReceiptActions = current => {
+					actions.replaceChildren();
+					if (!current || current.status === "committed") return;
+					if (current.status === "awaiting-choice") {
+						addButton(`Keep ${current.tableRoll?.roll}`, () => this._state.chooseGamblerTableResult?.(current.resolutionId, 1), "btn-primary");
+						addButton(`Keep ${current.tableRoll?.secondRoll}`, () => this._state.chooseGamblerTableResult?.(current.resolutionId, 2), "btn-primary");
+					} else if (current.status === "awaiting-confirmation") {
+						addButton("Apply", () => {
+							const applied = this._state.applyGamblingTableResolution?.(current.resolutionId, {confirmAutomatic: true});
+							return applied?.status === "applied"
+								? this._state.commitGamblerCastResolution?.(current.resolutionId)
+								: applied;
+						}, "btn-primary");
+						addButton("Cancel", () => {
+							this._state.cancelGamblerCastResolution?.(current.resolutionId);
+							return null;
+						}, "btn-danger");
+					} else if (current.status === "ready" && current.descriptor?.automation === "manual") {
+						addButton("Acknowledge", () => {
+							const acknowledged = this._state.acknowledgeGamblingTableResolution?.(current.resolutionId);
+							return acknowledged
+								? this._state.commitGamblerCastResolution?.(current.resolutionId)
+								: null;
+						}, "btn-primary");
+						addButton("Record as note", () => this._state.recordGamblerTableResolutionAsNote?.(current.resolutionId), "btn-default");
+					} else if (current.status === "ready" && current.descriptor?.automation === "automatic") {
+						addButton("Apply", () => {
+							const applied = this._state.applyGamblingTableResolution?.(current.resolutionId, {confirmAutomatic: true});
+							return applied?.status === "applied"
+								? this._state.commitGamblerCastResolution?.(current.resolutionId)
+								: applied;
+						}, "btn-primary");
+					} else if (current.status === "delayed") {
+						addButton("Resume delayed result", () => this._pResumeGamblerDelayedCast(current.resolutionId), "btn-primary");
+					}
+				};
+				row.querySelector("span").textContent = statusText(receipt);
+				renderReceiptActions(receipt);
+				receiptRenderers.set(receipt.resolutionId, current => {
+					row.querySelector("span").textContent = statusText(current);
+					renderReceiptActions(current);
+				});
+				list.append(row);
+			});
+			modalInner.append(receiptSection);
+		}
+
 		// Roll button and result display
 		const rollSection = e_({outer: `
 			<div class="mb-3 p-2" style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px;">
 				<div class="ve-flex-v-center" style="gap: 12px;">
-					<button class="btn btn-sm btn-warning btn-gambler-modal-roll" style="font-weight: 600; min-width: 120px;">\u{1F3B2} Roll d100</button>
-					<div class="gambler-roll-result" style="font-size: 1.05em; line-height: 1.4;"></div>
+					<button type="button" class="btn btn-sm btn-warning btn-gambler-modal-roll" style="font-weight: 600; min-width: 120px; min-height: 44px;">\u{1F3B2} Roll d100</button>
+					<div class="gambler-roll-result" aria-live="polite" role="status" style="font-size: 1.05em; line-height: 1.4;"></div>
 				</div>
 				<div class="gambler-roll-choice mt-2" style="display: none;"></div>
 			</div>
@@ -4427,6 +4731,7 @@ class CharacterSheetSpells {
 
 		const resultDisplay = rollSection.querySelector(".gambler-roll-result");
 		const choiceDisplay = rollSection.querySelector(".gambler-roll-choice");
+		rollSection.querySelector(".btn-gambler-modal-roll")?.focus();
 
 		const highlightRow = (/** @type {number} */ roll) => {
 			tableBody.querySelectorAll("tr.table-warning").forEach(el => { el.classList.remove("table-warning"); el.style.removeProperty("background"); });
@@ -4465,21 +4770,27 @@ class CharacterSheetSpells {
 			choiceDisplay.style.display = "";
 			choiceDisplay.innerHTML = `
 				<div class="ve-small mb-1"><span class="text-info">\u{1F3B2} <b>Master of Fortune</b> \u2014 you rolled twice. Choose which result applies:</span></div>
-				<div class="ve-flex" style="gap: 8px; flex-wrap: wrap;">
+				<div class="gambler-choice-radiogroup" role="radiogroup" aria-label="Gambling Table result choice">
 					${options.map(o => `
-						<button class="btn btn-xs ${chosenRoll === o.roll && !result.needsChoice ? "btn-primary" : "btn-default"} btn-gambler-choose" data-which="${o.which}" style="text-align: left; max-width: 100%; white-space: normal;">
-							<b>${o.roll}</b> \u2014 ${o.effect}
-						</button>
+						<label class="gambler-choice-option" style="display: flex; align-items: center; min-height: 44px; gap: 8px;">
+							<input type="radio" name="gambler-table-choice" value="${o.which}" style="min-width: 20px; min-height: 20px;" ${chosenRoll === o.roll && !result.needsChoice ? "checked" : ""}>
+							<span><b>${o.roll}</b> \u2014 ${o.effect}</span>
+						</label>
 					`).join("")}
 				</div>
 			`;
-			choiceDisplay.querySelectorAll(".btn-gambler-choose").forEach(btn => {
-				btn.addEventListener("click", () => {
-					this._state.chooseGamblingTableResult?.(parseInt(btn.getAttribute("data-which"), 10));
-					showResult(this._state.getGamblerLastTableRoll?.());
+			choiceDisplay.querySelectorAll("input[type=radio]").forEach(input => {
+				input.addEventListener("change", () => {
+					const which = parseInt(input.value, 10);
+					const chosen = activeReceiptId
+						? this._state.chooseGamblerTableResult?.(activeReceiptId, which)
+						: this._state.chooseGamblingTableResult?.(which);
+					showResult(chosen?.tableRoll || this._state.getGamblerLastTableRoll?.());
+					if (activeReceiptId) receiptRenderers.get(activeReceiptId)?.(chosen);
 					void this._page?._saveCurrentCharacter?.();
 				});
 			});
+			choiceDisplay.querySelector("input[type=radio]")?.focus();
 		};
 
 		rollSection.querySelector(".btn-gambler-modal-roll").addEventListener("click", () => {
@@ -4489,7 +4800,6 @@ class CharacterSheetSpells {
 
 		// Last roll display — or the freshly-rolled result the caller handed us.
 		const lastRoll = prerolled || this._state.getGamblerLastTableRoll?.();
-		if (lastRoll) showResult(lastRoll);
 
 		// Search filter
 		const searchRow = e_({outer: `
@@ -4534,6 +4844,9 @@ class CharacterSheetSpells {
 		};
 
 		renderTable();
+		// The result highlighter needs the table body to exist. Keep this after
+		// the table is mounted so restored/prerolled receipts are safe too.
+		if (lastRoll) showResult(lastRoll);
 
 		searchInput.addEventListener("input", (/** @type {*} */ e) => {
 			renderTable(e.target.value);
@@ -6818,9 +7131,8 @@ class CharacterSheetSpells {
 		// character is a single-class rolled-prepared caster.
 		if (!spell.prepared) {
 			const info = this._state.getSpellcastingInfo();
-			const isGamblerSpell = spell.sourceClass === "Gambler"
-				|| spell.sourceSubclass === "Gambler"
-				|| (info?.isRolledPrepared && !info?.isMulticlass);
+			const isGamblerSpell = this._state.isTgttGamblerSpell?.(spell) === true
+				|| (info?.isRolledPrepared && !info?.isMulticlass && !spell.sourceClass && !spell.sourceSubclass);
 			if (isGamblerSpell) {
 				const rolledMax = this._state.getGamblerPreparedCount();
 				if (rolledMax == null) {
@@ -7064,6 +7376,17 @@ class CharacterSheetSpells {
 		container.classList?.add(`charsheet__spell-lists--${viewMode}-mode`);
 
 		container.innerHTML = "";
+
+		const pendingGamblerReceipts = this._state.getPendingGamblerCastResolutions?.() || [];
+		if (pendingGamblerReceipts.length) {
+			const pendingPanel = e_({outer: `
+				<section class="charsheet__gambler-pending-panel ve-flex-v-center mb-2" aria-live="polite">
+					<span class="mr-2">🎲 ${pendingGamblerReceipts.length} pending Gambling Table resolution${pendingGamblerReceipts.length === 1 ? "" : "s"}</span>
+					<button type="button" class="ve-btn ve-btn-sm ve-btn-primary charsheet__gambler-open-receipts" style="min-height: 44px; min-width: 44px;">Review Gambling Table</button>
+				</section>
+			`});
+			container.append(pendingPanel);
+		}
 
 		// Render innate spells first (from features/feats)
 		this._renderWizardCapstonePanel(container);

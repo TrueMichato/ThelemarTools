@@ -2332,7 +2332,10 @@ class CharacterSheetClassUtils {
 		// Authoritative path: the caller knows exactly which class this spell
 		// belongs to. Stamp it directly so attribution never relies on a guess.
 		if (targetClass) {
-			const isGamblerTarget = /^gambler$/i.test(targetClass.subclass?.name || "");
+			const isGamblerTarget = /^rogue$/i.test(targetClass.name || "")
+				&& /^tgtt$/i.test(targetClass.source || "")
+				&& /^gambler$/i.test(targetClass.subclass?.name || "")
+				&& /^tgtt$/i.test(targetClass.subclass?.source || "");
 			const isWizardTarget = /^wizard$/i.test(targetClass.name || "");
 			const sourceClass = isGamblerTarget ? "Gambler" : (targetClass.name || null);
 			const sourceSubclass = isGamblerTarget ? "Gambler" : null;
@@ -2373,7 +2376,11 @@ class CharacterSheetClassUtils {
 		// as a Gambler spell (and rolled Gambler dice at cast time).
 		let sourceSubclass = null;
 		const resolvedEntry = classes?.find(c => (c?.name || "").toLowerCase() === (sourceClass || "").toLowerCase());
-		if (resolvedEntry && /^gambler$/i.test(resolvedEntry.subclass?.name || "")) {
+		if (resolvedEntry
+			&& /^rogue$/i.test(resolvedEntry.name || "")
+			&& /^tgtt$/i.test(resolvedEntry.source || "")
+			&& /^gambler$/i.test(resolvedEntry.subclass?.name || "")
+			&& /^tgtt$/i.test(resolvedEntry.subclass?.source || "")) {
 			sourceClass = "Gambler";
 			sourceSubclass = "Gambler";
 		}
@@ -5638,12 +5645,30 @@ class CharacterSheetClassUtils {
 	 * @returns {{regularFeatures: Array<*>, optionalFeatures: Array<*>, autoGrantedCombatMethods: Array<*>, standaloneFeatures: Array<*>, featureOptions: Array<*>}}
 	 */
 	static partitionClassFeaturesForDisplay (/** @type {*[]} */ features = []) {
-		const regularFeatures = features.filter(f => f.featureType !== "Optional Feature");
+		const regularFeatures = CharacterSheetClassUtils.mergeEquivalentFeaturesForDisplay(features.filter(f => f.featureType !== "Optional Feature"));
 		const optionalFeatures = features.filter(f => f.featureType === "Optional Feature");
 		const autoGrantedCombatMethods = regularFeatures.filter(f => CharacterSheetClassUtils.isCombatMethod(f));
 		const standaloneFeatures = regularFeatures.filter(f => !f.parentFeature && !CharacterSheetClassUtils.isCombatMethod(f));
 		const featureOptions = regularFeatures.filter(f => f.parentFeature && !CharacterSheetClassUtils.isCombatMethod(f));
 		return {regularFeatures, optionalFeatures, autoGrantedCombatMethods, standaloneFeatures, featureOptions};
+	}
+
+	static mergeEquivalentFeaturesForDisplay (/** @type {*[]} */ features = []) {
+		const potentSpellcasting = features.filter(feature =>
+			String(feature.name || "").toLowerCase() === "potent spellcasting"
+			&& String(feature.className || "").toLowerCase() === "cleric");
+		const blessedOption = potentSpellcasting.find(feature => String(feature.parentFeature || "").toLowerCase() === "blessed strikes");
+		const domainGrant = potentSpellcasting.find(feature => !feature.parentFeature);
+		if (!blessedOption || !domainGrant) return [...features];
+
+		const merged = {
+			...domainGrant,
+			provenanceSources: [
+				{feature: blessedOption.parentFeature, level: blessedOption.level, source: blessedOption.source},
+				{feature: domainGrant.subclassShortName || domainGrant.subclassName || "Divine Domain", level: domainGrant.level, source: domainGrant.source},
+			],
+		};
+		return features.filter(feature => !potentSpellcasting.includes(feature)).concat(merged);
 	}
 
 	/**
@@ -8561,6 +8586,32 @@ class CharacterSheetClassUtils {
 		return options || [];
 	}
 
+	static getOptionalFeatureReplacementRule ({classData, featureTypes, currentLevel, newLevel, countAtCurrent, countAtNew, existingOfType}) {
+		if (!existingOfType) return {count: 0, label: null};
+		if (featureTypes.includes("MV:B") && countAtNew > countAtCurrent) {
+			return {count: 1, label: "maneuver"};
+		}
+		if (featureTypes.includes("JA")) {
+			// Jester's Acts allow a swap when the known-count grows and whenever Bardic
+			// Versatility is available. TGTT's Bard chassis expresses those versatility
+			// opportunities as ASI feature rows, so derive them from class data rather than
+			// freezing the current level list here.
+			const crossesVersatilityLevel = (classData?.classFeatures || []).some(ref => {
+				const uid = typeof ref === "string" ? ref : ref?.classFeature;
+				if (!uid) return false;
+				const [name, , , levelRaw] = uid.split("|");
+				const level = Number(levelRaw);
+				return /^(?:ability score improvement|bardic versatility)$/i.test(name)
+					&& level > currentLevel
+					&& level <= newLevel;
+			});
+			if (countAtNew > countAtCurrent || crossesVersatilityLevel) {
+				return {count: 1, label: "Jester's Act"};
+			}
+		}
+		return {count: 0, label: null};
+	}
+
 	/**
 	 * Compute optional feature gains between currentLevel and newLevel.
 	 *
@@ -8664,7 +8715,16 @@ class CharacterSheetClassUtils {
 			}
 
 			const newOptionsCount = countAtNew - effectiveExisting;
-			if (/** @type {*} */ newOptionsCount > 0) {
+			const replacement = CharacterSheetClassUtils.getOptionalFeatureReplacementRule({
+				classData,
+				featureTypes,
+				currentLevel,
+				newLevel,
+				countAtCurrent,
+				countAtNew,
+				existingOfType,
+			});
+			if (/** @type {*} */ newOptionsCount > 0 || replacement.count > 0) {
 				gains.push({
 					featureTypes,
 					name,
@@ -8672,8 +8732,9 @@ class CharacterSheetClassUtils {
 					// Keep the headline total consistent with what the character will
 					// actually know: currentCount + newCount === totalCount.
 					totalCount: countAtNew + alreadyGrantedBonus,
-					newCount: newOptionsCount,
-					replacementCount: featureTypes.includes("MV:B") && countAtNew > countAtCurrent && existingOfType > 0 ? 1 : 0,
+					newCount: Math.max(0, newOptionsCount),
+					replacementCount: replacement.count,
+					replacementLabel: replacement.label,
 					required: optFeatProg.required || false,
 				});
 			}

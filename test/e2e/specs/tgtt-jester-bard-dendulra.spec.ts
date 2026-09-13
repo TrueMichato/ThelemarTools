@@ -11,20 +11,17 @@ import {buildSpecialtyChecks, buildJesterActChecks} from "../utils/tgttFeaturePo
  *     +1 each at L6 and L14 — at least one of the picked Acts must
  *     surface as an activatable feature on the sheet (validated via
  *     `expectToggles` regex covering all 13 JA names)
- *   - Concentration via Bless
- *   - Short-rest BI restoration is blocked by CS-BUG-008
+ *   - Real runtime probes for every picked Jester's Act
+ *   - Concentration via Bless and Font of Inspiration short-rest recovery
  */
 describeCharacter({
 	preset: PRESET_FULL_JESTER_DENDULRA,
 	displayName: "College of Jesters Bard Dendulra",
 	signatureToggle: /juggle|jaunt|jest|prankster|pantomime|fool|laughing|witty|agility|dazzling|tumbler|disengagement|ridiculous/i,
-	// CS-BUG-032: the only Jester's Act that surfaces as a TOGGLE is Pantomime, and
-	// its whole effect (speed 0, disadvantage on attacks) lands on the charmed target,
-	// which a single-character sheet cannot model. The acts with self effects —
-	// notably Jester's Agility (+PB AC for a turn) — are limited-use "Use" abilities
-	// rather than toggles; their mechanics are pinned by
-	// test/jest/charactersheet/CharacterSheetFeatureTextEffects.test.js.
-	signatureToggleNoDerivedEffect: "Pantomime is target-facing; self-effect acts are Use abilities, covered by Jest",
+	// The generic signature-toggle smoke check cannot choose one stable Act because the
+	// build's picks vary. `buildJesterActChecks()` supplies a real UI/runtime probe for
+	// every picked Act instead.
+	signatureToggleNoDerivedEffect: "Each picked Jester's Act is covered by its generated featureUseRuntime probe",
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [
@@ -37,7 +34,7 @@ describeCharacter({
 		expectLongRestRestores: true,
 		attackName: /dagger|rapier|crossbow/i,
 		skillRoll: {name: "Performance"},
-		shortRestRestores: {skip: true}, // blocked by CS-BUG-008 (Bardic Inspiration not restored on short rest)
+		shortRestRestores: {resource: "Bardic Inspiration"},
 		concentrationCheck: {castSpell: "Bless", thenAction: "damage", expectActive: false},
 		deathSaves: true,
 		applyCondition: {skip: true},
@@ -87,8 +84,7 @@ describeCharacter({
 			],
 		},
 		// Font of Inspiration (L5+) → BI restores on short OR long rest.
-		// Blocked by CS-BUG-008 (short-rest restore not wired).
-		{level: 5, name: /bardic inspiration/i, kind: "resource", resourceMax: [1, 5], restoreOn: "short", skip: true, skipReason: "CS-BUG-008"},
+		{level: 5, name: /bardic inspiration/i, kind: "resource", resourceMax: [1, 5], restoreOn: "short"},
 		// L5+ Bardic Inspiration die grows to d8 (then d10 at L10, d12
 		// at L15). Anchored on a passive row so the resource skip above
 		// doesn't suppress the die probe.
@@ -118,8 +114,7 @@ describeCharacter({
 				{kind: "spellSaveDc", min: 12},
 				// L10+ BI die grows to d10.
 				{kind: "bardicInspirationDie", minFaces: 10},
-				// Font of Inspiration: should restore on short rest too — blocked by CS-BUG-008.
-				{kind: "shortRestRestores", resource: "Bardic Inspiration", skip: true, skipReason: "CS-BUG-008"},
+				{kind: "shortRestRestores", resource: "Bardic Inspiration"},
 			],
 		},
 		{
@@ -131,7 +126,7 @@ describeCharacter({
 				{kind: "longRestRestores", resource: "Bardic Inspiration"},
 				// L15+ BI die grows to d12 (final tier).
 				{kind: "bardicInspirationDie", minFaces: 12},
-				{kind: "shortRestRestores", resource: "Bardic Inspiration", skip: true, skipReason: "CS-BUG-008"},
+				{kind: "shortRestRestores", resource: "Bardic Inspiration"},
 			],
 		},
 
@@ -169,15 +164,17 @@ describeCharacter({
 		// Other Jesters subclass features.
 		// Gifted Acrobat — climbing speed equal to walking speed, plus a
 		// bonus-action grapple escape and a 10-ft cost to stand from
-		// prone. Only the climb speed has a generic surface on the sheet
-		// (movement-cost overrides have no state representation at all —
-		// see CS-BUG-119), so that is what is asserted here.
+		// prone. All three mechanics now feed shared speed, action-economy,
+		// and movement-override surfaces rather than Jester-only UI.
 		{
 			level: 6,
 			name: /gifted acrobat/i,
 			kind: "passive",
 			effects: [
 				{kind: "speedEquals", left: "climb", right: "walk"},
+				{kind: "stateCall", method: "getActionEconomyOverrides", contains: "Escape a Grapple"},
+				{kind: "stateCall", method: "getMovementOverrides", contains: "Stand from Prone"},
+				{kind: "combatActionEconomyText", includes: ["Escape a Grapple", "Stand from Prone", "Gifted Acrobat"]},
 			],
 		},
 		// Unparalleled Skill — expertise (doubled proficiency) in one
@@ -200,6 +197,15 @@ describeCharacter({
 			kind: "resource",
 			resourceMax: 1,
 			restoreOn: "long",
+			effects: [
+				{
+					kind: "featureUseRuntime",
+					feature: "Jester's Privilege",
+					toastIncludes: ["Jester's Privilege", "Wisdom", "charmed"],
+					resource: {name: "Bardic Inspiration", delta: 1},
+					featureUseDelta: 1,
+				},
+			],
 		},
 
 		// ── Dendulra racial features (TGTT) ───────────────────────────

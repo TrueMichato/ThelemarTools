@@ -45,6 +45,21 @@ class CharacterSheetModal {
 	].join(", ");
 
 	/**
+	 * Focus the first actionable control after a caller has populated a modal.
+	 * @param {HTMLElement} eleModalInner
+	 * @param {{preferSelector?: string}} [opts]
+	 * @returns {HTMLElement|null}
+	 */
+	static focusFirst (eleModalInner, {preferSelector} = {}) {
+		if (!eleModalInner || typeof eleModalInner.querySelector !== "function") return null;
+		const elePreferred = preferSelector ? eleModalInner.querySelector(preferSelector) : null;
+		const ele = elePreferred || eleModalInner.querySelector(CharacterSheetModal._FOCUSABLE_SELECTOR);
+		if (!ele || typeof ele.focus !== "function") return null;
+		try { ele.focus(); } catch (e) { void e; }
+		return ele;
+	}
+
+	/**
 	 * Drop-in replacement for `UiUtil.pGetShowModal`.
 	 *
 	 * @param {object} [opts] Passed through untouched, minus the options this owns.
@@ -62,7 +77,12 @@ class CharacterSheetModal {
 
 		// `UiUtil.getShowModal` blurs the active element before building the modal, so the trigger
 		// has to be read here, not after the await.
-		const eleTrigger = CharacterSheetModal._getRestoreTarget();
+		const getFocusRestoreTarget = typeof opts.getFocusRestoreTarget === "function"
+			? opts.getFocusRestoreTarget
+			: null;
+		const eleTrigger = opts.focusRestoreTarget
+			|| getFocusRestoreTarget?.()
+			|| CharacterSheetModal._getRestoreTarget();
 
 		const isCloseable = !opts.isPermanent;
 		const headerId = `cs-modal-title-${++CharacterSheetModal._uid}`;
@@ -76,6 +96,8 @@ class CharacterSheetModal {
 		const eleTitleSplit = CharacterSheetModal._getMergedTitleSplit(opts, btnClose);
 
 		const optsOut = {...opts};
+		delete optsOut.focusRestoreTarget;
+		delete optsOut.getFocusRestoreTarget;
 		if (eleTitleSplit) {
 			// eslint-disable-next-line vet-jquery/jquery -- deleting the jQuery option, not using it
 			delete optsOut.$titleSplit;
@@ -95,7 +117,9 @@ class CharacterSheetModal {
 
 		const modal = await CharacterSheetModal._pGetShowModalRaw(optsOut);
 
-		doRestoreFocus = () => CharacterSheetModal._doRestoreFocus(eleTrigger);
+		doRestoreFocus = () => CharacterSheetModal._doRestoreFocus(
+			eleTrigger?.isConnected ? eleTrigger : getFocusRestoreTarget?.(),
+		);
 
 		// The spawn harness's fallback stub has no `eleModal`; there is nothing to enhance.
 		if (!modal?.eleModal) return modal;

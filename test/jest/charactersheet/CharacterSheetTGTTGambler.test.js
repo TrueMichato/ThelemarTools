@@ -159,22 +159,19 @@ describe("TGTT Gambler Subclass", () => {
 			it("should win on rolls 1-3 (d4)", () => {
 				createGambler(3);
 
-				// Mock RNG to test specific values
-				const originalRandom = Math.random;
-
 				// Roll = 1 (should win)
-				Math.random = () => 0;
+				state.setGamblerRollSource({nextInt: () => 1});
 				expect(state.rollGamblerBet(1).won).toBe(true);
 
 				// Roll = 3 (should win)
-				Math.random = () => 0.6;
+				state.setGamblerRollSource({nextInt: () => 3});
 				expect(state.rollGamblerBet(1).won).toBe(true);
 
 				// Roll = 4 (should lose)
-				Math.random = () => 0.99;
+				state.setGamblerRollSource({nextInt: () => 4});
 				expect(state.rollGamblerBet(1).won).toBe(false);
 
-				Math.random = originalRandom;
+				state.setGamblerRollSource();
 			});
 
 			it("should roll d4 for 2nd level spells", () => {
@@ -197,21 +194,19 @@ describe("TGTT Gambler Subclass", () => {
 
 			it("should win on rolls 1-4, lose on 5-6 (d6)", () => {
 				createGambler(7);
-				const originalRandom = Math.random;
-
 				// Roll = 4 (should win)
-				Math.random = () => 0.5;
+				state.setGamblerRollSource({nextInt: () => 4});
 				expect(state.rollGamblerBet(3).won).toBe(true);
 
 				// Roll = 5 (should lose)
-				Math.random = () => 0.7;
+				state.setGamblerRollSource({nextInt: () => 5});
 				expect(state.rollGamblerBet(3).won).toBe(false);
 
 				// Roll = 6 (should lose)
-				Math.random = () => 0.99;
+				state.setGamblerRollSource({nextInt: () => 6});
 				expect(state.rollGamblerBet(3).won).toBe(false);
 
-				Math.random = originalRandom;
+				state.setGamblerRollSource();
 			});
 		});
 
@@ -236,17 +231,15 @@ describe("TGTT Gambler Subclass", () => {
 
 			it("should win on 1, lose on 2 (d2)", () => {
 				createGambler(10);
-				const originalRandom = Math.random;
-
 				// Roll = 1 (should win)
-				Math.random = () => 0;
+				state.setGamblerRollSource({nextInt: () => 1});
 				expect(state.rollGamblerBet(4).won).toBe(true);
 
 				// Roll = 2 (should lose)
-				Math.random = () => 0.99;
+				state.setGamblerRollSource({nextInt: () => 2});
 				expect(state.rollGamblerBet(4).won).toBe(false);
 
-				Math.random = originalRandom;
+				state.setGamblerRollSource();
 			});
 		});
 
@@ -336,27 +329,25 @@ describe("TGTT Gambler Subclass", () => {
 
 		it("should return matching effect for each roll", () => {
 			createGambler(3);
-			const originalRandom = Math.random;
-
 			// Test roll = 1
-			Math.random = () => 0;
+			state.setGamblerRollSource({nextInt: () => 1});
 			const result1 = state.rollGamblingTable();
 			expect(result1.roll).toBe(1);
 			expect(result1.effect).toBe(CharacterSheetState.GAMBLER_GAMBLING_TABLE[0]);
 
 			// Test roll = 50
-			Math.random = () => 0.49;
+			state.setGamblerRollSource({nextInt: () => 50});
 			const result50 = state.rollGamblingTable();
 			expect(result50.roll).toBe(50);
 			expect(result50.effect).toBe(CharacterSheetState.GAMBLER_GAMBLING_TABLE[49]);
 
 			// Test roll = 100
-			Math.random = () => 0.99;
+			state.setGamblerRollSource({nextInt: () => 100});
 			const result100 = state.rollGamblingTable();
 			expect(result100.roll).toBe(100);
 			expect(result100.effect).toBe(CharacterSheetState.GAMBLER_GAMBLING_TABLE[99]);
 
-			Math.random = originalRandom;
+			state.setGamblerRollSource();
 		});
 
 		it("should return null for non-Gambler characters", () => {
@@ -449,6 +440,7 @@ describe("TGTT Gambler Subclass", () => {
 
 			// Use remaining
 			for (let i = 1; i < pb; i++) {
+				state.resetBonusAction();
 				state.useExtraLuck();
 			}
 			expect(state.getExtraLuckUses().remaining).toBe(0);
@@ -474,6 +466,7 @@ describe("TGTT Gambler Subclass", () => {
 
 			// Exhaust uses
 			for (let i = 0; i < pb; i++) {
+				state.resetBonusAction();
 				state.useExtraLuck();
 			}
 			expect(state.getExtraLuckUses().remaining).toBe(0);
@@ -517,6 +510,7 @@ describe("TGTT Gambler Subclass", () => {
 
 			// Exhaust uses
 			for (let i = 1; i < pb; i++) {
+				state.resetBonusAction();
 				state.useMasterOfFortune();
 			}
 			expect(state.getMasterOfFortuneUses().remaining).toBe(0);
@@ -534,16 +528,27 @@ describe("TGTT Gambler Subclass", () => {
 			expect(lastRoll).not.toBeNull();
 		});
 
+		it("keeps Extra Luck's bonus-action cost", () => {
+			createExtraLuckGambler();
+			state.spendBonusAction();
+			const before = state.getExtraLuckUses().remaining;
+			expect(state.useExtraLuck({consumeBonusAction: false})).toBe(false);
+			expect(state.getExtraLuckUses().remaining).toBe(before);
+			state.resetBonusAction();
+			expect(state.useExtraLuck({consumeBonusAction: false})).toBe(true);
+			expect(state.isBonusActionAvailable()).toBe(false);
+		});
+
 		it("should roll twice on d100 table (choose result)", () => {
 			createMasterGambler();
-			const originalRandom = Math.random;
-
 			// Force different rolls
 			let callCount = 0;
-			Math.random = () => {
-				callCount++;
-				return callCount === 1 ? 0.1 : 0.9; // First roll low, second roll high
-			};
+			state.setGamblerRollSource({
+				nextInt: () => {
+					callCount++;
+					return callCount === 1 ? 11 : 91; // First roll low, second roll high
+				},
+			});
 
 			const result = state.rollGamblingTable();
 
@@ -552,7 +557,7 @@ describe("TGTT Gambler Subclass", () => {
 			expect(result.secondRoll).toBeDefined();
 			expect(result.roll).not.toBe(result.secondRoll);
 
-			Math.random = originalRandom;
+			state.setGamblerRollSource();
 		});
 
 		it("should reset uses on long rest", () => {
@@ -578,9 +583,11 @@ describe("TGTT Gambler Subclass", () => {
 
 			// Exhaust all resources
 			for (let i = 0; i < elPb; i++) {
+				state.resetBonusAction();
 				state.useExtraLuck();
 			}
 			for (let i = 0; i < mofPb; i++) {
+				state.resetBonusAction();
 				state.useMasterOfFortune();
 			}
 
@@ -607,6 +614,7 @@ describe("TGTT Gambler Subclass", () => {
 			// Set some state
 			state.setGamblerAutoRollTable(true);
 			state.useExtraLuck();
+			state.resetBonusAction();
 			state.useMasterOfFortune();
 			state.rollGamblerBet(3);
 

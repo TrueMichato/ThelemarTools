@@ -4,6 +4,7 @@
  */
 
 import "./setup.js";
+import {jest} from "@jest/globals";
 import "../../../js/charactersheet/charactersheet-state.js";
 import {CharacterSheetPlayMode} from "../../../js/charactersheet/charactersheet-playmode.js";
 
@@ -14,6 +15,67 @@ describe("CharacterSheetPlayMode", () => {
 
 	beforeEach(() => {
 		state = new CharacterSheetState();
+	});
+
+	describe("Active-state lifecycle", () => {
+		it("ends known states canonically, drains their queued end save, and persists", async () => {
+			state.activateState("dancing");
+			let pendingAtDrain = [];
+			const page = {
+				getState: () => state,
+				_pDrainPendingStateEndSaves: jest.fn(async () => {
+					pendingAtDrain = state.getPendingStateEndSaves();
+					for (const pending of pendingAtDrain) state.resolvePendingStateEndSave(pending.id, 10);
+				}),
+				_saveCurrentCharacter: jest.fn(async () => {}),
+				_renderActiveStates: jest.fn(),
+			};
+			const pm = new CharacterSheetPlayMode(page);
+
+			await expect(pm._pToggleActiveState(state.getActiveStates().find(it => it.stateTypeId === "dancing")))
+				.resolves.toBe(true);
+
+			expect(state.isStateTypeActive("dancing")).toBe(false);
+			expect(pendingAtDrain).toHaveLength(1);
+			expect(state.getPendingStateEndSaves()).toHaveLength(0);
+			expect(page._pDrainPendingStateEndSaves).toHaveBeenCalledTimes(1);
+			expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(1);
+			expect(page._renderActiveStates).toHaveBeenCalledTimes(1);
+		});
+
+		it("routes feature-backed activation through the page transaction", async () => {
+			const activeState = {id: "dance-state", stateTypeId: "dancing", active: false};
+			const feature = {id: "dance-feature", name: "Dance of the Country"};
+			const stateType = {id: "dancing", resourceCost: 1};
+			const activationInfo = {stateType, resourceCost: 1};
+			const resource = {id: "dance-resource", cost: 1, current: 2};
+			const fakeState = {
+				constructor: {ACTIVE_STATE_TYPES: {dancing: stateType}},
+				getActivatableFeatures: () => [{feature, stateTypeId: "dancing", activationInfo, resource}],
+				toggleActiveState: jest.fn(),
+			};
+			const page = {
+				getState: () => fakeState,
+				_activateFeatureState: jest.fn(async () => { activeState.active = true; }),
+				_saveCurrentCharacter: jest.fn(async () => {}),
+				_renderActiveStates: jest.fn(),
+			};
+			const pm = new CharacterSheetPlayMode(page);
+
+			await expect(pm._pToggleActiveState(activeState)).resolves.toBe(true);
+
+			expect(page._activateFeatureState).toHaveBeenCalledWith(
+				feature,
+				"dancing",
+				stateType,
+				resource,
+				1,
+				activationInfo,
+			);
+			expect(fakeState.toggleActiveState).not.toHaveBeenCalled();
+			expect(page._saveCurrentCharacter).not.toHaveBeenCalled();
+			expect(page._renderActiveStates).toHaveBeenCalledTimes(1);
+		});
 	});
 
 	describe("Item attunement", () => {
@@ -93,6 +155,91 @@ describe("CharacterSheetPlayMode", () => {
 			const restored = new CharacterSheetState();
 			restored.loadFromJson(json);
 			expect(restored.getViewMode()).toBe("full");
+		});
+	});
+
+	describe("Action economy rendering", () => {
+		it("refreshes the existing Your Turn card instead of appending a duplicate", () => {
+			const actionsHub = {
+				children: [],
+				querySelector (selector) {
+					return selector === "[data-pm-section='action-economy']"
+						? this.children.find(it => it.dataset?.pmSection === "action-economy") || null
+						: null;
+				},
+				insertBefore (node, before) {
+					const index = this.children.indexOf(before);
+					this.children.splice(index < 0 ? this.children.length : index, 0, node);
+					node.parentNode = this;
+				},
+			};
+			const economy = {action: false, bonus: false, reaction: false};
+			const pm = new CharacterSheetPlayMode({
+				getState: () => ({
+					getActionEconomyState: () => ({...economy}),
+					isActionTypeAvailable: type => economy[type],
+					restoreActionType: type => { economy[type] = true; return true; },
+					getSpeed: () => 30,
+				}),
+			});
+			const clickable = [];
+			pm._elActionsHub = actionsHub;
+			pm._makeCard = (parent) => {
+				const header = {
+					classList: {contains: cls => cls === "pm-card__header"},
+					parentNode: null,
+				};
+				const card = {
+					dataset: {},
+					parentNode: parent,
+					children: [header],
+					querySelector (selector) { return selector === ".pm-card__header" ? header : null; },
+					replaceChildren (...children) { this.children = children; },
+				};
+				header.parentNode = card;
+				parent.children.push(card);
+				return card;
+			};
+			pm._ce = (tag, className, parent) => {
+				const el = {
+					tag,
+					className,
+					parentNode: parent,
+					children: [],
+					remove () { parent.children.splice(parent.children.indexOf(this), 1); },
+					replaceChildren (...children) { this.children = children; },
+				};
+				parent.children.push(el);
+				return el;
+			};
+			pm._makeClickable = (el, label, handler) => {
+				el._label = label;
+				el._handler = handler;
+				clickable.push(el);
+			};
+			pm._icon = () => ({});
+			pm._setIconLabel = () => {};
+
+			const previousDocument = globalThis.document;
+			globalThis.document = {createTextNode: text => text};
+			try {
+				pm._renderActionEconomy();
+				expect(actionsHub.children.filter(it => it.dataset?.pmSection === "action-economy")).toHaveLength(1);
+				expect(clickable[1]._label).toBe("Restore Bonus");
+				clickable[1]._handler();
+
+				expect(actionsHub.children.filter(it => it.dataset?.pmSection === "action-economy")).toHaveLength(1);
+				expect(clickable.slice(-5).map(it => it._label)).toEqual([
+					"Restore Action",
+					"Use Bonus",
+					"Restore Reaction",
+					"Use Movement",
+					"Reset turn (restore all actions)",
+				]);
+			} finally {
+				if (previousDocument === undefined) delete globalThis.document;
+				else globalThis.document = previousDocument;
+			}
 		});
 	});
 

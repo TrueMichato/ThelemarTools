@@ -4,6 +4,16 @@
  */
 
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
+import {CharacterSheetGamblerRules, GAMBLER_GAMBLING_TABLE} from "./charactersheet-gambler.js";
+
+// Target-aware riders resolve through this registry rather than through attack-id
+// branches. New sources can opt in by registering a handler method.
+const TARGET_EFFECT_HANDLER_METHODS = Object.freeze({
+	"chained-fury": "applyChainedTargetEffect",
+});
+const TARGET_EFFECT_METADATA_METHODS = Object.freeze({
+	"chained-fury": "getChainedTargetEffectMetadata",
+});
 
 /**
  * Utility to parse feature text and extract limited-use information
@@ -2478,7 +2488,7 @@ class FeatureModifierParser {
 				if (abilityMod) {
 					// Special case: "add your X modifier to initiative"
 					// We can't resolve this statically, mark it for special handling
-					const abilityName = match[1]?.toLowerCase();
+					const abilityName = match[1]?.toLowerCase().slice(0, 3);
 					modifiers.push({
 						type,
 						value: 0,
@@ -3969,12 +3979,9 @@ const FeatureEffectRegistry = {
 	 * fully expressed by their DC + save ability on the activation row.
 	 */
 	_registerJesterActEffects () {
-		// === DAZZLING DISGUISE — advantage on Deception for an hour after a 1-minute setup.
-		// Conditional (not a flat always-on advantage) because the disguise has to have
-		// been put on; the conditional-modifier prompt surfaces it per roll.
-		this.register("Dazzling Disguise", [
-			{type: "skillAdvantage", skill: "deception", conditional: "while your Dazzling Disguise is worn (1 hour)"},
-		]);
+		// Jester's Act effects are activation-scoped. Registering Dazzling Disguise here
+		// made its Deception advantage available merely for knowing the Act; the active
+		// custom state now carries that effect for the Act's one-hour duration instead.
 	},
 
 	/**
@@ -4315,6 +4322,8 @@ class CharacterSheetState {
 
 	constructor () {
 		this._data = this._getDefaultState();
+		// Runtime-only seam for deterministic Gambler tests. Never serialized.
+		this._gamblerRollSource = null;
 		// Optional full spell database, injected by the controller after data
 		// load (`setSpellData`). Used to enrich subclass/feature-granted spells
 		// with their real level/school/metadata so they render and persist
@@ -4930,6 +4939,8 @@ class CharacterSheetState {
 				gamblerLastTableRoll: null, // {roll, effect, timestamp}
 				gamblerExtraLuckUsed: 0, // Uses of Extra Luck (L9) today
 				gamblerMasterFortuneUsed: 0, // Uses of Master of Fortune nat-1-to-20 (L17) today
+				gamblerPendingCastResolutions: [], // runtime-independent pending cast/table obligations
+				gamblerCastHistory: [], // committed cast receipts, capped by the state layer
 				// Spell Scribing Adept (TGTT) — mini-spellbook for Bard/Sorcerer/Warlock
 				scribingSpellbook: [], // [{id, name, source, level, school, ...}]
 				scribingMemorizedSpellId: null, // ID of currently memorized spell
@@ -5154,6 +5165,13 @@ class CharacterSheetState {
 			// Active states (e.g., Rage, Concentration, Wild Shape, etc.)
 			// Each state: {id, name, active, sourceFeatureId, resourceId?, effects: [{type, value, ...}], duration?, icon?, roundsRemaining?, activatedAtRound?}
 			activeStates: [],
+			// Lightweight initiative roster used by character-owned turn-order effects.
+			// This deliberately tracks no NPC statistics beyond the order itself.
+			combatTurnOrder: [], // [{id, name, initiative, hasActed}]
+			// End-of-state saves waiting for the UI to resolve. Keeping these in
+			// serialized state prevents an automatic ending immediately before a
+			// save/close from silently losing its consequence.
+			pendingStateEndSaves: [],
 
 			// Companions (beast companions, familiars, summons, steel defenders, drakes, wild shape forms)
 			// Each companion: { id, name, source, type, origin, customName,
@@ -5297,12 +5315,28 @@ class CharacterSheetState {
 			// Play Mode (alternative intent-based UI)
 			viewMode: "full", // "full" | "play"
 			favorites: [], // [{id, type, name, icon, detail, ref}] — pinned actions for quick access
+			migrationFlags: {},
+
+			// Generic opt-in target/effect tracking. Most attack riders remain prompt-only;
+			// features which explicitly opt into this collection can persist target state
+			// without creating a second source of truth outside CharacterSheetState.
+			targetEffects: [], // [{id, source, targetName, ...effect fields}]
+			// Per-turn accounting for chain-only movement. This is deliberately kept in
+			// CharacterSheetState so Combat, Play Mode, and headless callers share one
+			// source of truth for the bonus-action doubling rule.
+			chainedMovementUsage: {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false},
+			// Shared transient action-economy usage for surfaces which do not own the
+			// Combat module (notably Play Mode). Combat keeps its richer attack tracker,
+			// while bonus-action consumers use this common gate.
+			actionEconomyUsage: {action: false, bonus: false, reaction: false},
 		};
 	}
 
 	// #region Core State Management
 	reset () {
 		this._data = this._getDefaultState();
+		// Runtime-only seam for deterministic Gambler tests. Never serialized.
+		this._gamblerRollSource = null;
 	}
 
 	toJson () {
@@ -5348,9 +5382,17 @@ class CharacterSheetState {
 		this._data.speed = {...this._getDefaultState().speed, ...this._data.speed};
 		this._data.senses = {...this._getDefaultState().senses, ...this._data.senses};
 		this._data.spellcasting = {...this._getDefaultState().spellcasting, ...this._data.spellcasting};
+		if (!Array.isArray(this._data.spellcasting.gamblerPendingCastResolutions)) this._data.spellcasting.gamblerPendingCastResolutions = [];
+		if (!Array.isArray(this._data.spellcasting.gamblerCastHistory)) this._data.spellcasting.gamblerCastHistory = [];
+		const hadActionEconomyUsage = !!this._data.actionEconomyUsage && typeof this._data.actionEconomyUsage === "object";
+		const legacyBonusActionAvailable = this._data.actionEconomy?.bonusActionAvailable;
+		delete this._data.actionEconomy;
 		this._data.currency = {...this._getDefaultState().currency, ...this._data.currency};
 		this._data.notes = {...this._getDefaultState().notes, ...this._data.notes};
 		this._data.appearance = {...this._getDefaultState().appearance, ...this._data.appearance};
+		if (!this._data.migrationFlags || typeof this._data.migrationFlags !== "object" || Array.isArray(this._data.migrationFlags)) {
+			this._data.migrationFlags = {};
+		}
 		this._data.ac = {...this._getDefaultState().ac, ...this._data.ac};
 		this._data.customModifiers = {...this._getDefaultState().customModifiers, ...this._data.customModifiers};
 		// Ensure nested customModifiers objects exist
@@ -5400,6 +5442,52 @@ class CharacterSheetState {
 		if (!Array.isArray(this._data.activeStates)) {
 			this._data.activeStates = [];
 		}
+		this._normalizeCombatTurnOrder();
+		this._migrateTimeDomainActiveStates();
+		// Percussive Strike is an automatic rider on Dance activation, not an
+		// independently toggled state. Retire legacy standalone instances.
+		this._data.activeStates = this._data.activeStates.filter(state => state?.stateTypeId !== "percussiveStrike");
+		this._data.activeStates.forEach(state => {
+			state.targets = this._normalizeActiveStateTargets(state.targets);
+		});
+		if (!Array.isArray(this._data.pendingStateEndSaves)) {
+			this._data.pendingStateEndSaves = [];
+		} else {
+			this._data.pendingStateEndSaves = this._data.pendingStateEndSaves
+				.filter(entry => entry && entry.id && entry.stateTypeId)
+				.map(entry => ({
+					id: String(entry.id),
+					stateId: entry.stateId ? String(entry.stateId) : null,
+					stateTypeId: String(entry.stateTypeId),
+					reason: String(entry.reason || "ended"),
+					queuedAt: Number(entry.queuedAt) || Date.now(),
+				}));
+		}
+		if (!Array.isArray(this._data.targetEffects)) this._data.targetEffects = [];
+		this._data.targetEffects = this._data.targetEffects
+			.filter(it => it && typeof it === "object")
+			.map(it => this._normalizeTargetEffect(it))
+			.filter(Boolean);
+		if (!this._data.chainedMovementUsage || typeof this._data.chainedMovementUsage !== "object") {
+			this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
+		} else {
+			this._data.chainedMovementUsage = {
+				round: this._data.chainedMovementUsage.round == null ? null : Number(this._data.chainedMovementUsage.round),
+				movementUsed: Math.max(0, Number(this._data.chainedMovementUsage.movementUsed) || 0),
+				bonusActionUsed: !!this._data.chainedMovementUsage.bonusActionUsed,
+				doubled: !!this._data.chainedMovementUsage.doubled,
+			};
+		}
+		if (!this._data.actionEconomyUsage || typeof this._data.actionEconomyUsage !== "object") {
+			this._data.actionEconomyUsage = {action: false, bonus: false, reaction: false};
+		} else {
+			this._data.actionEconomyUsage = {
+				action: !!this._data.actionEconomyUsage.action,
+				bonus: !!this._data.actionEconomyUsage.bonus,
+				reaction: !!this._data.actionEconomyUsage.reaction,
+			};
+		}
+		if (!hadActionEconomyUsage && legacyBonusActionAvailable === false) this._data.actionEconomyUsage.bonus = true;
 
 		// Ensure chosenSubfeatures array exists (legacy saves predate structured choices)
 		if (!Array.isArray(this._data.chosenSubfeatures)) {
@@ -5557,6 +5645,8 @@ class CharacterSheetState {
 
 		// Migrate modifiers: re-process modifiers that may be missing special flags
 		this._migrateModifiers();
+		this._migrateRightOnTimeModifiers();
+		this._migrateAmbiguousBlessedStrikes();
 
 		// Drop duplicate feature-sourced named modifiers. `addFeat` runs both the
 		// data-declared and the registry pipelines, and until the guard was hoisted
@@ -5703,6 +5793,7 @@ class CharacterSheetState {
 		// but did not fully reconstruct runtime feature state.
 		this._reapplyHistoryOptionalFeatures();
 		this._reapplyHistoryFeatureChoices();
+		this._migrateActiveStateRuntimeMetadata();
 		this._syncTunedMetamagicsToKnownOptions();
 
 		// Ensure unarmed strike exists for all characters
@@ -6130,6 +6221,10 @@ class CharacterSheetState {
 		// editions by one subclass collapses to the edition matching that subclass. Runs LAST
 		// so it sees the fully-enriched, relocated arrays. Idempotent.
 		this._sweepDedupStoredSpells();
+		// Reconcile opt-in target effects after classes, levels, and active states
+		// have been restored. This removes stale Chained Fury effects from old
+		// saves when Rage/Manifest Chains/source legality no longer applies.
+		this.reconcileTargetEffects();
 	}
 
 	/**
@@ -6489,6 +6584,57 @@ class CharacterSheetState {
 
 		this._data.namedModifiers = kept;
 		this._recalculateCustomModifiers();
+	}
+
+	/**
+	 * Old Time Domain saves can carry both the parser-owned dynamic initiative row and
+	 * the retired class-effect snapshot. Keep the dynamic Wisdom row and remove only its
+	 * obsolete same-feature numeric twin.
+	 */
+	_migrateRightOnTimeModifiers () {
+		const mods = this._data.namedModifiers || [];
+		const isRightOnTime = mod => mod?.type === "initiative"
+			&& /right on time/i.test(`${mod.name || ""} ${mod.note || ""}`);
+		if (!mods.some(mod => isRightOnTime(mod) && mod.abilityMod)) return;
+		this._data.namedModifiers = mods.filter(mod => !isRightOnTime(mod) || !!mod.abilityMod);
+	}
+
+	/**
+	 * Some legacy 2024 Cleric saves persisted both Blessed Strikes options. There is no
+	 * deterministic way to infer the player's intended L7 pick, so remove only those
+	 * option children and queue the existing structured picker once.
+	 */
+	_migrateAmbiguousBlessedStrikes () {
+		if (this._data.migrationFlags.blessedStrikesChoiceReset) return;
+		const chosen = (this._data.chosenSubfeatures || [])
+			.filter(rec => String(rec.parent || "").toLowerCase() === "blessed strikes");
+		const children = (this._data.features || [])
+			.filter(feature => String(feature.parentFeature || "").toLowerCase() === "blessed strikes");
+		const optionNames = new Set([...chosen, ...children].map(it => String(it.name || "").toLowerCase()));
+		if (!optionNames.has("divine strike") || !optionNames.has("potent spellcasting")) return;
+
+		children.forEach(feature => this.removeFeature(feature.id));
+		this._data.chosenSubfeatures = (this._data.chosenSubfeatures || [])
+			.filter(rec => String(rec.parent || "").toLowerCase() !== "blessed strikes");
+
+		const parent = (this._data.features || []).find(feature => String(feature.name || "").toLowerCase() === "blessed strikes");
+		this.clearPendingFeatureChoicesByFeature(parent?.id || "Blessed Strikes");
+		this.clearPendingFeatureChoicesByFeature("Blessed Strikes");
+		this.addPendingFeatureChoice({
+			featureName: "Blessed Strikes",
+			featureId: parent?.id || "Blessed Strikes",
+			featureSource: parent?.source || "XPHB",
+			featureClass: parent?.className || "Cleric",
+			featureClassSource: parent?.classSource || "XPHB",
+			level: parent?.level ?? 7,
+			kind: "subfeature",
+			options: [
+				{name: "Divine Strike", source: "XPHB", className: "Cleric", classSource: "XPHB", level: 7},
+				{name: "Potent Spellcasting", source: "XPHB", className: "Cleric", classSource: "XPHB", level: 7},
+			],
+			count: 1,
+		});
+		this._data.migrationFlags.blessedStrikesChoiceReset = true;
 	}
 
 	_migrateModifiers () {
@@ -12828,7 +12974,18 @@ class CharacterSheetState {
 	}
 
 	setBaseAc (ac) { this._data.ac.base = ac; }
-	setArmor (armor) { this._data.ac.armor = armor; }
+	setArmor (armor) {
+		const wasHeavy = this._isHeavyArmorSnapshot(this._data.ac.armor);
+		this._data.ac.armor = armor;
+		if (!wasHeavy && this._isHeavyArmorSnapshot(armor)) {
+			this._deactivateStatesForEndCondition({armorType: "heavy"});
+		}
+	}
+
+	_isHeavyArmorSnapshot (armor) {
+		const type = `${armor?.type || armor?.armorType || ""}`.trim().toLowerCase();
+		return type === "ha" || type === "heavy" || type === "heavy armor";
+	}
 
 	/**
 	 * Build the `_data.ac.armor` snapshot for a piece of body armor.
@@ -14306,6 +14463,15 @@ class CharacterSheetState {
 		return [
 			...this._getFeatureInitiativeBonuses().map(it => ({...it, sourceType: "feature"})),
 			...this.getMaterialInitiativeBonuses().map(it => ({...it, sourceType: "itemMaterial"})),
+			...(this._data.activeStates || [])
+				.filter(state => state.active)
+				.flatMap(state => (state.customEffects || [])
+					.filter(effect => effect.type === "bonus" && effect.target === "initiative")
+					.map(effect => ({
+						name: state.name || state.stateTypeId || "Active state",
+						value: Number(effect.value) || 0,
+						sourceType: "activeState",
+					}))),
 		];
 	}
 
@@ -15015,12 +15181,13 @@ class CharacterSheetState {
 			// ability: null / abilityLabel: "Rolled" plus saveDcFormula and
 			// attackBonusFormula). Any NEW consumer of this function must handle
 			// the rolled case explicitly rather than trusting this return value.
-			case "Gambler":
 			case "Architect of Ruin": return "cha";
 			// Order of the Profane Soul casts pact magic using its hemocraft ability
 			// (Intelligence or Wisdom, whichever the Blood Hunter chose at level 1).
 			case "Order of the Profane Soul": return this._getHemocraftAbility();
 		}
+
+		if (this._isGamblerClassEntry(cls)) return "cha";
 
 		// Prefer the ability stored on the class data (covers 2024 + homebrew).
 		if (cls.spellcastingAbility) return cls.spellcastingAbility;
@@ -15057,9 +15224,12 @@ class CharacterSheetState {
 		const keys = [spell.sourceClass, spell.sourceSubclass].filter(Boolean).map(s => s.toLowerCase());
 		if (keys.length) {
 			for (const cls of this._data.classes || []) {
+				const isGamblerKey = keys.includes("gambler");
+				if (isGamblerKey && !this._isGamblerClassEntry(cls)) continue;
 				const clsKeys = [cls.name, cls.subclass?.name].filter(Boolean).map(s => s.toLowerCase());
-				// Gambler spells are stamped sourceClass:"Gambler"; match the subclass.
-				if (cls.subclass?.name === "Gambler") clsKeys.push("gambler");
+				// Gambler spells are stamped sourceClass:"Gambler"; only the
+				// source-qualified TGTT subclass may claim that key.
+				if (this._isGamblerClassEntry(cls)) clsKeys.push("gambler");
 				if (clsKeys.some(k => keys.includes(k))) {
 					const ability = this.getSpellcastingAbilityForClass(cls);
 					if (ability) return ability;
@@ -15197,7 +15367,7 @@ class CharacterSheetState {
 		const subclassName = cls.subclass?.name;
 
 		// Gambler (TGTT Rogue subclass) — 1/3 caster using Warlock spell list with rolled prepared count
-		if (subclassName === "Gambler") {
+		if (this._isGamblerClassEntry(cls)) {
 			if (level < 3) return null;
 			const calcs = this.getFeatureCalculations();
 			const rolledMax = this.getGamblerPreparedCount();
@@ -16068,9 +16238,14 @@ class CharacterSheetState {
 	 * @returns {string[]}
 	 */
 	_getClassMatchKeys (cls) {
-		const keys = [cls.name, cls.subclass?.name].filter(Boolean).map(s => s.toLowerCase());
+		const keys = [cls.name].filter(Boolean).map(s => s.toLowerCase());
+		if (!this._isGamblerClassEntry(cls)) {
+			if (cls.subclass?.name) keys.push(cls.subclass.name.toLowerCase());
+		} else if (cls.subclass?.name) {
+			keys.push(cls.subclass.name.toLowerCase());
+		}
 		// Gambler spells are stamped sourceClass:"Gambler" regardless of the base class.
-		if (cls.subclass?.name === "Gambler") keys.push("gambler");
+		if (this._isGamblerClassEntry(cls)) keys.push("gambler");
 		return [...new Set(keys)];
 	}
 
@@ -16207,7 +16382,7 @@ class CharacterSheetState {
 	 */
 	getMaxPreparedSpells (className) {
 		// Special case: Gambler uses rolled value, not fixed formula
-		if (className === "Gambler") {
+		if (className === "Gambler" && this._getGamblerClass()) {
 			const rolled = this.getGamblerPreparedCount();
 			if (rolled !== null) {
 				return rolled;
@@ -18495,10 +18670,128 @@ class CharacterSheetState {
 				s => s.name === spellIdOrName && s.source === sourceOrPrepared,
 			);
 		}
-		if (spell) spell.prepared = prepared;
+		if (!spell) return false;
+		if (spell.alwaysPrepared && !prepared) return false;
+		spell.prepared = prepared;
+		return true;
 	}
 
 	// #region Gambler Spellcasting Management
+	/**
+	 * Install a per-sheet integer source for Gambler rolls. The source is
+	 * deliberately runtime-only; save files retain outcomes, never a queue or
+	 * callback. `nextInt(maxInclusive, context)` must return 1..maxInclusive.
+	 * @param {{nextInt: function(number, string): number}|null} source
+	 */
+	setGamblerRollSource (source = null) {
+		this._gamblerRollSource = source && typeof source.nextInt === "function" ? source : null;
+	}
+
+	/**
+	 * Install a runtime-only d20 source for deterministic browser probes. Like
+	 * the Gambler source, this is never serialized; production rolls fall back
+	 * to genuine randomness when no source is installed.
+	 * @param {{nextInt: function(number, string): number}|null} source
+	 */
+	setD20RollSource (source = null) {
+		this._d20RollSource = source && typeof source.nextInt === "function" ? source : null;
+	}
+
+	/**
+	 * Install a finite deterministic queue for d20 browser probes.
+	 * @param {number[]} values
+	 */
+	setD20RollSequence (values = []) {
+		const queue = Array.isArray(values) ? [...values] : [];
+		this.setD20RollSource({nextInt: max => queue.length ? queue.shift() : max});
+	}
+
+	/**
+	 * Roll a d20 through the per-sheet runtime seam.
+	 * @param {string} [context]
+	 * @returns {number}
+	 */
+	rollD20 (context = "d20") {
+		const supplied = this._d20RollSource?.nextInt?.(20, context);
+		if (Number.isFinite(supplied)) return Math.max(1, Math.min(20, Math.floor(supplied)));
+		return Math.floor(Math.random() * 20) + 1;
+	}
+
+	/**
+	 * Install a finite deterministic queue for browser/E2E probes. This is the
+	 * serializable-friendly companion to setGamblerRollSource; production callers
+	 * continue to use Math.random when the queue is exhausted.
+	 * @param {number[]} values
+	 */
+	setGamblerRollSequence (values = []) {
+		const queue = Array.isArray(values) ? [...values] : [];
+		this.setGamblerRollSource({nextInt: max => queue.length ? queue.shift() : max});
+	}
+
+	/**
+	 * Install context-aware deterministic cast rolls for browser probes. This
+	 * avoids coupling a test to whether Versatile Gambler currently rolls one
+	 * or two modifier dice.
+	 * @param {{modifierRolls?:number[], betRoll?:number, tableRoll?:number, durationRoll?:number}} scenario
+	 */
+	setGamblerRollScenario (scenario = {}) {
+		const modifierRolls = Array.isArray(scenario.modifierRolls) ? [...scenario.modifierRolls] : [];
+		const betRoll = Number.isFinite(scenario.betRoll) ? scenario.betRoll : null;
+		const tableRoll = Number.isFinite(scenario.tableRoll) ? scenario.tableRoll : null;
+		const durationRoll = Number.isFinite(scenario.durationRoll) ? scenario.durationRoll : null;
+		this.setGamblerRollSource({
+			nextInt: (max, context = "") => {
+				if (context.startsWith("cast-modifier") && modifierRolls.length) return modifierRolls.shift();
+				if (context === "bet" && betRoll != null) return betRoll;
+				if (context.startsWith("table") && tableRoll != null) return tableRoll;
+				if (context.startsWith("duration:") && durationRoll != null) return durationRoll;
+				return max;
+			},
+		});
+	}
+
+	setRollSource (source = null) { this.setGamblerRollSource(source); }
+
+	/**
+	 * @param {number} maxInclusive
+	 * @param {string} [context]
+	 * @returns {number}
+	 * @private
+	 */
+	_rollGamblerRandomInt (maxInclusive, context = "gambler") {
+		const max = Math.max(1, Math.floor(Number(maxInclusive) || 1));
+		const supplied = this._gamblerRollSource?.nextInt?.(max, context);
+		if (Number.isFinite(supplied)) return Math.max(1, Math.min(max, Math.floor(supplied)));
+		return Math.floor(Math.random() * max) + 1;
+	}
+
+	_rollRandomInt (maxInclusive, context = "gambler") {
+		return this._rollGamblerRandomInt(maxInclusive, context);
+	}
+
+	/**
+	 * @param {number} count
+	 * @param {number} faces
+	 * @param {string} [context]
+	 * @returns {{rolls:number[], total:number}}
+	 * @private
+	 */
+	_rollGamblerDice (count, faces, context = "gambler") {
+		const rolls = Array.from({length: count}, (_, ix) => this._rollGamblerRandomInt(faces, `${context}:${ix + 1}`));
+		return {rolls, total: rolls.reduce((sum, roll) => sum + roll, 0)};
+	}
+
+	_rollDice (count, faces, context = "gambler") {
+		return this._rollGamblerDice(count, faces, context);
+	}
+
+	/**
+	 * Expose the runtime seam to browser-side E2E helpers without exposing the
+	 * callback in persisted state.
+	 * @returns {boolean}
+	 */
+	hasGamblerRollSource () { return !!this._gamblerRollSource; }
+
 	/**
 	 * Roll for Gambler's daily prepared spell count.
 	 * Gambler prepares 2d4 spells (3d6 at level 13+) after each long rest.
@@ -18519,10 +18812,9 @@ class CharacterSheetState {
 
 		// Roll each die individually for display
 		const rolls = [];
-		for (let i = 0; i < count; i++) {
-			rolls.push(Math.floor(Math.random() * sides) + 1);
-		}
-		const total = rolls.reduce((sum, r) => sum + r, 0);
+		const rolled = this._rollGamblerDice(count, sides, "prepared");
+		rolled.rolls.forEach(roll => rolls.push(roll));
+		const total = rolled.total;
 
 		const rollDetails = {dice: diceStr, rolls, total};
 		this._data.spellcasting.gamblerPreparedRolled = total;
@@ -18559,7 +18851,7 @@ class CharacterSheetState {
 		if (clearPrepared) {
 			// Clear prepared status from Gambler spells (not cantrips)
 			this._data.spellcasting.spellsKnown
-				.filter(s => s.sourceClass === "Gambler" || s.sourceSubclass === "Gambler")
+				.filter(s => this.isTgttGamblerSpell(s))
 				.forEach(s => { s.prepared = false; });
 		}
 	}
@@ -18580,7 +18872,7 @@ class CharacterSheetState {
 	 */
 	getGamblerCurrentPreparedCount () {
 		return this._data.spellcasting.spellsKnown
-			.filter(s => (s.sourceClass === "Gambler" || s.sourceSubclass === "Gambler") && s.prepared && s.level > 0)
+			.filter(s => this.isTgttGamblerSpell(s) && s.prepared && s.level > 0)
 			.length;
 	}
 
@@ -18619,7 +18911,7 @@ class CharacterSheetState {
 			odds = "1/2";
 		}
 
-		const roll = Math.floor(Math.random() * die) + 1;
+		const roll = this._rollGamblerRandomInt(die, "bet");
 		const won = !losesOn.includes(roll);
 
 		const result = {
@@ -18668,17 +18960,18 @@ class CharacterSheetState {
 		const calcs = this.getFeatureCalculations();
 		if (!calcs.hasGamblerFolly) return null;
 
-		const roll = Math.floor(Math.random() * 100) + 1;
+		const roll = this._rollGamblerRandomInt(100, "table");
 		const effect = CharacterSheetState.GAMBLER_GAMBLING_TABLE[roll - 1] || "Unknown effect";
 
 		// Master of Fortune: roll twice on table
 		let secondRoll, secondEffect;
 		if (calcs.hasMasterOfFortune) {
-			secondRoll = Math.floor(Math.random() * 100) + 1;
+			secondRoll = this._rollGamblerRandomInt(100, "table:master");
 			secondEffect = CharacterSheetState.GAMBLER_GAMBLING_TABLE[secondRoll - 1] || "Unknown effect";
 		}
 
 		const result = {
+			resolutionId: CryptUtil.uid(),
 			roll,
 			effect,
 			...(secondRoll && {secondRoll, secondEffect}),
@@ -18687,6 +18980,8 @@ class CharacterSheetState {
 			chosenRoll: roll,
 			chosenEffect: effect,
 			needsChoice: !!secondRoll,
+			status: secondRoll ? "awaiting-choice" : "pending",
+			descriptor: CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[roll] || null,
 			timestamp: Date.now(),
 		};
 		this._data.spellcasting.gamblerLastTableRoll = result;
@@ -18705,7 +19000,335 @@ class CharacterSheetState {
 		last.chosenRoll = useSecond ? last.secondRoll : last.roll;
 		last.chosenEffect = useSecond ? last.secondEffect : last.effect;
 		last.needsChoice = false;
+		last.status = "pending";
+		last.descriptor = CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[last.chosenRoll] || null;
 		return {roll: last.chosenRoll, effect: last.chosenEffect};
+	}
+
+	/**
+	 * Build one atomic Gambler spell cast receipt. No slot is mutated here.
+	 * A caller commits the receipt only after any required result choice or
+	 * confirmation has been resolved.
+	 *
+	 * @param {{spell?: object, slotLevel:number, usesGamblerFocus?:boolean}} args
+	 * @returns {object|null}
+	 */
+	createGamblerCastResolution ({spell = null, slotLevel = 1, usesGamblerFocus = true, castMeta = null} = {}) {
+		const calcs = this.getFeatureCalculations();
+		if (!calcs.hasGamblerFolly || !usesGamblerFocus || slotLevel <= 0) return null;
+		const modifierDice = calcs.gamblerModifierDice || "1d6";
+		const modifier = CharacterSheetGamblerRules.rollModifier({
+			level: this._getGamblerClass()?.level || 3,
+			nextInt: max => this._rollGamblerRandomInt(max, "cast-modifier"),
+		});
+		const bet = CharacterSheetGamblerRules.rollBet({
+			spellLevel: slotLevel,
+			nextInt: max => this._rollGamblerRandomInt(max, "bet"),
+		});
+		this._data.spellcasting.gamblerLastBet = {
+			...bet,
+			slotLevel,
+			diceType: bet.diceType,
+			timestamp: Date.now(),
+		};
+		const table = bet.won ? null : this.rollGamblingTable();
+		const descriptor = table ? CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[table.chosenRoll] : null;
+		const resolution = {
+			resolutionId: CryptUtil.uid(),
+			spellId: spell?.id || null,
+			spellName: spell?.name || null,
+			spell: spell ? MiscUtil.copyFast(spell) : null,
+			slotLevel,
+			castMeta: castMeta ? MiscUtil.copyFast(castMeta) : null,
+			modifier: {...modifier, dice: modifierDice},
+			bet,
+			tableRoll: table,
+			descriptor: table?.needsChoice ? null : descriptor,
+			slotTransaction: table?.needsChoice ? null : (descriptor?.transaction === "preserveSlot" ? "preserve" : "consume"),
+			status: table?.needsChoice ? "awaiting-choice" : descriptor?.automation === "confirm" ? "awaiting-confirmation" : "ready",
+			createdAt: Date.now(),
+		};
+		this._data.spellcasting.gamblerPendingCastResolutions.push(resolution);
+		return MiscUtil.copyFast(resolution);
+	}
+
+	/**
+	 * Put an Extra Luck/Master of Fortune table roll through the same durable
+	 * receipt lifecycle as a spell cast. This prevents the global last-roll modal
+	 * from losing a choice or effect application after save/load.
+	 */
+	createGamblerFortuneResolution (tableRoll, source = "fortune") {
+		if (!tableRoll) return null;
+		const resourceType = source === "Master of Fortune" ? "gamblerMasterOfFortune" : "gamblerExtraLuck";
+		const resolution = {
+			resolutionId: CryptUtil.uid(),
+			spellId: null,
+			spellName: source,
+			fortuneSource: source,
+			fortuneResourceType: resourceType,
+			bonusActionSpent: source === "Extra Luck",
+			slotLevel: 0,
+			tableRoll: MiscUtil.copyFast(tableRoll),
+			descriptor: tableRoll.needsChoice ? null : (CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[tableRoll.chosenRoll] || null),
+			slotTransaction: "none",
+			status: tableRoll.needsChoice ? "awaiting-choice" : "ready",
+			createdAt: Date.now(),
+		};
+		this._data.spellcasting.gamblerPendingCastResolutions.push(resolution);
+		return MiscUtil.copyFast(resolution);
+	}
+
+	/**
+	 * @param {string} resolutionId
+	 * @param {1|2} choice
+	 * @returns {object|null}
+	 */
+	chooseGamblerTableResult (resolutionId, choice) {
+		const resolution = this._data.spellcasting.gamblerPendingCastResolutions.find(r => r.resolutionId === resolutionId);
+		if (!resolution?.tableRoll?.needsChoice) return null;
+		const table = resolution.tableRoll;
+		const useSecond = choice === 2 && table.secondRoll != null;
+		const pickedRoll = useSecond ? table.secondRoll : table.roll;
+		const pickedEffect = useSecond ? table.secondEffect : table.effect;
+		table.chosenRoll = pickedRoll;
+		table.chosenEffect = pickedEffect;
+		table.needsChoice = false;
+		table.status = "pending";
+		table.descriptor = CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[pickedRoll] || null;
+		resolution.descriptor = table.descriptor;
+		resolution.status = resolution.descriptor?.automation === "confirm" ? "awaiting-confirmation" : "ready";
+		resolution.slotTransaction = resolution.descriptor?.transaction === "preserveSlot" ? "preserve" : "consume";
+		return MiscUtil.copyFast(resolution);
+	}
+
+	chooseLatestGamblerTableResult (choice = 1) {
+		const latest = [...(this._data.spellcasting.gamblerPendingCastResolutions || [])].reverse()
+			.find(r => r.status === "awaiting-choice");
+		return latest ? this.chooseGamblerTableResult(latest.resolutionId, choice) : null;
+	}
+
+	/**
+	 * Apply a safe self-result or acknowledge a manual one. This is intentionally
+	 * conservative: unsupported target/world outcomes remain visible and durable.
+	 * @param {string} resolutionId
+	 * @param {{confirmAutomatic?:boolean}} [opts]
+	 * @returns {object|null}
+	 */
+	applyGamblingTableResolution (resolutionId, {confirmAutomatic = false} = {}) {
+		const resolution = this._data.spellcasting.gamblerPendingCastResolutions.find(r => r.resolutionId === resolutionId);
+		if (!resolution || resolution.status === "applied" || resolution.status === "acknowledged") return resolution ? MiscUtil.copyFast(resolution) : null;
+		if (resolution.status === "awaiting-choice" || (resolution.status === "awaiting-confirmation" && !confirmAutomatic)) return MiscUtil.copyFast(resolution);
+		const descriptor = resolution.descriptor;
+		if (!descriptor) return null;
+		const sourceFeatureId = `gambler-table:${resolution.resolutionId}`;
+		const duration = this._resolveGamblerDuration(descriptor.duration, resolution.resolutionId);
+		if (descriptor.automation === "automatic") {
+			if (descriptor.effectType === "condition") {
+				this.addCondition({
+					name: descriptor.condition,
+					source: "TGTT",
+					sourceFeatureId,
+					_gamblerResolutionId: resolution.resolutionId,
+					duration: duration?.text || descriptor.duration || null,
+					roundsRemaining: duration?.rounds ?? null,
+				});
+			} else if (descriptor.effectType === "modifier") {
+				this.addNamedModifier({
+					...descriptor.modifier,
+					name: `Gambler's Folly (${descriptor.roll})`,
+					sourceFeatureId,
+					duration: duration?.text || descriptor.duration || null,
+					roundsRemaining: duration?.rounds ?? null,
+				});
+			} else if (descriptor.effectType === "activeState") {
+				const stateId = this.activateState("custom", {
+					sourceFeatureId,
+					name: descriptor.stateName || `Gambler's Folly (${descriptor.roll})`,
+					description: descriptor.text,
+					duration: duration?.text || descriptor.duration,
+					customEffects: descriptor.effects || [],
+				});
+				const state = this._data.activeStates.find(state => state.id === stateId);
+				if (state && duration?.rounds != null) state.roundsRemaining = duration.rounds;
+			} else if (descriptor.effectType === "spellTransaction") {
+				resolution.spellTransaction = descriptor.transaction;
+				if (descriptor.transaction === "freeSpell") {
+					resolution.freeSpell = {name: "Color Spray", source: "PHB", slotLevel: 1};
+				} else if (descriptor.transaction === "delayedCast") {
+					resolution.delayedCast = {
+						rounds: this._rollGamblerRandomInt(4, "delayed-cast"),
+						spellName: resolution.spellName,
+						status: "unresolved",
+					};
+					// Keep the receipt durable until the player explicitly resumes
+					// it from the restored Gambling Table UI. A delayed result is
+					// never silently discarded by the normal cast cleanup path.
+					resolution.status = "delayed";
+				}
+			}
+			if (resolution.status !== "delayed") resolution.status = "applied";
+			resolution.appliedAt = Date.now();
+			return MiscUtil.copyFast(resolution);
+		}
+
+		if (descriptor.automation === "manual" || descriptor.automation === "confirm") {
+			if (descriptor.automation === "confirm") {
+				if (descriptor.transaction === "freeSpell") resolution.freeSpell = {name: "Color Spray", source: "PHB", slotLevel: 1};
+				if (descriptor.transaction === "delayedCast") {
+					resolution.delayedCast = {
+						rounds: this._rollGamblerRandomInt(4, "delayed-cast"),
+						spellName: resolution.spellName,
+						status: "unresolved",
+					};
+					resolution.status = "delayed";
+				}
+				if (resolution.status !== "delayed") resolution.status = "applied";
+				resolution.appliedAt = Date.now();
+				return MiscUtil.copyFast(resolution);
+			}
+
+			resolution.status = "acknowledged";
+			resolution.acknowledgedAt = Date.now();
+			return MiscUtil.copyFast(resolution);
+		}
+		return MiscUtil.copyFast(resolution);
+	}
+
+	/**
+	 * Resolve a table-owned duration once, using the sheet RNG seam for dice.
+	 * The concrete result is persisted on the owned artifact so save/load and
+	 * cleanup never reroll it.
+	 * @private
+	 */
+	_resolveGamblerDuration (duration, context = "table") {
+		if (!duration || duration === "spell duration") return {text: duration || null, rounds: null};
+		const match = String(duration).match(/^(\d+)d(\d+)\s*(rounds?|minutes?|hours?)$/i);
+		if (!match) return {text: duration, rounds: CharacterSheetState.parseDurationToRounds(duration)};
+		const count = Number(match[1]);
+		const faces = Number(match[2]);
+		const unit = match[3].toLowerCase();
+		let total = 0;
+		for (let i = 0; i < count; i++) total += this._rollGamblerRandomInt(faces, `duration:${context}`);
+		const text = `${total} ${unit}`;
+		return {text, rounds: CharacterSheetState.parseDurationToRounds(text)};
+	}
+
+	/**
+	 * Persist a manual outcome as a durable sticky note rather than only
+	 * acknowledging the transient receipt.
+	 */
+	recordGamblerTableResolutionAsNote (resolutionId) {
+		const resolution = (this._data.spellcasting.gamblerPendingCastResolutions || [])
+			.find(r => r.resolutionId === resolutionId);
+		if (!resolution?.descriptor) return null;
+		const descriptor = resolution.descriptor;
+		const noteId = this.addStickyNote({
+			title: `Gambling Table ${resolution.tableRoll?.chosenRoll || resolution.tableRoll?.roll || ""}`,
+			content: `${resolution.tableRoll?.chosenEffect || resolution.tableRoll?.effect || descriptor.text}\n\n${descriptor.instructions || ""}`.trim(),
+			tab: null,
+		});
+		resolution.noteId = noteId;
+		resolution.status = "acknowledged";
+		resolution.acknowledgedAt = Date.now();
+		return MiscUtil.copyFast(resolution);
+	}
+
+	applyLatestGamblingTableResolution ({confirmAutomatic = true} = {}) {
+		const latest = [...(this._data.spellcasting.gamblerPendingCastResolutions || [])].reverse()
+			.find(r => ["ready", "awaiting-confirmation"].includes(r.status));
+		return latest ? this.applyGamblingTableResolution(latest.resolutionId, {confirmAutomatic}) : null;
+	}
+
+	/**
+	 * @param {string} resolutionId
+	 * @returns {object|null}
+	 */
+	acknowledgeGamblingTableResolution (resolutionId) {
+		const resolution = this._data.spellcasting.gamblerPendingCastResolutions.find(r => r.resolutionId === resolutionId);
+		if (!resolution || resolution.status === "awaiting-choice") return null;
+		resolution.status = "acknowledged";
+		resolution.acknowledgedAt = Date.now();
+		return MiscUtil.copyFast(resolution);
+	}
+
+	getPendingGamblerCastResolutions () {
+		return MiscUtil.copyFast(this._data.spellcasting.gamblerPendingCastResolutions || []);
+	}
+
+	/**
+	 * Resume a durable delayed Gambling Table result after save/load. This is
+	 * deliberately explicit: the receipt remains pending until the user chooses
+	 * to continue, then the normal commit/cleanup path may run.
+	 * @param {string} resolutionId
+	 * @returns {object|null}
+	 */
+	resumeGamblerDelayedCast (resolutionId) {
+		const resolution = (this._data.spellcasting.gamblerPendingCastResolutions || [])
+			.find(r => r.resolutionId === resolutionId);
+		if (!resolution?.delayedCast || resolution.status !== "delayed") return null;
+		resolution.delayedCast.status = "resuming";
+		resolution.delayedCast.resumedAt = Date.now();
+		resolution.status = "resuming";
+		resolution.resumedAt = Date.now();
+		return MiscUtil.copyFast(resolution);
+	}
+
+	/**
+	 * Mark a resumed delayed cast as executed. This is separate from `resume...`
+	 * so a browser-side target/cast cancellation can leave the receipt durable
+	 * without ever rerolling the wager or spending another slot.
+	 */
+	completeGamblerDelayedCast (resolutionId) {
+		const resolution = (this._data.spellcasting.gamblerPendingCastResolutions || [])
+			.find(r => r.resolutionId === resolutionId);
+		if (!resolution?.delayedCast || resolution.status !== "resuming") return null;
+		resolution.delayedCast.status = "executed";
+		resolution.delayedCast.executedAt = Date.now();
+		resolution.status = "ready";
+		resolution.executedAt = Date.now();
+		return MiscUtil.copyFast(resolution);
+	}
+
+	restoreGamblerDelayedCast (resolutionId) {
+		const resolution = (this._data.spellcasting.gamblerPendingCastResolutions || [])
+			.find(r => r.resolutionId === resolutionId);
+		if (!resolution?.delayedCast || resolution.status !== "resuming") return null;
+		resolution.delayedCast.status = "unresolved";
+		resolution.status = "delayed";
+		return MiscUtil.copyFast(resolution);
+	}
+
+	/**
+	 * Commit a cast receipt. Slot mutation belongs to the spell module, so this
+	 * method only validates/records the receipt and makes it idempotent.
+	 * @param {string} resolutionId
+	 * @returns {object|null}
+	 */
+	commitGamblerCastResolution (resolutionId) {
+		const pending = this._data.spellcasting.gamblerPendingCastResolutions || [];
+		const resolution = pending.find(r => r.resolutionId === resolutionId);
+		if (!resolution) return (this._data.spellcasting.gamblerCastHistory || []).find(r => r.resolutionId === resolutionId) || null;
+		if (resolution.status === "awaiting-choice" || resolution.status === "awaiting-confirmation" || resolution.status === "delayed") return null;
+		resolution.status = "committed";
+		resolution.committedAt = Date.now();
+		this._data.spellcasting.gamblerCastHistory.push(MiscUtil.copyFast(resolution));
+		if (this._data.spellcasting.gamblerCastHistory.length > 50) this._data.spellcasting.gamblerCastHistory.shift();
+		this._data.spellcasting.gamblerPendingCastResolutions = pending.filter(r => r.resolutionId !== resolutionId);
+		return MiscUtil.copyFast(resolution);
+	}
+
+	cancelGamblerCastResolution (resolutionId) {
+		const pending = this._data.spellcasting.gamblerPendingCastResolutions || [];
+		const ix = pending.findIndex(r => r.resolutionId === resolutionId);
+		if (ix < 0) return false;
+		const resolution = pending[ix];
+		if (resolution.fortuneResourceType && !resolution.fortuneCancelled && !resolution.fortuneResultReturned) {
+			this._restoreGamblerResource(resolution.fortuneResourceType);
+			if (resolution.bonusActionSpent) this.resetBonusAction();
+			resolution.fortuneCancelled = true;
+		}
+		pending.splice(ix, 1);
+		return true;
 	}
 
 	/**
@@ -18776,7 +19399,7 @@ class CharacterSheetState {
 		// die that is plausibly worth rescuing (configurable) and never on an existing
 		// advantage roll (which it could not improve).
 		const extraLuck = this.getExtraLuckUses();
-		if (extraLuck && extraLuck.remaining > 0 && !isAdvantage) {
+		if (extraLuck && extraLuck.remaining > 0 && !isAdvantage && this.isBonusActionAvailable()) {
 			const threshold = Number.isFinite(settings.gamblerLuckPromptThreshold)
 				? settings.gamblerLuckPromptThreshold
 				: CharacterSheetState.GAMBLER_LUCK_PROMPT_THRESHOLD;
@@ -18826,26 +19449,40 @@ class CharacterSheetState {
 		switch (id) {
 			case "gamblerExtraLuck": {
 				if (!this.useExtraLuck()) return fail;
-				const secondDie = Math.floor(Math.random() * 20) + 1;
+				const secondDie = this._rollGamblerRandomInt(20, "extra-luck");
+				const tableRoll = this.getGamblerLastTableRoll();
+				const receipt = this.createGamblerFortuneResolution(tableRoll, "Extra Luck");
+				if (receipt) {
+					const live = this._data.spellcasting.gamblerPendingCastResolutions.find(r => r.resolutionId === receipt.resolutionId);
+					if (live) live.fortuneResultReturned = true;
+				}
 				return {
 					applied: true,
 					name: "Extra Luck",
 					naturalRoll: Math.max(natural, secondDie),
 					effectiveRoll: Math.max(effective, secondDie),
 					secondDie,
-					tableRoll: this.getGamblerLastTableRoll(),
+					tableRoll,
+					resolutionId: receipt?.resolutionId,
 					remaining: this.getExtraLuckUses()?.remaining ?? 0,
 				};
 			}
 			case "gamblerMasterOfFortune": {
 				if (natural !== 1) return fail;
 				if (!this.useMasterOfFortune()) return fail;
+				const tableRoll = this.getGamblerLastTableRoll();
+				const receipt = this.createGamblerFortuneResolution(tableRoll, "Master of Fortune");
+				if (receipt) {
+					const live = this._data.spellcasting.gamblerPendingCastResolutions.find(r => r.resolutionId === receipt.resolutionId);
+					if (live) live.fortuneResultReturned = true;
+				}
 				return {
 					applied: true,
 					name: "Master of Fortune",
 					naturalRoll: 20,
 					effectiveRoll: 20,
-					tableRoll: this.getGamblerLastTableRoll(),
+					tableRoll,
+					resolutionId: receipt?.resolutionId,
 					remaining: this.getMasterOfFortuneUses()?.remaining ?? 0,
 				};
 			}
@@ -18858,11 +19495,37 @@ class CharacterSheetState {
 	 * @returns {boolean} True if successful, false if no uses remaining
 	 */
 	useExtraLuck () {
-		const resource = this._spendGamblerResource("gamblerExtraLuck");
-		if (!resource) return false;
+		// Extra Luck is always a bonus-action feature. Preflight both costs before
+		// mutating either one, so an exhausted pool never consumes the action.
+		if (!this.isBonusActionAvailable()) return false;
+		const resource = this._getGamblerResourceUses("gamblerExtraLuck");
+		if (!resource || resource.remaining <= 0) return false;
+		if (!this._spendGamblerResource("gamblerExtraLuck")) return false;
+		if (!this.spendBonusAction()) {
+			// The resource spend is only reachable after the availability preflight,
+			// but keep the transaction reversible if a future action-economy hook fails.
+			this._restoreGamblerResource("gamblerExtraLuck");
+			return false;
+		}
 		// Trigger d100 roll on the Gambling Table
-		this.rollGamblingTable();
+		if (!this.rollGamblingTable()) {
+			this._restoreGamblerResource("gamblerExtraLuck");
+			this.resetBonusAction();
+			return false;
+		}
 		return true;
+	}
+
+	isBonusActionAvailable () {
+		return this.isActionTypeAvailable("bonus");
+	}
+
+	spendBonusAction () {
+		return this.consumeActionType("bonus");
+	}
+
+	resetBonusAction () {
+		this.restoreActionType("bonus");
 	}
 
 	/**
@@ -18878,10 +19541,18 @@ class CharacterSheetState {
 	 * @returns {boolean} True if successful, false if no uses remaining
 	 */
 	useMasterOfFortune () {
+		const available = this._getGamblerResourceUses("gamblerMasterOfFortune");
+		if (!available || available.remaining <= 0) return false;
 		const resource = this._spendGamblerResource("gamblerMasterOfFortune");
-		if (!resource) return false;
+		if (!resource) {
+			if (resource) this._restoreGamblerResource("gamblerMasterOfFortune");
+			return false;
+		}
 		// Trigger d100 roll on the Gambling Table
-		this.rollGamblingTable();
+		if (!this.rollGamblingTable()) {
+			this._restoreGamblerResource("gamblerMasterOfFortune");
+			return false;
+		}
 		return true;
 	}
 
@@ -19743,6 +20414,12 @@ class CharacterSheetState {
 							// TGTT Gambler (Rogue Subclass) - Unique Rolling Spellcasting
 							// =====================================================================
 							case "Gambler": {
+								if (String(cls.source || "").toUpperCase() !== "TGTT"
+									|| String(cls.subclass?.source || "").toUpperCase() !== "TGTT"
+									|| this.getSettings()?.enableTgtt === false) {
+									this._cleanupGamblerArtifacts();
+									break;
+								}
 								// Gambler's Tools (level 3) - tool proficiencies and weapon options
 								if (level >= 3) {
 									calculations.hasGamblerTools = true;
@@ -19762,7 +20439,7 @@ class CharacterSheetState {
 									calculations.gamblerSpellsPreparedDice = level >= 13 ? "3d6" : "2d4";
 
 									// Gambling Modifier: roll 1d6 (or 2d4 at 13+) per spell cast
-									calculations.gamblerModifierDice = level >= 13 ? "2d4" : "1d6";
+									calculations.gamblerModifierDice = CharacterSheetGamblerRules.getModifierDice(level);
 
 									// Spell DC and attack are: 8 + prof + (roll) and prof + (roll)
 									// We show the formula, not a static value
@@ -19809,6 +20486,7 @@ class CharacterSheetState {
 							// TGTT Belly Dancer (Rogue Subclass)
 							// =====================================================================
 							case "The Belly Dancer": {
+								if (`${cls.subclass?.source || ""}`.toUpperCase() !== "TGTT") break;
 								const chaMod = this.getAbilityMod("cha");
 
 								// Bonus Proficiency (level 3) — Expertise in Performance (the
@@ -20962,6 +21640,9 @@ class CharacterSheetState {
 							// ===== TGTT BARBARIAN SUBCLASSES =====
 							case "chained fury":
 							case "path of the chained fury": {
+								// Chained Fury is a TGTT-only subclass. Never infer mechanics
+								// from a same-named homebrew subclass from another source.
+								if (!this._isCanonicalChainedFuryClass(cls)) break;
 								const conMod = this.getAbilityMod("con");
 
 								// ---- Manifest Chains (level 3) ----------------------------
@@ -20983,6 +21664,10 @@ class CharacterSheetState {
 								calculations.chainRange = tableRange ??
 									(level >= 14 ? 30 : level >= 10 ? 25 : level >= 6 ? 20 : 15);
 								calculations.chainCount = level >= 14 ? 4 : 2;
+								// Escape DC is the character's current grapple/method DC. Keep
+								// this separate from Chain Imprisonment's STR save DC.
+								calculations.chainGrappleDc = calculations.combatMethodDc
+									|| (8 + profBonus + Math.max(this.getAbilityMod("str"), this.getAbilityMod("dex")));
 								// "You count as 1 size category larger" (2 at L10) when grappling
 								// or moving a grappled creature. Fed to getGrappleSizeCategory().
 								calculations.chainGrappleSizeBonus = level >= 10 ? 2 : 1;
@@ -21012,6 +21697,7 @@ class CharacterSheetState {
 									countsAsMagical: level >= 6,
 									actionType: "action",
 									requiresState: "manifestChains",
+									requiresStates: ["rage", "manifestChains"],
 								});
 
 								// On-hit riders. Never auto-applied — each is a player choice
@@ -21022,12 +21708,20 @@ class CharacterSheetState {
 									id: "chains-grapple",
 									name: "Grapple with the chains",
 									attackSourceFeature: "Manifest Chains",
+									targetAware: true,
+									targetEffect: {source: "chained-fury", effect: "grapple"},
+									requiresState: "manifestChains",
+									requiresStates: ["rage", "manifestChains"],
 									description: `Grapple the target in addition to dealing damage. You count as ${calculations.chainGrappleSizeBonus} size ${calculations.chainGrappleSizeBonus === 1 ? "category" : "categories"} larger for the grapple.`,
 								});
 								onHit.push({
 									id: "chains-shove",
 									name: "Shove with the chains",
 									attackSourceFeature: "Manifest Chains",
+									targetAware: true,
+									targetEffect: {source: "chained-fury", effect: "shove"},
+									requiresState: "manifestChains",
+									requiresStates: ["rage", "manifestChains"],
 									description: "Shove the target in addition to dealing damage.",
 								});
 
@@ -21041,6 +21735,10 @@ class CharacterSheetState {
 										id: "chains-restrain",
 										name: "Chain Imprisonment (restrain)",
 										attackSourceFeature: "Manifest Chains",
+										targetAware: true,
+										targetEffect: {source: "chained-fury", effect: "restrain"},
+										requiresState: "manifestChains",
+										requiresStates: ["rage", "manifestChains"],
 										description: `On a successful grapple, the target must succeed on a Strength saving throw or be restrained until the grapple ends, taking ${level} force damage at the start of each of its turns.`,
 										save: {ability: "str", dc: calculations.chainRestrainDc},
 										recurringDamage: {amount: level, type: "force", when: "start of each of its turns"},
@@ -21055,6 +21753,10 @@ class CharacterSheetState {
 										id: "chains-control-shove",
 										name: "Chain Control (10 ft. reposition)",
 										attackSourceFeature: "Manifest Chains",
+										targetAware: true,
+										targetEffect: {source: "chained-fury", effect: "control-shove"},
+										requiresState: "manifestChains",
+										requiresStates: ["rage", "manifestChains"],
 										description: "On a successful grapple, immediately shove the target 10 feet in any direction, provided it ends within the chains' reach.",
 									});
 								}
@@ -21072,6 +21774,7 @@ class CharacterSheetState {
 										sourceFeature: "Manifest Chains",
 										count: 3,
 										requiresState: "manifestChains",
+										requiresStates: ["rage", "manifestChains"],
 										label: "Unchained Fury",
 									});
 								}
@@ -23719,9 +24422,12 @@ class CharacterSheetState {
 					calculations.channelDivinityDc = this.getFeatureSaveDc({className: cls.name});
 
 					// Channel Divinity uses progression
-					// PHB/XPHB: 1 use at level 2, 2 at level 6, 3 at level 18
+					// PHB: 1/2/3 uses at levels 2/6/18.
+					// XPHB/TGTT: 2/3/4 uses at levels 2/6/18.
 					if (level >= 2) {
-						calculations.channelDivinityUses = level >= 18 ? 3 : level >= 6 ? 2 : 1;
+						calculations.channelDivinityUses = is2024
+							? (level >= 18 ? 4 : level >= 6 ? 3 : 2)
+							: (level >= 18 ? 3 : level >= 6 ? 2 : 1);
 					}
 
 					// Destroy Undead CR threshold (PHB only - XPHB uses Sear Undead instead)
@@ -25348,32 +26054,34 @@ class CharacterSheetState {
 							// TGTT College of Jesters (Bard Subclass)
 							// =====================================================================
 							case "College of Jesters": {
-								// Combat Methods — auto-grant Comedic Jabs tradition
-								calculations.hasJesterCombatMethods = true;
-								if (!calculations._subclassGrantedTraditions) calculations._subclassGrantedTraditions = [];
-								calculations._subclassGrantedTraditions.push(
-									{tradition: "Comedic Jabs", source: "College of Jesters: Combat Methods"},
-								);
-
-								// Calculate Performance skill bonus for Act DC
-								// Performance = CHA mod + proficiency (+ expertise if chosen)
-								const performanceProfBonus = profBonus; // Guaranteed at level 3
-								const hasPerformanceExpertise = this.getSkillProficiency("performance") === 2;
-								const performanceExpertise = hasPerformanceExpertise ? profBonus : 0;
-								const performanceSkillBonus = chaMod + performanceProfBonus + performanceExpertise;
-
 								// Bonus Proficiencies (level 3) - Performance + choice of Acrobatics/Persuasion
 								calculations.hasJesterBonusProficiencies = true;
 
-								// Jester's Acts (level 3) - Acts Known: 3 at 3, 4 at 6, 5 at 14
+								// Jester's Acts use the subclass table and the shared Performance
+								// helper, so progression/DC cannot drift between calculation and UI APIs.
 								calculations.hasJesterActs = true;
-								calculations.jesterActsKnown = level >= 14 ? 5 : level >= 6 ? 4 : 3;
-
-								// Act DC = 8 + Performance skill bonus (unique formula!)
-								calculations.jesterActDcBase = 8 + performanceSkillBonus - exhaustionPenalty;
-
-								// Get known acts with their effects
+								calculations.jesterActsKnown = this.getJesterActsKnown();
+								calculations.jesterActDcBase = this.getJesterActBaseDc();
 								calculations.jesterActs = this.getJesterActs();
+								for (const act of calculations.jesterActs.filter(it => it.grantsSpell)) {
+									const fullSpell = this._resolveFullSpellData({name: act.grantsSpell, source: Parser.SRC_PHB});
+									const spellMeta = fullSpell ? this._deriveSpellEnrichment(fullSpell) : null;
+									calculations.resourceCastSpells = [
+										...(calculations.resourceCastSpells || []),
+										{
+											spell: spellMeta?.name || act.grantsSpell,
+											source: spellMeta?.source || Parser.SRC_PHB,
+											level: spellMeta?.level ?? null,
+											cost: act.bardicInspirationCost || 1,
+											resource: "Bardic Inspiration",
+											grantedBy: act.name,
+											castingTime: spellMeta?.castingTime || "action",
+											concentration: !!spellMeta?.concentration,
+											ignoresMaterialComponents: true,
+											note: "Cast without expending a spell slot or using material components.",
+										},
+									];
+								}
 
 								// Gifted Acrobat (level 6) - climbing speed, escape grapple bonus action
 								if (level >= 6) {
@@ -28738,15 +29446,6 @@ class CharacterSheetState {
 			effects.push({ type: "skillProficiency", skill: "persuasion", level: 1, source: "Lust Domain" });
 		}
 
-		// Time Domain - Right on Time: +WIS to initiative
-		if (calculations.hasRightOnTime && calculations.rightOnTimeBonus && !alreadyProcessed("Right on Time")) {
-			effects.push({
-				type: "initiativeBonus",
-				value: calculations.rightOnTimeBonus,
-				source: "Right on Time",
-			});
-		}
-
 		// ===== TGTT MONK SUBCLASSES =====
 
 		// Way of Mercy - Implements of Mercy: Insight + Medicine proficiency + Herbalism Kit
@@ -29482,6 +30181,7 @@ class CharacterSheetState {
 		// Rebuild gated conditional save-advantage modifiers from learned combat methods
 		// (e.g. Iron Will). Idempotent; surfaces in the conditional-modifier opt-in picker.
 		this._syncCombatMethodConditionalModifiers();
+		this.reconcileTargetEffects();
 
 		return appliedEffects;
 	}
@@ -32761,11 +33461,19 @@ class CharacterSheetState {
 	 * Uses _isGamblerWeapon marker to detect existing weapons and prevent duplicates.
 	 */
 	_injectGamblerWeapons () {
-		// Check if any Gambler weapons already exist (by marker)
-		const hasGamblerWeapons = this._data.inventory.some(
-			invItem => invItem.item._isGamblerWeapon,
-		);
-		if (hasGamblerWeapons) return; // Already injected
+		const validGambler = !!this._getGamblerClass() && (this._getGamblerClass()?.level || 0) >= 3;
+		if (!validGambler) {
+			this._cleanupGamblerArtifacts();
+			return;
+		}
+		// Reconcile only synthesized rows: preserve ordinary items and allow a
+		// player to remove/re-add the generated suite without duplication.
+		const templates = new Map(CharacterSheetState.GAMBLER_WEAPONS.map(i => [i.name, i]));
+		this._data.inventory = (this._data.inventory || []).filter(invItem => {
+			if (!invItem?.item?._isGamblerWeapon) return true;
+			return templates.has(invItem.item.name);
+		});
+		const existing = new Set(this._data.inventory.filter(i => i.item?._isGamblerWeapon).map(i => i.item.name));
 
 		// Inject all Gambler weapons, EQUIPPED. Gambler's Tools is the subclass's weapon
 		// suite — the cards/dice/coins are the gambler's arms and their spellcasting focus,
@@ -32773,7 +33481,7 @@ class CharacterSheetState {
 		// inventory. They are weightless trinkets (0.01-0.1 lb) with no AC or attunement
 		// impact, and the guard above means a player who unequips them is never overridden.
 		for (const weaponTemplate of CharacterSheetState.GAMBLER_WEAPONS) {
-			this.addItem({...weaponTemplate}, 1, true, false);
+			if (!existing.has(weaponTemplate.name)) this.addItem({...weaponTemplate}, 1, true, false);
 		}
 	}
 
@@ -36961,6 +37669,7 @@ class CharacterSheetState {
 			// RAW: Incapacitated creatures can't concentrate (PHB/XPHB)
 			const condDef = this._resolveConditionEffects(condObj.name, condObj.source);
 			const isIncapacitating = condDef?.effects?.some(e => e.type === "incapacitated" && e.value);
+			this._deactivateStatesForEndCondition({conditionName: condObj.name});
 			if (isIncapacitating) {
 				if (this.isConcentrating()) this.breakConcentration();
 				// RAW: "If you become incapacitated or die, all of your current active
@@ -37014,7 +37723,13 @@ class CharacterSheetState {
 			}
 		}
 
-		return {name, source};
+		const normalized = {name, source};
+		if (condition && typeof condition === "object") {
+			for (const key of ["sourceFeatureId", "_gamblerResolutionId", "roundsRemaining", "duration"]) {
+				if (condition[key] != null) normalized[key] = condition[key];
+			}
+		}
+		return normalized;
 	}
 
 	/**
@@ -37076,6 +37791,7 @@ class CharacterSheetState {
 			}
 		}
 		// Add new condition effects
+		const addedConditions = [];
 		for (const condObj of newConditions) {
 			const wasPresent = this._data.conditions.some(c => {
 				const cObj = this._normalizeCondition(c);
@@ -37083,9 +37799,13 @@ class CharacterSheetState {
 			});
 			if (!wasPresent) {
 				this._applyConditionEffects(condObj.name, condObj.source);
+				addedConditions.push(condObj);
 			}
 		}
 		this._data.conditions = [...newConditions];
+		for (const condObj of addedConditions) {
+			this._deactivateStatesForEndCondition({conditionName: condObj.name});
+		}
 		const isIncapacitating = newConditions.some(condObj =>
 			this._resolveConditionEffects(condObj.name, condObj.source)?.effects?.some(e => e.type === "incapacitated" && e.value),
 		);
@@ -37284,6 +38004,17 @@ class CharacterSheetState {
 		if (this._isStrainSpeedHalved()) multiplier *= 0.5;
 
 		return multiplier;
+	}
+
+	/**
+	 * Return the highest active levitation height in feet. This deliberately
+	 * remains a small generic active-state consumer rather than pretending that
+	 * levitation grants a flying speed.
+	 */
+	getLevitationHeight () {
+		return this.getActiveStateEffects()
+			.filter(e => e.type === "levitation")
+			.reduce((max, e) => Math.max(max, Number(e.height) || 0), 0);
 	}
 
 	/**
@@ -38227,9 +38958,10 @@ class CharacterSheetState {
 		const is2024 = cls?.source === "XPHB" || cls?.source === "TGTT";
 
 		if (name === "cleric") {
-			// PHB/XPHB alike: 1 use at level 2, 2 at level 6, 3 at level 18.
 			if (level < 2) return 0;
-			return level >= 18 ? 3 : level >= 6 ? 2 : 1;
+			return is2024
+				? (level >= 18 ? 4 : level >= 6 ? 3 : 2)
+				: (level >= 18 ? 3 : level >= 6 ? 2 : 1);
 		}
 
 		if (name === "paladin") {
@@ -38266,6 +38998,14 @@ class CharacterSheetState {
 		const desiredMax = (this._data.classes || [])
 			.reduce((max, cls) => Math.max(max, CharacterSheetState._getChannelDivinityUsesForClass(cls)), 0);
 		if (desiredMax <= 0) return;
+		const has2024Grant = (this._data.classes || []).some(cls => {
+			const source = cls?.source;
+			const name = (cls?.name || "").toLowerCase();
+			return (source === "XPHB" || source === "TGTT")
+				&& CharacterSheetState._getChannelDivinityUsesForClass(cls) > 0
+				&& (name === "cleric" || name === "paladin");
+		});
+		const shortRestRecovery = has2024Grant ? 1 : null;
 
 		let resource = (this._data.resources || []).find(r => r.name === "Channel Divinity");
 		const feature = (resource && this._data.features?.find(f => f.id === resource.featureId))
@@ -38286,32 +39026,54 @@ class CharacterSheetState {
 				current: desiredMax,
 				max: desiredMax,
 				recharge: "short",
+				...(shortRestRecovery ? {shortRestRecovery} : {}),
 				featureId: feature.id,
 			};
 			(this._data.resources = this._data.resources || []).push(resource);
-			if (!feature.uses) feature.uses = {current: desiredMax, max: desiredMax, per: "short"};
+			if (!feature.uses) {
+				feature.uses = {
+					current: desiredMax,
+					max: desiredMax,
+					per: "short",
+					recharge: "short",
+					...(shortRestRecovery ? {shortRestRecovery} : {}),
+				};
+			}
 		}
 
 		// Both surfaces are checked independently. A later level-up can re-parse the
 		// feature text and reset the FEATURE back to its grant-time maximum while the
 		// resource is already correct — and rest restoration reads the feature, so
 		// returning early on the resource alone would silently restore only 2 of 3 uses.
-		const resourceStale = (resource.max ?? 0) !== desiredMax;
-		const featureStale = !!feature?.uses && (feature.uses.max ?? 0) !== desiredMax;
+		const resourceStale = (resource.max ?? 0) !== desiredMax
+			|| (resource.shortRestRecovery ?? null) !== shortRestRecovery;
+		const featureStale = !!feature?.uses && (
+			(feature.uses.max ?? 0) !== desiredMax
+			|| (feature.uses.shortRestRecovery ?? null) !== shortRestRecovery
+		);
 		if (!resourceStale && !featureStale) return;
 
-		if (resourceStale) {
+		if ((resource.max ?? 0) !== desiredMax) {
 			const wasFull = (resource.current ?? 0) >= (resource.max ?? 0);
+			const spent = Math.max(0, (resource.max ?? 0) - (resource.current ?? 0));
 			resource.max = desiredMax;
-			resource.current = wasFull ? desiredMax : Math.min(resource.current ?? 0, desiredMax);
+			resource.current = wasFull
+				? desiredMax
+				: has2024Grant
+					? Math.max(0, desiredMax - spent)
+					: Math.min(resource.current ?? 0, desiredMax);
 		}
+		if (shortRestRecovery) resource.shortRestRecovery = shortRestRecovery;
+		else delete resource.shortRestRecovery;
 
 		// Keep the owning feature's own use pool in step, so the Features tab, the
 		// Combat Resources pips and rest restoration cannot disagree.
-		if (feature && !feature.uses) feature.uses = {current: desiredMax, max: desiredMax, per: "short"};
+		if (feature && !feature.uses) feature.uses = {current: desiredMax, max: desiredMax, per: "short", recharge: "short"};
 		if (feature?.uses) {
 			feature.uses.max = desiredMax;
 			feature.uses.current = Math.min(desiredMax, Math.max(feature.uses.current ?? 0, resource.current ?? 0));
+			if (shortRestRecovery) feature.uses.shortRestRecovery = shortRestRecovery;
+			else delete feature.uses.shortRestRecovery;
 		}
 	}
 
@@ -38597,11 +39359,86 @@ class CharacterSheetState {
 	/** @returns {object|null} The Rogue class entry whose subclass is the TGTT Gambler. */
 	_getGamblerClass () {
 		return (this._data.classes || []).find(cls => {
-			const sub = cls?.subclass;
-			if (!sub) return false;
-			const name = (sub.shortName || sub.name || "").toLowerCase();
-			return name === "gambler";
+			return this._isGamblerClassEntry(cls);
 		}) || null;
+	}
+
+	/**
+	 * Source-aware Gambler identity. A name-only subclass match is unsafe because
+	 * homebrew repositories commonly reuse the short name "Gambler".
+	 * @param {object|null} cls
+	 * @returns {boolean}
+	 */
+	_isGamblerClassEntry (cls) {
+		const sub = cls?.subclass;
+		if (!sub) return false;
+		const name = (sub.shortName || sub.name || "").toLowerCase();
+		return name === "gambler"
+			&& String(cls.name || "").toLowerCase() === "rogue"
+			&& String(cls.source || "").toUpperCase() === "TGTT"
+			&& String(sub.source || "").toUpperCase() === "TGTT"
+			&& this.getSettings()?.enableTgtt !== false;
+	}
+
+	/**
+	 * Source-aware check for a spell attributed to the TGTT Gambler.
+	 * @param {object|null} spell
+	 * @returns {boolean}
+	 */
+	isTgttGamblerSpell (spell) {
+		if (!spell) return false;
+		const sourceClass = String(spell.sourceClass || "").toLowerCase();
+		const sourceSubclass = String(spell.sourceSubclass || "").toLowerCase();
+		if (sourceClass !== "gambler" || (sourceSubclass && sourceSubclass !== "gambler")) return false;
+		// The calculation override is also used by cast-path unit probes, but in
+		// production it is only true for a source-qualified TGTT Gambler.
+		return this._getGamblerClass() != null
+			|| this.getFeatureCalculations?.().hasGamblerSpellcasting === true;
+	}
+
+	/**
+	 * Remove all synthesized Gambler artifacts when a TGTT Gambler is removed or
+	 * the TGTT master switch is disabled. User-owned items are never touched.
+	 */
+	_cleanupGamblerArtifacts () {
+		const before = this._data.inventory?.length || 0;
+		this._data.inventory = (this._data.inventory || []).filter(i => !i?.item?._isGamblerWeapon);
+		if (before !== this._data.inventory.length) this._recalculateItemBonuses?.();
+		const gamblerSources = new Set(
+			(this._data.spellcasting?.gamblerCastHistory || [])
+				.concat(this._data.spellcasting?.gamblerPendingCastResolutions || [])
+				.map(r => r.resolutionId)
+				.filter(Boolean),
+		);
+		this._data.namedModifiers = (this._data.namedModifiers || []).filter(mod =>
+			!String(mod.sourceFeatureId || "").startsWith("gambler-table:"),
+		);
+		this._data.activeStates = (this._data.activeStates || []).filter(state =>
+			!String(state.sourceFeatureId || "").startsWith("gambler-table:"),
+		);
+		for (const condition of this._data.conditions || []) {
+			if (String(condition.sourceFeatureId || "").startsWith("gambler-table:")
+				|| gamblerSources.has(condition._gamblerResolutionId)) {
+				this._removeConditionEffects(condition.name, condition.source);
+			}
+		}
+		this._data.conditions = (this._data.conditions || []).filter(condition =>
+			!String(condition.sourceFeatureId || "").startsWith("gambler-table:")
+			&& !gamblerSources.has(condition._gamblerResolutionId),
+		);
+		const gamblerFeatureIds = this._getGamblerFeatureIds();
+		this._data.resources = (this._data.resources || []).filter(resource => {
+			if (String(resource.resourceType || "").startsWith("gambler")) return false;
+			if (resource._gamblerOwned) return false;
+			if (!gamblerFeatureIds.has(resource.featureId)) return true;
+			return !this._isGamblerFortuneResourceName(resource.name);
+		});
+		if (this._data.spellcasting) {
+			this._data.spellcasting.gamblerPendingCastResolutions = [];
+			this._data.spellcasting.gamblerCastHistory = [];
+			this._data.spellcasting.gamblerLastBet = null;
+			this._data.spellcasting.gamblerLastTableRoll = null;
+		}
 	}
 
 	/**
@@ -38623,13 +39460,34 @@ class CharacterSheetState {
 		const level = this._getGamblerClass()?.level || 0;
 		const max = this.getProficiencyBonus();
 		this._data.resources = this._data.resources || [];
+		if (!this._getGamblerClass()) {
+			this._cleanupGamblerArtifacts();
+			return;
+		}
+		if (level < 3) {
+			this._data.spellcasting.gamblerPendingCastResolutions = [];
+			this._data.spellcasting.gamblerCastHistory = [];
+			this._data.spellcasting.gamblerLastBet = null;
+			this._data.spellcasting.gamblerLastTableRoll = null;
+		}
 
 		const ensure = ({name, resourceType, minLevel, legacyUsedKey}) => {
+			const featureIds = this._getGamblerFeatureIds(name);
+			const isOwned = resource => String(resource.resourceType || "") === resourceType
+				|| (resource._gamblerOwned && String(resource.name || "").toLowerCase() === name.toLowerCase())
+				|| (featureIds.has(resource.featureId) && this._isGamblerFortuneResourceName(resource.name));
+			const candidates = this._data.resources.filter(resource =>
+				isOwned(resource) || (
+					!resource.resourceType
+					&& String(resource.name || "").toLowerCase() === name.toLowerCase()
+					&& featureIds.has(resource.featureId)
+				),
+			);
 			if (level < minLevel) {
-				this._data.resources = this._data.resources.filter(r => r.resourceType !== resourceType);
+				this._data.resources = this._data.resources.filter(resource => !isOwned(resource));
 				return;
 			}
-			let resource = this._data.resources.find(r => r.resourceType === resourceType);
+			let resource = candidates.find(r => r.resourceType === resourceType) || candidates[0];
 			if (!resource) {
 				const legacyUsed = Math.max(0, Math.min(max, this._data.spellcasting?.[legacyUsedKey] || 0));
 				resource = {
@@ -38639,19 +39497,47 @@ class CharacterSheetState {
 					max,
 					recharge: "long",
 					resourceType,
+					_gamblerOwned: true,
 				};
 				this._data.resources.push(resource);
 				return;
 			}
-			const expended = Math.max(0, (resource.max ?? max) - (resource.current ?? resource.max ?? max));
+			const expended = candidates.reduce((spent, candidate) =>
+				Math.max(spent, Math.max(0, (candidate.max ?? max) - (candidate.current ?? candidate.max ?? max))),
+			0);
 			resource.name = name;
 			resource.max = max;
 			resource.current = Math.max(0, max - expended);
 			resource.recharge = "long";
+			resource.resourceType = resourceType;
+			resource._gamblerOwned = true;
+			this._data.resources = this._data.resources.filter(candidate => !candidates.includes(candidate));
+			this._data.resources.push(resource);
 		};
 
 		ensure({name: "Extra Luck", resourceType: "gamblerExtraLuck", minLevel: 9, legacyUsedKey: "gamblerExtraLuckUsed"});
 		ensure({name: "Master of Fortune", resourceType: "gamblerMasterOfFortune", minLevel: 17, legacyUsedKey: "gamblerMasterFortuneUsed"});
+	}
+
+	_getGamblerFeatureIds (name = null) {
+		const wanted = name ? name.toLowerCase() : null;
+		const ids = new Set();
+		for (const feature of this._data.features || []) {
+			const featureName = String(feature.name || "").toLowerCase();
+			if (featureName !== "extra luck" && featureName !== "master of fortune") continue;
+			if (wanted && featureName !== wanted) continue;
+			if (String(feature.className || "").toLowerCase() !== "rogue"
+				|| String(feature.classSource || feature.source || "").toUpperCase() !== "TGTT"
+				|| String(feature.subclassShortName || feature.subclassName || "").toLowerCase() !== "gambler"
+				|| String(feature.subclassSource || feature.source || "").toUpperCase() !== "TGTT") continue;
+			if (feature.id) ids.add(feature.id);
+		}
+		return ids;
+	}
+
+	_isGamblerFortuneResourceName (name) {
+		const normalized = String(name || "").trim().toLowerCase();
+		return normalized === "extra luck" || normalized === "master of fortune";
 	}
 
 	/**
@@ -38680,6 +39566,15 @@ class CharacterSheetState {
 		const legacyKey = resourceType === "gamblerExtraLuck" ? "gamblerExtraLuckUsed" : "gamblerMasterFortuneUsed";
 		this._data.spellcasting[legacyKey] = Math.max(0, (resource.max || 0) - resource.current);
 		return resource;
+	}
+
+	_restoreGamblerResource (resourceType) {
+		const resource = (this._data.resources || []).find(r => r.resourceType === resourceType);
+		if (!resource) return false;
+		resource.current = Math.min(resource.max, (resource.current || 0) + 1);
+		const legacyKey = resourceType === "gamblerExtraLuck" ? "gamblerExtraLuckUsed" : "gamblerMasterFortuneUsed";
+		this._data.spellcasting[legacyKey] = Math.max(0, (resource.max || 0) - resource.current);
+		return true;
 	}
 
 	/**
@@ -38794,6 +39689,7 @@ class CharacterSheetState {
 	 */
 	getDancingEffects () {
 		const calcs = this.getFeatureCalculations();
+		if (!calcs.hasDanceOfTheCountry) return [];
 		const effects = [
 			// "a bonus to your AC equal to your Charisma modifier (minimum of +1)"
 			{type: "bonus", target: "ac", abilityMod: "cha", minimum: 1},
@@ -38817,7 +39713,9 @@ class CharacterSheetState {
 	}
 
 	/** @returns {boolean} True while the Dance of the Country is active. */
-	isDancing () { return this.isStateTypeActive("dancing"); }
+	isDancing () {
+		return !!this.getFeatureCalculations().hasDanceOfTheCountry && this.isStateTypeActive("dancing");
+	}
 
 	/**
 	 * True when an active state currently lets this character land a Sneak Attack
@@ -41953,20 +42851,20 @@ class CharacterSheetState {
 
 	recoverResources (rechargeType) {
 		this._data.resources.forEach(r => {
-			if (r.recharge === rechargeType || (rechargeType === "long" && r.recharge === "short")) {
-				r.current = r.max;
-			} else if (rechargeType === "short" && r.shortRestRecovery) {
+			if (rechargeType === "short" && r.shortRestRecovery) {
 				r.current = Math.min(r.max, r.current + r.shortRestRecovery);
+			} else if (r.recharge === rechargeType || (rechargeType === "long" && r.recharge === "short")) {
+				r.current = r.max;
 			}
 		});
 
 		// Also recover feature uses directly
 		this._data.features.forEach(f => {
 			if (f.uses) {
-				if (f.uses.recharge === rechargeType || (rechargeType === "long" && f.uses.recharge === "short")) {
-					f.uses.current = f.uses.max;
-				} else if (rechargeType === "short" && f.uses.shortRestRecovery) {
+				if (rechargeType === "short" && f.uses.shortRestRecovery) {
 					f.uses.current = Math.min(f.uses.max, f.uses.current + f.uses.shortRestRecovery);
+				} else if (f.uses.recharge === rechargeType || (rechargeType === "long" && f.uses.recharge === "short")) {
+					f.uses.current = f.uses.max;
 				}
 			}
 		});
@@ -43489,6 +44387,53 @@ class CharacterSheetState {
 		(this._data.features || []).forEach(feature => this._remintFeatureUsesFromText(feature));
 	}
 
+	/**
+	 * Backfill runtime descriptors onto active custom states written before their
+	 * originating feature exposed data-driven attack/action/movement contracts.
+	 * Existing persisted values always win.
+	 */
+	_migrateActiveStateRuntimeMetadata () {
+		this._data.activeStates = (this._data.activeStates || []).filter(state => {
+			if (state?.stateTypeId !== "custom" || !state.sourceFeatureId) return true;
+			const feature = (this._data.features || []).find(it => it.id === state.sourceFeatureId);
+			if (!feature) {
+				const isOrphanedJesterAct = (this._optionalFeatureCatalog || []).some(it =>
+					it?.featureType?.includes?.("JA")
+					&& String(it.name || "").toLowerCase() === String(state.name || "").toLowerCase(),
+				);
+				return !isOrphanedJesterAct;
+			}
+			const activationInfo = CharacterSheetState.detectActivatableFeature(this._hydrateJesterActProse(feature));
+			if (!activationInfo) return true;
+
+			const hasRuntimeState = activationInfo.isToggle
+				|| activationInfo.effects?.length
+				|| activationInfo.pendingAttack
+				|| activationInfo.actionBenefit
+				|| activationInfo.movementOverride
+				|| activationInfo.addsConditions?.length;
+			if (activationInfo.isJesterAct && !hasRuntimeState) return false;
+
+			if (!state.duration && activationInfo.duration) state.duration = activationInfo.duration;
+			if (!state.customEffects?.length && activationInfo.effects?.length) state.customEffects = MiscUtil.copyFast(activationInfo.effects);
+			if (!state.pendingAttack && activationInfo.pendingAttack) state.pendingAttack = MiscUtil.copyFast(activationInfo.pendingAttack);
+			if (!state.actionBenefit && activationInfo.actionBenefit) state.actionBenefit = MiscUtil.copyFast(activationInfo.actionBenefit);
+			if (state.actionBenefit?.action && !state.actionBenefit.activity) {
+				const activity = String(state.actionBenefit.action);
+				state.actionBenefit = {
+					...state.actionBenefit,
+					activity: activity ? `${activity[0].toUpperCase()}${activity.slice(1)}` : "Activity",
+					normalCost: state.actionBenefit.normalCost || "action",
+					cost: state.actionBenefit.cost || "bonus",
+				};
+				delete state.actionBenefit.action;
+			}
+			if (!state.movementOverride && activationInfo.movementOverride) state.movementOverride = MiscUtil.copyFast(activationInfo.movementOverride);
+			if (state.consumeOnAttack == null && activationInfo.pendingAttack?.consume === "onAttack") state.consumeOnAttack = true;
+			return true;
+		});
+	}
+
 	_reapplyHistoryOptionalFeatures () {
 		const history = [...(this._data.levelHistory || [])].sort((a, b) => a.level - b.level);
 		if (!history.length) return;
@@ -44755,6 +45700,7 @@ class CharacterSheetState {
 		this._subclassFeatureCatalog = Array.isArray(subclassFeatures) ? subclassFeatures : [];
 		this._optionalFeatureCatalog = Array.isArray(optionalFeatures) ? optionalFeatures : [];
 		this._reapplyHistoryFeatureChoices();
+		this._migrateActiveStateRuntimeMetadata();
 	}
 
 	/**
@@ -46043,6 +46989,9 @@ class CharacterSheetState {
 			// Remove associated modifiers (by ID and by name for orphaned modifiers)
 			this.removeModifiersByFeature(feature.id);
 			this.removeModifiersByName(feature.name);
+			for (const state of [...(this._data.activeStates || [])]) {
+				if (state.sourceFeatureId === feature.id) this.removeActiveState(state.id);
+			}
 
 			// Cascade-remove any feats granted by this optional feature
 			// (e.g. Lessons of the First Ones invocation → its Origin Feat).
@@ -48324,6 +49273,101 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Optional effects which may ride on one use of a named resource.
+	 * The trigger is derived from feature prose, while each feature's own use pool
+	 * remains an independent eligibility gate.
+	 * @param {string} resourceName
+	 * @returns {Array<object>}
+	 */
+	getResourceUseAugments (resourceName) {
+		const wanted = String(resourceName || "").toLowerCase();
+		if (!wanted) return [];
+		return this.getActivatableFeatures()
+			.filter(row => String(row.activationInfo?.resourceTrigger?.resourceName || "").toLowerCase() === wanted)
+			.map(row => {
+				const ownUses = row.feature?.uses || null;
+				const available = !ownUses || (ownUses.current ?? 0) > 0;
+				return {
+					...row,
+					available,
+					unavailableReason: available ? null : `${row.feature.name} has no uses remaining.`,
+					ownUses: ownUses ? {...ownUses} : null,
+				};
+			});
+	}
+
+	/**
+	 * Atomically spend a base resource use and, when applicable, one use from the
+	 * selected augment's own pool.
+	 * @param {string} resourceId
+	 * @param {object} [opts]
+	 * @param {string|null} [opts.augmentFeatureId]
+	 * @returns {{ok:boolean, error?:string, resourceRemaining?:number, augmentUsesRemaining?:number|null}}
+	 */
+	spendResourceUse (resourceId, {augmentFeatureId = null} = {}) {
+		const resource = (this.getResources() || []).find(it => it.id === resourceId);
+		if (!resource || resource.current <= 0) return {ok: false, error: `${resource?.name || "Resource"} has no uses remaining.`};
+
+		const augment = augmentFeatureId
+			? (this._data.features || []).find(it => it.id === augmentFeatureId)
+			: null;
+		if (augmentFeatureId && !augment) return {ok: false, error: "The selected resource rider is no longer available."};
+		if (augment?.uses && (augment.uses.current ?? 0) <= 0) {
+			return {ok: false, error: `${augment.name} has no uses remaining.`};
+		}
+
+		const resourceRemaining = resource.current - 1;
+		const augmentUsesRemaining = augment?.uses ? augment.uses.current - 1 : null;
+		this.setResourceCurrent(resource.id, resourceRemaining);
+		if (augment?.uses) this.setFeatureUses(augment.id, augmentUsesRemaining);
+		return {
+			ok: true,
+			resourceRemaining,
+			augmentUsesRemaining,
+		};
+	}
+
+	/**
+	 * Rules which replace a normal action cost with another cost.
+	 * @returns {Array<object>}
+	 */
+	getActionEconomyOverrides () {
+		const out = [];
+		if (this.hasJesterActs() && this.getClassLevel("Bard") >= 6) {
+			out.push({
+				activity: "Escape a Grapple",
+				normalCost: "action",
+				cost: "bonus",
+				source: "Gifted Acrobat",
+			});
+		}
+		for (const state of this.getActiveStates().filter(it => it.active && it.actionBenefit)) {
+			out.push({...state.actionBenefit, source: state.name, stateId: state.id});
+		}
+		return out;
+	}
+
+	/**
+	 * Active and standing movement-rule overrides.
+	 * @returns {Array<object>}
+	 */
+	getMovementOverrides () {
+		const out = [];
+		if (this.hasJesterActs() && this.getClassLevel("Bard") >= 6) {
+			out.push({
+				activity: "Stand from Prone",
+				normalCost: "half speed",
+				costFeet: 10,
+				source: "Gifted Acrobat",
+			});
+		}
+		for (const state of this.getActiveStates().filter(it => it.active && it.movementOverride)) {
+			out.push({...state.movementOverride, source: state.name, stateId: state.id});
+		}
+		return out;
+	}
+
+	/**
 	 * Ensure stamina pool is initialized based on proficiency bonus
 	 * This is a public method that can be called from other modules
 	 */
@@ -50249,6 +51293,28 @@ class CharacterSheetState {
 	// #region Appearance
 	getAppearance (field) { return this._data.appearance[field] || ""; }
 	setAppearance (field, value) { this._data.appearance[field] = value; }
+
+	getNumericAge () {
+		const age = Number(this._data.appearance?.age);
+		return Number.isInteger(age) && age > 0 ? age : null;
+	}
+
+	adjustAge (years) {
+		const current = this.getNumericAge();
+		const delta = Number(years);
+		if (current == null || !Number.isInteger(delta)) return {ok: false, error: "Enter a valid current age."};
+		const next = current + delta;
+		if (next < 1) return {ok: false, error: "Age must remain at least 1 year."};
+		this._data.appearance.age = String(next);
+		return {ok: true, previous: current, current: next};
+	}
+
+	resolveMagicalAging ({years, ignore = true} = {}) {
+		const delta = Number(years);
+		if (!Number.isInteger(delta) || delta === 0) return {ok: false, error: "Enter a non-zero whole-year change."};
+		if (ignore) return {ok: true, ignored: true, previous: this.getNumericAge(), current: this.getNumericAge()};
+		return {...this.adjustAge(delta), ignored: false};
+	}
 	// #endregion
 
 	// #region Custom Abilities
@@ -52448,7 +53514,13 @@ class CharacterSheetState {
 		// Source tracking
 		if (modifier.sourceFeatureId) newModifier.sourceFeatureId = modifier.sourceFeatureId;
 		if (modifier.sourceType) newModifier.sourceType = modifier.sourceType;
-		if (modifier.duration) newModifier.duration = modifier.duration;
+		if (modifier.duration) {
+			newModifier.duration = modifier.duration;
+			if (this._data.inCombat) {
+				newModifier.roundsRemaining = CharacterSheetState.parseDurationToRounds(modifier.duration);
+			}
+		}
+		if (modifier.roundsRemaining != null) newModifier.roundsRemaining = modifier.roundsRemaining;
 		if (modifier.conditional) newModifier.conditional = modifier.conditional;
 		// Damage-type scoping for `damageReduction`. Dropping this silently widens a
 		// reduction: Heavy Armor Master authors `["bludgeoning", "piercing", "slashing"]`
@@ -52655,6 +53727,9 @@ class CharacterSheetState {
 		if (mod.perLevel) {
 			const totalLevel = this.getTotalLevel() || 1;
 			value = value * totalLevel;
+		}
+		if (mod.type === "initiative" && mod.abilityMod) {
+			value += this.getAbilityMod(String(mod.abilityMod).toLowerCase().slice(0, 3));
 		}
 		if (mod.proficiencyBonus) {
 			value += this.getProficiencyBonus();
@@ -53302,7 +54377,7 @@ class CharacterSheetState {
 
 		// Ability modifier addition
 		if (mod.abilityMod) {
-			value += this.getAbilityMod(mod.abilityMod);
+			value += this.getAbilityMod(String(mod.abilityMod).toLowerCase().slice(0, 3));
 		}
 
 		// Proficiency bonus addition
@@ -53875,7 +54950,7 @@ class CharacterSheetState {
 	}
 
 	_getConditionalActiveStateModifiersForType (type) {
-		return this.getActiveStateEffects()
+		const effectModifiers = this.getActiveStateEffects()
 			.filter(effect => effect.conditional && ["advantage", "disadvantage"].includes(effect.type))
 			.filter(effect => effect.target === type
 				|| (effect.target === "save" && type.startsWith("save:"))
@@ -53891,6 +54966,31 @@ class CharacterSheetState {
 				conditional: effect.conditional,
 				sourceId: effect.stateId,
 			}));
+
+		if (!type.startsWith("attack")) return effectModifiers;
+
+		const calculations = this.getFeatureCalculations?.() || {};
+		const targetModifiers = this._data.activeStates
+			.filter(state => state.active)
+			.filter(state => {
+				const calculationGate = CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId]?.onActivateTargeting?.calculationGate;
+				return !calculationGate || !!calculations[calculationGate];
+			})
+			.flatMap(state => this._normalizeActiveStateTargets(state.targets)
+				.filter(target => target.grantsAttackAdvantage)
+				.map(target => ({
+					id: `active-state-target-${state.id}-${target.id}`,
+					name: `${target.source || state.name || "Active State"}: ${target.name}`,
+					type,
+					value: 0,
+					advantage: true,
+					disadvantage: false,
+					conditional: `when attacking ${target.name}`,
+					sourceId: state.id,
+					targetId: target.id,
+				})));
+
+		return [...effectModifiers, ...targetModifiers];
 	}
 
 	/**
@@ -54521,7 +55621,7 @@ class CharacterSheetState {
 	 * Gambler's Gambling Table - 100 effects from TGTT
 	 * Indexed 0-99, roll d100 and subtract 1 to access
 	 */
-	static GAMBLER_GAMBLING_TABLE = [
+	static GAMBLER_GAMBLING_TABLE_LEGACY = [
 		"Wall of force appears 10 ft in front of the gambler",
 		"Gambler smells like a skunk for spell duration, gaining disadvantage on Charisma (Persuasion) checks",
 		"Gambler shoots forth eight nonpoisonous snakes from fingertips. Snakes do not attack and disappear after an hour.",
@@ -54623,6 +55723,12 @@ class CharacterSheetState {
 		"Nothing happens",
 		"Spell effectiveness (range, duration, area of effect, damage, etc.) is doubled",
 	];
+
+	// The runtime table is the lossless canonical TGTT table from the rules
+	// module. Keep the legacy fallback above only for old tooling migrations;
+	// receipts, descriptors, and rendered text all use this source of truth.
+	static GAMBLER_GAMBLING_TABLE = GAMBLER_GAMBLING_TABLE;
+	static GAMBLER_GAMBLING_TABLE_EFFECTS = CharacterSheetGamblerRules.createTableEffects(CharacterSheetState.GAMBLER_GAMBLING_TABLE);
 
 	/**
 	 * Zodiac Form constellation definitions (Circle of the Zodiac, TGTT).
@@ -55332,6 +56438,21 @@ class CharacterSheetState {
 	};
 
 	static ACTIVE_STATE_TYPES = {
+		eyesOfFuturePast: {
+			id: "eyesOfFuturePast",
+			name: "Eyes of the Future Past",
+			icon: "⏳",
+			description: "View the past or future while blinded to the present.",
+			effects: [],
+			addsConditions: ["blinded"],
+			duration: "1 minute",
+			endConditions: ["Dismissed", "Duration expires", "Incapacitated"],
+			resourceName: "Eyes of the Future Past",
+			resourceCost: 1,
+			activationAction: "bonus",
+			detectPatterns: ["^eyes of the future past$"],
+			preferCuratedEffects: true,
+		},
 		rage: {
 			id: "rage",
 			name: "Rage",
@@ -56042,12 +57163,28 @@ class CharacterSheetState {
 			effectsBuilder: "getDancingEffects",
 			duration: "1 minute",
 			endConditions: ["Incapacitated", "Paralyzed", "Restrained", "Donning heavy armor", "1 minute elapses"],
+			endTriggers: {
+				conditions: ["incapacitated", "paralyzed", "restrained"],
+				armorTypes: ["heavy"],
+				duration: true,
+			},
 			// Per the homebrew: when the Dance ends you must make a DC 10 Constitution
 			// save or gain a level of exhaustion.
 			endSave: {ability: "con", dc: 10, onFailure: {exhaustion: 1}, label: "Dance of the Country"},
 			resourceName: "Dance of the Country",
 			detectPatterns: ["dance of the country", "traditional dance"],
 			activationAction: "bonus",
+			tracksActionEconomy: true,
+			onActivateTargeting: {
+				calculationGate: "hasPercussiveStrike",
+				mode: "multiple",
+				source: "Percussive Strike",
+				statuses: ["Failed Wisdom save"],
+				grantsAttackAdvantage: true,
+				dcCalculation: "percussiveStrikeDc",
+				saveAbility: "wis",
+			},
+			requiredSource: "TGTT",
 			requiresSubclass: "The Belly Dancer",
 		},
 		tantalizingShivers: {
@@ -56055,13 +57192,21 @@ class CharacterSheetState {
 			name: "Tantalizing Shivers",
 			icon: "💫",
 			description: "A creature is charmed by your Dance — it is incapacitated with speed 0, and you have advantage on attack rolls against it.",
-			effects: [{type: "advantage", target: "attack"}],
+			effects: [],
 			duration: "1 round",
 			endConditions: ["The creature takes damage", "Someone shakes it out of its fascination", "Your Dance ends"],
 			// "As a bonus action WHILE DANCING" — hidden from the activate list until
 			// the Dance is running, and auto-dropped when the Dance ends.
 			requiresStates: ["dancing"],
 			activationAction: "bonus",
+			tracksActionEconomy: true,
+			targeting: {
+				mode: "single",
+				source: "Tantalizing Shivers",
+				statuses: ["Charmed", "Incapacitated", "Speed 0"],
+				grantsAttackAdvantage: true,
+			},
+			requiredSource: "TGTT",
 			requiresSubclass: "The Belly Dancer",
 		},
 		percussiveStrike: {
@@ -56069,11 +57214,12 @@ class CharacterSheetState {
 			name: "Percussive Strike",
 			icon: "🥁",
 			description: "A hostile creature failed its Wisdom save when your Dance began — you have advantage on attack rolls against it for as long as the Dance lasts.",
-			effects: [{type: "advantage", target: "attack"}],
+			effects: [],
 			duration: "While the Dance is active",
 			endConditions: ["Your Dance ends"],
 			requiresStates: ["dancing"],
 			activationAction: "free",
+			requiredSource: "TGTT",
 			requiresSubclass: "The Belly Dancer",
 		},
 		combatStance: {
@@ -57571,6 +58717,7 @@ class CharacterSheetState {
 		} else if (/as a reaction|use (?:a |your )?reaction/i.test(text)) {
 			activationAction = "reaction";
 		}
+
 		// (R25 #1) Parse a stamina cost from the description so abilities that spend stamina
 		// but aren't tied to a named pool (e.g. Purge Toxins — "as an action you can spend 2
 		// stamina to end one poison") consume it through the unified activation pipeline. The
@@ -57619,6 +58766,55 @@ class CharacterSheetState {
 			channelDivinityCost: opts.resourceName === "Channel Divinity" ? (opts.resourceCost || 1) : null,
 			deferredDamageMaximization,
 		};
+	}
+
+	/**
+	 * Source-qualified interactions whose choices cannot be represented by prose-derived
+	 * effects alone. The returned descriptors augment the generic activation contract.
+	 * @param {object} feature
+	 * @returns {object|null}
+	 */
+	static getFeatureInteractionDescriptor (feature) {
+		const name = (feature?.name || "").trim().toLowerCase();
+		const source = feature?.source || feature?.subclassSource;
+		const subclass = (feature?.subclassShortName || feature?.subclassName || "").trim().toLowerCase();
+		if (source !== "TGTT" || (subclass && subclass !== "time" && subclass !== "time domain")) return null;
+
+		switch (name) {
+			case "chronological interference":
+				return {
+					interactionKind: "initiativeSwap",
+					interactionMode: "limited",
+					activationAction: "bonus",
+					resourceName: "Chronological Interference",
+					resourceCost: 1,
+				};
+			case "channel divinity: temporal manipulation":
+				return {
+					interactionKind: "externalRollMode",
+					interactionMode: "limited",
+					activationAction: "reaction",
+					resourceName: "Channel Divinity",
+					resourceCost: 1,
+					range: 60,
+				};
+			case "eyes of the future past":
+				return {
+					interactionKind: "temporalVision",
+					interactionMode: "toggle",
+					activationAction: "bonus",
+					resourceName: "Eyes of the Future Past",
+					resourceCost: 1,
+					stateTypeId: "eyesOfFuturePast",
+					stateType: this.ACTIVE_STATE_TYPES.eyesOfFuturePast,
+					isToggle: true,
+					duration: "1 minute",
+					addsConditions: ["blinded"],
+				};
+			case "temporal mastery":
+				return {utilityAction: "magicalAging", utilityLabel: "Resolve Magical Aging…"};
+			default: return null;
+		}
 	}
 
 	/**
@@ -57841,6 +59037,55 @@ class CharacterSheetState {
 		};
 	}
 
+	/**
+	 * Build a generic "when you use resource X" trigger descriptor.
+	 * @param {string} text lower-cased, tag-stripped feature text
+	 * @returns {object|null}
+	 */
+	static _buildResourceTriggerInfo (text) {
+		if (!/\bwhen you use your bardic inspiration\b/i.test(text || "")) return null;
+		return {
+			resourceName: "Bardic Inspiration",
+			timing: "onUse",
+			consumesBaseUse: true,
+		};
+	}
+
+	/**
+	 * Describe an effect that resolves against creatures the sheet does not model.
+	 * The controller presents this contract without fabricating enemy rolls or state.
+	 */
+	static _buildTargetResolutionInfo (rawText, text, {saveAbility = null, range = null, condition = null, dcSource = null} = {}) {
+		if (!text) return null;
+		const hasExternalOutcome = saveAbility
+			|| /\b(?:impose disadvantage on the next attack roll|attacks? against (?:a|the) creature|unable to take reactions)\b/i.test(text);
+		if (!hasExternalOutcome) return null;
+
+		const summary = String(rawText || "")
+			.replace(/\{@(?:condition|skill|spell|damage|dice)\s+([^}|]+)(?:\|[^}]*)?\}/gi, "$1")
+			.replace(/<[^>]*>/g, " ")
+			.replace(/\s+/g, " ")
+			.trim();
+		const targets = /\beach hostile creature\b/i.test(text)
+			? "allHostile"
+			: /\bcreatures within\b/i.test(text)
+				? "allCreatures"
+				: /\bup to five creatures\b/i.test(text)
+					? "upToFive"
+					: "one";
+		const durationMatch = text.match(/\b(until (?:the )?(?:start|end) of (?:their|its|your) next turn|for the next hour|for 1 hour)\b/i);
+
+		return {
+			targets,
+			range,
+			saveAbility,
+			dcSource: saveAbility ? dcSource : null,
+			onFailure: condition ? [{type: "condition", condition}] : [],
+			duration: durationMatch ? durationMatch[1] : null,
+			summary,
+		};
+	}
+
 	static _buildJesterActActivationInfo (feature, rawText, text) {
 		if (!text) return null;
 
@@ -57901,15 +59146,52 @@ class CharacterSheetState {
 		const acBonusScale = /bonus to (?:your )?ac equal to your proficiency bonus/i.test(text)
 			? "proficiency"
 			: null;
+		const actionBenefit = /disengage from up to five creatures/i.test(text)
+			? {activity: "Disengage", normalCost: "action", cost: "bonus", targets: 5, duration: "rest of the turn"}
+			: null;
+		const movementOverride = /move through the space of hostile creatures/i.test(text)
+			? {kind: "hostileSpacePermission", duration: "rest of the turn"}
+			: null;
+		const damageMatch = /\{@damage\s+([^}|]+)/i.exec(rawText || "")
+			|| /\badditional\s+(\d+d\d+(?:\s*[+-]\s*\d+)?)\s+([a-z]+)\s+damage/i.exec(text);
+		const pendingAttack = activationAction === "attack"
+			? {
+				qualifier: "nextAttackAction",
+				advantage: /\bwith advantage\b/i.test(text),
+				damageDice: damageMatch?.[1]?.trim() || null,
+				damageType: damageMatch?.[2]?.toLowerCase() || (/psychic damage/i.test(text) ? "psychic" : null),
+				consume: "onAttack",
+			}
+			: null;
 
-		// Acts whose benefit persists past the instant of use are toggles, so the sheet can
-		// show "this is currently running" and apply the state's effects while it is.
+		const parsedEffects = this.parseEffectsFromDescription(rawText) || [];
+		const effects = [];
+		if (/advantage on charisma\s*\(\s*(?:\{@skill\s+)?deception(?:\|[^}]*)?\}?\s*\)\s+checks/i.test(text)) {
+			effects.push({type: "advantage", target: "skill:deception"});
+		}
+		if (acBonusScale) {
+			const acEffect = parsedEffects.find(it => it.type === "bonus" && it.target === "ac");
+			if (acEffect) effects.push(acEffect);
+		}
+
+		// Only SELF-facing benefits become active states. A target's condition may last
+		// until its next turn, but that duration belongs in targetResolution and must not
+		// create a fake state (or apply the target's penalties to the Jester).
 		let duration = null;
 		if (/for the next hour|for 1 hour/i.test(text)) duration = "1 hour";
 		else if (/until the start of your next turn/i.test(text)) duration = "until the start of your next turn";
 		else if (/for the rest of the turn/i.test(text)) duration = "rest of the turn";
-		const isToggle = duration != null;
-
+		else if (actionBenefit?.duration) duration = actionBenefit.duration;
+		else if (pendingAttack) duration = "until your next attack";
+		const hasSelfState = !!(effects.length || actionBenefit || movementOverride || pendingAttack);
+		const isToggle = hasSelfState;
+		const resourceTrigger = this._buildResourceTriggerInfo(text);
+		const targetResolution = this._buildTargetResolutionInfo(rawText, text, {
+			saveAbility,
+			range: rangeMatch ? Number(rangeMatch[1]) : null,
+			condition,
+			dcSource: "jesterAct",
+		});
 		return {
 			stateTypeId: "custom",
 			isCustom: true,
@@ -57928,9 +59210,14 @@ class CharacterSheetState {
 			condition,
 			grantsSpell,
 			acBonusScale,
+			targetResolution,
+			resourceTrigger,
+			pendingAttack,
+			actionBenefit,
+			movementOverride,
 			bardicInspirationCost: bardicInspirationCost || null,
 			usesBardicInspiration: !!bardicInspirationCost || usesInspirationProse,
-			effects: this.parseEffectsFromDescription(rawText) || [],
+			effects,
 		};
 	}
 
@@ -57994,7 +59281,8 @@ class CharacterSheetState {
 		// rather than dropped by this early return. The override branch below builds its own
 		// text from `entries` via _featureTextFromEntries.
 		const hasClassificationOverride = !!this.FEATURE_CLASSIFICATION_OVERRIDES[feature?.name?.toLowerCase() || ""];
-		if (!feature?.description && !feature?.activatable && !hasMarkers && !hasClassificationOverride) return null;
+		const hasInteractionDescriptor = !!this.getFeatureInteractionDescriptor(feature);
+		if (!feature?.description && !feature?.activatable && !hasMarkers && !hasClassificationOverride && !hasInteractionDescriptor) return null;
 
 		const rawText = feature.description || CharacterSheetState._featureTextFromEntries(feature) || "";
 		// (CS-BUG-121) Embedded outcome tables (Wild Magic Surge, the TGTT
@@ -58002,6 +59290,23 @@ class CharacterSheetState {
 		// "you gain …" phrasing in a table ROW must not promote an always-on
 		// passive into a bogus activatable toggle.
 		const text = CharacterSheetState.stripEmbeddedOutcomeTables(rawText).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
+		const interactionDescriptor = this.getFeatureInteractionDescriptor(feature);
+		if (interactionDescriptor?.interactionKind) {
+			const base = interactionDescriptor.interactionMode === "toggle"
+				? {
+					stateTypeId: interactionDescriptor.stateTypeId,
+					stateType: interactionDescriptor.stateType,
+					matchedBy: "interactionRegistry",
+					isToggle: true,
+					duration: interactionDescriptor.duration,
+					effects: interactionDescriptor.stateType?.effects || [],
+				}
+				: this._buildAbilityActivationInfo(feature, rawText, text, {
+					resourceName: interactionDescriptor.resourceName,
+					resourceCost: interactionDescriptor.resourceCost,
+				});
+			return {...base, ...interactionDescriptor, matchedBy: "interactionRegistry"};
+		}
 		const psionic = this._detectPsionicActivation(feature, rawText, text);
 		if (psionic) return psionic;
 		// ===== JESTER'S ACTS (TGTT Bard — College of Jesters, optional feature type "JA") =====
@@ -58083,8 +59388,11 @@ class CharacterSheetState {
 		// types carry `requiresStates: ["dancing"]`, which getActivatableFeatures()
 		// honours), so they only appear once the Dance is running and are dropped
 		// automatically when it ends.
-		const isBellyDancerFeature = (feature.subclassShortName || "").toLowerCase() === "belly dancer"
-			|| (feature.subclassName || "").toLowerCase() === "the belly dancer";
+		const bellyDancerSource = `${feature.subclassSource || feature.source || ""}`.toUpperCase();
+		const isBellyDancerFeature = bellyDancerSource === "TGTT"
+			&& ((feature.subclassShortName || "").toLowerCase() === "belly dancer"
+				|| (feature.subclassName || "").toLowerCase() === "the belly dancer");
+		if (isBellyDancerFeature && name === "percussive strike") return null;
 		if (isBellyDancerFeature && name === "tantalizing shivers") {
 			return {
 				stateTypeId: "tantalizingShivers",
@@ -58107,21 +59415,6 @@ class CharacterSheetState {
 				},
 			};
 		}
-		if (isBellyDancerFeature && name === "percussive strike") {
-			return {
-				stateTypeId: "percussiveStrike",
-				stateType: this.ACTIVE_STATE_TYPES.percussiveStrike,
-				matchedBy: "bellyDancer",
-				activationAction: "free",
-				interactionMode: "toggle",
-				isToggle: true,
-				duration: this.ACTIVE_STATE_TYPES.percussiveStrike.duration,
-				endConditions: this.ACTIVE_STATE_TYPES.percussiveStrike.endConditions,
-				effects: this.ACTIVE_STATE_TYPES.percussiveStrike.effects,
-				resourceCost: 0,
-			};
-		}
-
 		// ===== Child of the Sun Bloodline (Ar2 Sorcerer; TGTT re-parents it) =====
 		// Identified by the subclass rather than by source, so both the Ar2
 		// original and the TGTT `_copy` route here. Left to the generic pipeline
@@ -58709,6 +60002,7 @@ class CharacterSheetState {
 		// any state whose own name matches exactly is unambiguously the right answer.
 		const detectCandidates = Object.entries(this.ACTIVE_STATE_TYPES)
 			.filter(([, stateType]) => {
+				if (stateType.requiredSource && `${feature.subclassSource || feature.source || ""}`.toUpperCase() !== stateType.requiredSource) return false;
 				// Skip generic types that shouldn't match by name
 				if (stateType.isGeneric && !stateType.detectPatterns?.length) return false;
 				// CS-BUG-083: states that are ONLY ever applied programmatically (the Shadow
@@ -58791,8 +60085,8 @@ class CharacterSheetState {
 			{pattern: /start (?:your |a )?bladesong/i, stateTypeId: "bladesong"},
 
 			// Belly Dancer dancing patterns (TGTT)
-			{pattern: /dance of the country/i, stateTypeId: "dancing"},
-			{pattern: /perform (?:a |an? )?traditional dance/i, stateTypeId: "dancing"},
+			{pattern: /dance of the country/i, stateTypeId: "dancing", requiredSource: "TGTT"},
+			{pattern: /perform (?:a |an? )?traditional dance/i, stateTypeId: "dancing", requiredSource: "TGTT"},
 
 			// Combat stance patterns (Level Up A5E, TGTT, Grim Hollow, etc.)
 			{pattern: /this stance lasts until/i, stateTypeId: "combatStance"},
@@ -58863,7 +60157,8 @@ class CharacterSheetState {
 			{pattern: /hex(?:blade)?.*curse/i, stateTypeId: "custom"},
 		];
 
-		for (const {pattern, stateTypeId, isInstant: patternIsInstant} of activationPatterns) {
+		for (const {pattern, stateTypeId, isInstant: patternIsInstant, requiredSource} of activationPatterns) {
+			if (requiredSource && `${feature.subclassSource || feature.source || ""}`.toUpperCase() !== requiredSource) continue;
 			if (pattern.test(text) || pattern.test(name)) {
 				const parsedEffects = this.parseEffectsFromDescription(rawText);
 				if (stateTypeId !== "custom" && this.ACTIVE_STATE_TYPES[stateTypeId]) {
@@ -60252,6 +61547,15 @@ class CharacterSheetState {
 				const flat = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
 				const rolled = CharacterSheetState._buildRolledSaveDcInfo(flat);
 				if (rolled) activationInfo.rolledSaveDc = rolled;
+				if (!activationInfo.resourceTrigger) activationInfo.resourceTrigger = CharacterSheetState._buildResourceTriggerInfo(flat);
+				if (!activationInfo.targetResolution && (activationInfo.rolledSaveDc || activationInfo.isJesterAct)) {
+					activationInfo.targetResolution = CharacterSheetState._buildTargetResolutionInfo(rawText, flat, {
+						saveAbility: activationInfo.rolledSaveDc?.saveAbility || activationInfo.saveAbility || null,
+						range: activationInfo.rolledSaveDc?.range ?? activationInfo.range ?? null,
+						condition: activationInfo.condition || null,
+						dcSource: activationInfo.rolledSaveDc ? "rolledCheck" : "jesterAct",
+					});
+				}
 			}
 
 			activatables.push({
@@ -60872,6 +62176,47 @@ class CharacterSheetState {
 	}
 	// #endregion
 
+	_normalizeActiveStateTargets (targets) {
+		if (!Array.isArray(targets)) return [];
+
+		const seenNames = new Set();
+		return targets
+			.map(target => {
+				if (typeof target === "string") target = {name: target};
+				if (!target || typeof target !== "object") return null;
+
+				const name = `${target.name || ""}`.trim();
+				if (!name) return null;
+
+				const normalizedName = name.toLowerCase();
+				if (seenNames.has(normalizedName)) return null;
+				seenNames.add(normalizedName);
+
+				return {
+					id: `${target.id || CharacterSheetState._nextActiveStateId("target")}`,
+					name,
+					source: `${target.source || ""}`.trim() || null,
+					statuses: [...new Set((Array.isArray(target.statuses) ? target.statuses : [])
+						.map(status => `${status || ""}`.trim())
+						.filter(Boolean))],
+					grantsAttackAdvantage: !!target.grantsAttackAdvantage,
+				};
+			})
+			.filter(Boolean);
+	}
+
+	setActiveStateTargets (stateTypeId, targets) {
+		const state = this._data.activeStates.find(activeState => activeState.active && activeState.stateTypeId === stateTypeId);
+		if (!state) return false;
+		state.targets = this._normalizeActiveStateTargets(targets);
+		return true;
+	}
+
+	getActiveStateTargets (stateTypeId) {
+		const state = this._data.activeStates.find(activeState => activeState.active && activeState.stateTypeId === stateTypeId);
+		return this._normalizeActiveStateTargets(state?.targets);
+	}
+
 	/**
 	 * Add a new active state
 	 * @param {string} stateTypeId - The state type ID from ACTIVE_STATE_TYPES, or "custom" for custom states
@@ -60921,8 +62266,15 @@ class CharacterSheetState {
 			if (options.beastData !== undefined) existing.beastData = options.beastData;
 			if (options.zodiacForm !== undefined) existing.zodiacForm = options.zodiacForm;
 			if (options.placement !== undefined) existing.placement = options.placement;
+			existing.targets = this._normalizeActiveStateTargets(options.targets ?? existing.targets);
 			if (options.weaponId !== undefined) existing.weaponId = options.weaponId;
 			if (options.weaponName !== undefined) existing.weaponName = options.weaponName;
+			if (options.consumeOnAttack !== undefined) existing.consumeOnAttack = options.consumeOnAttack;
+			if (options.pendingAttack !== undefined) existing.pendingAttack = options.pendingAttack;
+			if (options.actionBenefit !== undefined) existing.actionBenefit = options.actionBenefit;
+			if (options.movementOverride !== undefined) existing.movementOverride = options.movementOverride;
+			if (options.duration) existing.duration = options.duration;
+			if (options.temporalView !== undefined) existing.temporalView = MiscUtil.copyFast(options.temporalView);
 			// Re-parse duration on reactivation
 			const dur = options.duration || existing.duration;
 			existing.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(dur) : null;
@@ -60968,10 +62320,16 @@ class CharacterSheetState {
 			placement: options.placement || null,
 			weaponId: options.weaponId || null,
 			weaponName: options.weaponName || null,
+			consumeOnAttack: !!options.consumeOnAttack,
+			pendingAttack: options.pendingAttack || null,
+			actionBenefit: options.actionBenefit || null,
+			movementOverride: options.movementOverride || null,
+			temporalView: options.temporalView ? MiscUtil.copyFast(options.temporalView) : null,
 			// Self-imposed drawback conditions this state applies while active. Curated
 			// states declare them on their ACTIVE_STATE_TYPES entry; CUSTOM (generically
 			// detected) toggles carry them here instead, parsed from the feature text.
 			addsConditions: options.addsConditions?.length ? options.addsConditions : null,
+			targets: this._normalizeActiveStateTargets(options.targets),
 		};
 
 		this._data.activeStates.push(state);
@@ -60991,8 +62349,11 @@ class CharacterSheetState {
 	toggleActiveState (stateId) {
 		const state = this._data.activeStates.find(s => s.id === stateId);
 		if (state) {
-			state.active = !state.active;
 			if (state.active) {
+				if (state.stateTypeId === "custom") this._deactivateStateInstance(state, {reason: "manual"});
+				else this.deactivateState(state.stateTypeId, {reason: "manual"});
+			} else {
+				state.active = true;
 				state.activatedAt = Date.now();
 				state.activatedAtRound = this._data.inCombat ? this._data.combatRound : null;
 				state.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(state.duration) : null;
@@ -61000,16 +62361,32 @@ class CharacterSheetState {
 				// so a toggle-on through Play Mode restores the boon's condition, mirroring
 				// activateState. No-op for states without `addsConditions`.
 				this._applyStateAddedConditions(state, CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId]);
-			} else {
-				// (R26 #7) Toggling a state OFF must strip the conditions it added, exactly
-				// like deactivateState/removeActiveState. Play Mode's "Active States" card
-				// ends boons via this method; without this, ending a condition-granting boon
-				// (e.g. Veil of Lies → Invisible) left the condition stuck on the sheet.
-				this._removeStateAddedConditions(state);
 			}
 			return state.active;
 		}
 		return false;
+	}
+
+	/**
+	 * Pending one-shot attack riders carried by serialized active states.
+	 * @returns {Array<object>}
+	 */
+	getPendingAttackRiders () {
+		return this.getActiveStates()
+			.filter(state => state.active && state.pendingAttack?.qualifier === "nextAttackAction")
+			.map(state => ({stateId: state.id, source: state.name, ...state.pendingAttack}));
+	}
+
+	/**
+	 * Consume every pending rider attached to the attack being made.
+	 * @returns {Array<object>} the riders that were consumed
+	 */
+	consumePendingAttackRiders ({stateIds = null} = {}) {
+		const allowedIds = stateIds ? new Set(stateIds) : null;
+		const riders = this.getPendingAttackRiders()
+			.filter(rider => !allowedIds || allowedIds.has(rider.stateId));
+		for (const rider of riders) this.removeActiveState(rider.stateId);
+		return riders;
 	}
 
 	/**
@@ -61044,6 +62421,7 @@ class CharacterSheetState {
 		// Look up state type definition for side-effect handling
 		const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[stateTypeId];
 		if (stateType?.requiresStates?.some(requiredId => !this.isStateTypeActive(requiredId))) return null;
+		if (stateTypeId === "manifestChains" && !this._getChainedFuryClass()) return null;
 
 		// (Generic) A state type may declare an `effectsBuilder` — the name of an
 		// instance method that resolves its effect list against the CURRENT build
@@ -61111,6 +62489,19 @@ class CharacterSheetState {
 			if (options.beastData !== undefined) existing.beastData = options.beastData;
 			if (options.zodiacForm !== undefined) existing.zodiacForm = options.zodiacForm;
 			if (options.placement !== undefined) existing.placement = options.placement;
+			if (options.weaponId !== undefined) existing.weaponId = options.weaponId;
+			if (options.weaponName !== undefined) existing.weaponName = options.weaponName;
+			if (options.consumeOnAttack !== undefined) existing.consumeOnAttack = options.consumeOnAttack;
+			if (options.pendingAttack !== undefined) existing.pendingAttack = options.pendingAttack;
+			if (options.actionBenefit !== undefined) existing.actionBenefit = options.actionBenefit;
+			if (options.movementOverride !== undefined) existing.movementOverride = options.movementOverride;
+			if (options.duration) existing.duration = options.duration;
+			if (options.temporalView !== undefined) existing.temporalView = MiscUtil.copyFast(options.temporalView);
+			if (options.targets !== undefined) existing.targets = this._normalizeActiveStateTargets(options.targets);
+			else if (
+				stateType?.onActivateTargeting?.calculationGate
+				&& !this.getFeatureCalculations?.()[stateType.onActivateTargeting.calculationGate]
+			) existing.targets = [];
 			// Re-parse duration on reactivation
 			const dur = options.duration || existing.duration;
 			existing.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(dur) : null;
@@ -61341,29 +62732,87 @@ class CharacterSheetState {
 		}
 	}
 
+	_enqueueStateEndSave (state, reason) {
+		const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[state?.stateTypeId];
+		if (!stateType?.endSave) return;
+		this._data.pendingStateEndSaves ||= [];
+		this._data.pendingStateEndSaves.push({
+			id: CharacterSheetState._nextActiveStateId("end-save"),
+			stateId: state.id,
+			stateTypeId: state.stateTypeId,
+			reason: reason || "ended",
+			queuedAt: Date.now(),
+		});
+	}
+
+	getPendingStateEndSaves () {
+		return [...(this._data.pendingStateEndSaves || [])];
+	}
+
+	resolvePendingStateEndSave (pendingId, rollTotal) {
+		const ix = (this._data.pendingStateEndSaves || []).findIndex(entry => entry.id === pendingId);
+		if (ix === -1) return null;
+		const [pending] = this._data.pendingStateEndSaves.splice(ix, 1);
+		const result = this.resolveStateEndSave(pending.stateTypeId, {total: rollTotal});
+		return {...pending, ...result};
+	}
+
+	_deactivateStateInstance (state, {reason = "manual"} = {}) {
+		if (!state?.active) return false;
+
+		const oldMax = this._data.hp.max || 0;
+		const involvesHpMaxIncrease = this._stateContributesHpMaxIncrease(state);
+		state.active = false;
+		state.roundsRemaining = state.roundsRemaining == null ? null : Math.max(0, state.roundsRemaining);
+		this._removeStateAddedConditions(state);
+
+		if (state.grantsConditions?.length > 0) {
+			for (const condName of state.grantsConditions) this.removeCondition?.(condName);
+		}
+
+		if (state.isSpellEffect && this.getConcentrations().some(c => c.name === state.name || c.spellName === state.name)) {
+			this._dropConcentrationsWhere(c => c.name === state.name || c.spellName === state.name);
+			this.dismissConcentrationCompanions();
+			if (!this.getConcentrationCount()) {
+				const concState = this._data.activeStates.find(s => s.stateTypeId === "concentration");
+				if (concState) this.removeActiveState(concState.id);
+			}
+		}
+
+		if (state.sourceFeatureId) {
+			const ability = this._data.customAbilities?.find(a => a.id === state.sourceFeatureId);
+			if (ability?.isActive) {
+				ability.isActive = false;
+				if (ability.concentration) this._dropConcentrationsWhere(c => c.customAbilityId === ability.id);
+				this._unregisterCustomAbilityEffects(ability.id);
+			}
+		}
+
+		this._enqueueStateEndSave(state, reason);
+		if (involvesHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
+		return true;
+	}
+
 	/**
 	 * Deactivate a state by type ID
 	 * @param {string} stateTypeId - The state type ID
+	 * @param {{reason?: string}} [options]
 	 */
-	deactivateState (stateTypeId) {
-		const state = this._data.activeStates.find(s => s.stateTypeId === stateTypeId);
-		if (state) {
-			const oldMax = this._data.hp.max || 0;
-			const involvesHpMaxIncrease = this._stateContributesHpMaxIncrease(state);
-			state.active = false;
-			// Remove any conditions this state added (e.g. Shell Defense → Prone).
-			this._removeStateAddedConditions(state);
-			// If this state contributed an hpMaxIncrease, recompute max so the cap drops.
-			if (involvesHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
-		}
+	deactivateState (stateTypeId, options = {}) {
+		const state = this._data.activeStates.find(s => s.active && s.stateTypeId === stateTypeId);
+		this._deactivateStateInstance(state, options);
 		for (const [dependentId, stateType] of Object.entries(CharacterSheetState.ACTIVE_STATE_TYPES)) {
-			if (stateType.requiresStates?.includes(stateTypeId) && this.isStateTypeActive(dependentId)) this.deactivateState(dependentId);
+			if (stateType.requiresStates?.includes(stateTypeId) && this.isStateTypeActive(dependentId)) {
+				this.deactivateState(dependentId, {reason: `required state ${stateTypeId} ended`});
+			}
 		}
 		if (["astralArms", "astralVisage", "astralBody"].includes(stateTypeId) && this.isStateTypeActive("awakenedAstralSelf")) {
-			this.deactivateState("awakenedAstralSelf");
+			this.deactivateState("awakenedAstralSelf", {reason: `required state ${stateTypeId} ended`});
 		}
 		if (stateTypeId === "awakenedAstralSelf") {
-			for (const componentId of ["astralBody", "astralVisage", "astralArms"]) this.deactivateState(componentId);
+			for (const componentId of ["astralBody", "astralVisage", "astralArms"]) {
+				this.deactivateState(componentId, {reason: "Awakened Astral Self ended"});
+			}
 		}
 		// (CS-BUG-151) `mutagen` is a single generic state carrying the UNION of every
 		// consumed mutagen, so ending it from the Active States panel ends them all — but
@@ -61376,18 +62825,34 @@ class CharacterSheetState {
 			this._data.activeMutagens = [];
 			delete this._data.mutagenIgnoredDrawback;
 		}
+		// Chained Fury targets are sustained by Rage + Manifest Chains. Ending
+		// either source tears down every persisted chain effect immediately.
+		if (stateTypeId === "rage" || stateTypeId === "manifestChains") this.clearTargetEffects("chained-fury");
 	}
 
-	_deactivateStatesForEndCondition ({isIncapacitated = false, isDead = false} = {}) {
-		const shouldEnd = (stateType) => (stateType?.endConditions || []).some(condition => {
-			const normalized = condition.toLowerCase();
-			if (isIncapacitated && (normalized.includes("incapacitat") || normalized.includes("unconscious"))) return true;
-			return isDead && (normalized.includes("dead") || normalized.includes("die") || normalized.includes("killed"));
-		});
+	_deactivateStatesForEndCondition ({conditionName = null, armorType = null, isIncapacitated = false, isDead = false} = {}) {
+		const normalizedConditionName = `${conditionName || ""}`.trim().toLowerCase();
+		const normalizedArmorType = `${armorType || ""}`.trim().toLowerCase();
+		const shouldEnd = (stateType) => {
+			if (normalizedConditionName && stateType?.endTriggers?.conditions?.includes(normalizedConditionName)) return true;
+			if (normalizedArmorType && stateType?.endTriggers?.armorTypes?.includes(normalizedArmorType)) return true;
+			return (stateType?.endConditions || []).some(condition => {
+				const normalized = condition.toLowerCase();
+				if (isIncapacitated && (normalized.includes("incapacitat") || normalized.includes("unconscious"))) return true;
+				return isDead && (normalized.includes("dead") || normalized.includes("die") || normalized.includes("killed"));
+			});
+		};
 		const activeTypeIds = this._data.activeStates
 			.filter(state => state.active && shouldEnd(CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId]))
 			.map(state => state.stateTypeId);
-		for (const stateTypeId of activeTypeIds) this.deactivateState(stateTypeId);
+		const reason = normalizedConditionName
+			? `condition:${normalizedConditionName}`
+			: normalizedArmorType
+				? `armor:${normalizedArmorType}`
+				: isDead
+					? "death"
+					: "incapacitated";
+		for (const stateTypeId of activeTypeIds) this.deactivateState(stateTypeId, {reason});
 	}
 
 	/**
@@ -61457,7 +62922,7 @@ class CharacterSheetState {
 		if (s === "instantaneous" || s === "instant") return 0;
 
 		// Turn-scoped durations
-		if (/\bthis turn\b/.test(s) || /\buntil the end of your turn\b/.test(s) || /\buntil end of turn\b/.test(s)) return 1;
+		if (/\bthis turn\b/.test(s) || /\b(?:for )?(?:the )?rest of (?:your|the) turn\b/.test(s) || /\buntil the end of your turn\b/.test(s) || /\buntil end of turn\b/.test(s)) return 1;
 		if (/\buntil (?:the )?start of (?:your )?next turn\b/.test(s)) return 1;
 		if (/\buntil (?:the )?end of (?:your )?next turn\b/.test(s)) return 1;
 
@@ -61491,6 +62956,9 @@ class CharacterSheetState {
 	startCombat () {
 		this._data.inCombat = true;
 		this._data.combatRound = 1;
+		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
+		this._data.chainedMovementUsage = {round: 1, movementUsed: 0, bonusActionUsed: false, doubled: false};
+		this.resetActionEconomy();
 		this._data.sanguineMasteryLastRerollRound = null;
 		this.applyHybridRegenerationAtTurnStart();
 		this.applyTurnStartEffects();
@@ -61504,6 +62972,16 @@ class CharacterSheetState {
 				}
 			}
 		}
+		for (const modifier of this._data.namedModifiers || []) {
+			if (modifier.enabled && modifier.roundsRemaining == null && modifier.duration) {
+				modifier.roundsRemaining = CharacterSheetState.parseDurationToRounds(modifier.duration);
+			}
+		}
+		for (const condition of this._data.conditions || []) {
+			if (condition.roundsRemaining == null && condition.duration) {
+				condition.roundsRemaining = CharacterSheetState.parseDurationToRounds(condition.duration);
+			}
+		}
 	}
 
 	/**
@@ -61515,11 +62993,14 @@ class CharacterSheetState {
 		this._data.sanguineMasteryLastRerollRound = null;
 		this._data.hybridBloodlustTurnStartRound = null;
 		this._data.hybridBloodlustTurnStartCheck = null;
+		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
+		this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
+		this.resetActionEconomy();
 
 		for (const state of this._data.activeStates) {
 			// Fully deactivate transient "consume on attack" states (e.g. Steady Aim)
 			const typeDef = CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId];
-			if (state.active && typeDef?.consumeOnAttack) {
+			if (state.active && (state.consumeOnAttack || typeDef?.consumeOnAttack)) {
 				state.active = false;
 				delete state.customEffects;
 			}
@@ -61538,12 +63019,31 @@ class CharacterSheetState {
 		if (!this._data.inCombat) return [];
 
 		this._data.combatRound++;
+		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
+		this._data.chainedMovementUsage = {round: this._data.combatRound, movementUsed: 0, bonusActionUsed: false, doubled: false};
+		this.resetActionEconomy();
 		this._data.sanguineMasteryLastRerollRound = null;
 		this.applyHybridRegenerationAtTurnStart();
 		this.applyTurnStartEffects();
 		const expired = [];
-		const oldMax = this._data.hp.max || 0;
-		let anyExpiredHpMaxIncrease = false;
+
+		for (const modifier of this._data.namedModifiers || []) {
+			if (!modifier.enabled || modifier.roundsRemaining == null) continue;
+			modifier.roundsRemaining--;
+		}
+		this._data.namedModifiers = (this._data.namedModifiers || []).filter(modifier =>
+			modifier.roundsRemaining == null || modifier.roundsRemaining > 0,
+		);
+		for (const condition of this._data.conditions || []) {
+			if (condition.roundsRemaining != null) condition.roundsRemaining--;
+		}
+		const expiredConditions = (this._data.conditions || []).filter(condition =>
+			condition.roundsRemaining != null && condition.roundsRemaining <= 0,
+		);
+		for (const condition of expiredConditions) this._removeConditionEffects(condition.name, condition.source);
+		this._data.conditions = (this._data.conditions || []).filter(condition =>
+			condition.roundsRemaining == null || condition.roundsRemaining > 0,
+		);
 
 		for (const state of this._data.activeStates) {
 			if (!state.active) continue;
@@ -61551,52 +63051,19 @@ class CharacterSheetState {
 
 			state.roundsRemaining--;
 			if (state.roundsRemaining <= 0) {
-				state.active = false;
 				state.roundsRemaining = 0;
 				expired.push(state.name || state.stateTypeId);
-				if (this._stateContributesHpMaxIncrease(state)) anyExpiredHpMaxIncrease = true;
-
-				// Cleanup: remove any conditions this state granted
-				if (state.grantsConditions?.length > 0) {
-					for (const condName of state.grantsConditions) {
-						this.removeCondition?.(condName);
-					}
-				}
-				// (R26 #7) Also strip conditions added via `_managedConditions` (e.g. an
-				// interdiction boon like Veil of Lies → Invisible). advanceRound previously
-				// only cleaned the spell-effect `grantsConditions` field, so a boon whose
-				// duration expired during combat left its granted condition stuck.
-				this._removeStateAddedConditions(state);
-
-				// If this was a spell effect that matches a concentrated spell, do full cleanup
-				if (state.isSpellEffect && this.getConcentrations().some(c => c.name === state.name || c.spellName === state.name)) {
-					this._dropConcentrationsWhere(c => c.name === state.name || c.spellName === state.name);
-					this.dismissConcentrationCompanions();
-					// Also remove legacy "concentration" state type if exists
-					if (!this.getConcentrationCount()) {
-						const concState = this._data.activeStates.find(s => s.stateTypeId === "concentration");
-						if (concState) this.removeActiveState(concState.id);
-					}
-				}
-
-				// If this was a custom ability state, toggle off the ability
-				if (state.sourceFeatureId) {
-					const ability = this._data.customAbilities?.find(a => a.id === state.sourceFeatureId);
-					if (ability && ability.isActive) {
-						ability.isActive = false;
-						// Clear concentration if this ability was concentrating
-						if (ability.concentration) {
-							this._dropConcentrationsWhere(c => c.customAbilityId === ability.id);
-						}
-						// Unregister effects (named modifiers)
-						this._unregisterCustomAbilityEffects(ability.id);
-					}
-				}
+				if (state.stateTypeId === "custom") this._deactivateStateInstance(state, {reason: "duration"});
+				else this.deactivateState(state.stateTypeId, {reason: "duration"});
+			} else if (state.stateTypeId === "eyesOfFuturePast") {
+				state.temporalView = {
+					direction: state.temporalView?.direction || null,
+					offsetHours: Math.max(1, Number(state.temporalView?.offsetHours) || 1),
+					roundDecision: null,
+					decisionPending: true,
+				};
 			}
 		}
-
-		// If any expired state contributed hpMaxIncrease, recompute max HP.
-		if (anyExpiredHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
 
 		return expired;
 	}
@@ -61610,6 +63077,103 @@ class CharacterSheetState {
 	 * Check if currently in combat
 	 */
 	isInCombat () { return !!this._data.inCombat; }
+
+	_normalizeCombatTurnOrder () {
+		if (!Array.isArray(this._data.combatTurnOrder)) this._data.combatTurnOrder = [];
+		const seen = new Set();
+		this._data.combatTurnOrder = this._data.combatTurnOrder
+			.map((participant, index) => {
+				const name = String(participant?.name || "").trim();
+				if (!name) return null;
+				const id = String(participant?.id || `turn-${index}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`);
+				if (seen.has(id)) return null;
+				seen.add(id);
+				return {
+					id,
+					name,
+					initiative: Number.isFinite(Number(participant?.initiative)) ? Number(participant.initiative) : 0,
+					hasActed: !!participant?.hasActed,
+				};
+			})
+			.filter(Boolean);
+	}
+
+	_migrateTimeDomainActiveStates () {
+		for (const state of this._data.activeStates || []) {
+			if ((state?.name || "").trim().toLowerCase() !== "eyes of the future past") continue;
+			state.stateTypeId = "eyesOfFuturePast";
+			state.duration = state.duration || "1 minute";
+			state.addsConditions = state.addsConditions?.length ? state.addsConditions : ["blinded"];
+			state.temporalView = {
+				direction: ["past", "future"].includes(state.temporalView?.direction) ? state.temporalView.direction : null,
+				offsetHours: Math.max(1, Number(state.temporalView?.offsetHours) || 1),
+				roundDecision: ["advance", "hold"].includes(state.temporalView?.roundDecision) ? state.temporalView.roundDecision : null,
+				decisionPending: state.active ? (!state.temporalView?.direction || !!state.temporalView?.decisionPending) : false,
+			};
+		}
+	}
+
+	getCombatTurnOrder () {
+		return MiscUtil.copyFast(this._data.combatTurnOrder || []);
+	}
+
+	upsertCombatTurnOrderParticipant ({id = null, name, initiative = 0, hasActed = false} = {}) {
+		const cleanName = String(name || "").trim();
+		if (!cleanName) return null;
+		const numericInitiative = Number(initiative);
+		if (!Number.isFinite(numericInitiative)) return null;
+		const participantId = id || CryptUtil.uid();
+		const existing = this._data.combatTurnOrder.find(it => it.id === participantId);
+		if (existing) Object.assign(existing, {name: cleanName, initiative: numericInitiative, hasActed: !!hasActed});
+		else this._data.combatTurnOrder.push({id: participantId, name: cleanName, initiative: numericInitiative, hasActed: !!hasActed});
+		this._data.combatTurnOrder.sort((a, b) => b.initiative - a.initiative);
+		return participantId;
+	}
+
+	removeCombatTurnOrderParticipant (id) {
+		const oldLength = this._data.combatTurnOrder.length;
+		this._data.combatTurnOrder = this._data.combatTurnOrder.filter(it => it.id !== id);
+		return this._data.combatTurnOrder.length !== oldLength;
+	}
+
+	markCombatTurnOrderParticipantActed (id, hasActed = true) {
+		const participant = this._data.combatTurnOrder.find(it => it.id === id);
+		if (!participant) return false;
+		participant.hasActed = !!hasActed;
+		return true;
+	}
+
+	swapCombatTurnOrderParticipants (firstId, secondId) {
+		if (!this.isInCombat()) return {ok: false, error: "Start combat before swapping initiative."};
+		if (!firstId || !secondId || firstId === secondId) return {ok: false, error: "Choose two different creatures."};
+		const firstIndex = this._data.combatTurnOrder.findIndex(it => it.id === firstId);
+		const secondIndex = this._data.combatTurnOrder.findIndex(it => it.id === secondId);
+		if (firstIndex < 0 || secondIndex < 0) return {ok: false, error: "Both creatures must be in the turn order."};
+		const first = this._data.combatTurnOrder[firstIndex];
+		const second = this._data.combatTurnOrder[secondIndex];
+		if (first.hasActed || second.hasActed) return {ok: false, error: "Both creatures must not have acted this round."};
+
+		const firstInitiative = first.initiative;
+		first.initiative = second.initiative;
+		second.initiative = firstInitiative;
+		this._data.combatTurnOrder[firstIndex] = second;
+		this._data.combatTurnOrder[secondIndex] = first;
+		return {
+			ok: true,
+			first: {id: first.id, name: first.name, initiative: first.initiative},
+			second: {id: second.id, name: second.name, initiative: second.initiative},
+		};
+	}
+
+	resolveTemporalViewRoundChoice (choice) {
+		if (!["advance", "hold"].includes(choice)) return false;
+		const state = this._data.activeStates.find(it => it.stateTypeId === "eyesOfFuturePast" && it.active);
+		if (!state?.temporalView?.direction || !state.temporalView.decisionPending) return false;
+		if (choice === "advance") state.temporalView.offsetHours = Math.max(1, Number(state.temporalView.offsetHours) || 1) + 1;
+		state.temporalView.roundDecision = choice;
+		state.temporalView.decisionPending = false;
+		return true;
+	}
 
 	// #endregion
 
@@ -62112,7 +63676,10 @@ class CharacterSheetState {
 	 */
 	getFeatureGrantedAttacks () {
 		return (this.getFeatureCalculations().grantedAttacks || [])
-			.filter(attack => !attack.requiresState || this.isStateTypeActive(attack.requiresState))
+			.filter(attack => {
+				const requirements = attack.requiresStates || (attack.requiresState ? [attack.requiresState] : []);
+				return requirements.every(requiredId => this.isStateTypeActive(requiredId));
+			})
 			.map(attack => ({
 				...attack,
 				isFeatureAttack: true,
@@ -62691,6 +64258,629 @@ class CharacterSheetState {
 		}
 		return abilityKey;
 	}
+
+	/**
+	 * Normalize one persisted target/effect entry. Feature code opts in by supplying
+	 * a `source`; unrelated on-hit riders remain prompt-only.
+	 * @param {*} raw
+	 * @returns {object|null}
+	 * @private
+	 */
+	_normalizeTargetEffect (raw) {
+		if (!raw || typeof raw !== "object") return null;
+		const id = String(raw.id || "").trim();
+		if (!id) return null;
+		const sizeNames = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
+		const size = String(raw.size || "medium").toLowerCase();
+		const normalizedSize = sizeNames.includes(size) ? size : "medium";
+		const distance = Number(raw.distance);
+		const declaredDistance = Number(raw.declaredDistance);
+		const chainIndex = raw.chainIndex == null || raw.chainIndex === "" ? null : Number(raw.chainIndex);
+		const effects = raw.effects && typeof raw.effects === "object" ? raw.effects : {};
+		const grappleEffect = effects.grapple && typeof effects.grapple === "object" ? effects.grapple : {};
+		const shoveEffect = effects.shove && typeof effects.shove === "object" ? effects.shove : {};
+		const restraintEffect = effects.restraint && typeof effects.restraint === "object" ? effects.restraint : {};
+		const grappleActive = grappleEffect.active == null ? !!raw.grappled : !!grappleEffect.active;
+		const shoveActive = shoveEffect.active == null ? !!raw.shoved : !!shoveEffect.active;
+		// `restrained: false` is an explicit compatibility alias. Older saves
+		// occasionally carried a stale nested restraint layer, so never let that
+		// layer resurrect a normal grapple.
+		const restraintActive = raw.restrained === false
+			? false
+			: restraintEffect.active == null ? !!raw.restrained : !!restraintEffect.active;
+		return {
+			id,
+			source: raw.source == null ? null : String(raw.source).trim().toLowerCase(),
+			effectType: raw.effectType || "target",
+			targetName: String(raw.targetName || raw.name || "Target"),
+			size: normalizedSize,
+			declaredDistance: Number.isFinite(declaredDistance) && declaredDistance >= 0 ? declaredDistance : (Number.isFinite(distance) && distance >= 0 ? distance : null),
+			distance: Number.isFinite(distance) && distance >= 0 ? distance : (Number.isFinite(declaredDistance) && declaredDistance >= 0 ? declaredDistance : null),
+			grappled: grappleActive,
+			restrained: restraintActive,
+			shoved: shoveActive,
+			shoveDistance: Math.max(0, Number(raw.shoveDistance) || 0),
+			recurringDamage: raw.recurringDamage && typeof raw.recurringDamage === "object"
+				? {amount: Math.max(0, Number(raw.recurringDamage.amount) || 0), type: raw.recurringDamage.type || "force", when: raw.recurringDamage.when || "start of each of its turns"}
+				: null,
+			chainIndex: Number.isFinite(chainIndex) && chainIndex >= 0 ? chainIndex : null,
+			escapeDc: raw.escapeDc == null ? null : Number(raw.escapeDc),
+			restraintDc: raw.restraintDc == null ? null : Number(raw.restraintDc),
+			shoveDirection: raw.shoveDirection || null,
+			lastRecurringDamageTurn: raw.lastRecurringDamageTurn == null ? null : Number(raw.lastRecurringDamageTurn),
+			createdAt: Number(raw.createdAt) || Date.now(),
+			updatedAt: Number(raw.updatedAt) || Date.now(),
+			// Keep the effect layers separate from the target identity. The legacy
+			// booleans below are retained as compatibility aliases for old saves and
+			// callers, but chain occupancy is derived from the grapple layer only.
+			effects: {
+				grapple: {
+					active: grappleActive,
+					ability: grappleEffect.ability === "dex" ? "dex" : "str",
+					dc: grappleEffect.dc == null ? (raw.escapeDc == null ? null : Number(raw.escapeDc)) : Number(grappleEffect.dc),
+				},
+				shove: {
+					active: shoveActive,
+					distance: Math.max(0, Number(shoveEffect.distance == null ? raw.shoveDistance : shoveEffect.distance) || 0),
+				},
+				restraint: {
+					active: restraintActive,
+					dc: restraintEffect.dc == null ? (raw.restraintDc == null ? null : Number(raw.restraintDc)) : Number(restraintEffect.dc),
+				},
+			},
+		};
+	}
+
+	getTargetEffects (opts = {}) {
+		this.reconcileTargetEffects();
+		const source = opts.source?.toLowerCase();
+		return this._data.targetEffects
+			.filter(it => !source || String(it.source || "").toLowerCase() === source)
+			.map(it => MiscUtil.copyFast(it));
+	}
+
+	getTargetEffect (id) {
+		const target = this._data.targetEffects.find(it => it.id === id);
+		return target ? MiscUtil.copyFast(target) : null;
+	}
+
+	getTargetEffectMetadata (source, effect = "target") {
+		const normalizedSource = String(source || "").trim().toLowerCase();
+		const normalizedEffect = String(effect || "target").trim().toLowerCase();
+		const methodName = TARGET_EFFECT_METADATA_METHODS[normalizedSource];
+		if (methodName && typeof this[methodName] === "function") {
+			return this[methodName](normalizedEffect);
+		}
+		return {
+			source: normalizedSource,
+			effect: normalizedEffect,
+			range: null,
+			prompt: "Record the creature affected by this target-aware effect.",
+		};
+	}
+
+	getChainedTargetEffectMetadata (effect = "target") {
+		const range = Number(this.getFeatureCalculations?.()?.chainRange) || null;
+		return {
+			source: "chained-fury",
+			effect,
+			range,
+			prompt: "Record the creature affected by the spectral chains. The target remains until the source releases it or its active requirements end.",
+		};
+	}
+
+	upsertTargetEffect (target = {}) {
+		const id = String(target.id || `target-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+		const existingIndex = this._data.targetEffects.findIndex(it => it.id === id);
+		const normalized = this._normalizeTargetEffect({
+			...(existingIndex >= 0 ? this._data.targetEffects[existingIndex] : {}),
+			...target,
+			id,
+			updatedAt: Date.now(),
+		});
+		if (!normalized) return null;
+		if (existingIndex >= 0) this._data.targetEffects[existingIndex] = normalized;
+		else this._data.targetEffects.push(normalized);
+		return MiscUtil.copyFast(normalized);
+	}
+
+	removeTargetEffect (id) {
+		const index = this._data.targetEffects.findIndex(it => it.id === id);
+		if (index < 0) return false;
+		this._data.targetEffects.splice(index, 1);
+		return true;
+	}
+
+	clearTargetEffects (source = null) {
+		if (!source) this._data.targetEffects = [];
+		else {
+			const normalized = String(source).toLowerCase();
+			this._data.targetEffects = this._data.targetEffects.filter(it => String(it.source || "").toLowerCase() !== normalized);
+		}
+	}
+
+	getChainedTargets () {
+		return this.getTargetEffects({source: "chained-fury"});
+	}
+
+	getChainedTargetOccupants () {
+		this.reconcileTargetEffects();
+		return this._data.targetEffects
+			.filter(it => String(it.source || "").toLowerCase() === "chained-fury")
+			.filter(it => it.effects?.grapple?.active && it.chainIndex != null)
+			.map(it => MiscUtil.copyFast(it));
+	}
+
+	getChainedTargetCapacity () {
+		return this.getFeatureCalculations()?.chainCount || 0;
+	}
+
+	getChainedTargetState () {
+		const calc = this.getFeatureCalculations() || {};
+		return {
+			available: this.isStateTypeActive("manifestChains") && this.isStateTypeActive("rage"),
+			capacity: calc.chainCount || 0,
+			used: this.getChainedTargetOccupants().length,
+			availableChains: Math.max(0, (calc.chainCount || 0) - this.getChainedTargetOccupants().length),
+			range: calc.chainRange || 0,
+			grappleDc: calc.chainGrappleDc || null,
+			restraintDc: calc.chainRestrainDc || null,
+			movement: this.getChainedMovementState(),
+		};
+	}
+
+	/**
+	 * Return the canonical TGTT Chained Fury class/subclass identity.
+	 * Mechanics must not leak to same-named homebrew content from another source.
+	 * @param {*} cls
+	 * @returns {boolean}
+	 * @private
+	 */
+	_isCanonicalChainedFuryClass (cls) {
+		const subclass = cls?.subclass || this.getEffectiveSubclassForClass(cls);
+		const subclassName = String(subclass?.shortName || subclass?.name || "").trim().toLowerCase();
+		return String(cls?.name || "").trim().toLowerCase() === "barbarian"
+			&& String(cls?.source || "").toUpperCase() === "TGTT"
+			&& (subclassName === "chained fury" || subclassName === "path of the chained fury")
+			&& String(subclass?.source || "").toUpperCase() === "TGTT";
+	}
+
+	_getChainedFuryClass () {
+		return (this._data.classes || []).find(cls => this._isCanonicalChainedFuryClass(cls)) || null;
+	}
+
+	getChainedMovementState () {
+		const usage = this._data.chainedMovementUsage || {};
+		const speed = Number(this.getSpeed?.("walk")) || 30;
+		const doubled = !!usage.doubled;
+		return {
+			round: usage.round ?? null,
+			speed,
+			allowance: speed * (doubled ? 2 : 1),
+			used: Math.max(0, Number(usage.movementUsed) || 0),
+			remaining: Math.max(0, speed * (doubled ? 2 : 1) - (Number(usage.movementUsed) || 0)),
+			doubled,
+			bonusActionUsed: !!usage.bonusActionUsed,
+		};
+	}
+
+	/**
+	 * Shared transient action-economy API used by Play Mode and state-owned
+	 * operations. Combat's attack tracker remains separate, but bonus-action
+	 * consumers must all consult the same gate.
+	 */
+	getActionEconomyState () {
+		const usage = this._data.actionEconomyUsage || {};
+		return {
+			action: !usage.action,
+			bonus: !usage.bonus,
+			reaction: !usage.reaction,
+		};
+	}
+
+	isActionTypeAvailable (actionType) {
+		if (!actionType || actionType === "free") return true;
+		return !!this.getActionEconomyState()[actionType];
+	}
+
+	consumeActionType (actionType) {
+		if (!actionType || actionType === "free") return true;
+		if (!this.isActionTypeAvailable(actionType)) return false;
+		if (!this._data.actionEconomyUsage) this._data.actionEconomyUsage = {action: false, bonus: false, reaction: false};
+		if (!Object.hasOwn(this._data.actionEconomyUsage, actionType)) return false;
+		this._data.actionEconomyUsage[actionType] = true;
+		return true;
+	}
+
+	restoreActionType (actionType) {
+		if (!actionType || actionType === "free") return true;
+		if (!this._data.actionEconomyUsage) this._data.actionEconomyUsage = {action: false, bonus: false, reaction: false};
+		if (!Object.hasOwn(this._data.actionEconomyUsage, actionType)) return false;
+		this._data.actionEconomyUsage[actionType] = false;
+		return true;
+	}
+
+	resetActionEconomy () {
+		this._data.actionEconomyUsage = {action: false, bonus: false, reaction: false};
+	}
+
+	applyChainedTargetEffect ({
+		targetId, targetName, name, size = "medium", distance = null, effect = "grapple",
+		riderId, restraintSaveTotal = null, shoveDistance = null, grappleSaveTotal = null,
+		grappleSaveAbility = "str", finalDistance = null, shoveDirection = null,
+		source = "chained-fury", targetEffect = null,
+	} = {}) {
+		const calc = this.getFeatureCalculations() || {};
+		if (!calc.hasManifestChains || !this.isStateTypeActive("rage") || !this.isStateTypeActive("manifestChains")) {
+			return {ok: false, reason: "chains-inactive"};
+		}
+		const normalizedSource = String(source || "chained-fury").trim().toLowerCase();
+		const nestedSource = String(targetEffect?.source || "").trim().toLowerCase();
+		const nestedEffect = String(targetEffect?.effect || "").trim().toLowerCase();
+		const normalizedEffect = String(effect || "target").trim().toLowerCase();
+		if (normalizedSource !== "chained-fury" || (nestedSource && nestedSource !== normalizedSource) || (nestedEffect && nestedEffect !== normalizedEffect)) {
+			return {ok: false, reason: "effect-metadata-mismatch"};
+		}
+		const riderEffects = {
+			"chains-grapple": "grapple",
+			"chains-shove": "shove",
+			"chains-restrain": "restrain",
+			"chains-control-shove": "control-shove",
+		};
+		// `effect` and `riderId` describe one canonical contract. Accepting one
+		// while inferring behavior from the other allowed low-level callers to
+		// bypass level gates (e.g. an L3 grapple carrying the L10 rider ID).
+		if (riderId && riderEffects[riderId] && normalizedEffect !== riderEffects[riderId]) {
+			return {ok: false, reason: "effect-metadata-mismatch"};
+		}
+		if (riderId && !riderEffects[riderId] && !["target", "none", "track"].includes(normalizedEffect)) {
+			return {ok: false, reason: "effect-unavailable"};
+		}
+		const allowedEffects = new Set(["target", "none", "track", "grapple", "shove", "shove-only", "restrain", "control-shove"]);
+		if (!allowedEffects.has(normalizedEffect)) return {ok: false, reason: "effect-unavailable"};
+		if (["restrain"].includes(normalizedEffect) && !calc.hasChainImprisonment) {
+			return {ok: false, reason: "effect-unavailable", requiredLevel: 6};
+		}
+		if (["control-shove"].includes(normalizedEffect) && !calc.hasChainControl) {
+			return {ok: false, reason: "effect-unavailable", requiredLevel: 10};
+		}
+		const existing = targetId ? this._data.targetEffects.find(it => it.id === targetId) : null;
+		const existingGrapple = !!existing?.effects?.grapple?.active || !!existing?.grappled;
+		const wantsGrapple = !["target", "none", "track", "shove", "shove-only"].includes(normalizedEffect);
+		if (!existingGrapple && wantsGrapple && this.getChainedTargetOccupants().length >= (calc.chainCount || 0)) return {ok: false, reason: "chain-capacity"};
+		const maxSize = this.getGrappleSizeCategory()?.maxTargetSize;
+		const sizeRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(size).toLowerCase());
+		const maxRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(maxSize || "gargantuan").toLowerCase());
+		if (wantsGrapple && !calc.grappleSizeUnlimited && maxRank >= 0 && sizeRank > maxRank) return {ok: false, reason: "target-too-large", maxSize};
+		const range = Number(calc.chainRange) || 0;
+		if (distance != null && (Number(distance) < 0 || Number(distance) > range)) return {ok: false, reason: "out-of-range", range};
+
+		const id = targetId || `chain-target-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+		const isRestrain = normalizedEffect === "restrain";
+		const isControlShove = normalizedEffect === "control-shove";
+		const isShove = ["shove", "control-shove"].includes(normalizedEffect);
+		const grappleAbility = grappleSaveAbility === "dex" ? "dex" : grappleSaveAbility === "str" ? "str" : null;
+		if (wantsGrapple && !grappleAbility) return {ok: false, reason: "invalid-save-ability"};
+		const grappleDc = Number(calc.chainGrappleDc) || null;
+		const grappleSucceeded = !wantsGrapple || grappleSaveTotal == null || Number(grappleSaveTotal) < grappleDc;
+		const grappled = wantsGrapple && grappleSucceeded;
+		const restraintDc = calc.chainRestrainDc || null;
+		const restraintSuccess = isRestrain && grappled
+			&& (restraintSaveTotal == null || Number(restraintSaveTotal) < restraintDc);
+		const finalShoveDistance = shoveDistance == null ? (isShove ? (calc.chainShoveDistance || 0) : 0) : Number(shoveDistance);
+		const currentDistance = Number(distance ?? existing?.distance ?? 0);
+		const direction = shoveDirection || existing?.shoveDirection || null;
+		const inferredFinalDistance = direction === "toward"
+			? currentDistance - finalShoveDistance
+			: direction === "lateral"
+				? currentDistance
+				: currentDistance + finalShoveDistance;
+		const declaredFinalDistance = finalDistance == null ? inferredFinalDistance : Number(finalDistance);
+		const expectedFinalDistance = direction === "toward"
+			? currentDistance - finalShoveDistance
+			: direction === "lateral"
+				? currentDistance
+				: currentDistance + finalShoveDistance;
+		if (isControlShove && !grappled) {
+			// Chain Control is explicitly contingent on the initial grapple. Keep
+			// the target record for the player's confirmed outcome, but never apply
+			// a shove or occupy a chain after a successful save.
+			const target = this.upsertTargetEffect({
+				id,
+				source: "chained-fury",
+				effectType: normalizedEffect,
+				targetName: targetName || name || existing?.targetName || "Target",
+				size,
+				grappled: false,
+				restrained: false,
+				shoved: false,
+				distance: currentDistance,
+				declaredDistance: currentDistance,
+				chainIndex: null,
+				escapeDc: grappleDc,
+				restraintDc,
+				effects: {
+					grapple: {active: false, ability: grappleAbility || "str", dc: grappleDc},
+					shove: {active: false, distance: 0},
+					restraint: {active: false, dc: restraintDc},
+				},
+			});
+			return {
+				ok: !!target,
+				target,
+				grappled: false,
+				restrained: false,
+				shoved: false,
+				grappleSaveSuccess: false,
+				grappleDc,
+				grappleSaveAbility: grappleAbility,
+				restraintSaveSuccess: false,
+				saveDc: restraintDc,
+				controlApplied: false,
+			};
+		}
+		if (isControlShove && (
+			!["away", "toward", "lateral"].includes(direction)
+			|| finalShoveDistance !== 10
+			|| !Number.isFinite(declaredFinalDistance)
+			|| declaredFinalDistance < 0
+			|| declaredFinalDistance > range
+			|| Math.abs(declaredFinalDistance - expectedFinalDistance) > 0.001
+		)) {
+			return {ok: false, reason: "shove-out-of-range", range, finalDistance: declaredFinalDistance};
+		}
+		const target = this.upsertTargetEffect({
+			id,
+			source: "chained-fury",
+			effectType: normalizedEffect,
+			targetName: targetName || name || existing?.targetName || "Target",
+			size,
+			grappled,
+			restrained: isRestrain && restraintSuccess,
+			shoved: isShove && (!isControlShove || grappled),
+			shoveDistance: finalShoveDistance,
+			shoveDirection: direction,
+			declaredDistance: declaredFinalDistance,
+			distance: isShove && (!isControlShove || grappled) ? declaredFinalDistance : (distance == null && existing ? existing.distance : (distance == null ? 0 : distance)),
+			recurringDamage: isRestrain && restraintSuccess && calc.chainRestrainDamage
+				? {
+					amount: calc.chainRestrainDamage,
+					type: "force",
+					when: "start of each of its turns",
+				}
+				: null,
+			chainIndex: grappled ? (existing?.chainIndex ?? this.getChainedTargetOccupants().length) : null,
+			escapeDc: grappleDc,
+			restraintDc,
+			effects: {
+				grapple: {active: grappled, ability: grappleAbility || "str", dc: grappleDc},
+				shove: {active: isShove && (!isControlShove || grappled), distance: isShove && (!isControlShove || grappled) ? finalShoveDistance : 0},
+				restraint: {active: restraintSuccess, dc: restraintDc},
+			},
+		});
+		return {
+			ok: !!target,
+			target,
+			grappled,
+			restrained: !!target?.restrained,
+			grappleSaveSuccess: grappleSucceeded,
+			grappleDc,
+			grappleSaveAbility: grappleAbility,
+			restraintSaveSuccess: restraintSuccess,
+			saveDc: restraintDc,
+			finalDistance: declaredFinalDistance,
+			shoveDirection: direction,
+			controlApplied: isControlShove && grappled,
+		};
+	}
+
+	applyTargetEffect (opts = {}) {
+		const topSource = String(opts?.source || "").trim().toLowerCase();
+		const nestedSource = String(opts?.targetEffect?.source || "").trim().toLowerCase();
+		const topEffect = String(opts?.effect || "").trim().toLowerCase();
+		const nestedEffect = String(opts?.targetEffect?.effect || "").trim().toLowerCase();
+		const riderId = String(opts?.riderId || opts?.targetEffect?.riderId || "").trim().toLowerCase();
+		if (topSource && nestedSource && topSource !== nestedSource) return {ok: false, reason: "effect-metadata-mismatch"};
+		if (topEffect && nestedEffect && topEffect !== nestedEffect) return {ok: false, reason: "effect-metadata-mismatch"};
+		const source = topSource || nestedSource;
+		const effect = topEffect || nestedEffect || "target";
+		const handlerName = TARGET_EFFECT_HANDLER_METHODS[source];
+		if (source === "chained-fury") {
+			const riderEffects = {
+				"chains-grapple": "grapple",
+				"chains-shove": "shove",
+				"chains-restrain": "restrain",
+				"chains-control-shove": "control-shove",
+			};
+			if (riderId && riderEffects[riderId] && riderEffects[riderId] !== effect) return {ok: false, reason: "effect-metadata-mismatch"};
+			if (riderId && !riderEffects[riderId] && !["target", "none", "track"].includes(effect)) return {ok: false, reason: "effect-unavailable"};
+		}
+		if (handlerName && typeof this[handlerName] === "function") {
+			return this[handlerName]({
+				...opts,
+				source,
+				effect,
+				riderId: opts.riderId || opts.targetEffect?.riderId,
+				targetEffect: opts.targetEffect ? {...opts.targetEffect, source, effect} : {source, effect},
+			});
+		}
+		const target = this.upsertTargetEffect({...opts, source, effectType: effect});
+		return target ? {ok: true, target} : {ok: false, reason: "invalid-target"};
+	}
+
+	createChainedTarget (opts = {}) { return this.applyChainedTargetEffect(opts); }
+	resolveChainedTargetEffect (opts = {}) { return this.applyChainedTargetEffect(opts); }
+	releaseChainedTarget (id) { return this.removeTargetEffect(id); }
+
+	escapeChainedTarget (id, saveTotal = null, {ability = "str"} = {}) {
+		const target = this._data.targetEffects.find(it => it.id === id);
+		if (!target) return {ok: false, reason: "not-found"};
+		const dc = Number(this.getFeatureCalculations()?.chainGrappleDc) || target.effects?.grapple?.dc || target.escapeDc;
+		const resolvedAbility = ability === "dex" ? "dex" : "str";
+		if (saveTotal != null && Number(saveTotal) < dc) return {ok: false, escaped: false, dc, ability: resolvedAbility};
+		target.grappled = false;
+		target.restrained = false;
+		target.shoved = false;
+		target.recurringDamage = null;
+		target.chainIndex = null;
+		target.effects = {
+			grapple: {active: false, ability: target.effects?.grapple?.ability || "str", dc},
+			shove: {active: false, distance: 0},
+			restraint: {active: false, dc: target.effects?.restraint?.dc ?? target.restraintDc},
+		};
+		target.updatedAt = Date.now();
+		return {ok: true, escaped: true, target: MiscUtil.copyFast(target), dc, ability: resolvedAbility};
+	}
+
+	moveChainedTarget (id, distance, options = {}) {
+		const target = this._data.targetEffects.find(it => it.id === id);
+		if (!target) return {ok: false, reason: "not-found"};
+		if (!target.effects?.grapple?.active || target.chainIndex == null) return {ok: false, reason: "not-grappled"};
+		const range = Number(this.getFeatureCalculations()?.chainRange) || 0;
+		if (Number(distance) < 0 || Number(distance) > range) {
+			// A chained creature that leaves reach is no longer grappled. Preserve
+			// the lightweight target record, but atomically release every rider.
+			this._releaseChainedTargetEffect(target);
+			target.distance = Number(distance);
+			target.declaredDistance = Number(distance);
+			target.updatedAt = Date.now();
+			return {ok: false, reason: "out-of-range-released", range, released: true, target: MiscUtil.copyFast(target)};
+		}
+		const previousDistance = Number(target.distance) || 0;
+		const finalDistance = Number(distance);
+		const delta = Math.abs(finalDistance - previousDistance);
+		const targetRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(target.size || "medium").toLowerCase());
+		const grapplerRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(this.getGrappleSizeCategory()?.effective || "medium").toLowerCase());
+		const canMoveFullSpeed = !!this.getFeatureCalculations()?.chainFreeMovement;
+		const dragMultiplier = canMoveFullSpeed || grapplerRank - targetRank >= 2 ? 1 : 2;
+		const movementCost = delta * dragMultiplier;
+		const round = Number(this._data.combatRound) || 0;
+		const priorUsage = this._data.chainedMovementUsage || {};
+		const usage = priorUsage.round === round
+			? {...priorUsage}
+			: {round, movementUsed: 0, bonusActionUsed: !this.isActionTypeAvailable("bonus"), doubled: false};
+		const speed = Number(this.getSpeed?.("walk")) || 30;
+		const doubleMovement = !!options.doubleMovement;
+		const isNewRound = priorUsage.round !== round;
+		if (doubleMovement && (usage.bonusActionUsed || !this.isActionTypeAvailable("bonus"))) return {ok: false, reason: "bonus-action-used"};
+		const doubled = usage.doubled || doubleMovement;
+		const allowance = speed * (doubled ? 2 : 1);
+		const available = allowance - (Number(usage.movementUsed) || 0);
+		if (movementCost > available) return {ok: false, reason: "movement-exceeded", speed, movementCost, available, allowance};
+		if (doubleMovement) {
+			// Consume the shared bonus action only after every movement guard has
+			// passed. This keeps a rejected request fully transactional.
+			if (!this.consumeActionType("bonus")) return {ok: false, reason: "bonus-action-used"};
+		}
+		usage.doubled = doubled;
+		usage.movementUsed = (Number(usage.movementUsed) || 0) + movementCost;
+		usage.bonusActionUsed = !!usage.bonusActionUsed || doubleMovement;
+		this._data.chainedMovementUsage = usage;
+		target.distance = Number(distance);
+		target.declaredDistance = Number(distance);
+		target.movementCost = movementCost;
+		target.dragMultiplier = dragMultiplier;
+		target.updatedAt = Date.now();
+		return {
+			ok: true,
+			target: MiscUtil.copyFast(target),
+			movementCost,
+			dragMultiplier,
+			bonusActionUsed: doubleMovement,
+			movement: this.getChainedMovementState(),
+		};
+	}
+
+	_releaseChainedTargetEffect (target) {
+		if (!target) return;
+		target.grappled = false;
+		target.restrained = false;
+		target.shoved = false;
+		target.recurringDamage = null;
+		target.chainIndex = null;
+		target.effects = {
+			grapple: {active: false, ability: target.effects?.grapple?.ability || "str", dc: target.effects?.grapple?.dc ?? null},
+			shove: {active: false, distance: 0},
+			restraint: {active: false, dc: target.effects?.restraint?.dc ?? target.restraintDc ?? null},
+		};
+	}
+
+	resolveChainedTargetTurn (id, turn = this._data.combatRound, {repeat = false} = {}) {
+		const target = this._data.targetEffects.find(it => it.id === id);
+		if (!target || !target.restrained || !target.recurringDamage) return {ok: false, damage: 0};
+		if (!repeat && target.lastRecurringDamageTurn === turn) return {ok: true, damage: 0, alreadyResolved: true};
+		if (repeat) target.lastRecurringDamageRepeatTurn = turn;
+		else target.lastRecurringDamageTurn = turn;
+		target.updatedAt = Date.now();
+		return {ok: true, damage: target.recurringDamage.amount, damageType: target.recurringDamage.type};
+	}
+
+	reconcileTargetEffects () {
+		const calc = this.getFeatureCalculations() || {};
+		const legal = calc.hasManifestChains && this.isStateTypeActive("rage") && this.isStateTypeActive("manifestChains");
+		if (!legal) {
+			this.clearTargetEffects("chained-fury");
+			const manifest = this._data.activeStates.find(state => state.stateTypeId === "manifestChains");
+			if (manifest?.active && !this._getChainedFuryClass()) manifest.active = false;
+		} else {
+			const max = Number(calc.chainRange) || 0;
+			const maxSize = this.getGrappleSizeCategory()?.maxTargetSize;
+			const maxRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(maxSize || "gargantuan").toLowerCase());
+			const capacity = Number(calc.chainCount) || 0;
+			const occupants = [...this._data.targetEffects]
+				.filter(it => it.source === "chained-fury" && it.effects?.grapple?.active && it.chainIndex != null)
+				.sort((a, b) => Number(a.chainIndex) - Number(b.chainIndex));
+			for (const target of [...this._data.targetEffects]) {
+				if (target.source !== "chained-fury") continue;
+				const grappled = !!target.effects?.grapple?.active;
+				if (target.distance != null && target.distance > max) {
+					this._releaseChainedTargetEffect(target);
+					continue;
+				}
+				const sizeRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(target.size || "medium").toLowerCase());
+				if (grappled && (!calc.grappleSizeUnlimited && maxRank >= 0 && sizeRank > maxRank)) {
+					this._releaseChainedTargetEffect(target);
+					continue;
+				}
+				if (grappled && occupants.indexOf(target) >= capacity) {
+					this._releaseChainedTargetEffect(target);
+					continue;
+				}
+				if (grappled) {
+					target.chainIndex = occupants.indexOf(target);
+				}
+				if (!grappled) target.chainIndex = null;
+				target.grappled = grappled;
+				target.effects.grapple.active = grappled;
+				target.escapeDc = calc.chainGrappleDc || null;
+				target.effects.grapple.dc = calc.chainGrappleDc || null;
+				target.restraintDc = calc.chainRestrainDc || null;
+				target.effects.restraint.dc = calc.chainRestrainDc || null;
+				// Ordinary grapples never carry the restraint layer. This also
+				// repairs saves written by the earlier implementation, which
+				// accidentally marked every grapple as restrained.
+				if (target.effectType !== "restrain") {
+					target.restrained = false;
+					target.effects.restraint.active = false;
+					target.recurringDamage = null;
+				} else if (target.restrained && (!grappled || !calc.hasChainImprisonment)) {
+					this._releaseChainedTargetEffect(target);
+				} else if (target.restrained) {
+					target.effects.restraint.active = true;
+					target.recurringDamage = {
+						amount: Number(calc.chainRestrainDamage) || 0,
+						type: "force",
+						when: "start of each of its turns",
+					};
+				}
+				target.restrained = !!target.effects.restraint.active && grappled && target.effectType === "restrain";
+				target.shoved = !!target.effects.shove.active;
+			}
+		}
+	}
+
+	getChainedFuryTargets () { return this.getChainedTargets(); }
+	clearChainedFuryTargets () { return this.clearTargetEffects("chained-fury"); }
 
 	/**
 	 * Effective size category used when grappling or shoving, and when moving a
@@ -66133,6 +68323,9 @@ class CharacterSheetState {
 	onShortRest () {
 		// Clear active states that end on rest
 		this.clearStatesOnRest("short");
+		this.clearChainedFuryTargets();
+		this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
+		this.resetActionEconomy();
 
 		// Recover short rest resources (includes Ki/Focus Points)
 		this.recoverResources("short");
@@ -66165,6 +68358,8 @@ class CharacterSheetState {
 	onLongRest (options = {}) {
 		// Clear active states that end on rest
 		this.clearStatesOnRest("long");
+		this.clearChainedFuryTargets();
+		this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
 
 		// Recover all HP
 		this._data.hp.current = this.getMaxHp();

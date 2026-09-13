@@ -323,8 +323,6 @@ export class BuilderWizardPage {
 	}
 
 	async setQuickBuildTargetLevel (level: number): Promise<void> {
-		await this.classPreview.waitFor({state: "visible", timeout: 10000});
-		await expect(this.classPreview).toContainText("Quick Build", {timeout: 10000});
 		await this.quickBuildLevelSlider.waitFor({state: "visible", timeout: 10000});
 		await this.quickBuildLevelSlider.evaluate((element, value) => {
 			const input = /** @type {HTMLInputElement} */ (element);

@@ -23,6 +23,15 @@ This document catalogs all Thelemar homebrew content implemented in the characte
 
 **Total TGTT Tests**: 737 passing
 
+### Gambler Rogue lifecycle
+
+The TGTT Gambler is source-qualified as `Rogue|TGTT` plus
+`Gambler|TGTT`; disabling TGTT or changing either source removes Gambler-only
+spellcasting, resources, synthesized implements, pending receipts, and
+table-owned effects. Gambling Table self effects use the shared condition,
+named-modifier, and active-state expiry paths. Radius effects remain explicit
+`area`/manual outcomes, and manual outcomes may be persisted as sticky notes.
+
 ---
 
 ## Gemstone Empowerment
@@ -203,7 +212,7 @@ exactly the RAW "they vanish when your rage ends". It inherits Rage's
 | Level | Feature | Implementation |
 |---|---|---|
 | 3 | Manifest Chains | `manifestChains` toggle; a `grantedAttacks` descriptor (`Spectral Chains`, finesse, force, `reachBonus`, `requiresState: "manifestChains"`) that appears in the Combat attack list with a `✨ Feature` badge; `attackOnHitOptions` `chains-grapple` / `chains-shove`; grapple size +1 |
-| 6 | Chain Imprisonment | `countsAsMagical` on the chains (renders a `✧ Magical` badge); `chains-restrain` on-hit rider with a STR save at `8 + PB + STR` and recurring damage |
+| 6 | Chain Imprisonment | `countsAsMagical` on the chains (renders a `✧ Magical` badge); `chains-restrain` on-hit rider with a STR save at `8 + PB + CON` and recurring damage equal to current Barbarian level |
 | 10 | Chain Control | grapple size bonus → +2; `chains-control-shove` on-hit rider |
 | 14 | Unchained Fury | `chainCount` 2 → 4; `attackActionAllowances` entry (3 attacks with the chains per Attack action); `grappleSizeUnlimited` (no size cap) |
 
@@ -238,30 +247,36 @@ hook as a confirm-then-pick prompt.
 | 3 | **Bonus Proficiencies** | Performance auto-granted; one further skill prompted at creation / Quick Build / level-up (the "proficiency in between …" phrasing needed a new `FeatureChoiceParser` pattern) |
 | 3 | **Jester's Acts** | The wrapper. Classified `passive` via `FEATURE_CLASSIFICATION_OVERRIDES`; the acts themselves carry the mechanics. Act save DC = `8 + your Performance skill bonus` (**not** the usual 8 + PB + CHA) via `getJesterActDc()` |
 | 3 | **Jester's Acts Options** | The pick pool (13 acts, `featureType: "JA"`). Count comes from the subclass's own **"Jester's Acts Known"** table column via `getSubclassTableNumber` — 3 at L3, 4 at L6, 5 at L14 |
-| 6 | **Gifted Acrobat** | Climbing speed equal to walking speed (`speed:climb` `equalToWalk`). The bonus-action grapple escape and 10-ft stand-from-prone have **no** generic surface — see **CS-BUG-119** |
+| 6 | **Gifted Acrobat** | Climbing speed equal to walking speed (`speed:climb` `equalToWalk`), plus generic action/movement overrides for bonus-action grapple escapes and standing from prone for 10 ft; the Combat tab surfaces both |
 | 6 | **Unparalleled Skill** | Expertise (doubled proficiency) in one chosen skill; the choice is prompted and applied |
-| 14 | **Jester's Privilege** | 1 use / **long** rest. DC is a **rolled** value — `activationInfo.rolledSaveDc` rolls Performance at activation and reports "DC = result" rather than substituting a static DC |
+| 14 | **Jester's Privilege** | 1 use / **long** rest. The Bardic Inspiration rider picker spends one Inspiration plus the feature's own use atomically. Its DC is a **rolled** value — `activationInfo.rolledSaveDc` rolls Performance at activation and reports "DC = result" rather than substituting a static DC |
 
-**The 13 Jester's Acts.** Each is a discrete row with its own Use button in the
-generic "Available to Activate" list. Detection is **data-driven**
+**The 13 Jester's Acts.** Limited and triggered Acts have a **Use** control in
+the Features area; durational Acts have **Activate/End** controls in the shared
+Active States panel. Detection is **data-driven**
 (`_buildJesterActActivationInfo` reads each act's own prose), so a homebrewer
-adding a 14th act inherits the behaviour for free.
+adding a 14th act inherits the same runtime contracts rather than needing a
+name-specific handler.
 
 | Act | Action | BI cost | Mechanics |
 |---|---|---|---|
-| Jester's Pantomime | action | 0 | WIS save, 30 ft, **charmed** |
-| Jester's Prankster | action | 0 | WIS save, 30 ft, **dazed** |
-| Trickster's Disengagement | bonus | 0 | Disengage |
-| Jester's Tumbler | bonus | 0 | toggle, "rest of the turn" |
-| Dazzling Disguise | special | 0 | toggle 1 hour + conditional Deception advantage |
-| Jester's Juggle | bonus | 0 | WIS save, 30 ft |
-| Fool's Folly | special | **1** | INT save, 60 ft, incapacitated |
-| Laughing Lunge | attack | **1** | attack-timing rider |
-| Jester's Jaunt | special | **1** | grants *mirror image* |
-| Ridiculous Ruse | special | **1** | grants *silent image* |
-| Jester's Agility | reaction | **1** | toggle, AC bonus = proficiency bonus |
-| Witty Wordplay | special | 0 | 60 ft |
-| Jester's Jest | bonus | 0 | WIS save |
+| Pantomime | action | 0 | Reports the 30-ft WIS save and charmed outcome |
+| Prankster | action | 0 | Reports the 30-ft WIS save and dazed outcome |
+| Trickster's Disengagement | bonus | 0 | Stores a rest-of-turn Disengage override for up to five creatures |
+| Tumbler | bonus | 0 | Stores the rest-of-turn hostile-space movement permission |
+| Dazzling Disguise | special | 0 | One-hour state; Deception advantage applies only while active |
+| Jester's Juggle | bonus | 0 | Reports the 30-ft hostile-creature WIS save and advantage-on-target outcome |
+| Fool's Folly | BI rider | **1 total** | Uses the shared Bardic Inspiration transaction; reports the 60-ft INT save and incapacitated outcome |
+| Laughing Lunge | attack | **1** | Arms advantage and `1d6` psychic damage for the next attack, then consumes once |
+| Jester's Jaunt | special | **1** | Casts *mirror image* through the generic resource-cast pipeline |
+| Ridiculous Ruse | special | **1** | Casts concentration *silent image* through the generic resource-cast pipeline |
+| Jester's Agility | reaction | **1** | Timed active state; AC increases by proficiency bonus |
+| Witty Wordplay | BI rider | **1 total** | Uses the shared Bardic Inspiration transaction and reports the 60-ft next-attack disadvantage rider |
+| Jester's Jest | bonus | 0 | Reports the WIS save and loss-of-reactions outcome |
+
+Runtime states persist their duration plus attack/action/movement descriptors.
+Loading an older save backfills missing descriptors from the stored feature
+without duplicating the state or altering already-persisted values.
 
 > **`consumes` beats prose for the Bardic Inspiration cost.** Five acts declare
 > `consumes` in the homebrew and that is authoritative. The prose fallback must
@@ -294,7 +309,7 @@ adding a 14th act inherits the behaviour for free.
 | **Darkness** | ✅ Complete | `darknessChannelRange`, `umbralStrikeDamage` |
 | **Lust** | ✅ Complete | `charmingPresenceDc`, `seductiveAuraRange` |
 | **Madness** | ✅ Complete | `maddingTouchDamage`, `contagiousMadnessRange` |
-| **Time** | ✅ Complete | See [Time Domain](#time-domain-full-surface) below — implemented as real mechanics (domain spells, initiative modifier, resource pools, cantrip damage, self-imposed condition), not calc keys |
+| **Time** | ✅ Complete | See [Time Domain](#time-domain-full-surface) below — domain spells, turn-order swap, external-roll reaction, temporal-vision state, cantrip damage, and age handling are all player-operable mechanics |
 
 #### Time Domain — full surface
 
@@ -305,17 +320,18 @@ domain at L3, not L1) plus a **17** tier added for Temporal Mastery.
 | Level | Feature | Mechanical implementation |
 |---|---|---|
 | 3 | Time Domain | Wrapper; pulls in the three L3 features via `refSubclassFeature` |
-| 3 | Chronological Interference | Bonus-action limited-use ability on a PB-scaled pool (2/3/3/6 at L3/5/8/17). The initiative *swap* itself is DM-side — the sheet spends the use |
-| 3 | Right on Time | `+WIS` initiative modifier, read by `getInitiative()` |
-| 3 | Time Domain Spells | `additionalSpells.prepared` → always-prepared, via the generic subclass path |
-| 3 | CD: Temporal Manipulation | Reaction; surfaced by the generic `"Channel Divinity: <Option>"` handler and bound to the shared Channel Divinity pool |
-| 6 | Eyes of the Future Past | Bonus-action toggle on a `max(1, wisMod)` pool that applies **Blinded** to its own owner while active and releases it on end (see `addsConditions` below) |
-| 8 | Potent Spellcasting | `+WIS` to cleric cantrip damage, read by `getCantripDamageBonus` |
-| 17 | Temporal Mastery | Adds *time stop* and *time ravage* to the always-prepared domain list (data-driven, the `"17"` tier) |
+| 3 | Chronological Interference | Bonus-action limited-use ability on a PB-scaled pool (2/3/3/6 at L3/5/8/17). The Combat tab's lightweight Turn Order roster selects two distinct creatures that have not acted, previews the result, and swaps their stored positions and initiative values only on confirmation |
+| 3 | Right on Time | One dynamic `+WIS` initiative modifier, read consistently by `getInitiative()` and modifier breakdowns; legacy duplicate numeric rows are removed on load |
+| 3 | Time Domain Spells | `additionalSpells.prepared` → always-prepared Cleric spells, preserving the canonical PHB/EGW sources and locked against unpreparing |
+| 3 | CD: Temporal Manipulation | Reaction modal requiring a target plus Advantage/Disadvantage; confirmation spends one shared Channel Divinity use and records the external result without creating a self modifier or active state |
+| 6 | Eyes of the Future Past | Curated bonus-action state on a `max(1, wisMod)` pool. Activation chooses Past/Future at one hour; each later round offers Hold/Advance; the state tracks its 10-round duration and owns the **Blinded** condition it applies and removes |
+| 8 | Potent Spellcasting | `+WIS` to Cleric cantrip damage through `getCantripDamageBonus`; if the character also chose the XPHB Blessed Strikes option, the two canonical grants display as one effect with both provenances and never double the bonus |
+| 17 | Temporal Mastery | Adds *time stop* and *time ravage* to the always-prepared domain list; Long Rest offers no change/younger/older age choices, and the feature card resolves magical aging as Ignore/Accept |
+| 2/6/18 | Shared Channel Divinity | TGTT follows XPHB progression: 2/3/4 uses. A Short Rest restores one expended use; a Long Rest restores all |
 
-Deliberately **not** modelled: Chronological Interference's swap of two
-creatures' initiative order, because the sheet does not track other creatures'
-initiative. Only the use-spend is implemented.
+The Turn Order roster is intentionally narrow: name, initiative, order, and
+whether a creature has acted. It exists to resolve Chronological Interference
+without duplicating the DM Screen's encounter-management responsibilities.
 
 ##### Convention: `addsConditions` on generically-detected toggles
 
@@ -326,7 +342,10 @@ extracts the condition from the feature text, the toggle detector attaches it
 to the activation info as `addsConditions`, and `addActiveState` applies and
 releases it. Only self-directed phrasings match; negations and immunity
 clauses ("you are immune to being blinded", "you can't be blinded") are
-rejected. Prefer this over adding a bespoke state type.
+rejected. Prefer this over adding a bespoke state type unless the feature needs
+additional persisted lifecycle data; Eyes of the Future Past is the example
+exception because it stores direction, hour offset, pending round choice, and
+duration.
 
 ### ✅ Ranger Conclaves
 
@@ -338,17 +357,17 @@ rejected. Prefer this over adding a bespoke state type.
 
 | Archetype | Status | Key Features |
 |-----------|--------|--------------|
-| **The Belly Dancer** | ✅ Complete | `dancing` toggle state (+CHA AC, min +1; Acrobatics advantage; melee Sneak Attack without advantage; DC 10 CON save on end or gain 1 exhaustion); `hasConcealedWeapons`, `danceEndSaveDc`; gated `tantalizingShivers` + `percussiveStrike` states; Fluid Step Disengage benefit |
+| **The Belly Dancer** | ✅ Complete | Source-gated `dancing` state (+CHA AC, min +1; Acrobatics advantage; melee Sneak Attack without advantage); named target tracking for Tantalizing Shivers and automatic Percussive Strike; canonical teardown with queued DC 10 CON end save; Fluid Step Disengage benefit |
 
 #### The Belly Dancer — feature-by-feature
 
 | Lvl | Feature | Mechanical effect on the sheet |
 |---|---|---|
 | 3 | **Bonus Proficiency** | Performance Expertise (`getSkillProficiency("performance") === 2`); `hasConcealedWeapons` plus a **conditional** Sleight of Hand advantage ("to keep a weapon you are holding hidden"), opt-in per roll like every other conditional modifier |
-| 3 | **Dance of the Country** | Bonus-action `dancing` toggle costing 1 of PB/short rest. While active: AC + CHA mod (**minimum +1**), advantage on Dex (Acrobatics), and `sneakAttackWithoutAdvantage` for **melee** attacks. Ends on Incapacitated / Paralyzed / Restrained / donning heavy armor / 1 minute; ending triggers a **DC 10 Constitution** save, failure = 1 exhaustion |
-| 9 | **Tantalizing Shivers** | Separate toggle, `requiresStates: ["dancing"]`. Activation rolls a **Charisma (Performance)** contest vs the target's Wisdom (Insight) *before* spending anything; winning grants advantage on attacks for 1 round |
+| 3 | **Dance of the Country** | Tracked Bonus Action `dancing` toggle costing 1 of PB/short rest. While active: AC + CHA mod (**minimum +1**), advantage on Dex (Acrobatics), and `sneakAttackWithoutAdvantage` for **melee** attacks. Exact condition, heavy-armor, manual, and 10-round endings all use canonical teardown and enqueue exactly one **DC 10 Constitution** save; failure = 1 exhaustion |
+| 9 | **Tantalizing Shivers** | Named-target state with `requiresStates: ["dancing"]`. The target is chosen before commitment; the Bonus Action is then spent and a **Charisma (Performance)** contest is rolled vs Wisdom (Insight). Winning records Charmed / Incapacitated / speed 0 reminders for one round and offers opt-in attack advantage only against that target |
 | 13 | **Fluid Step** | `grantsActionBenefit: "disengage"` while Dancing → `hasActionBenefitFromStates("disengage")`. The reciprocal clause (enemies can't Disengage from you) is a rules note only — see **CS-BUG-115** |
-| 17 | **Percussive Strike** | Free-action toggle, `requiresStates: ["dancing"]`, DC = `8 + PB + CHA` via `getPercussiveStrikeDc()`, surfaced in the Combat tab; grants advantage on attacks and lasts as long as the Dance |
+| 17 | **Percussive Strike** | Automatic rider when Dance begins, never a standalone toggle. The activation modal shows the derived Wisdom save DC (`8 + PB + CHA`) and records zero or more failed targets on the Dance state; each target supplies its own opt-in attack-advantage modifier until the Dance ends |
 
 > **Dance of the Country is a toggle, not a choice.** The homebrew text reads
 > "you can start Dancing, and can stop doing so at will" — there is no list of

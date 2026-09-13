@@ -124,6 +124,9 @@ The sheet itself.  Most probes go through this.
 - `getToggleableFeatureNames(): string[]`.
 - `activateFeature(name)` / `deactivateFeature(name)` /
   `isFeatureActive(name): boolean`.
+- `activateFeatureWithTargets(name, targetNames, {contestWon?})` — drives
+  named-target capture and any follow-up contested-check confirmation through
+  the real activation UI.
 
 ### Resources & slots
 

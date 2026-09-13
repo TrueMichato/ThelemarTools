@@ -8089,13 +8089,7 @@ class CharacterSheetPage {
 			`});
 
 			row.querySelector(".charsheet__resource-use-btn").addEventListener("click", () => {
-				if (resource.current > 0) {
-					this._state.setResourceCurrent(resource.id, resource.current - 1);
-					this._saveCurrentCharacter();
-					this._renderResources();
-					this._renderActiveStates(); // Refresh active states to update Activate button states
-					if (this._features) this._features._renderResources();
-				}
+				void this._pUseResource(resource.id);
 			});
 
 			row.querySelector(".charsheet__resource-restore-btn").addEventListener("click", () => {
@@ -9182,6 +9176,7 @@ class CharacterSheetPage {
 	// #endregion
 
 	_renderActiveStates () {
+		this._schedulePendingStateEndSaves();
 		const container = document.getElementById("charsheet-active-states");
 		container.innerHTML = "";
 
@@ -10189,6 +10184,14 @@ class CharacterSheetPage {
 		if (isSpellEffect && state.grantsConditions?.length > 0) {
 			grantsConditionsHtml = `<span class="ve-small text-info ml-2" title="This spell grants these conditions">(Grants: ${state.grantsConditions.join(", ")})</span>`;
 		}
+		const targets = Array.isArray(state.targets) ? state.targets : [];
+		const targetsHtml = targets.length
+			? `<span class="charsheet__state-targets ml-2" aria-label="Affected targets">${targets.map(target => {
+				const statusText = target.statuses?.length ? ` — ${target.statuses.join(", ")}` : "";
+				const title = `${target.source || state.name || "Effect"}: ${target.name}${statusText}`.qq();
+				return `<span class="charsheet__state-target" title="${title}">${target.name.qq()}</span>`;
+			}).join("")}</span>`
+			: "";
 
 		// C2: Show inline effect labels for non-spell active states (e.g. Patient Defense)
 		let effectLabelsHtml = "";
@@ -10216,6 +10219,20 @@ class CharacterSheetPage {
 				effectLabelsHtml = `<span class="ve-small ve-muted ml-2">${labels.join(" · ")}</span>`;
 			}
 		}
+		let temporalViewHtml = "";
+		const isTemporalVision = isActive && state.stateTypeId === "eyesOfFuturePast" && state.temporalView;
+		if (isTemporalVision) {
+			const direction = state.temporalView.direction
+				? state.temporalView.direction.toTitleCase()
+				: "Direction required";
+			const offset = Math.max(1, Number(state.temporalView.offsetHours) || 1);
+			const pending = state.temporalView.decisionPending
+				? " · Choose this round's view"
+				: state.temporalView.roundDecision
+					? ` · ${state.temporalView.roundDecision.toTitleCase()} selected`
+					: "";
+			temporalViewHtml = `<span class="charsheet__temporal-state-summary ve-small ml-2" aria-live="polite">${direction} · ${offset} hour${offset === 1 ? "" : "s"}${pending}</span>`;
+		}
 
 		// Style differently for spell effects
 		const bgColor = isActive
@@ -10230,13 +10247,28 @@ class CharacterSheetPage {
 				style="background: ${bgColor}; border: 1px solid ${borderColor};">
 				<span class="charsheet__state-icon mr-2" style="font-size: 1.2em;" title="${tooltipAttr}">${icon}</span>
 				<span class="charsheet__state-name ve-bold" title="${tooltipAttr}">${nameHtml}${concentrationHtml}</span>
-				${effectLabelsHtml}${durationHtml}${grantsConditionsHtml}
+				${effectLabelsHtml}${temporalViewHtml}${durationHtml}${grantsConditionsHtml}${targetsHtml}
 				<div class="charsheet__state-controls ml-auto ve-flex-v-center">
+					${isTemporalVision && state.temporalView.decisionPending ? `
+						<button class="ve-btn ve-btn-xs ve-btn-default mr-1 charsheet__temporal-hold-btn">Hold</button>
+						<button class="ve-btn ve-btn-xs ve-btn-info mr-1 charsheet__temporal-advance-btn">Advance 1 hour</button>
+					` : ""}
 					${isSpellEffect ? `<span class="ve-small ve-muted mr-2" title="Remember to end this when the spell ends">Spell Effect</span>` : ""}
 					${isEndable ? `<button class="ve-btn ve-btn-xs ${isSpellEffect ? "ve-btn-danger" : "ve-btn-warning"} charsheet__end-state-btn">${isSpellEffect ? "End Spell" : "End"}</button>` : `<span class="ve-small ve-muted" title="This is a passive ability">Passive</span>`}
 				</div>
 			</div>
 		`});
+
+		if (isTemporalVision && state.temporalView.decisionPending) {
+			const resolveRoundChoice = (choice) => {
+				if (!this._state.resolveTemporalViewRoundChoice(choice)) return;
+				this._saveCurrentCharacter();
+				this._renderActiveStates();
+				this._combat?.renderCombatStates?.();
+			};
+			row.querySelector(".charsheet__temporal-hold-btn")?.addEventListener("click", () => resolveRoundChoice("hold"));
+			row.querySelector(".charsheet__temporal-advance-btn")?.addEventListener("click", () => resolveRoundChoice("advance"));
+		}
 
 		if (isEndable) {
 			row.querySelector(".charsheet__end-state-btn").addEventListener("click", async () => {
@@ -10259,7 +10291,7 @@ class CharacterSheetPage {
 						// Sync custom abilities panel
 						this._customAbilitiesPanel?.render?.();
 					} else {
-						this._state.deactivateState(state.stateTypeId);
+						this._state.deactivateState(state.stateTypeId, {reason: "manual"});
 						// Bridge combat stance deactivation to the stance-specific system
 						if (state.stateTypeId === "combatStance") {
 							this._state.deactivateStance();
@@ -10269,7 +10301,7 @@ class CharacterSheetPage {
 						// (e.g. the Belly Dancer's Dance of the Country: DC 10 CON or a
 						// level of exhaustion). Prompted AFTER deactivation so the roll is
 						// made without the state's own bonuses still applied.
-						await this._pResolveStateEndSave(state.stateTypeId);
+						await this._pDrainPendingStateEndSaves();
 					}
 				}
 				this._saveCurrentCharacter();
@@ -12562,9 +12594,12 @@ class CharacterSheetPage {
 	 * @param {string} stateTypeId
 	 * @private
 	 */
-	async _pResolveStateEndSave (stateTypeId) {
+	async _pResolveStateEndSave (stateTypeId, {pendingId = null} = {}) {
 		const endSave = this._state.getStateEndSave?.(stateTypeId);
-		if (!endSave) return;
+		if (!endSave) {
+			if (pendingId) this._state.resolvePendingStateEndSave?.(pendingId, Number.POSITIVE_INFINITY);
+			return;
+		}
 
 		const ability = endSave.ability;
 		const mod = this._state.getSaveMod(ability);
@@ -12572,7 +12607,9 @@ class CharacterSheetPage {
 		const roll = typeof RollerUtil !== "undefined" ? RollerUtil.randomise(20) : Math.ceil(Math.random() * 20);
 		const total = roll + mod - exhaustionPenalty;
 
-		const outcome = this._state.resolveStateEndSave(stateTypeId, {total});
+		const outcome = pendingId
+			? this._state.resolvePendingStateEndSave(pendingId, total)
+			: this._state.resolveStateEndSave(stateTypeId, {total});
 		if (!outcome) return;
 
 		const abilityFull = typeof Parser !== "undefined" ? Parser.attAbvToFull(ability) : ability.toUpperCase();
@@ -12592,6 +12629,122 @@ class CharacterSheetPage {
 		if (!outcome.success && outcome.exhaustionGained) {
 			JqueryUtil.doToast({type: "warning", content: note});
 		}
+	}
+
+	async _pDrainPendingStateEndSaves () {
+		if (this._isResolvingPendingStateEndSaves) return;
+		this._isResolvingPendingStateEndSaves = true;
+		try {
+			while (true) {
+				const pending = this._state.getPendingStateEndSaves?.()[0];
+				if (!pending) break;
+				await this._pResolveStateEndSave(pending.stateTypeId, {pendingId: pending.id});
+				await this._saveCurrentCharacter();
+			}
+		} finally {
+			this._isResolvingPendingStateEndSaves = false;
+		}
+	}
+
+	_schedulePendingStateEndSaves () {
+		if (this._isPendingStateEndSaveScheduled || this._isResolvingPendingStateEndSaves) return;
+		if (!this._state.getPendingStateEndSaves?.().length) return;
+		this._isPendingStateEndSaveScheduled = true;
+		Promise.resolve().then(async () => {
+			this._isPendingStateEndSaveScheduled = false;
+			await this._pDrainPendingStateEndSaves();
+			this._renderResources();
+			this._renderActiveStates();
+			this._combat?.renderCombatStates?.();
+			this._renderCharacter();
+		});
+	}
+
+	async _pChooseActiveStateTargets (feature, targeting) {
+		if (!targeting) return [];
+
+		const isMultiple = targeting.mode === "multiple";
+		const allowEmpty = isMultiple;
+		let resolveOuter = null;
+		let isResolved = false;
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: isMultiple ? `${feature.name} — Record Failed Saves` : `${feature.name} — Choose Target`,
+			isMinHeight0: true,
+			cbClose: () => {
+				if (resolveOuter && !isResolved) {
+					isResolved = true;
+					resolveOuter(null);
+				}
+			},
+		});
+
+		return new Promise(resolve => {
+			resolveOuter = resolve;
+			const finalize = value => {
+				if (isResolved) return;
+				isResolved = true;
+				resolve(value);
+			};
+			const statusText = (targeting.statuses || []).join(", ");
+			modalInner.innerHTML = `
+				<div class="charsheet__target-picker">
+					<p class="charsheet__target-picker-lede">${isMultiple
+		? `After the DC ${this._state.getPercussiveStrikeDc?.() ?? "—"} Wisdom saves are resolved, enter each hostile creature that failed. Leave this empty if none failed.`
+		: `Name the visible creature you are targeting. The sheet records the outcome on this target without applying enemy conditions to your character.`}</p>
+					<label class="charsheet__target-picker-label" for="charsheet-target-picker-input">${isMultiple ? "Failed targets" : "Target name"}</label>
+					${isMultiple
+		? `<textarea id="charsheet-target-picker-input" class="form-control charsheet__target-picker-input" rows="5" placeholder="One target per line, e.g.&#10;Bandit Captain&#10;Cult Fanatic"></textarea>`
+		: `<input id="charsheet-target-picker-input" class="form-control charsheet__target-picker-input" type="text" autocomplete="off" placeholder="e.g. Bandit Captain">`}
+					<div class="ve-small ve-muted mt-1">${isMultiple ? "Separate names with a new line or comma." : `On a won contest: ${statusText || "the feature's effects apply"}.`}</div>
+					<div class="charsheet__target-picker-error ve-small text-danger mt-2" role="alert" aria-live="polite"></div>
+					<div class="ve-flex-h-right mt-3" style="gap: 8px;">
+						<button class="ve-btn ve-btn-default" data-act="cancel">Cancel</button>
+						<button class="ve-btn ve-btn-primary" data-act="confirm">${isMultiple ? "Start Dance" : "Roll Contest"}</button>
+					</div>
+				</div>
+			`;
+
+			const input = modalInner.querySelector("#charsheet-target-picker-input");
+			const error = modalInner.querySelector(".charsheet__target-picker-error");
+			const collect = () => {
+				const rawNames = isMultiple ? `${input.value || ""}`.split(/[\n,]+/) : [`${input.value || ""}`];
+				const names = [...new Map(rawNames
+					.map(name => name.trim())
+					.filter(Boolean)
+					.map(name => [name.toLowerCase(), name])).values()];
+				if (!allowEmpty && !names.length) {
+					error.textContent = "Enter a target name to continue.";
+					input.focus();
+					return null;
+				}
+				return names.map(name => ({
+					name,
+					source: targeting.source || feature.name,
+					statuses: targeting.statuses || [],
+					grantsAttackAdvantage: !!targeting.grantsAttackAdvantage,
+				}));
+			};
+
+			modalInner.querySelector(`[data-act="cancel"]`).addEventListener("click", () => {
+				finalize(null);
+				doClose();
+			});
+			modalInner.querySelector(`[data-act="confirm"]`).addEventListener("click", () => {
+				const targets = collect();
+				if (targets == null) return;
+				finalize(targets);
+				doClose();
+			});
+			input.addEventListener("input", () => { error.textContent = ""; });
+			if (!isMultiple) {
+				input.addEventListener("keydown", evt => {
+					if (evt.key !== "Enter") return;
+					evt.preventDefault();
+					modalInner.querySelector(`[data-act="confirm"]`).click();
+				});
+			}
+			input.focus();
+		});
 	}
 
 	/**
@@ -12637,17 +12790,452 @@ class CharacterSheetPage {
 	 */
 	async _pResolveRolledSaveDc (feature, spec) {
 		const result = await this._rollSkillCheck(spec.skill, spec.skillLabel, null, spec.ability);
-		if (!result) return false;
+		if (!result) return null;
 		const saveFull = typeof Parser !== "undefined" ? Parser.attAbvToFull(spec.saveAbility) : String(spec.saveAbility).toUpperCase();
 		const rangeTxt = spec.range ? ` within ${spec.range} ft.` : "";
 		JqueryUtil.doToast({
 			type: "info",
 			content: `${feature?.name || "Ability"}: creatures${rangeTxt} must make a DC ${result.total} ${saveFull} saving throw (your ${spec.skillLabel} check result).`,
 		});
+		return {dc: result.total, roll: result};
+	}
+
+	/**
+	 * Present an external target-resolution contract without pretending the sheet
+	 * owns the target's save roll or condition state.
+	 */
+	_pPresentTargetResolution (feature, spec, {dc = null} = {}) {
+		if (!spec) return;
+		const targetLabel = {
+			one: "One creature",
+			allHostile: "Each hostile creature",
+			allCreatures: "Each creature",
+			upToFive: "Up to five creatures",
+		}[spec.targets] || "Target";
+		const save = spec.saveAbility
+			? ` DC ${dc ?? "—"} ${Parser.attAbvToFull(spec.saveAbility)} save.`
+			: "";
+		const range = spec.range ? ` within ${spec.range} ft.` : "";
+		const summary = CharacterSheetClassUtils.escapeHtml(spec.summary || feature?.description || "");
+		JqueryUtil.doToast({
+			type: "info",
+			content: `<strong>${CharacterSheetClassUtils.escapeHtml(feature?.name || "Ability")}</strong>: ${targetLabel}${range}.${save}${summary ? `<div class="ve-small mt-1">${summary}</div>` : ""}`,
+		});
+	}
+
+	async _pChooseResourceUseAugment (resource, augments, {preselectedAugmentId = null} = {}) {
+		const {eleModalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: `Use ${resource.name}`,
+			isMinHeight0: true,
+			isUncappedHeight: true,
+		});
+		let selectedId = preselectedAugmentId || "";
+		let committed = false;
+		const options = [
+			{feature: null, label: `Plain ${resource.name}`, available: true, description: "Spend the resource without an additional rider."},
+			...augments.map(it => ({
+				...it,
+				label: it.feature.name,
+				description: it.activationInfo?.targetResolution?.summary || it.feature.description || "",
+			})),
+		];
+		const list = e_({outer: `<div class="ve-flex-col p-2" role="radiogroup" aria-label="${CharacterSheetClassUtils.escapeHtml(resource.name)} options"></div>`});
+		for (const option of options) {
+			const id = option.feature?.id || "";
+			const inputId = `resource-augment-${String(id || "plain").replace(/[^a-z0-9_-]/gi, "-")}`;
+			const checked = selectedId === id;
+			const row = e_({outer: `
+				<label class="ve-flex-v-center p-2 mb-2" style="gap:.5rem;border:1px solid var(--cs-border);border-radius:4px;${option.available === false ? "opacity:.6;" : ""}">
+					<input type="radio" name="resource-augment" id="${inputId}" value="${CharacterSheetClassUtils.escapeHtml(id)}" ${checked ? "checked" : ""} ${option.available === false ? "disabled" : ""}>
+					<span class="ve-flex-col">
+						<span class="bold">${CharacterSheetClassUtils.escapeHtml(option.label)}</span>
+						<span class="ve-small ve-muted">${CharacterSheetClassUtils.escapeHtml(option.unavailableReason || option.description || "")}</span>
+					</span>
+				</label>
+			`});
+			row.querySelector("input")?.addEventListener("change", () => { selectedId = id; });
+			list.append(row);
+		}
+		const controls = e_({outer: `<div class="ve-flex-v-center mt-2" style="gap:.5rem;">
+			<button class="ve-btn ve-btn-primary" type="button">Use 1 ${CharacterSheetClassUtils.escapeHtml(resource.name)}</button>
+			<button class="ve-btn ve-btn-default" type="button">Cancel</button>
+		</div>`});
+		controls.children[0].addEventListener("click", () => {
+			committed = true;
+			doClose(true);
+		});
+		controls.children[1].addEventListener("click", () => doClose(false));
+		eleModalInner.append(list, controls);
+		await pGetResolved();
+		if (!committed) return null;
+		return options.find(it => (it.feature?.id || "") === selectedId) || options[0];
+	}
+
+	/**
+	 * Canonical resource-use transaction. Resource panels and "when you use X"
+	 * features both route here so riders cannot double-spend or bypass their own uses.
+	 */
+	async _pUseResource (resourceId, {preselectedAugmentId = null} = {}) {
+		const resource = (this._state.getResources() || []).find(it => it.id === resourceId);
+		if (!resource || resource.current <= 0) {
+			JqueryUtil.doToast({type: "warning", content: `${resource?.name || "Resource"} has no uses remaining.`});
+			return false;
+		}
+
+		const augments = this._state.getResourceUseAugments?.(resource.name) || [];
+		const choice = augments.length
+			? await this._pChooseResourceUseAugment(resource, augments, {preselectedAugmentId})
+			: {feature: null};
+		if (!choice) return false;
+		if (choice.available === false) {
+			JqueryUtil.doToast({type: "warning", content: choice.unavailableReason});
+			return false;
+		}
+
+		let resolvedSaveDc = null;
+		if (choice.activationInfo?.rolledSaveDc) {
+			const resolved = await this._pResolveRolledSaveDc(choice.feature, choice.activationInfo.rolledSaveDc);
+			if (!resolved) return false;
+			resolvedSaveDc = resolved.dc;
+		}
+
+		const spent = this._state.spendResourceUse(resource.id, {augmentFeatureId: choice.feature?.id || null});
+		if (!spent.ok) {
+			JqueryUtil.doToast({type: "warning", content: spent.error});
+			return false;
+		}
+
+		if (choice.feature) {
+			const af = choice;
+			const stateType = af.activationInfo?.stateType || CharacterSheetState.ACTIVE_STATE_TYPES[af.stateTypeId];
+			await this._activateFeatureState(
+				af.feature,
+				af.stateTypeId,
+				stateType,
+				null,
+				0,
+				{
+					...af.activationInfo,
+					resourceTriggerResolved: true,
+					rolledSaveDc: null,
+					resolvedSaveDc,
+				},
+			);
+		} else {
+			await this._saveCurrentCharacter?.();
+			this._renderResources();
+			this._renderActiveStates();
+			this._features?._renderResources?.();
+		}
+		return true;
+	}
+
+	_getLiveFeatureInteractionResource (resource) {
+		if (!resource) return null;
+		if (resource.isStamina) return {isStamina: true, id: "stamina", current: this._state.getStaminaCurrent()};
+		return this._state.getResources().find(it => it.id === resource.id) || null;
+	}
+
+	_canCommitFeatureInteractionCosts ({resource, cost, actionType}) {
+		const liveResource = this._getLiveFeatureInteractionResource(resource);
+		if (resource && (!liveResource || liveResource.current < cost)) {
+			JqueryUtil.doToast({type: "warning", content: `Not enough ${resource.name} remaining.`});
+			return null;
+		}
+		if (!this._combat?.isActionTypeAvailable?.(actionType)) {
+			const label = actionType === "bonus" ? "Bonus Action" : `${String(actionType || "action").toTitleCase()}`;
+			JqueryUtil.doToast({type: "warning", content: `${label} already used this turn.`});
+			return null;
+		}
+		return {liveResource};
+	}
+
+	_commitFeatureInteractionCosts ({liveResource, cost, actionType}) {
+		if (liveResource) {
+			if (liveResource.isStamina) this._state.setStaminaCurrent(liveResource.current - cost);
+			else this._state.setResourceCurrent(liveResource.id, liveResource.current - cost);
+		}
+		this._combat?.consumeActionType?.(actionType);
+	}
+
+	async _pChooseTemporalDirection (feature) {
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: `${feature.name} — Choose a View`,
+			isMinHeight0: true,
+		});
+		let direction = null;
+		const intro = e_({outer: `<p class="ve-muted mb-3">Choose whether to look one hour into the past or future. You are Blinded to the present while this view is active.</p>`});
+		const fieldset = e_({outer: `<fieldset class="charsheet__temporal-choice-group mb-3">
+			<legend class="ve-bold mb-2">Temporal direction</legend>
+			<label class="charsheet__temporal-choice"><input type="radio" name="temporal-direction" value="past"> <span><strong>Past</strong><small>Begin one hour in the past</small></span></label>
+			<label class="charsheet__temporal-choice"><input type="radio" name="temporal-direction" value="future"> <span><strong>Future</strong><small>Begin one hour in the future</small></span></label>
+		</fieldset>`});
+		const status = e_({outer: `<div class="ve-muted ve-small mb-3" aria-live="polite">Choose a direction to continue.</div>`});
+		const footer = e_({outer: `<div class="charsheet__modal-actions">
+			<button type="button" class="ve-btn ve-btn-default" data-role="cancel">Cancel</button>
+			<button type="button" class="ve-btn ve-btn-primary" data-role="confirm" disabled>Activate Eyes</button>
+		</div>`});
+		const confirm = footer.querySelector(`[data-role="confirm"]`);
+		fieldset.addEventListener("change", evt => {
+			direction = evt.target?.value || null;
+			confirm.disabled = !direction;
+			status.textContent = direction ? `View: 1 hour into the ${direction}.` : "Choose a direction to continue.";
+		});
+		footer.querySelector(`[data-role="cancel"]`).addEventListener("click", () => doClose(false));
+		confirm.addEventListener("click", () => doClose(true));
+		ee(modalInner)`${intro}${fieldset}${status}${footer}`;
+		CharacterSheetModal.focusFirst(modalInner);
+		const [confirmed] = await pGetResolved();
+		return confirmed ? direction : null;
+	}
+
+	async _pChooseChronologicalSwap (feature) {
+		if (!this._state.isInCombat?.()) {
+			JqueryUtil.doToast({type: "warning", content: "Start combat before using Chronological Interference."});
+			return null;
+		}
+		const eligible = this._state.getCombatTurnOrder().filter(it => !it.hasActed);
+		if (eligible.length < 2) {
+			JqueryUtil.doToast({type: "warning", content: "Add at least two creatures that have not acted to the Turn Order."});
+			await this._combat?.pShowTurnOrderModal?.();
+			return null;
+		}
+
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: feature.name,
+			isMinHeight0: true,
+		});
+		let firstId = eligible[0]?.id || null;
+		let secondId = eligible[1]?.id || null;
+		const options = eligible.map(it => `<option value="${it.id.qq()}">${it.name.qq()} (${it.initiative})</option>`).join("");
+		const body = e_({outer: `<div>
+			<p class="ve-muted mb-3">Choose two creatures that have not acted this round. Their initiative positions are permanently exchanged.</p>
+			<div class="charsheet__temporal-target-grid mb-3">
+				<label><span class="ve-bold">First creature</span><select class="form-control input-xs mt-1" data-role="first">${options}</select></label>
+				<label><span class="ve-bold">Second creature</span><select class="form-control input-xs mt-1" data-role="second">${options}</select></label>
+			</div>
+			<div class="charsheet__temporal-preview mb-3" data-role="preview" aria-live="polite"></div>
+			<div class="charsheet__modal-actions">
+				<button type="button" class="ve-btn ve-btn-default" data-role="cancel">Cancel</button>
+				<button type="button" class="ve-btn ve-btn-primary" data-role="confirm">Swap &amp; spend use</button>
+			</div>
+		</div>`});
+		const first = body.querySelector(`[data-role="first"]`);
+		const second = body.querySelector(`[data-role="second"]`);
+		const preview = body.querySelector(`[data-role="preview"]`);
+		const confirm = body.querySelector(`[data-role="confirm"]`);
+		second.value = secondId;
+		const renderPreview = () => {
+			firstId = first.value;
+			secondId = second.value;
+			const a = eligible.find(it => it.id === firstId);
+			const b = eligible.find(it => it.id === secondId);
+			const valid = !!a && !!b && a.id !== b.id;
+			confirm.disabled = !valid;
+			preview.textContent = valid
+				? `${a.name} moves to ${b.initiative}; ${b.name} moves to ${a.initiative}.`
+				: "Choose two different creatures.";
+			preview.classList.toggle("text-danger", !valid);
+		};
+		first.addEventListener("change", renderPreview);
+		second.addEventListener("change", renderPreview);
+		body.querySelector(`[data-role="cancel"]`).addEventListener("click", () => doClose(false));
+		confirm.addEventListener("click", () => doClose(true));
+		modalInner.append(body);
+		renderPreview();
+		CharacterSheetModal.focusFirst(modalInner);
+		const [confirmed] = await pGetResolved();
+		return confirmed ? {firstId, secondId} : null;
+	}
+
+	async _pChooseTemporalManipulation (feature) {
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: feature.name,
+			isMinHeight0: true,
+		});
+		let mode = null;
+		const body = e_({outer: `<div>
+			<p class="ve-muted mb-3">When a visible creature within 60 feet takes an action involving a d20, choose how time alters that roll.</p>
+			<label class="ve-bold" for="charsheet-temporal-target">Target</label>
+			<input id="charsheet-temporal-target" class="form-control input-xs mb-3" data-role="target" placeholder="Creature name">
+			<fieldset class="charsheet__temporal-choice-group mb-3">
+				<legend class="ve-bold mb-2">Roll effect</legend>
+				<label class="charsheet__temporal-choice"><input type="radio" name="temporal-roll-mode" value="advantage"> <span><strong>Grant Advantage</strong><small>Help the target's action</small></span></label>
+				<label class="charsheet__temporal-choice"><input type="radio" name="temporal-roll-mode" value="disadvantage"> <span><strong>Impose Disadvantage</strong><small>Hinder the target's action</small></span></label>
+			</fieldset>
+			<div class="ve-muted ve-small mb-3" data-role="status" aria-live="polite">Enter a target and choose an effect.</div>
+			<div class="charsheet__modal-actions">
+				<button type="button" class="ve-btn ve-btn-default" data-role="cancel">Cancel</button>
+				<button type="button" class="ve-btn ve-btn-primary" data-role="confirm" disabled>Apply &amp; spend Channel Divinity</button>
+			</div>
+		</div>`});
+		const target = body.querySelector(`[data-role="target"]`);
+		const status = body.querySelector(`[data-role="status"]`);
+		const confirm = body.querySelector(`[data-role="confirm"]`);
+		const update = () => {
+			const targetName = target.value.trim();
+			const valid = !!targetName && !!mode;
+			confirm.disabled = !valid;
+			status.textContent = valid
+				? `${targetName}: ${mode}. Costs your Reaction and 1 Channel Divinity.`
+				: "Enter a target and choose an effect.";
+		};
+		target.addEventListener("input", update);
+		body.querySelector("fieldset").addEventListener("change", evt => {
+			mode = evt.target?.value || null;
+			update();
+		});
+		body.querySelector(`[data-role="cancel"]`).addEventListener("click", () => doClose(false));
+		confirm.addEventListener("click", () => doClose(true));
+		modalInner.append(body);
+		CharacterSheetModal.focusFirst(modalInner);
+		const [confirmed] = await pGetResolved();
+		return confirmed ? {target: target.value.trim(), mode} : null;
+	}
+
+	async _pResolveMagicalAging (feature) {
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: `${feature?.name || "Temporal Mastery"} — Magical Aging`,
+			isMinHeight0: true,
+		});
+		let resolution = "ignore";
+		const body = e_({outer: `<div>
+			<p class="ve-muted mb-3">Record a magical aging effect, then choose whether Temporal Mastery leaves you unaffected or allows the change.</p>
+			<label class="ve-bold" for="charsheet-magical-aging-years">Years changed</label>
+			<input id="charsheet-magical-aging-years" class="form-control input-xs mb-3" data-role="years" type="number" step="1" placeholder="Use a negative number to become younger">
+			<fieldset class="charsheet__temporal-choice-group mb-3">
+				<legend class="ve-bold mb-2">Resolution</legend>
+				<label class="charsheet__temporal-choice"><input type="radio" name="magical-aging-resolution" value="ignore" checked> <span><strong>Remain unaffected</strong><small>Your age does not change</small></span></label>
+				<label class="charsheet__temporal-choice"><input type="radio" name="magical-aging-resolution" value="accept"> <span><strong>Accept the change</strong><small>Apply the entered years to your age</small></span></label>
+			</fieldset>
+			<div class="ve-muted ve-small mb-3" data-role="status" aria-live="polite"></div>
+			<div class="charsheet__modal-actions">
+				<button type="button" class="ve-btn ve-btn-default" data-role="cancel">Cancel</button>
+				<button type="button" class="ve-btn ve-btn-primary" data-role="confirm" disabled>Resolve aging</button>
+			</div>
+		</div>`});
+		const years = body.querySelector(`[data-role="years"]`);
+		const status = body.querySelector(`[data-role="status"]`);
+		const confirm = body.querySelector(`[data-role="confirm"]`);
+		const update = () => {
+			const delta = Number(years.value);
+			const currentAge = this._state.getNumericAge?.();
+			const validDelta = Number.isInteger(delta) && delta !== 0;
+			const validAge = resolution === "ignore" || (currentAge != null && currentAge + delta >= 1);
+			confirm.disabled = !(validDelta && validAge);
+			if (!validDelta) status.textContent = "Enter a non-zero whole number of years.";
+			else if (resolution === "ignore") status.textContent = `Remain age ${currentAge ?? "unchanged"} despite a ${delta > 0 ? "+" : ""}${delta}-year effect.`;
+			else if (currentAge == null) status.textContent = "Set a valid numeric age in Appearance before accepting the change.";
+			else if (currentAge + delta < 1) status.textContent = "Age must remain at least 1 year.";
+			else status.textContent = `Age ${currentAge} → ${currentAge + delta}.`;
+			status.classList.toggle("text-danger", !validAge || !validDelta);
+		};
+		years.addEventListener("input", update);
+		body.querySelector("fieldset").addEventListener("change", evt => {
+			resolution = evt.target?.value || "ignore";
+			update();
+		});
+		body.querySelector(`[data-role="cancel"]`).addEventListener("click", () => doClose(false));
+		confirm.addEventListener("click", () => doClose(true));
+		modalInner.append(body);
+		update();
+		CharacterSheetModal.focusFirst(modalInner);
+		const [confirmed] = await pGetResolved();
+		if (!confirmed) return false;
+
+		const result = this._state.resolveMagicalAging({
+			years: Number(years.value),
+			ignore: resolution === "ignore",
+		});
+		if (!result.ok) {
+			JqueryUtil.doToast({type: "warning", content: result.error});
+			return false;
+		}
+		this._rollHistory?.addRoll({
+			title: "Temporal Mastery — Magical Aging",
+			total: result.ignored ? "Unaffected" : `${result.current} years`,
+			breakdown: result.ignored
+				? `Ignored a ${Number(years.value) > 0 ? "+" : ""}${Number(years.value)}-year magical aging effect.`
+				: `Age ${result.previous} → ${result.current}.`,
+		});
+		this._saveCurrentCharacter();
+		this._renderCharacter();
+		this._features?.render?.();
+		return true;
+	}
+
+	async _pHandleFeatureInteraction (feature, stateTypeId, stateType, resource, resourceCost, activationInfo) {
+		const kind = activationInfo?.interactionKind;
+		if (!kind) return false;
+		const actionType = activationInfo.activationAction || stateType?.activationAction || "special";
+		const cost = resourceCost ?? activationInfo.resourceCost ?? stateType?.resourceCost ?? 1;
+
+		if (kind === "initiativeSwap") {
+			const choice = await this._pChooseChronologicalSwap(feature);
+			if (!choice) return true;
+			const costs = this._canCommitFeatureInteractionCosts({resource, cost, actionType});
+			if (!costs) return true;
+			const result = this._state.swapCombatTurnOrderParticipants(choice.firstId, choice.secondId);
+			if (!result.ok) {
+				JqueryUtil.doToast({type: "warning", content: result.error});
+				return true;
+			}
+			this._commitFeatureInteractionCosts({...costs, cost, actionType});
+			this._rollHistory?.addRoll({
+				title: feature.name,
+				total: "Swap",
+				breakdown: `${result.first.name} → ${result.first.initiative}; ${result.second.name} → ${result.second.initiative}`,
+			});
+		} else if (kind === "externalRollMode") {
+			const choice = await this._pChooseTemporalManipulation(feature);
+			if (!choice) return true;
+			const costs = this._canCommitFeatureInteractionCosts({resource, cost, actionType});
+			if (!costs) return true;
+			this._commitFeatureInteractionCosts({...costs, cost, actionType});
+			this._rollHistory?.addRoll({
+				title: feature.name,
+				total: choice.mode.toTitleCase(),
+				breakdown: `${choice.target} has ${choice.mode} on the triggering action's d20 roll.`,
+			});
+		} else if (kind === "temporalVision") {
+			const direction = await this._pChooseTemporalDirection(feature);
+			if (!direction) return true;
+			const costs = this._canCommitFeatureInteractionCosts({resource, cost, actionType});
+			if (!costs) return true;
+			this._commitFeatureInteractionCosts({...costs, cost, actionType});
+			this._state.activateState("eyesOfFuturePast", {
+				name: feature.name,
+				sourceFeatureId: feature.id,
+				resourceId: resource?.id,
+				description: feature.description,
+				temporalView: {
+					direction,
+					offsetHours: 1,
+					roundDecision: null,
+					decisionPending: false,
+				},
+			});
+		} else return false;
+
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderActiveStates();
+		this._combat?.render?.();
+		this._renderCharacter();
 		return true;
 	}
 
 	async _activateFeatureState (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
+		if (activationInfo?.resourceTrigger && !activationInfo.resourceTriggerResolved) {
+			const triggerResource = (this._state.getResources() || []).find(it =>
+				String(it.name || "").toLowerCase() === String(activationInfo.resourceTrigger.resourceName || "").toLowerCase());
+			if (!triggerResource) {
+				JqueryUtil.doToast({type: "warning", content: `${activationInfo.resourceTrigger.resourceName} is unavailable.`});
+				return;
+			}
+			await this._pUseResource(triggerResource.id, {preselectedAugmentId: feature.id});
+			return;
+		}
 		let variableSpend = null;
 		if (stateType?.variablePointSpend) {
 			const calculations = this._state.getFeatureCalculations();
@@ -12667,6 +13255,19 @@ class CharacterSheetPage {
 		if (resource && resource.current < resolvedCost && !canRestoreDaemonologistUse && !ownsItsCost) {
 			JqueryUtil.doToast({type: "warning", content: `Not enough ${resource.name} remaining.`});
 			return;
+		}
+		if (await this._pHandleFeatureInteraction(feature, stateTypeId, stateType, resource, resolvedCost, activationInfo)) return;
+
+		let activationTargets = null;
+		let targeting = stateType?.targeting || null;
+		if (!targeting && stateType?.onActivateTargeting) {
+			const calculationGate = stateType.onActivateTargeting.calculationGate;
+			const calculations = this._state.getFeatureCalculations?.() || {};
+			if (!calculationGate || calculations[calculationGate]) targeting = stateType.onActivateTargeting;
+		}
+		if (targeting) {
+			activationTargets = await this._pChooseActiveStateTargets(feature, targeting);
+			if (activationTargets == null) return;
 		}
 		if (!this._tryConsumeActiveStateToggleAction(stateTypeId, stateType, activationInfo)) return;
 		// ===== R20: name-keyed homebrew ability "Use" behaviors =====
@@ -12842,7 +13443,9 @@ class CharacterSheetPage {
 		// Some abilities only take effect if you win a contest (e.g. the Belly
 		// Dancer's Tantalizing Shivers: Charisma (Performance) vs the target's
 		// Wisdom (Insight)). Rolled BEFORE any resource is deducted, so losing the
-		// contest — or cancelling — costs nothing.
+		// contest. Selecting a target is cancelable before the Bonus Action is
+		// committed; once the contest roll begins, the action is spent even if
+		// the target wins.
 		if (activationInfo?.contestedCheck) {
 			const won = await this._pResolveContestedCheck(feature, activationInfo.contestedCheck);
 			if (!won) return;
@@ -12855,9 +13458,11 @@ class CharacterSheetPage {
 		// result"). Rolled BEFORE any resource is deducted, so cancelling the
 		// roll costs nothing. The sheet reports the resulting DC rather than
 		// silently applying a static one that the feature never had.
+		let resolvedSaveDc = activationInfo?.resolvedSaveDc ?? null;
 		if (activationInfo?.rolledSaveDc) {
-			const proceed = await this._pResolveRolledSaveDc(feature, activationInfo.rolledSaveDc);
-			if (!proceed) return;
+			const resolved = await this._pResolveRolledSaveDc(feature, activationInfo.rolledSaveDc);
+			if (!resolved) return;
+			resolvedSaveDc = resolved.dc;
 		}
 
 		// Deduct resource cost if applicable
@@ -12896,6 +13501,10 @@ class CharacterSheetPage {
 		}
 
 		const interactionMode = activationInfo?.interactionMode || (activationInfo?.isToggle ? "toggle" : "limited");
+		if (activationInfo?.targetResolution) {
+			const dc = resolvedSaveDc ?? (activationInfo.targetResolution.dcSource === "jesterAct" ? activationInfo.actDc : null);
+			this._pPresentTargetResolution(feature, activationInfo.targetResolution, {dc});
+		}
 
 		// Passive features should not create active states.
 		if (interactionMode === "passive") {
@@ -12911,24 +13520,38 @@ class CharacterSheetPage {
 		const shouldParseEffects = stateTypeId === "custom"
 			|| !CharacterSheetState.ACTIVE_STATE_TYPES[stateTypeId]
 			|| stateType?.isGeneric
-			|| (stateType?.effects && stateType.effects.length === 0);
+			|| (stateType?.effects && stateType.effects.length === 0
+				&& !stateType.effectsBuilder
+				&& !stateType.targeting
+				&& !stateType.onActivateTargeting);
 
 		const metadataEffects = activationInfo?.effects;
 		const parsedEffects = shouldParseEffects
 			? (metadataEffects?.length ? metadataEffects : CharacterSheetState.parseEffectsFromDescription(feature.description))
 			: null;
 
-		// Limited/trigger/instant abilities consume resources and may apply one-off effects,
-		// but should not persist as toggle states.
+		// Limited/trigger/instant abilities consume resources and may apply one-off effects.
+		// Most resolve immediately, but some publish a short-lived runtime contract (for
+		// example, a next-attack rider or an until-end-of-turn movement/action benefit).
 		if (interactionMode === "limited" || interactionMode === "trigger" || interactionMode === "instant") {
-			if (parsedEffects?.length) {
+			const hasRuntimeState = parsedEffects?.length
+				|| activationInfo?.pendingAttack
+				|| activationInfo?.actionBenefit
+				|| activationInfo?.movementOverride
+				|| activationInfo?.addsConditions?.length;
+			if (hasRuntimeState) {
 				this._state.addActiveState("custom", {
 					name: feature.name,
 					icon: "⚡",
 					sourceFeatureId: feature.id,
 					description: feature.description,
-					customEffects: parsedEffects,
+					customEffects: parsedEffects?.length ? parsedEffects : null,
+					addsConditions: activationInfo?.addsConditions || null,
 					duration: activationInfo?.duration || "Instant",
+					consumeOnAttack: activationInfo?.pendingAttack?.consume === "onAttack",
+					pendingAttack: activationInfo?.pendingAttack || null,
+					actionBenefit: activationInfo?.actionBenefit || null,
+					movementOverride: activationInfo?.movementOverride || null,
 				});
 			}
 
@@ -12949,6 +13572,11 @@ class CharacterSheetPage {
 				description: feature.description,
 				customEffects: parsedEffects?.length > 0 ? parsedEffects : null,
 				addsConditions: activationInfo?.addsConditions || null,
+				duration: activationInfo?.duration || null,
+				consumeOnAttack: activationInfo?.pendingAttack?.consume === "onAttack",
+				pendingAttack: activationInfo?.pendingAttack || null,
+				actionBenefit: activationInfo?.actionBenefit || null,
+				movementOverride: activationInfo?.movementOverride || null,
 			});
 		} else {
 			// For known state types, pass feature info but only use parsed effects for generic types
@@ -12957,11 +13585,13 @@ class CharacterSheetPage {
 				resourceId: resource?.id,
 				name: feature.name,
 				description: feature.description,
+				duration: activationInfo?.duration || stateType?.duration || null,
 				// Only use parsed effects for generic state types (like combatStance)
 				// Non-generic types (like recklessAttack, rage) use their predefined effects
 				customEffects: weaponScopedEffects || (shouldParseEffects && parsedEffects?.length > 0 ? parsedEffects : null),
 			};
 			if (wrathPlacement) customData.placement = wrathPlacement;
+			if (stateType?.targeting || stateType?.onActivateTargeting) customData.targets = activationTargets || [];
 			this._state.activateState(stateTypeId, customData);
 			const linkedStateId = stateType?.variablePointSpend?.linkedStateBySpend?.[variableSpend];
 			if (linkedStateId) this._state.activateState(linkedStateId);
@@ -12981,7 +13611,9 @@ class CharacterSheetPage {
 	}
 
 	_tryConsumeActiveStateToggleAction (stateTypeId, stateType, activationInfo = null) {
-		if (!["sunShield", "astralArms", "astralVisage", "awakenedAstralSelf"].includes(stateTypeId) || !this._state.isInCombat?.()) return true;
+		const tracksActionEconomy = stateType?.tracksActionEconomy
+			|| ["sunShield", "astralArms", "astralVisage", "awakenedAstralSelf"].includes(stateTypeId);
+		if (!tracksActionEconomy || !this._state.isInCombat?.()) return true;
 		return this._combat?._tryConsumeStateToggleAction?.(stateType, activationInfo) ?? true;
 	}
 
@@ -15090,8 +15722,8 @@ class CharacterSheetPage {
 			mode = mode || "normal";
 		}
 
-		const roll1 = RollerUtil.randomise(20);
-		const roll2 = RollerUtil.randomise(20);
+		const roll1 = this._state.rollD20?.("d20:first") ?? RollerUtil.randomise(20);
+		const roll2 = this._state.rollD20?.("d20:second") ?? RollerUtil.randomise(20);
 
 		let roll;
 		if (mode === "advantage") {
@@ -15726,7 +16358,7 @@ class CharacterSheetPage {
 
 		// The Gambling Table roll may need a choice (Master of Fortune rolls twice), and
 		// the spend has to be persisted + repainted like any other resource expenditure.
-		if (result.tableRoll) void this._pResolveGamblingTableRoll(result.tableRoll);
+		if (result.tableRoll) void this._pResolveGamblingTableRoll(result.tableRoll, result.resolutionId);
 		this._renderResources?.();
 		void this._saveCurrentCharacter?.();
 
@@ -15756,9 +16388,9 @@ class CharacterSheetPage {
 	 * roll gets its "choose one" modal. Safe no-op when the spells module is absent.
 	 * @param {object} tableRoll
 	 */
-	async _pResolveGamblingTableRoll (tableRoll) {
+	async _pResolveGamblingTableRoll (tableRoll, resolutionId = null) {
 		try {
-			await this._spells?._pOpenGamblingTableModal?.(tableRoll);
+			await this._spells?._pOpenGamblingTableModal?.(tableRoll, resolutionId);
 		} catch (e) {
 			// eslint-disable-next-line no-console
 			console.error("[CharSheet] Gambling Table modal error", e);
@@ -15804,7 +16436,7 @@ class CharacterSheetPage {
 
 			const escape = (/** @type {string} */ s) => String(s || "").replace(/[<>]/g, "");
 			const rows = offers.map((o, i) => `
-				<button class="ve-btn ve-btn-primary charsheet__fortune__offer" data-act="pick" data-idx="${i}">
+				<button class="ve-btn ve-btn-primary charsheet__fortune__offer" data-act="pick" data-idx="${i}" style="min-height: 44px; min-width: 44px;">
 					<span class="charsheet__fortune__offer-head">
 						<span class="charsheet__fortune__offer-name">${escape(o.name)}</span>
 						<span class="charsheet__fortune__offer-uses">${o.remaining}/${o.max} left</span>
@@ -15822,7 +16454,7 @@ class CharacterSheetPage {
 					</p>
 					<div class="charsheet__fortune__offers">${rows}</div>
 					<div class="charsheet__fortune__actions">
-						<button class="ve-btn ve-btn-default" data-act="decline">Keep the roll</button>
+						<button class="ve-btn ve-btn-default" data-act="decline" style="min-height: 44px; min-width: 44px;">Keep the roll</button>
 					</div>
 				</div>
 			`;

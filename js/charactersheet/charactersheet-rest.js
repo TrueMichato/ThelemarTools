@@ -838,9 +838,17 @@ class CharacterSheetRest {
 
 		const spellMasterySwap = this._buildSpellMasteryLongRestSection();
 		if (spellMasterySwap) modalInner.append(spellMasterySwap.section);
+		const temporalMasteryAge = this._buildTemporalMasteryAgeSection();
+		if (temporalMasteryAge) modalInner.append(temporalMasteryAge.section);
 
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "🌙 Finish Long Rest"});
+		if (temporalMasteryAge) {
+			const syncValidity = () => { btnConfirm.disabled = !temporalMasteryAge.isValid(); };
+			temporalMasteryAge.onChange(syncValidity);
+			syncValidity();
+		}
 		btnConfirm.onClick(() => {
+			if (temporalMasteryAge && !temporalMasteryAge.isValid()) return;
 			// Snapshot the full pre-rest state so this rest can be undone (BUG 8).
 			// Captured BEFORE any mutation below; transient and never persisted.
 			this._captureRestSnapshot("long");
@@ -920,6 +928,7 @@ class CharacterSheetRest {
 			if (calcs.hasGamblerFolly) {
 				this._state.resetGamblerDailyResources();
 			}
+			this._state.resetBonusAction?.();
 
 			// Apply Hunter's Prey option swap, if changed
 			huntersPreySwap?.apply();
@@ -936,6 +945,7 @@ class CharacterSheetRest {
 			// Apply Terrorizing Force damage-type re-choice (free on a long rest)
 			const terrorizingForceChanged = terrorizingForceChoice?.apply() || false;
 			const spellMasteryChanged = spellMasterySwap?.apply() || false;
+			const temporalAgeChanged = temporalMasteryAge?.apply() || false;
 
 			// Save changes
 			this._page.saveCharacter();
@@ -949,6 +959,7 @@ class CharacterSheetRest {
 			if (forkedTongueChanged) message += ` Forked Tongue: swapped ${forkedTongueChanged}.`;
 			if (terrorizingForceChanged) message += ` Terrorizing Force damage set to ${terrorizingForceChanged}.`;
 			if (spellMasteryChanged) message += ` Spell Mastery changed to ${spellMasteryChanged}.`;
+			if (temporalAgeChanged) message += ` Temporal Mastery changed age to ${temporalAgeChanged}.`;
 			if (abilityDamageRestored > 0) message += ` Restored ${abilityDamageRestored} ability damage.`;
 			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
 			if (cbBreakConcentration?.checked) message += ` Broke concentration.`;
@@ -979,6 +990,63 @@ class CharacterSheetRest {
 			${btnCancel}
 			${btnConfirm}
 		</div>`.appendTo(modalInner);
+	}
+
+	_buildTemporalMasteryAgeSection () {
+		const hasTemporalMastery = (this._state.getFeatures?.() || []).some(feature =>
+			(feature?.name || "").trim().toLowerCase() === "temporal mastery"
+			&& (feature?.source || feature?.subclassSource) === "TGTT",
+		);
+		if (!hasTemporalMastery) return null;
+
+		let selected = 0;
+		const section = e_({outer: `<fieldset class="charsheet__rest-section charsheet__temporal-choice-group">
+			<legend class="charsheet__rest-section-title">Temporal Mastery — Age</legend>
+			<p class="ve-muted ve-small mb-2">At the end of this Long Rest, you may become one year younger or older.</p>
+			<label class="charsheet__temporal-choice"><input type="radio" name="temporal-rest-age" value="0" checked> <span><strong>No age change</strong><small>Keep your current age</small></span></label>
+			<label class="charsheet__temporal-choice"><input type="radio" name="temporal-rest-age" value="-1"> <span><strong>1 year younger</strong><small>Reduce your age by one year</small></span></label>
+			<label class="charsheet__temporal-choice"><input type="radio" name="temporal-rest-age" value="1"> <span><strong>1 year older</strong><small>Increase your age by one year</small></span></label>
+			<label class="mt-2"><span class="ve-bold">Current age</span><input class="form-control input-xs mt-1" data-role="age" inputmode="numeric" type="number" min="1"></label>
+			<div class="ve-small ve-muted mt-2" data-role="preview" aria-live="polite"></div>
+		</fieldset>`});
+		const ageInput = section.querySelector(`[data-role="age"]`);
+		const preview = section.querySelector(`[data-role="preview"]`);
+		const currentAge = this._state.getNumericAge?.();
+		if (currentAge != null) ageInput.value = currentAge;
+		let onChange = () => {};
+
+		const getAge = () => {
+			const value = Number(ageInput.value);
+			return Number.isInteger(value) && value > 0 ? value : null;
+		};
+		const isValid = () => selected === 0 || (getAge() != null && getAge() + selected >= 1);
+		const render = () => {
+			const age = getAge();
+			if (selected === 0) preview.textContent = age == null ? "No age change." : `Age remains ${age}.`;
+			else if (age == null) preview.textContent = "Enter a valid current age to use this option.";
+			else if (age + selected < 1) preview.textContent = "Age must remain at least 1 year.";
+			else preview.textContent = `Age ${age} → ${age + selected}.`;
+			preview.classList.toggle("text-danger", !isValid());
+			onChange();
+		};
+		section.addEventListener("change", evt => {
+			if (evt.target?.name === "temporal-rest-age") selected = Number(evt.target.value);
+			render();
+		});
+		ageInput.addEventListener("input", render);
+		render();
+
+		return {
+			section,
+			isValid,
+			onChange: fn => { onChange = fn; },
+			apply: () => {
+				if (selected === 0) return false;
+				this._state.setAppearance("age", String(getAge()));
+				const result = this._state.adjustAge(selected);
+				return result.ok ? result.current : false;
+			},
+		};
 	}
 
 	_buildSpellMasteryLongRestSection () {
@@ -1431,7 +1499,9 @@ class CharacterSheetRest {
 		const resources = this._state.getResources();
 		resources.forEach(resource => {
 			if (resource.gemstoneResource) return;
-			if (restType === "long" || resource.recharge === "short") {
+			if (restType === "short" && resource.shortRestRecovery) {
+				this._state.setResourceCurrent(resource.id, Math.min(resource.max, resource.current + resource.shortRestRecovery));
+			} else if (restType === "long" || resource.recharge === "short") {
 				// Use state method to persist the change
 				this._state.setResourceCurrent(resource.id, resource.max);
 			}
@@ -1441,7 +1511,9 @@ class CharacterSheetRest {
 		const features = this._state.getFeatures();
 		features.forEach(feature => {
 			if (feature.uses) {
-				if (restType === "long" || feature.uses.recharge === "short") {
+				if (restType === "short" && feature.uses.shortRestRecovery) {
+					this._state.setFeatureUses(feature.id, Math.min(feature.uses.max, feature.uses.current + feature.uses.shortRestRecovery));
+				} else if (restType === "long" || feature.uses.recharge === "short") {
 					// Use state method to persist the change
 					this._state.setFeatureUses(feature.id, feature.uses.max);
 				}

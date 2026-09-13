@@ -744,6 +744,8 @@ class CharacterSheetLevelUp {
 				const selected = selectedOptionalFeatures[featureKey] || [];
 				if (selected.length < gain.newCount) {
 					allComplete = false;
+				} else if (!gain.newCount && !selected.length && gain.replacementCount) {
+					summaries.push(`Optional ${gain.replacementLabel || "option"} replacement`);
 				} else {
 					summaries.push(`${selected.length} ${gain.name}`);
 				}
@@ -760,14 +762,15 @@ class CharacterSheetLevelUp {
 		};
 
 		if (optionalFeatureGains.length) {
-			summaryItems.append(createSummaryItem("optfeatures", "✨", "Class Options", {required: true}));
+			const hasRequiredOptionalFeatureGain = optionalFeatureGains.some((/** @type {*} */ gain) => gain.newCount > 0);
+			summaryItems.append(createSummaryItem("optfeatures", "✨", "Class Options", {required: hasRequiredOptionalFeatureGain}));
 
 			// Subclass already known from earlier level — pass it through so the
 			// subclass-tradition picker can render for choice-based subclasses.
 			const knownActiveSubclass = fullSubclassData || classEntry.subclass || null;
 			const optContent = this._renderOptionalFeaturesSelection(classData, optionalFeatureGains, createOptFeaturesOnSelect, newLevel, {activeSubclass: knownActiveSubclass, levelContext: {className: classEntry.name, classSource: classEntry.source, newClassLevel: newLevel}});
 
-			main.append(createAccordion("optfeatures", "✨", "Class Options", optContent, {required: true}));
+			main.append(createAccordion("optfeatures", "✨", "Class Options", optContent, {required: hasRequiredOptionalFeatureGain}));
 		}
 
 		// ========== 3b. WEAPON MASTERY (bug #4 — optional) ==========
@@ -3546,7 +3549,9 @@ class CharacterSheetLevelUp {
 
 		const gainSection = e_({outer: `
 			<div class="charsheet__levelup-opt-gain mb-3">
-				<p><strong>${gain.name}:</strong> Choose ${gain.newCount} new option${gain.newCount > 1 ? "s" : ""}</p>
+				<p><strong>${gain.name}:</strong> ${gain.newCount
+	? `Choose ${gain.newCount} new option${gain.newCount > 1 ? "s" : ""}`
+	: `You may replace one known ${gain.replacementLabel || "option"}`}</p>
 				<div class="charsheet__levelup-opt-list"></div>
 				<div class="ve-small ve-muted mt-1">Selected: <span class="opt-count">0</span>/<span class="opt-target">${gain.newCount}</span></div>
 			</div>
@@ -3571,9 +3576,10 @@ class CharacterSheetLevelUp {
 		};
 
 		if (gain.replacementCount && knownForType.length) {
+			const replacementLabel = gain.replacementLabel || "option";
 			const replaceRow = e_({outer: `
 				<div class="ve-flex-v-center mb-2 p-2" style="border: 1px solid var(--cs-border); border-radius: 4px;">
-					<label class="mr-2 mb-0"><input type="checkbox" class="mr-1"> Replace one known maneuver</label>
+					<label class="mr-2 mb-0"><input type="checkbox" class="mr-1"> Replace one known ${replacementLabel}</label>
 					<select class="form-control input-xs" disabled>
 						${knownForType.map((/** @type {*} */ feature, ix) => `<option value="${ix}">${feature.name}</option>`).join("")}
 					</select>
@@ -3584,7 +3590,7 @@ class CharacterSheetLevelUp {
 			cb.addEventListener("change", () => {
 				if (!cb.checked && selectedForType.length > gain.newCount) {
 					cb.checked = true;
-					JqueryUtil.doToast({type: "warning", content: "Unselect the replacement maneuver before disabling the swap."});
+					JqueryUtil.doToast({type: "warning", content: `Unselect the replacement ${replacementLabel} before disabling the swap.`});
 					return;
 				}
 				sel.disabled = !cb.checked;
