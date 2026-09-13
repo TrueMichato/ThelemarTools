@@ -68,6 +68,12 @@ export interface CharacterSpec {
 	signatureToggleNoDerivedEffect?: string;
 	/** Per-milestone expectations indexed by character level. */
 	milestones?: Partial<Record<number, MilestoneExpect>>;
+	/** Optional MEGA checkpoint levels; defaults to the shared 3/5/11/17/20 sample. */
+	megaCheckpoints?: number[];
+	/** Optional timeout for each MEGA test when extra checkpoints materially extend the walk. */
+	megaTimeoutMs?: number;
+	/** Run the feature matrix only in its dedicated MEGA test, avoiding duplicate long probes. */
+	featureMatrixDedicatedOnly?: boolean;
 	/** Set true to skip the L1→20 mega test (e.g. for multiclass cases handled separately). */
 	skipMega?: boolean;
 	/**
@@ -187,8 +193,8 @@ export interface CharacterSpec {
 	 * feature picks surface). See `FeatureCheck` doc for entry shape.
 	 *
 	 * The matrix runs at the SAME checkpoint levels as MEGA milestones
-	 * (3/5/11/17/20) and only checks entries with `level <= currentLevel`,
-	 * so adding L11+ entries doesn't make the L3 milestone slower.
+	 * (3/5/11/17/20 by default, or `megaCheckpoints`) and only checks entries
+	 * with `level <= currentLevel`, so later entries do not slow earlier milestones.
 	 */
 	featuresMatrix?: FeatureCheck[];
 }
@@ -394,10 +400,10 @@ export function describeCharacter (spec: CharacterSpec): void {
 		// ── L1→20 mega progression ─────────────────────────────────────
 		const mega = skipMega || !process.env.RUN_MEGA ? test.skip : test;
 		mega(`MEGA L1→20 with milestone asserts`, async ({page}) => {
-			test.setTimeout(MEGA_TIMEOUT_MS);
+			test.setTimeout(spec.megaTimeoutMs || MEGA_TIMEOUT_MS);
 			const {charSheet} = await createCharacterViaWizard(page, preset);
 
-			const checkpoints = [3, 5, 11, 17, 20];
+			const checkpoints = spec.megaCheckpoints || [3, 5, 11, 17, 20];
 			let cursor = 1;
 			for (const cp of checkpoints) {
 				if (cp <= cursor) continue;
@@ -406,7 +412,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 				await charSheet.expectLevel(cp);
 				const m = milestones[cp];
 				if (m) await assertMilestone(charSheet, m);
-				if (featuresMatrix?.length) {
+				if (featuresMatrix?.length && !spec.featureMatrixDedicatedOnly) {
 					await charSheet.triggerLongRest();
 					await assertFeaturesMatrix(charSheet, featuresMatrix, cp);
 				}
@@ -431,9 +437,9 @@ export function describeCharacter (spec: CharacterSpec): void {
 				: !!process.env.RUN_MEGA;
 			const matrixGated = wantMatrix ? test : test.skip;
 			matrixGated(`MEGA Features matrix L1→20`, async ({page}) => {
-				test.setTimeout(MEGA_TIMEOUT_MS);
+				test.setTimeout(spec.megaTimeoutMs || MEGA_TIMEOUT_MS);
 				const {charSheet} = await createCharacterViaWizard(page, preset);
-				const checkpoints = [3, 5, 11, 17, 20];
+				const checkpoints = spec.megaCheckpoints || [3, 5, 11, 17, 20];
 				let cursor = 1;
 				for (const cp of checkpoints) {
 					if (cp <= cursor) continue;

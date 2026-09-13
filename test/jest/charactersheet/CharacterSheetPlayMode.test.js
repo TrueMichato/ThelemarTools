@@ -4,6 +4,7 @@
  */
 
 import "./setup.js";
+import {jest} from "@jest/globals";
 import "../../../js/charactersheet/charactersheet-state.js";
 import {CharacterSheetPlayMode} from "../../../js/charactersheet/charactersheet-playmode.js";
 
@@ -14,6 +15,67 @@ describe("CharacterSheetPlayMode", () => {
 
 	beforeEach(() => {
 		state = new CharacterSheetState();
+	});
+
+	describe("Active-state lifecycle", () => {
+		it("ends known states canonically, drains their queued end save, and persists", async () => {
+			state.activateState("dancing");
+			let pendingAtDrain = [];
+			const page = {
+				getState: () => state,
+				_pDrainPendingStateEndSaves: jest.fn(async () => {
+					pendingAtDrain = state.getPendingStateEndSaves();
+					for (const pending of pendingAtDrain) state.resolvePendingStateEndSave(pending.id, 10);
+				}),
+				_saveCurrentCharacter: jest.fn(async () => {}),
+				_renderActiveStates: jest.fn(),
+			};
+			const pm = new CharacterSheetPlayMode(page);
+
+			await expect(pm._pToggleActiveState(state.getActiveStates().find(it => it.stateTypeId === "dancing")))
+				.resolves.toBe(true);
+
+			expect(state.isStateTypeActive("dancing")).toBe(false);
+			expect(pendingAtDrain).toHaveLength(1);
+			expect(state.getPendingStateEndSaves()).toHaveLength(0);
+			expect(page._pDrainPendingStateEndSaves).toHaveBeenCalledTimes(1);
+			expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(1);
+			expect(page._renderActiveStates).toHaveBeenCalledTimes(1);
+		});
+
+		it("routes feature-backed activation through the page transaction", async () => {
+			const activeState = {id: "dance-state", stateTypeId: "dancing", active: false};
+			const feature = {id: "dance-feature", name: "Dance of the Country"};
+			const stateType = {id: "dancing", resourceCost: 1};
+			const activationInfo = {stateType, resourceCost: 1};
+			const resource = {id: "dance-resource", cost: 1, current: 2};
+			const fakeState = {
+				constructor: {ACTIVE_STATE_TYPES: {dancing: stateType}},
+				getActivatableFeatures: () => [{feature, stateTypeId: "dancing", activationInfo, resource}],
+				toggleActiveState: jest.fn(),
+			};
+			const page = {
+				getState: () => fakeState,
+				_activateFeatureState: jest.fn(async () => { activeState.active = true; }),
+				_saveCurrentCharacter: jest.fn(async () => {}),
+				_renderActiveStates: jest.fn(),
+			};
+			const pm = new CharacterSheetPlayMode(page);
+
+			await expect(pm._pToggleActiveState(activeState)).resolves.toBe(true);
+
+			expect(page._activateFeatureState).toHaveBeenCalledWith(
+				feature,
+				"dancing",
+				stateType,
+				resource,
+				1,
+				activationInfo,
+			);
+			expect(fakeState.toggleActiveState).not.toHaveBeenCalled();
+			expect(page._saveCurrentCharacter).not.toHaveBeenCalled();
+			expect(page._renderActiveStates).toHaveBeenCalledTimes(1);
+		});
 	});
 
 	describe("Item attunement", () => {

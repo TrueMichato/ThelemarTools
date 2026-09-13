@@ -348,17 +348,17 @@ duration.
 
 | Archetype | Status | Key Features |
 |-----------|--------|--------------|
-| **The Belly Dancer** | ✅ Complete | `dancing` toggle state (+CHA AC, min +1; Acrobatics advantage; melee Sneak Attack without advantage; DC 10 CON save on end or gain 1 exhaustion); `hasConcealedWeapons`, `danceEndSaveDc`; gated `tantalizingShivers` + `percussiveStrike` states; Fluid Step Disengage benefit |
+| **The Belly Dancer** | ✅ Complete | Source-gated `dancing` state (+CHA AC, min +1; Acrobatics advantage; melee Sneak Attack without advantage); named target tracking for Tantalizing Shivers and automatic Percussive Strike; canonical teardown with queued DC 10 CON end save; Fluid Step Disengage benefit |
 
 #### The Belly Dancer — feature-by-feature
 
 | Lvl | Feature | Mechanical effect on the sheet |
 |---|---|---|
 | 3 | **Bonus Proficiency** | Performance Expertise (`getSkillProficiency("performance") === 2`); `hasConcealedWeapons` plus a **conditional** Sleight of Hand advantage ("to keep a weapon you are holding hidden"), opt-in per roll like every other conditional modifier |
-| 3 | **Dance of the Country** | Bonus-action `dancing` toggle costing 1 of PB/short rest. While active: AC + CHA mod (**minimum +1**), advantage on Dex (Acrobatics), and `sneakAttackWithoutAdvantage` for **melee** attacks. Ends on Incapacitated / Paralyzed / Restrained / donning heavy armor / 1 minute; ending triggers a **DC 10 Constitution** save, failure = 1 exhaustion |
-| 9 | **Tantalizing Shivers** | Separate toggle, `requiresStates: ["dancing"]`. Activation rolls a **Charisma (Performance)** contest vs the target's Wisdom (Insight) *before* spending anything; winning grants advantage on attacks for 1 round |
+| 3 | **Dance of the Country** | Tracked Bonus Action `dancing` toggle costing 1 of PB/short rest. While active: AC + CHA mod (**minimum +1**), advantage on Dex (Acrobatics), and `sneakAttackWithoutAdvantage` for **melee** attacks. Exact condition, heavy-armor, manual, and 10-round endings all use canonical teardown and enqueue exactly one **DC 10 Constitution** save; failure = 1 exhaustion |
+| 9 | **Tantalizing Shivers** | Named-target state with `requiresStates: ["dancing"]`. The target is chosen before commitment; the Bonus Action is then spent and a **Charisma (Performance)** contest is rolled vs Wisdom (Insight). Winning records Charmed / Incapacitated / speed 0 reminders for one round and offers opt-in attack advantage only against that target |
 | 13 | **Fluid Step** | `grantsActionBenefit: "disengage"` while Dancing → `hasActionBenefitFromStates("disengage")`. The reciprocal clause (enemies can't Disengage from you) is a rules note only — see **CS-BUG-115** |
-| 17 | **Percussive Strike** | Free-action toggle, `requiresStates: ["dancing"]`, DC = `8 + PB + CHA` via `getPercussiveStrikeDc()`, surfaced in the Combat tab; grants advantage on attacks and lasts as long as the Dance |
+| 17 | **Percussive Strike** | Automatic rider when Dance begins, never a standalone toggle. The activation modal shows the derived Wisdom save DC (`8 + PB + CHA`) and records zero or more failed targets on the Dance state; each target supplies its own opt-in attack-advantage modifier until the Dance ends |
 
 > **Dance of the Country is a toggle, not a choice.** The homebrew text reads
 > "you can start Dancing, and can stop doing so at will" — there is no list of

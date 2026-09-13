@@ -9176,6 +9176,7 @@ class CharacterSheetPage {
 	// #endregion
 
 	_renderActiveStates () {
+		this._schedulePendingStateEndSaves();
 		const container = document.getElementById("charsheet-active-states");
 		container.innerHTML = "";
 
@@ -10183,6 +10184,14 @@ class CharacterSheetPage {
 		if (isSpellEffect && state.grantsConditions?.length > 0) {
 			grantsConditionsHtml = `<span class="ve-small text-info ml-2" title="This spell grants these conditions">(Grants: ${state.grantsConditions.join(", ")})</span>`;
 		}
+		const targets = Array.isArray(state.targets) ? state.targets : [];
+		const targetsHtml = targets.length
+			? `<span class="charsheet__state-targets ml-2" aria-label="Affected targets">${targets.map(target => {
+				const statusText = target.statuses?.length ? ` — ${target.statuses.join(", ")}` : "";
+				const title = `${target.source || state.name || "Effect"}: ${target.name}${statusText}`.qq();
+				return `<span class="charsheet__state-target" title="${title}">${target.name.qq()}</span>`;
+			}).join("")}</span>`
+			: "";
 
 		// C2: Show inline effect labels for non-spell active states (e.g. Patient Defense)
 		let effectLabelsHtml = "";
@@ -10238,7 +10247,7 @@ class CharacterSheetPage {
 				style="background: ${bgColor}; border: 1px solid ${borderColor};">
 				<span class="charsheet__state-icon mr-2" style="font-size: 1.2em;" title="${tooltipAttr}">${icon}</span>
 				<span class="charsheet__state-name ve-bold" title="${tooltipAttr}">${nameHtml}${concentrationHtml}</span>
-				${effectLabelsHtml}${temporalViewHtml}${durationHtml}${grantsConditionsHtml}
+				${effectLabelsHtml}${temporalViewHtml}${durationHtml}${grantsConditionsHtml}${targetsHtml}
 				<div class="charsheet__state-controls ml-auto ve-flex-v-center">
 					${isTemporalVision && state.temporalView.decisionPending ? `
 						<button class="ve-btn ve-btn-xs ve-btn-default mr-1 charsheet__temporal-hold-btn">Hold</button>
@@ -10282,7 +10291,7 @@ class CharacterSheetPage {
 						// Sync custom abilities panel
 						this._customAbilitiesPanel?.render?.();
 					} else {
-						this._state.deactivateState(state.stateTypeId);
+						this._state.deactivateState(state.stateTypeId, {reason: "manual"});
 						// Bridge combat stance deactivation to the stance-specific system
 						if (state.stateTypeId === "combatStance") {
 							this._state.deactivateStance();
@@ -10292,7 +10301,7 @@ class CharacterSheetPage {
 						// (e.g. the Belly Dancer's Dance of the Country: DC 10 CON or a
 						// level of exhaustion). Prompted AFTER deactivation so the roll is
 						// made without the state's own bonuses still applied.
-						await this._pResolveStateEndSave(state.stateTypeId);
+						await this._pDrainPendingStateEndSaves();
 					}
 				}
 				this._saveCurrentCharacter();
@@ -12585,9 +12594,12 @@ class CharacterSheetPage {
 	 * @param {string} stateTypeId
 	 * @private
 	 */
-	async _pResolveStateEndSave (stateTypeId) {
+	async _pResolveStateEndSave (stateTypeId, {pendingId = null} = {}) {
 		const endSave = this._state.getStateEndSave?.(stateTypeId);
-		if (!endSave) return;
+		if (!endSave) {
+			if (pendingId) this._state.resolvePendingStateEndSave?.(pendingId, Number.POSITIVE_INFINITY);
+			return;
+		}
 
 		const ability = endSave.ability;
 		const mod = this._state.getSaveMod(ability);
@@ -12595,7 +12607,9 @@ class CharacterSheetPage {
 		const roll = typeof RollerUtil !== "undefined" ? RollerUtil.randomise(20) : Math.ceil(Math.random() * 20);
 		const total = roll + mod - exhaustionPenalty;
 
-		const outcome = this._state.resolveStateEndSave(stateTypeId, {total});
+		const outcome = pendingId
+			? this._state.resolvePendingStateEndSave(pendingId, total)
+			: this._state.resolveStateEndSave(stateTypeId, {total});
 		if (!outcome) return;
 
 		const abilityFull = typeof Parser !== "undefined" ? Parser.attAbvToFull(ability) : ability.toUpperCase();
@@ -12615,6 +12629,122 @@ class CharacterSheetPage {
 		if (!outcome.success && outcome.exhaustionGained) {
 			JqueryUtil.doToast({type: "warning", content: note});
 		}
+	}
+
+	async _pDrainPendingStateEndSaves () {
+		if (this._isResolvingPendingStateEndSaves) return;
+		this._isResolvingPendingStateEndSaves = true;
+		try {
+			while (true) {
+				const pending = this._state.getPendingStateEndSaves?.()[0];
+				if (!pending) break;
+				await this._pResolveStateEndSave(pending.stateTypeId, {pendingId: pending.id});
+				await this._saveCurrentCharacter();
+			}
+		} finally {
+			this._isResolvingPendingStateEndSaves = false;
+		}
+	}
+
+	_schedulePendingStateEndSaves () {
+		if (this._isPendingStateEndSaveScheduled || this._isResolvingPendingStateEndSaves) return;
+		if (!this._state.getPendingStateEndSaves?.().length) return;
+		this._isPendingStateEndSaveScheduled = true;
+		Promise.resolve().then(async () => {
+			this._isPendingStateEndSaveScheduled = false;
+			await this._pDrainPendingStateEndSaves();
+			this._renderResources();
+			this._renderActiveStates();
+			this._combat?.renderCombatStates?.();
+			this._renderCharacter();
+		});
+	}
+
+	async _pChooseActiveStateTargets (feature, targeting) {
+		if (!targeting) return [];
+
+		const isMultiple = targeting.mode === "multiple";
+		const allowEmpty = isMultiple;
+		let resolveOuter = null;
+		let isResolved = false;
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: isMultiple ? `${feature.name} — Record Failed Saves` : `${feature.name} — Choose Target`,
+			isMinHeight0: true,
+			cbClose: () => {
+				if (resolveOuter && !isResolved) {
+					isResolved = true;
+					resolveOuter(null);
+				}
+			},
+		});
+
+		return new Promise(resolve => {
+			resolveOuter = resolve;
+			const finalize = value => {
+				if (isResolved) return;
+				isResolved = true;
+				resolve(value);
+			};
+			const statusText = (targeting.statuses || []).join(", ");
+			modalInner.innerHTML = `
+				<div class="charsheet__target-picker">
+					<p class="charsheet__target-picker-lede">${isMultiple
+		? `After the DC ${this._state.getPercussiveStrikeDc?.() ?? "—"} Wisdom saves are resolved, enter each hostile creature that failed. Leave this empty if none failed.`
+		: `Name the visible creature you are targeting. The sheet records the outcome on this target without applying enemy conditions to your character.`}</p>
+					<label class="charsheet__target-picker-label" for="charsheet-target-picker-input">${isMultiple ? "Failed targets" : "Target name"}</label>
+					${isMultiple
+		? `<textarea id="charsheet-target-picker-input" class="form-control charsheet__target-picker-input" rows="5" placeholder="One target per line, e.g.&#10;Bandit Captain&#10;Cult Fanatic"></textarea>`
+		: `<input id="charsheet-target-picker-input" class="form-control charsheet__target-picker-input" type="text" autocomplete="off" placeholder="e.g. Bandit Captain">`}
+					<div class="ve-small ve-muted mt-1">${isMultiple ? "Separate names with a new line or comma." : `On a won contest: ${statusText || "the feature's effects apply"}.`}</div>
+					<div class="charsheet__target-picker-error ve-small text-danger mt-2" role="alert" aria-live="polite"></div>
+					<div class="ve-flex-h-right mt-3" style="gap: 8px;">
+						<button class="ve-btn ve-btn-default" data-act="cancel">Cancel</button>
+						<button class="ve-btn ve-btn-primary" data-act="confirm">${isMultiple ? "Start Dance" : "Roll Contest"}</button>
+					</div>
+				</div>
+			`;
+
+			const input = modalInner.querySelector("#charsheet-target-picker-input");
+			const error = modalInner.querySelector(".charsheet__target-picker-error");
+			const collect = () => {
+				const rawNames = isMultiple ? `${input.value || ""}`.split(/[\n,]+/) : [`${input.value || ""}`];
+				const names = [...new Map(rawNames
+					.map(name => name.trim())
+					.filter(Boolean)
+					.map(name => [name.toLowerCase(), name])).values()];
+				if (!allowEmpty && !names.length) {
+					error.textContent = "Enter a target name to continue.";
+					input.focus();
+					return null;
+				}
+				return names.map(name => ({
+					name,
+					source: targeting.source || feature.name,
+					statuses: targeting.statuses || [],
+					grantsAttackAdvantage: !!targeting.grantsAttackAdvantage,
+				}));
+			};
+
+			modalInner.querySelector(`[data-act="cancel"]`).addEventListener("click", () => {
+				finalize(null);
+				doClose();
+			});
+			modalInner.querySelector(`[data-act="confirm"]`).addEventListener("click", () => {
+				const targets = collect();
+				if (targets == null) return;
+				finalize(targets);
+				doClose();
+			});
+			input.addEventListener("input", () => { error.textContent = ""; });
+			if (!isMultiple) {
+				input.addEventListener("keydown", evt => {
+					if (evt.key !== "Enter") return;
+					evt.preventDefault();
+					modalInner.querySelector(`[data-act="confirm"]`).click();
+				});
+			}
+			input.focus();
+		});
 	}
 
 	/**
@@ -13127,6 +13257,18 @@ class CharacterSheetPage {
 			return;
 		}
 		if (await this._pHandleFeatureInteraction(feature, stateTypeId, stateType, resource, resolvedCost, activationInfo)) return;
+
+		let activationTargets = null;
+		let targeting = stateType?.targeting || null;
+		if (!targeting && stateType?.onActivateTargeting) {
+			const calculationGate = stateType.onActivateTargeting.calculationGate;
+			const calculations = this._state.getFeatureCalculations?.() || {};
+			if (!calculationGate || calculations[calculationGate]) targeting = stateType.onActivateTargeting;
+		}
+		if (targeting) {
+			activationTargets = await this._pChooseActiveStateTargets(feature, targeting);
+			if (activationTargets == null) return;
+		}
 		if (!this._tryConsumeActiveStateToggleAction(stateTypeId, stateType, activationInfo)) return;
 		// ===== R20: name-keyed homebrew ability "Use" behaviors =====
 		// Intercept the Illrigger/Hochling abilities that need bespoke effects BEFORE the
@@ -13301,7 +13443,9 @@ class CharacterSheetPage {
 		// Some abilities only take effect if you win a contest (e.g. the Belly
 		// Dancer's Tantalizing Shivers: Charisma (Performance) vs the target's
 		// Wisdom (Insight)). Rolled BEFORE any resource is deducted, so losing the
-		// contest — or cancelling — costs nothing.
+		// contest. Selecting a target is cancelable before the Bonus Action is
+		// committed; once the contest roll begins, the action is spent even if
+		// the target wins.
 		if (activationInfo?.contestedCheck) {
 			const won = await this._pResolveContestedCheck(feature, activationInfo.contestedCheck);
 			if (!won) return;
@@ -13376,7 +13520,10 @@ class CharacterSheetPage {
 		const shouldParseEffects = stateTypeId === "custom"
 			|| !CharacterSheetState.ACTIVE_STATE_TYPES[stateTypeId]
 			|| stateType?.isGeneric
-			|| (stateType?.effects && stateType.effects.length === 0);
+			|| (stateType?.effects && stateType.effects.length === 0
+				&& !stateType.effectsBuilder
+				&& !stateType.targeting
+				&& !stateType.onActivateTargeting);
 
 		const metadataEffects = activationInfo?.effects;
 		const parsedEffects = shouldParseEffects
@@ -13444,6 +13591,7 @@ class CharacterSheetPage {
 				customEffects: weaponScopedEffects || (shouldParseEffects && parsedEffects?.length > 0 ? parsedEffects : null),
 			};
 			if (wrathPlacement) customData.placement = wrathPlacement;
+			if (stateType?.targeting || stateType?.onActivateTargeting) customData.targets = activationTargets || [];
 			this._state.activateState(stateTypeId, customData);
 			const linkedStateId = stateType?.variablePointSpend?.linkedStateBySpend?.[variableSpend];
 			if (linkedStateId) this._state.activateState(linkedStateId);
@@ -13463,7 +13611,9 @@ class CharacterSheetPage {
 	}
 
 	_tryConsumeActiveStateToggleAction (stateTypeId, stateType, activationInfo = null) {
-		if (!["sunShield", "astralArms", "astralVisage", "awakenedAstralSelf"].includes(stateTypeId) || !this._state.isInCombat?.()) return true;
+		const tracksActionEconomy = stateType?.tracksActionEconomy
+			|| ["sunShield", "astralArms", "astralVisage", "awakenedAstralSelf"].includes(stateTypeId);
+		if (!tracksActionEconomy || !this._state.isInCombat?.()) return true;
 		return this._combat?._tryConsumeStateToggleAction?.(stateType, activationInfo) ?? true;
 	}
 

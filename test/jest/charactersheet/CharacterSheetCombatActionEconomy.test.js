@@ -1,7 +1,9 @@
 import "./setup.js";
+import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-combat.js";
 
 const CharacterSheetCombat = globalThis.CharacterSheetCombat;
+const CharacterSheetState = globalThis.CharacterSheetState;
 
 describe("CharacterSheetCombat action economy gating", () => {
 	let combat;
@@ -69,6 +71,18 @@ describe("CharacterSheetCombat action economy gating", () => {
 
 		const warningToasts = toasts.filter(t => t.type === "warning");
 		expect(warningToasts.some(t => /bonus action/i.test(t.content))).toBe(true);
+	});
+
+	it("tracks Belly Dancer Dance and Tantalizing Shivers as bonus-action states", () => {
+		for (const stateTypeId of ["dancing", "tantalizingShivers"]) {
+			const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[stateTypeId];
+			expect(stateType).toMatchObject({activationAction: "bonus", tracksActionEconomy: true});
+		}
+
+		const dance = CharacterSheetState.ACTIVE_STATE_TYPES.dancing;
+		expect(combat._tryConsumeStateToggleAction(dance)).toBe(true);
+		expect(combat._tryConsumeStateToggleAction(dance)).toBe(false);
+		expect(toasts.some(t => t.type === "warning" && /bonus action/i.test(t.content))).toBe(true);
 	});
 
 	it("resets per-turn action economy on round reset", () => {

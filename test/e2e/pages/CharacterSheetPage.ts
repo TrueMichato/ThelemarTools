@@ -437,6 +437,14 @@ export class CharacterSheetPage {
 		}
 		const choiceModal = this.page.locator(".ve-ui-modal__inner:visible, .ui-modal__inner:visible").last();
 		if (await choiceModal.count()) {
+			const targetInput = this.page.locator(".charsheet__target-picker-input:visible").last();
+			if (await targetInput.count()) {
+				await targetInput.fill("Test Target");
+				await targetInput.locator("xpath=..").locator(`[data-act="confirm"]`).evaluate((el: HTMLElement) => el.click());
+				await targetInput.waitFor({state: "hidden", timeout: 5000});
+				const contestWin = this.page.locator("button.ve-btn").filter({hasText: /^\s*Yes — contest won\s*$/i}).last();
+				if (await contestWin.isVisible({timeout: 5000}).catch(() => false)) await contestWin.click({timeout: 5000});
+			}
 			const choice = choiceModal.locator("button.ve-btn").filter({hasText: /Spend \d+/}).first();
 			if (await choice.count()) {
 				await choice.click({timeout: 5000});
@@ -449,6 +457,48 @@ export class CharacterSheetPage {
 			}
 		}
 		await this.page.waitForTimeout(200);
+	}
+
+	async activateFeatureWithTargets (featureName: string, targetNames: string[], {contestWon = true} = {}): Promise<void> {
+		await this.switchToTab(this.tabOverview);
+		const row = this.page.locator(".charsheet__activatable-row").filter({hasText: this._getFeatureActivationPattern(featureName)}).first();
+		const btn = row.locator(".charsheet__activate-btn");
+		await btn.waitFor({state: "visible", timeout: 5000});
+		// Dispatch directly so a modal mounted under the pointer during the activation
+		// handler cannot receive the tail of Playwright's synthetic mouse gesture.
+		await btn.evaluate((el: HTMLElement) => el.click());
+
+		const input = this.page.locator(".charsheet__target-picker-input:visible").last();
+		try {
+			await input.waitFor({state: "visible", timeout: 10000});
+		} catch (e) {
+			const diagnostic = await this.page.evaluate((name) => {
+				const cs: any = (globalThis as any).charSheet;
+				const feature = cs?._state?.getFeature?.(name);
+				const activationInfo = (globalThis as any).CharacterSheetState?.detectActivatableFeature?.(feature);
+				return {
+					stateTypeId: activationInfo?.stateTypeId ?? null,
+					hasTargeting: !!activationInfo?.stateType?.targeting,
+					targeting: activationInfo?.stateType?.targeting ?? null,
+					visibleModalText: [...document.querySelectorAll(".ve-ui-modal__inner, .ui-modal__inner")]
+						.filter((it: any) => it.offsetParent !== null)
+						.map(it => it.textContent?.trim().slice(0, 300)),
+				};
+			}, featureName);
+			throw new Error(`activateFeatureWithTargets(${featureName}): target picker did not appear. diagnostic=${JSON.stringify(diagnostic)}; cause=${e}`);
+		}
+		await input.fill(targetNames.join("\n"));
+		await input.locator("xpath=..").locator(`[data-act="confirm"]`).evaluate((el: HTMLElement) => el.click());
+		await input.waitFor({state: "hidden", timeout: 5000});
+
+		const contestButton = this.page.locator("button.ve-btn")
+			.filter({hasText: contestWon ? /^\s*Yes — contest won\s*$/i : /^\s*No\s*$/i})
+			.last();
+		if (await contestButton.isVisible({timeout: 5000}).catch(() => false)) {
+			await contestButton.evaluate((el: HTMLElement) => el.click());
+			await contestButton.waitFor({state: "hidden", timeout: 5000});
+		}
+		await this.page.waitForTimeout(300);
 	}
 
 	/**

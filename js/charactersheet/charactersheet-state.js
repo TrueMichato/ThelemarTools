@@ -5154,6 +5154,10 @@ class CharacterSheetState {
 			// Lightweight initiative roster used by character-owned turn-order effects.
 			// This deliberately tracks no NPC statistics beyond the order itself.
 			combatTurnOrder: [], // [{id, name, initiative, hasActed}]
+			// End-of-state saves waiting for the UI to resolve. Keeping these in
+			// serialized state prevents an automatic ending immediately before a
+			// save/close from silently losing its consequence.
+			pendingStateEndSaves: [],
 
 			// Companions (beast companions, familiars, summons, steel defenders, drakes, wild shape forms)
 			// Each companion: { id, name, source, type, origin, customName,
@@ -5406,6 +5410,25 @@ class CharacterSheetState {
 		}
 		this._normalizeCombatTurnOrder();
 		this._migrateTimeDomainActiveStates();
+		// Percussive Strike is an automatic rider on Dance activation, not an
+		// independently toggled state. Retire legacy standalone instances.
+		this._data.activeStates = this._data.activeStates.filter(state => state?.stateTypeId !== "percussiveStrike");
+		this._data.activeStates.forEach(state => {
+			state.targets = this._normalizeActiveStateTargets(state.targets);
+		});
+		if (!Array.isArray(this._data.pendingStateEndSaves)) {
+			this._data.pendingStateEndSaves = [];
+		} else {
+			this._data.pendingStateEndSaves = this._data.pendingStateEndSaves
+				.filter(entry => entry && entry.id && entry.stateTypeId)
+				.map(entry => ({
+					id: String(entry.id),
+					stateId: entry.stateId ? String(entry.stateId) : null,
+					stateTypeId: String(entry.stateTypeId),
+					reason: String(entry.reason || "ended"),
+					queuedAt: Number(entry.queuedAt) || Date.now(),
+				}));
+		}
 
 		// Ensure chosenSubfeatures array exists (legacy saves predate structured choices)
 		if (!Array.isArray(this._data.chosenSubfeatures)) {
@@ -12888,7 +12911,18 @@ class CharacterSheetState {
 	}
 
 	setBaseAc (ac) { this._data.ac.base = ac; }
-	setArmor (armor) { this._data.ac.armor = armor; }
+	setArmor (armor) {
+		const wasHeavy = this._isHeavyArmorSnapshot(this._data.ac.armor);
+		this._data.ac.armor = armor;
+		if (!wasHeavy && this._isHeavyArmorSnapshot(armor)) {
+			this._deactivateStatesForEndCondition({armorType: "heavy"});
+		}
+	}
+
+	_isHeavyArmorSnapshot (armor) {
+		const type = `${armor?.type || armor?.armorType || ""}`.trim().toLowerCase();
+		return type === "ha" || type === "heavy" || type === "heavy armor";
+	}
 
 	/**
 	 * Build the `_data.ac.armor` snapshot for a piece of body armor.
@@ -19872,6 +19906,7 @@ class CharacterSheetState {
 							// TGTT Belly Dancer (Rogue Subclass)
 							// =====================================================================
 							case "The Belly Dancer": {
+								if (`${cls.subclass?.source || ""}`.toUpperCase() !== "TGTT") break;
 								const chaMod = this.getAbilityMod("cha");
 
 								// Bonus Proficiency (level 3) — Expertise in Performance (the
@@ -37020,6 +37055,7 @@ class CharacterSheetState {
 			// RAW: Incapacitated creatures can't concentrate (PHB/XPHB)
 			const condDef = this._resolveConditionEffects(condObj.name, condObj.source);
 			const isIncapacitating = condDef?.effects?.some(e => e.type === "incapacitated" && e.value);
+			this._deactivateStatesForEndCondition({conditionName: condObj.name});
 			if (isIncapacitating) {
 				if (this.isConcentrating()) this.breakConcentration();
 				// RAW: "If you become incapacitated or die, all of your current active
@@ -37135,6 +37171,7 @@ class CharacterSheetState {
 			}
 		}
 		// Add new condition effects
+		const addedConditions = [];
 		for (const condObj of newConditions) {
 			const wasPresent = this._data.conditions.some(c => {
 				const cObj = this._normalizeCondition(c);
@@ -37142,9 +37179,13 @@ class CharacterSheetState {
 			});
 			if (!wasPresent) {
 				this._applyConditionEffects(condObj.name, condObj.source);
+				addedConditions.push(condObj);
 			}
 		}
 		this._data.conditions = [...newConditions];
+		for (const condObj of addedConditions) {
+			this._deactivateStatesForEndCondition({conditionName: condObj.name});
+		}
 		const isIncapacitating = newConditions.some(condObj =>
 			this._resolveConditionEffects(condObj.name, condObj.source)?.effects?.some(e => e.type === "incapacitated" && e.value),
 		);
@@ -38884,6 +38925,7 @@ class CharacterSheetState {
 	 */
 	getDancingEffects () {
 		const calcs = this.getFeatureCalculations();
+		if (!calcs.hasDanceOfTheCountry) return [];
 		const effects = [
 			// "a bonus to your AC equal to your Charisma modifier (minimum of +1)"
 			{type: "bonus", target: "ac", abilityMod: "cha", minimum: 1},
@@ -38907,7 +38949,9 @@ class CharacterSheetState {
 	}
 
 	/** @returns {boolean} True while the Dance of the Country is active. */
-	isDancing () { return this.isStateTypeActive("dancing"); }
+	isDancing () {
+		return !!this.getFeatureCalculations().hasDanceOfTheCountry && this.isStateTypeActive("dancing");
+	}
 
 	/**
 	 * True when an active state currently lets this character land a Sneak Attack
@@ -54136,7 +54180,7 @@ class CharacterSheetState {
 	}
 
 	_getConditionalActiveStateModifiersForType (type) {
-		return this.getActiveStateEffects()
+		const effectModifiers = this.getActiveStateEffects()
 			.filter(effect => effect.conditional && ["advantage", "disadvantage"].includes(effect.type))
 			.filter(effect => effect.target === type
 				|| (effect.target === "save" && type.startsWith("save:"))
@@ -54152,6 +54196,31 @@ class CharacterSheetState {
 				conditional: effect.conditional,
 				sourceId: effect.stateId,
 			}));
+
+		if (!type.startsWith("attack")) return effectModifiers;
+
+		const calculations = this.getFeatureCalculations?.() || {};
+		const targetModifiers = this._data.activeStates
+			.filter(state => state.active)
+			.filter(state => {
+				const calculationGate = CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId]?.onActivateTargeting?.calculationGate;
+				return !calculationGate || !!calculations[calculationGate];
+			})
+			.flatMap(state => this._normalizeActiveStateTargets(state.targets)
+				.filter(target => target.grantsAttackAdvantage)
+				.map(target => ({
+					id: `active-state-target-${state.id}-${target.id}`,
+					name: `${target.source || state.name || "Active State"}: ${target.name}`,
+					type,
+					value: 0,
+					advantage: true,
+					disadvantage: false,
+					conditional: `when attacking ${target.name}`,
+					sourceId: state.id,
+					targetId: target.id,
+				})));
+
+		return [...effectModifiers, ...targetModifiers];
 	}
 
 	/**
@@ -56318,12 +56387,28 @@ class CharacterSheetState {
 			effectsBuilder: "getDancingEffects",
 			duration: "1 minute",
 			endConditions: ["Incapacitated", "Paralyzed", "Restrained", "Donning heavy armor", "1 minute elapses"],
+			endTriggers: {
+				conditions: ["incapacitated", "paralyzed", "restrained"],
+				armorTypes: ["heavy"],
+				duration: true,
+			},
 			// Per the homebrew: when the Dance ends you must make a DC 10 Constitution
 			// save or gain a level of exhaustion.
 			endSave: {ability: "con", dc: 10, onFailure: {exhaustion: 1}, label: "Dance of the Country"},
 			resourceName: "Dance of the Country",
 			detectPatterns: ["dance of the country", "traditional dance"],
 			activationAction: "bonus",
+			tracksActionEconomy: true,
+			onActivateTargeting: {
+				calculationGate: "hasPercussiveStrike",
+				mode: "multiple",
+				source: "Percussive Strike",
+				statuses: ["Failed Wisdom save"],
+				grantsAttackAdvantage: true,
+				dcCalculation: "percussiveStrikeDc",
+				saveAbility: "wis",
+			},
+			requiredSource: "TGTT",
 			requiresSubclass: "The Belly Dancer",
 		},
 		tantalizingShivers: {
@@ -56331,13 +56416,21 @@ class CharacterSheetState {
 			name: "Tantalizing Shivers",
 			icon: "💫",
 			description: "A creature is charmed by your Dance — it is incapacitated with speed 0, and you have advantage on attack rolls against it.",
-			effects: [{type: "advantage", target: "attack"}],
+			effects: [],
 			duration: "1 round",
 			endConditions: ["The creature takes damage", "Someone shakes it out of its fascination", "Your Dance ends"],
 			// "As a bonus action WHILE DANCING" — hidden from the activate list until
 			// the Dance is running, and auto-dropped when the Dance ends.
 			requiresStates: ["dancing"],
 			activationAction: "bonus",
+			tracksActionEconomy: true,
+			targeting: {
+				mode: "single",
+				source: "Tantalizing Shivers",
+				statuses: ["Charmed", "Incapacitated", "Speed 0"],
+				grantsAttackAdvantage: true,
+			},
+			requiredSource: "TGTT",
 			requiresSubclass: "The Belly Dancer",
 		},
 		percussiveStrike: {
@@ -56345,11 +56438,12 @@ class CharacterSheetState {
 			name: "Percussive Strike",
 			icon: "🥁",
 			description: "A hostile creature failed its Wisdom save when your Dance began — you have advantage on attack rolls against it for as long as the Dance lasts.",
-			effects: [{type: "advantage", target: "attack"}],
+			effects: [],
 			duration: "While the Dance is active",
 			endConditions: ["Your Dance ends"],
 			requiresStates: ["dancing"],
 			activationAction: "free",
+			requiredSource: "TGTT",
 			requiresSubclass: "The Belly Dancer",
 		},
 		combatStance: {
@@ -58518,8 +58612,11 @@ class CharacterSheetState {
 		// types carry `requiresStates: ["dancing"]`, which getActivatableFeatures()
 		// honours), so they only appear once the Dance is running and are dropped
 		// automatically when it ends.
-		const isBellyDancerFeature = (feature.subclassShortName || "").toLowerCase() === "belly dancer"
-			|| (feature.subclassName || "").toLowerCase() === "the belly dancer";
+		const bellyDancerSource = `${feature.subclassSource || feature.source || ""}`.toUpperCase();
+		const isBellyDancerFeature = bellyDancerSource === "TGTT"
+			&& ((feature.subclassShortName || "").toLowerCase() === "belly dancer"
+				|| (feature.subclassName || "").toLowerCase() === "the belly dancer");
+		if (isBellyDancerFeature && name === "percussive strike") return null;
 		if (isBellyDancerFeature && name === "tantalizing shivers") {
 			return {
 				stateTypeId: "tantalizingShivers",
@@ -58542,21 +58639,6 @@ class CharacterSheetState {
 				},
 			};
 		}
-		if (isBellyDancerFeature && name === "percussive strike") {
-			return {
-				stateTypeId: "percussiveStrike",
-				stateType: this.ACTIVE_STATE_TYPES.percussiveStrike,
-				matchedBy: "bellyDancer",
-				activationAction: "free",
-				interactionMode: "toggle",
-				isToggle: true,
-				duration: this.ACTIVE_STATE_TYPES.percussiveStrike.duration,
-				endConditions: this.ACTIVE_STATE_TYPES.percussiveStrike.endConditions,
-				effects: this.ACTIVE_STATE_TYPES.percussiveStrike.effects,
-				resourceCost: 0,
-			};
-		}
-
 		// ===== Child of the Sun Bloodline (Ar2 Sorcerer; TGTT re-parents it) =====
 		// Identified by the subclass rather than by source, so both the Ar2
 		// original and the TGTT `_copy` route here. Left to the generic pipeline
@@ -59144,6 +59226,7 @@ class CharacterSheetState {
 		// any state whose own name matches exactly is unambiguously the right answer.
 		const detectCandidates = Object.entries(this.ACTIVE_STATE_TYPES)
 			.filter(([, stateType]) => {
+				if (stateType.requiredSource && `${feature.subclassSource || feature.source || ""}`.toUpperCase() !== stateType.requiredSource) return false;
 				// Skip generic types that shouldn't match by name
 				if (stateType.isGeneric && !stateType.detectPatterns?.length) return false;
 				// CS-BUG-083: states that are ONLY ever applied programmatically (the Shadow
@@ -59226,8 +59309,8 @@ class CharacterSheetState {
 			{pattern: /start (?:your |a )?bladesong/i, stateTypeId: "bladesong"},
 
 			// Belly Dancer dancing patterns (TGTT)
-			{pattern: /dance of the country/i, stateTypeId: "dancing"},
-			{pattern: /perform (?:a |an? )?traditional dance/i, stateTypeId: "dancing"},
+			{pattern: /dance of the country/i, stateTypeId: "dancing", requiredSource: "TGTT"},
+			{pattern: /perform (?:a |an? )?traditional dance/i, stateTypeId: "dancing", requiredSource: "TGTT"},
 
 			// Combat stance patterns (Level Up A5E, TGTT, Grim Hollow, etc.)
 			{pattern: /this stance lasts until/i, stateTypeId: "combatStance"},
@@ -59298,7 +59381,8 @@ class CharacterSheetState {
 			{pattern: /hex(?:blade)?.*curse/i, stateTypeId: "custom"},
 		];
 
-		for (const {pattern, stateTypeId, isInstant: patternIsInstant} of activationPatterns) {
+		for (const {pattern, stateTypeId, isInstant: patternIsInstant, requiredSource} of activationPatterns) {
+			if (requiredSource && `${feature.subclassSource || feature.source || ""}`.toUpperCase() !== requiredSource) continue;
 			if (pattern.test(text) || pattern.test(name)) {
 				const parsedEffects = this.parseEffectsFromDescription(rawText);
 				if (stateTypeId !== "custom" && this.ACTIVE_STATE_TYPES[stateTypeId]) {
@@ -61316,6 +61400,47 @@ class CharacterSheetState {
 	}
 	// #endregion
 
+	_normalizeActiveStateTargets (targets) {
+		if (!Array.isArray(targets)) return [];
+
+		const seenNames = new Set();
+		return targets
+			.map(target => {
+				if (typeof target === "string") target = {name: target};
+				if (!target || typeof target !== "object") return null;
+
+				const name = `${target.name || ""}`.trim();
+				if (!name) return null;
+
+				const normalizedName = name.toLowerCase();
+				if (seenNames.has(normalizedName)) return null;
+				seenNames.add(normalizedName);
+
+				return {
+					id: `${target.id || CharacterSheetState._nextActiveStateId("target")}`,
+					name,
+					source: `${target.source || ""}`.trim() || null,
+					statuses: [...new Set((Array.isArray(target.statuses) ? target.statuses : [])
+						.map(status => `${status || ""}`.trim())
+						.filter(Boolean))],
+					grantsAttackAdvantage: !!target.grantsAttackAdvantage,
+				};
+			})
+			.filter(Boolean);
+	}
+
+	setActiveStateTargets (stateTypeId, targets) {
+		const state = this._data.activeStates.find(activeState => activeState.active && activeState.stateTypeId === stateTypeId);
+		if (!state) return false;
+		state.targets = this._normalizeActiveStateTargets(targets);
+		return true;
+	}
+
+	getActiveStateTargets (stateTypeId) {
+		const state = this._data.activeStates.find(activeState => activeState.active && activeState.stateTypeId === stateTypeId);
+		return this._normalizeActiveStateTargets(state?.targets);
+	}
+
 	/**
 	 * Add a new active state
 	 * @param {string} stateTypeId - The state type ID from ACTIVE_STATE_TYPES, or "custom" for custom states
@@ -61365,6 +61490,7 @@ class CharacterSheetState {
 			if (options.beastData !== undefined) existing.beastData = options.beastData;
 			if (options.zodiacForm !== undefined) existing.zodiacForm = options.zodiacForm;
 			if (options.placement !== undefined) existing.placement = options.placement;
+			existing.targets = this._normalizeActiveStateTargets(options.targets ?? existing.targets);
 			if (options.weaponId !== undefined) existing.weaponId = options.weaponId;
 			if (options.weaponName !== undefined) existing.weaponName = options.weaponName;
 			if (options.consumeOnAttack !== undefined) existing.consumeOnAttack = options.consumeOnAttack;
@@ -61427,6 +61553,7 @@ class CharacterSheetState {
 			// states declare them on their ACTIVE_STATE_TYPES entry; CUSTOM (generically
 			// detected) toggles carry them here instead, parsed from the feature text.
 			addsConditions: options.addsConditions?.length ? options.addsConditions : null,
+			targets: this._normalizeActiveStateTargets(options.targets),
 		};
 
 		this._data.activeStates.push(state);
@@ -61446,8 +61573,11 @@ class CharacterSheetState {
 	toggleActiveState (stateId) {
 		const state = this._data.activeStates.find(s => s.id === stateId);
 		if (state) {
-			state.active = !state.active;
 			if (state.active) {
+				if (state.stateTypeId === "custom") this._deactivateStateInstance(state, {reason: "manual"});
+				else this.deactivateState(state.stateTypeId, {reason: "manual"});
+			} else {
+				state.active = true;
 				state.activatedAt = Date.now();
 				state.activatedAtRound = this._data.inCombat ? this._data.combatRound : null;
 				state.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(state.duration) : null;
@@ -61455,12 +61585,6 @@ class CharacterSheetState {
 				// so a toggle-on through Play Mode restores the boon's condition, mirroring
 				// activateState. No-op for states without `addsConditions`.
 				this._applyStateAddedConditions(state, CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId]);
-			} else {
-				// (R26 #7) Toggling a state OFF must strip the conditions it added, exactly
-				// like deactivateState/removeActiveState. Play Mode's "Active States" card
-				// ends boons via this method; without this, ending a condition-granting boon
-				// (e.g. Veil of Lies → Invisible) left the condition stuck on the sheet.
-				this._removeStateAddedConditions(state);
 			}
 			return state.active;
 		}
@@ -61596,6 +61720,11 @@ class CharacterSheetState {
 			if (options.movementOverride !== undefined) existing.movementOverride = options.movementOverride;
 			if (options.duration) existing.duration = options.duration;
 			if (options.temporalView !== undefined) existing.temporalView = MiscUtil.copyFast(options.temporalView);
+			if (options.targets !== undefined) existing.targets = this._normalizeActiveStateTargets(options.targets);
+			else if (
+				stateType?.onActivateTargeting?.calculationGate
+				&& !this.getFeatureCalculations?.()[stateType.onActivateTargeting.calculationGate]
+			) existing.targets = [];
 			// Re-parse duration on reactivation
 			const dur = options.duration || existing.duration;
 			existing.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(dur) : null;
@@ -61826,29 +61955,87 @@ class CharacterSheetState {
 		}
 	}
 
+	_enqueueStateEndSave (state, reason) {
+		const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[state?.stateTypeId];
+		if (!stateType?.endSave) return;
+		this._data.pendingStateEndSaves ||= [];
+		this._data.pendingStateEndSaves.push({
+			id: CharacterSheetState._nextActiveStateId("end-save"),
+			stateId: state.id,
+			stateTypeId: state.stateTypeId,
+			reason: reason || "ended",
+			queuedAt: Date.now(),
+		});
+	}
+
+	getPendingStateEndSaves () {
+		return [...(this._data.pendingStateEndSaves || [])];
+	}
+
+	resolvePendingStateEndSave (pendingId, rollTotal) {
+		const ix = (this._data.pendingStateEndSaves || []).findIndex(entry => entry.id === pendingId);
+		if (ix === -1) return null;
+		const [pending] = this._data.pendingStateEndSaves.splice(ix, 1);
+		const result = this.resolveStateEndSave(pending.stateTypeId, {total: rollTotal});
+		return {...pending, ...result};
+	}
+
+	_deactivateStateInstance (state, {reason = "manual"} = {}) {
+		if (!state?.active) return false;
+
+		const oldMax = this._data.hp.max || 0;
+		const involvesHpMaxIncrease = this._stateContributesHpMaxIncrease(state);
+		state.active = false;
+		state.roundsRemaining = state.roundsRemaining == null ? null : Math.max(0, state.roundsRemaining);
+		this._removeStateAddedConditions(state);
+
+		if (state.grantsConditions?.length > 0) {
+			for (const condName of state.grantsConditions) this.removeCondition?.(condName);
+		}
+
+		if (state.isSpellEffect && this.getConcentrations().some(c => c.name === state.name || c.spellName === state.name)) {
+			this._dropConcentrationsWhere(c => c.name === state.name || c.spellName === state.name);
+			this.dismissConcentrationCompanions();
+			if (!this.getConcentrationCount()) {
+				const concState = this._data.activeStates.find(s => s.stateTypeId === "concentration");
+				if (concState) this.removeActiveState(concState.id);
+			}
+		}
+
+		if (state.sourceFeatureId) {
+			const ability = this._data.customAbilities?.find(a => a.id === state.sourceFeatureId);
+			if (ability?.isActive) {
+				ability.isActive = false;
+				if (ability.concentration) this._dropConcentrationsWhere(c => c.customAbilityId === ability.id);
+				this._unregisterCustomAbilityEffects(ability.id);
+			}
+		}
+
+		this._enqueueStateEndSave(state, reason);
+		if (involvesHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
+		return true;
+	}
+
 	/**
 	 * Deactivate a state by type ID
 	 * @param {string} stateTypeId - The state type ID
+	 * @param {{reason?: string}} [options]
 	 */
-	deactivateState (stateTypeId) {
-		const state = this._data.activeStates.find(s => s.stateTypeId === stateTypeId);
-		if (state) {
-			const oldMax = this._data.hp.max || 0;
-			const involvesHpMaxIncrease = this._stateContributesHpMaxIncrease(state);
-			state.active = false;
-			// Remove any conditions this state added (e.g. Shell Defense → Prone).
-			this._removeStateAddedConditions(state);
-			// If this state contributed an hpMaxIncrease, recompute max so the cap drops.
-			if (involvesHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
-		}
+	deactivateState (stateTypeId, options = {}) {
+		const state = this._data.activeStates.find(s => s.active && s.stateTypeId === stateTypeId);
+		this._deactivateStateInstance(state, options);
 		for (const [dependentId, stateType] of Object.entries(CharacterSheetState.ACTIVE_STATE_TYPES)) {
-			if (stateType.requiresStates?.includes(stateTypeId) && this.isStateTypeActive(dependentId)) this.deactivateState(dependentId);
+			if (stateType.requiresStates?.includes(stateTypeId) && this.isStateTypeActive(dependentId)) {
+				this.deactivateState(dependentId, {reason: `required state ${stateTypeId} ended`});
+			}
 		}
 		if (["astralArms", "astralVisage", "astralBody"].includes(stateTypeId) && this.isStateTypeActive("awakenedAstralSelf")) {
-			this.deactivateState("awakenedAstralSelf");
+			this.deactivateState("awakenedAstralSelf", {reason: `required state ${stateTypeId} ended`});
 		}
 		if (stateTypeId === "awakenedAstralSelf") {
-			for (const componentId of ["astralBody", "astralVisage", "astralArms"]) this.deactivateState(componentId);
+			for (const componentId of ["astralBody", "astralVisage", "astralArms"]) {
+				this.deactivateState(componentId, {reason: "Awakened Astral Self ended"});
+			}
 		}
 		// (CS-BUG-151) `mutagen` is a single generic state carrying the UNION of every
 		// consumed mutagen, so ending it from the Active States panel ends them all — but
@@ -61863,16 +62050,29 @@ class CharacterSheetState {
 		}
 	}
 
-	_deactivateStatesForEndCondition ({isIncapacitated = false, isDead = false} = {}) {
-		const shouldEnd = (stateType) => (stateType?.endConditions || []).some(condition => {
-			const normalized = condition.toLowerCase();
-			if (isIncapacitated && (normalized.includes("incapacitat") || normalized.includes("unconscious"))) return true;
-			return isDead && (normalized.includes("dead") || normalized.includes("die") || normalized.includes("killed"));
-		});
+	_deactivateStatesForEndCondition ({conditionName = null, armorType = null, isIncapacitated = false, isDead = false} = {}) {
+		const normalizedConditionName = `${conditionName || ""}`.trim().toLowerCase();
+		const normalizedArmorType = `${armorType || ""}`.trim().toLowerCase();
+		const shouldEnd = (stateType) => {
+			if (normalizedConditionName && stateType?.endTriggers?.conditions?.includes(normalizedConditionName)) return true;
+			if (normalizedArmorType && stateType?.endTriggers?.armorTypes?.includes(normalizedArmorType)) return true;
+			return (stateType?.endConditions || []).some(condition => {
+				const normalized = condition.toLowerCase();
+				if (isIncapacitated && (normalized.includes("incapacitat") || normalized.includes("unconscious"))) return true;
+				return isDead && (normalized.includes("dead") || normalized.includes("die") || normalized.includes("killed"));
+			});
+		};
 		const activeTypeIds = this._data.activeStates
 			.filter(state => state.active && shouldEnd(CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId]))
 			.map(state => state.stateTypeId);
-		for (const stateTypeId of activeTypeIds) this.deactivateState(stateTypeId);
+		const reason = normalizedConditionName
+			? `condition:${normalizedConditionName}`
+			: normalizedArmorType
+				? `armor:${normalizedArmorType}`
+				: isDead
+					? "death"
+					: "incapacitated";
+		for (const stateTypeId of activeTypeIds) this.deactivateState(stateTypeId, {reason});
 	}
 
 	/**
@@ -62030,8 +62230,6 @@ class CharacterSheetState {
 		this.applyHybridRegenerationAtTurnStart();
 		this.applyTurnStartEffects();
 		const expired = [];
-		const oldMax = this._data.hp.max || 0;
-		let anyExpiredHpMaxIncrease = false;
 
 		for (const state of this._data.activeStates) {
 			if (!state.active) continue;
@@ -62039,47 +62237,10 @@ class CharacterSheetState {
 
 			state.roundsRemaining--;
 			if (state.roundsRemaining <= 0) {
-				state.active = false;
 				state.roundsRemaining = 0;
 				expired.push(state.name || state.stateTypeId);
-				if (this._stateContributesHpMaxIncrease(state)) anyExpiredHpMaxIncrease = true;
-
-				// Cleanup: remove any conditions this state granted
-				if (state.grantsConditions?.length > 0) {
-					for (const condName of state.grantsConditions) {
-						this.removeCondition?.(condName);
-					}
-				}
-				// (R26 #7) Also strip conditions added via `_managedConditions` (e.g. an
-				// interdiction boon like Veil of Lies → Invisible). advanceRound previously
-				// only cleaned the spell-effect `grantsConditions` field, so a boon whose
-				// duration expired during combat left its granted condition stuck.
-				this._removeStateAddedConditions(state);
-
-				// If this was a spell effect that matches a concentrated spell, do full cleanup
-				if (state.isSpellEffect && this.getConcentrations().some(c => c.name === state.name || c.spellName === state.name)) {
-					this._dropConcentrationsWhere(c => c.name === state.name || c.spellName === state.name);
-					this.dismissConcentrationCompanions();
-					// Also remove legacy "concentration" state type if exists
-					if (!this.getConcentrationCount()) {
-						const concState = this._data.activeStates.find(s => s.stateTypeId === "concentration");
-						if (concState) this.removeActiveState(concState.id);
-					}
-				}
-
-				// If this was a custom ability state, toggle off the ability
-				if (state.sourceFeatureId) {
-					const ability = this._data.customAbilities?.find(a => a.id === state.sourceFeatureId);
-					if (ability && ability.isActive) {
-						ability.isActive = false;
-						// Clear concentration if this ability was concentrating
-						if (ability.concentration) {
-							this._dropConcentrationsWhere(c => c.customAbilityId === ability.id);
-						}
-						// Unregister effects (named modifiers)
-						this._unregisterCustomAbilityEffects(ability.id);
-					}
-				}
+				if (state.stateTypeId === "custom") this._deactivateStateInstance(state, {reason: "duration"});
+				else this.deactivateState(state.stateTypeId, {reason: "duration"});
 			} else if (state.stateTypeId === "eyesOfFuturePast") {
 				state.temporalView = {
 					direction: state.temporalView?.direction || null,
@@ -62089,9 +62250,6 @@ class CharacterSheetState {
 				};
 			}
 		}
-
-		// If any expired state contributed hpMaxIncrease, recompute max HP.
-		if (anyExpiredHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
 
 		return expired;
 	}

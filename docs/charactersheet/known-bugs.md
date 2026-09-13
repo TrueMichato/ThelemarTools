@@ -10120,3 +10120,45 @@ emitted and three tests failed. The collision in the real save depends on
 the two `sourceName`s agreeing **by two different routes** (`featuresById`
 lookup vs the `mod.name` fallback). A fixture that simply names both
 "Dueling" passes while exercising a shape the sheet never produces.
+
+---
+
+## CS-BUG-171 — Belly Dancer mechanics rendered without complete stateful support — FIXED
+
+**Symptom.** A TGTT Belly Dancer could see its subclass prose, but several
+rules were absent or over-broad on the live sheet: Dance termination did
+not cover its exact conditions, heavy armor, or ten-round duration;
+Tantalizing Shivers and Percussive Strike could grant blanket attack
+advantage without identifying a target; Percussive Strike appeared as an
+independent toggle instead of resolving when the Dance began; and ending
+the Dance could lose its DC 10 Constitution save.
+
+**Root cause.** The active-state model had no reusable named-target
+metadata or persisted queue for consequences that occur when a state
+ends. Combat attacks also skipped the conditional-modifier picker used
+by Overview attacks, and Belly Dancer feature detection was not fully
+source-gated to TGTT.
+
+**Fixed.** Active states now support normalized, persisted named targets
+and target-scoped conditional attack modifiers. Dance activation records
+Percussive Strike failures, Tantalizing Shivers runs its target choice
+and contest transactionally, both tracked activations consume the proper
+Bonus Action in combat, and every Dance teardown path uses the shared
+deactivation pipeline to enqueue exactly one persisted end save. The
+implementation also adds TGTT source isolation, legacy Percussive-state
+migration, exact condition/heavy-armor/duration endings, and shared
+conditional selection in Combat attack rolls.
+
+**Regression coverage.**
+
+- `CharacterSheetBellyDancer.test.js` pins every subclass calculation,
+  target scope, teardown trigger, resource recovery, migration, and
+  save/load invariant.
+- `CharacterSheetBellyDancerActivation.test.js` pins cancellation,
+  action-spend ordering, failed contests, and queued-save drainage.
+- `CharacterSheetCombatActionEconomy.test.js` and
+  `CharacterSheetRecklessAttack.test.js` pin Bonus Action and Combat
+  conditional-roll behavior.
+- `tgtt-belly-dancer-rogue-jaknian.spec.ts` drives the real L1-20 UI,
+  including named Tantalizing and Percussive targets and default-off
+  target advantage.
