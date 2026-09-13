@@ -15,6 +15,7 @@ describe("CharacterSheetCombat action economy gating", () => {
 		toasts = [];
 		useCustomAbilityCalls = 0;
 		featureList = [];
+		const actionUsage = {action: false, bonus: false, reaction: false};
 
 		globalThis.JqueryUtil = {
 			doToast: (payload) => toasts.push(payload),
@@ -22,6 +23,18 @@ describe("CharacterSheetCombat action economy gating", () => {
 
 		const mockState = {
 			isInCombat: () => inCombat,
+			isActionTypeAvailable: (type) => type === "free" || !actionUsage[type],
+			consumeActionType: (type) => {
+				if (type === "free") return true;
+				if (actionUsage[type]) return false;
+				actionUsage[type] = true;
+				return true;
+			},
+			resetActionEconomy: () => {
+				actionUsage.action = false;
+				actionUsage.bonus = false;
+				actionUsage.reaction = false;
+			},
 			getFeatures: () => featureList,
 			canUseCustomAbility: () => true,
 			useCustomAbility: () => {
@@ -77,6 +90,15 @@ describe("CharacterSheetCombat action economy gating", () => {
 
 		combat._resetTurnActionUsage();
 		expect(combat._isActionTypeAvailable("bonus")).toBe(true);
+	});
+
+	it("keeps Combat and CharacterSheetState bonus-action ledgers synchronized", () => {
+		combat._state.consumeActionType("bonus");
+		expect(combat._isActionTypeAvailable("bonus")).toBe(false);
+		combat._resetTurnActionUsage();
+		expect(combat._isActionTypeAvailable("bonus")).toBe(true);
+		combat._consumeActionType("bonus");
+		expect(combat._state.isActionTypeAvailable("bonus")).toBe(false);
 	});
 
 	it("initializes _handOfHarmUsedThisTurn as false", () => {

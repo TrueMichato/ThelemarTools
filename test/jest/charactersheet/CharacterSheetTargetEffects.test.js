@@ -147,6 +147,13 @@ describe("CharacterSheet target/effect lifecycle", () => {
 		const tracked = state.applyChainedTargetEffect({targetName: "Tracked", distance: 10, effect: "target"});
 		expect(tracked).toMatchObject({ok: true, grappled: false, restrained: false});
 		expect(state.getChainedTargetState().used).toBe(0);
+		expect(state.applyTargetEffect({
+			source: "chained-fury",
+			targetEffect: {source: "chained-fury", effect: "target"},
+			riderId: "target-only",
+			targetName: "Tracked through dispatcher",
+			distance: 5,
+		})).toMatchObject({ok: true, target: {grappled: false, restrained: false}});
 		expect(state.applyChainedTargetEffect({targetName: "Illegal", distance: 10, effect: "restrain"}).reason).toBe("effect-unavailable");
 	});
 
@@ -157,6 +164,13 @@ describe("CharacterSheet target/effect lifecycle", () => {
 			targetName: "Mismatched",
 			effect: "grapple",
 			riderId: "chains-control-shove",
+			distance: 10,
+		})).toMatchObject({ok: false, reason: "effect-metadata-mismatch"});
+		expect(state.applyTargetEffect({
+			source: "chained-fury",
+			targetEffect: {source: "chained-fury", effect: "control-shove"},
+			targetName: "Nested mismatch",
+			effect: "grapple",
 			distance: 10,
 		})).toMatchObject({ok: false, reason: "effect-metadata-mismatch"});
 	});
@@ -215,6 +229,16 @@ describe("CharacterSheet target/effect lifecycle", () => {
 		expect(state.moveChainedTarget(target.id, 20, {doubleMovement: true})).toMatchObject({ok: false, reason: "movement-exceeded"});
 		expect(state.getChainedMovementState()).toMatchObject(before);
 		expect(state.isActionTypeAvailable("bonus")).toBe(true);
+	});
+
+	it("shares bonus-action usage with movement across a new round boundary", () => {
+		const state = makeFury(14);
+		const target = state.createChainedTarget({targetName: "Shared economy", distance: 0}).target;
+		expect(state.consumeActionType("bonus")).toBe(true);
+		expect(state.isActionTypeAvailable("bonus")).toBe(false);
+		expect(state.moveChainedTarget(target.id, 10, {doubleMovement: true})).toMatchObject({ok: false, reason: "bonus-action-used"});
+		expect(state.getChainedMovementState()).toMatchObject({doubled: false, used: 0});
+		expect(state.isActionTypeAvailable("bonus")).toBe(false);
 	});
 
 	it("accepts and validates Chain Control's declared final position and direction", () => {

@@ -1248,6 +1248,7 @@ export class CharacterSheetPlayMode {
 			const row = this._ce("div", "pm-chained-target", card);
 			row.setAttribute("role", "group");
 			row.setAttribute("aria-label", `${target.targetName}, chained target`);
+			row.dataset.targetId = target.id;
 			const name = this._ce("span", "pm-chained-target__name", row);
 			name.textContent = target.targetName;
 			const meta = this._ce("span", "pm-chained-target__meta", row);
@@ -1286,7 +1287,12 @@ export class CharacterSheetPlayMode {
 				const result = this._state.moveChainedTarget(target.id, Number(distance.value), {doubleMovement});
 				if (!result.ok) JqueryUtil.doToast({type: "warning", content: `Cannot move target: ${result.reason || "invalid distance"}`});
 				else {
-					if (result.bonusActionUsed) this._actionEconomy.bonus = false;
+					const economy = this._state.getActionEconomyState?.();
+					if (economy) {
+						this._actionEconomy.action = economy.action;
+						this._actionEconomy.bonus = economy.bonus;
+						this._actionEconomy.reaction = economy.reaction;
+					}
 					this._page._saveCurrentCharacter?.();
 					this.render();
 				}
@@ -1328,6 +1334,7 @@ export class CharacterSheetPlayMode {
 					isMinHeight0: true,
 					cbClose: () => csRestoreModalFocus(trigger),
 				});
+				modalInner.classList.add("cs-combat-target-modal");
 				modalInner.innerHTML = `<div class="cs-combat-target-effect" role="form" aria-label="Chained target escape">
 					<p class="ve-small ve-muted">Strength or Dexterity against DC ${this._state.getFeatureCalculations?.()?.chainGrappleDc || target.escapeDc}.</p>
 					<label class="ve-form-label">Escape ability <select class="form-control" data-escape-ability aria-label="Escape ability"><option value="str">Strength</option><option value="dex">Dexterity</option></select></label>
@@ -1506,7 +1513,7 @@ export class CharacterSheetPlayMode {
 					}
 					const used = await this._page._inventory?._pInvokeItemPower?.(power.itemId, power.id);
 					if (!used) return;
-					if (["action", "bonus", "reaction"].includes(group.key)) this._actionEconomy[group.key] = false;
+					if (["action", "bonus", "reaction"].includes(group.key)) this._actionEconomy[group.key] = this._state.isActionTypeAvailable?.(group.key) !== false;
 					this._logActivity("feature", `${power.kind === "spell" ? "Cast" : "Invoked"} ${power.name} from ${power.itemName}`);
 					this._renderActionsHub();
 				});
@@ -1606,6 +1613,12 @@ export class CharacterSheetPlayMode {
 	_renderActionEconomy () {
 		const card = this._makeCard(this._elActionsHub, "turn", "Your Turn");
 		const row = this._ce("div", "pm-economy", card);
+		const sharedEconomy = this._state.getActionEconomyState?.();
+		if (sharedEconomy) {
+			this._actionEconomy.action = sharedEconomy.action;
+			this._actionEconomy.bonus = sharedEconomy.bonus;
+			this._actionEconomy.reaction = sharedEconomy.reaction;
+		}
 
 		const slots = [
 			{key: "action", label: "Action", icon: "attack"},
@@ -1614,18 +1627,15 @@ export class CharacterSheetPlayMode {
 		];
 
 		slots.forEach(slot => {
-			const sharedEconomy = this._state.getActionEconomyState?.();
-			const avail = slot.key === "bonus"
-				? (sharedEconomy?.bonus ?? this._actionEconomy[slot.key])
-				: this._actionEconomy[slot.key];
+			const avail = this._actionEconomy[slot.key];
 			const el = this._ce("div", `pm-economy__slot pm-economy__slot--${avail ? "available" : "used"}`, row);
 			el.replaceChildren(this._icon(slot.icon), document.createTextNode(` ${slot.label}`));
 			this._makeClickable(el, `${avail ? "Use" : "Restore"} ${slot.label}`, () => {
-				if (slot.key === "bonus") {
-					if (this._state.isActionTypeAvailable?.("bonus")) this._state.consumeActionType?.("bonus");
-					else this._state.resetActionEconomy?.();
-					this._actionEconomy.bonus = this._state.isActionTypeAvailable?.("bonus") !== false;
-				} else this._actionEconomy[slot.key] = !this._actionEconomy[slot.key];
+				if (this._state.isActionTypeAvailable?.(slot.key)) this._state.consumeActionType?.(slot.key);
+				else this._state.resetActionEconomy?.();
+				const current = this._state.getActionEconomyState?.();
+				if (current) this._actionEconomy[slot.key] = current[slot.key];
+				else this._actionEconomy[slot.key] = !this._actionEconomy[slot.key];
 				this._renderActionEconomy();
 			});
 		});

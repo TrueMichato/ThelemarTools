@@ -2053,6 +2053,7 @@ class CharacterSheetCombat {
 	async _pOfferFeatureOnHitOptions (ctx) {
 		const options = this._getEligibleOnHitOptions(ctx.attack);
 		if (!options.length) return;
+		const focusTrigger = document?.activeElement?.closest?.("button, [role=button]");
 
 		const labels = options.map(opt => {
 			const bits = [opt.name];
@@ -2077,10 +2078,19 @@ class CharacterSheetCombat {
 		if (picked == null || picked > options.length || (picked === options.length && !hasTargetAware)) return;
 
 		const opt = picked === options.length
-			? {name: "Track target only", targetAware: true, targetEffect: {source: "chained-fury", effect: "target"}}
+			? (() => {
+				const base = options.find(it => it.targetAware && it.targetEffect?.source);
+				return base ? {
+					...base,
+					id: "target-only",
+					name: "Track target only",
+					targetEffect: {...base.targetEffect, effect: "target"},
+				} : null;
+			})()
 			: options[picked];
+		if (!opt) return;
 		if (opt.targetAware && opt.targetEffect?.source) {
-			await this._pOfferTargetEffect(ctx, opt);
+			await this._pOfferTargetEffect({...ctx, focusTrigger}, opt);
 			return;
 		}
 		const parts = [opt.description || opt.name];
@@ -2100,19 +2110,20 @@ class CharacterSheetCombat {
 	 */
 	async _pOfferTargetEffect (ctx, opt) {
 		const state = this._state;
-		const source = opt.targetEffect?.source;
+		const source = String(opt.targetEffect?.source || "").trim().toLowerCase();
+		const effect = String(opt.targetEffect?.effect || "target").trim().toLowerCase();
+		const metadata = state.getTargetEffectMetadata?.(source, effect) || {};
 		const existing = state.getTargetEffects?.({source}) || [];
-		const active = typeof document !== "undefined" ? document.activeElement : null;
-		const trigger = active?.isConnected && !active.closest?.(".ve-ui-modal__inner, .ui-modal__inner")
-			? active
-			: [...(document?.querySelectorAll?.(".charsheet__attack-item") || [])]
-				.find(row => /spectral chains/i.test(row.textContent || ""))
-				?.querySelector("button");
+		const trigger = ctx.focusTrigger?.isConnected
+			? ctx.focusTrigger
+			: [...(document?.querySelectorAll?.(".charsheet__attack-roll, button, [role=button]") || [])]
+				.find(row => row.isConnected && !row.closest?.(".ve-ui-modal__inner, .ui-modal__inner") && !row.disabled);
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `${opt.name} — Choose Target`,
 			isMinHeight0: true,
 			cbClose: () => csRestoreModalFocus(trigger),
 		});
+		modalInner.classList.add("cs-combat-target-modal");
 		// Let the modal host finish attaching before replacing its contents. This
 		// keeps the follow-up target form deterministic when the on-hit enum and
 		// target modal are opened in the same task.
@@ -2129,9 +2140,9 @@ class CharacterSheetCombat {
 			const targetOptions = existing.map(t => `<option value="${t.id}">${t.targetName} (${t.size})</option>`).join("");
 			modalInner.innerHTML = `
 				<div class="cs-combat-target-effect" role="form" aria-label="Target effect">
-					<p class="ve-small ve-muted">Track the creature hit by this attack. Targets remain until released, escaped, moved beyond range, or the required active state ends.</p>
+					<p class="ve-small ve-muted">${metadata.prompt || "Record the creature affected by this target-aware effect."}</p>
 					<label class="ve-form-label">Existing target
-						<select class="form-control" data-target-id aria-label="Existing chained target">
+						<select class="form-control" data-target-id aria-label="Existing target">
 							<option value="">New target</option>${targetOptions}
 						</select>
 					</label>
@@ -2144,7 +2155,7 @@ class CharacterSheetCombat {
 						</select>
 					</label>
 					<label class="ve-form-label">Distance (ft.)
-						<input class="form-control" data-target-distance aria-label="Target distance in feet" type="number" min="0" max="${state.getFeatureCalculations()?.chainRange || 30}" value="${state.getFeatureCalculations()?.chainRange || 0}">
+						<input class="form-control" data-target-distance aria-label="Target distance in feet" type="number" min="0" max="${metadata.range || 30}" value="${metadata.range || 0}">
 					</label>
 					${opt.targetEffect?.effect === "grapple" || opt.targetEffect?.effect === "restrain" || opt.targetEffect?.effect === "control-shove" ? `<label class="ve-form-label">Grapple save ability
 						<select class="form-control" data-grapple-ability aria-label="Grapple save ability"><option value="str">Strength</option><option value="dex">Dexterity</option></select>
@@ -2189,8 +2200,8 @@ class CharacterSheetCombat {
 					size: sizeInput.value,
 					distance: Number(distanceInput.value),
 					riderId: opt.id,
-					targetEffect: opt.targetEffect,
-					effect: opt.targetEffect?.effect || "target",
+					targetEffect: {...opt.targetEffect, source, effect},
+					effect,
 					grappleSaveAbility: modalInner.querySelector("[data-grapple-ability]")?.value || "str",
 					grappleSaveTotal: modalInner.querySelector("[data-grapple-save]")?.value === "" ? null : Number(modalInner.querySelector("[data-grapple-save]")?.value),
 					restraintSaveTotal: restraintSave === "" || restraintSave == null ? null : Number(restraintSave),
@@ -2198,7 +2209,7 @@ class CharacterSheetCombat {
 					shoveDirection: modalInner.querySelector("[data-shove-direction]")?.value || null,
 				});
 				if (!result.ok) {
-					JqueryUtil.doToast({type: "warning", content: `Cannot apply chain effect: ${result.reason || "invalid target"}`});
+					JqueryUtil.doToast({type: "warning", content: `Cannot apply target effect: ${result.reason || "invalid target"}`});
 					return;
 				}
 				finish();
@@ -3855,6 +3866,7 @@ class CharacterSheetCombat {
 
 	_resetTurnActionUsage () {
 		this._turnActionUsage = {action: false, bonus: false, reaction: false};
+		this._state?.resetActionEconomy?.();
 		this._turnAttackUsage = {hasAttackAction: false, attackActionCount: 0, attackActionFeatureIds: new Set()};
 		this._handOfHarmUsedThisTurn = false;
 		this._relentlessUsedThisTurn = false;
@@ -4120,16 +4132,26 @@ class CharacterSheetCombat {
 	}
 
 	_isActionTypeAvailable (actionType) {
-		if (!this._state?.isInCombat?.()) return true;
 		if (!actionType || actionType === "free") return true;
+		if (this._state?.isInCombat && !this._state.isInCombat()) return true;
+		if (typeof this._state?.isActionTypeAvailable === "function") {
+			return this._state.isActionTypeAvailable(actionType);
+		}
 		return !this._turnActionUsage?.[actionType];
 	}
 
 	_consumeActionType (actionType) {
-		if (!this._state?.isInCombat?.()) return;
 		if (!actionType || actionType === "free") return;
+		if (this._state?.isInCombat && !this._state.isInCombat()) return true;
+		if (typeof this._state?.consumeActionType === "function") {
+			const consumed = this._state.consumeActionType(actionType);
+			if (!consumed) return false;
+			if (this._turnActionUsage) this._turnActionUsage[actionType] = true;
+			return true;
+		}
 		if (!this._turnActionUsage) this._resetTurnActionUsage();
 		if (Object.hasOwn(this._turnActionUsage, actionType)) this._turnActionUsage[actionType] = true;
+		return true;
 	}
 
 	_getFeatureActionType (feature) {
@@ -6934,6 +6956,7 @@ class CharacterSheetCombat {
 		for (const target of targets) {
 			const row = document.createElement("div");
 			row.className = "charsheet__chained-target-row ve-flex-v-center ve-flex-wrap gap-1";
+			row.dataset.targetId = target.id;
 			row.setAttribute("role", "group");
 			row.setAttribute("aria-label", `${target.targetName}, chained target`);
 			const label = document.createElement("span");
@@ -6984,7 +7007,6 @@ class CharacterSheetCombat {
 				const result = this._state.moveChainedTarget(target.id, Number(distance.value), {doubleMovement});
 				if (!result.ok) JqueryUtil.doToast({type: "warning", content: `Cannot move target: ${result.reason || "invalid distance"}`});
 				else {
-					if (doubleMovement) this._consumeActionType("bonus");
 					this._page.saveCharacter?.();
 					this.renderChainedTargets();
 				}
@@ -7041,6 +7063,7 @@ class CharacterSheetCombat {
 					isMinHeight0: true,
 					cbClose: () => csRestoreModalFocus(trigger),
 				});
+				modalInner.classList.add("cs-combat-target-modal");
 				modalInner.innerHTML = `
 					<div class="cs-combat-target-effect" role="form" aria-label="Chained target escape">
 						<p class="ve-small ve-muted">The target may use Strength or Dexterity against the current grapple DC (${this._state.getFeatureCalculations?.()?.chainGrappleDc || target.escapeDc}).</p>

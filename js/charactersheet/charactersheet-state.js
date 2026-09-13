@@ -10,6 +10,9 @@ import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
 const TARGET_EFFECT_HANDLER_METHODS = Object.freeze({
 	"chained-fury": "applyChainedTargetEffect",
 });
+const TARGET_EFFECT_METADATA_METHODS = Object.freeze({
+	"chained-fury": "getChainedTargetEffectMetadata",
+});
 
 /**
  * Utility to parse feature text and extract limited-use information
@@ -62788,10 +62791,15 @@ class CharacterSheetState {
 		const restraintEffect = effects.restraint && typeof effects.restraint === "object" ? effects.restraint : {};
 		const grappleActive = grappleEffect.active == null ? !!raw.grappled : !!grappleEffect.active;
 		const shoveActive = shoveEffect.active == null ? !!raw.shoved : !!shoveEffect.active;
-		const restraintActive = restraintEffect.active == null ? !!raw.restrained : !!restraintEffect.active;
+		// `restrained: false` is an explicit compatibility alias. Older saves
+		// occasionally carried a stale nested restraint layer, so never let that
+		// layer resurrect a normal grapple.
+		const restraintActive = raw.restrained === false
+			? false
+			: restraintEffect.active == null ? !!raw.restrained : !!restraintEffect.active;
 		return {
 			id,
-			source: raw.source || null,
+			source: raw.source == null ? null : String(raw.source).trim().toLowerCase(),
 			effectType: raw.effectType || "target",
 			targetName: String(raw.targetName || raw.name || "Target"),
 			size: normalizedSize,
@@ -62843,6 +62851,31 @@ class CharacterSheetState {
 	getTargetEffect (id) {
 		const target = this._data.targetEffects.find(it => it.id === id);
 		return target ? MiscUtil.copyFast(target) : null;
+	}
+
+	getTargetEffectMetadata (source, effect = "target") {
+		const normalizedSource = String(source || "").trim().toLowerCase();
+		const normalizedEffect = String(effect || "target").trim().toLowerCase();
+		const methodName = TARGET_EFFECT_METADATA_METHODS[normalizedSource];
+		if (methodName && typeof this[methodName] === "function") {
+			return this[methodName](normalizedEffect);
+		}
+		return {
+			source: normalizedSource,
+			effect: normalizedEffect,
+			range: null,
+			prompt: "Record the creature affected by this target-aware effect.",
+		};
+	}
+
+	getChainedTargetEffectMetadata (effect = "target") {
+		const range = Number(this.getFeatureCalculations?.()?.chainRange) || null;
+		return {
+			source: "chained-fury",
+			effect,
+			range,
+			prompt: "Record the creature affected by the spectral chains. The target remains until the source releases it or its active requirements end.",
+		};
 	}
 
 	upsertTargetEffect (target = {}) {
@@ -62976,12 +63009,19 @@ class CharacterSheetState {
 		targetId, targetName, name, size = "medium", distance = null, effect = "grapple",
 		riderId, restraintSaveTotal = null, shoveDistance = null, grappleSaveTotal = null,
 		grappleSaveAbility = "str", finalDistance = null, shoveDirection = null,
+		source = "chained-fury", targetEffect = null,
 	} = {}) {
 		const calc = this.getFeatureCalculations() || {};
 		if (!calc.hasManifestChains || !this.isStateTypeActive("rage") || !this.isStateTypeActive("manifestChains")) {
 			return {ok: false, reason: "chains-inactive"};
 		}
-		const normalizedEffect = String(effect || "target").toLowerCase();
+		const normalizedSource = String(source || "chained-fury").trim().toLowerCase();
+		const nestedSource = String(targetEffect?.source || "").trim().toLowerCase();
+		const nestedEffect = String(targetEffect?.effect || "").trim().toLowerCase();
+		const normalizedEffect = String(effect || "target").trim().toLowerCase();
+		if (normalizedSource !== "chained-fury" || (nestedSource && nestedSource !== normalizedSource) || (nestedEffect && nestedEffect !== normalizedEffect)) {
+			return {ok: false, reason: "effect-metadata-mismatch"};
+		}
 		const riderEffects = {
 			"chains-grapple": "grapple",
 			"chains-shove": "shove",
@@ -63136,16 +63176,36 @@ class CharacterSheetState {
 	}
 
 	applyTargetEffect (opts = {}) {
-		const source = String(opts?.source || opts?.targetEffect?.source || "").toLowerCase();
+		const topSource = String(opts?.source || "").trim().toLowerCase();
+		const nestedSource = String(opts?.targetEffect?.source || "").trim().toLowerCase();
+		const topEffect = String(opts?.effect || "").trim().toLowerCase();
+		const nestedEffect = String(opts?.targetEffect?.effect || "").trim().toLowerCase();
+		const riderId = String(opts?.riderId || opts?.targetEffect?.riderId || "").trim().toLowerCase();
+		if (topSource && nestedSource && topSource !== nestedSource) return {ok: false, reason: "effect-metadata-mismatch"};
+		if (topEffect && nestedEffect && topEffect !== nestedEffect) return {ok: false, reason: "effect-metadata-mismatch"};
+		const source = topSource || nestedSource;
+		const effect = topEffect || nestedEffect || "target";
 		const handlerName = TARGET_EFFECT_HANDLER_METHODS[source];
+		if (source === "chained-fury") {
+			const riderEffects = {
+				"chains-grapple": "grapple",
+				"chains-shove": "shove",
+				"chains-restrain": "restrain",
+				"chains-control-shove": "control-shove",
+			};
+			if (riderId && riderEffects[riderId] && riderEffects[riderId] !== effect) return {ok: false, reason: "effect-metadata-mismatch"};
+			if (riderId && !riderEffects[riderId] && !["target", "none", "track"].includes(effect)) return {ok: false, reason: "effect-unavailable"};
+		}
 		if (handlerName && typeof this[handlerName] === "function") {
 			return this[handlerName]({
 				...opts,
 				source,
-				effect: opts.effect || opts.targetEffect?.effect || "target",
+				effect,
+				riderId: opts.riderId || opts.targetEffect?.riderId,
+				targetEffect: opts.targetEffect ? {...opts.targetEffect, source, effect} : {source, effect},
 			});
 		}
-		const target = this.upsertTargetEffect(opts);
+		const target = this.upsertTargetEffect({...opts, source, effectType: effect});
 		return target ? {ok: true, target} : {ok: false, reason: "invalid-target"};
 	}
 
@@ -63199,22 +63259,23 @@ class CharacterSheetState {
 		const priorUsage = this._data.chainedMovementUsage || {};
 		const usage = priorUsage.round === round
 			? {...priorUsage}
-			: {round, movementUsed: 0, bonusActionUsed: false, doubled: false};
+			: {round, movementUsed: 0, bonusActionUsed: !this.isActionTypeAvailable("bonus"), doubled: false};
 		const speed = Number(this.getSpeed?.("walk")) || 30;
 		const doubleMovement = !!options.doubleMovement;
 		const isNewRound = priorUsage.round !== round;
-		if (doubleMovement && (usage.bonusActionUsed || (!isNewRound && !this.isActionTypeAvailable("bonus")))) return {ok: false, reason: "bonus-action-used"};
+		if (doubleMovement && (usage.bonusActionUsed || !this.isActionTypeAvailable("bonus"))) return {ok: false, reason: "bonus-action-used"};
 		const doubled = usage.doubled || doubleMovement;
 		const allowance = speed * (doubled ? 2 : 1);
 		const available = allowance - (Number(usage.movementUsed) || 0);
 		if (movementCost > available) return {ok: false, reason: "movement-exceeded", speed, movementCost, available, allowance};
-		usage.doubled = doubled;
-		usage.movementUsed = (Number(usage.movementUsed) || 0) + movementCost;
 		if (doubleMovement) {
-			usage.bonusActionUsed = true;
-			if (isNewRound) this.resetActionEconomy();
+			// Consume the shared bonus action only after every movement guard has
+			// passed. This keeps a rejected request fully transactional.
 			if (!this.consumeActionType("bonus")) return {ok: false, reason: "bonus-action-used"};
 		}
+		usage.doubled = doubled;
+		usage.movementUsed = (Number(usage.movementUsed) || 0) + movementCost;
+		usage.bonusActionUsed = !!usage.bonusActionUsed || doubleMovement;
 		this._data.chainedMovementUsage = usage;
 		target.distance = Number(distance);
 		target.declaredDistance = Number(distance);

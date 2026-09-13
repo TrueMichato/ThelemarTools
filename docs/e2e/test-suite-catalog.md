@@ -77,4 +77,4 @@ the skill reference at
 
 ### Chained Fury target lifecycle
 
-`tgtt-chained-fury-barbarian-minotaur.spec.ts` drives the real Combat-tab Spectral Chains attack, hit confirmation, target-aware effect picker, resource-backed Rage and Manifest Chains toggles, and persisted target controls. The shared page object owns the UI interaction so coverage does not bypass the attack/modal pipeline with direct state mutation.
+`tgtt-chained-fury-barbarian-minotaur.spec.ts` drives the real Combat-tab Spectral Chains attack, hit confirmation, target-aware effect picker, target-only and resisted-save branches, persisted target controls, movement/doubling, recurring damage, out-of-range release, and Rage teardown. The shared page object owns the player-facing attack/modal and target-row interaction; the state API is used only for the save/load round-trip and compact activation setup.
