@@ -8561,6 +8561,32 @@ class CharacterSheetClassUtils {
 		return options || [];
 	}
 
+	static getOptionalFeatureReplacementRule ({classData, featureTypes, currentLevel, newLevel, countAtCurrent, countAtNew, existingOfType}) {
+		if (!existingOfType) return {count: 0, label: null};
+		if (featureTypes.includes("MV:B") && countAtNew > countAtCurrent) {
+			return {count: 1, label: "maneuver"};
+		}
+		if (featureTypes.includes("JA")) {
+			// Jester's Acts allow a swap when the known-count grows and whenever Bardic
+			// Versatility is available. TGTT's Bard chassis expresses those versatility
+			// opportunities as ASI feature rows, so derive them from class data rather than
+			// freezing the current level list here.
+			const crossesVersatilityLevel = (classData?.classFeatures || []).some(ref => {
+				const uid = typeof ref === "string" ? ref : ref?.classFeature;
+				if (!uid) return false;
+				const [name, , , levelRaw] = uid.split("|");
+				const level = Number(levelRaw);
+				return /^(?:ability score improvement|bardic versatility)$/i.test(name)
+					&& level > currentLevel
+					&& level <= newLevel;
+			});
+			if (countAtNew > countAtCurrent || crossesVersatilityLevel) {
+				return {count: 1, label: "Jester's Act"};
+			}
+		}
+		return {count: 0, label: null};
+	}
+
 	/**
 	 * Compute optional feature gains between currentLevel and newLevel.
 	 *
@@ -8664,7 +8690,16 @@ class CharacterSheetClassUtils {
 			}
 
 			const newOptionsCount = countAtNew - effectiveExisting;
-			if (/** @type {*} */ newOptionsCount > 0) {
+			const replacement = CharacterSheetClassUtils.getOptionalFeatureReplacementRule({
+				classData,
+				featureTypes,
+				currentLevel,
+				newLevel,
+				countAtCurrent,
+				countAtNew,
+				existingOfType,
+			});
+			if (/** @type {*} */ newOptionsCount > 0 || replacement.count > 0) {
 				gains.push({
 					featureTypes,
 					name,
@@ -8672,8 +8707,9 @@ class CharacterSheetClassUtils {
 					// Keep the headline total consistent with what the character will
 					// actually know: currentCount + newCount === totalCount.
 					totalCount: countAtNew + alreadyGrantedBonus,
-					newCount: newOptionsCount,
-					replacementCount: featureTypes.includes("MV:B") && countAtNew > countAtCurrent && existingOfType > 0 ? 1 : 0,
+					newCount: Math.max(0, newOptionsCount),
+					replacementCount: replacement.count,
+					replacementLabel: replacement.label,
 					required: optFeatProg.required || false,
 				});
 			}

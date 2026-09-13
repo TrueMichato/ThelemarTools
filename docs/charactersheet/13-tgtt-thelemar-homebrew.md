@@ -238,30 +238,36 @@ hook as a confirm-then-pick prompt.
 | 3 | **Bonus Proficiencies** | Performance auto-granted; one further skill prompted at creation / Quick Build / level-up (the "proficiency in between …" phrasing needed a new `FeatureChoiceParser` pattern) |
 | 3 | **Jester's Acts** | The wrapper. Classified `passive` via `FEATURE_CLASSIFICATION_OVERRIDES`; the acts themselves carry the mechanics. Act save DC = `8 + your Performance skill bonus` (**not** the usual 8 + PB + CHA) via `getJesterActDc()` |
 | 3 | **Jester's Acts Options** | The pick pool (13 acts, `featureType: "JA"`). Count comes from the subclass's own **"Jester's Acts Known"** table column via `getSubclassTableNumber` — 3 at L3, 4 at L6, 5 at L14 |
-| 6 | **Gifted Acrobat** | Climbing speed equal to walking speed (`speed:climb` `equalToWalk`). The bonus-action grapple escape and 10-ft stand-from-prone have **no** generic surface — see **CS-BUG-119** |
+| 6 | **Gifted Acrobat** | Climbing speed equal to walking speed (`speed:climb` `equalToWalk`), plus generic action/movement overrides for bonus-action grapple escapes and standing from prone for 10 ft; the Combat tab surfaces both |
 | 6 | **Unparalleled Skill** | Expertise (doubled proficiency) in one chosen skill; the choice is prompted and applied |
-| 14 | **Jester's Privilege** | 1 use / **long** rest. DC is a **rolled** value — `activationInfo.rolledSaveDc` rolls Performance at activation and reports "DC = result" rather than substituting a static DC |
+| 14 | **Jester's Privilege** | 1 use / **long** rest. The Bardic Inspiration rider picker spends one Inspiration plus the feature's own use atomically. Its DC is a **rolled** value — `activationInfo.rolledSaveDc` rolls Performance at activation and reports "DC = result" rather than substituting a static DC |
 
-**The 13 Jester's Acts.** Each is a discrete row with its own Use button in the
-generic "Available to Activate" list. Detection is **data-driven**
+**The 13 Jester's Acts.** Limited and triggered Acts have a **Use** control in
+the Features area; durational Acts have **Activate/End** controls in the shared
+Active States panel. Detection is **data-driven**
 (`_buildJesterActActivationInfo` reads each act's own prose), so a homebrewer
-adding a 14th act inherits the behaviour for free.
+adding a 14th act inherits the same runtime contracts rather than needing a
+name-specific handler.
 
 | Act | Action | BI cost | Mechanics |
 |---|---|---|---|
-| Jester's Pantomime | action | 0 | WIS save, 30 ft, **charmed** |
-| Jester's Prankster | action | 0 | WIS save, 30 ft, **dazed** |
-| Trickster's Disengagement | bonus | 0 | Disengage |
-| Jester's Tumbler | bonus | 0 | toggle, "rest of the turn" |
-| Dazzling Disguise | special | 0 | toggle 1 hour + conditional Deception advantage |
-| Jester's Juggle | bonus | 0 | WIS save, 30 ft |
-| Fool's Folly | special | **1** | INT save, 60 ft, incapacitated |
-| Laughing Lunge | attack | **1** | attack-timing rider |
-| Jester's Jaunt | special | **1** | grants *mirror image* |
-| Ridiculous Ruse | special | **1** | grants *silent image* |
-| Jester's Agility | reaction | **1** | toggle, AC bonus = proficiency bonus |
-| Witty Wordplay | special | 0 | 60 ft |
-| Jester's Jest | bonus | 0 | WIS save |
+| Pantomime | action | 0 | Reports the 30-ft WIS save and charmed outcome |
+| Prankster | action | 0 | Reports the 30-ft WIS save and dazed outcome |
+| Trickster's Disengagement | bonus | 0 | Stores a rest-of-turn Disengage override for up to five creatures |
+| Tumbler | bonus | 0 | Stores the rest-of-turn hostile-space movement permission |
+| Dazzling Disguise | special | 0 | One-hour state; Deception advantage applies only while active |
+| Jester's Juggle | bonus | 0 | Reports the 30-ft hostile-creature WIS save and advantage-on-target outcome |
+| Fool's Folly | BI rider | **1 total** | Uses the shared Bardic Inspiration transaction; reports the 60-ft INT save and incapacitated outcome |
+| Laughing Lunge | attack | **1** | Arms advantage and `1d6` psychic damage for the next attack, then consumes once |
+| Jester's Jaunt | special | **1** | Casts *mirror image* through the generic resource-cast pipeline |
+| Ridiculous Ruse | special | **1** | Casts concentration *silent image* through the generic resource-cast pipeline |
+| Jester's Agility | reaction | **1** | Timed active state; AC increases by proficiency bonus |
+| Witty Wordplay | BI rider | **1 total** | Uses the shared Bardic Inspiration transaction and reports the 60-ft next-attack disadvantage rider |
+| Jester's Jest | bonus | 0 | Reports the WIS save and loss-of-reactions outcome |
+
+Runtime states persist their duration plus attack/action/movement descriptors.
+Loading an older save backfills missing descriptors from the stored feature
+without duplicating the state or altering already-persisted values.
 
 > **`consumes` beats prose for the Bardic Inspiration cost.** Five acts declare
 > `consumes` in the homebrew and that is authoritative. The prose fallback must

@@ -130,16 +130,16 @@ describe("TGTT Tradition Auto-Grants", () => {
 	});
 
 	// --- College of Jesters Bard ---
-	it("College of Jesters should auto-grant Comedic Jabs tradition", () => {
+	it("College of Jesters should not invent a Comedic Jabs tradition grant", () => {
 		makeTGTTBard(3, "College of Jesters");
 		state.applyClassFeatureEffects();
-		expect(state.hasCombatTradition("Comedic Jabs")).toBe(true);
+		expect(state.hasCombatTradition("Comedic Jabs")).toBe(false);
 	});
 
-	it("College of Jesters should set hasJesterCombatMethods flag", () => {
+	it("College of Jesters should not advertise unsupported combat methods", () => {
 		makeTGTTBard(3, "College of Jesters");
 		const calcs = state.getFeatureCalculations();
-		expect(calcs.hasJesterCombatMethods).toBe(true);
+		expect(calcs.hasJesterCombatMethods).toBeUndefined();
 	});
 
 	it("Non-Jester Bard should NOT get Comedic Jabs", () => {

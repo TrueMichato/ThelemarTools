@@ -793,6 +793,7 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "speed"; type?: SpeedType; min?: number; exact?: number}
 	| {kind: "speedEquals"; left: SpeedType; right: SpeedType}
 	| {kind: "initiative"; min?: number; exact?: number}
+	| {kind: "combatActionEconomyText"; includes: string[]}
 	| {kind: "featureCalculation"; property: string; min?: number; exact?: number | string | boolean; isNull?: boolean}
 	// Assert a `getFeatureCalculations()` number is DERIVED from a live
 	// character statistic rather than hard-coded. Far stronger than a
@@ -833,6 +834,24 @@ export type EffectCheck = _EffectCommon & (
 	}
 	| {kind: "proficiency"; proficiencyType: "armor" | "weapon"; includes: string}
 	| {kind: "featureUsesEqualAbilityMod"; feature: string; ability: AblKey; minimum?: number; recharge: "short" | "long"}
+	| {
+		kind: "featureUseRuntime";
+		feature: string;
+		toastIncludes?: string[];
+		resource?: {name: string; delta: number};
+		featureUseDelta?: number;
+		acDelta?: number;
+		acDeltaMin?: number;
+		combatTextIncludes?: string[];
+		activeState?: {
+			duration?: string;
+			effect?: {type: string; target: string};
+			actionBenefit?: {activity: string; cost: string; targets?: number};
+			movementOverride?: {kind: string};
+		};
+		activeSpell?: {name: string; concentration?: boolean};
+		attack?: {name: string | RegExp; mode: "advantage" | "normal"; riderDice?: string; riderDamageType?: string; consumed?: boolean};
+	}
 	// `damageTypes` / `saveAbility` are optional so the same probe covers HEALING actions
 	// (Turn the Tide) and saves whose DC is inherited from the character rather than
 	// written into the prose (`saveDcFromCharacter`).
@@ -1514,6 +1533,99 @@ async function _runPassiveOrRollEffect (
 			const expected = Math.max(e.minimum ?? 0, ability.mod);
 			if (uses.max !== expected) throw new Error(`${e.feature} uses=${uses.max}, expected max(${e.minimum ?? 0}, ${e.ability} mod ${ability.mod})=${expected}`);
 			if (uses.recharge !== e.recharge) throw new Error(`${e.feature} recharge=${uses.recharge}, expected ${e.recharge}`);
+			return;
+		}
+		case "featureUseRuntime": {
+			const result = await charSheet.probeFeatureUseRuntime(e.feature, {
+				attackName: e.attack?.name,
+				captureCombatActionEconomy: !!e.combatTextIncludes?.length,
+			});
+			if (!result.clicked) throw new Error(`${e.feature}: no visible Use or Activate control`);
+			if (result.runtimeErrors.length) throw new Error(`${e.feature}: activation logged browser errors: ${JSON.stringify(result.runtimeErrors)}`);
+			for (const text of e.toastIncludes || []) {
+				if (!result.toastText.toLowerCase().includes(text.toLowerCase())) {
+					throw new Error(`${e.feature}: visible result did not include "${text}". toast="${result.toastText}" activation=${JSON.stringify(result.activationInfo)} resources=${JSON.stringify({before: result.beforeResources, after: result.afterResources})} errors=${JSON.stringify(result.runtimeErrors)}`);
+				}
+			}
+			if (e.resource) {
+				const before = result.beforeResources[e.resource.name];
+				const after = result.afterResources[e.resource.name];
+				if (before == null || after == null) throw new Error(`${e.feature}: resource "${e.resource.name}" was not present`);
+				if (before - after !== e.resource.delta) {
+					throw new Error(`${e.feature}: ${e.resource.name} changed ${before}→${after}, expected delta ${e.resource.delta}`);
+				}
+			}
+			if (e.featureUseDelta != null) {
+				if (result.beforeFeatureUses == null || result.afterFeatureUses == null) throw new Error(`${e.feature}: feature uses were not available`);
+				if (result.beforeFeatureUses - result.afterFeatureUses !== e.featureUseDelta) {
+					throw new Error(`${e.feature}: feature uses changed ${result.beforeFeatureUses}→${result.afterFeatureUses}, expected delta ${e.featureUseDelta}`);
+				}
+			}
+			if (e.acDelta != null && result.afterAc - result.beforeAc !== e.acDelta) {
+				throw new Error(`${e.feature}: AC changed ${result.beforeAc}→${result.afterAc}, expected delta ${e.acDelta}`);
+			}
+			if (e.acDeltaMin != null && result.afterAc - result.beforeAc < e.acDeltaMin) {
+				throw new Error(`${e.feature}: AC changed ${result.beforeAc}→${result.afterAc}, expected delta >= ${e.acDeltaMin}`);
+			}
+			for (const expected of e.combatTextIncludes || []) {
+				if (!result.combatActionEconomyText?.toLowerCase().includes(expected.toLowerCase())) {
+					throw new Error(`${e.feature}: Combat action economy did not include "${expected}". text="${result.combatActionEconomyText || ""}"`);
+				}
+			}
+			if (e.activeState) {
+				const state = result.activeState;
+				if (!state) throw new Error(`${e.feature}: activation created no active state`);
+				if (e.activeState.duration != null && state.duration !== e.activeState.duration) {
+					throw new Error(`${e.feature}: duration=${state.duration}, expected ${e.activeState.duration}`);
+				}
+				if (e.activeState.effect && !(state.customEffects || []).some((it: any) =>
+					it.type === e.activeState?.effect?.type && it.target === e.activeState?.effect?.target)) {
+					throw new Error(`${e.feature}: active state is missing ${e.activeState.effect.type}:${e.activeState.effect.target}`);
+				}
+				if (e.activeState.actionBenefit) {
+					const actual = state.actionBenefit;
+					if (actual?.activity !== e.activeState.actionBenefit.activity
+						|| actual?.cost !== e.activeState.actionBenefit.cost
+						|| (e.activeState.actionBenefit.targets != null && actual?.targets !== e.activeState.actionBenefit.targets)) {
+						throw new Error(`${e.feature}: action benefit=${JSON.stringify(actual)}, expected ${JSON.stringify(e.activeState.actionBenefit)}`);
+					}
+				}
+				if (e.activeState.movementOverride && state.movementOverride?.kind !== e.activeState.movementOverride.kind) {
+					throw new Error(`${e.feature}: movement override=${JSON.stringify(state.movementOverride)}, expected ${JSON.stringify(e.activeState.movementOverride)}`);
+				}
+			}
+			if (e.activeSpell) {
+				const active = result.activeResourceCastSpells.find((it: any) => String(it.spell).toLowerCase() === e.activeSpell?.name.toLowerCase());
+				if (!active) throw new Error(`${e.feature}: ${e.activeSpell.name} was not recorded as an active resource cast`);
+				if (e.activeSpell.concentration != null && !!active.concentration !== e.activeSpell.concentration) {
+					throw new Error(`${e.feature}: ${e.activeSpell.name} concentration=${!!active.concentration}, expected ${e.activeSpell.concentration}`);
+				}
+				if (e.activeSpell.concentration && String(result.concentration?.spellName || result.concentration?.name || "").toLowerCase() !== e.activeSpell.name.toLowerCase()) {
+					throw new Error(`${e.feature}: ${e.activeSpell.name} did not become the active concentration spell`);
+				}
+			}
+			if (e.attack) {
+				if (!result.attack?.clicked || result.attack.threwError) {
+					throw new Error(`${e.feature}: attack probe failed${result.attack?.errorMessage ? `: ${result.attack.errorMessage}` : ""}`);
+				}
+				if (result.attack.mode !== e.attack.mode) throw new Error(`${e.feature}: attack mode=${result.attack.mode}, expected ${e.attack.mode}`);
+				if (e.attack.riderDice) {
+					const rider = result.attack.damageRiders.find((it: any) => it.dice === e.attack?.riderDice && it.damageType === e.attack?.riderDamageType);
+					if (!rider) throw new Error(`${e.feature}: pending damage riders=${JSON.stringify(result.attack.damageRiders)}`);
+				}
+				if (e.attack.consumed != null && result.attack.stateStillActive === e.attack.consumed) {
+					throw new Error(`${e.feature}: one-shot state consumed=${!result.attack.stateStillActive}, expected ${e.attack.consumed}`);
+				}
+			}
+			return;
+		}
+		case "combatActionEconomyText": {
+			const text = await charSheet.getCombatActionEconomyText();
+			for (const expected of e.includes) {
+				if (!text.toLowerCase().includes(expected.toLowerCase())) {
+					throw new Error(`Combat action economy did not include "${expected}". text="${text}"`);
+				}
+			}
 			return;
 		}
 		case "featureActivation": {

@@ -202,6 +202,7 @@ const _actProp = (name: string, path: string, expect: {exact?: number | string |
 export const TGTT_JESTER_ACT_EFFECTS: Record<string, EffectCheck[]> = {
 	// Action, 30 ft, Wis save or charmed.
 	"Pantomime": _jesterAct("Pantomime", [
+		{kind: "featureUseRuntime", feature: "Pantomime", toastIncludes: ["Pantomime", "Wisdom", "charmed"]},
 		_actProp("Pantomime", "timing", {exact: "action"}),
 		_actProp("Pantomime", "saveType", {exact: "wis"}),
 		_actProp("Pantomime", "dc", {min: 8}),
@@ -210,6 +211,7 @@ export const TGTT_JESTER_ACT_EFFECTS: Record<string, EffectCheck[]> = {
 	]),
 	// Action, 30 ft, Wis save or dazed (TGTT condition).
 	"Prankster": _jesterAct("Prankster", [
+		{kind: "featureUseRuntime", feature: "Prankster", toastIncludes: ["Prankster", "Wisdom", "dazed"]},
 		_actProp("Prankster", "timing", {exact: "action"}),
 		_actProp("Prankster", "saveType", {exact: "wis"}),
 		_actProp("Prankster", "dc", {min: 8}),
@@ -217,23 +219,27 @@ export const TGTT_JESTER_ACT_EFFECTS: Record<string, EffectCheck[]> = {
 	]),
 	// Bonus action, no save, no resource.
 	"Trickster's Disengagement": _jesterAct("Trickster's Disengagement", [
+		{kind: "featureUseRuntime", feature: "Trickster's Disengagement", activeState: {duration: "rest of the turn", actionBenefit: {activity: "Disengage", cost: "bonus", targets: 5}}, combatTextIncludes: ["Disengage", "Trickster's Disengagement", "up to 5 targets"]},
 		_actProp("Trickster's Disengagement", "timing", {exact: "bonus"}),
 		_actProp("Trickster's Disengagement", "saveType", {exact: null}),
 		_actProp("Trickster's Disengagement", "bardicInspirationCost", {exact: 0}),
 	]),
 	// Bonus action toggle lasting the rest of the turn.
 	"Tumbler": _jesterAct("Tumbler", [
+		{kind: "featureUseRuntime", feature: "Tumbler", activeState: {duration: "rest of the turn", movementOverride: {kind: "hostileSpacePermission"}}, combatTextIncludes: ["Tumbler", "hostile creatures' spaces"]},
 		_actProp("Tumbler", "timing", {exact: "bonus"}),
 		_actProp("Tumbler", "isToggle", {exact: true}),
 		_actProp("Tumbler", "duration", {exact: "rest of the turn"}),
 	]),
 	// 1-hour disguise toggle; also registers conditional Deception advantage.
 	"Dazzling Disguise": _jesterAct("Dazzling Disguise", [
+		{kind: "featureUseRuntime", feature: "Dazzling Disguise", activeState: {duration: "1 hour", effect: {type: "advantage", target: "skill:deception"}}},
 		_actProp("Dazzling Disguise", "isToggle", {exact: true}),
 		_actProp("Dazzling Disguise", "duration", {exact: "1 hour"}),
 	]),
 	// Bonus action, 30 ft, Wis save.
 	"Jester's Juggle": _jesterAct("Jester's Juggle", [
+		{kind: "featureUseRuntime", feature: "Jester's Juggle", toastIncludes: ["Jester's Juggle", "Wisdom", "enamoured"]},
 		_actProp("Jester's Juggle", "timing", {exact: "bonus"}),
 		_actProp("Jester's Juggle", "saveType", {exact: "wis"}),
 		_actProp("Jester's Juggle", "dc", {min: 8}),
@@ -243,6 +249,7 @@ export const TGTT_JESTER_ACT_EFFECTS: Record<string, EffectCheck[]> = {
 	// declares a `consumes` block, which wins: 60 ft, Int save or incapacitated,
 	// one Bardic Inspiration.
 	"Fool's Folly": _jesterAct("Fool's Folly", [
+		{kind: "featureUseRuntime", feature: "Fool's Folly", toastIncludes: ["Fool's Folly", "Intelligence", "incapacitated"], resource: {name: "Bardic Inspiration", delta: 1}},
 		_actProp("Fool's Folly", "saveType", {exact: "int"}),
 		_actProp("Fool's Folly", "dc", {min: 8}),
 		_actProp("Fool's Folly", "range", {exact: 60}),
@@ -252,22 +259,26 @@ export const TGTT_JESTER_ACT_EFFECTS: Record<string, EffectCheck[]> = {
 	]),
 	// Rider on the Attack action; explicitly spends one Bardic Inspiration.
 	"Laughing Lunge": _jesterAct("Laughing Lunge", [
+		{kind: "featureUseRuntime", feature: "Laughing Lunge", resource: {name: "Bardic Inspiration", delta: 1}, attack: {name: /unarmed strike|rapier|dagger|crossbow/i, mode: "advantage", riderDice: "1d6", riderDamageType: "psychic", consumed: true}},
 		_actProp("Laughing Lunge", "timing", {exact: "attack"}),
 		_actProp("Laughing Lunge", "bardicInspirationCost", {exact: 1}),
 	]),
 	// Spends one Bardic Inspiration to cast mirror image.
 	"Jester's Jaunt": _jesterAct("Jester's Jaunt", [
+		{kind: "featureUseRuntime", feature: "Jester's Jaunt", resource: {name: "Bardic Inspiration", delta: 1}, activeSpell: {name: "Mirror Image", concentration: false}},
 		_actProp("Jester's Jaunt", "grantsSpell", {exact: "mirror image"}),
 		_actProp("Jester's Jaunt", "bardicInspirationCost", {exact: 1}),
 	]),
 	// Spends one Bardic Inspiration to cast silent image.
 	"Ridiculous Ruse": _jesterAct("Ridiculous Ruse", [
+		{kind: "featureUseRuntime", feature: "Ridiculous Ruse", resource: {name: "Bardic Inspiration", delta: 1}, activeSpell: {name: "Silent Image", concentration: true}},
 		_actProp("Ridiculous Ruse", "grantsSpell", {exact: "silent image"}),
 		_actProp("Ridiculous Ruse", "bardicInspirationCost", {exact: 1}),
 	]),
 	// Reaction toggle: +PB AC until the start of your next turn, for one
 	// Bardic Inspiration. `acBonus` resolves the proficiency scale per build.
 	"Jester's Agility": _jesterAct("Jester's Agility", [
+		{kind: "featureUseRuntime", feature: "Jester's Agility", resource: {name: "Bardic Inspiration", delta: 1}, acDeltaMin: 2, activeState: {duration: "until the start of your next turn", effect: {type: "bonus", target: "ac"}}},
 		_actProp("Jester's Agility", "timing", {exact: "reaction"}),
 		_actProp("Jester's Agility", "isToggle", {exact: true}),
 		_actProp("Jester's Agility", "acBonus", {min: 2}),
@@ -275,12 +286,14 @@ export const TGTT_JESTER_ACT_EFFECTS: Record<string, EffectCheck[]> = {
 	]),
 	// Rider on a Bardic Inspiration use: disadvantage on one attack within 60 ft.
 	"Witty Wordplay": _jesterAct("Witty Wordplay", [
+		{kind: "featureUseRuntime", feature: "Witty Wordplay", toastIncludes: ["Witty Wordplay", "disadvantage"], resource: {name: "Bardic Inspiration", delta: 1}},
 		_actProp("Witty Wordplay", "range", {exact: 60}),
 		_actProp("Witty Wordplay", "usesBardicInspiration", {exact: true}),
 		_actProp("Witty Wordplay", "bardicInspirationCost", {exact: 0}),
 	]),
 	// Bonus action, Wis save.
 	"Jester's Jest": _jesterAct("Jester's Jest", [
+		{kind: "featureUseRuntime", feature: "Jester's Jest", toastIncludes: ["Jester's Jest", "Wisdom", "unable to take reactions"]},
 		_actProp("Jester's Jest", "timing", {exact: "bonus"}),
 		_actProp("Jester's Jest", "saveType", {exact: "wis"}),
 		_actProp("Jester's Jest", "dc", {min: 8}),

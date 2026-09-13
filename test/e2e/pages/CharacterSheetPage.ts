@@ -484,6 +484,171 @@ export class CharacterSheetPage {
 		return this.page.locator(".charsheet__state-row.charsheet__state--active").filter({hasText: this._getFeatureActivationPattern(featureName)}).count().then(count => count > 0);
 	}
 
+	/**
+	 * Drive a feature through its real Use/Activate control, observe the resulting runtime
+	 * state, and restore the character snapshot so one probe cannot drain resources or leave
+	 * a toggle running for the next feature check.
+	 */
+	async probeFeatureUseRuntime (
+		featureName: string,
+		{attackName, captureCombatActionEconomy = false}: {attackName?: string | RegExp; captureCombatActionEconomy?: boolean} = {},
+	): Promise<{
+		clicked: boolean;
+		toastText: string;
+		beforeResources: Record<string, number>;
+		afterResources: Record<string, number>;
+		beforeFeatureUses: number | null;
+		afterFeatureUses: number | null;
+		beforeAc: number;
+		afterAc: number;
+		activeState: any;
+		activeResourceCastSpells: any[];
+		concentration: any;
+		activationInfo: any;
+		runtimeErrors: string[];
+		combatActionEconomyText: string | null;
+		attack: null | {
+			clicked: boolean;
+			threwError: boolean;
+			errorMessage?: string;
+			mode: string | null;
+			damageRiders: any[];
+			stateStillActive: boolean;
+		};
+	}> {
+		const before = await this.page.evaluate((name) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			const feature = state?.getFeature?.(name);
+			return {
+				json: state?.toJson?.(),
+				resources: Object.fromEntries((state?.getResources?.() || []).map((it: any) => [it.name, it.current])),
+				featureUses: feature?.uses?.current ?? null,
+				ac: state?.getAC?.() ?? 0,
+				activationInfo: state?.getActivatableFeatures?.().find((it: any) => it.feature?.id === feature?.id)?.activationInfo ?? null,
+			};
+		}, featureName);
+		if (!before?.json) throw new Error(`probeFeatureUseRuntime(${featureName}): character state is unavailable`);
+
+		const toastSelector = ".toast__wrp-content, .toast";
+		let clicked = false;
+		const runtimeErrors: string[] = [];
+		const onConsole = (msg: any) => {
+			if (msg.type() === "error") runtimeErrors.push(msg.text());
+		};
+		this.page.on("console", onConsole);
+
+		await this.switchToTab(this.tabFeatures);
+		const exactName = new RegExp(`^\\s*${featureName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i");
+		const featureCard = this.page.locator(".charsheet__feature").filter({
+			has: this.page.locator(".charsheet__feature-name").filter({hasText: exactName}),
+		}).first();
+		const useButton = featureCard.locator(".charsheet__feature-use");
+		if (await useButton.isVisible({timeout: uiGate(2000)}).catch(() => false)) {
+			await useButton.click({timeout: uiGate(5000)});
+			clicked = true;
+		} else {
+			await this.switchToTab(this.tabOverview);
+			const row = this.page.locator(".charsheet__activatable-row")
+				.filter({hasText: this._getFeatureActivationPattern(featureName)})
+				.first();
+			const activateButton = row.locator(".charsheet__activate-btn");
+			if (await activateButton.isVisible({timeout: uiGate(2000)}).catch(() => false)) {
+				await activateButton.click({timeout: uiGate(5000)});
+				clicked = true;
+			}
+		}
+
+		if (clicked) {
+			const modal = this.page.locator(".ve-ui-modal__inner:visible, .ui-modal__inner:visible").last();
+			if (await modal.isVisible({timeout: uiGate(500)}).catch(() => false)) {
+				const commit = modal.locator("button.ve-btn")
+					.filter({hasText: /^Use \d+\s+/i})
+					.first();
+				if (await commit.isVisible({timeout: uiGate(1000)}).catch(() => false)) {
+					await commit.click({timeout: uiGate(5000)});
+					await modal.waitFor({state: "hidden", timeout: uiGate(5000)}).catch(() => {});
+				}
+			}
+			await this.page.waitForTimeout(400);
+		}
+
+		const afterUse = await this.page.evaluate((name) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			const feature = state?.getFeature?.(name);
+			const activeState = (state?.getActiveStates?.() || []).find((it: any) => it.sourceFeatureId === feature?.id && it.active);
+			return {
+				resources: Object.fromEntries((state?.getResources?.() || []).map((it: any) => [it.name, it.current])),
+				featureUses: feature?.uses?.current ?? null,
+				ac: state?.getAC?.() ?? 0,
+				activeState: activeState ? JSON.parse(JSON.stringify(activeState)) : null,
+				activeResourceCastSpells: JSON.parse(JSON.stringify(state?.getActiveResourceCastSpells?.() || [])),
+				concentration: JSON.parse(JSON.stringify(state?.getConcentration?.() || null)),
+			};
+		}, featureName);
+
+		let attack = null;
+		if (attackName) {
+			const clickResult = await this.clickAttackRoll(attackName);
+			await this.page.waitForTimeout(150);
+			const attackState = await this.page.evaluate((name) => {
+				const cs: any = (globalThis as any).charSheet;
+				const state = cs?._state;
+				const feature = state?.getFeature?.(name);
+				return {
+					mode: cs?._combat?._lastAttackContext?.mode ?? null,
+					damageRiders: JSON.parse(JSON.stringify(cs?._combat?._pendingActiveStateDamageRiders?.riders || [])),
+					stateStillActive: (state?.getActiveStates?.() || []).some((it: any) => it.sourceFeatureId === feature?.id && it.active),
+				};
+			}, featureName);
+			attack = {...clickResult, ...attackState};
+		}
+
+		const combatActionEconomyText = captureCombatActionEconomy
+			? await this.getCombatActionEconomyText()
+			: null;
+		const rawToastText = (await this.page.locator(toastSelector).allTextContents()).join(" ");
+		const toastText = await this.page.evaluate((raw) => {
+			const template = document.createElement("template");
+			template.innerHTML = raw;
+			return template.content.textContent || raw;
+		}, rawToastText);
+		this.page.off("console", onConsole);
+
+		await this.page.evaluate((json) => {
+			const cs: any = (globalThis as any).charSheet;
+			cs?._state?.loadFromJson?.(json);
+			cs?._renderCharacter?.();
+		}, before.json);
+		await this.page.waitForTimeout(150);
+
+		return {
+			clicked,
+			toastText,
+			beforeResources: before.resources,
+			afterResources: afterUse.resources,
+			beforeFeatureUses: before.featureUses,
+			afterFeatureUses: afterUse.featureUses,
+			beforeAc: before.ac,
+			afterAc: afterUse.ac,
+			activeState: afterUse.activeState,
+			activeResourceCastSpells: afterUse.activeResourceCastSpells,
+			concentration: afterUse.concentration,
+			activationInfo: before.activationInfo,
+			runtimeErrors,
+			combatActionEconomyText,
+			attack,
+		};
+	}
+
+	async getCombatActionEconomyText (): Promise<string> {
+		await this.switchToTab(this.tabCombat);
+		const container = this.page.locator("#charsheet-combat-action-economy");
+		await container.waitFor({state: "visible", timeout: uiGate(5000)});
+		return (await container.innerText()).replace(/\s+/g, " ").trim();
+	}
+
 	// ========== TGTT — RESOURCE TRACKERS ==========
 
 	/**

@@ -7713,7 +7713,7 @@ suppressed L4+ coverage for the whole TGTT suite.
 
 ## CS-BUG-119 — "action-economy" feature grants are computed into write-only `calculations` keys with zero product consumers
 
-**Status**: Open (documented, not fixed — no generic surface exists yet)
+**Status**: **Fixed (College of Jesters completeness pass)**
 **Surfaced**: College of Jesters (TGTT) full-support audit, Gifted Acrobat (L6).
 **Component**: Character Sheet · `charactersheet-state.js` · `getFeatureCalculations()`.
 
@@ -7727,66 +7727,20 @@ grants three things:
 | Grant | Surface | Effective? |
 |---|---|---|
 | Climbing speed equal to walking speed | `speed:climb` `equalToWalk` modifier | **Yes** |
-| Escaping a grapple costs a bonus action | `calculations.escapeGrappleBonusAction` | **No** |
-| Standing from prone costs 10 ft | `calculations.standFromProneCost` | **No** |
+| Escaping a grapple costs a bonus action | `getActionEconomyOverrides()` | **Yes** |
+| Standing from prone costs 10 ft | `getMovementOverrides()` | **Yes** |
 
-### Measurement
+### Fix
 
-Both keys are produced in exactly one place and consumed in exactly one
-place — and the only consumer is a unit test asserting the producer:
+The state now exposes generic `getActionEconomyOverrides()` and
+`getMovementOverrides()` contracts. Gifted Acrobat feeds those contracts,
+and the Combat tab renders the resulting action and movement notes rather
+than leaving the calculation keys write-only. Jester Acts that temporarily
+change action or movement rules use the same contracts.
 
-```
-$ grep -rn "escapeGrappleBonusAction\|standFromProneCost" js/ test/
-js/charactersheet/charactersheet-state.js:23532:  calculations.escapeGrappleBonusAction = true;
-js/charactersheet/charactersheet-state.js:23533:  calculations.standFromProneCost = 10;
-test/jest/charactersheet/CharacterSheetTGTT.test.js:9303:  expect(calcs.escapeGrappleBonusAction).toBe(true);
-test/jest/charactersheet/CharacterSheetTGTT.test.js:9304:  expect(calcs.standFromProneCost).toBe(10);
-```
-
-**2 product references, 0 product consumers.** Nothing renders them,
-nothing rolls with them, nothing gates on them. The test passes and the
-feature is inert — the exact failure mode the "a test can pass while the
-feature is inert" rule exists to catch.
-
-The absence is structural, not a Jester oversight. There is no
-movement-cost or action-economy vocabulary in the sheet at all:
-
-```
-$ grep -rn "movementCost\|proneCost\|standFromProne\|grappleEscape" js/charactersheet/ | wc -l
-0   # (the two lines above are the only near-matches, and they are the producer)
-```
-
-`getSpeedBreakdown()` and the 15 `get*Speed*` accessors all model speed as
-a **distance per type**; none model the *cost* of an action, and there is
-no `getMovementCostOverrides()` / `getBonusActionGrants()` equivalent.
-
-### Why it is not fixed here
-
-Fixing it properly means adding a new generic surface (a movement-cost /
-action-economy override registry, plus somewhere on Overview or Combat to
-render it) that every class with the same shape would feed — Rogue's
-Cunning Action, Monk's Step of the Wind, Barbarian's Fast Movement riders,
-Tabaxi's Feline Agility. Special-casing Gifted Acrobat into a bespoke
-renderer would violate the generic-architecture rule in
-`.github/instructions/charactersheet.instructions.md` and leave the same
-hole for every other feature of this shape.
-
-### Scope
-
-Not Jester-specific. Any feature whose entire effect is "X costs a bonus
-action instead of an action" or "Y costs N ft instead of half your speed"
-currently has nowhere to land. Grep `calculations\.` in the class-feature
-block for other write-only keys before designing the fix.
-
-### Suggested fix
-
-1. Add `state.getActionEconomyOverrides()` returning
-   `[{what, from, to, source}]`, fed by the same feature-parse path.
-2. Render them as a short list on the Combat tab (next to Actions) and in
-   the Overview feature summary.
-3. Add an `actionEconomy` EffectCheck kind to
-   `test/e2e/utils/comprehensiveBuildHelpers.ts` so E2E can assert them,
-   and re-point the Gifted Acrobat row at it.
+The Jester Playwright matrix checks both Gifted Acrobat overrides through
+the shared state API, while the Jester runtime Jest suite covers the same
+contracts together with the turn-scoped Act variants.
 
 ---
 
