@@ -21,6 +21,11 @@
       "iteration": 3,
       "verdict": "FAIL",
       "summary": "Production E2E remains red; Play Mode and failed doubled movement break action economy; Chain Control, effect-layer consistency, generic dispatch, mobile accessibility, tests, and docs remain incomplete."
+    },
+    {
+      "iteration": 4,
+      "verdict": "FAIL",
+      "summary": "Fresh E2E passes, but action economy remains split, metadata and generic dispatch are incomplete, E2E bypasses required UI branches, and mobile modal focus/layout remain broken."
     }
   ]
 }
