@@ -26,6 +26,11 @@
       "iteration": 4,
       "verdict": "FAIL",
       "summary": "Casting and restored receipts are improved, but effect expiry/respec cleanup, canonical scopes, fortune cancellation atomicity, accessibility, real browser/planted coverage, documentation, and the final npm test gate remain incomplete."
+    },
+    {
+      "iteration": 5,
+      "verdict": "FAIL",
+      "summary": "Focused mechanics and Gambler browser gates pass, but npm test is red; canonical table scopes, Master action economy, resource cleanup, accessibility, full E2E coverage, documentation, and required artifacts remain incomplete."
     }
   ]
 }
