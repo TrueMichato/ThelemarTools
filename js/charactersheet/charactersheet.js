@@ -108,6 +108,10 @@ class CharacterSheetPage {
 		this._partyInventory = null;
 		this._characterLoadGeneration = 0;
 		this._hubRealtimeGeneration = 0;
+		this._hubAuthoritativeReconcileRequest = null;
+		this._hubAuthoritativeReconcilePromise = null;
+		this._isHubAuthoritativeReconcileScheduled = false;
+		this._isHubCharacterConflictPromptOpen = false;
 		this._hubContextGeneration = 0;
 		this._hubContextRefreshActiveGeneration = null;
 		this._isHubContextRefreshing = false;
@@ -314,6 +318,7 @@ class CharacterSheetPage {
 		this._hubRealtime.on("semanticOperation", event => this._onHubSemanticOperation(event));
 		this._hubRealtime.on("connectionState", state => this._onHubRealtimeConnectionState(state));
 		this._hubRealtime.on("campaignContextChanged", event => this._onHubCampaignContextChanged(event));
+		this._hubRealtime.on("projectionInvalidated", event => this._onHubProjectionInvalidated(event));
 		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
 		this._hubRealtime.on("rulesChanged", event => { void this._pRefreshHubRules(event); });
 		return true;
@@ -389,6 +394,11 @@ class CharacterSheetPage {
 		} else if (state?.state === "live" && this._hubRulesRefreshBlocked) {
 			void this._pRefreshHubRules();
 		}
+		if (
+			state?.state === "live"
+			&& this._currentCharacterId
+			&& this._characterRepository.getPendingRecovery?.(this._currentCharacterId)
+		) this._scheduleHubAuthoritativeReconcile({characterId: this._currentCharacterId});
 		if (state?.state === "access_lost") {
 			// Fail closed synchronously; the coordinator then performs the full ordered teardown.
 			this._teardownHubRules();
@@ -415,6 +425,11 @@ class CharacterSheetPage {
 		this._isHubContextRevalidationRequired = state.state === "closed";
 		this._clearHubRules?.({isUnavailable: true});
 		this._campaign?.render();
+	}
+
+	_onHubProjectionInvalidated (event) {
+		if (!this._currentCharacterId || event?.characterId !== this._currentCharacterId) return false;
+		return this._scheduleHubAuthoritativeReconcile({characterId: this._currentCharacterId});
 	}
 
 	_applyHubContext (context) {
@@ -691,6 +706,134 @@ class CharacterSheetPage {
 				return false;
 			default:
 				return false;
+		}
+	}
+
+	_scheduleHubAuthoritativeReconcile ({characterId}) {
+		if (!characterId || characterId !== this._currentCharacterId) return false;
+		this._hubAuthoritativeReconcileRequest = {
+			characterId,
+			generation: this._characterLoadGeneration,
+			realtimeGeneration: this._hubRealtimeGeneration,
+		};
+		if (this._hubAuthoritativeReconcilePromise || this._isHubAuthoritativeReconcileScheduled) return true;
+		this._isHubAuthoritativeReconcileScheduled = true;
+		queueMicrotask(() => {
+			this._isHubAuthoritativeReconcileScheduled = false;
+			if (this._hubAuthoritativeReconcilePromise) return;
+			const promise = this._pDrainHubAuthoritativeReconcile();
+			this._hubAuthoritativeReconcilePromise = promise;
+			void promise
+				.catch(error => {
+					// eslint-disable-next-line no-console
+					console.error("Authoritative character reconciliation failed:", error);
+					this._updateSaveIndicator("error");
+					JqueryUtil.doToast({
+						type: "danger",
+						content: `Could not reconcile this character with the campaign server. Your local copy was preserved; retry or export it before reloading.`,
+					});
+				})
+				.finally(() => {
+					if (this._hubAuthoritativeReconcilePromise === promise) {
+						this._hubAuthoritativeReconcilePromise = null;
+					}
+					if (this._hubAuthoritativeReconcileRequest) {
+						this._scheduleHubAuthoritativeReconcile({
+							characterId: this._hubAuthoritativeReconcileRequest.characterId,
+						});
+					}
+				});
+		});
+		return true;
+	}
+
+	async _pDrainHubAuthoritativeReconcile () {
+		while (this._hubAuthoritativeReconcileRequest) {
+			const request = this._hubAuthoritativeReconcileRequest;
+			this._hubAuthoritativeReconcileRequest = null;
+			await this._pRunHubAuthoritativeReconcile(request);
+		}
+	}
+
+	async _pRunHubAuthoritativeReconcile ({characterId, generation, realtimeGeneration}) {
+		const repository = this._characterRepository;
+		if (typeof repository?.pReconcileAuthoritativeCharacter !== "function") return false;
+		const fnIsCurrent = () => (
+			this._currentCharacterId === characterId
+			&& this._characterLoadGeneration === generation
+			&& this._hubRealtimeGeneration === realtimeGeneration
+		);
+		const result = await repository.pReconcileAuthoritativeCharacter({
+			characterId,
+			fnGetLiveData: () => this._getHubLiveCharacterData(),
+			fnAdoptLive: liveNext => this._adoptHubLiveCharacterData(liveNext),
+			fnIsCurrent,
+			isPreserveLocalOnConflict: true,
+		}).catch(error => ({status: "failed", error}));
+		if (!fnIsCurrent()) return false;
+
+		switch (result?.status) {
+			case "reconciled":
+				this._renderCharacter();
+				if (repository.getPendingRecovery?.(characterId)) return this._saveCurrentCharacter();
+				this._updateSaveIndicator("saved");
+				return true;
+			case "unchanged":
+				if (repository.getPendingRecovery?.(characterId)) return this._saveCurrentCharacter();
+				return true;
+			case "stale":
+				return true;
+			case "conflict":
+				this._updateSaveIndicator("error");
+				return this._pResolveHubCharacterConflict({characterId, fnIsCurrent});
+			case "failed":
+				this._updateSaveIndicator("error");
+				JqueryUtil.doToast({
+					type: "danger",
+					content: `Could not reconcile this character with the campaign server. Your local copy was preserved; retry or export it before reloading.`,
+				});
+				return false;
+			default:
+				return false;
+		}
+	}
+
+	async _pResolveHubCharacterConflict ({
+		characterId,
+		fnIsCurrent = () => this._currentCharacterId === characterId,
+		fallbackRecovery = null,
+	} = {}) {
+		if (
+			this._isHubCharacterConflictPromptOpen
+			|| typeof this._characterRepository?.pResolveConflict !== "function"
+		) return false;
+		this._isHubCharacterConflictPromptOpen = true;
+		try {
+			const choice = await InputUiUtil.pGetUserBoolean({
+				title: "Character Changed on Another Device",
+				htmlDescription: "Your local edits overlap newer server changes. Use your local version, or load the server version?",
+				textYes: "Use Local",
+				textNo: "Use Server",
+			});
+			if (!fnIsCurrent()) return false;
+			const recovery = this._characterRepository.getConflictRecovery?.(characterId) || fallbackRecovery;
+			if (!recovery) return false;
+			if (choice == null) {
+				DataUtil.userDownload("character-conflict-recovery", recovery, {fileType: "character-conflict"});
+				return false;
+			}
+			const resolved = await this._characterRepository.pResolveConflict({
+				characterId,
+				choice: choice ? "local" : "server",
+			});
+			if (!fnIsCurrent() || !resolved) return false;
+			this._state.loadFromJson(resolved);
+			this._reconcileClassFeatures();
+			this._renderCharacter();
+			this._updateSaveIndicator("saved");
+			return true;
+		} finally {
+			this._isHubCharacterConflictPromptOpen = false;
 		}
 	}
 
@@ -4482,28 +4625,11 @@ class CharacterSheetPage {
 				return true;
 			}
 			if (err?.code === "CHARACTER_CONFLICT" && this._characterRepository.pResolveConflict) {
-				const choice = await InputUiUtil.pGetUserBoolean({
-					title: "Character Changed on Another Device",
-					htmlDescription: "Your local edits overlap newer server changes. Use your local version, or load the server version?",
-					textYes: "Use Local",
-					textNo: "Use Server",
-				});
-				if (!isSaveCurrent()) return false;
-				if (choice == null) {
-					DataUtil.userDownload("character-conflict-recovery", err.recovery, {fileType: "character-conflict"});
-					return false;
-				}
-				const resolved = await this._characterRepository.pResolveConflict({
+				return this._pResolveHubCharacterConflict({
 					characterId: saveFence.characterId,
-					choice: choice ? "local" : "server",
+					fnIsCurrent: isSaveCurrent,
+					fallbackRecovery: err.recovery,
 				});
-				if (!isSaveCurrent()) return false;
-				if (resolved) {
-					this._state.loadFromJson(resolved);
-					this._renderCharacter();
-					this._updateSaveIndicator("saved");
-					return true;
-				}
 			}
 			return false;
 		}

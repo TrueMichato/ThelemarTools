@@ -18,6 +18,10 @@ import {
 const _PENDING_RESYNC_LIMIT = 64;
 const _RESYNC_PAGE_LIMIT = 200;
 const _RESYNC_MAX_PAGES = 50;
+const _SERVER_AUTHORITATIVE_CHARACTER_PATHS = ["/inventory", "/xp"];
+
+const isServerAuthoritativeCharacterPath = path => _SERVER_AUTHORITATIVE_CHARACTER_PATHS
+	.some(authoritativePath => path === authoritativePath || path.startsWith(`${authoritativePath}/`));
 
 export class HubHttpCharacterRepository {
 	isRescueMirrorEnabled = false;
@@ -178,6 +182,7 @@ export class HubHttpCharacterRepository {
 		fnGetLiveData = null,
 		fnAdoptLive = null,
 		fnIsCurrent = () => true,
+		isPreserveLocalOnConflict = false,
 	} = {}) {
 		if (typeof characterId !== "string" || !characterId) throw new TypeError(`characterId is required.`);
 		const canonicalId = this._canonicalIds.get(characterId) || characterId;
@@ -198,12 +203,14 @@ export class HubHttpCharacterRepository {
 				canonicalId,
 				accepted,
 				canonical,
+				isPreserveLocalOnConflict,
 			});
 			this._rebaseConflictForAuthoritative({
 				store: this._liveConflicts,
 				canonicalId,
 				accepted,
 				canonical,
+				isPreserveLocalOnConflict,
 			});
 			const liveData = fnGetLiveData?.();
 			const existingConflict = this._conflicts.get(canonicalId);
@@ -217,7 +224,12 @@ export class HubHttpCharacterRepository {
 			const authoritativeDiscarded = {};
 			const stageRebase = (name, local) => {
 				if (local === undefined) return;
-				const rebased = this._rebaseAuthoritativeCandidate({base: accepted.data, local, remote: canonical.data});
+				const rebased = this._rebaseAuthoritativeCandidate({
+					base: accepted.data,
+					local,
+					remote: canonical.data,
+					isPreserveLocalOnConflict,
+				});
 				if (rebased.isConflict) conflicts.push(...rebased.conflicts.map(conflict => ({track: name, ...conflict})));
 				if (rebased.isConflict) authoritativeDiscarded[name] = structuredClone(local);
 				staged[name] = rebased.document;
@@ -292,11 +304,12 @@ export class HubHttpCharacterRepository {
 		});
 	}
 
-	_rebaseAuthoritativeCandidate ({base, local, remote}) {
-		const withoutDerivedCarry = document => {
+	_rebaseAuthoritativeCandidate ({base, local, remote, isPreserveLocalOnConflict = false}) {
+		const withoutDerivedFields = document => {
 			if (!document || typeof document !== "object" || Array.isArray(document)) return document;
 			const out = {...document};
 			delete out.carry;
+			delete out._savedAt;
 			return out;
 		};
 		// Carry is a one-way Character Sheet projection, not editable character state. Server-side
@@ -304,9 +317,9 @@ export class HubHttpCharacterRepository {
 		// recompute it as data finishes loading; those concurrent derived changes must not block
 		// adoption of the authoritative inventory that the next serialization will summarize.
 		const rebased = rebaseJsonChanges({
-			base: withoutDerivedCarry(base),
-			local: withoutDerivedCarry(local),
-			remote: withoutDerivedCarry(remote),
+			base: withoutDerivedFields(base),
+			local: withoutDerivedFields(local),
+			remote: withoutDerivedFields(remote),
 		});
 		if (!rebased.isConflict) return rebased;
 		const conflictingPaths = new Set(rebased.conflicts.map(conflict => conflict.localPath));
@@ -314,11 +327,43 @@ export class HubHttpCharacterRepository {
 		// authoritative escrow changes at an overlapping path.
 		return {
 			...rebased,
-			document: applyJsonPatch(remote, rebased.patches.filter(patch => !conflictingPaths.has(patch.path))),
+			document: applyJsonPatch(
+				withoutDerivedFields(remote),
+				isPreserveLocalOnConflict
+					? rebased.patches.filter(patch => !(
+						conflictingPaths.has(patch.path)
+						&& isServerAuthoritativeCharacterPath(patch.path)
+					))
+					: rebased.patches.filter(patch => !conflictingPaths.has(patch.path)),
+			),
 		};
 	}
 
-	_rebaseConflictForAuthoritative ({store, canonicalId, accepted, canonical}) {
+	_rebaseOwnerCandidate ({base, local, remote}) {
+		const withoutClientMetadata = document => {
+			if (!document || typeof document !== "object" || Array.isArray(document)) return document;
+			const out = {...document};
+			delete out._savedAt;
+			return out;
+		};
+		const rebased = rebaseJsonChanges({
+			base: withoutClientMetadata(base),
+			local: withoutClientMetadata(local),
+			remote: withoutClientMetadata(remote),
+		});
+		return {
+			...rebased,
+			document: rebased.isConflict ? null : applyJsonPatch(remote, rebased.patches),
+		};
+	}
+
+	_rebaseConflictForAuthoritative ({
+		store,
+		canonicalId,
+		accepted,
+		canonical,
+		isPreserveLocalOnConflict = false,
+	}) {
 		const conflict = store.get(canonicalId);
 		if (!conflict) return;
 		const next = {
@@ -333,6 +378,7 @@ export class HubHttpCharacterRepository {
 				base: accepted.data,
 				local: conflict[key],
 				remote: canonical.data,
+				isPreserveLocalOnConflict: isPreserveLocalOnConflict && key === "local",
 			});
 			next[key] = rebased.document;
 			if (rebased.isConflict) next.authoritativeDiscarded[key] = structuredClone(conflict[key]);
@@ -343,7 +389,7 @@ export class HubHttpCharacterRepository {
 		const serverCoverage = this._getConflictCoverage(conflict, "server");
 		serverCoverage.revision = canonical.revision;
 		next.coverage.server = serializeCoverage(serverCoverage);
-		const rebased = rebaseJsonChanges({base: next.base, local: next.local, remote: next.server});
+		const rebased = this._rebaseOwnerCandidate({base: next.base, local: next.local, remote: next.server});
 		next.conflicts = rebased.conflicts;
 		next.isResolved = !rebased.isConflict;
 		store.set(canonicalId, next);
@@ -1270,7 +1316,12 @@ export class HubHttpCharacterRepository {
 			const characterNxt = {...structuredClone(submittedSnapshot), id: canonicalId};
 			const existingConflict = this._conflicts.get(canonicalId);
 			if (existingConflict) {
-				existingConflict.local = this._getSnapshotData(characterNxt);
+				existingConflict.local = this._rebaseAuthoritativeCandidate({
+					base: existingConflict.base,
+					local: this._getSnapshotData(characterNxt),
+					remote: existingConflict.server,
+					isPreserveLocalOnConflict: true,
+				}).document;
 				const conflict = new Error(`Character conflict requires explicit resolution.`);
 				conflict.code = "CHARACTER_CONFLICT";
 				conflict.recovery = structuredClone(existingConflict);
@@ -1300,7 +1351,7 @@ export class HubHttpCharacterRepository {
 			}
 			let desired = this._getSnapshotData(characterNxt);
 			if (submittedBase) {
-				const submittedRebase = rebaseJsonChanges({
+				const submittedRebase = this._rebaseOwnerCandidate({
 					base: submittedBase,
 					local: desired,
 					remote: accepted.data,
@@ -1308,7 +1359,12 @@ export class HubHttpCharacterRepository {
 				if (submittedRebase.isConflict) {
 					const recovery = {
 						base: submittedBase,
-						local: desired,
+						local: this._rebaseAuthoritativeCandidate({
+							base: submittedBase,
+							local: desired,
+							remote: accepted.data,
+							isPreserveLocalOnConflict: true,
+						}).document,
 						server: structuredClone(accepted.data),
 						serverDocument: structuredClone(accepted),
 						conflicts: submittedRebase.conflicts,
@@ -1350,7 +1406,12 @@ export class HubHttpCharacterRepository {
 					const canonical = await this._api.pGetCharacter({characterId: canonicalId});
 					const recovery = {
 						base: structuredClone(accepted.data),
-						local: desired,
+						local: this._rebaseAuthoritativeCandidate({
+							base: accepted.data,
+							local: desired,
+							remote: canonical.data,
+							isPreserveLocalOnConflict: true,
+						}).document,
 						server: structuredClone(canonical.data),
 						serverDocument: structuredClone(canonical),
 						conflicts: [{localPath: "", remotePath: "", reason: error.code}],
@@ -1370,7 +1431,7 @@ export class HubHttpCharacterRepository {
 				}
 				if (error?.code !== "REVISION_CONFLICT") throw error;
 				const canonical = await this._api.pGetCharacter({characterId: canonicalId});
-				const rebased = rebaseJsonChanges({
+				const rebased = this._rebaseOwnerCandidate({
 					base: accepted.data,
 					local: desired,
 					remote: canonical.data,
@@ -1378,7 +1439,12 @@ export class HubHttpCharacterRepository {
 				if (rebased.isConflict) {
 					const recovery = {
 						base: structuredClone(accepted.data),
-						local: desired,
+						local: this._rebaseAuthoritativeCandidate({
+							base: accepted.data,
+							local: desired,
+							remote: canonical.data,
+							isPreserveLocalOnConflict: true,
+						}).document,
 						server: structuredClone(canonical.data),
 						serverDocument: structuredClone(canonical),
 						conflicts: rebased.conflicts,
@@ -1449,12 +1515,14 @@ export class HubHttpCharacterRepository {
 	}
 
 	getPendingRecovery (characterId) {
+		const canonicalId = this._canonicalIds.get(characterId) || characterId;
+		const failedWrite = this._failedWrites.get(canonicalId) || this._failedWrites.get(characterId);
+		if (failedWrite) return structuredClone(failedWrite);
 		try {
 			const raw = this._recoveryStorage?.getItem(`hub-character-recovery:${this._scopeKey}:${characterId}`);
 			if (!raw) return null;
 			const parsed = JSON.parse(raw);
 			if (parsed.snapshot) {
-				const canonicalId = this._canonicalIds.get(characterId) || characterId;
 				const book = this._getCoverageBook(canonicalId);
 				// A blob written before coverage metadata existed cannot prove which operations it already
 				// reflects. It is still honoured as a draft, but its unknown coverage forces a resync rather than

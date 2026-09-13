@@ -221,6 +221,104 @@ describe("HTTP character repository", () => {
 		expect(repository._accepted.get("server-1")).toEqual(documents[2]);
 	});
 
+	it("keeps the real overlapping owner draft as the explicit Use Local candidate", async () => {
+		let revision = 1;
+		const documents = {
+			1: {id: "server-1", campaignId: "campaign-1", revision: 1, data: {name: "Mira", hp: {current: 12}, xp: 100, inventory: [{id: "arrow", quantity: 10}]}},
+			2: {id: "server-1", campaignId: "campaign-1", revision: 2, data: {name: "Mira", hp: {current: 9}, xp: 120, inventory: [{id: "arrow", quantity: 7}]}},
+			3: {id: "server-1", campaignId: "campaign-1", revision: 3, data: {name: "Mira", hp: {current: 8}, xp: 140, inventory: [{id: "arrow", quantity: 5}]}},
+		};
+		const patches = [];
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => structuredClone(documents[revision]),
+			pAcquireCharacterLease: async () => ({epoch: 2}),
+			pPatchCharacter: async input => {
+				patches.push(...input.patches);
+				return {
+					character: {
+						id: "server-1",
+						campaignId: "campaign-1",
+						revision: 4,
+						data: {name: "Mira", hp: {current: 7}, xp: 140, inventory: [{id: "arrow", quantity: 5}]},
+					},
+				};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "server-1"});
+		revision = 2;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({name: "Mira", hp: {current: 7}, xp: 110, inventory: [{id: "arrow", quantity: 9}]}),
+			fnAdoptLive: () => { throw new Error("must not adopt"); },
+			isPreserveLocalOnConflict: true,
+		})).resolves.toMatchObject({status: "conflict"});
+		expect(repository.getConflictRecovery("server-1")).toMatchObject({
+			local: {hp: {current: 7}, xp: 120, inventory: [{quantity: 7}]},
+			server: {hp: {current: 9}, xp: 120, inventory: [{quantity: 7}]},
+		});
+
+		revision = 3;
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({name: "Mira", hp: {current: 7}, xp: 110, inventory: [{id: "arrow", quantity: 9}]}),
+			fnAdoptLive: () => { throw new Error("must not adopt"); },
+			isPreserveLocalOnConflict: true,
+		})).resolves.toMatchObject({status: "conflict"});
+		expect(repository.getConflictRecovery("server-1")).toMatchObject({
+			base: {hp: {current: 8}, xp: 140, inventory: [{quantity: 5}]},
+			local: {hp: {current: 7}, xp: 140, inventory: [{quantity: 5}]},
+			server: {hp: {current: 8}, xp: 140, inventory: [{quantity: 5}]},
+		});
+
+		await expect(repository.pResolveConflict({
+			characterId: "server-1",
+			choice: "local",
+		})).resolves.toMatchObject({hp: {current: 7}});
+		expect(patches).toContainEqual({op: "replace", path: "/hp/current", value: 7});
+		expect(patches.some(patch => patch.path.startsWith("/inventory"))).toBe(false);
+		expect(patches.some(patch => patch.path === "/xp")).toBe(false);
+	});
+
+	it("ignores client save timestamps while rebasing disjoint owner edits", async () => {
+		let revision = 1;
+		const documents = {
+			1: {
+				id: "server-1",
+				campaignId: "campaign-1",
+				revision: 1,
+				data: {name: "Mira", hp: {current: 12}, _savedAt: 1},
+			},
+			2: {
+				id: "server-1",
+				campaignId: "campaign-1",
+				revision: 2,
+				data: {name: "Mira", hp: {current: 9}, _savedAt: 3},
+			},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(documents[revision]),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		revision = 2;
+		let adopted;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({name: "Mira Offline", hp: {current: 12}, _savedAt: 2}),
+			fnAdoptLive: data => adopted = data,
+			isPreserveLocalOnConflict: true,
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+		expect(adopted).toMatchObject({name: "Mira Offline", hp: {current: 9}});
+		expect(repository.getConflictRecovery("server-1")).toBeNull();
+	});
+
 	it("does not treat a recomputed derived carry block as an inventory conflict", async () => {
 		let revision = 1;
 		const carry = grossWeight => ({schemaVersion: 1, grossWeight});
@@ -464,7 +562,7 @@ describe("HTTP character repository", () => {
 			pGetSession: async () => ({signedIn: true}),
 			pGetCharacter: async () => ++getCount === 1
 				? {id: "c", campaignId: "cmp", revision: 1, data: {name: "Mira", xp: 100}}
-				: {id: "c", campaignId: "cmp", revision: 2, data: {name: "Mira", xp: 200}},
+				: {id: "c", campaignId: "cmp", revision: 2, data: {name: "Server", xp: 200}},
 			pAcquireCharacterLease: async () => ({epoch: 1}),
 			pPatchCharacter: async () => {
 				const error = new Error("conflict");
@@ -479,6 +577,59 @@ describe("HTTP character repository", () => {
 				code: "CHARACTER_CONFLICT",
 				recovery: expect.objectContaining({local: expect.any(Object), server: expect.any(Object)}),
 			}));
+	});
+
+	it("protects server-owned inventory and XP when Use Local resolves a normal revision conflict", async () => {
+		let getCount = 0;
+		let patchCount = 0;
+		let resolvedPatches;
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ++getCount === 1
+				? {
+					id: "c",
+					campaignId: "cmp",
+					revision: 1,
+					data: {hp: {current: 20}, xp: 100, inventory: [{id: "arrow", quantity: 10}]},
+				}
+				: {
+					id: "c",
+					campaignId: "cmp",
+					revision: 2,
+					data: {hp: {current: 19}, xp: 200, inventory: [{id: "arrow", quantity: 7}]},
+				},
+			pAcquireCharacterLease: async () => ({epoch: 1}),
+			pPatchCharacter: async input => {
+				if (!patchCount++) {
+					const error = new Error("conflict");
+					error.code = "REVISION_CONFLICT";
+					throw error;
+				}
+				resolvedPatches = input.patches;
+				return {
+					character: {
+						id: "c",
+						campaignId: "cmp",
+						revision: 3,
+						data: {hp: {current: 18}, xp: 200, inventory: [{id: "arrow", quantity: 7}]},
+					},
+				};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		await repository.pGet({characterId: "c"});
+		await expect(repository.pUpsert({
+			character: {id: "c", hp: {current: 18}, xp: 150, inventory: [{id: "arrow", quantity: 9}]},
+		})).rejects.toMatchObject({code: "CHARACTER_CONFLICT"});
+		expect(repository.getConflictRecovery("c")).toMatchObject({
+			local: {hp: {current: 18}, xp: 200, inventory: [{quantity: 7}]},
+			server: {hp: {current: 19}, xp: 200, inventory: [{quantity: 7}]},
+		});
+
+		await expect(repository.pResolveConflict({characterId: "c", choice: "local"}))
+			.resolves.toMatchObject({hp: {current: 18}, xp: 200, inventory: [{quantity: 7}]});
+		expect(resolvedPatches).toContainEqual({op: "replace", path: "/hp/current", value: 18});
+		expect(resolvedPatches.some(patch => patch.path === "/xp" || patch.path.startsWith("/inventory"))).toBe(false);
 	});
 
 	it("clears rejected local recovery when the user chooses server", async () => {
@@ -521,13 +672,13 @@ describe("HTTP character repository", () => {
 		};
 		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
 		await repository.pGet({characterId: "c"});
-		const first = repository.pUpsert({character: {id: "c", name: "Mira", xp: 150}});
+		const first = repository.pUpsert({character: {id: "c", name: "First", xp: 150}});
 		await pStarted;
-		const second = repository.pUpsert({character: {id: "c", name: "Mira", xp: 175}});
+		const second = repository.pUpsert({character: {id: "c", name: "Newest", xp: 175}});
 		doRelease();
 		await expect(first).rejects.toEqual(expect.objectContaining({code: "CHARACTER_CONFLICT"}));
 		await expect(second).rejects.toEqual(expect.objectContaining({code: "CHARACTER_CONFLICT"}));
-		expect(repository.getConflictRecovery("c").local.xp).toBe(175);
+		expect(repository.getConflictRecovery("c").local).toMatchObject({name: "Newest", xp: 200});
 		expect(repository.hasPendingWrites()).toBe(true);
 	});
 
