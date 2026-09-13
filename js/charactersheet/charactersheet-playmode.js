@@ -1235,6 +1235,11 @@ export class CharacterSheetPlayMode {
 		const occupied = this._state.getChainedTargetState?.().used ?? targets.filter(it => it.chainIndex != null).length;
 		const movement = this._state.getChainedMovementState?.() || {};
 		lede.textContent = `${occupied}/${calc.chainCount || 0} chains occupied · reach ${calc.chainRange || 0} ft. · chain movement ${movement.remaining ?? 0}/${movement.allowance ?? 0} ft.${movement.doubled ? " (doubled)" : ""}`;
+		if (occupied >= Number(calc.chainCount || 0)) {
+			const warning = this._ce("div", "pm-chained-target__warning ve-small", card);
+			warning.setAttribute("role", "status");
+			warning.textContent = "Chain capacity reached — release a grapple before adding another.";
+		}
 		if (!targets.length) {
 			this._ce("div", "ve-muted ve-small", card).textContent = "No creatures chained. Use a target-aware rider after a Spectral Chains hit.";
 			return;
@@ -1274,10 +1279,14 @@ export class CharacterSheetPlayMode {
 			doubleLabel.innerHTML = `<input type="checkbox" data-double-movement aria-label="Spend bonus action to double chain-only movement"> Double movement`;
 			this._makeClickable(move, `Move ${target.targetName} within chain range`, () => {
 				const doubleMovement = !!doubleLabel.querySelector("[data-double-movement]")?.checked;
+				if (doubleMovement && !this._state.isActionTypeAvailable?.("bonus")) {
+					JqueryUtil.doToast({type: "warning", content: "Your bonus action has already been used this turn."});
+					return;
+				}
 				const result = this._state.moveChainedTarget(target.id, Number(distance.value), {doubleMovement});
 				if (!result.ok) JqueryUtil.doToast({type: "warning", content: `Cannot move target: ${result.reason || "invalid distance"}`});
 				else {
-					if (doubleMovement && result.bonusActionUsed) this._consumeActionType("bonus");
+					if (result.bonusActionUsed) this._actionEconomy.bonus = false;
 					this._page._saveCurrentCharacter?.();
 					this.render();
 				}
@@ -1605,11 +1614,18 @@ export class CharacterSheetPlayMode {
 		];
 
 		slots.forEach(slot => {
-			const avail = this._actionEconomy[slot.key];
+			const sharedEconomy = this._state.getActionEconomyState?.();
+			const avail = slot.key === "bonus"
+				? (sharedEconomy?.bonus ?? this._actionEconomy[slot.key])
+				: this._actionEconomy[slot.key];
 			const el = this._ce("div", `pm-economy__slot pm-economy__slot--${avail ? "available" : "used"}`, row);
 			el.replaceChildren(this._icon(slot.icon), document.createTextNode(` ${slot.label}`));
 			this._makeClickable(el, `${avail ? "Use" : "Restore"} ${slot.label}`, () => {
-				this._actionEconomy[slot.key] = !this._actionEconomy[slot.key];
+				if (slot.key === "bonus") {
+					if (this._state.isActionTypeAvailable?.("bonus")) this._state.consumeActionType?.("bonus");
+					else this._state.resetActionEconomy?.();
+					this._actionEconomy.bonus = this._state.isActionTypeAvailable?.("bonus") !== false;
+				} else this._actionEconomy[slot.key] = !this._actionEconomy[slot.key];
 				this._renderActionEconomy();
 			});
 		});
@@ -1628,6 +1644,7 @@ export class CharacterSheetPlayMode {
 		this._setIconLabel(reset, "refresh", " Reset turn");
 		this._makeClickable(reset, "Reset turn (restore all actions)", () => {
 			this._actionEconomy = {action: true, bonus: true, reaction: true, movement: true};
+			this._state.resetActionEconomy?.();
 			this._renderActionEconomy();
 			this._logActivity("turn", "New turn started");
 		});

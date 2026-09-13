@@ -150,6 +150,37 @@ describe("CharacterSheet target/effect lifecycle", () => {
 		expect(state.applyChainedTargetEffect({targetName: "Illegal", distance: 10, effect: "restrain"}).reason).toBe("effect-unavailable");
 	});
 
+	it("rejects mismatched rider/effect metadata instead of bypassing level gates", () => {
+		const state = makeFury(3);
+		expect(state.applyTargetEffect({
+			source: "chained-fury",
+			targetName: "Mismatched",
+			effect: "grapple",
+			riderId: "chains-control-shove",
+			distance: 10,
+		})).toMatchObject({ok: false, reason: "effect-metadata-mismatch"});
+	});
+
+	it("keeps ordinary grapples unrestrained and without recurring damage", () => {
+		const state = makeFury(6);
+		const result = state.applyTargetEffect({
+			source: "chained-fury",
+			targetName: "Grappled",
+			effect: "grapple",
+			riderId: "chains-grapple",
+			distance: 10,
+		});
+		expect(result).toMatchObject({
+			ok: true,
+			grappled: true,
+			restrained: false,
+			target: {
+				effects: {restraint: {active: false}},
+				recurringDamage: null,
+			},
+		});
+	});
+
 	it("releases stale effects instead of clamping them and reconciles derived values/capacity", () => {
 		const state = makeFury(14);
 		const targets = [1, 2, 3, 4].map(i => state.createChainedTarget({targetName: `T${i}`, distance: 10}).target);
@@ -175,6 +206,17 @@ describe("CharacterSheet target/effect lifecycle", () => {
 		expect(state.getChainedTargets().find(t => t.id === target.id)).toMatchObject({grappled: false, chainIndex: null});
 	});
 
+	it("does not consume doubled movement or bonus action when validation fails", () => {
+		const state = makeFury(10);
+		state.setSpeed("walk", 5);
+		const target = state.createChainedTarget({targetName: "Transactional", distance: 0}).target;
+		const before = state.getChainedMovementState();
+		expect(state.isActionTypeAvailable("bonus")).toBe(true);
+		expect(state.moveChainedTarget(target.id, 20, {doubleMovement: true})).toMatchObject({ok: false, reason: "movement-exceeded"});
+		expect(state.getChainedMovementState()).toMatchObject(before);
+		expect(state.isActionTypeAvailable("bonus")).toBe(true);
+	});
+
 	it("accepts and validates Chain Control's declared final position and direction", () => {
 		const state = makeFury(10);
 		expect(state.applyChainedTargetEffect({
@@ -183,9 +225,9 @@ describe("CharacterSheet target/effect lifecycle", () => {
 			effect: "control-shove",
 			riderId: "chains-control-shove",
 			shoveDistance: 10,
-			finalDistance: 15,
+			finalDistance: 10,
 			shoveDirection: "toward",
-		})).toMatchObject({ok: true, finalDistance: 15, shoveDirection: "toward"});
+		})).toMatchObject({ok: true, finalDistance: 10, shoveDirection: "toward"});
 		expect(state.applyChainedTargetEffect({
 			targetName: "Too far",
 			distance: 20,
@@ -194,5 +236,22 @@ describe("CharacterSheet target/effect lifecycle", () => {
 			finalDistance: 26,
 			shoveDirection: "away",
 		})).toMatchObject({ok: false, reason: "shove-out-of-range"});
+	});
+
+	it("does not apply Chain Control when the initial grapple save succeeds", () => {
+		const state = makeFury(10);
+		const result = state.applyTargetEffect({
+			source: "chained-fury",
+			targetName: "Resisted control",
+			effect: "control-shove",
+			riderId: "chains-control-shove",
+			distance: 10,
+			grappleSaveAbility: "str",
+			grappleSaveTotal: state.getFeatureCalculations().chainGrappleDc,
+			finalDistance: 20,
+			shoveDirection: "away",
+		});
+		expect(result).toMatchObject({ok: true, grappled: false, shoved: false, controlApplied: false});
+		expect(result.target).toMatchObject({grappled: false, shoved: false, chainIndex: null});
 	});
 });

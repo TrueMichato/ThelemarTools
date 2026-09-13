@@ -5,6 +5,12 @@
 
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
 
+// Target-aware riders resolve through this registry rather than through attack-id
+// branches. New sources can opt in by registering a handler method.
+const TARGET_EFFECT_HANDLER_METHODS = Object.freeze({
+	"chained-fury": "applyChainedTargetEffect",
+});
+
 /**
  * Utility to parse feature text and extract limited-use information
  * Works with both official and homebrew content
@@ -5306,6 +5312,10 @@ class CharacterSheetState {
 			// CharacterSheetState so Combat, Play Mode, and headless callers share one
 			// source of truth for the bonus-action doubling rule.
 			chainedMovementUsage: {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false},
+			// Shared transient action-economy usage for surfaces which do not own the
+			// Combat module (notably Play Mode). Combat keeps its richer attack tracker,
+			// while bonus-action consumers use this common gate.
+			actionEconomyUsage: {action: false, bonus: false, reaction: false},
 		};
 	}
 
@@ -5422,6 +5432,15 @@ class CharacterSheetState {
 				movementUsed: Math.max(0, Number(this._data.chainedMovementUsage.movementUsed) || 0),
 				bonusActionUsed: !!this._data.chainedMovementUsage.bonusActionUsed,
 				doubled: !!this._data.chainedMovementUsage.doubled,
+			};
+		}
+		if (!this._data.actionEconomyUsage || typeof this._data.actionEconomyUsage !== "object") {
+			this._data.actionEconomyUsage = {action: false, bonus: false, reaction: false};
+		} else {
+			this._data.actionEconomyUsage = {
+				action: !!this._data.actionEconomyUsage.action,
+				bonus: !!this._data.actionEconomyUsage.bonus,
+				reaction: !!this._data.actionEconomyUsage.reaction,
 			};
 		}
 
@@ -61537,6 +61556,7 @@ class CharacterSheetState {
 		this._data.inCombat = true;
 		this._data.combatRound = 1;
 		this._data.chainedMovementUsage = {round: 1, movementUsed: 0, bonusActionUsed: false, doubled: false};
+		this.resetActionEconomy();
 		this._data.sanguineMasteryLastRerollRound = null;
 		this.applyHybridRegenerationAtTurnStart();
 		this.applyTurnStartEffects();
@@ -61562,6 +61582,7 @@ class CharacterSheetState {
 		this._data.hybridBloodlustTurnStartRound = null;
 		this._data.hybridBloodlustTurnStartCheck = null;
 		this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
+		this.resetActionEconomy();
 
 		for (const state of this._data.activeStates) {
 			// Fully deactivate transient "consume on attack" states (e.g. Steady Aim)
@@ -61586,6 +61607,7 @@ class CharacterSheetState {
 
 		this._data.combatRound++;
 		this._data.chainedMovementUsage = {round: this._data.combatRound, movementUsed: 0, bonusActionUsed: false, doubled: false};
+		this.resetActionEconomy();
 		this._data.sanguineMasteryLastRerollRound = null;
 		this.applyHybridRegenerationAtTurnStart();
 		this.applyTurnStartEffects();
@@ -62759,11 +62781,14 @@ class CharacterSheetState {
 		const normalizedSize = sizeNames.includes(size) ? size : "medium";
 		const distance = Number(raw.distance);
 		const declaredDistance = Number(raw.declaredDistance);
-		const chainIndex = Number(raw.chainIndex);
+		const chainIndex = raw.chainIndex == null || raw.chainIndex === "" ? null : Number(raw.chainIndex);
 		const effects = raw.effects && typeof raw.effects === "object" ? raw.effects : {};
 		const grappleEffect = effects.grapple && typeof effects.grapple === "object" ? effects.grapple : {};
 		const shoveEffect = effects.shove && typeof effects.shove === "object" ? effects.shove : {};
 		const restraintEffect = effects.restraint && typeof effects.restraint === "object" ? effects.restraint : {};
+		const grappleActive = grappleEffect.active == null ? !!raw.grappled : !!grappleEffect.active;
+		const shoveActive = shoveEffect.active == null ? !!raw.shoved : !!shoveEffect.active;
+		const restraintActive = restraintEffect.active == null ? !!raw.restrained : !!restraintEffect.active;
 		return {
 			id,
 			source: raw.source || null,
@@ -62772,9 +62797,9 @@ class CharacterSheetState {
 			size: normalizedSize,
 			declaredDistance: Number.isFinite(declaredDistance) && declaredDistance >= 0 ? declaredDistance : (Number.isFinite(distance) && distance >= 0 ? distance : null),
 			distance: Number.isFinite(distance) && distance >= 0 ? distance : (Number.isFinite(declaredDistance) && declaredDistance >= 0 ? declaredDistance : null),
-			grappled: !!raw.grappled,
-			restrained: !!raw.restrained,
-			shoved: !!raw.shoved,
+			grappled: grappleActive,
+			restrained: restraintActive,
+			shoved: shoveActive,
 			shoveDistance: Math.max(0, Number(raw.shoveDistance) || 0),
 			recurringDamage: raw.recurringDamage && typeof raw.recurringDamage === "object"
 				? {amount: Math.max(0, Number(raw.recurringDamage.amount) || 0), type: raw.recurringDamage.type || "force", when: raw.recurringDamage.when || "start of each of its turns"}
@@ -62791,16 +62816,16 @@ class CharacterSheetState {
 			// callers, but chain occupancy is derived from the grapple layer only.
 			effects: {
 				grapple: {
-					active: grappleEffect.active == null ? !!raw.grappled : !!grappleEffect.active,
+					active: grappleActive,
 					ability: grappleEffect.ability === "dex" ? "dex" : "str",
 					dc: grappleEffect.dc == null ? (raw.escapeDc == null ? null : Number(raw.escapeDc)) : Number(grappleEffect.dc),
 				},
 				shove: {
-					active: shoveEffect.active == null ? !!raw.shoved : !!shoveEffect.active,
+					active: shoveActive,
 					distance: Math.max(0, Number(shoveEffect.distance == null ? raw.shoveDistance : shoveEffect.distance) || 0),
 				},
 				restraint: {
-					active: restraintEffect.active == null ? !!raw.restrained : !!restraintEffect.active,
+					active: restraintActive,
 					dc: restraintEffect.dc == null ? (raw.restraintDc == null ? null : Number(raw.restraintDc)) : Number(restraintEffect.dc),
 				},
 			},
@@ -62915,6 +62940,38 @@ class CharacterSheetState {
 		};
 	}
 
+	/**
+	 * Shared transient action-economy API used by Play Mode and state-owned
+	 * operations. Combat's attack tracker remains separate, but bonus-action
+	 * consumers must all consult the same gate.
+	 */
+	getActionEconomyState () {
+		const usage = this._data.actionEconomyUsage || {};
+		return {
+			action: !usage.action,
+			bonus: !usage.bonus,
+			reaction: !usage.reaction,
+		};
+	}
+
+	isActionTypeAvailable (actionType) {
+		if (!actionType || actionType === "free") return true;
+		return !!this.getActionEconomyState()[actionType];
+	}
+
+	consumeActionType (actionType) {
+		if (!actionType || actionType === "free") return true;
+		if (!this.isActionTypeAvailable(actionType)) return false;
+		if (!this._data.actionEconomyUsage) this._data.actionEconomyUsage = {action: false, bonus: false, reaction: false};
+		if (!Object.hasOwn(this._data.actionEconomyUsage, actionType)) return false;
+		this._data.actionEconomyUsage[actionType] = true;
+		return true;
+	}
+
+	resetActionEconomy () {
+		this._data.actionEconomyUsage = {action: false, bonus: false, reaction: false};
+	}
+
 	applyChainedTargetEffect ({
 		targetId, targetName, name, size = "medium", distance = null, effect = "grapple",
 		riderId, restraintSaveTotal = null, shoveDistance = null, grappleSaveTotal = null,
@@ -62925,6 +62982,21 @@ class CharacterSheetState {
 			return {ok: false, reason: "chains-inactive"};
 		}
 		const normalizedEffect = String(effect || "target").toLowerCase();
+		const riderEffects = {
+			"chains-grapple": "grapple",
+			"chains-shove": "shove",
+			"chains-restrain": "restrain",
+			"chains-control-shove": "control-shove",
+		};
+		// `effect` and `riderId` describe one canonical contract. Accepting one
+		// while inferring behavior from the other allowed low-level callers to
+		// bypass level gates (e.g. an L3 grapple carrying the L10 rider ID).
+		if (riderId && riderEffects[riderId] && normalizedEffect !== riderEffects[riderId]) {
+			return {ok: false, reason: "effect-metadata-mismatch"};
+		}
+		if (riderId && !riderEffects[riderId] && !["target", "none", "track"].includes(normalizedEffect)) {
+			return {ok: false, reason: "effect-unavailable"};
+		}
 		const allowedEffects = new Set(["target", "none", "track", "grapple", "shove", "shove-only", "restrain", "control-shove"]);
 		if (!allowedEffects.has(normalizedEffect)) return {ok: false, reason: "effect-unavailable"};
 		if (["restrain"].includes(normalizedEffect) && !calc.hasChainImprisonment) {
@@ -62945,21 +63017,77 @@ class CharacterSheetState {
 		if (distance != null && (Number(distance) < 0 || Number(distance) > range)) return {ok: false, reason: "out-of-range", range};
 
 		const id = targetId || `chain-target-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-		const isRestrain = normalizedEffect === "restrain" || riderId === "chains-restrain";
-		const isShove = ["shove", "control-shove"].includes(normalizedEffect) || riderId === "chains-control-shove";
+		const isRestrain = normalizedEffect === "restrain";
+		const isControlShove = normalizedEffect === "control-shove";
+		const isShove = ["shove", "control-shove"].includes(normalizedEffect);
 		const grappleAbility = grappleSaveAbility === "dex" ? "dex" : grappleSaveAbility === "str" ? "str" : null;
 		if (wantsGrapple && !grappleAbility) return {ok: false, reason: "invalid-save-ability"};
 		const grappleDc = Number(calc.chainGrappleDc) || null;
 		const grappleSucceeded = !wantsGrapple || grappleSaveTotal == null || Number(grappleSaveTotal) < grappleDc;
 		const grappled = wantsGrapple && grappleSucceeded;
 		const restraintDc = calc.chainRestrainDc || null;
-		const restraintSuccess = grappled && (!isRestrain || restraintSaveTotal == null || Number(restraintSaveTotal) < restraintDc);
+		const restraintSuccess = isRestrain && grappled
+			&& (restraintSaveTotal == null || Number(restraintSaveTotal) < restraintDc);
 		const finalShoveDistance = shoveDistance == null ? (isShove ? (calc.chainShoveDistance || 0) : 0) : Number(shoveDistance);
 		const currentDistance = Number(distance ?? existing?.distance ?? 0);
-		const declaredFinalDistance = finalDistance == null
-			? currentDistance + (isShove ? finalShoveDistance : 0)
-			: Number(finalDistance);
-		if (isShove && (finalShoveDistance < 0 || !Number.isFinite(declaredFinalDistance) || declaredFinalDistance < 0 || declaredFinalDistance > range)) {
+		const direction = shoveDirection || existing?.shoveDirection || null;
+		const inferredFinalDistance = direction === "toward"
+			? currentDistance - finalShoveDistance
+			: direction === "lateral"
+				? currentDistance
+				: currentDistance + finalShoveDistance;
+		const declaredFinalDistance = finalDistance == null ? inferredFinalDistance : Number(finalDistance);
+		const expectedFinalDistance = direction === "toward"
+			? currentDistance - finalShoveDistance
+			: direction === "lateral"
+				? currentDistance
+				: currentDistance + finalShoveDistance;
+		if (isControlShove && !grappled) {
+			// Chain Control is explicitly contingent on the initial grapple. Keep
+			// the target record for the player's confirmed outcome, but never apply
+			// a shove or occupy a chain after a successful save.
+			const target = this.upsertTargetEffect({
+				id,
+				source: "chained-fury",
+				effectType: normalizedEffect,
+				targetName: targetName || name || existing?.targetName || "Target",
+				size,
+				grappled: false,
+				restrained: false,
+				shoved: false,
+				distance: currentDistance,
+				declaredDistance: currentDistance,
+				chainIndex: null,
+				escapeDc: grappleDc,
+				restraintDc,
+				effects: {
+					grapple: {active: false, ability: grappleAbility || "str", dc: grappleDc},
+					shove: {active: false, distance: 0},
+					restraint: {active: false, dc: restraintDc},
+				},
+			});
+			return {
+				ok: !!target,
+				target,
+				grappled: false,
+				restrained: false,
+				shoved: false,
+				grappleSaveSuccess: false,
+				grappleDc,
+				grappleSaveAbility: grappleAbility,
+				restraintSaveSuccess: false,
+				saveDc: restraintDc,
+				controlApplied: false,
+			};
+		}
+		if (isControlShove && (
+			!["away", "toward", "lateral"].includes(direction)
+			|| finalShoveDistance !== 10
+			|| !Number.isFinite(declaredFinalDistance)
+			|| declaredFinalDistance < 0
+			|| declaredFinalDistance > range
+			|| Math.abs(declaredFinalDistance - expectedFinalDistance) > 0.001
+		)) {
 			return {ok: false, reason: "shove-out-of-range", range, finalDistance: declaredFinalDistance};
 		}
 		const target = this.upsertTargetEffect({
@@ -62970,11 +63098,11 @@ class CharacterSheetState {
 			size,
 			grappled,
 			restrained: isRestrain && restraintSuccess,
-			shoved: isShove,
+			shoved: isShove && (!isControlShove || grappled),
 			shoveDistance: finalShoveDistance,
-			shoveDirection: shoveDirection || existing?.shoveDirection || null,
+			shoveDirection: direction,
 			declaredDistance: declaredFinalDistance,
-			distance: isShove ? declaredFinalDistance : (distance == null && existing ? existing.distance : (distance == null ? 0 : distance)),
+			distance: isShove && (!isControlShove || grappled) ? declaredFinalDistance : (distance == null && existing ? existing.distance : (distance == null ? 0 : distance)),
 			recurringDamage: isRestrain && restraintSuccess && calc.chainRestrainDamage
 				? {
 					amount: calc.chainRestrainDamage,
@@ -62987,7 +63115,7 @@ class CharacterSheetState {
 			restraintDc,
 			effects: {
 				grapple: {active: grappled, ability: grappleAbility || "str", dc: grappleDc},
-				shove: {active: isShove, distance: finalShoveDistance},
+				shove: {active: isShove && (!isControlShove || grappled), distance: isShove && (!isControlShove || grappled) ? finalShoveDistance : 0},
 				restraint: {active: restraintSuccess, dc: restraintDc},
 			},
 		});
@@ -63002,14 +63130,18 @@ class CharacterSheetState {
 			restraintSaveSuccess: restraintSuccess,
 			saveDc: restraintDc,
 			finalDistance: declaredFinalDistance,
-			shoveDirection: shoveDirection || null,
+			shoveDirection: direction,
+			controlApplied: isControlShove && grappled,
 		};
 	}
 
 	applyTargetEffect (opts = {}) {
-		if (opts?.source === "chained-fury" || opts?.targetEffect?.source === "chained-fury" || opts?.effectType === "chained-fury") {
-			return this.applyChainedTargetEffect({
+		const source = String(opts?.source || opts?.targetEffect?.source || "").toLowerCase();
+		const handlerName = TARGET_EFFECT_HANDLER_METHODS[source];
+		if (handlerName && typeof this[handlerName] === "function") {
+			return this[handlerName]({
 				...opts,
+				source,
 				effect: opts.effect || opts.targetEffect?.effect || "target",
 			});
 		}
@@ -63064,18 +63196,26 @@ class CharacterSheetState {
 		const dragMultiplier = canMoveFullSpeed || grapplerRank - targetRank >= 2 ? 1 : 2;
 		const movementCost = delta * dragMultiplier;
 		const round = Number(this._data.combatRound) || 0;
-		if (this._data.chainedMovementUsage.round !== round) {
-			this._data.chainedMovementUsage = {round, movementUsed: 0, bonusActionUsed: false, doubled: false};
-		}
+		const priorUsage = this._data.chainedMovementUsage || {};
+		const usage = priorUsage.round === round
+			? {...priorUsage}
+			: {round, movementUsed: 0, bonusActionUsed: false, doubled: false};
 		const speed = Number(this.getSpeed?.("walk")) || 30;
 		const doubleMovement = !!options.doubleMovement;
-		if (doubleMovement && this._data.chainedMovementUsage.bonusActionUsed) return {ok: false, reason: "bonus-action-used"};
-		if (doubleMovement) this._data.chainedMovementUsage.doubled = true;
-		const allowance = speed * (this._data.chainedMovementUsage.doubled ? 2 : 1);
-		const available = allowance - this._data.chainedMovementUsage.movementUsed;
+		const isNewRound = priorUsage.round !== round;
+		if (doubleMovement && (usage.bonusActionUsed || (!isNewRound && !this.isActionTypeAvailable("bonus")))) return {ok: false, reason: "bonus-action-used"};
+		const doubled = usage.doubled || doubleMovement;
+		const allowance = speed * (doubled ? 2 : 1);
+		const available = allowance - (Number(usage.movementUsed) || 0);
 		if (movementCost > available) return {ok: false, reason: "movement-exceeded", speed, movementCost, available, allowance};
-		this._data.chainedMovementUsage.movementUsed += movementCost;
-		if (doubleMovement) this._data.chainedMovementUsage.bonusActionUsed = true;
+		usage.doubled = doubled;
+		usage.movementUsed = (Number(usage.movementUsed) || 0) + movementCost;
+		if (doubleMovement) {
+			usage.bonusActionUsed = true;
+			if (isNewRound) this.resetActionEconomy();
+			if (!this.consumeActionType("bonus")) return {ok: false, reason: "bonus-action-used"};
+		}
+		this._data.chainedMovementUsage = usage;
 		target.distance = Number(distance);
 		target.declaredDistance = Number(distance);
 		target.movementCost = movementCost;
@@ -63149,19 +63289,31 @@ class CharacterSheetState {
 					target.chainIndex = occupants.indexOf(target);
 				}
 				if (!grappled) target.chainIndex = null;
+				target.grappled = grappled;
+				target.effects.grapple.active = grappled;
 				target.escapeDc = calc.chainGrappleDc || null;
 				target.effects.grapple.dc = calc.chainGrappleDc || null;
 				target.restraintDc = calc.chainRestrainDc || null;
 				target.effects.restraint.dc = calc.chainRestrainDc || null;
-				if (target.restrained && !calc.hasChainImprisonment) {
+				// Ordinary grapples never carry the restraint layer. This also
+				// repairs saves written by the earlier implementation, which
+				// accidentally marked every grapple as restrained.
+				if (target.effectType !== "restrain") {
+					target.restrained = false;
+					target.effects.restraint.active = false;
+					target.recurringDamage = null;
+				} else if (target.restrained && (!grappled || !calc.hasChainImprisonment)) {
 					this._releaseChainedTargetEffect(target);
 				} else if (target.restrained) {
+					target.effects.restraint.active = true;
 					target.recurringDamage = {
 						amount: Number(calc.chainRestrainDamage) || 0,
 						type: "force",
 						when: "start of each of its turns",
 					};
 				}
+				target.restrained = !!target.effects.restraint.active && grappled && target.effectType === "restrain";
+				target.shoved = !!target.effects.shove.active;
 			}
 		}
 	}
@@ -66612,6 +66764,7 @@ class CharacterSheetState {
 		this.clearStatesOnRest("short");
 		this.clearChainedFuryTargets();
 		this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
+		this.resetActionEconomy();
 
 		// Recover short rest resources (includes Ki/Focus Points)
 		this.recoverResources("short");

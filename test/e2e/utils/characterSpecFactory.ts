@@ -676,7 +676,21 @@ export function describeCharacter (spec: CharacterSpec): void {
 						return cs?._state?.getTargetEffects?.() ?? [];
 					});
 					expect(roundTrip.some((t: any) => t.id === applied.id)).toBe(true);
-					expect(await charSheet.releaseChainedTarget(applied.id)).toBe(true);
+					if (tl.effect === "restrain") {
+						const branches = await charSheet.probeChainedFuryLifecycleBranches(applied.id);
+						expect(branches).toEqual({
+							targetOnly: true,
+							failedGrapple: true,
+							failedControl: true,
+							recurringDamage: true,
+							distributedMovement: true,
+							outOfRangeRelease: true,
+							teardown: true,
+						});
+						expect((await charSheet.getChainedTargets()).some(t => t.id === applied.id)).toBe(false);
+					} else {
+						expect(await charSheet.releaseChainedTarget(applied.id)).toBe(true);
+					}
 					expect((await charSheet.getChainedTargets()).some(t => t.id === applied.id)).toBe(false);
 				}
 			});

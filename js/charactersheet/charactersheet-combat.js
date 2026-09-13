@@ -2100,8 +2100,14 @@ class CharacterSheetCombat {
 	 */
 	async _pOfferTargetEffect (ctx, opt) {
 		const state = this._state;
-		const existing = state.getChainedTargets?.() || [];
-		const trigger = typeof document !== "undefined" ? document.activeElement : null;
+		const source = opt.targetEffect?.source;
+		const existing = state.getTargetEffects?.({source}) || [];
+		const active = typeof document !== "undefined" ? document.activeElement : null;
+		const trigger = active?.isConnected && !active.closest?.(".ve-ui-modal__inner, .ui-modal__inner")
+			? active
+			: [...(document?.querySelectorAll?.(".charsheet__attack-item") || [])]
+				.find(row => /spectral chains/i.test(row.textContent || ""))
+				?.querySelector("button");
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `${opt.name} — Choose Target`,
 			isMinHeight0: true,
@@ -2122,8 +2128,8 @@ class CharacterSheetCombat {
 			};
 			const targetOptions = existing.map(t => `<option value="${t.id}">${t.targetName} (${t.size})</option>`).join("");
 			modalInner.innerHTML = `
-				<div class="cs-combat-target-effect" role="form" aria-label="Chained Fury target effect">
-					<p class="ve-small ve-muted">Track the creature hit by your Spectral Chains. Targets remain until released, escaped, moved beyond range, or Rage/Manifest Chains ends.</p>
+				<div class="cs-combat-target-effect" role="form" aria-label="Target effect">
+					<p class="ve-small ve-muted">Track the creature hit by this attack. Targets remain until released, escaped, moved beyond range, or the required active state ends.</p>
 					<label class="ve-form-label">Existing target
 						<select class="form-control" data-target-id aria-label="Existing chained target">
 							<option value="">New target</option>${targetOptions}
@@ -2176,13 +2182,15 @@ class CharacterSheetCombat {
 			modalInner.querySelector("[data-act=apply]").addEventListener("click", () => {
 				const targetId = targetSelect.value || undefined;
 				const restraintSave = modalInner.querySelector("[data-restraint-save]")?.value;
-				const result = state.applyChainedTargetEffect({
+				const result = state.applyTargetEffect({
 					targetId,
+					source,
 					targetName: nameInput.value.trim() || undefined,
 					size: sizeInput.value,
 					distance: Number(distanceInput.value),
 					riderId: opt.id,
-					effect: opt.targetEffect?.effect || "grapple",
+					targetEffect: opt.targetEffect,
+					effect: opt.targetEffect?.effect || "target",
 					grappleSaveAbility: modalInner.querySelector("[data-grapple-ability]")?.value || "str",
 					grappleSaveTotal: modalInner.querySelector("[data-grapple-save]")?.value === "" ? null : Number(modalInner.querySelector("[data-grapple-save]")?.value),
 					restraintSaveTotal: restraintSave === "" || restraintSave == null ? null : Number(restraintSave),
@@ -6916,6 +6924,13 @@ class CharacterSheetCombat {
 		const occupied = this._state.getChainedTargetState?.().used ?? targets.filter(it => it.chainIndex != null).length;
 		summary.textContent = `${occupied}/${calc.chainCount || 0} chains occupied · reach ${calc.chainRange || 0} ft.`;
 		container.appendChild(summary);
+		if (occupied >= Number(calc.chainCount || 0)) {
+			const warning = document.createElement("div");
+			warning.className = "ve-small cs-combat-target-warning mb-2";
+			warning.setAttribute("role", "status");
+			warning.textContent = "Chain capacity reached — release a grapple before adding another.";
+			container.appendChild(warning);
+		}
 		for (const target of targets) {
 			const row = document.createElement("div");
 			row.className = "charsheet__chained-target-row ve-flex-v-center ve-flex-wrap gap-1";

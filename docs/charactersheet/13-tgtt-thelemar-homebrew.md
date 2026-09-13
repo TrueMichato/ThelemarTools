@@ -203,7 +203,7 @@ exactly the RAW "they vanish when your rage ends". It inherits Rage's
 | Level | Feature | Implementation |
 |---|---|---|
 | 3 | Manifest Chains | `manifestChains` toggle; a `grantedAttacks` descriptor (`Spectral Chains`, finesse, force, `reachBonus`, `requiresState: "manifestChains"`) that appears in the Combat attack list with a `✨ Feature` badge; `attackOnHitOptions` `chains-grapple` / `chains-shove`; grapple size +1 |
-| 6 | Chain Imprisonment | `countsAsMagical` on the chains (renders a `✧ Magical` badge); `chains-restrain` on-hit rider with a STR save at `8 + PB + STR` and recurring damage |
+| 6 | Chain Imprisonment | `countsAsMagical` on the chains (renders a `✧ Magical` badge); `chains-restrain` on-hit rider with a STR save at `8 + PB + CON` and recurring damage equal to current Barbarian level |
 | 10 | Chain Control | grapple size bonus → +2; `chains-control-shove` on-hit rider |
 | 14 | Unchained Fury | `chainCount` 2 → 4; `attackActionAllowances` entry (3 attacks with the chains per Attack action); `grappleSizeUnlimited` (no size cap) |
 

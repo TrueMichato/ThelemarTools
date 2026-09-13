@@ -1998,7 +1998,8 @@
 	.charsheet__chained-target-row > *,
 	.pm-chained-target > * {
 		margin-left: 0 !important;
-		width: 100%;
+		width: 100% !important;
+		min-width: 0;
 	}
 
 	.charsheet__chained-target-row button,
@@ -2012,7 +2013,24 @@
 
 	.cs-combat-target-effect {
 		width: min(100%, 32rem);
-		padding-bottom: env(safe-area-inset-bottom);
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: .65rem;
+		padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px)) !important;
+	}
+
+	.cs-combat-target-effect > .ve-form-label {
+		display: flex;
+		flex-direction: column;
+		width: 100%;
+		gap: .25rem;
+	}
+
+	.cs-combat-target-effect .form-control,
+	.cs-combat-target-effect input[type="number"] {
+		width: 100% !important;
+		min-width: 0;
+		min-height: 44px;
 	}
 
 	.cs-combat-target-effect > .ve-flex-h-right {
@@ -2020,11 +2038,13 @@
 		grid-template-columns: 1fr;
 		gap: .5rem;
 		margin-left: 0 !important;
+		padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
 	}
 
 	.cs-combat-target-effect > .ve-flex-h-right > * {
 		margin-left: 0 !important;
-		width: 100%;
+		width: 100% !important;
+		min-height: 44px;
 	}
 
 	.cs-combat-target-warning {

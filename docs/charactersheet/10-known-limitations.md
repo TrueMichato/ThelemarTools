@@ -1099,4 +1099,4 @@ warning.
 
 ## Chained Fury status
 
-The sheet tracks Chained Fury target identity and active effects in persisted state. Movement uses current walking speed and normal grapple drag cost; Unchained Fury removes the extra drag surcharge but does not remove movement accounting. Optional bonus-action doubling is tracked per combat round. Combat and Play Mode expose keyboard-reachable, 44px target controls with safe-area spacing on mobile.
+The sheet tracks Chained Fury target identity and active effects in persisted state. Movement uses current walking speed and normal grapple drag cost; Unchained Fury removes the extra drag surcharge but does not remove movement accounting. Optional bonus-action doubling is tracked per combat round. Combat and Play Mode expose keyboard-reachable, 44px target controls; narrow layouts stack target fields and actions, while modal footers reserve a minimum bottom clearance in addition to any device safe-area inset.
