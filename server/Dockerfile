@@ -24,7 +24,10 @@ LABEL org.opencontainers.image.source="https://github.com/TrueMichato/ThelemarTo
 ENV NODE_ENV=production
 WORKDIR /app
 
-RUN groupadd --system --gid 10001 hub \
+RUN apt-get update \
+	&& apt-get install --yes --no-install-recommends libpcre2-8-0=10.42-1+deb12u1 \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& groupadd --system --gid 10001 hub \
 	&& useradd --system --uid 10001 --gid hub --home-dir /app --shell /usr/sbin/nologin hub \
 	&& rm -rf \
 		/usr/local/lib/node_modules \

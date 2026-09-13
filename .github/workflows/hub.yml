@@ -57,6 +57,15 @@ jobs:
       - name: Build BFF image
         run: docker build -f server/Dockerfile --build-arg VERSION=${GITHUB_SHA} --build-arg VCS_REF=${GITHUB_SHA} -t thelemartools-hub-bff:${GITHUB_SHA} .
 
+      - name: Verify patched PCRE2 runtime
+        env:
+          HUB_BFF_IMAGE: thelemartools-hub-bff:${{ github.sha }}
+          HUB_MIN_PCRE2_VERSION: 10.42-1+deb12u1
+        run: |
+          actual="$(docker run --rm --entrypoint dpkg-query "$HUB_BFF_IMAGE" -W -f='${Version}\n' libpcre2-8-0)"
+          docker run --rm --entrypoint dpkg "$HUB_BFF_IMAGE" --compare-versions "$actual" ge "$HUB_MIN_PCRE2_VERSION"
+          printf 'libpcre2-8-0 %s (minimum %s)\n' "$actual" "$HUB_MIN_PCRE2_VERSION"
+
       - name: Export immutable image artifact
         run: |
           docker save --output hub-bff-image.tar "thelemartools-hub-bff:${GITHUB_SHA}"
