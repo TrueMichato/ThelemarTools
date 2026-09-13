@@ -1,6 +1,27 @@
 import {HubStoreError} from "./hub-store-error.js";
 import {getDerivedStats} from "./character-derived-stats.js";
 import {resolveCarryAuthority} from "../../js/hub/hub-carry-authority.js";
+import {
+	ABILITY_KEYS,
+	MOVEMENT_KEYS,
+	PROJECTION_FIELD_KEYS,
+	PROJECTION_OVERRIDE_MODES,
+	PROJECTION_PRESET_KEYS,
+	SKILL_KEYS,
+	SKILL_RANKS,
+	SKILL_TO_ABILITY,
+} from "../../js/hub/hub-character-projection-contract.js";
+
+export {
+	ABILITY_KEYS,
+	MOVEMENT_KEYS,
+	PROJECTION_FIELD_KEYS,
+	PROJECTION_OVERRIDE_MODES,
+	PROJECTION_PRESET_KEYS,
+	SKILL_KEYS,
+	SKILL_RANKS,
+	SKILL_TO_ABILITY,
+};
 
 /**
  * Authorization-scoped character projections (ADR 0011).
@@ -25,63 +46,6 @@ const MAX_EXHAUSTION = 10;
 const MAX_QUANTITY = 1_000_000;
 const MAX_WEIGHT = 1_000_000;
 
-export const ABILITY_KEYS = Object.freeze(["str", "dex", "con", "int", "wis", "cha"]);
-export const MOVEMENT_KEYS = Object.freeze(["walk", "fly", "swim", "climb", "burrow"]);
-export const SKILL_RANKS = Object.freeze(["none", "half", "proficient", "expertise"]);
-
-/**
- * Skill key -> governing ability. Mirrors
- * `PartyTrackerCharacterSerializer.SKILL_TO_ABILITY` so a peer profile and the Party
- * Tracker cannot disagree about a character's modifiers.
- */
-export const SKILL_TO_ABILITY = Object.freeze({
-	athletics: "str",
-	acrobatics: "dex",
-	sleightOfHand: "dex",
-	stealth: "dex",
-	arcana: "int",
-	history: "int",
-	investigation: "int",
-	nature: "int",
-	religion: "int",
-	animalHandling: "wis",
-	insight: "wis",
-	medicine: "wis",
-	perception: "wis",
-	survival: "wis",
-	deception: "cha",
-	intimidation: "cha",
-	performance: "cha",
-	persuasion: "cha",
-	cooking: "wis",
-	culture: "wis",
-	endurance: "con",
-	engineering: "int",
-	harvesting: "dex",
-	linguistics: "wis",
-	might: "str",
-});
-
-export const SKILL_KEYS = Object.freeze(Object.keys(SKILL_TO_ABILITY));
-
-export const PROJECTION_FIELD_KEYS = Object.freeze([
-	"identity",
-	"species",
-	"classes",
-	"abilities",
-	"saves",
-	"skills",
-	"ac",
-	"hp",
-	"speed",
-	"senses",
-	"conditions",
-	"diseases",
-	"exhaustion",
-	"inventorySummary",
-	"carrySummary",
-]);
-
 const TABLE_PRESET_FIELDS = Object.freeze([
 	"identity",
 	"species",
@@ -104,9 +68,6 @@ export const PROJECTION_PRESETS = Object.freeze({
 	open: PROJECTION_FIELD_KEYS,
 	private: Object.freeze([]),
 });
-
-export const PROJECTION_PRESET_KEYS = Object.freeze(Object.keys(PROJECTION_PRESETS));
-export const PROJECTION_OVERRIDE_MODES = Object.freeze(["share", "hide", "replace"]);
 
 export const DEFAULT_PROJECTION_POLICY = Object.freeze({
 	version: PROJECTION_POLICY_VERSION,

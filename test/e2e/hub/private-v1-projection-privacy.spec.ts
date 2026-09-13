@@ -83,6 +83,11 @@ test("character sharing policy narrows peer projections and survives a stale wri
 		// preview, with no raw policy JSON on screen.
 		await owner.openCharacterSheet({campaignId, characterId: character.id, name: "Mira"});
 		await owner.expectSharingControls({previewText: "steady"});
+		await owner.expectSavedSharingPreview({
+			sharedText: "4 of 15 details shared · 1 shown instead.",
+			replacedText: "steady",
+			omittedText: "Ability scores",
+		});
 
 		// Drive the real controls and the real Save button. A direct API helper attaches
 		// its own mutation headers, so it cannot catch a client that omits CSRF or an
@@ -104,6 +109,26 @@ test("character sharing policy narrows peer projections and survives a stale wri
 			expect(typeof save.proficient).toBe("boolean");
 			expect(Number.isInteger(save.modifier)).toBe(true);
 		}
+
+		await peer.expectSharedProfile({
+			campaignId,
+			characterName: "Mira",
+			expectedText: ["Ability scores", "STR 10", "Saving throws", "Hit points", "steady"],
+			forbiddenText: ["Sharing Owner", "backstory", "projectionRevision"],
+		});
+
+		await owner.changeSharingPresetAndSave({preset: "private", expectPreviewText: "Nothing is shared with other players."});
+		const privateProjection = await peer.getCharacterProjection(character.id);
+		expect(privateProjection.kind).toBe("peer_profile");
+		expect(privateProjection.data).toEqual({});
+		const privateSnapshot = await peer.getCampaignSnapshot(campaignId);
+		expect(privateSnapshot.roster.some((entry: any) => entry.characterId === character.id)).toBe(false);
+		await peer.expectSharedProfile({
+			campaignId,
+			characterName: "Unnamed Character",
+			expectedText: ["This player is not sharing any profile details."],
+			forbiddenText: ["Mira", "Sharing Owner", "steady"],
+		});
 	} finally {
 		await Promise.all([dmContext.close(), ownerContext.close(), peerContext.close(), secondDeviceContext.close()]);
 	}

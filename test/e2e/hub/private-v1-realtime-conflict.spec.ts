@@ -19,23 +19,39 @@ test("character edits and rolls update live while a second device is safely fenc
 	};
 	const dmContext = await browser.newContext(contextOptions);
 	const playerContext = await browser.newContext(contextOptions);
+	const peerContext = await browser.newContext(contextOptions);
 	const otherDeviceContext = await browser.newContext(contextOptions);
 	try {
 		const dm = new HubCampaignPage(await dmContext.newPage());
 		const player = new HubCampaignPage(await playerContext.newPage());
+		const peer = new HubCampaignPage(await peerContext.newPage());
 		const otherDevice = new HubCampaignPage(await otherDeviceContext.newPage());
 
 		await dm.signInSynthetic({providerSubject: "realtime-dm", displayName: "Realtime DM", secret});
 		await player.signInSynthetic({providerSubject: "realtime-player", displayName: "Mira Thorn", secret});
+		await peer.signInSynthetic({providerSubject: "realtime-peer", displayName: "Other Player", secret});
 		await otherDevice.signInSynthetic({providerSubject: "realtime-player", displayName: "Mira Thorn", secret});
 		const campaignId = await dm.createCampaign("Realtime Table E2E");
-		const invite = await dm.createInviteViaApi(campaignId);
-		await player.redeemInviteTokenViaApi(invite);
+		await player.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
+		await peer.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
 		const character = await player.createCharacter({campaignId, name: "Mira"});
 		await dm.gotoCampaign(campaignId);
+		await peer.gotoCampaign(campaignId);
 
-		await player.editCharacterHpAndRollInitiative({campaignId, characterId: character.id, name: "Mira", hp: 11});
+		await player.editCharacterHpAndRollInitiative({
+			campaignId,
+			characterId: character.id,
+			name: "Mira",
+			hp: 11,
+			rollVisibility: "actor_and_dm",
+		});
 		await dm.expectLiveCharacterUpdateAndRoll({characterName: "Mira", hp: 11});
+		const getPrivateRolls = async (page: HubCampaignPage) => (await page.getEvents(campaignId))
+			.filter(event => event.type === "roll.logged" && event.aggregateId === character.id && event.visibility === "actor_and_dm");
+		expect(await getPrivateRolls(player)).toHaveLength(1);
+		expect(await getPrivateRolls(dm)).toHaveLength(1);
+		expect(await getPrivateRolls(peer)).toHaveLength(0);
+		await expect(peer.page.locator("#campaign-activity-list")).not.toContainText("Initiative");
 
 		await otherDevice.openCharacterSheet({campaignId, characterId: character.id, name: "Mira"});
 		await otherDevice.editCharacterHpAndResolveDeviceConflict({
@@ -60,6 +76,7 @@ test("character edits and rolls update live while a second device is safely fenc
 		await Promise.all([
 			pCloseContext(dmContext),
 			pCloseContext(playerContext),
+			pCloseContext(peerContext),
 			pCloseContext(otherDeviceContext),
 		]);
 	}

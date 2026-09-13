@@ -12,6 +12,7 @@ import {
 	getOwnerMembershipId,
 	getProjectionId,
 	getProjectionOwnerAccountId,
+	getProjectionProfileRows,
 	getProjectionName,
 	getProjectionSummary,
 	getProjectionView,
@@ -1461,7 +1462,7 @@ function renderPartyRoster ({campaignId, characters, members, session, isDm, ros
 	list.replaceChildren(...characters.map(character => {
 		const characterId = getProjectionId(character);
 		const canOpen = isCanonicalProjection(character) && (isDm || getProjectionOwnerAccountId(character) === session.account.id);
-		const row = document.createElement(canOpen ? "a" : "div");
+		const row = document.createElement(canOpen ? "a" : "summary");
 		row.className = "hub-data-row";
 		if (canOpen) {
 			row.href = `charactersheet.html?id=${encodeURIComponent(characterId)}&hubCampaign=${encodeURIComponent(campaignId)}`;
@@ -1484,8 +1485,42 @@ function renderPartyRoster ({campaignId, characters, members, session, isDm, ros
 			open.className = "hub-data-row__open";
 			open.textContent = "Open sheet";
 			row.append(open);
+			return row;
 		}
-		return row;
+
+		const open = document.createElement("span");
+		open.className = "hub-data-row__open";
+		open.textContent = "View shared profile";
+		row.append(open);
+
+		const details = document.createElement("details");
+		details.className = "hub-shared-profile";
+		details.append(row);
+		const profile = document.createElement("div");
+		profile.className = "hub-shared-profile__body";
+		const fields = getProjectionProfileRows(character);
+		if (!fields.length) {
+			const empty = document.createElement("p");
+			empty.className = "hub-shared-profile__empty";
+			empty.textContent = "This player is not sharing any profile details.";
+			profile.append(empty);
+		} else {
+			const heading = document.createElement("p");
+			heading.className = "hub-shared-profile__intro";
+			heading.textContent = "Server-authorized profile shared with players";
+			const values = document.createElement("dl");
+			values.className = "hub-shared-profile__list";
+			for (const field of fields) {
+				const term = document.createElement("dt");
+				term.textContent = field.label;
+				const description = document.createElement("dd");
+				description.textContent = field.value;
+				values.append(term, description);
+			}
+			profile.append(heading, values);
+		}
+		details.append(profile);
+		return details;
 	}));
 }
 
