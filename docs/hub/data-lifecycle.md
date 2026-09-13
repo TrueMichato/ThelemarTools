@@ -23,6 +23,7 @@
 | Party inventory | Shared assets | campaign members; mutations role/ownership controlled | campaign lifetime |
 | Audit entries | Security/admin evidence | BFF/operators; no public API | retained; actor/campaign refs nullable |
 | Domain events | Ordered replay/history | visibility-filtered | retained until campaign/account deletion |
+| Campaign Overview activity window | Presentation cache of authorized domain events | current signed-in campaign page | memory only; newest visible page reloads after refresh, while explicitly loaded older pages remain for the page lifetime |
 | Character Sheet realtime delivery | Ordered metadata/lifecycle handoff for the open owned character | current authenticated campaign page only | memory only; fenced and discarded on switch/detach/access loss/logout/terminal page hide; temporarily retained across BFCache suspension |
 | Outbox rows | Technical delivery | BFF/operators | published 7-day cleanup approved, not implemented |
 | Command receipts | Idempotent retry | BFF/store | 24 hours |
@@ -82,7 +83,8 @@
   carry `operationWatermark`; shared projection invalidations remain metadata-only.
 - Browser cache/service worker must never cache authenticated API/auth responses.
 - The Character Sheet realtime coordinator keeps no durable event queue or payload cache. It passes only the
-  open target's projection metadata and explicit-recipient semantic-operation lifecycle payloads through
+  open target's projection metadata, explicit-recipient semantic-operation lifecycle payloads, and minimized
+  XP/item recipient notices through
   ephemeral callbacks serialized behind saves. Payloads are not written to local/session storage, recovery
   artifacts, telemetry, or logs. A remote archive/move or missing canonical ref serializes teardown behind
   already-queued delivery. BFCache restoration resumes the same in-memory client/cursor rather than starting a
@@ -90,6 +92,13 @@
 
 The private pilot must disclose DM full-sheet access and account/export/deletion behavior before users upload
 characters.
+
+Campaign activity disappearance must be diagnosed separately from retention. Domain events and audit records are
+durable until campaign/account deletion; published outbox cleanup does not delete them. Campaign Overview reads
+the newest authorized history page, offers backward pagination, and preserves loaded older rows while refreshing
+or reconnecting. A projection-policy revision deliberately replaces that cache from the server so activity that
+is no longer authorized cannot survive locally. An empty privacy-filtered scan window is reported as such and is
+not presented as deleted or nonexistent history.
 
 ## Creation and update
 

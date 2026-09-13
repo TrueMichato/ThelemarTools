@@ -92,6 +92,8 @@ describe("campaign hub pages", () => {
 			"campaign-pending-actions-empty",
 			"campaign-pending-transfers-empty",
 			"campaign-activity-empty",
+			"campaign-activity-status",
+			"campaign-activity-load-earlier",
 			"campaign-invite-form-status",
 			"campaign-action-form-status",
 			"campaign-transfer-form-status",
@@ -186,8 +188,11 @@ describe("campaign hub pages", () => {
 
 	it("renders a named inbox, recent activity, and copyable invite result", () => {
 		const source = read("js/hub/hub-page.js");
-		expect(source).toContain("api.pListEvents({");
-		expect(source).toContain("new HubRealtimeClient({campaignId})");
+		expect(source).toContain("api.pListEventPage({");
+		expect(source).toContain("beforeSequence:");
+		expect(source).not.toContain("snapshot.lastSequence - 50");
+		expect(source).toContain("No additional visible activity in this window");
+		expect(source).toContain("new HubRealtimeClient({campaignId, initialLastSequence: snapshot.lastSequence})");
 		expect(source).toContain("realtime.on(\"event\", event =>");
 		expect(source).toContain("realtime.on(\"cursor\", baseline =>");
 		// ADR 0011: the page must not read character data off an event payload; every

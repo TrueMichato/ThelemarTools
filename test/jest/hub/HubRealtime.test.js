@@ -443,6 +443,62 @@ describe("hub realtime", () => {
 			expect(client.getConnectionState().state).toBe("live");
 		});
 
+		it("delivers award events buffered during a periodic resync", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			const events = [];
+			const client = new HubRealtimeClient({campaignId: "cmp", location: {protocol: "https:", host: "tools.example"}});
+			client._socket = {readyState: 1, send () {}};
+			client.on("event", event => events.push(event));
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 20},
+				characterRefs: [],
+				events: [],
+				replay: {scannedThroughSequence: 20, hasMore: false},
+			});
+
+			client.requestResync();
+			const xp = {id: "xp-21", sequence: 21, type: "xp.granted"};
+			const item = {id: "item-22", sequence: 22, type: "item.granted"};
+			client._handleMessage({type: "event", event: xp});
+			client._handleMessage({type: "event", event: item});
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 22},
+				characterRefs: [],
+				events: [xp, item],
+				replay: {scannedThroughSequence: 22, hasMore: false},
+			});
+
+			expect(events).toEqual([xp, item]);
+		});
+
+		it("starts replay after an HTTP-loaded activity baseline", async () => {
+			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
+			const sent = [];
+			const events = [];
+			const client = new HubRealtimeClient({
+				campaignId: "cmp",
+				initialLastSequence: 40,
+				location: {protocol: "https:", host: "tools.example"},
+			});
+			client._socket = {readyState: 1, send: raw => sent.push(JSON.parse(raw))};
+			client.on("event", event => events.push(event));
+
+			client.requestResync();
+			const xp = {id: "xp-41", sequence: 41, type: "xp.granted"};
+			client._handleMessage({
+				type: "resync_complete",
+				cursor: {campaignId: "cmp", lastSequence: 41},
+				characterRefs: [],
+				events: [xp],
+				replay: {scannedThroughSequence: 41, hasMore: false},
+			});
+
+			expect(sent).toEqual([{type: "resync", afterSequence: 40}]);
+			expect(events).toEqual([xp]);
+		});
+
 		it("restarts a malformed replay chain without stranding buffered live events", async () => {
 			const {HubRealtimeClient} = await import("../../../js/hub/hub-realtime-client.js");
 			const sent = [];

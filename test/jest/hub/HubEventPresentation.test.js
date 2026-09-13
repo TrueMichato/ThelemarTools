@@ -8,13 +8,41 @@ import {
 	enrichEventPayload,
 	redactTransferEventForViewer,
 } from "../../../server/src/hub-event-snapshots.js";
-import {renderHubActivityRows} from "../../../js/hub/hub-activity-render.js";
+import {
+	hasHubActivityAuthorizationChanged,
+	mergeHubActivityEvents,
+	renderHubActivityRows,
+} from "../../../js/hub/hub-activity-render.js";
 import {MemoryHubStore} from "../../../server/src/memory-hub-store.js";
 import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
 import {jest} from "@jest/globals";
 import fs from "node:fs";
 
 describe("campaign activity event presentation", () => {
+	it("replaces cached activity when projection authorization changes", () => {
+		const previousCharacters = [{
+			kind: "peer_profile",
+			id: "character-1",
+			projectionRevision: 2,
+			data: {identity: {name: "Visible before"}},
+		}];
+		const nextCharacters = [{
+			kind: "peer_profile",
+			id: "character-1",
+			projectionRevision: 3,
+			data: {},
+		}];
+		const stale = {id: "stale", sequence: 1, type: "spell.used"};
+		const authorized = {id: "authorized", sequence: 2, type: "roll.logged"};
+
+		expect(hasHubActivityAuthorizationChanged({previousCharacters, nextCharacters})).toBe(true);
+		expect(mergeHubActivityEvents({
+			currentEvents: [stale],
+			pageEvents: [authorized],
+			isAuthorizationChanged: true,
+		})).toEqual([authorized]);
+	});
+
 	it("keeps lifecycle snapshots durable across archive, move, detach, and public deletion", async () => {
 		const store = new MemoryHubStore();
 		const owner = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "activity-owner", displayName: "Owner"});
@@ -399,6 +427,43 @@ describe("campaign activity event presentation", () => {
 		expect(second.replay).toEqual({scannedThroughSequence: 502, hasMore: false});
 	});
 
+	it("pages retained activity backward past a hidden recent tail", async () => {
+		const store = new MemoryHubStore();
+		store._campaigns.set("campaign", {id: "campaign", status: "active"});
+		store._memberships.set("campaign::player", {campaignId: "campaign", accountId: "player", role: "player", status: "active"});
+		store._appendEvent({
+			campaignId: "campaign",
+			actorAccountId: "dm",
+			type: "xp.granted",
+			aggregateType: "character",
+			aggregateId: "character",
+			visibility: "explicit_accounts",
+			visibleAccountIds: ["player"],
+			payload: {amount: 100, reason: "First session", xp: 100},
+		});
+		for (let i = 0; i < 60; ++i) {
+			store._appendEvent({
+				campaignId: "campaign",
+				actorAccountId: "dm",
+				type: "invite.created",
+				aggregateType: "invite",
+				aggregateId: `invite-${i}`,
+				visibility: "dm_only",
+				payload: {},
+			});
+		}
+
+		const page = await store.pListVisibleEventPage({
+			accountId: "player",
+			campaignId: "campaign",
+			beforeSequence: 62,
+			limit: 8,
+		});
+
+		expect(page.events.map(event => event.type)).toEqual(["xp.granted"]);
+		expect(page.history).toEqual({scannedBackThroughSequence: 1, hasMore: false});
+	});
+
 	it("keeps large memory cursors stack-safe and scans only bounded raw replay pages", async () => {
 		const store = new MemoryHubStore();
 		store._campaigns.set("campaign", {id: "campaign", status: "active"});
@@ -493,8 +558,34 @@ describe("campaign activity event presentation", () => {
 			targetCharacterId: "character",
 			effect: {type: "healing", amount: 8, context: "Cure Wounds"},
 		}).details).toContain("Effect: Cure Wounds: 8 healing");
-		expect(normalize("xp.granted", {amount: 250, xp: 900}, "character").details).toEqual(["Amount: 250 XP", "Total: 900 XP"]);
-		expect(normalize("item.granted", {entry: {item: {name: "<b>Moon Blade</b>"}, quantity: 2}}, "character").details).toEqual(["Item: Moon Blade", "Quantity: 2"]);
+		expect(normalize("xp.granted", {
+			amount: 250,
+			xp: 900,
+			reason: `<b>Milestone</b> ${"x".repeat(300)}`,
+		}, "character").details).toEqual([
+			"Amount: 250 XP",
+			"Total: 900 XP",
+			`Reason: Milestone ${"x".repeat(142)}`,
+		]);
+		expect(normalize("item.granted", {
+			entry: {item: {name: "<b>Moon Blade</b>"}, quantity: 2},
+			note: "<script>alert(1)</script> For the road",
+		}, "character").details).toEqual(["Item: Moon Blade", "Quantity: 2", "Reason: alert(1) For the road"]);
+		expect(normalize("spell.used", {
+			spellName: "<b>Fireball</b>",
+			spellSource: "PHB",
+			spellLevel: 3,
+			slotLevel: 5,
+			mode: "spell_slot",
+		}, "character")).toEqual(expect.objectContaining({
+			title: "Nyx cast Fireball.",
+			details: ["Spell level: 3", "Cast at level: 5"],
+		}));
+		expect(normalize("spell.used", {}, "character")).toEqual(expect.objectContaining({
+			title: "Nyx used a spell.",
+			details: [],
+		}));
+		expect(normalize("character.projection.invalidated", {projectionRevision: 2}, "character")).toBeNull();
 		expect(normalize("brew.activated", {version: 4}).details).toContain("Version: 4");
 		expect(normalize("rules.activated", {version: 7}).details).toContain("Version: 7");
 		expect(normalize("transfer.committed", {

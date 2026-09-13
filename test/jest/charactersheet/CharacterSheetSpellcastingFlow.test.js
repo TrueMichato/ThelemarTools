@@ -112,6 +112,21 @@ describe("Spellcasting flow — Bug #2: cast vs. cast-with-metamagic", () => {
 		await spells._castSpell("fb");
 		expect(spells._pChooseActiveMetamagic).toHaveBeenCalledTimes(1);
 	});
+
+	it("saves a committed cantrip with a closed spell-use activity descriptor", async () => {
+		await spells._castSpell("fb", {withMetamagic: false});
+
+		expect(spells._page.saveCharacter).toHaveBeenCalledWith({
+			activity: {
+				type: "spell.used",
+				spellName: "Fire Bolt",
+				spellSource: "XPHB",
+				spellLevel: 0,
+				slotLevel: 0,
+				mode: "cantrip",
+			},
+		});
+	});
 });
 
 describe("Spellcasting flow — Bug #2: sorcery-point refund on a cancelled cast", () => {

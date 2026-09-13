@@ -69,9 +69,26 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 		await player.editCharacterHpAndRollInitiative({campaignId, characterId: character.id, name: "Rowan", hp: 11});
 		await dm.expectLiveCharacterUpdateAndRoll({characterName: "Rowan", hp: 11});
 
-		await dm.grantXp({campaignId, characterName: "Rowan", amount: 250});
+		const xpArrival = player.expectLiveXpAwardArrival({
+			amount: 250,
+			totalXp: 250,
+			reason: "Defeated the Ember Wyrm",
+		});
+		await dm.grantXp({
+			campaignId,
+			characterName: "Rowan",
+			amount: 250,
+			reason: "Defeated the Ember Wyrm",
+		});
+		await xpArrival;
 		expect((await player.getCharacter(character.id)).data.xp).toBe(250);
 		const spellcaster = await player.createCharacter({campaignId, name: "Mira"});
+		const itemArrival = player.expectLiveAwardArrival({
+			itemName: "Longsword",
+			source: "PHB",
+			quantity: 2,
+			reason: "For the Ashen Pass",
+		});
 		await dm.awardCatalogItems({
 			campaignId,
 			characterNames: ["Rowan", "Mira"],
@@ -80,7 +97,14 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 			quantity: 2,
 			note: "For the Ashen Pass",
 		});
-		await player.expectLiveAwardArrival({itemName: "Longsword", source: "PHB", quantity: 2});
+		await itemArrival;
+		await dm.expectActivitySurvivesRefresh({
+			campaignId,
+			expectedText: [
+				"Reason: Defeated the Ember Wyrm",
+				"Reason: For the Ashen Pass",
+			],
+		});
 		expect((await player.getCharacter(character.id)).data.inventory).toEqual(expect.arrayContaining([
 			expect.objectContaining({item: expect.objectContaining({name: "Longsword", source: "PHB"}), quantity: 2}),
 		]));

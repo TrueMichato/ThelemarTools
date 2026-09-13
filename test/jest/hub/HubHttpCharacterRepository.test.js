@@ -142,6 +142,45 @@ describe("HTTP character repository", () => {
 		]);
 	});
 
+	it("persists an explicit spell-use activity even when the character document is unchanged", async () => {
+		const calls = [];
+		const activity = {
+			type: "spell.used",
+			spellName: "Fire Bolt",
+			spellSource: "PHB",
+			spellLevel: 0,
+			slotLevel: 0,
+			mode: "cantrip",
+		};
+		const character = {
+			id: "server-1",
+			campaignId: "campaign-1",
+			revision: 3,
+			data: {name: "Mira"},
+		};
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => structuredClone(character),
+			pAcquireCharacterLease: async () => ({epoch: 7}),
+			pPatchCharacter: async input => {
+				calls.push(input);
+				return {character: structuredClone(character)};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "server-1"});
+
+		await repository.pUpsert({character: {id: "server-1", name: "Mira"}, activity});
+
+		expect(calls).toEqual([expect.objectContaining({
+			characterId: "server-1",
+			baseRevision: 3,
+			leaseEpoch: 7,
+			patches: [],
+			activity,
+		})]);
+	});
+
 	it("keeps campaign characters read-only while signed out", async () => {
 		const repository = new HubHttpCharacterRepository({
 			campaignId: "campaign-1",
@@ -533,6 +572,7 @@ describe("HTTP character repository", () => {
 
 	it("reuses the exact patch key after a lost response", async () => {
 		const keys = [];
+		const activities = [];
 		let attempts = 0;
 		const api = {
 			pGetSession: async () => ({signedIn: true}),
@@ -540,14 +580,46 @@ describe("HTTP character repository", () => {
 			pAcquireCharacterLease: async () => ({epoch: 1}),
 			pPatchCharacter: async input => {
 				keys.push(input.idempotencyKey);
+				activities.push(input.activity);
 				if (++attempts === 1) throw new Error("response lost");
 				return {character: {id: "c", revision: 2, data: {hp: 9}}};
 			},
 		};
 		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
 		await repository.pGet({characterId: "c"});
-		await expect(repository.pUpsert({character: {id: "c", hp: 9}})).rejects.toThrow("response lost");
-		await expect(repository.pUpsert({character: {id: "c", hp: 9}})).resolves.toEqual({id: "c", hp: 9});
+		const activity = {type: "spell.used", spellName: "Shield", spellSource: "PHB", spellLevel: 1, slotLevel: 1, mode: "spell_slot"};
+		await expect(repository.pUpsert({character: {id: "c", hp: 9}, activity})).rejects.toThrow("response lost");
+		await expect(repository.pUpsert({character: {id: "c", hp: 9}, activity})).resolves.toEqual({id: "c", hp: 9});
 		expect(keys[1]).toBe(keys[0]);
+		expect(activities).toEqual([activity, activity]);
+	});
+
+	it("replays a failed spell command before saving a newer snapshot", async () => {
+		const requests = [];
+		let attempts = 0;
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+			pAcquireCharacterLease: async () => ({epoch: attempts + 1}),
+			pPatchCharacter: async input => {
+				requests.push(input);
+				attempts++;
+				if (attempts === 1) throw new Error("response lost");
+				if (attempts === 2) return {character: {id: "c", revision: 2, data: {hp: 9}}};
+				return {character: {id: "c", revision: 3, data: {hp: 8}}};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		await repository.pGet({characterId: "c"});
+		const activity = {type: "spell.used", spellName: "Shield", spellSource: "PHB", spellLevel: 1, slotLevel: 1, mode: "spell_slot"};
+
+		await expect(repository.pUpsert({character: {id: "c", hp: 9, _savedAt: 1}, activity})).rejects.toThrow("response lost");
+		await expect(repository.pUpsert({character: {id: "c", hp: 8, _savedAt: 2}})).resolves.toEqual({id: "c", hp: 8});
+
+		expect(requests).toHaveLength(3);
+		expect(requests[1].idempotencyKey).toBe(requests[0].idempotencyKey);
+		expect(requests[1].activity).toEqual(activity);
+		expect(requests[2].idempotencyKey).not.toBe(requests[0].idempotencyKey);
+		expect(requests[2].activity).toBeNull();
 	});
 });

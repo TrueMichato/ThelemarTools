@@ -315,6 +315,7 @@ class CharacterSheetPage {
 		this._hubRealtime.on("connectionState", state => this._onHubRealtimeConnectionState(state));
 		this._hubRealtime.on("campaignContextChanged", event => this._onHubCampaignContextChanged(event));
 		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
+		this._hubRealtime.on("recipientNotice", notice => this._onHubRecipientNotice(notice));
 		this._hubRealtime.on("rulesChanged", event => { void this._pRefreshHubRules(event); });
 		return true;
 	}
@@ -482,6 +483,24 @@ class CharacterSheetPage {
 			type: "danger",
 			content: `A campaign update could not be applied (${detail?.deliveryType || "update"}). Reload this character to catch up.`,
 		});
+	}
+
+	_onHubRecipientNotice (notice) {
+		if (!notice || !this._currentCharacterId) return false;
+		if (notice.kind === "xp_award") {
+			const total = Number.isFinite(notice.totalXp) ? ` (${notice.totalXp} XP total)` : "";
+			const content = e_({tag: "span", txt: `Received ${notice.amount || 0} XP${total}${notice.reason ? ` — ${notice.reason}` : ""}.`});
+			JqueryUtil.doToast({type: "success", content});
+			this._scheduleHubRealtimeResync({characterId: this._currentCharacterId});
+			return true;
+		}
+		if (notice.kind === "item_award") {
+			const quantity = notice.quantity > 1 ? `${notice.quantity}× ` : "";
+			const content = e_({tag: "span", txt: `Received ${quantity}${notice.itemName || "an item"}${notice.reason ? ` — ${notice.reason}` : ""}.`});
+			JqueryUtil.doToast({type: "success", content});
+			return true;
+		}
+		return false;
 	}
 
 	/** The repository document shape: live state without the transient sheet id. */
@@ -4358,7 +4377,7 @@ class CharacterSheetPage {
 		return nxt;
 	}
 
-	async _saveCurrentCharacter ({isInteractiveConflict = true} = {}) {
+	async _saveCurrentCharacter ({isInteractiveConflict = true, activity = null} = {}) {
 		if (!this._currentCharacterId) return;
 		const saveFence = getCharacterSaveFence(this);
 		const isSaveCurrent = () => isCharacterSaveFenceCurrent({sheet: this, saveFence});
@@ -4385,7 +4404,7 @@ class CharacterSheetPage {
 		if (this._characterRepository.isRescueMirrorEnabled) this._writeActiveCharacterMirror(charData);
 
 		try {
-			const persisted = await this._characterRepository.pUpsert({character: charData});
+			const persisted = await this._characterRepository.pUpsert({character: charData, activity});
 			if (!isSaveCurrent()) return false;
 			if (persisted?.id && persisted.id !== charData.id && this._currentCharacterId === charData.id) {
 				this._currentCharacterId = persisted.id;
@@ -4474,7 +4493,7 @@ class CharacterSheetPage {
 					DataUtil.userDownload("character-live-conflict-recovery", recovery, {fileType: "character-conflict"});
 					return false;
 				}
-				if (choice) return this._saveCurrentCharacter();
+				if (choice) return this._saveCurrentCharacter({activity});
 				this._state.loadFromJson(recovery.server);
 				this._reconcileClassFeatures();
 				this._renderCharacter();
@@ -21613,8 +21632,8 @@ class CharacterSheetPage {
 		});
 	}
 
-	async saveCharacter () {
-		return this._saveCurrentCharacter();
+	async saveCharacter (options = {}) {
+		return this._saveCurrentCharacter(options);
 	}
 
 	/**

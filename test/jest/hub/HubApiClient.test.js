@@ -253,6 +253,49 @@ describe("hub API client", () => {
 		]);
 	});
 
+	it("uses an exclusive backward activity cursor and forwards closed spell activity", async () => {
+		const calls = [];
+		const client = new HubApiClient({
+			fnFetch: async (path, opts = {}) => {
+				calls.push({path, opts});
+				if (path === "/api/session") return getResponse({body: {signedIn: true, csrfToken: "csrf-1"}});
+				if (path.includes("/events?")) return getResponse({body: {events: [], history: {scannedBackThroughSequence: 20, hasMore: true}}});
+				return getResponse({body: {character: {id: "character", revision: 2, data: {}}}});
+			},
+		});
+		await client.pGetSession();
+		await client.pListEventPage({campaignId: "campaign", beforeSequence: 40, limit: 8});
+		const activity = {
+			type: "spell.used",
+			spellName: "Fireball",
+			spellSource: "PHB",
+			spellLevel: 3,
+			slotLevel: 5,
+			mode: "spell_slot",
+		};
+		await client.pPatchCharacter({
+			characterId: "character",
+			baseRevision: 1,
+			leaseEpoch: 2,
+			patches: [],
+			activity,
+			idempotencyKey: "cast",
+		});
+
+		expect(calls[1].path).toBe("/api/campaigns/campaign/events?beforeSequence=40&limit=8");
+		expect(JSON.parse(calls[2].opts.body)).toEqual({
+			baseRevision: 1,
+			leaseEpoch: 2,
+			patches: [],
+			activity,
+		});
+		await expect(client.pListEventPage({
+			campaignId: "campaign",
+			afterSequence: 1,
+			beforeSequence: 40,
+		})).rejects.toThrow(/one event cursor/i);
+	});
+
 	it("sends one idempotent item-award batch", async () => {
 		const calls = [];
 		const client = new HubApiClient({

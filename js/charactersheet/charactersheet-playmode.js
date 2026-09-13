@@ -2044,8 +2044,25 @@ export class CharacterSheetPlayMode {
 				{label: spell.name, icon: "spell", disabled: true},
 				{separator: true},
 			];
-			if (spell.level > 0) menuItems.push({label: "Cast Spell", icon: "concentration", onClick: () => this._castSpell(spell)});
-			if (spell.ritual) menuItems.push({label: "Cast as Ritual", icon: "ritual", onClick: () => { if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level}); this._logActivity("ritual", `Cast ${spell.name} as ritual`); this._renderStatusBar(); }});
+			if (spell.level > 0) {
+				menuItems.push({
+					label: "Cast Spell",
+					icon: "concentration",
+					onClick: () => this._castSpell(spell),
+				});
+			}
+			if (spell.ritual) {
+				menuItems.push({
+					label: "Cast as Ritual",
+					icon: "ritual",
+					onClick: () => {
+						if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
+						this._logActivity("ritual", `Cast ${spell.name} as ritual`);
+						this._renderStatusBar();
+						void this._persistSpellUse(spell, {slotLevel: spell.level, mode: "ritual"});
+					},
+				});
+			}
 			if (spell.level > 0 && !spell.alwaysPrepared && showPreparedToggle) menuItems.push({label: spell.prepared ? "Unprepare" : "Prepare", icon: "check", onClick: () => { this._state.setSpellPrepared?.(spell.id, !spell.prepared); this._openDrawerByType("spells"); }});
 			menuItems.push({label: "Add Note", icon: "edit", onClick: () => this._showEntityNoteModal("spell", spell.id, spell.name, () => { this._renderSpellsQuick(); if (this._openDrawer === "spells") this._openDrawerByType("spells"); })});
 			menuItems.push({label: spellIsFav ? "Remove Favorite" : "Add Favorite", icon: "inspiration", onClick: () => this._toggleFavorite({id: `spell:${spell.name}`, type: "spell", name: spell.name, icon: "spell", detail: spell.level === 0 ? "Cantrip" : `Level ${spell.level}`, ref: spell})});
@@ -3254,6 +3271,7 @@ export class CharacterSheetPlayMode {
 					this._state.setConcentration?.({name: spell.name, level: 0});
 					this._logActivity("spell", `Cast ${spell.name} (cantrip, concentration)`);
 					this._renderStatusBar();
+					void this._persistSpellUse(spell, {slotLevel: 0, mode: "cantrip"});
 				});
 				return;
 			}
@@ -3262,6 +3280,7 @@ export class CharacterSheetPlayMode {
 			}
 			this._logActivity("spell", `Cast ${spell.name} (cantrip)`);
 			if (spell.concentration) this._renderStatusBar();
+			void this._persistSpellUse(spell, {slotLevel: 0, mode: "cantrip"});
 			return;
 		}
 
@@ -3322,6 +3341,20 @@ export class CharacterSheetPlayMode {
 		this._logActivity("spell", `Cast ${spell.name} (${slotLabel})`);
 		this._renderSpellsQuick();
 		this._renderStatusBar();
+		void this._persistSpellUse(spell, {slotLevel: slot.level, mode: slot.isPact ? "pact_slot" : "spell_slot"});
+	}
+
+	_persistSpellUse (spell, {slotLevel, mode}) {
+		return this._page.saveCharacter?.({
+			activity: {
+				type: "spell.used",
+				spellName: spell.name,
+				spellSource: spell.source,
+				spellLevel: spell.level,
+				slotLevel,
+				mode,
+			},
+		});
 	}
 
 	_promptConcentrationBreak (newSpell, onConfirm) {

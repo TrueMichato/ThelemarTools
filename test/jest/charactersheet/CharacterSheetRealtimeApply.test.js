@@ -213,6 +213,7 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 		"_onHubRealtimeCursor",
 		"_onHubRealtimeConnectionState",
 		"_onHubRealtimeDeliveryError",
+		"_onHubRecipientNotice",
 		"_onHubSemanticOperation",
 		"_getHubLiveCharacterData",
 		"_adoptHubLiveCharacterData",
@@ -237,6 +238,40 @@ beforeAll(async () => {
 });
 
 describe("Live campaign effects on an open Character Sheet", () => {
+	it("shows bounded XP and item award reasons and schedules XP reconciliation", async () => {
+		const {clients, host, toasts} = await pMakeHarness();
+		host._scheduleHubRealtimeResync = jest.fn();
+
+		clients[0].emit("event", {
+			id: "xp-notice",
+			campaignId: "campaign-1",
+			sequence: 21,
+			type: "xp.granted",
+			aggregateType: "character",
+			aggregateId: "character-1",
+			payload: {amount: 250, xp: 900, reason: "<b>For the Ashen Pass</b>"},
+		});
+		clients[0].emit("event", {
+			id: "item-notice",
+			campaignId: "campaign-1",
+			sequence: 22,
+			type: "item.granted",
+			aggregateType: "character",
+			aggregateId: "character-1",
+			payload: {
+				entry: {item: {name: "Longsword", source: "PHB"}, quantity: 1},
+				note: "<i>For the Ashen Pass</i>",
+			},
+		});
+		await pFlush();
+
+		expect(toasts.map(toast => toast.content.textContent || toast.content.innerHTML || toast.content._html)).toEqual([
+			"Received 250 XP (900 XP total) — For the Ashen Pass.",
+			"Received Longsword — For the Ashen Pass.",
+		]);
+		expect(host._scheduleHubRealtimeResync).toHaveBeenCalledWith({characterId: "character-1"});
+	});
+
 	it("adopts an authoritative approval response when its socket edge is missed", async () => {
 		const {clients, host, hubEffects, state} = await pMakeHarness();
 		const operation = makeAppliedEvent({

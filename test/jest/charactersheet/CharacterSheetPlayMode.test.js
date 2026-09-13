@@ -3,6 +3,7 @@
  * Tests for play mode state fields (viewMode, favorites) and state management helpers.
  */
 
+import {jest} from "@jest/globals";
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import {CharacterSheetPlayMode} from "../../../js/charactersheet/charactersheet-playmode.js";
@@ -14,6 +15,30 @@ describe("CharacterSheetPlayMode", () => {
 
 	beforeEach(() => {
 		state = new CharacterSheetState();
+	});
+
+	it("persists play-mode cantrips with the same closed spell activity descriptor", () => {
+		const saveCharacter = jest.fn();
+		const playMode = Object.create(CharacterSheetPlayMode.prototype);
+		playMode._page = {saveCharacter};
+		playMode._state = {
+			isConcentrating: () => false,
+		};
+		playMode._logActivity = jest.fn();
+		playMode._renderStatusBar = jest.fn();
+
+		playMode._castSpell({id: "fire-bolt", name: "Fire Bolt", source: "XPHB", level: 0, concentration: false});
+
+		expect(saveCharacter).toHaveBeenCalledWith({
+			activity: {
+				type: "spell.used",
+				spellName: "Fire Bolt",
+				spellSource: "XPHB",
+				spellLevel: 0,
+				slotLevel: 0,
+				mode: "cantrip",
+			},
+		});
 	});
 
 	describe("Item attunement", () => {

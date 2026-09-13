@@ -4,6 +4,7 @@ import {hasFreshCarryWrite, stripCarryAuthority} from "../../js/hub/hub-carry-au
 import {getExpectedCarryBasis} from "./carry-basis.js";
 import {getPendingEffectPresentation} from "../../js/hub/hub-effect-presentation.js";
 import {HubStoreError} from "./hub-store-error.js";
+import {normalizeCharacterPatchActivity} from "./hub-spell-activity.js";
 import {canViewEvent} from "./projections.js";
 import {
 	computePeerProfile,
@@ -1352,6 +1353,7 @@ export class MemoryHubStore {
 		baseRevision,
 		leaseEpoch,
 		patches,
+		activity = null,
 		rulesVersionId = null,
 		idempotencyKey,
 		protocolVersion = null,
@@ -1386,6 +1388,11 @@ export class MemoryHubStore {
 				details: {revision: character.revision, character: copy(character)},
 			});
 		}
+		const normalizedActivity = normalizeCharacterPatchActivity(activity);
+		const isDocumentMutation = !!patches?.length;
+		if (!isDocumentMutation && !normalizedActivity) {
+			return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(character)}});
+		}
 		const data = applyJsonPatch(character.data, patches);
 		// The current sheet writes a fresh `/carry` on every save whose document otherwise
 		// changes, so its ABSENCE identifies a writer that does not understand carry
@@ -1409,9 +1416,11 @@ export class MemoryHubStore {
 				rulesVersionId: enforcement.activeRulesVersionId,
 			});
 		}
-		this._setCharacterData({character, data});
-		character.revision++;
-		if (character.campaignId) {
+		if (isDocumentMutation) {
+			this._setCharacterData({character, data});
+			character.revision++;
+		}
+		if (character.campaignId && isDocumentMutation) {
 			this._appendEvent({
 				campaignId: character.campaignId,
 				actorAccountId: accountId,
@@ -1423,7 +1432,28 @@ export class MemoryHubStore {
 				payload: {patches},
 			});
 		}
-		this._commitCharacterMutation({character, actorAccountId: accountId, isRevisionBump: false});
+		if (character.campaignId && normalizedActivity) {
+			const {type, ...payload} = normalizedActivity;
+			this._appendAudit({
+				campaignId: character.campaignId,
+				actorAccountId: accountId,
+				action: type,
+				targetType: "character",
+				targetId: character.id,
+				details: normalizedActivity,
+			});
+			this._appendEvent({
+				campaignId: character.campaignId,
+				actorAccountId: accountId,
+				type,
+				aggregateType: "character",
+				aggregateId: character.id,
+				aggregateRevision: character.revision,
+				visibility: "all_members",
+				payload,
+			});
+		}
+		if (isDocumentMutation) this._commitCharacterMutation({character, actorAccountId: accountId, isRevisionBump: false});
 		return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(character)}});
 	}
 
@@ -2005,9 +2035,46 @@ export class MemoryHubStore {
 		return (await this.pListVisibleEventPage({accountId, campaignId, afterSequence, limit})).events;
 	}
 
-	async pListVisibleEventPage ({accountId, campaignId, afterSequence = 0, limit = 500}) {
+	async pListVisibleEventPage ({accountId, campaignId, afterSequence = 0, beforeSequence = null, limit = 500}) {
 		const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
 		const campaignEvents = this._getCampaignEvents(campaignId);
+		if (beforeSequence != null) {
+			const rawLimit = Math.min(2_000, Math.max(200, limit * 25));
+			const candidates = [];
+			for (let index = campaignEvents.length - 1; index >= 0; --index) {
+				if (campaignEvents[index].sequence >= beforeSequence) continue;
+				candidates.push(campaignEvents[index]);
+				if (candidates.length > rawLimit) break;
+			}
+			const scanned = candidates.slice(0, rawLimit);
+			const visible = [];
+			let scannedCount = 0;
+			for (const event of scanned) {
+				scannedCount++;
+				if (!canViewEvent({event, accountId, role: membership.role})) continue;
+				const redacted = this.redactEventForViewer({
+					event: {
+						...copy(event),
+						...(this._accounts.get(event.actorAccountId)?.displayName
+							? {actorDisplayName: this._accounts.get(event.actorAccountId).displayName}
+							: {}),
+					},
+					accountId,
+					role: membership.role,
+				});
+				if (!redacted) continue;
+				visible.push(redacted);
+				if (visible.length >= limit) break;
+			}
+			const considered = scanned.slice(0, scannedCount);
+			return {
+				events: visible.reverse(),
+				history: {
+					scannedBackThroughSequence: considered.at(-1)?.sequence ?? beforeSequence,
+					hasMore: candidates.length > considered.length,
+				},
+			};
+		}
 		let lower = 0;
 		let upper = campaignEvents.length;
 		while (lower < upper) {

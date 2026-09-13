@@ -436,7 +436,9 @@ describe("Character Sheet realtime coordinator", () => {
 	it("delivers privacy-safe relevant transfer invalidations once", async () => {
 		const {clients, coordinator} = makeCoordinator();
 		const delivered = [];
+		const notices = [];
 		coordinator.on("inventoryTransfer", value => delivered.push(value));
+		coordinator.on("recipientNotice", value => notices.push(value));
 		coordinator.attach({characterId: "character-1"});
 		const event = {
 			id: "transfer-event",
@@ -461,7 +463,7 @@ describe("Character Sheet realtime coordinator", () => {
 			id: "unrelated",
 			payload: {...event.payload, sourceKind: "character", sourceId: "other", targetId: "another"},
 		});
-		clients[0].emit("event", {
+		const itemAward = {
 			id: "item-award",
 			campaignId: "campaign-1",
 			sequence: 13,
@@ -469,12 +471,39 @@ describe("Character Sheet realtime coordinator", () => {
 			aggregateType: "character",
 			aggregateId: "character-1",
 			aggregateRevision: 4,
-			payload: {entry: {id: "private-entry-id", item: {name: "Rope", source: "PHB"}, quantity: 1}},
-		});
+			payload: {
+				entry: {
+					id: "private-entry-id",
+					item: {name: "<b>Rope</b>", source: "PHB", entries: ["private item body"], rarity: "common"},
+					quantity: 1,
+				},
+				note: "<script>alert(1)</script> For the road",
+				arbitrary: {secret: true},
+			},
+		};
+		clients[0].emit("event", itemAward);
+		clients[0].emit("event", itemAward);
+		const xpAward = {
+			id: "xp-award",
+			campaignId: "campaign-1",
+			sequence: 14,
+			type: "xp.granted",
+			aggregateType: "character",
+			aggregateId: "character-1",
+			aggregateRevision: 5,
+			payload: {
+				amount: 250,
+				xp: 900,
+				reason: "<b>Milestone</b>",
+				hiddenCharacterState: {notes: "private"},
+			},
+		};
+		clients[0].emit("event", xpAward);
+		clients[0].emit("event", xpAward);
 		clients[0].emit("event", {
 			id: "other-item-award",
 			campaignId: "campaign-1",
-			sequence: 14,
+			sequence: 15,
 			type: "item.granted",
 			aggregateType: "character",
 			aggregateId: "other",
@@ -484,7 +513,7 @@ describe("Character Sheet realtime coordinator", () => {
 		clients[0].emit("event", {
 			id: "stash-invalidation",
 			campaignId: "campaign-1",
-			sequence: 15,
+			sequence: 16,
 			type: "party_inventory.invalidated",
 			aggregateType: "campaign",
 			aggregateId: "campaign-1",
@@ -512,12 +541,34 @@ describe("Character Sheet realtime coordinator", () => {
 			{
 				eventId: "stash-invalidation",
 				campaignId: "campaign-1",
-				sequence: 15,
+				sequence: 16,
 				type: "party_inventory.invalidated",
 				isCurrentCharacterAffected: false,
 				isPartyInventoryAffected: true,
 			},
 		]);
+		expect(notices).toEqual([
+			{
+				eventId: "item-award",
+				campaignId: "campaign-1",
+				sequence: 13,
+				kind: "item_award",
+				itemName: "Rope",
+				itemSource: "PHB",
+				quantity: 1,
+				reason: "alert(1) For the road",
+			},
+			{
+				eventId: "xp-award",
+				campaignId: "campaign-1",
+				sequence: 14,
+				kind: "xp_award",
+				amount: 250,
+				totalXp: 900,
+				reason: "Milestone",
+			},
+		]);
+		expect(JSON.stringify(notices)).not.toMatch(/private-entry-id|private item body|rarity|hiddenCharacterState|arbitrary/);
 		expect(JSON.stringify(delivered)).not.toMatch(/private|character-1/);
 	});
 

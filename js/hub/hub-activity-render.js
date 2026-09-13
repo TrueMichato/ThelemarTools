@@ -1,7 +1,29 @@
 import {normalizeHubEvent} from "./hub-event-presentation.js";
+import {getProjectionId, getProjectionRevision} from "./hub-character-view.js";
 
-export function renderHubActivityRows ({list, events, characters, members, documentRef, getDateLabel}) {
-	const rows = events
+export function hasHubActivityAuthorizationChanged ({previousCharacters, nextCharacters}) {
+	const getRevisions = characters => new Map((characters || []).map(character => [
+		getProjectionId(character),
+		getProjectionRevision(character).projectionRevision,
+	]));
+	const previous = getRevisions(previousCharacters);
+	const next = getRevisions(nextCharacters);
+	if (previous.size !== next.size) return true;
+	for (const [characterId, projectionRevision] of next) {
+		if (!previous.has(characterId) || previous.get(characterId) !== projectionRevision) return true;
+	}
+	return false;
+}
+
+export function mergeHubActivityEvents ({currentEvents, pageEvents, isAuthorizationChanged = false}) {
+	const events = isAuthorizationChanged ? pageEvents : [...pageEvents, ...currentEvents];
+	return events
+		.filter((event, index, all) => all.findIndex(other => other.id === event.id) === index)
+		.sort((a, b) => a.sequence - b.sequence);
+}
+
+export function renderHubActivityRows ({list, events, characters, members, documentRef, getDateLabel, limit = 8}) {
+	let rows = events
 		.map(event => ({
 			event,
 			presentation: normalizeHubEvent({
@@ -11,9 +33,9 @@ export function renderHubActivityRows ({list, events, characters, members, docum
 				actorDisplayName: event.actorDisplayName,
 			}),
 		}))
-		.filter(({presentation}) => presentation?.title)
-		.slice(-8)
-		.reverse();
+		.filter(({presentation}) => presentation?.title);
+	if (Number.isInteger(limit) && limit >= 0) rows = rows.slice(-limit);
+	rows.reverse();
 	list.replaceChildren(...rows.map(({event, presentation}) => {
 		const row = documentRef.createElement("div");
 		row.className = "hub-activity-row";

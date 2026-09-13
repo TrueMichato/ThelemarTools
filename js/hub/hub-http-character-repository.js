@@ -1205,7 +1205,7 @@ export class HubHttpCharacterRepository {
 		}
 	}
 
-	pUpsert ({character}) {
+	pUpsert ({character, activity = null}) {
 		const saveBlock = this.getSaveBlock(character?.id);
 		if (saveBlock) {
 			const error = new Error(saveBlock.message || `Character saving is paused until reconciliation completes.`);
@@ -1213,15 +1213,24 @@ export class HubHttpCharacterRepository {
 			error.saveBlock = saveBlock;
 			return Promise.reject(error);
 		}
-		let recoveryKey = `hub-character-recovery:${this._scopeKey}:${character.id}`;
-		const recoveryVersion = (this._recoveryVersions.get(recoveryKey) || 0) + 1;
-		this._recoveryVersions.set(recoveryKey, recoveryVersion);
 		const requestedId = character.id;
 		const canonicalAtCall = this._canonicalIds.get(requestedId) || requestedId;
 		const submittedSnapshot = this._getSnapshotData(character);
-		const failedCommand = this._failedCommands.get(requestedId);
+		const submittedActivity = activity == null ? null : structuredClone(activity);
+		const failedCommandKey = this._failedCommands.has(requestedId) ? requestedId : canonicalAtCall;
+		const failedCommand = this._failedCommands.get(failedCommandKey);
 		const isSameFailedSnapshot = failedCommand
-			&& JSON.stringify(failedCommand.snapshot) === JSON.stringify(submittedSnapshot);
+			&& JSON.stringify(failedCommand.snapshot) === JSON.stringify(submittedSnapshot)
+			&& JSON.stringify(failedCommand.activity ?? null) === JSON.stringify(submittedActivity);
+		if (failedCommand && !isSameFailedSnapshot) {
+			return this.pUpsert({
+				character: {...structuredClone(failedCommand.snapshot), id: requestedId},
+				activity: failedCommand.activity ?? null,
+			}).then(() => this.pUpsert({character, activity}));
+		}
+		let recoveryKey = `hub-character-recovery:${this._scopeKey}:${requestedId}`;
+		const recoveryVersion = (this._recoveryVersions.get(recoveryKey) || 0) + 1;
+		this._recoveryVersions.set(recoveryKey, recoveryVersion);
 		const commandKeys = isSameFailedSnapshot
 			? failedCommand.commandKeys
 			: {create: crypto.randomUUID(), patch: crypto.randomUUID()};
@@ -1251,6 +1260,7 @@ export class HubHttpCharacterRepository {
 				version: recoveryVersion,
 				base: submittedBase,
 				snapshot: submittedSnapshot,
+				activity: submittedActivity,
 				commandKeys,
 				coverageVersion: COVERAGE_VERSION,
 				coverage: {
@@ -1330,7 +1340,7 @@ export class HubHttpCharacterRepository {
 			// the server accepts as "this writer understands carry authority". Without this
 			// normalisation an ordinary save strips the summary it is actually carrying.
 			const patches = withRootCarryWrite({patches: diffJson(accepted.data, desired), document: desired, base: accepted.data});
-			if (!patches.length) {
+			if (!patches.length && !submittedActivity) {
 				this._syncCoverageToAccepted(canonicalId);
 				return this._getData(accepted);
 			}
@@ -1342,6 +1352,7 @@ export class HubHttpCharacterRepository {
 					baseRevision: accepted.revision,
 					leaseEpoch: lease.epoch,
 					patches,
+					activity: submittedActivity,
 					rulesVersionId: this._fnGetRulesVersionId(),
 					idempotencyKey: commandKeys.patch,
 				});
@@ -1407,6 +1418,7 @@ export class HubHttpCharacterRepository {
 						document: rebased.document,
 						base: canonical.data,
 					}),
+					activity: submittedActivity,
 					rulesVersionId: this._fnGetRulesVersionId(),
 					idempotencyKey: commandKeys.patch,
 				});
@@ -1431,7 +1443,7 @@ export class HubHttpCharacterRepository {
 			})
 			.catch(error => {
 				this._failedWrites.set(requestedId, structuredClone(character));
-				this._failedCommands.set(requestedId, {snapshot: submittedSnapshot, commandKeys});
+				this._failedCommands.set(requestedId, {snapshot: submittedSnapshot, activity: submittedActivity, commandKeys});
 				// Keep the in-memory coverage of the recovered snapshot in step with the copy written to recovery
 				// storage above. Without this the failed write would carry unknown coverage, and the next campaign
 				// effect would classify it as unprovable and cascade into a resync the history can never satisfy.
@@ -1462,8 +1474,16 @@ export class HubHttpCharacterRepository {
 				const isCoverageKnown = [1, COVERAGE_VERSION].includes(parsed.coverageVersion) && !!parsed.coverage;
 				book.recoveredBase = isCoverageKnown ? deserializeCoverage(parsed.coverage.base) : createCoverage();
 				book.failedWrite = isCoverageKnown ? deserializeCoverage(parsed.coverage.snapshot) : createCoverage();
-				if (parsed.base) this._recoveredBases.set(characterId, parsed.base);
-				if (parsed.commandKeys) this._failedCommands.set(characterId, {snapshot: parsed.snapshot, commandKeys: parsed.commandKeys});
+				if (parsed.base) {
+					this._recoveredBases.set(characterId, parsed.base);
+				}
+				if (parsed.commandKeys) {
+					this._failedCommands.set(characterId, {
+						snapshot: parsed.snapshot,
+						activity: parsed.activity ?? null,
+						commandKeys: parsed.commandKeys,
+					});
+				}
 				return parsed.snapshot;
 			}
 			return parsed.character || parsed;

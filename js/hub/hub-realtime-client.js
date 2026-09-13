@@ -7,6 +7,7 @@ export function isRealtimeEventCoveredByBaseline ({event, baselineSequence}) {
 export class HubRealtimeClient {
 	constructor ({
 		campaignId,
+		initialLastSequence = null,
 		fnCreateSocket = url => new WebSocket(url),
 		location = globalThis.location,
 		fnSetTimeout = (...args) => setTimeout(...args),
@@ -37,7 +38,10 @@ export class HubRealtimeClient {
 		this._reconnectTimer = null;
 		this._resyncTimer = null;
 		this._resyncWatchdogMarker = null;
-		this._lastSequence = 0;
+		this._lastSequence = Number.isSafeInteger(initialLastSequence) && initialLastSequence >= 0
+			? initialLastSequence
+			: 0;
+		this._isSnapshotSuppressionPending = initialLastSequence == null;
 		this._hasBaseline = false;
 		this._bufferedEvents = [];
 		this._resyncAccumulatedEvents = [];
@@ -234,7 +238,7 @@ export class HubRealtimeClient {
 				if (event.sequence <= previousSequence) continue;
 				this._lastSequence = Math.max(this._lastSequence, event.sequence);
 				if (this._isEventSeen(event)) continue;
-				if (event.sequence <= snapshotSequence && [
+				if (this._isSnapshotSuppressionPending && event.sequence <= snapshotSequence && [
 					"character.created",
 					"character.cloned",
 					"character.archived",
@@ -254,6 +258,7 @@ export class HubRealtimeClient {
 			this._resyncAccumulatedEvents = [];
 			this._resyncScannedThroughSequence = null;
 			this._resyncStartSequence = null;
+			this._isSnapshotSuppressionPending = false;
 			this._hasBaseline = true;
 			this._reconnectAttempt = 0;
 			this._setConnectionState("live");
