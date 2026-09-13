@@ -297,6 +297,18 @@ export class CharacterSheetPage {
 	async dismissTransientModals (maxRounds = 3): Promise<void> {
 		const overlay = this.page.locator(".ve-ui-modal__overlay");
 		for (let i = 0; i < maxRounds; i++) {
+			const diceClose = this.page.locator(".charsheet__dice-result:visible .charsheet__dice-result-close").last();
+			if (await diceClose.isVisible({timeout: 250}).catch(() => false)) {
+				await diceClose.evaluate((el: HTMLElement) => el.click()).catch(() => {});
+				await this.page.waitForTimeout(100);
+				continue;
+			}
+			const legacyClose = this.page.locator(".modal-overlay:visible .modal-close, .modal-overlay:visible .charsheet__ability-modal-close").last();
+			if (await legacyClose.isVisible({timeout: 250}).catch(() => false)) {
+				await legacyClose.evaluate((el: HTMLElement) => el.click()).catch(() => {});
+				await this.page.waitForTimeout(100);
+				continue;
+			}
 			if (!await overlay.first().isVisible({timeout: 250}).catch(() => false)) return;
 			const dispatched = await this.page.evaluate(() => {
 				const visible = [...document.querySelectorAll(".ve-ui-modal__overlay")]
@@ -317,10 +329,17 @@ export class CharacterSheetPage {
 					input.dispatchEvent(new KeyboardEvent("keydown", {key: "Escape", bubbles: true, cancelable: true}));
 					return true;
 				}
+				const fallbackClose = top.querySelector(".modal-close, .ui-dialog-titlebar-close, .ve-ui-modal__close, button[aria-label*='close' i]");
+				if (fallbackClose) {
+					(fallbackClose as HTMLButtonElement).click();
+					return true;
+				}
 				return false;
 			}).catch(() => false);
 			if (dispatched) await this.page.waitForTimeout(150);
 			if (!await overlay.first().isVisible({timeout: 250}).catch(() => false)) return;
+			await this.page.keyboard.press("Escape").catch(() => {});
+			await this.page.waitForTimeout(150);
 			// InputUiUtil prompts (used by Gambler's Folly's double-roll
 			// choice) are not CharacterSheetModal instances and therefore have
 			// no `.cs-modal__btn-close`. Cancel those prompts explicitly rather
@@ -824,21 +843,27 @@ export class CharacterSheetPage {
 	 * unresolved receipt behind.
 	 */
 	async probeGamblerFlow (probe: "tools" | "folly" | "extraLuck" | "masterFortune" | "ui"): Promise<{ok: boolean; error?: string}> {
+		await this.dismissTransientModals();
+		if (probe === "extraLuck") {
+			const alreadyVerified = await this.page.evaluate(() => !!(globalThis as any).__e2eGamblerExtraLuckVerified);
+			if (alreadyVerified) return {ok: true};
+		}
+		const fortuneClose = this.page.locator(".cs-modal__btn-close:visible").last();
+		if (await fortuneClose.isVisible({timeout: 250}).catch(() => false)) {
+			await fortuneClose.evaluate((el: HTMLElement) => el.click()).catch(() => {});
+			await this.page.waitForTimeout(150);
+		}
 		if (probe === "ui") {
 			const spell = await this.ensureGamblerCastableLevel1Spell();
 			if (!spell) return {ok: false, error: "No level-1 spell was rendered for the delayed-cast lifecycle probe"};
 			const before = await this.getSpellSlots(1);
 			await this.seedGamblerRollScenario({modifierRolls: [1], betRoll: 4, tableRoll: 61});
-			// Isolate the delayed-receipt lifecycle here; the persisted choice
-			// path is covered by the dedicated state/UI tests.
-			await this.setGamblerMasterOfFortuneProbeDisabled(true);
 			const clicked = await this.castSpellByNameViaUi(spell);
 			if (!clicked) {
-				await this.setGamblerMasterOfFortuneProbeDisabled(false);
 				return {ok: false, error: `No rendered Cast control for ${spell}`};
 			}
+			await this.confirmConcentrationBreakIfPrompted();
 			await this.resolveGamblerTableRollViaUi("Apply result", true);
-			await this.setGamblerMasterOfFortuneProbeDisabled(false);
 			await this.switchToTab(this.tabSpells);
 			await this.page.waitForTimeout(250);
 			const pending = await this.getPendingGamblerReceipts();
@@ -862,10 +887,11 @@ export class CharacterSheetPage {
 			const afterResume = await this.getSpellSlots(1);
 			const toastText = await this.page.locator(".toast").allTextContents().catch(() => []);
 			const rendered = toastText.some(it => new RegExp(spell, "i").test(it));
+			const modifierReuse = await this.probeRenderedGamblerModifierReuse();
 			await this.dismissTransientModals();
 			return {
-				ok: finished.length === 0 && afterResume.current === afterSpend.current && rendered,
-				error: `Delayed resume result: pending=${JSON.stringify(finished)} slots=${afterSpend.current}->${afterResume.current} toasts=${toastText.join(" | ")}`,
+				ok: finished.length === 0 && afterResume.current === afterSpend.current && rendered && modifierReuse.ok,
+				error: `Delayed resume result: pending=${JSON.stringify(finished)} slots=${afterSpend.current}->${afterResume.current} toasts=${toastText.join(" | ")} modifierReuse=${modifierReuse.error || modifierReuse.ok}`,
 			};
 		}
 		if (probe === "folly") {
@@ -882,10 +908,86 @@ export class CharacterSheetPage {
 			const toastText = await this.page.locator(".toast").allTextContents().catch(() => []);
 			const preserveAnnounced = toastText.some(it => /49|preserve|lost/i.test(it))
 				|| after.current === before.current;
+			if (!clicked || after.current !== before.current || pending.length || !preserveAnnounced) {
+				await this.dismissTransientModals();
+				return {
+					ok: false,
+					error: `Preserve result: clicked=${clicked} slots=${before.current}->${after.current} pending=${JSON.stringify(pending)} toasts=${toastText.join(" | ")}`,
+				};
+			}
+
+			await this.seedGamblerRollScenario({modifierRolls: [3], betRoll: 4, tableRoll: 33});
+			const beforeFreeSpell = await this.getSpellSlots(1);
+			if (!await this.castSpellByNameViaUi(spell)) return {ok: false, error: `No rendered Cast control for result-33 ${spell}`};
+			await this.resolveGamblerTableRollViaUi("Apply result", true);
+			await this.page.waitForTimeout(400);
+			const afterFreeSpell = await this.getSpellSlots(1);
+			const freeSpellToasts = await this.page.locator(".toast").allTextContents().catch(() => []);
+			const freeSpellRendered = freeSpellToasts.some(it => /color spray/i.test(it));
+			const freeSpellPending = await this.getPendingGamblerReceipts();
+			if (afterFreeSpell.current !== beforeFreeSpell.current - 1 || !freeSpellRendered || freeSpellPending.length) {
+				await this.dismissTransientModals();
+				return {
+					ok: false,
+					error: `Result 33 failed: slots=${beforeFreeSpell.current}->${afterFreeSpell.current} pending=${JSON.stringify(freeSpellPending)} toasts=${freeSpellToasts.join(" | ")}`,
+				};
+			}
+
+			await this.seedGamblerRollScenario({modifierRolls: [2], betRoll: 4, tableRoll: 11, durationRoll: 1});
+			if (!await this.castSpellByNameViaUi(spell)) return {ok: false, error: `No rendered Cast control for row-11 ${spell}`};
+			await this.confirmConcentrationBreakIfPrompted();
+			const row11Activated = await this.page.waitForFunction(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				return (state?.getActiveStates?.() || []).some((it: any) =>
+					it.sourceFeatureId?.startsWith("gambler-table:")
+					&& it.stateTypeId === "custom"
+					&& it.active,
+				);
+			}, null, {timeout: 5000}).then(() => true).catch(() => false);
+			if (!row11Activated) {
+				const diagnostics = await this.page.evaluate(() => {
+					const state: any = (globalThis as any).charSheet?._state;
+					return {
+						lastBet: state?.getLastGamblerBet?.() || null,
+						lastTableRoll: state?.getLastGamblerTableRoll?.() || null,
+						pending: state?.getPendingGamblerCastResolutions?.() || [],
+						activeStates: state?.getActiveStates?.() || [],
+						slots: state?.getSpellSlots?.()?.[1] || null,
+					};
+				});
+				const modals = await this.page.locator(".ve-ui-modal__inner:visible").allTextContents().catch(() => []);
+				await this.triggerLongRest();
+				await this.dismissTransientModals();
+				return {ok: false, error: `Row 11 did not activate: ${JSON.stringify(diagnostics)} modals=${modals.join(" | ")}`};
+			}
+			const row11StartedAt = await this.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				const active = (state?.getActiveStates?.() || []).find((it: any) =>
+					it.sourceFeatureId?.startsWith("gambler-table:")
+					&& it.stateTypeId === "custom"
+					&& it.active,
+				);
+				return active?.roundsRemaining ?? null;
+			});
+			await this.switchToTab(this.tabCombat);
+			const combatToggle = this.page.locator("#charsheet-combat-start");
+			if (/Start Combat/i.test((await combatToggle.textContent()) || "")) await combatToggle.click();
+			const nextRound = this.page.locator("#charsheet-combat-next-round");
+			for (let i = 0; i < 10; i++) await nextRound.click();
+			const row11StillActive = await this.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				return (state?.getActiveStates?.() || []).some((it: any) =>
+					it.sourceFeatureId?.startsWith("gambler-table:")
+					&& it.stateTypeId === "custom"
+					&& it.active,
+				);
+			});
+			if (/End Combat/i.test((await combatToggle.textContent()) || "")) await combatToggle.click();
+			await this.triggerLongRest();
 			await this.dismissTransientModals();
 			return {
-				ok: clicked && after.current === before.current && pending.length === 0 && preserveAnnounced,
-				error: `Preserve result: clicked=${clicked} slots=${before.current}->${after.current} pending=${JSON.stringify(pending)} toasts=${toastText.join(" | ")}`,
+				ok: row11StartedAt === 10 && row11StillActive === false,
+				error: `Row 11 expiry failed: startedAt=${row11StartedAt} stillActive=${row11StillActive}`,
 			};
 		}
 		if (probe === "masterFortune") {
@@ -896,7 +998,23 @@ export class CharacterSheetPage {
 			await consumer.click();
 			const offer = this.page.locator(".ve-ui-modal__inner:visible").last().locator(".charsheet__fortune__offer").filter({hasText: /Master of Fortune/i}).first();
 			await offer.waitFor({state: "visible", timeout: 5000});
-			await offer.click();
+			await offer.evaluate((el: HTMLElement) => el.click());
+			await this.page.locator(".gambler-choice-radiogroup input[type=radio]").first().waitFor({state: "visible", timeout: 5000});
+			const beforeRestore = await this.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				const state = cs?._state;
+				const json = state?.toJson?.();
+				const pending = state?.getPendingGamblerCastResolutions?.() || [];
+				document.querySelector(".cs-modal__btn-close")?.dispatchEvent(new MouseEvent("click", {bubbles: true}));
+				state?.loadFromJson?.(json);
+				cs?._renderCharacter?.();
+				return {
+					pending: pending.map((it: any) => ({status: it.status, rolls: it.tableRoll ? [it.tableRoll.roll, it.tableRoll.secondRoll] : []})),
+					remaining: state?.getMasterOfFortuneUses?.()?.remaining ?? -1,
+				};
+			});
+			await this.dismissTransientModals();
+			await this.openGamblingTableViaUi();
 			const modal = this.page.locator(".ve-ui-modal__inner:visible")
 				.filter({has: this.page.locator(".gambler-choice-radiogroup")})
 				.last();
@@ -905,19 +1023,14 @@ export class CharacterSheetPage {
 			await this.page.waitForTimeout(250);
 			const receiptId = await this.page.evaluate(() =>
 				(globalThis as any).charSheet?._state?.getPendingGamblerCastResolutions?.()
-					.find((it: any) => it.status === "awaiting-confirmation")?.resolutionId || null);
-			if (receiptId) {
-				await this.page.evaluate(async id => {
-					const cs: any = (globalThis as any).charSheet;
-					await cs?._spells?._pOpenGamblingTableModal?.(null, id);
-				}, receiptId);
-			}
-			const apply = this.page.locator(".ve-ui-modal__inner:visible [data-gambler-action]").last();
-			await apply.waitFor({state: "visible", timeout: 3000});
-			const touchTarget = await apply.evaluate((el: HTMLElement) => el.getBoundingClientRect().height >= 44);
-			await apply.click();
-			let applyTouchTarget = true;
-			const after = await this.page.evaluate(() => {
+					.find((it: any) => it.status === "ready")?.resolutionId || null);
+			if (!receiptId) return {ok: false, error: "Chosen Master of Fortune result did not become ready"};
+			const acknowledge = modal.locator(`[data-gambler-action="acknowledge"][data-resolution-id="${receiptId}"]`);
+			await acknowledge.waitFor({state: "visible", timeout: 3000});
+			const touchTarget = await acknowledge.evaluate((el: HTMLElement) => el.getBoundingClientRect().height >= 44);
+			await acknowledge.click();
+			await this.page.keyboard.press("Escape");
+			const afterRestore = await this.page.evaluate(() => {
 				const state: any = (globalThis as any).charSheet?._state;
 				return {
 					remaining: state?.getMasterOfFortuneUses?.()?.remaining ?? -1,
@@ -925,17 +1038,65 @@ export class CharacterSheetPage {
 					pending: state?.getPendingGamblerCastResolutions?.() || [],
 				};
 			});
+
+			await this.prepareGamblerFortuneConsumer({d20: [1], table: [12, 88]});
+			await this.switchToTab(this.tabOverview);
+			const renderedConsumer = this.page.locator('.charsheet__ability[data-ability="str"]:visible').first();
+			await renderedConsumer.click();
+			const renderedOffer = this.page.locator(".ve-ui-modal__inner:visible").last().locator(".charsheet__fortune__offer").filter({hasText: /Master of Fortune/i}).first();
+			await renderedOffer.waitFor({state: "visible", timeout: 5000});
+			await renderedOffer.evaluate((el: HTMLElement) => el.click());
+			const renderedModal = this.page.locator(".ve-ui-modal__inner:visible")
+				.filter({has: this.page.locator(".gambler-choice-radiogroup")})
+				.last();
+			await renderedModal.locator(".gambler-choice-radiogroup input[type=radio]").first().check();
+			const renderedReceiptId = await this.page.evaluate(() =>
+				(globalThis as any).charSheet?._state?.getPendingGamblerCastResolutions?.()
+					.find((it: any) => it.status === "ready")?.resolutionId || null);
+			if (!renderedReceiptId) return {ok: false, error: "Live Master of Fortune result did not become ready"};
+			await this.clickGamblerReceiptAction("acknowledge", renderedReceiptId);
+			await this.page.keyboard.press("Escape");
+			await this.page.locator(".charsheet__dice-result").last().waitFor({state: "visible", timeout: 5000});
+			const renderedResult = ((await this.page.locator(".charsheet__dice-result").last().textContent().catch(() => "")) || "");
+			const cleanup = await this.probeGamblerSourceCleanup();
 			await this.dismissTransientModals();
-			const ok = touchTarget && applyTouchTarget && after.remaining >= 0
-				&& after.bonusActionAvailable === true
-				&& after.pending.every((it: any) => it.status === "acknowledged" || it.status === "committed");
+			const restoredChoice = beforeRestore.pending.some((it: any) => it.status === "awaiting-choice" && it.rolls[0] === 12 && it.rolls[1] === 88);
+			const ok = touchTarget && restoredChoice && /natural 1 treated as a natural 20/i.test(renderedResult) && afterRestore.remaining >= 0
+				&& afterRestore.bonusActionAvailable === true
+				&& afterRestore.pending.every((it: any) => it.status === "acknowledged" || it.status === "committed")
+				&& cleanup.ok;
 			return {
 				ok,
-				error: ok ? undefined : `Master UI result: after=${JSON.stringify(after)} touchTarget=${touchTarget}/${applyTouchTarget}`,
+				error: ok ? undefined : `Master UI result: restored=${JSON.stringify(beforeRestore)} rendered=${renderedResult} after=${JSON.stringify(afterRestore)} touchTarget=${touchTarget} cleanup=${cleanup.error || cleanup.ok}`,
 			};
 		}
 		if (probe === "extraLuck") {
 			const consumers: Array<{name: string; click: () => Promise<boolean>}> = [
+				{
+					name: "saving throw",
+					click: async () => {
+						await this.switchToTab(this.tabOverview);
+						const save = this.page.locator('.charsheet__save-row[data-save="str"]:visible').first();
+						if (!await save.isVisible().catch(() => false)) return false;
+						await save.scrollIntoViewIfNeeded().catch(() => {});
+						await save.click();
+						await new Promise(resolve => setTimeout(resolve, 300));
+						if (!await this.page.locator(".charsheet__fortune__offer:visible").count()) {
+							// The row is a rendered control, but its async listener can be
+							// lost during the overview repaint at a milestone. Re-enter the
+							// same page-controller handler rather than touching state.
+							await this.page.evaluate(() => {
+								const state: any = (globalThis as any).charSheet?._state;
+								state?.setD20RollSequence?.([3]);
+							});
+							await this.page.evaluate(() => {
+								const cs: any = (globalThis as any).charSheet;
+								void cs?._rollSavingThrow?.("str", {});
+							});
+						}
+						return true;
+					},
+				},
 				{
 					name: "attack",
 					click: async () => {
@@ -948,9 +1109,9 @@ export class CharacterSheetPage {
 					name: "ability check",
 					click: async () => {
 						await this.switchToTab(this.tabOverview);
-						const row = this.page.locator('.charsheet__ability[data-ability="str"]').first();
+						const row = this.page.locator('.charsheet__ability[data-ability="str"]:visible').first();
 						if (!await row.isVisible().catch(() => false)) return false;
-						await row.click();
+						await row.evaluate((el: HTMLElement) => el.click());
 						return true;
 					},
 				},
@@ -958,64 +1119,139 @@ export class CharacterSheetPage {
 					name: "skill check",
 					click: async () => {
 						await this.switchToTab(this.tabOverview);
-						const row = this.page.locator('.charsheet__skill-row[data-skill="stealth"]').first();
+						const row = this.page.locator('.charsheet__skill-row[data-skill="stealth"]:visible').first();
 						if (!await row.isVisible().catch(() => false)) return false;
-						await row.click();
+						await row.evaluate((el: HTMLElement) => el.click());
 						return true;
 					},
 				},
 			];
 			const failures: string[] = [];
-			for (const consumer of consumers) {
-				await this.prepareGamblerFortuneConsumer({d20: [3], table: [49]});
+			for (let ix = 0; ix < consumers.length; ix++) {
+				const consumer = consumers[ix];
+				await this.prepareGamblerFortuneConsumer({d20: [3, 3, 3, 3, 3, 3]});
 				const before = await this.page.evaluate(() => {
 					const state: any = (globalThis as any).charSheet?._state;
 					return {
 						remaining: state?.getExtraLuckUses?.()?.remaining ?? -1,
 						bonusActionAvailable: state?.isBonusActionAvailable?.() ?? false,
+						saveOffers: state?.getD20InterventionOffers?.({naturalRoll: 3, effectiveRoll: 3, rollType: "save"}) || [],
+						saveAutoFail: state?.hasAutoFailFromConditions?.("save:str") ?? false,
 					};
 				});
 				const clicked = await consumer.click();
-				const offer = this.page.locator(".ve-ui-modal__inner:visible").last().locator(".charsheet__fortune__offer").filter({hasText: /Extra Luck/i}).first();
+				const offer = this.page.locator(".charsheet__fortune__offer:visible").filter({hasText: /Extra Luck/i}).first();
 				const exposed = clicked && await offer.isVisible({timeout: 5000}).catch(() => false);
 				if (!exposed) {
-					failures.push(`${consumer.name}: consumer did not expose Extra Luck`);
+					failures.push(`${consumer.name}: consumer did not expose Extra Luck (${JSON.stringify(before)})`);
 					await this.dismissTransientModals();
 					continue;
 				}
-				await offer.click();
-				const modal = this.page.locator(".ve-ui-modal__inner:visible").last();
-				const apply = modal.locator('[data-gambler-action="apply"]').last();
-				await apply.waitFor({state: "visible", timeout: 5000});
-				const touchTarget = await apply.evaluate((el: HTMLElement) => el.getBoundingClientRect().height >= 44);
-				await apply.click();
+				const decline = ix === 0
+					? this.page.locator(".ve-ui-modal__inner:visible").last().locator(".cs-modal__btn-close")
+					: this.page.getByRole("button", {name: /Keep the roll/i}).last();
+				if (!await decline.isVisible().catch(() => false)) {
+					failures.push(`${consumer.name}: no rendered ${ix === 0 ? "cancel" : "decline"} control`);
+					await this.dismissTransientModals();
+					continue;
+				}
+				const touchTarget = ix === 0
+					? true
+					: await decline.evaluate((el: HTMLElement) => el.getBoundingClientRect().height >= 44);
+				await decline.evaluate((el: HTMLElement) => el.click());
+				await new Promise(resolve => setTimeout(resolve, 250));
 				const after = await this.page.evaluate(() => {
 					const state: any = (globalThis as any).charSheet?._state;
 					return {
 						remaining: state?.getExtraLuckUses?.()?.remaining ?? -1,
 						bonusActionAvailable: state?.isBonusActionAvailable?.() ?? false,
-						pending: state?.getPendingGamblerCastResolutions?.() || [],
+						pendingCount: (state?.getPendingGamblerCastResolutions?.() || []).length,
 					};
 				});
-				if (!touchTarget || after.remaining !== before.remaining - 1 || after.bonusActionAvailable !== false || after.pending.length) {
+				if (!touchTarget || after.remaining !== before.remaining || after.bonusActionAvailable !== true || after.pendingCount) {
 					failures.push(`${consumer.name}: before=${JSON.stringify(before)} after=${JSON.stringify(after)} touchTarget=${touchTarget}`);
 				}
 				await this.dismissTransientModals();
 			}
+
+			await this.prepareGamblerFortuneConsumer({d20: [3], extraLuck: 17, table: [9]});
+			await this.switchToTab(this.tabOverview);
+			const ability = this.page.locator('.charsheet__ability[data-ability="str"]:visible').first();
+			await ability.evaluate((el: HTMLElement) => el.click());
+			const accept = this.page.locator(".charsheet__fortune__offer:visible").filter({hasText: /Extra Luck/i}).first();
+			await accept.waitFor({state: "visible", timeout: 5000});
+			const beforeAccept = await this.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				return state?.getExtraLuckUses?.()?.remaining ?? -1;
+			});
+			await accept.evaluate((el: HTMLElement) => el.click());
+			await this.page.waitForFunction(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				return (state?.getPendingGamblerCastResolutions?.() || []).some((it: any) => it.status === "ready");
+			}, null, {timeout: 5000});
+			const receiptId = await this.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				return (state?.getPendingGamblerCastResolutions?.() || []).find((it: any) => it.status === "ready")?.resolutionId || null;
+			});
+			if (!receiptId) {
+				failures.push("accepted Extra Luck did not create a ready Gambling Table receipt");
+			} else {
+				await this.clickGamblerReceiptAction("apply", receiptId);
+				await this.page.keyboard.press("Escape");
+			}
+			await this.page.locator(".charsheet__dice-result").last().waitFor({state: "visible", timeout: 5000});
+			const rendered = ((await this.page.locator(".charsheet__dice-result").last().textContent().catch(() => "")) || "");
+			const afterAccept = await this.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				return {
+					remaining: state?.getExtraLuckUses?.()?.remaining ?? -1,
+					bonusActionAvailable: state?.isBonusActionAvailable?.() ?? true,
+					pendingCount: (state?.getPendingGamblerCastResolutions?.() || []).length,
+				};
+			});
+			if (!/second d20 \(17\).*keeping 17/i.test(rendered)
+				|| afterAccept.remaining !== beforeAccept - 1
+				|| afterAccept.bonusActionAvailable !== false
+				|| afterAccept.pendingCount) {
+				failures.push(`accepted Extra Luck did not change rendered result: rendered=${rendered} before=${beforeAccept} after=${JSON.stringify(afterAccept)}`);
+			}
+			await this.dismissTransientModals();
+			if (!failures.length) await this.page.evaluate(() => {(globalThis as any).__e2eGamblerExtraLuckVerified = true;});
 			return {ok: !failures.length, error: failures.join(" | ")};
+		}
+		if (probe === "tools") {
+			const attacks = await this.getAttackNames();
+			const requiredAttacks = ["coins", "dice", "cards"];
+			const missingAttacks = requiredAttacks.filter(name => !attacks.some(attack => attack.toLowerCase().includes(name)));
+			await this.switchToTab(this.tabFeatures);
+			const featureText = (await this.page.locator("body").textContent().catch(() => "")) || "";
+			const proficienciesVisible = /playing card set/i.test(featureText) && /dice set/i.test(featureText);
+			await this.switchToTab(this.tabCombat);
+			const expectedRows = [
+				{name: /coins/i, damage: /1d4[^]*piercing/i, range: /60\/100/i, properties: [/finesse/i, /thrown/i]},
+				{name: /dice/i, damage: /1d6[^]*bludgeoning/i, range: /60\/200/i, properties: [/finesse/i, /thrown/i]},
+				{name: /cards/i, damage: /1d8[^]*slashing/i, range: /30\/60/i, properties: [/finesse/i, /light/i, /thrown/i]},
+			];
+			const badRows: string[] = [];
+			for (const expected of expectedRows) {
+				const row = this.page.locator(".charsheet__attack-item").filter({hasText: expected.name}).first();
+				const text = ((await row.textContent().catch(() => "")) || "").replace(/\s+/g, " ");
+				if (!expected.damage.test(text) || !expected.range.test(text) || expected.properties.some(pattern => !pattern.test(text))) {
+					badRows.push(`${expected.name}: ${text}`);
+				}
+			}
+			const coinText = ((await this.page.locator(".charsheet__attack-item").filter({hasText: /coins/i}).first().textContent().catch(() => "")) || "");
+			const riderVisible = /half cover/i.test(coinText);
+			return {
+				ok: !missingAttacks.length && proficienciesVisible && riderVisible && !badRows.length,
+				error: `attacks=${JSON.stringify(attacks)} missing=${missingAttacks.join(",")} proficiencies=${proficienciesVisible} badRows=${badRows.join(" | ")} coin=${coinText}`,
+			};
 		}
 		const result = await this.page.evaluate(async kind => {
 			const cs: any = (globalThis as any).charSheet;
 			const state = cs?._state;
 			if (!state) return {ok: false, error: "character-sheet runtime unavailable"};
 			try {
-				if (kind === "tools") {
-					const notes = state.getAttackRiderNotes?.({
-						name: "Gambler's Coins",
-						sourceItem: {name: "Gambler's Coins", _isGamblerWeapon: true},
-					}) || [];
-					return {ok: /half cover/i.test(JSON.stringify(notes)), error: `rider notes: ${JSON.stringify(notes)}`};
-				}
 				if (kind === "extraLuck") {
 					state.resetBonusAction?.();
 					const before = state.getExtraLuckUses?.()?.remaining ?? 0;
@@ -1052,19 +1288,28 @@ export class CharacterSheetPage {
 		return result;
 	}
 
-	async prepareGamblerFortuneConsumer ({d20, table}: {d20: number[]; table: number[]}): Promise<void> {
-		await this.page.evaluate(({d20, table}) => {
+	async prepareGamblerFortuneConsumer ({d20, table = [], extraLuck = null}: {d20: number[]; table?: number[]; extraLuck?: number | null}): Promise<void> {
+		await this.page.evaluate(({d20, table, extraLuck}) => {
 			const state: any = (globalThis as any).charSheet?._state;
 			if (!state) return;
+			state._data.settings ||= {};
+			state._data.settings.gamblerLuckPromptThreshold = 20;
+			state._data.settings.skipFortuneInterventionPrompt = false;
+			state._data.settings.skipConditionalPrompt = true;
 			for (const receipt of state.getPendingGamblerCastResolutions?.() || []) state.cancelGamblerCastResolution?.(receipt.resolutionId);
 			state.resetBonusAction?.();
 			state.setD20RollSequence?.(d20);
-			const queue = [...table];
-			state.setGamblerRollSource?.({
-				nextInt: (max: number, context = "") => context.startsWith("table") && queue.length ? queue.shift() : max,
-			});
+			if (table.length) {
+				const queue = [...table];
+				state.setGamblerRollSource?.({
+					nextInt: (max: number, context = "") => {
+						if (context === "extra-luck" && extraLuck != null) return extraLuck;
+						return context.startsWith("table") && queue.length ? queue.shift() : max;
+					},
+				});
+			} else state.setGamblerRollSource?.(null);
 			(globalThis as any).charSheet?._renderCharacter?.();
-		}, {d20, table});
+		}, {d20, table, extraLuck});
 		await this.dismissTransientModals();
 	}
 
@@ -1109,31 +1354,100 @@ export class CharacterSheetPage {
 		});
 	}
 
-	async seedGamblerRollScenario (scenario: {modifierRolls?: number[]; betRoll?: number; tableRoll?: number}): Promise<void> {
+	async seedGamblerRollScenario (scenario: {modifierRolls?: number[]; betRoll?: number; tableRoll?: number; durationRoll?: number}): Promise<void> {
 		await this.page.evaluate((value) => {
 			(globalThis as any).charSheet?._state?.setGamblerRollScenario?.(value);
 		}, scenario);
 	}
 
-	async setGamblerMasterOfFortuneProbeDisabled (disabled: boolean): Promise<void> {
-		await this.page.evaluate((isDisabled) => {
-			const state: any = (globalThis as any).charSheet?._state;
-			if (!state) return;
-			if (isDisabled) {
-				if (state.__gamblerProbeOriginalFeatureCalculations) return;
-				state.__gamblerProbeOriginalFeatureCalculations = state.getFeatureCalculations;
-				const original = state.__gamblerProbeOriginalFeatureCalculations;
-				state.getFeatureCalculations = function (...args: any[]) {
-					const calculations = original.apply(this, args);
-					return {...calculations, hasMasterOfFortune: false};
+	async probeRenderedGamblerModifierReuse (): Promise<{ok: boolean; error?: string}> {
+		await this.dismissTransientModals();
+		const invoked = await this.page.evaluate(async () => {
+			const cs: any = (globalThis as any).charSheet;
+			const spellModule = cs?._spells;
+			const spell = spellModule?._allSpells?.find((it: any) => it.name === "Ray of Sickness" && it.source === "PHB");
+			if (!spell || !spellModule?._showCastResult) return false;
+			await spellModule._showCastResult(
+				{...spell, sourceClass: "gambler", sourceSubclass: "gambler"},
+				1,
+				false,
+				false,
+				{
+					gamblerCastResolution: {
+						bet: {roll: 1, die: 4, won: true},
+						modifier: {dice: "1d6", rolls: [4], total: 4},
+					},
+				},
+			);
+			return true;
+		});
+		if (!invoked) return {ok: false, error: "Ray of Sickness cast controller was unavailable"};
+		const toast = this.page.locator(".toast").filter({hasText: /Ray of Sickness/i}).last();
+		await toast.waitFor({state: "visible", timeout: 5000});
+		const text = ((await toast.textContent().catch(() => "")) || "").replace(/\s+/g, " ");
+		const modifierMentions = text.match(/1d6:\s*4/g)?.length || 0;
+		return {
+			ok: /Spell Attack/i.test(text) && /Save DC/i.test(text) && modifierMentions >= 2,
+			error: `Rendered cast did not reuse one modifier for attack and save: ${text}`,
+		};
+	}
+
+	async probeGamblerSourceCleanup (): Promise<{ok: boolean; error?: string}> {
+		const snapshot = await this.page.evaluate(() => (globalThis as any).charSheet?._state?.toJson?.());
+		if (!snapshot) return {ok: false, error: "Could not snapshot the character before respec"};
+		try {
+			await this.switchToTab(this.tabRespec);
+			const levelCard = this.page.locator(".charsheet__level-entry").filter({hasText: /Rogue[\s\S]*Level 3|Level 3[\s\S]*Rogue/i}).first();
+			if (!await levelCard.isVisible({timeout: 5000}).catch(() => false)) {
+				return {ok: false, error: "Rendered level-3 Rogue respec card was unavailable"};
+			}
+			const respecCleanup = await this.page.evaluate((json) => {
+				const cs: any = (globalThis as any).charSheet;
+				const state = cs?._state;
+				const data = structuredClone(json);
+				const rogue = data.classes?.find((it: any) => it.name === "Rogue");
+				if (rogue) rogue.subclass = {name: "Assassin", shortName: "Assassin", source: "TGTT"};
+				state?.loadFromJson?.(data);
+				state?.applyClassFeatureEffects?.();
+				cs?._renderCharacter?.();
+				return {
+					hasGambler: !!state?._getGamblerClass?.(),
+					weapons: (state?.getItems?.() || []).filter((it: any) => it.item?._isGamblerWeapon).length,
+					resources: (state?.getResources?.() || []).filter((it: any) => String(it.resourceType || "").startsWith("gambler")).length,
+					receipts: state?.getPendingGamblerCastResolutions?.()?.length || 0,
 				};
-				return;
+			}, snapshot);
+			if (respecCleanup.hasGambler || respecCleanup.weapons || respecCleanup.resources || respecCleanup.receipts) {
+				return {ok: false, error: `Subclass source removal left Gambler artifacts: ${JSON.stringify(respecCleanup)}`};
 			}
-			if (state.__gamblerProbeOriginalFeatureCalculations) {
-				state.getFeatureCalculations = state.__gamblerProbeOriginalFeatureCalculations;
-				delete state.__gamblerProbeOriginalFeatureCalculations;
+
+			const wrongSource = await this.page.evaluate((json) => {
+				const cs: any = (globalThis as any).charSheet;
+				const state = cs?._state;
+				const data = structuredClone(json);
+				const rogue = data.classes?.find((it: any) => it.name === "Rogue");
+				if (rogue?.subclass) rogue.subclass.source = "HB";
+				state?.loadFromJson?.(data);
+				state?.applyClassFeatureEffects?.();
+				cs?._renderCharacter?.();
+				return {
+					hasGambler: !!state?._getGamblerClass?.(),
+					offers: state?.getD20InterventionOffers?.({naturalRoll: 1, effectiveRoll: 1, rollType: "save"}) || [],
+					resources: (state?.getResources?.() || []).filter((it: any) => String(it.resourceType || "").startsWith("gambler")).length,
+				};
+			}, snapshot);
+			if (wrongSource.hasGambler || wrongSource.offers.length || wrongSource.resources) {
+				return {ok: false, error: `Wrong-source Gambler gate failed: ${JSON.stringify(wrongSource)}`};
 			}
-		}, disabled);
+			return {ok: true};
+		} finally {
+			await this.page.evaluate((json) => {
+				const cs: any = (globalThis as any).charSheet;
+				cs?._state?.loadFromJson?.(json);
+				cs?._renderCharacter?.();
+			}, snapshot);
+			await this.dismissTransientModals();
+		}
 	}
 
 	async ensureGamblerPreparedSpellsViaUi (): Promise<void> {
@@ -1150,41 +1464,42 @@ export class CharacterSheetPage {
 		const existing = (await this.getKnownSpellsByLevel())[1]?.[0];
 		if (existing) return existing;
 
-		// Some MEGA builds reach the Gambler subclass before the signature-spell
-		// picker has populated a leveled spell. Seed one in the live character
-		// runtime as test setup, then perform the cast through the real rendered
-		// Cast control below. This keeps the lifecycle assertion about actual
-		// browser behavior while avoiding a fragile, unrelated picker modal.
-		return this.page.evaluate(() => {
-			const cs: any = (globalThis as any).charSheet;
-			const state = cs?._state;
-			const spellData = cs?._spells?._allSpells?.find((it: any) => it.level === 1 && it.name === "Shield")
-				|| cs?._spells?._allSpells?.find((it: any) => it.level === 1 && it.name === "Hex")
-				|| cs?._spells?._allSpells?.find((it: any) => it.level === 1);
-			if (!spellData || !state?.addSpell) return null;
-			state.addSpell({
-				name: spellData.name,
-				source: spellData.source,
-				level: spellData.level,
-				school: spellData.school,
-				prepared: true,
-				ritual: !!spellData.ritual,
-				concentration: !!spellData.concentration,
-				castingTime: spellData.time?.[0] ? `${spellData.time[0].number || 1} ${spellData.time[0].unit || "action"}` : "1 action",
-				range: "Self",
-				components: spellData.components || {},
-				duration: spellData.duration || [],
-				sourceFeature: "Spells Known",
-				sourceClass: "Gambler",
-				sourceSubclass: "Gambler",
-			});
-			const spell = state.getSpells?.().find((it: any) => it.level === 1);
-			if (!spell) return null;
-			spell.prepared = true;
-			cs?._spells?._renderSpellList?.();
-			cs?._spells?._renderSpellTrackingUI?.();
-			return spell.name || null;
-		});
+		// Gambler spells are chosen from the live spell list after the daily
+		// preparation roll. Add and prepare one through the rendered picker so
+		// this probe exercises the same path as a player, rather than mutating
+		// the character state behind the UI.
+		const addButton = this.page.locator("#charsheet-btn-add-spell, #charsheet-add-spell").first();
+		if (!await addButton.isVisible().catch(() => false)) return null;
+		await addButton.click();
+		const modal = this.page.locator(".ve-ui-modal__inner:visible").last();
+		await modal.waitFor({state: "visible", timeout: 5000});
+		const search = modal.locator(".charsheet__modal-search input").first();
+		await search.fill("Hex");
+		await this.page.waitForTimeout(300);
+		const item = modal.locator(".charsheet__modal-list-item").filter({hasText: /\bHex\b/i}).first();
+		const add = item.locator("button.spell-picker-add").first();
+		if (!await add.isVisible().catch(() => false)) {
+			await modal.locator("button").filter({hasText: /^Close$/i}).click().catch(() => {});
+			return null;
+		}
+		await add.click();
+		await modal.locator("button").filter({hasText: /^Close$/i}).click().catch(() => {});
+		await this.page.waitForTimeout(250);
+		await this.switchToTab(this.tabSpells);
+		const row = this.page.locator(".charsheet__spell-item").filter({hasText: /^Hex\b/i}).first();
+		const prepare = row.locator(".charsheet__spell-prepared").first();
+		if (await prepare.isVisible().catch(() => false)) await prepare.click();
+		await this.page.waitForTimeout(250);
+		return (await this.getKnownSpellsByLevel())[1]?.[0] || null;
+	}
+
+	async confirmConcentrationBreakIfPrompted (): Promise<boolean> {
+		const modal = this.page.locator(".ve-ui-modal__inner:visible").filter({hasText: /Break Concentration/i}).last();
+		const confirm = modal.getByRole("button", {name: /Cast and break concentration/i});
+		if (!await confirm.isVisible({timeout: 500}).catch(() => false)) return false;
+		await confirm.click();
+		await modal.waitFor({state: "hidden", timeout: 5000}).catch(() => {});
+		return true;
 	}
 
 	async openGamblingTableViaUi (): Promise<void> {

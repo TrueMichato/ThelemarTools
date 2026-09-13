@@ -4,7 +4,7 @@
  */
 
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
-import {CharacterSheetGamblerRules} from "./charactersheet-gambler.js";
+import {CharacterSheetGamblerRules, GAMBLER_GAMBLING_TABLE} from "./charactersheet-gambler.js";
 
 /**
  * Utility to parse feature text and extract limited-use information
@@ -18583,17 +18583,19 @@ class CharacterSheetState {
 	 * Install context-aware deterministic cast rolls for browser probes. This
 	 * avoids coupling a test to whether Versatile Gambler currently rolls one
 	 * or two modifier dice.
-	 * @param {{modifierRolls?:number[], betRoll?:number, tableRoll?:number}} scenario
+	 * @param {{modifierRolls?:number[], betRoll?:number, tableRoll?:number, durationRoll?:number}} scenario
 	 */
 	setGamblerRollScenario (scenario = {}) {
 		const modifierRolls = Array.isArray(scenario.modifierRolls) ? [...scenario.modifierRolls] : [];
 		const betRoll = Number.isFinite(scenario.betRoll) ? scenario.betRoll : null;
 		const tableRoll = Number.isFinite(scenario.tableRoll) ? scenario.tableRoll : null;
+		const durationRoll = Number.isFinite(scenario.durationRoll) ? scenario.durationRoll : null;
 		this.setGamblerRollSource({
 			nextInt: (max, context = "") => {
 				if (context.startsWith("cast-modifier") && modifierRolls.length) return modifierRolls.shift();
 				if (context === "bet" && betRoll != null) return betRoll;
 				if (context.startsWith("table") && tableRoll != null) return tableRoll;
+				if (context.startsWith("duration:") && durationRoll != null) return durationRoll;
 				return max;
 			},
 		});
@@ -39315,9 +39317,13 @@ class CharacterSheetState {
 		const ids = new Set();
 		for (const feature of this._data.features || []) {
 			const featureName = String(feature.name || "").toLowerCase();
-			if (featureName === "extra luck" || featureName === "master of fortune") {
-				if (!wanted || featureName === wanted) ids.add(feature.id);
-			}
+			if (featureName !== "extra luck" && featureName !== "master of fortune") continue;
+			if (wanted && featureName !== wanted) continue;
+			if (String(feature.className || "").toLowerCase() !== "rogue"
+				|| String(feature.classSource || feature.source || "").toUpperCase() !== "TGTT"
+				|| String(feature.subclassShortName || feature.subclassName || "").toLowerCase() !== "gambler"
+				|| String(feature.subclassSource || feature.source || "").toUpperCase() !== "TGTT") continue;
+			if (feature.id) ids.add(feature.id);
 		}
 		return ids;
 	}
@@ -55209,7 +55215,7 @@ class CharacterSheetState {
 	 * Gambler's Gambling Table - 100 effects from TGTT
 	 * Indexed 0-99, roll d100 and subtract 1 to access
 	 */
-	static GAMBLER_GAMBLING_TABLE = [
+	static GAMBLER_GAMBLING_TABLE_LEGACY = [
 		"Wall of force appears 10 ft in front of the gambler",
 		"Gambler smells like a skunk for spell duration, gaining disadvantage on Charisma (Persuasion) checks",
 		"Gambler shoots forth eight nonpoisonous snakes from fingertips. Snakes do not attack and disappear after an hour.",
@@ -55312,6 +55318,10 @@ class CharacterSheetState {
 		"Spell effectiveness (range, duration, area of effect, damage, etc.) is doubled",
 	];
 
+	// The runtime table is the lossless canonical TGTT table from the rules
+	// module. Keep the legacy fallback above only for old tooling migrations;
+	// receipts, descriptors, and rendered text all use this source of truth.
+	static GAMBLER_GAMBLING_TABLE = GAMBLER_GAMBLING_TABLE;
 	static GAMBLER_GAMBLING_TABLE_EFFECTS = CharacterSheetGamblerRules.createTableEffects(CharacterSheetState.GAMBLER_GAMBLING_TABLE);
 
 	/**

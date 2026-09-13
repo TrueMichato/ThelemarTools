@@ -10163,13 +10163,10 @@ lookup vs the `mod.name` fallback). A fixture that simply names both
 
 ## CS-BUG-171 — TGTT Gambler fortune resources and table scopes — FIXED
 
-The iteration-6 Gambler audit corrected the remaining canonical Gambling Table
-area/group descriptors, including the 60-foot and 10/15-foot radius results,
-kept Master of Fortune free of an invented bonus-action cost, and reconciled
-legacy untyped fortune rows into one typed pool. Gambler-owned typed and legacy
-resources, pending receipts, and table effects are removed on respec or when
-TGTT is disabled without removing unrelated user-owned resources.
-
-The browser modal now exposes 44px action targets and rerenders a pending
-receipt immediately after a radio choice, so Apply is never hidden behind stale
-UI state. Focused Jest and browser probes pin these behaviours.
+Iteration 7 now verifies every one of the 100 Gambling Table rows against the
+canonical TGTT source, including the previously mis-scoped rows 19, 29, 68,
+69, 71, 75, 80, and 87. Row 11 is an executable, expiring self-state rather
+than a manual-only acknowledgement. Gambler-owned typed and legacy resources,
+pending receipts, and table effects are removed on respec or when TGTT is
+disabled without removing unrelated same-named resources. Focused Jest and
+rendered browser probes cover these invariants.

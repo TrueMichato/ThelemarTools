@@ -26,43 +26,6 @@ import {getUid} from "./generate-crafting-data/crafting-utils.js";
 
 const OUT_PATH = "./data/crafting.json";
 
-/**
- * Crafting extracts prose from several books which are intentionally not
- * loaded as first-class 5etools entities (for example the private HHHVI
- * corpus and generic COMCRAF rules). Keep those references readable without
- * emitting links which LinkCheck cannot resolve.
- * @param {*} value
- * @returns {*}
- */
-function sanitizeCraftingTags (value) {
-	if (typeof value === "string") {
-		return value
-			.replace(/\{@variantrule Crafting Material Descriptions\|COMCRAF\}/gi, "{@b Crafting Material Descriptions}")
-			.replace(/\{@variantrule The Twelve Uses of Dragon's Blood\|TGTT\}/gi, "{@b The Twelve Uses of Dragon's Blood}")
-			.replace(/\{@spell Identify\|TGTT\}/gi, "{@spell Identify}")
-			.replace(/\{@spell steel wind strike\}/gi, "{@spell Steel Wind Strike|XPHB}")
-			.replace(/\{@item arrow of dragon slaying\}/gi, "{@item Arrow of Slaying}")
-			.replace(/\{@(?:item|disease|feat|optfeature|skill|table|vehicle|vehupgrade|variantrule) ([^|}]+)\|(HHHVI|HHHVIII|Arcadia11|Ar8|COMCRAF|TGTT)(?:\|[^}]*)?\}/gi, "{@i $1}")
-			.replace(/\{@creature Faerie Dragon \(any\)\}/gi, "{@b Faerie Dragon (any)}")
-			.replace(/\{@creature Giant \(any race\)\}/gi, "{@b Giant (any race)}")
-			.replace(/\{@creature Half-Ogre\}/gi, "{@b Half-Ogre}")
-			.replace(/\{@creature Mephit\}/gi, "{@b Mephit}")
-			.replace(/\{@creature Slithering Tracker\}/gi, "{@creature Slithering Tracker|MPMM}")
-			.replace(/\{@creature Yuan-ti Malison(?:\|VGM)?\}/gi, "{@b Yuan-ti Malison}")
-			.replace(/\{@creature Naga, Bone\|MM\|Bone Naga\}/gi, "{@creature Bone Naga|XMM}")
-			.replace(/\{@creature Naga, Guardian\|MM\|Guardian Naga\}/gi, "{@creature Guardian Naga|MM}")
-			.replace(/\{@creature Naga, Spirit\|MM\|Spirit Naga\}/gi, "{@creature Spirit Naga|MM}")
-			.replace(/\{@creature Remorhaz, Young\|MM\|Young Remorhaz\}/gi, "{@creature Young Remorhaz|MM}");
-	}
-	if (Array.isArray(value)) return value.map(sanitizeCraftingTags);
-	if (!value || typeof value !== "object") return value;
-	if (value.type === "statblock" && /^(HHHVI|HHHVIII|Ar8)$/i.test(value.source || "")) {
-		return `{@i ${value.name || "unavailable reference"}}`;
-	}
-	for (const [key, child] of Object.entries(value)) value[key] = sanitizeCraftingTags(child);
-	return value;
-}
-
 class GenCrafting {
 	constructor () {
 		this._report = {
@@ -142,7 +105,6 @@ class GenCrafting {
 			itemMaterial: itemMaterials,
 			draconicResonance: draconicResonances,
 		};
-		sanitizeCraftingTags(output);
 
 		// Written via `CleanUtil` so `npm run clean-jsons` is a no-op on this file
 		fs.writeFileSync(OUT_PATH, CleanUtil.getCleanJson(output), "utf-8");

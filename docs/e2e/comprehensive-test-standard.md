@@ -169,6 +169,8 @@ not only the feature label. For TGTT Gambler this includes a deterministic
 cast
 receipt, the slot transaction (including result 49 preservation), Master of
 Fortune choice/confirmation, cancellation, save/load restoration, and the
-real effect or durable manual acknowledgement for the selected table row.
-The browser probe should use the page object or shared effect helper; direct
-state calls belong in Jest regression coverage.
+real effect or durable manual acknowledgement for the selected table row. The
+browser probe also confirms the rendered Respec surface is available before
+loading source-removed and wrong-source save variants through the normal
+deserialization/reconciliation path; focused Respec Jest owns the modal's
+subclass-change transaction itself.

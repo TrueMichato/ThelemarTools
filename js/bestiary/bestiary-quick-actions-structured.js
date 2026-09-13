@@ -130,7 +130,7 @@ export class BestiaryQuickActionsStructuredEditor {
 			try {
 				parsed = JSON.parse(raw || "[]");
 			} catch (e) {
-				throw new Error(`${_toTitleCase(prop)} entries contain invalid JSON: ${e.message}`, {cause: e});
+				throw new Error(`${_toTitleCase(prop)} entries contain invalid JSON: ${e.message}`);
 			}
 			if (!Array.isArray(parsed)) throw new Error(`${_toTitleCase(prop)} entries must be a JSON array.`);
 			return [prop, parsed];

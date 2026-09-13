@@ -239,12 +239,3 @@ Complete edition-gated feature tests (Druid Primal Order, Epic Boons, etc.).
 | File | Tests | Coverage |
 |---|---|---|
 | CharacterSheetConditionalModifiers.test.js | 15 | Unified conditional-modifier pipeline: `_isConditionalSaveSubtype` / `_buildConditionalModId` helpers, aggregator gating, both encodings (text-parsed + registry sub-typed `save:advantage:<sub>`), opt-in via `appliedConditionalIds`, `getAdvantageState` / `getModifierBonus` opt forwarding |
-
-### TGTT Gambler receipt/effect coverage
-
-`CharacterSheetTGTTGamblerEffects.test.js` now verifies TGTT source gating and
-artifact cleanup, canonical executable descriptors for the safe self rows,
-real condition/modifier mutation, and Color Spray/delayed spell transaction
-application. Receipt choices and confirmations are also exposed through the
-Gambling Table modal, while Play Mode's Reset Turn restores the same
-bonus-action flag consumed by Extra Luck.

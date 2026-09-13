@@ -45,16 +45,21 @@ tables, rather than the generic third-caster progression.
 
 ## Gambling Table boundary
 
-All 100 published rows have canonical descriptors in
-`CharacterSheetGamblerRules`. Safe self effects (including Persuasion
+All 100 published rows are copied losslessly from the canonical
+`Gambler's Folly` table in `homebrew/TravelersGuidetoThelemar.json` into
+`CharacterSheetGamblerRules`; renderer tags and omitted rule text are retained.
+Safe self effects (including Persuasion
 disadvantage, initiative penalties, Light, Prone/Blinded/Invisible,
 Reduce/half-speed changes, levitation, and X-ray vision) use the existing
 condition, modifier, active-state, and receipt systems. The 15-foot Silence
 result is an `area` resolution centered on the Gambler, not a self-only
-condition. Radius/creature-group outcomes are explicitly scoped as `area`;
-target, world, narrative, and DM-adjudicated outcomes remain durable manual
-resolutions with the published row text and explicit acknowledgement
-instructions. Manual outcomes can also be recorded as sticky notes through
+condition. Every radius, creature-group, and other multi-creature outcome is
+explicitly scoped as `area`; target, world, narrative, and DM-adjudicated
+outcomes remain durable manual resolutions with the published row text and
+explicit acknowledgement instructions. Row 11 is a safe automatic self-state:
+the Gambler sneezes, has attack disadvantage, cannot speak or cast spells, and
+the rolled `1d6`-minute duration expires through the normal round lifecycle.
+Manual outcomes can also be recorded as sticky notes through
 `recordGamblerTableResolutionAsNote()`, so recording is durable rather than
 only dismissing the receipt.
 

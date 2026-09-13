@@ -22,10 +22,14 @@
  */
 
 import "./setup.js";
+import {readFileSync} from "node:fs";
 
 let CharacterSheetState;
 let CharacterSheetSpells;
 let state;
+const canonicalGamblingTable = JSON.parse(
+	readFileSync(new URL("../../../homebrew/TravelersGuidetoThelemar.json", import.meta.url), "utf8"),
+);
 
 /** The authoritative L1-20 slot rows from the homebrew, as [L1, L2, L3, L4]. */
 const PUBLISHED_SLOTS = [
@@ -455,6 +459,33 @@ describe("Extra Luck + Master of Fortune resources", () => {
 		expect(state._data.resources[0].resourceType).toBe("gamblerExtraLuck");
 	});
 
+	it.each([
+		["Extra Luck", "unrelated-extra-luck"],
+		["Master of Fortune", "unrelated-master-of-fortune"],
+	])("preserves an unrelated same-named %s resource during Gambler cleanup", (name, id) => {
+		const feature = state.addFeature({
+			name,
+			source: "HB",
+			featureType: "Feat",
+			className: "Fighter",
+			classSource: "HB",
+		});
+		state._data.resources = [{
+			id,
+			name,
+			current: 1,
+			max: 1,
+			recharge: "long",
+			featureId: feature.id,
+		}];
+		state._ensureGamblerResources();
+		expect(state._data.resources).toEqual([expect.objectContaining({
+			id,
+			name,
+			featureId: feature.id,
+		})]);
+	});
+
 	it("spends and restores both pools on a long rest", () => {
 		buildGambler(17);
 		expect(state.useExtraLuck()).toBeTruthy();
@@ -717,9 +748,14 @@ describe("Versatile Gambler (L13)", () => {
 		it("defines an explicit descriptor for every published Gambling Table row", () => {
 			const descriptors = CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS;
 			expect(Object.keys(descriptors)).toHaveLength(100);
+			const sourceRows = canonicalGamblingTable.subclassFeature
+				.find(it => it.name === "Gambler's Folly")
+				.entries.find(it => it.type === "table").rows;
+			expect(CharacterSheetState.GAMBLER_GAMBLING_TABLE).toEqual(sourceRows.map(row => row[1]));
 			for (let roll = 1; roll <= 100; roll++) {
 				expect(descriptors[roll]).toEqual(expect.objectContaining({roll, id: `gambler-table-${roll}`}));
 				expect(["automatic", "confirm", "manual"]).toContain(descriptors[roll].automation);
+				expect(descriptors[roll].text).toBe(sourceRows[roll - 1][1]);
 			}
 		});
 
@@ -754,9 +790,10 @@ describe("Versatile Gambler (L13)", () => {
 		});
 
 		it("keeps every canonical radius/group row explicitly area-scoped", () => {
-			for (const roll of [6, 18, 23, 27, 39, 40, 41, 42, 43, 45, 46, 52, 59, 62, 73, 88]) {
+			for (const roll of [6, 18, 19, 23, 27, 39, 40, 41, 42, 43, 45, 46, 52, 59, 62, 68, 69, 71, 73, 75, 80, 87, 88]) {
 				expect(CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[roll].scope).toBe("area");
 			}
+			expect(CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[29].scope).toBe("self");
 		});
 
 		it.each([
@@ -765,6 +802,7 @@ describe("Versatile Gambler (L13)", () => {
 			[5, "activeState"],
 			[9, "condition"],
 			[10, "condition"],
+			[11, "activeState"],
 			[13, "activeState"],
 			[20, "activeState"],
 			[22, "activeState"],
@@ -793,6 +831,21 @@ describe("Versatile Gambler (L13)", () => {
 			const conditionReceipt = makeReceipt(9);
 			state.applyGamblingTableResolution(conditionReceipt.resolutionId, {confirmAutomatic: true});
 			expect(state.getConditions().some(c => c.name === "Prone")).toBe(true);
+		});
+
+		it("automates the safe row-11 self-state with a rolled, expiring duration", () => {
+			buildGambler(3);
+			state.startCombat();
+			state.setGamblerRollSource({nextInt: max => max === 100 ? 11 : max === 4 ? 4 : max === 6 ? 2 : 1});
+			const receipt = state.createGamblerCastResolution({spell: {name: "Sneezing"}, slotLevel: 1});
+			state.applyGamblingTableResolution(receipt.resolutionId, {confirmAutomatic: true});
+			const sneezing = state.getActiveStates().find(s => s.sourceFeatureId === `gambler-table:${receipt.resolutionId}`);
+			expect(sneezing).toEqual(expect.objectContaining({stateTypeId: "custom", roundsRemaining: 20}));
+			expect(sneezing.customEffects).toEqual(expect.arrayContaining([
+				expect.objectContaining({type: "disadvantage", target: "attack"}),
+			]));
+			for (let i = 0; i < 20; i++) state.advanceRound();
+			expect(state.getActiveStates().some(s => s.sourceFeatureId === `gambler-table:${receipt.resolutionId}` && s.active)).toBe(false);
 		});
 
 		it("executes confirmation transactions instead of acknowledging them", () => {

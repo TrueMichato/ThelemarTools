@@ -22,7 +22,6 @@ const _BLOCKLIST_FILE_PREFIXES = [
 
 const _BLOCKLIST_KEYS = new Set([
 	"_meta",
-	"_readme",
 	"_test",
 	"data",
 	"itemProperty",
