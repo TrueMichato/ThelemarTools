@@ -38,6 +38,7 @@ export class CharacterSheetRollHistory {
 		this._rolls = [];
 		this._panelEl = null;
 		this._listEl = null;
+		this._hubVisibilitySelect = null;
 		this._isOpen = false;
 		this._unreadCount = 0;
 		if (typeof document !== "undefined") this._buildPanel();
@@ -146,6 +147,12 @@ export class CharacterSheetRollHistory {
 		return true;
 	}
 
+	syncFromActiveCharacter () {
+		const visibility = this._getHubRollVisibility();
+		if (this._hubVisibilitySelect) this._hubVisibilitySelect.value = visibility;
+		return visibility;
+	}
+
 	/**
 	 * Clear all roll history.
 	 */
@@ -225,7 +232,8 @@ export class CharacterSheetRollHistory {
 			option.value = choice.value;
 			select.append(option);
 		}
-		select.value = this._getHubRollVisibility();
+		this._hubVisibilitySelect = select;
+		this.syncFromActiveCharacter();
 		select.addEventListener("change", () => {
 			if (this._setHubRollVisibility(select.value)) return;
 			select.value = this._getHubRollVisibility();

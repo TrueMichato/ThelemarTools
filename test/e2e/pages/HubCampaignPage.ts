@@ -1354,6 +1354,40 @@ export class HubCampaignPage {
 			.length).toBeGreaterThan(0);
 	}
 
+	async switchCharacterAndExpectRollVisibility ({
+		characterId,
+		rollVisibility,
+	}: {
+		characterId: string;
+		rollVisibility: "all_members" | "actor_and_dm";
+	}): Promise<void> {
+		await this.page.locator("#charsheet-sel-character").selectOption(characterId);
+		await expect.poll(() => new URL(this.page.url()).searchParams.get("id")).toBe(characterId);
+
+		await this.page.locator("#charsheet-btn-rolllog").click();
+		const visibility = this.page.locator("#charsheet-roll-history-visibility");
+		await expect(visibility).toBeVisible();
+		await expect(visibility).toHaveValue(rollVisibility);
+		await this.page.locator(".charsheet__roll-history-btn", {hasText: "✕"}).click();
+	}
+
+	async rollInitiativeAndExpectVisibility ({
+		campaignId,
+		characterId,
+		rollVisibility,
+	}: {
+		campaignId: string;
+		characterId: string;
+		rollVisibility: "all_members" | "actor_and_dm";
+	}): Promise<void> {
+		const countMatchingEvents = async () => (await this.getEvents(campaignId))
+			.filter(event => event.type === "roll.logged" && event.aggregateId === characterId && event.visibility === rollVisibility)
+			.length;
+		const countBefore = await countMatchingEvents();
+		await this.page.locator("#charsheet-box-initiative").click();
+		await expect.poll(countMatchingEvents).toBe(countBefore + 1);
+	}
+
 	async editCharacterHpAndResolveDeviceConflict ({
 		campaignId,
 		characterId,

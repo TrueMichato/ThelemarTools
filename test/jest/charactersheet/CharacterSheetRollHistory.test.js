@@ -124,6 +124,33 @@ describe("CharacterSheetRollHistory", () => {
 			expect(settings.hubRollVisibility).toBe("all_members");
 		});
 
+		test("syncs the displayed and submitted audience across active character switches", async () => {
+			let activeSettings = {hubRollVisibility: "actor_and_dm"};
+			const pLog = jest.fn(async () => ({}));
+			history = new CharacterSheetRollHistory({
+				_hubRollLogAdapter: {pLog},
+				_state: {getSettings: () => activeSettings},
+			});
+			const control = history._buildHubVisibilityControl();
+			const select = getStubByClass(control, "charsheet__roll-history-visibility-select");
+
+			expect(select.value).toBe("actor_and_dm");
+
+			activeSettings = {};
+			expect(history.syncFromActiveCharacter()).toBe("all_members");
+			expect(select.value).toBe("all_members");
+			history.addRoll({title: "Initiative", total: 12});
+			await Promise.resolve();
+			expect(pLog).toHaveBeenLastCalledWith(expect.objectContaining({visibility: "all_members"}));
+
+			activeSettings = {hubRollVisibility: "actor_and_dm"};
+			expect(history.syncFromActiveCharacter()).toBe("actor_and_dm");
+			expect(select.value).toBe("actor_and_dm");
+			history.addRoll({title: "Perception", total: 18});
+			await Promise.resolve();
+			expect(pLog).toHaveBeenLastCalledWith(expect.objectContaining({visibility: "actor_and_dm"}));
+		});
+
 		test("does not render a misleading audience control outside a campaign", () => {
 			expect(history._page._hubRollLogAdapter).toBeUndefined();
 			expect(history._panelEl).toBeNull();

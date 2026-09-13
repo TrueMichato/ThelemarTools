@@ -53,6 +53,35 @@ test("character edits and rolls update live while a second device is safely fenc
 		expect(await getPrivateRolls(peer)).toHaveLength(0);
 		await expect(peer.page.locator("#campaign-activity-list")).not.toContainText("Initiative");
 
+		const publicCharacter = await player.createCharacter({campaignId, name: "Public Switch"});
+		await player.openCharacterSheet({campaignId, characterId: character.id, name: "Mira"});
+		await player.waitForCharacterRealtimeLive();
+		await player.switchCharacterAndExpectRollVisibility({
+			characterId: publicCharacter.id,
+			rollVisibility: "all_members",
+		});
+		await player.rollInitiativeAndExpectVisibility({
+			campaignId,
+			characterId: publicCharacter.id,
+			rollVisibility: "all_members",
+		});
+		const getPublicRolls = async (page: HubCampaignPage) => (await page.getEvents(campaignId))
+			.filter(event => event.type === "roll.logged" && event.aggregateId === publicCharacter.id && event.visibility === "all_members");
+		expect(await getPublicRolls(peer)).toHaveLength(1);
+
+		await player.switchCharacterAndExpectRollVisibility({
+			characterId: character.id,
+			rollVisibility: "actor_and_dm",
+		});
+		await player.rollInitiativeAndExpectVisibility({
+			campaignId,
+			characterId: character.id,
+			rollVisibility: "actor_and_dm",
+		});
+		expect(await getPrivateRolls(player)).toHaveLength(2);
+		expect(await getPrivateRolls(dm)).toHaveLength(2);
+		expect(await getPrivateRolls(peer)).toHaveLength(0);
+
 		await otherDevice.openCharacterSheet({campaignId, characterId: character.id, name: "Mira"});
 		await otherDevice.editCharacterHpAndResolveDeviceConflict({
 			campaignId,
