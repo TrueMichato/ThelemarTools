@@ -40,6 +40,7 @@ import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
 describeCharacter({
 	preset: PRESET_FULL_CREATION_BARD_CHANGELING,
 	displayName: "College of Creation Bard",
+	megaCheckpoints: [3, 5, 11, 17, 18, 20],
 	// Performance of Creation is the subclass's signature "Use" ability.
 	signatureToggle: /performance of creation|mote of potential|animating performance/i,
 	signatureToggleNoDerivedEffect:
@@ -117,7 +118,14 @@ describeCharacter({
 		{level: 10, name: /magical secrets/i, kind: "passive"},
 		{level: 14, name: /magical secrets/i, kind: "passive"},
 		{level: 18, name: /magical secrets/i, kind: "passive"},
-		{level: 20, name: /superior inspiration/i, kind: "passive"},
+		{
+			level: 18,
+			name: /superior inspiration/i,
+			kind: "passive",
+			effects: [
+				{kind: "initiativeRestoresResource", resource: "Bardic Inspiration", spendTo: 0, restoresTo: 2},
+			],
+		},
 
 		// ── Mote of Potential (L3) ────────────────────────────────────
 		// Three modes ride on the SAME Bardic Inspiration die that was

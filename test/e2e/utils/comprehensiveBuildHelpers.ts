@@ -943,6 +943,7 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "rollSkillCheck"; skill?: string; proficientSkills?: true}
 	| {kind: "rollAttack"; attackName: string | RegExp}
 	| {kind: "rollInitiative"}
+	| {kind: "initiativeRestoresResource"; resource: string; spendTo: number; restoresTo: number}
 
 	// === Resource semantics extension ===
 	| {kind: "longRestRestores"; resource: string; toMax?: boolean}
@@ -1932,6 +1933,30 @@ async function _runPassiveOrRollEffect (
 			await charSheet.dismissTransientModals?.();
 			if (!r.clicked) throw new Error(`initiative roll button not found`);
 			if (r.threwError) throw new Error(`initiative click threw: ${r.errorMessage ?? "unknown"}`);
+			return;
+		}
+		case "initiativeRestoresResource": {
+			const before = await charSheet.getResource(e.resource).catch(() => null);
+			if (!before || before.max <= 0) throw new Error(`resource "${e.resource}" not on sheet`);
+			if (before.current < e.spendTo) {
+				throw new Error(`resource "${e.resource}" starts below requested spend target ${e.spendTo}: ${before.current}/${before.max}`);
+			}
+			const spend = before.current - e.spendTo;
+			if (spend > 0) {
+				const spent = await charSheet.useResourceByName(e.resource, spend);
+				if (!spent.ok || spent.remaining !== e.spendTo) {
+					throw new Error(`could not spend "${e.resource}" to ${e.spendTo}; got ${spent.remaining}/${before.max}`);
+				}
+			}
+			const rolled = await charSheet.clickInitiativeRoll();
+			await charSheet.dismissTransientModals?.();
+			if (!rolled.clicked) throw new Error(`initiative roll button not found`);
+			if (rolled.threwError) throw new Error(`initiative click threw: ${rolled.errorMessage ?? "unknown"}`);
+			const after = await charSheet.getResource(e.resource);
+			const expected = Math.min(before.max, e.restoresTo);
+			if (after.current !== expected) {
+				throw new Error(`expected initiative to restore "${e.resource}" to ${expected}, got ${after.current}/${after.max}`);
+			}
 			return;
 		}
 		case "longRestRestores":

@@ -4494,7 +4494,9 @@ class CharacterSheetCombat {
 	}
 
 	/**
-	 * Trigger recovery features that activate on initiative rolls (Uncanny Metabolism, Perfect Focus/Self).
+	 * Trigger recovery features that activate on initiative rolls.
+	 * Superior Inspiration (PHB Bard 20): If Bardic Inspiration is empty, regain 1 use.
+	 * Superior Inspiration (XPHB/TGTT Bard 18): Restore Bardic Inspiration to 2 uses.
 	 * Uncanny Metabolism (XPHB Monk 2+): Regain all focus points + heal (Martial Arts die + Monk level). 1/long rest.
 	 * Perfect Focus (XPHB Monk 15+): If UM not used and focus <= 3, regain up to 4.
 	 * Perfect Self (PHB Monk 20): If ki = 0, regain 4.
@@ -4503,6 +4505,20 @@ class CharacterSheetCombat {
 		const calc = this._state.getFeatureCalculations?.() || {};
 		const kiMax = this._state.getKiPoints?.() || 0;
 		const kiCurrent = this._state.getKiPointsCurrent?.() || 0;
+
+		// Superior Inspiration is automatic and must resolve before any optional prompt
+		// can return early from this shared initiative hook.
+		const inspirationRegained = this._state.restoreBardicInspirationOnInitiative?.() || 0;
+		if (inspirationRegained > 0) {
+			this.renderCombatResources();
+			this._page._renderResources?.();
+			if (this._page._features) this._page._features.render();
+			this._page.saveCharacter?.();
+			JqueryUtil.doToast({
+				type: "success",
+				content: `Superior Inspiration: regained ${inspirationRegained} use${inspirationRegained === 1 ? "" : "s"} of Bardic Inspiration.`,
+			});
+		}
 
 		// Predatory Instinct (Steel Hawk Fighter 15): automatic, no prompt — "when you
 		// roll initiative and have no uses of Launch remaining, you regain one use".

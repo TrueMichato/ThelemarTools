@@ -2874,10 +2874,6 @@ const FeatureEffectRegistry = {
 			{type: "modifier", modType: "save:advantage:frightened", value: 1, conditional: "while you can hear the bard"},
 			{type: "modifier", modType: "save:advantage:charmed", value: 1, conditional: "while you can hear the bard"},
 		]);
-		this.register("Superior Inspiration", [
-			{type: "resourceProperty", resource: "bardicInspiration", property: "regainOnInitiative"},
-		]);
-
 		// ======= CLERIC =======
 		// (Most cleric features are domain-specific, see subclasses)
 
@@ -25772,9 +25768,10 @@ class CharacterSheetState {
 						calculations.hasCountercharm = true;
 					}
 
-					// Superior Inspiration (level 18+) - both PHB and XPHB
-					if (level >= 18) {
+					// Superior Inspiration: PHB capstone at 20; XPHB/TGTT at 18.
+					if ((isXPHB && level >= 18) || (!isXPHB && level >= 20)) {
 						calculations.hasSuperiorInspiration = true;
+						calculations.superiorInspirationRestoreTo = isXPHB ? 2 : 1;
 					}
 
 					// Words of Creation (XPHB level 20 capstone - replaced Superior Inspiration capstone)
@@ -29908,16 +29905,6 @@ class CharacterSheetState {
 			});
 		}
 
-		// Superior Inspiration (Bard 20): regain 1 inspiration if have none on initiative
-		if (calculations.hasSuperiorInspiration && !alreadyProcessed("Superior Inspiration")) {
-			effects.push({
-				type: "resourceProperty",
-				resource: "bardicInspiration",
-				property: "regainOnInitiative",
-				source: "Superior Inspiration",
-			});
-		}
-
 		// College of Jesters - Performance proficiency
 		if (calculations.hasJesterBonusProficiencies && !alreadyProcessed("Jester Bonus Proficiencies")) {
 			effects.push({ type: "skillProficiency", skill: "performance", source: "Jester Bonus Proficiencies" });
@@ -30134,6 +30121,8 @@ class CharacterSheetState {
 	 * Should be called when class configuration changes.
 	 */
 	applyClassFeatureEffects () {
+		const shouldReconcileJesterCombatAccess = this._isJesterBard();
+
 		// First, clear all previously applied class feature effects
 		this._clearClassFeatureEffects();
 
@@ -30171,7 +30160,9 @@ class CharacterSheetState {
 		// no-op until the combat-method catalog is available, so they are safe to run on
 		// every effect application (load, level-up, level-down, focus-mode change).
 		this._repairCombatMethodMarkers();
+		this._migrateObsoleteJesterCombatMethods({shouldReconcileJesterCombatAccess});
 		this.reconcileGrantedCombatMethods();
+		this.ensureStaminaInitialized();
 
 		// Rebuild the Inexorable (IllMastery) save modifier from its persisted adjacent-
 		// hostile count — _clearClassFeatureEffects() sweeps all classFeature named modifiers,
@@ -30184,6 +30175,49 @@ class CharacterSheetState {
 		this.reconcileTargetEffects();
 
 		return appliedEffects;
+	}
+
+	_getLevelHistoryCombatTraditionCodes () {
+		return new Set(
+			(this._data.levelHistory || [])
+				.flatMap(it => it?.choices?.combatTraditions || [])
+				.map(it => this._normalizeCombatTradition(it)?.code)
+				.filter(Boolean),
+		);
+	}
+
+	_isJesterBard () {
+		return (this._data.classes || []).some(cls => {
+			if (String(cls?.name || "").toLowerCase() !== "bard") return false;
+			const subclassNames = [cls?.subclass?.name, cls?.subclass?.shortName]
+				.map(it => String(it || "").toLowerCase());
+			return subclassNames.includes("college of jesters") || subclassNames.includes("jesters");
+		});
+	}
+
+	_migrateObsoleteJesterCombatMethods ({shouldReconcileJesterCombatAccess = false} = {}) {
+		if (!shouldReconcileJesterCombatAccess) return;
+
+		const hasIndependentCombatAccess = !!this._data.combatTraditions?.length
+			|| (this._data.features || []).some(feature =>
+				CharacterSheetClassUtils.isCombatMethod(feature) && feature._autoGranted,
+			);
+		const hasLegitimateComedicJabs = this.hasCombatTradition("CJ");
+		const removedNames = new Set();
+
+		for (const feature of [...(this._data.features || [])]) {
+			if (!CharacterSheetClassUtils.isCombatMethod(feature)) continue;
+			const traditionCode = CharacterSheetClassUtils.getMethodTraditionCode(feature);
+			if (hasIndependentCombatAccess && (traditionCode !== "CJ" || hasLegitimateComedicJabs)) continue;
+			removedNames.add(String(feature.name || "").toLowerCase());
+			this.removeFeature(feature.id || feature.name, feature.id ? undefined : feature.source);
+		}
+
+		if (removedNames.has(String(this._data.activeStance || "").toLowerCase())) {
+			this._data.activeStance = null;
+		}
+		this._data.activeCombatMethodEffects = (this._data.activeCombatMethodEffects || [])
+			.filter(effect => !removedNames.has(String(effect?.methodName || effect?.name || "").toLowerCase()));
 	}
 
 	/**
@@ -30832,7 +30866,9 @@ class CharacterSheetState {
 
 		// Remove class feature combat traditions (TGTT subclass grants)
 		if (this._data._classFeatureCombatTraditions) {
+			const historyTraditionCodes = this._getLevelHistoryCombatTraditionCodes();
 			this._data._classFeatureCombatTraditions.forEach(t => {
+				if (historyTraditionCodes.has(this._normalizeCombatTradition(t)?.code)) return;
 				this.removeCombatTradition(t);
 			});
 		}
@@ -42811,6 +42847,25 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Apply Superior Inspiration when initiative is rolled.
+	 * @returns {number} Number of Bardic Inspiration uses restored.
+	 */
+	restoreBardicInspirationOnInitiative () {
+		const restoreTo = this.getFeatureCalculations().superiorInspirationRestoreTo;
+		if (!restoreTo) return 0;
+
+		const resource = this.getResource("Bardic Inspiration");
+		if (!resource) return 0;
+
+		const current = Math.max(0, Number(resource.current) || 0);
+		const target = Math.min(Math.max(0, Number(resource.max) || 0), restoreTo);
+		if (current >= target) return 0;
+
+		this.setResourceCurrent(resource.id, target);
+		return target - current;
+	}
+
+	/**
 	 * Resolve "cast without a spell slot" resources that apply to a given spell.
 	 * Driven by getFeatureCalculations().noSlotCasts (a generic, data-driven
 	 * descriptor), so any feature granting slot-free casts of a specific spell
@@ -49373,6 +49428,8 @@ class CharacterSheetState {
 	 */
 	ensureStaminaInitialized () {
 		if (!this.usesCombatSystem()) {
+			this._data.staminaCurrent = 0;
+			this._data.staminaMax = 0;
 			return;
 		}
 

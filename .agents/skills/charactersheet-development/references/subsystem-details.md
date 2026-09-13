@@ -2434,3 +2434,14 @@ Both flow through the same gating + picker pipeline:
 - Roll handlers (`_rollAbilityCheck`, `_rollSavingThrow`, `_rollSkillCheck`, `_rollAttack`) probe → `_pPickConditionalModifiers` modal → re-aggregate → emit `⚡ Name (effect, condition)` lines in the result note via `_formatAppliedConditionalsNote`
 - `_rollAttack` is `async` and only adds the picker's bonus delta (not the full re-aggregated bonus) to avoid double-counting registry mods already folded into `attack.attackBonus`
 - Escape hatch: `settings.skipConditionalPrompt` suppresses the picker; conditionals simply don't apply (no "always apply" mode by design — that would re-introduce the Dauntless Heritage bug)
+
+## Initiative-triggered resource recovery
+**Files**: state methods in `charactersheet-state.js`; shared trigger in `charactersheet-combat.js::_triggerInitiativeRecovery`.
+
+Automatic initiative recovery belongs in a canonical state method, then runs through the shared combat hook before any optional prompt. This ordering prevents a cancelled Monk recovery prompt from suppressing an automatic feature.
+
+- `restoreBardicInspirationOnInitiative()` implements Superior Inspiration through the canonical Bardic Inspiration resource and `setResourceCurrent()`, keeping the resource row and linked feature uses synchronized.
+- PHB Bard unlocks Superior Inspiration at level 20 and restores an empty pool to 1.
+- XPHB and TGTT Bards unlock it at level 18 and restore a pool below 2 to 2.
+- Recovery is capped by the actual resource maximum, including low-Charisma characters whose maximum is 1.
+- Do not represent automatic initiative recovery as an inert `resourceProperty`; the initiative hook must perform the mutation, refresh resource surfaces, and persist the character.

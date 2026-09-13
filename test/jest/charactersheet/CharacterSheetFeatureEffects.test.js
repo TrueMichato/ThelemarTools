@@ -732,11 +732,12 @@ describe("Bard Feature Effects", () => {
 	});
 
 	describe("Superior Inspiration (Level 20)", () => {
-		it("should track superior inspiration in applied effects", () => {
+		it("uses direct initiative recovery instead of inert applied-effect metadata", () => {
 			state.addClass({name: "Bard", source: "PHB", level: 20});
 			const appliedEffects = state.getAppliedClassFeatureEffects();
 
-			expect(appliedEffects.some(e => e.includes("Superior Inspiration"))).toBe(true);
+			expect(state.getFeatureCalculations().hasSuperiorInspiration).toBe(true);
+			expect(appliedEffects.some(e => e.includes("Superior Inspiration"))).toBe(false);
 		});
 	});
 });

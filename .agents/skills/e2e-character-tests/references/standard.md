@@ -238,6 +238,7 @@ stay clean). Use this decision tree:
 | Activation that records one or more affected creatures | targeted activation | `targetedFeatureActivation` (`feature`, `stateTypeId`, `targets`, optional `prerequisiteStateTypeId`, `contestWon`, `conditionalRollType`) — drives the real target modal, verifies persisted names, and proves target-only advantage remains default-off |
 | Toggle whose activation fires a save-for-damage / reaction burst | toggle trigger | `activeStateTrigger` (`label`, `actionType`, `damageType`, `damageMin`, `damageFormula`, `dcMin`) |
 | Adds a roll button (Bardic Inspiration, Channel Divinity option, …) | roll | `rollAbilityCheck`, `rollSavingThrow`, `rollSkillCheck`, `rollAttack`, `rollInitiative` |
+| Restores a resource when initiative is rolled | resource + roll | `initiativeRestoresResource` |
 | Restores a resource or feature-owned use pool on long / short rest | resource | `longRestRestores`, `shortRestRestores`, `longRestRestoresFeatureUses`, `shortRestRestoresFeatureUses` |
 | Grants spell slots at a level | spellcasting | `spellSlots` |
 | Adds an attack to the Combat tab | attack | `attackPresent` |

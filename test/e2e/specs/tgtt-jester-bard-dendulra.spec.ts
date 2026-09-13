@@ -17,6 +17,7 @@ import {buildSpecialtyChecks, buildJesterActChecks} from "../utils/tgttFeaturePo
 describeCharacter({
 	preset: PRESET_FULL_JESTER_DENDULRA,
 	displayName: "College of Jesters Bard Dendulra",
+	megaCheckpoints: [3, 5, 11, 17, 18, 20],
 	signatureToggle: /juggle|jaunt|jest|prankster|pantomime|fool|laughing|witty|agility|dazzling|tumbler|disengagement|ridiculous/i,
 	// The generic signature-toggle smoke check cannot choose one stable Act because the
 	// build's picks vary. `buildJesterActChecks()` supplies a real UI/runtime probe for
@@ -147,10 +148,17 @@ describeCharacter({
 		{level: 10, name: /magical secrets/i, kind: "passive"},
 		{level: 14, name: /magical secrets/i, kind: "passive"},
 		{level: 18, name: /magical secrets/i, kind: "passive"},
-		// Superior Inspiration — refills 1 BI use on initiative roll if
-		// at 0. Not a passive state value; can't be probed via the
-		// passive/toggle/roll APIs.
-		{level: 20, name: /superior inspiration/i, kind: "passive"},
+		// TGTT follows the XPHB Bard: Superior Inspiration arrives at
+		// level 18 and restores the pool to two uses on initiative.
+		{
+			level: 18,
+			name: /superior inspiration/i,
+			kind: "passive",
+			effects: [
+				{kind: "initiativeRestoresResource", resource: "Bardic Inspiration", spendTo: 0, restoresTo: 2},
+				{kind: "initiativeRestoresResource", resource: "Bardic Inspiration", spendTo: 1, restoresTo: 2},
+			],
+		},
 
 		// ── College of Jesters subclass ──────────────────────────────
 		// Jester's Acts (JA optional features) — 3 known from L3, 4 from
@@ -160,6 +168,15 @@ describeCharacter({
 		// bottom of this matrix, which is generated from
 		// homebrew/TravelersGuidetoThelemar.json — open-coding them here
 		// would let the two drift.
+		{
+			level: 3,
+			name: /jester's acts/i,
+			kind: "passive",
+			effects: [
+				{kind: "stateCall", method: "usesCombatSystem", exact: false},
+				{kind: "stateCall", method: "getStaminaMax", exact: 0},
+			],
+		},
 
 		// Other Jesters subclass features.
 		// Gifted Acrobat — climbing speed equal to walking speed, plus a

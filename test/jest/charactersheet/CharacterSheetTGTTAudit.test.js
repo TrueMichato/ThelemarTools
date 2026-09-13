@@ -142,6 +142,128 @@ describe("TGTT Tradition Auto-Grants", () => {
 		expect(calcs.hasJesterCombatMethods).toBeUndefined();
 	});
 
+	it("loads an old Jester save without obsolete Comedic Jabs methods or Stamina", () => {
+		makeTGTTBard(3, "College of Jesters");
+		const legacy = state.toJson();
+		legacy.classes[0].subclass = {name: "College of Jesters", shortName: "Jesters", source: "TGTT"};
+		legacy.combatTraditions = [{code: "CJ", name: "Comedic Jabs"}];
+		legacy._classFeatureCombatTraditions = ["Comedic Jabs"];
+		legacy.staminaCurrent = 6;
+		legacy.staminaMax = 6;
+		legacy.features = [{
+			id: "legacy-jester-method",
+			name: "Cutting Retort",
+			source: "TGTT",
+			_entityType: "combatMethod",
+			tradition: "Comedic Jabs",
+			optionalFeatureTypes: ["CTM:1"],
+		}];
+		legacy.activeStance = "Cutting Retort";
+		legacy.activeCombatMethodEffects = [{id: "legacy-effect", name: "Cutting Retort"}];
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(legacy);
+
+		expect(loaded.hasCombatTradition("Comedic Jabs")).toBe(false);
+		expect(loaded.getCombatMethods()).toHaveLength(0);
+		expect(loaded.getActiveStance()).toBeNull();
+		expect(loaded.getActiveCombatMethodEffects()).toHaveLength(0);
+		expect(loaded.usesCombatSystem()).toBe(false);
+		expect(loaded.getStaminaCurrent()).toBe(0);
+		expect(loaded.getStaminaMax()).toBe(0);
+	});
+
+	it("cleans a Jester save already re-saved without the obsolete tradition marker", () => {
+		makeTGTTBard(3, "College of Jesters");
+		const legacy = state.toJson();
+		legacy.combatTraditions = [];
+		legacy._classFeatureCombatTraditions = [];
+		legacy.staminaCurrent = 6;
+		legacy.staminaMax = 6;
+		legacy.features = [{
+			id: "orphaned-jester-method",
+			name: "Cutting Retort",
+			source: "TGTT",
+			_entityType: "combatMethod",
+			tradition: "Comedic Jabs",
+			optionalFeatureTypes: ["CTM:1"],
+		}];
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(legacy);
+
+		expect(loaded.getCombatMethods()).toHaveLength(0);
+		expect(loaded.usesCombatSystem()).toBe(false);
+		expect(loaded.getStaminaCurrent()).toBe(0);
+		expect(loaded.getStaminaMax()).toBe(0);
+	});
+
+	it("preserves explicitly chosen Comedic Jabs access in an old Jester save", () => {
+		makeTGTTBard(3, "College of Jesters");
+		const legacy = state.toJson();
+		legacy.combatTraditions = [{code: "CJ", name: "Comedic Jabs"}];
+		legacy._classFeatureCombatTraditions = ["Comedic Jabs"];
+		legacy.staminaCurrent = 4;
+		legacy.staminaMax = 4;
+		legacy.levelHistory = [{
+			level: 1,
+			className: "Bard",
+			classSource: "TGTT",
+			choices: {combatTraditions: ["CJ"]},
+		}];
+		legacy.features = [{
+			id: "chosen-jester-method",
+			name: "Cutting Retort",
+			source: "TGTT",
+			_entityType: "combatMethod",
+			tradition: "Comedic Jabs",
+			optionalFeatureTypes: ["CTM:1"],
+		}];
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(legacy);
+
+		expect(loaded.hasCombatTradition("Comedic Jabs")).toBe(true);
+		expect(loaded.getCombatMethods().map(it => it.name)).toContain("Cutting Retort");
+		expect(loaded.usesCombatSystem()).toBe(true);
+		expect(loaded.getStaminaMax()).toBeGreaterThan(0);
+	});
+
+	it("removes obsolete Jester access but preserves an independently chosen tradition and Stamina", () => {
+		makeTGTTBard(3, "College of Jesters");
+		const legacy = state.toJson();
+		legacy.combatTraditions = [
+			{code: "CJ", name: "Comedic Jabs"},
+			{code: "AM", name: "Adamant Mountain"},
+		];
+		legacy._classFeatureCombatTraditions = ["Comedic Jabs"];
+		legacy.staminaCurrent = 4;
+		legacy.staminaMax = 4;
+		legacy.levelHistory = [{
+			level: 1,
+			className: "Bard",
+			classSource: "TGTT",
+			choices: {combatTraditions: ["AM"]},
+		}];
+		legacy.features = [{
+			id: "legacy-jester-method",
+			name: "Cutting Retort",
+			source: "TGTT",
+			_entityType: "combatMethod",
+			tradition: "Comedic Jabs",
+			optionalFeatureTypes: ["CTM:1"],
+		}];
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(legacy);
+
+		expect(loaded.hasCombatTradition("Comedic Jabs")).toBe(false);
+		expect(loaded.hasCombatTradition("Adamant Mountain")).toBe(true);
+		expect(loaded.getCombatMethods()).toHaveLength(0);
+		expect(loaded.usesCombatSystem()).toBe(true);
+		expect(loaded.getStaminaMax()).toBeGreaterThan(0);
+	});
+
 	it("Non-Jester Bard should NOT get Comedic Jabs", () => {
 		makeTGTTBard(3, "College of Surrealism");
 		state.applyClassFeatureEffects();

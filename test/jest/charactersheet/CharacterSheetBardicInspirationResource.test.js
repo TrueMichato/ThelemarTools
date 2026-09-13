@@ -18,11 +18,14 @@
  */
 
 import "./setup.js";
-import "../../../js/charactersheet/charactersheet-state.js";
+import {jest} from "@jest/globals";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
+import "../../../js/charactersheet/charactersheet-state.js";
+import "../../../js/charactersheet/charactersheet-combat.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
+const CharacterSheetCombat = globalThis.CharacterSheetCombat;
 
 // Faithful PHB Bardic Inspiration uses text — the phrases FeatureUsesParser keys on.
 const BI_DESC_PHB =
@@ -222,6 +225,107 @@ describe("Bardic Inspiration resource (Bug 3)", () => {
 			const after = state.getFeatures().find(f => f.name === "Bardic Inspiration");
 			expect(after.uses.current).toBe(2);
 			expect(state.getResource("Bardic Inspiration").current).toBe(2);
+		});
+	});
+
+	describe("Superior Inspiration initiative recovery", () => {
+		it("PHB unlocks at Bard 20 and restores exactly one use from empty", () => {
+			const state = makeBard({level: 20, cha: 20});
+			const resource = state.getResource("Bardic Inspiration");
+			state.setResourceCurrent(resource.id, 0);
+
+			expect(state.getFeatureCalculations()).toMatchObject({
+				hasSuperiorInspiration: true,
+				superiorInspirationRestoreTo: 1,
+			});
+			expect(state.restoreBardicInspirationOnInitiative()).toBe(1);
+			expect(resource.current).toBe(1);
+			expect(state.getFeatures().find(f => f.name === "Bardic Inspiration").uses.current).toBe(1);
+		});
+
+		it("PHB does not unlock at Bard 18 or add a use when one remains", () => {
+			const level18 = makeBard({level: 18, cha: 20});
+			const level18Resource = level18.getResource("Bardic Inspiration");
+			level18.setResourceCurrent(level18Resource.id, 0);
+			expect(level18.getFeatureCalculations().hasSuperiorInspiration).toBeUndefined();
+			expect(level18.restoreBardicInspirationOnInitiative()).toBe(0);
+			expect(level18Resource.current).toBe(0);
+
+			const level20 = makeBard({level: 20, cha: 20});
+			const level20Resource = level20.getResource("Bardic Inspiration");
+			level20.setResourceCurrent(level20Resource.id, 1);
+			expect(level20.restoreBardicInspirationOnInitiative()).toBe(0);
+			expect(level20Resource.current).toBe(1);
+		});
+
+		it.each(["XPHB", "TGTT"])("%s unlocks at Bard 18 and restores the pool to two uses", source => {
+			const state = makeBard({
+				level: 18,
+				cha: 20,
+				source,
+				desc: BI_DESC_XPHB,
+			});
+			const resource = state.getResource("Bardic Inspiration");
+
+			expect(state.getFeatureCalculations()).toMatchObject({
+				hasSuperiorInspiration: true,
+				superiorInspirationRestoreTo: 2,
+			});
+
+			state.setResourceCurrent(resource.id, 0);
+			expect(state.restoreBardicInspirationOnInitiative()).toBe(2);
+			expect(resource.current).toBe(2);
+
+			state.setResourceCurrent(resource.id, 1);
+			expect(state.restoreBardicInspirationOnInitiative()).toBe(1);
+			expect(resource.current).toBe(2);
+
+			state.setResourceCurrent(resource.id, 3);
+			expect(state.restoreBardicInspirationOnInitiative()).toBe(0);
+			expect(resource.current).toBe(3);
+		});
+
+		it("caps XPHB recovery at the resource maximum", () => {
+			const state = makeBard({
+				level: 18,
+				cha: 8,
+				source: "XPHB",
+				desc: BI_DESC_XPHB,
+			});
+			const resource = state.getResource("Bardic Inspiration");
+			state.setResourceCurrent(resource.id, 0);
+
+			expect(resource.max).toBe(1);
+			expect(state.restoreBardicInspirationOnInitiative()).toBe(1);
+			expect(resource.current).toBe(1);
+		});
+
+		it("runs through the shared initiative hook and persists the restored resource", async () => {
+			const state = makeBard({
+				level: 18,
+				cha: 20,
+				source: "XPHB",
+				desc: BI_DESC_XPHB,
+			});
+			const resource = state.getResource("Bardic Inspiration");
+			state.setResourceCurrent(resource.id, 0);
+
+			const combat = Object.create(CharacterSheetCombat.prototype);
+			combat._state = state;
+			combat.renderCombatResources = jest.fn();
+			combat._page = {
+				_renderResources: jest.fn(),
+				saveCharacter: jest.fn(),
+				_features: {render: jest.fn()},
+			};
+
+			await combat._triggerInitiativeRecovery();
+
+			expect(resource.current).toBe(2);
+			expect(combat.renderCombatResources).toHaveBeenCalledTimes(1);
+			expect(combat._page._renderResources).toHaveBeenCalledTimes(1);
+			expect(combat._page._features.render).toHaveBeenCalledTimes(1);
+			expect(combat._page.saveCharacter).toHaveBeenCalledTimes(1);
 		});
 	});
 });
