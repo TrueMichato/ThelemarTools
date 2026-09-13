@@ -27079,3 +27079,41 @@ color: var(--cs-text-primary, #f1f5f9);
 	background: var(--cs-danger, #dc3545);
 	color: #fff;
 }
+
+.charsheet__chained-target-row {
+	display: flex;
+	align-items: center;
+	gap: .35rem;
+	flex-wrap: wrap;
+	padding: .4rem 0;
+	border-bottom: 1px solid var(--cs-border, #ccc);
+}
+
+.charsheet__chained-target-row .form-control {
+	min-height: 44px;
+}
+
+.cs-combat-target-effect {
+	display: grid;
+	gap: .65rem;
+	max-width: 32rem;
+}
+
+.cs-combat-target-effect .form-control,
+.cs-combat-target-effect button {
+	min-height: 44px;
+}
+
+.pm-chained-target {
+	display: grid;
+	grid-template-columns: minmax(8rem, 1fr) auto;
+	gap: .35rem;
+	align-items: center;
+	padding: .45rem 0;
+	border-bottom: 1px solid var(--cs-border, #ccc);
+}
+
+.pm-chained-target__meta {
+	grid-column: 1 / -1;
+	color: var(--cs-muted, #666);
+}

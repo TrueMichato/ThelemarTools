@@ -1095,3 +1095,8 @@ are **never** bundled — they have a real home, and copying them would launder
 someone else's content. Their hovers work only for a reader who has that brew
 installed, which the export reports as an informational note rather than a
 warning.
+
+
+## Chained Fury status
+
+The sheet tracks Chained Fury target identity and active effects in persisted state. Movement uses current walking speed and normal grapple drag cost; Unchained Fury removes the extra drag surcharge but does not remove movement accounting. Optional bonus-action doubling is tracked per combat round and is shared by Combat and Play Mode. Combat and Play Mode expose keyboard-reachable, 44px target controls; narrow layouts stack target fields and actions, while target/escape modal bodies scroll within the viewport and modal footers reserve bottom clearance in addition to any device safe-area inset. The target-aware modal chain reacquires and restores focus to the connected Spectral Chains attack control after its intermediate dialogs close.

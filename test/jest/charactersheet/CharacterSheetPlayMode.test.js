@@ -158,6 +158,91 @@ describe("CharacterSheetPlayMode", () => {
 		});
 	});
 
+	describe("Action economy rendering", () => {
+		it("refreshes the existing Your Turn card instead of appending a duplicate", () => {
+			const actionsHub = {
+				children: [],
+				querySelector (selector) {
+					return selector === "[data-pm-section='action-economy']"
+						? this.children.find(it => it.dataset?.pmSection === "action-economy") || null
+						: null;
+				},
+				insertBefore (node, before) {
+					const index = this.children.indexOf(before);
+					this.children.splice(index < 0 ? this.children.length : index, 0, node);
+					node.parentNode = this;
+				},
+			};
+			const economy = {action: false, bonus: false, reaction: false};
+			const pm = new CharacterSheetPlayMode({
+				getState: () => ({
+					getActionEconomyState: () => ({...economy}),
+					isActionTypeAvailable: type => economy[type],
+					restoreActionType: type => { economy[type] = true; return true; },
+					getSpeed: () => 30,
+				}),
+			});
+			const clickable = [];
+			pm._elActionsHub = actionsHub;
+			pm._makeCard = (parent) => {
+				const header = {
+					classList: {contains: cls => cls === "pm-card__header"},
+					parentNode: null,
+				};
+				const card = {
+					dataset: {},
+					parentNode: parent,
+					children: [header],
+					querySelector (selector) { return selector === ".pm-card__header" ? header : null; },
+					replaceChildren (...children) { this.children = children; },
+				};
+				header.parentNode = card;
+				parent.children.push(card);
+				return card;
+			};
+			pm._ce = (tag, className, parent) => {
+				const el = {
+					tag,
+					className,
+					parentNode: parent,
+					children: [],
+					remove () { parent.children.splice(parent.children.indexOf(this), 1); },
+					replaceChildren (...children) { this.children = children; },
+				};
+				parent.children.push(el);
+				return el;
+			};
+			pm._makeClickable = (el, label, handler) => {
+				el._label = label;
+				el._handler = handler;
+				clickable.push(el);
+			};
+			pm._icon = () => ({});
+			pm._setIconLabel = () => {};
+
+			const previousDocument = globalThis.document;
+			globalThis.document = {createTextNode: text => text};
+			try {
+				pm._renderActionEconomy();
+				expect(actionsHub.children.filter(it => it.dataset?.pmSection === "action-economy")).toHaveLength(1);
+				expect(clickable[1]._label).toBe("Restore Bonus");
+				clickable[1]._handler();
+
+				expect(actionsHub.children.filter(it => it.dataset?.pmSection === "action-economy")).toHaveLength(1);
+				expect(clickable.slice(-5).map(it => it._label)).toEqual([
+					"Restore Action",
+					"Use Bonus",
+					"Restore Reaction",
+					"Use Movement",
+					"Reset turn (restore all actions)",
+				]);
+			} finally {
+				if (previousDocument === undefined) delete globalThis.document;
+				else globalThis.document = previousDocument;
+			}
+		});
+	});
+
 	// ==========================================================================
 	// Favorites
 	// ==========================================================================

@@ -212,6 +212,24 @@ describe("CharacterSheetModal", () => {
 
 			expect(body.isFocused).toBeUndefined();
 		});
+
+		it("reacquires a connected focus target after the original control is replaced", async () => {
+			const original = mkEle({tag: "button"});
+			const replacement = mkEle({tag: "button"});
+			globalThis.document.activeElement = body;
+
+			await CharacterSheetModal.pGetShow({
+				title: "Choose target",
+				focusRestoreTarget: original,
+				getFocusRestoreTarget: () => replacement,
+			});
+			original.isConnected = false;
+			await calls[0].cbClose(false);
+			await new Promise(resolve => setTimeout(resolve, 5));
+
+			expect(original.isFocused).toBeUndefined();
+			expect(replacement.isFocused).toBe(true);
+		});
 	});
 
 	describe("initial focus", () => {

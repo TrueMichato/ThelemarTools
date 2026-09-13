@@ -134,6 +134,16 @@ to permit a third Astral Arms attack only while the current Attack action
 contains exclusively Astral Arms attacks. Empowered Arms uses the shared
 once-per-turn damage-rider path and is scoped to the same feature-owned row.
 
+TGTT Path of the Chained Fury is the first opt-in persisted target/effect
+integration. A Spectral Chains on-hit choice opens an accessible target form
+and stores the result in `CharacterSheetState.targetEffects`. The Combat tab
+and Play Mode render the same records, including chain occupancy, target size,
+range, grappled/restrained state, recurring force damage, and Release controls.
+`CharacterSheetState` owns the lifecycle: escape/release, movement beyond chain
+range, save/load reconciliation, and ending Rage or Manifest Chains all remove
+invalid effects. Existing prompt-only `attackOnHitOptions` remain unchanged
+unless an option explicitly declares `targetAware: true`.
+
 ### Attack Bonus Calculation
 
 ```javascript
@@ -743,3 +753,8 @@ The dice settings dropdown (in `charactersheet.html` near L256) has a **"Skip co
 ---
 
 *Previous: [Feature Calculations](./05-feature-calculations.md) | Next: [Spellcasting](./07-spellcasting.md)*
+
+
+## Data-driven attack allowances and target riders
+
+Attack-action allowances apply to every qualifying feature attack. Chained Fury Unchained Fury grants a third attack only while every Attack-action attack uses Manifest Chains; mixed sequences return to the normal allowance. Target-aware on-hit riders declare target-effect metadata and are routed through the shared state dispatcher; feature handlers validate their own canonical metadata contract. The target modal records identity, grapple/shove/restrain effects, range, final shove position, and accessible Strength/Dexterity escape resolution. Repeating recurring damage is an explicit override.

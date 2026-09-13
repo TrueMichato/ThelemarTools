@@ -26,7 +26,7 @@ describeCharacter({
 	],
 	signatureToggle: /rage|reckless attack|chained/i,
 	usage: {
-		atLevel: 5,
+		atLevel: 11,
 		useResourceName: "Rage",
 		attackName: /greataxe|battleaxe|maul/i,
 		skillRoll: {name: "Athletics"},
@@ -37,6 +37,12 @@ describeCharacter({
 		deathSaves: true,
 		applyCondition: {skip: true}, // blocked by CS-BUG-009 (addCondition hangs render — to retest after fix)
 		featAbility: {skip: true},
+		targetLifecycle: {
+			targetName: "Playwright ogre",
+			size: "large",
+			distance: 15,
+			effect: "restrain",
+		},
 	},
 	milestones: {
 		1:  {totalLevel: 1,  expectToggles: [/rage/i], expectResources: {"Rage": 2}},

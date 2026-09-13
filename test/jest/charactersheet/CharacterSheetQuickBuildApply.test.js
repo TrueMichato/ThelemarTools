@@ -7,6 +7,20 @@ const CharacterSheetQuickBuild = globalThis.CharacterSheetQuickBuild;
 const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
 
 describe("CharacterSheetQuickBuild _applyQuickBuild", () => {
+	test("preserves a selected TGTT Chained Fury subclass for level-up analysis", () => {
+		const qb = Object.create(CharacterSheetQuickBuild.prototype);
+		qb._selections = {
+			subclasses: {
+				"Barbarian_TGTT": {name: "Path of the Chained Fury", shortName: "Chained Fury", source: "TGTT"},
+			},
+		};
+		qb._state = {getClasses: jest.fn(() => [])};
+		expect(qb._getSubclassForClass("Barbarian", "TGTT", 14)).toMatchObject({
+			shortName: "Chained Fury",
+			source: "TGTT",
+		});
+	});
+
 	test("does not throw when there are no analyzed levels", async () => {
 		const originalUpdateRacialSpells = CharacterSheetClassUtils.updateRacialSpells;
 		CharacterSheetClassUtils.updateRacialSpells = jest.fn();

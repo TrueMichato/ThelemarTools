@@ -32,6 +32,23 @@ function getCombatHarness (state) {
 	return combat;
 }
 
+function getChainedState (level) {
+	const state = new CharacterSheetState();
+	state.setAbilityBase("str", 18);
+	state.setAbilityBase("con", 16);
+	state.setSpeed("walk", 30);
+	state.addClass({
+		name: "Barbarian",
+		source: "TGTT",
+		level,
+		subclass: {name: "Path of the Chained Fury", shortName: "Chained Fury", source: "TGTT"},
+	});
+	state.activateState("rage");
+	state.activateState("manifestChains");
+	state._data.inCombat = true;
+	return state;
+}
+
 describe("Way of the Astral Self — computed mechanics", () => {
 	it.each([
 		[3, "1d4", "2d4"],
@@ -236,6 +253,23 @@ describe("Way of the Astral Self — combat execution", () => {
 		combat._recordAttackForTurn({name: "Quarterstaff", actionType: "action"});
 		expect(combat._getAttackActionAllowance(astralAttack)).toBe(2);
 		expect(combat._canRollAttackActionAttack(astralAttack)).toBe(false);
+	});
+
+	it("applies the generic level-14 attack gate to Chained Fury, including mixed attacks", () => {
+		const state = getChainedState(14);
+		const combat = getCombatHarness(state);
+		const chains = state.getFeatureGrantedAttacks()[0];
+		expect(combat._getAttackActionAllowance(chains)).toBe(3);
+		combat._recordAttackForTurn(chains);
+		combat._recordAttackForTurn(chains);
+		expect(combat._canRollAttackActionAttack(chains)).toBe(true);
+		combat._recordAttackForTurn(chains);
+		expect(combat._canRollAttackActionAttack(chains)).toBe(false);
+		combat._resetTurnActionUsage();
+		combat._recordAttackForTurn(chains);
+		combat._recordAttackForTurn({name: "Greataxe", sourceFeature: "Greataxe", actionType: "action"});
+		expect(combat._getAttackActionAllowance(chains)).toBe(2);
+		expect(combat._canRollAttackActionAttack(chains)).toBe(false);
 	});
 
 	it("limits Empowered Arms to the Astral Arms attack row", () => {
