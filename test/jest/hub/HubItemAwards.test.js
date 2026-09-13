@@ -1,11 +1,13 @@
 import crypto from "node:crypto";
 
+import {createDefaultCampaignRulesPolicy} from "../../../js/hub/hub-campaign-rules.js";
 import {createHubApp} from "../../../server/src/app.js";
 import {
 	addAwardedEntryToCharacter,
 	addAwardedItemToCharacter,
 	normalizeSafeItemSummary,
 } from "../../../server/src/hub-actions.js";
+import {resolveItemAward} from "../../../server/src/item-award-catalog.js";
 import {MemoryHubStore} from "../../../server/src/memory-hub-store.js";
 import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
 
@@ -22,8 +24,10 @@ function getCookie (response, name) {
 	return (response.cookies || []).find(it => it.name === name)?.value;
 }
 
-async function pCreateStoreFixture () {
-	const store = new MemoryHubStore();
+async function pCreateStoreFixture ({
+	fnResolveAwardItem = async ({item}) => structuredClone(item),
+} = {}) {
+	const store = new MemoryHubStore({fnResolveAwardItem});
 	const accounts = Object.fromEntries(await Promise.all(Object.entries(IDENTITIES).map(async ([key, identity]) => [
 		key,
 		await store.pUpsertOAuthAccount(identity),
@@ -139,6 +143,95 @@ describe("Campaign Hub item award domain", () => {
 		expect(added.entry).not.toHaveProperty("_sourceIndex");
 	});
 
+	it("upgrades a legacy summary stack without merging incompatible rich or custom metadata", () => {
+		const legacyId = crypto.randomUUID();
+		const authoritativeItem = {
+			name: "Moonsteel Longsword",
+			source: "TST",
+			type: "M",
+			weight: 3,
+			weaponCategory: "martial",
+			dmg1: "1d8",
+			dmgType: "S",
+			entries: ["Trusted catalog text"],
+		};
+		const upgraded = addAwardedEntryToCharacter({
+			container: {
+				inventory: [{id: legacyId, item: {name: authoritativeItem.name, source: authoritativeItem.source}, quantity: 1}],
+				currency: {},
+			},
+			incoming: {item: authoritativeItem, quantity: 2},
+			isAllowLegacySummaryUpgrade: true,
+		});
+		expect(upgraded.container.inventory).toEqual([
+			expect.objectContaining({id: legacyId, item: authoritativeItem, quantity: 3}),
+		]);
+
+		const incompatible = addAwardedEntryToCharacter({
+			container: {
+				inventory: [{
+					id: "custom",
+					item: {...authoritativeItem, custom: {maker: "Rook"}},
+					quantity: 1,
+				}],
+				currency: {},
+			},
+			incoming: {item: authoritativeItem, quantity: 1},
+		});
+		expect(incompatible.container.inventory).toHaveLength(2);
+
+		const incomingLegacySummary = addAwardedEntryToCharacter({
+			container: {
+				inventory: [{
+					id: "custom",
+					item: {...authoritativeItem, custom: {maker: "Rook"}},
+					quantity: 1,
+				}],
+				currency: {},
+			},
+			incoming: {
+				item: {
+					name: authoritativeItem.name,
+					source: authoritativeItem.source,
+					weight: authoritativeItem.weight,
+				},
+				quantity: 2,
+			},
+		});
+		expect(incomingLegacySummary.container.inventory).toHaveLength(2);
+		expect(incomingLegacySummary.container.inventory[0]).toEqual(expect.objectContaining({
+			id: "custom",
+			quantity: 1,
+			item: expect.objectContaining({custom: {maker: "Rook"}}),
+		}));
+
+		const incomingCustom = addAwardedEntryToCharacter({
+			container: {
+				inventory: [{
+					id: legacyId,
+					item: {
+						name: authoritativeItem.name,
+						source: authoritativeItem.source,
+						typeCode: authoritativeItem.type,
+					},
+					quantity: 2,
+				}],
+				currency: {},
+			},
+			incoming: {
+				item: {...authoritativeItem, _isCustom: true, custom: {maker: "Rook"}},
+				quantity: 1,
+			},
+			isAllowLegacySummaryUpgrade: true,
+		});
+		expect(incomingCustom.container.inventory).toHaveLength(2);
+		expect(incomingCustom.container.inventory[0]).toEqual(expect.objectContaining({
+			id: legacyId,
+			quantity: 2,
+			item: expect.not.objectContaining({custom: expect.anything()}),
+		}));
+	});
+
 	it("locks unique PostgreSQL inventory participants in lexical order", async () => {
 		const calls = [];
 		const store = new PostgresHubStore({
@@ -226,6 +319,319 @@ describe("Campaign Hub item award domain", () => {
 				characterNameSnapshot: expect.any(Object),
 			},
 		});
+	});
+
+	it("persists trusted campaign-item metadata while keeping command and event summaries bounded", async () => {
+		const ctx = await pCreateStoreFixture({fnResolveAwardItem: resolveItemAward});
+		const authoritativeItem = {
+			name: "Moonsteel Longsword",
+			source: "TST",
+			page: 42,
+			edition: "classic",
+			type: "M",
+			rarity: "rare",
+			weight: 3,
+			value: 25000,
+			weaponCategory: "martial",
+			property: ["V"],
+			dmg1: "1d8",
+			dmg2: "1d10",
+			dmgType: "S",
+			weapon: true,
+			bonusWeapon: "+1",
+			entries: ["A synthetic metadata-rich weapon used only by this regression."],
+			effects: [{type: "skillBonus", skill: "athletics", value: 1}],
+			_baseSource: "TST",
+		};
+		const brewId = crypto.randomUUID();
+		ctx.store._brewVersions.set(brewId, {
+			id: brewId,
+			campaignId: ctx.campaign.id,
+			version: 1,
+			contentHash: crypto.createHash("sha256").update(JSON.stringify(authoritativeItem)).digest("hex"),
+			content: [{body: {item: [authoritativeItem]}}],
+			manifest: [],
+			createdAt: new Date().toISOString(),
+		});
+		ctx.store._campaigns.get(ctx.campaign.id).activeBrewBundleVersionId = brewId;
+		const directTarget = await ctx.pCreateCharacter(ctx.accounts.playerA, "Direct target");
+
+		const result = await ctx.store.pAwardItems({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+			source: {
+				kind: "campaign_item",
+				item: {
+					name: authoritativeItem.name,
+					source: authoritativeItem.source,
+					page: authoritativeItem.page,
+					edition: authoritativeItem.edition,
+					typeCode: "G",
+					rarity: "common",
+					weight: 0,
+					value: 0,
+				},
+			},
+			targetCharacterIds: [ctx.characterA.id, ctx.characterB.id],
+			quantity: 2,
+			note: "Regression",
+			idempotencyKey: "award-rich-campaign-item",
+		});
+
+		for (const characterId of [ctx.characterA.id, ctx.characterB.id]) {
+			expect(ctx.store._characters.get(characterId).data.inventory).toEqual([
+				expect.objectContaining({
+					item: authoritativeItem,
+					quantity: 2,
+				}),
+			]);
+		}
+		expect(result.source.item).toEqual({
+			name: authoritativeItem.name,
+			source: authoritativeItem.source,
+			page: authoritativeItem.page,
+			rarity: authoritativeItem.rarity,
+			weight: authoritativeItem.weight,
+			value: authoritativeItem.value,
+			typeCode: authoritativeItem.type,
+			edition: authoritativeItem.edition,
+		});
+		const audit = ctx.store.getAuditEntries().find(entry =>
+			entry.action === "item.award_batch"
+			&& entry.details?.awardId === result.awardId);
+		expect(audit.details.item).toEqual(result.source.item);
+		for (const event of ctx.store.getDomainEvents().filter(event => event.payload?.awardId === result.awardId && event.type === "item.granted")) {
+			expect(event.payload.entry.item).toEqual(result.source.item);
+			expect(event.payload.entry.item).not.toHaveProperty("entries");
+			expect(event.payload.entry.item).not.toHaveProperty("effects");
+			expect(event.payload.entry.item).not.toHaveProperty("_baseSource");
+		}
+
+		const direct = await ctx.store.pGrantItem({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+			characterId: directTarget.id,
+			item: {name: authoritativeItem.name, source: authoritativeItem.source},
+			quantity: 1,
+			idempotencyKey: "grant-rich-campaign-item",
+		});
+		expect(direct.entry.item).toEqual(authoritativeItem);
+		expect(ctx.store._characters.get(directTarget.id).data.inventory).toEqual([
+			expect.objectContaining({item: authoritativeItem, quantity: 1}),
+		]);
+		const repeatedDirect = await ctx.store.pGrantItem({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+			characterId: directTarget.id,
+			item: {name: authoritativeItem.name, source: authoritativeItem.source},
+			quantity: 1,
+			idempotencyKey: "grant-rich-campaign-item-again",
+		});
+		expect(ctx.store._characters.get(directTarget.id).data.inventory).toEqual([
+			expect.objectContaining({id: direct.entry.id, item: authoritativeItem, quantity: 1}),
+			expect.objectContaining({id: repeatedDirect.entry.id, item: authoritativeItem, quantity: 1}),
+		]);
+		expect(repeatedDirect.entry.id).not.toBe(direct.entry.id);
+		const directEvent = ctx.store.getDomainEvents().find(event =>
+			event.type === "item.granted"
+			&& event.aggregateId === directTarget.id);
+		expect(directEvent.payload.entry.item).toEqual({
+			name: authoritativeItem.name,
+			source: authoritativeItem.source,
+			page: authoritativeItem.page,
+			rarity: authoritativeItem.rarity,
+			weight: authoritativeItem.weight,
+			value: authoritativeItem.value,
+			typeCode: authoritativeItem.type,
+			edition: authoritativeItem.edition,
+		});
+	});
+
+	it("rejects an unprojectable authoritative item before mutating or consuming idempotency", async () => {
+		const invalidItem = {
+			name: "Longsword",
+			source: "PHB",
+			type: "W",
+			rarity: "x".repeat(81),
+			entries: ["Trusted content whose summary is outside the command/event contract."],
+		};
+		const ctx = await pCreateStoreFixture({
+			fnResolveAwardItem: async () => structuredClone(invalidItem),
+		});
+		const target = await ctx.pCreateCharacter(ctx.accounts.playerA, "Invalid summary target");
+		const auditCount = ctx.store.getAuditEntries().length;
+		const eventCount = ctx.store.getDomainEvents().length;
+		const receiptCount = ctx.store._commandReceipts.size;
+		const input = {
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+			characterId: target.id,
+			item: {name: invalidItem.name, source: invalidItem.source},
+			quantity: 1,
+			idempotencyKey: "invalid-authoritative-summary",
+		};
+
+		await expect(ctx.store.pGrantItem(input)).rejects.toMatchObject({code: "ITEM_AWARD_INVALID"});
+		await expect(ctx.store.pGrantItem(input)).rejects.toMatchObject({code: "ITEM_AWARD_INVALID"});
+		expect(ctx.store._characters.get(target.id).data.inventory).toEqual([]);
+		expect(ctx.store.getAuditEntries()).toHaveLength(auditCount);
+		expect(ctx.store.getDomainEvents()).toHaveLength(eventCount);
+		expect(ctx.store._commandReceipts.size).toBe(receiptCount);
+	});
+
+	it("conserves newly awarded metadata through accepted, rejected, cancelled, and stash transfers", async () => {
+		const ctx = await pCreateStoreFixture({fnResolveAwardItem: resolveItemAward});
+		const authoritativeItem = {
+			name: "Moonsteel Longsword",
+			source: "TST",
+			page: 42,
+			edition: "classic",
+			type: "M",
+			rarity: "rare",
+			weight: 3,
+			value: 25000,
+			weaponCategory: "martial",
+			property: ["V"],
+			dmg1: "1d8",
+			dmg2: "1d10",
+			dmgType: "S",
+			weapon: true,
+			bonusWeapon: "+1",
+			entries: ["A synthetic metadata-rich weapon used only by this regression."],
+			effects: [{type: "skillBonus", skill: "athletics", value: 1}],
+			_baseSource: "TST",
+		};
+		const brewId = crypto.randomUUID();
+		ctx.store._brewVersions.set(brewId, {
+			id: brewId,
+			campaignId: ctx.campaign.id,
+			version: 1,
+			contentHash: crypto.createHash("sha256").update(JSON.stringify(authoritativeItem)).digest("hex"),
+			content: [{body: {item: [authoritativeItem]}}],
+			manifest: [],
+			createdAt: new Date().toISOString(),
+		});
+		ctx.store._campaigns.get(ctx.campaign.id).activeBrewBundleVersionId = brewId;
+
+		const award = await ctx.store.pAwardItems({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+			source: {kind: "campaign_item", item: {name: authoritativeItem.name, source: authoritativeItem.source}},
+			targetCharacterIds: [ctx.characterA.id],
+			quantity: 8,
+			idempotencyKey: "award-transfer-lifecycle",
+		});
+		const awardedEntryId = award.targets[0].entryId;
+		const getCharacterEntry = accountId => ctx.store.pGetCharacter({
+			accountId,
+			characterId: accountId === ctx.accounts.playerA.id ? ctx.characterA.id : ctx.characterB.id,
+		}).then(({character}) => character.data.inventory.find(entry => entry.item.name === authoritativeItem.name));
+
+		const directInput = {
+			accountId: ctx.accounts.playerA.id,
+			campaignId: ctx.campaign.id,
+			sourceKind: "character",
+			sourceId: ctx.characterA.id,
+			targetKind: "character",
+			targetId: ctx.characterB.id,
+			payload: {items: [{entryId: awardedEntryId, quantity: 1}]},
+			idempotencyKey: "award-transfer-direct",
+		};
+		const direct = await ctx.store.pProposeTransfer(directInput);
+		await expect(ctx.store.pProposeTransfer(directInput)).resolves.toEqual(direct);
+		expect(direct.transfer.payload.escrow.items[0]).toEqual(expect.objectContaining({
+			id: awardedEntryId,
+			item: authoritativeItem,
+			quantity: 1,
+		}));
+		const acceptDirectInput = {
+			accountId: ctx.accounts.playerB.id,
+			campaignId: ctx.campaign.id,
+			transferId: direct.transfer.id,
+			decision: "accept",
+			idempotencyKey: "award-transfer-direct-accept",
+		};
+		const acceptedDirect = await ctx.store.pResolveTransfer(acceptDirectInput);
+		await expect(ctx.store.pResolveTransfer(acceptDirectInput)).resolves.toEqual(acceptedDirect);
+		expect(await getCharacterEntry(ctx.accounts.playerB.id)).toEqual(expect.objectContaining({
+			item: authoritativeItem,
+			quantity: 1,
+		}));
+
+		const party = await ctx.store.pGetPartyInventory({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+		});
+		const deposit = await ctx.store.pProposeTransfer({
+			accountId: ctx.accounts.playerA.id,
+			campaignId: ctx.campaign.id,
+			sourceKind: "character",
+			sourceId: ctx.characterA.id,
+			targetKind: "party_inventory",
+			targetId: party.id,
+			payload: {items: [{entryId: awardedEntryId, quantity: 2}]},
+			idempotencyKey: "award-transfer-deposit",
+		});
+		await ctx.store.pResolveTransfer({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+			transferId: deposit.transfer.id,
+			decision: "accept",
+			idempotencyKey: "award-transfer-deposit-accept",
+		});
+		const stashed = (await ctx.store.pGetPartyInventory({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+		})).inventory.find(entry => entry.item.name === authoritativeItem.name);
+		expect(stashed).toEqual(expect.objectContaining({item: authoritativeItem, quantity: 2}));
+
+		const withdraw = await ctx.store.pProposeTransfer({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+			sourceKind: "party_inventory",
+			sourceId: party.id,
+			targetKind: "character",
+			targetId: ctx.characterB.id,
+			payload: {items: [{entryId: stashed.id, quantity: 1}]},
+			idempotencyKey: "award-transfer-withdraw",
+		});
+		await ctx.store.pResolveTransfer({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+			transferId: withdraw.transfer.id,
+			decision: "accept",
+			idempotencyKey: "award-transfer-withdraw-accept",
+		});
+		expect(await getCharacterEntry(ctx.accounts.playerB.id)).toEqual(expect.objectContaining({
+			item: authoritativeItem,
+			quantity: 2,
+		}));
+
+		const assertRestoredAfterReject = async ({key, accountId}) => {
+			const before = await getCharacterEntry(ctx.accounts.playerA.id);
+			const proposed = await ctx.store.pProposeTransfer({
+				accountId: ctx.accounts.playerA.id,
+				campaignId: ctx.campaign.id,
+				sourceKind: "character",
+				sourceId: ctx.characterA.id,
+				targetKind: "character",
+				targetId: ctx.characterB.id,
+				payload: {items: [{entryId: awardedEntryId, quantity: 1}]},
+				idempotencyKey: `${key}-propose`,
+			});
+			const resolveInput = {
+				accountId,
+				campaignId: ctx.campaign.id,
+				transferId: proposed.transfer.id,
+				decision: "reject",
+				idempotencyKey: `${key}-resolve`,
+			};
+			const resolved = await ctx.store.pResolveTransfer(resolveInput);
+			await expect(ctx.store.pResolveTransfer(resolveInput)).resolves.toEqual(resolved);
+			expect(await getCharacterEntry(ctx.accounts.playerA.id)).toEqual(before);
+		};
+		await assertRestoredAfterReject({key: "award-transfer-reject", accountId: ctx.accounts.playerB.id});
+		await assertRestoredAfterReject({key: "award-transfer-cancel", accountId: ctx.accounts.playerA.id});
 	});
 
 	it("stages every target before publishing and rejects archived and cross-campaign targets without enumeration", async () => {
@@ -316,6 +722,45 @@ describe("Campaign Hub item award domain", () => {
 		expect(ctx.store.getAuditEntries().filter(audit => audit.action === "item.award_batch")).toHaveLength(1);
 		expect(ctx.store.getDomainEvents().filter(event => event.payload?.awardId === first.awardId && event.type === "item.granted")).toHaveLength(2);
 		await expect(ctx.store.pAwardItems({...input, quantity: 3})).rejects.toMatchObject({code: "IDEMPOTENCY_KEY_REUSED"});
+	});
+
+	it("rechecks the active rules version after asynchronous authoritative resolution", async () => {
+		let fnMarkResolutionStarted;
+		let fnReleaseResolution;
+		const resolutionStarted = new Promise(resolve => fnMarkResolutionStarted = resolve);
+		const resolutionGate = new Promise(resolve => fnReleaseResolution = resolve);
+		const ctx = await pCreateStoreFixture({
+			fnResolveAwardItem: async ({item}) => {
+				fnMarkResolutionStarted();
+				await resolutionGate;
+				return {...structuredClone(item), type: "G"};
+			},
+		});
+		const before = structuredClone(ctx.store._characters.get(ctx.characterA.id));
+		const pending = ctx.store.pAwardItems({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+			source: {kind: "catalog", item: {name: "Torch", source: "PHB"}},
+			targetCharacterIds: [ctx.characterA.id],
+			quantity: 1,
+			idempotencyKey: "award-rules-race",
+		});
+		await resolutionStarted;
+
+		const policy = createDefaultCampaignRulesPolicy();
+		policy.rules.find(rule => rule.id === "content.sources.allowed").parameters.sources = ["DMG"];
+		await ctx.store.pCreateAndActivateRulesPolicy({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+			policy,
+			expectedActiveRulesVersionId: null,
+			idempotencyKey: "award-rules-race-policy",
+		});
+		fnReleaseResolution();
+
+		await expect(pending).rejects.toMatchObject({code: "RULES_VERSION_STALE", status: 409});
+		expect(ctx.store._characters.get(ctx.characterA.id)).toEqual(before);
+		expect(ctx.store.getDomainEvents().filter(event => event.type === "item.granted")).toHaveLength(0);
 	});
 
 	it("debits exactly quantity times target count and rolls back an insufficient stash award", async () => {
@@ -448,7 +893,7 @@ describe("POST /api/campaigns/:campaignId/item-awards", () => {
 	let keyIndex;
 
 	beforeEach(async () => {
-		store = new MemoryHubStore();
+		store = new MemoryHubStore({fnResolveAwardItem: async ({item}) => structuredClone(item)});
 		identity = IDENTITIES.dm;
 		keyIndex = 0;
 		app = await createHubApp({

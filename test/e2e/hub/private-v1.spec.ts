@@ -72,6 +72,22 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 		await dm.grantXp({campaignId, characterName: "Rowan", amount: 250});
 		expect((await player.getCharacter(character.id)).data.xp).toBe(250);
 		const spellcaster = await player.createCharacter({campaignId, name: "Mira"});
+		const expectedLongsword = {
+			name: "Longsword",
+			source: "PHB",
+			page: 149,
+			edition: "classic",
+			type: "M",
+			rarity: "none",
+			weight: 3,
+			value: 1500,
+			weaponCategory: "martial",
+			property: ["V"],
+			dmg1: "1d8",
+			dmg2: "1d10",
+			dmgType: "S",
+			weapon: true,
+		};
 		await dm.awardCatalogItems({
 			campaignId,
 			characterNames: ["Rowan", "Mira"],
@@ -82,10 +98,10 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 		});
 		await player.expectLiveAwardArrival({itemName: "Longsword", source: "PHB", quantity: 2});
 		expect((await player.getCharacter(character.id)).data.inventory).toEqual(expect.arrayContaining([
-			expect.objectContaining({item: expect.objectContaining({name: "Longsword", source: "PHB"}), quantity: 2}),
+			expect.objectContaining({item: expect.objectContaining(expectedLongsword), quantity: 2}),
 		]));
 		expect((await player.getCharacter(spellcaster.id)).data.inventory).toEqual(expect.arrayContaining([
-			expect.objectContaining({item: expect.objectContaining({name: "Longsword", source: "PHB"}), quantity: 2}),
+			expect.objectContaining({item: expect.objectContaining(expectedLongsword), quantity: 2}),
 		]));
 
 		await dm.applyDamage({campaignId, characterName: "Rowan", amount: 4});
@@ -111,12 +127,12 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 		const transferredCharacter = await player.getCharacter(character.id);
 		expect(transferredCharacter.data.currency).toEqual(expect.objectContaining({cp: 5, sp: 4, ep: 3, gp: 7, pp: 1}));
 		expect(transferredCharacter.data.inventory).toEqual(expect.arrayContaining([
-			expect.objectContaining({item: expect.objectContaining({name: "Longsword", source: "PHB"}), quantity: 1}),
+			expect.objectContaining({item: expect.objectContaining(expectedLongsword), quantity: 1}),
 		]));
 		const partyInventory = await dm.getPartyInventory(campaignId);
 		expect(partyInventory.currency).toEqual(expect.objectContaining({cp: 3, sp: 2, ep: 1, gp: 3, pp: 1}));
 		expect(partyInventory.inventory).toEqual(expect.arrayContaining([
-			expect.objectContaining({item: expect.objectContaining({name: "Longsword", source: "PHB"}), quantity: 1}),
+			expect.objectContaining({item: expect.objectContaining(expectedLongsword), quantity: 1}),
 		]));
 		await dm.awardStashItems({
 			campaignId,
@@ -129,7 +145,7 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 			expect.objectContaining({item: expect.objectContaining({name: "Longsword", source: "PHB"})}),
 		]));
 		expect((await player.getCharacter(spellcaster.id)).data.inventory).toEqual(expect.arrayContaining([
-			expect.objectContaining({item: expect.objectContaining({name: "Longsword", source: "PHB"}), quantity: 3}),
+			expect.objectContaining({item: expect.objectContaining(expectedLongsword), quantity: 3}),
 		]));
 		await player.expectInsufficientTransferFeedback({campaignId, characterName: "Rowan"});
 

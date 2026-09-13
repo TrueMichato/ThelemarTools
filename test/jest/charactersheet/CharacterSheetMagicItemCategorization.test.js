@@ -159,6 +159,158 @@ describe("_getItemCategory keeps magic items out of 'Other'", () => {
 	});
 });
 
+describe("Hub summary-only inventory metadata migration", () => {
+	test("rehydrates a metadata-rich catalog weapon and preserves it through export/reload", () => {
+		const catalogItem = {
+			name: "Moonsteel Longsword",
+			source: "TST",
+			type: "M",
+			rarity: "rare",
+			weight: 3,
+			value: 25000,
+			reqAttune: "by a knight",
+			weaponCategory: "martial",
+			property: ["V"],
+			dmg1: "1d8",
+			dmg2: "1d10",
+			dmgType: "S",
+			weapon: true,
+			bonusWeapon: "+1",
+			entries: ["A synthetic metadata-rich weapon used only by this regression."],
+			effects: [{type: "skillBonus", skill: "athletics", value: 1}],
+			_baseSource: "TST",
+			_fullEntries: ["Transient renderer cache"],
+		};
+		const summaryOnlySave = {
+			name: "Hub character",
+			inventory: [{
+				id: "hub-award",
+				item: {
+					name: catalogItem.name,
+					source: catalogItem.source,
+					typeCode: catalogItem.type,
+					rarity: catalogItem.rarity,
+					weight: catalogItem.weight,
+					value: catalogItem.value,
+					_awardProvenance: {awardId: "award-1"},
+				},
+				quantity: 2,
+				equipped: false,
+				attuned: false,
+			}],
+		};
+		const state = newState();
+		state.setItemCatalog([catalogItem]);
+		state.loadFromJson(summaryOnlySave);
+		const inventory = makeInventory(state);
+		const item = state.getItemRaw("hub-award");
+
+		expect(item).toEqual(expect.objectContaining({
+			type: "M",
+			typeCode: "M",
+			weapon: true,
+			weaponCategory: "martial",
+			properties: ["V"],
+			dmg1: "1d8",
+			dmg2: "1d10",
+			dmgType: "S",
+			bonusWeapon: "+1",
+			entries: catalogItem.entries,
+			effects: catalogItem.effects,
+			_baseSource: "TST",
+			requiresAttunement: true,
+			_awardProvenance: {awardId: "award-1"},
+		}));
+		expect(item).not.toHaveProperty("_fullEntries");
+		expect(inventory._getItemCategory(item)).toBe("Weapons");
+		expect(state.getEffectiveWeaponDamage("hub-award")).toEqual(expect.objectContaining({
+			dice: "1d8",
+			damageType: "slashing",
+		}));
+
+		const exported = state.toJson();
+		const reloaded = newState();
+		reloaded.setItemCatalog([catalogItem]);
+		reloaded.loadFromJson(exported);
+		expect(reloaded.getItemRaw("hub-award")).toEqual(item);
+
+		const lateCatalog = newState();
+		lateCatalog.loadFromJson(summaryOnlySave);
+		lateCatalog.setItemCatalog([catalogItem]);
+		expect(lateCatalog.getItemRaw("hub-award")).toEqual(item);
+	});
+
+	test("does not replace an already canonical customized item with missing catalog fields", () => {
+		const state = newState();
+		state.setItemCatalog([{
+			name: "Moonsteel Longsword",
+			source: "TST",
+			type: "M",
+			weapon: true,
+			bonusWeapon: "+1",
+			entries: ["Catalog text"],
+			effects: [{type: "skillBonus", skill: "athletics", value: 1}],
+		}]);
+		state.loadFromJson({
+			name: "Customized character",
+			inventory: [{
+				id: "customized",
+				item: {
+					name: "Moonsteel Longsword",
+					source: "TST",
+					type: "M",
+					entries: ["Player-authored replacement text"],
+				},
+				quantity: 1,
+			}],
+		});
+
+		expect(state.getItemRaw("customized")).toEqual(expect.objectContaining({
+			entries: ["Player-authored replacement text"],
+		}));
+		expect(state.getItemRaw("customized")).not.toHaveProperty("bonusWeapon");
+		expect(state.getItemRaw("customized")).not.toHaveProperty("effects");
+	});
+
+	test("normalizes stored raw metadata after its campaign brew leaves the active catalog", () => {
+		const saved = {
+			name: "Retired brew character",
+			inventory: [{
+				id: "retired-brew-item",
+				item: {
+					name: "Retired Knight's Belt",
+					source: "TST",
+					type: "W",
+					reqAttune: true,
+					property: ["V"],
+					charges: 3,
+					effects: [{type: "carryCapacity", value: 50}],
+				},
+				quantity: 1,
+				equipped: true,
+				attuned: false,
+			}],
+		};
+		const state = newState();
+		state.loadFromJson(saved);
+		const item = state.getItemRaw("retired-brew-item");
+
+		expect(item).toEqual(expect.objectContaining({
+			type: "W",
+			typeCode: "W",
+			requiresAttunement: true,
+			properties: ["V"],
+			chargesCurrent: 3,
+		}));
+		expect(state.getCarryingCapacityBreakdown().flatBonus).toBe(0);
+
+		const reloaded = newState();
+		reloaded.loadFromJson(state.toJson());
+		expect(reloaded.getItemRaw("retired-brew-item")).toEqual(item);
+		expect(reloaded.getCarryingCapacityBreakdown().flatBonus).toBe(0);
+	});
+});
+
 describe("_migrateInventoryItemWeaponFlag repairs pre-fix saves", () => {
 	function stateWithInventory (inventory) {
 		const state = new CharacterSheetState();

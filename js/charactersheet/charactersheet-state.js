@@ -4360,22 +4360,65 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Restore catalog-only identity fields lost by the legacy inventory add path.
-	 * Exact source matching prevents a PHB row from adopting XPHB metadata.
+	 * Restore trusted catalog metadata omitted by legacy/Hub summary-only inventory rows.
+	 * Exact source matching prevents a PHB row from adopting XPHB metadata. Only absent
+	 * values are filled, so customizations and ownership-local state remain authoritative.
 	 */
 	_migrateInventoryItemMetadata () {
-		if (!this._allItems?.length || !Array.isArray(this._data?.inventory)) return;
-		const catalog = new Map(this._allItems
+		if (!Array.isArray(this._data?.inventory)) return;
+		const transientCatalogFields = new Set([
+			"__prop",
+			"__proto__",
+			"_attunement",
+			"_attunementCategory",
+			"_category",
+			"_entrySubType",
+			"_entryType",
+			"_fullEntries",
+			"_isBaseItem",
+			"_isEnhanced",
+			"_isItemGroup",
+			"_textTypes",
+			"constructor",
+			"prototype",
+		]);
+		const catalog = new Map((this._allItems || [])
 			.filter(item => item?.name && item?.source)
 			.map(item => [`${item.name}|${item.source}`.toLowerCase(), item]));
 		for (const inventoryRow of this._data.inventory) {
 			const item = inventoryRow?.item;
-			if (!item?.name || !item?.source || item._isCustom || item.source === "Custom") continue;
-			const match = catalog.get(`${item.name}|${item.source}`.toLowerCase());
-			if (!match) continue;
-			if (item.typeCode == null && match.type != null) item.typeCode = match.type;
-			if (item.scfType == null && match.scfType != null) item.scfType = match.scfType;
-			if (item.focus == null && match.focus != null) item.focus = MiscUtil.copyFast(match.focus);
+			if (!item || typeof item !== "object") continue;
+			const isCustom = item._isCustom || item.source === "Custom";
+			const match = !isCustom && item.name && item.source
+				? catalog.get(`${item.name}|${item.source}`.toLowerCase())
+				: null;
+			if (match && item.type == null) {
+				for (const [key, value] of Object.entries(match)) {
+					if (transientCatalogFields.has(key) || item[key] !== undefined) continue;
+					item[key] = MiscUtil.copyFast(value);
+				}
+			}
+			if (item.typeCode == null && item.type != null) item.typeCode = item.type;
+			if (item.scfType == null && match?.scfType != null) item.scfType = match.scfType;
+			if (item.focus == null && match?.focus != null) item.focus = MiscUtil.copyFast(match.focus);
+			if (item.requiresAttunement == null && item.reqAttune != null) item.requiresAttunement = !!item.reqAttune;
+			if (item.properties == null && Array.isArray(item.property)) item.properties = MiscUtil.copyFast(item.property);
+			for (const [suffix, ability] of [["Str", "str"], ["Dex", "dex"], ["Con", "con"], ["Int", "int"], ["Wis", "wis"], ["Cha", "cha"]]) {
+				for (const family of ["bonusSavingThrow", "bonusAbilityCheck"]) {
+					const storedKey = `${family}${suffix}`;
+					const catalogKey = `${family}_${ability}`;
+					if (item[storedKey] == null && item[catalogKey] != null) item[storedKey] = item[catalogKey];
+				}
+			}
+			const typeBase = String(item.type || item.typeCode || "").split("|")[0];
+			if (item.shield == null) item.shield = typeBase === "S";
+			if (item.armor == null) item.armor = ["LA", "MA", "HA"].includes(typeBase);
+			if (item.armorType == null && item.armor) {
+				if (typeBase === "HA") item.armorType = "heavy";
+				else if (typeBase === "MA") item.armorType = "medium";
+				else if (typeBase === "LA") item.armorType = "light";
+			}
+			if (item.chargesCurrent == null && typeof item.charges === "number") item.chargesCurrent = item.charges;
 		}
 	}
 

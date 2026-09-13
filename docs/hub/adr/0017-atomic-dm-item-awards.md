@@ -17,9 +17,10 @@ The award UI also needs four sources with different trust boundaries:
 - the active campaign brew bundle;
 - an authoritative party-inventory stack.
 
-The BFF must not load the full 5etools item catalog. Conversely, it must not accept rich arbitrary JSON merely
-because the browser labels it as catalog content. Carry data is projection-scoped, can be stale or intentionally
-unavailable, and cannot be reconstructed from hidden peer state.
+The BFF must not accept rich arbitrary JSON merely because the browser labels it as catalog content. It may,
+however, resolve a bounded identity against a generated repository-owned item catalog or the active validated
+campaign brew bundle before writing authoritative inventory. Carry data is projection-scoped, can be stale or
+intentionally unavailable, and cannot be reconstructed from hidden peer state.
 
 ## Decision
 
@@ -54,8 +55,21 @@ Catalog, recent, and campaign-item requests accept only this bounded summary:
 `name`, `source`, optional `page`, `rarity`, `weight`, `value`, `typeCode`, and `edition`.
 
 Unknown keys, invalid types/ranges, control text, HTML-like content, handler-like text, and executable URL schemes
-are rejected. `name` and `source` are required and normalized. This preserves the source identity and useful
-display/carry metadata without sending entries, renderer content, callbacks, or the full catalog to the BFF.
+are rejected. `name` and `source` are required and normalized. The summary is a command identity and
+privacy-safe projection, not the authoritative inventory object.
+
+Before a catalog-like award is staged, the server resolves that identity from a trusted source:
+
+- `catalog` resolves only from the generated repository-owned site item catalog;
+- `campaign_item` resolves only from the campaign's active validated brew bundle; direct metadata and simple
+  `name`/`source` `_copy` inheritance are supported, while runtime transformation/template execution is rejected;
+- `recent` resolves from either trusted source because the originating event intentionally retains only a safe
+  summary.
+
+An unknown or source-kind-mismatched identity fails with `ITEM_AWARD_SOURCE_NOT_FOUND`; invalid trusted
+inheritance fails with `ITEM_AWARD_SOURCE_INVALID`. Client-supplied display fields never override trusted
+metadata. The full resolved item is stored in each destination inventory, while the response source, event,
+and audit evidence remain bounded summaries.
 
 A party-inventory request supplies only its stack entry UUID. The server reads and locks that stack, validates
 the total debit (`quantity * target count`), removes it once through the transfer inventory primitives, and
@@ -65,19 +79,23 @@ splits transferable metadata into each destination. Browser-supplied stash item 
 
 The transaction:
 
-1. validates the actor, membership, targets, source, normalized quantity/note, and receipt;
-2. stages all destination inventory merges and removes stale `data.carry` authority;
-3. stages the one optional stash debit;
-4. validates every resulting character against cloud size/safety limits;
-5. writes one `item.award_batch` audit snapshot;
-6. emits one `item.granted` fact followed by one `character.projection.invalidated` event for each target in
+1. validates the actor, membership, targets, source summary, normalized quantity/note, and receipt;
+2. resolves catalog-like identities from trusted server-side content and rechecks campaign content policy
+   against the complete authoritative item;
+3. stages all destination inventory merges and removes stale `data.carry` authority;
+4. stages the one optional stash debit;
+5. validates every resulting character against cloud size/safety limits;
+6. writes one `item.award_batch` audit snapshot;
+7. emits one `item.granted` fact followed by one `character.projection.invalidated` event for each target in
    request order;
-7. emits one final `party_inventory.invalidated` event when the stash changed;
-8. stores the response receipt and commits.
+8. emits one final `party_inventory.invalidated` event when the stash changed;
+9. stores the response receipt and commits.
 
 `item.granted` is visible only to the actor/DM policy and that character's owner. Its payload carries the shared
-`awardId`, deterministic target index/count, source kind, bounded note, and safe granted entry. The batch audit
-is administrative evidence; there is no additional broad event exposing the recipient list.
+`awardId`, deterministic target index/count, source kind, bounded note, and a safe projection of the granted
+entry. It deliberately omits entries/effects, provenance, custom metadata, and wrapper notes even though those
+fields remain in authoritative inventory. The batch audit is administrative evidence; there is no additional
+broad event exposing the recipient list.
 
 ### Preview and live reconciliation
 
@@ -100,8 +118,10 @@ local, detached, and non-owner sheets do not attach this integration.
 
 - Multi-recipient and stash-backed awards are all-or-nothing and retry-safe.
 - Memory and PostgreSQL expose the same normalized request, response ordering, audit, and event ordering.
-- The catalog remains a static browser concern; the BFF receives only a strict summary.
+- The browser still sends only a strict summary; the BFF resolves it through generated/active trusted content
+  and persists the full authoritative item.
 - Preview can be incomplete without becoming a privacy leak or mutation blocker.
-- Existing single-character item grants remain compatible but now use the same safe item normalization.
-- Campaign source/edition enforcement remains a separate ADR 0015 policy slice; this command already provides the
-  authoritative boundary where that policy will be rechecked.
+- Existing single-character item grants remain compatible and use the same strict input plus authoritative
+  resolution path.
+- Campaign source/edition enforcement remains an ADR 0015 policy slice and is rechecked against the complete
+  authoritative item before the award commits.

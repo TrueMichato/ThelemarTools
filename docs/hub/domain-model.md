@@ -252,9 +252,12 @@ compatible. Restore preserves source identity/index.
 A DM/co-DM award is one command for an ordered unique target set. Every target receives the same whole-number
 quantity, or no target changes. A stash-backed award locks and debits the selected authoritative stack once for
 the full `quantity * target count`, preserves transferable stack metadata through the existing inventory
-normalization, and commits that debit with every destination write. Catalog-like sources carry only bounded safe
-summary metadata. All destination inventory changes delete derived `data.carry` authority instead of
-recomputing it without a Character Sheet.
+normalization, and commits that debit with every destination write. Catalog-like command bodies and
+`item.granted` events carry only bounded safe summary metadata, but the authority resolves `name|source` from
+the generated site catalog or active campaign brew and stores the complete trusted item. Recent-award identity
+may resolve through either trusted source. Unknown or source-kind-mismatched identities fail; browser metadata
+never becomes canonical merely because it is present in the summary. All destination inventory changes delete
+derived `data.carry` authority instead of recomputing it without a Character Sheet.
 
 ## Known domain gaps
 

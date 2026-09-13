@@ -116,11 +116,13 @@ export function normalizeSafeItemSummary (item) {
 
 export function getSafeItemSummary (item) {
 	if (!isPlainObject(item)) throwItemAwardInvalid(`Item must be an object.`);
-	return normalizeSafeItemSummary(Object.fromEntries(
+	const summary = Object.fromEntries(
 		SAFE_ITEM_SUMMARY_FIELDS
 			.filter(key => Object.hasOwn(item, key))
 			.map(key => [key, item[key]]),
-	));
+	);
+	if (summary.typeCode == null && typeof item.type === "string") summary.typeCode = item.type;
+	return normalizeSafeItemSummary(summary);
 }
 
 export function normalizeItemAwardQuantity (quantity) {
@@ -286,9 +288,53 @@ function getDestinationInventoryEntry (entry) {
 	return out;
 }
 
-function addDestinationInventoryEntry ({inventory, incoming}) {
+function isSafeSummaryOnlyItem (item) {
+	return isPlainObject(item)
+		&& Object.keys(item).every(key => SAFE_ITEM_SUMMARY_FIELDS.includes(key));
+}
+
+function getComparableInventoryEntryWithoutItem (entry) {
+	const out = getComparableInventoryEntry(entry);
+	delete out.item;
+	return out;
+}
+
+function isSafeSummaryCompatible (left, right) {
+	const leftSummary = getSafeItemSummary(left);
+	const rightSummary = getSafeItemSummary(right);
+	if (leftSummary.name !== rightSummary.name || leftSummary.source !== rightSummary.source) return false;
+	for (const key of SAFE_ITEM_SUMMARY_FIELDS) {
+		if (!Object.hasOwn(leftSummary, key) || !Object.hasOwn(rightSummary, key)) continue;
+		if (!isDeepStrictEqual(leftSummary[key], rightSummary[key])) return false;
+	}
+	return true;
+}
+
+function isCustomInventoryItem (item) {
+	return item?._isCustom
+		|| item?.source === "Custom"
+		|| Object.hasOwn(item || {}, "custom");
+}
+
+function addDestinationInventoryEntry ({inventory, incoming, isAllowLegacySummaryUpgrade = false}) {
 	const entry = getDestinationInventoryEntry(incoming);
-	const existing = inventory.find(it => isDeepStrictEqual(getComparableInventoryEntry(it), getComparableInventoryEntry(entry)));
+	let existing = inventory.find(it => isDeepStrictEqual(getComparableInventoryEntry(it), getComparableInventoryEntry(entry)));
+	if (
+		!existing
+		&& isAllowLegacySummaryUpgrade
+		&& !isSafeSummaryOnlyItem(entry.item)
+		&& !isCustomInventoryItem(entry.item)
+	) {
+		existing = inventory.find(candidate => {
+			if (!isDeepStrictEqual(
+				getComparableInventoryEntryWithoutItem(candidate),
+				getComparableInventoryEntryWithoutItem(entry),
+			)) return false;
+			if (!isSafeSummaryOnlyItem(candidate.item)) return false;
+			return isSafeSummaryCompatible(candidate.item, entry.item);
+		});
+		if (existing) existing.item = structuredClone(entry.item);
+	}
 	if (existing) {
 		existing.quantity = addFinite(existing.quantity, incoming.quantity, "Item quantity");
 		return existing;
@@ -298,13 +344,14 @@ function addDestinationInventoryEntry ({inventory, incoming}) {
 	return created;
 }
 
-export function addAwardedEntryToCharacter ({container, incoming}) {
+export function addAwardedEntryToCharacter ({container, incoming, isAllowLegacySummaryUpgrade = false}) {
 	const out = normalizeCharacterInventory(container);
 	const normalizedIncoming = structuredClone(incoming);
 	normalizedIncoming.quantity = normalizeItemAwardQuantity(normalizedIncoming.quantity);
 	const entry = addDestinationInventoryEntry({
 		inventory: out.inventory,
 		incoming: normalizedIncoming,
+		isAllowLegacySummaryUpgrade,
 	});
 	return {container: out, entry: structuredClone(entry)};
 }

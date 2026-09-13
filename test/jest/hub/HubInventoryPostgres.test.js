@@ -5,6 +5,22 @@ import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
 
 const {Pool} = pg;
 const describePostgres = process.env.HUB_TEST_POSTGRES_URL ? describe : describe.skip;
+const RICH_CATALOG_ITEM = Object.freeze({
+	name: "Moonsteel Longsword",
+	source: "PHB",
+	type: "M",
+	rarity: "rare",
+	weight: 3,
+	value: 25000,
+	weaponCategory: "martial",
+	property: ["V"],
+	dmg1: "1d8",
+	dmg2: "1d10",
+	dmgType: "S",
+	weapon: true,
+	entries: ["A synthetic metadata-rich weapon used only by this regression."],
+	_baseSource: "PHB",
+});
 
 describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 	let pool;
@@ -115,7 +131,14 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			ssl: false,
 			max: 6,
 		});
-		store = new PostgresHubStore({pool});
+		store = new PostgresHubStore({
+			pool,
+			fnResolveAwardItem: async ({item}) => (
+				`${item?.name}|${item?.source}`.toLowerCase() === "moonsteel longsword|phb"
+					? structuredClone(RICH_CATALOG_ITEM)
+					: structuredClone(item)
+			),
+		});
 		await store.pCheckHealth();
 
 		dm = await pCreateAccount("Inventory DM");
@@ -164,6 +187,72 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 
 	afterAll(async () => {
 		await pool?.end();
+	});
+
+	test("persists resolved catalog metadata while keeping the durable grant event bounded", async () => {
+		const legacyEntryId = crypto.randomUUID();
+		const target = await pCreateTargetCharacter(`${prefix} rich award`, [{
+			id: legacyEntryId,
+			item: {
+				name: RICH_CATALOG_ITEM.name,
+				source: RICH_CATALOG_ITEM.source,
+				typeCode: RICH_CATALOG_ITEM.type,
+			},
+			quantity: 1,
+		}]);
+		const result = await store.pAwardItems({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			source: {
+				kind: "catalog",
+				item: {
+					name: RICH_CATALOG_ITEM.name,
+					source: RICH_CATALOG_ITEM.source,
+					typeCode: "G",
+					rarity: "common",
+					weight: 0,
+					value: 0,
+				},
+			},
+			targetCharacterIds: [target.id],
+			quantity: 2,
+			idempotencyKey: `${prefix}-rich-award`,
+		});
+
+		const persisted = await pReadCharacter(targetOwner.id, target.id);
+		expect(persisted.data.inventory).toEqual([
+			expect.objectContaining({id: legacyEntryId, item: RICH_CATALOG_ITEM, quantity: 3}),
+		]);
+		expect(result.targets[0].entryId).toBe(legacyEntryId);
+		expect(result.source.item).toEqual({
+			name: RICH_CATALOG_ITEM.name,
+			source: RICH_CATALOG_ITEM.source,
+			rarity: RICH_CATALOG_ITEM.rarity,
+			weight: RICH_CATALOG_ITEM.weight,
+			value: RICH_CATALOG_ITEM.value,
+			typeCode: RICH_CATALOG_ITEM.type,
+		});
+		const event = (await pool.query(`
+			SELECT payload
+			FROM hub.domain_events
+			WHERE event_type = 'item.granted' AND payload->>'awardId' = $1
+		`, [result.awardId])).rows[0];
+		expect(event.payload.entry.item).toEqual({
+			name: RICH_CATALOG_ITEM.name,
+			source: RICH_CATALOG_ITEM.source,
+			rarity: RICH_CATALOG_ITEM.rarity,
+			weight: RICH_CATALOG_ITEM.weight,
+			value: RICH_CATALOG_ITEM.value,
+			typeCode: RICH_CATALOG_ITEM.type,
+		});
+		expect(event.payload.entry.item).not.toHaveProperty("entries");
+		expect(event.payload.entry.item).not.toHaveProperty("_baseSource");
+		const audit = (await pool.query(`
+			SELECT details
+			FROM hub.audit_entries
+			WHERE action = 'item.award_batch' AND details->>'awardId' = $1
+		`, [result.awardId])).rows[0];
+		expect(audit.details.item).toEqual(result.source.item);
 	});
 
 	test("keeps an archived campaign mutation-closed while preserving idempotent replay", async () => {
