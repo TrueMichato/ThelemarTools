@@ -2332,7 +2332,10 @@ class CharacterSheetClassUtils {
 		// Authoritative path: the caller knows exactly which class this spell
 		// belongs to. Stamp it directly so attribution never relies on a guess.
 		if (targetClass) {
-			const isGamblerTarget = /^gambler$/i.test(targetClass.subclass?.name || "");
+			const isGamblerTarget = /^rogue$/i.test(targetClass.name || "")
+				&& /^tgtt$/i.test(targetClass.source || "")
+				&& /^gambler$/i.test(targetClass.subclass?.name || "")
+				&& /^tgtt$/i.test(targetClass.subclass?.source || "");
 			const isWizardTarget = /^wizard$/i.test(targetClass.name || "");
 			const sourceClass = isGamblerTarget ? "Gambler" : (targetClass.name || null);
 			const sourceSubclass = isGamblerTarget ? "Gambler" : null;
@@ -2373,7 +2376,11 @@ class CharacterSheetClassUtils {
 		// as a Gambler spell (and rolled Gambler dice at cast time).
 		let sourceSubclass = null;
 		const resolvedEntry = classes?.find(c => (c?.name || "").toLowerCase() === (sourceClass || "").toLowerCase());
-		if (resolvedEntry && /^gambler$/i.test(resolvedEntry.subclass?.name || "")) {
+		if (resolvedEntry
+			&& /^rogue$/i.test(resolvedEntry.name || "")
+			&& /^tgtt$/i.test(resolvedEntry.source || "")
+			&& /^gambler$/i.test(resolvedEntry.subclass?.name || "")
+			&& /^tgtt$/i.test(resolvedEntry.subclass?.source || "")) {
 			sourceClass = "Gambler";
 			sourceSubclass = "Gambler";
 		}

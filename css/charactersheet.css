@@ -27117,3 +27117,38 @@ color: var(--cs-text-primary, #f1f5f9);
 	grid-column: 1 / -1;
 	color: var(--cs-muted, #666);
 }
+
+.gambler-choice-radiogroup {
+	display: grid;
+	gap: 0.5rem;
+}
+
+.gambler-choice-option {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	min-height: 44px;
+	padding: 0.45rem 0.65rem;
+	border: 1px solid var(--rgb-border-grey);
+	border-radius: 0.35rem;
+	cursor: pointer;
+}
+
+.gambler-choice-option input {
+	flex: 0 0 auto;
+	width: 20px;
+	height: 20px;
+}
+
+.gambler-choice-option:focus-within {
+	outline: 2px solid var(--rgb-link-color);
+	outline-offset: 2px;
+}
+
+.gambler-pending-receipt-list button {
+	min-height: 44px;
+}
+
+.charsheet__gambler-open-receipts {
+	min-height: 44px;
+}

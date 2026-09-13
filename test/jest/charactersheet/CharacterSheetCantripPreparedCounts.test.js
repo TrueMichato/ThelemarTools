@@ -379,8 +379,8 @@ describe("pickAddedSpellAttribution — Add-Spell modal stamps source so new spe
 			const r = C.pickAddedSpellAttribution({
 				spell: {name: "Bane", level: 1},
 				info: {type: "prepared", byClass: [{className: "Rogue", type: "prepared"}]},
-				classes: [{name: "Rogue", subclass: {name: "Gambler"}}],
-				targetClass: {name: "Rogue", source: "TGTT", subclass: {name: "Gambler"}},
+				classes: [{name: "Rogue", source: "TGTT", subclass: {name: "Gambler", source: "TGTT"}}],
+				targetClass: {name: "Rogue", source: "TGTT", subclass: {name: "Gambler", source: "TGTT"}},
 			});
 			expect(r).toMatchObject({sourceClass: "Gambler", sourceSubclass: "Gambler"});
 		});

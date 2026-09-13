@@ -832,6 +832,7 @@ export type EffectCheck = _EffectCommon & (
 		 */
 		isNull?: boolean;
 	}
+	| {kind: "gamblerProbe"; probe: "tools" | "folly" | "extraLuck" | "masterFortune" | "ui"}
 	| {kind: "proficiency"; proficiencyType: "armor" | "weapon"; includes: string}
 	| {kind: "featureUsesEqualAbilityMod"; feature: string; ability: AblKey; minimum?: number; recharge: "short" | "long"}
 	| {
@@ -1233,6 +1234,7 @@ const _TOGGLE_EFFECT_KINDS = new Set([
 	"toggleAddsCondition",
 	"toggleAddsAttack",
 ]);
+let _gamblerUiProbeCompleted = false;
 
 function _checkNumeric (
 	actual: number,
@@ -1252,6 +1254,7 @@ function _hasDamageType (list: string[], dt: string): boolean {
 async function _runPassiveOrRollEffect (
 	charSheet: CharacterSheetPage,
 	e: EffectCheck,
+	currentLevel?: number,
 ): Promise<void> {
 	switch (e.kind) {
 		case "saveBonus": {
@@ -1531,6 +1534,18 @@ async function _runPassiveOrRollEffect (
 			if (!e.ignoreResult && e.exact === undefined && e.min === undefined && e.contains === undefined && actual == null) {
 				throw new Error(`${label} is absent`);
 			}
+			return;
+		}
+		case "gamblerProbe": {
+			// The MEGA matrix rechecks the L3 row at every later level. Run the
+			// expensive real-browser lifecycle once per matrix invocation; later
+			// levels have additional fortune prompts and do not represent the
+			// owning lifecycle.
+			if ((e.probe === "ui" || e.probe === "folly") && (currentLevel || 0) > 3) return;
+			if (e.probe === "ui" && _gamblerUiProbeCompleted) return;
+			const result = await charSheet.probeGamblerFlow(e.probe);
+			if (!result?.ok) throw new Error(`Gambler ${e.probe} probe failed: ${result?.error || "unknown error"}`);
+			if (e.probe === "ui") _gamblerUiProbeCompleted = true;
 			return;
 		}
 		case "proficiency": {
@@ -3545,7 +3560,7 @@ export async function assertFeaturesMatrix (
 				const toggleEffects = expandedEffects.filter(e => _TOGGLE_EFFECT_KINDS.has(e.kind));
 
 				for (const eff of passiveOrRoll) {
-					try { await _runPassiveOrRollEffect(charSheet, eff); }
+					try { await _runPassiveOrRollEffect(charSheet, eff, currentLevel); }
 					catch (eErr: any) { errors.push(`${label} effect ${eff.kind}: ${eErr.message}`); }
 				}
 

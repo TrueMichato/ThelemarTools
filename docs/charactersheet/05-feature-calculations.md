@@ -12,6 +12,15 @@ This document provides comprehensive documentation for `getFeatureCalculations()
 - Ability scores
 - Proficiency bonus
 
+### TGTT Gambler source identity
+
+Gambler-only calculations are source-qualified, not name-qualified. A
+calculation may use the TGTT Gambler progression only when the class is Rogue
+from `TGTT`, the subclass is Gambler from `TGTT`, and the `enableTgtt` setting
+is on. This same identity gate is consumed by spell-level limits, prepared
+spell attribution, cantrip/resource reconciliation, and synthesized Gambler
+artifacts; a same-named PHB or homebrew subclass must remain an ordinary Rogue.
+
 ## Return Value Structure
 
 The method returns a flat object with boolean flags and computed values:

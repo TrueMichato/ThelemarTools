@@ -15722,8 +15722,8 @@ class CharacterSheetPage {
 			mode = mode || "normal";
 		}
 
-		const roll1 = RollerUtil.randomise(20);
-		const roll2 = RollerUtil.randomise(20);
+		const roll1 = this._state.rollD20?.("d20:first") ?? RollerUtil.randomise(20);
+		const roll2 = this._state.rollD20?.("d20:second") ?? RollerUtil.randomise(20);
 
 		let roll;
 		if (mode === "advantage") {
@@ -16358,7 +16358,7 @@ class CharacterSheetPage {
 
 		// The Gambling Table roll may need a choice (Master of Fortune rolls twice), and
 		// the spend has to be persisted + repainted like any other resource expenditure.
-		if (result.tableRoll) void this._pResolveGamblingTableRoll(result.tableRoll);
+		if (result.tableRoll) void this._pResolveGamblingTableRoll(result.tableRoll, result.resolutionId);
 		this._renderResources?.();
 		void this._saveCurrentCharacter?.();
 
@@ -16388,9 +16388,9 @@ class CharacterSheetPage {
 	 * roll gets its "choose one" modal. Safe no-op when the spells module is absent.
 	 * @param {object} tableRoll
 	 */
-	async _pResolveGamblingTableRoll (tableRoll) {
+	async _pResolveGamblingTableRoll (tableRoll, resolutionId = null) {
 		try {
-			await this._spells?._pOpenGamblingTableModal?.(tableRoll);
+			await this._spells?._pOpenGamblingTableModal?.(tableRoll, resolutionId);
 		} catch (e) {
 			// eslint-disable-next-line no-console
 			console.error("[CharSheet] Gambling Table modal error", e);
@@ -16436,7 +16436,7 @@ class CharacterSheetPage {
 
 			const escape = (/** @type {string} */ s) => String(s || "").replace(/[<>]/g, "");
 			const rows = offers.map((o, i) => `
-				<button class="ve-btn ve-btn-primary charsheet__fortune__offer" data-act="pick" data-idx="${i}">
+				<button class="ve-btn ve-btn-primary charsheet__fortune__offer" data-act="pick" data-idx="${i}" style="min-height: 44px; min-width: 44px;">
 					<span class="charsheet__fortune__offer-head">
 						<span class="charsheet__fortune__offer-name">${escape(o.name)}</span>
 						<span class="charsheet__fortune__offer-uses">${o.remaining}/${o.max} left</span>
@@ -16454,7 +16454,7 @@ class CharacterSheetPage {
 					</p>
 					<div class="charsheet__fortune__offers">${rows}</div>
 					<div class="charsheet__fortune__actions">
-						<button class="ve-btn ve-btn-default" data-act="decline">Keep the roll</button>
+						<button class="ve-btn ve-btn-default" data-act="decline" style="min-height: 44px; min-width: 44px;">Keep the roll</button>
 					</div>
 				</div>
 			`;

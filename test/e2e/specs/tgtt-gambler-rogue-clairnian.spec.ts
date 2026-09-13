@@ -180,12 +180,7 @@ describeCharacter({
 				// The rider mechanism itself: the coins declare a rider that
 				// `getAttackRiderNotes` surfaces on the attack row and in the
 				// roll toast.
-				{
-					kind: "stateCall",
-					method: "getAttackRiderNotes",
-					args: [{name: "Gambler's Coins", sourceItem: {name: "Gambler's Coins", _isGamblerWeapon: true}}],
-					contains: "half cover",
-				},
+				{kind: "gamblerProbe", probe: "tools"},
 			],
 		},
 		// Gambler's Folly: casting through an implement is a bet. A loss
@@ -196,7 +191,8 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				{kind: "featureCalculation", property: "hasGamblerFolly", exact: true},
-				{kind: "stateCall", method: "rollGamblingTable", path: "effect"},
+				{kind: "gamblerProbe", probe: "folly"},
+				{kind: "gamblerProbe", probe: "ui"},
 			],
 		},
 		// Gambler's Spellcasting: warlock-list cantrips + the subclass's
@@ -266,20 +262,7 @@ describeCharacter({
 				{kind: "featureCalculationDerivedFrom", property: "extraLuckUses", equals: "proficiencyBonus"},
 				{kind: "longRestRestores", resource: "Extra Luck"},
 				// The intervention API must OFFER Extra Luck on a low roll…
-				{
-					kind: "stateCall",
-					method: "getD20InterventionOffers",
-					args: [{naturalRoll: 3, effectiveRoll: 3, rollType: "attack"}],
-					contains: "gamblerExtraLuck",
-				},
-				// …and applying it must actually spend a use and re-roll.
-				{
-					kind: "stateCall",
-					method: "applyD20Intervention",
-					args: ["gamblerExtraLuck", {naturalRoll: 3, effectiveRoll: 3}],
-					path: "applied",
-					exact: true,
-				},
+				{kind: "gamblerProbe", probe: "extraLuck"},
 			],
 		},
 		// Versatile Gambler: the prepared-spell roll becomes 3d6 and the
@@ -302,22 +285,7 @@ describeCharacter({
 			effects: [
 				{kind: "featureCalculationDerivedFrom", property: "masterOfFortuneUses", equals: "proficiencyBonus"},
 				{kind: "longRestRestores", resource: "Master of Fortune"},
-				// Two rolls, and the result is flagged as needing a choice.
-				{kind: "stateCall", method: "rollGamblingTable", path: "needsChoice", exact: true},
-				// The nat-1 → nat-20 conversion is offered and applies.
-				{
-					kind: "stateCall",
-					method: "getD20InterventionOffers",
-					args: [{naturalRoll: 1, effectiveRoll: 1, rollType: "save"}],
-					contains: "gamblerMasterOfFortune",
-				},
-				{
-					kind: "stateCall",
-					method: "applyD20Intervention",
-					args: ["gamblerMasterOfFortune", {naturalRoll: 1, effectiveRoll: 1}],
-					path: "effectiveRoll",
-					exact: 20,
-				},
+				{kind: "gamblerProbe", probe: "masterFortune"},
 			],
 		},
 		// CS-BUG-017: specialty pick count short past L11. Keep the helper

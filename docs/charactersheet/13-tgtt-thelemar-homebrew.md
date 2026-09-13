@@ -23,6 +23,15 @@ This document catalogs all Thelemar homebrew content implemented in the characte
 
 **Total TGTT Tests**: 737 passing
 
+### Gambler Rogue lifecycle
+
+The TGTT Gambler is source-qualified as `Rogue|TGTT` plus
+`Gambler|TGTT`; disabling TGTT or changing either source removes Gambler-only
+spellcasting, resources, synthesized implements, pending receipts, and
+table-owned effects. Gambling Table self effects use the shared condition,
+named-modifier, and active-state expiry paths. Radius effects remain explicit
+`area`/manual outcomes, and manual outcomes may be persisted as sticky notes.
+
 ---
 
 ## Gemstone Empowerment

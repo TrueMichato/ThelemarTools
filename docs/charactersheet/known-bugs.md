@@ -10162,3 +10162,15 @@ conditional selection in Combat attack rolls.
 - `tgtt-belly-dancer-rogue-jaknian.spec.ts` drives the real L1-20 UI,
   including named Tantalizing and Percussive targets and default-off
   target advantage.
+
+---
+
+## CS-BUG-172 — TGTT Gambler fortune resources and table scopes — FIXED
+
+Iteration 7 now verifies every one of the 100 Gambling Table rows against the
+canonical TGTT source, including the previously mis-scoped rows 19, 29, 68,
+69, 71, 75, 80, and 87. Row 11 is an executable, expiring self-state rather
+than a manual-only acknowledgement. Gambler-owned typed and legacy resources,
+pending receipts, and table effects are removed on respec or when TGTT is
+disabled without removing unrelated same-named resources. Focused Jest and
+rendered browser probes cover these invariants.
