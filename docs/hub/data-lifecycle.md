@@ -1,7 +1,7 @@
 # Campaign Hub data lifecycle
 
 > **Status:** Current behavior plus approved Phase 6 policy
-> **Last verified:** 2026-09-03
+> **Last verified:** 2026-09-13
 > **Owner:** Campaign Hub maintainers
 
 ## Data inventory
@@ -212,8 +212,8 @@ compare the export against the deletion/privacy disclosure and add any newly int
 - Restore uses `--clean --if-exists --single-transaction`.
 - Credentials are passed through libpq environment fields, not process argument URLs.
 - Restores are performed only into an isolated drill database.
-- Oracle intentionally has no managed PITR. Encrypted backup, off-machine copy, and restore tooling exist; their
-  scheduled target-environment proof remains V1-G1 in the [living roadmap](roadmap.md).
+- Oracle intentionally has no managed PITR. Encrypted backup, off-machine copy, restore tooling, and genuine
+  scheduled target-environment execution were proven for V1-G1; see the [living roadmap](roadmap.md).
 
 ## Reserved fields without active lifecycle
 

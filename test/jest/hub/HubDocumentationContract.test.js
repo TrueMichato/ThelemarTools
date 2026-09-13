@@ -39,6 +39,7 @@ describe("Campaign Hub documentation contract", () => {
 		"troubleshooting.md",
 		"post-v1-roadmap.md",
 		"runbooks/README.md",
+		"runbooks/private-game-day.md",
 	];
 
 	it("contains and indexes every required handoff document", () => {

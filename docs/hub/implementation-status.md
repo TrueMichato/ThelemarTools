@@ -1,32 +1,23 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-09-06
+> **Last updated:** 2026-09-13
 > **Owner:** Campaign Hub maintainers
 
 ## Status
 
-Private invite-only V1 release `hub-staging-2026-09-01` at `8f181712` is deployed on a reused, Hub-only Oracle
-Always Free ARM instance. Foundry was intentionally decommissioned and is not a release prerequisite. The
-same-origin HTTPS, GitHub OAuth, PostgreSQL, static site, BFF, API, and WebSocket smoke checks pass. Phase 6G
-deployment is complete. The controlled one-DM/two-player test remains gated on
-host-operations proof and the physical game day described in the [living roadmap](roadmap.md). Semi-public
-onboarding remains intentionally disabled.
-
-The repository has advanced beyond that deployed release. [PR #241](https://github.com/TrueMichato/ThelemarTools/pull/241)
-merged carry/encumbrance enforcement as `de5acaabfa6cc64ce804bb43b94b74ccf3bc2714`;
-[PR #242](https://github.com/TrueMichato/ThelemarTools/pull/242) then integrated source/species/edition content
-enforcement as `168d6e9ac36c11e2c938f21a4324b803f3f2fb61`, and
-[PR #243](https://github.com/TrueMichato/ThelemarTools/pull/243) merged the role-adaptive Campaign Overview and
-authority hardening as `b8d31d3416b934cc9275b859b5932db050005351` from head
-`c8d5f0333d1bd8f7867b91c7ecb7170a9838671b`. That merged head is **not yet deployed** to Oracle.
+Private invite-only V1 release `hub-staging-2026-09-10-r7` at
+`77d955c053dcdfe949235620db93f7eba477af34` is deployed on the reused, Hub-only Oracle Always Free ARM
+instance. Foundry was intentionally decommissioned and is not a release prerequisite. The same-origin HTTPS,
+GitHub OAuth, PostgreSQL, static site, BFF, API, and WebSocket checks pass. Phase 6G deployment and the
+authenticated recovery/rollback and genuine scheduled-operations evidence for V1-G1 are complete. The physical
+one-DM/two-player game day remains V1-G2. Semi-public onboarding remains intentionally disabled.
 
 Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecycle administration, Phase 6C
 migration management, Phase 6D portable deployment, Phase 6E operations, Phase 6F CI/real-stack integration,
 and Phase 6G Oracle deployment are complete.
 
-All 59 planned implementation todos in the coordinating program are complete. The only remaining V1 gates are
-operator/human evidence: V1-G1 Oracle host-operations and recovery proof, followed by V1-G2's physical
-one-DM/two-player game day and explicit private-launch go/no-go.
+All 59 planned implementation todos in the coordinating program are complete. The only remaining V1 evidence is
+V1-G2's physical one-DM/two-player game day and explicit private-launch go/no-go.
 
 The first `t7-auth-providers` layer provides migration 0006, provider-neutral identity/session provenance,
 durable one-time OAuth transactions, and the validated registry. Layer 2 adds production Discord OAuth and
@@ -46,8 +37,8 @@ or volume teardown, or mutates services outside the Hub Compose project.
 V2-T0 release-automation implementation is **shipped** by
 [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219), and V2-T1 legible activity history is
 **shipped** by [PR #218](https://github.com/TrueMichato/ThelemarTools/pull/218). The release script's live
-Oracle dry run, deliberate release, and induced-failure drills are external host-operations evidence, not
-unfinished T0 implementation; they remain blocked under the first V1 gate below.
+Oracle dry run, deliberate r7 release, image preservation, and failure-path evidence are now proven external
+host-operations evidence rather than unfinished T0 implementation.
 
 V2-T2 projection/privacy is shipped: versioned authorization-scoped projections, metadata-only realtime
 invalidations, owner/DM/peer views, sharing controls, and fail-closed privacy coverage are implemented.
@@ -108,13 +99,15 @@ static image with release-built service workers, PostgreSQL 17, one-shot migrati
 least-privilege runtime, same-origin Caddy edge, WebSocket forwarding, liveness/readiness, and graceful
 restart.
 
-Phase 6E portable operations/observability is implemented: migration 0003 operational evidence, singleton
+Phase 6E portable operations/observability is implemented and its Oracle recovery path is proven: migration 0003 operational evidence, singleton
 bounded maintenance, protected Prometheus metrics, bounded route/request correlation, query/secret-safe JSON
 logs, SLO/alert catalog, AES-256-GCM backup/restore, dedicated backup/evidence roles, and executable deploy/
 rollback/outage/outbox/rotation/incident runbooks. Real cleanup, singleton lock, role boundaries, tamper
-failure, encrypted backup/restore, evidence-age metrics, and OAuth log sanitization were drilled. Oracle
-scheduling, off-machine backup, isolated restore, and rollback proof remain the V1 host-operations gate;
-managed PITR is intentionally not part of the Oracle free-tier design.
+failure, encrypted backup/restore, evidence-age metrics, and OAuth log sanitization were drilled. On Oracle,
+manual jobs, external heartbeat/failure signaling, off-machine copying, authenticated isolated restore,
+continuous RPO/RTO, exact-r6 compatibility, exact-r7 return, and exact cleanup passed on 2026-09-12. Genuine
+scheduled maintenance and backup executions passed on 2026-09-13, completing V1-G1; managed PITR is
+intentionally not part of the Oracle free-tier design.
 
 Phase 6F adds a pinned-action Hub pull-request workflow, deterministic install/lint/test/migration/supply-chain
 gates, exact-image export with Node/image SBOMs and provenance, production-excluded synthetic authentication
@@ -137,9 +130,9 @@ than registry digest, because the free tier is ARM while CI runners are x86 (ADR
 
 The guarded `do-connecting-ip` adapter and 25-second WebSocket heartbeat are implemented and pass the full
 real-stack gate; the adapter stays disabled on Oracle, where Caddy is the sole ingress. Release
-`hub-staging-2026-09-01` at `8f181712` is live on the Oracle VM originally repurposed from Foundry. Foundry has
-since been intentionally decommissioned, leaving a Hub-only host; the deployment smoke checks pass. Only the
-host-operations proof and physical one-DM/two-player game day remain before the V1 go/no-go.
+`hub-staging-2026-09-10-r7` at `77d955c053dcdfe949235620db93f7eba477af34` is live on the Oracle VM
+originally repurposed from Foundry. The deployment and recovery checks pass. Only genuine daily
+maintenance/backup timer evidence and the physical one-DM/two-player game day remain before the V1 go/no-go.
 
 ## Implemented
 
@@ -292,16 +285,13 @@ rewritten into a current whole-repository baseline. The latest merged handoffs a
 - Semi-public moderation, self-service recovery, billing, and legal/privacy publication are not enabled.
 - Private V1 supports one BFF replica and therefore no multi-replica application HA.
 
-## Remaining V1 gates
+## V1 gates
 
-1. **Host-operations proof:** run the shipped release automation's Oracle dry run and deliberate release against
-   the next verified `hub-*` tag containing merged head
-   `b8d31d3416b934cc9275b859b5932db050005351`; prove lock contention, pre-cutover backup failure, compatible app rollback,
-   redacted evidence, Hub-only service isolation without destructive Compose/volume teardown, timers, encrypted
-   off-machine backup, isolated restore, monitoring/alerts, and the schema-incompatible break-glass decision
-   without restoring over production.
-2. **Physical game day:** complete and record the private one-DM/two-player session with real GitHub OAuth and
-   physical devices, then make an explicit go/no-go decision.
+1. **Host-operations proof — complete:** installation, manual drills, five-minute monitoring, encrypted
+   off-machine backup, authenticated isolated restore, continuous RPO/RTO, exact-r6 rollback, exact-r7 return,
+   exact cleanup, and the first genuine scheduled maintenance/backup executions passed by 2026-09-13.
+2. **Physical game day:** execute the [private one-DM/two-player runbook](runbooks/private-game-day.md) with real
+   GitHub OAuth and physical devices, then make an explicit go/no-go decision.
 
 The [living roadmap](roadmap.md) owns scope, dependencies, and acceptance criteria for these gates and the
 approved V2 program.

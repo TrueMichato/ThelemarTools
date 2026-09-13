@@ -247,7 +247,7 @@ The Phase 6G Oracle topology provides or is configured to provide:
 
 Phase 6F exports the already-scanned x86 production image as `hub-bff-image.tar` and records its SHA-256,
 source/lockfile SHAs, versions, and SBOMs in `hub-ci-provenance.json`. The ARM Oracle path instead builds from
-the verified release tag as recorded by ADR 0008/0010; release `hub-staging-2026-09-01` at `8f181712` is the
-deployed baseline. The archive SHA-256 is not labeled as an OCI digest. CI loads the x86 archive, derives the
-test-auth layer from it, and separately requires the unmodified image's production entry point to become
-healthy. See [CI and provenance](ci-and-provenance.md).
+the verified release tag as recorded by ADR 0008/0010; annotated release `hub-staging-2026-09-10-r7` at
+`77d955c053dcdfe949235620db93f7eba477af34` is the deployed baseline. The archive SHA-256 is not labeled as an
+OCI digest. CI loads the x86 archive, derives the test-auth layer from it, and separately requires the
+unmodified image's production entry point to become healthy. See [CI and provenance](ci-and-provenance.md).

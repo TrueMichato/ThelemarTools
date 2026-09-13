@@ -3,11 +3,11 @@
 The Campaign Hub is an optional online layer over the existing local-first 5etools experience.
 Signed-out character sheets, homebrew, and DM screens remain supported and do not use hub storage.
 
-> **Implementation:** Coordinated implementation program complete through merged PRs #242 and #243
-> **Deployment:** Release `hub-staging-2026-09-01` at `8f181712` is live on private Oracle staging; host-
-> operations proof and the physical one-DM/two-player game day remain gated. Merged head
-> `b8d31d3416b934cc9275b859b5932db050005351` is not yet promoted
-> **Last verified:** 2026-09-05
+> **Implementation:** Coordinated implementation program complete through merged PR #253
+> **Deployment:** Release `hub-staging-2026-09-10-r7` at
+> `77d955c053dcdfe949235620db93f7eba477af34` is live on private Oracle staging; V1-G1 operations and
+> recovery proof passed, while the physical one-DM/two-player game day remains gated
+> **Last verified:** 2026-09-13
 > **Owner:** Campaign Hub maintainers
 
 ## Start here
@@ -37,6 +37,7 @@ Signed-out character sheets, homebrew, and DM screens remain supported and do no
 | CI, test-auth boundary, artifacts | [CI and provenance](ci-and-provenance.md) |
 | How to change Hub safely | [Contributor guide](contributing.md) |
 | Oracle staging and game-day plan | [Staging plan](staging-plan.md) |
+| Run the private one-DM/two-player game day | [Game-day runbook](runbooks/private-game-day.md) |
 | Managed provider decision | [Provider comparison](provider-comparison.md) |
 | Historical Phase 6A-6H launch plan | [Private-V1 roadmap](private-v1-roadmap.md) |
 | Diagnose a problem | [Troubleshooting](troubleshooting.md) and [runbooks](runbooks/README.md) |

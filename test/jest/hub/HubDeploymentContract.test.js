@@ -1,7 +1,11 @@
 import {spawnSync} from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {fileURLToPath} from "node:url";
 
 const read = path => fs.readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
+const pullBackupsPath = fileURLToPath(new URL("../../../deploy/hub/pull-backups.sh", import.meta.url));
 
 describe("Hub portable deployment contract", () => {
 	const dockerfile = read("server/Dockerfile");
@@ -252,6 +256,42 @@ describe("Hub portable deployment contract", () => {
 		expect(pullBackups).toContain("-mmin -1800");
 		expect(oracleOperations).toContain("Run this on a different trusted computer, not on the Oracle VM.");
 		expect(oracleOperations).toContain("Never restore over the production database.");
+	});
+
+	it("reports the newest copied backup by modification time across scheduled and prerelease names", () => {
+		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hub-pull-backups-"));
+		const binDir = path.join(tempDir, "bin");
+		const backupDir = path.join(tempDir, "backups");
+		fs.mkdirSync(binDir);
+		fs.mkdirSync(backupDir);
+		const rsyncPath = path.join(binDir, "rsync");
+		fs.writeFileSync(rsyncPath, "#!/bin/sh\nexit 0\n");
+		fs.chmodSync(rsyncPath, 0o755);
+
+		const olderPrerelease = path.join(backupDir, "hub-prerelease-hub-staging-r7-20260911T075748Z.dump.enc");
+		const newerScheduled = path.join(backupDir, "hub-20260912T092100Z.dump.enc");
+		fs.writeFileSync(olderPrerelease, "HUBENC1 older");
+		fs.writeFileSync(newerScheduled, "HUBENC1 newer");
+		const now = Date.now() / 1000;
+		fs.utimesSync(olderPrerelease, now - 120, now - 120);
+		fs.utimesSync(newerScheduled, now - 60, now - 60);
+
+		try {
+			const result = spawnSync("sh", [pullBackupsPath], {
+				encoding: "utf8",
+				env: {
+					...process.env,
+					HUB_BACKUP_REMOTE: "unused.example",
+					HUB_BACKUP_LOCAL_DIR: backupDir,
+					PATH: `${binDir}:${process.env.PATH}`,
+				},
+			});
+			expect(result.status).toBe(0);
+			expect(result.stdout).toContain(`Latest off-machine backup: ${newerScheduled}`);
+			expect(result.stdout).not.toContain(`Latest off-machine backup: ${olderPrerelease}`);
+		} finally {
+			fs.rmSync(tempDir, {recursive: true, force: true});
+		}
 	});
 
 	it("ships persistent Oracle maintenance, backup, and monitoring timers", () => {

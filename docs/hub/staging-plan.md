@@ -1,7 +1,7 @@
 # Campaign Hub staging plan
 
-> **Status:** Release deployed; host-operations proof and physical game day remain
-> **Last reviewed:** 2026-09-06
+> **Status:** Release r7 deployed; V1-G1 complete; physical game day remains
+> **Last reviewed:** 2026-09-13
 > **Owner:** Campaign Hub maintainers
 
 ## Objectives
@@ -16,16 +16,20 @@ environment and must not use copied production characters.
 - The host is Hub-only. Foundry was intentionally decommissioned and port 30000 is not a release prerequisite.
 - Caddy terminates public HTTPS and keeps the static site, API, OAuth, and WebSocket routes on one origin.
 - GitHub OAuth, PostgreSQL, campaign creation, and the basic deployment smoke checks pass.
-- Release `hub-staging-2026-09-01` at `8f181712` is deployed; Phase 6G is complete.
-- Repository head `b8d31d3416b934cc9275b859b5932db050005351` (merged PRs #242 and #243) is not yet promoted. Current
-  Oracle behavior is evidence for the older recorded release only; V1-G1 owns the next deliberate promotion and
-  host-operations/recovery proof.
+- Annotated release `hub-staging-2026-09-10-r7` at
+  `77d955c053dcdfe949235620db93f7eba477af34` is deployed; Phase 6G is complete.
+- Hash-matched systemd units, manual maintenance/backup, five-minute Healthchecks.io monitoring, off-machine
+  backup, authenticated isolated restore, continuous RPO/RTO, exact-r6 rollback, exact-r7 return, and cleanup
+  passed on 2026-09-12.
+- Genuine scheduled daily maintenance and backup executions passed on 2026-09-13 with one succeeded
+  operational row each, a verified encrypted archive, successful external heartbeat, exact container identity,
+  zero restarts, and unchanged migrations. V1-G1 is complete.
 - The instance must not be stopped, resized, detached, or recreated while replacement ARM capacity is
   unavailable; normal guest reboots are allowed.
 - The staging-baseline repair, lightweight Hub boot, Character Sheet-native campaign linking, role-aware
   campaign operation page, and human-readable interaction controls are deployed and pass Oracle smoke checks.
-- The [living roadmap](roadmap.md) now gates the V1 decision only on host-operations proof and the physical
-  one-DM/two-player game day.
+- The [living roadmap](roadmap.md) gates the V1 decision on the physical
+  [one-DM/two-player game day](runbooks/private-game-day.md) and explicit go/no-go.
 
 ## Environment requirements
 

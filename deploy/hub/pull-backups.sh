@@ -20,7 +20,21 @@ rsync \
 	"${HUB_BACKUP_REMOTE}:${remote_dir}/" \
 	"${local_dir}/"
 
-latest="$(find "$local_dir" -type f -name 'hub-*.dump.enc' -mmin -1800 -print | sort | tail -n 1)"
+if stat -c '%Y|%n' "$local_dir" >/dev/null 2>&1; then
+	latest="$(
+		find "$local_dir" -type f -name 'hub-*.dump.enc' -mmin -1800 -exec stat -c '%Y|%n' {} + \
+			| LC_ALL=C sort -t '|' -k1,1n -k2,2 \
+			| tail -n 1 \
+			| cut -d '|' -f 2-
+	)"
+else
+	latest="$(
+		find "$local_dir" -type f -name 'hub-*.dump.enc' -mmin -1800 -exec stat -f '%m|%N' {} + \
+			| LC_ALL=C sort -t '|' -k1,1n -k2,2 \
+			| tail -n 1 \
+			| cut -d '|' -f 2-
+	)"
+fi
 [ -n "$latest" ] || {
 	printf 'No encrypted Campaign Hub backup newer than 30 hours exists in %s.\n' "$local_dir" >&2
 	exit 1

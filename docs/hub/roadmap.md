@@ -1,7 +1,7 @@
 # Campaign Hub living roadmap
 
 > **Status:** Authoritative living roadmap
-> **Last reviewed:** 2026-09-06
+> **Last reviewed:** 2026-09-13
 > **Owner:** Campaign Hub maintainers
 
 This is the single source of truth for Campaign Hub delivery status, sequencing, dependencies, and acceptance
@@ -27,32 +27,32 @@ rather than inferring deployment or enablement from merged code.
 | Status | Milestone | Evidence or remaining decision |
 |---|---|---|
 | **shipped** | Private invite-only Hub implementation through Phase 6F | Server, browser, Character Sheet, DM Screen, lifecycle, migration, operations, CI, and real-stack evidence are summarized in [implementation status](implementation-status.md) |
-| **shipped** | Phase 6G Oracle deployment | Release `hub-staging-2026-09-01` at `8f181712` is deployed to the private Hub-only Oracle Always Free environment; HTTPS, GitHub OAuth, PostgreSQL, static, BFF, API, and WebSocket smoke checks pass |
-| **shipped** | V2-T0 release-automation implementation | [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219) merged the deliberate tagged Oracle release path; its real-host drills remain blocked under V1-G1 |
+| **shipped** | Phase 6G Oracle deployment | Annotated release `hub-staging-2026-09-10-r7` at `77d955c053dcdfe949235620db93f7eba477af34` is deployed to the private Hub-only Oracle Always Free environment; HTTPS, GitHub OAuth, PostgreSQL, static, BFF, API, and WebSocket checks pass |
+| **shipped** | V2-T0 release automation and live promotion | [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219) implemented the release path; the r7 dry-run/promotion, immutable evidence, image preservation, and non-disruptive rollback prerequisites were proven on Oracle |
 | **shipped** | V2-T1 legible activity history | [PR #218](https://github.com/TrueMichato/ThelemarTools/pull/218) merged semantic titles, privacy-safe display-name snapshots, historical fallback, and lifecycle coverage |
 | **shipped** | Coordinated implementation closeout | All 59 planned implementation todos are complete. [PR #241](https://github.com/TrueMichato/ThelemarTools/pull/241) merged carry/encumbrance enforcement as `de5acaabfa6cc64ce804bb43b94b74ccf3bc2714`; [PR #242](https://github.com/TrueMichato/ThelemarTools/pull/242) integrated source/species/edition content enforcement as `168d6e9ac36c11e2c938f21a4324b803f3f2fb61`; [PR #243](https://github.com/TrueMichato/ThelemarTools/pull/243) merged the role-adaptive Campaign Overview and authority hardening as `b8d31d3416b934cc9275b859b5932db050005351` |
 | **shipped** | V2-T2 projection/privacy foundation | Authorization-scoped projection storage, fetch, invalidation, sharing controls, and privacy tests are implemented |
 | **shipped** | V2-T5 whole-site campaign context | Device-scoped selection, cross-tab convergence, temporary rules/brew activation, and ordered teardown are implemented |
 | **shipped** | V2-T9 Campaign Overview redesign | The pinned session brief, role-specific continuation action, preserved workbench, responsive/accessibility coverage, and authority hardening are merged in PR #243 |
-| **active** | V1 external Oracle host-operations proof | Blocked pending real-host release/induced-failure evidence, timers, encrypted off-machine backup, isolated restore, and rollback proof |
-| **active** | V1 physical game day | Blocked on V1-G1; complete the one-DM/two-player session on physical devices and record the go/no-go evidence |
+| **shipped** | V1 external Oracle host-operations proof | Manual and genuine scheduled maintenance/backup, five-minute external monitoring, off-machine backup, authenticated isolated restore, RPO/RTO, exact-r6 rollback, exact-r7 return, cleanup, and zero-disruption identity checks passed by 2026-09-13 |
+| **active** | V1 physical game day | V1-G1 is complete; execute the [one-DM/two-player runbook](runbooks/private-game-day.md) on physical devices and record the go/no-go |
 | **active** | V2-T4 party inventory, carry, and item awards | Player stash/direct-transfer and DM atomic-award slices are implemented, with shared carry summaries and enforced carry/content boundaries; broader unified party/DM inventory UX remains |
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
 | **active** | V2-T7 player targeting | The one-player PHB/XPHB Cure Wounds slice is implemented; broader spells, abilities, resources, party/multi-target, and NPC/monster targeting remain |
 | **active** | Remaining V2 scope | V2-T3 still requires broader Character Sheet effect implementation and enablement; the remaining T4/T7 scope and V2-T8 account linking/rollout retain their own acceptance gates |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
 
-The merged repository head is `b8d31d3416b934cc9275b859b5932db050005351` (PR #243, head
-`c8d5f0333d1bd8f7867b91c7ecb7170a9838671b`). It is **not** the Oracle deployment. Oracle still runs the
-older recorded release above until an operator deliberately promotes a verified descendant release during V1-G1.
+Oracle runs annotated release `hub-staging-2026-09-10-r7` at
+`77d955c053dcdfe949235620db93f7eba477af34`, deployed by PR #253's hardened release path. Later repository
+changes are not target-environment evidence until separately reviewed, tagged, approved, and promoted.
 
 ## V1 launch closeout
 
-Phase 6G is complete. V1 has exactly two remaining launch gates; neither is an implementation phase.
-These are rollout/operations gates in parallel with V2 engineering. They gate expansion of the private pilot,
-not implementation or merging of independently safe V2 work.
+Phase 6G and V1-G1 are complete. V1 has one remaining launch gate: the physical game day and explicit
+private-launch go/no-go. This rollout gate proceeds in parallel with V2 engineering and gates expansion of the
+private pilot, not implementation or merging of independently safe V2 work.
 
-### V1-G1 — host-operations proof (**active**)
+### V1-G1 — host-operations proof (**complete 2026-09-13**)
 
 Scope:
 
@@ -60,11 +60,10 @@ Scope:
 - pull an encrypted backup to a second trusted machine without granting the staging host write access;
 - restore that backup to an isolated target and prove representative Hub workflows within RPO <=24 hours and
   RTO <=4 hours;
-- dry-run and deliberately promote a verified release containing merged head
-  `b8d31d3416b934cc9275b859b5932db050005351`;
+- dry-run and deliberately promote a verified release;
 - prove release operations remain confined to the named Hub Compose services and never use destructive
   environment or volume teardown;
-- rehearse rollback to release `hub-staging-2026-09-01` at `8f181712`, including application,
+- rehearse rollback to the prior exact release, including application,
   migration-compatibility, readiness, and WebSocket recovery checks.
 
 Acceptance:
@@ -79,9 +78,34 @@ Acceptance:
 - evidence records timestamps, release, migration version, operator, duration, outcome, and follow-up issues
   without secrets or private campaign content.
 
+Evidence completed on 2026-09-12:
+
+- r7 deployed from annotated tag `hub-staging-2026-09-10-r7`;
+- systemd maintenance, backup, and five-minute monitor timers installed and enabled from hash-matched files;
+- manual maintenance and backup succeeded; Healthchecks.io failure and recovery signals were observed;
+- encrypted archive `hub-20260912T092100Z.dump.enc` copied off-machine with matching SHA-256;
+- authenticated isolated restore passed with RPO 3,865 seconds and continuous RTO 6,772 seconds;
+- exact preserved-r6 application reads passed on schema `0007`, followed by exact-r7 return;
+- every disposable recovery resource and temporary credential was removed without changing production identities.
+
+Final scheduled evidence completed on 2026-09-13:
+
+- the maintenance timer triggered at `01:22:40Z`; one non-skipped service invocation produced one succeeded
+  operational row at `01:22:41.800835Z`;
+- the backup timer triggered at `02:28:07Z`; one service invocation produced one succeeded operational row and
+  `hub-20260913T022807Z.dump.enc`;
+- the archive is 139,953 bytes, mode `0600`, owned by `ubuntu:ubuntu`, starts with `HUBENC1`, and has SHA-256
+  `997c70f3c67e762422764203a3ab73582c2e6782a5b23ec2c4e5d51b7ca90816`;
+- the next daily timer schedules were present, Healthchecks monitoring succeeded, migrations remained exactly
+  `0001`-`0007`, and the exact r7 DB/BFF/static/edge containers remained running with zero restarts.
+
+V1-G1 is complete. Continue normal scheduled observation; do not treat this evidence as permission to skip
+future failures or freshness policies.
+
 ### V1-G2 — physical one-DM/two-player game day (**active**)
 
-Dependency: V1-G1 must pass first so the session is protected by proven recovery procedures.
+Dependency: V1-G1 passed on 2026-09-13, so this gate is unblocked. Execute
+[the private game-day runbook](runbooks/private-game-day.md); its existence is not evidence that V1-G2 has run.
 
 Scope:
 
@@ -106,9 +130,10 @@ pass. V2 engineering does not wait for V1-G1, V1-G2, or the V1 go/no-go. A train
 V2 work, and merging a train does not silently enable it.
 
 V2-T0's implementation is shipped and remains the first operational foundation. Its live Oracle
-dry-run/release and induced-failure evidence are part of V1-G1 and must pass before any new V2 product
-capability is enabled on Oracle. That enablement gate does not block T2 implementation or independently safe
-feature code from being reviewed and merged behind disabled capability gates.
+dry-run/release and induced-failure evidence passed during r7 qualification. Genuine scheduled daily
+maintenance and backup executions passed on 2026-09-13, completing V1-G1. V2 product enablement remains
+subject to each train's own acceptance criteria and the private-launch go/no-go; independently safe feature
+code can still be reviewed and merged behind disabled capability gates.
 
 Every train must:
 
@@ -135,13 +160,13 @@ The approved decision-record sequence has landed:
 
 ## Approved V2 release trains
 
-### V2-T0 — release automation (**shipped — implementation; external proof active**)
+### V2-T0 — release automation (**shipped — implementation and r7 live promotion proven**)
 
 Purpose: make the exact source-to-Oracle promotion and rollback path repeatable before increasing product scope.
 
 Implementation shipped in [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219). The live Oracle
-dry run, deliberate release, and induced-failure evidence remain blocked under V1-G1; this heading does not
-claim those operator drills have passed.
+path subsequently promoted annotated r7, preserved the prior exact application images, and produced redacted
+release evidence. Genuine daily maintenance/backup timer observations completed V1-G1 on 2026-09-13.
 
 Deliver:
 

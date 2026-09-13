@@ -1,7 +1,7 @@
 # Campaign Hub runbooks
 
 > **Status:** Current portable and Oracle operations runbooks
-> **Last reviewed:** 2026-09-06
+> **Last reviewed:** 2026-09-13
 > **Owner:** Campaign Hub maintainers
 
 Runbooks are executable operational procedures. Each final runbook must contain:
@@ -35,6 +35,7 @@ Runbooks are executable operational procedures. Each final runbook must contain:
 - [Private OAuth allowlist change](allowlist-change.md)
 - [Authentication provider registry and rollback](auth-provider-registry.md)
 - [Campaign ownership recovery](campaign-ownership-recovery.md)
+- [Private one-DM/two-player game day](private-game-day.md)
 
 ## Historical reference
 
@@ -42,5 +43,6 @@ Runbooks are executable operational procedures. Each final runbook must contain:
   its Foundry coexistence instructions are superseded, and current host operations route through the runbooks
   above.
 
-The procedures are implemented. Private launch still requires installing and drilling the Oracle operations
-units, producing a fresh off-machine backup and restore record, and rehearsing the exact release rollback.
+The Oracle units, manual jobs, external monitor, off-machine backup, isolated restore, and exact-release rollback
+were drilled on 2026-09-12. Genuine scheduled maintenance/backup executions passed on 2026-09-13, completing
+V1-G1. Private launch still requires the physical one-DM/two-player game day and explicit go/no-go.
