@@ -528,7 +528,7 @@ describe("TGTT Gambler Subclass", () => {
 			expect(lastRoll).not.toBeNull();
 		});
 
-		it("cannot bypass the bonus-action cost through a caller option", () => {
+		it("keeps Extra Luck's bonus-action cost", () => {
 			createExtraLuckGambler();
 			state.spendBonusAction();
 			const before = state.getExtraLuckUses().remaining;

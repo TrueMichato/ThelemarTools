@@ -79,6 +79,12 @@ function createTableEffects (entries = []) {
 			manualResolution: true,
 			instructions: "Apply the spell's 60-foot radius centered on the Gambler, then acknowledge the result.",
 		},
+		27: {
+			scope: "area",
+			effectType: "manual",
+			manualResolution: true,
+			instructions: "Apply Silence in a 15-foot radius centered on the Gambler, then acknowledge the result.",
+		},
 		22: {
 			scope: "self",
 			effectType: "activeState",
@@ -113,12 +119,6 @@ function createTableEffects (entries = []) {
 			effects: [{type: "sense", target: "xray", value: 60}],
 			duration: "1d6 rounds",
 		},
-		27: {
-			scope: "self",
-			effectType: "condition",
-			condition: "Silenced",
-			duration: "spell duration",
-		},
 		32: {scope: "self", effectType: "condition", condition: "Invisible", duration: "1 hour"},
 		49: {scope: "self", effectType: "spellTransaction", transaction: "preserveSlot"},
 		99: {scope: "self", effectType: "none"},
@@ -128,16 +128,17 @@ function createTableEffects (entries = []) {
 		61: {scope: "self", effectType: "spellTransaction", transaction: "delayedCast", requiresConfirmation: true},
 	};
 	const targetRows = new Set([
-		44, 47, 48, 52, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 74, 75, 76, 77, 78, 79,
-		80, 81, 82, 83, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97,
+		44, 47, 48, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 74, 75, 76, 77, 78, 79,
+		80, 81, 82, 83, 85, 86, 87, 89, 90, 91, 92, 93, 94, 95, 96, 97,
 	]);
-	const worldRows = new Set([1, 6, 19, 28, 29, 38, 39, 46, 50, 51, 54, 57, 58, 59, 62, 73, 98, 100]);
+	const worldRows = new Set([1, 19, 28, 29, 38, 46, 50, 51, 54, 57, 58, 98, 100]);
+	const areaRows = new Set([6, 39, 40, 41, 43, 46, 52, 59, 62, 73, 88]);
 
 	return Object.fromEntries(Array.from({length: 100}, (_, ix) => {
 		const roll = ix + 1;
 		const text = entries[ix] || `Unspecified Gambling Table result ${roll}`;
 		const explicit = automatic[roll] || confirm[roll];
-		const scope = explicit?.scope || (targetRows.has(roll) ? "target" : worldRows.has(roll) ? "world" : "self");
+		const scope = explicit?.scope || (areaRows.has(roll) ? "area" : targetRows.has(roll) ? "target" : worldRows.has(roll) ? "world" : "self");
 		const automation = automatic[roll] ? "automatic" : confirm[roll] ? "confirm" : "manual";
 		return [roll, {
 			id: `gambler-table-${roll}`,

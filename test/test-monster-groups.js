@@ -55,6 +55,10 @@ const CANONICAL_GROUPS = new Set([
 	"Earth Elementals",
 	"Fire Elementals",
 	"Water Elementals",
+	"Star Spawn Emissary",
+	"Ulmist Inquisitor",
+	"Relentless Killer",
+	"Zombie",
 	// Humanoids
 	"Goblinoids",
 	"Goblins",

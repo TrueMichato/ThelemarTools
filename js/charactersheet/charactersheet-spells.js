@@ -661,7 +661,6 @@ class CharacterSheetSpells {
 			isMinHeight0: true,
 			isWidth100: true,
 		});
-
 		// Spell tracking status bar - shows cantrips and spells known/prepared
 		const statusBar = e_({tag: "div", clazz: "charsheet__modal-status-bar", style: "display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 12px; background: rgba(var(--rgb-bg-text), 0.05); border-radius: 6px; margin-bottom: 12px; font-size: 0.85em;"});
 		modalInner.append(statusBar);
@@ -4625,6 +4624,11 @@ class CharacterSheetSpells {
 		// global last-roll record so Master of Fortune choices survive a save/load
 		// and can be completed from the same accessible modal.
 		const pending = this._state.getPendingGamblerCastResolutions?.() || [];
+		const receiptRenderers = new Map();
+		const activeReceiptId = receiptId
+			|| (prerolled?.resolutionId ? prerolled.resolutionId : null)
+			|| [...pending].reverse().find(receipt => receipt.status === "awaiting-choice")?.resolutionId
+			|| null;
 		if (pending.length) {
 			const receiptSection = e_({outer: `<section class="gambler-pending-receipts mb-3" aria-labelledby="gambler-pending-heading">
 				<h4 id="gambler-pending-heading" class="mb-2">Pending Gambler cast resolutions</h4>
@@ -4654,7 +4658,7 @@ class CharacterSheetSpells {
 				let renderReceiptActions;
 				const addButton = (label, handler, cls = "btn-default") => {
 					const action = label.toLowerCase().replace(/\s+/g, "-");
-					const btn = e_({outer: `<button type="button" class="btn btn-xs ${cls}" data-gambler-action="${action}" data-resolution-id="${receipt.resolutionId}">${label}</button>`});
+					const btn = e_({outer: `<button type="button" class="btn btn-xs ${cls}" style="min-height: 44px; min-width: 44px;" data-gambler-action="${action}" data-resolution-id="${receipt.resolutionId}">${label}</button>`});
 					btn.addEventListener("click", async () => {
 						btn.disabled = true;
 						const result = await handler();
@@ -4704,6 +4708,10 @@ class CharacterSheetSpells {
 				};
 				row.querySelector("span").textContent = statusText(receipt);
 				renderReceiptActions(receipt);
+				receiptRenderers.set(receipt.resolutionId, current => {
+					row.querySelector("span").textContent = statusText(current);
+					renderReceiptActions(current);
+				});
 				list.append(row);
 			});
 			modalInner.append(receiptSection);
@@ -4713,7 +4721,7 @@ class CharacterSheetSpells {
 		const rollSection = e_({outer: `
 			<div class="mb-3 p-2" style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px;">
 				<div class="ve-flex-v-center" style="gap: 12px;">
-					<button type="button" class="btn btn-sm btn-warning btn-gambler-modal-roll" style="font-weight: 600; min-width: 120px;">\u{1F3B2} Roll d100</button>
+					<button type="button" class="btn btn-sm btn-warning btn-gambler-modal-roll" style="font-weight: 600; min-width: 120px; min-height: 44px;">\u{1F3B2} Roll d100</button>
 					<div class="gambler-roll-result" aria-live="polite" role="status" style="font-size: 1.05em; line-height: 1.4;"></div>
 				</div>
 				<div class="gambler-roll-choice mt-2" style="display: none;"></div>
@@ -4764,8 +4772,8 @@ class CharacterSheetSpells {
 				<div class="ve-small mb-1"><span class="text-info">\u{1F3B2} <b>Master of Fortune</b> \u2014 you rolled twice. Choose which result applies:</span></div>
 				<div class="gambler-choice-radiogroup" role="radiogroup" aria-label="Gambling Table result choice">
 					${options.map(o => `
-						<label class="gambler-choice-option">
-							<input type="radio" name="gambler-table-choice" value="${o.which}" ${chosenRoll === o.roll && !result.needsChoice ? "checked" : ""}>
+						<label class="gambler-choice-option" style="display: flex; align-items: center; min-height: 44px; gap: 8px;">
+							<input type="radio" name="gambler-table-choice" value="${o.which}" style="min-width: 20px; min-height: 20px;" ${chosenRoll === o.roll && !result.needsChoice ? "checked" : ""}>
 							<span><b>${o.roll}</b> \u2014 ${o.effect}</span>
 						</label>
 					`).join("")}
@@ -4774,10 +4782,11 @@ class CharacterSheetSpells {
 			choiceDisplay.querySelectorAll("input[type=radio]").forEach(input => {
 				input.addEventListener("change", () => {
 					const which = parseInt(input.value, 10);
-					const chosen = receiptId
-						? this._state.chooseGamblerTableResult?.(receiptId, which)
+					const chosen = activeReceiptId
+						? this._state.chooseGamblerTableResult?.(activeReceiptId, which)
 						: this._state.chooseGamblingTableResult?.(which);
 					showResult(chosen?.tableRoll || this._state.getGamblerLastTableRoll?.());
+					if (activeReceiptId) receiptRenderers.get(activeReceiptId)?.(chosen);
 					void this._page?._saveCurrentCharacter?.();
 				});
 			});
@@ -7373,7 +7382,7 @@ class CharacterSheetSpells {
 			const pendingPanel = e_({outer: `
 				<section class="charsheet__gambler-pending-panel ve-flex-v-center mb-2" aria-live="polite">
 					<span class="mr-2">🎲 ${pendingGamblerReceipts.length} pending Gambling Table resolution${pendingGamblerReceipts.length === 1 ? "" : "s"}</span>
-					<button type="button" class="ve-btn ve-btn-sm ve-btn-primary charsheet__gambler-open-receipts">Review Gambling Table</button>
+					<button type="button" class="ve-btn ve-btn-sm ve-btn-primary charsheet__gambler-open-receipts" style="min-height: 44px; min-width: 44px;">Review Gambling Table</button>
 				</section>
 			`});
 			container.append(pendingPanel);

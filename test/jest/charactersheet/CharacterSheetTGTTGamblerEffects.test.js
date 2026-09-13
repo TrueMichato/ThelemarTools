@@ -432,6 +432,29 @@ describe("Extra Luck + Master of Fortune resources", () => {
 		expect(findRes("Master of Fortune").max).toBe(6);
 	});
 
+	it("does not spend the shared bonus action for Master of Fortune", () => {
+		buildGambler(17);
+		expect(state.isBonusActionAvailable()).toBe(true);
+		expect(state.useMasterOfFortune()).toBe(true);
+		expect(state.isBonusActionAvailable()).toBe(true);
+	});
+
+	it("deduplicates a legacy untyped Extra Luck row into the typed pool", () => {
+		buildGambler(9);
+		const featureId = state.getFeatures().find(feature => feature.name === "Extra Luck").id;
+		state._data.resources = [{
+			id: "legacy-extra-luck",
+			name: "Extra Luck",
+			current: 2,
+			max: 4,
+			recharge: "long",
+			featureId,
+		}];
+		expect(state.getExtraLuckUses()).toEqual({remaining: 2, max: 4});
+		expect(state._data.resources.filter(resource => resource.name === "Extra Luck")).toHaveLength(1);
+		expect(state._data.resources[0].resourceType).toBe("gamblerExtraLuck");
+	});
+
 	it("spends and restores both pools on a long rest", () => {
 		buildGambler(17);
 		expect(state.useExtraLuck()).toBeTruthy();
@@ -540,7 +563,7 @@ describe("d20 fortune interventions (generic API)", () => {
 			state.useMasterOfFortune();
 		}
 		const offers = state.getD20InterventionOffers({naturalRoll: 1, effectiveRoll: 1, rollType: "attack"});
-		expect(offers).toEqual([]);
+		expect(offers.map(offer => offer.id)).toEqual(["gamblerExtraLuck"]);
 	});
 
 	it("applies Master of Fortune by turning the natural 1 into a natural 20", () => {
@@ -730,6 +753,12 @@ describe("Versatile Gambler (L13)", () => {
 			expect(restored.getActiveStates().some(s => s.sourceFeatureId === xrayState.sourceFeatureId && s.active)).toBe(false);
 		});
 
+		it("keeps every canonical radius/group row explicitly area-scoped", () => {
+			for (const roll of [6, 18, 23, 27, 39, 40, 41, 42, 43, 45, 46, 52, 59, 62, 73, 88]) {
+				expect(CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[roll].scope).toBe("area");
+			}
+		});
+
 		it.each([
 			[2, "modifier"],
 			[4, "modifier"],
@@ -740,7 +769,7 @@ describe("Versatile Gambler (L13)", () => {
 			[20, "activeState"],
 			[22, "activeState"],
 			[25, "activeState"],
-			[27, "condition"],
+			[27, "manual"],
 			[32, "condition"],
 			[33, "spellTransaction"],
 			[49, "spellTransaction"],
@@ -809,7 +838,7 @@ describe("Versatile Gambler (L13)", () => {
 			applyRow(25);
 			expect(state.getSenseBonusFromStates("xray")).toBe(60);
 			applyRow(27);
-			expect(state.getCastingConstraints().verbal).toEqual(expect.arrayContaining([
+			expect(state.getCastingConstraints().verbal).not.toEqual(expect.arrayContaining([
 				expect.objectContaining({value: "banned"}),
 			]));
 		});
@@ -856,7 +885,7 @@ describe("Versatile Gambler (L13)", () => {
 			expect(result.naturalRoll).toBe(20);
 			expect(state.cancelGamblerCastResolution(result.resolutionId)).toBe(true);
 			expect(state.getMasterOfFortuneUses().remaining).toBe(before - 1);
-			expect(state.isBonusActionAvailable()).toBe(false);
+			expect(state.isBonusActionAvailable()).toBe(true);
 		});
 
 		it("records manual resolutions as durable notes", () => {

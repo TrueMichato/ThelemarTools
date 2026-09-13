@@ -29,8 +29,9 @@ tables, rather than the generic third-caster progression.
   persisted bonus-action flag, so toggling or resetting either view cannot
   bypass the cost.
 - Master of Fortune turns a natural 1 into a natural 20 and stores both
-  Gambling Table rolls until the player chooses one. Pending choices survive
-  save/load.
+  Gambling Table rolls until the player chooses one. It is a
+  proficiency-bonus-per-long-rest resource with no bonus-action cost. Pending
+  choices survive save/load.
 - Automatic table effects persist their resolved duration on the owned
   condition, named modifier, or active state. Dice durations are rolled once
   through the per-sheet RNG seam (`1d6 rounds`, `1d3 minutes`, etc.), converted
@@ -47,11 +48,12 @@ tables, rather than the generic third-caster progression.
 All 100 published rows have canonical descriptors in
 `CharacterSheetGamblerRules`. Safe self effects (including Persuasion
 disadvantage, initiative penalties, Light, Prone/Blinded/Invisible,
-Reduce/half-speed changes, levitation, X-ray vision, Silence, and the two
-spell transactions) use the existing condition, modifier, active-state, and
-receipt systems. Radius/creature-group outcomes are explicitly scoped as
-`area`; target, world, narrative, and DM-adjudicated outcomes remain durable
-manual resolutions with the published row text and explicit acknowledgement
+Reduce/half-speed changes, levitation, and X-ray vision) use the existing
+condition, modifier, active-state, and receipt systems. The 15-foot Silence
+result is an `area` resolution centered on the Gambler, not a self-only
+condition. Radius/creature-group outcomes are explicitly scoped as `area`;
+target, world, narrative, and DM-adjudicated outcomes remain durable manual
+resolutions with the published row text and explicit acknowledgement
 instructions. Manual outcomes can also be recorded as sticky notes through
 `recordGamblerTableResolutionAsNote()`, so recording is durable rather than
 only dismissing the receipt.
@@ -61,11 +63,14 @@ which exposes keyboard-labelled controls for Master of Fortune choices,
 confirmation, delayed-result resume, manual acknowledgement, application, and
 cancellation. Two-result choices use native radios in a labelled radiogroup;
 rolled values/status are announced through a polite live region, focus enters
-the dialog, and choice/action controls meet the 44px touch-target requirement.
+the dialog, choice/action controls meet the 44px touch-target requirement, and
+choosing a radio option immediately rerenders the matching pending receipt's
+Apply action.
 Selecting a choice only updates the receipt; it is not shown as committed until
 the effect is applied and the receipt is committed. Once a modified fortune
 result has been returned to its caller, cancelling a later table confirmation
-cannot refund the already-spent resource or bonus action. The receipt queue is
+cannot refund the already-spent resource; Extra Luck's bonus action is also
+atomic, while Master of Fortune has no action cost. The receipt queue is
 persisted with the character, so closing/reopening or saving/loading does not
 lose a required choice or leave behind a UI-only acknowledgement.
 

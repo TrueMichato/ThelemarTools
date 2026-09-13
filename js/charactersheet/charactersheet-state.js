@@ -18539,6 +18539,36 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Install a runtime-only d20 source for deterministic browser probes. Like
+	 * the Gambler source, this is never serialized; production rolls fall back
+	 * to genuine randomness when no source is installed.
+	 * @param {{nextInt: function(number, string): number}|null} source
+	 */
+	setD20RollSource (source = null) {
+		this._d20RollSource = source && typeof source.nextInt === "function" ? source : null;
+	}
+
+	/**
+	 * Install a finite deterministic queue for d20 browser probes.
+	 * @param {number[]} values
+	 */
+	setD20RollSequence (values = []) {
+		const queue = Array.isArray(values) ? [...values] : [];
+		this.setD20RollSource({nextInt: max => queue.length ? queue.shift() : max});
+	}
+
+	/**
+	 * Roll a d20 through the per-sheet runtime seam.
+	 * @param {string} [context]
+	 * @returns {number}
+	 */
+	rollD20 (context = "d20") {
+		const supplied = this._d20RollSource?.nextInt?.(20, context);
+		if (Number.isFinite(supplied)) return Math.max(1, Math.min(20, Math.floor(supplied)));
+		return Math.floor(Math.random() * 20) + 1;
+	}
+
+	/**
 	 * Install a finite deterministic queue for browser/E2E probes. This is the
 	 * serializable-friendly companion to setGamblerRollSource; production callers
 	 * continue to use Math.random when the queue is exhausted.
@@ -18885,7 +18915,7 @@ class CharacterSheetState {
 			spellName: source,
 			fortuneSource: source,
 			fortuneResourceType: resourceType,
-			bonusActionSpent: true,
+			bonusActionSpent: source === "Extra Luck",
 			slotLevel: 0,
 			tableRoll: MiscUtil.copyFast(tableRoll),
 			descriptor: tableRoll.needsChoice ? null : (CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[tableRoll.chosenRoll] || null),
@@ -19362,18 +19392,16 @@ class CharacterSheetState {
 	 * @returns {boolean} True if successful, false if no uses remaining
 	 */
 	useMasterOfFortune () {
-		if (!this.isBonusActionAvailable()) return false;
 		const available = this._getGamblerResourceUses("gamblerMasterOfFortune");
 		if (!available || available.remaining <= 0) return false;
 		const resource = this._spendGamblerResource("gamblerMasterOfFortune");
-		if (!resource || !this.spendBonusAction()) {
+		if (!resource) {
 			if (resource) this._restoreGamblerResource("gamblerMasterOfFortune");
 			return false;
 		}
 		// Trigger d100 roll on the Gambling Table
 		if (!this.rollGamblingTable()) {
 			this._restoreGamblerResource("gamblerMasterOfFortune");
-			this.resetBonusAction();
 			return false;
 		}
 		return true;
@@ -39189,7 +39217,13 @@ class CharacterSheetState {
 			!String(condition.sourceFeatureId || "").startsWith("gambler-table:")
 			&& !gamblerSources.has(condition._gamblerResolutionId),
 		);
-		this._data.resources = (this._data.resources || []).filter(r => !String(r.resourceType || "").startsWith("gambler"));
+		const gamblerFeatureIds = this._getGamblerFeatureIds();
+		this._data.resources = (this._data.resources || []).filter(resource => {
+			if (String(resource.resourceType || "").startsWith("gambler")) return false;
+			if (resource._gamblerOwned) return false;
+			if (!gamblerFeatureIds.has(resource.featureId)) return true;
+			return !this._isGamblerFortuneResourceName(resource.name);
+		});
 		if (this._data.spellcasting) {
 			this._data.spellcasting.gamblerPendingCastResolutions = [];
 			this._data.spellcasting.gamblerCastHistory = [];
@@ -39229,11 +39263,22 @@ class CharacterSheetState {
 		}
 
 		const ensure = ({name, resourceType, minLevel, legacyUsedKey}) => {
+			const featureIds = this._getGamblerFeatureIds(name);
+			const isOwned = resource => String(resource.resourceType || "") === resourceType
+				|| (resource._gamblerOwned && String(resource.name || "").toLowerCase() === name.toLowerCase())
+				|| (featureIds.has(resource.featureId) && this._isGamblerFortuneResourceName(resource.name));
+			const candidates = this._data.resources.filter(resource =>
+				isOwned(resource) || (
+					!resource.resourceType
+					&& String(resource.name || "").toLowerCase() === name.toLowerCase()
+					&& featureIds.has(resource.featureId)
+				),
+			);
 			if (level < minLevel) {
-				this._data.resources = this._data.resources.filter(r => r.resourceType !== resourceType);
+				this._data.resources = this._data.resources.filter(resource => !isOwned(resource));
 				return;
 			}
-			let resource = this._data.resources.find(r => r.resourceType === resourceType);
+			let resource = candidates.find(r => r.resourceType === resourceType) || candidates[0];
 			if (!resource) {
 				const legacyUsed = Math.max(0, Math.min(max, this._data.spellcasting?.[legacyUsedKey] || 0));
 				resource = {
@@ -39243,19 +39288,43 @@ class CharacterSheetState {
 					max,
 					recharge: "long",
 					resourceType,
+					_gamblerOwned: true,
 				};
 				this._data.resources.push(resource);
 				return;
 			}
-			const expended = Math.max(0, (resource.max ?? max) - (resource.current ?? resource.max ?? max));
+			const expended = candidates.reduce((spent, candidate) =>
+				Math.max(spent, Math.max(0, (candidate.max ?? max) - (candidate.current ?? candidate.max ?? max))),
+			0);
 			resource.name = name;
 			resource.max = max;
 			resource.current = Math.max(0, max - expended);
 			resource.recharge = "long";
+			resource.resourceType = resourceType;
+			resource._gamblerOwned = true;
+			this._data.resources = this._data.resources.filter(candidate => !candidates.includes(candidate));
+			this._data.resources.push(resource);
 		};
 
 		ensure({name: "Extra Luck", resourceType: "gamblerExtraLuck", minLevel: 9, legacyUsedKey: "gamblerExtraLuckUsed"});
 		ensure({name: "Master of Fortune", resourceType: "gamblerMasterOfFortune", minLevel: 17, legacyUsedKey: "gamblerMasterFortuneUsed"});
+	}
+
+	_getGamblerFeatureIds (name = null) {
+		const wanted = name ? name.toLowerCase() : null;
+		const ids = new Set();
+		for (const feature of this._data.features || []) {
+			const featureName = String(feature.name || "").toLowerCase();
+			if (featureName === "extra luck" || featureName === "master of fortune") {
+				if (!wanted || featureName === wanted) ids.add(feature.id);
+			}
+		}
+		return ids;
+	}
+
+	_isGamblerFortuneResourceName (name) {
+		const normalized = String(name || "").trim().toLowerCase();
+		return normalized === "extra luck" || normalized === "master of fortune";
 	}
 
 	/**
