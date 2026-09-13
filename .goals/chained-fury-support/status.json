@@ -31,6 +31,11 @@
       "iteration": 5,
       "verdict": "FAIL",
       "summary": "Core state fixes and real rider selection pass, but Play Mode restores all action slots, mobile footer/focus remain wrong, and E2E assertions still omit or fake key lifecycle behavior."
+    },
+    {
+      "iteration": 6,
+      "verdict": "FAIL",
+      "summary": "Per-slot restore and mobile layout are fixed, but Play Mode duplicates action cards, modal focus still falls to BODY, and E2E release/duplicate-damage checks remain non-proving."
     }
   ]
 }
