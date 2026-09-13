@@ -45,6 +45,86 @@ async function pCaptureOverview ({
 	});
 }
 
+test("DM inspection is read-only and condition actions use the canonical picker", async ({browser}) => {
+	test.setTimeout(180_000);
+	const secret = process.env.HUB_TEST_AUTH_SECRET;
+	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
+
+	const contextOptions = {
+		baseURL: process.env.HUB_E2E_ORIGIN || "https://localhost:8443",
+		ignoreHTTPSErrors: true,
+	};
+	const dmContext = await browser.newContext(contextOptions);
+	const playerContext = await browser.newContext(contextOptions);
+	try {
+		const dm = new HubCampaignPage(await dmContext.newPage());
+		const player = new HubCampaignPage(await playerContext.newPage());
+		await dm.signInSynthetic({providerSubject: "authority-dm", displayName: "Authority DM", secret});
+		await player.signInSynthetic({providerSubject: "authority-player", displayName: "Authority Player", secret});
+		const campaignId = await dm.createCampaign("Authority and Conditions E2E");
+		await player.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
+		const character = await player.createCharacter({campaignId, name: "Readonly Rowan"});
+
+		await dm.gotoCampaign(campaignId);
+		const row = dm.page.locator("#campaign-character-list .hub-data-row", {hasText: "Readonly Rowan"});
+		await expect(row).toContainText("Inspect sheet");
+		await expect(row).toHaveAttribute("title", "Open this character in a read-only DM view");
+
+		const ownerOnlyRequests: string[] = [];
+		const characterMutations: string[] = [];
+		dm.page.on("request", request => {
+			const pathname = new URL(request.url()).pathname;
+			if ([
+				`/api/characters/${character.id}/lease`,
+				`/api/characters/${character.id}/projection-policy`,
+				`/api/campaigns/${campaignId}/characters/${character.id}/pending-actions`,
+				`/api/campaigns/${campaignId}/characters/${character.id}/outgoing-actions`,
+				`/api/campaigns/${campaignId}/party-inventory`,
+			].includes(pathname)) ownerOnlyRequests.push(pathname);
+			if (
+				pathname === `/api/characters/${character.id}`
+				&& ["POST", "PATCH", "DELETE"].includes(request.method())
+			) characterMutations.push(request.method());
+		});
+
+		await row.click();
+		await dm.page.waitForFunction(() => !!(globalThis as any).charSheet, undefined, {timeout: 60_000});
+		await expect(dm.page.locator("#charsheet-ipt-name")).toHaveValue("Readonly Rowan");
+		await expect(dm.page.locator("#charsheet-ipt-name")).toBeDisabled();
+		await expect(dm.page.locator("#charsheet-btn-export")).toBeEnabled();
+		await expect(dm.page.locator("#charsheet-campaign .charsheet__campaign-detail"))
+			.toContainText("Read-only DM view");
+		await expect(dm.page.locator("#charsheet-sel-character option:checked")).toContainText("(read-only)");
+		await expect(dm.page.locator(".charsheet__sharing")).toHaveCount(0);
+		expect(await dm.page.evaluate(() => (globalThis as any).charSheet.isCurrentCharacterReadOnly())).toBe(true);
+		expect(await dm.page.evaluate(() => (globalThis as any).charSheet._saveCurrentCharacter())).toBe(true);
+		expect(ownerOnlyRequests).toEqual([]);
+		expect(characterMutations).toEqual([]);
+		expect((await player.getCharacter(character.id)).data.name).toBe("Readonly Rowan");
+
+		await dm.gotoCampaign(campaignId);
+		const workbench = dm.page.locator("#campaign-workbench");
+		if (!await workbench.evaluate(element => (element as HTMLDetailsElement).open)) {
+			await workbench.locator(":scope > summary").click();
+		}
+		await dm.page.locator("#campaign-action-target").selectOption({label: "Readonly Rowan"});
+		await dm.page.locator("#campaign-action-type").selectOption("condition_add");
+		const condition = dm.page.locator("#campaign-action-condition");
+		await expect(condition).toBeEnabled();
+		await expect(condition.locator("option", {hasText: "Blinded (PHB)"})).toHaveCount(1);
+		await expect(condition.locator("option", {hasText: "Blinded (XPHB)"})).toHaveCount(1);
+		await condition.selectOption({label: "Blinded (PHB)"});
+		await dm.page.locator("#campaign-action-form button[type='submit']").click();
+		await expect(dm.page.locator("#campaign-action-form-status")).toHaveText("Effect applied.");
+		await expect.poll(
+			async () => (await player.getCharacter(character.id)).data.conditions,
+			{timeout: 20_000},
+		).toContainEqual({name: "Blinded", source: "PHB"});
+	} finally {
+		await Promise.all([pCloseContext(dmContext), pCloseContext(playerContext)]);
+	}
+});
+
 test("campaign overview remains role-aware across responsive day and night states", async ({browser}, testInfo) => {
 	test.setTimeout(180_000);
 	const secret = process.env.HUB_TEST_AUTH_SECRET;

@@ -147,6 +147,11 @@ Only the token hash is persisted. The raw token is returned only from creation.
 
 Character data is sanitized/validated and capped at 1.5 MB after the resulting mutation.
 
+`dm_truth` authorizes inspection, not document editing. The Character Sheet preserves that discriminator,
+renders the sheet read-only before accepting input, and does not initialize owner-only leases, sharing policy,
+pending-action approval, peer-targeting, or party-inventory controls. DMs change player characters through the
+explicit semantic action and grant routes below; they never acquire the owner's document lease.
+
 ## Rolls, actions, and grants
 
 | Method/path | Authorization | Input | Result |
@@ -163,6 +168,13 @@ Character data is sanitized/validated and capped at 1.5 MB after the resulting m
 
 Every semantic command uses a UUID `commandId` equal to `Idempotency-Key`. Exact retries return the stored
 operation and event ids; any actor/body reuse returns `IDEMPOTENCY_KEY_REUSED`.
+
+The Campaign Overview condition action uses the canonical site condition catalog plus the active campaign brew
+catalog. The submitted operation always carries the selected `name` and `source`; there is no free-form source
+fallback. Removal choices additionally include exact conditions already present on an authorized canonical
+target, including legacy bare-string conditions normalized to their established `XPHB` identity, so retiring a
+brew version cannot strand an applied condition. Remote `brew.activated` events refresh the catalog; a later
+live refresh retries a transient catalog-load failure.
 
 The item-award source is either `{kind:"party_inventory",entryId}` or
 `{kind:"catalog"|"recent"|"campaign_item",item}`. A browser-supplied item is restricted to `name`, `source`,

@@ -143,44 +143,80 @@ export class CharacterSheetCampaign {
 		this._feedback = null;
 		this._pendingCommand = null;
 		this._sharing = null;
+		this._isInitialized = false;
+		this._refreshGeneration = 0;
 	}
 
 	async pInit () {
 		if (!this._root) return;
+		this._isInitialized = true;
 		window.addEventListener?.("online", () => this.render());
 		window.addEventListener?.("offline", () => this.render());
 		this.render();
 		await this._pRefresh();
 	}
 
-	async _pRefresh () {
-		this._isLoading = true;
+	resetCharacterScope () {
+		this._refreshGeneration++;
+		this._currentCharacter = null;
+		this._currentCampaign = null;
+		this._sharing = null;
 		this._feedback = null;
 		this.render();
+	}
+
+	async pRefreshCurrentCharacter () {
+		this.resetCharacterScope();
+		if (!this._isInitialized) return;
+		await this._pRefresh();
+	}
+
+	async _pRefresh () {
+		const generation = ++this._refreshGeneration;
+		const characterId = this._page._currentCharacterId || null;
+		const isCurrent = () => (
+			generation === this._refreshGeneration
+			&& characterId === (this._page._currentCharacterId || null)
+		);
+		this._isLoading = true;
+		this._feedback = null;
+		this._currentCharacter = null;
+		this._currentCampaign = null;
+		this._sharing = null;
+		this.render();
 		try {
-			this._session = await this._api.pGetSession();
-			this._campaigns = this._session.signedIn
+			const session = await this._api.pGetSession();
+			const campaigns = session.signedIn
 				? await this._api.pListCampaigns()
 				: [];
-			this._currentCharacter = this._session.signedIn && this._page._isHubCharacter && this._page._currentCharacterId
-				? await this._api.pGetCharacter({characterId: this._page._currentCharacterId})
+			const currentCharacter = session.signedIn && this._page._isHubCharacter && characterId
+				? await this._api.pGetCharacter({characterId})
 				: null;
-			const currentCampaignId = this._currentCharacter?.campaignId || null;
-			this._currentCampaign = this._session.signedIn && currentCampaignId
-				? this._campaigns.find(campaign => campaign.id === currentCampaignId)
+			const currentCampaignId = currentCharacter?.campaignId || null;
+			const currentCampaign = session.signedIn && currentCampaignId
+				? campaigns.find(campaign => campaign.id === currentCampaignId)
 					|| await this._api.pGetCampaign({campaignId: currentCampaignId})
 				: null;
+			if (!isCurrent()) return;
+			this._session = session;
+			this._campaigns = campaigns;
+			this._currentCharacter = currentCharacter;
+			this._currentCampaign = currentCampaign;
 		} catch (error) {
+			if (!isCurrent()) return;
 			this._session = null;
 			this._campaigns = [];
 			this._currentCharacter = null;
 			this._currentCampaign = null;
 			this._feedback = {type: "error", text: getCampaignControlErrorMessage(error)};
 		} finally {
-			this._isLoading = false;
-			this.render();
+			if (isCurrent()) {
+				this._isLoading = false;
+				this.render();
+			}
 		}
-		await this.pRefreshSharing();
+		if (!isCurrent()) return;
+		await this.pRefreshSharing({characterId, generation});
 	}
 
 	render () {
@@ -261,17 +297,26 @@ export class CharacterSheetCampaign {
 	}
 
 	/** Load the owner's sharing policy once the character's campaign context is known. */
-	async pRefreshSharing () {
-		if (!this._page._isHubCharacter || !this._currentCharacter?.campaignId) {
+	async pRefreshSharing ({
+		characterId = this._page._currentCharacterId,
+		generation = this._refreshGeneration,
+	} = {}) {
+		if (
+			!this._page._isHubCharacter
+			|| !this._currentCharacter?.campaignId
+			|| this._page.isCurrentCharacterReadOnly?.()
+		) {
 			this._sharing = null;
 			return;
 		}
-		this._sharing ||= new CharacterSheetSharing({
+		const sharing = new CharacterSheetSharing({
 			api: this._api,
-			fnGetCharacterId: () => this._page._currentCharacterId,
+			fnGetCharacterId: () => characterId,
 			fnGetErrorMessage: getCampaignControlErrorMessage,
 		});
-		await this._sharing.pLoad();
+		await sharing.pLoad();
+		if (generation !== this._refreshGeneration || characterId !== this._page._currentCharacterId) return;
+		this._sharing = sharing;
 		this.render();
 	}
 
@@ -284,6 +329,7 @@ export class CharacterSheetCampaign {
 	_getDetail ({isCloud}) {
 		if (this._isLoading) return "Checking availability…";
 		if (isCloud) {
+			if (this._page.isCurrentCharacterReadOnly?.()) return "Read-only DM view · use campaign actions to make authorized changes";
 			if (typeof navigator !== "undefined" && !navigator.onLine) return "Offline view · changes will retry when the connection returns";
 			if (this._page._characterRepository?.hasPendingWrites?.()) return "Sync needs attention · export before leaving if retry keeps failing";
 			if (!this._currentCharacter?.campaignId) return "Online · not attached to a campaign";
@@ -333,6 +379,16 @@ export class CharacterSheetCampaign {
 					text: "Return to campaign",
 					attrs: {href: `campaign.html?id=${encodeURIComponent(this._currentCampaign.id)}`},
 				}));
+			}
+			if (this._page.isCurrentCharacterReadOnly?.()) {
+				if (!this._currentCampaign) {
+					actions.append(createElement("a", {
+						className: "charsheet__campaign-button",
+						text: "Open Campaign Hub",
+						attrs: {href: "hub.html"},
+					}));
+				}
+				return;
 			}
 			const sourceCampaignId = this._currentCharacter?.campaignId || null;
 			const destinations = getEligibleCharacterCampaigns(this._campaigns, {excludeCampaignId: sourceCampaignId});

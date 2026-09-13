@@ -102,10 +102,22 @@ describe("campaign hub pages", () => {
 
 	it("requires an explicit source identity for condition effects", () => {
 		const source = read("js/hub/hub-page.js");
-		expect(campaignHtml).toContain("id=\"campaign-action-condition-source\"");
-		expect(campaignHtml).toContain("value=\"XPHB\"");
-		expect(source).toContain("arguments: {condition: {name: rawValue, source: conditionSource}}");
+		expect(campaignHtml).toContain("id=\"campaign-action-condition\"");
+		expect(campaignHtml).not.toContain("id=\"campaign-action-condition-source\"");
+		expect(source).toContain("pLoadCampaignConditionCatalog");
+		expect(source).toContain("conditionCatalogByUid");
+		expect(source).toContain("getCurrentTargetConditions");
+		expect(source).toContain("event.type === \"brew.activated\"");
+		expect(source).toContain("pRefreshContextBoundControls");
 		expect(source).not.toContain("source: \"PHB\"");
+	});
+
+	it("labels another member's canonical sheet as DM inspection rather than editing", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("function renderCharacterList ({campaignId, characters, session, isDm})");
+		expect(source).toContain("const isReadOnlyDm = isDm && character.ownerAccountId !== session.account.id");
+		expect(source).toContain("Open this character in a read-only DM view");
+		expect(source).toContain("\"Inspect sheet\" : \"Open sheet\"");
 	});
 
 	it("keeps loaded campaign data visible while offline and requires a refresh after reconnecting", () => {
@@ -151,7 +163,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("characterSetup.href = hasCharacterChoices ? \"#campaign-character-list\" : \"#campaign-upload-local\"");
 		expect(source).toContain("setHidden(characterSetup, campaign.status !== \"active\" || campaign.role !== \"player\" || playerCharacters.length === 1)");
 		expect(source).toContain("setHidden(readonlyPrimary, !isSpectator && campaign.status === \"active\")");
-		expect(source).toContain("renderCharacterList({campaignId, characters: charactersNxt});");
+		expect(source).toContain("characters: charactersNxt,\n\t\t\t\tsession,\n\t\t\t\tisDm: [\"dm\", \"co_dm\"].includes(campaign.role)");
 		expect(source).toContain("applyCampaignRoleLayout({campaign, characters: charactersNxt});");
 		for (const id of [
 			"campaign-open-primary-character",

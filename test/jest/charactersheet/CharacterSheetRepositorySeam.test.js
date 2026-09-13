@@ -1,6 +1,7 @@
 import "./setup.js";
 import {jest} from "@jest/globals";
 import {HubCharacterMemoryAuthority, HubCharacterRepository} from "../../../js/hub/hub-character-repository.js";
+import {CHARACTER_ACCESS_MODES} from "../../../js/hub/hub-character-view.js";
 
 const REPO_ROOT = new URL("../../../", import.meta.url).pathname;
 let CharacterSheetPage;
@@ -52,6 +53,7 @@ describe("Character Sheet repository seam", () => {
 				name: "Cloud Character",
 				_savedAt: expect.any(Number),
 			}),
+			isCreate: false,
 		});
 		expect(host._writeActiveCharacterMirror).not.toHaveBeenCalled();
 		expect(host._clearActiveCharacterMirror).not.toHaveBeenCalled();
@@ -69,6 +71,37 @@ describe("Character Sheet repository seam", () => {
 
 		expect(repository.pList).toHaveBeenCalledTimes(1);
 		expect(host._updateCharacterDropdown).toHaveBeenCalledWith(characters);
+	});
+
+	it("does not erase cloud dropdown options when the current character name changes", () => {
+		const select = {
+			value: "cloud-a",
+			options: [
+				{value: "", textContent: "Create New Character"},
+				{value: "cloud-a", textContent: "Before — Fighter 1"},
+				{value: "cloud-b", textContent: "Other — Wizard 2"},
+			],
+		};
+		const host = {
+			_isHubCharacter: true,
+			_currentCharacterId: "cloud-a",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_selCharacter: select,
+			_state: {
+				getName: () => "After",
+				getClasses: () => [{name: "Fighter", level: 1}],
+			},
+			_characterRepository: {getCharacterAccess: () => CHARACTER_ACCESS_MODES.OWNER},
+		};
+
+		CharacterSheetPage.prototype._updateCharacterDropdown.call(host);
+
+		expect(select.options.map(option => [option.value, option.textContent])).toEqual([
+			["", "Create New Character"],
+			["cloud-a", "After — Fighter 1"],
+			["cloud-b", "Other — Wizard 2"],
+		]);
+		expect(select.value).toBe("cloud-a");
 	});
 
 	it("reports remote save failure so character switching can abort", async () => {
@@ -126,23 +159,140 @@ describe("Character Sheet repository seam", () => {
 	});
 
 	it("adopts a canonical id returned by the cloud repository", async () => {
+		const calls = [];
 		const repository = makeRepository();
-		repository.pUpsert.mockResolvedValueOnce({id: "server-id", name: "Cloud Character"});
+		repository.pUpsert.mockImplementationOnce(async options => {
+			calls.push("upsert");
+			expect(options.isCreate).toBe(true);
+			return {id: "server-id", name: "Cloud Character"};
+		});
 		const host = {
 			_characterRepository: repository,
 			_currentCharacterId: "temporary-id",
+			_isCurrentCharacterNew: true,
 			_state: {toJson: () => ({name: "Cloud Character"})},
 			_updateSaveIndicator: jest.fn(),
 			_writeActiveCharacterMirror: jest.fn(),
 			_clearActiveCharacterMirror: jest.fn(),
 			_getNextSavedAt: CharacterSheetPage.prototype._getNextSavedAt,
 			_lastSavedAt: 0,
-			_attachHubRealtime: jest.fn(),
+			_pLoadCharacters: jest.fn(async () => calls.push("refresh")),
+			_selCharacter: {value: ""},
+			_attachHubRealtime: jest.fn(() => calls.push("attach")),
+			_campaign: {pRefreshCurrentCharacter: jest.fn(async () => calls.push("campaign"))},
 		};
 
 		await expect(CharacterSheetPage.prototype._saveCurrentCharacter.call(host)).resolves.toBe(true);
 		expect(host._currentCharacterId).toBe("server-id");
+		expect(host._isCurrentCharacterNew).toBe(false);
+		expect(host._selCharacter.value).toBe("server-id");
 		expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "server-id"});
+		expect(calls).toEqual(["upsert", "refresh", "campaign", "attach"]);
+	});
+
+	it("does not send owner-only writes for a DM read-only character", async () => {
+		const repository = makeRepository();
+		repository.getCharacterAccess = () => "dm_readonly";
+		const host = {
+			_characterRepository: repository,
+			_currentCharacterId: "player-character",
+			_currentCharacterAccess: "dm_readonly",
+			_state: {toJson: () => ({name: "Locally edited"})},
+			_updateSaveIndicator: jest.fn(),
+		};
+
+		await expect(CharacterSheetPage.prototype._saveCurrentCharacter.call(host)).resolves.toBe(true);
+		expect(repository.pUpsert).not.toHaveBeenCalled();
+		expect(host._updateSaveIndicator).toHaveBeenLastCalledWith("readonly");
+	});
+
+	it("disables mutation controls before a DM can edit a read-only sheet", () => {
+		const makeControl = ({id = "", disabled = false} = {}) => ({
+			id,
+			disabled,
+			dataset: {},
+			setAttribute: jest.fn(),
+			removeAttribute: jest.fn(),
+			getAttribute: jest.fn(() => null),
+		});
+		const edit = makeControl();
+		const characterSelect = makeControl({id: "charsheet-sel-character"});
+		const exportButton = makeControl({id: "charsheet-btn-export"});
+		const root = {
+			classList: {toggle: jest.fn()},
+			getAttribute: jest.fn(() => null),
+			setAttribute: jest.fn(),
+			querySelectorAll: jest.fn(() => [edit, characterSelect, exportButton]),
+		};
+		const documentPrevious = globalThis.document;
+		globalThis.document = {querySelector: () => root};
+		const host = {
+			_currentCharacterAccess: "dm_readonly",
+			_updateSaveIndicator: jest.fn(),
+		};
+		try {
+			CharacterSheetPage.prototype._applyCharacterAccessMode.call(host);
+		} finally {
+			globalThis.document = documentPrevious;
+		}
+
+		expect(edit.disabled).toBe(true);
+		expect(edit.setAttribute).toHaveBeenCalledWith("aria-disabled", "true");
+		expect(characterSelect.disabled).toBe(false);
+		expect(exportButton.disabled).toBe(false);
+		expect(host._updateSaveIndicator).toHaveBeenCalledWith("readonly");
+	});
+
+	it("keeps read-only DM views live without activating owner-only integrations", () => {
+		const host = {
+			_currentCharacterAccess: "dm_readonly",
+			_hubRealtimeGeneration: 0,
+			_hubEffects: {activate: jest.fn(), deactivate: jest.fn()},
+			_peerTargeting: {activate: jest.fn(), deactivate: jest.fn()},
+			_partyInventory: {pAttach: jest.fn(), detach: jest.fn()},
+			_hubRealtime: {attach: jest.fn(() => true)},
+		};
+
+		expect(CharacterSheetPage.prototype._attachHubRealtime.call(host, {characterId: "player-character"})).toBe(true);
+		expect(host._hubRealtime.attach).toHaveBeenCalledWith({characterId: "player-character"});
+		expect(host._hubEffects.activate).not.toHaveBeenCalled();
+		expect(host._peerTargeting.activate).not.toHaveBeenCalled();
+		expect(host._partyInventory.pAttach).not.toHaveBeenCalled();
+		expect(host._hubEffects.deactivate).toHaveBeenCalled();
+		expect(host._peerTargeting.deactivate).toHaveBeenCalled();
+		expect(host._partyInventory.detach).toHaveBeenCalled();
+	});
+
+	it("blocks non-control mutation gestures in a DM read-only sheet", () => {
+		const listeners = {};
+		const root = {
+			dataset: {},
+			addEventListener: jest.fn((type, listener) => listeners[type] = listener),
+		};
+		const documentPrevious = globalThis.document;
+		globalThis.document = {querySelector: () => root};
+		const host = {_currentCharacterAccess: "dm_readonly"};
+		try {
+			CharacterSheetPage.prototype._initReadOnlyInteractionGuard.call(host);
+			const blocked = {
+				target: {closest: () => null},
+				preventDefault: jest.fn(),
+				stopImmediatePropagation: jest.fn(),
+			};
+			listeners.click(blocked);
+			expect(blocked.preventDefault).toHaveBeenCalled();
+			expect(blocked.stopImmediatePropagation).toHaveBeenCalled();
+
+			const navigation = {
+				target: {closest: () => ({id: "charsheet-sel-character"})},
+				preventDefault: jest.fn(),
+				stopImmediatePropagation: jest.fn(),
+			};
+			listeners.change(navigation);
+			expect(navigation.preventDefault).not.toHaveBeenCalled();
+		} finally {
+			globalThis.document = documentPrevious;
+		}
 	});
 
 	it("applies remote fields while preserving edits made during the save", async () => {
@@ -230,6 +380,7 @@ describe("Character Sheet repository seam", () => {
 
 		expect(host._detachHubRealtime).toHaveBeenCalledTimes(1);
 		expect(host._characterLoadGeneration).toBe(1);
+		expect(host._isCurrentCharacterNew).toBe(true);
 		expect(host._state.setId).toHaveBeenCalledWith(host._currentCharacterId);
 	});
 
@@ -249,6 +400,108 @@ describe("Character Sheet repository seam", () => {
 
 		expect(host._detachHubRealtime).toHaveBeenCalledTimes(1);
 		expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "character-1"});
+	});
+
+	it("selects a directly loaded character in the dropdown", async () => {
+		const windowPrevious = globalThis.window;
+		globalThis.window = {
+			location: new URL("https://tools.example/charactersheet.html?id=character-2"),
+			history: {replaceState: jest.fn()},
+		};
+		const host = {
+			_characterLoadGeneration: 0,
+			_currentCharacterId: null,
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_isCurrentCharacterNew: true,
+			_isLevelUpBannerDismissed: true,
+			_characterRepository: {
+				isRescueMirrorEnabled: false,
+				pGet: jest.fn(async () => ({id: "character-2", name: "Mira"})),
+				getCharacterAccess: jest.fn(() => CHARACTER_ACCESS_MODES.DM_READ_ONLY),
+			},
+			_selCharacter: {value: ""},
+			_hubContext: null,
+			_state: {
+				clearCampaignSettingsOverlay: jest.fn(),
+				loadFromJson: jest.fn(),
+				setCampaignSettingsOverlay: jest.fn(),
+				getBackgroundTheme: jest.fn(() => "default"),
+			},
+			_reconcilePersistedCharacter: jest.fn(canonical => ({chosen: canonical, mirrorWon: false})),
+			_reconcileClassFeatures: jest.fn(() => ({added: 0, backfilled: 0})),
+			_ensureLinguisticsSkillIfNeeded: jest.fn(),
+			_renderCharacter: jest.fn(),
+			_applyBackgroundTheme: jest.fn(),
+			_updateThemePickerSelection: jest.fn(),
+			_attachHubRealtime: jest.fn(),
+			_detachHubRealtime: jest.fn(),
+			_campaign: {
+				resetCharacterScope: jest.fn(),
+				pRefreshCurrentCharacter: jest.fn(async () => {}),
+			},
+			_layout: null,
+			_playMode: null,
+		};
+
+		try {
+			await expect(CharacterSheetPage.prototype._pLoadCharacter.call(host, "character-2")).resolves.toBe(true);
+			expect(host._selCharacter.value).toBe("character-2");
+			expect(host._currentCharacterAccess).toBe(CHARACTER_ACCESS_MODES.DM_READ_ONLY);
+			expect(host._campaign.resetCharacterScope).toHaveBeenCalled();
+			expect(host._campaign.pRefreshCurrentCharacter).toHaveBeenCalled();
+		} finally {
+			globalThis.window = windowPrevious;
+		}
+	});
+
+	it("adopts an imported character's canonical id in the URL and campaign controls", async () => {
+		const windowPrevious = globalThis.window;
+		const windowMock = {
+			location: new URL("https://tools.example/charactersheet.html?id=previous&hubCampaign=campaign-1"),
+			history: {replaceState: jest.fn()},
+		};
+		globalThis.window = windowMock;
+		const repository = makeRepository();
+		repository.pUpsert.mockResolvedValueOnce({id: "server-import", name: "Imported"});
+		const host = {
+			_currentCharacterId: "previous",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_isCurrentCharacterNew: false,
+			_characterLoadGeneration: 0,
+			_saveCurrentCharacter: jest.fn(async () => true),
+			_characterRepository: repository,
+			_state: {
+				loadFromJson: jest.fn(),
+			},
+			_detachHubRealtime: jest.fn(),
+			_clearLastHpChange: jest.fn(),
+			_reconcileClassFeatures: jest.fn(),
+			_pLoadCharacters: jest.fn(async () => {}),
+			_selCharacter: {value: ""},
+			_attachHubRealtime: jest.fn(),
+			_campaign: {
+				resetCharacterScope: jest.fn(),
+				pRefreshCurrentCharacter: jest.fn(async () => {}),
+			},
+		};
+
+		try {
+			await expect(CharacterSheetPage.prototype.addCharacter.call(host, {
+				toJson: () => ({name: "Imported"}),
+			})).resolves.toBe(true);
+		} finally {
+			globalThis.window = windowPrevious;
+		}
+
+		expect(host._currentCharacterId).toBe("server-import");
+		expect(windowMock.history.replaceState).toHaveBeenCalledWith(
+			{},
+			"",
+			expect.objectContaining({search: "?id=server-import&hubCampaign=campaign-1"}),
+		);
+		expect(host._campaign.resetCharacterScope).toHaveBeenCalled();
+		expect(host._campaign.pRefreshCurrentCharacter).toHaveBeenCalled();
+		expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "server-import"});
 	});
 
 	it("tears down on terminal pagehide and resumes the same subscription after BFCache restoration", async () => {

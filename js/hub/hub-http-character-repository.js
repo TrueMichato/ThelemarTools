@@ -4,6 +4,11 @@ import {withRootCarryWrite} from "./hub-carry-authority.js";
 import {HubBroadcastSync} from "./hub-broadcast-sync.js";
 import {CHARACTER_OPERATION_LEGS, getCharacterOperationRouting, getOperationLegKey} from "./hub-character-operation-events.js";
 import {
+	CHARACTER_ACCESS_MODES,
+	getCanonicalCharacter,
+	getCanonicalProjectionAccess,
+} from "./hub-character-view.js";
+import {
 	BoundedIdSet,
 	COVERAGE_VERSION,
 	RECONCILE_STATUS,
@@ -40,6 +45,7 @@ export class HubHttpCharacterRepository {
 		);
 		this._session = null;
 		this._accepted = new Map();
+		this._access = new Map();
 		this._canonicalIds = new Map();
 		this._leases = new Map();
 		this._conflicts = new Map();
@@ -99,6 +105,29 @@ export class HubHttpCharacterRepository {
 		throw error;
 	}
 
+	_getListedCharacterAccess (character) {
+		const accountId = this._session?.account?.id;
+		if (accountId && character.ownerAccountId && character.ownerAccountId !== accountId) return CHARACTER_ACCESS_MODES.DM_READ_ONLY;
+		return CHARACTER_ACCESS_MODES.OWNER;
+	}
+
+	getCharacterAccess ({characterId}) {
+		const canonicalId = this._canonicalIds.get(characterId) || characterId;
+		return this._access.get(canonicalId) || null;
+	}
+
+	isCharacterReadOnly ({characterId}) {
+		return this.getCharacterAccess({characterId}) === CHARACTER_ACCESS_MODES.DM_READ_ONLY;
+	}
+
+	_assertCharacterEditable ({characterId}) {
+		if (!this.isCharacterReadOnly({characterId})) return;
+		const error = new Error(`This character is open as a read-only DM view.`);
+		error.code = "CHARACTER_READ_ONLY";
+		error.characterId = characterId;
+		throw error;
+	}
+
 	async pGetCampaignId ({characterId}) {
 		await this._pEnsureSession();
 		const canonicalId = this._canonicalIds.get(characterId) || characterId;
@@ -112,6 +141,7 @@ export class HubHttpCharacterRepository {
 			.filter(character => this._campaignId || character.campaignId == null)
 			.map(character => {
 				this._accepted.set(character.id, character);
+				this._access.set(character.id, this._getListedCharacterAccess(character));
 				return this._getData(character);
 			});
 	}
@@ -119,9 +149,18 @@ export class HubHttpCharacterRepository {
 	async pGet ({characterId}) {
 		await this._pEnsureSession();
 		const canonicalId = this._canonicalIds.get(characterId) || characterId;
-		const character = await this._api.pGetCharacter({characterId: canonicalId});
+		const projection = this._api.pGetCharacterProjection
+			? await this._api.pGetCharacterProjection({characterId: canonicalId})
+			: null;
+		const character = projection
+			? getCanonicalCharacter(projection)
+			: await this._api.pGetCharacter({characterId: canonicalId});
 		this._assertCharacterScope(character);
 		this._accepted.set(canonicalId, character);
+		this._access.set(
+			canonicalId,
+			getCanonicalProjectionAccess(projection) || this._getListedCharacterAccess(character),
+		);
 		const book = this._getCoverageBook(canonicalId);
 		book.acceptedOperationLegIds = new BoundedIdSet();
 		const recovery = this._failedWrites.get(characterId) || this.getPendingRecovery(characterId);
@@ -150,6 +189,7 @@ export class HubHttpCharacterRepository {
 
 	async pAcquireLease ({characterId, isTakeover = false}) {
 		await this._pEnsureSession();
+		this._assertCharacterEditable({characterId});
 		const lease = await this._api.pAcquireCharacterLease({characterId, isTakeover});
 		this._leases.set(characterId, lease);
 		this._broadcastSync?.announceLease({resourceId: characterId, epoch: lease.epoch});
@@ -1179,7 +1219,7 @@ export class HubHttpCharacterRepository {
 	_migrateCharacterIdentity ({fromId, toId}) {
 		if (fromId === toId) return;
 		this._canonicalIds.set(fromId, toId);
-		for (const map of [this._failedWrites, this._failedCommands, this._latestSubmitted, this._recoveredBases]) {
+		for (const map of [this._access, this._failedWrites, this._failedCommands, this._latestSubmitted, this._recoveredBases]) {
 			if (!map.has(fromId)) continue;
 			map.set(toId, map.get(fromId));
 			map.delete(fromId);
@@ -1205,7 +1245,12 @@ export class HubHttpCharacterRepository {
 		}
 	}
 
-	pUpsert ({character}) {
+	pUpsert ({character, isCreate = false}) {
+		try {
+			this._assertCharacterEditable({characterId: character?.id});
+		} catch (error) {
+			return Promise.reject(error);
+		}
 		const saveBlock = this.getSaveBlock(character?.id);
 		if (saveBlock) {
 			const error = new Error(saveBlock.message || `Character saving is paused until reconciliation completes.`);
@@ -1262,7 +1307,7 @@ export class HubHttpCharacterRepository {
 			// Recovery storage is best-effort; the in-memory conflict guard remains authoritative.
 		}
 		const pResult = this._pRunMutation(async () => {
-			const canonicalId = this._canonicalIds.get(requestedId) || requestedId;
+			let canonicalId = this._canonicalIds.get(requestedId) || requestedId;
 			if (canonicalId !== requestedId) {
 				this._migrateCharacterIdentity({fromId: requestedId, toId: canonicalId});
 				recoveryKey = `hub-character-recovery:${this._scopeKey}:${canonicalId}`;
@@ -1279,11 +1324,15 @@ export class HubHttpCharacterRepository {
 			await this._pEnsureSession();
 			let accepted = this._accepted.get(canonicalId);
 			if (!accepted) {
-				try {
-					await this.pGet({characterId: canonicalId});
-					accepted = this._accepted.get(canonicalId);
-				} catch (error) {
-					if (error?.code !== "CHARACTER_NOT_FOUND") throw error;
+				if (!isCreate) {
+					try {
+						await this.pGet({characterId: canonicalId});
+						accepted = this._accepted.get(canonicalId);
+					} catch (error) {
+						if (error?.code !== "CHARACTER_NOT_FOUND") throw error;
+					}
+				}
+				if (!accepted) {
 					const created = await this._api.pCreateCharacter({
 						clientImportId: requestedId,
 						campaignId: this._campaignId,
@@ -1293,8 +1342,10 @@ export class HubHttpCharacterRepository {
 					});
 					this._canonicalIds.set(requestedId, created.character.id);
 					this._migrateCharacterIdentity({fromId: requestedId, toId: created.character.id});
+					canonicalId = created.character.id;
 					recoveryKey = `hub-character-recovery:${this._scopeKey}:${created.character.id}`;
 					this._accepted.set(created.character.id, created.character);
+					this._access.set(created.character.id, CHARACTER_ACCESS_MODES.OWNER);
 					accepted = created.character;
 				}
 			}
@@ -1511,14 +1562,17 @@ export class HubHttpCharacterRepository {
 
 	async pDelete ({characterId}) {
 		await this._pEnsureSession();
+		this._assertCharacterEditable({characterId});
 		await this._api.pArchiveCharacter({characterId, idempotencyKey: crypto.randomUUID()});
 		this._accepted.delete(characterId);
+		this._access.delete(characterId);
 		this._leases.delete(characterId);
 		return true;
 	}
 
 	async pReleaseLease ({characterId}) {
 		await this._pEnsureSession();
+		if (this.isCharacterReadOnly({characterId})) return {released: false};
 		const result = await this._api.pReleaseCharacterLease({characterId});
 		this._leases.delete(characterId);
 		return result;

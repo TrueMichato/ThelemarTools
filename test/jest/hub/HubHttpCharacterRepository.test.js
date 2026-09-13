@@ -91,18 +91,103 @@ describe("HTTP character repository", () => {
 	it("creates a cloud document and adopts its canonical server id", async () => {
 		const api = {
 			pGetSession: async () => ({signedIn: true}),
-			pGetCharacter: async () => {
-				const error = new Error("missing");
-				error.code = "CHARACTER_NOT_FOUND";
-				throw error;
-			},
+			pGetCharacter: jest.fn(),
 			pCreateCharacter: async ({data}) => ({
 				character: {id: "server-id", revision: 1, data},
 			}),
 		};
 		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
-		await expect(repository.pUpsert({character: {id: "temporary-id", name: "Mira"}}))
+		await expect(repository.pUpsert({character: {id: "temporary-id", name: "Mira"}, isCreate: true}))
 			.resolves.toEqual({id: "server-id", name: "Mira"});
+		expect(api.pGetCharacter).not.toHaveBeenCalled();
+		expect(repository.getCharacterAccess({characterId: "server-id"})).toBe("owner");
+	});
+
+	it("uses the canonical id for a server-normalization patch immediately after create", async () => {
+		const leaseCalls = [];
+		const patchCalls = [];
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: jest.fn(),
+			pCreateCharacter: async () => ({
+				character: {id: "server-id", revision: 1, data: {name: "Mira"}},
+			}),
+			pAcquireCharacterLease: async input => {
+				leaseCalls.push(input);
+				return {epoch: 1};
+			},
+			pPatchCharacter: async input => {
+				patchCalls.push(input);
+				return {
+					character: {
+						id: "server-id",
+						revision: 2,
+						data: {name: "Mira", hp: {current: 12}},
+					},
+				};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+
+		await expect(repository.pUpsert({
+			character: {id: "temporary-id", name: "Mira", hp: {current: 12}},
+			isCreate: true,
+		})).resolves.toEqual({id: "server-id", name: "Mira", hp: {current: 12}});
+
+		expect(api.pGetCharacter).not.toHaveBeenCalled();
+		expect(leaseCalls).toEqual([{characterId: "server-id", isTakeover: false}]);
+		expect(patchCalls).toEqual([
+			expect.objectContaining({characterId: "server-id", baseRevision: 1, leaseEpoch: 1}),
+		]);
+	});
+
+	it("preserves DM read-only authority from the character projection envelope", async () => {
+		const api = {
+			pGetSession: async () => ({signedIn: true, account: {id: "dm-1"}}),
+			pGetCharacterProjection: jest.fn(async () => ({
+				kind: "dm_truth",
+				character: {
+					id: "server-1",
+					ownerAccountId: "player-1",
+					campaignId: "campaign-1",
+					revision: 3,
+					data: {name: "Mira", hp: {current: 20}},
+				},
+			})),
+			pAcquireCharacterLease: jest.fn(),
+			pPatchCharacter: jest.fn(),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+
+		await expect(repository.pGet({characterId: "server-1"}))
+			.resolves.toEqual({id: "server-1", name: "Mira", hp: {current: 20}});
+		expect(repository.getCharacterAccess({characterId: "server-1"})).toBe("dm_readonly");
+		await expect(repository.pAcquireLease({characterId: "server-1"})).rejects.toMatchObject({
+			code: "CHARACTER_READ_ONLY",
+		});
+		await expect(repository.pUpsert({
+			character: {id: "server-1", name: "Locally edited"},
+		})).rejects.toMatchObject({
+			code: "CHARACTER_READ_ONLY",
+		});
+		expect(api.pAcquireCharacterLease).not.toHaveBeenCalled();
+		expect(api.pPatchCharacter).not.toHaveBeenCalled();
+	});
+
+	it("marks campaign roster characters owned by another account as DM read-only", async () => {
+		const api = {
+			pGetSession: async () => ({signedIn: true, account: {id: "dm-1"}}),
+			pListCharacters: async () => [
+				{id: "owned", ownerAccountId: "dm-1", revision: 1, data: {name: "Owned"}},
+				{id: "player", ownerAccountId: "player-1", revision: 1, data: {name: "Player"}},
+			],
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+
+		await repository.pList();
+
+		expect(repository.getCharacterAccess({characterId: "owned"})).toBe("owner");
+		expect(repository.getCharacterAccess({characterId: "player"})).toBe("dm_readonly");
 	});
 
 	it("uses accepted revision and lease epoch for patch saves", async () => {

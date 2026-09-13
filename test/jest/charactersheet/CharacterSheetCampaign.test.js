@@ -23,6 +23,7 @@ function getControl ({
 		_characterRepository: {
 			pReleaseLease: jest.fn(async () => ({released: true})),
 		},
+		isCurrentCharacterReadOnly: jest.fn(() => false),
 		_canRestoreHubRealtimeAfterError: jest.fn(error => ![
 			"AUTH_REQUIRED",
 			"CAMPAIGN_NOT_FOUND",
@@ -96,6 +97,88 @@ function getControl ({
 }
 
 describe("Character Sheet campaign control", () => {
+	it("does not load owner-only sharing controls for a DM read-only sheet", async () => {
+		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {
+			_page: {
+				_isHubCharacter: true,
+				_currentCharacterId: "player-character",
+				isCurrentCharacterReadOnly: () => true,
+			},
+			_currentCharacter: {id: "player-character", campaignId: "campaign-1"},
+			_sharing: {pLoad: jest.fn()},
+			render: jest.fn(),
+		});
+
+		await control.pRefreshSharing();
+
+		expect(control._sharing).toBeNull();
+	});
+
+	it("describes DM truth as read-only instead of implying edits will sync", () => {
+		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {
+			_isLoading: false,
+			_currentCharacter: {id: "player-character", campaignId: "campaign-1"},
+			_currentCampaign: {id: "campaign-1", name: "Ashen March"},
+			_page: {
+				_currentCharacterId: "player-character",
+				_characterRepository: {hasPendingWrites: () => false},
+				isCurrentCharacterReadOnly: () => true,
+			},
+		});
+
+		expect(control._getDetail({isCloud: true}))
+			.toBe("Read-only DM view · use campaign actions to make authorized changes");
+	});
+
+	it("reloads character-scoped campaign state and binds sharing writes to the loaded character", async () => {
+		const page = {
+			_isHubCharacter: true,
+			_currentCharacterId: "character-a",
+			isCurrentCharacterReadOnly: () => false,
+		};
+		const policy = {
+			policy: {version: 1, preset: "table", overrides: {}},
+			projectionRevision: 1,
+			preview: null,
+		};
+		const api = {
+			pGetSession: jest.fn(async () => ({signedIn: true})),
+			pListCampaigns: jest.fn(async () => [{id: "campaign-1", name: "Ashen March"}]),
+			pGetCharacter: jest.fn(async ({characterId}) => ({id: characterId, campaignId: "campaign-1"})),
+			pGetProjectionPolicy: jest.fn(async () => policy),
+			pSetProjectionPolicy: jest.fn(async ({characterId}) => ({...policy, characterId})),
+		};
+		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {
+			_page: page,
+			_api: api,
+			_root: null,
+			_isInitialized: true,
+			_refreshGeneration: 0,
+			_session: null,
+			_campaigns: [],
+			_currentCharacter: null,
+			_currentCampaign: null,
+			_isLoading: false,
+			_feedback: null,
+			_sharing: null,
+			render: jest.fn(),
+		});
+
+		await control.pRefreshCurrentCharacter();
+		const sharingA = control._sharing;
+		page._currentCharacterId = "character-b";
+		await control.pRefreshCurrentCharacter();
+
+		expect(control._sharing).not.toBe(sharingA);
+		expect(api.pGetProjectionPolicy.mock.calls.map(([{characterId}]) => characterId))
+			.toEqual(["character-a", "character-b"]);
+
+		await sharingA.pSave();
+		expect(api.pSetProjectionPolicy).toHaveBeenCalledWith(expect.objectContaining({
+			characterId: "character-a",
+		}));
+	});
+
 	it("uses the full source-edition catalog when deciding whether to show policy warnings", () => {
 		const root = {append: jest.fn()};
 		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {

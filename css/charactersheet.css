@@ -1218,8 +1218,22 @@ body.is-charsheet-page .ve-ui-modal__scroller > .ve-flex.ve-w-100.ve-mb-1 {
 	color: #ef4444;
 }
 
+.charsheet__save-indicator--readonly {
+	background: rgba(96, 165, 250, 0.15);
+	color: #60a5fa;
+}
+
 .charsheet__save-icon {
 	font-size: 0.75rem;
+}
+
+.charsheet-page--read-only .charsheet__campaign {
+	border-color: rgba(96, 165, 250, 0.65);
+	background: color-mix(in srgb, var(--cs-bg-elevated, #334155) 82%, #2563eb);
+}
+
+.charsheet-page--read-only :is(button, input, select, textarea)[disabled] {
+	cursor: not-allowed;
 }
 
 /* Level Up Banner - Floating notification bar */

@@ -9,6 +9,12 @@ import {
 import {HubRealtimeClient, isRealtimeEventCoveredByBaseline} from "./hub-realtime-client.js";
 import {renderHubActivityRows} from "./hub-activity-render.js";
 import {
+	getCampaignConditionCatalog,
+	getCampaignConditionUid,
+	pLoadCampaignConditionCatalog,
+} from "./hub-condition-catalog.js";
+import {
+	getCanonicalCharacter,
 	getOwnerMembershipId,
 	getProjectionId,
 	getProjectionOwnerAccountId,
@@ -1041,7 +1047,12 @@ async function pInitCampaign ({session}) {
 	document.getElementById("campaign-account").textContent = session.account.displayName;
 	renderMemberList({campaign, campaignId, members, session, pRefresh: pRefreshMembers});
 	if (["dm", "co_dm"].includes(campaign.role)) await pRefreshInvites();
-	renderCharacterList({campaignId, characters});
+	renderCharacterList({
+		campaignId,
+		characters,
+		session,
+		isDm: ["dm", "co_dm"].includes(campaign.role),
+	});
 	renderPartyRoster({
 		campaignId,
 		characters: snapshot.characters,
@@ -1073,7 +1084,13 @@ async function pInitCampaign ({session}) {
 		document.title = `${campaign.name} - Campaign Hub - ThelemarTools`;
 		return;
 	}
-	const {pRefreshTransferState, rulesPolicyManagerPromise} = await pInitCampaignForms({
+	const {
+		pRefreshTransferState,
+		rulesPolicyManagerPromise,
+		pRefreshConditionOptions,
+		pRefreshContextBoundControls,
+		isConditionCatalogAvailable,
+	} = await pInitCampaignForms({
 		campaign,
 		campaignId,
 		session,
@@ -1128,7 +1145,12 @@ async function pInitCampaign ({session}) {
 				liveRoster = snapshotNxt.roster || [];
 				liveLastSequence = snapshotNxt.lastSequence;
 			}
-			renderCharacterList({campaignId, characters: charactersNxt});
+			renderCharacterList({
+				campaignId,
+				characters: charactersNxt,
+				session,
+				isDm: ["dm", "co_dm"].includes(campaign.role),
+			});
 			applyCampaignRoleLayout({campaign, characters: charactersNxt});
 			renderPartyRoster({
 				campaignId,
@@ -1143,6 +1165,9 @@ async function pInitCampaign ({session}) {
 				context = await api.pGetCampaignContext({campaignId});
 				renderCampaignContext(context);
 				void rulesPolicyManagerPromise.then(manager => manager?.replaceContext(context));
+				await pRefreshContextBoundControls({context});
+			} else if (!isConditionCatalogAvailable()) {
+				await pRefreshContextBoundControls({context});
 			}
 			if (isCampaignReloadRequired) return;
 			await Promise.all([
@@ -1154,6 +1179,7 @@ async function pInitCampaign ({session}) {
 					eventsNxt: liveEvents,
 				}),
 			]);
+			pRefreshConditionOptions();
 		} catch (error) {
 			renderError(error);
 		} finally {
@@ -1206,7 +1232,9 @@ async function pInitCampaign ({session}) {
 		// event, including an invalidation, is coalesced into one authorization-scoped
 		// HTTP refetch that *replaces* the roster rather than merging into it, so a
 		// previously broader projection cannot survive a narrowed sharing policy.
-		queueLiveRefresh({isCampaignContextRefresh: event.type === "rules.activated"});
+		const isCampaignContextRefresh = event.type === "rules.activated"
+			|| event.type === "brew.activated";
+		queueLiveRefresh({isCampaignContextRefresh});
 	});
 	realtime.on("cursor", baseline => {
 		authorityBaselineSequence = Math.max(authorityBaselineSequence, baseline?.cursor?.lastSequence || 0);
@@ -1423,7 +1451,7 @@ function renderInviteList ({campaignId, invites, pRefresh}) {
 	}));
 }
 
-function renderCharacterList ({campaignId, characters}) {
+function renderCharacterList ({campaignId, characters, session, isDm}) {
 	const list = document.getElementById("campaign-character-list");
 	if (!list) return;
 	setCount({id: "campaign-character-count", count: characters.length});
@@ -1436,6 +1464,8 @@ function renderCharacterList ({campaignId, characters}) {
 		const link = document.createElement("a");
 		link.className = "hub-data-row";
 		link.href = `charactersheet.html?id=${encodeURIComponent(character.id)}&hubCampaign=${encodeURIComponent(campaignId)}`;
+		const isReadOnlyDm = isDm && character.ownerAccountId !== session.account.id;
+		if (isReadOnlyDm) link.title = "Open this character in a read-only DM view";
 		const main = document.createElement("span");
 		main.className = "hub-data-row__main";
 		const name = document.createElement("span");
@@ -1447,7 +1477,7 @@ function renderCharacterList ({campaignId, characters}) {
 		main.append(name, status);
 		const open = document.createElement("span");
 		open.className = "hub-data-row__open";
-		open.textContent = "Open sheet";
+		open.textContent = isReadOnlyDm ? "Inspect sheet" : "Open sheet";
 		link.append(main, open);
 		return link;
 	}));
@@ -1460,11 +1490,13 @@ function renderPartyRoster ({campaignId, characters, members, session, isDm, ros
 	setHidden(document.getElementById("campaign-party-empty"), !!characters.length);
 	list.replaceChildren(...characters.map(character => {
 		const characterId = getProjectionId(character);
-		const canOpen = isCanonicalProjection(character) && (isDm || getProjectionOwnerAccountId(character) === session.account.id);
+		const isOwner = getProjectionOwnerAccountId(character) === session.account.id;
+		const canOpen = isCanonicalProjection(character) && (isDm || isOwner);
 		const row = document.createElement(canOpen ? "a" : "div");
 		row.className = "hub-data-row";
 		if (canOpen) {
 			row.href = `charactersheet.html?id=${encodeURIComponent(characterId)}&hubCampaign=${encodeURIComponent(campaignId)}`;
+			if (isDm && !isOwner) row.title = "Open this character in a read-only DM view";
 		}
 		const main = document.createElement("span");
 		main.className = "hub-data-row__main";
@@ -1482,7 +1514,7 @@ function renderPartyRoster ({campaignId, characters, members, session, isDm, ros
 		if (canOpen) {
 			const open = document.createElement("span");
 			open.className = "hub-data-row__open";
-			open.textContent = "Open sheet";
+			open.textContent = isDm && !isOwner ? "Inspect sheet" : "Open sheet";
 			row.append(open);
 		}
 		return row;
@@ -1830,7 +1862,12 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 				idempotencyKey: crypto.randomUUID(),
 			});
 			const charactersNxt = await api.pListCharacters({campaignId});
-			renderCharacterList({campaignId, characters: charactersNxt});
+			renderCharacterList({
+				campaignId,
+				characters: charactersNxt,
+				session,
+				isDm: ["dm", "co_dm"].includes(campaign.role),
+			});
 			applyCampaignRoleLayout({campaign, characters: charactersNxt});
 			setHidden(uploadControls, true);
 			if (uploadStatus) uploadStatus.textContent = `${character.name || "Character"} was added as a cloud copy. The local original is unchanged.`;
@@ -1943,24 +1980,53 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 	const actionType = document.getElementById("campaign-action-type");
 	const actionValue = document.getElementById("campaign-action-value");
 	const actionValueLabel = document.getElementById("campaign-action-value-label");
-	const actionConditionSourceField = document.getElementById("campaign-action-condition-source-field");
-	const actionConditionSource = document.getElementById("campaign-action-condition-source");
+	const actionConditionField = document.getElementById("campaign-action-condition-field");
+	const actionCondition = document.getElementById("campaign-action-condition");
 	const actionSlotFields = document.getElementById("campaign-action-slot-fields");
+	const conditionCatalogByUid = new Map();
+	let activeConditionCatalog = [];
+	let isConditionCatalogLoadFailed = false;
+	const getCurrentTargetConditions = () => {
+		if (actionType.value !== "condition_remove") return [];
+		const targetId = document.getElementById("campaign-action-target")?.value?.split(":")[1];
+		if (!targetId) return [];
+		const target = getCharacterById(targetCharacters, targetId);
+		if (!isCanonicalProjection(target)) return [];
+		const conditions = getCanonicalCharacter(target)?.data?.conditions;
+		return Array.isArray(conditions) ? conditions : [];
+	};
+	const pRefreshConditionOptions = () => {
+		const previousValue = actionCondition.value;
+		const conditions = getCampaignConditionCatalog({
+			siteData: {condition: activeConditionCatalog},
+			additionalConditions: getCurrentTargetConditions(),
+		});
+		conditionCatalogByUid.clear();
+		actionCondition.replaceChildren(...conditions.map(condition => {
+			const option = document.createElement("option");
+			option.value = getCampaignConditionUid(condition);
+			option.textContent = `${condition.name} (${condition.source})`;
+			conditionCatalogByUid.set(option.value, condition);
+			return option;
+		}));
+		if (conditionCatalogByUid.has(previousValue)) actionCondition.value = previousValue;
+	};
 	const syncActionFields = () => {
 		const type = actionType.value;
 		const isSlot = ["spell_slot_spend", "spell_slot_restore"].includes(type);
 		const isCondition = ["condition_add", "condition_remove"].includes(type);
 		setHidden(actionSlotFields, !isSlot);
-		setHidden(actionConditionSourceField, !isCondition);
-		actionConditionSource.disabled = !isCondition;
-		actionValue.disabled = isSlot;
-		actionValue.required = !isSlot;
-		if (isSlot) return;
+		setHidden(actionConditionField, !isCondition);
+		setHidden(actionValueLabel, isSlot || isCondition);
+		setHidden(actionValue, isSlot || isCondition);
+		if (isCondition) pRefreshConditionOptions();
+		actionCondition.disabled = !isCondition || !conditionCatalogByUid.size;
+		actionValue.disabled = isSlot || isCondition;
+		actionValue.required = !isSlot && !isCondition;
+		if (isSlot || isCondition) return;
 		const configuration = {
 			damage: {label: "Damage amount", type: "number", placeholder: "1"},
 			healing: {label: "Healing amount", type: "number", placeholder: "1"},
-			condition_add: {label: "Condition to add", type: "text", placeholder: "Poisoned"},
-			condition_remove: {label: "Condition to remove", type: "text", placeholder: "Poisoned"},
 		}[type];
 		actionValueLabel.textContent = configuration.label;
 		actionValue.type = configuration.type;
@@ -1968,8 +2034,38 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		actionValue.placeholder = configuration.placeholder;
 		actionValue.min = configuration.type === "number" ? "1" : "";
 	};
+	const pRefreshConditionCatalog = async ({campaignBrewContent}) => {
+		try {
+			activeConditionCatalog = await pLoadCampaignConditionCatalog({campaignBrewContent});
+			if (isConditionCatalogLoadFailed) setFormStatus({formId: "campaign-action-form"});
+			isConditionCatalogLoadFailed = false;
+			syncActionFields();
+			return true;
+		} catch (error) {
+			activeConditionCatalog = [];
+			isConditionCatalogLoadFailed = true;
+			conditionCatalogByUid.clear();
+			const option = document.createElement("option");
+			option.value = "";
+			option.textContent = "Condition catalog unavailable";
+			actionCondition.replaceChildren(option);
+			setFormStatus({
+				formId: "campaign-action-form",
+				message: getErrorMessage(error),
+				isError: true,
+			});
+			syncActionFields();
+			return false;
+		}
+	};
+	await pRefreshConditionCatalog({campaignBrewContent: context.brewBundle?.content});
 	actionType?.addEventListener("change", syncActionFields);
+	document.getElementById("campaign-action-target")?.addEventListener("change", syncActionFields);
 	syncActionFields();
+	const pRefreshContextBoundControls = async ({context: contextNxt}) => {
+		itemAward.setCampaignBrewContent(contextNxt.brewBundle?.content);
+		return pRefreshConditionCatalog({campaignBrewContent: contextNxt.brewBundle?.content});
+	};
 
 	document.getElementById("campaign-action-form")?.addEventListener("submit", async event => {
 		event.preventDefault();
@@ -1984,13 +2080,8 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					if (["damage", "healing"].includes(type) && !(Number(rawValue) > 0)) {
 						throw new Error("Enter a positive amount.");
 					}
-					if (["condition_add", "condition_remove"].includes(type) && !rawValue) {
-						throw new Error("Enter a condition.");
-					}
-					const conditionSource = document.getElementById("campaign-action-condition-source").value.trim();
-					if (["condition_add", "condition_remove"].includes(type) && !conditionSource) {
-						throw new Error("Enter the condition source code.");
-					}
+					const condition = conditionCatalogByUid.get(actionCondition.value) || null;
+					if (["condition_add", "condition_remove"].includes(type) && !condition) throw new Error("Choose a condition.");
 					const slotLevel = Number(document.getElementById("campaign-action-slot-level").value);
 					const slotAmount = Number(document.getElementById("campaign-action-slot-amount").value);
 					if (["spell_slot_spend", "spell_slot_restore"].includes(type) && (!Number.isInteger(slotLevel) || slotLevel < 1 || slotLevel > 9)) {
@@ -2015,7 +2106,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 								? {
 									kind: type === "condition_add" ? "condition.add" : "condition.remove",
 									version: 1,
-									arguments: {condition: {name: rawValue, source: conditionSource}},
+									arguments: {condition},
 								}
 								: null;
 					await api.pCreateStructuredAction({
@@ -2201,7 +2292,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					});
 					const contextNxt = await api.pGetCampaignContext({campaignId});
 					renderCampaignContext(contextNxt);
-					itemAward.setCampaignBrewContent(contextNxt.brewBundle?.content);
+					await pRefreshContextBoundControls({context: contextNxt});
 					setFormStatus({formId: "campaign-brew-form", message: "Campaign homebrew published."});
 				}});
 		} catch (error) {
@@ -2248,7 +2339,13 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		}
 	});
 
-	return {pRefreshTransferState, rulesPolicyManagerPromise};
+	return {
+		pRefreshTransferState,
+		rulesPolicyManagerPromise,
+		pRefreshConditionOptions,
+		pRefreshContextBoundControls,
+		isConditionCatalogAvailable: () => !!activeConditionCatalog.length,
+	};
 }
 
 async function pInit () {

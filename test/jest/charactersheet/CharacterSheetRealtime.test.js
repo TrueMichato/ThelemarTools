@@ -305,11 +305,14 @@ describe("Character Sheet realtime coordinator", () => {
 		expect(states).toContainEqual({
 			state: "closed",
 			reason: "Character is no longer available in this campaign.",
+			isCharacterAccessEnded: true,
 		});
 	});
 
 	it.each(["character.archived", "character.moved_out"])("tears down on a remote %s event", async type => {
 		const {clients, coordinator} = makeCoordinator();
+		const states = [];
+		coordinator.on("connectionState", value => states.push(value));
 		coordinator.attach({characterId: "character-1"});
 
 		clients[0].emit("event", {
@@ -323,6 +326,66 @@ describe("Character Sheet realtime coordinator", () => {
 		await pFlush();
 
 		expect(clients[0].close).toHaveBeenCalledTimes(1);
+		expect(states).toContainEqual(expect.objectContaining({
+			state: "closed",
+			isCharacterAccessEnded: true,
+		}));
+	});
+
+	it("tears down a DM truth view when the viewer is demoted", async () => {
+		const repository = {
+			...makeRepository(),
+			isCharacterReadOnly: jest.fn(() => true),
+		};
+		const {clients, coordinator} = makeCoordinator({repository});
+		const states = [];
+		coordinator.on("connectionState", value => states.push(value));
+		coordinator.attach({characterId: "character-1"});
+		clients[0].emit("cursor", {
+			cursor: {campaignId: "campaign-1", lastSequence: 8},
+			membership: {accountId: "dm-account", role: "dm"},
+			characterRefs: [{id: "character-1", revision: 1, projectionRevision: 1}],
+		});
+
+		clients[0].emit("event", {
+			id: "event-role-change",
+			campaignId: "campaign-1",
+			sequence: 9,
+			type: "membership.role_changed",
+			aggregateType: "membership",
+			aggregateId: "membership-1",
+			payload: {accountId: "dm-account", role: "player"},
+		});
+		await pFlush();
+
+		expect(repository.isCharacterReadOnly).toHaveBeenCalledWith({characterId: "character-1"});
+		expect(states).toContainEqual(expect.objectContaining({
+			state: "closed",
+			isCharacterAccessEnded: true,
+		}));
+	});
+
+	it("tears down the open character when the campaign is archived", async () => {
+		const {clients, coordinator} = makeCoordinator();
+		const states = [];
+		coordinator.on("connectionState", value => states.push(value));
+		coordinator.attach({characterId: "character-1"});
+
+		clients[0].emit("event", {
+			id: "event-campaign-archived",
+			campaignId: "campaign-1",
+			sequence: 9,
+			type: "campaign.archived",
+			aggregateType: "campaign",
+			aggregateId: "campaign-1",
+			payload: {},
+		});
+		await pFlush();
+
+		expect(states).toContainEqual(expect.objectContaining({
+			state: "closed",
+			isCharacterAccessEnded: true,
+		}));
 	});
 
 	it("suspends and resumes the same client without resetting its delivery generation", async () => {

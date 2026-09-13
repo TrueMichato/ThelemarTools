@@ -158,6 +158,12 @@ rules and brew teardown, so no private projection remains visible during cleanup
 cancel pending debounced Board persistence before clearing panels, preventing concealment from being saved
 as an empty authoritative workspace.
 
+Character-scoped loss uses the same fail-closed presentation without incorrectly clearing the user's campaign
+selection. `character.archived`, `character.moved_out`, `campaign.archived`, and a DM/co-DM demotion while a
+foreign canonical sheet is open close that resource subscription, discard character-scoped campaign/sharing
+state, and conceal the document. Switching characters also clears the old sharing controller before the new
+policy loads, and each controller is permanently bound to the character whose policy it fetched.
+
 A cancellation is classified as `REQUEST_ABORTED` across the whole request path — including the
 response body read — so it is never mistaken for connectivity loss. Personal brew and local
 documents are never cleared by a campaign-context failure.
@@ -201,6 +207,28 @@ unrelated open campaign Y.
 
 Only a non-persisted `pagehide` disposes the coordinator.
 
+## Surface-entry consistency
+
+Character Sheet and DM Screen use one precedence contract regardless of where navigation starts:
+
+1. an explicit resource URL (`hubCampaign`, `hubCharacter`, or `local=1`) wins;
+2. otherwise a verified active campaign decorates ordinary navigation and redirects a bare eligible surface;
+3. explicit local and deep-link character URLs are never silently retargeted.
+
+Campaign Overview links remain explicit because they identify a specific campaign resource. A DM opening another
+member's character receives the same campaign rules/content context as the owner but a distinct `dm_readonly`
+authority mode: the roster says **Inspect sheet**, the sheet announces **Read-only DM view**, mutation controls
+are disabled before input, and authorized changes stay in Campaign Overview's semantic operations.
+
+The remaining long-term cleanup is intentionally phased rather than a broad entry-flow rewrite:
+
+1. **Current:** shared URL precedence and surface-default helper, explicit local mode, authority-preserving
+   Character Sheet repository, and consistent read-only DM affordances.
+2. **Next:** expose a shared launch descriptor (`surface`, campaign id, resource id, authority) so Campaign
+   Overview, global navigation, bookmarks, and future deep links produce one normalized destination.
+3. **Later:** reuse that descriptor for pre-navigation capability summaries and cross-surface breadcrumbs without
+   moving authorization decisions out of the BFF.
+
 ## Files
 
 | File | Role |
@@ -231,6 +259,7 @@ two-script boot graph. The coordinator graph's combined transfer size is asserte
 | `HubCampaignNavigation.test.js` | URL decoration, explicit local routes, and surface defaults |
 | `HubContentBootstrap.test.js` / `HubSiteContext.test.js` | Pre-data activation, temporary-only brew, capability failure |
 | `CharacterSheetHubTeardown.test.js` / `CharacterSheetPersistenceBackend.test.js` | Ordered rules cleanup and in-flight character-save conflict fencing |
+| `HubHttpCharacterRepository.test.js` / `CharacterSheetRepositorySeam.test.js` | Canonical-id adoption, explicit create intent, owner/DM authority preservation, and pre-input read-only guards |
 | `DmScreenCampaignPrivacy.test.js` / `DmScreenWorkspacePersistence.test.js` | Private Board concealment and conflict/panel-hydration fencing |
 | `HubActiveCampaignJourney.test.js` | Real BFF integration: reload, device independence, request counts, logout ordering, pinned convergence |
 | `test/e2e/hub/active-campaign-context.spec.ts` | Production stack: switcher/reselection, native storage/channel, defaults/local routes, pinning, in-flight conflict/access-loss order, BFCache, revoke/archive |

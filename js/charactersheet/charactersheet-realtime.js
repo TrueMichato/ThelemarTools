@@ -95,6 +95,7 @@ export class CharacterSheetRealtimeCoordinator {
 			client,
 			cursorKey: null,
 			generation,
+			viewerAccountId: null,
 			isDetachQueued: false,
 			isSuspended: false,
 			inventoryEventKeys: new Set(),
@@ -166,6 +167,7 @@ export class CharacterSheetRealtimeCoordinator {
 	_handleCursor (active, baseline) {
 		if (!this._isCurrent(active)) return;
 		if (baseline.cursor?.campaignId !== this._campaignId) return;
+		if (baseline.membership?.accountId) active.viewerAccountId = baseline.membership.accountId;
 		if (
 			baseline.campaign
 			&& Object.hasOwn(baseline.campaign, "activeRulesVersionId")
@@ -226,6 +228,19 @@ export class CharacterSheetRealtimeCoordinator {
 
 	_handleEvent (active, event) {
 		if (!this._isCurrent(active) || event?.campaignId !== this._campaignId) return;
+		const isViewerDemotedFromDm = event.type === "membership.role_changed"
+			&& event.payload?.accountId === active.viewerAccountId
+			&& !["dm", "co_dm"].includes(event.payload?.role)
+			&& this._repository.isCharacterReadOnly?.({characterId: active.characterId});
+		if (event.type === "campaign.archived" || isViewerDemotedFromDm) {
+			this._queueDetach(active, {
+				reason: event.type === "campaign.archived"
+					? "Campaign is no longer active."
+					: "Your campaign role no longer permits this character view.",
+				sequence: event.sequence,
+			});
+			return;
+		}
 		if (event.type === "rules.activated" && event.aggregateType === "rules_version") {
 			this._enqueue(active, {
 				type: "rulesChanged",
@@ -363,7 +378,11 @@ export class CharacterSheetRealtimeCoordinator {
 				fnDeliver: () => {
 					if (!this._isCurrent(active)) return false;
 					this.detach();
-					this._emit("connectionState", {state: "closed", reason});
+					this._emit("connectionState", {
+						state: "closed",
+						reason,
+						isCharacterAccessEnded: true,
+					});
 					return true;
 				},
 			}).catch(() => {

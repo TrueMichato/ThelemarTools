@@ -242,6 +242,42 @@ describe("Character Sheet hub teardown owners", () => {
 		expect(calls).toContainEqual(["before", message]);
 		expect(calls).not.toContainEqual(["append", message]);
 	});
+
+	it("conceals a character when its resource-level realtime access ends", () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._isHubCharacter = true;
+		page._currentCharacterId = "private-character";
+		page._state._data.name = "Private Character";
+		page._hubEffects = {onConnectionState: jest.fn(), deactivate: jest.fn()};
+		page._peerTargeting = {onConnectionState: jest.fn(), deactivate: jest.fn()};
+		page._partyInventory = {detach: jest.fn()};
+		page._characterRepository = {clearRealtimeReconciliation: jest.fn()};
+		page._hubRealtime = {detach: jest.fn()};
+		page._campaign = {render: jest.fn()};
+		const previousDocument = globalThis.document;
+		globalThis.document = {
+			body: {append: jest.fn()},
+			createElement: () => ({setAttribute: jest.fn()}),
+			getElementById: () => null,
+			querySelector: () => ({replaceChildren: jest.fn(), before: jest.fn(), hidden: false}),
+		};
+
+		try {
+			page._onHubRealtimeConnectionState({
+				state: "closed",
+				reason: "Character is no longer available in this campaign.",
+				isCharacterAccessEnded: true,
+			});
+		} finally {
+			globalThis.document = previousDocument;
+		}
+
+		expect(page._currentCharacterId).toBeNull();
+		expect(page._state._data.name).toBe("");
+		expect(page._partyInventory.detach).toHaveBeenCalled();
+		expect(page._hubEffects.deactivate).toHaveBeenCalled();
+		expect(page._campaign.render).toHaveBeenCalled();
+	});
 });
 
 describe("Character Sheet campaign content context lifecycle", () => {
