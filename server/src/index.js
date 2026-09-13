@@ -1,6 +1,7 @@
 import {createHubApp} from "./app.js";
 import {createAuthProviderConfiguration} from "./auth-provider-config.js";
 import {getClientIpHeader} from "./client-ip.js";
+import {parsePeerSourceCostsCampaignIds} from "./peer-source-cost-rollout.js";
 import {PostgresHubStore} from "./postgres-hub-store.js";
 import {getSafeRequestLog, HUB_LOG_REDACT_PATHS} from "./observability.js";
 
@@ -26,7 +27,9 @@ const clientIpHeader = getClientIpHeader(process.env.HUB_CLIENT_IP_HEADER);
 const store = PostgresHubStore.fromConnectionString({
 	connectionString: requireEnv("DATABASE_URL"),
 	ssl: process.env.HUB_DATABASE_SSL !== "false",
-	peerSourceCostsEnabled: getCsv("HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS"),
+	peerSourceCostsEnabled: parsePeerSourceCostsCampaignIds(
+		process.env.HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS,
+	),
 });
 await store.pCheckHealth();
 const {authProviderRegistry, allowedOAuthSubjects} = createAuthProviderConfiguration({

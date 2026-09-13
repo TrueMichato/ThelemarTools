@@ -355,6 +355,14 @@ export class HubCampaignPage {
 		return rulesVersionId;
 	}
 
+	async getCampaignContext (campaignId: string): Promise<any> {
+		const response = await this.page.request.get(
+			`/api/campaigns/${encodeURIComponent(campaignId)}/context`,
+		);
+		expect(response.ok(), await response.text()).toBe(true);
+		return (await response.json()).context;
+	}
+
 	async gotoCampaign (campaignId: string): Promise<void> {
 		await this.page.goto(`/campaign.html?id=${encodeURIComponent(campaignId)}`);
 		await expect(this.page.locator("#campaign-content")).toBeVisible({timeout: 30_000});
@@ -1140,6 +1148,26 @@ export class HubCampaignPage {
 			() => this.page.evaluate(() => (window as any).charSheet?._peerTargeting?._hasCapability?.() === true),
 			{timeout: 15_000},
 		).toBe(true);
+	}
+
+	async expectPeerTargetingUnavailable (): Promise<void> {
+		await expect.poll(
+			() => this.page.evaluate(() => {
+				const targeting = (window as any).charSheet?._peerTargeting;
+				return {
+					hasCapability: targeting?._hasCapability?.() === true,
+					phbSupported: targeting?.isSupportedSpellCast?.({
+						spell: {name: "Cure Wounds", source: "PHB", level: 1},
+						selectedSlot: {level: 1},
+					}) === true,
+					xphbSupported: targeting?.isSupportedSpellCast?.({
+						spell: {name: "Cure Wounds", source: "XPHB", level: 1},
+						selectedSlot: {level: 1},
+					}) === true,
+				};
+			}),
+			{timeout: 15_000},
+		).toEqual({hasCapability: false, phbSupported: false, xphbSupported: false});
 	}
 
 	async castSpellAtPeerTarget ({spellName, targetName}: {spellName: string; targetName: string}): Promise<void> {

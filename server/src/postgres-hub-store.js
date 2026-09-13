@@ -2211,7 +2211,7 @@ export class PostgresHubStore {
 		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 		const result = await this._pool.query(`
 			SELECT
-				c.id AS campaign_id,
+				c.id AS campaign_id, c.status AS campaign_status,
 				b.id AS brew_id, b.version AS brew_version, b.content_hash,
 				b.content, b.manifest,
 				r.id AS rules_id, r.version AS rules_version,
@@ -2246,7 +2246,9 @@ export class PostgresHubStore {
 			} : null,
 			capabilities: {
 				peerSourceCosts: getPeerSourceCostsCampaignCapability({
-					isEnabled: Boolean(row.rules_id) && this._isPeerSourceCostsEnabled(campaignId),
+					isEnabled: row.campaign_status === "active"
+						&& Boolean(row.rules_id)
+						&& this._isPeerSourceCostsEnabled(campaignId),
 				}),
 			},
 		};
@@ -2256,12 +2258,14 @@ export class PostgresHubStore {
 		const membership = await this.pGetMembership({accountId, campaignId});
 		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 		const result = await this._pool.query(`
-			SELECT active_rules_version_id
+			SELECT status, active_rules_version_id
 			FROM hub.campaigns
 			WHERE id = $1 AND status <> 'deleting'
 		`, [campaignId]);
 		return getPeerSourceCostsCampaignCapability({
-			isEnabled: Boolean(result.rows[0]?.active_rules_version_id) && this._isPeerSourceCostsEnabled(campaignId),
+			isEnabled: result.rows[0]?.status === "active"
+				&& Boolean(result.rows[0]?.active_rules_version_id)
+				&& this._isPeerSourceCostsEnabled(campaignId),
 		});
 	}
 

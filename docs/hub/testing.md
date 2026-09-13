@@ -60,8 +60,10 @@ npm run build:sw
 # Production dependency audit
 npm audit --omit=dev --audit-level=high
 
-# Tracked-file secret scan, paired first-enable probe, and disposable HTTPS/PostgreSQL E2E
+# Tracked-file secret scan, rollout/provider probes, and disposable HTTPS/PostgreSQL E2E
 npm run hub:check-secrets
+# Against a protected environment with exact campaign IDs configured:
+# npm run hub:check-peer-source-cost-rollout
 # Against isolated staging with both providers configured:
 # npm run hub:check-auth-first-enable
 npm run test:hub:e2e:stack
@@ -92,10 +94,15 @@ error during replay must close/reconnect, preserve its replay marker, and recove
 The memory semantic suite additionally covers every version-1 kind, player generic-operation denial,
 DM/co-DM immediate application, self-target explicit approval, DM non-owner approval denial, unsupported and
 stale source cost/policy, apply-time targetability, target-ref rotation, revocation cleanup, and projection
-privacy canaries. Protocol-4 source-cost suites additionally prove PHB/XPHB Cure Wounds derivation, no mutation
-before consent, slot decrement plus healing, reject/cancel/expiry no-op behavior, concurrent last-slot
-serialization, permanent spent-then-restored slot invalidation, class/preparation/casting-ability derivation,
-self-target combined writes, capability skew, per-leg dedupe, and privacy-shaped failures.
+privacy canaries. Protocol-4 source-cost suites additionally prove exact-ID new-campaign rollout state,
+production configuration validation, PHB/XPHB Cure Wounds derivation and selector gating, no mutation before
+consent, slot decrement plus healing, reject/cancel/expiry no-op behavior, concurrent last-slot serialization,
+permanent spent-then-restored slot invalidation, class/preparation/casting-ability derivation, self-target
+combined writes, capability skew, per-leg dedupe, privacy-shaped failures, and reactivation of an already-open
+Character Sheet after authoritative context changes. The production-derived three-user browser journey begins
+with no active rules/capability, observes the disabled selector state, activates rules through the supported API,
+and then exercises PHB and XPHB targeting. Its `*` gate remains confined to the isolated test entry point; exact
+production enrollment is covered by the closed parser and read-only pre-cutover readiness check.
 
 ## Test data rules
 

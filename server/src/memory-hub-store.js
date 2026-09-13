@@ -1605,7 +1605,9 @@ export class MemoryHubStore {
 			rulesVersion: getPublicCampaignRulesVersion(copy(rules)),
 			capabilities: {
 				peerSourceCosts: getPeerSourceCostsCampaignCapability({
-					isEnabled: Boolean(rules) && this._isPeerSourceCostsEnabled(campaignId),
+					isEnabled: campaign.status === "active"
+						&& Boolean(rules)
+						&& this._isPeerSourceCostsEnabled(campaignId),
 				}),
 			},
 		};
@@ -1615,7 +1617,9 @@ export class MemoryHubStore {
 		this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
 		const campaign = this._campaigns.get(campaignId);
 		return getPeerSourceCostsCampaignCapability({
-			isEnabled: Boolean(campaign?.activeRulesVersionId) && this._isPeerSourceCostsEnabled(campaignId),
+			isEnabled: campaign?.status === "active"
+				&& Boolean(campaign.activeRulesVersionId)
+				&& this._isPeerSourceCostsEnabled(campaignId),
 		});
 	}
 

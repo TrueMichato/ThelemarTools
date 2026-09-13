@@ -4,6 +4,7 @@ import {createHubApp} from "../../../server/src/app.js";
 import {MemoryHubStore} from "../../../server/src/memory-hub-store.js";
 import {createPeerSourceCostsGate, isCanonicalEqual} from "../../../server/src/peer-source-cost-authority.js";
 import {createSemanticOperationRegistry} from "../../../server/src/semantic-operation-registry.js";
+import {getPeerSourceCostsCapability} from "../../../js/hub/hub-source-costs.js";
 
 const SOURCE_ENTITY = {type: "spell", uid: "cure wounds|phb", version: "phb-2014-v1"};
 const EFFECT_TEMPLATE_ID = "spell.cure-wounds.heal";
@@ -43,7 +44,9 @@ async function fixture ({sameCharacter = false, slots = 1, gate = true, activate
 	let isEnabled = gate;
 	const store = new MemoryHubStore({
 		fnNow: () => new Date(now),
-		peerSourceCostsEnabled: () => isEnabled,
+		peerSourceCostsEnabled: campaignId => typeof isEnabled === "function"
+			? isEnabled(campaignId)
+			: isEnabled,
 		semanticProposalTtlMs: 60_000,
 	});
 	const createActor = async label => {
@@ -209,6 +212,45 @@ describe("peer source-cost memory authority", () => {
 	it("supports an explicit all-campaign rollout gate for isolated test stacks", () => {
 		expect(createPeerSourceCostsGate(["*"])("any-campaign")).toBe(true);
 		expect(createPeerSourceCostsGate([])("any-campaign")).toBe(false);
+	});
+
+	it("keeps a new campaign disabled until its exact id is enrolled", async () => {
+		const enrolledCampaignIds = new Set();
+		const ctx = await fixture({gate: campaignId => enrolledCampaignIds.has(campaignId)});
+
+		const disabled = await ctx.store.pGetCampaignContext({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+		});
+		expect(disabled.rulesVersion).not.toBeNull();
+		expect(disabled.capabilities.peerSourceCosts).toMatchObject({enabled: false});
+
+		enrolledCampaignIds.add(ctx.campaign.id);
+		const enabled = await ctx.store.pGetCampaignContext({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+		});
+		expect(enabled.capabilities.peerSourceCosts).toEqual(getPeerSourceCostsCapability({enabled: true}));
+	});
+
+	it("stops advertising the capability after the campaign is archived", async () => {
+		const ctx = await fixture();
+		await ctx.store.pArchiveCampaign({
+			accountId: ctx.dm.account.id,
+			campaignId: ctx.campaign.id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+
+		const context = await ctx.store.pGetCampaignContext({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+		});
+		expect(context.rulesVersion).not.toBeNull();
+		expect(context.capabilities.peerSourceCosts).toMatchObject({enabled: false});
+		expect(await ctx.store.pGetPeerSourceCostsCapability({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+		})).toMatchObject({enabled: false});
 	});
 
 	it("compares pinned JSON canonically across PostgreSQL JSONB key ordering", () => {

@@ -280,6 +280,7 @@ class CharacterSheetPage {
 		// Return to the detached basis in lockstep with the overlay: a summary stamped with a
 		// campaign this sheet is no longer in must not keep claiming to be current.
 		this._state.setCarryAuthorityContext(cleared.carryAuthorityContext);
+		this._peerTargeting?.deactivate();
 	}
 
 	_teardownHubRules () {
@@ -406,13 +407,13 @@ class CharacterSheetPage {
 			}
 			return;
 		}
-		if (state?.state !== "closed") return;
+		if (!["closed", "reconnecting"].includes(state?.state)) return;
 		this._hubRealtimeGeneration++;
 		this._hubContextGeneration++;
 		this._hubContextRefreshActiveGeneration = null;
 		this._isHubContextRefreshing = false;
 		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
-		this._isHubContextRevalidationRequired = state.state === "closed";
+		this._isHubContextRevalidationRequired = true;
 		this._clearHubRules?.({isUnavailable: true});
 		this._campaign?.render();
 	}
@@ -430,6 +431,7 @@ class CharacterSheetPage {
 			rulesVersionId: context?.rulesVersion?.id ?? null,
 			brewBundleHash: context?.brewBundle?.contentHash ?? null,
 		});
+		this._peerTargeting?.activate({characterId: this._currentCharacterId});
 	}
 
 	_onHubCampaignContextChanged (event = null) {

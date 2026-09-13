@@ -34,6 +34,7 @@ Runbooks are executable operational procedures. Each final runbook must contain:
 - [Database migration failure](migration-failure.md)
 - [Private OAuth allowlist change](allowlist-change.md)
 - [Authentication provider registry and rollback](auth-provider-registry.md)
+- [Peer source-cost campaign rollout](peer-source-cost-rollout.md)
 - [Campaign ownership recovery](campaign-ownership-recovery.md)
 - [Private one-DM/two-player game day](private-game-day.md)
 
