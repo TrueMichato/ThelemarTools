@@ -47,6 +47,7 @@ describe("Character Sheet repository seam", () => {
 		await CharacterSheetPage.prototype._saveCurrentCharacter.call(host);
 
 		expect(repository.pUpsert).toHaveBeenCalledWith({
+			activity: null,
 			character: expect.objectContaining({
 				id: "cloud-character",
 				name: "Cloud Character",
