@@ -679,6 +679,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 					if (tl.effect === "restrain") {
 						const branches = await charSheet.probeChainedFuryLifecycleBranches(applied.id);
 						expect(branches).toEqual({
+							focusRestored: true,
 							targetOnly: true,
 							failedGrapple: true,
 							failedControl: true,

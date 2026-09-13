@@ -302,17 +302,27 @@ function csFocusModalOnOpen (modalInner, {preferSelector} = {}) {
  * opening the modal.
  * @param {Element|null} trigger
  */
-function csRestoreModalFocus (trigger) {
-	if (trigger && trigger.isConnected && typeof (/** @type {*} */ (trigger).focus) === "function") {
-		try { /** @type {*} */ (trigger).focus(); } catch (ignored) { /* jsdom */ }
-	}
+function csRestoreModalFocus (trigger, getFallback = null) {
+	setTimeout(() => {
+		const target = trigger?.isConnected
+			? trigger
+			: (typeof getFallback === "function" ? getFallback() : null);
+		if (target && target.isConnected && typeof (/** @type {*} */ (target).focus) === "function") {
+			try { /** @type {*} */ (target).focus({preventScroll: true}); } catch (ignored) { /* jsdom */ }
+		}
+	}, 0);
 }
 
 function csGetAttackFocusTrigger (attack) {
 	const attackId = attack?.id;
-	if (!attackId || typeof document === "undefined") return null;
-	const row = [...(document.querySelectorAll?.(".charsheet__attack-item") || [])]
-		.find(it => it.dataset?.attackId === String(attackId));
+	if (typeof document === "undefined") return null;
+	const rows = [...(document.querySelectorAll?.(".charsheet__attack-item") || [])];
+	const attackName = String(attack?.name || "").trim().toLowerCase();
+	const row = (attackId ? rows.find(it => it.dataset?.attackId === String(attackId)) : null)
+		|| (attackName
+			? rows.find(it => (it.querySelector?.(".charsheet__attack-name")?.textContent || it.textContent || "")
+				.toLowerCase().includes(attackName))
+			: null);
 	return row?.querySelector?.(".charsheet__attack-roll, button, [role=button]") || null;
 }
 
@@ -2125,9 +2135,7 @@ class CharacterSheetCombat {
 		const existing = state.getTargetEffects?.({source}) || [];
 		const trigger = ctx.focusTrigger?.isConnected
 			? ctx.focusTrigger
-			: csGetAttackFocusTrigger(ctx.attack)
-				|| [...(document?.querySelectorAll?.(".charsheet__attack-roll, button, [role=button]") || [])]
-					.find(row => row.isConnected && !row.closest?.(".ve-ui-modal__inner, .ui-modal__inner") && !row.disabled);
+			: csGetAttackFocusTrigger(ctx.attack);
 		// InputUiUtil resolves its promise as soon as the enum choice is made, while
 		// the closing modal can remain mounted for one animation frame. Wait for that
 		// previous dialog to leave the document before opening the target form; otherwise
@@ -2145,18 +2153,14 @@ class CharacterSheetCombat {
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `${opt.name} — Choose Target`,
 			isMinHeight0: true,
-			cbClose: () => csRestoreModalFocus(trigger),
+			focusRestoreTarget: trigger,
+			getFocusRestoreTarget: () => csGetAttackFocusTrigger(ctx.attack),
 		});
 		modalInner.classList.add("cs-combat-target-modal");
 		modalInner.style.maxHeight = "calc(100dvh - 2rem)";
 		modalInner.style.overflowY = "auto";
 		modalInner.style.boxSizing = "border-box";
 		modalInner.style.paddingBottom = "max(1.5rem, env(safe-area-inset-bottom, 0px))";
-		// Let the modal host finish attaching before replacing its contents. This
-		// keeps the follow-up target form deterministic when the on-hit enum and
-		// target modal are opened in the same task.
-		await new Promise(resolve => setTimeout(resolve, 0));
-
 		await new Promise(resolve => {
 			let resolved = false;
 			const finish = () => {
@@ -2205,7 +2209,6 @@ class CharacterSheetCombat {
 						<button class="cs-combat-btn cs-combat-btn--primary ml-2" data-act="apply">Apply effect</button>
 					</div>
 				</div>`;
-
 			const targetSelect = modalInner.querySelector("[data-target-id]");
 			const nameInput = modalInner.querySelector("[data-target-name]");
 			const sizeInput = modalInner.querySelector("[data-target-size]");

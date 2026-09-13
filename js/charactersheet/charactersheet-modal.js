@@ -62,7 +62,12 @@ class CharacterSheetModal {
 
 		// `UiUtil.getShowModal` blurs the active element before building the modal, so the trigger
 		// has to be read here, not after the await.
-		const eleTrigger = CharacterSheetModal._getRestoreTarget();
+		const getFocusRestoreTarget = typeof opts.getFocusRestoreTarget === "function"
+			? opts.getFocusRestoreTarget
+			: null;
+		const eleTrigger = opts.focusRestoreTarget
+			|| getFocusRestoreTarget?.()
+			|| CharacterSheetModal._getRestoreTarget();
 
 		const isCloseable = !opts.isPermanent;
 		const headerId = `cs-modal-title-${++CharacterSheetModal._uid}`;
@@ -76,6 +81,8 @@ class CharacterSheetModal {
 		const eleTitleSplit = CharacterSheetModal._getMergedTitleSplit(opts, btnClose);
 
 		const optsOut = {...opts};
+		delete optsOut.focusRestoreTarget;
+		delete optsOut.getFocusRestoreTarget;
 		if (eleTitleSplit) {
 			// eslint-disable-next-line vet-jquery/jquery -- deleting the jQuery option, not using it
 			delete optsOut.$titleSplit;
@@ -95,7 +102,9 @@ class CharacterSheetModal {
 
 		const modal = await CharacterSheetModal._pGetShowModalRaw(optsOut);
 
-		doRestoreFocus = () => CharacterSheetModal._doRestoreFocus(eleTrigger);
+		doRestoreFocus = () => CharacterSheetModal._doRestoreFocus(
+			eleTrigger?.isConnected ? eleTrigger : getFocusRestoreTarget?.(),
+		);
 
 		// The spawn harness's fallback stub has no `eleModal`; there is nothing to enhance.
 		if (!modal?.eleModal) return modal;

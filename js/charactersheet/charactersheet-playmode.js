@@ -1631,7 +1631,17 @@ export class CharacterSheetPlayMode {
 	}
 
 	_renderActionEconomy () {
-		const card = this._makeCard(this._elActionsHub, "turn", "Your Turn");
+		// Slot toggles refresh this section in place. Keep the card and replace
+		// only its body so a targeted refresh cannot append a second card.
+		let card = this._elActionsHub?.querySelector?.("[data-pm-section='action-economy']");
+		if (!card) {
+			card = this._makeCard(this._elActionsHub, "turn", "Your Turn");
+			card.dataset.pmSection = "action-economy";
+		} else {
+			const header = card.querySelector?.(".pm-card__header");
+			if (header) [...card.children].filter(child => child !== header).forEach(child => child.remove());
+			else card.replaceChildren?.();
+		}
 		const row = this._ce("div", "pm-economy", card);
 		const sharedEconomy = this._state.getActionEconomyState?.();
 		if (sharedEconomy) {

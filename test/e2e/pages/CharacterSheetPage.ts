@@ -966,6 +966,14 @@ export class CharacterSheetPage {
 		await this.enterPlayMode();
 		const label = actionType[0].toUpperCase() + actionType.slice(1);
 		await this.page.getByRole("button", {name: new RegExp(`^Restore ${label}$`, "i")}).click();
+		const economy = this.page.locator("[data-pm-section='action-economy']");
+		await expect(economy).toHaveCount(1);
+		const shared = await this.page.evaluate(() => (globalThis as any).charSheet?._state?.getActionEconomyState?.() ?? null);
+		const labels = await economy.locator(".pm-economy__slot").evaluateAll(els => els.map(el => el.getAttribute("aria-label")));
+		for (const slot of ["action", "bonus", "reaction"] as const) {
+			const name = slot[0].toUpperCase() + slot.slice(1);
+			expect(labels).toContain(`${shared?.[slot] ? "Use" : "Restore"} ${name}`);
+		}
 		await this.exitPlayMode();
 	}
 
@@ -991,7 +999,7 @@ export class CharacterSheetPage {
 		await row.waitFor({state: "visible", timeout: 10000});
 		await row.locator(".pm-chained-target__release").click();
 		await this.page.waitForTimeout(150);
-		return !(await this.getChainedTargets()).some(it => it.id === targetId && (it.grappled || it.restrained || it.shoved));
+		return !(await this.getChainedTargets()).some(it => it.id === targetId);
 	}
 
 	/** Apply a target-aware Chained Fury rider through the live state API. */
@@ -1882,6 +1890,7 @@ export class CharacterSheetPage {
 		shoveDirection?: string;
 		grappleSaveTotal?: number;
 		restraintSaveTotal?: number;
+		cancel?: boolean;
 	} = {}): Promise<any> {
 		// Rage is a resource-backed bonus-action state in the sheet. Spend the
 		// real resource only when the chain states are not already active; the
@@ -1953,6 +1962,18 @@ export class CharacterSheetPage {
 				await modal.locator("[data-final-distance]").fill(String(options.finalDistance ?? ((options.distance ?? 10) + 10)));
 				await modal.locator("[data-shove-direction]").selectOption(options.shoveDirection || "away");
 			}
+			if (options.cancel) {
+				await modal.locator("[data-act=cancel]").click();
+				await this.page.waitForTimeout(150);
+				return {
+					cancelled: true,
+					focusRestored: await this.page.evaluate(() => {
+						const active = document.activeElement as HTMLElement | null;
+						return !!active?.closest?.(".charsheet__attack-item")
+							&& /spectral chains/i.test(active.closest(".charsheet__attack-item")?.textContent || "");
+					}),
+				};
+			}
 			await modal.locator("[data-act=apply]").click();
 			await this.page.waitForTimeout(250);
 			const targets = await this.getChainedTargets();
@@ -1976,6 +1997,7 @@ export class CharacterSheetPage {
 	 */
 	async probeChainedFuryLifecycleBranches (targetId: string): Promise<any> {
 		const calc = await this.page.evaluate(() => (globalThis as any).charSheet?._state?.getFeatureCalculations?.() ?? {});
+		const cancelledTarget = await this.rollSpectralChainsTargetEffect({effect: "target", cancel: true});
 		const targetOnly = await this.rollSpectralChainsTargetEffect({effect: "target", targetName: "Tracked only", distance: 5});
 		const targetOnlyRecord = (await this.getChainedTargets()).find(it => it.targetName === "Tracked only");
 		// Keep the probe within the level's real chain capacity. Target-only
@@ -2017,6 +2039,11 @@ export class CharacterSheetPage {
 		const turnDamage = row.getByRole("button", {name: /resolve recurring damage/i});
 		await turnDamage.click();
 		const afterFirstDamage = (await this.getChainedTargets()).find(it => it.id === targetId);
+		const firstDamageTurn = afterFirstDamage?.lastRecurringDamageTurn ?? null;
+		const duplicateToast = this.page.locator(".toast__wrp-content").filter({hasText: /already resolved/i}).last();
+		await turnDamage.click();
+		await expect(duplicateToast).toBeVisible({timeout: 2000});
+		const afterDuplicateDamage = (await this.getChainedTargets()).find(it => it.id === targetId);
 		await row.getByRole("button", {name: /repeat recurring damage/i}).click();
 		const afterRepeatDamage = (await this.getChainedTargets()).find(it => it.id === targetId);
 
@@ -2034,9 +2061,10 @@ export class CharacterSheetPage {
 		const escaped = await this.resolvePlayModeEscape(targetId, (calc.chainGrappleDc || calc.combatMethodDc || 0) + 10, "dex");
 		const escapedState = !!escaped && !escaped.grappled && !escaped.restrained;
 		const releasedTarget = await this.rollSpectralChainsTargetEffect({
-			effect: "target",
+			effect: "grapple",
 			targetName: "Manual release",
 			distance: 5,
+			grappleSaveTotal: 1,
 		});
 		const manualRelease = releasedTarget?.id ? await this.releasePlayModeTarget(releasedTarget.id) : false;
 		await this.exitPlayMode();
@@ -2057,12 +2085,14 @@ export class CharacterSheetPage {
 		const afterTeardown = await this.getChainedTargets();
 
 		return {
+			focusRestored: cancelledTarget?.cancelled === true && cancelledTarget.focusRestored === true,
 			targetOnly: !!(targetOnly || targetOnlyRecord)
 				&& !(targetOnly || targetOnlyRecord)?.effects?.grapple?.active
 				&& !(targetOnly || targetOnlyRecord)?.effects?.restraint?.active,
 			failedGrapple: !!failedGrapple && failedGrapple.grappled === false,
 			failedControl: !!failedControl && failedControl.grappled === false && failedControl.shoved === false,
-			recurringDamage: afterFirstDamage?.lastRecurringDamageTurn != null
+			recurringDamage: firstDamageTurn != null
+				&& afterDuplicateDamage?.lastRecurringDamageTurn === firstDamageTurn
 				&& afterRepeatDamage?.lastRecurringDamageRepeatTurn === afterFirstDamage.lastRecurringDamageTurn,
 			distributedMovement: (afterDoubledMove?.doubled === true)
 				&& (afterDoubledMove?.bonusActionUsed === true)
