@@ -86,7 +86,7 @@ describe("College of Jesters combat integration", () => {
 	it("applies Laughing Lunge to the next attack, transfers its damage rider, and consumes it once", async () => {
 		const {state, combat, rollModes, damageResults} = makeCombat();
 
-		expect(combat._rollAttack("longsword", null)).toBe(true);
+		await expect(combat._rollAttack("longsword", null)).resolves.toBe(true);
 
 		expect(rollModes).toEqual(["advantage"]);
 		expect(combat._pendingActiveStateDamageRiders).toEqual({
@@ -96,7 +96,7 @@ describe("College of Jesters combat integration", () => {
 		});
 		expect(state.getPendingAttackRiders()).toEqual([]);
 
-		expect(combat._rollAttack("longsword", null)).toBe(true);
+		await expect(combat._rollAttack("longsword", null)).resolves.toBe(true);
 		expect(rollModes).toEqual(["advantage", undefined]);
 		expect(combat._pendingActiveStateDamageRiders.riders).toEqual([
 			{name: "Laughing Lunge", dice: "1d6", damageType: "psychic"},
@@ -107,10 +107,10 @@ describe("College of Jesters combat integration", () => {
 		expect(combat._pendingActiveStateDamageRiders).toBeNull();
 	});
 
-	it("does not apply or consume Laughing Lunge on a spell attack", () => {
+	it("does not apply or consume Laughing Lunge on a spell attack", async () => {
 		const {state, combat, rollModes} = makeCombat();
 
-		expect(combat._rollAttack("fire-bolt", null)).toBe(true);
+		await expect(combat._rollAttack("fire-bolt", null)).resolves.toBe(true);
 
 		expect(rollModes).toEqual([undefined]);
 		expect(combat._pendingActiveStateDamageRiders).toBeUndefined();
