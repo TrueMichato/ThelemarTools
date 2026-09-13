@@ -1199,6 +1199,18 @@ export type EffectCheck = _EffectCommon & (
 	 * case, that a use is NOT consumed when the first roll already succeeded.
 	 */
 	| {kind: "manifestationAdeptReroll"; feature: string; order: number; roll: number; rerollResult: number; expectRoll: number; expectStrain: number; expectSpend: boolean; powerType?: string}
+
+	// Time Domain Cleric integration probes. The generic metadata/resource probes remain
+	// reusable; the modal flows are feature-specific because they deliberately exercise
+	// the production UI's atomic cancel/confirm behavior.
+	| {kind: "alwaysPreparedSpell"; spellName: string; expectedLevel: number; sourceFeature: string; sourceClass: string}
+	| {kind: "dynamicInitiativeAbilityBonus"; featureName: string; ability: AblKey}
+	| {kind: "partialShortRestRestore"; resourceName: string; restoreAmount: number}
+	| {kind: "cantripDamageBonus"; spellName: string; featureName: string; ability: AblKey}
+	| {kind: "chronologicalInterferenceFlow"; featureName: string}
+	| {kind: "temporalManipulationFlow"; featureName: string}
+	| {kind: "eyesOfFuturePastFlow"; featureName: string}
+	| {kind: "temporalMasteryAgeFlows"; featureName: string}
 );
 
 const _TOGGLE_EFFECT_KINDS = new Set([
@@ -2900,6 +2912,30 @@ async function _runPassiveOrRollEffect (
 			}
 			return;
 		}
+		case "alwaysPreparedSpell":
+			await charSheet.probeAlwaysPreparedSpell(e);
+			return;
+		case "dynamicInitiativeAbilityBonus":
+			await charSheet.probeDynamicInitiativeAbilityBonus(e);
+			return;
+		case "partialShortRestRestore":
+			await charSheet.probePartialShortRestRestore(e);
+			return;
+		case "cantripDamageBonus":
+			await charSheet.probeCantripDamageBonus(e);
+			return;
+		case "chronologicalInterferenceFlow":
+			await charSheet.probeChronologicalInterference(e.featureName);
+			return;
+		case "temporalManipulationFlow":
+			await charSheet.probeTemporalManipulation(e.featureName);
+			return;
+		case "eyesOfFuturePastFlow":
+			await charSheet.probeEyesOfFuturePast(e.featureName);
+			return;
+		case "temporalMasteryAgeFlows":
+			await charSheet.probeTemporalMasteryAgeFlows(e.featureName);
+			return;
 	}
 }
 

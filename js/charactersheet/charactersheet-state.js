@@ -2478,7 +2478,7 @@ class FeatureModifierParser {
 				if (abilityMod) {
 					// Special case: "add your X modifier to initiative"
 					// We can't resolve this statically, mark it for special handling
-					const abilityName = match[1]?.toLowerCase();
+					const abilityName = match[1]?.toLowerCase().slice(0, 3);
 					modifiers.push({
 						type,
 						value: 0,
@@ -5151,6 +5151,9 @@ class CharacterSheetState {
 			// Active states (e.g., Rage, Concentration, Wild Shape, etc.)
 			// Each state: {id, name, active, sourceFeatureId, resourceId?, effects: [{type, value, ...}], duration?, icon?, roundsRemaining?, activatedAtRound?}
 			activeStates: [],
+			// Lightweight initiative roster used by character-owned turn-order effects.
+			// This deliberately tracks no NPC statistics beyond the order itself.
+			combatTurnOrder: [], // [{id, name, initiative, hasActed}]
 
 			// Companions (beast companions, familiars, summons, steel defenders, drakes, wild shape forms)
 			// Each companion: { id, name, source, type, origin, customName,
@@ -5294,6 +5297,7 @@ class CharacterSheetState {
 			// Play Mode (alternative intent-based UI)
 			viewMode: "full", // "full" | "play"
 			favorites: [], // [{id, type, name, icon, detail, ref}] — pinned actions for quick access
+			migrationFlags: {},
 		};
 	}
 
@@ -5348,6 +5352,9 @@ class CharacterSheetState {
 		this._data.currency = {...this._getDefaultState().currency, ...this._data.currency};
 		this._data.notes = {...this._getDefaultState().notes, ...this._data.notes};
 		this._data.appearance = {...this._getDefaultState().appearance, ...this._data.appearance};
+		if (!this._data.migrationFlags || typeof this._data.migrationFlags !== "object" || Array.isArray(this._data.migrationFlags)) {
+			this._data.migrationFlags = {};
+		}
 		this._data.ac = {...this._getDefaultState().ac, ...this._data.ac};
 		this._data.customModifiers = {...this._getDefaultState().customModifiers, ...this._data.customModifiers};
 		// Ensure nested customModifiers objects exist
@@ -5397,6 +5404,8 @@ class CharacterSheetState {
 		if (!Array.isArray(this._data.activeStates)) {
 			this._data.activeStates = [];
 		}
+		this._normalizeCombatTurnOrder();
+		this._migrateTimeDomainActiveStates();
 
 		// Ensure chosenSubfeatures array exists (legacy saves predate structured choices)
 		if (!Array.isArray(this._data.chosenSubfeatures)) {
@@ -5554,6 +5563,8 @@ class CharacterSheetState {
 
 		// Migrate modifiers: re-process modifiers that may be missing special flags
 		this._migrateModifiers();
+		this._migrateRightOnTimeModifiers();
+		this._migrateAmbiguousBlessedStrikes();
 
 		// Drop duplicate feature-sourced named modifiers. `addFeat` runs both the
 		// data-declared and the registry pipelines, and until the guard was hoisted
@@ -6487,6 +6498,57 @@ class CharacterSheetState {
 
 		this._data.namedModifiers = kept;
 		this._recalculateCustomModifiers();
+	}
+
+	/**
+	 * Old Time Domain saves can carry both the parser-owned dynamic initiative row and
+	 * the retired class-effect snapshot. Keep the dynamic Wisdom row and remove only its
+	 * obsolete same-feature numeric twin.
+	 */
+	_migrateRightOnTimeModifiers () {
+		const mods = this._data.namedModifiers || [];
+		const isRightOnTime = mod => mod?.type === "initiative"
+			&& /right on time/i.test(`${mod.name || ""} ${mod.note || ""}`);
+		if (!mods.some(mod => isRightOnTime(mod) && mod.abilityMod)) return;
+		this._data.namedModifiers = mods.filter(mod => !isRightOnTime(mod) || !!mod.abilityMod);
+	}
+
+	/**
+	 * Some legacy 2024 Cleric saves persisted both Blessed Strikes options. There is no
+	 * deterministic way to infer the player's intended L7 pick, so remove only those
+	 * option children and queue the existing structured picker once.
+	 */
+	_migrateAmbiguousBlessedStrikes () {
+		if (this._data.migrationFlags.blessedStrikesChoiceReset) return;
+		const chosen = (this._data.chosenSubfeatures || [])
+			.filter(rec => String(rec.parent || "").toLowerCase() === "blessed strikes");
+		const children = (this._data.features || [])
+			.filter(feature => String(feature.parentFeature || "").toLowerCase() === "blessed strikes");
+		const optionNames = new Set([...chosen, ...children].map(it => String(it.name || "").toLowerCase()));
+		if (!optionNames.has("divine strike") || !optionNames.has("potent spellcasting")) return;
+
+		children.forEach(feature => this.removeFeature(feature.id));
+		this._data.chosenSubfeatures = (this._data.chosenSubfeatures || [])
+			.filter(rec => String(rec.parent || "").toLowerCase() !== "blessed strikes");
+
+		const parent = (this._data.features || []).find(feature => String(feature.name || "").toLowerCase() === "blessed strikes");
+		this.clearPendingFeatureChoicesByFeature(parent?.id || "Blessed Strikes");
+		this.clearPendingFeatureChoicesByFeature("Blessed Strikes");
+		this.addPendingFeatureChoice({
+			featureName: "Blessed Strikes",
+			featureId: parent?.id || "Blessed Strikes",
+			featureSource: parent?.source || "XPHB",
+			featureClass: parent?.className || "Cleric",
+			featureClassSource: parent?.classSource || "XPHB",
+			level: parent?.level ?? 7,
+			kind: "subfeature",
+			options: [
+				{name: "Divine Strike", source: "XPHB", className: "Cleric", classSource: "XPHB", level: 7},
+				{name: "Potent Spellcasting", source: "XPHB", className: "Cleric", classSource: "XPHB", level: 7},
+			],
+			count: 1,
+		});
+		this._data.migrationFlags.blessedStrikesChoiceReset = true;
 	}
 
 	_migrateModifiers () {
@@ -18493,7 +18555,10 @@ class CharacterSheetState {
 				s => s.name === spellIdOrName && s.source === sourceOrPrepared,
 			);
 		}
-		if (spell) spell.prepared = prepared;
+		if (!spell) return false;
+		if (spell.alwaysPrepared && !prepared) return false;
+		spell.prepared = prepared;
+		return true;
 	}
 
 	// #region Gambler Spellcasting Management
@@ -23717,9 +23782,12 @@ class CharacterSheetState {
 					calculations.channelDivinityDc = this.getFeatureSaveDc({className: cls.name});
 
 					// Channel Divinity uses progression
-					// PHB/XPHB: 1 use at level 2, 2 at level 6, 3 at level 18
+					// PHB: 1/2/3 uses at levels 2/6/18.
+					// XPHB/TGTT: 2/3/4 uses at levels 2/6/18.
 					if (level >= 2) {
-						calculations.channelDivinityUses = level >= 18 ? 3 : level >= 6 ? 2 : 1;
+						calculations.channelDivinityUses = is2024
+							? (level >= 18 ? 4 : level >= 6 ? 3 : 2)
+							: (level >= 18 ? 3 : level >= 6 ? 2 : 1);
 					}
 
 					// Destroy Undead CR threshold (PHB only - XPHB uses Sear Undead instead)
@@ -28736,15 +28804,6 @@ class CharacterSheetState {
 		if (calculations.hasLustSkillProficiency && !alreadyProcessed("Lust Skill Proficiency")) {
 			effects.push({ type: "skillProficiency", skill: "deception", level: 1, source: "Lust Domain" });
 			effects.push({ type: "skillProficiency", skill: "persuasion", level: 1, source: "Lust Domain" });
-		}
-
-		// Time Domain - Right on Time: +WIS to initiative
-		if (calculations.hasRightOnTime && calculations.rightOnTimeBonus && !alreadyProcessed("Right on Time")) {
-			effects.push({
-				type: "initiativeBonus",
-				value: calculations.rightOnTimeBonus,
-				source: "Right on Time",
-			});
 		}
 
 		// ===== TGTT MONK SUBCLASSES =====
@@ -38227,9 +38286,10 @@ class CharacterSheetState {
 		const is2024 = cls?.source === "XPHB" || cls?.source === "TGTT";
 
 		if (name === "cleric") {
-			// PHB/XPHB alike: 1 use at level 2, 2 at level 6, 3 at level 18.
 			if (level < 2) return 0;
-			return level >= 18 ? 3 : level >= 6 ? 2 : 1;
+			return is2024
+				? (level >= 18 ? 4 : level >= 6 ? 3 : 2)
+				: (level >= 18 ? 3 : level >= 6 ? 2 : 1);
 		}
 
 		if (name === "paladin") {
@@ -38266,6 +38326,14 @@ class CharacterSheetState {
 		const desiredMax = (this._data.classes || [])
 			.reduce((max, cls) => Math.max(max, CharacterSheetState._getChannelDivinityUsesForClass(cls)), 0);
 		if (desiredMax <= 0) return;
+		const has2024Grant = (this._data.classes || []).some(cls => {
+			const source = cls?.source;
+			const name = (cls?.name || "").toLowerCase();
+			return (source === "XPHB" || source === "TGTT")
+				&& CharacterSheetState._getChannelDivinityUsesForClass(cls) > 0
+				&& (name === "cleric" || name === "paladin");
+		});
+		const shortRestRecovery = has2024Grant ? 1 : null;
 
 		let resource = (this._data.resources || []).find(r => r.name === "Channel Divinity");
 		const feature = (resource && this._data.features?.find(f => f.id === resource.featureId))
@@ -38286,32 +38354,54 @@ class CharacterSheetState {
 				current: desiredMax,
 				max: desiredMax,
 				recharge: "short",
+				...(shortRestRecovery ? {shortRestRecovery} : {}),
 				featureId: feature.id,
 			};
 			(this._data.resources = this._data.resources || []).push(resource);
-			if (!feature.uses) feature.uses = {current: desiredMax, max: desiredMax, per: "short"};
+			if (!feature.uses) {
+				feature.uses = {
+					current: desiredMax,
+					max: desiredMax,
+					per: "short",
+					recharge: "short",
+					...(shortRestRecovery ? {shortRestRecovery} : {}),
+				};
+			}
 		}
 
 		// Both surfaces are checked independently. A later level-up can re-parse the
 		// feature text and reset the FEATURE back to its grant-time maximum while the
 		// resource is already correct — and rest restoration reads the feature, so
 		// returning early on the resource alone would silently restore only 2 of 3 uses.
-		const resourceStale = (resource.max ?? 0) !== desiredMax;
-		const featureStale = !!feature?.uses && (feature.uses.max ?? 0) !== desiredMax;
+		const resourceStale = (resource.max ?? 0) !== desiredMax
+			|| (resource.shortRestRecovery ?? null) !== shortRestRecovery;
+		const featureStale = !!feature?.uses && (
+			(feature.uses.max ?? 0) !== desiredMax
+			|| (feature.uses.shortRestRecovery ?? null) !== shortRestRecovery
+		);
 		if (!resourceStale && !featureStale) return;
 
-		if (resourceStale) {
+		if ((resource.max ?? 0) !== desiredMax) {
 			const wasFull = (resource.current ?? 0) >= (resource.max ?? 0);
+			const spent = Math.max(0, (resource.max ?? 0) - (resource.current ?? 0));
 			resource.max = desiredMax;
-			resource.current = wasFull ? desiredMax : Math.min(resource.current ?? 0, desiredMax);
+			resource.current = wasFull
+				? desiredMax
+				: has2024Grant
+					? Math.max(0, desiredMax - spent)
+					: Math.min(resource.current ?? 0, desiredMax);
 		}
+		if (shortRestRecovery) resource.shortRestRecovery = shortRestRecovery;
+		else delete resource.shortRestRecovery;
 
 		// Keep the owning feature's own use pool in step, so the Features tab, the
 		// Combat Resources pips and rest restoration cannot disagree.
-		if (feature && !feature.uses) feature.uses = {current: desiredMax, max: desiredMax, per: "short"};
+		if (feature && !feature.uses) feature.uses = {current: desiredMax, max: desiredMax, per: "short", recharge: "short"};
 		if (feature?.uses) {
 			feature.uses.max = desiredMax;
 			feature.uses.current = Math.min(desiredMax, Math.max(feature.uses.current ?? 0, resource.current ?? 0));
+			if (shortRestRecovery) feature.uses.shortRestRecovery = shortRestRecovery;
+			else delete feature.uses.shortRestRecovery;
 		}
 	}
 
@@ -41953,20 +42043,20 @@ class CharacterSheetState {
 
 	recoverResources (rechargeType) {
 		this._data.resources.forEach(r => {
-			if (r.recharge === rechargeType || (rechargeType === "long" && r.recharge === "short")) {
-				r.current = r.max;
-			} else if (rechargeType === "short" && r.shortRestRecovery) {
+			if (rechargeType === "short" && r.shortRestRecovery) {
 				r.current = Math.min(r.max, r.current + r.shortRestRecovery);
+			} else if (r.recharge === rechargeType || (rechargeType === "long" && r.recharge === "short")) {
+				r.current = r.max;
 			}
 		});
 
 		// Also recover feature uses directly
 		this._data.features.forEach(f => {
 			if (f.uses) {
-				if (f.uses.recharge === rechargeType || (rechargeType === "long" && f.uses.recharge === "short")) {
-					f.uses.current = f.uses.max;
-				} else if (rechargeType === "short" && f.uses.shortRestRecovery) {
+				if (rechargeType === "short" && f.uses.shortRestRecovery) {
 					f.uses.current = Math.min(f.uses.max, f.uses.current + f.uses.shortRestRecovery);
+				} else if (f.uses.recharge === rechargeType || (rechargeType === "long" && f.uses.recharge === "short")) {
+					f.uses.current = f.uses.max;
 				}
 			}
 		});
@@ -46091,8 +46181,8 @@ class CharacterSheetState {
 			// Remove associated modifiers (by ID and by name for orphaned modifiers)
 			this.removeModifiersByFeature(feature.id);
 			this.removeModifiersByName(feature.name);
-			for (const state of (this._data.activeStates || []).filter(it => it.sourceFeatureId === feature.id)) {
-				this.removeActiveState(state.id);
+			for (const state of [...(this._data.activeStates || [])]) {
+				if (state.sourceFeatureId === feature.id) this.removeActiveState(state.id);
 			}
 
 			// Cascade-remove any feats granted by this optional feature
@@ -50395,6 +50485,28 @@ class CharacterSheetState {
 	// #region Appearance
 	getAppearance (field) { return this._data.appearance[field] || ""; }
 	setAppearance (field, value) { this._data.appearance[field] = value; }
+
+	getNumericAge () {
+		const age = Number(this._data.appearance?.age);
+		return Number.isInteger(age) && age > 0 ? age : null;
+	}
+
+	adjustAge (years) {
+		const current = this.getNumericAge();
+		const delta = Number(years);
+		if (current == null || !Number.isInteger(delta)) return {ok: false, error: "Enter a valid current age."};
+		const next = current + delta;
+		if (next < 1) return {ok: false, error: "Age must remain at least 1 year."};
+		this._data.appearance.age = String(next);
+		return {ok: true, previous: current, current: next};
+	}
+
+	resolveMagicalAging ({years, ignore = true} = {}) {
+		const delta = Number(years);
+		if (!Number.isInteger(delta) || delta === 0) return {ok: false, error: "Enter a non-zero whole-year change."};
+		if (ignore) return {ok: true, ignored: true, previous: this.getNumericAge(), current: this.getNumericAge()};
+		return {...this.adjustAge(delta), ignored: false};
+	}
 	// #endregion
 
 	// #region Custom Abilities
@@ -52802,6 +52914,9 @@ class CharacterSheetState {
 			const totalLevel = this.getTotalLevel() || 1;
 			value = value * totalLevel;
 		}
+		if (mod.type === "initiative" && mod.abilityMod) {
+			value += this.getAbilityMod(String(mod.abilityMod).toLowerCase().slice(0, 3));
+		}
 		if (mod.proficiencyBonus) {
 			value += this.getProficiencyBonus();
 		}
@@ -53448,7 +53563,7 @@ class CharacterSheetState {
 
 		// Ability modifier addition
 		if (mod.abilityMod) {
-			value += this.getAbilityMod(mod.abilityMod);
+			value += this.getAbilityMod(String(mod.abilityMod).toLowerCase().slice(0, 3));
 		}
 
 		// Proficiency bonus addition
@@ -55478,6 +55593,21 @@ class CharacterSheetState {
 	};
 
 	static ACTIVE_STATE_TYPES = {
+		eyesOfFuturePast: {
+			id: "eyesOfFuturePast",
+			name: "Eyes of the Future Past",
+			icon: "⏳",
+			description: "View the past or future while blinded to the present.",
+			effects: [],
+			addsConditions: ["blinded"],
+			duration: "1 minute",
+			endConditions: ["Dismissed", "Duration expires", "Incapacitated"],
+			resourceName: "Eyes of the Future Past",
+			resourceCost: 1,
+			activationAction: "bonus",
+			detectPatterns: ["^eyes of the future past$"],
+			preferCuratedEffects: true,
+		},
 		rage: {
 			id: "rage",
 			name: "Rage",
@@ -57717,6 +57847,7 @@ class CharacterSheetState {
 		} else if (/as a reaction|use (?:a |your )?reaction/i.test(text)) {
 			activationAction = "reaction";
 		}
+
 		// (R25 #1) Parse a stamina cost from the description so abilities that spend stamina
 		// but aren't tied to a named pool (e.g. Purge Toxins — "as an action you can spend 2
 		// stamina to end one poison") consume it through the unified activation pipeline. The
@@ -57765,6 +57896,55 @@ class CharacterSheetState {
 			channelDivinityCost: opts.resourceName === "Channel Divinity" ? (opts.resourceCost || 1) : null,
 			deferredDamageMaximization,
 		};
+	}
+
+	/**
+	 * Source-qualified interactions whose choices cannot be represented by prose-derived
+	 * effects alone. The returned descriptors augment the generic activation contract.
+	 * @param {object} feature
+	 * @returns {object|null}
+	 */
+	static getFeatureInteractionDescriptor (feature) {
+		const name = (feature?.name || "").trim().toLowerCase();
+		const source = feature?.source || feature?.subclassSource;
+		const subclass = (feature?.subclassShortName || feature?.subclassName || "").trim().toLowerCase();
+		if (source !== "TGTT" || (subclass && subclass !== "time" && subclass !== "time domain")) return null;
+
+		switch (name) {
+			case "chronological interference":
+				return {
+					interactionKind: "initiativeSwap",
+					interactionMode: "limited",
+					activationAction: "bonus",
+					resourceName: "Chronological Interference",
+					resourceCost: 1,
+				};
+			case "channel divinity: temporal manipulation":
+				return {
+					interactionKind: "externalRollMode",
+					interactionMode: "limited",
+					activationAction: "reaction",
+					resourceName: "Channel Divinity",
+					resourceCost: 1,
+					range: 60,
+				};
+			case "eyes of the future past":
+				return {
+					interactionKind: "temporalVision",
+					interactionMode: "toggle",
+					activationAction: "bonus",
+					resourceName: "Eyes of the Future Past",
+					resourceCost: 1,
+					stateTypeId: "eyesOfFuturePast",
+					stateType: this.ACTIVE_STATE_TYPES.eyesOfFuturePast,
+					isToggle: true,
+					duration: "1 minute",
+					addsConditions: ["blinded"],
+				};
+			case "temporal mastery":
+				return {utilityAction: "magicalAging", utilityLabel: "Resolve Magical Aging…"};
+			default: return null;
+		}
 	}
 
 	/**
@@ -58231,7 +58411,8 @@ class CharacterSheetState {
 		// rather than dropped by this early return. The override branch below builds its own
 		// text from `entries` via _featureTextFromEntries.
 		const hasClassificationOverride = !!this.FEATURE_CLASSIFICATION_OVERRIDES[feature?.name?.toLowerCase() || ""];
-		if (!feature?.description && !feature?.activatable && !hasMarkers && !hasClassificationOverride) return null;
+		const hasInteractionDescriptor = !!this.getFeatureInteractionDescriptor(feature);
+		if (!feature?.description && !feature?.activatable && !hasMarkers && !hasClassificationOverride && !hasInteractionDescriptor) return null;
 
 		const rawText = feature.description || CharacterSheetState._featureTextFromEntries(feature) || "";
 		// (CS-BUG-121) Embedded outcome tables (Wild Magic Surge, the TGTT
@@ -58239,6 +58420,23 @@ class CharacterSheetState {
 		// "you gain …" phrasing in a table ROW must not promote an always-on
 		// passive into a bogus activatable toggle.
 		const text = CharacterSheetState.stripEmbeddedOutcomeTables(rawText).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
+		const interactionDescriptor = this.getFeatureInteractionDescriptor(feature);
+		if (interactionDescriptor?.interactionKind) {
+			const base = interactionDescriptor.interactionMode === "toggle"
+				? {
+					stateTypeId: interactionDescriptor.stateTypeId,
+					stateType: interactionDescriptor.stateType,
+					matchedBy: "interactionRegistry",
+					isToggle: true,
+					duration: interactionDescriptor.duration,
+					effects: interactionDescriptor.stateType?.effects || [],
+				}
+				: this._buildAbilityActivationInfo(feature, rawText, text, {
+					resourceName: interactionDescriptor.resourceName,
+					resourceCost: interactionDescriptor.resourceCost,
+				});
+			return {...base, ...interactionDescriptor, matchedBy: "interactionRegistry"};
+		}
 		const psionic = this._detectPsionicActivation(feature, rawText, text);
 		if (psionic) return psionic;
 		// ===== JESTER'S ACTS (TGTT Bard — College of Jesters, optional feature type "JA") =====
@@ -61174,6 +61372,7 @@ class CharacterSheetState {
 			if (options.actionBenefit !== undefined) existing.actionBenefit = options.actionBenefit;
 			if (options.movementOverride !== undefined) existing.movementOverride = options.movementOverride;
 			if (options.duration) existing.duration = options.duration;
+			if (options.temporalView !== undefined) existing.temporalView = MiscUtil.copyFast(options.temporalView);
 			// Re-parse duration on reactivation
 			const dur = options.duration || existing.duration;
 			existing.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(dur) : null;
@@ -61223,6 +61422,7 @@ class CharacterSheetState {
 			pendingAttack: options.pendingAttack || null,
 			actionBenefit: options.actionBenefit || null,
 			movementOverride: options.movementOverride || null,
+			temporalView: options.temporalView ? MiscUtil.copyFast(options.temporalView) : null,
 			// Self-imposed drawback conditions this state applies while active. Curated
 			// states declare them on their ACTIVE_STATE_TYPES entry; CUSTOM (generically
 			// detected) toggles carry them here instead, parsed from the feature text.
@@ -61395,6 +61595,7 @@ class CharacterSheetState {
 			if (options.actionBenefit !== undefined) existing.actionBenefit = options.actionBenefit;
 			if (options.movementOverride !== undefined) existing.movementOverride = options.movementOverride;
 			if (options.duration) existing.duration = options.duration;
+			if (options.temporalView !== undefined) existing.temporalView = MiscUtil.copyFast(options.temporalView);
 			// Re-parse duration on reactivation
 			const dur = options.duration || existing.duration;
 			existing.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(dur) : null;
@@ -61775,6 +61976,7 @@ class CharacterSheetState {
 	startCombat () {
 		this._data.inCombat = true;
 		this._data.combatRound = 1;
+		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
 		this._data.sanguineMasteryLastRerollRound = null;
 		this.applyHybridRegenerationAtTurnStart();
 		this.applyTurnStartEffects();
@@ -61799,6 +62001,7 @@ class CharacterSheetState {
 		this._data.sanguineMasteryLastRerollRound = null;
 		this._data.hybridBloodlustTurnStartRound = null;
 		this._data.hybridBloodlustTurnStartCheck = null;
+		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
 
 		for (const state of this._data.activeStates) {
 			// Fully deactivate transient "consume on attack" states (e.g. Steady Aim)
@@ -61822,6 +62025,7 @@ class CharacterSheetState {
 		if (!this._data.inCombat) return [];
 
 		this._data.combatRound++;
+		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
 		this._data.sanguineMasteryLastRerollRound = null;
 		this.applyHybridRegenerationAtTurnStart();
 		this.applyTurnStartEffects();
@@ -61876,6 +62080,13 @@ class CharacterSheetState {
 						this._unregisterCustomAbilityEffects(ability.id);
 					}
 				}
+			} else if (state.stateTypeId === "eyesOfFuturePast") {
+				state.temporalView = {
+					direction: state.temporalView?.direction || null,
+					offsetHours: Math.max(1, Number(state.temporalView?.offsetHours) || 1),
+					roundDecision: null,
+					decisionPending: true,
+				};
 			}
 		}
 
@@ -61894,6 +62105,103 @@ class CharacterSheetState {
 	 * Check if currently in combat
 	 */
 	isInCombat () { return !!this._data.inCombat; }
+
+	_normalizeCombatTurnOrder () {
+		if (!Array.isArray(this._data.combatTurnOrder)) this._data.combatTurnOrder = [];
+		const seen = new Set();
+		this._data.combatTurnOrder = this._data.combatTurnOrder
+			.map((participant, index) => {
+				const name = String(participant?.name || "").trim();
+				if (!name) return null;
+				const id = String(participant?.id || `turn-${index}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`);
+				if (seen.has(id)) return null;
+				seen.add(id);
+				return {
+					id,
+					name,
+					initiative: Number.isFinite(Number(participant?.initiative)) ? Number(participant.initiative) : 0,
+					hasActed: !!participant?.hasActed,
+				};
+			})
+			.filter(Boolean);
+	}
+
+	_migrateTimeDomainActiveStates () {
+		for (const state of this._data.activeStates || []) {
+			if ((state?.name || "").trim().toLowerCase() !== "eyes of the future past") continue;
+			state.stateTypeId = "eyesOfFuturePast";
+			state.duration = state.duration || "1 minute";
+			state.addsConditions = state.addsConditions?.length ? state.addsConditions : ["blinded"];
+			state.temporalView = {
+				direction: ["past", "future"].includes(state.temporalView?.direction) ? state.temporalView.direction : null,
+				offsetHours: Math.max(1, Number(state.temporalView?.offsetHours) || 1),
+				roundDecision: ["advance", "hold"].includes(state.temporalView?.roundDecision) ? state.temporalView.roundDecision : null,
+				decisionPending: state.active ? (!state.temporalView?.direction || !!state.temporalView?.decisionPending) : false,
+			};
+		}
+	}
+
+	getCombatTurnOrder () {
+		return MiscUtil.copyFast(this._data.combatTurnOrder || []);
+	}
+
+	upsertCombatTurnOrderParticipant ({id = null, name, initiative = 0, hasActed = false} = {}) {
+		const cleanName = String(name || "").trim();
+		if (!cleanName) return null;
+		const numericInitiative = Number(initiative);
+		if (!Number.isFinite(numericInitiative)) return null;
+		const participantId = id || CryptUtil.uid();
+		const existing = this._data.combatTurnOrder.find(it => it.id === participantId);
+		if (existing) Object.assign(existing, {name: cleanName, initiative: numericInitiative, hasActed: !!hasActed});
+		else this._data.combatTurnOrder.push({id: participantId, name: cleanName, initiative: numericInitiative, hasActed: !!hasActed});
+		this._data.combatTurnOrder.sort((a, b) => b.initiative - a.initiative);
+		return participantId;
+	}
+
+	removeCombatTurnOrderParticipant (id) {
+		const oldLength = this._data.combatTurnOrder.length;
+		this._data.combatTurnOrder = this._data.combatTurnOrder.filter(it => it.id !== id);
+		return this._data.combatTurnOrder.length !== oldLength;
+	}
+
+	markCombatTurnOrderParticipantActed (id, hasActed = true) {
+		const participant = this._data.combatTurnOrder.find(it => it.id === id);
+		if (!participant) return false;
+		participant.hasActed = !!hasActed;
+		return true;
+	}
+
+	swapCombatTurnOrderParticipants (firstId, secondId) {
+		if (!this.isInCombat()) return {ok: false, error: "Start combat before swapping initiative."};
+		if (!firstId || !secondId || firstId === secondId) return {ok: false, error: "Choose two different creatures."};
+		const firstIndex = this._data.combatTurnOrder.findIndex(it => it.id === firstId);
+		const secondIndex = this._data.combatTurnOrder.findIndex(it => it.id === secondId);
+		if (firstIndex < 0 || secondIndex < 0) return {ok: false, error: "Both creatures must be in the turn order."};
+		const first = this._data.combatTurnOrder[firstIndex];
+		const second = this._data.combatTurnOrder[secondIndex];
+		if (first.hasActed || second.hasActed) return {ok: false, error: "Both creatures must not have acted this round."};
+
+		const firstInitiative = first.initiative;
+		first.initiative = second.initiative;
+		second.initiative = firstInitiative;
+		this._data.combatTurnOrder[firstIndex] = second;
+		this._data.combatTurnOrder[secondIndex] = first;
+		return {
+			ok: true,
+			first: {id: first.id, name: first.name, initiative: first.initiative},
+			second: {id: second.id, name: second.name, initiative: second.initiative},
+		};
+	}
+
+	resolveTemporalViewRoundChoice (choice) {
+		if (!["advance", "hold"].includes(choice)) return false;
+		const state = this._data.activeStates.find(it => it.stateTypeId === "eyesOfFuturePast" && it.active);
+		if (!state?.temporalView?.direction || !state.temporalView.decisionPending) return false;
+		if (choice === "advance") state.temporalView.offsetHours = Math.max(1, Number(state.temporalView.offsetHours) || 1) + 1;
+		state.temporalView.roundDecision = choice;
+		state.temporalView.decisionPending = false;
+		return true;
+	}
 
 	// #endregion
 

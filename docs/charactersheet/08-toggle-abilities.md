@@ -94,6 +94,15 @@ generic incapacitation/0-HP teardown path.
   Wisdom-sized pool, can be dismissed, and marks enemy saves against Radiance
   of the Dawn and Fire/Radiant-damage spells as disadvantaged while active.
 
+### TGTT Time Domain state
+
+- **Eyes of the Future Past** (`eyesOfFuturePast`) is a bonus-action,
+  one-minute temporal view. Activation chooses the past or future at a
+  one-hour offset and applies a feature-owned Blinded condition. At each later
+  round, the player can hold the current offset or advance it by one hour.
+  Ending the state, reaching ten rounds, or removing the feature also removes
+  the Blinded condition.
+
 Arms uses `variablePointSpend` so the level 6+ UI can offer Arms for one
 Ki/Focus point or Arms plus Visage for two. Visage and Body expose resolved
 `trigger` controls for speech modes and Deflect Energy; the trigger resolver
@@ -377,7 +386,7 @@ placed on an ally rather than on the druid.
 
 ## Supported Toggle Abilities
 
-> ⚠️ **This section documents 33 of the 74 states in `ACTIVE_STATE_TYPES`.**
+> ⚠️ **This section documents 34 of the 75 states in `ACTIVE_STATE_TYPES`.**
 > The other 41 are **implemented and working** — they are merely undocumented
 > here. Do not read a state's absence from this section as "unsupported"; check
 > `CharacterSheetState.ACTIVE_STATE_TYPES` first, which is the only authority.

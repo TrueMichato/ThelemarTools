@@ -214,6 +214,23 @@ describe("CharacterSheetModal", () => {
 		});
 	});
 
+	describe("initial focus", () => {
+		it("focuses a preferred control after modal content is populated", () => {
+			const first = mkEle({tag: "button"});
+			const preferred = mkEle({tag: "input"});
+			const modalInner = mkEle({children: [first, preferred]});
+			modalInner.querySelector = selector => selector === ".preferred" ? preferred : first;
+
+			expect(CharacterSheetModal.focusFirst(modalInner, {preferSelector: ".preferred"})).toBe(preferred);
+			expect(preferred.isFocused).toBe(true);
+		});
+
+		it("falls back safely when there is no focusable control", () => {
+			const modalInner = mkEle();
+			expect(CharacterSheetModal.focusFirst(modalInner)).toBeNull();
+		});
+	});
+
 	describe("dialog semantics", () => {
 		it("announces itself as a modal dialog", async () => {
 			const modal = await CharacterSheetModal.pGetShow({title: "Harvest"});

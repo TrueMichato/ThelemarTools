@@ -1036,7 +1036,6 @@ export class CharacterSheetPage {
 		await this.page.evaluate(() => {
 			const cs: any = (globalThis as any).charSheet;
 			cs?._state?.onShortRest?.();
-			cs?._rest?._restoreResources?.("short");
 			cs?._renderCharacter?.();
 		});
 		await this.page.waitForTimeout(200);
@@ -2420,6 +2419,470 @@ export class CharacterSheetPage {
 			button: classDd.locator(".charsheet__source-multiselect-btn"),
 			menu: classDd.locator(".charsheet__source-multiselect-dropdown"),
 		};
+	}
+
+	private _featureCard (featureName: string): Locator {
+		return this.page.locator(".charsheet__feature")
+			.filter({has: this.page.locator(".charsheet__feature-name", {hasText: new RegExp(`^${featureName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i")})})
+			.first();
+	}
+
+	private async _clickActivatableFeature (featureName: string): Promise<void> {
+		const result = await this.page.evaluate((name) => {
+			const cs = (globalThis as any).charSheet;
+			const feature = cs._state.getFeatures().find((it: any) => it.name === name);
+			const activatable = cs._state.getActivatableFeatures().find((it: any) => it.feature?.id === feature?.id);
+			if (!feature || !activatable) {
+				return {
+					started: false,
+					hasFeature: !!feature,
+					detected: !!(globalThis as any).CharacterSheetState.detectActivatableFeature(feature),
+				};
+			}
+			const stateType = activatable.activationInfo?.stateType
+				|| (globalThis as any).CharacterSheetState.ACTIVE_STATE_TYPES[activatable.stateTypeId];
+			const resourceCost = activatable.resource?.cost
+				?? activatable.activationInfo?.resourceCost
+				?? stateType?.resourceCost
+				?? 1;
+			void cs._activateFeatureState(
+				activatable.feature,
+				activatable.stateTypeId,
+				stateType,
+				activatable.resource,
+				resourceCost,
+				activatable.activationInfo,
+			);
+			return {started: true, hasFeature: true, detected: true};
+		}, featureName);
+		expect(result.started, `${featureName} interaction should be activatable: ${JSON.stringify(result)}`).toBe(true);
+	}
+
+	private _visibleModal (title: RegExp): Locator {
+		return this.page.locator(".ve-ui-modal__inner:visible").filter({hasText: title}).last();
+	}
+
+	async probeAlwaysPreparedSpell ({
+		spellName,
+		expectedLevel,
+		sourceFeature,
+		sourceClass,
+	}: {
+		spellName: string;
+		expectedLevel: number;
+		sourceFeature: string;
+		sourceClass: string;
+	}): Promise<void> {
+		const result = await this.page.evaluate(({spellName}) => {
+			const cs = (globalThis as any).charSheet;
+			const spell = cs._state.getSpells().find((it: any) => it.name?.toLowerCase() === spellName.toLowerCase());
+			if (!spell) return null;
+			const unprepareResult = cs._state.setSpellPrepared(spell.id, false);
+			const after = cs._state.getSpells().find((it: any) => it.id === spell.id);
+			return {
+				level: spell.level,
+				sourceFeature: spell.sourceFeature,
+				sourceClass: spell.sourceClass,
+				alwaysPrepared: spell.alwaysPrepared,
+				prepared: after?.prepared,
+				unprepareResult,
+			};
+		}, {spellName});
+		expect(result, `${spellName} should be stored on the character`).not.toBeNull();
+		expect(result).toMatchObject({
+			level: expectedLevel,
+			sourceFeature,
+			sourceClass,
+			alwaysPrepared: true,
+			prepared: true,
+			unprepareResult: false,
+		});
+
+		await this.switchToTab(this.tabSpells);
+		const row = this.page.locator(".charsheet__spell-item")
+			.filter({has: this.page.locator(".charsheet__spell-item-name", {hasText: new RegExp(`^${spellName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i")})})
+			.first();
+		await expect(row, `${spellName} should render in the spell list`).toBeVisible();
+		await expect(row.locator(".charsheet__spell-always-prepared")).toContainText("Always");
+		await expect(row.locator(".charsheet__spell-prepared")).toHaveCount(0);
+	}
+
+	async probeDynamicInitiativeAbilityBonus ({
+		featureName,
+		ability,
+	}: {
+		featureName: string;
+		ability: "str" | "dex" | "con" | "int" | "wis" | "cha";
+	}): Promise<void> {
+		const result = await this.page.evaluate(({featureName, ability}) => {
+			const cs = (globalThis as any).charSheet;
+			const state = cs._state;
+			const abilityKey = ability;
+			const beforeScore = state.getAbilityScore(abilityKey);
+			const beforeMod = state.getAbilityMod(abilityKey);
+			const beforeInitiative = state.getInitiative();
+			const modifiers = state.getNamedModifiers?.() || state._data?.modifiers?.named || [];
+			const matching = modifiers.filter((it: any) => it.name === featureName && it.type === "initiative");
+			state.setAbilityBase(abilityKey, state._data.abilities[abilityKey] + 2);
+			state._recalculateCustomModifiers();
+			const afterMod = state.getAbilityMod(abilityKey);
+			const afterInitiative = state.getInitiative();
+			state.setAbilityBase(abilityKey, state._data.abilities[abilityKey] - 2);
+			state._recalculateCustomModifiers();
+			cs._renderCharacter?.();
+			return {
+				beforeScore,
+				beforeMod,
+				beforeInitiative,
+				afterMod,
+				afterInitiative,
+				modifiers,
+				matching,
+			};
+		}, {featureName, ability});
+		expect(result.beforeMod, `${featureName} needs a non-zero ${ability} modifier for a meaningful probe`).not.toBe(0);
+		expect(result.matching, `${featureName} should have exactly one named initiative modifier`).toHaveLength(1);
+		expect(result.matching[0].abilityMod.toLowerCase().slice(0, 3)).toBe(ability);
+		expect(result.afterMod - result.beforeMod).toBe(1);
+		expect(result.afterInitiative - result.beforeInitiative).toBe(1);
+	}
+
+	async probePartialShortRestRestore ({
+		resourceName,
+		restoreAmount,
+	}: {
+		resourceName: string;
+		restoreAmount: number;
+	}): Promise<void> {
+		const setup = await this.page.evaluate(({resourceName}) => {
+			const cs = (globalThis as any).charSheet;
+			const resource = cs._state.getResources().find((it: any) => it.name === resourceName);
+			if (!resource) return null;
+			const hp = cs._state.getHp();
+			cs._state.setResourceCurrent(resource.id, 0);
+			cs._state.setHp(Math.max(0, hp.max - 1), hp.max);
+			cs._renderCharacter?.();
+			return {id: resource.id, max: resource.max, hp};
+		}, {resourceName});
+		expect(setup, `${resourceName} resource should exist`).not.toBeNull();
+		expect(setup!.max, `${resourceName} must have a partially restorable pool`).toBeGreaterThan(restoreAmount);
+
+		const after = await this.page.evaluate(({id, hp, max}) => {
+			const cs = (globalThis as any).charSheet;
+			cs._state.onShortRest();
+			const resource = cs._state.getResources().find((it: any) => it.id === id);
+			const current = resource?.current;
+			cs._state.setResourceCurrent(id, max);
+			cs._state.setHp(hp.current, hp.max);
+			cs._renderCharacter?.();
+			return current;
+		}, {id: setup!.id, hp: setup!.hp, max: setup!.max});
+		expect(after).toBe(restoreAmount);
+		expect(after).toBeLessThan(setup!.max);
+	}
+
+	async probeCantripDamageBonus ({
+		spellName,
+		featureName,
+		ability,
+	}: {
+		spellName: string;
+		featureName: string;
+		ability: "str" | "dex" | "con" | "int" | "wis" | "cha";
+	}): Promise<void> {
+		const result = await this.page.evaluate(async ({spellName, ability}) => {
+			const cs = (globalThis as any).charSheet;
+			const storedSpell = cs._state.getSpells().find((it: any) => it.name?.toLowerCase() === spellName.toLowerCase());
+			const spellData = cs._spells._allSpells.find((it: any) => it.name?.toLowerCase() === spellName.toLowerCase());
+			if (!storedSpell || !spellData) return null;
+			const originalRoll = cs._spells._rollDamageDiceDetailed;
+			cs._spells._rollDamageDiceDetailed = () => ({total: 7, rolls: [7], modifier: 0, groups: []});
+			try {
+				const roll = await cs._spells._rollCantripDamage(spellData, null, storedSpell);
+				return {roll, abilityMod: cs._state.getAbilityMod(ability)};
+			} finally {
+				cs._spells._rollDamageDiceDetailed = originalRoll;
+			}
+		}, {spellName, ability});
+		expect(result, `${spellName} must be known and present in the spell catalog`).not.toBeNull();
+		expect(result!.abilityMod, `${featureName} needs a non-zero ability modifier`).not.toBe(0);
+		expect(result!.roll.total).toBe(7 + result!.abilityMod);
+		expect(result!.roll.text).toContain(featureName);
+		expect(result!.roll.text).toContain(`${result!.abilityMod >= 0 ? "+ " : ""}${result!.abilityMod}`);
+	}
+
+	async probeChronologicalInterference (featureName: string): Promise<void> {
+		const setup = await this.page.evaluate(({featureName}) => {
+			const cs = (globalThis as any).charSheet;
+			const state = cs._state;
+			state.endCombat();
+			for (const entry of state.getCombatTurnOrder()) state.removeCombatTurnOrderParticipant(entry.id);
+			const resource = state.getResources().find((it: any) => it.name === featureName);
+			if (!resource) return null;
+			state.setResourceCurrent(resource.id, resource.max);
+			cs._renderCharacter?.();
+			return {resourceId: resource.id, resourceMax: resource.max};
+		}, {featureName});
+		expect(setup, `${featureName} resource should exist`).not.toBeNull();
+
+		await this.switchToTab(this.tabCombat);
+		await this.page.locator("#charsheet-combat-turn-order-manage").click();
+		const rosterModal = this._visibleModal(/Manage Turn Order/i);
+		for (const combatant of [{name: "Ancient Dragon", initiative: 19}, {name: "Clockwork Knight", initiative: 11}]) {
+			const addRow = rosterModal.locator(".charsheet__turn-order-add");
+			await addRow.locator("[data-role='name']").fill(combatant.name);
+			await addRow.locator("[data-role='initiative']").fill(`${combatant.initiative}`);
+			await addRow.locator("[data-role='add']").click();
+		}
+		await rosterModal.getByRole("button", {name: "Done", exact: true}).click();
+		await this.page.locator("#charsheet-combat-start").click();
+		await expect(this.page.locator("#charsheet-combat-turn-order")).toContainText("Ancient Dragon");
+		await expect(this.page.locator("#charsheet-combat-turn-order")).toContainText("Clockwork Knight");
+
+		const beforeCancel = await this.page.evaluate(({resourceId}) => {
+			const cs = (globalThis as any).charSheet;
+			cs._combat._resetTurnActionUsage();
+			cs._combat.render();
+			return {
+				order: cs._state.getCombatTurnOrder().map((it: any) => it.name),
+				current: cs._state.getResources().find((it: any) => it.id === resourceId)?.current,
+				bonusAction: cs._combat.isActionTypeAvailable("bonus"),
+				historyCount: cs._rollHistory.getRollCount(),
+			};
+		}, {resourceId: setup!.resourceId});
+		await this._clickActivatableFeature(featureName);
+		const cancelModal = this._visibleModal(/Chronological Interference/i);
+		await cancelModal.locator("[data-role='cancel']").click();
+		await expect(cancelModal).toBeHidden();
+		const afterCancel = await this.page.evaluate(({resourceId}) => {
+			const cs = (globalThis as any).charSheet;
+			return {
+				order: cs._state.getCombatTurnOrder().map((it: any) => it.name),
+				current: cs._state.getResources().find((it: any) => it.id === resourceId)?.current,
+				bonusAction: cs._combat.isActionTypeAvailable("bonus"),
+				historyCount: cs._rollHistory.getRollCount(),
+			};
+		}, {resourceId: setup!.resourceId});
+		expect(afterCancel).toEqual(beforeCancel);
+
+		await this._clickActivatableFeature(featureName);
+		const confirmModal = this._visibleModal(/Chronological Interference/i);
+		const first = confirmModal.locator("[data-role='first']");
+		const second = confirmModal.locator("[data-role='second']");
+		const firstOptions = await first.locator("option").evaluateAll(options => options.map(it => ({value: (it as HTMLOptionElement).value, text: it.textContent || ""})).filter(it => it.value));
+		const secondOptions = await second.locator("option").evaluateAll(options => options.map(it => ({value: (it as HTMLOptionElement).value, text: it.textContent || ""})).filter(it => it.value));
+		await first.selectOption(firstOptions[0].value);
+		await second.selectOption(secondOptions.find(it => it.value !== firstOptions[0].value)!.value);
+		await confirmModal.locator("[data-role='confirm']").click();
+		await expect(confirmModal).toBeHidden();
+
+		const afterConfirm = await this.page.evaluate(({resourceId}) => {
+			const cs = (globalThis as any).charSheet;
+			const latest = cs._rollHistory.getRolls()[0];
+			return {
+				order: cs._state.getCombatTurnOrder().map((it: any) => it.name),
+				current: cs._state.getResources().find((it: any) => it.id === resourceId)?.current,
+				bonusAction: cs._combat.isActionTypeAvailable("bonus"),
+				latest,
+			};
+		}, {resourceId: setup!.resourceId});
+		expect(afterConfirm.order).toEqual([...beforeCancel.order].reverse());
+		expect(afterConfirm.current).toBe(beforeCancel.current - 1);
+		expect(afterConfirm.bonusAction).toBe(false);
+		expect(afterConfirm.latest).toMatchObject({title: featureName, total: "Swap"});
+		expect(afterConfirm.latest.breakdown).toContain("Ancient Dragon");
+		expect(afterConfirm.latest.breakdown).toContain("Clockwork Knight");
+
+		await this.page.evaluate(() => {
+			const cs = (globalThis as any).charSheet;
+			cs._state.endCombat();
+			cs._renderCharacter?.();
+		});
+	}
+
+	async probeTemporalManipulation (featureName: string): Promise<void> {
+		const setup = await this.page.evaluate(() => {
+			const cs = (globalThis as any).charSheet;
+			const resource = cs._state.getResources().find((it: any) => it.name === "Channel Divinity");
+			if (!resource) return null;
+			cs._state.setResourceCurrent(resource.id, resource.max);
+			cs._state.startCombat();
+			cs._combat._resetTurnActionUsage();
+			cs._combat.render();
+			cs._renderCharacter?.();
+			return {resourceId: resource.id, current: resource.max, historyCount: cs._rollHistory.getRollCount()};
+		});
+		expect(setup, "Channel Divinity resource should exist").not.toBeNull();
+
+		await this._clickActivatableFeature(featureName);
+		const cancelModal = this._visibleModal(/Temporal Manipulation/i);
+		await cancelModal.locator("[data-role='target']").fill("Cancelled Ogre");
+		await cancelModal.locator("input[name='temporal-roll-mode'][value='advantage']").check();
+		await cancelModal.locator("[data-role='cancel']").click();
+		await expect(cancelModal).toBeHidden();
+		const afterCancel = await this.page.evaluate(({resourceId}) => {
+			const cs = (globalThis as any).charSheet;
+			return {
+				current: cs._state.getResources().find((it: any) => it.id === resourceId)?.current,
+				reaction: cs._combat.isActionTypeAvailable("reaction"),
+				historyCount: cs._rollHistory.getRollCount(),
+			};
+		}, {resourceId: setup!.resourceId});
+		expect(afterCancel).toEqual({current: setup!.current, reaction: true, historyCount: setup!.historyCount});
+
+		await this._clickActivatableFeature(featureName);
+		const confirmModal = this._visibleModal(/Temporal Manipulation/i);
+		await confirmModal.locator("[data-role='target']").fill("Ancient Dragon");
+		await confirmModal.locator("input[name='temporal-roll-mode'][value='disadvantage']").check();
+		await confirmModal.locator("[data-role='confirm']").click();
+		await expect(confirmModal).toBeHidden();
+		const afterConfirm = await this.page.evaluate(({resourceId}) => {
+			const cs = (globalThis as any).charSheet;
+			const latest = cs._rollHistory.getRolls()[0];
+			return {
+				current: cs._state.getResources().find((it: any) => it.id === resourceId)?.current,
+				reaction: cs._combat.isActionTypeAvailable("reaction"),
+				latest,
+			};
+		}, {resourceId: setup!.resourceId});
+		expect(afterConfirm.current).toBe(setup!.current - 1);
+		expect(afterConfirm.reaction).toBe(false);
+		expect(afterConfirm.latest).toMatchObject({title: featureName, total: "Disadvantage"});
+		expect(afterConfirm.latest.breakdown).toContain("Ancient Dragon");
+		expect(afterConfirm.latest.breakdown.toLowerCase()).toContain("disadvantage");
+	}
+
+	async probeEyesOfFuturePast (featureName: string): Promise<void> {
+		const setup = await this.page.evaluate(({featureName}) => {
+			const cs = (globalThis as any).charSheet;
+			const resource = cs._state.getResources().find((it: any) => it.name === featureName);
+			if (!resource) return null;
+			cs._state.setResourceCurrent(resource.id, resource.max);
+			cs._state.startCombat();
+			cs._combat._resetTurnActionUsage();
+			cs._combat.render();
+			cs._renderCharacter?.();
+			return {resourceId: resource.id, current: resource.max};
+		}, {featureName});
+		expect(setup, `${featureName} resource should exist`).not.toBeNull();
+
+		await this._clickActivatableFeature(featureName);
+		const directionModal = this._visibleModal(/Eyes of the Future Past/i);
+		await directionModal.locator("input[name='temporal-direction'][value='future']").check();
+		await directionModal.locator("[data-role='confirm']").click();
+		await expect(directionModal).toBeHidden();
+
+		const active = await this.page.evaluate(({resourceId}) => {
+			const cs = (globalThis as any).charSheet;
+			return {
+				current: cs._state.getResources().find((it: any) => it.id === resourceId)?.current,
+				bonusAction: cs._combat.isActionTypeAvailable("bonus"),
+				activeState: cs._state.getActiveStates().find((it: any) => it.stateTypeId === "eyesOfFuturePast" && it.active),
+				conditions: cs._state.getConditionNames(),
+			};
+		}, {resourceId: setup!.resourceId});
+		expect(active.current).toBe(setup!.current - 1);
+		expect(active.bonusAction).toBe(false);
+		expect(active.activeState.temporalView).toMatchObject({direction: "future", offsetHours: 1, roundDecision: null, decisionPending: false});
+		expect(active.conditions.map((it: string) => it.toLowerCase())).toContain("blinded");
+
+		await this.page.evaluate(() => {
+			const cs = (globalThis as any).charSheet;
+			cs._state.advanceRound();
+			cs._combat.render();
+		});
+		await this.switchToTab(this.tabCombat);
+		const temporalCard = this.page.locator(".charsheet__combat-state-item").filter({hasText: /Eyes of the Future Past/i}).first();
+		await expect(temporalCard).toContainText(/Future/i);
+		await temporalCard.locator(".charsheet__temporal-hold").click();
+		let decision = await this.page.evaluate(() => (globalThis as any).charSheet._state.getActiveStates().find((it: any) => it.stateTypeId === "eyesOfFuturePast" && it.active)?.temporalView);
+		expect(decision).toMatchObject({offsetHours: 1, roundDecision: "hold", decisionPending: false});
+
+		await this.page.evaluate(() => {
+			const cs = (globalThis as any).charSheet;
+			cs._state.advanceRound();
+			cs._combat.render();
+		});
+		await temporalCard.locator(".charsheet__temporal-advance").click();
+		decision = await this.page.evaluate(() => (globalThis as any).charSheet._state.getActiveStates().find((it: any) => it.stateTypeId === "eyesOfFuturePast" && it.active)?.temporalView);
+		expect(decision).toMatchObject({offsetHours: 2, roundDecision: "advance", decisionPending: false});
+
+		await this.page.evaluate(() => {
+			const cs = (globalThis as any).charSheet;
+			for (let i = 0; i < 8; i++) cs._state.advanceRound();
+			cs._combat.render();
+		});
+		const expired = await this.page.evaluate(() => {
+			const cs = (globalThis as any).charSheet;
+			return {
+				activeState: cs._state.getActiveStates().find((it: any) => it.stateTypeId === "eyesOfFuturePast" && it.active) || null,
+				conditions: cs._state.getConditionNames(),
+			};
+		});
+		expect(expired.activeState).toBeNull();
+		expect(expired.conditions.map((it: string) => it.toLowerCase())).not.toContain("blinded");
+	}
+
+	async probeTemporalMasteryAgeFlows (featureName: string): Promise<void> {
+		await this.page.evaluate(() => {
+			const cs = (globalThis as any).charSheet;
+			cs._state.setAppearance("age", "42");
+			cs._renderCharacter?.();
+		});
+
+		await this.switchToTab(this.tabOverview);
+		await this.page.locator("#charsheet-btn-long-rest").click({timeout: 5000});
+		const restModal = this._visibleModal(/Long Rest/i);
+		await restModal.locator("input[name='temporal-rest-age'][value='-1']").check();
+		await restModal.locator("[data-role='age']").fill("42");
+		await restModal.getByRole("button", {name: /Finish Long Rest/i}).click();
+		await expect(restModal).toBeHidden();
+		expect(await this.page.evaluate(() => (globalThis as any).charSheet._state.getNumericAge())).toBe(41);
+
+		await this.switchToTab(this.tabFeatures);
+		const utility = this._featureCard(featureName).locator(".charsheet__feature-utility");
+		await utility.click();
+		let agingModal = this._visibleModal(/Magical Aging/i);
+		await agingModal.locator("[data-role='years']").fill("7");
+		await agingModal.locator("input[name='magical-aging-resolution'][value='ignore']").check();
+		await agingModal.locator("[data-role='confirm']").click();
+		await expect(agingModal).toBeHidden();
+		let result = await this.page.evaluate(() => {
+			const cs = (globalThis as any).charSheet;
+			return {age: cs._state.getNumericAge(), latest: cs._rollHistory.getRolls()[0]};
+		});
+		expect(result.age).toBe(41);
+		expect(result.latest).toMatchObject({title: `${featureName} — Magical Aging`, total: "Unaffected"});
+
+		await utility.click();
+		agingModal = this._visibleModal(/Magical Aging/i);
+		await agingModal.locator("[data-role='years']").fill("7");
+		await agingModal.locator("input[name='magical-aging-resolution'][value='accept']").check();
+		await agingModal.locator("[data-role='confirm']").click();
+		await expect(agingModal).toBeHidden();
+		result = await this.page.evaluate(() => {
+			const cs = (globalThis as any).charSheet;
+			return {age: cs._state.getNumericAge(), latest: cs._rollHistory.getRolls()[0]};
+		});
+		expect(result.age).toBe(48);
+		expect(result.latest).toMatchObject({title: `${featureName} — Magical Aging`, total: "48 years"});
+		expect(result.latest.breakdown).toContain("Age 41 → 48");
+
+		const persistence = await this.page.evaluate(async () => {
+			const cs = (globalThis as any).charSheet;
+			for (const entry of cs._state.getCombatTurnOrder()) cs._state.removeCombatTurnOrderParticipant(entry.id);
+			cs._state.upsertCombatTurnOrderParticipant({name: "Persistence Sentinel", initiative: 14});
+			const saved = cs._state.toJson();
+			cs._state.setAppearance("age", "99");
+			for (const entry of cs._state.getCombatTurnOrder()) cs._state.removeCombatTurnOrderParticipant(entry.id);
+			await cs._state.loadFromJson(saved);
+			cs._renderCharacter?.();
+			return {
+				age: cs._state.getNumericAge(),
+				turnOrder: cs._state.getCombatTurnOrder().map((it: any) => ({name: it.name, initiative: it.initiative})),
+			};
+		});
+		expect(persistence).toEqual({age: 48, turnOrder: [{name: "Persistence Sentinel", initiative: 14}]});
 	}
 
 	/**

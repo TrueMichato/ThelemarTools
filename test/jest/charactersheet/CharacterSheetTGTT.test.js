@@ -5872,22 +5872,14 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					expect(state.getInitiative()).toBe(5);
 				});
 
-				// CS-BUG-118: the feature is captured BOTH by the generic
-				// "add your <ability> modifier to initiative" text-parse (which mints an
-				// inert `abilityMod` row) and by the curated calc effect (which mints the
-				// live +WIS row), so two same-named rows appear in the modifiers list.
-				// Every total is currently correct because the two numeric chokepoints
-				// disagree about `abilityMod` and the text-parsed row resolves to 0 —
-				// this test pins that the TOTAL stays right, and documents the duplicate
-				// so a future fix to `_getNamedModifierEffectiveValue` cannot silently
-				// double it to +6.
-				it("does not double-count initiative despite the duplicate modifier row (CS-BUG-118)", () => {
+				it("stores one live Right on Time modifier row (CS-BUG-118)", () => {
 					makeTimeCleric(3, {wis: 16});
 					const rows = state.getNamedModifiers()
 						.filter(m => m.type === "initiative" && m.note?.includes("Right on Time"));
-					expect(rows.length).toBe(2);
-					expect(rows.filter(r => r.value === 0).length).toBe(1);
-					expect(state.getInitiative()).toBe(3); // NOT 6
+					expect(rows).toHaveLength(1);
+					expect(rows[0]).toMatchObject({value: 0, abilityMod: "wis"});
+					expect(state.getInitiative()).toBe(3);
+					expect(state.aggregateModifiers("initiative").bonus).toBe(3);
 				});
 
 				it("Chronological Interference is a bonus action bound to its own PB pool", () => {
@@ -5976,24 +5968,55 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					expect(bonus.sources.map(s => s.name)).toContain("Potent Spellcasting");
 				});
 
-				it("grants exactly the homebrew domain spells at each gated level", () => {
+				it("grants exactly the homebrew domain spells with canonical source and preparation metadata at each gated level", () => {
 					const expected = {
-						3: ["gift of alacrity", "feather fall", "fortune's favor", "immovable object"],
-						5: ["slow", "haste"],
-						7: ["death ward", "freedom of movement"],
-						9: ["temporal shunt", "hold monster"],
+						3: [["gift of alacrity", "EGW"], ["feather fall", "PHB"], ["fortune's favor", "EGW"], ["immovable object", "EGW"]],
+						5: [["slow", "PHB"], ["haste", "PHB"]],
+						7: [["death ward", "PHB"], ["freedom of movement", "PHB"]],
+						9: [["temporal shunt", "EGW"], ["hold monster", "PHB"]],
+						17: [["time stop", "PHB"], ["time ravage", "EGW"]],
 					};
-					for (const level of [3, 5, 7, 9]) {
+					for (const level of [3, 5, 7, 9, 17]) {
 						const s = new CharacterSheetState();
 						const sub = TGTT_BREW.subclass.find(x => x.name === "Time Domain" && x.className === "Cleric");
 						s.addClass({name: "Cleric", source: "TGTT", level, hitDice: "d8", subclass: JSON.parse(JSON.stringify(sub))});
-						const got = s.getSubclassAlwaysPreparedSpells(s.getClasses()[0]).map(p => p.name.toLowerCase());
+						const got = s.getSubclassAlwaysPreparedSpells(s.getClasses()[0]);
 						// Everything gated at or below this level is present…
 						for (const [gate, spells] of Object.entries(expected)) {
-							if (+gate <= level) spells.forEach(sp => expect(got).toContain(sp));
-							else spells.forEach(sp => expect(got).not.toContain(sp));
+							for (const [name, source] of spells) {
+								const spell = got.find(it => it.name.toLowerCase() === name);
+								if (+gate > level) {
+									expect(spell).toBeUndefined();
+									continue;
+								}
+								expect(spell).toMatchObject({
+									alwaysPrepared: true,
+									prepared: true,
+									sourceClass: "Cleric",
+									sourceFeature: "Time Domain Spells",
+								});
+								expect(spell.source.toUpperCase()).toBe(source);
+							}
 						}
 					}
+				});
+
+				it("keeps populated domain spells locked prepared across save/load and removes them by grant provenance", () => {
+					const sub = TGTT_BREW.subclass.find(x => x.name === "Time Domain" && x.className === "Cleric");
+					state.addClass({name: "Cleric", source: "TGTT", level: 3, hitDice: "d8", subclass: JSON.parse(JSON.stringify(sub))});
+					state.populateSubclassSpells();
+					const granted = state.getSpellsKnown().filter(it => it.sourceFeature === "Time Domain Spells");
+					expect(granted).toHaveLength(4);
+					for (const spell of granted) {
+						expect(state.setSpellPrepared(spell.name, spell.source, false)).toBe(false);
+						expect(spell.prepared).toBe(true);
+					}
+
+					const loaded = new CharacterSheetState();
+					loaded.loadFromJson(state.toJson());
+					expect(loaded.getSpellsKnown().filter(it => it.sourceFeature === "Time Domain Spells")).toHaveLength(4);
+					loaded.removeSubclassSpells("Time Domain Spells");
+					expect(loaded.getSpellsKnown().filter(it => it.sourceFeature === "Time Domain Spells")).toHaveLength(0);
 				});
 
 				it("Temporal Mastery adds Time Stop and Time Ravage as always-prepared domain spells at 17", () => {
@@ -6104,15 +6127,15 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					});
 
 					let calcs = state.getFeatureCalculations();
-					expect(calcs.channelDivinityUses).toBe(1);
+					expect(calcs.channelDivinityUses).toBe(2);
 
 					state.addClass({name: "Cleric", source: "TGTT", level: 6});
 					calcs = state.getFeatureCalculations();
-					expect(calcs.channelDivinityUses).toBe(2);
+					expect(calcs.channelDivinityUses).toBe(3);
 
 					state.addClass({name: "Cleric", source: "TGTT", level: 18});
 					calcs = state.getFeatureCalculations();
-					expect(calcs.channelDivinityUses).toBe(3);
+					expect(calcs.channelDivinityUses).toBe(4);
 				});
 
 				it("should track Potent Spellcasting bonus for 5 of 6 TGTT domains", () => {

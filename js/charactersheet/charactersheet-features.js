@@ -809,7 +809,7 @@ class CharacterSheetFeatures {
 	 * @param {string} featureType - "Class" or "Species"
 	 */
 	async _pShowMoreFeaturesModal (featureType) {
-		const allFeatures = this._state.getFeatures();
+		const allFeatures = CharacterSheetClassUtils.mergeEquivalentFeaturesForDisplay(this._state.getFeatures());
 
 		// Get features matching the type
 		let features;
@@ -958,7 +958,7 @@ class CharacterSheetFeatures {
 		container.innerHTML = "";
 
 		const classes = this._state.getClasses();
-		const allFeatures = this._state.getFeatures();
+		const allFeatures = CharacterSheetClassUtils.mergeEquivalentFeaturesForDisplay(this._state.getFeatures());
 		const classNames = classes.map(c => c.name?.toLowerCase()).filter(Boolean);
 
 		// Filter for class features - be lenient for compatibility with old saves
@@ -1736,6 +1736,8 @@ class CharacterSheetFeatures {
 		// This features-area button is the single canonical "use this ability" path.
 		const abilityEntry = this._page?._getActivatableAbilityForFeature?.(feature) || null;
 		const isAbility = !!abilityEntry;
+		const featureUtility = CharacterSheetState.getFeatureInteractionDescriptor?.(feature)?.utilityAction || null;
+		const featureUtilityLabel = CharacterSheetState.getFeatureInteractionDescriptor?.(feature)?.utilityLabel || "Resolve";
 		// (R21 #14) An interdict boon that is already running is managed from the active-states
 		// "Currently Active" section (turn it off there); don't offer a second invoke here that
 		// would double-spend a seal. Limited abilities stay re-usable.
@@ -1778,6 +1780,9 @@ class CharacterSheetFeatures {
 			derivedEffectBadge = `<span class="badge badge-outline-success" title="Computed effect">${effectSummary}</span>`;
 			derivedEffectRow = `<div class="ve-small mb-1"><span class="ve-muted">Effect:</span> <strong>${effectSummary}</strong></div>`;
 		}
+		const provenanceBadge = feature.provenanceSources?.length
+			? `<span class="badge badge-outline-info" title="${feature.provenanceSources.map(it => `${it.feature} (level ${it.level})`).join("; ")}">${feature.provenanceSources.length} grants</span>`
+			: "";
 
 		// Combat-method attribution badge (tradition + focus gate). Surfaced for combat-method
 		// features — especially auto-granted ones (Singular Focus / Groundshatter) that would
@@ -2041,8 +2046,10 @@ class CharacterSheetFeatures {
 					${huntersPreyBadge}
 					${combatMethodBadge}
 					${derivedEffectBadge}
+					${provenanceBadge}
 					${intransigentBadge}
 					<div class="charsheet__feature-actions">
+						${featureUtility ? `<button class="ve-btn ve-btn-xs ve-btn-info charsheet__feature-utility" data-utility="${featureUtility}">${featureUtilityLabel}</button>` : ""}
 						${showUseBtn ? `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__feature-use" title="${isAbility ? "Use this ability" : "Use Feature"}">Use</button>` : ""}
 						<button class="ve-btn ve-btn-xs ${this._state.getFeatureNote?.(feature.id) ? "ve-btn-warning" : "ve-btn-default"} charsheet__feature-note" title="${this._state.getFeatureNote?.(feature.id) ? "Edit Note" : "Add Note"}">
 							<span class="glyphicon glyphicon-comment"></span>
@@ -2062,6 +2069,10 @@ class CharacterSheetFeatures {
 				</div>
 			</div>
 		`});
+		featureEl.querySelector(".charsheet__feature-utility")?.addEventListener("click", evt => {
+			evt.stopPropagation();
+			if (featureUtility === "magicalAging") this._page?._pResolveMagicalAging?.(feature);
+		});
 
 		// Add Primal Focus switch button handlers
 		if (isPrimalFocus) {

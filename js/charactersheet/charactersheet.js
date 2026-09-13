@@ -10210,6 +10210,20 @@ class CharacterSheetPage {
 				effectLabelsHtml = `<span class="ve-small ve-muted ml-2">${labels.join(" · ")}</span>`;
 			}
 		}
+		let temporalViewHtml = "";
+		const isTemporalVision = isActive && state.stateTypeId === "eyesOfFuturePast" && state.temporalView;
+		if (isTemporalVision) {
+			const direction = state.temporalView.direction
+				? state.temporalView.direction.toTitleCase()
+				: "Direction required";
+			const offset = Math.max(1, Number(state.temporalView.offsetHours) || 1);
+			const pending = state.temporalView.decisionPending
+				? " · Choose this round's view"
+				: state.temporalView.roundDecision
+					? ` · ${state.temporalView.roundDecision.toTitleCase()} selected`
+					: "";
+			temporalViewHtml = `<span class="charsheet__temporal-state-summary ve-small ml-2" aria-live="polite">${direction} · ${offset} hour${offset === 1 ? "" : "s"}${pending}</span>`;
+		}
 
 		// Style differently for spell effects
 		const bgColor = isActive
@@ -10224,13 +10238,28 @@ class CharacterSheetPage {
 				style="background: ${bgColor}; border: 1px solid ${borderColor};">
 				<span class="charsheet__state-icon mr-2" style="font-size: 1.2em;" title="${tooltipAttr}">${icon}</span>
 				<span class="charsheet__state-name ve-bold" title="${tooltipAttr}">${nameHtml}${concentrationHtml}</span>
-				${effectLabelsHtml}${durationHtml}${grantsConditionsHtml}
+				${effectLabelsHtml}${temporalViewHtml}${durationHtml}${grantsConditionsHtml}
 				<div class="charsheet__state-controls ml-auto ve-flex-v-center">
+					${isTemporalVision && state.temporalView.decisionPending ? `
+						<button class="ve-btn ve-btn-xs ve-btn-default mr-1 charsheet__temporal-hold-btn">Hold</button>
+						<button class="ve-btn ve-btn-xs ve-btn-info mr-1 charsheet__temporal-advance-btn">Advance 1 hour</button>
+					` : ""}
 					${isSpellEffect ? `<span class="ve-small ve-muted mr-2" title="Remember to end this when the spell ends">Spell Effect</span>` : ""}
 					${isEndable ? `<button class="ve-btn ve-btn-xs ${isSpellEffect ? "ve-btn-danger" : "ve-btn-warning"} charsheet__end-state-btn">${isSpellEffect ? "End Spell" : "End"}</button>` : `<span class="ve-small ve-muted" title="This is a passive ability">Passive</span>`}
 				</div>
 			</div>
 		`});
+
+		if (isTemporalVision && state.temporalView.decisionPending) {
+			const resolveRoundChoice = (choice) => {
+				if (!this._state.resolveTemporalViewRoundChoice(choice)) return;
+				this._saveCurrentCharacter();
+				this._renderActiveStates();
+				this._combat?.renderCombatStates?.();
+			};
+			row.querySelector(".charsheet__temporal-hold-btn")?.addEventListener("click", () => resolveRoundChoice("hold"));
+			row.querySelector(".charsheet__temporal-advance-btn")?.addEventListener("click", () => resolveRoundChoice("advance"));
+		}
 
 		if (isEndable) {
 			row.querySelector(".charsheet__end-state-btn").addEventListener("click", async () => {
@@ -12771,6 +12800,301 @@ class CharacterSheetPage {
 		return true;
 	}
 
+	_getLiveFeatureInteractionResource (resource) {
+		if (!resource) return null;
+		if (resource.isStamina) return {isStamina: true, id: "stamina", current: this._state.getStaminaCurrent()};
+		return this._state.getResources().find(it => it.id === resource.id) || null;
+	}
+
+	_canCommitFeatureInteractionCosts ({resource, cost, actionType}) {
+		const liveResource = this._getLiveFeatureInteractionResource(resource);
+		if (resource && (!liveResource || liveResource.current < cost)) {
+			JqueryUtil.doToast({type: "warning", content: `Not enough ${resource.name} remaining.`});
+			return null;
+		}
+		if (!this._combat?.isActionTypeAvailable?.(actionType)) {
+			const label = actionType === "bonus" ? "Bonus Action" : `${String(actionType || "action").toTitleCase()}`;
+			JqueryUtil.doToast({type: "warning", content: `${label} already used this turn.`});
+			return null;
+		}
+		return {liveResource};
+	}
+
+	_commitFeatureInteractionCosts ({liveResource, cost, actionType}) {
+		if (liveResource) {
+			if (liveResource.isStamina) this._state.setStaminaCurrent(liveResource.current - cost);
+			else this._state.setResourceCurrent(liveResource.id, liveResource.current - cost);
+		}
+		this._combat?.consumeActionType?.(actionType);
+	}
+
+	async _pChooseTemporalDirection (feature) {
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: `${feature.name} — Choose a View`,
+			isMinHeight0: true,
+		});
+		let direction = null;
+		const intro = e_({outer: `<p class="ve-muted mb-3">Choose whether to look one hour into the past or future. You are Blinded to the present while this view is active.</p>`});
+		const fieldset = e_({outer: `<fieldset class="charsheet__temporal-choice-group mb-3">
+			<legend class="ve-bold mb-2">Temporal direction</legend>
+			<label class="charsheet__temporal-choice"><input type="radio" name="temporal-direction" value="past"> <span><strong>Past</strong><small>Begin one hour in the past</small></span></label>
+			<label class="charsheet__temporal-choice"><input type="radio" name="temporal-direction" value="future"> <span><strong>Future</strong><small>Begin one hour in the future</small></span></label>
+		</fieldset>`});
+		const status = e_({outer: `<div class="ve-muted ve-small mb-3" aria-live="polite">Choose a direction to continue.</div>`});
+		const footer = e_({outer: `<div class="charsheet__modal-actions">
+			<button type="button" class="ve-btn ve-btn-default" data-role="cancel">Cancel</button>
+			<button type="button" class="ve-btn ve-btn-primary" data-role="confirm" disabled>Activate Eyes</button>
+		</div>`});
+		const confirm = footer.querySelector(`[data-role="confirm"]`);
+		fieldset.addEventListener("change", evt => {
+			direction = evt.target?.value || null;
+			confirm.disabled = !direction;
+			status.textContent = direction ? `View: 1 hour into the ${direction}.` : "Choose a direction to continue.";
+		});
+		footer.querySelector(`[data-role="cancel"]`).addEventListener("click", () => doClose(false));
+		confirm.addEventListener("click", () => doClose(true));
+		ee(modalInner)`${intro}${fieldset}${status}${footer}`;
+		CharacterSheetModal.focusFirst(modalInner);
+		const [confirmed] = await pGetResolved();
+		return confirmed ? direction : null;
+	}
+
+	async _pChooseChronologicalSwap (feature) {
+		if (!this._state.isInCombat?.()) {
+			JqueryUtil.doToast({type: "warning", content: "Start combat before using Chronological Interference."});
+			return null;
+		}
+		const eligible = this._state.getCombatTurnOrder().filter(it => !it.hasActed);
+		if (eligible.length < 2) {
+			JqueryUtil.doToast({type: "warning", content: "Add at least two creatures that have not acted to the Turn Order."});
+			await this._combat?.pShowTurnOrderModal?.();
+			return null;
+		}
+
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: feature.name,
+			isMinHeight0: true,
+		});
+		let firstId = eligible[0]?.id || null;
+		let secondId = eligible[1]?.id || null;
+		const options = eligible.map(it => `<option value="${it.id.qq()}">${it.name.qq()} (${it.initiative})</option>`).join("");
+		const body = e_({outer: `<div>
+			<p class="ve-muted mb-3">Choose two creatures that have not acted this round. Their initiative positions are permanently exchanged.</p>
+			<div class="charsheet__temporal-target-grid mb-3">
+				<label><span class="ve-bold">First creature</span><select class="form-control input-xs mt-1" data-role="first">${options}</select></label>
+				<label><span class="ve-bold">Second creature</span><select class="form-control input-xs mt-1" data-role="second">${options}</select></label>
+			</div>
+			<div class="charsheet__temporal-preview mb-3" data-role="preview" aria-live="polite"></div>
+			<div class="charsheet__modal-actions">
+				<button type="button" class="ve-btn ve-btn-default" data-role="cancel">Cancel</button>
+				<button type="button" class="ve-btn ve-btn-primary" data-role="confirm">Swap &amp; spend use</button>
+			</div>
+		</div>`});
+		const first = body.querySelector(`[data-role="first"]`);
+		const second = body.querySelector(`[data-role="second"]`);
+		const preview = body.querySelector(`[data-role="preview"]`);
+		const confirm = body.querySelector(`[data-role="confirm"]`);
+		second.value = secondId;
+		const renderPreview = () => {
+			firstId = first.value;
+			secondId = second.value;
+			const a = eligible.find(it => it.id === firstId);
+			const b = eligible.find(it => it.id === secondId);
+			const valid = !!a && !!b && a.id !== b.id;
+			confirm.disabled = !valid;
+			preview.textContent = valid
+				? `${a.name} moves to ${b.initiative}; ${b.name} moves to ${a.initiative}.`
+				: "Choose two different creatures.";
+			preview.classList.toggle("text-danger", !valid);
+		};
+		first.addEventListener("change", renderPreview);
+		second.addEventListener("change", renderPreview);
+		body.querySelector(`[data-role="cancel"]`).addEventListener("click", () => doClose(false));
+		confirm.addEventListener("click", () => doClose(true));
+		modalInner.append(body);
+		renderPreview();
+		CharacterSheetModal.focusFirst(modalInner);
+		const [confirmed] = await pGetResolved();
+		return confirmed ? {firstId, secondId} : null;
+	}
+
+	async _pChooseTemporalManipulation (feature) {
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: feature.name,
+			isMinHeight0: true,
+		});
+		let mode = null;
+		const body = e_({outer: `<div>
+			<p class="ve-muted mb-3">When a visible creature within 60 feet takes an action involving a d20, choose how time alters that roll.</p>
+			<label class="ve-bold" for="charsheet-temporal-target">Target</label>
+			<input id="charsheet-temporal-target" class="form-control input-xs mb-3" data-role="target" placeholder="Creature name">
+			<fieldset class="charsheet__temporal-choice-group mb-3">
+				<legend class="ve-bold mb-2">Roll effect</legend>
+				<label class="charsheet__temporal-choice"><input type="radio" name="temporal-roll-mode" value="advantage"> <span><strong>Grant Advantage</strong><small>Help the target's action</small></span></label>
+				<label class="charsheet__temporal-choice"><input type="radio" name="temporal-roll-mode" value="disadvantage"> <span><strong>Impose Disadvantage</strong><small>Hinder the target's action</small></span></label>
+			</fieldset>
+			<div class="ve-muted ve-small mb-3" data-role="status" aria-live="polite">Enter a target and choose an effect.</div>
+			<div class="charsheet__modal-actions">
+				<button type="button" class="ve-btn ve-btn-default" data-role="cancel">Cancel</button>
+				<button type="button" class="ve-btn ve-btn-primary" data-role="confirm" disabled>Apply &amp; spend Channel Divinity</button>
+			</div>
+		</div>`});
+		const target = body.querySelector(`[data-role="target"]`);
+		const status = body.querySelector(`[data-role="status"]`);
+		const confirm = body.querySelector(`[data-role="confirm"]`);
+		const update = () => {
+			const targetName = target.value.trim();
+			const valid = !!targetName && !!mode;
+			confirm.disabled = !valid;
+			status.textContent = valid
+				? `${targetName}: ${mode}. Costs your Reaction and 1 Channel Divinity.`
+				: "Enter a target and choose an effect.";
+		};
+		target.addEventListener("input", update);
+		body.querySelector("fieldset").addEventListener("change", evt => {
+			mode = evt.target?.value || null;
+			update();
+		});
+		body.querySelector(`[data-role="cancel"]`).addEventListener("click", () => doClose(false));
+		confirm.addEventListener("click", () => doClose(true));
+		modalInner.append(body);
+		CharacterSheetModal.focusFirst(modalInner);
+		const [confirmed] = await pGetResolved();
+		return confirmed ? {target: target.value.trim(), mode} : null;
+	}
+
+	async _pResolveMagicalAging (feature) {
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: `${feature?.name || "Temporal Mastery"} — Magical Aging`,
+			isMinHeight0: true,
+		});
+		let resolution = "ignore";
+		const body = e_({outer: `<div>
+			<p class="ve-muted mb-3">Record a magical aging effect, then choose whether Temporal Mastery leaves you unaffected or allows the change.</p>
+			<label class="ve-bold" for="charsheet-magical-aging-years">Years changed</label>
+			<input id="charsheet-magical-aging-years" class="form-control input-xs mb-3" data-role="years" type="number" step="1" placeholder="Use a negative number to become younger">
+			<fieldset class="charsheet__temporal-choice-group mb-3">
+				<legend class="ve-bold mb-2">Resolution</legend>
+				<label class="charsheet__temporal-choice"><input type="radio" name="magical-aging-resolution" value="ignore" checked> <span><strong>Remain unaffected</strong><small>Your age does not change</small></span></label>
+				<label class="charsheet__temporal-choice"><input type="radio" name="magical-aging-resolution" value="accept"> <span><strong>Accept the change</strong><small>Apply the entered years to your age</small></span></label>
+			</fieldset>
+			<div class="ve-muted ve-small mb-3" data-role="status" aria-live="polite"></div>
+			<div class="charsheet__modal-actions">
+				<button type="button" class="ve-btn ve-btn-default" data-role="cancel">Cancel</button>
+				<button type="button" class="ve-btn ve-btn-primary" data-role="confirm" disabled>Resolve aging</button>
+			</div>
+		</div>`});
+		const years = body.querySelector(`[data-role="years"]`);
+		const status = body.querySelector(`[data-role="status"]`);
+		const confirm = body.querySelector(`[data-role="confirm"]`);
+		const update = () => {
+			const delta = Number(years.value);
+			const currentAge = this._state.getNumericAge?.();
+			const validDelta = Number.isInteger(delta) && delta !== 0;
+			const validAge = resolution === "ignore" || (currentAge != null && currentAge + delta >= 1);
+			confirm.disabled = !(validDelta && validAge);
+			if (!validDelta) status.textContent = "Enter a non-zero whole number of years.";
+			else if (resolution === "ignore") status.textContent = `Remain age ${currentAge ?? "unchanged"} despite a ${delta > 0 ? "+" : ""}${delta}-year effect.`;
+			else if (currentAge == null) status.textContent = "Set a valid numeric age in Appearance before accepting the change.";
+			else if (currentAge + delta < 1) status.textContent = "Age must remain at least 1 year.";
+			else status.textContent = `Age ${currentAge} → ${currentAge + delta}.`;
+			status.classList.toggle("text-danger", !validAge || !validDelta);
+		};
+		years.addEventListener("input", update);
+		body.querySelector("fieldset").addEventListener("change", evt => {
+			resolution = evt.target?.value || "ignore";
+			update();
+		});
+		body.querySelector(`[data-role="cancel"]`).addEventListener("click", () => doClose(false));
+		confirm.addEventListener("click", () => doClose(true));
+		modalInner.append(body);
+		update();
+		CharacterSheetModal.focusFirst(modalInner);
+		const [confirmed] = await pGetResolved();
+		if (!confirmed) return false;
+
+		const result = this._state.resolveMagicalAging({
+			years: Number(years.value),
+			ignore: resolution === "ignore",
+		});
+		if (!result.ok) {
+			JqueryUtil.doToast({type: "warning", content: result.error});
+			return false;
+		}
+		this._rollHistory?.addRoll({
+			title: "Temporal Mastery — Magical Aging",
+			total: result.ignored ? "Unaffected" : `${result.current} years`,
+			breakdown: result.ignored
+				? `Ignored a ${Number(years.value) > 0 ? "+" : ""}${Number(years.value)}-year magical aging effect.`
+				: `Age ${result.previous} → ${result.current}.`,
+		});
+		this._saveCurrentCharacter();
+		this._renderCharacter();
+		this._features?.render?.();
+		return true;
+	}
+
+	async _pHandleFeatureInteraction (feature, stateTypeId, stateType, resource, resourceCost, activationInfo) {
+		const kind = activationInfo?.interactionKind;
+		if (!kind) return false;
+		const actionType = activationInfo.activationAction || stateType?.activationAction || "special";
+		const cost = resourceCost ?? activationInfo.resourceCost ?? stateType?.resourceCost ?? 1;
+
+		if (kind === "initiativeSwap") {
+			const choice = await this._pChooseChronologicalSwap(feature);
+			if (!choice) return true;
+			const costs = this._canCommitFeatureInteractionCosts({resource, cost, actionType});
+			if (!costs) return true;
+			const result = this._state.swapCombatTurnOrderParticipants(choice.firstId, choice.secondId);
+			if (!result.ok) {
+				JqueryUtil.doToast({type: "warning", content: result.error});
+				return true;
+			}
+			this._commitFeatureInteractionCosts({...costs, cost, actionType});
+			this._rollHistory?.addRoll({
+				title: feature.name,
+				total: "Swap",
+				breakdown: `${result.first.name} → ${result.first.initiative}; ${result.second.name} → ${result.second.initiative}`,
+			});
+		} else if (kind === "externalRollMode") {
+			const choice = await this._pChooseTemporalManipulation(feature);
+			if (!choice) return true;
+			const costs = this._canCommitFeatureInteractionCosts({resource, cost, actionType});
+			if (!costs) return true;
+			this._commitFeatureInteractionCosts({...costs, cost, actionType});
+			this._rollHistory?.addRoll({
+				title: feature.name,
+				total: choice.mode.toTitleCase(),
+				breakdown: `${choice.target} has ${choice.mode} on the triggering action's d20 roll.`,
+			});
+		} else if (kind === "temporalVision") {
+			const direction = await this._pChooseTemporalDirection(feature);
+			if (!direction) return true;
+			const costs = this._canCommitFeatureInteractionCosts({resource, cost, actionType});
+			if (!costs) return true;
+			this._commitFeatureInteractionCosts({...costs, cost, actionType});
+			this._state.activateState("eyesOfFuturePast", {
+				name: feature.name,
+				sourceFeatureId: feature.id,
+				resourceId: resource?.id,
+				description: feature.description,
+				temporalView: {
+					direction,
+					offsetHours: 1,
+					roundDecision: null,
+					decisionPending: false,
+				},
+			});
+		} else return false;
+
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderActiveStates();
+		this._combat?.render?.();
+		this._renderCharacter();
+		return true;
+	}
+
 	async _activateFeatureState (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
 		if (activationInfo?.resourceTrigger && !activationInfo.resourceTriggerResolved) {
 			const triggerResource = (this._state.getResources() || []).find(it =>
@@ -12802,6 +13126,7 @@ class CharacterSheetPage {
 			JqueryUtil.doToast({type: "warning", content: `Not enough ${resource.name} remaining.`});
 			return;
 		}
+		if (await this._pHandleFeatureInteraction(feature, stateTypeId, stateType, resource, resolvedCost, activationInfo)) return;
 		if (!this._tryConsumeActiveStateToggleAction(stateTypeId, stateType, activationInfo)) return;
 		// ===== R20: name-keyed homebrew ability "Use" behaviors =====
 		// Intercept the Illrigger/Hochling abilities that need bespoke effects BEFORE the
