@@ -73,6 +73,12 @@ function createTableEffects (entries = []) {
 			],
 			duration: "1d3 minutes",
 		},
+		18: {
+			scope: "area",
+			effectType: "manual",
+			manualResolution: true,
+			instructions: "Apply the spell's 60-foot radius centered on the Gambler, then acknowledge the result.",
+		},
 		22: {
 			scope: "self",
 			effectType: "activeState",
@@ -80,6 +86,24 @@ function createTableEffects (entries = []) {
 			stateName: "Gambler's Folly: Levitation",
 			effects: [{type: "levitation", height: 20}],
 			duration: "1d4 minutes",
+		},
+		23: {
+			scope: "area",
+			effectType: "manual",
+			manualResolution: true,
+			instructions: "Resolve Cause Fear for every creature within 60 feet except the Gambler, then acknowledge the result.",
+		},
+		42: {
+			scope: "area",
+			effectType: "manual",
+			manualResolution: true,
+			instructions: "Increase magical weapon bonuses within 30 feet by +2 for 1 turn, then acknowledge the result.",
+		},
+		45: {
+			scope: "area",
+			effectType: "manual",
+			manualResolution: true,
+			instructions: "Apply the five-round hiccup effect to all creatures within 30 feet, then acknowledge the result.",
 		},
 		25: {
 			scope: "self",

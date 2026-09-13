@@ -18939,24 +18939,36 @@ class CharacterSheetState {
 		if (resolution.status === "awaiting-choice" || (resolution.status === "awaiting-confirmation" && !confirmAutomatic)) return MiscUtil.copyFast(resolution);
 		const descriptor = resolution.descriptor;
 		if (!descriptor) return null;
+		const sourceFeatureId = `gambler-table:${resolution.resolutionId}`;
+		const duration = this._resolveGamblerDuration(descriptor.duration, resolution.resolutionId);
 		if (descriptor.automation === "automatic") {
-			const sourceFeatureId = `gambler-table:${resolution.resolutionId}`;
 			if (descriptor.effectType === "condition") {
-				this.addCondition({name: descriptor.condition, source: "TGTT"});
+				this.addCondition({
+					name: descriptor.condition,
+					source: "TGTT",
+					sourceFeatureId,
+					_gamblerResolutionId: resolution.resolutionId,
+					duration: duration?.text || descriptor.duration || null,
+					roundsRemaining: duration?.rounds ?? null,
+				});
 			} else if (descriptor.effectType === "modifier") {
 				this.addNamedModifier({
 					...descriptor.modifier,
 					name: `Gambler's Folly (${descriptor.roll})`,
 					sourceFeatureId,
+					duration: duration?.text || descriptor.duration || null,
+					roundsRemaining: duration?.rounds ?? null,
 				});
 			} else if (descriptor.effectType === "activeState") {
-				this.activateState("custom", {
+				const stateId = this.activateState("custom", {
 					sourceFeatureId,
 					name: descriptor.stateName || `Gambler's Folly (${descriptor.roll})`,
 					description: descriptor.text,
-					duration: descriptor.duration,
+					duration: duration?.text || descriptor.duration,
 					customEffects: descriptor.effects || [],
 				});
+				const state = this._data.activeStates.find(state => state.id === stateId);
+				if (state && duration?.rounds != null) state.roundsRemaining = duration.rounds;
 			} else if (descriptor.effectType === "spellTransaction") {
 				resolution.spellTransaction = descriptor.transaction;
 				if (descriptor.transaction === "freeSpell") {
@@ -18998,6 +19010,45 @@ class CharacterSheetState {
 			resolution.acknowledgedAt = Date.now();
 			return MiscUtil.copyFast(resolution);
 		}
+		return MiscUtil.copyFast(resolution);
+	}
+
+	/**
+	 * Resolve a table-owned duration once, using the sheet RNG seam for dice.
+	 * The concrete result is persisted on the owned artifact so save/load and
+	 * cleanup never reroll it.
+	 * @private
+	 */
+	_resolveGamblerDuration (duration, context = "table") {
+		if (!duration || duration === "spell duration") return {text: duration || null, rounds: null};
+		const match = String(duration).match(/^(\d+)d(\d+)\s*(rounds?|minutes?|hours?)$/i);
+		if (!match) return {text: duration, rounds: CharacterSheetState.parseDurationToRounds(duration)};
+		const count = Number(match[1]);
+		const faces = Number(match[2]);
+		const unit = match[3].toLowerCase();
+		let total = 0;
+		for (let i = 0; i < count; i++) total += this._rollGamblerRandomInt(faces, `duration:${context}`);
+		const text = `${total} ${unit}`;
+		return {text, rounds: CharacterSheetState.parseDurationToRounds(text)};
+	}
+
+	/**
+	 * Persist a manual outcome as a durable sticky note rather than only
+	 * acknowledging the transient receipt.
+	 */
+	recordGamblerTableResolutionAsNote (resolutionId) {
+		const resolution = (this._data.spellcasting.gamblerPendingCastResolutions || [])
+			.find(r => r.resolutionId === resolutionId);
+		if (!resolution?.descriptor) return null;
+		const descriptor = resolution.descriptor;
+		const noteId = this.addStickyNote({
+			title: `Gambling Table ${resolution.tableRoll?.chosenRoll || resolution.tableRoll?.roll || ""}`,
+			content: `${resolution.tableRoll?.chosenEffect || resolution.tableRoll?.effect || descriptor.text}\n\n${descriptor.instructions || ""}`.trim(),
+			tab: null,
+		});
+		resolution.noteId = noteId;
+		resolution.status = "acknowledged";
+		resolution.acknowledgedAt = Date.now();
 		return MiscUtil.copyFast(resolution);
 	}
 
@@ -19090,7 +19141,7 @@ class CharacterSheetState {
 		const ix = pending.findIndex(r => r.resolutionId === resolutionId);
 		if (ix < 0) return false;
 		const resolution = pending[ix];
-		if (resolution.fortuneResourceType && !resolution.fortuneCancelled) {
+		if (resolution.fortuneResourceType && !resolution.fortuneCancelled && !resolution.fortuneResultReturned) {
 			this._restoreGamblerResource(resolution.fortuneResourceType);
 			if (resolution.bonusActionSpent) this.resetBonusAction();
 			resolution.fortuneCancelled = true;
@@ -19220,6 +19271,10 @@ class CharacterSheetState {
 				const secondDie = this._rollGamblerRandomInt(20, "extra-luck");
 				const tableRoll = this.getGamblerLastTableRoll();
 				const receipt = this.createGamblerFortuneResolution(tableRoll, "Extra Luck");
+				if (receipt) {
+					const live = this._data.spellcasting.gamblerPendingCastResolutions.find(r => r.resolutionId === receipt.resolutionId);
+					if (live) live.fortuneResultReturned = true;
+				}
 				return {
 					applied: true,
 					name: "Extra Luck",
@@ -19236,6 +19291,10 @@ class CharacterSheetState {
 				if (!this.useMasterOfFortune()) return fail;
 				const tableRoll = this.getGamblerLastTableRoll();
 				const receipt = this.createGamblerFortuneResolution(tableRoll, "Master of Fortune");
+				if (receipt) {
+					const live = this._data.spellcasting.gamblerPendingCastResolutions.find(r => r.resolutionId === receipt.resolutionId);
+					if (live) live.fortuneResultReturned = true;
+				}
 				return {
 					applied: true,
 					name: "Master of Fortune",
@@ -37463,7 +37522,13 @@ class CharacterSheetState {
 			}
 		}
 
-		return {name, source};
+		const normalized = {name, source};
+		if (condition && typeof condition === "object") {
+			for (const key of ["sourceFeatureId", "_gamblerResolutionId", "roundsRemaining", "duration"]) {
+				if (condition[key] != null) normalized[key] = condition[key];
+			}
+		}
+		return normalized;
 	}
 
 	/**
@@ -39102,6 +39167,28 @@ class CharacterSheetState {
 		const before = this._data.inventory?.length || 0;
 		this._data.inventory = (this._data.inventory || []).filter(i => !i?.item?._isGamblerWeapon);
 		if (before !== this._data.inventory.length) this._recalculateItemBonuses?.();
+		const gamblerSources = new Set(
+			(this._data.spellcasting?.gamblerCastHistory || [])
+				.concat(this._data.spellcasting?.gamblerPendingCastResolutions || [])
+				.map(r => r.resolutionId)
+				.filter(Boolean),
+		);
+		this._data.namedModifiers = (this._data.namedModifiers || []).filter(mod =>
+			!String(mod.sourceFeatureId || "").startsWith("gambler-table:"),
+		);
+		this._data.activeStates = (this._data.activeStates || []).filter(state =>
+			!String(state.sourceFeatureId || "").startsWith("gambler-table:"),
+		);
+		for (const condition of this._data.conditions || []) {
+			if (String(condition.sourceFeatureId || "").startsWith("gambler-table:")
+				|| gamblerSources.has(condition._gamblerResolutionId)) {
+				this._removeConditionEffects(condition.name, condition.source);
+			}
+		}
+		this._data.conditions = (this._data.conditions || []).filter(condition =>
+			!String(condition.sourceFeatureId || "").startsWith("gambler-table:")
+			&& !gamblerSources.has(condition._gamblerResolutionId),
+		);
 		this._data.resources = (this._data.resources || []).filter(r => !String(r.resourceType || "").startsWith("gambler"));
 		if (this._data.spellcasting) {
 			this._data.spellcasting.gamblerPendingCastResolutions = [];
@@ -52974,7 +53061,13 @@ class CharacterSheetState {
 		// Source tracking
 		if (modifier.sourceFeatureId) newModifier.sourceFeatureId = modifier.sourceFeatureId;
 		if (modifier.sourceType) newModifier.sourceType = modifier.sourceType;
-		if (modifier.duration) newModifier.duration = modifier.duration;
+		if (modifier.duration) {
+			newModifier.duration = modifier.duration;
+			if (this._data.inCombat) {
+				newModifier.roundsRemaining = CharacterSheetState.parseDurationToRounds(modifier.duration);
+			}
+		}
+		if (modifier.roundsRemaining != null) newModifier.roundsRemaining = modifier.roundsRemaining;
 		if (modifier.conditional) newModifier.conditional = modifier.conditional;
 		// Damage-type scoping for `damageReduction`. Dropping this silently widens a
 		// reduction: Heavy Armor Master authors `["bludgeoning", "piercing", "slashing"]`
@@ -62032,6 +62125,16 @@ class CharacterSheetState {
 				}
 			}
 		}
+		for (const modifier of this._data.namedModifiers || []) {
+			if (modifier.enabled && modifier.roundsRemaining == null && modifier.duration) {
+				modifier.roundsRemaining = CharacterSheetState.parseDurationToRounds(modifier.duration);
+			}
+		}
+		for (const condition of this._data.conditions || []) {
+			if (condition.roundsRemaining == null && condition.duration) {
+				condition.roundsRemaining = CharacterSheetState.parseDurationToRounds(condition.duration);
+			}
+		}
 	}
 
 	/**
@@ -62072,6 +62175,24 @@ class CharacterSheetState {
 		const expired = [];
 		const oldMax = this._data.hp.max || 0;
 		let anyExpiredHpMaxIncrease = false;
+
+		for (const modifier of this._data.namedModifiers || []) {
+			if (!modifier.enabled || modifier.roundsRemaining == null) continue;
+			modifier.roundsRemaining--;
+		}
+		this._data.namedModifiers = (this._data.namedModifiers || []).filter(modifier =>
+			modifier.roundsRemaining == null || modifier.roundsRemaining > 0,
+		);
+		for (const condition of this._data.conditions || []) {
+			if (condition.roundsRemaining != null) condition.roundsRemaining--;
+		}
+		const expiredConditions = (this._data.conditions || []).filter(condition =>
+			condition.roundsRemaining != null && condition.roundsRemaining <= 0,
+		);
+		for (const condition of expiredConditions) this._removeConditionEffects(condition.name, condition.source);
+		this._data.conditions = (this._data.conditions || []).filter(condition =>
+			condition.roundsRemaining == null || condition.roundsRemaining > 0,
+		);
 
 		for (const state of this._data.activeStates) {
 			if (!state.active) continue;

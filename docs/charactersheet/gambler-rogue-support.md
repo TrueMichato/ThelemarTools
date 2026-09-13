@@ -31,6 +31,16 @@ tables, rather than the generic third-caster progression.
 - Master of Fortune turns a natural 1 into a natural 20 and stores both
   Gambling Table rolls until the player chooses one. Pending choices survive
   save/load.
+- Automatic table effects persist their resolved duration on the owned
+  condition, named modifier, or active state. Dice durations are rolled once
+  through the per-sheet RNG seam (`1d6 rounds`, `1d3 minutes`, etc.), converted
+  to combat rounds, and expire from the normal round/rest lifecycle rather than
+  being silently treated as maximum values.
+- Every applied automatic effect is tagged with its originating
+  `gambler-table:<resolutionId>`. Removing the TGTT Gambler (including a
+  respec or disabled TGTT setting) removes those conditions, modifiers, active
+  states, pending receipts, and synthesized resources while preserving
+  unrelated user-owned state.
 
 ## Gambling Table boundary
 
@@ -39,17 +49,25 @@ All 100 published rows have canonical descriptors in
 disadvantage, initiative penalties, Light, Prone/Blinded/Invisible,
 Reduce/half-speed changes, levitation, X-ray vision, Silence, and the two
 spell transactions) use the existing condition, modifier, active-state, and
-receipt systems. Target, world, narrative, and DM-adjudicated outcomes remain
-durable manual resolutions with the published row text and explicit
-acknowledgement instructions; they are never silently discarded.
+receipt systems. Radius/creature-group outcomes are explicitly scoped as
+`area`; target, world, narrative, and DM-adjudicated outcomes remain durable
+manual resolutions with the published row text and explicit acknowledgement
+instructions. Manual outcomes can also be recorded as sticky notes through
+`recordGamblerTableResolutionAsNote()`, so recording is durable rather than
+only dismissing the receipt.
 
 Pending cast and fortune receipts are available in the Gambling Table modal,
 which exposes keyboard-labelled controls for Master of Fortune choices,
 confirmation, delayed-result resume, manual acknowledgement, application, and
-cancellation. Selecting a choice only updates the receipt; it is not shown as
-committed until the effect is applied and the receipt is committed. The receipt
-queue is persisted with the character, so closing/reopening or saving/loading
-does not lose a required choice or leave behind a UI-only acknowledgement.
+cancellation. Two-result choices use native radios in a labelled radiogroup;
+rolled values/status are announced through a polite live region, focus enters
+the dialog, and choice/action controls meet the 44px touch-target requirement.
+Selecting a choice only updates the receipt; it is not shown as committed until
+the effect is applied and the receipt is committed. Once a modified fortune
+result has been returned to its caller, cancelling a later table confirmation
+cannot refund the already-spent resource or bonus action. The receipt queue is
+persisted with the character, so closing/reopening or saving/loading does not
+lose a required choice or leave behind a UI-only acknowledgement.
 
 ## Source safety
 

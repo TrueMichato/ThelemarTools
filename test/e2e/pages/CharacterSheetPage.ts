@@ -298,7 +298,60 @@ export class CharacterSheetPage {
 		const overlay = this.page.locator(".ve-ui-modal__overlay");
 		for (let i = 0; i < maxRounds; i++) {
 			if (!await overlay.first().isVisible({timeout: 250}).catch(() => false)) return;
-			await this.page.keyboard.press("Escape").catch(() => {});
+			const dispatched = await this.page.evaluate(() => {
+				const visible = [...document.querySelectorAll(".ve-ui-modal__overlay")]
+					.filter((el: any) => getComputedStyle(el).display !== "none" && getComputedStyle(el).visibility !== "hidden");
+				const top = visible.at(-1);
+				if (!top) return false;
+				const close = top.querySelector(".cs-modal__btn-close, button[aria-label='Close'], button[title*='Close']");
+				if (close) {
+					(close as HTMLButtonElement).click();
+					return true;
+				}
+				// Some legacy modal content has no close control. Focus an input
+				// before dispatching Escape so CharacterSheetModal's guarded
+				// Escape handler recognizes the request.
+				const input = top.querySelector("input, textarea, select") as HTMLElement | null;
+				if (input) {
+					input.focus();
+					input.dispatchEvent(new KeyboardEvent("keydown", {key: "Escape", bubbles: true, cancelable: true}));
+					return true;
+				}
+				return false;
+			}).catch(() => false);
+			if (dispatched) await this.page.waitForTimeout(150);
+			if (!await overlay.first().isVisible({timeout: 250}).catch(() => false)) return;
+			// InputUiUtil prompts (used by Gambler's Folly's double-roll
+			// choice) are not CharacterSheetModal instances and therefore have
+			// no `.cs-modal__btn-close`. Cancel those prompts explicitly rather
+			// than allowing their overlay to poison later feature probes.
+			const cancel = this.page.locator(".ve-ui-modal__overlay:visible button")
+				.filter({hasText: /^\s*cancel(?:\s+cast)?\s*$/i}).last();
+			if (await cancel.isVisible({timeout: 250}).catch(() => false)) {
+				await cancel.click({timeout: 1000}).catch(() => {});
+				await this.page.waitForTimeout(150);
+				if (!await overlay.first().isVisible({timeout: 250}).catch(() => false)) return;
+			}
+			// CharacterSheetModal only treats Escape as a close request when the
+			// event originated in an input. Prefer its explicit close control so
+			// prompts opened after a probe cannot leave the overlay intercepting
+			// the next tab click.
+			const close = this.page.locator(".cs-modal__btn-close:visible").last();
+			if (await close.isVisible({timeout: 250}).catch(() => false)) {
+				await close.click({timeout: 1000}).catch(async () => {
+					// A toast can overlap the modal's close control even though the
+					// control is visible. Dispatch the same click through the DOM
+					// as a bounded fallback; this still exercises the product
+					// close handler rather than removing the overlay directly.
+					await this.page.evaluate(() => {
+						const buttons = [...document.querySelectorAll(".ve-ui-modal__overlay .cs-modal__btn-close")]
+							.filter((el: any) => el.offsetParent !== null) as HTMLButtonElement[];
+						buttons.at(-1)?.click();
+					}).catch(() => {});
+				});
+			} else {
+				await this.page.keyboard.press("Escape").catch(() => {});
+			}
 			await this.page.waitForTimeout(100);
 		}
 	}
@@ -772,14 +825,62 @@ export class CharacterSheetPage {
 	 */
 	async probeGamblerFlow (probe: "tools" | "folly" | "extraLuck" | "masterFortune" | "ui"): Promise<{ok: boolean; error?: string}> {
 		if (probe === "ui") {
-			const clicked = await this.castFirstSpellViaUi();
+			const spell = await this.ensureGamblerCastableLevel1Spell();
+			if (!spell) return {ok: false, error: "No level-1 spell was rendered for the delayed-cast lifecycle probe"};
+			const before = await this.getSpellSlots(1);
+			await this.seedGamblerRollScenario({modifierRolls: [1], betRoll: 4, tableRoll: 61});
+			// Isolate the delayed-receipt lifecycle here; the persisted choice
+			// path is covered by the dedicated state/UI tests.
+			await this.setGamblerMasterOfFortuneProbeDisabled(true);
+			const clicked = await this.castSpellByNameViaUi(spell);
+			if (!clicked) {
+				await this.setGamblerMasterOfFortuneProbeDisabled(false);
+				return {ok: false, error: `No rendered Cast control for ${spell}`};
+			}
+			await this.resolveGamblerTableRollViaUi("Apply result", true);
+			await this.setGamblerMasterOfFortuneProbeDisabled(false);
+			await this.switchToTab(this.tabSpells);
 			await this.page.waitForTimeout(250);
+			const pending = await this.getPendingGamblerReceipts();
+			const delayed = pending.find(it => it.status === "delayed");
+			const afterSpend = await this.getSpellSlots(1);
+			const banner = this.page.locator(".charsheet__gambler-open-receipts");
+			const bannerVisible = await banner.isVisible().catch(() => false);
+			if (!delayed || afterSpend.current !== before.current - 1 || (!bannerVisible && pending.length === 0)) {
+				await this.dismissTransientModals();
+				return {ok: false, error: `Delayed receipt lifecycle failed: spell=${spell} clicked=${clicked} before=${before.current} after=${afterSpend.current} pending=${JSON.stringify(pending)} banner=${bannerVisible}`};
+			}
+			await this.openGamblingTableViaUi();
+			await this.clickGamblerReceiptAction("resume-delayed-result", delayed.resolutionId);
+			await this.page.waitForTimeout(250);
+			const finished = await this.getPendingGamblerReceipts();
+			const afterResume = await this.getSpellSlots(1);
 			const toastText = await this.page.locator(".toast").allTextContents().catch(() => []);
-			const rendered = toastText.some(it => /cast /i.test(it));
+			const rendered = toastText.some(it => new RegExp(spell, "i").test(it));
 			await this.dismissTransientModals();
 			return {
-				ok: clicked && rendered,
-				error: clicked ? `No rendered cast result toast found: ${toastText.join(" | ")}` : "No spell cast button was available",
+				ok: finished.length === 0 && afterResume.current === afterSpend.current && rendered,
+				error: `Delayed resume result: pending=${JSON.stringify(finished)} slots=${afterSpend.current}->${afterResume.current} toasts=${toastText.join(" | ")}`,
+			};
+		}
+		if (probe === "folly") {
+			const spell = await this.ensureGamblerCastableLevel1Spell();
+			if (!spell) return {ok: false, error: "No level-1 spell was rendered for the preserve-slot lifecycle probe"};
+			const before = await this.getSpellSlots(1);
+			await this.seedGamblerRollScenario({modifierRolls: [1], betRoll: 4, tableRoll: 49});
+			const clicked = await this.castSpellByNameViaUi(spell);
+			await this.resolveGamblerTableRollViaUi(undefined, true);
+			await this.switchToTab(this.tabSpells);
+			await this.page.waitForTimeout(300);
+			const after = await this.getSpellSlots(1);
+			const pending = await this.getPendingGamblerReceipts();
+			const toastText = await this.page.locator(".toast").allTextContents().catch(() => []);
+			const preserveAnnounced = toastText.some(it => /49|preserve|lost/i.test(it))
+				|| after.current === before.current;
+			await this.dismissTransientModals();
+			return {
+				ok: clicked && after.current === before.current && pending.length === 0 && preserveAnnounced,
+				error: `Preserve result: clicked=${clicked} slots=${before.current}->${after.current} pending=${JSON.stringify(pending)} toasts=${toastText.join(" | ")}`,
 			};
 		}
 		const result = await this.page.evaluate(async kind => {
@@ -794,16 +895,6 @@ export class CharacterSheetPage {
 					}) || [];
 					return {ok: /half cover/i.test(JSON.stringify(notes)), error: `rider notes: ${JSON.stringify(notes)}`};
 				}
-				if (kind === "folly") {
-					state.setGamblerRollScenario?.({modifierRolls: [1, 1], betRoll: 4, tableRoll: 49});
-					const receipt = state.createGamblerCastResolution?.({
-						spell: {id: "e2e-gambler", name: "E2E Gambler Spell"},
-						slotLevel: 1,
-					});
-					const good = receipt?.bet?.won === false && receipt?.tableRoll?.chosenRoll === 49;
-					if (receipt?.resolutionId) state.cancelGamblerCastResolution?.(receipt.resolutionId);
-					return {ok: !!good};
-				}
 				if (kind === "extraLuck") {
 					state.resetBonusAction?.();
 					const before = state.getExtraLuckUses?.()?.remaining ?? 0;
@@ -813,12 +904,12 @@ export class CharacterSheetPage {
 						: null;
 					const pending = state.getPendingGamblerCastResolutions?.() || [];
 					pending.forEach((it: any) => state.cancelGamblerCastResolution?.(it.resolutionId));
-					state.resetBonusAction?.();
 					const after = state.getExtraLuckUses?.()?.remaining ?? before;
 					const ok = offers.some((it: any) => it.id === "gamblerExtraLuck")
 						&& result?.applied === true
-						&& after === before
-						&& state.isBonusActionAvailable?.() === true;
+						&& after === before - 1
+						&& state.isBonusActionAvailable?.() === false;
+					state.resetBonusAction?.();
 					return {
 						ok,
 						error: ok ? undefined : `before=${before} after=${after} offers=${JSON.stringify(offers)} result=${JSON.stringify(result)}`,
@@ -851,6 +942,194 @@ export class CharacterSheetPage {
 		if (!await castButton.isVisible().catch(() => false)) return false;
 		await castButton.click();
 		return true;
+	}
+
+	/**
+	 * Click the rendered Cast control for a named leveled spell. This is the
+	 * browser-facing Gambler entry point; deterministic RNG is seeded separately,
+	 * but the cast itself always travels through the delegated DOM handler.
+	 */
+	async castSpellByNameViaUi (spellName: string): Promise<boolean> {
+		await this.switchToTab(this.tabSpells);
+		const row = this.page.locator(".charsheet__spell-item").filter({
+			has: this.page.locator(".charsheet__spell-item-name").filter({hasText: new RegExp(`^\\s*${spellName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i")}),
+		}).first();
+		const castButton = row.locator(".charsheet__spell-cast").first();
+		if (!await castButton.isVisible().catch(() => false)) return false;
+		await castButton.click();
+		return true;
+	}
+
+	async getPendingGamblerReceipts (): Promise<Array<{resolutionId: string; status: string; slotTransaction?: string; spellName?: string}>> {
+		return this.page.evaluate(() => {
+			const pending = (globalThis as any).charSheet?._state?.getPendingGamblerCastResolutions?.() || [];
+			return pending.map((receipt: any) => ({
+				resolutionId: receipt.resolutionId,
+				status: receipt.status,
+				slotTransaction: receipt.slotTransaction,
+				spellName: receipt.spellName,
+			}));
+		});
+	}
+
+	async seedGamblerRollScenario (scenario: {modifierRolls?: number[]; betRoll?: number; tableRoll?: number}): Promise<void> {
+		await this.page.evaluate((value) => {
+			(globalThis as any).charSheet?._state?.setGamblerRollScenario?.(value);
+		}, scenario);
+	}
+
+	async setGamblerMasterOfFortuneProbeDisabled (disabled: boolean): Promise<void> {
+		await this.page.evaluate((isDisabled) => {
+			const state: any = (globalThis as any).charSheet?._state;
+			if (!state) return;
+			if (isDisabled) {
+				if (state.__gamblerProbeOriginalFeatureCalculations) return;
+				state.__gamblerProbeOriginalFeatureCalculations = state.getFeatureCalculations;
+				const original = state.__gamblerProbeOriginalFeatureCalculations;
+				state.getFeatureCalculations = function (...args: any[]) {
+					const calculations = original.apply(this, args);
+					return {...calculations, hasMasterOfFortune: false};
+				};
+				return;
+			}
+			if (state.__gamblerProbeOriginalFeatureCalculations) {
+				state.getFeatureCalculations = state.__gamblerProbeOriginalFeatureCalculations;
+				delete state.__gamblerProbeOriginalFeatureCalculations;
+			}
+		}, disabled);
+	}
+
+	async ensureGamblerPreparedSpellsViaUi (): Promise<void> {
+		await this.switchToTab(this.tabSpells);
+		const roll = this.page.locator(".charsheet__gambler-roll-btn-inline").first();
+		if (await roll.isVisible().catch(() => false)) {
+			await roll.click();
+			await this.page.waitForTimeout(250);
+		}
+	}
+
+	async ensureGamblerCastableLevel1Spell (): Promise<string | null> {
+		await this.ensureGamblerPreparedSpellsViaUi();
+		const existing = (await this.getKnownSpellsByLevel())[1]?.[0];
+		if (existing) return existing;
+
+		// Some MEGA builds reach the Gambler subclass before the signature-spell
+		// picker has populated a leveled spell. Seed one in the live character
+		// runtime as test setup, then perform the cast through the real rendered
+		// Cast control below. This keeps the lifecycle assertion about actual
+		// browser behavior while avoiding a fragile, unrelated picker modal.
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			const spellData = cs?._spells?._allSpells?.find((it: any) => it.level === 1 && it.name === "Shield")
+				|| cs?._spells?._allSpells?.find((it: any) => it.level === 1 && it.name === "Hex")
+				|| cs?._spells?._allSpells?.find((it: any) => it.level === 1);
+			if (!spellData || !state?.addSpell) return null;
+			state.addSpell({
+				name: spellData.name,
+				source: spellData.source,
+				level: spellData.level,
+				school: spellData.school,
+				prepared: true,
+				ritual: !!spellData.ritual,
+				concentration: !!spellData.concentration,
+				castingTime: spellData.time?.[0] ? `${spellData.time[0].number || 1} ${spellData.time[0].unit || "action"}` : "1 action",
+				range: "Self",
+				components: spellData.components || {},
+				duration: spellData.duration || [],
+				sourceFeature: "Spells Known",
+				sourceClass: "Gambler",
+				sourceSubclass: "Gambler",
+			});
+			const spell = state.getSpells?.().find((it: any) => it.level === 1);
+			if (!spell) return null;
+			spell.prepared = true;
+			cs?._spells?._renderSpellList?.();
+			cs?._spells?._renderSpellTrackingUI?.();
+			return spell.name || null;
+		});
+	}
+
+	async openGamblingTableViaUi (): Promise<void> {
+		await this.switchToTab(this.tabSpells);
+		await this.page.locator("#charsheet-tab-spells").waitFor({state: "visible", timeout: 5000}).catch(() => {});
+		const button = this.page.locator(".charsheet__gambler-open-receipts, .btn-open-gambling-table").last();
+		if (await button.isVisible().catch(() => false)) {
+			await button.click();
+		} else {
+			// The feature-matrix runner can repaint the spell list while its
+			// tab is still hidden. Fall back to the same live modal controller
+			// used by the rendered button, preserving the real receipt UI path.
+			await this.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				void cs?._spells?._pOpenGamblingTableModal?.();
+			});
+		}
+		await this.page.locator(".ve-ui-modal__inner:visible").last().waitFor({state: "visible", timeout: 5000});
+	}
+
+	async resolveGamblerTableRollViaUi (promptText?: string, applyReady = false): Promise<void> {
+		const prompt = promptText
+			? this.page.locator("button.ve-btn").filter({hasText: new RegExp(`^\\s*${promptText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i")}).last()
+			: null;
+		if (prompt && await prompt.isVisible().catch(() => false)) {
+			await prompt.click();
+			await this.page.waitForTimeout(500);
+			return;
+		}
+		// Gambler's Folly can open an InputUiUtil choice/confirmation prompt
+		// immediately after the cast when Master of Fortune supplied two table
+		// results. Resolve that real prompt before touching the reference-table
+		// modal; otherwise its overlay intercepts every subsequent tab action.
+		const activePrompt = this.page.locator(".ve-ui-modal__overlay:visible").last();
+		const choice = activePrompt.locator("select:visible").last();
+		if (await choice.isVisible({timeout: 250}).catch(() => false)) {
+			await choice.selectOption({index: 1});
+			await activePrompt.getByRole("button", {name: /^OK$/i}).click();
+			await this.page.waitForTimeout(250);
+			if (applyReady) {
+				const applyPrompt = this.page.getByRole("button", {name: /^Apply result$/i}).last();
+				await applyPrompt.waitFor({state: "visible", timeout: 3000});
+				await applyPrompt.click();
+			}
+			await this.page.locator(".ve-ui-modal__overlay:visible").last().waitFor({state: "hidden", timeout: 2000}).catch(() => {});
+			await this.page.waitForTimeout(500);
+			return;
+		}
+		const applyPrompt = activePrompt.getByRole("button", {name: /^Apply result$/i});
+		if (applyReady && await applyPrompt.isVisible({timeout: 250}).catch(() => false)) {
+			await applyPrompt.click();
+			await this.page.locator(".ve-ui-modal__overlay:visible").last().waitFor({state: "hidden", timeout: 2000}).catch(() => {});
+			await this.page.waitForTimeout(500);
+			return;
+		}
+		await this.openGamblingTableViaUi();
+		const modal = this.page.locator(".ve-ui-modal__inner:visible").last();
+		await modal.locator(".btn-gambler-modal-roll").click();
+		await this.page.waitForTimeout(200);
+		await this.page.keyboard.press("Escape").catch(() => {});
+		await this.page.waitForTimeout(150);
+		await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			cs?._spells?._renderSpellList?.();
+		});
+		if (applyReady) {
+			await this.openGamblingTableViaUi();
+			const receiptModal = this.page.locator(".ve-ui-modal__inner:visible").last();
+			const apply = receiptModal.locator("[data-gambler-action='apply']").last();
+			if (await apply.isVisible().catch(() => false)) await apply.click();
+		}
+		await this.page.waitForTimeout(200);
+	}
+
+	async clickGamblerReceiptAction (action: string, resolutionId?: string): Promise<void> {
+		const selector = resolutionId
+			? `[data-gambler-action="${action}"][data-resolution-id="${resolutionId}"]`
+			: `[data-gambler-action="${action}"]`;
+		const button = this.page.locator(selector).last();
+		await button.waitFor({state: "visible", timeout: 5000});
+		await button.click();
+		await this.page.waitForTimeout(200);
 	}
 
 	// ========== SHEET-USAGE HELPERS (Phase 2) ==========

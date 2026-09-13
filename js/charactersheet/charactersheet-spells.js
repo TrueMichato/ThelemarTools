@@ -309,6 +309,12 @@ class CharacterSheetSpells {
 			this._castSpell(spellId, {withMetamagic: false, decision: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true}});
 		});
 
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			const btn = e.target.closest(".charsheet__gambler-open-receipts");
+			if (!btn) return;
+			void this._pOpenGamblingTableModal();
+		});
+
 		// Cast w/ Metamagic button (offers the active-metamagic picker before casting — the one
 		// path that legitimately needs slot/upcast + metamagic selection, plus the optional
 		// Feywild Shard discharge toggle when a shard is attuned)
@@ -578,7 +584,14 @@ class CharacterSheetSpells {
 		// Gambler is a TGTT Rogue subclass, not a reusable name-only caster
 		// progression. Reject same-named entries before honoring persisted
 		// casterProgression data.
-		if (classInfo?.subclass?.name === "Gambler" && this._state._isGamblerClassEntry?.(classInfo) !== true) return 0;
+		if (String(classInfo?.subclass?.name || "").toLowerCase() === "gambler") {
+			const isCanonicalGambler = String(classInfo?.name || "").toLowerCase() === "rogue"
+				&& String(classInfo?.source || "").toUpperCase() === "TGTT"
+				&& String(classInfo?.subclass?.source || "").toUpperCase() === "TGTT"
+				&& this._state.getSettings?.().enableTgtt !== false
+				&& this._state._isGamblerClassEntry?.(classInfo) === true;
+			if (!isCanonicalGambler) return 0;
+		}
 
 		// Get the per-class level (not total character level) for spell level limits
 		const classLevel = this._state.getClassLevel(classInfo.name) || characterLevel;
@@ -4640,7 +4653,8 @@ class CharacterSheetSpells {
 				};
 				let renderReceiptActions;
 				const addButton = (label, handler, cls = "btn-default") => {
-					const btn = e_({outer: `<button type="button" class="btn btn-xs ${cls}">${label}</button>`});
+					const action = label.toLowerCase().replace(/\s+/g, "-");
+					const btn = e_({outer: `<button type="button" class="btn btn-xs ${cls}" data-gambler-action="${action}" data-resolution-id="${receipt.resolutionId}">${label}</button>`});
 					btn.addEventListener("click", async () => {
 						btn.disabled = true;
 						const result = await handler();
@@ -4676,6 +4690,7 @@ class CharacterSheetSpells {
 								? this._state.commitGamblerCastResolution?.(current.resolutionId)
 								: null;
 						}, "btn-primary");
+						addButton("Record as note", () => this._state.recordGamblerTableResolutionAsNote?.(current.resolutionId), "btn-default");
 					} else if (current.status === "ready" && current.descriptor?.automation === "automatic") {
 						addButton("Apply", () => {
 							const applied = this._state.applyGamblingTableResolution?.(current.resolutionId, {confirmAutomatic: true});
@@ -4699,7 +4714,7 @@ class CharacterSheetSpells {
 			<div class="mb-3 p-2" style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px;">
 				<div class="ve-flex-v-center" style="gap: 12px;">
 					<button type="button" class="btn btn-sm btn-warning btn-gambler-modal-roll" style="font-weight: 600; min-width: 120px;">\u{1F3B2} Roll d100</button>
-					<div class="gambler-roll-result" style="font-size: 1.05em; line-height: 1.4;"></div>
+					<div class="gambler-roll-result" aria-live="polite" role="status" style="font-size: 1.05em; line-height: 1.4;"></div>
 				</div>
 				<div class="gambler-roll-choice mt-2" style="display: none;"></div>
 			</div>
@@ -4708,6 +4723,7 @@ class CharacterSheetSpells {
 
 		const resultDisplay = rollSection.querySelector(".gambler-roll-result");
 		const choiceDisplay = rollSection.querySelector(".gambler-roll-choice");
+		rollSection.querySelector(".btn-gambler-modal-roll")?.focus();
 
 		const highlightRow = (/** @type {number} */ roll) => {
 			tableBody.querySelectorAll("tr.table-warning").forEach(el => { el.classList.remove("table-warning"); el.style.removeProperty("background"); });
@@ -4746,17 +4762,18 @@ class CharacterSheetSpells {
 			choiceDisplay.style.display = "";
 			choiceDisplay.innerHTML = `
 				<div class="ve-small mb-1"><span class="text-info">\u{1F3B2} <b>Master of Fortune</b> \u2014 you rolled twice. Choose which result applies:</span></div>
-				<div class="ve-flex" style="gap: 8px; flex-wrap: wrap;">
+				<div class="gambler-choice-radiogroup" role="radiogroup" aria-label="Gambling Table result choice">
 					${options.map(o => `
-						<button type="button" class="btn btn-xs ${chosenRoll === o.roll && !result.needsChoice ? "btn-primary" : "btn-default"} btn-gambler-choose" data-which="${o.which}" style="text-align: left; max-width: 100%; white-space: normal;">
-							<b>${o.roll}</b> \u2014 ${o.effect}
-						</button>
+						<label class="gambler-choice-option">
+							<input type="radio" name="gambler-table-choice" value="${o.which}" ${chosenRoll === o.roll && !result.needsChoice ? "checked" : ""}>
+							<span><b>${o.roll}</b> \u2014 ${o.effect}</span>
+						</label>
 					`).join("")}
 				</div>
 			`;
-			choiceDisplay.querySelectorAll(".btn-gambler-choose").forEach(btn => {
-				btn.addEventListener("click", () => {
-					const which = parseInt(btn.getAttribute("data-which"), 10);
+			choiceDisplay.querySelectorAll("input[type=radio]").forEach(input => {
+				input.addEventListener("change", () => {
+					const which = parseInt(input.value, 10);
 					const chosen = receiptId
 						? this._state.chooseGamblerTableResult?.(receiptId, which)
 						: this._state.chooseGamblingTableResult?.(which);
@@ -4764,6 +4781,7 @@ class CharacterSheetSpells {
 					void this._page?._saveCurrentCharacter?.();
 				});
 			});
+			choiceDisplay.querySelector("input[type=radio]")?.focus();
 		};
 
 		rollSection.querySelector(".btn-gambler-modal-roll").addEventListener("click", () => {
@@ -7349,6 +7367,17 @@ class CharacterSheetSpells {
 		container.classList?.add(`charsheet__spell-lists--${viewMode}-mode`);
 
 		container.innerHTML = "";
+
+		const pendingGamblerReceipts = this._state.getPendingGamblerCastResolutions?.() || [];
+		if (pendingGamblerReceipts.length) {
+			const pendingPanel = e_({outer: `
+				<section class="charsheet__gambler-pending-panel ve-flex-v-center mb-2" aria-live="polite">
+					<span class="mr-2">🎲 ${pendingGamblerReceipts.length} pending Gambling Table resolution${pendingGamblerReceipts.length === 1 ? "" : "s"}</span>
+					<button type="button" class="ve-btn ve-btn-sm ve-btn-primary charsheet__gambler-open-receipts">Review Gambling Table</button>
+				</section>
+			`});
+			container.append(pendingPanel);
+		}
 
 		// Render innate spells first (from features/feats)
 		this._renderWizardCapstonePanel(container);

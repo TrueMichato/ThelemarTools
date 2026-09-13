@@ -89,6 +89,12 @@ go through the shared PHB multiclass table, as the rules require.
 (keyed `"<subclassShortName>|<source>"` lowercased) for saves whose stored
 subclass predates `subclassTableGroups` persistence.
 
+The TGTT Gambler is an important source-gating case: `CharacterSheetSpells`
+accepts its third-caster progression only for a TGTT Rogue with a TGTT
+Gambler subclass while TGTT is enabled. Matching the name `Gambler` alone is
+not sufficient, which prevents unrelated homebrew data from acquiring the
+Gambler slot grid or prepared-spell behavior.
+
 ### Multiclass Slot Calculation
 
 ```javascript
