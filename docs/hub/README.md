@@ -5,9 +5,9 @@ Signed-out character sheets, homebrew, and DM screens remain supported and do no
 
 > **Implementation:** Coordinated implementation program complete through merged PR #253
 > **Deployment:** Release `hub-staging-2026-09-10-r7` at
-> `77d955c053dcdfe949235620db93f7eba477af34` is live on private Oracle staging; recovery/rollback proof passed,
-> while first scheduled daily timer evidence and the physical one-DM/two-player game day remain gated
-> **Last verified:** 2026-09-12
+> `77d955c053dcdfe949235620db93f7eba477af34` is live on private Oracle staging; V1-G1 operations and
+> recovery proof passed, while the physical one-DM/two-player game day remains gated
+> **Last verified:** 2026-09-13
 > **Owner:** Campaign Hub maintainers
 
 ## Start here

@@ -2,7 +2,7 @@
 
 > **Status:** Current implementation reference
 > **Scope:** Repository implementation through PR #253; deployed Oracle baseline identified separately
-> **Last verified:** 2026-09-12
+> **Last verified:** 2026-09-13
 > **Owner:** Campaign Hub maintainers
 
 This document describes what exists in the repository. It is not the delivery plan, and repository implementation
@@ -272,7 +272,6 @@ limits, and WebSocket context; live ingress spoofing evidence is still required.
 
 Phase 6G is complete for release `hub-staging-2026-09-10-r7` at
 `77d955c053dcdfe949235620db93f7eba477af34`. Its manual operations, off-machine backup, authenticated restore,
-RPO/RTO, exact-r6 rollback, and exact-r7 return are proven. Before expanding the allowlist, finish V1-G1's first
-genuine daily maintenance/backup timer evidence, then execute V1-G2's
-[one-DM/two-player game day](runbooks/private-game-day.md) and explicit go/no-go in the
-[living roadmap](roadmap.md).
+RPO/RTO, exact-r6 rollback, exact-r7 return, and genuine scheduled maintenance/backup executions are proven.
+V1-G1 is complete. Before expanding the allowlist, execute V1-G2's
+[one-DM/two-player game day](runbooks/private-game-day.md) and explicit go/no-go in the [living roadmap](roadmap.md).

@@ -1,6 +1,6 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-09-12
+> **Last updated:** 2026-09-13
 > **Owner:** Campaign Hub maintainers
 
 ## Status
@@ -9,17 +9,15 @@ Private invite-only V1 release `hub-staging-2026-09-10-r7` at
 `77d955c053dcdfe949235620db93f7eba477af34` is deployed on the reused, Hub-only Oracle Always Free ARM
 instance. Foundry was intentionally decommissioned and is not a release prerequisite. The same-origin HTTPS,
 GitHub OAuth, PostgreSQL, static site, BFF, API, and WebSocket checks pass. Phase 6G deployment and the
-authenticated recovery/rollback portion of V1-G1 are complete. V1-G1 still requires the first genuine daily
-maintenance and backup timer evidence; the physical one-DM/two-player game day remains V1-G2. Semi-public
-onboarding remains intentionally disabled.
+authenticated recovery/rollback and genuine scheduled-operations evidence for V1-G1 are complete. The physical
+one-DM/two-player game day remains V1-G2. Semi-public onboarding remains intentionally disabled.
 
 Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecycle administration, Phase 6C
 migration management, Phase 6D portable deployment, Phase 6E operations, Phase 6F CI/real-stack integration,
 and Phase 6G Oracle deployment are complete.
 
 All 59 planned implementation todos in the coordinating program are complete. The only remaining V1 evidence is
-the first genuine scheduled maintenance/backup timer execution for V1-G1, followed by V1-G2's physical
-one-DM/two-player game day and explicit private-launch go/no-go.
+V1-G2's physical one-DM/two-player game day and explicit private-launch go/no-go.
 
 The first `t7-auth-providers` layer provides migration 0006, provider-neutral identity/session provenance,
 durable one-time OAuth transactions, and the validated registry. Layer 2 adds production Discord OAuth and
@@ -107,9 +105,9 @@ logs, SLO/alert catalog, AES-256-GCM backup/restore, dedicated backup/evidence r
 rollback/outage/outbox/rotation/incident runbooks. Real cleanup, singleton lock, role boundaries, tamper
 failure, encrypted backup/restore, evidence-age metrics, and OAuth log sanitization were drilled. On Oracle,
 manual jobs, external heartbeat/failure signaling, off-machine copying, authenticated isolated restore,
-continuous RPO/RTO, exact-r6 compatibility, exact-r7 return, and exact cleanup passed on 2026-09-12. Only the
-first genuine daily maintenance/backup timer executions remain for V1-G1; managed PITR is intentionally not
-part of the Oracle free-tier design.
+continuous RPO/RTO, exact-r6 compatibility, exact-r7 return, and exact cleanup passed on 2026-09-12. Genuine
+scheduled maintenance and backup executions passed on 2026-09-13, completing V1-G1; managed PITR is
+intentionally not part of the Oracle free-tier design.
 
 Phase 6F adds a pinned-action Hub pull-request workflow, deterministic install/lint/test/migration/supply-chain
 gates, exact-image export with Node/image SBOMs and provenance, production-excluded synthetic authentication
@@ -287,11 +285,11 @@ rewritten into a current whole-repository baseline. The latest merged handoffs a
 - Semi-public moderation, self-service recovery, billing, and legal/privacy publication are not enabled.
 - Private V1 supports one BFF replica and therefore no multi-replica application HA.
 
-## Remaining V1 gates
+## V1 gates
 
-1. **Host-operations proof:** observe the first genuine daily maintenance and backup timer executions. Installation,
-   manual drills, five-minute monitoring, encrypted off-machine backup, authenticated isolated restore, continuous
-   RPO/RTO, exact-r6 rollback, exact-r7 return, and exact cleanup already passed on 2026-09-12.
+1. **Host-operations proof — complete:** installation, manual drills, five-minute monitoring, encrypted
+   off-machine backup, authenticated isolated restore, continuous RPO/RTO, exact-r6 rollback, exact-r7 return,
+   exact cleanup, and the first genuine scheduled maintenance/backup executions passed by 2026-09-13.
 2. **Physical game day:** execute the [private one-DM/two-player runbook](runbooks/private-game-day.md) with real
    GitHub OAuth and physical devices, then make an explicit go/no-go decision.
 

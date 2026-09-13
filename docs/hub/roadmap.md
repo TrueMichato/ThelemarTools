@@ -1,7 +1,7 @@
 # Campaign Hub living roadmap
 
 > **Status:** Authoritative living roadmap
-> **Last reviewed:** 2026-09-12
+> **Last reviewed:** 2026-09-13
 > **Owner:** Campaign Hub maintainers
 
 This is the single source of truth for Campaign Hub delivery status, sequencing, dependencies, and acceptance
@@ -34,8 +34,8 @@ rather than inferring deployment or enablement from merged code.
 | **shipped** | V2-T2 projection/privacy foundation | Authorization-scoped projection storage, fetch, invalidation, sharing controls, and privacy tests are implemented |
 | **shipped** | V2-T5 whole-site campaign context | Device-scoped selection, cross-tab convergence, temporary rules/brew activation, and ordered teardown are implemented |
 | **shipped** | V2-T9 Campaign Overview redesign | The pinned session brief, role-specific continuation action, preserved workbench, responsive/accessibility coverage, and authority hardening are merged in PR #243 |
-| **active** | V1 external Oracle host-operations proof | Manual maintenance/backup, five-minute external monitoring, off-machine backup, authenticated isolated restore, RPO/RTO, exact-r6 rollback, exact-r7 return, and cleanup passed on 2026-09-12; first genuine daily maintenance/backup timer executions remain |
-| **active** | V1 physical game day | Blocked on the final scheduled-timer evidence in V1-G1; then execute the [one-DM/two-player runbook](runbooks/private-game-day.md) on physical devices and record the go/no-go |
+| **shipped** | V1 external Oracle host-operations proof | Manual and genuine scheduled maintenance/backup, five-minute external monitoring, off-machine backup, authenticated isolated restore, RPO/RTO, exact-r6 rollback, exact-r7 return, cleanup, and zero-disruption identity checks passed by 2026-09-13 |
+| **active** | V1 physical game day | V1-G1 is complete; execute the [one-DM/two-player runbook](runbooks/private-game-day.md) on physical devices and record the go/no-go |
 | **active** | V2-T4 party inventory, carry, and item awards | Player stash/direct-transfer and DM atomic-award slices are implemented, with shared carry summaries and enforced carry/content boundaries; broader unified party/DM inventory UX remains |
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
 | **active** | V2-T7 player targeting | The one-player PHB/XPHB Cure Wounds slice is implemented; broader spells, abilities, resources, party/multi-target, and NPC/monster targeting remain |
@@ -48,11 +48,11 @@ changes are not target-environment evidence until separately reviewed, tagged, a
 
 ## V1 launch closeout
 
-Phase 6G is complete. V1 has exactly two remaining launch gates; neither is an implementation phase.
-These are rollout/operations gates in parallel with V2 engineering. They gate expansion of the private pilot,
-not implementation or merging of independently safe V2 work.
+Phase 6G and V1-G1 are complete. V1 has one remaining launch gate: the physical game day and explicit
+private-launch go/no-go. This rollout gate proceeds in parallel with V2 engineering and gates expansion of the
+private pilot, not implementation or merging of independently safe V2 work.
 
-### V1-G1 — host-operations proof (**active — scheduled execution evidence remains**)
+### V1-G1 — host-operations proof (**complete 2026-09-13**)
 
 Scope:
 
@@ -88,15 +88,24 @@ Evidence completed on 2026-09-12:
 - exact preserved-r6 application reads passed on schema `0007`, followed by exact-r7 return;
 - every disposable recovery resource and temporary credential was removed without changing production identities.
 
-Remaining evidence: observe the first genuine daily maintenance and backup timer executions after their scheduled
-windows, including journals, operational rows, archive evidence, timer state, and monitor health. Do not close
-V1-G1 from manual starts or the five-minute monitor alone.
+Final scheduled evidence completed on 2026-09-13:
+
+- the maintenance timer triggered at `01:22:40Z`; one non-skipped service invocation produced one succeeded
+  operational row at `01:22:41.800835Z`;
+- the backup timer triggered at `02:28:07Z`; one service invocation produced one succeeded operational row and
+  `hub-20260913T022807Z.dump.enc`;
+- the archive is 139,953 bytes, mode `0600`, owned by `ubuntu:ubuntu`, starts with `HUBENC1`, and has SHA-256
+  `997c70f3c67e762422764203a3ab73582c2e6782a5b23ec2c4e5d51b7ca90816`;
+- the next daily timer schedules were present, Healthchecks monitoring succeeded, migrations remained exactly
+  `0001`-`0007`, and the exact r7 DB/BFF/static/edge containers remained running with zero restarts.
+
+V1-G1 is complete. Continue normal scheduled observation; do not treat this evidence as permission to skip
+future failures or freshness policies.
 
 ### V1-G2 — physical one-DM/two-player game day (**active**)
 
-Dependency: V1-G1 must pass first so the session is protected by proven scheduled operations and recovery
-procedures. Execute [the private game-day runbook](runbooks/private-game-day.md); its existence is not evidence
-that V1-G2 has run.
+Dependency: V1-G1 passed on 2026-09-13, so this gate is unblocked. Execute
+[the private game-day runbook](runbooks/private-game-day.md); its existence is not evidence that V1-G2 has run.
 
 Scope:
 
@@ -121,10 +130,10 @@ pass. V2 engineering does not wait for V1-G1, V1-G2, or the V1 go/no-go. A train
 V2 work, and merging a train does not silently enable it.
 
 V2-T0's implementation is shipped and remains the first operational foundation. Its live Oracle
-dry-run/release and induced-failure evidence passed during r7 qualification. The first genuine scheduled daily
-maintenance and backup executions remain part of V1-G1 and must pass before any new V2 product capability is
-enabled on Oracle. That enablement gate does not block T2 implementation or independently safe feature code
-from being reviewed and merged behind disabled capability gates.
+dry-run/release and induced-failure evidence passed during r7 qualification. Genuine scheduled daily
+maintenance and backup executions passed on 2026-09-13, completing V1-G1. V2 product enablement remains
+subject to each train's own acceptance criteria and the private-launch go/no-go; independently safe feature
+code can still be reviewed and merged behind disabled capability gates.
 
 Every train must:
 
@@ -157,7 +166,7 @@ Purpose: make the exact source-to-Oracle promotion and rollback path repeatable 
 
 Implementation shipped in [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219). The live Oracle
 path subsequently promoted annotated r7, preserved the prior exact application images, and produced redacted
-release evidence. V1-G1 remains active only for the first genuine daily maintenance/backup timer observations.
+release evidence. Genuine daily maintenance/backup timer observations completed V1-G1 on 2026-09-13.
 
 Deliver:
 

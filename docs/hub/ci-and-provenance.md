@@ -1,7 +1,7 @@
 # Campaign Hub CI, test boundary, and artifact provenance
 
 > **Status:** Implemented for Phase 6F; tagged Oracle promotion deployed
-> **Last verified:** 2026-09-12
+> **Last verified:** 2026-09-13
 > **Owner:** Campaign Hub maintainers
 
 ## Workflow contract
@@ -10,8 +10,8 @@
 a full reviewed commit SHA. Deployment remains intentionally absent from this workflow. Phase 6G deployed a
 verified git tag to the ARM Oracle host under ADR 0008/0010. V2-T0 protected release automation shipped in
 [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219). The r7 live Oracle release and induced-failure
-proof passed; only the first genuine scheduled daily maintenance and backup executions remain for V1-G1.
-Expansion stays disabled until the V1 go/no-go.
+proof passed. Genuine scheduled maintenance and backup executions passed on 2026-09-13, completing V1-G1.
+Expansion stays disabled until the V1 physical game day and go/no-go.
 
 | Job | Gates | Failure owner |
 |---|---|---|

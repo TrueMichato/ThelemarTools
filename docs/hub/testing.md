@@ -1,7 +1,7 @@
 # Campaign Hub testing guide
 
 > **Status:** Current automated and real-stack coverage plus managed-staging gates
-> **Last verified:** 2026-09-06
+> **Last verified:** 2026-09-13
 > **Owner:** Campaign Hub maintainers
 
 ## Test layers
@@ -109,9 +109,10 @@ self-target combined writes, capability skew, per-leg dedupe, and privacy-shaped
 
 Annotated release `hub-staging-2026-09-10-r7` is deployed. Its real-host release, manual operations,
 Healthchecks.io signals, encrypted off-machine backup, authenticated isolated restore, continuous RPO/RTO,
-exact-r6 rollback, exact-r7 return, and exact cleanup passed on 2026-09-12. V1-G1 still requires the first
-genuine daily maintenance and backup timer executions; a manual service start or synthetic CI run cannot
-substitute for that wall-clock evidence. V1-G2 remains blocked on V1-G1 and requires the physical
+exact-r6 rollback, exact-r7 return, and exact cleanup passed on 2026-09-12. Genuine scheduled maintenance and
+backup executions then passed on 2026-09-13 with one succeeded operational row each, verified
+archive/heartbeat evidence, exact production identities, zero restarts, and migrations `0001`-`0007`.
+V1-G1 is complete. V1-G2 now requires the physical
 [one-DM/two-player game day](runbooks/private-game-day.md).
 
 ## Evidence record

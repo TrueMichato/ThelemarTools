@@ -1,7 +1,7 @@
 # Runbook: Oracle host operations for the Campaign Hub
 
-> **Status:** Release r7 deployed; manual operations and recovery drills passed; first daily timer evidence pending
-> **Last drilled:** 2026-09-12
+> **Status:** Release r7 deployed; V1-G1 operations and recovery evidence complete
+> **Last drilled:** 2026-09-13
 > **Owner:** Campaign Hub operator
 
 This procedure adds scheduled maintenance, encrypted backups, off-machine copies, and five-minute health
@@ -12,8 +12,8 @@ The current deployed release is the annotated tag `hub-staging-2026-09-10-r7` (t
 `a65fec81eba3cd147fd44b54e617bf83d4a707f8`, commit
 `77d955c053dcdfe949235620db93f7eba477af34`). Manual maintenance and backup runs, five-minute monitoring,
 off-machine backup copying, an isolated authenticated restore, and an exact-r6 application rollback rehearsal
-passed on 2026-09-12. V1-G1 remains open until the first genuine daily maintenance and backup timer activations
-are observed after their scheduled windows; do not substitute another manual start for that evidence.
+passed on 2026-09-12. The first genuine daily maintenance and backup timer activations passed on 2026-09-13,
+completing V1-G1.
 
 ## Safety rules
 
@@ -181,6 +181,20 @@ resource was removed. The redacted host evidence is mode `0600` at
 `f5d20e6ac3b3af5c2613dcd93086e52fdc260ea2678dd5abc35b43f9421fad00`. Do not copy its deleted temporary
 credential state into documentation.
 
+The 2026-09-13 scheduled-operation evidence completed V1-G1:
+
+- maintenance triggered at `01:22:40Z`, ran once with `skipped: false`, and produced one succeeded operational
+  row at `01:22:41.800835Z`;
+- backup triggered at `02:28:07Z`, ran once, and produced one succeeded operational row plus
+  `hub-20260913T022807Z.dump.enc`;
+- that archive is 139,953 bytes, mode `0600`, owned by `ubuntu:ubuntu`, starts with `HUBENC1`, and has SHA-256
+  `997c70f3c67e762422764203a3ab73582c2e6782a5b23ec2c4e5d51b7ca90816`;
+- the external heartbeat succeeded; the next daily timer schedules were present; the migration ledger remained
+  exactly `0001`-`0007`;
+- the exact r7 DB, BFF, static, and edge container IDs remained running with zero restarts. Static and edge were
+  re-read at `07:32:25Z` against the `07:29:18Z` snapshot to recover restart counts without restarting or
+  recreating either container.
+
 ## 6. Daily and release checks
 
 ```bash
@@ -219,8 +233,7 @@ no automatic path reverses a migration or restores over production.
 The r7 release qualification completed the live Oracle dry-run/release and induced-failure coverage: lock
 contention, failed backup before cutover, and forced post-cutover health failure with compatible application
 rollback. Retain the redacted release evidence under `~/.local/state/thelemar-hub/releases/`; do not repeat these
-host mutations merely to close V1-G1. The remaining V1-G1 evidence is the first genuine scheduled daily
-maintenance and backup executions.
+host mutations merely to repeat completed V1-G1 evidence.
 
 ## Stop conditions
 

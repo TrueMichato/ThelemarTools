@@ -1,7 +1,7 @@
 # Campaign Hub staging plan
 
-> **Status:** Release r7 deployed; scheduled timer evidence and physical game day remain
-> **Last reviewed:** 2026-09-12
+> **Status:** Release r7 deployed; V1-G1 complete; physical game day remains
+> **Last reviewed:** 2026-09-13
 > **Owner:** Campaign Hub maintainers
 
 ## Objectives
@@ -21,13 +21,15 @@ environment and must not use copied production characters.
 - Hash-matched systemd units, manual maintenance/backup, five-minute Healthchecks.io monitoring, off-machine
   backup, authenticated isolated restore, continuous RPO/RTO, exact-r6 rollback, exact-r7 return, and cleanup
   passed on 2026-09-12.
-- V1-G1 remains open only until the first genuine daily maintenance and backup timer executions are observed.
+- Genuine scheduled daily maintenance and backup executions passed on 2026-09-13 with one succeeded
+  operational row each, a verified encrypted archive, successful external heartbeat, exact container identity,
+  zero restarts, and unchanged migrations. V1-G1 is complete.
 - The instance must not be stopped, resized, detached, or recreated while replacement ARM capacity is
   unavailable; normal guest reboots are allowed.
 - The staging-baseline repair, lightweight Hub boot, Character Sheet-native campaign linking, role-aware
   campaign operation page, and human-readable interaction controls are deployed and pass Oracle smoke checks.
-- The [living roadmap](roadmap.md) gates the V1 decision on the final scheduled-timer evidence and the physical
-  [one-DM/two-player game day](runbooks/private-game-day.md).
+- The [living roadmap](roadmap.md) gates the V1 decision on the physical
+  [one-DM/two-player game day](runbooks/private-game-day.md) and explicit go/no-go.
 
 ## Environment requirements
 

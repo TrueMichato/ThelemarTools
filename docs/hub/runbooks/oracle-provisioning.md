@@ -19,9 +19,9 @@ stack at a public HTTPS address, at $0/month recurring cost.
 
 This runbook produced the original private **staging** environment. Oracle now runs annotated release
 `hub-staging-2026-09-10-r7` at `77d955c053dcdfe949235620db93f7eba477af34`. Do not expand it to a real
-private campaign until V1-G1's first genuine daily timer evidence and V1-G2's physical game-day/go-no-go in the
-[living roadmap](../roadmap.md) have passed. Later repository changes are not deployed until an operator
-deliberately promotes a verified release.
+private campaign until V1-G2's physical game-day/go-no-go in the [living roadmap](../roadmap.md) has passed.
+V1-G1 completed on 2026-09-13. Later repository changes are not deployed until an operator deliberately
+promotes a verified release.
 
 ## Current operator boundary
 
@@ -38,8 +38,8 @@ On the existing staging host:
   [`deploy/hub/release.sh`](deploy-promote.md), and use the checked-in [rollback](rollback.md) and
   [backup/restore](backup-restore.md) procedures for recovery;
 - observe and verify the installed host timers through
-  [Oracle host operations](oracle-operations.md); the first genuine daily maintenance/backup executions remain
-  V1-G1 evidence.
+  [Oracle host operations](oracle-operations.md); genuine daily maintenance/backup execution evidence completed
+  V1-G1 on 2026-09-13.
 
 Any later text requiring Foundry continuity or port 30000 is superseded by this boundary. Historical Foundry
 commands remain below only to explain the original Phase 6G host state; they must not be replayed. Branch-based

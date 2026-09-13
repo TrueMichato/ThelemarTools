@@ -1,7 +1,7 @@
 # Campaign Hub runbooks
 
 > **Status:** Current portable and Oracle operations runbooks
-> **Last reviewed:** 2026-09-06
+> **Last reviewed:** 2026-09-13
 > **Owner:** Campaign Hub maintainers
 
 Runbooks are executable operational procedures. Each final runbook must contain:
@@ -44,5 +44,5 @@ Runbooks are executable operational procedures. Each final runbook must contain:
   above.
 
 The Oracle units, manual jobs, external monitor, off-machine backup, isolated restore, and exact-release rollback
-were drilled on 2026-09-12. Private launch still requires genuine scheduled maintenance/backup timer evidence,
-then execution of the physical one-DM/two-player game day and an explicit go/no-go.
+were drilled on 2026-09-12. Genuine scheduled maintenance/backup executions passed on 2026-09-13, completing
+V1-G1. Private launch still requires the physical one-DM/two-player game day and explicit go/no-go.
