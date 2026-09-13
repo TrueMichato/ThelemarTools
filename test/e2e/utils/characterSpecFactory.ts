@@ -684,6 +684,8 @@ export function describeCharacter (spec: CharacterSpec): void {
 							failedControl: true,
 							recurringDamage: true,
 							distributedMovement: true,
+							escape: true,
+							manualRelease: true,
 							outOfRangeRelease: true,
 							teardown: true,
 						});

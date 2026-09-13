@@ -9,6 +9,22 @@
 
 import {CharacterSheetProfPicker} from "./charactersheet-prof-editor.js";
 
+function csRestoreModalFocus (trigger) {
+	if (trigger?.isConnected && typeof trigger.focus === "function") {
+		try { trigger.focus(); } catch (ignored) { /* jsdom */ }
+	}
+}
+
+function csFocusModalOnOpen (modalInner, {preferSelector} = {}) {
+	if (!modalInner?.querySelector) return null;
+	const el = (preferSelector && modalInner.querySelector(preferSelector))
+		|| modalInner.querySelector("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])");
+	if (el?.focus) {
+		try { el.focus(); } catch (ignored) { /* jsdom */ }
+	}
+	return el || null;
+}
+
 const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"];
 const ABILITY_NAMES = {str: "STR", dex: "DEX", con: "CON", int: "INT", wis: "WIS", cha: "CHA"};
 
@@ -1335,21 +1351,25 @@ export class CharacterSheetPlayMode {
 					cbClose: () => csRestoreModalFocus(trigger),
 				});
 				modalInner.classList.add("cs-combat-target-modal");
+				modalInner.style.maxHeight = "calc(100dvh - 2rem)";
+				modalInner.style.overflowY = "auto";
+				modalInner.style.boxSizing = "border-box";
+				modalInner.style.paddingBottom = "max(1.5rem, env(safe-area-inset-bottom, 0px))";
 				modalInner.innerHTML = `<div class="cs-combat-target-effect" role="form" aria-label="Chained target escape">
 					<p class="ve-small ve-muted">Strength or Dexterity against DC ${this._state.getFeatureCalculations?.()?.chainGrappleDc || target.escapeDc}.</p>
 					<label class="ve-form-label">Escape ability <select class="form-control" data-escape-ability aria-label="Escape ability"><option value="str">Strength</option><option value="dex">Dexterity</option></select></label>
 					<label class="ve-form-label">Save total <input class="form-control" data-escape-total aria-label="Escape save total" type="number" min="0" inputmode="numeric"></label>
-					<div class="ve-flex-h-right mt-2"><button type="button" class="cs-combat-btn" data-act="cancel">Cancel</button><button type="button" class="cs-combat-btn cs-combat-btn--primary ml-2" data-act="apply">Resolve escape</button></div>
+					<div class="ve-flex-h-right cs-combat-target-modal__footer mt-2"><button type="button" class="cs-combat-btn" data-act="cancel">Cancel</button><button type="button" class="cs-combat-btn cs-combat-btn--primary ml-2" data-act="apply">Resolve escape</button></div>
 				</div>`;
 				modalInner.querySelector("[data-act=cancel]").addEventListener("click", doClose);
-				modalInner.querySelector("[data-act=apply]").addEventListener("click", () => {
+				modalInner.querySelector("[data-act=apply]").addEventListener("click", async () => {
 					const raw = modalInner.querySelector("[data-escape-total]").value;
 					if (raw === "") return;
 					const result = this._state.escapeChainedTarget(target.id, Number(raw), {ability: modalInner.querySelector("[data-escape-ability]").value});
 					if (result.escaped) {
 						JqueryUtil.doToast({type: "success", content: `${target.targetName} escaped the chains.`});
 						this._page._saveCurrentCharacter?.();
-						doClose();
+						await doClose();
 						this.render();
 					} else JqueryUtil.doToast({type: "info", content: `${target.targetName} remains chained (escape DC ${result.dc}).`});
 				});
@@ -1632,7 +1652,7 @@ export class CharacterSheetPlayMode {
 			el.replaceChildren(this._icon(slot.icon), document.createTextNode(` ${slot.label}`));
 			this._makeClickable(el, `${avail ? "Use" : "Restore"} ${slot.label}`, () => {
 				if (this._state.isActionTypeAvailable?.(slot.key)) this._state.consumeActionType?.(slot.key);
-				else this._state.resetActionEconomy?.();
+				else this._state.restoreActionType?.(slot.key);
 				const current = this._state.getActionEconomyState?.();
 				if (current) this._actionEconomy[slot.key] = current[slot.key];
 				else this._actionEconomy[slot.key] = !this._actionEconomy[slot.key];

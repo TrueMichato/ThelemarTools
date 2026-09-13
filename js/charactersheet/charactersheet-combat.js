@@ -308,6 +308,14 @@ function csRestoreModalFocus (trigger) {
 	}
 }
 
+function csGetAttackFocusTrigger (attack) {
+	const attackId = attack?.id;
+	if (!attackId || typeof document === "undefined") return null;
+	const row = [...(document.querySelectorAll?.(".charsheet__attack-item") || [])]
+		.find(it => it.dataset?.attackId === String(attackId));
+	return row?.querySelector?.(".charsheet__attack-roll, button, [role=button]") || null;
+}
+
 class CharacterSheetCombat {
 	/**
 	 * Fighter action-economy features that are owned by the dedicated `renderCombatFighter`
@@ -2053,7 +2061,8 @@ class CharacterSheetCombat {
 	async _pOfferFeatureOnHitOptions (ctx) {
 		const options = this._getEligibleOnHitOptions(ctx.attack);
 		if (!options.length) return;
-		const focusTrigger = document?.activeElement?.closest?.("button, [role=button]");
+		const focusTrigger = csGetAttackFocusTrigger(ctx.attack)
+			|| document?.activeElement?.closest?.("button, [role=button]");
 
 		const labels = options.map(opt => {
 			const bits = [opt.name];
@@ -2116,14 +2125,33 @@ class CharacterSheetCombat {
 		const existing = state.getTargetEffects?.({source}) || [];
 		const trigger = ctx.focusTrigger?.isConnected
 			? ctx.focusTrigger
-			: [...(document?.querySelectorAll?.(".charsheet__attack-roll, button, [role=button]") || [])]
-				.find(row => row.isConnected && !row.closest?.(".ve-ui-modal__inner, .ui-modal__inner") && !row.disabled);
+			: csGetAttackFocusTrigger(ctx.attack)
+				|| [...(document?.querySelectorAll?.(".charsheet__attack-roll, button, [role=button]") || [])]
+					.find(row => row.isConnected && !row.closest?.(".ve-ui-modal__inner, .ui-modal__inner") && !row.disabled);
+		// InputUiUtil resolves its promise as soon as the enum choice is made, while
+		// the closing modal can remain mounted for one animation frame. Wait for that
+		// previous dialog to leave the document before opening the target form; otherwise
+		// its cleanup can close the newly-created target modal as well.
+		await new Promise(resolve => {
+			const started = performance.now();
+			const waitForPreviousModal = () => {
+				const hasVisibleModal = [...(document?.querySelectorAll?.(".ve-ui-modal__inner, .ui-modal__inner") || [])]
+					.some(el => el.offsetParent !== null);
+				if (!hasVisibleModal || performance.now() - started >= 1000) return resolve();
+				setTimeout(waitForPreviousModal, 16);
+			};
+			waitForPreviousModal();
+		});
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `${opt.name} — Choose Target`,
 			isMinHeight0: true,
 			cbClose: () => csRestoreModalFocus(trigger),
 		});
 		modalInner.classList.add("cs-combat-target-modal");
+		modalInner.style.maxHeight = "calc(100dvh - 2rem)";
+		modalInner.style.overflowY = "auto";
+		modalInner.style.boxSizing = "border-box";
+		modalInner.style.paddingBottom = "max(1.5rem, env(safe-area-inset-bottom, 0px))";
 		// Let the modal host finish attaching before replacing its contents. This
 		// keeps the follow-up target form deterministic when the on-hit enum and
 		// target modal are opened in the same task.
@@ -2172,7 +2200,7 @@ class CharacterSheetCombat {
 					${opt.targetEffect?.effect === "restrain" ? `<label class="ve-form-label">STR save total (optional)
 						<input class="form-control" data-restraint-save aria-label="Target Strength save total" type="number" placeholder="Leave blank if failed">
 					</label>` : ""}
-					<div class="ve-flex-h-right mt-2">
+					<div class="ve-flex-h-right cs-combat-target-modal__footer mt-2">
 						<button class="cs-combat-btn" data-act="cancel">Cancel</button>
 						<button class="cs-combat-btn cs-combat-btn--primary ml-2" data-act="apply">Apply effect</button>
 					</div>
@@ -2189,8 +2217,8 @@ class CharacterSheetCombat {
 				sizeInput.value = target.size;
 				distanceInput.value = target.distance ?? "";
 			});
-			modalInner.querySelector("[data-act=cancel]").addEventListener("click", () => { finish(); doClose(); });
-			modalInner.querySelector("[data-act=apply]").addEventListener("click", () => {
+			modalInner.querySelector("[data-act=cancel]").addEventListener("click", async () => { finish(); await doClose(); });
+			modalInner.querySelector("[data-act=apply]").addEventListener("click", async () => {
 				const targetId = targetSelect.value || undefined;
 				const restraintSave = modalInner.querySelector("[data-restraint-save]")?.value;
 				const result = state.applyTargetEffect({
@@ -2213,7 +2241,7 @@ class CharacterSheetCombat {
 					return;
 				}
 				finish();
-				doClose();
+				await doClose();
 				JqueryUtil.doToast({type: "success", content: `${opt.name} applied to ${result.target.targetName}.`});
 				this._page.renderCharacter?.();
 			});
@@ -7064,6 +7092,10 @@ class CharacterSheetCombat {
 					cbClose: () => csRestoreModalFocus(trigger),
 				});
 				modalInner.classList.add("cs-combat-target-modal");
+				modalInner.style.maxHeight = "calc(100dvh - 2rem)";
+				modalInner.style.overflowY = "auto";
+				modalInner.style.boxSizing = "border-box";
+				modalInner.style.paddingBottom = "max(1.5rem, env(safe-area-inset-bottom, 0px))";
 				modalInner.innerHTML = `
 					<div class="cs-combat-target-effect" role="form" aria-label="Chained target escape">
 						<p class="ve-small ve-muted">The target may use Strength or Dexterity against the current grapple DC (${this._state.getFeatureCalculations?.()?.chainGrappleDc || target.escapeDc}).</p>
@@ -7075,7 +7107,7 @@ class CharacterSheetCombat {
 						<label class="ve-form-label">Save total
 							<input class="form-control" data-escape-total aria-label="Escape save total" type="number" min="0" inputmode="numeric">
 						</label>
-						<div class="ve-flex-h-right mt-2">
+						<div class="ve-flex-h-right cs-combat-target-modal__footer mt-2">
 							<button type="button" class="cs-combat-btn" data-act="cancel">Cancel</button>
 							<button type="button" class="cs-combat-btn cs-combat-btn--primary ml-2" data-act="apply">Resolve escape</button>
 						</div>

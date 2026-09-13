@@ -931,6 +931,69 @@ export class CharacterSheetPage {
 		});
 	}
 
+	async getChainedMovementState (): Promise<any> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			return cs?._state?.getChainedMovementState?.() ?? null;
+		});
+	}
+
+	async enterPlayMode (): Promise<void> {
+		const root = this.page.locator(".charsheet-page");
+		if (!(await root.evaluate(el => el.classList.contains("charsheet--play-mode")))) {
+			await this.page.locator("#charsheet-btn-playmode").click();
+		}
+		await root.waitFor({state: "visible"});
+		await expect(root).toHaveClass(/charsheet--play-mode/);
+	}
+
+	async exitPlayMode (): Promise<void> {
+		const root = this.page.locator(".charsheet-page");
+		if (await root.evaluate(el => el.classList.contains("charsheet--play-mode"))) {
+			const fullSheet = this.page.locator(".pm-status__tool-btn").filter({hasText: /^Full Sheet$/}).first();
+			if (await fullSheet.isVisible().catch(() => false)) await fullSheet.click();
+			else await this.page.locator("#charsheet-btn-playmode").click({force: true});
+		}
+		await expect(root).not.toHaveClass(/charsheet--play-mode/);
+	}
+
+	async restorePlayModeActionType (actionType: "action" | "bonus" | "reaction"): Promise<void> {
+		const available = await this.page.evaluate((type) => {
+			const state: any = (globalThis as any).charSheet?._state;
+			return state?.getActionEconomyState?.()?.[type] ?? true;
+		}, actionType);
+		if (available) return;
+		await this.enterPlayMode();
+		const label = actionType[0].toUpperCase() + actionType.slice(1);
+		await this.page.getByRole("button", {name: new RegExp(`^Restore ${label}$`, "i")}).click();
+		await this.exitPlayMode();
+	}
+
+	async resolvePlayModeEscape (targetId: string, saveTotal: number, ability = "str"): Promise<any> {
+		await this.enterPlayMode();
+		const row = this.page.locator(`.pm-chained-target[data-target-id="${targetId}"]`).first();
+		await row.waitFor({state: "visible", timeout: 10000});
+		await row.getByRole("button", {name: /escape/i}).click();
+		const modal = this.page.locator(".ve-ui-modal__inner:visible, .ui-modal__inner:visible").last();
+		await modal.getByLabel("Escape ability").selectOption(ability);
+		await modal.getByLabel("Escape save total").fill(String(saveTotal));
+		await modal.getByRole("button", {name: /resolve escape/i}).click();
+		await expect(modal).toBeHidden({timeout: 10000});
+		await this.page.waitForTimeout(150);
+		const result = (await this.getChainedTargets()).find(it => it.id === targetId) || null;
+		await this.exitPlayMode();
+		return result;
+	}
+
+	async releasePlayModeTarget (targetId: string): Promise<boolean> {
+		await this.enterPlayMode();
+		const row = this.page.locator(`.pm-chained-target[data-target-id="${targetId}"]`).first();
+		await row.waitFor({state: "visible", timeout: 10000});
+		await row.locator(".pm-chained-target__release").click();
+		await this.page.waitForTimeout(150);
+		return !(await this.getChainedTargets()).some(it => it.id === targetId && (it.grappled || it.restrained || it.shoved));
+	}
+
 	/** Apply a target-aware Chained Fury rider through the live state API. */
 	async applyChainedTargetEffect (options: Record<string, unknown>): Promise<any> {
 		return this.page.evaluate((opts) => {
@@ -1834,6 +1897,7 @@ export class CharacterSheetPage {
 			state?.activateState?.("manifestChains");
 			(globalThis as any).charSheet?._renderCharacter?.();
 		});
+		await this.restorePlayModeActionType("action");
 		await this.page.waitForFunction(() => {
 			const state: any = (globalThis as any).charSheet?._state;
 			return !!state?.isStateTypeActive?.("rage")
@@ -1914,12 +1978,25 @@ export class CharacterSheetPage {
 		const calc = await this.page.evaluate(() => (globalThis as any).charSheet?._state?.getFeatureCalculations?.() ?? {});
 		const targetOnly = await this.rollSpectralChainsTargetEffect({effect: "target", targetName: "Tracked only", distance: 5});
 		const targetOnlyRecord = (await this.getChainedTargets()).find(it => it.targetName === "Tracked only");
+		// Keep the probe within the level's real chain capacity. Target-only
+		// effects still occupy a chain until the player releases them, so clean
+		// each temporary branch through the Play Mode control before creating the
+		// next branch.
+		if (targetOnlyRecord?.id) {
+			await this.releasePlayModeTarget(targetOnlyRecord.id);
+			await this.exitPlayMode();
+		}
 		const failedGrapple = await this.rollSpectralChainsTargetEffect({
 			effect: "grapple",
 			targetName: "Resisted grapple",
 			distance: 10,
 			grappleSaveTotal: calc.chainGrappleDc,
 		});
+		const failedGrappleRecord = (await this.getChainedTargets()).find(it => it.targetName === "Resisted grapple");
+		if (failedGrappleRecord?.id) {
+			await this.releasePlayModeTarget(failedGrappleRecord.id);
+			await this.exitPlayMode();
+		}
 		const failedControl = await this.rollSpectralChainsTargetEffect({
 			effect: "control-shove",
 			targetName: "Resisted control",
@@ -1928,22 +2005,41 @@ export class CharacterSheetPage {
 			finalDistance: 20,
 			shoveDirection: "away",
 		});
+		const failedControlRecord = (await this.getChainedTargets()).find(it => it.targetName === "Resisted control");
+		if (failedControlRecord?.id) {
+			await this.releasePlayModeTarget(failedControlRecord.id);
+			await this.exitPlayMode();
+		}
 
 		await this.switchToTab(this.tabCombat);
-		const row = this.page.locator(`[data-target-id="${targetId}"]`).first();
+		const row = this.page.locator(`.charsheet__chained-target-row[data-target-id="${targetId}"]`).first();
 		await row.waitFor({state: "visible", timeout: 10000});
 		const turnDamage = row.getByRole("button", {name: /resolve recurring damage/i});
 		await turnDamage.click();
+		const afterFirstDamage = (await this.getChainedTargets()).find(it => it.id === targetId);
 		await row.getByRole("button", {name: /repeat recurring damage/i}).click();
+		const afterRepeatDamage = (await this.getChainedTargets()).find(it => it.id === targetId);
 
 		const distance = row.locator("input[type=number]").first();
 		const double = row.locator("[data-double-movement]");
 		await distance.fill("20");
 		await double.check();
 		await row.getByRole("button", {name: /^move /i}).click();
+		const afterDoubledMove = await this.getChainedMovementState();
 		await distance.fill("25");
 		await row.locator("[data-double-movement]").uncheck();
 		await row.getByRole("button", {name: /^move /i}).click();
+		const afterDistributedMove = await this.getChainedMovementState();
+
+		const escaped = await this.resolvePlayModeEscape(targetId, (calc.chainGrappleDc || calc.combatMethodDc || 0) + 10, "dex");
+		const escapedState = !!escaped && !escaped.grappled && !escaped.restrained;
+		const releasedTarget = await this.rollSpectralChainsTargetEffect({
+			effect: "target",
+			targetName: "Manual release",
+			distance: 5,
+		});
+		const manualRelease = releasedTarget?.id ? await this.releasePlayModeTarget(releasedTarget.id) : false;
+		await this.exitPlayMode();
 
 		const outOfRangeTarget = await this.rollSpectralChainsTargetEffect({
 			effect: "grapple",
@@ -1957,7 +2053,6 @@ export class CharacterSheetPage {
 		await this.page.waitForTimeout(150);
 		const afterMove = await this.getChainedTargets();
 		const beforeTeardown = afterMove.length > 0;
-		const retainedRestrainedTarget = afterMove.some(it => it.id === targetId);
 		await this.deactivateFeature("Rage");
 		const afterTeardown = await this.getChainedTargets();
 
@@ -1967,8 +2062,15 @@ export class CharacterSheetPage {
 				&& !(targetOnly || targetOnlyRecord)?.effects?.restraint?.active,
 			failedGrapple: !!failedGrapple && failedGrapple.grappled === false,
 			failedControl: !!failedControl && failedControl.grappled === false && failedControl.shoved === false,
-			recurringDamage: retainedRestrainedTarget,
-			distributedMovement: true,
+			recurringDamage: afterFirstDamage?.lastRecurringDamageTurn != null
+				&& afterRepeatDamage?.lastRecurringDamageRepeatTurn === afterFirstDamage.lastRecurringDamageTurn,
+			distributedMovement: (afterDoubledMove?.doubled === true)
+				&& (afterDoubledMove?.bonusActionUsed === true)
+				&& (afterDoubledMove?.used > 0)
+				&& (afterDistributedMove?.used > afterDoubledMove.used)
+				&& (afterDistributedMove?.remaining < afterDoubledMove.remaining),
+			escape: escapedState,
+			manualRelease,
 			outOfRangeRelease: !afterMove.some(it => it.id === outOfRangeTarget.id && it.grappled),
 			teardown: beforeTeardown && afterTeardown.length === 0,
 		};

@@ -63001,6 +63001,14 @@ class CharacterSheetState {
 		return true;
 	}
 
+	restoreActionType (actionType) {
+		if (!actionType || actionType === "free") return true;
+		if (!this._data.actionEconomyUsage) this._data.actionEconomyUsage = {action: false, bonus: false, reaction: false};
+		if (!Object.hasOwn(this._data.actionEconomyUsage, actionType)) return false;
+		this._data.actionEconomyUsage[actionType] = false;
+		return true;
+	}
+
 	resetActionEconomy () {
 		this._data.actionEconomyUsage = {action: false, bonus: false, reaction: false};
 	}
@@ -63310,7 +63318,8 @@ class CharacterSheetState {
 		const target = this._data.targetEffects.find(it => it.id === id);
 		if (!target || !target.restrained || !target.recurringDamage) return {ok: false, damage: 0};
 		if (!repeat && target.lastRecurringDamageTurn === turn) return {ok: true, damage: 0, alreadyResolved: true};
-		target.lastRecurringDamageTurn = turn;
+		if (repeat) target.lastRecurringDamageRepeatTurn = turn;
+		else target.lastRecurringDamageTurn = turn;
 		target.updatedAt = Date.now();
 		return {ok: true, damage: target.recurringDamage.amount, damageType: target.recurringDamage.type};
 	}

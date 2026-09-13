@@ -2054,6 +2054,32 @@
 		padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
 	}
 
+	@layer vetools {
+		body.is-charsheet-page .ve-ui-modal__inner .cs-combat-target-modal__footer,
+		.ve-ui-modal__inner .cs-combat-target-modal__footer,
+		.cs-combat-target-modal .cs-combat-target-modal__footer,
+		.cs-combat-target-modal__footer {
+			display: grid !important;
+			grid-template-columns: minmax(0, 1fr) !important;
+			grid-auto-flow: row;
+			gap: .5rem !important;
+			align-items: stretch;
+			width: 100% !important;
+			margin-left: 0 !important;
+			padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px)) !important;
+		}
+
+		body.is-charsheet-page .ve-ui-modal__inner .cs-combat-target-modal__footer > *,
+		.ve-ui-modal__inner .cs-combat-target-modal__footer > *,
+		.cs-combat-target-modal .cs-combat-target-modal__footer > *,
+		.cs-combat-target-modal__footer > * {
+			width: 100% !important;
+			min-width: 0;
+			min-height: 44px;
+			margin-left: 0 !important;
+		}
+	}
+
 	.cs-combat-target-modal .cs-combat-target-effect .ve-flex-h-right > * {
 		margin-left: 0 !important;
 		width: 100% !important;

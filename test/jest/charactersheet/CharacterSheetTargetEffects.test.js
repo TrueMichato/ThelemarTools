@@ -241,6 +241,16 @@ describe("CharacterSheet target/effect lifecycle", () => {
 		expect(state.isActionTypeAvailable("bonus")).toBe(false);
 	});
 
+	it("restores one action slot without restoring unrelated slots", () => {
+		const state = makeFury(6);
+		state.consumeActionType("action");
+		state.consumeActionType("bonus");
+		state.consumeActionType("reaction");
+
+		expect(state.restoreActionType("bonus")).toBe(true);
+		expect(state.getActionEconomyState()).toEqual({action: false, bonus: true, reaction: false});
+	});
+
 	it("accepts and validates Chain Control's declared final position and direction", () => {
 		const state = makeFury(10);
 		expect(state.applyChainedTargetEffect({

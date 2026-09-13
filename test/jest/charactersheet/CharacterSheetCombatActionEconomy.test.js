@@ -30,6 +30,11 @@ describe("CharacterSheetCombat action economy gating", () => {
 				actionUsage[type] = true;
 				return true;
 			},
+			restoreActionType: (type) => {
+				if (!Object.hasOwn(actionUsage, type)) return false;
+				actionUsage[type] = false;
+				return true;
+			},
 			resetActionEconomy: () => {
 				actionUsage.action = false;
 				actionUsage.bonus = false;
@@ -99,6 +104,17 @@ describe("CharacterSheetCombat action economy gating", () => {
 		expect(combat._isActionTypeAvailable("bonus")).toBe(true);
 		combat._consumeActionType("bonus");
 		expect(combat._state.isActionTypeAvailable("bonus")).toBe(false);
+	});
+
+	it("restores only the requested action slot", () => {
+		combat._state.consumeActionType("action");
+		combat._state.consumeActionType("bonus");
+		combat._state.consumeActionType("reaction");
+
+		expect(combat._state.restoreActionType("bonus")).toBe(true);
+		expect(combat._state.isActionTypeAvailable("action")).toBe(false);
+		expect(combat._state.isActionTypeAvailable("bonus")).toBe(true);
+		expect(combat._state.isActionTypeAvailable("reaction")).toBe(false);
 	});
 
 	it("initializes _handOfHarmUsedThisTurn as false", () => {
