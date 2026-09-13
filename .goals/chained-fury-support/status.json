@@ -1,6 +1,6 @@
 {
   "goal_id": "chained-fury-support",
-  "status": "building",
+  "status": "inspecting",
   "iteration": 3,
   "builder_model": "GPT:5.6-Luna",
   "inspector_model": "GPT:5.6-Sol",
@@ -16,6 +16,11 @@
       "iteration": 2,
       "verdict": "FAIL",
       "summary": "Source and activation gating, target-only application, derived-state reconciliation, range/movement/Chain Control behavior, mobile accessibility, and reliable comprehensive E2E coverage remain incomplete."
+    },
+    {
+      "iteration": 3,
+      "verdict": "FAIL",
+      "summary": "Production E2E remains red; Play Mode and failed doubled movement break action economy; Chain Control, effect-layer consistency, generic dispatch, mobile accessibility, tests, and docs remain incomplete."
     }
   ]
 }
