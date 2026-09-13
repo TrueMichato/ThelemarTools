@@ -21,6 +21,11 @@
       "iteration": 3,
       "verdict": "FAIL",
       "summary": "Real browser probes expose broken result-49/result-61 casting, incomplete canonical effects, source-gating and restored-receipt defects, non-atomic fortune spending, weak regression coverage, and red repository gates."
+    },
+    {
+      "iteration": 4,
+      "verdict": "FAIL",
+      "summary": "Casting and restored receipts are improved, but effect expiry/respec cleanup, canonical scopes, fortune cancellation atomicity, accessibility, real browser/planted coverage, documentation, and the final npm test gate remain incomplete."
     }
   ]
 }
