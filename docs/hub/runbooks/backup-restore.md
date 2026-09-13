@@ -54,19 +54,50 @@ Do not reset the RTO clock after a failed attempt. Record safe failures as part 
 4. Obtain the encryption key through approved secret access without printing it. The host archive is mode
    `0600`; because the released operations image runs as `postgres`, stage a hash-verified encrypted copy in a
    drill-only volume owned by that user rather than loosening the source file.
-5. Run the exact released operations image with:
+5. Read `candidate_image_4` and `target_sha` from the selected release's mode-0600 `state.tsv`; this is the
+   immutable released backup/operations image and its expected revision. Put `DATABASE_URL`,
+   `HUB_OPERATIONS_DATABASE_URL`, and `HUB_BACKUP_ENCRYPTION_KEY` in a drill-only mode-0600 environment file
+   outside the repository. The target URL must name the isolated PostgreSQL container on `drill_network`; the
+   operations URL may name production `db` only for the bounded `restore_drill` evidence row.
 
 ```bash
-DATABASE_URL=postgresql://.../hub_restore_drill \
-HUB_OPERATIONS_DATABASE_URL=postgresql://hub_operations:.../hub \
-HUB_BACKUP_ENCRYPTION_KEY=... \
-HUB_RESTORE_CONFIRM=RESTORE \
-npm run hub:restore:encrypted -- /secure/path/hub.dump.enc
+release_state="$HOME/.local/state/thelemar-hub/releases/<release-id>/state.tsv"
+restore_image="$(awk -F '\t' '$1 == "candidate_image_4" {print $2}' "$release_state")"
+release_commit="$(awk -F '\t' '$1 == "target_sha" {print $2}' "$release_state")"
+drill_env="$HOME/.local/state/thelemar-hub/restore-drill/<drill-id>.env"
+drill_network="hub-restore-<drill-id>"
+archive_volume="hub-restore-archive-<drill-id>"
+archive_name="hub-YYYYMMDDTHHMMSSZ.dump.enc"
+restore_runner="hub-restore-runner-<drill-id>"
+production_private_network="<name discovered from the running production DB container>"
+
+test "$(stat -c '%a' "$drill_env")" = "600"
+test -n "$restore_image"
+test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
+  "$restore_image")" = "$release_commit"
+docker network inspect "$drill_network" >/dev/null
+docker network inspect "$production_private_network" >/dev/null
+docker volume inspect "$archive_volume" >/dev/null
+! docker container inspect "$restore_runner" >/dev/null 2>&1
+
+docker create \
+  --name "$restore_runner" \
+  --network "$drill_network" \
+  --env-file "$drill_env" \
+  --env HUB_RESTORE_CONFIRM=RESTORE \
+  --mount "type=volume,src=${archive_volume},dst=/secure,readonly" \
+  "$restore_image" \
+  node server/scripts/restore-encrypted.mjs "/secure/$archive_name"
+docker network connect "$production_private_network" "$restore_runner"
+docker start --attach "$restore_runner"
+test "$(docker inspect --format '{{.State.ExitCode}}' "$restore_runner")" = "0"
 ```
 
-The temporary restore runner may join both the isolated network and the discovered production private network
-only when it must write the bounded `restore_drill` operational row. Remove the runner after saving safe exit
-metadata and logs. Authentication failure/tampering must leave no plaintext output.
+Do not replace this with `npm run` from the host checkout; that would execute checkout code rather than the
+released image. The temporary runner joins the isolated network for the restore target and the discovered
+production private network only to write the bounded `restore_drill` operational row. Preserve it on failure
+until safe exit metadata and logs are saved; remove it and the drill environment file during separately approved
+exact cleanup. Authentication failure/tampering must leave no plaintext output.
 
 ### Prove the restored service
 

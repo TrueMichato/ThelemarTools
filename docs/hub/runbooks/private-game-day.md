@@ -50,11 +50,15 @@ Do not start until every item below is true:
 
 | Role | Minimum device | Responsibility |
 |---|---|---|
-| Operator | separate desktop/terminal | watches health and records timestamps; does not play or mutate the host without a separate approved action |
+| Operator | DM's separate terminal/profile, or an optional fourth observer's desktop | watches health and records timestamps between scenarios; does not mutate the host without a separate approved action |
 | DM | desktop or laptop | owns both campaigns, controls rules/homebrew, observes DM-only data, grants items/XP, and resolves party transfers |
 | Player A | desktop/laptop plus a second browser or phone | owns the primary spellcasting character and performs the multi-device/concurrency checks |
 | Player B | phone or tablet plus a desktop-capable browser | owns the target character and verifies mobile, privacy, targeting, and reconnect behavior |
 | Recorder | may be the operator | records check IDs, result, sanitized screenshots, correlation IDs, defects, and the final decision |
+
+The true minimum is three people: the DM also performs the operator/recorder checks while play is paused between
+scenarios. A fourth non-playing observer may take those duties, but is not required. No one mutates the host
+during play without stopping the game day and obtaining separate approval for the exact action.
 
 Use separate browser profiles. Private/incognito windows are acceptable if they retain cookies for the duration
 of the scenario. Disable password sharing and screen sharing before any OAuth or invite action.
@@ -142,12 +146,12 @@ works; denial does not reveal private resource existence beyond the user's autho
 
 ### GD-04 — local copy and multi-device character synchronization
 
-1. Player A creates `Aster` locally, then uses **Create cloud copy** for Campaign A.
+1. Player A creates `Aster` locally, then uses **Add cloud copy** for Campaign A.
 2. Confirm the local original still exists and the campaign copy has a distinct authoritative identity.
 3. Open Aster on Player A's second device/profile.
 4. Change one safe field on the first device, save, and observe the second device.
 5. Refresh both devices.
-6. Player B creates `Bryn` locally, then uses **Create cloud copy** for Campaign A.
+6. Player B creates `Bryn` locally, then uses **Add cloud copy** for Campaign A.
 7. Confirm Bryn's local original remains separate and its Campaign A copy opens for Player B.
 
 **Expected:** the cloud copy synchronizes, the local original is unchanged, the second device receives or
@@ -188,13 +192,17 @@ correct, activity is readable, and retries do not duplicate the award.
 
 ### GD-08 — shared inventory and transfer
 
-1. Player A offers one awarded item plus small CP/SP/GP amounts to party inventory.
-2. DM reviews the human-readable source, item, quantities, and destination, then accepts.
-3. DM transfers part of the party stack to Bryn.
-4. Repeat one completed request from browser history or retry UI if available.
+1. Record Aster's and the party inventory's relevant item/currency balances.
+2. Player A offers one awarded item plus small CP/SP/GP amounts to party inventory.
+3. DM reviews the human-readable source, item, quantities, and destination, then accepts.
+4. Player A creates a second bounded offer of 1 CP; DM rejects it.
+5. Player A creates a third bounded offer of 1 SP and uses **Cancel** before the DM resolves it.
+6. DM transfers part of the accepted party stack to Bryn.
+7. Repeat one completed accepted request from browser history or retry UI if available.
 
 **Expected:** assets are reserved before acceptance, conserved exactly across source/destination, never duplicated,
-and replay returns the existing outcome. Reject/cancel must restore the exact source identity.
+and replay returns the existing outcome. The rejected 1 CP and sender-cancelled 1 SP each return exactly once to
+Aster's original source identity; neither reaches party inventory or creates a duplicate.
 
 ### GD-09 — cross-character Cure Wounds
 
