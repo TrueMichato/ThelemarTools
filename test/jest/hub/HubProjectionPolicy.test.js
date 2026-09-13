@@ -8,13 +8,11 @@ import {
 	PRESET_CHOICES,
 } from "../../../js/charactersheet/charactersheet-sharing.js";
 import {
+	getOmittedProjectionFieldLabels,
+	getProjectionProfileRows,
 	PROJECTION_FIELD_KEYS,
 	SKILL_RANK_CHOICES,
 	SKILL_RANKS,
-} from "../../../js/hub/hub-character-projection-contract.js";
-import {
-	getOmittedProjectionFieldLabels,
-	getProjectionProfileRows,
 } from "../../../js/hub/hub-character-view.js";
 
 const CATALOG_KEYS = [

@@ -1,17 +1,15 @@
 import {HubApiClient} from "../hub/hub-api-client.js";
 import {
 	ABILITY_CHOICES,
+	getOmittedProjectionFieldLabels,
+	getProjectionFieldLabel,
+	getProjectionProfileRows,
 	MOVEMENT_CHOICES,
 	PROJECTION_FIELD_KEYS,
 	PROJECTION_OVERRIDE_MODES,
 	PROJECTION_PRESET_KEYS,
 	SKILL_CHOICES,
 	SKILL_RANK_CHOICES,
-} from "../hub/hub-character-projection-contract.js";
-import {
-	getOmittedProjectionFieldLabels,
-	getProjectionFieldLabel,
-	getProjectionProfileRows,
 } from "../hub/hub-character-view.js";
 
 /**

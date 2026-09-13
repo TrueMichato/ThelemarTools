@@ -10,7 +10,7 @@ import {
 	SKILL_KEYS,
 	SKILL_RANKS,
 	SKILL_TO_ABILITY,
-} from "../../js/hub/hub-character-projection-contract.js";
+} from "../../js/hub/hub-character-view.js";
 
 export {
 	ABILITY_KEYS,
