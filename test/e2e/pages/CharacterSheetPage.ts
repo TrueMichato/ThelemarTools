@@ -771,6 +771,17 @@ export class CharacterSheetPage {
 	 * unresolved receipt behind.
 	 */
 	async probeGamblerFlow (probe: "tools" | "folly" | "extraLuck" | "masterFortune" | "ui"): Promise<{ok: boolean; error?: string}> {
+		if (probe === "ui") {
+			const clicked = await this.castFirstSpellViaUi();
+			await this.page.waitForTimeout(250);
+			const toastText = await this.page.locator(".toast").allTextContents().catch(() => []);
+			const rendered = toastText.some(it => /cast /i.test(it));
+			await this.dismissTransientModals();
+			return {
+				ok: clicked && rendered,
+				error: clicked ? `No rendered cast result toast found: ${toastText.join(" | ")}` : "No spell cast button was available",
+			};
+		}
 		const result = await this.page.evaluate(async kind => {
 			const cs: any = (globalThis as any).charSheet;
 			const state = cs?._state;
@@ -803,22 +814,15 @@ export class CharacterSheetPage {
 					const pending = state.getPendingGamblerCastResolutions?.() || [];
 					pending.forEach((it: any) => state.cancelGamblerCastResolution?.(it.resolutionId));
 					state.resetBonusAction?.();
-					return {ok: offers.some((it: any) => it.id === "gamblerExtraLuck") && result?.applied === true && (state.getExtraLuckUses?.()?.remaining ?? before) < before};
-				}
-				if (kind === "ui") {
-					state.setGamblerRollScenario?.({modifierRolls: [1, 1], betRoll: 4, tableRoll: 49});
-					const receipt = state.createGamblerCastResolution?.({
-						spell: {id: "e2e-ui", name: "UI Gambler Spell"},
-						slotLevel: 1,
-					});
-					await cs?._spells?._pOpenGamblingTableModal?.(null);
-					const modal = document.querySelector(".ve-ui-modal__overlay");
-					const rollButton = modal?.querySelector(".btn-gambler-modal-roll");
-					const table = modal?.querySelector("table");
-					const pending = modal?.querySelector("#gambler-pending-heading");
-					const accessible = !!rollButton?.getAttribute("type") && !!table && !!pending;
-					if (receipt?.resolutionId) state.cancelGamblerCastResolution?.(receipt.resolutionId);
-					return {ok: accessible};
+					const after = state.getExtraLuckUses?.()?.remaining ?? before;
+					const ok = offers.some((it: any) => it.id === "gamblerExtraLuck")
+						&& result?.applied === true
+						&& after === before
+						&& state.isBonusActionAvailable?.() === true;
+					return {
+						ok,
+						error: ok ? undefined : `before=${before} after=${after} offers=${JSON.stringify(offers)} result=${JSON.stringify(result)}`,
+					};
 				}
 				state.setGamblerRollSequence?.([1, 4, 12, 88]);
 				const table = state.rollGamblingTable?.();
@@ -834,6 +838,19 @@ export class CharacterSheetPage {
 		}, probe);
 		await this.dismissTransientModals();
 		return result;
+	}
+
+	/**
+	 * Click the rendered spell-row cast control, rather than invoking a state
+	 * mutator. This is intentionally small and generic so Gambler coverage
+	 * exercises the same delegated click handler as a player.
+	 */
+	async castFirstSpellViaUi (): Promise<boolean> {
+		await this.switchToTab(this.tabSpells);
+		const castButton = this.page.locator(".charsheet__spell-item .charsheet__spell-cast").first();
+		if (!await castButton.isVisible().catch(() => false)) return false;
+		await castButton.click();
+		return true;
 	}
 
 	// ========== SHEET-USAGE HELPERS (Phase 2) ==========

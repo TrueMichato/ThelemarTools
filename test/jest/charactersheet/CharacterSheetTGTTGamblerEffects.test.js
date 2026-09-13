@@ -237,6 +237,15 @@ describe("Gambler's Spellcasting - spell slots (L3+)", () => {
 		}
 	});
 
+	it("gates every Gambler prepared-spell consumer by the TGTT class entry", () => {
+		buildGambler(3);
+		expect(state.getMaxPreparedSpells("Gambler")).toMatch(/d/);
+		state._data.classes[0].source = "PHB";
+		state._data.classes[0].subclass.source = "PHB";
+		expect(state.getMaxPreparedSpells("Gambler")).toBe(0);
+		expect(state.isTgttGamblerSpell({name: "Hex", source: "PHB", sourceClass: "Gambler"})).toBe(false);
+	});
+
 	it("does not disturb a subclass with no declared slot table (Eldritch Knight)", () => {
 		state.addClass({
 			name: "Fighter",
@@ -406,6 +415,7 @@ describe("Extra Luck + Master of Fortune resources", () => {
 	it("spends and restores both pools on a long rest", () => {
 		buildGambler(17);
 		expect(state.useExtraLuck()).toBeTruthy();
+		state.resetBonusAction();
 		expect(state.useMasterOfFortune()).toBeTruthy();
 		expect(findRes("Extra Luck").current).toBe(5);
 		expect(findRes("Master of Fortune").current).toBe(5);
@@ -427,6 +437,18 @@ describe("Extra Luck + Master of Fortune resources", () => {
 		expect(findRes("Extra Luck").current).toBe(0);
 	});
 
+	it("rolls back a fortune use and shared bonus action when its receipt is cancelled", () => {
+		buildGambler(17);
+		const before = state.getExtraLuckUses().remaining;
+		const result = state.applyD20Intervention("gamblerExtraLuck", {naturalRoll: 3, effectiveRoll: 3});
+		expect(result.applied).toBe(true);
+		expect(state.getExtraLuckUses().remaining).toBe(before - 1);
+		expect(state.isBonusActionAvailable()).toBe(false);
+		expect(state.cancelGamblerCastResolution(result.resolutionId)).toBe(true);
+		expect(state.getExtraLuckUses().remaining).toBe(before);
+		expect(state.isBonusActionAvailable()).toBe(true);
+	});
+
 	it("preserves expended uses when proficiency bonus raises the maximum", () => {
 		buildGambler(9);
 		state.useExtraLuck();
@@ -441,7 +463,9 @@ describe("Extra Luck + Master of Fortune resources", () => {
 	it("round-trips both pools through save/load", () => {
 		buildGambler(17);
 		state.useExtraLuck();
+		state.resetBonusAction();
 		state.useMasterOfFortune();
+		state.resetBonusAction();
 		state.useMasterOfFortune();
 
 		const restored = new CharacterSheetState();
@@ -491,9 +515,12 @@ describe("d20 fortune interventions (generic API)", () => {
 
 	it("stops offering once the backing pool is exhausted", () => {
 		buildGambler(17);
-		for (let i = 0; i < 6; i++) state.useMasterOfFortune();
+		for (let i = 0; i < 6; i++) {
+			state.resetBonusAction();
+			state.useMasterOfFortune();
+		}
 		const offers = state.getD20InterventionOffers({naturalRoll: 1, effectiveRoll: 1, rollType: "attack"});
-		expect(offers.map(o => o.id)).toEqual(["gamblerExtraLuck"]);
+		expect(offers).toEqual([]);
 	});
 
 	it("applies Master of Fortune by turning the natural 1 into a natural 20", () => {
@@ -663,7 +690,7 @@ describe("Versatile Gambler (L13)", () => {
 			[20, "activeState"],
 			[22, "activeState"],
 			[25, "activeState"],
-			[27, "activeState"],
+			[27, "condition"],
 			[32, "condition"],
 			[33, "spellTransaction"],
 			[49, "spellTransaction"],
@@ -703,13 +730,37 @@ describe("Versatile Gambler (L13)", () => {
 			const reduce = CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[13];
 			const feet = CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[20];
 			expect(reduce.effects).toEqual(expect.arrayContaining([
-				{type: "sizeChange", value: -1},
-				{type: "speedMultiplier", value: 0.5},
+				{type: "sizeDecrease", value: 1},
 			]));
 			expect(feet.effects).toEqual(expect.arrayContaining([
-				{type: "sizeChange", value: -1},
 				{type: "speedMultiplier", value: 0.5},
 				{type: "bonus", target: "initiative", value: -4},
+			]));
+		});
+
+		it("routes canonical table effects through live runtime consumers", () => {
+			buildGambler(3);
+			const applyRow = roll => {
+				state.setGamblerRollSource({nextInt: max => max === 100 ? roll : max === 4 ? 4 : 1});
+				const receipt = state.createGamblerCastResolution({spell: {name: `Row ${roll}`}, slotLevel: 1});
+				return state.applyGamblingTableResolution(receipt.resolutionId, {confirmAutomatic: true});
+			};
+
+			applyRow(5);
+			expect(state.getEmittedLight()).toEqual(expect.objectContaining({brightRange: 20, dimRange: 40}));
+			applyRow(13);
+			expect(state.getSize()).toBe("small");
+			expect(state.getSpeedMultiplierFromConditions()).toBe(1);
+			applyRow(20);
+			expect(state.getSpeedMultiplierFromConditions()).toBe(0.5);
+			expect(state.getInitiativeBonuses().some(it => it.value === -4)).toBe(true);
+			applyRow(22);
+			expect(state.getLevitationHeight()).toBe(20);
+			applyRow(25);
+			expect(state.getSenseBonusFromStates("xray")).toBe(60);
+			applyRow(27);
+			expect(state.getCastingConstraints().verbal).toEqual(expect.arrayContaining([
+				expect.objectContaining({value: "banned"}),
 			]));
 		});
 
@@ -720,7 +771,8 @@ describe("Versatile Gambler (L13)", () => {
 			const applied = state.applyGamblingTableResolution(receipt.resolutionId, {confirmAutomatic: true});
 			expect(applied.status).toBe("delayed");
 			expect(state.commitGamblerCastResolution(receipt.resolutionId)).toBeNull();
-			expect(state.resumeGamblerDelayedCast(receipt.resolutionId).status).toBe("ready");
+			expect(state.resumeGamblerDelayedCast(receipt.resolutionId).status).toBe("resuming");
+			expect(state.completeGamblerDelayedCast(receipt.resolutionId).status).toBe("ready");
 			expect(state.commitGamblerCastResolution(receipt.resolutionId).status).toBe("committed");
 		});
 	});

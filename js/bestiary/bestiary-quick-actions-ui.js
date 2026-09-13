@@ -1716,7 +1716,7 @@ export class BestiaryQuickActionsUi {
 		try {
 			parsed = JSON.parse(clean);
 		} catch (e) {
-			throw new Error(`${label} contains invalid JSON: ${e.message}`);
+			throw new Error(`${label} contains invalid JSON: ${e.message}`, {cause: e});
 		}
 		if (!Array.isArray(parsed)) throw new Error(`${label} must be a comma-separated list or JSON array.`);
 		return parsed;
@@ -1736,7 +1736,7 @@ export class BestiaryQuickActionsUi {
 			try {
 				parsed = JSON.parse(clean);
 			} catch (e) {
-				throw new Error(`${label.toTitleCase()} contain invalid JSON: ${e.message}`);
+				throw new Error(`${label.toTitleCase()} contain invalid JSON: ${e.message}`, {cause: e});
 			}
 			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${label.toTitleCase()} must be a “name:value” list or JSON object.`);
 			return parsed;
@@ -1844,10 +1844,12 @@ export class BestiaryQuickActionsUi {
 				clean.legendaryGroup = {name: groupName, source: source.json};
 			}
 			await BrewUtil2.pPersistEditableBrewEntity("monster", DataUtil.cleanJson(clean, {isDeleteUniqueId: false}));
-			if (pFnOnSave) await pFnOnSave({
-				..._copy(clean),
-				...(hotLegendaryGroup ? {legendaryGroup: hotLegendaryGroup} : {}),
-			});
+			if (pFnOnSave) {
+				await pFnOnSave({
+					..._copy(clean),
+					...(hotLegendaryGroup ? {legendaryGroup: hotLegendaryGroup} : {}),
+				});
+			}
 			JqueryUtil.doToast({
 				type: "success",
 				content: pFnOnSave

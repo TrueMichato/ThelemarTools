@@ -510,6 +510,7 @@ describe("TGTT Gambler Subclass", () => {
 
 			// Exhaust uses
 			for (let i = 1; i < pb; i++) {
+				state.resetBonusAction();
 				state.useMasterOfFortune();
 			}
 			expect(state.getMasterOfFortuneUses().remaining).toBe(0);
@@ -586,6 +587,7 @@ describe("TGTT Gambler Subclass", () => {
 				state.useExtraLuck();
 			}
 			for (let i = 0; i < mofPb; i++) {
+				state.resetBonusAction();
 				state.useMasterOfFortune();
 			}
 
@@ -612,6 +614,7 @@ describe("TGTT Gambler Subclass", () => {
 			// Set some state
 			state.setGamblerAutoRollTable(true);
 			state.useExtraLuck();
+			state.resetBonusAction();
 			state.useMasterOfFortune();
 			state.rollGamblerBet(3);
 

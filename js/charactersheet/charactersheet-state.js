@@ -16236,7 +16236,7 @@ class CharacterSheetState {
 	 */
 	getMaxPreparedSpells (className) {
 		// Special case: Gambler uses rolled value, not fixed formula
-		if (className === "Gambler") {
+		if (className === "Gambler" && this._getGamblerClass()) {
 			const rolled = this.getGamblerPreparedCount();
 			if (rolled !== null) {
 				return rolled;
@@ -18832,7 +18832,7 @@ class CharacterSheetState {
 	 * @param {{spell?: object, slotLevel:number, usesGamblerFocus?:boolean}} args
 	 * @returns {object|null}
 	 */
-	createGamblerCastResolution ({spell = null, slotLevel = 1, usesGamblerFocus = true} = {}) {
+	createGamblerCastResolution ({spell = null, slotLevel = 1, usesGamblerFocus = true, castMeta = null} = {}) {
 		const calcs = this.getFeatureCalculations();
 		if (!calcs.hasGamblerFolly || !usesGamblerFocus || slotLevel <= 0) return null;
 		const modifierDice = calcs.gamblerModifierDice || "1d6";
@@ -18856,7 +18856,9 @@ class CharacterSheetState {
 			resolutionId: CryptUtil.uid(),
 			spellId: spell?.id || null,
 			spellName: spell?.name || null,
+			spell: spell ? MiscUtil.copyFast(spell) : null,
 			slotLevel,
+			castMeta: castMeta ? MiscUtil.copyFast(castMeta) : null,
 			modifier: {...modifier, dice: modifierDice},
 			bet,
 			tableRoll: table,
@@ -18876,11 +18878,14 @@ class CharacterSheetState {
 	 */
 	createGamblerFortuneResolution (tableRoll, source = "fortune") {
 		if (!tableRoll) return null;
+		const resourceType = source === "Master of Fortune" ? "gamblerMasterOfFortune" : "gamblerExtraLuck";
 		const resolution = {
 			resolutionId: CryptUtil.uid(),
 			spellId: null,
 			spellName: source,
 			fortuneSource: source,
+			fortuneResourceType: resourceType,
+			bonusActionSpent: true,
 			slotLevel: 0,
 			tableRoll: MiscUtil.copyFast(tableRoll),
 			descriptor: tableRoll.needsChoice ? null : (CharacterSheetState.GAMBLER_GAMBLING_TABLE_EFFECTS[tableRoll.chosenRoll] || null),
@@ -19029,10 +19034,35 @@ class CharacterSheetState {
 		const resolution = (this._data.spellcasting.gamblerPendingCastResolutions || [])
 			.find(r => r.resolutionId === resolutionId);
 		if (!resolution?.delayedCast || resolution.status !== "delayed") return null;
-		resolution.delayedCast.status = "resumed";
+		resolution.delayedCast.status = "resuming";
 		resolution.delayedCast.resumedAt = Date.now();
-		resolution.status = "ready";
+		resolution.status = "resuming";
 		resolution.resumedAt = Date.now();
+		return MiscUtil.copyFast(resolution);
+	}
+
+	/**
+	 * Mark a resumed delayed cast as executed. This is separate from `resume...`
+	 * so a browser-side target/cast cancellation can leave the receipt durable
+	 * without ever rerolling the wager or spending another slot.
+	 */
+	completeGamblerDelayedCast (resolutionId) {
+		const resolution = (this._data.spellcasting.gamblerPendingCastResolutions || [])
+			.find(r => r.resolutionId === resolutionId);
+		if (!resolution?.delayedCast || resolution.status !== "resuming") return null;
+		resolution.delayedCast.status = "executed";
+		resolution.delayedCast.executedAt = Date.now();
+		resolution.status = "ready";
+		resolution.executedAt = Date.now();
+		return MiscUtil.copyFast(resolution);
+	}
+
+	restoreGamblerDelayedCast (resolutionId) {
+		const resolution = (this._data.spellcasting.gamblerPendingCastResolutions || [])
+			.find(r => r.resolutionId === resolutionId);
+		if (!resolution?.delayedCast || resolution.status !== "resuming") return null;
+		resolution.delayedCast.status = "unresolved";
+		resolution.status = "delayed";
 		return MiscUtil.copyFast(resolution);
 	}
 
@@ -19059,6 +19089,12 @@ class CharacterSheetState {
 		const pending = this._data.spellcasting.gamblerPendingCastResolutions || [];
 		const ix = pending.findIndex(r => r.resolutionId === resolutionId);
 		if (ix < 0) return false;
+		const resolution = pending[ix];
+		if (resolution.fortuneResourceType && !resolution.fortuneCancelled) {
+			this._restoreGamblerResource(resolution.fortuneResourceType);
+			if (resolution.bonusActionSpent) this.resetBonusAction();
+			resolution.fortuneCancelled = true;
+		}
 		pending.splice(ix, 1);
 		return true;
 	}
@@ -19180,7 +19216,7 @@ class CharacterSheetState {
 
 		switch (id) {
 			case "gamblerExtraLuck": {
-				if (!this.useExtraLuck({consumeBonusAction: true})) return fail;
+				if (!this.useExtraLuck()) return fail;
 				const secondDie = this._rollGamblerRandomInt(20, "extra-luck");
 				const tableRoll = this.getGamblerLastTableRoll();
 				const receipt = this.createGamblerFortuneResolution(tableRoll, "Extra Luck");
@@ -19219,16 +19255,24 @@ class CharacterSheetState {
 	 * @returns {boolean} True if successful, false if no uses remaining
 	 */
 	useExtraLuck () {
-		// Extra Luck is always a bonus-action feature. Do not accept a caller
-		// supplied bypass flag: Play Mode, interventions, and restored saves
-		// must all obey the same economy.
+		// Extra Luck is always a bonus-action feature. Preflight both costs before
+		// mutating either one, so an exhausted pool never consumes the action.
 		if (!this.isBonusActionAvailable()) return false;
 		const resource = this._getGamblerResourceUses("gamblerExtraLuck");
-		if (!resource) return false;
-		if (!this.spendBonusAction()) return false;
+		if (!resource || resource.remaining <= 0) return false;
 		if (!this._spendGamblerResource("gamblerExtraLuck")) return false;
+		if (!this.spendBonusAction()) {
+			// The resource spend is only reachable after the availability preflight,
+			// but keep the transaction reversible if a future action-economy hook fails.
+			this._restoreGamblerResource("gamblerExtraLuck");
+			return false;
+		}
 		// Trigger d100 roll on the Gambling Table
-		this.rollGamblingTable();
+		if (!this.rollGamblingTable()) {
+			this._restoreGamblerResource("gamblerExtraLuck");
+			this.resetBonusAction();
+			return false;
+		}
 		return true;
 	}
 
@@ -19259,10 +19303,20 @@ class CharacterSheetState {
 	 * @returns {boolean} True if successful, false if no uses remaining
 	 */
 	useMasterOfFortune () {
+		if (!this.isBonusActionAvailable()) return false;
+		const available = this._getGamblerResourceUses("gamblerMasterOfFortune");
+		if (!available || available.remaining <= 0) return false;
 		const resource = this._spendGamblerResource("gamblerMasterOfFortune");
-		if (!resource) return false;
+		if (!resource || !this.spendBonusAction()) {
+			if (resource) this._restoreGamblerResource("gamblerMasterOfFortune");
+			return false;
+		}
 		// Trigger d100 roll on the Gambling Table
-		this.rollGamblingTable();
+		if (!this.rollGamblingTable()) {
+			this._restoreGamblerResource("gamblerMasterOfFortune");
+			this.resetBonusAction();
+			return false;
+		}
 		return true;
 	}
 
@@ -37682,6 +37736,17 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Return the highest active levitation height in feet. This deliberately
+	 * remains a small generic active-state consumer rather than pretending that
+	 * levitation grants a flying speed.
+	 */
+	getLevitationHeight () {
+		return this.getActiveStateEffects()
+			.filter(e => e.type === "levitation")
+			.reduce((max, e) => Math.max(max, Number(e.height) || 0), 0);
+	}
+
+	/**
 	 * Aggregate the light the character currently sheds from active states and item powers.
 	 *
 	 * Generic over any active-state effect of the form
@@ -39132,6 +39197,15 @@ class CharacterSheetState {
 		const legacyKey = resourceType === "gamblerExtraLuck" ? "gamblerExtraLuckUsed" : "gamblerMasterFortuneUsed";
 		this._data.spellcasting[legacyKey] = Math.max(0, (resource.max || 0) - resource.current);
 		return resource;
+	}
+
+	_restoreGamblerResource (resourceType) {
+		const resource = (this._data.resources || []).find(r => r.resourceType === resourceType);
+		if (!resource) return false;
+		resource.current = Math.min(resource.max, (resource.current || 0) + 1);
+		const legacyKey = resourceType === "gamblerExtraLuck" ? "gamblerExtraLuckUsed" : "gamblerMasterFortuneUsed";
+		this._data.spellcasting[legacyKey] = Math.max(0, (resource.max || 0) - resource.current);
+		return true;
 	}
 
 	/**

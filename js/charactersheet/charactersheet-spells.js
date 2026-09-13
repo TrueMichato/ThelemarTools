@@ -575,6 +575,11 @@ class CharacterSheetSpells {
 	}
 
 	_getMaxSpellLevel (classInfo, characterLevel) {
+		// Gambler is a TGTT Rogue subclass, not a reusable name-only caster
+		// progression. Reject same-named entries before honoring persisted
+		// casterProgression data.
+		if (classInfo?.subclass?.name === "Gambler" && this._state._isGamblerClassEntry?.(classInfo) !== true) return 0;
+
 		// Get the per-class level (not total character level) for spell level limits
 		const classLevel = this._state.getClassLevel(classInfo.name) || characterLevel;
 
@@ -587,7 +592,7 @@ class CharacterSheetSpells {
 		// Fallback: hardcoded class name lookup for classes without casterProgression field
 		const fullCasters = ["Bard", "Cleric", "Druid", "Sorcerer", "Wizard"];
 		const halfCasters = ["Paladin", "Ranger", "Artificer"];
-		const thirdCasters = ["Eldritch Knight", "Arcane Trickster", "Gambler", "Architect of Ruin"];
+		const thirdCasters = ["Eldritch Knight", "Arcane Trickster", "Architect of Ruin"];
 
 		const className = classInfo.name;
 		const subclassName = classInfo.subclass?.name;
@@ -612,7 +617,11 @@ class CharacterSheetSpells {
 			// Full caster: use full level
 		} else if (halfCasters.includes(className)) {
 			casterLevel = Math.floor(classLevel / 2);
-		} else if (thirdCasters.includes(subclassName)) {
+		} else if (thirdCasters.includes(subclassName)
+			|| (
+				subclassName === "Gambler"
+				&& this._state._isGamblerClassEntry?.(classInfo) === true
+			)) {
 			casterLevel = Math.floor(classLevel / 3);
 		} else {
 			return 0; // Non-caster
@@ -2281,6 +2290,43 @@ class CharacterSheetSpells {
 		};
 	}
 
+	/**
+	 * Execute a persisted result-61 cast exactly once. The receipt already owns
+	 * the original spell, slot level, wager, and modifier, so this path never
+	 * creates a second bet or consumes another slot.
+	 */
+	async _pResumeGamblerDelayedCast (resolutionId) {
+		const pending = this._state.getPendingGamblerCastResolutions?.() || [];
+		const receipt = pending.find(r => r.resolutionId === resolutionId);
+		if (!receipt?.delayedCast || receipt.status !== "delayed") return null;
+		const resumed = this._state.resumeGamblerDelayedCast?.(resolutionId);
+		if (!resumed) return null;
+		const spell = resumed.spell || this._state.getSpells?.().find(s => s.id === resumed.spellId);
+		if (!spell) {
+			this._state.restoreGamblerDelayedCast?.(resolutionId);
+			return null;
+		}
+		const castResult = await this._showCastResult(
+			spell,
+			resumed.slotLevel,
+			!!resumed.castMeta?.isPact,
+			false,
+			{
+				...(resumed.castMeta || {}),
+				gamblerCastResolution: resumed,
+			},
+		);
+		if (castResult?.cancelled) {
+			this._state.restoreGamblerDelayedCast?.(resolutionId);
+			return null;
+		}
+		const completed = this._state.completeGamblerDelayedCast?.(resolutionId);
+		if (!completed) return null;
+		const committed = this._state.commitGamblerCastResolution?.(resolutionId);
+		await this._page?.saveCharacter?.();
+		return committed || completed;
+	}
+
 	async _castSpell (spellId, {withMetamagic, decision = null} = {}) {
 		// Metamagic prompt runs unless the caller explicitly opts out (withMetamagic === false).
 		// Default (undefined) preserves legacy behaviour for callers that pass only a spellId
@@ -2578,6 +2624,10 @@ class CharacterSheetSpells {
 				spell,
 				slotLevel: selectedSlot.level,
 				usesGamblerFocus: !selectedSlot.isNoSlotResource,
+				castMeta: {
+					...castMeta,
+					isPact: !!selectedSlot.isPact,
+				},
 			});
 			if (gamblerCastResolution) castMeta.gamblerCastResolution = gamblerCastResolution;
 		}
@@ -2624,6 +2674,16 @@ class CharacterSheetSpells {
 		}
 		if (gamblerCastResolution?.slotTransaction === "preserve") skipSlotConsumption = true;
 
+		// Result 49 is an atomic failed cast: preserve the chosen slot and do not
+		// run spell targeting, attack rolls, saves, damage, or concentration.
+		if (gamblerCastResolution?.slotTransaction === "preserve") {
+			gamblerCastResolution = this._state.applyGamblingTableResolution?.(
+				gamblerCastResolution.resolutionId,
+				{confirmAutomatic: true},
+			) || gamblerCastResolution;
+			castMeta.gamblerCastResolution = gamblerCastResolution;
+		}
+
 		// Consume the selected slot (or no-slot resource).
 		// A no-slot resource (e.g. Star Map) is the player's chosen cast vehicle,
 		// so it is always spent — a variant component's "noSlot" effect waives
@@ -2650,7 +2710,7 @@ class CharacterSheetSpells {
 		}
 
 		const effectiveSlotLevel = this._state.getDaemonologistEffectiveCastLevel?.(spell, selectedSlot.level) ?? selectedSlot.level;
-		const castResult = deferGamblerCast
+		const castResult = deferGamblerCast || gamblerCastResolution?.slotTransaction === "preserve"
 			? {cancelled: false}
 			: await this._showCastResult(
 				spell,
@@ -2742,6 +2802,15 @@ class CharacterSheetSpells {
 			} else {
 				JqueryUtil.doToast({type: "warning", content: `${gamblerCastResolution.freeSpell.name} is unavailable for this free cast.`});
 			}
+		}
+
+		// Result 49 never reaches the spell effect pipeline.
+		if (gamblerCastResolution?.slotTransaction === "preserve") {
+			if (gamblerCastResolution) this._state.commitGamblerCastResolution?.(gamblerCastResolution.resolutionId);
+			this.renderSlots();
+			this._page._renderQuickSpells();
+			this._page.saveCharacter();
+			return;
 		}
 
 		// Set concentration if spell requires it
@@ -4558,47 +4627,68 @@ class CharacterSheetSpells {
 					<div class="gambler-receipt-actions"></div>
 				</div>`});
 				const actions = row.querySelector(".gambler-receipt-actions");
+				const statusText = (current) => {
+					if (!current) return "Resolution cancelled.";
+					if (current.status === "awaiting-choice") return "Choose which result applies.";
+					if (current.status === "awaiting-confirmation") return "Confirm this result.";
+					if (current.status === "delayed") return "Delayed cast is ready to resume.";
+					if (current.status === "resuming") return "Casting the delayed spell…";
+					if (current.status === "committed") return "Resolution committed.";
+					if (current.status === "applied") return "Result applied; commit the cast.";
+					if (current.status === "acknowledged") return "Result acknowledged; commit the cast.";
+					return "Resolution ready.";
+				};
+				let renderReceiptActions;
 				const addButton = (label, handler, cls = "btn-default") => {
 					const btn = e_({outer: `<button type="button" class="btn btn-xs ${cls}">${label}</button>`});
-					btn.addEventListener("click", () => {
-						const result = handler();
-						row.querySelector("span").textContent = result
-							? "Resolution committed."
-							: "Resolution could not be completed.";
-						actions.replaceChildren();
-						void this._page?.saveCharacter?.();
+					btn.addEventListener("click", async () => {
+						btn.disabled = true;
+						const result = await handler();
+						const live = this._state.getPendingGamblerCastResolutions?.()
+							.find(r => r.resolutionId === receipt.resolutionId) || (result?.status === "committed" ? result : null);
+						row.querySelector("span").textContent = statusText(live);
+						renderReceiptActions(live);
+						await this._page?.saveCharacter?.();
 					});
 					actions.append(btn);
 				};
-				if (receipt.status === "awaiting-choice") {
-					addButton(`Keep ${receipt.tableRoll?.roll}`, () => this._state.chooseGamblerTableResult?.(receipt.resolutionId, 1), "btn-primary");
-					addButton(`Keep ${receipt.tableRoll?.secondRoll}`, () => this._state.chooseGamblerTableResult?.(receipt.resolutionId, 2), "btn-primary");
-				} else if (receipt.status === "awaiting-confirmation") {
-					addButton("Apply", () => {
-						const applied = this._state.applyGamblingTableResolution?.(receipt.resolutionId, {confirmAutomatic: true});
-						if (applied?.status === "applied") return this._state.commitGamblerCastResolution?.(receipt.resolutionId);
-						return null;
-					}, "btn-primary");
-					addButton("Cancel", () => this._state.cancelGamblerCastResolution?.(receipt.resolutionId), "btn-danger");
-				} else if (receipt.status === "ready" && receipt.descriptor?.automation === "manual") {
-					addButton("Acknowledge", () => {
-						const acknowledged = this._state.acknowledgeGamblingTableResolution?.(receipt.resolutionId);
-						if (acknowledged) return this._state.commitGamblerCastResolution?.(receipt.resolutionId);
-						return null;
-					}, "btn-primary");
-				} else if (receipt.status === "ready" && receipt.descriptor?.automation === "automatic") {
-					addButton("Apply", () => {
-						const applied = this._state.applyGamblingTableResolution?.(receipt.resolutionId, {confirmAutomatic: true});
-						return applied?.status === "applied"
-							? this._state.commitGamblerCastResolution?.(receipt.resolutionId)
-							: null;
-					}, "btn-primary");
-				} else if (receipt.status === "delayed") {
-					addButton("Resume delayed result", () => {
-						const resumed = this._state.resumeGamblerDelayedCast?.(receipt.resolutionId);
-						return resumed ? this._state.commitGamblerCastResolution?.(receipt.resolutionId) : null;
-					}, "btn-primary");
-				}
+				renderReceiptActions = current => {
+					actions.replaceChildren();
+					if (!current || current.status === "committed") return;
+					if (current.status === "awaiting-choice") {
+						addButton(`Keep ${current.tableRoll?.roll}`, () => this._state.chooseGamblerTableResult?.(current.resolutionId, 1), "btn-primary");
+						addButton(`Keep ${current.tableRoll?.secondRoll}`, () => this._state.chooseGamblerTableResult?.(current.resolutionId, 2), "btn-primary");
+					} else if (current.status === "awaiting-confirmation") {
+						addButton("Apply", () => {
+							const applied = this._state.applyGamblingTableResolution?.(current.resolutionId, {confirmAutomatic: true});
+							return applied?.status === "applied"
+								? this._state.commitGamblerCastResolution?.(current.resolutionId)
+								: applied;
+						}, "btn-primary");
+						addButton("Cancel", () => {
+							this._state.cancelGamblerCastResolution?.(current.resolutionId);
+							return null;
+						}, "btn-danger");
+					} else if (current.status === "ready" && current.descriptor?.automation === "manual") {
+						addButton("Acknowledge", () => {
+							const acknowledged = this._state.acknowledgeGamblingTableResolution?.(current.resolutionId);
+							return acknowledged
+								? this._state.commitGamblerCastResolution?.(current.resolutionId)
+								: null;
+						}, "btn-primary");
+					} else if (current.status === "ready" && current.descriptor?.automation === "automatic") {
+						addButton("Apply", () => {
+							const applied = this._state.applyGamblingTableResolution?.(current.resolutionId, {confirmAutomatic: true});
+							return applied?.status === "applied"
+								? this._state.commitGamblerCastResolution?.(current.resolutionId)
+								: applied;
+						}, "btn-primary");
+					} else if (current.status === "delayed") {
+						addButton("Resume delayed result", () => this._pResumeGamblerDelayedCast(current.resolutionId), "btn-primary");
+					}
+				};
+				row.querySelector("span").textContent = statusText(receipt);
+				renderReceiptActions(receipt);
 				list.append(row);
 			});
 			modalInner.append(receiptSection);

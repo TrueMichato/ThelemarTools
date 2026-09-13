@@ -1,7 +1,7 @@
 {
   "goal_id": "tgtt-gambler-rogue-support",
   "status": "building",
-  "iteration": 3,
+  "iteration": 4,
   "builder_model": "GPT:5.6-Luna",
   "inspector_model": "GPT:5.6-Sol",
   "initial_sha": "4a84b403c9f0c5e2e091673859e8f5d2585c492c",

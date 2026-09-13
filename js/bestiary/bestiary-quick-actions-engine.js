@@ -158,13 +158,13 @@ function _walkStrings (value, fnString) {
 
 function _getDiceAverage (expression) {
 	const clean = `${expression}`.replace(/\s+/g, "");
-	if (!/^[+\-]?(?:\d*d\d+|\d+)(?:[+\-](?:\d*d\d+|\d+))*$/i.test(clean)) return null;
+	if (!/^[+-]?(?:\d*d\d+|\d+)(?:[+-](?:\d*d\d+|\d+))*$/i.test(clean)) return null;
 
 	let total = 0;
-	const terms = clean.match(/[+\-]?(?:\d*d\d+|\d+)/gi) || [];
+	const terms = clean.match(/[+-]?(?:\d*d\d+|\d+)/gi) || [];
 	for (const term of terms) {
 		const sign = term.startsWith("-") ? -1 : 1;
-		const unsigned = term.replace(/^[+\-]/, "");
+		const unsigned = term.replace(/^[+-]/, "");
 		const matchDice = /^(?<count>\d*)d(?<faces>\d+)$/i.exec(unsigned);
 		total += sign * (matchDice
 			? Number(matchDice.groups.count || 1) * (Number(matchDice.groups.faces) + 1) / 2
@@ -357,13 +357,16 @@ function _applyItemEffects (creature, item, effects) {
 			else if (typeof acFirst === "number") ac[0] += acBonus;
 			else ac[0] = {...acFirst, ac: baseAc + acBonus};
 		} else if (acFirst?.special) {
-			if (isConditional) ac.push({
-				special: `${_getSpecialAcWithBonus({special: acFirst.special, bonus: acBonus})} (${condition})`,
-			});
-			else ac[0] = {
-				...acFirst,
-				special: _getSpecialAcWithBonus({special: acFirst.special, bonus: acBonus, item}),
-			};
+			if (isConditional) {
+				ac.push({
+					special: `${_getSpecialAcWithBonus({special: acFirst.special, bonus: acBonus})} (${condition})`,
+				});
+			} else {
+				ac[0] = {
+					...acFirst,
+					special: _getSpecialAcWithBonus({special: acFirst.special, bonus: acBonus, item}),
+				};
+			}
 		} else {
 			throw new BestiaryQuickActionsValidationError(`${item.name} has an AC bonus, but this creature has no numeric or formula-based AC to modify.`);
 		}
@@ -484,9 +487,9 @@ function _getScaleContext ({creature, scaleContext}) {
 	if (!Object.values(_SCALE_TYPES).includes(type) || type === _SCALE_TYPES.BASE) {
 		throw new BestiaryQuickActionsValidationError(`Unknown scale context type "${scaleContext.type}".`);
 	}
-	const value = scaleContext.value
-		?? scaleContext.cr
-		?? scaleContext.level;
+	const value = scaleContext.value ??
+		scaleContext.cr ??
+		scaleContext.level;
 	if (value == null || `${value}`.trim() === "") throw new BestiaryQuickActionsValidationError(`Scale context "${type}" requires a value.`);
 	return {type, value};
 }
@@ -684,7 +687,7 @@ export class BestiaryQuickActionsMinion {
 export class BestiaryQuickActionsUtil {
 	static getCanonicalUid (creature) {
 		if (!creature?.name || !creature?.source) throw new BestiaryQuickActionsValidationError("Creatures require name and source to create an override key.");
-		return `${creature.name}`.trim().toLowerCase() + "|" + `${creature.source}`.trim().toLowerCase();
+		return `${`${creature.name}`.trim().toLowerCase()}|${`${creature.source}`.trim().toLowerCase()}`;
 	}
 
 	static getRegistryKey ({creature, scaleContext = null}) {
