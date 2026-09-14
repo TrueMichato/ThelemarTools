@@ -118,7 +118,10 @@ sequenceDiagram
 ```
 
 The client never treats an unacknowledged queued snapshot as a new base. Each submitted write retains its own
-base so overlapping and disjoint changes are classified correctly.
+base so overlapping and disjoint changes are classified correctly. The repository persists an ordered recovery
+queue containing every uncommitted snapshot, closed one-shot activity descriptor, and exact idempotency keys.
+Only the matching successful command is dequeued. Choosing local after an overlap replays every unresolved
+command in order against the selected local document; choosing server explicitly discards the complete queue.
 
 ## Transactional outbox and realtime
 

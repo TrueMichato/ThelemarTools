@@ -492,7 +492,9 @@ Reconciliation is `R = E(B)`, `F = E(L)`, `nextSave = diff(R, F)`:
   (`pRunPendingResync`) rather than guessing or writing blindly.
 - Explicit one-shot activity such as `spell.used` is part of the same retry envelope as the character patch.
   If a response is lost, the repository replays that exact snapshot/activity/idempotency key before accepting a
-  newer autosave, so a changing `_savedAt` cannot silently discard or duplicate the semantic event.
+  newer autosave, so a changing `_savedAt` cannot silently discard or duplicate the semantic event. Recovery is
+  an ordered durable queue, not one replaceable slot: reload preserves every command, local conflict resolution
+  replays all unresolved activities in order, and server conflict resolution is the explicit discard boundary.
 
 Protocol-4 cost-bearing peer operations extend this with per-character operation legs:
 
