@@ -137,7 +137,9 @@ moves the durable queue from its temporary key to the canonical character id. If
 server, the owner's recovery-only draft remains listed under its temporary id and retries with the original
 create idempotency key. Recovery is validated against the current account before hydration or migration, and
 cross-account collisions leave the original stored recovery untouched. Once a temporary create resolves to its
-canonical id, the browser atomically rebinds page state, URL scope, roster selection, projections, and realtime
+canonical id, that alias is published only after the pending queue is durably migrated; a storage failure leaves
+the temporary queue visible and retryable with its original keys and activities. The browser then atomically
+rebinds page state, URL scope, roster selection, projections, and realtime
 before queued canonical events resume. Repository hydration and successful replay retain the temporary-to-
 canonical lookup but remove obsolete pending-state aliases, so a completed retry cannot leave unload warnings or
 context-switch blockers behind.

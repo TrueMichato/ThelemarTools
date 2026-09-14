@@ -65,8 +65,10 @@ assertion, clears that release gate.
   exists; both discovery paths validate the stored owner before hydration and preserve the original create
   idempotency key. Persist first-command intent, and never expose or replay established-character patch recovery
   as a replacement create. Canonicalization must also rebind Character Sheet identity, URL/roster, projections,
-  and realtime before queued canonical events resume, while removing obsolete in-memory pending aliases after
-  hydration, migration, or successful replay.
+  and realtime before queued canonical events resume. Publish a temporary-to-canonical alias only after its
+  pending queue is durably migrated; on storage failure, retain the temporary in-memory/durable queue with its
+  original keys and activities. Remove obsolete pending aliases only after hydration, migration, or replay
+  succeeds.
 - Access loss, takeover, campaign switch, detach, logout, or terminal page hide fences queued callbacks and
   pending saves.
 

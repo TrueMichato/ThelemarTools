@@ -1871,7 +1871,7 @@ export class HubHttpCharacterRepository {
 			submittedBaseCoverage,
 			submittedSnapshotCoverage,
 		} = command;
-		const canonicalId = this._canonicalIds.get(requestedId) || requestedId;
+		let canonicalId = this._canonicalIds.get(requestedId) || requestedId;
 		if (canonicalId !== requestedId) {
 			this._migrateCharacterIdentity({fromId: requestedId, toId: canonicalId});
 		}
@@ -1904,9 +1904,9 @@ export class HubHttpCharacterRepository {
 					rulesVersionId: this._fnGetRulesVersionId(),
 					idempotencyKey: commandKeys.create,
 				});
-				this._canonicalIds.set(requestedId, created.character.id);
-				this._migrateCharacterIdentity({fromId: requestedId, toId: created.character.id});
-				this._accepted.set(created.character.id, created.character);
+				canonicalId = created.character.id;
+				this._migrateCharacterIdentity({fromId: requestedId, toId: canonicalId});
+				this._accepted.set(canonicalId, created.character);
 				accepted = created.character;
 			}
 		}

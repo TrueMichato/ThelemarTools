@@ -390,6 +390,91 @@ describe("HTTP character repository", () => {
 		expect(storage.getItem(canonicalKey)).toBeNull();
 	});
 
+	it("keeps a committed create pending until canonical recovery migration and activity replay succeed", async () => {
+		const storage = new MemoryStorage();
+		const temporaryId = "temporary-id";
+		const canonicalId = "server-id";
+		const temporaryKey = `hub-character-recovery:campaign-1:${temporaryId}`;
+		const canonicalKey = `hub-character-recovery:campaign-1:${canonicalId}`;
+		const activity = makeSpellActivity("Shield", "spell_slot");
+		const creates = [];
+		const patches = [];
+		let isFailCanonicalWrite = true;
+		const setItem = storage.setItem.bind(storage);
+		storage.setItem = (key, value) => {
+			if (isFailCanonicalWrite && key === canonicalKey) throw new Error("quota");
+			setItem(key, value);
+		};
+		const api = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+			pGetCharacter: async () => {
+				const error = new Error("missing");
+				error.code = "CHARACTER_NOT_FOUND";
+				throw error;
+			},
+			pCreateCharacter: async input => {
+				creates.push(structuredClone(input));
+				return {
+					character: {
+						id: canonicalId,
+						ownerAccountId: "owner",
+						campaignId: "campaign-1",
+						clientImportId: temporaryId,
+						revision: 1,
+						data: structuredClone(input.data),
+					},
+				};
+			},
+			pAcquireCharacterLease: async () => ({epoch: 1}),
+			pPatchCharacter: async input => {
+				patches.push(structuredClone(input));
+				return {
+					character: {
+						id: canonicalId,
+						ownerAccountId: "owner",
+						campaignId: "campaign-1",
+						clientImportId: temporaryId,
+						revision: 2,
+						data: {name: "Mira"},
+					},
+				};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		repository._recoveryStorage = storage;
+
+		await expect(repository.pUpsert({character: {id: temporaryId, name: "Mira"}, activity}))
+			.rejects.toMatchObject({code: "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE"});
+		const pending = JSON.parse(storage.getItem(temporaryKey));
+		expect(pending.commands[0].activity).toEqual(activity);
+		expect(repository._canonicalIds.has(temporaryId)).toBe(false);
+		expect(repository._recoveryCommandQueues.get(temporaryId)).toHaveLength(1);
+		expect(repository._failedWrites.has(temporaryId)).toBe(true);
+		expect(repository.hasPendingWrites()).toBe(true);
+		expect(storage.getItem(canonicalKey)).toBeNull();
+
+		isFailCanonicalWrite = false;
+		await expect(repository.pUpsert({character: {id: temporaryId, name: "Mira"}, activity: null}))
+			.resolves.toEqual({id: canonicalId, name: "Mira"});
+
+		expect(creates).toHaveLength(2);
+		expect(creates[1].idempotencyKey).toBe(creates[0].idempotencyKey);
+		expect(patches).toHaveLength(1);
+		expect(patches[0]).toEqual(expect.objectContaining({
+			characterId: canonicalId,
+			idempotencyKey: pending.commands[0].commandKeys.patch,
+			activity,
+		}));
+		for (const id of [temporaryId, canonicalId]) {
+			expect(repository._failedWrites.has(id)).toBe(false);
+			expect(repository._recoveredBases.has(id)).toBe(false);
+			expect(repository._recoveryCommandQueues.has(id)).toBe(false);
+		}
+		expect(storage.getItem(temporaryKey)).toBeNull();
+		expect(storage.getItem(canonicalKey)).toBeNull();
+		expect(repository.hasPendingWrites()).toBe(false);
+	});
+
 	it("lists and retries an owner-scoped recovery-only create that never reached the server", async () => {
 		const storage = new MemoryStorage();
 		const temporaryId = "temporary-id";
