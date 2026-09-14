@@ -5324,6 +5324,7 @@ class CharacterSheetQuickBuild {
 		const entry = {
 			level: analysis.characterLevel,
 			class: {name: analysis.className, source: analysis.classSource},
+			classLevel: analysis.classLevel,
 			choices: {},
 			complete: true,
 			timestamp: Date.now(),
@@ -5462,6 +5463,57 @@ class CharacterSheetQuickBuild {
 		// Scholar
 		if (analysis.isScholarLevel && this._selections.scholarSkill) {
 			entry.choices.scholarSkill = this._selections.scholarSkill;
+		}
+
+		const toHistorySpells = spells => (spells || []).map(spell => ({
+			name: spell.name,
+			source: spell.source,
+			level: spell.level,
+		}));
+		const takeProgressionSelections = ({field, gainField, getCount = null, matches}) => {
+			const countFor = candidate => getCount ? getCount(candidate) : (candidate[gainField] || 0);
+			const offset = this._levelAnalysis
+				.filter(candidate => candidate.characterLevel < analysis.characterLevel && matches(candidate))
+				.reduce((sum, candidate) => sum + countFor(candidate), 0);
+			const count = countFor(analysis);
+			return toHistorySpells((this._selections[field] || []).slice(offset, offset + count));
+		};
+
+		if (analysis.isSpellbookLevel) {
+			const spellbook = takeProgressionSelections({
+				field: "spellbookSpells",
+				getCount: () => 2,
+				matches: candidate => candidate.isSpellbookLevel,
+			});
+			if (spellbook.length) entry.choices.spellbookSpells = spellbook;
+		}
+		if (analysis.isKnownCaster) {
+			const knownSpells = takeProgressionSelections({
+				field: "knownSpells",
+				gainField: "knownSpellsGainAtLevel",
+				matches: candidate => candidate.isKnownCaster,
+			});
+			const cantrips = takeProgressionSelections({
+				field: "knownCantrips",
+				gainField: "knownCantripsGainAtLevel",
+				matches: candidate => candidate.isKnownCaster,
+			});
+			if (knownSpells.length) entry.choices.knownSpells = knownSpells;
+			if (cantrips.length) entry.choices.knownCantrips = cantrips;
+		}
+		if (analysis.isPreparedCaster) {
+			const preparedSpells = takeProgressionSelections({
+				field: "preparedSpells",
+				gainField: "preparedSpellsGainAtLevel",
+				matches: candidate => candidate.isPreparedCaster,
+			});
+			const cantrips = takeProgressionSelections({
+				field: "preparedCantrips",
+				gainField: "preparedCantripsGainAtLevel",
+				matches: candidate => candidate.isPreparedCaster,
+			});
+			if (preparedSpells.length) entry.choices.preparedSpells = preparedSpells;
+			if (cantrips.length) entry.choices.preparedCantrips = cantrips;
 		}
 
 		return entry;

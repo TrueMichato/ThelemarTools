@@ -1585,6 +1585,55 @@
 		opacity: 1;
 	}
 
+	.charsheet__respec-toolbar {
+		position: static;
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.charsheet__respec-toolbar-actions {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.charsheet__respec-toolbar-actions .ve-btn,
+	.charsheet__level-entry-remove {
+		min-height: 44px;
+	}
+
+	.charsheet__respec-choice-row {
+		align-items: flex-start;
+		flex-wrap: wrap;
+	}
+
+	.charsheet__respec-choice-current {
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+
+	.charsheet__level-history {
+		padding: var(--cs-space-md, 0.75rem);
+	}
+
+	.charsheet__level-history-timeline,
+	.charsheet__level-branch-entries {
+		padding-left: var(--cs-space-lg, 1rem);
+	}
+
+	.charsheet__level-entry::before {
+		left: calc(-1 * var(--cs-space-lg, 1rem) - 12px);
+	}
+
+	.charsheet__level-entry-header {
+		align-items: flex-start;
+	}
+
+	.charsheet__level-entry-class {
+		align-items: flex-start;
+		flex-direction: column;
+		gap: var(--cs-space-xs, 0.25rem);
+	}
+
 	.charsheet__dmg-undo {
 		min-height: 44px;
 		padding: 0.25rem 0;

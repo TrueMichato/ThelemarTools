@@ -42,6 +42,11 @@ describe("CharacterSheetLevelHistory", () => {
 			expect(history[0].level).toBe(1);
 			expect(history[0].class.name).toBe("Fighter");
 			expect(history[0].choices.skills).toContain("athletics");
+			expect(history[0].ledgerVersion).toBe(2);
+			expect(history[0].manifestComplete).toBe(false);
+			expect(history[0].decisions).toEqual(expect.arrayContaining([
+				expect.objectContaining({type: "skills", selection: ["athletics", "perception"], status: "resolved"}),
+			]));
 		});
 
 		it("should replace existing history entry for same level", () => {
@@ -151,6 +156,73 @@ describe("CharacterSheetLevelHistory", () => {
 
 			state.clearLevelHistory();
 			expect(state.getLevelHistory()).toEqual([]);
+		});
+
+		it("should keep structural history complete while manifest decisions need attention", () => {
+			state.addClass({name: "Fighter", source: "XPHB", level: 1});
+			state.recordLevelChoice({
+				level: 1,
+				class: {name: "Fighter", source: "XPHB"},
+				choices: {},
+			});
+
+			state.setProgressionManifest({
+				levels: [{
+					characterLevel: 1,
+					className: "Fighter",
+					classSource: "XPHB",
+					classLevel: 1,
+					decisions: [{
+						id: "fighter-skills@level-1",
+						semanticKey: "fighter-skills",
+						characterLevel: 1,
+						className: "Fighter",
+						classSource: "XPHB",
+						classLevel: 1,
+						type: "skills",
+						label: "Starting Skills",
+						sourceKey: "starting-proficiencies",
+						slot: 0,
+						required: true,
+						count: 2,
+						options: ["Athletics", "Perception"],
+						selection: null,
+						status: "missing",
+						meta: {},
+					}],
+				}],
+			});
+
+			expect(state.hasCompleteLevelHistory()).toBe(true);
+			expect(state.isLegacyCharacter()).toBe(false);
+
+			const entry = state.getLevelHistoryEntry(1);
+			entry.decisions[0].selection = ["Athletics", "Perception"];
+			entry.decisions[0].status = "resolved";
+			entry.complete = true;
+
+			expect(state.hasCompleteLevelHistory()).toBe(true);
+			expect(state.isLegacyCharacter()).toBe(false);
+		});
+
+		it("should remain non-legacy when a newly recorded level follows manifest-backed history", () => {
+			state.addClass({name: "Fighter", source: "XPHB", level: 2});
+			state.recordLevelChoice({
+				level: 1,
+				class: {name: "Fighter", source: "XPHB"},
+				manifestVersion: 1,
+				manifestComplete: true,
+				decisions: [],
+				choices: {},
+			});
+			state.recordLevelChoice({
+				level: 2,
+				class: {name: "Fighter", source: "XPHB"},
+				choices: {},
+			});
+
+			expect(state.hasCompleteLevelHistory()).toBe(true);
+			expect(state.isLegacyCharacter()).toBe(false);
 		});
 	});
 

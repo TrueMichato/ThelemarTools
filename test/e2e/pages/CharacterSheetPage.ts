@@ -152,6 +152,119 @@ export class CharacterSheetPage {
 		await this.page.waitForTimeout(100);
 	}
 
+	async makeFirstClassSkillDecisionMissing (): Promise<string[]> {
+		return this.page.evaluate(async () => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			const history = state?.getLevelHistoryEntry?.(1);
+			const skills = [...(history?.choices?.skills || [])];
+			for (const skill of skills) {
+				const key = String(skill).toLowerCase().replace(/\s+/g, "").replace(/'s?/g, "");
+				state?.setSkillProficiency?.(key, 0);
+			}
+			delete history.choices.skills;
+			history.decisions = (history.decisions || []).filter((decision: any) => decision.type !== "skills");
+			history.manifestComplete = false;
+			history.complete = false;
+			await cs?._saveCurrentCharacter?.();
+			cs?._renderCharacter?.();
+			return skills;
+		});
+	}
+
+	async openRespec (): Promise<void> {
+		await this.switchToTab(this.tabRespec);
+		await this.page.locator("#charsheet-respec-draft-status").waitFor({state: "visible", timeout: 5000});
+	}
+
+	async getRespecDraftStatus (): Promise<string> {
+		return ((await this.page.locator("#charsheet-respec-draft-status").textContent()) || "").trim();
+	}
+
+	async stageFirstMissingRespecSkillChoice (): Promise<string[]> {
+		const level = this.page.locator('.charsheet__level-entry[data-level="1"]');
+		await level.locator(".charsheet__level-entry-edit").click();
+		const decisionRow = this.page.locator(".charsheet__respec-choice-row").filter({hasText: "Starting Skill Proficiencies"}).last();
+		await decisionRow.locator("button", {hasText: "Change"}).click();
+
+		const editor = this.page.locator(".charsheet__respec-decision-editor").last();
+		const requiredCount = await this.page.evaluate(() => {
+			const decisions = (globalThis as any).charSheet?._respec?._engine?.manifest?.decisions || [];
+			return decisions.find((decision: any) => decision.type === "skills" && decision.characterLevel === 1)?.count || 1;
+		});
+		const options = editor.locator('.charsheet__respec-option input[type="checkbox"]');
+		const selected: string[] = [];
+		for (let i = 0; i < requiredCount; ++i) {
+			const option = options.nth(i);
+			selected.push(await option.locator("xpath=..").innerText());
+			await option.check();
+		}
+		await editor.locator("button", {hasText: "Stage Choice"}).click();
+		return selected.map(it => it.trim());
+	}
+
+	async getRespecSkillSnapshot (): Promise<{live: string[]; draft: string[]}> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const getSkills = (state: any) => Object.entries(state?.getSkillProficiencies?.() || {})
+				.filter(([, level]) => Number(level) >= 1)
+				.map(([skill]) => skill)
+				.sort();
+			return {
+				live: getSkills(cs?._state),
+				draft: getSkills(cs?._respec?._state),
+			};
+		});
+	}
+
+	async cancelRespecDraft (): Promise<void> {
+		await this.page.locator("#charsheet-respec-cancel").click();
+	}
+
+	async applyRespecDraft (): Promise<void> {
+		const apply = this.page.locator("#charsheet-respec-apply");
+		if (!await apply.isEnabled()) {
+			const validation = await this.page.evaluate(() => {
+				const engine = (globalThis as any).charSheet?._respec?._engine;
+				return {
+					status: (document.querySelector("#charsheet-respec-draft-status")?.textContent || "").trim(),
+					issues: engine?.getValidation?.().issues || [],
+					decisions: (engine?.manifest?.decisions || [])
+						.filter((decision: any) => decision.status !== "resolved" && decision.status !== "deferred")
+						.map((decision: any) => ({
+							label: decision.label,
+							status: decision.status,
+							count: decision.count,
+							selection: decision.selection,
+							optionCount: decision.options?.length || 0,
+						})),
+				};
+			});
+			throw new Error(`Respec Apply remained disabled: ${JSON.stringify(validation)}`);
+		}
+		await apply.click();
+		await expect(this.page.locator("#charsheet-respec-undo")).toBeEnabled();
+	}
+
+	async undoAppliedRespec (): Promise<void> {
+		await this.page.locator("#charsheet-respec-undo").click();
+		await expect(this.page.locator("#charsheet-respec-undo")).toBeDisabled();
+	}
+
+	async expectRespecToolbarFitsViewport (): Promise<void> {
+		const toolbar = this.page.locator(".charsheet__respec-toolbar");
+		const box = await toolbar.boundingBox();
+		const viewport = this.page.viewportSize();
+		if (!box || !viewport) throw new Error("Respec toolbar geometry was unavailable");
+		expect(box.x).toBeGreaterThanOrEqual(0);
+		expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+		for (const button of await toolbar.locator("button").all()) {
+			const buttonBox = await button.boundingBox();
+			if (!buttonBox) continue;
+			expect(buttonBox.height).toBeGreaterThanOrEqual(40);
+		}
+	}
+
 	/**
 	 * Enable the optional "Abilities" tab via the page controller and refresh tab
 	 * visibility, so its nav link becomes clickable. Best-effort and idempotent.

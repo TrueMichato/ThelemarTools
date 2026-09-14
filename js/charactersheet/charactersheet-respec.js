@@ -7,11 +7,20 @@ const {e_, ee} = /** @type {*} */ (globalThis);
 class CharacterSheetRespec {
 	constructor ({page, state}) {
 		this._page = page;
+		this._liveState = state;
 		this._state = state;
+		this._engine = globalThis.CharacterSheetRespecEngine
+			? new globalThis.CharacterSheetRespecEngine({page, state})
+			: null;
 
 		this._timeline = null;
 		this._legacyBadge = null;
 		this._container = null;
+		this._draftStatus = null;
+		this._btnUndo = null;
+		this._btnCancel = null;
+		this._btnReview = null;
+		this._btnApply = null;
 	}
 
 	/**
@@ -21,12 +30,22 @@ class CharacterSheetRespec {
 		this._container = document.getElementById("charsheet-level-history");
 		this._timeline = document.getElementById("charsheet-level-timeline");
 		this._legacyBadge = document.getElementById("charsheet-legacy-badge");
+		this._draftStatus = document.getElementById("charsheet-respec-draft-status");
+		this._btnUndo = document.getElementById("charsheet-respec-undo");
+		this._btnCancel = document.getElementById("charsheet-respec-cancel");
+		this._btnReview = document.getElementById("charsheet-respec-review");
+		this._btnApply = document.getElementById("charsheet-respec-apply");
 
 		if (!this._container) {
 			// eslint-disable-next-line no-console
 			console.warn("[Respec] Level history container not found");
 			return;
 		}
+
+		this._btnUndo?.addEventListener("click", () => this._onUndo());
+		this._btnCancel?.addEventListener("click", () => this._onCancelDraft());
+		this._btnReview?.addEventListener("click", () => this._showDraftReview());
+		this._btnApply?.addEventListener("click", () => this._onApplyDraft());
 
 		// Initial render
 		this.render();
@@ -37,6 +56,11 @@ class CharacterSheetRespec {
 	 */
 	render () {
 		if (!this._timeline) return;
+		if (this._engine) {
+			this._engine.syncCleanDraft();
+			this._state = this._engine.state;
+			this._renderDraftStatus();
+		}
 
 		const totalLevel = this._state.getTotalLevel();
 
@@ -82,6 +106,94 @@ class CharacterSheetRespec {
 			const entry = this._renderLevelEntry(level, history, level === totalLevel, hpByLevel.get(level));
 			this._timeline.append(entry);
 		}
+	}
+
+	_renderDraftStatus () {
+		if (!this._engine || !this._draftStatus) return;
+		const validation = this._engine.getValidation();
+		const changeCount = this._engine.getChangeSummary().length;
+		const attention = validation.errors.length;
+		this._draftStatus.textContent = attention
+			? `${attention} required decision${attention === 1 ? "" : "s"} need attention${changeCount ? ` · ${changeCount} staged change${changeCount === 1 ? "" : "s"}` : ""}`
+			: `${changeCount} staged change${changeCount === 1 ? "" : "s"} · Ready to apply`;
+		this._draftStatus.classList.toggle("charsheet__respec-draft-status--invalid", attention > 0);
+		if (this._btnApply) this._btnApply.disabled = !this._engine.isDirty || !validation.isValid;
+		if (this._btnCancel) this._btnCancel.disabled = !this._engine.isDirty;
+		if (this._btnReview) this._btnReview.disabled = !this._engine.isDirty && !attention;
+		if (this._btnUndo) this._btnUndo.disabled = !this._engine.canUndo;
+	}
+
+	_onCancelDraft () {
+		if (!this._engine?.isDraftActive) return;
+		this._engine.cancel();
+		this._state = this._liveState;
+		this.render();
+		JqueryUtil.doToast({type: "info", content: "Respec draft discarded."});
+	}
+
+	async _onApplyDraft () {
+		if (!this._engine) return;
+		try {
+			await this._engine.apply();
+			this._state = this._liveState;
+			this.render();
+			JqueryUtil.doToast({type: "success", content: "Respec applied. You can undo it until you start another draft."});
+		} catch (error) {
+			JqueryUtil.doToast({type: "danger", content: error.message || "Could not apply the Respec draft."});
+		}
+	}
+
+	async _onUndo () {
+		if (!this._engine?.canUndo) return;
+		try {
+			await this._engine.undo();
+			this._state = this._liveState;
+			this.render();
+			JqueryUtil.doToast({type: "success", content: "The previous character state was restored."});
+		} catch (error) {
+			JqueryUtil.doToast({type: "danger", content: error.message || "Could not undo the Respec."});
+		}
+	}
+
+	async _showDraftReview () {
+		if (!this._engine) return;
+		const validation = this._engine.getValidation();
+		const changes = this._engine.getChangeSummary();
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: "Review Respec Draft",
+			isMinHeight0: true,
+			isWidth100: true,
+			isUncappedWidth: true,
+			cbClose: () => {},
+		});
+		const content = e_({tag: "div", clazz: "charsheet__respec-review"});
+		if (validation.errors.length) {
+			content.append(e_({outer: `<div class="ve-alert ve-alert--warning mb-2"><b>${validation.errors.length} item${validation.errors.length === 1 ? "" : "s"} need attention before Apply.</b></div>`}));
+			const issueList = e_({tag: "ul", clazz: "charsheet__respec-review-list"});
+			validation.errors.forEach(issue => issueList.append(e_({tag: "li", txt: `${issue.level ? `Level ${issue.level}: ` : ""}${issue.message}`})));
+			content.append(issueList);
+		}
+		if (validation.warnings.length) {
+			const warningList = e_({tag: "ul", clazz: "charsheet__respec-review-list"});
+			validation.warnings.forEach(issue => warningList.append(e_({tag: "li", txt: `${issue.level ? `Level ${issue.level}: ` : ""}${issue.message}`})));
+			content.append(e_({tag: "h4", txt: "Warnings"}), warningList);
+		}
+		if (changes.length) {
+			const changeList = e_({tag: "ul", clazz: "charsheet__respec-review-list"});
+			changes.forEach(change => {
+				const before = change.before == null ? "Not selected" : globalThis.CharacterSheetProgression.getDecisionDisplayValue({selection: change.before});
+				const after = change.after == null ? "Not selected" : globalThis.CharacterSheetProgression.getDecisionDisplayValue({selection: change.after});
+				const location = change.level ? `Level ${change.level}` : "Character Base";
+				changeList.append(e_({tag: "li", txt: `${location}: ${change.label} — ${before} → ${after}`}));
+			});
+			content.append(e_({tag: "h4", txt: "Staged changes"}), changeList);
+		} else {
+			content.append(e_({tag: "p", clazz: "ve-muted", txt: "No changes are staged."}));
+		}
+		const close = e_({tag: "button", clazz: "ve-btn ve-btn-default mt-2", txt: "Close"});
+		close.addEventListener("click", () => doClose());
+		content.append(close);
+		modalInner.append(content);
 	}
 
 	/**
@@ -261,19 +373,29 @@ class CharacterSheetRespec {
 				<span class="charsheet__level-entry-class-level">${levelLabel}</span>
 			</div>
 		`});
+		const levelDecisions = this._engine?.manifest?.decisions?.filter(decision => decision.characterLevel === totalLevel) || [];
+		const decisionsNeedingAttention = levelDecisions.filter(decision =>
+			decision.status === "invalid"
+				|| decision.status === "ambiguous"
+				|| (decision.required && decision.status !== "resolved"),
+		);
+		const status = e_({
+			tag: "span",
+			clazz: `charsheet__respec-level-status ${decisionsNeedingAttention.length ? "charsheet__respec-level-status--attention" : "charsheet__respec-level-status--complete"}`,
+			txt: decisionsNeedingAttention.length
+				? `${decisionsNeedingAttention.length} need attention`
+				: `${levelDecisions.length} decision${levelDecisions.length === 1 ? "" : "s"} reviewed`,
+		});
+		classInfo.append(status);
 
 		// Edit button - disabled for legacy entries
 		const editBtn = e_({outer: `
-			<button class="charsheet__level-entry-edit" title="${isLegacy ? "Cannot edit legacy level - level history not recorded" : "Edit choices for this level"}">
+			<button class="charsheet__level-entry-edit" type="button" aria-label="Edit ${levelLabel} choices" title="Edit choices for this level">
 				<span class="glyphicon glyphicon-pencil"></span>
 			</button>
 		`});
 
-		if (isLegacy) {
-			editBtn.disabled = true;
-		} else {
-			editBtn.addEventListener("click", () => this._onEditLevel(totalLevel, history));
-		}
+		editBtn.addEventListener("click", () => this._onEditLevel(totalLevel, history));
 
 		const headerActions = e_({tag: "div", clazz: "charsheet__level-entry-actions"});
 		headerActions.append(editBtn);
@@ -467,9 +589,16 @@ class CharacterSheetRespec {
 				`}));
 			}
 		} else if (isLegacy) {
-			choices.append(e_({outer: `<span class="charsheet__level-entry-empty">No history recorded (legacy character)</span>`}));
+			choices.append(e_({outer: `<span class="charsheet__level-entry-empty">No choices could be reconstructed. Open this level to review its decision opportunities.</span>`}));
 		} else {
 			choices.append(e_({outer: `<span class="charsheet__level-entry-empty">No choices at this level</span>`}));
+		}
+		for (const decision of decisionsNeedingAttention) {
+			choices.append(e_({
+				tag: "span",
+				clazz: "charsheet__level-choice charsheet__level-choice--attention",
+				txt: `${decision.label}: ${decision.status}`,
+			}));
 		}
 
 		// HP gain pill — always shown when we have breakdown data, so players can see
@@ -629,8 +758,7 @@ class CharacterSheetRespec {
 			const result = doRemove();
 			if (result.success) {
 				doClose();
-				this._page.renderCharacter();
-				this._page.saveCharacter();
+				this._engine?.markDirty();
 				this.render();
 				JqueryUtil.doToast({type: "success", content: `Removed ${preview.className} level ${preview.classLevel}.`});
 			} else {
@@ -695,7 +823,8 @@ class CharacterSheetRespec {
 				if (speed) items.push(`Speed ${speed} ft.`);
 				if (typeof race.speed === "object") {
 					["fly", "swim", "climb", "burrow"].forEach(t => {
-						if (race.speed[t]) items.push(`${(/** @type {*} */ (t)).toTitleCase()} ${race.speed[t]} ft.`);
+						if (race.speed[t] === true) items.push(`${(/** @type {*} */ (t)).toTitleCase()} equal to walking speed`);
+						else if (race.speed[t]) items.push(`${(/** @type {*} */ (t)).toTitleCase()} ${race.speed[t]} ft.`);
 					});
 				}
 			}
@@ -897,6 +1026,69 @@ class CharacterSheetRespec {
 	 * @returns {Array} Array of {type, label, current} objects
 	 */
 	_getEditableChoices (level, history) {
+		const manifestDecisions = this._engine?.manifest?.decisions?.filter(decision => decision.characterLevel === level) || [];
+		if (manifestDecisions.length) {
+			const editable = manifestDecisions.map(decision => {
+				const out = {
+					type: decision.type,
+					label: decision.label,
+					current: globalThis.CharacterSheetProgression.getDecisionDisplayValue(decision),
+					decision,
+					hasCascade: ["class", "subclass"].includes(decision.type),
+				};
+				if (decision.type === "asiOrFeat" && decision.selection?.mode) out.type = decision.selection.mode;
+				if (decision.type === "featureChoice") {
+					out.index = (history.choices?.featureChoices || []).findIndex(choice =>
+						choice.featureName === decision.sourceKey,
+					);
+				}
+				if (decision.type === "classFeatProgressionFeat") {
+					out.index = (history.choices?.classFeatProgressionFeats || []).findIndex(choice =>
+						choice.progressionName === decision.sourceKey,
+					);
+				}
+				if (decision.type === "optionalFeatures") {
+					out.featureTypeKey = decision.sourceKey.split("|")[0];
+					out.count = decision.count;
+					if (out.featureTypeKey.startsWith("CTM:")) out.type = "combatMethods";
+				}
+				return out;
+			});
+			const representedTypes = new Set(manifestDecisions.map(decision => decision.type));
+			if (history.choices?.combatTraditions?.length && !representedTypes.has("combatTraditions")) {
+				editable.push({
+					type: "combatTraditions",
+					label: "Combat Traditions",
+					current: history.choices.combatTraditions.join(", "),
+				});
+			}
+			if (history.choices?.weaponMasteries?.length && !representedTypes.has("weaponMasteries")) {
+				editable.push({
+					type: "weaponMasteries",
+					label: "Weapon Masteries",
+					current: history.choices.weaponMasteries.map(mastery => mastery.split("|")[0]).join(", "),
+				});
+			}
+			const representedOptionalTypes = new Set(manifestDecisions
+				.filter(decision => decision.type === "optionalFeatures")
+				.map(decision => decision.sourceKey.split("|")[0]));
+			const legacyOptionalByType = {};
+			for (const feature of history.choices?.optionalFeatures || []) {
+				const type = feature.type || "other";
+				if (representedOptionalTypes.has(type)) continue;
+				(legacyOptionalByType[type] ||= []).push(feature);
+			}
+			for (const [type, features] of Object.entries(legacyOptionalByType)) {
+				editable.push({
+					type: type.startsWith("CTM:") ? "combatMethods" : "optionalFeatures",
+					label: CharacterSheetRespec._getOptionalFeatureTypeLabel(type),
+					current: features.map(feature => feature.name).join(", "),
+					featureTypeKey: type,
+					count: features.length,
+				});
+			}
+			return editable;
+		}
 		const editable = [];
 
 		// NOTE: Species and Background are NOT edited here. They belong to the character base (rendered as
@@ -1021,7 +1213,7 @@ class CharacterSheetRespec {
 		const content = e_({tag: "div", clazz: "charsheet__respec-modal"});
 
 		// Show current choices
-		content.append(e_({outer: `<h4>Current Choices</h4>`}));
+		content.append(e_({outer: `<h4>Progression Decisions</h4>`}));
 
 		const choicesList = e_({tag: "div", clazz: "charsheet__respec-choices-list"});
 		editableChoices.forEach(choice => {
@@ -1029,10 +1221,12 @@ class CharacterSheetRespec {
 				? (choice.current.name || JSON.stringify(choice.current))
 				: String(choice.current);
 
+			const status = choice.decision?.status || "resolved";
 			const choiceRow = e_({outer: `
-				<div class="charsheet__respec-choice-row">
+				<div class="charsheet__respec-choice-row charsheet__respec-choice-row--${status}">
 					<span class="charsheet__respec-choice-label">${choice.label}:</span>
 					<span class="charsheet__respec-choice-current">${currentText}</span>
+					<span class="charsheet__respec-choice-status">${status}</span>
 					${choice.hasCascade ? `<span class="charsheet__respec-choice-warning" title="Changing this will remove dependent features">\u26a0\ufe0f</span>` : ""}
 				</div>
 			`});
@@ -1095,9 +1289,702 @@ class CharacterSheetRespec {
 			case "classFeatProgressionFeat":
 				await this._editClassFeatProgressionFeat(level, history, choice, closeParentModal);
 				break;
+			case "class":
+				await this._editClassAllocation(level, history, choice, closeParentModal);
+				break;
+			case "asiOrFeat":
+				await this._editAsiOrFeat(level, history, choice, closeParentModal);
+				break;
+			case "skills":
+			case "tools":
+			case "expertise":
+			case "languages":
+			case "knownSpells":
+			case "cantrips":
+			case "preparedSpells":
+			case "preparedCantrips":
+			case "spellbookSpells":
+			case "scholar":
+			case "subclassChoice":
+			case "spellMastery":
+			case "signatureSpells":
+				await this._editManifestOptions(level, history, choice, closeParentModal);
+				break;
+			case "hp":
+				await this._editHpDecision(level, history, choice, closeParentModal);
+				break;
+			case "spellSwap":
+				await this._editSpellSwapDecision(level, history, choice, closeParentModal);
+				break;
 			default:
 				JqueryUtil.doToast({type: "warning", content: "Editing this choice type is not yet implemented."});
 		}
+	}
+
+	_getDecisionOptions (decision) {
+		let options = [...(decision.options || [])];
+		if (["knownSpells", "preparedSpells", "spellbookSpells", "cantrips", "preparedCantrips", "spellMastery", "signatureSpells", "spellSwap"].includes(decision.type)) {
+			const classData = this._page.getClasses?.().find(cls =>
+				cls.name === decision.className && cls.source === decision.classSource,
+			) || this._page.getClasses?.().find(cls => cls.name === decision.className);
+			const classEntry = this._state.getClasses().find(cls => cls.name === decision.className && cls.source === decision.classSource)
+				|| this._state.getClasses().find(cls => cls.name === decision.className);
+			const maxSpellLevel = decision.meta?.maxSpellLevel;
+			options = options.filter(spell => {
+				if (decision.type === "cantrips" || decision.type === "preparedCantrips") {
+					if (spell.level !== 0) return false;
+				} else if (!Number.isFinite(Number(spell.level)) || spell.level < 1) return false;
+				if (maxSpellLevel != null && spell.level > maxSpellLevel) return false;
+				return CharacterSheetClassUtils.spellIsAvailableForClass(spell, {
+					className: decision.className,
+					classSource: decision.classSource,
+					subclass: classEntry?.subclass,
+					subclassChoice: classEntry?.subclassChoice,
+					includeCoreSpellsForHomebrew: !["PHB", "XPHB"].includes(classData?.source),
+				});
+			});
+		}
+		return options;
+	}
+
+	static _getDecisionOptionKey (option) {
+		if (typeof option === "string") return option.toLowerCase();
+		return `${option?.name || option?.choice || option?.label || JSON.stringify(option)}|${option?.source || ""}`.toLowerCase();
+	}
+
+	static _getDecisionOptionLabel (option) {
+		if (typeof option === "string") return (/** @type {*} */ (option)).toTitleCase();
+		const source = option?.source ? ` (${Parser.sourceJsonToAbv(option.source)})` : "";
+		return `${option?.name || option?.choice || option?.label || "Option"}${source}`;
+	}
+
+	static _toDecisionSelectionValue (option) {
+		if (typeof option === "string") {
+			return option;
+		}
+		if (option?.name) {
+			return {
+				name: option.name,
+				source: option.source,
+				...(option.level != null ? {level: option.level} : {}),
+				...(option.shortName ? {shortName: option.shortName} : {}),
+			};
+		}
+		return MiscUtil.copyFast(option);
+	}
+
+	async _editManifestOptions (level, history, choice, closeParentModal) {
+		const decision = choice.decision;
+		if (!decision) return;
+		const options = this._getDecisionOptions(decision);
+		const selected = new Map();
+		const currentValues = Array.isArray(decision.selection)
+			? decision.selection
+			: (decision.selection == null ? [] : [decision.selection]);
+		currentValues.forEach(value => selected.set(CharacterSheetRespec._getDecisionOptionKey(value), value));
+
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: `${decision.label} · Level ${level}`,
+			isMinHeight0: true,
+			isWidth100: true,
+			isUncappedWidth: true,
+			cbClose: () => {},
+		});
+		const content = e_({tag: "div", clazz: "charsheet__respec-decision-editor"});
+		content.append(e_({
+			tag: "p",
+			clazz: "ve-muted",
+			txt: `Choose ${decision.count} option${decision.count === 1 ? "" : "s"}. ${decision.required ? "This decision is required." : "You may leave it deferred."}`,
+		}));
+		const search = e_({tag: "input", clazz: "ve-form-control mb-2"});
+		search.type = "search";
+		search.placeholder = `Search ${decision.label.toLowerCase()}...`;
+		search.setAttribute("aria-label", `Search ${decision.label}`);
+		content.append(search);
+
+		const count = e_({tag: "div", clazz: "charsheet__respec-selection-count", txt: `${selected.size}/${decision.count} selected`});
+		const list = e_({tag: "div", clazz: "charsheet__respec-option-list"});
+		content.append(count, list);
+
+		const renderOptions = () => {
+			list.innerHTML = "";
+			const query = search.value.trim().toLowerCase();
+			const filtered = options.filter(option => CharacterSheetRespec._getDecisionOptionLabel(option).toLowerCase().includes(query));
+			filtered.slice(0, 150).forEach(option => {
+				const key = CharacterSheetRespec._getDecisionOptionKey(option);
+				const row = e_({tag: "label", clazz: "charsheet__respec-option"});
+				const input = e_({tag: "input"});
+				input.type = decision.count === 1 ? "radio" : "checkbox";
+				input.name = `respec-${decision.id}`;
+				input.checked = selected.has(key);
+				const label = e_({tag: "span", txt: CharacterSheetRespec._getDecisionOptionLabel(option)});
+				input.addEventListener("change", () => {
+					if (decision.count === 1) selected.clear();
+					if (input.checked) {
+						if (selected.size >= decision.count) {
+							input.checked = false;
+							return;
+						}
+						selected.set(key, CharacterSheetRespec._toDecisionSelectionValue(option));
+					} else selected.delete(key);
+					count.textContent = `${selected.size}/${decision.count} selected`;
+					if (decision.count === 1) renderOptions();
+				});
+				row.append(input, label);
+				list.append(row);
+			});
+			if (filtered.length > 150) {
+				list.append(e_({tag: "p", clazz: "ve-muted ve-small", txt: `${filtered.length - 150} more results. Refine the search to narrow the list.`}));
+			}
+			if (!filtered.length) list.append(e_({tag: "p", clazz: "ve-muted", txt: "No legal options match this search."}));
+		};
+		search.addEventListener("input", renderOptions);
+		renderOptions();
+
+		const actions = e_({tag: "div", clazz: "charsheet__respec-btn-row mt-3"});
+		const cancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel"});
+		cancel.addEventListener("click", () => doClose());
+		if (!decision.required) {
+			const defer = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Defer"});
+			defer.addEventListener("click", () => {
+				this._engine.updateDecisionSelection(decision.id, null, {status: "deferred"});
+				doClose();
+				closeParentModal?.();
+				this.render();
+			});
+			actions.append(defer);
+		}
+		const apply = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "Stage Choice"});
+		apply.addEventListener("click", () => {
+			if (selected.size !== decision.count) {
+				JqueryUtil.doToast({type: "warning", content: `Choose exactly ${decision.count} option${decision.count === 1 ? "" : "s"}.`});
+				return;
+			}
+			const values = [...selected.values()];
+			const selection = ["scholar", "subclassChoice"].includes(decision.type) && decision.count === 1
+				? values[0]
+				: values;
+			this._applyManifestSelectionMechanics(decision, selection, options);
+			this._engine.updateDecisionSelection(decision.id, selection);
+			doClose();
+			closeParentModal?.();
+			this.render();
+			JqueryUtil.doToast({type: "success", content: `${decision.label} staged in the Respec draft.`});
+		});
+		actions.append(cancel, apply);
+		content.append(actions);
+		modalInner.append(content);
+		search.focus();
+	}
+
+	_applyManifestSelectionMechanics (decision, selection, options) {
+		const next = Array.isArray(selection) ? selection : (selection == null ? [] : [selection]);
+		const previous = Array.isArray(decision.selection)
+			? decision.selection
+			: (decision.selection == null ? [] : [decision.selection]);
+		const nextKeys = new Set(next.map(CharacterSheetRespec._getDecisionOptionKey));
+		const findFull = selected => options.find(option =>
+			CharacterSheetRespec._getDecisionOptionKey(option) === CharacterSheetRespec._getDecisionOptionKey(selected),
+		) || selected;
+		const normalizeSkill = value => String(value || "").toLowerCase().replace(/\s+/g, "").replace(/'s?/g, "");
+		const release = (type, value, fnRemove) => {
+			if (this._state.releaseProgressionOwnership(type, value, decision.semanticKey)) fnRemove();
+		};
+		const claim = (type, value) => this._state.claimProgressionOwnership(type, value, decision.semanticKey);
+
+		if (decision.type === "skills") {
+			previous.filter(value => !nextKeys.has(CharacterSheetRespec._getDecisionOptionKey(value)))
+				.forEach(value => release("skills", value, () => this._state.setSkillProficiency(normalizeSkill(value), 0)));
+			next.forEach(value => {
+				claim("skills", value);
+				const skill = normalizeSkill(value);
+				if (this._state.getSkillProficiency(skill) < 1) this._state.addSkillProficiency(skill);
+			});
+		}
+		if (decision.type === "expertise") {
+			const toolName = decision.meta?.allowTools ? decision.meta?.toolName : null;
+			const isTool = value => toolName
+				&& CharacterSheetRespec._getDecisionOptionKey(value) === CharacterSheetRespec._getDecisionOptionKey(toolName);
+			previous.filter(value => !nextKeys.has(CharacterSheetRespec._getDecisionOptionKey(value)))
+				.forEach(value => release("expertise", value, () => {
+					if (!isTool(value)) this._state.setSkillProficiency(normalizeSkill(value), 1);
+				}));
+			next.forEach(value => {
+				claim("expertise", value);
+				if (!isTool(value)) this._state.addExpertise(normalizeSkill(value));
+			});
+		}
+		if (decision.type === "tools") {
+			previous.filter(value => !nextKeys.has(CharacterSheetRespec._getDecisionOptionKey(value)))
+				.forEach(value => release("tools", value, () => this._state.removeToolProficiency(value)));
+			next.forEach(value => {
+				claim("tools", value);
+				this._state.addToolProficiency(value);
+			});
+		}
+		if (decision.type === "languages") {
+			previous.filter(value => !nextKeys.has(CharacterSheetRespec._getDecisionOptionKey(value)))
+				.forEach(value => release("languages", value, () => this._state.removeLanguage(value)));
+			next.forEach(value => {
+				claim("languages", value);
+				this._state.addLanguage(value);
+			});
+		}
+		if (decision.type === "scholar") this._state.setScholarExpertise(next[0] || null);
+		if (decision.type === "spellMastery") {
+			this._state.setSpellMasterySpells(next);
+			return;
+		}
+		if (decision.type === "signatureSpells") {
+			this._state.setSignatureSpells(next);
+			return;
+		}
+
+		const spellTypes = new Set(["knownSpells", "preparedSpells", "spellbookSpells", "cantrips", "preparedCantrips"]);
+		if (!spellTypes.has(decision.type)) {
+			return;
+		}
+		previous.filter(value => !nextKeys.has(CharacterSheetRespec._getDecisionOptionKey(value)))
+			.forEach(value => {
+				const type = ["cantrips", "preparedCantrips"].includes(decision.type) ? "cantrips" : "spells";
+				release(type, value, () => this._state.removeSpell(value.name, value.source));
+			});
+		const added = next.filter(value => !new Set(previous.map(CharacterSheetRespec._getDecisionOptionKey)).has(CharacterSheetRespec._getDecisionOptionKey(value)));
+		added.forEach(value => {
+			const spell = findFull(value);
+			if (["cantrips", "preparedCantrips"].includes(decision.type)) {
+				claim("cantrips", value);
+				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(spell, {
+					sourceFeature: "Cantrips Known",
+					sourceClass: decision.className,
+				}));
+				return;
+			}
+			claim("spells", value);
+			this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
+				sourceFeature: decision.type === "spellbookSpells" ? "Wizard Spellbook" : (decision.type === "preparedSpells" ? "Prepared Spells" : "Spells Known"),
+				sourceClass: decision.className,
+				prepared: decision.type === "preparedSpells",
+				inSpellbook: decision.type === "spellbookSpells",
+			}));
+		});
+	}
+
+	async _editAsiOrFeat (level, history, choice, closeParentModal) {
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: `Level ${level} Improvement`,
+			isMinHeight0: true,
+			cbClose: () => {},
+		});
+		const content = e_({tag: "div", clazz: "charsheet__respec-decision-mode"});
+		content.append(e_({tag: "p", txt: "Choose which kind of improvement this level grants."}));
+		const asi = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "Ability Score Improvement"});
+		asi.addEventListener("click", () => {
+			doClose();
+			this._editAsi(level, history, closeParentModal);
+		});
+		const feat = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Feat"});
+		feat.addEventListener("click", () => {
+			doClose();
+			this._editFeat(level, history, closeParentModal);
+		});
+		content.append(asi, feat);
+		modalInner.append(content);
+	}
+
+	async _editClassAllocation (level, history, choice, closeParentModal) {
+		const decision = choice.decision;
+		const classes = this._page.filterByAllowedSources
+			? this._page.filterByAllowedSources(this._page.getClasses?.() || [])
+			: (this._page.getClasses?.() || []);
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: `Change Class at Character Level ${level}`,
+			isMinHeight0: true,
+			isWidth100: true,
+			isUncappedWidth: true,
+			cbClose: () => {},
+		});
+		const content = e_({tag: "div", clazz: "charsheet__respec-decision-editor"});
+		content.append(e_({
+			tag: "div",
+			clazz: "ve-alert ve-alert--warning mb-2",
+			html: "Changing a historical class recomputes class levels, subclasses, features, starting grants, multiclass grants, hit dice, spell slots, and every later decision opportunity.",
+		}));
+		const search = e_({tag: "input", clazz: "ve-form-control mb-2"});
+		search.type = "search";
+		search.placeholder = "Search classes...";
+		const list = e_({tag: "div", clazz: "charsheet__respec-option-list"});
+		let selectedClass = null;
+		const render = () => {
+			list.innerHTML = "";
+			const query = search.value.trim().toLowerCase();
+			classes.filter(cls => cls.name.toLowerCase().includes(query)).slice(0, 100).forEach(cls => {
+				const row = e_({tag: "button", clazz: "charsheet__respec-option charsheet__respec-option--button"});
+				row.type = "button";
+				row.append(e_({tag: "span", txt: `${cls.name} (${Parser.sourceJsonToAbv(cls.source)})`}));
+				if (selectedClass?.name === cls.name && selectedClass?.source === cls.source) row.classList.add("is-selected");
+				row.addEventListener("click", () => {
+					selectedClass = cls;
+					render();
+				});
+				list.append(row);
+			});
+		};
+		search.addEventListener("input", render);
+		render();
+		content.append(search, list);
+		const actions = e_({tag: "div", clazz: "charsheet__respec-btn-row mt-3"});
+		const cancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel"});
+		cancel.addEventListener("click", () => doClose());
+		const apply = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "Stage Class Change"});
+		apply.addEventListener("click", () => {
+			if (!selectedClass) {
+				JqueryUtil.doToast({type: "warning", content: "Select a class first."});
+				return;
+			}
+			if (selectedClass.name === decision.className && selectedClass.source === decision.classSource) {
+				doClose();
+				return;
+			}
+			this._applyClassAllocationChange(decision, selectedClass);
+			doClose();
+			closeParentModal?.();
+			this.render();
+			JqueryUtil.doToast({type: "success", content: `Character level ${level} is now assigned to ${selectedClass.name}. Review the affected decisions before applying.`});
+		});
+		actions.append(cancel, apply);
+		content.append(actions);
+		modalInner.append(content);
+		search.focus();
+	}
+
+	_applyClassAllocationChange (decision, selectedClass) {
+		const oldHistory = this._state.getLevelHistory().map(entry => MiscUtil.copyFast(entry));
+		const oldAsi = Object.fromEntries(Parser.ABIL_ABVS.map(ability => [ability, oldHistory.reduce(
+			(sum, entry) => sum + (Number(entry.choices?.asi?.[ability]) || 0),
+			0,
+		)]));
+		const oldFeatUids = new Set(oldHistory.map(entry => entry.choices?.feat).filter(Boolean).map(feat => `${feat.name}|${feat.source}`.toLowerCase()));
+
+		this._engine.updateDecisionSelection(decision.id, {name: selectedClass.name, source: selectedClass.source});
+		this._rebuildClassProgression();
+
+		const newHistory = this._state.getLevelHistory();
+		Parser.ABIL_ABVS.forEach(ability => {
+			const nextAsi = newHistory.reduce((sum, entry) => sum + (Number(entry.choices?.asi?.[ability]) || 0), 0);
+			const baseWithoutOldProgression = this._state.getAbilityBase(ability) - oldAsi[ability];
+			this._state.setAbilityBase(ability, baseWithoutOldProgression + nextAsi);
+		});
+		const newFeatUids = new Set(newHistory.map(entry => entry.choices?.feat).filter(Boolean).map(feat => `${feat.name}|${feat.source}`.toLowerCase()));
+		for (const uid of oldFeatUids) {
+			if (newFeatUids.has(uid)) continue;
+			const [name, source] = uid.split("|");
+			this._state.removeFeat(name, source);
+		}
+		this._state.recalculateHp({syncCurrent: false});
+		this._engine.markDirty();
+	}
+
+	_rebuildClassProgression () {
+		const state = this._state;
+		const history = state.getLevelHistory().sort((a, b) => a.level - b.level);
+		const existingClasses = state.getClasses();
+		const oldResources = new Map((state.getResources?.() || []).map(resource => [resource.name, resource.current]));
+		const oldCurrentHp = state.getCurrentHp();
+
+		for (const entry of history) {
+			const grants = entry.choices?.multiclassProficiencies;
+			(grants?.armor || []).forEach(value => state.removeArmorProficiency(value));
+			(grants?.weapons || []).forEach(value => state.removeWeaponProficiency(value));
+			(grants?.tools || []).forEach(value => state.removeToolProficiency(value));
+			delete entry.choices?.multiclassProficiencies;
+		}
+
+		state.getFeatures()
+			.filter(feature => feature.className)
+			.forEach(feature => state.removeFeature(feature.id));
+
+		const classCounts = new Map();
+		const firstEntryByClass = new Map();
+		for (const entry of history) {
+			const uid = `${entry.class.name}|${entry.class.source}`.toLowerCase();
+			classCounts.set(uid, (classCounts.get(uid) || 0) + 1);
+			if (!firstEntryByClass.has(uid)) firstEntryByClass.set(uid, entry);
+		}
+
+		state._data.classes = [];
+		for (const [uid, level] of classCounts) {
+			const [name, source] = uid.split("|");
+			const classData = this._page.getClasses?.().find(cls =>
+				cls.name.toLowerCase() === name && cls.source.toLowerCase() === source,
+			);
+			if (!classData) continue;
+			const prior = existingClasses.find(cls => cls.name === classData.name && cls.source === classData.source);
+			const subclassChoiceEntry = history.find(entry =>
+				entry.class.name === classData.name
+				&& entry.class.source === classData.source
+				&& entry.choices?.subclass,
+			);
+			state.addClass({
+				...(prior || {}),
+				name: classData.name,
+				source: classData.source,
+				level,
+				hd: classData.hd,
+				proficiency: classData.proficiency,
+				startingProficiencies: classData.startingProficiencies,
+				multiclassing: classData.multiclassing,
+				subclass: subclassChoiceEntry?.choices?.subclass || prior?.subclass || null,
+				subclassChoice: subclassChoiceEntry?.choices?.subclassChoice || prior?.subclassChoice || null,
+				casterProgression: classData.casterProgression,
+				spellcastingAbility: classData.spellcastingAbility,
+				preparedSpellsProgression: classData.preparedSpellsProgression,
+				spellsKnownProgression: classData.spellsKnownProgression,
+				cantripProgression: classData.cantripProgression,
+			});
+		}
+
+		const firstClassData = this._page.getClasses?.().find(cls =>
+			cls.name === history[0]?.class?.name && cls.source === history[0]?.class?.source,
+		);
+		if (firstClassData) state.applyFirstClassStartingProficiencies(firstClassData);
+
+		const seenClasses = new Set();
+		for (const entry of history) {
+			const uid = `${entry.class.name}|${entry.class.source}`.toLowerCase();
+			if (seenClasses.has(uid)) continue;
+			seenClasses.add(uid);
+			if (entry.level === 1) continue;
+			const classData = this._page.getClasses?.().find(cls => cls.name === entry.class.name && cls.source === entry.class.source);
+			const gained = classData?.multiclassing?.proficienciesGained || {};
+			const toNames = values => (Array.isArray(values) ? values : (values ? [values] : []))
+				.map(value => typeof value === "string" ? value : value?.full)
+				.filter(Boolean);
+			const grants = {
+				armor: toNames(gained.armor),
+				weapons: toNames(gained.weapons),
+				tools: [],
+			};
+			grants.armor.forEach(value => state.addArmorProficiency(value));
+			grants.weapons.forEach(value => state.addWeaponProficiency(value));
+			entry.choices.multiclassProficiencies = grants;
+		}
+
+		const seenFeatures = new Set();
+		for (const [uid, classLevel] of classCounts) {
+			const [name, source] = uid.split("|");
+			const classData = this._page.getClasses?.().find(cls =>
+				cls.name.toLowerCase() === name && cls.source.toLowerCase() === source,
+			);
+			const classEntry = state.getClasses().find(cls => cls.name === classData?.name && cls.source === classData?.source);
+			if (!classData || !classEntry) continue;
+			for (let level = 1; level <= classLevel; ++level) {
+				const features = CharacterSheetClassUtils.getLevelFeatures(
+					classData,
+					level,
+					classEntry.subclass,
+					this._page.getClassFeatures?.() || [],
+					this._page.getSubclassFeatures?.() || [],
+				);
+				CharacterSheetClassUtils.dedupAndBuildFeatures(features, [], {
+					className: classData.name,
+					classSource: classData.source,
+					level,
+				}).forEach(feature => {
+					const key = `${feature.name}|${feature.className}|${feature.subclassShortName || ""}|${feature.level}`.toLowerCase();
+					if (seenFeatures.has(key)) return;
+					seenFeatures.add(key);
+					state.addFeature(feature);
+				});
+			}
+			CharacterSheetClassUtils.updateClassResources(state, classEntry, classLevel, classData);
+		}
+
+		state.recalculateHitDice();
+		state.calculateSpellSlots();
+		state.applyClassFeatureEffects();
+		state.recalculateHp({syncCurrent: false});
+		state.setCurrentHp(Math.min(oldCurrentHp, state.getMaxHp()));
+		for (const resource of state.getResources?.() || []) {
+			if (!oldResources.has(resource.name)) continue;
+			state.setResourceCurrent?.(resource.id, Math.min(oldResources.get(resource.name), resource.max));
+		}
+	}
+
+	async _editHpDecision (level, history, choice, closeParentModal) {
+		const decision = choice.decision;
+		const classData = this._page.getClasses?.().find(cls => cls.name === history.class.name && cls.source === history.class.source)
+			|| this._page.getClasses?.().find(cls => cls.name === history.class.name);
+		const hitDie = CharacterSheetClassUtils.getClassHitDie(classData);
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: `Level ${level} Hit Points`,
+			isMinHeight0: true,
+			cbClose: () => {},
+		});
+		const content = e_({tag: "div", clazz: "charsheet__respec-hp-editor"});
+		const average = e_({tag: "input"});
+		average.type = "radio";
+		average.name = `hp-${level}`;
+		average.checked = decision.selection?.method !== "roll";
+		const rolled = e_({tag: "input"});
+		rolled.type = "radio";
+		rolled.name = `hp-${level}`;
+		rolled.checked = decision.selection?.method === "roll";
+		const rollValue = e_({tag: "input", clazz: "ve-form-control"});
+		rollValue.type = "number";
+		rollValue.min = "1";
+		rollValue.max = String(hitDie);
+		rollValue.value = String(decision.selection?.value || Math.ceil((hitDie + 1) / 2));
+		content.append(
+			e_({tag: "label", clazz: "charsheet__respec-option", children: [average, e_({tag: "span", txt: "Use the class average"})]}),
+			e_({tag: "label", clazz: "charsheet__respec-option", children: [rolled, e_({tag: "span", txt: `Use a recorded d${hitDie} roll`})]}),
+			rollValue,
+		);
+		const actions = e_({tag: "div", clazz: "charsheet__respec-btn-row mt-3"});
+		const cancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel"});
+		cancel.addEventListener("click", () => doClose());
+		const apply = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "Stage HP Choice"});
+		apply.addEventListener("click", () => {
+			const value = Number(rollValue.value);
+			if (rolled.checked && (!Number.isInteger(value) || value < 1 || value > hitDie)) {
+				JqueryUtil.doToast({type: "warning", content: `Enter a roll from 1 to ${hitDie}.`});
+				return;
+			}
+			this._engine.updateDecisionSelection(decision.id, rolled.checked ? {method: "roll", value} : {method: "average"});
+			this._state.recalculateHp({syncCurrent: false});
+			doClose();
+			closeParentModal?.();
+			this.render();
+		});
+		actions.append(cancel, apply);
+		content.append(actions);
+		modalInner.append(content);
+	}
+
+	async _editSpellSwapDecision (level, history, choice, closeParentModal) {
+		const decision = choice.decision;
+		const legalSpells = this._getDecisionOptions(decision);
+		const existing = decision.selection;
+		const currentClassSpells = this._state.getSpellsKnown().filter(spell =>
+			spell.sourceClass?.toLowerCase() === decision.className.toLowerCase()
+			&& !spell.alwaysPrepared
+			&& !spell.grantedByClass
+			&& CharacterSheetRespec._getDecisionOptionKey(spell) !== CharacterSheetRespec._getDecisionOptionKey(existing?.added),
+		);
+		if (existing?.removed?.name && !currentClassSpells.some(spell =>
+			CharacterSheetRespec._getDecisionOptionKey(spell) === CharacterSheetRespec._getDecisionOptionKey(existing.removed),
+		)) {
+			currentClassSpells.push(existing.removed);
+		}
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: `Spell Replacement · Level ${level}`,
+			isMinHeight0: true,
+			isWidth100: true,
+			isUncappedWidth: true,
+			cbClose: () => {},
+		});
+		const content = e_({tag: "div", clazz: "charsheet__respec-decision-editor"});
+		content.append(e_({
+			tag: "p",
+			clazz: "ve-muted",
+			txt: "Choose one spell this character knew at this point and the legal spell that replaced it. This optional replacement can also be deferred.",
+		}));
+		const removed = e_({tag: "select", clazz: "ve-form-control mb-2"});
+		removed.setAttribute("aria-label", "Spell to replace");
+		removed.append(e_({tag: "option", value: "", txt: "Choose the spell to replace"}));
+		currentClassSpells.forEach(spell => removed.append(e_({
+			tag: "option",
+			value: `${spell.name}|${spell.source}`,
+			txt: CharacterSheetRespec._getDecisionOptionLabel(spell),
+		})));
+		const added = e_({tag: "select", clazz: "ve-form-control"});
+		added.setAttribute("aria-label", "Replacement spell");
+		added.append(e_({tag: "option", value: "", txt: "Choose the replacement spell"}));
+		legalSpells.forEach(spell => added.append(e_({
+			tag: "option",
+			value: `${spell.name}|${spell.source}`,
+			txt: CharacterSheetRespec._getDecisionOptionLabel(spell),
+		})));
+		content.append(removed, added);
+
+		const actions = e_({tag: "div", clazz: "charsheet__respec-btn-row mt-3"});
+		const cancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel"});
+		cancel.addEventListener("click", () => doClose());
+		const defer = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Defer Replacement"});
+		defer.addEventListener("click", () => {
+			this._applySpellSwapMechanics(decision, null, legalSpells);
+			this._engine.updateDecisionSelection(decision.id, null, {status: "deferred"});
+			doClose();
+			closeParentModal?.();
+			this.render();
+		});
+		const apply = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "Stage Replacement"});
+		apply.addEventListener("click", () => {
+			const [removedName, removedSource] = removed.value.split("|");
+			const [addedName, addedSource] = added.value.split("|");
+			const removedSpell = currentClassSpells.find(spell => spell.name === removedName && spell.source === removedSource);
+			const addedSpell = legalSpells.find(spell => spell.name === addedName && spell.source === addedSource);
+			if (!removedSpell || !addedSpell) {
+				JqueryUtil.doToast({type: "warning", content: "Choose both the spell to replace and its replacement."});
+				return;
+			}
+			if (removedName === addedName && removedSource === addedSource) {
+				JqueryUtil.doToast({type: "warning", content: "Choose a different replacement spell."});
+				return;
+			}
+			const nextSelection = {
+				removed: CharacterSheetRespec._toDecisionSelectionValue(removedSpell),
+				added: CharacterSheetRespec._toDecisionSelectionValue(addedSpell),
+			};
+			if (!this._applySpellSwapMechanics(decision, nextSelection, legalSpells)) return;
+			this._engine.updateDecisionSelection(decision.id, nextSelection);
+			doClose();
+			closeParentModal?.();
+			this.render();
+		});
+		actions.append(cancel, defer, apply);
+		content.append(actions);
+		modalInner.append(content);
+	}
+
+	_applySpellSwapMechanics (decision, nextSelection, legalSpells = []) {
+		if (nextSelection?.removed?.name && nextSelection?.added?.name
+			&& CharacterSheetRespec._getDecisionOptionKey(nextSelection.removed) === CharacterSheetRespec._getDecisionOptionKey(nextSelection.added)) {
+			return false;
+		}
+
+		const getOwnershipType = spellRef => Number(spellRef?.level) === 0 ? "cantrips" : "spells";
+		const restoreSpell = spellRef => {
+			if (!spellRef?.name) return;
+			const spell = legalSpells.find(it =>
+				CharacterSheetRespec._getDecisionOptionKey(it) === CharacterSheetRespec._getDecisionOptionKey(spellRef),
+			) || spellRef;
+			if (Number(spell.level) === 0) {
+				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(spell, {
+					sourceFeature: "Cantrips Known",
+					sourceClass: decision.className,
+				}));
+				return;
+			}
+			this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
+				sourceFeature: "Spells Known",
+				sourceClass: decision.className,
+			}));
+		};
+
+		const existing = decision.selection;
+		if (existing?.added?.name && existing?.removed?.name) {
+			if (this._state.releaseProgressionOwnership(getOwnershipType(existing.added), existing.added, decision.semanticKey)) {
+				this._state.removeSpell(existing.added.name, existing.added.source);
+			}
+			restoreSpell(existing.removed);
+		}
+		if (!nextSelection) return true;
+
+		this._state.removeSpell(nextSelection.removed.name, nextSelection.removed.source);
+		this._state.claimProgressionOwnership(getOwnershipType(nextSelection.added), nextSelection.added, decision.semanticKey);
+		restoreSpell(nextSelection.added);
+		return true;
 	}
 
 	async _editCombatTraditions (level, history, closeParentModal) {
@@ -1213,13 +2100,12 @@ class CharacterSheetRespec {
 				JqueryUtil.doToast({type: "danger", content: "Failed to update level history entry."});
 				return;
 			}
-			this._page.replayHistoryMartialChoices();
+			this._page.replayHistoryMartialChoices(this._state);
 
 			doClose();
 			closeParentModal();
+			this._engine?.markDirty();
 			this.render();
-			this._page.renderCharacter();
-			await this._page.saveCharacter();
 			JqueryUtil.doToast({type: "success", content: `Updated level ${level} combat traditions.`});
 		});
 	}
@@ -1429,13 +2315,12 @@ class CharacterSheetRespec {
 				},
 			});
 
-			this._page.replayHistoryMartialChoices();
+			this._page.replayHistoryMartialChoices(this._state);
 
 			doClose();
 			closeParentModal();
+			this._engine?.markDirty();
 			this.render();
-			this._page.renderCharacter();
-			await this._page.saveCharacter();
 			JqueryUtil.doToast({type: "success", content: "Updated combat methods."});
 		});
 	}
@@ -1540,13 +2425,12 @@ class CharacterSheetRespec {
 				JqueryUtil.doToast({type: "danger", content: "Failed to update level history entry."});
 				return;
 			}
-			this._page.replayHistoryMartialChoices();
+			this._page.replayHistoryMartialChoices(this._state);
 
 			doClose();
 			closeParentModal();
+			this._engine?.markDirty();
 			this.render();
-			this._page.renderCharacter();
-			await this._page.saveCharacter();
 			JqueryUtil.doToast({type: "success", content: `Updated level ${level} weapon masteries.`});
 		});
 	}
@@ -1736,9 +2620,8 @@ class CharacterSheetRespec {
 
 			doClose();
 			closeParentModal();
+			this._engine?.markDirty();
 			this.render();
-			this._page.renderCharacter();
-			await this._page.saveCharacter();
 			JqueryUtil.doToast({type: "success", content: `Updated ${choice.label}.`});
 		});
 	}
@@ -1899,9 +2782,8 @@ class CharacterSheetRespec {
 
 			doClose();
 			closeParentModal();
+			this._engine?.markDirty();
 			this.render();
-			this._page.renderCharacter();
-			await this._page.saveCharacter();
 			JqueryUtil.doToast({type: "success", content: `Updated level ${level} ASI.`});
 		});
 
@@ -2002,9 +2884,8 @@ class CharacterSheetRespec {
 
 			doClose();
 			closeParentModal();
+			this._engine?.markDirty();
 			this.render();
-			this._page.renderCharacter();
-			await this._page.saveCharacter();
 			JqueryUtil.doToast({type: "success", content: `Changed feat to ${selectedFeat.name}.`});
 		});
 
@@ -2095,9 +2976,8 @@ class CharacterSheetRespec {
 
 			doClose();
 			closeParentModal();
+			this._engine?.markDirty();
 			this.render();
-			this._page.renderCharacter();
-			await this._page.saveCharacter();
 			JqueryUtil.doToast({type: "success", content: `Changed ${entry.progressionName || "feat"} to ${selectedFeat.name}.`});
 		});
 
@@ -2298,9 +3178,8 @@ class CharacterSheetRespec {
 
 			doClose();
 			closeParentModal();
+			this._engine?.markDirty();
 			this.render();
-			this._page.renderCharacter();
-			await this._page.saveCharacter();
 			JqueryUtil.doToast({type: "success", content: `Changed ${choice.label} to ${selectedOption.name}.`});
 		});
 
@@ -2534,11 +3413,8 @@ class CharacterSheetRespec {
 	 * @param {Function} closeParentModal - Function to close parent modal
 	 */
 	async _editSubclass (level, history, closeParentModal) {
-		const currentSubclass = history.choices?.subclass;
-		if (!currentSubclass) {
-			JqueryUtil.doToast({type: "warning", content: "No subclass found at this level."});
-			return;
-		}
+		const classEntry = this._state.getClasses().find(cls => cls.name === history.class.name && cls.source === history.class.source);
+		const currentSubclass = history.choices?.subclass || classEntry?.subclass || null;
 
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Change ${history.class.name} Subclass`,
@@ -2551,7 +3427,7 @@ class CharacterSheetRespec {
 		const content = e_({tag: "div", clazz: "charsheet__respec-subclass-modal"});
 
 		// Show current subclass
-		content.append(e_({outer: `<p class="text-muted mb-2">Current Subclass: <strong>${currentSubclass.name}</strong></p>`}));
+		content.append(e_({outer: `<p class="text-muted mb-2">Current Subclass: <strong>${currentSubclass?.name || "Not selected"}</strong></p>`}));
 
 		// Get available subclasses for this class
 		const classes = this._page.getClasses();
@@ -2621,7 +3497,7 @@ class CharacterSheetRespec {
 			}
 
 			filtered.forEach(subclass => {
-				const isCurrent = subclass.name === currentSubclass.name && subclass.source === currentSubclass.source;
+				const isCurrent = subclass.name === currentSubclass?.name && subclass.source === currentSubclass?.source;
 				const isSelected = selectedSubclass && subclass.name === selectedSubclass.name && subclass.source === selectedSubclass.source;
 				const item = e_({outer: `
 					<div class="charsheet__respec-feat-item ${isCurrent ? "charsheet__respec-feat-current" : ""} ${isSelected ? "charsheet__respec-feat-selected" : ""}">
@@ -2659,7 +3535,7 @@ class CharacterSheetRespec {
 				return;
 			}
 
-			if (selectedSubclass.name === currentSubclass.name && selectedSubclass.source === currentSubclass.source) {
+			if (selectedSubclass.name === currentSubclass?.name && selectedSubclass.source === currentSubclass?.source) {
 				JqueryUtil.doToast({type: "info", content: "No changes made."});
 				doClose();
 				return;
@@ -2679,15 +3555,9 @@ class CharacterSheetRespec {
 
 			doClose();
 			closeParentModal();
+			this._engine?.markDirty();
 			this.render();
-			this._page.renderCharacter();
-			await this._page.saveCharacter();
 			JqueryUtil.doToast({type: "success", content: `Changed subclass to ${selectedSubclass.name}.`});
-
-			// Surface any prose choices the new subclass queued (e.g. the 2024
-			// Bladesinger's skill pick) AFTER the respec modals have closed, so the
-			// picker doesn't stack on top of the respec UI. Self-saves/re-renders.
-			await this._page.processPendingFeatureChoices?.();
 		});
 
 		btnRow.append(cancelBtn, applyBtn);
@@ -2702,6 +3572,7 @@ class CharacterSheetRespec {
 	 * @returns {Array} Array of features to remove
 	 */
 	_getSubclassFeatures (subclass, classContext = null) {
+		if (!subclass) return [];
 		const features = this._state.getFeatures();
 		return features.filter(f => {
 			// When a class context is supplied, only consider features belonging to that
@@ -2812,7 +3683,8 @@ class CharacterSheetRespec {
 		// Update all level history entries that had the old subclass
 		const levelHistory = this._state.getLevelHistory();
 		levelHistory.forEach(entry => {
-			if (entry.choices?.subclass?.name === oldSubclass.name) {
+			if ((!oldSubclass && entry.level === level)
+				|| entry.choices?.subclass?.name === oldSubclass?.name) {
 				this._state.updateLevelChoice(entry.level, {
 					subclass: {
 						name: newSubclass.name,
@@ -2997,9 +3869,8 @@ class CharacterSheetRespec {
 
 			doClose();
 			closeParentModal();
+			this._engine?.markDirty();
 			this.render();
-			this._page.renderCharacter();
-			await this._page.saveCharacter();
 			JqueryUtil.doToast({type: "success", content: `Changed species to ${Renderer.stripTags(selectedRace.name)}.`});
 		});
 
@@ -3147,9 +4018,8 @@ class CharacterSheetRespec {
 
 			doClose();
 			closeParentModal();
+			this._engine?.markDirty();
 			this.render();
-			this._page.renderCharacter();
-			await this._page.saveCharacter();
 			JqueryUtil.doToast({type: "success", content: `Changed background to ${Renderer.stripTags(selectedBg.name)}.`});
 		});
 

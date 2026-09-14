@@ -5115,6 +5115,7 @@ class CharacterSheetLevelUp {
 				name: classEntry.name,
 				source: classEntry.source,
 			},
+			classLevel: newLevel,
 			choices: {},
 			complete: true,
 			timestamp: Date.now(),
@@ -5286,6 +5287,15 @@ class CharacterSheetLevelUp {
 				level: spell.level,
 			}));
 		}
+		const toHistorySpells = (/** @type {*[]} */ spells) => (spells || []).map((/** @type {*} */ spell) => ({
+			name: spell.name,
+			source: spell.source,
+			level: spell.level,
+		}));
+		if (selectedKnownSpells?.length) historyEntry.choices.knownSpells = toHistorySpells(selectedKnownSpells);
+		if (selectedKnownCantrips?.length) historyEntry.choices.knownCantrips = toHistorySpells(selectedKnownCantrips);
+		if (selectedPreparedSpells?.length) historyEntry.choices.preparedSpells = toHistorySpells(selectedPreparedSpells);
+		if (selectedPreparedCantrips?.length) historyEntry.choices.preparedCantrips = toHistorySpells(selectedPreparedCantrips);
 
 		// Record spell swap in history. Persist enough metadata on the *removed* spell that respec
 		// can faithfully restore it on teardown (older saves only carried name+source → best-effort).
@@ -6202,6 +6212,7 @@ class CharacterSheetLevelUp {
 		}
 
 		// Add selected spells from multiclass
+		const isPreparedCasterMulticlass = !!selectedClass.preparedSpellsProgression;
 		if (selectedSpells && selectedSpells.length) {
 			const isWizard = selectedClass.name === "Wizard";
 			selectedSpells.forEach((/** @type {*} */ spell) => {
@@ -6238,6 +6249,7 @@ class CharacterSheetLevelUp {
 		/** @type {*} */ const mcHistory = {
 			level: mcTotalLevel,
 			class: {name: selectedClass.name, source: selectedClass.source},
+			classLevel: 1,
 			choices: {multiclassProficiencies: grantedMulticlassProfs},
 			complete: true,
 			timestamp: Date.now(),
@@ -6296,6 +6308,17 @@ class CharacterSheetLevelUp {
 		}
 		if (selectedSkills?.length) mcHistory.choices.skills = [...selectedSkills];
 		if (selectedTools?.length) mcHistory.choices.tools = selectedTools.filter(Boolean).map((/** @type {*} */ t) => (/** @type {*} */ (t)).toTitleCase());
+		const toHistorySpells = (/** @type {*[]} */ spells) => (spells || []).map((/** @type {*} */ spell) => ({
+			name: spell.name,
+			source: spell.source,
+			level: spell.level,
+		}));
+		if (selectedSpells?.length) {
+			if (selectedClass.name === "Wizard") mcHistory.choices.spellbookSpells = toHistorySpells(selectedSpells);
+			else if (isPreparedCasterMulticlass) mcHistory.choices.preparedSpells = toHistorySpells(selectedSpells);
+			else mcHistory.choices.knownSpells = toHistorySpells(selectedSpells);
+		}
+		if (selectedCantrips?.length) mcHistory.choices.knownCantrips = toHistorySpells(selectedCantrips);
 		this._state.recordLevelChoice(mcHistory);
 
 		// Bug #18 (multiclass parity): drain feature choices queued while adding the

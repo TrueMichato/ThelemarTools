@@ -566,6 +566,28 @@ class CharacterSheetBuilder {
 					if (this._selectedExpertise?.length > 0) {
 						level1History.choices.expertise = this._selectedExpertise.map((/** @type {*} */ s) => s.toLowerCase());
 					}
+					if (this._selectedClassToolProficiencies?.length > 0) {
+						level1History.choices.tools = this._selectedClassToolProficiencies
+							.map((/** @type {*} */ choice) => choice.tool || choice)
+							.filter(Boolean);
+					}
+
+					const toHistorySpells = (/** @type {*[]} */ spells) => (spells || []).map((/** @type {*} */ spell) => ({
+						name: spell.name,
+						source: spell.source,
+						level: spell.level,
+					}));
+					const knownInfo = this._getKnownCasterInfoForBuilder();
+					if (knownInfo?.isSpellbookCaster && this._selectedSpellbookSpells?.length) {
+						level1History.choices.spellbookSpells = toHistorySpells(this._selectedSpellbookSpells);
+					} else if (knownInfo?.isPreparedCaster && this._selectedKnownSpells?.length) {
+						level1History.choices.preparedSpells = toHistorySpells(this._selectedKnownSpells);
+					} else if (this._selectedKnownSpells?.length) {
+						level1History.choices.knownSpells = toHistorySpells(this._selectedKnownSpells);
+					}
+					if (this._selectedKnownCantrips?.length) {
+						level1History.choices.knownCantrips = toHistorySpells(this._selectedKnownCantrips);
+					}
 
 					// Record subclass if selected at level 1 (Cleric, Sorcerer, Warlock)
 					if (this._selectedSubclass) {

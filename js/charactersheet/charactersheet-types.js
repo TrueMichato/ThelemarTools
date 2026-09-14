@@ -422,6 +422,7 @@ void globalThis;
  * @typedef {object} LevelHistoryEntry
  * @property {number} level
  * @property {{name: string, source: SourceCode}} class
+ * @property {number} [classLevel]
  * @property {{
  *   asi?: AbilityBonusHash,
  *   feat?: {name: string, source: SourceCode},
@@ -431,6 +432,27 @@ void globalThis;
  *   featureChoices?: Array<{featureName: string, choice: *}>,
  *   expertise?: string[]
  * }} [choices]
+ * @property {number} [ledgerVersion]
+ * @property {number} [manifestVersion]
+ * @property {boolean} [manifestComplete]
+ * @property {Array<{
+ *   id: string,
+ *   semanticKey: string,
+ *   characterLevel: number,
+ *   className: string,
+ *   classSource: SourceCode,
+ *   classLevel: number,
+ *   type: string,
+ *   label: string,
+ *   sourceKey: string,
+ *   slot: number,
+ *   required: boolean,
+ *   count: number,
+ *   options: Array<*>,
+ *   selection: *,
+ *   status: "resolved"|"deferred"|"missing"|"invalid"|"ambiguous",
+ *   meta: Object<string, *>
+ * }>} [decisions]
  * @property {boolean} [complete]
  * @property {number} [timestamp]
  */
@@ -460,6 +482,15 @@ void globalThis;
  * @property {CharacterClassEntry[]} classes
  * @property {{name: string, source: SourceCode} | null} background
  * @property {LevelHistoryEntry[]} levelHistory
+ * @property {{
+ *   version: number,
+ *   initialized: boolean,
+ *   values: Record<string, Record<string, {
+ *     value: *,
+ *     sources: string[],
+ *     preserved: boolean
+ *   }>>
+ * }} progressionOwnership
  * @property {Record<AbilityKey, number>} abilities
  * @property {Record<AbilityKey, number>} abilityBonuses
  * @property {Partial<Record<AbilityKey, number>>} abilityScoreMaximums - Manual per-ability max overrides; effect-driven raises live in customModifiers.abilityScoreMaxIncrease/Set
