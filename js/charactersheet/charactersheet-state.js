@@ -4393,6 +4393,7 @@ class CharacterSheetState {
 		const pristineCatalogFields = new Set([
 			"additionalSources",
 			"entries",
+			"hasRefs",
 		]);
 		const isTransientCatalogField = key => transientCatalogFields.has(key)
 			|| /^_f[A-Z]/.test(key)

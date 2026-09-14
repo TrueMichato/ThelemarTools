@@ -133,6 +133,7 @@ jobs:
           test/jest/charactersheet/CharacterSheetHubTeardown.test.js
           test/jest/charactersheet/CharacterSheetRollHistory.test.js
           test/jest/charactersheet/CharacterSheetMagicItemCategorization.test.js
+          test/jest/charactersheet/CharacterSheetItemRepairLoadOrder.test.js
           --no-coverage --forceExit
 
       - name: DM Screen Hub seams
