@@ -56,6 +56,12 @@ assertion, clears that release gate.
 - Writes require base revision, held lease, and monotonic lease epoch.
 - The client retains the accepted base for each in-flight write and performs explicit disjoint rebase or conflict
   recovery. It must not promote an unacknowledged snapshot to the base.
+- Choosing server conflict truth updates accepted, live, and latest-submitted coverage before queued realtime
+  delivery resumes. A delayed operation already represented by the server watermark must remain suppressed on
+  every track.
+- Recovery for a create without a canonical response remains keyed by the temporary id. Startup may migrate it
+  through an owner-visible matching `clientImportId`, or list it as a recovery-only draft when no server row
+  exists; both discovery paths are account-scoped and preserve the original create idempotency key.
 - Access loss, takeover, campaign switch, detach, logout, or terminal page hide fences queued callbacks and
   pending saves.
 

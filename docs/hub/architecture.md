@@ -124,7 +124,15 @@ idempotency key. The queue is capped at 32 commands and 3.5 MB; a command that c
 rejected before network submission. Authoritative operation and resync transforms advance every queued base and
 snapshot, then replace the complete persisted queue before replay. Only the matching successful command is
 dequeued. Choosing local after an overlap replays every unresolved command in order against the selected local
-document; choosing server explicitly discards the complete queue.
+document. Choosing server explicitly discards the complete queue and installs that canonical document and its
+operation watermark into the accepted, live, and latest-submitted tracks before the serialized mutation queue
+resumes, so a delayed already-covered operation cannot be applied twice.
+
+Recovery records for not-yet-canonical creates carry the authenticated owner id and original `clientImportId`.
+Startup listing matches only an owner-visible server row with the same import id, then atomically moves the
+durable queue from its temporary key to the canonical character id. If the create never reached the server, the
+owner's recovery-only draft remains listed under its temporary id and retries with the original create
+idempotency key. Recovery-only records are never discovered across accounts.
 
 ## Transactional outbox and realtime
 

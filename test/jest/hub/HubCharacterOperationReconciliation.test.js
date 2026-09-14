@@ -1083,4 +1083,55 @@ describe("Conflict candidates after a resync", () => {
 		expect(accepted.data.hp.current).toBe(3);
 		expect(accepted.revision).toBe(3);
 	});
+
+	it("adopts Use Server truth into every live track before a delayed covered operation", async () => {
+		const serverDocument = {
+			id: "character-1",
+			campaignId: "campaign-1",
+			revision: 2,
+			operationWatermark: 20,
+			data: makeCharacterData({current: 7}),
+		};
+		const api = makeApi({character: serverDocument});
+		const repository = makeRepository({api});
+		await repository.pGet({characterId: "character-1"});
+		repository._accepted.set("character-1", {
+			...structuredClone(serverDocument),
+			revision: 1,
+			operationWatermark: 0,
+			data: makeCharacterData({current: 10}),
+		});
+		repository._latestSubmitted.set("character-1", makeCharacterData({current: 9}));
+		const book = repository._getCoverageBook("character-1");
+		book.live.revision = 1;
+		book.live.acceptedSequence = 0;
+		book.latestSubmitted.revision = 1;
+		book.latestSubmitted.acceptedSequence = 0;
+		repository._conflicts.set("character-1", {
+			base: makeCharacterData({current: 10}),
+			local: makeCharacterData({current: 9}),
+			server: structuredClone(serverDocument.data),
+			serverDocument: structuredClone(serverDocument),
+			conflicts: [{localPath: "/hp/current", remotePath: "/hp/current"}],
+		});
+
+		const resolved = await repository.pResolveConflict({characterId: "character-1", choice: "server"});
+		let live = structuredClone(resolved);
+		const delayed = repository.applyRealtimeOperation({
+			characterId: "character-1",
+			operation: makeOperation({args: {amount: 3}}),
+			resultingCharacterRevision: 2,
+			eventId: "delayed-event",
+			sequence: 20,
+			liveData: live,
+			fnAdoptLive: next => { live = next; },
+		});
+
+		expect(delayed.status).toBe("suppressed");
+		expect(live.hp.current).toBe(7);
+		expect(repository._accepted.get("character-1").data.hp.current).toBe(7);
+		expect(repository._latestSubmitted.get("character-1").hp.current).toBe(7);
+		expect(book.live).toMatchObject({revision: 2, acceptedSequence: 20});
+		expect(book.latestSubmitted).toMatchObject({revision: 2, acceptedSequence: 20});
+	});
 });

@@ -44,8 +44,10 @@ export class HubHttpCharacterRepository {
 				: new HubBroadcastSync({campaignId})
 		);
 		this._session = null;
+		this._pSession = null;
 		this._accepted = new Map();
 		this._canonicalIds = new Map();
+		this._recoveryOnlyIds = new Set();
 		this._leases = new Map();
 		this._conflicts = new Map();
 		this._pMutationQueue = Promise.resolve();
@@ -72,7 +74,12 @@ export class HubHttpCharacterRepository {
 	}
 
 	async _pEnsureSession () {
-		this._session ||= await this._api.pGetSession();
+		if (!this._session) {
+			this._pSession ||= Promise.resolve(this._api.pGetSession())
+				.then(session => this._session = session)
+				.finally(() => this._pSession = null);
+			await this._pSession;
+		}
 		if (!this._session.signedIn) throw new Error(`Sign in to edit campaign characters.`);
 	}
 
@@ -113,17 +120,49 @@ export class HubHttpCharacterRepository {
 
 	async pList () {
 		await this._pEnsureSession();
-		return (await this._api.pListCharacters({campaignId: this._campaignId}))
-			.filter(character => this._campaignId || character.campaignId == null)
-			.map(character => {
+		return this._pRunMutation(async () => {
+			const characters = (await this._api.pListCharacters({campaignId: this._campaignId}))
+				.filter(character => this._campaignId || character.campaignId == null);
+			const out = [];
+			const listedIds = new Set();
+			const accountId = this._session?.account?.id || null;
+			for (const character of characters) {
 				this._accepted.set(character.id, character);
-				return this._getData(character);
-			});
+				listedIds.add(character.id);
+				let recovery = null;
+				const isOwner = !!accountId && character.ownerAccountId === accountId;
+				if (isOwner && character.clientImportId && character.clientImportId !== character.id) {
+					recovery = this.getPendingRecovery(character.clientImportId);
+					if (recovery) this._migrateCharacterIdentity({fromId: character.clientImportId, toId: character.id});
+				}
+				recovery ||= isOwner ? this.getPendingRecovery(character.id) : null;
+				out.push(recovery ? {...structuredClone(recovery), id: character.id} : this._getData(character));
+			}
+
+			for (const characterId of this._getOwnedRecoveryOnlyCharacterIds()) {
+				if (listedIds.has(characterId) || this._canonicalIds.has(characterId)) continue;
+				const recovery = this.getPendingRecovery(characterId);
+				if (!recovery) continue;
+				this._recoveryOnlyIds.add(characterId);
+				listedIds.add(characterId);
+				out.push({...structuredClone(recovery), id: characterId});
+			}
+			return out;
+		});
 	}
 
 	async pGet ({characterId}) {
 		await this._pEnsureSession();
 		const canonicalId = this._canonicalIds.get(characterId) || characterId;
+		if (this._recoveryOnlyIds.has(canonicalId)) {
+			const recovery = this._failedWrites.get(canonicalId) || this.getPendingRecovery(canonicalId);
+			if (recovery) {
+				const book = this._getCoverageBook(canonicalId);
+				book.live = this._cloneTrackCoverage(book.failedWrite);
+				return {...structuredClone(recovery), id: canonicalId};
+			}
+			this._recoveryOnlyIds.delete(canonicalId);
+		}
 		const character = await this._api.pGetCharacter({characterId: canonicalId});
 		this._assertCharacterScope(character);
 		this._accepted.set(canonicalId, character);
@@ -1380,8 +1419,51 @@ export class HubHttpCharacterRepository {
 
 	_migrateCharacterIdentity ({fromId, toId}) {
 		if (fromId === toId) return;
+		const queueEntry = this._getRecoveryCommandQueueEntry(fromId);
+		const stagedQueue = queueEntry?.queue.length
+			? this._stageRecoveryCommandQueue({
+				characterId: fromId,
+				queue: queueEntry.queue,
+				isRequired: true,
+				storageId: toId,
+			})
+			: null;
+		const oldKey = this._getRecoveryStorageKey(fromId);
+		const newKey = this._getRecoveryStorageKey(toId);
+		let stagedRaw = null;
+		if (!stagedQueue && this._recoveryStorage) {
+			try {
+				const oldRaw = this._recoveryStorage.getItem(oldKey);
+				if (oldRaw != null) {
+					stagedRaw = {
+						oldRaw,
+						newRaw: this._recoveryStorage.getItem(newKey),
+					};
+					this._recoveryStorage.setItem(newKey, oldRaw);
+					this._recoveryStorage.removeItem(oldKey);
+				}
+			} catch (cause) {
+				if (stagedRaw) {
+					try {
+						this._recoveryStorage.setItem(oldKey, stagedRaw.oldRaw);
+						if (stagedRaw.newRaw == null) this._recoveryStorage.removeItem(newKey);
+						else this._recoveryStorage.setItem(newKey, stagedRaw.newRaw);
+					} catch {
+						// The original durability error is the actionable failure.
+					}
+				}
+				throw this._getRecoveryStorageError({
+					code: "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE",
+					message: `Cloud character recovery identity could not be stored safely.`,
+					cause,
+				});
+			}
+		}
+
 		this._canonicalIds.set(fromId, toId);
-		for (const map of [this._failedWrites, this._recoveryCommandQueues, this._latestSubmitted, this._recoveredBases]) {
+		this._recoveryOnlyIds.delete(fromId);
+		this._recoveryOnlyIds.delete(toId);
+		for (const map of [this._failedWrites, this._latestSubmitted, this._recoveredBases]) {
 			if (!map.has(fromId)) continue;
 			map.set(toId, map.get(fromId));
 			map.delete(fromId);
@@ -1392,27 +1474,43 @@ export class HubHttpCharacterRepository {
 			map.delete(fromId);
 		}
 		if (this._resyncInFlight.delete(fromId)) this._resyncInFlight.add(toId);
-		const oldKey = `hub-character-recovery:${this._scopeKey}:${fromId}`;
-		const newKey = `hub-character-recovery:${this._scopeKey}:${toId}`;
+		if (stagedQueue) {
+			this._commitStagedRecoveryCommandQueue(stagedQueue);
+			this._recoveryVersions.delete(oldKey);
+			return;
+		}
 		if (this._recoveryVersions.has(oldKey)) {
 			this._recoveryVersions.set(newKey, this._recoveryVersions.get(oldKey));
 			this._recoveryVersions.delete(oldKey);
 		}
-		const queueEntry = this._getRecoveryCommandQueueEntry(toId);
-		if (queueEntry?.queue.length) {
-			this._persistRecoveryCommandQueue(fromId, {
-				queue: queueEntry.queue,
-				isRequired: true,
-			});
-			return;
+	}
+
+	_getRecoveryStoragePrefix () {
+		return `hub-character-recovery:${this._scopeKey}:`;
+	}
+
+	_getRecoveryStorageKey (characterId) {
+		return `${this._getRecoveryStoragePrefix()}${characterId}`;
+	}
+
+	_getOwnedRecoveryOnlyCharacterIds () {
+		const accountId = this._session?.account?.id;
+		if (!accountId || !this._recoveryStorage || typeof this._recoveryStorage.key !== "function") return [];
+		const prefix = this._getRecoveryStoragePrefix();
+		const out = [];
+		for (let i = 0; i < this._recoveryStorage.length; ++i) {
+			const key = this._recoveryStorage.key(i);
+			if (!key?.startsWith(prefix)) continue;
+			try {
+				const parsed = JSON.parse(this._recoveryStorage.getItem(key));
+				const characterId = key.slice(prefix.length);
+				if (parsed?.ownerAccountId !== accountId || parsed?.clientImportId !== characterId) continue;
+				out.push(characterId);
+			} catch {
+				// Invalid recovery blobs are ignored by the same fail-closed rule as getPendingRecovery.
+			}
 		}
-		try {
-			const recovery = this._recoveryStorage?.getItem(oldKey);
-			if (recovery) this._recoveryStorage?.setItem(newKey, recovery);
-			this._recoveryStorage?.removeItem(oldKey);
-		} catch {
-			// Recovery-storage identity migration is best-effort.
-		}
+		return out;
 	}
 
 	_getRecoveryCommandQueueEntry (characterId) {
@@ -1475,6 +1573,8 @@ export class HubHttpCharacterRepository {
 		const payload = {
 			version,
 			queueVersion: _RECOVERY_COMMAND_QUEUE_VERSION,
+			...(this._session?.account?.id ? {ownerAccountId: this._session.account.id} : {}),
+			...(first.requestedId ? {clientImportId: first.requestedId} : {}),
 			base: structuredClone(first.submittedBase),
 			baseCoverage: serializeCoverage(first.submittedBaseCoverage),
 			commands,
@@ -1529,16 +1629,18 @@ export class HubHttpCharacterRepository {
 		return queue;
 	}
 
-	_stageRecoveryCommandQueue ({characterId, queue, isRequired = queue.length > 0}) {
-		const canonicalId = this._canonicalIds.get(characterId) || characterId;
+	_stageRecoveryCommandQueue ({characterId, queue, isRequired = queue.length > 0, storageId = null}) {
+		const canonicalId = storageId || this._canonicalIds.get(characterId) || characterId;
 		const entry = this._getRecoveryCommandQueueEntry(characterId);
-		const key = entry?.key || canonicalId;
+		const key = storageId || entry?.key || canonicalId;
 		const recoveryKeys = [...new Set([
-			`hub-character-recovery:${this._scopeKey}:${characterId}`,
-			`hub-character-recovery:${this._scopeKey}:${canonicalId}`,
-			`hub-character-recovery:${this._scopeKey}:${key}`,
+			this._getRecoveryStorageKey(characterId),
+			this._getRecoveryStorageKey(this._canonicalIds.get(characterId) || characterId),
+			this._getRecoveryStorageKey(canonicalId),
+			this._getRecoveryStorageKey(entry?.key || key),
+			this._getRecoveryStorageKey(key),
 		])];
-		const recoveryKey = `hub-character-recovery:${this._scopeKey}:${key}`;
+		const recoveryKey = this._getRecoveryStorageKey(key);
 		const version = (this._recoveryVersions.get(recoveryKey) || 0) + 1;
 		const nextRaw = queue.length ? this._getRecoveryQueuePayload({queue, version}) : null;
 		if (!this._recoveryStorage) {
@@ -1681,6 +1783,8 @@ export class HubHttpCharacterRepository {
 				accepted = this._accepted.get(canonicalId);
 			} catch (error) {
 				if (error?.code !== "CHARACTER_NOT_FOUND") throw error;
+			}
+			if (!accepted) {
 				const created = await this._api.pCreateCharacter({
 					clientImportId: requestedId,
 					campaignId: this._campaignId,
@@ -1890,6 +1994,11 @@ export class HubHttpCharacterRepository {
 	}
 
 	pUpsert ({character, activity = null}) {
+		if (this._session?.signedIn) return this._pUpsertAfterSession({character, activity});
+		return this._pEnsureSession().then(() => this._pUpsertAfterSession({character, activity}));
+	}
+
+	_pUpsertAfterSession ({character, activity = null}) {
 		const saveBlock = this.getSaveBlock(character?.id);
 		if (saveBlock) {
 			const error = new Error(saveBlock.message || `Character saving is paused until reconciliation completes.`);
@@ -2051,14 +2160,15 @@ export class HubHttpCharacterRepository {
 	}
 
 	async pResolveConflict ({characterId, choice}) {
-		const recovery = this._conflicts.get(characterId);
+		const canonicalId = this._canonicalIds.get(characterId) || characterId;
+		const recovery = this._conflicts.get(canonicalId);
 		if (!recovery) return null;
 		if (choice === "server") {
 			return this._pRunMutation(async () => {
-				const queueEntry = this._getRecoveryCommandQueueEntry(characterId);
-				this._persistRecoveryCommandQueue(characterId, {queue: [], isRequired: !!queueEntry?.queue.length});
-				this._conflicts.delete(characterId);
-				this._accepted.set(characterId, recovery.serverDocument);
+				const queueEntry = this._getRecoveryCommandQueueEntry(canonicalId);
+				this._persistRecoveryCommandQueue(canonicalId, {queue: [], isRequired: !!queueEntry?.queue.length});
+				this._conflicts.delete(canonicalId);
+				this._adoptServerConflictResolution({canonicalId, recovery});
 				return this._getData(recovery.serverDocument);
 			});
 		}
@@ -2098,6 +2208,27 @@ export class HubHttpCharacterRepository {
 				throughCommandKeys: last.commandKeys,
 			});
 		});
+	}
+
+	_adoptServerConflictResolution ({canonicalId, recovery}) {
+		const serverDocument = structuredClone(recovery.serverDocument);
+		this._accepted.set(canonicalId, serverDocument);
+		this._latestSubmitted.set(canonicalId, structuredClone(serverDocument.data));
+		this._recoveredBases.delete(canonicalId);
+		const book = this._getCoverageBook(canonicalId);
+		const coverage = recovery.coverage?.server
+			? deserializeCoverage(recovery.coverage.server)
+			: createCoverage();
+		coverage.revision = serverDocument.revision;
+		const acceptedSequence = this._getOperationWatermark(canonicalId, serverDocument);
+		if (Number.isInteger(acceptedSequence)) {
+			coverage.acceptedSequence = Math.max(coverage.acceptedSequence || 0, acceptedSequence);
+		}
+		book.acceptedOperationLegIds = coverage.appliedOperationLegIds.clone();
+		book.live = this._cloneTrackCoverage(coverage);
+		book.latestSubmitted = this._cloneTrackCoverage(coverage);
+		book.recoveredBase = createCoverage();
+		book.failedWrite = createCoverage();
 	}
 
 	async pDelete ({characterId}) {

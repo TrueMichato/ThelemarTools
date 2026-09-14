@@ -17,6 +17,14 @@ class MemoryStorage {
 	removeItem (key) {
 		this._values.delete(key);
 	}
+
+	key (index) {
+		return [...this._values.keys()][index] ?? null;
+	}
+
+	get length () {
+		return this._values.size;
+	}
 }
 
 class FailingStorage extends MemoryStorage {
@@ -160,6 +168,213 @@ describe("HTTP character repository", () => {
 		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
 		await expect(repository.pUpsert({character: {id: "temporary-id", name: "Mira"}}))
 			.resolves.toEqual({id: "server-id", name: "Mira"});
+	});
+
+	it("migrates temporary recovery to the canonical id when create committed but its response was lost", async () => {
+		const storage = new MemoryStorage();
+		const temporaryId = "temporary-id";
+		const canonical = {
+			id: "server-id",
+			ownerAccountId: "owner",
+			campaignId: "campaign-1",
+			clientImportId: temporaryId,
+			revision: 1,
+			data: {name: "Mira", hp: {current: 9}},
+		};
+		let createKey;
+		const activity = makeSpellActivity("Shield", "spell_slot");
+		const firstApi = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+			pListCharacters: async () => [],
+			pGetCharacter: async () => {
+				const error = new Error("missing");
+				error.code = "CHARACTER_NOT_FOUND";
+				throw error;
+			},
+			pCreateCharacter: async input => {
+				createKey = input.idempotencyKey;
+				throw new Error("response lost");
+			},
+		};
+		const first = new HubHttpCharacterRepository({campaignId: "campaign-1", api: firstApi});
+		first._recoveryStorage = storage;
+		await first.pList();
+		await expect(first.pUpsert({character: {id: temporaryId, ...canonical.data}, activity})).rejects.toThrow("response lost");
+		const stored = JSON.parse(storage.getItem(`hub-character-recovery:campaign-1:${temporaryId}`));
+		const patchKey = stored.commands[0].commandKeys.patch;
+
+		const retryCreates = [];
+		const patches = [];
+		const freshApi = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+			pListCharacters: async () => [structuredClone(canonical)],
+			pGetCharacter: async ({characterId}) => {
+				expect(characterId).toBe(canonical.id);
+				return structuredClone(canonical);
+			},
+			pCreateCharacter: async input => {
+				retryCreates.push(input);
+				return {character: structuredClone(canonical)};
+			},
+			pAcquireCharacterLease: async () => ({epoch: 1}),
+			pPatchCharacter: async input => {
+				patches.push(structuredClone(input));
+				return {character: {...structuredClone(canonical), revision: 2}};
+			},
+		};
+		const fresh = new HubHttpCharacterRepository({campaignId: "campaign-1", api: freshApi});
+		fresh._recoveryStorage = storage;
+
+		await expect(fresh.pList()).resolves.toEqual([{id: canonical.id, ...canonical.data}]);
+		expect(fresh._canonicalIds.get(temporaryId)).toBe(canonical.id);
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${temporaryId}`)).toBeNull();
+		const migrated = JSON.parse(storage.getItem(`hub-character-recovery:campaign-1:${canonical.id}`));
+		expect(migrated.commands[0].commandKeys).toEqual({create: createKey, patch: patchKey});
+		await expect(fresh.pGet({characterId: canonical.id})).resolves.toEqual({id: canonical.id, ...canonical.data});
+		await expect(fresh.pUpsert({character: {id: canonical.id, ...canonical.data}, activity}))
+			.resolves.toEqual({id: canonical.id, ...canonical.data});
+		expect(retryCreates).toEqual([]);
+		expect(patches).toHaveLength(1);
+		expect(patches[0]).toEqual(expect.objectContaining({idempotencyKey: patchKey, activity}));
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${canonical.id}`)).toBeNull();
+		expect(createKey).toBeTruthy();
+	});
+
+	it("keeps temporary recovery intact when canonical identity migration cannot be stored", async () => {
+		const storage = new MemoryStorage();
+		const temporaryId = "temporary-id";
+		const canonicalId = "server-id";
+		const firstApi = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+			pListCharacters: async () => [],
+			pGetCharacter: async () => {
+				const error = new Error("missing");
+				error.code = "CHARACTER_NOT_FOUND";
+				throw error;
+			},
+			pCreateCharacter: async () => { throw new Error("response lost"); },
+		};
+		const first = new HubHttpCharacterRepository({campaignId: "campaign-1", api: firstApi});
+		first._recoveryStorage = storage;
+		await first.pList();
+		await expect(first.pUpsert({character: {id: temporaryId, name: "Mira"}})).rejects.toThrow("response lost");
+		const temporaryKey = `hub-character-recovery:campaign-1:${temporaryId}`;
+		const canonicalKey = `hub-character-recovery:campaign-1:${canonicalId}`;
+		const storedBefore = storage.getItem(temporaryKey);
+		const setItem = storage.setItem.bind(storage);
+		storage.setItem = (key, value) => {
+			if (key === canonicalKey) throw new Error("quota");
+			setItem(key, value);
+		};
+
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pListCharacters: async () => [{
+					id: canonicalId,
+					ownerAccountId: "owner",
+					campaignId: "campaign-1",
+					clientImportId: temporaryId,
+					revision: 1,
+					data: {name: "Mira"},
+				}],
+			},
+		});
+		fresh._recoveryStorage = storage;
+
+		await expect(fresh.pList()).rejects.toMatchObject({code: "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE"});
+		expect(fresh._canonicalIds.has(temporaryId)).toBe(false);
+		expect(storage.getItem(temporaryKey)).toBe(storedBefore);
+		expect(storage.getItem(canonicalKey)).toBeNull();
+	});
+
+	it("lists and retries an owner-scoped recovery-only create that never reached the server", async () => {
+		const storage = new MemoryStorage();
+		const temporaryId = "temporary-id";
+		let createKey;
+		const firstApi = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+			pListCharacters: async () => [],
+			pGetCharacter: async () => {
+				const error = new Error("missing");
+				error.code = "CHARACTER_NOT_FOUND";
+				throw error;
+			},
+			pCreateCharacter: async input => {
+				createKey = input.idempotencyKey;
+				throw new Error("offline before commit");
+			},
+		};
+		const first = new HubHttpCharacterRepository({campaignId: "campaign-1", api: firstApi});
+		first._recoveryStorage = storage;
+		await first.pList();
+		await expect(first.pUpsert({character: {id: temporaryId, name: "Mira", hp: {current: 9}}}))
+			.rejects.toThrow("offline before commit");
+
+		const createInputs = [];
+		const canonical = {
+			id: "server-id",
+			ownerAccountId: "owner",
+			campaignId: "campaign-1",
+			clientImportId: temporaryId,
+			revision: 1,
+			data: {name: "Mira", hp: {current: 9}},
+		};
+		const freshApi = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+			pListCharacters: async () => [],
+			pGetCharacter: jest.fn(async () => {
+				const error = new Error("missing");
+				error.code = "CHARACTER_NOT_FOUND";
+				throw error;
+			}),
+			pCreateCharacter: async input => {
+				createInputs.push(structuredClone(input));
+				return {character: structuredClone(canonical)};
+			},
+		};
+		const fresh = new HubHttpCharacterRepository({campaignId: "campaign-1", api: freshApi});
+		fresh._recoveryStorage = storage;
+
+		await expect(fresh.pList()).resolves.toEqual([{id: temporaryId, name: "Mira", hp: {current: 9}}]);
+		await expect(fresh.pGet({characterId: temporaryId})).resolves.toEqual({id: temporaryId, name: "Mira", hp: {current: 9}});
+		expect(freshApi.pGetCharacter).not.toHaveBeenCalled();
+		await expect(fresh.pUpsert({character: {id: temporaryId, name: "Mira", hp: {current: 9}}}))
+			.resolves.toEqual({id: canonical.id, ...canonical.data});
+		expect(createInputs).toHaveLength(1);
+		expect(createInputs[0].idempotencyKey).toBe(createKey);
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${temporaryId}`)).toBeNull();
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${canonical.id}`)).toBeNull();
+	});
+
+	it("does not list another account's recovery-only create", async () => {
+		const storage = new MemoryStorage();
+		const seedApi = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner-a"}}),
+			pListCharacters: async () => [],
+			pGetCharacter: async () => {
+				const error = new Error("missing");
+				error.code = "CHARACTER_NOT_FOUND";
+				throw error;
+			},
+			pCreateCharacter: async () => { throw new Error("offline"); },
+		};
+		const seed = new HubHttpCharacterRepository({campaignId: "campaign-1", api: seedApi});
+		seed._recoveryStorage = storage;
+		await seed.pList();
+		await expect(seed.pUpsert({character: {id: "private-temporary-id", name: "Private"}})).rejects.toThrow("offline");
+
+		const other = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner-b"}}),
+				pListCharacters: async () => [],
+			},
+		});
+		other._recoveryStorage = storage;
+
+		await expect(other.pList()).resolves.toEqual([]);
 	});
 
 	it("uses accepted revision and lease epoch for patch saves", async () => {
