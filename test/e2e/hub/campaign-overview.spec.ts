@@ -1,4 +1,5 @@
 import {expect, test, type BrowserContext, type Page, type TestInfo} from "@playwright/test";
+import {CharacterSheetPage} from "../pages/CharacterSheetPage";
 import {HubCampaignPage} from "../pages/HubCampaignPage";
 
 async function pCloseContext (context: BrowserContext): Promise<void> {
@@ -59,6 +60,19 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 	try {
 		const dm = new HubCampaignPage(await dmContext.newPage());
 		const player = new HubCampaignPage(await playerContext.newPage());
+		const conditionModuleRequests: string[] = [];
+		await dm.page.route(/\/js\/hub\/hub-condition-catalog\.js(?:\?.*)?$/, async route => {
+			conditionModuleRequests.push(route.request().url());
+			if (conditionModuleRequests.length === 1) {
+				await route.fulfill({
+					status: 503,
+					contentType: "text/javascript",
+					body: "throw new Error('temporary module failure');",
+				});
+				return;
+			}
+			await route.continue();
+		});
 		await dm.signInSynthetic({providerSubject: "authority-dm", displayName: "Authority DM", secret});
 		await player.signInSynthetic({providerSubject: "authority-player", displayName: "Authority Player", secret});
 		const campaignId = await dm.createCampaign("Authority and Conditions E2E");
@@ -89,8 +103,9 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 
 		await row.click();
 		await dm.page.waitForFunction(() => !!(globalThis as any).charSheet, undefined, {timeout: 60_000});
-		await expect(dm.page.locator("#charsheet-ipt-name")).toHaveValue("Readonly Rowan");
-		await expect(dm.page.locator("#charsheet-ipt-name")).toBeDisabled();
+		const dmSheet = new CharacterSheetPage(dm.page);
+		await expect(dmSheet.characterName).toHaveValue("Readonly Rowan");
+		await expect(dmSheet.characterName).toBeDisabled();
 		await expect(dm.page.locator("#charsheet-btn-export")).toBeEnabled();
 		await expect(dm.page.locator("#charsheet-campaign .charsheet__campaign-detail"))
 			.toContainText("Read-only DM view");
@@ -98,19 +113,33 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		await expect(dm.page.locator(".charsheet__sharing")).toHaveCount(0);
 		expect(await dm.page.evaluate(() => (globalThis as any).charSheet.isCurrentCharacterReadOnly())).toBe(true);
 		expect(await dm.page.evaluate(() => (globalThis as any).charSheet._saveCurrentCharacter())).toBe(true);
+		await dmSheet.waitForHubRealtimeLive();
+
+		const playerSheet = new CharacterSheetPage(player.page);
+		await playerSheet.gotoCampaignCharacter({campaignId, characterId: character.id});
+		await playerSheet.renameCharacter("Readonly Rowan Updated");
+		await expect(dmSheet.characterName).toHaveValue("Readonly Rowan Updated", {timeout: 20_000});
+		await expect(dmSheet.characterName).toBeDisabled();
+		await dmSheet.requestHubRealtimeResyncAndWait();
 		expect(ownerOnlyRequests).toEqual([]);
 		expect(characterMutations).toEqual([]);
-		expect((await player.getCharacter(character.id)).data.name).toBe("Readonly Rowan");
+		expect((await player.getCharacter(character.id)).data.name).toBe("Readonly Rowan Updated");
 
 		await dm.gotoCampaign(campaignId);
 		const workbench = dm.page.locator("#campaign-workbench");
 		if (!await workbench.evaluate(element => (element as HTMLDetailsElement).open)) {
 			await workbench.locator(":scope > summary").click();
 		}
-		await dm.page.locator("#campaign-action-target").selectOption({label: "Readonly Rowan"});
+		await dm.page.locator("#campaign-action-target").selectOption({label: "Readonly Rowan Updated"});
 		await dm.page.locator("#campaign-action-type").selectOption("condition_add");
 		const condition = dm.page.locator("#campaign-action-condition");
+		await expect(condition).toBeDisabled();
+		await expect.poll(() => conditionModuleRequests.length).toBe(1);
+		await dm.page.locator("#campaign-action-type").selectOption("damage");
+		await dm.page.locator("#campaign-action-type").selectOption("condition_add");
 		await expect(condition).toBeEnabled();
+		expect(conditionModuleRequests).toHaveLength(2);
+		expect(conditionModuleRequests[1]).not.toBe(conditionModuleRequests[0]);
 		await expect(condition.locator("option", {hasText: "Blinded (PHB)"})).toHaveCount(1);
 		await expect(condition.locator("option", {hasText: "Blinded (XPHB)"})).toHaveCount(1);
 		await condition.selectOption({label: "Blinded (PHB)"});

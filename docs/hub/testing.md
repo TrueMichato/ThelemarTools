@@ -281,7 +281,9 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   probe. Projection regressions preserve `owner_truth` versus `dm_truth`; a DM view keeps live reads but disables
   mutation controls and skips owner-only sharing, pending-action, targeting, lease, and party-inventory calls.
 - Campaign action contracts verify that condition add/remove uses the canonical core plus active campaign-brew
-  catalog and submits the selected `name|source` identity rather than accepting free-form condition text.
+  catalog and submits the selected `name|source` identity rather than accepting free-form condition text. The
+  browser journey fails the first condition-catalog module request, retries through a distinct module URL, and
+  proves the picker recovers without moving the catalog into lightweight page boot.
 - Failure-state hardening classifies fetch rejection, malformed success, and unreadable 503 responses without
   exposing browser-specific errors. Campaign UI contracts cover offline retention, reconnect refresh, direct
   protocol reload, terminal read-only access state, size/safety validation, insufficient transfer/resource,
@@ -291,7 +293,10 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   after live session and membership revocation.
 - Realtime campaign coverage proves that accepted Character Sheet HP edits and initiative rolls reach the DM
   roster/activity view, a second device is initially read-only, lease takeover fences the stale writer, and
-  campaign pages react immediately to session or membership revocation.
+  campaign pages react immediately to session or membership revocation. DM truth coverage keeps an inspection
+  sheet open while the owner performs an ordinary document save, proves the disabled sheet converges without a
+  reload, forces a later resync, and verifies no owner-only lease, sharing, pending-action, targeting, inventory,
+  or document-mutation request escapes.
 - Campaign snapshot consumers coalesce `character.projection.invalidated` metadata into one authorization-scoped HTTP refetch and fence older
   in-flight snapshot responses with the campaign event sequence, so an authoritative refresh cannot regress a
   newer visible projection. A single 10-second client watchdog requests an authoritative snapshot while the

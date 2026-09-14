@@ -25,6 +25,16 @@ const makeRepository = (characters = []) => {
 	};
 };
 
+const makeDeferred = () => {
+	let resolve;
+	let reject;
+	const promise = new Promise((resolve_, reject_) => {
+		resolve = resolve_;
+		reject = reject_;
+	});
+	return {promise, resolve, reject};
+};
+
 describe("Character Sheet repository seam", () => {
 	beforeAll(async () => {
 		globalThis.window = globalThis.window || {addEventListener: () => {}, location: {search: "", href: "http://test/"}};
@@ -261,6 +271,179 @@ describe("Character Sheet repository seam", () => {
 		expect(host._hubEffects.deactivate).toHaveBeenCalled();
 		expect(host._peerTargeting.deactivate).toHaveBeenCalled();
 		expect(host._partyInventory.detach).toHaveBeenCalled();
+	});
+
+	it("replaces a DM read-only projection after an ordinary character invalidation without saving", async () => {
+		let loaded = null;
+		const repository = {
+			pGet: jest.fn(async () => ({id: "player-character", name: "Updated by owner", hp: {current: 7, max: 12}})),
+			getCharacterAccess: jest.fn(() => CHARACTER_ACCESS_MODES.DM_READ_ONLY),
+			pAcquireLease: jest.fn(),
+			pUpsert: jest.fn(),
+		};
+		const host = {
+			_characterRepository: repository,
+			_currentCharacterId: "player-character",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.DM_READ_ONLY,
+			_characterLoadGeneration: 3,
+			_hubRealtimeGeneration: 5,
+			_hubReadOnlyRefreshGeneration: 0,
+			_hubContext: {rulesVersion: {rules: {thelemar_carryWeight: false}}},
+			_state: {
+				loadFromJson: data => loaded = structuredClone(data),
+				setCampaignSettingsOverlay: jest.fn(),
+			},
+			_clearLastHpChange: jest.fn(),
+			_reconcileClassFeatures: jest.fn(),
+			_renderCharacter: jest.fn(),
+			_updateCharacterDropdown: jest.fn(),
+		};
+
+		await expect(CharacterSheetPage.prototype._pRefreshHubReadOnlyCharacter.call(host, {
+			characterId: "player-character",
+		})).resolves.toBe(true);
+
+		expect(repository.pGet).toHaveBeenCalledWith({characterId: "player-character"});
+		expect(loaded).toEqual(expect.objectContaining({name: "Updated by owner", hp: {current: 7, max: 12}}));
+		expect(host._state.setCampaignSettingsOverlay).toHaveBeenCalledWith(expect.objectContaining({thelemar_carryWeight: false}));
+		expect(host._reconcileClassFeatures).toHaveBeenCalledTimes(1);
+		expect(host._renderCharacter).toHaveBeenCalledTimes(1);
+		expect(repository.pAcquireLease).not.toHaveBeenCalled();
+		expect(repository.pUpsert).not.toHaveBeenCalled();
+	});
+
+	it("discards a late DM read-only projection after the character changes", async () => {
+		const refresh = makeDeferred();
+		const repository = {
+			pGet: jest.fn(() => refresh.promise),
+			getCharacterAccess: jest.fn(() => CHARACTER_ACCESS_MODES.DM_READ_ONLY),
+		};
+		const host = {
+			_characterRepository: repository,
+			_currentCharacterId: "player-character",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.DM_READ_ONLY,
+			_characterLoadGeneration: 3,
+			_hubRealtimeGeneration: 5,
+			_hubReadOnlyRefreshGeneration: 0,
+			_state: {
+				loadFromJson: jest.fn(),
+				setCampaignSettingsOverlay: jest.fn(),
+			},
+			_reconcileClassFeatures: jest.fn(),
+			_renderCharacter: jest.fn(),
+		};
+
+		const pending = CharacterSheetPage.prototype._pRefreshHubReadOnlyCharacter.call(host, {
+			characterId: "player-character",
+		});
+		host._currentCharacterId = "other-character";
+		host._characterLoadGeneration++;
+		refresh.resolve({id: "player-character", name: "Stale owner update"});
+
+		await expect(pending).resolves.toBe(false);
+		expect(host._state.loadFromJson).not.toHaveBeenCalled();
+		expect(host._renderCharacter).not.toHaveBeenCalled();
+	});
+
+	it("discards a late DM read-only projection after the realtime binding changes", async () => {
+		const refresh = makeDeferred();
+		const repository = {
+			pGet: jest.fn(() => refresh.promise),
+			getCharacterAccess: jest.fn(() => CHARACTER_ACCESS_MODES.DM_READ_ONLY),
+		};
+		const host = {
+			_characterRepository: repository,
+			_currentCharacterId: "player-character",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.DM_READ_ONLY,
+			_characterLoadGeneration: 3,
+			_hubRealtimeGeneration: 5,
+			_hubReadOnlyRefreshGeneration: 0,
+			_state: {
+				loadFromJson: jest.fn(),
+				setCampaignSettingsOverlay: jest.fn(),
+			},
+			_reconcileClassFeatures: jest.fn(),
+			_renderCharacter: jest.fn(),
+		};
+
+		const pending = CharacterSheetPage.prototype._pRefreshHubReadOnlyCharacter.call(host, {
+			characterId: "player-character",
+		});
+		host._hubRealtimeGeneration++;
+		refresh.resolve({id: "player-character", name: "Stale owner update"});
+
+		await expect(pending).resolves.toBe(false);
+		expect(host._state.loadFromJson).not.toHaveBeenCalled();
+		expect(host._renderCharacter).not.toHaveBeenCalled();
+	});
+
+	it("conceals a DM read-only projection when its scoped access is revoked", async () => {
+		const accessError = Object.assign(new Error("Character is no longer visible."), {
+			code: "CHARACTER_PROJECTION_SCOPED",
+		});
+		const host = {
+			_characterRepository: {
+				pGet: jest.fn(async () => { throw accessError; }),
+				getCharacterAccess: jest.fn(() => CHARACTER_ACCESS_MODES.DM_READ_ONLY),
+			},
+			_currentCharacterId: "player-character",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.DM_READ_ONLY,
+			_characterLoadGeneration: 3,
+			_hubRealtimeGeneration: 5,
+			_hubReadOnlyRefreshGeneration: 0,
+			_onHubRealtimeConnectionState: jest.fn(),
+		};
+
+		await expect(CharacterSheetPage.prototype._pRefreshHubReadOnlyCharacter.call(host, {
+			characterId: "player-character",
+		})).resolves.toBe(false);
+		expect(host._onHubRealtimeConnectionState).toHaveBeenCalledWith(expect.objectContaining({
+			state: "closed",
+			isCharacterAccessEnded: true,
+		}));
+	});
+
+	it("does not reactivate owner-only peer targeting on live read-only connection states", () => {
+		const host = {
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.DM_READ_ONLY,
+			isCurrentCharacterReadOnly: () => true,
+			_hubEffects: {onConnectionState: jest.fn()},
+			_peerTargeting: {onConnectionState: jest.fn(), deactivate: jest.fn()},
+			_isHubContextRevalidationRequired: false,
+			_hubRulesRefreshBlocked: false,
+		};
+
+		CharacterSheetPage.prototype._onHubRealtimeConnectionState.call(host, {state: "live"});
+		CharacterSheetPage.prototype._onHubRealtimeConnectionState.call(host, {state: "live", isReconnect: true});
+
+		expect(host._peerTargeting.onConnectionState).not.toHaveBeenCalled();
+		expect(host._peerTargeting.deactivate).toHaveBeenCalledTimes(2);
+	});
+
+	it("subscribes DM read-only views to character projection invalidations only", () => {
+		const listeners = new Map();
+		const host = {
+			_hubRealtime: {
+				on: jest.fn((type, listener) => listeners.set(type, listener)),
+			},
+			_isHubRealtimeListenersBound: false,
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.DM_READ_ONLY,
+			_pRefreshHubReadOnlyCharacter: jest.fn(),
+			_onHubRealtimeCursor: jest.fn(),
+			_onHubSemanticOperation: jest.fn(),
+			_onHubRealtimeConnectionState: jest.fn(),
+			_onHubCampaignContextChanged: jest.fn(),
+			_onHubRealtimeDeliveryError: jest.fn(),
+			_pRefreshHubRules: jest.fn(),
+		};
+
+		expect(CharacterSheetPage.prototype._initHubRealtimeListeners.call(host)).toBe(true);
+		listeners.get("projectionInvalidated")({characterId: "player-character"});
+		expect(host._pRefreshHubReadOnlyCharacter).toHaveBeenCalledWith({characterId: "player-character"});
+
+		host._currentCharacterAccess = CHARACTER_ACCESS_MODES.OWNER;
+		listeners.get("projectionInvalidated")({characterId: "owner-character"});
+		expect(host._pRefreshHubReadOnlyCharacter).toHaveBeenCalledTimes(1);
 	});
 
 	it("blocks non-control mutation gestures in a DM read-only sheet", () => {

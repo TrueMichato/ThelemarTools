@@ -1982,6 +1982,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 	let conditionCatalogModule = null;
 	let conditionCatalogState = "idle";
 	let conditionCatalogGeneration = 0;
+	let conditionCatalogModuleRetryGeneration = 0;
 	let campaignConditionBrewContent = context.brewBundle?.content;
 	let activeConditionCatalog = [];
 	const getCurrentTargetConditions = () => {
@@ -1999,7 +2000,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		if (conditionCatalogState !== "ready" || !conditionCatalogModule) {
 			const option = document.createElement("option");
 			option.value = "";
-			option.textContent = conditionCatalogState === "failed"
+			option.textContent = conditionCatalogState.endsWith("_failed")
 				? "Condition catalog unavailable"
 				: "Loading conditions...";
 			actionCondition.replaceChildren(option);
@@ -2028,7 +2029,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		setHidden(actionValue, isSlot || isCondition);
 		if (isCondition) {
 			pRefreshConditionOptions();
-			if (conditionCatalogState === "idle") {
+			if (["idle", "module_failed", "data_failed"].includes(conditionCatalogState)) {
 				void pRefreshConditionCatalog({
 					campaignBrewContent: campaignConditionBrewContent,
 				});
@@ -2051,14 +2052,37 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 	const pRefreshConditionCatalog = async ({campaignBrewContent}) => {
 		const generation = ++conditionCatalogGeneration;
 		campaignConditionBrewContent = campaignBrewContent;
-		conditionCatalogState = "loading";
+		conditionCatalogState = conditionCatalogModule ? "loading_data" : "loading_module";
 		pRefreshConditionOptions();
 		actionCondition.disabled = true;
-		try {
-			const module = conditionCatalogModule || await import("./hub-condition-catalog.js");
-			const catalog = await module.pLoadCampaignConditionCatalog({campaignBrewContent});
+		let module = conditionCatalogModule;
+		if (!module) {
+			const moduleRetrySuffix = conditionCatalogModuleRetryGeneration
+				? `?retry=${conditionCatalogModuleRetryGeneration}`
+				: "";
+			try {
+				module = await import(`./hub-condition-catalog.js${moduleRetrySuffix}`);
+			} catch (error) {
+				if (generation !== conditionCatalogGeneration) return false;
+				conditionCatalogModuleRetryGeneration++;
+				activeConditionCatalog = [];
+				conditionCatalogState = "module_failed";
+				pRefreshConditionOptions();
+				setFormStatus({
+					formId: "campaign-action-form",
+					message: getErrorMessage(error),
+					isError: true,
+				});
+				actionCondition.disabled = true;
+				return false;
+			}
 			if (generation !== conditionCatalogGeneration) return false;
 			conditionCatalogModule = module;
+		}
+		conditionCatalogState = "loading_data";
+		try {
+			const catalog = await module.pLoadCampaignConditionCatalog({campaignBrewContent});
+			if (generation !== conditionCatalogGeneration) return false;
 			activeConditionCatalog = catalog;
 			conditionCatalogState = "ready";
 			setFormStatus({formId: "campaign-action-form"});
@@ -2067,14 +2091,14 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		} catch (error) {
 			if (generation !== conditionCatalogGeneration) return false;
 			activeConditionCatalog = [];
-			conditionCatalogState = "failed";
+			conditionCatalogState = "data_failed";
 			pRefreshConditionOptions();
 			setFormStatus({
 				formId: "campaign-action-form",
 				message: getErrorMessage(error),
 				isError: true,
 			});
-			syncActionFields();
+			actionCondition.disabled = true;
 			return false;
 		}
 	};

@@ -112,9 +112,12 @@ describe("campaign hub pages", () => {
 		expect(campaignHtml).toContain("id=\"campaign-action-condition\"");
 		expect(campaignHtml).not.toContain("id=\"campaign-action-condition-source\"");
 		expect(topLevelImports).not.toContain("hub-condition-catalog.js");
-		expect(source).toContain("await import(\"./hub-condition-catalog.js\")");
+		expect(source).toMatch(/await import\(`\.\/hub-condition-catalog\.js\$\{moduleRetrySuffix\}`\)/);
+		expect(source).toContain("conditionCatalogModuleRetryGeneration");
+		expect(source).toContain("conditionCatalogState = \"module_failed\"");
+		expect(source).toContain("conditionCatalogState = \"data_failed\"");
 		expect(source).not.toContain("await pRefreshConditionCatalog({campaignBrewContent: context.brewBundle?.content});");
-		expect(source).toMatch(/if \(conditionCatalogState === "idle"\) \{\s+void pRefreshConditionCatalog/);
+		expect(source).toMatch(/if \(\["idle", "module_failed", "data_failed"\]\.includes\(conditionCatalogState\)\) \{\s+void pRefreshConditionCatalog/);
 		expect(source).toContain("pLoadCampaignConditionCatalog");
 		expect(source).toContain("conditionCatalogByUid");
 		expect(source).toContain("getCurrentTargetConditions");

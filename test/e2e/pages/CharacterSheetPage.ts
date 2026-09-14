@@ -202,6 +202,32 @@ export class CharacterSheetPage {
 		await expect(this.characterName).toHaveValue(name);
 	}
 
+	async waitForHubRealtimeLive (): Promise<void> {
+		await this.page.waitForFunction(() => {
+			const client = (globalThis as any).charSheet?._hubRealtime?._active?.client;
+			return client?._hasBaseline === true && client?._connectionState?.state === "live";
+		}, undefined, {timeout: 30_000});
+	}
+
+	async requestHubRealtimeResyncAndWait (): Promise<void> {
+		await this.page.evaluate(async () => {
+			const client = (globalThis as any).charSheet?._hubRealtime?._active?.client;
+			if (!client?.requestResync || !client?.on) throw new Error("Character Sheet realtime client is unavailable.");
+			await new Promise<void>((resolve, reject) => {
+				const timer = setTimeout(() => {
+					unsubscribe?.();
+					reject(new Error("Timed out waiting for Character Sheet realtime resync."));
+				}, 15_000);
+				const unsubscribe = client.on("cursor", () => {
+					clearTimeout(timer);
+					unsubscribe();
+					resolve();
+				});
+				client.requestResync(null);
+			});
+		});
+	}
+
 	async expectMulticlassSources ({allowed, denied}: {allowed: string; denied: string}): Promise<void> {
 		const multiclass = this.page.locator("#charsheet-btn-multiclass");
 		await expect(multiclass).toBeVisible();

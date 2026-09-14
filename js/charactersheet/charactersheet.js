@@ -109,6 +109,7 @@ class CharacterSheetPage {
 		this._partyInventory = null;
 		this._characterLoadGeneration = 0;
 		this._hubRealtimeGeneration = 0;
+		this._hubReadOnlyRefreshGeneration = 0;
 		this._hubContextGeneration = 0;
 		this._hubContextRefreshActiveGeneration = null;
 		this._isHubContextRefreshing = false;
@@ -317,21 +318,78 @@ class CharacterSheetPage {
 	// #region Live semantic-operation reconciliation (ADR 0012)
 
 	/**
-	 * Register the production consumers for server-authoritative campaign effects. Handlers run synchronously
-	 * inside the repository's realtime delivery queue, so they must not await: the coordinator emits to listeners
-	 * without awaiting them, and any async work would escape the serialization window that keeps an incoming
-	 * operation ordered against an in-flight save.
+	 * Register the production consumers for server-authoritative campaign effects. Semantic handlers run
+	 * synchronously inside the repository's realtime delivery queue. DM read-only document invalidations are the
+	 * exception: they perform a scoped HTTP refetch with character, load, realtime, and refresh-generation fences,
+	 * and cannot race an owner write because this surface has no lease or save authority.
 	 */
 	_initHubRealtimeListeners () {
 		if (!this._hubRealtime || this._isHubRealtimeListenersBound) return false;
 		this._isHubRealtimeListenersBound = true;
 		this._hubRealtime.on("cursor", metadata => this._onHubRealtimeCursor(metadata));
+		this._hubRealtime.on("projectionInvalidated", detail => {
+			if (this._currentCharacterAccess !== CHARACTER_ACCESS_MODES.DM_READ_ONLY) return;
+			void this._pRefreshHubReadOnlyCharacter({characterId: detail?.characterId});
+		});
 		this._hubRealtime.on("semanticOperation", event => this._onHubSemanticOperation(event));
 		this._hubRealtime.on("connectionState", state => this._onHubRealtimeConnectionState(state));
 		this._hubRealtime.on("campaignContextChanged", event => this._onHubCampaignContextChanged(event));
 		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
 		this._hubRealtime.on("rulesChanged", event => { void this._pRefreshHubRules(event); });
 		return true;
+	}
+
+	async _pRefreshHubReadOnlyCharacter ({characterId = this._currentCharacterId} = {}) {
+		if (
+			!characterId
+			|| characterId !== this._currentCharacterId
+			|| this._currentCharacterAccess !== CHARACTER_ACCESS_MODES.DM_READ_ONLY
+			|| typeof this._characterRepository?.pGet !== "function"
+		) return false;
+		const refreshGeneration = ++this._hubReadOnlyRefreshGeneration;
+		const characterLoadGeneration = this._characterLoadGeneration;
+		const realtimeGeneration = this._hubRealtimeGeneration;
+		const isCurrent = () => (
+			refreshGeneration === this._hubReadOnlyRefreshGeneration
+			&& characterLoadGeneration === this._characterLoadGeneration
+			&& realtimeGeneration === this._hubRealtimeGeneration
+			&& characterId === this._currentCharacterId
+			&& this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY
+		);
+		try {
+			const character = await this._characterRepository.pGet({characterId});
+			if (!isCurrent()) return false;
+			if (
+				character?.id !== characterId
+				|| this._characterRepository.getCharacterAccess?.({characterId}) !== CHARACTER_ACCESS_MODES.DM_READ_ONLY
+			) {
+				throw Object.assign(new Error("Character inspection access changed."), {code: "CHARACTER_PROJECTION_SCOPED"});
+			}
+			this._clearLastHpChange?.();
+			this._state.loadFromJson(character);
+			this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
+			this._reconcileClassFeatures();
+			this._renderCharacter();
+			return true;
+		} catch (error) {
+			if (!isCurrent()) return false;
+			if (
+				error?.code === "CHARACTER_PROJECTION_SCOPED"
+				|| !this._canRestoreHubRealtimeAfterError(error)
+			) {
+				this._onHubRealtimeConnectionState({
+					state: "closed",
+					reason: "Character is no longer available in this campaign.",
+					isCharacterAccessEnded: true,
+				});
+				return false;
+			}
+			JqueryUtil.doToast({
+				type: "danger",
+				content: "Could not refresh this read-only character. Reconnect or reload before relying on its current values.",
+			});
+			return false;
+		}
 	}
 
 	async _pRefreshHubRules ({rulesVersionId = null} = {}) {
@@ -397,7 +455,8 @@ class CharacterSheetPage {
 
 	_onHubRealtimeConnectionState (state) {
 		this._hubEffects?.onConnectionState(state);
-		this._peerTargeting?.onConnectionState(state);
+		if (this.isCurrentCharacterReadOnly?.()) this._peerTargeting?.deactivate();
+		else this._peerTargeting?.onConnectionState(state);
 		if (state?.state === "live" && this._isHubContextRevalidationRequired && this._hubCampaignContext) {
 			this._isHubContextRevalidationRequired = false;
 			this._onHubCampaignContextChanged({type: "reconnected"});
@@ -962,6 +1021,7 @@ class CharacterSheetPage {
 					api: this._hubCampaignContext.api,
 					root: document.getElementById("charsheet-peer-targeting"),
 					fnGetCharacterId: () => this._currentCharacterId,
+					fnIsOwner: () => !this.isCurrentCharacterReadOnly(),
 					fnGetRulesVersionId: () => this._hubContext?.rulesVersion?.id ?? null,
 					fnGetCapability: () => this._hubCampaignContext?.context?.capabilities?.peerSourceCosts ?? null,
 					fnOnAuthoritativeApplied: detail => this._onHubAuthoritativeApproval(detail),
