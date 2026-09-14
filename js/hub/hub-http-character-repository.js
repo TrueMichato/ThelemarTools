@@ -1205,6 +1205,278 @@ export class HubHttpCharacterRepository {
 		}
 	}
 
+	_getFailedCommandEntry (characterId) {
+		const canonicalId = this._canonicalIds.get(characterId) || characterId;
+		for (const key of new Set([characterId, canonicalId])) {
+			if (this._failedCommands.has(key)) return {key, command: this._failedCommands.get(key)};
+		}
+		return null;
+	}
+
+	_areSameCommandKeys (left, right) {
+		return left?.create === right?.create && left?.patch === right?.patch;
+	}
+
+	_writeRecoveryCommand (command) {
+		try {
+			this._recoveryStorage?.setItem(command.recoveryKey, JSON.stringify({
+				version: command.recoveryVersion,
+				base: command.submittedBase,
+				snapshot: command.submittedSnapshot,
+				activity: command.submittedActivity,
+				commandKeys: command.commandKeys,
+				coverageVersion: COVERAGE_VERSION,
+				coverage: {
+					base: serializeCoverage(command.submittedBaseCoverage),
+					snapshot: serializeCoverage(command.submittedSnapshotCoverage),
+				},
+			}));
+		} catch {
+			// Recovery storage is best-effort; the in-memory conflict guard remains authoritative.
+		}
+	}
+
+	_recordFailedCommand (command) {
+		const failedId = this._canonicalIds.get(command.requestedId) || command.requestedId;
+		const book = this._getCoverageBook(failedId);
+		const failedCommand = {
+			requestedId: failedId,
+			snapshot: structuredClone(command.submittedSnapshot),
+			activity: structuredClone(command.submittedActivity),
+			commandKeys: {...command.commandKeys},
+			submittedSnapshot: structuredClone(command.submittedSnapshot),
+			submittedActivity: structuredClone(command.submittedActivity),
+			submittedBase: structuredClone(command.submittedBase),
+			submittedBaseCoverage: this._cloneTrackCoverage(command.submittedBaseCoverage),
+			submittedSnapshotCoverage: this._cloneTrackCoverage(command.submittedSnapshotCoverage),
+			bookAtCall: book,
+			recoveryKey: `hub-character-recovery:${this._scopeKey}:${failedId}`,
+			recoveryVersion: command.recoveryVersion,
+			failedWrite: {...structuredClone(command.failedWrite), id: failedId},
+		};
+		if (failedId !== command.requestedId) {
+			this._failedWrites.delete(command.requestedId);
+			this._failedCommands.delete(command.requestedId);
+		}
+		this._failedWrites.set(failedId, failedCommand.failedWrite);
+		this._failedCommands.set(failedId, failedCommand);
+		book.failedWrite = this._cloneTrackCoverage(command.submittedSnapshotCoverage);
+		this._writeRecoveryCommand(failedCommand);
+	}
+
+	_getExecutableFailedCommand ({key, command}) {
+		if (command.submittedSnapshot) return command;
+		const canonicalId = this._canonicalIds.get(key) || key;
+		const book = this._getCoverageBook(canonicalId);
+		const accepted = this._accepted.get(canonicalId);
+		const recoveredBase = this._recoveredBases.get(key);
+		return {
+			requestedId: key,
+			submittedSnapshot: structuredClone(command.snapshot),
+			submittedActivity: structuredClone(command.activity ?? null),
+			commandKeys: {...command.commandKeys},
+			submittedBase: structuredClone(recoveredBase || accepted?.data || null),
+			submittedBaseCoverage: this._cloneTrackCoverage(recoveredBase ? book.recoveredBase : this._getAcceptedCoverage(canonicalId)),
+			submittedSnapshotCoverage: this._cloneTrackCoverage(book.failedWrite),
+			bookAtCall: book,
+			recoveryKey: `hub-character-recovery:${this._scopeKey}:${canonicalId}`,
+			recoveryVersion: null,
+			failedWrite: {...structuredClone(command.snapshot), id: canonicalId},
+		};
+	}
+
+	_clearFailedCommandIfMatches (command) {
+		const canonicalId = this._canonicalIds.get(command.requestedId) || command.requestedId;
+		let isCleared = false;
+		for (const key of new Set([command.requestedId, canonicalId])) {
+			const failedCommand = this._failedCommands.get(key);
+			if (!failedCommand || !this._areSameCommandKeys(failedCommand.commandKeys, command.commandKeys)) continue;
+			this._failedCommands.delete(key);
+			this._failedWrites.delete(key);
+			isCleared = true;
+		}
+		return isCleared;
+	}
+
+	_clearRecoveryIfCurrent (command) {
+		if (command.recoveryVersion == null || this._recoveryVersions.get(command.recoveryKey) !== command.recoveryVersion) return;
+		try {
+			const raw = this._recoveryStorage?.getItem(command.recoveryKey);
+			const storedCommandKeys = raw ? JSON.parse(raw)?.commandKeys : null;
+			if (storedCommandKeys && !this._areSameCommandKeys(storedCommandKeys, command.commandKeys)) return;
+			this._recoveryStorage?.removeItem(command.recoveryKey);
+		} catch {
+			// Recovery storage cleanup is best-effort.
+		}
+		this._recoveryVersions.delete(command.recoveryKey);
+	}
+
+	async _pExecuteUpsertCommand (command) {
+		const {
+			requestedId,
+			submittedSnapshot,
+			submittedActivity,
+			commandKeys,
+			submittedBase,
+			submittedBaseCoverage,
+			submittedSnapshotCoverage,
+		} = command;
+		const canonicalId = this._canonicalIds.get(requestedId) || requestedId;
+		if (canonicalId !== requestedId) {
+			this._migrateCharacterIdentity({fromId: requestedId, toId: canonicalId});
+			command.recoveryKey = `hub-character-recovery:${this._scopeKey}:${canonicalId}`;
+		}
+		const characterNxt = {...structuredClone(submittedSnapshot), id: canonicalId};
+		const existingConflict = this._conflicts.get(canonicalId);
+		if (existingConflict) {
+			existingConflict.local = this._getSnapshotData(characterNxt);
+			const conflict = new Error(`Character conflict requires explicit resolution.`);
+			conflict.code = "CHARACTER_CONFLICT";
+			conflict.recovery = structuredClone(existingConflict);
+			throw conflict;
+		}
+		await this._pEnsureSession();
+		let accepted = this._accepted.get(canonicalId);
+		if (!accepted) {
+			try {
+				await this.pGet({characterId: canonicalId});
+				accepted = this._accepted.get(canonicalId);
+			} catch (error) {
+				if (error?.code !== "CHARACTER_NOT_FOUND") throw error;
+				const created = await this._api.pCreateCharacter({
+					clientImportId: requestedId,
+					campaignId: this._campaignId,
+					data: this._getSnapshotData(characterNxt),
+					rulesVersionId: this._fnGetRulesVersionId(),
+					idempotencyKey: commandKeys.create,
+				});
+				this._canonicalIds.set(requestedId, created.character.id);
+				this._migrateCharacterIdentity({fromId: requestedId, toId: created.character.id});
+				command.recoveryKey = `hub-character-recovery:${this._scopeKey}:${created.character.id}`;
+				this._accepted.set(created.character.id, created.character);
+				accepted = created.character;
+			}
+		}
+		let desired = this._getSnapshotData(characterNxt);
+		if (submittedBase) {
+			const submittedRebase = rebaseJsonChanges({
+				base: submittedBase,
+				local: desired,
+				remote: accepted.data,
+			});
+			if (submittedRebase.isConflict) {
+				const recovery = {
+					base: submittedBase,
+					local: desired,
+					server: structuredClone(accepted.data),
+					serverDocument: structuredClone(accepted),
+					conflicts: submittedRebase.conflicts,
+					coverage: {
+						base: serializeCoverage(submittedBaseCoverage),
+						local: serializeCoverage(submittedSnapshotCoverage),
+						server: serializeCoverage(this._getAcceptedCoverage(canonicalId)),
+					},
+				};
+				this._conflicts.set(canonicalId, recovery);
+				const conflict = new Error(`Character changed remotely on overlapping fields.`);
+				conflict.code = "CHARACTER_CONFLICT";
+				conflict.recovery = structuredClone(recovery);
+				throw conflict;
+			}
+			desired = submittedRebase.document;
+		}
+		// A recursive diff never emits a whole-block `/carry` op, which is the only signal
+		// the server accepts as "this writer understands carry authority". Without this
+		// normalisation an ordinary save strips the summary it is actually carrying.
+		const patches = withRootCarryWrite({patches: diffJson(accepted.data, desired), document: desired, base: accepted.data});
+		if (!patches.length && !submittedActivity) {
+			this._syncCoverageToAccepted(canonicalId);
+			return this._getData(accepted);
+		}
+		let result;
+		try {
+			const lease = await this.pAcquireLease({characterId: canonicalId});
+			result = await this._api.pPatchCharacter({
+				characterId: canonicalId,
+				baseRevision: accepted.revision,
+				leaseEpoch: lease.epoch,
+				patches,
+				activity: submittedActivity,
+				rulesVersionId: this._fnGetRulesVersionId(),
+				idempotencyKey: commandKeys.patch,
+			});
+		} catch (error) {
+			if (["LEASE_HELD", "LEASE_FENCED", "LEASE_EXPIRED"].includes(error?.code)) {
+				const canonical = await this._api.pGetCharacter({characterId: canonicalId});
+				const recovery = {
+					base: structuredClone(accepted.data),
+					local: desired,
+					server: structuredClone(canonical.data),
+					serverDocument: structuredClone(canonical),
+					conflicts: [{localPath: "", remotePath: "", reason: error.code}],
+					coverage: {
+						base: serializeCoverage(this._getAcceptedCoverage(canonicalId)),
+						local: serializeCoverage(submittedSnapshotCoverage),
+						// Freshly fetched canonical truth already contains any operation up to its revision,
+						// so this candidate must never be transformed again.
+						server: serializeCoverage(createCoverage({revision: canonical.revision, acceptedSequence: this._getOperationWatermark(canonicalId, canonical)})),
+					},
+				};
+				this._conflicts.set(canonicalId, recovery);
+				const conflict = new Error(`Character is being edited on another device.`);
+				conflict.code = "CHARACTER_CONFLICT";
+				conflict.recovery = structuredClone(recovery);
+				throw conflict;
+			}
+			if (error?.code !== "REVISION_CONFLICT") throw error;
+			const canonical = await this._api.pGetCharacter({characterId: canonicalId});
+			const rebased = rebaseJsonChanges({
+				base: accepted.data,
+				local: desired,
+				remote: canonical.data,
+			});
+			if (rebased.isConflict) {
+				const recovery = {
+					base: structuredClone(accepted.data),
+					local: desired,
+					server: structuredClone(canonical.data),
+					serverDocument: structuredClone(canonical),
+					conflicts: rebased.conflicts,
+					coverage: {
+						base: serializeCoverage(this._getAcceptedCoverage(canonicalId)),
+						local: serializeCoverage(submittedSnapshotCoverage),
+						// The revision-conflict refetch already reflects the intervening operation.
+						server: serializeCoverage(createCoverage({revision: canonical.revision, acceptedSequence: this._getOperationWatermark(canonicalId, canonical)})),
+					},
+				};
+				this._conflicts.set(canonicalId, recovery);
+				const conflict = new Error(`Character changed remotely on overlapping fields.`);
+				conflict.name = "HubCharacterConflictError";
+				conflict.code = "CHARACTER_CONFLICT";
+				conflict.recovery = structuredClone(recovery);
+				throw conflict;
+			}
+			this._accepted.set(canonicalId, canonical);
+			const leaseNxt = await this.pAcquireLease({characterId: canonicalId});
+			result = await this._api.pPatchCharacter({
+				characterId: canonicalId,
+				baseRevision: canonical.revision,
+				leaseEpoch: leaseNxt.epoch,
+				patches: withRootCarryWrite({
+					patches: diffJson(canonical.data, rebased.document),
+					document: rebased.document,
+					base: canonical.data,
+				}),
+				activity: submittedActivity,
+				rulesVersionId: this._fnGetRulesVersionId(),
+				idempotencyKey: commandKeys.patch,
+			});
+		}
+		this._accepted.set(canonicalId, result.character);
+		this._syncCoverageToAccepted(canonicalId);
+		return this._getData(result.character);
+	}
+
 	pUpsert ({character, activity = null}) {
 		const saveBlock = this.getSaveBlock(character?.id);
 		if (saveBlock) {
@@ -1217,18 +1489,11 @@ export class HubHttpCharacterRepository {
 		const canonicalAtCall = this._canonicalIds.get(requestedId) || requestedId;
 		const submittedSnapshot = this._getSnapshotData(character);
 		const submittedActivity = activity == null ? null : structuredClone(activity);
-		const failedCommandKey = this._failedCommands.has(requestedId) ? requestedId : canonicalAtCall;
-		const failedCommand = this._failedCommands.get(failedCommandKey);
+		const failedCommand = this._getFailedCommandEntry(requestedId)?.command;
 		const isSameFailedSnapshot = failedCommand
 			&& JSON.stringify(failedCommand.snapshot) === JSON.stringify(submittedSnapshot)
 			&& JSON.stringify(failedCommand.activity ?? null) === JSON.stringify(submittedActivity);
-		if (failedCommand && !isSameFailedSnapshot) {
-			return this.pUpsert({
-				character: {...structuredClone(failedCommand.snapshot), id: requestedId},
-				activity: failedCommand.activity ?? null,
-			}).then(() => this.pUpsert({character, activity}));
-		}
-		let recoveryKey = `hub-character-recovery:${this._scopeKey}:${requestedId}`;
+		const recoveryKey = `hub-character-recovery:${this._scopeKey}:${requestedId}`;
 		const recoveryVersion = (this._recoveryVersions.get(recoveryKey) || 0) + 1;
 		this._recoveryVersions.set(recoveryKey, recoveryVersion);
 		const commandKeys = isSameFailedSnapshot
@@ -1236,6 +1501,7 @@ export class HubHttpCharacterRepository {
 			: {create: crypto.randomUUID(), patch: crypto.randomUUID()};
 		const submittedBase = structuredClone(
 			this._recoveredBases.get(requestedId)
+			|| (failedCommand && !isSameFailedSnapshot ? failedCommand.snapshot : null)
 			|| (this._pendingWrites > 0 ? this._latestSubmitted.get(requestedId) : null)
 			|| this._accepted.get(canonicalAtCall)?.data
 			|| this._latestSubmitted.get(requestedId)
@@ -1245,211 +1511,71 @@ export class HubHttpCharacterRepository {
 		// Mirror the precedence used for `submittedBase` so the base's coverage travels with it.
 		const submittedBaseCoverage = this._cloneTrackCoverage(
 			this._recoveredBases.get(requestedId) ? bookAtCall.recoveredBase
-				: (this._pendingWrites > 0 && this._latestSubmitted.get(requestedId)) ? bookAtCall.latestSubmitted
-					: this._accepted.get(canonicalAtCall)?.data ? this._getAcceptedCoverage(canonicalAtCall)
-						: bookAtCall.latestSubmitted,
+				: (failedCommand && !isSameFailedSnapshot) ? bookAtCall.failedWrite
+					: (this._pendingWrites > 0 && this._latestSubmitted.get(requestedId)) ? bookAtCall.latestSubmitted
+						: this._accepted.get(canonicalAtCall)?.data ? this._getAcceptedCoverage(canonicalAtCall)
+							: bookAtCall.latestSubmitted,
 		);
 		const submittedSnapshotCoverage = this._cloneTrackCoverage(bookAtCall.live);
+		const command = {
+			requestedId,
+			submittedSnapshot,
+			submittedActivity,
+			commandKeys,
+			submittedBase,
+			submittedBaseCoverage,
+			submittedSnapshotCoverage,
+			bookAtCall,
+			recoveryKey,
+			recoveryVersion,
+			failedWrite: structuredClone(character),
+		};
 		this._recoveredBases.delete(requestedId);
 		bookAtCall.recoveredBase = createCoverage();
 		this._latestSubmitted.set(requestedId, structuredClone(submittedSnapshot));
 		bookAtCall.latestSubmitted = this._cloneTrackCoverage(submittedSnapshotCoverage);
 		this._pendingWrites++;
-		try {
-			this._recoveryStorage?.setItem(recoveryKey, JSON.stringify({
-				version: recoveryVersion,
-				base: submittedBase,
-				snapshot: submittedSnapshot,
-				activity: submittedActivity,
-				commandKeys,
-				coverageVersion: COVERAGE_VERSION,
-				coverage: {
-					base: serializeCoverage(submittedBaseCoverage),
-					snapshot: serializeCoverage(submittedSnapshotCoverage),
-				},
-			}));
-		} catch {
-			// Recovery storage is best-effort; the in-memory conflict guard remains authoritative.
-		}
+		this._writeRecoveryCommand(command);
 		const pResult = this._pRunMutation(async () => {
-			const canonicalId = this._canonicalIds.get(requestedId) || requestedId;
-			if (canonicalId !== requestedId) {
-				this._migrateCharacterIdentity({fromId: requestedId, toId: canonicalId});
-				recoveryKey = `hub-character-recovery:${this._scopeKey}:${canonicalId}`;
-			}
-			const characterNxt = {...structuredClone(submittedSnapshot), id: canonicalId};
-			const existingConflict = this._conflicts.get(canonicalId);
-			if (existingConflict) {
-				existingConflict.local = this._getSnapshotData(characterNxt);
-				const conflict = new Error(`Character conflict requires explicit resolution.`);
-				conflict.code = "CHARACTER_CONFLICT";
-				conflict.recovery = structuredClone(existingConflict);
-				throw conflict;
-			}
-			await this._pEnsureSession();
-			let accepted = this._accepted.get(canonicalId);
-			if (!accepted) {
+			const failedEntry = this._getFailedCommandEntry(requestedId);
+			if (failedEntry && !this._areSameCommandKeys(failedEntry.command.commandKeys, command.commandKeys)) {
+				const failedCommandNxt = this._getExecutableFailedCommand(failedEntry);
+				this._writeRecoveryCommand(failedCommandNxt);
 				try {
-					await this.pGet({characterId: canonicalId});
-					accepted = this._accepted.get(canonicalId);
+					await this._pExecuteUpsertCommand(failedCommandNxt);
 				} catch (error) {
-					if (error?.code !== "CHARACTER_NOT_FOUND") throw error;
-					const created = await this._api.pCreateCharacter({
-						clientImportId: requestedId,
-						campaignId: this._campaignId,
-						data: this._getSnapshotData(characterNxt),
-						rulesVersionId: this._fnGetRulesVersionId(),
-						idempotencyKey: commandKeys.create,
-					});
-					this._canonicalIds.set(requestedId, created.character.id);
-					this._migrateCharacterIdentity({fromId: requestedId, toId: created.character.id});
-					recoveryKey = `hub-character-recovery:${this._scopeKey}:${created.character.id}`;
-					this._accepted.set(created.character.id, created.character);
-					accepted = created.character;
+					if (error?.code === "CHARACTER_CONFLICT") {
+						this._clearFailedCommandIfMatches(failedCommandNxt);
+						const canonicalId = this._canonicalIds.get(command.requestedId) || command.requestedId;
+						const recovery = this._conflicts.get(canonicalId);
+						if (recovery) recovery.local = structuredClone(command.submittedSnapshot);
+					} else {
+						this._recordFailedCommand(failedCommandNxt);
+					}
+					throw error;
+				}
+				this._clearFailedCommandIfMatches(failedCommandNxt);
+				this._clearRecoveryIfCurrent(failedCommandNxt);
+				const canonicalId = this._canonicalIds.get(command.requestedId) || command.requestedId;
+				const accepted = this._accepted.get(canonicalId);
+				if (accepted) {
+					command.submittedBase = structuredClone(accepted.data);
+					command.submittedBaseCoverage = this._cloneTrackCoverage(this._getAcceptedCoverage(canonicalId));
 				}
 			}
-			let desired = this._getSnapshotData(characterNxt);
-			if (submittedBase) {
-				const submittedRebase = rebaseJsonChanges({
-					base: submittedBase,
-					local: desired,
-					remote: accepted.data,
-				});
-				if (submittedRebase.isConflict) {
-					const recovery = {
-						base: submittedBase,
-						local: desired,
-						server: structuredClone(accepted.data),
-						serverDocument: structuredClone(accepted),
-						conflicts: submittedRebase.conflicts,
-						coverage: {
-							base: serializeCoverage(submittedBaseCoverage),
-							local: serializeCoverage(submittedSnapshotCoverage),
-							server: serializeCoverage(this._getAcceptedCoverage(canonicalId)),
-						},
-					};
-					this._conflicts.set(canonicalId, recovery);
-					const conflict = new Error(`Character changed remotely on overlapping fields.`);
-					conflict.code = "CHARACTER_CONFLICT";
-					conflict.recovery = structuredClone(recovery);
-					throw conflict;
-				}
-				desired = submittedRebase.document;
-			}
-			// A recursive diff never emits a whole-block `/carry` op, which is the only signal
-			// the server accepts as "this writer understands carry authority". Without this
-			// normalisation an ordinary save strips the summary it is actually carrying.
-			const patches = withRootCarryWrite({patches: diffJson(accepted.data, desired), document: desired, base: accepted.data});
-			if (!patches.length && !submittedActivity) {
-				this._syncCoverageToAccepted(canonicalId);
-				return this._getData(accepted);
-			}
-			let result;
+			this._writeRecoveryCommand(command);
 			try {
-				const lease = await this.pAcquireLease({characterId: canonicalId});
-				result = await this._api.pPatchCharacter({
-					characterId: canonicalId,
-					baseRevision: accepted.revision,
-					leaseEpoch: lease.epoch,
-					patches,
-					activity: submittedActivity,
-					rulesVersionId: this._fnGetRulesVersionId(),
-					idempotencyKey: commandKeys.patch,
-				});
+				const out = await this._pExecuteUpsertCommand(command);
+				this._clearFailedCommandIfMatches(command);
+				this._clearRecoveryIfCurrent(command);
+				return out;
 			} catch (error) {
-				if (["LEASE_HELD", "LEASE_FENCED", "LEASE_EXPIRED"].includes(error?.code)) {
-					const canonical = await this._api.pGetCharacter({characterId: canonicalId});
-					const recovery = {
-						base: structuredClone(accepted.data),
-						local: desired,
-						server: structuredClone(canonical.data),
-						serverDocument: structuredClone(canonical),
-						conflicts: [{localPath: "", remotePath: "", reason: error.code}],
-						coverage: {
-							base: serializeCoverage(this._getAcceptedCoverage(canonicalId)),
-							local: serializeCoverage(submittedSnapshotCoverage),
-							// Freshly fetched canonical truth already contains any operation up to its revision,
-							// so this candidate must never be transformed again.
-							server: serializeCoverage(createCoverage({revision: canonical.revision, acceptedSequence: this._getOperationWatermark(canonicalId, canonical)})),
-						},
-					};
-					this._conflicts.set(canonicalId, recovery);
-					const conflict = new Error(`Character is being edited on another device.`);
-					conflict.code = "CHARACTER_CONFLICT";
-					conflict.recovery = structuredClone(recovery);
-					throw conflict;
-				}
-				if (error?.code !== "REVISION_CONFLICT") throw error;
-				const canonical = await this._api.pGetCharacter({characterId: canonicalId});
-				const rebased = rebaseJsonChanges({
-					base: accepted.data,
-					local: desired,
-					remote: canonical.data,
-				});
-				if (rebased.isConflict) {
-					const recovery = {
-						base: structuredClone(accepted.data),
-						local: desired,
-						server: structuredClone(canonical.data),
-						serverDocument: structuredClone(canonical),
-						conflicts: rebased.conflicts,
-						coverage: {
-							base: serializeCoverage(this._getAcceptedCoverage(canonicalId)),
-							local: serializeCoverage(submittedSnapshotCoverage),
-							// The revision-conflict refetch already reflects the intervening operation.
-							server: serializeCoverage(createCoverage({revision: canonical.revision, acceptedSequence: this._getOperationWatermark(canonicalId, canonical)})),
-						},
-					};
-					this._conflicts.set(canonicalId, recovery);
-					const conflict = new Error(`Character changed remotely on overlapping fields.`);
-					conflict.name = "HubCharacterConflictError";
-					conflict.code = "CHARACTER_CONFLICT";
-					conflict.recovery = structuredClone(recovery);
-					throw conflict;
-				}
-				this._accepted.set(canonicalId, canonical);
-				const leaseNxt = await this.pAcquireLease({characterId: canonicalId});
-				result = await this._api.pPatchCharacter({
-					characterId: canonicalId,
-					baseRevision: canonical.revision,
-					leaseEpoch: leaseNxt.epoch,
-					patches: withRootCarryWrite({
-						patches: diffJson(canonical.data, rebased.document),
-						document: rebased.document,
-						base: canonical.data,
-					}),
-					activity: submittedActivity,
-					rulesVersionId: this._fnGetRulesVersionId(),
-					idempotencyKey: commandKeys.patch,
-				});
+				if (error?.code === "CHARACTER_CONFLICT") this._clearFailedCommandIfMatches(command);
+				else this._recordFailedCommand(command);
+				throw error;
 			}
-			this._accepted.set(canonicalId, result.character);
-			this._syncCoverageToAccepted(canonicalId);
-			return this._getData(result.character);
 		});
 		return pResult
-			.then(out => {
-				this._failedWrites.delete(requestedId);
-				this._failedCommands.delete(requestedId);
-				if (this._recoveryVersions.get(recoveryKey) === recoveryVersion) {
-					this._recoveryVersions.delete(recoveryKey);
-					try {
-						this._recoveryStorage?.removeItem(recoveryKey);
-					} catch {
-						// Recovery storage cleanup is best-effort.
-					}
-				}
-				return out;
-			})
-			.catch(error => {
-				this._failedWrites.set(requestedId, structuredClone(character));
-				this._failedCommands.set(requestedId, {snapshot: submittedSnapshot, activity: submittedActivity, commandKeys});
-				// Keep the in-memory coverage of the recovered snapshot in step with the copy written to recovery
-				// storage above. Without this the failed write would carry unknown coverage, and the next campaign
-				// effect would classify it as unprovable and cascade into a resync the history can never satisfy.
-				bookAtCall.failedWrite = this._cloneTrackCoverage(submittedSnapshotCoverage);
-				throw error;
-			})
 			.finally(() => this._pendingWrites--);
 	}
 

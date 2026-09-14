@@ -622,4 +622,88 @@ describe("HTTP character repository", () => {
 		expect(requests[2].idempotencyKey).not.toBe(requests[0].idempotencyKey);
 		expect(requests[2].activity).toBeNull();
 	});
+
+	it("replays a failed spell command when the later save was queued before rejection", async () => {
+		const requests = [];
+		let rejectFirstPatch;
+		let markFirstPatchStarted;
+		const firstPatchStarted = new Promise(resolve => markFirstPatchStarted = resolve);
+		const firstPatch = new Promise((resolve, reject) => rejectFirstPatch = reject);
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+			pAcquireCharacterLease: async () => ({epoch: requests.length + 1}),
+			pPatchCharacter: async input => {
+				requests.push(structuredClone(input));
+				if (requests.length === 1) {
+					markFirstPatchStarted();
+					return firstPatch;
+				}
+				if (requests.length === 2) return {character: {id: "c", revision: 2, data: {hp: 10}}};
+				return {character: {id: "c", revision: 3, data: {hp: 10}}};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		await repository.pGet({characterId: "c"});
+		const failedActivity = {type: "spell.used", spellName: "Fire Bolt", spellSource: "PHB", spellLevel: 0, slotLevel: 0, mode: "cantrip"};
+		const laterActivity = {type: "spell.used", spellName: "Ray of Frost", spellSource: "PHB", spellLevel: 0, slotLevel: 0, mode: "cantrip"};
+
+		const failed = repository.pUpsert({character: {id: "c", hp: 10}, activity: failedActivity});
+		await firstPatchStarted;
+		const later = repository.pUpsert({character: {id: "c", hp: 10}, activity: laterActivity});
+		rejectFirstPatch(new Error("response lost"));
+
+		const results = await Promise.allSettled([failed, later]);
+
+		expect(results.map(result => result.status)).toEqual(["rejected", "fulfilled"]);
+		expect(requests).toHaveLength(3);
+		expect(requests[1].idempotencyKey).toBe(requests[0].idempotencyKey);
+		expect(requests[1].activity).toEqual(failedActivity);
+		expect(requests[2].idempotencyKey).not.toBe(requests[0].idempotencyKey);
+		expect(requests[2].activity).toEqual(laterActivity);
+		expect(results[1].value).toEqual({id: "c", hp: 10});
+		expect(repository._failedCommands.size).toBe(0);
+		expect(repository.hasPendingWrites()).toBe(false);
+	});
+
+	it("retains the earlier failed spell command when its queued replay also fails", async () => {
+		const requests = [];
+		let rejectFirstPatch;
+		let markFirstPatchStarted;
+		const firstPatchStarted = new Promise(resolve => markFirstPatchStarted = resolve);
+		const firstPatch = new Promise((resolve, reject) => rejectFirstPatch = reject);
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+			pAcquireCharacterLease: async () => ({epoch: requests.length + 1}),
+			pPatchCharacter: async input => {
+				requests.push(structuredClone(input));
+				if (requests.length === 1) {
+					markFirstPatchStarted();
+					return firstPatch;
+				}
+				throw new Error("retry also failed");
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		await repository.pGet({characterId: "c"});
+		const failedActivity = {type: "spell.used", spellName: "Fire Bolt", spellSource: "PHB", spellLevel: 0, slotLevel: 0, mode: "cantrip"};
+		const laterActivity = {type: "spell.used", spellName: "Ray of Frost", spellSource: "PHB", spellLevel: 0, slotLevel: 0, mode: "cantrip"};
+
+		const failed = repository.pUpsert({character: {id: "c", hp: 10}, activity: failedActivity});
+		await firstPatchStarted;
+		const later = repository.pUpsert({character: {id: "c", hp: 10}, activity: laterActivity});
+		rejectFirstPatch(new Error("response lost"));
+
+		const results = await Promise.allSettled([failed, later]);
+
+		expect(results.map(result => result.status)).toEqual(["rejected", "rejected"]);
+		expect(requests).toHaveLength(2);
+		expect(requests[1].idempotencyKey).toBe(requests[0].idempotencyKey);
+		expect(repository._failedCommands.get("c")).toEqual(expect.objectContaining({
+			activity: failedActivity,
+			commandKeys: expect.objectContaining({patch: requests[0].idempotencyKey}),
+		}));
+		expect(repository.hasPendingWrites()).toBe(true);
+	});
 });

@@ -2003,17 +2003,7 @@ export class CharacterSheetPlayMode {
 				ritualBtn.title = "Cast as Ritual (no slot)";
 				ritualBtn.addEventListener("click", (e) => {
 					e.stopPropagation();
-					if (spell.concentration && this._state.isConcentrating?.()) {
-						this._promptConcentrationBreak(spell, () => {
-							if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
-							this._logActivity("ritual", `Cast ${spell.name} as ritual (no slot)`);
-							this._renderStatusBar();
-						});
-					} else {
-						if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
-						this._logActivity("ritual", `Cast ${spell.name} as ritual (no slot)`);
-						this._renderStatusBar();
-					}
+					this._castSpellAsRitual(spell);
 				});
 			}
 		}
@@ -2055,12 +2045,7 @@ export class CharacterSheetPlayMode {
 				menuItems.push({
 					label: "Cast as Ritual",
 					icon: "ritual",
-					onClick: () => {
-						if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
-						this._logActivity("ritual", `Cast ${spell.name} as ritual`);
-						this._renderStatusBar();
-						void this._persistSpellUse(spell, {slotLevel: spell.level, mode: "ritual"});
-					},
+					onClick: () => this._castSpellAsRitual(spell),
 				});
 			}
 			if (spell.level > 0 && !spell.alwaysPrepared && showPreparedToggle) menuItems.push({label: spell.prepared ? "Unprepare" : "Prepare", icon: "check", onClick: () => { this._state.setSpellPrepared?.(spell.id, !spell.prepared); this._openDrawerByType("spells"); }});
@@ -3357,6 +3342,20 @@ export class CharacterSheetPlayMode {
 		});
 	}
 
+	_castSpellAsRitual (spell) {
+		const commit = () => {
+			if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
+			this._logActivity("ritual", `Cast ${spell.name} as ritual (no slot)`);
+			this._renderStatusBar();
+			void this._persistSpellUse(spell, {slotLevel: spell.level, mode: "ritual"});
+		};
+		if (spell.concentration && this._state.isConcentrating?.()) {
+			this._promptConcentrationBreak(spell, commit);
+			return;
+		}
+		commit();
+	}
+
 	_promptConcentrationBreak (newSpell, onConfirm) {
 		const concentrating = this._state.getActiveStates().find(s => s.stateTypeId === "concentration" && s.active);
 		const currentName = concentrating?.name || "a spell";
@@ -3867,17 +3866,7 @@ export class CharacterSheetPlayMode {
 			ritualBtn.title = "Cast as Ritual (no slot)";
 			ritualBtn.addEventListener("click", () => {
 				overlay.remove();
-				if (spell.concentration && this._state.isConcentrating?.()) {
-					this._promptConcentrationBreak(spell, () => {
-						if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
-						this._logActivity("ritual", `Cast ${spell.name} as ritual (no slot)`);
-						this._renderStatusBar();
-					});
-				} else {
-					if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
-					this._logActivity("ritual", `Cast ${spell.name} as ritual (no slot)`);
-					this._renderStatusBar();
-				}
+				this._castSpellAsRitual(spell);
 			});
 		}
 		if (showPreparedToggle && spell.level > 0 && !spell.alwaysPrepared) {

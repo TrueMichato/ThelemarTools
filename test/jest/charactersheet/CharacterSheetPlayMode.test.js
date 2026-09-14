@@ -10,6 +10,46 @@ import {CharacterSheetPlayMode} from "../../../js/charactersheet/charactersheet-
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 
+function makeElement (className = "") {
+	return {
+		className,
+		children: [],
+		_handlers: {},
+		classList: {add: jest.fn()},
+		appendChild (child) {
+			this.children.push(child);
+			child.parentNode = this;
+			return child;
+		},
+		replaceChildren (...children) {
+			this.children = children;
+		},
+		addEventListener (type, handler) {
+			this._handlers[type] = handler;
+		},
+		remove: jest.fn(),
+	};
+}
+
+function makePlayModeDomHarness () {
+	const elements = [];
+	const playMode = Object.create(CharacterSheetPlayMode.prototype);
+	playMode._ce = (tag, className, parent) => {
+		const element = makeElement(className);
+		element.tagName = tag.toUpperCase();
+		if (parent) parent.appendChild(element);
+		elements.push(element);
+		return element;
+	};
+	playMode._setIcon = jest.fn();
+	playMode._setIconLabel = jest.fn();
+	playMode._makeChip = jest.fn();
+	playMode._makeClickable = jest.fn();
+	playMode._isFavorite = jest.fn(() => false);
+	playMode._state = {getSpellNote: jest.fn(() => null)};
+	return {elements, playMode};
+}
+
 describe("CharacterSheetPlayMode", () => {
 	let state;
 
@@ -39,6 +79,136 @@ describe("CharacterSheetPlayMode", () => {
 				mode: "cantrip",
 			},
 		});
+	});
+
+	it("routes the quick-row ritual control through the committed ritual helper", () => {
+		const {elements, playMode} = makePlayModeDomHarness();
+		const spell = {id: "detect-magic", name: "Detect Magic", level: 1, ritual: true};
+		playMode._castSpellAsRitual = jest.fn();
+
+		playMode._renderSpellRow(makeElement(), spell);
+		const ritualButton = elements.find(element => element.className.includes("pm-spell__cast--ritual"));
+
+		expect(ritualButton).toBeDefined();
+		ritualButton._handlers.click({stopPropagation: jest.fn()});
+		expect(playMode._castSpellAsRitual).toHaveBeenCalledTimes(1);
+		expect(playMode._castSpellAsRitual).toHaveBeenCalledWith(spell);
+	});
+
+	it("routes the spell context-menu ritual control through the committed ritual helper", () => {
+		const {elements, playMode} = makePlayModeDomHarness();
+		const spell = {id: "detect-magic", name: "Detect Magic", level: 1, ritual: true};
+		playMode._castSpellAsRitual = jest.fn();
+		playMode._showContextMenu = jest.fn();
+
+		playMode._renderSpellRow(makeElement(), spell);
+		const row = elements.find(element => element.className === "pm-spell");
+		row._handlers.contextmenu({preventDefault: jest.fn()});
+		const ritualItem = playMode._showContextMenu.mock.calls[0][1].find(item => item.label === "Cast as Ritual");
+
+		expect(ritualItem).toBeDefined();
+		ritualItem.onClick();
+		expect(playMode._castSpellAsRitual).toHaveBeenCalledTimes(1);
+		expect(playMode._castSpellAsRitual).toHaveBeenCalledWith(spell);
+	});
+
+	it("routes the spell-details ritual control through the committed ritual helper", () => {
+		const originalDocument = globalThis.document;
+		const {elements, playMode} = makePlayModeDomHarness();
+		const spell = {id: "detect-magic", name: "Detect Magic", level: 1, ritual: true};
+		const body = makeElement();
+		globalThis.document = {
+			addEventListener: jest.fn(),
+			removeEventListener: jest.fn(),
+			body,
+		};
+		playMode._castSpellAsRitual = jest.fn();
+
+		try {
+			playMode._showSpellInfoModal(spell);
+			const ritualButton = elements.find(element => element.className.includes("pm-modal__btn--ritual"));
+			const overlay = elements.find(element => element.className === "pm-modal-overlay");
+
+			expect(ritualButton).toBeDefined();
+			ritualButton._handlers.click();
+			expect(overlay.remove).toHaveBeenCalledTimes(1);
+			expect(playMode._castSpellAsRitual).toHaveBeenCalledTimes(1);
+			expect(playMode._castSpellAsRitual).toHaveBeenCalledWith(spell);
+		} finally {
+			globalThis.document = originalDocument;
+		}
+	});
+
+	it("commits and persists a concentrating ritual exactly once after confirmation", () => {
+		const originalDocument = globalThis.document;
+		const {elements, playMode} = makePlayModeDomHarness();
+		const spell = {name: "Detect Magic", level: 1, concentration: true, ritual: true};
+		globalThis.document = {body: makeElement()};
+		playMode._state = {
+			isConcentrating: jest.fn(() => true),
+			getActiveStates: jest.fn(() => [{stateTypeId: "concentration", active: true, name: "Bless"}]),
+			breakConcentration: jest.fn(),
+			setConcentration: jest.fn(),
+		};
+		playMode._logActivity = jest.fn();
+		playMode._renderStatusBar = jest.fn();
+		playMode._persistSpellUse = jest.fn(() => Promise.resolve());
+
+		try {
+			playMode._castSpellAsRitual(spell);
+
+			expect(playMode._state.breakConcentration).not.toHaveBeenCalled();
+			expect(playMode._state.setConcentration).not.toHaveBeenCalled();
+			expect(playMode._logActivity).not.toHaveBeenCalled();
+			expect(playMode._renderStatusBar).not.toHaveBeenCalled();
+			expect(playMode._persistSpellUse).not.toHaveBeenCalled();
+
+			const confirmButton = elements.find(element => element.className.includes("pm-modal__btn--confirm"));
+			confirmButton._handlers.click();
+
+			expect(playMode._state.breakConcentration).toHaveBeenCalledTimes(1);
+			expect(playMode._state.setConcentration).toHaveBeenCalledTimes(1);
+			expect(playMode._state.setConcentration).toHaveBeenCalledWith({name: "Detect Magic", level: 1});
+			expect(playMode._logActivity.mock.calls).toEqual([
+				["concentration", "Broke concentration on Bless"],
+				["ritual", "Cast Detect Magic as ritual (no slot)"],
+			]);
+			expect(playMode._renderStatusBar).toHaveBeenCalledTimes(1);
+			expect(playMode._persistSpellUse).toHaveBeenCalledTimes(1);
+			expect(playMode._persistSpellUse).toHaveBeenCalledWith(spell, {slotLevel: 1, mode: "ritual"});
+		} finally {
+			globalThis.document = originalDocument;
+		}
+	});
+
+	it("does not commit or persist a concentrating ritual when confirmation is cancelled", () => {
+		const originalDocument = globalThis.document;
+		const {elements, playMode} = makePlayModeDomHarness();
+		const spell = {name: "Detect Magic", level: 1, concentration: true, ritual: true};
+		globalThis.document = {body: makeElement()};
+		playMode._state = {
+			isConcentrating: jest.fn(() => true),
+			getActiveStates: jest.fn(() => [{stateTypeId: "concentration", active: true, name: "Bless"}]),
+			breakConcentration: jest.fn(),
+			setConcentration: jest.fn(),
+		};
+		playMode._logActivity = jest.fn();
+		playMode._renderStatusBar = jest.fn();
+		playMode._persistSpellUse = jest.fn(() => Promise.resolve());
+
+		try {
+			playMode._castSpellAsRitual(spell);
+			const cancelButton = elements.find(element => element.className.includes("pm-modal__btn--cancel"));
+			cancelButton._handlers.click();
+
+			expect(playMode._state.breakConcentration).not.toHaveBeenCalled();
+			expect(playMode._state.setConcentration).not.toHaveBeenCalled();
+			expect(playMode._logActivity).not.toHaveBeenCalled();
+			expect(playMode._renderStatusBar).not.toHaveBeenCalled();
+			expect(playMode._persistSpellUse).not.toHaveBeenCalled();
+		} finally {
+			globalThis.document = originalDocument;
+		}
 	});
 
 	describe("Item attunement", () => {
