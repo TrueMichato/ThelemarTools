@@ -1823,7 +1823,9 @@ export class HubCampaignPage {
 		const partyMatcher = `**/api/campaigns/${campaignId}/party-inventory`;
 		const idempotencyKeys: string[] = [];
 		let failedRefreshCount = 0;
+		let shouldFailRefresh = true;
 		const failRefresh = (route: Route) => {
+			if (!shouldFailRefresh) return route.continue();
 			failedRefreshCount++;
 			return route.fulfill({
 				status: 503,
@@ -1833,19 +1835,20 @@ export class HubCampaignPage {
 		};
 		const observeResolution = async (route: Route) => {
 			idempotencyKeys.push(route.request().headers()["idempotency-key"]);
+			await this.page.route(partyMatcher, failRefresh);
 			const response = await route.fetch();
 			expect(response.ok()).toBe(true);
-			await this.page.route(partyMatcher, failRefresh, {times: 1});
 			await route.fulfill({response});
 		};
 		await this.page.route(resolveMatcher, observeResolution);
 		try {
 			await transfer.getByRole("button", {name: buttonName, exact: true}).click();
-			await expect.poll(() => failedRefreshCount).toBe(1);
+			await expect.poll(() => failedRefreshCount).toBeGreaterThan(0);
 			await expect(transfer).toContainText("The committed outcome is safe");
 			await expect(transfer.getByRole("button", {name: buttonName, exact: true})).toHaveCount(0);
 			const retry = transfer.getByRole("button", {name: "Retry inbox refresh", exact: true});
 			await expect(retry).toBeVisible();
+			shouldFailRefresh = false;
 			await retry.click();
 			await expect(transfers).toHaveCount(transferCount - 1);
 			expect(idempotencyKeys).toHaveLength(1);
@@ -1875,7 +1878,9 @@ export class HubCampaignPage {
 		const idempotencyKeys: string[] = [];
 		let attempt = 0;
 		let failedRefreshCount = 0;
+		let shouldFailRefresh = true;
 		const failRefresh = (route: Route) => {
+			if (!shouldFailRefresh) return route.continue();
 			failedRefreshCount++;
 			return route.fulfill({
 				status: 503,
@@ -1886,9 +1891,9 @@ export class HubCampaignPage {
 		const loseFirstResponse = async (route: Route) => {
 			idempotencyKeys.push(route.request().headers()["idempotency-key"]);
 			if (++attempt === 1) {
+				await this.page.route(partyMatcher, failRefresh);
 				const committed = await route.fetch();
 				expect(committed.ok()).toBe(true);
-				await this.page.route(partyMatcher, failRefresh, {times: 1});
 				await route.fulfill({
 					status: 503,
 					contentType: "application/json",
@@ -1902,11 +1907,12 @@ export class HubCampaignPage {
 		try {
 			const decision = transfer.getByRole("button", {name: buttonName, exact: true});
 			await decision.click();
-			await expect.poll(() => failedRefreshCount).toBe(1);
+			await expect.poll(() => failedRefreshCount).toBeGreaterThan(0);
 			await expect(transfer).toContainText("outcome is not yet confirmed");
 			await expect(transfer.getByRole("button", {name: "Retry inbox refresh", exact: true})).toBeVisible();
 			await expect(decision).toBeEnabled();
 
+			shouldFailRefresh = false;
 			await decision.click();
 			await expect(transfers).toHaveCount(transferCount - 1);
 			expect(idempotencyKeys).toHaveLength(2);

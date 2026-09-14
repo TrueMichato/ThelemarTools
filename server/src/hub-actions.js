@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import {isDeepStrictEqual} from "node:util";
 import {getInventoryTransferEligibility} from "../../js/hub/hub-inventory-contract.js";
+import {getItemWithoutDeterministicSheetAliases} from "../../js/hub/hub-inventory-equivalence.js";
 import {getHealedHp, resolveApplicableMaxHp} from "../../js/hub/hub-semantic-hp.js";
 import {HubStoreError} from "./hub-store-error.js";
 
@@ -274,38 +275,7 @@ function getComparableInventoryEntry (entry) {
 	delete out.quantity;
 	delete out._sourceIndex;
 	if (out.item && typeof out.item === "object" && !Array.isArray(out.item)) {
-		const item = out.item;
-		const typeBase = String(item.type || item.typeCode || "").split("|")[0];
-		if (item.typeCode === item.type) delete item.typeCode;
-		if (isDeepStrictEqual(item.properties, item.property)) delete item.properties;
-		if (Object.hasOwn(item, "requiresAttunement") && item.reqAttune != null && item.requiresAttunement === !!item.reqAttune) {
-			delete item.requiresAttunement;
-		}
-		for (const [suffix, ability] of [["Str", "str"], ["Dex", "dex"], ["Con", "con"], ["Int", "int"], ["Wis", "wis"], ["Cha", "cha"]]) {
-			for (const family of ["bonusSavingThrow", "bonusAbilityCheck"]) {
-				const aliasKey = `${family}${suffix}`;
-				const canonicalKey = `${family}_${ability}`;
-				if (Object.hasOwn(item, aliasKey) && item[aliasKey] === item[canonicalKey]) delete item[aliasKey];
-			}
-		}
-		if (item.shield === (typeBase === "S")) delete item.shield;
-		if (item.armor === ["LA", "MA", "HA"].includes(typeBase)) delete item.armor;
-		const armorType = typeBase === "HA"
-			? "heavy"
-			: typeBase === "MA"
-				? "medium"
-				: typeBase === "LA"
-					? "light"
-					: null;
-		if (armorType && item.armorType === armorType) delete item.armorType;
-		if (
-			item.weapon === true
-			&& (item.type === "weapon" || ["M", "R"].includes(typeBase) || !!item.weaponCategory)
-		) delete item.weapon;
-		if (typeof item.charges === "number" && item.chargesCurrent === item.charges) delete item.chargesCurrent;
-		for (const key of ["appliedUpgrades", "socketedGemstones"]) {
-			if (Array.isArray(item[key]) && !item[key].length) delete item[key];
-		}
+		out.item = getItemWithoutDeterministicSheetAliases(out.item);
 	}
 	for (const key of ["equipped", "attuned", "starred"]) {
 		if (!out[key]) delete out[key];

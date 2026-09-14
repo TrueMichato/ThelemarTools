@@ -98,6 +98,19 @@ export class HubCharacterSheetPartyInventoryPage {
 		return this.page.locator("[data-charsheet-party-inventory]");
 	}
 
+	async _expectTransferSubmitted (): Promise<void> {
+		try {
+			await expect(this.root().locator("[data-party-inventory-live]"))
+				.toContainText(/Transfer reserved|Transfer complete/, {timeout: 15_000});
+		} catch (error) {
+			const recovery = await this.page.evaluate(() => {
+				const sheet: any = (globalThis as any).charSheet;
+				return sheet?._characterRepository?.getConflictRecovery?.(sheet?._currentCharacterId) || null;
+			});
+			throw new Error(`${error instanceof Error ? error.message : error}\nConflict recovery: ${JSON.stringify(recovery)}`);
+		}
+	}
+
 	async expectPrivacySafe ({forbiddenIds, recipientLabel}: {forbiddenIds: string[]; recipientLabel: string}): Promise<void> {
 		const itemRow = this.page.locator("#charsheet-inventory-list .charsheet__item", {
 			has: this.page.locator(".charsheet__item-name", {hasText: "Rations"}),
@@ -132,6 +145,7 @@ export class HubCharacterSheetPartyInventoryPage {
 
 		if (!isSingleFlight) {
 			await composer.locator("button[type='submit']").click();
+			await this._expectTransferSubmitted();
 		} else {
 			let requests = 0;
 			const onRequest = (request: Request) => {
@@ -143,13 +157,13 @@ export class HubCharacterSheetPartyInventoryPage {
 					form.requestSubmit();
 					form.requestSubmit();
 				});
-				await expect(composer).toHaveCount(0);
+				await this._expectTransferSubmitted();
 			} finally {
 				this.page.off("request", onRequest);
 			}
 			expect(requests, "Double submission must produce one transfer request").toBe(1);
 		}
-		await expect(this.root().locator("[data-party-inventory-live]")).toContainText(/Transfer reserved|Transfer complete/);
+		await expect(composer).toHaveCount(0);
 	}
 
 	async takeStashItem ({itemName, quantity}: {itemName: string; quantity: number}): Promise<void> {

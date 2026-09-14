@@ -3,6 +3,7 @@ import {applyJsonPatch, diffJson, rebaseJsonChanges} from "./hub-json-patch.js";
 import {withRootCarryWrite} from "./hub-carry-authority.js";
 import {HubBroadcastSync} from "./hub-broadcast-sync.js";
 import {CHARACTER_OPERATION_LEGS, getCharacterOperationRouting, getOperationLegKey} from "./hub-character-operation-events.js";
+import {getCharacterDocumentWithoutDeterministicInventoryAliases} from "./hub-inventory-equivalence.js";
 import {
 	BoundedIdSet,
 	COVERAGE_VERSION,
@@ -191,24 +192,32 @@ export class HubHttpCharacterRepository {
 			const accepted = this._accepted.get(canonicalId);
 			if (!accepted) return {status: "unavailable"};
 			if (canonical.revision < accepted.revision) return {status: "stale"};
-			if (canonical.revision === accepted.revision && !diffJson(accepted.data, canonical.data).length) return {status: "unchanged"};
 
 			this._rebaseConflictForAuthoritative({
 				store: this._conflicts,
 				canonicalId,
 				accepted,
 				canonical,
+				isClearOnResolve: true,
 			});
 			this._rebaseConflictForAuthoritative({
 				store: this._liveConflicts,
 				canonicalId,
 				accepted,
 				canonical,
+				isClearOnResolve: false,
 			});
 			const liveData = fnGetLiveData?.();
 			const existingConflict = this._conflicts.get(canonicalId);
 			if (existingConflict) {
 				return {status: "conflict", conflicts: structuredClone(existingConflict.conflicts)};
+			}
+			if (canonical.revision === accepted.revision && !diffJson(accepted.data, canonical.data).length) {
+				if (
+					this._failedWrites.has(canonicalId)
+					&& this._areCharacterCandidatesSemanticallyEqual(this._failedWrites.get(canonicalId), canonical.data)
+				) this._clearFailedRecovery(canonicalId);
+				return {status: "unchanged"};
 			}
 
 			const book = this._getCoverageBook(canonicalId);
@@ -274,14 +283,18 @@ export class HubHttpCharacterRepository {
 			}
 
 			if (Object.hasOwn(staged, "failedWrite")) {
-				this._failedWrites.set(canonicalId, {...staged.failedWrite, id: canonicalId});
-				this._recoveredBases.set(canonicalId, structuredClone(canonical.data));
-				book.failedWrite = createCoverage({
-					revision: canonical.revision,
-					acceptedSequence,
-					appliedOperationLegIds: book.failedWrite.appliedOperationLegIds,
-				});
-				book.recoveredBase = this._cloneTrackCoverage(book.failedWrite);
+				if (this._areCharacterCandidatesSemanticallyEqual(staged.failedWrite, canonical.data)) {
+					this._clearFailedRecovery(canonicalId);
+				} else {
+					this._failedWrites.set(canonicalId, {...staged.failedWrite, id: canonicalId});
+					this._recoveredBases.set(canonicalId, structuredClone(canonical.data));
+					book.failedWrite = createCoverage({
+						revision: canonical.revision,
+						acceptedSequence,
+						appliedOperationLegIds: book.failedWrite.appliedOperationLegIds,
+					});
+					book.recoveredBase = this._cloneTrackCoverage(book.failedWrite);
+				}
 			}
 			this._writeRecoveryCoverage(canonicalId);
 			return {
@@ -293,20 +306,24 @@ export class HubHttpCharacterRepository {
 	}
 
 	_rebaseAuthoritativeCandidate ({base, local, remote}) {
-		const withoutDerivedCarry = document => {
-			if (!document || typeof document !== "object" || Array.isArray(document)) return document;
-			const out = {...document};
-			delete out.carry;
-			return out;
-		};
 		// Carry is a one-way Character Sheet projection, not editable character state. Server-side
-		// inventory mutations deliberately remove it, while the live sheet may independently
-		// recompute it as data finishes loading; those concurrent derived changes must not block
-		// adoption of the authoritative inventory that the next serialization will summarize.
+		// inventory mutations deliberately remove it. Character Sheet metadata hydration also adds
+		// deterministic aliases which must not turn an authoritative quantity change into a conflict.
+		const normalizedBase = this._getNormalizedCharacterCandidate(base);
+		const normalizedLocal = this._getNormalizedCharacterCandidate(local);
+		const normalizedRemote = this._getNormalizedCharacterCandidate(remote);
+		if (!diffJson(normalizedLocal, normalizedRemote).length) {
+			return {
+				isConflict: false,
+				conflicts: [],
+				patches: diffJson(normalizedBase, normalizedLocal),
+				document: structuredClone(remote),
+			};
+		}
 		const rebased = rebaseJsonChanges({
-			base: withoutDerivedCarry(base),
-			local: withoutDerivedCarry(local),
-			remote: withoutDerivedCarry(remote),
+			base: normalizedBase,
+			local: normalizedLocal,
+			remote: normalizedRemote,
 		});
 		if (!rebased.isConflict) return rebased;
 		const conflictingPaths = new Set(rebased.conflicts.map(conflict => conflict.localPath));
@@ -318,7 +335,34 @@ export class HubHttpCharacterRepository {
 		};
 	}
 
-	_rebaseConflictForAuthoritative ({store, canonicalId, accepted, canonical}) {
+	_getNormalizedCharacterCandidate (candidate) {
+		return getCharacterDocumentWithoutDeterministicInventoryAliases(this._getSnapshotData(candidate));
+	}
+
+	_areCharacterCandidatesSemanticallyEqual (left, right) {
+		return !diffJson(
+			this._getNormalizedCharacterCandidate(left),
+			this._getNormalizedCharacterCandidate(right),
+		).length;
+	}
+
+	_getConflictRebaseState (conflict) {
+		const rebased = this._rebaseAuthoritativeCandidate({
+			base: conflict.base,
+			local: conflict.local,
+			remote: conflict.server,
+		});
+		const survivingCandidates = [conflict.base, conflict.local, conflict.server]
+			.map(candidate => this._getNormalizedCharacterCandidate(candidate));
+		const isDiscardedIntentPreserved = Object.values(conflict.authoritativeDiscarded || {})
+			.every(discarded => {
+				const normalized = this._getNormalizedCharacterCandidate(discarded);
+				return survivingCandidates.some(candidate => !diffJson(candidate, normalized).length);
+			});
+		return {rebased, isDiscardedIntentPreserved};
+	}
+
+	_rebaseConflictForAuthoritative ({store, canonicalId, accepted, canonical, isClearOnResolve}) {
 		const conflict = store.get(canonicalId);
 		if (!conflict) return;
 		const next = {
@@ -343,7 +387,11 @@ export class HubHttpCharacterRepository {
 		const serverCoverage = this._getConflictCoverage(conflict, "server");
 		serverCoverage.revision = canonical.revision;
 		next.coverage.server = serializeCoverage(serverCoverage);
-		const rebased = rebaseJsonChanges({base: next.base, local: next.local, remote: next.server});
+		const {rebased, isDiscardedIntentPreserved} = this._getConflictRebaseState(next);
+		if (!rebased.isConflict && isClearOnResolve && isDiscardedIntentPreserved) {
+			store.delete(canonicalId);
+			return;
+		}
 		next.conflicts = rebased.conflicts;
 		next.isResolved = !rebased.isConflict;
 		store.set(canonicalId, next);
@@ -710,8 +758,8 @@ export class HubHttpCharacterRepository {
 			next.serverDocument = {...next.serverDocument, data: staged[serverTrack], revision};
 		}
 
-		const rebased = rebaseJsonChanges({base: next.base, local: next.local, remote: next.server});
-		if (!rebased.isConflict && isClearOnResolve) {
+		const {rebased, isDiscardedIntentPreserved} = this._getConflictRebaseState(next);
+		if (!rebased.isConflict && isClearOnResolve && isDiscardedIntentPreserved) {
 			store.delete(canonicalId);
 			return;
 		}
@@ -1107,8 +1155,8 @@ export class HubHttpCharacterRepository {
 				...(Number.isInteger(revision) ? {revision} : {}),
 			};
 		}
-		const rebased = rebaseJsonChanges({base: next.base, local: next.local, remote: next.server});
-		if (!rebased.isConflict && isClearOnResolve) {
+		const {rebased, isDiscardedIntentPreserved} = this._getConflictRebaseState(next);
+		if (!rebased.isConflict && isClearOnResolve && isDiscardedIntentPreserved) {
 			store.delete(canonicalId);
 			return;
 		}
@@ -1446,6 +1494,22 @@ export class HubHttpCharacterRepository {
 			|| this._conflicts.size > 0
 			|| this._failedWrites.size > 0
 			|| this._operationConflicts.size > 0;
+	}
+
+	_clearFailedRecovery (characterId) {
+		this._failedWrites.delete(characterId);
+		this._failedCommands.delete(characterId);
+		this._recoveredBases.delete(characterId);
+		const book = this._getCoverageBook(characterId);
+		book.failedWrite = createCoverage();
+		book.recoveredBase = createCoverage();
+		const recoveryKey = `hub-character-recovery:${this._scopeKey}:${characterId}`;
+		this._recoveryVersions.delete(recoveryKey);
+		try {
+			this._recoveryStorage?.removeItem(recoveryKey);
+		} catch {
+			// Recovery storage cleanup is best-effort.
+		}
 	}
 
 	getPendingRecovery (characterId) {
