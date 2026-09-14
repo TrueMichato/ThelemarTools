@@ -94,7 +94,9 @@ repair source for an old summary without exact historical bundle provenance; the
 the already-persisted safe `typeCode` for categorization/equip inference without persisting a guessed canonical
 `type`, and it does not copy current mutable entries/effects or renderer caches.
 Source-authored site reference fields remain canonical, while renderer-created empty entries, injected sources,
-and renderer/filter caches remain excluded.
+and renderer/filter caches remain excluded. The separate legacy local-save effect hydrator is disabled for Hub
+characters entirely: complete server inventory, including legitimately typeless items, remains authoritative
+across bundle changes and export/reload.
 
 ### Canonical mutation, audit, and events
 

@@ -85,10 +85,12 @@ class CharacterSheetInventory {
 	 * Copy structured catalog fields onto inventory rows that are missing them (effects,
 	 * ability/senses, spell attachments, numeric bonuses). Does not overwrite custom items
 	 * or values the player already has. Used so brew buffs (e.g. Necklace of Goibhnie AC/saves)
-	 * reach older saves without re-adding the item.
+	 * reach older local saves without re-adding the item. Hub inventory is already authoritative
+	 * and must never be rewritten from the client's current mutable catalog.
 	 * @private
 	 */
 	_rehydrateInventoryItemEffects () {
+		if (this._page?._isHubCharacter) return;
 		if (!this._allItems?.length || !this._state?.getItems) return;
 		const raw = this._state._data?.inventory;
 		if (!Array.isArray(raw) || !raw.length) return;
@@ -98,7 +100,6 @@ class CharacterSheetInventory {
 		for (const inv of raw) {
 			const item = inv?.item;
 			if (!item?.name || item._isCustom || item.source === "Custom") continue;
-			if (this._state.isItemMetadataRepairPending?.(item)) continue;
 			const nameLower = item.name.toLowerCase();
 			const sourceLower = (item.source || "").toLowerCase();
 			const match = this._allItems.find(i =>

@@ -86,7 +86,12 @@ function resolveCampaignItemCopy ({campaignItems, item, siteItems, seen = new Se
 	if (campaignItems.has(parentUid) && !campaignItems.get(parentUid)) {
 		throw new HubStoreError("ITEM_AWARD_SOURCE_INVALID", `Item award source inheritance is ambiguous.`, {status: 409});
 	}
-	const parent = campaignItems.get(parentUid) || siteItems.get(parentUid);
+	const campaignParent = campaignItems.get(parentUid);
+	const siteParent = siteItems.get(parentUid);
+	if (campaignParent && siteParent) {
+		throw new HubStoreError("ITEM_AWARD_SOURCE_INVALID", `Campaign item inheritance collides with the site catalog.`, {status: 409});
+	}
+	const parent = campaignParent || siteParent;
 	if (!parent) {
 		throw new HubStoreError("ITEM_AWARD_SOURCE_INVALID", `Item award source inheritance could not be resolved.`, {status: 409});
 	}

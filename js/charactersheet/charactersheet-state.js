@@ -4331,7 +4331,6 @@ class CharacterSheetState {
 		this._allSpells = [];
 		this._allItems = [];
 		this._allItemsPristine = null;
-		this._legacyItemSummaryItems = new WeakSet();
 		// Live handle for the pure static helpers that must consult character state but are
 		// called from contexts with no reference to it — chiefly the item hover builders in
 		// `charactersheet-class-utils.js`, which are invoked from a dozen render sites. Mirrors
@@ -4362,10 +4361,6 @@ class CharacterSheetState {
 		this._allItems = Array.isArray(allItems) ? allItems : [];
 		this._allItemsPristine = Array.isArray(pristineItems) ? pristineItems : null;
 		this._migrateInventoryItemMetadata();
-	}
-
-	isItemMetadataRepairPending (item) {
-		return !!item && this._legacyItemSummaryItems.has(item);
 	}
 
 	/**
@@ -4428,8 +4423,7 @@ class CharacterSheetState {
 				: null;
 			const match = uid ? catalog.get(uid) : null;
 			const pristineMatch = uid ? pristineCatalog.get(uid) : null;
-			const isLegacySummary = item.type == null || this._legacyItemSummaryItems.has(item);
-			if (match && pristineMatch && isLegacySummary) {
+			if (match && pristineMatch && item.type == null) {
 				for (const [key, value] of Object.entries(match)) {
 					if (
 						isTransientCatalogField(key)
@@ -4446,10 +4440,6 @@ class CharacterSheetState {
 					) continue;
 					item[key] = MiscUtil.copyFast(pristineMatch[key]);
 				}
-				this._legacyItemSummaryItems.delete(item);
-			}
-			if (item.type == null && item.typeCode != null) {
-				this._legacyItemSummaryItems.add(item);
 			}
 			if (item.typeCode == null && item.type != null) item.typeCode = item.type;
 			if (item.scfType == null && pristineMatch && match?.scfType != null) item.scfType = match.scfType;

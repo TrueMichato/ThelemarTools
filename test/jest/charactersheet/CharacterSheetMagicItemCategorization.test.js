@@ -375,6 +375,7 @@ describe("Hub summary-only inventory metadata migration", () => {
 			}],
 		});
 		const inventory = makeInventory(state);
+		inventory._page._isHubCharacter = true;
 		inventory.setItems([mutableBrewItem], {pristineItems: []});
 
 		expect(state.getItemRaw("legacy-brew-summary")).toEqual(expect.objectContaining({
@@ -392,11 +393,53 @@ describe("Hub summary-only inventory metadata migration", () => {
 		reloaded.setItemCatalog([mutableBrewItem], {pristineItems: []});
 		reloaded.loadFromJson(state.toJson());
 		const reloadedInventory = makeInventory(reloaded);
+		reloadedInventory._page._isHubCharacter = true;
 		reloadedInventory.setItems([mutableBrewItem], {pristineItems: []});
 		expect(reloaded.getItemRaw("legacy-brew-summary")).not.toHaveProperty("type");
 		expect(reloaded.getItemRaw("legacy-brew-summary")).not.toHaveProperty("entries");
 		expect(reloaded.getItemRaw("legacy-brew-summary")).not.toHaveProperty("effects");
 		expect(reloadedInventory._getItemCategory(reloaded.getItemRaw("legacy-brew-summary"))).toBe("Tools");
+	});
+
+	test("does not rewrite a typeless authoritative Hub item from the current mutable brew", () => {
+		const authoritativeItem = {
+			name: "Campaign Amulet",
+			source: "TST",
+			rarity: "rare",
+			entries: ["The authoritative historical text."],
+		};
+		const currentBrewItem = {
+			...authoritativeItem,
+			entries: ["Changed bundle text."],
+			effects: [{type: "skillBonus", skill: "arcana", value: 3}],
+		};
+		const state = newState();
+		state.loadFromJson({
+			name: "Hub character",
+			inventory: [{
+				id: "typeless-authoritative-item",
+				item: authoritativeItem,
+				quantity: 1,
+			}],
+		});
+		const inventory = makeInventory(state);
+		inventory._page._isHubCharacter = true;
+		inventory.setItems([currentBrewItem], {pristineItems: []});
+
+		expect(state.getItemRaw("typeless-authoritative-item")).toEqual(expect.objectContaining({
+			name: authoritativeItem.name,
+			source: authoritativeItem.source,
+			entries: authoritativeItem.entries,
+		}));
+		expect(state.getItemRaw("typeless-authoritative-item")).not.toHaveProperty("effects");
+
+		const reloaded = newState();
+		reloaded.loadFromJson(state.toJson());
+		const reloadedInventory = makeInventory(reloaded);
+		reloadedInventory._page._isHubCharacter = true;
+		reloadedInventory.setItems([currentBrewItem], {pristineItems: []});
+		expect(reloaded.getItemRaw("typeless-authoritative-item").entries).toEqual(authoritativeItem.entries);
+		expect(reloaded.getItemRaw("typeless-authoritative-item")).not.toHaveProperty("effects");
 	});
 
 	test("does not replace an already canonical customized item with missing catalog fields", () => {

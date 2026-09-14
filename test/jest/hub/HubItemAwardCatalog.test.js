@@ -152,6 +152,38 @@ describe("Campaign Hub authoritative item-award catalog", () => {
 		expect(resolved).not.toHaveProperty("_copy");
 	});
 
+	it("rejects campaign copy inheritance through a site-UID-shadowing campaign parent", async () => {
+		const siteParent = {
+			name: "Longsword",
+			source: "PHB",
+			type: "M",
+			weight: 3,
+		};
+		const collidingParent = {
+			name: "LONGSWORD",
+			source: "phb",
+			type: "G",
+			weight: 99,
+		};
+		const child = {
+			name: "Shadow Child",
+			source: "TST",
+			_copy: {name: "Longsword", source: "PHB"},
+		};
+		const resolve = createItemAwardResolver({
+			fnLoadSiteItems: async () => new Map([["longsword|phb", siteParent]]),
+		});
+
+		await expect(resolve({
+			sourceKind: "campaign_item",
+			item: {name: child.name, source: child.source},
+			brewBundle: {content: [{body: {item: [collidingParent, child]}}]},
+		})).rejects.toMatchObject({
+			code: "ITEM_AWARD_SOURCE_INVALID",
+			status: 409,
+		});
+	});
+
 	it("does not inherit parent-only publication fields through a campaign item copy", async () => {
 		const parent = {
 			name: "Longsword",

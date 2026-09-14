@@ -270,7 +270,9 @@ exact `name|source` match in an immutable repository-owned site/variant repair p
 loading begins, the sheet snapshots only the authoritative repair-sensitive fields needed for that decision.
 Mutable prerelease or brew catalogs cannot retroactively supply an old summary's entries/effects without exact
 historical provenance. Authored site metadata therefore survives save and later stack comparison while
-cross-authority substitutions, injected render caches, and publication hints remain excluded.
+cross-authority substitutions, injected render caches, and publication hints remain excluded. Hub characters
+also bypass the local-save catalog effect hydrator, so complete or typeless authoritative inventory is not
+rewritten when the current client brew changes.
 
 ## Known domain gaps
 

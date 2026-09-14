@@ -316,7 +316,9 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   source-authored `hasRefs` and `additionalSources` from real site catalog entries through repeat award and stash
   return. A production-order loader regression mutates both a shipped instrument and a synthetic campaign-brew
   instrument in place, proving the minimal site repair projection was captured before enhancement and excludes
-  mutable brew metadata. Duplicate official/brew UIDs and changed brew content are also pinned fail-closed. The real-stack
+  mutable brew metadata. Duplicate official/brew UIDs, recursive `_copy` parent collisions, typed/typeless Hub
+  inventory, and changed brew content across export/reload are also pinned fail-closed while local-save brew
+  effect hydration remains covered. The real-stack
   lifecycle commits a multi-character catalog award
   behind a lost response, changes incidental form state, retries with the same key, verifies canonical weapon
   type/damage/value/weight metadata on both characters, observes exactly one live arrival on an already-open
