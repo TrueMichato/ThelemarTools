@@ -5,6 +5,27 @@ const SITE_CATALOG_PATH = new URL("../data/item-award-site-catalog.json", import
 
 let _siteItemsPromise = null;
 
+const COPY_PARENT_ONLY_FIELDS = new Set([
+	"page",
+	"otherSources",
+	"referenceSources",
+	"srd",
+	"srd52",
+	"basicRules",
+	"basicRules2024",
+	"reprintedAs",
+	"hasFluff",
+	"hasFluffImages",
+	"hasToken",
+	"tokenCredit",
+	"tokenCustom",
+	"foundryTokenScale",
+	"altArt",
+	"_versions",
+	"lootTables",
+	"tier",
+]);
+
 function getItemUid (item) {
 	return `${String(item?.name || "").trim()}|${String(item?.source || "").trim()}`.toLowerCase();
 }
@@ -75,10 +96,7 @@ function resolveCampaignItemCopy ({campaignItems, item, siteItems, seen = new Se
 		siteItems,
 		seen: new Set([...seen, parentUid]),
 	});
-	delete parentResolved.page;
-	delete parentResolved.otherSources;
-	delete parentResolved.lootTables;
-	delete parentResolved.tier;
+	for (const key of COPY_PARENT_ONLY_FIELDS) delete parentResolved[key];
 	const direct = structuredClone(item);
 	delete direct._copy;
 	return {...parentResolved, ...direct, _isCopy: true};

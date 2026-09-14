@@ -16,6 +16,7 @@
  */
 
 import "./setup.js";
+import {addAwardedEntryToCharacter} from "../../../server/src/hub-actions.js";
 
 if (typeof globalThis.document === "undefined") {
 	globalThis.document = {
@@ -180,6 +181,13 @@ describe("Hub summary-only inventory metadata migration", () => {
 			effects: [{type: "skillBonus", skill: "athletics", value: 1}],
 			_baseSource: "TST",
 			_fullEntries: ["Transient renderer cache"],
+			_fullAdditionalEntries: ["Transient additional renderer cache"],
+			_valueFromRarity: 40000,
+			_compositionSearch: "Transient composition index",
+			_fSources: ["TST"],
+			_l_value: "250 gp",
+			hasRefs: true,
+			variants: [{name: "Transient variant index"}],
 		};
 		const summaryOnlySave = {
 			name: "Hub character",
@@ -221,7 +229,16 @@ describe("Hub summary-only inventory metadata migration", () => {
 			requiresAttunement: true,
 			_awardProvenance: {awardId: "award-1"},
 		}));
-		expect(item).not.toHaveProperty("_fullEntries");
+		for (const key of [
+			"_fullEntries",
+			"_fullAdditionalEntries",
+			"_valueFromRarity",
+			"_compositionSearch",
+			"_fSources",
+			"_l_value",
+			"hasRefs",
+			"variants",
+		]) expect(item).not.toHaveProperty(key);
 		expect(inventory._getItemCategory(item)).toBe("Weapons");
 		expect(state.getEffectiveWeaponDamage("hub-award")).toEqual(expect.objectContaining({
 			dice: "1d8",
@@ -285,6 +302,8 @@ describe("Hub summary-only inventory metadata migration", () => {
 					property: ["V"],
 					charges: 3,
 					effects: [{type: "carryCapacity", value: 50}],
+					entries: [],
+					additionalSources: [{source: "XGE", page: 83}],
 				},
 				quantity: 1,
 				equipped: true,
@@ -301,6 +320,8 @@ describe("Hub summary-only inventory metadata migration", () => {
 			requiresAttunement: true,
 			properties: ["V"],
 			chargesCurrent: 3,
+			entries: [],
+			additionalSources: [{source: "XGE", page: 83}],
 		}));
 		expect(state.getCarryingCapacityBreakdown().flatBonus).toBe(0);
 
@@ -308,6 +329,74 @@ describe("Hub summary-only inventory metadata migration", () => {
 		reloaded.loadFromJson(state.toJson());
 		expect(reloaded.getItemRaw("retired-brew-item")).toEqual(item);
 		expect(reloaded.getCarryingCapacityBreakdown().flatBonus).toBe(0);
+	});
+
+	test.each([
+		{
+			label: "empty renderer entries",
+			authoritativeItem: {
+				name: "Abacus",
+				source: "PHB",
+				page: 150,
+				srd: true,
+				basicRules: true,
+				type: "G",
+				rarity: "none",
+				weight: 2,
+				value: 200,
+			},
+			enhancedFields: {entries: []},
+			transientField: "entries",
+		},
+		{
+			label: "renderer-added instrument source",
+			authoritativeItem: {
+				name: "+1 Rhythm-Maker's Drum",
+				source: "TCE",
+				page: 134,
+				baseItem: "drum|phb",
+				type: "INS",
+				rarity: "uncommon",
+				reqAttune: "by a bard",
+				wondrous: true,
+				weight: 3,
+				bonusSpellAttack: "+1",
+				bonusSpellSaveDc: "+1",
+				entries: ["Synthetic stand-in for the canonical instrument text."],
+			},
+			enhancedFields: {additionalSources: [{source: "XGE", page: 83}]},
+			transientField: "additionalSources",
+		},
+	])("does not persist $label from the enhanced catalog into a repaired legacy row", ({authoritativeItem, enhancedFields, transientField}) => {
+		const state = newState();
+		state.setItemCatalog([{...authoritativeItem, ...enhancedFields, _isEnhanced: true}]);
+		state.loadFromJson({
+			name: "Legacy Hub character",
+			inventory: [{
+				id: "legacy-stack",
+				item: {
+					name: authoritativeItem.name,
+					source: authoritativeItem.source,
+					typeCode: authoritativeItem.type,
+					rarity: authoritativeItem.rarity,
+					weight: authoritativeItem.weight,
+					value: authoritativeItem.value,
+				},
+				quantity: 1,
+			}],
+		});
+		const repairedItem = state.toJson().inventory[0].item;
+		const merged = addAwardedEntryToCharacter({
+			container: {
+				inventory: [{id: "legacy-stack", item: repairedItem, quantity: 1}],
+				currency: {},
+			},
+			incoming: {item: authoritativeItem, quantity: 1},
+		});
+		expect(merged.container.inventory).toEqual([
+			expect.objectContaining({id: "legacy-stack", quantity: 2}),
+		]);
+		expect(repairedItem).not.toHaveProperty(transientField);
 	});
 });
 
