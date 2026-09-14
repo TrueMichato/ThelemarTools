@@ -56,6 +56,10 @@ assertion, clears that release gate.
 - Writes require base revision, held lease, and monotonic lease epoch.
 - The client retains the accepted base for each in-flight write and performs explicit disjoint rebase or conflict
   recovery. It must not promote an unacknowledged snapshot to the base.
+- A transport-failed owner write remains a local recovery draft. Reconnect/refocus must refetch canonical truth:
+  retry disjoint drafts, but surface overlapping paths through the explicit local/server recovery flow. Exclude
+  client-only save timestamps from overlap detection and preserve the actual local candidate for `Use Local`;
+  server-owned inventory and XP reconciliation retains its stricter server-wins overlap policy.
 - Access loss, takeover, campaign switch, detach, logout, or terminal page hide fences queued callbacks and
   pending saves.
 

@@ -36,6 +36,10 @@ export class DmScreenHubController {
 		this._staleTimer = null;
 		this._resyncTimer = null;
 		this._partyInventoryTimer = null;
+		// Projection reads can overlap across rapid invalidations; only the newest response
+		// from the current attachment may replace the Board's authorization-scoped snapshot.
+		this._projectionRequestSeq = 0;
+		this._projectionAppliedSeq = 0;
 		// Monotonic per-request sequence. Two refreshes in the same generation can resolve out
 		// of order (a slow earlier request landing after a fast later one), which would leave
 		// the older weight on screen forever. Only a response at least as new as the newest
@@ -202,11 +206,23 @@ export class DmScreenHubController {
 	 */
 	async pRefreshProjections () {
 		if (!this._campaignId) return;
+		const generation = this._generation;
+		const campaignId = this._campaignId;
+		const seq = ++this._projectionRequestSeq;
+		const isStale = () => generation !== this._generation
+			|| campaignId !== this._campaignId
+			|| seq !== this._projectionRequestSeq
+			|| seq <= this._projectionAppliedSeq;
 		try {
-			const result = await this._api.pListCampaignCharacterProjections({campaignId: this._campaignId});
+			const result = await this._api.pListCampaignCharacterProjections({campaignId});
+			if (isStale()) return false;
+			this._projectionAppliedSeq = seq;
 			this.applySnapshot({characters: result?.projections || [], roster: result?.roster || []});
+			return true;
 		} catch (error) {
+			if (isStale()) return false;
 			this.handleRealtimeError(error);
+			return false;
 		}
 	}
 
