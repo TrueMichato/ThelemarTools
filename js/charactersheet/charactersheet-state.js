@@ -4330,6 +4330,7 @@ class CharacterSheetState {
 		// level-gated grouping in the spell list silently drops the spells.
 		this._allSpells = [];
 		this._allItems = [];
+		this._allItemsRepair = [];
 		this._allItemsPristine = null;
 		// Live handle for the pure static helpers that must consult character state but are
 		// called from contexts with no reference to it — chiefly the item hover builders in
@@ -4355,10 +4356,11 @@ class CharacterSheetState {
 	 * catalog used to distinguish source-authored metadata from renderer enhancement.
 	 * The migration also runs here for alternate load orders.
 	 * @param {Array} allItems
-	 * @param {{pristineItems?: Array}} [opts]
+	 * @param {{pristineItems?: Array, repairItems?: Array}} [opts]
 	 */
-	setItemCatalog (allItems, {pristineItems = null} = {}) {
+	setItemCatalog (allItems, {pristineItems = null, repairItems = null} = {}) {
 		this._allItems = Array.isArray(allItems) ? allItems : [];
+		this._allItemsRepair = Array.isArray(repairItems) ? repairItems : this._allItems;
 		this._allItemsPristine = Array.isArray(pristineItems) ? pristineItems : null;
 		this._migrateInventoryItemMetadata();
 	}
@@ -4412,7 +4414,7 @@ class CharacterSheetState {
 			}
 			return out;
 		};
-		const catalog = getFirstByUid(this._allItems);
+		const catalog = getFirstByUid(this._allItemsRepair);
 		const pristineCatalog = getFirstByUid(this._allItemsPristine);
 		for (const inventoryRow of this._data.inventory) {
 			const item = inventoryRow?.item;

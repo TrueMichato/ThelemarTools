@@ -268,7 +268,9 @@ authority instead of recomputing it without a Character Sheet.
 When a legacy summary-only inventory row is opened in the Character Sheet, item identity is repaired from an
 exact `name|source` match in an immutable repository-owned site/variant repair projection. Before enhanced item
 loading begins, the sheet snapshots only the authoritative repair-sensitive fields needed for that decision.
-Mutable prerelease or brew catalogs cannot retroactively supply an old summary's entries/effects without exact
+The corresponding broad repair match comes from a separate enhanced site-plus-variant authority, so a mutable
+catalog collision cannot borrow the pristine identity and inject other fields. Mutable prerelease or brew
+catalogs cannot retroactively supply an old summary's entries/effects without exact
 historical provenance. Authored site metadata therefore survives save and later stack comparison while
 cross-authority substitutions, injected render caches, and publication hints remain excluded. Hub characters
 also bypass the local-save catalog effect hydrator, so complete or typeless authoritative inventory is not

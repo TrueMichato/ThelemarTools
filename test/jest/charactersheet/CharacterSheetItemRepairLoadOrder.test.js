@@ -89,6 +89,7 @@ describe("Character Sheet item repair catalog load order", () => {
 		}
 
 		expect(loaded.itemRepairData).toHaveLength(1);
+		expect(loaded.itemRepairItems).toEqual([siteItem]);
 		for (const pristine of loaded.itemRepairData) {
 			expect(pristine).not.toHaveProperty("_isEnhanced");
 			expect(pristine).not.toHaveProperty("_fullAdditionalEntries");
@@ -98,7 +99,10 @@ describe("Character Sheet item repair catalog load order", () => {
 
 		const enhancedItems = [...loaded.items, ...loaded.brewItems];
 		const state = new CharacterSheetState();
-		state.setItemCatalog(enhancedItems, {pristineItems: loaded.itemRepairData});
+		state.setItemCatalog(enhancedItems, {
+			pristineItems: loaded.itemRepairData,
+			repairItems: loaded.itemRepairItems,
+		});
 		state.loadFromJson({
 			name: "Legacy Hub character",
 			inventory: [{
@@ -145,6 +149,75 @@ describe("Character Sheet item repair catalog load order", () => {
 		expect(unrepairedBrewItem).not.toHaveProperty("type");
 		expect(unrepairedBrewItem).not.toHaveProperty("entries");
 		expect(unrepairedBrewItem).not.toHaveProperty("_isEnhanced");
+	});
+
+	test.each(["prerelease", "brew"])("repairs a variant-component collision only from immutable authority (%s)", async mutableKind => {
+		const variantItem = {
+			name: "Stable Component",
+			source: "AR8",
+			type: "G",
+			rarity: "uncommon",
+			entries: ["Immutable variant-component metadata."],
+			variantComponent: {spell: "legend lore|PHB"},
+		};
+		const mutableCollision = {
+			...variantItem,
+			type: "W",
+			entries: ["Mutable collision metadata."],
+			effects: [{type: "skillBonus", skill: "arcana", value: 99}],
+			customMetadata: {injected: true},
+			_isEnhanced: true,
+		};
+		const loaded = await CharacterSheetPage._pLoadItemData({
+			pLoadRawItems: async () => ({item: [], baseitem: []}),
+			pLoadPrereleaseData: async () => mutableKind === "prerelease" ? {item: [mutableCollision]} : {},
+			pLoadBrewData: async () => mutableKind === "brew" ? {item: [mutableCollision]} : {},
+			pLoadVariantComponents: async () => ({item: [variantItem]}),
+			pLoadSiteItems: async () => [],
+			pLoadPrereleaseItems: async () => mutableKind === "prerelease" ? [mutableCollision] : [],
+			pLoadBrewItems: async () => mutableKind === "brew" ? [mutableCollision] : [],
+		});
+		const allItems = [
+			...loaded.items,
+			...loaded.variantComponents.item,
+			...loaded.prereleaseItems,
+			...loaded.brewItems,
+		];
+		const getState = () => {
+			const state = new CharacterSheetState();
+			state.setItemCatalog(allItems, {
+				pristineItems: loaded.itemRepairData,
+				repairItems: loaded.itemRepairItems,
+			});
+			return state;
+		};
+		const state = getState();
+		state.loadFromJson({
+			name: "Legacy Hub character",
+			inventory: [{
+				id: "variant-summary",
+				item: {
+					name: variantItem.name,
+					source: variantItem.source,
+					typeCode: variantItem.type,
+					rarity: variantItem.rarity,
+				},
+				quantity: 1,
+			}],
+		});
+
+		const repaired = state.toJson().inventory[0].item;
+		expect(repaired).toEqual(expect.objectContaining({
+			type: variantItem.type,
+			entries: variantItem.entries,
+			variantComponent: variantItem.variantComponent,
+		}));
+		expect(repaired).not.toHaveProperty("effects");
+		expect(repaired).not.toHaveProperty("customMetadata");
+
+		const reloaded = getState();
+		reloaded.loadFromJson(state.toJson());
+		expect(reloaded.toJson().inventory[0].item).toEqual(repaired);
 	});
 
 	test("keeps the full site repair catalog field- and memory-bounded", () => {

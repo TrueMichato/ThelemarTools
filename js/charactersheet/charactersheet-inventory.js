@@ -72,9 +72,9 @@ class CharacterSheetInventory {
 		this._initEventListeners();
 	}
 
-	setItems (items, {pristineItems = null} = {}) {
+	setItems (items, {pristineItems = null, repairItems = null} = {}) {
 		this._allItems = items;
-		this._state?.setItemCatalog?.(items, {pristineItems});
+		this._state?.setItemCatalog?.(items, {pristineItems, repairItems});
 		// Older saves / pre-effects inventory rows may lack catalog `effects[]`. Rehydrate
 		// from the loaded item index (by name|source) so equip/attune registration can apply
 		// brew mechanics like Gae Bolg's proficiency-to-initiative without requiring re-add.

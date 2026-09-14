@@ -89,7 +89,9 @@ provenance, and ownership-local wrapper differences remain distinct.
 Legacy summary repair keeps the enhanced item catalog for mechanics, but first captures an immutable minimal
 projection (`name`, `source`, `entries`, `additionalSources`, and `hasRefs`) from repository-owned site and
 variant-component content before any enhanced site, prerelease, or brew item loader starts. Site authority is
-first-wins for a duplicate `name|source`. Mutable prerelease/personal/campaign brew is not an authoritative
+first-wins for a duplicate `name|source`, and broad repair fields are copied from a separate enhanced
+site-plus-variant catalog rather than the combined mutable display catalog. Mutable
+prerelease/personal/campaign brew is not an authoritative
 repair source for an old summary without exact historical bundle provenance; the sheet may derive `type` from
 the already-persisted safe `typeCode` for categorization/equip inference without persisting a guessed canonical
 `type`, and it does not copy current mutable entries/effects or renderer caches.

@@ -178,6 +178,7 @@ class CharacterSheetPage {
 		this._spellsData = [];
 		this._itemsData = [];
 		this._itemRepairData = [];
+		this._itemRepairItems = [];
 		this._actionsData = [];
 		this._featsData = [];
 		this._optionalFeaturesData = [];
@@ -1106,7 +1107,12 @@ class CharacterSheetPage {
 		/* eslint-enable no-console */
 
 		// Pass loaded data to modules
-		if (this._inventory) this._inventory.setItems(this._itemsData, {pristineItems: this._itemRepairData});
+		if (this._inventory) {
+			this._inventory.setItems(this._itemsData, {
+				pristineItems: this._itemRepairData,
+				repairItems: this._itemRepairItems,
+			});
+		}
 		if (this._combat) this._combat.setItems(this._itemsData);
 		if (this._features) this._features.setFeats(this._featsData);
 		if (this._spells) this._spells.setSpells(this._spellsData);
@@ -1258,6 +1264,7 @@ class CharacterSheetPage {
 			items,
 			prereleaseItems,
 			brewItems,
+			itemRepairItems: [...items, ...(variantComponents.item || [])],
 			prereleaseData,
 			brewData,
 			variantComponents,
@@ -1290,6 +1297,7 @@ class CharacterSheetPage {
 			items,
 			prereleaseItems,
 			brewItems,
+			itemRepairItems,
 			prereleaseData,
 			brewData,
 			variantComponents,
@@ -1322,10 +1330,11 @@ class CharacterSheetPage {
 		this._backgrounds = backgrounds.background || [];
 		this._spellsData = spells;
 		// Filter out item groups which are not actual items.
-		// Merge site + prerelease + brew + variant component items here (all already enhanced by DataUtil.item.*).
-		this._itemsData = [...(items || []), ...(prereleaseItems || []), ...(brewItems || []), ...(variantComponents.item || [])]
+		// Repository-owned site/variant identities precede mutable prerelease/brew collisions.
+		this._itemsData = [...(items || []), ...(variantComponents.item || []), ...(prereleaseItems || []), ...(brewItems || [])]
 			.filter(it => !it._isItemGroup);
 		this._itemRepairData = itemRepairData;
+		this._itemRepairItems = itemRepairItems.filter(it => !it._isItemGroup);
 		this._actionsData = actions.action || [];
 		this._featsData = feats.feat || [];
 		this._optionalFeaturesData = optFeatures.optionalfeature || [];
