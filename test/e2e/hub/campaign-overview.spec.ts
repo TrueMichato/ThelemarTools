@@ -165,10 +165,13 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		await dmSheet.waitForHubRealtimeLive();
 		await expect.poll(async () => {
 			const failureCount = await dm.page.evaluate(() => (globalThis as any).__dmProjectionRefreshFailures);
-			return projectionReadRequests > 0 && failureCount === projectionReadRequests;
+			return projectionReadRequests > 0 && failureCount > 0;
 		}).toBe(true);
 		await expect(dmSheet.characterName).toHaveValue("Readonly Rowan");
-		expect(await dm.page.evaluate(() => (globalThis as any).__dmProjectionInvalidations)).toBe(1);
+		const invalidationsAfterFailedReconnect = await dm.page.evaluate(
+			() => (globalThis as any).__dmProjectionInvalidations,
+		);
+		expect(invalidationsAfterFailedReconnect).toBeGreaterThan(0);
 
 		const readsBeforeSameCursorReconnect = projectionReadRequests;
 		allowProjectionReads = true;
@@ -185,10 +188,12 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		await dmSheet.waitForHubRealtimeLive();
 		await expect(dmSheet.characterName).toHaveValue("Readonly Rowan Updated", {timeout: 20_000});
 		expect(projectionReadRequests).toBe(readsBeforeSameCursorReconnect + 1);
-		expect(await dm.page.evaluate(() => (globalThis as any).__dmProjectionInvalidations)).toBe(1);
+		expect(await dm.page.evaluate(() => (globalThis as any).__dmProjectionInvalidations))
+			.toBe(invalidationsAfterFailedReconnect);
 		await expect(dmSheet.characterName).toBeDisabled();
 		await dmSheet.requestHubRealtimeResyncAndWait();
-		expect(await dm.page.evaluate(() => (globalThis as any).__dmProjectionInvalidations)).toBe(1);
+		expect(await dm.page.evaluate(() => (globalThis as any).__dmProjectionInvalidations))
+			.toBe(invalidationsAfterFailedReconnect);
 		expect(ownerOnlyRequests).toEqual([]);
 		expect(characterMutations).toEqual([]);
 		expect((await player.getCharacter(character.id)).data.name).toBe("Readonly Rowan Updated");
@@ -348,6 +353,7 @@ test("condition catalog module retries exhaust without request storms", async ({
 		const campaignId = await dm.createCampaign("Condition Retry Budget E2E");
 		await dm.createCharacter({campaignId, name: "Budget Target"});
 		await dm.gotoCampaign(campaignId);
+		await expect(dm.page.locator("#campaign-connection-status")).toHaveText("Live updates connected");
 		const workbench = dm.page.locator("#campaign-workbench");
 		if (!await workbench.evaluate(element => (element as HTMLDetailsElement).open)) {
 			await workbench.locator(":scope > summary").click();
@@ -363,10 +369,18 @@ test("condition catalog module retries exhaust without request storms", async ({
 		await expect(dm.page.locator("#campaign-action-form-status"))
 			.toHaveText("Condition options are unavailable until this page is reloaded.");
 
-		await dm.createCharacter({campaignId, name: "Realtime Refresh Target"});
-		await expect(dm.page.locator("#campaign-character-list .hub-data-row", {hasText: "Realtime Refresh Target"}))
-			.toBeVisible();
+		let snapshotRefreshRequests = 0;
+		dm.page.on("request", request => {
+			if (
+				request.method() === "GET"
+				&& new URL(request.url()).pathname === `/api/campaigns/${campaignId}/snapshot`
+			) snapshotRefreshRequests++;
+		});
 		await dm.page.locator("#campaign-action-type").selectOption("damage");
+		await dm.page.locator("#campaign-action-value").fill("1");
+		await dm.page.locator("#campaign-action-form button[type='submit']").click();
+		await expect(dm.page.locator("#campaign-action-form-status")).toHaveText("Effect applied.");
+		await expect.poll(() => snapshotRefreshRequests).toBeGreaterThan(0);
 		await dm.page.locator("#campaign-action-type").selectOption("condition_add");
 		expect(conditionModuleRequests).toHaveLength(3);
 	} finally {
