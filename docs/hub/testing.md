@@ -280,10 +280,13 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   id, refresh/select the cloud roster before realtime attachment, and do not emit a deliberate missing-character
   probe. Projection regressions preserve `owner_truth` versus `dm_truth`; a DM view keeps live reads but disables
   mutation controls and skips owner-only sharing, pending-action, targeting, lease, and party-inventory calls.
+  Same-tab account-switch coverage proves a failed owner draft is account-scoped, cannot replace a later DM's
+  projection, and cannot stale a subsequent invalidation refetch.
 - Campaign action contracts verify that condition add/remove uses the canonical core plus active campaign-brew
   catalog and submits the selected `name|source` identity rather than accepting free-form condition text. The
-  browser journey fails the first condition-catalog module request, retries through a distinct module URL, and
-  proves the picker recovers without moving the catalog into lightweight page boot.
+  browser journeys recover module and data failures through ordinary realtime refresh, reuse a loaded module for
+  data retry, and prove persistent module failures stop after the finite fresh-URL budget without moving the
+  catalog into lightweight page boot.
 - Failure-state hardening classifies fetch rejection, malformed success, and unreadable 503 responses without
   exposing browser-specific errors. Campaign UI contracts cover offline retention, reconnect refresh, direct
   protocol reload, terminal read-only access state, size/safety validation, insufficient transfer/resource,

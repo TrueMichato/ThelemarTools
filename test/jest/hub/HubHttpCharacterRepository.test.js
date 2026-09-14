@@ -174,6 +174,76 @@ describe("HTTP character repository", () => {
 		expect(api.pPatchCharacter).not.toHaveBeenCalled();
 	});
 
+	it("keeps failed owner recovery account-scoped and never substitutes it for fresh DM truth", async () => {
+		const stored = new Map();
+		const storage = {
+			getItem: key => stored.get(key) || null,
+			setItem: (key, value) => stored.set(key, value),
+			removeItem: key => stored.delete(key),
+		};
+		const ownerApi = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner-account"}}),
+			pGetCharacterProjection: async () => ({
+				kind: "owner_truth",
+				character: {
+					id: "server-1",
+					ownerAccountId: "owner-account",
+					campaignId: "campaign-1",
+					revision: 3,
+					data: {name: "Server Rowan", hp: {current: 12}},
+				},
+			}),
+			pAcquireCharacterLease: async () => ({epoch: 4}),
+			pPatchCharacter: async () => {
+				throw new Error("offline");
+			},
+		};
+		const ownerRepository = new HubHttpCharacterRepository({campaignId: "campaign-1", api: ownerApi});
+		ownerRepository._recoveryStorage = storage;
+		await ownerRepository.pGet({characterId: "server-1"});
+		await expect(ownerRepository.pUpsert({
+			character: {id: "server-1", name: "Unsaved Owner Draft", hp: {current: 1}},
+		})).rejects.toThrow("offline");
+		expect([...stored.keys()]).toEqual([
+			"hub-character-recovery:campaign-1:owner-account:server-1",
+		]);
+
+		const ownerReloadRepository = new HubHttpCharacterRepository({campaignId: "campaign-1", api: ownerApi});
+		ownerReloadRepository._recoveryStorage = storage;
+		await expect(ownerReloadRepository.pGet({characterId: "server-1"}))
+			.resolves.toMatchObject({name: "Unsaved Owner Draft", hp: {current: 1}});
+		stored.set("hub-character-recovery:campaign-1:server-1", JSON.stringify({
+			snapshot: {name: "Legacy Unscoped Owner Draft", hp: {current: 0}},
+		}));
+
+		let dmTruth = {name: "Server Rowan", hp: {current: 12}};
+		const dmRepository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "dm-account"}}),
+				pGetCharacterProjection: async () => ({
+					kind: "dm_truth",
+					character: {
+						id: "server-1",
+						ownerAccountId: "owner-account",
+						campaignId: "campaign-1",
+						revision: 4,
+						data: dmTruth,
+					},
+				}),
+			},
+		});
+		dmRepository._recoveryStorage = storage;
+		dmRepository._failedWrites.set("server-1", {name: "Leaked In-Memory Owner Draft", hp: {current: 0}});
+		await expect(dmRepository.pGet({characterId: "server-1"}))
+			.resolves.toEqual({id: "server-1", name: "Server Rowan", hp: {current: 12}});
+		expect(stored.has("hub-character-recovery:campaign-1:server-1")).toBe(false);
+
+		dmTruth = {name: "Server Rowan Updated", hp: {current: 9}};
+		await expect(dmRepository.pGet({characterId: "server-1"}))
+			.resolves.toEqual({id: "server-1", name: "Server Rowan Updated", hp: {current: 9}});
+	});
+
 	it("marks campaign roster characters owned by another account as DM read-only", async () => {
 		const api = {
 			pGetSession: async () => ({signedIn: true, account: {id: "dm-1"}}),
@@ -575,14 +645,15 @@ describe("HTTP character repository", () => {
 		};
 		const repository = new HubHttpCharacterRepository({
 			campaignId: "cmp",
-			api: {pGetSession: async () => ({signedIn: true})},
+			api: {pGetSession: async () => ({signedIn: true, account: {id: "owner-account"}})},
 		});
+		repository._session = {signedIn: true, account: {id: "owner-account"}};
 		repository._recoveryStorage = storage;
 		repository._conflicts.set("c", {local: {xp: 150}, serverDocument: {id: "c", data: {xp: 200}}});
 		repository._failedWrites.set("c", {xp: 150});
 		await expect(repository.pResolveConflict({characterId: "c", choice: "server"})).resolves.toEqual({id: "c", xp: 200});
 		expect(repository.hasPendingWrites()).toBe(false);
-		expect(removed).toEqual(["hub-character-recovery:cmp:c"]);
+		expect(removed).toEqual(["hub-character-recovery:cmp:owner-account:c"]);
 	});
 
 	it("keeps the newest queued local snapshot in conflict recovery", async () => {

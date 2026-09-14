@@ -126,6 +126,19 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		expect((await player.getCharacter(character.id)).data.name).toBe("Readonly Rowan Updated");
 
 		await dm.gotoCampaign(campaignId);
+		const conditionDataRequests: string[] = [];
+		await dm.page.route(/\/data\/conditionsdiseases\.json(?:\?.*)?$/, async route => {
+			conditionDataRequests.push(route.request().url());
+			if (conditionDataRequests.length === 1) {
+				await route.fulfill({
+					status: 503,
+					contentType: "application/json",
+					body: JSON.stringify({error: "temporary condition data failure"}),
+				});
+				return;
+			}
+			await route.continue();
+		});
 		const workbench = dm.page.locator("#campaign-workbench");
 		if (!await workbench.evaluate(element => (element as HTMLDetailsElement).open)) {
 			await workbench.locator(":scope > summary").click();
@@ -135,10 +148,14 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		const condition = dm.page.locator("#campaign-action-condition");
 		await expect(condition).toBeDisabled();
 		await expect.poll(() => conditionModuleRequests.length).toBe(1);
-		await dm.page.locator("#campaign-action-type").selectOption("damage");
-		await dm.page.locator("#campaign-action-type").selectOption("condition_add");
+		await playerSheet.renameCharacter("Readonly Rowan Module Retry");
+		await expect.poll(() => conditionDataRequests.length).toBe(1);
+		await expect(condition).toBeDisabled();
+		expect(conditionModuleRequests).toHaveLength(2);
+		await playerSheet.renameCharacter("Readonly Rowan Recovered");
 		await expect(condition).toBeEnabled();
 		expect(conditionModuleRequests).toHaveLength(2);
+		expect(conditionDataRequests).toHaveLength(2);
 		expect(conditionModuleRequests[1]).not.toBe(conditionModuleRequests[0]);
 		await expect(condition.locator("option", {hasText: "Blinded (PHB)"})).toHaveCount(1);
 		await expect(condition.locator("option", {hasText: "Blinded (XPHB)"})).toHaveCount(1);
@@ -151,6 +168,141 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		).toContainEqual({name: "Blinded", source: "PHB"});
 	} finally {
 		await Promise.all([pCloseContext(dmContext), pCloseContext(playerContext)]);
+	}
+});
+
+test("DM same-tab login ignores another account's failed owner recovery and stays live", async ({browser}) => {
+	test.setTimeout(180_000);
+	const secret = process.env.HUB_TEST_AUTH_SECRET;
+	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
+
+	const contextOptions = {
+		baseURL: process.env.HUB_E2E_ORIGIN || "https://localhost:8443",
+		ignoreHTTPSErrors: true,
+	};
+	const dmSetupContext = await browser.newContext(contextOptions);
+	const sharedContext = await browser.newContext(contextOptions);
+	const ownerUpdateContext = await browser.newContext(contextOptions);
+	try {
+		const dmSetup = new HubCampaignPage(await dmSetupContext.newPage());
+		const shared = new HubCampaignPage(await sharedContext.newPage());
+		const ownerUpdate = new HubCampaignPage(await ownerUpdateContext.newPage());
+		await dmSetup.signInSynthetic({providerSubject: "recovery-dm", displayName: "Recovery DM", secret});
+		const ownerSession = await shared.signInSynthetic({
+			providerSubject: "recovery-owner",
+			displayName: "Recovery Owner",
+			secret,
+		});
+		const ownerAccountId = ownerSession.account?.id;
+		if (!ownerAccountId) throw new Error("Synthetic owner session did not return an account id.");
+		const campaignId = await dmSetup.createCampaign("Recovery Authority E2E");
+		await shared.redeemInviteTokenViaApi(await dmSetup.createInviteViaApi(campaignId));
+		const character = await shared.createCharacter({campaignId, name: "Canonical Rowan"});
+
+		const ownerSheet = new CharacterSheetPage(shared.page);
+		await ownerSheet.gotoCampaignCharacter({campaignId, characterId: character.id});
+		const characterRoute = `**/api/characters/${character.id}`;
+		await shared.page.route(characterRoute, async route => {
+			if (route.request().method() !== "PATCH") {
+				await route.continue();
+				return;
+			}
+			await route.fulfill({
+				status: 503,
+				contentType: "application/json",
+				body: JSON.stringify({error: {code: "TEST_SAVE_FAILED", message: "Synthetic save failure"}}),
+			});
+		});
+		expect(await shared.page.evaluate(async () => {
+			const sheet = (globalThis as any).charSheet;
+			sheet._state.setName("Unsaved Owner Draft");
+			return sheet._saveCurrentCharacter();
+		})).toBe(false);
+		await shared.page.unroute(characterRoute);
+		await expect.poll(() => shared.page.evaluate(() =>
+			Object.keys(sessionStorage).find(key => key.startsWith("hub-character-recovery:")) || null,
+		)).toContain(`:${ownerAccountId}:${character.id}`);
+		expect((await shared.getCharacter(character.id)).data.name).toBe("Canonical Rowan");
+
+		shared.page.on("dialog", dialog => void dialog.accept());
+		await shared.gotoHub();
+		await shared.page.locator("#hub-logout").click();
+		await expect(shared.page.locator("#hub-signed-out")).toBeVisible();
+		await shared.signInSynthetic({providerSubject: "recovery-dm", displayName: "Recovery DM", secret});
+		await shared.gotoCampaign(campaignId);
+		await shared.page.locator("#campaign-character-list .hub-data-row", {hasText: "Canonical Rowan"}).click();
+		await shared.page.waitForFunction(() => !!(globalThis as any).charSheet, undefined, {timeout: 60_000});
+		const dmSheet = new CharacterSheetPage(shared.page);
+		await expect(dmSheet.characterName).toHaveValue("Canonical Rowan", {timeout: 20_000});
+		await expect(dmSheet.characterName).toBeDisabled();
+		await dmSheet.waitForHubRealtimeLive();
+
+		await ownerUpdate.signInSynthetic({
+			providerSubject: "recovery-owner",
+			displayName: "Recovery Owner",
+			secret,
+		});
+		const updatingOwnerSheet = new CharacterSheetPage(ownerUpdate.page);
+		await updatingOwnerSheet.gotoCampaignCharacter({campaignId, characterId: character.id});
+		await updatingOwnerSheet.renameCharacter("Canonical Rowan Updated");
+		await expect(dmSheet.characterName).toHaveValue("Canonical Rowan Updated", {timeout: 20_000});
+		await expect(dmSheet.characterName).toBeDisabled();
+	} finally {
+		await Promise.all([
+			pCloseContext(dmSetupContext),
+			pCloseContext(sharedContext),
+			pCloseContext(ownerUpdateContext),
+		]);
+	}
+});
+
+test("condition catalog module retries exhaust without request storms", async ({browser}) => {
+	test.setTimeout(120_000);
+	const secret = process.env.HUB_TEST_AUTH_SECRET;
+	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
+
+	const context = await browser.newContext({
+		baseURL: process.env.HUB_E2E_ORIGIN || "https://localhost:8443",
+		ignoreHTTPSErrors: true,
+	});
+	try {
+		const dm = new HubCampaignPage(await context.newPage());
+		const conditionModuleRequests: string[] = [];
+		await dm.page.route(/\/js\/hub\/hub-condition-catalog\.js(?:\?.*)?$/, async route => {
+			conditionModuleRequests.push(route.request().url());
+			await route.fulfill({
+				status: 503,
+				contentType: "text/javascript",
+				body: "throw new Error('persistent module failure');",
+			});
+		});
+		await dm.signInSynthetic({providerSubject: "condition-budget-dm", displayName: "Condition Budget DM", secret});
+		const campaignId = await dm.createCampaign("Condition Retry Budget E2E");
+		await dm.createCharacter({campaignId, name: "Budget Target"});
+		await dm.gotoCampaign(campaignId);
+		const workbench = dm.page.locator("#campaign-workbench");
+		if (!await workbench.evaluate(element => (element as HTMLDetailsElement).open)) {
+			await workbench.locator(":scope > summary").click();
+		}
+		await dm.page.locator("#campaign-action-target").selectOption({label: "Budget Target"});
+		for (let i = 0; i < 6; ++i) {
+			await dm.page.locator("#campaign-action-type").selectOption(i % 2 ? "damage" : "condition_add");
+		}
+		await dm.page.locator("#campaign-action-type").selectOption("condition_add");
+		await expect.poll(() => conditionModuleRequests.length).toBe(3);
+		expect(new Set(conditionModuleRequests).size).toBe(3);
+		await expect(dm.page.locator("#campaign-action-condition")).toBeDisabled();
+		await expect(dm.page.locator("#campaign-action-form-status"))
+			.toHaveText("Condition options are unavailable until this page is reloaded.");
+
+		await dm.createCharacter({campaignId, name: "Realtime Refresh Target"});
+		await expect(dm.page.locator("#campaign-character-list .hub-data-row", {hasText: "Realtime Refresh Target"}))
+			.toBeVisible();
+		await dm.page.locator("#campaign-action-type").selectOption("damage");
+		await dm.page.locator("#campaign-action-type").selectOption("condition_add");
+		expect(conditionModuleRequests).toHaveLength(3);
+	} finally {
+		await pCloseContext(context);
 	}
 });
 

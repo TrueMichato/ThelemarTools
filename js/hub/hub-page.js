@@ -81,6 +81,11 @@ window.addEventListener("pageshow", event => {
 	if (event.persisted) activeCampaign.pResume().catch(err => console.warn("Failed to resume campaign selection:", err));
 });
 const CURRENCY_TYPES = ["cp", "sp", "ep", "gp", "pp"];
+const CONDITION_CATALOG_MODULE_URLS = Object.freeze([
+	"./hub-condition-catalog.js",
+	"./hub-condition-catalog.js?retry=1",
+	"./hub-condition-catalog.js?retry=2",
+]);
 let isCampaignReloadRequired = false;
 
 function setHidden (element, isHidden) {
@@ -1982,7 +1987,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 	let conditionCatalogModule = null;
 	let conditionCatalogState = "idle";
 	let conditionCatalogGeneration = 0;
-	let conditionCatalogModuleRetryGeneration = 0;
+	let conditionCatalogModuleAttemptIndex = 0;
 	let campaignConditionBrewContent = context.brewBundle?.content;
 	let activeConditionCatalog = [];
 	const getCurrentTargetConditions = () => {
@@ -2000,7 +2005,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		if (conditionCatalogState !== "ready" || !conditionCatalogModule) {
 			const option = document.createElement("option");
 			option.value = "";
-			option.textContent = conditionCatalogState.endsWith("_failed")
+			option.textContent = ["module_failed", "module_exhausted", "data_failed"].includes(conditionCatalogState)
 				? "Condition catalog unavailable"
 				: "Loading conditions...";
 			actionCondition.replaceChildren(option);
@@ -2057,27 +2062,39 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		actionCondition.disabled = true;
 		let module = conditionCatalogModule;
 		if (!module) {
-			const moduleRetrySuffix = conditionCatalogModuleRetryGeneration
-				? `?retry=${conditionCatalogModuleRetryGeneration}`
-				: "";
-			try {
-				module = await import(`./hub-condition-catalog.js${moduleRetrySuffix}`);
-			} catch (error) {
-				if (generation !== conditionCatalogGeneration) return false;
-				conditionCatalogModuleRetryGeneration++;
-				activeConditionCatalog = [];
-				conditionCatalogState = "module_failed";
+			const conditionCatalogModuleUrl = CONDITION_CATALOG_MODULE_URLS[conditionCatalogModuleAttemptIndex++];
+			if (!conditionCatalogModuleUrl) {
+				conditionCatalogState = "module_exhausted";
 				pRefreshConditionOptions();
 				setFormStatus({
 					formId: "campaign-action-form",
-					message: getErrorMessage(error),
+					message: "Condition options are unavailable until this page is reloaded.",
+					isError: true,
+				});
+				actionCondition.disabled = true;
+				return false;
+			}
+			try {
+				conditionCatalogModule = await import(conditionCatalogModuleUrl);
+				module = conditionCatalogModule;
+			} catch (error) {
+				if (generation !== conditionCatalogGeneration) return false;
+				activeConditionCatalog = [];
+				conditionCatalogState = conditionCatalogModuleAttemptIndex < CONDITION_CATALOG_MODULE_URLS.length
+					? "module_failed"
+					: "module_exhausted";
+				pRefreshConditionOptions();
+				setFormStatus({
+					formId: "campaign-action-form",
+					message: conditionCatalogState === "module_exhausted"
+						? "Condition options are unavailable until this page is reloaded."
+						: getErrorMessage(error),
 					isError: true,
 				});
 				actionCondition.disabled = true;
 				return false;
 			}
 			if (generation !== conditionCatalogGeneration) return false;
-			conditionCatalogModule = module;
 		}
 		conditionCatalogState = "loading_data";
 		try {
@@ -2109,6 +2126,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		campaignConditionBrewContent = contextNxt.brewBundle?.content;
 		itemAward.setCampaignBrewContent(campaignConditionBrewContent);
 		if (conditionCatalogState === "idle") return true;
+		if (conditionCatalogState === "module_exhausted") return false;
 		return pRefreshConditionCatalog({campaignBrewContent: campaignConditionBrewContent});
 	};
 
@@ -2389,7 +2407,11 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		rulesPolicyManagerPromise,
 		pRefreshConditionOptions,
 		pRefreshContextBoundControls,
-		isConditionCatalogRetryNeeded: () => conditionCatalogState === "failed",
+		isConditionCatalogRetryNeeded: () => conditionCatalogState === "data_failed"
+			|| (
+				conditionCatalogState === "module_failed"
+				&& conditionCatalogModuleAttemptIndex < CONDITION_CATALOG_MODULE_URLS.length
+			),
 	};
 }
 

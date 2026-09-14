@@ -100,6 +100,10 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G currentl
 - Lease takeover increments the epoch; a stale device is fenced even if it reconnects.
 - Disjoint local changes may rebase over a server result. Overlapping changes require explicit local/server
   recovery.
+- Persisted character recovery is scoped by campaign/detached scope, authenticated account, and character.
+  Recovery is restored only after the fetched projection confirms owner access; `dm_truth` always returns the
+  freshly authorized server projection. Legacy unscoped recovery is discarded because it cannot be attributed
+  safely after an account switch in the same tab.
 - When the server replaces a temporary local id with a canonical UUID, repository maps, recovery keys, live
   state, selector state, and the page URL are migrated.
 - Cloud characters do not use the local rescue mirror; unresolved cloud conflicts produce explicit recovery
@@ -254,6 +258,8 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G currentl
 - immediate DM/co-DM semantic effects and inline target-owner peer approvals/effect notices on an open Character
   Sheet; the first production peer template supports one-player PHB/XPHB Cure Wounds with an atomic standard-slot
   cost, while broader abilities, resources, party/multi-target, and NPC/monster targeting remain unavailable;
+- canonical condition add/remove pickers whose catalog remains outside lightweight boot, retries module and data
+  failures through realtime/cursor refresh, and stops module retries after a fixed set of fresh URLs until reload;
 - XP and item grants;
 - party inventory summary and item/currency transfers.
 

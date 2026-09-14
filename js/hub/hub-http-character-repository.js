@@ -77,6 +77,24 @@ export class HubHttpCharacterRepository {
 		if (!this._session.signedIn) throw new Error(`Sign in to edit campaign characters.`);
 	}
 
+	_getRecoveryAccountId () {
+		return this._session?.account?.id || null;
+	}
+
+	_getRecoveryStorageKey (characterId) {
+		const accountId = this._getRecoveryAccountId();
+		if (!accountId) return null;
+		return `hub-character-recovery:${this._scopeKey}:${encodeURIComponent(accountId)}:${characterId}`;
+	}
+
+	_discardLegacyRecovery (characterId) {
+		try {
+			this._recoveryStorage?.removeItem(`hub-character-recovery:${this._scopeKey}:${characterId}`);
+		} catch {
+			// Legacy unscoped recovery cannot be attributed safely to the current account.
+		}
+	}
+
 	_getData (character) {
 		return {...structuredClone(character.data), id: character.id};
 	}
@@ -149,6 +167,7 @@ export class HubHttpCharacterRepository {
 	async pGet ({characterId}) {
 		await this._pEnsureSession();
 		const canonicalId = this._canonicalIds.get(characterId) || characterId;
+		this._discardLegacyRecovery(canonicalId);
 		const projection = this._api.pGetCharacterProjection
 			? await this._api.pGetCharacterProjection({characterId: canonicalId})
 			: null;
@@ -157,15 +176,15 @@ export class HubHttpCharacterRepository {
 			: await this._api.pGetCharacter({characterId: canonicalId});
 		this._assertCharacterScope(character);
 		this._accepted.set(canonicalId, character);
-		this._access.set(
-			canonicalId,
-			getCanonicalProjectionAccess(projection) || this._getListedCharacterAccess(character),
-		);
+		const access = getCanonicalProjectionAccess(projection) || this._getListedCharacterAccess(character);
+		this._access.set(canonicalId, access);
 		const book = this._getCoverageBook(canonicalId);
 		book.acceptedOperationLegIds = new BoundedIdSet();
-		const recovery = this._failedWrites.get(characterId) || this.getPendingRecovery(characterId);
+		const recovery = access === CHARACTER_ACCESS_MODES.OWNER
+			? this._failedWrites.get(canonicalId) || this.getPendingRecovery(canonicalId)
+			: null;
 		if (recovery) {
-			this._failedWrites.set(characterId, recovery);
+			this._failedWrites.set(canonicalId, recovery);
 			// The document handed back is an older draft, not the canonical truth just stored above, so the live
 			// track keeps its own (possibly unknown) coverage instead of inheriting the fetched revision.
 			book.live = this._cloneTrackCoverage(book.failedWrite);
@@ -806,7 +825,8 @@ export class HubHttpCharacterRepository {
 	_writeRecoveryCoverage (canonicalId) {
 		// Best effort: in-memory coverage stays authoritative for this tab. A failed or partial write only
 		// degrades the next reload to unknown coverage, which forces a resync rather than a silent double-apply.
-		const key = `hub-character-recovery:${this._scopeKey}:${canonicalId}`;
+		const key = this._getRecoveryStorageKey(canonicalId);
+		if (!key) return;
 		try {
 			const raw = this._recoveryStorage?.getItem(key);
 			if (!raw) return;
@@ -1230,22 +1250,25 @@ export class HubHttpCharacterRepository {
 			map.delete(fromId);
 		}
 		if (this._resyncInFlight.delete(fromId)) this._resyncInFlight.add(toId);
-		const oldKey = `hub-character-recovery:${this._scopeKey}:${fromId}`;
-		const newKey = `hub-character-recovery:${this._scopeKey}:${toId}`;
-		if (this._recoveryVersions.has(oldKey)) {
-			this._recoveryVersions.set(newKey, this._recoveryVersions.get(oldKey));
-			this._recoveryVersions.delete(oldKey);
-		}
-		try {
-			const recovery = this._recoveryStorage?.getItem(oldKey);
-			if (recovery) this._recoveryStorage?.setItem(newKey, recovery);
-			this._recoveryStorage?.removeItem(oldKey);
-		} catch {
-			// Recovery-storage identity migration is best-effort.
+		const oldKey = this._getRecoveryStorageKey(fromId);
+		const newKey = this._getRecoveryStorageKey(toId);
+		if (oldKey && newKey) {
+			if (this._recoveryVersions.has(oldKey)) {
+				this._recoveryVersions.set(newKey, this._recoveryVersions.get(oldKey));
+				this._recoveryVersions.delete(oldKey);
+			}
+			try {
+				const recovery = this._recoveryStorage?.getItem(oldKey);
+				if (recovery) this._recoveryStorage?.setItem(newKey, recovery);
+				this._recoveryStorage?.removeItem(oldKey);
+			} catch {
+				// Recovery-storage identity migration is best-effort.
+			}
 		}
 	}
 
 	pUpsert ({character, isCreate = false}) {
+		if (!this._session) return this._pEnsureSession().then(() => this.pUpsert({character, isCreate}));
 		try {
 			this._assertCharacterEditable({characterId: character?.id});
 		} catch (error) {
@@ -1258,9 +1281,11 @@ export class HubHttpCharacterRepository {
 			error.saveBlock = saveBlock;
 			return Promise.reject(error);
 		}
-		let recoveryKey = `hub-character-recovery:${this._scopeKey}:${character.id}`;
-		const recoveryVersion = (this._recoveryVersions.get(recoveryKey) || 0) + 1;
-		this._recoveryVersions.set(recoveryKey, recoveryVersion);
+		let recoveryKey = this._getRecoveryStorageKey(character.id);
+		const recoveryVersion = recoveryKey
+			? (this._recoveryVersions.get(recoveryKey) || 0) + 1
+			: null;
+		if (recoveryKey) this._recoveryVersions.set(recoveryKey, recoveryVersion);
 		const requestedId = character.id;
 		const canonicalAtCall = this._canonicalIds.get(requestedId) || requestedId;
 		const submittedSnapshot = this._getSnapshotData(character);
@@ -1291,26 +1316,29 @@ export class HubHttpCharacterRepository {
 		this._latestSubmitted.set(requestedId, structuredClone(submittedSnapshot));
 		bookAtCall.latestSubmitted = this._cloneTrackCoverage(submittedSnapshotCoverage);
 		this._pendingWrites++;
-		try {
-			this._recoveryStorage?.setItem(recoveryKey, JSON.stringify({
-				version: recoveryVersion,
-				base: submittedBase,
-				snapshot: submittedSnapshot,
-				commandKeys,
-				coverageVersion: COVERAGE_VERSION,
-				coverage: {
-					base: serializeCoverage(submittedBaseCoverage),
-					snapshot: serializeCoverage(submittedSnapshotCoverage),
-				},
-			}));
-		} catch {
-			// Recovery storage is best-effort; the in-memory conflict guard remains authoritative.
+		if (recoveryKey) {
+			try {
+				this._recoveryStorage?.setItem(recoveryKey, JSON.stringify({
+					accountId: this._getRecoveryAccountId(),
+					version: recoveryVersion,
+					base: submittedBase,
+					snapshot: submittedSnapshot,
+					commandKeys,
+					coverageVersion: COVERAGE_VERSION,
+					coverage: {
+						base: serializeCoverage(submittedBaseCoverage),
+						snapshot: serializeCoverage(submittedSnapshotCoverage),
+					},
+				}));
+			} catch {
+				// Recovery storage is best-effort; the in-memory conflict guard remains authoritative.
+			}
 		}
 		const pResult = this._pRunMutation(async () => {
 			let canonicalId = this._canonicalIds.get(requestedId) || requestedId;
 			if (canonicalId !== requestedId) {
 				this._migrateCharacterIdentity({fromId: requestedId, toId: canonicalId});
-				recoveryKey = `hub-character-recovery:${this._scopeKey}:${canonicalId}`;
+				recoveryKey = this._getRecoveryStorageKey(canonicalId);
 			}
 			const characterNxt = {...structuredClone(submittedSnapshot), id: canonicalId};
 			const existingConflict = this._conflicts.get(canonicalId);
@@ -1343,7 +1371,7 @@ export class HubHttpCharacterRepository {
 					this._canonicalIds.set(requestedId, created.character.id);
 					this._migrateCharacterIdentity({fromId: requestedId, toId: created.character.id});
 					canonicalId = created.character.id;
-					recoveryKey = `hub-character-recovery:${this._scopeKey}:${created.character.id}`;
+					recoveryKey = this._getRecoveryStorageKey(created.character.id);
 					this._accepted.set(created.character.id, created.character);
 					this._access.set(created.character.id, CHARACTER_ACCESS_MODES.OWNER);
 					accepted = created.character;
@@ -1470,7 +1498,7 @@ export class HubHttpCharacterRepository {
 			.then(out => {
 				this._failedWrites.delete(requestedId);
 				this._failedCommands.delete(requestedId);
-				if (this._recoveryVersions.get(recoveryKey) === recoveryVersion) {
+				if (recoveryKey && this._recoveryVersions.get(recoveryKey) === recoveryVersion) {
 					this._recoveryVersions.delete(recoveryKey);
 					try {
 						this._recoveryStorage?.removeItem(recoveryKey);
@@ -1500,10 +1528,13 @@ export class HubHttpCharacterRepository {
 	}
 
 	getPendingRecovery (characterId) {
+		const recoveryKey = this._getRecoveryStorageKey(characterId);
+		if (!recoveryKey) return null;
 		try {
-			const raw = this._recoveryStorage?.getItem(`hub-character-recovery:${this._scopeKey}:${characterId}`);
+			const raw = this._recoveryStorage?.getItem(recoveryKey);
 			if (!raw) return null;
 			const parsed = JSON.parse(raw);
+			if (parsed.accountId !== this._getRecoveryAccountId()) return null;
 			if (parsed.snapshot) {
 				const canonicalId = this._canonicalIds.get(characterId) || characterId;
 				const book = this._getCoverageBook(canonicalId);
@@ -1544,12 +1575,14 @@ export class HubHttpCharacterRepository {
 			this._accepted.set(characterId, recovery.serverDocument);
 			this._failedWrites.delete(characterId);
 			this._failedCommands.delete(characterId);
-			const recoveryKey = `hub-character-recovery:${this._scopeKey}:${characterId}`;
-			this._recoveryVersions.delete(recoveryKey);
-			try {
-				this._recoveryStorage?.removeItem(recoveryKey);
-			} catch {
-				// Recovery storage cleanup is best-effort.
+			const recoveryKey = this._getRecoveryStorageKey(characterId);
+			if (recoveryKey) {
+				this._recoveryVersions.delete(recoveryKey);
+				try {
+					this._recoveryStorage?.removeItem(recoveryKey);
+				} catch {
+					// Recovery storage cleanup is best-effort.
+				}
 			}
 			return this._getData(recovery.serverDocument);
 		}
