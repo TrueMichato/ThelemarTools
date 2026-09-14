@@ -44,25 +44,25 @@ Three modules handle character progression with overlapping concerns:
 
 **Why this matters**: Duplicate logic across all three was the motivation for the ClassUtils refactor. If you fix a bug in LevelUp's feature parsing, check if QuickBuild/Builder have the same bug.
 
-### Respec System Limitations
-**Status**: Partially implemented
+### Respec Progression Workspace
+**Status**: Implemented; continued parity hardening
 
-The respec/level history system (`charactersheet-respec.js`) stores per-level decisions but only some are editable:
+Respec now derives a complete progression manifest instead of displaying only
+properties already present in sparse `levelHistory`. Its versioned ledger covers
+skills, tools, expertise, languages, subclasses, feature/optional-feature
+choices, ASIs, feats, masteries, permanent spell acquisition/replacement, HP,
+and historical class assignment.
 
-| Choice Type | Editable? |
-|------------|----------|
-| ASI allocation | ✅ Yes |
-| Feat selection | ✅ Yes |
-| Subclass | ✅ Yes (with cascade warning) |
-| Feature choices (Specialties, Fighting Styles) | ✅ Yes |
-| Combat traditions, Weapon masteries | ✅ Yes |
-| Skill proficiencies | ❌ No |
-| Expertise | ❌ No |
-| Spells | ❌ No ("would require extensive recalculation") |
+All edits occur in an isolated candidate state. Apply is atomic and rolls back a
+failed persistence attempt; Cancel discards the candidate; one-step Undo restores
+the last applied snapshot. Semantic decision keys preserve still-legal choices
+when class levels move to a different chronological position, while recomputed
+opportunities mark missing/invalid decisions for repair.
 
-Subclass edits trigger `state.replayHistoryMartialChoices()` for cascade recalculation.
-
-Legacy characters (created before level history was implemented) show a badge and have edit buttons disabled. Can be rebuilt via Quick Build.
+Legacy/imported values are reconstructed conservatively. Exact history is
+resolved, uncertain choices remain ambiguous, and unattributed proficiency/spell
+values are preserved through the progression-ownership ledger. See
+`docs/charactersheet/22-respec.md`.
 
 ### State File Modularization
 **Status**: Planned (medium-term)  

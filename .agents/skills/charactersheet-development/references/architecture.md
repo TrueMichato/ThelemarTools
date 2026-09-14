@@ -91,8 +91,19 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   Print-optimized self-contained HTML (browser Save as PDF). Notes,
 │   appearance/portrait, resources, custom abilities, TGTT, companions.
 │
-├── CharacterSheetRespec (charactersheet-respec.js, ~600 lines)
-│   Level history timeline display. Edit functionality planned.
+├── CharacterSheetProgression (charactersheet-progression.js)
+│   Shared progression manifest + versioned decision-ledger contract. Discovers
+│   skipped opportunities, validates choices, preserves semantic identity across
+│   timeline reorder, and projects decisions to legacy `choices`.
+│
+├── CharacterSheetRespecEngine (charactersheet-respec-engine.js)
+│   Isolated candidate transaction: validate, review, atomic Apply/rollback,
+│   Cancel, and one-step Undo.
+│
+├── CharacterSheetRespec (charactersheet-respec.js)
+│   Draft workspace for level/base decisions, historical class reassignment,
+│   cascade repair, permanent spell choices, and responsive review/apply UI.
+│   See docs/charactersheet/22-respec.md.
 │
 ├── CharacterSheetLayout (charactersheet-layout.js, ~800 lines)
 │   Drag-drop section reordering, layout persistence.

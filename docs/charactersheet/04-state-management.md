@@ -10,6 +10,28 @@ This document provides an in-depth exploration of `CharacterSheetState`, the hea
 
 All character information is stored in a private `_data` object. Understanding this structure is essential for working with the state.
 
+### Progression History
+
+`levelHistory` is a versioned decision ledger, not only a list of sparse receipts.
+Each chronological level records its class assignment, compatibility `choices`,
+and normalized `decisions`. The shared `CharacterSheetProgression` manifest
+regenerates every expected opportunity from the loaded catalogs, including
+choices which were skipped and therefore never appeared in older history.
+Legal option catalogs remain runtime-only and are not serialized into character
+saves. Structural history completeness means every character level has a row;
+decision validity is checked separately by the Respec manifest.
+
+Decision semantic keys contain class identity, class level, decision type,
+source feature, and slot, but not character level. This lets choices follow their
+class-level opportunity when multiclass order changes.
+
+`progressionOwnership` tracks overlapping progression sources for skills, tools,
+languages, expertise, and permanent spells. Respec detaches only the source being
+changed and keeps the mechanical value if another decision or a preserved
+import/manual origin still owns it. Cascades prune removed semantic sources and
+delete only values which no surviving or preserved source requires. See
+[22-respec.md](./22-respec.md).
+
 ### Basic Information
 
 ```javascript

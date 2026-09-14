@@ -5,6 +5,7 @@
 
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
 import {CharacterSheetGamblerRules, GAMBLER_GAMBLING_TABLE} from "./charactersheet-gambler.js";
+import {CharacterSheetProgression} from "./charactersheet-progression.js";
 
 // Target-aware riders resolve through this registry rather than through attack-id
 // branches. New sources can opt in by registering a handler method.
@@ -5108,6 +5109,14 @@ class CharacterSheetState {
 				languages: {},
 			},
 
+			// Progression-owned values may overlap with species, background, feature, or manual grants.
+			// Respec uses this source ledger to detach only the decision being changed.
+			progressionOwnership: {
+				version: 1,
+				initialized: false,
+				values: {},
+			},
+
 			// Appearance
 			appearance: {
 				age: "",
@@ -5494,6 +5503,7 @@ class CharacterSheetState {
 		if (!Array.isArray(this._data.levelHistory)) {
 			this._data.levelHistory = [];
 		}
+		this._data.levelHistory = CharacterSheetProgression.normalizeHistory(this._data.levelHistory);
 		// Ensure tuned metamagics array exists
 		if (!Array.isArray(this._data.tunedMetamagics)) {
 			this._data.tunedMetamagics = [];
@@ -5586,6 +5596,9 @@ class CharacterSheetState {
 		// Ensure grantedProficiencies tracking object exists
 		if (!this._data.grantedProficiencies) {
 			this._data.grantedProficiencies = {skills: {}, tools: {}, weapons: {}, armor: {}, languages: {}};
+		}
+		if (this._data.progressionOwnership?.version !== 1 || typeof this._data.progressionOwnership?.values !== "object") {
+			this._data.progressionOwnership = {version: 1, initialized: false, values: {}};
 		}
 
 		// Ensure Forked Tongue (Illrigger) state exists. Older saves predate this
@@ -8926,7 +8939,10 @@ class CharacterSheetState {
 		const totalLevel = this.getTotalLevel();
 		if (totalLevel === 0) return true; // No levels = nothing to track
 
-		// Check if we have history entries for all levels
+		// Structural history completeness is deliberately separate from Respec
+		// decision validity. A recorded skipped or ambiguous choice still belongs to
+		// a real level and must not turn the character into a legacy character or
+		// disable level removal.
 		const historyLevels = new Set(this._data.levelHistory.map(h => h.level));
 		for (let i = 1; i <= totalLevel; i++) {
 			if (!historyLevels.has(i)) return false;
@@ -8988,16 +9004,22 @@ class CharacterSheetState {
 		this._data.levelHistory = this._data.levelHistory.filter(h => h.level !== entry.level);
 
 		// Add new entry
-		this._data.levelHistory.push({
+		this._data.levelHistory.push(CharacterSheetProgression.normalizeHistoryEntry({
 			level: entry.level,
 			class: entry.class,
+			classLevel: entry.classLevel,
 			choices: entry.choices || {},
+			decisions: entry.decisions,
+			ledgerVersion: entry.ledgerVersion,
+			manifestVersion: entry.manifestVersion,
+			manifestComplete: entry.manifestComplete,
 			complete: entry.complete !== false,
 			timestamp: entry.timestamp || Date.now(),
-		});
+		}));
 
 		// Sort by level
 		this._data.levelHistory.sort((a, b) => a.level - b.level);
+		this._onProgressionLedgerChange?.();
 	}
 
 	/**
@@ -9012,7 +9034,213 @@ class CharacterSheetState {
 
 		entry.choices = {...entry.choices, ...updates};
 		entry.timestamp = Date.now();
+		const refreshed = CharacterSheetProgression.refreshDecisionSelectionsFromChoices(entry);
+		Object.assign(entry, refreshed);
+		this._onProgressionLedgerChange?.();
 		return true;
+	}
+
+	/**
+	 * Persist a fully-derived progression manifest into the history ledger.
+	 * This is the point where `complete` becomes decision-aware rather than merely
+	 * meaning that a row exists for the character level.
+	 */
+	setProgressionManifest (manifest) {
+		this._data.levelHistory = CharacterSheetProgression.reconcileHistoryWithManifest({
+			history: this._data.levelHistory,
+			manifest,
+		});
+	}
+
+	_getProgressionOwnershipKey (type, value) {
+		if (["spells", "cantrips"].includes(type)) {
+			return `${String(value?.name || "").trim().toLowerCase()}|${String(value?.source || "").trim().toLowerCase()}`;
+		}
+		return String(value?.name || value || "").trim().toLowerCase().replace(/['\s]+/g, "");
+	}
+
+	_getProgressionOwnershipEntry (type, value, {isCreate = false} = {}) {
+		const ownership = this._data.progressionOwnership ||= {version: 1, initialized: false, values: {}};
+		ownership.values[type] ||= {};
+		const key = this._getProgressionOwnershipKey(type, value);
+		if (!key) return null;
+		if (isCreate && !ownership.values[type][key]) {
+			ownership.values[type][key] = {
+				value: typeof value === "object" ? {name: value.name, source: value.source, level: value.level} : value,
+				sources: [],
+				preserved: false,
+			};
+		}
+		return ownership.values[type][key] || null;
+	}
+
+	_getProgressionDecisionOwnedValues (decision) {
+		const typeMap = {
+			skills: "skills",
+			tools: "tools",
+			expertise: "expertise",
+			languages: "languages",
+			knownSpells: "spells",
+			preparedSpells: "spells",
+			spellbookSpells: "spells",
+			cantrips: "cantrips",
+			preparedCantrips: "cantrips",
+		};
+		const type = typeMap[decision?.type];
+		if (type) {
+			const values = Array.isArray(decision.selection)
+				? decision.selection
+				: (decision.selection == null ? [] : [decision.selection]);
+			return values.map(value => ({type, value}));
+		}
+		if (decision?.type === "spellSwap" && decision.selection?.added?.name) {
+			return [{type: Number(decision.selection.added.level) === 0 ? "cantrips" : "spells", value: decision.selection.added}];
+		}
+		return [];
+	}
+
+	/**
+	 * Build conservative source ownership for progression-controlled values.
+	 * Exact ledger selections are treated as owned; values with no recorded source
+	 * are marked preserved so Respec cannot delete imported/manual grants.
+	 */
+	initializeProgressionOwnership (manifest) {
+		const ownership = this._data.progressionOwnership ||= {version: 1, initialized: false, values: {}};
+		if (!ownership.initialized) ownership.values = {};
+
+		for (const decision of manifest?.decisions || []) {
+			for (const {type, value} of this._getProgressionDecisionOwnedValues(decision)) {
+				this.claimProgressionOwnership(type, value, decision.semanticKey);
+			}
+		}
+
+		const actual = {
+			skills: Object.entries(this._data.skillProficiencies || {}).filter(([, level]) => Number(level) >= 1).map(([skill]) => skill),
+			expertise: Object.entries(this._data.skillProficiencies || {}).filter(([, level]) => Number(level) >= 2).map(([skill]) => skill),
+			tools: this._data.toolProficiencies || [],
+			languages: this._data.languages || [],
+			spells: this._data.spellcasting?.spellsKnown || [],
+			cantrips: this._data.spellcasting?.cantripsKnown || [],
+		};
+		const nonProgression = this._getNonProgressionOwnershipKeys(manifest);
+		for (const [type, values] of Object.entries(actual)) {
+			for (const value of values) {
+				const entry = this._getProgressionOwnershipEntry(type, value, {isCreate: true});
+				if (!entry) continue;
+				const key = this._getProgressionOwnershipKey(type, value);
+				if (!entry.sources.length || nonProgression[type]?.has(key)) entry.preserved = true;
+			}
+		}
+		ownership.initialized = true;
+	}
+
+	_getNonProgressionOwnershipKeys (manifest) {
+		const out = Object.fromEntries(["skills", "expertise", "tools", "languages", "spells", "cantrips"]
+			.map(type => [type, new Set()]));
+		const add = (type, value) => {
+			const key = this._getProgressionOwnershipKey(type, value);
+			if (key) out[type]?.add(key);
+		};
+		const addDefinitionKeys = (type, definitions, excluded) => {
+			for (const definition of Array.isArray(definitions) ? definitions : []) {
+				if (!definition || typeof definition !== "object") continue;
+				for (const [key, value] of Object.entries(definition)) {
+					if (excluded.has(key) || value !== true) continue;
+					add(type, type === "languages" ? CharacterSheetClassUtils.resolveLanguageProficiencyName(key) : key);
+				}
+			}
+		};
+		const addUserChoices = choices => {
+			for (const skill of choices?.selectedSkills || []) add("skills", skill);
+			for (const tool of choices?.selectedTools || []) add("tools", typeof tool === "string" ? tool : tool?.tool);
+			const languages = choices?.selectedLanguages;
+			for (const value of Array.isArray(languages) ? languages : Object.values(languages || {})) {
+				for (const language of Array.isArray(value) ? value : [value]) {
+					add("languages", typeof language === "string" ? language : language?.language);
+				}
+			}
+			for (const language of choices?.selectedSubraceLanguages || []) add("languages", language);
+			for (const skill of choices?.tashasSkillReplacements || []) add("skills", skill);
+			for (const language of choices?.tashasLanguageReplacements || []) add("languages", language);
+		};
+
+		for (const [type, entries] of Object.entries(this._data.grantedProficiencies || {})) {
+			if (!["skills", "tools", "languages"].includes(type)) continue;
+			for (const [value, sources] of Object.entries(entries || {})) {
+				if (!sources?.length) continue;
+				add(type, value);
+				if (type === "skills" && Number(this._data.skillProficiencies?.[value]) >= 2) add("expertise", value);
+			}
+		}
+
+		const proficiencyMeta = new Set(["choose", "any", "anyStandard", "anyArtisansTool", "anyMusicalInstrument"]);
+		for (const entity of [this._data.race, this._data.subrace, this._data.background]) {
+			addDefinitionKeys("skills", entity?.skillProficiencies, proficiencyMeta);
+			addDefinitionKeys("tools", entity?.toolProficiencies, proficiencyMeta);
+			addDefinitionKeys("languages", entity?.languageProficiencies, proficiencyMeta);
+		}
+		addUserChoices(this.getBaseRaceUserChoices());
+		addUserChoices(this.getBaseBackgroundUserChoices());
+
+		for (const decision of manifest?.decisions || []) {
+			if (!["skills", "tools"].includes(decision.type)) continue;
+			for (const value of decision.meta?.fixed || []) add(decision.type, value);
+		}
+		return out;
+	}
+
+	/**
+	 * Drop ownership claims for decisions which no longer exist after a cascade.
+	 * Values owned only by removed decisions are removed from the candidate state;
+	 * preserved/manual and overlapping values remain intact.
+	 */
+	reconcileProgressionOwnership (manifest) {
+		const ownership = this._data.progressionOwnership;
+		if (!ownership?.initialized) return;
+		const activeSources = new Set((manifest?.decisions || []).map(decision => decision.semanticKey));
+		const orphaned = [];
+		for (const [type, entries] of Object.entries(ownership.values || {})) {
+			for (const [key, entry] of Object.entries(entries || {})) {
+				const hadSources = !!entry.sources?.length;
+				entry.sources = (entry.sources || []).filter(source => activeSources.has(source));
+				if (hadSources && !entry.sources.length && !entry.preserved) orphaned.push({type, key, entry});
+				if (!entry.sources.length && !entry.preserved) delete entries[key];
+			}
+		}
+
+		for (const {type, entry} of orphaned.filter(it => it.type === "expertise")) {
+			this.setSkillProficiency(this._getProgressionOwnershipKey(type, entry.value), 1);
+		}
+		for (const {type, entry} of orphaned.filter(it => it.type !== "expertise")) {
+			const value = entry.value;
+			if (type === "skills") {
+				const expertise = this._getProgressionOwnershipEntry("expertise", value);
+				if (!expertise?.preserved && !expertise?.sources?.length) this.setSkillProficiency(this._getProgressionOwnershipKey(type, value), 0);
+			} else if (type === "tools") this.removeToolProficiency(value);
+			else if (type === "languages") this.removeLanguage(value);
+			else if (["spells", "cantrips"].includes(type)) this.removeSpell(value?.name, value?.source);
+		}
+	}
+
+	claimProgressionOwnership (type, value, sourceId) {
+		if (!sourceId) return;
+		const entry = this._getProgressionOwnershipEntry(type, value, {isCreate: true});
+		if (entry && !entry.sources.includes(sourceId)) entry.sources.push(sourceId);
+	}
+
+	/**
+	 * Detach one decision from a value.
+	 * @returns {boolean} True when no other source requires the mechanical value.
+	 */
+	releaseProgressionOwnership (type, value, sourceId) {
+		const entry = this._getProgressionOwnershipEntry(type, value);
+		if (!entry) return true;
+		entry.sources = entry.sources.filter(source => source !== sourceId);
+		if (type === "skills") {
+			const expertise = this._getProgressionOwnershipEntry("expertise", value);
+			if (expertise?.preserved || expertise?.sources?.length) return false;
+		}
+		return !entry.preserved && !entry.sources.length;
 	}
 
 	/**
@@ -9020,6 +9248,7 @@ class CharacterSheetState {
 	 */
 	clearLevelHistory () {
 		this._data.levelHistory = [];
+		this._onProgressionLedgerChange?.();
 	}
 
 	/**
@@ -9028,6 +9257,7 @@ class CharacterSheetState {
 	 */
 	removeLevelHistoryEntry (level) {
 		this._data.levelHistory = this._data.levelHistory.filter(h => h.level !== level);
+		this._onProgressionLedgerChange?.();
 	}
 
 	/**

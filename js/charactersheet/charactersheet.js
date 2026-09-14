@@ -18,6 +18,7 @@ import {CharacterSheetCustomAbilities} from "./charactersheet-customabilities.js
 import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
 import {CharacterSheetQuickBuild} from "./charactersheet-quickbuild.js";
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
+import "./charactersheet-respec-engine.js";
 import {CharacterSheetSpellPicker} from "./charactersheet-spell-picker.js";
 import {CharacterSheetProfPicker} from "./charactersheet-prof-editor.js";
 import {CharacterSheetUpgrades} from "./charactersheet-upgrades.js";
@@ -21356,14 +21357,14 @@ class CharacterSheetPage {
 	 *
 	 * @returns {{combatTraditions: string[], weaponMasteries: string[]}}
 	 */
-	replayHistoryMartialChoices () {
-		const baselineTraditions = this._state.getCombatTraditions();
-		const baselineMasteries = this._state.getWeaponMasteries();
+	replayHistoryMartialChoices (state = this._state) {
+		const baselineTraditions = state.getCombatTraditions();
+		const baselineMasteries = state.getWeaponMasteries();
 
 		let replayTraditions = [...baselineTraditions];
 		let replayMasteries = [...baselineMasteries];
 
-		const history = [...(this._state.getLevelHistory() || [])].sort((a, b) => a.level - b.level);
+		const history = [...(state.getLevelHistory() || [])].sort((a, b) => a.level - b.level);
 		for (const entry of history) {
 			if (Array.isArray(entry?.choices?.combatTraditions)) {
 				replayTraditions = [...entry.choices.combatTraditions];
@@ -21374,8 +21375,8 @@ class CharacterSheetPage {
 			}
 		}
 
-		this._state.setCombatTraditions(replayTraditions);
-		this._state.setWeaponMasteries(replayMasteries);
+		state.setCombatTraditions(replayTraditions);
+		state.setWeaponMasteries(replayMasteries);
 
 		return {
 			combatTraditions: replayTraditions,

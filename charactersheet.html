@@ -1806,7 +1806,16 @@
 							<span class="charsheet__level-history-title">Level Progression</span>
 							<span class="charsheet__level-history-badge charsheet__level-history-badge--legacy ve-hidden" id="charsheet-legacy-badge" title="This character was created before level history tracking. New levels will be tracked.">Legacy</span>
 						</h4>
-						<p class="charsheet__respec-description">View your character's level history and edit past choices. Click the pencil icon on any level to modify your selections.</p>
+						<p class="charsheet__respec-description">Review every progression decision, including choices that were skipped or could not be reconstructed. Changes stay in this draft until you apply them.</p>
+						<div class="charsheet__respec-toolbar" id="charsheet-respec-toolbar">
+							<div class="charsheet__respec-draft-status" id="charsheet-respec-draft-status" role="status" aria-live="polite"></div>
+							<div class="charsheet__respec-toolbar-actions">
+								<button class="ve-btn ve-btn-default" id="charsheet-respec-undo" type="button">Undo Apply</button>
+								<button class="ve-btn ve-btn-default" id="charsheet-respec-cancel" type="button">Cancel Draft</button>
+								<button class="ve-btn ve-btn-default" id="charsheet-respec-review" type="button">Review Changes</button>
+								<button class="ve-btn ve-btn-primary" id="charsheet-respec-apply" type="button">Apply Respec</button>
+							</div>
+						</div>
 						<div class="charsheet__level-history-timeline" id="charsheet-level-timeline">
 							<!-- Populated by JS -->
 						</div>
