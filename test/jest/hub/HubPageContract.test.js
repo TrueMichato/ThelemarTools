@@ -114,6 +114,18 @@ describe("campaign hub pages", () => {
 		expect(source).not.toContain("event.currentTarget.querySelector(\"button[type='submit']\").disabled = true");
 	});
 
+	it("keeps inbox transfer decisions idempotent and separates committed outcomes from refresh failures", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("HubTransferResolutionKeys");
+		expect(source).toContain("pResolveTransferAndRefresh");
+		expect(source).toContain("transferResolutionKeys.get({campaignId, transferId: transfer.id, decision})");
+		expect(source).toContain("Transfer applied.");
+		expect(source).toContain("The committed outcome is safe");
+		expect(source).toContain("The transfer outcome is not yet confirmed.");
+		expect(source).toContain("Retry inbox refresh");
+		expect(source).not.toMatch(/pResolveTransfer\([\s\S]{0,300}idempotencyKey: crypto\.randomUUID\(\)/);
+	});
+
 	it("requires an explicit source identity for condition effects", () => {
 		const source = read("js/hub/hub-page.js");
 		expect(campaignHtml).toContain("id=\"campaign-action-condition-source\"");

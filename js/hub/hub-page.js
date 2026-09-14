@@ -26,7 +26,12 @@ import {
 	filterAwardItems,
 	getAwardCommandFingerprint,
 } from "./hub-item-award.js";
+import {
+	HubTransferResolutionKeys,
+	pResolveTransferAndRefresh,
+} from "./hub-transfer-resolution.js";
 const api = new HubApiClient();
+const transferResolutionKeys = new HubTransferResolutionKeys();
 
 /**
  * Lightweight Hub shells keep a device-local active campaign selection, but must never fetch the
@@ -863,6 +868,34 @@ function setTransferRefreshFailure ({form, message, pRetry}) {
 	status.append(retry);
 }
 
+function setTransferInboxRefreshFailure ({controls, meta, message, pRetry, isResolutionKnown}) {
+	meta.textContent = message;
+	const decisionButtons = [...controls.querySelectorAll("[data-transfer-decision]")];
+	const priorRetry = controls.querySelector("[data-transfer-refresh-retry]");
+	priorRetry?.remove();
+	const retry = document.createElement("button");
+	retry.type = "button";
+	retry.className = "hub-button hub-button--inline";
+	retry.textContent = "Retry inbox refresh";
+	retry.dataset.transferRefreshRetry = "true";
+	retry.addEventListener("click", async () => {
+		for (const control of controls.querySelectorAll("button")) control.disabled = true;
+		retry.textContent = "Refreshing...";
+		try {
+			await pRetry();
+			renderError("");
+		} catch (error) {
+			renderError(error);
+			setTransferInboxRefreshFailure({controls, meta, message, pRetry, isResolutionKnown});
+		}
+	});
+	if (isResolutionKnown) controls.replaceChildren(retry);
+	else {
+		for (const button of decisionButtons) button.disabled = false;
+		controls.append(retry);
+	}
+}
+
 function setFormAvailability ({formId, isAvailable, message}) {
 	const form = document.getElementById(formId);
 	if (!form) return;
@@ -1628,9 +1661,11 @@ async function renderPendingActions ({campaign, campaignId, session, targetChara
 
 async function renderPendingTransfers ({campaign, campaignId, session, targetCharacters, members, pRefreshTransferState}) {
 	const list = document.getElementById("campaign-pending-transfers");
-	if (!list) return;
+	if (!list) return {pendingTransferIds: []};
 	const transfers = await api.pListTransfers({campaignId});
 	const pending = transfers.filter(transfer => ["proposed", "reserved"].includes(transfer.status));
+	const pendingTransferIds = pending.map(transfer => transfer.id);
+	transferResolutionKeys.reconcilePending({campaignId, pendingTransferIds});
 	updateInboxCount({kind: "transfers", count: pending.length});
 	setHidden(document.getElementById("campaign-pending-transfers-empty"), !!pending.length);
 	const isDm = ["dm", "co_dm"].includes(campaign.role);
@@ -1675,27 +1710,56 @@ async function renderPendingTransfers ({campaign, campaignId, session, targetCha
 				const button = document.createElement("button");
 				button.type = "button";
 				button.className = decision === "accept" ? "hub-button hub-button--primary" : "hub-button";
+				button.dataset.transferDecision = decision;
 				button.textContent = decision === "accept"
 					? isRequest ? "Approve" : "Accept"
 					: canAccept ? isRequest ? "Decline" : "Reject" : "Cancel";
 				button.addEventListener("click", async () => {
 					for (const control of controls.querySelectorAll("button")) control.disabled = true;
-					try {
-						const currentContext = decision === "accept"
-							? await api.pGetCampaignContext({campaignId})
-							: null;
-						await api.pResolveTransfer({
-							campaignId,
-							transferId: transfer.id,
-							decision,
-							rulesVersionId: currentContext?.rulesVersion?.id || null,
-							idempotencyKey: crypto.randomUUID(),
-						});
-						await pRefreshTransferState();
-					} catch (error) {
-						renderError(error);
-						for (const control of controls.querySelectorAll("button")) control.disabled = false;
+					const idempotencyKey = transferResolutionKeys.get({campaignId, transferId: transfer.id, decision});
+					const outcome = await pResolveTransferAndRefresh({
+						pResolve: async () => {
+							const currentContext = decision === "accept"
+								? await api.pGetCampaignContext({campaignId})
+								: null;
+							return api.pResolveTransfer({
+								campaignId,
+								transferId: transfer.id,
+								decision,
+								rulesVersionId: currentContext?.rulesVersion?.id || null,
+								idempotencyKey,
+							});
+						},
+						pRefresh: pRefreshTransferState,
+					});
+					if (outcome.state === "resolved_refreshed") {
+						renderError("");
+						return;
 					}
+					if (outcome.state === "resolution_failed_refreshed") {
+						const isStillPending = outcome.refreshResult.pendingTransferIds.includes(transfer.id);
+						renderError(isStillPending ? outcome.resolutionError : "");
+						return;
+					}
+					if (outcome.state === "resolved_refresh_failed") {
+						renderError(outcome.refreshError);
+						setTransferInboxRefreshFailure({
+							controls,
+							meta,
+							message: `${decision === "accept" ? "Transfer applied." : "Transfer declined."} The committed outcome is safe, but the latest transfer state could not be loaded.`,
+							pRetry: pRefreshTransferState,
+							isResolutionKnown: true,
+						});
+						return;
+					}
+					renderError(outcome.resolutionError);
+					setTransferInboxRefreshFailure({
+						controls,
+						meta,
+						message: "The transfer outcome is not yet confirmed. Refresh the inbox or retry the same decision.",
+						pRetry: pRefreshTransferState,
+						isResolutionKnown: false,
+					});
 				});
 				controls.append(button);
 			}
@@ -1703,6 +1767,7 @@ async function renderPendingTransfers ({campaign, campaignId, session, targetCha
 		}
 		return row;
 	}));
+	return {pendingTransferIds};
 }
 
 function getFormFingerprint (form) {
@@ -1951,7 +2016,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			}
 		}
 		renderPartyInventoryStatus(partyInventory);
-		await renderPendingTransfers({
+		const transferState = await renderPendingTransfers({
 			campaign,
 			campaignId,
 			session,
@@ -1959,6 +2024,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			members,
 			pRefreshTransferState,
 		});
+		return transferState;
 	};
 
 	await renderPendingActions({campaign, campaignId, session, targetCharacters, members});

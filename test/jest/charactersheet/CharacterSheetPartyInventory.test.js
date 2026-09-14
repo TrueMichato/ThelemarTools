@@ -3,10 +3,21 @@ import {jest} from "@jest/globals";
 import {
 	CharacterSheetPartyInventory,
 	getPartyInventoryRecipients,
+	getPartyInventoryStashAction,
 	getPartyInventoryTransferTargetId,
 } from "../../../js/charactersheet/charactersheet-party-inventory.js";
 
 describe("Character Sheet party inventory", () => {
+	it.each([
+		["dm", "take"],
+		["co_dm", "take"],
+		["player", "request"],
+		["spectator", null],
+		[null, null],
+	])("maps the %s role to the supported stash action", (role, expected) => {
+		expect(getPartyInventoryStashAction(role)).toBe(expected);
+	});
+
 	it("does nothing for local characters", async () => {
 		const api = {
 			pGetCharacterProjection: jest.fn(),

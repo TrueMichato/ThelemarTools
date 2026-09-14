@@ -472,6 +472,8 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		};
 		const accepted = await store.pResolveTransfer(acceptInput);
 		await expect(store.pResolveTransfer(acceptInput)).resolves.toEqual(JSON.parse(JSON.stringify(accepted)));
+		await expect(store.pResolveTransfer({...acceptInput, idempotencyKey: `${prefix}-approve-player-stash-request-new-key`}))
+			.rejects.toMatchObject({code: "TRANSFER_NOT_FOUND"});
 		expect(accepted.transfer).toMatchObject({
 			status: "committed",
 			payload: {
@@ -612,6 +614,8 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		};
 		const first = await store.pResolveTransfer(rejectInput);
 		await expect(store.pResolveTransfer(rejectInput)).resolves.toEqual(JSON.parse(JSON.stringify(first)));
+		await expect(store.pResolveTransfer({...rejectInput, idempotencyKey: `${prefix}-resolve-reject-new-key`}))
+			.rejects.toMatchObject({code: "TRANSFER_NOT_FOUND"});
 		const restored = await pReadCharacter(sourceOwner.id, sourceCharacter.id);
 		expect(restored.data.inventory.find(it => it.id === "maps")).toEqual(before.data.inventory.find(it => it.id === "maps"));
 

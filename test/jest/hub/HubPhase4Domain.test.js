@@ -362,14 +362,29 @@ describe("Phase 4 actions, grants, and transfers", () => {
 		expect(playerCannotApproveOwnRequest.statusCode).toBe(403);
 		expect(playerCannotApproveOwnRequest.json().error).toBe("FORBIDDEN");
 
+		const approvalKey = "approve-player-stash-request";
 		const approved = await app.inject({
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/transfers/${requested.json().transfer.id}/resolve`,
-			headers: headers(dm),
+			headers: headers(dm, approvalKey),
 			payload: {decision: "accept"},
 		});
 		expect(approved.statusCode).toBe(200);
 		expect(approved.json().transfer.status).toBe("committed");
+		const approvalReplay = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${requested.json().transfer.id}/resolve`,
+			headers: headers(dm, approvalKey),
+			payload: {decision: "accept"},
+		});
+		expect(approvalReplay.statusCode).toBe(200);
+		expect(approvalReplay.json()).toEqual(approved.json());
+		expect((await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${requested.json().transfer.id}/resolve`,
+			headers: headers(dm, "approve-player-stash-request-new-key"),
+			payload: {decision: "accept"},
+		})).statusCode).toBe(404);
 
 		const requestA = await app.inject({
 			method: "POST",
@@ -428,12 +443,26 @@ describe("Phase 4 actions, grants, and transfers", () => {
 				payload: {items: [{entryId: item.id, quantity: item.quantity}], currency: {gp: 3}},
 			},
 		});
-		await app.inject({
+		const rejectionKey = "reject-transfer-retry";
+		const rejected = await app.inject({
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/transfers/${proposed.json().transfer.id}/resolve`,
-			headers: headers(b.session),
+			headers: headers(b.session, rejectionKey),
 			payload: {decision: "reject"},
 		});
+		const rejectionReplay = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${proposed.json().transfer.id}/resolve`,
+			headers: headers(b.session, rejectionKey),
+			payload: {decision: "reject"},
+		});
+		expect(rejectionReplay.json()).toEqual(rejected.json());
+		expect((await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${proposed.json().transfer.id}/resolve`,
+			headers: headers(b.session, "reject-transfer-new-key"),
+			payload: {decision: "reject"},
+		})).statusCode).toBe(404);
 		const source = (await app.inject({method: "GET", url: `/api/characters/${a.character.id}`, headers: readHeaders(a.session)})).json().projection.character;
 		expect(source.data.currency.gp).toBe(10);
 		expect(source.data.inventory).toContainEqual(expect.objectContaining({id: item.id, quantity: item.quantity}));

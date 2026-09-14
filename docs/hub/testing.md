@@ -305,8 +305,11 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   DM-to-owned/player-owned destinations, verifies direct DM and same-owner UI resolution, keeps player stash
   requests non-escrowed until DM approval, proves stale approvals return `TRANSFER_INSUFFICIENT`, and forces a
   post-mutation refetch failure before retrying balances and completing another transfer without a page reload.
+  Inbox resolution coverage loses approve/decline responses after commit, reuses the same decision key, and
+  distinguishes a known committed outcome from a failed authoritative refresh with an explicit inbox retry.
   Character Sheet refresh/retry tests assert a real refetch, visible pending/success/error state, and retained
-  last-good stash content.
+  last-good stash content; spectators and unresolved roles receive a read-only stash rather than a rejected
+  Request action.
 - Item-award regressions mutation-verify role/tenant/target gates, strict source and note/quantity bounds,
   trusted site/campaign identity resolution, full authoritative metadata persistence, privacy-reduced
   command/event projections, multi-target rollback, exact retry and concurrent duplicate behavior,

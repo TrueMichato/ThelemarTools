@@ -109,6 +109,12 @@ function createElement (tag, {className = "", text = "", attrs = {}} = {}) {
 	return element;
 }
 
+export function getPartyInventoryStashAction (role) {
+	if (DM_ROLES.has(role)) return "take";
+	if (role === "player") return "request";
+	return null;
+}
+
 export function getPartyInventoryRecipients ({projections = [], roster = [], currentCharacterId}) {
 	return getTargetableProjections({projections, roster})
 		.filter(projection => getProjectionId(projection) !== currentCharacterId)
@@ -864,7 +870,15 @@ export class CharacterSheetPartyInventory {
 		row.append(main, quantity);
 
 		const {maxQuantity, blockers} = getTransferLimit({container: this._partyInventory, entry});
-		const isDm = DM_ROLES.has(this._role);
+		const stashAction = getPartyInventoryStashAction(this._role);
+		const isDm = stashAction === "take";
+		if (!stashAction) {
+			row.append(createElement("span", {
+				className: "charsheet__party-inventory-row-note",
+				text: "The party stash is read-only for your current campaign role.",
+			}));
+			return row;
+		}
 		const token = this._getItemToken({kind: "party_inventory", entryId: entry.id});
 		this._itemByToken.set(token, {kind: "party_inventory", entryId: entry.id});
 		const button = createElement("button", {
@@ -1188,7 +1202,7 @@ export class CharacterSheetPartyInventory {
 	}
 
 	_isPlayerStashRequest () {
-		return this._draft?.kind === "party_inventory" && !DM_ROLES.has(this._role);
+		return this._draft?.kind === "party_inventory" && this._role === "player";
 	}
 
 	_shouldAutoResolve () {

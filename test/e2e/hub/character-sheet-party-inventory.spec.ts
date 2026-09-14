@@ -117,18 +117,33 @@ test("owned Character Sheets reconcile authoritative party inventory across devi
 		await player.expectInventorySearchStillFocused();
 		await player.expectReconnectRefresh();
 
-		for (let i = 0; i < 2; ++i) {
-			await player.requestStashItem({itemName: "Rations", quantity: 1});
-			await player.expectStashQuantity({itemName: "Rations", quantity: 3 - i});
-			await dm.hub.acceptFirstPendingTransfer({
-				campaignId,
-				expectedText: ["Rowan", "requests", "1 × Rations · PHB", "Party inventory"],
-				expectedAbsentText: ["Rowan Vale"],
-				buttonName: "Approve",
-			});
-			await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 2 + i});
-			await player.expectStashQuantity({itemName: "Rations", quantity: 2 - i});
-		}
+		await player.requestStashItem({itemName: "Rations", quantity: 1});
+		await player.expectStashQuantity({itemName: "Rations", quantity: 3});
+		await dm.hub.resolveFirstPendingTransferAfterCommittedRefreshFailure({
+			campaignId,
+			expectedText: ["Rowan", "requests", "1 × Rations · PHB", "Party inventory"],
+			buttonName: "Approve",
+		});
+		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 2});
+		await player.expectStashQuantity({itemName: "Rations", quantity: 2});
+
+		await player.requestStashItem({itemName: "Rations", quantity: 1});
+		await dm.hub.resolveFirstPendingTransferAfterLostResponse({
+			campaignId,
+			expectedText: ["Rowan", "requests", "1 × Rations · PHB", "Party inventory"],
+			buttonName: "Decline",
+		});
+		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 2});
+		await player.expectStashQuantity({itemName: "Rations", quantity: 2});
+
+		await player.requestStashItem({itemName: "Rations", quantity: 1});
+		await dm.hub.resolveFirstPendingTransferAfterLostResponse({
+			campaignId,
+			expectedText: ["Rowan", "requests", "1 × Rations · PHB", "Party inventory"],
+			buttonName: "Approve",
+		});
+		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 3});
+		await player.expectStashQuantity({itemName: "Rations", quantity: 1});
 
 		await player.shareCharacterItem({
 			itemName: "Rations",
