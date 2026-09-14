@@ -33,7 +33,9 @@ specified separately by ADR 0012.
 
 - Audit/outbox tables must exist before the first cloud mutation.
 - A lease is not sufficient without fencing.
-- Offline player character editing is read-only in V1.
+- An offline player edit is retained only as a local recovery draft in V1; it is never promoted to authoritative
+  state while disconnected. Reconnect refetches canonical truth, automatically retries a disjoint draft, and
+  requires an explicit local/server choice for overlapping paths.
 - Event delivery can be retried independently of the canonical transaction.
 - Event replay retention and immutable audit retention are separate policies.
 
@@ -43,6 +45,7 @@ The memory/PostgreSQL authorities and their Jest/real-stack suites demonstrate:
 
 - stale-device fencing after takeover;
 - revision conflict detection;
+- reconnect rebase of offline recovery drafts, including explicit overlap resolution;
 - idempotent retry;
 - one event/outbox record per mutation;
 - disjoint owner rebase over a DM XP grant.
