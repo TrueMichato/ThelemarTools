@@ -38,4 +38,22 @@ test.describe("Respec workspace", () => {
 		await charSheet.openRespec();
 		await charSheet.expectRespecToolbarFitsViewport();
 	});
+
+	test("repairs a legacy level-19 ASI into an Epic Boon even when no feat was originally chosen", async ({page}) => {
+		const {charSheet} = await createCharacterViaWizard(page, {...PRESET_FIGHTER, name: "Legacy Boon Repair"});
+		const before = await charSheet.prepareLegacyEpicBoonRepairFixture();
+
+		await charSheet.openRespec();
+		expect(await charSheet.getRespecDraftStatus()).toContain("spell choices grouped");
+		const invalid = await charSheet.getLevel19EpicBoonRepairSnapshot();
+		expect(invalid.status).toBe("invalid");
+		expect(invalid.selection).toMatchObject({mode: "asi", legacyAsi: {con: 2}});
+
+		await charSheet.stageLevel19EpicBoonRepair();
+		const repaired = await charSheet.getLevel19EpicBoonRepairSnapshot();
+		expect(repaired.status).toBe("resolved");
+		expect(repaired.featName).toBe("Boon of Combat Prowess");
+		expect(repaired.con).toBe(before.con - 2);
+		expect(repaired.abilityTotal).toBe(before.abilityTotal - 1);
+	});
 });

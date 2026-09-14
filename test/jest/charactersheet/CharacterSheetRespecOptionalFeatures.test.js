@@ -1,6 +1,7 @@
 import "./setup.js";
 import {jest} from "@jest/globals";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
+import "../../../js/charactersheet/charactersheet-progression.js";
 import "../../../js/charactersheet/charactersheet-respec.js";
 
 const CharacterSheetRespec = globalThis.CharacterSheetRespec;
@@ -223,6 +224,39 @@ describe("CharacterSheetRespec optional features", () => {
 			expect(editable.find(e => e.type === "asi")).toBeDefined();
 			expect(editable.find(e => e.type === "feat")).toBeDefined();
 			expect(editable.find(e => e.type === "optionalFeatures")).toBeDefined();
+		});
+
+		test("a manifest-owned skipped slot is editable even without a legacy history row", () => {
+			const decision = {
+				id: "jester-act-5",
+				type: "optionalFeatures",
+				label: "Jester's Acts",
+				characterLevel: 5,
+				sourceKey: "JA|Jester's Acts|TGTT",
+				count: 1,
+				selection: null,
+				status: "missing",
+			};
+			const respec = makeRespec();
+			respec._engine = {manifest: {decisions: [decision]}};
+			const history = {
+				level: 5,
+				class: {name: "Bard", source: "TGTT"},
+				choices: {},
+			};
+
+			const editable = respec._getEditableChoices(5, history);
+
+			expect(editable).toEqual([
+				expect.objectContaining({
+					type: "optionalFeatures",
+					label: "Jester's Acts",
+					current: "Not selected",
+					featureTypeKey: "JA",
+					count: 1,
+					decision,
+				}),
+			]);
 		});
 	});
 

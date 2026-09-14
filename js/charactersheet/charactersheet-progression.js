@@ -13,6 +13,39 @@ class CharacterSheetProgression {
 
 	static DECISION_STATUSES = new Set(["resolved", "deferred", "missing", "invalid", "ambiguous"]);
 
+	static DECISION_ADAPTERS = Object.freeze({
+		class: {discovery: "timeline", editor: "class", validation: "class-reference", mechanics: "class-reassignment", projection: ["class"]},
+		skills: {discovery: "starting-proficiencies", editor: "manifest-options", validation: "option-count", mechanics: "skill-proficiencies", projection: ["choices.skills"]},
+		tools: {discovery: "starting-and-feature-proficiencies", editor: "manifest-options", validation: "option-count", mechanics: "tool-proficiencies", projection: ["choices.tools"]},
+		expertise: {discovery: "class-features", editor: "manifest-options", validation: "option-count", mechanics: "skill-expertise", projection: ["choices.expertise"]},
+		languages: {discovery: "class-features", editor: "languages", validation: "option-count", mechanics: "languages", projection: ["choices.languages"]},
+		subclass: {discovery: "class-features", editor: "subclass", validation: "entity-option", mechanics: "subclass-reassignment", projection: ["choices.subclass"]},
+		subclassChoice: {discovery: "subclass-data", editor: "manifest-options", validation: "entity-option", mechanics: "subclass-choice-refresh", projection: ["choices.subclassChoice"]},
+		asi: {discovery: "class-features", editor: "improvement", validation: "asi-total", mechanics: "ability-scores", projection: ["choices.asi"]},
+		feat: {discovery: "class-features-and-feat-progression", editor: "improvement", validation: "eligible-feat", mechanics: "feat-transaction", projection: ["choices.feat"]},
+		asiOrFeat: {discovery: "class-features", editor: "improvement", validation: "improvement-mode", mechanics: "improvement-transaction", projection: ["choices.asi", "choices.feat"]},
+		optionalFeatures: {discovery: "optional-feature-progression", editor: "optional-features", validation: "option-count", mechanics: "optional-features", projection: ["choices.optionalFeatures"]},
+		featureChoice: {discovery: "feature-options", editor: "feature-choice", validation: "option-count", mechanics: "feature-choice", projection: ["choices.featureChoices"]},
+		classFeatProgressionFeat: {discovery: "feat-progression", editor: "class-feat", validation: "eligible-feat", mechanics: "feat-transaction", projection: ["choices.classFeatProgressionFeats"]},
+		combatTraditions: {discovery: "legacy-and-class-features", editor: "combat-traditions", validation: "option-count", mechanics: "combat-traditions", projection: ["choices.combatTraditions"]},
+		combatMethods: {discovery: "legacy-and-class-features", editor: "combat-methods", validation: "option-count", mechanics: "combat-methods", projection: ["choices.combatMethods"]},
+		weaponMasteries: {discovery: "class-progression", editor: "weapon-masteries", validation: "option-count", mechanics: "weapon-masteries", projection: ["choices.weaponMasteries"]},
+		spellbookSpells: {discovery: "spell-progression", editor: "spells", validation: "legal-spell-set", mechanics: "known-spells", projection: ["choices.spellbookSpells"]},
+		knownSpells: {discovery: "spell-progression", editor: "spells", validation: "legal-spell-set", mechanics: "known-spells", projection: ["choices.knownSpells"]},
+		cantrips: {discovery: "spell-progression", editor: "spells", validation: "legal-spell-set", mechanics: "known-or-prepared-cantrips", projection: ["choices.knownCantrips", "choices.preparedCantrips"]},
+		preparedSpells: {discovery: "spell-progression", editor: "spells", validation: "legal-spell-set", mechanics: "prepared-spells", projection: ["choices.preparedSpells"]},
+		preparedCantrips: {discovery: "spell-progression", editor: "spells", validation: "legal-spell-set", mechanics: "prepared-cantrips", projection: ["choices.preparedCantrips"]},
+		spellSwap: {discovery: "spell-progression", editor: "spell-swap", validation: "legal-spell-swap", mechanics: "known-spells", projection: ["choices.spellSwap"]},
+		scholar: {discovery: "class-features", editor: "scholar", validation: "skill-option", mechanics: "skill-expertise", projection: ["choices.scholarSkill"]},
+		spellMastery: {discovery: "class-features", editor: "spell-mastery", validation: "spell-mastery-levels", mechanics: "spell-mastery", projection: ["choices.spellMasterySpells"]},
+		signatureSpells: {discovery: "class-features", editor: "signature-spells", validation: "signature-spell-levels", mechanics: "signature-spells", projection: ["choices.signatureSpells"]},
+		hp: {discovery: "class-level", editor: "hit-points", validation: "hit-point-method", mechanics: "hit-points", projection: ["choices.hpRoll"]},
+	});
+
+	static getDecisionAdapter (type) {
+		return CharacterSheetProgression.DECISION_ADAPTERS[type] || null;
+	}
+
 	static _copy (value) {
 		if (value == null) return value;
 		if (globalThis.MiscUtil?.copyFast) return MiscUtil.copyFast(value);
@@ -104,6 +137,7 @@ class CharacterSheetProgression {
 			if (!selection.every(spell => Number(spell.level) === 3)) return false;
 		}
 		if (!Array.isArray(options) || !options.length) return true;
+		options = options.filter(option => option?._selectable !== false);
 		const getOptionKeys = option => {
 			const out = new Set();
 			const add = value => {
@@ -146,6 +180,9 @@ class CharacterSheetProgression {
 		isValid = true,
 		meta = {},
 	}) {
+		if (!CharacterSheetProgression.getDecisionAdapter(type)) {
+			throw new Error(`No progression decision adapter is registered for "${type}".`);
+		}
 		const semanticKey = CharacterSheetProgression.getSemanticKey({
 			className,
 			classSource,
@@ -353,6 +390,8 @@ class CharacterSheetProgression {
 			asiOrFeat: ["asi", "feat"],
 			asi: ["asi"],
 			feat: ["feat"],
+			combatTraditions: ["combatTraditions"],
+			combatMethods: ["combatMethods"],
 			optionalFeatures: ["optionalFeatures"],
 			featureChoice: ["featureChoices"],
 			classFeatProgressionFeat: ["classFeatProgressionFeats"],
@@ -371,6 +410,10 @@ class CharacterSheetProgression {
 		const representedTypes = new Set((normalized.decisions || []).map(decision => decision.type));
 		for (const type of representedTypes) {
 			for (const key of managedKeysByType[type] || []) delete choices[key];
+		}
+		if ((normalized.decisions || []).some(decision => decision.type === "feat" && decision.meta?.improvement?.kind === "feat")) {
+			delete choices.asi;
+			delete choices.feat;
 		}
 		const append = (key, values) => {
 			if (!Array.isArray(values) || !values.length) return;
@@ -395,7 +438,11 @@ class CharacterSheetProgression {
 					if (selection.mode === "feat") choices.feat = CharacterSheetProgression._copy(selection.feat);
 					break;
 				case "asi": choices.asi = CharacterSheetProgression._copy(selection); break;
-				case "feat": choices.feat = CharacterSheetProgression._copy(selection); break;
+				case "feat":
+					if (!selection.legacyAsi) choices.feat = CharacterSheetProgression._copy(selection);
+					break;
+				case "combatTraditions": append("combatTraditions", selection); break;
+				case "combatMethods": append("combatMethods", selection); break;
 				case "optionalFeatures": append("optionalFeatures", selection); break;
 				case "featureChoice": append("featureChoices", selection); break;
 				case "classFeatProgressionFeat": append("classFeatProgressionFeats", [selection]); break;
@@ -620,11 +667,31 @@ class CharacterSheetProgression {
 		return out;
 	}
 
-	static _getClassSpellPools (state) {
+	static _getClassSpellPools (state, page, history = []) {
 		const pools = new Map();
+		const loadedClasses = page?.getClasses?.() || [];
+		const spellcastingClasses = (state?.getClasses?.() || []).filter(stored => {
+			const classData = loadedClasses.find(it =>
+				CharacterSheetProgression._normalize(it.name) === CharacterSheetProgression._normalize(stored.name)
+				&& (!stored.source || CharacterSheetProgression._normalize(it.source) === CharacterSheetProgression._normalize(stored.source)),
+			) || stored;
+			return CharacterSheetClassUtils.getClassSpellcastingModel({
+				name: stored.name,
+				source: stored.source,
+				classData,
+			}) !== "none";
+		});
+		const soleSpellcastingClass = spellcastingClasses.length === 1 ? spellcastingClasses[0] : null;
 		const add = (spell, kind) => {
-			if (!spell?.sourceClass) return;
-			const classKey = CharacterSheetProgression._normalize(spell.sourceClass);
+			const ownerName = typeof spell?.sourceClass === "string" ? spell.sourceClass : spell?.sourceClass?.name;
+			const isFeatureGranted = !!(
+				spell?.fromFeat
+				|| spell?.sourceFeatId
+				|| (spell?.sourceFeature && !CharacterSheetClassUtils.isPlayerChosenSpell(spell))
+			);
+			if (!ownerName && isFeatureGranted) return;
+			const classKey = CharacterSheetProgression._normalize(ownerName || soleSpellcastingClass?.name);
+			if (!classKey) return;
 			if (!pools.has(classKey)) pools.set(classKey, {knownSpells: [], cantrips: [], preparedSpells: [], preparedCantrips: [], spellbookSpells: []});
 			const pool = pools.get(classKey);
 			if (spell.inSpellbook || spell.sourceFeature === "Wizard Spellbook") pool.spellbookSpells.push(spell);
@@ -638,6 +705,40 @@ class CharacterSheetProgression {
 		};
 		(state?.getSpellsKnown?.() || []).forEach(spell => add(spell, "spell"));
 		(state?.getCantripsKnown?.() || []).forEach(spell => add(spell, "cantrip"));
+
+		for (const entry of [...(history || [])].sort((a, b) => Number(b?.level) - Number(a?.level))) {
+			const swap = entry?.choices?.spellSwap;
+			if (!swap?.added?.name || !swap?.removed?.name) continue;
+			const classKey = CharacterSheetProgression._normalize(entry?.class?.name);
+			const pool = pools.get(classKey);
+			if (!pool) continue;
+			const key = Number(swap.added.level) === 0 || Number(swap.removed.level) === 0 ? "cantrips" : "knownSpells";
+			const ix = pool[key].findIndex(spell =>
+				CharacterSheetProgression.getEntityUid(spell) === CharacterSheetProgression.getEntityUid(swap.added),
+			);
+			if (!~ix) continue;
+			pool[key].splice(ix, 1, {
+				...swap.removed,
+				sourceClass: entry.class?.name,
+				sourceFeature: key === "cantrips" ? "Cantrips Known" : "Spells Known",
+			});
+		}
+
+		const spellData = page?.getFilteredSpellData?.() || page?.getSpells?.() || [];
+		const getSpellLevel = spell => {
+			if (spell.level != null) return Number(spell.level) || 0;
+			const match = spellData.find(it =>
+				CharacterSheetProgression._normalize(it.name) === CharacterSheetProgression._normalize(spell.name)
+				&& (!spell.source || CharacterSheetProgression._normalize(it.source) === CharacterSheetProgression._normalize(spell.source)),
+			);
+			return Number(match?.level) || 0;
+		};
+		for (const pool of pools.values()) {
+			Object.values(pool).forEach(spells => spells.sort((a, b) =>
+				getSpellLevel(a) - getSpellLevel(b)
+				|| String(a.name || "").localeCompare(String(b.name || "")),
+			));
+		}
 		return pools;
 	}
 
@@ -653,12 +754,12 @@ class CharacterSheetProgression {
 		return selected.length ? selected : null;
 	}
 
-	static _getExistingSelection ({storedPool, semanticKey, history, type, sourceKey, slot, fallback = null}) {
+	static _getExistingSelection ({storedPool, semanticKey, history, type, sourceKey, slot, fallback = null, fallbackStatus = "ambiguous"}) {
 		const exact = storedPool.get(semanticKey)?.find(decision => decision.selection != null);
 		if (exact) return {selection: CharacterSheetProgression._copy(exact.selection), status: exact.status};
 		const legacy = CharacterSheetProgression._getLegacySelection({history, type, sourceKey, slot});
 		if (legacy != null) return {selection: CharacterSheetProgression._copy(legacy), status: null};
-		if (fallback != null) return {selection: CharacterSheetProgression._copy(fallback), status: "ambiguous"};
+		if (fallback != null) return {selection: CharacterSheetProgression._copy(fallback), status: fallbackStatus};
 		return {selection: null, status: null};
 	}
 
@@ -711,8 +812,7 @@ class CharacterSheetProgression {
 		const decisions = [];
 		const levels = [];
 		const issues = [];
-		const optionalFeatureCounts = {};
-		const spellPools = CharacterSheetProgression._getClassSpellPools(state);
+		const spellPools = CharacterSheetProgression._getClassSpellPools(state, page, normalizedHistory);
 		const spellPoolCursors = new Map();
 
 		const addDecision = (levelInfo, config) => {
@@ -732,6 +832,7 @@ class CharacterSheetProgression {
 				sourceKey: config.sourceKey || "",
 				slot: config.slot || 0,
 				fallback: config.fallbackSelection,
+				fallbackStatus: config.fallbackStatus,
 			});
 			const isValid = config.isValid !== false && CharacterSheetProgression._isSelectionValid({
 				selection: matched.selection,
@@ -791,6 +892,18 @@ class CharacterSheetProgression {
 				spellPoolCursors.set(classUid, {knownSpells: 0, cantrips: 0, preparedSpells: 0, preparedCantrips: 0, spellbookSpells: 0});
 			}
 			const spellCursor = spellPoolCursors.get(classUid);
+			const featPool = page?.filterByAllowedSources?.(page?.getFeats?.() || []) || page?.getFeats?.() || [];
+			const historicalAbilityScores = CharacterSheetClassUtils.getHistoricalAbilityScores({
+				state,
+				history: normalizedHistory,
+				characterLevel: levelInfo.characterLevel,
+			});
+			const historicalOwnedFeats = CharacterSheetClassUtils.getHistoricalOwnedFeats({
+				state,
+				history: normalizedHistory,
+				characterLevel: levelInfo.characterLevel,
+				featCatalog: featPool,
+			});
 
 			const multiclassRequirementIssues = CharacterSheetProgression._getMulticlassRequirementIssues({
 				classData,
@@ -871,14 +984,59 @@ class CharacterSheetProgression {
 				});
 			}
 
-			const hasAsi = CharacterSheetClassUtils.levelGrantsAsi(classData, levelInfo.classLevel);
-			if (hasAsi) {
-				const grantsBoth = !!state?.shouldGrantBothAsiAndFeat?.(levelInfo.characterLevel);
-				if (grantsBoth) {
+			const grantsBoth = !!state?.shouldGrantBothAsiAndFeat?.(levelInfo.characterLevel);
+			const improvement = CharacterSheetClassUtils.getImprovementOpportunity(
+				classData,
+				levelInfo.classLevel,
+				{grantBoth: grantsBoth},
+			);
+			if (improvement) {
+				const legacyFeat = historyEntry?.choices?.feat || null;
+				const excludeFeatUid = legacyFeat?.name
+					? CharacterSheetProgression.getEntityUid(legacyFeat)
+					: "";
+				const eligibleFeats = CharacterSheetClassUtils.getEligibleFeats(featPool, state, {
+					totalLevel: levelInfo.characterLevel,
+					excludeFeatUid,
+					abilityScores: historicalAbilityScores,
+					ownedFeats: historicalOwnedFeats,
+					featCatalog: featPool,
+				}).sort((a, b) => {
+					const categoryDelta = Number(b.category === "EB") - Number(a.category === "EB");
+					return categoryDelta || String(a.name || "").localeCompare(String(b.name || ""));
+				});
+
+				if (improvement.kind === "asiAndFeat") {
 					addDecision(levelInfo, {type: "asi", label: "Ability Score Improvement", sourceKey: "asi", count: 1});
-					addDecision(levelInfo, {type: "feat", label: "Feat", sourceKey: "feat", count: 1});
+					addDecision(levelInfo, {
+						type: "feat",
+						label: "Feat",
+						sourceKey: "feat",
+						count: 1,
+						options: eligibleFeats,
+						meta: {improvement},
+					});
+				} else if (improvement.kind === "feat") {
+					const legacyAsi = historyEntry?.choices?.asi || null;
+					addDecision(levelInfo, {
+						type: "feat",
+						label: improvement.label,
+						sourceKey: "epic-boon-or-feat",
+						count: 1,
+						options: eligibleFeats,
+						fallbackSelection: legacyAsi ? {mode: "asi", legacyAsi: CharacterSheetProgression._copy(legacyAsi)} : null,
+						fallbackStatus: null,
+						meta: {improvement, legacyAsiInvalid: !!legacyAsi},
+					});
 				} else {
-					addDecision(levelInfo, {type: "asiOrFeat", label: "Ability Score Improvement or Feat", sourceKey: "asi-or-feat", count: 1});
+					addDecision(levelInfo, {
+						type: "asiOrFeat",
+						label: improvement.label,
+						sourceKey: "asi-or-feat",
+						count: 1,
+						options: eligibleFeats,
+						meta: {improvement},
+					});
 				}
 			}
 
@@ -890,42 +1048,95 @@ class CharacterSheetProgression {
 				page?.getSubclassFeatures?.() || [],
 			);
 
-			const syntheticFeatures = [];
-			for (const [key, count] of Object.entries(optionalFeatureCounts)) {
-				const featureTypes = key.split("_").filter(Boolean);
-				for (let i = 0; i < count; ++i) {
-					syntheticFeatures.push({
-						id: `progression-${key}-${i}`,
-						name: `Progression ${key} ${i + 1}`,
-						featureType: "Optional Feature",
-						optionalFeatureTypes: featureTypes,
-					});
-				}
-			}
-			const stateView = {
-				getFeatures: () => [...(state?.getFeatures?.() || []), ...syntheticFeatures],
-			};
-			const optionalFeatureGains = CharacterSheetClassUtils.getOptionalFeatureGains(
+			const optionalFeatureGains = CharacterSheetClassUtils.getOptionalFeatureProgressionDeltas(
 				classData,
-				0,
+				levelInfo.classLevel - 1,
 				levelInfo.classLevel,
-				stateView,
 				subclass,
-			).filter(gain => gain.newCount > 0);
+			);
+			const historicalClasses = [...new Map(resolvedTimeline
+				.filter(it => Number(it.characterLevel) <= Number(levelInfo.characterLevel))
+				.map(it => {
+					const uid = CharacterSheetProgression.getClassUid(it.className, it.classSource);
+					return [uid, {
+						name: it.className,
+						source: it.classSource,
+						level: Math.max(...resolvedTimeline
+							.filter(candidate =>
+								Number(candidate.characterLevel) <= Number(levelInfo.characterLevel)
+									&& CharacterSheetProgression.getClassUid(candidate.className, candidate.classSource) === uid)
+							.map(candidate => Number(candidate.classLevel) || 0)),
+					}];
+				})).values()];
+			const priorDecisionValues = type => decisions
+				.slice(0, levelDecisionsStart)
+				.filter(decision => decision.type === type)
+				.flatMap(decision => Array.isArray(decision.selection) ? decision.selection : (decision.selection ? [decision.selection] : []));
+			const historicalFeatures = [
+				...(page?.getClassFeatures?.() || []).filter(feature => {
+					const cls = historicalClasses.find(it =>
+						CharacterSheetProgression._normalize(it.name) === CharacterSheetProgression._normalize(feature.className)
+							&& (!feature.classSource || CharacterSheetProgression._normalize(it.source) === CharacterSheetProgression._normalize(feature.classSource)),
+					);
+					return cls && Number(feature.level) <= Number(cls.level);
+				}),
+				...(page?.getSubclassFeatures?.() || []).filter(feature => {
+					const cls = historicalClasses.find(it =>
+						CharacterSheetProgression._normalize(it.name) === CharacterSheetProgression._normalize(feature.className)
+							&& (!feature.classSource || CharacterSheetProgression._normalize(it.source) === CharacterSheetProgression._normalize(feature.classSource)),
+					);
+					return cls && Number(feature.level) <= Number(cls.level);
+				}),
+				...priorDecisionValues("optionalFeatures"),
+				...priorDecisionValues("featureChoice"),
+			];
+			const historicalOptionalFeatures = priorDecisionValues("optionalFeatures");
+			const optionalPrereqContext = {
+				classes: historicalClasses,
+				totalLevel: levelInfo.characterLevel,
+				existingFeatures: historicalFeatures,
+				cantrips: [
+					...priorDecisionValues("cantrips"),
+					...priorDecisionValues("preparedCantrips"),
+				],
+				spells: [
+					...priorDecisionValues("knownSpells"),
+					...priorDecisionValues("preparedSpells"),
+					...priorDecisionValues("spellbookSpells"),
+				],
+				toolProficiencies: priorDecisionValues("tools"),
+				state: null,
+				levelPrerequisiteClassAliases: CharacterSheetClassUtils.getOptionalFeaturePrerequisiteClassAliases(
+					subclass,
+					optionalFeatureGains.flatMap(gain => gain.featureTypes || []),
+				),
+			};
 			for (const [slot, gain] of optionalFeatureGains.entries()) {
 				const typeKey = (gain.featureTypes || []).join("_") || "other";
+				const progressionOptions = CharacterSheetClassUtils.filterOptionalFeaturesForProgressionSource(
+					page?.getOptionalFeatures?.() || [],
+					gain.featureTypes || [],
+					gain.progressionSource || subclass?.source || classData.source,
+				);
+				const eligibleOptions = CharacterSheetClassUtils.getEligibleOptionalFeatures(progressionOptions, {
+					featureTypes: gain.featureTypes || [],
+					prereqContext: optionalPrereqContext,
+					alreadyKnown: historicalOptionalFeatures,
+				});
 				addDecision(levelInfo, {
 					type: "optionalFeatures",
 					label: gain.name || "Optional Features",
-					sourceKey: `${typeKey}|${gain.name || "options"}`,
+					sourceKey: `${typeKey}|${gain.name || "options"}|${gain.progressionSource || classData.source}`,
 					slot,
 					count: gain.newCount,
-					options: (page?.getOptionalFeatures?.() || [])
-						.filter(feature => (feature.featureType || []).some(type => (gain.featureTypes || []).includes(type)))
-						.map(feature => ({name: feature.name, source: feature.source, featureType: feature.featureType})),
-					meta: {featureTypes: gain.featureTypes || []},
+					options: eligibleOptions,
+					meta: {
+						featureTypes: gain.featureTypes || [],
+						progressionSource: gain.progressionSource || classData.source,
+						countBefore: gain.currentCount,
+						countAfter: gain.totalCount,
+					},
 				});
-				optionalFeatureCounts[typeKey] = (optionalFeatureCounts[typeKey] || 0) + gain.newCount;
 			}
 
 			const featureOptions = CharacterSheetClassUtils
@@ -949,18 +1160,32 @@ class CharacterSheetProgression {
 				levelInfo.classLevel,
 				subclass,
 			);
-			classFeatGains.forEach((gain, slot) => {
-				addDecision(levelInfo, {
-					type: "classFeatProgressionFeat",
-					label: gain.progressionName || "Class Feat",
-					sourceKey: gain.progressionName || `class-feat-${slot}`,
-					slot,
-					count: gain.count || 1,
-					options: (page?.getFeats?.() || [])
-						.filter(feat => CharacterSheetClassUtils.filterFeatsByCategory([feat], gain.category || []).length)
-						.map(feat => ({name: feat.name, source: feat.source})),
-					meta: {category: gain.category},
-				});
+			classFeatGains.forEach((gain, gainIx) => {
+				const legacySelections = (historyEntry?.choices?.classFeatProgressionFeats || [])
+					.filter(feat => CharacterSheetProgression._normalize(feat.progressionName) === CharacterSheetProgression._normalize(gain.progressionName));
+				const categoryFeats = CharacterSheetClassUtils.filterFeatsByCategory(
+					page?.filterByAllowedSources?.(page?.getFeats?.() || []) || page?.getFeats?.() || [],
+					gain.category || [],
+				);
+				for (let slot = 0; slot < (gain.count || 1); ++slot) {
+					const current = legacySelections[slot];
+					const options = CharacterSheetClassUtils.getEligibleFeats(categoryFeats, state, {
+						totalLevel: levelInfo.characterLevel,
+						excludeFeatUid: current?.name ? CharacterSheetProgression.getEntityUid(current) : "",
+						abilityScores: historicalAbilityScores,
+						ownedFeats: historicalOwnedFeats,
+						featCatalog: featPool,
+					});
+					addDecision(levelInfo, {
+						type: "classFeatProgressionFeat",
+						label: gain.progressionName || "Class Feat",
+						sourceKey: gain.progressionName || `class-feat-${gainIx}`,
+						slot,
+						count: 1,
+						options,
+						meta: {category: gain.category, progressionName: gain.progressionName},
+					});
+				}
 			});
 
 			const expertiseGrants = CharacterSheetClassUtils.getExpertiseGrantsForLevel(features);
@@ -1020,6 +1245,7 @@ class CharacterSheetProgression {
 					count: spellbookCount,
 					options: getLegalSpellOptions(maxSpellLevel),
 					fallbackSelection: fallback,
+					fallbackStatus: "resolved",
 					meta: {maxSpellLevel},
 				});
 			}
@@ -1041,6 +1267,7 @@ class CharacterSheetProgression {
 					count: cantripGain,
 					options: getLegalSpellOptions(0),
 					fallbackSelection: fallback,
+					fallbackStatus: "resolved",
 					meta: {maxSpellLevel: 0},
 				});
 			}
@@ -1061,6 +1288,7 @@ class CharacterSheetProgression {
 						count,
 						options: getLegalSpellOptions(maxSpellLevel),
 						fallbackSelection: fallback,
+						fallbackStatus: "resolved",
 						meta: {maxSpellLevel},
 					});
 				}
@@ -1080,6 +1308,7 @@ class CharacterSheetProgression {
 						count,
 						options: getLegalSpellOptions(maxSpellLevel),
 						fallbackSelection: fallback,
+						fallbackStatus: "resolved",
 						meta: {maxSpellLevel},
 					});
 				}

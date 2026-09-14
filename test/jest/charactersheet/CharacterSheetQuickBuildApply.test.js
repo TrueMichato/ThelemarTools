@@ -162,4 +162,24 @@ describe("CharacterSheetQuickBuild _applyQuickBuild", () => {
 		});
 		expect(qb._showWizard).toHaveBeenCalled();
 	});
+
+	test("rejects duplicate non-repeatable feats across Quick Build levels before applying", () => {
+		const qb = Object.create(CharacterSheetQuickBuild.prototype);
+		qb._state = {getFeats: () => []};
+		qb._levelAnalysis = [
+			{characterLevel: 4, className: "Fighter", classLevel: 4},
+			{characterLevel: 8, className: "Fighter", classLevel: 8},
+		];
+		qb._selections = {
+			asi: {
+				Fighter_4: {mode: "feat", feat: {name: "Alert", source: "XPHB"}},
+				Fighter_8: {mode: "feat", feat: {name: "Alert", source: "XPHB"}},
+			},
+			classFeatProgression: {},
+		};
+
+		expect(qb._getQuickBuildFeatSelectionIssues()).toEqual([
+			expect.stringContaining("Alert"),
+		]);
+	});
 });

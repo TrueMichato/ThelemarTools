@@ -96,8 +96,10 @@ class CharacterSheetLevelUp {
 		// Get features for the new level
 		const newFeatures = CharacterSheetClassUtils.getLevelFeatures(classData, newLevel, fullSubclassData, this._page.getClassFeatures(), this._page.getSubclassFeatures());
 
-		// Check if this level grants an ASI
-		const hasAsi = CharacterSheetClassUtils.levelGrantsAsi(classData, newLevel);
+		const improvement = CharacterSheetClassUtils.getImprovementOpportunity(classData, newLevel, {
+			grantBoth: this._state.shouldGrantBothAsiAndFeat(totalLevel + 1),
+		});
+		const hasAsi = !!improvement;
 
 		// Check if this level grants a subclass (usually level 3 for most classes)
 		const needsSubclass = CharacterSheetClassUtils.levelGrantsSubclass(classData, newLevel) && !classEntry.subclass;
@@ -109,6 +111,7 @@ class CharacterSheetLevelUp {
 			newLevel,
 			newFeatures,
 			hasAsi,
+			improvement,
 			needsSubclass,
 			fullSubclassData,
 		});
@@ -116,7 +119,7 @@ class CharacterSheetLevelUp {
 
 	/** @param {*} arg */
 
-	async _pShowLevelUpModal ({classData, classEntry, newLevel, newFeatures, hasAsi, needsSubclass, fullSubclassData = null}) {
+	async _pShowLevelUpModal ({classData, classEntry, newLevel, newFeatures, hasAsi, improvement = null, needsSubclass, fullSubclassData = null}) {
 		const {eleModalInner: modalInner, eleModalFooter: modalFooter, doClose} = await CharacterSheetModal.pGetShow({
 			title: `🎉 Level Up: ${classEntry.name} → Level ${newLevel}`,
 			isMinHeight0: true,
@@ -189,10 +192,8 @@ class CharacterSheetLevelUp {
 		/** @type {string[]} */ let selectedWeaponMasteries = [...(this._state.getWeaponMasteries?.() || [])];
 
 		// ========== DETERMINE WHAT SECTIONS ARE NEEDED ==========
-		// Thelemar rule: applies at CHARACTER level 4, not per-class level 4 (matters for multiclass).
-		// At this point the new class level has not yet been written, so getTotalLevel()+1 = new character level.
-		const isBothAsiAndFeat = this._state.shouldGrantBothAsiAndFeat((this._state.getTotalLevel() || 0) + 1);
-		const isEpicBoonLevel = CharacterSheetClassUtils.isEpicBoonLevel(classEntry.source, newLevel);
+		const isBothAsiAndFeat = improvement?.kind === "asiAndFeat";
+		const isEpicBoonLevel = improvement?.kind === "feat" && improvement?.categories?.includes("EB");
 		// Subclass-aware: at L7/10/15/18 the subclass already exists on classEntry, so its
 		// optionalfeatureProgression (e.g. Arcane Shot) is resolved here. At the subclass-
 		// granting level (L3) it is null until chosen, then recomputed in the picker below.
@@ -686,7 +687,7 @@ class CharacterSheetLevelUp {
 
 		// ========== 2. ASI / FEAT SECTION ==========
 		if (hasAsi) {
-			const asiLabel = isBothAsiAndFeat ? "ASI + Feat" : isEpicBoonLevel ? "ASI / Epic Boon" : "ASI / Feat";
+			const asiLabel = improvement?.label || (isBothAsiAndFeat ? "ASI + Feat" : "ASI / Feat");
 			summaryItems.append(createSummaryItem("asi", "📈", asiLabel, {required: true}));
 
 			const asiContent = this._renderAsiSelectionCompact(
@@ -717,6 +718,9 @@ class CharacterSheetLevelUp {
 						? `${asiParts.join(", ")} + ${selectedFeat.name}`
 						: asiComplete ? `${asiParts.join(", ")} (+feat)`
 							: featComplete ? `+${selectedFeat.name} (+ASI)` : "Incomplete";
+				} else if (isEpicBoonLevel) {
+					complete = featComplete;
+					summary = featComplete ? selectedFeat.name : "Choose a qualifying feat";
 				} else if (featComplete) {
 					complete = true;
 					summary = selectedFeat.name;
@@ -1364,6 +1368,12 @@ class CharacterSheetLevelUp {
 						el.scrollIntoView({behavior: "smooth"});
 						return;
 					}
+				} else if (isEpicBoonLevel && !selectedFeat) {
+					JqueryUtil.doToast({type: "warning", content: "Please select an Epic Boon or another feat whose prerequisites you meet."});
+					const el = accordions.asi.el;
+					el.classList.add("expanded");
+					el.scrollIntoView({behavior: "smooth"});
+					return;
 				} else if (!selectedFeat && totalAsi !== 2) {
 					JqueryUtil.doToast({type: "warning", content: "Please allocate all ability score points or select a feat."});
 					const el = accordions.asi.el;
@@ -2008,7 +2018,7 @@ class CharacterSheetLevelUp {
 	_renderAsiSelection (/** @type {*} */ onAsiChange, /** @type {*} */ onFeatSelect, /** @type {*} */ isBothAsiAndFeat = false, /** @type {*} */ isEpicBoonLevel = false) {
 		// When Thelemar rules give both ASI and Feat at level 4
 		const sectionTitle = isEpicBoonLevel
-			? "📈 Ability Score Improvement / Epic Boon"
+			? "🌟 Epic Boon or Qualifying Feat"
 			: isBothAsiAndFeat
 				? "📈 Ability Score Improvement + Feat (Thelemar)"
 				: "📈 Ability Score Improvement";
@@ -2022,6 +2032,10 @@ class CharacterSheetLevelUp {
 					<div class="alert alert-info ve-small mb-3">
 						<strong>🌍 Thelemar Rule:</strong> At level 4, you gain both an ASI <em>and</em> a feat!
 					</div>
+				` : isEpicBoonLevel ? `
+					<div class="alert alert-info ve-small mb-3">
+						This level grants a feat instead of an Ability Score Improvement. Epic Boons are recommended, but any feat whose prerequisites you meet is legal.
+					</div>
 				` : `
 					<div class="charsheet__levelup-asi-choice mb-3">
 						<label class="ve-flex-v-center mr-3">
@@ -2034,8 +2048,8 @@ class CharacterSheetLevelUp {
 						</label>
 					</div>
 				`}
-				<div id="asi-abilities-container"></div>
-				<div id="asi-feats-container" style="${isBothAsiAndFeat ? "" : "display: none;"}"></div>
+				<div id="asi-abilities-container" style="${isEpicBoonLevel ? "display: none;" : ""}"></div>
+				<div id="asi-feats-container" style="${isBothAsiAndFeat || isEpicBoonLevel ? "" : "display: none;"}"></div>
 			</div>
 		`});
 
@@ -2043,7 +2057,7 @@ class CharacterSheetLevelUp {
 		const featsContainer = section.querySelector("#asi-feats-container");
 
 		// Toggle between ASI and Feat (only if not both)
-		if (!isBothAsiAndFeat) {
+		if (!isBothAsiAndFeat && !isEpicBoonLevel) {
 			section.querySelectorAll("input[name=\"asi-type\"]").forEach((/** @type {*} */ radio) => radio.addEventListener("change", (/** @type {*} */ e) => {
 				if (e.target.value === "asi") {
 					abilitiesContainer.style.display = "";
@@ -2163,6 +2177,7 @@ class CharacterSheetLevelUp {
 				updatePointsDisplay();
 				onAsiChange(abl, -1);
 				_refreshFeatAbilityChoices();
+				if (isBothAsiAndFeat) renderFeats(featSearch.value);
 				_refreshAsiDisplays();
 			});
 
@@ -2177,6 +2192,7 @@ class CharacterSheetLevelUp {
 				updatePointsDisplay();
 				onAsiChange(abl, 1);
 				_refreshFeatAbilityChoices();
+				if (isBothAsiAndFeat) renderFeats(featSearch.value);
 				_refreshAsiDisplays();
 			});
 
@@ -2187,8 +2203,22 @@ class CharacterSheetLevelUp {
 
 		// Feats list - filtered by allowed sources; Interdict Boons (ItdBoon) are chosen via
 		// the Illrigger Interdict-boon progression, never the generic feat/epic-boon slot.
-		const feats = this._page.filterByAllowedSources(this._page.getFeats() || [])
-			.filter((/** @type {*} */ f) => !CharacterSheetClassUtils.isInterdictBoonEntry(f));
+		const getEligibleFeats = () => CharacterSheetClassUtils.getEligibleFeats(
+			this._page.filterByAllowedSources(this._page.getFeats() || [])
+				.filter((/** @type {*} */ f) => !CharacterSheetClassUtils.isInterdictBoonEntry(f)),
+			this._state,
+			{
+				totalLevel: (this._state.getTotalLevel() || 0) + 1,
+				abilityScores: isBothAsiAndFeat
+					? Object.fromEntries(Parser.ABIL_ABVS.map((/** @type {*} */ ability) => [
+						ability,
+						this._state.getAbilityScore(ability) + ((/** @type {*} */ (asiValues))[ability] || 0),
+					]))
+					: null,
+				featCatalog: this._page.getFeats() || [],
+			},
+		);
+		let feats = getEligibleFeats();
 		const getFeatChoices = (/** @type {*} */ feat) =>
 			CharacterSheetClassUtils.buildFeatChoicesSpec(feat, {state: this._state, page: this._page});
 
@@ -2286,18 +2316,30 @@ class CharacterSheetLevelUp {
 		const featChoicesContainer = e_({outer: `<div class="charsheet__levelup-feat-choices"></div>`});
 
 		const renderFeats = (filter = "") => {
+			feats = getEligibleFeats();
+			let didClearSelection = false;
+			if (_currentSelectedFeat && !feats.some((/** @type {*} */ feat) =>
+				feat.name === _currentSelectedFeat.name && feat.source === _currentSelectedFeat.source,
+			)) {
+				_currentSelectedFeat = null;
+				_currentFeatChoices = null;
+				onFeatSelect(null);
+				didClearSelection = true;
+			}
 			featList.innerHTML = "";
-			featChoicesContainer.innerHTML = "";
+			if (didClearSelection) featChoicesContainer.innerHTML = "";
 			const filteredFeats = feats.filter((/** @type {*} */ f) =>
-				f.name.toLowerCase().includes(filter.toLowerCase()),
+				f.category !== "EB"
+				&& f.name.toLowerCase().includes(filter.toLowerCase()),
 			).slice(0, 50);
 
 			filteredFeats.forEach((/** @type {*} */ feat) => {
 				const choices = getFeatChoices(feat);
 				const hasChoices = choices.skills || choices.languages || choices.ability || choices.tools || choices.expertise || choices.spells || choices.optionalFeatures?.length;
+				const isSelected = _currentSelectedFeat?.name === feat.name && _currentSelectedFeat?.source === feat.source;
 
-				const featEl = e_({outer: `<div class="charsheet__levelup-feat-option" data-feat="${feat.name}"></div>`});
-				featEl.insertAdjacentHTML("beforeend", `<input type="radio" name="feat-choice" value="${feat.name}">`);
+				const featEl = e_({outer: `<div class="charsheet__levelup-feat-option${isSelected ? " selected" : ""}" data-feat="${feat.name}"></div>`});
+				featEl.insertAdjacentHTML("beforeend", `<input type="radio" name="feat-choice" value="${feat.name}"${isSelected ? " checked" : ""}>`);
 				const featLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_FEATS, feat.name, feat.source);
 				const featNameEl = e_({outer: `<strong></strong>`});
 				if (typeof featLink === "string") featNameEl.innerHTML = featLink;

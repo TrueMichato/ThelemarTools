@@ -94,7 +94,10 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 ├── CharacterSheetProgression (charactersheet-progression.js)
 │   Shared progression manifest + versioned decision-ledger contract. Discovers
 │   skipped opportunities, validates choices, preserves semantic identity across
-│   timeline reorder, and projects decisions to legacy `choices`.
+│   timeline reorder, and projects decisions to legacy `choices`. Every decision
+│   type must have a `DECISION_ADAPTERS` entry declaring discovery, editor,
+│   validation, mechanics, and projection; manifest construction rejects missing
+│   adapters so new progression families cannot become silently read-only.
 │
 ├── CharacterSheetRespecEngine (charactersheet-respec-engine.js)
 │   Isolated candidate transaction: validate, review, atomic Apply/rollback,

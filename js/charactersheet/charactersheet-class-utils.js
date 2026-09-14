@@ -557,6 +557,77 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Resolve the improvement opportunity granted by a class at a specific class level.
+	 *
+	 * Modern class data replaces the level-19 ASI feature with an Epic Boon feat
+	 * progression. Reading the class feature/progression data keeps official, partnered,
+	 * and homebrew classes aligned without treating every level-19 character alike.
+	 * The legacy level table is retained only for incomplete class data.
+	 *
+	 * @param {*} classData - The resolved class data.
+	 * @param {number} classLevel - The class level being gained.
+	 * @param {{grantBoth?: boolean}} [opts] - Flow-specific additions such as TGTT's
+	 *   level-4 "ASI and feat" rule.
+	 * @returns {null|{kind: "asiOrFeat"|"asiAndFeat"|"feat", label: string, categories: string[], allowsAnyQualifyingFeat: boolean, source: string}}
+	 */
+	static getImprovementOpportunity (/** @type {*} */ classData, /** @type {*} */ classLevel, /** @type {*} */ opts = {}) {
+		const level = Number(classLevel) || 0;
+		if (!classData || level < 1) return null;
+
+		const featureRefs = [];
+		const collectFeatureRefs = value => {
+			if (Array.isArray(value)) {
+				value.forEach(collectFeatureRefs);
+				return;
+			}
+			if (value != null) featureRefs.push(value);
+		};
+		collectFeatureRefs(classData.classFeatures || []);
+
+		const featuresAtLevel = featureRefs.filter(ref => {
+			if (typeof ref === "string") return Number(ref.split("|").at(-1)) === level;
+			if (typeof ref?.classFeature === "string") return Number(ref.classFeature.split("|").at(-1)) === level;
+			return Number(ref?.level) === level;
+		});
+		const getFeatureName = ref => {
+			if (typeof ref === "string") return ref.split("|")[0];
+			if (typeof ref?.classFeature === "string") return ref.classFeature.split("|")[0];
+			return ref?.name || "";
+		};
+
+		const epicProgressions = (classData.featProgression || []).filter(progression => {
+			if (!Array.isArray(progression?.category) || !progression.category.includes("EB")) return false;
+			const map = progression.progression;
+			return Array.isArray(map)
+				? Number(map[level - 1]) > 0
+				: Number(map?.[String(level)]) > 0;
+		});
+		const hasEpicBoon = epicProgressions.length > 0
+			|| featuresAtLevel.some(ref => /(?:^|\s)epic boon(?:\s|$)/i.test(getFeatureName(ref)));
+		if (hasEpicBoon) {
+			return {
+				kind: "feat",
+				label: "Epic Boon or Qualifying Feat",
+				categories: ["EB"],
+				allowsAnyQualifyingFeat: true,
+				source: epicProgressions.length ? "featProgression" : "classFeature",
+			};
+		}
+
+		const hasAsi = featuresAtLevel.some(ref => /^ability score improvement$/i.test(getFeatureName(ref)));
+		const hasCompleteFeatureData = featureRefs.length > 0;
+		if (!hasAsi && (hasCompleteFeatureData || !CharacterSheetClassUtils.levelGrantsAsi(classData, level))) return null;
+
+		return {
+			kind: opts.grantBoth ? "asiAndFeat" : "asiOrFeat",
+			label: opts.grantBoth ? "Ability Score Improvement and Feat" : "Ability Score Improvement or Feat",
+			categories: [],
+			allowsAnyQualifyingFeat: true,
+			source: hasAsi ? "classFeature" : "legacyFallback",
+		};
+	}
+
+	/**
 	 * Whether a class level is the one at which a generic Epic Boon feat is offered in the
 	 * ASI/feat slot. Epic Boons are a 2024 (PHB'24 / TGTT) construct granted at class level
 	 * 19; classes from other sources do NOT get the generic epic-boon slot.
@@ -6867,6 +6938,18 @@ class CharacterSheetClassUtils {
 	 */
 	static applyFeatBonuses (/** @type {*} */ state, /** @type {*} */ feat, /** @type {*} */ featChoices = null) {
 		const choices = featChoices || feat._featChoices || {};
+		const abilityAbbreviations = globalThis.Parser?.ABIL_ABVS || ["str", "dex", "con", "int", "wis", "cha"];
+		const getSpellUid = spell => `${String(spell?.name || "").toLowerCase()}|${String(spell?.source || "").toLowerCase()}`;
+		const before = state._captureFeatAppliedEffectsSnapshot?.() || {
+			abilities: Object.fromEntries(abilityAbbreviations.map(ability => [ability, Number(state.getAbilityBase?.(ability)) || 0])),
+			skills: state.getSkillProficiencies?.() || {},
+			saves: new Set(state.getSaveProficiencies?.() || []),
+			tools: new Set(state.getToolProficiencies?.() || []),
+			languages: new Set(state.getLanguages?.() || []),
+			spells: new Set((state.getSpells?.() || []).map(getSpellUid)),
+			immunities: new Set(state?._data?.immunities || state.getImmunities?.() || []),
+			conditionImmunities: new Set(state?._data?.conditionImmunities || state.getConditionImmunities?.() || []),
+		};
 
 		// Apply damage immunities from feat/boon data (e.g., Epic Boons with "immune": ["radiant"])
 		if (/** @type {*} */ feat.immune) {
@@ -7021,6 +7104,34 @@ class CharacterSheetClassUtils {
 				}
 			});
 		}
+
+		if (state.recordFeatAppliedEffectsSince) {
+			state.recordFeatAppliedEffectsSince(feat.name, feat.source, before);
+			return;
+		}
+
+		const afterSkills = state.getSkillProficiencies?.() || {};
+		const skillProficiencies = {};
+		for (const skill of new Set([...Object.keys(before.skills), ...Object.keys(afterSkills)])) {
+			const previous = Number(before.skills[skill]) || 0;
+			const next = Number(afterSkills[skill]) || 0;
+			if (previous !== next) skillProficiencies[skill] = {before: previous, after: next};
+		}
+		const afterSpells = state.getSpells?.() || [];
+		state.recordFeatAppliedEffects?.(feat.name, feat.source, {
+			abilityDeltas: Object.fromEntries(abilityAbbreviations
+				.map(ability => [ability, (Number(state.getAbilityBase?.(ability)) || 0) - before.abilities[ability]])
+				.filter(([, delta]) => delta !== 0)),
+			skillProficiencies,
+			saveProficienciesAdded: (state.getSaveProficiencies?.() || []).filter(value => !before.saves.has(value)),
+			toolProficienciesAdded: (state.getToolProficiencies?.() || []).filter(value => !before.tools.has(value)),
+			languagesAdded: (state.getLanguages?.() || []).filter(value => !before.languages.has(value)),
+			spellsAdded: afterSpells
+				.filter(spell => !before.spells.has(getSpellUid(spell)))
+				.map(spell => ({name: spell.name, source: spell.source})),
+			immunitiesAdded: (state?._data?.immunities || state.getImmunities?.() || []).filter(value => !before.immunities.has(value)),
+			conditionImmunitiesAdded: (state?._data?.conditionImmunities || state.getConditionImmunities?.() || []).filter(value => !before.conditionImmunities.has(value)),
+		});
 	}
 
 	/**
@@ -8031,6 +8142,215 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Evaluate feat prerequisites using the character's current candidate state.
+	 * A feat's top-level prerequisite entries are alternatives; properties within
+	 * one entry are cumulative requirements.
+	 *
+	 * Unknown campaign/special-timing prerequisites are rejected rather than
+	 * silently offering an illegal choice.
+	 *
+	 * @param {*} feat - Feat data.
+	 * @param {*} state - CharacterSheetState-compatible candidate.
+	 * @param {{totalLevel?: number, excludeFeatUid?: string}} [opts]
+	 * @returns {{eligible: boolean, reasons: string[]}}
+	 */
+	static evaluateFeatPrerequisites (/** @type {*} */ feat, /** @type {*} */ state, /** @type {*} */ opts = {}) {
+		if (!feat?.name) return {eligible: false, reasons: ["Invalid feat data"]};
+
+		const normalize = value => String(value || "").trim().toLowerCase();
+		const abilityAbbreviations = globalThis.Parser?.ABIL_ABVS || ["str", "dex", "con", "int", "wis", "cha"];
+		const featUid = `${normalize(feat.name)}|${normalize(feat.source)}`;
+		const excludeFeatUid = normalize(opts.excludeFeatUid);
+		const featCatalog = opts.featCatalog || [];
+		const ownedFeats = (opts.ownedFeats || state?.getFeats?.() || []).map(owned => {
+			if (owned?.category) return owned;
+			const canonical = featCatalog.find(candidate =>
+				normalize(candidate?.name) === normalize(owned?.name)
+				&& normalize(candidate?.source) === normalize(owned?.source),
+			);
+			return canonical ? {...owned, category: canonical.category} : owned;
+		});
+		if (!feat.repeatable && featUid !== excludeFeatUid && ownedFeats.some(owned =>
+			`${normalize(owned?.name)}|${normalize(owned?.source)}` === featUid,
+		)) {
+			return {eligible: false, reasons: ["Already selected"]};
+		}
+
+		const totalLevel = Number(opts.totalLevel ?? state?.getTotalLevel?.()) || 0;
+		const classes = opts.classes || state?.getClasses?.() || [];
+		const abilityScores = opts.abilityScores || null;
+		const race = state?.getRace?.() || null;
+		const background = state?.getBackground?.() || null;
+		const armorProficiencies = (state?.getArmorProficiencies?.() || []).map(it => normalize(it?.name || it));
+		const weaponProficiencies = (state?.getWeaponProficiencies?.() || []).map(it => normalize(it?.name || it));
+		const hasSpellcasting = !!(
+			state?.getSpellcastingAbility?.()
+			|| classes.some(cls => state?.getSpellcastingAbilityForClass?.(cls))
+			|| state?.getFeatureCalculations?.()?.hasSpellcasting
+		);
+		const prerequisiteBlocks = Array.isArray(feat.prerequisite) ? feat.prerequisite : [];
+		if (!prerequisiteBlocks.length) return {eligible: true, reasons: []};
+
+		const evaluateBlock = block => {
+			const reasons = [];
+			const levelRequirement = block.level;
+			if (levelRequirement != null) {
+				if (typeof levelRequirement === "number") {
+					if (totalLevel < levelRequirement) reasons.push(`Requires level ${levelRequirement}`);
+				} else {
+					const requiredLevel = Number(levelRequirement.level) || 0;
+					const requiredClassName = normalize(levelRequirement.class?.name);
+					const actualLevel = requiredClassName
+						? Number(classes.find(cls => normalize(cls.name) === requiredClassName)?.level) || 0
+						: totalLevel;
+					if (actualLevel < requiredLevel) reasons.push(`Requires ${levelRequirement.class?.name || ""} level ${requiredLevel}`.trim());
+				}
+			}
+
+			if (Array.isArray(block.ability) && block.ability.length) {
+				const meetsAbility = block.ability.some(requirement => Object.entries(requirement || {}).some(([ability, minimum]) =>
+					abilityAbbreviations.includes(ability)
+					&& Number(abilityScores?.[ability] ?? state?.getAbilityScore?.(ability) ?? 0) >= Number(minimum),
+				));
+				if (!meetsAbility) reasons.push("Ability score prerequisite not met");
+			}
+
+			if (block.spellcasting || block.spellcasting2020 || block.spellcastingFeature) {
+				if (!hasSpellcasting) reasons.push("Requires Spellcasting");
+			}
+
+			if (Array.isArray(block.race) && block.race.length) {
+				const raceNames = [race?.name, race?.baseName].map(normalize).filter(Boolean);
+				if (!block.race.some(required => raceNames.includes(normalize(required?.name || required)))) {
+					reasons.push("Race prerequisite not met");
+				}
+			}
+
+			if (Array.isArray(block.background) && block.background.length) {
+				if (!block.background.some(required => normalize(required?.name || required) === normalize(background?.name || background))) {
+					reasons.push("Background prerequisite not met");
+				}
+			}
+
+			if (Array.isArray(block.proficiency) && block.proficiency.length) {
+				const meetsProficiency = block.proficiency.some(required => {
+					if (required?.armor) {
+						const armor = normalize(required.armor);
+						return armorProficiencies.some(value => value === armor || value.includes(armor));
+					}
+					if (required?.weapon) {
+						const weapon = normalize(required.weapon);
+						return weaponProficiencies.some(value => value === weapon || value.includes(weapon));
+					}
+					return false;
+				});
+				if (!meetsProficiency) reasons.push("Proficiency prerequisite not met");
+			}
+
+			if (Array.isArray(block.feat) && block.feat.length) {
+				const ownedIds = new Set(ownedFeats.map(owned => `${normalize(owned?.name)}|${normalize(owned?.source)}`));
+				if (!block.feat.some(required => {
+					const [name, source] = String(required).split("|");
+					if (source) return ownedIds.has(`${normalize(name)}|${normalize(source)}`);
+					return ownedFeats.some(owned => normalize(owned?.name) === normalize(name));
+				})) reasons.push("Required feat not selected");
+			}
+
+			if (Array.isArray(block.featCategory) && block.featCategory.length) {
+				if (!ownedFeats.some(owned => block.featCategory.includes(owned?.category))) reasons.push("Required feat category not selected");
+			}
+			if (Array.isArray(block.exclusiveFeatCategory) && block.exclusiveFeatCategory.length) {
+				if (ownedFeats.some(owned => block.exclusiveFeatCategory.includes(owned?.category))) reasons.push("Conflicting feat category already selected");
+			}
+
+			if (Array.isArray(block.feature) && block.feature.length) {
+				if (!block.feature.some(name => state?.hasFeature?.(name))) reasons.push("Required feature not present");
+			}
+
+			if (block.campaign || block.other || block.otherSummary) reasons.push("Special prerequisite requires manual validation");
+			return reasons;
+		};
+
+		const alternatives = prerequisiteBlocks.map(evaluateBlock);
+		const valid = alternatives.find(reasons => reasons.length === 0);
+		return valid
+			? {eligible: true, reasons: []}
+			: {eligible: false, reasons: alternatives.sort((a, b) => a.length - b.length)[0] || ["Prerequisite not met"]};
+	}
+
+	static getEligibleFeats (/** @type {*} */ feats, /** @type {*} */ state, /** @type {*} */ opts = {}) {
+		return (feats || [])
+			.filter(feat => !CharacterSheetClassUtils.isInterdictBoonEntry(feat))
+			.filter(feat => CharacterSheetClassUtils.evaluateFeatPrerequisites(feat, state, {
+				featCatalog: feats,
+				...opts,
+			}).eligible);
+	}
+
+	static getHistoricalOwnedFeats ({state, history = [], characterLevel, featCatalog = []} = {}) {
+		const normalize = value => String(value || "").trim().toLowerCase();
+		const refs = [];
+		const add = ref => {
+			if (!ref?.name) return;
+			const uid = `${normalize(ref.name)}|${normalize(ref.source)}`;
+			if (refs.some(existing => `${normalize(existing.name)}|${normalize(existing.source)}` === uid)) return;
+			const stored = (state?.getFeats?.() || []).find(feat =>
+				normalize(feat?.name) === normalize(ref.name)
+					&& normalize(feat?.source) === normalize(ref.source),
+			);
+			const canonical = featCatalog.find(feat =>
+				normalize(feat?.name) === normalize(ref.name)
+					&& normalize(feat?.source) === normalize(ref.source),
+			);
+			refs.push({...canonical, ...stored, ...ref});
+		};
+
+		for (const entry of history || []) {
+			if (Number(entry?.level) > Number(characterLevel)) continue;
+			add(entry?.choices?.feat);
+			for (const feat of entry?.choices?.classFeatProgressionFeats || []) add(feat);
+			for (const decision of entry?.decisions || []) {
+				if (decision?.type === "feat" || decision?.type === "classFeatProgressionFeat") add(decision.selection);
+				if (decision?.type === "asiOrFeat" && decision.selection?.mode === "feat") add(decision.selection.feat);
+			}
+		}
+		return refs;
+	}
+
+	static getHistoricalAbilityScores ({state, history = [], characterLevel} = {}) {
+		const abilityAbbreviations = globalThis.Parser?.ABIL_ABVS || ["str", "dex", "con", "int", "wis", "cha"];
+		const scores = Object.fromEntries(abilityAbbreviations.map(ability => [
+			ability,
+			Number(state?.getAbilityScore?.(ability)) || 0,
+		]));
+		const normalize = value => String(value || "").trim().toLowerCase();
+		const storedFeats = state?.getFeats?.() || [];
+		const subFeatDeltas = ref => {
+			if (!ref?.name) return;
+			const stored = storedFeats.find(feat =>
+				normalize(feat?.name) === normalize(ref.name)
+					&& normalize(feat?.source) === normalize(ref.source),
+			);
+			for (const [ability, delta] of Object.entries(stored?.appliedEffects?.abilityDeltas || {})) {
+				scores[ability] = (scores[ability] || 0) - (Number(delta) || 0);
+			}
+		};
+
+		for (const entry of history || []) {
+			const level = Number(entry?.level) || 0;
+			if (level > Number(characterLevel)) {
+				for (const [ability, delta] of Object.entries(entry?.choices?.asi || {})) {
+					scores[ability] = (scores[ability] || 0) - (Number(delta) || 0);
+				}
+			}
+			if (level < Number(characterLevel)) continue;
+			subFeatDeltas(entry?.choices?.feat);
+			for (const feat of entry?.choices?.classFeatProgressionFeats || []) subFeatDeltas(feat);
+		}
+		return scores;
+	}
+
+	/**
 	 * Whether a feat already grants an ability score increase (fixed or "choose").
 	 * Used to decide whether an uncategorized feat should receive a synthesized
 	 * General-feat +1 ASI (we never double-grant on feats that already have one).
@@ -8612,6 +8932,54 @@ class CharacterSheetClassUtils {
 		return {count: 0, label: null};
 	}
 
+	static _getMergedOptionalFeatureProgressions (/** @type {*} */ classData, /** @type {*} */ subclassData = null) {
+		const progressions = (classData?.optionalfeatureProgression || []).map((/** @type {*} */ progression) => ({
+			...progression,
+			progressionSource: classData?.source || "",
+		}));
+		for (const progression of subclassData?.optionalfeatureProgression || []) {
+			const types = progression.featureType || [];
+			if (types.some((/** @type {*} */ type) => type.startsWith?.("CTM:"))) continue;
+			const overlapIndex = progressions.findIndex((/** @type {*} */ existing) =>
+				(existing.featureType || []).some((/** @type {*} */ type) => types.includes(type)));
+			if (overlapIndex < 0) {
+				progressions.push({...progression, progressionSource: subclassData?.source || ""});
+				continue;
+			}
+			const base = progressions[overlapIndex];
+			progressions[overlapIndex] = {
+				...base,
+				progression: CharacterSheetClassUtils._sumCumulativeProgressions(base.progression, progression.progression),
+				required: base.required || progression.required || false,
+				progressionSource: [base.progressionSource, subclassData?.source].filter(Boolean).join("+"),
+			};
+		}
+		return progressions;
+	}
+
+	/**
+	 * Compute the historical optional-feature slots created by a level transition,
+	 * independent of the character's final aggregate feature collection.
+	 */
+	static getOptionalFeatureProgressionDeltas (/** @type {*} */ classData, /** @type {*} */ currentLevel, /** @type {*} */ newLevel, /** @type {*} */ subclassData = null) {
+		return CharacterSheetClassUtils._getMergedOptionalFeatureProgressions(classData, subclassData)
+			.map((/** @type {*} */ progression) => {
+				const featureTypes = progression.featureType || [];
+				const countAtCurrent = CharacterSheetClassUtils._readOptFeatureProgressionCount(progression.progression, currentLevel);
+				const countAtNew = CharacterSheetClassUtils._readOptFeatureProgressionCount(progression.progression, newLevel);
+				return {
+					featureTypes,
+					name: progression.name || featureTypes.map((/** @type {*} */ type) => type.replace(/:/g, " ")).join(", "),
+					currentCount: countAtCurrent,
+					totalCount: countAtNew,
+					newCount: Math.max(0, countAtNew - countAtCurrent),
+					required: progression.required || false,
+					progressionSource: progression.progressionSource || classData?.source || "",
+				};
+			})
+			.filter((/** @type {*} */ gain) => gain.newCount > 0);
+	}
+
 	/**
 	 * Compute optional feature gains between currentLevel and newLevel.
 	 *
@@ -8636,40 +9004,7 @@ class CharacterSheetClassUtils {
 	static getOptionalFeatureGains (/** @type {*} */ classData, /** @type {*} */ currentLevel, /** @type {*} */ newLevel, /** @type {*} */ state, /** @type {*} */ subclassData = null) {
 		/** @type {*[]} */ const gains = [];
 
-		const classProgressions = classData.optionalfeatureProgression || [];
-
-		/** @type {*[]} */ const progressions = [...classProgressions];
-
-		// Merge subclass-level progressions (Arcane Shot, Maneuvers, Runes, Disciplines).
-		const subclassProgressions = subclassData?.optionalfeatureProgression || [];
-		for (const p of subclassProgressions) {
-			const types = p.featureType || [];
-			// Skip combat methods (handled by the bonus-method augmentation path).
-			if (types.some((/** @type {*} */ ft) => ft.startsWith?.("CTM:"))) continue;
-
-			// A subclass progression sharing a featureType with the class table is ADDITIVE
-			// to it, not a competing total. Both store CUMULATIVE counts and `existingOfType`
-			// counts every known feature of the type, so pushing the subclass progression as
-			// a peer would make the two cancel — which is why this used to be skipped
-			// outright. Skipping, though, means the pick is never offered at all: PHB
-			// Champion's level-10 second Fighting Style (`{"10": 1}` against Fighter's
-			// `{"1": 1}`) simply never appeared (CS-BUG-140). Summing the two cumulative
-			// curves gives the right total at every level for both that case and brews whose
-			// subclass grants extra picks from the class's own pool (Beastheart's Infernal /
-			// Primordial bonds add exploits at 3 and 11 on top of the class's 3/5/7).
-			const overlapIdx = progressions.findIndex((/** @type {*} */ cp) =>
-				(cp.featureType || []).some((/** @type {*} */ ft) => types.includes(ft)));
-			if (overlapIdx >= 0) {
-				const base = progressions[overlapIdx];
-				progressions[overlapIdx] = {
-					...base,
-					progression: CharacterSheetClassUtils._sumCumulativeProgressions(base.progression, p.progression),
-					required: base.required || p.required || false,
-				};
-				continue;
-			}
-			progressions.push(p);
-		}
+		const progressions = CharacterSheetClassUtils._getMergedOptionalFeatureProgressions(classData, subclassData);
 
 		if (!progressions.length) return gains;
 
