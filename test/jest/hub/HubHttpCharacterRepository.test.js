@@ -91,18 +91,201 @@ describe("HTTP character repository", () => {
 	it("creates a cloud document and adopts its canonical server id", async () => {
 		const api = {
 			pGetSession: async () => ({signedIn: true}),
-			pGetCharacter: async () => {
-				const error = new Error("missing");
-				error.code = "CHARACTER_NOT_FOUND";
-				throw error;
-			},
+			pGetCharacter: jest.fn(),
 			pCreateCharacter: async ({data}) => ({
 				character: {id: "server-id", revision: 1, data},
 			}),
 		};
 		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
-		await expect(repository.pUpsert({character: {id: "temporary-id", name: "Mira"}}))
+		await expect(repository.pUpsert({character: {id: "temporary-id", name: "Mira"}, isCreate: true}))
 			.resolves.toEqual({id: "server-id", name: "Mira"});
+		expect(api.pGetCharacter).not.toHaveBeenCalled();
+		expect(repository.getCharacterAccess({characterId: "server-id"})).toBe("owner");
+	});
+
+	it("uses the canonical id for a server-normalization patch immediately after create", async () => {
+		const leaseCalls = [];
+		const patchCalls = [];
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: jest.fn(),
+			pCreateCharacter: async () => ({
+				character: {id: "server-id", revision: 1, data: {name: "Mira"}},
+			}),
+			pAcquireCharacterLease: async input => {
+				leaseCalls.push(input);
+				return {epoch: 1};
+			},
+			pPatchCharacter: async input => {
+				patchCalls.push(input);
+				return {
+					character: {
+						id: "server-id",
+						revision: 2,
+						data: {name: "Mira", hp: {current: 12}},
+					},
+				};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+
+		await expect(repository.pUpsert({
+			character: {id: "temporary-id", name: "Mira", hp: {current: 12}},
+			isCreate: true,
+		})).resolves.toEqual({id: "server-id", name: "Mira", hp: {current: 12}});
+
+		expect(api.pGetCharacter).not.toHaveBeenCalled();
+		expect(leaseCalls).toEqual([{characterId: "server-id", isTakeover: false}]);
+		expect(patchCalls).toEqual([
+			expect.objectContaining({characterId: "server-id", baseRevision: 1, leaseEpoch: 1}),
+		]);
+	});
+
+	it("preserves DM read-only authority from the character projection envelope", async () => {
+		const api = {
+			pGetSession: async () => ({signedIn: true, account: {id: "dm-1"}}),
+			pGetCharacterProjection: jest.fn(async () => ({
+				kind: "dm_truth",
+				character: {
+					id: "server-1",
+					ownerAccountId: "player-1",
+					campaignId: "campaign-1",
+					revision: 3,
+					data: {name: "Mira", hp: {current: 20}},
+				},
+			})),
+			pAcquireCharacterLease: jest.fn(),
+			pPatchCharacter: jest.fn(),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+
+		await expect(repository.pGet({characterId: "server-1"}))
+			.resolves.toEqual({id: "server-1", name: "Mira", hp: {current: 20}});
+		expect(repository.getCharacterAccess({characterId: "server-1"})).toBe("dm_readonly");
+		await expect(repository.pAcquireLease({characterId: "server-1"})).rejects.toMatchObject({
+			code: "CHARACTER_READ_ONLY",
+		});
+		await expect(repository.pUpsert({
+			character: {id: "server-1", name: "Locally edited"},
+		})).rejects.toMatchObject({
+			code: "CHARACTER_READ_ONLY",
+		});
+		expect(api.pAcquireCharacterLease).not.toHaveBeenCalled();
+		expect(api.pPatchCharacter).not.toHaveBeenCalled();
+	});
+
+	it("keeps failed owner recovery account-scoped and never substitutes it for fresh DM truth", async () => {
+		const stored = new Map();
+		const storage = {
+			getItem: key => stored.get(key) || null,
+			setItem: (key, value) => stored.set(key, value),
+			removeItem: key => stored.delete(key),
+		};
+		const ownerApi = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner-account"}}),
+			pGetCharacterProjection: async () => ({
+				kind: "owner_truth",
+				character: {
+					id: "server-1",
+					ownerAccountId: "owner-account",
+					campaignId: "campaign-1",
+					revision: 3,
+					data: {name: "Server Rowan", hp: {current: 12}},
+				},
+			}),
+			pAcquireCharacterLease: async () => ({epoch: 4}),
+			pPatchCharacter: async () => {
+				throw new Error("offline");
+			},
+		};
+		const ownerRepository = new HubHttpCharacterRepository({campaignId: "campaign-1", api: ownerApi});
+		ownerRepository._recoveryStorage = storage;
+		await ownerRepository.pGet({characterId: "server-1"});
+		await expect(ownerRepository.pUpsert({
+			character: {id: "server-1", name: "Unsaved Owner Draft", hp: {current: 1}},
+		})).rejects.toThrow("offline");
+		expect([...stored.keys()]).toEqual([
+			"hub-character-recovery:campaign-1:owner-account:server-1",
+		]);
+
+		const ownerReloadRepository = new HubHttpCharacterRepository({campaignId: "campaign-1", api: ownerApi});
+		ownerReloadRepository._recoveryStorage = storage;
+		await expect(ownerReloadRepository.pGet({characterId: "server-1"}))
+			.resolves.toMatchObject({name: "Unsaved Owner Draft", hp: {current: 1}});
+		stored.set("hub-character-recovery:campaign-1:server-1", JSON.stringify({
+			snapshot: {name: "Legacy Unscoped Owner Draft", hp: {current: 0}},
+		}));
+
+		let dmTruth = {name: "Server Rowan", hp: {current: 12}};
+		const dmRepository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "dm-account"}}),
+				pGetCharacterProjection: async () => ({
+					kind: "dm_truth",
+					character: {
+						id: "server-1",
+						ownerAccountId: "owner-account",
+						campaignId: "campaign-1",
+						revision: 4,
+						data: dmTruth,
+					},
+				}),
+			},
+		});
+		dmRepository._recoveryStorage = storage;
+		dmRepository._failedWrites.set("server-1", {name: "Leaked In-Memory Owner Draft", hp: {current: 0}});
+		await expect(dmRepository.pGet({characterId: "server-1"}))
+			.resolves.toEqual({id: "server-1", name: "Server Rowan", hp: {current: 12}});
+		expect(stored.has("hub-character-recovery:campaign-1:server-1")).toBe(false);
+
+		dmTruth = {name: "Server Rowan Updated", hp: {current: 9}};
+		await expect(dmRepository.pGet({characterId: "server-1"}))
+			.resolves.toEqual({id: "server-1", name: "Server Rowan Updated", hp: {current: 9}});
+	});
+
+	it("marks campaign roster characters owned by another account as DM read-only", async () => {
+		const api = {
+			pGetSession: async () => ({signedIn: true, account: {id: "dm-1"}}),
+			pListCharacters: async () => [
+				{id: "owned", ownerAccountId: "dm-1", revision: 1, data: {name: "Owned"}},
+				{id: "player", ownerAccountId: "player-1", revision: 1, data: {name: "Player"}},
+			],
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+
+		await repository.pList();
+
+		expect(repository.getCharacterAccess({characterId: "owned"})).toBe("owner");
+		expect(repository.getCharacterAccess({characterId: "player"})).toBe("dm_readonly");
+	});
+
+	it("does not let a delayed roster response replace newer accepted realtime truth", async () => {
+		let resolveRoster;
+		const roster = new Promise(resolve => resolveRoster = resolve);
+		let characterRead = 0;
+		const documents = [
+			{id: "server-1", campaignId: "campaign-1", ownerAccountId: "player-1", revision: 1, data: {name: "Before"}},
+			{id: "server-1", campaignId: "campaign-1", ownerAccountId: "player-1", revision: 2, data: {name: "After"}},
+		];
+		const api = {
+			pGetSession: async () => ({signedIn: true, account: {id: "player-1"}}),
+			pGetCharacter: async () => structuredClone(documents[characterRead++]),
+			pListCharacters: async () => roster,
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "server-1"});
+
+		const pList = repository.pList();
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({name: "Before"}),
+			fnAdoptLive: () => {},
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+		resolveRoster([structuredClone(documents[0])]);
+
+		await expect(pList).resolves.toEqual([{id: "server-1", name: "After"}]);
+		expect(repository._accepted.get("server-1")).toEqual(documents[1]);
 	});
 
 	it("uses accepted revision and lease epoch for patch saves", async () => {
@@ -412,6 +595,41 @@ describe("HTTP character repository", () => {
 		expect(calls[0].characterId).toBe("server");
 	});
 
+	it("preserves invocation order while concurrent initial saves await the same session", async () => {
+		let resolveSession;
+		const pSession = new Promise(resolve => resolveSession = resolve);
+		const order = [];
+		const api = {
+			pGetSession: jest.fn(() => pSession),
+			pGetCharacter: async ({characterId}) => {
+				if (characterId === "temp") {
+					const error = new Error("missing");
+					error.code = "CHARACTER_NOT_FOUND";
+					throw error;
+				}
+				return {id: "server", revision: 1, data: {name: "First"}};
+			},
+			pCreateCharacter: async ({data}) => {
+				order.push(`create:${data.name}`);
+				return {character: {id: "server", revision: 1, data}};
+			},
+			pAcquireCharacterLease: async () => ({epoch: 1}),
+			pPatchCharacter: async ({data, patches}) => {
+				order.push(`patch:${patches.find(patch => patch.path === "/name")?.value}`);
+				return {character: {id: "server", revision: 2, data: data || {name: "Second"}}};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		const first = repository.pUpsert({character: {id: "temp", name: "First"}});
+		const second = repository.pUpsert({character: {id: "temp", name: "Second"}});
+
+		expect(api.pGetSession).toHaveBeenCalledTimes(1);
+		resolveSession({signedIn: true, account: {id: "owner-account"}});
+		await Promise.all([first, second]);
+
+		expect(order).toEqual(["create:First", "patch:Second"]);
+	});
+
 	it("preserves a remote grant across later queued local saves", async () => {
 		const calls = [];
 		const api = {
@@ -490,14 +708,15 @@ describe("HTTP character repository", () => {
 		};
 		const repository = new HubHttpCharacterRepository({
 			campaignId: "cmp",
-			api: {pGetSession: async () => ({signedIn: true})},
+			api: {pGetSession: async () => ({signedIn: true, account: {id: "owner-account"}})},
 		});
+		repository._session = {signedIn: true, account: {id: "owner-account"}};
 		repository._recoveryStorage = storage;
 		repository._conflicts.set("c", {local: {xp: 150}, serverDocument: {id: "c", data: {xp: 200}}});
 		repository._failedWrites.set("c", {xp: 150});
 		await expect(repository.pResolveConflict({characterId: "c", choice: "server"})).resolves.toEqual({id: "c", xp: 200});
 		expect(repository.hasPendingWrites()).toBe(false);
-		expect(removed).toEqual(["hub-character-recovery:cmp:c"]);
+		expect(removed).toEqual(["hub-character-recovery:cmp:owner-account:c"]);
 	});
 
 	it("keeps the newest queued local snapshot in conflict recovery", async () => {

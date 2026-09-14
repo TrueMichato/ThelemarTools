@@ -1,5 +1,115 @@
-import {expect, test} from "@playwright/test";
+import {expect, test, type BrowserContext} from "@playwright/test";
 import {HubCampaignPage} from "../pages/HubCampaignPage";
+import {createCharacterViaWizard, PRESET_FIGHTER} from "../utils/characterBuilder";
+
+async function pCloseContext (context: BrowserContext): Promise<void> {
+	await Promise.race([
+		context.close().catch(() => undefined),
+		new Promise<void>(resolve => setTimeout(resolve, 5_000)),
+	]);
+}
+
+test("Builder adopts the canonical cloud character through a failed roster refresh", async ({browser}) => {
+	test.setTimeout(240_000);
+	const secret = process.env.HUB_TEST_AUTH_SECRET;
+	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
+
+	const context = await browser.newContext({
+		baseURL: process.env.HUB_E2E_ORIGIN || "https://localhost:8443",
+		ignoreHTTPSErrors: true,
+	});
+	try {
+		const hub = new HubCampaignPage(await context.newPage());
+		await hub.signInSynthetic({providerSubject: "builder-lifecycle-owner", displayName: "Builder Owner", secret});
+		const campaignId = await hub.createCampaign("Builder Lifecycle E2E");
+		await hub.gotoCampaign(campaignId);
+		await hub.waitForSelectedCampaign(campaignId);
+
+		let isCreateCommitted = false;
+		let failedRosterRefreshes = 0;
+		await hub.page.route(/\/api\/characters(?:\?.*)?$/, async route => {
+			if (route.request().method() === "POST") {
+				const response = await route.fetch();
+				isCreateCommitted = response.ok();
+				await route.fulfill({response});
+				return;
+			}
+			if (route.request().method() === "GET" && isCreateCommitted && failedRosterRefreshes === 0) {
+				failedRosterRefreshes++;
+				await route.fulfill({
+					status: 503,
+					contentType: "application/json",
+					body: JSON.stringify({error: {code: "TEST_ROSTER_REFRESH_FAILED", message: "Synthetic roster refresh failure"}}),
+				});
+				return;
+			}
+			await route.continue();
+		});
+		const missingCharacterReads: string[] = [];
+		const browserErrors: string[] = [];
+		const failedApiResponses: string[] = [];
+		hub.page.on("console", message => {
+			if (message.type() === "error") browserErrors.push(message.text());
+		});
+		hub.page.on("response", response => {
+			const url = new URL(response.url());
+			if (url.pathname.startsWith("/api/") && response.status() >= 400) {
+				failedApiResponses.push(`${response.status()} ${response.request().method()} ${url.pathname}`);
+			}
+			if (
+				response.request().method() === "GET"
+				&& /^\/api\/characters\/[^/]+$/.test(url.pathname)
+				&& response.status() === 404
+			) missingCharacterReads.push(url.pathname);
+		});
+
+		const name = "Canonical Builder Hero";
+		await createCharacterViaWizard(hub.page, {...PRESET_FIGHTER, name}, {campaignId});
+
+		const active = await hub.page.evaluate(() => {
+			const sheet = (globalThis as any).charSheet;
+			const select = document.getElementById("charsheet-sel-character") as HTMLSelectElement;
+			return {
+				characterId: sheet?._currentCharacterId,
+				selectedId: select?.value,
+				optionText: select?.selectedOptions?.[0]?.textContent,
+				saveStatus: document.getElementById("charsheet-save-indicator")?.getAttribute("title"),
+				hubCampaignId: sheet?._hubCampaignId,
+				repositoryCampaignId: sheet?._characterRepository?._campaignId,
+				options: [...(select?.options || [])].map(option => ({value: option.value, text: option.textContent})),
+			};
+		});
+		const unexpectedBrowserErrors = browserErrors.filter(message =>
+			!/^Failed to register a ServiceWorker .* An SSL certificate error occurred when fetching the script\.$/.test(message),
+		).filter(message =>
+			message !== "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+		);
+		const unexpectedFailedApiResponses = failedApiResponses.filter(response =>
+			response !== "503 GET /api/characters",
+		);
+		expect({
+			hubCampaignId: active.hubCampaignId,
+			repositoryCampaignId: active.repositoryCampaignId,
+			browserErrors: unexpectedBrowserErrors,
+			failedApiResponses: unexpectedFailedApiResponses,
+		}).toEqual({
+			hubCampaignId: campaignId,
+			repositoryCampaignId: campaignId,
+			browserErrors: [],
+			failedApiResponses: [],
+		});
+		expect(active.characterId).toMatch(/^[0-9a-f-]{36}$/);
+		expect(active.selectedId).toBe(active.characterId);
+		expect(active.optionText).toContain(name);
+		expect(active.saveStatus).toBe("Auto-save status");
+		expect(new URL(hub.page.url()).searchParams.get("id")).toBe(active.characterId);
+		expect((await hub.getCharacter(active.characterId)).data.name).toBe(name);
+		expect(missingCharacterReads).toEqual([]);
+		expect(failedRosterRefreshes).toBe(1);
+	} finally {
+		await pCloseContext(context);
+	}
+});
 
 test("campaign characters recover from detachment and copy or move safely", async ({browser}) => {
 	test.setTimeout(180_000);

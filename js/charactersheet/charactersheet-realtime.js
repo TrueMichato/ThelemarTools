@@ -17,6 +17,12 @@ const _CHARACTER_TEARDOWN_EVENT_TYPES = new Set([
 	"character.moved_out",
 ]);
 
+export const CHARACTER_REALTIME_ACCESS_END_CAUSES = Object.freeze({
+	CHARACTER: "character",
+	CAMPAIGN: "campaign",
+	SURFACE_ROLE: "surface_role",
+});
+
 const _INVENTORY_TRANSFER_EVENT_TYPES = new Set([
 	"transfer.cancelled",
 	"transfer.committed",
@@ -28,6 +34,11 @@ const _INVENTORY_CHARACTER_MUTATION_EVENT_TYPES = new Set([
 	"item.granted",
 ]);
 const _PARTY_INVENTORY_INVALIDATION_EVENT_TYPE = "party_inventory.invalidated";
+const _ACCESS_END_CAUSE_PRIORITY = Object.freeze({
+	[CHARACTER_REALTIME_ACCESS_END_CAUSES.CHARACTER]: 1,
+	[CHARACTER_REALTIME_ACCESS_END_CAUSES.SURFACE_ROLE]: 2,
+	[CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN]: 3,
+});
 
 export class CharacterSheetRealtimeCoordinator {
 	constructor ({
@@ -95,11 +106,13 @@ export class CharacterSheetRealtimeCoordinator {
 			client,
 			cursorKey: null,
 			generation,
+			viewerAccountId: null,
 			isDetachQueued: false,
 			isSuspended: false,
 			inventoryEventKeys: new Set(),
 			operationKeys: new Set(),
 			cursorMetadata: null,
+			detachRequest: null,
 			projectionCursorKey: null,
 			unsubscribers: [],
 		};
@@ -166,6 +179,7 @@ export class CharacterSheetRealtimeCoordinator {
 	_handleCursor (active, baseline) {
 		if (!this._isCurrent(active)) return;
 		if (baseline.cursor?.campaignId !== this._campaignId) return;
+		if (baseline.membership?.accountId) active.viewerAccountId = baseline.membership.accountId;
 		if (
 			baseline.campaign
 			&& Object.hasOwn(baseline.campaign, "activeRulesVersionId")
@@ -185,6 +199,7 @@ export class CharacterSheetRealtimeCoordinator {
 		const characterRef = baseline.characterRefs?.find(ref => ref?.id === active.characterId);
 		if (!characterRef) {
 			this._queueDetach(active, {
+				accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CHARACTER,
 				reason: "Character is no longer available in this campaign.",
 				sequence: baseline.cursor?.lastSequence || 0,
 			});
@@ -226,6 +241,22 @@ export class CharacterSheetRealtimeCoordinator {
 
 	_handleEvent (active, event) {
 		if (!this._isCurrent(active) || event?.campaignId !== this._campaignId) return;
+		const isViewerDemotedFromDm = event.type === "membership.role_changed"
+			&& event.payload?.accountId === active.viewerAccountId
+			&& !["dm", "co_dm"].includes(event.payload?.role)
+			&& this._repository.isCharacterReadOnly?.({characterId: active.characterId});
+		if (event.type === "campaign.archived" || isViewerDemotedFromDm) {
+			this._queueDetach(active, {
+				accessEndCause: event.type === "campaign.archived"
+					? CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN
+					: CHARACTER_REALTIME_ACCESS_END_CAUSES.SURFACE_ROLE,
+				reason: event.type === "campaign.archived"
+					? "Campaign is no longer active."
+					: "Your campaign role no longer permits this character view.",
+				sequence: event.sequence,
+			});
+			return;
+		}
 		if (event.type === "rules.activated" && event.aggregateType === "rules_version") {
 			this._enqueue(active, {
 				type: "rulesChanged",
@@ -258,6 +289,7 @@ export class CharacterSheetRealtimeCoordinator {
 			&& event.aggregateId === active.characterId
 		) {
 			this._queueDetach(active, {
+				accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CHARACTER,
 				reason: "Character is no longer available in this campaign.",
 				sequence: event.sequence,
 			});
@@ -353,8 +385,14 @@ export class CharacterSheetRealtimeCoordinator {
 		});
 	}
 
-	_queueDetach (active, {reason, sequence}) {
-		if (!this._isCurrent(active) || active.isDetachQueued) return;
+	_queueDetach (active, {accessEndCause, reason, sequence}) {
+		if (!this._isCurrent(active)) return;
+		const currentPriority = _ACCESS_END_CAUSE_PRIORITY[active.detachRequest?.accessEndCause] || 0;
+		const nextPriority = _ACCESS_END_CAUSE_PRIORITY[accessEndCause] || 0;
+		if (!active.detachRequest || nextPriority > currentPriority) {
+			active.detachRequest = {accessEndCause, reason, sequence};
+		}
+		if (active.isDetachQueued) return;
 		active.isDetachQueued = true;
 		queueMicrotask(() => {
 			if (!this._isCurrent(active)) return;
@@ -362,8 +400,14 @@ export class CharacterSheetRealtimeCoordinator {
 				characterId: active.characterId,
 				fnDeliver: () => {
 					if (!this._isCurrent(active)) return false;
+					const request = active.detachRequest;
 					this.detach();
-					this._emit("connectionState", {state: "closed", reason});
+					this._emit("connectionState", {
+						state: "closed",
+						reason: request.reason,
+						isCharacterAccessEnded: true,
+						accessEndCause: request.accessEndCause,
+					});
 					return true;
 				},
 			}).catch(() => {
@@ -372,7 +416,7 @@ export class CharacterSheetRealtimeCoordinator {
 				this._emit("deliveryError", {
 					characterId: active.characterId,
 					deliveryType: "teardown",
-					sequence,
+					sequence: active.detachRequest?.sequence || sequence,
 				});
 			});
 		});

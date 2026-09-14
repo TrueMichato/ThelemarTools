@@ -43,10 +43,14 @@ import {LocalCharacterRepository} from "../hub/hub-character-repository.js";
 import {HubHttpCharacterRepository} from "../hub/hub-http-character-repository.js";
 import {HubActiveCampaignCoordinator} from "../hub/hub-active-campaign-coordinator.js";
 import {HubApiClient} from "../hub/hub-api-client.js";
+import {CHARACTER_ACCESS_MODES} from "../hub/hub-character-view.js";
 import {HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT} from "../hub/hub-capabilities.js";
 import {getCampaignSurfaceDefaultUrl} from "../hub/hub-surface-defaults.js";
 import {HubRollLogAdapter} from "../hub/hub-roll-log-adapter.js";
-import {CharacterSheetRealtimeCoordinator} from "./charactersheet-realtime.js";
+import {
+	CHARACTER_REALTIME_ACCESS_END_CAUSES,
+	CharacterSheetRealtimeCoordinator,
+} from "./charactersheet-realtime.js";
 import {CharacterSheetHubEffects} from "./charactersheet-hub-effects.js";
 import {CharacterSheetPeerTargeting} from "./charactersheet-peer-targeting.js";
 import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js";
@@ -108,6 +112,8 @@ class CharacterSheetPage {
 		this._partyInventory = null;
 		this._characterLoadGeneration = 0;
 		this._hubRealtimeGeneration = 0;
+		this._hubReadOnlyRefreshGeneration = 0;
+		this._isHubReadOnlyRefreshRequired = false;
 		this._hubContextGeneration = 0;
 		this._hubContextRefreshActiveGeneration = null;
 		this._isHubContextRefreshing = false;
@@ -146,6 +152,8 @@ class CharacterSheetPage {
 
 		this._selCharacter = /** @type {*} */ (null);
 		this._currentCharacterId = null;
+		this._currentCharacterAccess = CHARACTER_ACCESS_MODES.OWNER;
+		this._isCurrentCharacterNew = false;
 		this._lastSavedAt = 0;
 		this._isLevelUpBannerDismissed = false;
 		/** @type {?*} Lazily created on first spawn — see `get spawner`. */
@@ -210,14 +218,25 @@ class CharacterSheetPage {
 
 	_attachHubRealtime ({characterId = this._currentCharacterId} = {}) {
 		this._hubRealtimeGeneration++;
-		this._hubEffects?.activate({characterId});
-		this._peerTargeting?.activate({characterId});
+		this._isHubReadOnlyRefreshRequired = false;
+		if (this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY) {
+			this._hubEffects?.deactivate();
+			this._peerTargeting?.deactivate();
+			this._partyInventory?.detach();
+		} else {
+			this._hubEffects?.activate({characterId});
+			this._peerTargeting?.activate({characterId});
+			void this._partyInventory?.pAttach({
+				characterId,
+				generation: this._characterLoadGeneration,
+			});
+		}
 		const isAttached = this._hubRealtime?.attach({characterId}) || false;
-		void this._partyInventory?.pAttach({
-			characterId,
-			generation: this._characterLoadGeneration,
-		});
 		return isAttached;
+	}
+
+	isCurrentCharacterReadOnly () {
+		return this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY;
 	}
 
 	// #region Hub teardown owners (ADR 0013)
@@ -227,6 +246,7 @@ class CharacterSheetPage {
 	/** `teardown-generation`: fence in-flight realtime work. */
 	_fenceHubGeneration () {
 		this._hubRealtimeGeneration++;
+		this._isHubReadOnlyRefreshRequired = false;
 	}
 
 	/** `teardown-realtime`: detach the realtime client only. */
@@ -246,6 +266,8 @@ class CharacterSheetPage {
 		if (!this._isHubCharacter) return;
 		this._characterLoadGeneration++;
 		this._currentCharacterId = null;
+		this._currentCharacterAccess = CHARACTER_ACCESS_MODES.OWNER;
+		this._isCurrentCharacterNew = false;
 		this._state.reset();
 		const doc = globalThis.document;
 		if (!doc?.body) return;
@@ -302,21 +324,81 @@ class CharacterSheetPage {
 	// #region Live semantic-operation reconciliation (ADR 0012)
 
 	/**
-	 * Register the production consumers for server-authoritative campaign effects. Handlers run synchronously
-	 * inside the repository's realtime delivery queue, so they must not await: the coordinator emits to listeners
-	 * without awaiting them, and any async work would escape the serialization window that keeps an incoming
-	 * operation ordered against an in-flight save.
+	 * Register the production consumers for server-authoritative campaign effects. Semantic handlers run
+	 * synchronously inside the repository's realtime delivery queue. DM read-only document invalidations are the
+	 * exception: they perform a scoped HTTP refetch with character, load, realtime, and refresh-generation fences,
+	 * and cannot race an owner write because this surface has no lease or save authority.
 	 */
 	_initHubRealtimeListeners () {
 		if (!this._hubRealtime || this._isHubRealtimeListenersBound) return false;
 		this._isHubRealtimeListenersBound = true;
 		this._hubRealtime.on("cursor", metadata => this._onHubRealtimeCursor(metadata));
+		this._hubRealtime.on("projectionInvalidated", detail => {
+			if (this._currentCharacterAccess !== CHARACTER_ACCESS_MODES.DM_READ_ONLY) return;
+			void this._pRefreshHubReadOnlyCharacter({characterId: detail?.characterId});
+		});
 		this._hubRealtime.on("semanticOperation", event => this._onHubSemanticOperation(event));
 		this._hubRealtime.on("connectionState", state => this._onHubRealtimeConnectionState(state));
 		this._hubRealtime.on("campaignContextChanged", event => this._onHubCampaignContextChanged(event));
 		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
 		this._hubRealtime.on("rulesChanged", event => { void this._pRefreshHubRules(event); });
 		return true;
+	}
+
+	async _pRefreshHubReadOnlyCharacter ({characterId = this._currentCharacterId} = {}) {
+		if (
+			!characterId
+			|| characterId !== this._currentCharacterId
+			|| this._currentCharacterAccess !== CHARACTER_ACCESS_MODES.DM_READ_ONLY
+			|| typeof this._characterRepository?.pGet !== "function"
+		) return false;
+		this._isHubReadOnlyRefreshRequired = true;
+		const refreshGeneration = ++this._hubReadOnlyRefreshGeneration;
+		const characterLoadGeneration = this._characterLoadGeneration;
+		const realtimeGeneration = this._hubRealtimeGeneration;
+		const isCurrent = () => (
+			refreshGeneration === this._hubReadOnlyRefreshGeneration
+			&& characterLoadGeneration === this._characterLoadGeneration
+			&& realtimeGeneration === this._hubRealtimeGeneration
+			&& characterId === this._currentCharacterId
+			&& this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY
+		);
+		try {
+			const character = await this._characterRepository.pGet({characterId});
+			if (!isCurrent()) return false;
+			if (
+				character?.id !== characterId
+				|| this._characterRepository.getCharacterAccess?.({characterId}) !== CHARACTER_ACCESS_MODES.DM_READ_ONLY
+			) {
+				throw Object.assign(new Error("Character inspection access changed."), {code: "CHARACTER_PROJECTION_SCOPED"});
+			}
+			this._clearLastHpChange?.();
+			this._state.loadFromJson(character);
+			this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
+			this._reconcileClassFeatures();
+			this._renderCharacter();
+			this._isHubReadOnlyRefreshRequired = false;
+			return true;
+		} catch (error) {
+			if (!isCurrent()) return false;
+			if (
+				error?.code === "CHARACTER_PROJECTION_SCOPED"
+				|| !this._canRestoreHubRealtimeAfterError(error)
+			) {
+				this._isHubReadOnlyRefreshRequired = false;
+				this._onHubRealtimeConnectionState({
+					state: "closed",
+					reason: "Character is no longer available in this campaign.",
+					isCharacterAccessEnded: true,
+				});
+				return false;
+			}
+			JqueryUtil.doToast({
+				type: "danger",
+				content: "Could not refresh this read-only character. Reconnect or reload before relying on its current values.",
+			});
+			return false;
+		}
 	}
 
 	async _pRefreshHubRules ({rulesVersionId = null} = {}) {
@@ -382,7 +464,12 @@ class CharacterSheetPage {
 
 	_onHubRealtimeConnectionState (state) {
 		this._hubEffects?.onConnectionState(state);
-		this._peerTargeting?.onConnectionState(state);
+		const isReadOnly = this.isCurrentCharacterReadOnly?.();
+		if (isReadOnly) this._peerTargeting?.deactivate();
+		else this._peerTargeting?.onConnectionState(state);
+		if (state?.state === "live" && isReadOnly && this._isHubReadOnlyRefreshRequired) {
+			void this._pRefreshHubReadOnlyCharacter();
+		}
 		if (state?.state === "live" && this._isHubContextRevalidationRequired && this._hubCampaignContext) {
 			this._isHubContextRevalidationRequired = false;
 			this._onHubCampaignContextChanged({type: "reconnected"});
@@ -403,6 +490,26 @@ class CharacterSheetPage {
 				this._concealHubPrivateCharacter();
 				this._hubCampaignContext?.dispose?.();
 				this._hubCampaignContext = null;
+			}
+			return;
+		}
+		if (state?.state === "closed" && state.isCharacterAccessEnded) {
+			this._fenceHubGeneration();
+			this._detachHubRealtimeClient();
+			this._detachHubProjections();
+			this._concealHubPrivateCharacter();
+			this._teardownHubRules();
+			this._campaign?.resetCharacterScope?.();
+			this._campaign?.render();
+			const pCoordinatorTeardown = state.accessEndCause === CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN
+				? this._hubActiveCampaign?.pHandleAccessLoss?.({campaignId: this._hubCampaignId})
+				: state.accessEndCause === CHARACTER_REALTIME_ACCESS_END_CAUSES.SURFACE_ROLE
+					? this._hubActiveCampaign?.pHandleSurfaceRoleLoss?.()
+					: null;
+			if (pCoordinatorTeardown) {
+				void pCoordinatorTeardown
+					// eslint-disable-next-line no-console
+					.catch(error => console.error("Failed to tear down ended campaign character access:", error));
 			}
 			return;
 		}
@@ -937,6 +1044,7 @@ class CharacterSheetPage {
 					api: this._hubCampaignContext.api,
 					root: document.getElementById("charsheet-peer-targeting"),
 					fnGetCharacterId: () => this._currentCharacterId,
+					fnIsOwner: () => !this.isCurrentCharacterReadOnly(),
 					fnGetRulesVersionId: () => this._hubContext?.rulesVersion?.id ?? null,
 					fnGetCapability: () => this._hubCampaignContext?.context?.capabilities?.peerSourceCosts ?? null,
 					fnOnAuthoritativeApplied: detail => this._onHubAuthoritativeApproval(detail),
@@ -2095,6 +2203,7 @@ class CharacterSheetPage {
 	}
 
 	_initEventListeners () {
+		this._initReadOnlyInteractionGuard();
 		const bind = (elementOrId, eventName, handler) => {
 			const element = typeof elementOrId === "string"
 				? document.getElementById(elementOrId)
@@ -2369,14 +2478,107 @@ class CharacterSheetPage {
 		bind("charsheet-edit-masteries", "click", () => this._showEditWeaponMasteriesModal());
 	}
 
+	_initReadOnlyInteractionGuard () {
+		const root = document.querySelector?.(".charsheet-page");
+		if (!root || root.dataset.charsheetReadOnlyGuardBound === "true") return;
+		root.dataset.charsheetReadOnlyGuardBound = "true";
+		const handle = event => {
+			if (this._currentCharacterAccess !== CHARACTER_ACCESS_MODES.DM_READ_ONLY) return;
+			const target = event.target?.closest?.(
+				"a[href], #charsheet-sel-character, #charsheet-btn-export, #charsheet-btn-print, #charsheet-btn-rolllog, #charsheet-btn-more",
+			);
+			if (target) return;
+			event.preventDefault();
+			event.stopImmediatePropagation();
+		};
+		for (const eventName of ["click", "input", "change", "submit"]) {
+			root.addEventListener(eventName, handle, true);
+		}
+	}
+
 	// #region Character Management
 	async _pLoadCharacters () {
 		const characters = await this._characterRepository.pList();
 		this._updateCharacterDropdown(characters);
 	}
 
+	_getCharacterDropdownLabel (character) {
+		const name = character?.name || "Unnamed Character";
+		const totalLevel = character?.classes?.reduce((sum, cls) => sum + (cls.level || 0), 0) || 0;
+		const classNames = character?.classes?.map(cls => cls.name).join("/") || "";
+		const classInfo = classNames ? `${classNames} ${totalLevel}` : "";
+		const access = this._characterRepository.getCharacterAccess?.({characterId: character?.id});
+		const suffix = access === CHARACTER_ACCESS_MODES.DM_READ_ONLY ? " (read-only)" : "";
+		return `${classInfo ? `${name} — ${classInfo}` : name}${suffix}`;
+	}
+
+	_syncCurrentCharacterDropdownOption ({previousCharacterId = null, character = null} = {}) {
+		if (!this._selCharacter || !this._currentCharacterId) return;
+		const options = [...(this._selCharacter.options || [])];
+		let option = options.find(it => it.value === this._currentCharacterId)
+			|| (previousCharacterId ? options.find(it => it.value === previousCharacterId) : null);
+		if (!option && globalThis.document?.createElement && this._selCharacter.append) {
+			if (!options.some(it => it.disabled)) {
+				const divider = document.createElement("option");
+				divider.disabled = true;
+				divider.textContent = "────── Saved Characters ──────";
+				this._selCharacter.append(divider);
+			}
+			option = document.createElement("option");
+			this._selCharacter.append(option);
+		}
+		if (option) {
+			const current = character || {
+				id: this._currentCharacterId,
+				name: this._state.getName?.(),
+				classes: this._state.getClasses?.(),
+			};
+			option.value = this._currentCharacterId;
+			option.textContent = this._getCharacterDropdownLabel({...current, id: this._currentCharacterId});
+		}
+		this._selCharacter.value = this._currentCharacterId;
+	}
+
+	async _pRefreshPersistedCharacterUi ({characterId, previousCharacterId = null, character = null, fnIsCurrent = null}) {
+		const isCurrent = () => fnIsCurrent ? fnIsCurrent() : this._currentCharacterId === characterId;
+		this._syncCurrentCharacterDropdownOption({previousCharacterId, character});
+		const failures = [];
+		try {
+			await this._pLoadCharacters();
+		} catch (error) {
+			failures.push({surface: "character list", error});
+		}
+		if (isCurrent() && this._selCharacter) this._selCharacter.value = characterId;
+		if (isCurrent()) {
+			try {
+				await this._campaign?.pRefreshCurrentCharacter?.();
+			} catch (error) {
+				failures.push({surface: "campaign controls", error});
+			}
+		}
+		if (failures.length) {
+			// eslint-disable-next-line no-console
+			console.warn("Character was saved, but some UI state could not refresh:", failures);
+			JqueryUtil.doToast({
+				type: "warning",
+				content: "Character saved, but some campaign controls could not refresh. Reload this page to retry.",
+			});
+		}
+	}
+
 	_updateCharacterDropdown (characters) {
 		if (!characters) {
+			if (this._isHubCharacter) {
+				const currentOption = [...(this._selCharacter?.options || [])]
+					.find(option => option.value === this._currentCharacterId);
+				if (!currentOption) return;
+				currentOption.textContent = this._getCharacterDropdownLabel({
+					id: this._currentCharacterId,
+					name: this._state.getName?.(),
+					classes: this._state.getClasses?.(),
+				});
+				return;
+			}
 			characters = this._state.getAllCharacters();
 		}
 
@@ -2391,12 +2593,7 @@ class CharacterSheetPage {
 		}
 
 		characters.forEach(char => {
-			const name = char.name || "Unnamed Character";
-			// Show class info with total level
-			const totalLevel = char.classes?.reduce((sum, c) => sum + (c.level || 0), 0) || 0;
-			const classNames = char.classes?.map(c => c.name).join("/") || "";
-			const classInfo = classNames ? `${classNames} ${totalLevel}` : "";
-			const label = classInfo ? `${name} — ${classInfo}` : name;
+			const label = this._getCharacterDropdownLabel(char);
 			const option = document.createElement("option");
 			option.value = char.id;
 			option.textContent = label;
@@ -2433,6 +2630,7 @@ class CharacterSheetPage {
 		this._characterLoadGeneration = loadGeneration;
 		const previousCharacterId = this._currentCharacterId;
 		this._detachHubRealtime?.();
+		this._campaign?.resetCharacterScope?.();
 		let canonical;
 		try {
 			canonical = await this._characterRepository.pGet({characterId: charId});
@@ -2442,7 +2640,10 @@ class CharacterSheetPage {
 					loadGeneration === this._characterLoadGeneration
 					&& previousCharacterId
 					&& this._canRestoreHubRealtimeAfterError?.(error) !== false
-				) this._attachHubRealtime?.({characterId: previousCharacterId});
+				) {
+					this._attachHubRealtime?.({characterId: previousCharacterId});
+					await this._campaign?.pRefreshCurrentCharacter?.();
+				}
 				throw error;
 			}
 			window.location.replace(getCloudCharacterUrl({
@@ -2463,6 +2664,10 @@ class CharacterSheetPage {
 
 		if (character) {
 			this._currentCharacterId = charId;
+			this._currentCharacterAccess = this._characterRepository.getCharacterAccess?.({characterId: charId})
+				|| CHARACTER_ACCESS_MODES.OWNER;
+			this._isCurrentCharacterNew = false;
+			if (this._selCharacter) this._selCharacter.value = charId;
 			this._isLevelUpBannerDismissed = false;
 			this._state.clearCampaignSettingsOverlay();
 			this._state.loadFromJson(character);
@@ -2516,6 +2721,8 @@ class CharacterSheetPage {
 			url.searchParams.set("id", charId);
 			window.history.replaceState({}, "", url);
 			if (loadGeneration === this._characterLoadGeneration && this._currentCharacterId === charId) {
+				await this._campaign?.pRefreshCurrentCharacter?.();
+				if (loadGeneration !== this._characterLoadGeneration || this._currentCharacterId !== charId) return false;
 				this._attachHubRealtime({characterId: charId});
 			}
 		}
@@ -2525,8 +2732,11 @@ class CharacterSheetPage {
 	_createNewCharacter () {
 		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
 		this._detachHubRealtime?.();
+		this._campaign?.resetCharacterScope?.();
 		this._clearLastHpChange();
 		this._currentCharacterId = CryptUtil.uid();
+		this._currentCharacterAccess = CHARACTER_ACCESS_MODES.OWNER;
+		this._isCurrentCharacterNew = true;
 		this._isLevelUpBannerDismissed = false;
 		this._state.clearCampaignSettingsOverlay();
 		this._state.reset();
@@ -2809,22 +3019,32 @@ class CharacterSheetPage {
 
 		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
 		this._detachHubRealtime?.();
+		this._campaign?.resetCharacterScope?.();
 		this._clearLastHpChange();
 		this._currentCharacterId = newId;
+		this._currentCharacterAccess = CHARACTER_ACCESS_MODES.OWNER;
+		this._isCurrentCharacterNew = true;
 		this._isLevelUpBannerDismissed = false;
 		this._state.loadFromJson(charData);
 		this._reconcileClassFeatures();
 		if (!await this._saveCurrentCharacter()) {
 			this._currentCharacterId = sourceId;
+			this._currentCharacterAccess = this._characterRepository.getCharacterAccess?.({characterId: sourceId})
+				|| CHARACTER_ACCESS_MODES.OWNER;
+			this._isCurrentCharacterNew = false;
 			this._state.loadFromJson(sourceData);
 			this._reconcileClassFeatures();
 			this._renderCharacter();
 			this._selCharacter.value = sourceId;
+			await this._pRefreshPersistedCharacterUi({
+				characterId: sourceId,
+				character: sourceData,
+			});
 			this._attachHubRealtime?.({characterId: sourceId});
 			return;
 		}
 		await this._pLoadCharacters();
-		this._selCharacter.value = newId;
+		this._selCharacter.value = this._currentCharacterId;
 	}
 
 	/**
@@ -2840,19 +3060,28 @@ class CharacterSheetPage {
 		const charData = state.toJson();
 		charData.id = newId;
 
-		const persisted = await this._characterRepository.pUpsert({character: charData});
+		const persisted = await this._characterRepository.pUpsert({character: charData, isCreate: true});
 
 		// Load the new character
 		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
 		this._detachHubRealtime?.();
+		this._campaign?.resetCharacterScope?.();
 		this._clearLastHpChange();
 		this._currentCharacterId = persisted?.id || newId;
+		this._currentCharacterAccess = CHARACTER_ACCESS_MODES.OWNER;
+		this._isCurrentCharacterNew = false;
 		this._isLevelUpBannerDismissed = false;
 		this._state.loadFromJson(persisted || charData);
 		this._reconcileClassFeatures();
-		await this._pLoadCharacters();
-		this._selCharacter.value = this._currentCharacterId;
+		const url = new URL(window.location.href);
+		url.searchParams.set("id", this._currentCharacterId);
+		window.history?.replaceState?.({}, "", url);
 		this._attachHubRealtime?.({characterId: this._currentCharacterId});
+		await this._pRefreshPersistedCharacterUi({
+			characterId: this._currentCharacterId,
+			previousCharacterId: newId,
+			character: persisted || charData,
+		});
 		return true;
 	}
 
@@ -4360,6 +4589,10 @@ class CharacterSheetPage {
 
 	async _saveCurrentCharacter ({isInteractiveConflict = true} = {}) {
 		if (!this._currentCharacterId) return;
+		if (this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY) {
+			this._updateSaveIndicator("readonly");
+			return true;
+		}
 		const saveFence = getCharacterSaveFence(this);
 		const isSaveCurrent = () => isCharacterSaveFenceCurrent({sheet: this, saveFence});
 
@@ -4385,20 +4618,36 @@ class CharacterSheetPage {
 		if (this._characterRepository.isRescueMirrorEnabled) this._writeActiveCharacterMirror(charData);
 
 		try {
-			const persisted = await this._characterRepository.pUpsert({character: charData});
-			if (!isSaveCurrent()) return false;
+			const persisted = await this._characterRepository.pUpsert({
+				character: charData,
+				isCreate: !!this._isCurrentCharacterNew,
+			});
+			if (!isSaveCurrent()) return true;
 			if (persisted?.id && persisted.id !== charData.id && this._currentCharacterId === charData.id) {
+				const previousCharacterId = this._currentCharacterId;
 				this._currentCharacterId = persisted.id;
 				saveFence.characterId = persisted.id;
 				this._state.setId?.(persisted.id);
 				const url = new URL(window.location.href);
 				url.searchParams.set("id", persisted.id);
 				window.history?.replaceState?.({}, "", url);
-				await this._pLoadCharacters?.();
-				if (!isSaveCurrent()) return false;
-				if (this._selCharacter) this._selCharacter.value = persisted.id;
+				this._currentCharacterAccess = this._characterRepository.getCharacterAccess?.({
+					characterId: persisted.id,
+				}) || CHARACTER_ACCESS_MODES.OWNER;
+				this._isCurrentCharacterNew = false;
 				this._attachHubRealtime?.({characterId: persisted.id});
+				await this._pRefreshPersistedCharacterUi({
+					characterId: persisted.id,
+					previousCharacterId,
+					character: persisted,
+					fnIsCurrent: isSaveCurrent,
+				});
+				if (!isSaveCurrent()) return true;
 			}
+			this._currentCharacterAccess = this._characterRepository.getCharacterAccess?.({
+				characterId: persisted?.id || this._currentCharacterId,
+			}) || CHARACTER_ACCESS_MODES.OWNER;
+			this._isCurrentCharacterNew = false;
 			if (persisted) {
 				const getClean = data => {
 					const out = MiscUtil.copyFast(data);
@@ -4511,28 +4760,37 @@ class CharacterSheetPage {
 
 	/**
 	 * Update the save indicator UI
-	 * @param {"saving"|"saved"|"error"} status
+	 * @param {"saving"|"saved"|"error"|"readonly"} status
 	 */
 	_updateSaveIndicator (status) {
 		const indicator = document.getElementById("charsheet-save-indicator");
 		if (!indicator) return;
 
-		indicator.classList.remove("charsheet__save-indicator--saving", "charsheet__save-indicator--error");
+		indicator.classList.remove("charsheet__save-indicator--saving", "charsheet__save-indicator--error", "charsheet__save-indicator--readonly");
 
 		switch (status) {
 			case "saving":
+				indicator.title = "Auto-save status";
 				indicator.classList.add("charsheet__save-indicator--saving");
 				if (indicator.querySelector(".charsheet__save-icon")) indicator.querySelector(".charsheet__save-icon").textContent = "⟳";
 				if (indicator.querySelector(".charsheet__save-text")) indicator.querySelector(".charsheet__save-text").textContent = "Saving...";
 				break;
 			case "saved":
+				indicator.title = "Auto-save status";
 				if (indicator.querySelector(".charsheet__save-icon")) indicator.querySelector(".charsheet__save-icon").textContent = "✓";
 				if (indicator.querySelector(".charsheet__save-text")) indicator.querySelector(".charsheet__save-text").textContent = "Saved";
 				break;
 			case "error":
+				indicator.title = "Auto-save error";
 				indicator.classList.add("charsheet__save-indicator--error");
 				if (indicator.querySelector(".charsheet__save-icon")) indicator.querySelector(".charsheet__save-icon").textContent = "✗";
 				if (indicator.querySelector(".charsheet__save-text")) indicator.querySelector(".charsheet__save-text").textContent = "Error";
+				break;
+			case "readonly":
+				indicator.classList.add("charsheet__save-indicator--readonly");
+				indicator.title = "Read-only DM view";
+				if (indicator.querySelector(".charsheet__save-icon")) indicator.querySelector(".charsheet__save-icon").textContent = "🔒";
+				if (indicator.querySelector(".charsheet__save-text")) indicator.querySelector(".charsheet__save-text").textContent = "Read only";
 				break;
 		}
 	}
@@ -4658,6 +4916,48 @@ class CharacterSheetPage {
 
 		// Update tab visibility based on character state
 		this._updateTabVisibility();
+		this._applyCharacterAccessMode();
+	}
+
+	_applyCharacterAccessMode () {
+		if (typeof document === "undefined") return;
+		const root = document.querySelector?.(".charsheet-page");
+		if (!root) return;
+		const isReadOnly = this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY;
+		const wasReadOnly = root.getAttribute?.("data-character-access") === "dm-readonly";
+		root.classList?.toggle("charsheet-page--read-only", isReadOnly);
+		root.setAttribute?.("data-character-access", isReadOnly ? "dm-readonly" : "owner");
+		const allowedIds = new Set([
+			"charsheet-sel-character",
+			"charsheet-btn-export",
+			"charsheet-btn-print",
+			"charsheet-btn-rolllog",
+		]);
+		for (const control of root.querySelectorAll?.("button, input, select, textarea, [contenteditable=\"true\"]") || []) {
+			if (allowedIds.has(control.id)) continue;
+			if (isReadOnly) {
+				if (control.getAttribute?.("contenteditable") === "true") {
+					control.dataset.charsheetReadOnlyWasContenteditable = "true";
+					control.setAttribute("contenteditable", "false");
+				}
+				if (control.dataset.charsheetReadOnlyWasDisabled == null) {
+					control.dataset.charsheetReadOnlyWasDisabled = control.disabled ? "true" : "false";
+				}
+				control.disabled = true;
+				control.setAttribute?.("aria-disabled", "true");
+				continue;
+			}
+			if (control.dataset.charsheetReadOnlyWasDisabled == null) continue;
+			control.disabled = control.dataset.charsheetReadOnlyWasDisabled === "true";
+			control.removeAttribute?.("aria-disabled");
+			delete control.dataset.charsheetReadOnlyWasDisabled;
+			if (control.dataset.charsheetReadOnlyWasContenteditable === "true") {
+				control.setAttribute("contenteditable", "true");
+				delete control.dataset.charsheetReadOnlyWasContenteditable;
+			}
+		}
+		if (isReadOnly) this._updateSaveIndicator("readonly");
+		else if (wasReadOnly) this._updateSaveIndicator("saved");
 	}
 
 	_renderBasicInfo () {

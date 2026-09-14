@@ -9,6 +9,7 @@ describe("campaign hub pages", () => {
 	const scss = read("scss/hub.scss");
 	const navigation = read("js/navigation.js");
 	const rulesPolicyManager = read("js/hub/hub-rules-policy-manager.js");
+	const hubCampaignPage = read("test/e2e/pages/HubCampaignPage.ts");
 
 	it("exposes signed-out, loading, error, and signed-in states", () => {
 		for (const id of ["hub-loading", "hub-error", "hub-signed-out", "hub-signed-in"]) {
@@ -22,6 +23,11 @@ describe("campaign hub pages", () => {
 		expect(hubHtml).toContain("for=\"hub-campaign-name\"");
 		expect(hubHtml).toContain("id=\"hub-create-submit\"");
 		expect(hubHtml).not.toContain("<dialog");
+	});
+
+	it("waits for both empty and populated campaign-list render states before creating another campaign", () => {
+		expect(hubCampaignPage).toContain("#hub-campaign-list .hub-campaign-row, #hub-campaign-empty:not(.ve-hidden)");
+		expect(hubCampaignPage).not.toContain("#hub-campaign-list .hub-data-row, #hub-campaign-empty:not(.ve-hidden)");
 	});
 
 	it("exposes account/session/deletion and campaign lifecycle controls", () => {
@@ -102,10 +108,36 @@ describe("campaign hub pages", () => {
 
 	it("requires an explicit source identity for condition effects", () => {
 		const source = read("js/hub/hub-page.js");
-		expect(campaignHtml).toContain("id=\"campaign-action-condition-source\"");
-		expect(campaignHtml).toContain("value=\"XPHB\"");
-		expect(source).toContain("arguments: {condition: {name: rawValue, source: conditionSource}}");
+		const topLevelImports = source.slice(0, source.indexOf("const api = new HubApiClient();"));
+		expect(campaignHtml).toContain("id=\"campaign-action-condition\"");
+		expect(campaignHtml).not.toContain("id=\"campaign-action-condition-source\"");
+		expect(topLevelImports).not.toContain("hub-condition-catalog.js");
+		expect(source).toContain("const CONDITION_CATALOG_MODULE_URLS = Object.freeze([");
+		expect(source).toContain("\"./hub-condition-catalog.js?retry=2\"");
+		expect(source).toContain("let conditionCatalogModuleAttemptIndex = 0;");
+		expect(source).toContain("conditionCatalogModule = await import(conditionCatalogModuleUrl);");
+		expect(source).toContain("CONDITION_CATALOG_MODULE_URLS[conditionCatalogModuleAttemptIndex++]");
+		expect(source).toMatch(/conditionCatalogModuleAttemptIndex\s*<\s*CONDITION_CATALOG_MODULE_URLS\.length/);
+		expect(source).toContain("\"module_failed\"");
+		expect(source).toContain("conditionCatalogState = \"module_exhausted\"");
+		expect(source).toContain("conditionCatalogState = \"data_failed\"");
+		expect(source).not.toContain("conditionCatalogState === \"failed\"");
+		expect(source).not.toContain("await pRefreshConditionCatalog({campaignBrewContent: context.brewBundle?.content});");
+		expect(source).toMatch(/if \(\["idle", "module_failed", "data_failed"\]\.includes\(conditionCatalogState\)\) \{\s+void pRefreshConditionCatalog/);
+		expect(source).toContain("pLoadCampaignConditionCatalog");
+		expect(source).toContain("conditionCatalogByUid");
+		expect(source).toContain("getCurrentTargetConditions");
+		expect(source).toContain("event.type === \"brew.activated\"");
+		expect(source).toContain("pRefreshContextBoundControls");
 		expect(source).not.toContain("source: \"PHB\"");
+	});
+
+	it("labels another member's canonical sheet as DM inspection rather than editing", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("function renderCharacterList ({campaignId, characters, session, isDm})");
+		expect(source).toContain("const isReadOnlyDm = isDm && character.ownerAccountId !== session.account.id");
+		expect(source).toContain("Open this character in a read-only DM view");
+		expect(source).toContain("\"Inspect sheet\" : \"Open sheet\"");
 	});
 
 	it("keeps loaded campaign data visible while offline and requires a refresh after reconnecting", () => {
@@ -151,7 +183,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("characterSetup.href = hasCharacterChoices ? \"#campaign-character-list\" : \"#campaign-upload-local\"");
 		expect(source).toContain("setHidden(characterSetup, campaign.status !== \"active\" || campaign.role !== \"player\" || playerCharacters.length === 1)");
 		expect(source).toContain("setHidden(readonlyPrimary, !isSpectator && campaign.status === \"active\")");
-		expect(source).toContain("renderCharacterList({campaignId, characters: charactersNxt});");
+		expect(source).toContain("characters: charactersNxt,\n\t\t\t\tsession,\n\t\t\t\tisDm: [\"dm\", \"co_dm\"].includes(campaign.role)");
 		expect(source).toContain("applyCampaignRoleLayout({campaign, characters: charactersNxt});");
 		for (const id of [
 			"campaign-open-primary-character",

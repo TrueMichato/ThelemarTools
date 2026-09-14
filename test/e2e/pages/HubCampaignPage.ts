@@ -318,6 +318,9 @@ export class HubCampaignPage {
 
 	async createCampaign (name: string): Promise<string> {
 		await this.gotoHub();
+		await expect(
+			this.page.locator("#hub-campaign-list .hub-campaign-row, #hub-campaign-empty:not(.ve-hidden)").first(),
+		).toBeVisible();
 		await this.page.locator("#hub-campaign-name").fill(name);
 		await this.page.locator("#hub-create-submit").click();
 		await this.page.waitForURL(/campaign\.html\?id=/);

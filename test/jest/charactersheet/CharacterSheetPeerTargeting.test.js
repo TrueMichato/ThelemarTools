@@ -51,6 +51,7 @@ describe("Character Sheet peer targeting", () => {
 	let controller;
 	let capability;
 	let characterId;
+	let isOwner;
 
 	beforeEach(() => {
 		root = globalThis.e_({tag: "div"});
@@ -74,6 +75,7 @@ describe("Character Sheet peer targeting", () => {
 		};
 		capability = {...CAPABILITY, resourceKinds: [...CAPABILITY.resourceKinds]};
 		characterId = "source-character";
+		isOwner = true;
 		fnPickTarget = jest.fn(async ({targets}) => ({kind: "target", targetRef: targets.find(target => !target.isSelf).targetRef}));
 		onAuthoritativeApproval = jest.fn(async () => true);
 		controller = new CharacterSheetPeerTargeting({
@@ -81,6 +83,7 @@ describe("Character Sheet peer targeting", () => {
 			api,
 			root,
 			fnGetCharacterId: () => characterId,
+			fnIsOwner: () => isOwner,
 			fnGetRulesVersionId: () => "rules-version-1",
 			fnGetCapability: () => capability,
 			fnCreateId: () => "command-1",
@@ -419,5 +422,20 @@ describe("Character Sheet peer targeting", () => {
 		await pFlush();
 		expect(controller._characterId).toBe("source-character");
 		expect(api.pListCharacterOutgoingActions).toHaveBeenCalledTimes(beforeReconnect + 1);
+	});
+
+	it("cannot reactivate after authority changes to DM read-only", async () => {
+		await pFlush();
+		const readsBeforeAuthorityChange = api.pListCharacterOutgoingActions.mock.calls.length;
+		isOwner = false;
+		controller.deactivate();
+
+		expect(controller.activate({characterId: "source-character"})).toBe(false);
+		controller.onConnectionState({state: "live"});
+		await pFlush();
+
+		expect(controller._characterId).toBeNull();
+		expect(root.hidden).toBe(true);
+		expect(api.pListCharacterOutgoingActions).toHaveBeenCalledTimes(readsBeforeAuthorityChange);
 	});
 });
