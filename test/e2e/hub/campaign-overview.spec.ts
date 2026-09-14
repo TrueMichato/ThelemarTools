@@ -115,26 +115,65 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		expect(await dm.page.evaluate(() => (globalThis as any).charSheet._saveCurrentCharacter())).toBe(true);
 		await dmSheet.waitForHubRealtimeLive();
 
-		let failedProjectionReads = 0;
+		let projectionReadRequests = 0;
+		let allowProjectionReads = false;
 		await dm.page.route(`**/api/characters/${character.id}`, async route => {
-			if (route.request().method() !== "GET" || failedProjectionReads) {
+			if (route.request().method() !== "GET") {
 				await route.continue();
 				return;
 			}
-			failedProjectionReads++;
-			await route.fulfill({
-				status: 503,
-				contentType: "application/json",
-				body: JSON.stringify({error: {code: "TEST_REFRESH_FAILED", message: "Synthetic projection refresh failure"}}),
+			projectionReadRequests++;
+			if (!allowProjectionReads) {
+				await route.fulfill({
+					status: 503,
+					contentType: "application/json",
+					body: JSON.stringify({error: {code: "TEST_REFRESH_FAILED", message: "Synthetic projection refresh failure"}}),
+				});
+				return;
+			}
+			await route.continue();
+		});
+		await dm.page.evaluate(() => {
+			(globalThis as any).__dmProjectionInvalidations = 0;
+			(globalThis as any).__dmProjectionRefreshFailures = 0;
+			(globalThis as any).charSheet._hubRealtime.on("projectionInvalidated", () => {
+				(globalThis as any).__dmProjectionInvalidations++;
 			});
+			const fnToast = (globalThis as any).JqueryUtil.doToast.bind((globalThis as any).JqueryUtil);
+			(globalThis as any).JqueryUtil.doToast = (options: any) => {
+				if (`${options?.content || ""}`.startsWith("Could not refresh this read-only character")) {
+					(globalThis as any).__dmProjectionRefreshFailures++;
+				}
+				return fnToast(options);
+			};
 		});
 		const playerSheet = new CharacterSheetPage(player.page);
 		await playerSheet.gotoCampaignCharacter({campaignId, characterId: character.id});
-		await playerSheet.renameCharacter("Readonly Rowan Updated");
-		await expect.poll(() => failedProjectionReads).toBe(1);
-		await expect(dmSheet.characterName).toHaveValue("Readonly Rowan");
+		await dmContext.setOffline(true);
 		try {
-			await dmContext.setOffline(true);
+			await dm.page.evaluate(() => (globalThis as any).charSheet?._hubRealtime?._active?.client?._socket?.close());
+			await dm.page.waitForFunction(() => {
+				const state = (globalThis as any).charSheet?._hubRealtime?._active?.client?._connectionState?.state;
+				return state && state !== "live";
+			});
+			await playerSheet.renameCharacter("Readonly Rowan Updated");
+			await expect.poll(async () => (await player.getCharacter(character.id)).data.name)
+				.toBe("Readonly Rowan Updated");
+		} finally {
+			await dmContext.setOffline(false);
+		}
+		await dmSheet.waitForHubRealtimeLive();
+		await expect.poll(async () => {
+			const failureCount = await dm.page.evaluate(() => (globalThis as any).__dmProjectionRefreshFailures);
+			return projectionReadRequests > 0 && failureCount === projectionReadRequests;
+		}).toBe(true);
+		await expect(dmSheet.characterName).toHaveValue("Readonly Rowan");
+		expect(await dm.page.evaluate(() => (globalThis as any).__dmProjectionInvalidations)).toBe(1);
+
+		const readsBeforeSameCursorReconnect = projectionReadRequests;
+		allowProjectionReads = true;
+		await dmContext.setOffline(true);
+		try {
 			await dm.page.evaluate(() => (globalThis as any).charSheet?._hubRealtime?._active?.client?._socket?.close());
 			await dm.page.waitForFunction(() => {
 				const state = (globalThis as any).charSheet?._hubRealtime?._active?.client?._connectionState?.state;
@@ -145,8 +184,11 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		}
 		await dmSheet.waitForHubRealtimeLive();
 		await expect(dmSheet.characterName).toHaveValue("Readonly Rowan Updated", {timeout: 20_000});
+		expect(projectionReadRequests).toBe(readsBeforeSameCursorReconnect + 1);
+		expect(await dm.page.evaluate(() => (globalThis as any).__dmProjectionInvalidations)).toBe(1);
 		await expect(dmSheet.characterName).toBeDisabled();
 		await dmSheet.requestHubRealtimeResyncAndWait();
+		expect(await dm.page.evaluate(() => (globalThis as any).__dmProjectionInvalidations)).toBe(1);
 		expect(ownerOnlyRequests).toEqual([]);
 		expect(characterMutations).toEqual([]);
 		expect((await player.getCharacter(character.id)).data.name).toBe("Readonly Rowan Updated");
