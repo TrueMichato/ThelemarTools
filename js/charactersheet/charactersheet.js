@@ -2481,7 +2481,8 @@ class CharacterSheetPage {
 		const {chosen: character, mirrorWon} = this._reconcilePersistedCharacter(canonical, mirror);
 
 		if (character) {
-			this._currentCharacterId = charId;
+			const resolvedId = canonical?.id || charId;
+			this._currentCharacterId = resolvedId;
 			this._isLevelUpBannerDismissed = false;
 			this._state.clearCampaignSettingsOverlay();
 			this._state.loadFromJson(character);
@@ -2506,9 +2507,9 @@ class CharacterSheetPage {
 			// (the await above can interleave with another load).
 			const needsSave = mirrorWon
 				|| (reconcileResult && (reconcileResult.added > 0 || reconcileResult.backfilled > 0));
-			if (needsSave && this._currentCharacterId === charId) {
+			if (needsSave && this._currentCharacterId === resolvedId) {
 				await this._saveCurrentCharacter();
-			} else if (this._characterRepository.isRescueMirrorEnabled && this._currentCharacterId === charId) {
+			} else if (this._characterRepository.isRescueMirrorEnabled && this._currentCharacterId === resolvedId) {
 				// Nothing to persist, but the mirror (if any) now agrees with canonical — clear it.
 				this._clearActiveCharacterMirror(charId);
 			}
@@ -2532,10 +2533,10 @@ class CharacterSheetPage {
 
 			// Update URL
 			const url = new URL(/** @type {*} */ (window.location));
-			url.searchParams.set("id", charId);
+			url.searchParams.set("id", resolvedId);
 			window.history.replaceState({}, "", url);
-			if (loadGeneration === this._characterLoadGeneration && this._currentCharacterId === charId) {
-				this._attachHubRealtime({characterId: charId});
+			if (loadGeneration === this._characterLoadGeneration && this._currentCharacterId === resolvedId) {
+				this._attachHubRealtime({characterId: resolvedId});
 			}
 		}
 		return true;
@@ -4515,8 +4516,23 @@ class CharacterSheetPage {
 				const resolved = await this._characterRepository.pResolveConflict({
 					characterId: saveFence.characterId,
 					choice: choice ? "local" : "server",
+					...(!choice
+						? {
+							fnAdoptLive: server => {
+								if (!isSaveCurrent()) return false;
+								this._state.loadFromJson(server);
+								this._reconcileClassFeatures();
+								this._renderCharacter();
+								return true;
+							},
+						}
+						: {}),
 				});
 				if (!isSaveCurrent()) return false;
+				if (!choice) {
+					this._updateSaveIndicator("saved");
+					return true;
+				}
 				if (resolved) {
 					this._state.loadFromJson(resolved);
 					this._renderCharacter();

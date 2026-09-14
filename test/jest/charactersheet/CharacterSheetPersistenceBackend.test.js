@@ -343,6 +343,7 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 			expect(host._characterRepository.pResolveConflict).toHaveBeenCalledWith({
 				characterId: "private-id",
 				choice: "server",
+				fnAdoptLive: expect.any(Function),
 			});
 
 			CharacterSheetPage.prototype._concealHubPrivateCharacter.call(host);
@@ -354,6 +355,51 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 			expect(host._renderCharacter).not.toHaveBeenCalled();
 		} finally {
 			globalThis.document = previousDocument;
+			consoleError.mockRestore();
+			prompt.mockRestore();
+		}
+	});
+
+	it("does not overwrite a newer queued operation after resolving a conflict with server state", async () => {
+		let live = {id: "private-id", name: "Mira", hp: {current: 9}};
+		const state = {
+			toJson: () => structuredClone(live),
+			loadFromJson: data => { live = structuredClone(data); },
+		};
+		const host = makeHost({state});
+		host._currentCharacterId = "private-id";
+		host._characterLoadGeneration = 1;
+		host._isHubCharacter = true;
+		host._reconcileClassFeatures = jest.fn();
+		host._renderCharacter = jest.fn();
+		host._updateSaveIndicator = jest.fn();
+		const conflict = Object.assign(new Error("Character changed remotely."), {
+			code: "CHARACTER_CONFLICT",
+			recovery: {server: {name: "Mira", hp: {current: 7}}},
+		});
+		host._characterRepository = {
+			isRescueMirrorEnabled: false,
+			pUpsert: jest.fn(async () => { throw conflict; }),
+			pResolveConflict: jest.fn(async ({fnAdoptLive}) => {
+				fnAdoptLive?.({id: "private-id", name: "Mira", hp: {current: 7}});
+				// A genuinely new revision queued behind conflict resolution applies before the
+				// awaiting caller resumes.
+				live = {id: "private-id", name: "Mira", hp: {current: 5}};
+				return {id: "private-id", name: "Mira", hp: {current: 7}};
+			}),
+		};
+		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(false);
+		const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+
+		try {
+			await expect(host._saveCurrentCharacter()).resolves.toBe(true);
+			expect(host._characterRepository.pResolveConflict).toHaveBeenCalledWith(expect.objectContaining({
+				characterId: "private-id",
+				choice: "server",
+				fnAdoptLive: expect.any(Function),
+			}));
+			expect(live.hp.current).toBe(5);
+		} finally {
 			consoleError.mockRestore();
 			prompt.mockRestore();
 		}

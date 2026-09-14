@@ -146,6 +146,57 @@ describe("Character Sheet repository seam", () => {
 		expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "server-id"});
 	});
 
+	it("adopts a canonical id when loading through a temporary recovery URL", async () => {
+		const previousLocation = globalThis.window.location;
+		const previousHistory = globalThis.window.history;
+		globalThis.window.location = new URL("http://test/charactersheet.html?campaign=campaign-1&id=temporary-id");
+		globalThis.window.history = {replaceState: jest.fn()};
+		const state = {
+			clearCampaignSettingsOverlay: jest.fn(),
+			loadFromJson: jest.fn(),
+			setCampaignSettingsOverlay: jest.fn(),
+			getBackgroundTheme: jest.fn(() => null),
+			getViewMode: jest.fn(() => "sheet"),
+		};
+		const host = {
+			_characterLoadGeneration: 0,
+			_currentCharacterId: null,
+			_characterRepository: {
+				isRescueMirrorEnabled: false,
+				pGet: jest.fn(async ({characterId}) => {
+					expect(characterId).toBe("temporary-id");
+					return {id: "server-id", name: "Recovered"};
+				}),
+			},
+			_state: state,
+			_hubContext: null,
+			_detachHubRealtime: jest.fn(),
+			_reconcilePersistedCharacter: CharacterSheetPage.prototype._reconcilePersistedCharacter,
+			_reconcileClassFeatures: jest.fn(() => null),
+			_ensureLinguisticsSkillIfNeeded: jest.fn(),
+			_renderCharacter: jest.fn(),
+			_applyBackgroundTheme: jest.fn(),
+			_updateThemePickerSelection: jest.fn(),
+			_attachHubRealtime: jest.fn(),
+			_layout: null,
+			_playMode: null,
+		};
+
+		try {
+			await expect(CharacterSheetPage.prototype._pLoadCharacter.call(host, "temporary-id")).resolves.toBe(true);
+			expect(host._currentCharacterId).toBe("server-id");
+			expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "server-id"});
+			expect(globalThis.window.history.replaceState).toHaveBeenCalledWith(
+				{},
+				"",
+				expect.objectContaining({searchParams: expect.any(URLSearchParams)}),
+			);
+		} finally {
+			globalThis.window.location = previousLocation;
+			globalThis.window.history = previousHistory;
+		}
+	});
+
 	it("applies remote fields while preserving edits made during the save", async () => {
 		let callCount = 0;
 		let loaded = null;

@@ -125,14 +125,18 @@ rejected before network submission. Authoritative operation and resync transform
 snapshot, then replace the complete persisted queue before replay. Only the matching successful command is
 dequeued. Choosing local after an overlap replays every unresolved command in order against the selected local
 document. Choosing server explicitly discards the complete queue and installs that canonical document and its
-operation watermark into the accepted, live, and latest-submitted tracks before the serialized mutation queue
-resumes, so a delayed already-covered operation cannot be applied twice.
+operation watermark into the accepted, live, latest-submitted, and visible Character Sheet tracks inside the
+same serialized mutation. Realtime resumes only after that fenced adoption, so neither an already-covered event
+nor a genuinely newer queued operation can be overwritten by the caller's stale conflict result.
 
-Recovery records for not-yet-canonical creates carry the authenticated owner id and original `clientImportId`.
-Startup listing matches only an owner-visible server row with the same import id, then atomically moves the
-durable queue from its temporary key to the canonical character id. If the create never reached the server, the
-owner's recovery-only draft remains listed under its temporary id and retries with the original create
-idempotency key. Recovery-only records are never discovered across accounts.
+Recovery queues carry the authenticated owner id and explicit first-command intent. Only genuine creates retain
+the original `clientImportId`; patch recovery is never exposed or replayed as a replacement create when its
+established character is absent. URL routing resolves owner-scoped create recovery before loading the selected
+character. Startup listing matches only an owner-visible server row with the same import id, then atomically
+moves the durable queue from its temporary key to the canonical character id. If the create never reached the
+server, the owner's recovery-only draft remains listed under its temporary id and retries with the original
+create idempotency key. Recovery is validated against the current account before hydration or migration, and
+cross-account collisions leave the original stored recovery untouched.
 
 ## Transactional outbox and realtime
 

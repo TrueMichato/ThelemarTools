@@ -1134,4 +1134,109 @@ describe("Conflict candidates after a resync", () => {
 		expect(book.live).toMatchObject({revision: 2, acceptedSequence: 20});
 		expect(book.latestSubmitted).toMatchObject({revision: 2, acceptedSequence: 20});
 	});
+
+	it("resolves Use Server from the conflict updated by an earlier queued reconciliation", async () => {
+		const initialDocument = {
+			id: "character-1",
+			campaignId: "campaign-1",
+			revision: 1,
+			operationWatermark: 0,
+			data: makeCharacterData({current: 10}),
+		};
+		const api = makeApi({character: initialDocument});
+		const repository = makeRepository({api});
+		await repository.pGet({characterId: "character-1"});
+		const staleConflictDocument = {
+			...structuredClone(initialDocument),
+			revision: 2,
+			operationWatermark: 20,
+			data: makeCharacterData({current: 7}),
+		};
+		repository._conflicts.set("character-1", {
+			base: makeCharacterData({current: 10}),
+			local: makeCharacterData({current: 9}),
+			server: structuredClone(staleConflictDocument.data),
+			serverDocument: structuredClone(staleConflictDocument),
+			conflicts: [{localPath: "/hp/current", remotePath: "/hp/current"}],
+		});
+		api.state.character = {
+			...structuredClone(initialDocument),
+			revision: 3,
+			operationWatermark: 21,
+			data: makeCharacterData({current: 5}),
+		};
+		let live = makeCharacterData({current: 9});
+
+		const reconciliation = repository.pReconcileAuthoritativeCharacter({
+			characterId: "character-1",
+			fnGetLiveData: () => structuredClone(live),
+			fnAdoptLive: next => { live = next; },
+		});
+		const resolution = repository.pResolveConflict({
+			characterId: "character-1",
+			choice: "server",
+			fnAdoptLive: next => {
+				live = structuredClone(next);
+				return true;
+			},
+		});
+
+		await expect(reconciliation).resolves.toMatchObject({status: "conflict"});
+		await expect(resolution).resolves.toBeNull();
+		expect(live.hp.current).toBe(5);
+		expect(repository._accepted.get("character-1")).toMatchObject({
+			revision: 3,
+			data: {hp: {current: 5}},
+		});
+	});
+
+	it("adopts Use Server into live state before a genuinely new queued operation", async () => {
+		const serverDocument = {
+			id: "character-1",
+			campaignId: "campaign-1",
+			revision: 2,
+			operationWatermark: 20,
+			data: makeCharacterData({current: 7}),
+		};
+		const api = makeApi({character: serverDocument});
+		const repository = makeRepository({api});
+		await repository.pGet({characterId: "character-1"});
+		repository._conflicts.set("character-1", {
+			base: makeCharacterData({current: 10}),
+			local: makeCharacterData({current: 9}),
+			server: structuredClone(serverDocument.data),
+			serverDocument: structuredClone(serverDocument),
+			conflicts: [{localPath: "/hp/current", remotePath: "/hp/current"}],
+		});
+		let live = makeCharacterData({current: 9});
+
+		const resolution = repository.pResolveConflict({
+			characterId: "character-1",
+			choice: "server",
+			fnAdoptLive: next => {
+				live = structuredClone(next);
+				return true;
+			},
+		});
+		const delivery = repository.pEnqueueRealtimeDelivery({
+			characterId: "character-1",
+			fnDeliver: () => repository.applyRealtimeOperation({
+				characterId: "character-1",
+				operation: makeOperation({operationId: "operation-3", args: {amount: 2}}),
+				resultingCharacterRevision: 3,
+				eventId: "new-event",
+				sequence: 21,
+				liveData: live,
+				fnAdoptLive: next => { live = next; },
+			}),
+		});
+
+		await expect(resolution).resolves.toBeNull();
+		await expect(delivery).resolves.toMatchObject({status: "applied"});
+		expect(live.hp.current).toBe(5);
+		expect(repository._accepted.get("character-1")).toMatchObject({
+			revision: 3,
+			data: {hp: {current: 5}},
+		});
+	});
 });
