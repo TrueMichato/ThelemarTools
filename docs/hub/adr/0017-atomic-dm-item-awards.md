@@ -82,9 +82,10 @@ attunement or ability alias, full `chargesCurrent`, or empty upgrade/gemstone li
 otherwise identical trusted stack. Non-empty composition, spent charges, custom metadata, effects, materials,
 provenance, and ownership-local wrapper differences remain distinct.
 
-Legacy summary repair also excludes renderer/filter caches, renderer-created empty `entries`, and
-renderer-injected `additionalSources`. Those enhanced-catalog fields are not part of the authoritative award
-catalog and must not become canonical merely because the Character Sheet loaded the item.
+Legacy summary repair keeps the enhanced item catalog for mechanics, but sources enhancement-sensitive
+`entries` and `additionalSources` from a separate pristine pre-enhancement catalog. Source-authored `hasRefs`
+remains canonical, while renderer-created empty entries, injected sources, and renderer/filter caches remain
+excluded. Enhanced-only values must not become canonical merely because the Character Sheet loaded the item.
 
 ### Canonical mutation, audit, and events
 

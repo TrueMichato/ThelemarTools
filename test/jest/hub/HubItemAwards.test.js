@@ -588,6 +588,8 @@ describe("Campaign Hub item award domain", () => {
 			dmgType: "S",
 			weapon: true,
 			entries: ["A synthetic metadata-rich weapon used only by this regression."],
+			hasRefs: true,
+			additionalSources: [{source: "XGE", page: 79}],
 			custom: {provenance: "synthetic-catalog"},
 		};
 		const ctx = await pCreateStoreFixture({

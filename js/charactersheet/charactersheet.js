@@ -173,6 +173,7 @@ class CharacterSheetPage {
 		this._backgrounds = [];
 		this._spellsData = [];
 		this._itemsData = [];
+		this._itemRepairData = [];
 		this._actionsData = [];
 		this._featsData = [];
 		this._optionalFeaturesData = [];
@@ -962,7 +963,7 @@ class CharacterSheetPage {
 		/* eslint-enable no-console */
 
 		// Pass loaded data to modules
-		if (this._inventory) this._inventory.setItems(this._itemsData);
+		if (this._inventory) this._inventory.setItems(this._itemsData, {pristineItems: this._itemRepairData});
 		if (this._combat) this._combat.setItems(this._itemsData);
 		if (this._features) this._features.setFeats(this._featsData);
 		if (this._spells) this._spells.setSpells(this._spellsData);
@@ -1089,6 +1090,7 @@ class CharacterSheetPage {
 			// Load variant spell components (Arcadia 8)
 			DataUtil.loadJSON("data/items-variant-components-ar8.json").catch(() => ({item: []})),
 		]);
+		const rawItems = await DataUtil.item.loadRawJSON();
 
 		// Base site data
 		// Merge subraces into races to get _baseName, _baseSource properties for subrace grouping
@@ -1104,6 +1106,17 @@ class CharacterSheetPage {
 		// Merge site + prerelease + brew + variant component items here (all already enhanced by DataUtil.item.*).
 		this._itemsData = [...(items || []), ...(prereleaseItems || []), ...(brewItems || []), ...(variantComponents.item || [])]
 			.filter(it => !it._isItemGroup);
+		this._itemRepairData = [
+			...(rawItems.item || []),
+			...(rawItems.baseitem || []),
+			...(prereleaseData?.item || []),
+			...(prereleaseData?.baseitem || []),
+			...(brewData?.item || []),
+			...(brewData?.baseitem || []),
+			...(variantComponents.item || []),
+		]
+			.filter(it => it?.name && it?.source)
+			.map(it => MiscUtil.copyFast(it));
 		this._actionsData = actions.action || [];
 		this._featsData = feats.feat || [];
 		this._optionalFeaturesData = optFeatures.optionalfeature || [];

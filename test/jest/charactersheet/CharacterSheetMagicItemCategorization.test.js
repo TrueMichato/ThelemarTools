@@ -15,8 +15,14 @@
  *   - `_migrateInventoryItemWeaponFlag` repairs the `weapon` flag on pre-fix saves (idempotently).
  */
 
+import fs from "node:fs";
+
 import "./setup.js";
-import {addAwardedEntryToCharacter} from "../../../server/src/hub-actions.js";
+import {
+	addAwardedEntryToCharacter,
+	addTransferPayload,
+	removeTransferPayload,
+} from "../../../server/src/hub-actions.js";
 
 if (typeof globalThis.document === "undefined") {
 	globalThis.document = {
@@ -47,6 +53,16 @@ import "../../../js/charactersheet/charactersheet-inventory.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetInventory = globalThis.CharacterSheetInventory;
+const SITE_AWARD_ITEMS = JSON.parse(fs.readFileSync(
+	new URL("../../../server/data/item-award-site-catalog.json", import.meta.url),
+	"utf8",
+)).items;
+
+function getSiteAwardItem (name, source) {
+	const item = SITE_AWARD_ITEMS.find(it => it.name === name && it.source === source);
+	if (!item) throw new Error(`Missing site award item: ${name}|${source}`);
+	return structuredClone(item);
+}
 
 function newState () {
 	const state = new CharacterSheetState();
@@ -186,9 +202,19 @@ describe("Hub summary-only inventory metadata migration", () => {
 			_compositionSearch: "Transient composition index",
 			_fSources: ["TST"],
 			_l_value: "250 gp",
-			hasRefs: true,
 			variants: [{name: "Transient variant index"}],
 		};
+		const pristineCatalogItem = structuredClone(catalogItem);
+		for (const key of [
+			"_fullEntries",
+			"_fullAdditionalEntries",
+			"_valueFromRarity",
+			"_compositionSearch",
+			"_fSources",
+			"_l_value",
+			"variants",
+		]) delete pristineCatalogItem[key];
+		const enhancedCatalogItem = {...catalogItem, _isEnhanced: true};
 		const summaryOnlySave = {
 			name: "Hub character",
 			inventory: [{
@@ -208,7 +234,7 @@ describe("Hub summary-only inventory metadata migration", () => {
 			}],
 		};
 		const state = newState();
-		state.setItemCatalog([catalogItem]);
+		state.setItemCatalog([enhancedCatalogItem], {pristineItems: [pristineCatalogItem]});
 		state.loadFromJson(summaryOnlySave);
 		const inventory = makeInventory(state);
 		const item = state.getItemRaw("hub-award");
@@ -236,7 +262,6 @@ describe("Hub summary-only inventory metadata migration", () => {
 			"_compositionSearch",
 			"_fSources",
 			"_l_value",
-			"hasRefs",
 			"variants",
 		]) expect(item).not.toHaveProperty(key);
 		expect(inventory._getItemCategory(item)).toBe("Weapons");
@@ -247,13 +272,13 @@ describe("Hub summary-only inventory metadata migration", () => {
 
 		const exported = state.toJson();
 		const reloaded = newState();
-		reloaded.setItemCatalog([catalogItem]);
+		reloaded.setItemCatalog([enhancedCatalogItem], {pristineItems: [pristineCatalogItem]});
 		reloaded.loadFromJson(exported);
 		expect(reloaded.getItemRaw("hub-award")).toEqual(item);
 
 		const lateCatalog = newState();
 		lateCatalog.loadFromJson(summaryOnlySave);
-		lateCatalog.setItemCatalog([catalogItem]);
+		lateCatalog.setItemCatalog([enhancedCatalogItem], {pristineItems: [pristineCatalogItem]});
 		expect(lateCatalog.getItemRaw("hub-award")).toEqual(item);
 	});
 
@@ -369,7 +394,10 @@ describe("Hub summary-only inventory metadata migration", () => {
 		},
 	])("does not persist $label from the enhanced catalog into a repaired legacy row", ({authoritativeItem, enhancedFields, transientField}) => {
 		const state = newState();
-		state.setItemCatalog([{...authoritativeItem, ...enhancedFields, _isEnhanced: true}]);
+		state.setItemCatalog(
+			[{...authoritativeItem, ...enhancedFields, _isEnhanced: true}],
+			{pristineItems: [authoritativeItem]},
+		);
 		state.loadFromJson({
 			name: "Legacy Hub character",
 			inventory: [{
@@ -397,6 +425,107 @@ describe("Hub summary-only inventory metadata migration", () => {
 			expect.objectContaining({id: "legacy-stack", quantity: 2}),
 		]);
 		expect(repairedItem).not.toHaveProperty(transientField);
+	});
+
+	test("preserves source-authored hasRefs when only an enhanced catalog is available", () => {
+		const authoritativeItem = getSiteAwardItem("Acid Absorbing Tattoo", "TCE");
+		const state = newState();
+		state.setItemCatalog([{...authoritativeItem, _isEnhanced: true}]);
+		state.loadFromJson({
+			name: "Legacy Hub character",
+			inventory: [{
+				id: "legacy-stack",
+				item: {
+					name: authoritativeItem.name,
+					source: authoritativeItem.source,
+					rarity: authoritativeItem.rarity,
+				},
+				quantity: 1,
+			}],
+		});
+
+		expect(state.toJson().inventory[0].item.hasRefs).toBe(true);
+	});
+
+	test.each([
+		{
+			name: "Acid Absorbing Tattoo",
+			source: "TCE",
+			enhancedFields: {
+				entries: ["Renderer-dereferenced synthetic replacement."],
+			},
+			assertCanonicalFields: item => {
+				expect(item.hasRefs).toBe(true);
+				expect(item.entries).toEqual(getSiteAwardItem("Acid Absorbing Tattoo", "TCE").entries);
+			},
+		},
+		{
+			name: "Alchemist's Supplies",
+			source: "PHB",
+			enhancedFields: {},
+			assertCanonicalFields: item => {
+				expect(item.additionalSources).toEqual([{source: "XGE", page: 79}]);
+			},
+		},
+	])("preserves source-authored metadata for $name through repair, repeat award, and stash return", ({
+		name,
+		source,
+		enhancedFields,
+		assertCanonicalFields,
+	}) => {
+		const authoritativeItem = getSiteAwardItem(name, source);
+		const state = newState();
+		const inventory = makeInventory(state);
+		inventory.setItems(
+			[{...authoritativeItem, ...enhancedFields, _isEnhanced: true}],
+			{pristineItems: [authoritativeItem]},
+		);
+		state.loadFromJson({
+			name: "Legacy Hub character",
+			inventory: [{
+				id: "legacy-stack",
+				item: {
+					name: authoritativeItem.name,
+					source: authoritativeItem.source,
+					...(authoritativeItem.type != null ? {typeCode: authoritativeItem.type} : {}),
+					...(authoritativeItem.rarity != null ? {rarity: authoritativeItem.rarity} : {}),
+					...(authoritativeItem.weight != null ? {weight: authoritativeItem.weight} : {}),
+					...(authoritativeItem.value != null ? {value: authoritativeItem.value} : {}),
+				},
+				quantity: 1,
+			}],
+		});
+
+		const repairedItem = state.toJson().inventory[0].item;
+		assertCanonicalFields(repairedItem);
+
+		const repeatedAward = addAwardedEntryToCharacter({
+			container: {
+				inventory: [{id: "legacy-stack", item: repairedItem, quantity: 1}],
+				currency: {},
+			},
+			incoming: {item: authoritativeItem, quantity: 1},
+		});
+		expect(repeatedAward.container.inventory).toEqual([
+			expect.objectContaining({id: "legacy-stack", quantity: 2}),
+		]);
+
+		const deposited = removeTransferPayload({
+			container: repeatedAward.container,
+			payload: {items: [{entryId: "legacy-stack", quantity: 1}], currency: {}},
+		});
+		const stash = addTransferPayload({container: {inventory: [], currency: {}}, escrow: deposited.escrow});
+		const stashEntry = stash.inventory[0];
+		const withdrawn = removeTransferPayload({
+			container: stash,
+			payload: {items: [{entryId: stashEntry.id, quantity: 1}], currency: {}},
+		});
+		const returned = addTransferPayload({container: deposited.container, escrow: withdrawn.escrow});
+
+		expect(returned.inventory).toEqual([
+			expect.objectContaining({id: "legacy-stack", quantity: 2}),
+		]);
+		assertCanonicalFields(returned.inventory[0].item);
 	});
 });
 
