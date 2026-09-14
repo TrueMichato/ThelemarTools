@@ -230,13 +230,20 @@ describe("HTTP character repository", () => {
 		expect(storage.getItem(`hub-character-recovery:campaign-1:${temporaryId}`)).toBeNull();
 		const migrated = JSON.parse(storage.getItem(`hub-character-recovery:campaign-1:${canonical.id}`));
 		expect(migrated.commands[0].commandKeys).toEqual({create: createKey, patch: patchKey});
-		await expect(fresh.pGet({characterId: canonical.id})).resolves.toEqual({id: canonical.id, ...canonical.data});
+		await expect(fresh.pGet({characterId: temporaryId})).resolves.toEqual({id: canonical.id, ...canonical.data});
 		await expect(fresh.pUpsert({character: {id: canonical.id, ...canonical.data}, activity}))
 			.resolves.toEqual({id: canonical.id, ...canonical.data});
 		expect(retryCreates).toEqual([]);
 		expect(patches).toHaveLength(1);
 		expect(patches[0]).toEqual(expect.objectContaining({idempotencyKey: patchKey, activity}));
+		for (const id of [temporaryId, canonical.id]) {
+			expect(fresh._failedWrites.has(id)).toBe(false);
+			expect(fresh._recoveredBases.has(id)).toBe(false);
+			expect(fresh._recoveryCommandQueues.has(id)).toBe(false);
+		}
 		expect(storage.getItem(`hub-character-recovery:campaign-1:${canonical.id}`)).toBeNull();
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${temporaryId}`)).toBeNull();
+		expect(fresh.hasPendingWrites()).toBe(false);
 		expect(createKey).toBeTruthy();
 	});
 

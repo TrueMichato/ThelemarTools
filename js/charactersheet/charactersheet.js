@@ -234,12 +234,14 @@ class CharacterSheetPage {
 		this._hubRealtime?.detach();
 	}
 
-	/** `teardown-projections`: viewer-scoped projections, party inventory, and reconciliation. */
-	_detachHubProjections () {
+	/** `teardown-projections`: viewer-scoped projections, party inventory, and optionally reconciliation. */
+	_detachHubProjections ({isPreserveRepositoryReconciliation = false} = {}) {
 		this._partyInventory?.detach();
 		this._hubEffects?.deactivate();
 		this._peerTargeting?.deactivate();
-		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
+		if (!isPreserveRepositoryReconciliation) {
+			this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
+		}
 	}
 
 	_concealHubPrivateCharacter () {
@@ -291,10 +293,10 @@ class CharacterSheetPage {
 	}
 
 	/** Composed detach used by ordinary (non-context-switch) call sites. */
-	_detachHubRealtime () {
+	_detachHubRealtime ({isPreserveRepositoryReconciliation = false} = {}) {
 		this._fenceHubGeneration();
 		this._detachHubRealtimeClient();
-		this._detachHubProjections();
+		this._detachHubProjections({isPreserveRepositoryReconciliation});
 	}
 
 	// #endregion
@@ -4378,6 +4380,45 @@ class CharacterSheetPage {
 		return nxt;
 	}
 
+	_adoptCanonicalCharacterIdentity ({canonicalId, saveFence}) {
+		if (!canonicalId || !isCharacterSaveFenceCurrent({sheet: this, saveFence})) return {isCurrent: false, isChanged: false};
+		const previousId = saveFence.characterId;
+		if (canonicalId === previousId) {
+			this._state.setId?.(canonicalId);
+			return {isCurrent: true, isChanged: false};
+		}
+
+		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
+		this._detachHubRealtime?.({isPreserveRepositoryReconciliation: true});
+		this._currentCharacterId = canonicalId;
+		saveFence.characterId = canonicalId;
+		saveFence.loadGeneration = this._characterLoadGeneration;
+		this._state.setId?.(canonicalId);
+
+		const url = new URL(window.location.href);
+		url.searchParams.set("id", canonicalId);
+		if (this._isHubCharacter) {
+			if (this._hubCampaignId) {
+				url.searchParams.set("hubCampaign", this._hubCampaignId);
+				url.searchParams.delete("hubCharacter");
+			} else {
+				url.searchParams.delete("hubCampaign");
+				url.searchParams.set("hubCharacter", "1");
+			}
+		}
+		window.history?.replaceState?.({}, "", url);
+		if (this._selCharacter) this._selCharacter.value = canonicalId;
+		if (this._isHubCharacter) this._attachHubRealtime?.({characterId: canonicalId});
+		return {isCurrent: true, isChanged: true};
+	}
+
+	async _pRefreshCanonicalCharacterRoster ({canonicalId, saveFence}) {
+		await this._pLoadCharacters?.();
+		if (!isCharacterSaveFenceCurrent({sheet: this, saveFence})) return false;
+		if (this._selCharacter) this._selCharacter.value = canonicalId;
+		return true;
+	}
+
 	async _saveCurrentCharacter ({isInteractiveConflict = true, activity = null} = {}) {
 		if (!this._currentCharacterId) return;
 		const saveFence = getCharacterSaveFence(this);
@@ -4408,16 +4449,9 @@ class CharacterSheetPage {
 			const persisted = await this._characterRepository.pUpsert({character: charData, activity});
 			if (!isSaveCurrent()) return false;
 			if (persisted?.id && persisted.id !== charData.id && this._currentCharacterId === charData.id) {
-				this._currentCharacterId = persisted.id;
-				saveFence.characterId = persisted.id;
-				this._state.setId?.(persisted.id);
-				const url = new URL(window.location.href);
-				url.searchParams.set("id", persisted.id);
-				window.history?.replaceState?.({}, "", url);
-				await this._pLoadCharacters?.();
-				if (!isSaveCurrent()) return false;
-				if (this._selCharacter) this._selCharacter.value = persisted.id;
-				this._attachHubRealtime?.({characterId: persisted.id});
+				const identity = this._adoptCanonicalCharacterIdentity({canonicalId: persisted.id, saveFence});
+				if (!identity.isCurrent) return false;
+				if (identity.isChanged && !await this._pRefreshCanonicalCharacterRoster({canonicalId: persisted.id, saveFence})) return false;
 			}
 			if (persisted) {
 				const getClean = data => {
@@ -4513,32 +4547,35 @@ class CharacterSheetPage {
 					DataUtil.userDownload("character-conflict-recovery", err.recovery, {fileType: "character-conflict"});
 					return false;
 				}
+				let isIdentityChanged = false;
+				let isResolutionAdopted = false;
+				const fnAdoptResolution = resolved => {
+					if (!isSaveCurrent()) return false;
+					const identity = this._adoptCanonicalCharacterIdentity({
+						canonicalId: resolved?.id || saveFence.characterId,
+						saveFence,
+					});
+					if (!identity.isCurrent) return false;
+					isIdentityChanged ||= identity.isChanged;
+					this._state.loadFromJson(resolved);
+					this._reconcileClassFeatures();
+					this._renderCharacter();
+					isResolutionAdopted = true;
+					return true;
+				};
 				const resolved = await this._characterRepository.pResolveConflict({
 					characterId: saveFence.characterId,
 					choice: choice ? "local" : "server",
-					...(!choice
-						? {
-							fnAdoptLive: server => {
-								if (!isSaveCurrent()) return false;
-								this._state.loadFromJson(server);
-								this._reconcileClassFeatures();
-								this._renderCharacter();
-								return true;
-							},
-						}
-						: {}),
+					fnAdoptLive: fnAdoptResolution,
 				});
 				if (!isSaveCurrent()) return false;
-				if (!choice) {
-					this._updateSaveIndicator("saved");
-					return true;
-				}
-				if (resolved) {
-					this._state.loadFromJson(resolved);
-					this._renderCharacter();
-					this._updateSaveIndicator("saved");
-					return true;
-				}
+				if (resolved && !isResolutionAdopted && !fnAdoptResolution(resolved)) return false;
+				if (isIdentityChanged && !await this._pRefreshCanonicalCharacterRoster({
+					canonicalId: saveFence.characterId,
+					saveFence,
+				})) return false;
+				this._updateSaveIndicator("saved");
+				return true;
 			}
 			return false;
 		}

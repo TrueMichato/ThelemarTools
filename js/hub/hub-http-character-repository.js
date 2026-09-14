@@ -186,14 +186,16 @@ export class HubHttpCharacterRepository {
 		this._accepted.set(canonicalId, character);
 		const book = this._getCoverageBook(canonicalId);
 		book.acceptedOperationLegIds = new BoundedIdSet();
-		const recovery = this._failedWrites.get(characterId) || this.getPendingRecovery(characterId);
+		const recovery = this._failedWrites.get(canonicalId) || this.getPendingRecovery(canonicalId);
 		if (recovery) {
-			this._failedWrites.set(characterId, recovery);
+			this._failedWrites.set(canonicalId, recovery);
+			this._clearObsoleteCharacterAliasState(canonicalId);
 			// The document handed back is an older draft, not the canonical truth just stored above, so the live
 			// track keeps its own (possibly unknown) coverage instead of inheriting the fetched revision.
 			book.live = this._cloneTrackCoverage(book.failedWrite);
 			return {...structuredClone(recovery), id: canonicalId};
 		}
+		this._clearObsoleteCharacterAliasState(canonicalId);
 		book.live = createCoverage({
 			revision: character.revision,
 			acceptedSequence: this._getOperationWatermark(canonicalId, character),
@@ -1502,6 +1504,37 @@ export class HubHttpCharacterRepository {
 			this._recoveryVersions.set(newKey, this._recoveryVersions.get(oldKey));
 			this._recoveryVersions.delete(oldKey);
 		}
+		this._clearObsoleteCharacterAliasState(toId);
+	}
+
+	_clearObsoleteCharacterAliasState (canonicalId) {
+		const aliases = [...this._canonicalIds]
+			.filter(([aliasId, targetId]) => aliasId !== canonicalId && targetId === canonicalId)
+			.map(([aliasId]) => aliasId);
+		if (!aliases.length) return;
+		const maps = [
+			this._accepted,
+			this._leases,
+			this._conflicts,
+			this._failedWrites,
+			this._latestSubmitted,
+			this._recoveredBases,
+			this._recoveryCommandQueues,
+			this._coverage,
+			this._appliedEventIds,
+			this._appliedOperationLegIds,
+			this._pendingResync,
+			this._realtimeCursors,
+			this._saveBlocks,
+			this._operationConflicts,
+			this._liveConflicts,
+		];
+		for (const aliasId of aliases) {
+			for (const map of maps) map.delete(aliasId);
+			this._recoveryVersions.delete(this._getRecoveryStorageKey(aliasId));
+			this._recoveryOnlyIds.delete(aliasId);
+			this._resyncInFlight.delete(aliasId);
+		}
 	}
 
 	_getRecoveryStoragePrefix () {
@@ -1703,12 +1736,16 @@ export class HubHttpCharacterRepository {
 		const canonicalId = storageId || this._canonicalIds.get(characterId) || characterId;
 		const entry = this._getRecoveryCommandQueueEntry(characterId);
 		const key = storageId || entry?.key || canonicalId;
+		const aliasIds = [...this._canonicalIds]
+			.filter(([aliasId, targetId]) => aliasId !== canonicalId && targetId === canonicalId)
+			.map(([aliasId]) => aliasId);
 		const recoveryKeys = [...new Set([
 			this._getRecoveryStorageKey(characterId),
 			this._getRecoveryStorageKey(this._canonicalIds.get(characterId) || characterId),
 			this._getRecoveryStorageKey(canonicalId),
 			this._getRecoveryStorageKey(entry?.key || key),
 			this._getRecoveryStorageKey(key),
+			...aliasIds.map(aliasId => this._getRecoveryStorageKey(aliasId)),
 		])];
 		const recoveryKey = this._getRecoveryStorageKey(key);
 		const version = (this._recoveryVersions.get(recoveryKey) || 0) + 1;
@@ -1781,6 +1818,7 @@ export class HubHttpCharacterRepository {
 			this._recoveredBases.delete(key);
 			this._getCoverageBook(canonicalId).failedWrite = createCoverage();
 			for (const storageKey of recoveryKeys) this._recoveryVersions.delete(storageKey);
+			this._clearObsoleteCharacterAliasState(canonicalId);
 			return;
 		}
 		this._recoveryCommandQueues.set(key, queue);
@@ -1788,6 +1826,7 @@ export class HubHttpCharacterRepository {
 		this._failedWrites.set(key, {...structuredClone(latest.submittedSnapshot), id: key});
 		this._getCoverageBook(key).failedWrite = this._cloneTrackCoverage(latest.submittedSnapshotCoverage);
 		if (isStored) this._recoveryVersions.set(recoveryKey, version);
+		this._clearObsoleteCharacterAliasState(canonicalId);
 	}
 
 	_commitRecoveryCommandQueueInMemory ({characterId, queue}) {
@@ -2179,6 +2218,7 @@ export class HubHttpCharacterRepository {
 				const book = this._getCoverageBook(canonicalId);
 				book.failedWrite = this._cloneTrackCoverage(latest.submittedSnapshotCoverage);
 				this._failedWrites.set(canonicalId, {...structuredClone(latest.submittedSnapshot), id: canonicalId});
+				this._clearObsoleteCharacterAliasState(canonicalId);
 				return structuredClone(latest.submittedSnapshot);
 			}
 			if (parsed.snapshot) {
@@ -2190,7 +2230,7 @@ export class HubHttpCharacterRepository {
 				book.recoveredBase = isCoverageKnown ? deserializeCoverage(parsed.coverage.base) : createCoverage();
 				book.failedWrite = isCoverageKnown ? deserializeCoverage(parsed.coverage.snapshot) : createCoverage();
 				if (parsed.base) {
-					this._recoveredBases.set(characterId, parsed.base);
+					this._recoveredBases.set(canonicalId, parsed.base);
 				}
 				if (parsed.commandKeys) {
 					const command = this._hydrateRecoveryCommand({
@@ -2208,6 +2248,7 @@ export class HubHttpCharacterRepository {
 					this._recoveryCommandQueues.set(canonicalId, [command]);
 				}
 				this._failedWrites.set(canonicalId, {...structuredClone(parsed.snapshot), id: canonicalId});
+				this._clearObsoleteCharacterAliasState(canonicalId);
 				return structuredClone(parsed.snapshot);
 			}
 			return parsed.character || parsed;
@@ -2297,10 +2338,15 @@ export class HubHttpCharacterRepository {
 			this._conflicts.delete(canonicalId);
 			this._accepted.set(canonicalId, recovery.serverDocument);
 			this._syncCoverageToAccepted(canonicalId);
-			return this._pDrainRecoveryCommandQueue({
+			const resolved = await this._pDrainRecoveryCommandQueue({
 				characterId: canonicalId,
 				throughCommandKeys: last.commandKeys,
 			});
+			if (fnAdoptLive && resolved) {
+				if (fnAdoptLive(structuredClone(resolved)) === false) return null;
+				return null;
+			}
+			return resolved;
 		});
 	}
 

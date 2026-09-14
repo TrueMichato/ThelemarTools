@@ -132,13 +132,24 @@ describe("Character Sheet repository seam", () => {
 		const host = {
 			_characterRepository: repository,
 			_currentCharacterId: "temporary-id",
-			_state: {toJson: () => ({name: "Cloud Character"})},
+			_characterLoadGeneration: 1,
+			_isHubCharacter: true,
+			_hubCampaignId: "campaign-1",
+			_state: {
+				toJson: () => ({name: "Cloud Character"}),
+				setId: jest.fn(),
+			},
 			_updateSaveIndicator: jest.fn(),
 			_writeActiveCharacterMirror: jest.fn(),
 			_clearActiveCharacterMirror: jest.fn(),
 			_getNextSavedAt: CharacterSheetPage.prototype._getNextSavedAt,
+			_adoptCanonicalCharacterIdentity: CharacterSheetPage.prototype._adoptCanonicalCharacterIdentity,
+			_pRefreshCanonicalCharacterRoster: CharacterSheetPage.prototype._pRefreshCanonicalCharacterRoster,
 			_lastSavedAt: 0,
+			_detachHubRealtime: jest.fn(),
 			_attachHubRealtime: jest.fn(),
+			_pLoadCharacters: jest.fn(async () => {}),
+			_selCharacter: {value: "temporary-id"},
 		};
 
 		await expect(CharacterSheetPage.prototype._saveCurrentCharacter.call(host)).resolves.toBe(true);

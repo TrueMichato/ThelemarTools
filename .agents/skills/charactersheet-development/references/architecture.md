@@ -178,6 +178,10 @@ No reactive system — renders are explicit. Related modules re-render together 
   state load/render/save or a generic conflict modal. The page turns notices into text-only toasts; XP schedules
   authoritative owner-document reconciliation after delivery, while item reconciliation remains with the
   inventory listener.
+- **Temporary-to-canonical identity adoption**: create retry and conflict resolution rebind the state id, URL
+  scope, roster selection, projections, and realtime subscription under one updated load/save fence before the
+  repository mutation queue releases canonical events. The identity-only detach preserves canonical repository
+  reconciliation coverage while fencing callbacks from the temporary subscription.
 - **Hub effect UI**: `CharacterSheetHubEffects` is activated and deactivated with the coordinator's current
   canonical character. Its pending read is owner-only and presentation-only. Approval remains visibly pending
   until an authoritative applied event completes repository adoption. The approval response carries that same

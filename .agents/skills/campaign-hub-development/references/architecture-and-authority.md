@@ -64,7 +64,9 @@ assertion, clears that release gate.
   through an owner-visible matching `clientImportId`, or list it as a recovery-only draft when no server row
   exists; both discovery paths validate the stored owner before hydration and preserve the original create
   idempotency key. Persist first-command intent, and never expose or replay established-character patch recovery
-  as a replacement create.
+  as a replacement create. Canonicalization must also rebind Character Sheet identity, URL/roster, projections,
+  and realtime before queued canonical events resume, while removing obsolete in-memory pending aliases after
+  hydration, migration, or successful replay.
 - Access loss, takeover, campaign switch, detach, logout, or terminal page hide fences queued callbacks and
   pending saves.
 

@@ -99,6 +99,8 @@ function makeHost ({state} = {}) {
 		_clearActiveCharacterMirror: proto._clearActiveCharacterMirror,
 		_reconcilePersistedCharacter: proto._reconcilePersistedCharacter,
 		_getNextSavedAt: proto._getNextSavedAt,
+		_adoptCanonicalCharacterIdentity: proto._adoptCanonicalCharacterIdentity,
+		_pRefreshCanonicalCharacterRoster: proto._pRefreshCanonicalCharacterRoster,
 		_saveCurrentCharacter: proto._saveCurrentCharacter,
 		_characterRepository: null,
 		_lastSavedAt: 0,
@@ -402,6 +404,107 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 		} finally {
 			consoleError.mockRestore();
 			prompt.mockRestore();
+		}
+	});
+
+	it.each([
+		["Use Server", false],
+		["Use Local", true],
+	])("adopts canonical identity and accepts canonical realtime after %s", async (_label, choice) => {
+		const previousLocation = globalThis.window.location;
+		const previousHistory = globalThis.window.history;
+		globalThis.window.location = new URL("http://test/charactersheet.html?id=temporary-id&hubCampaign=campaign-1");
+		globalThis.window.history = {replaceState: jest.fn()};
+		let live = {id: "temporary-id", name: "Mira", hp: {current: 9}};
+		const state = {
+			toJson: () => structuredClone(live),
+			loadFromJson: data => { live = structuredClone(data); },
+			setId: id => { live.id = id; },
+		};
+		const host = makeHost({state});
+		host._currentCharacterId = "temporary-id";
+		host._characterLoadGeneration = 4;
+		host._hubRealtimeGeneration = 2;
+		host._isHubCharacter = true;
+		host._hubCampaignId = "campaign-1";
+		host._selCharacter = {value: "temporary-id"};
+		host._fenceHubGeneration = CharacterSheetPage.prototype._fenceHubGeneration;
+		host._detachHubRealtimeClient = jest.fn();
+		host._detachHubProjections = jest.fn();
+		host._detachHubRealtime = CharacterSheetPage.prototype._detachHubRealtime;
+		host._attachHubRealtime = jest.fn(function () {
+			this._hubRealtimeGeneration++;
+			return true;
+		});
+		host._pLoadCharacters = jest.fn(async () => {});
+		host._reconcileClassFeatures = jest.fn();
+		host._renderCharacter = jest.fn();
+		host._updateSaveIndicator = jest.fn();
+		host._getHubLiveCharacterData = () => structuredClone(live);
+		host._hubEffects = null;
+		const conflict = Object.assign(new Error("Character changed remotely."), {
+			code: "CHARACTER_CONFLICT",
+			recovery: {server: {id: "server-id", name: "Mira", hp: {current: 7}}},
+		});
+		const applyRealtimeOperation = jest.fn(() => ({status: "suppressed"}));
+		host._characterRepository = {
+			isRescueMirrorEnabled: false,
+			pUpsert: jest.fn(async () => { throw conflict; }),
+			pResolveConflict: jest.fn(async ({fnAdoptLive}) => {
+				const resolved = {id: "server-id", name: "Mira", hp: {current: choice ? 9 : 7}};
+				if (fnAdoptLive) {
+					fnAdoptLive(resolved);
+					return null;
+				}
+				return resolved;
+			}),
+			applyRealtimeOperation,
+		};
+		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(choice);
+		const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+
+		try {
+			await expect(host._saveCurrentCharacter()).resolves.toBe(true);
+			expect(host._currentCharacterId).toBe("server-id");
+			expect(live.id).toBe("server-id");
+			expect(host._characterLoadGeneration).toBe(5);
+			expect(host._hubRealtimeGeneration).toBe(4);
+			expect(globalThis.window.history.replaceState).toHaveBeenCalledWith({}, "", expect.objectContaining({
+				searchParams: expect.any(URLSearchParams),
+			}));
+			const adoptedUrl = globalThis.window.history.replaceState.mock.calls.at(-1)[2];
+			expect(adoptedUrl.searchParams.get("id")).toBe("server-id");
+			expect(adoptedUrl.searchParams.get("hubCampaign")).toBe("campaign-1");
+			expect(host._pLoadCharacters).toHaveBeenCalledTimes(1);
+			expect(host._selCharacter.value).toBe("server-id");
+			expect(host._detachHubRealtimeClient).toHaveBeenCalledTimes(1);
+			expect(host._detachHubProjections).toHaveBeenCalledWith({isPreserveRepositoryReconciliation: true});
+			expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "server-id"});
+
+			expect(CharacterSheetPage.prototype._onHubSemanticOperation.call(host, {
+				status: "applied",
+				characterId: "server-id",
+				targetCharacterId: "server-id",
+				operationId: "award-operation",
+				eventId: "award-event",
+				sequence: 2,
+				payload: {
+					operation: {
+						operationId: "award-operation",
+						kind: "hp.heal",
+						version: 1,
+						targetCharacterId: "server-id",
+						arguments: {amount: 1},
+					},
+					resultingCharacterRevision: 2,
+				},
+			})).toBe(true);
+			expect(applyRealtimeOperation).toHaveBeenCalledWith(expect.objectContaining({characterId: "server-id"}));
+		} finally {
+			consoleError.mockRestore();
+			prompt.mockRestore();
+			globalThis.window.location = previousLocation;
+			globalThis.window.history = previousHistory;
 		}
 	});
 
