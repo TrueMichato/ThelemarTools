@@ -4430,7 +4430,7 @@ class CharacterSheetState {
 				}
 			}
 			const matchedTypeCode = match?.typeCode ?? match?.type;
-			const hasDerivedCoarseTypeCode = item.typeCode === item.type && coarseInventoryTypes.has(item.type);
+			const hasDerivedCoarseTypeCode = coarseInventoryTypes.has(item.typeCode);
 			const resolvedTypeCode = matchedTypeCode ?? item.type;
 			if (resolvedTypeCode != null && (item.typeCode == null || hasDerivedCoarseTypeCode)) {
 				item.typeCode = resolvedTypeCode;

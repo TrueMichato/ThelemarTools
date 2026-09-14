@@ -331,6 +331,47 @@ describe("Hub summary-only inventory metadata migration", () => {
 		expect(reloaded.getCarryingCapacityBreakdown().flatBonus).toBe(0);
 	});
 
+	test("replaces a typeCode-only coarse Hub summary with the canonical catalog code", () => {
+		const catalogItem = {
+			name: "Signal Whistle",
+			source: "TST",
+			type: "G",
+			entries: ["As an {@action Utilize} action, you sound the whistle."],
+		};
+		const summaryOnlySave = {
+			name: "Legacy Hub character",
+			inventory: [{
+				id: "summary-only-gear",
+				item: {
+					name: catalogItem.name,
+					source: catalogItem.source,
+					typeCode: "gear",
+				},
+				quantity: 1,
+			}],
+		};
+		const state = newState();
+		state.setItemCatalog([catalogItem]);
+		state.loadFromJson(summaryOnlySave);
+
+		expect(state.getItemRaw("summary-only-gear")).toEqual(expect.objectContaining({
+			type: "G",
+			typeCode: "G",
+		}));
+		expect(state.getUsableGear()).toEqual([
+			expect.objectContaining({
+				itemId: "summary-only-gear",
+				actionName: "Utilize",
+			}),
+		]);
+
+		const lateCatalog = newState();
+		lateCatalog.loadFromJson(summaryOnlySave);
+		lateCatalog.setItemCatalog([catalogItem]);
+		expect(lateCatalog.getItemRaw("summary-only-gear")).toEqual(state.getItemRaw("summary-only-gear"));
+		expect(lateCatalog.getUsableGear()).toHaveLength(1);
+	});
+
 	test.each([
 		{
 			label: "empty renderer entries",
