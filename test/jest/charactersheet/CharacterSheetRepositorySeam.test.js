@@ -403,6 +403,58 @@ describe("Character Sheet repository seam", () => {
 		}));
 	});
 
+	it("retries a failed DM projection refresh when the realtime connection returns live", async () => {
+		let loaded = null;
+		const repository = {
+			pGet: jest.fn()
+				.mockRejectedValueOnce(new Error("temporary network failure"))
+				.mockResolvedValueOnce({id: "player-character", name: "Recovered owner update"}),
+			getCharacterAccess: jest.fn(() => CHARACTER_ACCESS_MODES.DM_READ_ONLY),
+			clearRealtimeReconciliation: jest.fn(),
+		};
+		const host = {
+			_characterRepository: repository,
+			_currentCharacterId: "player-character",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.DM_READ_ONLY,
+			_characterLoadGeneration: 3,
+			_hubRealtimeGeneration: 5,
+			_hubReadOnlyRefreshGeneration: 0,
+			_isHubReadOnlyRefreshRequired: false,
+			_hubContext: null,
+			_hubContextGeneration: 0,
+			_hubContextRefreshActiveGeneration: null,
+			_isHubContextRefreshing: false,
+			_isHubContextRevalidationRequired: false,
+			_hubRulesRefreshBlocked: false,
+			_state: {
+				loadFromJson: data => loaded = structuredClone(data),
+				setCampaignSettingsOverlay: jest.fn(),
+			},
+			_clearLastHpChange: jest.fn(),
+			_reconcileClassFeatures: jest.fn(),
+			_renderCharacter: jest.fn(),
+			_canRestoreHubRealtimeAfterError: () => true,
+			_hubEffects: {onConnectionState: jest.fn()},
+			_peerTargeting: {deactivate: jest.fn()},
+			isCurrentCharacterReadOnly: () => true,
+			_clearHubRules: jest.fn(),
+			_campaign: {render: jest.fn()},
+		};
+		host._pRefreshHubReadOnlyCharacter = options =>
+			CharacterSheetPage.prototype._pRefreshHubReadOnlyCharacter.call(host, options);
+
+		await expect(host._pRefreshHubReadOnlyCharacter({characterId: "player-character"})).resolves.toBe(false);
+		expect(host._isHubReadOnlyRefreshRequired).toBe(true);
+		CharacterSheetPage.prototype._onHubRealtimeConnectionState.call(host, {state: "closed"});
+		CharacterSheetPage.prototype._onHubRealtimeConnectionState.call(host, {state: "live"});
+		await new Promise(resolve => setImmediate(resolve));
+
+		expect(repository.pGet).toHaveBeenCalledTimes(2);
+		expect(loaded).toEqual(expect.objectContaining({name: "Recovered owner update"}));
+		expect(host._renderCharacter).toHaveBeenCalledTimes(1);
+		expect(host._isHubReadOnlyRefreshRequired).toBe(false);
+	});
+
 	it("does not reactivate owner-only peer targeting on live read-only connection states", () => {
 		const host = {
 			_currentCharacterAccess: CHARACTER_ACCESS_MODES.DM_READ_ONLY,

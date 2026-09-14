@@ -96,7 +96,9 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G currentl
   acquire a lease, save/archive the document, open sharing/pending-action controls, or use owner-only targeting
   and party-inventory integrations. Character-document invalidations trigger a generation- and character-fenced
   `dm_truth` refetch and full manual render, so an already-open DM inspection converges after ordinary owner saves
-  without becoming editable. Realtime live/resync states cannot reactivate owner-only targeting.
+  without becoming editable. A transient failed refetch remains pending and retries when realtime returns live,
+  even if the reconnect cursor itself is unchanged. Realtime live/resync states cannot reactivate owner-only
+  targeting.
 - Lease takeover increments the epoch; a stale device is fenced even if it reconnects.
 - Disjoint local changes may rebase over a server result. Overlapping changes require explicit local/server
   recovery.

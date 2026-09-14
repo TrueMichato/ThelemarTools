@@ -298,8 +298,9 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   roster/activity view, a second device is initially read-only, lease takeover fences the stale writer, and
   campaign pages react immediately to session or membership revocation. DM truth coverage keeps an inspection
   sheet open while the owner performs an ordinary document save, proves the disabled sheet converges without a
-  reload, forces a later resync, and verifies no owner-only lease, sharing, pending-action, targeting, inventory,
-  or document-mutation request escapes.
+  reload, fails one scoped projection read, reconnects against the same cursor, proves the pending refresh
+  converges, forces a later resync, and verifies no owner-only lease, sharing, pending-action, targeting,
+  inventory, or document-mutation request escapes.
 - Campaign snapshot consumers coalesce `character.projection.invalidated` metadata into one authorization-scoped HTTP refetch and fence older
   in-flight snapshot responses with the campaign event sequence, so an authoritative refresh cannot regress a
   newer visible projection. A single 10-second client watchdog requests an authoritative snapshot while the

@@ -115,9 +115,35 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		expect(await dm.page.evaluate(() => (globalThis as any).charSheet._saveCurrentCharacter())).toBe(true);
 		await dmSheet.waitForHubRealtimeLive();
 
+		let failedProjectionReads = 0;
+		await dm.page.route(`**/api/characters/${character.id}`, async route => {
+			if (route.request().method() !== "GET" || failedProjectionReads) {
+				await route.continue();
+				return;
+			}
+			failedProjectionReads++;
+			await route.fulfill({
+				status: 503,
+				contentType: "application/json",
+				body: JSON.stringify({error: {code: "TEST_REFRESH_FAILED", message: "Synthetic projection refresh failure"}}),
+			});
+		});
 		const playerSheet = new CharacterSheetPage(player.page);
 		await playerSheet.gotoCampaignCharacter({campaignId, characterId: character.id});
 		await playerSheet.renameCharacter("Readonly Rowan Updated");
+		await expect.poll(() => failedProjectionReads).toBe(1);
+		await expect(dmSheet.characterName).toHaveValue("Readonly Rowan");
+		try {
+			await dmContext.setOffline(true);
+			await dm.page.evaluate(() => (globalThis as any).charSheet?._hubRealtime?._active?.client?._socket?.close());
+			await dm.page.waitForFunction(() => {
+				const state = (globalThis as any).charSheet?._hubRealtime?._active?.client?._connectionState?.state;
+				return state && state !== "live";
+			});
+		} finally {
+			await dmContext.setOffline(false);
+		}
+		await dmSheet.waitForHubRealtimeLive();
 		await expect(dmSheet.characterName).toHaveValue("Readonly Rowan Updated", {timeout: 20_000});
 		await expect(dmSheet.characterName).toBeDisabled();
 		await dmSheet.requestHubRealtimeResyncAndWait();

@@ -567,6 +567,41 @@ describe("HTTP character repository", () => {
 		expect(calls[0].characterId).toBe("server");
 	});
 
+	it("preserves invocation order while concurrent initial saves await the same session", async () => {
+		let resolveSession;
+		const pSession = new Promise(resolve => resolveSession = resolve);
+		const order = [];
+		const api = {
+			pGetSession: jest.fn(() => pSession),
+			pGetCharacter: async ({characterId}) => {
+				if (characterId === "temp") {
+					const error = new Error("missing");
+					error.code = "CHARACTER_NOT_FOUND";
+					throw error;
+				}
+				return {id: "server", revision: 1, data: {name: "First"}};
+			},
+			pCreateCharacter: async ({data}) => {
+				order.push(`create:${data.name}`);
+				return {character: {id: "server", revision: 1, data}};
+			},
+			pAcquireCharacterLease: async () => ({epoch: 1}),
+			pPatchCharacter: async ({data, patches}) => {
+				order.push(`patch:${patches.find(patch => patch.path === "/name")?.value}`);
+				return {character: {id: "server", revision: 2, data: data || {name: "Second"}}};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		const first = repository.pUpsert({character: {id: "temp", name: "First"}});
+		const second = repository.pUpsert({character: {id: "temp", name: "Second"}});
+
+		expect(api.pGetSession).toHaveBeenCalledTimes(1);
+		resolveSession({signedIn: true, account: {id: "owner-account"}});
+		await Promise.all([first, second]);
+
+		expect(order).toEqual(["create:First", "patch:Second"]);
+	});
+
 	it("preserves a remote grant across later queued local saves", async () => {
 		const calls = [];
 		const api = {

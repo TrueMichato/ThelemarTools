@@ -110,6 +110,7 @@ class CharacterSheetPage {
 		this._characterLoadGeneration = 0;
 		this._hubRealtimeGeneration = 0;
 		this._hubReadOnlyRefreshGeneration = 0;
+		this._isHubReadOnlyRefreshRequired = false;
 		this._hubContextGeneration = 0;
 		this._hubContextRefreshActiveGeneration = null;
 		this._isHubContextRefreshing = false;
@@ -214,6 +215,7 @@ class CharacterSheetPage {
 
 	_attachHubRealtime ({characterId = this._currentCharacterId} = {}) {
 		this._hubRealtimeGeneration++;
+		this._isHubReadOnlyRefreshRequired = false;
 		if (this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY) {
 			this._hubEffects?.deactivate();
 			this._peerTargeting?.deactivate();
@@ -241,6 +243,7 @@ class CharacterSheetPage {
 	/** `teardown-generation`: fence in-flight realtime work. */
 	_fenceHubGeneration () {
 		this._hubRealtimeGeneration++;
+		this._isHubReadOnlyRefreshRequired = false;
 	}
 
 	/** `teardown-realtime`: detach the realtime client only. */
@@ -346,6 +349,7 @@ class CharacterSheetPage {
 			|| this._currentCharacterAccess !== CHARACTER_ACCESS_MODES.DM_READ_ONLY
 			|| typeof this._characterRepository?.pGet !== "function"
 		) return false;
+		this._isHubReadOnlyRefreshRequired = true;
 		const refreshGeneration = ++this._hubReadOnlyRefreshGeneration;
 		const characterLoadGeneration = this._characterLoadGeneration;
 		const realtimeGeneration = this._hubRealtimeGeneration;
@@ -370,6 +374,7 @@ class CharacterSheetPage {
 			this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 			this._reconcileClassFeatures();
 			this._renderCharacter();
+			this._isHubReadOnlyRefreshRequired = false;
 			return true;
 		} catch (error) {
 			if (!isCurrent()) return false;
@@ -377,6 +382,7 @@ class CharacterSheetPage {
 				error?.code === "CHARACTER_PROJECTION_SCOPED"
 				|| !this._canRestoreHubRealtimeAfterError(error)
 			) {
+				this._isHubReadOnlyRefreshRequired = false;
 				this._onHubRealtimeConnectionState({
 					state: "closed",
 					reason: "Character is no longer available in this campaign.",
@@ -455,8 +461,12 @@ class CharacterSheetPage {
 
 	_onHubRealtimeConnectionState (state) {
 		this._hubEffects?.onConnectionState(state);
-		if (this.isCurrentCharacterReadOnly?.()) this._peerTargeting?.deactivate();
+		const isReadOnly = this.isCurrentCharacterReadOnly?.();
+		if (isReadOnly) this._peerTargeting?.deactivate();
 		else this._peerTargeting?.onConnectionState(state);
+		if (state?.state === "live" && isReadOnly && this._isHubReadOnlyRefreshRequired) {
+			void this._pRefreshHubReadOnlyCharacter();
+		}
 		if (state?.state === "live" && this._isHubContextRevalidationRequired && this._hubCampaignContext) {
 			this._isHubContextRevalidationRequired = false;
 			this._onHubCampaignContextChanged({type: "reconnected"});

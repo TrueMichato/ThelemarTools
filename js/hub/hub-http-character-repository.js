@@ -44,6 +44,7 @@ export class HubHttpCharacterRepository {
 				: new HubBroadcastSync({campaignId})
 		);
 		this._session = null;
+		this._sessionPromise = null;
 		this._accepted = new Map();
 		this._access = new Map();
 		this._canonicalIds = new Map();
@@ -73,7 +74,12 @@ export class HubHttpCharacterRepository {
 	}
 
 	async _pEnsureSession () {
-		this._session ||= await this._api.pGetSession();
+		if (!this._session) {
+			this._sessionPromise ||= this._api.pGetSession()
+				.then(session => this._session = session)
+				.finally(() => this._sessionPromise = null);
+			await this._sessionPromise;
+		}
 		if (!this._session.signedIn) throw new Error(`Sign in to edit campaign characters.`);
 	}
 
