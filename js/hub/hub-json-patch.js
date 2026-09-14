@@ -164,17 +164,30 @@ function pathsOverlap (a, b) {
 export function rebaseJsonChanges ({base, local, remote}) {
 	const localPatches = diffJson(base, local);
 	const remotePatches = diffJson(base, remote);
-	const conflicts = localPatches
-		.flatMap(localPatch => remotePatches
-			.filter(remotePatch => pathsOverlap(localPatch.path, remotePatch.path))
-			.map(remotePatch => ({localPath: localPatch.path, remotePath: remotePatch.path})));
+	const redundantLocalPatchIndexes = new Set();
+	const conflicts = localPatches.flatMap((localPatch, ixLocal) => remotePatches
+		.filter(remotePatch => pathsOverlap(localPatch.path, remotePatch.path))
+		.flatMap(remotePatch => {
+			const isConvergent = localPatch.path === remotePatch.path
+				&& localPatch.op === remotePatch.op
+				&& (
+					localPatch.op === "remove"
+					|| isDeepEqual(localPatch.value, remotePatch.value)
+				);
+			if (isConvergent) {
+				redundantLocalPatchIndexes.add(ixLocal);
+				return [];
+			}
+			return [{localPath: localPatch.path, remotePath: remotePatch.path}];
+		}));
 
 	if (conflicts.length) return {isConflict: true, conflicts, patches: localPatches, document: null};
+	const patches = localPatches.filter((_, ix) => !redundantLocalPatchIndexes.has(ix));
 	return {
 		isConflict: false,
 		conflicts: [],
-		patches: localPatches,
-		document: applyJsonPatch(remote, localPatches),
+		patches,
+		document: applyJsonPatch(remote, patches),
 	};
 }
 

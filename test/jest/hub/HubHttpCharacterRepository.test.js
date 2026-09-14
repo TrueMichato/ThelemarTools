@@ -197,6 +197,58 @@ describe("HTTP character repository", () => {
 		expect(repository._recoveryVersions.size).toBe(0);
 	});
 
+	it("converges a queued owner save when an authoritative refresh already accepted the identical changes", async () => {
+		const base = {
+			id: "server-1",
+			campaignId: "campaign-1",
+			revision: 1,
+			data: {
+				name: "Mira",
+				hp: {current: 12, max: 12},
+				resources: [],
+			},
+		};
+		const converged = {
+			...base,
+			revision: 2,
+			data: {
+				...base.data,
+				hp: {current: 11, max: 12},
+				resources: [{id: "second-wind", name: "Second Wind", current: 1, max: 1}],
+			},
+		};
+		let resolveRefresh;
+		const pRefresh = new Promise(resolve => resolveRefresh = resolve);
+		let getCount = 0;
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => (++getCount === 1 ? structuredClone(base) : pRefresh),
+			pAcquireCharacterLease: jest.fn(),
+			pPatchCharacter: jest.fn(),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "server-1"});
+
+		const pReconcile = repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => structuredClone(base.data),
+			fnAdoptLive: jest.fn(),
+		});
+		const pSave = repository.pUpsert({
+			character: {
+				id: "server-1",
+				...structuredClone(converged.data),
+				_savedAt: 123,
+			},
+		});
+		resolveRefresh(structuredClone(converged));
+
+		await expect(pReconcile).resolves.toMatchObject({status: "reconciled", revision: 2});
+		await expect(pSave).resolves.toEqual({id: "server-1", ...converged.data});
+		expect(api.pPatchCharacter).not.toHaveBeenCalled();
+		expect(repository.getConflictRecovery("server-1")).toBeNull();
+	});
+
 	it("rebases authoritative inventory escrow into the live sheet without losing disjoint edits", async () => {
 		let revision = 1;
 		const documents = {
