@@ -225,6 +225,17 @@ describe("getSpellcastingFocusStatus", () => {
 			scfType: "arcane",
 		}));
 		expect(state.getSpellcastingFocusStatus().ok).toBe(true);
+
+		const lateCatalogState = makeState();
+		lateCatalogState.loadFromJson(legacy);
+		expect(lateCatalogState.getItemRaw("legacy-orb").typeCode).toBe("gear");
+		lateCatalogState.setItemCatalog([orb]);
+		expect(lateCatalogState.getItemRaw("legacy-orb")).toEqual(expect.objectContaining({
+			type: "gear",
+			typeCode: "SCF|XPHB",
+			scfType: "arcane",
+		}));
+		expect(lateCatalogState.getSpellcastingFocusStatus().ok).toBe(true);
 	});
 
 	it("is true with a component pouch (matched by name)", () => {
