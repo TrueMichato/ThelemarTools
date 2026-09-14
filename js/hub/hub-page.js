@@ -9,11 +9,6 @@ import {
 import {HubRealtimeClient, isRealtimeEventCoveredByBaseline} from "./hub-realtime-client.js";
 import {renderHubActivityRows} from "./hub-activity-render.js";
 import {
-	getCampaignConditionCatalog,
-	getCampaignConditionUid,
-	pLoadCampaignConditionCatalog,
-} from "./hub-condition-catalog.js";
-import {
 	getCanonicalCharacter,
 	getOwnerMembershipId,
 	getProjectionId,
@@ -1089,7 +1084,7 @@ async function pInitCampaign ({session}) {
 		rulesPolicyManagerPromise,
 		pRefreshConditionOptions,
 		pRefreshContextBoundControls,
-		isConditionCatalogAvailable,
+		isConditionCatalogRetryNeeded,
 	} = await pInitCampaignForms({
 		campaign,
 		campaignId,
@@ -1166,7 +1161,7 @@ async function pInitCampaign ({session}) {
 				renderCampaignContext(context);
 				void rulesPolicyManagerPromise.then(manager => manager?.replaceContext(context));
 				await pRefreshContextBoundControls({context});
-			} else if (!isConditionCatalogAvailable()) {
+			} else if (isConditionCatalogRetryNeeded()) {
 				await pRefreshContextBoundControls({context});
 			}
 			if (isCampaignReloadRequired) return;
@@ -1984,8 +1979,11 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 	const actionCondition = document.getElementById("campaign-action-condition");
 	const actionSlotFields = document.getElementById("campaign-action-slot-fields");
 	const conditionCatalogByUid = new Map();
+	let conditionCatalogModule = null;
+	let conditionCatalogState = "idle";
+	let conditionCatalogGeneration = 0;
+	let campaignConditionBrewContent = context.brewBundle?.content;
 	let activeConditionCatalog = [];
-	let isConditionCatalogLoadFailed = false;
 	const getCurrentTargetConditions = () => {
 		if (actionType.value !== "condition_remove") return [];
 		const targetId = document.getElementById("campaign-action-target")?.value?.split(":")[1];
@@ -1997,14 +1995,23 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 	};
 	const pRefreshConditionOptions = () => {
 		const previousValue = actionCondition.value;
-		const conditions = getCampaignConditionCatalog({
+		conditionCatalogByUid.clear();
+		if (conditionCatalogState !== "ready" || !conditionCatalogModule) {
+			const option = document.createElement("option");
+			option.value = "";
+			option.textContent = conditionCatalogState === "failed"
+				? "Condition catalog unavailable"
+				: "Loading conditions...";
+			actionCondition.replaceChildren(option);
+			return;
+		}
+		const conditions = conditionCatalogModule.getCampaignConditionCatalog({
 			siteData: {condition: activeConditionCatalog},
 			additionalConditions: getCurrentTargetConditions(),
 		});
-		conditionCatalogByUid.clear();
 		actionCondition.replaceChildren(...conditions.map(condition => {
 			const option = document.createElement("option");
-			option.value = getCampaignConditionUid(condition);
+			option.value = conditionCatalogModule.getCampaignConditionUid(condition);
 			option.textContent = `${condition.name} (${condition.source})`;
 			conditionCatalogByUid.set(option.value, condition);
 			return option;
@@ -2019,7 +2026,14 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		setHidden(actionConditionField, !isCondition);
 		setHidden(actionValueLabel, isSlot || isCondition);
 		setHidden(actionValue, isSlot || isCondition);
-		if (isCondition) pRefreshConditionOptions();
+		if (isCondition) {
+			pRefreshConditionOptions();
+			if (conditionCatalogState === "idle") {
+				void pRefreshConditionCatalog({
+					campaignBrewContent: campaignConditionBrewContent,
+				});
+			}
+		}
 		actionCondition.disabled = !isCondition || !conditionCatalogByUid.size;
 		actionValue.disabled = isSlot || isCondition;
 		actionValue.required = !isSlot && !isCondition;
@@ -2035,20 +2049,26 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		actionValue.min = configuration.type === "number" ? "1" : "";
 	};
 	const pRefreshConditionCatalog = async ({campaignBrewContent}) => {
+		const generation = ++conditionCatalogGeneration;
+		campaignConditionBrewContent = campaignBrewContent;
+		conditionCatalogState = "loading";
+		pRefreshConditionOptions();
+		actionCondition.disabled = true;
 		try {
-			activeConditionCatalog = await pLoadCampaignConditionCatalog({campaignBrewContent});
-			if (isConditionCatalogLoadFailed) setFormStatus({formId: "campaign-action-form"});
-			isConditionCatalogLoadFailed = false;
+			const module = conditionCatalogModule || await import("./hub-condition-catalog.js");
+			const catalog = await module.pLoadCampaignConditionCatalog({campaignBrewContent});
+			if (generation !== conditionCatalogGeneration) return false;
+			conditionCatalogModule = module;
+			activeConditionCatalog = catalog;
+			conditionCatalogState = "ready";
+			setFormStatus({formId: "campaign-action-form"});
 			syncActionFields();
 			return true;
 		} catch (error) {
+			if (generation !== conditionCatalogGeneration) return false;
 			activeConditionCatalog = [];
-			isConditionCatalogLoadFailed = true;
-			conditionCatalogByUid.clear();
-			const option = document.createElement("option");
-			option.value = "";
-			option.textContent = "Condition catalog unavailable";
-			actionCondition.replaceChildren(option);
+			conditionCatalogState = "failed";
+			pRefreshConditionOptions();
 			setFormStatus({
 				formId: "campaign-action-form",
 				message: getErrorMessage(error),
@@ -2058,13 +2078,14 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			return false;
 		}
 	};
-	await pRefreshConditionCatalog({campaignBrewContent: context.brewBundle?.content});
 	actionType?.addEventListener("change", syncActionFields);
 	document.getElementById("campaign-action-target")?.addEventListener("change", syncActionFields);
 	syncActionFields();
 	const pRefreshContextBoundControls = async ({context: contextNxt}) => {
-		itemAward.setCampaignBrewContent(contextNxt.brewBundle?.content);
-		return pRefreshConditionCatalog({campaignBrewContent: contextNxt.brewBundle?.content});
+		campaignConditionBrewContent = contextNxt.brewBundle?.content;
+		itemAward.setCampaignBrewContent(campaignConditionBrewContent);
+		if (conditionCatalogState === "idle") return true;
+		return pRefreshConditionCatalog({campaignBrewContent: campaignConditionBrewContent});
 	};
 
 	document.getElementById("campaign-action-form")?.addEventListener("submit", async event => {
@@ -2344,7 +2365,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		rulesPolicyManagerPromise,
 		pRefreshConditionOptions,
 		pRefreshContextBoundControls,
-		isConditionCatalogAvailable: () => !!activeConditionCatalog.length,
+		isConditionCatalogRetryNeeded: () => conditionCatalogState === "failed",
 	};
 }
 

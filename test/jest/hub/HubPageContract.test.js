@@ -9,6 +9,7 @@ describe("campaign hub pages", () => {
 	const scss = read("scss/hub.scss");
 	const navigation = read("js/navigation.js");
 	const rulesPolicyManager = read("js/hub/hub-rules-policy-manager.js");
+	const hubCampaignPage = read("test/e2e/pages/HubCampaignPage.ts");
 
 	it("exposes signed-out, loading, error, and signed-in states", () => {
 		for (const id of ["hub-loading", "hub-error", "hub-signed-out", "hub-signed-in"]) {
@@ -22,6 +23,11 @@ describe("campaign hub pages", () => {
 		expect(hubHtml).toContain("for=\"hub-campaign-name\"");
 		expect(hubHtml).toContain("id=\"hub-create-submit\"");
 		expect(hubHtml).not.toContain("<dialog");
+	});
+
+	it("waits for both empty and populated campaign-list render states before creating another campaign", () => {
+		expect(hubCampaignPage).toContain("#hub-campaign-list .hub-campaign-row, #hub-campaign-empty:not(.ve-hidden)");
+		expect(hubCampaignPage).not.toContain("#hub-campaign-list .hub-data-row, #hub-campaign-empty:not(.ve-hidden)");
 	});
 
 	it("exposes account/session/deletion and campaign lifecycle controls", () => {
@@ -102,8 +108,13 @@ describe("campaign hub pages", () => {
 
 	it("requires an explicit source identity for condition effects", () => {
 		const source = read("js/hub/hub-page.js");
+		const topLevelImports = source.slice(0, source.indexOf("const api = new HubApiClient();"));
 		expect(campaignHtml).toContain("id=\"campaign-action-condition\"");
 		expect(campaignHtml).not.toContain("id=\"campaign-action-condition-source\"");
+		expect(topLevelImports).not.toContain("hub-condition-catalog.js");
+		expect(source).toContain("await import(\"./hub-condition-catalog.js\")");
+		expect(source).not.toContain("await pRefreshConditionCatalog({campaignBrewContent: context.brewBundle?.content});");
+		expect(source).toMatch(/if \(conditionCatalogState === "idle"\) \{\s+void pRefreshConditionCatalog/);
 		expect(source).toContain("pLoadCampaignConditionCatalog");
 		expect(source).toContain("conditionCatalogByUid");
 		expect(source).toContain("getCurrentTargetConditions");
