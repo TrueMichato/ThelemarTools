@@ -55,6 +55,7 @@
 | `xp.granted` | character | explicit DM+owner | amount, reason, resulting XP | DM/co-DM also included by visibility policy |
 | `item.granted` | character | explicit DM actor+owner | `{awardId,index,targetCount,sourceKind,note,entry}` | One deterministic per-target fact; `entry.item` is a bounded privacy-safe summary, not the complete authoritative inventory item, followed by that target's projection invalidation |
 | `party_inventory.invalidated` | campaign | all_members | empty | Metadata-only shared-stash refresh signal |
+| `transfer.proposed` | transfer | explicit requester+target owner; DMs see explicit events by role | source/target kinds; each non-DM sees only owned character endpoint ids | Player requested party inventory for an owned character; no asset was reserved or removed |
 | `transfer.reserved` | transfer | explicit actor+target owner | source/target kinds; each non-DM sees only owned character endpoint ids | Escrow content and counterpart identities are not broadcast |
 | `transfer.committed` | transfer | explicit actor+target owner | privacy-reduced source/target endpoints | Destination write complete; affected owners refetch authoritative state |
 | `transfer.rejected` | transfer | explicit actor+target owner | privacy-reduced source/target endpoints | Source restored; affected owners refetch authoritative state |
@@ -143,12 +144,12 @@ Current audit actions include:
 - `dm_workspace.created`, `dm_workspace.updated`;
 - `character.operation.proposed`, `.applied`, `.rejected`, `.cancelled`, `.expired`;
 - `xp.granted`, compatibility `item.granted`, atomic `item.award_batch`;
-- `transfer.committed`, `transfer.rejected`;
+- `transfer.proposed`, `transfer.committed`, `transfer.rejected`;
 - `session.revoked`, `session.revoked_others`;
 - `account.deletion_requested`, `account.deletion_cancelled`, `account.deletion_purged`.
 
 Not every high-frequency product event has an audit row. Character patches, presence, roll logging, action
-proposal, and transfer reservation are represented by canonical/domain data instead. Changing audit policy
+proposal, transfer request, and transfer reservation are represented by canonical/domain data instead. Changing audit policy
 requires privacy/retention review.
 
 ## Outbox lifecycle

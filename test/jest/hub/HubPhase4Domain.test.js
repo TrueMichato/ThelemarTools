@@ -168,6 +168,251 @@ describe("Phase 4 actions, grants, and transfers", () => {
 		expect(target.data.currency).toEqual({cp: 0, sp: 6, ep: 0, gp: 14, pp: 0});
 	});
 
+	it("keeps transfer authority tied to source control and destination ownership", async () => {
+		const {dm, campaign, a, b} = await setup();
+		const dmCharacter = (await app.inject({
+			method: "POST",
+			url: "/api/characters",
+			headers: headers(dm),
+			payload: {
+				clientImportId: "local-dm-authority",
+				campaignId: campaign.id,
+				schemaVersion: 1,
+				data: {
+					name: "Guide",
+					inventory: [{id: "dm-arrows", item: {name: "Arrow", source: "PHB"}, quantity: 5}],
+					currency: {},
+				},
+			},
+		})).json().character;
+		const secondOwned = (await app.inject({
+			method: "POST",
+			url: "/api/characters",
+			headers: headers(a.session),
+			payload: {
+				clientImportId: "local-a-second",
+				campaignId: campaign.id,
+				schemaVersion: 1,
+				data: {name: "A Two", inventory: [], currency: {}},
+			},
+		})).json().character;
+
+		const playerToPeer = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(a.session),
+			payload: {
+				sourceKind: "character",
+				sourceId: a.character.id,
+				targetKind: "character",
+				targetId: b.character.id,
+				payload: {items: [{entryId: "arrows-2", quantity: 1}]},
+			},
+		});
+		expect(playerToPeer.statusCode).toBe(201);
+		expect(playerToPeer.json().transfer.status).toBe("reserved");
+		const actorCannotSelfAcceptPeer = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${playerToPeer.json().transfer.id}/resolve`,
+			headers: headers(a.session),
+			payload: {decision: "accept"},
+		});
+		expect(actorCannotSelfAcceptPeer.statusCode).toBe(403);
+		expect(actorCannotSelfAcceptPeer.json().error).toBe("FORBIDDEN");
+		expect((await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${playerToPeer.json().transfer.id}/resolve`,
+			headers: headers(b.session),
+			payload: {decision: "accept"},
+		})).json().transfer.status).toBe("committed");
+
+		const playerToOwn = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(a.session),
+			payload: {
+				sourceKind: "character",
+				sourceId: a.character.id,
+				targetKind: "character",
+				targetId: secondOwned.id,
+				payload: {items: [{entryId: "arrows-2", quantity: 1}]},
+			},
+		});
+		expect(playerToOwn.json().transfer.status).toBe("reserved");
+		expect((await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${playerToOwn.json().transfer.id}/resolve`,
+			headers: headers(a.session),
+			payload: {decision: "accept"},
+		})).json().transfer.status).toBe("committed");
+
+		const playerToDm = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(a.session),
+			payload: {
+				sourceKind: "character",
+				sourceId: a.character.id,
+				targetKind: "character",
+				targetId: dmCharacter.id,
+				payload: {items: [{entryId: "arrows-2", quantity: 1}]},
+			},
+		});
+		expect(playerToDm.json().transfer.status).toBe("reserved");
+		expect((await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${playerToDm.json().transfer.id}/resolve`,
+			headers: headers(dm),
+			payload: {decision: "accept"},
+		})).json().transfer.status).toBe("committed");
+
+		const dmToPlayer = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(dm),
+			payload: {
+				sourceKind: "character",
+				sourceId: dmCharacter.id,
+				targetKind: "character",
+				targetId: b.character.id,
+				payload: {items: [{entryId: "dm-arrows", quantity: 1}]},
+			},
+		});
+		expect(dmToPlayer.json().transfer.status).toBe("reserved");
+		expect((await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${dmToPlayer.json().transfer.id}/resolve`,
+			headers: headers(dm),
+			payload: {decision: "accept"},
+		})).json().transfer.status).toBe("committed");
+	});
+
+	it("lets a player request stash items without reserving them before DM approval", async () => {
+		const {dm, campaign, a, b} = await setup();
+		const party = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/party-inventory`,
+			headers: readHeaders(dm),
+		})).json().partyInventory;
+		const deposit = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(a.session),
+			payload: {
+				sourceKind: "character",
+				sourceId: a.character.id,
+				targetKind: "party_inventory",
+				targetId: party.id,
+				payload: {items: [{entryId: "arrows-2", quantity: 4}]},
+			},
+		});
+		await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${deposit.json().transfer.id}/resolve`,
+			headers: headers(dm),
+			payload: {decision: "accept"},
+		});
+		const seeded = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/party-inventory`,
+			headers: readHeaders(a.session),
+		})).json().partyInventory;
+		const stashEntry = seeded.inventory[0];
+
+		const requested = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(a.session),
+			payload: {
+				sourceKind: "party_inventory",
+				sourceId: seeded.id,
+				targetKind: "character",
+				targetId: a.character.id,
+				payload: {items: [{entryId: stashEntry.id, quantity: 1}]},
+			},
+		});
+		expect(requested.statusCode).toBe(201);
+		expect(requested.json().transfer).toMatchObject({
+			status: "proposed",
+			sourceKind: "party_inventory",
+			targetKind: "character",
+			targetId: a.character.id,
+			payload: {
+				request: {items: [{entryId: stashEntry.id, quantity: 1}]},
+				preview: {
+					items: [expect.objectContaining({
+						item: {name: "Arrow", source: "PHB"},
+						quantity: 1,
+					})],
+				},
+			},
+		});
+		expect((await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/party-inventory`,
+			headers: readHeaders(a.session),
+		})).json().partyInventory.inventory[0].quantity).toBe(4);
+
+		const playerCannotApproveOwnRequest = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${requested.json().transfer.id}/resolve`,
+			headers: headers(a.session),
+			payload: {decision: "accept"},
+		});
+		expect(playerCannotApproveOwnRequest.statusCode).toBe(403);
+		expect(playerCannotApproveOwnRequest.json().error).toBe("FORBIDDEN");
+
+		const approved = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${requested.json().transfer.id}/resolve`,
+			headers: headers(dm),
+			payload: {decision: "accept"},
+		});
+		expect(approved.statusCode).toBe(200);
+		expect(approved.json().transfer.status).toBe("committed");
+
+		const requestA = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(a.session),
+			payload: {
+				sourceKind: "party_inventory",
+				sourceId: seeded.id,
+				targetKind: "character",
+				targetId: a.character.id,
+				payload: {items: [{entryId: stashEntry.id, quantity: 3}]},
+			},
+		});
+		const requestB = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(b.session),
+			payload: {
+				sourceKind: "party_inventory",
+				sourceId: seeded.id,
+				targetKind: "character",
+				targetId: b.character.id,
+				payload: {items: [{entryId: stashEntry.id, quantity: 3}]},
+			},
+		});
+		expect(requestA.json().transfer.status).toBe("proposed");
+		expect(requestB.json().transfer.status).toBe("proposed");
+		expect((await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${requestA.json().transfer.id}/resolve`,
+			headers: headers(dm),
+			payload: {decision: "accept"},
+		})).json().transfer.status).toBe("committed");
+		const staleApproval = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${requestB.json().transfer.id}/resolve`,
+			headers: headers(dm),
+			payload: {decision: "accept"},
+		});
+		expect(staleApproval.statusCode).toBe(409);
+		expect(staleApproval.json().error).toBe("TRANSFER_INSUFFICIENT");
+	});
+
 	it("returns escrow to the source when a transfer is rejected", async () => {
 		const {campaign, a, b} = await setup();
 		const item = a.character.data.inventory[0];

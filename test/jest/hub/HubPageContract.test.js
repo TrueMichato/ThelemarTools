@@ -100,6 +100,20 @@ describe("campaign hub pages", () => {
 		expect(campaignHtml).toContain("data-pending-label=\"Applying...\"");
 	});
 
+	it("keeps transfer submission recoverable after a successful mutation outlives its refresh", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("setTransferRefreshFailure");
+		expect(source).toContain("const form = event.currentTarget;");
+		expect(source).toContain("Retry latest balances");
+		expect(source).toContain("Latest balances loaded. You can send another transfer.");
+		expect(source).toContain("const latestSelections = readSelections();");
+		expect(source).toContain("selectionsToRestore");
+		expect(source).toContain("if (sourceKind !== \"character\") return false;");
+		expect(source).toContain("Request sent. A DM must approve before anything leaves the party inventory.");
+		expect(source).not.toContain("Reload the campaign before sending another transfer.");
+		expect(source).not.toContain("event.currentTarget.querySelector(\"button[type='submit']\").disabled = true");
+	});
+
 	it("requires an explicit source identity for condition effects", () => {
 		const source = read("js/hub/hub-page.js");
 		expect(campaignHtml).toContain("id=\"campaign-action-condition-source\"");
@@ -381,7 +395,9 @@ describe("campaign hub pages", () => {
 		expect(source).toMatch(/^async function renderPendingTransfers/m);
 		expect(source.indexOf("async function renderPendingTransfers")).toBeLessThan(source.indexOf("async function pInitCampaignForms"));
 		expect(source).toContain("const canReject = canAct && (canAccept || transfer.actorAccountId === session.account.id)");
-		expect(source).toContain("canAccept ? \"Reject\" : \"Cancel\"");
+		expect(source).toContain("[\"proposed\", \"reserved\"].includes(transfer.status)");
+		expect(source).toContain("DM approval is needed before the stash changes");
+		expect(source).toContain("isRequest ? \"Decline\" : \"Reject\"");
 	});
 
 	it("initializes every rules control from the active campaign version", () => {

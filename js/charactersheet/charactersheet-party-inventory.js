@@ -124,6 +124,7 @@ export function getPartyInventoryRecipients ({projections = [], roster = [], cur
 				id: getProjectionId(projection),
 				label: view.name,
 				summary: view.classes.map(cls => `${cls.name}${Number.isFinite(cls.level) ? ` ${cls.level}` : ""}`).join(" / "),
+				isOwned: projection.kind === "owner_truth",
 				carry: isShared
 					? {
 						carried: Number(carry.carried),
@@ -205,11 +206,13 @@ export class CharacterSheetPartyInventory {
 		this._reconcileError = null;
 		this._partyError = null;
 		this._announcement = "";
+		this._refreshNotice = "";
 		this._connectionState = null;
 		this._isLoading = false;
 		this._isSubmitting = false;
 		this._refreshFlags = {character: false, party: false};
 		this._refreshPromise = null;
+		this._manualRefreshPromise = null;
 		this._partyFetchToken = null;
 		this._scheduledRefresh = false;
 		this._activationRetryTimer = null;
@@ -308,6 +311,7 @@ export class CharacterSheetPartyInventory {
 		this._reconcileError = null;
 		this._partyError = null;
 		this._announcement = "";
+		this._refreshNotice = "";
 		this._partyInventory = null;
 		this._role = null;
 		this._recipients = [];
@@ -317,6 +321,7 @@ export class CharacterSheetPartyInventory {
 		this._seenEventKeys.clear();
 		this._refreshFlags = {character: false, party: false};
 		this._refreshPromise = null;
+		this._manualRefreshPromise = null;
 		this._partyFetchToken = null;
 		this._scheduledRefresh = false;
 		this._connectionState = null;
@@ -608,7 +613,7 @@ export class CharacterSheetPartyInventory {
 		if (!this._isCurrent(active) || !active?.isOwner) return false;
 		const fetchToken = Symbol("party-inventory-fetch");
 		this._partyFetchToken = fetchToken;
-		this._isLoading = !this._partyInventory;
+		this._isLoading = true;
 		this._render();
 		const [partyResult, snapshotResult] = await Promise.allSettled([
 			this._api.pGetPartyInventory({campaignId: this._campaignId}),
@@ -648,6 +653,31 @@ export class CharacterSheetPartyInventory {
 		this._render();
 		this._decorateCharacterInventory();
 		return partyResult.status === "fulfilled" && snapshotResult.status === "fulfilled";
+	}
+
+	_pManualRefresh ({errorSource = null} = {}) {
+		if (this._manualRefreshPromise) return this._manualRefreshPromise;
+		const active = this._active;
+		if (!this._isCurrent(active) || !active?.isOwner) return Promise.resolve(false);
+		this._manualRefreshPromise = (async () => {
+			if (errorSource === "reconcile") this._reconcileError = null;
+			else if (errorSource === "party") this._partyError = null;
+			else if (errorSource === "action") this._error = null;
+			this._refreshNotice = errorSource ? "Retrying party stash sync..." : "Refreshing party stash...";
+			this._isLoading = true;
+			this._render();
+			this._refreshFlags.character = true;
+			this._refreshFlags.party = true;
+			const isSuccessful = await this._pDrainRefresh();
+			if (!this._isCurrent(active)) return false;
+			this._refreshNotice = isSuccessful ? "Party stash refreshed." : "";
+			if (isSuccessful) this._announce(this._refreshNotice);
+			this._render();
+			return isSuccessful;
+		})().finally(() => {
+			this._manualRefreshPromise = null;
+		});
+		return this._manualRefreshPromise;
 	}
 
 	_rebuildRecipientTokens () {
@@ -699,6 +729,13 @@ export class CharacterSheetPartyInventory {
 				attrs: {role: "status"},
 			}));
 		}
+		if (this._refreshNotice) {
+			this._root.append(createElement("p", {
+				className: "charsheet__party-inventory-refresh-status",
+				text: this._refreshNotice,
+				attrs: {role: "status"},
+			}));
+		}
 
 		if (this._isLoading && !this._partyInventory) this._root.append(this._renderLoading());
 		else if (this._partyInventory) this._root.append(this._renderContents());
@@ -743,7 +780,7 @@ export class CharacterSheetPartyInventory {
 				"data-party-inventory-focus": "refresh",
 			},
 		});
-		refresh.addEventListener("click", () => this._scheduleRefresh({character: true, party: true}));
+		refresh.addEventListener("click", () => void this._pManualRefresh());
 		controls.append(refresh);
 		header.append(headingGroup, controls);
 		return header;
@@ -757,16 +794,14 @@ export class CharacterSheetPartyInventory {
 		error.append(createElement("span", {text: message}));
 		const retry = createElement("button", {
 			className: "ve-btn ve-btn-xs ve-btn-default",
-			text: "Retry",
-			attrs: {type: "button", "data-party-inventory-focus": "retry"},
+			text: this._isLoading ? "Retrying..." : "Retry",
+			attrs: {
+				type: "button",
+				disabled: this._isLoading,
+				"data-party-inventory-focus": "retry",
+			},
 		});
-		retry.addEventListener("click", () => {
-			if (source === "reconcile") this._reconcileError = null;
-			else if (source === "party") this._partyError = null;
-			else this._error = null;
-			this._scheduleRefresh({character: true, party: true});
-			this._render();
-		});
+		retry.addEventListener("click", () => void this._pManualRefresh({errorSource: source}));
 		error.append(retry);
 		return error;
 	}
@@ -829,31 +864,29 @@ export class CharacterSheetPartyInventory {
 		row.append(main, quantity);
 
 		const {maxQuantity, blockers} = getTransferLimit({container: this._partyInventory, entry});
-		if (DM_ROLES.has(this._role)) {
-			const token = this._getItemToken({kind: "party_inventory", entryId: entry.id});
-			this._itemByToken.set(token, {kind: "party_inventory", entryId: entry.id});
-			const button = createElement("button", {
-				className: "ve-btn ve-btn-xs ve-btn-primary",
-				text: "Take",
-				attrs: {
-					type: "button",
-					disabled: maxQuantity < 1,
-					"aria-label": maxQuantity
+		const isDm = DM_ROLES.has(this._role);
+		const token = this._getItemToken({kind: "party_inventory", entryId: entry.id});
+		this._itemByToken.set(token, {kind: "party_inventory", entryId: entry.id});
+		const button = createElement("button", {
+			className: `ve-btn ve-btn-xs ${isDm ? "ve-btn-primary" : "ve-btn-default"}`,
+			text: isDm ? "Take" : "Request",
+			attrs: {
+				type: "button",
+				disabled: maxQuantity < 1,
+				"aria-label": maxQuantity
+					? isDm
 						? `Move ${getEntryName(entry)} to this character`
-						: `${getEntryName(entry)} cannot move: ${blockers.join(", ")}`,
-					title: getBlockerText({blockers, maxQuantity}) || "Move this stack to the open character",
-					"data-party-inventory-focus": `stash-${token}`,
-				},
-			});
-			button.addEventListener("click", () => this._beginDraft({kind: "party_inventory", entryId: entry.id, returnToken: token}));
-			row.append(button);
-		} else {
-			row.append(createElement("span", {
-				className: "charsheet__party-inventory-role-note",
-				text: "DM transfer",
-				attrs: {title: "Only a DM or Co-DM can move items out of the shared stash."},
-			}));
-		}
+						: `Request ${getEntryName(entry)} for this character`
+					: `${getEntryName(entry)} cannot move: ${blockers.join(", ")}`,
+				title: getBlockerText({blockers, maxQuantity})
+					|| (isDm
+						? "Move this stack to the open character with DM authority"
+						: "Ask a DM to move this stack to the open character"),
+				"data-party-inventory-focus": `stash-${token}`,
+			},
+		});
+		button.addEventListener("click", () => this._beginDraft({kind: "party_inventory", entryId: entry.id, returnToken: token}));
+		row.append(button);
 		const blockerText = getBlockerText({blockers, maxQuantity});
 		if (blockerText) row.append(createElement("span", {className: "charsheet__party-inventory-row-note", text: blockerText}));
 		return row;
@@ -874,7 +907,9 @@ export class CharacterSheetPartyInventory {
 				"data-party-inventory-focus": "composer",
 			},
 		});
-		const title = createElement("h5", {text: `Move ${entry ? getEntryName(entry) : this._draft.entryName}`});
+		const title = createElement("h5", {
+			text: `${this._isPlayerStashRequest() ? "Request" : "Move"} ${entry ? getEntryName(entry) : this._draft.entryName}`,
+		});
 		const fields = createElement("div", {className: "charsheet__party-inventory-fields"});
 
 		const quantityField = createElement("label");
@@ -974,7 +1009,11 @@ export class CharacterSheetPartyInventory {
 		cancel.addEventListener("click", () => void this._pCancelDraft());
 		const submit = createElement("button", {
 			className: "ve-btn ve-btn-primary",
-			text: "Confirm transfer",
+			text: this._isPlayerStashRequest()
+				? "Send request"
+				: this._shouldAutoResolve()
+					? "Move now"
+					: "Offer transfer",
 			attrs: {type: "submit", "data-party-inventory-focus": "submit"},
 		});
 		actions.append(cancel, submit);
@@ -1128,8 +1167,9 @@ export class CharacterSheetPartyInventory {
 				: recipient?.label || "the selected character";
 		this._syncCarryDelta(composer);
 		const summary = composer.querySelector(".charsheet__party-inventory-confirmation");
+		const approvalText = this._getApprovalText();
 		summary.textContent = isQuantityValid
-			? `${quantity} × ${entryName} will move from ${this._draft.kind === "party_inventory" ? "the party stash" : "this character"} to ${destination}.${this._willRequireApproval() ? " The recipient must accept before it arrives." : ""}`
+			? `${quantity} × ${entryName} will move from ${this._draft.kind === "party_inventory" ? "the party stash" : "this character"} to ${destination}.${approvalText ? ` ${approvalText}` : " This move applies immediately under your current authority."}`
 			: `Enter a whole-number quantity from 1 to ${this._draft.maxQuantity}.`;
 		const submit = composer.querySelector("button[type='submit']");
 		const isReserved = !!this._draft.transfer;
@@ -1144,7 +1184,25 @@ export class CharacterSheetPartyInventory {
 	}
 
 	_willRequireApproval () {
-		return !DM_ROLES.has(this._role);
+		return !this._shouldAutoResolve();
+	}
+
+	_isPlayerStashRequest () {
+		return this._draft?.kind === "party_inventory" && !DM_ROLES.has(this._role);
+	}
+
+	_shouldAutoResolve () {
+		if (!this._draft) return false;
+		if (DM_ROLES.has(this._role)) return true;
+		if (this._draft.kind === "party_inventory" || this._draft.destinationKind === "party_inventory") return false;
+		return this._recipients.some(recipient => recipient.id === this._draft.recipientId && recipient.isOwned);
+	}
+
+	_getApprovalText () {
+		if (!this._willRequireApproval()) return "";
+		if (this._draft.kind === "party_inventory") return "A DM must approve before anything leaves the stash.";
+		if (this._draft.destinationKind === "party_inventory") return "A DM must accept before it arrives.";
+		return "The recipient must accept before it arrives.";
 	}
 
 	_closeDraft () {
@@ -1182,7 +1240,9 @@ export class CharacterSheetPartyInventory {
 			this._refreshFlags.party = true;
 			if (!await this._pDrainRefresh()) throw Object.assign(new Error("Authoritative refresh failed"), {code: "NETWORK_UNAVAILABLE"});
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
-			const message = "Transfer cancelled. The reserved items were restored.";
+			const message = draft.transfer.status === "proposed"
+				? "Request cancelled. The party stash was unchanged."
+				: "Transfer cancelled. The reserved items were restored.";
 			this._isSubmitting = false;
 			this._closeDraft();
 			this._fnToast?.({type: "success", content: message});
@@ -1242,11 +1302,15 @@ export class CharacterSheetPartyInventory {
 				if (!transfer) throw Object.assign(new Error("Transfer was not found"), {code: "TRANSFER_NOT_FOUND"});
 				draft.transfer = transfer;
 				draft.needsStatusCheck = false;
-				if (transfer.status !== "reserved") {
+				if (!["proposed", "reserved"].includes(transfer.status)) {
 					const messages = {
 						committed: "Transfer complete. Both inventories are up to date.",
-						rejected: "Transfer was rejected. The reserved items were restored.",
-						cancelled: "Transfer was cancelled. The reserved items were restored.",
+						rejected: draft.kind === "party_inventory"
+							? "Request was rejected. The party stash was unchanged."
+							: "Transfer was rejected. The reserved items were restored.",
+						cancelled: draft.kind === "party_inventory"
+							? "Request was cancelled. The party stash was unchanged."
+							: "Transfer was cancelled. The reserved items were restored.",
 						expired: "Transfer expired. The reserved items were restored.",
 					};
 					const message = messages[transfer.status];
@@ -1290,24 +1354,29 @@ export class CharacterSheetPartyInventory {
 				draft.transfer = result.transfer;
 			}
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
-			if (DM_ROLES.has(this._role)) {
+			if (this._shouldAutoResolve()) {
 				const rulesVersionId = this._fnGetRulesVersionId();
-				await this._api.pResolveTransfer({
+				const resolved = await this._api.pResolveTransfer({
 					campaignId: this._campaignId,
 					transferId: draft.transfer.id,
 					decision: "accept",
 					...(rulesVersionId == null ? {} : {rulesVersionId}),
 					idempotencyKey: draft.resolutionCommandId,
 				});
+				draft.transfer = resolved.transfer;
 			}
 
 			this._refreshFlags.character = true;
 			this._refreshFlags.party = true;
 			if (!await this._pDrainRefresh()) throw Object.assign(new Error("Authoritative refresh failed"), {code: "NETWORK_UNAVAILABLE"});
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
-			const message = this._willRequireApproval()
-				? "Transfer reserved. The recipient can accept it from the campaign inbox."
-				: "Transfer complete. Both inventories are up to date.";
+			const message = draft.transfer.status === "proposed"
+				? "Request sent. A DM can approve it from the campaign inbox; the party stash is unchanged until then."
+				: this._willRequireApproval()
+					? draft.destinationKind === "party_inventory"
+						? "Transfer reserved. A DM can accept it from the campaign inbox."
+						: "Transfer reserved. The recipient can accept it from the campaign inbox."
+					: "Transfer complete. Both inventories are up to date.";
 			this._isSubmitting = false;
 			this._closeDraft();
 			this._fnToast?.({type: "success", content: message});

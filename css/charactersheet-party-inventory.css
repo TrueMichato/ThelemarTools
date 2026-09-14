@@ -167,6 +167,17 @@
 	color: var(--cs-warning-text);
 }
 
+.charsheet__party-inventory-refresh-status {
+	margin: var(--cs-space-md) 0 0;
+	padding: var(--cs-space-sm) var(--cs-space-md);
+	background: var(--cs-info-light);
+	border: 1px solid var(--cs-info);
+	border-radius: var(--cs-radius-sm);
+	color: var(--cs-info-text);
+	font-size: var(--cs-text-sm);
+	line-height: var(--cs-leading-snug);
+}
+
 .charsheet__party-inventory-loading {
 	display: grid;
 	gap: var(--cs-space-sm);

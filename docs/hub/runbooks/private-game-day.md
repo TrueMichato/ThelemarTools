@@ -195,14 +195,23 @@ correct, activity is readable, and retries do not duplicate the award.
 1. Record Aster's and the party inventory's relevant item/currency balances.
 2. Player A offers one awarded item plus small CP/SP/GP amounts to party inventory.
 3. DM reviews the human-readable source, item, quantities, and destination, then accepts.
-4. Player A creates a second bounded offer of 1 CP; DM rejects it.
-5. Player A creates a third bounded offer of 1 SP and uses **Cancel** before the DM resolves it.
-6. DM transfers part of the accepted party stack to Bryn.
-7. Repeat one completed accepted request from browser history or retry UI if available.
+4. Player A uses **Request** on the stash from Aster's Character Sheet. Before approval, verify the stash and
+   character balances are unchanged; then DM uses **Approve** in the Campaign Hub.
+5. Create two requests that together exceed the remaining stack. Approve one, record
+   `TRANSFER_INSUFFICIENT` for the stale second approval, then decline it.
+6. Player A creates a bounded deposit of 1 CP; DM rejects it. Player A creates another of 1 SP and uses
+   **Cancel** before the DM resolves it.
+7. DM moves part of the accepted party stack to Bryn and confirms the move completes immediately under DM
+   authority rather than appearing as recipient consent.
+8. Force one synthetic post-transfer party-inventory refetch to return `NETWORK_UNAVAILABLE`. Use
+   **Retry latest balances**, then complete another transfer without reloading the page.
+9. Repeat one completed accepted request from browser history or retry UI if available.
 
-**Expected:** assets are reserved before acceptance, conserved exactly across source/destination, never duplicated,
-and replay returns the existing outcome. The rejected 1 CP and sender-cancelled 1 SP each return exactly once to
-Aster's original source identity; neither reaches party inventory or creates a duplicate.
+**Expected:** character-source and DM party-source assets are reserved before acceptance/resolution and conserved
+exactly; a player stash request reserves nothing until DM approval. Metadata survives every character/stash
+round trip. Replay returns the existing outcome. Rejected/cancelled escrow returns exactly once to its original
+source identity, the stale request changes neither inventory, refresh/retry visibly refetches, and a later
+transfer succeeds without a page reload.
 
 ### GD-09 — cross-character Cure Wounds
 

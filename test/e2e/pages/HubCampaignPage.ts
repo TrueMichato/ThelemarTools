@@ -605,6 +605,7 @@ export class HubCampaignPage {
 		race = null,
 		spellsKnown = [],
 		rulesVersionId = null,
+		inventory = null,
 	}: {
 		campaignId: string;
 		name: string;
@@ -623,6 +624,7 @@ export class HubCampaignPage {
 			sourceFeature?: string;
 		}>;
 		rulesVersionId?: string | null;
+		inventory?: Array<Record<string, unknown>> | null;
 	}): Promise<any> {
 		const response = await this.page.request.post("/api/characters", {
 			headers: await this.getMutationHeaders(),
@@ -646,7 +648,7 @@ export class HubCampaignPage {
 						...(spellsKnown.length ? {spellsKnown, cantripsKnown: []} : {}),
 					},
 					conditions: [],
-					inventory: [{id: "rations", item: {name: "Rations", source: "PHB"}, quantity: 5}],
+					inventory: inventory || [{id: "rations", item: {name: "Rations", source: "PHB"}, quantity: 5}],
 					currency: {cp: 8, sp: 6, ep: 4, gp: 10, pp: 2},
 				},
 			},
@@ -1680,7 +1682,7 @@ export class HubCampaignPage {
 		expect(await this.page.locator("#campaign-transfer-target").inputValue())
 			.not.toBe(await this.page.locator("#campaign-transfer-source").inputValue());
 		await this.page.locator("#campaign-transfer-target").selectOption({label: "Party inventory"});
-		const itemOption = this.page.locator("#campaign-transfer-entry option", {hasText: itemName});
+		const itemOption = this.page.locator("#campaign-transfer-entry option", {hasText: itemName}).first();
 		await expect(itemOption).toContainText("available");
 		await this.page.locator("#campaign-transfer-entry").selectOption(await itemOption.getAttribute("value") || "");
 		await this.page.locator("#campaign-transfer-quantity").fill(`${quantity}`);
@@ -1691,23 +1693,115 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer reserved.");
 	}
 
+	async submitAuthoritativeItemTransfer ({
+		campaignId,
+		sourceName,
+		targetName,
+		itemName,
+		quantity,
+	}: {
+		campaignId: string;
+		sourceName: string;
+		targetName: string;
+		itemName: string;
+		quantity: number;
+	}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		await this.openCampaignWorkbench();
+		await this.page.locator("#campaign-transfer-source").selectOption({label: sourceName});
+		await this.page.locator("#campaign-transfer-target").selectOption({label: targetName});
+		const itemOption = this.page.locator("#campaign-transfer-entry option", {hasText: itemName}).first();
+		const itemValue = await itemOption.getAttribute("value") || "";
+		await this.page.locator("#campaign-transfer-entry").selectOption(itemValue);
+		await this.page.locator("#campaign-transfer-quantity").fill(`${quantity}`);
+		await expect(this.page.locator("#campaign-transfer-entry")).toHaveValue(itemValue);
+		await this.page.locator("#campaign-transfer-form button[type='submit']").click();
+		await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer complete.");
+		await expect(this.page.locator("#campaign-pending-transfers .hub-data-row")).toHaveCount(0);
+	}
+
+	async reserveRepeatedItemTransfersAfterRefreshRetry ({
+		campaignId,
+		sourceName,
+		targetName,
+		itemName,
+		quantity,
+	}: {
+		campaignId: string;
+		sourceName: string;
+		targetName: string;
+		itemName: string;
+		quantity: number;
+	}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		await this.openCampaignWorkbench();
+		await this.page.locator("#campaign-transfer-source").selectOption({label: sourceName});
+		await this.page.locator("#campaign-transfer-target").selectOption({label: targetName});
+		const itemOption = this.page.locator("#campaign-transfer-entry option", {hasText: itemName}).first();
+		await this.page.locator("#campaign-transfer-entry").selectOption(await itemOption.getAttribute("value") || "");
+		await this.page.locator("#campaign-transfer-quantity").fill(`${quantity}`);
+
+		const transferMatcher = `**/api/campaigns/${campaignId}/transfers`;
+		const partyMatcher = `**/api/campaigns/${campaignId}/party-inventory`;
+		let transferPostCount = 0;
+		let failedRefreshCount = 0;
+		const failRefresh = (route: Route) => {
+			failedRefreshCount++;
+			return route.fulfill({
+				status: 503,
+				contentType: "application/json",
+				body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
+			});
+		};
+		const observeTransfer = async (route: Route) => {
+			const response = await route.fetch();
+			if (route.request().method() === "POST" && response.ok()) {
+				transferPostCount++;
+				await this.page.route(partyMatcher, failRefresh, {times: 1});
+			}
+			await route.fulfill({response});
+		};
+		await this.page.route(transferMatcher, observeTransfer);
+		try {
+			await this.page.locator("#campaign-transfer-form button[type='submit']").click();
+			await expect.poll(() => transferPostCount).toBe(1);
+			await expect.poll(() => failedRefreshCount).toBe(1);
+			const retry = this.page.getByRole("button", {name: "Retry latest balances"});
+			await expect(retry).toBeVisible();
+			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeDisabled();
+			await retry.click();
+			await expect(this.page.locator("#campaign-transfer-form-status")).toHaveText("Latest balances loaded. You can send another transfer.");
+			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeEnabled();
+		} finally {
+			await this.page.unroute(transferMatcher, observeTransfer);
+			await this.page.unroute(partyMatcher, failRefresh);
+		}
+
+		await this.page.locator("#campaign-transfer-form button[type='submit']").click();
+		await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer reserved.");
+	}
+
 	async acceptFirstPendingTransfer ({
 		campaignId,
 		expectedText,
 		expectedAbsentText = [],
+		buttonName = "Accept",
 	}: {
 		campaignId: string;
 		expectedText: string[];
 		expectedAbsentText?: string[];
+		buttonName?: "Accept" | "Approve";
 	}): Promise<void> {
 		await this.gotoCampaign(campaignId);
-		const transfer = this.page.locator("#campaign-pending-transfers .hub-data-row").first();
+		const transfers = this.page.locator("#campaign-pending-transfers .hub-data-row");
+		const transferCount = await transfers.count();
+		const transfer = transfers.first();
 		for (const text of expectedText) await expect(transfer).toContainText(text);
 		for (const text of expectedAbsentText) await expect(transfer).not.toContainText(text);
-		const button = this.page.locator("#campaign-pending-transfers button", {hasText: "Accept"}).first();
+		const button = transfer.getByRole("button", {name: buttonName, exact: true});
 		await expect(button).toBeVisible();
 		await button.click();
-		await expect(button).toBeHidden();
+		await expect(transfers).toHaveCount(transferCount - 1);
 	}
 
 	async expectTransferItemAvailable ({sourceName, itemName}: {sourceName: string; itemName: string}): Promise<void> {

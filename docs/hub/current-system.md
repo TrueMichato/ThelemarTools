@@ -234,7 +234,8 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G currentl
   Sheet; the first production peer template supports one-player PHB/XPHB Cure Wounds with an atomic standard-slot
   cost, while broader abilities, resources, party/multi-target, and NPC/monster targeting remain unavailable;
 - XP and item grants;
-- party inventory summary and item/currency transfers.
+- party inventory summary, player requests to take stash items with DM approval, explicit DM/same-owner
+  immediate moves, peer/deposit escrow, and recoverable transfer-state refresh/retry.
 
 Lifecycle administration is authoritative: member removal restores escrow, cancels pending work, releases
 leases, archives the member workspace, detaches player-owned characters, and closes campaign sockets. Account

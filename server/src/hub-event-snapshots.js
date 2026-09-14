@@ -39,6 +39,7 @@ const UNENRICHED_EVENT_TYPES = new Set([
 	"character.operation.cancelled",
 	"character.operation.expired",
 	"party_inventory.invalidated",
+	"transfer.proposed",
 	"transfer.reserved",
 	"transfer.committed",
 	"transfer.rejected",

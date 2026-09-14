@@ -398,6 +398,17 @@ export function removeTransferPayload ({container, payload}) {
 	return {container: out, escrow: {items: escrowItems, currency: escrowCurrency}};
 }
 
+export function prepareTransferRequest ({container, payload}) {
+	const {escrow} = removeTransferPayload({container, payload});
+	return {
+		request: {
+			items: escrow.items.map(entry => ({entryId: entry.id, quantity: entry.quantity})),
+			currency: structuredClone(escrow.currency),
+		},
+		preview: escrow,
+	};
+}
+
 export function addTransferPayload ({container, escrow, isRestore = false}) {
 	const out = structuredClone(container);
 	out.inventory = normalizeInventory(out.inventory);

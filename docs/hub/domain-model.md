@@ -193,6 +193,10 @@ revision.
 
 ```mermaid
 stateDiagram-v2
+  [*] --> proposed: player requests party item; stash unchanged
+  proposed --> committed: DM approves; source and target change atomically
+  proposed --> rejected: DM declines or requester cancels; stash unchanged
+  proposed --> cancelled: lifecycle cancellation; stash unchanged
   [*] --> reserved: source moved to escrow
   reserved --> committed: target accepts
   reserved --> rejected: target rejects; source restored
@@ -200,7 +204,11 @@ stateDiagram-v2
   reserved --> expired: reserved; not implemented
 ```
 
-`proposed` and `accepted` are allowed schema states but current API/store does not persist them.
+`proposed` is persisted only for a player request from party inventory to that player's own character. The
+request stores normalized quantities and a server-derived preview, but the shared source remains untouched
+until a DM/co-DM accepts. Acceptance locks both participants, rechecks the live source, and transfers the
+fresh canonical escrow in one transaction; `TRANSFER_INSUFFICIENT` leaves the request proposed. `accepted`
+remains an unused schema state.
 
 ### Outbox
 

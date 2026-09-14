@@ -449,8 +449,23 @@ describe("campaign activity event presentation", () => {
 			},
 			characters: [],
 		});
+		const request = normalizeHubEvent({
+			event: {
+				type: "transfer.proposed",
+				aggregateType: "transfer",
+				aggregateId: "request-id",
+				payload: {
+					sourceKind: "party_inventory",
+					targetKind: "character",
+					targetId: "target-id",
+					targetCharacterNameSnapshot: {version: 1, displayName: "Rook"},
+				},
+			},
+			characters: [],
+		});
 		expect(roll.subject).toBe("Nyx");
 		expect(transfer.title).toBe("Nyx offered a transfer to Rook.");
+		expect(request.title).toBe("Rook requested a transfer from Party inventory.");
 		expect(transfer.title).not.toMatch(/source-id|target-id|transfer-id/);
 	});
 
@@ -649,7 +664,9 @@ describe("campaign activity event presentation", () => {
 		expect(source).toMatch(/async pRemoveMember[\s\S]*?_pRemoveMembershipLifecycle/);
 		expect(source).toMatch(/async pLeaveCampaign[\s\S]*?_pRemoveMembershipLifecycle/);
 		expect(source).toMatch(/async pPurgeDueAccounts[\s\S]*?_pRemoveMembershipLifecycle/);
-		const cancellation = source.slice(source.indexOf("async _pCancelIncomingForCharacter"), source.indexOf("async _pCancelTransferForLifecycle"));
+		const incomingCancellation = source.slice(source.indexOf("async _pCancelIncomingForCharacter"), source.indexOf("async _pCancelTransferForLifecycle"));
+		expect(incomingCancellation).toContain("this._pCancelTransferForLifecycle");
+		const cancellation = source.slice(source.indexOf("async _pCancelTransferForLifecycle"), source.indexOf("async _pCancelTransfersForLifecycle"));
 		expect(cancellation).toContain("sourceKind: transfer.sourceKind");
 		expect(cancellation).toContain("sourceId: transfer.sourceId");
 		expect(cancellation).toContain("targetKind: transfer.targetKind");

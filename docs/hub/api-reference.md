@@ -227,14 +227,19 @@ arbitrary spell prose.
 |---|---|---|---|
 | `GET /api/campaigns/:campaignId/party-inventory` | Active member | none | Lazily created party inventory, entries, denomination currency |
 | `GET /api/campaigns/:campaignId/transfers` | Active member | none | Transfers visible to DM, actor, source owner, or target owner |
-| `POST /api/campaigns/:campaignId/transfers` | Active-member mutation; source owner or DM for party source | source/target kind+UUID, <=100 item quantities, nonnegative denomination currency | 201 transfer already in `reserved` state |
-| `POST /api/campaigns/:campaignId/transfers/:transferId/resolve` | Target owner or DM/co-DM; originating actor may reject | accept/reject plus active `rulesVersionId` when accepting into a character under restrictive content policy | committed or rejected transfer |
+| `POST /api/campaigns/:campaignId/transfers` | Active-member mutation; character source owner, DM/co-DM party source, or player requesting party inventory for their own character | source/target kind+UUID, <=100 item quantities, nonnegative denomination currency | 201 `reserved` escrow transfer, or non-escrowed `proposed` player stash request |
+| `POST /api/campaigns/:campaignId/transfers/:transferId/resolve` | Reserved: target owner or DM/co-DM; proposed stash request: DM/co-DM; originating actor may reject/cancel either | accept/reject plus active `rulesVersionId` when accepting into a character under restrictive content policy | committed or rejected transfer/request |
 
 `sourceKind`/`targetKind` are `character` or `party_inventory`. Empty/insufficient transfers fail before a
-row is committed. Item quantities must be positive finite safe integers within the route schema limit. The
-authority removes the requested value into escrow before returning `reserved`; acceptance writes that escrow
-to the destination, while rejection or lifecycle cancellation restores the source exactly once. Reusing an
-idempotency key with the same command replays its stored result rather than repeating either mutation.
+row is committed. Item quantities must be positive finite safe integers within the route schema limit.
+Character-source and DM/co-DM party-source commands remove the requested value into escrow before returning
+`reserved`; acceptance writes that escrow to the destination, while rejection or lifecycle cancellation
+restores the source exactly once. A player party-source command is allowed only when the destination is that
+player's own character. It stores a server-derived metadata preview and normalized request as `proposed` but
+does not debit or reserve the stash. DM/co-DM acceptance rechecks the live stack and atomically removes its
+current canonical metadata and writes it to the character; concurrent depletion returns
+`TRANSFER_INSUFFICIENT` without changing either container or terminalizing the request. Reusing an idempotency
+key with the same command replays its stored result rather than repeating either mutation.
 Acceptance into a character compares the resulting authoritative document with its prior state and rejects a
 new disallowed/unknown item identity or stale rules pin before destination, resolution, audit, event, outbox, or
 receipt changes. The reserved escrow remains available for an exact reject/cancel restoration.
@@ -249,8 +254,11 @@ custom names, source/edition, charges, durability, notes, material/variant/compo
 fields therefore remain distinct when they differ.
 
 An owned campaign-backed Character Sheet uses these routes directly: it fetches the party stash on open and
-after reconnect or relevant transfer events, proposes character-to-stash and character-to-character moves, and
-lets a DM/co-DM move stash items into the open character. The browser never applies an escrow mutation to two
+after reconnect or relevant transfer events, proposes character-to-stash and character-to-character moves,
+lets a player request a stash item for the open character, and lets a DM/co-DM move stash items directly.
+DM/co-DM moves and same-owner character moves issue the explicit resolve command immediately; player deposits,
+peer transfers, and stash requests explain whose approval is pending. The Campaign Overview follows the same
+direct-authority wording and auto-resolution rule. The browser never applies an escrow mutation to two
 documents itself. Character updates are adopted through the HTTP character repository's authoritative
 reconciliation queue. Local, signed-out, detached, and non-owner sheets do not activate this integration.
 

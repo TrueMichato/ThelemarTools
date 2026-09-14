@@ -32,6 +32,7 @@ import {
 	normalizeCurrency,
 	normalizeSafeItemSummary,
 	normalizeSemanticOperation,
+	prepareTransferRequest,
 	removeTransferPayload,
 } from "./hub-actions.js";
 import {validateCloudCharacterData, validateCloudValue} from "./cloud-data-validation.js";
@@ -822,16 +823,18 @@ export class MemoryHubStore {
 	}
 
 	_cancelTransferForLifecycle ({transfer, actorAccountId, reason}) {
-		if (transfer.status !== "reserved") return;
-		const source = this._getTransferContainer({kind: transfer.sourceKind, id: transfer.sourceId, campaignId: transfer.campaignId});
+		if (!["proposed", "reserved"].includes(transfer.status)) return;
 		const targetOwnerAccountId = transfer.targetKind === "character"
 			? this._characters.get(transfer.targetId)?.ownerAccountId
 			: null;
-		this._setTransferContainer({
-			holder: source,
-			container: addTransferPayload({container: source.container, escrow: transfer.payload.escrow, isRestore: true}),
-			actorAccountId,
-		});
+		if (transfer.status === "reserved") {
+			const source = this._getTransferContainer({kind: transfer.sourceKind, id: transfer.sourceId, campaignId: transfer.campaignId});
+			this._setTransferContainer({
+				holder: source,
+				container: addTransferPayload({container: source.container, escrow: transfer.payload.escrow, isRestore: true}),
+				actorAccountId,
+			});
+		}
 		transfer.status = "cancelled";
 		transfer.resolvedAt = this._fnNow().toISOString();
 		this._appendEvent({
@@ -854,7 +857,7 @@ export class MemoryHubStore {
 
 	_cancelTransfersForLifecycle ({campaignId, affectedAccountId, characterIds, actorAccountId, reason}) {
 		for (const transfer of this._transfers.values()) {
-			if (transfer.campaignId !== campaignId || transfer.status !== "reserved") continue;
+			if (transfer.campaignId !== campaignId || !["proposed", "reserved"].includes(transfer.status)) continue;
 			const isAffected = transfer.actorAccountId === affectedAccountId
 				|| (transfer.sourceKind === "character" && characterIds.has(transfer.sourceId))
 				|| (transfer.targetKind === "character" && characterIds.has(transfer.targetId));
@@ -3389,9 +3392,23 @@ export class MemoryHubStore {
 		const target = this._getTransferContainer({kind: targetKind, id: targetId, campaignId});
 		if (target._character) this._assertTargetable({character: target._character, accountId, role: membership.role});
 		if (sourceKind === "character" && source._character.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can transfer from this character.`, {status: 403});
-		if (sourceKind === "party_inventory" && !["dm", "co_dm"].includes(membership.role)) throw new HubStoreError("FORBIDDEN", `Only a DM can transfer from party inventory.`, {status: 403});
-		const {container, escrow} = removeTransferPayload({container: source.container, payload});
-		this._setTransferContainer({holder: source, container, actorAccountId: accountId});
+		const isDm = ["dm", "co_dm"].includes(membership.role);
+		const isPlayerStashRequest = sourceKind === "party_inventory" && !isDm;
+		if (
+			isPlayerStashRequest
+			&& (
+				targetKind !== "character"
+				|| target._character?.ownerAccountId !== accountId
+			)
+		) {
+			throw new HubStoreError("FORBIDDEN", `Players can only request party inventory for one of their own characters.`, {status: 403});
+		}
+		const prepared = isPlayerStashRequest
+			? prepareTransferRequest({container: source.container, payload})
+			: removeTransferPayload({container: source.container, payload});
+		if (!isPlayerStashRequest) {
+			this._setTransferContainer({holder: source, container: prepared.container, actorAccountId: accountId});
+		}
 		const transfer = {
 			id: crypto.randomUUID(),
 			campaignId,
@@ -3400,15 +3417,17 @@ export class MemoryHubStore {
 			sourceId,
 			targetKind,
 			targetId,
-			status: "reserved",
-			payload: {escrow},
+			status: isPlayerStashRequest ? "proposed" : "reserved",
+			payload: isPlayerStashRequest
+				? {request: prepared.request, preview: prepared.preview}
+				: {escrow: prepared.escrow},
 			createdAt: this._fnNow().toISOString(),
 		};
 		this._transfers.set(transfer.id, transfer);
 		this._appendEvent({
 			campaignId,
 			actorAccountId: accountId,
-			type: "transfer.reserved",
+			type: `transfer.${transfer.status}`,
 			aggregateType: "transfer",
 			aggregateId: transfer.id,
 			visibility: "explicit_accounts",
@@ -3423,7 +3442,7 @@ export class MemoryHubStore {
 		if (prior) return prior;
 		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
 		const transferPre = this._transfers.get(transferId);
-		if (!transferPre || transferPre.campaignId !== campaignId || transferPre.status !== "reserved") throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
+		if (!transferPre || transferPre.campaignId !== campaignId || !["proposed", "reserved"].includes(transferPre.status)) throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
 		const enforcement = decision === "accept" && transferPre.targetKind === "character"
 			? await this._pGetCampaignContentEnforcement(campaignId)
 			: null;
@@ -3431,35 +3450,59 @@ export class MemoryHubStore {
 		if (resumedPrior) return resumedPrior;
 		const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
 		const transfer = this._transfers.get(transferId);
-		if (!transfer || transfer.campaignId !== campaignId || transfer.status !== "reserved") throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
+		if (!transfer || transfer.campaignId !== campaignId || !["proposed", "reserved"].includes(transfer.status)) throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
 		const target = this._getTransferContainer({kind: transfer.targetKind, id: transfer.targetId, campaignId});
 		const isActorCancelling = decision === "reject" && transfer.actorAccountId === accountId;
-		const canResolve = isActorCancelling || (transfer.targetKind === "character"
-			? target._character.ownerAccountId === accountId || ["dm", "co_dm"].includes(membership.role)
-			: ["dm", "co_dm"].includes(membership.role));
+		const isDm = ["dm", "co_dm"].includes(membership.role);
+		const canResolve = transfer.status === "proposed"
+			? isActorCancelling || isDm
+			: isActorCancelling || (transfer.targetKind === "character"
+				? target._character.ownerAccountId === accountId || isDm
+				: isDm);
 		if (!canResolve) throw new HubStoreError("FORBIDDEN", `Cannot resolve this transfer.`, {status: 403});
-		const destination = decision === "accept"
-			? target
-			: this._getTransferContainer({kind: transfer.sourceKind, id: transfer.sourceId, campaignId});
-		const after = addTransferPayload({
-			container: destination.container,
-			escrow: transfer.payload.escrow,
-			isRestore: decision !== "accept",
-		});
-		if (decision === "accept" && destination._character) {
-			assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
-			assertCharacterCampaignContentMutation({
-				...enforcement,
-				before: destination.container,
-				after,
-				rulesVersionId: enforcement.activeRulesVersionId,
+		if (transfer.status === "proposed") {
+			if (decision === "accept") {
+				const source = this._getTransferContainer({kind: transfer.sourceKind, id: transfer.sourceId, campaignId});
+				const removed = removeTransferPayload({container: source.container, payload: transfer.payload.request});
+				const after = addTransferPayload({container: target.container, escrow: removed.escrow});
+				if (target._character) {
+					assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+					assertCharacterCampaignContentMutation({
+						...enforcement,
+						before: target.container,
+						after,
+						rulesVersionId: enforcement.activeRulesVersionId,
+					});
+					validateCloudCharacterData(after);
+				}
+				this._setTransferContainer({holder: source, container: removed.container, actorAccountId: accountId});
+				this._setTransferContainer({holder: target, container: after, actorAccountId: accountId});
+				transfer.payload = {...transfer.payload, escrow: removed.escrow};
+			}
+		} else {
+			const destination = decision === "accept"
+				? target
+				: this._getTransferContainer({kind: transfer.sourceKind, id: transfer.sourceId, campaignId});
+			const after = addTransferPayload({
+				container: destination.container,
+				escrow: transfer.payload.escrow,
+				isRestore: decision !== "accept",
+			});
+			if (decision === "accept" && destination._character) {
+				assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+				assertCharacterCampaignContentMutation({
+					...enforcement,
+					before: destination.container,
+					after,
+					rulesVersionId: enforcement.activeRulesVersionId,
+				});
+			}
+			this._setTransferContainer({
+				holder: destination,
+				container: after,
+				actorAccountId: accountId,
 			});
 		}
-		this._setTransferContainer({
-			holder: destination,
-			container: after,
-			actorAccountId: accountId,
-		});
 		transfer.status = decision === "accept" ? "committed" : "rejected";
 		transfer.resolvedAt = this._fnNow().toISOString();
 		this._appendAudit({campaignId, actorAccountId: accountId, action: `transfer.${transfer.status}`, targetType: "transfer", targetId: transfer.id});
@@ -3653,30 +3696,11 @@ export class MemoryHubStore {
 			if (action.targetCharacterId === character.id && action.status === "proposed") action.status = "cancelled";
 		}
 		for (const transfer of this._transfers.values()) {
-			if (transfer.status !== "reserved" || transfer.targetKind !== "character" || transfer.targetId !== character.id) continue;
-			const source = this._getTransferContainer({kind: transfer.sourceKind, id: transfer.sourceId, campaignId: transfer.campaignId});
-			this._setTransferContainer({
-				holder: source,
-				container: addTransferPayload({container: source.container, escrow: transfer.payload.escrow, isRestore: true}),
+			if (!["proposed", "reserved"].includes(transfer.status) || transfer.targetKind !== "character" || transfer.targetId !== character.id) continue;
+			this._cancelTransferForLifecycle({
+				transfer,
 				actorAccountId: character.ownerAccountId,
-			});
-			transfer.status = "cancelled";
-			transfer.resolvedAt = this._fnNow().toISOString();
-			this._appendEvent({
-				campaignId: transfer.campaignId,
-				actorAccountId: character.ownerAccountId,
-				type: "transfer.cancelled",
-				aggregateType: "transfer",
-				aggregateId: transfer.id,
-				visibility: "explicit_accounts",
-				visibleAccountIds: [...new Set([transfer.actorAccountId, character.ownerAccountId].filter(Boolean))],
-				payload: {
-					reason: "target_lifecycle_change",
-					sourceKind: transfer.sourceKind,
-					sourceId: transfer.sourceId,
-					targetKind: transfer.targetKind,
-					targetId: transfer.targetId,
-				},
+				reason: "target_lifecycle_change",
 			});
 		}
 	}
@@ -3735,6 +3759,11 @@ export class MemoryHubStore {
 		if (campaign.status !== "active") throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 		if ([...this._transfers.values()].some(it => it.campaignId === campaignId && it.status === "reserved")) {
 			throw new HubStoreError("CAMPAIGN_BUSY", `Resolve reserved transfers before archiving.`, {status: 409});
+		}
+		for (const transfer of this._transfers.values()) {
+			if (transfer.campaignId === campaignId && transfer.status === "proposed") {
+				this._cancelTransferForLifecycle({transfer, actorAccountId: accountId, reason: "campaign_archived"});
+			}
 		}
 		campaign.status = "archived";
 		for (const operation of this._semanticOperations.values()) {

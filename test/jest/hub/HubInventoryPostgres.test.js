@@ -86,6 +86,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 
 	async function pSeedPartyItem ({name, quantity, item = null, entryMetadata = {}}) {
 		const donorEntryId = crypto.randomUUID();
+		const seededItem = structuredClone(item || {name, source: "PHB", weight: 0.1});
 		const donor = (await store.pCreateCharacter({
 			accountId: sourceOwner.id,
 			campaignId: campaign.id,
@@ -93,7 +94,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 				name: `${name} donor`,
 				inventory: [{
 					id: donorEntryId,
-					item: item || {name, source: "PHB", weight: 0.1},
+					item: seededItem,
 					quantity,
 					...entryMetadata,
 				}],
@@ -122,7 +123,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			idempotencyKey: crypto.randomUUID(),
 		});
 		const seeded = await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id});
-		return {party: seeded, entry: seeded.inventory.find(entry => entry.item.name === name)};
+		return {party: seeded, entry: seeded.inventory.find(entry => entry.item.name === seededItem.name)};
 	}
 
 	beforeAll(async () => {
@@ -418,6 +419,154 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		stash = await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id});
 		expect(stash.inventory[0]).toEqual(expect.objectContaining({note: "Secret route", quantity: 1}));
 		expect((await pReadCharacter(targetOwner.id, targetCharacter.id)).data.inventory.find(it => it.note === "Secret route").quantity).toBe(2);
+	});
+
+	test("keeps player stash requests non-escrowed until DM approval and conserves canonical metadata", async () => {
+		const seeded = await pSeedPartyItem({
+			name: `${prefix} requested moonsteel`,
+			quantity: 3,
+			item: RICH_CATALOG_ITEM,
+			entryMetadata: {note: "Keep the full trusted entry"},
+		});
+		const requestInput = {
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			sourceKind: "party_inventory",
+			sourceId: seeded.party.id,
+			targetKind: "character",
+			targetId: targetCharacter.id,
+			payload: {items: [{entryId: seeded.entry.id, quantity: 1}]},
+			idempotencyKey: `${prefix}-player-stash-request`,
+		};
+		const requested = await store.pProposeTransfer(requestInput);
+		await expect(store.pProposeTransfer(requestInput)).resolves.toEqual(JSON.parse(JSON.stringify(requested)));
+		expect(requested.transfer).toMatchObject({
+			status: "proposed",
+			payload: {
+				request: {items: [{entryId: seeded.entry.id, quantity: 1}]},
+				preview: {
+					items: [expect.objectContaining({
+						item: RICH_CATALOG_ITEM,
+						note: "Keep the full trusted entry",
+						quantity: 1,
+					})],
+				},
+			},
+		});
+		expect((await store.pGetPartyInventory({accountId: targetOwner.id, campaignId: campaign.id}))
+			.inventory.find(entry => entry.id === seeded.entry.id).quantity).toBe(3);
+		await expect(store.pResolveTransfer({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			transferId: requested.transfer.id,
+			decision: "accept",
+			idempotencyKey: crypto.randomUUID(),
+		})).rejects.toMatchObject({code: "FORBIDDEN"});
+
+		const acceptInput = {
+			accountId: dm.id,
+			campaignId: campaign.id,
+			transferId: requested.transfer.id,
+			decision: "accept",
+			idempotencyKey: `${prefix}-approve-player-stash-request`,
+		};
+		const accepted = await store.pResolveTransfer(acceptInput);
+		await expect(store.pResolveTransfer(acceptInput)).resolves.toEqual(JSON.parse(JSON.stringify(accepted)));
+		expect(accepted.transfer).toMatchObject({
+			status: "committed",
+			payload: {
+				escrow: {
+					items: [expect.objectContaining({
+						item: RICH_CATALOG_ITEM,
+						note: "Keep the full trusted entry",
+						quantity: 1,
+					})],
+				},
+			},
+		});
+		expect((await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id}))
+			.inventory.find(entry => entry.id === seeded.entry.id).quantity).toBe(2);
+		expect((await pReadCharacter(targetOwner.id, targetCharacter.id)).data.inventory).toContainEqual(expect.objectContaining({
+			item: RICH_CATALOG_ITEM,
+			note: "Keep the full trusted entry",
+			quantity: 1,
+		}));
+
+		const secondRequest = await store.pProposeTransfer({
+			...requestInput,
+			idempotencyKey: `${prefix}-player-stash-request-2`,
+		});
+		await store.pResolveTransfer({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			transferId: secondRequest.transfer.id,
+			decision: "accept",
+			idempotencyKey: `${prefix}-approve-player-stash-request-2`,
+		});
+		expect((await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id}))
+			.inventory.find(entry => entry.id === seeded.entry.id).quantity).toBe(1);
+		expect((await pReadCharacter(targetOwner.id, targetCharacter.id)).data.inventory
+			.find(entry => entry.item?.name === RICH_CATALOG_ITEM.name).quantity).toBe(2);
+	});
+
+	test("serializes competing player stash requests and returns a stable insufficient code", async () => {
+		const seeded = await pSeedPartyItem({name: `${prefix} requested ration`, quantity: 3});
+		const [sourceRequest, targetRequest] = await Promise.all([
+			store.pProposeTransfer({
+				accountId: sourceOwner.id,
+				campaignId: campaign.id,
+				sourceKind: "party_inventory",
+				sourceId: seeded.party.id,
+				targetKind: "character",
+				targetId: sourceCharacter.id,
+				payload: {items: [{entryId: seeded.entry.id, quantity: 2}]},
+				idempotencyKey: `${prefix}-source-request-contention`,
+			}),
+			store.pProposeTransfer({
+				accountId: targetOwner.id,
+				campaignId: campaign.id,
+				sourceKind: "party_inventory",
+				sourceId: seeded.party.id,
+				targetKind: "character",
+				targetId: targetCharacter.id,
+				payload: {items: [{entryId: seeded.entry.id, quantity: 2}]},
+				idempotencyKey: `${prefix}-target-request-contention`,
+			}),
+		]);
+		expect(sourceRequest.transfer.status).toBe("proposed");
+		expect(targetRequest.transfer.status).toBe("proposed");
+		expect((await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id}))
+			.inventory.find(entry => entry.id === seeded.entry.id).quantity).toBe(3);
+
+		await store.pResolveTransfer({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			transferId: sourceRequest.transfer.id,
+			decision: "accept",
+			idempotencyKey: `${prefix}-approve-source-contention`,
+		});
+		await expect(store.pResolveTransfer({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			transferId: targetRequest.transfer.id,
+			decision: "accept",
+			idempotencyKey: `${prefix}-approve-target-contention`,
+		})).rejects.toMatchObject({code: "TRANSFER_INSUFFICIENT"});
+		expect((await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === targetRequest.transfer.id).status).toBe("proposed");
+		expect((await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id}))
+			.inventory.find(entry => entry.id === seeded.entry.id).quantity).toBe(1);
+
+		await expect(store.pProposeTransfer({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			sourceKind: "party_inventory",
+			sourceId: seeded.party.id,
+			targetKind: "character",
+			targetId: targetCharacter.id,
+			payload: {items: [{entryId: seeded.entry.id, quantity: 1}]},
+			idempotencyKey: `${prefix}-peer-stash-request`,
+		})).rejects.toMatchObject({code: "FORBIDDEN"});
 	});
 
 	test("fails stale or linked transfers atomically and restores a rejection exactly once", async () => {

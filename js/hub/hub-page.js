@@ -339,13 +339,20 @@ function renderPartyInventoryStatus (partyInventory) {
 }
 
 function getTransferContentsDescription (transfer) {
-	const escrow = transfer.payload?.escrow || {};
+	const escrow = transfer.payload?.escrow || transfer.payload?.preview || {};
 	const items = (escrow.items || []).map(entry => {
 		const source = entry.item?.source ? ` · ${entry.item.source}` : "";
 		return `${entry.quantity} × ${entry.item?.name || "item"}${source}`;
 	});
 	const currency = getCurrencyDescription(escrow.currency);
 	return [...items, currency].filter(Boolean).join(" + ") || "Reserved transfer";
+}
+
+function shouldAutoResolveTransfer ({isDm, sourceKind, targetKind, targetId, targetCharacters, accountId}) {
+	if (isDm) return true;
+	if (sourceKind !== "character") return false;
+	if (targetKind !== "character") return false;
+	return getProjectionOwnerAccountId(getCharacterById(targetCharacters, targetId)) === accountId;
 }
 
 function getTransferContainer ({value, characters, partyInventory}) {
@@ -826,6 +833,34 @@ function setFormStatus ({formId, message = "", isError = false}) {
 	if (!status) return;
 	status.textContent = message;
 	status.classList.toggle("hub-inline-status--error", isError);
+}
+
+function setTransferRefreshFailure ({form, message, pRetry}) {
+	const status = document.getElementById("campaign-transfer-form-status");
+	const submit = form?.querySelector("button[type='submit']");
+	if (!status || !submit) return;
+	submit.disabled = true;
+	status.classList.add("hub-inline-status--error");
+	status.replaceChildren(document.createTextNode(`${message} `));
+	const retry = document.createElement("button");
+	retry.type = "button";
+	retry.className = "hub-button hub-button--inline";
+	retry.textContent = "Retry latest balances";
+	retry.addEventListener("click", async () => {
+		retry.disabled = true;
+		retry.textContent = "Retrying...";
+		try {
+			await pRetry();
+			submit.disabled = false;
+			setFormStatus({
+				formId: "campaign-transfer-form",
+				message: "Latest balances loaded. You can send another transfer.",
+			});
+		} catch {
+			setTransferRefreshFailure({form, message, pRetry});
+		}
+	});
+	status.append(retry);
 }
 
 function setFormAvailability ({formId, isAvailable, message}) {
@@ -1595,7 +1630,7 @@ async function renderPendingTransfers ({campaign, campaignId, session, targetCha
 	const list = document.getElementById("campaign-pending-transfers");
 	if (!list) return;
 	const transfers = await api.pListTransfers({campaignId});
-	const pending = transfers.filter(transfer => transfer.status === "reserved");
+	const pending = transfers.filter(transfer => ["proposed", "reserved"].includes(transfer.status));
 	updateInboxCount({kind: "transfers", count: pending.length});
 	setHidden(document.getElementById("campaign-pending-transfers-empty"), !!pending.length);
 	const isDm = ["dm", "co_dm"].includes(campaign.role);
@@ -1608,18 +1643,29 @@ async function renderPendingTransfers ({campaign, campaignId, session, targetCha
 		const contents = getTransferContentsDescription(transfer);
 		const sourceName = getContainerName({kind: transfer.sourceKind, id: transfer.sourceId, characters: targetCharacters});
 		const targetName = getContainerName({kind: transfer.targetKind, id: transfer.targetId, characters: targetCharacters});
-		text.textContent = `${sourceName} offers ${contents} to ${targetName}.`;
+		const isRequest = transfer.status === "proposed";
+		text.textContent = isRequest
+			? `${targetName} requests ${contents} from ${sourceName}.`
+			: `${sourceName} offers ${contents} to ${targetName}.`;
 		const target = transfer.targetKind === "character" ? getCharacterById(targetCharacters, transfer.targetId) : null;
 		const canAct = isDm || campaign.role === "player";
-		const canAccept = canAct && (isDm || getProjectionOwnerAccountId(target) === session.account.id);
+		const canAccept = canAct && (isRequest
+			? isDm
+			: isDm || getProjectionOwnerAccountId(target) === session.account.id);
 		const canReject = canAct && (canAccept || transfer.actorAccountId === session.account.id);
 		const meta = document.createElement("span");
 		meta.className = "hub-data-row__meta";
 		meta.textContent = canAccept
-			? "Your response is needed"
+			? isRequest
+				? "DM approval is needed before the stash changes"
+				: isDm && getProjectionOwnerAccountId(target) !== session.account.id
+					? "You can apply this transfer with DM authority"
+					: "Your response is needed"
 			: canReject
-				? "Waiting for the recipient; you can cancel this transfer"
-				: "Waiting for the recipient";
+				? isRequest
+					? "Waiting for a DM; you can cancel this request"
+					: "Waiting for the recipient; you can cancel this transfer"
+				: isRequest ? "Waiting for a DM" : "Waiting for the recipient";
 		main.append(text, meta);
 		row.append(main);
 		if (canReject) {
@@ -1629,7 +1675,9 @@ async function renderPendingTransfers ({campaign, campaignId, session, targetCha
 				const button = document.createElement("button");
 				button.type = "button";
 				button.className = decision === "accept" ? "hub-button hub-button--primary" : "hub-button";
-				button.textContent = decision === "accept" ? "Accept" : canAccept ? "Reject" : "Cancel";
+				button.textContent = decision === "accept"
+					? isRequest ? "Approve" : "Accept"
+					: canAccept ? isRequest ? "Decline" : "Reject" : "Cancel";
 				button.addEventListener("click", async () => {
 					for (const control of controls.querySelectorAll("button")) control.disabled = true;
 					try {
@@ -1857,17 +1905,23 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		const source = document.getElementById("campaign-transfer-source");
 		const target = document.getElementById("campaign-transfer-target");
 		const item = document.getElementById("campaign-transfer-entry");
-		const selections = {
+		const readSelections = () => ({
 			source: source?.value,
 			target: target?.value,
 			item: item?.value,
 			quantity: document.getElementById("campaign-transfer-quantity")?.value,
-		};
+		});
+		const selections = readSelections();
 		const [charactersLatest, snapshotLatest, partyInventoryLatest] = await Promise.all([
 			charactersNxt ? null : api.pListCharacters({campaignId}),
 			targetCharactersNxt ? null : api.pGetCampaignSnapshot({campaignId}),
 			partyInventoryNxt ? null : api.pGetPartyInventory({campaignId}),
 		]);
+		const latestSelections = readSelections();
+		const selectionsToRestore = Object.keys(selections)
+			.some(key => latestSelections[key] !== selections[key])
+			? latestSelections
+			: selections;
 		characters.splice(0, characters.length, ...(charactersNxt || charactersLatest));
 		targetCharacters.splice(0, targetCharacters.length, ...(targetCharactersNxt || snapshotLatest.characters));
 		if (snapshotLatest?.roster) rosterRef.current = snapshotLatest.roster;
@@ -1885,15 +1939,15 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		// A character whose identity the owner hid is absent from roster metadata and is
 		// therefore not peer-targetable.
 		fillCharacterSelect(target, getTargetableProjections({projections: targetCharacters, roster: rosterRef.current}), {includeParty: true, partyInventory});
-		if ([...source.options].some(option => option.value === selections.source)) source.value = selections.source;
-		if ([...target.options].some(option => option.value === selections.target)) target.value = selections.target;
+		if ([...source.options].some(option => option.value === selectionsToRestore.source)) source.value = selectionsToRestore.source;
+		if ([...target.options].some(option => option.value === selectionsToRestore.target)) target.value = selectionsToRestore.target;
 		syncTransferItemPicker({characters, partyInventory});
-		if ([...item.options].some(option => option.value === selections.item)) {
-			item.value = selections.item;
+		if ([...item.options].some(option => option.value === selectionsToRestore.item)) {
+			item.value = selectionsToRestore.item;
 			syncTransferQuantity();
 			const maximum = Number(item.selectedOptions[0]?.dataset.quantity);
-			if (Number(selections.quantity) > 0 && Number(selections.quantity) <= maximum) {
-				document.getElementById("campaign-transfer-quantity").value = selections.quantity;
+			if (Number(selectionsToRestore.quantity) > 0 && Number(selectionsToRestore.quantity) <= maximum) {
+				document.getElementById("campaign-transfer-quantity").value = selectionsToRestore.quantity;
 			}
 		}
 		renderPartyInventoryStatus(partyInventory);
@@ -2107,11 +2161,12 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 
 	document.getElementById("campaign-transfer-form")?.addEventListener("submit", async event => {
 		event.preventDefault();
+		const form = event.currentTarget;
 		const formId = "campaign-transfer-form";
 		setFormStatus({formId});
 		try {
-			await pRunFormMutation({form: event.currentTarget,
-				fingerprint: getFormFingerprint(event.currentTarget),
+			const result = await pRunFormMutation({form,
+				fingerprint: getFormFingerprint(form),
 				fnMutate: async idempotencyKey => {
 					const [sourceKind, sourceId] = document.getElementById("campaign-transfer-source").value.split(":");
 					const [targetKind, targetId] = document.getElementById("campaign-transfer-target").value.split(":");
@@ -2137,7 +2192,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					const insufficientType = CURRENCY_TYPES.find(type => currency[type] > (Number(sourceContainer?.currency?.[type]) || 0));
 					if (insufficientType) throw new Error(`Only ${sourceContainer?.currency?.[insufficientType] || 0} ${insufficientType.toUpperCase()} is available.`);
 					if (!entryId && !Object.values(currency).some(Boolean)) throw new Error("Choose an item or enter a currency amount.");
-					await api.pProposeTransfer({
+					const proposed = await api.pProposeTransfer({
 						campaignId,
 						sourceKind,
 						sourceId,
@@ -2149,18 +2204,45 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 						},
 						idempotencyKey,
 					});
+					const isAutoResolved = shouldAutoResolveTransfer({
+						isDm,
+						sourceKind,
+						targetKind,
+						targetId,
+						targetCharacters,
+						accountId: session.account.id,
+					});
+					if (!isAutoResolved) return {transfer: proposed.transfer, isAutoResolved: false, targetKind};
+					const currentContext = targetKind === "character"
+						? await api.pGetCampaignContext({campaignId})
+						: null;
+					const resolved = await api.pResolveTransfer({
+						campaignId,
+						transferId: proposed.transfer.id,
+						decision: "accept",
+						rulesVersionId: currentContext?.rulesVersion?.id || null,
+						idempotencyKey: `${idempotencyKey}:resolve`,
+					});
+					return {transfer: resolved.transfer, isAutoResolved: true, targetKind};
 				}});
+			if (!result) return;
 			for (const type of CURRENCY_TYPES) document.getElementById(`campaign-transfer-${type}`).value = "0";
-			setFormStatus({formId, message: "Transfer reserved. The recipient can now accept it from the inbox."});
+			const successMessage = result.isAutoResolved
+				? "Transfer complete. The authoritative inventories are updated."
+				: result.transfer.status === "proposed"
+					? "Request sent. A DM must approve before anything leaves the party inventory."
+					: result.targetKind === "party_inventory"
+						? "Transfer reserved. A DM can accept it from the inbox."
+						: "Transfer reserved. The recipient can accept it from the inbox.";
+			setFormStatus({formId, message: successMessage});
 			try {
 				await pRefreshTransferState();
 			} catch {
-				setFormStatus({
-					formId,
-					message: "Transfer reserved, but the latest balances could not be loaded. Reload the campaign before sending another transfer.",
-					isError: true,
+				setTransferRefreshFailure({
+					form,
+					message: `${successMessage} The latest balances could not be loaded.`,
+					pRetry: pRefreshTransferState,
 				});
-				event.currentTarget.querySelector("button[type='submit']").disabled = true;
 			}
 		} catch (error) {
 			const message = error instanceof HubApiError ? getErrorMessage(error) : error.message;
