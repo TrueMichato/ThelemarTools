@@ -1745,7 +1745,9 @@ export class HubCampaignPage {
 		const partyMatcher = `**/api/campaigns/${campaignId}/party-inventory`;
 		let transferPostCount = 0;
 		let failedRefreshCount = 0;
+		let shouldFailRefresh = true;
 		const failRefresh = (route: Route) => {
+			if (!shouldFailRefresh) return route.continue();
 			failedRefreshCount++;
 			return route.fulfill({
 				status: 503,
@@ -1754,10 +1756,10 @@ export class HubCampaignPage {
 			});
 		};
 		const observeTransfer = async (route: Route) => {
+			if (route.request().method() === "POST") await this.page.route(partyMatcher, failRefresh);
 			const response = await route.fetch();
 			if (route.request().method() === "POST" && response.ok()) {
 				transferPostCount++;
-				await this.page.route(partyMatcher, failRefresh, {times: 1});
 			}
 			await route.fulfill({response});
 		};
@@ -1765,10 +1767,11 @@ export class HubCampaignPage {
 		try {
 			await this.page.locator("#campaign-transfer-form button[type='submit']").click();
 			await expect.poll(() => transferPostCount).toBe(1);
-			await expect.poll(() => failedRefreshCount).toBe(1);
+			await expect.poll(() => failedRefreshCount).toBeGreaterThan(0);
 			const retry = this.page.getByRole("button", {name: "Retry latest balances"});
 			await expect(retry).toBeVisible();
 			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeDisabled();
+			shouldFailRefresh = false;
 			await retry.click();
 			await expect(this.page.locator("#campaign-transfer-form-status")).toHaveText("Latest balances loaded. You can send another transfer.");
 			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeEnabled();

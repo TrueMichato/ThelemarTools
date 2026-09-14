@@ -20,6 +20,8 @@ const RICH_CATALOG_ITEM = Object.freeze({
 	dmgType: "S",
 	weapon: true,
 	entries: ["A synthetic metadata-rich weapon used only by this regression."],
+	hasRefs: true,
+	additionalSources: [{source: "XGE", page: 79}],
 	_baseSource: "PHB",
 });
 

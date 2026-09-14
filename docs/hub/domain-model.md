@@ -279,6 +279,11 @@ removes the generic/item parent-only publication fields that the site copy syste
 request. All destination inventory changes delete derived `data.carry` authority instead of recomputing it
 without a Character Sheet.
 
+When a legacy summary-only inventory row is opened in the Character Sheet, item identity is repaired from an
+exact `name|source` catalog match. Before enhanced item loading begins, the sheet snapshots only the
+authoritative repair-sensitive fields needed for that decision. Authored metadata therefore survives save and
+later stack comparison while injected render caches and publication hints remain excluded.
+
 ## Known domain gaps
 
 - active enforcement of pending-action/transfer `expires_at`;

@@ -4330,6 +4330,7 @@ class CharacterSheetState {
 		// level-gated grouping in the spell list silently drops the spells.
 		this._allSpells = [];
 		this._allItems = [];
+		this._allItemsPristine = null;
 		// Live handle for the pure static helpers that must consult character state but are
 		// called from contexts with no reference to it — chiefly the item hover builders in
 		// `charactersheet-class-utils.js`, which are invoked from a dozen render sites. Mirrors
@@ -4350,12 +4351,15 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Inject the enhanced item catalog used to repair authoritative metadata on legacy
-	 * inventory rows. The migration also runs here for alternate load orders.
+	 * Inject the enhanced item catalog used for item mechanics and the optional pristine
+	 * catalog used to distinguish source-authored metadata from renderer enhancement.
+	 * The migration also runs here for alternate load orders.
 	 * @param {Array} allItems
+	 * @param {{pristineItems?: Array}} [opts]
 	 */
-	setItemCatalog (allItems) {
+	setItemCatalog (allItems, {pristineItems = null} = {}) {
 		this._allItems = Array.isArray(allItems) ? allItems : [];
+		this._allItemsPristine = Array.isArray(pristineItems) ? pristineItems : null;
 		this._migrateInventoryItemMetadata();
 	}
 
@@ -4382,7 +4386,6 @@ class CharacterSheetState {
 			"_textTypes",
 			"_valueFromRarity",
 			"_compositionSearch",
-			"hasRefs",
 			"variants",
 			"constructor",
 			"prototype",
@@ -4402,31 +4405,52 @@ class CharacterSheetState {
 			"weapon",
 			"wondrous",
 		]);
+		const pristineCatalogFields = new Set([
+			"additionalSources",
+			"entries",
+			"hasRefs",
+		]);
 		const isTransientCatalogField = key => transientCatalogFields.has(key)
 			|| /^_f[A-Z]/.test(key)
 			|| key.startsWith("_l_")
 			|| key.startsWith("_full");
-		const isEnhancedCatalogOnlyField = (key, value, match) =>
+		const isEnhancedCatalogOnlyField = (key, value, match) => match._isEnhanced && (
 			(key === "entries" && Array.isArray(value) && !value.length)
-			|| (key === "additionalSources" && match._isEnhanced);
+			|| key === "additionalSources"
+		);
 		const catalog = new Map((this._allItems || [])
+			.filter(item => item?.name && item?.source)
+			.map(item => [`${item.name}|${item.source}`.toLowerCase(), item]));
+		const pristineCatalog = new Map((this._allItemsPristine || [])
 			.filter(item => item?.name && item?.source)
 			.map(item => [`${item.name}|${item.source}`.toLowerCase(), item]));
 		for (const inventoryRow of this._data.inventory) {
 			const item = inventoryRow?.item;
 			if (!item || typeof item !== "object") continue;
 			const isCustom = item._isCustom || item.source === "Custom";
-			const match = !isCustom && item.name && item.source
-				? catalog.get(`${item.name}|${item.source}`.toLowerCase())
+			const uid = !isCustom && item.name && item.source
+				? `${item.name}|${item.source}`.toLowerCase()
 				: null;
+			const match = uid ? catalog.get(uid) : null;
+			const pristineMatch = uid ? pristineCatalog.get(uid) : null;
 			if (match && item.type == null) {
 				for (const [key, value] of Object.entries(match)) {
 					if (
 						isTransientCatalogField(key)
+						|| (pristineMatch && pristineCatalogFields.has(key))
 						|| isEnhancedCatalogOnlyField(key, value, match)
 						|| item[key] !== undefined
 					) continue;
 					item[key] = MiscUtil.copyFast(value);
+				}
+				if (pristineMatch) {
+					for (const key of pristineCatalogFields) {
+						if (
+							item[key] !== undefined
+							|| !Object.prototype.hasOwnProperty.call(pristineMatch, key)
+						) continue;
+						item[key] = MiscUtil.copyFast(pristineMatch[key]);
+					}
 				}
 			}
 			const matchedTypeCode = match?.typeCode ?? match?.type;

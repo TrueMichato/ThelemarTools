@@ -323,7 +323,10 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   open-sheet authoritative reconciliation. A complete generated-artifact equality test prevents the browser
   item data and BFF award catalog from drifting. Character Sheet migration coverage also rejects renderer/filter
   caches, empty renderer-created `entries`, and renderer-injected `additionalSources` while retaining
-  authoritative mechanics and provenance. The real-stack lifecycle commits a multi-character catalog award
+  source-authored `hasRefs` and `additionalSources` from real catalog entries through repeat award and stash
+  return. A production-order loader regression mutates both a shipped instrument and a synthetic campaign-brew
+  instrument in place, proving the minimal repair projection was captured before enhancement. The real-stack
+  lifecycle commits a multi-character catalog award
   behind a lost response, changes incidental form state, retries with the same key, verifies canonical weapon
   type/damage/value/weight metadata on both characters, observes exactly one live arrival on an already-open
   owner sheet, then verifies the same metadata after a stash round trip without loss or duplication.
