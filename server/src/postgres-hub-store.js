@@ -81,7 +81,10 @@ import {
 	getAccountDisplayName,
 	normalizeExternalIdentity,
 } from "./external-identity.js";
-import {resolveItemAward} from "./item-award-catalog.js";
+import {
+	normalizeItemAwardResolution,
+	resolveItemAwardAuthority,
+} from "./item-award-catalog.js";
 
 const {Pool} = pg;
 
@@ -194,7 +197,7 @@ export class PostgresHubStore {
 		semanticOperationRegistry = createSemanticOperationRegistry(),
 		semanticProposalTtlMs = 24 * 60 * 60 * 1_000,
 		peerSourceCostsEnabled = false,
-		fnResolveAwardItem = resolveItemAward,
+		fnResolveAwardItem = resolveItemAwardAuthority,
 	}) {
 		if (!pool?.query || !pool?.connect) throw new TypeError(`A pg-compatible pool is required.`);
 		this._pool = pool;
@@ -4681,6 +4684,7 @@ export class PostgresHubStore {
 		validateCloudValue(normalizedItem, {label: "Granted item"});
 		let entry = null;
 		let authoritativeSummary = null;
+		let resolvedSourceKind = "recent";
 		return this._pGrantCharacterMutation({
 			accountId,
 			campaignId,
@@ -4693,11 +4697,13 @@ export class PostgresHubStore {
 				return out;
 			},
 			fnMutate: async (data, {enforcement}) => {
-				const authoritativeItem = await this._fnResolveAwardItem({
+				const resolution = normalizeItemAwardResolution(await this._fnResolveAwardItem({
 					sourceKind: "recent",
 					item: normalizedItem,
 					brewBundle: enforcement.brewBundle,
-				});
+				}), {sourceKind: "recent"});
+				const authoritativeItem = resolution.authoritativeItem;
+				resolvedSourceKind = resolution.sourceKind;
 				validateCloudValue(authoritativeItem, {label: "Granted item"});
 				authoritativeSummary = getSafeItemSummary(authoritativeItem);
 				const out = normalizeCharacterInventory(data);
@@ -4709,8 +4715,8 @@ export class PostgresHubStore {
 				return out;
 			},
 			eventType: "item.granted",
-			eventPayload: () => ({entry: {...structuredClone(entry), item: structuredClone(authoritativeSummary)}}),
-			auditDetails: () => ({entryId: entry.id, quantity: entry.quantity}),
+			eventPayload: () => ({sourceKind: resolvedSourceKind, entry: {...structuredClone(entry), item: structuredClone(authoritativeSummary)}}),
+			auditDetails: () => ({entryId: entry.id, quantity: entry.quantity, sourceKind: resolvedSourceKind}),
 			responseExtra: () => ({entry}),
 			rulesVersionId,
 			isContentMutation: true,
@@ -4770,6 +4776,7 @@ export class PostgresHubStore {
 
 			let item;
 			let incomingEntry;
+			let resolvedSourceKind = request.source.kind;
 			let party = null;
 			let stagedPartyContainer = null;
 			if (request.source.kind === "party_inventory") {
@@ -4801,11 +4808,13 @@ export class PostgresHubStore {
 						rulesVersionId: enforcement.activeRulesVersionId,
 					});
 				}
-				const authoritativeItem = await this._fnResolveAwardItem({
+				const resolution = normalizeItemAwardResolution(await this._fnResolveAwardItem({
 					sourceKind: request.source.kind,
 					item,
 					brewBundle: enforcement.brewBundle,
-				});
+				}), {sourceKind: request.source.kind});
+				const authoritativeItem = resolution.authoritativeItem;
+				resolvedSourceKind = resolution.sourceKind;
 				validateCloudValue(authoritativeItem, {label: "Awarded item"});
 				item = getSafeItemSummary(authoritativeItem);
 				incomingEntry = {item: authoritativeItem, quantity: request.quantity};
@@ -4816,7 +4825,7 @@ export class PostgresHubStore {
 				const added = addAwardedEntryToCharacter({
 					container: character.data,
 					incoming: {...structuredClone(incomingEntry), quantity: request.quantity},
-					isAllowLegacySummaryUpgrade: request.source.kind === "catalog",
+					isAllowLegacySummaryUpgrade: resolvedSourceKind === "catalog",
 				});
 				stripCarryAuthority(added.container);
 				validateCloudCharacterData(added.container);
@@ -4872,7 +4881,7 @@ export class PostgresHubStore {
 				targetId: campaignId,
 				details: {
 					awardId,
-					sourceKind: request.source.kind,
+					sourceKind: resolvedSourceKind,
 					item,
 					targetCharacterIds: request.targetCharacterIds,
 					targetCount: request.targetCharacterIds.length,
@@ -4896,7 +4905,7 @@ export class PostgresHubStore {
 						awardId,
 						index,
 						targetCount: updatedTargets.length,
-						sourceKind: request.source.kind,
+						sourceKind: resolvedSourceKind,
 						note: request.note,
 						entry: {id: entry.id, item: structuredClone(item), quantity: request.quantity},
 					},

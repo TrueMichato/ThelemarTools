@@ -174,6 +174,13 @@ describe("_getItemCategory keeps magic items out of 'Other'", () => {
 		expect(category).not.toBe("Other");
 		expect(category).toBe(expectedCategory);
 	});
+
+	test.each([
+		[{name: "Legacy Blade", source: "TST", typeCode: "M"}, "Weapons"],
+		[{name: "Legacy Ring", source: "TST", typeCode: "RG|DMG"}, "Wondrous Items"],
+	])("categorises a fail-closed Hub summary %o as %s", (item, expectedCategory) => {
+		expect(inv._getItemCategory(item)).toBe(expectedCategory);
+	});
 });
 
 describe("Hub summary-only inventory metadata migration", () => {
@@ -280,6 +287,116 @@ describe("Hub summary-only inventory metadata migration", () => {
 		lateCatalog.loadFromJson(summaryOnlySave);
 		lateCatalog.setItemCatalog([enhancedCatalogItem], {pristineItems: [pristineCatalogItem]});
 		expect(lateCatalog.getItemRaw("hub-award")).toEqual(item);
+	});
+
+	test("repairs an official summary from immutable site authority despite a mutable brew UID collision", () => {
+		const officialItem = {
+			name: "Longsword",
+			source: "PHB",
+			type: "M",
+			weight: 3,
+			value: 1500,
+			weaponCategory: "martial",
+			property: ["V"],
+			dmg1: "1d8",
+			dmgType: "S",
+			entries: ["Official site metadata."],
+		};
+		const collidingBrewItem = {
+			...officialItem,
+			type: "G",
+			weight: 99,
+			entries: ["Mutable brew metadata."],
+			effects: [{type: "skillBonus", skill: "arcana", value: 99}],
+			customMetadata: {injected: true},
+			_isEnhanced: true,
+		};
+		const state = newState();
+		state.setItemCatalog([
+			{...officialItem, _isEnhanced: true},
+			collidingBrewItem,
+		], {
+			pristineItems: [{
+				name: officialItem.name,
+				source: officialItem.source,
+				entries: officialItem.entries,
+			}],
+		});
+		state.loadFromJson({
+			name: "Legacy Hub character",
+			inventory: [{
+				id: "official-summary",
+				item: {
+					name: officialItem.name,
+					source: officialItem.source,
+					typeCode: officialItem.type,
+					weight: officialItem.weight,
+					value: officialItem.value,
+				},
+				quantity: 1,
+			}],
+		});
+
+		const repaired = state.getItemRaw("official-summary");
+		expect(repaired).toEqual(expect.objectContaining({
+			type: officialItem.type,
+			weight: officialItem.weight,
+			entries: officialItem.entries,
+			dmg1: officialItem.dmg1,
+			weaponCategory: officialItem.weaponCategory,
+		}));
+		expect(repaired).not.toHaveProperty("effects");
+		expect(repaired).not.toHaveProperty("customMetadata");
+	});
+
+	test("does not retroactively hydrate a legacy summary from the current mutable brew version", () => {
+		const mutableBrewItem = {
+			name: "Campaign Harp",
+			source: "TST",
+			type: "INS",
+			rarity: "rare",
+			entries: ["Current mutable bundle text."],
+			effects: [{type: "skillBonus", skill: "performance", value: 3}],
+			_isEnhanced: true,
+		};
+		const state = newState();
+		state.setItemCatalog([mutableBrewItem], {pristineItems: []});
+		state.loadFromJson({
+			name: "Legacy Hub character",
+			inventory: [{
+				id: "legacy-brew-summary",
+				item: {
+					name: mutableBrewItem.name,
+					source: mutableBrewItem.source,
+					typeCode: mutableBrewItem.type,
+					rarity: mutableBrewItem.rarity,
+				},
+				quantity: 1,
+			}],
+		});
+		const inventory = makeInventory(state);
+		inventory.setItems([mutableBrewItem], {pristineItems: []});
+
+		expect(state.getItemRaw("legacy-brew-summary")).toEqual(expect.objectContaining({
+			name: mutableBrewItem.name,
+			source: mutableBrewItem.source,
+			typeCode: mutableBrewItem.type,
+			rarity: mutableBrewItem.rarity,
+		}));
+		expect(state.getItemRaw("legacy-brew-summary")).not.toHaveProperty("type");
+		expect(state.getItemRaw("legacy-brew-summary")).not.toHaveProperty("entries");
+		expect(state.getItemRaw("legacy-brew-summary")).not.toHaveProperty("effects");
+		expect(inventory._getItemCategory(state.getItemRaw("legacy-brew-summary"))).toBe("Tools");
+
+		const reloaded = newState();
+		reloaded.setItemCatalog([mutableBrewItem], {pristineItems: []});
+		reloaded.loadFromJson(state.toJson());
+		const reloadedInventory = makeInventory(reloaded);
+		reloadedInventory.setItems([mutableBrewItem], {pristineItems: []});
+		expect(reloaded.getItemRaw("legacy-brew-summary")).not.toHaveProperty("type");
+		expect(reloaded.getItemRaw("legacy-brew-summary")).not.toHaveProperty("entries");
+		expect(reloaded.getItemRaw("legacy-brew-summary")).not.toHaveProperty("effects");
+		expect(reloadedInventory._getItemCategory(reloaded.getItemRaw("legacy-brew-summary"))).toBe("Tools");
 	});
 
 	test("does not replace an already canonical customized item with missing catalog fields", () => {
@@ -427,7 +544,7 @@ describe("Hub summary-only inventory metadata migration", () => {
 		expect(repairedItem).not.toHaveProperty(transientField);
 	});
 
-	test("preserves source-authored hasRefs when only an enhanced catalog is available", () => {
+	test("does not trust source-like hasRefs when only an enhanced mutable catalog is available", () => {
 		const authoritativeItem = getSiteAwardItem("Acid Absorbing Tattoo", "TCE");
 		const state = newState();
 		state.setItemCatalog([{...authoritativeItem, _isEnhanced: true}]);
@@ -444,7 +561,7 @@ describe("Hub summary-only inventory metadata migration", () => {
 			}],
 		});
 
-		expect(state.toJson().inventory[0].item.hasRefs).toBe(true);
+		expect(state.toJson().inventory[0].item.hasRefs).toBeUndefined();
 	});
 
 	test.each([

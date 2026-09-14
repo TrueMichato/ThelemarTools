@@ -164,11 +164,12 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		});
 		store = new PostgresHubStore({
 			pool,
-			fnResolveAwardItem: async ({item}) => (
-				`${item?.name}|${item?.source}`.toLowerCase() === "moonsteel longsword|phb"
+			fnResolveAwardItem: async ({item, sourceKind}) => ({
+				sourceKind: sourceKind === "recent" ? "catalog" : sourceKind,
+				authoritativeItem: `${item?.name}|${item?.source}`.toLowerCase() === "moonsteel longsword|phb"
 					? structuredClone(RICH_CATALOG_ITEM)
-					: structuredClone(item)
-			),
+					: structuredClone(item),
+			}),
 		});
 		await store.pCheckHealth();
 
@@ -278,12 +279,40 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		});
 		expect(event.payload.entry.item).not.toHaveProperty("entries");
 		expect(event.payload.entry.item).not.toHaveProperty("_baseSource");
+		expect(event.payload.sourceKind).toBe("catalog");
 		const audit = (await pool.query(`
 			SELECT details
 			FROM hub.audit_entries
 			WHERE action = 'item.award_batch' AND details->>'awardId' = $1
 		`, [result.awardId])).rows[0];
 		expect(audit.details.item).toEqual(result.source.item);
+		expect(audit.details.sourceKind).toBe("catalog");
+	});
+
+	test("records resolved catalog authority for an unambiguous Recent award", async () => {
+		const target = await pCreateTargetCharacter(`${prefix} recent authority`);
+		const result = await store.pAwardItems({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			source: {kind: "recent", item: {name: RICH_CATALOG_ITEM.name, source: RICH_CATALOG_ITEM.source}},
+			targetCharacterIds: [target.id],
+			quantity: 1,
+			idempotencyKey: `${prefix}-recent-authority`,
+		});
+
+		expect(result.source.kind).toBe("recent");
+		const event = (await pool.query(`
+			SELECT payload
+			FROM hub.domain_events
+			WHERE event_type = 'item.granted' AND payload->>'awardId' = $1
+		`, [result.awardId])).rows[0];
+		expect(event.payload.sourceKind).toBe("catalog");
+		const audit = (await pool.query(`
+			SELECT details
+			FROM hub.audit_entries
+			WHERE action = 'item.award_batch' AND details->>'awardId' = $1
+		`, [result.awardId])).rows[0];
+		expect(audit.details.sourceKind).toBe("catalog");
 	});
 
 	test("reuses the PostgreSQL stack identity after a sheet save and party-stash return", async () => {

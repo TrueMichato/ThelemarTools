@@ -40,7 +40,7 @@ function getSiteItem (name, source) {
 }
 
 describe("Character Sheet item repair catalog load order", () => {
-	test("captures a minimal immutable repair projection before site and brew enhancement", async () => {
+	test("captures immutable site repair data before enhancement without trusting mutable brew", async () => {
 		const siteItem = getSiteItem("+1 Rhythm-Maker's Drum", "TCE");
 		const brewItem = {
 			name: "Campaign Harp",
@@ -88,6 +88,7 @@ describe("Character Sheet item repair catalog load order", () => {
 			expect(enhanced._fullAdditionalEntries).toBeTruthy();
 		}
 
+		expect(loaded.itemRepairData).toHaveLength(1);
 		for (const pristine of loaded.itemRepairData) {
 			expect(pristine).not.toHaveProperty("_isEnhanced");
 			expect(pristine).not.toHaveProperty("_fullAdditionalEntries");
@@ -96,37 +97,54 @@ describe("Character Sheet item repair catalog load order", () => {
 		}
 
 		const enhancedItems = [...loaded.items, ...loaded.brewItems];
-		for (const canonicalItem of [canonicalSiteItem, canonicalBrewItem]) {
-			const state = new CharacterSheetState();
-			state.setItemCatalog(enhancedItems, {pristineItems: loaded.itemRepairData});
-			state.loadFromJson({
-				name: "Legacy Hub character",
-				inventory: [{
-					id: "legacy-stack",
-					item: {
-						name: canonicalItem.name,
-						source: canonicalItem.source,
-						typeCode: canonicalItem.type,
-						rarity: canonicalItem.rarity,
-					},
-					quantity: 1,
-				}],
-			});
-
-			const repairedItem = state.toJson().inventory[0].item;
-			expect(repairedItem).not.toHaveProperty("additionalSources");
-			expect(repairedItem).not.toHaveProperty("_fullAdditionalEntries");
-			const repeatedAward = addAwardedEntryToCharacter({
-				container: {
-					inventory: [{id: "legacy-stack", item: repairedItem, quantity: 1}],
-					currency: {},
+		const state = new CharacterSheetState();
+		state.setItemCatalog(enhancedItems, {pristineItems: loaded.itemRepairData});
+		state.loadFromJson({
+			name: "Legacy Hub character",
+			inventory: [{
+				id: "legacy-site-stack",
+				item: {
+					name: canonicalSiteItem.name,
+					source: canonicalSiteItem.source,
+					typeCode: canonicalSiteItem.type,
+					rarity: canonicalSiteItem.rarity,
 				},
-				incoming: {item: canonicalItem, quantity: 1},
-			});
-			expect(repeatedAward.container.inventory).toEqual([
-				expect.objectContaining({id: "legacy-stack", quantity: 2}),
-			]);
-		}
+				quantity: 1,
+			}, {
+				id: "legacy-brew-stack",
+				item: {
+					name: canonicalBrewItem.name,
+					source: canonicalBrewItem.source,
+					typeCode: canonicalBrewItem.type,
+					rarity: canonicalBrewItem.rarity,
+				},
+				quantity: 1,
+			}],
+		});
+
+		const [repairedSiteItem, unrepairedBrewItem] = state.toJson().inventory.map(it => it.item);
+		expect(repairedSiteItem).not.toHaveProperty("additionalSources");
+		expect(repairedSiteItem).not.toHaveProperty("_fullAdditionalEntries");
+		const repeatedAward = addAwardedEntryToCharacter({
+			container: {
+				inventory: [{id: "legacy-site-stack", item: repairedSiteItem, quantity: 1}],
+				currency: {},
+			},
+			incoming: {item: canonicalSiteItem, quantity: 1},
+		});
+		expect(repeatedAward.container.inventory).toEqual([
+			expect.objectContaining({id: "legacy-site-stack", quantity: 2}),
+		]);
+
+		expect(unrepairedBrewItem).toEqual(expect.objectContaining({
+			name: canonicalBrewItem.name,
+			source: canonicalBrewItem.source,
+			typeCode: canonicalBrewItem.type,
+			rarity: canonicalBrewItem.rarity,
+		}));
+		expect(unrepairedBrewItem).not.toHaveProperty("type");
+		expect(unrepairedBrewItem).not.toHaveProperty("entries");
+		expect(unrepairedBrewItem).not.toHaveProperty("_isEnhanced");
 	});
 
 	test("keeps the full site repair catalog field- and memory-bounded", () => {

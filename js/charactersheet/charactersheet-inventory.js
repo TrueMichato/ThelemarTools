@@ -49,6 +49,7 @@ class CharacterSheetInventory {
 	 */
 	static canEquipItem (item) {
 		if (!item) return false;
+		const typeBase = String(item.type || item.typeCode || "").split("|")[0];
 		const CustomAbilities = globalThis.CharacterSheetCustomAbilities;
 		const hasEffectBehavior = Array.isArray(item.effects) && item.effects.some(eff =>
 			CustomAbilities?.effectHasBehavior ? CustomAbilities.effectHasBehavior(eff) : !!(eff && eff.type),
@@ -63,6 +64,7 @@ class CharacterSheetInventory {
 			|| hasEffectBehavior;
 		return !!(item.weapon || item.armor || item.shield || item.type === "gear"
 			|| item.type === "wondrous" || item.type === "ring" || item.type === "wand"
+			|| ["M", "R", "LA", "MA", "HA", "S", "W", "RG", "WD", "ST", "RD"].includes(typeBase)
 			|| item.requiresAttunement || hasBonus);
 	}
 
@@ -96,6 +98,7 @@ class CharacterSheetInventory {
 		for (const inv of raw) {
 			const item = inv?.item;
 			if (!item?.name || item._isCustom || item.source === "Custom") continue;
+			if (this._state.isItemMetadataRepairPending?.(item)) continue;
 			const nameLower = item.name.toLowerCase();
 			const sourceLower = (item.source || "").toLowerCase();
 			const match = this._allItems.find(i =>
@@ -1607,7 +1610,7 @@ class CharacterSheetInventory {
 	}
 
 	_isWeapon (item) {
-		const typeBase = item.type?.split("|")[0];
+		const typeBase = String(item.type || item.typeCode || "").split("|")[0];
 		return item.weapon || typeBase === "M" || typeBase === "R" || !!item.weaponCategory;
 	}
 
@@ -1616,7 +1619,7 @@ class CharacterSheetInventory {
 		// every comparison must use `typeBase`, NOT an exact `item.type === "RG"` match — the
 		// exact form silently dropped rings/wands/rods/staves/potions into "gear". Boolean flags
 		// (e.g. a DMG Staff of Power carries `staff:true` and NO type) are handled alongside.
-		const typeBase = item.type?.split("|")[0];
+		const typeBase = String(item.type || item.typeCode || "").split("|")[0];
 		if (this._isVariantComponent(item)) return "component";
 		if (this._isWeapon(item)) return "weapon";
 		// Check both armor flag and armor type codes
@@ -1628,8 +1631,8 @@ class CharacterSheetInventory {
 		if (typeBase === "ST" || item.staff) return "staff";
 		if (typeBase === "RD") return "rod";
 		if (typeBase === "RG") return "ring";
-		if (item.wondrous) return "wondrous";
-		if (typeBase === "AT" || typeBase === "T") return "tool";
+		if (item.wondrous || typeBase === "W") return "wondrous";
+		if (["AT", "T", "INS", "GS"].includes(typeBase)) return "tool";
 		if (typeBase === "G" || typeBase === "SCF") return "gear";
 		if (typeBase === "$G") return "gemstone";
 		if (item._isEmpoweredGemstone) return "gemstone";
@@ -1637,7 +1640,7 @@ class CharacterSheetInventory {
 	}
 
 	_getItemTypeTag (item) {
-		const typeBase = item.type?.split("|")[0];
+		const typeBase = String(item.type || item.typeCode || "").split("|")[0];
 		if (this._isVariantComponent(item)) return "Component";
 		if (this._isWeapon(item)) return "Weapon";
 		if (item.armor || ["LA", "MA", "HA"].includes(typeBase)) return "Armor";
@@ -1648,8 +1651,8 @@ class CharacterSheetInventory {
 		if (typeBase === "ST" || item.staff) return "Staff";
 		if (typeBase === "RD") return "Rod";
 		if (typeBase === "RG") return "Ring";
-		if (item.wondrous) return "Wondrous";
-		if (typeBase === "AT" || typeBase === "T") return "Tool";
+		if (item.wondrous || typeBase === "W") return "Wondrous";
+		if (["AT", "T", "INS", "GS"].includes(typeBase)) return "Tool";
 		if (typeBase === "$G") return "Gemstone";
 		if (item._isEmpoweredGemstone) return "Empowered Gem";
 		if (this._isCraftingMaterial(item)) return "Material";
@@ -7153,18 +7156,18 @@ class CharacterSheetInventory {
 		// Each branch therefore accepts BOTH the coarse stored type AND the raw code, so a stored
 		// magic staff/wand/ring/wondrous item no longer collapses into "Other".
 		if (this._isVariantComponent(item)) return "Spell Components";
-		if (item.weapon || item.type === "weapon") return "Weapons";
-		const typeBase = item.type?.split("|")[0];
+		const typeBase = String(item.type || item.typeCode || "").split("|")[0];
+		if (item.weapon || item.type === "weapon" || ["M", "R"].includes(typeBase)) return "Weapons";
 		if (item.armor || item.type === "armor" || ["LA", "MA", "HA"].includes(typeBase)) return "Armor";
 		if (typeBase === "S" || item.shield) return "Armor";
 		if (item.type === "potion" || typeBase === "P") return "Consumables";
 		if (item.type === "scroll" || typeBase === "SC") return "Consumables";
 		if (
 			["wand", "staff", "rod", "ring", "wondrous"].includes(item.type)
-			|| ["WD", "ST", "RD", "RG"].includes(typeBase)
+			|| ["WD", "ST", "RD", "RG", "W"].includes(typeBase)
 			|| item.wondrous || item.staff || item.wand || item.rod
 		) return "Wondrous Items";
-		if (item.type === "tool" || typeBase === "AT" || typeBase === "T") return "Tools";
+		if (item.type === "tool" || ["AT", "T", "INS", "GS"].includes(typeBase)) return "Tools";
 		if (this._isCraftingMaterial(item)) return "Crafting Materials";
 		if (item.type === "gear" || typeBase === "G" || typeBase === "SCF") return "Adventuring Gear";
 		if (item.type === "gemstone" || typeBase === "$G" || item._isEmpoweredGemstone) return "Gemstones";

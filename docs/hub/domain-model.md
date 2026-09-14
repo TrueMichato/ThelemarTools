@@ -256,17 +256,21 @@ quantity, or no target changes. A stash-backed award locks and debits the select
 the full `quantity * target count`, preserves transferable stack metadata through the existing inventory
 normalization, and commits that debit with every destination write. Catalog-like command bodies and
 `item.granted` events carry only bounded safe summary metadata, but the authority resolves `name|source` from
-the generated site catalog or active campaign brew and stores the complete trusted item. Recent-award identity
-may resolve through either trusted source. Unknown or source-kind-mismatched identities fail; browser metadata
-never becomes canonical merely because it is present in the summary. Simple campaign `_copy` resolution also
-removes the generic/item parent-only publication fields that the site copy system preserves only by explicit
-request. All destination inventory changes delete derived `data.carry` authority instead of recomputing it
-without a Character Sheet.
+the generated site catalog or active campaign brew and stores the complete trusted item. New events retain
+their resolved site/campaign authority; legacy Recent identity may resolve only when exactly one authority owns
+the UID. Stash-derived grants remain selectable only through the live authoritative party stack rather than a
+Recent `name|source` projection. A campaign item cannot shadow a site UID. Unknown, source-kind-mismatched, duplicate, or cross-authority
+ambiguous identities fail; browser metadata never becomes canonical merely because it is present in the summary.
+Simple campaign `_copy` resolution also removes the generic/item parent-only publication fields that the site
+copy system preserves only by explicit request. All destination inventory changes delete derived `data.carry`
+authority instead of recomputing it without a Character Sheet.
 
 When a legacy summary-only inventory row is opened in the Character Sheet, item identity is repaired from an
-exact `name|source` catalog match. Before enhanced item loading begins, the sheet snapshots only the
-authoritative repair-sensitive fields needed for that decision. Authored metadata therefore survives save and
-later stack comparison while injected render caches and publication hints remain excluded.
+exact `name|source` match in an immutable repository-owned site/variant repair projection. Before enhanced item
+loading begins, the sheet snapshots only the authoritative repair-sensitive fields needed for that decision.
+Mutable prerelease or brew catalogs cannot retroactively supply an old summary's entries/effects without exact
+historical provenance. Authored site metadata therefore survives save and later stack comparison while
+cross-authority substitutions, injected render caches, and publication hints remain excluded.
 
 ## Known domain gaps
 

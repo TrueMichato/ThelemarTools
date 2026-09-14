@@ -65,12 +65,16 @@ Before a catalog-like award is staged, the server resolves that identity from a 
   `name`/`source` `_copy` inheritance are supported, while runtime transformation/template execution is rejected.
   Parent-only generic/item publication fields are not inherited unless the child authors its own value;
 - `recent` resolves from either trusted source because the originating event intentionally retains only a safe
-  summary.
+  summary. New events retain the resolver's exact `catalog` or `campaign_item` authority, so selecting them from
+  Recent sends that exact source kind. Legacy `recent` rows remain compatible only when the identity exists in
+  exactly one authority. Stash-derived events are not offered as Recent choices because their exact authority is
+  the live party stack UUID, not reconstructible `name|source` metadata.
 
 An unknown or source-kind-mismatched identity fails with `ITEM_AWARD_SOURCE_NOT_FOUND`; invalid trusted
-inheritance fails with `ITEM_AWARD_SOURCE_INVALID`. Client-supplied display fields never override trusted
-metadata. The full resolved item is stored in each destination inventory, while the response source, event,
-and audit evidence remain bounded summaries.
+inheritance, a campaign item that collides with a site `name|source`, or an ambiguous legacy Recent identity
+fails with `ITEM_AWARD_SOURCE_INVALID`. Client-supplied display fields never override trusted metadata. The
+full resolved item is stored in each destination inventory, while the response source, event, and audit
+evidence remain bounded summaries.
 
 A party-inventory request supplies only its stack entry UUID. The server reads and locks that stack, validates
 the total debit (`quantity * target count`), removes it once through the transfer inventory primitives, and
@@ -83,10 +87,14 @@ otherwise identical trusted stack. Non-empty composition, spent charges, custom 
 provenance, and ownership-local wrapper differences remain distinct.
 
 Legacy summary repair keeps the enhanced item catalog for mechanics, but first captures an immutable minimal
-projection (`name`, `source`, `entries`, `additionalSources`, and `hasRefs`) before any enhanced site,
-prerelease, or brew item loader starts. Source-authored reference fields remain canonical, while
-renderer-created empty entries, injected sources, and renderer/filter caches remain excluded. Enhanced-only
-values must not become canonical merely because the Character Sheet loaded the item.
+projection (`name`, `source`, `entries`, `additionalSources`, and `hasRefs`) from repository-owned site and
+variant-component content before any enhanced site, prerelease, or brew item loader starts. Site authority is
+first-wins for a duplicate `name|source`. Mutable prerelease/personal/campaign brew is not an authoritative
+repair source for an old summary without exact historical bundle provenance; the sheet may derive `type` from
+the already-persisted safe `typeCode` for categorization/equip inference without persisting a guessed canonical
+`type`, and it does not copy current mutable entries/effects or renderer caches.
+Source-authored site reference fields remain canonical, while renderer-created empty entries, injected sources,
+and renderer/filter caches remain excluded.
 
 ### Canonical mutation, audit, and events
 

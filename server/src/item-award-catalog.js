@@ -102,7 +102,7 @@ function resolveCampaignItemCopy ({campaignItems, item, siteItems, seen = new Se
 	return {...parentResolved, ...direct, _isCopy: true};
 }
 
-export function createItemAwardResolver ({fnLoadSiteItems = pLoadSiteItems} = {}) {
+export function createItemAwardAuthorityResolver ({fnLoadSiteItems = pLoadSiteItems} = {}) {
 	return async ({sourceKind = "recent", item, brewBundle = null}) => {
 		const uid = getItemUid(item);
 		if (!uid || uid === "|") {
@@ -114,23 +114,64 @@ export function createItemAwardResolver ({fnLoadSiteItems = pLoadSiteItems} = {}
 		if (campaignItems.has(uid) && !campaignItem && sourceKind !== "catalog") {
 			throw new HubStoreError("ITEM_AWARD_SOURCE_INVALID", `Item award source is ambiguous.`, {status: 409});
 		}
-		if (sourceKind === "campaign_item" && campaignItem) {
-			const siteItems = campaignItem._copy ? await fnLoadSiteItems() : new Map();
-			return resolveCampaignItemCopy({campaignItems, item: campaignItem, siteItems, seen: new Set([uid])});
+		const siteItems = await fnLoadSiteItems();
+		const siteItem = siteItems.get(uid);
+
+		if (sourceKind === "campaign_item") {
+			if (!campaignItem) {
+				throw new HubStoreError("ITEM_AWARD_SOURCE_NOT_FOUND", `Item award source was not found.`, {status: 404});
+			}
+			if (siteItem) {
+				throw new HubStoreError("ITEM_AWARD_SOURCE_INVALID", `Campaign item identity collides with the site catalog.`, {status: 409});
+			}
+			return {
+				sourceKind: "campaign_item",
+				authoritativeItem: resolveCampaignItemCopy({campaignItems, item: campaignItem, siteItems, seen: new Set([uid])}),
+			};
+		}
+
+		if (sourceKind === "recent" && campaignItem && siteItem) {
+			throw new HubStoreError("ITEM_AWARD_SOURCE_INVALID", `Recent item authority is ambiguous.`, {status: 409});
 		}
 		if (sourceKind === "recent" && campaignItem) {
-			const siteItems = campaignItem._copy ? await fnLoadSiteItems() : new Map();
-			return resolveCampaignItemCopy({campaignItems, item: campaignItem, siteItems, seen: new Set([uid])});
+			return {
+				sourceKind: "campaign_item",
+				authoritativeItem: resolveCampaignItemCopy({campaignItems, item: campaignItem, siteItems, seen: new Set([uid])}),
+			};
 		}
-		const siteItems = sourceKind === "campaign_item" ? null : await fnLoadSiteItems();
-		const resolved = sourceKind === "catalog" || sourceKind === "recent"
-			? siteItems.get(uid)
-			: null;
-		if (!resolved) {
+		if ((sourceKind === "catalog" || sourceKind === "recent") && siteItem) {
+			return {
+				sourceKind: "catalog",
+				authoritativeItem: structuredClone(siteItem),
+			};
+		}
+
+		if (!siteItem) {
 			throw new HubStoreError("ITEM_AWARD_SOURCE_NOT_FOUND", `Item award source was not found.`, {status: 404});
 		}
-		return structuredClone(resolved);
+		throw new HubStoreError("ITEM_AWARD_SOURCE_INVALID", `Item award source kind is invalid.`, {status: 409});
 	};
 }
 
+export function createItemAwardResolver (opts = {}) {
+	const resolveAuthority = createItemAwardAuthorityResolver(opts);
+	return async args => (await resolveAuthority(args)).authoritativeItem;
+}
+
+export function normalizeItemAwardResolution (resolved, {sourceKind}) {
+	if (
+		resolved
+		&& typeof resolved === "object"
+		&& resolved.authoritativeItem
+		&& ["catalog", "campaign_item"].includes(resolved.sourceKind)
+	) {
+		return resolved;
+	}
+	return {
+		sourceKind,
+		authoritativeItem: resolved,
+	};
+}
+
+export const resolveItemAwardAuthority = createItemAwardAuthorityResolver();
 export const resolveItemAward = createItemAwardResolver();

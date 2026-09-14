@@ -35,13 +35,18 @@ describe("Hub item award presentation contract", () => {
 	it("derives recent and stash choices without carrying arbitrary item JSON", () => {
 		const recent = buildRecentAwardItems([
 			{sequence: 1, type: "item.granted", payload: {entry: {item: {name: "Torch", source: "PHB", weight: 1, entries: ["hidden"]}}}},
-			{sequence: 2, type: "item.granted", payload: {entry: {item: {name: "Torch", source: "PHB", weight: 1, entries: ["newer"]}}}},
+			{sequence: 2, type: "item.granted", payload: {sourceKind: "catalog", entry: {item: {name: "Torch", source: "PHB", weight: 1, entries: ["newer"]}}}},
+			{sequence: 3, type: "item.granted", payload: {sourceKind: "campaign_item", entry: {item: {name: "Campaign Harp", source: "TST", weight: 2, effects: ["hidden"]}}}},
+			{sequence: 4, type: "item.granted", payload: {sourceKind: "party_inventory", entry: {item: {name: "Private Stash Relic", source: "TST", weight: 2}}}},
 		]);
 		const stash = buildStashAwardItems({
 			inventory: [{id: "entry-1", item: {name: "Rope", source: "PHB", weight: 10, entries: ["hidden"]}, quantity: 3}],
 		});
 
-		expect(recent).toEqual([{name: "Torch", source: "PHB", sourceKind: "recent", weight: 1}]);
+		expect(recent).toEqual([
+			{name: "Campaign Harp", source: "TST", sourceKind: "campaign_item", weight: 2},
+			{name: "Torch", source: "PHB", sourceKind: "catalog", weight: 1},
+		]);
 		expect(stash).toEqual([{
 			name: "Rope",
 			source: "PHB",
@@ -51,8 +56,8 @@ describe("Hub item award presentation contract", () => {
 			availableQuantity: 3,
 		}]);
 		expect(getAwardSourceRequest(recent[0])).toEqual({
-			kind: "recent",
-			item: {name: "Torch", source: "PHB", weight: 1},
+			kind: "campaign_item",
+			item: {name: "Campaign Harp", source: "TST", weight: 2},
 		});
 		expect(getAwardSourceRequest(stash[0])).toEqual({kind: "party_inventory", entryId: "entry-1"});
 	});

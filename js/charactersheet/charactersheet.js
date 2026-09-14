@@ -1211,22 +1211,23 @@ class CharacterSheetPage {
 		"hasRefs",
 	];
 
-	static _getItemRepairData ({rawItems, prereleaseData, brewData, variantComponents}) {
-		return [
+	static _getItemRepairData ({rawItems, variantComponents}) {
+		const byUid = new Map();
+		for (const item of [
 			...(rawItems.item || []),
 			...(rawItems.baseitem || []),
-			...(prereleaseData?.item || []),
-			...(prereleaseData?.baseitem || []),
-			...(brewData?.item || []),
-			...(brewData?.baseitem || []),
 			...(variantComponents.item || []),
-		]
-			.filter(it => it?.name && it?.source)
-			.map(it => Object.fromEntries(
+		]) {
+			if (!item?.name || !item?.source) continue;
+			const uid = `${item.name}|${item.source}`.toLowerCase();
+			if (byUid.has(uid)) continue;
+			byUid.set(uid, Object.fromEntries(
 				this._ITEM_REPAIR_FIELDS
-					.filter(key => Object.prototype.hasOwnProperty.call(it, key))
-					.map(key => [key, MiscUtil.copyFast(it[key])]),
+					.filter(key => Object.prototype.hasOwnProperty.call(item, key))
+					.map(key => [key, MiscUtil.copyFast(item[key])]),
 			));
+		}
+		return [...byUid.values()];
 	}
 
 	static async _pLoadItemData ({
@@ -1246,8 +1247,6 @@ class CharacterSheetPage {
 		]);
 		const itemRepairData = this._getItemRepairData({
 			rawItems,
-			prereleaseData,
-			brewData,
 			variantComponents,
 		});
 		const [items, prereleaseItems, brewItems] = await Promise.all([

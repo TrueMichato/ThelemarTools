@@ -303,7 +303,8 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   pickers, and the inbox together; the lifecycle journey proves the accepted item is immediately selectable
   from party inventory without reloading.
 - Item-award regressions mutation-verify role/tenant/target gates, strict source and note/quantity bounds,
-  trusted site/campaign identity resolution, full authoritative metadata persistence, privacy-reduced
+  trusted site/campaign identity resolution, cross-authority collision rejection, resolved Recent provenance,
+  full authoritative metadata persistence, privacy-reduced
   command/event projections, multi-target rollback, exact retry and concurrent duplicate behavior,
   award-to-Character-Sheet-save-to-repeat-award stack identity, direct/stash-return metadata conservation,
   accept/reject/cancel behavior, stash conservation under contention, memory/PostgreSQL parity, carry
@@ -312,9 +313,10 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   open-sheet authoritative reconciliation. A complete generated-artifact equality test prevents the browser
   item data and BFF award catalog from drifting. Character Sheet migration coverage also rejects renderer/filter
   caches, empty renderer-created `entries`, and renderer-injected `additionalSources` while retaining
-  source-authored `hasRefs` and `additionalSources` from real catalog entries through repeat award and stash
+  source-authored `hasRefs` and `additionalSources` from real site catalog entries through repeat award and stash
   return. A production-order loader regression mutates both a shipped instrument and a synthetic campaign-brew
-  instrument in place, proving the minimal repair projection was captured before enhancement. The real-stack
+  instrument in place, proving the minimal site repair projection was captured before enhancement and excludes
+  mutable brew metadata. Duplicate official/brew UIDs and changed brew content are also pinned fail-closed. The real-stack
   lifecycle commits a multi-character catalog award
   behind a lost response, changes incidental form state, retries with the same key, verifies canonical weapon
   type/damage/value/weight metadata on both characters, observes exactly one live arrival on an already-open
