@@ -50,12 +50,22 @@ Legal option catalogs exist only on the in-memory manifest. They are re-derived
 when Respec opens and are not serialized into `levelHistory`, preventing full
 spell, feat, and feature entities from inflating character saves.
 
+Every decision family must be registered in
+`CharacterSheetProgression.DECISION_ADAPTERS`. The adapter declares its
+discovery source, editor, validation contract, mechanics handler, and
+compatibility projection. Manifest construction rejects an unregistered type,
+so adding a new progression choice cannot silently create a read-only Respec
+row.
+
 ## Legacy Reconstruction
 
 Old saves are normalized on load.
 
 - Exact recorded history becomes a resolved decision.
 - A uniquely reconstructable state value may be attached to its opportunity.
+- Legacy spells on a single spellcasting class are assigned across acquisition
+  levels as an aggregate legal set. Lower-level spells are assigned first and
+  every resulting level must satisfy the spell-level and class-list rules.
 - Uncertain values remain `ambiguous`; Respec does not invent a historical
   choice.
 - Values with no recorded progression source are preserved rather than removed.
@@ -101,6 +111,48 @@ Starting equipment and ordinary inventory are not reconstructed by a class
 change. Inventory, notes, identity, layout, favorites, custom data, and other
 non-progression state remain attached to the candidate.
 
+## Improvements and Feats
+
+ASI and feat opportunities are derived from the loaded class data instead of a
+universal level table. PHB classes retain their normal level-19 ASI-or-feat
+choice. XPHB and TGTT classes which declare an `Epic Boon` feat progression at
+level 19 receive a feat-only opportunity:
+
+- Epic Boons are listed first as the recommended choice;
+- another feat remains legal when its prerequisites are satisfied;
+- a legacy level-19 ASI is marked invalid and must be repaired;
+- the editor can move both directions between ASI and feat when the opportunity
+  genuinely permits both.
+
+Feat prerequisites are evaluated against the candidate for level, ability
+scores, spellcasting, race, background, armor/weapon proficiency, prior feats,
+feat categories, and named features. Campaign-specific or free-text special
+prerequisites are withheld instead of being assumed legal.
+
+Applying a feat records an exact effect receipt: capped ability deltas,
+proficiency transitions, added saves/tools/languages/spells, and immunities.
+Replacing that feat reverses the receipt before applying the new feat. Old saves
+which predate receipts still use the conservative legacy reversal path; fixed
+or overlapping grants from those old feats may require manual review when they
+are replaced.
+
+Non-Epic-Boon `featProgression` grants, such as Fighting Styles, are also
+manifest decisions. A skipped grant can be created later, and replacements use
+the same prerequisite, nested-choice, add-feat, receipt, and rollback
+transaction as ordinary feats.
+
+## Historical Optional Features
+
+Optional-feature slots are reconstructed from the progression curve itself, not
+from the character's final feature count. Progression values are treated as
+cumulative totals, and the manifest emits the delta at each class level. For
+example, a Jester progression which rises from two Acts to three creates one
+level-specific choice even if the final save contains only the original two.
+
+The editor targets the manifest decision ID and selection, so it can create a
+missing Metamagic, Invocation, Jester's Act, maneuver, or similar slot without a
+pre-existing sparse-history array entry.
+
 ## Apply, Cancel, and Undo
 
 - **Cancel** discards the candidate without touching the live character.
@@ -128,6 +180,13 @@ Permanent spell acquisition is progression-owned:
 Wizard daily preparation and other freely replaceable runtime loadouts are not
 progression decisions. Legal spell options are filtered by class/subclass list
 and by the maximum spell level available at the acquisition level.
+
+When a legal aggregate reconstruction is possible, it is accepted
+automatically. If real choices are missing, Review groups all unresolved spell
+decisions into one repair item. The spell-repair flow walks them in acquisition
+order, prevents assigning the same permanent spell to two levels, and keeps
+partially completed work in the candidate when the player chooses **Finish
+later**.
 
 ## Tests
 

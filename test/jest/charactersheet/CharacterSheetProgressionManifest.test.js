@@ -3,7 +3,7 @@ import "../../../js/charactersheet/charactersheet-progression.js";
 
 const CharacterSheetProgression = globalThis.CharacterSheetProgression;
 
-const getPage = () => {
+const getPage = (opts = {}) => {
 	const fighter = {
 		name: "Fighter",
 		source: "XPHB",
@@ -56,8 +56,8 @@ const getPage = () => {
 	};
 
 	return {
-		getClasses: () => [fighter, wizard, cleric],
-		getClassFeatures: () => [
+		getClasses: () => opts.classes || [fighter, wizard, cleric],
+		getClassFeatures: () => opts.classFeatures || [
 			{name: "Fighting Style", source: "XPHB", className: "Fighter", classSource: "XPHB", level: 1, entries: []},
 			{name: "Second Wind", source: "XPHB", className: "Fighter", classSource: "XPHB", level: 1, entries: []},
 			{name: "Action Surge", source: "XPHB", className: "Fighter", classSource: "XPHB", level: 2, entries: []},
@@ -72,10 +72,10 @@ const getPage = () => {
 			{name: "Divine Order", source: "XPHB", className: "Cleric", classSource: "XPHB", level: 1, entries: []},
 		],
 		getSubclassFeatures: () => [],
-		getOptionalFeatures: () => [],
-		getFeats: () => [],
-		getSpells: () => [],
-		getFilteredSpellData: () => [],
+		getOptionalFeatures: () => opts.optionalFeatures || [],
+		getFeats: () => opts.feats || [],
+		getSpells: () => opts.spells || [],
+		getFilteredSpellData: () => opts.spells || [],
 		getSkillsList: () => [
 			{name: "Athletics"},
 			{name: "Perception"},
@@ -87,7 +87,20 @@ const getPage = () => {
 	};
 };
 
-const getState = ({classes, history, spells = [], cantrips = [], abilityScores = {}}) => ({
+const getState = ({
+	classes,
+	history,
+	spells = [],
+	cantrips = [],
+	abilityScores = {},
+	feats = [],
+	race = null,
+	background = null,
+	armorProficiencies = [],
+	weaponProficiencies = [],
+	spellcastingAbility = null,
+	features = [],
+}) => ({
 	getClasses: () => classes,
 	getLevelHistory: () => history,
 	getTotalLevel: () => classes.reduce((sum, cls) => sum + cls.level, 0),
@@ -98,6 +111,15 @@ const getState = ({classes, history, spells = [], cantrips = [], abilityScores =
 	getCombatTraditions: () => [],
 	getSettings: () => ({}),
 	getAbilityScore: ability => abilityScores[ability] ?? 13,
+	getFeats: () => feats,
+	getRace: () => race,
+	getBackground: () => background,
+	getArmorProficiencies: () => armorProficiencies,
+	getWeaponProficiencies: () => weaponProficiencies,
+	getSpellcastingAbility: () => spellcastingAbility,
+	getSpellcastingAbilityForClass: () => spellcastingAbility,
+	getFeatureCalculations: () => ({hasSpellcasting: !!spellcastingAbility}),
+	getFeatures: () => features,
 });
 
 describe("CharacterSheetProgression manifest", () => {
@@ -131,6 +153,41 @@ describe("CharacterSheetProgression manifest", () => {
 
 		expect(startingSkills).toMatchObject({characterLevel: 1, required: true, status: "missing", count: 2});
 		expect(asiOrFeat).toMatchObject({characterLevel: 4, required: true, status: "missing"});
+	});
+
+	it("surfaces skipped class feat-progression choices and filters illegal feats", () => {
+		const fighter = {
+			name: "Fighter",
+			source: "XPHB",
+			hd: {faces: 10},
+			featProgression: [{name: "Fighting Style", category: ["FS"], progression: {"1": 1}}],
+			classFeatures: ["Second Wind|Fighter|XPHB|1"],
+		};
+		const page = getPage({
+			classes: [fighter],
+			classFeatures: [{name: "Second Wind", source: "XPHB", className: "Fighter", classSource: "XPHB", level: 1, entries: []}],
+			feats: [
+				{name: "Defense", source: "XPHB", category: "FS"},
+				{name: "Advanced Style", source: "TGTT", category: "FS", prerequisite: [{level: 4}]},
+				{name: "Alert", source: "XPHB", category: "G"},
+			],
+		});
+		const manifest = CharacterSheetProgression.buildManifest({
+			page,
+			state: getState({
+				classes: [{name: "Fighter", source: "XPHB", level: 1}],
+				history: [{level: 1, class: {name: "Fighter", source: "XPHB"}, choices: {}}],
+			}),
+		});
+		const choice = manifest.decisions.find(it => it.type === "classFeatProgressionFeat");
+
+		expect(choice).toMatchObject({
+			characterLevel: 1,
+			label: "Fighting Style",
+			status: "missing",
+			count: 1,
+		});
+		expect(choice.options.map(it => it.name)).toEqual(["Defense"]);
 	});
 
 	it("derives Wizard spellbook/cantrip and prepared-caster permanent spell opportunities", () => {
@@ -167,6 +224,156 @@ describe("CharacterSheetProgression manifest", () => {
 			expect.objectContaining({type: "preparedSpells", characterLevel: 1, count: 4, status: "missing"}),
 			expect.objectContaining({type: "preparedSpells", characterLevel: 2, count: 1, status: "missing"}),
 		]));
+	});
+
+	it("reconstructs a legal aggregate spell history for a single legacy caster", () => {
+		const bard = {
+			name: "Bard",
+			source: "TGTT",
+			hd: {faces: 8},
+			casterProgression: "full",
+			spellcastingAbility: "cha",
+			cantripProgression: [0, 0, 0],
+			spellsKnownProgression: [2, 3, 4],
+			classFeatures: [
+				"Spellcasting|Bard|TGTT|1",
+				"Bard Feature|Bard|TGTT|2",
+				"Bard Feature|Bard|TGTT|3",
+			],
+		};
+		const fighter = {
+			name: "Fighter",
+			source: "XPHB",
+			hd: {faces: 10},
+			classFeatures: [],
+		};
+		const spells = [
+			{name: "Low A", source: "TGTT", level: 1, classes: {fromClassList: [{name: "Bard", source: "TGTT"}]}},
+			{name: "Low B", source: "TGTT", level: 1, classes: {fromClassList: [{name: "Bard", source: "TGTT"}]}},
+			{name: "Low C", source: "TGTT", level: 1, classes: {fromClassList: [{name: "Bard", source: "TGTT"}]}},
+			{name: "High", source: "TGTT", level: 2, classes: {fromClassList: [{name: "Bard", source: "TGTT"}]}},
+		];
+		const page = getPage({
+			classes: [bard, fighter],
+			classFeatures: bard.classFeatures.map((uid, ix) => ({
+				name: uid.split("|")[0],
+				source: "TGTT",
+				className: "Bard",
+				classSource: "TGTT",
+				level: ix + 1,
+				entries: [],
+			})),
+			spells,
+		});
+		const manifest = CharacterSheetProgression.buildManifest({
+			page,
+			state: getState({
+				classes: [
+					{name: "Bard", source: "TGTT", level: 3},
+					{name: "Fighter", source: "XPHB", level: 1},
+				],
+				history: [
+					...[1, 2, 3].map(level => ({
+						level,
+						class: {name: "Bard", source: "TGTT"},
+						choices: {},
+					})),
+					{level: 4, class: {name: "Fighter", source: "XPHB"}, choices: {}},
+				],
+				spells: [spells[3], spells[2], spells[0], spells[1]],
+				spellcastingAbility: "cha",
+			}),
+		});
+
+		const choices = manifest.decisions.filter(it => it.type === "knownSpells");
+		expect(choices).toHaveLength(3);
+		expect(choices.map(it => it.status)).toEqual(["resolved", "resolved", "resolved"]);
+		expect(choices[0].selection.map(it => it.name)).toEqual(["Low A", "Low B"]);
+		expect(choices[1].selection.map(it => it.name)).toEqual(["Low C"]);
+		expect(choices[2].selection.map(it => it.name)).toEqual(["High"]);
+	});
+
+	it("reconstructs gain slots from the pre-swap spell pool", () => {
+		const bard = {
+			name: "Bard",
+			source: "PHB",
+			hd: {faces: 8},
+			casterProgression: "full",
+			spellcastingAbility: "cha",
+			cantripProgression: [0, 0],
+			spellsKnownProgression: [4, 5],
+			classFeatures: [],
+		};
+		const spells = ["A", "B", "C", "D", "E", "F"].map(name => ({
+			name,
+			source: "PHB",
+			level: 1,
+			classes: {fromClassList: [{name: "Bard", source: "PHB"}]},
+		}));
+		const [spellA, spellB, spellC, spellD, spellE, spellF] = spells;
+		const history = [
+			{level: 1, class: {name: "Bard", source: "PHB"}, choices: {}},
+			{
+				level: 2,
+				class: {name: "Bard", source: "PHB"},
+				choices: {spellSwap: {removed: spellA, added: spellE}},
+			},
+		];
+		const manifest = CharacterSheetProgression.buildManifest({
+			page: getPage({classes: [bard], classFeatures: [], spells}),
+			state: getState({
+				classes: [{name: "Bard", source: "PHB", level: 2}],
+				history,
+				spells: [spellB, spellC, spellD, spellE, spellF].map(spell => ({
+					...spell,
+					sourceClass: "Bard",
+					sourceFeature: "Spells Known",
+				})),
+				spellcastingAbility: "cha",
+			}),
+		});
+
+		const gains = manifest.decisions.filter(it => it.type === "knownSpells");
+		expect(gains[0].selection.map(it => it.name)).toEqual(["A", "B", "C", "D"]);
+		expect(gains[1].selection.map(it => it.name)).toEqual(["F"]);
+		expect(manifest.decisions.find(it => it.type === "spellSwap")?.selection).toMatchObject({
+			removed: {name: "A"},
+			added: {name: "E"},
+		});
+	});
+
+	it("does not reconstruct feat-granted spells as class spell choices", () => {
+		const bard = {
+			name: "Bard",
+			source: "PHB",
+			hd: {faces: 8},
+			casterProgression: "full",
+			spellcastingAbility: "cha",
+			cantripProgression: [2],
+			spellsKnownProgression: [0],
+			classFeatures: [],
+		};
+		const spells = [
+			{name: "Dancing Lights", source: "PHB", level: 0, classes: {fromClassList: [{name: "Bard", source: "PHB"}]}},
+			{name: "Vicious Mockery", source: "PHB", level: 0, classes: {fromClassList: [{name: "Bard", source: "PHB"}]}},
+			{name: "Mage Hand", source: "PHB", level: 0, classes: {fromClassList: [{name: "Wizard", source: "PHB"}]}},
+		];
+		const manifest = CharacterSheetProgression.buildManifest({
+			page: getPage({classes: [bard], classFeatures: [], spells}),
+			state: getState({
+				classes: [{name: "Bard", source: "PHB", level: 1}],
+				history: [{level: 1, class: {name: "Bard", source: "PHB"}, choices: {}}],
+				cantrips: [
+					{...spells[0], sourceClass: "Bard", sourceFeature: "Cantrips Known"},
+					{...spells[1], sourceClass: "Bard", sourceFeature: "Cantrips Known"},
+					{...spells[2], sourceFeature: "Telekinetic", fromFeat: "Telekinetic"},
+				],
+				spellcastingAbility: "cha",
+			}),
+		});
+
+		expect(manifest.decisions.find(it => it.type === "cantrips")?.selection.map(it => it.name))
+			.toEqual(["Dancing Lights", "Vicious Mockery"]);
 	});
 
 	it("keeps semantic decision keys stable when class levels move to different character levels", () => {
@@ -453,5 +660,259 @@ describe("CharacterSheetProgression manifest", () => {
 		expect(multiclass.decisions.find(decision =>
 			decision.type === "class" && decision.characterLevel === 2,
 		)?.status).toBe("invalid");
+	});
+
+	it("derives level-19 ASI and feat opportunities from class data", () => {
+		const makeHistory = source => Array.from({length: 19}, (_, ix) => ({
+			level: ix + 1,
+			class: {name: "Bard", source},
+			choices: ix === 18 ? {asi: {cha: 2}} : {},
+			complete: true,
+		}));
+		const makeClass = ({source, level19Feature, featProgression}) => ({
+			name: "Bard",
+			source,
+			hd: {faces: 8},
+			spellcastingAbility: "cha",
+			classFeatures: Array.from({length: 19}, (_, ix) => ix === 18 ? [level19Feature] : []),
+			...(featProgression ? {featProgression} : {}),
+		});
+		const phbClass = makeClass({
+			source: "PHB",
+			level19Feature: "Ability Score Improvement|Bard|PHB|19",
+		});
+		const tgttClass = makeClass({
+			source: "TGTT",
+			level19Feature: "Epic Boon|Bard|TGTT|19",
+			featProgression: [{
+				name: "Epic Boon",
+				category: ["EB"],
+				progression: {"19": 1},
+			}],
+		});
+		const feats = [
+			{name: "Boon of Spell Recall", source: "XPHB", category: "EB", prerequisite: [{level: 19, spellcasting2020: true}]},
+			{name: "Actor", source: "XPHB", category: "G", prerequisite: [{level: 4, ability: [{cha: 13}]}]},
+			{name: "Athlete", source: "XPHB", category: "G", prerequisite: [{level: 4, ability: [{str: 13}]}, {level: 4, ability: [{dex: 13}]}]},
+		];
+
+		const phbManifest = CharacterSheetProgression.buildManifest({
+			page: getPage({classes: [phbClass], feats}),
+			state: getState({
+				classes: [{name: "Bard", source: "PHB", level: 19}],
+				history: makeHistory("PHB"),
+				abilityScores: {str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 16},
+				spellcastingAbility: "cha",
+			}),
+		});
+		expect(phbManifest.decisions.find(decision => decision.characterLevel === 19 && decision.type === "asiOrFeat")).toMatchObject({
+			selection: {mode: "asi", asi: {cha: 2}},
+			status: "resolved",
+		});
+
+		const tgttManifest = CharacterSheetProgression.buildManifest({
+			page: getPage({classes: [tgttClass], feats}),
+			state: getState({
+				classes: [{name: "Bard", source: "TGTT", level: 19}],
+				history: makeHistory("TGTT"),
+				abilityScores: {str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 16},
+				spellcastingAbility: "cha",
+			}),
+		});
+		const tgttDecision = tgttManifest.decisions.find(decision => decision.characterLevel === 19 && decision.type === "feat");
+		expect(tgttDecision).toMatchObject({
+			label: "Epic Boon or Qualifying Feat",
+			selection: {legacyAsi: {cha: 2}, mode: "asi"},
+			status: "invalid",
+		});
+		expect(tgttDecision.options.map(option => option.name)).toEqual(["Boon of Spell Recall", "Actor"]);
+		expect(tgttManifest.unresolved).toContain(tgttDecision);
+	});
+
+	it("registers a complete adapter contract for every emitted decision", () => {
+		const manifest = CharacterSheetProgression.buildManifest({
+			page: getPage(),
+			state: getState({
+				classes: [{name: "Fighter", source: "XPHB", level: 1}],
+				history: [{
+					level: 1,
+					class: {name: "Fighter", source: "XPHB"},
+					choices: {skills: ["Athletics", "Perception"], hpRoll: 10},
+				}],
+			}),
+		});
+
+		for (const decision of manifest.decisions) {
+			expect(CharacterSheetProgression.getDecisionAdapter(decision.type)).toEqual(expect.objectContaining({
+				discovery: expect.any(String),
+				editor: expect.any(String),
+				validation: expect.any(String),
+				mechanics: expect.any(String),
+				projection: expect.any(Array),
+			}));
+		}
+	});
+
+	it("derives cumulative optional-feature slots from progression deltas instead of final state", () => {
+		const bard = {
+			name: "Bard",
+			source: "TGTT",
+			hd: {faces: 8},
+			classFeatures: [],
+			optionalfeatureProgression: [{
+				name: "Jester's Acts",
+				featureType: ["JA"],
+				progression: {"3": 2, "5": 3},
+			}],
+		};
+		const history = Array.from({length: 5}, (_, ix) => ({
+			level: ix + 1,
+			class: {name: "Bard", source: "TGTT"},
+			choices: ix === 2
+				? {optionalFeatures: [
+					{name: "Mocking Flourish", source: "TGTT", type: "JA"},
+					{name: "Pratfall", source: "TGTT", type: "JA"},
+				]}
+				: {},
+		}));
+		const manifest = CharacterSheetProgression.buildManifest({
+			page: getPage({
+				classes: [bard],
+				feats: [],
+				classFeatures: [],
+			}),
+			state: getState({
+				classes: [{name: "Bard", source: "TGTT", level: 5}],
+				history,
+				features: [
+					{name: "Mocking Flourish", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]},
+					{name: "Pratfall", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]},
+				],
+			}),
+		});
+		const actDecisions = manifest.decisions.filter(decision => decision.type === "optionalFeatures");
+
+		expect(actDecisions).toEqual([
+			expect.objectContaining({
+				characterLevel: 3,
+				count: 2,
+				status: "resolved",
+				selection: [
+					expect.objectContaining({name: "Mocking Flourish"}),
+					expect.objectContaining({name: "Pratfall"}),
+				],
+			}),
+			expect.objectContaining({
+				characterLevel: 5,
+				count: 1,
+				status: "missing",
+				selection: null,
+				meta: expect.objectContaining({countBefore: 2, countAfter: 3}),
+			}),
+		]);
+	});
+
+	it("marks historical optional-feature selections invalid when their prerequisites were not met", () => {
+		const warlock = {
+			name: "Warlock",
+			source: "XPHB",
+			hd: {faces: 8},
+			classFeatures: [],
+			optionalfeatureProgression: [{
+				name: "Eldritch Invocations",
+				featureType: ["EI"],
+				progression: {"1": 1},
+			}],
+		};
+		const manifest = CharacterSheetProgression.buildManifest({
+			page: getPage({
+				classes: [warlock],
+				classFeatures: [],
+				optionalFeatures: [
+					{name: "Pact of the Blade", source: "XPHB", featureType: ["EI"]},
+					{
+						name: "Thirsting Blade",
+						source: "XPHB",
+						featureType: ["EI"],
+						prerequisite: [
+							{level: {level: 5, class: {name: "Warlock"}}},
+							{pact: "Blade"},
+						],
+					},
+				],
+			}),
+			state: getState({
+				classes: [{name: "Warlock", source: "XPHB", level: 1}],
+				history: [{
+					level: 1,
+					class: {name: "Warlock", source: "XPHB"},
+					choices: {optionalFeatures: [{name: "Thirsting Blade", source: "XPHB", type: "EI"}]},
+				}],
+				features: [],
+			}),
+		});
+		const decision = manifest.decisions.find(it => it.type === "optionalFeatures");
+
+		expect(decision.status).toBe("invalid");
+		expect(decision.options.find(it => it.name === "Pact of the Blade")).toMatchObject({_selectable: true});
+		expect(decision.options.find(it => it.name === "Thirsting Blade")).toMatchObject({
+			_selectable: false,
+			_meetsPrereqs: false,
+		});
+	});
+
+	it("evaluates historical feat prerequisites before later ASIs", () => {
+		const fighter = {
+			name: "Fighter",
+			source: "XPHB",
+			hd: {faces: 10},
+			classFeatures: [
+				...Array.from({length: 3}, () => []),
+				["Ability Score Improvement|Fighter|XPHB|4"],
+				...Array.from({length: 3}, () => []),
+				["Ability Score Improvement|Fighter|XPHB|8"],
+			],
+		};
+		const athlete = {
+			name: "Athlete",
+			source: "XPHB",
+			category: "G",
+			prerequisite: [{level: 4, ability: [{str: 13}]}],
+		};
+		const manifest = CharacterSheetProgression.buildManifest({
+			page: getPage({classes: [fighter], classFeatures: [], feats: [athlete]}),
+			state: getState({
+				classes: [{name: "Fighter", source: "XPHB", level: 8}],
+				history: Array.from({length: 8}, (_, ix) => ({
+					level: ix + 1,
+					class: {name: "Fighter", source: "XPHB"},
+					choices: ix === 7 ? {asi: {str: 2}} : {},
+				})),
+				abilityScores: {str: 14},
+			}),
+		});
+
+		expect(manifest.decisions.find(it => it.characterLevel === 4 && it.type === "asiOrFeat")?.options)
+			.not.toEqual(expect.arrayContaining([expect.objectContaining({name: "Athlete"})]));
+	});
+
+	it("resolves feat-category prerequisites from the catalog for legacy stored feats", () => {
+		const dragonmark = {name: "Mark of Making", source: "TGTT", category: "D"};
+		const potent = {
+			name: "Potent Dragonmark",
+			source: "TGTT",
+			category: "G",
+			prerequisite: [{featCategory: ["D"]}],
+		};
+		const eligible = globalThis.CharacterSheetClassUtils.getEligibleFeats(
+			[dragonmark, potent],
+			getState({
+				classes: [{name: "Fighter", source: "XPHB", level: 4}],
+				history: [],
+				feats: [{name: "Mark of Making", source: "TGTT"}],
+			}),
+		);
+
+		expect(eligible.map(it => it.name)).toContain("Potent Dragonmark");
 	});
 });

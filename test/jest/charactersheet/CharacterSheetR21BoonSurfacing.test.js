@@ -126,23 +126,31 @@ describe("R21 #8 — combat panel surfaces summaries + working Apply button", ()
 });
 
 // ==========================================================================
-// Bug #10 — shared epic-boon-level gating helper
+// Bug #10 — shared data-driven improvement opportunity
 // ==========================================================================
-describe("R21 #10 — isEpicBoonLevel is source-aware and shared", () => {
-	test.each([
-		["XPHB", 19, true],
-		["TGTT", 19, true],
-		["TGTT-IllR", 19, false], // Illrigger uses Interdict Boons, not epic-boon feats
-		["PHB", 19, false],
-		["XPHB", 18, false],
-		["XPHB", 20, false],
-	])("isEpicBoonLevel(%s, %i) === %s", (source, level, expected) => {
-		expect(CharacterSheetClassUtils.isEpicBoonLevel(source, level)).toBe(expected);
+describe("R21 #10 — improvement opportunities are data-driven and shared", () => {
+	test("class feature/progression data distinguishes Epic Boons from ASIs", () => {
+		expect(CharacterSheetClassUtils.getImprovementOpportunity({
+			name: "Bard",
+			source: "XPHB",
+			classFeatures: ["Epic Boon|Bard|XPHB|19"],
+			featProgression: [{name: "Epic Boon", category: ["EB"], progression: {"19": 1}}],
+		}, 19)).toMatchObject({kind: "feat", categories: ["EB"]});
+		expect(CharacterSheetClassUtils.getImprovementOpportunity({
+			name: "Bard",
+			source: "PHB",
+			classFeatures: ["Ability Score Improvement|Bard||19"],
+		}, 19)).toMatchObject({kind: "asiOrFeat"});
+		expect(CharacterSheetClassUtils.getImprovementOpportunity({
+			name: "Illrigger",
+			source: "TGTT-IllR",
+			classFeatures: ["Ability Score Improvement|Illrigger|TGTT-IllR|19"],
+		}, 19)).toMatchObject({kind: "asiOrFeat"});
 	});
 
 	test("both builders consume the shared helper (no divergent inline gating)", () => {
-		expect(QUICKBUILD_SRC).toMatch(/CharacterSheetClassUtils\.isEpicBoonLevel\(classSource, classLevel\)/);
-		expect(LEVELUP_SRC).toMatch(/CharacterSheetClassUtils\.isEpicBoonLevel\(classEntry\.source, newLevel\)/);
+		expect(QUICKBUILD_SRC).toMatch(/CharacterSheetClassUtils\.getImprovementOpportunity\(classData, classLevel/);
+		expect(LEVELUP_SRC).toMatch(/CharacterSheetClassUtils\.getImprovementOpportunity\(classData, newLevel/);
 		// The old inline level-only / source-divergent checks are gone.
 		expect(QUICKBUILD_SRC).not.toMatch(/isEpicBoon = classLevel === 19;/);
 		expect(LEVELUP_SRC).not.toMatch(/newLevel === 19 && \(classEntry\.source === "XPHB"/);
@@ -207,6 +215,10 @@ describe("R21 — representative Illrigger L10 (Soul Eater + Veil of Lies)", () 
 	});
 
 	test("the character's class source is excluded from the L19 epic-boon slot", () => {
-		expect(CharacterSheetClassUtils.isEpicBoonLevel("TGTT-IllR", 19)).toBe(false);
+		expect(CharacterSheetClassUtils.getImprovementOpportunity({
+			name: "Illrigger",
+			source: "TGTT-IllR",
+			classFeatures: ["Ability Score Improvement|Illrigger|TGTT-IllR|19"],
+		}, 19)).toMatchObject({kind: "asiOrFeat"});
 	});
 });

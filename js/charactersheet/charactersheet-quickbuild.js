@@ -242,7 +242,10 @@ class CharacterSheetQuickBuild {
 			const needsSubclass = classLevel === CharacterSheetClassUtils.getSubclassLevel(classData)
 				&& !this._hasSubclass(className, classSource);
 
-			const hasAsi = CharacterSheetClassUtils.levelGrantsAsi(classData, classLevel);
+			const improvement = CharacterSheetClassUtils.getImprovementOpportunity(classData, classLevel, {
+				grantBoth: !!this._state.shouldGrantBothAsiAndFeat?.(characterLevel),
+			});
+			const hasAsi = !!improvement;
 
 			const optionalFeatureGains = this._getOptionalFeatureGains(
 				classData, classLevel, runningOptionalFeatureCounts, subclass,
@@ -342,6 +345,7 @@ class CharacterSheetQuickBuild {
 				features,
 				needsSubclass,
 				hasAsi,
+				improvement,
 				optionalFeatureGains,
 				classFeatProgressionGains,
 				featureOptions,
@@ -1452,6 +1456,45 @@ class CharacterSheetQuickBuild {
 	// Step 3: ASI / Feat Selection
 	// ==========================================
 
+	_getProjectedQuickBuildFeats ({excludeSelection = null} = {}) {
+		const out = [...(this._state.getFeats?.() || [])];
+		for (const selection of Object.values(this._selections.asi || {})) {
+			if (selection === excludeSelection || !selection?.feat) continue;
+			out.push(selection.feat);
+		}
+		for (const slots of Object.values(this._selections.classFeatProgression || {})) {
+			for (const slot of slots || []) {
+				if (slot === excludeSelection || !slot?.feat) continue;
+				out.push(slot.feat);
+			}
+		}
+		return out;
+	}
+
+	_getQuickBuildFeatSelectionIssues () {
+		const seen = new Map();
+		const issues = [];
+		const add = (feat, label) => {
+			if (!feat?.name) return;
+			const uid = `${feat.name}|${feat.source || ""}`.toLowerCase();
+			if (!feat.repeatable && seen.has(uid)) {
+				issues.push(`${feat.name} is selected more than once (${seen.get(uid)} and ${label}).`);
+				return;
+			}
+			if (!feat.repeatable) seen.set(uid, label);
+		};
+
+		for (const feat of this._state.getFeats?.() || []) add(feat, "the existing character");
+		for (const analysis of this._levelAnalysis || []) {
+			const levelKey = `${analysis.className}_${analysis.classLevel}`;
+			add(this._selections.asi?.[levelKey]?.feat, `${analysis.className} level ${analysis.classLevel}`);
+			for (const slot of this._selections.classFeatProgression?.[levelKey] || []) {
+				add(slot.feat, `${analysis.className} level ${analysis.classLevel} ${slot.progressionName || "class feat"}`);
+			}
+		}
+		return issues;
+	}
+
 	_renderAsiStep (content, asiLevels) {
 		const step = e_({outer: `<div class="charsheet__quickbuild-step"></div>`});
 
@@ -1498,25 +1541,26 @@ class CharacterSheetQuickBuild {
 		};
 
 		asiLevels.forEach((analysis, idx) => {
-			const {characterLevel, className, classSource, classLevel, classData} = analysis;
+			const {characterLevel, className, classLevel, improvement} = analysis;
 			const levelKey = `${className}_${classLevel}`;
-			// Thelemar rule fires at CHARACTER level 4 (matters for multiclass).
-			const isBoth = this._state.shouldGrantBothAsiAndFeat(characterLevel);
-			const isEpicBoon = CharacterSheetClassUtils.isEpicBoonLevel(classSource, classLevel);
+			const isBoth = improvement?.kind === "asiAndFeat";
+			const isFeatOnly = improvement?.kind === "feat";
+			const isEpicBoon = isFeatOnly && improvement?.categories?.includes("EB");
 
 			if (!this._selections.asi[levelKey]) {
 				this._selections.asi[levelKey] = {
-					mode: "asi",
+					mode: isFeatOnly ? "feat" : "asi",
 					abilityChoices: {},
 					feat: null,
 					isBoth,
 				};
 			}
 			const sel = this._selections.asi[levelKey];
+			if (isFeatOnly) sel.mode = "feat";
 
 			const section = e_({outer: `
 				<div class="charsheet__quickbuild-section mb-3">
-					<h5>${className} Level ${classLevel} — ${isEpicBoon ? "Epic Boon" : "ASI / Feat"}
+					<h5>${className} Level ${classLevel} — ${improvement?.label || "ASI / Feat"}
 						${isBoth ? ` <span class="badge badge-info">ASI + Feat</span>` : ""}
 					</h5>
 				</div>
@@ -1528,7 +1572,7 @@ class CharacterSheetQuickBuild {
 
 			// Mode toggle (ASI vs Feat) — not shown for isBoth
 			const modeRow = e_({outer: `<div class="ve-flex-v-center gap-2 mb-2"></div>`});
-			if (!isBoth) {
+			if (!isBoth && !isFeatOnly) {
 				const asiRadio = e_({outer: `<label class="ve-flex-v-center gap-1"><input type="radio" name="qb-asi-mode-${levelKey}" value="asi" ${sel.mode === "asi" ? "checked" : ""}> Increase Ability Scores (+2 total)</label>`});
 				const featRadio = e_({outer: `<label class="ve-flex-v-center gap-1"><input type="radio" name="qb-asi-mode-${levelKey}" value="feat" ${sel.mode === "feat" ? "checked" : ""}> Take a ${isEpicBoon ? "Boon" : "Feat"}</label>`});
 
@@ -1536,6 +1580,12 @@ class CharacterSheetQuickBuild {
 				featRadio.querySelector("input").addEventListener("change", () => { sel.mode = "feat"; renderAsiContent(); reRenderFrom(idx + 1); });
 
 				modeRow.append(asiRadio, featRadio);
+			} else if (isFeatOnly) {
+				modeRow.append(e_({
+					tag: "p",
+					clazz: "ve-small ve-muted mb-0",
+					txt: "This class level grants a feat rather than an Ability Score Improvement. Epic Boons are recommended, but any feat whose prerequisites you meet is legal.",
+				}));
 			}
 			section.append(modeRow);
 
@@ -1563,7 +1613,20 @@ class CharacterSheetQuickBuild {
 					const onFeatAbilityChanged = isBoth
 						? () => { renderAsiContent(); reRenderFrom(idx + 1); }
 						: null;
-					const featSelect = this._renderFeatSelector(levelKey, sel, isEpicBoon, featScores, onFeatAbilityChanged);
+					const featSelect = this._renderFeatSelector(
+						levelKey,
+						sel,
+						isEpicBoon,
+						featScores,
+						onFeatAbilityChanged,
+						null,
+						{
+							totalLevel: characterLevel,
+							abilityScores: featScores,
+							ownedFeats: this._getProjectedQuickBuildFeats({excludeSelection: sel}),
+							featCatalog: this._page.getFeats() || [],
+						},
+					);
 					asiContent.append(featSelect);
 				}
 			};
@@ -1649,7 +1712,7 @@ class CharacterSheetQuickBuild {
 		return container;
 	}
 
-	_renderFeatSelector (levelKey, sel, isEpicBoon, runningScores = null, onFeatAbilityChanged = null, categoryFilter = null) {
+	_renderFeatSelector (levelKey, sel, isEpicBoon, runningScores = null, onFeatAbilityChanged = null, categoryFilter = null, eligibilityContext = {}) {
 		const container = e_({outer: `<div class="charsheet__quickbuild-feat-select mb-2"></div>`});
 		container.append(e_({outer: `<label class="ve-bold ve-small">${isEpicBoon ? "Epic Boon" : "Feat"} Selection</label>`}));
 
@@ -1658,11 +1721,11 @@ class CharacterSheetQuickBuild {
 		if (categoryFilter && categoryFilter.length) {
 			// Class-level featProgression (e.g. Fighting Style): constrain to the given categories.
 			feats = CharacterSheetClassUtils.filterFeatsByCategory(feats, categoryFilter);
-		} else if (isEpicBoon) {
-			feats = feats.filter(f => f.category === "EB");
-		} else {
-			feats = feats.filter(f => f.category !== "EB");
-		}
+		} else if (!isEpicBoon) feats = feats.filter(f => f.category !== "EB");
+		feats = CharacterSheetClassUtils.getEligibleFeats(feats, this._state, {
+			featCatalog: this._page.getFeats() || [],
+			...eligibilityContext,
+		});
 
 		if (!sel.featChoices) {
 			sel.featChoices = {skills: [], languages: [], tools: [], ability: null, expertise: [], spellList: null, cantrips: [], spells: [], optionalFeatures: []};
@@ -2255,7 +2318,10 @@ class CharacterSheetQuickBuild {
 			const filterLower = filter.toLowerCase();
 			feats
 				.filter(f => !filter || f.name.toLowerCase().includes(filterLower))
-				.sort((a, b) => a.name.localeCompare(b.name))
+				.sort((a, b) => {
+					const categoryDelta = isEpicBoon ? Number(b.category === "EB") - Number(a.category === "EB") : 0;
+					return categoryDelta || a.name.localeCompare(b.name);
+				})
 				.slice(0, 50)
 				.forEach(feat => {
 					const isSelected = sel.feat?.name === feat.name && sel.feat?.source === feat.source;
@@ -2321,6 +2387,11 @@ class CharacterSheetQuickBuild {
 	}
 
 	_validateAsiStep (asiLevels) {
+		const featIssues = this._getQuickBuildFeatSelectionIssues();
+		if (featIssues.length) {
+			JqueryUtil.doToast({type: "warning", content: featIssues[0]});
+			return false;
+		}
 		for (const analysis of asiLevels) {
 			const levelKey = `${analysis.className}_${analysis.classLevel}`;
 			const sel = this._selections.asi[levelKey];
@@ -2329,7 +2400,7 @@ class CharacterSheetQuickBuild {
 				return false;
 			}
 
-			const isBoth = this._state.shouldGrantBothAsiAndFeat(analysis.characterLevel);
+			const isBoth = !!this._state.shouldGrantBothAsiAndFeat?.(analysis.characterLevel);
 
 			if (isBoth) {
 				// Need both ASI points spent AND a feat
@@ -2518,7 +2589,19 @@ class CharacterSheetQuickBuild {
 						<h5>${analysis.className} Level ${analysis.classLevel} — ${slot.progressionName}</h5>
 					</div>
 				`});
-				const selector = this._renderFeatSelector(`${levelKey}__classfeat_${slotIdx}`, slot, false, null, null, slot.category);
+				const selector = this._renderFeatSelector(
+					`${levelKey}__classfeat_${slotIdx}`,
+					slot,
+					false,
+					null,
+					null,
+					slot.category,
+					{
+						totalLevel: analysis.characterLevel,
+						ownedFeats: this._getProjectedQuickBuildFeats({excludeSelection: slot}),
+						featCatalog: this._page.getFeats() || [],
+					},
+				);
 				section.append(selector);
 				step.append(section);
 			});
@@ -2528,6 +2611,11 @@ class CharacterSheetQuickBuild {
 	}
 
 	_validateClassFeatProgressionStep (classFeatLevels) {
+		const featIssues = this._getQuickBuildFeatSelectionIssues();
+		if (featIssues.length) {
+			JqueryUtil.doToast({type: "warning", content: featIssues[0]});
+			return false;
+		}
 		for (const analysis of classFeatLevels) {
 			const levelKey = `${analysis.className}_${analysis.classLevel}`;
 			const slots = this._selections.classFeatProgression[levelKey] || [];
@@ -4758,6 +4846,11 @@ class CharacterSheetQuickBuild {
 	}
 
 	async _applyQuickBuildInner () {
+		const featIssues = this._getQuickBuildFeatSelectionIssues();
+		if (featIssues.length) {
+			JqueryUtil.doToast({type: "danger", content: featIssues[0]});
+			return;
+		}
 		const conMod = this._state.getAbilityMod("con");
 		const pendingHistoryEntries = [];
 

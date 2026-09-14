@@ -181,6 +181,71 @@ export class CharacterSheetPage {
 		return ((await this.page.locator("#charsheet-respec-draft-status").textContent()) || "").trim();
 	}
 
+	async prepareLegacyEpicBoonRepairFixture (): Promise<{con: number; abilityTotal: number}> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			if (!state) throw new Error("Character Sheet state is unavailable");
+			const data = state.toJson();
+			data.classes = [{name: "Bard", source: "TGTT", level: 20}];
+			data.features = [];
+			data.feats = [];
+			data.levelHistory = Array.from({length: 20}, (_, ix) => ({
+				level: ix + 1,
+				class: {name: "Bard", source: "TGTT"},
+				choices: ix === 18 ? {asi: {con: 2}} : {},
+				complete: true,
+			}));
+			if (data.spellcasting) {
+				data.spellcasting.spellsKnown = [];
+				data.spellcasting.cantripsKnown = [];
+			}
+			state.loadFromJson(data);
+			for (const ability of ["str", "dex", "con", "int", "wis", "cha"]) state.setAbilityBase(ability, 10);
+			state.setAbilityBase("con", 12);
+			cs._renderCharacter?.();
+			const scores = ["str", "dex", "con", "int", "wis", "cha"].map(ability => state.getAbilityBase(ability));
+			return {con: state.getAbilityBase("con"), abilityTotal: scores.reduce((sum, score) => sum + score, 0)};
+		});
+	}
+
+	async getLevel19EpicBoonRepairSnapshot (): Promise<{
+		status: string;
+		selection: any;
+		featName: string | null;
+		con: number;
+		abilityTotal: number;
+	}> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const respec = cs?._respec;
+			const decision = respec?._engine?.manifest?.decisions?.find((it: any) =>
+				it.characterLevel === 19 && it.type === "feat",
+			);
+			const state = respec?._state;
+			const scores = ["str", "dex", "con", "int", "wis", "cha"].map(ability => state?.getAbilityBase?.(ability) || 0);
+			return {
+				status: decision?.status || "missing",
+				selection: decision?.selection || null,
+				featName: state?.getFeats?.().find((feat: any) => feat?.source === "XPHB" && /^Boon of /i.test(feat.name))?.name || null,
+				con: state?.getAbilityBase?.("con") || 0,
+				abilityTotal: scores.reduce((sum, score) => sum + score, 0),
+			};
+		});
+	}
+
+	async stageLevel19EpicBoonRepair (): Promise<void> {
+		const level = this.page.locator('.charsheet__level-entry[data-level="19"]');
+		await level.locator(".charsheet__level-entry-edit").click();
+		const row = this.page.locator(".charsheet__respec-choice-row").filter({hasText: /Epic Boon or Qualifying Feat/i}).last();
+		await row.locator("button", {hasText: "Change"}).click();
+		const featEditor = this.page.locator(".charsheet__respec-feat-modal").last();
+		await featEditor.locator('input[placeholder="Search feats..."]').fill("Boon of Combat Prowess");
+		await featEditor.locator(".charsheet__respec-feat-item").filter({hasText: "Boon of Combat Prowess"}).first().click();
+		await featEditor.locator(".charsheet__feat-ability-grid button:not([disabled])").first().click();
+		await featEditor.locator("button", {hasText: "Apply Changes"}).click();
+	}
+
 	async stageFirstMissingRespecSkillChoice (): Promise<string[]> {
 		const level = this.page.locator('.charsheet__level-entry[data-level="1"]');
 		await level.locator(".charsheet__level-entry-edit").click();

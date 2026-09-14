@@ -5103,6 +5103,7 @@ class CharacterSheetState {
 			// Structure: {skills: {[skill]: [abilityId, ...]}, tools: {...}, weapons: {...}, armor: {...}, languages: {...}}
 			grantedProficiencies: {
 				skills: {},
+				saves: {},
 				tools: {},
 				weapons: {},
 				armor: {},
@@ -5595,8 +5596,9 @@ class CharacterSheetState {
 
 		// Ensure grantedProficiencies tracking object exists
 		if (!this._data.grantedProficiencies) {
-			this._data.grantedProficiencies = {skills: {}, tools: {}, weapons: {}, armor: {}, languages: {}};
+			this._data.grantedProficiencies = {skills: {}, saves: {}, tools: {}, weapons: {}, armor: {}, languages: {}};
 		}
+		this._data.grantedProficiencies.saves ||= {};
 		if (this._data.progressionOwnership?.version !== 1 || typeof this._data.progressionOwnership?.values !== "object") {
 			this._data.progressionOwnership = {version: 1, initialized: false, values: {}};
 		}
@@ -9053,7 +9055,7 @@ class CharacterSheetState {
 	}
 
 	_getProgressionOwnershipKey (type, value) {
-		if (["spells", "cantrips"].includes(type)) {
+		if (["spells", "cantrips", "innateSpells"].includes(type)) {
 			return `${String(value?.name || "").trim().toLowerCase()}|${String(value?.source || "").trim().toLowerCase()}`;
 		}
 		return String(value?.name || value || "").trim().toLowerCase().replace(/['\s]+/g, "");
@@ -9197,7 +9199,10 @@ class CharacterSheetState {
 	reconcileProgressionOwnership (manifest) {
 		const ownership = this._data.progressionOwnership;
 		if (!ownership?.initialized) return;
-		const activeSources = new Set((manifest?.decisions || []).map(decision => decision.semanticKey));
+		const activeSources = new Set([
+			...(manifest?.decisions || []).map(decision => decision.semanticKey),
+			...(this._data.feats || []).map(feat => `feat:${feat.id}`),
+		]);
 		const orphaned = [];
 		for (const [type, entries] of Object.entries(ownership.values || {})) {
 			for (const [key, entry] of Object.entries(entries || {})) {
@@ -9219,6 +9224,7 @@ class CharacterSheetState {
 			} else if (type === "tools") this.removeToolProficiency(value);
 			else if (type === "languages") this.removeLanguage(value);
 			else if (["spells", "cantrips"].includes(type)) this.removeSpell(value?.name, value?.source);
+			else if (type === "innateSpells") this.removeInnateSpell(value?.name, value?.source);
 		}
 	}
 
@@ -46970,13 +46976,17 @@ class CharacterSheetState {
 		for (const sp of asArray(feature.savingThrowProficiencies)) {
 			if (sp == null) continue;
 			if (typeof sp === "string") {
-				this.addSaveProficiency(sp.toLowerCase());
+				const ability = sp.toLowerCase();
+				this.addSaveProficiency(ability);
+				this._trackGrantedProficiency("saves", ability, trackSource);
 				continue;
 			}
 			if (typeof sp !== "object") continue;
 			for (const ability of Object.keys(sp)) {
 				if (sp[ability] !== true && sp[ability] !== 1) continue;
-				this.addSaveProficiency(ability.toLowerCase());
+				const normalized = ability.toLowerCase();
+				this.addSaveProficiency(normalized);
+				this._trackGrantedProficiency("saves", normalized, trackSource);
 			}
 		}
 	}
@@ -47243,14 +47253,17 @@ class CharacterSheetState {
 
 		// Remove associated resource if it was auto-added
 		if (feature) {
-			const choiceSource = `feature-choice:${feature.id}`;
-			for (const [type, remove] of [
-				["skills", name => this.setSkillProficiency(name, 0)],
-				["tools", name => this.removeToolProficiency(name)],
-			]) {
-				for (const name of Object.keys(this._data.grantedProficiencies?.[type] || {})) {
-					if (!this._data.grantedProficiencies[type][name].includes(choiceSource)) continue;
-					if (this._untrackGrantedProficiency(type, name, choiceSource)) remove(name);
+			for (const trackedSource of [`feature-choice:${feature.id}`, `feature:${feature.id}`]) {
+				for (const [type, remove] of [
+					["skills", name => this.setSkillProficiency(name, 0)],
+					["saves", name => this.removeSaveProficiency(name)],
+					["tools", name => this.removeToolProficiency(name)],
+					["languages", name => this.removeLanguage(name)],
+				]) {
+					for (const name of Object.keys(this._data.grantedProficiencies?.[type] || {})) {
+						if (!this._data.grantedProficiencies[type][name].includes(trackedSource)) continue;
+						if (this._untrackGrantedProficiency(type, name, trackedSource)) remove(name);
+					}
 				}
 			}
 			const featureKey = feature.name.toLowerCase();
@@ -47350,6 +47363,172 @@ class CharacterSheetState {
 		}));
 	}
 
+	recordFeatAppliedEffects (featName, featSource, effects) {
+		const feat = this._data.feats.find(it => it.name === featName && it.source === featSource);
+		if (!feat) return false;
+		const existing = feat.appliedEffects || {};
+		const mergeAdded = (current, next, getKey = value => String(value)) => {
+			const out = [...(current || [])];
+			const seen = new Set(out.map(getKey));
+			for (const value of next || []) {
+				const key = getKey(value);
+				if (seen.has(key)) continue;
+				seen.add(key);
+				out.push(value);
+			}
+			return out;
+		};
+		const mergedSkills = {...(existing.skillProficiencies || {})};
+		for (const [skill, values] of Object.entries(effects?.skillProficiencies || {})) {
+			mergedSkills[skill] = mergedSkills[skill]
+				? {before: mergedSkills[skill].before, after: values.after}
+				: values;
+		}
+		feat.appliedEffects = {
+			...existing,
+			...effects,
+			abilityDeltas: Object.fromEntries(new Set([
+				...Object.keys(existing.abilityDeltas || {}),
+				...Object.keys(effects?.abilityDeltas || {}),
+			]).values().map(ability => [
+				ability,
+				(Number(existing.abilityDeltas?.[ability]) || 0) + (Number(effects?.abilityDeltas?.[ability]) || 0),
+			])),
+			skillProficiencies: mergedSkills,
+			saveProficienciesAdded: mergeAdded(existing.saveProficienciesAdded, effects?.saveProficienciesAdded),
+			toolProficienciesAdded: mergeAdded(existing.toolProficienciesAdded, effects?.toolProficienciesAdded),
+			languagesAdded: mergeAdded(existing.languagesAdded, effects?.languagesAdded),
+			spellsAdded: mergeAdded(existing.spellsAdded, effects?.spellsAdded, spell =>
+				`${spell?.type || "spells"}:${this._getProgressionOwnershipKey(spell?.type || "spells", spell)}`),
+			innateSpellsAdded: mergeAdded(existing.innateSpellsAdded, effects?.innateSpellsAdded, spell =>
+				this._getProgressionOwnershipKey("innateSpells", spell)),
+			immunitiesAdded: mergeAdded(existing.immunitiesAdded, effects?.immunitiesAdded),
+			conditionImmunitiesAdded: mergeAdded(existing.conditionImmunitiesAdded, effects?.conditionImmunitiesAdded),
+		};
+
+		const sourceId = `feat:${feat.id}`;
+		for (const skill of Object.keys(effects?.skillProficiencies || {})) {
+			const values = effects.skillProficiencies[skill];
+			this.claimProgressionOwnership(Number(values.after) >= 2 ? "expertise" : "skills", skill, sourceId);
+		}
+		for (const ability of effects?.saveProficienciesAdded || []) this.claimProgressionOwnership("saves", ability, sourceId);
+		for (const tool of effects?.toolProficienciesAdded || []) this.claimProgressionOwnership("tools", tool, sourceId);
+		for (const language of effects?.languagesAdded || []) this.claimProgressionOwnership("languages", language, sourceId);
+		for (const spell of effects?.spellsAdded || []) this.claimProgressionOwnership(spell.type || "spells", spell, sourceId);
+		for (const spell of effects?.innateSpellsAdded || []) this.claimProgressionOwnership("innateSpells", spell, sourceId);
+		for (const type of effects?.immunitiesAdded || []) this.claimProgressionOwnership("immunities", type, sourceId);
+		for (const condition of effects?.conditionImmunitiesAdded || []) this.claimProgressionOwnership("conditionImmunities", condition, sourceId);
+		return true;
+	}
+
+	_captureFeatAppliedEffectsSnapshot () {
+		const abilityAbbreviations = globalThis.Parser?.ABIL_ABVS || ["str", "dex", "con", "int", "wis", "cha"];
+		const getSpellUid = spell => `${String(spell?.name || "").toLowerCase()}|${String(spell?.source || "").toLowerCase()}`;
+		return {
+			abilities: Object.fromEntries(abilityAbbreviations.map(ability => [ability, Number(this.getAbilityBase(ability)) || 0])),
+			skills: this.getSkillProficiencies(),
+			saves: new Set(this.getSaveProficiencies()),
+			tools: new Set(this.getToolProficiencies()),
+			languages: new Set(this.getLanguages()),
+			spells: new Set([
+				...(this.getSpellsKnown() || []),
+				...(this.getCantripsKnown() || []),
+			].map(getSpellUid)),
+			innateSpells: new Set((this.getInnateSpells() || []).map(getSpellUid)),
+			immunities: new Set(this._data.immunities || []),
+			conditionImmunities: new Set(this._data.conditionImmunities || []),
+		};
+	}
+
+	recordFeatAppliedEffectsSince (featName, featSource, before) {
+		if (!before) return false;
+		const abilityAbbreviations = globalThis.Parser?.ABIL_ABVS || ["str", "dex", "con", "int", "wis", "cha"];
+		const getSpellUid = spell => `${String(spell?.name || "").toLowerCase()}|${String(spell?.source || "").toLowerCase()}`;
+		const afterSkills = this.getSkillProficiencies();
+		const skillProficiencies = {};
+		for (const skill of new Set([...Object.keys(before.skills || {}), ...Object.keys(afterSkills)])) {
+			const previous = Number(before.skills?.[skill]) || 0;
+			const next = Number(afterSkills[skill]) || 0;
+			if (previous !== next) skillProficiencies[skill] = {before: previous, after: next};
+		}
+		const spellsAdded = [
+			...(this.getSpellsKnown() || []).map(spell => ({...spell, type: "spells"})),
+			...(this.getCantripsKnown() || []).map(spell => ({...spell, type: "cantrips"})),
+		]
+			.filter(spell => !before.spells?.has(getSpellUid(spell)))
+			.map(spell => ({name: spell.name, source: spell.source, level: spell.level, type: spell.type}));
+		const innateSpellsAdded = (this.getInnateSpells() || [])
+			.filter(spell => !before.innateSpells?.has(getSpellUid(spell)))
+			.map(spell => ({name: spell.name, source: spell.source, level: spell.level}));
+
+		return this.recordFeatAppliedEffects(featName, featSource, {
+			abilityDeltas: Object.fromEntries(abilityAbbreviations
+				.map(ability => [ability, (Number(this.getAbilityBase(ability)) || 0) - (Number(before.abilities?.[ability]) || 0)])
+				.filter(([, delta]) => delta !== 0)),
+			skillProficiencies,
+			saveProficienciesAdded: this.getSaveProficiencies().filter(value => !before.saves?.has(value)),
+			toolProficienciesAdded: this.getToolProficiencies().filter(value => !before.tools?.has(value)),
+			languagesAdded: this.getLanguages().filter(value => !before.languages?.has(value)),
+			spellsAdded,
+			innateSpellsAdded,
+			immunitiesAdded: (this._data.immunities || []).filter(value => !before.immunities?.has(value)),
+			conditionImmunitiesAdded: (this._data.conditionImmunities || []).filter(value => !before.conditionImmunities?.has(value)),
+		});
+	}
+
+	_hasOtherFeatEffectOwner (type, value) {
+		const key = this._getProgressionOwnershipKey(type, value);
+		if (["skills", "saves", "tools", "languages"].includes(type)) {
+			if ((this._data.grantedProficiencies?.[type]?.[key] || []).length) return true;
+		}
+		if (["immunities", "conditionImmunities"].includes(type)) {
+			if ((this._data.grantedDefensiveTraits?.[type]?.[key] || []).length) return true;
+		}
+		return false;
+	}
+
+	_revertFeatAppliedEffects (feat) {
+		const effects = feat?.appliedEffects;
+		if (!effects) return false;
+		const sourceId = `feat:${feat.id}`;
+
+		Object.entries(effects.abilityDeltas || {}).forEach(([ability, delta]) => {
+			if (!delta) return;
+			this.setAbilityBase(ability, Math.max(1, this.getAbilityBase(ability) - Number(delta)));
+		});
+		Object.entries(effects.skillProficiencies || {}).forEach(([skill, values]) => {
+			const type = Number(values.after) >= 2 ? "expertise" : "skills";
+			if (!this.releaseProgressionOwnership(type, skill, sourceId)) return;
+			if (this._hasOtherFeatEffectOwner("skills", skill)) return;
+			if (this.getSkillProficiency(skill) === values.after) this.setSkillProficiency(skill, values.before);
+		});
+		(effects.saveProficienciesAdded || []).forEach(ability => {
+			if (this.releaseProgressionOwnership("saves", ability, sourceId) && !this._hasOtherFeatEffectOwner("saves", ability)) this.removeSaveProficiency(ability);
+		});
+		(effects.toolProficienciesAdded || []).forEach(tool => {
+			if (this.releaseProgressionOwnership("tools", tool, sourceId) && !this._hasOtherFeatEffectOwner("tools", tool)) this.removeToolProficiency(tool);
+		});
+		(effects.languagesAdded || []).forEach(language => {
+			if (this.releaseProgressionOwnership("languages", language, sourceId) && !this._hasOtherFeatEffectOwner("languages", language)) this.removeLanguage(language);
+		});
+		(effects.spellsAdded || []).forEach(spell => {
+			const type = spell.type || (Number(spell.level) === 0 ? "cantrips" : "spells");
+			if (this.releaseProgressionOwnership(type, spell, sourceId)) this.removeSpell(spell.name, spell.source);
+		});
+		(effects.innateSpellsAdded || []).forEach(spell => {
+			if (this.releaseProgressionOwnership("innateSpells", spell, sourceId)) this.removeInnateSpell(spell.name, spell.source);
+		});
+		(effects.immunitiesAdded || []).forEach(type => {
+			if (!this.releaseProgressionOwnership("immunities", type, sourceId) || this._hasOtherFeatEffectOwner("immunities", type)) return;
+			this._data.immunities = this._data.immunities.filter(it => it !== type);
+		});
+		(effects.conditionImmunitiesAdded || []).forEach(condition => {
+			if (!this.releaseProgressionOwnership("conditionImmunities", condition, sourceId) || this._hasOtherFeatEffectOwner("conditionImmunities", condition)) return;
+			this._data.conditionImmunities = this._data.conditionImmunities.filter(it => it !== condition);
+		});
+		return true;
+	}
+
 	/**
 	 * Check if character has a specific feat
 	 * @param {string} featName - The name of the feat to check for
@@ -47382,6 +47561,7 @@ class CharacterSheetState {
 		if (this._data.feats.find(f => f.name === feat.name && f.source === feat.source)) {
 			return false;
 		}
+		const appliedEffectsBefore = this._captureFeatAppliedEffectsSnapshot();
 
 		// Derive a renderable description from entries when one isn't supplied. LevelUp /
 		// QuickBuild / Builder pass raw feat data that has `entries` but no rendered
@@ -47423,6 +47603,8 @@ class CharacterSheetState {
 			source: feat.source,
 			description: description,
 			additionalSpells: feat.additionalSpells, // Preserve for spell processing
+			category: feat.category || null,
+			repeatable: feat.repeatable || false,
 			isOriginFeat: feat.isOriginFeat || false,
 			backgroundName: feat.backgroundName || null,
 			choices: feat.choices || null,
@@ -47522,6 +47704,7 @@ class CharacterSheetState {
 		if (feat.choices?.optionalFeaturePicks?.length) {
 			this.addFeatOptionalFeaturePicks(featData, feat.choices.optionalFeaturePicks, opts);
 		}
+		this.recordFeatAppliedEffectsSince(feat.name, feat.source, appliedEffectsBefore);
 
 		return true;
 	}
@@ -47553,15 +47736,16 @@ class CharacterSheetState {
 		// Remove associated resource if it was auto-added
 		if (feat) {
 			this._data.resources = this._data.resources.filter(r => r.featId !== feat.id && r.name !== feat.name);
-			// Remove associated innate spells
-			this.removeInnateSpellsByFeature(feat.name);
 			// Remove associated modifiers
 			this.removeModifiersByFeature(feat.id);
 			// Remove optional features granted via feat choices
 			this._data.features = this._data.features.filter(f => f.sourceFeatId !== feat.id);
 
-			// Reverse user-selected feat choices
-			if (feat.choices) {
+			// Reverse feat bonuses through the exact application receipt when available.
+			// Older saves fall back to the legacy selected-choice reversal below.
+			const revertedAppliedEffects = this._revertFeatAppliedEffects(feat);
+			if (!revertedAppliedEffects) this.removeInnateSpellsByFeature(feat.name);
+			if (!revertedAppliedEffects && feat.choices) {
 				if (feat.choices.ability) {
 					const amount = feat.choices.amount || 1;
 					const current = this.getAbilityBase(feat.choices.ability);
