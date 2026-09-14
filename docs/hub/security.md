@@ -47,6 +47,9 @@
   event cannot be rewritten, so a name captured in one would survive an owner later choosing a narrower policy;
   shared activity derives its labels from the current peer-visible projection instead. Name snapshots remain on
   targeted events, whose audience is already authorized for that character.
+- Spell-use activity is explicit, never inferred from character patches. Its closed payload contains only the
+  bounded spell name/source, spell and slot levels, and a cast-mode enum; it excludes spell text, targets,
+  component selections, slot totals, resource names/values, document paths, and arbitrary JSON.
 - Targeting is authorized on the server, not filtered in the browser. Semantic peers use random target
   references exposed only by an identity-visible profile. Hidden/missing/stale source, target, or eligibility
   fails as `SOURCE_OR_TARGET_UNAVAILABLE` at creation and `PROPOSAL_STALE` at apply, without identifying the
@@ -70,6 +73,9 @@
 - Socket and subscription generations are both fenced. Access-loss code 1008, character/campaign changes,
   detach, logout, remote archive/move, and non-persisted page hide invalidate queued callbacks before
   they can reach a reopened sheet. BFCache suspension resumes only the same in-memory client generation.
+- XP/item recipient notices are derived only after server-side event authorization, deduplicated by event id,
+  and reduced again to bounded display fields. Toasts receive text-only DOM content. XP reconciliation refetches
+  owner truth; item reconciliation remains on the established inventory path.
 - Projection invalidation remains metadata-only on the owner sheet: this layer performs no projection fetch,
   document replacement, operation application, save, render, or generic conflict fallback.
 - Character and DM-workspace writes require aggregate revision plus a monotonic lease epoch.

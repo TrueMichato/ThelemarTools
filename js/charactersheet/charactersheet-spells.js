@@ -2209,7 +2209,7 @@ class CharacterSheetSpells {
 		return `${dur.duration?.amount || ""} ${dur.duration?.type || ""}`.trim();
 	}
 
-	async pCastItemSpell (power) {
+	async pCastItemSpell (power, {fnOnCast = null} = {}) {
 		const spellData = this._allSpells.find(spell =>
 			spell.name?.toLowerCase() === power?.spellName?.toLowerCase()
 			&& spell.source?.toLowerCase() === power?.spellSource?.toLowerCase());
@@ -2243,6 +2243,7 @@ class CharacterSheetSpells {
 			this._updateConcentrationUI();
 		}
 		this._state.consumeStatesEndingOnSpellCast?.();
+		fnOnCast?.(this._getSpellUseActivity({spell: spellData, slotLevel, mode: "resource"}));
 		return true;
 	}
 
@@ -2350,7 +2351,7 @@ class CharacterSheetSpells {
 				this._updateConcentrationUI();
 			}
 			this._state.consumeStatesEndingOnSpellCast?.();
-			this._page.saveCharacter();
+			await this._page.saveCharacter({activity: this._getSpellUseActivity({spell, slotLevel: 0, mode: "cantrip"})});
 			return;
 		}
 
@@ -2424,7 +2425,7 @@ class CharacterSheetSpells {
 					this._updateConcentrationUI();
 				}
 				this._state.consumeStatesEndingOnSpellCast?.();
-				this._page.saveCharacter();
+				await this._page.saveCharacter({activity: this._getSpellUseActivity({spell, slotLevel: spell.level, mode: "ritual"})});
 				return;
 			}
 			// Otherwise fall through to normal slot-consuming cast
@@ -2671,7 +2672,25 @@ class CharacterSheetSpells {
 			this._page._updateAllCalculations?.();
 			this._page._renderActiveStates?.();
 		}
-		this._page.saveCharacter();
+		const mode = selectedSlot.isPact
+			? "pact_slot"
+			: selectedSlot.isNoSlotResource
+				? "resource"
+				: selectedSlot.isWizardCapstone || skipSlotConsumption
+					? "free"
+					: "spell_slot";
+		await this._page.saveCharacter({activity: this._getSpellUseActivity({spell, slotLevel: effectiveSlotLevel, mode})});
+	}
+
+	_getSpellUseActivity ({spell, slotLevel, mode}) {
+		return {
+			type: "spell.used",
+			spellName: spell.name,
+			spellSource: spell.source,
+			spellLevel: spell.level,
+			slotLevel,
+			mode,
+		};
 	}
 
 	/**
@@ -2716,7 +2735,7 @@ class CharacterSheetSpells {
 		}
 
 		this._state.consumeStatesEndingOnSpellCast?.();
-		this._page.saveCharacter();
+		await this._page.saveCharacter({activity: this._getSpellUseActivity({spell, slotLevel: spell.level, mode: "ritual"})});
 	}
 
 	/* -------------------------------------------------------------------------- */

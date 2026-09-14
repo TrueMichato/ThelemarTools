@@ -646,6 +646,60 @@ describe("Repository resync recovery", () => {
 		expect(recovered.appliedEffects).toEqual([]);
 		expect(live).toMatchObject({name: "Offline edit", spellcasting: {spellSlots: {1: {current: 1}}}});
 	});
+
+	it("advances every queued command through a multi-operation resync and persists the result", async () => {
+		const sessionStorage = makeSessionStorage();
+		const api = makeApi({
+			character: {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData({current: 10})},
+		});
+		const repository = makeRepository({api, sessionStorage});
+		await repository.pGet({characterId: "character-1"});
+		api.pPatchCharacter
+			.mockRejectedValueOnce(Object.assign(new Error("offline"), {code: "NETWORK_ERROR"}))
+			.mockRejectedValueOnce(Object.assign(new Error("offline"), {code: "NETWORK_ERROR"}));
+
+		await expect(repository.pUpsert({
+			character: {...makeCharacterData({current: 9}), id: "character-1"},
+			activity: {type: "spell.used", spellName: "Shield", spellSource: "PHB", spellLevel: 1, slotLevel: 1, mode: "spell_slot"},
+		})).rejects.toMatchObject({code: "NETWORK_ERROR"});
+		await expect(repository.pUpsert({
+			character: {...makeCharacterData({current: 8}), id: "character-1"},
+			activity: {type: "spell.used", spellName: "Magic Missile", spellSource: "PHB", spellLevel: 1, slotLevel: 1, mode: "spell_slot"},
+		})).rejects.toMatchObject({code: "NETWORK_ERROR"});
+
+		api.state.character = {id: "character-1", campaignId: "campaign-1", revision: 3, data: makeCharacterData({current: 3})};
+		api.state.events = [
+			makeAppliedEvent({operationId: "operation-1", sequence: 20, revision: 2, args: {amount: 4}, id: "event-1"}),
+			makeAppliedEvent({operationId: "operation-2", sequence: 21, revision: 3, args: {amount: 3}, id: "event-2"}),
+		];
+		let live = makeCharacterData({current: 8});
+		const queued = repository.applyRealtimeOperation({
+			characterId: "character-1",
+			operation: makeOperation({operationId: "operation-2", args: {amount: 3}}),
+			resultingCharacterRevision: 3,
+			eventId: "event-2",
+			sequence: 21,
+			liveData: live,
+			fnAdoptLive: () => {},
+		});
+		expect(queued.status).toBe("resync_required");
+
+		const recovered = await repository.pRunPendingResync({
+			characterId: "character-1",
+			fnGetLiveData: () => live,
+			fnAdoptLive: next => { live = next; },
+		});
+
+		expect(recovered.status).toBe("recovered");
+		expect(live.hp.current).toBe(1);
+		const queue = repository._recoveryCommandQueues.get("character-1");
+		expect(queue.map(command => command.submittedBase.hp.current)).toEqual([3, 2]);
+		expect(queue.map(command => command.submittedSnapshot.hp.current)).toEqual([2, 1]);
+
+		const reloaded = makeRepository({api, sessionStorage});
+		expect(reloaded.getPendingRecovery("character-1")).toMatchObject({hp: {current: 1}});
+		expect(reloaded._recoveryCommandQueues.get("character-1").map(command => command.submittedSnapshot.hp.current)).toEqual([2, 1]);
+	});
 });
 
 describe("Failed save followed by a live effect", () => {
@@ -677,6 +731,141 @@ describe("Failed save followed by a live effect", () => {
 		expect(repository.isSaveBlocked("character-1")).toBe(false);
 		// The pending local snapshot is carried forward too, so retrying the save cannot undo the effect.
 		expect(repository._failedWrites.get("character-1").hp.current).toBe(6);
+	});
+
+	it.each([
+		["replays the transformed queue through Use Local", false],
+		["durably retains the transformed queue when Use Local retry fails", true],
+	])("%s", async (_label, isLocalRetryFailure) => {
+		const sessionStorage = makeSessionStorage();
+		const shield = {type: "spell.used", spellName: "Shield", spellSource: "PHB", spellLevel: 1, slotLevel: 1, mode: "spell_slot"};
+		const magicMissile = {type: "spell.used", spellName: "Magic Missile", spellSource: "PHB", spellLevel: 1, slotLevel: 1, mode: "spell_slot"};
+		const requests = [];
+		let canonical = {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData({current: 10})};
+		const api = {
+			pGetSession: jest.fn(async () => ({signedIn: true})),
+			pGetCharacter: jest.fn(async () => structuredClone(canonical)),
+			pAcquireCharacterLease: jest.fn(async () => ({epoch: requests.length + 1})),
+			pPatchCharacter: jest.fn(async input => {
+				requests.push(structuredClone(input));
+				if (requests.length <= 2) {
+					throw Object.assign(new Error("offline"), {code: "NETWORK_ERROR"});
+				}
+				if (requests.length === 3) {
+					canonical = {id: "character-1", campaignId: "campaign-1", revision: 3, data: makeCharacterData({current: 3})};
+					throw Object.assign(new Error("stale"), {code: "REVISION_CONFLICT"});
+				}
+				if (requests.length === 4 && isLocalRetryFailure) {
+					throw Object.assign(new Error("offline again"), {code: "NETWORK_ERROR"});
+				}
+				const hp = requests.length === 4 ? 5 : 4;
+				canonical = {id: "character-1", campaignId: "campaign-1", revision: canonical.revision + 1, data: makeCharacterData({current: hp})};
+				return {character: structuredClone(canonical)};
+			}),
+		};
+		const repository = makeRepository({api, sessionStorage});
+		await repository.pGet({characterId: "character-1"});
+
+		await expect(repository.pUpsert({
+			character: {...makeCharacterData({current: 9}), id: "character-1"},
+			activity: shield,
+		})).rejects.toMatchObject({code: "NETWORK_ERROR"});
+		await expect(repository.pUpsert({
+			character: {...makeCharacterData({current: 8}), id: "character-1"},
+			activity: magicMissile,
+		})).rejects.toMatchObject({code: "NETWORK_ERROR"});
+
+		let live = makeCharacterData({current: 8});
+		const applied = repository.applyRealtimeOperation({
+			characterId: "character-1",
+			operation: makeOperation(),
+			resultingCharacterRevision: 2,
+			eventId: "event-1",
+			sequence: 20,
+			liveData: live,
+			fnAdoptLive: next => { live = next; },
+		});
+		canonical = {id: "character-1", campaignId: "campaign-1", revision: 2, data: makeCharacterData({current: 6})};
+
+		expect(applied.status).toBe("applied");
+		expect(live.hp.current).toBe(4);
+		const queue = repository._recoveryCommandQueues.get("character-1");
+		expect(queue.map(command => command.submittedBase.hp.current)).toEqual([6, 5]);
+		expect(queue.map(command => command.submittedSnapshot.hp.current)).toEqual([5, 4]);
+
+		await expect(repository.pUpsert({character: {...live, id: "character-1"}}))
+			.rejects.toMatchObject({code: "CHARACTER_CONFLICT"});
+		expect(repository.getConflictRecovery("character-1").local.hp.current).toBe(4);
+
+		const resolution = repository.pResolveConflict({characterId: "character-1", choice: "local"});
+		if (!isLocalRetryFailure) {
+			await expect(resolution).resolves.toMatchObject({id: "character-1", hp: {current: 4}});
+			expect(requests.slice(3).map(request => request.activity)).toEqual([shield, magicMissile]);
+			expect(requests.slice(3).map(request => request.patches.find(patch => patch.path === "/hp/current")?.value)).toEqual([5, 4]);
+			expect(sessionStorage.getItem(RECOVERY_KEY("character-1"))).toBeNull();
+			return;
+		}
+
+		await expect(resolution).rejects.toMatchObject({code: "NETWORK_ERROR"});
+		const reloaded = makeRepository({api, sessionStorage});
+		expect(reloaded.getPendingRecovery("character-1")).toMatchObject({hp: {current: 4}});
+		const recoveredQueue = reloaded._recoveryCommandQueues.get("character-1");
+		expect(recoveredQueue.slice(0, 2).map(command => command.submittedSnapshot.hp.current)).toEqual([5, 4]);
+		expect(recoveredQueue[0].submittedBase.hp.current).toBe(3);
+	});
+
+	it("commits no operation track when the transformed recovery queue cannot be stored", async () => {
+		const sessionStorage = makeSessionStorage();
+		const api = makeApi({character: {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData()}});
+		const repository = makeRepository({api, sessionStorage});
+		await repository.pGet({characterId: "character-1"});
+		api.pPatchCharacter.mockRejectedValueOnce(Object.assign(new Error("offline"), {code: "NETWORK_ERROR"}));
+		await expect(repository.pUpsert({
+			character: {...makeCharacterData({current: 9}), id: "character-1"},
+			activity: {type: "spell.used", spellName: "Shield", spellSource: "PHB", spellLevel: 1, slotLevel: 1, mode: "spell_slot"},
+		})).rejects.toMatchObject({code: "NETWORK_ERROR"});
+		const setItem = sessionStorage.setItem.bind(sessionStorage);
+		let shouldFailStorage = true;
+		sessionStorage.setItem = (key, value) => {
+			if (!shouldFailStorage) return setItem(key, value);
+			shouldFailStorage = false;
+			const error = new Error("quota");
+			error.name = "QuotaExceededError";
+			throw error;
+		};
+		let live = makeCharacterData({current: 9});
+
+		const result = repository.applyRealtimeOperation({
+			characterId: "character-1",
+			operation: makeOperation(),
+			resultingCharacterRevision: 2,
+			eventId: "event-1",
+			sequence: 20,
+			liveData: live,
+			fnAdoptLive: next => { live = next; },
+		});
+
+		expect(result).toMatchObject({
+			status: "blocked",
+			error: {code: "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE"},
+		});
+		expect(live.hp.current).toBe(9);
+		expect(repository._accepted.get("character-1")).toMatchObject({revision: 1, data: {hp: {current: 10}}});
+		expect(repository._recoveryCommandQueues.get("character-1")[0].submittedSnapshot.hp.current).toBe(9);
+		expect(repository._appliedOperationLegIds.get("character-1")?.has("operation-1/target") || false).toBe(false);
+
+		const retried = repository.applyRealtimeOperation({
+			characterId: "character-1",
+			operation: makeOperation(),
+			resultingCharacterRevision: 2,
+			eventId: "event-1",
+			sequence: 20,
+			liveData: live,
+			fnAdoptLive: next => { live = next; },
+		});
+		expect(retried.status).toBe("applied");
+		expect(live.hp.current).toBe(5);
+		expect(repository.isSaveBlocked("character-1")).toBe(false);
 	});
 });
 
@@ -893,5 +1082,161 @@ describe("Conflict candidates after a resync", () => {
 		const accepted = repository._accepted.get("character-1");
 		expect(accepted.data.hp.current).toBe(3);
 		expect(accepted.revision).toBe(3);
+	});
+
+	it("adopts Use Server truth into every live track before a delayed covered operation", async () => {
+		const serverDocument = {
+			id: "character-1",
+			campaignId: "campaign-1",
+			revision: 2,
+			operationWatermark: 20,
+			data: makeCharacterData({current: 7}),
+		};
+		const api = makeApi({character: serverDocument});
+		const repository = makeRepository({api});
+		await repository.pGet({characterId: "character-1"});
+		repository._accepted.set("character-1", {
+			...structuredClone(serverDocument),
+			revision: 1,
+			operationWatermark: 0,
+			data: makeCharacterData({current: 10}),
+		});
+		repository._latestSubmitted.set("character-1", makeCharacterData({current: 9}));
+		const book = repository._getCoverageBook("character-1");
+		book.live.revision = 1;
+		book.live.acceptedSequence = 0;
+		book.latestSubmitted.revision = 1;
+		book.latestSubmitted.acceptedSequence = 0;
+		repository._conflicts.set("character-1", {
+			base: makeCharacterData({current: 10}),
+			local: makeCharacterData({current: 9}),
+			server: structuredClone(serverDocument.data),
+			serverDocument: structuredClone(serverDocument),
+			conflicts: [{localPath: "/hp/current", remotePath: "/hp/current"}],
+		});
+
+		const resolved = await repository.pResolveConflict({characterId: "character-1", choice: "server"});
+		let live = structuredClone(resolved);
+		const delayed = repository.applyRealtimeOperation({
+			characterId: "character-1",
+			operation: makeOperation({args: {amount: 3}}),
+			resultingCharacterRevision: 2,
+			eventId: "delayed-event",
+			sequence: 20,
+			liveData: live,
+			fnAdoptLive: next => { live = next; },
+		});
+
+		expect(delayed.status).toBe("suppressed");
+		expect(live.hp.current).toBe(7);
+		expect(repository._accepted.get("character-1").data.hp.current).toBe(7);
+		expect(repository._latestSubmitted.get("character-1").hp.current).toBe(7);
+		expect(book.live).toMatchObject({revision: 2, acceptedSequence: 20});
+		expect(book.latestSubmitted).toMatchObject({revision: 2, acceptedSequence: 20});
+	});
+
+	it("resolves Use Server from the conflict updated by an earlier queued reconciliation", async () => {
+		const initialDocument = {
+			id: "character-1",
+			campaignId: "campaign-1",
+			revision: 1,
+			operationWatermark: 0,
+			data: makeCharacterData({current: 10}),
+		};
+		const api = makeApi({character: initialDocument});
+		const repository = makeRepository({api});
+		await repository.pGet({characterId: "character-1"});
+		const staleConflictDocument = {
+			...structuredClone(initialDocument),
+			revision: 2,
+			operationWatermark: 20,
+			data: makeCharacterData({current: 7}),
+		};
+		repository._conflicts.set("character-1", {
+			base: makeCharacterData({current: 10}),
+			local: makeCharacterData({current: 9}),
+			server: structuredClone(staleConflictDocument.data),
+			serverDocument: structuredClone(staleConflictDocument),
+			conflicts: [{localPath: "/hp/current", remotePath: "/hp/current"}],
+		});
+		api.state.character = {
+			...structuredClone(initialDocument),
+			revision: 3,
+			operationWatermark: 21,
+			data: makeCharacterData({current: 5}),
+		};
+		let live = makeCharacterData({current: 9});
+
+		const reconciliation = repository.pReconcileAuthoritativeCharacter({
+			characterId: "character-1",
+			fnGetLiveData: () => structuredClone(live),
+			fnAdoptLive: next => { live = next; },
+		});
+		const resolution = repository.pResolveConflict({
+			characterId: "character-1",
+			choice: "server",
+			fnAdoptLive: next => {
+				live = structuredClone(next);
+				return true;
+			},
+		});
+
+		await expect(reconciliation).resolves.toMatchObject({status: "conflict"});
+		await expect(resolution).resolves.toBeNull();
+		expect(live.hp.current).toBe(5);
+		expect(repository._accepted.get("character-1")).toMatchObject({
+			revision: 3,
+			data: {hp: {current: 5}},
+		});
+	});
+
+	it("adopts Use Server into live state before a genuinely new queued operation", async () => {
+		const serverDocument = {
+			id: "character-1",
+			campaignId: "campaign-1",
+			revision: 2,
+			operationWatermark: 20,
+			data: makeCharacterData({current: 7}),
+		};
+		const api = makeApi({character: serverDocument});
+		const repository = makeRepository({api});
+		await repository.pGet({characterId: "character-1"});
+		repository._conflicts.set("character-1", {
+			base: makeCharacterData({current: 10}),
+			local: makeCharacterData({current: 9}),
+			server: structuredClone(serverDocument.data),
+			serverDocument: structuredClone(serverDocument),
+			conflicts: [{localPath: "/hp/current", remotePath: "/hp/current"}],
+		});
+		let live = makeCharacterData({current: 9});
+
+		const resolution = repository.pResolveConflict({
+			characterId: "character-1",
+			choice: "server",
+			fnAdoptLive: next => {
+				live = structuredClone(next);
+				return true;
+			},
+		});
+		const delivery = repository.pEnqueueRealtimeDelivery({
+			characterId: "character-1",
+			fnDeliver: () => repository.applyRealtimeOperation({
+				characterId: "character-1",
+				operation: makeOperation({operationId: "operation-3", args: {amount: 2}}),
+				resultingCharacterRevision: 3,
+				eventId: "new-event",
+				sequence: 21,
+				liveData: live,
+				fnAdoptLive: next => { live = next; },
+			}),
+		});
+
+		await expect(resolution).resolves.toBeNull();
+		await expect(delivery).resolves.toMatchObject({status: "applied"});
+		expect(live.hp.current).toBe(5);
+		expect(repository._accepted.get("character-1")).toMatchObject({
+			revision: 3,
+			data: {hp: {current: 5}},
+		});
 	});
 });

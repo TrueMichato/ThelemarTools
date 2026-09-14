@@ -7,6 +7,7 @@ export function isRealtimeEventCoveredByBaseline ({event, baselineSequence}) {
 export class HubRealtimeClient {
 	constructor ({
 		campaignId,
+		initialLastSequence = null,
 		fnCreateSocket = url => new WebSocket(url),
 		location = globalThis.location,
 		fnSetTimeout = (...args) => setTimeout(...args),
@@ -37,7 +38,10 @@ export class HubRealtimeClient {
 		this._reconnectTimer = null;
 		this._resyncTimer = null;
 		this._resyncWatchdogMarker = null;
-		this._lastSequence = 0;
+		this._lastSequence = Number.isSafeInteger(initialLastSequence) && initialLastSequence >= 0
+			? initialLastSequence
+			: 0;
+		this._isSnapshotSuppressionPending = initialLastSequence == null;
 		this._hasBaseline = false;
 		this._bufferedEvents = [];
 		this._resyncAccumulatedEvents = [];
@@ -226,15 +230,19 @@ export class HubRealtimeClient {
 					characterRefs: message.characterRefs || [],
 				});
 			}
-			const events = [...this._resyncAccumulatedEvents, ...this._bufferedEvents]
-				.sort((a, b) => a.sequence - b.sequence);
+			// Initial replay rows may be covered by the HTTP-loaded snapshot, but an event received live after
+			// this socket subscribed is not historical merely because the cursor later advances through it.
+			const events = [
+				...this._resyncAccumulatedEvents.map(event => ({event, isLiveBuffered: false})),
+				...this._bufferedEvents.map(event => ({event, isLiveBuffered: true})),
+			].sort((a, b) => a.event.sequence - b.event.sequence || Number(a.isLiveBuffered) - Number(b.isLiveBuffered));
 			this._bufferedEvents = [];
 			this._lastSequence = Math.max(this._lastSequence, snapshotSequence);
-			for (const event of events) {
+			for (const {event, isLiveBuffered} of events) {
 				if (event.sequence <= previousSequence) continue;
 				this._lastSequence = Math.max(this._lastSequence, event.sequence);
 				if (this._isEventSeen(event)) continue;
-				if (event.sequence <= snapshotSequence && [
+				if (!isLiveBuffered && this._isSnapshotSuppressionPending && event.sequence <= snapshotSequence && [
 					"character.created",
 					"character.cloned",
 					"character.archived",
@@ -254,6 +262,7 @@ export class HubRealtimeClient {
 			this._resyncAccumulatedEvents = [];
 			this._resyncScannedThroughSequence = null;
 			this._resyncStartSequence = null;
+			this._isSnapshotSuppressionPending = false;
 			this._hasBaseline = true;
 			this._reconnectAttempt = 0;
 			this._setConnectionState("live");

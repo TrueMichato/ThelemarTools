@@ -69,7 +69,9 @@ npm run test:hub:e2e:stack
 
 The disposable stack exposes PostgreSQL only on a random loopback port for the duration of the run. Before
 browser journeys, it executes the semantic-operation, inventory, provider-identity, and rules-policy PostgreSQL
-suites against the migrated runtime role. The rules-policy parity suite proves the exact memory/PostgreSQL
+suites against the migrated runtime role. The production-image provider smoke container is removed immediately
+after its metadata check so its independent outbox dispatcher cannot consume events intended for the
+socket-serving test BFF. The rules-policy parity suite proves the exact memory/PostgreSQL
 response, compatibility projection, audit, ordered-event, outbox, stale-base concurrency, and rollback behavior
 without adding a migration. Its content scenario additionally proves whole-document admission, grandfathered
 unrelated edits, direct patch/grant/award/transfer rejection, transfer stale-pin fencing and escrow restoration,
@@ -86,8 +88,10 @@ without scanning the whole history.
 Realtime tests cover 26 exact continuation pages on one connection, one-time connection-scoped rate-limit
 exemptions, forged/replayed marker limiting, reconnect preservation, exact-once accumulation, and explicit
 campaign-client close/reset. They also interleave live delivery with a periodic multi-page replay and prove
-recovered and live events emit exactly once in sequence order without an overlapping watchdog resync. Any server
-error during replay must close/reconnect, preserve its replay marker, and recover buffered live events exactly once.
+recovered and live events emit exactly once in sequence order without an overlapping watchdog resync. Dispatcher
+tests deliberately return a claimed same-campaign batch out of order and prove sequence-ordered publication plus
+failure blocking. Any server error during replay must close/reconnect, preserve its replay marker, and recover
+buffered live events exactly once.
 
 The memory semantic suite additionally covers every version-1 kind, player generic-operation denial,
 DM/co-DM immediate application, self-target explicit approval, DM non-owner approval denial, unsupported and

@@ -169,12 +169,19 @@ No reactive system — renders are explicit. Related modules re-render together 
 - **Toast notifications**: `JqueryUtil.doToast({type: "success", content: "..."})` for user feedback (site-wide utility, not jQuery-dependent despite the name)
 - **HTML generation**: `e_({outer: \`<button class="btn">...</button>\`})` for single elements, `ee\`<div>...</div>\`` tagged template for complex HTML. `insertAdjacentHTML()` for appending HTML strings.
 - **Hub realtime callbacks**: `CharacterSheetRealtimeCoordinator.on()` exposes connection, cursor,
-  metadata-only projection invalidation, semantic-operation lifecycle, and delivery-error handoffs. Only a
+  metadata-only projection invalidation, semantic-operation lifecycle, minimized XP/item recipient notices,
+  and delivery-error handoffs. Only a
   signed-in campaign-backed canonical character attaches. Delivery uses the repository mutation queue and is
   generation-fenced on switch/detach/revocation/terminal page hide; a missing canonical ref, remote archive, or remote move
   serializes teardown behind already-queued delivery. Persisted `pagehide` suspends the socket and `pageshow`
   resumes the same client/cursor rather than replaying through a fresh generation. This substrate must not call
-  state load/render/save or a generic conflict modal.
+  state load/render/save or a generic conflict modal. The page turns notices into text-only toasts; XP schedules
+  authoritative owner-document reconciliation after delivery, while item reconciliation remains with the
+  inventory listener.
+- **Temporary-to-canonical identity adoption**: create retry and conflict resolution rebind the state id, URL
+  scope, roster selection, projections, and realtime subscription under one updated load/save fence before the
+  repository mutation queue releases canonical events. The identity-only detach preserves canonical repository
+  reconciliation coverage while fencing callbacks from the temporary subscription.
 - **Hub effect UI**: `CharacterSheetHubEffects` is activated and deactivated with the coordinator's current
   canonical character. Its pending read is owner-only and presentation-only. Approval remains visibly pending
   until an authoritative applied event completes repository adoption. The approval response carries that same
@@ -487,6 +494,14 @@ Reconciliation is `R = E(B)`, `F = E(L)`, `nextSave = diff(R, F)`:
   truth containing the operation while returning an older recovery draft as live state.
 - An unprovable delivery blocks autosave and schedules a serialized no-reload recovery
   (`pRunPendingResync`) rather than guessing or writing blindly.
+- Explicit one-shot activity such as `spell.used` is part of the same retry envelope as the character patch.
+  If a response is lost, the repository replays that exact snapshot/activity/idempotency key before accepting a
+  newer autosave, so a changing `_savedAt` cannot silently discard or duplicate the semantic event. Recovery is
+  an ordered durable queue, not one replaceable slot: reload preserves every command, local conflict resolution
+  replays all unresolved activities in order, and server conflict resolution is the explicit discard boundary.
+  Storage uses one base plus a patch chain, capped at 32 commands/3.5 MB; a cloud command is rejected before
+  submission if the complete queue cannot be stored. Operation and resync reconciliation transform every queued
+  base/snapshot and durably replace the queue before replay.
 
 Protocol-4 cost-bearing peer operations extend this with per-character operation legs:
 

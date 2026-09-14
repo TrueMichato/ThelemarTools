@@ -1044,6 +1044,10 @@
 	flex-direction: column;
 }
 
+.hub-activity-load-earlier {
+	margin-top: 12px;
+}
+
 .hub-activity-row {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) auto;

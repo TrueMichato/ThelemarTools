@@ -118,7 +118,31 @@ sequenceDiagram
 ```
 
 The client never treats an unacknowledged queued snapshot as a new base. Each submitted write retains its own
-base so overlapping and disjoint changes are classified correctly.
+base so overlapping and disjoint changes are classified correctly. The repository persists an ordered recovery
+queue as one base plus an ordered patch chain containing every closed one-shot activity descriptor and exact
+idempotency key. The queue is capped at 32 commands and 3.5 MB; a command that cannot be added durably is
+rejected before network submission. Authoritative operation and resync transforms advance every queued base and
+snapshot, then replace the complete persisted queue before replay. Only the matching successful command is
+dequeued. Choosing local after an overlap replays every unresolved command in order against the selected local
+document. Choosing server explicitly discards the complete queue and installs that canonical document and its
+operation watermark into the accepted, live, latest-submitted, and visible Character Sheet tracks inside the
+same serialized mutation. Realtime resumes only after that fenced adoption, so neither an already-covered event
+nor a genuinely newer queued operation can be overwritten by the caller's stale conflict result.
+
+Recovery queues carry the authenticated owner id and explicit first-command intent. Only genuine creates retain
+the original `clientImportId`; patch recovery is never exposed or replayed as a replacement create when its
+established character is absent. URL routing resolves owner-scoped create recovery before loading the selected
+character. Startup listing matches only an owner-visible server row with the same import id, then atomically
+moves the durable queue from its temporary key to the canonical character id. If the create never reached the
+server, the owner's recovery-only draft remains listed under its temporary id and retries with the original
+create idempotency key. Recovery is validated against the current account before hydration or migration, and
+cross-account collisions leave the original stored recovery untouched. Once a temporary create resolves to its
+canonical id, that alias is published only after the pending queue is durably migrated; a storage failure leaves
+the temporary queue visible and retryable with its original keys and activities. The browser then atomically
+rebinds page state, URL scope, roster selection, projections, and realtime
+before queued canonical events resume. Repository hydration and successful replay retain the temporary-to-
+canonical lookup but remove obsolete pending-state aliases, so a completed retry cannot leave unload warnings or
+context-switch blockers behind.
 
 ## Transactional outbox and realtime
 
@@ -137,7 +161,9 @@ flowchart LR
 ```
 
 Clients use snapshots and sequence-based replay to recover from disconnects. Presence is ephemeral. Roll and
-action history is durable. Visibility is evaluated on the server for both replay and live fanout.
+action history is durable. Visibility is evaluated on the server for both replay and live fanout. Claimed
+outbox rows are explicitly ordered by campaign sequence before fanout; database `UPDATE ... RETURNING` row order
+is not treated as a delivery guarantee.
 
 An authenticated campaign-backed Character Sheet attaches a focused realtime coordinator only after its
 canonical character has loaded. Socket-generation fencing makes stale messages, closes, and watchdog timers

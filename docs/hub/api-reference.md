@@ -92,7 +92,7 @@ tokens and response bodies never cross the callback adapter boundary.
 | `GET /api/campaigns/:campaignId/context` | Active member | none | Active immutable brew/rules versions |
 | `GET /api/campaigns/:campaignId/snapshot` | Active member; protocol-versioned | none | Campaign, membership, authorization-scoped character envelopes, roster metadata, last sequence |
 | `GET /api/campaigns/:campaignId/character-projections` | Active member; protocol-versioned | none | `{projections, roster}` — the batch scoped projector every consumer refetches through |
-| `GET /api/campaigns/:campaignId/events` | Active member | `afterSequence>=0`, `limit` 1-500 (default 200) | `{events, replay: {scannedThroughSequence, hasMore}}`; ordered authorization-scoped events plus the authoritative continuation boundary |
+| `GET /api/campaigns/:campaignId/events` | Active member | exactly one optional cursor: forward `afterSequence>=0` or backward `beforeSequence>=1`; `limit` 1-500 (default 200) | Forward: `{events, replay: {scannedThroughSequence, hasMore}}`. Backward: `{events, history: {scannedBackThroughSequence, hasMore}}`. Events are always returned in ascending sequence order |
 | `POST /api/campaigns/:campaignId/archive` | Campaign owner mutation | none | Cancels actions/releases leases/detaches characters, or `CAMPAIGN_BUSY` |
 | `POST /api/campaigns/:campaignId/transfer-ownership` | Campaign owner mutation | `{targetAccountId}` | Changes owner and owner/target roles atomically |
 
@@ -103,6 +103,12 @@ redaction. A client continues while `replay.hasMore` is true and passes `replay.
 next `afterSequence`; returned event count is never evidence that the scanned range is exhausted. The marker is
 the highest raw event sequence in that page's bounded scan window, excluding its one-row lookahead, not the last
 event disclosed to the viewer.
+
+Backward history is a separate presentation/read mode and never changes realtime replay semantics. It scans
+newest-to-oldest before the exclusive cursor, returns up to `limit` authorized events in ascending order, and
+reports the oldest raw sequence examined as `history.scannedBackThroughSequence`. The bounded raw scan is
+`max(200, 25 * limit)`, capped at 2,000 rows. A short or empty page with `history.hasMore: true` means only that
+the scanned window contained no additional visible events; clients may continue from the returned history cursor.
 
 ### Authorization envelopes
 
@@ -140,12 +146,18 @@ Only the token hash is persisted. The raw token is returned only from creation.
 | `GET /api/characters/:characterId/projection-policy` | Owner only; protocol-versioned | none | `{policy, projectionRevision, preview}`; `preview` is the server-computed peer profile, and `error` reports `PROJECTION_POLICY_INVALID`. A character owned by somebody else and one that does not exist both return `404 PROJECTION_POLICY_NOT_AVAILABLE`, so the endpoint cannot confirm an id |
 | `PUT /api/characters/:characterId/projection-policy` | Owner mutation | `{policy, expectedProjectionRevision}` + `Idempotency-Key` | Updated policy/preview, `409 PROJECTION_POLICY_CONFLICT` with the current safe state, or `422 PROJECTION_POLICY_INVALID` |
 | `POST /api/characters/:characterId/lease` | Owner mutation | `{takeover?}` | Lease session, monotonic epoch, expiry |
-| `PATCH /api/characters/:characterId` | Owner mutation + held lease | `baseRevision`, `leaseEpoch`, up to 500 add/remove/replace patches | Canonical character or revision/lease conflict |
+| `PATCH /api/characters/:characterId` | Owner mutation + held lease | `baseRevision`, `leaseEpoch`, up to 500 add/remove/replace patches; optional closed `spell.used` activity descriptor | Canonical character or revision/lease conflict |
 | `DELETE /api/characters/:characterId` | Owner mutation | none | Soft archive; blocks outgoing reserved transfer |
 | `POST /api/characters/:characterId/clone` | Owner + target non-spectator membership | `{campaignId}` | Independent character with new id |
 | `POST /api/characters/:characterId/move` | Owner + target non-spectator membership | `{campaignId}` | Same character moved; active lease/outgoing escrow blocks |
 
 Character data is sanitized/validated and capped at 1.5 MB after the resulting mutation.
+
+The optional spell activity descriptor contains only `type:"spell.used"`, bounded `spellName`/`spellSource`,
+integer `spellLevel`/`slotLevel` (0-9), and mode `cantrip|ritual|spell_slot|pact_slot|resource|free`. It is never
+derived from arbitrary patches. The event, audit row, outbox row, character mutation, and idempotency receipt
+commit together. A cantrip or ritual may submit an empty patch array; in that case the semantic event/audit are
+committed without incrementing the character revision or emitting a projection invalidation.
 
 ## Rolls, actions, and grants
 

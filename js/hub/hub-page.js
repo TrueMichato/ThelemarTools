@@ -7,7 +7,11 @@ import {
 	pLoadHubCapabilityModule,
 } from "./hub-capabilities.js";
 import {HubRealtimeClient, isRealtimeEventCoveredByBaseline} from "./hub-realtime-client.js";
-import {renderHubActivityRows} from "./hub-activity-render.js";
+import {
+	hasHubActivityAuthorizationChanged,
+	mergeHubActivityEvents,
+	renderHubActivityRows,
+} from "./hub-activity-render.js";
 import {
 	getOwnerMembershipId,
 	getProjectionId,
@@ -1012,14 +1016,15 @@ async function pInitCampaign ({session}) {
 		api.pListCharacters({campaignId}),
 		api.pGetCampaignSnapshot({campaignId}),
 	]);
-	const [contextInitial, events] = await Promise.all([
+	const [contextInitial, eventPage] = await Promise.all([
 		api.pGetCampaignContext({campaignId}),
-		api.pListEvents({
+		api.pListEventPage({
 			campaignId,
-			afterSequence: Math.max(0, snapshot.lastSequence - 50),
+			beforeSequence: snapshot.lastSequence + 1,
 			limit: 50,
 		}),
 	]);
+	const events = eventPage.events;
 	let context = contextInitial;
 	const pRefreshMembers = async () => renderMemberList({
 		campaign,
@@ -1050,7 +1055,7 @@ async function pInitCampaign ({session}) {
 		isDm: ["dm", "co_dm"].includes(campaign.role),
 		roster: snapshot.roster || [],
 	});
-	renderRecentActivity({events, characters: snapshot.characters, members});
+	renderRecentActivity({events, characters: snapshot.characters, members, history: eventPage.history});
 	renderCampaignContext(context);
 	applyCampaignRoleLayout({campaign, characters});
 	initCampaignWorkbenchLinks();
@@ -1085,8 +1090,9 @@ async function pInitCampaign ({session}) {
 		pRefreshInvites,
 		roster: snapshot.roster || [],
 	});
-	const realtime = new HubRealtimeClient({campaignId});
+	const realtime = new HubRealtimeClient({campaignId, initialLastSequence: snapshot.lastSequence});
 	let liveEvents = events;
+	let activityHistory = eventPage.history;
 	let liveMembers = members;
 	let liveCharacters = snapshot.characters;
 	let liveRoster = snapshot.roster || [];
@@ -1111,17 +1117,26 @@ async function pInitCampaign ({session}) {
 				api.pListCharacters({campaignId}),
 				api.pGetCampaignSnapshot({campaignId}),
 			]);
-			const eventsNxt = await api.pListEvents({
+			const eventsPageNxt = await api.pListEventPage({
 				campaignId,
-				afterSequence: Math.max(0, snapshotNxt.lastSequence - 50),
+				beforeSequence: snapshotNxt.lastSequence + 1,
 				limit: 50,
 			});
-			liveEvents = [...eventsNxt, ...liveEvents]
-				.filter((event, index, all) => all.findIndex(other => other.id === event.id) === index)
-				.sort((a, b) => a.sequence - b.sequence)
-				.slice(-50);
+			const eventsNxt = eventsPageNxt.events;
+			const isSnapshotCurrent = snapshotNxt.lastSequence >= liveLastSequence;
+			const isActivityAuthorizationChanged = isSnapshotCurrent
+				&& hasHubActivityAuthorizationChanged({
+					previousCharacters: liveCharacters,
+					nextCharacters: snapshotNxt.characters,
+				});
+			liveEvents = mergeHubActivityEvents({
+				currentEvents: liveEvents,
+				pageEvents: eventsNxt,
+				isAuthorizationChanged: isActivityAuthorizationChanged,
+			});
+			if (isActivityAuthorizationChanged) activityHistory = eventsPageNxt.history;
 			liveMembers = membersNxt;
-			if (snapshotNxt.lastSequence >= liveLastSequence) {
+			if (isSnapshotCurrent) {
 				// Replacement, not a merge: a field the owner has just stopped sharing must
 				// disappear rather than survive from the previous, broader projection.
 				liveCharacters = snapshotNxt.characters;
@@ -1138,7 +1153,7 @@ async function pInitCampaign ({session}) {
 				isDm: ["dm", "co_dm"].includes(campaign.role),
 				roster: liveRoster,
 			});
-			renderRecentActivity({events: liveEvents, characters: liveCharacters, members: membersNxt});
+			renderRecentActivity({events: liveEvents, characters: liveCharacters, members: membersNxt, history: activityHistory});
 			if (isRefreshCampaignContext) {
 				context = await api.pGetCampaignContext({campaignId});
 				renderCampaignContext(context);
@@ -1164,6 +1179,49 @@ async function pInitCampaign ({session}) {
 			}
 		}
 	};
+	const pLoadEarlierActivity = async () => {
+		if (!activityHistory?.hasMore) return;
+		const button = document.getElementById("campaign-activity-load-earlier");
+		button.disabled = true;
+		renderRecentActivity({
+			events: liveEvents,
+			characters: liveCharacters,
+			members: liveMembers,
+			history: activityHistory,
+			isLoading: true,
+		});
+		try {
+			const page = await api.pListEventPage({
+				campaignId,
+				beforeSequence: activityHistory.scannedBackThroughSequence,
+				limit: 50,
+			});
+			liveEvents = mergeHubActivityEvents({
+				currentEvents: liveEvents,
+				pageEvents: page.events,
+			});
+			activityHistory = page.history;
+			renderRecentActivity({
+				events: liveEvents,
+				characters: liveCharacters,
+				members: liveMembers,
+				history: activityHistory,
+				statusMessage: page.events.length ? "" : "No additional visible activity in this window. Older retained history may still be available.",
+			});
+		} catch (error) {
+			renderRecentActivity({
+				events: liveEvents,
+				characters: liveCharacters,
+				members: liveMembers,
+				history: activityHistory,
+				statusMessage: "Earlier activity could not be loaded. Try again.",
+			});
+			renderError(error);
+		} finally {
+			button.disabled = false;
+		}
+	};
+	document.getElementById("campaign-activity-load-earlier")?.addEventListener("click", () => void pLoadEarlierActivity());
 	const queueLiveRefresh = ({isCampaignContextRefresh = false} = {}) => {
 		if (isCampaignReloadRequired) return;
 		if (isCampaignContextRefresh) isCampaignContextRefreshQueued = true;
@@ -1198,9 +1256,8 @@ async function pInitCampaign ({session}) {
 		if (!isCampaignReloadRequired && navigator.onLine) {
 			liveLastSequence = Math.max(liveLastSequence, event.sequence || 0);
 			liveEvents = [...liveEvents.filter(existing => existing.id !== event.id), event]
-				.sort((a, b) => a.sequence - b.sequence)
-				.slice(-50);
-			renderRecentActivity({events: liveEvents, characters: liveCharacters, members: liveMembers});
+				.sort((a, b) => a.sequence - b.sequence);
+			renderRecentActivity({events: liveEvents, characters: liveCharacters, members: liveMembers, history: activityHistory});
 		}
 		// ADR 0011: `character.projection.invalidated` carries no character data. Every
 		// event, including an invalidation, is coalesced into one authorization-scoped
@@ -1489,7 +1546,7 @@ function renderPartyRoster ({campaignId, characters, members, session, isDm, ros
 	}));
 }
 
-function renderRecentActivity ({events, characters, members}) {
+function renderRecentActivity ({events, characters, members, history = null, isLoading = false, statusMessage = ""}) {
 	const list = document.getElementById("campaign-activity-list");
 	if (!list) return;
 	const rows = renderHubActivityRows({
@@ -1499,8 +1556,23 @@ function renderRecentActivity ({events, characters, members}) {
 		members,
 		documentRef: document,
 		getDateLabel,
+		limit: null,
 	});
-	setHidden(document.getElementById("campaign-activity-empty"), !!rows.length);
+	const hasMore = history?.hasMore === true;
+	setHidden(document.getElementById("campaign-activity-empty"), !!rows.length || hasMore || isLoading);
+	const status = document.getElementById("campaign-activity-status");
+	if (status) {
+		status.textContent = isLoading
+			? "Loading earlier activity..."
+			: statusMessage || (!rows.length && hasMore ? "No visible activity in this window. Older retained history is still available." : "");
+		setHidden(status, !status.textContent);
+	}
+	const loadEarlier = document.getElementById("campaign-activity-load-earlier");
+	if (loadEarlier) {
+		loadEarlier.disabled = isLoading;
+		setHidden(loadEarlier, !hasMore);
+	}
+	return rows;
 }
 
 function fillCharacterSelect (select, characters, {includeParty = false, partyInventory = null, ownerAccountId = null} = {}) {

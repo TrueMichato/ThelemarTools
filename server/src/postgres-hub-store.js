@@ -5,6 +5,7 @@ import {hasFreshCarryWrite, stripCarryAuthority} from "../../js/hub/hub-carry-au
 import {getExpectedCarryBasis} from "./carry-basis.js";
 import {getPendingEffectPresentation} from "../../js/hub/hub-effect-presentation.js";
 import {HubStoreError} from "./hub-store-error.js";
+import {normalizeCharacterPatchActivity} from "./hub-spell-activity.js";
 import {
 	computePeerProfile,
 	getDefaultProjectionPolicy,
@@ -1895,6 +1896,7 @@ export class PostgresHubStore {
 		baseRevision,
 		leaseEpoch,
 		patches,
+		activity = null,
 		rulesVersionId = null,
 		idempotencyKey,
 		protocolVersion = null,
@@ -1938,6 +1940,8 @@ export class PostgresHubStore {
 					details: {revision: character.revision, character},
 				});
 			}
+			const normalizedActivity = normalizeCharacterPatchActivity(activity);
+			const isDocumentMutation = !!patches?.length;
 			const data = applyJsonPatch(character.data, patches);
 			// The current sheet writes a fresh `/carry` on every save whose document
 			// otherwise changes, so its absence identifies a writer that predates carry
@@ -1976,14 +1980,15 @@ export class PostgresHubStore {
 					rulesVersionId: enforcement.activeRulesVersionId,
 				});
 			}
-			const updated = await client.query(`
-				UPDATE hub.characters
-				SET data = $2::jsonb, revision = revision + 1, updated_at = now()
-				WHERE id = $1
-				RETURNING *
-			`, [characterId, JSON.stringify(data)]);
-			const characterNxt = getCharacter(updated.rows[0]);
-			if (characterNxt.campaignId) {
+			const characterNxt = isDocumentMutation
+				? getCharacter((await client.query(`
+					UPDATE hub.characters
+					SET data = $2::jsonb, revision = revision + 1, updated_at = now()
+					WHERE id = $1
+					RETURNING *
+				`, [characterId, JSON.stringify(data)])).rows[0])
+				: character;
+			if (characterNxt.campaignId && isDocumentMutation) {
 				await this._pAppendEvent({
 					client,
 					campaignId: characterNxt.campaignId,
@@ -1995,6 +2000,31 @@ export class PostgresHubStore {
 					visibility: "actor_and_dm",
 					payload: {patches},
 				});
+			}
+			if (characterNxt.campaignId && normalizedActivity) {
+				const {type, ...payload} = normalizedActivity;
+				await this._pAppendAudit({
+					client,
+					campaignId: characterNxt.campaignId,
+					actorAccountId: accountId,
+					action: type,
+					targetType: "character",
+					targetId: characterId,
+					details: normalizedActivity,
+				});
+				await this._pAppendEvent({
+					client,
+					campaignId: characterNxt.campaignId,
+					actorAccountId: accountId,
+					type,
+					aggregateType: "character",
+					aggregateId: characterId,
+					aggregateRevision: characterNxt.revision,
+					visibility: "all_members",
+					payload,
+				});
+			}
+			if (characterNxt.campaignId && isDocumentMutation) {
 				await this._pAppendProjectionInvalidation({client, character: characterNxt, actorAccountId: accountId});
 			}
 			const response = {character: stripProjectionPolicy(characterNxt)};
@@ -3027,20 +3057,22 @@ export class PostgresHubStore {
 		return (await this.pListVisibleEventPage({accountId, campaignId, afterSequence, limit})).events;
 	}
 
-	async pListVisibleEventPage ({accountId, campaignId, afterSequence = 0, limit = 500}) {
+	async pListVisibleEventPage ({accountId, campaignId, afterSequence = 0, beforeSequence = null, limit = 500}) {
 		const membership = await this.pGetMembership({accountId, campaignId});
 		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+		const isHistory = beforeSequence != null;
+		const rawLimit = isHistory ? Math.min(2_000, Math.max(200, limit * 25)) : limit;
 		const result = await this._pool.query(`
 			SELECT e.*, a.display_name AS actor_display_name
 			FROM hub.domain_events
 			AS e
 			LEFT JOIN hub.accounts a ON a.id = e.actor_account_id
 			WHERE e.campaign_id = $1
-				AND e.sequence > $2
-			ORDER BY e.sequence
+				AND e.sequence ${isHistory ? "<" : ">"} $2
+			ORDER BY e.sequence ${isHistory ? "DESC" : "ASC"}
 			LIMIT $3
-		`, [campaignId, afterSequence, limit + 1]);
-		const scannedRows = result.rows.slice(0, limit);
+		`, [campaignId, isHistory ? beforeSequence : afterSequence, rawLimit + 1]);
+		const scannedRows = result.rows.slice(0, rawLimit);
 		const visibleRows = scannedRows.filter(row => canViewEvent({
 			event: {
 				visibility: row.visibility,
@@ -3064,12 +3096,22 @@ export class PostgresHubStore {
 			? (await this._pool.query(`SELECT id, owner_account_id, projection_policy FROM hub.characters WHERE id = ANY($1::uuid[])`, [characterIds])).rows
 			: [];
 		const charactersById = new Map(characters.map(row => [row.id, {ownerAccountId: row.owner_account_id, projectionPolicy: row.projection_policy}]));
-		const events = visibleRows.map(row => this._redactRowForViewer({
+		const visibleEvents = visibleRows.map(row => ({
 			row,
-			accountId,
-			role: membership.role,
-			character: charactersById.get(row.aggregate_id) || null,
-		})).filter(Boolean).map(row => ({
+			event: this._redactRowForViewer({
+				row,
+				accountId,
+				role: membership.role,
+				character: charactersById.get(row.aggregate_id) || null,
+			}),
+		})).filter(({event}) => event);
+		const selectedVisible = isHistory ? visibleEvents.slice(0, limit) : visibleEvents;
+		const selectedRowIds = new Set(selectedVisible.map(({row}) => row.id));
+		const lastSelectedIndex = isHistory && selectedVisible.length >= limit
+			? scannedRows.findIndex(row => selectedRowIds.has(row.id) && row.id === selectedVisible.at(-1).row.id)
+			: scannedRows.length - 1;
+		const consideredRows = isHistory ? scannedRows.slice(0, Math.max(0, lastSelectedIndex + 1)) : scannedRows;
+		const events = selectedVisible.map(({event: row}) => ({
 			id: row.id,
 			campaignId: row.campaign_id,
 			sequence: Number(row.sequence),
@@ -3089,6 +3131,15 @@ export class PostgresHubStore {
 			role: membership.role,
 			getCharacterOwnerId: characterId => charactersById.get(characterId)?.ownerAccountId,
 		})).filter(Boolean);
+		if (isHistory) {
+			return {
+				events: events.reverse(),
+				history: {
+					scannedBackThroughSequence: consideredRows.length ? Number(consideredRows.at(-1).sequence) : beforeSequence,
+					hasMore: result.rows.length > consideredRows.length,
+				},
+			};
+		}
 		return {
 			events,
 			replay: {

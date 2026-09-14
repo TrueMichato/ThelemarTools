@@ -187,6 +187,7 @@ describe("Catalog magic-item powers and passive normalization", () => {
 		spells._pHandleCastingConstraints = jest.fn().mockResolvedValue(true);
 		spells._showCastResult = jest.fn().mockResolvedValue(undefined);
 		const slotsBefore = JSON.stringify(state.getSpellSlots());
+		const fnOnCast = jest.fn();
 
 		await expect(spells.pCastItemSpell({
 			id: "fireball",
@@ -195,7 +196,7 @@ describe("Catalog magic-item powers and passive normalization", () => {
 			spellName: "Fireball",
 			spellSource: "PHB",
 			castLevel: 5,
-		})).resolves.toBe(true);
+		}, {fnOnCast})).resolves.toBe(true);
 
 		expect(spells._showCastResult).toHaveBeenCalledWith(
 			expect.objectContaining({name: "Fireball", level: 5, sourceItem: "Staff of Power"}),
@@ -204,7 +205,65 @@ describe("Catalog magic-item powers and passive normalization", () => {
 			false,
 			{sourceItem: "Staff of Power"},
 		);
+		expect(fnOnCast).toHaveBeenCalledWith({
+			type: "spell.used",
+			spellName: "Fireball",
+			spellSource: "PHB",
+			spellLevel: 3,
+			slotLevel: 5,
+			mode: "resource",
+		});
 		expect(JSON.stringify(state.getSpellSlots())).toBe(slotsBefore);
+	});
+
+	it("persists item spell activity with the charge mutation", async () => {
+		const activity = {
+			type: "spell.used",
+			spellName: "Fireball",
+			spellSource: "PHB",
+			spellLevel: 3,
+			slotLevel: 5,
+			mode: "resource",
+		};
+		const power = {
+			id: "fireball",
+			itemId: "staff",
+			itemName: "Staff of Power",
+			name: "Fireball",
+			kind: "spell",
+			isAvailable: true,
+			castLevel: 5,
+			chargesCost: 1,
+		};
+		const inventory = Object.create(CharacterSheetInventory.prototype);
+		inventory._state = {
+			getItemPower: jest.fn(() => power),
+			invokeItemPower: jest.fn(() => ({
+				ok: true,
+				power,
+				chargesCurrent: 2,
+				chargesMax: 3,
+			})),
+			getItems: jest.fn(() => []),
+		};
+		inventory._updateItemBonuses = jest.fn();
+		inventory._renderItemList = jest.fn();
+		inventory._page = {
+			_spells: {
+				pCastItemSpell: jest.fn(async (castPower, {fnOnCast}) => {
+					fnOnCast(activity);
+					return true;
+				}),
+			},
+			_combat: {renderCombatItemPowers: jest.fn(), renderCombatActionEconomy: jest.fn()},
+			_playMode: {_renderActionsHub: jest.fn()},
+			_saveCurrentCharacter: jest.fn(),
+		};
+
+		await expect(inventory._pInvokeItemPower("staff", "fireball")).resolves.toBe(true);
+
+		expect(inventory._state.invokeItemPower).toHaveBeenCalledWith("staff", "fireball", {chargesCost: null});
+		expect(inventory._page._saveCurrentCharacter).toHaveBeenCalledWith({activity});
 	});
 
 	it("tracks shared daily attached-spell uses and restores them on a long rest", () => {

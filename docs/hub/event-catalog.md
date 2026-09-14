@@ -38,6 +38,7 @@
 | `character.reactivated` | character | all_members | empty | Same scoped import reactivates archived row |
 | `character.patched` | character | actor_and_dm | submitted patches | Private owner/DM state event |
 | `character.projection.invalidated` | character | all_members | `{projectionRevision}` only | Metadata-only ([ADR 0011](adr/0011-authorization-scoped-character-projections.md)). Carries no character field, patch, path, amount, field name or display text — including no name snapshot. Consumers refetch through the scoped HTTP projector |
+| `spell.used` | character | all_members | `{spellName,spellSource,spellLevel,slotLevel,mode}` | Explicitly supplied by supported Character Sheet cast flows and committed with the authoritative save. Never inferred from patch bodies; carries no target, spell text, slot totals, component choice, resource identity, or character-name snapshot |
 | `character.operation.proposed` | semantic operation | explicit proposer+target owner+DMs | Cost-bearing: `{operationId,status,targetDisplaySnapshot,effectDisplaySnapshot,expiresAt}`; cost-free legacy also carries its existing target/source snapshot fields | Cost-bearing payload omits canonical source/target ids, source entity/template/choice, source cost, seed, and derived operation; the target owner refetches its approval projection |
 | `character.operation.source_cost_consumed` | source character | explicit source owner+DMs | `{operationId,leg:"source",sourceCost,resultingSourceCharacterRevision}` | Never visible to target-only peers; stable leg key is `operationId/source` |
 | `character.operation.applied` | target character | explicit workflow participants+DMs | `{leg?:"target"|"combined",operation,resultingCharacterRevision,resultingSourceCharacterRevision?}` | Distinct target leg omits source cost; self-target combined leg includes it and uses one revision |
@@ -52,8 +53,8 @@
 | `brew.activated` | brew bundle version | all_members | version | Context consumers refetch/activate |
 | `rules.activated` | rules version | all_members | version id/number; schema/catalog version and `publish`/`rollback` operation when emitted by policy management | Context consumers refetch/activate; policy body, parameters, notes, and before/after values are never emitted |
 | `roll.logged` | character or campaign | caller-selected all_members/dm_only/actor_and_dm | formula, total, context, detail | Cooperative evidence, not cryptographic roll authority. Activity presentation prefers bounded `detail.title` and selectively renders safe breakdown/result/advantage/critical/spell/ability/target fields. |
-| `xp.granted` | character | explicit DM+owner | amount, reason, resulting XP | DM/co-DM also included by visibility policy |
-| `item.granted` | character | explicit DM actor+owner | `{awardId,index,targetCount,sourceKind,note,entry}` | One deterministic per-target fact; bounded entry/note, followed by that target's projection invalidation |
+| `xp.granted` | character | explicit DM+owner | amount, reason, resulting XP | DM/co-DM also included by visibility policy; activity and the recipient notice render the bounded reason when present |
+| `item.granted` | character | explicit DM actor+owner | `{awardId,index,targetCount,sourceKind,note,entry}` | One deterministic per-target fact; bounded entry/note, followed by that target's projection invalidation. Activity and the recipient notice render the bounded note as the award reason |
 | `party_inventory.invalidated` | campaign | all_members | empty | Metadata-only shared-stash refresh signal |
 | `transfer.reserved` | transfer | explicit actor+target owner | source/target kinds; each non-DM sees only owned character endpoint ids | Escrow content and counterpart identities are not broadcast |
 | `transfer.committed` | transfer | explicit actor+target owner | privacy-reduced source/target endpoints | Destination write complete; affected owners refetch authoritative state |
@@ -106,7 +107,7 @@ An atomic item-award batch emits each `item.granted` and its projection invalida
 then one `party_inventory.invalidated` if the source stash was debited. Retries replay the receipt and emit
 nothing. No campaign-wide batch event exposes the complete recipient list.
 
-Roll history and non-state workflow history are not assumed to be represented by the snapshot.
+Roll history, `spell.used`, and non-state workflow history are not assumed to be represented by the snapshot.
 Character semantic-operation lifecycle events are delivered even when their sequence is at/before the
 snapshot cursor or an owner/DM character ref's `operationWatermark`. The later live-apply consumer, not the
 transport, decides whether an applied operation is already represented by canonical truth.
@@ -137,7 +138,7 @@ Current audit actions include:
 - `invite.created`, `invite.redeemed`, `invite.revoked`;
 - `membership.role_changed`, `membership.removed`, `membership.left`;
 - `character.created`, `character.reactivated`, `character.cloned`, `character.moved`,
-  `character.archived`;
+  `character.archived`, `spell.used`;
 - `brew.created`, `brew.activated`;
 - `rules.created`, `rules.activated`;
 - `dm_workspace.created`, `dm_workspace.updated`;
@@ -151,6 +152,10 @@ Not every high-frequency product event has an audit row. Character patches, pres
 proposal, and transfer reservation are represented by canonical/domain data instead. Changing audit policy
 requires privacy/retention review.
 
+`character.projection.invalidated` remains a transport/control signal and is not rendered as campaign activity.
+Legacy activity without newer optional reason or spell detail fields renders a bounded neutral fallback rather
+than disappearing or exposing raw payloads.
+
 ## Outbox lifecycle
 
 ```text
@@ -161,6 +166,8 @@ publishing stale -> pending
 
 - Event and outbox are inserted together.
 - `claim_token` fences publishers.
+- Claimed rows are sorted by campaign sequence before publication; a later event never overtakes an earlier
+  event from the same campaign even if the database returns the claimed rows out of order.
 - `attempt_count` increments on claim.
 - `last_error` is operator diagnostics and must not contain private payloads.
 - `published_at` supports planned 7-day technical cleanup.

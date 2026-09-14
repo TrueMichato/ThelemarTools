@@ -234,12 +234,14 @@ class CharacterSheetPage {
 		this._hubRealtime?.detach();
 	}
 
-	/** `teardown-projections`: viewer-scoped projections, party inventory, and reconciliation. */
-	_detachHubProjections () {
+	/** `teardown-projections`: viewer-scoped projections, party inventory, and optionally reconciliation. */
+	_detachHubProjections ({isPreserveRepositoryReconciliation = false} = {}) {
 		this._partyInventory?.detach();
 		this._hubEffects?.deactivate();
 		this._peerTargeting?.deactivate();
-		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
+		if (!isPreserveRepositoryReconciliation) {
+			this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
+		}
 	}
 
 	_concealHubPrivateCharacter () {
@@ -291,10 +293,10 @@ class CharacterSheetPage {
 	}
 
 	/** Composed detach used by ordinary (non-context-switch) call sites. */
-	_detachHubRealtime () {
+	_detachHubRealtime ({isPreserveRepositoryReconciliation = false} = {}) {
 		this._fenceHubGeneration();
 		this._detachHubRealtimeClient();
-		this._detachHubProjections();
+		this._detachHubProjections({isPreserveRepositoryReconciliation});
 	}
 
 	// #endregion
@@ -315,6 +317,7 @@ class CharacterSheetPage {
 		this._hubRealtime.on("connectionState", state => this._onHubRealtimeConnectionState(state));
 		this._hubRealtime.on("campaignContextChanged", event => this._onHubCampaignContextChanged(event));
 		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
+		this._hubRealtime.on("recipientNotice", notice => this._onHubRecipientNotice(notice));
 		this._hubRealtime.on("rulesChanged", event => { void this._pRefreshHubRules(event); });
 		return true;
 	}
@@ -482,6 +485,24 @@ class CharacterSheetPage {
 			type: "danger",
 			content: `A campaign update could not be applied (${detail?.deliveryType || "update"}). Reload this character to catch up.`,
 		});
+	}
+
+	_onHubRecipientNotice (notice) {
+		if (!notice || !this._currentCharacterId) return false;
+		if (notice.kind === "xp_award") {
+			const total = Number.isFinite(notice.totalXp) ? ` (${notice.totalXp} XP total)` : "";
+			const content = e_({tag: "span", txt: `Received ${notice.amount || 0} XP${total}${notice.reason ? ` — ${notice.reason}` : ""}.`});
+			JqueryUtil.doToast({type: "success", content});
+			this._scheduleHubRealtimeResync({characterId: this._currentCharacterId});
+			return true;
+		}
+		if (notice.kind === "item_award") {
+			const quantity = notice.quantity > 1 ? `${notice.quantity}× ` : "";
+			const content = e_({tag: "span", txt: `Received ${quantity}${notice.itemName || "an item"}${notice.reason ? ` — ${notice.reason}` : ""}.`});
+			JqueryUtil.doToast({type: "success", content});
+			return true;
+		}
+		return false;
 	}
 
 	/** The repository document shape: live state without the transient sheet id. */
@@ -2462,7 +2483,8 @@ class CharacterSheetPage {
 		const {chosen: character, mirrorWon} = this._reconcilePersistedCharacter(canonical, mirror);
 
 		if (character) {
-			this._currentCharacterId = charId;
+			const resolvedId = canonical?.id || charId;
+			this._currentCharacterId = resolvedId;
 			this._isLevelUpBannerDismissed = false;
 			this._state.clearCampaignSettingsOverlay();
 			this._state.loadFromJson(character);
@@ -2487,9 +2509,9 @@ class CharacterSheetPage {
 			// (the await above can interleave with another load).
 			const needsSave = mirrorWon
 				|| (reconcileResult && (reconcileResult.added > 0 || reconcileResult.backfilled > 0));
-			if (needsSave && this._currentCharacterId === charId) {
+			if (needsSave && this._currentCharacterId === resolvedId) {
 				await this._saveCurrentCharacter();
-			} else if (this._characterRepository.isRescueMirrorEnabled && this._currentCharacterId === charId) {
+			} else if (this._characterRepository.isRescueMirrorEnabled && this._currentCharacterId === resolvedId) {
 				// Nothing to persist, but the mirror (if any) now agrees with canonical — clear it.
 				this._clearActiveCharacterMirror(charId);
 			}
@@ -2513,10 +2535,10 @@ class CharacterSheetPage {
 
 			// Update URL
 			const url = new URL(/** @type {*} */ (window.location));
-			url.searchParams.set("id", charId);
+			url.searchParams.set("id", resolvedId);
 			window.history.replaceState({}, "", url);
-			if (loadGeneration === this._characterLoadGeneration && this._currentCharacterId === charId) {
-				this._attachHubRealtime({characterId: charId});
+			if (loadGeneration === this._characterLoadGeneration && this._currentCharacterId === resolvedId) {
+				this._attachHubRealtime({characterId: resolvedId});
 			}
 		}
 		return true;
@@ -4358,7 +4380,46 @@ class CharacterSheetPage {
 		return nxt;
 	}
 
-	async _saveCurrentCharacter ({isInteractiveConflict = true} = {}) {
+	_adoptCanonicalCharacterIdentity ({canonicalId, saveFence}) {
+		if (!canonicalId || !isCharacterSaveFenceCurrent({sheet: this, saveFence})) return {isCurrent: false, isChanged: false};
+		const previousId = saveFence.characterId;
+		if (canonicalId === previousId) {
+			this._state.setId?.(canonicalId);
+			return {isCurrent: true, isChanged: false};
+		}
+
+		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
+		this._detachHubRealtime?.({isPreserveRepositoryReconciliation: true});
+		this._currentCharacterId = canonicalId;
+		saveFence.characterId = canonicalId;
+		saveFence.loadGeneration = this._characterLoadGeneration;
+		this._state.setId?.(canonicalId);
+
+		const url = new URL(window.location.href);
+		url.searchParams.set("id", canonicalId);
+		if (this._isHubCharacter) {
+			if (this._hubCampaignId) {
+				url.searchParams.set("hubCampaign", this._hubCampaignId);
+				url.searchParams.delete("hubCharacter");
+			} else {
+				url.searchParams.delete("hubCampaign");
+				url.searchParams.set("hubCharacter", "1");
+			}
+		}
+		window.history?.replaceState?.({}, "", url);
+		if (this._selCharacter) this._selCharacter.value = canonicalId;
+		if (this._isHubCharacter) this._attachHubRealtime?.({characterId: canonicalId});
+		return {isCurrent: true, isChanged: true};
+	}
+
+	async _pRefreshCanonicalCharacterRoster ({canonicalId, saveFence}) {
+		await this._pLoadCharacters?.();
+		if (!isCharacterSaveFenceCurrent({sheet: this, saveFence})) return false;
+		if (this._selCharacter) this._selCharacter.value = canonicalId;
+		return true;
+	}
+
+	async _saveCurrentCharacter ({isInteractiveConflict = true, activity = null} = {}) {
 		if (!this._currentCharacterId) return;
 		const saveFence = getCharacterSaveFence(this);
 		const isSaveCurrent = () => isCharacterSaveFenceCurrent({sheet: this, saveFence});
@@ -4385,19 +4446,12 @@ class CharacterSheetPage {
 		if (this._characterRepository.isRescueMirrorEnabled) this._writeActiveCharacterMirror(charData);
 
 		try {
-			const persisted = await this._characterRepository.pUpsert({character: charData});
+			const persisted = await this._characterRepository.pUpsert({character: charData, activity});
 			if (!isSaveCurrent()) return false;
 			if (persisted?.id && persisted.id !== charData.id && this._currentCharacterId === charData.id) {
-				this._currentCharacterId = persisted.id;
-				saveFence.characterId = persisted.id;
-				this._state.setId?.(persisted.id);
-				const url = new URL(window.location.href);
-				url.searchParams.set("id", persisted.id);
-				window.history?.replaceState?.({}, "", url);
-				await this._pLoadCharacters?.();
-				if (!isSaveCurrent()) return false;
-				if (this._selCharacter) this._selCharacter.value = persisted.id;
-				this._attachHubRealtime?.({characterId: persisted.id});
+				const identity = this._adoptCanonicalCharacterIdentity({canonicalId: persisted.id, saveFence});
+				if (!identity.isCurrent) return false;
+				if (identity.isChanged && !await this._pRefreshCanonicalCharacterRoster({canonicalId: persisted.id, saveFence})) return false;
 			}
 			if (persisted) {
 				const getClean = data => {
@@ -4474,7 +4528,7 @@ class CharacterSheetPage {
 					DataUtil.userDownload("character-live-conflict-recovery", recovery, {fileType: "character-conflict"});
 					return false;
 				}
-				if (choice) return this._saveCurrentCharacter();
+				if (choice) return this._saveCurrentCharacter({activity});
 				this._state.loadFromJson(recovery.server);
 				this._reconcileClassFeatures();
 				this._renderCharacter();
@@ -4493,17 +4547,35 @@ class CharacterSheetPage {
 					DataUtil.userDownload("character-conflict-recovery", err.recovery, {fileType: "character-conflict"});
 					return false;
 				}
+				let isIdentityChanged = false;
+				let isResolutionAdopted = false;
+				const fnAdoptResolution = resolved => {
+					if (!isSaveCurrent()) return false;
+					const identity = this._adoptCanonicalCharacterIdentity({
+						canonicalId: resolved?.id || saveFence.characterId,
+						saveFence,
+					});
+					if (!identity.isCurrent) return false;
+					isIdentityChanged ||= identity.isChanged;
+					this._state.loadFromJson(resolved);
+					this._reconcileClassFeatures();
+					this._renderCharacter();
+					isResolutionAdopted = true;
+					return true;
+				};
 				const resolved = await this._characterRepository.pResolveConflict({
 					characterId: saveFence.characterId,
 					choice: choice ? "local" : "server",
+					fnAdoptLive: fnAdoptResolution,
 				});
 				if (!isSaveCurrent()) return false;
-				if (resolved) {
-					this._state.loadFromJson(resolved);
-					this._renderCharacter();
-					this._updateSaveIndicator("saved");
-					return true;
-				}
+				if (resolved && !isResolutionAdopted && !fnAdoptResolution(resolved)) return false;
+				if (isIdentityChanged && !await this._pRefreshCanonicalCharacterRoster({
+					canonicalId: saveFence.characterId,
+					saveFence,
+				})) return false;
+				this._updateSaveIndicator("saved");
+				return true;
 			}
 			return false;
 		}
@@ -21613,8 +21685,8 @@ class CharacterSheetPage {
 		});
 	}
 
-	async saveCharacter () {
-		return this._saveCurrentCharacter();
+	async saveCharacter (options = {}) {
+		return this._saveCurrentCharacter(options);
 	}
 
 	/**
