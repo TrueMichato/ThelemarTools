@@ -260,6 +260,34 @@ describe("HTTP character repository", () => {
 		expect(repository.getCharacterAccess({characterId: "player"})).toBe("dm_readonly");
 	});
 
+	it("does not let a delayed roster response replace newer accepted realtime truth", async () => {
+		let resolveRoster;
+		const roster = new Promise(resolve => resolveRoster = resolve);
+		let characterRead = 0;
+		const documents = [
+			{id: "server-1", campaignId: "campaign-1", ownerAccountId: "player-1", revision: 1, data: {name: "Before"}},
+			{id: "server-1", campaignId: "campaign-1", ownerAccountId: "player-1", revision: 2, data: {name: "After"}},
+		];
+		const api = {
+			pGetSession: async () => ({signedIn: true, account: {id: "player-1"}}),
+			pGetCharacter: async () => structuredClone(documents[characterRead++]),
+			pListCharacters: async () => roster,
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "server-1"});
+
+		const pList = repository.pList();
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({name: "Before"}),
+			fnAdoptLive: () => {},
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+		resolveRoster([structuredClone(documents[0])]);
+
+		await expect(pList).resolves.toEqual([{id: "server-1", name: "After"}]);
+		expect(repository._accepted.get("server-1")).toEqual(documents[1]);
+	});
+
 	it("uses accepted revision and lease epoch for patch saves", async () => {
 		const calls = [];
 		const api = {

@@ -102,6 +102,7 @@ describe("Character Sheet repository seam", () => {
 				getClasses: () => [{name: "Fighter", level: 1}],
 			},
 			_characterRepository: {getCharacterAccess: () => CHARACTER_ACCESS_MODES.OWNER},
+			_getCharacterDropdownLabel: CharacterSheetPage.prototype._getCharacterDropdownLabel,
 		};
 
 		CharacterSheetPage.prototype._updateCharacterDropdown.call(host);
@@ -187,6 +188,9 @@ describe("Character Sheet repository seam", () => {
 			_getNextSavedAt: CharacterSheetPage.prototype._getNextSavedAt,
 			_lastSavedAt: 0,
 			_pLoadCharacters: jest.fn(async () => calls.push("refresh")),
+			_pRefreshPersistedCharacterUi: CharacterSheetPage.prototype._pRefreshPersistedCharacterUi,
+			_syncCurrentCharacterDropdownOption: CharacterSheetPage.prototype._syncCurrentCharacterDropdownOption,
+			_getCharacterDropdownLabel: CharacterSheetPage.prototype._getCharacterDropdownLabel,
 			_selCharacter: {value: ""},
 			_attachHubRealtime: jest.fn(() => calls.push("attach")),
 			_campaign: {pRefreshCurrentCharacter: jest.fn(async () => calls.push("campaign"))},
@@ -197,7 +201,71 @@ describe("Character Sheet repository seam", () => {
 		expect(host._isCurrentCharacterNew).toBe(false);
 		expect(host._selCharacter.value).toBe("server-id");
 		expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "server-id"});
-		expect(calls).toEqual(["upsert", "refresh", "campaign", "attach"]);
+		expect(calls).toEqual(["upsert", "attach", "refresh", "campaign"]);
+	});
+
+	it("keeps a canonical create successful when post-create UI refreshes fail", async () => {
+		const calls = [];
+		const repository = makeRepository();
+		repository.getCharacterAccess = jest.fn(() => CHARACTER_ACCESS_MODES.OWNER);
+		repository.pUpsert.mockImplementationOnce(async () => {
+			calls.push("upsert");
+			return {id: "server-id", name: "Cloud Character"};
+		});
+		const toastPrevious = globalThis.JqueryUtil.doToast;
+		const doToast = jest.fn();
+		const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+		globalThis.JqueryUtil.doToast = doToast;
+		const host = {
+			_characterRepository: repository,
+			_currentCharacterId: "temporary-id",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_isCurrentCharacterNew: true,
+			_state: {
+				toJson: () => ({name: "Cloud Character"}),
+				setId: jest.fn(),
+			},
+			_updateSaveIndicator: jest.fn(),
+			_writeActiveCharacterMirror: jest.fn(),
+			_clearActiveCharacterMirror: jest.fn(),
+			_getNextSavedAt: CharacterSheetPage.prototype._getNextSavedAt,
+			_lastSavedAt: 0,
+			_pLoadCharacters: jest.fn(async () => {
+				calls.push("refresh");
+				throw new Error("roster unavailable");
+			}),
+			_pRefreshPersistedCharacterUi: CharacterSheetPage.prototype._pRefreshPersistedCharacterUi,
+			_syncCurrentCharacterDropdownOption: CharacterSheetPage.prototype._syncCurrentCharacterDropdownOption,
+			_getCharacterDropdownLabel: CharacterSheetPage.prototype._getCharacterDropdownLabel,
+			_selCharacter: {value: "", options: []},
+			_attachHubRealtime: jest.fn(() => calls.push("attach")),
+			_campaign: {
+				pRefreshCurrentCharacter: jest.fn(async () => {
+					calls.push("campaign");
+					throw new Error("campaign controls unavailable");
+				}),
+			},
+		};
+
+		try {
+			await expect(CharacterSheetPage.prototype._saveCurrentCharacter.call(host)).resolves.toBe(true);
+			expect(warn).toHaveBeenCalledTimes(1);
+			expect(doToast).toHaveBeenCalledWith(expect.objectContaining({
+				type: "warning",
+				content: expect.stringContaining("Character saved"),
+			}));
+		} finally {
+			warn.mockRestore();
+			globalThis.JqueryUtil.doToast = toastPrevious;
+		}
+
+		expect(host._currentCharacterId).toBe("server-id");
+		expect(host._isCurrentCharacterNew).toBe(false);
+		expect(host._state.setId).toHaveBeenCalledWith("server-id");
+		expect(host._selCharacter.value).toBe("server-id");
+		expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "server-id"});
+		expect(host._updateSaveIndicator).toHaveBeenLastCalledWith("saved");
+		expect(calls).toEqual(["upsert", "attach", "refresh", "campaign"]);
 	});
 
 	it("does not send owner-only writes for a DM read-only character", async () => {
@@ -712,6 +780,9 @@ describe("Character Sheet repository seam", () => {
 			_clearLastHpChange: jest.fn(),
 			_reconcileClassFeatures: jest.fn(),
 			_pLoadCharacters: jest.fn(async () => {}),
+			_pRefreshPersistedCharacterUi: CharacterSheetPage.prototype._pRefreshPersistedCharacterUi,
+			_syncCurrentCharacterDropdownOption: CharacterSheetPage.prototype._syncCurrentCharacterDropdownOption,
+			_getCharacterDropdownLabel: CharacterSheetPage.prototype._getCharacterDropdownLabel,
 			_selCharacter: {value: ""},
 			_attachHubRealtime: jest.fn(),
 			_campaign: {
@@ -737,6 +808,107 @@ describe("Character Sheet repository seam", () => {
 		expect(host._campaign.resetCharacterScope).toHaveBeenCalled();
 		expect(host._campaign.pRefreshCurrentCharacter).toHaveBeenCalled();
 		expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "server-import"});
+	});
+
+	it("keeps an imported character successful when post-create UI refreshes fail", async () => {
+		const windowPrevious = globalThis.window;
+		const windowMock = {
+			location: new URL("https://tools.example/charactersheet.html?id=previous&hubCampaign=campaign-1"),
+			history: {replaceState: jest.fn()},
+		};
+		globalThis.window = windowMock;
+		const repository = makeRepository();
+		repository.pUpsert.mockResolvedValueOnce({id: "server-import", name: "Imported"});
+		const toastPrevious = globalThis.JqueryUtil.doToast;
+		const doToast = jest.fn();
+		const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+		globalThis.JqueryUtil.doToast = doToast;
+		const host = {
+			_currentCharacterId: "previous",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_isCurrentCharacterNew: false,
+			_characterLoadGeneration: 0,
+			_saveCurrentCharacter: jest.fn(async () => true),
+			_characterRepository: repository,
+			_state: {
+				loadFromJson: jest.fn(),
+				toJson: () => ({id: "server-import", name: "Imported"}),
+			},
+			_detachHubRealtime: jest.fn(),
+			_clearLastHpChange: jest.fn(),
+			_reconcileClassFeatures: jest.fn(),
+			_pLoadCharacters: jest.fn(async () => { throw new Error("roster unavailable"); }),
+			_pRefreshPersistedCharacterUi: CharacterSheetPage.prototype._pRefreshPersistedCharacterUi,
+			_syncCurrentCharacterDropdownOption: CharacterSheetPage.prototype._syncCurrentCharacterDropdownOption,
+			_getCharacterDropdownLabel: CharacterSheetPage.prototype._getCharacterDropdownLabel,
+			_selCharacter: {value: "", options: []},
+			_attachHubRealtime: jest.fn(),
+			_campaign: {
+				resetCharacterScope: jest.fn(),
+				pRefreshCurrentCharacter: jest.fn(async () => { throw new Error("campaign controls unavailable"); }),
+			},
+		};
+
+		try {
+			await expect(CharacterSheetPage.prototype.addCharacter.call(host, {
+				toJson: () => ({name: "Imported"}),
+			})).resolves.toBe(true);
+			expect(warn).toHaveBeenCalledTimes(1);
+			expect(doToast).toHaveBeenCalledWith(expect.objectContaining({
+				type: "warning",
+				content: expect.stringContaining("Character saved"),
+			}));
+		} finally {
+			warn.mockRestore();
+			globalThis.window = windowPrevious;
+			globalThis.JqueryUtil.doToast = toastPrevious;
+		}
+
+		expect(host._currentCharacterId).toBe("server-import");
+		expect(host._isCurrentCharacterNew).toBe(false);
+		expect(host._selCharacter.value).toBe("server-import");
+		expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "server-import"});
+	});
+
+	it("restores campaign controls after a duplicate save genuinely fails", async () => {
+		const sourceData = {id: "source-id", name: "Source"};
+		const host = {
+			_currentCharacterId: "source-id",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_isCurrentCharacterNew: false,
+			_characterLoadGeneration: 0,
+			_saveCurrentCharacter: jest.fn()
+				.mockResolvedValueOnce(true)
+				.mockResolvedValueOnce(false),
+			_characterRepository: {
+				getCharacterAccess: jest.fn(() => CHARACTER_ACCESS_MODES.OWNER),
+			},
+			_state: {
+				toJson: jest.fn(() => structuredClone(sourceData)),
+				loadFromJson: jest.fn(),
+			},
+			_detachHubRealtime: jest.fn(),
+			_clearLastHpChange: jest.fn(),
+			_reconcileClassFeatures: jest.fn(),
+			_renderCharacter: jest.fn(),
+			_pLoadCharacters: jest.fn(async () => {}),
+			_pRefreshPersistedCharacterUi: CharacterSheetPage.prototype._pRefreshPersistedCharacterUi,
+			_syncCurrentCharacterDropdownOption: CharacterSheetPage.prototype._syncCurrentCharacterDropdownOption,
+			_getCharacterDropdownLabel: CharacterSheetPage.prototype._getCharacterDropdownLabel,
+			_selCharacter: {value: "source-id"},
+			_attachHubRealtime: jest.fn(),
+			_campaign: {
+				resetCharacterScope: jest.fn(),
+				pRefreshCurrentCharacter: jest.fn(async () => {}),
+			},
+		};
+
+		await CharacterSheetPage.prototype._onDuplicateCharacter.call(host);
+
+		expect(host._currentCharacterId).toBe("source-id");
+		expect(host._state.loadFromJson).toHaveBeenLastCalledWith(sourceData);
+		expect(host._campaign.pRefreshCurrentCharacter).toHaveBeenCalledTimes(1);
+		expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "source-id"});
 	});
 
 	it("tears down on terminal pagehide and resumes the same subscription after BFCache restoration", async () => {

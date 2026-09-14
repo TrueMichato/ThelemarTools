@@ -1,6 +1,9 @@
 import "./setup.js";
 import {jest} from "@jest/globals";
-import {CharacterSheetRealtimeCoordinator} from "../../../js/charactersheet/charactersheet-realtime.js";
+import {
+	CHARACTER_REALTIME_ACCESS_END_CAUSES,
+	CharacterSheetRealtimeCoordinator,
+} from "../../../js/charactersheet/charactersheet-realtime.js";
 
 const pFlush = () => new Promise(resolve => setImmediate(resolve));
 
@@ -306,6 +309,7 @@ describe("Character Sheet realtime coordinator", () => {
 			state: "closed",
 			reason: "Character is no longer available in this campaign.",
 			isCharacterAccessEnded: true,
+			accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CHARACTER,
 		});
 	});
 
@@ -329,6 +333,7 @@ describe("Character Sheet realtime coordinator", () => {
 		expect(states).toContainEqual(expect.objectContaining({
 			state: "closed",
 			isCharacterAccessEnded: true,
+			accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CHARACTER,
 		}));
 	});
 
@@ -362,6 +367,40 @@ describe("Character Sheet realtime coordinator", () => {
 		expect(states).toContainEqual(expect.objectContaining({
 			state: "closed",
 			isCharacterAccessEnded: true,
+			accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.SURFACE_ROLE,
+		}));
+	});
+
+	it("upgrades a missing-character cursor to replayed DM role loss before teardown", async () => {
+		const repository = {
+			...makeRepository(),
+			isCharacterReadOnly: jest.fn(() => true),
+		};
+		const {clients, coordinator} = makeCoordinator({repository});
+		const states = [];
+		coordinator.on("connectionState", value => states.push(value));
+		coordinator.attach({characterId: "character-1"});
+
+		clients[0].emit("cursor", {
+			cursor: {campaignId: "campaign-1", lastSequence: 9},
+			membership: {accountId: "dm-account", role: "player"},
+			characterRefs: [],
+		});
+		clients[0].emit("event", {
+			id: "event-role-change",
+			campaignId: "campaign-1",
+			sequence: 9,
+			type: "membership.role_changed",
+			aggregateType: "membership",
+			aggregateId: "membership-1",
+			payload: {accountId: "dm-account", role: "player"},
+		});
+		await pFlush();
+
+		expect(states).toContainEqual(expect.objectContaining({
+			state: "closed",
+			isCharacterAccessEnded: true,
+			accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.SURFACE_ROLE,
 		}));
 	});
 
@@ -385,6 +424,7 @@ describe("Character Sheet realtime coordinator", () => {
 		expect(states).toContainEqual(expect.objectContaining({
 			state: "closed",
 			isCharacterAccessEnded: true,
+			accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN,
 		}));
 	});
 

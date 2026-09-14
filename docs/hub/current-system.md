@@ -87,9 +87,12 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G currentl
 - One canonical server document per character.
 - Builder/import creation uses explicit create intent, so a temporary client id is not probed through a guaranteed
   `CHARACTER_NOT_FOUND` read before canonical-id adoption.
-- A successful create replaces the in-flight temporary id before any server-normalization lease/patch, then
-  refreshes the cloud roster, selects the canonical option, and updates the direct URL. A later no-argument sheet
-  render only updates that option in place instead of rebuilding the cloud selector from local storage.
+- A successful create treats canonical-id adoption as the persistence commit point: it immediately finalizes the
+  character identity, direct URL, selector option, owner mode, and realtime binding before independently refreshing
+  the cloud roster and campaign controls. A failed post-create read is surfaced as a retryable UI warning and never
+  reports the committed create/import as failed or invites a duplicate retry. A later no-argument sheet render only
+  updates that option in place instead of rebuilding the cloud selector from local storage. Delayed roster responses
+  cannot replace a higher accepted revision already delivered through realtime.
 - The client holds the last accepted base, computes path patches, and serializes writes.
 - A write requires the current `revision` and lease `epoch`.
 - `owner_truth` and `dm_truth` remain distinct after loading. DM truth may stay live for inspection but cannot

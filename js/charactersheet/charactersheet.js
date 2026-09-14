@@ -47,7 +47,10 @@ import {CHARACTER_ACCESS_MODES} from "../hub/hub-character-view.js";
 import {HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT} from "../hub/hub-capabilities.js";
 import {getCampaignSurfaceDefaultUrl} from "../hub/hub-surface-defaults.js";
 import {HubRollLogAdapter} from "../hub/hub-roll-log-adapter.js";
-import {CharacterSheetRealtimeCoordinator} from "./charactersheet-realtime.js";
+import {
+	CHARACTER_REALTIME_ACCESS_END_CAUSES,
+	CharacterSheetRealtimeCoordinator,
+} from "./charactersheet-realtime.js";
 import {CharacterSheetHubEffects} from "./charactersheet-hub-effects.js";
 import {CharacterSheetPeerTargeting} from "./charactersheet-peer-targeting.js";
 import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js";
@@ -498,6 +501,16 @@ class CharacterSheetPage {
 			this._teardownHubRules();
 			this._campaign?.resetCharacterScope?.();
 			this._campaign?.render();
+			const pCoordinatorTeardown = state.accessEndCause === CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN
+				? this._hubActiveCampaign?.pHandleAccessLoss?.({campaignId: this._hubCampaignId})
+				: state.accessEndCause === CHARACTER_REALTIME_ACCESS_END_CAUSES.SURFACE_ROLE
+					? this._hubActiveCampaign?.pHandleSurfaceRoleLoss?.()
+					: null;
+			if (pCoordinatorTeardown) {
+				void pCoordinatorTeardown
+					// eslint-disable-next-line no-console
+					.catch(error => console.error("Failed to tear down ended campaign character access:", error));
+			}
 			return;
 		}
 		if (state?.state !== "closed") return;
@@ -2489,19 +2502,81 @@ class CharacterSheetPage {
 		this._updateCharacterDropdown(characters);
 	}
 
+	_getCharacterDropdownLabel (character) {
+		const name = character?.name || "Unnamed Character";
+		const totalLevel = character?.classes?.reduce((sum, cls) => sum + (cls.level || 0), 0) || 0;
+		const classNames = character?.classes?.map(cls => cls.name).join("/") || "";
+		const classInfo = classNames ? `${classNames} ${totalLevel}` : "";
+		const access = this._characterRepository.getCharacterAccess?.({characterId: character?.id});
+		const suffix = access === CHARACTER_ACCESS_MODES.DM_READ_ONLY ? " (read-only)" : "";
+		return `${classInfo ? `${name} — ${classInfo}` : name}${suffix}`;
+	}
+
+	_syncCurrentCharacterDropdownOption ({previousCharacterId = null, character = null} = {}) {
+		if (!this._selCharacter || !this._currentCharacterId) return;
+		const options = [...(this._selCharacter.options || [])];
+		let option = options.find(it => it.value === this._currentCharacterId)
+			|| (previousCharacterId ? options.find(it => it.value === previousCharacterId) : null);
+		if (!option && globalThis.document?.createElement && this._selCharacter.append) {
+			if (!options.some(it => it.disabled)) {
+				const divider = document.createElement("option");
+				divider.disabled = true;
+				divider.textContent = "────── Saved Characters ──────";
+				this._selCharacter.append(divider);
+			}
+			option = document.createElement("option");
+			this._selCharacter.append(option);
+		}
+		if (option) {
+			const current = character || {
+				id: this._currentCharacterId,
+				name: this._state.getName?.(),
+				classes: this._state.getClasses?.(),
+			};
+			option.value = this._currentCharacterId;
+			option.textContent = this._getCharacterDropdownLabel({...current, id: this._currentCharacterId});
+		}
+		this._selCharacter.value = this._currentCharacterId;
+	}
+
+	async _pRefreshPersistedCharacterUi ({characterId, previousCharacterId = null, character = null, fnIsCurrent = null}) {
+		const isCurrent = () => fnIsCurrent ? fnIsCurrent() : this._currentCharacterId === characterId;
+		this._syncCurrentCharacterDropdownOption({previousCharacterId, character});
+		const failures = [];
+		try {
+			await this._pLoadCharacters();
+		} catch (error) {
+			failures.push({surface: "character list", error});
+		}
+		if (isCurrent() && this._selCharacter) this._selCharacter.value = characterId;
+		if (isCurrent()) {
+			try {
+				await this._campaign?.pRefreshCurrentCharacter?.();
+			} catch (error) {
+				failures.push({surface: "campaign controls", error});
+			}
+		}
+		if (failures.length) {
+			// eslint-disable-next-line no-console
+			console.warn("Character was saved, but some UI state could not refresh:", failures);
+			JqueryUtil.doToast({
+				type: "warning",
+				content: "Character saved, but some campaign controls could not refresh. Reload this page to retry.",
+			});
+		}
+	}
+
 	_updateCharacterDropdown (characters) {
 		if (!characters) {
 			if (this._isHubCharacter) {
 				const currentOption = [...(this._selCharacter?.options || [])]
 					.find(option => option.value === this._currentCharacterId);
 				if (!currentOption) return;
-				const name = this._state.getName?.() || "Unnamed Character";
-				const classes = this._state.getClasses?.() || [];
-				const totalLevel = classes.reduce((sum, cls) => sum + (cls.level || 0), 0);
-				const classNames = classes.map(cls => cls.name).join("/");
-				const access = this._characterRepository.getCharacterAccess?.({characterId: this._currentCharacterId});
-				const suffix = access === CHARACTER_ACCESS_MODES.DM_READ_ONLY ? " (read-only)" : "";
-				currentOption.textContent = `${classNames ? `${name} — ${classNames} ${totalLevel}` : name}${suffix}`;
+				currentOption.textContent = this._getCharacterDropdownLabel({
+					id: this._currentCharacterId,
+					name: this._state.getName?.(),
+					classes: this._state.getClasses?.(),
+				});
 				return;
 			}
 			characters = this._state.getAllCharacters();
@@ -2518,14 +2593,7 @@ class CharacterSheetPage {
 		}
 
 		characters.forEach(char => {
-			const name = char.name || "Unnamed Character";
-			// Show class info with total level
-			const totalLevel = char.classes?.reduce((sum, c) => sum + (c.level || 0), 0) || 0;
-			const classNames = char.classes?.map(c => c.name).join("/") || "";
-			const classInfo = classNames ? `${classNames} ${totalLevel}` : "";
-			const access = this._characterRepository.getCharacterAccess?.({characterId: char.id});
-			const suffix = access === CHARACTER_ACCESS_MODES.DM_READ_ONLY ? " (read-only)" : "";
-			const label = `${classInfo ? `${name} — ${classInfo}` : name}${suffix}`;
+			const label = this._getCharacterDropdownLabel(char);
 			const option = document.createElement("option");
 			option.value = char.id;
 			option.textContent = label;
@@ -2968,6 +3036,10 @@ class CharacterSheetPage {
 			this._reconcileClassFeatures();
 			this._renderCharacter();
 			this._selCharacter.value = sourceId;
+			await this._pRefreshPersistedCharacterUi({
+				characterId: sourceId,
+				character: sourceData,
+			});
 			this._attachHubRealtime?.({characterId: sourceId});
 			return;
 		}
@@ -3001,13 +3073,15 @@ class CharacterSheetPage {
 		this._isLevelUpBannerDismissed = false;
 		this._state.loadFromJson(persisted || charData);
 		this._reconcileClassFeatures();
-		await this._pLoadCharacters();
-		this._selCharacter.value = this._currentCharacterId;
 		const url = new URL(window.location.href);
 		url.searchParams.set("id", this._currentCharacterId);
 		window.history?.replaceState?.({}, "", url);
-		await this._campaign?.pRefreshCurrentCharacter?.();
 		this._attachHubRealtime?.({characterId: this._currentCharacterId});
+		await this._pRefreshPersistedCharacterUi({
+			characterId: this._currentCharacterId,
+			previousCharacterId: newId,
+			character: persisted || charData,
+		});
 		return true;
 	}
 
@@ -4548,20 +4622,27 @@ class CharacterSheetPage {
 				character: charData,
 				isCreate: !!this._isCurrentCharacterNew,
 			});
-			if (!isSaveCurrent()) return false;
+			if (!isSaveCurrent()) return true;
 			if (persisted?.id && persisted.id !== charData.id && this._currentCharacterId === charData.id) {
+				const previousCharacterId = this._currentCharacterId;
 				this._currentCharacterId = persisted.id;
 				saveFence.characterId = persisted.id;
 				this._state.setId?.(persisted.id);
 				const url = new URL(window.location.href);
 				url.searchParams.set("id", persisted.id);
 				window.history?.replaceState?.({}, "", url);
-				await this._pLoadCharacters?.();
-				if (!isSaveCurrent()) return false;
-				if (this._selCharacter) this._selCharacter.value = persisted.id;
-				await this._campaign?.pRefreshCurrentCharacter?.();
-				if (!isSaveCurrent()) return false;
+				this._currentCharacterAccess = this._characterRepository.getCharacterAccess?.({
+					characterId: persisted.id,
+				}) || CHARACTER_ACCESS_MODES.OWNER;
+				this._isCurrentCharacterNew = false;
 				this._attachHubRealtime?.({characterId: persisted.id});
+				await this._pRefreshPersistedCharacterUi({
+					characterId: persisted.id,
+					previousCharacterId,
+					character: persisted,
+					fnIsCurrent: isSaveCurrent,
+				});
+				if (!isSaveCurrent()) return true;
 			}
 			this._currentCharacterAccess = this._characterRepository.getCharacterAccess?.({
 				characterId: persisted?.id || this._currentCharacterId,

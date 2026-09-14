@@ -301,6 +301,12 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   reload, fails the scoped projection reads on one reconnect, reconnects again against the same cursor, proves
   the pending refresh converges, forces a later resync, and verifies no owner-only lease, sharing, pending-action, targeting,
   inventory, or document-mutation request escapes.
+- Character Sheet repository regressions prove that canonical create/import commits remain successful when roster
+  or campaign-control refreshes fail, realtime binds to the canonical id before those reads, and a genuinely failed
+  duplicate restores the source character's campaign controls. Realtime teardown regressions preserve structured
+  lifecycle causes, including cursor-then-replay cause upgrades, so campaign archive clears the selected campaign and
+  temporary context, DM-role loss closes only the private surface, and character archive/move remains resource-scoped.
+  Repository ordering coverage proves a delayed stale roster cannot replace a newer accepted realtime revision.
 - Campaign snapshot consumers coalesce `character.projection.invalidated` metadata into one authorization-scoped HTTP refetch and fence older
   in-flight snapshot responses with the campaign event sequence, so an authoritative refresh cannot regress a
   newer visible projection. A single 10-second client watchdog requests an authoritative snapshot while the

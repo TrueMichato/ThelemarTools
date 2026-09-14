@@ -164,9 +164,15 @@ export class HubHttpCharacterRepository {
 		return (await this._api.pListCharacters({campaignId: this._campaignId}))
 			.filter(character => this._campaignId || character.campaignId == null)
 			.map(character => {
-				this._accepted.set(character.id, character);
+				const accepted = this._accepted.get(character.id);
+				const isAcceptedNewer = accepted
+					&& Number.isFinite(Number(accepted.revision))
+					&& Number.isFinite(Number(character.revision))
+					&& Number(accepted.revision) > Number(character.revision);
+				const current = isAcceptedNewer ? accepted : character;
+				if (!isAcceptedNewer) this._accepted.set(character.id, character);
 				this._access.set(character.id, this._getListedCharacterAccess(character));
-				return this._getData(character);
+				return this._getData(current);
 			});
 	}
 

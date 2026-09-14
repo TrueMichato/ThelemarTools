@@ -9,7 +9,7 @@ async function pCloseContext (context: BrowserContext): Promise<void> {
 	]);
 }
 
-test("Builder adopts the canonical cloud character without probing its temporary id", async ({browser}) => {
+test("Builder adopts the canonical cloud character through a failed roster refresh", async ({browser}) => {
 	test.setTimeout(240_000);
 	const secret = process.env.HUB_TEST_AUTH_SECRET;
 	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
@@ -25,6 +25,26 @@ test("Builder adopts the canonical cloud character without probing its temporary
 		await hub.gotoCampaign(campaignId);
 		await hub.waitForSelectedCampaign(campaignId);
 
+		let isCreateCommitted = false;
+		let failedRosterRefreshes = 0;
+		await hub.page.route(/\/api\/characters(?:\?.*)?$/, async route => {
+			if (route.request().method() === "POST") {
+				const response = await route.fetch();
+				isCreateCommitted = response.ok();
+				await route.fulfill({response});
+				return;
+			}
+			if (route.request().method() === "GET" && isCreateCommitted && failedRosterRefreshes === 0) {
+				failedRosterRefreshes++;
+				await route.fulfill({
+					status: 503,
+					contentType: "application/json",
+					body: JSON.stringify({error: {code: "TEST_ROSTER_REFRESH_FAILED", message: "Synthetic roster refresh failure"}}),
+				});
+				return;
+			}
+			await route.continue();
+		});
 		const missingCharacterReads: string[] = [];
 		const browserErrors: string[] = [];
 		const failedApiResponses: string[] = [];
@@ -61,12 +81,17 @@ test("Builder adopts the canonical cloud character without probing its temporary
 		});
 		const unexpectedBrowserErrors = browserErrors.filter(message =>
 			!/^Failed to register a ServiceWorker .* An SSL certificate error occurred when fetching the script\.$/.test(message),
+		).filter(message =>
+			message !== "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+		);
+		const unexpectedFailedApiResponses = failedApiResponses.filter(response =>
+			response !== "503 GET /api/characters",
 		);
 		expect({
 			hubCampaignId: active.hubCampaignId,
 			repositoryCampaignId: active.repositoryCampaignId,
 			browserErrors: unexpectedBrowserErrors,
-			failedApiResponses,
+			failedApiResponses: unexpectedFailedApiResponses,
 		}).toEqual({
 			hubCampaignId: campaignId,
 			repositoryCampaignId: campaignId,
@@ -80,6 +105,7 @@ test("Builder adopts the canonical cloud character without probing its temporary
 		expect(new URL(hub.page.url()).searchParams.get("id")).toBe(active.characterId);
 		expect((await hub.getCharacter(active.characterId)).data.name).toBe(name);
 		expect(missingCharacterReads).toEqual([]);
+		expect(failedRosterRefreshes).toBe(1);
 	} finally {
 		await pCloseContext(context);
 	}

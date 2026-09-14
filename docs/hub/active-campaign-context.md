@@ -158,11 +158,13 @@ rules and brew teardown, so no private projection remains visible during cleanup
 cancel pending debounced Board persistence before clearing panels, preventing concealment from being saved
 as an empty authoritative workspace.
 
-Character-scoped loss uses the same fail-closed presentation without incorrectly clearing the user's campaign
-selection. `character.archived`, `character.moved_out`, `campaign.archived`, and a DM/co-DM demotion while a
-foreign canonical sheet is open close that resource subscription, discard character-scoped campaign/sharing
-state, and conceal the document. Switching characters also clears the old sharing controller before the new
-policy loads, and each controller is permanently bound to the character whose policy it fetched.
+Realtime closure preserves a structured lifecycle cause instead of collapsing every event into generic character
+loss. `character.archived` and `character.moved_out` close only the resource and retain the campaign selection;
+`campaign.archived` additionally runs full campaign teardown, clears the matching selection, and disposes temporary
+rules/brew; a DM/co-DM demotion closes the private surface through role-loss teardown while retaining the campaign
+for ordinary player surfaces. Every path first uses the same fail-closed presentation, discards character-scoped
+campaign/sharing state, and conceals the document. Switching characters also clears the old sharing controller
+before the new policy loads, and each controller is permanently bound to the character whose policy it fetched.
 
 A cancellation is classified as `REQUEST_ABORTED` across the whole request path — including the
 response body read — so it is never mistaken for connectivity loss. Personal brew and local
