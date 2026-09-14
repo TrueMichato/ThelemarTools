@@ -1281,6 +1281,60 @@ describe("hub realtime", () => {
 		expect(published).toEqual([1]);
 	});
 
+	it("publishes one campaign's claimed events in sequence order even when the store returns them out of order", async () => {
+		const entries = [
+			{id: 2, claimToken: "claim", event: {id: "invalidation", campaignId: "cmp", sequence: 17}},
+			{id: 1, claimToken: "claim", event: {id: "award", campaignId: "cmp", sequence: 16}},
+		];
+		const published = [];
+		const marked = [];
+		const store = {
+			pClaimOutboxBatch: async () => entries,
+			pMarkOutboxPublished: async ({outboxId}) => marked.push(outboxId),
+			pMarkOutboxFailed: async () => {},
+		};
+		const dispatcher = new HubOutboxDispatcher({
+			store,
+			realtime: {pPublishEvent: async event => published.push(event)},
+		});
+
+		await expect(dispatcher.pDispatchOnce()).resolves.toBe(2);
+
+		expect(published.map(event => event.id)).toEqual(["award", "invalidation"]);
+		expect(marked).toEqual([1, 2]);
+	});
+
+	it("does not publish a later same-campaign event when the earlier returned-out-of-order event fails", async () => {
+		const entries = [
+			{id: 2, claimToken: "claim", event: {id: "invalidation", campaignId: "cmp", sequence: 17}},
+			{id: 1, claimToken: "claim", event: {id: "award", campaignId: "cmp", sequence: 16}},
+		];
+		const attempted = [];
+		const failed = [];
+		const store = {
+			pClaimOutboxBatch: async () => entries,
+			pMarkOutboxPublished: async () => {},
+			pMarkOutboxFailed: async detail => failed.push(detail),
+		};
+		const dispatcher = new HubOutboxDispatcher({
+			store,
+			realtime: {
+				pPublishEvent: async event => {
+					attempted.push(event.id);
+					if (event.id === "award") throw new Error("transient");
+				},
+			},
+		});
+
+		await expect(dispatcher.pDispatchOnce()).resolves.toBe(2);
+
+		expect(attempted).toEqual(["award"]);
+		expect(failed).toEqual([
+			{outboxId: 1, claimToken: "claim", error: "transient"},
+			{outboxId: 2, claimToken: "claim", error: "Blocked by earlier campaign event failure"},
+		]);
+	});
+
 	it("marks failed delivery and retries it on the next dispatch", async () => {
 		let status = "pending";
 		let attempts = 0;

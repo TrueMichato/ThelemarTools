@@ -1,6 +1,7 @@
 import "./setup.js";
 import {jest} from "@jest/globals";
 import {CharacterSheetRealtimeCoordinator} from "../../../js/charactersheet/charactersheet-realtime.js";
+import {HubRealtimeClient} from "../../../js/hub/hub-realtime-client.js";
 
 const pFlush = () => new Promise(resolve => setImmediate(resolve));
 
@@ -594,6 +595,96 @@ describe("Character Sheet realtime coordinator", () => {
 		expect(queued).toHaveLength(2);
 		expect(queued[1]()).toBe(true);
 		expect(delivered).toEqual([expect.objectContaining({eventId: "reopened"})]);
+	});
+
+	it("delivers a live item award exactly once when initial replay advances through the same batch", async () => {
+		const deliveries = [];
+		const repository = {
+			pEnqueueRealtimeDelivery: jest.fn(({fnDeliver}) => {
+				deliveries.push(fnDeliver);
+				return Promise.resolve();
+			}),
+		};
+		const client = new HubRealtimeClient({
+			campaignId: "campaign-1",
+			location: {protocol: "https:", host: "tools.example"},
+		});
+		client.pConnect = jest.fn(async () => {});
+		const coordinator = new CharacterSheetRealtimeCoordinator({
+			campaignId: "campaign-1",
+			isAuthenticated: true,
+			repository,
+			fnCreateRealtimeClient: () => client,
+		});
+		const notices = [];
+		const inventoryEvents = [];
+		const invalidations = [];
+		coordinator.on("recipientNotice", value => notices.push(value));
+		coordinator.on("inventoryTransfer", value => inventoryEvents.push(value));
+		coordinator.on("projectionInvalidated", value => invalidations.push(value));
+		coordinator.attach({characterId: "character-1"});
+
+		const itemAward = {
+			id: "item-award-live",
+			campaignId: "campaign-1",
+			sequence: 18,
+			type: "item.granted",
+			aggregateType: "character",
+			aggregateId: "character-1",
+			aggregateRevision: 4,
+			payload: {
+				entry: {
+					id: "private-entry-id",
+					item: {name: "<b>Longsword</b>", source: "PHB", entries: ["private item body"]},
+					quantity: 2,
+				},
+				note: `<b>${"x".repeat(200)}</b>`,
+			},
+		};
+		const invalidation = {
+			id: "item-award-invalidation",
+			campaignId: "campaign-1",
+			sequence: 19,
+			type: "character.projection.invalidated",
+			aggregateType: "character",
+			aggregateId: "character-1",
+			aggregateRevision: 4,
+			payload: {projectionRevision: 2},
+		};
+
+		client._handleMessage({type: "event", event: itemAward});
+		client._handleMessage({type: "event", event: invalidation});
+		client._handleMessage({
+			type: "resync_complete",
+			cursor: {campaignId: "campaign-1", lastSequence: 19},
+			characterRefs: [{id: "character-1", revision: 4, projectionRevision: 2, operationWatermark: 0}],
+			events: [itemAward, invalidation],
+			replay: {scannedThroughSequence: 19, hasMore: false},
+		});
+
+		while (deliveries.length) deliveries.shift()();
+		await pFlush();
+
+		expect(client._lastSequence).toBe(19);
+		expect(notices).toEqual([{
+			eventId: "item-award-live",
+			campaignId: "campaign-1",
+			sequence: 18,
+			kind: "item_award",
+			itemName: "Longsword",
+			itemSource: "PHB",
+			quantity: 2,
+			reason: "x".repeat(160),
+		}]);
+		expect(inventoryEvents).toEqual([expect.objectContaining({
+			eventId: "item-award-live",
+			sequence: 18,
+			isCurrentCharacterAffected: true,
+		})]);
+		expect(invalidations).toEqual([
+			expect.objectContaining({source: "cursor", lastSequence: 19}),
+			expect.objectContaining({source: "event", eventId: "item-award-invalidation", sequence: 19}),
+		]);
 	});
 
 	it("fences a delivery that was already queued when access is lost", () => {

@@ -230,15 +230,19 @@ export class HubRealtimeClient {
 					characterRefs: message.characterRefs || [],
 				});
 			}
-			const events = [...this._resyncAccumulatedEvents, ...this._bufferedEvents]
-				.sort((a, b) => a.sequence - b.sequence);
+			// Initial replay rows may be covered by the HTTP-loaded snapshot, but an event received live after
+			// this socket subscribed is not historical merely because the cursor later advances through it.
+			const events = [
+				...this._resyncAccumulatedEvents.map(event => ({event, isLiveBuffered: false})),
+				...this._bufferedEvents.map(event => ({event, isLiveBuffered: true})),
+			].sort((a, b) => a.event.sequence - b.event.sequence || Number(a.isLiveBuffered) - Number(b.isLiveBuffered));
 			this._bufferedEvents = [];
 			this._lastSequence = Math.max(this._lastSequence, snapshotSequence);
-			for (const event of events) {
+			for (const {event, isLiveBuffered} of events) {
 				if (event.sequence <= previousSequence) continue;
 				this._lastSequence = Math.max(this._lastSequence, event.sequence);
 				if (this._isEventSeen(event)) continue;
-				if (this._isSnapshotSuppressionPending && event.sequence <= snapshotSequence && [
+				if (!isLiveBuffered && this._isSnapshotSuppressionPending && event.sequence <= snapshotSequence && [
 					"character.created",
 					"character.cloned",
 					"character.archived",

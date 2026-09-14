@@ -166,6 +166,8 @@ publishing stale -> pending
 
 - Event and outbox are inserted together.
 - `claim_token` fences publishers.
+- Claimed rows are sorted by campaign sequence before publication; a later event never overtakes an earlier
+  event from the same campaign even if the database returns the claimed rows out of order.
 - `attempt_count` increments on claim.
 - `last_error` is operator diagnostics and must not contain private payloads.
 - `published_at` supports planned 7-day technical cleanup.

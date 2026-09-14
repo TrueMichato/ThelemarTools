@@ -143,7 +143,9 @@ flowchart LR
 ```
 
 Clients use snapshots and sequence-based replay to recover from disconnects. Presence is ephemeral. Roll and
-action history is durable. Visibility is evaluated on the server for both replay and live fanout.
+action history is durable. Visibility is evaluated on the server for both replay and live fanout. Claimed
+outbox rows are explicitly ordered by campaign sequence before fanout; database `UPDATE ... RETURNING` row order
+is not treated as a delivery guarantee.
 
 An authenticated campaign-backed Character Sheet attaches a focused realtime coordinator only after its
 canonical character has loaded. Socket-generation fencing makes stale messages, closes, and watchdog timers

@@ -240,7 +240,7 @@ Each campaign has a monotonically allocated `sequence`.
 
 1. Canonical transaction inserts event and outbox row.
 2. Dispatcher claims up to 100 available rows with a claim token.
-3. Rows are processed in order.
+3. Claimed rows are explicitly sorted by campaign sequence before processing; SQL return order is not trusted.
 4. If one campaign event fails, later claimed events for that campaign are marked failed rather than
    overtaking it.
 5. Success marks the row published.
@@ -324,12 +324,15 @@ semantic lifecycle events behind repository saves, and emits ephemeral callbacks
 whitelisted amount/resulting XP/reason or item name/source/quantity/reason. XP schedules an authoritative
 owner-document reconciliation outside the active delivery callback; item awards retain the existing inventory
 reconciliation signal. Neither notice carries entry ids, item bodies/metadata, account identity, arbitrary JSON,
-or private character state. Snapshot-covered state events are suppressed only for the initial baseline; unseen
-award events recovered by periodic resync or reconnect still reach this notice path. In this substrate slice,
-those callbacks never fetch/replace the owner document, call `loadFromJson`, render, save, apply an operation,
-or open a generic conflict modal. A missing canonical ref or matching remote archive/move event queues teardown
-behind already-accepted delivery. Persisted `pagehide` suspends the socket and persisted `pageshow` resumes the
-same client, sequence cursor, partial replay chain, buffered live events, and in-memory dedupe state.
+or private character state. Snapshot-covered replay rows are suppressed only for the initial baseline. Events
+received live after the socket subscribed remain live even when the completing cursor advances through the same
+batch; replay/live duplicates are emitted once, so a concurrent award or rules activation cannot converge state
+while silently losing its semantic notification. Unseen award events recovered by periodic resync or reconnect
+also reach this notice path. In this substrate slice, those callbacks never fetch/replace the owner document,
+call `loadFromJson`, render, save, apply an operation, or open a generic conflict modal. A missing canonical ref
+or matching remote archive/move event queues teardown behind already-accepted delivery. Persisted `pagehide`
+suspends the socket and persisted `pageshow` resumes the same client, sequence cursor, partial replay chain,
+buffered live events, and in-memory dedupe state.
 
 Snapshot-covered event types are suppressed only when at/before the snapshot sequence. Semantic lifecycle
 events are not discarded solely because they are at/below `operationWatermark`; durable roll/operation history
