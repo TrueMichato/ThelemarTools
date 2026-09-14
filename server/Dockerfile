@@ -50,7 +50,6 @@ COPY --chown=hub:hub js/hub/hub-content-policy.js ./js/hub/hub-content-policy.js
 COPY --chown=hub:hub js/hub/hub-campaign-rule-evaluator.js ./js/hub/hub-campaign-rule-evaluator.js
 COPY --chown=hub:hub js/hub/hub-effect-presentation.js ./js/hub/hub-effect-presentation.js
 COPY --chown=hub:hub js/hub/hub-inventory-contract.js ./js/hub/hub-inventory-contract.js
-COPY --chown=hub:hub js/hub/hub-inventory-equivalence.js ./js/hub/hub-inventory-equivalence.js
 COPY --chown=hub:hub js/hub/hub-semantic-hp.js ./js/hub/hub-semantic-hp.js
 COPY --chown=hub:hub js/hub/hub-semantic-operations.js ./js/hub/hub-semantic-operations.js
 COPY --chown=hub:hub js/hub/hub-source-costs.js ./js/hub/hub-source-costs.js

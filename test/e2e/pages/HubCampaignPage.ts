@@ -279,7 +279,10 @@ export class HubCampaignPage {
 		const networkUrls = requests.map(url => new URL(url)).filter(url => ["http:", "https:"].includes(url.protocol));
 		expect(networkUrls.filter(url => url.origin !== pageOrigin), `${path} should not make third-party requests`).toEqual([]);
 		expect(networkUrls.filter(url => /^\/(?:data|fonts|homebrew|prerelease|search)\//.test(url.pathname)), `${path} should not load the general data graph`).toEqual([]);
-		if (maxRequests != null) expect(networkUrls.length, `${path} initial request budget`).toBeLessThanOrEqual(maxRequests);
+		if (maxRequests != null) {
+			const requestPaths = networkUrls.map(url => `${url.pathname}${url.search}`);
+			expect(networkUrls.length, `${path} initial request budget:\n${requestPaths.join("\n")}`).toBeLessThanOrEqual(maxRequests);
+		}
 		if (maxLcpMs != null) {
 			const lcpMs = await this.page.evaluate(() => (window as any).__hubLargestContentfulPaint);
 			expect(lcpMs, `${path} should report an LCP entry`).toBeGreaterThan(0);

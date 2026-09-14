@@ -3,7 +3,7 @@ import {jest} from "@jest/globals";
 import {
 	HubTransferResolutionKeys,
 	pResolveTransferAndRefresh,
-} from "../../../js/hub/hub-transfer-resolution.js";
+} from "../../../js/hub/hub-api-client.js";
 
 describe("Campaign Hub transfer resolution retries", () => {
 	it("keeps one key per transfer decision until an authoritative pending-list reconciliation", () => {

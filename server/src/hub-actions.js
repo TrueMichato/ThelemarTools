@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import {isDeepStrictEqual} from "node:util";
 import {getInventoryTransferEligibility} from "../../js/hub/hub-inventory-contract.js";
-import {getItemWithoutDeterministicSheetAliases} from "../../js/hub/hub-inventory-equivalence.js";
+import {getItemWithoutDeterministicSheetAliases} from "../../js/hub/hub-json-patch.js";
 import {getHealedHp, resolveApplicableMaxHp} from "../../js/hub/hub-semantic-hp.js";
 import {HubStoreError} from "./hub-store-error.js";
 

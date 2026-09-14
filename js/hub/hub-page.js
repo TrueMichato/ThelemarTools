@@ -1,4 +1,9 @@
-import {HubApiClient, HubApiError} from "./hub-api-client.js";
+import {
+	HubApiClient,
+	HubApiError,
+	HubTransferResolutionKeys,
+	pResolveTransferAndRefresh,
+} from "./hub-api-client.js";
 import {HubActiveCampaignCoordinator} from "./hub-active-campaign-coordinator.js";
 import {HubActiveCampaignSwitcher} from "./hub-active-campaign-switcher.js";
 import {
@@ -26,10 +31,6 @@ import {
 	filterAwardItems,
 	getAwardCommandFingerprint,
 } from "./hub-item-award.js";
-import {
-	HubTransferResolutionKeys,
-	pResolveTransferAndRefresh,
-} from "./hub-transfer-resolution.js";
 const api = new HubApiClient();
 const transferResolutionKeys = new HubTransferResolutionKeys();
 

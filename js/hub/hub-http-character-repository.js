@@ -1,9 +1,13 @@
 import {HubApiClient} from "./hub-api-client.js";
-import {applyJsonPatch, diffJson, rebaseJsonChanges} from "./hub-json-patch.js";
+import {
+	applyJsonPatch,
+	diffJson,
+	getCharacterDocumentWithoutDeterministicInventoryAliases,
+	rebaseJsonChanges,
+} from "./hub-json-patch.js";
 import {withRootCarryWrite} from "./hub-carry-authority.js";
 import {HubBroadcastSync} from "./hub-broadcast-sync.js";
 import {CHARACTER_OPERATION_LEGS, getCharacterOperationRouting, getOperationLegKey} from "./hub-character-operation-events.js";
-import {getCharacterDocumentWithoutDeterministicInventoryAliases} from "./hub-inventory-equivalence.js";
 import {
 	BoundedIdSet,
 	COVERAGE_VERSION,
