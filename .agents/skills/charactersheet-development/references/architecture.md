@@ -495,6 +495,9 @@ Reconciliation is `R = E(B)`, `F = E(L)`, `nextSave = diff(R, F)`:
   newer autosave, so a changing `_savedAt` cannot silently discard or duplicate the semantic event. Recovery is
   an ordered durable queue, not one replaceable slot: reload preserves every command, local conflict resolution
   replays all unresolved activities in order, and server conflict resolution is the explicit discard boundary.
+  Storage uses one base plus a patch chain, capped at 32 commands/3.5 MB; a cloud command is rejected before
+  submission if the complete queue cannot be stored. Operation and resync reconciliation transform every queued
+  base/snapshot and durably replace the queue before replay.
 
 Protocol-4 cost-bearing peer operations extend this with per-character operation legs:
 

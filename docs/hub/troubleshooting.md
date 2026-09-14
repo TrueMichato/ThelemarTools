@@ -1,7 +1,7 @@
 # Campaign Hub troubleshooting
 
 > **Status:** Current first-response guide; provider commands are added after selection
-> **Last verified:** 2026-08-24
+> **Last verified:** 2026-09-14
 > **Owner:** Campaign Hub maintainers
 
 Do not begin by editing database rows. Preserve request ids, timestamps, app/protocol/migration versions, and
@@ -20,6 +20,7 @@ documents into tickets/logs.
 | `LEASE_HELD`/`LEASE_FENCED` | active device and epoch | takeover/tab coordination | use explicit takeover or recover local draft |
 | `REVISION_CONFLICT` | server revision and local recovery | repository queued base/rebase | use conflict UI; export recovery before destructive choice |
 | Character save rejected as too large | serialized byte count | notes/features/inventory growth | export, reduce content, retry; do not raise quota casually |
+| `CHARACTER_RECOVERY_LIMIT` / `CHARACTER_RECOVERY_STORAGE_UNAVAILABLE` | pending command count, recovery payload bytes, browser `sessionStorage` availability/quota | ordered character recovery queue | wait for the current save, retry, or export; never bypass recovery durability or discard the pending activity |
 | Brew rejected | error code, size/depth/dependencies/HTML | `campaign-content.js` | correct source bundle; never disable validation |
 | Hub page loads error state | `/api/session`, console, service worker | API unavailable, boot order, bound fetch | confirm same-origin route and no cached API response |
 | WebSocket disconnects immediately | Origin, cookie, protocol, membership | edge upgrade/timeout/auth | inspect close code and HTTP membership |

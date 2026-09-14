@@ -18,7 +18,11 @@ import {
 const _PENDING_RESYNC_LIMIT = 64;
 const _RESYNC_PAGE_LIMIT = 200;
 const _RESYNC_MAX_PAGES = 50;
-const _RECOVERY_COMMAND_QUEUE_VERSION = 1;
+const _RECOVERY_COMMAND_QUEUE_VERSION = 2;
+const _RECOVERY_COMMAND_QUEUE_LEGACY_VERSION = 1;
+const _RECOVERY_COMMAND_QUEUE_LIMIT = 32;
+const _RECOVERY_COMMAND_QUEUE_MAX_BYTES = 3_500_000;
+const _RECOVERY_COMMAND_TRACK_PREFIX = "recoveryCommand";
 
 export class HubHttpCharacterRepository {
 	isRescueMirrorEnabled = false;
@@ -225,12 +229,42 @@ export class HubHttpCharacterRepository {
 			};
 			stageRebase("live", liveData);
 			if (this._latestSubmitted.has(canonicalId)) stageRebase("latestSubmitted", this._latestSubmitted.get(canonicalId));
-			if (this._failedWrites.has(canonicalId)) stageRebase("failedWrite", this._failedWrites.get(canonicalId));
+			const recoveryQueueEntry = this._getRecoveryCommandQueueEntry(canonicalId);
+			if (recoveryQueueEntry?.queue.length) {
+				for (const [index, command] of recoveryQueueEntry.queue.entries()) {
+					stageRebase(this._getRecoveryCommandTrackName({index, part: "base"}), command.submittedBase);
+					stageRebase(this._getRecoveryCommandTrackName({index, part: "snapshot"}), command.submittedSnapshot);
+				}
+			} else if (this._failedWrites.has(canonicalId)) {
+				stageRebase("failedWrite", this._failedWrites.get(canonicalId));
+			}
+
+			const recoveryQueueNxt = this._getRecoveryQueueFromAuthoritativeRebase({canonicalId, canonical, staged});
+			let stagedRecoveryQueue = null;
+			if (recoveryQueueNxt) {
+				try {
+					stagedRecoveryQueue = this._stageRecoveryCommandQueue({
+						characterId: canonicalId,
+						queue: recoveryQueueNxt,
+					});
+				} catch (error) {
+					this._setSaveBlock(canonicalId, {
+						reason: "recovery_storage_failed",
+						code: error.code || "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE",
+						message: error.message || `Cloud character recovery storage failed.`,
+					});
+					return {status: "failed", error: {code: error.code, message: error.message}};
+				}
+			}
 
 			if (conflicts.length) {
+				const latestRecoverySnapshotName = recoveryQueueEntry?.queue.length
+					? this._getRecoveryCommandTrackName({index: recoveryQueueEntry.queue.length - 1, part: "snapshot"})
+					: null;
 				const local = staged.live
 					|| liveData
 					|| this._latestSubmitted.get(canonicalId)
+					|| (latestRecoverySnapshotName ? staged[latestRecoverySnapshotName] : null)
 					|| this._failedWrites.get(canonicalId)
 					|| accepted.data;
 				const recovery = {
@@ -246,6 +280,7 @@ export class HubHttpCharacterRepository {
 					},
 					authoritativeDiscarded,
 				};
+				if (stagedRecoveryQueue) this._commitStagedRecoveryCommandQueue(stagedRecoveryQueue);
 				this._conflicts.set(canonicalId, recovery);
 				return {status: "conflict", conflicts: structuredClone(conflicts)};
 			}
@@ -254,10 +289,12 @@ export class HubHttpCharacterRepository {
 				try {
 					fnAdoptLive(structuredClone(staged.live));
 				} catch (error) {
+					this._rollbackStagedRecoveryCommandQueue(stagedRecoveryQueue);
 					return {status: "failed", error: {code: "LIVE_ADOPTION_FAILED", message: error?.message}};
 				}
 			}
 
+			if (stagedRecoveryQueue) this._commitStagedRecoveryCommandQueue(stagedRecoveryQueue);
 			this._accepted.set(canonicalId, canonical);
 			const acceptedSequence = this._getOperationWatermark(canonicalId, canonical);
 			book.live = createCoverage({
@@ -284,7 +321,8 @@ export class HubHttpCharacterRepository {
 				});
 				book.recoveredBase = this._cloneTrackCoverage(book.failedWrite);
 			}
-			this._writeRecoveryCoverage(canonicalId);
+			if (!stagedRecoveryQueue) this._writeRecoveryCoverage(canonicalId);
+			this._clearRecoveryStorageSaveBlock(canonicalId);
 			return {
 				status: "reconciled",
 				revision: canonical.revision,
@@ -426,6 +464,10 @@ export class HubHttpCharacterRepository {
 		this._saveBlocks.delete(characterId);
 	}
 
+	_clearRecoveryStorageSaveBlock (characterId) {
+		if (this._saveBlocks.get(characterId)?.reason === "recovery_storage_failed") this._clearSaveBlock(characterId);
+	}
+
 	_recordOperationConflict ({canonicalId, plan, eventId, sequence, liveData, resultingCharacterRevision}) {
 		const accepted = this._accepted.get(canonicalId);
 		const serverData = plan.prepared?.accepted
@@ -502,6 +544,102 @@ export class HubHttpCharacterRepository {
 		return coverage ? deserializeCoverage(serializeCoverage(coverage)) : createCoverage();
 	}
 
+	_addRecoveryQueueTracks ({canonicalId, tracks}) {
+		const entry = this._getRecoveryCommandQueueEntry(canonicalId);
+		for (const [index, command] of (entry?.queue || []).entries()) {
+			tracks[this._getRecoveryCommandTrackName({index, part: "base"})] = {
+				data: command.submittedBase,
+				coverage: command.submittedBaseCoverage,
+			};
+			tracks[this._getRecoveryCommandTrackName({index, part: "snapshot"})] = {
+				data: command.submittedSnapshot,
+				coverage: command.submittedSnapshotCoverage,
+			};
+		}
+		return entry;
+	}
+
+	_getRecoveryQueueFromPlan ({canonicalId, plan, sequence}) {
+		const entry = this._getRecoveryCommandQueueEntry(canonicalId);
+		if (!entry?.queue.length) return null;
+		const revision = plan.revisionNext;
+		const operationLegKey = plan.operationLegKey;
+		const getTrack = ({command, index, part}) => {
+			const name = this._getRecoveryCommandTrackName({index, part});
+			const hasStaged = Object.hasOwn(plan.staged, name);
+			const data = hasStaged ? plan.staged[name] : command[part === "base" ? "submittedBase" : "submittedSnapshot"];
+			const coverageKey = part === "base" ? "submittedBaseCoverage" : "submittedSnapshotCoverage";
+			const coverage = this._cloneTrackCoverage(command[coverageKey]);
+			if (hasStaged) {
+				coverage.revision = Math.max(Number.isInteger(coverage.revision) ? coverage.revision : 0, revision);
+				markCoverageOperationLeg(coverage, operationLegKey);
+				if (Number.isInteger(sequence)) coverage.acceptedSequence = Math.max(coverage.acceptedSequence || 0, sequence);
+			} else if (plan.decisions[name] === TRACK_DECISION.COVERED) {
+				markCoverageOperationLeg(coverage, operationLegKey);
+				if (Number.isInteger(sequence)) coverage.acceptedSequence = Math.max(coverage.acceptedSequence || 0, sequence);
+			}
+			return {data: structuredClone(data), coverage};
+		};
+		return entry.queue.map((command, index) => {
+			const base = getTrack({command, index, part: "base"});
+			const snapshot = getTrack({command, index, part: "snapshot"});
+			return {
+				...command,
+				submittedBase: base.data,
+				submittedBaseCoverage: base.coverage,
+				submittedSnapshot: snapshot.data,
+				submittedSnapshotCoverage: snapshot.coverage,
+			};
+		});
+	}
+
+	_getRecoveryQueueFromWorkingSet ({canonicalId, working}) {
+		const entry = this._getRecoveryCommandQueueEntry(canonicalId);
+		if (!entry?.queue.length) return null;
+		return entry.queue.map((command, index) => {
+			const base = working[this._getRecoveryCommandTrackName({index, part: "base"})];
+			const snapshot = working[this._getRecoveryCommandTrackName({index, part: "snapshot"})];
+			return {
+				...command,
+				submittedBase: structuredClone(base.data),
+				submittedBaseCoverage: this._cloneTrackCoverage(base.coverage),
+				submittedSnapshot: structuredClone(snapshot.data),
+				submittedSnapshotCoverage: this._cloneTrackCoverage(snapshot.coverage),
+			};
+		});
+	}
+
+	_getRecoveryQueueFromAuthoritativeRebase ({canonicalId, canonical, staged}) {
+		const entry = this._getRecoveryCommandQueueEntry(canonicalId);
+		if (!entry?.queue.length) return null;
+		const acceptedSequence = this._getOperationWatermark(canonicalId, canonical);
+		const getTrack = ({command, index, part}) => {
+			const name = this._getRecoveryCommandTrackName({index, part});
+			const coverageKey = part === "base" ? "submittedBaseCoverage" : "submittedSnapshotCoverage";
+			return {
+				data: structuredClone(Object.hasOwn(staged, name)
+					? staged[name]
+					: command[part === "base" ? "submittedBase" : "submittedSnapshot"]),
+				coverage: createCoverage({
+					revision: canonical.revision,
+					acceptedSequence,
+					appliedOperationLegIds: command[coverageKey].appliedOperationLegIds,
+				}),
+			};
+		};
+		return entry.queue.map((command, index) => {
+			const base = getTrack({command, index, part: "base"});
+			const snapshot = getTrack({command, index, part: "snapshot"});
+			return {
+				...command,
+				submittedBase: base.data,
+				submittedBaseCoverage: base.coverage,
+				submittedSnapshot: snapshot.data,
+				submittedSnapshotCoverage: snapshot.coverage,
+			};
+		});
+	}
+
 	_buildReconciliationTracks ({canonicalId, liveData}) {
 		const book = this._getCoverageBook(canonicalId);
 		const tracks = {};
@@ -510,7 +648,10 @@ export class HubHttpCharacterRepository {
 		if (liveData !== undefined) tracks.live = {data: liveData, coverage: book.live};
 		if (this._latestSubmitted.has(canonicalId)) tracks.latestSubmitted = {data: this._latestSubmitted.get(canonicalId), coverage: book.latestSubmitted};
 		if (this._recoveredBases.has(canonicalId)) tracks.recoveredBase = {data: this._recoveredBases.get(canonicalId), coverage: book.recoveredBase};
-		if (this._failedWrites.has(canonicalId)) tracks.failedWrite = {data: this._failedWrites.get(canonicalId), coverage: book.failedWrite};
+		const recoveryQueueEntry = this._addRecoveryQueueTracks({canonicalId, tracks});
+		if (!recoveryQueueEntry?.queue.length && this._failedWrites.has(canonicalId)) {
+			tracks.failedWrite = {data: this._failedWrites.get(canonicalId), coverage: book.failedWrite};
+		}
 		const conflict = this._conflicts.get(canonicalId);
 		if (conflict) {
 			tracks.conflictBase = {data: conflict.base, coverage: this._getConflictCoverage(conflict, "base")};
@@ -612,16 +753,36 @@ export class HubHttpCharacterRepository {
 			return {status: plan.status, decisions: plan.decisions};
 		}
 
+		const recoveryQueueNxt = this._getRecoveryQueueFromPlan({canonicalId, plan, sequence});
+		let stagedRecoveryQueue = null;
+		if (recoveryQueueNxt) {
+			try {
+				stagedRecoveryQueue = this._stageRecoveryCommandQueue({
+					characterId: canonicalId,
+					queue: recoveryQueueNxt,
+				});
+			} catch (error) {
+				this._setSaveBlock(canonicalId, {
+					reason: "recovery_storage_failed",
+					code: error.code || "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE",
+					message: error.message || `Cloud character recovery storage failed.`,
+				});
+				return {status: RECONCILE_STATUS.BLOCKED, error: {code: error.code, message: error.message}, decisions: plan.decisions};
+			}
+		}
+
 		// ADOPT LIVE — the only externally visible step inside the transaction.
 		if (Object.hasOwn(plan.staged, "live") && typeof fnAdoptLive === "function") {
 			try {
 				fnAdoptLive(structuredClone(plan.staged.live));
 			} catch (error) {
+				this._rollbackStagedRecoveryCommandQueue(stagedRecoveryQueue);
 				return {status: RECONCILE_STATUS.BLOCKED, error: {code: "LIVE_ADOPTION_FAILED", message: error?.message || `Live state could not be updated.`}, decisions: plan.decisions};
 			}
 		}
 
-		this._commitReconciliation({canonicalId, plan, eventId, sequence});
+		if (stagedRecoveryQueue) this._commitStagedRecoveryCommandQueue(stagedRecoveryQueue);
+		this._commitReconciliation({canonicalId, plan, eventId, sequence, isRecoveryQueueCommitted: !!stagedRecoveryQueue});
 		return {
 			status: RECONCILE_STATUS.APPLIED,
 			decisions: plan.decisions,
@@ -631,7 +792,7 @@ export class HubHttpCharacterRepository {
 		};
 	}
 
-	_commitReconciliation ({canonicalId, plan, eventId, sequence}) {
+	_commitReconciliation ({canonicalId, plan, eventId, sequence, isRecoveryQueueCommitted = false}) {
 		const book = this._getCoverageBook(canonicalId);
 		const operationLegKey = plan.operationLegKey;
 		const revision = plan.revisionNext;
@@ -670,11 +831,12 @@ export class HubHttpCharacterRepository {
 		} else if (plan.decisions.failedWrite === TRACK_DECISION.COVERED) markCovered(book.failedWrite);
 
 		this._commitConflictReconciliation({canonicalId, plan, revision, operationLegKey, sequence});
-		this._writeRecoveryCoverage(canonicalId);
+		if (!isRecoveryQueueCommitted) this._writeRecoveryCoverage(canonicalId);
 		if (this._operationConflicts.get(canonicalId)?.operationLegKey === operationLegKey) {
 			this._operationConflicts.delete(canonicalId);
 			this._clearSaveBlock(canonicalId);
 		}
+		this._clearRecoveryStorageSaveBlock(canonicalId);
 		this._commitAppliedIds({canonicalId, eventId, operationLegKey, sequence});
 	}
 
@@ -765,17 +927,16 @@ export class HubHttpCharacterRepository {
 	}
 
 	_writeRecoveryCoverage (canonicalId) {
-		// Best effort: in-memory coverage stays authoritative for this tab. A failed or partial write only
-		// degrades the next reload to unknown coverage, which forces a resync rather than a silent double-apply.
+		// Current cloud command queues require durable storage; legacy recovery remains best-effort and
+		// degrades the next reload to unknown coverage, forcing a resync rather than a silent double-apply.
 		const key = `hub-character-recovery:${this._scopeKey}:${canonicalId}`;
 		const queueEntry = this._getRecoveryCommandQueueEntry(canonicalId);
 		const failedWrite = this._failedWrites.get(canonicalId);
-		if (queueEntry?.queue.length && failedWrite) {
-			const latest = queueEntry.queue.at(-1);
-			const book = this._getCoverageBook(canonicalId);
-			latest.submittedSnapshot = this._getSnapshotData({...structuredClone(failedWrite), id: canonicalId});
-			latest.submittedSnapshotCoverage = this._cloneTrackCoverage(book.failedWrite);
-			this._persistRecoveryCommandQueue(canonicalId);
+		if (queueEntry?.queue.length) {
+			this._persistRecoveryCommandQueue(canonicalId, {
+				queue: queueEntry.queue,
+				isRequired: true,
+			});
 			return;
 		}
 		try {
@@ -928,18 +1089,38 @@ export class HubHttpCharacterRepository {
 					return {status: "history_unavailable"};
 				}
 
+				const recoveryQueueNxt = this._getRecoveryQueueFromWorkingSet({canonicalId, working});
+				let stagedRecoveryQueue = null;
+				if (recoveryQueueNxt) {
+					try {
+						stagedRecoveryQueue = this._stageRecoveryCommandQueue({
+							characterId: canonicalId,
+							queue: recoveryQueueNxt,
+						});
+					} catch (error) {
+						this._setSaveBlock(canonicalId, {
+							reason: "recovery_storage_failed",
+							code: error.code || "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE",
+							message: error.message || `Cloud character recovery storage failed.`,
+						});
+						return {status: "failed", error: {code: error.code, message: error.message}};
+					}
+				}
+
 				const liveNext = working.live?.data;
 				const isLiveChanged = !!plan.applied.length && liveNext !== undefined;
 				if (isLiveChanged && typeof fnAdoptLive === "function") {
 					try {
 						fnAdoptLive(structuredClone(liveNext));
 					} catch (error) {
+						this._rollbackStagedRecoveryCommandQueue(stagedRecoveryQueue);
 						// Nothing has been committed yet, so a retry replays the identical batch.
 						return {status: "failed", error: {code: "LIVE_ADOPTION_FAILED", message: error?.message}};
 					}
 				}
 
-				this._commitResyncBatch({canonicalId, canonical, plan});
+				if (stagedRecoveryQueue) this._commitStagedRecoveryCommandQueue(stagedRecoveryQueue);
+				this._commitResyncBatch({canonicalId, canonical, plan, isRecoveryQueueCommitted: !!stagedRecoveryQueue});
 				this._pendingResync.delete(canonicalId);
 				this._clearSaveBlock(canonicalId);
 				return {
@@ -980,6 +1161,17 @@ export class HubHttpCharacterRepository {
 		]) {
 			if (!map.has(canonicalId)) continue;
 			working[name] = {data: structuredClone(map.get(canonicalId)), coverage: this._cloneTrackCoverage(book[coverageKey])};
+		}
+		const recoveryQueueEntry = this._getRecoveryCommandQueueEntry(canonicalId);
+		for (const [index, command] of (recoveryQueueEntry?.queue || []).entries()) {
+			working[this._getRecoveryCommandTrackName({index, part: "base"})] = {
+				data: structuredClone(command.submittedBase),
+				coverage: this._cloneTrackCoverage(command.submittedBaseCoverage),
+			};
+			working[this._getRecoveryCommandTrackName({index, part: "snapshot"})] = {
+				data: structuredClone(command.submittedSnapshot),
+				coverage: this._cloneTrackCoverage(command.submittedSnapshotCoverage),
+			};
 		}
 		for (const [store, prefix] of [[this._conflicts, "conflict"], [this._liveConflicts, "liveConflict"]]) {
 			const conflict = store.get(canonicalId);
@@ -1062,7 +1254,7 @@ export class HubHttpCharacterRepository {
 	}
 
 	/** Publish a fully planned and already-adopted batch. */
-	_commitResyncBatch ({canonicalId, canonical, plan}) {
+	_commitResyncBatch ({canonicalId, canonical, plan, isRecoveryQueueCommitted = false}) {
 		const book = this._getCoverageBook(canonicalId);
 		const working = plan.working;
 
@@ -1092,7 +1284,7 @@ export class HubHttpCharacterRepository {
 			const cursor = this._realtimeCursors.get(canonicalId) || {};
 			this._realtimeCursors.set(canonicalId, {...cursor, operationWatermark: Math.max(cursor.operationWatermark || 0, ...sequences)});
 		}
-		this._writeRecoveryCoverage(canonicalId);
+		if (!isRecoveryQueueCommitted) this._writeRecoveryCoverage(canonicalId);
 	}
 
 	_commitResyncConflict ({store, prefix, canonicalId, working, isClearOnResolve}) {
@@ -1206,6 +1398,14 @@ export class HubHttpCharacterRepository {
 			this._recoveryVersions.set(newKey, this._recoveryVersions.get(oldKey));
 			this._recoveryVersions.delete(oldKey);
 		}
+		const queueEntry = this._getRecoveryCommandQueueEntry(toId);
+		if (queueEntry?.queue.length) {
+			this._persistRecoveryCommandQueue(fromId, {
+				queue: queueEntry.queue,
+				isRequired: true,
+			});
+			return;
+		}
 		try {
 			const recovery = this._recoveryStorage?.getItem(oldKey);
 			if (recovery) this._recoveryStorage?.setItem(newKey, recovery);
@@ -1232,19 +1432,62 @@ export class HubHttpCharacterRepository {
 			&& JSON.stringify(command?.submittedActivity ?? null) === JSON.stringify(activity ?? null);
 	}
 
-	_serializeRecoveryCommand (command) {
-		return {
-			base: structuredClone(command.submittedBase),
-			snapshot: structuredClone(command.submittedSnapshot),
-			activity: structuredClone(command.submittedActivity),
-			commandKeys: {...command.commandKeys},
-			state: command.state,
-			coverageVersion: COVERAGE_VERSION,
-			coverage: {
-				base: serializeCoverage(command.submittedBaseCoverage),
-				snapshot: serializeCoverage(command.submittedSnapshotCoverage),
-			},
+	_getRecoveryCommandTrackName ({index, part}) {
+		return `${_RECOVERY_COMMAND_TRACK_PREFIX}:${index}:${part}`;
+	}
+
+	_getRecoveryStorageError ({code, message, cause = null}) {
+		const error = new Error(message);
+		error.code = code;
+		if (cause) error.cause = cause;
+		return error;
+	}
+
+	_getRecoveryQueuePayload ({queue, version}) {
+		if (queue.length > _RECOVERY_COMMAND_QUEUE_LIMIT) {
+			throw this._getRecoveryStorageError({
+				code: "CHARACTER_RECOVERY_LIMIT",
+				message: `Too many cloud character changes are waiting to save. Wait for the current save to finish, then retry.`,
+			});
+		}
+		const first = queue[0];
+		let previousSnapshot = structuredClone(first.submittedBase);
+		let previousCoverage = this._cloneTrackCoverage(first.submittedBaseCoverage);
+		const commands = queue.map(command => {
+			if (diffJson(previousSnapshot, command.submittedBase).length
+				|| JSON.stringify(serializeCoverage(previousCoverage)) !== JSON.stringify(serializeCoverage(command.submittedBaseCoverage))) {
+				throw this._getRecoveryStorageError({
+					code: "CHARACTER_RECOVERY_INTEGRITY",
+					message: `Cloud character recovery history is inconsistent. Reload or export the character before retrying.`,
+				});
+			}
+			const out = {
+				patches: diffJson(command.submittedBase, command.submittedSnapshot),
+				activity: structuredClone(command.submittedActivity),
+				commandKeys: {...command.commandKeys},
+				state: command.state,
+				snapshotCoverage: serializeCoverage(command.submittedSnapshotCoverage),
+			};
+			previousSnapshot = structuredClone(command.submittedSnapshot);
+			previousCoverage = this._cloneTrackCoverage(command.submittedSnapshotCoverage);
+			return out;
+		});
+		const payload = {
+			version,
+			queueVersion: _RECOVERY_COMMAND_QUEUE_VERSION,
+			base: structuredClone(first.submittedBase),
+			baseCoverage: serializeCoverage(first.submittedBaseCoverage),
+			commands,
 		};
+		const raw = JSON.stringify(payload);
+		const byteLength = new TextEncoder().encode(raw).byteLength;
+		if (byteLength > _RECOVERY_COMMAND_QUEUE_MAX_BYTES) {
+			throw this._getRecoveryStorageError({
+				code: "CHARACTER_RECOVERY_LIMIT",
+				message: `Cloud character recovery is full. Wait for the current save to finish, then retry.`,
+			});
+		}
+		return raw;
 	}
 
 	_hydrateRecoveryCommand ({characterId, raw}) {
@@ -1261,59 +1504,150 @@ export class HubHttpCharacterRepository {
 		};
 	}
 
-	_persistRecoveryCommandQueue (characterId) {
+	_hydrateCompactRecoveryQueue ({characterId, parsed}) {
+		if (!Array.isArray(parsed.commands) || !parsed.commands.length || parsed.commands.length > _RECOVERY_COMMAND_QUEUE_LIMIT) return null;
+		let base = structuredClone(parsed.base ?? null);
+		let baseCoverage = deserializeCoverage(parsed.baseCoverage);
+		const queue = [];
+		for (const raw of parsed.commands) {
+			if (!Array.isArray(raw?.patches) || !raw?.commandKeys?.create || !raw?.commandKeys?.patch) return null;
+			const snapshot = applyJsonPatch(base, raw.patches);
+			const snapshotCoverage = deserializeCoverage(raw.snapshotCoverage);
+			queue.push({
+				requestedId: characterId,
+				submittedSnapshot: structuredClone(snapshot),
+				submittedActivity: structuredClone(raw.activity ?? null),
+				submittedBase: structuredClone(base),
+				submittedBaseCoverage: this._cloneTrackCoverage(baseCoverage),
+				submittedSnapshotCoverage: this._cloneTrackCoverage(snapshotCoverage),
+				commandKeys: {...raw.commandKeys},
+				state: ["failed", "conflict"].includes(raw.state) ? raw.state : "pending",
+			});
+			base = structuredClone(snapshot);
+			baseCoverage = this._cloneTrackCoverage(snapshotCoverage);
+		}
+		return queue;
+	}
+
+	_stageRecoveryCommandQueue ({characterId, queue, isRequired = queue.length > 0}) {
 		const canonicalId = this._canonicalIds.get(characterId) || characterId;
 		const entry = this._getRecoveryCommandQueueEntry(characterId);
 		const key = entry?.key || canonicalId;
-		const queue = entry?.queue || [];
 		const recoveryKeys = [...new Set([
 			`hub-character-recovery:${this._scopeKey}:${characterId}`,
 			`hub-character-recovery:${this._scopeKey}:${canonicalId}`,
+			`hub-character-recovery:${this._scopeKey}:${key}`,
 		])];
-		if (!queue.length) {
-			this._recoveryCommandQueues.delete(characterId);
-			this._recoveryCommandQueues.delete(canonicalId);
-			this._failedWrites.delete(characterId);
-			this._failedWrites.delete(canonicalId);
-			this._recoveredBases.delete(characterId);
-			this._recoveredBases.delete(canonicalId);
-			this._getCoverageBook(canonicalId).failedWrite = createCoverage();
-			for (const recoveryKey of recoveryKeys) {
-				this._recoveryVersions.delete(recoveryKey);
-				try {
-					this._recoveryStorage?.removeItem(recoveryKey);
-				} catch {
-					// Recovery storage cleanup is best-effort.
-				}
+		const recoveryKey = `hub-character-recovery:${this._scopeKey}:${key}`;
+		const version = (this._recoveryVersions.get(recoveryKey) || 0) + 1;
+		const nextRaw = queue.length ? this._getRecoveryQueuePayload({queue, version}) : null;
+		if (!this._recoveryStorage) {
+			if (isRequired) {
+				throw this._getRecoveryStorageError({
+					code: "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE",
+					message: `This cloud character change cannot be saved safely because browser recovery storage is unavailable.`,
+				});
 			}
-			return;
+			return {characterId, canonicalId, key, queue, recoveryKey, recoveryKeys, version, isStored: false, previous: new Map()};
 		}
 
+		let previous;
+		try {
+			previous = new Map(recoveryKeys.map(storageKey => [storageKey, this._recoveryStorage.getItem(storageKey)]));
+			for (const storageKey of recoveryKeys) {
+				if (storageKey === recoveryKey && nextRaw != null) this._recoveryStorage.setItem(storageKey, nextRaw);
+				else this._recoveryStorage.removeItem(storageKey);
+			}
+		} catch (cause) {
+			for (const [storageKey, raw] of previous || []) {
+				try {
+					if (raw == null) this._recoveryStorage.removeItem(storageKey);
+					else this._recoveryStorage.setItem(storageKey, raw);
+				} catch {
+					// The original durability error is the actionable failure.
+				}
+			}
+			if (isRequired) {
+				throw this._getRecoveryStorageError({
+					code: "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE",
+					message: `This cloud character change cannot be saved safely because browser recovery storage is full or unavailable.`,
+					cause,
+				});
+			}
+			return {characterId, canonicalId, key, queue, recoveryKey, recoveryKeys, version, isStored: false, previous};
+		}
+		return {characterId, canonicalId, key, queue, recoveryKey, recoveryKeys, version, isStored: true, previous};
+	}
+
+	_rollbackStagedRecoveryCommandQueue (staged) {
+		if (!staged?.isStored || !this._recoveryStorage) return;
+		for (const [storageKey, raw] of staged.previous) {
+			try {
+				if (raw == null) this._recoveryStorage.removeItem(storageKey);
+				else this._recoveryStorage.setItem(storageKey, raw);
+			} catch {
+				this._setSaveBlock(staged.canonicalId, {
+					reason: "recovery_storage_failed",
+					code: "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE",
+					message: `Cloud character recovery storage failed. Reload or export this character before continuing.`,
+				});
+			}
+		}
+	}
+
+	_commitStagedRecoveryCommandQueue (staged) {
+		const {characterId, canonicalId, key, queue, recoveryKey, recoveryKeys, version, isStored} = staged;
+		this._recoveryCommandQueues.delete(characterId);
+		this._recoveryCommandQueues.delete(canonicalId);
+		this._recoveryCommandQueues.delete(key);
+		if (!queue.length) {
+			this._failedWrites.delete(characterId);
+			this._failedWrites.delete(canonicalId);
+			this._failedWrites.delete(key);
+			this._recoveredBases.delete(characterId);
+			this._recoveredBases.delete(canonicalId);
+			this._recoveredBases.delete(key);
+			this._getCoverageBook(canonicalId).failedWrite = createCoverage();
+			for (const storageKey of recoveryKeys) this._recoveryVersions.delete(storageKey);
+			return;
+		}
+		this._recoveryCommandQueues.set(key, queue);
 		const latest = queue.at(-1);
 		this._failedWrites.set(key, {...structuredClone(latest.submittedSnapshot), id: key});
 		this._getCoverageBook(key).failedWrite = this._cloneTrackCoverage(latest.submittedSnapshotCoverage);
-		const recoveryKey = `hub-character-recovery:${this._scopeKey}:${key}`;
-		const version = (this._recoveryVersions.get(recoveryKey) || 0) + 1;
-		this._recoveryVersions.set(recoveryKey, version);
-		const first = queue[0];
-		try {
-			this._recoveryStorage?.setItem(recoveryKey, JSON.stringify({
-				version,
-				queueVersion: _RECOVERY_COMMAND_QUEUE_VERSION,
-				commands: queue.map(command => this._serializeRecoveryCommand(command)),
-				base: structuredClone(first.submittedBase),
-				snapshot: structuredClone(latest.submittedSnapshot),
-				activity: structuredClone(latest.submittedActivity),
-				commandKeys: {...latest.commandKeys},
-				coverageVersion: COVERAGE_VERSION,
-				coverage: {
-					base: serializeCoverage(first.submittedBaseCoverage),
-					snapshot: serializeCoverage(latest.submittedSnapshotCoverage),
-				},
-			}));
-		} catch {
-			// Recovery storage is best-effort; the in-memory queue remains authoritative for this tab.
-		}
+		if (isStored) this._recoveryVersions.set(recoveryKey, version);
+	}
+
+	_commitRecoveryCommandQueueInMemory ({characterId, queue}) {
+		const canonicalId = this._canonicalIds.get(characterId) || characterId;
+		const entry = this._getRecoveryCommandQueueEntry(characterId);
+		const key = entry?.key || canonicalId;
+		this._commitStagedRecoveryCommandQueue({
+			characterId,
+			canonicalId,
+			key,
+			queue,
+			recoveryKey: `hub-character-recovery:${this._scopeKey}:${key}`,
+			recoveryKeys: [...new Set([
+				`hub-character-recovery:${this._scopeKey}:${characterId}`,
+				`hub-character-recovery:${this._scopeKey}:${canonicalId}`,
+				`hub-character-recovery:${this._scopeKey}:${key}`,
+			])],
+			version: this._recoveryVersions.get(`hub-character-recovery:${this._scopeKey}:${key}`) || 0,
+			isStored: false,
+		});
+	}
+
+	_persistRecoveryCommandQueue (characterId, {queue = null, isRequired} = {}) {
+		const entry = this._getRecoveryCommandQueueEntry(characterId);
+		const queueNxt = queue || entry?.queue || [];
+		const staged = this._stageRecoveryCommandQueue({
+			characterId,
+			queue: queueNxt,
+			...(isRequired == null ? {} : {isRequired}),
+		});
+		this._commitStagedRecoveryCommandQueue({...staged, characterId});
+		return staged;
 	}
 
 	async _pExecuteUpsertCommand (command) {
@@ -1500,14 +1834,25 @@ export class HubHttpCharacterRepository {
 			try {
 				lastResult = await this._pExecuteUpsertCommand(command);
 			} catch (error) {
-				command.state = error?.code === "CHARACTER_CONFLICT" ? "conflict" : "failed";
+				const currentEntry = this._getRecoveryCommandQueueEntry(characterId);
+				const queueNxt = (currentEntry?.queue || entry.queue).map((it, index) => index
+					? it
+					: {...it, state: error?.code === "CHARACTER_CONFLICT" ? "conflict" : "failed"});
 				if (error?.code === "CHARACTER_CONFLICT") {
 					const canonicalId = this._canonicalIds.get(characterId) || characterId;
 					const recovery = this._conflicts.get(canonicalId);
-					const latest = entry.queue.at(-1);
+					const latest = queueNxt.at(-1);
 					if (recovery && latest) recovery.local = structuredClone(latest.submittedSnapshot);
 				}
-				this._persistRecoveryCommandQueue(characterId);
+				try {
+					this._persistRecoveryCommandQueue(characterId, {
+						queue: queueNxt,
+						isRequired: true,
+					});
+				} catch (storageError) {
+					this._commitRecoveryCommandQueueInMemory({characterId, queue: queueNxt});
+					throw storageError;
+				}
 				throw error;
 			}
 
@@ -1516,18 +1861,30 @@ export class HubHttpCharacterRepository {
 			if (!committed || !this._areSameCommandKeys(committed.commandKeys, command.commandKeys)) {
 				throw new Error(`Character recovery command queue changed during serialized commit.`);
 			}
-			committedEntry.queue.shift();
+			const queueNxt = committedEntry.queue.slice(1);
 			const isTargetCommitted = this._areSameCommandKeys(command.commandKeys, throughCommandKeys);
 			const canonicalId = this._canonicalIds.get(characterId) || characterId;
 			const accepted = this._accepted.get(canonicalId);
-			const next = committedEntry.queue[0];
+			const next = queueNxt[0];
 			if (next && accepted && isRecoveryReplay) {
-				next.requestedId = canonicalId;
-				next.submittedBase = structuredClone(accepted.data);
-				next.submittedBaseCoverage = this._cloneTrackCoverage(this._getAcceptedCoverage(canonicalId));
-				next.state = "pending";
+				queueNxt[0] = {
+					...next,
+					requestedId: canonicalId,
+					submittedBase: structuredClone(accepted.data),
+					submittedBaseCoverage: this._cloneTrackCoverage(this._getAcceptedCoverage(canonicalId)),
+					state: "pending",
+				};
 			}
-			this._persistRecoveryCommandQueue(characterId);
+			try {
+				this._persistRecoveryCommandQueue(characterId, {
+					queue: queueNxt,
+					isRequired: queueNxt.length > 0,
+				});
+			} catch (storageError) {
+				const retryQueue = committedEntry.queue.map((it, index) => index ? it : {...it, state: "failed"});
+				this._commitRecoveryCommandQueueInMemory({characterId, queue: retryQueue});
+				throw storageError;
+			}
 			if (isTargetCommitted) return lastResult;
 		}
 	}
@@ -1585,13 +1942,20 @@ export class HubHttpCharacterRepository {
 				submittedSnapshotCoverage,
 				state: "pending",
 			};
-			queueEntry.queue.push(command);
+		}
+		const queueNxt = command === retryCommand ? queueEntry.queue : [...queueEntry.queue, command];
+		try {
+			this._persistRecoveryCommandQueue(requestedId, {
+				queue: queueNxt,
+				isRequired: true,
+			});
+		} catch (error) {
+			return Promise.reject(error);
 		}
 		this._recoveredBases.delete(requestedId);
 		bookAtCall.recoveredBase = createCoverage();
 		this._latestSubmitted.set(requestedId, structuredClone(submittedSnapshot));
 		bookAtCall.latestSubmitted = this._cloneTrackCoverage(submittedSnapshotCoverage);
-		this._persistRecoveryCommandQueue(requestedId);
 		this._pendingWrites++;
 		const pResult = this._pRunMutation(() => this._pDrainRecoveryCommandQueue({
 			characterId: requestedId,
@@ -1619,15 +1983,16 @@ export class HubHttpCharacterRepository {
 			const raw = recoveryKey ? this._recoveryStorage?.getItem(recoveryKey) : null;
 			if (!raw) return null;
 			const parsed = JSON.parse(raw);
-			const isQueuePayload = parsed.queueVersion === _RECOVERY_COMMAND_QUEUE_VERSION;
-			if (isQueuePayload && (
-				!Array.isArray(parsed.commands)
-				|| !parsed.commands.length
-				|| parsed.commands.some(command => !command?.snapshot || !command?.commandKeys?.create || !command?.commandKeys?.patch)
-			)) return null;
-			const rawCommands = isQueuePayload ? parsed.commands : [];
-			if (rawCommands.length) {
-				const queue = rawCommands.map(command => this._hydrateRecoveryCommand({characterId: canonicalId, raw: command}));
+			let queue = null;
+			if (parsed.queueVersion === _RECOVERY_COMMAND_QUEUE_VERSION) {
+				queue = this._hydrateCompactRecoveryQueue({characterId: canonicalId, parsed});
+			} else if (parsed.queueVersion === _RECOVERY_COMMAND_QUEUE_LEGACY_VERSION) {
+				if (!Array.isArray(parsed.commands)
+					|| !parsed.commands.length
+					|| parsed.commands.some(command => !command?.snapshot || !command?.commandKeys?.create || !command?.commandKeys?.patch)) return null;
+				queue = parsed.commands.map(command => this._hydrateRecoveryCommand({characterId: canonicalId, raw: command}));
+			}
+			if (queue?.length) {
 				if (queue[0].state === "pending") queue[0].state = "failed";
 				this._recoveryCommandQueues.set(canonicalId, queue);
 				if (Number.isInteger(parsed.version)) this._recoveryVersions.set(recoveryKey, parsed.version);
@@ -1690,34 +2055,44 @@ export class HubHttpCharacterRepository {
 		if (!recovery) return null;
 		if (choice === "server") {
 			return this._pRunMutation(async () => {
+				const queueEntry = this._getRecoveryCommandQueueEntry(characterId);
+				this._persistRecoveryCommandQueue(characterId, {queue: [], isRequired: !!queueEntry?.queue.length});
 				this._conflicts.delete(characterId);
 				this._accepted.set(characterId, recovery.serverDocument);
-				const queueEntry = this._getRecoveryCommandQueueEntry(characterId);
-				if (queueEntry) queueEntry.queue.length = 0;
-				this._persistRecoveryCommandQueue(characterId);
 				return this._getData(recovery.serverDocument);
 			});
 		}
 		if (choice !== "local") throw new TypeError(`Conflict choice must be "local" or "server".`);
 		const queueEntry = this._getRecoveryCommandQueueEntry(characterId);
 		if (!queueEntry?.queue.length) {
+			await this.pAcquireLease({characterId, isTakeover: true});
 			this._conflicts.delete(characterId);
 			this._accepted.set(characterId, recovery.serverDocument);
 			this._syncCoverageToAccepted(characterId);
-			await this.pAcquireLease({characterId, isTakeover: true});
 			return this.pUpsert({character: {...structuredClone(recovery.local), id: characterId}});
 		}
 		return this._pRunMutation(async () => {
+			await this.pAcquireLease({characterId, isTakeover: true});
+			const serverCoverage = this._getAcceptedCoverage(characterId);
+			serverCoverage.revision = recovery.serverDocument.revision;
+			const serverSequence = this._getOperationWatermark(characterId, recovery.serverDocument);
+			if (Number.isInteger(serverSequence)) serverCoverage.acceptedSequence = serverSequence;
+			const queueNxt = queueEntry.queue.map((command, index) => index
+				? command
+				: {
+					...command,
+					submittedBase: structuredClone(recovery.serverDocument.data),
+					submittedBaseCoverage: serverCoverage,
+					state: "pending",
+				});
+			const last = queueNxt.at(-1);
+			this._persistRecoveryCommandQueue(characterId, {
+				queue: queueNxt,
+				isRequired: true,
+			});
 			this._conflicts.delete(characterId);
 			this._accepted.set(characterId, recovery.serverDocument);
 			this._syncCoverageToAccepted(characterId);
-			await this.pAcquireLease({characterId, isTakeover: true});
-			const first = queueEntry.queue[0];
-			const last = queueEntry.queue.at(-1);
-			first.submittedBase = structuredClone(recovery.serverDocument.data);
-			first.submittedBaseCoverage = this._cloneTrackCoverage(this._getAcceptedCoverage(characterId));
-			first.state = "pending";
-			this._persistRecoveryCommandQueue(characterId);
 			return this._pDrainRecoveryCommandQueue({
 				characterId,
 				throughCommandKeys: last.commandKeys,

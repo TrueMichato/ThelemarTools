@@ -19,6 +19,24 @@ class MemoryStorage {
 	}
 }
 
+class FailingStorage extends MemoryStorage {
+	constructor ({failOnWrite}) {
+		super();
+		this._failOnWrite = failOnWrite;
+		this._writeCount = 0;
+	}
+
+	setItem (key, value) {
+		this._writeCount++;
+		if (this._writeCount === this._failOnWrite) {
+			const error = new Error("sessionStorage quota exceeded");
+			error.name = "QuotaExceededError";
+			throw error;
+		}
+		super.setItem(key, value);
+	}
+}
+
 const makeSpellActivity = (spellName, mode = "cantrip") => ({
 	type: "spell.used",
 	spellName,
@@ -29,6 +47,18 @@ const makeSpellActivity = (spellName, mode = "cantrip") => ({
 });
 
 describe("HTTP character repository", () => {
+	let previousSessionStorage;
+
+	beforeEach(() => {
+		previousSessionStorage = globalThis.sessionStorage;
+		globalThis.sessionStorage = new MemoryStorage();
+	});
+
+	afterEach(() => {
+		if (previousSessionStorage === undefined) delete globalThis.sessionStorage;
+		else globalThis.sessionStorage = previousSessionStorage;
+	});
+
 	it("lists and unwraps campaign character documents", async () => {
 		const api = {
 			pGetSession: async () => ({signedIn: true}),
@@ -433,6 +463,86 @@ describe("HTTP character repository", () => {
 		expect(recovery.serverDocument).toEqual(documents[3]);
 	});
 
+	it("persists authoritative conflict rebases across every queued command before Use Local replay", async () => {
+		let canonical = {
+			id: "server-1",
+			campaignId: "campaign-1",
+			revision: 1,
+			data: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]},
+		};
+		const requests = [];
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => structuredClone(canonical),
+			pAcquireCharacterLease: async () => ({epoch: 1}),
+			pPatchCharacter: async input => {
+				requests.push(input);
+				expect(input.patches.some(patch => patch.path.startsWith("/inventory"))).toBe(false);
+				const notes = input.patches.find(patch => patch.path === "/notes")?.value;
+				canonical = {
+					...canonical,
+					revision: canonical.revision + 1,
+					data: {...canonical.data, notes},
+				};
+				return {character: structuredClone(canonical)};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "server-1"});
+		const initialCoverage = repository._cloneTrackCoverage(repository._getAcceptedCoverage("server-1"));
+		const firstActivity = makeSpellActivity("Shield", "spell_slot");
+		const secondActivity = makeSpellActivity("Magic Missile", "spell_slot");
+		const firstSnapshot = {notes: "first", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 9}]};
+		const secondSnapshot = {notes: "second", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 9}]};
+		repository._persistRecoveryCommandQueue("server-1", {
+			queue: [
+				{
+					requestedId: "server-1",
+					submittedBase: structuredClone(canonical.data),
+					submittedBaseCoverage: repository._cloneTrackCoverage(initialCoverage),
+					submittedSnapshot: firstSnapshot,
+					submittedSnapshotCoverage: repository._cloneTrackCoverage(initialCoverage),
+					submittedActivity: firstActivity,
+					commandKeys: {create: "create-1", patch: "patch-1"},
+					state: "failed",
+				},
+				{
+					requestedId: "server-1",
+					submittedBase: firstSnapshot,
+					submittedBaseCoverage: repository._cloneTrackCoverage(initialCoverage),
+					submittedSnapshot: secondSnapshot,
+					submittedSnapshotCoverage: repository._cloneTrackCoverage(initialCoverage),
+					submittedActivity: secondActivity,
+					commandKeys: {create: "create-2", patch: "patch-2"},
+					state: "pending",
+				},
+			],
+			isRequired: true,
+		});
+		canonical = {
+			...canonical,
+			revision: 2,
+			data: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 7}]},
+		};
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => secondSnapshot,
+		})).resolves.toMatchObject({status: "conflict"});
+		const queued = repository._recoveryCommandQueues.get("server-1");
+		expect(queued.map(command => command.submittedBase.inventory[0].quantity)).toEqual([7, 7]);
+		expect(queued.map(command => command.submittedSnapshot.inventory[0].quantity)).toEqual([7, 7]);
+		expect(queued.map(command => command.submittedActivity)).toEqual([firstActivity, secondActivity]);
+
+		await expect(repository.pResolveConflict({characterId: "server-1", choice: "local"})).resolves.toEqual({
+			id: "server-1",
+			notes: "second",
+			inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 7}],
+		});
+		expect(requests.map(request => request.activity)).toEqual([firstActivity, secondActivity]);
+		expect(repository._recoveryCommandQueues.size).toBe(0);
+	});
+
 	it("suppresses duplicate authoritative reconciliation once the revision is accepted", async () => {
 		const document = {id: "server-1", campaignId: "campaign-1", revision: 2, data: {inventory: []}};
 		const repository = new HubHttpCharacterRepository({
@@ -732,10 +842,16 @@ describe("HTTP character repository", () => {
 		await replayStarted;
 
 		const stored = JSON.parse(storage.getItem("hub-character-recovery:cmp:c"));
+		expect(stored.queueVersion).toBe(2);
 		expect(stored.commands).toHaveLength(2);
 		expect(stored.commands.map(command => command.activity)).toEqual([shield, magicMissile]);
 		expect(stored.commands[0].commandKeys.patch).toBe(requests[0].idempotencyKey);
 		expect(stored.commands[1].commandKeys.patch).not.toBe(requests[0].idempotencyKey);
+		expect(stored).not.toHaveProperty("snapshot");
+		expect(stored).not.toHaveProperty("activity");
+		expect(stored).not.toHaveProperty("commandKeys");
+		expect(stored.commands[0]).not.toHaveProperty("base");
+		expect(stored.commands[0]).not.toHaveProperty("snapshot");
 
 		const fresh = new HubHttpCharacterRepository({campaignId: "cmp", api});
 		fresh._recoveryStorage = storage;
@@ -744,6 +860,43 @@ describe("HTTP character repository", () => {
 
 		rejectReplay(new Error("still offline"));
 		await settled;
+	});
+
+	it("loads the previous full-snapshot recovery queue format without dropping commands", () => {
+		const storage = new MemoryStorage();
+		const coverage = {
+			base: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: [], appliedOperationIds: []},
+			snapshot: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: [], appliedOperationIds: []},
+		};
+		storage.setItem("hub-character-recovery:cmp:c", JSON.stringify({
+			version: 3,
+			queueVersion: 1,
+			commands: [
+				{
+					base: {hp: 10},
+					snapshot: {hp: 9},
+					activity: makeSpellActivity("Shield", "spell_slot"),
+					commandKeys: {create: "create-1", patch: "patch-1"},
+					state: "failed",
+					coverageVersion: 2,
+					coverage,
+				},
+				{
+					base: {hp: 9},
+					snapshot: {hp: 8},
+					activity: makeSpellActivity("Magic Missile", "spell_slot"),
+					commandKeys: {create: "create-2", patch: "patch-2"},
+					state: "pending",
+					coverageVersion: 2,
+					coverage,
+				},
+			],
+		}));
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api: {}});
+		repository._recoveryStorage = storage;
+
+		expect(repository.getPendingRecovery("c")).toEqual({hp: 8});
+		expect(repository._recoveryCommandQueues.get("c").map(command => command.submittedSnapshot.hp)).toEqual([9, 8]);
 	});
 
 	it("replays every unresolved activity after a replay conflict is resolved with local state", async () => {
@@ -841,6 +994,136 @@ describe("HTTP character repository", () => {
 		expect(repository._recoveryCommandQueues.has("c")).toBe(false);
 		expect(repository.hasPendingWrites()).toBe(false);
 		expect(storage.getItem("hub-character-recovery:cmp:c")).toBeNull();
+	});
+
+	it("rejects a semantic command when session recovery storage refuses the complete queue", async () => {
+		const storage = new FailingStorage({failOnWrite: 2});
+		const requests = [];
+		let releaseFirst;
+		let markFirstStarted;
+		const firstStarted = new Promise(resolve => markFirstStarted = resolve);
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+			pAcquireCharacterLease: async () => ({epoch: requests.length + 1}),
+			pPatchCharacter: async input => {
+				requests.push(structuredClone(input));
+				if (requests.length === 1) {
+					markFirstStarted();
+					await new Promise(resolve => releaseFirst = resolve);
+					return {character: {id: "c", revision: 2, data: {hp: 9}}};
+				}
+				return {character: {id: "c", revision: 3, data: {hp: 8}}};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		repository._recoveryStorage = storage;
+		await repository.pGet({characterId: "c"});
+
+		const first = repository.pUpsert({character: {id: "c", hp: 9}, activity: makeSpellActivity("Shield", "spell_slot")});
+		await firstStarted;
+		const rejected = repository.pUpsert({character: {id: "c", hp: 8}, activity: makeSpellActivity("Magic Missile", "spell_slot")});
+		const rejectedAssertion = expect(rejected).rejects.toMatchObject({code: "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE"});
+		releaseFirst();
+
+		await expect(first).resolves.toEqual({id: "c", hp: 9});
+		await rejectedAssertion;
+		expect(requests).toHaveLength(1);
+		expect(repository._recoveryCommandQueues.size).toBe(0);
+	});
+
+	it("rejects an ordinary cloud save when no reload-durable recovery storage is available", async () => {
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+			pPatchCharacter: jest.fn(),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		repository._recoveryStorage = null;
+		await repository.pGet({characterId: "c"});
+
+		await expect(repository.pUpsert({character: {id: "c", hp: 9}}))
+			.rejects.toMatchObject({code: "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE"});
+		expect(api.pPatchCharacter).not.toHaveBeenCalled();
+	});
+
+	it("rejects a queued semantic command before its compact recovery payload exceeds the byte limit", async () => {
+		const storage = new MemoryStorage();
+		const requests = [];
+		let releaseFirst;
+		let markFirstStarted;
+		const firstStarted = new Promise(resolve => markFirstStarted = resolve);
+		const base = "a".repeat(1_450_000);
+		const firstValue = "b".repeat(1_450_000);
+		const secondValue = "c".repeat(1_450_000);
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {notes: base}}),
+			pAcquireCharacterLease: async () => ({epoch: requests.length + 1}),
+			pPatchCharacter: async input => {
+				requests.push(input);
+				if (requests.length === 1) {
+					markFirstStarted();
+					await new Promise(resolve => releaseFirst = resolve);
+					return {character: {id: "c", revision: 2, data: {notes: firstValue}}};
+				}
+				return {character: {id: "c", revision: 3, data: {notes: secondValue}}};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		repository._recoveryStorage = storage;
+		await repository.pGet({characterId: "c"});
+
+		const first = repository.pUpsert({character: {id: "c", notes: firstValue}, activity: makeSpellActivity("Shield", "spell_slot")});
+		await firstStarted;
+		const rejected = repository.pUpsert({character: {id: "c", notes: secondValue}, activity: makeSpellActivity("Magic Missile", "spell_slot")});
+		const rejectedAssertion = expect(rejected).rejects.toMatchObject({code: "CHARACTER_RECOVERY_LIMIT"});
+		await rejectedAssertion;
+		const stored = storage.getItem("hub-character-recovery:cmp:c");
+		expect(new TextEncoder().encode(stored).byteLength).toBeLessThanOrEqual(3_500_000);
+		releaseFirst();
+
+		await expect(first).resolves.toEqual({id: "c", notes: firstValue});
+		expect(requests).toHaveLength(1);
+	});
+
+	it("rejects a semantic command before the recovery queue exceeds its command limit", async () => {
+		const storage = new MemoryStorage();
+		const requests = [];
+		let releaseFirst;
+		let markFirstStarted;
+		const firstStarted = new Promise(resolve => markFirstStarted = resolve);
+		let revision = 1;
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {value: -1}}),
+			pAcquireCharacterLease: async () => ({epoch: requests.length + 1}),
+			pPatchCharacter: async input => {
+				requests.push(input);
+				const value = input.patches.find(patch => patch.path === "/value")?.value;
+				if (requests.length === 1) {
+					markFirstStarted();
+					await new Promise(resolve => releaseFirst = resolve);
+				}
+				return {character: {id: "c", revision: ++revision, data: {value}}};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		repository._recoveryStorage = storage;
+		await repository.pGet({characterId: "c"});
+
+		const accepted = [repository.pUpsert({character: {id: "c", value: 0}, activity: makeSpellActivity("Spell 0")})];
+		await firstStarted;
+		for (let i = 1; i < 32; ++i) {
+			accepted.push(repository.pUpsert({character: {id: "c", value: i}, activity: makeSpellActivity(`Spell ${i}`)}));
+		}
+		const rejected = repository.pUpsert({character: {id: "c", value: 32}, activity: makeSpellActivity("Spell 32")});
+		const rejectedAssertion = expect(rejected).rejects.toMatchObject({code: "CHARACTER_RECOVERY_LIMIT"});
+		releaseFirst();
+
+		await rejectedAssertion;
+		await expect(Promise.all(accepted)).resolves.toHaveLength(32);
+		expect(requests).toHaveLength(32);
 	});
 
 	it("retains the earlier failed spell command when its queued replay also fails", async () => {
