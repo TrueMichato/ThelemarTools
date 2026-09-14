@@ -132,6 +132,7 @@ jobs:
           test/jest/charactersheet/CharacterSheetCampaignRules.test.js
           test/jest/charactersheet/CharacterSheetHubTeardown.test.js
           test/jest/charactersheet/CharacterSheetRollHistory.test.js
+          test/jest/charactersheet/CharacterSheetMagicItemCategorization.test.js
           --no-coverage --forceExit
 
       - name: DM Screen Hub seams
@@ -211,6 +212,14 @@ jobs:
             await pool.end();
           }
           NODE
+
+      - name: PostgreSQL inventory lifecycle
+        env:
+          HUB_TEST_POSTGRES_URL: postgresql://hub_runtime:hub-runtime@127.0.0.1:5432/hub
+        run: >
+          npm run test:unit --
+          test/jest/hub/HubInventoryPostgres.test.js
+          --runInBand --no-coverage --forceExit
 
   real-stack-e2e:
     needs: unit-and-supply-chain

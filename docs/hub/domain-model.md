@@ -245,7 +245,9 @@ Whole-item transfer is refused if removal would require Character Sheet recalcul
 
 Partial stack transfer is allowed because the source wrapper remains. Cross-container commit resets
 ownership-local equipped/attuned/starred state and mints a new id unless full wrapper metadata is merge
-compatible. Restore preserves source identity/index.
+compatible. Comparison removes only deterministic Character Sheet aliases and empty composition defaults;
+spent charges, non-empty upgrades/gemstones, custom metadata, provenance, and other semantic differences remain
+stack-separating. Restore preserves source identity/index.
 
 ## Atomic item-award invariant
 
@@ -256,8 +258,10 @@ normalization, and commits that debit with every destination write. Catalog-like
 `item.granted` events carry only bounded safe summary metadata, but the authority resolves `name|source` from
 the generated site catalog or active campaign brew and stores the complete trusted item. Recent-award identity
 may resolve through either trusted source. Unknown or source-kind-mismatched identities fail; browser metadata
-never becomes canonical merely because it is present in the summary. All destination inventory changes delete
-derived `data.carry` authority instead of recomputing it without a Character Sheet.
+never becomes canonical merely because it is present in the summary. Simple campaign `_copy` resolution also
+removes the generic/item parent-only publication fields that the site copy system preserves only by explicit
+request. All destination inventory changes delete derived `data.carry` authority instead of recomputing it
+without a Character Sheet.
 
 ## Known domain gaps
 

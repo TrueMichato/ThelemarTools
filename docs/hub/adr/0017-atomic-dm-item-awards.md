@@ -62,7 +62,8 @@ Before a catalog-like award is staged, the server resolves that identity from a 
 
 - `catalog` resolves only from the generated repository-owned site item catalog;
 - `campaign_item` resolves only from the campaign's active validated brew bundle; direct metadata and simple
-  `name`/`source` `_copy` inheritance are supported, while runtime transformation/template execution is rejected;
+  `name`/`source` `_copy` inheritance are supported, while runtime transformation/template execution is rejected.
+  Parent-only generic/item publication fields are not inherited unless the child authors its own value;
 - `recent` resolves from either trusted source because the originating event intentionally retains only a safe
   summary.
 
@@ -74,6 +75,16 @@ and audit evidence remain bounded summaries.
 A party-inventory request supplies only its stack entry UUID. The server reads and locks that stack, validates
 the total debit (`quantity * target count`), removes it once through the transfer inventory primitives, and
 splits transferable metadata into each destination. Browser-supplied stash item content is never trusted.
+
+Destination stack comparison preserves complete item and wrapper semantics, but canonicalizes deterministic
+Character Sheet aliases before comparing. A load/save-added `typeCode`, `properties`, armor/shield/weapon flag,
+attunement or ability alias, full `chargesCurrent`, or empty upgrade/gemstone list therefore cannot split an
+otherwise identical trusted stack. Non-empty composition, spent charges, custom metadata, effects, materials,
+provenance, and ownership-local wrapper differences remain distinct.
+
+Legacy summary repair also excludes renderer/filter caches, renderer-created empty `entries`, and
+renderer-injected `additionalSources`. Those enhanced-catalog fields are not part of the authoritative award
+catalog and must not become canonical merely because the Character Sheet loaded the item.
 
 ### Canonical mutation, audit, and events
 

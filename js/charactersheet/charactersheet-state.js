@@ -4374,14 +4374,26 @@ class CharacterSheetState {
 			"_category",
 			"_entrySubType",
 			"_entryType",
+			"_fullAdditionalEntries",
 			"_fullEntries",
 			"_isBaseItem",
 			"_isEnhanced",
 			"_isItemGroup",
 			"_textTypes",
+			"_valueFromRarity",
+			"_compositionSearch",
+			"hasRefs",
+			"variants",
 			"constructor",
 			"prototype",
 		]);
+		const isTransientCatalogField = key => transientCatalogFields.has(key)
+			|| /^_f[A-Z]/.test(key)
+			|| key.startsWith("_l_")
+			|| key.startsWith("_full");
+		const isEnhancedCatalogOnlyField = (key, value, match) =>
+			(key === "entries" && Array.isArray(value) && !value.length)
+			|| (key === "additionalSources" && match._isEnhanced);
 		const catalog = new Map((this._allItems || [])
 			.filter(item => item?.name && item?.source)
 			.map(item => [`${item.name}|${item.source}`.toLowerCase(), item]));
@@ -4394,7 +4406,11 @@ class CharacterSheetState {
 				: null;
 			if (match && item.type == null) {
 				for (const [key, value] of Object.entries(match)) {
-					if (transientCatalogFields.has(key) || item[key] !== undefined) continue;
+					if (
+						isTransientCatalogField(key)
+						|| isEnhancedCatalogOnlyField(key, value, match)
+						|| item[key] !== undefined
+					) continue;
 					item[key] = MiscUtil.copyFast(value);
 				}
 			}

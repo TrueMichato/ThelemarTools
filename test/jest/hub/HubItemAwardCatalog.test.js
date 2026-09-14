@@ -111,6 +111,89 @@ describe("Campaign Hub authoritative item-award catalog", () => {
 		expect(resolved).not.toHaveProperty("_copy");
 	});
 
+	it("does not inherit parent-only publication fields through a campaign item copy", async () => {
+		const parent = {
+			name: "Longsword",
+			source: "PHB",
+			type: "M",
+			weight: 3,
+			value: 1500,
+			weaponCategory: "martial",
+			property: ["V"],
+			dmg1: "1d8",
+			dmgType: "S",
+			page: 149,
+			otherSources: [{source: "XPHB", page: 213}],
+			referenceSources: [{source: "SRD"}],
+			srd: true,
+			srd52: true,
+			basicRules: true,
+			basicRules2024: true,
+			reprintedAs: ["Longsword|XPHB"],
+			hasFluff: true,
+			hasFluffImages: true,
+			hasToken: true,
+			tokenCredit: "Synthetic",
+			tokenCustom: true,
+			foundryTokenScale: 2,
+			altArt: [{name: "Synthetic"}],
+			_versions: [{name: "Legacy"}],
+			lootTables: ["Synthetic Table"],
+			tier: "minor",
+		};
+		const copiedItem = {
+			name: "Moonsteel Longsword",
+			source: "TST",
+			_copy: {name: parent.name, source: parent.source},
+			rarity: "rare",
+			entries: ["Trusted campaign effect."],
+		};
+		const resolve = createItemAwardResolver({
+			fnLoadSiteItems: async () => new Map([["longsword|phb", parent]]),
+		});
+
+		const resolved = await resolve({
+			sourceKind: "campaign_item",
+			item: {name: copiedItem.name, source: copiedItem.source},
+			brewBundle: {content: [{body: {item: [copiedItem]}}]},
+		});
+
+		expect(resolved).toEqual(expect.objectContaining({
+			name: copiedItem.name,
+			source: copiedItem.source,
+			type: parent.type,
+			weight: parent.weight,
+			value: parent.value,
+			weaponCategory: parent.weaponCategory,
+			property: parent.property,
+			dmg1: parent.dmg1,
+			dmgType: parent.dmgType,
+			rarity: copiedItem.rarity,
+			entries: copiedItem.entries,
+			_isCopy: true,
+		}));
+		for (const key of [
+			"page",
+			"otherSources",
+			"referenceSources",
+			"srd",
+			"srd52",
+			"basicRules",
+			"basicRules2024",
+			"reprintedAs",
+			"hasFluff",
+			"hasFluffImages",
+			"hasToken",
+			"tokenCredit",
+			"tokenCustom",
+			"foundryTokenScale",
+			"altArt",
+			"_versions",
+			"lootTables",
+			"tier",
+		]) expect(resolved).not.toHaveProperty(key);
+	});
+
 	it("rejects campaign copy metadata when its trusted parent cannot be resolved", async () => {
 		const resolve = createItemAwardResolver({
 			fnLoadSiteItems: async () => new Map(),
