@@ -250,8 +250,10 @@ result rather than repeating either mutation.
 Browser proposal and resolution retries freeze the original body, decision, rules pin, and idempotency key after
 an outcome-uncertain network, invalid-response, or HTTP 5xx failure. That exact retry is allowed for at most 23
 hours, staying inside PostgreSQL's 24-hour command-receipt lifetime. Once the browser window expires, it performs
-an authorization-scoped inventory or inbox refresh instead of risking a fresh duplicate command; offline mutation
-queues and blind replay across reloads remain out of scope.
+an authorization-scoped inventory or inbox refresh instead of risking a fresh duplicate command. If an acceptance
+fails definitively because its rules pin is stale, the browser reconciles first and creates a complete new
+decision request with a new key; it never changes the pin beneath an existing key. Offline mutation queues and
+blind replay across reloads remain out of scope.
 An approval-bound acceptance or direct proposal into a character compares the resulting authoritative document
 with its prior state and rejects a new disallowed/unknown item identity or stale rules pin before source,
 destination, resolution, audit, event, outbox, or receipt changes. Approval-bound reserved escrow remains

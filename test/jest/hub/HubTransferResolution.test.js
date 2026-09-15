@@ -30,9 +30,6 @@ describe("Campaign Hub transfer resolution retries", () => {
 		expect(drafts.isReplayable(accept)).toBe(false);
 		expect(drafts.clear({...input, idempotencyKey: "wrong-key"})).toBe(false);
 		drafts.reconcilePending({campaignId: "campaign-1", pendingTransferIds: ["transfer-1"]});
-		expect(drafts.get(input)).toEqual(accept);
-
-		drafts.reconcilePending({campaignId: "campaign-1", pendingTransferIds: []});
 		expect(drafts.get(input)).toBeNull();
 		expect(drafts.stage({...input, decision: "reject"})).toEqual(expect.objectContaining({
 			decision: "reject",

@@ -127,6 +127,10 @@ describe("campaign hub pages", () => {
 	it("keeps inbox transfer decisions idempotent and separates committed outcomes from refresh failures", () => {
 		const source = read("js/hub/hub-page.js");
 		expect(source).toContain("HubTransferResolutionDrafts");
+		expect(source).toContain("HubTransferRefreshQueue");
+		expect(source).toContain("transferRefreshQueue.pRun");
+		expect(source).toContain("const pTransferStateRefresh = pRefreshTransferState({");
+		expect(source).toContain("charactersNxt: pCharactersNxt");
 		expect(source).toContain("pResolveTransferAndRefresh");
 		expect(source).toContain("transferResolutionDrafts.stage");
 		expect(source).toContain("resolutionRequest.decision !== decision");

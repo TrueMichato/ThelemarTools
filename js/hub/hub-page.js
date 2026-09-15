@@ -2,6 +2,7 @@ import {
 	HubApiClient,
 	HubApiError,
 	HubTransferProposalDrafts,
+	HubTransferRefreshQueue,
 	HubTransferResolutionDrafts,
 	pResolveTransferAndRefresh,
 } from "./hub-api-client.js";
@@ -144,7 +145,7 @@ function getErrorMessage (error) {
 		case "HP_MAX_UNAVAILABLE": return "This character's hit point maximum could not be read, so nothing was applied. Open it in the character sheet once to refresh its totals, then try again.";
 		case "ACTION_NOT_FOUND": return "That effect request is no longer waiting. Reload the campaign inbox to see its latest status.";
 		case "REVISION_CONFLICT": return "This data changed on another device. Your changes were not discarded. Reload and use the recovery choice shown before editing again.";
-		case "RULES_VERSION_STALE": return "Campaign rules changed on another device. Your draft was kept; review it against the refreshed active version.";
+		case "RULES_VERSION_STALE": return "Campaign rules changed on another device. Refresh the active version before trying again.";
 		case "RULES_UNKNOWN": return "That policy contains a rule this server does not recognize. No version was created.";
 		case "RULES_PARAMETER_INVALID":
 		case "RULES_COMBINATION_UNSUPPORTED":
@@ -1214,20 +1215,35 @@ async function pInitCampaign ({session}) {
 		isCampaignContextRefreshQueued = false;
 		isRefreshing = true;
 		try {
-			const [membersNxt, charactersNxt, snapshotNxt] = await Promise.all([
-				api.pListMembers({campaignId}),
-				api.pListCharacters({campaignId}),
-				api.pGetCampaignSnapshot({campaignId}),
-			]);
-			const eventsNxt = await api.pListEvents({
+			const pMembersNxt = api.pListMembers({campaignId});
+			const pCharactersNxt = api.pListCharacters({campaignId});
+			const pSnapshotNxt = api.pGetCampaignSnapshot({campaignId});
+			const pEventsNxt = pSnapshotNxt.then(snapshotNxt => api.pListEvents({
 				campaignId,
 				afterSequence: Math.max(0, snapshotNxt.lastSequence - 50),
 				limit: 50,
-			});
-			liveEvents = [...eventsNxt, ...liveEvents]
+			}));
+			const getMergedEvents = eventsNxt => [...eventsNxt, ...liveEvents]
 				.filter((event, index, all) => all.findIndex(other => other.id === event.id) === index)
 				.sort((a, b) => a.sequence - b.sequence)
 				.slice(-50);
+			const pTransferStateRefresh = pRefreshTransferState({
+				charactersNxt: pCharactersNxt,
+				targetCharactersNxt: pSnapshotNxt.then(snapshotNxt => snapshotNxt.characters),
+				membersNxt: pMembersNxt,
+				eventsNxt: pEventsNxt.then(getMergedEvents),
+				fnIsCurrent: () => !isCampaignReloadRequired,
+			}).then(
+				value => ({value}),
+				error => ({error}),
+			);
+			const [membersNxt, charactersNxt, snapshotNxt, eventsNxt] = await Promise.all([
+				pMembersNxt,
+				pCharactersNxt,
+				pSnapshotNxt,
+				pEventsNxt,
+			]);
+			liveEvents = getMergedEvents(eventsNxt);
 			liveMembers = membersNxt;
 			if (snapshotNxt.lastSequence >= liveLastSequence) {
 				// Replacement, not a merge: a field the owner has just stopped sharing must
@@ -1253,15 +1269,11 @@ async function pInitCampaign ({session}) {
 				void rulesPolicyManagerPromise.then(manager => manager?.replaceContext(context));
 			}
 			if (isCampaignReloadRequired) return;
-			await Promise.all([
+			const [, transferRefreshResult] = await Promise.all([
 				renderPendingActions({campaign, campaignId, session, targetCharacters: liveCharacters, members: membersNxt, roster: liveRoster}),
-				pRefreshTransferState({
-					charactersNxt,
-					targetCharactersNxt: liveCharacters,
-					membersNxt,
-					eventsNxt: liveEvents,
-				}),
+				pTransferStateRefresh,
 			]);
+			if (transferRefreshResult.error) throw transferRefreshResult.error;
 		} catch (error) {
 			renderError(error);
 		} finally {
@@ -1706,10 +1718,12 @@ async function renderPendingTransfers ({
 	targetCharacters,
 	members,
 	pRefreshTransferState,
+	fnIsCurrent = () => true,
 }) {
 	const list = document.getElementById("campaign-pending-transfers");
 	if (!list) return {pendingTransferIds: []};
 	const transfers = await api.pListTransfers({campaignId});
+	if (!fnIsCurrent()) return {pendingTransferIds: [], isFenced: true};
 	const pending = transfers.filter(transfer => ["proposed", "reserved"].includes(transfer.status));
 	const pendingTransferIds = pending.map(transfer => transfer.id);
 	transferResolutionDrafts.reconcilePending({campaignId, pendingTransferIds});
@@ -2065,13 +2079,23 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 	if (dmScreenLink) dmScreenLink.href = `dmscreen.html?hubCampaign=${encodeURIComponent(campaignId)}`;
 	let partyInventory = await api.pGetPartyInventory({campaignId});
 	const itemAward = await pInitItemAwardComposer({context, partyInventory, targetCharacters, events});
-	const pRefreshTransferState = async ({
-		charactersNxt = null,
-		targetCharactersNxt = null,
-		membersNxt = null,
-		partyInventoryNxt = null,
-		eventsNxt = null,
-	} = {}) => {
+	const transferRefreshQueue = new HubTransferRefreshQueue();
+	const pRefreshTransferState = (refresh = {}) => transferRefreshQueue.pRun(async () => {
+		let {
+			charactersNxt = null,
+			targetCharactersNxt = null,
+			membersNxt = null,
+			partyInventoryNxt = null,
+			eventsNxt = null,
+			fnIsCurrent = () => true,
+		} = refresh;
+		[charactersNxt, targetCharactersNxt, membersNxt, partyInventoryNxt, eventsNxt] = await Promise.all([
+			charactersNxt,
+			targetCharactersNxt,
+			membersNxt,
+			partyInventoryNxt,
+			eventsNxt,
+		]);
 		const source = document.getElementById("campaign-transfer-source");
 		const target = document.getElementById("campaign-transfer-target");
 		const item = document.getElementById("campaign-transfer-entry");
@@ -2087,6 +2111,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			targetCharactersNxt ? null : api.pGetCampaignSnapshot({campaignId}),
 			partyInventoryNxt ? null : api.pGetPartyInventory({campaignId}),
 		]);
+		if (!fnIsCurrent()) return {pendingTransferIds: [], isFenced: true};
 		const latestSelections = readSelections();
 		const selectionsToRestore = Object.keys(selections)
 			.some(key => latestSelections[key] !== selections[key])
@@ -2128,9 +2153,10 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			targetCharacters,
 			members,
 			pRefreshTransferState,
+			fnIsCurrent,
 		});
 		return transferState;
-	};
+	});
 
 	await renderPendingActions({campaign, campaignId, session, targetCharacters, members});
 	await pRefreshTransferState({

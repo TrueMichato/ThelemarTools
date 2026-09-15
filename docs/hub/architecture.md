@@ -166,6 +166,9 @@ comparison-only: every surviving add/replace patch rematerializes its value from
 applies it to the raw canonical document, so neither side's canonical metadata is deleted. The Character Sheet's
 final post-save rebase uses this same comparison and rematerialization contract, so save completion cannot
 reintroduce the hydration conflict.
+Campaign Overview serializes every transfer-state refresh in request-start order. Realtime refreshes enter that
+queue when their authorization-scoped character/snapshot requests start, not after those requests finish, so a
+pre-transfer response cannot overwrite balances or pending decisions rendered by the transfer's later refresh.
 The accepted base and every other base track still advance together with live state so later saves retain exact
 coverage and do not need to rediscover already-accepted edits. Delivery is therefore a prepare/adopt/commit
 transaction over per-track coverage records, and an unprovable delivery schedules a serialized recovery that

@@ -2,6 +2,7 @@ import {
 	HubApiClient,
 	HubApiError,
 	HubTransferProposalDrafts,
+	HubTransferRefreshQueue,
 } from "../../../js/hub/hub-api-client.js";
 
 function getResponse ({status = 200, body = {}} = {}) {
@@ -13,6 +14,28 @@ function getResponse ({status = 200, body = {}} = {}) {
 }
 
 describe("hub API client", () => {
+	it("serializes transfer refreshes in invocation order and releases the queue after failure", async () => {
+		const queue = new HubTransferRefreshQueue();
+		const order = [];
+		let releaseFirst;
+		const firstGate = new Promise(resolve => releaseFirst = resolve);
+		const pFirst = queue.pRun(async () => {
+			order.push("first:start");
+			await firstGate;
+			order.push("first:end");
+		});
+		const pSecond = queue.pRun(async () => order.push("second"));
+
+		await Promise.resolve();
+		expect(order).toEqual(["first:start"]);
+		releaseFirst();
+		await Promise.all([pFirst, pSecond]);
+		expect(order).toEqual(["first:start", "first:end", "second"]);
+
+		await expect(queue.pRun(async () => { throw new Error("refresh failed"); })).rejects.toThrow("refresh failed");
+		await expect(queue.pRun(async () => "recovered")).resolves.toBe("recovered");
+	});
+
 	it("freezes one transfer proposal per account and campaign until its exact key is reconciled", () => {
 		let now = 100;
 		const drafts = new HubTransferProposalDrafts({fnNow: () => now, replayWindowMs: 50});
@@ -160,7 +183,7 @@ describe("hub API client", () => {
 		}));
 	});
 
-	it("pins transfer acceptance to the current policy and retries once after a concurrent activation", async () => {
+	it("keeps a transfer acceptance body immutable and requires a new key after a stale policy pin", async () => {
 		const calls = [];
 		let contextReads = 0;
 		let resolveWrites = 0;
@@ -188,11 +211,17 @@ describe("hub API client", () => {
 			transferId: "transfer-1",
 			decision: "accept",
 			idempotencyKey: "accept-1",
+		})).rejects.toEqual(expect.objectContaining({code: "RULES_VERSION_STALE"}));
+		await expect(client.pResolveTransfer({
+			campaignId: "campaign-1",
+			transferId: "transfer-1",
+			decision: "accept",
+			idempotencyKey: "accept-2",
 		})).resolves.toEqual({transfer: {id: "transfer-1", status: "committed"}});
 
 		const resolveCalls = calls.filter(call => call.path.endsWith("/resolve"));
 		expect(resolveCalls.map(call => JSON.parse(call.opts.body).rulesVersionId)).toEqual(["rules-1", "rules-2"]);
-		expect(resolveCalls.map(call => call.opts.headers["idempotency-key"])).toEqual(["accept-1", "accept-1"]);
+		expect(resolveCalls.map(call => call.opts.headers["idempotency-key"])).toEqual(["accept-1", "accept-2"]);
 	});
 
 	it("pins an atomic direct transfer proposal to the active rules version", async () => {

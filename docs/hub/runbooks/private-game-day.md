@@ -207,11 +207,12 @@ correct, activity is readable, and retries do not duplicate the award.
    **Retry latest balances**, then complete another transfer without reloading the page.
 9. Repeat one completed accepted request from browser history or retry UI if available.
 
-**Expected:** character-source and DM party-source assets are reserved before acceptance/resolution and conserved
-exactly; a player stash request reserves nothing until DM approval. Metadata survives every character/stash
-round trip. Replay returns the existing outcome. Rejected/cancelled escrow returns exactly once to its original
-source identity, the stale request changes neither inventory, refresh/retry visibly refetches, and a later
-transfer succeeds without a page reload.
+**Expected:** approval-bound character-source assets are reserved before acceptance/resolution and conserved
+exactly; DM/co-DM direct transfers, including party-source moves, commit immediately. A player stash request
+reserves nothing until DM approval. Metadata survives every character/stash round trip. Replay returns the
+existing outcome. Rejected/cancelled escrow returns exactly once to its original source identity, the stale
+request changes neither inventory, refresh/retry visibly refetches, and a later transfer succeeds without a page
+reload.
 
 ### GD-09 — cross-character Cure Wounds
 

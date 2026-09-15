@@ -13,6 +13,19 @@ export class HubApiError extends Error {
 
 export const HUB_TRANSFER_REPLAY_WINDOW_MS = 23 * 60 * 60 * 1000;
 
+export class HubTransferRefreshQueue {
+	constructor () {
+		this._queue = Promise.resolve();
+	}
+
+	pRun (fnRefresh) {
+		if (typeof fnRefresh !== "function") throw new TypeError(`fnRefresh must be a function.`);
+		const pResult = this._queue.then(fnRefresh, fnRefresh);
+		this._queue = pResult.catch(() => {});
+		return pResult;
+	}
+}
+
 export class HubTransferResolutionDrafts {
 	constructor ({
 		fnCreateKey = () => globalThis.crypto.randomUUID(),
@@ -65,7 +78,8 @@ export class HubTransferResolutionDrafts {
 		const pending = new Set(pendingTransferIds);
 		const prefix = `${campaignId}\u0000`;
 		for (const [ref, draft] of this._drafts.entries()) {
-			if (ref.startsWith(prefix) && !pending.has(draft.transferId)) this._drafts.delete(ref);
+			if (!ref.startsWith(prefix)) continue;
+			if (!pending.has(draft.transferId) || !this.isReplayable(draft)) this._drafts.delete(ref);
 		}
 	}
 }
@@ -650,14 +664,7 @@ export class HubApiClient {
 		if (decision !== "accept") return pResolve(rulesVersionId);
 		let pin = rulesVersionId;
 		if (pin === undefined) pin = (await this.pGetCampaignContext({campaignId})).rulesVersion?.id || null;
-		try {
-			return await pResolve(pin);
-		} catch (error) {
-			if (error?.code !== "RULES_VERSION_STALE") throw error;
-			const refreshedPin = (await this.pGetCampaignContext({campaignId})).rulesVersion?.id || null;
-			if (refreshedPin === pin) throw error;
-			return pResolve(refreshedPin);
-		}
+		return pResolve(pin);
 	}
 
 	async pLogout () {
