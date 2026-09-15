@@ -1,25 +1,42 @@
 import {jest} from "@jest/globals";
 
 import {
-	HubTransferResolutionKeys,
+	HubTransferResolutionDrafts,
 	pResolveTransferAndRefresh,
 } from "../../../js/hub/hub-api-client.js";
 
 describe("Campaign Hub transfer resolution retries", () => {
-	it("keeps one key per transfer decision until an authoritative pending-list reconciliation", () => {
+	it("freezes one decision request until authoritative reconciliation and bounds its replay window", () => {
 		let ix = 0;
-		const keys = new HubTransferResolutionKeys({fnCreateKey: () => `key-${++ix}`});
+		let now = 100;
+		const drafts = new HubTransferResolutionDrafts({
+			fnCreateKey: () => `key-${++ix}`,
+			fnNow: () => now,
+			replayWindowMs: 50,
+		});
 		const input = {campaignId: "campaign-1", transferId: "transfer-1"};
 
-		expect(keys.get({...input, decision: "accept"})).toBe("key-1");
-		expect(keys.get({...input, decision: "accept"})).toBe("key-1");
-		expect(keys.get({...input, decision: "reject"})).toBe("key-2");
+		const accept = drafts.stage({...input, decision: "accept", rulesVersionId: "rules-1"});
+		expect(accept).toEqual({
+			...input,
+			decision: "accept",
+			rulesVersionId: "rules-1",
+			idempotencyKey: "key-1",
+			replayUntil: 150,
+		});
+		expect(drafts.stage({...input, decision: "reject"})).toEqual(accept);
+		expect(drafts.isReplayable(accept)).toBe(true);
+		now = 150;
+		expect(drafts.isReplayable(accept)).toBe(false);
+		expect(drafts.clear({...input, idempotencyKey: "wrong-key"})).toBe(false);
+		drafts.reconcilePending({campaignId: "campaign-1", pendingTransferIds: ["transfer-1"]});
+		expect(drafts.get(input)).toEqual(accept);
 
-		keys.reconcilePending({campaignId: "campaign-1", pendingTransferIds: ["transfer-1"]});
-		expect(keys.get({...input, decision: "accept"})).toBe("key-1");
-
-		keys.reconcilePending({campaignId: "campaign-1", pendingTransferIds: []});
-		expect(keys.get({...input, decision: "accept"})).toBe("key-3");
+		drafts.reconcileCampaign({campaignId: "campaign-1"});
+		expect(drafts.stage({...input, decision: "reject"})).toEqual(expect.objectContaining({
+			decision: "reject",
+			idempotencyKey: "key-2",
+		}));
 	});
 
 	it("reports a committed resolution separately when only the authoritative refresh fails", async () => {

@@ -106,8 +106,10 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("transferProposalDrafts.stage");
 		expect(source).toContain("transferProposalDrafts.get(proposalRef)");
 		expect(source).toContain("proposalRequest.isAutoResolved");
+		expect(source).toContain("transferProposalDrafts.isReplayable");
 		expect(source).toContain("Retry transfer");
 		expect(source).toContain("Retry to reconcile the same transfer.");
+		expect(source).toContain("Refresh latest balances");
 		expect(source).toContain("setTransferRefreshFailure");
 		expect(source).toContain("const form = event.currentTarget;");
 		expect(source).toContain("Retry latest balances");
@@ -122,9 +124,12 @@ describe("campaign hub pages", () => {
 
 	it("keeps inbox transfer decisions idempotent and separates committed outcomes from refresh failures", () => {
 		const source = read("js/hub/hub-page.js");
-		expect(source).toContain("HubTransferResolutionKeys");
+		expect(source).toContain("HubTransferResolutionDrafts");
 		expect(source).toContain("pResolveTransferAndRefresh");
-		expect(source).toContain("transferResolutionKeys.get({campaignId, transferId: transfer.id, decision})");
+		expect(source).toContain("transferResolutionDrafts.stage");
+		expect(source).toContain("resolutionRequest.decision !== decision");
+		expect(source).toContain("transferResolutionDrafts.isReplayable");
+		expect(source).toContain("isResolutionReconciliation: true");
 		expect(source).toContain("Transfer applied.");
 		expect(source).toContain("The committed outcome is safe");
 		expect(source).toContain("The transfer outcome is not yet confirmed.");

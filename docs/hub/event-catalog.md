@@ -144,7 +144,7 @@ Current audit actions include:
 - `dm_workspace.created`, `dm_workspace.updated`;
 - `character.operation.proposed`, `.applied`, `.rejected`, `.cancelled`, `.expired`;
 - `xp.granted`, compatibility `item.granted`, atomic `item.award_batch`;
-- `transfer.proposed`, `transfer.committed`, `transfer.rejected`;
+- `transfer.committed`, `transfer.rejected`;
 - `session.revoked`, `session.revoked_others`;
 - `account.deletion_requested`, `account.deletion_cancelled`, `account.deletion_purged`.
 

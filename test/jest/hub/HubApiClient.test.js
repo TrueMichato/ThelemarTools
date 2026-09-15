@@ -14,7 +14,8 @@ function getResponse ({status = 200, body = {}} = {}) {
 
 describe("hub API client", () => {
 	it("freezes one transfer proposal per account and campaign until its exact key is reconciled", () => {
-		const drafts = new HubTransferProposalDrafts();
+		let now = 100;
+		const drafts = new HubTransferProposalDrafts({fnNow: () => now, replayWindowMs: 50});
 		const first = {
 			sourceKind: "character",
 			sourceId: "source-1",
@@ -39,7 +40,11 @@ describe("hub API client", () => {
 			rulesVersionId: "rules-1",
 			idempotencyKey: "proposal-1",
 			isAutoResolved: true,
+			replayUntil: 150,
 		}));
+		expect(drafts.isReplayable(staged)).toBe(true);
+		now = 150;
+		expect(drafts.isReplayable(staged)).toBe(false);
 		expect(drafts.get({accountId: "account-2", campaignId: "campaign-1"})).toBeNull();
 		expect(drafts.clear({
 			accountId: "account-1",

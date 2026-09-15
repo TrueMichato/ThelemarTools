@@ -2000,6 +2000,7 @@ export class HubCampaignPage {
 		const resolveMatcher = `**/api/campaigns/${campaignId}/transfers/*/resolve`;
 		const partyMatcher = `**/api/campaigns/${campaignId}/party-inventory`;
 		const idempotencyKeys: string[] = [];
+		const resolutionBodies: string[] = [];
 		let attempt = 0;
 		let failedRefreshCount = 0;
 		let shouldFailRefresh = true;
@@ -2013,7 +2014,13 @@ export class HubCampaignPage {
 			});
 		};
 		const loseFirstResponse = async (route: Route) => {
+			const body = route.request().postData();
+			if (!body) {
+				await route.continue();
+				return;
+			}
 			idempotencyKeys.push(route.request().headers()["idempotency-key"]);
+			resolutionBodies.push(body);
 			if (++attempt === 1) {
 				await this.page.route(partyMatcher, failRefresh);
 				const committed = await route.fetch();
@@ -2035,12 +2042,20 @@ export class HubCampaignPage {
 			await expect(transfer).toContainText("outcome is not yet confirmed");
 			await expect(transfer.getByRole("button", {name: "Retry inbox refresh", exact: true})).toBeVisible();
 			await expect(decision).toBeEnabled();
+			const oppositeName = {
+				Accept: "Reject",
+				Approve: "Decline",
+				Decline: "Approve",
+				Reject: "Accept",
+			}[buttonName];
+			await expect(transfer.getByRole("button", {name: oppositeName, exact: true})).toBeDisabled();
 
 			shouldFailRefresh = false;
 			await decision.click();
 			await expect(transfers).toHaveCount(transferCount - 1);
-			expect(idempotencyKeys).toHaveLength(2);
-			expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
+			expect(idempotencyKeys.length).toBeGreaterThanOrEqual(2);
+			expect(new Set(idempotencyKeys)).toEqual(new Set([idempotencyKeys[0]]));
+			expect(new Set(resolutionBodies)).toEqual(new Set([resolutionBodies[0]]));
 		} finally {
 			await this.page.unroute(resolveMatcher, loseFirstResponse);
 			await this.page.unroute(partyMatcher, failRefresh);

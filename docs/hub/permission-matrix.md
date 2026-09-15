@@ -42,7 +42,7 @@ visibility is not authorization.
 | Read party inventory | Yes | Yes | Yes | Yes |
 | Move from party inventory | Yes | Yes | Request for own character only | No |
 | Transfer from character | Own character | Own character | Own character | No |
-| Resolve transfer to character | Override or target owner | Override or target owner | Target owner | Target owner |
+| Resolve transfer to character | Override or target owner | Override or target owner | Target owner | No |
 | Resolve transfer to party inventory | Yes | Yes | No | No |
 | Approve player party-inventory request | Yes | Yes | No; may cancel own request | No |
 | Read `all_members` event | Yes | Yes | Yes | Yes |

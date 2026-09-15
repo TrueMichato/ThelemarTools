@@ -11,39 +11,77 @@ export class HubApiError extends Error {
 	}
 }
 
-export class HubTransferResolutionKeys {
-	constructor ({fnCreateKey = () => globalThis.crypto.randomUUID()} = {}) {
+export const HUB_TRANSFER_REPLAY_WINDOW_MS = 23 * 60 * 60 * 1000;
+
+export class HubTransferResolutionDrafts {
+	constructor ({
+		fnCreateKey = () => globalThis.crypto.randomUUID(),
+		fnNow = () => Date.now(),
+		replayWindowMs = HUB_TRANSFER_REPLAY_WINDOW_MS,
+	} = {}) {
 		this._fnCreateKey = fnCreateKey;
-		this._keys = new Map();
+		this._fnNow = fnNow;
+		this._replayWindowMs = replayWindowMs;
+		this._drafts = new Map();
 	}
 
-	_getRef ({campaignId, transferId, decision}) {
-		return `${campaignId}\u0000${transferId}\u0000${decision}`;
+	_getRef ({campaignId, transferId}) {
+		return `${campaignId}\u0000${transferId}`;
 	}
 
-	get ({campaignId, transferId, decision}) {
-		const ref = this._getRef({campaignId, transferId, decision});
-		let key = this._keys.get(ref);
-		if (!key) {
-			key = this._fnCreateKey();
-			this._keys.set(ref, key);
-		}
-		return key;
+	get ({campaignId, transferId}) {
+		const draft = this._drafts.get(this._getRef({campaignId, transferId}));
+		return draft ? structuredClone(draft) : null;
+	}
+
+	stage ({campaignId, transferId, decision, rulesVersionId = null}) {
+		const existing = this.get({campaignId, transferId});
+		if (existing) return existing;
+		const draft = {
+			campaignId,
+			transferId,
+			decision,
+			rulesVersionId,
+			idempotencyKey: this._fnCreateKey(),
+			replayUntil: this._fnNow() + this._replayWindowMs,
+		};
+		this._drafts.set(this._getRef({campaignId, transferId}), draft);
+		return structuredClone(draft);
+	}
+
+	isReplayable (draft) {
+		return Number.isFinite(draft?.replayUntil) && this._fnNow() < draft.replayUntil;
+	}
+
+	clear ({campaignId, transferId, idempotencyKey}) {
+		const ref = this._getRef({campaignId, transferId});
+		const draft = this._drafts.get(ref);
+		if (draft?.idempotencyKey !== idempotencyKey) return false;
+		this._drafts.delete(ref);
+		return true;
+	}
+
+	reconcileCampaign ({campaignId}) {
+		const prefix = `${campaignId}\u0000`;
+		for (const ref of this._drafts.keys()) if (ref.startsWith(prefix)) this._drafts.delete(ref);
 	}
 
 	reconcilePending ({campaignId, pendingTransferIds}) {
 		const pending = new Set(pendingTransferIds);
 		const prefix = `${campaignId}\u0000`;
-		for (const ref of this._keys.keys()) {
-			if (!ref.startsWith(prefix)) continue;
-			const transferId = ref.slice(prefix.length).split("\u0000", 1)[0];
-			if (!pending.has(transferId)) this._keys.delete(ref);
+		for (const [ref, draft] of this._drafts.entries()) {
+			if (ref.startsWith(prefix) && !pending.has(draft.transferId)) this._drafts.delete(ref);
 		}
 	}
 }
 
 export class HubTransferProposalDrafts {
-	constructor () {
+	constructor ({
+		fnNow = () => Date.now(),
+		replayWindowMs = HUB_TRANSFER_REPLAY_WINDOW_MS,
+	} = {}) {
+		this._fnNow = fnNow;
+		this._replayWindowMs = replayWindowMs;
 		this._drafts = new Map();
 	}
 
@@ -59,9 +97,16 @@ export class HubTransferProposalDrafts {
 	stage ({accountId, campaignId, request}) {
 		const existing = this.get({accountId, campaignId});
 		if (existing) return existing;
-		const draft = structuredClone(request);
+		const draft = {
+			...structuredClone(request),
+			replayUntil: this._fnNow() + this._replayWindowMs,
+		};
 		this._drafts.set(this._getRef({accountId, campaignId}), draft);
 		return structuredClone(draft);
+	}
+
+	isReplayable (draft) {
+		return Number.isFinite(draft?.replayUntil) && this._fnNow() < draft.replayUntil;
 	}
 
 	clear ({accountId, campaignId, idempotencyKey}) {

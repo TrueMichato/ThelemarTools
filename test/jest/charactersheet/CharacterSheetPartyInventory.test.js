@@ -592,15 +592,86 @@ describe("Character Sheet party inventory", () => {
 
 		await expect(partyInventory._pCancelDraft()).resolves.toBe(true);
 
-		expect(api.pResolveTransfer).toHaveBeenCalledWith({
+		expect(api.pResolveTransfer).toHaveBeenCalledWith(expect.objectContaining({
 			campaignId: "campaign-1",
 			transferId: "transfer-1",
 			decision: "reject",
 			idempotencyKey: "cancel-command-1",
-		});
+		}));
 		expect(partyInventory._pDrainRefresh).toHaveBeenCalledTimes(1);
 		expect(partyInventory._isSubmitting).toBe(false);
 		expect(partyInventory._draft).toBeNull();
+	});
+
+	it("replays a lost cancellation with one immutable reject request", async () => {
+		const resolve = jest.fn()
+			.mockRejectedValueOnce(Object.assign(new Error("gateway lost response"), {code: "SERVICE_UNAVAILABLE", status: 502}))
+			.mockResolvedValueOnce({transfer: {status: "rejected"}});
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {pResolveTransfer: resolve},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._draft = {
+			transfer: {id: "transfer-1", status: "reserved"},
+			cancellationCommandId: "cancel-command-1",
+			needsStatusCheck: false,
+			pendingResolution: null,
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pCancelDraft()).resolves.toBe(false);
+		expect(partyInventory._draft.pendingResolution).toEqual(expect.objectContaining({
+			campaignId: "campaign-1",
+			transferId: "transfer-1",
+			decision: "reject",
+			idempotencyKey: "cancel-command-1",
+		}));
+		expect(partyInventory._draft.pendingResolution.replayUntil).toBeGreaterThan(Date.now());
+		expect(partyInventory._draft.needsStatusCheck).toBe(true);
+		await expect(partyInventory._pCancelDraft()).resolves.toBe(true);
+		expect(resolve.mock.calls.map(([request]) => request)).toEqual([
+			expect.objectContaining({decision: "reject", idempotencyKey: "cancel-command-1"}),
+			expect.objectContaining({decision: "reject", idempotencyKey: "cancel-command-1"}),
+		]);
+	});
+
+	it("checks status without accepting after an uncertain cancellation", async () => {
+		const resolve = jest.fn(async () => {
+			throw Object.assign(new Error("gateway lost response"), {code: "SERVICE_UNAVAILABLE", status: 502});
+		});
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {
+				pResolveTransfer: resolve,
+				pListTransfers: jest.fn(async () => [{id: "transfer-1", status: "reserved"}]),
+			},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._draft = {
+			kind: "character",
+			destinationKind: "character",
+			recipientId: "character-2",
+			transfer: {id: "transfer-1", status: "reserved"},
+			cancellationCommandId: "cancel-command-1",
+			needsStatusCheck: false,
+			pendingResolution: null,
+		};
+
+		await expect(partyInventory._pCancelDraft()).resolves.toBe(false);
+		partyInventory._draft.pendingResolution.replayUntil = 0;
+		await expect(partyInventory._pCancelDraft()).resolves.toBe(false);
+		expect(partyInventory._error).toContain("too old to replay safely");
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+
+		expect(resolve).toHaveBeenCalledTimes(1);
+		expect(partyInventory._draft.pendingResolution).toBeNull();
+		expect(partyInventory._draft.needsStatusCheck).toBe(false);
+		expect(partyInventory._error).toContain("cancellation was not applied");
 	});
 
 	it("re-enables controls after a successful reservation", async () => {
@@ -799,7 +870,7 @@ describe("Character Sheet party inventory", () => {
 		const propose = jest.fn()
 			.mockImplementationOnce(async () => {
 				character.inventory = [];
-				throw Object.assign(new Error("response lost"), {code: "NETWORK_UNAVAILABLE"});
+				throw Object.assign(new Error("gateway lost response"), {code: "SERVICE_UNAVAILABLE", status: 502});
 			})
 			.mockResolvedValueOnce({transfer: {id: "transfer-1", status: "committed"}});
 		let rulesReadCount = 0;
@@ -846,6 +917,35 @@ describe("Character Sheet party inventory", () => {
 		expect(propose.mock.calls.map(([input]) => input.rulesVersionId)).toEqual(["rules-1", "rules-1"]);
 		expect(propose.mock.calls.map(([input]) => input.payload.items[0].quantity)).toEqual([1, 1]);
 		expect(partyInventory._announcement).toContain("Transfer complete");
+	});
+
+	it("refreshes authoritative balances instead of replaying an expired proposal", async () => {
+		const propose = jest.fn();
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {pProposeTransfer: propose},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+			fnToast: jest.fn(),
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._draft = {
+			kind: "character",
+			destinationKind: "character",
+			proposalRequest: {idempotencyKey: "expired-key"},
+			proposalReplayUntil: 0,
+			transfer: null,
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+		expect(propose).not.toHaveBeenCalled();
+		expect(partyInventory._error).toContain("too old to replay safely");
+		await expect(partyInventory._pCancelDraft()).resolves.toBe(true);
+		expect(partyInventory._pDrainRefresh).toHaveBeenCalledTimes(1);
+		expect(partyInventory._draft).toBeNull();
+		expect(partyInventory._announcement).toContain("Latest source and stash balances loaded");
 	});
 
 	it("keeps a reserved draft recoverable when authoritative refresh fails", async () => {

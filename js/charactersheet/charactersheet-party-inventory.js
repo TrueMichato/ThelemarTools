@@ -9,6 +9,7 @@ import {
 	getInventoryTransferEligibility,
 	getInventoryWeightSummary,
 } from "../hub/hub-inventory-contract.js";
+import {HUB_TRANSFER_REPLAY_WINDOW_MS} from "../hub/hub-api-client.js";
 
 const DM_ROLES = new Set(["dm", "co_dm"]);
 const MAX_SEEN_EVENT_KEYS = 2_000;
@@ -24,6 +25,7 @@ const ERROR_MESSAGES = {
 	CHARACTER_BUSY: "This character is busy with another authoritative change. Wait a moment, then try again.",
 	FORBIDDEN: "Your campaign role no longer allows this transfer. The inventories are unchanged.",
 	IDEMPOTENCY_KEY_REUSED: "This transfer retry no longer matches the original request. Review the summary and try again.",
+	IDEMPOTENCY_WINDOW_EXPIRED: "This transfer retry is too old to replay safely. Refresh this character and inspect the destination before starting another transfer.",
 	NETWORK_UNAVAILABLE: "The Campaign Hub could not be reached. Your last synced stash is still shown; reconnect and retry.",
 	TRANSFER_INSUFFICIENT: "The available quantity changed before the transfer completed. Nothing else was moved.",
 	TRANSFER_ITEM_LINKED: "That stack is now linked to equipment or another character feature, so it cannot move safely.",
@@ -34,6 +36,10 @@ let fallbackTokenId = 0;
 
 function getOpaqueToken () {
 	return globalThis.crypto?.randomUUID?.() || `opaque-${++fallbackTokenId}`;
+}
+
+function isTransferOutcomeUncertain (error) {
+	return ["NETWORK_UNAVAILABLE", "REQUEST_ABORTED", "RESPONSE_INVALID"].includes(error?.code) || error?.status >= 500;
 }
 
 function getEntryName (entry) {
@@ -511,6 +517,7 @@ export class CharacterSheetPartyInventory {
 			cancellationCommandId: getOpaqueToken(),
 			transfer: null,
 			needsStatusCheck: false,
+			pendingResolution: null,
 		};
 		this._error = null;
 		this._announcement = "";
@@ -1010,19 +1017,22 @@ export class CharacterSheetPartyInventory {
 			}));
 		}
 		const actions = createElement("div", {className: "charsheet__party-inventory-composer-actions"});
+		const isCancellationUncertain = this._draft.pendingResolution?.decision === "reject";
 		const cancel = createElement("button", {
 			className: "ve-btn ve-btn-default",
-			text: "Cancel",
+			text: isCancellationUncertain ? "Retry cancellation" : "Cancel",
 			attrs: {type: "button", "data-party-inventory-focus": "cancel"},
 		});
 		cancel.addEventListener("click", () => void this._pCancelDraft());
 		const submit = createElement("button", {
 			className: "ve-btn ve-btn-primary",
-			text: this._isPlayerStashRequest()
-				? "Send request"
-				: this._shouldAutoResolve()
-					? "Move now"
-					: "Offer transfer",
+			text: isCancellationUncertain
+				? "Check transfer status"
+				: this._isPlayerStashRequest()
+					? "Send request"
+					: this._shouldAutoResolve()
+						? "Move now"
+						: "Offer transfer",
 			attrs: {type: "submit", "data-party-inventory-focus": "submit"},
 		});
 		actions.append(cancel, submit);
@@ -1232,6 +1242,32 @@ export class CharacterSheetPartyInventory {
 		const draft = this._draft;
 		if (!draft.transfer) {
 			if (draft.proposalRequest) {
+				if (Date.now() >= draft.proposalReplayUntil) {
+					this._isSubmitting = true;
+					this._error = null;
+					this._render();
+					try {
+						this._refreshFlags.character = true;
+						this._refreshFlags.party = true;
+						if (!await this._pDrainRefresh()) {
+							this._error = "The transfer retry expired, and the latest inventories could not be loaded. Reconnect and try the refresh again.";
+							this._render();
+							return false;
+						}
+						if (!this._isCurrent(active) || this._draft !== draft) return false;
+						this._isSubmitting = false;
+						this._closeDraft();
+						const message = "Latest source and stash balances loaded. Inspect the destination before starting another transfer.";
+						this._fnToast?.({type: "info", content: message});
+						this._announce(message);
+						return true;
+					} finally {
+						if (this._draft === draft) {
+							this._isSubmitting = false;
+							this._render();
+						}
+					}
+				}
 				this._error = "The transfer outcome is not yet confirmed. Retry the transfer before closing it.";
 				this._render();
 				return false;
@@ -1243,13 +1279,30 @@ export class CharacterSheetPartyInventory {
 		this._isSubmitting = true;
 		this._error = null;
 		this._render();
+		let isResolutionKnown = false;
 		try {
-			await this._api.pResolveTransfer({
-				campaignId: this._campaignId,
-				transferId: draft.transfer.id,
-				decision: "reject",
-				idempotencyKey: draft.cancellationCommandId,
-			});
+			if (!draft.pendingResolution) {
+				draft.pendingResolution = {
+					campaignId: this._campaignId,
+					transferId: draft.transfer.id,
+					decision: "reject",
+					idempotencyKey: draft.cancellationCommandId,
+					replayUntil: Date.now() + HUB_TRANSFER_REPLAY_WINDOW_MS,
+				};
+			}
+			if (Date.now() >= draft.pendingResolution.replayUntil) {
+				draft.needsStatusCheck = true;
+				this._error = "This cancellation retry is too old to replay safely. Check the transfer status before acting again.";
+				return false;
+			}
+			try {
+				await this._api.pResolveTransfer(draft.pendingResolution);
+				isResolutionKnown = true;
+				draft.pendingResolution = null;
+			} catch (error) {
+				if (!isTransferOutcomeUncertain(error)) draft.pendingResolution = null;
+				throw error;
+			}
 			this._refreshFlags.character = true;
 			this._refreshFlags.party = true;
 			if (!await this._pDrainRefresh()) throw Object.assign(new Error("Authoritative refresh failed"), {code: "NETWORK_UNAVAILABLE"});
@@ -1264,6 +1317,7 @@ export class CharacterSheetPartyInventory {
 			return true;
 		} catch (error) {
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
+			if (draft.pendingResolution || isResolutionKnown) draft.needsStatusCheck = true;
 			this._error = getErrorMessage(error);
 			this._render();
 			return false;
@@ -1280,6 +1334,11 @@ export class CharacterSheetPartyInventory {
 		const active = this._active;
 		const draft = this._draft;
 		const isPartyEndpoint = draft.kind === "party_inventory" || draft.destinationKind === "party_inventory";
+		if (draft.proposalRequest && Date.now() >= draft.proposalReplayUntil) {
+			this._error = ERROR_MESSAGES.IDEMPOTENCY_WINDOW_EXPIRED;
+			this._render();
+			return false;
+		}
 		if (isPartyEndpoint && !this._partyInventory?.id) {
 			this._error = "The party stash is unavailable. Retry the stash refresh before transferring this item.";
 			this._render();
@@ -1339,6 +1398,14 @@ export class CharacterSheetPartyInventory {
 					this._announce(message);
 					return true;
 				}
+				if (draft.pendingResolution?.decision === "reject") {
+					draft.pendingResolution = null;
+					draft.cancellationCommandId = getOpaqueToken();
+					this._error = "The cancellation was not applied. You can retry it or continue the transfer.";
+					this._isSubmitting = false;
+					this._render();
+					return false;
+				}
 			}
 			if (draft.kind === "character" && !draft.transfer && !draft.proposalRequest) {
 				const isSaved = await this._fnSaveCharacter?.();
@@ -1372,13 +1439,15 @@ export class CharacterSheetPartyInventory {
 						idempotencyKey: draft.commandId,
 						isAutoResolved: isAutoResolve,
 					};
+					draft.proposalReplayUntil = Date.now() + HUB_TRANSFER_REPLAY_WINDOW_MS;
 				}
 				let result;
 				try {
 					result = await this._api.pProposeTransfer(draft.proposalRequest);
 				} catch (error) {
-					if (!["NETWORK_UNAVAILABLE", "REQUEST_ABORTED", "RESPONSE_INVALID"].includes(error?.code)) {
+					if (!isTransferOutcomeUncertain(error)) {
 						draft.proposalRequest = null;
+						draft.proposalReplayUntil = null;
 					}
 					throw error;
 				}

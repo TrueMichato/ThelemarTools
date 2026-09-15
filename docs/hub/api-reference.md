@@ -247,6 +247,11 @@ reserve the stash. DM/co-DM acceptance rechecks the live stack and atomically re
 metadata and writes it to the character; concurrent depletion returns `TRANSFER_INSUFFICIENT` without changing
 either container or terminalizing the request. Reusing an idempotency key with the same command replays its stored
 result rather than repeating either mutation.
+Browser proposal and resolution retries freeze the original body, decision, rules pin, and idempotency key after
+an outcome-uncertain network, invalid-response, or HTTP 5xx failure. That exact retry is allowed for at most 23
+hours, staying inside PostgreSQL's 24-hour command-receipt lifetime. Once the browser window expires, it performs
+an authorization-scoped inventory or inbox refresh instead of risking a fresh duplicate command; offline mutation
+queues and blind replay across reloads remain out of scope.
 An approval-bound acceptance or direct proposal into a character compares the resulting authoritative document
 with its prior state and rejects a new disallowed/unknown item identity or stale rules pin before source,
 destination, resolution, audit, event, outbox, or receipt changes. Approval-bound reserved escrow remains
