@@ -421,6 +421,43 @@ describe("inventory escrow", () => {
 		expect(modified.quantity + original.quantity).toBe(4);
 	});
 
+	it("keeps multiple metadata-diverged partial restores adjacent to their remaining source rows", () => {
+		const {container, escrow} = removeTransferPayload({
+			container: {
+				inventory: [
+					{id: "before", item: {name: "Before"}, quantity: 1},
+					{id: "first", item: {name: "Arrow", custom: {version: "first-original"}}, quantity: 4},
+					{id: "second", item: {name: "Bolt", custom: {version: "second-original"}}, quantity: 6},
+					{id: "after", item: {name: "After"}, quantity: 1},
+				],
+				currency: {},
+			},
+			payload: {
+				items: [
+					{entryId: "first", quantity: 2},
+					{entryId: "second", quantity: 3},
+				],
+			},
+		});
+		container.inventory.find(entry => entry.id === "first").item.custom.version = "first-modified";
+		container.inventory.find(entry => entry.id === "second").item.custom.version = "second-modified";
+
+		const restored = addTransferPayload({container, escrow, isRestore: true});
+
+		expect(restored.inventory.map(entry => entry.item.custom?.version || entry.id)).toEqual([
+			"before",
+			"first-original",
+			"first-modified",
+			"second-original",
+			"second-modified",
+			"after",
+		]);
+		expect(new Set(restored.inventory.map(entry => entry.id)).size).toBe(restored.inventory.length);
+		expect(restored.inventory
+			.filter(entry => ["Arrow", "Bolt"].includes(entry.item.name))
+			.reduce((total, entry) => total + entry.quantity, 0)).toBe(10);
+	});
+
 	it("merges only metadata-compatible stacks", () => {
 		const escrow = {items: [{id: "incoming", item: {name: "Map", source: "HB"}, quantity: 1, note: "Secret route"}], currency: {}};
 		const destination = addTransferPayload({

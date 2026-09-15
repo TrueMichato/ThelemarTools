@@ -459,7 +459,11 @@ export function addTransferPayload ({container, escrow, isRestore = false}) {
 			existing.quantity = addFinite(existing.quantity, incoming.quantity, "Item quantity");
 			continue;
 		}
-		if (existing) entry.id = getCollisionFreeInventoryEntryId(out.inventory);
+		if (existing) {
+			entry.id = getCollisionFreeInventoryEntryId(out.inventory);
+			out.inventory.splice(out.inventory.indexOf(existing), 0, entry);
+			continue;
+		}
 		out.inventory.splice(Math.min(incoming._sourceIndex ?? out.inventory.length, out.inventory.length), 0, entry);
 	}
 	const currency = normalizeCurrency(escrow.currency);

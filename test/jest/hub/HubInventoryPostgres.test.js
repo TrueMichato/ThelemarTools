@@ -965,8 +965,9 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			.toEqual(before.data.inventory.find(it => it.id === "maps"));
 	});
 
-	test("keeps restored escrow separate from a metadata-diverged same-ID source stack", async () => {
+	test("keeps multiple restored escrow stacks beside their metadata-diverged same-ID source rows", async () => {
 		const stackId = crypto.randomUUID();
+		const secondStackId = crypto.randomUUID();
 		const originalItem = {
 			name: "Arrow",
 			source: "PHB",
@@ -978,6 +979,15 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			appliedUpgrades: [{name: "Balanced", source: "PHB"}],
 			socketedGemstones: [{name: "Journey", source: "PHB"}],
 			custom: {maker: "Rook", batch: "original"},
+		};
+		const secondOriginalItem = {
+			...structuredClone(originalItem),
+			name: "Bolt",
+			_fromPack: "Ranger's Kit|PHB",
+			effects: [{type: "skillBonus", skill: "survival", value: 1}],
+			charges: 9,
+			chargesCurrent: 6,
+			custom: {maker: "Rook", batch: "second-original"},
 		};
 		const source = (await store.pCreateCharacter({
 			accountId: sourceOwner.id,
@@ -991,6 +1001,13 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 						item: originalItem,
 						quantity: 4,
 						note: "Original commission",
+						customState: {privacy: "owner-only"},
+					},
+					{
+						id: secondStackId,
+						item: secondOriginalItem,
+						quantity: 6,
+						note: "Second commission",
 						customState: {privacy: "owner-only"},
 					},
 					{id: "after", item: {name: "Dagger", source: "PHB"}, quantity: 1},
@@ -1010,7 +1027,12 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			sourceId: source.id,
 			targetKind: "character",
 			targetId: target.id,
-			payload: {items: [{entryId: stackId, quantity: 2}]},
+			payload: {
+				items: [
+					{entryId: stackId, quantity: 2},
+					{entryId: secondStackId, quantity: 3},
+				],
+			},
 			idempotencyKey: `${prefix}-metadata-restore-reserve`,
 		});
 		expect(reserved.transfer.status).toBe("reserved");
@@ -1026,10 +1048,24 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			socketedGemstones: [{name: "Ember", source: "PHB"}],
 			custom: {maker: "Vale", batch: "modified"},
 		};
+		const secondModifiedItem = {
+			...structuredClone(secondOriginalItem),
+			_fromPack: "Reforged Ranger's Kit|PHB",
+			effects: [{type: "skillBonus", skill: "stealth", value: 2}],
+			chargesCurrent: 2,
+			material: {name: "Moon Silver", source: "PHB", role: "strikingSurface"},
+			appliedUpgrades: [{name: "Keen", source: "PHB"}],
+			socketedGemstones: [{name: "Frost", source: "PHB"}],
+			custom: {maker: "Vale", batch: "second-modified"},
+		};
 		const currentStack = afterReserve.data.inventory.find(entry => entry.id === stackId);
 		currentStack.item = modifiedItem;
 		currentStack.note = "Reworked commission";
 		currentStack.customState = {privacy: "shared"};
+		const currentSecondStack = afterReserve.data.inventory.find(entry => entry.id === secondStackId);
+		currentSecondStack.item = secondModifiedItem;
+		currentSecondStack.note = "Second reworked commission";
+		currentSecondStack.customState = {privacy: "shared"};
 		await pSaveCharacterInventoryThroughSheet({
 			accountId: sourceOwner.id,
 			character: afterReserve,
@@ -1044,10 +1080,20 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		});
 		const restored = (await pReadCharacter(sourceOwner.id, source.id)).data.inventory;
 		const modified = restored.find(entry => entry.id === stackId);
+		const secondModified = restored.find(entry => entry.id === secondStackId);
 		const original = restored.find(entry => entry.item.custom?.batch === "original");
+		const secondOriginal = restored.find(entry => entry.item.custom?.batch === "second-original");
 		const restoredId = original?.id;
+		const secondRestoredId = secondOriginal?.id;
 
-		expect(restored.map(entry => entry.id)).toEqual(["before", restoredId, stackId, "after"]);
+		expect(restored.map(entry => entry.id)).toEqual([
+			"before",
+			restoredId,
+			stackId,
+			secondRestoredId,
+			secondStackId,
+			"after",
+		]);
 		expect(new Set(restored.map(entry => entry.id)).size).toBe(restored.length);
 		expect(modified).toEqual(expect.objectContaining({
 			item: expect.objectContaining(modifiedItem),
@@ -1061,8 +1107,22 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			note: "Original commission",
 			customState: {privacy: "owner-only"},
 		}));
+		expect(secondModified).toEqual(expect.objectContaining({
+			item: expect.objectContaining(secondModifiedItem),
+			quantity: 3,
+			note: "Second reworked commission",
+			customState: {privacy: "shared"},
+		}));
+		expect(secondOriginal).toEqual(expect.objectContaining({
+			item: expect.objectContaining(secondOriginalItem),
+			quantity: 3,
+			note: "Second commission",
+			customState: {privacy: "owner-only"},
+		}));
 		expect(restoredId).not.toBe(stackId);
+		expect(secondRestoredId).not.toBe(secondStackId);
 		expect(modified.quantity + original.quantity).toBe(4);
+		expect(secondModified.quantity + secondOriginal.quantity).toBe(6);
 	});
 
 	test("awards a party stack in stable target order with exact conservation and event pairing", async () => {

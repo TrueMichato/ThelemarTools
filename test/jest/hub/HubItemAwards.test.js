@@ -1209,9 +1209,10 @@ describe("Campaign Hub item award domain", () => {
 		expect(ctx.store.getDomainEvents()).toHaveLength(eventsAfterSuccess);
 	});
 
-	it("keeps restored escrow separate from a metadata-diverged same-ID source stack", async () => {
+	it("keeps multiple restored escrow stacks beside their metadata-diverged same-ID source rows", async () => {
 		const ctx = await pCreateStoreFixture();
 		const stackId = crypto.randomUUID();
+		const secondStackId = crypto.randomUUID();
 		const originalItem = {
 			name: "Arrow",
 			source: "PHB",
@@ -1224,6 +1225,15 @@ describe("Campaign Hub item award domain", () => {
 			socketedGemstones: [{name: "Journey", source: "PHB"}],
 			custom: {maker: "Rook", batch: "original"},
 		};
+		const secondOriginalItem = {
+			...structuredClone(originalItem),
+			name: "Bolt",
+			_fromPack: "Ranger's Kit|PHB",
+			effects: [{type: "skillBonus", skill: "survival", value: 1}],
+			charges: 9,
+			chargesCurrent: 6,
+			custom: {maker: "Rook", batch: "second-original"},
+		};
 		const source = await ctx.pCreateCharacter(ctx.accounts.playerA, "Escrow source", [
 			{id: "before", item: {name: "Club", source: "PHB"}, quantity: 1},
 			{
@@ -1231,6 +1241,13 @@ describe("Campaign Hub item award domain", () => {
 				item: originalItem,
 				quantity: 4,
 				note: "Original commission",
+				customState: {privacy: "owner-only"},
+			},
+			{
+				id: secondStackId,
+				item: secondOriginalItem,
+				quantity: 6,
+				note: "Second commission",
 				customState: {privacy: "owner-only"},
 			},
 			{id: "after", item: {name: "Dagger", source: "PHB"}, quantity: 1},
@@ -1242,7 +1259,12 @@ describe("Campaign Hub item award domain", () => {
 			sourceId: source.id,
 			targetKind: "character",
 			targetId: ctx.characterB.id,
-			payload: {items: [{entryId: stackId, quantity: 2}]},
+			payload: {
+				items: [
+					{entryId: stackId, quantity: 2},
+					{entryId: secondStackId, quantity: 3},
+				],
+			},
 			idempotencyKey: "metadata-restore-reserve",
 		});
 		expect(reserved.transfer.status).toBe("reserved");
@@ -1261,10 +1283,24 @@ describe("Campaign Hub item award domain", () => {
 			socketedGemstones: [{name: "Ember", source: "PHB"}],
 			custom: {maker: "Vale", batch: "modified"},
 		};
+		const secondModifiedItem = {
+			...structuredClone(secondOriginalItem),
+			_fromPack: "Reforged Ranger's Kit|PHB",
+			effects: [{type: "skillBonus", skill: "stealth", value: 2}],
+			chargesCurrent: 2,
+			material: {name: "Moon Silver", source: "PHB", role: "strikingSurface"},
+			appliedUpgrades: [{name: "Keen", source: "PHB"}],
+			socketedGemstones: [{name: "Frost", source: "PHB"}],
+			custom: {maker: "Vale", batch: "second-modified"},
+		};
 		const currentStack = afterReserve.data.inventory.find(entry => entry.id === stackId);
 		currentStack.item = modifiedItem;
 		currentStack.note = "Reworked commission";
 		currentStack.customState = {privacy: "shared"};
+		const currentSecondStack = afterReserve.data.inventory.find(entry => entry.id === secondStackId);
+		currentSecondStack.item = secondModifiedItem;
+		currentSecondStack.note = "Second reworked commission";
+		currentSecondStack.customState = {privacy: "shared"};
 		await pSaveCharacterInventoryThroughSheet({
 			store: ctx.store,
 			accountId: ctx.accounts.playerA.id,
@@ -1283,10 +1319,20 @@ describe("Campaign Hub item award domain", () => {
 			characterId: source.id,
 		})).character.data.inventory;
 		const modified = restored.find(entry => entry.id === stackId);
+		const secondModified = restored.find(entry => entry.id === secondStackId);
 		const original = restored.find(entry => entry.item.custom?.batch === "original");
+		const secondOriginal = restored.find(entry => entry.item.custom?.batch === "second-original");
 		const restoredId = original?.id;
+		const secondRestoredId = secondOriginal?.id;
 
-		expect(restored.map(entry => entry.id)).toEqual(["before", restoredId, stackId, "after"]);
+		expect(restored.map(entry => entry.id)).toEqual([
+			"before",
+			restoredId,
+			stackId,
+			secondRestoredId,
+			secondStackId,
+			"after",
+		]);
 		expect(new Set(restored.map(entry => entry.id)).size).toBe(restored.length);
 		expect(modified).toEqual(expect.objectContaining({
 			item: expect.objectContaining(modifiedItem),
@@ -1300,8 +1346,22 @@ describe("Campaign Hub item award domain", () => {
 			note: "Original commission",
 			customState: {privacy: "owner-only"},
 		}));
+		expect(secondModified).toEqual(expect.objectContaining({
+			item: expect.objectContaining(secondModifiedItem),
+			quantity: 3,
+			note: "Second reworked commission",
+			customState: {privacy: "shared"},
+		}));
+		expect(secondOriginal).toEqual(expect.objectContaining({
+			item: expect.objectContaining(secondOriginalItem),
+			quantity: 3,
+			note: "Second commission",
+			customState: {privacy: "owner-only"},
+		}));
 		expect(restoredId).not.toBe(stackId);
+		expect(secondRestoredId).not.toBe(secondStackId);
 		expect(modified.quantity + original.quantity).toBe(4);
+		expect(secondModified.quantity + secondOriginal.quantity).toBe(6);
 	});
 
 	it("tightens the legacy grant to safe metadata without breaking name/source callers", async () => {
