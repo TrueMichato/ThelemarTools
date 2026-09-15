@@ -606,6 +606,19 @@ export class MemoryHubStore {
 		return copy(response);
 	}
 
+	_projectTransferResponseForViewer ({response, accountId, membership}) {
+		if (!response?.transfer) return copy(response);
+		return {
+			...copy(response),
+			transfer: projectTransferForViewer({
+				transfer: copy(response.transfer),
+				accountId,
+				role: membership.role,
+				getCharacterOwnerId: characterId => this._characters.get(characterId)?.ownerAccountId,
+			}),
+		};
+	}
+
 	_normalizeIdempotencyKey (idempotencyKey) {
 		if (idempotencyKey && typeof idempotencyKey === "object") return idempotencyKey;
 		const key = `${idempotencyKey}`;
@@ -3395,7 +3408,10 @@ export class MemoryHubStore {
 
 	async pProposeTransfer ({accountId, campaignId, sourceKind, sourceId, targetKind, targetId, payload, rulesVersionId = null, idempotencyKey}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
-		if (prior) return prior;
+		if (prior) {
+			const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+			return this._projectTransferResponseForViewer({response: prior, accountId, membership});
+		}
 		if (sourceKind === targetKind && sourceId === targetId) {
 			throw new HubStoreError("TRANSFER_TARGET_INVALID", `Choose a different transfer destination.`, {status: 400});
 		}
@@ -3499,12 +3515,20 @@ export class MemoryHubStore {
 			visibleAccountIds: [...new Set([accountId, target._character?.ownerAccountId].filter(Boolean))],
 			payload: {sourceKind, sourceId, targetKind, targetId},
 		});
-		return this._setReceipt({accountId, idempotencyKey, response: {transfer}});
+		const response = this._projectTransferResponseForViewer({
+			response: {transfer},
+			accountId,
+			membership: current.membership,
+		});
+		return this._setReceipt({accountId, idempotencyKey, response});
 	}
 
 	async pResolveTransfer ({accountId, campaignId, transferId, decision, rulesVersionId = null, idempotencyKey}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
-		if (prior) return prior;
+		if (prior) {
+			const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+			return this._projectTransferResponseForViewer({response: prior, accountId, membership});
+		}
 		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
 		const transferPre = this._transfers.get(transferId);
 		if (!transferPre || transferPre.campaignId !== campaignId || !["proposed", "reserved"].includes(transferPre.status)) throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
@@ -3586,7 +3610,12 @@ export class MemoryHubStore {
 				targetId: transfer.targetId,
 			},
 		});
-		return this._setReceipt({accountId, idempotencyKey, response: {transfer}});
+		const response = this._projectTransferResponseForViewer({
+			response: {transfer},
+			accountId,
+			membership,
+		});
+		return this._setReceipt({accountId, idempotencyKey, response});
 	}
 
 	async pListTransfers ({accountId, campaignId}) {

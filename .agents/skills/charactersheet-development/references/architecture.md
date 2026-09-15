@@ -169,7 +169,8 @@ No reactive system — renders are explicit. Related modules re-render together 
 - **Toast notifications**: `JqueryUtil.doToast({type: "success", content: "..."})` for user feedback (site-wide utility, not jQuery-dependent despite the name)
 - **HTML generation**: `e_({outer: \`<button class="btn">...</button>\`})` for single elements, `ee\`<div>...</div>\`` tagged template for complex HTML. `insertAdjacentHTML()` for appending HTML strings.
 - **Hub realtime callbacks**: `CharacterSheetRealtimeCoordinator.on()` exposes connection, cursor,
-  metadata-only projection invalidation, semantic-operation lifecycle, and delivery-error handoffs. Only a
+  membership-authority change, metadata-only projection invalidation, semantic-operation lifecycle, and
+  delivery-error handoffs. Only a
   signed-in campaign-backed canonical character attaches. Delivery uses the repository mutation queue and is
   generation-fenced on switch/detach/revocation/terminal page hide; a missing canonical ref, remote archive, or remote move
   serializes teardown behind already-queued delivery. Persisted `pagehide` suspends the socket and `pageshow`

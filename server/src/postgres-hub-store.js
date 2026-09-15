@@ -887,6 +887,19 @@ export class PostgresHubStore {
 		};
 	}
 
+	async _pGetMembershipForShare ({client, accountId, campaignId, roles = null}) {
+		const result = await client.query(`
+			SELECT id, campaign_id, account_id, role, status
+			FROM hub.memberships
+			WHERE campaign_id = $1 AND account_id = $2 AND status = 'active'
+			FOR SHARE
+		`, [campaignId, accountId]);
+		if (!result.rowCount) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+		const membership = getMembership(result.rows[0]);
+		if (roles && !roles.includes(membership.role)) throw new HubStoreError("FORBIDDEN", `Campaign role is not allowed.`, {status: 403});
+		return membership;
+	}
+
 	async _pLockCommand ({client, accountId, idempotencyKey}) {
 		const normalized = this._normalizeIdempotencyKey(idempotencyKey);
 		await client.query(`
@@ -928,6 +941,33 @@ export class PostgresHubStore {
 		// the first response did — otherwise an idempotent retry both leaks another owner's
 		// sharing configuration and returns a different body than the call it replays.
 		return {...response, character: stripProjectionPolicy(getCharacter(result.rows[0]))};
+	}
+
+	async _pProjectTransferResponseForViewer ({client, response, accountId, campaignId, membership = null}) {
+		if (!response?.transfer) return structuredClone(response);
+		const viewerMembership = membership || await this._pGetMembershipForShare({
+			client,
+			accountId,
+			campaignId,
+			roles: ["dm", "co_dm", "player"],
+		});
+		const characterIds = [
+			response.transfer.sourceKind === "character" ? response.transfer.sourceId : null,
+			response.transfer.targetKind === "character" ? response.transfer.targetId : null,
+		].filter(Boolean);
+		const owners = characterIds.length
+			? await client.query(`SELECT id, owner_account_id FROM hub.characters WHERE id = ANY($1::uuid[])`, [characterIds])
+			: {rows: []};
+		const ownerByCharacterId = new Map(owners.rows.map(row => [row.id, row.owner_account_id]));
+		return {
+			...structuredClone(response),
+			transfer: projectTransferForViewer({
+				transfer: structuredClone(response.transfer),
+				accountId,
+				role: viewerMembership.role,
+				getCharacterOwnerId: characterId => ownerByCharacterId.get(characterId),
+			}),
+		};
 	}
 
 	async pDeleteExpiredCommandReceipts ({limit = 1_000} = {}) {
@@ -5547,8 +5587,9 @@ export class PostgresHubStore {
 			await client.query("BEGIN");
 			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
 			if (prior) {
+				const response = await this._pProjectTransferResponseForViewer({client, response: prior, accountId, campaignId});
 				await client.query("COMMIT");
-				return prior;
+				return response;
 			}
 			const membership = await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm", "player"]});
 			if (sourceKind === targetKind && sourceId === targetId) {
@@ -5635,7 +5676,13 @@ export class PostgresHubStore {
 				visibleAccountIds: [...new Set([accountId, target.ownerAccountId].filter(Boolean))],
 				payload: {sourceKind, sourceId, targetKind, targetId},
 			});
-			const response = {transfer};
+			const response = await this._pProjectTransferResponseForViewer({
+				client,
+				response: {transfer},
+				accountId,
+				campaignId,
+				membership,
+			});
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "transfer.propose", response});
 			await client.query("COMMIT");
 			return response;
@@ -5653,8 +5700,9 @@ export class PostgresHubStore {
 			await client.query("BEGIN");
 			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
 			if (prior) {
+				const response = await this._pProjectTransferResponseForViewer({client, response: prior, accountId, campaignId});
 				await client.query("COMMIT");
-				return prior;
+				return response;
 			}
 			const transferLookup = await client.query(`SELECT * FROM hub.transfers WHERE campaign_id = $1 AND id = $2 AND status IN ('proposed', 'reserved')`, [campaignId, transferId]);
 			if (!transferLookup.rowCount) throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
@@ -5734,7 +5782,13 @@ export class PostgresHubStore {
 					targetId: transfer.targetId,
 				},
 			});
-			const response = {transfer: transferNxt};
+			const response = await this._pProjectTransferResponseForViewer({
+				client,
+				response: {transfer: transferNxt},
+				accountId,
+				campaignId,
+				membership,
+			});
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "transfer.resolve", response});
 			await client.query("COMMIT");
 			return response;
@@ -5747,32 +5801,42 @@ export class PostgresHubStore {
 	}
 
 	async pListTransfers ({accountId, campaignId}) {
-		const membership = await this.pGetMembership({accountId, campaignId});
-		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
-		const result = await this._pool.query(`
-			SELECT
-				t.*,
-				sc.owner_account_id AS source_owner_account_id,
-				tc.owner_account_id AS target_owner_account_id
-			FROM hub.transfers t
-			LEFT JOIN hub.characters sc ON sc.id = t.source_character_id
-			LEFT JOIN hub.characters tc ON tc.id = t.target_character_id
-			WHERE t.campaign_id = $1
-				AND ($2::boolean OR t.actor_account_id = $3 OR sc.owner_account_id = $3 OR tc.owner_account_id = $3)
-			ORDER BY t.created_at DESC
-		`, [campaignId, ["dm", "co_dm"].includes(membership.role), accountId]);
-		return result.rows
-			.map(row => projectTransferForViewer({
-				transfer: this._getTransfer(row),
-				accountId,
-				role: membership.role,
-				getCharacterOwnerId: characterId => {
-					if (characterId === row.source_character_id) return row.source_owner_account_id;
-					if (characterId === row.target_character_id) return row.target_owner_account_id;
-					return null;
-				},
-			}))
-			.filter(Boolean);
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const membership = await this._pGetMembershipForShare({client, accountId, campaignId});
+			const result = await client.query(`
+				SELECT
+					t.*,
+					sc.owner_account_id AS source_owner_account_id,
+					tc.owner_account_id AS target_owner_account_id
+				FROM hub.transfers t
+				LEFT JOIN hub.characters sc ON sc.id = t.source_character_id
+				LEFT JOIN hub.characters tc ON tc.id = t.target_character_id
+				WHERE t.campaign_id = $1
+					AND ($2::boolean OR t.actor_account_id = $3 OR sc.owner_account_id = $3 OR tc.owner_account_id = $3)
+				ORDER BY t.created_at DESC
+			`, [campaignId, ["dm", "co_dm"].includes(membership.role), accountId]);
+			const transfers = result.rows
+				.map(row => projectTransferForViewer({
+					transfer: this._getTransfer(row),
+					accountId,
+					role: membership.role,
+					getCharacterOwnerId: characterId => {
+						if (characterId === row.source_character_id) return row.source_owner_account_id;
+						if (characterId === row.target_character_id) return row.target_owner_account_id;
+						return null;
+					},
+				}))
+				.filter(Boolean);
+			await client.query("COMMIT");
+			return transfers;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
 	}
 
 	async pGetAccountDeletion ({accountId}) {

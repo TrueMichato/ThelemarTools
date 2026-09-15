@@ -248,6 +248,10 @@ export class CharacterSheetPartyInventory {
 				if (this._active?.isActivationPending) void this._pActivate(this._active);
 				else this._scheduleRefresh({party: true});
 			}),
+			this._realtime.on("membershipChanged", () => {
+				if (this._active?.isActivationPending) void this._pActivate(this._active);
+				else this._scheduleRefresh({party: true});
+			}),
 			this._realtime.on("connectionState", state => this._onConnectionState(state)),
 		);
 	}

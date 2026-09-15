@@ -231,8 +231,8 @@ arbitrary spell prose.
 |---|---|---|---|
 | `GET /api/campaigns/:campaignId/party-inventory` | Active member | none | Lazily created party inventory, entries, denomination currency |
 | `GET /api/campaigns/:campaignId/transfers` | Active member | none | Transfers visible to DM, actor, source owner, or target owner; non-DM views omit unowned character/container IDs and foreign actor attribution |
-| `POST /api/campaigns/:campaignId/transfers` | Active-member mutation; character source owner, DM/co-DM party source, or player requesting party inventory for their own character | source/target kind+UUID, <=100 item quantities, nonnegative denomination currency, and active `rulesVersionId` for a direct character destination under restrictive content policy | 201 `committed` direct-authority transfer, `reserved` approval-bound escrow transfer, or non-escrowed `proposed` player stash request |
-| `POST /api/campaigns/:campaignId/transfers/:transferId/resolve` | Reserved: target owner or DM/co-DM; proposed stash request: DM/co-DM; originating actor may reject/cancel either | accept/reject plus active `rulesVersionId` when accepting into a character under restrictive content policy | committed or rejected transfer/request |
+| `POST /api/campaigns/:campaignId/transfers` | Active-member mutation; character source owner, DM/co-DM party source, or player requesting party inventory for their own character | source/target kind+UUID, <=100 item quantities, nonnegative denomination currency, and active `rulesVersionId` for a direct character destination under restrictive content policy | 201 viewer-scoped `committed` direct-authority transfer, `reserved` approval-bound escrow transfer, or non-escrowed `proposed` player stash request |
+| `POST /api/campaigns/:campaignId/transfers/:transferId/resolve` | Reserved: target owner or DM/co-DM; proposed stash request: DM/co-DM; originating actor may reject/cancel either | accept/reject plus active `rulesVersionId` when accepting into a character under restrictive content policy | viewer-scoped committed or rejected transfer/request |
 
 `sourceKind`/`targetKind` are `character` or `party_inventory`. Empty/insufficient transfers fail before a
 row is committed. Item quantities must be positive finite safe integers within the route schema limit.
@@ -247,6 +247,9 @@ reserve the stash. DM/co-DM acceptance rechecks the live stack and atomically re
 metadata and writes it to the character; concurrent depletion returns `TRANSFER_INSUFFICIENT` without changing
 either container or terminalizing the request. Reusing an idempotency key with the same command replays its stored
 result rather than repeating either mutation.
+Transfer mutation responses and their replay receipts use the same viewer projection as the transfer collection:
+DM/co-DM viewers receive the full record, while non-DM viewers receive only owned character endpoint IDs and
+their own actor attribution; party-inventory IDs and foreign actor attribution remain concealed.
 Browser proposal and resolution retries freeze the original body, decision, rules pin, and idempotency key after
 an outcome-uncertain network, invalid-response, or HTTP 5xx failure. That exact retry is allowed for at most 23
 hours, staying inside PostgreSQL's 24-hour command-receipt lifetime. Once the browser window expires, it performs

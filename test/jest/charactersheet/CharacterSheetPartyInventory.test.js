@@ -384,6 +384,33 @@ describe("Character Sheet party inventory", () => {
 		expect(repository.pReconcileAuthoritativeCharacter).not.toHaveBeenCalled();
 	});
 
+	it("refetches the stash projection after membership authority changes", () => {
+		const listeners = new Map();
+		const partyInventory = new CharacterSheetPartyInventory({
+			api: {},
+			realtime: {
+				on: jest.fn((type, listener) => {
+					listeners.set(type, listener);
+					return jest.fn();
+				}),
+			},
+			campaignId: "campaign-1",
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {
+			characterId: "character-1",
+			generation: 1,
+			token: Symbol("test"),
+			isOwner: true,
+		};
+		partyInventory._scheduleRefresh = jest.fn();
+
+		listeners.get("membershipChanged")({campaignId: "campaign-1", source: "event"});
+
+		expect(partyInventory._scheduleRefresh).toHaveBeenCalledWith({party: true});
+	});
+
 	it("leaves cursor-covered character reconciliation to the owning Character Sheet page", () => {
 		const listeners = new Map();
 		const partyInventory = new CharacterSheetPartyInventory({
