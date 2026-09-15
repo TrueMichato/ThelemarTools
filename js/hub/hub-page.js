@@ -2690,10 +2690,24 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			const message = error instanceof HubApiError ? getErrorMessage(error) : error.message;
 			const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId});
 			const isRulesVersionStale = error instanceof HubApiError && error.code === "RULES_VERSION_STALE";
-			if (isRulesVersionStale && !pendingProposal) {
+			const isDefinitiveWithoutPending = error instanceof HubApiError
+				&& !isTransferOutcomeUncertain(error)
+				&& !pendingProposal;
+			if (isDefinitiveWithoutPending) {
 				form._hubMutationKey = null;
 				form._hubMutationFingerprint = null;
 				setTransferProposalControls({form, isLocked: false});
+				try {
+					await pRefreshTransferState();
+				} catch {
+					setTransferRefreshFailure({
+						form,
+						message: `${message} The latest balances could not be loaded.`,
+						pRetry: pRefreshTransferState,
+					});
+					renderError(error);
+					return;
+				}
 			}
 			if (pendingProposal && !transferProposalDrafts.isReplayable(pendingProposal)) {
 				setTransferProposalReplayExpired({

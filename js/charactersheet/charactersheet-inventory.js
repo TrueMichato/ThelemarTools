@@ -6369,8 +6369,8 @@ class CharacterSheetInventory {
 			}
 
 			// Get AC value - include magic bonus if present
-			const baseAC = equippedArmor.ac || 10;
-			const magicBonus = equippedArmor.bonusAc || 0;
+			const baseAC = this._parseBonus(equippedArmor.ac) || 10;
+			const magicBonus = this._parseBonus(equippedArmor.bonusAc);
 			const armorAC = baseAC + magicBonus;
 
 			// Get armor properties for mechanics - try stored values first, then look up
@@ -6406,8 +6406,8 @@ class CharacterSheetInventory {
 		}
 
 		// Update shield state - track base AC and magic bonus separately
-		const shieldBaseAc = equippedShield?.ac ?? 2;
-		const shieldMagicBonus = equippedShield?.bonusAc || 0;
+		const shieldBaseAc = equippedShield ? this._parseBonus(equippedShield.ac ?? 2) : 2;
+		const shieldMagicBonus = this._parseBonus(equippedShield?.bonusAc);
 		this._state.setShield(equippedShield ? {equipped: true, ac: shieldBaseAc, bonus: shieldMagicBonus, name: equippedShield.name || "Shield", source: equippedShield.source, appliedUpgrades: equippedShield.appliedUpgrades || []} : false);
 
 		// Calculate AC bonuses from other equipped/attuned items (like Cloak of Protection, Ring of Protection)
@@ -6441,7 +6441,7 @@ class CharacterSheetInventory {
 				if (bonusType === "bonusAc" && item.effects?.some(effect => effect?.type === "acBonusConditional")) return false;
 				return item[bonusType];
 			})
-			.reduce((sum, item) => sum + (item[bonusType] || 0), 0);
+			.reduce((sum, item) => sum + this._parseBonus(item[bonusType]), 0);
 	}
 
 	/**

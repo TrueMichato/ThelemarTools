@@ -965,6 +965,106 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			.toEqual(before.data.inventory.find(it => it.id === "maps"));
 	});
 
+	test("keeps restored escrow separate from a metadata-diverged same-ID source stack", async () => {
+		const stackId = crypto.randomUUID();
+		const originalItem = {
+			name: "Arrow",
+			source: "PHB",
+			_fromPack: "Wayfarer's Kit|PHB",
+			effects: [{type: "skillBonus", skill: "athletics", value: 1}],
+			charges: 7,
+			chargesCurrent: 5,
+			material: {name: "Dragonbone", source: "PHB", role: "strikingSurface"},
+			appliedUpgrades: [{name: "Balanced", source: "PHB"}],
+			socketedGemstones: [{name: "Journey", source: "PHB"}],
+			custom: {maker: "Rook", batch: "original"},
+		};
+		const source = (await store.pCreateCharacter({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			data: {
+				name: `${prefix} metadata restore source`,
+				inventory: [
+					{id: "before", item: {name: "Club", source: "PHB"}, quantity: 1},
+					{
+						id: stackId,
+						item: originalItem,
+						quantity: 4,
+						note: "Original commission",
+						customState: {privacy: "owner-only"},
+					},
+					{id: "after", item: {name: "Dagger", source: "PHB"}, quantity: 1},
+				],
+				currency: {},
+				carry: {schemaVersion: 1, status: "known"},
+			},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const target = await pCreateTargetCharacter(`${prefix} metadata restore target`);
+		const reserved = await store.pProposeTransfer({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: source.id,
+			targetKind: "character",
+			targetId: target.id,
+			payload: {items: [{entryId: stackId, quantity: 2}]},
+			idempotencyKey: `${prefix}-metadata-restore-reserve`,
+		});
+		expect(reserved.transfer.status).toBe("reserved");
+
+		const afterReserve = await pReadCharacter(sourceOwner.id, source.id);
+		const modifiedItem = {
+			...structuredClone(originalItem),
+			_fromPack: "Reforged Kit|PHB",
+			effects: [{type: "skillBonus", skill: "arcana", value: 2}],
+			chargesCurrent: 1,
+			material: {name: "Star Iron", source: "PHB", role: "strikingSurface"},
+			appliedUpgrades: [{name: "Keen", source: "PHB"}],
+			socketedGemstones: [{name: "Ember", source: "PHB"}],
+			custom: {maker: "Vale", batch: "modified"},
+		};
+		const currentStack = afterReserve.data.inventory.find(entry => entry.id === stackId);
+		currentStack.item = modifiedItem;
+		currentStack.note = "Reworked commission";
+		currentStack.customState = {privacy: "shared"};
+		await pSaveCharacterInventoryThroughSheet({
+			accountId: sourceOwner.id,
+			character: afterReserve,
+		});
+
+		await store.pResolveTransfer({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			transferId: reserved.transfer.id,
+			decision: "reject",
+			idempotencyKey: `${prefix}-metadata-restore-reject`,
+		});
+		const restored = (await pReadCharacter(sourceOwner.id, source.id)).data.inventory;
+		const modified = restored.find(entry => entry.id === stackId);
+		const original = restored.find(entry => entry.item.custom?.batch === "original");
+		const restoredId = original?.id;
+
+		expect(restored.map(entry => entry.id)).toEqual(["before", restoredId, stackId, "after"]);
+		expect(new Set(restored.map(entry => entry.id)).size).toBe(restored.length);
+		expect(modified).toEqual(expect.objectContaining({
+			item: expect.objectContaining(modifiedItem),
+			quantity: 2,
+			note: "Reworked commission",
+			customState: {privacy: "shared"},
+		}));
+		expect(original).toEqual(expect.objectContaining({
+			item: expect.objectContaining(originalItem),
+			quantity: 2,
+			note: "Original commission",
+			customState: {privacy: "owner-only"},
+		}));
+		expect(restoredId).not.toBe(stackId);
+		expect(modified.quantity + original.quantity).toBe(4);
+	});
+
 	test("awards a party stack in stable target order with exact conservation and event pairing", async () => {
 		const richItem = {
 			name: `${prefix} bolts`,

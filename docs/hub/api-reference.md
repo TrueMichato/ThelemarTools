@@ -273,7 +273,10 @@ across reloads remain out of scope.
 An approval-bound acceptance or direct proposal into a character compares the resulting authoritative document
 with its prior state and rejects a new disallowed/unknown item identity or stale rules pin before source,
 destination, resolution, audit, event, outbox, or receipt changes. Approval-bound reserved escrow remains
-available for an exact reject/cancel restoration.
+available for an exact reject/cancel restoration. If the remaining same-ID source stack was edited after a
+partial reservation, restoration merges only when the complete transferable metadata is still stack-equivalent.
+Otherwise the escrowed original returns as a collision-free stack near its original index, preserving both
+metadata identities and the conserved total quantity.
 
 The server derives item eligibility and stack compatibility from canonical data. A whole stack is refused
 while equipped, attuned, container-linked, spell/component-linked (including a real `itemGrantedSpells[].itemId`
