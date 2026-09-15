@@ -262,13 +262,16 @@ compatible. Comparison removes only deterministic Character Sheet aliases and em
 spent charges, non-empty upgrades/gemstones, custom metadata, provenance, and other semantic differences remain
 stack-separating. Restore preserves source identity/index.
 
-Open-sheet authoritative reconciliation uses the same deterministic-alias comparison and treats semantically
-identical local/server candidates as converged, retaining the canonical server representation. An ordinary
-recovery conflict clears automatically only when the overlap is gone and every draft discarded by an earlier
-authoritative rebase is semantically represented by a surviving base/local/server candidate. Unique local
-intent remains exportable behind explicit conflict recovery, and live-operation conflicts are never cleared
-through this shortcut. A failed-write recovery marker is removed only when its draft is already represented by
-canonical truth; disjoint unsaved edits retain their retry and reload recovery state.
+Open-sheet authoritative reconciliation uses the same deterministic-alias and immutable-repair-catalog
+comparison as post-save reconciliation. Trusted hydration is limited to non-custom official UIDs, and
+comparison patches take add/replace values from the raw local candidate before applying to raw canonical truth.
+Semantically identical local/server candidates therefore converge without deleting either player metadata or
+canonical item metadata. An ordinary recovery conflict clears automatically only when the overlap is gone and
+every draft discarded by an earlier authoritative rebase is semantically represented by a surviving
+base/local/server candidate. Unique local intent remains exportable behind explicit conflict recovery, and
+live-operation conflicts are never cleared through this shortcut. A failed-write recovery marker is removed
+only when its draft is already represented by canonical truth; disjoint unsaved edits retain their retry and
+reload recovery state.
 
 ## Atomic item-award invariant
 

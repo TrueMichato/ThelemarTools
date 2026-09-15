@@ -321,8 +321,10 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   award-to-Character-Sheet-save-to-repeat-award stack identity, direct/stash-return metadata conservation,
   accept/reject/cancel behavior, stash conservation under contention, memory/PostgreSQL parity, carry
   invalidation, stable audit/event/projection ordering,
-  privacy-safe preview states, normalized retry identity, legacy-summary Character Sheet rehydration, and
-  open-sheet authoritative reconciliation. A complete generated-artifact equality test prevents the browser
+  privacy-safe preview states, normalized retry identity, legacy-summary Character Sheet rehydration, trusted
+  focus/weapon hydration across quantity-only authoritative changes, custom-item metadata preservation, raw
+  patch-value rematerialization, and open-sheet authoritative reconciliation. A complete generated-artifact
+  equality test prevents the browser
   item data and BFF award catalog from drifting. Character Sheet migration coverage also rejects renderer/filter
   caches, empty renderer-created `entries`, and renderer-injected `additionalSources` while retaining
   source-authored `hasRefs` and `additionalSources` from real site catalog entries through repeat award and stash

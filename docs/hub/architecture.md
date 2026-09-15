@@ -156,12 +156,16 @@ revocation, logout, and terminal page hide all fence the subscription generation
 Applied operations are reconciled in the repository under ADR 0012. `rebaseJsonChanges` treats identical
 same-path edits as convergence while preserving unequal and ancestor/descendant overlaps as conflicts. The
 character repository additionally removes only deterministic Character Sheet item aliases from all three
-comparison inputs before inventory diffs. A canonical item and the same sheet-normalized item therefore do not
-manufacture an `/inventory` overlap around a server quantity change, while quantity, spent charges, non-empty
-upgrades/gemstones, custom metadata, provenance, effects, materials, and wrapper-state changes remain real
-conflicts. The normalization is comparison-only; canonical server inventory remains the adopted document.
-The Character Sheet's final post-save rebase uses the same comparison contract and applies disjoint local
-patches back onto the unmodified canonical document, so save completion cannot reintroduce the alias conflict.
+comparison inputs before inventory diffs. For non-custom official UIDs only, it also removes fields which exactly
+match the immutable pre-enhancement repair catalog. Player-owned fields outside that catalog match remain
+significant, while `_isCustom` and `source: "Custom"` items receive no trusted-catalog normalization. A canonical
+item and the same sheet-hydrated focus or weapon therefore do not manufacture an `/inventory` overlap around a
+server quantity change, while quantity, spent charges, non-empty upgrades/gemstones, custom metadata,
+provenance, effects, materials, and wrapper-state changes remain real conflicts. The normalization is
+comparison-only: every surviving add/replace patch rematerializes its value from the raw local document and
+applies it to the raw canonical document, so neither side's canonical metadata is deleted. The Character Sheet's
+final post-save rebase uses this same comparison and rematerialization contract, so save completion cannot
+reintroduce the hydration conflict.
 The accepted base and every other base track still advance together with live state so later saves retain exact
 coverage and do not need to rediscover already-accepted edits. Delivery is therefore a prepare/adopt/commit
 transaction over per-track coverage records, and an unprovable delivery schedules a serialized recovery that

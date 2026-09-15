@@ -1,5 +1,5 @@
 import {HubApiClient} from "./hub-api-client.js";
-import {applyJsonPatch, diffJson, rebaseJsonChanges} from "./hub-json-patch.js";
+import {applyJsonPatch, diffJson, getJsonPatchesWithDocumentValues, rebaseJsonChanges} from "./hub-json-patch.js";
 import {withRootCarryWrite} from "./hub-carry-authority.js";
 import {HubBroadcastSync} from "./hub-broadcast-sync.js";
 import {CHARACTER_OPERATION_LEGS, getCharacterOperationRouting, getOperationLegKey} from "./hub-character-operation-events.js";
@@ -32,11 +32,14 @@ export class HubHttpCharacterRepository {
 		api = new HubApiClient(),
 		broadcastSync = null,
 		fnGetRulesVersionId = () => null,
+		fnNormalizeCharacterDocument = getCharacterDocumentWithoutDeterministicItemAliases,
 	}) {
 		if (campaignId != null && (typeof campaignId !== "string" || !campaignId)) throw new TypeError(`campaignId must be a non-empty string or null.`);
+		if (typeof fnNormalizeCharacterDocument !== "function") throw new TypeError(`fnNormalizeCharacterDocument must be a function.`);
 		this._campaignId = campaignId;
 		this._api = api;
 		this._fnGetRulesVersionId = fnGetRulesVersionId;
+		this._fnNormalizeCharacterDocument = fnNormalizeCharacterDocument;
 		this._scopeKey = campaignId || "detached";
 		this._broadcastSync = broadcastSync || (
 			!campaignId || typeof BroadcastChannel === "undefined"
@@ -322,15 +325,21 @@ export class HubHttpCharacterRepository {
 		// inventory mutations deliberately remove it, while the live sheet may independently
 		// recompute it as data finishes loading; those concurrent derived changes must not block
 		// adoption of the authoritative inventory that the next serialization will summarize.
+		const rawLocal = this._getSnapshotData(local);
+		const rawRemote = this._getSnapshotData(remote);
 		const normalizedBase = this._getNormalizedCharacterCandidate(base);
-		const normalizedLocal = this._getNormalizedCharacterCandidate(local);
-		const normalizedRemote = this._getNormalizedCharacterCandidate(remote);
+		const normalizedLocal = this._getNormalizedCharacterCandidate(rawLocal);
+		const normalizedRemote = this._getNormalizedCharacterCandidate(rawRemote);
 		if (!diffJson(normalizedLocal, normalizedRemote).length) {
+			const patches = getJsonPatchesWithDocumentValues({
+				patches: diffJson(normalizedBase, normalizedLocal),
+				document: rawLocal,
+			});
 			return {
 				isConflict: false,
 				conflicts: [],
-				patches: diffJson(normalizedBase, normalizedLocal),
-				document: structuredClone(remote),
+				patches,
+				document: rawRemote,
 			};
 		}
 		const rebased = rebaseJsonChanges({
@@ -338,26 +347,35 @@ export class HubHttpCharacterRepository {
 			local: normalizedLocal,
 			remote: normalizedRemote,
 		});
-		if (!rebased.isConflict) return rebased;
+		if (!rebased.isConflict) {
+			const patches = getJsonPatchesWithDocumentValues({patches: rebased.patches, document: rawLocal});
+			return {
+				...rebased,
+				patches,
+				document: applyJsonPatch(rawRemote, patches),
+			};
+		}
 		const conflictingPaths = new Set(rebased.conflicts.map(conflict => conflict.localPath));
 		// A recovery choice may reapply disjoint local edits, but must never overwrite
 		// authoritative escrow changes at an overlapping path.
+		const patches = getJsonPatchesWithDocumentValues({
+			patches: isPreserveLocalOnConflict
+				? rebased.patches.filter(patch => !(
+					conflictingPaths.has(patch.path)
+					&& isServerAuthoritativeCharacterPath(patch.path)
+				))
+				: rebased.patches.filter(patch => !conflictingPaths.has(patch.path)),
+			document: rawLocal,
+		});
 		return {
 			...rebased,
-			document: applyJsonPatch(
-				normalizedRemote,
-				isPreserveLocalOnConflict
-					? rebased.patches.filter(patch => !(
-						conflictingPaths.has(patch.path)
-						&& isServerAuthoritativeCharacterPath(patch.path)
-					))
-					: rebased.patches.filter(patch => !conflictingPaths.has(patch.path)),
-			),
+			patches,
+			document: applyJsonPatch(rawRemote, patches),
 		};
 	}
 
 	_getNormalizedCharacterCandidate (candidate) {
-		const out = getCharacterDocumentWithoutDeterministicItemAliases(this._getSnapshotData(candidate));
+		const out = this._fnNormalizeCharacterDocument(this._getSnapshotData(candidate));
 		if (!out || typeof out !== "object" || Array.isArray(out)) return out;
 		delete out.carry;
 		delete out._savedAt;
@@ -372,23 +390,28 @@ export class HubHttpCharacterRepository {
 	}
 
 	_rebaseOwnerCandidate ({base, local, remote}) {
+		const rawBase = this._getSnapshotData(base);
+		const rawLocal = this._getSnapshotData(local);
+		const rawRemote = this._getSnapshotData(remote);
 		const withoutClientMetadata = candidate => {
-			const out = getCharacterDocumentWithoutDeterministicItemAliases(this._getSnapshotData(candidate));
+			const out = this._fnNormalizeCharacterDocument(candidate);
 			if (!out || typeof out !== "object" || Array.isArray(out)) return out;
 			delete out._savedAt;
 			return out;
 		};
-		const normalizedBase = withoutClientMetadata(base);
-		const normalizedLocal = withoutClientMetadata(local);
-		const normalizedRemote = withoutClientMetadata(remote);
+		const normalizedBase = withoutClientMetadata(rawBase);
+		const normalizedLocal = withoutClientMetadata(rawLocal);
+		const normalizedRemote = withoutClientMetadata(rawRemote);
 		const rebased = rebaseJsonChanges({
 			base: normalizedBase,
 			local: normalizedLocal,
 			remote: normalizedRemote,
 		});
+		const patches = getJsonPatchesWithDocumentValues({patches: rebased.patches, document: rawLocal});
 		return {
 			...rebased,
-			document: rebased.isConflict ? null : applyJsonPatch(this._getSnapshotData(remote), rebased.patches),
+			patches,
+			document: rebased.isConflict ? null : applyJsonPatch(rawRemote, patches),
 		};
 	}
 

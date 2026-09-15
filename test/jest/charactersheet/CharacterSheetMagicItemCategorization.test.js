@@ -25,6 +25,7 @@ import {
 	removeTransferPayload,
 } from "../../../server/src/hub-actions.js";
 import {HubHttpCharacterRepository} from "../../../js/hub/hub-http-character-repository.js";
+import {getCharacterDocumentWithoutDeterministicItemAliases} from "../../../js/hub/hub-inventory-equivalence.js";
 import {applyJsonPatch} from "../../../js/hub/hub-json-patch.js";
 
 if (typeof globalThis.document === "undefined") {
@@ -773,6 +774,323 @@ describe("Hub summary-only inventory metadata migration", () => {
 });
 
 describe("Hub authoritative inventory reconciliation", () => {
+	test.each([
+		[
+			"player custom metadata on an official UID",
+			{name: "Orb", source: "XPHB", type: "gear", typeCode: "SCF|XPHB", scfType: "arcane", custom: {maker: "Mira"}},
+			{custom: {maker: "Mira"}},
+		],
+		[
+			"an _isCustom official-UID item",
+			{name: "Orb", source: "XPHB", type: "gear", typeCode: "SCF|XPHB", scfType: "arcane", entries: ["Player-authored"], _isCustom: true},
+			{typeCode: "SCF|XPHB", scfType: "arcane", entries: ["Player-authored"], _isCustom: true},
+		],
+		[
+			"a Custom-source item",
+			{name: "Orb", source: "Custom", type: "gear", typeCode: "SCF|XPHB", scfType: "arcane", entries: ["Player-authored"]},
+			{typeCode: "SCF|XPHB", scfType: "arcane", entries: ["Player-authored"]},
+		],
+	])("keeps %s outside trusted catalog normalization", (_, item, expected) => {
+		const normalized = getCharacterDocumentWithoutDeterministicItemAliases({
+			inventory: [{id: "orb", item, quantity: 1}],
+		}, {
+			pristineItems: [{name: "Orb", source: "XPHB"}],
+			repairItems: [{name: "Orb", source: "XPHB", type: "SCF|XPHB", scfType: "arcane"}],
+		});
+
+		expect(normalized.inventory[0].item).toEqual(expect.objectContaining(expected));
+	});
+
+	test("preserves focus metadata when saving an official item customized by the player", async () => {
+		const canonicalItem = {
+			name: "Orb",
+			source: "XPHB",
+			type: "SCF|XPHB",
+			scfType: "arcane",
+		};
+		const baseData = {
+			name: "Mira",
+			inventory: [{
+				id: "custom-orb",
+				item: {
+					name: canonicalItem.name,
+					source: canonicalItem.source,
+					type: "gear",
+					typeCode: canonicalItem.type,
+					scfType: canonicalItem.scfType,
+				},
+				quantity: 1,
+			}],
+		};
+		let patchInput;
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({id: "character-1", campaignId: "campaign-1", revision: 1, data: structuredClone(baseData)}),
+			pAcquireCharacterLease: async () => ({epoch: 1}),
+			pPatchCharacter: async input => {
+				patchInput = input;
+				return {
+					character: {
+						id: "character-1",
+						campaignId: "campaign-1",
+						revision: 2,
+						data: applyJsonPatch(baseData, input.patches),
+					},
+				};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api,
+			fnNormalizeCharacterDocument: document => getCharacterDocumentWithoutDeterministicItemAliases(document, {
+				pristineItems: [{name: canonicalItem.name, source: canonicalItem.source}],
+				repairItems: [canonicalItem],
+			}),
+		});
+		await repository.pGet({characterId: "character-1"});
+		const customized = structuredClone(baseData);
+		customized.inventory[0].item = {
+			...customized.inventory[0].item,
+			entries: ["Player-authored replacement"],
+			_isCustom: true,
+		};
+
+		await expect(repository.pUpsert({
+			character: {id: "character-1", ...customized},
+		})).resolves.toMatchObject({
+			inventory: [{
+				item: expect.objectContaining({
+					typeCode: canonicalItem.type,
+					scfType: canonicalItem.scfType,
+					entries: ["Player-authored replacement"],
+					_isCustom: true,
+				}),
+			}],
+		});
+		expect(patchInput.patches).toEqual(expect.arrayContaining([
+			expect.objectContaining({path: "/inventory"}),
+		]));
+	});
+
+	test("post-save rebase preserves a live quantity edit on a repaired legacy focus", async () => {
+		const canonicalItem = {
+			name: "Orb",
+			source: "XPHB",
+			type: "SCF|XPHB",
+			scfType: "arcane",
+		};
+		const pristineItems = [{name: canonicalItem.name, source: canonicalItem.source}];
+		const state = newState();
+		state.setItemCatalog([canonicalItem], {pristineItems, repairItems: [canonicalItem]});
+		state.loadFromJson({
+			id: "character-1",
+			name: "Mira",
+			inventory: [{
+				id: "legacy-orb",
+				item: {name: canonicalItem.name, source: canonicalItem.source, type: "gear"},
+				quantity: 1,
+				equipped: false,
+				attuned: false,
+			}],
+		});
+		const baseData = state.toJson();
+		delete baseData.id;
+		baseData.inventory[0].item = {name: canonicalItem.name, source: canonicalItem.source, type: "gear"};
+		let resolvePatch;
+		let markPatchStarted;
+		const pPatch = new Promise(resolve => resolvePatch = resolve);
+		const pPatchStarted = new Promise(resolve => markPatchStarted = resolve);
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => ({id: "character-1", campaignId: "campaign-1", revision: 1, data: structuredClone(baseData)}),
+				pAcquireCharacterLease: async () => ({epoch: 1}),
+				pPatchCharacter: async () => {
+					markPatchStarted();
+					return pPatch;
+				},
+			},
+			fnNormalizeCharacterDocument: document => getCharacterDocumentWithoutDeterministicItemAliases(document, {
+				pristineItems,
+				repairItems: [canonicalItem],
+			}),
+		});
+		await repository.pGet({characterId: "character-1"});
+		state._data.notes.general = "submitted";
+		const host = {
+			_currentCharacterId: "character-1",
+			_characterLoadGeneration: 1,
+			_lastSavedAt: 0,
+			_state: state,
+			_characterRepository: repository,
+			_itemRepairData: pristineItems,
+			_itemRepairItems: [canonicalItem],
+			_updateSaveIndicator: jest.fn(),
+			_getNextSavedAt: CharacterSheetPage.prototype._getNextSavedAt,
+			_getHubComparableCharacterDocument: CharacterSheetPage.prototype._getHubComparableCharacterDocument,
+			_reconcileClassFeatures: jest.fn(),
+			_renderCharacter: jest.fn(),
+		};
+
+		const pSave = CharacterSheetPage.prototype._saveCurrentCharacter.call(host, {isInteractiveConflict: false});
+		await pPatchStarted;
+		state.setItemQuantity("legacy-orb", 2);
+		const persistedData = structuredClone(baseData);
+		persistedData.notes.general = "submitted";
+		resolvePatch({
+			character: {
+				id: "character-1",
+				campaignId: "campaign-1",
+				revision: 2,
+				data: persistedData,
+			},
+		});
+
+		await expect(pSave).resolves.toBe(true);
+		expect(state.getItemRaw("legacy-orb")).toEqual(expect.objectContaining({
+			type: "gear",
+			typeCode: canonicalItem.type,
+			scfType: canonicalItem.scfType,
+			quantity: 2,
+		}));
+		expect(host._renderCharacter).toHaveBeenCalledTimes(1);
+		expect(repository.getLiveConflictRecovery("character-1")).toBeNull();
+	});
+
+	test("rebases a trusted legacy focus repair across an authoritative quantity change", async () => {
+		const canonicalItem = {
+			name: "Orb",
+			source: "XPHB",
+			type: "SCF|XPHB",
+			scfType: "arcane",
+			rarity: "none",
+			weight: 3,
+			value: 2000,
+		};
+		const baseData = {
+			name: "Mira",
+			inventory: [{
+				id: "legacy-orb",
+				item: {name: canonicalItem.name, source: canonicalItem.source, type: "gear"},
+				quantity: 1,
+				equipped: false,
+				attuned: false,
+			}],
+		};
+		const remoteData = structuredClone(baseData);
+		remoteData.inventory[0].quantity = 2;
+		const base = {id: "character-1", campaignId: "campaign-1", revision: 1, data: baseData};
+		const remote = {id: "character-1", campaignId: "campaign-1", revision: 2, data: remoteData};
+		let getCount = 0;
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(++getCount === 1 ? base : remote),
+			},
+			fnNormalizeCharacterDocument: document => getCharacterDocumentWithoutDeterministicItemAliases(document, {
+				pristineItems: [{name: canonicalItem.name, source: canonicalItem.source}],
+				repairItems: [canonicalItem],
+			}),
+		});
+		await repository.pGet({characterId: "character-1"});
+		const state = newState();
+		state.setItemCatalog([canonicalItem], {
+			pristineItems: [{name: canonicalItem.name, source: canonicalItem.source}],
+			repairItems: [canonicalItem],
+		});
+		state.loadFromJson({id: "character-1", ...baseData});
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "character-1",
+			fnGetLiveData: () => {
+				const out = state.toJson();
+				delete out.id;
+				return out;
+			},
+			fnAdoptLive: data => state.loadFromJson({id: "character-1", ...data}),
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+		expect(state.getItemRaw("legacy-orb")).toEqual(expect.objectContaining({
+			type: "gear",
+			typeCode: canonicalItem.type,
+			scfType: canonicalItem.scfType,
+			quantity: 2,
+		}));
+		expect(repository.getConflictRecovery("character-1")).toBeNull();
+	});
+
+	test("rebases a trusted summary-only weapon across an authoritative quantity change", async () => {
+		const canonicalItem = {
+			name: "Longsword",
+			source: "PHB",
+			type: "M",
+			rarity: "none",
+			weight: 3,
+			value: 1500,
+			weaponCategory: "martial",
+			property: ["V"],
+			dmg1: "1d8",
+			dmgType: "S",
+			entries: ["A versatile martial weapon."],
+		};
+		const pristineItems = [{name: canonicalItem.name, source: canonicalItem.source}];
+		const baseData = {
+			name: "Mira",
+			inventory: [{
+				id: "legacy-longsword",
+				item: {
+					name: canonicalItem.name,
+					source: canonicalItem.source,
+					typeCode: canonicalItem.type,
+					weight: canonicalItem.weight,
+					value: canonicalItem.value,
+				},
+				quantity: 1,
+				equipped: false,
+				attuned: false,
+			}],
+		};
+		const remoteData = structuredClone(baseData);
+		remoteData.inventory[0].quantity = 2;
+		const base = {id: "character-1", campaignId: "campaign-1", revision: 1, data: baseData};
+		const remote = {id: "character-1", campaignId: "campaign-1", revision: 2, data: remoteData};
+		let getCount = 0;
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(++getCount === 1 ? base : remote),
+			},
+			fnNormalizeCharacterDocument: document => getCharacterDocumentWithoutDeterministicItemAliases(document, {
+				pristineItems,
+				repairItems: [canonicalItem],
+			}),
+		});
+		await repository.pGet({characterId: "character-1"});
+		const state = newState();
+		state.setItemCatalog([canonicalItem], {pristineItems, repairItems: [canonicalItem]});
+		state.loadFromJson({id: "character-1", ...baseData});
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "character-1",
+			fnGetLiveData: () => {
+				const out = state.toJson();
+				delete out.id;
+				return out;
+			},
+			fnAdoptLive: data => state.loadFromJson({id: "character-1", ...data}),
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+		expect(state.getItemRaw("legacy-longsword")).toEqual(expect.objectContaining({
+			type: canonicalItem.type,
+			typeCode: canonicalItem.type,
+			weaponCategory: canonicalItem.weaponCategory,
+			dmg1: canonicalItem.dmg1,
+			quantity: 2,
+		}));
+		expect(repository.getConflictRecovery("character-1")).toBeNull();
+	});
+
 	test("post-save adoption rebases a repeat award across sheet-derived aliases", async () => {
 		const canonicalItem = getSiteAwardItem("+1 Rhythm-Maker's Drum", "TCE");
 		const {canonical: baseData, local} = getSheetNormalizedHubDocument({
@@ -801,7 +1119,14 @@ describe("Hub authoritative inventory reconciliation", () => {
 				},
 			}),
 		};
-		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api,
+			fnNormalizeCharacterDocument: document => getCharacterDocumentWithoutDeterministicItemAliases(document, {
+				pristineItems: [canonicalItem],
+				repairItems: [canonicalItem],
+			}),
+		});
 		await repository.pGet({characterId: "character-1"});
 		const state = newState();
 		state.setItemCatalog([canonicalItem], {
@@ -815,8 +1140,11 @@ describe("Hub authoritative inventory reconciliation", () => {
 			_lastSavedAt: 0,
 			_state: state,
 			_characterRepository: repository,
+			_itemRepairData: [canonicalItem],
+			_itemRepairItems: [canonicalItem],
 			_updateSaveIndicator: jest.fn(),
 			_getNextSavedAt: CharacterSheetPage.prototype._getNextSavedAt,
+			_getHubComparableCharacterDocument: CharacterSheetPage.prototype._getHubComparableCharacterDocument,
 			_reconcileClassFeatures: jest.fn(),
 			_renderCharacter: jest.fn(),
 		};
