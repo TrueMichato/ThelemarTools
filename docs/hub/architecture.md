@@ -155,7 +155,12 @@ revocation, logout, and terminal page hide all fence the subscription generation
 
 Applied operations are reconciled in the repository under ADR 0012. `rebaseJsonChanges` treats identical
 same-path edits as convergence while preserving unequal and ancestor/descendant overlaps as conflicts. The
-accepted base and every other base track still advance together with live state so later saves retain exact
+character repository additionally removes only deterministic Character Sheet item aliases from all three
+comparison inputs before inventory diffs. A canonical item and the same sheet-normalized item therefore do not
+manufacture an `/inventory` overlap around a server quantity change, while quantity, spent charges, non-empty
+upgrades/gemstones, custom metadata, provenance, effects, materials, and wrapper-state changes remain real
+conflicts. The normalization is comparison-only; canonical server inventory remains the adopted document.
+The accepted base and every other base track still advance together with live state so later saves retain exact
 coverage and do not need to rediscover already-accepted edits. Delivery is therefore a prepare/adopt/commit
 transaction over per-track coverage records, and an unprovable delivery schedules a serialized recovery that
 replays ordered visible history instead of forcing a reload.

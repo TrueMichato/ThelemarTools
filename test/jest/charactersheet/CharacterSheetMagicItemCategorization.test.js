@@ -23,6 +23,8 @@ import {
 	addTransferPayload,
 	removeTransferPayload,
 } from "../../../server/src/hub-actions.js";
+import {HubHttpCharacterRepository} from "../../../js/hub/hub-http-character-repository.js";
+import {applyJsonPatch} from "../../../js/hub/hub-json-patch.js";
 
 if (typeof globalThis.document === "undefined") {
 	globalThis.document = {
@@ -81,6 +83,30 @@ function makeInventory (state) {
 function lastAdded (state) {
 	const items = state.getItems();
 	return items[items.length - 1];
+}
+
+function getSheetNormalizedHubDocument ({canonicalItem, quantity, notes = "before"}) {
+	const state = newState();
+	state.setItemCatalog([canonicalItem], {
+		pristineItems: [canonicalItem],
+		repairItems: [canonicalItem],
+	});
+	state.loadFromJson({
+		id: "character-1",
+		name: "Mira",
+		notes: {general: notes},
+		inventory: [{
+			id: "stable-stack",
+			item: structuredClone(canonicalItem),
+			quantity,
+		}],
+	});
+	const local = state.toJson();
+	delete local.id;
+	const canonical = structuredClone(local);
+	canonical.inventory[0].item = structuredClone(canonicalItem);
+	delete canonical.carry;
+	return {canonical, local};
 }
 
 /** The combat attack generator's entry gate (charactersheet-combat.js). */
@@ -686,6 +712,143 @@ describe("Hub summary-only inventory metadata migration", () => {
 			expect.objectContaining({id: "legacy-stack", quantity: 2}),
 		]);
 		assertCanonicalFields(returned.inventory[0].item);
+	});
+});
+
+describe("Hub authoritative inventory reconciliation", () => {
+	test("rebases a repeat award across sheet-normalized live and queued snapshots", async () => {
+		const canonicalItem = getSiteAwardItem("+1 Rhythm-Maker's Drum", "TCE");
+		const {canonical: baseData, local} = getSheetNormalizedHubDocument({
+			canonicalItem,
+			quantity: 1,
+		});
+		local.notes.general = "locally edited";
+		const remoteData = addAwardedEntryToCharacter({
+			container: baseData,
+			incoming: {item: canonicalItem, quantity: 1},
+		}).container;
+		const base = {id: "character-1", campaignId: "campaign-1", revision: 1, data: baseData};
+		const remote = {id: "character-1", campaignId: "campaign-1", revision: 2, data: remoteData};
+		let resolveRemote;
+		const pRemote = new Promise(resolve => resolveRemote = resolve);
+		let getCount = 0;
+		let patchInput;
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ++getCount === 1 ? structuredClone(base) : pRemote,
+			pAcquireCharacterLease: async () => ({epoch: 1}),
+			pPatchCharacter: async input => {
+				patchInput = input;
+				return {
+					character: {
+						...remote,
+						revision: 3,
+						data: applyJsonPatch(remote.data, input.patches),
+					},
+				};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "character-1"});
+
+		let adopted;
+		const pReconcile = repository.pReconcileAuthoritativeCharacter({
+			characterId: "character-1",
+			fnGetLiveData: () => structuredClone(local),
+			fnAdoptLive: data => adopted = data,
+		});
+		const pSave = repository.pUpsert({character: {id: "character-1", ...structuredClone(local)}});
+		const pSaveResult = pSave.then(
+			value => ({value}),
+			error => ({error}),
+		);
+		resolveRemote(structuredClone(remote));
+
+		await expect(pReconcile).resolves.toMatchObject({status: "reconciled", revision: 2});
+		const {value: saved, error: saveError} = await pSaveResult;
+		expect(saveError).toBeUndefined();
+		expect(saved).toMatchObject({
+			id: "character-1",
+			notes: {general: "locally edited"},
+			inventory: [expect.objectContaining({id: "stable-stack", quantity: 2})],
+		});
+		expect(adopted).toMatchObject({
+			notes: {general: "locally edited"},
+			inventory: [expect.objectContaining({id: "stable-stack", quantity: 2})],
+		});
+		expect(patchInput.patches).toContainEqual({
+			op: "replace",
+			path: "/notes/general",
+			value: "locally edited",
+		});
+		expect(patchInput.patches.some(patch => patch.path === "/inventory" || patch.path.startsWith("/inventory/"))).toBe(false);
+		expect(repository.getConflictRecovery("character-1")).toBeNull();
+	});
+
+	test("rebases an accepted transfer into a failed sheet-normalized recovery draft", async () => {
+		const canonicalItem = getSiteAwardItem("+1 Rhythm-Maker's Drum", "TCE");
+		const {canonical: baseData, local} = getSheetNormalizedHubDocument({
+			canonicalItem,
+			quantity: 2,
+		});
+		local.notes.general = "offline edit";
+		const remoteData = removeTransferPayload({
+			container: baseData,
+			payload: {items: [{entryId: "stable-stack", quantity: 1}], currency: {}},
+		}).container;
+		const base = {id: "character-1", campaignId: "campaign-1", revision: 1, data: baseData};
+		const remote = {id: "character-1", campaignId: "campaign-1", revision: 2, data: remoteData};
+		let isTransportFailure = true;
+		let patchInput;
+		let getCount = 0;
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => structuredClone(++getCount === 1 ? base : remote),
+			pAcquireCharacterLease: async () => ({epoch: 1}),
+			pPatchCharacter: async input => {
+				if (isTransportFailure) throw new Error("response lost");
+				patchInput = input;
+				return {
+					character: {
+						...remote,
+						revision: 3,
+						data: applyJsonPatch(remote.data, input.patches),
+					},
+				};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "character-1"});
+		await expect(repository.pUpsert({
+			character: {id: "character-1", ...structuredClone(local)},
+		})).rejects.toThrow("response lost");
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "character-1",
+			fnGetLiveData: () => structuredClone(local),
+			fnAdoptLive: () => {},
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+		const recovery = repository.getPendingRecovery("character-1");
+		expect(recovery).toMatchObject({
+			notes: {general: "offline edit"},
+			inventory: [expect.objectContaining({id: "stable-stack", quantity: 1})],
+		});
+
+		isTransportFailure = false;
+		await expect(repository.pUpsert({
+			character: {id: "character-1", ...recovery},
+		})).resolves.toMatchObject({
+			id: "character-1",
+			notes: {general: "offline edit"},
+			inventory: [expect.objectContaining({id: "stable-stack", quantity: 1})],
+		});
+		expect(patchInput.patches).toContainEqual({
+			op: "replace",
+			path: "/notes/general",
+			value: "offline edit",
+		});
+		expect(patchInput.patches.some(patch => patch.path === "/inventory" || patch.path.startsWith("/inventory/"))).toBe(false);
+		expect(repository.getConflictRecovery("character-1")).toBeNull();
 	});
 });
 

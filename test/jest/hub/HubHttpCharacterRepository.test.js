@@ -412,6 +412,56 @@ describe("HTTP character repository", () => {
 		expect(repository._conflicts.size).toBe(0);
 	});
 
+	it.each([
+		["quantity", ({row}) => row.quantity = 3],
+		["spent charges", ({item}) => item.chargesCurrent = 4],
+		["non-empty upgrades", ({item}) => item.appliedUpgrades = [{name: "Keen", source: "TST"}]],
+		["non-empty gemstones", ({item}) => item.socketedGemstones = [{name: "Ruby", source: "TST"}]],
+		["custom metadata", ({item}) => item.custom = {maker: "Rook"}],
+		["award provenance", ({item}) => item._awardProvenance = {awardId: "award-1"}],
+		["effects", ({item}) => item.effects = [{type: "savingThrow", ability: "str", bonus: 1}]],
+		["materials", ({item}) => item.material = {name: "Darkmetal", source: "TGTT"}],
+	])("keeps %s identity-significant during authoritative inventory rebase", (_, mutate) => {
+		const canonicalItem = {
+			name: "Longsword",
+			source: "PHB",
+			type: "M",
+			property: ["V"],
+			reqAttune: true,
+			charges: 5,
+		};
+		const base = {
+			notes: "before",
+			inventory: [{id: "stable-stack", item: canonicalItem, quantity: 1}],
+		};
+		const local = structuredClone(base);
+		local.inventory[0].item = {
+			...local.inventory[0].item,
+			typeCode: "M",
+			properties: ["V"],
+			requiresAttunement: true,
+			shield: false,
+			armor: false,
+			weapon: true,
+			chargesCurrent: 5,
+			appliedUpgrades: [],
+			socketedGemstones: [],
+		};
+		mutate({row: local.inventory[0], item: local.inventory[0].item});
+		const remote = structuredClone(base);
+		remote.inventory[0].quantity = 2;
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api: {}});
+
+		expect(repository._rebaseAuthoritativeCandidate({base, local, remote})).toMatchObject({
+			isConflict: true,
+			conflicts: [{localPath: "/inventory", remotePath: "/inventory"}],
+			document: {
+				notes: "before",
+				inventory: [{id: "stable-stack", item: canonicalItem, quantity: 2}],
+			},
+		});
+	});
+
 	it("rebases live-conflict recovery before it can restore pre-transfer inventory", async () => {
 		let revision = 1;
 		const documents = {

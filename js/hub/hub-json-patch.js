@@ -191,4 +191,4 @@ export function rebaseJsonChanges ({base, local, remote}) {
 	};
 }
 
-export {copyJson};
+export {copyJson, isDeepEqual};

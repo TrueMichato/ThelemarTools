@@ -136,8 +136,14 @@ Mutation success does not recompute carry; it invalidates stale carry authority.
 
 An open owner Character Sheet treats `item.granted` as an authoritative inventory edge and schedules the existing
 HTTP repository reconciliation. Stable event/revision handling prevents duplicate application and preserves
-disjoint unsaved local edits. Reconnect and next-load canonical fetches cover offline recipients. Signed-out,
-local, detached, and non-owner sheets do not attach this integration.
+disjoint unsaved local edits. Reconciliation compares inventory after removing only deterministic aliases that
+`CharacterSheetState` derives from the same canonical item (for example matching `typeCode`, attunement/property
+aliases, armor/weapon flags, full-charge state, and empty upgrade/gemstone arrays). Those aliases cannot turn a
+repeat award or transfer into a false whole-array conflict, including queued and failed-save recovery tracks;
+quantity, spent charges, composition, upgrades, gemstones, custom metadata, provenance, effects, materials, and
+wrapper state remain identity-significant. The adopted inventory still comes from canonical server truth.
+Reconnect and next-load canonical fetches cover offline recipients. Signed-out, local, detached, and non-owner
+sheets do not attach this integration.
 
 ## Consequences
 
