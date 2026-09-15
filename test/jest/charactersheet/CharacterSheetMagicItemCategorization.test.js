@@ -221,6 +221,84 @@ describe("_getItemCategory keeps magic items out of 'Other'", () => {
 });
 
 describe("Hub summary-only inventory metadata migration", () => {
+	test("calculates trusted Hub catalog bonuses numerically without rewriting canonical item metadata", () => {
+		const catalogItems = [
+			getSiteAwardItem("Demon Armor", "DMG"),
+			getSiteAwardItem("Ring of Protection", "DMG"),
+			getSiteAwardItem("Stone of Good Luck", "DMG"),
+			getSiteAwardItem("+1 Rhythm-Maker's Drum", "TCE"),
+		];
+		const state = newState();
+		state.loadFromJson({
+			name: "Hub character",
+			inventory: catalogItems.map((item, ix) => ({
+				id: `hub-item-${ix}`,
+				item: {
+					name: item.name,
+					source: item.source,
+					typeCode: item.type,
+					rarity: item.rarity,
+					...(item.weight != null ? {weight: item.weight} : {}),
+				},
+				quantity: 1,
+				equipped: true,
+				attuned: true,
+			})),
+		});
+		const inventory = makeInventory(state);
+		inventory._page._isHubCharacter = true;
+		inventory.setItems(catalogItems, {
+			pristineItems: catalogItems,
+			repairItems: catalogItems,
+		});
+		inventory._updateArmorClass();
+
+		expect(state.getItemRaw("hub-item-0")).toEqual(expect.objectContaining({
+			bonusAc: "+1",
+			bonusWeapon: "+1",
+		}));
+		expect(state.getItemRaw("hub-item-1")).toEqual(expect.objectContaining({
+			bonusAc: "+1",
+			bonusSavingThrow: "+1",
+		}));
+		expect(state.getItemRaw("hub-item-2")).toEqual(expect.objectContaining({
+			bonusAbilityCheck: "+1",
+			bonusSavingThrow: "+1",
+		}));
+		expect(state.getItemRaw("hub-item-3")).toEqual(expect.objectContaining({
+			bonusSpellAttack: "+1",
+			bonusSpellSaveDc: "+1",
+		}));
+		expect(state.getItems().find(item => item.id === "hub-item-0")).toEqual(expect.objectContaining({
+			bonusAc: 1,
+			bonusWeapon: 1,
+		}));
+		expect(state.getItems().find(item => item.id === "hub-item-3")).toEqual(expect.objectContaining({
+			bonusSpellAttack: 1,
+			bonusSpellSaveDc: 1,
+		}));
+
+		expect(state.getAc()).toBe(20);
+		expect(state.getSaveBreakdown("wis").total).toBe(2);
+		expect(state.getItemBonuses()).toEqual(expect.objectContaining({
+			savingThrow: 2,
+			abilityCheck: 1,
+			spellAttack: 1,
+			spellSaveDc: 1,
+		}));
+		expect(state.getEffectiveItemBonuses("hub-item-0")).toEqual(expect.objectContaining({
+			bonusWeapon: 1,
+		}));
+		for (const value of [
+			state.getAc(),
+			state.getSaveBreakdown("wis").total,
+			state.getItemBonuses().savingThrow,
+			state.getItemBonuses().abilityCheck,
+			state.getItemBonuses().spellAttack,
+			state.getItemBonuses().spellSaveDc,
+		]) expect(Number.isFinite(value)).toBe(true);
+	});
+
 	test("rehydrates a metadata-rich catalog weapon and preserves it through export/reload", () => {
 		const catalogItem = {
 			name: "Moonsteel Longsword",

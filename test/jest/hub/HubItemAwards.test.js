@@ -1209,6 +1209,101 @@ describe("Campaign Hub item award domain", () => {
 		expect(ctx.store.getDomainEvents()).toHaveLength(eventsAfterSuccess);
 	});
 
+	it("keeps restored escrow separate from a metadata-diverged same-ID source stack", async () => {
+		const ctx = await pCreateStoreFixture();
+		const stackId = crypto.randomUUID();
+		const originalItem = {
+			name: "Arrow",
+			source: "PHB",
+			_fromPack: "Wayfarer's Kit|PHB",
+			effects: [{type: "skillBonus", skill: "athletics", value: 1}],
+			charges: 7,
+			chargesCurrent: 5,
+			material: {name: "Dragonbone", source: "PHB", role: "strikingSurface"},
+			appliedUpgrades: [{name: "Balanced", source: "PHB"}],
+			socketedGemstones: [{name: "Journey", source: "PHB"}],
+			custom: {maker: "Rook", batch: "original"},
+		};
+		const source = await ctx.pCreateCharacter(ctx.accounts.playerA, "Escrow source", [
+			{id: "before", item: {name: "Club", source: "PHB"}, quantity: 1},
+			{
+				id: stackId,
+				item: originalItem,
+				quantity: 4,
+				note: "Original commission",
+				customState: {privacy: "owner-only"},
+			},
+			{id: "after", item: {name: "Dagger", source: "PHB"}, quantity: 1},
+		]);
+		const reserved = await ctx.store.pProposeTransfer({
+			accountId: ctx.accounts.playerA.id,
+			campaignId: ctx.campaign.id,
+			sourceKind: "character",
+			sourceId: source.id,
+			targetKind: "character",
+			targetId: ctx.characterB.id,
+			payload: {items: [{entryId: stackId, quantity: 2}]},
+			idempotencyKey: "metadata-restore-reserve",
+		});
+		expect(reserved.transfer.status).toBe("reserved");
+
+		const afterReserve = (await ctx.store.pGetCharacter({
+			accountId: ctx.accounts.playerA.id,
+			characterId: source.id,
+		})).character;
+		const modifiedItem = {
+			...structuredClone(originalItem),
+			_fromPack: "Reforged Kit|PHB",
+			effects: [{type: "skillBonus", skill: "arcana", value: 2}],
+			chargesCurrent: 1,
+			material: {name: "Star Iron", source: "PHB", role: "strikingSurface"},
+			appliedUpgrades: [{name: "Keen", source: "PHB"}],
+			socketedGemstones: [{name: "Ember", source: "PHB"}],
+			custom: {maker: "Vale", batch: "modified"},
+		};
+		const currentStack = afterReserve.data.inventory.find(entry => entry.id === stackId);
+		currentStack.item = modifiedItem;
+		currentStack.note = "Reworked commission";
+		currentStack.customState = {privacy: "shared"};
+		await pSaveCharacterInventoryThroughSheet({
+			store: ctx.store,
+			accountId: ctx.accounts.playerA.id,
+			character: afterReserve,
+		});
+
+		await ctx.store.pResolveTransfer({
+			accountId: ctx.accounts.playerB.id,
+			campaignId: ctx.campaign.id,
+			transferId: reserved.transfer.id,
+			decision: "reject",
+			idempotencyKey: "metadata-restore-reject",
+		});
+		const restored = (await ctx.store.pGetCharacter({
+			accountId: ctx.accounts.playerA.id,
+			characterId: source.id,
+		})).character.data.inventory;
+		const modified = restored.find(entry => entry.id === stackId);
+		const original = restored.find(entry => entry.item.custom?.batch === "original");
+		const restoredId = original?.id;
+
+		expect(restored.map(entry => entry.id)).toEqual(["before", restoredId, stackId, "after"]);
+		expect(new Set(restored.map(entry => entry.id)).size).toBe(restored.length);
+		expect(modified).toEqual(expect.objectContaining({
+			item: expect.objectContaining(modifiedItem),
+			quantity: 2,
+			note: "Reworked commission",
+			customState: {privacy: "shared"},
+		}));
+		expect(original).toEqual(expect.objectContaining({
+			item: expect.objectContaining(originalItem),
+			quantity: 2,
+			note: "Original commission",
+			customState: {privacy: "owner-only"},
+		}));
+		expect(restoredId).not.toBe(stackId);
+		expect(modified.quantity + original.quantity).toBe(4);
+	});
+
 	it("tightens the legacy grant to safe metadata without breaking name/source callers", async () => {
 		const ctx = await pCreateStoreFixture();
 		const safe = await ctx.store.pGrantItem({

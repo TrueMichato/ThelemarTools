@@ -144,7 +144,11 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("transferResolutionDrafts.stage");
 		expect(source).toContain("pResolveTransferFromDraft");
 		expect(source).toContain("error?.code !== \"RULES_VERSION_STALE\"");
-		expect(source).toContain("if (isRulesVersionStale && !pendingProposal)");
+		expect(source).toContain("const isDefinitiveWithoutPending = error instanceof HubApiError");
+		expect(source).toContain("&& !isTransferOutcomeUncertain(error)");
+		expect(source).toContain("if (isDefinitiveWithoutPending) {");
+		expect(source).toContain("await pRefreshTransferState();");
+		expect(source).toContain("The latest balances could not be loaded.");
 		expect(source).toContain("setTransferProposalControls");
 		expect(source).toContain("form._hubTransferControlStates");
 		expect(source).toContain("const transfers = await api.pListTransfers({campaignId})");

@@ -319,7 +319,8 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   full authoritative metadata persistence, privacy-reduced
   command/event projections, multi-target rollback, exact retry and concurrent duplicate behavior,
   award-to-Character-Sheet-save-to-repeat-award stack identity, direct/stash-return metadata conservation,
-  accept/reject/cancel behavior, stash conservation under contention, memory/PostgreSQL parity, carry
+  accept/reject/cancel behavior, metadata-diverged same-ID escrow restoration with collision-free source stacks
+  and exact quantity conservation, stash conservation under contention, memory/PostgreSQL parity, carry
   invalidation, stable audit/event/projection ordering,
   privacy-safe preview states, normalized retry identity, legacy-summary Character Sheet rehydration, trusted
   focus/weapon hydration across quantity-only authoritative changes, custom-item metadata preservation, raw
