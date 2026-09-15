@@ -995,14 +995,23 @@ export class CharacterSheetPartyInventory {
 					attrs: {value: token},
 				}));
 			}
-			destination.value = this._draft.destinationKind === "party_inventory"
+			let destinationToken = this._draft.destinationKind === "party_inventory"
 				? "party_inventory"
-				: [...this._recipientByToken].find(([, recipient]) => recipient.id === this._draft.recipientId)?.[0] || "party_inventory";
+				: [...this._recipientByToken].find(([, recipient]) => recipient.id === this._draft.recipientId)?.[0];
+			if (!destinationToken && this._draft.destinationKind === "character" && !this._isDraftEditable()) {
+				destinationToken = getOpaqueToken();
+				destination.append(createElement("option", {
+					text: `${this._draft.recipientLabel || "Original recipient"} — current campaign view unavailable`,
+					attrs: {value: destinationToken},
+				}));
+			}
+			destination.value = destinationToken || "party_inventory";
 			destination.addEventListener("change", () => {
 				if (!this._isDraftEditable()) return;
 				const recipient = this._recipientByToken.get(destination.value);
 				this._draft.destinationKind = recipient ? "character" : "party_inventory";
 				this._draft.recipientId = recipient?.id || null;
+				this._draft.recipientLabel = recipient?.label || null;
 				this._draft.commandId = getOpaqueToken();
 				this._draft.resolutionCommandId = getOpaqueToken();
 				this._draft.cancellationCommandId = getOpaqueToken();
@@ -1226,7 +1235,7 @@ export class CharacterSheetPartyInventory {
 			? "this character"
 			: this._draft.destinationKind === "party_inventory"
 				? "the party stash"
-				: recipient?.label || "the selected character";
+				: recipient?.label || this._draft.recipientLabel || "the original recipient";
 		this._syncCarryDelta(composer);
 		const summary = composer.querySelector(".charsheet__party-inventory-confirmation");
 		const approvalText = this._getApprovalText();
@@ -1234,14 +1243,28 @@ export class CharacterSheetPartyInventory {
 			? `${quantity} × ${entryName} will move from ${this._draft.kind === "party_inventory" ? "the party stash" : "this character"} to ${destination}.${approvalText ? ` ${approvalText}` : " This move applies immediately under your current authority."}`
 			: `Enter a whole-number quantity from 1 to ${this._draft.maxQuantity}.`;
 		const submit = composer.querySelector("button[type='submit']");
-		const isReserved = !!this._draft.transfer;
+		const isDraftEditable = this._isDraftEditable();
+		const isProposalFrozen = !!this._draft.proposalRequest && !this._draft.transfer;
+		const pendingAcceptance = this._getPendingAcceptance();
+		const isStatusCheckRequired = !!this._draft.transfer
+			&& !!this._draft.needsStatusCheck
+			&& !this._draft.pendingResolution
+			&& !pendingAcceptance;
 		submit.disabled = this._isSubmitting
 			|| !isQuantityValid
-			|| (this._draft.kind === "character" && this._draft.destinationKind === "character" && !recipient);
+			|| (
+				isDraftEditable
+				&& this._draft.kind === "character"
+				&& this._draft.destinationKind === "character"
+				&& !recipient
+			);
 		for (const control of composer.querySelectorAll("input, select, button")) {
 			if (control === submit) continue;
 			const isCancel = control.dataset.partyInventoryFocus === "cancel";
-			control.disabled = this._isSubmitting || (isReserved && !isCancel);
+			control.disabled = this._isSubmitting
+				|| (isCancel
+					? isProposalFrozen || !!pendingAcceptance || isStatusCheckRequired
+					: !isDraftEditable);
 		}
 	}
 
@@ -1255,6 +1278,7 @@ export class CharacterSheetPartyInventory {
 
 	_shouldAutoResolve () {
 		if (!this._draft) return false;
+		if (this._draft.proposalRequest?.isAutoResolved != null) return this._draft.proposalRequest.isAutoResolved;
 		if (DM_ROLES.has(this._role)) return true;
 		if (this._draft.kind === "party_inventory" || this._draft.destinationKind === "party_inventory") return false;
 		return this._recipients.some(recipient => recipient.id === this._draft.recipientId && recipient.isOwned);

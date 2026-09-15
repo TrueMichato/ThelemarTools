@@ -987,6 +987,71 @@ describe("Character Sheet party inventory", () => {
 		expect(partyInventory._announcement).toContain("Transfer complete");
 	});
 
+	it("keeps frozen proposal and acceptance controls aligned with immutable intent", () => {
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => ({
+				inventory: [{id: "stack-1", quantity: 2, item: {name: "Rations", source: "PHB"}}],
+			}),
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._role = "player";
+		partyInventory._recipients = [];
+		partyInventory._draft = {
+			kind: "character",
+			entryId: "stack-1",
+			entryName: "Rations",
+			quantity: 1,
+			maxQuantity: 2,
+			blockers: [],
+			destinationKind: "character",
+			recipientId: "character-2",
+			recipientLabel: "Second",
+			commandId: "proposal-1",
+			resolutionCommandId: "accept-1",
+			cancellationCommandId: "reject-1",
+			proposalRequest: {isAutoResolved: true},
+			transfer: null,
+		};
+		const quantity = {dataset: {partyInventoryFocus: "quantity"}, disabled: false};
+		const destination = {dataset: {partyInventoryFocus: "destination"}, disabled: false};
+		const cancel = {dataset: {partyInventoryFocus: "cancel"}, disabled: false};
+		const submit = {dataset: {partyInventoryFocus: "submit"}, disabled: false};
+		const summary = {textContent: ""};
+		const composer = {
+			querySelector: selector => {
+				if (selector === ".charsheet__party-inventory-confirmation") return summary;
+				if (selector === "button[type='submit']") return submit;
+				return null;
+			},
+			querySelectorAll: () => [quantity, destination, cancel, submit],
+		};
+
+		partyInventory._syncComposerSummary(composer);
+
+		expect(summary.textContent).toContain("Second");
+		expect(quantity.disabled).toBe(true);
+		expect(destination.disabled).toBe(true);
+		expect(cancel.disabled).toBe(true);
+		expect(submit.disabled).toBe(false);
+
+		partyInventory._draft.transfer = {id: "transfer-1", status: "reserved"};
+		partyInventory._transferResolutionDrafts.stage({
+			campaignId: "campaign-1",
+			transferId: "transfer-1",
+			decision: "accept",
+			idempotencyKey: "accept-1",
+		});
+		partyInventory._syncComposerSummary(composer);
+
+		expect(cancel.disabled).toBe(true);
+		expect(submit.disabled).toBe(false);
+	});
+
 	it("fences cancellation while an acceptance outcome is unresolved", async () => {
 		const resolve = jest.fn(async () => {
 			throw Object.assign(new Error("gateway lost response"), {code: "SERVICE_UNAVAILABLE", status: 502});

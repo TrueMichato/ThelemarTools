@@ -76,9 +76,9 @@ test("owned Character Sheets reconcile authoritative party inventory across devi
 			sourceName: "Guide",
 			targetName: "Rowan",
 			itemName: "Rations",
-			quantity: 1,
+			quantity: 5,
 		});
-		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 6});
+		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 10});
 
 		await player.hub.reserveRepeatedItemTransfersAfterRefreshRetry({
 			campaignId,
@@ -98,7 +98,7 @@ test("owned Character Sheets reconcile authoritative party inventory across devi
 			expectedAbsentText: ["Rowan Vale"],
 		});
 		await player.openOwnedCharacter({campaignId, characterId: sourceCharacter.id, name: "Rowan"});
-		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 4});
+		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 8});
 
 		await player.shareCharacterItem({
 			itemName: "Rations",
@@ -106,7 +106,7 @@ test("owned Character Sheets reconcile authoritative party inventory across devi
 			destination: "Party stash",
 			isSingleFlight: true,
 		});
-		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 1});
+		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 5});
 		await player.focusInventorySearch();
 		await dm.hub.acceptFirstPendingTransfer({
 			campaignId,
@@ -124,7 +124,7 @@ test("owned Character Sheets reconcile authoritative party inventory across devi
 			expectedText: ["Rowan", "requests", "1 × Rations · PHB", "Party inventory"],
 			buttonName: "Approve",
 		});
-		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 2});
+		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 6});
 		await player.expectStashQuantity({itemName: "Rations", quantity: 2});
 
 		await player.requestStashItem({itemName: "Rations", quantity: 1});
@@ -133,7 +133,7 @@ test("owned Character Sheets reconcile authoritative party inventory across devi
 			expectedText: ["Rowan", "requests", "1 × Rations · PHB", "Party inventory"],
 			buttonName: "Decline",
 		});
-		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 2});
+		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 6});
 		await player.expectStashQuantity({itemName: "Rations", quantity: 2});
 
 		await player.requestStashItem({itemName: "Rations", quantity: 1});
@@ -142,7 +142,7 @@ test("owned Character Sheets reconcile authoritative party inventory across devi
 			expectedText: ["Rowan", "requests", "1 × Rations · PHB", "Party inventory"],
 			buttonName: "Approve",
 		});
-		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 3});
+		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 7});
 		await player.expectStashQuantity({itemName: "Rations", quantity: 1});
 
 		await player.shareCharacterItem({
@@ -155,7 +155,7 @@ test("owned Character Sheets reconcile authoritative party inventory across devi
 			expectedText: ["Rowan", "1 × Rations · PHB", "Mira"],
 			expectedAbsentText: ["Rowan Vale"],
 		});
-		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 2});
+		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 6});
 		await recipient.expectCharacterQuantity({characterId: recipientCharacter.id, itemName: "Rations", quantity: 6});
 
 		await player.shareCharacterItem({
@@ -168,13 +168,13 @@ test("owned Character Sheets reconcile authoritative party inventory across devi
 			expectedText: ["Rowan", "1 × Rations · PHB", "Mira"],
 			expectedAbsentText: ["Rowan Vale"],
 		});
-		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 1});
+		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 5});
 		await recipient.expectCharacterQuantity({characterId: recipientCharacter.id, itemName: "Rations", quantity: 7});
 
 		await dm.openOwnedCharacter({campaignId, characterId: dmCharacter.id, name: "Guide"});
 		await dm.expectStashQuantity({itemName: "Rations", quantity: 1});
 		await dm.takeStashItem({itemName: "Rations", quantity: 1});
-		await dm.expectCharacterQuantity({characterId: dmCharacter.id, itemName: "Rations", quantity: 7});
+		await dm.expectCharacterQuantity({characterId: dmCharacter.id, itemName: "Rations", quantity: 3});
 		await dm.expectStashEmpty();
 		await player.expectStashEmpty();
 
@@ -182,9 +182,9 @@ test("owned Character Sheets reconcile authoritative party inventory across devi
 		const finalPartyInventory = await dm.hub.getPartyInventory(campaignId);
 		expect(finalPartyInventory.inventory).toEqual([]);
 		for (const {page, characterId, quantity} of [
-			{page: player, characterId: sourceCharacter.id, quantity: 1},
+			{page: player, characterId: sourceCharacter.id, quantity: 5},
 			{page: recipient, characterId: recipientCharacter.id, quantity: 7},
-			{page: dm, characterId: dmCharacter.id, quantity: 7},
+			{page: dm, characterId: dmCharacter.id, quantity: 3},
 		]) {
 			const character = await page.hub.getCharacter(characterId);
 			const matchingEntries = character.data.inventory.filter((entry: any) => entry.item?.name === "Rations");
