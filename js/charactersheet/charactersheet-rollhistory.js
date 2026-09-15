@@ -7,8 +7,14 @@
 // Project globals — typed via globalThis cast for TypeScript checkJs
 const {e_} = /** @type {*} */ (globalThis);
 
+export const HUB_ROLL_VISIBILITY_CHOICES = Object.freeze([
+	Object.freeze({value: "all_members", label: "Everyone in the campaign"}),
+	Object.freeze({value: "actor_and_dm", label: "Only me and DMs"}),
+]);
+
 export class CharacterSheetRollHistory {
 	static MAX_ROLLS = 200;
+	static DEFAULT_HUB_VISIBILITY = "all_members";
 
 	static ROLL_TYPES = {
 		ATTACK: {label: "Attack", color: "#dc3545"},
@@ -32,6 +38,7 @@ export class CharacterSheetRollHistory {
 		this._rolls = [];
 		this._panelEl = null;
 		this._listEl = null;
+		this._hubVisibilitySelect = null;
 		this._isOpen = false;
 		this._unreadCount = 0;
 		if (typeof document !== "undefined") this._buildPanel();
@@ -79,6 +86,7 @@ export class CharacterSheetRollHistory {
 				total: Number(total) || 0,
 				context: rollType.toLowerCase(),
 				detail: {title, breakdown, resultClass, resultNote},
+				visibility: this._getHubRollVisibility(),
 			}).catch(error => {
 				// eslint-disable-next-line no-console
 				console.error("Failed to persist campaign roll:", error);
@@ -124,6 +132,26 @@ export class CharacterSheetRollHistory {
 	 * Get all rolls (for testing).
 	 */
 	getRolls () { return [...this._rolls]; }
+
+	_getHubRollVisibility () {
+		const saved = this._page?._state?.getSettings?.()?.hubRollVisibility;
+		return HUB_ROLL_VISIBILITY_CHOICES.some(choice => choice.value === saved)
+			? saved
+			: CharacterSheetRollHistory.DEFAULT_HUB_VISIBILITY;
+	}
+
+	_setHubRollVisibility (visibility) {
+		if (!HUB_ROLL_VISIBILITY_CHOICES.some(choice => choice.value === visibility)) return false;
+		if (!this._page?._state?.setSetting?.("hubRollVisibility", visibility)) return false;
+		this._page._saveCurrentCharacter?.();
+		return true;
+	}
+
+	syncFromActiveCharacter () {
+		const visibility = this._getHubRollVisibility();
+		if (this._hubVisibilitySelect) this._hubVisibilitySelect.value = visibility;
+		return visibility;
+	}
 
 	/**
 	 * Clear all roll history.
@@ -173,11 +201,15 @@ export class CharacterSheetRollHistory {
 		controls.append(btnClear, btnClose);
 		header.append(controls);
 
+		const visibility = this._page?._hubRollLogAdapter ? this._buildHubVisibilityControl() : null;
+
 		// Scrollable list
 		const list = e_({tag: "div", clazz: "charsheet__roll-history-list"});
 		this._listEl = list;
 
-		panel.append(header, list);
+		panel.append(header);
+		if (visibility) panel.append(visibility);
+		panel.append(list);
 
 		this._panelEl = e_({tag: "div", clazz: "charsheet__roll-history-wrapper"});
 		this._panelEl.append(panel);
@@ -185,6 +217,35 @@ export class CharacterSheetRollHistory {
 		document.body.append(this._panelEl);
 
 		this._renderList();
+	}
+
+	_buildHubVisibilityControl () {
+		const root = e_({tag: "div", clazz: "charsheet__roll-history-visibility"});
+		const label = e_({tag: "label", clazz: "charsheet__roll-history-visibility-label"});
+		label.setAttribute("for", "charsheet-roll-history-visibility");
+		label.textContent = "Share new campaign rolls with";
+		const select = e_({tag: "select", clazz: "charsheet__roll-history-visibility-select"});
+		select.id = "charsheet-roll-history-visibility";
+		select.setAttribute("aria-describedby", "charsheet-roll-history-visibility-hint");
+		for (const choice of HUB_ROLL_VISIBILITY_CHOICES) {
+			const option = e_({tag: "option", txt: choice.label});
+			option.value = choice.value;
+			select.append(option);
+		}
+		this._hubVisibilitySelect = select;
+		this.syncFromActiveCharacter();
+		select.addEventListener("change", () => {
+			if (this._setHubRollVisibility(select.value)) return;
+			select.value = this._getHubRollVisibility();
+		});
+		const hint = e_({
+			tag: "span",
+			clazz: "charsheet__roll-history-visibility-hint",
+			txt: "DMs includes co-DMs. This affects future rolls only.",
+		});
+		hint.id = "charsheet-roll-history-visibility-hint";
+		root.append(label, select, hint);
+		return root;
 	}
 
 	/**

@@ -1,4 +1,16 @@
 import {HubApiClient} from "../hub/hub-api-client.js";
+import {
+	ABILITY_CHOICES,
+	getOmittedProjectionFieldLabels,
+	getProjectionFieldLabel,
+	getProjectionProfileRows,
+	MOVEMENT_CHOICES,
+	PROJECTION_FIELD_KEYS,
+	PROJECTION_OVERRIDE_MODES,
+	PROJECTION_PRESET_KEYS,
+	SKILL_CHOICES,
+	SKILL_RANK_CHOICES,
+} from "../hub/hub-character-view.js";
 
 /**
  * Owner-facing sharing controls for ADR 0011 projection policy.
@@ -9,47 +21,36 @@ import {HubApiClient} from "../hub/hub-api-client.js";
  * see" is the server-computed preview returned beside the policy.
  */
 
-export const PRESET_CHOICES = Object.freeze([
-	{
-		value: "table",
+const PRESET_DETAILS = Object.freeze({
+	table: {
 		label: "Table view",
 		description: "Share the usual at-the-table details: name, species, classes, abilities, saves, skills, AC, HP, speed, senses and conditions. Inventory and carried weight stay private.",
 	},
-	{
-		value: "minimal",
+	minimal: {
 		label: "Name and class only",
 		description: "Share only who this character is: name, species and classes. Everything else stays private.",
 	},
-	{
-		value: "open",
+	open: {
 		label: "Open book",
 		description: "Share every field the Hub supports, including an inventory summary and carried weight.",
 	},
-	{
-		value: "private",
+	private: {
 		label: "Private",
 		// Existence is deliberately not hidden: ADR 0011 treats the character id and its
 		// presence on the roster as campaign metadata. Promising otherwise would be a
 		// privacy claim the server does not make.
 		description: "Share no details. Other players can still see that this character is in the campaign, but not its name, stats, or who plays it — and it cannot be picked as a target.",
 	},
-]);
+});
 
-export const MODE_CHOICES = Object.freeze([
-	{value: "share", label: "Share"},
-	{value: "hide", label: "Hide"},
-	{value: "replace", label: "Show instead"},
-]);
+export const PRESET_CHOICES = Object.freeze(PROJECTION_PRESET_KEYS.map(value => Object.freeze({value, ...PRESET_DETAILS[value]})));
 
-const ABILITY_KEYS = Object.freeze(["str", "dex", "con", "int", "wis", "cha"]);
-const MOVEMENT_KEYS = Object.freeze(["walk", "fly", "swim", "climb", "burrow"]);
-const SKILL_RANKS = Object.freeze(["none", "half", "proficient", "expertise"]);
-const SKILL_KEYS = Object.freeze([
-	"athletics", "acrobatics", "sleightOfHand", "stealth", "arcana", "history",
-	"investigation", "nature", "religion", "animalHandling", "insight", "medicine",
-	"perception", "survival", "deception", "intimidation", "performance", "persuasion",
-	"cooking", "culture", "endurance", "engineering", "harvesting", "linguistics", "might",
-]);
+const MODE_LABELS = Object.freeze({
+	share: "Share",
+	hide: "Hide",
+	replace: "Show instead",
+});
+export const MODE_CHOICES = Object.freeze(PROJECTION_OVERRIDE_MODES.map(value => Object.freeze({value, label: MODE_LABELS[value]})));
 
 const num = (key, label, {min = 0, max = 999, step = 1, isRequired = false} = {}) => ({
 	key,
@@ -68,44 +69,44 @@ const text = (key, label, {isRequired = false, maxLength = 120} = {}) => ({key, 
  */
 export const FIELD_DESCRIPTORS = Object.freeze({
 	identity: {
-		label: "Name and portrait",
+		label: getProjectionFieldLabel("identity"),
 		shape: "object",
 		parts: [text("name", "Shown name", {isRequired: true}), text("pronouns", "Pronouns", {maxLength: 40}), text("avatar.url", "Portrait image address", {maxLength: 2000})],
 	},
 	species: {
-		label: "Species",
+		label: getProjectionFieldLabel("species"),
 		shape: "object",
 		parts: [text("name", "Shown species", {isRequired: true}), text("source", "Source", {maxLength: 30})],
 	},
 	classes: {
-		label: "Classes",
+		label: getProjectionFieldLabel("classes"),
 		shape: "rows",
 		parts: [text("name", "Class", {isRequired: true}), text("source", "Source", {maxLength: 30}), num("level", "Level", {min: 0, max: 20, isRequired: true})],
 	},
 	abilities: {
-		label: "Ability scores",
+		label: getProjectionFieldLabel("abilities"),
 		shape: "object",
-		parts: ABILITY_KEYS.map(key => num(key, key.toUpperCase(), {min: 1, max: 30, isRequired: true})),
+		parts: ABILITY_CHOICES.map(choice => num(choice.value, choice.label, {min: 1, max: 30, isRequired: true})),
 	},
 	saves: {
-		label: "Saving throws",
+		label: getProjectionFieldLabel("saves"),
 		shape: "object",
-		parts: ABILITY_KEYS.flatMap(key => [
-			num(`${key}.modifier`, `${key.toUpperCase()} modifier`, {min: -99, max: 99, isRequired: true}),
-			{key: `${key}.proficient`, label: `${key.toUpperCase()} proficient`, kind: "checkbox", isRequired: true},
+		parts: ABILITY_CHOICES.flatMap(choice => [
+			num(`${choice.value}.modifier`, `${choice.label} modifier`, {min: -99, max: 99, isRequired: true}),
+			{key: `${choice.value}.proficient`, label: `${choice.label} proficient`, kind: "checkbox", isRequired: true},
 		]),
 	},
 	skills: {
-		label: "Skills",
+		label: getProjectionFieldLabel("skills"),
 		shape: "object",
-		parts: SKILL_KEYS.flatMap(key => [
-			num(`${key}.modifier`, `${key} modifier`, {min: -99, max: 99, isRequired: true}),
-			{key: `${key}.rank`, label: `${key} training`, kind: "select", options: SKILL_RANKS},
+		parts: SKILL_CHOICES.flatMap(choice => [
+			num(`${choice.value}.modifier`, `${choice.label} modifier`, {min: -99, max: 99, isRequired: true}),
+			{key: `${choice.value}.rank`, label: `${choice.label} training`, kind: "select", options: SKILL_RANK_CHOICES},
 		]),
 	},
-	ac: {label: "Armour class", shape: "object", parts: [num("value", "Shown AC", {min: 0, max: 99, isRequired: true})]},
+	ac: {label: getProjectionFieldLabel("ac"), shape: "object", parts: [num("value", "Shown AC", {min: 0, max: 99, isRequired: true})]},
 	hp: {
-		label: "Hit points",
+		label: getProjectionFieldLabel("hp"),
 		shape: "object",
 		parts: [
 			num("current", "Current"),
@@ -114,24 +115,24 @@ export const FIELD_DESCRIPTORS = Object.freeze({
 			text("state", "Or a word instead of numbers", {maxLength: 40}),
 		],
 	},
-	speed: {label: "Speed", shape: "object", parts: MOVEMENT_KEYS.map(key => num(key, key))},
-	senses: {label: "Senses", shape: "rows", parts: [text("name", "Sense", {isRequired: true, maxLength: 40}), num("range", "Range")]},
-	conditions: {label: "Conditions", shape: "list", itemLabel: "Condition"},
-	diseases: {label: "Diseases", shape: "list", itemLabel: "Disease"},
+	speed: {label: getProjectionFieldLabel("speed"), shape: "object", parts: MOVEMENT_CHOICES.map(choice => num(choice.value, choice.label))},
+	senses: {label: getProjectionFieldLabel("senses"), shape: "rows", parts: [text("name", "Sense", {isRequired: true, maxLength: 40}), num("range", "Range")]},
+	conditions: {label: getProjectionFieldLabel("conditions"), shape: "list", itemLabel: "Condition"},
+	diseases: {label: getProjectionFieldLabel("diseases"), shape: "list", itemLabel: "Disease"},
 	exhaustion: {
-		label: "Exhaustion",
+		label: getProjectionFieldLabel("exhaustion"),
 		shape: "object",
 		isScalar: true,
 		parts: [num("value", "Level", {min: 0, max: 10}), text("label", "Or a word instead of a level", {maxLength: 40})],
 	},
 	inventorySummary: {
-		label: "Inventory summary",
+		label: getProjectionFieldLabel("inventorySummary"),
 		shape: "object",
 		parts: [num("entryCount", "Number of entries", {min: 0, max: 9999, isRequired: true})],
 		rows: {key: "publicItems", label: "Listed items", parts: [text("name", "Item", {isRequired: true}), num("quantity", "Quantity", {min: 0, max: 9999})]},
 	},
 	carrySummary: {
-		label: "Carried weight",
+		label: getProjectionFieldLabel("carrySummary"),
 		shape: "object",
 		parts: [num("carried", "Carried", {min: 0, max: 99999}), num("capacity", "Capacity", {min: 0, max: 99999}), text("state", "Or a word instead of numbers", {maxLength: 40})],
 	},
@@ -147,7 +148,7 @@ const FIELD_EMPTY_FALLBACKS = Object.freeze({
 	carrySummary: {state: "Hidden"},
 });
 
-export const FIELD_KEYS = Object.freeze(Object.keys(FIELD_DESCRIPTORS));
+export const FIELD_KEYS = PROJECTION_FIELD_KEYS;
 
 function el (tagName, {className = "", text: content = "", attrs = {}} = {}) {
 	const element = document.createElement(tagName);
@@ -252,6 +253,18 @@ export class CharacterSheetSharing {
 		};
 	}
 
+	getSavedPreviewPresentation () {
+		const shared = getProjectionProfileRows(this._preview).map(row => ({
+			...row,
+			status: this._policy?.overrides?.[row.field]?.mode === "replace" ? "replace" : "shared",
+		}));
+		return {
+			shared,
+			omitted: getOmittedProjectionFieldLabels(this._preview),
+			replacedCount: shared.filter(row => row.status === "replace").length,
+		};
+	}
+
 	async pLoad () {
 		const characterId = this._fnGetCharacterId();
 		if (!characterId) {
@@ -279,6 +292,7 @@ export class CharacterSheetSharing {
 	setPreset (preset) {
 		if (!this._draft) return;
 		this._draft.preset = preset;
+		if (preset === "private") this._draft.overrides = {};
 		this._feedback = null;
 	}
 
@@ -332,7 +346,7 @@ export class CharacterSheetSharing {
 	/** A type-correct starting value, so a freshly opened control is already submittable. */
 	_getPartDefault (part) {
 		if (part.kind === "checkbox") return false;
-		if (part.kind === "select") return part.options[0];
+		if (part.kind === "select") return getChoiceValue(part.options[0]);
 		if (part.kind === "number") return part.isRequired ? Math.max(0, part.min) : "";
 		return part.isRequired ? "Hidden" : "";
 	}
@@ -522,8 +536,8 @@ export class CharacterSheetSharing {
 		let input;
 		if (part.kind === "select") {
 			input = el("select", {attrs: {id}});
-			for (const option of part.options) input.append(el("option", {text: option, attrs: {value: option}}));
-			input.value = getDeep(store, part.key) ?? part.options[0];
+			for (const option of part.options) input.append(el("option", {text: getChoiceLabel(option), attrs: {value: getChoiceValue(option)}}));
+			input.value = getDeep(store, part.key) ?? getChoiceValue(part.options[0]);
 		} else if (part.kind === "checkbox") {
 			input = el("input", {attrs: {type: "checkbox", id}});
 			input.checked = !!getDeep(store, part.key);
@@ -612,19 +626,31 @@ export class CharacterSheetSharing {
 	_renderPreview () {
 		const wrp = el("div", {className: "charsheet__sharing-preview", attrs: {"aria-live": "polite"}});
 		wrp.append(el("h4", {className: "charsheet__sharing-preview-heading", text: "What other players see now"}));
-		const shared = Object.entries(this._preview?.data || {});
+		const {shared, omitted, replacedCount} = this.getSavedPreviewPresentation();
+		wrp.append(el("p", {
+			className: "charsheet__sharing-preview-summary",
+			text: `${shared.length} of ${FIELD_KEYS.length} details shared${replacedCount ? ` · ${replacedCount} shown instead` : ""}.`,
+		}));
 		if (!shared.length) {
 			wrp.append(el("p", {className: "charsheet__sharing-preview-empty", text: "Nothing is shared with other players."}));
-			return wrp;
+		} else {
+			const list = el("dl", {className: "charsheet__sharing-preview-list"});
+			for (const row of shared) {
+				const value = el("dd");
+				value.append(el("span", {text: row.value}));
+				value.append(el("span", {
+					className: `charsheet__sharing-preview-status charsheet__sharing-preview-status--${row.status}`,
+					text: row.status === "replace" ? "Shown instead" : "Shared",
+				}));
+				list.append(el("dt", {text: row.label}), value);
+			}
+			wrp.append(list);
 		}
-		const list = el("dl", {className: "charsheet__sharing-preview-list"});
-		for (const [field, value] of shared) {
-			list.append(
-				el("dt", {text: FIELD_DESCRIPTORS[field]?.label || field}),
-				el("dd", {text: describePreviewValue(value)}),
-			);
+		if (omitted.length) {
+			const hidden = el("p", {className: "charsheet__sharing-preview-omitted"});
+			hidden.append(el("strong", {text: "Not shared: "}), document.createTextNode(omitted.join(", ")));
+			wrp.append(hidden);
 		}
-		wrp.append(list);
 		wrp.append(el("p", {className: "charsheet__sharing-preview-note", text: "This is the saved result, not your unsaved changes."}));
 		return wrp;
 	}
@@ -659,4 +685,12 @@ export function describePreviewValue (value) {
 			.join(" · ");
 	}
 	return `${value}`;
+}
+
+function getChoiceValue (choice) {
+	return typeof choice === "object" ? choice.value : choice;
+}
+
+function getChoiceLabel (choice) {
+	return typeof choice === "object" ? choice.label : choice;
 }
