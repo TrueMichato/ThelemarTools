@@ -48,6 +48,9 @@ const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlU
  * Orchestrates all character sheet functionality
  */
 class CharacterSheetPage {
+	static _STORAGE_KEY_ACTIVE_TAB = "charsheet-active-tab";
+	static _DEFAULT_TAB_ID = "#charsheet-tab-overview";
+
 	// Small embedded subset of `data/loading-tips.json`, rendered synchronously so a
 	// helpful tip is visible the instant the loading overlay appears (the async JSON
 	// fetch resolves too late to cover the early part of init — see `_pInitLoadingTip`).
@@ -270,6 +273,12 @@ class CharacterSheetPage {
 		}
 
 		await this._pHandleSpawnUrl(urlParams);
+
+		// Tab availability depends on the loaded character and settings. Restore only after
+		// those gates are final so stale choices (e.g. Builder/Powers/Abilities) safely fall
+		// back to Overview instead of revealing a hidden pane.
+		this._updateTabVisibility();
+		this._restoreActiveTab();
 
 		// Apply background theme (will use default if no character loaded)
 		this._applyBackgroundTheme(this._state.getBackgroundTheme());
@@ -1134,25 +1143,13 @@ class CharacterSheetPage {
 	 */
 	_initTabs () {
 		const tabs = document.getElementById("charsheet-tabs");
-		const tabContent = document.querySelector(".tab-content");
+		if (!tabs) return;
 
 		for (const link of tabs.querySelectorAll("a[data-toggle=\"tab\"]")) {
 			link.addEventListener("click", (e) => {
 				e.preventDefault();
 				const targetId = (/** @type {*} */ (e.currentTarget)).getAttribute("href");
-
-				// Update tab nav
-				for (const li of tabs.querySelectorAll("li")) li.classList.remove("ve-active");
-				(/** @type {*} */ (e.currentTarget)).parentElement.classList.add("ve-active");
-
-				// Update tab content — set inline display as belt-and-suspenders
-				for (const pane of tabContent.querySelectorAll(".tab-pane")) {
-					pane.classList.remove("ve-active", "in");
-					(/** @type {*} */ (pane)).style.display = "none";
-				}
-				const target = document.querySelector(targetId);
-				target.classList.add("ve-active", "in");
-				target.style.display = "";
+				this.switchToTab(targetId);
 			});
 		}
 
@@ -1298,21 +1295,59 @@ class CharacterSheetPage {
 	/**
 	 * Switch to a specific tab programmatically
 	 * @param {string} tabId - The tab ID (e.g., "#charsheet-tab-builder")
+	 * @param {{isPersist?: boolean}} [opts]
+	 * @returns {boolean} Whether the tab was available and activated
 	 */
-	switchToTab (tabId) {
+	switchToTab (tabId, {isPersist = true} = {}) {
+		if (typeof tabId !== "string" || !tabId.startsWith("#charsheet-tab-")) return false;
+
 		const tabs = document.getElementById("charsheet-tabs");
 		const tabContent = document.querySelector(".tab-content");
-		const link = tabs.querySelector(`a[href="${tabId}"]`);
+		const link = tabs?.querySelector(`a[href="${tabId}"]`);
+		const target = document.querySelector(tabId);
 
-		if (!link) return;
+		if (!link || !target || !tabContent || link.parentElement?.classList.contains("ve-hidden")) return false;
 
 		// Update tab nav
 		for (const li of tabs.querySelectorAll("li")) li.classList.remove("ve-active");
 		link.parentElement.classList.add("ve-active");
 
-		// Update tab content
-		for (const pane of tabContent.querySelectorAll(".tab-pane")) pane.classList.remove("ve-active", "in");
-		document.querySelector(tabId).classList.add("ve-active", "in");
+		// Update tab content — set inline display as belt-and-suspenders
+		for (const pane of tabContent.querySelectorAll(".tab-pane")) {
+			pane.classList.remove("ve-active", "in");
+			(/** @type {*} */ (pane)).style.display = "none";
+		}
+		target.classList.add("ve-active", "in");
+		target.style.display = "";
+
+		if (isPersist) this._persistActiveTab(tabId);
+		return true;
+	}
+
+	_persistActiveTab (tabId) {
+		try {
+			StorageUtil.syncSetForPage(CharacterSheetPage._STORAGE_KEY_ACTIVE_TAB, tabId);
+		} catch (error) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet] Failed to persist active tab:", error);
+		}
+	}
+
+	_restoreActiveTab () {
+		let savedTabId = null;
+		try {
+			savedTabId = StorageUtil.syncGetForPage(CharacterSheetPage._STORAGE_KEY_ACTIVE_TAB);
+		} catch (error) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet] Failed to restore active tab:", error);
+			this.switchToTab(CharacterSheetPage._DEFAULT_TAB_ID, {isPersist: false});
+			return CharacterSheetPage._DEFAULT_TAB_ID;
+		}
+
+		if (savedTabId && this.switchToTab(savedTabId, {isPersist: false})) return savedTabId;
+
+		this.switchToTab(CharacterSheetPage._DEFAULT_TAB_ID);
+		return CharacterSheetPage._DEFAULT_TAB_ID;
 	}
 
 	/**
