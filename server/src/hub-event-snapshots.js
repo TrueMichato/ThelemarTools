@@ -20,9 +20,25 @@ export function createCharacterDisplayNameSnapshot (value) {
 	};
 }
 
-export function projectTransferForViewer ({transfer, accountId, role, getCharacterOwnerId}) {
+export function projectTransferForViewer ({
+	transfer,
+	accountId,
+	role,
+	getCharacterOwnerId,
+	getCharacterDisplaySnapshot,
+}) {
 	if (!transfer) return transfer;
 	const projected = {...transfer};
+	delete projected.sourceDisplaySnapshot;
+	delete projected.targetDisplaySnapshot;
+	if (transfer.sourceKind === "character") {
+		const snapshot = getCharacterDisplaySnapshot?.(transfer.sourceId);
+		if (snapshot) projected.sourceDisplaySnapshot = snapshot;
+	}
+	if (transfer.targetKind === "character") {
+		const snapshot = getCharacterDisplaySnapshot?.(transfer.targetId);
+		if (snapshot) projected.targetDisplaySnapshot = snapshot;
+	}
 	if (transfer.actorAccountId !== accountId) delete projected.actorCommandId;
 	if (["dm", "co_dm"].includes(role)) return projected;
 	const ownsSource = transfer.sourceKind === "character"

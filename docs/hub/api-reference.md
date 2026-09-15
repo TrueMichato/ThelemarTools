@@ -252,7 +252,10 @@ DM/co-DM viewers receive the full authority record, while non-DM viewers receive
 IDs and their own actor attribution; party-inventory IDs and foreign actor attribution remain concealed. A
 transfer's originating actor also receives `actorCommandId`, the opaque proposal idempotency key, on proposal
 responses, receipt replays, and transfer-list reads. Other participants, including DM/co-DM viewers who did not
-originate the command, never receive that correlation value.
+originate the command, never receive that correlation value. Transfer-list reads may also include
+`sourceDisplaySnapshot` and `targetDisplaySnapshot` for character endpoints whose identity is visible to that
+viewer under the current projection policy. These labels are derived at read time, are omitted when identity is
+hidden, and never restore the concealed endpoint UUID.
 Browser proposal and resolution retries freeze the original body, decision, rules pin, and idempotency key after
 an outcome-uncertain network, invalid-response, or HTTP 5xx failure. That exact retry is allowed for at most 23
 hours, staying inside PostgreSQL's 24-hour command-receipt lifetime. Once the browser window expires, it matches

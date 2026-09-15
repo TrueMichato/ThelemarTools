@@ -319,8 +319,13 @@ function getCharacterNameById (characters, characterId) {
 	return getCharacterName(getCharacterById(characters, characterId));
 }
 
-function getContainerName ({kind, id, characters}) {
-	return kind === "party_inventory" ? "Party inventory" : getCharacterNameById(characters, id);
+function getTransferContainerName ({transfer, endpoint, characters}) {
+	const kind = transfer[`${endpoint}Kind`];
+	if (kind === "party_inventory") return "Party inventory";
+	const character = getCharacterById(characters, transfer[`${endpoint}Id`]);
+	const visibleName = getProjectionView(character).name;
+	if (visibleName) return visibleName;
+	return transfer[`${endpoint}DisplaySnapshot`]?.displayName || "A character";
 }
 
 function getEffectDescription (effect = {}) {
@@ -1799,8 +1804,8 @@ async function renderPendingTransfers ({
 		main.className = "hub-data-row__main";
 		const text = document.createElement("span");
 		const contents = getTransferContentsDescription(transfer);
-		const sourceName = getContainerName({kind: transfer.sourceKind, id: transfer.sourceId, characters: targetCharacters});
-		const targetName = getContainerName({kind: transfer.targetKind, id: transfer.targetId, characters: targetCharacters});
+		const sourceName = getTransferContainerName({transfer, endpoint: "source", characters: targetCharacters});
+		const targetName = getTransferContainerName({transfer, endpoint: "target", characters: targetCharacters});
 		const isRequest = transfer.status === "proposed";
 		text.textContent = isRequest
 			? `${targetName} requests ${contents} from ${sourceName}.`

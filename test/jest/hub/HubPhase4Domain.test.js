@@ -235,6 +235,7 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			sourceKind: "character",
 			sourceId: a.character.id,
 			targetKind: "character",
+			targetDisplaySnapshot: {version: 1, displayName: "B"},
 		});
 		expect(sourceTransferView).not.toHaveProperty("targetId");
 		const targetTransferView = (await app.inject({
@@ -247,6 +248,7 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			sourceKind: "character",
 			targetKind: "character",
 			targetId: b.character.id,
+			sourceDisplaySnapshot: {version: 1, displayName: "A"},
 		});
 		expect(targetTransferView).not.toHaveProperty("sourceId");
 		expect(targetTransferView).not.toHaveProperty("actorCommandId");
@@ -255,6 +257,10 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			url: `/api/campaigns/${campaign.id}/transfers`,
 			headers: readHeaders(dm),
 		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(dmTransferView).toMatchObject({
+			sourceDisplaySnapshot: {version: 1, displayName: "A"},
+			targetDisplaySnapshot: {version: 1, displayName: "B"},
+		});
 		expect(dmTransferView).not.toHaveProperty("actorCommandId");
 		const actorCannotSelfAcceptPeer = await app.inject({
 			method: "POST",
@@ -382,6 +388,21 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			headers: readHeaders(b.session),
 		})).json().projection.character;
 		expect(directTarget.data.inventory.find(entry => entry.item.name === "Arrow").quantity).toBe(12);
+
+		await store.pSetProjectionPolicy({
+			accountId: a.session.account.id,
+			characterId: a.character.id,
+			policy: {version: 1, preset: "private", overrides: {}},
+			expectedProjectionRevision: a.character.projectionRevision,
+			idempotencyKey: "hide-a-after-transfer",
+		});
+		const targetViewAfterSourceHide = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(b.session),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(targetViewAfterSourceHide).not.toHaveProperty("sourceDisplaySnapshot");
+		expect(targetViewAfterSourceHide).not.toHaveProperty("sourceId");
 
 		const aMembership = await store.pGetMembership({accountId: a.session.account.id, campaignId: campaign.id});
 		await store.pChangeMemberRole({

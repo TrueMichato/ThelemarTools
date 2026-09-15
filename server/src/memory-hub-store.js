@@ -3681,6 +3681,18 @@ export class MemoryHubStore {
 				accountId,
 				role: membership.role,
 				getCharacterOwnerId: characterId => this._characters.get(characterId)?.ownerAccountId,
+				getCharacterDisplaySnapshot: characterId => {
+					const character = this._characters.get(characterId);
+					if (
+						!character
+						|| (
+							!["dm", "co_dm"].includes(membership.role)
+							&& character.ownerAccountId !== accountId
+							&& !isPeerVisibleIdentity(character)
+						)
+					) return null;
+					return createCharacterDisplayNameSnapshot(character.data?.name);
+				},
 			}))
 			.filter(Boolean);
 	}

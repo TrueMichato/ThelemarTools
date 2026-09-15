@@ -265,7 +265,8 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("liveEvents = [...liveEvents.filter");
 		expect(source).toContain("renderRecentActivity({events: liveEvents");
 		expect(source).toContain("getCharacterName(target)");
-		expect(source).toContain("getContainerName({kind: transfer.sourceKind");
+		expect(source).toContain("getTransferContainerName({transfer, endpoint: \"source\"");
+		expect(source).toContain("DisplaySnapshot`]?.displayName || \"A character\"");
 		expect(source).toContain("navigator.clipboard.writeText(inviteOutput.value)");
 		expect(campaignHtml).toContain("id=\"campaign-invite-copy\"");
 	});

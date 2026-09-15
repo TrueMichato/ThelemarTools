@@ -591,6 +591,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			sourceKind: "character",
 			sourceId: sourceCharacter.id,
 			targetKind: "character",
+			targetDisplaySnapshot: {version: 1, displayName: "Target"},
 		});
 		expect(sourceTransferView).not.toHaveProperty("targetId");
 		const targetTransferView = (await store.pListTransfers({accountId: targetOwner.id, campaignId: campaign.id}))
@@ -600,11 +601,16 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			sourceKind: "character",
 			targetKind: "character",
 			targetId: targetCharacter.id,
+			sourceDisplaySnapshot: {version: 1, displayName: "Source"},
 		});
 		expect(targetTransferView).not.toHaveProperty("sourceId");
 		expect(targetTransferView).not.toHaveProperty("actorCommandId");
 		const dmTransferView = (await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
 			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(dmTransferView).toMatchObject({
+			sourceDisplaySnapshot: {version: 1, displayName: "Source"},
+			targetDisplaySnapshot: {version: 1, displayName: "Target"},
+		});
 		expect(dmTransferView).not.toHaveProperty("actorCommandId");
 		const acceptDirectInput = {
 			accountId: targetOwner.id,
@@ -627,6 +633,24 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		const acceptedSourceView = (await store.pListTransfers({accountId: sourceOwner.id, campaignId: campaign.id}))
 			.find(transfer => transfer.id === directPass.transfer.id);
 		expect(acceptedSourceView.actorCommandId).toBe(`${prefix}-direct`);
+		const privatePolicy = await store.pSetProjectionPolicy({
+			accountId: sourceOwner.id,
+			characterId: sourceCharacter.id,
+			policy: {version: 1, preset: "private", overrides: {}},
+			expectedProjectionRevision: sourceCharacter.projectionRevision,
+			idempotencyKey: `${prefix}-hide-source-after-transfer`,
+		});
+		const targetViewAfterSourceHide = (await store.pListTransfers({accountId: targetOwner.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(targetViewAfterSourceHide).not.toHaveProperty("sourceDisplaySnapshot");
+		expect(targetViewAfterSourceHide).not.toHaveProperty("sourceId");
+		await store.pSetProjectionPolicy({
+			accountId: sourceOwner.id,
+			characterId: sourceCharacter.id,
+			policy: {version: 1, preset: "table", overrides: {}},
+			expectedProjectionRevision: privatePolicy.projectionRevision,
+			idempotencyKey: `${prefix}-restore-source-after-transfer`,
+		});
 		const directTarget = await pReadCharacter(targetOwner.id, targetCharacter.id);
 		expect(directTarget.data.inventory).toHaveLength(2);
 		expect(directTarget.data.inventory).toEqual(expect.arrayContaining([

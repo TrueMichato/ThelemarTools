@@ -5827,7 +5827,11 @@ export class PostgresHubStore {
 				SELECT
 					t.*,
 					sc.owner_account_id AS source_owner_account_id,
-					tc.owner_account_id AS target_owner_account_id
+					sc.data->>'name' AS source_character_name,
+					sc.projection_policy AS source_projection_policy,
+					tc.owner_account_id AS target_owner_account_id,
+					tc.data->>'name' AS target_character_name,
+					tc.projection_policy AS target_projection_policy
 				FROM hub.transfers t
 				LEFT JOIN hub.characters sc ON sc.id = t.source_character_id
 				LEFT JOIN hub.characters tc ON tc.id = t.target_character_id
@@ -5844,6 +5848,30 @@ export class PostgresHubStore {
 						if (characterId === row.source_character_id) return row.source_owner_account_id;
 						if (characterId === row.target_character_id) return row.target_owner_account_id;
 						return null;
+					},
+					getCharacterDisplaySnapshot: characterId => {
+						const endpoint = characterId === row.source_character_id
+							? {
+								ownerAccountId: row.source_owner_account_id,
+								name: row.source_character_name,
+								projectionPolicy: row.source_projection_policy,
+							}
+							: characterId === row.target_character_id
+								? {
+									ownerAccountId: row.target_owner_account_id,
+									name: row.target_character_name,
+									projectionPolicy: row.target_projection_policy,
+								}
+								: null;
+						if (
+							!endpoint?.ownerAccountId
+							|| (
+								!["dm", "co_dm"].includes(membership.role)
+								&& endpoint.ownerAccountId !== accountId
+								&& !isPeerVisibleIdentity({projectionPolicy: endpoint.projectionPolicy})
+							)
+						) return null;
+						return createCharacterDisplayNameSnapshot(endpoint.name);
 					},
 				}))
 				.filter(Boolean);
