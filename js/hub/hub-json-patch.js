@@ -133,6 +133,26 @@ export function applyJsonPatch (document, patches) {
 	return patches.reduce((out, patch) => applyPatchOperation(out, patch), copyJson(document));
 }
 
+function getJsonPointerValue (document, path) {
+	const segments = parsePointer(path);
+	let value = document;
+	for (const segment of segments) {
+		if (Array.isArray(value)) value = value[getArrayIndex(segment, {length: value.length})];
+		else {
+			if (!isPlainObject(value) || !Object.hasOwn(value, segment)) throw new TypeError(`JSON pointer path does not exist.`);
+			value = value[segment];
+		}
+	}
+	return value;
+}
+
+export function getJsonPatchesWithDocumentValues ({patches, document}) {
+	if (!Array.isArray(patches)) throw new TypeError(`Patches must be an array.`);
+	return patches.map(patch => patch.op === "remove"
+		? {...patch}
+		: {...patch, value: copyJson(getJsonPointerValue(document, patch.path))});
+}
+
 export function diffJson (before, after, {path = ""} = {}) {
 	if (isDeepEqual(before, after)) return [];
 

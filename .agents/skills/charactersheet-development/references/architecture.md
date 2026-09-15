@@ -169,7 +169,8 @@ No reactive system — renders are explicit. Related modules re-render together 
 - **Toast notifications**: `JqueryUtil.doToast({type: "success", content: "..."})` for user feedback (site-wide utility, not jQuery-dependent despite the name)
 - **HTML generation**: `e_({outer: \`<button class="btn">...</button>\`})` for single elements, `ee\`<div>...</div>\`` tagged template for complex HTML. `insertAdjacentHTML()` for appending HTML strings.
 - **Hub realtime callbacks**: `CharacterSheetRealtimeCoordinator.on()` exposes connection, cursor,
-  metadata-only projection invalidation, semantic-operation lifecycle, and delivery-error handoffs. Only a
+  membership-authority change, metadata-only projection invalidation, semantic-operation lifecycle, and
+  delivery-error handoffs. Only a
   signed-in campaign-backed canonical character attaches. Delivery uses the repository mutation queue and is
   generation-fenced on switch/detach/revocation/terminal page hide; a missing canonical ref, remote archive, or remote move
   serializes teardown behind already-queued delivery. Persisted `pagehide` suspends the socket and `pageshow`
@@ -504,6 +505,12 @@ Protocol-4 cost-bearing peer operations extend this with per-character operation
 - coverage is `appliedOperationLegIds`; legacy protocol-3 operation ids migrate as target-leg coverage.
 - a local resource conflict after canonical acceptance blocks autosave and keeps the recovery draft visible;
   it never reapplies the operation or silently overwrites the authoritative source spend.
+
+Party-inventory proposal retries use the proposal idempotency key as an actor-only transfer correlation. After
+the 23-hour browser replay window ends, the sheet must list visible transfers before unlocking the frozen
+composer: a correlated pending request remains recoverable/cancellable, while a terminal or confirmed-missing
+request permits an authoritative character-and-stash refresh and close. Never infer absence from balances alone,
+because a pending player stash withdrawal intentionally changes neither container.
 
 `CharacterSheetPeerTargeting` is invoked from the real spell-use path after cast-option validation but before
 local resource mutation. It is gated by the exact campaign `peerSourceCosts` capability tuple. Unsupported

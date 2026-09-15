@@ -1,5 +1,5 @@
 import {HubApiClient} from "./hub-api-client.js";
-import {applyJsonPatch, diffJson, rebaseJsonChanges} from "./hub-json-patch.js";
+import {applyJsonPatch, diffJson, getJsonPatchesWithDocumentValues, rebaseJsonChanges} from "./hub-json-patch.js";
 import {withRootCarryWrite} from "./hub-carry-authority.js";
 import {HubBroadcastSync} from "./hub-broadcast-sync.js";
 import {CHARACTER_OPERATION_LEGS, getCharacterOperationRouting, getOperationLegKey} from "./hub-character-operation-events.js";
@@ -32,11 +32,14 @@ export class HubHttpCharacterRepository {
 		api = new HubApiClient(),
 		broadcastSync = null,
 		fnGetRulesVersionId = () => null,
+		fnNormalizeCharacterDocument = getCharacterDocumentWithoutDeterministicItemAliases,
 	}) {
 		if (campaignId != null && (typeof campaignId !== "string" || !campaignId)) throw new TypeError(`campaignId must be a non-empty string or null.`);
+		if (typeof fnNormalizeCharacterDocument !== "function") throw new TypeError(`fnNormalizeCharacterDocument must be a function.`);
 		this._campaignId = campaignId;
 		this._api = api;
 		this._fnGetRulesVersionId = fnGetRulesVersionId;
+		this._fnNormalizeCharacterDocument = fnNormalizeCharacterDocument;
 		this._scopeKey = campaignId || "detached";
 		this._broadcastSync = broadcastSync || (
 			!campaignId || typeof BroadcastChannel === "undefined"
@@ -197,7 +200,6 @@ export class HubHttpCharacterRepository {
 			const accepted = this._accepted.get(canonicalId);
 			if (!accepted) return {status: "unavailable"};
 			if (canonical.revision < accepted.revision) return {status: "stale"};
-			if (canonical.revision === accepted.revision && !diffJson(accepted.data, canonical.data).length) return {status: "unchanged"};
 
 			this._rebaseConflictForAuthoritative({
 				store: this._conflicts,
@@ -205,6 +207,7 @@ export class HubHttpCharacterRepository {
 				accepted,
 				canonical,
 				isPreserveLocalOnConflict,
+				isClearOnResolve: true,
 			});
 			this._rebaseConflictForAuthoritative({
 				store: this._liveConflicts,
@@ -212,11 +215,19 @@ export class HubHttpCharacterRepository {
 				accepted,
 				canonical,
 				isPreserveLocalOnConflict,
+				isClearOnResolve: false,
 			});
 			const liveData = fnGetLiveData?.();
 			const existingConflict = this._conflicts.get(canonicalId);
 			if (existingConflict) {
 				return {status: "conflict", conflicts: structuredClone(existingConflict.conflicts)};
+			}
+			if (canonical.revision === accepted.revision && !diffJson(accepted.data, canonical.data).length) {
+				if (
+					this._failedWrites.has(canonicalId)
+					&& this._areCharacterCandidatesSemanticallyEqual(this._failedWrites.get(canonicalId), canonical.data)
+				) this._clearFailedRecovery(canonicalId);
+				return {status: "unchanged"};
 			}
 
 			const book = this._getCoverageBook(canonicalId);
@@ -287,14 +298,18 @@ export class HubHttpCharacterRepository {
 			}
 
 			if (Object.hasOwn(staged, "failedWrite")) {
-				this._failedWrites.set(canonicalId, {...staged.failedWrite, id: canonicalId});
-				this._recoveredBases.set(canonicalId, structuredClone(canonical.data));
-				book.failedWrite = createCoverage({
-					revision: canonical.revision,
-					acceptedSequence,
-					appliedOperationLegIds: book.failedWrite.appliedOperationLegIds,
-				});
-				book.recoveredBase = this._cloneTrackCoverage(book.failedWrite);
+				if (this._areCharacterCandidatesSemanticallyEqual(staged.failedWrite, canonical.data)) {
+					this._clearFailedRecovery(canonicalId);
+				} else {
+					this._failedWrites.set(canonicalId, {...staged.failedWrite, id: canonicalId});
+					this._recoveredBases.set(canonicalId, structuredClone(canonical.data));
+					book.failedWrite = createCoverage({
+						revision: canonical.revision,
+						acceptedSequence,
+						appliedOperationLegIds: book.failedWrite.appliedOperationLegIds,
+					});
+					book.recoveredBase = this._cloneTrackCoverage(book.failedWrite);
+				}
 			}
 			this._writeRecoveryCoverage(canonicalId);
 			return {
@@ -306,56 +321,114 @@ export class HubHttpCharacterRepository {
 	}
 
 	_rebaseAuthoritativeCandidate ({base, local, remote, isPreserveLocalOnConflict = false}) {
-		const withoutDerivedFields = document => {
-			if (!document || typeof document !== "object" || Array.isArray(document)) return document;
-			const out = getCharacterDocumentWithoutDeterministicItemAliases(document);
-			delete out.carry;
-			delete out._savedAt;
-			return out;
-		};
 		// Carry is a one-way Character Sheet projection, not editable character state. Server-side
 		// inventory mutations deliberately remove it, while the live sheet may independently
 		// recompute it as data finishes loading; those concurrent derived changes must not block
 		// adoption of the authoritative inventory that the next serialization will summarize.
+		const rawLocal = this._getSnapshotData(local);
+		const rawRemote = this._getSnapshotData(remote);
+		const normalizedBase = this._getNormalizedCharacterCandidate(base);
+		const normalizedLocal = this._getNormalizedCharacterCandidate(rawLocal);
+		const normalizedRemote = this._getNormalizedCharacterCandidate(rawRemote);
+		if (!diffJson(normalizedLocal, normalizedRemote).length) {
+			const patches = getJsonPatchesWithDocumentValues({
+				patches: diffJson(normalizedBase, normalizedLocal),
+				document: rawLocal,
+			});
+			return {
+				isConflict: false,
+				conflicts: [],
+				patches,
+				document: rawRemote,
+			};
+		}
 		const rebased = rebaseJsonChanges({
-			base: withoutDerivedFields(base),
-			local: withoutDerivedFields(local),
-			remote: withoutDerivedFields(remote),
+			base: normalizedBase,
+			local: normalizedLocal,
+			remote: normalizedRemote,
 		});
-		if (!rebased.isConflict) return rebased;
+		if (!rebased.isConflict) {
+			const patches = getJsonPatchesWithDocumentValues({patches: rebased.patches, document: rawLocal});
+			return {
+				...rebased,
+				patches,
+				document: applyJsonPatch(rawRemote, patches),
+			};
+		}
 		const conflictingPaths = new Set(rebased.conflicts.map(conflict => conflict.localPath));
 		// A recovery choice may reapply disjoint local edits, but must never overwrite
 		// authoritative escrow changes at an overlapping path.
-		return {
-			...rebased,
-			document: applyJsonPatch(
-				withoutDerivedFields(remote),
-				isPreserveLocalOnConflict
-					? rebased.patches.filter(patch => !(
-						conflictingPaths.has(patch.path)
-						&& isServerAuthoritativeCharacterPath(patch.path)
-					))
-					: rebased.patches.filter(patch => !conflictingPaths.has(patch.path)),
-			),
-		};
-	}
-
-	_rebaseOwnerCandidate ({base, local, remote}) {
-		const withoutClientMetadata = document => {
-			if (!document || typeof document !== "object" || Array.isArray(document)) return document;
-			const out = getCharacterDocumentWithoutDeterministicItemAliases(document);
-			delete out._savedAt;
-			return out;
-		};
-		const rebased = rebaseJsonChanges({
-			base: withoutClientMetadata(base),
-			local: withoutClientMetadata(local),
-			remote: withoutClientMetadata(remote),
+		const patches = getJsonPatchesWithDocumentValues({
+			patches: isPreserveLocalOnConflict
+				? rebased.patches.filter(patch => !(
+					conflictingPaths.has(patch.path)
+					&& isServerAuthoritativeCharacterPath(patch.path)
+				))
+				: rebased.patches.filter(patch => !conflictingPaths.has(patch.path)),
+			document: rawLocal,
 		});
 		return {
 			...rebased,
-			document: rebased.isConflict ? null : applyJsonPatch(remote, rebased.patches),
+			patches,
+			document: applyJsonPatch(rawRemote, patches),
 		};
+	}
+
+	_getNormalizedCharacterCandidate (candidate) {
+		const out = this._fnNormalizeCharacterDocument(this._getSnapshotData(candidate));
+		if (!out || typeof out !== "object" || Array.isArray(out)) return out;
+		delete out.carry;
+		delete out._savedAt;
+		return out;
+	}
+
+	_areCharacterCandidatesSemanticallyEqual (left, right) {
+		return !diffJson(
+			this._getNormalizedCharacterCandidate(left),
+			this._getNormalizedCharacterCandidate(right),
+		).length;
+	}
+
+	_rebaseOwnerCandidate ({base, local, remote}) {
+		const rawBase = this._getSnapshotData(base);
+		const rawLocal = this._getSnapshotData(local);
+		const rawRemote = this._getSnapshotData(remote);
+		const withoutClientMetadata = candidate => {
+			const out = this._fnNormalizeCharacterDocument(candidate);
+			if (!out || typeof out !== "object" || Array.isArray(out)) return out;
+			delete out._savedAt;
+			return out;
+		};
+		const normalizedBase = withoutClientMetadata(rawBase);
+		const normalizedLocal = withoutClientMetadata(rawLocal);
+		const normalizedRemote = withoutClientMetadata(rawRemote);
+		const rebased = rebaseJsonChanges({
+			base: normalizedBase,
+			local: normalizedLocal,
+			remote: normalizedRemote,
+		});
+		const patches = getJsonPatchesWithDocumentValues({patches: rebased.patches, document: rawLocal});
+		return {
+			...rebased,
+			patches,
+			document: rebased.isConflict ? null : applyJsonPatch(rawRemote, patches),
+		};
+	}
+
+	_getConflictRebaseState (conflict) {
+		const rebased = this._rebaseOwnerCandidate({
+			base: conflict.base,
+			local: conflict.local,
+			remote: conflict.server,
+		});
+		const survivingCandidates = [conflict.base, conflict.local, conflict.server]
+			.map(candidate => this._getNormalizedCharacterCandidate(candidate));
+		const isDiscardedIntentPreserved = Object.values(conflict.authoritativeDiscarded || {})
+			.every(discarded => {
+				const normalized = this._getNormalizedCharacterCandidate(discarded);
+				return survivingCandidates.some(candidate => !diffJson(candidate, normalized).length);
+			});
+		return {rebased, isDiscardedIntentPreserved};
 	}
 
 	_rebaseConflictForAuthoritative ({
@@ -364,6 +437,7 @@ export class HubHttpCharacterRepository {
 		accepted,
 		canonical,
 		isPreserveLocalOnConflict = false,
+		isClearOnResolve,
 	}) {
 		const conflict = store.get(canonicalId);
 		if (!conflict) return;
@@ -390,7 +464,11 @@ export class HubHttpCharacterRepository {
 		const serverCoverage = this._getConflictCoverage(conflict, "server");
 		serverCoverage.revision = canonical.revision;
 		next.coverage.server = serializeCoverage(serverCoverage);
-		const rebased = this._rebaseOwnerCandidate({base: next.base, local: next.local, remote: next.server});
+		const {rebased, isDiscardedIntentPreserved} = this._getConflictRebaseState(next);
+		if (!rebased.isConflict && isClearOnResolve && isDiscardedIntentPreserved) {
+			store.delete(canonicalId);
+			return;
+		}
 		next.conflicts = rebased.conflicts;
 		next.isResolved = !rebased.isConflict;
 		store.set(canonicalId, next);
@@ -757,8 +835,8 @@ export class HubHttpCharacterRepository {
 			next.serverDocument = {...next.serverDocument, data: staged[serverTrack], revision};
 		}
 
-		const rebased = rebaseJsonChanges({base: next.base, local: next.local, remote: next.server});
-		if (!rebased.isConflict && isClearOnResolve) {
+		const {rebased, isDiscardedIntentPreserved} = this._getConflictRebaseState(next);
+		if (!rebased.isConflict && isClearOnResolve && isDiscardedIntentPreserved) {
 			store.delete(canonicalId);
 			return;
 		}
@@ -1154,8 +1232,8 @@ export class HubHttpCharacterRepository {
 				...(Number.isInteger(revision) ? {revision} : {}),
 			};
 		}
-		const rebased = rebaseJsonChanges({base: next.base, local: next.local, remote: next.server});
-		if (!rebased.isConflict && isClearOnResolve) {
+		const {rebased, isDiscardedIntentPreserved} = this._getConflictRebaseState(next);
+		if (!rebased.isConflict && isClearOnResolve && isDiscardedIntentPreserved) {
 			store.delete(canonicalId);
 			return;
 		}
@@ -1513,6 +1591,22 @@ export class HubHttpCharacterRepository {
 			|| this._conflicts.size > 0
 			|| this._failedWrites.size > 0
 			|| this._operationConflicts.size > 0;
+	}
+
+	_clearFailedRecovery (characterId) {
+		this._failedWrites.delete(characterId);
+		this._failedCommands.delete(characterId);
+		this._recoveredBases.delete(characterId);
+		const book = this._getCoverageBook(characterId);
+		book.failedWrite = createCoverage();
+		book.recoveredBase = createCoverage();
+		const recoveryKey = `hub-character-recovery:${this._scopeKey}:${characterId}`;
+		this._recoveryVersions.delete(recoveryKey);
+		try {
+			this._recoveryStorage?.removeItem(recoveryKey);
+		} catch {
+			// Recovery storage cleanup is best-effort.
+		}
 	}
 
 	getPendingRecovery (characterId) {

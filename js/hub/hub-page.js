@@ -1,4 +1,13 @@
-import {HubApiClient, HubApiError} from "./hub-api-client.js";
+import {
+	HubApiClient,
+	HubApiError,
+	HubTransferProposalDrafts,
+	HubTransferRefreshQueue,
+	HubTransferResolutionDrafts,
+	isTransferOutcomeUncertain,
+	pResolveTransferFromDraft,
+	pResolveTransferAndRefresh,
+} from "./hub-api-client.js";
 import {HubActiveCampaignCoordinator} from "./hub-active-campaign-coordinator.js";
 import {HubActiveCampaignSwitcher} from "./hub-active-campaign-switcher.js";
 import {
@@ -27,6 +36,8 @@ import {
 	getAwardCommandFingerprint,
 } from "./hub-item-award.js";
 const api = new HubApiClient();
+const transferProposalDrafts = new HubTransferProposalDrafts();
+const transferResolutionDrafts = new HubTransferResolutionDrafts();
 
 /**
  * Lightweight Hub shells keep a device-local active campaign selection, but must never fetch the
@@ -131,7 +142,7 @@ function getErrorMessage (error) {
 		case "HP_MAX_UNAVAILABLE": return "This character's hit point maximum could not be read, so nothing was applied. Open it in the character sheet once to refresh its totals, then try again.";
 		case "ACTION_NOT_FOUND": return "That effect request is no longer waiting. Reload the campaign inbox to see its latest status.";
 		case "REVISION_CONFLICT": return "This data changed on another device. Your changes were not discarded. Reload and use the recovery choice shown before editing again.";
-		case "RULES_VERSION_STALE": return "Campaign rules changed on another device. Your draft was kept; review it against the refreshed active version.";
+		case "RULES_VERSION_STALE": return "Campaign rules changed on another device. Refresh the active version before trying again.";
 		case "RULES_UNKNOWN": return "That policy contains a rule this server does not recognize. No version was created.";
 		case "RULES_PARAMETER_INVALID":
 		case "RULES_COMBINATION_UNSUPPORTED":
@@ -308,8 +319,13 @@ function getCharacterNameById (characters, characterId) {
 	return getCharacterName(getCharacterById(characters, characterId));
 }
 
-function getContainerName ({kind, id, characters}) {
-	return kind === "party_inventory" ? "Party inventory" : getCharacterNameById(characters, id);
+function getTransferContainerName ({transfer, endpoint, characters}) {
+	const kind = transfer[`${endpoint}Kind`];
+	if (kind === "party_inventory") return "Party inventory";
+	const character = getCharacterById(characters, transfer[`${endpoint}Id`]);
+	const visibleName = getProjectionView(character).name;
+	if (visibleName) return visibleName;
+	return transfer[`${endpoint}DisplaySnapshot`]?.displayName || "A character";
 }
 
 function getEffectDescription (effect = {}) {
@@ -339,13 +355,20 @@ function renderPartyInventoryStatus (partyInventory) {
 }
 
 function getTransferContentsDescription (transfer) {
-	const escrow = transfer.payload?.escrow || {};
+	const escrow = transfer.payload?.escrow || transfer.payload?.preview || {};
 	const items = (escrow.items || []).map(entry => {
 		const source = entry.item?.source ? ` · ${entry.item.source}` : "";
 		return `${entry.quantity} × ${entry.item?.name || "item"}${source}`;
 	});
 	const currency = getCurrencyDescription(escrow.currency);
 	return [...items, currency].filter(Boolean).join(" + ") || "Reserved transfer";
+}
+
+function shouldAutoResolveTransfer ({isDm, sourceKind, targetKind, targetId, targetCharacters, accountId}) {
+	if (isDm) return true;
+	if (sourceKind !== "character") return false;
+	if (targetKind !== "character") return false;
+	return getProjectionOwnerAccountId(getCharacterById(targetCharacters, targetId)) === accountId;
 }
 
 function getTransferContainer ({value, characters, partyInventory}) {
@@ -400,6 +423,69 @@ function syncTransferQuantity () {
 	quantity.value = hasItem ? "1" : "0";
 	if (hasItem) quantity.max = `${maximum}`;
 	else quantity.removeAttribute("max");
+}
+
+function setFrozenTransferOption ({select, value, label, quantity = null}) {
+	if (!select || value == null) return;
+	let option = [...select.options].find(it => it.value === value);
+	if (!option) {
+		option = document.createElement("option");
+		option.value = value;
+		option.textContent = label;
+		option.dataset.hubFrozenProposal = "true";
+		select.append(option);
+	}
+	if (quantity != null) option.dataset.quantity = `${quantity}`;
+	select.value = value;
+}
+
+function setTransferProposalControls ({form, proposalRequest, characters, partyInventory, isLocked}) {
+	if (!form) return;
+	if (!form._hubTransferControlStates) form._hubTransferControlStates = new Map();
+	if (!isLocked) {
+		for (const option of form.querySelectorAll("option[data-hub-frozen-proposal]")) option.remove();
+		for (const [control, wasDisabled] of form._hubTransferControlStates) control.disabled = wasDisabled;
+		form._hubTransferControlStates.clear();
+		const latestState = form._hubTransferLatestState;
+		if (latestState) syncTransferItemPicker(latestState);
+		return;
+	}
+	form._hubTransferLatestState = {characters, partyInventory};
+
+	const source = document.getElementById("campaign-transfer-source");
+	const target = document.getElementById("campaign-transfer-target");
+	const item = document.getElementById("campaign-transfer-entry");
+	const quantity = document.getElementById("campaign-transfer-quantity");
+	setFrozenTransferOption({
+		select: source,
+		value: `${proposalRequest.sourceKind}:${proposalRequest.sourceId}`,
+		label: "Original transfer source (current balance unavailable)",
+	});
+	syncTransferItemPicker({characters, partyInventory});
+	setFrozenTransferOption({
+		select: target,
+		value: `${proposalRequest.targetKind}:${proposalRequest.targetId}`,
+		label: "Original transfer destination (current view unavailable)",
+	});
+	const requestedItem = proposalRequest.payload?.items?.[0] || null;
+	if (requestedItem?.entryId) {
+		setFrozenTransferOption({
+			select: item,
+			value: requestedItem.entryId,
+			label: `Original item stack · ${requestedItem.quantity} requested (current balance unavailable)`,
+			quantity: requestedItem.quantity,
+		});
+	} else if (item) item.value = "";
+	syncTransferQuantity();
+	if (quantity) quantity.value = `${requestedItem?.quantity || 0}`;
+	for (const type of CURRENCY_TYPES) {
+		const input = document.getElementById(`campaign-transfer-${type}`);
+		if (input) input.value = `${proposalRequest.payload?.currency?.[type] || 0}`;
+	}
+	for (const control of form.querySelectorAll("input, select")) {
+		if (!form._hubTransferControlStates.has(control)) form._hubTransferControlStates.set(control, control.disabled);
+		control.disabled = true;
+	}
 }
 
 async function pInitItemAwardComposer ({context, partyInventory, targetCharacters, events = []}) {
@@ -828,6 +914,142 @@ function setFormStatus ({formId, message = "", isError = false}) {
 	status.classList.toggle("hub-inline-status--error", isError);
 }
 
+function setTransferRefreshFailure ({form, message, pRetry}) {
+	const status = document.getElementById("campaign-transfer-form-status");
+	const submit = form?.querySelector("button[type='submit']");
+	if (!status || !submit) return;
+	submit.disabled = true;
+	status.classList.add("hub-inline-status--error");
+	status.replaceChildren(document.createTextNode(`${message} `));
+	const retry = document.createElement("button");
+	retry.type = "button";
+	retry.className = "hub-button hub-button--inline";
+	retry.textContent = "Retry latest balances";
+	retry.addEventListener("click", async () => {
+		retry.disabled = true;
+		retry.textContent = "Retrying...";
+		try {
+			await pRetry();
+			submit.disabled = false;
+			setFormStatus({
+				formId: "campaign-transfer-form",
+				message: "Latest balances loaded. You can send another transfer.",
+			});
+		} catch {
+			setTransferRefreshFailure({form, message, pRetry});
+		}
+	});
+	status.append(retry);
+}
+
+function setTransferProposalReplayExpired ({
+	form,
+	proposalRef,
+	proposalRequest,
+	pRefresh,
+	message = "This transfer retry is too old to replay safely.",
+}) {
+	const status = document.getElementById("campaign-transfer-form-status");
+	const submit = form?.querySelector("button[type='submit']");
+	if (!status || !submit) return;
+	submit.disabled = true;
+	status.classList.add("hub-inline-status--error");
+	status.replaceChildren(document.createTextNode(`${message} `));
+	const refresh = document.createElement("button");
+	refresh.type = "button";
+	refresh.className = "hub-button hub-button--inline";
+	refresh.textContent = "Refresh latest balances";
+	refresh.addEventListener("click", async () => {
+		refresh.disabled = true;
+		refresh.textContent = "Refreshing...";
+		try {
+			const refreshResult = await pRefresh();
+			if (refreshResult?.isFenced || !Array.isArray(refreshResult?.transfers)) {
+				throw new HubApiError({code: "TRANSFER_REFRESH_FAILED", status: 0});
+			}
+			const reconciliation = HubTransferProposalDrafts.reconcileExpiredProposal({
+				proposalRequest,
+				transfers: refreshResult.transfers,
+			});
+			if (reconciliation.state === "ambiguous") {
+				setTransferProposalReplayExpired({
+					form,
+					proposalRef,
+					proposalRequest,
+					pRefresh,
+					message: "Multiple matching pending transfers were found. This request remains locked to prevent a duplicate; resolve them in the transfer inbox.",
+				});
+				return;
+			}
+			if (reconciliation.state === "pending") {
+				setTransferProposalReplayExpired({
+					form,
+					proposalRef,
+					proposalRequest,
+					pRefresh,
+					message: "The original transfer was found and is still pending. Resolve or cancel it in the transfer inbox before starting another.",
+				});
+				return;
+			}
+
+			transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+			form._hubMutationKey = null;
+			form._hubMutationFingerprint = null;
+			setTransferProposalControls({form, isLocked: false});
+			submit.textContent = "Submit transfer";
+			submit.disabled = !document.getElementById("campaign-transfer-source")?.options.length;
+			const terminalMessages = {
+				committed: "The original transfer completed. Latest balances are loaded.",
+				rejected: "The original transfer was rejected. Latest balances are loaded.",
+				cancelled: "The original transfer was cancelled. Latest balances are loaded.",
+				expired: "The original transfer expired. Latest balances are loaded.",
+			};
+			setFormStatus({
+				formId: "campaign-transfer-form",
+				message: terminalMessages[reconciliation.transfer?.status]
+					|| "No matching transfer was found. Latest balances are loaded; inspect the destination before starting another.",
+			});
+		} catch {
+			setTransferProposalReplayExpired({
+				form,
+				proposalRef,
+				proposalRequest,
+				pRefresh,
+				message: "The transfer outcome and latest balances could not be confirmed. Retry the state refresh; this request remains locked.",
+			});
+		}
+	});
+	status.append(refresh);
+}
+
+function setTransferInboxRefreshFailure ({controls, meta, message, pRetry, isResolutionKnown, pendingDecision = null}) {
+	meta.textContent = message;
+	const decisionButtons = [...controls.querySelectorAll("[data-transfer-decision]")];
+	const priorRetry = controls.querySelector("[data-transfer-refresh-retry]");
+	priorRetry?.remove();
+	const retry = document.createElement("button");
+	retry.type = "button";
+	retry.className = "hub-button hub-button--inline";
+	retry.textContent = "Retry inbox refresh";
+	retry.dataset.transferRefreshRetry = "true";
+	retry.addEventListener("click", async () => {
+		for (const control of controls.querySelectorAll("button")) control.disabled = true;
+		retry.textContent = "Refreshing...";
+		try {
+			await pRetry();
+			renderError("");
+		} catch (error) {
+			renderError(error);
+			setTransferInboxRefreshFailure({controls, meta, message, pRetry, isResolutionKnown, pendingDecision});
+		}
+	});
+	if (isResolutionKnown) controls.replaceChildren(retry);
+	else {
+		for (const button of decisionButtons) button.disabled = button.dataset.transferDecision !== pendingDecision;
+		controls.append(retry);
+	}
+}
+
 function setFormAvailability ({formId, isAvailable, message}) {
 	const form = document.getElementById(formId);
 	if (!form) return;
@@ -1106,20 +1328,36 @@ async function pInitCampaign ({session}) {
 		isCampaignContextRefreshQueued = false;
 		isRefreshing = true;
 		try {
-			const [membersNxt, charactersNxt, snapshotNxt] = await Promise.all([
-				api.pListMembers({campaignId}),
-				api.pListCharacters({campaignId}),
-				api.pGetCampaignSnapshot({campaignId}),
-			]);
-			const eventsNxt = await api.pListEvents({
+			const pMembersNxt = api.pListMembers({campaignId});
+			const pCharactersNxt = api.pListCharacters({campaignId});
+			const pSnapshotNxt = api.pGetCampaignSnapshot({campaignId});
+			const pEventsNxt = pSnapshotNxt.then(snapshotNxt => api.pListEvents({
 				campaignId,
 				afterSequence: Math.max(0, snapshotNxt.lastSequence - 50),
 				limit: 50,
-			});
-			liveEvents = [...eventsNxt, ...liveEvents]
+			}));
+			const getMergedEvents = eventsNxt => [...eventsNxt, ...liveEvents]
 				.filter((event, index, all) => all.findIndex(other => other.id === event.id) === index)
 				.sort((a, b) => a.sequence - b.sequence)
 				.slice(-50);
+			const pTransferStateRefresh = pRefreshTransferState({
+				charactersNxt: pCharactersNxt,
+				snapshotNxt: pSnapshotNxt,
+				membersNxt: pMembersNxt,
+				eventsNxt: pEventsNxt.then(getMergedEvents),
+				fnIsCurrent: () => !isCampaignReloadRequired,
+				fnIsSnapshotCurrent: snapshotNxt => snapshotNxt.lastSequence >= liveLastSequence,
+			}).then(
+				value => ({value}),
+				error => ({error}),
+			);
+			const [membersNxt, charactersNxt, snapshotNxt, eventsNxt] = await Promise.all([
+				pMembersNxt,
+				pCharactersNxt,
+				pSnapshotNxt,
+				pEventsNxt,
+			]);
+			liveEvents = getMergedEvents(eventsNxt);
 			liveMembers = membersNxt;
 			if (snapshotNxt.lastSequence >= liveLastSequence) {
 				// Replacement, not a merge: a field the owner has just stopped sharing must
@@ -1145,15 +1383,11 @@ async function pInitCampaign ({session}) {
 				void rulesPolicyManagerPromise.then(manager => manager?.replaceContext(context));
 			}
 			if (isCampaignReloadRequired) return;
-			await Promise.all([
+			const [, transferRefreshResult] = await Promise.all([
 				renderPendingActions({campaign, campaignId, session, targetCharacters: liveCharacters, members: membersNxt, roster: liveRoster}),
-				pRefreshTransferState({
-					charactersNxt,
-					targetCharactersNxt: liveCharacters,
-					membersNxt,
-					eventsNxt: liveEvents,
-				}),
+				pTransferStateRefresh,
 			]);
+			if (transferRefreshResult.error) throw transferRefreshResult.error;
 		} catch (error) {
 			renderError(error);
 		} finally {
@@ -1591,11 +1825,22 @@ async function renderPendingActions ({campaign, campaignId, session, targetChara
 	}));
 }
 
-async function renderPendingTransfers ({campaign, campaignId, session, targetCharacters, members, pRefreshTransferState}) {
+async function renderPendingTransfers ({
+	campaign,
+	campaignId,
+	session,
+	targetCharacters,
+	members,
+	pRefreshTransferState,
+	fnIsCurrent = () => true,
+}) {
 	const list = document.getElementById("campaign-pending-transfers");
-	if (!list) return;
+	if (!list) return {pendingTransferIds: []};
 	const transfers = await api.pListTransfers({campaignId});
-	const pending = transfers.filter(transfer => transfer.status === "reserved");
+	if (!fnIsCurrent()) return {pendingTransferIds: [], isFenced: true};
+	const pending = transfers.filter(transfer => ["proposed", "reserved"].includes(transfer.status));
+	const pendingTransferIds = pending.map(transfer => transfer.id);
+	transferResolutionDrafts.reconcilePending({campaignId, pendingTransferIds});
 	updateInboxCount({kind: "transfers", count: pending.length});
 	setHidden(document.getElementById("campaign-pending-transfers-empty"), !!pending.length);
 	const isDm = ["dm", "co_dm"].includes(campaign.role);
@@ -1606,55 +1851,156 @@ async function renderPendingTransfers ({campaign, campaignId, session, targetCha
 		main.className = "hub-data-row__main";
 		const text = document.createElement("span");
 		const contents = getTransferContentsDescription(transfer);
-		const sourceName = getContainerName({kind: transfer.sourceKind, id: transfer.sourceId, characters: targetCharacters});
-		const targetName = getContainerName({kind: transfer.targetKind, id: transfer.targetId, characters: targetCharacters});
-		text.textContent = `${sourceName} offers ${contents} to ${targetName}.`;
+		const sourceName = getTransferContainerName({transfer, endpoint: "source", characters: targetCharacters});
+		const targetName = getTransferContainerName({transfer, endpoint: "target", characters: targetCharacters});
+		const isRequest = transfer.status === "proposed";
+		text.textContent = isRequest
+			? `${targetName} requests ${contents} from ${sourceName}.`
+			: `${sourceName} offers ${contents} to ${targetName}.`;
 		const target = transfer.targetKind === "character" ? getCharacterById(targetCharacters, transfer.targetId) : null;
 		const canAct = isDm || campaign.role === "player";
-		const canAccept = canAct && (isDm || getProjectionOwnerAccountId(target) === session.account.id);
+		const canAccept = canAct && (isRequest
+			? isDm
+			: isDm || getProjectionOwnerAccountId(target) === session.account.id);
 		const canReject = canAct && (canAccept || transfer.actorAccountId === session.account.id);
 		const meta = document.createElement("span");
 		meta.className = "hub-data-row__meta";
 		meta.textContent = canAccept
-			? "Your response is needed"
+			? isRequest
+				? "DM approval is needed before the stash changes"
+				: isDm && getProjectionOwnerAccountId(target) !== session.account.id
+					? "You can apply this transfer with DM authority"
+					: "Your response is needed"
 			: canReject
-				? "Waiting for the recipient; you can cancel this transfer"
-				: "Waiting for the recipient";
+				? isRequest
+					? "Waiting for a DM; you can cancel this request"
+					: "Waiting for the recipient; you can cancel this transfer"
+				: isRequest ? "Waiting for a DM" : "Waiting for the recipient";
 		main.append(text, meta);
 		row.append(main);
 		if (canReject) {
 			const controls = document.createElement("span");
 			controls.className = "hub-data-row__controls";
+			const pendingResolutionRequest = transferResolutionDrafts.get({campaignId, transferId: transfer.id});
 			for (const decision of [...(canAccept ? ["accept"] : []), "reject"]) {
 				const button = document.createElement("button");
 				button.type = "button";
 				button.className = decision === "accept" ? "hub-button hub-button--primary" : "hub-button";
-				button.textContent = decision === "accept" ? "Accept" : canAccept ? "Reject" : "Cancel";
+				button.dataset.transferDecision = decision;
+				button.textContent = decision === "accept"
+					? isRequest ? "Approve" : "Accept"
+					: canAccept ? isRequest ? "Decline" : "Reject" : "Cancel";
 				button.addEventListener("click", async () => {
 					for (const control of controls.querySelectorAll("button")) control.disabled = true;
-					try {
-						const currentContext = decision === "accept"
-							? await api.pGetCampaignContext({campaignId})
-							: null;
-						await api.pResolveTransfer({
+					let resolutionRequest = transferResolutionDrafts.get({campaignId, transferId: transfer.id});
+					if (resolutionRequest && resolutionRequest.decision !== decision) {
+						renderError("");
+						setTransferInboxRefreshFailure({
+							controls,
+							meta,
+							message: `The ${resolutionRequest.decision === "accept" ? "accept" : "decline"} outcome is not yet confirmed. Refresh the inbox or retry that same decision.`,
+							pRetry: pRefreshTransferState,
+							isResolutionKnown: false,
+							pendingDecision: resolutionRequest.decision,
+						});
+						return;
+					}
+					if (!resolutionRequest) {
+						let currentContext;
+						try {
+							currentContext = decision === "accept"
+								? await api.pGetCampaignContext({campaignId})
+								: null;
+						} catch (error) {
+							for (const control of controls.querySelectorAll("button")) control.disabled = false;
+							renderError(error);
+							return;
+						}
+						resolutionRequest = transferResolutionDrafts.stage({
 							campaignId,
 							transferId: transfer.id,
 							decision,
 							rulesVersionId: currentContext?.rulesVersion?.id || null,
-							idempotencyKey: crypto.randomUUID(),
 						});
-						await pRefreshTransferState();
-					} catch (error) {
-						renderError(error);
-						for (const control of controls.querySelectorAll("button")) control.disabled = false;
 					}
+					if (!transferResolutionDrafts.isReplayable(resolutionRequest)) {
+						setTransferInboxRefreshFailure({
+							controls,
+							meta,
+							message: "This decision retry is too old to replay safely. Refresh the inbox before acting again.",
+							pRetry: pRefreshTransferState,
+							isResolutionKnown: true,
+						});
+						return;
+					}
+					const outcome = await pResolveTransferAndRefresh({
+						pResolve: async () => {
+							try {
+								const resolution = await api.pResolveTransfer(resolutionRequest);
+								transferResolutionDrafts.clear(resolutionRequest);
+								return resolution;
+							} catch (error) {
+								if (!isTransferOutcomeUncertain(error)) transferResolutionDrafts.clear(resolutionRequest);
+								throw error;
+							}
+						},
+						pRefresh: pRefreshTransferState,
+					});
+					if (outcome.state === "resolved_refreshed") {
+						transferResolutionDrafts.clear(resolutionRequest);
+						renderError("");
+						return;
+					}
+					if (outcome.state === "resolution_failed_refreshed") {
+						const isStillPending = outcome.refreshResult.pendingTransferIds.includes(transfer.id);
+						renderError(isStillPending ? outcome.resolutionError : "");
+						return;
+					}
+					if (outcome.state === "resolved_refresh_failed") {
+						transferResolutionDrafts.clear(resolutionRequest);
+						renderError(outcome.refreshError);
+						setTransferInboxRefreshFailure({
+							controls,
+							meta,
+							message: `${decision === "accept" ? "Transfer applied." : "Transfer declined."} The committed outcome is safe, but the latest transfer state could not be loaded.`,
+							pRetry: pRefreshTransferState,
+							isResolutionKnown: true,
+						});
+						return;
+					}
+					const isOutcomeUncertain = isTransferOutcomeUncertain(outcome.resolutionError);
+					renderError(outcome.resolutionError);
+					setTransferInboxRefreshFailure({
+						controls,
+						meta,
+						message: isOutcomeUncertain
+							? "The transfer outcome is not yet confirmed. Refresh the inbox or retry the same decision."
+							: "The decision was not applied, and the latest transfer state could not be loaded. Refresh the inbox before acting again.",
+						pRetry: pRefreshTransferState,
+						isResolutionKnown: !isOutcomeUncertain,
+						pendingDecision: resolutionRequest.decision,
+					});
 				});
 				controls.append(button);
+			}
+			if (pendingResolutionRequest) {
+				const isReplayable = transferResolutionDrafts.isReplayable(pendingResolutionRequest);
+				setTransferInboxRefreshFailure({
+					controls,
+					meta,
+					message: isReplayable
+						? "The transfer outcome is not yet confirmed. Refresh the inbox or retry the same decision."
+						: "This decision retry is too old to replay safely. Refresh the inbox before acting again.",
+					pRetry: pRefreshTransferState,
+					isResolutionKnown: !isReplayable,
+					pendingDecision: pendingResolutionRequest.decision,
+				});
 			}
 			row.append(controls);
 		}
 		return row;
 	}));
+	return {pendingTransferIds, transfers};
 }
 
 function getFormFingerprint (form) {
@@ -1847,30 +2193,54 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 	if (dmScreenLink) dmScreenLink.href = `dmscreen.html?hubCampaign=${encodeURIComponent(campaignId)}`;
 	let partyInventory = await api.pGetPartyInventory({campaignId});
 	const itemAward = await pInitItemAwardComposer({context, partyInventory, targetCharacters, events});
-	const pRefreshTransferState = async ({
-		charactersNxt = null,
-		targetCharactersNxt = null,
-		membersNxt = null,
-		partyInventoryNxt = null,
-		eventsNxt = null,
-	} = {}) => {
+	const transferRefreshQueue = new HubTransferRefreshQueue();
+	const pRefreshTransferState = (refresh = {}) => transferRefreshQueue.pRun(async () => {
+		let {
+			charactersNxt = null,
+			targetCharactersNxt = null,
+			snapshotNxt = null,
+			membersNxt = null,
+			partyInventoryNxt = null,
+			eventsNxt = null,
+			fnIsCurrent = () => true,
+			fnIsSnapshotCurrent = () => true,
+		} = refresh;
+		[charactersNxt, targetCharactersNxt, snapshotNxt, membersNxt, partyInventoryNxt, eventsNxt] = await Promise.all([
+			charactersNxt,
+			targetCharactersNxt,
+			snapshotNxt,
+			membersNxt,
+			partyInventoryNxt,
+			eventsNxt,
+		]);
 		const source = document.getElementById("campaign-transfer-source");
 		const target = document.getElementById("campaign-transfer-target");
 		const item = document.getElementById("campaign-transfer-entry");
-		const selections = {
+		const readSelections = () => ({
 			source: source?.value,
 			target: target?.value,
 			item: item?.value,
 			quantity: document.getElementById("campaign-transfer-quantity")?.value,
-		};
+		});
+		const selections = readSelections();
 		const [charactersLatest, snapshotLatest, partyInventoryLatest] = await Promise.all([
 			charactersNxt ? null : api.pListCharacters({campaignId}),
-			targetCharactersNxt ? null : api.pGetCampaignSnapshot({campaignId}),
+			targetCharactersNxt || snapshotNxt ? null : api.pGetCampaignSnapshot({campaignId}),
 			partyInventoryNxt ? null : api.pGetPartyInventory({campaignId}),
 		]);
+		if (!fnIsCurrent()) return {pendingTransferIds: [], isFenced: true};
+		const acceptedSnapshot = snapshotNxt && fnIsSnapshotCurrent(snapshotNxt)
+			? snapshotNxt
+			: snapshotLatest;
+		const latestSelections = readSelections();
+		const selectionsToRestore = Object.keys(selections)
+			.some(key => latestSelections[key] !== selections[key])
+			? latestSelections
+			: selections;
 		characters.splice(0, characters.length, ...(charactersNxt || charactersLatest));
-		targetCharacters.splice(0, targetCharacters.length, ...(targetCharactersNxt || snapshotLatest.characters));
-		if (snapshotLatest?.roster) rosterRef.current = snapshotLatest.roster;
+		const targetCharactersReplacement = targetCharactersNxt || acceptedSnapshot?.characters;
+		if (targetCharactersReplacement) targetCharacters.splice(0, targetCharacters.length, ...targetCharactersReplacement);
+		if (acceptedSnapshot?.roster) rosterRef.current = acceptedSnapshot.roster;
 		if (membersNxt) members.splice(0, members.length, ...membersNxt);
 		partyInventory = partyInventoryNxt || partyInventoryLatest;
 		if (eventsNxt) itemAward.setEvents(eventsNxt);
@@ -1885,27 +2255,39 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		// A character whose identity the owner hid is absent from roster metadata and is
 		// therefore not peer-targetable.
 		fillCharacterSelect(target, getTargetableProjections({projections: targetCharacters, roster: rosterRef.current}), {includeParty: true, partyInventory});
-		if ([...source.options].some(option => option.value === selections.source)) source.value = selections.source;
-		if ([...target.options].some(option => option.value === selections.target)) target.value = selections.target;
+		if ([...source.options].some(option => option.value === selectionsToRestore.source)) source.value = selectionsToRestore.source;
+		if ([...target.options].some(option => option.value === selectionsToRestore.target)) target.value = selectionsToRestore.target;
 		syncTransferItemPicker({characters, partyInventory});
-		if ([...item.options].some(option => option.value === selections.item)) {
-			item.value = selections.item;
+		if ([...item.options].some(option => option.value === selectionsToRestore.item)) {
+			item.value = selectionsToRestore.item;
 			syncTransferQuantity();
 			const maximum = Number(item.selectedOptions[0]?.dataset.quantity);
-			if (Number(selections.quantity) > 0 && Number(selections.quantity) <= maximum) {
-				document.getElementById("campaign-transfer-quantity").value = selections.quantity;
+			if (Number(selectionsToRestore.quantity) > 0 && Number(selectionsToRestore.quantity) <= maximum) {
+				document.getElementById("campaign-transfer-quantity").value = selectionsToRestore.quantity;
 			}
 		}
 		renderPartyInventoryStatus(partyInventory);
-		await renderPendingTransfers({
+		const transferState = await renderPendingTransfers({
 			campaign,
 			campaignId,
 			session,
 			targetCharacters,
 			members,
 			pRefreshTransferState,
+			fnIsCurrent,
 		});
-	};
+		const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId});
+		if (pendingProposal) {
+			setTransferProposalControls({
+				form: document.getElementById("campaign-transfer-form"),
+				proposalRequest: pendingProposal,
+				characters,
+				partyInventory,
+				isLocked: true,
+			});
+		}
+		return transferState;
+	});
 
 	await renderPendingActions({campaign, campaignId, session, targetCharacters, members});
 	await pRefreshTransferState({
@@ -1929,6 +2311,36 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		isAvailable: !!document.getElementById("campaign-transfer-source")?.options.length,
 		message: "Add one of your characters before starting a transfer.",
 	});
+	const pendingTransferProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId});
+	if (pendingTransferProposal) {
+		const form = document.getElementById("campaign-transfer-form");
+		if (!transferProposalDrafts.isReplayable(pendingTransferProposal)) {
+			setTransferProposalReplayExpired({
+				form,
+				proposalRef: {accountId: session.account.id, campaignId},
+				proposalRequest: pendingTransferProposal,
+				pRefresh: pRefreshTransferState,
+			});
+		} else {
+			setTransferProposalControls({
+				form,
+				proposalRequest: pendingTransferProposal,
+				characters,
+				partyInventory,
+				isLocked: true,
+			});
+			const submit = form?.querySelector("button[type='submit']");
+			if (submit) {
+				submit.disabled = false;
+				submit.textContent = "Retry transfer";
+			}
+			setFormStatus({
+				formId: "campaign-transfer-form",
+				message: "The previous transfer outcome is not yet confirmed. Retry to reconcile the same transfer.",
+				isError: true,
+			});
+		}
+	}
 	setFormAvailability({
 		formId: "campaign-xp-form",
 		isAvailable: !!characters.length,
@@ -2107,12 +2519,64 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 
 	document.getElementById("campaign-transfer-form")?.addEventListener("submit", async event => {
 		event.preventDefault();
+		const form = event.currentTarget;
 		const formId = "campaign-transfer-form";
 		setFormStatus({formId});
 		try {
-			await pRunFormMutation({form: event.currentTarget,
-				fingerprint: getFormFingerprint(event.currentTarget),
+			const result = await pRunFormMutation({form,
+				fingerprint: getFormFingerprint(form),
 				fnMutate: async idempotencyKey => {
+					const proposalRef = {accountId: session.account.id, campaignId};
+					const pResolveAutoTransfer = transfer => pResolveTransferFromDraft({
+						drafts: transferResolutionDrafts,
+						campaignId,
+						transferId: transfer.id,
+						pGetRulesVersionId: async () => (await api.pGetCampaignContext({campaignId})).rulesVersion?.id || null,
+						pResolve: request => api.pResolveTransfer(request),
+					});
+					let proposalRequest = transferProposalDrafts.get(proposalRef);
+					if (proposalRequest) {
+						if (!transferProposalDrafts.isReplayable(proposalRequest)) {
+							throw new HubApiError({code: "IDEMPOTENCY_WINDOW_EXPIRED", status: 0});
+						}
+						let proposed;
+						try {
+							proposed = await api.pProposeTransfer(proposalRequest);
+						} catch (error) {
+							if (!isTransferOutcomeUncertain(error)) {
+								transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+							}
+							throw error;
+						}
+						const transfers = await api.pListTransfers({campaignId});
+						const currentTransfer = transfers.find(it => it.id === proposed.transfer.id);
+						if (!currentTransfer) throw new HubApiError({code: "TRANSFER_NOT_FOUND", status: 404});
+						proposed = {...proposed, transfer: currentTransfer};
+						if (!["proposed", "reserved", "committed"].includes(proposed.transfer.status)) {
+							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+							return {transfer: proposed.transfer, isAutoResolved: proposalRequest.isAutoResolved, targetKind: proposalRequest.targetKind};
+						}
+						if (proposed.transfer.status === "committed") {
+							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+							return {transfer: proposed.transfer, isAutoResolved: true, targetKind: proposalRequest.targetKind};
+						}
+						const isAutoResolved = proposalRequest.isAutoResolved;
+						if (!isAutoResolved) {
+							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+							return {transfer: proposed.transfer, isAutoResolved: false, targetKind: proposalRequest.targetKind};
+						}
+						let resolved;
+						try {
+							resolved = await pResolveAutoTransfer(proposed.transfer);
+						} catch (error) {
+							if (!isTransferOutcomeUncertain(error) && error?.code !== "RULES_VERSION_STALE") {
+								transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+							}
+							throw error;
+						}
+						transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+						return {transfer: resolved.transfer, isAutoResolved: true, targetKind: proposalRequest.targetKind};
+					}
 					const [sourceKind, sourceId] = document.getElementById("campaign-transfer-source").value.split(":");
 					const [targetKind, targetId] = document.getElementById("campaign-transfer-target").value.split(":");
 					if (sourceKind === targetKind && sourceId === targetId) throw new Error("Choose a different recipient.");
@@ -2137,34 +2601,144 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					const insufficientType = CURRENCY_TYPES.find(type => currency[type] > (Number(sourceContainer?.currency?.[type]) || 0));
 					if (insufficientType) throw new Error(`Only ${sourceContainer?.currency?.[insufficientType] || 0} ${insufficientType.toUpperCase()} is available.`);
 					if (!entryId && !Object.values(currency).some(Boolean)) throw new Error("Choose an item or enter a currency amount.");
-					await api.pProposeTransfer({
-						campaignId,
+					const isAutoResolved = shouldAutoResolveTransfer({
+						isDm,
 						sourceKind,
-						sourceId,
 						targetKind,
 						targetId,
-						payload: {
-							items: entryId && quantity ? [{entryId, quantity}] : [],
-							currency,
-						},
-						idempotencyKey,
+						targetCharacters,
+						accountId: session.account.id,
 					});
+					const currentContext = isAutoResolved && targetKind === "character"
+						? await api.pGetCampaignContext({campaignId})
+						: null;
+					proposalRequest = transferProposalDrafts.stage({
+						...proposalRef,
+						request: {
+							campaignId,
+							sourceKind,
+							sourceId,
+							targetKind,
+							targetId,
+							payload: {
+								items: entryId && quantity ? [{entryId, quantity}] : [],
+								currency,
+							},
+							...(isAutoResolved && targetKind === "character"
+								? {rulesVersionId: currentContext?.rulesVersion?.id || null}
+								: {}),
+							idempotencyKey,
+							isAutoResolved,
+						},
+					});
+					let proposed;
+					try {
+						proposed = await api.pProposeTransfer(proposalRequest);
+					} catch (error) {
+						if (!isTransferOutcomeUncertain(error)) {
+							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+						}
+						throw error;
+					}
+					if (!isAutoResolved) {
+						transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+						return {transfer: proposed.transfer, isAutoResolved: false, targetKind};
+					}
+					if (proposed.transfer.status === "committed") {
+						transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+						return {transfer: proposed.transfer, isAutoResolved: true, targetKind};
+					}
+					let resolved;
+					try {
+						resolved = await pResolveAutoTransfer(proposed.transfer);
+					} catch (error) {
+						if (!isTransferOutcomeUncertain(error) && error?.code !== "RULES_VERSION_STALE") {
+							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+						}
+						throw error;
+					}
+					transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+					return {transfer: resolved.transfer, isAutoResolved: true, targetKind};
 				}});
+			if (!result) return;
+			setTransferProposalControls({form, isLocked: false});
 			for (const type of CURRENCY_TYPES) document.getElementById(`campaign-transfer-${type}`).value = "0";
-			setFormStatus({formId, message: "Transfer reserved. The recipient can now accept it from the inbox."});
+			const terminalMessages = {
+				rejected: "Transfer declined. The authoritative inventories are unchanged.",
+				cancelled: "Transfer cancelled. The authoritative inventories are up to date.",
+				expired: "Transfer expired. Any reserved assets were restored.",
+			};
+			const successMessage = result.transfer.status === "committed"
+				? "Transfer complete. The authoritative inventories are updated."
+				: terminalMessages[result.transfer.status]
+					|| (result.transfer.status === "proposed"
+						? "Request sent. A DM must approve before anything leaves the party inventory."
+						: result.targetKind === "party_inventory"
+							? "Transfer reserved. A DM can accept it from the inbox."
+							: "Transfer reserved. The recipient can accept it from the inbox.");
+			setFormStatus({formId, message: successMessage});
 			try {
 				await pRefreshTransferState();
 			} catch {
-				setFormStatus({
-					formId,
-					message: "Transfer reserved, but the latest balances could not be loaded. Reload the campaign before sending another transfer.",
-					isError: true,
+				setTransferRefreshFailure({
+					form,
+					message: `${successMessage} The latest balances could not be loaded.`,
+					pRetry: pRefreshTransferState,
 				});
-				event.currentTarget.querySelector("button[type='submit']").disabled = true;
 			}
 		} catch (error) {
 			const message = error instanceof HubApiError ? getErrorMessage(error) : error.message;
-			setFormStatus({formId, message, isError: true});
+			const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId});
+			const isRulesVersionStale = error instanceof HubApiError && error.code === "RULES_VERSION_STALE";
+			const isDefinitiveWithoutPending = error instanceof HubApiError
+				&& !isTransferOutcomeUncertain(error)
+				&& !pendingProposal;
+			if (isDefinitiveWithoutPending) {
+				form._hubMutationKey = null;
+				form._hubMutationFingerprint = null;
+				setTransferProposalControls({form, isLocked: false});
+				try {
+					await pRefreshTransferState();
+				} catch {
+					setTransferRefreshFailure({
+						form,
+						message: `${message} The latest balances could not be loaded.`,
+						pRetry: pRefreshTransferState,
+					});
+					renderError(error);
+					return;
+				}
+			}
+			if (pendingProposal && !transferProposalDrafts.isReplayable(pendingProposal)) {
+				setTransferProposalReplayExpired({
+					form,
+					proposalRef: {accountId: session.account.id, campaignId},
+					proposalRequest: pendingProposal,
+					pRefresh: pRefreshTransferState,
+				});
+				if (error instanceof HubApiError && error.code !== "IDEMPOTENCY_WINDOW_EXPIRED") renderError(error);
+				return;
+			}
+			setFormStatus({
+				formId,
+				message: pendingProposal
+					? isRulesVersionStale
+						? "Campaign rules changed before acceptance. Retry to reconcile the reserved transfer under the active version."
+						: "The transfer outcome is not yet confirmed. Retry to reconcile the same transfer."
+					: message,
+				isError: true,
+			});
+			if (pendingProposal) {
+				setTransferProposalControls({
+					form,
+					proposalRequest: pendingProposal,
+					characters,
+					partyInventory,
+					isLocked: true,
+				});
+				const submit = form.querySelector("button[type='submit']");
+				if (submit) submit.textContent = "Retry transfer";
+			}
 			if (error instanceof HubApiError) renderError(error);
 		}
 	});

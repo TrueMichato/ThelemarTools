@@ -52,7 +52,25 @@ export class HubCharacterSheetPartyInventoryPage {
 		await expect(root).toBeVisible();
 		await expect(root.getByRole("alert")).toContainText("could not be loaded");
 		await this.page.unroute(matcher, handler);
-		await root.getByRole("button", {name: "Retry"}).click();
+		const retryDelay = async (route: Route): Promise<void> => {
+			await new Promise(resolve => setTimeout(resolve, 200));
+			await route.continue();
+		};
+		await this.page.route(matcher, retryDelay, {times: 1});
+		let partyRefreshRequests = 0;
+		const onRefreshRequest = (request: Request) => {
+			if (new URL(request.url()).pathname.endsWith("/party-inventory")) partyRefreshRequests++;
+		};
+		this.page.on("request", onRefreshRequest);
+		try {
+			await root.getByRole("button", {name: "Retry"}).click();
+			await expect(root.getByRole("button", {name: "Refreshing..."})).toBeDisabled();
+			await expect(root).toContainText("Retrying party stash sync...");
+			await expect(root).toContainText("Party stash refreshed.");
+			expect(partyRefreshRequests).toBeGreaterThan(0);
+		} finally {
+			this.page.off("request", onRefreshRequest);
+		}
 		await expect(root).toContainText("Nothing is stored here yet.");
 		await expect(root.getByRole("alert")).toHaveCount(0);
 	}
@@ -80,10 +98,23 @@ export class HubCharacterSheetPartyInventoryPage {
 		return this.page.locator("[data-charsheet-party-inventory]");
 	}
 
+	async _expectTransferSubmitted (): Promise<void> {
+		try {
+			await expect(this.root().locator("[data-party-inventory-live]"))
+				.toContainText(/Transfer reserved|Transfer complete/, {timeout: 15_000});
+		} catch (error) {
+			const recovery = await this.page.evaluate(() => {
+				const sheet: any = (globalThis as any).charSheet;
+				return sheet?._characterRepository?.getConflictRecovery?.(sheet?._currentCharacterId) || null;
+			});
+			throw new Error(`${error instanceof Error ? error.message : error}\nConflict recovery: ${JSON.stringify(recovery)}`);
+		}
+	}
+
 	async expectPrivacySafe ({forbiddenIds, recipientLabel}: {forbiddenIds: string[]; recipientLabel: string}): Promise<void> {
 		const itemRow = this.page.locator("#charsheet-inventory-list .charsheet__item", {
 			has: this.page.locator(".charsheet__item-name", {hasText: "Rations"}),
-		});
+		}).first();
 		await itemRow.getByRole("button", {name: "Share Rations with the party"}).click();
 		const destination = this.root().getByLabel("Destination");
 		await expect(destination.locator("option")).toContainText(["Party stash", recipientLabel]);
@@ -105,7 +136,7 @@ export class HubCharacterSheetPartyInventoryPage {
 	}): Promise<void> {
 		const itemRow = this.page.locator("#charsheet-inventory-list .charsheet__item", {
 			has: this.page.locator(".charsheet__item-name", {hasText: itemName}),
-		});
+		}).first();
 		await itemRow.getByRole("button", {name: `Share ${itemName} with the party`}).click();
 		const composer = this.root().getByRole("form", {name: "Confirm inventory transfer"});
 		await composer.getByLabel("Quantity").fill(`${quantity}`);
@@ -113,7 +144,8 @@ export class HubCharacterSheetPartyInventoryPage {
 		await expect(composer.locator(".charsheet__party-inventory-confirmation")).toContainText(`${quantity} × ${itemName}`);
 
 		if (!isSingleFlight) {
-			await composer.getByRole("button", {name: "Confirm transfer"}).click();
+			await composer.locator("button[type='submit']").click();
+			await this._expectTransferSubmitted();
 		} else {
 			let requests = 0;
 			const onRequest = (request: Request) => {
@@ -125,13 +157,13 @@ export class HubCharacterSheetPartyInventoryPage {
 					form.requestSubmit();
 					form.requestSubmit();
 				});
-				await expect(composer).toHaveCount(0);
+				await this._expectTransferSubmitted();
 			} finally {
 				this.page.off("request", onRequest);
 			}
 			expect(requests, "Double submission must produce one transfer request").toBe(1);
 		}
-		await expect(this.root().locator("[data-party-inventory-live]")).toContainText(/Transfer reserved|Transfer complete/);
+		await expect(composer).toHaveCount(0);
 	}
 
 	async takeStashItem ({itemName, quantity}: {itemName: string; quantity: number}): Promise<void> {
@@ -140,15 +172,31 @@ export class HubCharacterSheetPartyInventoryPage {
 		const composer = this.root().getByRole("form", {name: "Confirm inventory transfer"});
 		await composer.getByLabel("Quantity").fill(`${quantity}`);
 		await expect(composer).toContainText("DestinationThis character");
-		await composer.getByRole("button", {name: "Confirm transfer"}).click();
+		await composer.getByRole("button", {name: "Move now"}).click();
 		await expect(composer).toHaveCount(0);
 		await expect(this.root().locator("[data-party-inventory-live]")).toContainText("Transfer complete");
+	}
+
+	async requestStashItem ({itemName, quantity}: {itemName: string; quantity: number}): Promise<void> {
+		const row = this.root().getByRole("listitem").filter({hasText: itemName});
+		await row.getByRole("button", {name: `Request ${itemName} for this character`}).click();
+		const composer = this.root().getByRole("form", {name: "Confirm inventory transfer"});
+		await composer.getByLabel("Quantity").fill(`${quantity}`);
+		await expect(composer).toContainText("A DM must approve before anything leaves the stash.");
+		await composer.getByRole("button", {name: "Send request"}).click();
+		await expect(composer).toHaveCount(0);
+		await expect(this.root().locator("[data-party-inventory-live]")).toContainText("Request sent");
 	}
 
 	async expectStashQuantity ({itemName, quantity}: {itemName: string; quantity: number}): Promise<void> {
 		const row = this.root().getByRole("listitem").filter({hasText: itemName});
 		await expect(row).toContainText(itemName, {timeout: 15_000});
 		await expect(row.locator(".charsheet__party-inventory-quantity")).toHaveAttribute("aria-label", `Quantity ${quantity}`, {timeout: 15_000});
+	}
+
+	async expectStashEmpty (): Promise<void> {
+		await expect(this.root()).toContainText("Nothing is stored here yet.", {timeout: 15_000});
+		await expect(this.root().getByRole("listitem")).toHaveCount(0);
 	}
 
 	async expectCharacterQuantity ({characterId, itemName, quantity}: {characterId: string; itemName: string; quantity: number}): Promise<void> {

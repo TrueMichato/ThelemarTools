@@ -283,6 +283,19 @@ function getComparableInventoryEntry (entry) {
 	return out;
 }
 
+function isInventoryEntryStackEquivalent (left, right) {
+	return isDeepStrictEqual(getComparableInventoryEntry(left), getComparableInventoryEntry(right));
+}
+
+function getCollisionFreeInventoryEntryId (inventory) {
+	const ids = new Set(inventory.map(entry => entry.id));
+	let id;
+	do {
+		id = crypto.randomUUID();
+	} while (ids.has(id));
+	return id;
+}
+
 function getDestinationInventoryEntry (entry) {
 	const out = structuredClone(entry);
 	delete out._sourceIndex;
@@ -322,7 +335,7 @@ function isCustomInventoryItem (item) {
 
 function addDestinationInventoryEntry ({inventory, incoming, isAllowLegacySummaryUpgrade = false}) {
 	const entry = getDestinationInventoryEntry(incoming);
-	let existing = inventory.find(it => isDeepStrictEqual(getComparableInventoryEntry(it), getComparableInventoryEntry(entry)));
+	let existing = inventory.find(it => isInventoryEntryStackEquivalent(it, entry));
 	if (
 		!existing
 		&& isAllowLegacySummaryUpgrade
@@ -343,7 +356,7 @@ function addDestinationInventoryEntry ({inventory, incoming, isAllowLegacySummar
 		existing.quantity = addFinite(existing.quantity, incoming.quantity, "Item quantity");
 		return existing;
 	}
-	const created = {...entry, id: crypto.randomUUID()};
+	const created = {...entry, id: getCollisionFreeInventoryEntryId(inventory)};
 	inventory.push(created);
 	return created;
 }
@@ -402,6 +415,31 @@ export function removeTransferPayload ({container, payload}) {
 	return {container: out, escrow: {items: escrowItems, currency: escrowCurrency}};
 }
 
+export function prepareTransferRequest ({container, payload}) {
+	const {escrow} = removeTransferPayload({container, payload});
+	return {
+		request: {
+			items: escrow.items.map(entry => ({entryId: entry.id, quantity: entry.quantity})),
+			currency: structuredClone(escrow.currency),
+		},
+		preview: escrow,
+	};
+}
+
+export function isDirectTransferAuthority ({
+	role,
+	accountId,
+	sourceKind,
+	targetKind,
+	targetOwnerAccountId,
+}) {
+	if (["dm", "co_dm"].includes(role)) return true;
+	return role === "player"
+		&& sourceKind === "character"
+		&& targetKind === "character"
+		&& targetOwnerAccountId === accountId;
+}
+
 export function addTransferPayload ({container, escrow, isRestore = false}) {
 	const out = structuredClone(container);
 	out.inventory = normalizeInventory(out.inventory);
@@ -417,8 +455,12 @@ export function addTransferPayload ({container, escrow, isRestore = false}) {
 		const entry = structuredClone(incoming);
 		delete entry._sourceIndex;
 		const existing = out.inventory.find(it => it.id === entry.id);
-		if (existing) existing.quantity = addFinite(existing.quantity, incoming.quantity, "Item quantity");
-		else out.inventory.splice(Math.min(incoming._sourceIndex ?? out.inventory.length, out.inventory.length), 0, entry);
+		if (existing && isInventoryEntryStackEquivalent(existing, entry)) {
+			existing.quantity = addFinite(existing.quantity, incoming.quantity, "Item quantity");
+			continue;
+		}
+		if (existing) entry.id = getCollisionFreeInventoryEntryId(out.inventory);
+		out.inventory.splice(Math.min(incoming._sourceIndex ?? out.inventory.length, out.inventory.length), 0, entry);
 	}
 	const currency = normalizeCurrency(escrow.currency);
 	for (const type of CURRENCY_TYPES) out.currency[type] = addFinite(out.currency[type], currency[type], `${type} amount`);

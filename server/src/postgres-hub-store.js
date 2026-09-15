@@ -26,12 +26,14 @@ import {
 	getItemAwardIdempotencyKey,
 	getItemAwardTotalQuantity,
 	getSafeItemSummary,
+	isDirectTransferAuthority,
 	normalizeItemAwardRequest,
 	normalizeItemAwardQuantity,
 	normalizeCharacterInventory,
 	normalizeCurrency,
 	normalizeSafeItemSummary,
 	normalizeSemanticOperation,
+	prepareTransferRequest,
 	removeTransferPayload,
 } from "./hub-actions.js";
 import {validateCloudCharacterData, validateCloudValue} from "./cloud-data-validation.js";
@@ -57,6 +59,8 @@ import {HUB_REQUIRED_MIGRATION_VERSION} from "./migration-version.js";
 import {
 	createCharacterDisplayNameSnapshot,
 	enrichEventPayload,
+	getTransferCharacterDisplaySnapshot,
+	projectTransferForViewer,
 	redactTransferEventForViewer,
 } from "./hub-event-snapshots.js";
 import {createSemanticOperationRegistry} from "./semantic-operation-registry.js";
@@ -884,6 +888,19 @@ export class PostgresHubStore {
 		};
 	}
 
+	async _pGetMembershipForShare ({client, accountId, campaignId, roles = null}) {
+		const result = await client.query(`
+			SELECT id, campaign_id, account_id, role, status
+			FROM hub.memberships
+			WHERE campaign_id = $1 AND account_id = $2 AND status = 'active'
+			FOR SHARE
+		`, [campaignId, accountId]);
+		if (!result.rowCount) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+		const membership = getMembership(result.rows[0]);
+		if (roles && !roles.includes(membership.role)) throw new HubStoreError("FORBIDDEN", `Campaign role is not allowed.`, {status: 403});
+		return membership;
+	}
+
 	async _pLockCommand ({client, accountId, idempotencyKey}) {
 		const normalized = this._normalizeIdempotencyKey(idempotencyKey);
 		await client.query(`
@@ -925,6 +942,47 @@ export class PostgresHubStore {
 		// the first response did — otherwise an idempotent retry both leaks another owner's
 		// sharing configuration and returns a different body than the call it replays.
 		return {...response, character: stripProjectionPolicy(getCharacter(result.rows[0]))};
+	}
+
+	async _pProjectTransferResponseForViewer ({client, response, accountId, campaignId, membership = null}) {
+		if (!response?.transfer) return structuredClone(response);
+		const viewerMembership = membership || await this._pGetMembershipForShare({
+			client,
+			accountId,
+			campaignId,
+		});
+		const canonicalResult = await client.query(`
+			SELECT *
+			FROM hub.transfers
+			WHERE id = $1 AND campaign_id = $2
+		`, [response.transfer.id, campaignId]);
+		const canonical = canonicalResult.rowCount ? this._getTransfer(canonicalResult.rows[0]) : null;
+		const transfer = canonical
+			? {
+				...structuredClone(response.transfer),
+				actorAccountId: canonical.actorAccountId,
+				actorCommandId: canonical.actorCommandId,
+				sourceId: canonical.sourceId,
+				targetId: canonical.targetId,
+			}
+			: structuredClone(response.transfer);
+		const characterIds = [
+			transfer.sourceKind === "character" ? transfer.sourceId : null,
+			transfer.targetKind === "character" ? transfer.targetId : null,
+		].filter(Boolean);
+		const owners = characterIds.length
+			? await client.query(`SELECT id, owner_account_id FROM hub.characters WHERE id = ANY($1::uuid[])`, [characterIds])
+			: {rows: []};
+		const ownerByCharacterId = new Map(owners.rows.map(row => [row.id, row.owner_account_id]));
+		return {
+			...structuredClone(response),
+			transfer: projectTransferForViewer({
+				transfer,
+				accountId,
+				role: viewerMembership.role,
+				getCharacterOwnerId: characterId => ownerByCharacterId.get(characterId),
+			}),
+		};
 	}
 
 	async pDeleteExpiredCommandReceipts ({limit = 1_000} = {}) {
@@ -3041,74 +3099,84 @@ export class PostgresHubStore {
 	}
 
 	async pListVisibleEventPage ({accountId, campaignId, afterSequence = 0, limit = 500}) {
-		const membership = await this.pGetMembership({accountId, campaignId});
-		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
-		const result = await this._pool.query(`
-			SELECT e.*, a.display_name AS actor_display_name
-			FROM hub.domain_events
-			AS e
-			LEFT JOIN hub.accounts a ON a.id = e.actor_account_id
-			WHERE e.campaign_id = $1
-				AND e.sequence > $2
-			ORDER BY e.sequence
-			LIMIT $3
-		`, [campaignId, afterSequence, limit + 1]);
-		const scannedRows = result.rows.slice(0, limit);
-		const visibleRows = scannedRows.filter(row => canViewEvent({
-			event: {
-				visibility: row.visibility,
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const membership = await this._pGetMembershipForShare({client, accountId, campaignId});
+			const result = await client.query(`
+				SELECT e.*, a.display_name AS actor_display_name
+				FROM hub.domain_events
+				AS e
+				LEFT JOIN hub.accounts a ON a.id = e.actor_account_id
+				WHERE e.campaign_id = $1
+					AND e.sequence > $2
+				ORDER BY e.sequence
+				LIMIT $3
+			`, [campaignId, afterSequence, limit + 1]);
+			const scannedRows = result.rows.slice(0, limit);
+			const visibleRows = scannedRows.filter(row => canViewEvent({
+				event: {
+					visibility: row.visibility,
+					actorAccountId: row.actor_account_id,
+					visibleAccountIds: row.visible_account_ids,
+				},
+				accountId,
+				role: membership.role,
+			}));
+			// Actor redaction needs the target characters' sharing policies, fetched once.
+			const characterIds = [...new Set(visibleRows.flatMap(row => {
+				const ids = [];
+				if (row.visibility === "all_members" && row.aggregate_type === "character") ids.push(row.aggregate_id);
+				if (row.aggregate_type === "transfer") {
+					if (row.payload?.sourceKind === "character") ids.push(row.payload.sourceId);
+					if (row.payload?.targetKind === "character") ids.push(row.payload.targetId);
+				}
+				return ids.filter(Boolean);
+			}))];
+			const characters = characterIds.length
+				? (await client.query(`SELECT id, owner_account_id, projection_policy FROM hub.characters WHERE id = ANY($1::uuid[])`, [characterIds])).rows
+				: [];
+			const charactersById = new Map(characters.map(row => [row.id, {ownerAccountId: row.owner_account_id, projectionPolicy: row.projection_policy}]));
+			const events = visibleRows.map(row => this._redactRowForViewer({
+				row,
+				accountId,
+				role: membership.role,
+				character: charactersById.get(row.aggregate_id) || null,
+			})).filter(Boolean).map(row => ({
+				id: row.id,
+				campaignId: row.campaign_id,
+				sequence: Number(row.sequence),
+				type: row.event_type,
 				actorAccountId: row.actor_account_id,
+				...(row.actor_display_name == null ? {} : {actorDisplayName: row.actor_display_name}),
+				aggregateType: row.aggregate_type,
+				aggregateId: row.aggregate_id,
+				aggregateRevision: row.aggregate_revision == null ? null : Number(row.aggregate_revision),
+				visibility: row.visibility,
 				visibleAccountIds: row.visible_account_ids,
-			},
-			accountId,
-			role: membership.role,
-		}));
-		// Actor redaction needs the target characters' sharing policies, fetched once.
-		const characterIds = [...new Set(visibleRows.flatMap(row => {
-			const ids = [];
-			if (row.visibility === "all_members" && row.aggregate_type === "character") ids.push(row.aggregate_id);
-			if (row.aggregate_type === "transfer") {
-				if (row.payload?.sourceKind === "character") ids.push(row.payload.sourceId);
-				if (row.payload?.targetKind === "character") ids.push(row.payload.targetId);
-			}
-			return ids.filter(Boolean);
-		}))];
-		const characters = characterIds.length
-			? (await this._pool.query(`SELECT id, owner_account_id, projection_policy FROM hub.characters WHERE id = ANY($1::uuid[])`, [characterIds])).rows
-			: [];
-		const charactersById = new Map(characters.map(row => [row.id, {ownerAccountId: row.owner_account_id, projectionPolicy: row.projection_policy}]));
-		const events = visibleRows.map(row => this._redactRowForViewer({
-			row,
-			accountId,
-			role: membership.role,
-			character: charactersById.get(row.aggregate_id) || null,
-		})).filter(Boolean).map(row => ({
-			id: row.id,
-			campaignId: row.campaign_id,
-			sequence: Number(row.sequence),
-			type: row.event_type,
-			actorAccountId: row.actor_account_id,
-			...(row.actor_display_name == null ? {} : {actorDisplayName: row.actor_display_name}),
-			aggregateType: row.aggregate_type,
-			aggregateId: row.aggregate_id,
-			aggregateRevision: row.aggregate_revision == null ? null : Number(row.aggregate_revision),
-			visibility: row.visibility,
-			visibleAccountIds: row.visible_account_ids,
-			payload: row.payload,
-			createdAt: row.created_at,
-		})).map(event => redactTransferEventForViewer({
-			event,
-			accountId,
-			role: membership.role,
-			getCharacterOwnerId: characterId => charactersById.get(characterId)?.ownerAccountId,
-		})).filter(Boolean);
-		return {
-			events,
-			replay: {
-				scannedThroughSequence: scannedRows.length ? Number(scannedRows.at(-1).sequence) : afterSequence,
-				hasMore: result.rows.length > limit,
-			},
-		};
+				payload: row.payload,
+				createdAt: row.created_at,
+			})).map(event => redactTransferEventForViewer({
+				event,
+				accountId,
+				role: membership.role,
+				getCharacterOwnerId: characterId => charactersById.get(characterId)?.ownerAccountId,
+			})).filter(Boolean);
+			const page = {
+				events,
+				replay: {
+					scannedThroughSequence: scannedRows.length ? Number(scannedRows.at(-1).sequence) : afterSequence,
+					hasMore: result.rows.length > limit,
+				},
+			};
+			await client.query("COMMIT");
+			return page;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
 	}
 
 	/**
@@ -5139,16 +5207,21 @@ export class PostgresHubStore {
 	}
 
 	_getTransfer (row) {
+		const {
+			_actorCommandId: actorCommandId = null,
+			...payload
+		} = row.payload || {};
 		return {
 			id: row.id,
 			campaignId: row.campaign_id,
 			actorAccountId: row.actor_account_id,
+			...(actorCommandId ? {actorCommandId} : {}),
 			sourceKind: row.source_character_id ? "character" : "party_inventory",
 			sourceId: row.source_character_id || row.source_party_inventory_id,
 			targetKind: row.target_character_id ? "character" : "party_inventory",
 			targetId: row.target_character_id || row.target_party_inventory_id,
 			status: row.status,
-			payload: row.payload,
+			payload,
 			createdAt: row.created_at,
 			updatedAt: row.updated_at,
 		};
@@ -5156,39 +5229,26 @@ export class PostgresHubStore {
 
 	async _pCancelIncomingForCharacter ({client, campaignId, characterId, actorAccountId}) {
 		await client.query(`UPDATE hub.pending_actions SET status = 'cancelled', updated_at = now() WHERE campaign_id = $1 AND target_character_id = $2 AND status = 'proposed'`, [campaignId, characterId]);
-		const transfers = await client.query(`SELECT * FROM hub.transfers WHERE campaign_id = $1 AND target_character_id = $2 AND status = 'reserved' FOR UPDATE`, [campaignId, characterId]);
+		const transfers = await client.query(`SELECT * FROM hub.transfers WHERE campaign_id = $1 AND target_character_id = $2 AND status IN ('proposed', 'reserved') FOR UPDATE`, [campaignId, characterId]);
 		for (const row of transfers.rows) {
-			const transfer = this._getTransfer(row);
-			const source = await this._pGetTransferContainer({client, campaignId, kind: transfer.sourceKind, id: transfer.sourceId, actorAccountId});
-			await source.pWrite(addTransferPayload({container: source.container, escrow: transfer.payload.escrow, isRestore: true}));
-			await client.query(`UPDATE hub.transfers SET status = 'cancelled', updated_at = now() WHERE id = $1`, [transfer.id]);
-			await this._pAppendEvent({
+			await this._pCancelTransferForLifecycle({
 				client,
-				campaignId,
+				row,
 				actorAccountId,
-				type: "transfer.cancelled",
-				aggregateType: "transfer",
-				aggregateId: transfer.id,
-				visibility: "explicit_accounts",
-				visibleAccountIds: [...new Set([transfer.actorAccountId, actorAccountId].filter(Boolean))],
-				payload: {
-					reason: "target_lifecycle_change",
-					sourceKind: transfer.sourceKind,
-					sourceId: transfer.sourceId,
-					targetKind: transfer.targetKind,
-					targetId: transfer.targetId,
-				},
+				reason: "target_lifecycle_change",
 			});
 		}
 	}
 
 	async _pCancelTransferForLifecycle ({client, row, actorAccountId, reason}) {
 		const transfer = this._getTransfer(row);
-		const source = await this._pGetTransferContainer({client, campaignId: transfer.campaignId, kind: transfer.sourceKind, id: transfer.sourceId, actorAccountId});
 		const targetOwner = transfer.targetKind === "character"
 			? (await client.query(`SELECT owner_account_id FROM hub.characters WHERE id = $1`, [transfer.targetId])).rows[0]?.owner_account_id
 			: null;
-		await source.pWrite(addTransferPayload({container: source.container, escrow: transfer.payload.escrow, isRestore: true}));
+		if (transfer.status === "reserved") {
+			const source = await this._pGetTransferContainer({client, campaignId: transfer.campaignId, kind: transfer.sourceKind, id: transfer.sourceId, actorAccountId});
+			await source.pWrite(addTransferPayload({container: source.container, escrow: transfer.payload.escrow, isRestore: true}));
+		}
 		await client.query(`UPDATE hub.transfers SET status = 'cancelled', updated_at = now() WHERE id = $1`, [transfer.id]);
 		await this._pAppendEvent({
 			client,
@@ -5213,7 +5273,7 @@ export class PostgresHubStore {
 		const transfers = await client.query(`
 			SELECT *
 			FROM hub.transfers
-			WHERE campaign_id = $1 AND status = 'reserved'
+			WHERE campaign_id = $1 AND status IN ('proposed', 'reserved')
 				AND (
 					actor_account_id = $2
 					OR source_character_id = ANY($3::uuid[])
@@ -5551,16 +5611,21 @@ export class PostgresHubStore {
 		}
 	}
 
-	async pProposeTransfer ({accountId, campaignId, sourceKind, sourceId, targetKind, targetId, payload, idempotencyKey}) {
+	async pProposeTransfer ({accountId, campaignId, sourceKind, sourceId, targetKind, targetId, payload, rulesVersionId = null, idempotencyKey}) {
+		const actorCommandId = this._normalizeIdempotencyKey(idempotencyKey).key;
 		const client = await this._pool.connect();
 		try {
 			await client.query("BEGIN");
 			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
 			if (prior) {
+				const response = await this._pProjectTransferResponseForViewer({client, response: prior, accountId, campaignId});
 				await client.query("COMMIT");
-				return prior;
+				return response;
 			}
 			const membership = await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+			if (sourceKind === targetKind && sourceId === targetId) {
+				throw new HubStoreError("TRANSFER_TARGET_INVALID", `Choose a different transfer destination.`, {status: 400});
+			}
 			await this._pLockInventoryParticipants({client, ids: [sourceId, targetId]});
 			const source = await this._pGetTransferContainer({client, campaignId, kind: sourceKind, id: sourceId, actorAccountId: accountId});
 			const target = await this._pGetTransferContainer({client, campaignId, kind: targetKind, id: targetId, actorAccountId: accountId});
@@ -5568,9 +5633,43 @@ export class PostgresHubStore {
 				this._assertTargetable({character: target.character, accountId, role: membership.role});
 			}
 			if (sourceKind === "character" && source.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can transfer from this character.`, {status: 403});
-			if (sourceKind === "party_inventory" && !["dm", "co_dm"].includes(membership.role)) throw new HubStoreError("FORBIDDEN", `Only a DM can transfer from party inventory.`, {status: 403});
-			const reserved = removeTransferPayload({container: source.container, payload});
-			await source.pWrite(reserved.container);
+			const isDm = ["dm", "co_dm"].includes(membership.role);
+			const isPlayerStashRequest = sourceKind === "party_inventory" && !isDm;
+			if (
+				isPlayerStashRequest
+				&& (
+					targetKind !== "character"
+					|| target.ownerAccountId !== accountId
+				)
+			) {
+				throw new HubStoreError("FORBIDDEN", `Players can only request party inventory for one of their own characters.`, {status: 403});
+			}
+			const isDirectAuthority = isDirectTransferAuthority({
+				role: membership.role,
+				accountId,
+				sourceKind,
+				targetKind,
+				targetOwnerAccountId: target.ownerAccountId,
+			});
+			const prepared = isPlayerStashRequest
+				? prepareTransferRequest({container: source.container, payload})
+				: removeTransferPayload({container: source.container, payload});
+			let directTargetAfter = null;
+			if (isDirectAuthority) {
+				directTargetAfter = addTransferPayload({container: target.container, escrow: prepared.escrow});
+				if (target.character) {
+					const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId});
+					assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+					assertCharacterCampaignContentMutation({
+						...enforcement,
+						before: target.container,
+						after: directTargetAfter,
+						rulesVersionId: enforcement.activeRulesVersionId,
+					});
+				}
+			}
+			if (!isPlayerStashRequest) await source.pWrite(prepared.container);
+			if (directTargetAfter) await target.pWrite(directTargetAfter);
 			const transferId = crypto.randomUUID();
 			const inserted = await client.query(`
 				INSERT INTO hub.transfers (
@@ -5578,7 +5677,7 @@ export class PostgresHubStore {
 					source_character_id, source_party_inventory_id,
 					target_character_id, target_party_inventory_id,
 					status, payload
-				) VALUES ($1, $2, $3, $4, $5, $6, $7, 'reserved', $8::jsonb)
+				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
 				RETURNING *
 			`, [
 				transferId,
@@ -5588,21 +5687,36 @@ export class PostgresHubStore {
 				sourceKind === "party_inventory" ? sourceId : null,
 				targetKind === "character" ? targetId : null,
 				targetKind === "party_inventory" ? targetId : null,
-				JSON.stringify({escrow: reserved.escrow}),
+				isPlayerStashRequest ? "proposed" : isDirectAuthority ? "committed" : "reserved",
+				JSON.stringify({
+					...(isPlayerStashRequest
+						? {request: prepared.request, preview: prepared.preview}
+						: {escrow: prepared.escrow}),
+					_actorCommandId: actorCommandId,
+				}),
 			]);
 			const transfer = this._getTransfer(inserted.rows[0]);
+			if (isDirectAuthority) {
+				await this._pAppendAudit({client, campaignId, actorAccountId: accountId, action: "transfer.committed", targetType: "transfer", targetId: transferId});
+			}
 			await this._pAppendEvent({
 				client,
 				campaignId,
 				actorAccountId: accountId,
-				type: "transfer.reserved",
+				type: `transfer.${transfer.status}`,
 				aggregateType: "transfer",
 				aggregateId: transferId,
 				visibility: "explicit_accounts",
 				visibleAccountIds: [...new Set([accountId, target.ownerAccountId].filter(Boolean))],
 				payload: {sourceKind, sourceId, targetKind, targetId},
 			});
-			const response = {transfer};
+			const response = await this._pProjectTransferResponseForViewer({
+				client,
+				response: {transfer},
+				accountId,
+				campaignId,
+				membership,
+			});
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "transfer.propose", response});
 			await client.query("COMMIT");
 			return response;
@@ -5620,44 +5734,70 @@ export class PostgresHubStore {
 			await client.query("BEGIN");
 			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
 			if (prior) {
+				const response = await this._pProjectTransferResponseForViewer({client, response: prior, accountId, campaignId});
 				await client.query("COMMIT");
-				return prior;
+				return response;
 			}
-			const transferLookup = await client.query(`SELECT * FROM hub.transfers WHERE campaign_id = $1 AND id = $2 AND status = 'reserved'`, [campaignId, transferId]);
+			const transferLookup = await client.query(`SELECT * FROM hub.transfers WHERE campaign_id = $1 AND id = $2 AND status IN ('proposed', 'reserved')`, [campaignId, transferId]);
 			if (!transferLookup.rowCount) throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
 			const transferPre = this._getTransfer(transferLookup.rows[0]);
 			const membership = await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm", "player"]});
 			await this._pLockInventoryParticipants({client, ids: [transferPre.sourceId, transferPre.targetId]});
-			const transferResult = await client.query(`SELECT * FROM hub.transfers WHERE campaign_id = $1 AND id = $2 AND status = 'reserved' FOR UPDATE`, [campaignId, transferId]);
+			const transferResult = await client.query(`SELECT * FROM hub.transfers WHERE campaign_id = $1 AND id = $2 AND status IN ('proposed', 'reserved') FOR UPDATE`, [campaignId, transferId]);
 			if (!transferResult.rowCount) throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
 			const transfer = this._getTransfer(transferResult.rows[0]);
 			const target = await this._pGetTransferContainer({client, campaignId, kind: transfer.targetKind, id: transfer.targetId, actorAccountId: accountId});
 			const isActorCancelling = decision === "reject" && transfer.actorAccountId === accountId;
-			const canResolve = isActorCancelling || (transfer.targetKind === "character"
-				? target.ownerAccountId === accountId || ["dm", "co_dm"].includes(membership.role)
-				: ["dm", "co_dm"].includes(membership.role));
+			const isDm = ["dm", "co_dm"].includes(membership.role);
+			const canResolve = transfer.status === "proposed"
+				? isActorCancelling || isDm
+				: isActorCancelling || (transfer.targetKind === "character"
+					? target.ownerAccountId === accountId || isDm
+					: isDm);
 			if (!canResolve) throw new HubStoreError("FORBIDDEN", `Cannot resolve this transfer.`, {status: 403});
-			const destination = decision === "accept"
-				? target
-				: await this._pGetTransferContainer({client, campaignId, kind: transfer.sourceKind, id: transfer.sourceId, actorAccountId: accountId});
-			const after = addTransferPayload({
-				container: destination.container,
-				escrow: transfer.payload.escrow,
-				isRestore: decision !== "accept",
-			});
-			if (decision === "accept" && destination.character) {
-				const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId});
-				assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
-				assertCharacterCampaignContentMutation({
-					...enforcement,
-					before: destination.container,
-					after,
-					rulesVersionId: enforcement.activeRulesVersionId,
+			let resolvedPayload = {...transfer.payload, _actorCommandId: transfer.actorCommandId};
+			if (transfer.status === "proposed") {
+				if (decision === "accept") {
+					const source = await this._pGetTransferContainer({client, campaignId, kind: transfer.sourceKind, id: transfer.sourceId, actorAccountId: accountId});
+					const removed = removeTransferPayload({container: source.container, payload: transfer.payload.request});
+					const after = addTransferPayload({container: target.container, escrow: removed.escrow});
+					if (target.character) {
+						const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId});
+						assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+						assertCharacterCampaignContentMutation({
+							...enforcement,
+							before: target.container,
+							after,
+							rulesVersionId: enforcement.activeRulesVersionId,
+						});
+					}
+					await source.pWrite(removed.container);
+					await target.pWrite(after);
+					resolvedPayload = {...transfer.payload, escrow: removed.escrow, _actorCommandId: transfer.actorCommandId};
+				}
+			} else {
+				const destination = decision === "accept"
+					? target
+					: await this._pGetTransferContainer({client, campaignId, kind: transfer.sourceKind, id: transfer.sourceId, actorAccountId: accountId});
+				const after = addTransferPayload({
+					container: destination.container,
+					escrow: transfer.payload.escrow,
+					isRestore: decision !== "accept",
 				});
+				if (decision === "accept" && destination.character) {
+					const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId});
+					assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+					assertCharacterCampaignContentMutation({
+						...enforcement,
+						before: destination.container,
+						after,
+						rulesVersionId: enforcement.activeRulesVersionId,
+					});
+				}
+				await destination.pWrite(after);
 			}
-			await destination.pWrite(after);
 			const status = decision === "accept" ? "committed" : "rejected";
-			const updated = await client.query(`UPDATE hub.transfers SET status = $2, updated_at = now() WHERE id = $1 RETURNING *`, [transferId, status]);
+			const updated = await client.query(`UPDATE hub.transfers SET status = $2, payload = $3::jsonb, updated_at = now() WHERE id = $1 RETURNING *`, [transferId, status, JSON.stringify(resolvedPayload)]);
 			const transferNxt = this._getTransfer(updated.rows[0]);
 			await this._pAppendAudit({client, campaignId, actorAccountId: accountId, action: `transfer.${status}`, targetType: "transfer", targetId: transferId});
 			await this._pAppendEvent({
@@ -5676,7 +5816,13 @@ export class PostgresHubStore {
 					targetId: transfer.targetId,
 				},
 			});
-			const response = {transfer: transferNxt};
+			const response = await this._pProjectTransferResponseForViewer({
+				client,
+				response: {transfer: transferNxt},
+				accountId,
+				campaignId,
+				membership,
+			});
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "transfer.resolve", response});
 			await client.query("COMMIT");
 			return response;
@@ -5689,18 +5835,78 @@ export class PostgresHubStore {
 	}
 
 	async pListTransfers ({accountId, campaignId}) {
-		const membership = await this.pGetMembership({accountId, campaignId});
-		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
-		const result = await this._pool.query(`
-			SELECT t.*
-			FROM hub.transfers t
-			LEFT JOIN hub.characters sc ON sc.id = t.source_character_id
-			LEFT JOIN hub.characters tc ON tc.id = t.target_character_id
-			WHERE t.campaign_id = $1
-				AND ($2::boolean OR t.actor_account_id = $3 OR sc.owner_account_id = $3 OR tc.owner_account_id = $3)
-			ORDER BY t.created_at DESC
-		`, [campaignId, ["dm", "co_dm"].includes(membership.role), accountId]);
-		return result.rows.map(row => this._getTransfer(row));
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const membership = await this._pGetMembershipForShare({client, accountId, campaignId});
+			const result = await client.query(`
+				SELECT
+					t.*,
+					sc.owner_account_id AS source_owner_account_id,
+					sc.campaign_id AS source_character_campaign_id,
+					sc.status AS source_character_status,
+					sc.data->>'name' AS source_character_name,
+					sc.projection_policy AS source_projection_policy,
+					sc.revision AS source_character_revision,
+					sc.projection_revision AS source_character_projection_revision,
+					sc.target_ref AS source_character_target_ref,
+					tc.owner_account_id AS target_owner_account_id,
+					tc.campaign_id AS target_character_campaign_id,
+					tc.status AS target_character_status,
+					tc.data->>'name' AS target_character_name,
+					tc.projection_policy AS target_projection_policy,
+					tc.revision AS target_character_revision,
+					tc.projection_revision AS target_character_projection_revision,
+					tc.target_ref AS target_character_target_ref
+				FROM hub.transfers t
+				LEFT JOIN hub.characters sc ON sc.id = t.source_character_id
+				LEFT JOIN hub.characters tc ON tc.id = t.target_character_id
+				WHERE t.campaign_id = $1
+					AND ($2::boolean OR t.actor_account_id = $3 OR sc.owner_account_id = $3 OR tc.owner_account_id = $3)
+				ORDER BY t.created_at DESC
+			`, [campaignId, ["dm", "co_dm"].includes(membership.role), accountId]);
+			const transfers = result.rows
+				.map(row => projectTransferForViewer({
+					transfer: this._getTransfer(row),
+					accountId,
+					role: membership.role,
+					getCharacterOwnerId: characterId => {
+						if (characterId === row.source_character_id) return row.source_owner_account_id;
+						if (characterId === row.target_character_id) return row.target_owner_account_id;
+						return null;
+					},
+					getCharacterDisplaySnapshot: characterId => {
+						const prefix = characterId === row.source_character_id
+							? "source"
+							: characterId === row.target_character_id ? "target" : null;
+						if (!prefix || !row[`${prefix}_owner_account_id`]) return null;
+						return getTransferCharacterDisplaySnapshot({
+							character: {
+								id: characterId,
+								campaignId: row[`${prefix}_character_campaign_id`],
+								ownerAccountId: row[`${prefix}_owner_account_id`],
+								status: row[`${prefix}_character_status`],
+								data: {name: row[`${prefix}_character_name`]},
+								projectionPolicy: row[`${prefix}_projection_policy`],
+								revision: row[`${prefix}_character_revision`],
+								projectionRevision: row[`${prefix}_character_projection_revision`],
+								targetRef: row[`${prefix}_character_target_ref`],
+							},
+							transferCampaignId: row.campaign_id,
+							viewerAccountId: accountId,
+							viewerRole: membership.role,
+						});
+					},
+				}))
+				.filter(Boolean);
+			await client.query("COMMIT");
+			return transfers;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
 	}
 
 	async pGetAccountDeletion ({accountId}) {
@@ -6000,6 +6206,15 @@ export class PostgresHubStore {
 			if (campaign.status !== "active") throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 			const reserved = await client.query(`SELECT 1 FROM hub.transfers WHERE campaign_id = $1 AND status = 'reserved' LIMIT 1 FOR UPDATE`, [campaignId]);
 			if (reserved.rowCount) throw new HubStoreError("CAMPAIGN_BUSY", `Resolve reserved transfers before archiving.`, {status: 409});
+			const proposedTransfers = await client.query(`SELECT * FROM hub.transfers WHERE campaign_id = $1 AND status = 'proposed' ORDER BY id FOR UPDATE`, [campaignId]);
+			for (const row of proposedTransfers.rows) {
+				await this._pCancelTransferForLifecycle({
+					client,
+					row,
+					actorAccountId: accountId,
+					reason: "campaign_archived",
+				});
+			}
 			await this._pCancelSemanticOperationsForLifecycle({
 				client,
 				campaignId,

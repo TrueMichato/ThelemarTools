@@ -2,6 +2,7 @@ import {
 	addTransferPayload,
 	applySemanticOperation,
 	applyStructuredEffect,
+	isDirectTransferAuthority,
 	normalizeCharacterInventory,
 	normalizeSemanticOperation,
 	removeTransferPayload,
@@ -10,6 +11,40 @@ import {
 	getInventoryTransferEligibility,
 	getInventoryWeightSummary,
 } from "../../../js/hub/hub-inventory-contract.js";
+
+describe("transfer authority", () => {
+	it("derives direct commits only from trusted DM roles or same-owner player characters", () => {
+		expect(isDirectTransferAuthority({
+			role: "dm",
+			accountId: "dm",
+			sourceKind: "party_inventory",
+			targetKind: "character",
+			targetOwnerAccountId: "player",
+		})).toBe(true);
+		expect(isDirectTransferAuthority({
+			role: "co_dm",
+			accountId: "co-dm",
+			sourceKind: "character",
+			targetKind: "party_inventory",
+			targetOwnerAccountId: null,
+		})).toBe(true);
+		expect(isDirectTransferAuthority({
+			role: "player",
+			accountId: "player",
+			sourceKind: "character",
+			targetKind: "character",
+			targetOwnerAccountId: "player",
+		})).toBe(true);
+		for (const candidate of [
+			{role: "player", sourceKind: "character", targetKind: "character", targetOwnerAccountId: "peer"},
+			{role: "player", sourceKind: "character", targetKind: "party_inventory", targetOwnerAccountId: null},
+			{role: "player", sourceKind: "party_inventory", targetKind: "character", targetOwnerAccountId: "player"},
+			{role: "spectator", sourceKind: "character", targetKind: "character", targetOwnerAccountId: "player"},
+		]) {
+			expect(isDirectTransferAuthority({accountId: "player", ...candidate})).toBe(false);
+		}
+	});
+});
 
 describe("structured effects", () => {
 	it("applies damage through temporary HP and clamps healing", () => {
@@ -251,6 +286,53 @@ describe("inventory escrow", () => {
 		expect(committed.inventory[0].id).not.toBe("custom");
 	});
 
+	it("merges restored same-ID stacks across deterministic Character Sheet aliases", () => {
+		const restored = addTransferPayload({
+			container: {
+				inventory: [{
+					id: "blade",
+					item: {
+						name: "Longsword",
+						source: "PHB",
+						type: "M",
+						typeCode: "M",
+						property: ["V"],
+						properties: ["V"],
+						weaponCategory: "martial",
+						weapon: true,
+						charges: 5,
+						chargesCurrent: 5,
+						appliedUpgrades: [],
+						socketedGemstones: [],
+					},
+					quantity: 2,
+				}],
+				currency: {},
+			},
+			escrow: {
+				items: [{
+					id: "blade",
+					item: {
+						name: "Longsword",
+						source: "PHB",
+						type: "M",
+						property: ["V"],
+						weaponCategory: "martial",
+						charges: 5,
+					},
+					quantity: 2,
+					_sourceIndex: 0,
+				}],
+				currency: {},
+			},
+			isRestore: true,
+		});
+
+		expect(restored.inventory).toEqual([
+			expect.objectContaining({id: "blade", quantity: 4}),
+		]);
+	});
+
 	it("restores multiple whole stacks to their exact original order", () => {
 		const original = normalizeCharacterInventory({
 			inventory: [
@@ -272,6 +354,71 @@ describe("inventory escrow", () => {
 		const restored = addTransferPayload({container, escrow, isRestore: true});
 
 		expect(restored.inventory.map(entry => entry.id)).toEqual(["first", "second", "third"]);
+	});
+
+	it("restores escrow beside a metadata-diverged same-ID stack without discarding either identity", () => {
+		const originalItem = {
+			name: "Arrow",
+			source: "PHB",
+			_fromPack: "Wayfarer's Kit|PHB",
+			effects: [{type: "skillBonus", skill: "athletics", value: 1}],
+			charges: 7,
+			chargesCurrent: 5,
+			material: {name: "Dragonbone", source: "PHB", role: "strikingSurface"},
+			appliedUpgrades: [{name: "Balanced", source: "PHB"}],
+			socketedGemstones: [{name: "Journey", source: "PHB"}],
+			custom: {maker: "Rook", batch: "original"},
+		};
+		const originalWrapper = {note: "Original commission", customState: {privacy: "owner-only"}};
+		const {container, escrow} = removeTransferPayload({
+			container: {
+				inventory: [
+					{id: "before", item: {name: "Before"}, quantity: 1},
+					{id: "starblade", item: originalItem, quantity: 4, ...originalWrapper},
+					{id: "after", item: {name: "After"}, quantity: 1},
+				],
+				currency: {},
+			},
+			payload: {items: [{entryId: "starblade", quantity: 2}]},
+		});
+		const modifiedItem = {
+			...structuredClone(originalItem),
+			_fromPack: "Reforged Kit|PHB",
+			effects: [{type: "skillBonus", skill: "arcana", value: 2}],
+			chargesCurrent: 1,
+			material: {name: "Star Iron", source: "PHB", role: "strikingSurface"},
+			appliedUpgrades: [{name: "Keen", source: "PHB"}],
+			socketedGemstones: [{name: "Ember", source: "PHB"}],
+			custom: {maker: "Vale", batch: "modified"},
+		};
+		container.inventory[1] = {
+			...container.inventory[1],
+			item: modifiedItem,
+			note: "Reworked commission",
+			customState: {privacy: "shared"},
+		};
+
+		const restored = addTransferPayload({container, escrow, isRestore: true});
+		const modified = restored.inventory.find(entry => entry.id === "starblade");
+		const original = restored.inventory.find(entry => entry.item.custom?.batch === "original");
+		const restoredId = original?.id;
+
+		expect(restored.inventory.map(entry => entry.id)).toEqual(["before", restoredId, "starblade", "after"]);
+		expect(new Set(restored.inventory.map(entry => entry.id)).size).toBe(restored.inventory.length);
+		expect(modified).toEqual(expect.objectContaining({
+			item: modifiedItem,
+			quantity: 2,
+			note: "Reworked commission",
+			customState: {privacy: "shared"},
+		}));
+		expect(original).toEqual(expect.objectContaining({
+			item: originalItem,
+			quantity: 2,
+			note: "Original commission",
+			customState: {privacy: "owner-only"},
+		}));
+		expect(restoredId).not.toBe("starblade");
+		expect(modified.quantity + original.quantity).toBe(4);
 	});
 
 	it("merges only metadata-compatible stacks", () => {

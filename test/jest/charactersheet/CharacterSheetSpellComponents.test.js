@@ -207,7 +207,10 @@ describe("getSpellcastingFocusStatus", () => {
 	it("rehydrates a legacy coarse Orb row during load", () => {
 		const state = makeState();
 		const orb = baseItems.find(item => item.name === "Orb" && item.source === "XPHB");
-		state.setItemCatalog([orb]);
+		state.setItemCatalog([orb], {
+			pristineItems: [orb],
+			repairItems: [orb],
+		});
 		const legacy = state.toJson();
 		legacy.inventory = [{
 			id: "legacy-orb",
@@ -225,6 +228,20 @@ describe("getSpellcastingFocusStatus", () => {
 			scfType: "arcane",
 		}));
 		expect(state.getSpellcastingFocusStatus().ok).toBe(true);
+
+		const lateCatalogState = makeState();
+		lateCatalogState.loadFromJson(legacy);
+		expect(lateCatalogState.getItemRaw("legacy-orb").typeCode).toBe("gear");
+		lateCatalogState.setItemCatalog([orb], {
+			pristineItems: [orb],
+			repairItems: [orb],
+		});
+		expect(lateCatalogState.getItemRaw("legacy-orb")).toEqual(expect.objectContaining({
+			type: "gear",
+			typeCode: "SCF|XPHB",
+			scfType: "arcane",
+		}));
+		expect(lateCatalogState.getSpellcastingFocusStatus().ok).toBe(true);
 	});
 
 	it("is true with a component pouch (matched by name)", () => {

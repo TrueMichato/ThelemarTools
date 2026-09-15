@@ -141,6 +141,12 @@ flowchart LR
   Claim --> Published[Published status]
 ```
 
+`MemoryHubStore` remains a deterministic contract double rather than the production authority, but lifecycle
+commands preserve the same rollback boundary. Before a role change, member removal, or character lifecycle
+operation cancels transfer escrow, Memory precomputes and validates every affected restoration against staged
+source containers. No transfer status, inventory revision, invalidation, or cancellation event is applied unless
+the complete restoration batch is valid.
+
 Clients use snapshots and sequence-based replay to recover from disconnects. Presence is ephemeral. Roll and
 action history is durable. Visibility is evaluated on the server for both replay and live fanout. Projection
 HTTP responses are request-sequence and attachment-generation fenced, so a slower old response or a response
@@ -156,12 +162,19 @@ revocation, logout, and terminal page hide all fence the subscription generation
 Applied operations are reconciled in the repository under ADR 0012. `rebaseJsonChanges` treats identical
 same-path edits as convergence while preserving unequal and ancestor/descendant overlaps as conflicts. The
 character repository additionally removes only deterministic Character Sheet item aliases from all three
-comparison inputs before inventory diffs. A canonical item and the same sheet-normalized item therefore do not
-manufacture an `/inventory` overlap around a server quantity change, while quantity, spent charges, non-empty
-upgrades/gemstones, custom metadata, provenance, effects, materials, and wrapper-state changes remain real
-conflicts. The normalization is comparison-only; canonical server inventory remains the adopted document.
-The Character Sheet's final post-save rebase uses the same comparison contract and applies disjoint local
-patches back onto the unmodified canonical document, so save completion cannot reintroduce the alias conflict.
+comparison inputs before inventory diffs. For non-custom official UIDs only, it also removes fields which exactly
+match the immutable pre-enhancement repair catalog. Player-owned fields outside that catalog match remain
+significant, while `_isCustom` and `source: "Custom"` items receive no trusted-catalog normalization. A canonical
+item and the same sheet-hydrated focus or weapon therefore do not manufacture an `/inventory` overlap around a
+server quantity change, while quantity, spent charges, non-empty upgrades/gemstones, custom metadata,
+provenance, effects, materials, and wrapper-state changes remain real conflicts. The normalization is
+comparison-only: every surviving add/replace patch rematerializes its value from the raw local document and
+applies it to the raw canonical document, so neither side's canonical metadata is deleted. The Character Sheet's
+final post-save rebase uses this same comparison and rematerialization contract, so save completion cannot
+reintroduce the hydration conflict.
+Campaign Overview serializes every transfer-state refresh in request-start order. Realtime refreshes enter that
+queue when their authorization-scoped character/snapshot requests start, not after those requests finish, so a
+pre-transfer response cannot overwrite balances or pending decisions rendered by the transfer's later refresh.
 The accepted base and every other base track still advance together with live state so later saves retain exact
 coverage and do not need to rediscover already-accepted edits. Delivery is therefore a prepare/adopt/commit
 transaction over per-track coverage records, and an unprovable delivery schedules a serialized recovery that

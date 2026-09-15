@@ -4392,6 +4392,21 @@ class CharacterSheetState {
 			"constructor",
 			"prototype",
 		]);
+		const coarseInventoryTypes = new Set([
+			"armor",
+			"component",
+			"gear",
+			"gemstone",
+			"potion",
+			"ring",
+			"rod",
+			"scroll",
+			"staff",
+			"tool",
+			"wand",
+			"weapon",
+			"wondrous",
+		]);
 		const pristineCatalogFields = new Set([
 			"additionalSources",
 			"entries",
@@ -4443,7 +4458,12 @@ class CharacterSheetState {
 					item[key] = MiscUtil.copyFast(pristineMatch[key]);
 				}
 			}
-			if (item.typeCode == null && item.type != null) item.typeCode = item.type;
+			const matchedTypeCode = pristineMatch ? match?.typeCode ?? match?.type : null;
+			const hasDerivedCoarseTypeCode = coarseInventoryTypes.has(item.typeCode);
+			const resolvedTypeCode = matchedTypeCode ?? item.type;
+			if (resolvedTypeCode != null && (item.typeCode == null || hasDerivedCoarseTypeCode)) {
+				item.typeCode = resolvedTypeCode;
+			}
 			if (item.scfType == null && pristineMatch && match?.scfType != null) item.scfType = match.scfType;
 			if (item.focus == null && pristineMatch && match?.focus != null) item.focus = MiscUtil.copyFast(match.focus);
 			if (item.requiresAttunement == null && item.reqAttune != null) item.requiresAttunement = !!item.reqAttune;
@@ -13067,7 +13087,7 @@ class CharacterSheetState {
 	 * @returns {object}
 	 */
 	_getArmorAcSlotSnapshot (item) {
-		const projected = this.projectItemMaterial(item);
+		const projected = this._projectItemNumericBonuses(this.projectItemMaterial(item));
 		return {
 			ac: projected.ac,
 			type: projected.armorType || item.armorType || this._inferArmorType(projected),
@@ -13089,7 +13109,7 @@ class CharacterSheetState {
 	 * @returns {object}
 	 */
 	_getShieldAcSlotSnapshot (item) {
-		const projected = this.projectItemMaterial(item);
+		const projected = this._projectItemNumericBonuses(this.projectItemMaterial(item));
 		return {
 			ac: projected.ac ?? 2,
 			bonus: projected.acBonus,
@@ -13135,31 +13155,32 @@ class CharacterSheetState {
 		let minCritThreshold = 20;
 
 		for (const invItem of this._data.inventory) {
-			const bonus = invItem.item?.kiSaveDcBonus || 0;
+			const item = this._projectItemNumericBonuses(invItem.item);
+			const bonus = item?.kiSaveDcBonus || 0;
 			if (bonus > maxKiDcBonus) maxKiDcBonus = bonus;
 
 			// Only consider equipped items for combat bonuses
 			if (!invItem.equipped) continue;
 
 			// Base item bonuses
-			const baseSpellAtk = invItem.item?.bonusSpellAttack || 0;
-			const baseSpellDc = invItem.item?.bonusSpellSaveDc || 0;
-			const baseCrit = invItem.item?.critThreshold || 20;
+			const baseSpellAtk = item?.bonusSpellAttack || 0;
+			const baseSpellDc = item?.bonusSpellSaveDc || 0;
+			const baseCrit = item?.critThreshold || 20;
 
 			// Material crit contribution. Read from the projection so the clamps in
 			// `applyToItem` (never an impossible crit, never past the natural 20) apply here too.
 			let materialCritReduction = 0;
-			if (invItem.item?.material?.name) {
-				const projected = this.projectItemMaterial(invItem.item);
-				if (projected !== invItem.item) materialCritReduction = baseCrit - (projected.critThreshold || baseCrit);
+			if (item?.material?.name) {
+				const projected = this.projectItemMaterial(item);
+				if (projected !== item) materialCritReduction = baseCrit - (projected.critThreshold || baseCrit);
 			}
 
 			// Upgrade bonuses (if CharacterSheetUpgrades module is loaded)
 			let upgradeSpellAtk = 0;
 			let upgradeSpellDc = 0;
 			let upgradeCritReduction = 0;
-			if (typeof CharacterSheetUpgrades !== "undefined" && invItem.item?.appliedUpgrades?.length) {
-				const effects = CharacterSheetUpgrades.getUpgradeEffects(invItem.item);
+			if (typeof CharacterSheetUpgrades !== "undefined" && item?.appliedUpgrades?.length) {
+				const effects = CharacterSheetUpgrades.getUpgradeEffects(item);
 				upgradeSpellAtk = effects.bonusSpellAttack;
 				upgradeSpellDc = effects.bonusSpellSaveDc;
 				upgradeCritReduction = effects.critThresholdReduction;
@@ -30497,18 +30518,66 @@ class CharacterSheetState {
 	// #region Inventory
 	getInventory () { return [...this._data.inventory]; }
 
+	static _ITEM_NUMERIC_BONUS_KEYS = Object.freeze([
+		"ac",
+		"acBonus",
+		"bonusAc",
+		"bonusAbilityCheck",
+		"bonusProficiencyBonus",
+		"bonusSavingThrow",
+		"bonusSavingThrowConcentration",
+		"bonusSpellAttack",
+		"bonusSpellDamage",
+		"bonusSpellSaveDc",
+		"bonusWeapon",
+		"bonusWeaponAttack",
+		"bonusWeaponCritDamage",
+		"bonusWeaponDamage",
+		"critThreshold",
+		"kiSaveDcBonus",
+		...["Str", "Dex", "Con", "Int", "Wis", "Cha"].flatMap(suffix => [
+			`bonusSavingThrow${suffix}`,
+			`bonusAbilityCheck${suffix}`,
+			`bonusSavingThrow_${suffix.toLowerCase()}`,
+			`bonusAbilityCheck_${suffix.toLowerCase()}`,
+		]),
+	]);
+
+	/**
+	 * Project authored signed-number strings (for example `"+1"`) as numbers for mechanics.
+	 * The stored item remains untouched so Hub canonical metadata does not become a client write.
+	 *
+	 * @param {object} itemData
+	 * @returns {object}
+	 */
+	_projectItemNumericBonuses (itemData) {
+		if (!itemData || typeof itemData !== "object") return itemData;
+		let out = itemData;
+		for (const key of CharacterSheetState._ITEM_NUMERIC_BONUS_KEYS) {
+			if (typeof itemData[key] !== "string") continue;
+			const parsed = Number(itemData[key].replace(/\s/g, ""));
+			if (!Number.isFinite(parsed)) continue;
+			if (out === itemData) out = {...itemData};
+			out[key] = parsed;
+		}
+		return out;
+	}
+
 	/**
 	 * Returns flattened items for display - merges item data with inventory metadata
 	 */
 	getItems () {
-		return this._data.inventory.map(invItem => ({
-			id: invItem.id,
-			...this.projectItemMaterial(invItem.item),
-			quantity: invItem.quantity,
-			equipped: invItem.equipped,
-			attuned: invItem.attuned,
-			starred: invItem.starred,
-		}));
+		return this._data.inventory.map(invItem => {
+			const projectedItem = this._projectItemNumericBonuses(this.projectItemMaterial(invItem.item));
+			return {
+				id: invItem.id,
+				...projectedItem,
+				quantity: invItem.quantity,
+				equipped: invItem.equipped,
+				attuned: invItem.attuned,
+				starred: invItem.starred,
+			};
+		});
 	}
 
 	/**

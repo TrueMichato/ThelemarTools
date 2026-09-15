@@ -371,6 +371,402 @@ describe("HTTP character repository", () => {
 		expect(repository.getConflictRecovery("server-1")).toBeNull();
 	});
 
+	it("ignores deterministic Character Sheet item aliases while reconciling transfer quantities", async () => {
+		let revision = 1;
+		const item = {
+			name: "Longsword",
+			source: "PHB",
+			type: "M",
+			property: ["V"],
+			reqAttune: true,
+			charges: 5,
+		};
+		const documents = {
+			1: {
+				id: "server-1",
+				campaignId: "campaign-1",
+				revision: 1,
+				data: {
+					notes: "before",
+					inventory: [{id: "stable-stack", item, quantity: 2}],
+				},
+			},
+			2: {
+				id: "server-1",
+				campaignId: "campaign-1",
+				revision: 2,
+				data: {
+					notes: "before",
+					inventory: [{id: "stable-stack", item, quantity: 1}],
+				},
+			},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(documents[revision]),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		revision = 2;
+		let adopted;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({
+				notes: "locally edited",
+				inventory: [{
+					id: "stable-stack",
+					item: {
+						...item,
+						typeCode: "M",
+						properties: ["V"],
+						requiresAttunement: true,
+						shield: false,
+						armor: false,
+						weapon: true,
+						chargesCurrent: 5,
+						appliedUpgrades: [],
+						socketedGemstones: [],
+					},
+					quantity: 2,
+				}],
+			}),
+			fnAdoptLive: data => adopted = data,
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+
+		expect(adopted).toEqual({
+			notes: "locally edited",
+			inventory: [{id: "stable-stack", item, quantity: 1}],
+		});
+		expect(repository.getConflictRecovery("server-1")).toBeNull();
+	});
+
+	it("clears a stale ordinary conflict after authoritative inventory reconciliation resolves it", async () => {
+		let revision = 1;
+		const documents = {
+			1: {id: "server-1", campaignId: "campaign-1", revision: 1, data: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]}},
+			2: {id: "server-1", campaignId: "campaign-1", revision: 2, data: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 7}]}},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(documents[revision]),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		repository._conflicts.set("server-1", {
+			base: structuredClone(documents[1].data),
+			local: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]},
+			server: {notes: "remote edit", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]},
+			serverDocument: structuredClone(documents[1]),
+			conflicts: [{localPath: "/notes", remotePath: "/notes"}],
+			coverage: {},
+		});
+		revision = 2;
+		let adopted;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({notes: "local live", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]}),
+			fnAdoptLive: data => adopted = data,
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+
+		expect(repository.getConflictRecovery("server-1")).toBeNull();
+		expect(adopted).toEqual({
+			notes: "local live",
+			inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 7}],
+		});
+	});
+
+	it("clears a stale ordinary conflict even when canonical data is unchanged", async () => {
+		const canonical = {
+			id: "server-1",
+			campaignId: "campaign-1",
+			revision: 1,
+			data: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(canonical),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		repository._conflicts.set("server-1", {
+			base: structuredClone(canonical.data),
+			local: structuredClone(canonical.data),
+			server: {notes: "remote edit", inventory: structuredClone(canonical.data.inventory)},
+			serverDocument: structuredClone(canonical),
+			conflicts: [{localPath: "/notes", remotePath: "/notes"}],
+			coverage: {},
+		});
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+		})).resolves.toMatchObject({status: "unchanged"});
+		expect(repository.getConflictRecovery("server-1")).toBeNull();
+	});
+
+	it("clears canonical-equivalent failed recovery while retaining genuinely unique failed intent", async () => {
+		let revision = 1;
+		const documents = {
+			1: {id: "server-1", campaignId: "campaign-1", revision: 1, data: {notes: "before", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]}},
+			2: {id: "server-1", campaignId: "campaign-1", revision: 2, data: {notes: "before", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 7}]}},
+			3: {id: "server-1", campaignId: "campaign-1", revision: 3, data: {notes: "before", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 5}]}},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(documents[revision]),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		repository._failedWrites.set("server-1", {...structuredClone(documents[1].data), id: "server-1"});
+		repository._recoveredBases.set("server-1", structuredClone(documents[1].data));
+		revision = 2;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+		expect(repository._failedWrites.has("server-1")).toBe(false);
+		expect(repository._recoveredBases.has("server-1")).toBe(false);
+
+		repository._failedWrites.set("server-1", {
+			...structuredClone(documents[2].data),
+			id: "server-1",
+			notes: "unsaved local intent",
+		});
+		repository._recoveredBases.set("server-1", structuredClone(documents[2].data));
+		revision = 3;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+		})).resolves.toMatchObject({status: "reconciled", revision: 3});
+		expect(repository._failedWrites.get("server-1")).toMatchObject({
+			id: "server-1",
+			notes: "unsaved local intent",
+			inventory: [{quantity: 5}],
+		});
+		expect(repository._recoveredBases.get("server-1")).toEqual(documents[3].data);
+	});
+
+	it("does not clear a conflict while authoritative reconciliation still holds unique discarded intent", async () => {
+		let revision = 1;
+		const documents = {
+			1: {id: "server-1", campaignId: "campaign-1", revision: 1, data: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]}},
+			2: {id: "server-1", campaignId: "campaign-1", revision: 2, data: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 7}]}},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(documents[revision]),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		repository._conflicts.set("server-1", {
+			base: structuredClone(documents[1].data),
+			local: structuredClone(documents[1].data),
+			server: {notes: "remote edit", inventory: structuredClone(documents[1].data.inventory)},
+			serverDocument: structuredClone(documents[1]),
+			conflicts: [{localPath: "/notes", remotePath: "/notes"}],
+			coverage: {},
+			authoritativeDiscarded: {
+				local: {notes: "unique local intent", inventory: structuredClone(documents[1].data.inventory)},
+			},
+		});
+		revision = 2;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+		})).resolves.toMatchObject({status: "conflict"});
+		expect(repository.getConflictRecovery("server-1")).toMatchObject({
+			authoritativeDiscarded: {
+				local: {notes: "unique local intent"},
+			},
+		});
+	});
+
+	it("clears a stale conflict once every discarded draft is represented semantically", async () => {
+		let revision = 1;
+		const canonicalItem = {name: "Rations", source: "PHB", type: "G"};
+		const canonicalData = {inventory: [{id: "rations", item: canonicalItem, quantity: 2}]};
+		const documents = {
+			1: {id: "server-1", campaignId: "campaign-1", revision: 1, data: canonicalData},
+			2: {id: "server-1", campaignId: "campaign-1", revision: 2, data: canonicalData},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(documents[revision]),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		const sheetData = {
+			inventory: [{
+				id: "rations",
+				item: {
+					...canonicalItem,
+					typeCode: "G",
+					shield: false,
+					armor: false,
+					appliedUpgrades: [],
+					socketedGemstones: [],
+				},
+				quantity: 2,
+			}],
+		};
+		repository._conflicts.set("server-1", {
+			base: structuredClone(sheetData),
+			local: structuredClone(sheetData),
+			server: structuredClone(sheetData),
+			serverDocument: structuredClone(documents[1]),
+			conflicts: [{localPath: "/inventory/0", remotePath: "/inventory/0"}],
+			coverage: {},
+			authoritativeDiscarded: {
+				base: structuredClone(sheetData),
+				local: structuredClone(sheetData),
+				latestSubmitted: structuredClone(sheetData),
+			},
+		});
+		revision = 2;
+		let adopted;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => structuredClone(sheetData),
+			fnAdoptLive: data => adopted = data,
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+
+		expect(repository.getConflictRecovery("server-1")).toBeNull();
+		expect(adopted).toEqual(canonicalData);
+	});
+
+	it("clears canonical-equivalent failed recovery when accepted truth is already current", async () => {
+		const canonicalItem = {name: "Rations", source: "PHB", type: "G"};
+		const canonicalData = {inventory: [{id: "rations", item: canonicalItem, quantity: 2}]};
+		const canonical = {id: "server-1", campaignId: "campaign-1", revision: 2, data: canonicalData};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(canonical),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		const removedRecoveryKeys = [];
+		repository._recoveryStorage = {
+			getItem: () => null,
+			removeItem: key => removedRecoveryKeys.push(key),
+			setItem () {},
+		};
+		const sheetData = {
+			inventory: [{
+				id: "rations",
+				item: {
+					...canonicalItem,
+					typeCode: "G",
+					shield: false,
+					armor: false,
+					appliedUpgrades: [],
+					socketedGemstones: [],
+				},
+				quantity: 2,
+			}],
+		};
+		repository._failedWrites.set("server-1", {...structuredClone(sheetData), id: "server-1"});
+		repository._failedCommands.set("server-1", {snapshot: structuredClone(sheetData), commandKeys: {patch: "patch-1"}});
+		repository._recoveredBases.set("server-1", structuredClone(canonicalData));
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => structuredClone(sheetData),
+		})).resolves.toMatchObject({status: "unchanged"});
+
+		expect(repository.hasPendingWrites()).toBe(false);
+		expect(repository._failedCommands.has("server-1")).toBe(false);
+		expect(repository._recoveredBases.has("server-1")).toBe(false);
+		expect(removedRecoveryKeys).toEqual(["hub-character-recovery:campaign-1:server-1"]);
+	});
+
+	it("retains failed recovery when accepted truth is current but local intent is unique", async () => {
+		const canonical = {
+			id: "server-1",
+			campaignId: "campaign-1",
+			revision: 2,
+			data: {notes: "server", inventory: []},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(canonical),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		repository._failedWrites.set("server-1", {id: "server-1", notes: "local", inventory: []});
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({notes: "local", inventory: []}),
+		})).resolves.toMatchObject({status: "unchanged"});
+
+		expect(repository._failedWrites.get("server-1")).toEqual({id: "server-1", notes: "local", inventory: []});
+		expect(repository.hasPendingWrites()).toBe(true);
+	});
+
+	it.each([
+		["live operation", (repository, conflict) => {
+			repository._conflicts.set("server-1", conflict);
+			repository._commitOneConflictRecord({
+				store: repository._conflicts,
+				prefix: "conflict",
+				canonicalId: "server-1",
+				plan: {staged: {}},
+				revision: 3,
+				operationLegKey: "operation-1:source",
+				sequence: 7,
+				isClearOnResolve: true,
+			});
+		}],
+		["resync", (repository, conflict) => {
+			repository._conflicts.set("server-1", conflict);
+			repository._commitResyncConflict({
+				store: repository._conflicts,
+				prefix: "conflict",
+				canonicalId: "server-1",
+				working: {},
+				isClearOnResolve: true,
+			});
+		}],
+	])("retains unique discarded intent after %s removes the current overlap", (name, fnCommit) => {
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1"});
+		const canonicalData = {inventory: [{id: "rations", item: {name: "Rations", source: "PHB"}, quantity: 2}]};
+		const uniqueDiscarded = {inventory: [{id: "rations", item: {name: "Rations", source: "PHB"}, quantity: 9}]};
+		const conflict = {
+			base: structuredClone(canonicalData),
+			local: structuredClone(canonicalData),
+			server: structuredClone(canonicalData),
+			conflicts: [{localPath: "/inventory", remotePath: "/inventory"}],
+			coverage: {},
+			authoritativeDiscarded: {live: uniqueDiscarded},
+		};
+
+		fnCommit(repository, conflict);
+
+		expect(repository.getConflictRecovery("server-1")).toEqual(expect.objectContaining({
+			isResolved: true,
+			conflicts: [],
+			authoritativeDiscarded: {live: uniqueDiscarded},
+		}));
+	});
+
 	it("does not treat a recomputed derived carry block as an inventory conflict", async () => {
 		let revision = 1;
 		const carry = grossWeight => ({schemaVersion: 1, grossWeight});

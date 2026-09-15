@@ -118,8 +118,10 @@ describe("Character Sheet realtime coordinator", () => {
 		const cursors = [];
 		const contextChanges = [];
 		const invalidations = [];
+		const membershipChanges = [];
 		coordinator.on("cursor", value => cursors.push(value));
 		coordinator.on("campaignContextChanged", value => contextChanges.push(value));
+		coordinator.on("membershipChanged", value => membershipChanges.push(value));
 		coordinator.on("projectionInvalidated", value => invalidations.push(value));
 		coordinator.attach({characterId: "character-1"});
 
@@ -129,6 +131,7 @@ describe("Character Sheet realtime coordinator", () => {
 				activeRulesVersionId: "rules-1",
 				activeBrewBundleVersionId: null,
 			},
+			membership: {role: "player"},
 			characterRefs: [
 				{id: "other", revision: 9, projectionRevision: 5, operationWatermark: 8},
 				{id: "character-1", revision: 4, projectionRevision: 2, operationWatermark: 10},
@@ -175,6 +178,12 @@ describe("Character Sheet realtime coordinator", () => {
 			rulesVersionId: "rules-1",
 			brewBundleVersionId: null,
 		}]);
+		expect(membershipChanges).toEqual([{
+			campaignId: "campaign-1",
+			sequence: 12,
+			source: "cursor",
+			role: "player",
+		}]);
 		expect(invalidations).toEqual([
 			expect.objectContaining({
 				source: "cursor",
@@ -191,6 +200,31 @@ describe("Character Sheet realtime coordinator", () => {
 				projectionRevision: 3,
 			},
 		]);
+	});
+
+	it("notifies consumers to refetch authority after live membership role changes", async () => {
+		const {clients, coordinator} = makeCoordinator();
+		const membershipChanges = [];
+		coordinator.on("membershipChanged", value => membershipChanges.push(value));
+		coordinator.attach({characterId: "character-1"});
+
+		clients[0].emit("event", {
+			id: "role-change",
+			campaignId: "campaign-1",
+			sequence: 18,
+			type: "membership.role_changed",
+			aggregateType: "membership",
+			aggregateId: "opaque-membership",
+			payload: {accountId: "opaque-account", role: "spectator"},
+		});
+		await pFlush();
+
+		expect(membershipChanges).toEqual([{
+			eventId: "role-change",
+			campaignId: "campaign-1",
+			sequence: 18,
+			source: "event",
+		}]);
 	});
 
 	it("preserves the difference between an absent watermark and authoritative zero", async () => {
