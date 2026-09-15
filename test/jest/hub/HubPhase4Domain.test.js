@@ -274,7 +274,7 @@ describe("Phase 4 actions, grants, and transfers", () => {
 		expect((await app.inject(acceptPeerRequest)).json()).toEqual(acceptedPeer.json());
 
 		const playerToOwnKey = "player-direct-own";
-		const playerToOwn = await app.inject({
+		const playerToOwnRequest = {
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/transfers`,
 			headers: headers(a.session, playerToOwnKey),
@@ -285,20 +285,10 @@ describe("Phase 4 actions, grants, and transfers", () => {
 				targetId: secondOwned.id,
 				payload: {items: [{entryId: "arrows-2", quantity: 1}]},
 			},
-		});
+		};
+		const playerToOwn = await app.inject(playerToOwnRequest);
 		expect(playerToOwn.json().transfer.status).toBe("committed");
-		expect((await app.inject({
-			method: "POST",
-			url: `/api/campaigns/${campaign.id}/transfers`,
-			headers: headers(a.session, playerToOwnKey),
-			payload: {
-				sourceKind: "character",
-				sourceId: a.character.id,
-				targetKind: "character",
-				targetId: secondOwned.id,
-				payload: {items: [{entryId: "arrows-2", quantity: 1}]},
-			},
-		})).json()).toEqual(playerToOwn.json());
+		expect((await app.inject(playerToOwnRequest)).json()).toEqual(playerToOwn.json());
 		expect((await app.inject({
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/transfers/${playerToOwn.json().transfer.id}/resolve`,
@@ -373,6 +363,26 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			headers: readHeaders(b.session),
 		})).json().projection.character;
 		expect(directTarget.data.inventory.find(entry => entry.item.name === "Arrow").quantity).toBe(12);
+
+		const aMembership = await store.pGetMembership({accountId: a.session.account.id, campaignId: campaign.id});
+		await store.pChangeMemberRole({
+			accountId: dm.account.id,
+			campaignId: campaign.id,
+			membershipId: aMembership.id,
+			role: "spectator",
+			idempotencyKey: "downgrade-a-after-transfer",
+		});
+		expect((await app.inject(playerToOwnRequest)).json()).toEqual(playerToOwn.json());
+
+		const bMembership = await store.pGetMembership({accountId: b.session.account.id, campaignId: campaign.id});
+		await store.pChangeMemberRole({
+			accountId: dm.account.id,
+			campaignId: campaign.id,
+			membershipId: bMembership.id,
+			role: "spectator",
+			idempotencyKey: "downgrade-b-after-transfer",
+		});
+		expect((await app.inject(acceptPeerRequest)).json()).toEqual(acceptedPeer.json());
 	});
 
 	it("rechecks Memory direct-transfer receipts and participants after policy loading", async () => {

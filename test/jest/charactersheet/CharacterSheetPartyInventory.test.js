@@ -51,6 +51,7 @@ describe("Character Sheet party inventory", () => {
 			fnIsCurrentCharacter: () => true,
 		});
 		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._role = "player";
 
 		expect(partyInventory._beginDraft({kind: "character", entryId: "stack-1"})).toBe(true);
 		const originalDraft = partyInventory._draft;
@@ -59,6 +60,94 @@ describe("Character Sheet party inventory", () => {
 		expect(partyInventory._beginDraft({kind: "character", entryId: "stack-2"})).toBe(false);
 		expect(partyInventory._draft).toBe(originalDraft);
 		expect(partyInventory._draft.proposalRequest.idempotencyKey).toBe(originalDraft.commandId);
+	});
+
+	it("keeps spectator inventory read-only while preserving frozen recovery", async () => {
+		const character = {inventory: [{id: "stack-1", item: {name: "Rope", source: "PHB"}, quantity: 1}], currency: {}};
+		const committed = {id: "transfer-1", status: "committed"};
+		const propose = jest.fn(async () => ({transfer: committed}));
+		const partyInventory = new CharacterSheetPartyInventory({
+			api: {
+				pProposeTransfer: propose,
+				pListTransfers: jest.fn(async () => [committed]),
+			},
+			campaignId: "campaign-1",
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => character,
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._role = "spectator";
+		partyInventory._render = jest.fn();
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		expect(partyInventory._beginDraft({kind: "character", entryId: "stack-1"})).toBe(false);
+		partyInventory._draft = {
+			kind: "character",
+			entryId: "stack-1",
+			entryName: "Rope",
+			quantity: 1,
+			maxQuantity: 1,
+			blockers: [],
+			destinationKind: "party_inventory",
+			recipientId: null,
+			commandId: "proposal-1",
+			resolutionCommandId: "resolution-1",
+			cancellationCommandId: "cancellation-1",
+			proposalRequest: {
+				campaignId: "campaign-1",
+				sourceKind: "character",
+				sourceId: "character-1",
+				targetKind: "party_inventory",
+				targetId: "party-1",
+				payload: {items: [{entryId: "stack-1", quantity: 1}], currency: {}},
+				idempotencyKey: "proposal-1",
+				isAutoResolved: false,
+			},
+			proposalReplayUntil: Date.now() + 60_000,
+			transfer: null,
+			needsStatusCheck: false,
+			pendingResolution: null,
+		};
+		const frozenRequest = partyInventory._draft.proposalRequest;
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+		expect(propose).toHaveBeenCalledWith(frozenRequest);
+		expect(partyInventory._draft).toBeNull();
+	});
+
+	it("closes an editable draft when an authoritative refresh changes the role to spectator", async () => {
+		const partyInventory = new CharacterSheetPartyInventory({
+			api: {
+				pGetPartyInventory: jest.fn(async () => ({id: "party-1", inventory: [], currency: {}})),
+				pGetCampaignSnapshot: jest.fn(async () => ({
+					membership: {role: "spectator"},
+					characters: [{kind: "owner_truth", character: {id: "character-1"}}],
+					roster: [],
+				})),
+			},
+			campaignId: "campaign-1",
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._role = "player";
+		partyInventory._draft = {
+			kind: "character",
+			entryId: "stack-1",
+			transfer: null,
+			proposalRequest: null,
+		};
+		partyInventory._render = jest.fn();
+		partyInventory._decorateCharacterInventory = jest.fn();
+
+		await expect(partyInventory._pRefreshParty()).resolves.toBe(true);
+
+		expect(partyInventory._role).toBe("spectator");
+		expect(partyInventory._draft).toBeNull();
+		expect(partyInventory._announcement).toContain("read-only");
+		expect(partyInventory._decorateCharacterInventory).toHaveBeenCalled();
 	});
 
 	it("fences an owner lookup after the current character generation changes", async () => {
@@ -117,6 +206,7 @@ describe("Character Sheet party inventory", () => {
 			token: Symbol("test"),
 			isOwner: true,
 		};
+		partyInventory._role = "player";
 		partyInventory._decorateCharacterInventory = jest.fn();
 
 		const older = partyInventory._pRefreshParty();
@@ -569,6 +659,7 @@ describe("Character Sheet party inventory", () => {
 			token: Symbol("test"),
 			isOwner: true,
 		};
+		partyInventory._role = "player";
 
 		try {
 			partyInventory._decorateCharacterInventory();
@@ -665,6 +756,7 @@ describe("Character Sheet party inventory", () => {
 			fnIsCurrentCharacter: () => true,
 		});
 		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._role = "player";
 		partyInventory._draft = {
 			transfer: {id: "transfer-1", status: "reserved"},
 			cancellationCommandId: "cancel-command-1",
@@ -703,6 +795,7 @@ describe("Character Sheet party inventory", () => {
 			fnIsCurrentCharacter: () => true,
 		});
 		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._role = "player";
 		partyInventory._draft = {
 			kind: "character",
 			destinationKind: "character",
@@ -1418,6 +1511,7 @@ describe("Character Sheet party inventory", () => {
 			fnIsCurrentCharacter: () => true,
 		});
 		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._role = "player";
 		partyInventory._draft = {
 			kind: "character",
 			entryId: "stack-1",

@@ -444,8 +444,17 @@ export class CharacterSheetPartyInventory {
 		return token;
 	}
 
+	_hasTransferAuthority () {
+		return this._role === "player" || DM_ROLES.has(this._role);
+	}
+
 	_decorateCharacterInventory () {
 		if (!this._active?.isOwner) return;
+		if (!this._hasTransferAuthority()) {
+			document.querySelectorAll("#charsheet-inventory-list .charsheet__item-party-move, #charsheet-inventory-list .charsheet__item-party-note")
+				.forEach(element => element.remove());
+			return;
+		}
 		const data = this._fnGetCharacterData?.() || {};
 		const container = {
 			...data,
@@ -499,7 +508,7 @@ export class CharacterSheetPartyInventory {
 	}
 
 	_beginDraft ({kind, entryId, returnToken = null}) {
-		if (this._isSubmitting || this._draft) return false;
+		if (!this._hasTransferAuthority() || this._isSubmitting || this._draft) return false;
 		const entry = this._getEntry({kind, entryId});
 		if (!entry) return false;
 		const container = this._getContainer(kind);
@@ -654,6 +663,15 @@ export class CharacterSheetPartyInventory {
 		if (partyResult.status === "fulfilled") this._partyInventory = partyResult.value;
 		if (snapshot) {
 			this._role = snapshot.membership?.role || null;
+			if (!this._hasTransferAuthority()) {
+				if (this._isDraftEditable()) {
+					this._draft = null;
+					this._error = null;
+					this._announcement = "Party transfers are read-only for your current campaign role.";
+				} else if (this._draft?.transfer) {
+					this._draft.needsStatusCheck = true;
+				}
+			}
 			this._recipients = getPartyInventoryRecipients({
 				projections: snapshot.characters,
 				roster: snapshot.roster,
@@ -942,6 +960,8 @@ export class CharacterSheetPartyInventory {
 			&& !!this._draft.needsStatusCheck
 			&& !this._draft.pendingResolution
 			&& !pendingAcceptance;
+		const isReadOnlyRecovery = !this._hasTransferAuthority()
+			&& (isProposalFrozen || isStatusCheckRequired || !!pendingAcceptance || !!this._draft.pendingResolution);
 		const composer = createElement("form", {
 			className: "charsheet__party-inventory-composer",
 			attrs: {
@@ -1083,19 +1103,21 @@ export class CharacterSheetPartyInventory {
 		cancel.addEventListener("click", () => void this._pCancelDraft());
 		const submit = createElement("button", {
 			className: "ve-btn ve-btn-primary",
-			text: isCancellationUncertain
-				? "Check transfer status"
-				: pendingAcceptance
-					? this._draft.needsStatusCheck ? "Check acceptance status" : "Retry acceptance"
-					: isStatusCheckRequired
-						? "Check transfer status"
-						: isProposalReplayExpired
-							? "Refresh latest balances"
-							: this._isPlayerStashRequest()
-								? "Send request"
-								: this._shouldAutoResolve()
-									? "Move now"
-									: "Offer transfer",
+			text: isReadOnlyRecovery
+				? "Recover transfer status"
+				: isCancellationUncertain
+					? "Check transfer status"
+					: pendingAcceptance
+						? this._draft.needsStatusCheck ? "Check acceptance status" : "Retry acceptance"
+						: isStatusCheckRequired
+							? "Check transfer status"
+							: isProposalReplayExpired
+								? "Refresh latest balances"
+								: this._isPlayerStashRequest()
+									? "Send request"
+									: this._shouldAutoResolve()
+										? "Move now"
+										: "Offer transfer",
 			attrs: {type: "submit", "data-party-inventory-focus": "submit"},
 		});
 		actions.append(cancel, submit);
@@ -1264,6 +1286,7 @@ export class CharacterSheetPartyInventory {
 			&& !pendingAcceptance;
 		submit.disabled = this._isSubmitting
 			|| !isQuantityValid
+			|| (!this._hasTransferAuthority() && !(isProposalFrozen || isStatusCheckRequired || !!pendingAcceptance || !!this._draft.pendingResolution))
 			|| (
 				isDraftEditable
 				&& this._draft.kind === "character"
@@ -1425,6 +1448,16 @@ export class CharacterSheetPartyInventory {
 		if (this._isSubmitting || !this._draft || !this._isCurrent()) return false;
 		const active = this._active;
 		const draft = this._draft;
+		if (!this._hasTransferAuthority() && draft.transfer && !draft.needsStatusCheck && !draft.pendingResolution && !this._getPendingAcceptance(draft)) {
+			draft.needsStatusCheck = true;
+		}
+		const isReadOnlyRecovery = !this._hasTransferAuthority()
+			&& (!!draft.proposalRequest || !!draft.needsStatusCheck || !!draft.pendingResolution || !!this._getPendingAcceptance(draft));
+		if (!this._hasTransferAuthority() && !isReadOnlyRecovery) {
+			this._error = "Party transfers are read-only for your current campaign role.";
+			this._render();
+			return false;
+		}
 		const isPartyEndpoint = draft.kind === "party_inventory" || draft.destinationKind === "party_inventory";
 		if (draft.proposalRequest && Date.now() >= draft.proposalReplayUntil) {
 			return this._pCancelDraft();
@@ -1529,6 +1562,12 @@ export class CharacterSheetPartyInventory {
 					this._render();
 					return false;
 				}
+				if (!this._hasTransferAuthority() && !acceptanceRequest) {
+					this._error = "Your campaign role is read-only. The transfer is still pending, so no new decision was sent.";
+					this._isSubmitting = false;
+					this._render();
+					return false;
+				}
 			}
 			if (draft.kind === "character" && !draft.transfer && !draft.proposalRequest) {
 				const isSaved = await this._fnSaveCharacter?.();
@@ -1599,6 +1638,17 @@ export class CharacterSheetPartyInventory {
 				}
 			}
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
+			if (
+				!this._hasTransferAuthority()
+				&& ["proposed", "reserved"].includes(draft.transfer.status)
+				&& !this._getPendingAcceptance(draft)
+			) {
+				draft.needsStatusCheck = true;
+				this._error = "Your campaign role is read-only. The transfer is still pending, so no new decision was sent.";
+				this._isSubmitting = false;
+				this._render();
+				return false;
+			}
 			if (draft.proposalRequest?.isAutoResolved && ["proposed", "reserved"].includes(draft.transfer.status)) {
 				let resolved;
 				try {

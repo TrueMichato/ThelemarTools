@@ -44,9 +44,11 @@ The system provides value at multiple levels:
 3. **Advanced**: Roll dice, apply effects, manage combat
 
 Campaign-backed owner sheets progressively add a separate Party Stash inventory section. It refetches
-server-authoritative stacks on open, reconnect, and relevant transfer events, and adopts authoritative character
+server-authoritative stacks and current membership role on open, reconnect, role changes, and relevant transfer
+events, and adopts authoritative character
 changes through the cloud repository. Local, signed-out, detached, and non-owner sheets do not mount the section
-or install its Hub listeners.
+or install its Hub listeners. Spectator and unresolved roles are read-only: editable drafts close, Share/Take/
+Request controls are removed, and only an already-frozen uncertain request may remain for exact receipt recovery.
 
 ### 4. **Backward Compatibility**
 

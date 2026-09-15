@@ -949,7 +949,6 @@ export class PostgresHubStore {
 			client,
 			accountId,
 			campaignId,
-			roles: ["dm", "co_dm", "player"],
 		});
 		const characterIds = [
 			response.transfer.sourceKind === "character" ? response.transfer.sourceId : null,
@@ -3084,74 +3083,84 @@ export class PostgresHubStore {
 	}
 
 	async pListVisibleEventPage ({accountId, campaignId, afterSequence = 0, limit = 500}) {
-		const membership = await this.pGetMembership({accountId, campaignId});
-		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
-		const result = await this._pool.query(`
-			SELECT e.*, a.display_name AS actor_display_name
-			FROM hub.domain_events
-			AS e
-			LEFT JOIN hub.accounts a ON a.id = e.actor_account_id
-			WHERE e.campaign_id = $1
-				AND e.sequence > $2
-			ORDER BY e.sequence
-			LIMIT $3
-		`, [campaignId, afterSequence, limit + 1]);
-		const scannedRows = result.rows.slice(0, limit);
-		const visibleRows = scannedRows.filter(row => canViewEvent({
-			event: {
-				visibility: row.visibility,
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const membership = await this._pGetMembershipForShare({client, accountId, campaignId});
+			const result = await client.query(`
+				SELECT e.*, a.display_name AS actor_display_name
+				FROM hub.domain_events
+				AS e
+				LEFT JOIN hub.accounts a ON a.id = e.actor_account_id
+				WHERE e.campaign_id = $1
+					AND e.sequence > $2
+				ORDER BY e.sequence
+				LIMIT $3
+			`, [campaignId, afterSequence, limit + 1]);
+			const scannedRows = result.rows.slice(0, limit);
+			const visibleRows = scannedRows.filter(row => canViewEvent({
+				event: {
+					visibility: row.visibility,
+					actorAccountId: row.actor_account_id,
+					visibleAccountIds: row.visible_account_ids,
+				},
+				accountId,
+				role: membership.role,
+			}));
+			// Actor redaction needs the target characters' sharing policies, fetched once.
+			const characterIds = [...new Set(visibleRows.flatMap(row => {
+				const ids = [];
+				if (row.visibility === "all_members" && row.aggregate_type === "character") ids.push(row.aggregate_id);
+				if (row.aggregate_type === "transfer") {
+					if (row.payload?.sourceKind === "character") ids.push(row.payload.sourceId);
+					if (row.payload?.targetKind === "character") ids.push(row.payload.targetId);
+				}
+				return ids.filter(Boolean);
+			}))];
+			const characters = characterIds.length
+				? (await client.query(`SELECT id, owner_account_id, projection_policy FROM hub.characters WHERE id = ANY($1::uuid[])`, [characterIds])).rows
+				: [];
+			const charactersById = new Map(characters.map(row => [row.id, {ownerAccountId: row.owner_account_id, projectionPolicy: row.projection_policy}]));
+			const events = visibleRows.map(row => this._redactRowForViewer({
+				row,
+				accountId,
+				role: membership.role,
+				character: charactersById.get(row.aggregate_id) || null,
+			})).filter(Boolean).map(row => ({
+				id: row.id,
+				campaignId: row.campaign_id,
+				sequence: Number(row.sequence),
+				type: row.event_type,
 				actorAccountId: row.actor_account_id,
+				...(row.actor_display_name == null ? {} : {actorDisplayName: row.actor_display_name}),
+				aggregateType: row.aggregate_type,
+				aggregateId: row.aggregate_id,
+				aggregateRevision: row.aggregate_revision == null ? null : Number(row.aggregate_revision),
+				visibility: row.visibility,
 				visibleAccountIds: row.visible_account_ids,
-			},
-			accountId,
-			role: membership.role,
-		}));
-		// Actor redaction needs the target characters' sharing policies, fetched once.
-		const characterIds = [...new Set(visibleRows.flatMap(row => {
-			const ids = [];
-			if (row.visibility === "all_members" && row.aggregate_type === "character") ids.push(row.aggregate_id);
-			if (row.aggregate_type === "transfer") {
-				if (row.payload?.sourceKind === "character") ids.push(row.payload.sourceId);
-				if (row.payload?.targetKind === "character") ids.push(row.payload.targetId);
-			}
-			return ids.filter(Boolean);
-		}))];
-		const characters = characterIds.length
-			? (await this._pool.query(`SELECT id, owner_account_id, projection_policy FROM hub.characters WHERE id = ANY($1::uuid[])`, [characterIds])).rows
-			: [];
-		const charactersById = new Map(characters.map(row => [row.id, {ownerAccountId: row.owner_account_id, projectionPolicy: row.projection_policy}]));
-		const events = visibleRows.map(row => this._redactRowForViewer({
-			row,
-			accountId,
-			role: membership.role,
-			character: charactersById.get(row.aggregate_id) || null,
-		})).filter(Boolean).map(row => ({
-			id: row.id,
-			campaignId: row.campaign_id,
-			sequence: Number(row.sequence),
-			type: row.event_type,
-			actorAccountId: row.actor_account_id,
-			...(row.actor_display_name == null ? {} : {actorDisplayName: row.actor_display_name}),
-			aggregateType: row.aggregate_type,
-			aggregateId: row.aggregate_id,
-			aggregateRevision: row.aggregate_revision == null ? null : Number(row.aggregate_revision),
-			visibility: row.visibility,
-			visibleAccountIds: row.visible_account_ids,
-			payload: row.payload,
-			createdAt: row.created_at,
-		})).map(event => redactTransferEventForViewer({
-			event,
-			accountId,
-			role: membership.role,
-			getCharacterOwnerId: characterId => charactersById.get(characterId)?.ownerAccountId,
-		})).filter(Boolean);
-		return {
-			events,
-			replay: {
-				scannedThroughSequence: scannedRows.length ? Number(scannedRows.at(-1).sequence) : afterSequence,
-				hasMore: result.rows.length > limit,
-			},
-		};
+				payload: row.payload,
+				createdAt: row.created_at,
+			})).map(event => redactTransferEventForViewer({
+				event,
+				accountId,
+				role: membership.role,
+				getCharacterOwnerId: characterId => charactersById.get(characterId)?.ownerAccountId,
+			})).filter(Boolean);
+			const page = {
+				events,
+				replay: {
+					scannedThroughSequence: scannedRows.length ? Number(scannedRows.at(-1).sequence) : afterSequence,
+					hasMore: result.rows.length > limit,
+				},
+			};
+			await client.query("COMMIT");
+			return page;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
 	}
 
 	/**

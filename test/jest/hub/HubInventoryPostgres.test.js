@@ -1170,7 +1170,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		})).rejects.toMatchObject({code: "FORBIDDEN"});
 	});
 
-	test("serializes transfer-list authorization with concurrent role changes", async () => {
+	test("serializes transfer and event-list authorization with concurrent role changes", async () => {
 		const coDm = await pCreateAccount("Inventory Concurrent Co-DM");
 		const membership = await pJoinCampaign(coDm);
 		await store.pChangeMemberRole({
@@ -1206,18 +1206,100 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		try {
 			await roleClient.query("BEGIN");
 			await roleClient.query(`UPDATE hub.memberships SET role = 'spectator', updated_at = now() WHERE id = $1`, [membership.id]);
-			let isSettled = false;
+			let isTransferListSettled = false;
+			let isEventListSettled = false;
 			const listing = store.pListTransfers({accountId: coDm.id, campaignId: campaign.id})
-				.finally(() => { isSettled = true; });
+				.finally(() => { isTransferListSettled = true; });
+			const eventListing = store.pListVisibleEventPage({accountId: coDm.id, campaignId: campaign.id})
+				.finally(() => { isEventListSettled = true; });
 			await new Promise(resolve => setTimeout(resolve, 50));
-			expect(isSettled).toBe(false);
+			expect(isTransferListSettled).toBe(false);
+			expect(isEventListSettled).toBe(false);
 			await roleClient.query("COMMIT");
 			expect((await listing).some(transfer => transfer.id === unrelated.id)).toBe(false);
+			expect((await eventListing).events.some(event => event.aggregateId === unrelated.id)).toBe(false);
 		} catch (error) {
 			await roleClient.query("ROLLBACK");
 			throw error;
 		} finally {
 			roleClient.release();
 		}
+	});
+
+	test("replays projected transfer receipts after active members become spectators", async () => {
+		const actor = await pCreateAccount("Inventory Receipt Actor");
+		const recipient = await pCreateAccount("Inventory Receipt Recipient");
+		const actorMembership = await pJoinCampaign(actor);
+		const recipientMembership = await pJoinCampaign(recipient);
+		const source = (await store.pCreateCharacter({
+			accountId: actor.id,
+			campaignId: campaign.id,
+			data: {
+				name: `${prefix} receipt source`,
+				inventory: [{id: "receipt-stack", item: {name: "Rope", source: "PHB"}, quantity: 2}],
+				currency: {},
+			},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const sameOwnerTarget = (await store.pCreateCharacter({
+			accountId: actor.id,
+			campaignId: campaign.id,
+			data: {name: `${prefix} receipt same-owner`, inventory: [], currency: {}},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const peerTarget = (await store.pCreateCharacter({
+			accountId: recipient.id,
+			campaignId: campaign.id,
+			data: {name: `${prefix} receipt peer`, inventory: [], currency: {}},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const directInput = {
+			accountId: actor.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: source.id,
+			targetKind: "character",
+			targetId: sameOwnerTarget.id,
+			payload: {items: [{entryId: "receipt-stack", quantity: 1}]},
+			idempotencyKey: crypto.randomUUID(),
+		};
+		const direct = await store.pProposeTransfer(directInput);
+		const peer = await store.pProposeTransfer({
+			...directInput,
+			targetId: peerTarget.id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const resolveInput = {
+			accountId: recipient.id,
+			campaignId: campaign.id,
+			transferId: peer.transfer.id,
+			decision: "accept",
+			idempotencyKey: crypto.randomUUID(),
+		};
+		const resolved = await store.pResolveTransfer(resolveInput);
+
+		await store.pChangeMemberRole({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			membershipId: actorMembership.id,
+			role: "spectator",
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await store.pChangeMemberRole({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			membershipId: recipientMembership.id,
+			role: "spectator",
+			idempotencyKey: crypto.randomUUID(),
+		});
+
+		await expect(store.pProposeTransfer(directInput)).resolves.toEqual(JSON.parse(JSON.stringify(direct)));
+		await expect(store.pResolveTransfer(resolveInput)).resolves.toEqual(JSON.parse(JSON.stringify(resolved)));
 	});
 });

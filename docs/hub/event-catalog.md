@@ -89,7 +89,9 @@ retries preserve `eventId` and `operationId`.
 
 ## Snapshot/replay interaction
 
-Current-state character events at/before `snapshot.lastSequence` may be omitted by the client because the
+PostgreSQL replay reads hold the active membership row through event selection and redaction, so a concurrent
+role downgrade cannot reuse stale DM/co-DM authority for the next replay page. Current-state character events
+at/before `snapshot.lastSequence` may be omitted by the client because the
 snapshot already contains their result:
 
 - character create/clone/move/move-out/archive/reactivate;

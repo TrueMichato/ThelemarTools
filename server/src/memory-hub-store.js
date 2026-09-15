@@ -3409,7 +3409,7 @@ export class MemoryHubStore {
 	async pProposeTransfer ({accountId, campaignId, sourceKind, sourceId, targetKind, targetId, payload, rulesVersionId = null, idempotencyKey}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
 		if (prior) {
-			const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+			const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
 			return this._projectTransferResponseForViewer({response: prior, accountId, membership});
 		}
 		if (sourceKind === targetKind && sourceId === targetId) {
@@ -3526,7 +3526,7 @@ export class MemoryHubStore {
 	async pResolveTransfer ({accountId, campaignId, transferId, decision, rulesVersionId = null, idempotencyKey}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
 		if (prior) {
-			const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+			const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
 			return this._projectTransferResponseForViewer({response: prior, accountId, membership});
 		}
 		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
