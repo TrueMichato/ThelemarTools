@@ -360,6 +360,13 @@ Modules communicate through:
 
 ## Persistence Layer
 
+Character documents are persisted separately from page-wide UI preferences. The
+active top-level tab is a page preference: every successful tab activation writes
+its pane selector through `StorageUtil.syncSetForPage()`, and initialization
+restores it only after the loaded character has finalized conditional tab
+visibility. If the stored tab no longer exists or is hidden for the current
+character/settings, the controller activates and stores Overview instead.
+
 ```
 localStorage
     │

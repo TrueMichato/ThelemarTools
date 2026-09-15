@@ -151,6 +151,9 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 6. Sub-modules instantiated with error isolation (try/catch per module)
 7. Saved characters loaded from IndexedDB
 8. UI rendered
+9. The page-wide active tab is restored from synchronous page-scoped storage after
+   character-dependent tab visibility is finalized. Missing or hidden saved tabs
+   fall back to Overview; tab preference is never serialized into character data.
 
 ### Update Cycle
 ```
@@ -176,6 +179,9 @@ last-writer-wins data loss from another open tab.
 - **Manual re-renders**: Modules call `_renderXxx()` — forgetting is a common source of stale UI bugs
 - **Toast notifications**: `JqueryUtil.doToast({type: "success", content: "..."})` for user feedback (site-wide utility, not jQuery-dependent despite the name)
 - **HTML generation**: `e_({outer: \`<button class="btn">...</button>\`})` for single elements, `ee\`<div>...</div>\`` tagged template for complex HTML. `insertAdjacentHTML()` for appending HTML strings.
+- **Top-level tabs**: Route both click-driven and programmatic navigation through
+  `CharacterSheetPage.switchToTab()`. It owns active classes, pane display, and
+  page-wide persistence; mobile delegates to the same real tab controls.
 
 ### Module Init Order
 
