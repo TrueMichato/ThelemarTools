@@ -252,8 +252,10 @@ an outcome-uncertain network, invalid-response, or HTTP 5xx failure. That exact 
 hours, staying inside PostgreSQL's 24-hour command-receipt lifetime. Once the browser window expires, it performs
 an authorization-scoped inventory or inbox refresh instead of risking a fresh duplicate command. If an acceptance
 fails definitively because its rules pin is stale, the browser reconciles first and creates a complete new
-decision request with a new key; it never changes the pin beneath an existing key. Offline mutation queues and
-blind replay across reloads remain out of scope.
+decision request with a new key while preserving any already-created proposal under its original body and key.
+If the proposal itself is rejected for a stale pin before creating a transfer, both the proposal body and key
+rotate together. The browser never changes a pin beneath an existing key. Offline mutation queues and blind replay
+across reloads remain out of scope.
 An approval-bound acceptance or direct proposal into a character compares the resulting authoritative document
 with its prior state and rejects a new disallowed/unknown item identity or stale rules pin before source,
 destination, resolution, audit, event, outbox, or receipt changes. Approval-bound reserved escrow remains

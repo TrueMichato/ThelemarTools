@@ -133,6 +133,9 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("charactersNxt: pCharactersNxt");
 		expect(source).toContain("pResolveTransferAndRefresh");
 		expect(source).toContain("transferResolutionDrafts.stage");
+		expect(source).toContain("pResolveTransferFromDraft");
+		expect(source).toContain("error?.code !== \"RULES_VERSION_STALE\"");
+		expect(source).toContain("if (isRulesVersionStale && !pendingProposal)");
 		expect(source).toContain("resolutionRequest.decision !== decision");
 		expect(source).toContain("transferResolutionDrafts.isReplayable");
 		expect(source).toContain("transferResolutionDrafts.reconcilePending");

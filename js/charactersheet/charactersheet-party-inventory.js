@@ -9,7 +9,12 @@ import {
 	getInventoryTransferEligibility,
 	getInventoryWeightSummary,
 } from "../hub/hub-inventory-contract.js";
-import {HUB_TRANSFER_REPLAY_WINDOW_MS} from "../hub/hub-api-client.js";
+import {
+	HUB_TRANSFER_REPLAY_WINDOW_MS,
+	HubTransferResolutionDrafts,
+	isTransferOutcomeUncertain,
+	pResolveTransferFromDraft,
+} from "../hub/hub-api-client.js";
 
 const DM_ROLES = new Set(["dm", "co_dm"]);
 const MAX_SEEN_EVENT_KEYS = 2_000;
@@ -36,10 +41,6 @@ let fallbackTokenId = 0;
 
 function getOpaqueToken () {
 	return globalThis.crypto?.randomUUID?.() || `opaque-${++fallbackTokenId}`;
-}
-
-function isTransferOutcomeUncertain (error) {
-	return ["NETWORK_UNAVAILABLE", "REQUEST_ABORTED", "RESPONSE_INVALID"].includes(error?.code) || error?.status >= 500;
 }
 
 function getEntryName (entry) {
@@ -193,6 +194,7 @@ export class CharacterSheetPartyInventory {
 		this._fnSaveCharacter = fnSaveCharacter;
 		this._fnIsCurrentCharacter = fnIsCurrentCharacter;
 		this._fnGetRulesVersionId = fnGetRulesVersionId;
+		this._transferResolutionDrafts = new HubTransferResolutionDrafts({fnCreateKey: getOpaqueToken});
 		// Supplies the live carry profile so a transfer can be previewed against the same
 		// calculation the carry bar uses. Optional: without it the preview simply omits the
 		// carry line rather than guessing at capacity.
@@ -1380,7 +1382,17 @@ export class CharacterSheetPartyInventory {
 				if (!transfer) throw Object.assign(new Error("Transfer was not found"), {code: "TRANSFER_NOT_FOUND"});
 				draft.transfer = transfer;
 				draft.needsStatusCheck = false;
-				if (!["proposed", "reserved"].includes(transfer.status)) {
+				const isPending = ["proposed", "reserved"].includes(transfer.status);
+				const acceptanceRequest = this._transferResolutionDrafts.get({
+					campaignId: this._campaignId,
+					transferId: transfer.id,
+				});
+				const isAcceptanceExpired = acceptanceRequest && !this._transferResolutionDrafts.isReplayable(acceptanceRequest);
+				this._transferResolutionDrafts.reconcilePending({
+					campaignId: this._campaignId,
+					pendingTransferIds: isPending ? [transfer.id] : [],
+				});
+				if (!isPending) {
 					const messages = {
 						committed: "Transfer complete. Both inventories are up to date.",
 						rejected: draft.kind === "party_inventory"
@@ -1402,6 +1414,16 @@ export class CharacterSheetPartyInventory {
 					this._fnToast?.({type: transfer.status === "committed" ? "success" : "info", content: message});
 					this._announce(message);
 					return true;
+				}
+				if (
+					draft.proposalRequest?.isAutoResolved
+					&& (draft.needsFreshAcceptance || isAcceptanceExpired)
+				) {
+					const latestContext = await this._api.pGetCampaignContext({campaignId: this._campaignId});
+					if (!this._isCurrent(active) || this._draft !== draft) return false;
+					draft.acceptanceRulesVersionId = latestContext?.rulesVersion?.id || null;
+					draft.resolutionCommandId = getOpaqueToken();
+					draft.needsFreshAcceptance = false;
 				}
 				if (draft.pendingResolution?.decision === "reject") {
 					if (Date.now() >= draft.pendingResolution.replayUntil) {
@@ -1468,13 +1490,22 @@ export class CharacterSheetPartyInventory {
 			}
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
 			if (draft.proposalRequest?.isAutoResolved && ["proposed", "reserved"].includes(draft.transfer.status)) {
-				const resolved = await this._api.pResolveTransfer({
-					campaignId: this._campaignId,
-					transferId: draft.transfer.id,
-					decision: "accept",
-					...(draft.proposalRequest?.rulesVersionId == null ? {} : {rulesVersionId: draft.proposalRequest.rulesVersionId}),
-					idempotencyKey: draft.resolutionCommandId,
-				});
+				let resolved;
+				try {
+					resolved = await pResolveTransferFromDraft({
+						drafts: this._transferResolutionDrafts,
+						campaignId: this._campaignId,
+						transferId: draft.transfer.id,
+						idempotencyKey: draft.resolutionCommandId,
+						pGetRulesVersionId: async () => draft.acceptanceRulesVersionId !== undefined
+							? draft.acceptanceRulesVersionId
+							: draft.proposalRequest?.rulesVersionId ?? null,
+						pResolve: request => this._api.pResolveTransfer(request),
+					});
+				} catch (error) {
+					if (error?.code === "RULES_VERSION_STALE") draft.needsFreshAcceptance = true;
+					throw error;
+				}
 				draft.transfer = resolved.transfer;
 			}
 

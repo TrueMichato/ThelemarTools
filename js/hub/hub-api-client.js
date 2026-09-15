@@ -13,6 +13,10 @@ export class HubApiError extends Error {
 
 export const HUB_TRANSFER_REPLAY_WINDOW_MS = 23 * 60 * 60 * 1000;
 
+export function isTransferOutcomeUncertain (error) {
+	return ["NETWORK_UNAVAILABLE", "REQUEST_ABORTED", "RESPONSE_INVALID"].includes(error?.code) || error?.status >= 500;
+}
+
 export class HubTransferRefreshQueue {
 	constructor () {
 		this._queue = Promise.resolve();
@@ -47,7 +51,7 @@ export class HubTransferResolutionDrafts {
 		return draft ? structuredClone(draft) : null;
 	}
 
-	stage ({campaignId, transferId, decision, rulesVersionId = null}) {
+	stage ({campaignId, transferId, decision, rulesVersionId = null, idempotencyKey = undefined}) {
 		const existing = this.get({campaignId, transferId});
 		if (existing) return existing;
 		const draft = {
@@ -55,7 +59,7 @@ export class HubTransferResolutionDrafts {
 			transferId,
 			decision,
 			rulesVersionId,
-			idempotencyKey: this._fnCreateKey(),
+			idempotencyKey: idempotencyKey ?? this._fnCreateKey(),
 			replayUntil: this._fnNow() + this._replayWindowMs,
 		};
 		this._drafts.set(this._getRef({campaignId, transferId}), draft);
@@ -81,6 +85,41 @@ export class HubTransferResolutionDrafts {
 			if (!ref.startsWith(prefix)) continue;
 			if (!pending.has(draft.transferId) || !this.isReplayable(draft)) this._drafts.delete(ref);
 		}
+	}
+}
+
+export async function pResolveTransferFromDraft ({
+	drafts,
+	campaignId,
+	transferId,
+	decision = "accept",
+	idempotencyKey = undefined,
+	pGetRulesVersionId = async () => null,
+	pResolve,
+}) {
+	let request = drafts.get({campaignId, transferId});
+	if (request && !drafts.isReplayable(request)) {
+		throw new HubApiError({code: "IDEMPOTENCY_WINDOW_EXPIRED", status: 0});
+	}
+	if (request && request.decision !== decision) {
+		throw new HubApiError({code: "IDEMPOTENCY_KEY_REUSED", status: 409});
+	}
+	if (!request) {
+		request = drafts.stage({
+			campaignId,
+			transferId,
+			decision,
+			rulesVersionId: decision === "accept" ? await pGetRulesVersionId() : null,
+			...(idempotencyKey === undefined ? {} : {idempotencyKey}),
+		});
+	}
+	try {
+		const result = await pResolve(request);
+		drafts.clear({...request});
+		return result;
+	} catch (error) {
+		if (!isTransferOutcomeUncertain(error)) drafts.clear({...request});
+		throw error;
 	}
 }
 

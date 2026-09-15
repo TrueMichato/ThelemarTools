@@ -3,6 +3,8 @@ import {
 	HubApiError,
 	HubTransferProposalDrafts,
 	HubTransferRefreshQueue,
+	HubTransferResolutionDrafts,
+	pResolveTransferFromDraft,
 } from "../../../js/hub/hub-api-client.js";
 
 function getResponse ({status = 200, body = {}} = {}) {
@@ -34,6 +36,34 @@ describe("hub API client", () => {
 
 		await expect(queue.pRun(async () => { throw new Error("refresh failed"); })).rejects.toThrow("refresh failed");
 		await expect(queue.pRun(async () => "recovered")).resolves.toBe("recovered");
+	});
+
+	it("rotates a definitive stale transfer decision only after a separate reconciled attempt", async () => {
+		const keys = ["accept-1", "accept-2"];
+		const drafts = new HubTransferResolutionDrafts({fnCreateKey: () => keys.shift()});
+		const requests = [];
+		let rulesRead = 0;
+		const pRun = () => pResolveTransferFromDraft({
+			drafts,
+			campaignId: "campaign-1",
+			transferId: "transfer-1",
+			pGetRulesVersionId: async () => `rules-${++rulesRead}`,
+			pResolve: async request => {
+				requests.push(request);
+				if (requests.length === 1) throw new HubApiError({code: "RULES_VERSION_STALE", status: 409});
+				return {transfer: {id: "transfer-1", status: "committed"}};
+			},
+		});
+
+		await expect(pRun()).rejects.toEqual(expect.objectContaining({code: "RULES_VERSION_STALE"}));
+		expect(drafts.get({campaignId: "campaign-1", transferId: "transfer-1"})).toBeNull();
+		await expect(pRun()).resolves.toEqual({transfer: {id: "transfer-1", status: "committed"}});
+
+		expect(requests).toEqual([
+			expect.objectContaining({rulesVersionId: "rules-1", idempotencyKey: "accept-1"}),
+			expect.objectContaining({rulesVersionId: "rules-2", idempotencyKey: "accept-2"}),
+		]);
+		expect(drafts.get({campaignId: "campaign-1", transferId: "transfer-1"})).toBeNull();
 	});
 
 	it("freezes one transfer proposal per account and campaign until its exact key is reconciled", () => {

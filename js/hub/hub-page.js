@@ -4,6 +4,8 @@ import {
 	HubTransferProposalDrafts,
 	HubTransferRefreshQueue,
 	HubTransferResolutionDrafts,
+	isTransferOutcomeUncertain,
+	pResolveTransferFromDraft,
 	pResolveTransferAndRefresh,
 } from "./hub-api-client.js";
 import {HubActiveCampaignCoordinator} from "./hub-active-campaign-coordinator.js";
@@ -36,11 +38,6 @@ import {
 const api = new HubApiClient();
 const transferProposalDrafts = new HubTransferProposalDrafts();
 const transferResolutionDrafts = new HubTransferResolutionDrafts();
-const TRANSFER_OUTCOME_UNCERTAIN_CODES = new Set(["NETWORK_UNAVAILABLE", "REQUEST_ABORTED", "RESPONSE_INVALID"]);
-
-function isTransferOutcomeUncertain (error) {
-	return TRANSFER_OUTCOME_UNCERTAIN_CODES.has(error?.code) || error?.status >= 500;
-}
 
 /**
  * Lightweight Hub shells keep a device-local active campaign selection, but must never fetch the
@@ -2389,6 +2386,13 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 				fingerprint: getFormFingerprint(form),
 				fnMutate: async idempotencyKey => {
 					const proposalRef = {accountId: session.account.id, campaignId};
+					const pResolveAutoTransfer = transfer => pResolveTransferFromDraft({
+						drafts: transferResolutionDrafts,
+						campaignId,
+						transferId: transfer.id,
+						pGetRulesVersionId: async () => (await api.pGetCampaignContext({campaignId})).rulesVersion?.id || null,
+						pResolve: request => api.pResolveTransfer(request),
+					});
 					let proposalRequest = transferProposalDrafts.get(proposalRef);
 					if (proposalRequest) {
 						if (!transferProposalDrafts.isReplayable(proposalRequest)) {
@@ -2414,15 +2418,9 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 						}
 						let resolved;
 						try {
-							resolved = await api.pResolveTransfer({
-								campaignId,
-								transferId: proposed.transfer.id,
-								decision: "accept",
-								rulesVersionId: proposalRequest.rulesVersionId,
-								idempotencyKey: `${proposalRequest.idempotencyKey}:resolve`,
-							});
+							resolved = await pResolveAutoTransfer(proposed.transfer);
 						} catch (error) {
-							if (!isTransferOutcomeUncertain(error)) {
+							if (!isTransferOutcomeUncertain(error) && error?.code !== "RULES_VERSION_STALE") {
 								transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
 							}
 							throw error;
@@ -2503,15 +2501,9 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					}
 					let resolved;
 					try {
-						resolved = await api.pResolveTransfer({
-							campaignId,
-							transferId: proposed.transfer.id,
-							decision: "accept",
-							rulesVersionId: proposalRequest.rulesVersionId,
-							idempotencyKey: `${proposalRequest.idempotencyKey}:resolve`,
-						});
+						resolved = await pResolveAutoTransfer(proposed.transfer);
 					} catch (error) {
-						if (!isTransferOutcomeUncertain(error)) {
+						if (!isTransferOutcomeUncertain(error) && error?.code !== "RULES_VERSION_STALE") {
 							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
 						}
 						throw error;
@@ -2541,6 +2533,11 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		} catch (error) {
 			const message = error instanceof HubApiError ? getErrorMessage(error) : error.message;
 			const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId});
+			const isRulesVersionStale = error instanceof HubApiError && error.code === "RULES_VERSION_STALE";
+			if (isRulesVersionStale && !pendingProposal) {
+				form._hubMutationKey = null;
+				form._hubMutationFingerprint = null;
+			}
 			if (pendingProposal && !transferProposalDrafts.isReplayable(pendingProposal)) {
 				setTransferProposalReplayExpired({
 					form,
@@ -2554,7 +2551,9 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			setFormStatus({
 				formId,
 				message: pendingProposal
-					? "The transfer outcome is not yet confirmed. Retry to reconcile the same transfer."
+					? isRulesVersionStale
+						? "Campaign rules changed before acceptance. Retry to reconcile the reserved transfer under the active version."
+						: "The transfer outcome is not yet confirmed. Retry to reconcile the same transfer."
 					: message,
 				isError: true,
 			});
