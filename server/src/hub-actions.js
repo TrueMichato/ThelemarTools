@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import {isDeepStrictEqual} from "node:util";
 import {getInventoryTransferEligibility} from "../../js/hub/hub-inventory-contract.js";
-import {getItemWithoutDeterministicSheetAliases} from "../../js/hub/hub-json-patch.js";
+import {getInventoryItemWithoutDeterministicAliases} from "../../js/hub/hub-inventory-equivalence.js";
 import {getHealedHp, resolveApplicableMaxHp} from "../../js/hub/hub-semantic-hp.js";
 import {HubStoreError} from "./hub-store-error.js";
 
@@ -275,7 +275,7 @@ function getComparableInventoryEntry (entry) {
 	delete out.quantity;
 	delete out._sourceIndex;
 	if (out.item && typeof out.item === "object" && !Array.isArray(out.item)) {
-		out.item = getItemWithoutDeterministicSheetAliases(out.item);
+		out.item = getInventoryItemWithoutDeterministicAliases(out.item);
 	}
 	for (const key of ["equipped", "attuned", "starred"]) {
 		if (!out[key]) delete out[key];

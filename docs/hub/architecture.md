@@ -118,7 +118,12 @@ sequenceDiagram
 ```
 
 The client never treats an unacknowledged queued snapshot as a new base. Each submitted write retains its own
-base so overlapping and disjoint changes are classified correctly.
+base so overlapping and disjoint changes are classified correctly. A transport-failed offline write remains a
+local recovery draft. When realtime reconnects, the owner sheet refetches the canonical document: disjoint
+changes are rebased and retried, while overlapping paths require an explicit local/server choice. Client-only
+save timestamps are excluded from overlap detection. `Use Local` is explicit authority to retry the actual
+local candidate against the newer server base; server-owned inventory and XP paths keep their stricter
+server-wins overlap policy.
 
 ## Transactional outbox and realtime
 
@@ -137,7 +142,9 @@ flowchart LR
 ```
 
 Clients use snapshots and sequence-based replay to recover from disconnects. Presence is ephemeral. Roll and
-action history is durable. Visibility is evaluated on the server for both replay and live fanout.
+action history is durable. Visibility is evaluated on the server for both replay and live fanout. Projection
+HTTP responses are request-sequence and attachment-generation fenced, so a slower old response or a response
+from a detached DM workspace cannot replace newer scoped truth.
 
 An authenticated campaign-backed Character Sheet attaches a focused realtime coordinator only after its
 canonical character has loaded. Socket-generation fencing makes stale messages, closes, and watchdog timers
@@ -146,15 +153,25 @@ inert. The coordinator routes metadata-only projection invalidations and the fro
 delivery cannot overtake an in-flight save. Character/campaign switch, canonical-id replacement, detach,
 revocation, logout, and terminal page hide all fence the subscription generation.
 
-Applied operations are reconciled in the repository under ADR 0012. Because `rebaseJsonChanges` conflicts on
-path overlap regardless of value equality, the accepted base and every other base track must advance together
-with live state or the next save reports a spurious conflict on identical values. Delivery is therefore a
-prepare/adopt/commit transaction over per-track coverage records, and an unprovable delivery schedules a
-serialized recovery that replays ordered visible history instead of forcing a reload.
+Applied operations are reconciled in the repository under ADR 0012. `rebaseJsonChanges` treats identical
+same-path edits as convergence while preserving unequal and ancestor/descendant overlaps as conflicts. The
+character repository additionally removes only deterministic Character Sheet item aliases from all three
+comparison inputs before inventory diffs. A canonical item and the same sheet-normalized item therefore do not
+manufacture an `/inventory` overlap around a server quantity change, while quantity, spent charges, non-empty
+upgrades/gemstones, custom metadata, provenance, effects, materials, and wrapper-state changes remain real
+conflicts. The normalization is comparison-only; canonical server inventory remains the adopted document.
+The Character Sheet's final post-save rebase uses the same comparison contract and applies disjoint local
+patches back onto the unmodified canonical document, so save completion cannot reintroduce the alias conflict.
+The accepted base and every other base track still advance together with live state so later saves retain exact
+coverage and do not need to rediscover already-accepted edits. Delivery is therefore a prepare/adopt/commit
+transaction over per-track coverage records, and an unprovable delivery schedules a serialized recovery that
+replays ordered visible history instead of forcing a reload.
 
 This delivery layer is intentionally not reconciliation: it does not mutate `CharacterSheetState`, accepted
 bases, revisions, leases, conflicts, or recovery storage, and it does not fetch or replace the owner document.
-The later live-apply layer owns ADR 0012 operation-aware base/live transforms.
+The Character Sheet page owns the subsequent authoritative-document reconciliation, while the later live-apply
+layer owns ADR 0012 operation-aware base/live transforms. Party Inventory refreshes its own stash projection
+and direct inventory-transfer effects; it does not own generic character-document reconnect recovery.
 
 ## Campaign content overlay
 

@@ -169,18 +169,22 @@ The item-award source is either `{kind:"party_inventory",entryId}` or
 `page`, `rarity`, `weight`, `value`, `typeCode`, and `edition`; unknown/rich/executable content is rejected and
 the request summary is never stored as the canonical item. The BFF resolves catalog identities from a generated
 repository-owned site catalog, campaign-item identities from the active validated brew bundle, and recent
-identities from either trusted source. Missing or source-kind-mismatched identities return
-`ITEM_AWARD_SOURCE_NOT_FOUND`; an active campaign item whose trusted `_copy` inheritance cannot resolve returns
-`ITEM_AWARD_SOURCE_INVALID`. The resolver supports direct campaign item metadata and simple `name`/`source`
-inheritance, but rejects `_mod`, templates, and other runtime transformations rather than executing
-campaign-supplied instructions in the BFF. Client-supplied metadata cannot override the resolved object. A
+identities from either trusted source. New `item.granted` events record the resolved `catalog` or
+`campaign_item` authority so Recent reuses it exactly. A legacy `recent` identity must exist in exactly one
+authority. Stash-derived events are omitted from Recent; the live party-stash picker retains their stack UUID.
+Missing or source-kind-mismatched identities return `ITEM_AWARD_SOURCE_NOT_FOUND`; unresolved trusted
+`_copy` inheritance, duplicate campaign identities, site/campaign `name|source` collisions, and ambiguous legacy
+Recent identities return `ITEM_AWARD_SOURCE_INVALID`. The resolver supports direct campaign item metadata and
+simple `name`/`source` inheritance, but rejects `_mod`, templates, and other runtime transformations rather than
+executing campaign-supplied instructions in the BFF. Client-supplied metadata cannot override the resolved object. A
 stash award derives content from the locked authoritative stack and debits
 `quantity * targetCharacterIds.length` once. All targets, the optional stash debit, one batch audit, the ordered
 per-target grant/projection events, the optional stash invalidation, and the receipt commit together or not at
 all. Exact retries replay the same ordered response without another debit or grant. Award responses and events
 contain only the bounded summary even though authoritative inventory retains the complete trusted item.
 Those returned/event/audit summaries are derived from the resolved authoritative item, so browser-supplied
-display metadata cannot disagree with the persisted object.
+display metadata cannot disagree with the persisted object. Event and audit `sourceKind` identify the resolved
+authority; the response source continues to describe the normalized submitted command for retry identity.
 
 Direct DM/co-DM body:
 

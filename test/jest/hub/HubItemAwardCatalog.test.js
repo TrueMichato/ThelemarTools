@@ -3,6 +3,7 @@ import {fileURLToPath} from "node:url";
 
 import {pBuildItemAwardSiteCatalog} from "../../../server/scripts/item-award-catalog-builder.mjs";
 import {
+	createItemAwardAuthorityResolver,
 	createItemAwardResolver,
 	resolveItemAward,
 } from "../../../server/src/item-award-catalog.js";
@@ -76,6 +77,46 @@ describe("Campaign Hub authoritative item-award catalog", () => {
 		})).resolves.toEqual(campaignItem);
 	});
 
+	it("preserves resolved authority and fails closed on site/campaign identity collisions", async () => {
+		const siteItem = {
+			name: "Longsword",
+			source: "PHB",
+			type: "M",
+			weight: 3,
+			entries: ["Official site metadata."],
+		};
+		const campaignCollision = {
+			name: "Longsword",
+			source: "PHB",
+			type: "G",
+			weight: 99,
+			entries: ["Colliding campaign metadata."],
+		};
+		const resolve = createItemAwardAuthorityResolver({
+			fnLoadSiteItems: async () => new Map([["longsword|phb", siteItem]]),
+		});
+		const brewBundle = {content: [{body: {item: [campaignCollision]}}]};
+
+		await expect(resolve({
+			sourceKind: "catalog",
+			item: {name: siteItem.name, source: siteItem.source},
+			brewBundle,
+		})).resolves.toEqual({
+			sourceKind: "catalog",
+			authoritativeItem: siteItem,
+		});
+		for (const sourceKind of ["recent", "campaign_item"]) {
+			await expect(resolve({
+				sourceKind,
+				item: {name: siteItem.name, source: siteItem.source},
+				brewBundle,
+			})).rejects.toMatchObject({
+				code: "ITEM_AWARD_SOURCE_INVALID",
+				status: 409,
+			});
+		}
+	});
+
 	it("resolves campaign item copy inheritance without trusting client metadata", async () => {
 		const copiedItem = {
 			name: "Moonsteel Longsword",
@@ -109,6 +150,38 @@ describe("Campaign Hub authoritative item-award catalog", () => {
 		}));
 		expect(resolved).not.toHaveProperty("typeCode");
 		expect(resolved).not.toHaveProperty("_copy");
+	});
+
+	it("rejects campaign copy inheritance through a site-UID-shadowing campaign parent", async () => {
+		const siteParent = {
+			name: "Longsword",
+			source: "PHB",
+			type: "M",
+			weight: 3,
+		};
+		const collidingParent = {
+			name: "LONGSWORD",
+			source: "phb",
+			type: "G",
+			weight: 99,
+		};
+		const child = {
+			name: "Shadow Child",
+			source: "TST",
+			_copy: {name: "Longsword", source: "PHB"},
+		};
+		const resolve = createItemAwardResolver({
+			fnLoadSiteItems: async () => new Map([["longsword|phb", siteParent]]),
+		});
+
+		await expect(resolve({
+			sourceKind: "campaign_item",
+			item: {name: child.name, source: child.source},
+			brewBundle: {content: [{body: {item: [collidingParent, child]}}]},
+		})).rejects.toMatchObject({
+			code: "ITEM_AWARD_SOURCE_INVALID",
+			status: 409,
+		});
 	});
 
 	it("does not inherit parent-only publication fields through a campaign item copy", async () => {

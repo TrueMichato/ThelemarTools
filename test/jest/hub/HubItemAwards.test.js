@@ -7,7 +7,10 @@ import {
 	addAwardedItemToCharacter,
 	normalizeSafeItemSummary,
 } from "../../../server/src/hub-actions.js";
-import {resolveItemAward} from "../../../server/src/item-award-catalog.js";
+import {
+	createItemAwardAuthorityResolver,
+	resolveItemAward,
+} from "../../../server/src/item-award-catalog.js";
 import {MemoryHubStore} from "../../../server/src/memory-hub-store.js";
 import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
 import {getCharacterSheetSavedInventory} from "./item-award-test-utils.js";
@@ -539,6 +542,105 @@ describe("Campaign Hub item award domain", () => {
 			typeCode: authoritativeItem.type,
 			edition: authoritativeItem.edition,
 		});
+	});
+
+	it("rejects ambiguous recent authority and records the exact catalog authority on success", async () => {
+		const officialItem = {
+			name: "Longsword",
+			source: "PHB",
+			type: "M",
+			weight: 3,
+			value: 1500,
+			weaponCategory: "martial",
+			dmg1: "1d8",
+			dmgType: "S",
+			entries: ["Official site metadata."],
+		};
+		const campaignCollision = {
+			...officialItem,
+			type: "G",
+			weight: 99,
+			entries: ["Colliding campaign metadata."],
+			effects: [{type: "skillBonus", skill: "arcana", value: 99}],
+		};
+		const ctx = await pCreateStoreFixture({
+			fnResolveAwardItem: createItemAwardAuthorityResolver({
+				fnLoadSiteItems: async () => new Map([["longsword|phb", officialItem]]),
+			}),
+		});
+		const brewId = crypto.randomUUID();
+		ctx.store._brewVersions.set(brewId, {
+			id: brewId,
+			campaignId: ctx.campaign.id,
+			version: 1,
+			contentHash: crypto.createHash("sha256").update(JSON.stringify(campaignCollision)).digest("hex"),
+			content: [{body: {item: [campaignCollision]}}],
+			manifest: [],
+			createdAt: new Date().toISOString(),
+		});
+		ctx.store._campaigns.get(ctx.campaign.id).activeBrewBundleVersionId = brewId;
+		const beforeCharacter = structuredClone(ctx.store._characters.get(ctx.characterA.id));
+		const beforeEvents = ctx.store.getDomainEvents().length;
+		const beforeAudits = ctx.store.getAuditEntries().length;
+
+		await expect(ctx.store.pAwardItems({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+			source: {kind: "recent", item: {name: officialItem.name, source: officialItem.source}},
+			targetCharacterIds: [ctx.characterA.id],
+			quantity: 1,
+			idempotencyKey: "ambiguous-recent-authority",
+		})).rejects.toMatchObject({
+			code: "ITEM_AWARD_SOURCE_INVALID",
+			status: 409,
+		});
+		expect(ctx.store._characters.get(ctx.characterA.id)).toEqual(beforeCharacter);
+		expect(ctx.store.getDomainEvents()).toHaveLength(beforeEvents);
+		expect(ctx.store.getAuditEntries()).toHaveLength(beforeAudits);
+
+		const awarded = await ctx.store.pAwardItems({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+			source: {kind: "catalog", item: {name: officialItem.name, source: officialItem.source}},
+			targetCharacterIds: [ctx.characterA.id],
+			quantity: 1,
+			idempotencyKey: "explicit-site-authority",
+		});
+		expect(ctx.store._characters.get(ctx.characterA.id).data.inventory).toEqual([
+			expect.objectContaining({item: officialItem, quantity: 1}),
+		]);
+		const grant = ctx.store.getDomainEvents()
+			.find(event => event.type === "item.granted" && event.payload.awardId === awarded.awardId);
+		expect(grant.payload).toEqual(expect.objectContaining({
+			sourceKind: "catalog",
+			entry: expect.objectContaining({
+				item: expect.objectContaining({
+					name: officialItem.name,
+					source: officialItem.source,
+					typeCode: officialItem.type,
+					weight: officialItem.weight,
+				}),
+			}),
+		}));
+		expect(grant.payload.entry.item).not.toHaveProperty("entries");
+		expect(grant.payload.entry.item).not.toHaveProperty("effects");
+		const audit = ctx.store.getAuditEntries()
+			.find(entry => entry.action === "item.award_batch" && entry.details.awardId === awarded.awardId);
+		expect(audit.details.sourceKind).toBe("catalog");
+
+		ctx.store._campaigns.get(ctx.campaign.id).activeBrewBundleVersionId = null;
+		const recent = await ctx.store.pAwardItems({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+			source: {kind: "recent", item: {name: officialItem.name, source: officialItem.source}},
+			targetCharacterIds: [ctx.characterA.id],
+			quantity: 1,
+			idempotencyKey: "unambiguous-recent-site-authority",
+		});
+		const recentGrant = ctx.store.getDomainEvents()
+			.find(event => event.type === "item.granted" && event.payload.awardId === recent.awardId);
+		expect(recentGrant.payload.sourceKind).toBe("catalog");
+		expect(recent.source.kind).toBe("recent");
 	});
 
 	it("rejects an unprojectable authoritative item before mutating or consuming idempotency", async () => {

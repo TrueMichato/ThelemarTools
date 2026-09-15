@@ -82,7 +82,10 @@ import {
 	getExternalIdentityKey,
 	normalizeExternalIdentity,
 } from "./external-identity.js";
-import {resolveItemAward} from "./item-award-catalog.js";
+import {
+	normalizeItemAwardResolution,
+	resolveItemAwardAuthority,
+} from "./item-award-catalog.js";
 
 function copy (value) {
 	return value === undefined ? undefined : structuredClone(value);
@@ -94,7 +97,7 @@ export class MemoryHubStore {
 		semanticOperationRegistry = createSemanticOperationRegistry(),
 		semanticProposalTtlMs = 24 * 60 * 60 * 1_000,
 		peerSourceCostsEnabled = false,
-		fnResolveAwardItem = resolveItemAward,
+		fnResolveAwardItem = resolveItemAwardAuthority,
 	} = {}) {
 		this._fnNow = fnNow;
 		this._semanticOperationRegistry = semanticOperationRegistry;
@@ -3067,11 +3070,12 @@ export class MemoryHubStore {
 			after: provisionalData,
 			rulesVersionId: enforcement.activeRulesVersionId,
 		});
-		const authoritativeItem = await this._fnResolveAwardItem({
+		const resolution = normalizeItemAwardResolution(await this._fnResolveAwardItem({
 			sourceKind: "recent",
 			item: normalizedItem,
 			brewBundle: enforcement.brewBundle,
-		});
+		}), {sourceKind: "recent"});
+		const authoritativeItem = resolution.authoritativeItem;
 		validateCloudValue(authoritativeItem, {label: "Granted item"});
 		const authoritativeSummary = getSafeItemSummary(authoritativeItem);
 		const currentEnforcement = await this._pGetCampaignContentEnforcement(campaignId);
@@ -3100,7 +3104,7 @@ export class MemoryHubStore {
 		validateCloudCharacterData(data);
 		this._setCharacterData({character, data});
 		character.revision++;
-		this._appendAudit({campaignId, actorAccountId: accountId, action: "item.granted", targetType: "character", targetId: characterId, details: {entryId: entry.id, quantity: entry.quantity}});
+		this._appendAudit({campaignId, actorAccountId: accountId, action: "item.granted", targetType: "character", targetId: characterId, details: {entryId: entry.id, quantity: entry.quantity, sourceKind: resolution.sourceKind}});
 		this._appendEvent({
 			campaignId,
 			actorAccountId: accountId,
@@ -3110,7 +3114,7 @@ export class MemoryHubStore {
 			aggregateRevision: character.revision,
 			visibility: "explicit_accounts",
 			visibleAccountIds: [...new Set([accountId, character.ownerAccountId])],
-			payload: {entry: {...copy(entry), item: copy(authoritativeSummary)}},
+			payload: {sourceKind: resolution.sourceKind, entry: {...copy(entry), item: copy(authoritativeSummary)}},
 		});
 		// A granted item changes the inventory and carry summaries.
 		this._commitCharacterMutation({character, actorAccountId: accountId, isRevisionBump: false});
@@ -3158,6 +3162,7 @@ export class MemoryHubStore {
 		});
 		let item;
 		let incomingEntry;
+		let resolvedSourceKind = request.source.kind;
 		let stagedPartyInventory = null;
 		let partyInventoryResponse = null;
 		if (request.source.kind === "party_inventory") {
@@ -3197,11 +3202,13 @@ export class MemoryHubStore {
 					rulesVersionId: enforcement.activeRulesVersionId,
 				});
 			}
-			const authoritativeItem = await this._fnResolveAwardItem({
+			const resolution = normalizeItemAwardResolution(await this._fnResolveAwardItem({
 				sourceKind: request.source.kind,
 				item,
 				brewBundle: enforcement.brewBundle,
-			});
+			}), {sourceKind: request.source.kind});
+			const authoritativeItem = resolution.authoritativeItem;
+			resolvedSourceKind = resolution.sourceKind;
 			validateCloudValue(authoritativeItem, {label: "Awarded item"});
 			item = getSafeItemSummary(authoritativeItem);
 			const currentEnforcement = await this._pGetCampaignContentEnforcement(campaignId);
@@ -3222,7 +3229,7 @@ export class MemoryHubStore {
 			const added = addAwardedEntryToCharacter({
 				container: character.data,
 				incoming: {...copy(incomingEntry), quantity: request.quantity},
-				isAllowLegacySummaryUpgrade: request.source.kind === "catalog",
+				isAllowLegacySummaryUpgrade: resolvedSourceKind === "catalog",
 			});
 			stripCarryAuthority(added.container);
 			validateCloudCharacterData(added.container);
@@ -3278,7 +3285,7 @@ export class MemoryHubStore {
 			targetId: campaignId,
 			details: {
 				awardId,
-				sourceKind: request.source.kind,
+				sourceKind: resolvedSourceKind,
 				item,
 				targetCharacterIds: request.targetCharacterIds,
 				targetCount: request.targetCharacterIds.length,
@@ -3301,7 +3308,7 @@ export class MemoryHubStore {
 					awardId,
 					index,
 					targetCount: stagedCharacters.length,
-					sourceKind: request.source.kind,
+					sourceKind: resolvedSourceKind,
 					note: request.note,
 					entry: {id: entry.id, item: copy(item), quantity: request.quantity},
 				},

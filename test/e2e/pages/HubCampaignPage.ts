@@ -1304,10 +1304,53 @@ export class HubCampaignPage {
 		await expect(this.page.getByText("Character Changed on Another Device", {exact: true})).toBeHidden();
 	}
 
+	async editCharacterHpWhileOffline ({
+		campaignId,
+		characterId,
+		name,
+		hp,
+	}: {
+		campaignId: string;
+		characterId: string;
+		name: string;
+		hp: number;
+	}): Promise<void> {
+		if (!this.page.url().includes(`/charactersheet.html?id=${encodeURIComponent(characterId)}`)) {
+			await this.openCharacterSheet({campaignId, characterId, name});
+		}
+		await this.waitForCharacterRealtimeLive();
+		await this.page.context().setOffline(true);
+		await this.page.locator("#charsheet-ipt-hp-current").fill(`${hp}`);
+		await this.page.locator("#charsheet-ipt-hp-current").blur();
+		await expect(this.page.locator("#charsheet-save-indicator")).toHaveClass(/charsheet__save-indicator--error/);
+		await expect(this.page.locator("#charsheet-save-indicator .charsheet__save-icon")).toHaveText("✗");
+		await expect(this.page.locator("#charsheet-ipt-hp-current")).toHaveValue(`${hp}`);
+	}
+
+	async reconnectAndResolveCharacterConflict ({
+		hp,
+		resolution,
+	}: {
+		hp: number;
+		resolution: "Use Local" | "Use Server";
+	}): Promise<void> {
+		await this.page.context().setOffline(false);
+		await expect(this.page.getByText("Character Changed on Another Device", {exact: true})).toBeVisible({timeout: 20_000});
+		await this.page.getByRole("button", {name: new RegExp(resolution)}).click();
+		await expect(this.page.getByText("Character Changed on Another Device", {exact: true})).toBeHidden();
+		await expect(this.page.locator("#charsheet-ipt-hp-current")).toHaveValue(`${hp}`);
+		await expect(this.page.locator("#charsheet-save-indicator")).not.toHaveClass(/charsheet__save-indicator--error/);
+		await expect(this.page.locator("#charsheet-save-indicator .charsheet__save-icon")).toHaveText("✓");
+	}
+
+	async expectCampaignCharacterHp ({characterName, hp, maxHp = 12}: {characterName: string; hp: number; maxHp?: number}): Promise<void> {
+		const row = this.page.locator("#campaign-party-roster .hub-data-row").filter({hasText: characterName});
+		await expect(row).toContainText(`HP ${hp}/${maxHp}`, {timeout: 15_000});
+	}
+
 	async expectLiveCharacterUpdateAndRoll ({characterName, hp}: {characterName: string; hp: number}): Promise<void> {
 		await expect(this.page.locator("#campaign-connection-status")).toHaveText("Live updates connected");
-		const row = this.page.locator("#campaign-party-roster .hub-data-row").filter({hasText: characterName});
-		await expect(row).toContainText(`HP ${hp}/12`, {timeout: 15_000});
+		await this.expectCampaignCharacterHp({characterName, hp});
 		const roll = this.page.locator("#campaign-activity-list .hub-activity-row")
 			.filter({hasText: characterName})
 			.filter({hasText: "Initiative"})
@@ -1333,7 +1376,15 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#charsheet-ipt-name")).toHaveValue(name);
 	}
 
-	async expectCampaignPartyTrackerProjection ({campaignId, name}: {campaignId: string; name: string}): Promise<void> {
+	async expectCampaignPartyTrackerProjection ({
+		campaignId,
+		name,
+		campaignName = "Ashen March E2E",
+	}: {
+		campaignId: string;
+		name: string;
+		campaignName?: string;
+	}): Promise<void> {
 		const pageErrors: string[] = [];
 		const failedResponses: string[] = [];
 		const onPageError = (error: Error) => pageErrors.push(error.message);
@@ -1348,7 +1399,7 @@ export class HubCampaignPage {
 				() => this.page.evaluate(() => (window as any).DM_SCREEN?._hubCharacterProjections?.length || 0),
 				{timeout: 30_000},
 			).toBeGreaterThan(0);
-			await expect(this.page.locator("#dm-screen-hub-status")).toContainText("Ashen March E2E");
+			await expect(this.page.locator("#dm-screen-hub-status")).toContainText(campaignName);
 			await expect(this.page.locator(".dm-hub__status-pill--live")).toContainText("Live party sync");
 			await this.page.evaluate(async () => {
 				const {PartyTrackerRoot} = await import("/js/dmscreen/partytracker/dmscreen-partytracker.js");
@@ -1408,6 +1459,22 @@ export class HubCampaignPage {
 			this.page.off("pageerror", onPageError);
 			this.page.off("response", onResponse);
 		}
+	}
+
+	async expectCampaignPartyTrackerHp (hp: number): Promise<void> {
+		await expect.poll(
+			() => this.page.evaluate(() => {
+				const projection = (window as any).DM_SCREEN?._hubCharacterProjections?.[0];
+				const data = projection?.character?.data || projection?.data || projection;
+				return data?.hp?.current;
+			}),
+			{timeout: 15_000},
+		).toBe(hp);
+		await this.page.evaluate(() => {
+			(window as any).HUB_E2E_PARTY_TRACKER.setHubCharacterProjections((window as any).DM_SCREEN._hubCharacterProjections);
+		});
+		await expect(this.page.locator("#hub-e2e-party-tracker [aria-label^='Hit points']").first())
+			.toHaveAttribute("aria-label", new RegExp(`^Hit points ${hp}/`));
 	}
 
 	async expectCampaignDmScreenDenied (campaignId: string): Promise<void> {

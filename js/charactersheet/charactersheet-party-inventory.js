@@ -236,14 +236,9 @@ export class CharacterSheetPartyInventory {
 		if (!this._realtime?.on) return;
 		this._unsubscribers.push(
 			this._realtime.on("inventoryTransfer", event => this._onInventoryTransfer(event)),
-			this._realtime.on("projectionInvalidated", event => {
+			this._realtime.on("projectionInvalidated", () => {
 				if (this._active?.isActivationPending) void this._pActivate(this._active);
-				else {
-					this._scheduleRefresh({
-						...(event?.isCharacterDocumentChanged === true ? {character: true} : {}),
-						party: true,
-					});
-				}
+				else this._scheduleRefresh({party: true});
 			}),
 			this._realtime.on("connectionState", state => this._onConnectionState(state)),
 		);
@@ -556,7 +551,7 @@ export class CharacterSheetPartyInventory {
 			if (state?.state === "live" && this._active.isActivationPending) void this._pActivate(this._active);
 			return;
 		}
-		if (state?.state === "live") this._scheduleRefresh({character: true, party: true});
+		if (state?.state === "live") this._scheduleRefresh({party: true});
 		else if (["reconnecting", "unavailable"].includes(state?.state)) this._render();
 	}
 

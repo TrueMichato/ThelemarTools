@@ -164,68 +164,31 @@ function pathsOverlap (a, b) {
 export function rebaseJsonChanges ({base, local, remote}) {
 	const localPatches = diffJson(base, local);
 	const remotePatches = diffJson(base, remote);
-	const conflicts = localPatches
-		.flatMap(localPatch => remotePatches
-			.filter(remotePatch => pathsOverlap(localPatch.path, remotePatch.path))
-			.map(remotePatch => ({localPath: localPatch.path, remotePath: remotePatch.path})));
+	const redundantLocalPatchIndexes = new Set();
+	const conflicts = localPatches.flatMap((localPatch, ixLocal) => remotePatches
+		.filter(remotePatch => pathsOverlap(localPatch.path, remotePatch.path))
+		.flatMap(remotePatch => {
+			const isConvergent = localPatch.path === remotePatch.path
+				&& localPatch.op === remotePatch.op
+				&& (
+					localPatch.op === "remove"
+					|| isDeepEqual(localPatch.value, remotePatch.value)
+				);
+			if (isConvergent) {
+				redundantLocalPatchIndexes.add(ixLocal);
+				return [];
+			}
+			return [{localPath: localPatch.path, remotePath: remotePatch.path}];
+		}));
 
 	if (conflicts.length) return {isConflict: true, conflicts, patches: localPatches, document: null};
+	const patches = localPatches.filter((_, ix) => !redundantLocalPatchIndexes.has(ix));
 	return {
 		isConflict: false,
 		conflicts: [],
-		patches: localPatches,
-		document: applyJsonPatch(remote, localPatches),
+		patches,
+		document: applyJsonPatch(remote, patches),
 	};
 }
 
-export function getItemWithoutDeterministicSheetAliases (item) {
-	if (!item || typeof item !== "object" || Array.isArray(item)) return item;
-	const out = structuredClone(item);
-	const typeBase = String(out.type || out.typeCode || "").split("|")[0];
-	if (out.typeCode === out.type) delete out.typeCode;
-	if (isDeepEqual(out.properties, out.property)) delete out.properties;
-	if (Object.hasOwn(out, "requiresAttunement") && out.reqAttune != null && out.requiresAttunement === !!out.reqAttune) {
-		delete out.requiresAttunement;
-	}
-	for (const [suffix, ability] of [["Str", "str"], ["Dex", "dex"], ["Con", "con"], ["Int", "int"], ["Wis", "wis"], ["Cha", "cha"]]) {
-		for (const family of ["bonusSavingThrow", "bonusAbilityCheck"]) {
-			const aliasKey = `${family}${suffix}`;
-			const canonicalKey = `${family}_${ability}`;
-			if (Object.hasOwn(out, aliasKey) && out[aliasKey] === out[canonicalKey]) delete out[aliasKey];
-		}
-	}
-	if (out.shield === (typeBase === "S")) delete out.shield;
-	if (out.armor === ["LA", "MA", "HA"].includes(typeBase)) delete out.armor;
-	const armorType = typeBase === "HA"
-		? "heavy"
-		: typeBase === "MA"
-			? "medium"
-			: typeBase === "LA"
-				? "light"
-				: null;
-	if (armorType && out.armorType === armorType) delete out.armorType;
-	if (
-		out.weapon === true
-		&& (out.type === "weapon" || ["M", "R"].includes(typeBase) || !!out.weaponCategory)
-	) delete out.weapon;
-	if (typeof out.charges === "number" && out.chargesCurrent === out.charges) delete out.chargesCurrent;
-	for (const key of ["appliedUpgrades", "socketedGemstones"]) {
-		if (Array.isArray(out[key]) && !out[key].length) delete out[key];
-	}
-	return out;
-}
-
-export function getCharacterDocumentWithoutDeterministicInventoryAliases (document) {
-	if (!document || typeof document !== "object" || Array.isArray(document)) return document;
-	const out = structuredClone(document);
-	delete out.carry;
-	if (!Array.isArray(out.inventory)) return out;
-	for (const entry of out.inventory) {
-		if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
-		if (!entry.item || typeof entry.item !== "object" || Array.isArray(entry.item)) continue;
-		entry.item = getItemWithoutDeterministicSheetAliases(entry.item);
-	}
-	return out;
-}
-
-export {copyJson};
+export {copyJson, isDeepEqual};

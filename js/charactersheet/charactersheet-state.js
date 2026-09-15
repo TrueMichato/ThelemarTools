@@ -4330,6 +4330,7 @@ class CharacterSheetState {
 		// level-gated grouping in the spell list silently drops the spells.
 		this._allSpells = [];
 		this._allItems = [];
+		this._allItemsRepair = [];
 		this._allItemsPristine = null;
 		// Live handle for the pure static helpers that must consult character state but are
 		// called from contexts with no reference to it — chiefly the item hover builders in
@@ -4355,10 +4356,11 @@ class CharacterSheetState {
 	 * catalog used to distinguish source-authored metadata from renderer enhancement.
 	 * The migration also runs here for alternate load orders.
 	 * @param {Array} allItems
-	 * @param {{pristineItems?: Array}} [opts]
+	 * @param {{pristineItems?: Array, repairItems?: Array}} [opts]
 	 */
-	setItemCatalog (allItems, {pristineItems = null} = {}) {
+	setItemCatalog (allItems, {pristineItems = null, repairItems = null} = {}) {
 		this._allItems = Array.isArray(allItems) ? allItems : [];
+		this._allItemsRepair = Array.isArray(repairItems) ? repairItems : this._allItems;
 		this._allItemsPristine = Array.isArray(pristineItems) ? pristineItems : null;
 		this._migrateInventoryItemMetadata();
 	}
@@ -4418,12 +4420,17 @@ class CharacterSheetState {
 			(key === "entries" && Array.isArray(value) && !value.length)
 			|| key === "additionalSources"
 		);
-		const catalog = new Map((this._allItems || [])
-			.filter(item => item?.name && item?.source)
-			.map(item => [`${item.name}|${item.source}`.toLowerCase(), item]));
-		const pristineCatalog = new Map((this._allItemsPristine || [])
-			.filter(item => item?.name && item?.source)
-			.map(item => [`${item.name}|${item.source}`.toLowerCase(), item]));
+		const getFirstByUid = items => {
+			const out = new Map();
+			for (const item of items || []) {
+				if (!item?.name || !item?.source) continue;
+				const uid = `${item.name}|${item.source}`.toLowerCase();
+				if (!out.has(uid)) out.set(uid, item);
+			}
+			return out;
+		};
+		const catalog = getFirstByUid(this._allItemsRepair);
+		const pristineCatalog = getFirstByUid(this._allItemsPristine);
 		for (const inventoryRow of this._data.inventory) {
 			const item = inventoryRow?.item;
 			if (!item || typeof item !== "object") continue;
@@ -4433,34 +4440,32 @@ class CharacterSheetState {
 				: null;
 			const match = uid ? catalog.get(uid) : null;
 			const pristineMatch = uid ? pristineCatalog.get(uid) : null;
-			if (match && item.type == null) {
+			if (match && pristineMatch && item.type == null) {
 				for (const [key, value] of Object.entries(match)) {
 					if (
 						isTransientCatalogField(key)
-						|| (pristineMatch && pristineCatalogFields.has(key))
+						|| pristineCatalogFields.has(key)
 						|| isEnhancedCatalogOnlyField(key, value, match)
 						|| item[key] !== undefined
 					) continue;
 					item[key] = MiscUtil.copyFast(value);
 				}
-				if (pristineMatch) {
-					for (const key of pristineCatalogFields) {
-						if (
-							item[key] !== undefined
-							|| !Object.prototype.hasOwnProperty.call(pristineMatch, key)
-						) continue;
-						item[key] = MiscUtil.copyFast(pristineMatch[key]);
-					}
+				for (const key of pristineCatalogFields) {
+					if (
+						item[key] !== undefined
+						|| !Object.prototype.hasOwnProperty.call(pristineMatch, key)
+					) continue;
+					item[key] = MiscUtil.copyFast(pristineMatch[key]);
 				}
 			}
-			const matchedTypeCode = match?.typeCode ?? match?.type;
+			const matchedTypeCode = pristineMatch ? match?.typeCode ?? match?.type : null;
 			const hasDerivedCoarseTypeCode = coarseInventoryTypes.has(item.typeCode);
 			const resolvedTypeCode = matchedTypeCode ?? item.type;
 			if (resolvedTypeCode != null && (item.typeCode == null || hasDerivedCoarseTypeCode)) {
 				item.typeCode = resolvedTypeCode;
 			}
-			if (item.scfType == null && match?.scfType != null) item.scfType = match.scfType;
-			if (item.focus == null && match?.focus != null) item.focus = MiscUtil.copyFast(match.focus);
+			if (item.scfType == null && pristineMatch && match?.scfType != null) item.scfType = match.scfType;
+			if (item.focus == null && pristineMatch && match?.focus != null) item.focus = MiscUtil.copyFast(match.focus);
 			if (item.requiresAttunement == null && item.reqAttune != null) item.requiresAttunement = !!item.reqAttune;
 			if (item.properties == null && Array.isArray(item.property)) item.properties = MiscUtil.copyFast(item.property);
 			for (const [suffix, ability] of [["Str", "str"], ["Dex", "dex"], ["Con", "con"], ["Int", "int"], ["Wis", "wis"], ["Cha", "cha"]]) {
@@ -6053,7 +6058,8 @@ class CharacterSheetState {
 		for (const invItem of this._data.inventory) {
 			const item = invItem?.item;
 			if (!item || item.weapon === true) continue;
-			const typeBase = typeof item.type === "string" ? item.type.split("|")[0] : null;
+			const storedType = item.type || item.typeCode;
+			const typeBase = typeof storedType === "string" ? storedType.split("|")[0] : null;
 			const isWeapon = item.type === "weapon"
 				|| typeBase === "M" || typeBase === "R"
 				|| !!item.weaponCategory;
