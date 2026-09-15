@@ -2259,6 +2259,17 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					const insufficientType = CURRENCY_TYPES.find(type => currency[type] > (Number(sourceContainer?.currency?.[type]) || 0));
 					if (insufficientType) throw new Error(`Only ${sourceContainer?.currency?.[insufficientType] || 0} ${insufficientType.toUpperCase()} is available.`);
 					if (!entryId && !Object.values(currency).some(Boolean)) throw new Error("Choose an item or enter a currency amount.");
+					const isAutoResolved = shouldAutoResolveTransfer({
+						isDm,
+						sourceKind,
+						targetKind,
+						targetId,
+						targetCharacters,
+						accountId: session.account.id,
+					});
+					const currentContext = isAutoResolved && targetKind === "character"
+						? await api.pGetCampaignContext({campaignId})
+						: null;
 					const proposed = await api.pProposeTransfer({
 						campaignId,
 						sourceKind,
@@ -2269,20 +2280,13 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 							items: entryId && quantity ? [{entryId, quantity}] : [],
 							currency,
 						},
+						...(currentContext ? {rulesVersionId: currentContext.rulesVersion?.id || null} : {}),
 						idempotencyKey,
 					});
-					const isAutoResolved = shouldAutoResolveTransfer({
-						isDm,
-						sourceKind,
-						targetKind,
-						targetId,
-						targetCharacters,
-						accountId: session.account.id,
-					});
 					if (!isAutoResolved) return {transfer: proposed.transfer, isAutoResolved: false, targetKind};
-					const currentContext = targetKind === "character"
-						? await api.pGetCampaignContext({campaignId})
-						: null;
+					if (proposed.transfer.status === "committed") {
+						return {transfer: proposed.transfer, isAutoResolved: true, targetKind};
+					}
 					const resolved = await api.pResolveTransfer({
 						campaignId,
 						transferId: proposed.transfer.id,

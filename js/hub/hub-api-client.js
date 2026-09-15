@@ -553,9 +553,19 @@ export class HubApiClient {
 		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/transfers`)).transfers;
 	}
 
-	async pProposeTransfer ({campaignId, sourceKind, sourceId, targetKind, targetId, payload, idempotencyKey}) {
+	async pProposeTransfer ({campaignId, sourceKind, sourceId, targetKind, targetId, payload, rulesVersionId, idempotencyKey}) {
 		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/transfers`, {
-			method: "POST", body: {sourceKind, sourceId, targetKind, targetId, payload}, isMutation: true, idempotencyKey,
+			method: "POST",
+			body: {
+				sourceKind,
+				sourceId,
+				targetKind,
+				targetId,
+				payload,
+				...(rulesVersionId === undefined ? {} : {rulesVersionId}),
+			},
+			isMutation: true,
+			idempotencyKey,
 		});
 	}
 

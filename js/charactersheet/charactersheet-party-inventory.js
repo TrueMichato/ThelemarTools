@@ -1335,12 +1335,16 @@ export class CharacterSheetPartyInventory {
 					return true;
 				}
 			}
-			if (draft.kind === "character" && !draft.transfer) {
+			if (draft.kind === "character" && !draft.transfer && !draft.hasAttemptedProposal) {
 				const isSaved = await this._fnSaveCharacter?.();
 				if (!isSaved) throw Object.assign(new Error("Save failed"), {code: "CHARACTER_BUSY"});
 			}
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
 			if (!draft.transfer) {
+				const isAutoResolve = this._shouldAutoResolve();
+				const rulesVersionId = isAutoResolve && draft.destinationKind === "character"
+					? this._fnGetRulesVersionId()
+					: undefined;
 				const targetId = getPartyInventoryTransferTargetId({
 					sourceKind: draft.kind,
 					destinationKind: draft.destinationKind,
@@ -1348,6 +1352,7 @@ export class CharacterSheetPartyInventory {
 					recipientId: draft.recipientId,
 					partyInventoryId: this._partyInventory?.id,
 				});
+				draft.hasAttemptedProposal = true;
 				const result = await this._api.pProposeTransfer({
 					campaignId: this._campaignId,
 					sourceKind: draft.kind,
@@ -1358,12 +1363,13 @@ export class CharacterSheetPartyInventory {
 						items: [{entryId: draft.entryId, quantity: draft.quantity}],
 						currency: {},
 					},
+					...(rulesVersionId === undefined ? {} : {rulesVersionId}),
 					idempotencyKey: draft.commandId,
 				});
 				draft.transfer = result.transfer;
 			}
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
-			if (this._shouldAutoResolve()) {
+			if (this._shouldAutoResolve() && ["proposed", "reserved"].includes(draft.transfer.status)) {
 				const rulesVersionId = this._fnGetRulesVersionId();
 				const resolved = await this._api.pResolveTransfer({
 					campaignId: this._campaignId,

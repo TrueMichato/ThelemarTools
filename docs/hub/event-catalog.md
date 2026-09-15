@@ -57,7 +57,7 @@
 | `party_inventory.invalidated` | campaign | all_members | empty | Metadata-only shared-stash refresh signal |
 | `transfer.proposed` | transfer | explicit requester+target owner; DMs see explicit events by role | source/target kinds; each non-DM sees only owned character endpoint ids | Player requested party inventory for an owned character; no asset was reserved or removed |
 | `transfer.reserved` | transfer | explicit actor+target owner | source/target kinds; each non-DM sees only owned character endpoint ids | Escrow content and counterpart identities are not broadcast |
-| `transfer.committed` | transfer | explicit actor+target owner | privacy-reduced source/target endpoints | Destination write complete; affected owners refetch authoritative state |
+| `transfer.committed` | transfer | explicit actor+target owner | privacy-reduced source/target endpoints | Destination write complete; direct-authority proposals emit this without a preceding `transfer.reserved`, and affected owners refetch authoritative state |
 | `transfer.rejected` | transfer | explicit actor+target owner | privacy-reduced source/target endpoints | Source restored; affected owners refetch authoritative state |
 | `transfer.cancelled` | transfer | explicit actor+target owner | lifecycle reason plus privacy-reduced endpoints | Source restored; affected owners refetch authoritative state |
 
@@ -99,9 +99,9 @@ snapshot already contains their result:
   includes the event sequence.
 
 One metadata-only invalidation is emitted per affected character per commit by every mutation that can change
-a catalog field: owner patches, item grants, applied structured effects, both legs of a transfer (escrow
-reservation and resolution), archived-import reactivation, and a sharing-policy write. `xp.granted` emits none
-because `xp` is not a catalog field.
+a catalog field: owner patches, item grants, applied structured effects, approval-bound transfer reservation
+and resolution, both participants of an atomic direct transfer, archived-import reactivation, and a
+sharing-policy write. `xp.granted` emits none because `xp` is not a catalog field.
 
 An atomic item-award batch emits each `item.granted` and its projection invalidation in request target order,
 then one `party_inventory.invalidated` if the source stash was debited. Retries replay the receipt and emit

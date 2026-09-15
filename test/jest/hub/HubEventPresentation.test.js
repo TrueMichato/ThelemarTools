@@ -20,6 +20,7 @@ describe("campaign activity event presentation", () => {
 		const owner = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "activity-owner", displayName: "Owner"});
 		const player = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "activity-player", displayName: "Player"});
 		const deleter = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "activity-deleter", displayName: "Deleter"});
+		const sender = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "activity-sender", displayName: "Sender"});
 		const campaign = (await store.pCreateCampaign({
 			accountId: owner.id,
 			name: "Activity",
@@ -46,8 +47,9 @@ describe("campaign activity event presentation", () => {
 		await join(player, campaign.id, "player-campaign");
 		await join(player, destination.id, "player-destination");
 		await join(deleter, campaign.id, "deleter-campaign");
+		await join(sender, campaign.id, "sender-campaign");
 		const source = (await store.pCreateCharacter({
-			accountId: owner.id,
+			accountId: sender.id,
 			campaignId: campaign.id,
 			data: {name: "Source", inventory: [], currency: {gp: 100}},
 			schemaVersion: 1,
@@ -77,7 +79,7 @@ describe("campaign activity event presentation", () => {
 		const detachTarget = await createTarget(player, "Detach Target", "activity-detach-target");
 		const deleteTarget = await createTarget(deleter, "Delete Target", "activity-delete-target");
 		const propose = (target, key) => store.pProposeTransfer({
-			accountId: owner.id,
+			accountId: sender.id,
 			campaignId: campaign.id,
 			sourceKind: "character",
 			sourceId: source.id,

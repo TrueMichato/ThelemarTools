@@ -1785,9 +1785,30 @@ export class HubCampaignPage {
 		await this.page.locator("#campaign-transfer-entry").selectOption(itemValue);
 		await this.page.locator("#campaign-transfer-quantity").fill(`${quantity}`);
 		await expect(this.page.locator("#campaign-transfer-entry")).toHaveValue(itemValue);
-		await this.page.locator("#campaign-transfer-form button[type='submit']").click();
-		await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer complete.");
-		await expect(this.page.locator("#campaign-pending-transfers .hub-data-row")).toHaveCount(0);
+		const proposalPath = `/api/campaigns/${campaignId}/transfers`;
+		const resolutionPathPrefix = `${proposalPath}/`;
+		let resolutionCount = 0;
+		const observeResolution = (request: Request) => {
+			const pathname = new URL(request.url()).pathname;
+			if (request.method() === "POST" && pathname.startsWith(resolutionPathPrefix) && pathname.endsWith("/resolve")) {
+				resolutionCount++;
+			}
+		};
+		this.page.on("request", observeResolution);
+		try {
+			const proposalResponsePromise = this.page.waitForResponse(response => {
+				return response.request().method() === "POST"
+					&& new URL(response.url()).pathname === proposalPath;
+			});
+			await this.page.locator("#campaign-transfer-form button[type='submit']").click();
+			const proposalStatus = (await (await proposalResponsePromise).json()).transfer?.status || null;
+			await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer complete.");
+			await expect(this.page.locator("#campaign-pending-transfers .hub-data-row")).toHaveCount(0);
+			expect(proposalStatus).toBe("committed");
+			expect(resolutionCount).toBe(0);
+		} finally {
+			this.page.off("request", observeResolution);
+		}
 	}
 
 	async reserveRepeatedItemTransfersAfterRefreshRetry ({

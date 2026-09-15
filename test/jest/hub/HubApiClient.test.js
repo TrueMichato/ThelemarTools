@@ -130,6 +130,7 @@ describe("hub API client", () => {
 				throw new Error(`Unexpected request: ${path}`);
 			},
 		});
+
 		await client.pGetSession();
 
 		await expect(client.pResolveTransfer({
@@ -142,6 +143,37 @@ describe("hub API client", () => {
 		const resolveCalls = calls.filter(call => call.path.endsWith("/resolve"));
 		expect(resolveCalls.map(call => JSON.parse(call.opts.body).rulesVersionId)).toEqual(["rules-1", "rules-2"]);
 		expect(resolveCalls.map(call => call.opts.headers["idempotency-key"])).toEqual(["accept-1", "accept-1"]);
+	});
+
+	it("pins an atomic direct transfer proposal to the active rules version", async () => {
+		const calls = [];
+		const client = new HubApiClient({
+			fnFetch: async (path, opts = {}) => {
+				calls.push({path, opts});
+				if (path === "/api/session") return getResponse({body: {signedIn: true, csrfToken: "csrf-1"}});
+				return getResponse({status: 201, body: {transfer: {id: "transfer-1", status: "committed"}}});
+			},
+		});
+		await client.pGetSession();
+		await client.pProposeTransfer({
+			campaignId: "campaign-1",
+			sourceKind: "character",
+			sourceId: "source-1",
+			targetKind: "character",
+			targetId: "target-1",
+			payload: {items: [{entryId: "item-1", quantity: 1}], currency: {}},
+			rulesVersionId: "rules-1",
+			idempotencyKey: "transfer-1",
+		});
+
+		expect(JSON.parse(calls[1].opts.body)).toEqual({
+			sourceKind: "character",
+			sourceId: "source-1",
+			targetKind: "character",
+			targetId: "target-1",
+			payload: {items: [{entryId: "item-1", quantity: 1}], currency: {}},
+			rulesVersionId: "rules-1",
+		});
 	});
 
 	it("normalizes browser fetch failures without leaking browser-specific messages", async () => {

@@ -302,7 +302,8 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
 - Transfer acceptance refreshes canonical character documents, shared inventory, balances, source/target/item
   pickers, and the inbox together; the lifecycle journey proves the accepted item is immediately selectable
   from party inventory without reloading. Transfer authority coverage exercises player-to-own/peer/DM-owned and
-  DM-to-owned/player-owned destinations, verifies direct DM and same-owner UI resolution, keeps player stash
+  DM-to-owned/player-owned destinations, verifies direct DM and same-owner moves are committed atomically by the
+  server without a recipient-resolvable reservation or redundant browser resolution, keeps player stash
   requests non-escrowed until DM approval, proves stale approvals return `TRANSFER_INSUFFICIENT`, and forces a
   post-mutation refetch failure before retrying balances and completing another transfer without a page reload.
   Inbox resolution coverage loses approve/decline responses after commit, reuses the same decision key, and

@@ -413,6 +413,20 @@ export function prepareTransferRequest ({container, payload}) {
 	};
 }
 
+export function isDirectTransferAuthority ({
+	role,
+	accountId,
+	sourceKind,
+	targetKind,
+	targetOwnerAccountId,
+}) {
+	if (["dm", "co_dm"].includes(role)) return true;
+	return role === "player"
+		&& sourceKind === "character"
+		&& targetKind === "character"
+		&& targetOwnerAccountId === accountId;
+}
+
 export function addTransferPayload ({container, escrow, isRestore = false}) {
 	const out = structuredClone(container);
 	out.inventory = normalizeInventory(out.inventory);

@@ -94,7 +94,7 @@ describe("Hub lifecycle administration", () => {
 
 	it("cancels a member's reserved transfers on spectator downgrade and keeps resolution read-only", async () => {
 		const source = (await store.pCreateCharacter({
-			accountId: dm.id,
+			accountId: player.id,
 			campaignId: campaign.id,
 			clientImportId: "role-change-source",
 			schemaVersion: 1,
@@ -110,7 +110,7 @@ describe("Hub lifecycle administration", () => {
 			idempotencyKey: key("role-change-target"),
 		})).character;
 		const reserved = (await store.pProposeTransfer({
-			accountId: dm.id,
+			accountId: player.id,
 			campaignId: campaign.id,
 			sourceKind: "character",
 			sourceId: source.id,
@@ -131,10 +131,10 @@ describe("Hub lifecycle administration", () => {
 
 		expect((await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
 			.find(transfer => transfer.id === reserved.id).status).toBe("cancelled");
-		expect((await store.pGetCharacter({accountId: dm.id, characterId: source.id})).character.data.currency.gp).toBe(4);
+		expect((await store.pGetCharacter({accountId: player.id, characterId: source.id})).character.data.currency.gp).toBe(4);
 
 		const afterDowngrade = (await store.pProposeTransfer({
-			accountId: dm.id,
+			accountId: player.id,
 			campaignId: campaign.id,
 			sourceKind: "character",
 			sourceId: source.id,

@@ -41,8 +41,24 @@ describe("campaign lifecycle and export", () => {
 	});
 
 	it("blocks archive while escrow is reserved, then detaches characters safely", async () => {
-		const source = (await store.pCreateCharacter({
+		const sourceOwner = (await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: "archive-source",
+			displayName: "Archive source",
+		})).id;
+		const tokenHash = crypto.createHash("sha256").update("archive-source-invite").digest("hex");
+		await store.pCreateInvite({
 			accountId: owner,
+			campaignId: campaign.id,
+			role: "player",
+			tokenHash,
+			expiresAt: new Date(Date.now() + 10000),
+			maxUses: 1,
+			idempotencyKey: "archive-source-invite",
+		});
+		await store.pRedeemInvite({accountId: sourceOwner, tokenHash, idempotencyKey: "archive-source-redeem"});
+		const source = (await store.pCreateCharacter({
+			accountId: sourceOwner,
 			campaignId: campaign.id,
 			data: {name: "Hero", inventory: [], currency: {gp: 10}},
 			schemaVersion: 1,
@@ -58,7 +74,7 @@ describe("campaign lifecycle and export", () => {
 			idempotencyKey: "target",
 		})).character;
 		const transfer = (await store.pProposeTransfer({
-			accountId: owner,
+			accountId: sourceOwner,
 			campaignId: campaign.id,
 			sourceKind: "character",
 			sourceId: source.id,
@@ -73,7 +89,7 @@ describe("campaign lifecycle and export", () => {
 		const successorMembership = await store.pGetMembership({accountId: successor, campaignId: campaign.id});
 		const archived = await store.pArchiveCampaign({accountId: owner, campaignId: campaign.id, idempotencyKey: "archive-2"});
 		expect(archived.campaign.status).toBe("archived");
-		expect((await store.pGetCharacter({accountId: owner, characterId: source.id})).character.campaignId).toBeNull();
+		expect((await store.pGetCharacter({accountId: sourceOwner, characterId: source.id})).character.campaignId).toBeNull();
 		const archivedEvents = () => store.getDomainEvents().filter(event => event.type === "campaign.archived");
 		expect(archivedEvents()).toHaveLength(1);
 		await expect(store.pArchiveCampaign({accountId: owner, campaignId: campaign.id, idempotencyKey: "archive-2"}))

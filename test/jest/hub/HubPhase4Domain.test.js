@@ -226,10 +226,11 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			payload: {decision: "accept"},
 		})).json().transfer.status).toBe("committed");
 
+		const playerToOwnKey = "player-direct-own";
 		const playerToOwn = await app.inject({
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/transfers`,
-			headers: headers(a.session),
+			headers: headers(a.session, playerToOwnKey),
 			payload: {
 				sourceKind: "character",
 				sourceId: a.character.id,
@@ -238,13 +239,25 @@ describe("Phase 4 actions, grants, and transfers", () => {
 				payload: {items: [{entryId: "arrows-2", quantity: 1}]},
 			},
 		});
-		expect(playerToOwn.json().transfer.status).toBe("reserved");
+		expect(playerToOwn.json().transfer.status).toBe("committed");
+		expect((await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(a.session, playerToOwnKey),
+			payload: {
+				sourceKind: "character",
+				sourceId: a.character.id,
+				targetKind: "character",
+				targetId: secondOwned.id,
+				payload: {items: [{entryId: "arrows-2", quantity: 1}]},
+			},
+		})).json()).toEqual(playerToOwn.json());
 		expect((await app.inject({
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/transfers/${playerToOwn.json().transfer.id}/resolve`,
 			headers: headers(a.session),
-			payload: {decision: "accept"},
-		})).json().transfer.status).toBe("committed");
+			payload: {decision: "reject"},
+		})).statusCode).toBe(404);
 
 		const playerToDm = await app.inject({
 			method: "POST",
@@ -266,10 +279,11 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			payload: {decision: "accept"},
 		})).json().transfer.status).toBe("committed");
 
+		const dmToPlayerKey = "dm-direct-player";
 		const dmToPlayer = await app.inject({
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/transfers`,
-			headers: headers(dm),
+			headers: headers(dm, dmToPlayerKey),
 			payload: {
 				sourceKind: "character",
 				sourceId: dmCharacter.id,
@@ -278,13 +292,31 @@ describe("Phase 4 actions, grants, and transfers", () => {
 				payload: {items: [{entryId: "dm-arrows", quantity: 1}]},
 			},
 		});
-		expect(dmToPlayer.json().transfer.status).toBe("reserved");
+		expect(dmToPlayer.json().transfer.status).toBe("committed");
+		expect((await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(dm, dmToPlayerKey),
+			payload: {
+				sourceKind: "character",
+				sourceId: dmCharacter.id,
+				targetKind: "character",
+				targetId: b.character.id,
+				payload: {items: [{entryId: "dm-arrows", quantity: 1}]},
+			},
+		})).json()).toEqual(dmToPlayer.json());
 		expect((await app.inject({
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/transfers/${dmToPlayer.json().transfer.id}/resolve`,
-			headers: headers(dm),
-			payload: {decision: "accept"},
-		})).json().transfer.status).toBe("committed");
+			headers: headers(b.session),
+			payload: {decision: "reject"},
+		})).statusCode).toBe(404);
+		const directTarget = (await app.inject({
+			method: "GET",
+			url: `/api/characters/${b.character.id}`,
+			headers: readHeaders(b.session),
+		})).json().projection.character;
+		expect(directTarget.data.inventory.find(entry => entry.item.name === "Arrow").quantity).toBe(12);
 	});
 
 	it("lets a player request stash items without reserving them before DM approval", async () => {

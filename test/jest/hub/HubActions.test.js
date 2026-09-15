@@ -2,6 +2,7 @@ import {
 	addTransferPayload,
 	applySemanticOperation,
 	applyStructuredEffect,
+	isDirectTransferAuthority,
 	normalizeCharacterInventory,
 	normalizeSemanticOperation,
 	removeTransferPayload,
@@ -10,6 +11,40 @@ import {
 	getInventoryTransferEligibility,
 	getInventoryWeightSummary,
 } from "../../../js/hub/hub-inventory-contract.js";
+
+describe("transfer authority", () => {
+	it("derives direct commits only from trusted DM roles or same-owner player characters", () => {
+		expect(isDirectTransferAuthority({
+			role: "dm",
+			accountId: "dm",
+			sourceKind: "party_inventory",
+			targetKind: "character",
+			targetOwnerAccountId: "player",
+		})).toBe(true);
+		expect(isDirectTransferAuthority({
+			role: "co_dm",
+			accountId: "co-dm",
+			sourceKind: "character",
+			targetKind: "party_inventory",
+			targetOwnerAccountId: null,
+		})).toBe(true);
+		expect(isDirectTransferAuthority({
+			role: "player",
+			accountId: "player",
+			sourceKind: "character",
+			targetKind: "character",
+			targetOwnerAccountId: "player",
+		})).toBe(true);
+		for (const candidate of [
+			{role: "player", sourceKind: "character", targetKind: "character", targetOwnerAccountId: "peer"},
+			{role: "player", sourceKind: "character", targetKind: "party_inventory", targetOwnerAccountId: null},
+			{role: "player", sourceKind: "party_inventory", targetKind: "character", targetOwnerAccountId: "player"},
+			{role: "spectator", sourceKind: "character", targetKind: "character", targetOwnerAccountId: "player"},
+		]) {
+			expect(isDirectTransferAuthority({accountId: "player", ...candidate})).toBe(false);
+		}
+	});
+});
 
 describe("structured effects", () => {
 	it("applies damage through temporary HP and clamps healing", () => {

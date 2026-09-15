@@ -45,7 +45,7 @@ security boundary.
 | `pending_actions` | Legacy pre-v3 structured effect workflow | actor, optional target character, status, payload, optional expiry | legacy history only; migration 0005 cancels arbitrary proposed rows |
 | `semantic_operations` | Versioned character intent lifecycle | one target, optional source, pinned template/choice/rules/content, optional closed source cost and deterministic seed, source/target result linkage, <=24h proposal expiry | direct applied operation or proposed -> applied/rejected/cancelled/expired/failed |
 | `semantic_operation_commands` | Persistent exactly-once command result | global command id, actor/body hash, operation, command type, response/event ids | create/resolve replay and mutated-body rejection |
-| `transfers` | Escrowed asset workflow | exactly one source and target container, status, escrow payload | created directly as reserved -> committed/rejected/cancelled; proposed/accepted/expired reserved |
+| `transfers` | Asset-transfer workflow | exactly one source and target container, status, escrow/request payload | direct authority is created as committed; approval-bound escrow is reserved -> committed/rejected/cancelled; player stash withdrawal is proposed -> committed/rejected/cancelled |
 | `domain_events` | Ordered client-visible history | unique campaign sequence; visibility and explicit-recipient constraint | replay/live fanout |
 | `audit_entries` | Security/admin history | nullable campaign/account/session refs; details JSON | mutations append relevant audit |
 | `command_receipts` | Payload-aware idempotency | account+key primary key; request hash; 24h expiry | character payload compacted to reference |
@@ -103,8 +103,10 @@ A target document that cannot supply a positive hit-point maximum fails the whol
 
 ### Transfer
 
-Reservation removes source assets into `payload.escrow`. Resolution writes either target (commit) or source
-(restore) and then changes transfer status. Source/target aggregate locks are acquired in sorted id order.
+Direct DM/co-DM and same-owner character transfers validate and write source, target, terminal transfer, audit,
+event, outbox, and receipt in one command. Approval-bound reservation removes source assets into
+`payload.escrow`; resolution writes either target (commit) or source (restore) and then changes transfer status.
+Source/target aggregate locks are acquired in sorted id order for both paths.
 
 ## State machines
 
@@ -197,6 +199,7 @@ stateDiagram-v2
   proposed --> committed: DM approves; source and target change atomically
   proposed --> rejected: DM declines or requester cancels; stash unchanged
   proposed --> cancelled: lifecycle cancellation; stash unchanged
+  [*] --> committed: server-authorized DM/co-DM or same-owner move
   [*] --> reserved: source moved to escrow
   reserved --> committed: target accepts
   reserved --> rejected: target rejects; source restored
@@ -208,7 +211,9 @@ stateDiagram-v2
 request stores normalized quantities and a server-derived preview, but the shared source remains untouched
 until a DM/co-DM accepts. Acceptance locks both participants, rechecks the live source, and transfers the
 fresh canonical escrow in one transaction; `TRANSFER_INSUFFICIENT` leaves the request proposed. `accepted`
-remains an unused schema state.
+remains an unused schema state. The direct path has no `reserved` state visible to a recipient: authority is
+derived from trusted membership role and target ownership, and the initial idempotent proposal either commits
+both containers or changes neither.
 
 ### Outbox
 

@@ -1403,6 +1403,7 @@ export async function createHubApp ({
 					sourceId: {type: "string", format: "uuid"},
 					targetKind: {type: "string", enum: ["character", "party_inventory"]},
 					targetId: {type: "string", format: "uuid"},
+					rulesVersionId: {type: ["string", "null"], format: "uuid"},
 					payload: {
 						type: "object",
 						additionalProperties: false,

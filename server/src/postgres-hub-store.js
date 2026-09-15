@@ -26,6 +26,7 @@ import {
 	getItemAwardIdempotencyKey,
 	getItemAwardTotalQuantity,
 	getSafeItemSummary,
+	isDirectTransferAuthority,
 	normalizeItemAwardRequest,
 	normalizeItemAwardQuantity,
 	normalizeCharacterInventory,
@@ -5539,7 +5540,7 @@ export class PostgresHubStore {
 		}
 	}
 
-	async pProposeTransfer ({accountId, campaignId, sourceKind, sourceId, targetKind, targetId, payload, idempotencyKey}) {
+	async pProposeTransfer ({accountId, campaignId, sourceKind, sourceId, targetKind, targetId, payload, rulesVersionId = null, idempotencyKey}) {
 		const client = await this._pool.connect();
 		try {
 			await client.query("BEGIN");
@@ -5549,6 +5550,9 @@ export class PostgresHubStore {
 				return prior;
 			}
 			const membership = await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+			if (sourceKind === targetKind && sourceId === targetId) {
+				throw new HubStoreError("TRANSFER_TARGET_INVALID", `Choose a different transfer destination.`, {status: 400});
+			}
 			await this._pLockInventoryParticipants({client, ids: [sourceId, targetId]});
 			const source = await this._pGetTransferContainer({client, campaignId, kind: sourceKind, id: sourceId, actorAccountId: accountId});
 			const target = await this._pGetTransferContainer({client, campaignId, kind: targetKind, id: targetId, actorAccountId: accountId});
@@ -5567,10 +5571,32 @@ export class PostgresHubStore {
 			) {
 				throw new HubStoreError("FORBIDDEN", `Players can only request party inventory for one of their own characters.`, {status: 403});
 			}
+			const isDirectAuthority = isDirectTransferAuthority({
+				role: membership.role,
+				accountId,
+				sourceKind,
+				targetKind,
+				targetOwnerAccountId: target.ownerAccountId,
+			});
 			const prepared = isPlayerStashRequest
 				? prepareTransferRequest({container: source.container, payload})
 				: removeTransferPayload({container: source.container, payload});
+			let directTargetAfter = null;
+			if (isDirectAuthority) {
+				directTargetAfter = addTransferPayload({container: target.container, escrow: prepared.escrow});
+				if (target.character) {
+					const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId});
+					assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+					assertCharacterCampaignContentMutation({
+						...enforcement,
+						before: target.container,
+						after: directTargetAfter,
+						rulesVersionId: enforcement.activeRulesVersionId,
+					});
+				}
+			}
 			if (!isPlayerStashRequest) await source.pWrite(prepared.container);
+			if (directTargetAfter) await target.pWrite(directTargetAfter);
 			const transferId = crypto.randomUUID();
 			const inserted = await client.query(`
 				INSERT INTO hub.transfers (
@@ -5588,12 +5614,15 @@ export class PostgresHubStore {
 				sourceKind === "party_inventory" ? sourceId : null,
 				targetKind === "character" ? targetId : null,
 				targetKind === "party_inventory" ? targetId : null,
-				isPlayerStashRequest ? "proposed" : "reserved",
+				isPlayerStashRequest ? "proposed" : isDirectAuthority ? "committed" : "reserved",
 				JSON.stringify(isPlayerStashRequest
 					? {request: prepared.request, preview: prepared.preview}
 					: {escrow: prepared.escrow}),
 			]);
 			const transfer = this._getTransfer(inserted.rows[0]);
+			if (isDirectAuthority) {
+				await this._pAppendAudit({client, campaignId, actorAccountId: accountId, action: "transfer.committed", targetType: "transfer", targetId: transferId});
+			}
 			await this._pAppendEvent({
 				client,
 				campaignId,

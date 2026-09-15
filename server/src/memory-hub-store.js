@@ -26,6 +26,7 @@ import {
 	getItemAwardIdempotencyKey,
 	getItemAwardTotalQuantity,
 	getSafeItemSummary,
+	isDirectTransferAuthority,
 	normalizeItemAwardRequest,
 	normalizeItemAwardQuantity,
 	normalizeCharacterInventory,
@@ -3391,10 +3392,13 @@ export class MemoryHubStore {
 		}
 	}
 
-	async pProposeTransfer ({accountId, campaignId, sourceKind, sourceId, targetKind, targetId, payload, idempotencyKey}) {
+	async pProposeTransfer ({accountId, campaignId, sourceKind, sourceId, targetKind, targetId, payload, rulesVersionId = null, idempotencyKey}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
 		if (prior) return prior;
 		const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+		if (sourceKind === targetKind && sourceId === targetId) {
+			throw new HubStoreError("TRANSFER_TARGET_INVALID", `Choose a different transfer destination.`, {status: 400});
+		}
 		const source = this._getTransferContainer({kind: sourceKind, id: sourceId, campaignId});
 		const target = this._getTransferContainer({kind: targetKind, id: targetId, campaignId});
 		if (target._character) this._assertTargetable({character: target._character, accountId, role: membership.role});
@@ -3410,11 +3414,36 @@ export class MemoryHubStore {
 		) {
 			throw new HubStoreError("FORBIDDEN", `Players can only request party inventory for one of their own characters.`, {status: 403});
 		}
+		const isDirectAuthority = isDirectTransferAuthority({
+			role: membership.role,
+			accountId,
+			sourceKind,
+			targetKind,
+			targetOwnerAccountId: target._character?.ownerAccountId,
+		});
 		const prepared = isPlayerStashRequest
 			? prepareTransferRequest({container: source.container, payload})
 			: removeTransferPayload({container: source.container, payload});
+		let directTargetAfter = null;
+		if (isDirectAuthority) {
+			directTargetAfter = addTransferPayload({container: target.container, escrow: prepared.escrow});
+			if (target._character) {
+				const enforcement = await this._pGetCampaignContentEnforcement(campaignId);
+				assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+				assertCharacterCampaignContentMutation({
+					...enforcement,
+					before: target.container,
+					after: directTargetAfter,
+					rulesVersionId: enforcement.activeRulesVersionId,
+				});
+				validateCloudCharacterData(directTargetAfter);
+			}
+		}
 		if (!isPlayerStashRequest) {
 			this._setTransferContainer({holder: source, container: prepared.container, actorAccountId: accountId});
+		}
+		if (directTargetAfter) {
+			this._setTransferContainer({holder: target, container: directTargetAfter, actorAccountId: accountId});
 		}
 		const transfer = {
 			id: crypto.randomUUID(),
@@ -3424,13 +3453,17 @@ export class MemoryHubStore {
 			sourceId,
 			targetKind,
 			targetId,
-			status: isPlayerStashRequest ? "proposed" : "reserved",
+			status: isPlayerStashRequest ? "proposed" : isDirectAuthority ? "committed" : "reserved",
 			payload: isPlayerStashRequest
 				? {request: prepared.request, preview: prepared.preview}
 				: {escrow: prepared.escrow},
 			createdAt: this._fnNow().toISOString(),
 		};
 		this._transfers.set(transfer.id, transfer);
+		if (isDirectAuthority) {
+			transfer.resolvedAt = this._fnNow().toISOString();
+			this._appendAudit({campaignId, actorAccountId: accountId, action: "transfer.committed", targetType: "transfer", targetId: transfer.id});
+		}
 		this._appendEvent({
 			campaignId,
 			actorAccountId: accountId,
