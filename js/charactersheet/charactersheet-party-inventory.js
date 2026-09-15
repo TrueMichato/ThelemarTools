@@ -914,8 +914,22 @@ export class CharacterSheetPartyInventory {
 		return createElement("p", {className: "charsheet__party-inventory-empty", text: message});
 	}
 
+	_isDraftEditable (draft = this._draft) {
+		return !!draft && !draft.transfer && !draft.proposalRequest;
+	}
+
+	_getPendingAcceptance (draft = this._draft) {
+		if (!draft?.transfer) return null;
+		return this._transferResolutionDrafts.get({
+			campaignId: this._campaignId,
+			transferId: draft.transfer.id,
+		});
+	}
+
 	_renderComposer () {
 		const entry = this._getEntry(this._draft);
+		const isProposalFrozen = !this._isDraftEditable() && !this._draft.transfer;
+		const pendingAcceptance = this._getPendingAcceptance();
 		const composer = createElement("form", {
 			className: "charsheet__party-inventory-composer",
 			attrs: {
@@ -942,12 +956,13 @@ export class CharacterSheetPartyInventory {
 				step: 1,
 				value: this._draft.quantity,
 				required: true,
+				disabled: isProposalFrozen,
 				"aria-describedby": "charsheet-party-inventory-confirmation",
 				"data-party-inventory-focus": "quantity",
 			},
 		});
 		quantity.addEventListener("input", () => {
-			if (this._draft.transfer) return;
+			if (!this._isDraftEditable()) return;
 			this._draft.quantity = Number(quantity.value);
 			this._draft.commandId = getOpaqueToken();
 			this._draft.resolutionCommandId = getOpaqueToken();
@@ -963,7 +978,10 @@ export class CharacterSheetPartyInventory {
 			destinationField.append(createElement("span", {text: "Destination"}));
 			const destination = createElement("select", {
 				className: "ve-form-control",
-				attrs: {"data-party-inventory-focus": "destination"},
+				attrs: {
+					disabled: isProposalFrozen,
+					"data-party-inventory-focus": "destination",
+				},
 			});
 			destination.append(createElement("option", {text: "Party stash", attrs: {value: "party_inventory"}}));
 			for (const [token, recipient] of this._recipientByToken) {
@@ -977,7 +995,7 @@ export class CharacterSheetPartyInventory {
 				? "party_inventory"
 				: [...this._recipientByToken].find(([, recipient]) => recipient.id === this._draft.recipientId)?.[0] || "party_inventory";
 			destination.addEventListener("change", () => {
-				if (this._draft.transfer) return;
+				if (!this._isDraftEditable()) return;
 				const recipient = this._recipientByToken.get(destination.value);
 				this._draft.destinationKind = recipient ? "character" : "party_inventory";
 				this._draft.recipientId = recipient?.id || null;
@@ -1022,19 +1040,30 @@ export class CharacterSheetPartyInventory {
 		const isCancellationUncertain = this._draft.pendingResolution?.decision === "reject";
 		const cancel = createElement("button", {
 			className: "ve-btn ve-btn-default",
-			text: isCancellationUncertain ? "Retry cancellation" : "Cancel",
-			attrs: {type: "button", "data-party-inventory-focus": "cancel"},
+			text: pendingAcceptance
+				? "Acceptance pending"
+				: isCancellationUncertain
+					? "Retry cancellation"
+					: "Cancel",
+			attrs: {
+				type: "button",
+				disabled: !!pendingAcceptance,
+				title: pendingAcceptance ? "Retry or check the pending acceptance before cancelling." : null,
+				"data-party-inventory-focus": "cancel",
+			},
 		});
 		cancel.addEventListener("click", () => void this._pCancelDraft());
 		const submit = createElement("button", {
 			className: "ve-btn ve-btn-primary",
 			text: isCancellationUncertain
 				? "Check transfer status"
-				: this._isPlayerStashRequest()
-					? "Send request"
-					: this._shouldAutoResolve()
-						? "Move now"
-						: "Offer transfer",
+				: pendingAcceptance
+					? this._draft.needsStatusCheck ? "Check acceptance status" : "Retry acceptance"
+					: this._isPlayerStashRequest()
+						? "Send request"
+						: this._shouldAutoResolve()
+							? "Move now"
+							: "Offer transfer",
 			attrs: {type: "submit", "data-party-inventory-focus": "submit"},
 		});
 		actions.append(cancel, submit);
@@ -1277,6 +1306,13 @@ export class CharacterSheetPartyInventory {
 			this._closeDraft();
 			return true;
 		}
+		const pendingAcceptance = this._getPendingAcceptance(draft);
+		if (pendingAcceptance) {
+			draft.needsStatusCheck = true;
+			this._error = "The acceptance outcome is not yet confirmed. Retry acceptance or check its status before cancelling.";
+			this._render();
+			return false;
+		}
 
 		this._isSubmitting = true;
 		this._error = null;
@@ -1483,6 +1519,11 @@ export class CharacterSheetPartyInventory {
 					if (!isTransferOutcomeUncertain(error)) {
 						draft.proposalRequest = null;
 						draft.proposalReplayUntil = null;
+						if (error?.code === "RULES_VERSION_STALE") {
+							draft.commandId = getOpaqueToken();
+							draft.resolutionCommandId = getOpaqueToken();
+							draft.cancellationCommandId = getOpaqueToken();
+						}
 					}
 					throw error;
 				}

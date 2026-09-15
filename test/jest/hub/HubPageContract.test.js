@@ -136,6 +136,8 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("pResolveTransferFromDraft");
 		expect(source).toContain("error?.code !== \"RULES_VERSION_STALE\"");
 		expect(source).toContain("if (isRulesVersionStale && !pendingProposal)");
+		expect(source).toContain("setTransferProposalControls");
+		expect(source).toContain("form._hubTransferControlStates");
 		expect(source).toContain("resolutionRequest.decision !== decision");
 		expect(source).toContain("transferResolutionDrafts.isReplayable");
 		expect(source).toContain("transferResolutionDrafts.reconcilePending");

@@ -420,6 +420,36 @@ function syncTransferQuantity () {
 	else quantity.removeAttribute("max");
 }
 
+function setTransferProposalControls ({form, proposalRequest, characters, partyInventory, isLocked}) {
+	if (!form) return;
+	if (!form._hubTransferControlStates) form._hubTransferControlStates = new Map();
+	if (!isLocked) {
+		for (const [control, wasDisabled] of form._hubTransferControlStates) control.disabled = wasDisabled;
+		form._hubTransferControlStates.clear();
+		return;
+	}
+
+	const source = document.getElementById("campaign-transfer-source");
+	const target = document.getElementById("campaign-transfer-target");
+	const item = document.getElementById("campaign-transfer-entry");
+	const quantity = document.getElementById("campaign-transfer-quantity");
+	if (source) source.value = `${proposalRequest.sourceKind}:${proposalRequest.sourceId}`;
+	syncTransferItemPicker({characters, partyInventory});
+	if (target) target.value = `${proposalRequest.targetKind}:${proposalRequest.targetId}`;
+	const requestedItem = proposalRequest.payload?.items?.[0] || null;
+	if (item) item.value = requestedItem?.entryId || "";
+	syncTransferQuantity();
+	if (quantity) quantity.value = `${requestedItem?.quantity || 0}`;
+	for (const type of CURRENCY_TYPES) {
+		const input = document.getElementById(`campaign-transfer-${type}`);
+		if (input) input.value = `${proposalRequest.payload?.currency?.[type] || 0}`;
+	}
+	for (const control of form.querySelectorAll("input, select")) {
+		if (!form._hubTransferControlStates.has(control)) form._hubTransferControlStates.set(control, control.disabled);
+		control.disabled = true;
+	}
+}
+
 async function pInitItemAwardComposer ({context, partyInventory, targetCharacters, events = []}) {
 	const form = document.getElementById("campaign-item-form");
 	const tabs = [...document.querySelectorAll("[data-item-award-source]")];
@@ -893,6 +923,7 @@ function setTransferProposalReplayExpired ({form, proposalRef, proposalRequest, 
 			transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
 			form._hubMutationKey = null;
 			form._hubMutationFingerprint = null;
+			setTransferProposalControls({form, isLocked: false});
 			submit.textContent = "Submit transfer";
 			submit.disabled = !document.getElementById("campaign-transfer-source")?.options.length;
 			setFormStatus({
@@ -2188,6 +2219,13 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 				pRefresh: pRefreshTransferState,
 			});
 		} else {
+			setTransferProposalControls({
+				form,
+				proposalRequest: pendingTransferProposal,
+				characters,
+				partyInventory,
+				isLocked: true,
+			});
 			const submit = form?.querySelector("button[type='submit']");
 			if (submit) {
 				submit.disabled = false;
@@ -2512,6 +2550,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					return {transfer: resolved.transfer, isAutoResolved: true, targetKind};
 				}});
 			if (!result) return;
+			setTransferProposalControls({form, isLocked: false});
 			for (const type of CURRENCY_TYPES) document.getElementById(`campaign-transfer-${type}`).value = "0";
 			const successMessage = result.isAutoResolved
 				? "Transfer complete. The authoritative inventories are updated."
@@ -2537,6 +2576,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			if (isRulesVersionStale && !pendingProposal) {
 				form._hubMutationKey = null;
 				form._hubMutationFingerprint = null;
+				setTransferProposalControls({form, isLocked: false});
 			}
 			if (pendingProposal && !transferProposalDrafts.isReplayable(pendingProposal)) {
 				setTransferProposalReplayExpired({
@@ -2558,6 +2598,13 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 				isError: true,
 			});
 			if (pendingProposal) {
+				setTransferProposalControls({
+					form,
+					proposalRequest: pendingProposal,
+					characters,
+					partyInventory,
+					isLocked: true,
+				});
 				const submit = form.querySelector("button[type='submit']");
 				if (submit) submit.textContent = "Retry transfer";
 			}
