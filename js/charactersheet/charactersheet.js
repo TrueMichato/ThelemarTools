@@ -51,7 +51,8 @@ import {CharacterSheetHubEffects} from "./charactersheet-hub-effects.js";
 import {CharacterSheetPeerTargeting} from "./charactersheet-peer-targeting.js";
 import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js";
 import {getCharacterSaveFence, isCharacterSaveFenceCurrent} from "./charactersheet-persistence-fence.js";
-import {diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
+import {applyJsonPatch, diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
+import {getCharacterDocumentWithoutDeterministicItemAliases} from "../hub/hub-inventory-equivalence.js";
 import {filterCampaignContentEntities, getCampaignContentPolicy, getCampaignEntityUid} from "../hub/hub-content-policy.js";
 import {
 	getClearedCampaignRulesState,
@@ -4641,7 +4642,11 @@ class CharacterSheetPage {
 				const canonical = getClean(persisted);
 				if (diffJson(submitted, canonical).length) {
 					const live = getClean(this._state.toJson());
-					const rebased = rebaseJsonChanges({base: submitted, local: live, remote: canonical});
+					const rebased = rebaseJsonChanges({
+						base: getCharacterDocumentWithoutDeterministicItemAliases(submitted),
+						local: getCharacterDocumentWithoutDeterministicItemAliases(live),
+						remote: getCharacterDocumentWithoutDeterministicItemAliases(canonical),
+					});
 					if (rebased.isConflict) {
 						const conflict = new Error(`Live character edits overlap server changes.`);
 						conflict.code = "CHARACTER_LIVE_CONFLICT";
@@ -4651,7 +4656,7 @@ class CharacterSheetPage {
 						this._characterRepository.registerLiveConflict?.({characterId: saveFence.characterId, recovery: conflict.recovery});
 						throw conflict;
 					}
-					this._state.loadFromJson({...rebased.document, id: persisted.id});
+					this._state.loadFromJson({...applyJsonPatch(canonical, rebased.patches), id: persisted.id});
 					this._reconcileClassFeatures();
 					this._renderCharacter();
 				}

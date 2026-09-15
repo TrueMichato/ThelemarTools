@@ -18,6 +18,7 @@
 import fs from "node:fs";
 
 import "./setup.js";
+import {jest} from "@jest/globals";
 import {
 	addAwardedEntryToCharacter,
 	addTransferPayload,
@@ -55,10 +56,19 @@ import "../../../js/charactersheet/charactersheet-inventory.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetInventory = globalThis.CharacterSheetInventory;
+let CharacterSheetPage;
 const SITE_AWARD_ITEMS = JSON.parse(fs.readFileSync(
 	new URL("../../../server/data/item-award-site-catalog.json", import.meta.url),
 	"utf8",
 )).items;
+
+beforeAll(async () => {
+	globalThis.window = globalThis.window || {
+		addEventListener () {},
+		location: {href: "http://test/charactersheet.html"},
+	};
+	CharacterSheetPage = (await import("../../../js/charactersheet/charactersheet.js")).CharacterSheetPage;
+});
 
 function getSiteAwardItem (name, source) {
 	const item = SITE_AWARD_ITEMS.find(it => it.name === name && it.source === source);
@@ -716,6 +726,77 @@ describe("Hub summary-only inventory metadata migration", () => {
 });
 
 describe("Hub authoritative inventory reconciliation", () => {
+	test("post-save adoption rebases a repeat award across sheet-derived aliases", async () => {
+		const canonicalItem = getSiteAwardItem("+1 Rhythm-Maker's Drum", "TCE");
+		const {canonical: baseData, local} = getSheetNormalizedHubDocument({
+			canonicalItem,
+			quantity: 1,
+		});
+		local.notes.general = "locally edited";
+		const remoteData = addAwardedEntryToCharacter({
+			container: baseData,
+			incoming: {item: canonicalItem, quantity: 1},
+		}).container;
+		const base = {id: "character-1", campaignId: "campaign-1", revision: 1, data: baseData};
+		const remote = {id: "character-1", campaignId: "campaign-1", revision: 2, data: remoteData};
+		let resolveRemote;
+		const pRemote = new Promise(resolve => resolveRemote = resolve);
+		let getCount = 0;
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ++getCount === 1 ? structuredClone(base) : pRemote,
+			pAcquireCharacterLease: async () => ({epoch: 1}),
+			pPatchCharacter: async input => ({
+				character: {
+					...remote,
+					revision: 3,
+					data: applyJsonPatch(remote.data, input.patches),
+				},
+			}),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "character-1"});
+		const state = newState();
+		state.setItemCatalog([canonicalItem], {
+			pristineItems: [canonicalItem],
+			repairItems: [canonicalItem],
+		});
+		state.loadFromJson({id: "character-1", ...local});
+		const host = {
+			_currentCharacterId: "character-1",
+			_characterLoadGeneration: 1,
+			_lastSavedAt: 0,
+			_state: state,
+			_characterRepository: repository,
+			_updateSaveIndicator: jest.fn(),
+			_getNextSavedAt: CharacterSheetPage.prototype._getNextSavedAt,
+			_reconcileClassFeatures: jest.fn(),
+			_renderCharacter: jest.fn(),
+		};
+
+		const pReconcile = repository.pReconcileAuthoritativeCharacter({
+			characterId: "character-1",
+			fnGetLiveData: () => {
+				const out = state.toJson();
+				delete out.id;
+				return out;
+			},
+			fnAdoptLive: data => state.loadFromJson({...data, id: "character-1"}),
+		});
+		const pSave = CharacterSheetPage.prototype._saveCurrentCharacter.call(host, {isInteractiveConflict: false});
+		resolveRemote(structuredClone(remote));
+
+		await expect(pReconcile).resolves.toMatchObject({status: "reconciled", revision: 2});
+		await expect(pSave).resolves.toBe(true);
+		expect(state.toJson()).toMatchObject({
+			id: "character-1",
+			notes: {general: "locally edited"},
+			inventory: [expect.objectContaining({id: "stable-stack", quantity: 2})],
+		});
+		expect(host._renderCharacter).toHaveBeenCalledTimes(1);
+		expect(repository.getLiveConflictRecovery("character-1")).toBeNull();
+	});
+
 	test("rebases a repeat award across sheet-normalized live and queued snapshots", async () => {
 		const canonicalItem = getSiteAwardItem("+1 Rhythm-Maker's Drum", "TCE");
 		const {canonical: baseData, local} = getSheetNormalizedHubDocument({

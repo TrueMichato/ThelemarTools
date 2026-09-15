@@ -160,6 +160,8 @@ comparison inputs before inventory diffs. A canonical item and the same sheet-no
 manufacture an `/inventory` overlap around a server quantity change, while quantity, spent charges, non-empty
 upgrades/gemstones, custom metadata, provenance, effects, materials, and wrapper-state changes remain real
 conflicts. The normalization is comparison-only; canonical server inventory remains the adopted document.
+The Character Sheet's final post-save rebase uses the same comparison contract and applies disjoint local
+patches back onto the unmodified canonical document, so save completion cannot reintroduce the alias conflict.
 The accepted base and every other base track still advance together with live state so later saves retain exact
 coverage and do not need to rediscover already-accepted edits. Delivery is therefore a prepare/adopt/commit
 transaction over per-track coverage records, and an unprovable delivery schedules a serialized recovery that
