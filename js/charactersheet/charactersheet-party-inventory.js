@@ -1001,7 +1001,7 @@ export class CharacterSheetPartyInventory {
 			if (!destinationToken && this._draft.destinationKind === "character" && !this._isDraftEditable()) {
 				destinationToken = getOpaqueToken();
 				destination.append(createElement("option", {
-					text: `${this._draft.recipientLabel || "Original recipient"} — current campaign view unavailable`,
+					text: "Original recipient — current campaign view unavailable",
 					attrs: {value: destinationToken},
 				}));
 			}
@@ -1011,7 +1011,6 @@ export class CharacterSheetPartyInventory {
 				const recipient = this._recipientByToken.get(destination.value);
 				this._draft.destinationKind = recipient ? "character" : "party_inventory";
 				this._draft.recipientId = recipient?.id || null;
-				this._draft.recipientLabel = recipient?.label || null;
 				this._draft.commandId = getOpaqueToken();
 				this._draft.resolutionCommandId = getOpaqueToken();
 				this._draft.cancellationCommandId = getOpaqueToken();
@@ -1235,7 +1234,7 @@ export class CharacterSheetPartyInventory {
 			? "this character"
 			: this._draft.destinationKind === "party_inventory"
 				? "the party stash"
-				: recipient?.label || this._draft.recipientLabel || "the original recipient";
+				: recipient?.label || "the original recipient";
 		this._syncCarryDelta(composer);
 		const summary = composer.querySelector(".charsheet__party-inventory-confirmation");
 		const approvalText = this._getApprovalText();

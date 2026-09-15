@@ -1010,7 +1010,6 @@ describe("Character Sheet party inventory", () => {
 			blockers: [],
 			destinationKind: "character",
 			recipientId: "character-2",
-			recipientLabel: "Second",
 			commandId: "proposal-1",
 			resolutionCommandId: "accept-1",
 			cancellationCommandId: "reject-1",
@@ -1033,7 +1032,8 @@ describe("Character Sheet party inventory", () => {
 
 		partyInventory._syncComposerSummary(composer);
 
-		expect(summary.textContent).toContain("Second");
+		expect(summary.textContent).toContain("the original recipient");
+		expect(summary.textContent).not.toContain("Second");
 		expect(quantity.disabled).toBe(true);
 		expect(destination.disabled).toBe(true);
 		expect(cancel.disabled).toBe(true);
