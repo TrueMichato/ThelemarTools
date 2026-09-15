@@ -893,6 +893,8 @@ function setTransferProposalReplayExpired ({form, proposalRef, proposalRequest, 
 		try {
 			await pRefresh();
 			transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+			form._hubMutationKey = null;
+			form._hubMutationFingerprint = null;
 			submit.textContent = "Submit transfer";
 			submit.disabled = !document.getElementById("campaign-transfer-source")?.options.length;
 			setFormStatus({
@@ -1704,15 +1706,13 @@ async function renderPendingTransfers ({
 	targetCharacters,
 	members,
 	pRefreshTransferState,
-	isResolutionReconciliation = false,
 }) {
 	const list = document.getElementById("campaign-pending-transfers");
 	if (!list) return {pendingTransferIds: []};
 	const transfers = await api.pListTransfers({campaignId});
 	const pending = transfers.filter(transfer => ["proposed", "reserved"].includes(transfer.status));
 	const pendingTransferIds = pending.map(transfer => transfer.id);
-	if (isResolutionReconciliation) transferResolutionDrafts.reconcileCampaign({campaignId});
-	else transferResolutionDrafts.reconcilePending({campaignId, pendingTransferIds});
+	transferResolutionDrafts.reconcilePending({campaignId, pendingTransferIds});
 	updateInboxCount({kind: "transfers", count: pending.length});
 	setHidden(document.getElementById("campaign-pending-transfers-empty"), !!pending.length);
 	const isDm = ["dm", "co_dm"].includes(campaign.role);
@@ -1753,6 +1753,7 @@ async function renderPendingTransfers ({
 		if (canReject) {
 			const controls = document.createElement("span");
 			controls.className = "hub-data-row__controls";
+			const pendingResolutionRequest = transferResolutionDrafts.get({campaignId, transferId: transfer.id});
 			for (const decision of [...(canAccept ? ["accept"] : []), "reject"]) {
 				const button = document.createElement("button");
 				button.type = "button";
@@ -1763,7 +1764,6 @@ async function renderPendingTransfers ({
 					: canAccept ? isRequest ? "Decline" : "Reject" : "Cancel";
 				button.addEventListener("click", async () => {
 					for (const control of controls.querySelectorAll("button")) control.disabled = true;
-					const pReconcileTransferState = () => pRefreshTransferState({isResolutionReconciliation: true});
 					let resolutionRequest = transferResolutionDrafts.get({campaignId, transferId: transfer.id});
 					if (resolutionRequest && resolutionRequest.decision !== decision) {
 						renderError("");
@@ -1771,7 +1771,7 @@ async function renderPendingTransfers ({
 							controls,
 							meta,
 							message: `The ${resolutionRequest.decision === "accept" ? "accept" : "decline"} outcome is not yet confirmed. Refresh the inbox or retry that same decision.`,
-							pRetry: pReconcileTransferState,
+							pRetry: pRefreshTransferState,
 							isResolutionKnown: false,
 							pendingDecision: resolutionRequest.decision,
 						});
@@ -1800,18 +1800,23 @@ async function renderPendingTransfers ({
 							controls,
 							meta,
 							message: "This decision retry is too old to replay safely. Refresh the inbox before acting again.",
-							pRetry: pReconcileTransferState,
+							pRetry: pRefreshTransferState,
 							isResolutionKnown: true,
 						});
 						return;
 					}
 					const outcome = await pResolveTransferAndRefresh({
 						pResolve: async () => {
-							const resolution = await api.pResolveTransfer(resolutionRequest);
-							transferResolutionDrafts.clear(resolutionRequest);
-							return resolution;
+							try {
+								const resolution = await api.pResolveTransfer(resolutionRequest);
+								transferResolutionDrafts.clear(resolutionRequest);
+								return resolution;
+							} catch (error) {
+								if (!isTransferOutcomeUncertain(error)) transferResolutionDrafts.clear(resolutionRequest);
+								throw error;
+							}
 						},
-						pRefresh: pReconcileTransferState,
+						pRefresh: pRefreshTransferState,
 					});
 					if (outcome.state === "resolved_refreshed") {
 						transferResolutionDrafts.clear(resolutionRequest);
@@ -1819,7 +1824,6 @@ async function renderPendingTransfers ({
 						return;
 					}
 					if (outcome.state === "resolution_failed_refreshed") {
-						transferResolutionDrafts.clear(resolutionRequest);
 						const isStillPending = outcome.refreshResult.pendingTransferIds.includes(transfer.id);
 						renderError(isStillPending ? outcome.resolutionError : "");
 						return;
@@ -1831,13 +1835,12 @@ async function renderPendingTransfers ({
 							controls,
 							meta,
 							message: `${decision === "accept" ? "Transfer applied." : "Transfer declined."} The committed outcome is safe, but the latest transfer state could not be loaded.`,
-							pRetry: pReconcileTransferState,
+							pRetry: pRefreshTransferState,
 							isResolutionKnown: true,
 						});
 						return;
 					}
 					const isOutcomeUncertain = isTransferOutcomeUncertain(outcome.resolutionError);
-					if (!isOutcomeUncertain) transferResolutionDrafts.clear(resolutionRequest);
 					renderError(outcome.resolutionError);
 					setTransferInboxRefreshFailure({
 						controls,
@@ -1845,12 +1848,25 @@ async function renderPendingTransfers ({
 						message: isOutcomeUncertain
 							? "The transfer outcome is not yet confirmed. Refresh the inbox or retry the same decision."
 							: "The decision was not applied, and the latest transfer state could not be loaded. Refresh the inbox before acting again.",
-						pRetry: pReconcileTransferState,
+						pRetry: pRefreshTransferState,
 						isResolutionKnown: !isOutcomeUncertain,
 						pendingDecision: resolutionRequest.decision,
 					});
 				});
 				controls.append(button);
+			}
+			if (pendingResolutionRequest) {
+				const isReplayable = transferResolutionDrafts.isReplayable(pendingResolutionRequest);
+				setTransferInboxRefreshFailure({
+					controls,
+					meta,
+					message: isReplayable
+						? "The transfer outcome is not yet confirmed. Refresh the inbox or retry the same decision."
+						: "This decision retry is too old to replay safely. Refresh the inbox before acting again.",
+					pRetry: pRefreshTransferState,
+					isResolutionKnown: !isReplayable,
+					pendingDecision: pendingResolutionRequest.decision,
+				});
 			}
 			row.append(controls);
 		}
@@ -2055,7 +2071,6 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		membersNxt = null,
 		partyInventoryNxt = null,
 		eventsNxt = null,
-		isResolutionReconciliation = false,
 	} = {}) => {
 		const source = document.getElementById("campaign-transfer-source");
 		const target = document.getElementById("campaign-transfer-target");
@@ -2113,7 +2128,6 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			targetCharacters,
 			members,
 			pRefreshTransferState,
-			isResolutionReconciliation,
 		});
 		return transferState;
 	};

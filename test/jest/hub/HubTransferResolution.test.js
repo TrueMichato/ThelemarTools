@@ -32,11 +32,27 @@ describe("Campaign Hub transfer resolution retries", () => {
 		drafts.reconcilePending({campaignId: "campaign-1", pendingTransferIds: ["transfer-1"]});
 		expect(drafts.get(input)).toEqual(accept);
 
-		drafts.reconcileCampaign({campaignId: "campaign-1"});
+		drafts.reconcilePending({campaignId: "campaign-1", pendingTransferIds: []});
+		expect(drafts.get(input)).toBeNull();
 		expect(drafts.stage({...input, decision: "reject"})).toEqual(expect.objectContaining({
 			decision: "reject",
 			idempotencyKey: "key-2",
 		}));
+	});
+
+	it("reconciles frozen decisions per transfer without erasing another in-flight decision", () => {
+		let ix = 0;
+		const drafts = new HubTransferResolutionDrafts({fnCreateKey: () => `key-${++ix}`});
+		const first = drafts.stage({campaignId: "campaign-1", transferId: "transfer-1", decision: "accept"});
+		const second = drafts.stage({campaignId: "campaign-1", transferId: "transfer-2", decision: "reject"});
+
+		drafts.reconcilePending({campaignId: "campaign-1", pendingTransferIds: ["transfer-1", "transfer-2"]});
+		expect(drafts.get({campaignId: "campaign-1", transferId: "transfer-1"})).toEqual(first);
+		expect(drafts.get({campaignId: "campaign-1", transferId: "transfer-2"})).toEqual(second);
+
+		drafts.reconcilePending({campaignId: "campaign-1", pendingTransferIds: ["transfer-2"]});
+		expect(drafts.get({campaignId: "campaign-1", transferId: "transfer-1"})).toBeNull();
+		expect(drafts.get({campaignId: "campaign-1", transferId: "transfer-2"})).toEqual(second);
 	});
 
 	it("reports a committed resolution separately when only the authoritative refresh fails", async () => {

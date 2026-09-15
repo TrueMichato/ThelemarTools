@@ -61,11 +61,6 @@ export class HubTransferResolutionDrafts {
 		return true;
 	}
 
-	reconcileCampaign ({campaignId}) {
-		const prefix = `${campaignId}\u0000`;
-		for (const ref of this._drafts.keys()) if (ref.startsWith(prefix)) this._drafts.delete(ref);
-	}
-
 	reconcilePending ({campaignId, pendingTransferIds}) {
 		const pending = new Set(pendingTransferIds);
 		const prefix = `${campaignId}\u0000`;

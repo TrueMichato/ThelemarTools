@@ -110,6 +110,8 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("Retry transfer");
 		expect(source).toContain("Retry to reconcile the same transfer.");
 		expect(source).toContain("Refresh latest balances");
+		expect(source).toContain("form._hubMutationKey = null");
+		expect(source).toContain("form._hubMutationFingerprint = null");
 		expect(source).toContain("setTransferRefreshFailure");
 		expect(source).toContain("const form = event.currentTarget;");
 		expect(source).toContain("Retry latest balances");
@@ -129,7 +131,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("transferResolutionDrafts.stage");
 		expect(source).toContain("resolutionRequest.decision !== decision");
 		expect(source).toContain("transferResolutionDrafts.isReplayable");
-		expect(source).toContain("isResolutionReconciliation: true");
+		expect(source).toContain("transferResolutionDrafts.reconcilePending");
 		expect(source).toContain("Transfer applied.");
 		expect(source).toContain("The committed outcome is safe");
 		expect(source).toContain("The transfer outcome is not yet confirmed.");

@@ -667,11 +667,18 @@ describe("Character Sheet party inventory", () => {
 		await expect(partyInventory._pCancelDraft()).resolves.toBe(false);
 		expect(partyInventory._error).toContain("too old to replay safely");
 		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+		const rotatedCancellationKey = partyInventory._draft.pendingResolution.idempotencyKey;
+		expect(partyInventory._error).toContain("acceptance remains unavailable");
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
 
 		expect(resolve).toHaveBeenCalledTimes(1);
-		expect(partyInventory._draft.pendingResolution).toBeNull();
+		expect(rotatedCancellationKey).not.toBe("cancel-command-1");
+		expect(partyInventory._draft.pendingResolution).toEqual(expect.objectContaining({
+			decision: "reject",
+			idempotencyKey: rotatedCancellationKey,
+		}));
 		expect(partyInventory._draft.needsStatusCheck).toBe(false);
-		expect(partyInventory._error).toContain("cancellation was not applied");
+		expect(partyInventory._error).toContain("not yet confirmed");
 	});
 
 	it("re-enables controls after a successful reservation", async () => {

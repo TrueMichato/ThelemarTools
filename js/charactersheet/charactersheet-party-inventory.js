@@ -1339,6 +1339,11 @@ export class CharacterSheetPartyInventory {
 			this._render();
 			return false;
 		}
+		if (draft.pendingResolution?.decision === "reject" && !draft.needsStatusCheck) {
+			this._error = "The cancellation outcome is not yet confirmed. Retry cancellation or check its status again later.";
+			this._render();
+			return false;
+		}
 		if (isPartyEndpoint && !this._partyInventory?.id) {
 			this._error = "The party stash is unavailable. Retry the stash refresh before transferring this item.";
 			this._render();
@@ -1399,9 +1404,17 @@ export class CharacterSheetPartyInventory {
 					return true;
 				}
 				if (draft.pendingResolution?.decision === "reject") {
-					draft.pendingResolution = null;
-					draft.cancellationCommandId = getOpaqueToken();
-					this._error = "The cancellation was not applied. You can retry it or continue the transfer.";
+					if (Date.now() >= draft.pendingResolution.replayUntil) {
+						draft.cancellationCommandId = getOpaqueToken();
+						draft.pendingResolution = {
+							campaignId: this._campaignId,
+							transferId: draft.transfer.id,
+							decision: "reject",
+							idempotencyKey: draft.cancellationCommandId,
+							replayUntil: Date.now() + HUB_TRANSFER_REPLAY_WINDOW_MS,
+						};
+					}
+					this._error = "The cancellation outcome is not yet confirmed. Retry cancellation; acceptance remains unavailable.";
 					this._isSubmitting = false;
 					this._render();
 					return false;
