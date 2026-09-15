@@ -84,14 +84,15 @@ class CharacterSheetInventory {
 	/**
 	 * Copy structured catalog fields onto inventory rows that are missing them (effects,
 	 * ability/senses, spell attachments, numeric bonuses). Does not overwrite custom items
-	 * or values the player already has. Used so brew buffs (e.g. Necklace of Goibhnie AC/saves)
-	 * reach older local saves without re-adding the item. Hub inventory is already authoritative
+	 * or values the player already has. Persisted authored bonus strings are normalized even
+	 * when their catalog entry is no longer available. Used so brew buffs (e.g. Necklace of
+	 * Goibhnie AC/saves) reach older local saves without re-adding the item. Hub inventory is authoritative
 	 * and must never be rewritten from the client's current mutable catalog.
 	 * @private
 	 */
 	_rehydrateInventoryItemEffects () {
 		if (this._page?._isHubCharacter) return;
-		if (!this._allItems?.length || !this._state?.getItems) return;
+		if (!this._state?.getItems) return;
 		const raw = this._state._data?.inventory;
 		if (!Array.isArray(raw) || !raw.length) return;
 
@@ -100,14 +101,32 @@ class CharacterSheetInventory {
 		for (const inv of raw) {
 			const item = inv?.item;
 			if (!item?.name || item._isCustom || item.source === "Custom") continue;
+			let rowChanged = false;
+			for (const k of [
+				"bonusAc", "bonusSavingThrow", "bonusSpellAttack", "bonusSpellSaveDc",
+				"bonusSpellDamage", "bonusWeapon", "bonusWeaponAttack", "bonusWeaponDamage",
+				"bonusWeaponCritDamage", "bonusAbilityCheck", "bonusProficiencyBonus",
+				"bonusSavingThrowConcentration",
+			]) {
+				if (typeof item[k] !== "string") continue;
+				item[k] = this._parseBonus(item[k]);
+				rowChanged = true;
+			}
+			for (const [rowKey] of CharacterSheetInventory._PER_ABILITY_BONUS_KEYS) {
+				if (typeof item[rowKey] !== "string") continue;
+				item[rowKey] = this._parseBonus(item[rowKey]);
+				rowChanged = true;
+			}
 			const nameLower = item.name.toLowerCase();
 			const sourceLower = (item.source || "").toLowerCase();
-			const match = this._allItems.find(i =>
+			const match = (this._allItems || []).find(i =>
 				i.name?.toLowerCase() === nameLower
 				&& (!sourceLower || (i.source || "").toLowerCase() === sourceLower));
-			if (!match) continue;
+			if (!match) {
+				if (rowChanged) changed = true;
+				continue;
+			}
 
-			let rowChanged = false;
 			if (typeof this._state._normalizeItemEffects === "function") {
 				const catEffects = this._state._normalizeItemEffects(match);
 				if (!(Array.isArray(item.effects) && item.effects.length)) {
@@ -235,7 +254,8 @@ class CharacterSheetInventory {
 			for (const k of [
 				"bonusAc", "bonusSavingThrow", "bonusSpellAttack", "bonusSpellSaveDc",
 				"bonusSpellDamage", "bonusWeapon", "bonusWeaponAttack", "bonusWeaponDamage",
-				"bonusAbilityCheck", "bonusProficiencyBonus", "bonusSavingThrowConcentration",
+				"bonusWeaponCritDamage", "bonusAbilityCheck", "bonusProficiencyBonus",
+				"bonusSavingThrowConcentration",
 			]) {
 				if ((item[k] == null || item[k] === 0) && match[k] != null) {
 					item[k] = typeof match[k] === "string" ? this._parseBonus(match[k]) : match[k];

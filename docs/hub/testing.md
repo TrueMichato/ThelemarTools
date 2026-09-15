@@ -308,7 +308,19 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   references remain ephemeral.
 - Transfer acceptance refreshes canonical character documents, shared inventory, balances, source/target/item
   pickers, and the inbox together; the lifecycle journey proves the accepted item is immediately selectable
-  from party inventory without reloading.
+  from party inventory without reloading. Transfer authority coverage exercises player-to-own/peer/DM-owned and
+  DM-to-owned/player-owned destinations, verifies direct DM and same-owner moves are committed atomically by the
+  server without a recipient-resolvable reservation or redundant browser resolution, keeps player stash
+  requests non-escrowed until DM approval, proves stale approvals return `TRANSFER_INSUFFICIENT`, and forces a
+  post-mutation refetch failure before retrying balances and completing another transfer without a page reload.
+  Inbox resolution coverage loses approve/decline responses after commit, reuses the same decision key, and
+  distinguishes a known committed outcome from a failed authoritative refresh with an explicit inbox retry.
+  Character Sheet refresh/retry tests assert a real refetch, visible pending/success/error state, and retained
+  last-good stash content; spectators and unresolved roles receive a read-only stash rather than a rejected
+  Request action. Repository and real-stack regressions also prove deterministic Character Sheet item aliases
+  cannot create a false inventory overlap, semantically converged stale recovery records clear before the next
+  save, canonical-equivalent failed writes stop reporting false pending work, and genuinely unique failed or
+  discarded local intent remains recoverable across authoritative, live-operation, and resync paths.
 - Item-award regressions mutation-verify role/tenant/target gates, strict source and note/quantity bounds,
   trusted site/campaign identity resolution, cross-authority collision rejection, resolved Recent provenance,
   full authoritative metadata persistence, privacy-reduced
@@ -316,8 +328,10 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   award-to-Character-Sheet-save-to-repeat-award stack identity, direct/stash-return metadata conservation,
   accept/reject/cancel behavior, stash conservation under contention, memory/PostgreSQL parity, carry
   invalidation, stable audit/event/projection ordering,
-  privacy-safe preview states, normalized retry identity, legacy-summary Character Sheet rehydration, and
-  open-sheet authoritative reconciliation. A complete generated-artifact equality test prevents the browser
+  privacy-safe preview states, normalized retry identity, legacy-summary Character Sheet rehydration, trusted
+  focus/weapon hydration across quantity-only authoritative changes, custom-item metadata preservation, raw
+  patch-value rematerialization, and open-sheet authoritative reconciliation. A complete generated-artifact
+  equality test prevents the browser
   item data and BFF award catalog from drifting. Character Sheet migration coverage also rejects renderer/filter
   caches, empty renderer-created `entries`, and renderer-injected `additionalSources` while retaining
   source-authored `hasRefs` and `additionalSources` from real site catalog entries through repeat award and stash

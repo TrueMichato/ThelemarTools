@@ -279,7 +279,10 @@ export class HubCampaignPage {
 		const networkUrls = requests.map(url => new URL(url)).filter(url => ["http:", "https:"].includes(url.protocol));
 		expect(networkUrls.filter(url => url.origin !== pageOrigin), `${path} should not make third-party requests`).toEqual([]);
 		expect(networkUrls.filter(url => /^\/(?:data|fonts|homebrew|prerelease|search)\//.test(url.pathname)), `${path} should not load the general data graph`).toEqual([]);
-		if (maxRequests != null) expect(networkUrls.length, `${path} initial request budget`).toBeLessThanOrEqual(maxRequests);
+		if (maxRequests != null) {
+			const requestPaths = networkUrls.map(url => `${url.pathname}${url.search}`);
+			expect(networkUrls.length, `${path} initial request budget:\n${requestPaths.join("\n")}`).toBeLessThanOrEqual(maxRequests);
+		}
 		if (maxLcpMs != null) {
 			const lcpMs = await this.page.evaluate(() => (window as any).__hubLargestContentfulPaint);
 			expect(lcpMs, `${path} should report an LCP entry`).toBeGreaterThan(0);
@@ -613,6 +616,7 @@ export class HubCampaignPage {
 		race = null,
 		spellsKnown = [],
 		rulesVersionId = null,
+		inventory = null,
 	}: {
 		campaignId: string;
 		name: string;
@@ -631,6 +635,7 @@ export class HubCampaignPage {
 			sourceFeature?: string;
 		}>;
 		rulesVersionId?: string | null;
+		inventory?: Array<Record<string, unknown>> | null;
 	}): Promise<any> {
 		const response = await this.page.request.post("/api/characters", {
 			headers: await this.getMutationHeaders(),
@@ -654,7 +659,7 @@ export class HubCampaignPage {
 						...(spellsKnown.length ? {spellsKnown, cantripsKnown: []} : {}),
 					},
 					conditions: [],
-					inventory: [{id: "rations", item: {name: "Rations", source: "PHB"}, quantity: 5}],
+					inventory: inventory || [{id: "rations", item: {name: "Rations", source: "PHB"}, quantity: 5}],
 					currency: {cp: 8, sp: 6, ep: 4, gp: 10, pp: 2},
 				},
 			},
@@ -1775,7 +1780,7 @@ export class HubCampaignPage {
 		expect(await this.page.locator("#campaign-transfer-target").inputValue())
 			.not.toBe(await this.page.locator("#campaign-transfer-source").inputValue());
 		await this.page.locator("#campaign-transfer-target").selectOption({label: "Party inventory"});
-		const itemOption = this.page.locator("#campaign-transfer-entry option", {hasText: itemName});
+		const itemOption = this.page.locator("#campaign-transfer-entry option", {hasText: itemName}).first();
 		await expect(itemOption).toContainText("available");
 		await this.page.locator("#campaign-transfer-entry").selectOption(await itemOption.getAttribute("value") || "");
 		await this.page.locator("#campaign-transfer-quantity").fill(`${quantity}`);
@@ -1786,23 +1791,308 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer reserved.");
 	}
 
+	async submitAuthoritativeItemTransfer ({
+		campaignId,
+		sourceName,
+		targetName,
+		itemName,
+		quantity,
+	}: {
+		campaignId: string;
+		sourceName: string;
+		targetName: string;
+		itemName: string;
+		quantity: number;
+	}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		await this.openCampaignWorkbench();
+		await this.page.locator("#campaign-transfer-source").selectOption({label: sourceName});
+		await this.page.locator("#campaign-transfer-target").selectOption({label: targetName});
+		const itemOption = this.page.locator("#campaign-transfer-entry option", {hasText: itemName}).first();
+		const itemValue = await itemOption.getAttribute("value") || "";
+		await this.page.locator("#campaign-transfer-entry").selectOption(itemValue);
+		await this.page.locator("#campaign-transfer-quantity").fill(`${quantity}`);
+		await expect(this.page.locator("#campaign-transfer-entry")).toHaveValue(itemValue);
+		const proposalPath = `/api/campaigns/${campaignId}/transfers`;
+		const resolutionPathPrefix = `${proposalPath}/`;
+		const proposalMatcher = `**${proposalPath}`;
+		const proposalBodies: string[] = [];
+		const proposalKeys: Array<string | undefined> = [];
+		let proposalAttempts = 0;
+		let resolutionCount = 0;
+		const observeResolution = (request: Request) => {
+			const pathname = new URL(request.url()).pathname;
+			if (request.method() === "POST" && pathname.startsWith(resolutionPathPrefix) && pathname.endsWith("/resolve")) {
+				resolutionCount++;
+			}
+		};
+		const loseFirstProposalResponse = async (route: Route) => {
+			const body = route.request().postData();
+			if (!body) {
+				await route.continue();
+				return;
+			}
+			proposalAttempts++;
+			proposalBodies.push(body);
+			proposalKeys.push(route.request().headers()["idempotency-key"]);
+			if (proposalAttempts === 1) {
+				const committed = await route.fetch();
+				expect(committed.ok()).toBe(true);
+				expect((await committed.json()).transfer?.status).toBe("committed");
+				await route.fulfill({
+					status: 503,
+					contentType: "application/json",
+					body: JSON.stringify({error: "NETWORK_UNAVAILABLE"}),
+				});
+				return;
+			}
+			await route.continue();
+		};
+		this.page.on("request", observeResolution);
+		await this.page.route(proposalMatcher, loseFirstProposalResponse);
+		try {
+			await this.page.locator("#campaign-transfer-form button[type='submit']").click();
+			await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("outcome is not yet confirmed");
+			const retry = this.page.locator("#campaign-transfer-form button[type='submit']");
+			await expect(retry).toHaveText("Retry transfer");
+			await expect(this.page.locator("#campaign-transfer-source")).toBeDisabled();
+			await expect(this.page.locator("#campaign-transfer-target")).toBeDisabled();
+			await expect(this.page.locator("#campaign-transfer-entry")).toBeDisabled();
+			await expect(this.page.locator("#campaign-transfer-entry")).toHaveValue(itemValue);
+			await expect(this.page.locator("#campaign-transfer-quantity")).toBeDisabled();
+			await expect(this.page.locator("#campaign-transfer-quantity")).toHaveValue(`${quantity}`);
+			await retry.click();
+			await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer complete.");
+			await expect(this.page.locator("#campaign-pending-transfers .hub-data-row")).toHaveCount(0);
+			expect(proposalAttempts).toBeGreaterThanOrEqual(2);
+			expect(new Set(proposalBodies)).toEqual(new Set([proposalBodies[0]]));
+			expect(new Set(proposalKeys)).toEqual(new Set([proposalKeys[0]]));
+			expect(resolutionCount).toBe(0);
+		} finally {
+			await this.page.unroute(proposalMatcher, loseFirstProposalResponse);
+			this.page.off("request", observeResolution);
+		}
+	}
+
+	async reserveRepeatedItemTransfersAfterRefreshRetry ({
+		campaignId,
+		sourceName,
+		targetName,
+		itemName,
+		quantity,
+	}: {
+		campaignId: string;
+		sourceName: string;
+		targetName: string;
+		itemName: string;
+		quantity: number;
+	}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		await this.openCampaignWorkbench();
+		await this.page.locator("#campaign-transfer-source").selectOption({label: sourceName});
+		await this.page.locator("#campaign-transfer-target").selectOption({label: targetName});
+		const itemOption = this.page.locator("#campaign-transfer-entry option", {hasText: itemName}).first();
+		await this.page.locator("#campaign-transfer-entry").selectOption(await itemOption.getAttribute("value") || "");
+		await this.page.locator("#campaign-transfer-quantity").fill(`${quantity}`);
+
+		const transferMatcher = `**/api/campaigns/${campaignId}/transfers`;
+		const partyMatcher = `**/api/campaigns/${campaignId}/party-inventory`;
+		let transferPostCount = 0;
+		let failedRefreshCount = 0;
+		let shouldFailRefresh = true;
+		const failRefresh = (route: Route) => {
+			if (!shouldFailRefresh) return route.continue();
+			failedRefreshCount++;
+			return route.fulfill({
+				status: 503,
+				contentType: "application/json",
+				body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
+			});
+		};
+		const observeTransfer = async (route: Route) => {
+			if (route.request().method() === "POST") await this.page.route(partyMatcher, failRefresh);
+			const response = await route.fetch();
+			if (route.request().method() === "POST" && response.ok()) {
+				transferPostCount++;
+			}
+			await route.fulfill({response});
+		};
+		await this.page.route(transferMatcher, observeTransfer);
+		try {
+			await this.page.locator("#campaign-transfer-form button[type='submit']").click();
+			await expect.poll(() => transferPostCount).toBe(1);
+			await expect.poll(() => failedRefreshCount).toBeGreaterThan(0);
+			const retry = this.page.getByRole("button", {name: "Retry latest balances"});
+			await expect(retry).toBeVisible();
+			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeDisabled();
+			shouldFailRefresh = false;
+			await retry.click();
+			await expect(this.page.locator("#campaign-transfer-form-status")).toHaveText("Latest balances loaded. You can send another transfer.");
+			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeEnabled();
+		} finally {
+			await this.page.unroute(transferMatcher, observeTransfer);
+			await this.page.unroute(partyMatcher, failRefresh);
+		}
+
+		await this.page.locator("#campaign-transfer-form button[type='submit']").click();
+		await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer reserved.");
+	}
+
 	async acceptFirstPendingTransfer ({
 		campaignId,
 		expectedText,
 		expectedAbsentText = [],
+		buttonName = "Accept",
 	}: {
 		campaignId: string;
 		expectedText: string[];
 		expectedAbsentText?: string[];
+		buttonName?: "Accept" | "Approve";
 	}): Promise<void> {
 		await this.gotoCampaign(campaignId);
-		const transfer = this.page.locator("#campaign-pending-transfers .hub-data-row").first();
+		const transfers = this.page.locator("#campaign-pending-transfers .hub-data-row");
+		const transferCount = await transfers.count();
+		const transfer = transfers.first();
 		for (const text of expectedText) await expect(transfer).toContainText(text);
 		for (const text of expectedAbsentText) await expect(transfer).not.toContainText(text);
-		const button = this.page.locator("#campaign-pending-transfers button", {hasText: "Accept"}).first();
+		const button = transfer.getByRole("button", {name: buttonName, exact: true});
 		await expect(button).toBeVisible();
 		await button.click();
-		await expect(button).toBeHidden();
+		await expect(transfers).toHaveCount(transferCount - 1);
+	}
+
+	async resolveFirstPendingTransferAfterCommittedRefreshFailure ({
+		campaignId,
+		expectedText,
+		buttonName,
+	}: {
+		campaignId: string;
+		expectedText: string[];
+		buttonName: "Accept" | "Approve" | "Decline" | "Reject";
+	}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		const transfers = this.page.locator("#campaign-pending-transfers .hub-data-row");
+		const transferCount = await transfers.count();
+		const transfer = transfers.first();
+		for (const text of expectedText) await expect(transfer).toContainText(text);
+
+		const resolveMatcher = `**/api/campaigns/${campaignId}/transfers/*/resolve`;
+		const partyMatcher = `**/api/campaigns/${campaignId}/party-inventory`;
+		const idempotencyKeys: string[] = [];
+		let failedRefreshCount = 0;
+		let shouldFailRefresh = true;
+		const failRefresh = (route: Route) => {
+			if (!shouldFailRefresh) return route.continue();
+			failedRefreshCount++;
+			return route.fulfill({
+				status: 503,
+				contentType: "application/json",
+				body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
+			});
+		};
+		const observeResolution = async (route: Route) => {
+			idempotencyKeys.push(route.request().headers()["idempotency-key"]);
+			await this.page.route(partyMatcher, failRefresh);
+			const response = await route.fetch();
+			expect(response.ok()).toBe(true);
+			await route.fulfill({response});
+		};
+		await this.page.route(resolveMatcher, observeResolution);
+		try {
+			await transfer.getByRole("button", {name: buttonName, exact: true}).click();
+			await expect.poll(() => failedRefreshCount).toBeGreaterThan(0);
+			await expect(transfer).toContainText("The committed outcome is safe");
+			await expect(transfer.getByRole("button", {name: buttonName, exact: true})).toHaveCount(0);
+			const retry = transfer.getByRole("button", {name: "Retry inbox refresh", exact: true});
+			await expect(retry).toBeVisible();
+			shouldFailRefresh = false;
+			await retry.click();
+			await expect(transfers).toHaveCount(transferCount - 1);
+			expect(idempotencyKeys).toHaveLength(1);
+		} finally {
+			await this.page.unroute(resolveMatcher, observeResolution);
+			await this.page.unroute(partyMatcher, failRefresh);
+		}
+	}
+
+	async resolveFirstPendingTransferAfterLostResponse ({
+		campaignId,
+		expectedText,
+		buttonName,
+	}: {
+		campaignId: string;
+		expectedText: string[];
+		buttonName: "Accept" | "Approve" | "Decline" | "Reject";
+	}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		const transfers = this.page.locator("#campaign-pending-transfers .hub-data-row");
+		const transferCount = await transfers.count();
+		const transfer = transfers.first();
+		for (const text of expectedText) await expect(transfer).toContainText(text);
+
+		const resolveMatcher = `**/api/campaigns/${campaignId}/transfers/*/resolve`;
+		const partyMatcher = `**/api/campaigns/${campaignId}/party-inventory`;
+		const idempotencyKeys: string[] = [];
+		const resolutionBodies: string[] = [];
+		let attempt = 0;
+		let failedRefreshCount = 0;
+		let shouldFailRefresh = true;
+		const failRefresh = (route: Route) => {
+			if (!shouldFailRefresh) return route.continue();
+			failedRefreshCount++;
+			return route.fulfill({
+				status: 503,
+				contentType: "application/json",
+				body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
+			});
+		};
+		const loseFirstResponse = async (route: Route) => {
+			const body = route.request().postData();
+			if (!body) {
+				await route.continue();
+				return;
+			}
+			idempotencyKeys.push(route.request().headers()["idempotency-key"]);
+			resolutionBodies.push(body);
+			if (++attempt === 1) {
+				await this.page.route(partyMatcher, failRefresh);
+				const committed = await route.fetch();
+				expect(committed.ok()).toBe(true);
+				await route.fulfill({
+					status: 503,
+					contentType: "application/json",
+					body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
+				});
+				return;
+			}
+			await route.continue();
+		};
+		await this.page.route(resolveMatcher, loseFirstResponse);
+		try {
+			const decision = transfer.getByRole("button", {name: buttonName, exact: true});
+			await decision.click();
+			await expect.poll(() => failedRefreshCount).toBeGreaterThan(0);
+			await expect(transfer).toContainText("outcome is not yet confirmed");
+			await expect(transfer.getByRole("button", {name: "Retry inbox refresh", exact: true})).toBeVisible();
+			await expect(decision).toBeEnabled();
+			const oppositeName = {
+				Accept: "Reject",
+				Approve: "Decline",
+				Decline: "Approve",
+				Reject: "Accept",
+			}[buttonName];
+			await expect(transfer.getByRole("button", {name: oppositeName, exact: true})).toBeDisabled();
+
+			shouldFailRefresh = false;
+			await decision.click();
+			await expect(transfers).toHaveCount(transferCount - 1);
+			expect(idempotencyKeys.length).toBeGreaterThanOrEqual(2);
+			expect(new Set(idempotencyKeys)).toEqual(new Set([idempotencyKeys[0]]));
+			expect(new Set(resolutionBodies)).toEqual(new Set([resolutionBodies[0]]));
+		} finally {
+			await this.page.unroute(resolveMatcher, loseFirstResponse);
+			await this.page.unroute(partyMatcher, failRefresh);
+		}
 	}
 
 	async expectTransferItemAvailable ({sourceName, itemName}: {sourceName: string; itemName: string}): Promise<void> {

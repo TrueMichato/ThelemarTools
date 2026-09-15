@@ -822,13 +822,7 @@ describe("Campaign Hub item award domain", () => {
 			payload: {items: [{entryId: stashed.id, quantity: 1}]},
 			idempotencyKey: "sheet-stack-withdraw",
 		});
-		await ctx.store.pResolveTransfer({
-			accountId: ctx.accounts.dm.id,
-			campaignId: ctx.campaign.id,
-			transferId: withdraw.transfer.id,
-			decision: "accept",
-			idempotencyKey: "sheet-stack-withdraw-accept",
-		});
+		expect(withdraw.transfer.status).toBe("committed");
 		characterA = (await ctx.store.pGetCharacter({
 			accountId: ctx.accounts.playerA.id,
 			characterId: ctx.characterA.id,
@@ -954,13 +948,7 @@ describe("Campaign Hub item award domain", () => {
 			payload: {items: [{entryId: stashed.id, quantity: 1}]},
 			idempotencyKey: "award-transfer-withdraw",
 		});
-		await ctx.store.pResolveTransfer({
-			accountId: ctx.accounts.dm.id,
-			campaignId: ctx.campaign.id,
-			transferId: withdraw.transfer.id,
-			decision: "accept",
-			idempotencyKey: "award-transfer-withdraw-accept",
-		});
+		expect(withdraw.transfer.status).toBe("committed");
 		expect(await getCharacterEntry(ctx.accounts.playerB.id)).toEqual(expect.objectContaining({
 			item: authoritativeItem,
 			quantity: 2,

@@ -117,6 +117,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 
 	async function pSeedPartyItem ({name, quantity, item = null, entryMetadata = {}}) {
 		const donorEntryId = crypto.randomUUID();
+		const seededItem = structuredClone(item || {name, source: "PHB", weight: 0.1});
 		const donor = (await store.pCreateCharacter({
 			accountId: sourceOwner.id,
 			campaignId: campaign.id,
@@ -124,7 +125,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 				name: `${name} donor`,
 				inventory: [{
 					id: donorEntryId,
-					item: item || {name, source: "PHB", weight: 0.1},
+					item: seededItem,
 					quantity,
 					...entryMetadata,
 				}],
@@ -153,7 +154,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			idempotencyKey: crypto.randomUUID(),
 		});
 		const seeded = await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id});
-		return {party: seeded, entry: seeded.inventory.find(entry => entry.item.name === name)};
+		return {party: seeded, entry: seeded.inventory.find(entry => entry.item.name === seededItem.name)};
 	}
 
 	beforeAll(async () => {
@@ -386,13 +387,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			payload: {items: [{entryId: stashed.id, quantity: 1}]},
 			idempotencyKey: `${prefix}-normalized-withdraw`,
 		});
-		await store.pResolveTransfer({
-			accountId: dm.id,
-			campaignId: campaign.id,
-			transferId: withdraw.transfer.id,
-			decision: "accept",
-			idempotencyKey: `${prefix}-normalized-withdraw-accept`,
-		});
+		expect(withdraw.transfer.status).toBe("committed");
 
 		const persisted = await pReadCharacter(targetOwner.id, target.id);
 		expect(persisted.data.inventory).toEqual([
@@ -480,6 +475,14 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		};
 		const deposit = await store.pProposeTransfer(depositInput);
 		await expect(store.pProposeTransfer(depositInput)).resolves.toEqual(JSON.parse(JSON.stringify(deposit)));
+		expect(deposit.transfer).toMatchObject({
+			actorAccountId: sourceOwner.id,
+			sourceKind: "character",
+			sourceId: sourceCharacter.id,
+			targetKind: "party_inventory",
+			status: "reserved",
+		});
+		expect(deposit.transfer).not.toHaveProperty("targetId");
 		expect((await pReadCharacter(sourceOwner.id, sourceCharacter.id)).data.inventory.find(it => it.id === "maps").quantity).toBe(2);
 		expect((await pReadCharacter(sourceOwner.id, sourceCharacter.id)).data.inventory.find(it => it.id === "flour").quantity).toBe(0.6667);
 
@@ -492,6 +495,12 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		};
 		const acceptedDeposit = await store.pResolveTransfer(acceptDepositInput);
 		await expect(store.pResolveTransfer(acceptDepositInput)).resolves.toEqual(JSON.parse(JSON.stringify(acceptedDeposit)));
+		expect(acceptedDeposit.transfer).toMatchObject({
+			actorAccountId: sourceOwner.id,
+			sourceId: sourceCharacter.id,
+			targetId: partyInventory.id,
+			status: "committed",
+		});
 		let stash = await store.pGetPartyInventory({accountId: sourceOwner.id, campaignId: campaign.id});
 		expect(stash.inventory).toEqual([
 			expect.objectContaining({
@@ -501,7 +510,59 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			}),
 		]);
 
-		const directPass = await store.pProposeTransfer({
+		const sameOwnerSource = (await store.pCreateCharacter({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			data: {
+				name: `${prefix} same-owner source`,
+				inventory: [{
+					id: "same-owner-map",
+					item: {name: "Map", source: "PHB", weight: 0.1},
+					note: "Secret route",
+					quantity: 1,
+				}],
+				currency: {},
+				carry: {schemaVersion: 1, status: "known"},
+			},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const sameOwnerTarget = (await store.pCreateCharacter({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			data: {name: `${prefix} same-owner target`, inventory: [], currency: {}, carry: {schemaVersion: 1, status: "known"}},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const sameOwnerInput = {
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: sameOwnerSource.id,
+			targetKind: "character",
+			targetId: sameOwnerTarget.id,
+			payload: {items: [{entryId: "same-owner-map", quantity: 1}]},
+			idempotencyKey: `${prefix}-same-owner-direct`,
+		};
+		const sameOwnerDirect = await store.pProposeTransfer(sameOwnerInput);
+		expect(sameOwnerDirect.transfer.status).toBe("committed");
+		await expect(store.pProposeTransfer(sameOwnerInput)).resolves.toEqual(JSON.parse(JSON.stringify(sameOwnerDirect)));
+		await expect(store.pResolveTransfer({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			transferId: sameOwnerDirect.transfer.id,
+			decision: "reject",
+			idempotencyKey: `${prefix}-same-owner-reject`,
+		})).rejects.toMatchObject({code: "TRANSFER_NOT_FOUND"});
+		expect((await pReadCharacter(sourceOwner.id, sameOwnerTarget.id)).data.inventory).toContainEqual(expect.objectContaining({
+			item: {name: "Map", source: "PHB", weight: 0.1},
+			note: "Secret route",
+			quantity: 1,
+		}));
+
+		const directPassInput = {
 			accountId: sourceOwner.id,
 			campaignId: campaign.id,
 			sourceKind: "character",
@@ -510,13 +571,130 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			targetId: targetCharacter.id,
 			payload: {items: [{entryId: "maps", quantity: 1}]},
 			idempotencyKey: `${prefix}-direct`,
+		};
+		const directPass = await store.pProposeTransfer(directPassInput);
+		await expect(store.pProposeTransfer(directPassInput)).resolves.toEqual(JSON.parse(JSON.stringify(directPass)));
+		expect(directPass.transfer).toMatchObject({
+			actorAccountId: sourceOwner.id,
+			actorCommandId: `${prefix}-direct`,
+			sourceKind: "character",
+			sourceId: sourceCharacter.id,
+			targetKind: "character",
+			status: "reserved",
 		});
-		await store.pResolveTransfer({
+		expect(directPass.transfer).not.toHaveProperty("targetId");
+		const sourceTransferView = (await store.pListTransfers({accountId: sourceOwner.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(sourceTransferView).toMatchObject({
+			actorAccountId: sourceOwner.id,
+			actorCommandId: `${prefix}-direct`,
+			sourceKind: "character",
+			sourceId: sourceCharacter.id,
+			targetKind: "character",
+			targetDisplaySnapshot: {version: 1, displayName: "Target"},
+		});
+		expect(sourceTransferView).not.toHaveProperty("targetId");
+		const targetTransferView = (await store.pListTransfers({accountId: targetOwner.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(targetTransferView).toMatchObject({
+			actorAccountId: null,
+			sourceKind: "character",
+			targetKind: "character",
+			targetId: targetCharacter.id,
+			sourceDisplaySnapshot: {version: 1, displayName: "Source"},
+		});
+		expect(targetTransferView).not.toHaveProperty("sourceId");
+		expect(targetTransferView).not.toHaveProperty("actorCommandId");
+		const dmTransferView = (await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(dmTransferView).toMatchObject({
+			sourceDisplaySnapshot: {version: 1, displayName: "Source"},
+			targetDisplaySnapshot: {version: 1, displayName: "Target"},
+		});
+		expect(dmTransferView).not.toHaveProperty("actorCommandId");
+		const acceptDirectInput = {
 			accountId: targetOwner.id,
 			campaignId: campaign.id,
 			transferId: directPass.transfer.id,
 			decision: "accept",
 			idempotencyKey: `${prefix}-accept-direct`,
+		};
+		const acceptedDirect = await store.pResolveTransfer(acceptDirectInput);
+		await expect(store.pResolveTransfer(acceptDirectInput)).resolves.toEqual(JSON.parse(JSON.stringify(acceptedDirect)));
+		expect(acceptedDirect.transfer).toMatchObject({
+			actorAccountId: null,
+			sourceKind: "character",
+			targetKind: "character",
+			targetId: targetCharacter.id,
+			status: "committed",
+		});
+		expect(acceptedDirect.transfer).not.toHaveProperty("sourceId");
+		expect(acceptedDirect.transfer).not.toHaveProperty("actorCommandId");
+		const acceptedSourceView = (await store.pListTransfers({accountId: sourceOwner.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(acceptedSourceView.actorCommandId).toBe(`${prefix}-direct`);
+		const aliasPolicy = await store.pSetProjectionPolicy({
+			accountId: sourceOwner.id,
+			characterId: sourceCharacter.id,
+			policy: {
+				version: 1,
+				preset: "private",
+				overrides: {identity: {mode: "replace", value: {name: "Masked Source"}}},
+			},
+			expectedProjectionRevision: sourceCharacter.projectionRevision,
+			idempotencyKey: `${prefix}-alias-source-after-transfer`,
+		});
+		const targetViewAfterSourceAlias = (await store.pListTransfers({accountId: targetOwner.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(targetViewAfterSourceAlias).toMatchObject({
+			sourceDisplaySnapshot: {version: 1, displayName: "Masked Source"},
+		});
+		expect(targetViewAfterSourceAlias).not.toHaveProperty("sourceId");
+		const dmViewAfterSourceAlias = (await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(dmViewAfterSourceAlias.sourceDisplaySnapshot).toEqual({version: 1, displayName: "Source"});
+
+		const privatePolicy = await store.pSetProjectionPolicy({
+			accountId: sourceOwner.id,
+			characterId: sourceCharacter.id,
+			policy: {version: 1, preset: "private", overrides: {}},
+			expectedProjectionRevision: aliasPolicy.projectionRevision,
+			idempotencyKey: `${prefix}-hide-source-after-transfer`,
+		});
+		const targetViewAfterSourceHide = (await store.pListTransfers({accountId: targetOwner.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(targetViewAfterSourceHide).not.toHaveProperty("sourceDisplaySnapshot");
+		expect(targetViewAfterSourceHide).not.toHaveProperty("sourceId");
+		await store.pSetProjectionPolicy({
+			accountId: sourceOwner.id,
+			characterId: sourceCharacter.id,
+			policy: {version: 1, preset: "table", overrides: {}},
+			expectedProjectionRevision: privatePolicy.projectionRevision,
+			idempotencyKey: `${prefix}-restore-source-after-transfer`,
+		});
+		const destinationCampaign = (await store.pCreateCampaign({
+			accountId: sourceOwner.id,
+			name: `${prefix} transfer-label-destination`,
+			idempotencyKey: `${prefix}-transfer-label-destination`,
+		})).campaign;
+		await store.pMoveCharacter({
+			accountId: sourceOwner.id,
+			characterId: sourceCharacter.id,
+			campaignId: destinationCampaign.id,
+			idempotencyKey: `${prefix}-move-source-after-transfer`,
+		});
+		const targetViewAfterSourceMove = (await store.pListTransfers({accountId: targetOwner.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(targetViewAfterSourceMove).not.toHaveProperty("sourceDisplaySnapshot");
+		expect(targetViewAfterSourceMove).not.toHaveProperty("sourceId");
+		const dmViewAfterSourceMove = (await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(dmViewAfterSourceMove).not.toHaveProperty("sourceDisplaySnapshot");
+		await store.pMoveCharacter({
+			accountId: sourceOwner.id,
+			characterId: sourceCharacter.id,
+			campaignId: campaign.id,
+			idempotencyKey: `${prefix}-restore-source-campaign`,
 		});
 		const directTarget = await pReadCharacter(targetOwner.id, targetCharacter.id);
 		expect(directTarget.data.inventory).toHaveLength(2);
@@ -553,16 +731,167 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			payload: {items: [{entryId: stash.inventory[0].id, quantity: 1}]},
 			idempotencyKey: `${prefix}-withdraw`,
 		});
-		await store.pResolveTransfer({
-			accountId: dm.id,
+		expect(withdraw.transfer.status).toBe("committed");
+		await expect(store.pResolveTransfer({
+			accountId: targetOwner.id,
 			campaignId: campaign.id,
 			transferId: withdraw.transfer.id,
-			decision: "accept",
-			idempotencyKey: `${prefix}-accept-withdraw`,
-		});
+			decision: "reject",
+			idempotencyKey: `${prefix}-reject-direct-withdraw`,
+		})).rejects.toMatchObject({code: "TRANSFER_NOT_FOUND"});
 		stash = await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id});
 		expect(stash.inventory[0]).toEqual(expect.objectContaining({note: "Secret route", quantity: 1}));
 		expect((await pReadCharacter(targetOwner.id, targetCharacter.id)).data.inventory.find(it => it.note === "Secret route").quantity).toBe(2);
+	});
+
+	test("keeps player stash requests non-escrowed until DM approval and conserves canonical metadata", async () => {
+		const seeded = await pSeedPartyItem({
+			name: `${prefix} requested moonsteel`,
+			quantity: 3,
+			item: RICH_CATALOG_ITEM,
+			entryMetadata: {note: "Keep the full trusted entry"},
+		});
+		const requestInput = {
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			sourceKind: "party_inventory",
+			sourceId: seeded.party.id,
+			targetKind: "character",
+			targetId: targetCharacter.id,
+			payload: {items: [{entryId: seeded.entry.id, quantity: 1}]},
+			idempotencyKey: `${prefix}-player-stash-request`,
+		};
+		const requested = await store.pProposeTransfer(requestInput);
+		await expect(store.pProposeTransfer(requestInput)).resolves.toEqual(JSON.parse(JSON.stringify(requested)));
+		expect(requested.transfer).toMatchObject({
+			status: "proposed",
+			payload: {
+				request: {items: [{entryId: seeded.entry.id, quantity: 1}]},
+				preview: {
+					items: [expect.objectContaining({
+						item: RICH_CATALOG_ITEM,
+						note: "Keep the full trusted entry",
+						quantity: 1,
+					})],
+				},
+			},
+		});
+		expect((await store.pGetPartyInventory({accountId: targetOwner.id, campaignId: campaign.id}))
+			.inventory.find(entry => entry.id === seeded.entry.id).quantity).toBe(3);
+		await expect(store.pResolveTransfer({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			transferId: requested.transfer.id,
+			decision: "accept",
+			idempotencyKey: crypto.randomUUID(),
+		})).rejects.toMatchObject({code: "FORBIDDEN"});
+
+		const acceptInput = {
+			accountId: dm.id,
+			campaignId: campaign.id,
+			transferId: requested.transfer.id,
+			decision: "accept",
+			idempotencyKey: `${prefix}-approve-player-stash-request`,
+		};
+		const accepted = await store.pResolveTransfer(acceptInput);
+		await expect(store.pResolveTransfer(acceptInput)).resolves.toEqual(JSON.parse(JSON.stringify(accepted)));
+		await expect(store.pResolveTransfer({...acceptInput, idempotencyKey: `${prefix}-approve-player-stash-request-new-key`}))
+			.rejects.toMatchObject({code: "TRANSFER_NOT_FOUND"});
+		expect(accepted.transfer).toMatchObject({
+			status: "committed",
+			payload: {
+				escrow: {
+					items: [expect.objectContaining({
+						item: RICH_CATALOG_ITEM,
+						note: "Keep the full trusted entry",
+						quantity: 1,
+					})],
+				},
+			},
+		});
+		expect((await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id}))
+			.inventory.find(entry => entry.id === seeded.entry.id).quantity).toBe(2);
+		expect((await pReadCharacter(targetOwner.id, targetCharacter.id)).data.inventory).toContainEqual(expect.objectContaining({
+			item: RICH_CATALOG_ITEM,
+			note: "Keep the full trusted entry",
+			quantity: 1,
+		}));
+
+		const secondRequest = await store.pProposeTransfer({
+			...requestInput,
+			idempotencyKey: `${prefix}-player-stash-request-2`,
+		});
+		await store.pResolveTransfer({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			transferId: secondRequest.transfer.id,
+			decision: "accept",
+			idempotencyKey: `${prefix}-approve-player-stash-request-2`,
+		});
+		expect((await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id}))
+			.inventory.find(entry => entry.id === seeded.entry.id).quantity).toBe(1);
+		expect((await pReadCharacter(targetOwner.id, targetCharacter.id)).data.inventory
+			.find(entry => entry.item?.name === RICH_CATALOG_ITEM.name).quantity).toBe(2);
+	});
+
+	test("serializes competing player stash requests and returns a stable insufficient code", async () => {
+		const seeded = await pSeedPartyItem({name: `${prefix} requested ration`, quantity: 3});
+		const [sourceRequest, targetRequest] = await Promise.all([
+			store.pProposeTransfer({
+				accountId: sourceOwner.id,
+				campaignId: campaign.id,
+				sourceKind: "party_inventory",
+				sourceId: seeded.party.id,
+				targetKind: "character",
+				targetId: sourceCharacter.id,
+				payload: {items: [{entryId: seeded.entry.id, quantity: 2}]},
+				idempotencyKey: `${prefix}-source-request-contention`,
+			}),
+			store.pProposeTransfer({
+				accountId: targetOwner.id,
+				campaignId: campaign.id,
+				sourceKind: "party_inventory",
+				sourceId: seeded.party.id,
+				targetKind: "character",
+				targetId: targetCharacter.id,
+				payload: {items: [{entryId: seeded.entry.id, quantity: 2}]},
+				idempotencyKey: `${prefix}-target-request-contention`,
+			}),
+		]);
+		expect(sourceRequest.transfer.status).toBe("proposed");
+		expect(targetRequest.transfer.status).toBe("proposed");
+		expect((await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id}))
+			.inventory.find(entry => entry.id === seeded.entry.id).quantity).toBe(3);
+
+		await store.pResolveTransfer({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			transferId: sourceRequest.transfer.id,
+			decision: "accept",
+			idempotencyKey: `${prefix}-approve-source-contention`,
+		});
+		await expect(store.pResolveTransfer({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			transferId: targetRequest.transfer.id,
+			decision: "accept",
+			idempotencyKey: `${prefix}-approve-target-contention`,
+		})).rejects.toMatchObject({code: "TRANSFER_INSUFFICIENT"});
+		expect((await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === targetRequest.transfer.id).status).toBe("proposed");
+		expect((await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id}))
+			.inventory.find(entry => entry.id === seeded.entry.id).quantity).toBe(1);
+
+		await expect(store.pProposeTransfer({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			sourceKind: "party_inventory",
+			sourceId: seeded.party.id,
+			targetKind: "character",
+			targetId: targetCharacter.id,
+			payload: {items: [{entryId: seeded.entry.id, quantity: 1}]},
+			idempotencyKey: `${prefix}-peer-stash-request`,
+		})).rejects.toMatchObject({code: "FORBIDDEN"});
 	});
 
 	test("fails stale or linked transfers atomically and restores a rejection exactly once", async () => {
@@ -608,6 +937,8 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		};
 		const first = await store.pResolveTransfer(rejectInput);
 		await expect(store.pResolveTransfer(rejectInput)).resolves.toEqual(JSON.parse(JSON.stringify(first)));
+		await expect(store.pResolveTransfer({...rejectInput, idempotencyKey: `${prefix}-resolve-reject-new-key`}))
+			.rejects.toMatchObject({code: "TRANSFER_NOT_FOUND"});
 		const restored = await pReadCharacter(sourceOwner.id, sourceCharacter.id);
 		expect(restored.data.inventory.find(it => it.id === "maps")).toEqual(before.data.inventory.find(it => it.id === "maps"));
 
@@ -829,7 +1160,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 	test("orders participant and stash locks consistently with a concurrent stash transfer", async () => {
 		const target = await pCreateTargetCharacter(`${prefix} transfer contention`);
 		const seeded = await pSeedPartyItem({name: `${prefix} contention ration`, quantity: 12});
-		const [award, reserved] = await Promise.all([
+		const [award, transferred] = await Promise.all([
 			store.pAwardItems({
 				accountId: dm.id,
 				campaignId: campaign.id,
@@ -852,14 +1183,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		expect(award.targets[0].characterId).toBe(target.id);
 		expect((await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id}))
 			.inventory.find(entry => entry.id === seeded.entry.id).quantity).toBe(3);
-
-		await store.pResolveTransfer({
-			accountId: dm.id,
-			campaignId: campaign.id,
-			transferId: reserved.transfer.id,
-			decision: "accept",
-			idempotencyKey: `${prefix}-contention-resolve`,
-		});
+		expect(transferred.transfer.status).toBe("committed");
 		expect((await pReadCharacter(targetOwner.id, target.id)).data.inventory).toEqual([
 			expect.objectContaining({item: {name: `${prefix} contention ration`, source: "PHB", weight: 0.1}, quantity: 9}),
 		]);
@@ -867,7 +1191,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 
 	test("cancels reserved transfers on spectator downgrade and rejects later resolution", async () => {
 		const source = (await store.pCreateCharacter({
-			accountId: dm.id,
+			accountId: sourceOwner.id,
 			campaignId: campaign.id,
 			data: {name: `${prefix} role source`, inventory: [], currency: {gp: 4}},
 			schemaVersion: 1,
@@ -883,7 +1207,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			idempotencyKey: crypto.randomUUID(),
 		})).character;
 		const reserved = (await store.pProposeTransfer({
-			accountId: dm.id,
+			accountId: sourceOwner.id,
 			campaignId: campaign.id,
 			sourceKind: "character",
 			sourceId: source.id,
@@ -904,10 +1228,10 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 
 		expect((await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
 			.find(transfer => transfer.id === reserved.id).status).toBe("cancelled");
-		expect((await pReadCharacter(dm.id, source.id)).data.currency.gp).toBe(4);
+		expect((await pReadCharacter(sourceOwner.id, source.id)).data.currency.gp).toBe(4);
 
 		const afterDowngrade = (await store.pProposeTransfer({
-			accountId: dm.id,
+			accountId: sourceOwner.id,
 			campaignId: campaign.id,
 			sourceKind: "character",
 			sourceId: source.id,
@@ -923,5 +1247,225 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			decision: "accept",
 			idempotencyKey: crypto.randomUUID(),
 		})).rejects.toMatchObject({code: "FORBIDDEN"});
+	});
+
+	test("rolls back every PostgreSQL lifecycle cancellation when one escrow restore is invalid", async () => {
+		const lifecycleTargetOwner = await pCreateAccount("Inventory Atomic Lifecycle Target");
+		const lifecycleMembership = await pJoinCampaign(lifecycleTargetOwner);
+		const sources = [];
+		for (const label of ["first", "second"]) {
+			sources.push((await store.pCreateCharacter({
+				accountId: sourceOwner.id,
+				campaignId: campaign.id,
+				data: {name: `${prefix} atomic ${label} source`, inventory: [], currency: {gp: Number.MAX_SAFE_INTEGER}},
+				schemaVersion: 1,
+				clientImportId: crypto.randomUUID(),
+				idempotencyKey: crypto.randomUUID(),
+			})).character);
+		}
+		const refillSource = (await store.pCreateCharacter({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			data: {name: `${prefix} atomic refill source`, inventory: [], currency: {gp: 1}},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const target = (await store.pCreateCharacter({
+			accountId: lifecycleTargetOwner.id,
+			campaignId: campaign.id,
+			data: {name: `${prefix} atomic target`, inventory: [], currency: {}},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const transfers = [];
+		for (const source of sources) {
+			transfers.push((await store.pProposeTransfer({
+				accountId: sourceOwner.id,
+				campaignId: campaign.id,
+				sourceKind: "character",
+				sourceId: source.id,
+				targetKind: "character",
+				targetId: target.id,
+				payload: {currency: {gp: 1}},
+				idempotencyKey: crypto.randomUUID(),
+			})).transfer);
+		}
+		const laterTransfer = [...transfers].sort((a, b) => a.id.localeCompare(b.id))[1];
+		await store.pProposeTransfer({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: refillSource.id,
+			targetKind: "character",
+			targetId: laterTransfer.sourceId,
+			payload: {currency: {gp: 1}},
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await expect(store.pChangeMemberRole({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			membershipId: lifecycleMembership.id,
+			role: "spectator",
+			idempotencyKey: crypto.randomUUID(),
+		})).rejects.toMatchObject({code: "NUMERIC_INVALID"});
+
+		expect((await store.pGetMembership({accountId: lifecycleTargetOwner.id, campaignId: campaign.id})).role).toBe("player");
+		const listed = await store.pListTransfers({accountId: dm.id, campaignId: campaign.id});
+		for (const transfer of transfers) {
+			expect(listed.find(candidate => candidate.id === transfer.id).status).toBe("reserved");
+		}
+		for (const source of sources) {
+			const expectedGp = source.id === laterTransfer.sourceId
+				? Number.MAX_SAFE_INTEGER
+				: Number.MAX_SAFE_INTEGER - 1;
+			expect((await pReadCharacter(sourceOwner.id, source.id)).data.currency.gp).toBe(expectedGp);
+		}
+	});
+
+	test("serializes transfer and event-list authorization with concurrent role changes", async () => {
+		const coDm = await pCreateAccount("Inventory Concurrent Co-DM");
+		const membership = await pJoinCampaign(coDm);
+		await store.pChangeMemberRole({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			membershipId: membership.id,
+			role: "co_dm",
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const source = (await store.pCreateCharacter({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			data: {name: `${prefix} concurrent-list source`, inventory: [], currency: {gp: 2}},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const target = await pCreateTargetCharacter(`${prefix} concurrent-list target`);
+		const unrelated = (await store.pProposeTransfer({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: source.id,
+			targetKind: "character",
+			targetId: target.id,
+			payload: {currency: {gp: 1}},
+			idempotencyKey: crypto.randomUUID(),
+		})).transfer;
+		expect((await store.pListTransfers({accountId: coDm.id, campaignId: campaign.id}))
+			.some(transfer => transfer.id === unrelated.id)).toBe(true);
+
+		const roleClient = await pool.connect();
+		try {
+			await roleClient.query("BEGIN");
+			await roleClient.query(`UPDATE hub.memberships SET role = 'spectator', updated_at = now() WHERE id = $1`, [membership.id]);
+			let isTransferListSettled = false;
+			let isEventListSettled = false;
+			const listing = store.pListTransfers({accountId: coDm.id, campaignId: campaign.id})
+				.finally(() => { isTransferListSettled = true; });
+			const eventListing = store.pListVisibleEventPage({accountId: coDm.id, campaignId: campaign.id})
+				.finally(() => { isEventListSettled = true; });
+			await new Promise(resolve => setTimeout(resolve, 50));
+			expect(isTransferListSettled).toBe(false);
+			expect(isEventListSettled).toBe(false);
+			await roleClient.query("COMMIT");
+			expect((await listing).some(transfer => transfer.id === unrelated.id)).toBe(false);
+			expect((await eventListing).events.some(event => event.aggregateId === unrelated.id)).toBe(false);
+		} catch (error) {
+			await roleClient.query("ROLLBACK");
+			throw error;
+		} finally {
+			roleClient.release();
+		}
+	});
+
+	test("replays projected transfer receipts after active members become spectators", async () => {
+		const actor = await pCreateAccount("Inventory Receipt Actor");
+		const recipient = await pCreateAccount("Inventory Receipt Recipient");
+		const actorMembership = await pJoinCampaign(actor);
+		const recipientMembership = await pJoinCampaign(recipient);
+		const source = (await store.pCreateCharacter({
+			accountId: actor.id,
+			campaignId: campaign.id,
+			data: {
+				name: `${prefix} receipt source`,
+				inventory: [{id: "receipt-stack", item: {name: "Rope", source: "PHB"}, quantity: 2}],
+				currency: {},
+			},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const sameOwnerTarget = (await store.pCreateCharacter({
+			accountId: actor.id,
+			campaignId: campaign.id,
+			data: {name: `${prefix} receipt same-owner`, inventory: [], currency: {}},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const peerTarget = (await store.pCreateCharacter({
+			accountId: recipient.id,
+			campaignId: campaign.id,
+			data: {name: `${prefix} receipt peer`, inventory: [], currency: {}},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const directInput = {
+			accountId: actor.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: source.id,
+			targetKind: "character",
+			targetId: sameOwnerTarget.id,
+			payload: {items: [{entryId: "receipt-stack", quantity: 1}]},
+			idempotencyKey: crypto.randomUUID(),
+		};
+		const direct = await store.pProposeTransfer(directInput);
+		const peer = await store.pProposeTransfer({
+			...directInput,
+			targetId: peerTarget.id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const resolveInput = {
+			accountId: recipient.id,
+			campaignId: campaign.id,
+			transferId: peer.transfer.id,
+			decision: "accept",
+			idempotencyKey: crypto.randomUUID(),
+		};
+		const resolved = await store.pResolveTransfer(resolveInput);
+		expect(resolved.transfer).not.toHaveProperty("sourceId");
+		expect(resolved.transfer.actorAccountId).toBeNull();
+		await store.pChangeMemberRole({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			membershipId: recipientMembership.id,
+			role: "co_dm",
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const promotedReplay = await store.pResolveTransfer(resolveInput);
+		expect(promotedReplay.transfer.sourceId).toBe(source.id);
+		expect(promotedReplay.transfer.actorAccountId).toBe(actor.id);
+
+		await store.pChangeMemberRole({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			membershipId: actorMembership.id,
+			role: "spectator",
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await store.pChangeMemberRole({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			membershipId: recipientMembership.id,
+			role: "spectator",
+			idempotencyKey: crypto.randomUUID(),
+		});
+
+		await expect(store.pProposeTransfer(directInput)).resolves.toEqual(JSON.parse(JSON.stringify(direct)));
+		await expect(store.pResolveTransfer(resolveInput)).resolves.toEqual(JSON.parse(JSON.stringify(resolved)));
 	});
 });

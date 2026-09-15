@@ -1,3 +1,5 @@
+import {computePeerProfile} from "./character-projection.js";
+
 const MAX_SNAPSHOT_LENGTH = 80;
 
 export const HUB_EVENT_SNAPSHOT_VERSION = 1;
@@ -20,6 +22,62 @@ export function createCharacterDisplayNameSnapshot (value) {
 	};
 }
 
+export function getTransferCharacterDisplaySnapshot ({
+	character,
+	transferCampaignId,
+	viewerAccountId,
+	viewerRole,
+}) {
+	if (
+		!character
+		|| character.status !== "active"
+		|| character.campaignId !== transferCampaignId
+	) return null;
+	if (["dm", "co_dm"].includes(viewerRole) || character.ownerAccountId === viewerAccountId) {
+		return createCharacterDisplayNameSnapshot(character.data?.name);
+	}
+	const identity = computePeerProfile({
+		character: {
+			...character,
+			data: {name: character.data?.name},
+		},
+	}).data?.identity;
+	return identity?.name ? createCharacterDisplayNameSnapshot(identity.name) : null;
+}
+
+export function projectTransferForViewer ({
+	transfer,
+	accountId,
+	role,
+	getCharacterOwnerId,
+	getCharacterDisplaySnapshot,
+}) {
+	if (!transfer) return transfer;
+	const projected = {...transfer};
+	delete projected.sourceDisplaySnapshot;
+	delete projected.targetDisplaySnapshot;
+	if (transfer.sourceKind === "character") {
+		const snapshot = getCharacterDisplaySnapshot?.(transfer.sourceId);
+		if (snapshot) projected.sourceDisplaySnapshot = snapshot;
+	}
+	if (transfer.targetKind === "character") {
+		const snapshot = getCharacterDisplaySnapshot?.(transfer.targetId);
+		if (snapshot) projected.targetDisplaySnapshot = snapshot;
+	}
+	if (transfer.actorAccountId !== accountId) delete projected.actorCommandId;
+	if (["dm", "co_dm"].includes(role)) return projected;
+	const ownsSource = transfer.sourceKind === "character"
+		&& getCharacterOwnerId?.(transfer.sourceId) === accountId;
+	const ownsTarget = transfer.targetKind === "character"
+		&& getCharacterOwnerId?.(transfer.targetId) === accountId;
+	if (transfer.actorAccountId !== accountId && !ownsSource && !ownsTarget) return null;
+
+	if (!ownsSource || transfer.sourceKind === "party_inventory") delete projected.sourceId;
+	if (!ownsTarget || transfer.targetKind === "party_inventory") delete projected.targetId;
+	if (transfer.actorAccountId !== accountId) projected.actorAccountId = null;
+	return projected;
+}
+
 function getSnapshotName (snapshot) {
 	if (!snapshot || snapshot.version !== HUB_EVENT_SNAPSHOT_VERSION) return "";
 	return sanitizeCharacterDisplayName(snapshot.displayName || snapshot.name);
@@ -39,6 +97,7 @@ const UNENRICHED_EVENT_TYPES = new Set([
 	"character.operation.cancelled",
 	"character.operation.expired",
 	"party_inventory.invalidated",
+	"transfer.proposed",
 	"transfer.reserved",
 	"transfer.committed",
 	"transfer.rejected",

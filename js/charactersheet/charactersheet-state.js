@@ -4392,6 +4392,21 @@ class CharacterSheetState {
 			"constructor",
 			"prototype",
 		]);
+		const coarseInventoryTypes = new Set([
+			"armor",
+			"component",
+			"gear",
+			"gemstone",
+			"potion",
+			"ring",
+			"rod",
+			"scroll",
+			"staff",
+			"tool",
+			"wand",
+			"weapon",
+			"wondrous",
+		]);
 		const pristineCatalogFields = new Set([
 			"additionalSources",
 			"entries",
@@ -4443,7 +4458,12 @@ class CharacterSheetState {
 					item[key] = MiscUtil.copyFast(pristineMatch[key]);
 				}
 			}
-			if (item.typeCode == null && item.type != null) item.typeCode = item.type;
+			const matchedTypeCode = pristineMatch ? match?.typeCode ?? match?.type : null;
+			const hasDerivedCoarseTypeCode = coarseInventoryTypes.has(item.typeCode);
+			const resolvedTypeCode = matchedTypeCode ?? item.type;
+			if (resolvedTypeCode != null && (item.typeCode == null || hasDerivedCoarseTypeCode)) {
+				item.typeCode = resolvedTypeCode;
+			}
 			if (item.scfType == null && pristineMatch && match?.scfType != null) item.scfType = match.scfType;
 			if (item.focus == null && pristineMatch && match?.focus != null) item.focus = MiscUtil.copyFast(match.focus);
 			if (item.requiresAttunement == null && item.reqAttune != null) item.requiresAttunement = !!item.reqAttune;

@@ -51,7 +51,7 @@ import {CharacterSheetHubEffects} from "./charactersheet-hub-effects.js";
 import {CharacterSheetPeerTargeting} from "./charactersheet-peer-targeting.js";
 import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js";
 import {getCharacterSaveFence, isCharacterSaveFenceCurrent} from "./charactersheet-persistence-fence.js";
-import {applyJsonPatch, diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
+import {applyJsonPatch, diffJson, getJsonPatchesWithDocumentValues, rebaseJsonChanges} from "../hub/hub-json-patch.js";
 import {getCharacterDocumentWithoutDeterministicItemAliases} from "../hub/hub-inventory-equivalence.js";
 import {filterCampaignContentEntities, getCampaignContentPolicy, getCampaignEntityUid} from "../hub/hub-content-policy.js";
 import {
@@ -61,6 +61,10 @@ import {
 
 const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, StorageUtil, DataUtil, BrewUtil2, PrereleaseUtil} = /** @type {*} */ (globalThis);
 const _getHubRulesOverlay = hubContext => getCampaignSettingsOverlayFromRulesVersion(hubContext?.rulesVersion);
+const _getHubComparableCharacterDocument = ({document, repairItems, pristineItems}) => getCharacterDocumentWithoutDeterministicItemAliases(document, {
+	repairItems,
+	pristineItems,
+});
 
 /**
  * Character Sheet - Main Controller
@@ -93,6 +97,7 @@ class CharacterSheetPage {
 				? new HubHttpCharacterRepository({
 					campaignId: hubCampaignId,
 					fnGetRulesVersionId: () => this._hubContext?.rulesVersion?.id || null,
+					fnNormalizeCharacterDocument: document => this._getHubComparableCharacterDocument(document),
 				})
 				: new LocalCharacterRepository({storage: StorageUtil}));
 		this._hubCampaignId = hubCampaignId;
@@ -509,6 +514,14 @@ class CharacterSheetPage {
 		const out = this._state.toJson();
 		delete out.id;
 		return out;
+	}
+
+	_getHubComparableCharacterDocument (document) {
+		return _getHubComparableCharacterDocument({
+			document,
+			repairItems: this._itemRepairItems,
+			pristineItems: this._itemRepairData,
+		});
 	}
 
 	/**
@@ -4644,10 +4657,15 @@ class CharacterSheetPage {
 				const canonical = getClean(persisted);
 				if (diffJson(submitted, canonical).length) {
 					const live = getClean(this._state.toJson());
+					const getComparable = document => _getHubComparableCharacterDocument({
+						document,
+						repairItems: this._itemRepairItems,
+						pristineItems: this._itemRepairData,
+					});
 					const rebased = rebaseJsonChanges({
-						base: getCharacterDocumentWithoutDeterministicItemAliases(submitted),
-						local: getCharacterDocumentWithoutDeterministicItemAliases(live),
-						remote: getCharacterDocumentWithoutDeterministicItemAliases(canonical),
+						base: getComparable(submitted),
+						local: getComparable(live),
+						remote: getComparable(canonical),
 					});
 					if (rebased.isConflict) {
 						const conflict = new Error(`Live character edits overlap server changes.`);
@@ -4658,7 +4676,8 @@ class CharacterSheetPage {
 						this._characterRepository.registerLiveConflict?.({characterId: saveFence.characterId, recovery: conflict.recovery});
 						throw conflict;
 					}
-					this._state.loadFromJson({...applyJsonPatch(canonical, rebased.patches), id: persisted.id});
+					const livePatches = getJsonPatchesWithDocumentValues({patches: rebased.patches, document: live});
+					this._state.loadFromJson({...applyJsonPatch(canonical, livePatches), id: persisted.id});
 					this._reconcileClassFeatures();
 					this._renderCharacter();
 				}

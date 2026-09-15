@@ -296,8 +296,9 @@ export function normalizeHubEvent ({event, characters = [], members = [], actorD
 		"xp.granted": `${subject || target || "A character"} received XP.`,
 		"item.granted": `${subject} received an item.`,
 		"party_inventory.invalidated": "Party stash updated.",
+		"transfer.proposed": `${transferTarget || "A character"} requested a transfer${transferSource ? ` from ${transferSource}` : ""}.`,
 		"transfer.reserved": `${transferSource || "A character"} offered a transfer${transferTarget ? ` to ${transferTarget}` : ""}.`,
-		"transfer.committed": `${actorName} accepted a transfer${transferSource && transferTarget ? ` from ${transferSource} to ${transferTarget}` : ""}.`,
+		"transfer.committed": `${actorName} completed a transfer${transferSource && transferTarget ? ` from ${transferSource} to ${transferTarget}` : ""}.`,
 		"transfer.rejected": `${actorName} rejected a transfer${transferSource && transferTarget ? ` from ${transferSource} to ${transferTarget}` : ""}.`,
 		"transfer.cancelled": transferSource || transferTarget
 			? `${transferTarget || transferSource}'s transfer was cancelled.`
