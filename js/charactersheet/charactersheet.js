@@ -51,7 +51,8 @@ import {CharacterSheetHubEffects} from "./charactersheet-hub-effects.js";
 import {CharacterSheetPeerTargeting} from "./charactersheet-peer-targeting.js";
 import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js";
 import {getCharacterSaveFence, isCharacterSaveFenceCurrent} from "./charactersheet-persistence-fence.js";
-import {diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
+import {applyJsonPatch, diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
+import {getCharacterDocumentWithoutDeterministicItemAliases} from "../hub/hub-inventory-equivalence.js";
 import {filterCampaignContentEntities, getCampaignContentPolicy, getCampaignEntityUid} from "../hub/hub-content-policy.js";
 import {
 	getClearedCampaignRulesState,
@@ -108,6 +109,10 @@ class CharacterSheetPage {
 		this._partyInventory = null;
 		this._characterLoadGeneration = 0;
 		this._hubRealtimeGeneration = 0;
+		this._hubAuthoritativeReconcileRequest = null;
+		this._hubAuthoritativeReconcilePromise = null;
+		this._isHubAuthoritativeReconcileScheduled = false;
+		this._isHubCharacterConflictPromptOpen = false;
 		this._hubContextGeneration = 0;
 		this._hubContextRefreshActiveGeneration = null;
 		this._isHubContextRefreshing = false;
@@ -173,6 +178,8 @@ class CharacterSheetPage {
 		this._backgrounds = [];
 		this._spellsData = [];
 		this._itemsData = [];
+		this._itemRepairData = [];
+		this._itemRepairItems = [];
 		this._actionsData = [];
 		this._featsData = [];
 		this._optionalFeaturesData = [];
@@ -315,6 +322,7 @@ class CharacterSheetPage {
 		this._hubRealtime.on("semanticOperation", event => this._onHubSemanticOperation(event));
 		this._hubRealtime.on("connectionState", state => this._onHubRealtimeConnectionState(state));
 		this._hubRealtime.on("campaignContextChanged", event => this._onHubCampaignContextChanged(event));
+		this._hubRealtime.on("projectionInvalidated", event => this._onHubProjectionInvalidated(event));
 		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
 		this._hubRealtime.on("rulesChanged", event => { void this._pRefreshHubRules(event); });
 		return true;
@@ -390,6 +398,11 @@ class CharacterSheetPage {
 		} else if (state?.state === "live" && this._hubRulesRefreshBlocked) {
 			void this._pRefreshHubRules();
 		}
+		if (
+			state?.state === "live"
+			&& this._currentCharacterId
+			&& this._characterRepository.getPendingRecovery?.(this._currentCharacterId)
+		) this._scheduleHubAuthoritativeReconcile({characterId: this._currentCharacterId});
 		if (state?.state === "access_lost") {
 			// Fail closed synchronously; the coordinator then performs the full ordered teardown.
 			this._teardownHubRules();
@@ -416,6 +429,11 @@ class CharacterSheetPage {
 		this._isHubContextRevalidationRequired = true;
 		this._clearHubRules?.({isUnavailable: true});
 		this._campaign?.render();
+	}
+
+	_onHubProjectionInvalidated (event) {
+		if (!this._currentCharacterId || event?.characterId !== this._currentCharacterId) return false;
+		return this._scheduleHubAuthoritativeReconcile({characterId: this._currentCharacterId});
 	}
 
 	_applyHubContext (context) {
@@ -696,6 +714,134 @@ class CharacterSheetPage {
 		}
 	}
 
+	_scheduleHubAuthoritativeReconcile ({characterId}) {
+		if (!characterId || characterId !== this._currentCharacterId) return false;
+		this._hubAuthoritativeReconcileRequest = {
+			characterId,
+			generation: this._characterLoadGeneration,
+			realtimeGeneration: this._hubRealtimeGeneration,
+		};
+		if (this._hubAuthoritativeReconcilePromise || this._isHubAuthoritativeReconcileScheduled) return true;
+		this._isHubAuthoritativeReconcileScheduled = true;
+		queueMicrotask(() => {
+			this._isHubAuthoritativeReconcileScheduled = false;
+			if (this._hubAuthoritativeReconcilePromise) return;
+			const promise = this._pDrainHubAuthoritativeReconcile();
+			this._hubAuthoritativeReconcilePromise = promise;
+			void promise
+				.catch(error => {
+					// eslint-disable-next-line no-console
+					console.error("Authoritative character reconciliation failed:", error);
+					this._updateSaveIndicator("error");
+					JqueryUtil.doToast({
+						type: "danger",
+						content: `Could not reconcile this character with the campaign server. Your local copy was preserved; retry or export it before reloading.`,
+					});
+				})
+				.finally(() => {
+					if (this._hubAuthoritativeReconcilePromise === promise) {
+						this._hubAuthoritativeReconcilePromise = null;
+					}
+					if (this._hubAuthoritativeReconcileRequest) {
+						this._scheduleHubAuthoritativeReconcile({
+							characterId: this._hubAuthoritativeReconcileRequest.characterId,
+						});
+					}
+				});
+		});
+		return true;
+	}
+
+	async _pDrainHubAuthoritativeReconcile () {
+		while (this._hubAuthoritativeReconcileRequest) {
+			const request = this._hubAuthoritativeReconcileRequest;
+			this._hubAuthoritativeReconcileRequest = null;
+			await this._pRunHubAuthoritativeReconcile(request);
+		}
+	}
+
+	async _pRunHubAuthoritativeReconcile ({characterId, generation, realtimeGeneration}) {
+		const repository = this._characterRepository;
+		if (typeof repository?.pReconcileAuthoritativeCharacter !== "function") return false;
+		const fnIsCurrent = () => (
+			this._currentCharacterId === characterId
+			&& this._characterLoadGeneration === generation
+			&& this._hubRealtimeGeneration === realtimeGeneration
+		);
+		const result = await repository.pReconcileAuthoritativeCharacter({
+			characterId,
+			fnGetLiveData: () => this._getHubLiveCharacterData(),
+			fnAdoptLive: liveNext => this._adoptHubLiveCharacterData(liveNext),
+			fnIsCurrent,
+			isPreserveLocalOnConflict: true,
+		}).catch(error => ({status: "failed", error}));
+		if (!fnIsCurrent()) return false;
+
+		switch (result?.status) {
+			case "reconciled":
+				this._renderCharacter();
+				if (repository.getPendingRecovery?.(characterId)) return this._saveCurrentCharacter();
+				this._updateSaveIndicator("saved");
+				return true;
+			case "unchanged":
+				if (repository.getPendingRecovery?.(characterId)) return this._saveCurrentCharacter();
+				return true;
+			case "stale":
+				return true;
+			case "conflict":
+				this._updateSaveIndicator("error");
+				return this._pResolveHubCharacterConflict({characterId, fnIsCurrent});
+			case "failed":
+				this._updateSaveIndicator("error");
+				JqueryUtil.doToast({
+					type: "danger",
+					content: `Could not reconcile this character with the campaign server. Your local copy was preserved; retry or export it before reloading.`,
+				});
+				return false;
+			default:
+				return false;
+		}
+	}
+
+	async _pResolveHubCharacterConflict ({
+		characterId,
+		fnIsCurrent = () => this._currentCharacterId === characterId,
+		fallbackRecovery = null,
+	} = {}) {
+		if (
+			this._isHubCharacterConflictPromptOpen
+			|| typeof this._characterRepository?.pResolveConflict !== "function"
+		) return false;
+		this._isHubCharacterConflictPromptOpen = true;
+		try {
+			const choice = await InputUiUtil.pGetUserBoolean({
+				title: "Character Changed on Another Device",
+				htmlDescription: "Your local edits overlap newer server changes. Use your local version, or load the server version?",
+				textYes: "Use Local",
+				textNo: "Use Server",
+			});
+			if (!fnIsCurrent()) return false;
+			const recovery = this._characterRepository.getConflictRecovery?.(characterId) || fallbackRecovery;
+			if (!recovery) return false;
+			if (choice == null) {
+				DataUtil.userDownload("character-conflict-recovery", recovery, {fileType: "character-conflict"});
+				return false;
+			}
+			const resolved = await this._characterRepository.pResolveConflict({
+				characterId,
+				choice: choice ? "local" : "server",
+			});
+			if (!fnIsCurrent() || !resolved) return false;
+			this._state.loadFromJson(resolved);
+			this._reconcileClassFeatures();
+			this._renderCharacter();
+			this._updateSaveIndicator("saved");
+			return true;
+		} finally {
+			this._isHubCharacterConflictPromptOpen = false;
+		}
+	}
+
 	// #endregion
 
 	_canRestoreHubRealtimeAfterError (error) {
@@ -964,7 +1110,12 @@ class CharacterSheetPage {
 		/* eslint-enable no-console */
 
 		// Pass loaded data to modules
-		if (this._inventory) this._inventory.setItems(this._itemsData);
+		if (this._inventory) {
+			this._inventory.setItems(this._itemsData, {
+				pristineItems: this._itemRepairData,
+				repairItems: this._itemRepairItems,
+			});
+		}
 		if (this._combat) this._combat.setItems(this._itemsData);
 		if (this._features) this._features.setFeats(this._featsData);
 		if (this._spells) this._spells.setSpells(this._spellsData);
@@ -1061,36 +1212,115 @@ class CharacterSheetPage {
 		}
 	}
 
+	static _ITEM_REPAIR_FIELDS = [
+		"name",
+		"source",
+		"entries",
+		"additionalSources",
+		"hasRefs",
+	];
+
+	static _getItemRepairData ({rawItems, variantComponents}) {
+		const byUid = new Map();
+		for (const item of [
+			...(rawItems.item || []),
+			...(rawItems.baseitem || []),
+			...(variantComponents.item || []),
+		]) {
+			if (!item?.name || !item?.source) continue;
+			const uid = `${item.name}|${item.source}`.toLowerCase();
+			if (byUid.has(uid)) continue;
+			byUid.set(uid, Object.fromEntries(
+				this._ITEM_REPAIR_FIELDS
+					.filter(key => Object.prototype.hasOwnProperty.call(item, key))
+					.map(key => [key, MiscUtil.copyFast(item[key])]),
+			));
+		}
+		return [...byUid.values()];
+	}
+
+	static async _pLoadItemData ({
+		pLoadRawItems = () => DataUtil.item.loadRawJSON(),
+		pLoadPrereleaseData = () => PrereleaseUtil.pGetBrewProcessed(),
+		pLoadBrewData = () => BrewUtil2.pGetBrewProcessed(),
+		pLoadVariantComponents = () => DataUtil.loadJSON("data/items-variant-components-ar8.json").catch(() => ({item: []})),
+		pLoadSiteItems = () => DataUtil.item.loadJSON().then(d => d.item || []),
+		pLoadPrereleaseItems = () => DataUtil.item.loadPrerelease().then(d => d.item || []).catch(() => []),
+		pLoadBrewItems = () => DataUtil.item.loadBrew().then(d => d.item || []).catch(() => []),
+	} = {}) {
+		const [rawItems, prereleaseData, brewData, variantComponents] = await Promise.all([
+			pLoadRawItems(),
+			pLoadPrereleaseData(),
+			pLoadBrewData(),
+			pLoadVariantComponents(),
+		]);
+		const itemRepairData = this._getItemRepairData({
+			rawItems,
+			variantComponents,
+		});
+		const [items, prereleaseItems, brewItems] = await Promise.all([
+			pLoadSiteItems(),
+			pLoadPrereleaseItems(),
+			pLoadBrewItems(),
+		]);
+		return {
+			items,
+			prereleaseItems,
+			brewItems,
+			itemRepairItems: [...items, ...(variantComponents.item || [])],
+			prereleaseData,
+			brewData,
+			variantComponents,
+			itemRepairData,
+		};
+	}
+
 	async _pLoadData () {
-		// Load all necessary data in parallel
 		// Note: Using loadRawJSON for classes to get classFeature and subclassFeature arrays
 		// Also pre-cache class/subclass features in DataLoader so hover links work properly
-		const [races, classes, backgrounds, spells, items, brewItems, prereleaseItems, actions, feats, optFeatures, skills, conditionsData, languagesData, combatMethods, itemUpgrades, itemMaterials, prereleaseData, brewData, variantComponents] = await Promise.all([
-			DataUtil.race.loadJSON(),
-			DataUtil.class.loadRawJSON(),
-			DataUtil.loadJSON("data/backgrounds.json"),
-			DataUtil.spell.pLoadAll(),
-			// Use DataUtil.item.loadJSON/loadBrew/loadPrerelease so brew items go through the
-			// full enhancement pipeline (generic variant generation + property/mastery merging)
-			// — same path used by items.html. Otherwise brew weapons lack mastery/property fields.
-			DataUtil.item.loadJSON().then(d => d.item || []),
-			DataUtil.item.loadBrew().then(d => d.item || []).catch(() => []),
-			DataUtil.item.loadPrerelease().then(d => d.item || []).catch(() => []),
-			DataUtil.action.loadJSON(),
-			DataUtil.loadJSON("data/feats.json"),
-			DataUtil.loadJSON("data/optionalfeatures.json"),
-			DataUtil.loadJSON("data/skills.json"),
-			DataUtil.loadJSON("data/conditionsdiseases.json"),
-			DataUtil.loadJSON("data/languages.json"),
-			DataUtil.combatmethod.loadJSON().catch(() => ({combatMethod: []})),
-			DataUtil.itemUpgrade.loadJSON().catch(() => ({itemUpgrade: []})),
-			DataUtil.itemMaterial.loadJSON().catch(() => ({itemMaterial: []})),
-			// Load homebrew/prerelease data (for non-item entities)
-			PrereleaseUtil.pGetBrewProcessed(),
-			BrewUtil2.pGetBrewProcessed(),
-			// Load variant spell components (Arcadia 8)
-			DataUtil.loadJSON("data/items-variant-components-ar8.json").catch(() => ({item: []})),
+		const [itemData, nonItemData] = await Promise.all([
+			CharacterSheetPage._pLoadItemData(),
+			Promise.all([
+				DataUtil.race.loadJSON(),
+				DataUtil.class.loadRawJSON(),
+				DataUtil.loadJSON("data/backgrounds.json"),
+				DataUtil.spell.pLoadAll(),
+				DataUtil.action.loadJSON(),
+				DataUtil.loadJSON("data/feats.json"),
+				DataUtil.loadJSON("data/optionalfeatures.json"),
+				DataUtil.loadJSON("data/skills.json"),
+				DataUtil.loadJSON("data/conditionsdiseases.json"),
+				DataUtil.loadJSON("data/languages.json"),
+				DataUtil.combatmethod.loadJSON().catch(() => ({combatMethod: []})),
+				DataUtil.itemUpgrade.loadJSON().catch(() => ({itemUpgrade: []})),
+				DataUtil.itemMaterial.loadJSON().catch(() => ({itemMaterial: []})),
+			]),
 		]);
+		const {
+			items,
+			prereleaseItems,
+			brewItems,
+			itemRepairItems,
+			prereleaseData,
+			brewData,
+			variantComponents,
+			itemRepairData,
+		} = itemData;
+		const [
+			races,
+			classes,
+			backgrounds,
+			spells,
+			actions,
+			feats,
+			optFeatures,
+			skills,
+			conditionsData,
+			languagesData,
+			combatMethods,
+			itemUpgrades,
+			itemMaterials,
+		] = nonItemData;
 
 		// Base site data
 		// Merge subraces into races to get _baseName, _baseSource properties for subrace grouping
@@ -1103,9 +1333,11 @@ class CharacterSheetPage {
 		this._backgrounds = backgrounds.background || [];
 		this._spellsData = spells;
 		// Filter out item groups which are not actual items.
-		// Merge site + prerelease + brew + variant component items here (all already enhanced by DataUtil.item.*).
-		this._itemsData = [...(items || []), ...(prereleaseItems || []), ...(brewItems || []), ...(variantComponents.item || [])]
+		// Repository-owned site/variant identities precede mutable prerelease/brew collisions.
+		this._itemsData = [...(items || []), ...(variantComponents.item || []), ...(prereleaseItems || []), ...(brewItems || [])]
 			.filter(it => !it._isItemGroup);
+		this._itemRepairData = itemRepairData;
+		this._itemRepairItems = itemRepairItems.filter(it => !it._isItemGroup);
 		this._actionsData = actions.action || [];
 		this._featsData = feats.feat || [];
 		this._optionalFeaturesData = optFeatures.optionalfeature || [];
@@ -4412,7 +4644,11 @@ class CharacterSheetPage {
 				const canonical = getClean(persisted);
 				if (diffJson(submitted, canonical).length) {
 					const live = getClean(this._state.toJson());
-					const rebased = rebaseJsonChanges({base: submitted, local: live, remote: canonical});
+					const rebased = rebaseJsonChanges({
+						base: getCharacterDocumentWithoutDeterministicItemAliases(submitted),
+						local: getCharacterDocumentWithoutDeterministicItemAliases(live),
+						remote: getCharacterDocumentWithoutDeterministicItemAliases(canonical),
+					});
 					if (rebased.isConflict) {
 						const conflict = new Error(`Live character edits overlap server changes.`);
 						conflict.code = "CHARACTER_LIVE_CONFLICT";
@@ -4422,7 +4658,7 @@ class CharacterSheetPage {
 						this._characterRepository.registerLiveConflict?.({characterId: saveFence.characterId, recovery: conflict.recovery});
 						throw conflict;
 					}
-					this._state.loadFromJson({...rebased.document, id: persisted.id});
+					this._state.loadFromJson({...applyJsonPatch(canonical, rebased.patches), id: persisted.id});
 					this._reconcileClassFeatures();
 					this._renderCharacter();
 				}
@@ -4484,28 +4720,11 @@ class CharacterSheetPage {
 				return true;
 			}
 			if (err?.code === "CHARACTER_CONFLICT" && this._characterRepository.pResolveConflict) {
-				const choice = await InputUiUtil.pGetUserBoolean({
-					title: "Character Changed on Another Device",
-					htmlDescription: "Your local edits overlap newer server changes. Use your local version, or load the server version?",
-					textYes: "Use Local",
-					textNo: "Use Server",
-				});
-				if (!isSaveCurrent()) return false;
-				if (choice == null) {
-					DataUtil.userDownload("character-conflict-recovery", err.recovery, {fileType: "character-conflict"});
-					return false;
-				}
-				const resolved = await this._characterRepository.pResolveConflict({
+				return this._pResolveHubCharacterConflict({
 					characterId: saveFence.characterId,
-					choice: choice ? "local" : "server",
+					fnIsCurrent: isSaveCurrent,
+					fallbackRecovery: err.recovery,
 				});
-				if (!isSaveCurrent()) return false;
-				if (resolved) {
-					this._state.loadFromJson(resolved);
-					this._renderCharacter();
-					this._updateSaveIndicator("saved");
-					return true;
-				}
 			}
 			return false;
 		}

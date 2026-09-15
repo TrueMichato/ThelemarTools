@@ -317,7 +317,7 @@ describe("Character Sheet party inventory", () => {
 		expect(repository.pReconcileAuthoritativeCharacter).not.toHaveBeenCalled();
 	});
 
-	it("reconciles a cursor-covered non-semantic character revision", () => {
+	it("leaves cursor-covered character reconciliation to the owning Character Sheet page", () => {
 		const listeners = new Map();
 		const partyInventory = new CharacterSheetPartyInventory({
 			api: {},
@@ -345,7 +345,7 @@ describe("Character Sheet party inventory", () => {
 			isCharacterDocumentChanged: true,
 		});
 
-		expect(partyInventory._scheduleRefresh).toHaveBeenCalledWith({character: true, party: true});
+		expect(partyInventory._scheduleRefresh).toHaveBeenCalledWith({party: true});
 	});
 
 	it("reconciles an item award into the open owner sheet exactly once without refreshing the stash", () => {

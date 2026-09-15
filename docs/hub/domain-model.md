@@ -245,16 +245,36 @@ Whole-item transfer is refused if removal would require Character Sheet recalcul
 
 Partial stack transfer is allowed because the source wrapper remains. Cross-container commit resets
 ownership-local equipped/attuned/starred state and mints a new id unless full wrapper metadata is merge
-compatible. Restore preserves source identity/index.
+compatible. Comparison removes only deterministic Character Sheet aliases and empty composition defaults;
+spent charges, non-empty upgrades/gemstones, custom metadata, provenance, and other semantic differences remain
+stack-separating. Restore preserves source identity/index.
 
 ## Atomic item-award invariant
 
 A DM/co-DM award is one command for an ordered unique target set. Every target receives the same whole-number
 quantity, or no target changes. A stash-backed award locks and debits the selected authoritative stack once for
 the full `quantity * target count`, preserves transferable stack metadata through the existing inventory
-normalization, and commits that debit with every destination write. Catalog-like sources carry only bounded safe
-summary metadata. All destination inventory changes delete derived `data.carry` authority instead of
-recomputing it without a Character Sheet.
+normalization, and commits that debit with every destination write. Catalog-like command bodies and
+`item.granted` events carry only bounded safe summary metadata, but the authority resolves `name|source` from
+the generated site catalog or active campaign brew and stores the complete trusted item. New events retain
+their resolved site/campaign authority; legacy Recent identity may resolve only when exactly one authority owns
+the UID. Stash-derived grants remain selectable only through the live authoritative party stack rather than a
+Recent `name|source` projection. A campaign item cannot shadow a site UID. Unknown, source-kind-mismatched, duplicate, or cross-authority
+ambiguous identities fail; browser metadata never becomes canonical merely because it is present in the summary.
+Simple campaign `_copy` resolution also removes the generic/item parent-only publication fields that the site
+copy system preserves only by explicit request. All destination inventory changes delete derived `data.carry`
+authority instead of recomputing it without a Character Sheet.
+
+When a legacy summary-only inventory row is opened in the Character Sheet, item identity is repaired from an
+exact `name|source` match in an immutable repository-owned site/variant repair projection. Before enhanced item
+loading begins, the sheet snapshots only the authoritative repair-sensitive fields needed for that decision.
+The corresponding broad repair match comes from a separate enhanced site-plus-variant authority, so a mutable
+catalog collision cannot borrow the pristine identity and inject other fields. Mutable prerelease or brew
+catalogs cannot retroactively supply an old summary's entries/effects without exact
+historical provenance. Authored site metadata therefore survives save and later stack comparison while
+cross-authority substitutions, injected render caches, and publication hints remain excluded. Hub characters
+also bypass the local-save catalog effect hydrator, so complete or typeless authoritative inventory is not
+rewritten when the current client brew changes.
 
 ## Known domain gaps
 

@@ -173,8 +173,16 @@ No reactive system — renders are explicit. Related modules re-render together 
   signed-in campaign-backed canonical character attaches. Delivery uses the repository mutation queue and is
   generation-fenced on switch/detach/revocation/terminal page hide; a missing canonical ref, remote archive, or remote move
   serializes teardown behind already-queued delivery. Persisted `pagehide` suspends the socket and `pageshow`
-  resumes the same client/cursor rather than replaying through a fresh generation. This substrate must not call
-  state load/render/save or a generic conflict modal.
+  resumes the same client/cursor rather than replaying through a fresh generation. The coordinator substrate
+  does not mutate UI state. The page consumes projection invalidations by refetching canonical truth through
+  `HubHttpCharacterRepository.pReconcileAuthoritativeCharacter()`: disjoint offline recovery drafts retry,
+  overlaps open the explicit local/server dialog, and generation fences prevent adoption after a switch or
+  access loss. Cursor revision changes refetch after ordered semantic replay because one reconnect can contain
+  both semantic and ordinary writes; operation coverage prevents double application. Client-only `_savedAt`
+  metadata is excluded from overlap detection. The generic owner-document
+  path preserves the actual local candidate for an explicit `Use Local`, except for server-owned inventory and
+  XP paths. Party Inventory keeps the server-protecting overlap policy for authoritative escrow and owns stash
+  refresh/direct transfer reconciliation, not generic document reconnect recovery.
 - **Hub effect UI**: `CharacterSheetHubEffects` is activated and deactivated with the coordinator's current
   canonical character. Its pending read is owner-only and presentation-only. Approval remains visibly pending
   until an authoritative applied event completes repository adoption. The approval response carries that same

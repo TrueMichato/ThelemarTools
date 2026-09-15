@@ -81,6 +81,10 @@ import {
 	getExternalIdentityKey,
 	normalizeExternalIdentity,
 } from "./external-identity.js";
+import {
+	normalizeItemAwardResolution,
+	resolveItemAwardAuthority,
+} from "./item-award-catalog.js";
 
 function copy (value) {
 	return value === undefined ? undefined : structuredClone(value);
@@ -92,11 +96,13 @@ export class MemoryHubStore {
 		semanticOperationRegistry = createSemanticOperationRegistry(),
 		semanticProposalTtlMs = 24 * 60 * 60 * 1_000,
 		peerSourceCostsEnabled = false,
+		fnResolveAwardItem = resolveItemAwardAuthority,
 	} = {}) {
 		this._fnNow = fnNow;
 		this._semanticOperationRegistry = semanticOperationRegistry;
 		this._semanticProposalTtlMs = semanticProposalTtlMs;
 		this._isPeerSourceCostsEnabled = createPeerSourceCostsGate(peerSourceCostsEnabled);
+		this._fnResolveAwardItem = fnResolveAwardItem;
 		this._accounts = new Map();
 		this._identityToAccount = new Map();
 		this._externalIdentities = new Map();
@@ -1090,7 +1096,13 @@ export class MemoryHubStore {
 			if (
 				(current?.activeRulesVersionId || null) === rulesVersionId
 				&& (current?.activeBrewBundleVersionId || null) === brewBundleVersionId
-			) return enforcement;
+			) {
+				return {
+					...enforcement,
+					activeBrewBundleVersionId: brewBundleVersionId,
+					brewBundle,
+				};
+			}
 		}
 	}
 
@@ -3048,17 +3060,43 @@ export class MemoryHubStore {
 		const resumedPrior = this._getReceipt({accountId, idempotencyKey});
 		if (resumedPrior) return resumedPrior;
 		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
-		const character = this._getCharacterOrThrow(characterId);
+		let character = this._getCharacterOrThrow(characterId);
 		if (character.campaignId !== campaignId) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
-		const data = normalizeCharacterInventory(character.data);
-		const entry = {id: crypto.randomUUID(), item: copy(normalizedItem), quantity};
-		data.inventory.push(entry);
 		assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+		const provisionalData = normalizeCharacterInventory(character.data);
+		provisionalData.inventory.push({id: crypto.randomUUID(), item: copy(normalizedItem), quantity});
 		assertCharacterCampaignContentMutation({
 			...enforcement,
 			before: character.data,
-			after: data,
+			after: provisionalData,
 			rulesVersionId: enforcement.activeRulesVersionId,
+		});
+		const resolution = normalizeItemAwardResolution(await this._fnResolveAwardItem({
+			sourceKind: "recent",
+			item: normalizedItem,
+			brewBundle: enforcement.brewBundle,
+		}), {sourceKind: "recent"});
+		const authoritativeItem = resolution.authoritativeItem;
+		validateCloudValue(authoritativeItem, {label: "Granted item"});
+		const authoritativeSummary = getSafeItemSummary(authoritativeItem);
+		const currentEnforcement = await this._pGetCampaignContentEnforcement(campaignId);
+		const replayed = this._getReceipt({accountId, idempotencyKey});
+		if (replayed) return replayed;
+		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
+		if (currentEnforcement.activeBrewBundleVersionId !== enforcement.activeBrewBundleVersionId) {
+			throw new HubStoreError("BREW_VERSION_STALE", `Campaign homebrew changed before this item was granted.`, {status: 409});
+		}
+		assertCampaignContentPolicyVersion({...currentEnforcement, rulesVersionId});
+		character = this._getCharacterOrThrow(characterId);
+		if (character.campaignId !== campaignId) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
+		const data = normalizeCharacterInventory(character.data);
+		const entry = {id: crypto.randomUUID(), item: copy(authoritativeItem), quantity};
+		data.inventory.push(entry);
+		assertCharacterCampaignContentMutation({
+			...currentEnforcement,
+			before: character.data,
+			after: data,
+			rulesVersionId: currentEnforcement.activeRulesVersionId,
 		});
 		// The inventory just changed underneath a summary the sheet computed for the previous
 		// one, and no sheet is present to recompute it. Drop it: the projection then reports
@@ -3067,8 +3105,18 @@ export class MemoryHubStore {
 		validateCloudCharacterData(data);
 		this._setCharacterData({character, data});
 		character.revision++;
-		this._appendAudit({campaignId, actorAccountId: accountId, action: "item.granted", targetType: "character", targetId: characterId, details: {entryId: entry.id, quantity: entry.quantity}});
-		this._appendEvent({campaignId, actorAccountId: accountId, type: "item.granted", aggregateType: "character", aggregateId: characterId, aggregateRevision: character.revision, visibility: "explicit_accounts", visibleAccountIds: [...new Set([accountId, character.ownerAccountId])], payload: {entry}});
+		this._appendAudit({campaignId, actorAccountId: accountId, action: "item.granted", targetType: "character", targetId: characterId, details: {entryId: entry.id, quantity: entry.quantity, sourceKind: resolution.sourceKind}});
+		this._appendEvent({
+			campaignId,
+			actorAccountId: accountId,
+			type: "item.granted",
+			aggregateType: "character",
+			aggregateId: characterId,
+			aggregateRevision: character.revision,
+			visibility: "explicit_accounts",
+			visibleAccountIds: [...new Set([accountId, character.ownerAccountId])],
+			payload: {sourceKind: resolution.sourceKind, entry: {...copy(entry), item: copy(authoritativeSummary)}},
+		});
 		// A granted item changes the inventory and carry summaries.
 		this._commitCharacterMutation({character, actorAccountId: accountId, isRevisionBump: false});
 		return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(character), entry}});
@@ -3089,12 +3137,12 @@ export class MemoryHubStore {
 		const prior = this._getReceipt({accountId, idempotencyKey: commandIdempotencyKey});
 		if (prior) return prior;
 		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
-		const enforcement = await this._pGetCampaignContentEnforcement(campaignId);
+		let enforcement = await this._pGetCampaignContentEnforcement(campaignId);
 		const resumedPrior = this._getReceipt({accountId, idempotencyKey: commandIdempotencyKey});
 		if (resumedPrior) return resumedPrior;
 		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
 
-		const targetCharacters = request.targetCharacterIds.map(characterId => {
+		const getTargetCharacters = () => request.targetCharacterIds.map(characterId => {
 			const character = this._characters.get(characterId);
 			const ownerMembership = character
 				? this._memberships.get(`${campaignId}::${character.ownerAccountId}`)
@@ -3107,6 +3155,7 @@ export class MemoryHubStore {
 			) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
 			return character;
 		});
+		let targetCharacters = getTargetCharacters();
 
 		const totalQuantity = getItemAwardTotalQuantity({
 			quantity: request.quantity,
@@ -3114,6 +3163,7 @@ export class MemoryHubStore {
 		});
 		let item;
 		let incomingEntry;
+		let resolvedSourceKind = request.source.kind;
 		let stagedPartyInventory = null;
 		let partyInventoryResponse = null;
 		if (request.source.kind === "party_inventory") {
@@ -3140,7 +3190,39 @@ export class MemoryHubStore {
 			partyInventoryResponse = {id: partyInventory.id, revision: stagedPartyInventory.revision};
 		} else {
 			item = request.source.item;
-			incomingEntry = {item, quantity: request.quantity};
+			assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+			for (const character of targetCharacters) {
+				const provisional = addAwardedEntryToCharacter({
+					container: character.data,
+					incoming: {item, quantity: request.quantity},
+				});
+				assertCharacterCampaignContentMutation({
+					...enforcement,
+					before: character.data,
+					after: provisional.container,
+					rulesVersionId: enforcement.activeRulesVersionId,
+				});
+			}
+			const resolution = normalizeItemAwardResolution(await this._fnResolveAwardItem({
+				sourceKind: request.source.kind,
+				item,
+				brewBundle: enforcement.brewBundle,
+			}), {sourceKind: request.source.kind});
+			const authoritativeItem = resolution.authoritativeItem;
+			resolvedSourceKind = resolution.sourceKind;
+			validateCloudValue(authoritativeItem, {label: "Awarded item"});
+			item = getSafeItemSummary(authoritativeItem);
+			const currentEnforcement = await this._pGetCampaignContentEnforcement(campaignId);
+			const replayed = this._getReceipt({accountId, idempotencyKey: commandIdempotencyKey});
+			if (replayed) return replayed;
+			this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
+			if (currentEnforcement.activeBrewBundleVersionId !== enforcement.activeBrewBundleVersionId) {
+				throw new HubStoreError("BREW_VERSION_STALE", `Campaign homebrew changed before this item was awarded.`, {status: 409});
+			}
+			assertCampaignContentPolicyVersion({...currentEnforcement, rulesVersionId});
+			enforcement = currentEnforcement;
+			targetCharacters = getTargetCharacters();
+			incomingEntry = {item: authoritativeItem, quantity: request.quantity};
 		}
 		validateCloudValue(item, {label: "Awarded item"});
 		assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
@@ -3148,6 +3230,7 @@ export class MemoryHubStore {
 			const added = addAwardedEntryToCharacter({
 				container: character.data,
 				incoming: {...copy(incomingEntry), quantity: request.quantity},
+				isAllowLegacySummaryUpgrade: resolvedSourceKind === "catalog",
 			});
 			stripCarryAuthority(added.container);
 			validateCloudCharacterData(added.container);
@@ -3203,7 +3286,7 @@ export class MemoryHubStore {
 			targetId: campaignId,
 			details: {
 				awardId,
-				sourceKind: request.source.kind,
+				sourceKind: resolvedSourceKind,
 				item,
 				targetCharacterIds: request.targetCharacterIds,
 				targetCount: request.targetCharacterIds.length,
@@ -3226,7 +3309,7 @@ export class MemoryHubStore {
 					awardId,
 					index,
 					targetCount: stagedCharacters.length,
-					sourceKind: request.source.kind,
+					sourceKind: resolvedSourceKind,
 					note: request.note,
 					entry: {id: entry.id, item: copy(item), quantity: request.quantity},
 				},

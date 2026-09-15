@@ -21,7 +21,11 @@ export function buildRecentAwardItems (events = []) {
 	const byUid = new Map();
 	for (const event of [...events].sort((a, b) => (b.sequence || 0) - (a.sequence || 0))) {
 		if (event?.type !== "item.granted") continue;
-		const summary = getHubItemSummary(event.payload?.entry?.item, {sourceKind: "recent"});
+		if (event.payload?.sourceKind === "party_inventory") continue;
+		const sourceKind = ["catalog", "campaign_item"].includes(event.payload?.sourceKind)
+			? event.payload.sourceKind
+			: "recent";
+		const summary = getHubItemSummary(event.payload?.entry?.item, {sourceKind});
 		if (!summary) continue;
 		const uid = getItemUid(summary);
 		if (!byUid.has(uid)) byUid.set(uid, summary);

@@ -2,9 +2,28 @@ import crypto from "node:crypto";
 import pg from "pg";
 
 import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
+import {getCharacterSheetSavedInventory} from "./item-award-test-utils.js";
 
 const {Pool} = pg;
 const describePostgres = process.env.HUB_TEST_POSTGRES_URL ? describe : describe.skip;
+const RICH_CATALOG_ITEM = Object.freeze({
+	name: "Moonsteel Longsword",
+	source: "PHB",
+	type: "M",
+	rarity: "rare",
+	weight: 3,
+	value: 25000,
+	weaponCategory: "martial",
+	property: ["V"],
+	dmg1: "1d8",
+	dmg2: "1d10",
+	dmgType: "S",
+	weapon: true,
+	entries: ["A synthetic metadata-rich weapon used only by this regression."],
+	hasRefs: true,
+	additionalSources: [{source: "XGE", page: 79}],
+	_baseSource: "PHB",
+});
 
 describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 	let pool;
@@ -55,6 +74,34 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 
 	async function pReadCharacter (accountId, characterId) {
 		return (await store.pGetCharacter({accountId, characterId})).character;
+	}
+
+	async function pSaveCharacterInventoryThroughSheet ({accountId, character}) {
+		const inventory = getCharacterSheetSavedInventory(character.data.inventory);
+		const session = await store.pCreateSession({
+			accountId,
+			tokenHash: crypto.randomBytes(32).toString("hex"),
+			expiresAt: new Date(Date.now() + 60_000),
+		});
+		const sessionId = session.id;
+		const lease = await store.pAcquireCharacterLease({
+			accountId,
+			sessionId,
+			characterId: character.id,
+		});
+		return (await store.pPatchCharacter({
+			accountId,
+			sessionId,
+			characterId: character.id,
+			baseRevision: character.revision,
+			leaseEpoch: lease.epoch,
+			patches: [{
+				op: "replace",
+				path: "/inventory",
+				value: inventory,
+			}],
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
 	}
 
 	async function pCreateTargetCharacter (label, inventory = []) {
@@ -115,7 +162,15 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			ssl: false,
 			max: 6,
 		});
-		store = new PostgresHubStore({pool});
+		store = new PostgresHubStore({
+			pool,
+			fnResolveAwardItem: async ({item, sourceKind}) => ({
+				sourceKind: sourceKind === "recent" ? "catalog" : sourceKind,
+				authoritativeItem: `${item?.name}|${item?.source}`.toLowerCase() === "moonsteel longsword|phb"
+					? structuredClone(RICH_CATALOG_ITEM)
+					: structuredClone(item),
+			}),
+		});
 		await store.pCheckHealth();
 
 		dm = await pCreateAccount("Inventory DM");
@@ -164,6 +219,185 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 
 	afterAll(async () => {
 		await pool?.end();
+	});
+
+	test("persists resolved catalog metadata while keeping the durable grant event bounded", async () => {
+		const legacyEntryId = crypto.randomUUID();
+		const target = await pCreateTargetCharacter(`${prefix} rich award`, [{
+			id: legacyEntryId,
+			item: {
+				name: RICH_CATALOG_ITEM.name,
+				source: RICH_CATALOG_ITEM.source,
+				typeCode: RICH_CATALOG_ITEM.type,
+			},
+			quantity: 1,
+		}]);
+		const result = await store.pAwardItems({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			source: {
+				kind: "catalog",
+				item: {
+					name: RICH_CATALOG_ITEM.name,
+					source: RICH_CATALOG_ITEM.source,
+					typeCode: "G",
+					rarity: "common",
+					weight: 0,
+					value: 0,
+				},
+			},
+			targetCharacterIds: [target.id],
+			quantity: 2,
+			idempotencyKey: `${prefix}-rich-award`,
+		});
+
+		const persisted = await pReadCharacter(targetOwner.id, target.id);
+		expect(persisted.data.inventory).toEqual([
+			expect.objectContaining({id: legacyEntryId, item: RICH_CATALOG_ITEM, quantity: 3}),
+		]);
+		expect(result.targets[0].entryId).toBe(legacyEntryId);
+		expect(result.source.item).toEqual({
+			name: RICH_CATALOG_ITEM.name,
+			source: RICH_CATALOG_ITEM.source,
+			rarity: RICH_CATALOG_ITEM.rarity,
+			weight: RICH_CATALOG_ITEM.weight,
+			value: RICH_CATALOG_ITEM.value,
+			typeCode: RICH_CATALOG_ITEM.type,
+		});
+		const event = (await pool.query(`
+			SELECT payload
+			FROM hub.domain_events
+			WHERE event_type = 'item.granted' AND payload->>'awardId' = $1
+		`, [result.awardId])).rows[0];
+		expect(event.payload.entry.item).toEqual({
+			name: RICH_CATALOG_ITEM.name,
+			source: RICH_CATALOG_ITEM.source,
+			rarity: RICH_CATALOG_ITEM.rarity,
+			weight: RICH_CATALOG_ITEM.weight,
+			value: RICH_CATALOG_ITEM.value,
+			typeCode: RICH_CATALOG_ITEM.type,
+		});
+		expect(event.payload.entry.item).not.toHaveProperty("entries");
+		expect(event.payload.entry.item).not.toHaveProperty("_baseSource");
+		expect(event.payload.sourceKind).toBe("catalog");
+		const audit = (await pool.query(`
+			SELECT details
+			FROM hub.audit_entries
+			WHERE action = 'item.award_batch' AND details->>'awardId' = $1
+		`, [result.awardId])).rows[0];
+		expect(audit.details.item).toEqual(result.source.item);
+		expect(audit.details.sourceKind).toBe("catalog");
+	});
+
+	test("records resolved catalog authority for an unambiguous Recent award", async () => {
+		const target = await pCreateTargetCharacter(`${prefix} recent authority`);
+		const result = await store.pAwardItems({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			source: {kind: "recent", item: {name: RICH_CATALOG_ITEM.name, source: RICH_CATALOG_ITEM.source}},
+			targetCharacterIds: [target.id],
+			quantity: 1,
+			idempotencyKey: `${prefix}-recent-authority`,
+		});
+
+		expect(result.source.kind).toBe("recent");
+		const event = (await pool.query(`
+			SELECT payload
+			FROM hub.domain_events
+			WHERE event_type = 'item.granted' AND payload->>'awardId' = $1
+		`, [result.awardId])).rows[0];
+		expect(event.payload.sourceKind).toBe("catalog");
+		const audit = (await pool.query(`
+			SELECT details
+			FROM hub.audit_entries
+			WHERE action = 'item.award_batch' AND details->>'awardId' = $1
+		`, [result.awardId])).rows[0];
+		expect(audit.details.sourceKind).toBe("catalog");
+	});
+
+	test("reuses the PostgreSQL stack identity after a sheet save and party-stash return", async () => {
+		const target = await pCreateTargetCharacter(`${prefix} normalized stack`);
+		const first = await store.pAwardItems({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			source: {kind: "catalog", item: {name: RICH_CATALOG_ITEM.name, source: RICH_CATALOG_ITEM.source}},
+			targetCharacterIds: [target.id],
+			quantity: 1,
+			idempotencyKey: `${prefix}-normalized-first`,
+		});
+		const stackId = first.targets[0].entryId;
+		const saved = await pSaveCharacterInventoryThroughSheet({
+			accountId: targetOwner.id,
+			character: await pReadCharacter(targetOwner.id, target.id),
+		});
+		const normalizedItem = saved.data.inventory[0].item;
+		expect(normalizedItem).toEqual(expect.objectContaining({
+			...RICH_CATALOG_ITEM,
+			typeCode: RICH_CATALOG_ITEM.type,
+			properties: RICH_CATALOG_ITEM.property,
+			shield: false,
+			armor: false,
+			appliedUpgrades: [],
+			socketedGemstones: [],
+		}));
+
+		const repeated = await store.pAwardItems({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			source: {kind: "catalog", item: {name: RICH_CATALOG_ITEM.name, source: RICH_CATALOG_ITEM.source}},
+			targetCharacterIds: [target.id],
+			quantity: 2,
+			idempotencyKey: `${prefix}-normalized-repeat`,
+		});
+		expect(repeated.targets[0]).toEqual(expect.objectContaining({entryId: stackId, quantity: 2}));
+		expect((await pReadCharacter(targetOwner.id, target.id)).data.inventory).toEqual([
+			expect.objectContaining({id: stackId, item: normalizedItem, quantity: 3}),
+		]);
+
+		const party = await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id});
+		const deposit = await store.pProposeTransfer({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: target.id,
+			targetKind: "party_inventory",
+			targetId: party.id,
+			payload: {items: [{entryId: stackId, quantity: 1}]},
+			idempotencyKey: `${prefix}-normalized-deposit`,
+		});
+		await store.pResolveTransfer({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			transferId: deposit.transfer.id,
+			decision: "accept",
+			idempotencyKey: `${prefix}-normalized-deposit-accept`,
+		});
+		const stashed = (await store.pGetPartyInventory({
+			accountId: dm.id,
+			campaignId: campaign.id,
+		})).inventory.find(entry => entry.item.name === RICH_CATALOG_ITEM.name);
+		const withdraw = await store.pProposeTransfer({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			sourceKind: "party_inventory",
+			sourceId: party.id,
+			targetKind: "character",
+			targetId: target.id,
+			payload: {items: [{entryId: stashed.id, quantity: 1}]},
+			idempotencyKey: `${prefix}-normalized-withdraw`,
+		});
+		await store.pResolveTransfer({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			transferId: withdraw.transfer.id,
+			decision: "accept",
+			idempotencyKey: `${prefix}-normalized-withdraw-accept`,
+		});
+
+		const persisted = await pReadCharacter(targetOwner.id, target.id);
+		expect(persisted.data.inventory).toEqual([
+			expect.objectContaining({id: stackId, item: normalizedItem, quantity: 3}),
+		]);
 	});
 
 	test("keeps an archived campaign mutation-closed while preserving idempotent replay", async () => {

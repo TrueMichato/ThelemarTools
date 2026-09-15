@@ -508,8 +508,9 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 	});
 
 	it("matches memory enforcement for admissions, writes, grandfathering, rollback, atomicity, and privacy", async () => {
-		const memory = await pRunContentScenario(new MemoryHubStore(), "memory");
-		const postgresStore = new PostgresHubStore({pool});
+		const fnResolveAwardItem = async ({item}) => structuredClone(item);
+		const memory = await pRunContentScenario(new MemoryHubStore({fnResolveAwardItem}), "memory");
+		const postgresStore = new PostgresHubStore({pool, fnResolveAwardItem});
 		await postgresStore.pCheckHealth();
 		const postgres = await pRunContentScenario(postgresStore, "postgres");
 
