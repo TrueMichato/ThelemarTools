@@ -59,6 +59,7 @@ import {HUB_REQUIRED_MIGRATION_VERSION} from "./migration-version.js";
 import {
 	createCharacterDisplayNameSnapshot,
 	enrichEventPayload,
+	getTransferCharacterDisplaySnapshot,
 	projectTransferForViewer,
 	redactTransferEventForViewer,
 } from "./hub-event-snapshots.js";
@@ -950,9 +951,24 @@ export class PostgresHubStore {
 			accountId,
 			campaignId,
 		});
+		const canonicalResult = await client.query(`
+			SELECT *
+			FROM hub.transfers
+			WHERE id = $1 AND campaign_id = $2
+		`, [response.transfer.id, campaignId]);
+		const canonical = canonicalResult.rowCount ? this._getTransfer(canonicalResult.rows[0]) : null;
+		const transfer = canonical
+			? {
+				...structuredClone(response.transfer),
+				actorAccountId: canonical.actorAccountId,
+				actorCommandId: canonical.actorCommandId,
+				sourceId: canonical.sourceId,
+				targetId: canonical.targetId,
+			}
+			: structuredClone(response.transfer);
 		const characterIds = [
-			response.transfer.sourceKind === "character" ? response.transfer.sourceId : null,
-			response.transfer.targetKind === "character" ? response.transfer.targetId : null,
+			transfer.sourceKind === "character" ? transfer.sourceId : null,
+			transfer.targetKind === "character" ? transfer.targetId : null,
 		].filter(Boolean);
 		const owners = characterIds.length
 			? await client.query(`SELECT id, owner_account_id FROM hub.characters WHERE id = ANY($1::uuid[])`, [characterIds])
@@ -961,7 +977,7 @@ export class PostgresHubStore {
 		return {
 			...structuredClone(response),
 			transfer: projectTransferForViewer({
-				transfer: structuredClone(response.transfer),
+				transfer,
 				accountId,
 				role: viewerMembership.role,
 				getCharacterOwnerId: characterId => ownerByCharacterId.get(characterId),
@@ -5827,11 +5843,21 @@ export class PostgresHubStore {
 				SELECT
 					t.*,
 					sc.owner_account_id AS source_owner_account_id,
+					sc.campaign_id AS source_character_campaign_id,
+					sc.status AS source_character_status,
 					sc.data->>'name' AS source_character_name,
 					sc.projection_policy AS source_projection_policy,
+					sc.revision AS source_character_revision,
+					sc.projection_revision AS source_character_projection_revision,
+					sc.target_ref AS source_character_target_ref,
 					tc.owner_account_id AS target_owner_account_id,
+					tc.campaign_id AS target_character_campaign_id,
+					tc.status AS target_character_status,
 					tc.data->>'name' AS target_character_name,
-					tc.projection_policy AS target_projection_policy
+					tc.projection_policy AS target_projection_policy,
+					tc.revision AS target_character_revision,
+					tc.projection_revision AS target_character_projection_revision,
+					tc.target_ref AS target_character_target_ref
 				FROM hub.transfers t
 				LEFT JOIN hub.characters sc ON sc.id = t.source_character_id
 				LEFT JOIN hub.characters tc ON tc.id = t.target_character_id
@@ -5850,28 +5876,26 @@ export class PostgresHubStore {
 						return null;
 					},
 					getCharacterDisplaySnapshot: characterId => {
-						const endpoint = characterId === row.source_character_id
-							? {
-								ownerAccountId: row.source_owner_account_id,
-								name: row.source_character_name,
-								projectionPolicy: row.source_projection_policy,
-							}
-							: characterId === row.target_character_id
-								? {
-									ownerAccountId: row.target_owner_account_id,
-									name: row.target_character_name,
-									projectionPolicy: row.target_projection_policy,
-								}
-								: null;
-						if (
-							!endpoint?.ownerAccountId
-							|| (
-								!["dm", "co_dm"].includes(membership.role)
-								&& endpoint.ownerAccountId !== accountId
-								&& !isPeerVisibleIdentity({projectionPolicy: endpoint.projectionPolicy})
-							)
-						) return null;
-						return createCharacterDisplayNameSnapshot(endpoint.name);
+						const prefix = characterId === row.source_character_id
+							? "source"
+							: characterId === row.target_character_id ? "target" : null;
+						if (!prefix || !row[`${prefix}_owner_account_id`]) return null;
+						return getTransferCharacterDisplaySnapshot({
+							character: {
+								id: characterId,
+								campaignId: row[`${prefix}_character_campaign_id`],
+								ownerAccountId: row[`${prefix}_owner_account_id`],
+								status: row[`${prefix}_character_status`],
+								data: {name: row[`${prefix}_character_name`]},
+								projectionPolicy: row[`${prefix}_projection_policy`],
+								revision: row[`${prefix}_character_revision`],
+								projectionRevision: row[`${prefix}_character_projection_revision`],
+								targetRef: row[`${prefix}_character_target_ref`],
+							},
+							transferCampaignId: row.campaign_id,
+							viewerAccountId: accountId,
+							viewerRole: membership.role,
+						});
 					},
 				}))
 				.filter(Boolean);

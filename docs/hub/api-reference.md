@@ -254,8 +254,11 @@ transfer's originating actor also receives `actorCommandId`, the opaque proposal
 responses, receipt replays, and transfer-list reads. Other participants, including DM/co-DM viewers who did not
 originate the command, never receive that correlation value. Transfer-list reads may also include
 `sourceDisplaySnapshot` and `targetDisplaySnapshot` for character endpoints whose identity is visible to that
-viewer under the current projection policy. These labels are derived at read time, are omitted when identity is
-hidden, and never restore the concealed endpoint UUID.
+viewer under the current projection policy. Peer viewers receive the current projected identity name, including
+an explicit replacement alias rather than the canonical name. Owners and DM/co-DM viewers may receive the
+canonical name, but only while the endpoint is still active in the transfer's campaign. These labels are derived
+at read time, are omitted when identity is hidden or the character has since detached or moved campaigns, and
+never restore the concealed endpoint UUID.
 Browser proposal and resolution retries freeze the original body, decision, rules pin, and idempotency key after
 an outcome-uncertain network, invalid-response, or HTTP 5xx failure. That exact retry is allowed for at most 23
 hours, staying inside PostgreSQL's 24-hour command-receipt lifetime. Once the browser window expires, it matches

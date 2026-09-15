@@ -58,6 +58,7 @@ import {
 import {
 	createCharacterDisplayNameSnapshot,
 	enrichEventPayload,
+	getTransferCharacterDisplaySnapshot,
 	projectTransferForViewer,
 	redactTransferEventForViewer,
 } from "./hub-event-snapshots.js";
@@ -608,10 +609,20 @@ export class MemoryHubStore {
 
 	_projectTransferResponseForViewer ({response, accountId, membership}) {
 		if (!response?.transfer) return copy(response);
+		const canonical = this._transfers.get(response.transfer.id);
+		const transfer = canonical
+			? {
+				...copy(response.transfer),
+				actorAccountId: canonical.actorAccountId,
+				actorCommandId: canonical.actorCommandId,
+				sourceId: canonical.sourceId,
+				targetId: canonical.targetId,
+			}
+			: copy(response.transfer);
 		return {
 			...copy(response),
 			transfer: projectTransferForViewer({
-				transfer: copy(response.transfer),
+				transfer,
 				accountId,
 				role: membership.role,
 				getCharacterOwnerId: characterId => this._characters.get(characterId)?.ownerAccountId,
@@ -3499,7 +3510,10 @@ export class MemoryHubStore {
 		if (current.isDirectAuthority && current.target._character) {
 			enforcement = await this._pGetCampaignContentEnforcement(campaignId);
 			const resumedPrior = this._getReceipt({accountId, idempotencyKey});
-			if (resumedPrior) return resumedPrior;
+			if (resumedPrior) {
+				const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
+				return this._projectTransferResponseForViewer({response: resumedPrior, accountId, membership});
+			}
 			current = getCurrentState();
 			if (!current.isDirectAuthority) enforcement = null;
 		}
@@ -3583,7 +3597,10 @@ export class MemoryHubStore {
 			? await this._pGetCampaignContentEnforcement(campaignId)
 			: null;
 		const resumedPrior = this._getReceipt({accountId, idempotencyKey});
-		if (resumedPrior) return resumedPrior;
+		if (resumedPrior) {
+			const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
+			return this._projectTransferResponseForViewer({response: resumedPrior, accountId, membership});
+		}
 		const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
 		const transfer = this._transfers.get(transferId);
 		if (!transfer || transfer.campaignId !== campaignId || !["proposed", "reserved"].includes(transfer.status)) throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
@@ -3683,15 +3700,12 @@ export class MemoryHubStore {
 				getCharacterOwnerId: characterId => this._characters.get(characterId)?.ownerAccountId,
 				getCharacterDisplaySnapshot: characterId => {
 					const character = this._characters.get(characterId);
-					if (
-						!character
-						|| (
-							!["dm", "co_dm"].includes(membership.role)
-							&& character.ownerAccountId !== accountId
-							&& !isPeerVisibleIdentity(character)
-						)
-					) return null;
-					return createCharacterDisplayNameSnapshot(character.data?.name);
+					return getTransferCharacterDisplaySnapshot({
+						character,
+						transferCampaignId: transfer.campaignId,
+						viewerAccountId: accountId,
+						viewerRole: membership.role,
+					});
 				},
 			}))
 			.filter(Boolean);

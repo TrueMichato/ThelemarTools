@@ -1,3 +1,5 @@
+import {computePeerProfile} from "./character-projection.js";
+
 const MAX_SNAPSHOT_LENGTH = 80;
 
 export const HUB_EVENT_SNAPSHOT_VERSION = 1;
@@ -18,6 +20,29 @@ export function createCharacterDisplayNameSnapshot (value) {
 		version: HUB_EVENT_SNAPSHOT_VERSION,
 		displayName: sanitizeCharacterDisplayName(value) || "A character",
 	};
+}
+
+export function getTransferCharacterDisplaySnapshot ({
+	character,
+	transferCampaignId,
+	viewerAccountId,
+	viewerRole,
+}) {
+	if (
+		!character
+		|| character.status !== "active"
+		|| character.campaignId !== transferCampaignId
+	) return null;
+	if (["dm", "co_dm"].includes(viewerRole) || character.ownerAccountId === viewerAccountId) {
+		return createCharacterDisplayNameSnapshot(character.data?.name);
+	}
+	const identity = computePeerProfile({
+		character: {
+			...character,
+			data: {name: character.data?.name},
+		},
+	}).data?.identity;
+	return identity?.name ? createCharacterDisplayNameSnapshot(identity.name) : null;
 }
 
 export function projectTransferForViewer ({

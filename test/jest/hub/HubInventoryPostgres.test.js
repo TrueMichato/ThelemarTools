@@ -633,11 +633,32 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		const acceptedSourceView = (await store.pListTransfers({accountId: sourceOwner.id, campaignId: campaign.id}))
 			.find(transfer => transfer.id === directPass.transfer.id);
 		expect(acceptedSourceView.actorCommandId).toBe(`${prefix}-direct`);
+		const aliasPolicy = await store.pSetProjectionPolicy({
+			accountId: sourceOwner.id,
+			characterId: sourceCharacter.id,
+			policy: {
+				version: 1,
+				preset: "private",
+				overrides: {identity: {mode: "replace", value: {name: "Masked Source"}}},
+			},
+			expectedProjectionRevision: sourceCharacter.projectionRevision,
+			idempotencyKey: `${prefix}-alias-source-after-transfer`,
+		});
+		const targetViewAfterSourceAlias = (await store.pListTransfers({accountId: targetOwner.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(targetViewAfterSourceAlias).toMatchObject({
+			sourceDisplaySnapshot: {version: 1, displayName: "Masked Source"},
+		});
+		expect(targetViewAfterSourceAlias).not.toHaveProperty("sourceId");
+		const dmViewAfterSourceAlias = (await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(dmViewAfterSourceAlias.sourceDisplaySnapshot).toEqual({version: 1, displayName: "Source"});
+
 		const privatePolicy = await store.pSetProjectionPolicy({
 			accountId: sourceOwner.id,
 			characterId: sourceCharacter.id,
 			policy: {version: 1, preset: "private", overrides: {}},
-			expectedProjectionRevision: sourceCharacter.projectionRevision,
+			expectedProjectionRevision: aliasPolicy.projectionRevision,
 			idempotencyKey: `${prefix}-hide-source-after-transfer`,
 		});
 		const targetViewAfterSourceHide = (await store.pListTransfers({accountId: targetOwner.id, campaignId: campaign.id}))
@@ -650,6 +671,30 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			policy: {version: 1, preset: "table", overrides: {}},
 			expectedProjectionRevision: privatePolicy.projectionRevision,
 			idempotencyKey: `${prefix}-restore-source-after-transfer`,
+		});
+		const destinationCampaign = (await store.pCreateCampaign({
+			accountId: sourceOwner.id,
+			name: `${prefix} transfer-label-destination`,
+			idempotencyKey: `${prefix}-transfer-label-destination`,
+		})).campaign;
+		await store.pMoveCharacter({
+			accountId: sourceOwner.id,
+			characterId: sourceCharacter.id,
+			campaignId: destinationCampaign.id,
+			idempotencyKey: `${prefix}-move-source-after-transfer`,
+		});
+		const targetViewAfterSourceMove = (await store.pListTransfers({accountId: targetOwner.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(targetViewAfterSourceMove).not.toHaveProperty("sourceDisplaySnapshot");
+		expect(targetViewAfterSourceMove).not.toHaveProperty("sourceId");
+		const dmViewAfterSourceMove = (await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(dmViewAfterSourceMove).not.toHaveProperty("sourceDisplaySnapshot");
+		await store.pMoveCharacter({
+			accountId: sourceOwner.id,
+			characterId: sourceCharacter.id,
+			campaignId: campaign.id,
+			idempotencyKey: `${prefix}-restore-source-campaign`,
 		});
 		const directTarget = await pReadCharacter(targetOwner.id, targetCharacter.id);
 		expect(directTarget.data.inventory).toHaveLength(2);
@@ -1392,6 +1437,18 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			idempotencyKey: crypto.randomUUID(),
 		};
 		const resolved = await store.pResolveTransfer(resolveInput);
+		expect(resolved.transfer).not.toHaveProperty("sourceId");
+		expect(resolved.transfer.actorAccountId).toBeNull();
+		await store.pChangeMemberRole({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			membershipId: recipientMembership.id,
+			role: "co_dm",
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const promotedReplay = await store.pResolveTransfer(resolveInput);
+		expect(promotedReplay.transfer.sourceId).toBe(source.id);
+		expect(promotedReplay.transfer.actorAccountId).toBe(actor.id);
 
 		await store.pChangeMemberRole({
 			accountId: dm.id,

@@ -389,11 +389,38 @@ describe("Phase 4 actions, grants, and transfers", () => {
 		})).json().projection.character;
 		expect(directTarget.data.inventory.find(entry => entry.item.name === "Arrow").quantity).toBe(12);
 
-		await store.pSetProjectionPolicy({
+		const aliasPolicy = await store.pSetProjectionPolicy({
+			accountId: a.session.account.id,
+			characterId: a.character.id,
+			policy: {
+				version: 1,
+				preset: "private",
+				overrides: {identity: {mode: "replace", value: {name: "Masked A"}}},
+			},
+			expectedProjectionRevision: a.character.projectionRevision,
+			idempotencyKey: "alias-a-after-transfer",
+		});
+		const targetViewAfterSourceAlias = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(b.session),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(targetViewAfterSourceAlias).toMatchObject({
+			sourceDisplaySnapshot: {version: 1, displayName: "Masked A"},
+		});
+		expect(targetViewAfterSourceAlias).not.toHaveProperty("sourceId");
+		const dmViewAfterSourceAlias = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(dm),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(dmViewAfterSourceAlias.sourceDisplaySnapshot).toEqual({version: 1, displayName: "A"});
+
+		const privatePolicy = await store.pSetProjectionPolicy({
 			accountId: a.session.account.id,
 			characterId: a.character.id,
 			policy: {version: 1, preset: "private", overrides: {}},
-			expectedProjectionRevision: a.character.projectionRevision,
+			expectedProjectionRevision: aliasPolicy.projectionRevision,
 			idempotencyKey: "hide-a-after-transfer",
 		});
 		const targetViewAfterSourceHide = (await app.inject({
@@ -403,6 +430,18 @@ describe("Phase 4 actions, grants, and transfers", () => {
 		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
 		expect(targetViewAfterSourceHide).not.toHaveProperty("sourceDisplaySnapshot");
 		expect(targetViewAfterSourceHide).not.toHaveProperty("sourceId");
+		await store.pSetProjectionPolicy({
+			accountId: a.session.account.id,
+			characterId: a.character.id,
+			policy: {version: 1, preset: "table", overrides: {}},
+			expectedProjectionRevision: privatePolicy.projectionRevision,
+			idempotencyKey: "restore-a-after-transfer",
+		});
+		const sourceDestinationCampaign = (await store.pCreateCampaign({
+			accountId: a.session.account.id,
+			name: "Transferred source destination",
+			idempotencyKey: "create-source-destination",
+		})).campaign;
 
 		const aMembership = await store.pGetMembership({accountId: a.session.account.id, campaignId: campaign.id});
 		await store.pChangeMemberRole({
@@ -412,6 +451,25 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			role: "spectator",
 			idempotencyKey: "downgrade-a-after-transfer",
 		});
+		await store.pMoveCharacter({
+			accountId: a.session.account.id,
+			characterId: a.character.id,
+			campaignId: sourceDestinationCampaign.id,
+			idempotencyKey: "move-a-after-transfer",
+		});
+		const targetViewAfterSourceDetach = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(b.session),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(targetViewAfterSourceDetach).not.toHaveProperty("sourceDisplaySnapshot");
+		expect(targetViewAfterSourceDetach).not.toHaveProperty("sourceId");
+		const dmViewAfterSourceDetach = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(dm),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(dmViewAfterSourceDetach).not.toHaveProperty("sourceDisplaySnapshot");
 		expect((await app.inject(playerToOwnRequest)).json()).toEqual(playerToOwn.json());
 
 		const bMembership = await store.pGetMembership({accountId: b.session.account.id, campaignId: campaign.id});
@@ -496,6 +554,114 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			url: `/api/characters/${source.id}`,
 			headers: readHeaders(dm),
 		})).json().projection.character.data.inventory).toEqual([]);
+	});
+
+	it("reprojects raced Memory proposal and resolution receipts after authority changes", async () => {
+		const pRunWithSecondPolicyReadPaused = async fnRun => {
+			const originalGetEnforcement = store._pGetCampaignContentEnforcement.bind(store);
+			let reads = 0;
+			let resolveSecondRead;
+			const secondRead = new Promise(resolve => { resolveSecondRead = resolve; });
+			let releaseSecondRead;
+			const secondReadGate = new Promise(resolve => { releaseSecondRead = resolve; });
+			store._pGetCampaignContentEnforcement = async campaignId => {
+				reads++;
+				if (reads === 2) {
+					resolveSecondRead();
+					await secondReadGate;
+				}
+				return originalGetEnforcement(campaignId);
+			};
+			try {
+				return await fnRun({secondRead, releaseSecondRead});
+			} finally {
+				store._pGetCampaignContentEnforcement = originalGetEnforcement;
+			}
+		};
+
+		const firstSetup = await setup();
+		const firstMembership = await store.pGetMembership({
+			accountId: firstSetup.a.session.account.id,
+			campaignId: firstSetup.campaign.id,
+		});
+		await store.pChangeMemberRole({
+			accountId: firstSetup.dm.account.id,
+			campaignId: firstSetup.campaign.id,
+			membershipId: firstMembership.id,
+			role: "co_dm",
+			idempotencyKey: "promote-proposal-race-actor",
+		});
+		const proposalInput = {
+			accountId: firstSetup.a.session.account.id,
+			campaignId: firstSetup.campaign.id,
+			sourceKind: "character",
+			sourceId: firstSetup.a.character.id,
+			targetKind: "character",
+			targetId: firstSetup.b.character.id,
+			payload: {items: [{entryId: "arrows-2", quantity: 1}]},
+			idempotencyKey: "same-key-proposal-role-race",
+		};
+		await pRunWithSecondPolicyReadPaused(async ({secondRead, releaseSecondRead}) => {
+			const first = store.pProposeTransfer(proposalInput);
+			const second = store.pProposeTransfer(proposalInput);
+			await secondRead;
+			const firstResponse = await first;
+			expect(firstResponse.transfer.targetId).toBe(firstSetup.b.character.id);
+			await store.pChangeMemberRole({
+				accountId: firstSetup.dm.account.id,
+				campaignId: firstSetup.campaign.id,
+				membershipId: firstMembership.id,
+				role: "spectator",
+				idempotencyKey: "downgrade-proposal-race-actor",
+			});
+			releaseSecondRead();
+			const replayed = await second;
+			expect(replayed.transfer.sourceId).toBe(firstSetup.a.character.id);
+			expect(replayed.transfer).not.toHaveProperty("targetId");
+		});
+
+		const secondSetup = await setup();
+		const secondMembership = await store.pGetMembership({
+			accountId: secondSetup.a.session.account.id,
+			campaignId: secondSetup.campaign.id,
+		});
+		const reserved = await store.pProposeTransfer({
+			accountId: secondSetup.b.session.account.id,
+			campaignId: secondSetup.campaign.id,
+			sourceKind: "character",
+			sourceId: secondSetup.b.character.id,
+			targetKind: "character",
+			targetId: secondSetup.a.character.id,
+			payload: {items: [{entryId: "arrows-3", quantity: 1}]},
+			idempotencyKey: "resolution-race-transfer",
+		});
+		const resolutionInput = {
+			accountId: secondSetup.a.session.account.id,
+			campaignId: secondSetup.campaign.id,
+			transferId: reserved.transfer.id,
+			decision: "accept",
+			idempotencyKey: "same-key-resolution-role-race",
+		};
+		await pRunWithSecondPolicyReadPaused(async ({secondRead, releaseSecondRead}) => {
+			const first = store.pResolveTransfer(resolutionInput);
+			const second = store.pResolveTransfer(resolutionInput);
+			await secondRead;
+			const firstResponse = await first;
+			expect(firstResponse.transfer).not.toHaveProperty("sourceId");
+			expect(firstResponse.transfer.actorAccountId).toBeNull();
+			await store.pChangeMemberRole({
+				accountId: secondSetup.dm.account.id,
+				campaignId: secondSetup.campaign.id,
+				membershipId: secondMembership.id,
+				role: "co_dm",
+				idempotencyKey: "promote-resolution-race-actor",
+			});
+			releaseSecondRead();
+			const replayed = await second;
+			expect(replayed.transfer.targetId).toBe(secondSetup.a.character.id);
+			expect(replayed.transfer.sourceId).toBe(secondSetup.b.character.id);
+			expect(replayed.transfer.actorAccountId).toBe(secondSetup.b.session.account.id);
+		});
 	});
 
 	it("lets a player request stash items without reserving them before DM approval", async () => {

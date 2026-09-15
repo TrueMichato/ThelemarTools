@@ -112,6 +112,53 @@ describe("hub API client", () => {
 		expect(drafts.get({accountId: "account-1", campaignId: "campaign-1"})).toBeNull();
 	});
 
+	it("reconciles expired transfer proposals without unlocking known or ambiguous commands", () => {
+		const proposalRequest = {
+			sourceKind: "character",
+			sourceId: "source-1",
+			targetKind: "character",
+			targetId: "target-1",
+			payload: {
+				items: [{entryId: "item-b", quantity: 2}, {entryId: "item-a", quantity: 1}],
+				currency: {gp: 3},
+			},
+			idempotencyKey: "proposal-1",
+		};
+		const matchingTransfer = {
+			id: "transfer-1",
+			actorCommandId: "proposal-1",
+			status: "reserved",
+			sourceKind: "character",
+			targetKind: "character",
+			targetId: "target-1",
+			payload: {escrow: {items: [{id: "item-a", quantity: 1}, {id: "item-b", quantity: 2}], currency: {gp: 3}}},
+		};
+
+		expect(HubTransferProposalDrafts.reconcileExpiredProposal({
+			proposalRequest,
+			transfers: [matchingTransfer],
+		})).toEqual({state: "pending", transfer: matchingTransfer});
+		const terminalTransfer = {...matchingTransfer, status: "committed"};
+		expect(HubTransferProposalDrafts.reconcileExpiredProposal({
+			proposalRequest,
+			transfers: [terminalTransfer],
+		})).toEqual({state: "terminal", transfer: terminalTransfer});
+		expect(HubTransferProposalDrafts.reconcileExpiredProposal({
+			proposalRequest,
+			transfers: [],
+		})).toEqual({state: "absent"});
+
+		const legacyMatch = {...matchingTransfer, actorCommandId: undefined};
+		expect(HubTransferProposalDrafts.reconcileExpiredProposal({
+			proposalRequest,
+			transfers: [legacyMatch],
+		})).toEqual({state: "pending", transfer: legacyMatch, isLegacy: true});
+		expect(HubTransferProposalDrafts.reconcileExpiredProposal({
+			proposalRequest,
+			transfers: [legacyMatch, {...legacyMatch, id: "transfer-2"}],
+		})).toEqual({state: "ambiguous"});
+	});
+
 	it("calls the browser fetch global without rebinding its receiver", async () => {
 		const originalFetch = globalThis.fetch;
 		globalThis.fetch = async function () {

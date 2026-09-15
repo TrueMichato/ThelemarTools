@@ -942,13 +942,19 @@ function setTransferRefreshFailure ({form, message, pRetry}) {
 	status.append(retry);
 }
 
-function setTransferProposalReplayExpired ({form, proposalRef, proposalRequest, pRefresh}) {
+function setTransferProposalReplayExpired ({
+	form,
+	proposalRef,
+	proposalRequest,
+	pRefresh,
+	message = "This transfer retry is too old to replay safely.",
+}) {
 	const status = document.getElementById("campaign-transfer-form-status");
 	const submit = form?.querySelector("button[type='submit']");
 	if (!status || !submit) return;
 	submit.disabled = true;
 	status.classList.add("hub-inline-status--error");
-	status.replaceChildren(document.createTextNode("This transfer retry is too old to replay safely. "));
+	status.replaceChildren(document.createTextNode(`${message} `));
 	const refresh = document.createElement("button");
 	refresh.type = "button";
 	refresh.className = "hub-button hub-button--inline";
@@ -957,19 +963,60 @@ function setTransferProposalReplayExpired ({form, proposalRef, proposalRequest, 
 		refresh.disabled = true;
 		refresh.textContent = "Refreshing...";
 		try {
-			await pRefresh();
+			const refreshResult = await pRefresh();
+			if (refreshResult?.isFenced || !Array.isArray(refreshResult?.transfers)) {
+				throw new HubApiError({code: "TRANSFER_REFRESH_FAILED", status: 0});
+			}
+			const reconciliation = HubTransferProposalDrafts.reconcileExpiredProposal({
+				proposalRequest,
+				transfers: refreshResult.transfers,
+			});
+			if (reconciliation.state === "ambiguous") {
+				setTransferProposalReplayExpired({
+					form,
+					proposalRef,
+					proposalRequest,
+					pRefresh,
+					message: "Multiple matching pending transfers were found. This request remains locked to prevent a duplicate; resolve them in the transfer inbox.",
+				});
+				return;
+			}
+			if (reconciliation.state === "pending") {
+				setTransferProposalReplayExpired({
+					form,
+					proposalRef,
+					proposalRequest,
+					pRefresh,
+					message: "The original transfer was found and is still pending. Resolve or cancel it in the transfer inbox before starting another.",
+				});
+				return;
+			}
+
 			transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
 			form._hubMutationKey = null;
 			form._hubMutationFingerprint = null;
 			setTransferProposalControls({form, isLocked: false});
 			submit.textContent = "Submit transfer";
 			submit.disabled = !document.getElementById("campaign-transfer-source")?.options.length;
+			const terminalMessages = {
+				committed: "The original transfer completed. Latest balances are loaded.",
+				rejected: "The original transfer was rejected. Latest balances are loaded.",
+				cancelled: "The original transfer was cancelled. Latest balances are loaded.",
+				expired: "The original transfer expired. Latest balances are loaded.",
+			};
 			setFormStatus({
 				formId: "campaign-transfer-form",
-				message: "Latest balances loaded. Review them before starting another transfer.",
+				message: terminalMessages[reconciliation.transfer?.status]
+					|| "No matching transfer was found. Latest balances are loaded; inspect the destination before starting another.",
 			});
 		} catch {
-			setTransferProposalReplayExpired({form, proposalRef, proposalRequest, pRefresh});
+			setTransferProposalReplayExpired({
+				form,
+				proposalRef,
+				proposalRequest,
+				pRefresh,
+				message: "The transfer outcome and latest balances could not be confirmed. Retry the state refresh; this request remains locked.",
+			});
 		}
 	});
 	status.append(refresh);
@@ -1953,7 +2000,7 @@ async function renderPendingTransfers ({
 		}
 		return row;
 	}));
-	return {pendingTransferIds};
+	return {pendingTransferIds, transfers};
 }
 
 function getFormFingerprint (form) {

@@ -107,6 +107,11 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("transferProposalDrafts.get(proposalRef)");
 		expect(source).toContain("proposalRequest.isAutoResolved");
 		expect(source).toContain("transferProposalDrafts.isReplayable");
+		expect(source).toContain("HubTransferProposalDrafts.reconcileExpiredProposal");
+		expect(source).toContain("transfers: refreshResult.transfers");
+		expect(source).toContain("This request remains locked to prevent a duplicate");
+		expect(source).toContain("The original transfer was found and is still pending.");
+		expect(source).toContain("No matching transfer was found. Latest balances are loaded");
 		expect(source).toContain("Retry transfer");
 		expect(source).toContain("Retry to reconcile the same transfer.");
 		expect(source).toContain("Refresh latest balances");

@@ -164,6 +164,50 @@ export class HubTransferProposalDrafts {
 		this._drafts.delete(ref);
 		return true;
 	}
+
+	static _getComparablePayload (payload = {}) {
+		const value = payload.request || payload.escrow || payload;
+		const items = (value.items || [])
+			.map(item => ({
+				entryId: item.entryId || item.id,
+				quantity: Number(item.quantity),
+			}))
+			.sort((a, b) => `${a.entryId}`.localeCompare(`${b.entryId}`) || a.quantity - b.quantity);
+		const currency = Object.fromEntries(["pp", "gp", "ep", "sp", "cp"]
+			.map(type => [type, Number(value.currency?.[type]) || 0]));
+		return JSON.stringify({items, currency});
+	}
+
+	static _isProjectedTransferMatch ({transfer, request}) {
+		if (
+			!transfer
+			|| transfer.sourceKind !== request.sourceKind
+			|| transfer.targetKind !== request.targetKind
+			|| (transfer.sourceId && transfer.sourceId !== request.sourceId)
+			|| (transfer.targetId && transfer.targetId !== request.targetId)
+		) return false;
+		return this._getComparablePayload(transfer.payload) === this._getComparablePayload(request.payload);
+	}
+
+	static reconcileExpiredProposal ({proposalRequest, transfers = []}) {
+		if (!proposalRequest?.idempotencyKey || !Array.isArray(transfers)) return {state: "ambiguous"};
+		const exactMatches = transfers.filter(transfer => transfer.actorCommandId === proposalRequest?.idempotencyKey);
+		if (exactMatches.length > 1) return {state: "ambiguous"};
+		if (exactMatches.length === 1) {
+			const transfer = exactMatches[0];
+			return {
+				state: ["proposed", "reserved"].includes(transfer.status) ? "pending" : "terminal",
+				transfer,
+			};
+		}
+
+		const legacyMatches = transfers.filter(transfer => !transfer.actorCommandId
+			&& ["proposed", "reserved"].includes(transfer.status)
+			&& this._isProjectedTransferMatch({transfer, request: proposalRequest}));
+		if (legacyMatches.length > 1) return {state: "ambiguous"};
+		if (legacyMatches.length === 1) return {state: "pending", transfer: legacyMatches[0], isLegacy: true};
+		return {state: "absent"};
+	}
 }
 
 export async function pResolveTransferAndRefresh ({pResolve, pRefresh}) {
