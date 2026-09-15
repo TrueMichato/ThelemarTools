@@ -14,14 +14,16 @@ function cookie (response, name) {
 
 describe("Phase 4 actions, grants, and transfers", () => {
 	let app;
+	let store;
 	let identity;
 	let ix;
 
 	beforeEach(async () => {
 		identity = identities.dm;
 		ix = 0;
+		store = new MemoryHubStore({fnResolveAwardItem: async ({item}) => structuredClone(item)});
 		app = await createHubApp({
-			store: new MemoryHubStore({fnResolveAwardItem: async ({item}) => structuredClone(item)}),
+			store,
 			oauthProvider: {getAuthorizationUrl: ({state}) => `https://x/?state=${state}`, pExchangeCode: async () => identity},
 			config: {appOrigin: ORIGIN, cookieSecret: "x".repeat(32), csrfSecret: "y".repeat(32), allowedOAuthSubjects: ["github:1", "github:2", "github:3"]},
 		});
@@ -317,6 +319,79 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			headers: readHeaders(b.session),
 		})).json().projection.character;
 		expect(directTarget.data.inventory.find(entry => entry.item.name === "Arrow").quantity).toBe(12);
+	});
+
+	it("rechecks Memory direct-transfer receipts and participants after policy loading", async () => {
+		const {dm, campaign, a, b} = await setup();
+		const source = (await app.inject({
+			method: "POST",
+			url: "/api/characters",
+			headers: headers(dm),
+			payload: {
+				clientImportId: "direct-race-source",
+				campaignId: campaign.id,
+				schemaVersion: 1,
+				data: {
+					name: "Direct race source",
+					inventory: [{
+						id: "direct-race-token",
+						item: {name: "Direct Race Token", source: "PHB"},
+						quantity: 1,
+					}],
+					currency: {},
+				},
+			},
+		})).json().character;
+		const originalGetEnforcement = store._pGetCampaignContentEnforcement.bind(store);
+		let policyReads = 0;
+		let resolvePolicyReadsStarted;
+		const policyReadsStarted = new Promise(resolve => { resolvePolicyReadsStarted = resolve; });
+		let releasePolicyReads;
+		const policyGate = new Promise(resolve => { releasePolicyReads = resolve; });
+		store._pGetCampaignContentEnforcement = async campaignId => {
+			const out = await originalGetEnforcement(campaignId);
+			policyReads++;
+			if (policyReads === 2) resolvePolicyReadsStarted();
+			await policyGate;
+			return out;
+		};
+		const key = "direct-race-same-key";
+		const propose = targetId => app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(dm, key),
+			payload: {
+				sourceKind: "character",
+				sourceId: source.id,
+				targetKind: "character",
+				targetId,
+				payload: {items: [{entryId: "direct-race-token", quantity: 1}]},
+			},
+		});
+		const first = propose(a.character.id);
+		const second = propose(b.character.id);
+		await policyReadsStarted;
+		releasePolicyReads();
+		const responses = await Promise.all([first, second]);
+
+		expect(responses.map(response => response.statusCode).sort()).toEqual([201, 409]);
+		expect(responses.find(response => response.statusCode === 409).json().error).toBe("IDEMPOTENCY_KEY_REUSED");
+		const targetCharacters = await Promise.all([a, b].map(({session, character}) => app.inject({
+			method: "GET",
+			url: `/api/characters/${character.id}`,
+			headers: readHeaders(session),
+		})));
+		const receivedQuantity = targetCharacters
+			.map(response => response.json().projection.character.data.inventory)
+			.flat()
+			.filter(entry => entry.item?.name === "Direct Race Token")
+			.reduce((total, entry) => total + entry.quantity, 0);
+		expect(receivedQuantity).toBe(1);
+		expect((await app.inject({
+			method: "GET",
+			url: `/api/characters/${source.id}`,
+			headers: readHeaders(dm),
+		})).json().projection.character.data.inventory).toEqual([]);
 	});
 
 	it("lets a player request stash items without reserving them before DM approval", async () => {

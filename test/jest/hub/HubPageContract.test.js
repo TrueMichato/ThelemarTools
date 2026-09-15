@@ -102,6 +102,12 @@ describe("campaign hub pages", () => {
 
 	it("keeps transfer submission recoverable after a successful mutation outlives its refresh", () => {
 		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("HubTransferProposalDrafts");
+		expect(source).toContain("transferProposalDrafts.stage");
+		expect(source).toContain("transferProposalDrafts.get(proposalRef)");
+		expect(source).toContain("proposalRequest.isAutoResolved");
+		expect(source).toContain("Retry transfer");
+		expect(source).toContain("Retry to reconcile the same transfer.");
 		expect(source).toContain("setTransferRefreshFailure");
 		expect(source).toContain("const form = event.currentTarget;");
 		expect(source).toContain("Retry latest balances");

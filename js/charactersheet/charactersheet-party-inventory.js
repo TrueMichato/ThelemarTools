@@ -1231,6 +1231,11 @@ export class CharacterSheetPartyInventory {
 		const active = this._active;
 		const draft = this._draft;
 		if (!draft.transfer) {
+			if (draft.proposalRequest) {
+				this._error = "The transfer outcome is not yet confirmed. Retry the transfer before closing it.";
+				this._render();
+				return false;
+			}
 			this._closeDraft();
 			return true;
 		}
@@ -1280,7 +1285,7 @@ export class CharacterSheetPartyInventory {
 			this._render();
 			return false;
 		}
-		if (!draft.transfer) {
+		if (!draft.transfer && !draft.proposalRequest) {
 			const entry = this._getEntry(draft);
 			const container = this._getContainer(draft.kind);
 			const eligibility = getInventoryTransferEligibility({container, entry, quantity: draft.quantity});
@@ -1335,47 +1340,57 @@ export class CharacterSheetPartyInventory {
 					return true;
 				}
 			}
-			if (draft.kind === "character" && !draft.transfer && !draft.hasAttemptedProposal) {
+			if (draft.kind === "character" && !draft.transfer && !draft.proposalRequest) {
 				const isSaved = await this._fnSaveCharacter?.();
 				if (!isSaved) throw Object.assign(new Error("Save failed"), {code: "CHARACTER_BUSY"});
 			}
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
 			if (!draft.transfer) {
-				const isAutoResolve = this._shouldAutoResolve();
-				const rulesVersionId = isAutoResolve && draft.destinationKind === "character"
-					? this._fnGetRulesVersionId()
-					: undefined;
-				const targetId = getPartyInventoryTransferTargetId({
-					sourceKind: draft.kind,
-					destinationKind: draft.destinationKind,
-					activeCharacterId: active.characterId,
-					recipientId: draft.recipientId,
-					partyInventoryId: this._partyInventory?.id,
-				});
-				draft.hasAttemptedProposal = true;
-				const result = await this._api.pProposeTransfer({
-					campaignId: this._campaignId,
-					sourceKind: draft.kind,
-					sourceId: draft.kind === "character" ? active.characterId : this._partyInventory.id,
-					targetKind: draft.destinationKind,
-					targetId,
-					payload: {
-						items: [{entryId: draft.entryId, quantity: draft.quantity}],
-						currency: {},
-					},
-					...(rulesVersionId === undefined ? {} : {rulesVersionId}),
-					idempotencyKey: draft.commandId,
-				});
+				if (!draft.proposalRequest) {
+					const isAutoResolve = this._shouldAutoResolve();
+					const rulesVersionId = isAutoResolve && draft.destinationKind === "character"
+						? this._fnGetRulesVersionId()
+						: undefined;
+					const targetId = getPartyInventoryTransferTargetId({
+						sourceKind: draft.kind,
+						destinationKind: draft.destinationKind,
+						activeCharacterId: active.characterId,
+						recipientId: draft.recipientId,
+						partyInventoryId: this._partyInventory?.id,
+					});
+					draft.proposalRequest = {
+						campaignId: this._campaignId,
+						sourceKind: draft.kind,
+						sourceId: draft.kind === "character" ? active.characterId : this._partyInventory.id,
+						targetKind: draft.destinationKind,
+						targetId,
+						payload: {
+							items: [{entryId: draft.entryId, quantity: draft.quantity}],
+							currency: {},
+						},
+						...(rulesVersionId === undefined ? {} : {rulesVersionId}),
+						idempotencyKey: draft.commandId,
+						isAutoResolved: isAutoResolve,
+					};
+				}
+				let result;
+				try {
+					result = await this._api.pProposeTransfer(draft.proposalRequest);
+				} catch (error) {
+					if (!["NETWORK_UNAVAILABLE", "REQUEST_ABORTED", "RESPONSE_INVALID"].includes(error?.code)) {
+						draft.proposalRequest = null;
+					}
+					throw error;
+				}
 				draft.transfer = result.transfer;
 			}
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
-			if (this._shouldAutoResolve() && ["proposed", "reserved"].includes(draft.transfer.status)) {
-				const rulesVersionId = this._fnGetRulesVersionId();
+			if (draft.proposalRequest?.isAutoResolved && ["proposed", "reserved"].includes(draft.transfer.status)) {
 				const resolved = await this._api.pResolveTransfer({
 					campaignId: this._campaignId,
 					transferId: draft.transfer.id,
 					decision: "accept",
-					...(rulesVersionId == null ? {} : {rulesVersionId}),
+					...(draft.proposalRequest?.rulesVersionId == null ? {} : {rulesVersionId: draft.proposalRequest.rulesVersionId}),
 					idempotencyKey: draft.resolutionCommandId,
 				});
 				draft.transfer = resolved.transfer;

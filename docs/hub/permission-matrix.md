@@ -74,14 +74,15 @@ account's campaign sockets immediately after the authoritative transaction commi
   identity does not prevent DM/co-DM targeting, but preview and events disclose no hidden carry or policy value.
 - Spectator is an authenticated read-only campaign role in current mutation paths.
 - DM/co-DM item transfers are explicit direct-authority commands. The Character Sheet and Campaign Overview
-  complete the proposal and resolution commands together; the UI says the move is immediate rather than
-  presenting it as recipient consent.
+  submit one proposal command that atomically commits both containers; the UI says the move is immediate rather
+  than presenting it as recipient consent.
 - A player may request a party-inventory item only for a character they own. The request remains `proposed`,
   does not reserve or remove shared assets, and requires DM/co-DM approval. A stale approval fails with
   `TRANSFER_INSUFFICIENT` and leaves the request pending for decline/cancellation.
 - A player transfer between two characters owned by the same account may resolve immediately because the
-  source and destination authority are the same account. Peer and DM-owned destinations remain reserved until
-  the target owner or a DM/co-DM resolves them.
+  source and destination authority are the same account. The server commits that proposal without an
+  intermediate reservation. Peer and DM-owned destinations remain reserved until the target owner or a
+  DM/co-DM resolves them.
 - DM/co-DM role alone never approves somebody else's peer proposal. The DM instead issues a distinct direct
   operation with its own actor/command identity.
 - Action and transfer resolution are both explicitly limited to active DM/co-DM/player memberships before

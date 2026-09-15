@@ -519,7 +519,7 @@ describe("campaign activity event presentation", () => {
 			sourceId: "character",
 			targetKind: "party_inventory",
 			targetId: "stash",
-		}).title).toBe("Morgan accepted a transfer from Nyx to Party inventory.");
+		}).title).toBe("Morgan completed a transfer from Nyx to Party inventory.");
 	});
 
 	it("renders every semantic lifecycle event from privacy-safe display snapshots", () => {

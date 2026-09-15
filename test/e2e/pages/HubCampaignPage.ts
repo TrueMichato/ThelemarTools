@@ -1787,6 +1787,10 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-transfer-entry")).toHaveValue(itemValue);
 		const proposalPath = `/api/campaigns/${campaignId}/transfers`;
 		const resolutionPathPrefix = `${proposalPath}/`;
+		const proposalMatcher = `**${proposalPath}`;
+		const proposalBodies: string[] = [];
+		const proposalKeys: Array<string | undefined> = [];
+		let proposalAttempts = 0;
 		let resolutionCount = 0;
 		const observeResolution = (request: Request) => {
 			const pathname = new URL(request.url()).pathname;
@@ -1794,19 +1798,45 @@ export class HubCampaignPage {
 				resolutionCount++;
 			}
 		};
+		const loseFirstProposalResponse = async (route: Route) => {
+			const body = route.request().postData();
+			if (!body) {
+				await route.continue();
+				return;
+			}
+			proposalAttempts++;
+			proposalBodies.push(body);
+			proposalKeys.push(route.request().headers()["idempotency-key"]);
+			if (proposalAttempts === 1) {
+				const committed = await route.fetch();
+				expect(committed.ok()).toBe(true);
+				expect((await committed.json()).transfer?.status).toBe("committed");
+				await route.fulfill({
+					status: 503,
+					contentType: "application/json",
+					body: JSON.stringify({error: "NETWORK_UNAVAILABLE"}),
+				});
+				return;
+			}
+			await route.continue();
+		};
 		this.page.on("request", observeResolution);
+		await this.page.route(proposalMatcher, loseFirstProposalResponse);
 		try {
-			const proposalResponsePromise = this.page.waitForResponse(response => {
-				return response.request().method() === "POST"
-					&& new URL(response.url()).pathname === proposalPath;
-			});
 			await this.page.locator("#campaign-transfer-form button[type='submit']").click();
-			const proposalStatus = (await (await proposalResponsePromise).json()).transfer?.status || null;
+			await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("outcome is not yet confirmed");
+			const retry = this.page.locator("#campaign-transfer-form button[type='submit']");
+			await expect(retry).toHaveText("Retry transfer");
+			await this.page.locator("#campaign-transfer-quantity").fill(`${quantity + 1}`);
+			await retry.click();
 			await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer complete.");
 			await expect(this.page.locator("#campaign-pending-transfers .hub-data-row")).toHaveCount(0);
-			expect(proposalStatus).toBe("committed");
+			expect(proposalAttempts).toBeGreaterThanOrEqual(2);
+			expect(new Set(proposalBodies)).toEqual(new Set([proposalBodies[0]]));
+			expect(new Set(proposalKeys)).toEqual(new Set([proposalKeys[0]]));
 			expect(resolutionCount).toBe(0);
 		} finally {
+			await this.page.unroute(proposalMatcher, loseFirstProposalResponse);
 			this.page.off("request", observeResolution);
 		}
 	}

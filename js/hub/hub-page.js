@@ -1,6 +1,7 @@
 import {
 	HubApiClient,
 	HubApiError,
+	HubTransferProposalDrafts,
 	HubTransferResolutionKeys,
 	pResolveTransferAndRefresh,
 } from "./hub-api-client.js";
@@ -32,7 +33,13 @@ import {
 	getAwardCommandFingerprint,
 } from "./hub-item-award.js";
 const api = new HubApiClient();
+const transferProposalDrafts = new HubTransferProposalDrafts();
 const transferResolutionKeys = new HubTransferResolutionKeys();
+const TRANSFER_OUTCOME_UNCERTAIN_CODES = new Set(["NETWORK_UNAVAILABLE", "REQUEST_ABORTED", "RESPONSE_INVALID"]);
+
+function isTransferOutcomeUncertain (error) {
+	return TRANSFER_OUTCOME_UNCERTAIN_CODES.has(error?.code);
+}
 
 /**
  * Lightweight Hub shells keep a device-local active campaign selection, but must never fetch the
@@ -2050,6 +2057,19 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		isAvailable: !!document.getElementById("campaign-transfer-source")?.options.length,
 		message: "Add one of your characters before starting a transfer.",
 	});
+	const pendingTransferProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId});
+	if (pendingTransferProposal) {
+		const submit = document.querySelector("#campaign-transfer-form button[type='submit']");
+		if (submit) {
+			submit.disabled = false;
+			submit.textContent = "Retry transfer";
+		}
+		setFormStatus({
+			formId: "campaign-transfer-form",
+			message: "The previous transfer outcome is not yet confirmed. Retry to reconcile the same transfer.",
+			isError: true,
+		});
+	}
 	setFormAvailability({
 		formId: "campaign-xp-form",
 		isAvailable: !!characters.length,
@@ -2235,6 +2255,45 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			const result = await pRunFormMutation({form,
 				fingerprint: getFormFingerprint(form),
 				fnMutate: async idempotencyKey => {
+					const proposalRef = {accountId: session.account.id, campaignId};
+					let proposalRequest = transferProposalDrafts.get(proposalRef);
+					if (proposalRequest) {
+						let proposed;
+						try {
+							proposed = await api.pProposeTransfer(proposalRequest);
+						} catch (error) {
+							if (!isTransferOutcomeUncertain(error)) {
+								transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+							}
+							throw error;
+						}
+						if (proposed.transfer.status === "committed") {
+							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+							return {transfer: proposed.transfer, isAutoResolved: true, targetKind: proposalRequest.targetKind};
+						}
+						const isAutoResolved = proposalRequest.isAutoResolved;
+						if (!isAutoResolved) {
+							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+							return {transfer: proposed.transfer, isAutoResolved: false, targetKind: proposalRequest.targetKind};
+						}
+						let resolved;
+						try {
+							resolved = await api.pResolveTransfer({
+								campaignId,
+								transferId: proposed.transfer.id,
+								decision: "accept",
+								rulesVersionId: proposalRequest.rulesVersionId,
+								idempotencyKey: `${proposalRequest.idempotencyKey}:resolve`,
+							});
+						} catch (error) {
+							if (!isTransferOutcomeUncertain(error)) {
+								transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+							}
+							throw error;
+						}
+						transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+						return {transfer: resolved.transfer, isAutoResolved: true, targetKind: proposalRequest.targetKind};
+					}
 					const [sourceKind, sourceId] = document.getElementById("campaign-transfer-source").value.split(":");
 					const [targetKind, targetId] = document.getElementById("campaign-transfer-target").value.split(":");
 					if (sourceKind === targetKind && sourceId === targetId) throw new Error("Choose a different recipient.");
@@ -2270,30 +2329,58 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					const currentContext = isAutoResolved && targetKind === "character"
 						? await api.pGetCampaignContext({campaignId})
 						: null;
-					const proposed = await api.pProposeTransfer({
-						campaignId,
-						sourceKind,
-						sourceId,
-						targetKind,
-						targetId,
-						payload: {
-							items: entryId && quantity ? [{entryId, quantity}] : [],
-							currency,
+					proposalRequest = transferProposalDrafts.stage({
+						...proposalRef,
+						request: {
+							campaignId,
+							sourceKind,
+							sourceId,
+							targetKind,
+							targetId,
+							payload: {
+								items: entryId && quantity ? [{entryId, quantity}] : [],
+								currency,
+							},
+							...(isAutoResolved && targetKind === "character"
+								? {rulesVersionId: currentContext?.rulesVersion?.id || null}
+								: {}),
+							idempotencyKey,
+							isAutoResolved,
 						},
-						...(currentContext ? {rulesVersionId: currentContext.rulesVersion?.id || null} : {}),
-						idempotencyKey,
 					});
-					if (!isAutoResolved) return {transfer: proposed.transfer, isAutoResolved: false, targetKind};
+					let proposed;
+					try {
+						proposed = await api.pProposeTransfer(proposalRequest);
+					} catch (error) {
+						if (!isTransferOutcomeUncertain(error)) {
+							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+						}
+						throw error;
+					}
+					if (!isAutoResolved) {
+						transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+						return {transfer: proposed.transfer, isAutoResolved: false, targetKind};
+					}
 					if (proposed.transfer.status === "committed") {
+						transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
 						return {transfer: proposed.transfer, isAutoResolved: true, targetKind};
 					}
-					const resolved = await api.pResolveTransfer({
-						campaignId,
-						transferId: proposed.transfer.id,
-						decision: "accept",
-						rulesVersionId: currentContext?.rulesVersion?.id || null,
-						idempotencyKey: `${idempotencyKey}:resolve`,
-					});
+					let resolved;
+					try {
+						resolved = await api.pResolveTransfer({
+							campaignId,
+							transferId: proposed.transfer.id,
+							decision: "accept",
+							rulesVersionId: proposalRequest.rulesVersionId,
+							idempotencyKey: `${proposalRequest.idempotencyKey}:resolve`,
+						});
+					} catch (error) {
+						if (!isTransferOutcomeUncertain(error)) {
+							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+						}
+						throw error;
+					}
+					transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
 					return {transfer: resolved.transfer, isAutoResolved: true, targetKind};
 				}});
 			if (!result) return;
@@ -2317,7 +2404,18 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			}
 		} catch (error) {
 			const message = error instanceof HubApiError ? getErrorMessage(error) : error.message;
-			setFormStatus({formId, message, isError: true});
+			const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId});
+			setFormStatus({
+				formId,
+				message: pendingProposal
+					? "The transfer outcome is not yet confirmed. Retry to reconcile the same transfer."
+					: message,
+				isError: true,
+			});
+			if (pendingProposal) {
+				const submit = form.querySelector("button[type='submit']");
+				if (submit) submit.textContent = "Retry transfer";
+			}
 			if (error instanceof HubApiError) renderError(error);
 		}
 	});

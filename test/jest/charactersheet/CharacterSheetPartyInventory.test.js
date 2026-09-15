@@ -797,8 +797,12 @@ describe("Character Sheet party inventory", () => {
 		};
 		const save = jest.fn(async () => true);
 		const propose = jest.fn()
-			.mockRejectedValueOnce(Object.assign(new Error("response lost"), {code: "NETWORK_UNAVAILABLE"}))
+			.mockImplementationOnce(async () => {
+				character.inventory = [];
+				throw Object.assign(new Error("response lost"), {code: "NETWORK_UNAVAILABLE"});
+			})
 			.mockResolvedValueOnce({transfer: {id: "transfer-1", status: "committed"}});
+		let rulesReadCount = 0;
 		const partyInventory = new CharacterSheetPartyInventory({
 			campaignId: "campaign-1",
 			api: {pProposeTransfer: propose, pResolveTransfer: jest.fn()},
@@ -806,7 +810,7 @@ describe("Character Sheet party inventory", () => {
 			fnGetCharacterData: () => character,
 			fnSaveCharacter: save,
 			fnIsCurrentCharacter: () => true,
-			fnGetRulesVersionId: () => "rules-1",
+			fnGetRulesVersionId: () => `rules-${++rulesReadCount}`,
 		});
 		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
 		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
@@ -828,6 +832,9 @@ describe("Character Sheet party inventory", () => {
 		partyInventory._pDrainRefresh = jest.fn(async () => true);
 
 		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+		await expect(partyInventory._pCancelDraft()).resolves.toBe(false);
+		expect(partyInventory._draft).not.toBeNull();
+		expect(partyInventory._error).toContain("not yet confirmed");
 		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
 
 		expect(save).toHaveBeenCalledTimes(1);
@@ -836,6 +843,8 @@ describe("Character Sheet party inventory", () => {
 			"stable-proposal-key",
 			"stable-proposal-key",
 		]);
+		expect(propose.mock.calls.map(([input]) => input.rulesVersionId)).toEqual(["rules-1", "rules-1"]);
+		expect(propose.mock.calls.map(([input]) => input.payload.items[0].quantity)).toEqual([1, 1]);
 		expect(partyInventory._announcement).toContain("Transfer complete");
 	});
 

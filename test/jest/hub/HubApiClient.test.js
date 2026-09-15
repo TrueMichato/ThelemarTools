@@ -1,4 +1,8 @@
-import {HubApiClient, HubApiError} from "../../../js/hub/hub-api-client.js";
+import {
+	HubApiClient,
+	HubApiError,
+	HubTransferProposalDrafts,
+} from "../../../js/hub/hub-api-client.js";
 
 function getResponse ({status = 200, body = {}} = {}) {
 	return {
@@ -9,6 +13,47 @@ function getResponse ({status = 200, body = {}} = {}) {
 }
 
 describe("hub API client", () => {
+	it("freezes one transfer proposal per account and campaign until its exact key is reconciled", () => {
+		const drafts = new HubTransferProposalDrafts();
+		const first = {
+			sourceKind: "character",
+			sourceId: "source-1",
+			targetKind: "character",
+			targetId: "target-1",
+			payload: {items: [{entryId: "item-1", quantity: 1}]},
+			rulesVersionId: "rules-1",
+			idempotencyKey: "proposal-1",
+			isAutoResolved: true,
+		};
+		const staged = drafts.stage({accountId: "account-1", campaignId: "campaign-1", request: first});
+		first.targetId = "changed-locally";
+		staged.payload.items[0].quantity = 99;
+
+		expect(drafts.stage({
+			accountId: "account-1",
+			campaignId: "campaign-1",
+			request: {...first, idempotencyKey: "proposal-2"},
+		})).toEqual(expect.objectContaining({
+			targetId: "target-1",
+			payload: {items: [{entryId: "item-1", quantity: 1}]},
+			rulesVersionId: "rules-1",
+			idempotencyKey: "proposal-1",
+			isAutoResolved: true,
+		}));
+		expect(drafts.get({accountId: "account-2", campaignId: "campaign-1"})).toBeNull();
+		expect(drafts.clear({
+			accountId: "account-1",
+			campaignId: "campaign-1",
+			idempotencyKey: "wrong-key",
+		})).toBe(false);
+		expect(drafts.clear({
+			accountId: "account-1",
+			campaignId: "campaign-1",
+			idempotencyKey: "proposal-1",
+		})).toBe(true);
+		expect(drafts.get({accountId: "account-1", campaignId: "campaign-1"})).toBeNull();
+	});
+
 	it("calls the browser fetch global without rebinding its receiver", async () => {
 		const originalFetch = globalThis.fetch;
 		globalThis.fetch = async function () {

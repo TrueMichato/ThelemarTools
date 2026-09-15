@@ -42,6 +42,37 @@ export class HubTransferResolutionKeys {
 	}
 }
 
+export class HubTransferProposalDrafts {
+	constructor () {
+		this._drafts = new Map();
+	}
+
+	_getRef ({accountId, campaignId}) {
+		return `${accountId}\u0000${campaignId}`;
+	}
+
+	get ({accountId, campaignId}) {
+		const draft = this._drafts.get(this._getRef({accountId, campaignId}));
+		return draft ? structuredClone(draft) : null;
+	}
+
+	stage ({accountId, campaignId, request}) {
+		const existing = this.get({accountId, campaignId});
+		if (existing) return existing;
+		const draft = structuredClone(request);
+		this._drafts.set(this._getRef({accountId, campaignId}), draft);
+		return structuredClone(draft);
+	}
+
+	clear ({accountId, campaignId, idempotencyKey}) {
+		const ref = this._getRef({accountId, campaignId});
+		const draft = this._drafts.get(ref);
+		if (draft?.idempotencyKey !== idempotencyKey) return false;
+		this._drafts.delete(ref);
+		return true;
+	}
+}
+
 export async function pResolveTransferAndRefresh ({pResolve, pRefresh}) {
 	let resolution;
 	try {

@@ -3395,32 +3395,57 @@ export class MemoryHubStore {
 	async pProposeTransfer ({accountId, campaignId, sourceKind, sourceId, targetKind, targetId, payload, rulesVersionId = null, idempotencyKey}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
 		if (prior) return prior;
-		const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
 		if (sourceKind === targetKind && sourceId === targetId) {
 			throw new HubStoreError("TRANSFER_TARGET_INVALID", `Choose a different transfer destination.`, {status: 400});
 		}
-		const source = this._getTransferContainer({kind: sourceKind, id: sourceId, campaignId});
-		const target = this._getTransferContainer({kind: targetKind, id: targetId, campaignId});
-		if (target._character) this._assertTargetable({character: target._character, accountId, role: membership.role});
-		if (sourceKind === "character" && source._character.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can transfer from this character.`, {status: 403});
-		const isDm = ["dm", "co_dm"].includes(membership.role);
-		const isPlayerStashRequest = sourceKind === "party_inventory" && !isDm;
-		if (
-			isPlayerStashRequest
-			&& (
-				targetKind !== "character"
-				|| target._character?.ownerAccountId !== accountId
-			)
-		) {
-			throw new HubStoreError("FORBIDDEN", `Players can only request party inventory for one of their own characters.`, {status: 403});
+		const getCurrentState = () => {
+			const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+			const source = this._getTransferContainer({kind: sourceKind, id: sourceId, campaignId});
+			const target = this._getTransferContainer({kind: targetKind, id: targetId, campaignId});
+			if (target._character) this._assertTargetable({character: target._character, accountId, role: membership.role});
+			if (sourceKind === "character" && source._character.ownerAccountId !== accountId) {
+				throw new HubStoreError("FORBIDDEN", `Only the owner can transfer from this character.`, {status: 403});
+			}
+			const isDm = ["dm", "co_dm"].includes(membership.role);
+			const isPlayerStashRequest = sourceKind === "party_inventory" && !isDm;
+			if (
+				isPlayerStashRequest
+				&& (
+					targetKind !== "character"
+					|| target._character?.ownerAccountId !== accountId
+				)
+			) {
+				throw new HubStoreError("FORBIDDEN", `Players can only request party inventory for one of their own characters.`, {status: 403});
+			}
+			return {
+				membership,
+				source,
+				target,
+				isPlayerStashRequest,
+				isDirectAuthority: isDirectTransferAuthority({
+					role: membership.role,
+					accountId,
+					sourceKind,
+					targetKind,
+					targetOwnerAccountId: target._character?.ownerAccountId,
+				}),
+			};
+		};
+		let current = getCurrentState();
+		let enforcement = null;
+		if (current.isDirectAuthority && current.target._character) {
+			enforcement = await this._pGetCampaignContentEnforcement(campaignId);
+			const resumedPrior = this._getReceipt({accountId, idempotencyKey});
+			if (resumedPrior) return resumedPrior;
+			current = getCurrentState();
+			if (!current.isDirectAuthority) enforcement = null;
 		}
-		const isDirectAuthority = isDirectTransferAuthority({
-			role: membership.role,
-			accountId,
-			sourceKind,
-			targetKind,
-			targetOwnerAccountId: target._character?.ownerAccountId,
-		});
+		const {
+			source,
+			target,
+			isPlayerStashRequest,
+			isDirectAuthority,
+		} = current;
 		const prepared = isPlayerStashRequest
 			? prepareTransferRequest({container: source.container, payload})
 			: removeTransferPayload({container: source.container, payload});
@@ -3428,7 +3453,6 @@ export class MemoryHubStore {
 		if (isDirectAuthority) {
 			directTargetAfter = addTransferPayload({container: target.container, escrow: prepared.escrow});
 			if (target._character) {
-				const enforcement = await this._pGetCampaignContentEnforcement(campaignId);
 				assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
 				assertCharacterCampaignContentMutation({
 					...enforcement,
