@@ -248,12 +248,17 @@ metadata and writes it to the character; concurrent depletion returns `TRANSFER_
 either container or terminalizing the request. Reusing an idempotency key with the same command replays its stored
 result rather than repeating either mutation.
 Transfer mutation responses and their replay receipts use the same viewer projection as the transfer collection:
-DM/co-DM viewers receive the full record, while non-DM viewers receive only owned character endpoint IDs and
-their own actor attribution; party-inventory IDs and foreign actor attribution remain concealed.
+DM/co-DM viewers receive the full authority record, while non-DM viewers receive only owned character endpoint
+IDs and their own actor attribution; party-inventory IDs and foreign actor attribution remain concealed. A
+transfer's originating actor also receives `actorCommandId`, the opaque proposal idempotency key, on proposal
+responses, receipt replays, and transfer-list reads. Other participants, including DM/co-DM viewers who did not
+originate the command, never receive that correlation value.
 Browser proposal and resolution retries freeze the original body, decision, rules pin, and idempotency key after
 an outcome-uncertain network, invalid-response, or HTTP 5xx failure. That exact retry is allowed for at most 23
-hours, staying inside PostgreSQL's 24-hour command-receipt lifetime. Once the browser window expires, it performs
-an authorization-scoped inventory or inbox refresh instead of risking a fresh duplicate command. If an acceptance
+hours, staying inside PostgreSQL's 24-hour command-receipt lifetime. Once the browser window expires, it matches
+the frozen command against an authorization-scoped transfer listing by `actorCommandId` before refreshing either
+inventory. A matching pending transfer keeps the composer locked until it is explicitly cancelled or resolved;
+only a confirmed missing or terminal command lets the composer close. If an acceptance
 fails definitively because its rules pin is stale, the browser reconciles first and creates a complete new
 decision request with a new key while preserving any already-created proposal under its original body and key.
 If the proposal itself is rejected for a stale pin before creating a transfer, both the proposal body and key

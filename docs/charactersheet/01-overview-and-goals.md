@@ -49,6 +49,9 @@ events, and adopts authoritative character
 changes through the cloud repository. Local, signed-out, detached, and non-owner sheets do not mount the section
 or install its Hub listeners. Spectator and unresolved roles are read-only: editable drafts close, Share/Take/
 Request controls are removed, and only an already-frozen uncertain request may remain for exact receipt recovery.
+If that proposal's bounded receipt-replay window expires, the sheet checks the actor-only command correlation in
+the authoritative transfer list before unlocking the composer. A still-pending request stays frozen and can be
+explicitly cancelled; a confirmed terminal or missing request refreshes both inventories before the draft closes.
 
 ### 4. **Backward Compatibility**
 

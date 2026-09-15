@@ -216,6 +216,7 @@ describe("Phase 4 actions, grants, and transfers", () => {
 		expect(playerToPeer.statusCode).toBe(201);
 		expect(playerToPeer.json().transfer).toMatchObject({
 			actorAccountId: a.session.account.id,
+			actorCommandId: playerToPeerKey,
 			sourceKind: "character",
 			sourceId: a.character.id,
 			targetKind: "character",
@@ -230,6 +231,7 @@ describe("Phase 4 actions, grants, and transfers", () => {
 		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
 		expect(sourceTransferView).toMatchObject({
 			actorAccountId: a.session.account.id,
+			actorCommandId: playerToPeerKey,
 			sourceKind: "character",
 			sourceId: a.character.id,
 			targetKind: "character",
@@ -247,6 +249,13 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			targetId: b.character.id,
 		});
 		expect(targetTransferView).not.toHaveProperty("sourceId");
+		expect(targetTransferView).not.toHaveProperty("actorCommandId");
+		const dmTransferView = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(dm),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(dmTransferView).not.toHaveProperty("actorCommandId");
 		const actorCannotSelfAcceptPeer = await app.inject({
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/transfers/${playerToPeer.json().transfer.id}/resolve`,
@@ -271,7 +280,14 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			status: "committed",
 		});
 		expect(acceptedPeer.json().transfer).not.toHaveProperty("sourceId");
+		expect(acceptedPeer.json().transfer).not.toHaveProperty("actorCommandId");
 		expect((await app.inject(acceptPeerRequest)).json()).toEqual(acceptedPeer.json());
+		const acceptedSourceView = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(a.session),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(acceptedSourceView.actorCommandId).toBe(playerToPeerKey);
 
 		const playerToOwnKey = "player-direct-own";
 		const playerToOwnRequest = {
@@ -288,6 +304,7 @@ describe("Phase 4 actions, grants, and transfers", () => {
 		};
 		const playerToOwn = await app.inject(playerToOwnRequest);
 		expect(playerToOwn.json().transfer.status).toBe("committed");
+		expect(playerToOwn.json().transfer.actorCommandId).toBe(playerToOwnKey);
 		expect((await app.inject(playerToOwnRequest)).json()).toEqual(playerToOwn.json());
 		expect((await app.inject({
 			method: "POST",
@@ -323,6 +340,7 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			targetId: dmCharacter.id,
 			status: "committed",
 		});
+		expect(acceptedPlayerToDm.json().transfer).not.toHaveProperty("actorCommandId");
 		expect((await app.inject(acceptPlayerToDmRequest)).json()).toEqual(acceptedPlayerToDm.json());
 
 		const dmToPlayerKey = "dm-direct-player";
@@ -339,6 +357,7 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			},
 		});
 		expect(dmToPlayer.json().transfer.status).toBe("committed");
+		expect(dmToPlayer.json().transfer.actorCommandId).toBe(dmToPlayerKey);
 		expect((await app.inject({
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/transfers`,

@@ -17,6 +17,7 @@ import {
 } from "../hub/hub-api-client.js";
 
 const DM_ROLES = new Set(["dm", "co_dm"]);
+const CURRENCY_TYPES = ["cp", "sp", "ep", "gp", "pp"];
 const MAX_SEEN_EVENT_KEYS = 2_000;
 const TERMINAL_ACCESS_ERROR_CODES = new Set([
 	"AUTH_REQUIRED",
@@ -102,6 +103,29 @@ function getCurrencySummary (currency = {}) {
 function getErrorMessage (error) {
 	return ERROR_MESSAGES[error?.code]
 		|| "The latest party inventory could not be loaded. Your inventories are unchanged; retry when the connection is available.";
+}
+
+function getComparableTransferPayload (payload = {}) {
+	const value = payload.request || payload.escrow || payload;
+	const items = (value.items || [])
+		.map(item => ({
+			entryId: item.entryId || item.id,
+			quantity: Number(item.quantity),
+		}))
+		.sort((a, b) => `${a.entryId}`.localeCompare(`${b.entryId}`) || a.quantity - b.quantity);
+	const currency = Object.fromEntries(CURRENCY_TYPES.map(type => [type, Number(value.currency?.[type]) || 0]));
+	return JSON.stringify({items, currency});
+}
+
+function isProjectedTransferMatch ({transfer, request}) {
+	if (
+		!transfer
+		|| transfer.sourceKind !== request.sourceKind
+		|| transfer.targetKind !== request.targetKind
+		|| (transfer.sourceId && transfer.sourceId !== request.sourceId)
+		|| (transfer.targetId && transfer.targetId !== request.targetId)
+	) return false;
+	return getComparableTransferPayload(transfer.payload) === getComparableTransferPayload(request.payload);
 }
 
 function createElement (tag, {className = "", text = "", attrs = {}} = {}) {
@@ -1350,18 +1374,52 @@ export class CharacterSheetPartyInventory {
 					this._error = null;
 					this._render();
 					try {
+						const transfers = await this._api.pListTransfers({campaignId: this._campaignId});
+						if (!this._isCurrent(active) || this._draft !== draft) return false;
+						const exactTransfer = transfers.find(transfer => transfer.actorCommandId === draft.proposalRequest.idempotencyKey);
+						const legacyMatches = exactTransfer
+							? []
+							: transfers.filter(transfer => !transfer.actorCommandId
+								&& ["proposed", "reserved"].includes(transfer.status)
+								&& isProjectedTransferMatch({transfer, request: draft.proposalRequest}));
 						this._refreshFlags.character = true;
 						this._refreshFlags.party = true;
 						if (!await this._pDrainRefresh()) {
-							this._error = "The transfer retry expired, and the latest inventories could not be loaded. Reconnect and try the refresh again.";
+							this._error = "The transfer retry expired, and the latest transfer state or inventories could not be loaded. Reconnect and try the refresh again.";
 							this._render();
 							return false;
 						}
 						if (!this._isCurrent(active) || this._draft !== draft) return false;
+						if (!exactTransfer && legacyMatches.length > 1) {
+							this._error = "Multiple matching pending transfers were found. This request remains locked to prevent a duplicate; resolve the pending transfers in Campaign Hub.";
+							this._announce(this._error);
+							this._render();
+							return false;
+						}
+						const matchedTransfer = exactTransfer || legacyMatches[0];
+						if (matchedTransfer && ["proposed", "reserved"].includes(matchedTransfer.status)) {
+							draft.transfer = matchedTransfer;
+							draft.needsStatusCheck = false;
+							this._error = "The transfer was found and is still pending. Cancel it explicitly to withdraw it, or leave it for approval.";
+							this._announce(this._error);
+							this._render();
+							return false;
+						}
 						this._isSubmitting = false;
 						this._closeDraft();
-						const message = "Latest source and stash balances loaded. Inspect the destination before starting another transfer.";
-						this._fnToast?.({type: "info", content: message});
+						const terminalMessages = {
+							committed: "Transfer complete. Both inventories are up to date.",
+							rejected: draft.kind === "party_inventory"
+								? "Request was rejected. The party stash was unchanged."
+								: "Transfer was rejected. The reserved items were restored.",
+							cancelled: draft.kind === "party_inventory"
+								? "Request was cancelled. The party stash was unchanged."
+								: "Transfer was cancelled. The reserved items were restored.",
+							expired: "Transfer expired. The reserved items were restored.",
+						};
+						const message = terminalMessages[matchedTransfer?.status]
+							|| "No matching transfer was found. Latest source and stash balances loaded; inspect the destination before starting another transfer.";
+						this._fnToast?.({type: matchedTransfer?.status === "committed" ? "success" : "info", content: message});
 						this._announce(message);
 						return true;
 					} finally {

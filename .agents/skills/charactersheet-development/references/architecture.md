@@ -506,6 +506,12 @@ Protocol-4 cost-bearing peer operations extend this with per-character operation
 - a local resource conflict after canonical acceptance blocks autosave and keeps the recovery draft visible;
   it never reapplies the operation or silently overwrites the authoritative source spend.
 
+Party-inventory proposal retries use the proposal idempotency key as an actor-only transfer correlation. After
+the 23-hour browser replay window ends, the sheet must list visible transfers before unlocking the frozen
+composer: a correlated pending request remains recoverable/cancellable, while a terminal or confirmed-missing
+request permits an authoritative character-and-stash refresh and close. Never infer absence from balances alone,
+because a pending player stash withdrawal intentionally changes neither container.
+
 `CharacterSheetPeerTargeting` is invoked from the real spell-use path after cast-option validation but before
 local resource mutation. It is gated by the exact campaign `peerSourceCosts` capability tuple. Unsupported
 templates/options and local/signed-out sheets continue through the existing local cast path unchanged.

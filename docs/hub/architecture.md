@@ -141,6 +141,12 @@ flowchart LR
   Claim --> Published[Published status]
 ```
 
+`MemoryHubStore` remains a deterministic contract double rather than the production authority, but lifecycle
+commands preserve the same rollback boundary. Before a role change, member removal, or character lifecycle
+operation cancels transfer escrow, Memory precomputes and validates every affected restoration against staged
+source containers. No transfer status, inventory revision, invalidation, or cancellation event is applied unless
+the complete restoration batch is valid.
+
 Clients use snapshots and sequence-based replay to recover from disconnects. Presence is ephemeral. Roll and
 action history is durable. Visibility is evaluated on the server for both replay and live fanout. Projection
 HTTP responses are request-sequence and attachment-generation fenced, so a slower old response or a response

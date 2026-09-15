@@ -813,6 +813,13 @@ export class MemoryHubStore {
 			const ownedCharacterIds = new Set([...this._characters.values()]
 				.filter(character => character.campaignId === campaignId && character.ownerAccountId === membership.accountId)
 				.map(character => character.id));
+			this._cancelTransfersForLifecycle({
+				campaignId,
+				affectedAccountId: membership.accountId,
+				characterIds: ownedCharacterIds,
+				actorAccountId: accountId,
+				reason: "membership_role_changed",
+			});
 			for (const operation of this._semanticOperations.values()) {
 				if (
 					operation.campaignId === campaignId
@@ -826,13 +833,6 @@ export class MemoryHubStore {
 					this._cancelSemanticOperationForLifecycle({operation, actorAccountId: accountId});
 				}
 			}
-			this._cancelTransfersForLifecycle({
-				campaignId,
-				affectedAccountId: membership.accountId,
-				characterIds: ownedCharacterIds,
-				actorAccountId: accountId,
-				reason: "membership_role_changed",
-			});
 		}
 		membership.role = role;
 		this._appendAudit({campaignId, actorAccountId: accountId, action: "membership.role_changed", targetType: "membership", targetId: membershipId, details: {role}});
@@ -840,47 +840,93 @@ export class MemoryHubStore {
 		return this._setReceipt({accountId, idempotencyKey, response: {membership: copy(membership)}});
 	}
 
-	_cancelTransferForLifecycle ({transfer, actorAccountId, reason}) {
-		if (!["proposed", "reserved"].includes(transfer.status)) return;
-		const targetOwnerAccountId = transfer.targetKind === "character"
-			? this._characters.get(transfer.targetId)?.ownerAccountId
-			: null;
-		if (transfer.status === "reserved") {
-			const source = this._getTransferContainer({kind: transfer.sourceKind, id: transfer.sourceId, campaignId: transfer.campaignId});
-			this._setTransferContainer({
-				holder: source,
-				container: addTransferPayload({container: source.container, escrow: transfer.payload.escrow, isRestore: true}),
-				actorAccountId,
-			});
-		}
-		transfer.status = "cancelled";
-		transfer.resolvedAt = this._fnNow().toISOString();
-		this._appendEvent({
-			campaignId: transfer.campaignId,
-			actorAccountId,
-			type: "transfer.cancelled",
-			aggregateType: "transfer",
-			aggregateId: transfer.id,
-			visibility: "explicit_accounts",
-			visibleAccountIds: [...new Set([transfer.actorAccountId, targetOwnerAccountId].filter(Boolean))],
-			payload: {
-				reason,
-				sourceKind: transfer.sourceKind,
-				sourceId: transfer.sourceId,
-				targetKind: transfer.targetKind,
-				targetId: transfer.targetId,
-			},
+	_prepareTransferLifecycleCancellations ({transfers}) {
+		const stagedBySource = new Map();
+		return transfers.map(transfer => {
+			let restore = null;
+			if (transfer.status === "reserved") {
+				const sourceKey = `${transfer.sourceKind}::${transfer.sourceId}`;
+				const staged = stagedBySource.get(sourceKey);
+				let holder = staged?.holder;
+				let sourceContainer = staged?.container;
+				if (!holder) {
+					if (transfer.sourceKind === "party_inventory") {
+						const party = this._partyInventories.get(transfer.campaignId);
+						if (!party || party.id !== transfer.sourceId) throw new HubStoreError("TRANSFER_TARGET_INVALID", `Party inventory was not found.`, {status: 404});
+						holder = {_party: party};
+						sourceContainer = copy(party);
+					} else {
+						const character = this._getCharacterOrThrow(transfer.sourceId);
+						if (character.campaignId !== transfer.campaignId) throw new HubStoreError("TRANSFER_TARGET_INVALID", `Character was not found.`, {status: 404});
+						holder = {_character: character};
+						sourceContainer = normalizeCharacterInventory(copy(character.data));
+					}
+				}
+				let container = addTransferPayload({
+					container: sourceContainer,
+					escrow: transfer.payload.escrow,
+					isRestore: true,
+				});
+				if (holder._character) {
+					stripCarryAuthority(container);
+					validateCloudCharacterData(container);
+				}
+				restore = {holder, container};
+				stagedBySource.set(sourceKey, restore);
+			}
+			return {
+				transfer,
+				restore,
+				targetOwnerAccountId: transfer.targetKind === "character"
+					? this._characters.get(transfer.targetId)?.ownerAccountId
+					: null,
+			};
 		});
 	}
 
+	_applyTransferLifecycleCancellations ({prepared, actorAccountId, reason}) {
+		for (const {transfer, restore, targetOwnerAccountId} of prepared) {
+			if (restore) this._setTransferContainer({...restore, actorAccountId});
+			transfer.status = "cancelled";
+			transfer.resolvedAt = this._fnNow().toISOString();
+			this._appendEvent({
+				campaignId: transfer.campaignId,
+				actorAccountId,
+				type: "transfer.cancelled",
+				aggregateType: "transfer",
+				aggregateId: transfer.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: [...new Set([transfer.actorAccountId, targetOwnerAccountId].filter(Boolean))],
+				payload: {
+					reason,
+					sourceKind: transfer.sourceKind,
+					sourceId: transfer.sourceId,
+					targetKind: transfer.targetKind,
+					targetId: transfer.targetId,
+				},
+			});
+		}
+	}
+
+	_cancelTransferBatchForLifecycle ({transfers, actorAccountId, reason}) {
+		const active = transfers.filter(transfer => ["proposed", "reserved"].includes(transfer.status));
+		if (!active.length) return;
+		const prepared = this._prepareTransferLifecycleCancellations({transfers: active});
+		this._applyTransferLifecycleCancellations({prepared, actorAccountId, reason});
+	}
+
+	_cancelTransferForLifecycle ({transfer, actorAccountId, reason}) {
+		this._cancelTransferBatchForLifecycle({transfers: [transfer], actorAccountId, reason});
+	}
+
 	_cancelTransfersForLifecycle ({campaignId, affectedAccountId, characterIds, actorAccountId, reason}) {
-		for (const transfer of this._transfers.values()) {
-			if (transfer.campaignId !== campaignId || !["proposed", "reserved"].includes(transfer.status)) continue;
-			const isAffected = transfer.actorAccountId === affectedAccountId
+		const transfers = [...this._transfers.values()].filter(transfer => {
+			if (transfer.campaignId !== campaignId || !["proposed", "reserved"].includes(transfer.status)) return false;
+			return transfer.actorAccountId === affectedAccountId
 				|| (transfer.sourceKind === "character" && characterIds.has(transfer.sourceId))
 				|| (transfer.targetKind === "character" && characterIds.has(transfer.targetId));
-			if (isAffected) this._cancelTransferForLifecycle({transfer, actorAccountId, reason});
-		}
+		});
+		this._cancelTransferBatchForLifecycle({transfers, actorAccountId, reason});
 	}
 
 	_removeMembershipLifecycle ({campaign, membership, actorAccountId, status}) {
@@ -888,6 +934,13 @@ export class MemoryHubStore {
 			.filter(character => character.ownerAccountId === membership.accountId && character.campaignId === campaign.id)
 			.map(character => character.id);
 		const characterIdSet = new Set(characterIds);
+		this._cancelTransfersForLifecycle({
+			campaignId: campaign.id,
+			affectedAccountId: membership.accountId,
+			characterIds: characterIdSet,
+			actorAccountId,
+			reason: "membership_lifecycle",
+		});
 		for (const operation of this._semanticOperations.values()) {
 			if (operation.campaignId !== campaign.id || operation.status !== "proposed") continue;
 			if (
@@ -915,13 +968,6 @@ export class MemoryHubStore {
 				payload: {reason: "membership_lifecycle", targetCharacterId: action.targetCharacterId},
 			});
 		}
-		this._cancelTransfersForLifecycle({
-			campaignId: campaign.id,
-			affectedAccountId: membership.accountId,
-			characterIds: characterIdSet,
-			actorAccountId,
-			reason: "membership_lifecycle",
-		});
 		const characterNameSnapshots = characterIds
 			.map(characterId => {
 				const character = this._characters.get(characterId);
@@ -3490,6 +3536,7 @@ export class MemoryHubStore {
 			id: crypto.randomUUID(),
 			campaignId,
 			actorAccountId: accountId,
+			actorCommandId: this._normalizeIdempotencyKey(idempotencyKey).key,
 			sourceKind,
 			sourceId,
 			targetKind,
@@ -3792,16 +3839,17 @@ export class MemoryHubStore {
 	}
 
 	_cancelIncomingForCharacter ({character}) {
+		const transfers = [...this._transfers.values()]
+			.filter(transfer => ["proposed", "reserved"].includes(transfer.status)
+				&& transfer.targetKind === "character"
+				&& transfer.targetId === character.id);
+		this._cancelTransferBatchForLifecycle({
+			transfers,
+			actorAccountId: character.ownerAccountId,
+			reason: "target_lifecycle_change",
+		});
 		for (const action of this._pendingActions.values()) {
 			if (action.targetCharacterId === character.id && action.status === "proposed") action.status = "cancelled";
-		}
-		for (const transfer of this._transfers.values()) {
-			if (!["proposed", "reserved"].includes(transfer.status) || transfer.targetKind !== "character" || transfer.targetId !== character.id) continue;
-			this._cancelTransferForLifecycle({
-				transfer,
-				actorAccountId: character.ownerAccountId,
-				reason: "target_lifecycle_change",
-			});
 		}
 	}
 

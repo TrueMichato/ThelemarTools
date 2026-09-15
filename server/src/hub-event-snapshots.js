@@ -21,14 +21,16 @@ export function createCharacterDisplayNameSnapshot (value) {
 }
 
 export function projectTransferForViewer ({transfer, accountId, role, getCharacterOwnerId}) {
-	if (!transfer || ["dm", "co_dm"].includes(role)) return transfer;
+	if (!transfer) return transfer;
+	const projected = {...transfer};
+	if (transfer.actorAccountId !== accountId) delete projected.actorCommandId;
+	if (["dm", "co_dm"].includes(role)) return projected;
 	const ownsSource = transfer.sourceKind === "character"
 		&& getCharacterOwnerId?.(transfer.sourceId) === accountId;
 	const ownsTarget = transfer.targetKind === "character"
 		&& getCharacterOwnerId?.(transfer.targetId) === accountId;
 	if (transfer.actorAccountId !== accountId && !ownsSource && !ownsTarget) return null;
 
-	const projected = {...transfer};
 	if (!ownsSource || transfer.sourceKind === "party_inventory") delete projected.sourceId;
 	if (!ownsTarget || transfer.targetKind === "party_inventory") delete projected.targetId;
 	if (transfer.actorAccountId !== accountId) projected.actorAccountId = null;

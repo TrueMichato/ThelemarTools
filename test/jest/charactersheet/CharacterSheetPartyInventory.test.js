@@ -1333,13 +1333,18 @@ describe("Character Sheet party inventory", () => {
 		expect(partyInventory._draft).toBeNull();
 	});
 
-	it("refreshes authoritative balances instead of replaying an expired proposal", async () => {
+	it("reconciles an expired proposal by its actor command before unlocking the composer", async () => {
 		const propose = jest.fn();
+		const listTransfers = jest.fn(async () => [{
+			id: "transfer-1",
+			status: "proposed",
+			actorCommandId: "expired-key",
+		}]);
 		const partyInventory = new CharacterSheetPartyInventory({
 			campaignId: "campaign-1",
 			api: {
 				pProposeTransfer: propose,
-				pListTransfers: jest.fn(async () => [{id: "transfer-1", status: "committed"}]),
+				pListTransfers: listTransfers,
 			},
 			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
 			fnIsCurrentCharacter: () => true,
@@ -1356,11 +1361,92 @@ describe("Character Sheet party inventory", () => {
 		};
 		partyInventory._pDrainRefresh = jest.fn(async () => true);
 
-		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
 		expect(propose).not.toHaveBeenCalled();
+		expect(listTransfers).toHaveBeenCalledTimes(1);
 		expect(partyInventory._pDrainRefresh).toHaveBeenCalledTimes(1);
+		expect(partyInventory._draft).toEqual(expect.objectContaining({
+			transfer: expect.objectContaining({id: "transfer-1", status: "proposed"}),
+		}));
+		expect(partyInventory._error).toContain("still pending");
+	});
+
+	it("closes an expired proposal only after confirming no matching actor command exists", async () => {
+		const listTransfers = jest.fn(async () => [{
+			id: "other-transfer",
+			status: "proposed",
+			actorCommandId: "other-key",
+		}]);
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {
+				pProposeTransfer: jest.fn(),
+				pListTransfers: listTransfers,
+			},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+			fnToast: jest.fn(),
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._draft = {
+			kind: "party_inventory",
+			destinationKind: "character",
+			proposalRequest: {idempotencyKey: "expired-key"},
+			proposalReplayUntil: 0,
+			transfer: null,
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+
+		expect(listTransfers).toHaveBeenCalledTimes(1);
 		expect(partyInventory._draft).toBeNull();
-		expect(partyInventory._announcement).toContain("Latest source and stash balances loaded");
+		expect(partyInventory._announcement).toContain("No matching transfer was found");
+	});
+
+	it("keeps an expired legacy proposal locked when matching pending transfers are ambiguous", async () => {
+		const pending = {
+			status: "proposed",
+			sourceKind: "party_inventory",
+			targetKind: "character",
+			targetId: "character-1",
+			payload: {request: {items: [{entryId: "stack-1", quantity: 1}], currency: {}}},
+		};
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {
+				pListTransfers: jest.fn(async () => [
+					{id: "transfer-1", ...pending},
+					{id: "transfer-2", ...pending},
+				]),
+			},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._draft = {
+			kind: "party_inventory",
+			destinationKind: "character",
+			proposalRequest: {
+				sourceKind: "party_inventory",
+				sourceId: "party-1",
+				targetKind: "character",
+				targetId: "character-1",
+				payload: {items: [{entryId: "stack-1", quantity: 1}], currency: {}},
+				idempotencyKey: "expired-key",
+			},
+			proposalReplayUntil: 0,
+			transfer: null,
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+
+		expect(partyInventory._draft.proposalRequest.idempotencyKey).toBe("expired-key");
+		expect(partyInventory._draft.transfer).toBeNull();
+		expect(partyInventory._error).toContain("Multiple matching pending transfers");
 	});
 
 	it("reconciles a replayed proposal receipt before announcing its outcome", async () => {

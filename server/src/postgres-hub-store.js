@@ -5191,16 +5191,21 @@ export class PostgresHubStore {
 	}
 
 	_getTransfer (row) {
+		const {
+			_actorCommandId: actorCommandId = null,
+			...payload
+		} = row.payload || {};
 		return {
 			id: row.id,
 			campaignId: row.campaign_id,
 			actorAccountId: row.actor_account_id,
+			...(actorCommandId ? {actorCommandId} : {}),
 			sourceKind: row.source_character_id ? "character" : "party_inventory",
 			sourceId: row.source_character_id || row.source_party_inventory_id,
 			targetKind: row.target_character_id ? "character" : "party_inventory",
 			targetId: row.target_character_id || row.target_party_inventory_id,
 			status: row.status,
-			payload: row.payload,
+			payload,
 			createdAt: row.created_at,
 			updatedAt: row.updated_at,
 		};
@@ -5591,6 +5596,7 @@ export class PostgresHubStore {
 	}
 
 	async pProposeTransfer ({accountId, campaignId, sourceKind, sourceId, targetKind, targetId, payload, rulesVersionId = null, idempotencyKey}) {
+		const actorCommandId = this._normalizeIdempotencyKey(idempotencyKey).key;
 		const client = await this._pool.connect();
 		try {
 			await client.query("BEGIN");
@@ -5666,9 +5672,12 @@ export class PostgresHubStore {
 				targetKind === "character" ? targetId : null,
 				targetKind === "party_inventory" ? targetId : null,
 				isPlayerStashRequest ? "proposed" : isDirectAuthority ? "committed" : "reserved",
-				JSON.stringify(isPlayerStashRequest
-					? {request: prepared.request, preview: prepared.preview}
-					: {escrow: prepared.escrow}),
+				JSON.stringify({
+					...(isPlayerStashRequest
+						? {request: prepared.request, preview: prepared.preview}
+						: {escrow: prepared.escrow}),
+					_actorCommandId: actorCommandId,
+				}),
 			]);
 			const transfer = this._getTransfer(inserted.rows[0]);
 			if (isDirectAuthority) {
@@ -5730,7 +5739,7 @@ export class PostgresHubStore {
 					? target.ownerAccountId === accountId || isDm
 					: isDm);
 			if (!canResolve) throw new HubStoreError("FORBIDDEN", `Cannot resolve this transfer.`, {status: 403});
-			let resolvedPayload = transfer.payload;
+			let resolvedPayload = {...transfer.payload, _actorCommandId: transfer.actorCommandId};
 			if (transfer.status === "proposed") {
 				if (decision === "accept") {
 					const source = await this._pGetTransferContainer({client, campaignId, kind: transfer.sourceKind, id: transfer.sourceId, actorAccountId: accountId});
@@ -5748,7 +5757,7 @@ export class PostgresHubStore {
 					}
 					await source.pWrite(removed.container);
 					await target.pWrite(after);
-					resolvedPayload = {...transfer.payload, escrow: removed.escrow};
+					resolvedPayload = {...transfer.payload, escrow: removed.escrow, _actorCommandId: transfer.actorCommandId};
 				}
 			} else {
 				const destination = decision === "accept"

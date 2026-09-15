@@ -576,6 +576,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		await expect(store.pProposeTransfer(directPassInput)).resolves.toEqual(JSON.parse(JSON.stringify(directPass)));
 		expect(directPass.transfer).toMatchObject({
 			actorAccountId: sourceOwner.id,
+			actorCommandId: `${prefix}-direct`,
 			sourceKind: "character",
 			sourceId: sourceCharacter.id,
 			targetKind: "character",
@@ -586,6 +587,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			.find(transfer => transfer.id === directPass.transfer.id);
 		expect(sourceTransferView).toMatchObject({
 			actorAccountId: sourceOwner.id,
+			actorCommandId: `${prefix}-direct`,
 			sourceKind: "character",
 			sourceId: sourceCharacter.id,
 			targetKind: "character",
@@ -600,6 +602,10 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			targetId: targetCharacter.id,
 		});
 		expect(targetTransferView).not.toHaveProperty("sourceId");
+		expect(targetTransferView).not.toHaveProperty("actorCommandId");
+		const dmTransferView = (await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(dmTransferView).not.toHaveProperty("actorCommandId");
 		const acceptDirectInput = {
 			accountId: targetOwner.id,
 			campaignId: campaign.id,
@@ -617,6 +623,10 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			status: "committed",
 		});
 		expect(acceptedDirect.transfer).not.toHaveProperty("sourceId");
+		expect(acceptedDirect.transfer).not.toHaveProperty("actorCommandId");
+		const acceptedSourceView = (await store.pListTransfers({accountId: sourceOwner.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(acceptedSourceView.actorCommandId).toBe(`${prefix}-direct`);
 		const directTarget = await pReadCharacter(targetOwner.id, targetCharacter.id);
 		expect(directTarget.data.inventory).toHaveLength(2);
 		expect(directTarget.data.inventory).toEqual(expect.arrayContaining([
@@ -1168,6 +1178,81 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			decision: "accept",
 			idempotencyKey: crypto.randomUUID(),
 		})).rejects.toMatchObject({code: "FORBIDDEN"});
+	});
+
+	test("rolls back every PostgreSQL lifecycle cancellation when one escrow restore is invalid", async () => {
+		const lifecycleTargetOwner = await pCreateAccount("Inventory Atomic Lifecycle Target");
+		const lifecycleMembership = await pJoinCampaign(lifecycleTargetOwner);
+		const sources = [];
+		for (const label of ["first", "second"]) {
+			sources.push((await store.pCreateCharacter({
+				accountId: sourceOwner.id,
+				campaignId: campaign.id,
+				data: {name: `${prefix} atomic ${label} source`, inventory: [], currency: {gp: Number.MAX_SAFE_INTEGER}},
+				schemaVersion: 1,
+				clientImportId: crypto.randomUUID(),
+				idempotencyKey: crypto.randomUUID(),
+			})).character);
+		}
+		const refillSource = (await store.pCreateCharacter({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			data: {name: `${prefix} atomic refill source`, inventory: [], currency: {gp: 1}},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const target = (await store.pCreateCharacter({
+			accountId: lifecycleTargetOwner.id,
+			campaignId: campaign.id,
+			data: {name: `${prefix} atomic target`, inventory: [], currency: {}},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const transfers = [];
+		for (const source of sources) {
+			transfers.push((await store.pProposeTransfer({
+				accountId: sourceOwner.id,
+				campaignId: campaign.id,
+				sourceKind: "character",
+				sourceId: source.id,
+				targetKind: "character",
+				targetId: target.id,
+				payload: {currency: {gp: 1}},
+				idempotencyKey: crypto.randomUUID(),
+			})).transfer);
+		}
+		const laterTransfer = [...transfers].sort((a, b) => a.id.localeCompare(b.id))[1];
+		await store.pProposeTransfer({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: refillSource.id,
+			targetKind: "character",
+			targetId: laterTransfer.sourceId,
+			payload: {currency: {gp: 1}},
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await expect(store.pChangeMemberRole({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			membershipId: lifecycleMembership.id,
+			role: "spectator",
+			idempotencyKey: crypto.randomUUID(),
+		})).rejects.toMatchObject({code: "NUMERIC_INVALID"});
+
+		expect((await store.pGetMembership({accountId: lifecycleTargetOwner.id, campaignId: campaign.id})).role).toBe("player");
+		const listed = await store.pListTransfers({accountId: dm.id, campaignId: campaign.id});
+		for (const transfer of transfers) {
+			expect(listed.find(candidate => candidate.id === transfer.id).status).toBe("reserved");
+		}
+		for (const source of sources) {
+			const expectedGp = source.id === laterTransfer.sourceId
+				? Number.MAX_SAFE_INTEGER
+				: Number.MAX_SAFE_INTEGER - 1;
+			expect((await pReadCharacter(sourceOwner.id, source.id)).data.currency.gp).toBe(expectedGp);
+		}
 	});
 
 	test("serializes transfer and event-list authorization with concurrent role changes", async () => {
