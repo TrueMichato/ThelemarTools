@@ -131,6 +131,10 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("transferRefreshQueue.pRun");
 		expect(source).toContain("const pTransferStateRefresh = pRefreshTransferState({");
 		expect(source).toContain("charactersNxt: pCharactersNxt");
+		expect(source).toContain("snapshotNxt: pSnapshotNxt");
+		expect(source).toContain("fnIsSnapshotCurrent: snapshotNxt => snapshotNxt.lastSequence >= liveLastSequence");
+		expect(source).toContain("const acceptedSnapshot = snapshotNxt && fnIsSnapshotCurrent(snapshotNxt)");
+		expect(source).toContain("if (acceptedSnapshot?.roster) rosterRef.current = acceptedSnapshot.roster");
 		expect(source).toContain("pResolveTransferAndRefresh");
 		expect(source).toContain("transferResolutionDrafts.stage");
 		expect(source).toContain("pResolveTransferFromDraft");

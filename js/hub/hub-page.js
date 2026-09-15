@@ -1290,10 +1290,11 @@ async function pInitCampaign ({session}) {
 				.slice(-50);
 			const pTransferStateRefresh = pRefreshTransferState({
 				charactersNxt: pCharactersNxt,
-				targetCharactersNxt: pSnapshotNxt.then(snapshotNxt => snapshotNxt.characters),
+				snapshotNxt: pSnapshotNxt,
 				membersNxt: pMembersNxt,
 				eventsNxt: pEventsNxt.then(getMergedEvents),
 				fnIsCurrent: () => !isCampaignReloadRequired,
+				fnIsSnapshotCurrent: snapshotNxt => snapshotNxt.lastSequence >= liveLastSequence,
 			}).then(
 				value => ({value}),
 				error => ({error}),
@@ -2145,14 +2146,17 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		let {
 			charactersNxt = null,
 			targetCharactersNxt = null,
+			snapshotNxt = null,
 			membersNxt = null,
 			partyInventoryNxt = null,
 			eventsNxt = null,
 			fnIsCurrent = () => true,
+			fnIsSnapshotCurrent = () => true,
 		} = refresh;
-		[charactersNxt, targetCharactersNxt, membersNxt, partyInventoryNxt, eventsNxt] = await Promise.all([
+		[charactersNxt, targetCharactersNxt, snapshotNxt, membersNxt, partyInventoryNxt, eventsNxt] = await Promise.all([
 			charactersNxt,
 			targetCharactersNxt,
+			snapshotNxt,
 			membersNxt,
 			partyInventoryNxt,
 			eventsNxt,
@@ -2169,18 +2173,22 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		const selections = readSelections();
 		const [charactersLatest, snapshotLatest, partyInventoryLatest] = await Promise.all([
 			charactersNxt ? null : api.pListCharacters({campaignId}),
-			targetCharactersNxt ? null : api.pGetCampaignSnapshot({campaignId}),
+			targetCharactersNxt || snapshotNxt ? null : api.pGetCampaignSnapshot({campaignId}),
 			partyInventoryNxt ? null : api.pGetPartyInventory({campaignId}),
 		]);
 		if (!fnIsCurrent()) return {pendingTransferIds: [], isFenced: true};
+		const acceptedSnapshot = snapshotNxt && fnIsSnapshotCurrent(snapshotNxt)
+			? snapshotNxt
+			: snapshotLatest;
 		const latestSelections = readSelections();
 		const selectionsToRestore = Object.keys(selections)
 			.some(key => latestSelections[key] !== selections[key])
 			? latestSelections
 			: selections;
 		characters.splice(0, characters.length, ...(charactersNxt || charactersLatest));
-		targetCharacters.splice(0, targetCharacters.length, ...(targetCharactersNxt || snapshotLatest.characters));
-		if (snapshotLatest?.roster) rosterRef.current = snapshotLatest.roster;
+		const targetCharactersReplacement = targetCharactersNxt || acceptedSnapshot?.characters;
+		if (targetCharactersReplacement) targetCharacters.splice(0, targetCharacters.length, ...targetCharactersReplacement);
+		if (acceptedSnapshot?.roster) rosterRef.current = acceptedSnapshot.roster;
 		if (membersNxt) members.splice(0, members.length, ...membersNxt);
 		partyInventory = partyInventoryNxt || partyInventoryLatest;
 		if (eventsNxt) itemAward.setEvents(eventsNxt);
