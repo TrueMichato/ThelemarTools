@@ -2496,6 +2496,14 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 							}
 							throw error;
 						}
+						const transfers = await api.pListTransfers({campaignId});
+						const currentTransfer = transfers.find(it => it.id === proposed.transfer.id);
+						if (!currentTransfer) throw new HubApiError({code: "TRANSFER_NOT_FOUND", status: 404});
+						proposed = {...proposed, transfer: currentTransfer};
+						if (!["proposed", "reserved", "committed"].includes(proposed.transfer.status)) {
+							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+							return {transfer: proposed.transfer, isAutoResolved: proposalRequest.isAutoResolved, targetKind: proposalRequest.targetKind};
+						}
 						if (proposed.transfer.status === "committed") {
 							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
 							return {transfer: proposed.transfer, isAutoResolved: true, targetKind: proposalRequest.targetKind};
@@ -2603,13 +2611,19 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			if (!result) return;
 			setTransferProposalControls({form, isLocked: false});
 			for (const type of CURRENCY_TYPES) document.getElementById(`campaign-transfer-${type}`).value = "0";
-			const successMessage = result.isAutoResolved
+			const terminalMessages = {
+				rejected: "Transfer declined. The authoritative inventories are unchanged.",
+				cancelled: "Transfer cancelled. The authoritative inventories are up to date.",
+				expired: "Transfer expired. Any reserved assets were restored.",
+			};
+			const successMessage = result.transfer.status === "committed"
 				? "Transfer complete. The authoritative inventories are updated."
-				: result.transfer.status === "proposed"
-					? "Request sent. A DM must approve before anything leaves the party inventory."
-					: result.targetKind === "party_inventory"
-						? "Transfer reserved. A DM can accept it from the inbox."
-						: "Transfer reserved. The recipient can accept it from the inbox.";
+				: terminalMessages[result.transfer.status]
+					|| (result.transfer.status === "proposed"
+						? "Request sent. A DM must approve before anything leaves the party inventory."
+						: result.targetKind === "party_inventory"
+							? "Transfer reserved. A DM can accept it from the inbox."
+							: "Transfer reserved. The recipient can accept it from the inbox.");
 			setFormStatus({formId, message: successMessage});
 			try {
 				await pRefreshTransferState();

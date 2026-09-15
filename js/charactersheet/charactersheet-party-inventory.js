@@ -467,7 +467,7 @@ export class CharacterSheetPartyInventory {
 				actions.append(button);
 			}
 			button.dataset.token = token;
-			button.disabled = maxQuantity < 1;
+			button.disabled = maxQuantity < 1 || !!this._draft || this._isSubmitting;
 			button.setAttribute("aria-label", maxQuantity
 				? `Share ${getEntryName(entry)} with the party`
 				: `${getEntryName(entry)} cannot be shared: ${blockers.join(", ")}`);
@@ -495,14 +495,15 @@ export class CharacterSheetPartyInventory {
 	}
 
 	_beginDraft ({kind, entryId, returnToken = null}) {
+		if (this._isSubmitting || this._draft) return false;
 		const entry = this._getEntry({kind, entryId});
-		if (!entry) return;
+		if (!entry) return false;
 		const container = this._getContainer(kind);
 		const {maxQuantity, blockers} = getTransferLimit({container, entry});
 		if (!maxQuantity) {
 			this._error = getBlockerText({blockers, maxQuantity});
 			this._render();
-			return;
+			return false;
 		}
 		this._draft = {
 			kind,
@@ -524,6 +525,8 @@ export class CharacterSheetPartyInventory {
 		this._error = null;
 		this._announcement = "";
 		this._render();
+		if (this._root) this._decorateCharacterInventory();
+		return true;
 	}
 
 	_getContainer (kind) {
@@ -890,7 +893,7 @@ export class CharacterSheetPartyInventory {
 			text: isDm ? "Take" : "Request",
 			attrs: {
 				type: "button",
-				disabled: maxQuantity < 1,
+				disabled: maxQuantity < 1 || !!this._draft || this._isSubmitting,
 				"aria-label": maxQuantity
 					? isDm
 						? `Move ${getEntryName(entry)} to this character`
@@ -929,6 +932,7 @@ export class CharacterSheetPartyInventory {
 	_renderComposer () {
 		const entry = this._getEntry(this._draft);
 		const isProposalFrozen = !this._isDraftEditable() && !this._draft.transfer;
+		const isProposalReplayExpired = isProposalFrozen && Date.now() >= this._draft.proposalReplayUntil;
 		const pendingAcceptance = this._getPendingAcceptance();
 		const isStatusCheckRequired = !!this._draft.transfer
 			&& !!this._draft.needsStatusCheck
@@ -1056,12 +1060,14 @@ export class CharacterSheetPartyInventory {
 				? "Acceptance pending"
 				: isStatusCheckRequired
 					? "Status pending"
-					: isCancellationUncertain
-						? "Retry cancellation"
-						: "Cancel",
+					: isProposalReplayExpired
+						? "Refresh and close"
+						: isCancellationUncertain
+							? "Retry cancellation"
+							: "Cancel",
 			attrs: {
 				type: "button",
-				disabled: !!pendingAcceptance || isStatusCheckRequired,
+				disabled: !!pendingAcceptance || isStatusCheckRequired || (isProposalFrozen && !isProposalReplayExpired),
 				title: pendingAcceptance
 					? "Retry or check the pending acceptance before cancelling."
 					: isStatusCheckRequired
@@ -1079,11 +1085,13 @@ export class CharacterSheetPartyInventory {
 					? this._draft.needsStatusCheck ? "Check acceptance status" : "Retry acceptance"
 					: isStatusCheckRequired
 						? "Check transfer status"
-						: this._isPlayerStashRequest()
-							? "Send request"
-							: this._shouldAutoResolve()
-								? "Move now"
-								: "Offer transfer",
+						: isProposalReplayExpired
+							? "Refresh latest balances"
+							: this._isPlayerStashRequest()
+								? "Send request"
+								: this._shouldAutoResolve()
+									? "Move now"
+									: "Offer transfer",
 			attrs: {type: "submit", "data-party-inventory-focus": "submit"},
 		});
 		actions.append(cancel, submit);
@@ -1244,6 +1252,7 @@ export class CharacterSheetPartyInventory {
 		const submit = composer.querySelector("button[type='submit']");
 		const isDraftEditable = this._isDraftEditable();
 		const isProposalFrozen = !!this._draft.proposalRequest && !this._draft.transfer;
+		const isProposalReplayExpired = isProposalFrozen && Date.now() >= this._draft.proposalReplayUntil;
 		const pendingAcceptance = this._getPendingAcceptance();
 		const isStatusCheckRequired = !!this._draft.transfer
 			&& !!this._draft.needsStatusCheck
@@ -1262,7 +1271,7 @@ export class CharacterSheetPartyInventory {
 			const isCancel = control.dataset.partyInventoryFocus === "cancel";
 			control.disabled = this._isSubmitting
 				|| (isCancel
-					? isProposalFrozen || !!pendingAcceptance || isStatusCheckRequired
+					? (isProposalFrozen && !isProposalReplayExpired) || !!pendingAcceptance || isStatusCheckRequired
 					: !isDraftEditable);
 		}
 	}
@@ -1295,6 +1304,7 @@ export class CharacterSheetPartyInventory {
 		this._draft = null;
 		this._error = null;
 		this._render();
+		if (this._root) this._decorateCharacterInventory();
 		if (!returnToken) return;
 		const returnButton = document.querySelector(`.charsheet__item-party-move[data-token="${CSS.escape(returnToken)}"]`)
 			|| this._root?.querySelector(`[data-party-inventory-focus="stash-${CSS.escape(returnToken)}"]`)
@@ -1413,9 +1423,7 @@ export class CharacterSheetPartyInventory {
 		const draft = this._draft;
 		const isPartyEndpoint = draft.kind === "party_inventory" || draft.destinationKind === "party_inventory";
 		if (draft.proposalRequest && Date.now() >= draft.proposalReplayUntil) {
-			this._error = ERROR_MESSAGES.IDEMPOTENCY_WINDOW_EXPIRED;
-			this._render();
-			return false;
+			return this._pCancelDraft();
 		}
 		if (draft.pendingResolution?.decision === "reject" && !draft.needsStatusCheck) {
 			this._error = "The cancellation outcome is not yet confirmed. Retry cancellation or check its status again later.";
@@ -1524,6 +1532,7 @@ export class CharacterSheetPartyInventory {
 			}
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
 			if (!draft.transfer) {
+				const isProposalReplay = !!draft.proposalRequest;
 				if (draft.needsFreshProposalRules) {
 					const latestContext = await this._api.pGetCampaignContext({campaignId: this._campaignId});
 					if (!this._isCurrent(active) || this._draft !== draft) return false;
@@ -1577,6 +1586,13 @@ export class CharacterSheetPartyInventory {
 					throw error;
 				}
 				draft.transfer = result.transfer;
+				if (isProposalReplay) {
+					const transfers = await this._api.pListTransfers({campaignId: this._campaignId});
+					if (!this._isCurrent(active) || this._draft !== draft) return false;
+					const currentTransfer = transfers.find(it => it.id === draft.transfer.id);
+					if (!currentTransfer) throw Object.assign(new Error("Transfer was not found"), {code: "TRANSFER_NOT_FOUND"});
+					draft.transfer = currentTransfer;
+				}
 			}
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
 			if (draft.proposalRequest?.isAutoResolved && ["proposed", "reserved"].includes(draft.transfer.status)) {
@@ -1603,16 +1619,25 @@ export class CharacterSheetPartyInventory {
 			this._refreshFlags.party = true;
 			if (!await this._pDrainRefresh()) throw Object.assign(new Error("Authoritative refresh failed"), {code: "NETWORK_UNAVAILABLE"});
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
-			const message = draft.transfer.status === "proposed"
-				? "Request sent. A DM can approve it from the campaign inbox; the party stash is unchanged until then."
-				: this._willRequireApproval()
-					? draft.destinationKind === "party_inventory"
+			const terminalMessages = {
+				committed: "Transfer complete. Both inventories are up to date.",
+				rejected: draft.kind === "party_inventory"
+					? "Request was rejected. The party stash was unchanged."
+					: "Transfer was rejected. The reserved items were restored.",
+				cancelled: draft.kind === "party_inventory"
+					? "Request was cancelled. The party stash was unchanged."
+					: "Transfer was cancelled. The reserved items were restored.",
+				expired: "Transfer expired. The reserved items were restored.",
+			};
+			const message = terminalMessages[draft.transfer.status]
+				|| (draft.transfer.status === "proposed"
+					? "Request sent. A DM can approve it from the campaign inbox; the party stash is unchanged until then."
+					: draft.destinationKind === "party_inventory"
 						? "Transfer reserved. A DM can accept it from the campaign inbox."
-						: "Transfer reserved. The recipient can accept it from the campaign inbox."
-					: "Transfer complete. Both inventories are up to date.";
+						: "Transfer reserved. The recipient can accept it from the campaign inbox.");
 			this._isSubmitting = false;
 			this._closeDraft();
-			this._fnToast?.({type: "success", content: message});
+			this._fnToast?.({type: draft.transfer.status === "committed" ? "success" : "info", content: message});
 			this._announce(message);
 			return true;
 		} catch (error) {

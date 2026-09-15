@@ -142,6 +142,8 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("if (isRulesVersionStale && !pendingProposal)");
 		expect(source).toContain("setTransferProposalControls");
 		expect(source).toContain("form._hubTransferControlStates");
+		expect(source).toContain("const transfers = await api.pListTransfers({campaignId})");
+		expect(source).toContain("const currentTransfer = transfers.find(it => it.id === proposed.transfer.id)");
 		expect(source).toContain("option[data-hub-frozen-proposal]");
 		expect(source).toContain("Original item stack");
 		expect(source).toContain("const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId})");
