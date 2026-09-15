@@ -1827,7 +1827,12 @@ export class HubCampaignPage {
 			await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("outcome is not yet confirmed");
 			const retry = this.page.locator("#campaign-transfer-form button[type='submit']");
 			await expect(retry).toHaveText("Retry transfer");
-			await this.page.locator("#campaign-transfer-quantity").fill(`${quantity + 1}`);
+			await expect(this.page.locator("#campaign-transfer-source")).toBeDisabled();
+			await expect(this.page.locator("#campaign-transfer-target")).toBeDisabled();
+			await expect(this.page.locator("#campaign-transfer-entry")).toBeDisabled();
+			await expect(this.page.locator("#campaign-transfer-entry")).toHaveValue(itemValue);
+			await expect(this.page.locator("#campaign-transfer-quantity")).toBeDisabled();
+			await expect(this.page.locator("#campaign-transfer-quantity")).toHaveValue(`${quantity}`);
 			await retry.click();
 			await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer complete.");
 			await expect(this.page.locator("#campaign-pending-transfers .hub-data-row")).toHaveCount(0);

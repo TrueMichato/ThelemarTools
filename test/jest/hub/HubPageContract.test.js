@@ -138,6 +138,9 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("if (isRulesVersionStale && !pendingProposal)");
 		expect(source).toContain("setTransferProposalControls");
 		expect(source).toContain("form._hubTransferControlStates");
+		expect(source).toContain("option[data-hub-frozen-proposal]");
+		expect(source).toContain("Original item stack");
+		expect(source).toContain("const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId})");
 		expect(source).toContain("resolutionRequest.decision !== decision");
 		expect(source).toContain("transferResolutionDrafts.isReplayable");
 		expect(source).toContain("transferResolutionDrafts.reconcilePending");

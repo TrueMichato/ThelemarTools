@@ -420,24 +420,57 @@ function syncTransferQuantity () {
 	else quantity.removeAttribute("max");
 }
 
+function setFrozenTransferOption ({select, value, label, quantity = null}) {
+	if (!select || value == null) return;
+	let option = [...select.options].find(it => it.value === value);
+	if (!option) {
+		option = document.createElement("option");
+		option.value = value;
+		option.textContent = label;
+		option.dataset.hubFrozenProposal = "true";
+		select.append(option);
+	}
+	if (quantity != null) option.dataset.quantity = `${quantity}`;
+	select.value = value;
+}
+
 function setTransferProposalControls ({form, proposalRequest, characters, partyInventory, isLocked}) {
 	if (!form) return;
 	if (!form._hubTransferControlStates) form._hubTransferControlStates = new Map();
 	if (!isLocked) {
+		for (const option of form.querySelectorAll("option[data-hub-frozen-proposal]")) option.remove();
 		for (const [control, wasDisabled] of form._hubTransferControlStates) control.disabled = wasDisabled;
 		form._hubTransferControlStates.clear();
+		const latestState = form._hubTransferLatestState;
+		if (latestState) syncTransferItemPicker(latestState);
 		return;
 	}
+	form._hubTransferLatestState = {characters, partyInventory};
 
 	const source = document.getElementById("campaign-transfer-source");
 	const target = document.getElementById("campaign-transfer-target");
 	const item = document.getElementById("campaign-transfer-entry");
 	const quantity = document.getElementById("campaign-transfer-quantity");
-	if (source) source.value = `${proposalRequest.sourceKind}:${proposalRequest.sourceId}`;
+	setFrozenTransferOption({
+		select: source,
+		value: `${proposalRequest.sourceKind}:${proposalRequest.sourceId}`,
+		label: "Original transfer source (current balance unavailable)",
+	});
 	syncTransferItemPicker({characters, partyInventory});
-	if (target) target.value = `${proposalRequest.targetKind}:${proposalRequest.targetId}`;
+	setFrozenTransferOption({
+		select: target,
+		value: `${proposalRequest.targetKind}:${proposalRequest.targetId}`,
+		label: "Original transfer destination (current view unavailable)",
+	});
 	const requestedItem = proposalRequest.payload?.items?.[0] || null;
-	if (item) item.value = requestedItem?.entryId || "";
+	if (requestedItem?.entryId) {
+		setFrozenTransferOption({
+			select: item,
+			value: requestedItem.entryId,
+			label: `Original item stack · ${requestedItem.quantity} requested (current balance unavailable)`,
+			quantity: requestedItem.quantity,
+		});
+	} else if (item) item.value = "";
 	syncTransferQuantity();
 	if (quantity) quantity.value = `${requestedItem?.quantity || 0}`;
 	for (const type of CURRENCY_TYPES) {
@@ -2183,6 +2216,16 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			pRefreshTransferState,
 			fnIsCurrent,
 		});
+		const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId});
+		if (pendingProposal) {
+			setTransferProposalControls({
+				form: document.getElementById("campaign-transfer-form"),
+				proposalRequest: pendingProposal,
+				characters,
+				partyInventory,
+				isLocked: true,
+			});
+		}
 		return transferState;
 	});
 

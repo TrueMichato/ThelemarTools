@@ -930,6 +930,10 @@ export class CharacterSheetPartyInventory {
 		const entry = this._getEntry(this._draft);
 		const isProposalFrozen = !this._isDraftEditable() && !this._draft.transfer;
 		const pendingAcceptance = this._getPendingAcceptance();
+		const isStatusCheckRequired = !!this._draft.transfer
+			&& !!this._draft.needsStatusCheck
+			&& !this._draft.pendingResolution
+			&& !pendingAcceptance;
 		const composer = createElement("form", {
 			className: "charsheet__party-inventory-composer",
 			attrs: {
@@ -1042,13 +1046,19 @@ export class CharacterSheetPartyInventory {
 			className: "ve-btn ve-btn-default",
 			text: pendingAcceptance
 				? "Acceptance pending"
-				: isCancellationUncertain
-					? "Retry cancellation"
-					: "Cancel",
+				: isStatusCheckRequired
+					? "Status pending"
+					: isCancellationUncertain
+						? "Retry cancellation"
+						: "Cancel",
 			attrs: {
 				type: "button",
-				disabled: !!pendingAcceptance,
-				title: pendingAcceptance ? "Retry or check the pending acceptance before cancelling." : null,
+				disabled: !!pendingAcceptance || isStatusCheckRequired,
+				title: pendingAcceptance
+					? "Retry or check the pending acceptance before cancelling."
+					: isStatusCheckRequired
+						? "Check the authoritative transfer status before cancelling."
+						: null,
 				"data-party-inventory-focus": "cancel",
 			},
 		});
@@ -1059,11 +1069,13 @@ export class CharacterSheetPartyInventory {
 				? "Check transfer status"
 				: pendingAcceptance
 					? this._draft.needsStatusCheck ? "Check acceptance status" : "Retry acceptance"
-					: this._isPlayerStashRequest()
-						? "Send request"
-						: this._shouldAutoResolve()
-							? "Move now"
-							: "Offer transfer",
+					: isStatusCheckRequired
+						? "Check transfer status"
+						: this._isPlayerStashRequest()
+							? "Send request"
+							: this._shouldAutoResolve()
+								? "Move now"
+								: "Offer transfer",
 			attrs: {type: "submit", "data-party-inventory-focus": "submit"},
 		});
 		actions.append(cancel, submit);
@@ -1313,6 +1325,11 @@ export class CharacterSheetPartyInventory {
 			this._render();
 			return false;
 		}
+		if (draft.needsStatusCheck && !draft.pendingResolution) {
+			this._error = "The cancellation result must be reconciled before another cancellation can be sent. Check the transfer status first.";
+			this._render();
+			return false;
+		}
 
 		this._isSubmitting = true;
 		this._error = null;
@@ -1355,7 +1372,7 @@ export class CharacterSheetPartyInventory {
 			return true;
 		} catch (error) {
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
-			if (draft.pendingResolution || isResolutionKnown) draft.needsStatusCheck = true;
+			draft.needsStatusCheck = true;
 			this._error = getErrorMessage(error);
 			this._render();
 			return false;
@@ -1484,10 +1501,18 @@ export class CharacterSheetPartyInventory {
 			}
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
 			if (!draft.transfer) {
+				if (draft.needsFreshProposalRules) {
+					const latestContext = await this._api.pGetCampaignContext({campaignId: this._campaignId});
+					if (!this._isCurrent(active) || this._draft !== draft) return false;
+					draft.proposalRulesVersionId = latestContext?.rulesVersion?.id || null;
+					draft.needsFreshProposalRules = false;
+				}
 				if (!draft.proposalRequest) {
 					const isAutoResolve = this._shouldAutoResolve();
 					const rulesVersionId = isAutoResolve && draft.destinationKind === "character"
-						? this._fnGetRulesVersionId()
+						? draft.proposalRulesVersionId !== undefined
+							? draft.proposalRulesVersionId
+							: this._fnGetRulesVersionId()
 						: undefined;
 					const targetId = getPartyInventoryTransferTargetId({
 						sourceKind: draft.kind,
@@ -1520,6 +1545,7 @@ export class CharacterSheetPartyInventory {
 						draft.proposalRequest = null;
 						draft.proposalReplayUntil = null;
 						if (error?.code === "RULES_VERSION_STALE") {
+							draft.needsFreshProposalRules = true;
 							draft.commandId = getOpaqueToken();
 							draft.resolutionCommandId = getOpaqueToken();
 							draft.cancellationCommandId = getOpaqueToken();
