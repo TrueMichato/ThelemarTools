@@ -81,6 +81,10 @@ import {
 	getAccountDisplayName,
 	normalizeExternalIdentity,
 } from "./external-identity.js";
+import {
+	normalizeItemAwardResolution,
+	resolveItemAwardAuthority,
+} from "./item-award-catalog.js";
 
 const {Pool} = pg;
 
@@ -193,12 +197,14 @@ export class PostgresHubStore {
 		semanticOperationRegistry = createSemanticOperationRegistry(),
 		semanticProposalTtlMs = 24 * 60 * 60 * 1_000,
 		peerSourceCostsEnabled = false,
+		fnResolveAwardItem = resolveItemAwardAuthority,
 	}) {
 		if (!pool?.query || !pool?.connect) throw new TypeError(`A pg-compatible pool is required.`);
 		this._pool = pool;
 		this._semanticOperationRegistry = semanticOperationRegistry;
 		this._semanticProposalTtlMs = semanticProposalTtlMs;
 		this._isPeerSourceCostsEnabled = createPeerSourceCostsGate(peerSourceCostsEnabled);
+		this._fnResolveAwardItem = fnResolveAwardItem;
 		this._fnOnPoolError = fnOnPoolError || (error => {
 			process.stderr.write(`Campaign Hub PostgreSQL idle client error: ${error.stack || error.message}\n`);
 		});
@@ -214,6 +220,7 @@ export class PostgresHubStore {
 		fnOnPoolError = null,
 		semanticOperationRegistry,
 		peerSourceCostsEnabled = false,
+		fnResolveAwardItem,
 	}) {
 		if (!connectionString) throw new TypeError(`connectionString is required.`);
 		return new this({
@@ -229,6 +236,7 @@ export class PostgresHubStore {
 			fnOnPoolError,
 			semanticOperationRegistry,
 			peerSourceCostsEnabled,
+			fnResolveAwardItem,
 		});
 	}
 
@@ -1497,22 +1505,27 @@ export class PostgresHubStore {
 		`, [campaignId]);
 		if (!result.rowCount) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 		const row = result.rows[0];
-		return pGetCampaignContentEnforcement({
-			rulesVersion: row.rules_id
-				? {
-					id: row.rules_id,
-					schemaVersion: row.rules_schema_version,
-					rules: row.rules,
-				}
-				: null,
-			brewBundle: row.brew_content
-				? {
-					id: row.brew_id,
-					contentHash: row.brew_content_hash,
-					content: row.brew_content,
-				}
-				: null,
-		});
+		const brewBundle = row.brew_content
+			? {
+				id: row.brew_id,
+				contentHash: row.brew_content_hash,
+				content: row.brew_content,
+			}
+			: null;
+		return {
+			...await pGetCampaignContentEnforcement({
+				rulesVersion: row.rules_id
+					? {
+						id: row.rules_id,
+						schemaVersion: row.rules_schema_version,
+						rules: row.rules,
+					}
+					: null,
+				brewBundle,
+			}),
+			activeBrewBundleVersionId: row.brew_id || null,
+			brewBundle,
+		};
 	}
 
 	/**
@@ -4669,15 +4682,32 @@ export class PostgresHubStore {
 		const normalizedItem = normalizeSafeItemSummary(item);
 		normalizeItemAwardQuantity(quantity);
 		validateCloudValue(normalizedItem, {label: "Granted item"});
-		const entry = {id: crypto.randomUUID(), item: structuredClone(normalizedItem), quantity};
+		let entry = null;
+		let authoritativeSummary = null;
+		let resolvedSourceKind = "recent";
 		return this._pGrantCharacterMutation({
 			accountId,
 			campaignId,
 			characterId,
 			idempotencyKey,
 			commandType: "item.grant",
-			fnMutate: data => {
+			fnPreflightContentMutation: data => {
 				const out = normalizeCharacterInventory(data);
+				out.inventory.push({id: crypto.randomUUID(), item: structuredClone(normalizedItem), quantity});
+				return out;
+			},
+			fnMutate: async (data, {enforcement}) => {
+				const resolution = normalizeItemAwardResolution(await this._fnResolveAwardItem({
+					sourceKind: "recent",
+					item: normalizedItem,
+					brewBundle: enforcement.brewBundle,
+				}), {sourceKind: "recent"});
+				const authoritativeItem = resolution.authoritativeItem;
+				resolvedSourceKind = resolution.sourceKind;
+				validateCloudValue(authoritativeItem, {label: "Granted item"});
+				authoritativeSummary = getSafeItemSummary(authoritativeItem);
+				const out = normalizeCharacterInventory(data);
+				entry = {id: crypto.randomUUID(), item: structuredClone(authoritativeItem), quantity};
 				out.inventory.push(entry);
 				// The inventory changed with no sheet present to recompute the summary the
 				// sheet had derived from the previous one, so it must not survive.
@@ -4685,9 +4715,9 @@ export class PostgresHubStore {
 				return out;
 			},
 			eventType: "item.granted",
-			eventPayload: () => ({entry}),
-			auditDetails: {entryId: entry.id, quantity: entry.quantity},
-			responseExtra: {entry},
+			eventPayload: () => ({sourceKind: resolvedSourceKind, entry: {...structuredClone(entry), item: structuredClone(authoritativeSummary)}}),
+			auditDetails: () => ({entryId: entry.id, quantity: entry.quantity, sourceKind: resolvedSourceKind}),
+			responseExtra: () => ({entry}),
 			rulesVersionId,
 			isContentMutation: true,
 		});
@@ -4742,9 +4772,11 @@ export class PostgresHubStore {
 			}
 			const targetsById = new Map(targetResult.rows.map(row => [row.id, getCharacter(row)]));
 			const targetCharacters = request.targetCharacterIds.map(characterId => targetsById.get(characterId));
+			const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId});
 
 			let item;
 			let incomingEntry;
+			let resolvedSourceKind = request.source.kind;
 			let party = null;
 			let stagedPartyContainer = null;
 			if (request.source.kind === "party_inventory") {
@@ -4763,7 +4795,29 @@ export class PostgresHubStore {
 				stagedPartyContainer = removed.container;
 			} else {
 				item = request.source.item;
-				incomingEntry = {item, quantity: request.quantity};
+				assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+				for (const character of targetCharacters) {
+					const provisional = addAwardedEntryToCharacter({
+						container: character.data,
+						incoming: {item, quantity: request.quantity},
+					});
+					assertCharacterCampaignContentMutation({
+						...enforcement,
+						before: character.data,
+						after: provisional.container,
+						rulesVersionId: enforcement.activeRulesVersionId,
+					});
+				}
+				const resolution = normalizeItemAwardResolution(await this._fnResolveAwardItem({
+					sourceKind: request.source.kind,
+					item,
+					brewBundle: enforcement.brewBundle,
+				}), {sourceKind: request.source.kind});
+				const authoritativeItem = resolution.authoritativeItem;
+				resolvedSourceKind = resolution.sourceKind;
+				validateCloudValue(authoritativeItem, {label: "Awarded item"});
+				item = getSafeItemSummary(authoritativeItem);
+				incomingEntry = {item: authoritativeItem, quantity: request.quantity};
 			}
 			validateCloudValue(item, {label: "Awarded item"});
 
@@ -4771,12 +4825,12 @@ export class PostgresHubStore {
 				const added = addAwardedEntryToCharacter({
 					container: character.data,
 					incoming: {...structuredClone(incomingEntry), quantity: request.quantity},
+					isAllowLegacySummaryUpgrade: resolvedSourceKind === "catalog",
 				});
 				stripCarryAuthority(added.container);
 				validateCloudCharacterData(added.container);
 				return {index, character, data: added.container, entry: added.entry};
 			});
-			const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId});
 			assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
 			for (const staged of stagedTargets) {
 				assertCharacterCampaignContentMutation({
@@ -4827,7 +4881,7 @@ export class PostgresHubStore {
 				targetId: campaignId,
 				details: {
 					awardId,
-					sourceKind: request.source.kind,
+					sourceKind: resolvedSourceKind,
 					item,
 					targetCharacterIds: request.targetCharacterIds,
 					targetCount: request.targetCharacterIds.length,
@@ -4851,7 +4905,7 @@ export class PostgresHubStore {
 						awardId,
 						index,
 						targetCount: updatedTargets.length,
-						sourceKind: request.source.kind,
+						sourceKind: resolvedSourceKind,
 						note: request.note,
 						entry: {id: entry.id, item: structuredClone(item), quantity: request.quantity},
 					},
@@ -4894,6 +4948,7 @@ export class PostgresHubStore {
 		idempotencyKey,
 		commandType,
 		fnMutate,
+		fnPreflightContentMutation = null,
 		eventType,
 		eventPayload,
 		auditDetails,
@@ -4914,11 +4969,23 @@ export class PostgresHubStore {
 			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [characterId]);
 			const characterResult = await client.query(`SELECT * FROM hub.characters WHERE campaign_id = $1 AND id = $2 AND status = 'active' FOR UPDATE`, [campaignId, characterId]);
 			if (!characterResult.rowCount) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
-			const data = fnMutate(characterResult.rows[0].data);
-			validateCloudCharacterData(data);
-			if (isContentMutation) {
-				const enforcement = await this._pGetCampaignContentEnforcement({client, campaignId});
+			const enforcement = isContentMutation
+				? await this._pGetCampaignContentEnforcement({client, campaignId})
+				: null;
+			if (enforcement) {
 				assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+				if (fnPreflightContentMutation) {
+					assertCharacterCampaignContentMutation({
+						...enforcement,
+						before: characterResult.rows[0].data,
+						after: fnPreflightContentMutation(characterResult.rows[0].data),
+						rulesVersionId: enforcement.activeRulesVersionId,
+					});
+				}
+			}
+			const data = await fnMutate(characterResult.rows[0].data, {enforcement});
+			validateCloudCharacterData(data);
+			if (enforcement) {
 				assertCharacterCampaignContentMutation({
 					...enforcement,
 					before: characterResult.rows[0].data,
@@ -4928,10 +4995,12 @@ export class PostgresHubStore {
 			}
 			const updated = await client.query(`UPDATE hub.characters SET data = $2::jsonb, revision = revision + 1, updated_at = now() WHERE id = $1 RETURNING *`, [characterId, JSON.stringify(data)]);
 			const character = getCharacter(updated.rows[0]);
-			await this._pAppendAudit({client, campaignId, actorAccountId: accountId, action: eventType, targetType: "character", targetId: characterId, details: auditDetails});
+			const resolvedAuditDetails = typeof auditDetails === "function" ? auditDetails(data) : auditDetails;
+			await this._pAppendAudit({client, campaignId, actorAccountId: accountId, action: eventType, targetType: "character", targetId: characterId, details: resolvedAuditDetails});
 			await this._pAppendEvent({client, campaignId, actorAccountId: accountId, type: eventType, aggregateType: "character", aggregateId: characterId, aggregateRevision: character.revision, visibility: "explicit_accounts", visibleAccountIds: [...new Set([accountId, character.ownerAccountId])], payload: eventPayload(data)});
 			if (isProjectionAffecting) await this._pAppendProjectionInvalidation({client, character, actorAccountId: accountId});
-			const response = {character: stripProjectionPolicy(character), ...responseExtra};
+			const resolvedResponseExtra = typeof responseExtra === "function" ? responseExtra(data) : responseExtra;
+			const response = {character: stripProjectionPolicy(character), ...resolvedResponseExtra};
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType, response});
 			await client.query("COMMIT");
 			return response;

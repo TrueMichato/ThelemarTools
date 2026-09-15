@@ -197,6 +197,58 @@ describe("HTTP character repository", () => {
 		expect(repository._recoveryVersions.size).toBe(0);
 	});
 
+	it("converges a queued owner save when an authoritative refresh already accepted the identical changes", async () => {
+		const base = {
+			id: "server-1",
+			campaignId: "campaign-1",
+			revision: 1,
+			data: {
+				name: "Mira",
+				hp: {current: 12, max: 12},
+				resources: [],
+			},
+		};
+		const converged = {
+			...base,
+			revision: 2,
+			data: {
+				...base.data,
+				hp: {current: 11, max: 12},
+				resources: [{id: "second-wind", name: "Second Wind", current: 1, max: 1}],
+			},
+		};
+		let resolveRefresh;
+		const pRefresh = new Promise(resolve => resolveRefresh = resolve);
+		let getCount = 0;
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => (++getCount === 1 ? structuredClone(base) : pRefresh),
+			pAcquireCharacterLease: jest.fn(),
+			pPatchCharacter: jest.fn(),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "server-1"});
+
+		const pReconcile = repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => structuredClone(base.data),
+			fnAdoptLive: jest.fn(),
+		});
+		const pSave = repository.pUpsert({
+			character: {
+				id: "server-1",
+				...structuredClone(converged.data),
+				_savedAt: 123,
+			},
+		});
+		resolveRefresh(structuredClone(converged));
+
+		await expect(pReconcile).resolves.toMatchObject({status: "reconciled", revision: 2});
+		await expect(pSave).resolves.toEqual({id: "server-1", ...converged.data});
+		expect(api.pPatchCharacter).not.toHaveBeenCalled();
+		expect(repository.getConflictRecovery("server-1")).toBeNull();
+	});
+
 	it("rebases authoritative inventory escrow into the live sheet without losing disjoint edits", async () => {
 		let revision = 1;
 		const documents = {
@@ -358,6 +410,56 @@ describe("HTTP character repository", () => {
 			inventory: [{id: "sword", item: {name: "Sword"}, quantity: 1}],
 		});
 		expect(repository._conflicts.size).toBe(0);
+	});
+
+	it.each([
+		["quantity", ({row}) => row.quantity = 3],
+		["spent charges", ({item}) => item.chargesCurrent = 4],
+		["non-empty upgrades", ({item}) => item.appliedUpgrades = [{name: "Keen", source: "TST"}]],
+		["non-empty gemstones", ({item}) => item.socketedGemstones = [{name: "Ruby", source: "TST"}]],
+		["custom metadata", ({item}) => item.custom = {maker: "Rook"}],
+		["award provenance", ({item}) => item._awardProvenance = {awardId: "award-1"}],
+		["effects", ({item}) => item.effects = [{type: "savingThrow", ability: "str", bonus: 1}]],
+		["materials", ({item}) => item.material = {name: "Darkmetal", source: "TGTT"}],
+	])("keeps %s identity-significant during authoritative inventory rebase", (_, mutate) => {
+		const canonicalItem = {
+			name: "Longsword",
+			source: "PHB",
+			type: "M",
+			property: ["V"],
+			reqAttune: true,
+			charges: 5,
+		};
+		const base = {
+			notes: "before",
+			inventory: [{id: "stable-stack", item: canonicalItem, quantity: 1}],
+		};
+		const local = structuredClone(base);
+		local.inventory[0].item = {
+			...local.inventory[0].item,
+			typeCode: "M",
+			properties: ["V"],
+			requiresAttunement: true,
+			shield: false,
+			armor: false,
+			weapon: true,
+			chargesCurrent: 5,
+			appliedUpgrades: [],
+			socketedGemstones: [],
+		};
+		mutate({row: local.inventory[0], item: local.inventory[0].item});
+		const remote = structuredClone(base);
+		remote.inventory[0].quantity = 2;
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api: {}});
+
+		expect(repository._rebaseAuthoritativeCandidate({base, local, remote})).toMatchObject({
+			isConflict: true,
+			conflicts: [{localPath: "/inventory", remotePath: "/inventory"}],
+			document: {
+				notes: "before",
+				inventory: [{id: "stable-stack", item: canonicalItem, quantity: 2}],
+			},
+		});
 	});
 
 	it("rebases live-conflict recovery before it can restore pre-transfer inventory", async () => {

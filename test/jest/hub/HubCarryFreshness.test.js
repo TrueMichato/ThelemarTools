@@ -75,7 +75,7 @@ function getCharacterData (overrides = {}) {
  * NON-owning viewer exercises the projection path the DM Screen actually reads.
  */
 async function setup () {
-	const store = new MemoryHubStore();
+	const store = new MemoryHubStore({fnResolveAwardItem: async ({item}) => structuredClone(item)});
 	const dm = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "1", displayName: "DM"});
 	const player = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "2", displayName: "Player"});
 	const {campaign} = await store.pCreateCampaign({accountId: dm.id, name: "C", idempotencyKey: "c-1"});

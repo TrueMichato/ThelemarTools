@@ -51,7 +51,8 @@ import {CharacterSheetHubEffects} from "./charactersheet-hub-effects.js";
 import {CharacterSheetPeerTargeting} from "./charactersheet-peer-targeting.js";
 import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js";
 import {getCharacterSaveFence, isCharacterSaveFenceCurrent} from "./charactersheet-persistence-fence.js";
-import {diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
+import {applyJsonPatch, diffJson, rebaseJsonChanges} from "../hub/hub-json-patch.js";
+import {getCharacterDocumentWithoutDeterministicItemAliases} from "../hub/hub-inventory-equivalence.js";
 import {filterCampaignContentEntities, getCampaignContentPolicy, getCampaignEntityUid} from "../hub/hub-content-policy.js";
 import {
 	getClearedCampaignRulesState,
@@ -177,6 +178,8 @@ class CharacterSheetPage {
 		this._backgrounds = [];
 		this._spellsData = [];
 		this._itemsData = [];
+		this._itemRepairData = [];
+		this._itemRepairItems = [];
 		this._actionsData = [];
 		this._featsData = [];
 		this._optionalFeaturesData = [];
@@ -1105,7 +1108,12 @@ class CharacterSheetPage {
 		/* eslint-enable no-console */
 
 		// Pass loaded data to modules
-		if (this._inventory) this._inventory.setItems(this._itemsData);
+		if (this._inventory) {
+			this._inventory.setItems(this._itemsData, {
+				pristineItems: this._itemRepairData,
+				repairItems: this._itemRepairItems,
+			});
+		}
 		if (this._combat) this._combat.setItems(this._itemsData);
 		if (this._features) this._features.setFeats(this._featsData);
 		if (this._spells) this._spells.setSpells(this._spellsData);
@@ -1202,36 +1210,115 @@ class CharacterSheetPage {
 		}
 	}
 
+	static _ITEM_REPAIR_FIELDS = [
+		"name",
+		"source",
+		"entries",
+		"additionalSources",
+		"hasRefs",
+	];
+
+	static _getItemRepairData ({rawItems, variantComponents}) {
+		const byUid = new Map();
+		for (const item of [
+			...(rawItems.item || []),
+			...(rawItems.baseitem || []),
+			...(variantComponents.item || []),
+		]) {
+			if (!item?.name || !item?.source) continue;
+			const uid = `${item.name}|${item.source}`.toLowerCase();
+			if (byUid.has(uid)) continue;
+			byUid.set(uid, Object.fromEntries(
+				this._ITEM_REPAIR_FIELDS
+					.filter(key => Object.prototype.hasOwnProperty.call(item, key))
+					.map(key => [key, MiscUtil.copyFast(item[key])]),
+			));
+		}
+		return [...byUid.values()];
+	}
+
+	static async _pLoadItemData ({
+		pLoadRawItems = () => DataUtil.item.loadRawJSON(),
+		pLoadPrereleaseData = () => PrereleaseUtil.pGetBrewProcessed(),
+		pLoadBrewData = () => BrewUtil2.pGetBrewProcessed(),
+		pLoadVariantComponents = () => DataUtil.loadJSON("data/items-variant-components-ar8.json").catch(() => ({item: []})),
+		pLoadSiteItems = () => DataUtil.item.loadJSON().then(d => d.item || []),
+		pLoadPrereleaseItems = () => DataUtil.item.loadPrerelease().then(d => d.item || []).catch(() => []),
+		pLoadBrewItems = () => DataUtil.item.loadBrew().then(d => d.item || []).catch(() => []),
+	} = {}) {
+		const [rawItems, prereleaseData, brewData, variantComponents] = await Promise.all([
+			pLoadRawItems(),
+			pLoadPrereleaseData(),
+			pLoadBrewData(),
+			pLoadVariantComponents(),
+		]);
+		const itemRepairData = this._getItemRepairData({
+			rawItems,
+			variantComponents,
+		});
+		const [items, prereleaseItems, brewItems] = await Promise.all([
+			pLoadSiteItems(),
+			pLoadPrereleaseItems(),
+			pLoadBrewItems(),
+		]);
+		return {
+			items,
+			prereleaseItems,
+			brewItems,
+			itemRepairItems: [...items, ...(variantComponents.item || [])],
+			prereleaseData,
+			brewData,
+			variantComponents,
+			itemRepairData,
+		};
+	}
+
 	async _pLoadData () {
-		// Load all necessary data in parallel
 		// Note: Using loadRawJSON for classes to get classFeature and subclassFeature arrays
 		// Also pre-cache class/subclass features in DataLoader so hover links work properly
-		const [races, classes, backgrounds, spells, items, brewItems, prereleaseItems, actions, feats, optFeatures, skills, conditionsData, languagesData, combatMethods, itemUpgrades, itemMaterials, prereleaseData, brewData, variantComponents] = await Promise.all([
-			DataUtil.race.loadJSON(),
-			DataUtil.class.loadRawJSON(),
-			DataUtil.loadJSON("data/backgrounds.json"),
-			DataUtil.spell.pLoadAll(),
-			// Use DataUtil.item.loadJSON/loadBrew/loadPrerelease so brew items go through the
-			// full enhancement pipeline (generic variant generation + property/mastery merging)
-			// — same path used by items.html. Otherwise brew weapons lack mastery/property fields.
-			DataUtil.item.loadJSON().then(d => d.item || []),
-			DataUtil.item.loadBrew().then(d => d.item || []).catch(() => []),
-			DataUtil.item.loadPrerelease().then(d => d.item || []).catch(() => []),
-			DataUtil.action.loadJSON(),
-			DataUtil.loadJSON("data/feats.json"),
-			DataUtil.loadJSON("data/optionalfeatures.json"),
-			DataUtil.loadJSON("data/skills.json"),
-			DataUtil.loadJSON("data/conditionsdiseases.json"),
-			DataUtil.loadJSON("data/languages.json"),
-			DataUtil.combatmethod.loadJSON().catch(() => ({combatMethod: []})),
-			DataUtil.itemUpgrade.loadJSON().catch(() => ({itemUpgrade: []})),
-			DataUtil.itemMaterial.loadJSON().catch(() => ({itemMaterial: []})),
-			// Load homebrew/prerelease data (for non-item entities)
-			PrereleaseUtil.pGetBrewProcessed(),
-			BrewUtil2.pGetBrewProcessed(),
-			// Load variant spell components (Arcadia 8)
-			DataUtil.loadJSON("data/items-variant-components-ar8.json").catch(() => ({item: []})),
+		const [itemData, nonItemData] = await Promise.all([
+			CharacterSheetPage._pLoadItemData(),
+			Promise.all([
+				DataUtil.race.loadJSON(),
+				DataUtil.class.loadRawJSON(),
+				DataUtil.loadJSON("data/backgrounds.json"),
+				DataUtil.spell.pLoadAll(),
+				DataUtil.action.loadJSON(),
+				DataUtil.loadJSON("data/feats.json"),
+				DataUtil.loadJSON("data/optionalfeatures.json"),
+				DataUtil.loadJSON("data/skills.json"),
+				DataUtil.loadJSON("data/conditionsdiseases.json"),
+				DataUtil.loadJSON("data/languages.json"),
+				DataUtil.combatmethod.loadJSON().catch(() => ({combatMethod: []})),
+				DataUtil.itemUpgrade.loadJSON().catch(() => ({itemUpgrade: []})),
+				DataUtil.itemMaterial.loadJSON().catch(() => ({itemMaterial: []})),
+			]),
 		]);
+		const {
+			items,
+			prereleaseItems,
+			brewItems,
+			itemRepairItems,
+			prereleaseData,
+			brewData,
+			variantComponents,
+			itemRepairData,
+		} = itemData;
+		const [
+			races,
+			classes,
+			backgrounds,
+			spells,
+			actions,
+			feats,
+			optFeatures,
+			skills,
+			conditionsData,
+			languagesData,
+			combatMethods,
+			itemUpgrades,
+			itemMaterials,
+		] = nonItemData;
 
 		// Base site data
 		// Merge subraces into races to get _baseName, _baseSource properties for subrace grouping
@@ -1244,9 +1331,11 @@ class CharacterSheetPage {
 		this._backgrounds = backgrounds.background || [];
 		this._spellsData = spells;
 		// Filter out item groups which are not actual items.
-		// Merge site + prerelease + brew + variant component items here (all already enhanced by DataUtil.item.*).
-		this._itemsData = [...(items || []), ...(prereleaseItems || []), ...(brewItems || []), ...(variantComponents.item || [])]
+		// Repository-owned site/variant identities precede mutable prerelease/brew collisions.
+		this._itemsData = [...(items || []), ...(variantComponents.item || []), ...(prereleaseItems || []), ...(brewItems || [])]
 			.filter(it => !it._isItemGroup);
+		this._itemRepairData = itemRepairData;
+		this._itemRepairItems = itemRepairItems.filter(it => !it._isItemGroup);
 		this._actionsData = actions.action || [];
 		this._featsData = feats.feat || [];
 		this._optionalFeaturesData = optFeatures.optionalfeature || [];
@@ -4553,7 +4642,11 @@ class CharacterSheetPage {
 				const canonical = getClean(persisted);
 				if (diffJson(submitted, canonical).length) {
 					const live = getClean(this._state.toJson());
-					const rebased = rebaseJsonChanges({base: submitted, local: live, remote: canonical});
+					const rebased = rebaseJsonChanges({
+						base: getCharacterDocumentWithoutDeterministicItemAliases(submitted),
+						local: getCharacterDocumentWithoutDeterministicItemAliases(live),
+						remote: getCharacterDocumentWithoutDeterministicItemAliases(canonical),
+					});
 					if (rebased.isConflict) {
 						const conflict = new Error(`Live character edits overlap server changes.`);
 						conflict.code = "CHARACTER_LIVE_CONFLICT";
@@ -4563,7 +4656,7 @@ class CharacterSheetPage {
 						this._characterRepository.registerLiveConflict?.({characterId: saveFence.characterId, recovery: conflict.recovery});
 						throw conflict;
 					}
-					this._state.loadFromJson({...rebased.document, id: persisted.id});
+					this._state.loadFromJson({...applyJsonPatch(canonical, rebased.patches), id: persisted.id});
 					this._reconcileClassFeatures();
 					this._renderCharacter();
 				}

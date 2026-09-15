@@ -153,11 +153,19 @@ inert. The coordinator routes metadata-only projection invalidations and the fro
 delivery cannot overtake an in-flight save. Character/campaign switch, canonical-id replacement, detach,
 revocation, logout, and terminal page hide all fence the subscription generation.
 
-Applied operations are reconciled in the repository under ADR 0012. Because `rebaseJsonChanges` conflicts on
-path overlap regardless of value equality, the accepted base and every other base track must advance together
-with live state or the next save reports a spurious conflict on identical values. Delivery is therefore a
-prepare/adopt/commit transaction over per-track coverage records, and an unprovable delivery schedules a
-serialized recovery that replays ordered visible history instead of forcing a reload.
+Applied operations are reconciled in the repository under ADR 0012. `rebaseJsonChanges` treats identical
+same-path edits as convergence while preserving unequal and ancestor/descendant overlaps as conflicts. The
+character repository additionally removes only deterministic Character Sheet item aliases from all three
+comparison inputs before inventory diffs. A canonical item and the same sheet-normalized item therefore do not
+manufacture an `/inventory` overlap around a server quantity change, while quantity, spent charges, non-empty
+upgrades/gemstones, custom metadata, provenance, effects, materials, and wrapper-state changes remain real
+conflicts. The normalization is comparison-only; canonical server inventory remains the adopted document.
+The Character Sheet's final post-save rebase uses the same comparison contract and applies disjoint local
+patches back onto the unmodified canonical document, so save completion cannot reintroduce the alias conflict.
+The accepted base and every other base track still advance together with live state so later saves retain exact
+coverage and do not need to rediscover already-accepted edits. Delivery is therefore a prepare/adopt/commit
+transaction over per-track coverage records, and an unprovable delivery schedules a serialized recovery that
+replays ordered visible history instead of forcing a reload.
 
 This delivery layer is intentionally not reconciliation: it does not mutate `CharacterSheetState`, accepted
 bases, revisions, leases, conflicts, or recovery storage, and it does not fetch or replace the owner document.

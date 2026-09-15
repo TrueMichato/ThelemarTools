@@ -21,7 +21,7 @@ describe("Phase 4 actions, grants, and transfers", () => {
 		identity = identities.dm;
 		ix = 0;
 		app = await createHubApp({
-			store: new MemoryHubStore(),
+			store: new MemoryHubStore({fnResolveAwardItem: async ({item}) => structuredClone(item)}),
 			oauthProvider: {getAuthorizationUrl: ({state}) => `https://x/?state=${state}`, pExchangeCode: async () => identity},
 			config: {appOrigin: ORIGIN, cookieSecret: "x".repeat(32), csrfSecret: "y".repeat(32), allowedOAuthSubjects: ["github:1", "github:2", "github:3"]},
 		});

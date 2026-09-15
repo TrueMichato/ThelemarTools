@@ -3,6 +3,7 @@ import {applyJsonPatch, diffJson, rebaseJsonChanges} from "./hub-json-patch.js";
 import {withRootCarryWrite} from "./hub-carry-authority.js";
 import {HubBroadcastSync} from "./hub-broadcast-sync.js";
 import {CHARACTER_OPERATION_LEGS, getCharacterOperationRouting, getOperationLegKey} from "./hub-character-operation-events.js";
+import {getCharacterDocumentWithoutDeterministicItemAliases} from "./hub-inventory-equivalence.js";
 import {
 	BoundedIdSet,
 	COVERAGE_VERSION,
@@ -307,7 +308,7 @@ export class HubHttpCharacterRepository {
 	_rebaseAuthoritativeCandidate ({base, local, remote, isPreserveLocalOnConflict = false}) {
 		const withoutDerivedFields = document => {
 			if (!document || typeof document !== "object" || Array.isArray(document)) return document;
-			const out = {...document};
+			const out = getCharacterDocumentWithoutDeterministicItemAliases(document);
 			delete out.carry;
 			delete out._savedAt;
 			return out;
@@ -342,7 +343,7 @@ export class HubHttpCharacterRepository {
 	_rebaseOwnerCandidate ({base, local, remote}) {
 		const withoutClientMetadata = document => {
 			if (!document || typeof document !== "object" || Array.isArray(document)) return document;
-			const out = {...document};
+			const out = getCharacterDocumentWithoutDeterministicItemAliases(document);
 			delete out._savedAt;
 			return out;
 		};
