@@ -558,6 +558,24 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			payload: {items: [{entryId: "maps", quantity: 1}]},
 			idempotencyKey: `${prefix}-direct`,
 		});
+		const sourceTransferView = (await store.pListTransfers({accountId: sourceOwner.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(sourceTransferView).toMatchObject({
+			actorAccountId: sourceOwner.id,
+			sourceKind: "character",
+			sourceId: sourceCharacter.id,
+			targetKind: "character",
+		});
+		expect(sourceTransferView).not.toHaveProperty("targetId");
+		const targetTransferView = (await store.pListTransfers({accountId: targetOwner.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === directPass.transfer.id);
+		expect(targetTransferView).toMatchObject({
+			actorAccountId: null,
+			sourceKind: "character",
+			targetKind: "character",
+			targetId: targetCharacter.id,
+		});
+		expect(targetTransferView).not.toHaveProperty("sourceId");
 		await store.pResolveTransfer({
 			accountId: targetOwner.id,
 			campaignId: campaign.id,

@@ -20,6 +20,21 @@ export function createCharacterDisplayNameSnapshot (value) {
 	};
 }
 
+export function projectTransferForViewer ({transfer, accountId, role, getCharacterOwnerId}) {
+	if (!transfer || ["dm", "co_dm"].includes(role)) return transfer;
+	const ownsSource = transfer.sourceKind === "character"
+		&& getCharacterOwnerId?.(transfer.sourceId) === accountId;
+	const ownsTarget = transfer.targetKind === "character"
+		&& getCharacterOwnerId?.(transfer.targetId) === accountId;
+	if (transfer.actorAccountId !== accountId && !ownsSource && !ownsTarget) return null;
+
+	const projected = {...transfer};
+	if (!ownsSource || transfer.sourceKind === "party_inventory") delete projected.sourceId;
+	if (!ownsTarget || transfer.targetKind === "party_inventory") delete projected.targetId;
+	if (transfer.actorAccountId !== accountId) projected.actorAccountId = null;
+	return projected;
+}
+
 function getSnapshotName (snapshot) {
 	if (!snapshot || snapshot.version !== HUB_EVENT_SNAPSHOT_VERSION) return "";
 	return sanitizeCharacterDisplayName(snapshot.displayName || snapshot.name);

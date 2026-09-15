@@ -213,6 +213,30 @@ describe("Phase 4 actions, grants, and transfers", () => {
 		});
 		expect(playerToPeer.statusCode).toBe(201);
 		expect(playerToPeer.json().transfer.status).toBe("reserved");
+		const sourceTransferView = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(a.session),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(sourceTransferView).toMatchObject({
+			actorAccountId: a.session.account.id,
+			sourceKind: "character",
+			sourceId: a.character.id,
+			targetKind: "character",
+		});
+		expect(sourceTransferView).not.toHaveProperty("targetId");
+		const targetTransferView = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(b.session),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(targetTransferView).toMatchObject({
+			actorAccountId: null,
+			sourceKind: "character",
+			targetKind: "character",
+			targetId: b.character.id,
+		});
+		expect(targetTransferView).not.toHaveProperty("sourceId");
 		const actorCannotSelfAcceptPeer = await app.inject({
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/transfers/${playerToPeer.json().transfer.id}/resolve`,

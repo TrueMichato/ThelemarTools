@@ -59,6 +59,7 @@ import {HUB_REQUIRED_MIGRATION_VERSION} from "./migration-version.js";
 import {
 	createCharacterDisplayNameSnapshot,
 	enrichEventPayload,
+	projectTransferForViewer,
 	redactTransferEventForViewer,
 } from "./hub-event-snapshots.js";
 import {createSemanticOperationRegistry} from "./semantic-operation-registry.js";
@@ -5749,7 +5750,10 @@ export class PostgresHubStore {
 		const membership = await this.pGetMembership({accountId, campaignId});
 		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 		const result = await this._pool.query(`
-			SELECT t.*
+			SELECT
+				t.*,
+				sc.owner_account_id AS source_owner_account_id,
+				tc.owner_account_id AS target_owner_account_id
 			FROM hub.transfers t
 			LEFT JOIN hub.characters sc ON sc.id = t.source_character_id
 			LEFT JOIN hub.characters tc ON tc.id = t.target_character_id
@@ -5757,7 +5761,18 @@ export class PostgresHubStore {
 				AND ($2::boolean OR t.actor_account_id = $3 OR sc.owner_account_id = $3 OR tc.owner_account_id = $3)
 			ORDER BY t.created_at DESC
 		`, [campaignId, ["dm", "co_dm"].includes(membership.role), accountId]);
-		return result.rows.map(row => this._getTransfer(row));
+		return result.rows
+			.map(row => projectTransferForViewer({
+				transfer: this._getTransfer(row),
+				accountId,
+				role: membership.role,
+				getCharacterOwnerId: characterId => {
+					if (characterId === row.source_character_id) return row.source_owner_account_id;
+					if (characterId === row.target_character_id) return row.target_owner_account_id;
+					return null;
+				},
+			}))
+			.filter(Boolean);
 	}
 
 	async pGetAccountDeletion ({accountId}) {

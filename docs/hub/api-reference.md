@@ -230,7 +230,7 @@ arbitrary spell prose.
 | Method/path | Authorization | Input | Result |
 |---|---|---|---|
 | `GET /api/campaigns/:campaignId/party-inventory` | Active member | none | Lazily created party inventory, entries, denomination currency |
-| `GET /api/campaigns/:campaignId/transfers` | Active member | none | Transfers visible to DM, actor, source owner, or target owner |
+| `GET /api/campaigns/:campaignId/transfers` | Active member | none | Transfers visible to DM, actor, source owner, or target owner; non-DM views omit unowned character/container IDs and foreign actor attribution |
 | `POST /api/campaigns/:campaignId/transfers` | Active-member mutation; character source owner, DM/co-DM party source, or player requesting party inventory for their own character | source/target kind+UUID, <=100 item quantities, nonnegative denomination currency, and active `rulesVersionId` for a direct character destination under restrictive content policy | 201 `committed` direct-authority transfer, `reserved` approval-bound escrow transfer, or non-escrowed `proposed` player stash request |
 | `POST /api/campaigns/:campaignId/transfers/:transferId/resolve` | Reserved: target owner or DM/co-DM; proposed stash request: DM/co-DM; originating actor may reject/cancel either | accept/reject plus active `rulesVersionId` when accepting into a character under restrictive content policy | committed or rejected transfer/request |
 

@@ -58,6 +58,7 @@ import {
 import {
 	createCharacterDisplayNameSnapshot,
 	enrichEventPayload,
+	projectTransferForViewer,
 	redactTransferEventForViewer,
 } from "./hub-event-snapshots.js";
 import {createSemanticOperationRegistry} from "./semantic-operation-registry.js";
@@ -3599,7 +3600,13 @@ export class MemoryHubStore {
 				}
 				return false;
 			})
-			.map(copy);
+			.map(transfer => projectTransferForViewer({
+				transfer: copy(transfer),
+				accountId,
+				role: membership.role,
+				getCharacterOwnerId: characterId => this._characters.get(characterId)?.ownerAccountId,
+			}))
+			.filter(Boolean);
 	}
 
 	async pGetAccountDeletion ({accountId}) {
