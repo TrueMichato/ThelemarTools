@@ -242,6 +242,7 @@ export class CharacterSheetPartyInventory {
 		this._tokenByItemKey = new Map();
 		this._draft = null;
 		this._needsAuthoritativeRefresh = false;
+		this._needsFreshProposalRules = false;
 		this._error = null;
 		this._reconcileError = null;
 		this._partyError = null;
@@ -347,6 +348,7 @@ export class CharacterSheetPartyInventory {
 		this._active = null;
 		this._draft = null;
 		this._needsAuthoritativeRefresh = false;
+		this._needsFreshProposalRules = false;
 		this._error = null;
 		this._reconcileError = null;
 		this._partyError = null;
@@ -1671,15 +1673,16 @@ export class CharacterSheetPartyInventory {
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
 			if (!draft.transfer) {
 				const isProposalReplay = !!draft.proposalRequest;
-				if (draft.needsFreshProposalRules) {
+				const isAutoResolve = this._shouldAutoResolve();
+				const isRulesPinnedProposal = isAutoResolve && draft.destinationKind === "character";
+				if (this._needsFreshProposalRules && isRulesPinnedProposal) {
 					const latestContext = await this._api.pGetCampaignContext({campaignId: this._campaignId});
 					if (!this._isCurrent(active) || this._draft !== draft) return false;
 					draft.proposalRulesVersionId = latestContext?.rulesVersion?.id || null;
-					draft.needsFreshProposalRules = false;
+					this._needsFreshProposalRules = false;
 				}
 				if (!draft.proposalRequest) {
-					const isAutoResolve = this._shouldAutoResolve();
-					const rulesVersionId = isAutoResolve && draft.destinationKind === "character"
+					const rulesVersionId = isRulesPinnedProposal
 						? draft.proposalRulesVersionId !== undefined
 							? draft.proposalRulesVersionId
 							: this._fnGetRulesVersionId()
@@ -1716,7 +1719,7 @@ export class CharacterSheetPartyInventory {
 						draft.proposalReplayUntil = null;
 						this._needsAuthoritativeRefresh = true;
 						if (error?.code === "RULES_VERSION_STALE") {
-							draft.needsFreshProposalRules = true;
+							this._needsFreshProposalRules = true;
 							draft.commandId = getOpaqueToken();
 							draft.resolutionCommandId = getOpaqueToken();
 							draft.cancellationCommandId = getOpaqueToken();

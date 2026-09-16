@@ -271,7 +271,8 @@ If the proposal itself is rejected for a stale pin before creating a transfer, b
 rotate together. The browser never changes a pin beneath an existing key. Offline mutation queues and blind replay
 across reloads remain out of scope. Any definitive proposal rejection also gates new Character Sheet transfer
 drafts until both authoritative character and stash refreshes succeed; dismissing the failed draft does not clear
-that gate or permit a direct method call to reuse cached eligibility.
+that gate or permit a direct method call to reuse cached eligibility. A stale-rules marker also survives draft
+dismissal, forcing the next proposal to fetch the active campaign context before choosing its rules pin.
 An approval-bound acceptance or direct proposal into a character compares the resulting authoritative document
 with its prior state and rejects a new disallowed/unknown item identity or stale rules pin before source,
 destination, resolution, audit, event, outbox, or receipt changes. Approval-bound reserved escrow remains

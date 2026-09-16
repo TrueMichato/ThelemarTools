@@ -55,6 +55,8 @@ explicitly cancelled; a confirmed terminal or missing request refreshes both inv
 Definitive proposal rejections also refresh both authoritative inventories before another transfer can begin.
 Cancelling the visible draft does not clear this authority-stale gate. If that refresh fails, Retry remains
 visible and both the composer and new Share/Take/Request actions stay locked rather than reusing cached balances.
+A stale-rules rejection also preserves its context-refresh requirement across draft cancellation, so the next
+proposal fetches the active immutable rules version before it sends a new command.
 
 ### 4. **Backward Compatibility**
 
