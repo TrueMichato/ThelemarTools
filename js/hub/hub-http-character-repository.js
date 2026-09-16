@@ -19,7 +19,8 @@ import {
 const _PENDING_RESYNC_LIMIT = 64;
 const _RESYNC_PAGE_LIMIT = 200;
 const _RESYNC_MAX_PAGES = 50;
-const _RECOVERY_COMMAND_QUEUE_VERSION = 2;
+const _RECOVERY_COMMAND_QUEUE_VERSION = 3;
+const _RECOVERY_COMMAND_QUEUE_COMPACT_LEGACY_VERSION = 2;
 const _RECOVERY_COMMAND_QUEUE_LEGACY_VERSION = 1;
 const _RECOVERY_COMMAND_QUEUE_LIMIT = 32;
 const _RECOVERY_COMMAND_QUEUE_MAX_BYTES = 3_500_000;
@@ -1680,7 +1681,10 @@ export class HubHttpCharacterRepository {
 
 	_getRecoveryIntent (parsed) {
 		if (["create", "patch"].includes(parsed?.intent)) return parsed.intent;
-		if (parsed?.queueVersion === _RECOVERY_COMMAND_QUEUE_VERSION && Object.hasOwn(parsed, "base")) {
+		if (
+			[_RECOVERY_COMMAND_QUEUE_VERSION, _RECOVERY_COMMAND_QUEUE_COMPACT_LEGACY_VERSION].includes(parsed?.queueVersion)
+			&& Object.hasOwn(parsed, "base")
+		) {
 			return parsed.base == null ? "create" : "patch";
 		}
 		const firstLegacyCommand = Array.isArray(parsed?.commands) ? parsed.commands[0] : null;
@@ -1796,6 +1800,7 @@ export class HubHttpCharacterRepository {
 				activity: structuredClone(command.submittedActivity),
 				commandKeys: {...command.commandKeys},
 				rulesVersionId: command.submittedRulesVersionId ?? null,
+				...(command.isExactRequestUnproven ? {isExactRequestUnproven: true} : {}),
 				...(command.outboundPatch
 					? {
 						outboundPatch: {
@@ -1846,6 +1851,9 @@ export class HubHttpCharacterRepository {
 			submittedSnapshotCoverage: isCoverageKnown ? deserializeCoverage(raw.coverage.snapshot) : createCoverage(),
 			commandKeys: {...raw.commandKeys},
 			submittedRulesVersionId: raw.rulesVersionId ?? null,
+			isExactRequestUnproven: raw.isExactRequestUnproven === true
+				|| !Object.hasOwn(raw, "rulesVersionId")
+				|| !raw.outboundPatch,
 			outboundPatch: raw.outboundPatch
 				? {
 					baseRevision: raw.outboundPatch.baseRevision,
@@ -1859,12 +1867,18 @@ export class HubHttpCharacterRepository {
 
 	_hydrateCompactRecoveryQueue ({characterId, parsed}) {
 		if (!Array.isArray(parsed.commands) || !parsed.commands.length || parsed.commands.length > _RECOVERY_COMMAND_QUEUE_LIMIT) return null;
+		const isLegacyQueue = parsed.queueVersion === _RECOVERY_COMMAND_QUEUE_COMPACT_LEGACY_VERSION;
 		let base = structuredClone(parsed.base ?? null);
 		let baseCoverage = deserializeCoverage(parsed.baseCoverage);
 		const initialIntent = this._getRecoveryIntent(parsed);
 		const queue = [];
 		for (const [index, raw] of parsed.commands.entries()) {
 			if (!Array.isArray(raw?.patches) || !raw?.commandKeys?.create || !raw?.commandKeys?.patch) return null;
+			const intent = index ? "patch" : initialIntent;
+			const isUnsubmittedLegacyPatch = isLegacyQueue
+				&& intent === "patch"
+				&& raw.state === "pending"
+				&& !raw.outboundPatch;
 			const snapshot = applyJsonPatch(base, raw.patches);
 			const snapshotCoverage = deserializeCoverage(raw.snapshotCoverage);
 			queue.push({
@@ -1875,7 +1889,17 @@ export class HubHttpCharacterRepository {
 				submittedBaseCoverage: this._cloneTrackCoverage(baseCoverage),
 				submittedSnapshotCoverage: this._cloneTrackCoverage(snapshotCoverage),
 				commandKeys: {...raw.commandKeys},
-				submittedRulesVersionId: raw.rulesVersionId ?? null,
+				submittedRulesVersionId: isUnsubmittedLegacyPatch && !Object.hasOwn(raw, "rulesVersionId")
+					? this._fnGetRulesVersionId()
+					: raw.rulesVersionId ?? null,
+				isExactRequestUnproven: raw.isExactRequestUnproven === true || (
+					isLegacyQueue
+					&& !isUnsubmittedLegacyPatch
+					&& (
+						!Object.hasOwn(raw, "rulesVersionId")
+						|| (intent === "patch" && !raw.outboundPatch)
+					)
+				),
 				outboundPatch: raw.outboundPatch
 					? {
 						baseRevision: raw.outboundPatch.baseRevision,
@@ -1883,7 +1907,7 @@ export class HubHttpCharacterRepository {
 					}
 					: null,
 				state: ["failed", "conflict"].includes(raw.state) ? raw.state : "pending",
-				intent: index ? "patch" : initialIntent,
+				intent,
 			});
 			base = structuredClone(snapshot);
 			baseCoverage = this._cloneTrackCoverage(snapshotCoverage);
@@ -2052,7 +2076,7 @@ export class HubHttpCharacterRepository {
 			submittedBaseCoverage,
 			submittedSnapshotCoverage,
 		} = command;
-		const submittedRulesVersionId = command.submittedRulesVersionId ?? null;
+		let submittedRulesVersionId = command.submittedRulesVersionId ?? null;
 		let canonicalId = this._canonicalIds.get(requestedId) || requestedId;
 		if (canonicalId !== requestedId) {
 			this._migrateCharacterIdentity({fromId: requestedId, toId: canonicalId});
@@ -2070,6 +2094,38 @@ export class HubHttpCharacterRepository {
 			conflict.code = "CHARACTER_CONFLICT";
 			conflict.recovery = structuredClone(existingConflict);
 			throw conflict;
+		}
+		if (command.isExactRequestUnproven && submittedActivity) {
+			const error = this._getRecoveryStorageError({
+				code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE",
+				message: `This recovered activity cannot be retried safely because the earlier browser version did not store its exact request. Export the local character before discarding recovery or choosing server state.`,
+			});
+			error.recovery = {
+				character: structuredClone(characterNxt),
+				activity: structuredClone(submittedActivity),
+			};
+			throw error;
+		}
+		if (command.isExactRequestUnproven) {
+			const previousCommandKeys = {...command.commandKeys};
+			const previousRulesVersionId = command.submittedRulesVersionId;
+			const previousOutboundPatch = command.outboundPatch;
+			command.commandKeys.create = crypto.randomUUID();
+			command.commandKeys.patch = crypto.randomUUID();
+			command.submittedRulesVersionId = this._fnGetRulesVersionId();
+			command.outboundPatch = null;
+			command.isExactRequestUnproven = false;
+			try {
+				this._persistRecoveryCommandQueue(requestedId, {isRequired: true});
+			} catch (error) {
+				command.commandKeys.create = previousCommandKeys.create;
+				command.commandKeys.patch = previousCommandKeys.patch;
+				command.submittedRulesVersionId = previousRulesVersionId;
+				command.outboundPatch = previousOutboundPatch;
+				command.isExactRequestUnproven = true;
+				throw error;
+			}
+			submittedRulesVersionId = command.submittedRulesVersionId ?? null;
 		}
 		await this._pEnsureSession();
 		let accepted = this._accepted.get(canonicalId);
@@ -2391,6 +2447,7 @@ export class HubHttpCharacterRepository {
 				submittedActivity,
 				commandKeys: {create: crypto.randomUUID(), patch: crypto.randomUUID()},
 				submittedRulesVersionId: this._fnGetRulesVersionId(),
+				isExactRequestUnproven: false,
 				outboundPatch: null,
 				submittedBase,
 				submittedBaseCoverage,
@@ -2447,7 +2504,7 @@ export class HubHttpCharacterRepository {
 			if (!record) return null;
 			const {key: recoveryKey, parsed} = record;
 			let queue = null;
-			if (parsed.queueVersion === _RECOVERY_COMMAND_QUEUE_VERSION) {
+			if ([_RECOVERY_COMMAND_QUEUE_VERSION, _RECOVERY_COMMAND_QUEUE_COMPACT_LEGACY_VERSION].includes(parsed.queueVersion)) {
 				queue = this._hydrateCompactRecoveryQueue({characterId: canonicalId, parsed});
 			} else if (parsed.queueVersion === _RECOVERY_COMMAND_QUEUE_LEGACY_VERSION) {
 				if (!Array.isArray(parsed.commands)
@@ -2592,6 +2649,7 @@ export class HubHttpCharacterRepository {
 					submittedActivity: null,
 					commandKeys: {create: crypto.randomUUID(), patch: crypto.randomUUID()},
 					submittedRulesVersionId: this._fnGetRulesVersionId(),
+					isExactRequestUnproven: false,
 					outboundPatch: null,
 					submittedBase: structuredClone(recovery.serverDocument.data),
 					submittedBaseCoverage: serverCoverage,

@@ -508,7 +508,11 @@ Reconciliation is `R = E(B)`, `F = E(L)`, `nextSave = diff(R, F)`:
   pair, local conflict resolution replays all unresolved activities in order, and server conflict resolution is
   the explicit discard boundary. Storage uses one base plus a patch chain, capped at 32 commands/3.5 MB; a cloud
   command is rejected before submission if the complete queue cannot be stored. Operation and resync reconciliation
-  transform every queued base/snapshot and durably replace the queue before replay.
+  transform every queued base/snapshot and durably replace the queue before replay. Recovery format 3 also records
+  whether that exact request is provable. A legacy one-shot activity without its original PATCH body or rules pin
+  remains quarantined and exportable under `CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE`; the sheet must not
+  retry it under a reconstructed old-key body or rotate the key and duplicate the activity. Activity-free legacy
+  recovery may rotate keys after its replacement request envelope is durably stored.
 - A `CHARACTER_LIVE_CONFLICT` is detected after the original repository command committed. `Keep Local` retries
   only the remaining document delta with `activity: null`; replaying the one-shot activity would create a duplicate
   event under a fresh idempotency key.

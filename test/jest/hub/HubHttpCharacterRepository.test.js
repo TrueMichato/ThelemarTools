@@ -2309,7 +2309,7 @@ describe("HTTP character repository", () => {
 		await replayStarted;
 
 		const stored = JSON.parse(storage.getItem("hub-character-recovery:cmp:c"));
-		expect(stored.queueVersion).toBe(2);
+		expect(stored.queueVersion).toBe(3);
 		expect(stored.commands).toHaveLength(2);
 		expect(stored.commands.map(command => command.activity)).toEqual([shield, magicMissile]);
 		expect(stored.commands[0].commandKeys.patch).toBe(requests[0].idempotencyKey);
@@ -2369,6 +2369,147 @@ describe("HTTP character repository", () => {
 
 		expect(repository.getPendingRecovery("c")).toEqual({hp: 8});
 		expect(repository._recoveryCommandQueues.get("c").map(command => command.submittedSnapshot.hp)).toEqual([9, 8]);
+	});
+
+	it("quarantines legacy activity recovery whose exact request hash cannot be proven", async () => {
+		const storage = new MemoryStorage();
+		const activity = makeSpellActivity("Shield", "spell_slot");
+		storage.setItem("hub-character-recovery:cmp:c", JSON.stringify({
+			version: 1,
+			queueVersion: 2,
+			intent: "patch",
+			base: {hp: 10},
+			baseCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+			commands: [{
+				patches: [{op: "replace", path: "/hp", value: 9}],
+				activity,
+				commandKeys: {create: "create-old", patch: "patch-old"},
+				state: "failed",
+				snapshotCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+			}],
+		}));
+		const patchCharacter = jest.fn();
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 2, data: {hp: 9}}),
+				pPatchCharacter: patchCharacter,
+			},
+		});
+		repository._recoveryStorage = storage;
+
+		await expect(repository.pGet({characterId: "c"})).resolves.toEqual({id: "c", hp: 9});
+		await expect(repository.pUpsert({character: {id: "c", hp: 9}, activity}))
+			.rejects.toMatchObject({code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE"});
+		expect(patchCharacter).not.toHaveBeenCalled();
+		expect(repository.hasPendingWrites()).toBe(true);
+		const stored = JSON.parse(storage.getItem("hub-character-recovery:cmp:c"));
+		expect(stored.queueVersion).toBe(3);
+		expect(stored.commands[0]).toEqual(expect.objectContaining({
+			activity,
+			commandKeys: {create: "create-old", patch: "patch-old"},
+			isExactRequestUnproven: true,
+		}));
+	});
+
+	it("rotates an unproven legacy key before retrying an activity-free recovery", async () => {
+		const storage = new MemoryStorage();
+		storage.setItem("hub-character-recovery:cmp:c", JSON.stringify({
+			version: 1,
+			queueVersion: 2,
+			intent: "patch",
+			base: {hp: 10},
+			baseCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+			commands: [{
+				patches: [{op: "replace", path: "/hp", value: 9}],
+				activity: null,
+				commandKeys: {create: "create-old", patch: "patch-old"},
+				state: "failed",
+				snapshotCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+			}],
+		}));
+		const requests = [];
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+				pAcquireCharacterLease: async () => ({epoch: 1}),
+				pPatchCharacter: async input => {
+					requests.push(structuredClone(input));
+					return {character: {id: "c", campaignId: "cmp", revision: 2, data: {hp: 9}}};
+				},
+			},
+			fnGetRulesVersionId: () => "rules-current",
+		});
+		repository._recoveryStorage = storage;
+
+		await repository.pGet({characterId: "c"});
+		await expect(repository.pUpsert({character: {id: "c", hp: 9}})).resolves.toEqual({id: "c", hp: 9});
+		expect(requests).toHaveLength(1);
+		expect(requests[0]).toEqual(expect.objectContaining({
+			idempotencyKey: expect.not.stringMatching(/^patch-old$/),
+			rulesVersionId: "rules-current",
+			patches: [{op: "replace", path: "/hp", value: 9}],
+		}));
+	});
+
+	it("replays a never-submitted pending activity from the previous compact queue format", async () => {
+		const storage = new MemoryStorage();
+		const shield = makeSpellActivity("Shield", "spell_slot");
+		const magicMissile = makeSpellActivity("Magic Missile", "spell_slot");
+		storage.setItem("hub-character-recovery:cmp:c", JSON.stringify({
+			version: 1,
+			queueVersion: 2,
+			intent: "patch",
+			base: {hp: 10},
+			baseCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+			commands: [
+				{
+					patches: [{op: "replace", path: "/hp", value: 9}],
+					activity: shield,
+					commandKeys: {create: "create-1", patch: "patch-1"},
+					rulesVersionId: "rules-original",
+					outboundPatch: {baseRevision: 1},
+					state: "failed",
+					snapshotCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+				},
+				{
+					patches: [{op: "replace", path: "/hp", value: 8}],
+					activity: magicMissile,
+					commandKeys: {create: "create-2", patch: "patch-2"},
+					rulesVersionId: "rules-original",
+					state: "pending",
+					snapshotCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+				},
+			],
+		}));
+		const requests = [];
+		let revision = 1;
+		let hp = 10;
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision, data: {hp}}),
+				pAcquireCharacterLease: async () => ({epoch: 1}),
+				pPatchCharacter: async input => {
+					requests.push(structuredClone(input));
+					hp = requests.length === 1 ? 9 : 8;
+					revision++;
+					return {character: {id: "c", campaignId: "cmp", revision, data: {hp}}};
+				},
+			},
+		});
+		repository._recoveryStorage = storage;
+
+		await repository.pGet({characterId: "c"});
+		await expect(repository.pUpsert({character: {id: "c", hp: 8}})).resolves.toEqual({id: "c", hp: 8});
+		expect(requests.map(request => request.activity)).toEqual([shield, magicMissile]);
+		expect(requests.map(request => request.idempotencyKey)).toEqual(["patch-1", "patch-2"]);
+		expect(repository.hasPendingWrites()).toBe(false);
+		expect(storage.getItem("hub-character-recovery:cmp:c")).toBeNull();
 	});
 
 	it("replays every unresolved activity after a replay conflict is resolved with local state", async () => {

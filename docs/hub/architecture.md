@@ -134,6 +134,14 @@ inside the same serialized mutation. Realtime resumes only after that fenced ado
 already-covered event nor a genuinely newer queued operation can be overwritten by the caller's stale conflict
 result.
 
+Recovery format 3 records whether the exact hash-significant request can still be proven. Legacy format-1/2
+activity commands that lack the original PATCH body or rules-version pin are quarantined locally with
+`CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE`: retrying the old key with a reconstructed body would violate
+idempotency, while rotating the key could duplicate the one-shot activity. The Character Sheet keeps the draft
+exportable and requires an explicit discard/server choice instead of sending it. Activity-free legacy commands
+may safely rotate their command keys, persist a current request envelope, and resume convergence because they
+cannot duplicate a semantic event.
+
 Recovery queues carry the authenticated owner id and explicit first-command intent. Only genuine creates retain
 the original `clientImportId`; patch recovery is never exposed or replayed as a replacement create when its
 established character is absent. URL routing resolves owner-scoped create recovery before loading the selected
@@ -210,7 +218,8 @@ queue when their authorization-scoped character/snapshot requests start, not aft
 pre-transfer response cannot overwrite balances or pending decisions rendered by the transfer's later refresh.
 Backward activity requests also capture an authorization generation. A projection or role change advances that
 generation and replaces the visible activity window; any older in-flight page is discarded instead of restoring
-events that the new policy removed.
+events that the new policy removed. Projection invalidation, authority reload, and realtime access loss advance
+that generation immediately, before any delayed authorization refetch can finish.
 The accepted base and every other base track still advance together with live state so later saves retain exact
 coverage and do not need to rediscover already-accepted edits. Delivery is therefore a prepare/adopt/commit
 transaction over per-track coverage records, and an unprovable delivery schedules a serialized recovery that

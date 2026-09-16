@@ -17,6 +17,7 @@ import {
 } from "./hub-capabilities.js";
 import {HubRealtimeClient, isRealtimeEventCoveredByBaseline} from "./hub-realtime-client.js";
 import {
+	bindHubActivityHistoryPagination,
 	hasHubActivityAuthorizationChanged,
 	mergeHubActivityEvents,
 	renderHubActivityRows,
@@ -1282,6 +1283,34 @@ async function pInitCampaign ({session}) {
 	renderCampaignContext(context);
 	applyCampaignRoleLayout({campaign, characters});
 	initCampaignWorkbenchLinks();
+	let liveEvents = events;
+	let activityHistory = eventPage.history;
+	let liveMembers = members;
+	let liveCharacters = snapshot.characters;
+	let activityAuthorizationGeneration = 0;
+	const invalidateActivityAuthorization = () => {
+		activityAuthorizationGeneration++;
+		const loadEarlier = document.getElementById("campaign-activity-load-earlier");
+		if (loadEarlier) loadEarlier.disabled = true;
+	};
+	bindHubActivityHistoryPagination({
+		button: document.getElementById("campaign-activity-load-earlier"),
+		pListEventPage: ({beforeSequence, limit}) => api.pListEventPage({campaignId, beforeSequence, limit}),
+		getState: () => ({
+			events: liveEvents,
+			characters: liveCharacters,
+			members: liveMembers,
+			history: activityHistory,
+		}),
+		setState: ({events: eventsNxt, history: historyNxt}) => {
+			liveEvents = eventsNxt;
+			activityHistory = historyNxt;
+		},
+		render: renderRecentActivity,
+		renderError,
+		getAuthorizationGeneration: () => activityAuthorizationGeneration,
+		isTerminal: () => isCampaignReloadRequired,
+	});
 	if (campaign.status !== "active") {
 		setHidden(document.getElementById("campaign-invite-form"), true);
 		setHidden(document.getElementById("campaign-upload-local"), true);
@@ -1314,10 +1343,6 @@ async function pInitCampaign ({session}) {
 		roster: snapshot.roster || [],
 	});
 	const realtime = new HubRealtimeClient({campaignId, initialLastSequence: snapshot.lastSequence});
-	let liveEvents = events;
-	let activityHistory = eventPage.history;
-	let liveMembers = members;
-	let liveCharacters = snapshot.characters;
 	let liveRoster = snapshot.roster || [];
 	let liveLastSequence = snapshot.lastSequence;
 	let authorityBaselineSequence = snapshot.lastSequence || 0;
@@ -1325,7 +1350,6 @@ async function pInitCampaign ({session}) {
 	let isRefreshing = false;
 	let isRefreshQueued = false;
 	let isCampaignContextRefreshQueued = false;
-	let activityAuthorizationGeneration = 0;
 	const pRefreshLiveViews = async () => {
 		if (isCampaignReloadRequired || !navigator.onLine) return;
 		if (isRefreshing) {
@@ -1382,7 +1406,7 @@ async function pInitCampaign ({session}) {
 			const isSnapshotCurrent = snapshotNxt.lastSequence >= liveLastSequence;
 			liveEvents = activityRefresh.events;
 			if (activityRefresh.isAuthorizationChanged) {
-				activityAuthorizationGeneration++;
+				invalidateActivityAuthorization();
 				activityHistory = activityRefresh.history;
 			}
 			liveMembers = membersNxt;
@@ -1425,52 +1449,6 @@ async function pInitCampaign ({session}) {
 			}
 		}
 	};
-	const pLoadEarlierActivity = async () => {
-		if (!activityHistory?.hasMore) return;
-		const requestAuthorizationGeneration = activityAuthorizationGeneration;
-		const button = document.getElementById("campaign-activity-load-earlier");
-		button.disabled = true;
-		renderRecentActivity({
-			events: liveEvents,
-			characters: liveCharacters,
-			members: liveMembers,
-			history: activityHistory,
-			isLoading: true,
-		});
-		try {
-			const page = await api.pListEventPage({
-				campaignId,
-				beforeSequence: activityHistory.scannedBackThroughSequence,
-				limit: 50,
-			});
-			if (requestAuthorizationGeneration !== activityAuthorizationGeneration) return;
-			liveEvents = mergeHubActivityEvents({
-				currentEvents: liveEvents,
-				pageEvents: page.events,
-			});
-			activityHistory = page.history;
-			renderRecentActivity({
-				events: liveEvents,
-				characters: liveCharacters,
-				members: liveMembers,
-				history: activityHistory,
-				statusMessage: page.events.length ? "" : "No additional visible activity in this window. Older retained history may still be available.",
-			});
-		} catch (error) {
-			if (requestAuthorizationGeneration !== activityAuthorizationGeneration) return;
-			renderRecentActivity({
-				events: liveEvents,
-				characters: liveCharacters,
-				members: liveMembers,
-				history: activityHistory,
-				statusMessage: "Earlier activity could not be loaded. Try again.",
-			});
-			renderError(error);
-		} finally {
-			button.disabled = false;
-		}
-	};
-	document.getElementById("campaign-activity-load-earlier")?.addEventListener("click", () => void pLoadEarlierActivity());
 	const queueLiveRefresh = ({isCampaignContextRefresh = false} = {}) => {
 		if (isCampaignReloadRequired) return;
 		if (isCampaignContextRefresh) isCampaignContextRefreshQueued = true;
@@ -1482,7 +1460,7 @@ async function pInitCampaign ({session}) {
 	};
 	const reloadForAuthorityChange = () => {
 		if (isCampaignReloadRequired) return;
-		activityAuthorizationGeneration++;
+		invalidateActivityAuthorization();
 		isCampaignReloadRequired = true;
 		if (refreshTimer != null) {
 			window.clearTimeout(refreshTimer);
@@ -1503,6 +1481,7 @@ async function pInitCampaign ({session}) {
 			reloadForAuthorityChange();
 			return;
 		}
+		if (event.type === "character.projection.invalidated") invalidateActivityAuthorization();
 		if (!isCampaignReloadRequired && navigator.onLine) {
 			liveLastSequence = Math.max(liveLastSequence, event.sequence || 0);
 			liveEvents = [...liveEvents.filter(existing => existing.id !== event.id), event]
@@ -1531,6 +1510,7 @@ async function pInitCampaign ({session}) {
 		if (state === "live") setCampaignConnectionStatus({label: "Live updates connected", state: "connected"});
 		else if (state === "reconnecting") setCampaignConnectionStatus({label: "Live updates reconnecting", state: "warning"});
 		else if (state === "access_lost") {
+			invalidateActivityAuthorization();
 			isCampaignReloadRequired = true;
 			if (/session|account deletion/i.test(reason || "")) renderError(new HubApiError({code: "AUTH_REQUIRED", status: 401}));
 			else if (/membership|authorization/i.test(reason || "")) renderError(new HubApiError({code: "CAMPAIGN_NOT_FOUND", status: 404}));

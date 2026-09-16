@@ -4830,6 +4830,10 @@ class CharacterSheetPage {
 				this._characterRepository.clearRetryableLeaseConflict?.({characterId: saveFence.characterId});
 				throw err;
 			}
+			if (err?.code === "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE") {
+				JqueryUtil.doToast({type: "warning", content: err.message});
+				return false;
+			}
 			if (err?.code === "CHARACTER_LIVE_CONFLICT") {
 				const choice = await InputUiUtil.pGetUserBoolean({
 					title: "Character Changed While Saving",

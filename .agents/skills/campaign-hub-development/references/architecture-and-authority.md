@@ -80,6 +80,11 @@ assertion, clears that release gate.
   create snapshot as their base, rather than diffing that stale snapshot directly against current canonical truth.
 - Access loss, takeover, campaign switch, detach, logout, or terminal page hide fences queued callbacks and
   pending saves.
+- Durable recovery format 3 stores the exact PATCH body and rules-version pin used with each idempotency key.
+  Legacy activity commands that cannot prove that exact request are quarantined locally and remain exportable;
+  never reconstruct under the old key or rotate to a new key, because either path can lose or duplicate the
+  one-shot event. Activity-free legacy commands may rotate keys only after the replacement recovery envelope is
+  durably stored.
 
 Primary sources: `docs/hub/architecture.md`, ADR 0002, `hub-http-character-repository.js`, and the character/
 workspace repository tests.
@@ -88,7 +93,9 @@ workspace repository tests.
 
 - Domain events and outbox rows are committed with authority state. WebSockets deliver already-committed facts.
 - Backward activity requests are fenced by the authorization generation which started them. If role or projection
-  authority changes, replace the visible window and discard older in-flight pages.
+  authority changes, replace the visible window and discard older in-flight pages. Projection invalidation,
+  authority reload, and realtime access loss increment that generation synchronously rather than waiting for a
+  follow-up authorization fetch.
 - The projector has three outcomes: `owner_truth`, `dm_truth`, and recipient-independent `peer_profile`.
 - `character.projection.invalidated` contains metadata only. Consumers batch/coalesce invalidations, refetch the
   authorization-scoped projection over HTTP, sequence-fence responses, and replace the prior view.

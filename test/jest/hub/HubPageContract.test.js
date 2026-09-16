@@ -1,5 +1,8 @@
 import fs from "node:fs";
-import {renderHubActivityRows} from "../../../js/hub/hub-activity-render.js";
+import {
+	bindHubActivityHistoryPagination,
+	renderHubActivityRows,
+} from "../../../js/hub/hub-activity-render.js";
 
 const read = path => fs.readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
 
@@ -254,10 +257,11 @@ describe("campaign hub pages", () => {
 
 	it("renders a named inbox, recent activity, and copyable invite result", () => {
 		const source = read("js/hub/hub-page.js");
+		const activitySource = read("js/hub/hub-activity-render.js");
 		expect(source).toContain("api.pListEventPage({");
 		expect(source).toContain("beforeSequence:");
 		expect(source).not.toContain("snapshot.lastSequence - 50");
-		expect(source).toContain("No additional visible activity in this window");
+		expect(activitySource).toContain("No additional visible activity in this window");
 		expect(source).toContain("new HubRealtimeClient({campaignId, initialLastSequence: snapshot.lastSequence})");
 		expect(source).toContain("realtime.on(\"event\", event =>");
 		expect(source).toContain("realtime.on(\"cursor\", baseline =>");
@@ -267,9 +271,12 @@ describe("campaign hub pages", () => {
 		expect(source).not.toContain("character.projection.updated");
 		expect(source).toContain("const reloadForAuthorityChange = () =>");
 		expect(source).toContain("let activityAuthorizationGeneration = 0");
-		expect(source).toContain("const requestAuthorizationGeneration = activityAuthorizationGeneration");
-		expect(source).toContain("requestAuthorizationGeneration !== activityAuthorizationGeneration");
-		expect(source).toContain("activityAuthorizationGeneration++");
+		expect(source).toContain("const invalidateActivityAuthorization = () =>");
+		expect(activitySource).toContain("const requestAuthorizationGeneration = getAuthorizationGeneration()");
+		expect(activitySource).toContain("requestAuthorizationGeneration !== getAuthorizationGeneration()");
+		expect(source).toContain("if (event.type === \"character.projection.invalidated\") invalidateActivityAuthorization()");
+		expect(source).toMatch(/state === "access_lost"[\s\S]*invalidateActivityAuthorization\(\)/);
+		expect(activitySource).toContain("requestAuthorizationGeneration === getAuthorizationGeneration()");
 		expect(source).toContain("event.type === \"membership.role_changed\"");
 		expect(source).toContain("event.payload?.accountId === session.account.id");
 		expect(source).toContain("event.payload?.role !== campaign.role");
@@ -287,6 +294,53 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("DisplaySnapshot`]?.displayName || \"A character\"");
 		expect(source).toContain("navigator.clipboard.writeText(inviteOutput.value)");
 		expect(campaignHtml).toContain("id=\"campaign-invite-copy\"");
+	});
+
+	it("loads earlier activity for an archived campaign before active-only controls initialize", async () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source.indexOf("bindHubActivityHistoryPagination({"))
+			.toBeLessThan(source.indexOf("if (campaign.status !== \"active\")"));
+		const listeners = {};
+		const button = {
+			disabled: false,
+			addEventListener: (type, listener) => listeners[type] = listener,
+		};
+		const pageRequests = [];
+		const renders = [];
+		let state = {
+			events: [{id: "event-2", sequence: 2}],
+			characters: [],
+			members: [],
+			history: {hasMore: true, scannedBackThroughSequence: 2},
+		};
+		bindHubActivityHistoryPagination({
+			button,
+			pListEventPage: async request => {
+				pageRequests.push(request);
+				return {
+					events: [{id: "event-1", sequence: 1}],
+					history: {hasMore: false, scannedBackThroughSequence: 1},
+				};
+			},
+			getState: () => state,
+			setState: ({events, history}) => state = {...state, events, history},
+			render: input => renders.push(input),
+			renderError: error => { throw error; },
+			getAuthorizationGeneration: () => 0,
+			isTerminal: () => false,
+		});
+
+		await listeners.click();
+
+		expect(pageRequests).toEqual([{beforeSequence: 2, limit: 50}]);
+		expect(state.events.map(event => event.id)).toEqual(["event-1", "event-2"]);
+		expect(state.history).toEqual({hasMore: false, scannedBackThroughSequence: 1});
+		expect(renders.at(-1)).toEqual(expect.objectContaining({
+			events: state.events,
+			history: state.history,
+			statusMessage: "",
+		}));
+		expect(button.disabled).toBe(false);
 	});
 
 	it("renders normalized character subjects safely and keeps activity rows usable on mobile", () => {

@@ -131,7 +131,10 @@ finally a neutral label.
 
 Campaign Overview backward-history requests are tied to the activity authorization generation active when the
 request starts. A role or projection change replaces the visible window and invalidates older in-flight pages, so
-an old response cannot restore activity removed by the new policy.
+an old response cannot restore activity removed by the new policy. Projection invalidation, authority reload, and
+realtime access loss advance the generation synchronously; a stale request completion cannot re-enable paging
+after terminal access loss. The read-only pagination handler is installed before the archived-campaign early
+return, so authorized retained history remains reachable when campaign mutations are disabled.
 
 ## Audit entries
 

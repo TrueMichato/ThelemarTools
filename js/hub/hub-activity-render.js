@@ -22,6 +22,58 @@ export function mergeHubActivityEvents ({currentEvents, pageEvents, isAuthorizat
 		.sort((a, b) => a.sequence - b.sequence);
 }
 
+export function bindHubActivityHistoryPagination ({
+	button,
+	pListEventPage,
+	getState,
+	setState,
+	render,
+	renderError,
+	getAuthorizationGeneration,
+	isTerminal,
+}) {
+	const pLoadEarlier = async () => {
+		const initialState = getState();
+		if (!initialState.history?.hasMore) return;
+		const requestAuthorizationGeneration = getAuthorizationGeneration();
+		button.disabled = true;
+		render({...initialState, isLoading: true});
+		try {
+			const page = await pListEventPage({
+				beforeSequence: initialState.history.scannedBackThroughSequence,
+				limit: 50,
+			});
+			if (requestAuthorizationGeneration !== getAuthorizationGeneration()) return;
+			const currentState = getState();
+			const events = mergeHubActivityEvents({
+				currentEvents: currentState.events,
+				pageEvents: page.events,
+			});
+			setState({events, history: page.history});
+			render({
+				...currentState,
+				events,
+				history: page.history,
+				statusMessage: page.events.length ? "" : "No additional visible activity in this window. Older retained history may still be available.",
+			});
+		} catch (error) {
+			if (requestAuthorizationGeneration !== getAuthorizationGeneration()) return;
+			render({
+				...getState(),
+				statusMessage: "Earlier activity could not be loaded. Try again.",
+			});
+			renderError(error);
+		} finally {
+			if (
+				requestAuthorizationGeneration === getAuthorizationGeneration()
+				&& !isTerminal()
+			) button.disabled = false;
+		}
+	};
+	button?.addEventListener("click", pLoadEarlier);
+	return pLoadEarlier;
+}
+
 export function renderHubActivityRows ({list, events, characters, members, documentRef, getDateLabel, limit = 8}) {
 	let rows = events
 		.map(event => ({
