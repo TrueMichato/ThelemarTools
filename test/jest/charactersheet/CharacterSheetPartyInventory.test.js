@@ -1368,6 +1368,7 @@ describe("Character Sheet party inventory", () => {
 
 		await expect(partyInventory._pManualRefresh({errorSource: "action"})).resolves.toBe(false);
 		expect(partyInventory._needsAuthoritativeRefresh).toBe(true);
+		expect(partyInventory._needsFreshProposalRules).toBe(true);
 		expect(saveCharacter).toHaveBeenCalledTimes(1);
 
 		await expect(partyInventory._pManualRefresh({errorSource: "action"})).resolves.toBe(true);
@@ -1383,6 +1384,69 @@ describe("Character Sheet party inventory", () => {
 		expect(getCampaignContext).not.toHaveBeenCalled();
 		expect(saveCharacter).toHaveBeenCalledTimes(2);
 		expect(refreshCampaignContext.mock.invocationCallOrder[1]).toBeLessThan(saveCharacter.mock.invocationCallOrder[1]);
+	});
+
+	it("uses the live rules pin when context advances after stale-policy recovery", async () => {
+		let rulesVersionId = "rules-1";
+		const savedRulesVersionIds = [];
+		const saveCharacter = jest.fn(async () => {
+			savedRulesVersionIds.push(rulesVersionId);
+			return true;
+		});
+		const refreshCampaignContext = jest.fn(async () => {
+			rulesVersionId = "rules-2";
+			return true;
+		});
+		const propose = jest.fn(async request => {
+			if (request.rulesVersionId === "rules-1") {
+				throw Object.assign(new Error("stale rules"), {code: "RULES_VERSION_STALE", status: 409});
+			}
+			if (request.rulesVersionId !== "rules-3") {
+				throw Object.assign(new Error("stale rules again"), {code: "RULES_VERSION_STALE", status: 409});
+			}
+			return {transfer: {id: "transfer-1", status: "committed"}};
+		});
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {pProposeTransfer: propose},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => ({
+				inventory: [{id: "stack-1", quantity: 2, item: {name: "Rations", source: "PHB"}}],
+			}),
+			fnSaveCharacter: saveCharacter,
+			fnRefreshCampaignContext: refreshCampaignContext,
+			fnIsCurrentCharacter: () => true,
+			fnGetRulesVersionId: () => rulesVersionId,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._role = "player";
+		partyInventory._recipients = [{id: "character-2", label: "Second", isOwned: true}];
+		partyInventory._draft = {
+			kind: "character",
+			entryId: "stack-1",
+			quantity: 1,
+			maxQuantity: 2,
+			blockers: [],
+			destinationKind: "character",
+			recipientId: "character-2",
+			commandId: "proposal-1",
+			resolutionCommandId: "accept-1",
+			cancellationCommandId: "reject-1",
+			transfer: null,
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+		expect(rulesVersionId).toBe("rules-2");
+
+		rulesVersionId = "rules-3";
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+
+		expect(refreshCampaignContext).toHaveBeenCalledTimes(1);
+		expect(savedRulesVersionIds).toEqual(["rules-1", "rules-3"]);
+		expect(propose.mock.calls.map(([request]) => request.rulesVersionId)).toEqual(["rules-1", "rules-3"]);
+		expect(propose).toHaveBeenCalledTimes(2);
 	});
 
 	it("requires an authoritative refresh after a definitive proposal rejection before retrying", async () => {

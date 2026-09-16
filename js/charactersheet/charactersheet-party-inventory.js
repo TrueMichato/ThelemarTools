@@ -745,6 +745,7 @@ export class CharacterSheetPartyInventory {
 			if (!this._isCurrent(active)) return false;
 			if (this._needsAuthoritativeRefresh) {
 				if (isSuccessful && this._needsFreshProposalRules) {
+					this._error = null;
 					isSuccessful = await this._pRefreshProposalRules(active);
 					if (!this._isCurrent(active)) return false;
 				}
@@ -771,7 +772,7 @@ export class CharacterSheetPartyInventory {
 			if (this._fnRefreshCampaignContext) {
 				const isRefreshed = await this._fnRefreshCampaignContext();
 				if (!this._isCurrent(active) || !isRefreshed) return false;
-				this._freshProposalRulesVersionId = this._fnGetRulesVersionId() ?? null;
+				this._freshProposalRulesVersionId = undefined;
 			} else {
 				const latestContext = await this._api.pGetCampaignContext({campaignId: this._campaignId});
 				if (!this._isCurrent(active)) return false;
@@ -1711,11 +1712,9 @@ export class CharacterSheetPartyInventory {
 				const isRulesPinnedProposal = isAutoResolve && draft.destinationKind === "character";
 				if (!draft.proposalRequest) {
 					const rulesVersionId = isRulesPinnedProposal
-						? draft.proposalRulesVersionId !== undefined
-							? draft.proposalRulesVersionId
-							: this._freshProposalRulesVersionId !== undefined
-								? this._freshProposalRulesVersionId
-								: this._fnGetRulesVersionId()
+						? this._freshProposalRulesVersionId !== undefined
+							? this._freshProposalRulesVersionId
+							: this._fnGetRulesVersionId()
 						: undefined;
 					if (isRulesPinnedProposal) this._freshProposalRulesVersionId = undefined;
 					const targetId = getPartyInventoryTransferTargetId({

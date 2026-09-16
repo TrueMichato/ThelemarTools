@@ -706,6 +706,32 @@ describe("carry authority basis follows the campaign context lifecycle", () => {
 		expect(page._hubRulesRefreshBlocked).toBe(false);
 	});
 
+	it("lets transfer recovery accept the latest active rules over an obsolete pending version", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		await activate(page, schemaV2Context("rules-1"));
+		page._hubRulesPendingVersionId = "rules-2";
+		page._hubRulesRefreshBlocked = true;
+		let refreshCount = 0;
+		page._hubApi = {
+			pGetCampaignContext: async () => {
+				if (++refreshCount === 1) throw new Error("offline");
+				return schemaV2Context("rules-3");
+			},
+		};
+		page._hubCampaignId = "campaign";
+		page._renderCharacter = () => {};
+
+		expect(await page._pRefreshHubRules({isUseLatest: true})).toBe(false);
+		expect(page._hubRulesPendingVersionId).toBeNull();
+		expect(page._hubRulesRefreshBlocked).toBe(true);
+
+		expect(await page._pRefreshHubRules({isUseLatest: true})).toBe(true);
+		expect(refreshCount).toBe(2);
+		expect(page._hubContext.rulesVersion.id).toBe("rules-3");
+		expect(page._hubRulesPendingVersionId).toBeNull();
+		expect(page._hubRulesRefreshBlocked).toBe(false);
+	});
+
 	it("replaces schema-v2 decisions atomically across master-toggle changes and rollback", async () => {
 		const page = new CharacterSheetPage({characterRepository: {}});
 		const off = schemaV2Context("rules-off", policy => {
