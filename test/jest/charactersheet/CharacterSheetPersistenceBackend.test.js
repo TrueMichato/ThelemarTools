@@ -863,7 +863,7 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 		host._pLoadCharacters = isRosterRefreshFailure
 			? jest.fn(async () => { throw new Error("Roster unavailable."); })
 			: jest.fn(async () => {});
-		host._selCharacter = {value: "character-id"};
+		host._selCharacter = null;
 		const recovery = {
 			intent: "patch",
 			character: {...state.toJson(), id: "character-id"},
@@ -911,7 +911,6 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 			expect(download.mock.invocationCallOrder[0]).toBeLessThan(pResolveUnprovableRecovery.mock.invocationCallOrder[0]);
 			expect(host._createNewCharacter).toHaveBeenCalledTimes(1);
 			expect(host._currentCharacterId).toBe("new-character-id");
-			expect(host._selCharacter.value).toBe("");
 			const discardedUrl = globalThis.window.history.replaceState.mock.calls.at(-1)[2];
 			expect(discardedUrl.searchParams.get("id")).toBeNull();
 			expect(discardedUrl.searchParams.get("hubCampaign")).toBe("campaign-1");

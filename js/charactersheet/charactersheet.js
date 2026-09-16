@@ -1046,11 +1046,11 @@ class CharacterSheetPage {
 				fnAdoptLive: fnAdoptResolution,
 				fnDiscardLive: fnDiscardResolution,
 			});
-			if (isRecoveryDiscarded) return this._pFinalizeDiscardedHubRecovery();
+			if (isRecoveryDiscarded) return this._pFinalizeDiscardedHubRecovery({discardedCharacterId: characterId});
 			if (!isResolutionCurrent()) return false;
 			if (["discarded_create", "discarded_missing_patch"].includes(resolved?.status)) {
 				this._createNewCharacter();
-				return this._pFinalizeDiscardedHubRecovery();
+				return this._pFinalizeDiscardedHubRecovery({discardedCharacterId: characterId});
 			}
 			if (resolved && !isResolutionAdopted && !fnAdoptResolution(resolved)) return false;
 			if (!resolved && !isResolutionAdopted) return false;
@@ -1069,19 +1069,23 @@ class CharacterSheetPage {
 		}
 	}
 
-	async _pFinalizeDiscardedHubRecovery () {
+	async _pFinalizeDiscardedHubRecovery ({discardedCharacterId = null} = {}) {
 		const url = new URL(window.location.href);
 		url.searchParams.delete("id");
 		window.history?.replaceState?.({}, "", url);
-		if (this._selCharacter) this._selCharacter.value = "";
 		this._updateSaveIndicator("saved");
 		try {
 			await this._pLoadCharacters?.();
 		} catch (error) {
+			for (const option of [...(this._selCharacter?.options || [])]) {
+				if (option.value === discardedCharacterId) option.remove();
+			}
 			JqueryUtil.doToast({
 				type: "warning",
 				content: `The blocked recovery was removed, but the cloud character list could not be refreshed: ${error.message}`,
 			});
+		} finally {
+			if (this._selCharacter) this._selCharacter.value = "";
 		}
 		return true;
 	}
