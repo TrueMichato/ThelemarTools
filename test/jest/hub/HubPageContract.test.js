@@ -307,6 +307,9 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("let activityAuthorizationGeneration = 0");
 		expect(source).toContain("let isActivityAuthorizationFenced = false");
 		expect(source).toContain("const invalidateActivityAuthorization = () =>");
+		expect(source).toContain("const concealCampaignAuthorization = ({isLoading = false} = {}) =>");
+		expect(source).toMatch(/const concealCampaignAuthorization = \(\{isLoading = false\} = \{\}\) => \{[\s\S]*liveRoster = \[\];[\s\S]*concealCampaignAuthorizationSurfaces\(\)/);
+		expect(source).toMatch(/function concealCampaignAuthorizationSurfaces \(\) \{[\s\S]*content\.replaceChildren\(\);[\s\S]*content\.classList\.add\("ve-hidden"\);[\s\S]*content\.setAttribute\("aria-hidden", "true"\)/);
 		expect(source).toContain("const concealActivityAuthorization = ({isLoading = false} = {}) =>");
 		expect(source).toMatch(/const concealActivityAuthorization = \(\{isLoading = false\} = \{\}\) => \{[\s\S]*liveEvents = \[\];[\s\S]*liveMembers = \[\];[\s\S]*renderRecentActivity\(\{[\s\S]*events: \[\],[\s\S]*isLoading,[\s\S]*isAuthorizationFenced: true/);
 		expect(source).toContain("isActivityAuthorizationFenced = true");
@@ -316,9 +319,9 @@ describe("campaign hub pages", () => {
 		expect(activitySource).toContain("const requestAuthorizationGeneration = getAuthorizationGeneration()");
 		expect(activitySource).toContain("requestAuthorizationGeneration !== getAuthorizationGeneration()");
 		expect(source).toContain("const isProjectionInvalidation = event.type === \"character.projection.invalidated\"");
-		expect(source).toMatch(/state === "access_lost"[\s\S]*concealActivityAuthorization\(\)/);
-		expect(source).toMatch(/onAuthorizationError:[\s\S]*concealActivityAuthorization\(\)/);
-		expect(source).toMatch(/state === "access_lost"[\s\S]*concealActivityAuthorization\(\)/);
+		expect(source).toMatch(/state === "access_lost"[\s\S]*concealCampaignAuthorization\(\)/);
+		expect(source).toMatch(/state === "access_lost"[\s\S]*concealCampaignAuthorization\(\);[\s\S]*isCampaignReloadRequired = true;[\s\S]*stopCampaignLiveUpdates\(\);[\s\S]*renderError\(new HubApiError\(\{code: "CAMPAIGN_NOT_FOUND", status: 404\}\)\)/);
+		expect(source).toMatch(/onAuthorizationError:[\s\S]*concealCampaignAuthorization\(\);[\s\S]*isCampaignReloadRequired = true;[\s\S]*stopCampaignLiveUpdates\(\)/);
 		expect(source).toContain("concealActivityAuthorization({isLoading: true})");
 		expect(source).toMatch(/const \[membersNxt, charactersNxt, snapshotNxt, activityRefresh\] = await Promise\.all[\s\S]*if \(isCampaignReloadRequired\) return;/);
 		expect(activitySource).toContain("requestAuthorizationGeneration === getAuthorizationGeneration()");

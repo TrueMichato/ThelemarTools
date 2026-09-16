@@ -35,6 +35,7 @@ Test more than final state:
 
 - memory/PostgreSQL response and stable error parity;
 - authorization rechecked after asynchronous work;
+- character identity rechecked after every asynchronous boundary before lease/realtime/navigation/reconciliation;
 - exact idempotent replay and mutated-body rejection;
 - no audit/event/outbox/receipt on rejected writes unless the contract explicitly records a terminal workflow;
 - transaction and event ordering;

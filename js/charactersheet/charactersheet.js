@@ -567,13 +567,10 @@ class CharacterSheetPage {
 			return;
 		}
 		if (state?.state === "closed" && state.isCharacterAccessEnded) {
-			this._fenceHubGeneration();
-			this._detachHubRealtimeClient();
-			this._detachHubProjections();
-			this._concealHubPrivateCharacter();
-			this._teardownHubRules();
-			this._campaign?.resetCharacterScope?.();
-			this._campaign?.render();
+			this._endCurrentHubCharacterAccess({
+				characterId: this._currentCharacterId,
+				accessEndCause: state.accessEndCause,
+			});
 			const pCoordinatorTeardown = state.accessEndCause === CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN
 				? this._hubActiveCampaign?.pHandleAccessLoss?.({campaignId: this._hubCampaignId})
 				: state.accessEndCause === CHARACTER_REALTIME_ACCESS_END_CAUSES.SURFACE_ROLE
@@ -598,6 +595,21 @@ class CharacterSheetPage {
 			isSuspendPeerTargeting: state?.state === "reconnecting",
 		});
 		this._campaign?.render();
+	}
+
+	_endCurrentHubCharacterAccess ({
+		characterId = this._currentCharacterId,
+		accessEndCause = CHARACTER_REALTIME_ACCESS_END_CAUSES.CHARACTER,
+	} = {}) {
+		if (!characterId || this._currentCharacterId !== characterId) return false;
+		this._fenceHubGeneration();
+		this._detachHubRealtimeClient();
+		this._detachHubProjections();
+		this._concealHubPrivateCharacter();
+		this._teardownHubRules();
+		this._campaign?.resetCharacterScope?.();
+		this._campaign?.render();
+		return true;
 	}
 
 	_onHubProjectionInvalidated (event) {
@@ -688,6 +700,7 @@ class CharacterSheetPage {
 
 	_onHubRecipientNotice (notice) {
 		if (!notice || !this._currentCharacterId) return false;
+		if (this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY) return false;
 		if (notice.kind === "xp_award") {
 			const total = Number.isFinite(notice.totalXp) ? ` (${notice.totalXp} XP total)` : "";
 			const content = e_({tag: "span", txt: `Received ${notice.amount || 0} XP${total}${notice.reason ? ` — ${notice.reason}` : ""}.`});
@@ -2976,6 +2989,10 @@ class CharacterSheetPage {
 		root.dataset.charsheetReadOnlyGuardBound = "true";
 		const handle = event => {
 			if (this._currentCharacterAccess !== CHARACTER_ACCESS_MODES.DM_READ_ONLY) return;
+			if (
+				event.type === "keydown"
+				&& !["Enter", " ", "Spacebar"].includes(event.key)
+			) return;
 			const target = event.target?.closest?.(
 				"a[href], #charsheet-sel-character, #charsheet-btn-export, #charsheet-btn-print, #charsheet-btn-rolllog, #charsheet-btn-more",
 			);
@@ -2983,7 +3000,7 @@ class CharacterSheetPage {
 			event.preventDefault();
 			event.stopImmediatePropagation();
 		};
-		for (const eventName of ["click", "input", "change", "submit"]) {
+		for (const eventName of ["click", "input", "change", "submit", "keydown"]) {
 			root.addEventListener(eventName, handle, true);
 		}
 	}
@@ -3635,7 +3652,15 @@ class CharacterSheetPage {
 		try {
 			await this._characterRepository.pDelete({characterId});
 		} catch (error) {
-			if (this._canRestoreHubRealtimeAfterError(error)) this._attachHubRealtime({characterId});
+			if (this._currentCharacterId === characterId) {
+				if (this._canRestoreHubRealtimeAfterError(error)) this._attachHubRealtime({characterId});
+				else if (this._isHubCharacter) {
+					this._endCurrentHubCharacterAccess({
+						characterId,
+						accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CHARACTER,
+					});
+				}
+			}
 			throw error;
 		}
 
@@ -3717,8 +3742,15 @@ class CharacterSheetPage {
 		try {
 			await this._characterRepository.pDeleteMany({characterIds: [...selectedIds]});
 		} catch (error) {
-			if (activeDeletedId && this._canRestoreHubRealtimeAfterError(error)) {
-				this._attachHubRealtime({characterId: activeDeletedId});
+			if (activeDeletedId && this._currentCharacterId === activeDeletedId) {
+				if (this._canRestoreHubRealtimeAfterError(error)) {
+					this._attachHubRealtime({characterId: activeDeletedId});
+				} else if (this._isHubCharacter) {
+					this._endCurrentHubCharacterAccess({
+						characterId: activeDeletedId,
+						accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CHARACTER,
+					});
+				}
 			}
 			throw error;
 		}
@@ -5471,13 +5503,19 @@ class CharacterSheetPage {
 			"charsheet-btn-export",
 			"charsheet-btn-print",
 			"charsheet-btn-rolllog",
+			"charsheet-btn-more",
 		]);
-		for (const control of root.querySelectorAll?.("button, input, select, textarea, [contenteditable=\"true\"]") || []) {
+		for (const control of root.querySelectorAll?.("button, input, select, textarea, [contenteditable=\"true\"], [role=\"button\"]") || []) {
 			if (allowedIds.has(control.id)) continue;
+			const isCustomButton = control.matches?.("[role=\"button\"]") === true;
 			if (isReadOnly) {
 				if (control.getAttribute?.("contenteditable") === "true") {
 					control.dataset.charsheetReadOnlyWasContenteditable = "true";
 					control.setAttribute("contenteditable", "false");
+				}
+				if (isCustomButton && control.dataset.charsheetReadOnlyWasTabindex == null) {
+					control.dataset.charsheetReadOnlyWasTabindex = control.getAttribute?.("tabindex") ?? "";
+					control.setAttribute?.("tabindex", "-1");
 				}
 				if (control.dataset.charsheetReadOnlyWasDisabled == null) {
 					control.dataset.charsheetReadOnlyWasDisabled = control.disabled ? "true" : "false";
@@ -5490,6 +5528,14 @@ class CharacterSheetPage {
 			control.disabled = control.dataset.charsheetReadOnlyWasDisabled === "true";
 			control.removeAttribute?.("aria-disabled");
 			delete control.dataset.charsheetReadOnlyWasDisabled;
+			if (control.dataset.charsheetReadOnlyWasTabindex != null) {
+				if (control.dataset.charsheetReadOnlyWasTabindex) {
+					control.setAttribute?.("tabindex", control.dataset.charsheetReadOnlyWasTabindex);
+				} else {
+					control.removeAttribute?.("tabindex");
+				}
+				delete control.dataset.charsheetReadOnlyWasTabindex;
+			}
 			if (control.dataset.charsheetReadOnlyWasContenteditable === "true") {
 				control.setAttribute("contenteditable", "true");
 				delete control.dataset.charsheetReadOnlyWasContenteditable;

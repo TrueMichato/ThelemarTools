@@ -33,6 +33,13 @@ export class HubCampaignPage {
 		return session;
 	}
 
+	async deleteCharacterViaApi (characterId: string): Promise<void> {
+		const response = await this.page.request.delete(`/api/characters/${characterId}`, {
+			headers: await this.getMutationHeaders(),
+		});
+		expect(response.ok()).toBe(true);
+	}
+
 	private async getMutationHeaders (): Promise<Record<string, string>> {
 		const session = await this.getSession();
 		const currentUrl = new URL(this.page.url());

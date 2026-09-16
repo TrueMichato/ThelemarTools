@@ -12,6 +12,16 @@ import {
 } from "../../../js/charactersheet/charactersheet-campaign.js";
 import {HubApiError} from "../../../js/hub/hub-api-client.js";
 
+const makeDeferred = () => {
+	let resolve;
+	let reject;
+	const promise = new Promise((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return {promise, resolve, reject};
+};
+
 function getControl ({
 	saveResult = true,
 	createResult = {character: {id: "cloud-1"}},
@@ -436,6 +446,50 @@ describe("Character Sheet campaign control", () => {
 		expect(page._detachHubRealtime).toHaveBeenCalledTimes(1);
 		expect(page._attachHubRealtime).toHaveBeenCalledWith({characterId: "cloud-source"});
 		expect(control._fnNavigate).not.toHaveBeenCalled();
+	});
+
+	it("does not detach the newly selected character when the source save settles after a switch", async () => {
+		const {control, page} = getControl();
+		const save = makeDeferred();
+		page._currentCharacterId = "cloud-source";
+		page._saveCurrentCharacter.mockImplementationOnce(() => save.promise);
+		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
+		control._movePreview = {campaignId: "campaign-2", report: {}, rulesVersionId: "rules-campaign-2"};
+		control._api.pMoveCharacter.mockRejectedValueOnce(new HubApiError({code: "CHARACTER_BUSY", status: 409}));
+
+		const pending = control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});
+		await Promise.resolve();
+		page._currentCharacterId = "cloud-other";
+		save.resolve(true);
+		await pending;
+
+		expect(page._characterRepository.pReleaseLease).not.toHaveBeenCalled();
+		expect(page._detachHubRealtime).not.toHaveBeenCalled();
+		expect(control._api.pMoveCharacter).not.toHaveBeenCalled();
+		expect(page._attachHubRealtime).not.toHaveBeenCalled();
+		expect(control._fnNavigate).not.toHaveBeenCalled();
+		expect(page._currentCharacterId).toBe("cloud-other");
+	});
+
+	it("does not restore the source subscription when a rejected move settles after a switch", async () => {
+		const {control, page} = getControl();
+		const move = makeDeferred();
+		page._currentCharacterId = "cloud-source";
+		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
+		control._movePreview = {campaignId: "campaign-2", report: {}, rulesVersionId: "rules-campaign-2"};
+		control._api.pMoveCharacter.mockImplementationOnce(() => move.promise);
+
+		const pending = control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});
+		await Promise.resolve();
+		await Promise.resolve();
+		page._currentCharacterId = "cloud-other";
+		move.reject(new HubApiError({code: "CHARACTER_BUSY", status: 409}));
+		await pending;
+
+		expect(page._detachHubRealtime).toHaveBeenCalledTimes(1);
+		expect(page._attachHubRealtime).not.toHaveBeenCalled();
+		expect(control._fnNavigate).not.toHaveBeenCalled();
+		expect(page._currentCharacterId).toBe("cloud-other");
 	});
 
 	it.each([

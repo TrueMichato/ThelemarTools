@@ -57,6 +57,19 @@ describe("CharacterSheetPlayMode", () => {
 		state = new CharacterSheetState();
 	});
 
+	it("reapplies the current character access mode after every late render", () => {
+		const playMode = Object.create(CharacterSheetPlayMode.prototype);
+		playMode._page = {_applyCharacterAccessMode: jest.fn()};
+		playMode._elRoot = {};
+		playMode._renderStatusBar = jest.fn();
+		playMode._renderCharacterPanel = jest.fn();
+		playMode._renderActionsHub = jest.fn();
+
+		playMode.render();
+
+		expect(playMode._page._applyCharacterAccessMode).toHaveBeenCalledTimes(1);
+	});
+
 	it("persists play-mode cantrips with the same closed spell activity descriptor", () => {
 		const saveCharacter = jest.fn();
 		const playMode = Object.create(CharacterSheetPlayMode.prototype);

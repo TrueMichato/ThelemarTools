@@ -46,6 +46,15 @@ const api = new HubApiClient();
 const transferProposalDrafts = new HubTransferProposalDrafts();
 const transferResolutionDrafts = new HubTransferResolutionDrafts();
 
+function concealCampaignAuthorizationSurfaces () {
+	const content = document.getElementById("campaign-content");
+	if (!content) return false;
+	content.replaceChildren();
+	content.classList.add("ve-hidden");
+	content.setAttribute("aria-hidden", "true");
+	return true;
+}
+
 /**
  * Lightweight Hub shells keep a device-local active campaign selection, but must never fetch the
  * campaign context or brew merely to persist it (ADR 0013). `isContextHost: false` selects the
@@ -1298,8 +1307,11 @@ async function pInitCampaign ({session}) {
 	let activityHistory = eventPage.history;
 	let liveMembers = members;
 	let liveCharacters = snapshot.characters;
+	let liveRoster = snapshot.roster || [];
 	let activityAuthorizationGeneration = 0;
 	let isActivityAuthorizationFenced = false;
+	const realtime = new HubRealtimeClient({campaignId, initialLastSequence: snapshot.lastSequence});
+	let refreshTimer = null;
 	const invalidateActivityAuthorization = () => {
 		activityAuthorizationGeneration++;
 		isActivityAuthorizationFenced = true;
@@ -1321,6 +1333,19 @@ async function pInitCampaign ({session}) {
 			isAuthorizationFenced: true,
 		});
 	};
+	const concealCampaignAuthorization = ({isLoading = false} = {}) => {
+		concealActivityAuthorization({isLoading});
+		liveRoster = [];
+		context = null;
+		concealCampaignAuthorizationSurfaces();
+	};
+	const stopCampaignLiveUpdates = () => {
+		if (refreshTimer != null) {
+			window.clearTimeout(refreshTimer);
+			refreshTimer = null;
+		}
+		realtime.close();
+	};
 	bindHubActivityHistoryPagination({
 		button: document.getElementById("campaign-activity-load-earlier"),
 		pListEventPage: ({beforeSequence, limit}) => api.pListEventPage({campaignId, beforeSequence, limit}),
@@ -1340,8 +1365,9 @@ async function pInitCampaign ({session}) {
 		isAuthorizationFenced: () => isActivityAuthorizationFenced,
 		onAuthorizationError: error => {
 			if (!["AUTH_REQUIRED", "FORBIDDEN", "CAMPAIGN_NOT_FOUND"].includes(error?.code)) return false;
-			concealActivityAuthorization();
+			concealCampaignAuthorization();
 			isCampaignReloadRequired = true;
+			stopCampaignLiveUpdates();
 			return true;
 		},
 		isTerminal: () => isCampaignReloadRequired,
@@ -1383,11 +1409,8 @@ async function pInitCampaign ({session}) {
 		pRefreshInvites,
 		roster: snapshot.roster || [],
 	});
-	const realtime = new HubRealtimeClient({campaignId, initialLastSequence: snapshot.lastSequence});
-	let liveRoster = snapshot.roster || [];
 	let liveLastSequence = snapshot.lastSequence;
 	let authorityBaselineSequence = snapshot.lastSequence || 0;
-	let refreshTimer = null;
 	let isRefreshing = false;
 	let isRefreshQueued = false;
 	let isCampaignContextRefreshQueued = false;
@@ -1523,13 +1546,9 @@ async function pInitCampaign ({session}) {
 	};
 	const reloadForAuthorityChange = () => {
 		if (isCampaignReloadRequired) return;
-		concealActivityAuthorization();
+		concealCampaignAuthorization();
 		isCampaignReloadRequired = true;
-		if (refreshTimer != null) {
-			window.clearTimeout(refreshTimer);
-			refreshTimer = null;
-		}
-		realtime.close();
+		stopCampaignLiveUpdates();
 		window.location.reload();
 	};
 	realtime.on("event", event => {
@@ -1586,11 +1605,11 @@ async function pInitCampaign ({session}) {
 		if (state === "live") setCampaignConnectionStatus({label: "Live updates connected", state: "connected"});
 		else if (state === "reconnecting") setCampaignConnectionStatus({label: "Live updates reconnecting", state: "warning"});
 		else if (state === "access_lost") {
-			concealActivityAuthorization();
+			concealCampaignAuthorization();
 			isCampaignReloadRequired = true;
+			stopCampaignLiveUpdates();
 			if (/session|account deletion/i.test(reason || "")) renderError(new HubApiError({code: "AUTH_REQUIRED", status: 401}));
-			else if (/membership|authorization/i.test(reason || "")) renderError(new HubApiError({code: "CAMPAIGN_NOT_FOUND", status: 404}));
-			else setCampaignConnectionStatus({label: "Live updates stopped · reload required", state: "warning"});
+			else renderError(new HubApiError({code: "CAMPAIGN_NOT_FOUND", status: 404}));
 		}
 	});
 	window.addEventListener("beforeunload", () => realtime.close(), {once: true});

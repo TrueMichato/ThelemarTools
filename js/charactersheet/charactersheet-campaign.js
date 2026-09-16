@@ -656,6 +656,7 @@ export class CharacterSheetCampaign {
 	async _pMoveCloudCharacter ({campaignId, isDetached}) {
 		const characterId = this._page._currentCharacterId;
 		const sourceCampaignId = this._currentCharacter?.campaignId || null;
+		const isCurrentCharacter = () => this._page._currentCharacterId === characterId;
 		if (!characterId || !campaignId || this._isBusy) return;
 		if (!isDetached && (!sourceCampaignId || this._movePreview?.campaignId !== campaignId)) return;
 		this._isBusy = true;
@@ -664,19 +665,23 @@ export class CharacterSheetCampaign {
 		let isRealtimeDetached = false;
 		try {
 			if (!await this._page._saveCurrentCharacter({isInteractiveConflict: false})) throw new Error("CLOUD_SAVE_FAILED");
-			await this._page._characterRepository.pReleaseLease?.({characterId});
-			this._page._detachHubRealtime?.();
-			isRealtimeDetached = true;
+			if (!isCurrentCharacter()) return;
 			const command = this._getPendingCommand({kind: isDetached ? "attach-cloud" : "move-cloud", characterId, campaignId});
 			const targetRulesVersionId = isDetached
 				? (await this._api.pGetCampaignCompatibility({campaignId})).rulesVersion?.id || null
 				: this._movePreview?.rulesVersionId || null;
+			if (!isCurrentCharacter()) return;
+			await this._page._characterRepository.pReleaseLease?.({characterId});
+			if (!isCurrentCharacter()) return;
+			this._page._detachHubRealtime?.();
+			isRealtimeDetached = true;
 			const result = await this._api.pMoveCharacter({
 				characterId,
 				campaignId,
 				rulesVersionId: targetRulesVersionId,
 				idempotencyKey: command.idempotencyKey,
 			});
+			if (!isCurrentCharacter()) return;
 			this._feedback = {
 				type: "success",
 				text: isDetached
@@ -686,6 +691,7 @@ export class CharacterSheetCampaign {
 			this.render();
 			this._fnNavigate(getCampaignCharacterUrl({campaignId, characterId: result.character.id}));
 		} catch (error) {
+			if (!isCurrentCharacter()) return;
 			const isDefiniteRejection = Number.isInteger(error?.status)
 				&& error.status >= 400
 				&& error.status < 500;

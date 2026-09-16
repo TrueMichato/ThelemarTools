@@ -141,7 +141,7 @@ const makeApi = character => {
  * Wire the real coordinator, the real HTTP repository and the real sheet handlers together so the assertions
  * exercise the merged PR #222 seam rather than a stand-in.
  */
-const pMakeHarness = async ({seed = {}} = {}) => {
+const pMakeHarness = async ({seed = {}, access = "owner"} = {}) => {
 	const previousStorage = globalThis.sessionStorage;
 	globalThis.sessionStorage = makeSessionStorage();
 
@@ -200,6 +200,7 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 		_hubActiveCampaign: {pHandleAccessLoss: jest.fn(async () => {})},
 		_teardownHubRules: jest.fn(),
 		_currentCharacterId: "character-1",
+		_currentCharacterAccess: access,
 		_characterLoadGeneration: 0,
 		_hubRealtimeGeneration: 0,
 		_isHubRealtimeListenersBound: false,
@@ -290,6 +291,33 @@ describe("Live campaign effects on an open Character Sheet", () => {
 		]);
 		expect(state.toJson().xp).toBe(9000);
 		expect(api.pGetCharacter).toHaveBeenCalled();
+	});
+
+	it("keeps item invalidation live without showing recipient notices to a DM inspector", async () => {
+		const {clients, coordinator, toasts} = await pMakeHarness({access: "dm_readonly"});
+		const inventoryEvents = [];
+		coordinator.on("inventoryTransfer", event => inventoryEvents.push(event));
+
+		clients[0].emit("event", {
+			id: "dm-visible-item-award",
+			campaignId: "campaign-1",
+			sequence: 22,
+			type: "item.granted",
+			aggregateType: "character",
+			aggregateId: "character-1",
+			payload: {
+				entry: {item: {name: "Longsword", source: "PHB"}, quantity: 1},
+				note: "For the player",
+			},
+		});
+		await pFlush();
+
+		expect(toasts).toEqual([]);
+		expect(inventoryEvents).toEqual([expect.objectContaining({
+			eventId: "dm-visible-item-award",
+			type: "item.granted",
+			isCurrentCharacterAffected: true,
+		})]);
 	});
 
 	it("commits spell activity once when Keep Local retries a post-save live conflict", async () => {

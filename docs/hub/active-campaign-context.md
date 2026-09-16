@@ -179,6 +179,14 @@ rules/brew; a DM/co-DM demotion closes the private surface through role-loss tea
 for ordinary player surfaces. Every path first uses the same fail-closed presentation, discards character-scoped
 campaign/sharing state, and conceals the document. Switching characters also clears the old sharing controller
 before the new policy loads, and each controller is permanently bound to the character whose policy it fetched.
+Terminal character DELETE/archive failures use that same ordered resource teardown when the failed request still
+names the open character; a response that settles after a selector switch cannot conceal or reattach the replacement.
+
+The campaign overview applies the same fail-closed rule to membership/session access loss. It invalidates activity
+history, clears its live roster/context state, destroys the complete authorized campaign surface, and only then
+renders the non-enumerating error outside that surface. Previously visible members, character/profile projections,
+inventory, pending actions/transfers, and administration controls therefore cannot remain readable while reload or
+reauthentication is required.
 
 A cancellation is classified as `REQUEST_ABORTED` across the whole request path — including the
 response body read — so it is never mistaken for connectivity loss. Personal brew and local

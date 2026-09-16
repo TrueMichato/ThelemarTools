@@ -107,6 +107,12 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		await expect(dmSheet.characterName).toHaveValue("Readonly Rowan");
 		await expect(dmSheet.characterName).toBeDisabled();
 		await expect(dm.page.locator("#charsheet-btn-export")).toBeEnabled();
+		await expect(dm.page.locator("#charsheet-btn-more")).toBeEnabled();
+		await dm.page.locator("#charsheet-btn-more").click();
+		await expect(dm.page.locator("#charsheet-header-secondary")).not.toHaveClass(/charsheet__header-row--collapsed/);
+		await expect(dm.page.locator("#charsheet-btn-export")).toBeVisible();
+		await expect(dm.page.locator("#charsheet-btn-print")).toBeVisible();
+		await expect(dm.page.locator("#charsheet-btn-settings")).toBeDisabled();
 		await expect(dm.page.locator("#charsheet-campaign .charsheet__campaign-detail"))
 			.toContainText("Read-only DM view");
 		await expect(dm.page.locator("#charsheet-sel-character option:checked")).toContainText("(read-only)");
@@ -114,6 +120,23 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		expect(await dm.page.evaluate(() => (globalThis as any).charSheet.isCurrentCharacterReadOnly())).toBe(true);
 		expect(await dm.page.evaluate(() => (globalThis as any).charSheet._saveCurrentCharacter())).toBe(true);
 		await dmSheet.waitForHubRealtimeLive();
+		await dm.page.evaluate(() => {
+			const sheet = (globalThis as any).charSheet;
+			sheet._state.setViewMode("play");
+			sheet._playMode.activate();
+		});
+		const lateRoleButton = dm.page.locator("#charsheet-play-mode [role='button']").first();
+		await expect(lateRoleButton).toBeVisible();
+		await expect(lateRoleButton).toHaveAttribute("aria-disabled", "true");
+		await expect(lateRoleButton).toHaveAttribute("tabindex", "-1");
+		const stateBeforeKeyboardActivation = await dm.page.evaluate(() => (globalThis as any).charSheet._state.toJson());
+		await lateRoleButton.dispatchEvent("keydown", {key: "Enter", code: "Enter"});
+		await lateRoleButton.dispatchEvent("keydown", {key: " ", code: "Space"});
+		expect(await dm.page.evaluate(() => (globalThis as any).charSheet._state.toJson()))
+			.toEqual(stateBeforeKeyboardActivation);
+		await dm.page.evaluate(() => (globalThis as any).charSheet._playMode.render());
+		await expect(dm.page.locator("#charsheet-play-mode [role='button']").first())
+			.toHaveAttribute("tabindex", "-1");
 
 		let projectionReadRequests = 0;
 		let allowProjectionReads = false;
@@ -460,6 +483,44 @@ test("peer shared profiles render as visible native disclosures", async ({browse
 			pCloseContext(viewerContext),
 			pCloseContext(ownerContext),
 		]);
+	}
+});
+
+test("campaign authorization loss immediately destroys previously visible private surfaces", async ({browser}) => {
+	test.setTimeout(180_000);
+	const secret = process.env.HUB_TEST_AUTH_SECRET;
+	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
+
+	const contextOptions = {
+		baseURL: process.env.HUB_E2E_ORIGIN || "https://localhost:8443",
+		ignoreHTTPSErrors: true,
+	};
+	const dmContext = await browser.newContext(contextOptions);
+	const playerContext = await browser.newContext(contextOptions);
+	try {
+		const dm = new HubCampaignPage(await dmContext.newPage());
+		const player = new HubCampaignPage(await playerContext.newPage());
+		await dm.signInSynthetic({providerSubject: "concealment-dm", displayName: "Concealment DM", secret});
+		await player.signInSynthetic({providerSubject: "concealment-player", displayName: "Concealed Player", secret});
+		const campaignId = await dm.createCampaign("Authorization Concealment E2E");
+		await player.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
+		await player.createCharacter({campaignId, name: "Private Roster Hero"});
+
+		await player.gotoCampaign(campaignId);
+		await expect(player.page.locator("#campaign-content")).toBeVisible();
+		await expect(player.page.locator("#campaign-character-list")).toContainText("Private Roster Hero");
+		await expect(player.page.locator("#campaign-member-list")).toContainText("Concealed Player");
+
+		await dm.removeMember({campaignId, displayName: "Concealed Player"});
+
+		await expect(player.page.locator("#campaign-content")).toBeHidden({timeout: 20_000});
+		await expect(player.page.locator("#campaign-content")).toHaveAttribute("aria-hidden", "true");
+		await expect(player.page.locator("#campaign-content")).toBeEmpty();
+		await expect(player.page.locator("#hub-error")).toBeVisible();
+		await expect(player.page.locator("body")).not.toContainText("Private Roster Hero");
+		await expect(player.page.locator("body")).not.toContainText("Concealed Player");
+	} finally {
+		await Promise.all([pCloseContext(dmContext), pCloseContext(playerContext)]);
 	}
 });
 

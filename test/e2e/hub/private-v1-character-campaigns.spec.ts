@@ -209,6 +209,102 @@ test("campaign characters recover from detachment and copy or move safely", asyn
 	}
 });
 
+test("stale move completion cannot detach the selected character and terminal delete races conceal the old sheet", async ({browser}) => {
+	test.setTimeout(180_000);
+	const secret = process.env.HUB_TEST_AUTH_SECRET;
+	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
+
+	const contextOptions = {
+		baseURL: process.env.HUB_E2E_ORIGIN || "https://localhost:8443",
+		ignoreHTTPSErrors: true,
+	};
+	const dmContext = await browser.newContext(contextOptions);
+	const playerContext = await browser.newContext(contextOptions);
+	const otherDeviceContext = await browser.newContext(contextOptions);
+	try {
+		const dm = new HubCampaignPage(await dmContext.newPage());
+		const player = new HubCampaignPage(await playerContext.newPage());
+		const otherDevice = new HubCampaignPage(await otherDeviceContext.newPage());
+		await dm.signInSynthetic({providerSubject: "stale-move-dm", displayName: "Stale Move DM", secret});
+		await player.signInSynthetic({providerSubject: "stale-move-player", displayName: "Stale Move Player", secret});
+		await otherDevice.signInSynthetic({providerSubject: "stale-move-player", displayName: "Stale Move Player", secret});
+		const sourceCampaignId = await dm.createCampaign("Stale Move Source E2E");
+		const targetCampaignId = await dm.createCampaign("Stale Move Target E2E");
+		await player.redeemInviteTokenViaApi(await dm.createInviteViaApi(sourceCampaignId));
+		await player.redeemInviteTokenViaApi(await dm.createInviteViaApi(targetCampaignId));
+		const sourceCharacter = await player.createCharacter({campaignId: sourceCampaignId, name: "Deferred Source"});
+		const selectedCharacter = await player.createCharacter({campaignId: sourceCampaignId, name: "Selected Survivor"});
+
+		await player.prepareCharacterMove({
+			characterId: sourceCharacter.id,
+			sourceCampaignId,
+			targetCampaignId,
+			name: "Deferred Source",
+		});
+		const moveRequests: string[] = [];
+		player.page.on("request", request => {
+			if (new URL(request.url()).pathname === `/api/characters/${sourceCharacter.id}/move`) {
+				moveRequests.push(request.method());
+			}
+		});
+		await player.page.evaluate(() => {
+			const sheet = (globalThis as any).charSheet;
+			(globalThis as any).__resolveDeferredMoveSave = null;
+			(globalThis as any).__originalMoveSave = sheet._saveCurrentCharacter;
+			const deferred = new Promise<boolean>(resolve => {
+				(globalThis as any).__resolveDeferredMoveSave = resolve;
+			});
+			sheet._saveCurrentCharacter = () => deferred;
+		});
+		const panel = player.page.locator("#charsheet-campaign-panel");
+		await panel.getByLabel("I understand that this moves the character instead of creating a copy.").check();
+		await panel.locator("button", {hasText: "Move character"}).click();
+		await expect.poll(() => player.page.evaluate(() => (globalThis as any).charSheet._campaign._isBusy)).toBe(true);
+		await player.page.evaluate(async characterId => {
+			const sheet = (globalThis as any).charSheet;
+			sheet._saveCurrentCharacter = (globalThis as any).__originalMoveSave;
+			await sheet._pLoadCharacter(characterId);
+			(globalThis as any).__resolveDeferredMoveSave(true);
+		}, selectedCharacter.id);
+		await expect.poll(() => player.page.evaluate(() => (globalThis as any).charSheet._campaign._isBusy)).toBe(false);
+		expect(moveRequests).toEqual([]);
+		await expect(player.page.locator("#charsheet-ipt-name")).toHaveValue("Selected Survivor");
+		expect(await player.page.evaluate(() => ({
+			currentCharacterId: (globalThis as any).charSheet._currentCharacterId,
+			realtimeCharacterId: (globalThis as any).charSheet._hubRealtime?._active?.characterId,
+		}))).toEqual({
+			currentCharacterId: selectedCharacter.id,
+			realtimeCharacterId: selectedCharacter.id,
+		});
+		expect((await player.getCharacter(sourceCharacter.id)).campaignId).toBe(sourceCampaignId);
+
+		await player.page.evaluate(() => (globalThis as any).charSheet._detachHubRealtime());
+		await otherDevice.deleteCharacterViaApi(selectedCharacter.id);
+		const deleteErrorCode = await player.page.evaluate(async () => {
+			const originalConfirm = (globalThis as any).InputUiUtil.pGetUserBoolean;
+			(globalThis as any).InputUiUtil.pGetUserBoolean = async () => true;
+			try {
+				await (globalThis as any).charSheet._onDeleteCharacter();
+				return null;
+			} catch (error: any) {
+				return error?.code || null;
+			} finally {
+				(globalThis as any).InputUiUtil.pGetUserBoolean = originalConfirm;
+			}
+		});
+		expect(deleteErrorCode).toBe("CHARACTER_NOT_FOUND");
+		await expect(player.page.locator("#charsheet-campaign-access-ended")).toBeVisible();
+		await expect(player.page.locator("main.charsheet-page")).toBeHidden();
+		expect(await player.page.evaluate(() => (globalThis as any).charSheet._currentCharacterId)).toBeNull();
+	} finally {
+		await Promise.all([
+			pCloseContext(dmContext),
+			pCloseContext(playerContext),
+			pCloseContext(otherDeviceContext),
+		]);
+	}
+});
+
 test("an open character sheet resolves peer effects and adopts authoritative outcomes inline", async ({browser}) => {
 	test.setTimeout(180_000);
 	const secret = process.env.HUB_TEST_AUTH_SECRET;

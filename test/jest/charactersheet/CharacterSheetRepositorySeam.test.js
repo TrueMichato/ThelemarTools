@@ -348,23 +348,122 @@ describe("Character Sheet repository seam", () => {
 		expect(host._updateSaveIndicator).toHaveBeenLastCalledWith("readonly");
 	});
 
-	it("disables mutation controls before a DM can edit a read-only sheet", () => {
-		const makeControl = ({id = "", disabled = false} = {}) => ({
-			id,
-			disabled,
-			dataset: {},
-			setAttribute: jest.fn(),
-			removeAttribute: jest.fn(),
-			getAttribute: jest.fn(() => null),
+	it("conceals an active Hub character when a terminal delete race cannot restore realtime", async () => {
+		const terminalError = Object.assign(new Error("already archived"), {code: "CHARACTER_NOT_FOUND", status: 404});
+		const host = {
+			_characterRepository: {pDelete: jest.fn(async () => { throw terminalError; })},
+			_currentCharacterId: "character-a",
+			_isHubCharacter: true,
+			_detachHubRealtime: jest.fn(),
+			_attachHubRealtime: jest.fn(),
+			_canRestoreHubRealtimeAfterError: CharacterSheetPage.prototype._canRestoreHubRealtimeAfterError,
+			_endCurrentHubCharacterAccess: jest.fn(() => true),
+		};
+		const confirm = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+		try {
+			await expect(CharacterSheetPage.prototype._onDeleteCharacter.call(host)).rejects.toBe(terminalError);
+		} finally {
+			confirm.mockRestore();
+		}
+
+		expect(host._detachHubRealtime).toHaveBeenCalledTimes(1);
+		expect(host._endCurrentHubCharacterAccess).toHaveBeenCalledWith({
+			characterId: "character-a",
+			accessEndCause: "character",
 		});
+		expect(host._attachHubRealtime).not.toHaveBeenCalled();
+	});
+
+	it("does not conceal or reattach the source when a delete failure settles after a character switch", async () => {
+		const deletion = makeDeferred();
+		const terminalError = Object.assign(new Error("already archived"), {code: "CHARACTER_NOT_FOUND", status: 404});
+		const host = {
+			_characterRepository: {pDelete: jest.fn(() => deletion.promise)},
+			_currentCharacterId: "character-a",
+			_isHubCharacter: true,
+			_detachHubRealtime: jest.fn(),
+			_attachHubRealtime: jest.fn(),
+			_canRestoreHubRealtimeAfterError: CharacterSheetPage.prototype._canRestoreHubRealtimeAfterError,
+			_endCurrentHubCharacterAccess: jest.fn(),
+		};
+		const confirm = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+		try {
+			const pending = CharacterSheetPage.prototype._onDeleteCharacter.call(host);
+			await Promise.resolve();
+			host._currentCharacterId = "character-b";
+			deletion.reject(terminalError);
+			await expect(pending).rejects.toBe(terminalError);
+		} finally {
+			confirm.mockRestore();
+		}
+
+		expect(host._endCurrentHubCharacterAccess).not.toHaveBeenCalled();
+		expect(host._attachHubRealtime).not.toHaveBeenCalled();
+		expect(host._currentCharacterId).toBe("character-b");
+	});
+
+	it("conceals an active Hub character when a terminal bulk-delete race cannot restore realtime", async () => {
+		const terminalError = Object.assign(new Error("already archived"), {code: "CHARACTER_NOT_FOUND", status: 404});
+		const characters = [{id: "character-a", name: "Mira"}];
+		const host = {
+			_characterRepository: {
+				pList: jest.fn(async () => characters),
+				pDeleteMany: jest.fn(async () => { throw terminalError; }),
+			},
+			_currentCharacterId: "character-a",
+			_isHubCharacter: true,
+			_detachHubRealtime: jest.fn(),
+			_attachHubRealtime: jest.fn(),
+			_canRestoreHubRealtimeAfterError: CharacterSheetPage.prototype._canRestoreHubRealtimeAfterError,
+			_endCurrentHubCharacterAccess: jest.fn(() => true),
+		};
+		const previousMultipleChoice = globalThis.InputUiUtil.pGetUserMultipleChoice;
+		const previousEscapeQuotes = String.prototype.escapeQuotes;
+		globalThis.InputUiUtil.pGetUserMultipleChoice = jest.fn(async () => characters);
+		String.prototype.escapeQuotes = function () { return `${this}`; };
+		const confirm = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+		try {
+			await expect(CharacterSheetPage.prototype._onManageCharacters.call(host)).rejects.toBe(terminalError);
+		} finally {
+			confirm.mockRestore();
+			if (previousMultipleChoice) globalThis.InputUiUtil.pGetUserMultipleChoice = previousMultipleChoice;
+			else delete globalThis.InputUiUtil.pGetUserMultipleChoice;
+			if (previousEscapeQuotes) String.prototype.escapeQuotes = previousEscapeQuotes;
+			else delete String.prototype.escapeQuotes;
+		}
+
+		expect(host._endCurrentHubCharacterAccess).toHaveBeenCalledWith({
+			characterId: "character-a",
+			accessEndCause: "character",
+		});
+		expect(host._attachHubRealtime).not.toHaveBeenCalled();
+	});
+
+	it("disables mutation controls before a DM can edit a read-only sheet", () => {
+		const makeControl = ({id = "", disabled = false, role = null, tabindex = null} = {}) => {
+			const attributes = new Map();
+			if (role != null) attributes.set("role", role);
+			if (tabindex != null) attributes.set("tabindex", tabindex);
+			return {
+				id,
+				disabled,
+				dataset: {},
+				matches: selector => selector === "[role=\"button\"]" && role === "button",
+				setAttribute: jest.fn((name, value) => attributes.set(name, `${value}`)),
+				removeAttribute: jest.fn(name => attributes.delete(name)),
+				getAttribute: jest.fn(name => attributes.get(name) ?? null),
+			};
+		};
 		const edit = makeControl();
+		const customButton = makeControl({role: "button", tabindex: "0"});
 		const characterSelect = makeControl({id: "charsheet-sel-character"});
 		const exportButton = makeControl({id: "charsheet-btn-export"});
+		const moreButton = makeControl({id: "charsheet-btn-more"});
 		const root = {
 			classList: {toggle: jest.fn()},
 			getAttribute: jest.fn(() => null),
 			setAttribute: jest.fn(),
-			querySelectorAll: jest.fn(() => [edit, characterSelect, exportButton]),
+			querySelectorAll: jest.fn(() => [edit, customButton, characterSelect, exportButton, moreButton]),
 		};
 		const documentPrevious = globalThis.document;
 		globalThis.document = {querySelector: () => root};
@@ -380,9 +479,22 @@ describe("Character Sheet repository seam", () => {
 
 		expect(edit.disabled).toBe(true);
 		expect(edit.setAttribute).toHaveBeenCalledWith("aria-disabled", "true");
+		expect(customButton.setAttribute).toHaveBeenCalledWith("tabindex", "-1");
+		expect(customButton.setAttribute).toHaveBeenCalledWith("aria-disabled", "true");
 		expect(characterSelect.disabled).toBe(false);
 		expect(exportButton.disabled).toBe(false);
+		expect(moreButton.disabled).toBe(false);
 		expect(host._updateSaveIndicator).toHaveBeenCalledWith("readonly");
+
+		host._currentCharacterAccess = "owner";
+		globalThis.document = {querySelector: () => root};
+		try {
+			CharacterSheetPage.prototype._applyCharacterAccessMode.call(host);
+		} finally {
+			globalThis.document = documentPrevious;
+		}
+		expect(customButton.setAttribute).toHaveBeenCalledWith("tabindex", "0");
+		expect(customButton.removeAttribute).toHaveBeenCalledWith("aria-disabled");
 	});
 
 	it("keeps read-only DM views live without activating owner-only integrations", () => {
@@ -651,6 +763,29 @@ describe("Character Sheet repository seam", () => {
 			listeners.click(blocked);
 			expect(blocked.preventDefault).toHaveBeenCalled();
 			expect(blocked.stopImmediatePropagation).toHaveBeenCalled();
+
+			for (const key of ["Enter", " "]) {
+				const keyboardActivation = {
+					type: "keydown",
+					key,
+					target: {closest: () => null},
+					preventDefault: jest.fn(),
+					stopImmediatePropagation: jest.fn(),
+				};
+				listeners.keydown(keyboardActivation);
+				expect(keyboardActivation.preventDefault).toHaveBeenCalled();
+				expect(keyboardActivation.stopImmediatePropagation).toHaveBeenCalled();
+			}
+
+			const keyboardNavigation = {
+				type: "keydown",
+				key: "Tab",
+				target: {closest: () => null},
+				preventDefault: jest.fn(),
+				stopImmediatePropagation: jest.fn(),
+			};
+			listeners.keydown(keyboardNavigation);
+			expect(keyboardNavigation.preventDefault).not.toHaveBeenCalled();
 
 			const navigation = {
 				target: {closest: () => ({id: "charsheet-sel-character"})},

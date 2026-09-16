@@ -96,6 +96,17 @@ sheet has implemented the later operation-aware `B/L -> R/F` live-edit reconcili
 coordination, banners, or peer approval UI. Until that client slice lands, ordinary local behavior and existing
 Hub repository save/rebase behavior remain unchanged.
 
+Character-scoped asynchronous workflows capture the character ID they started with and revalidate it after every
+`await` before releasing a lease, detaching or restoring realtime, navigating, reconciling inventory/effects, or
+showing operation feedback. A stale completion may finish its already-issued server request, but it must not mutate
+the newly selected character's client lifecycle.
+
+DM truth is one explicit `dm_readonly` access mode. Native form controls, contenteditable regions, and custom
+`[role="button"]` controls are disabled before input; the capture guard blocks click and Enter/Space activation while
+preserving navigation and the safe Character selector, More, Roll Log, Export, and Print paths. Late Play Mode renders
+reapply the same access mode. Recipient-framed award notices are owner-only in this view, while metadata-only
+projection/inventory invalidations continue to refresh the authorized DM projection.
+
 ### Campaign Hub content-policy boundary
 
 An authenticated campaign Character Sheet receives typed content-policy version 1 plus the generated site and

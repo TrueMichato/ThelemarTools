@@ -228,6 +228,7 @@ export class CharacterSheetPlayMode {
 		this._renderStatusBar();
 		this._renderCharacterPanel();
 		this._renderActionsHub();
+		this._page?._applyCharacterAccessMode?.();
 	}
 
 	/**
