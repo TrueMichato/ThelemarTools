@@ -1020,6 +1020,7 @@ class CharacterSheetPage {
 		if (choice) DataUtil.userDownload(exportName, recoveryExport, {fileType: "character-conflict"});
 		let isResolutionAdopted = false;
 		let isRecoveryDiscarded = false;
+		let discardedResolutionCharacterId = characterId;
 		const fnAdoptResolution = resolved => {
 			if (!isResolutionCurrent()) return false;
 			const identity = this._adoptCanonicalCharacterIdentity({
@@ -1034,8 +1035,9 @@ class CharacterSheetPage {
 			isResolutionAdopted = true;
 			return true;
 		};
-		const fnDiscardResolution = () => {
+		const fnDiscardResolution = ({characterId: resolvedCharacterId} = {}) => {
 			if (!isResolutionCurrent()) return false;
+			discardedResolutionCharacterId = resolvedCharacterId || characterId;
 			this._createNewCharacter();
 			isRecoveryDiscarded = true;
 			return true;
@@ -1046,11 +1048,13 @@ class CharacterSheetPage {
 				fnAdoptLive: fnAdoptResolution,
 				fnDiscardLive: fnDiscardResolution,
 			});
-			if (isRecoveryDiscarded) return this._pFinalizeDiscardedHubRecovery({discardedCharacterId: characterId});
+			if (isRecoveryDiscarded) {
+				return this._pFinalizeDiscardedHubRecovery({discardedCharacterId: discardedResolutionCharacterId});
+			}
 			if (!isResolutionCurrent()) return false;
 			if (["discarded_create", "discarded_missing_patch"].includes(resolved?.status)) {
 				this._createNewCharacter();
-				return this._pFinalizeDiscardedHubRecovery({discardedCharacterId: characterId});
+				return this._pFinalizeDiscardedHubRecovery({discardedCharacterId: resolved.characterId || characterId});
 			}
 			if (resolved && !isResolutionAdopted && !fnAdoptResolution(resolved)) return false;
 			if (!resolved && !isResolutionAdopted) return false;
