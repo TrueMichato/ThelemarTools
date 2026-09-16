@@ -8,3 +8,5 @@ const catalog = await pBuildCampaignContentSiteCatalog();
 
 await mkdir(fileURLToPath(new URL("../data/", import.meta.url)), {recursive: true});
 await writeFile(outputPath, `${JSON.stringify(catalog, null, "\t")}\n`, "utf8");
+
+await import("./generate-item-award-catalog.mjs");

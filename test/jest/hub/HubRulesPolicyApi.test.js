@@ -303,7 +303,11 @@ describe("Campaign rules policy API", () => {
 			url: `/api/campaigns/${campaign.id}/context`,
 			headers: {cookie: player.cookie},
 		})).json().context;
-		expect(playerContext).toEqual(dmContext);
+		const {membership: dmMembership, ...dmSharedContext} = dmContext;
+		const {membership: playerMembership, ...playerSharedContext} = playerContext;
+		expect(dmMembership).toEqual({role: "dm"});
+		expect(playerMembership).toEqual({role: "player"});
+		expect(playerSharedContext).toEqual(dmSharedContext);
 		expect(playerContext.rulesVersion.rules).toEqual(created.rules);
 		expect(playerContext.rulesVersion.policy).toBeUndefined();
 		expect(playerContext.rulesVersion.policySummary.rules).toHaveLength(10);

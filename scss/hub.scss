@@ -1039,6 +1039,15 @@
 	color: var(--hub-danger);
 }
 
+.hub-inline-status .hub-button--inline {
+	display: inline-flex;
+	min-height: 44px;
+	margin-left: 6px;
+	padding: 6px 10px;
+	font-size: inherit;
+	vertical-align: middle;
+}
+
 .hub-activity-list {
 	display: flex;
 	flex-direction: column;

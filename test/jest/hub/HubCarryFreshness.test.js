@@ -75,7 +75,7 @@ function getCharacterData (overrides = {}) {
  * NON-owning viewer exercises the projection path the DM Screen actually reads.
  */
 async function setup () {
-	const store = new MemoryHubStore();
+	const store = new MemoryHubStore({fnResolveAwardItem: async ({item}) => structuredClone(item)});
 	const dm = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "1", displayName: "DM"});
 	const player = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "2", displayName: "Player"});
 	const {campaign} = await store.pCreateCampaign({accountId: dm.id, name: "C", idempotencyKey: "c-1"});
@@ -236,8 +236,27 @@ describe("item grant invalidates", () => {
 describe("transfer lifecycle invalidates the written participant only", () => {
 	async function setupPair () {
 		const ctx = await setup();
+		const receiver = await ctx.store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: "3",
+			displayName: "Receiver",
+		});
+		await ctx.store.pCreateInvite({
+			accountId: ctx.dm.id,
+			campaignId: ctx.campaign.id,
+			role: "player",
+			tokenHash: "receiver-token-hash",
+			expiresAt: new Date(Date.now() + 3_600_000),
+			maxUses: 1,
+			idempotencyKey: "receiver-invite",
+		});
+		await ctx.store.pRedeemInvite({
+			accountId: receiver.id,
+			tokenHash: "receiver-token-hash",
+			idempotencyKey: "receiver-redeem",
+		});
 		const {character: other} = await ctx.store.pCreateCharacter({
-			accountId: ctx.player.id,
+			accountId: receiver.id,
 			campaignId: ctx.campaign.id,
 			data: getCharacterData({name: "Receiver"}),
 			schemaVersion: 1,
@@ -245,13 +264,13 @@ describe("transfer lifecycle invalidates the written participant only", () => {
 			idempotencyKey: "ch-b",
 		});
 		await ctx.store.pSetProjectionPolicy({
-			accountId: ctx.player.id,
+			accountId: receiver.id,
 			characterId: other.id,
 			policy: {version: 1, preset: "table", overrides: {carrySummary: {mode: "share"}}},
 			expectedProjectionRevision: other.projectionRevision,
 			idempotencyKey: "pol-2",
 		});
-		return {...ctx, other};
+		return {...ctx, receiver, other};
 	}
 
 	it("escrow reservation invalidates the SOURCE but leaves the untouched target alone", async () => {
@@ -288,7 +307,7 @@ describe("transfer lifecycle invalidates the written participant only", () => {
 			idempotencyKey: "t-1",
 		});
 		await ctx.store.pResolveTransfer({
-			accountId: ctx.player.id,
+			accountId: ctx.receiver.id,
 			campaignId: ctx.campaign.id,
 			transferId: transfer.id,
 			decision: "accept",
@@ -312,7 +331,7 @@ describe("transfer lifecycle invalidates the written participant only", () => {
 			idempotencyKey: "t-1",
 		});
 		await ctx.store.pResolveTransfer({
-			accountId: ctx.player.id,
+			accountId: ctx.receiver.id,
 			campaignId: ctx.campaign.id,
 			transferId: transfer.id,
 			decision: "reject",

@@ -3,10 +3,21 @@ import {jest} from "@jest/globals";
 import {
 	CharacterSheetPartyInventory,
 	getPartyInventoryRecipients,
+	getPartyInventoryStashAction,
 	getPartyInventoryTransferTargetId,
 } from "../../../js/charactersheet/charactersheet-party-inventory.js";
 
 describe("Character Sheet party inventory", () => {
+	it.each([
+		["dm", "take"],
+		["co_dm", "take"],
+		["player", "request"],
+		["spectator", null],
+		[null, null],
+	])("maps the %s role to the supported stash action", (role, expected) => {
+		expect(getPartyInventoryStashAction(role)).toBe(expected);
+	});
+
 	it("does nothing for local characters", async () => {
 		const api = {
 			pGetCharacterProjection: jest.fn(),
@@ -24,6 +35,119 @@ describe("Character Sheet party inventory", () => {
 		expect(api.pGetCharacterProjection).not.toHaveBeenCalled();
 		expect(api.pGetPartyInventory).not.toHaveBeenCalled();
 		expect(realtime.on).not.toHaveBeenCalled();
+	});
+
+	it("preserves the active transfer draft until it is reconciled", () => {
+		const partyInventory = new CharacterSheetPartyInventory({
+			api: {},
+			campaignId: "campaign-1",
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => ({
+				inventory: [
+					{id: "stack-1", quantity: 2, item: {name: "Rations", source: "PHB"}},
+					{id: "stack-2", quantity: 1, item: {name: "Torch", source: "PHB"}},
+				],
+			}),
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._role = "player";
+
+		expect(partyInventory._beginDraft({kind: "character", entryId: "stack-1"})).toBe(true);
+		const originalDraft = partyInventory._draft;
+		originalDraft.proposalRequest = {idempotencyKey: originalDraft.commandId};
+
+		expect(partyInventory._beginDraft({kind: "character", entryId: "stack-2"})).toBe(false);
+		expect(partyInventory._draft).toBe(originalDraft);
+		expect(partyInventory._draft.proposalRequest.idempotencyKey).toBe(originalDraft.commandId);
+	});
+
+	it("keeps spectator inventory read-only while preserving frozen recovery", async () => {
+		const character = {inventory: [{id: "stack-1", item: {name: "Rope", source: "PHB"}, quantity: 1}], currency: {}};
+		const committed = {id: "transfer-1", status: "committed"};
+		const propose = jest.fn(async () => ({transfer: committed}));
+		const partyInventory = new CharacterSheetPartyInventory({
+			api: {
+				pProposeTransfer: propose,
+				pListTransfers: jest.fn(async () => [committed]),
+			},
+			campaignId: "campaign-1",
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => character,
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._role = "spectator";
+		partyInventory._render = jest.fn();
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		expect(partyInventory._beginDraft({kind: "character", entryId: "stack-1"})).toBe(false);
+		partyInventory._draft = {
+			kind: "character",
+			entryId: "stack-1",
+			entryName: "Rope",
+			quantity: 1,
+			maxQuantity: 1,
+			blockers: [],
+			destinationKind: "party_inventory",
+			recipientId: null,
+			commandId: "proposal-1",
+			resolutionCommandId: "resolution-1",
+			cancellationCommandId: "cancellation-1",
+			proposalRequest: {
+				campaignId: "campaign-1",
+				sourceKind: "character",
+				sourceId: "character-1",
+				targetKind: "party_inventory",
+				targetId: "party-1",
+				payload: {items: [{entryId: "stack-1", quantity: 1}], currency: {}},
+				idempotencyKey: "proposal-1",
+				isAutoResolved: false,
+			},
+			proposalReplayUntil: Date.now() + 60_000,
+			transfer: null,
+			needsStatusCheck: false,
+			pendingResolution: null,
+		};
+		const frozenRequest = partyInventory._draft.proposalRequest;
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+		expect(propose).toHaveBeenCalledWith(frozenRequest);
+		expect(partyInventory._draft).toBeNull();
+	});
+
+	it("closes an editable draft when an authoritative refresh changes the role to spectator", async () => {
+		const partyInventory = new CharacterSheetPartyInventory({
+			api: {
+				pGetPartyInventory: jest.fn(async () => ({id: "party-1", inventory: [], currency: {}})),
+				pGetCampaignSnapshot: jest.fn(async () => ({
+					membership: {role: "spectator"},
+					characters: [{kind: "owner_truth", character: {id: "character-1"}}],
+					roster: [],
+				})),
+			},
+			campaignId: "campaign-1",
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._role = "player";
+		partyInventory._draft = {
+			kind: "character",
+			entryId: "stack-1",
+			transfer: null,
+			proposalRequest: null,
+		};
+		partyInventory._render = jest.fn();
+		partyInventory._decorateCharacterInventory = jest.fn();
+
+		await expect(partyInventory._pRefreshParty()).resolves.toBe(true);
+
+		expect(partyInventory._role).toBe("spectator");
+		expect(partyInventory._draft).toBeNull();
+		expect(partyInventory._announcement).toContain("read-only");
+		expect(partyInventory._decorateCharacterInventory).toHaveBeenCalled();
 	});
 
 	it("fences an owner lookup after the current character generation changes", async () => {
@@ -82,6 +206,7 @@ describe("Character Sheet party inventory", () => {
 			token: Symbol("test"),
 			isOwner: true,
 		};
+		partyInventory._role = "player";
 		partyInventory._decorateCharacterInventory = jest.fn();
 
 		const older = partyInventory._pRefreshParty();
@@ -96,6 +221,38 @@ describe("Character Sheet party inventory", () => {
 
 		expect(partyInventory._partyInventory.revision).toBe(2);
 		expect(partyInventory._partyInventory.inventory).toEqual([]);
+	});
+
+	it("shows an active refresh while retaining the last synced stash", async () => {
+		let resolveParty;
+		let resolveSnapshot;
+		const partyInventory = new CharacterSheetPartyInventory({
+			api: {
+				pGetPartyInventory: jest.fn(() => new Promise(resolve => resolveParty = resolve)),
+				pGetCampaignSnapshot: jest.fn(() => new Promise(resolve => resolveSnapshot = resolve)),
+			},
+			campaignId: "campaign-1",
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._render = jest.fn();
+		partyInventory._decorateCharacterInventory = jest.fn();
+
+		const refreshing = partyInventory._pRefreshParty();
+
+		expect(partyInventory._isLoading).toBe(true);
+		expect(partyInventory._render).toHaveBeenCalled();
+
+		resolveParty({id: "party-1", inventory: [], currency: {}});
+		resolveSnapshot({
+			membership: {role: "player"},
+			characters: [{kind: "owner_truth", character: {id: "character-1"}}],
+			roster: [],
+		});
+		await expect(refreshing).resolves.toBe(true);
+		expect(partyInventory._isLoading).toBe(false);
 	});
 
 	it("preserves a reconciliation conflict when the party fetch settles last", async () => {
@@ -317,7 +474,34 @@ describe("Character Sheet party inventory", () => {
 		expect(repository.pReconcileAuthoritativeCharacter).not.toHaveBeenCalled();
 	});
 
-	it("reconciles a cursor-covered non-semantic character revision", () => {
+	it("refetches the stash projection after membership authority changes", () => {
+		const listeners = new Map();
+		const partyInventory = new CharacterSheetPartyInventory({
+			api: {},
+			realtime: {
+				on: jest.fn((type, listener) => {
+					listeners.set(type, listener);
+					return jest.fn();
+				}),
+			},
+			campaignId: "campaign-1",
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {
+			characterId: "character-1",
+			generation: 1,
+			token: Symbol("test"),
+			isOwner: true,
+		};
+		partyInventory._scheduleRefresh = jest.fn();
+
+		listeners.get("membershipChanged")({campaignId: "campaign-1", source: "event"});
+
+		expect(partyInventory._scheduleRefresh).toHaveBeenCalledWith({party: true});
+	});
+
+	it("leaves cursor-covered character reconciliation to the owning Character Sheet page", () => {
 		const listeners = new Map();
 		const partyInventory = new CharacterSheetPartyInventory({
 			api: {},
@@ -345,7 +529,7 @@ describe("Character Sheet party inventory", () => {
 			isCharacterDocumentChanged: true,
 		});
 
-		expect(partyInventory._scheduleRefresh).toHaveBeenCalledWith({character: true, party: true});
+		expect(partyInventory._scheduleRefresh).toHaveBeenCalledWith({party: true});
 	});
 
 	it("reconciles an item award into the open owner sheet exactly once without refreshing the stash", () => {
@@ -475,6 +659,7 @@ describe("Character Sheet party inventory", () => {
 			token: Symbol("test"),
 			isOwner: true,
 		};
+		partyInventory._role = "player";
 
 		try {
 			partyInventory._decorateCharacterInventory();
@@ -510,7 +695,7 @@ describe("Character Sheet party inventory", () => {
 		expect(recipients).toEqual([
 			// `carry: null` is the privacy-safe default: this peer shared no carry summary, and
 			// a withheld load must be absent rather than defaulted to a number.
-			{id: "recipient-character", label: "Mira", summary: "Fighter 3", carry: null},
+			{id: "recipient-character", label: "Mira", summary: "Fighter 3", isOwned: false, carry: null},
 		]);
 		expect(JSON.stringify(recipients)).not.toContain("hidden-character");
 	});
@@ -549,15 +734,95 @@ describe("Character Sheet party inventory", () => {
 
 		await expect(partyInventory._pCancelDraft()).resolves.toBe(true);
 
-		expect(api.pResolveTransfer).toHaveBeenCalledWith({
+		expect(api.pResolveTransfer).toHaveBeenCalledWith(expect.objectContaining({
 			campaignId: "campaign-1",
 			transferId: "transfer-1",
 			decision: "reject",
 			idempotencyKey: "cancel-command-1",
-		});
+		}));
 		expect(partyInventory._pDrainRefresh).toHaveBeenCalledTimes(1);
 		expect(partyInventory._isSubmitting).toBe(false);
 		expect(partyInventory._draft).toBeNull();
+	});
+
+	it("replays a lost cancellation with one immutable reject request", async () => {
+		const resolve = jest.fn()
+			.mockRejectedValueOnce(Object.assign(new Error("gateway lost response"), {code: "SERVICE_UNAVAILABLE", status: 502}))
+			.mockResolvedValueOnce({transfer: {status: "rejected"}});
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {pResolveTransfer: resolve},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._role = "player";
+		partyInventory._draft = {
+			transfer: {id: "transfer-1", status: "reserved"},
+			cancellationCommandId: "cancel-command-1",
+			needsStatusCheck: false,
+			pendingResolution: null,
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pCancelDraft()).resolves.toBe(false);
+		expect(partyInventory._draft.pendingResolution).toEqual(expect.objectContaining({
+			campaignId: "campaign-1",
+			transferId: "transfer-1",
+			decision: "reject",
+			idempotencyKey: "cancel-command-1",
+		}));
+		expect(partyInventory._draft.pendingResolution.replayUntil).toBeGreaterThan(Date.now());
+		expect(partyInventory._draft.needsStatusCheck).toBe(true);
+		await expect(partyInventory._pCancelDraft()).resolves.toBe(true);
+		expect(resolve.mock.calls.map(([request]) => request)).toEqual([
+			expect.objectContaining({decision: "reject", idempotencyKey: "cancel-command-1"}),
+			expect.objectContaining({decision: "reject", idempotencyKey: "cancel-command-1"}),
+		]);
+	});
+
+	it("checks status without accepting after an uncertain cancellation", async () => {
+		const resolve = jest.fn(async () => {
+			throw Object.assign(new Error("gateway lost response"), {code: "SERVICE_UNAVAILABLE", status: 502});
+		});
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {
+				pResolveTransfer: resolve,
+				pListTransfers: jest.fn(async () => [{id: "transfer-1", status: "reserved"}]),
+			},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._role = "player";
+		partyInventory._draft = {
+			kind: "character",
+			destinationKind: "character",
+			recipientId: "character-2",
+			transfer: {id: "transfer-1", status: "reserved"},
+			cancellationCommandId: "cancel-command-1",
+			needsStatusCheck: false,
+			pendingResolution: null,
+		};
+
+		await expect(partyInventory._pCancelDraft()).resolves.toBe(false);
+		partyInventory._draft.pendingResolution.replayUntil = 0;
+		await expect(partyInventory._pCancelDraft()).resolves.toBe(false);
+		expect(partyInventory._error).toContain("too old to replay safely");
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+		const rotatedCancellationKey = partyInventory._draft.pendingResolution.idempotencyKey;
+		expect(partyInventory._error).toContain("acceptance remains unavailable");
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+
+		expect(resolve).toHaveBeenCalledTimes(1);
+		expect(rotatedCancellationKey).not.toBe("cancel-command-1");
+		expect(partyInventory._draft.pendingResolution).toEqual(expect.objectContaining({
+			decision: "reject",
+			idempotencyKey: rotatedCancellationKey,
+		}));
+		expect(partyInventory._draft.needsStatusCheck).toBe(false);
+		expect(partyInventory._error).toContain("not yet confirmed");
 	});
 
 	it("re-enables controls after a successful reservation", async () => {
@@ -605,6 +870,840 @@ describe("Character Sheet party inventory", () => {
 		expect(partyInventory._isSubmitting).toBe(false);
 		expect(partyInventory._draft).toBeNull();
 		expect(partyInventory._announcement).toContain("Transfer reserved");
+	});
+
+	it("submits a player stash withdrawal as a DM-approved request without self-resolving", async () => {
+		const api = {
+			pProposeTransfer: jest.fn(async () => ({transfer: {id: "transfer-1", status: "proposed"}})),
+			pResolveTransfer: jest.fn(),
+		};
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api,
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => ({inventory: [], currency: {}}),
+			fnIsCurrentCharacter: () => true,
+			fnToast: jest.fn(),
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {
+			id: "party-1",
+			inventory: [{id: "stack-1", quantity: 2, item: {name: "Rations", source: "PHB"}}],
+			currency: {},
+		};
+		partyInventory._role = "player";
+		partyInventory._draft = {
+			kind: "party_inventory",
+			entryId: "stack-1",
+			quantity: 1,
+			maxQuantity: 2,
+			blockers: [],
+			destinationKind: "character",
+			recipientId: null,
+			commandId: "propose-command-1",
+			resolutionCommandId: "resolve-command-1",
+			cancellationCommandId: "cancel-command-1",
+			transfer: null,
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+
+		expect(api.pProposeTransfer).toHaveBeenCalledWith(expect.objectContaining({
+			sourceKind: "party_inventory",
+			sourceId: "party-1",
+			targetKind: "character",
+			targetId: "character-1",
+		}));
+		expect(api.pResolveTransfer).not.toHaveBeenCalled();
+		expect(partyInventory._announcement).toContain("Request sent");
+		expect(partyInventory._announcement).toContain("DM");
+	});
+
+	it("auto-resolves a player's transfer between their own characters", async () => {
+		const character = {
+			inventory: [{id: "stack-1", quantity: 2, item: {name: "Rations", source: "PHB"}}],
+		};
+		const api = {
+			pProposeTransfer: jest.fn(async () => ({transfer: {id: "transfer-1", status: "committed"}})),
+			pResolveTransfer: jest.fn(),
+		};
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api,
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => character,
+			fnSaveCharacter: jest.fn(async () => true),
+			fnIsCurrentCharacter: () => true,
+			fnToast: jest.fn(),
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._role = "player";
+		partyInventory._recipients = [{id: "character-2", label: "Second", isOwned: true}];
+		partyInventory._draft = {
+			kind: "character",
+			entryId: "stack-1",
+			quantity: 1,
+			maxQuantity: 2,
+			blockers: [],
+			destinationKind: "character",
+			recipientId: "character-2",
+			commandId: "propose-command-1",
+			resolutionCommandId: "resolve-command-1",
+			cancellationCommandId: "cancel-command-1",
+			transfer: null,
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+
+		expect(api.pProposeTransfer).toHaveBeenCalledWith(expect.objectContaining({
+			rulesVersionId: null,
+		}));
+		expect(api.pResolveTransfer).not.toHaveBeenCalled();
+		expect(partyInventory._announcement).toContain("Transfer complete");
+	});
+
+	it("accepts a reserved same-owner response from an older Hub server", async () => {
+		const character = {
+			inventory: [{id: "stack-1", quantity: 2, item: {name: "Rations", source: "PHB"}}],
+		};
+		const api = {
+			pProposeTransfer: jest.fn(async () => ({transfer: {id: "transfer-1", status: "reserved"}})),
+			pResolveTransfer: jest.fn(async () => ({transfer: {id: "transfer-1", status: "committed"}})),
+		};
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api,
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => character,
+			fnSaveCharacter: jest.fn(async () => true),
+			fnIsCurrentCharacter: () => true,
+			fnGetRulesVersionId: () => "rules-1",
+			fnToast: jest.fn(),
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._role = "player";
+		partyInventory._recipients = [{id: "character-2", label: "Second", isOwned: true}];
+		partyInventory._draft = {
+			kind: "character",
+			entryId: "stack-1",
+			quantity: 1,
+			maxQuantity: 2,
+			blockers: [],
+			destinationKind: "character",
+			recipientId: "character-2",
+			commandId: "propose-command-1",
+			resolutionCommandId: "resolve-command-1",
+			cancellationCommandId: "cancel-command-1",
+			transfer: null,
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+
+		expect(api.pResolveTransfer).toHaveBeenCalledWith(expect.objectContaining({
+			transferId: "transfer-1",
+			decision: "accept",
+			idempotencyKey: "resolve-command-1",
+			rulesVersionId: "rules-1",
+		}));
+		expect(partyInventory._announcement).toContain("Transfer complete");
+	});
+
+	it("reconciles a stale same-owner acceptance before using a fresh policy pin and key", async () => {
+		const character = {
+			inventory: [{id: "stack-1", quantity: 2, item: {name: "Rations", source: "PHB"}}],
+		};
+		const resolve = jest.fn()
+			.mockRejectedValueOnce(Object.assign(new Error("stale rules"), {code: "RULES_VERSION_STALE", status: 409}))
+			.mockResolvedValueOnce({transfer: {id: "transfer-1", status: "committed"}});
+		const api = {
+			pProposeTransfer: jest.fn(async () => ({transfer: {id: "transfer-1", status: "reserved"}})),
+			pResolveTransfer: resolve,
+			pListTransfers: jest.fn(async () => [{id: "transfer-1", status: "reserved"}]),
+			pGetCampaignContext: jest.fn(async () => ({rulesVersion: {id: "rules-2"}})),
+		};
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api,
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => character,
+			fnSaveCharacter: jest.fn(async () => true),
+			fnIsCurrentCharacter: () => true,
+			fnGetRulesVersionId: () => "rules-1",
+			fnToast: jest.fn(),
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._role = "player";
+		partyInventory._recipients = [{id: "character-2", label: "Second", isOwned: true}];
+		partyInventory._draft = {
+			kind: "character",
+			entryId: "stack-1",
+			quantity: 1,
+			maxQuantity: 2,
+			blockers: [],
+			destinationKind: "character",
+			recipientId: "character-2",
+			commandId: "propose-command-1",
+			resolutionCommandId: "resolve-command-1",
+			cancellationCommandId: "cancel-command-1",
+			transfer: null,
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+
+		expect(api.pProposeTransfer).toHaveBeenCalledTimes(1);
+		expect(api.pListTransfers).toHaveBeenCalledTimes(1);
+		expect(api.pGetCampaignContext).toHaveBeenCalledTimes(1);
+		expect(resolve).toHaveBeenCalledTimes(2);
+		expect(resolve.mock.calls[0][0]).toEqual(expect.objectContaining({
+			rulesVersionId: "rules-1",
+			idempotencyKey: "resolve-command-1",
+		}));
+		expect(resolve.mock.calls[1][0]).toEqual(expect.objectContaining({
+			rulesVersionId: "rules-2",
+		}));
+		expect(resolve.mock.calls[1][0].idempotencyKey).not.toBe("resolve-command-1");
+		expect(partyInventory._announcement).toContain("Transfer complete");
+	});
+
+	it("replays a lost direct proposal with the same key before attempting another source save", async () => {
+		const character = {
+			inventory: [{id: "stack-1", quantity: 2, item: {name: "Rations", source: "PHB"}}],
+		};
+		const save = jest.fn(async () => true);
+		const propose = jest.fn()
+			.mockImplementationOnce(async () => {
+				character.inventory = [];
+				throw Object.assign(new Error("gateway lost response"), {code: "SERVICE_UNAVAILABLE", status: 502});
+			})
+			.mockResolvedValueOnce({transfer: {id: "transfer-1", status: "committed"}});
+		let rulesReadCount = 0;
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {
+				pProposeTransfer: propose,
+				pResolveTransfer: jest.fn(),
+				pListTransfers: jest.fn(async () => [{id: "transfer-1", status: "committed"}]),
+			},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => character,
+			fnSaveCharacter: save,
+			fnIsCurrentCharacter: () => true,
+			fnGetRulesVersionId: () => `rules-${++rulesReadCount}`,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._role = "player";
+		partyInventory._recipients = [{id: "character-2", label: "Second", isOwned: true}];
+		partyInventory._draft = {
+			kind: "character",
+			entryId: "stack-1",
+			quantity: 1,
+			maxQuantity: 2,
+			blockers: [],
+			destinationKind: "character",
+			recipientId: "character-2",
+			commandId: "stable-proposal-key",
+			resolutionCommandId: "stable-resolution-key",
+			cancellationCommandId: "stable-cancellation-key",
+			transfer: null,
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+		expect(partyInventory._isDraftEditable()).toBe(false);
+		await expect(partyInventory._pCancelDraft()).resolves.toBe(false);
+		expect(partyInventory._draft).not.toBeNull();
+		expect(partyInventory._error).toContain("not yet confirmed");
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+
+		expect(save).toHaveBeenCalledTimes(1);
+		expect(propose).toHaveBeenCalledTimes(2);
+		expect(propose.mock.calls.map(([input]) => input.idempotencyKey)).toEqual([
+			"stable-proposal-key",
+			"stable-proposal-key",
+		]);
+		expect(propose.mock.calls.map(([input]) => input.rulesVersionId)).toEqual(["rules-1", "rules-1"]);
+		expect(propose.mock.calls.map(([input]) => input.payload.items[0].quantity)).toEqual([1, 1]);
+		expect(partyInventory._announcement).toContain("Transfer complete");
+	});
+
+	it("keeps frozen proposal, acceptance, and refresh controls aligned with immutable intent", () => {
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => ({
+				inventory: [{id: "stack-1", quantity: 2, item: {name: "Rations", source: "PHB"}}],
+			}),
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._role = "player";
+		partyInventory._recipients = [];
+		partyInventory._draft = {
+			kind: "character",
+			entryId: "stack-1",
+			entryName: "Rations",
+			quantity: 1,
+			maxQuantity: 2,
+			blockers: [],
+			destinationKind: "character",
+			recipientId: "character-2",
+			commandId: "proposal-1",
+			resolutionCommandId: "accept-1",
+			cancellationCommandId: "reject-1",
+			proposalRequest: {isAutoResolved: true},
+			transfer: null,
+		};
+		const quantity = {dataset: {partyInventoryFocus: "quantity"}, disabled: false};
+		const destination = {dataset: {partyInventoryFocus: "destination"}, disabled: false};
+		const cancel = {dataset: {partyInventoryFocus: "cancel"}, disabled: false};
+		const submit = {dataset: {partyInventoryFocus: "submit"}, disabled: false};
+		const summary = {textContent: ""};
+		const composer = {
+			querySelector: selector => {
+				if (selector === ".charsheet__party-inventory-confirmation") return summary;
+				if (selector === "button[type='submit']") return submit;
+				return null;
+			},
+			querySelectorAll: () => [quantity, destination, cancel, submit],
+		};
+
+		partyInventory._syncComposerSummary(composer);
+
+		expect(summary.textContent).toContain("the original recipient");
+		expect(summary.textContent).not.toContain("Second");
+		expect(quantity.disabled).toBe(true);
+		expect(destination.disabled).toBe(true);
+		expect(cancel.disabled).toBe(true);
+		expect(submit.disabled).toBe(false);
+
+		partyInventory._draft.transfer = null;
+		partyInventory._draft.proposalRequest = null;
+		partyInventory._needsAuthoritativeRefresh = true;
+		partyInventory._syncComposerSummary(composer);
+
+		expect(quantity.disabled).toBe(true);
+		expect(destination.disabled).toBe(true);
+		expect(cancel.disabled).toBe(false);
+		expect(submit.disabled).toBe(true);
+
+		partyInventory._needsAuthoritativeRefresh = false;
+		partyInventory._draft.transfer = {id: "transfer-1", status: "reserved"};
+		partyInventory._transferResolutionDrafts.stage({
+			campaignId: "campaign-1",
+			transferId: "transfer-1",
+			decision: "accept",
+			idempotencyKey: "accept-1",
+		});
+		partyInventory._syncComposerSummary(composer);
+
+		expect(cancel.disabled).toBe(true);
+		expect(submit.disabled).toBe(false);
+	});
+
+	it("fences cancellation while an acceptance outcome is unresolved", async () => {
+		const resolve = jest.fn(async () => {
+			throw Object.assign(new Error("gateway lost response"), {code: "SERVICE_UNAVAILABLE", status: 502});
+		});
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {
+				pProposeTransfer: jest.fn(async () => ({transfer: {id: "transfer-1", status: "reserved"}})),
+				pResolveTransfer: resolve,
+			},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => ({
+				inventory: [{id: "stack-1", quantity: 2, item: {name: "Rations", source: "PHB"}}],
+			}),
+			fnSaveCharacter: jest.fn(async () => true),
+			fnIsCurrentCharacter: () => true,
+			fnGetRulesVersionId: () => "rules-1",
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._role = "player";
+		partyInventory._recipients = [{id: "character-2", label: "Second", isOwned: true}];
+		partyInventory._draft = {
+			kind: "character",
+			entryId: "stack-1",
+			quantity: 1,
+			maxQuantity: 2,
+			blockers: [],
+			destinationKind: "character",
+			recipientId: "character-2",
+			commandId: "proposal-1",
+			resolutionCommandId: "accept-1",
+			cancellationCommandId: "reject-1",
+			transfer: null,
+		};
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+		await expect(partyInventory._pCancelDraft()).resolves.toBe(false);
+
+		expect(resolve).toHaveBeenCalledTimes(1);
+		expect(resolve).toHaveBeenCalledWith(expect.objectContaining({
+			decision: "accept",
+			idempotencyKey: "accept-1",
+		}));
+		expect(partyInventory._getPendingAcceptance()).toEqual(expect.objectContaining({
+			decision: "accept",
+			idempotencyKey: "accept-1",
+		}));
+		expect(partyInventory._draft.needsStatusCheck).toBe(true);
+		expect(partyInventory._error).toContain("acceptance outcome is not yet confirmed");
+	});
+
+	it("rotates the complete proposal after a definitive stale policy rejection", async () => {
+		const propose = jest.fn()
+			.mockRejectedValueOnce(Object.assign(new Error("stale rules"), {code: "RULES_VERSION_STALE", status: 409}))
+			.mockResolvedValueOnce({transfer: {id: "transfer-1", status: "committed"}});
+		const getCampaignContext = jest.fn(async () => ({rulesVersion: {id: "rules-2"}}));
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {
+				pProposeTransfer: propose,
+				pGetCampaignContext: getCampaignContext,
+			},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => ({
+				inventory: [{id: "stack-1", quantity: 2, item: {name: "Rations", source: "PHB"}}],
+			}),
+			fnSaveCharacter: jest.fn(async () => true),
+			fnIsCurrentCharacter: () => true,
+			fnGetRulesVersionId: () => "rules-1",
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._role = "player";
+		partyInventory._recipients = [{id: "character-2", label: "Second", isOwned: true}];
+		partyInventory._draft = {
+			kind: "character",
+			entryId: "stack-1",
+			quantity: 1,
+			maxQuantity: 2,
+			blockers: [],
+			destinationKind: "character",
+			recipientId: "character-2",
+			commandId: "proposal-1",
+			resolutionCommandId: "accept-1",
+			cancellationCommandId: "reject-1",
+			transfer: null,
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+
+		expect(propose.mock.calls.map(([request]) => request.rulesVersionId)).toEqual(["rules-1", "rules-2"]);
+		expect(getCampaignContext).toHaveBeenCalledTimes(1);
+		expect(propose.mock.calls[0][0].idempotencyKey).toBe("proposal-1");
+		expect(propose.mock.calls[1][0].idempotencyKey).not.toBe("proposal-1");
+	});
+
+	it("preserves stale-policy recovery across cancel until the next proposal refreshes context", async () => {
+		const propose = jest.fn()
+			.mockRejectedValueOnce(Object.assign(new Error("stale rules"), {code: "RULES_VERSION_STALE", status: 409}))
+			.mockResolvedValueOnce({transfer: {id: "transfer-1", status: "committed"}});
+		const getCampaignContext = jest.fn(async () => ({rulesVersion: {id: "rules-2"}}));
+		let rulesVersionId = "rules-1";
+		let contextRefreshCount = 0;
+		const refreshCampaignContext = jest.fn(async () => {
+			if (++contextRefreshCount === 1) return false;
+			rulesVersionId = "rules-2";
+			return true;
+		});
+		let saveCount = 0;
+		const saveCharacter = jest.fn(async () => ++saveCount === 1 || rulesVersionId === "rules-2");
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {
+				pProposeTransfer: propose,
+				pGetCampaignContext: getCampaignContext,
+			},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => ({
+				inventory: [{id: "stack-1", quantity: 2, item: {name: "Rations", source: "PHB"}}],
+			}),
+			fnSaveCharacter: saveCharacter,
+			fnRefreshCampaignContext: refreshCampaignContext,
+			fnIsCurrentCharacter: () => true,
+			fnGetRulesVersionId: () => rulesVersionId,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._role = "player";
+		partyInventory._recipients = [{id: "character-2", label: "Second", isOwned: true}];
+		partyInventory._draft = {
+			kind: "character",
+			entryId: "stack-1",
+			quantity: 1,
+			maxQuantity: 2,
+			blockers: [],
+			destinationKind: "character",
+			recipientId: "character-2",
+			commandId: "proposal-1",
+			resolutionCommandId: "accept-1",
+			cancellationCommandId: "reject-1",
+			transfer: null,
+		};
+		let refreshCount = 0;
+		partyInventory._pDrainRefresh = jest.fn(async () => ++refreshCount > 1);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+		expect(partyInventory._needsAuthoritativeRefresh).toBe(true);
+
+		await expect(partyInventory._pCancelDraft()).resolves.toBe(true);
+		expect(partyInventory._draft).toBeNull();
+		expect(partyInventory._needsAuthoritativeRefresh).toBe(true);
+
+		await expect(partyInventory._pManualRefresh({errorSource: "action"})).resolves.toBe(false);
+		expect(partyInventory._needsAuthoritativeRefresh).toBe(true);
+		expect(partyInventory._needsFreshProposalRules).toBe(true);
+		expect(saveCharacter).toHaveBeenCalledTimes(1);
+
+		await expect(partyInventory._pManualRefresh({errorSource: "action"})).resolves.toBe(true);
+		expect(partyInventory._needsAuthoritativeRefresh).toBe(false);
+		expect(partyInventory._beginDraft({kind: "character", entryId: "stack-1"})).toBe(true);
+		partyInventory._draft.destinationKind = "character";
+		partyInventory._draft.recipientId = "character-2";
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+
+		expect(propose.mock.calls.map(([request]) => request.rulesVersionId)).toEqual(["rules-1", "rules-2"]);
+		expect(refreshCampaignContext).toHaveBeenCalledTimes(2);
+		expect(getCampaignContext).not.toHaveBeenCalled();
+		expect(saveCharacter).toHaveBeenCalledTimes(2);
+		expect(refreshCampaignContext.mock.invocationCallOrder[1]).toBeLessThan(saveCharacter.mock.invocationCallOrder[1]);
+	});
+
+	it("uses the live rules pin when context advances after stale-policy recovery", async () => {
+		let rulesVersionId = "rules-1";
+		const savedRulesVersionIds = [];
+		const saveCharacter = jest.fn(async () => {
+			savedRulesVersionIds.push(rulesVersionId);
+			return true;
+		});
+		const refreshCampaignContext = jest.fn(async () => {
+			rulesVersionId = "rules-2";
+			return true;
+		});
+		const propose = jest.fn(async request => {
+			if (request.rulesVersionId === "rules-1") {
+				throw Object.assign(new Error("stale rules"), {code: "RULES_VERSION_STALE", status: 409});
+			}
+			if (request.rulesVersionId !== "rules-3") {
+				throw Object.assign(new Error("stale rules again"), {code: "RULES_VERSION_STALE", status: 409});
+			}
+			return {transfer: {id: "transfer-1", status: "committed"}};
+		});
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {pProposeTransfer: propose},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => ({
+				inventory: [{id: "stack-1", quantity: 2, item: {name: "Rations", source: "PHB"}}],
+			}),
+			fnSaveCharacter: saveCharacter,
+			fnRefreshCampaignContext: refreshCampaignContext,
+			fnIsCurrentCharacter: () => true,
+			fnGetRulesVersionId: () => rulesVersionId,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._role = "player";
+		partyInventory._recipients = [{id: "character-2", label: "Second", isOwned: true}];
+		partyInventory._draft = {
+			kind: "character",
+			entryId: "stack-1",
+			quantity: 1,
+			maxQuantity: 2,
+			blockers: [],
+			destinationKind: "character",
+			recipientId: "character-2",
+			commandId: "proposal-1",
+			resolutionCommandId: "accept-1",
+			cancellationCommandId: "reject-1",
+			transfer: null,
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+		expect(rulesVersionId).toBe("rules-2");
+
+		rulesVersionId = "rules-3";
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+
+		expect(refreshCampaignContext).toHaveBeenCalledTimes(1);
+		expect(savedRulesVersionIds).toEqual(["rules-1", "rules-3"]);
+		expect(propose.mock.calls.map(([request]) => request.rulesVersionId)).toEqual(["rules-1", "rules-3"]);
+		expect(propose).toHaveBeenCalledTimes(2);
+	});
+
+	it("requires an authoritative refresh after a definitive proposal rejection before retrying", async () => {
+		const propose = jest.fn()
+			.mockRejectedValueOnce(Object.assign(new Error("quantity changed"), {code: "TRANSFER_INSUFFICIENT", status: 409}))
+			.mockResolvedValueOnce({transfer: {id: "transfer-1", status: "reserved"}});
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {pProposeTransfer: propose},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => ({
+				inventory: [{id: "stack-1", quantity: 2, item: {name: "Rations", source: "PHB"}}],
+			}),
+			fnSaveCharacter: jest.fn(async () => true),
+			fnIsCurrentCharacter: () => true,
+			fnToast: jest.fn(),
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._role = "player";
+		partyInventory._draft = {
+			kind: "character",
+			entryId: "stack-1",
+			quantity: 1,
+			maxQuantity: 2,
+			blockers: [],
+			destinationKind: "party_inventory",
+			recipientId: null,
+			commandId: "proposal-1",
+			resolutionCommandId: "accept-1",
+			cancellationCommandId: "reject-1",
+			transfer: null,
+		};
+		const refreshes = [];
+		partyInventory._pDrainRefresh = jest.fn(async () => {
+			refreshes.push({...partyInventory._refreshFlags});
+			return refreshes.length > 1;
+		});
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+
+		expect(refreshes[0]).toEqual({character: true, party: true});
+		expect(partyInventory._draft.proposalRequest).toBeNull();
+		expect(partyInventory._needsAuthoritativeRefresh).toBe(true);
+		expect(partyInventory._isDraftEditable()).toBe(false);
+		expect(partyInventory._error).toContain("latest character and party stash balances");
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+		expect(propose).toHaveBeenCalledTimes(1);
+
+		await expect(partyInventory._pCancelDraft()).resolves.toBe(true);
+		expect(partyInventory._draft).toBeNull();
+		expect(partyInventory._needsAuthoritativeRefresh).toBe(true);
+		expect(partyInventory._error).toContain("latest character and party stash balances");
+		expect(partyInventory._beginDraft({kind: "character", entryId: "stack-1"})).toBe(false);
+		expect(propose).toHaveBeenCalledTimes(1);
+
+		await expect(partyInventory._pManualRefresh({errorSource: "action"})).resolves.toBe(true);
+		expect(partyInventory._needsAuthoritativeRefresh).toBe(false);
+		expect(partyInventory._beginDraft({kind: "character", entryId: "stack-1"})).toBe(true);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+		expect(propose).toHaveBeenCalledTimes(2);
+	});
+
+	it("requires authoritative status after a definitive cancellation miss", async () => {
+		const resolve = jest.fn(async () => {
+			throw Object.assign(new Error("already terminal"), {code: "TRANSFER_NOT_FOUND", status: 404});
+		});
+		const listTransfers = jest.fn(async () => [{id: "transfer-1", status: "committed"}]);
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {
+				pResolveTransfer: resolve,
+				pListTransfers: listTransfers,
+			},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+			fnToast: jest.fn(),
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._draft = {
+			kind: "character",
+			destinationKind: "character",
+			transfer: {id: "transfer-1", status: "reserved"},
+			cancellationCommandId: "reject-1",
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pCancelDraft()).resolves.toBe(false);
+		await expect(partyInventory._pCancelDraft()).resolves.toBe(false);
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+
+		expect(resolve).toHaveBeenCalledTimes(1);
+		expect(listTransfers).toHaveBeenCalledTimes(1);
+		expect(partyInventory._draft).toBeNull();
+	});
+
+	it("reconciles an expired proposal by its actor command before unlocking the composer", async () => {
+		const propose = jest.fn();
+		const listTransfers = jest.fn(async () => [{
+			id: "transfer-1",
+			status: "proposed",
+			actorCommandId: "expired-key",
+		}]);
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {
+				pProposeTransfer: propose,
+				pListTransfers: listTransfers,
+			},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+			fnToast: jest.fn(),
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._draft = {
+			kind: "character",
+			destinationKind: "character",
+			proposalRequest: {idempotencyKey: "expired-key"},
+			proposalReplayUntil: 0,
+			transfer: null,
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+		expect(propose).not.toHaveBeenCalled();
+		expect(listTransfers).toHaveBeenCalledTimes(1);
+		expect(partyInventory._pDrainRefresh).toHaveBeenCalledTimes(1);
+		expect(partyInventory._draft).toEqual(expect.objectContaining({
+			transfer: expect.objectContaining({id: "transfer-1", status: "proposed"}),
+		}));
+		expect(partyInventory._error).toContain("still pending");
+	});
+
+	it("closes an expired proposal only after confirming no matching actor command exists", async () => {
+		const listTransfers = jest.fn(async () => [{
+			id: "other-transfer",
+			status: "proposed",
+			actorCommandId: "other-key",
+		}]);
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {
+				pProposeTransfer: jest.fn(),
+				pListTransfers: listTransfers,
+			},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+			fnToast: jest.fn(),
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._draft = {
+			kind: "party_inventory",
+			destinationKind: "character",
+			proposalRequest: {idempotencyKey: "expired-key"},
+			proposalReplayUntil: 0,
+			transfer: null,
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+
+		expect(listTransfers).toHaveBeenCalledTimes(1);
+		expect(partyInventory._draft).toBeNull();
+		expect(partyInventory._announcement).toContain("No matching transfer was found");
+	});
+
+	it("keeps an expired legacy proposal locked when matching pending transfers are ambiguous", async () => {
+		const pending = {
+			status: "proposed",
+			sourceKind: "party_inventory",
+			targetKind: "character",
+			targetId: "character-1",
+			payload: {request: {items: [{entryId: "stack-1", quantity: 1}], currency: {}}},
+		};
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {
+				pListTransfers: jest.fn(async () => [
+					{id: "transfer-1", ...pending},
+					{id: "transfer-2", ...pending},
+				]),
+			},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._draft = {
+			kind: "party_inventory",
+			destinationKind: "character",
+			proposalRequest: {
+				sourceKind: "party_inventory",
+				sourceId: "party-1",
+				targetKind: "character",
+				targetId: "character-1",
+				payload: {items: [{entryId: "stack-1", quantity: 1}], currency: {}},
+				idempotencyKey: "expired-key",
+			},
+			proposalReplayUntil: 0,
+			transfer: null,
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+
+		expect(partyInventory._draft.proposalRequest.idempotencyKey).toBe("expired-key");
+		expect(partyInventory._draft.transfer).toBeNull();
+		expect(partyInventory._error).toContain("Multiple matching pending transfers");
+	});
+
+	it("reconciles a replayed proposal receipt before announcing its outcome", async () => {
+		const propose = jest.fn()
+			.mockRejectedValueOnce(Object.assign(new Error("lost response"), {code: "NETWORK_UNAVAILABLE", status: 0}))
+			.mockResolvedValueOnce({transfer: {id: "transfer-1", status: "reserved"}});
+		const listTransfers = jest.fn(async () => [{id: "transfer-1", status: "rejected"}]);
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {
+				pProposeTransfer: propose,
+				pListTransfers: listTransfers,
+			},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => ({
+				inventory: [{id: "stack-1", quantity: 2, item: {name: "Rations", source: "PHB"}}],
+			}),
+			fnSaveCharacter: jest.fn(async () => true),
+			fnIsCurrentCharacter: () => true,
+			fnGetRulesVersionId: () => "rules-1",
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._role = "player";
+		partyInventory._draft = {
+			kind: "character",
+			entryId: "stack-1",
+			quantity: 1,
+			maxQuantity: 2,
+			blockers: [],
+			destinationKind: "party_inventory",
+			recipientId: null,
+			commandId: "proposal-1",
+			resolutionCommandId: "accept-1",
+			cancellationCommandId: "reject-1",
+			transfer: null,
+		};
+		partyInventory._pDrainRefresh = jest.fn(async () => true);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+
+		expect(listTransfers).toHaveBeenCalledTimes(1);
+		expect(partyInventory._announcement).toBe("Transfer was rejected. The reserved items were restored.");
 	});
 
 	it("keeps a reserved draft recoverable when authoritative refresh fails", async () => {
@@ -711,6 +1810,7 @@ describe("Character Sheet party inventory", () => {
 			fnIsCurrentCharacter: () => true,
 		});
 		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._role = "player";
 		partyInventory._draft = {
 			kind: "character",
 			entryId: "stack-1",

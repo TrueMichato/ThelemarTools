@@ -45,7 +45,7 @@ security boundary.
 | `pending_actions` | Legacy pre-v3 structured effect workflow | actor, optional target character, status, payload, optional expiry | legacy history only; migration 0005 cancels arbitrary proposed rows |
 | `semantic_operations` | Versioned character intent lifecycle | one target, optional source, pinned template/choice/rules/content, optional closed source cost and deterministic seed, source/target result linkage, <=24h proposal expiry | direct applied operation or proposed -> applied/rejected/cancelled/expired/failed |
 | `semantic_operation_commands` | Persistent exactly-once command result | global command id, actor/body hash, operation, command type, response/event ids | create/resolve replay and mutated-body rejection |
-| `transfers` | Escrowed asset workflow | exactly one source and target container, status, escrow payload | created directly as reserved -> committed/rejected/cancelled; proposed/accepted/expired reserved |
+| `transfers` | Asset-transfer workflow | exactly one source and target container, status, escrow/request payload | direct authority is created as committed; approval-bound escrow is reserved -> committed/rejected/cancelled; player stash withdrawal is proposed -> committed/rejected/cancelled |
 | `domain_events` | Ordered client-visible history | unique campaign sequence; visibility and explicit-recipient constraint | replay/live fanout |
 | `audit_entries` | Security/admin history | nullable campaign/account/session refs; details JSON | mutations append relevant audit |
 | `command_receipts` | Payload-aware idempotency | account+key primary key; request hash; 24h expiry | character payload compacted to reference |
@@ -103,8 +103,10 @@ A target document that cannot supply a positive hit-point maximum fails the whol
 
 ### Transfer
 
-Reservation removes source assets into `payload.escrow`. Resolution writes either target (commit) or source
-(restore) and then changes transfer status. Source/target aggregate locks are acquired in sorted id order.
+Direct DM/co-DM and same-owner character transfers validate and write source, target, terminal transfer, audit,
+event, outbox, and receipt in one command. Approval-bound reservation removes source assets into
+`payload.escrow`; resolution writes either target (commit) or source (restore) and then changes transfer status.
+Source/target aggregate locks are acquired in sorted id order for both paths.
 
 ## State machines
 
@@ -193,6 +195,11 @@ revision.
 
 ```mermaid
 stateDiagram-v2
+  [*] --> proposed: player requests party item; stash unchanged
+  proposed --> committed: DM approves; source and target change atomically
+  proposed --> rejected: DM declines or requester cancels; stash unchanged
+  proposed --> cancelled: lifecycle cancellation; stash unchanged
+  [*] --> committed: server-authorized DM/co-DM or same-owner move
   [*] --> reserved: source moved to escrow
   reserved --> committed: target accepts
   reserved --> rejected: target rejects; source restored
@@ -200,7 +207,13 @@ stateDiagram-v2
   reserved --> expired: reserved; not implemented
 ```
 
-`proposed` and `accepted` are allowed schema states but current API/store does not persist them.
+`proposed` is persisted only for a player request from party inventory to that player's own character. The
+request stores normalized quantities and a server-derived preview, but the shared source remains untouched
+until a DM/co-DM accepts. Acceptance locks both participants, rechecks the live source, and transfers the
+fresh canonical escrow in one transaction; `TRANSFER_INSUFFICIENT` leaves the request proposed. `accepted`
+remains an unused schema state. The direct path has no `reserved` state visible to a recipient: authority is
+derived from trusted membership role and target ownership, and the initial idempotent proposal either commits
+both containers or changes neither.
 
 ### Outbox
 
@@ -245,16 +258,47 @@ Whole-item transfer is refused if removal would require Character Sheet recalcul
 
 Partial stack transfer is allowed because the source wrapper remains. Cross-container commit resets
 ownership-local equipped/attuned/starred state and mints a new id unless full wrapper metadata is merge
-compatible. Restore preserves source identity/index.
+compatible. Comparison removes only deterministic Character Sheet aliases and empty composition defaults;
+spent charges, non-empty upgrades/gemstones, custom metadata, provenance, and other semantic differences remain
+stack-separating. Restore preserves source identity/index.
+
+Open-sheet authoritative reconciliation uses the same deterministic-alias and immutable-repair-catalog
+comparison as post-save reconciliation. Trusted hydration is limited to non-custom official UIDs, and
+comparison patches take add/replace values from the raw local candidate before applying to raw canonical truth.
+Semantically identical local/server candidates therefore converge without deleting either player metadata or
+canonical item metadata. An ordinary recovery conflict clears automatically only when the overlap is gone and
+every draft discarded by an earlier authoritative rebase is semantically represented by a surviving
+base/local/server candidate. Unique local intent remains exportable behind explicit conflict recovery, and
+live-operation conflicts are never cleared through this shortcut. A failed-write recovery marker is removed
+only when its draft is already represented by canonical truth; disjoint unsaved edits retain their retry and
+reload recovery state.
 
 ## Atomic item-award invariant
 
 A DM/co-DM award is one command for an ordered unique target set. Every target receives the same whole-number
 quantity, or no target changes. A stash-backed award locks and debits the selected authoritative stack once for
 the full `quantity * target count`, preserves transferable stack metadata through the existing inventory
-normalization, and commits that debit with every destination write. Catalog-like sources carry only bounded safe
-summary metadata. All destination inventory changes delete derived `data.carry` authority instead of
-recomputing it without a Character Sheet.
+normalization, and commits that debit with every destination write. Catalog-like command bodies and
+`item.granted` events carry only bounded safe summary metadata, but the authority resolves `name|source` from
+the generated site catalog or active campaign brew and stores the complete trusted item. New events retain
+their resolved site/campaign authority; legacy Recent identity may resolve only when exactly one authority owns
+the UID. Stash-derived grants remain selectable only through the live authoritative party stack rather than a
+Recent `name|source` projection. A campaign item cannot shadow a site UID. Unknown, source-kind-mismatched, duplicate, or cross-authority
+ambiguous identities fail; browser metadata never becomes canonical merely because it is present in the summary.
+Simple campaign `_copy` resolution also removes the generic/item parent-only publication fields that the site
+copy system preserves only by explicit request. All destination inventory changes delete derived `data.carry`
+authority instead of recomputing it without a Character Sheet.
+
+When a legacy summary-only inventory row is opened in the Character Sheet, item identity is repaired from an
+exact `name|source` match in an immutable repository-owned site/variant repair projection. Before enhanced item
+loading begins, the sheet snapshots only the authoritative repair-sensitive fields needed for that decision.
+The corresponding broad repair match comes from a separate enhanced site-plus-variant authority, so a mutable
+catalog collision cannot borrow the pristine identity and inject other fields. Mutable prerelease or brew
+catalogs cannot retroactively supply an old summary's entries/effects without exact
+historical provenance. Authored site metadata therefore survives save and later stack comparison while
+cross-authority substitutions, injected render caches, and publication hints remain excluded. Hub characters
+also bypass the local-save catalog effect hydrator, so complete or typeless authoritative inventory is not
+rewritten when the current client brew changes.
 
 ## Known domain gaps
 

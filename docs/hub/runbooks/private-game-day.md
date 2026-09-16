@@ -43,6 +43,9 @@ Do not start until every item below is true:
   commands.
 - The three GitHub accounts are on the private allowlist. Do not paste numeric subjects, tokens, cookies, invite
   tokens, monitor URLs, or OAuth material into the worksheet.
+- Campaign A was created before the approved release/configuration window, has an active immutable rules version,
+  and its exact UUID passed the [peer source-cost rollout](peer-source-cost-rollout.md) pre-cutover check.
+- Campaign B is not present in `HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS`. Production wildcard rollout is forbidden.
 - Each participant understands that staging uses synthetic game content only. Do not upload real private notes,
   personal information, or an irreplaceable character.
 
@@ -84,6 +87,12 @@ Create only synthetic data:
 The two-campaign layout makes privacy visible: Player A can switch between campaigns, Player B must never discover
 Campaign B, and Campaign A rules/homebrew must not leak into Campaign B or local mode.
 
+Create both campaigns during the approved setup window before the release used for the game day. Publish and
+activate a baseline immutable rules version for Campaign A, then enroll only Campaign A's exact UUID through the
+[peer source-cost rollout](peer-source-cost-rollout.md). This deployment/configuration mutation requires separate
+operator approval and must use the immutable release procedure; do not edit campaign rows or restart the BFF with
+ad hoc commands. Campaign B deliberately remains unenrolled.
+
 ## Evidence rules
 
 Create one private worksheet before starting. For every check record:
@@ -109,6 +118,11 @@ or database connection strings. Crop screenshots to the relevant UI and review t
 4. Record the four live container IDs and restart counts.
 5. Confirm no unresolved P0/P1 defect exists.
 6. Confirm all participants can reach the HTTPS Hub page while signed out.
+7. Confirm the release evidence records `peer_source_cost_rollout=passed` plus the preflight-output hash, and
+   record the expected configured campaign count from the preflight output without copying the protected
+   environment file into the worksheet.
+8. Through the normal authenticated application, confirm Campaign A advertises the exact protocol-4 peer
+   source-cost capability and Campaign B advertises `enabled: false`.
 
 If any check fails, stop before invitations and use the triage section below.
 
@@ -127,7 +141,7 @@ the operator sees no authentication-error spike or secret-bearing log.
 
 ### GD-02 — two campaigns and invitations
 
-1. DM creates Campaign A and Campaign B.
+1. DM confirms the prepared Campaign A and Campaign B identities match the private change record.
 2. DM creates separate player invites for Player A to both campaigns and Player B to Campaign A only.
 3. Each player redeems only their intended link.
 4. Try to reuse one consumed link, then revoke one unused replacement invite and try it.
@@ -199,24 +213,40 @@ correct, activity is readable, and retries do not duplicate the award.
 1. Record Aster's and the party inventory's relevant item/currency balances.
 2. Player A offers one awarded item plus small CP/SP/GP amounts to party inventory.
 3. DM reviews the human-readable source, item, quantities, and destination, then accepts.
-4. Player A creates a second bounded offer of 1 CP; DM rejects it.
-5. Player A creates a third bounded offer of 1 SP and uses **Cancel** before the DM resolves it.
-6. DM transfers part of the accepted party stack to Bryn.
-7. Repeat one completed accepted request from browser history or retry UI if available.
+4. Player A uses **Request** on the stash from Aster's Character Sheet. Before approval, verify the stash and
+   character balances are unchanged; then DM uses **Approve** in the Campaign Hub.
+5. Create two requests that together exceed the remaining stack. Approve one, record
+   `TRANSFER_INSUFFICIENT` for the stale second approval, then decline it.
+6. Player A creates a bounded deposit of 1 CP; DM rejects it. Player A creates another of 1 SP and uses
+   **Cancel** before the DM resolves it.
+7. DM moves part of the accepted party stack to Bryn and confirms the move completes immediately under DM
+   authority rather than appearing as recipient consent.
+8. Force one synthetic post-transfer party-inventory refetch to return `NETWORK_UNAVAILABLE`. Use
+   **Retry latest balances**, then complete another transfer without reloading the page.
+9. Repeat one completed accepted request from browser history or retry UI if available.
 
-**Expected:** assets are reserved before acceptance, conserved exactly across source/destination, never duplicated,
-and replay returns the existing outcome. The rejected 1 CP and sender-cancelled 1 SP each return exactly once to
-Aster's original source identity; neither reaches party inventory or creates a duplicate.
+**Expected:** approval-bound character-source assets are reserved before acceptance/resolution and conserved
+exactly; DM/co-DM direct transfers, including party-source moves, commit immediately. A player stash request
+reserves nothing until DM approval. Metadata survives every character/stash round trip. Replay returns the
+existing outcome. Rejected/cancelled escrow returns exactly once to its original source identity, the stale
+request changes neither inventory, refresh/retry visibly refetches, and a later transfer succeeds without a page
+reload.
 
 ### GD-09 — cross-character Cure Wounds
 
 1. Reduce Bryn below maximum HP using an ordinary supported flow.
-2. Player A targets Bryn with Cure Wounds.
-3. Before Player B responds, verify Aster's spell slot has not been consumed.
-4. Player B rejects once; repeat and accept once.
+2. With Aster's campaign sheet already open, confirm the selector is available for the character's exact PHB or
+   XPHB Cure Wounds source. If it is absent, reload once; if the authoritative Campaign A capability is still
+   enabled but the selector remains absent, record a P2 defect and stop this scenario.
+3. Player A targets Bryn with Cure Wounds.
+4. Before Player B responds, verify Aster's spell slot has not been consumed.
+5. Player B rejects once; repeat and accept once.
+6. Repeat the proposal-and-acceptance check with the other supported PHB/XPHB Cure Wounds source using a second
+   synthetic caster when necessary.
 
 **Expected:** rejection changes neither HP nor slot; acceptance atomically spends exactly one valid slot and heals
-Bryn once; both sheets converge; private character details are absent from unrelated users and logs.
+Bryn once; both exact spell editions work without enabling another spell or target type; both sheets converge;
+private character details are absent from unrelated users and logs.
 
 ### GD-10 — roll history and visibility
 

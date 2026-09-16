@@ -133,6 +133,26 @@ export function applyJsonPatch (document, patches) {
 	return patches.reduce((out, patch) => applyPatchOperation(out, patch), copyJson(document));
 }
 
+function getJsonPointerValue (document, path) {
+	const segments = parsePointer(path);
+	let value = document;
+	for (const segment of segments) {
+		if (Array.isArray(value)) value = value[getArrayIndex(segment, {length: value.length})];
+		else {
+			if (!isPlainObject(value) || !Object.hasOwn(value, segment)) throw new TypeError(`JSON pointer path does not exist.`);
+			value = value[segment];
+		}
+	}
+	return value;
+}
+
+export function getJsonPatchesWithDocumentValues ({patches, document}) {
+	if (!Array.isArray(patches)) throw new TypeError(`Patches must be an array.`);
+	return patches.map(patch => patch.op === "remove"
+		? {...patch}
+		: {...patch, value: copyJson(getJsonPointerValue(document, patch.path))});
+}
+
 export function diffJson (before, after, {path = ""} = {}) {
 	if (isDeepEqual(before, after)) return [];
 
@@ -164,18 +184,31 @@ function pathsOverlap (a, b) {
 export function rebaseJsonChanges ({base, local, remote}) {
 	const localPatches = diffJson(base, local);
 	const remotePatches = diffJson(base, remote);
-	const conflicts = localPatches
-		.flatMap(localPatch => remotePatches
-			.filter(remotePatch => pathsOverlap(localPatch.path, remotePatch.path))
-			.map(remotePatch => ({localPath: localPatch.path, remotePath: remotePatch.path})));
+	const redundantLocalPatchIndexes = new Set();
+	const conflicts = localPatches.flatMap((localPatch, ixLocal) => remotePatches
+		.filter(remotePatch => pathsOverlap(localPatch.path, remotePatch.path))
+		.flatMap(remotePatch => {
+			const isConvergent = localPatch.path === remotePatch.path
+				&& localPatch.op === remotePatch.op
+				&& (
+					localPatch.op === "remove"
+					|| isDeepEqual(localPatch.value, remotePatch.value)
+				);
+			if (isConvergent) {
+				redundantLocalPatchIndexes.add(ixLocal);
+				return [];
+			}
+			return [{localPath: localPatch.path, remotePath: remotePatch.path}];
+		}));
 
 	if (conflicts.length) return {isConflict: true, conflicts, patches: localPatches, document: null};
+	const patches = localPatches.filter((_, ix) => !redundantLocalPatchIndexes.has(ix));
 	return {
 		isConflict: false,
 		conflicts: [],
-		patches: localPatches,
-		document: applyJsonPatch(remote, localPatches),
+		patches,
+		document: applyJsonPatch(remote, patches),
 	};
 }
 
-export {copyJson};
+export {copyJson, isDeepEqual};

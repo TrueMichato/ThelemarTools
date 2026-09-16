@@ -242,8 +242,12 @@ item's own fields:
 ```
 
 `getItems()` runs `projectItemMaterial()` over every item, so all downstream readers see the
-projected stats (`dmg1: "1d10"`, `penetration: 2`, …). Use `getItemRaw(id)` when you need the
-unprojected item — for example when previewing a *different* material. See
+projected stats (`dmg1: "1d10"`, `penetration: 2`, …). It also projects authored signed-number
+mechanic fields such as `bonusAc: "+1"` and `bonusSpellSaveDc: "+1"` as numbers. This read-time
+coercion does not rewrite the stored item, which is required for Hub-backed inventory to retain
+the exact canonical metadata supplied by the server. Use `getItemRaw(id)` when you need the
+unprojected, uncoerced item — for example when previewing a *different* material or comparing a
+Hub item to authoritative inventory state. See
 [21-item-materials.md](./21-item-materials.md).
 
 #### Opening equipment packs
