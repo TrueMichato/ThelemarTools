@@ -183,9 +183,10 @@ established character is absent. URL routing resolves owner-scoped create recove
 PATCH recovery before loading the selected character. Missing-server PATCH queues remain discoverable under
 their canonical storage id after reload, including when the original intent was create, but they never use
 `clientImportId` matching or replacement CREATE. Startup listing matches only an owner-visible server row with
-the same import id for genuine create recovery, then atomically moves the durable queue from its temporary key
-to the canonical character id. If the create never reached the server, the owner's recovery-only draft remains
-listed under its temporary id and retries with the original
+the same import id for genuine create recovery, and the stored record's `clientImportId` must equal that lookup
+alias rather than merely occupying its storage key. Only then does the repository atomically move the durable
+queue from its temporary key to the canonical character id. If the create never reached the server, the owner's
+recovery-only draft remains listed under its temporary id and retries with the original
 create idempotency key. Recovery is validated against the current account before hydration or migration, and
 cross-account collisions leave the original stored recovery untouched. Once a temporary create resolves to its
 canonical id, that alias is published only after the pending queue is durably migrated; a storage failure leaves

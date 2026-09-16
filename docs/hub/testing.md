@@ -335,8 +335,9 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   missing-server PATCH recovery surviving reload before export-then-remove-local resolution. The PATCH regressions
   cover both `CHARACTER_NOT_FOUND` and `IDEMPOTENCY_RESULT_GONE`, including CREATE success followed by activity
   PATCH failure, exercise production `pGetCampaignId`/roster/character reload routing, prove another account
-  cannot discover the recovery, prove no `clientImportId` rematch or CREATE occurs, and verify a later save uses
-  a fresh character identity. A real-browser dropdown regression drives the production
+  cannot discover the recovery, prove canonical/temporary aliases survive an owner-visible import-id collision,
+  require the stored create record's import id to match the lookup alias, prove no rematch or replacement CREATE
+  occurs, and verify a later save uses a fresh character identity. A real-browser dropdown regression drives the production
   `_updateCharacterDropdown` against an actual `<select>`: successful refresh selects the visible Create New
   Character option, while failed refresh removes the inaccessible character option without rolling back the
   committed discard. Memory and PostgreSQL authority tests prove stale carry rejection changes no character

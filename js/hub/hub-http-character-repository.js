@@ -200,7 +200,10 @@ export class HubHttpCharacterRepository {
 			}
 			if (isOwner && character.clientImportId && character.clientImportId !== character.id) {
 				const recoveryRecord = this._getRecoveryStorageRecord(character.clientImportId, {isRequireOwner: true});
-				if (recoveryRecord?.intent === "create" && !this._isMissingServerPatchRecoveryRecord(recoveryRecord)) {
+				const isMatchingCreateRecovery = recoveryRecord?.intent === "create"
+					&& recoveryRecord.parsed?.clientImportId === character.clientImportId
+					&& !this._isMissingServerPatchRecoveryRecord(recoveryRecord);
+				if (isMatchingCreateRecovery) {
 					recovery = this.getPendingRecovery(character.clientImportId);
 					if (recovery) this._migrateCharacterIdentity({fromId: character.clientImportId, toId: character.id});
 				}

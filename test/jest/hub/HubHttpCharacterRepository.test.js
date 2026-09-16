@@ -863,6 +863,49 @@ describe("HTTP character repository", () => {
 		expect(storage.getItem(`hub-character-recovery:campaign-1:${ownerBCharacter.id}`)).toBeNull();
 	});
 
+	it("does not migrate create recovery when its stored client import id does not match the lookup alias", async () => {
+		const storage = new MemoryStorage();
+		const storedImportId = "stored-import-id";
+		const lookupImportId = "lookup-import-id";
+		const seed = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pGetCharacter: async () => {
+					throw Object.assign(new Error("missing"), {code: "CHARACTER_NOT_FOUND"});
+				},
+				pCreateCharacter: async () => { throw new Error("offline"); },
+			},
+		});
+		seed._recoveryStorage = storage;
+		await expect(seed.pUpsert({character: {id: storedImportId, name: "Stored Draft"}})).rejects.toThrow("offline");
+		const recoveryRaw = storage.getItem(`hub-character-recovery:campaign-1:${storedImportId}`);
+		storage.setItem(`hub-character-recovery:campaign-1:${lookupImportId}`, recoveryRaw);
+		storage.removeItem(`hub-character-recovery:campaign-1:${storedImportId}`);
+
+		const visible = {
+			id: "visible-character",
+			ownerAccountId: "owner",
+			campaignId: "campaign-1",
+			clientImportId: lookupImportId,
+			revision: 1,
+			data: {name: "Visible Character"},
+		};
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pListCharacters: async () => [structuredClone(visible)],
+			},
+		});
+		fresh._recoveryStorage = storage;
+
+		await expect(fresh.pList()).resolves.toEqual([{id: visible.id, name: "Visible Character"}]);
+		expect(fresh._canonicalIds.has(lookupImportId)).toBe(false);
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${lookupImportId}`)).toBe(recoveryRaw);
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${visible.id}`)).toBeNull();
+	});
+
 	it("does not migrate same-owner patch recovery through a colliding client import id", async () => {
 		const storage = new MemoryStorage();
 		const patchedCharacterId = "established-a";
