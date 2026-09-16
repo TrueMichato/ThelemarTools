@@ -9,6 +9,7 @@ const _LISTENER_TYPES = new Set([
 	"inventoryTransfer",
 	"membershipChanged",
 	"projectionInvalidated",
+	"recipientNotice",
 	"rulesChanged",
 	"semanticOperation",
 ]);
@@ -101,6 +102,7 @@ export class CharacterSheetRealtimeCoordinator {
 			inventoryEventKeys: new Set(),
 			membershipRole: null,
 			operationKeys: new Set(),
+			recipientNoticeKeys: new Set(),
 			cursorMetadata: null,
 			projectionCursorKey: null,
 			unsubscribers: [],
@@ -312,6 +314,15 @@ export class CharacterSheetRealtimeCoordinator {
 		}
 
 		if (
+			event.type === "xp.granted"
+			&& event.aggregateType === "character"
+			&& event.aggregateId === active.characterId
+		) {
+			this._emitRecipientNotice(active, event);
+			return;
+		}
+
+		if (
 			_INVENTORY_TRANSFER_EVENT_TYPES.has(event.type)
 			|| _INVENTORY_CHARACTER_MUTATION_EVENT_TYPES.has(event.type)
 			|| event.type === _PARTY_INVENTORY_INVALIDATION_EVENT_TYPE
@@ -330,6 +341,7 @@ export class CharacterSheetRealtimeCoordinator {
 				|| sourceKind === "party_inventory"
 				|| targetKind === "party_inventory";
 			if (isCurrentCharacterAffected || isPartyInventoryAffected) {
+				if (isDirectCharacterMutation && isCurrentCharacterAffected) this._emitRecipientNotice(active, event);
 				const eventKey = event.id || `${event.type}:${event.sequence}`;
 				if (active.inventoryEventKeys.has(eventKey)) return;
 				active.inventoryEventKeys.add(eventKey);
@@ -346,6 +358,7 @@ export class CharacterSheetRealtimeCoordinator {
 					},
 				});
 			}
+
 			return;
 		}
 
@@ -378,6 +391,49 @@ export class CharacterSheetRealtimeCoordinator {
 				payload: routing.payload,
 			},
 		});
+	}
+
+	_emitRecipientNotice (active, event) {
+		const eventKey = event.id || `${event.type}:${event.sequence}`;
+		if (active.recipientNoticeKeys.has(eventKey)) return false;
+		const cleanText = (value, maxLength) => {
+			if (typeof value !== "string") return "";
+			return value
+				.replace(/<[^>]*>/g, "")
+				// eslint-disable-next-line no-control-regex
+				.replace(/[\u0000-\u001f\u007f]/g, " ")
+				.replace(/\s+/g, " ")
+				.trim()
+				.slice(0, maxLength);
+		};
+		let value = null;
+		if (event.type === "xp.granted") {
+			value = {
+				eventId: event.id,
+				campaignId: this._campaignId,
+				sequence: event.sequence,
+				kind: "xp_award",
+				amount: Number.isFinite(Number(event.payload?.amount)) ? Number(event.payload.amount) : 0,
+				totalXp: Number.isFinite(Number(event.payload?.xp)) ? Number(event.payload.xp) : null,
+				reason: cleanText(event.payload?.reason, 160),
+			};
+		} else if (event.type === "item.granted") {
+			value = {
+				eventId: event.id,
+				campaignId: this._campaignId,
+				sequence: event.sequence,
+				kind: "item_award",
+				itemName: cleanText(event.payload?.entry?.item?.name || event.payload?.entry?.name, 80) || "Item",
+				itemSource: cleanText(event.payload?.entry?.item?.source, 20),
+				quantity: Number.isFinite(Number(event.payload?.entry?.quantity)) ? Number(event.payload.entry.quantity) : 1,
+				reason: cleanText(event.payload?.note, 160),
+			};
+		}
+		if (!value) return false;
+		active.recipientNoticeKeys.add(eventKey);
+		if (active.recipientNoticeKeys.size > 2_000) active.recipientNoticeKeys.delete(active.recipientNoticeKeys.values().next().value);
+		this._enqueue(active, {type: "recipientNotice", value});
+		return true;
 	}
 
 	_queueDetach (active, {reason, sequence}) {

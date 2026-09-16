@@ -216,6 +216,7 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 		"_onHubRealtimeCursor",
 		"_onHubRealtimeConnectionState",
 		"_onHubRealtimeDeliveryError",
+		"_onHubRecipientNotice",
 		"_onHubSemanticOperation",
 		"_getHubLiveCharacterData",
 		"_adoptHubLiveCharacterData",
@@ -227,6 +228,8 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 		"_pDrainHubAuthoritativeReconcile",
 		"_pRunHubAuthoritativeReconcile",
 		"_pResolveHubCharacterConflict",
+		"_adoptCanonicalCharacterIdentity",
+		"_pRefreshCanonicalCharacterRoster",
 		"_getNextSavedAt",
 		"_saveCurrentCharacter",
 	]) {
@@ -249,6 +252,95 @@ beforeAll(async () => {
 });
 
 describe("Live campaign effects on an open Character Sheet", () => {
+	it("shows bounded XP and item award reasons and schedules XP reconciliation", async () => {
+		const {api, clients, host, state, toasts} = await pMakeHarness();
+		api.state.character = makeCharacterDocument({
+			...api.state.character.data,
+			xp: 9000,
+		}, 2);
+
+		clients[0].emit("event", {
+			id: "xp-notice",
+			campaignId: "campaign-1",
+			sequence: 21,
+			type: "xp.granted",
+			aggregateType: "character",
+			aggregateId: "character-1",
+			payload: {amount: 250, xp: 9000, reason: "<b>For the Ashen Pass</b>"},
+		});
+		clients[0].emit("event", {
+			id: "item-notice",
+			campaignId: "campaign-1",
+			sequence: 22,
+			type: "item.granted",
+			aggregateType: "character",
+			aggregateId: "character-1",
+			payload: {
+				entry: {item: {name: "Longsword", source: "PHB"}, quantity: 1},
+				note: "<i>For the Ashen Pass</i>",
+			},
+		});
+		await pFlush();
+		if (host._hubAuthoritativeReconcilePromise) await host._hubAuthoritativeReconcilePromise;
+		await pFlush();
+
+		expect(toasts.map(toast => toast.content.textContent || toast.content.innerHTML || toast.content._html)).toEqual([
+			"Received 250 XP (9000 XP total) — For the Ashen Pass.",
+			"Received Longsword — For the Ashen Pass.",
+		]);
+		expect(state.toJson().xp).toBe(9000);
+		expect(api.pGetCharacter).toHaveBeenCalled();
+	});
+
+	it("commits spell activity once when Keep Local retries a post-save live conflict", async () => {
+		const {api, host, state} = await pMakeHarness({seed: {name: "Mira"}});
+		const firstPatchStarted = makeDeferred();
+		const releaseFirstPatch = makeDeferred();
+		const requests = [];
+		api.pPatchCharacter.mockImplementation(async input => {
+			requests.push(structuredClone(input));
+			if (requests.length === 1) {
+				firstPatchStarted.resolve();
+				await releaseFirstPatch.promise;
+				api.state.character = makeCharacterDocument({
+					...applyJsonPatch(api.state.character.data, input.patches),
+					name: "Server Edit",
+				}, 2);
+				return {character: structuredClone(api.state.character)};
+			}
+			api.state.character = makeCharacterDocument(
+				applyJsonPatch(api.state.character.data, input.patches),
+				api.state.character.revision + 1,
+			);
+			return {character: structuredClone(api.state.character)};
+		});
+		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+		const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+		const activity = {
+			type: "spell.used",
+			spellName: "Shield",
+			spellSource: "PHB",
+			spellLevel: 1,
+			slotLevel: 1,
+			mode: "spell_slot",
+		};
+
+		try {
+			const pendingSave = host._saveCurrentCharacter({activity});
+			await firstPatchStarted.promise;
+			state.setName("Local Edit");
+			releaseFirstPatch.resolve();
+
+			await expect(pendingSave).resolves.toBe(true);
+			expect(requests).toHaveLength(2);
+			expect(requests.map(request => request.activity)).toEqual([activity, null]);
+			expect(state.toJson().name).toBe("Local Edit");
+		} finally {
+			consoleError.mockRestore();
+			prompt.mockRestore();
+		}
+	});
+
 	it("adopts an authoritative approval response when its socket edge is missed", async () => {
 		const {clients, host, hubEffects, state} = await pMakeHarness();
 		const operation = makeAppliedEvent({
@@ -736,11 +828,6 @@ describe("Live campaign effects on an open Character Sheet", () => {
 
 	it("retries a disjoint offline draft when the realtime connection returns", async () => {
 		const {api, clients, repository, state} = await pMakeHarness();
-		repository._recoveryStorage = {
-			getItem: () => null,
-			setItem: () => { throw new Error("storage unavailable"); },
-			removeItem: () => {},
-		};
 		state.setName("Mira Offline");
 		api.state.isOffline = true;
 		await expect(repository.pUpsert({

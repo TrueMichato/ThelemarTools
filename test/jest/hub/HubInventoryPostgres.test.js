@@ -1631,22 +1631,92 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			await roleClient.query(`UPDATE hub.memberships SET role = 'spectator', updated_at = now() WHERE id = $1`, [membership.id]);
 			let isTransferListSettled = false;
 			let isEventListSettled = false;
+			let isHistoryListSettled = false;
 			const listing = store.pListTransfers({accountId: coDm.id, campaignId: campaign.id})
 				.finally(() => { isTransferListSettled = true; });
 			const eventListing = store.pListVisibleEventPage({accountId: coDm.id, campaignId: campaign.id})
 				.finally(() => { isEventListSettled = true; });
+			const historyListing = store.pListVisibleEventPage({
+				accountId: coDm.id,
+				campaignId: campaign.id,
+				beforeSequence: Number.MAX_SAFE_INTEGER,
+			}).finally(() => { isHistoryListSettled = true; });
 			await new Promise(resolve => setTimeout(resolve, 50));
 			expect(isTransferListSettled).toBe(false);
 			expect(isEventListSettled).toBe(false);
+			expect(isHistoryListSettled).toBe(false);
 			await roleClient.query("COMMIT");
 			expect((await listing).some(transfer => transfer.id === unrelated.id)).toBe(false);
 			expect((await eventListing).events.some(event => event.aggregateId === unrelated.id)).toBe(false);
+			expect((await historyListing).events.some(event => event.aggregateId === unrelated.id)).toBe(false);
 		} catch (error) {
 			await roleClient.query("ROLLBACK");
 			throw error;
 		} finally {
 			roleClient.release();
 		}
+	});
+
+	test("pages retained activity backward past a hidden recent tail", async () => {
+		const player = await pCreateAccount("Inventory History Player");
+		const historyCampaign = (await store.pCreateCampaign({
+			accountId: dm.id,
+			name: `${prefix} history campaign`,
+			idempotencyKey: crypto.randomUUID(),
+		})).campaign;
+		await pJoinSpecificCampaign({owner: dm, targetCampaign: historyCampaign, account: player});
+		const character = (await store.pCreateCharacter({
+			accountId: player.id,
+			campaignId: historyCampaign.id,
+			data: {name: `${prefix} history character`, inventory: [], currency: {}, xp: 0},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const reason = `${prefix} first session`;
+		await store.pGrantXp({
+			accountId: dm.id,
+			campaignId: historyCampaign.id,
+			characterId: character.id,
+			amount: 100,
+			reason,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const xpSequence = Number((await pool.query(`
+			SELECT sequence
+			FROM hub.domain_events
+			WHERE campaign_id = $1 AND event_type = 'xp.granted' AND payload->>'reason' = $2
+		`, [historyCampaign.id, reason])).rows[0].sequence);
+		for (let i = 0; i < 60; ++i) {
+			await store.pCreateInvite({
+				accountId: dm.id,
+				campaignId: historyCampaign.id,
+				role: "player",
+				tokenHash: crypto.randomBytes(32).toString("hex"),
+				expiresAt: new Date(Date.now() + 60_000),
+				maxUses: 1,
+				idempotencyKey: crypto.randomUUID(),
+			});
+		}
+		const cursor = await store.pGetCampaignCursor({accountId: player.id, campaignId: historyCampaign.id});
+
+		const page = await store.pListVisibleEventPage({
+			accountId: player.id,
+			campaignId: historyCampaign.id,
+			beforeSequence: cursor.cursor.lastSequence + 1,
+			limit: 1,
+		});
+
+		expect(page.events).toEqual([
+			expect.objectContaining({
+				type: "xp.granted",
+				payload: expect.objectContaining({amount: 100, reason}),
+			}),
+		]);
+		expect(page.history).toEqual({
+			scannedBackThroughSequence: xpSequence,
+			hasMore: true,
+		});
 	});
 
 	test("replays projected transfer receipts after active members become spectators", async () => {

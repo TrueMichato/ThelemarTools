@@ -1,7 +1,7 @@
 # Campaign Hub troubleshooting
 
 > **Status:** Current first-response guide; provider commands are added after selection
-> **Last verified:** 2026-08-24
+> **Last verified:** 2026-09-14
 > **Owner:** Campaign Hub maintainers
 
 Do not begin by editing database rows. Preserve request ids, timestamps, app/protocol/migration versions, and
@@ -21,6 +21,10 @@ documents into tickets/logs.
 | `REVISION_CONFLICT` | server revision and local recovery | repository queued base/rebase | use conflict UI; export recovery before destructive choice |
 | Offline Character Sheet still shows a local value after reconnect | character revision in reconnect cursor, canonical HTTP revision, local recovery draft/conflict | Character Sheet projection-invalidation consumer and accepted-base rebase | keep writes frozen; use the explicit local/server dialog, never infer success from the displayed local draft; verify `Use Local` preserves the draft and `Use Server` adopts canonical truth |
 | Character save rejected as too large | serialized byte count | notes/features/inventory growth | export, reduce content, retry; do not raise quota casually |
+| `CHARACTER_RECOVERY_LIMIT` / `CHARACTER_RECOVERY_STORAGE_UNAVAILABLE` | pending command count, recovery payload bytes, browser `sessionStorage` availability/quota, owner id, create/patch intent, temporary-to-canonical identity migration | ordered character recovery queue | wait for the current save, retry, or export; never bypass recovery durability, treat patch recovery as a new create, discard the pending activity, or remove the temporary recovery key unless the owner-scoped canonical replacement was stored |
+| `CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE` | recovery format, whether the original PATCH body and rules-version pin were stored, whether the command contains one-shot activity | legacy browser recovery created before format 3 | export the complete queue, then choose server state; a recovery-only create may instead be exported and discarded after an owner-scoped listing confirms it never committed. Dismissing exports and preserves the block so the next save reopens the choice. Never reconstruct the activity request under its old key or rotate the key and risk duplicating the event |
+| Older local recovery is hidden pending account claim | predecessor recovery has no `ownerAccountId`; check whether an authoritative owner row exists and whether the blob is create or patch intent | recovery written before account-bound format | established patches bind only after current-account ownership is verified. Claim an ownerless create only through the explicit Character Sheet prompt; declining leaves its contents hidden and storage untouched |
+| Character recovery repeatedly returns `RULES_VERSION_STALE` | stored rules pin, server `activeRulesVersionId`, replacement command key and durable queue | active campaign content policy changed after a request was prepared | a stale-policy rejection is definitive non-commit evidence. Verify the repository rotated the affected key, persisted the authoritative rules pin and replacement request, then retried; do not reuse the old key with a changed pin |
 | Brew rejected | error code, size/depth/dependencies/HTML | `campaign-content.js` | correct source bundle; never disable validation |
 | Hub page loads error state | `/api/session`, console, service worker | API unavailable, boot order, bound fetch | confirm same-origin route and no cached API response |
 | WebSocket disconnects immediately | Origin, cookie, protocol, membership | edge upgrade/timeout/auth | inspect close code and HTTP membership |

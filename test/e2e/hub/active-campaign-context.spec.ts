@@ -1,5 +1,12 @@
-import {expect, test} from "@playwright/test";
+import {expect, test, type BrowserContext} from "@playwright/test";
 import {HubCampaignPage} from "../pages/HubCampaignPage";
+
+async function pCloseContext (context: BrowserContext): Promise<void> {
+	await Promise.race([
+		context.close().catch(() => undefined),
+		new Promise<void>(resolve => setTimeout(resolve, 5_000)),
+	]);
+}
 
 /**
  * ADR 0013 evidence in a real browser against the real stack.
@@ -49,7 +56,7 @@ test.describe("device-scoped active campaign context", () => {
 			const atLogout = await hub.signOutCapturingSelectionAtRequest();
 			expect(atLogout).toMatchObject({state: "cleared", campaignId: null});
 		} finally {
-			await context.close();
+			await pCloseContext(context);
 		}
 	});
 
@@ -75,7 +82,7 @@ test.describe("device-scoped active campaign context", () => {
 			await page.selectLocalCampaignContext();
 			expect(await page.getActiveCampaignRecord()).toMatchObject({state: "cleared", campaignId: null});
 		} finally {
-			await context.close();
+			await pCloseContext(context);
 		}
 	});
 
@@ -96,8 +103,8 @@ test.describe("device-scoped active campaign context", () => {
 			await player.waitForSelectedCampaign(campaignId);
 			await player.expectCampaignSwitcher({campaignName: "Joined Context E2E", state: "active"});
 		} finally {
-			await dmContext.close();
-			await playerContext.close();
+			await pCloseContext(dmContext);
+			await pCloseContext(playerContext);
 		}
 	});
 
@@ -149,7 +156,7 @@ test.describe("device-scoped active campaign context", () => {
 			const recordB = await tabB.getActiveCampaignRecord();
 			expect(recordA).toEqual(recordB);
 		} finally {
-			await context.close();
+			await pCloseContext(context);
 		}
 	});
 
@@ -198,7 +205,7 @@ test.describe("device-scoped active campaign context", () => {
 				.toBe("active");
 			expect(await sheet.getSheetCampaignId()).toBe(openCampaign);
 		} finally {
-			await context.close();
+			await pCloseContext(context);
 		}
 	});
 
@@ -227,7 +234,7 @@ test.describe("device-scoped active campaign context", () => {
 				.not.toBe("signed_out");
 			expect(await sheet.getActiveCampaignRecord()).toMatchObject({campaignId, state: "selected"});
 		} finally {
-			await context.close();
+			await pCloseContext(context);
 		}
 	});
 
@@ -254,7 +261,7 @@ test.describe("device-scoped active campaign context", () => {
 
 			expect(await hub.getActiveCampaignRecord()).toMatchObject({campaignId, state: "selected"});
 		} finally {
-			await context.close();
+			await pCloseContext(context);
 		}
 	});
 
@@ -282,8 +289,8 @@ test.describe("device-scoped active campaign context", () => {
 			await player.waitForClearedSelection();
 			await player.expectPrivateCharacterConcealed();
 		} finally {
-			await dmContext.close();
-			await playerContext.close();
+			await pCloseContext(dmContext);
+			await pCloseContext(playerContext);
 		}
 	});
 
@@ -342,8 +349,8 @@ test.describe("device-scoped active campaign context", () => {
 				panelCount: 0,
 			});
 		} finally {
-			await ownerContext.close();
-			await collaboratorContext.close();
+			await pCloseContext(ownerContext);
+			await pCloseContext(collaboratorContext);
 		}
 	});
 
@@ -365,7 +372,7 @@ test.describe("device-scoped active campaign context", () => {
 			await dm.waitForClearedSelection();
 			await dm.expectPrivateCharacterConcealed();
 		} finally {
-			await context.close();
+			await pCloseContext(context);
 		}
 	});
 });

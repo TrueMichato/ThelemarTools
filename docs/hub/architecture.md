@@ -118,12 +118,67 @@ sequenceDiagram
 ```
 
 The client never treats an unacknowledged queued snapshot as a new base. Each submitted write retains its own
-base so overlapping and disjoint changes are classified correctly. A transport-failed offline write remains a
-local recovery draft. When realtime reconnects, the owner sheet refetches the canonical document: disjoint
-changes are rebased and retried, while overlapping paths require an explicit local/server choice. Client-only
-save timestamps are excluded from overlap detection. `Use Local` is explicit authority to retry the actual
-local candidate against the newer server base; server-owned inventory and XP paths keep their stricter
-server-wins overlap policy.
+base so overlapping and disjoint changes are classified correctly. The repository persists an ordered recovery
+queue as one base plus an ordered patch chain containing every closed one-shot activity descriptor and exact
+idempotency key. Before network submission it also persists the hash-significant PATCH body and the rules-version
+pin; a transport retry sends that exact key/body pair. A confirmed revision conflict rebases into a newly persisted
+request with a new key. The queue is capped at 32 commands and 3.5 MB; a command that cannot be added durably is
+rejected before network submission. Authoritative operation and resync transforms advance every queued base and
+snapshot, then replace the complete persisted queue before replay. Only the matching successful command is
+dequeued. Later commands retain coherent original base/snapshot pairs so their deltas rebase over canonical XP,
+inventory, and operation changes instead of interpreting stale snapshots as full replacements. Choosing local
+after an overlap replays every unresolved command in order against the selected local document and rotates any
+request whose body changed. Choosing server explicitly discards the complete queue and installs that canonical
+document and its operation watermark into the accepted, live, latest-submitted, and visible Character Sheet tracks
+inside the same serialized mutation. Realtime resumes only after that fenced adoption, so neither an
+already-covered event nor a genuinely newer queued operation can be overwritten by the caller's stale conflict
+result.
+
+Recovery format 3 records whether the exact hash-significant request can still be proven. Legacy format-1/2
+activity commands that lack the original PATCH body or rules-version pin are quarantined locally with
+`CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE`: retrying the old key with a reconstructed body would violate
+idempotency, while rotating the key could duplicate the one-shot activity. The Character Sheet keeps the draft
+exportable and offers an explicit export-then-use-server or use-server choice instead of sending it. The export
+contains the latest local document plus every queued snapshot, activity, rules pin, and command identity which
+the resolution will discard. Dismissing the choice exports that complete artifact and later save attempts reopen
+the decision; edits made after dismissal are included as a separate unsaved document rather than silently lost.
+The repository refetches canonical truth inside the serialized mutation, durably clears the entire blocked queue,
+adopts that document into every live/accepted coverage track, and only then permits later saves. A quarantined
+recovery-only create which is still absent from an owner-scoped server listing can instead be explicitly exported
+and discarded without inventing server state. A save block prevents newer commands accumulating behind the
+quarantined activity. Activity-free legacy commands may safely rotate their command keys, persist a current
+request envelope, and resume convergence because they cannot duplicate a semantic event. A transactional
+`RULES_VERSION_STALE` rejection likewise proves the old request did not commit: the repository adopts the
+authoritative active version, rotates the affected key, durably stores the replacement envelope, and only then
+retries. A format-2 `pending` state alone does not prove a request was unsent; only records carrying the later
+rules-pin marker but no prepared outbound PATCH qualify for that compatibility path.
+
+Recovery queues carry the authenticated owner id and explicit first-command intent. Only genuine creates retain
+the original `clientImportId`; patch recovery is never exposed or replayed as a replacement create when its
+established character is absent. URL routing resolves owner-scoped create recovery before loading the selected
+character. Startup listing matches only an owner-visible server row with the same import id, then atomically
+moves the durable queue from its temporary key to the canonical character id. If the create never reached the
+server, the owner's recovery-only draft remains listed under its temporary id and retries with the original
+create idempotency key. Recovery is validated against the current account before hydration or migration, and
+cross-account collisions leave the original stored recovery untouched. Once a temporary create resolves to its
+canonical id, that alias is published only after the pending queue is durably migrated; a storage failure leaves
+the temporary queue visible and retryable with its original keys and activities. The browser then atomically
+rebinds page state, URL scope, roster selection, projections, and realtime
+before queued canonical events resume. Repository hydration and successful replay retain the temporary-to-
+canonical lookup but remove obsolete pending-state aliases, so a completed retry cannot leave unload warnings or
+context-switch blockers behind. If startup discovers that the create already committed, the original creation
+snapshot becomes the replay base and the current canonical row remains authoritative; later XP, inventory, and
+other server changes are not reverted while pending activity or later local deltas are replayed.
+Recovery blobs written by the exact predecessor before owner metadata existed are never silently ignored.
+Established-character patch recovery is bound only after an authoritative row proves current-account ownership.
+An ownerless create remains hidden until the user explicitly claims it for the signed-in account; the claim prompt
+reveals only the local recovery count, not character contents, and declining a direct temporary-id URL removes
+that selection while preserving the untouched recovery.
+Transport-failed writes remain in that durable queue. Reconnect/refocus refetches canonical truth: disjoint
+drafts retry, while overlapping paths require an explicit local/server choice. Client-only save timestamps are
+excluded from overlap detection. `Use Local` is explicit authority to retry the actual local candidate against
+the newer server base, except that server-owned inventory and XP paths retain their stricter server-wins overlap
+policy.
 
 ## Transactional outbox and realtime
 
@@ -148,7 +203,9 @@ source containers. No transfer status, inventory revision, invalidation, or canc
 the complete restoration batch is valid.
 
 Clients use snapshots and sequence-based replay to recover from disconnects. Presence is ephemeral. Roll and
-action history is durable. Visibility is evaluated on the server for both replay and live fanout. Projection
+action history is durable. Visibility is evaluated on the server for both replay and live fanout. Claimed
+outbox rows are explicitly ordered by campaign sequence before fanout; database `UPDATE ... RETURNING` row order
+is not treated as a delivery guarantee. Projection
 HTTP responses are request-sequence and attachment-generation fenced, so a slower old response or a response
 from a detached DM workspace cannot replace newer scoped truth.
 
@@ -175,6 +232,12 @@ reintroduce the hydration conflict.
 Campaign Overview serializes every transfer-state refresh in request-start order. Realtime refreshes enter that
 queue when their authorization-scoped character/snapshot requests start, not after those requests finish, so a
 pre-transfer response cannot overwrite balances or pending decisions rendered by the transfer's later refresh.
+Backward activity requests also capture an authorization generation. A projection or role change advances that
+generation and replaces the visible activity window; any older in-flight page is discarded instead of restoring
+events that the new policy removed. Projection invalidation, authority reload, and realtime access loss advance
+that generation immediately, before any delayed authorization refetch can finish. While fenced, cached activity
+is concealed and backward paging remains disabled; only a successful authorization-scoped replacement clears the
+fence. Authorization errors keep it latched.
 The accepted base and every other base track still advance together with live state so later saves retain exact
 coverage and do not need to rediscover already-accepted edits. Delivery is therefore a prepare/adopt/commit
 transaction over per-track coverage records, and an unprovable delivery schedules a serialized recovery that

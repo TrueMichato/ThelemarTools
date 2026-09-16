@@ -16,7 +16,12 @@ import {
 	pLoadHubCapabilityModule,
 } from "./hub-capabilities.js";
 import {HubRealtimeClient, isRealtimeEventCoveredByBaseline} from "./hub-realtime-client.js";
-import {renderHubActivityRows} from "./hub-activity-render.js";
+import {
+	bindHubActivityHistoryPagination,
+	hasHubActivityAuthorizationChanged,
+	mergeHubActivityEvents,
+	renderHubActivityRows,
+} from "./hub-activity-render.js";
 import {
 	getOwnerMembershipId,
 	getProjectionId,
@@ -1235,14 +1240,15 @@ async function pInitCampaign ({session}) {
 		api.pListCharacters({campaignId}),
 		api.pGetCampaignSnapshot({campaignId}),
 	]);
-	const [contextInitial, events] = await Promise.all([
+	const [contextInitial, eventPage] = await Promise.all([
 		api.pGetCampaignContext({campaignId}),
-		api.pListEvents({
+		api.pListEventPage({
 			campaignId,
-			afterSequence: Math.max(0, snapshot.lastSequence - 50),
+			beforeSequence: snapshot.lastSequence + 1,
 			limit: 50,
 		}),
 	]);
+	const events = eventPage.events;
 	let context = contextInitial;
 	const pRefreshMembers = async () => renderMemberList({
 		campaign,
@@ -1273,10 +1279,62 @@ async function pInitCampaign ({session}) {
 		isDm: ["dm", "co_dm"].includes(campaign.role),
 		roster: snapshot.roster || [],
 	});
-	renderRecentActivity({events, characters: snapshot.characters, members});
+	renderRecentActivity({events, characters: snapshot.characters, members, history: eventPage.history});
 	renderCampaignContext(context);
 	applyCampaignRoleLayout({campaign, characters});
 	initCampaignWorkbenchLinks();
+	let liveEvents = events;
+	let activityHistory = eventPage.history;
+	let liveMembers = members;
+	let liveCharacters = snapshot.characters;
+	let activityAuthorizationGeneration = 0;
+	let isActivityAuthorizationFenced = false;
+	const invalidateActivityAuthorization = () => {
+		activityAuthorizationGeneration++;
+		isActivityAuthorizationFenced = true;
+		const loadEarlier = document.getElementById("campaign-activity-load-earlier");
+		if (loadEarlier) loadEarlier.disabled = true;
+	};
+	const concealActivityAuthorization = ({isLoading = false} = {}) => {
+		invalidateActivityAuthorization();
+		liveEvents = [];
+		activityHistory = null;
+		liveMembers = [];
+		liveCharacters = [];
+		renderRecentActivity({
+			events: [],
+			characters: [],
+			members: [],
+			history: null,
+			isLoading,
+			isAuthorizationFenced: true,
+		});
+	};
+	bindHubActivityHistoryPagination({
+		button: document.getElementById("campaign-activity-load-earlier"),
+		pListEventPage: ({beforeSequence, limit}) => api.pListEventPage({campaignId, beforeSequence, limit}),
+		getState: () => ({
+			events: liveEvents,
+			characters: liveCharacters,
+			members: liveMembers,
+			history: activityHistory,
+		}),
+		setState: ({events: eventsNxt, history: historyNxt}) => {
+			liveEvents = eventsNxt;
+			activityHistory = historyNxt;
+		},
+		render: input => renderRecentActivity({...input, isAuthorizationFenced: isActivityAuthorizationFenced}),
+		renderError,
+		getAuthorizationGeneration: () => activityAuthorizationGeneration,
+		isAuthorizationFenced: () => isActivityAuthorizationFenced,
+		onAuthorizationError: error => {
+			if (!["AUTH_REQUIRED", "FORBIDDEN", "CAMPAIGN_NOT_FOUND"].includes(error?.code)) return false;
+			concealActivityAuthorization();
+			isCampaignReloadRequired = true;
+			return true;
+		},
+		isTerminal: () => isCampaignReloadRequired,
+	});
 	if (campaign.status !== "active") {
 		setHidden(document.getElementById("campaign-invite-form"), true);
 		setHidden(document.getElementById("campaign-upload-local"), true);
@@ -1308,10 +1366,7 @@ async function pInitCampaign ({session}) {
 		pRefreshInvites,
 		roster: snapshot.roster || [],
 	});
-	const realtime = new HubRealtimeClient({campaignId});
-	let liveEvents = events;
-	let liveMembers = members;
-	let liveCharacters = snapshot.characters;
+	const realtime = new HubRealtimeClient({campaignId, initialLastSequence: snapshot.lastSequence});
 	let liveRoster = snapshot.roster || [];
 	let liveLastSequence = snapshot.lastSequence;
 	let authorityBaselineSequence = snapshot.lastSequence || 0;
@@ -1332,35 +1387,59 @@ async function pInitCampaign ({session}) {
 			const pMembersNxt = api.pListMembers({campaignId});
 			const pCharactersNxt = api.pListCharacters({campaignId});
 			const pSnapshotNxt = api.pGetCampaignSnapshot({campaignId});
-			const pEventsNxt = pSnapshotNxt.then(snapshotNxt => api.pListEvents({
+			const pEventsPageNxt = pSnapshotNxt.then(snapshotNxt => api.pListEventPage({
 				campaignId,
-				afterSequence: Math.max(0, snapshotNxt.lastSequence - 50),
+				beforeSequence: snapshotNxt.lastSequence + 1,
 				limit: 50,
 			}));
-			const getMergedEvents = eventsNxt => [...eventsNxt, ...liveEvents]
-				.filter((event, index, all) => all.findIndex(other => other.id === event.id) === index)
-				.sort((a, b) => a.sequence - b.sequence)
-				.slice(-50);
+			const pActivityRefresh = Promise.all([pSnapshotNxt, pEventsPageNxt])
+				.then(([snapshotNxt, eventsPageNxt]) => {
+					const isSnapshotCurrent = snapshotNxt.lastSequence >= liveLastSequence;
+					const isAuthorizationChanged = isSnapshotCurrent && (
+						isActivityAuthorizationFenced
+						|| hasHubActivityAuthorizationChanged({
+							previousCharacters: liveCharacters,
+							nextCharacters: snapshotNxt.characters,
+						})
+					);
+					return {
+						events: isActivityAuthorizationFenced && !isAuthorizationChanged
+							? []
+							: mergeHubActivityEvents({
+								currentEvents: liveEvents,
+								pageEvents: eventsPageNxt.events,
+								isAuthorizationChanged,
+							}),
+						history: eventsPageNxt.history,
+						isAuthorizationChanged,
+					};
+				});
 			const pTransferStateRefresh = pRefreshTransferState({
 				charactersNxt: pCharactersNxt,
 				snapshotNxt: pSnapshotNxt,
 				membersNxt: pMembersNxt,
-				eventsNxt: pEventsNxt.then(getMergedEvents),
+				eventsNxt: pActivityRefresh.then(({events}) => events),
 				fnIsCurrent: () => !isCampaignReloadRequired,
 				fnIsSnapshotCurrent: snapshotNxt => snapshotNxt.lastSequence >= liveLastSequence,
 			}).then(
 				value => ({value}),
 				error => ({error}),
 			);
-			const [membersNxt, charactersNxt, snapshotNxt, eventsNxt] = await Promise.all([
+			const [membersNxt, charactersNxt, snapshotNxt, activityRefresh] = await Promise.all([
 				pMembersNxt,
 				pCharactersNxt,
 				pSnapshotNxt,
-				pEventsNxt,
+				pActivityRefresh,
 			]);
-			liveEvents = getMergedEvents(eventsNxt);
+			if (isCampaignReloadRequired) return;
+			const isSnapshotCurrent = snapshotNxt.lastSequence >= liveLastSequence;
+			liveEvents = activityRefresh.events;
+			if (activityRefresh.isAuthorizationChanged) {
+				if (!isActivityAuthorizationFenced) invalidateActivityAuthorization();
+				activityHistory = activityRefresh.history;
+			}
 			liveMembers = membersNxt;
-			if (snapshotNxt.lastSequence >= liveLastSequence) {
+			if (isSnapshotCurrent) {
 				// Replacement, not a merge: a field the owner has just stopped sharing must
 				// disappear rather than survive from the previous, broader projection.
 				liveCharacters = snapshotNxt.characters;
@@ -1377,7 +1456,15 @@ async function pInitCampaign ({session}) {
 				isDm: ["dm", "co_dm"].includes(campaign.role),
 				roster: liveRoster,
 			});
-			renderRecentActivity({events: liveEvents, characters: liveCharacters, members: membersNxt});
+			if (activityRefresh.isAuthorizationChanged) isActivityAuthorizationFenced = false;
+			renderRecentActivity({
+				events: isActivityAuthorizationFenced ? [] : liveEvents,
+				characters: isActivityAuthorizationFenced ? [] : liveCharacters,
+				members: isActivityAuthorizationFenced ? [] : membersNxt,
+				history: isActivityAuthorizationFenced ? null : activityHistory,
+				isLoading: isActivityAuthorizationFenced,
+				isAuthorizationFenced: isActivityAuthorizationFenced,
+			});
 			if (isRefreshCampaignContext) {
 				context = await api.pGetCampaignContext({campaignId});
 				renderCampaignContext(context);
@@ -1410,6 +1497,7 @@ async function pInitCampaign ({session}) {
 	};
 	const reloadForAuthorityChange = () => {
 		if (isCampaignReloadRequired) return;
+		concealActivityAuthorization();
 		isCampaignReloadRequired = true;
 		if (refreshTimer != null) {
 			window.clearTimeout(refreshTimer);
@@ -1430,12 +1518,23 @@ async function pInitCampaign ({session}) {
 			reloadForAuthorityChange();
 			return;
 		}
+		const isProjectionInvalidation = event.type === "character.projection.invalidated";
+		if (isProjectionInvalidation) {
+			concealActivityAuthorization({isLoading: true});
+		}
 		if (!isCampaignReloadRequired && navigator.onLine) {
 			liveLastSequence = Math.max(liveLastSequence, event.sequence || 0);
-			liveEvents = [...liveEvents.filter(existing => existing.id !== event.id), event]
-				.sort((a, b) => a.sequence - b.sequence)
-				.slice(-50);
-			renderRecentActivity({events: liveEvents, characters: liveCharacters, members: liveMembers});
+			if (!isProjectionInvalidation) {
+				liveEvents = [...liveEvents.filter(existing => existing.id !== event.id), event]
+					.sort((a, b) => a.sequence - b.sequence);
+				renderRecentActivity({
+					events: liveEvents,
+					characters: liveCharacters,
+					members: liveMembers,
+					history: activityHistory,
+					isAuthorizationFenced: isActivityAuthorizationFenced,
+				});
+			}
 		}
 		// ADR 0011: `character.projection.invalidated` carries no character data. Every
 		// event, including an invalidation, is coalesced into one authorization-scoped
@@ -1459,6 +1558,7 @@ async function pInitCampaign ({session}) {
 		if (state === "live") setCampaignConnectionStatus({label: "Live updates connected", state: "connected"});
 		else if (state === "reconnecting") setCampaignConnectionStatus({label: "Live updates reconnecting", state: "warning"});
 		else if (state === "access_lost") {
+			concealActivityAuthorization();
 			isCampaignReloadRequired = true;
 			if (/session|account deletion/i.test(reason || "")) renderError(new HubApiError({code: "AUTH_REQUIRED", status: 401}));
 			else if (/membership|authorization/i.test(reason || "")) renderError(new HubApiError({code: "CAMPAIGN_NOT_FOUND", status: 404}));
@@ -1758,7 +1858,15 @@ function renderPartyRoster ({campaignId, characters, members, session, isDm, ros
 	}));
 }
 
-function renderRecentActivity ({events, characters, members}) {
+function renderRecentActivity ({
+	events,
+	characters,
+	members,
+	history = null,
+	isLoading = false,
+	isAuthorizationFenced = false,
+	statusMessage = "",
+}) {
 	const list = document.getElementById("campaign-activity-list");
 	if (!list) return;
 	const rows = renderHubActivityRows({
@@ -1768,8 +1876,23 @@ function renderRecentActivity ({events, characters, members}) {
 		members,
 		documentRef: document,
 		getDateLabel,
+		limit: null,
 	});
-	setHidden(document.getElementById("campaign-activity-empty"), !!rows.length);
+	const hasMore = history?.hasMore === true;
+	setHidden(document.getElementById("campaign-activity-empty"), !!rows.length || hasMore || isLoading);
+	const status = document.getElementById("campaign-activity-status");
+	if (status) {
+		status.textContent = isLoading
+			? "Loading earlier activity..."
+			: statusMessage || (!rows.length && hasMore ? "No visible activity in this window. Older retained history is still available." : "");
+		setHidden(status, !status.textContent);
+	}
+	const loadEarlier = document.getElementById("campaign-activity-load-earlier");
+	if (loadEarlier) {
+		loadEarlier.disabled = isLoading || isAuthorizationFenced;
+		setHidden(loadEarlier, !hasMore);
+	}
+	return rows;
 }
 
 function fillCharacterSelect (select, characters, {includeParty = false, partyInventory = null, ownerAccountId = null} = {}) {

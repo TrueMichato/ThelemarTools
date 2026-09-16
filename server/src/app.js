@@ -1010,17 +1010,24 @@ export async function createHubApp ({
 				type: "object",
 				additionalProperties: false,
 				properties: {
-					afterSequence: {type: "integer", minimum: 0, default: 0},
+					afterSequence: {type: "integer", minimum: 0},
+					beforeSequence: {type: "integer", minimum: 1},
 					limit: {type: "integer", minimum: 1, maximum: 500, default: 200},
 				},
 			},
 		},
-	}, async request => store.pListVisibleEventPage({
-		accountId: request.hubAuth.account.id,
-		campaignId: request.params.campaignId,
-		afterSequence: request.query.afterSequence,
-		limit: request.query.limit,
-	}));
+	}, async request => {
+		if (request.query.afterSequence != null && request.query.beforeSequence != null) {
+			throw new HubStoreError("INVALID_EVENT_CURSOR", "Only one event cursor may be supplied.", {status: 400});
+		}
+		return store.pListVisibleEventPage({
+			accountId: request.hubAuth.account.id,
+			campaignId: request.params.campaignId,
+			afterSequence: request.query.afterSequence,
+			beforeSequence: request.query.beforeSequence,
+			limit: request.query.limit,
+		});
+	});
 
 	app.post("/api/campaigns/:campaignId/rolls", {
 		preHandler: requireMutationSecurity,
@@ -2023,6 +2030,19 @@ export async function createHubApp ({
 							},
 						},
 					},
+					activity: {
+						type: ["object", "null"],
+						required: ["type", "spellName", "spellSource", "spellLevel", "slotLevel", "mode"],
+						additionalProperties: false,
+						properties: {
+							type: {type: "string", const: "spell.used"},
+							spellName: {type: "string", minLength: 1, maxLength: 100},
+							spellSource: {type: "string", minLength: 1, maxLength: 20},
+							spellLevel: {type: "integer", minimum: 0, maximum: 9},
+							slotLevel: {type: "integer", minimum: 0, maximum: 9},
+							mode: {type: "string", enum: ["cantrip", "ritual", "spell_slot", "pact_slot", "resource", "free"]},
+						},
+					},
 					rulesVersionId: {type: ["string", "null"], format: "uuid"},
 				},
 			},
@@ -2034,6 +2054,7 @@ export async function createHubApp ({
 		baseRevision: request.body.baseRevision,
 		leaseEpoch: request.body.leaseEpoch,
 		patches: request.body.patches,
+		activity: request.body.activity || null,
 		rulesVersionId: request.body.rulesVersionId || null,
 		idempotencyKey: getIdempotencyKey(request),
 		protocolVersion: request.headers["x-hub-protocol-version"],

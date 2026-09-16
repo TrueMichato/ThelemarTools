@@ -284,7 +284,13 @@ export class HubOutboxDispatcher {
 		if (this._isRunning) return 0;
 		this._isRunning = true;
 		try {
-			const entries = await this._store.pClaimOutboxBatch({limit: 100});
+			const entries = (await this._store.pClaimOutboxBatch({limit: 100}))
+				.sort((left, right) => {
+					if (left.event.campaignId === right.event.campaignId) {
+						return left.event.sequence - right.event.sequence;
+					}
+					return Number(left.id) - Number(right.id);
+				});
 			const failedCampaigns = new Set();
 			let hasFailure = false;
 			for (const entry of entries) {

@@ -414,8 +414,12 @@ export class HubApiClient {
 		return (await this.pListEventPage({campaignId, afterSequence, limit})).events;
 	}
 
-	async pListEventPage ({campaignId, afterSequence = 0, limit = 200}) {
-		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/events?afterSequence=${afterSequence}&limit=${limit}`);
+	async pListEventPage ({campaignId, afterSequence = null, beforeSequence = null, limit = 200}) {
+		if (afterSequence != null && beforeSequence != null) throw new TypeError(`Only one event cursor may be supplied.`);
+		const cursor = beforeSequence == null
+			? `afterSequence=${afterSequence ?? 0}`
+			: `beforeSequence=${beforeSequence}`;
+		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/events?${cursor}&limit=${limit}`);
 	}
 
 	async pLogRoll ({campaignId, characterId = null, formula, total, context = null, visibility = "all_members", detail = {}, idempotencyKey}) {
@@ -531,10 +535,10 @@ export class HubApiClient {
 		});
 	}
 
-	async pPatchCharacter ({characterId, baseRevision, leaseEpoch, patches, rulesVersionId = null, idempotencyKey}) {
+	async pPatchCharacter ({characterId, baseRevision, leaseEpoch, patches, activity = null, rulesVersionId = null, idempotencyKey}) {
 		return this._pRequest(`/api/characters/${encodeURIComponent(characterId)}`, {
 			method: "PATCH",
-			body: {baseRevision, leaseEpoch, patches, ...(rulesVersionId ? {rulesVersionId} : {})},
+			body: {baseRevision, leaseEpoch, patches, ...(activity ? {activity} : {}), ...(rulesVersionId ? {rulesVersionId} : {})},
 			isMutation: true,
 			idempotencyKey,
 		});

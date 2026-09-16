@@ -61,10 +61,14 @@ import {
 
 const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, StorageUtil, DataUtil, BrewUtil2, PrereleaseUtil} = /** @type {*} */ (globalThis);
 const _getHubRulesOverlay = hubContext => getCampaignSettingsOverlayFromRulesVersion(hubContext?.rulesVersion);
-const _getHubComparableCharacterDocument = ({document, repairItems, pristineItems}) => getCharacterDocumentWithoutDeterministicItemAliases(document, {
-	repairItems,
-	pristineItems,
-});
+const _getHubComparableCharacterDocument = ({document, repairItems, pristineItems}) => {
+	const out = getCharacterDocumentWithoutDeterministicItemAliases(document, {
+		repairItems,
+		pristineItems,
+	});
+	if (out && typeof out === "object" && !Array.isArray(out)) delete out.carry;
+	return out;
+};
 
 /**
  * Character Sheet - Main Controller
@@ -210,10 +214,42 @@ class CharacterSheetPage {
 		this._dialectParentMap = {};
 	}
 
+	async _pClaimUnboundLegacyHubRecovery ({characterId = null} = {}) {
+		if (
+			this._isUnboundLegacyRecoveryClaimDeferred
+			|| typeof this._characterRepository?.pListUnboundLegacyRecoveryIds !== "function"
+			|| typeof this._characterRepository?.pClaimUnboundLegacyRecovery !== "function"
+		) return null;
+		const recoveryIds = (await this._characterRepository.pListUnboundLegacyRecoveryIds())
+			.filter(id => characterId == null || id === characterId);
+		if (!recoveryIds.length) return null;
+		const choice = await InputUiUtil.pGetUserBoolean({
+			title: "Older Local Recovery Found",
+			htmlDescription: `This browser contains ${recoveryIds.length === 1 ? "an older character recovery" : `${recoveryIds.length} older character recoveries`} saved before account binding was added. Claim ${recoveryIds.length === 1 ? "it" : "them"} only if ${recoveryIds.length === 1 ? "this draft belongs" : "these drafts belong"} to the currently signed-in account.`,
+			textYes: "Claim Local Recovery",
+			textNo: "Leave Hidden",
+		});
+		if (choice !== true) {
+			this._isUnboundLegacyRecoveryClaimDeferred = true;
+			return false;
+		}
+		for (const recoveryId of recoveryIds) {
+			await this._characterRepository.pClaimUnboundLegacyRecovery({characterId: recoveryId});
+		}
+		return true;
+	}
+
 	async _pCanonicalizeHubCharacterUrl () {
 		if (!this._isHubCharacter || !this._characterRepository.pGetCampaignId) return false;
 		const characterId = new URLSearchParams(window.location.search).get("id");
 		if (!characterId) return false;
+		const claimResult = await this._pClaimUnboundLegacyHubRecovery({characterId});
+		if (claimResult === false) {
+			const url = new URL(window.location.href);
+			url.searchParams.delete("id");
+			window.location.replace(url.href);
+			return true;
+		}
 		const campaignId = await this._characterRepository.pGetCampaignId({characterId});
 		if (campaignId === this._hubCampaignId) return false;
 		window.location.replace(getCloudCharacterUrl({campaignId, characterId}));
@@ -249,12 +285,14 @@ class CharacterSheetPage {
 		this._hubRealtime?.detach();
 	}
 
-	/** `teardown-projections`: viewer-scoped projections, party inventory, and reconciliation. */
-	_detachHubProjections () {
+	/** `teardown-projections`: viewer-scoped projections, party inventory, and optionally reconciliation. */
+	_detachHubProjections ({isPreserveRepositoryReconciliation = false} = {}) {
 		this._partyInventory?.detach();
 		this._hubEffects?.deactivate();
 		this._peerTargeting?.deactivate();
-		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
+		if (!isPreserveRepositoryReconciliation) {
+			this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
+		}
 	}
 
 	_concealHubPrivateCharacter () {
@@ -308,10 +346,10 @@ class CharacterSheetPage {
 	}
 
 	/** Composed detach used by ordinary (non-context-switch) call sites. */
-	_detachHubRealtime () {
+	_detachHubRealtime ({isPreserveRepositoryReconciliation = false} = {}) {
 		this._fenceHubGeneration();
 		this._detachHubRealtimeClient();
-		this._detachHubProjections();
+		this._detachHubProjections({isPreserveRepositoryReconciliation});
 	}
 
 	// #endregion
@@ -334,6 +372,7 @@ class CharacterSheetPage {
 		this._hubRealtime.on("membershipChanged", event => this._onHubMembershipChanged(event));
 		this._hubRealtime.on("projectionInvalidated", event => this._onHubProjectionInvalidated(event));
 		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
+		this._hubRealtime.on("recipientNotice", notice => this._onHubRecipientNotice(notice));
 		this._hubRealtime.on("rulesChanged", event => { void this._pRefreshHubRules(event); });
 		return true;
 	}
@@ -536,6 +575,24 @@ class CharacterSheetPage {
 			type: "danger",
 			content: `A campaign update could not be applied (${detail?.deliveryType || "update"}). Reload this character to catch up.`,
 		});
+	}
+
+	_onHubRecipientNotice (notice) {
+		if (!notice || !this._currentCharacterId) return false;
+		if (notice.kind === "xp_award") {
+			const total = Number.isFinite(notice.totalXp) ? ` (${notice.totalXp} XP total)` : "";
+			const content = e_({tag: "span", txt: `Received ${notice.amount || 0} XP${total}${notice.reason ? ` — ${notice.reason}` : ""}.`});
+			JqueryUtil.doToast({type: "success", content});
+			this._scheduleHubAuthoritativeReconcile({characterId: this._currentCharacterId});
+			return true;
+		}
+		if (notice.kind === "item_award") {
+			const quantity = notice.quantity > 1 ? `${notice.quantity}× ` : "";
+			const content = e_({tag: "span", txt: `Received ${quantity}${notice.itemName || "an item"}${notice.reason ? ` — ${notice.reason}` : ""}.`});
+			JqueryUtil.doToast({type: "success", content});
+			return true;
+		}
+		return false;
 	}
 
 	/** The repository document shape: live state without the transient sheet id. */
@@ -849,11 +906,18 @@ class CharacterSheetPage {
 		characterId,
 		fnIsCurrent = () => this._currentCharacterId === characterId,
 		fallbackRecovery = null,
+		saveFence = null,
 	} = {}) {
 		if (
 			this._isHubCharacterConflictPromptOpen
 			|| typeof this._characterRepository?.pResolveConflict !== "function"
 		) return false;
+		const resolutionFence = saveFence || getCharacterSaveFence(this);
+		let isIdentityChanged = false;
+		const isResolutionCurrent = () => (
+			isCharacterSaveFenceCurrent({sheet: this, saveFence: resolutionFence})
+			&& (isIdentityChanged || fnIsCurrent())
+		);
 		this._isHubCharacterConflictPromptOpen = true;
 		try {
 			const choice = await InputUiUtil.pGetUserBoolean({
@@ -862,25 +926,136 @@ class CharacterSheetPage {
 				textYes: "Use Local",
 				textNo: "Use Server",
 			});
-			if (!fnIsCurrent()) return false;
+			if (!isResolutionCurrent()) return false;
 			const recovery = this._characterRepository.getConflictRecovery?.(characterId) || fallbackRecovery;
 			if (!recovery) return false;
 			if (choice == null) {
 				DataUtil.userDownload("character-conflict-recovery", recovery, {fileType: "character-conflict"});
 				return false;
 			}
+			let isResolutionAdopted = false;
+			const fnAdoptResolution = resolved => {
+				if (!isResolutionCurrent()) return false;
+				const identity = this._adoptCanonicalCharacterIdentity({
+					canonicalId: resolved?.id || resolutionFence.characterId,
+					saveFence: resolutionFence,
+				});
+				if (!identity.isCurrent) return false;
+				isIdentityChanged ||= identity.isChanged;
+				this._state.loadFromJson(resolved);
+				this._reconcileClassFeatures();
+				this._renderCharacter();
+				isResolutionAdopted = true;
+				return true;
+			};
 			const resolved = await this._characterRepository.pResolveConflict({
 				characterId,
 				choice: choice ? "local" : "server",
+				fnAdoptLive: fnAdoptResolution,
 			});
-			if (!fnIsCurrent() || !resolved) return false;
-			this._state.loadFromJson(resolved);
-			this._reconcileClassFeatures();
-			this._renderCharacter();
+			if (!isResolutionCurrent()) return false;
+			if (resolved && !isResolutionAdopted && !fnAdoptResolution(resolved)) return false;
+			if (!resolved && !isResolutionAdopted) return false;
+			if (isIdentityChanged && !await this._pRefreshCanonicalCharacterRoster({
+				canonicalId: resolutionFence.characterId,
+				saveFence: resolutionFence,
+			})) return false;
 			this._updateSaveIndicator("saved");
 			return true;
 		} finally {
 			this._isHubCharacterConflictPromptOpen = false;
+		}
+	}
+
+	async _pResolveUnprovableHubRecovery ({
+		characterId,
+		recovery,
+		fnIsCurrent = () => this._currentCharacterId === characterId,
+		saveFence = null,
+	} = {}) {
+		if (typeof this._characterRepository?.pResolveUnprovableRecovery !== "function") return false;
+		const resolutionFence = saveFence || getCharacterSaveFence(this);
+		let isIdentityChanged = false;
+		const isResolutionCurrent = () => (
+			isCharacterSaveFenceCurrent({sheet: this, saveFence: resolutionFence})
+			&& (isIdentityChanged || fnIsCurrent())
+		);
+		const recoveryExport = structuredClone(recovery);
+		const unsavedCharacter = {...this._state.toJson(), id: resolutionFence.characterId};
+		if (JSON.stringify(recoveryExport.character) !== JSON.stringify(unsavedCharacter)) {
+			recoveryExport.unsavedCharacter = unsavedCharacter;
+		}
+		const isRecoveryOnlyCreate = recovery?.intent === "create";
+		const choice = await InputUiUtil.pGetUserBoolean({
+			title: "Recovered Activity Needs Your Choice",
+			htmlDescription: isRecoveryOnlyCreate
+				? "This older recovery cannot safely resend its activity, and no server character may exist. Discard the blocked recovery to continue. You can export every queued change first."
+				: "This older recovery cannot safely resend its activity. Load the latest server version to discard the blocked recovery. You can export every queued change first.",
+			textYes: isRecoveryOnlyCreate ? "Export Then Discard" : "Export Then Use Server",
+			textNo: isRecoveryOnlyCreate ? "Discard Recovery" : "Use Server",
+		});
+		if (!isResolutionCurrent()) return false;
+		if (choice == null) {
+			DataUtil.userDownload("character-activity-recovery", recoveryExport, {fileType: "character-conflict"});
+			return false;
+		}
+		if (choice) DataUtil.userDownload("character-activity-recovery", recoveryExport, {fileType: "character-conflict"});
+		let isResolutionAdopted = false;
+		let isCreateDiscarded = false;
+		const fnAdoptResolution = resolved => {
+			if (!isResolutionCurrent()) return false;
+			const identity = this._adoptCanonicalCharacterIdentity({
+				canonicalId: resolved?.id || resolutionFence.characterId,
+				saveFence: resolutionFence,
+			});
+			if (!identity.isCurrent) return false;
+			isIdentityChanged ||= identity.isChanged;
+			this._state.loadFromJson(resolved);
+			this._reconcileClassFeatures();
+			this._renderCharacter();
+			isResolutionAdopted = true;
+			return true;
+		};
+		const fnDiscardResolution = () => {
+			if (!isResolutionCurrent()) return false;
+			this._createNewCharacter();
+			isCreateDiscarded = true;
+			return true;
+		};
+		try {
+			const resolved = await this._characterRepository.pResolveUnprovableRecovery({
+				characterId,
+				fnAdoptLive: fnAdoptResolution,
+				fnDiscardLive: fnDiscardResolution,
+			});
+			if (isCreateDiscarded) {
+				await this._pLoadCharacters?.();
+				if (this._selCharacter) this._selCharacter.value = "";
+				this._updateSaveIndicator("saved");
+				return true;
+			}
+			if (!isResolutionCurrent()) return false;
+			if (resolved?.status === "discarded_create") {
+				this._createNewCharacter();
+				await this._pLoadCharacters?.();
+				if (this._selCharacter) this._selCharacter.value = "";
+				this._updateSaveIndicator("saved");
+				return true;
+			}
+			if (resolved && !isResolutionAdopted && !fnAdoptResolution(resolved)) return false;
+			if (!resolved && !isResolutionAdopted) return false;
+			if (isIdentityChanged && !await this._pRefreshCanonicalCharacterRoster({
+				canonicalId: resolutionFence.characterId,
+				saveFence: resolutionFence,
+			})) return false;
+			this._updateSaveIndicator("saved");
+			return true;
+		} catch (error) {
+			JqueryUtil.doToast({
+				type: "danger",
+				content: `Could not load server state. The local recovery remains blocked and exportable: ${error.message}`,
+			});
+			return false;
 		}
 	}
 
@@ -2649,7 +2824,10 @@ class CharacterSheetPage {
 
 	// #region Character Management
 	async _pLoadCharacters () {
-		const characters = await this._characterRepository.pList();
+		let characters = await this._characterRepository.pList();
+		if (await this._pClaimUnboundLegacyHubRecovery?.() === true) {
+			characters = await this._characterRepository.pList();
+		}
 		this._updateCharacterDropdown(characters);
 	}
 
@@ -2740,7 +2918,8 @@ class CharacterSheetPage {
 		const {chosen: character, mirrorWon} = this._reconcilePersistedCharacter(canonical, mirror);
 
 		if (character) {
-			this._currentCharacterId = charId;
+			const resolvedId = canonical?.id || charId;
+			this._currentCharacterId = resolvedId;
 			this._isLevelUpBannerDismissed = false;
 			this._state.clearCampaignSettingsOverlay();
 			this._state.loadFromJson(character);
@@ -2765,9 +2944,9 @@ class CharacterSheetPage {
 			// (the await above can interleave with another load).
 			const needsSave = mirrorWon
 				|| (reconcileResult && (reconcileResult.added > 0 || reconcileResult.backfilled > 0));
-			if (needsSave && this._currentCharacterId === charId) {
+			if (needsSave && this._currentCharacterId === resolvedId) {
 				await this._saveCurrentCharacter();
-			} else if (this._characterRepository.isRescueMirrorEnabled && this._currentCharacterId === charId) {
+			} else if (this._characterRepository.isRescueMirrorEnabled && this._currentCharacterId === resolvedId) {
 				// Nothing to persist, but the mirror (if any) now agrees with canonical — clear it.
 				this._clearActiveCharacterMirror(charId);
 			}
@@ -2791,10 +2970,10 @@ class CharacterSheetPage {
 
 			// Update URL
 			const url = new URL(/** @type {*} */ (window.location));
-			url.searchParams.set("id", charId);
+			url.searchParams.set("id", resolvedId);
 			window.history.replaceState({}, "", url);
-			if (loadGeneration === this._characterLoadGeneration && this._currentCharacterId === charId) {
-				this._attachHubRealtime({characterId: charId});
+			if (loadGeneration === this._characterLoadGeneration && this._currentCharacterId === resolvedId) {
+				this._attachHubRealtime({characterId: resolvedId});
 			}
 		}
 		return true;
@@ -4636,7 +4815,46 @@ class CharacterSheetPage {
 		return nxt;
 	}
 
-	async _saveCurrentCharacter ({isInteractiveConflict = true} = {}) {
+	_adoptCanonicalCharacterIdentity ({canonicalId, saveFence}) {
+		if (!canonicalId || !isCharacterSaveFenceCurrent({sheet: this, saveFence})) return {isCurrent: false, isChanged: false};
+		const previousId = saveFence.characterId;
+		if (canonicalId === previousId) {
+			this._state.setId?.(canonicalId);
+			return {isCurrent: true, isChanged: false};
+		}
+
+		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
+		this._detachHubRealtime?.({isPreserveRepositoryReconciliation: true});
+		this._currentCharacterId = canonicalId;
+		saveFence.characterId = canonicalId;
+		saveFence.loadGeneration = this._characterLoadGeneration;
+		this._state.setId?.(canonicalId);
+
+		const url = new URL(window.location.href);
+		url.searchParams.set("id", canonicalId);
+		if (this._isHubCharacter) {
+			if (this._hubCampaignId) {
+				url.searchParams.set("hubCampaign", this._hubCampaignId);
+				url.searchParams.delete("hubCharacter");
+			} else {
+				url.searchParams.delete("hubCampaign");
+				url.searchParams.set("hubCharacter", "1");
+			}
+		}
+		window.history?.replaceState?.({}, "", url);
+		if (this._selCharacter) this._selCharacter.value = canonicalId;
+		if (this._isHubCharacter) this._attachHubRealtime?.({characterId: canonicalId});
+		return {isCurrent: true, isChanged: true};
+	}
+
+	async _pRefreshCanonicalCharacterRoster ({canonicalId, saveFence}) {
+		await this._pLoadCharacters?.();
+		if (!isCharacterSaveFenceCurrent({sheet: this, saveFence})) return false;
+		if (this._selCharacter) this._selCharacter.value = canonicalId;
+		return true;
+	}
+
+	async _saveCurrentCharacter ({isInteractiveConflict = true, activity = null} = {}) {
 		if (!this._currentCharacterId) return;
 		const saveFence = getCharacterSaveFence(this);
 		const isSaveCurrent = () => isCharacterSaveFenceCurrent({sheet: this, saveFence});
@@ -4646,6 +4864,14 @@ class CharacterSheetPage {
 		if (this._characterRepository.isSaveBlocked?.(this._currentCharacterId)) {
 			const block = this._characterRepository.getSaveBlock?.(this._currentCharacterId);
 			this._updateSaveIndicator("error");
+			if (block?.code === "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE" && block.recovery) {
+				return this._pResolveUnprovableHubRecovery({
+					characterId: saveFence.characterId,
+					recovery: block.recovery,
+					fnIsCurrent: isSaveCurrent,
+					saveFence,
+				});
+			}
 			JqueryUtil.doToast({type: "warning", content: block?.message || `Saving is paused while this character catches up with campaign effects.`});
 			return false;
 		}
@@ -4663,19 +4889,12 @@ class CharacterSheetPage {
 		if (this._characterRepository.isRescueMirrorEnabled) this._writeActiveCharacterMirror(charData);
 
 		try {
-			const persisted = await this._characterRepository.pUpsert({character: charData});
+			const persisted = await this._characterRepository.pUpsert({character: charData, activity});
 			if (!isSaveCurrent()) return false;
 			if (persisted?.id && persisted.id !== charData.id && this._currentCharacterId === charData.id) {
-				this._currentCharacterId = persisted.id;
-				saveFence.characterId = persisted.id;
-				this._state.setId?.(persisted.id);
-				const url = new URL(window.location.href);
-				url.searchParams.set("id", persisted.id);
-				window.history?.replaceState?.({}, "", url);
-				await this._pLoadCharacters?.();
-				if (!isSaveCurrent()) return false;
-				if (this._selCharacter) this._selCharacter.value = persisted.id;
-				this._attachHubRealtime?.({characterId: persisted.id});
+				const identity = this._adoptCanonicalCharacterIdentity({canonicalId: persisted.id, saveFence});
+				if (!identity.isCurrent) return false;
+				if (identity.isChanged && !await this._pRefreshCanonicalCharacterRoster({canonicalId: persisted.id, saveFence})) return false;
 			}
 			if (persisted) {
 				const getClean = data => {
@@ -4746,6 +4965,14 @@ class CharacterSheetPage {
 				this._characterRepository.clearRetryableLeaseConflict?.({characterId: saveFence.characterId});
 				throw err;
 			}
+			if (err?.code === "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE") {
+				return this._pResolveUnprovableHubRecovery({
+					characterId: saveFence.characterId,
+					recovery: err.recovery,
+					fnIsCurrent: isSaveCurrent,
+					saveFence,
+				});
+			}
 			if (err?.code === "CHARACTER_LIVE_CONFLICT") {
 				const choice = await InputUiUtil.pGetUserBoolean({
 					title: "Character Changed While Saving",
@@ -4762,7 +4989,7 @@ class CharacterSheetPage {
 					DataUtil.userDownload("character-live-conflict-recovery", recovery, {fileType: "character-conflict"});
 					return false;
 				}
-				if (choice) return this._saveCurrentCharacter();
+				if (choice) return this._saveCurrentCharacter({activity: null});
 				this._state.loadFromJson(recovery.server);
 				this._reconcileClassFeatures();
 				this._renderCharacter();
@@ -4774,6 +5001,7 @@ class CharacterSheetPage {
 					characterId: saveFence.characterId,
 					fnIsCurrent: isSaveCurrent,
 					fallbackRecovery: err.recovery,
+					saveFence,
 				});
 			}
 			return false;
@@ -21886,8 +22114,8 @@ class CharacterSheetPage {
 		});
 	}
 
-	async saveCharacter () {
-		return this._saveCurrentCharacter();
+	async saveCharacter (options = {}) {
+		return this._saveCurrentCharacter(options);
 	}
 
 	/**

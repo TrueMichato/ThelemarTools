@@ -764,10 +764,24 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 				path: "/carry",
 				value: {schemaVersion: 1, basis: {kind: "campaign", rulesVersionId: active.rulesVersion.id, settingsDigest: "digest"}},
 			}],
+			activity: {
+				type: "spell.used",
+				spellName: "Fireball",
+				spellSource: "PHB",
+				spellLevel: 3,
+				slotLevel: 3,
+				mode: "spell_slot",
+			},
 			protocolVersion: "4",
 			idempotencyKey: command("rules-patch-current"),
 		});
 		expect(patched.character.revision).toBe(created.character.revision + 1);
+		const spellEvidence = await pool.query(`
+			SELECT
+				(SELECT count(*)::integer FROM hub.domain_events WHERE campaign_id = $1 AND event_type = 'spell.used') AS event_count,
+				(SELECT count(*)::integer FROM hub.audit_entries WHERE campaign_id = $1 AND action = 'spell.used') AS audit_count
+		`, [campaign.id]);
+		expect(spellEvidence.rows[0]).toEqual({event_count: 1, audit_count: 1});
 
 		const destination = (await store.pCreateCampaign({
 			accountId: account.id,

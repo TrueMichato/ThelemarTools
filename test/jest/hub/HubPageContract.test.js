@@ -1,5 +1,9 @@
 import fs from "node:fs";
-import {renderHubActivityRows} from "../../../js/hub/hub-activity-render.js";
+import {jest} from "@jest/globals";
+import {
+	bindHubActivityHistoryPagination,
+	renderHubActivityRows,
+} from "../../../js/hub/hub-activity-render.js";
 
 const read = path => fs.readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
 
@@ -92,6 +96,8 @@ describe("campaign hub pages", () => {
 			"campaign-pending-actions-empty",
 			"campaign-pending-transfers-empty",
 			"campaign-activity-empty",
+			"campaign-activity-status",
+			"campaign-activity-load-earlier",
 			"campaign-invite-form-status",
 			"campaign-action-form-status",
 			"campaign-transfer-form-status",
@@ -252,8 +258,12 @@ describe("campaign hub pages", () => {
 
 	it("renders a named inbox, recent activity, and copyable invite result", () => {
 		const source = read("js/hub/hub-page.js");
-		expect(source).toContain("api.pListEvents({");
-		expect(source).toContain("new HubRealtimeClient({campaignId})");
+		const activitySource = read("js/hub/hub-activity-render.js");
+		expect(source).toContain("api.pListEventPage({");
+		expect(source).toContain("beforeSequence:");
+		expect(source).not.toContain("snapshot.lastSequence - 50");
+		expect(activitySource).toContain("No additional visible activity in this window");
+		expect(source).toContain("new HubRealtimeClient({campaignId, initialLastSequence: snapshot.lastSequence})");
 		expect(source).toContain("realtime.on(\"event\", event =>");
 		expect(source).toContain("realtime.on(\"cursor\", baseline =>");
 		// ADR 0011: the page must not read character data off an event payload; every
@@ -261,6 +271,24 @@ describe("campaign hub pages", () => {
 		expect(source).not.toContain("event.payload?.character");
 		expect(source).not.toContain("character.projection.updated");
 		expect(source).toContain("const reloadForAuthorityChange = () =>");
+		expect(source).toContain("let activityAuthorizationGeneration = 0");
+		expect(source).toContain("let isActivityAuthorizationFenced = false");
+		expect(source).toContain("const invalidateActivityAuthorization = () =>");
+		expect(source).toContain("const concealActivityAuthorization = ({isLoading = false} = {}) =>");
+		expect(source).toMatch(/const concealActivityAuthorization = \(\{isLoading = false\} = \{\}\) => \{[\s\S]*liveEvents = \[\];[\s\S]*liveMembers = \[\];[\s\S]*renderRecentActivity\(\{[\s\S]*events: \[\],[\s\S]*isLoading,[\s\S]*isAuthorizationFenced: true/);
+		expect(source).toContain("isActivityAuthorizationFenced = true");
+		expect(source).toContain("isActivityAuthorizationFenced = false");
+		expect(source).toContain("isActivityAuthorizationFenced ? [] : liveEvents");
+		expect(source).toContain("[\"AUTH_REQUIRED\", \"FORBIDDEN\", \"CAMPAIGN_NOT_FOUND\"]");
+		expect(activitySource).toContain("const requestAuthorizationGeneration = getAuthorizationGeneration()");
+		expect(activitySource).toContain("requestAuthorizationGeneration !== getAuthorizationGeneration()");
+		expect(source).toContain("const isProjectionInvalidation = event.type === \"character.projection.invalidated\"");
+		expect(source).toMatch(/state === "access_lost"[\s\S]*concealActivityAuthorization\(\)/);
+		expect(source).toMatch(/onAuthorizationError:[\s\S]*concealActivityAuthorization\(\)/);
+		expect(source).toMatch(/state === "access_lost"[\s\S]*concealActivityAuthorization\(\)/);
+		expect(source).toContain("concealActivityAuthorization({isLoading: true})");
+		expect(source).toMatch(/const \[membersNxt, charactersNxt, snapshotNxt, activityRefresh\] = await Promise\.all[\s\S]*if \(isCampaignReloadRequired\) return;/);
+		expect(activitySource).toContain("requestAuthorizationGeneration === getAuthorizationGeneration()");
 		expect(source).toContain("event.type === \"membership.role_changed\"");
 		expect(source).toContain("event.payload?.accountId === session.account.id");
 		expect(source).toContain("event.payload?.role !== campaign.role");
@@ -272,12 +300,132 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("if (isCampaignReloadRequired) return;");
 		expect(source).toContain("snapshotNxt.lastSequence >= liveLastSequence");
 		expect(source).toContain("liveEvents = [...liveEvents.filter");
-		expect(source).toContain("renderRecentActivity({events: liveEvents");
+		expect(source).toContain("events: liveEvents");
 		expect(source).toContain("getCharacterName(target)");
 		expect(source).toContain("getTransferContainerName({transfer, endpoint: \"source\"");
 		expect(source).toContain("DisplaySnapshot`]?.displayName || \"A character\"");
 		expect(source).toContain("navigator.clipboard.writeText(inviteOutput.value)");
 		expect(campaignHtml).toContain("id=\"campaign-invite-copy\"");
+	});
+
+	it("loads earlier activity for an archived campaign before active-only controls initialize", async () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source.indexOf("bindHubActivityHistoryPagination({"))
+			.toBeLessThan(source.indexOf("if (campaign.status !== \"active\")"));
+		const listeners = {};
+		const button = {
+			disabled: false,
+			addEventListener: (type, listener) => listeners[type] = listener,
+		};
+		const pageRequests = [];
+		const renders = [];
+		let state = {
+			events: [{id: "event-2", sequence: 2}],
+			characters: [],
+			members: [],
+			history: {hasMore: true, scannedBackThroughSequence: 2},
+		};
+		bindHubActivityHistoryPagination({
+			button,
+			pListEventPage: async request => {
+				pageRequests.push(request);
+				return {
+					events: [{id: "event-1", sequence: 1}],
+					history: {hasMore: false, scannedBackThroughSequence: 1},
+				};
+			},
+			getState: () => state,
+			setState: ({events, history}) => state = {...state, events, history},
+			render: input => renders.push(input),
+			renderError: error => { throw error; },
+			getAuthorizationGeneration: () => 0,
+			isTerminal: () => false,
+		});
+
+		await listeners.click();
+
+		expect(pageRequests).toEqual([{beforeSequence: 2, limit: 50}]);
+		expect(state.events.map(event => event.id)).toEqual(["event-1", "event-2"]);
+		expect(state.history).toEqual({hasMore: false, scannedBackThroughSequence: 1});
+		expect(renders.at(-1)).toEqual(expect.objectContaining({
+			events: state.events,
+			history: state.history,
+			statusMessage: "",
+		}));
+		expect(button.disabled).toBe(false);
+	});
+
+	it("keeps earlier-activity paging fenced until authorized history is replaced", async () => {
+		const listeners = {};
+		let isAuthorizationFenced = true;
+		const button = {
+			disabled: true,
+			addEventListener: (type, listener) => listeners[type] = listener,
+		};
+		const pListEventPage = jest.fn().mockResolvedValue({
+			events: [],
+			history: {hasMore: false, scannedBackThroughSequence: 1},
+		});
+		bindHubActivityHistoryPagination({
+			button,
+			pListEventPage,
+			getState: () => ({
+				events: [{id: "stale", sequence: 2}],
+				characters: [],
+				members: [],
+				history: {hasMore: true, scannedBackThroughSequence: 2},
+			}),
+			setState: jest.fn(),
+			render: jest.fn(),
+			renderError: jest.fn(),
+			getAuthorizationGeneration: () => 1,
+			isAuthorizationFenced: () => isAuthorizationFenced,
+			isTerminal: () => false,
+		});
+
+		await listeners.click();
+		expect(pListEventPage).not.toHaveBeenCalled();
+		expect(button.disabled).toBe(true);
+
+		isAuthorizationFenced = false;
+		await listeners.click();
+		expect(pListEventPage).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps earlier-activity paging fenced after an authorization error", async () => {
+		const listeners = {};
+		let isAuthorizationFenced = false;
+		const error = Object.assign(new Error("access lost"), {code: "CAMPAIGN_NOT_FOUND"});
+		const button = {
+			disabled: false,
+			addEventListener: (type, listener) => listeners[type] = listener,
+		};
+		const renderError = jest.fn();
+		bindHubActivityHistoryPagination({
+			button,
+			pListEventPage: jest.fn().mockRejectedValue(error),
+			getState: () => ({
+				events: [{id: "visible", sequence: 2}],
+				characters: [],
+				members: [],
+				history: {hasMore: true, scannedBackThroughSequence: 2},
+			}),
+			setState: jest.fn(),
+			render: jest.fn(),
+			renderError,
+			getAuthorizationGeneration: () => 0,
+			isAuthorizationFenced: () => isAuthorizationFenced,
+			onAuthorizationError: caught => {
+				isAuthorizationFenced = caught === error;
+				return isAuthorizationFenced;
+			},
+			isTerminal: () => isAuthorizationFenced,
+		});
+
+		await listeners.click();
+
+		expect(renderError).toHaveBeenCalledWith(error);
+		expect(button.disabled).toBe(true);
 	});
 
 	it("renders normalized character subjects safely and keeps activity rows usable on mobile", () => {

@@ -5911,6 +5911,7 @@ class CharacterSheetInventory {
 	async _pInvokeItemPower (itemId, powerId, {closeModal = null, chargesCost = null} = {}) {
 		const power = this._state.getItemPower?.(itemId, powerId);
 		const selectedChargesCost = chargesCost == null ? power?.chargesCost : Number(chargesCost);
+		let activity = null;
 		if (power?.chargesCostMax && (
 			selectedChargesCost < power.chargesCost
 			|| selectedChargesCost > power.chargesCostMax
@@ -5923,7 +5924,10 @@ class CharacterSheetInventory {
 			const castLevel = power.isVariableChargeCast && power.castLevel
 				? power.castLevel + selectedChargesCost - power.chargesCost
 				: power.castLevel;
-			const cast = await this._page?._spells?.pCastItemSpell?.({...power, castLevel});
+			const cast = await this._page?._spells?.pCastItemSpell?.(
+				{...power, castLevel},
+				{fnOnCast: activityNxt => activity = activityNxt},
+			);
 			if (!cast) return false;
 		}
 		let result = this._state.invokeItemPower?.(itemId, powerId, {chargesCost});
@@ -5952,7 +5956,7 @@ class CharacterSheetInventory {
 		this._page?._combat?.renderCombatItemPowers?.();
 		this._page?._combat?.renderCombatActionEconomy?.();
 		this._page?._playMode?._renderActionsHub?.();
-		this._page?._saveCurrentCharacter?.();
+		this._page?._saveCurrentCharacter?.({activity});
 		return true;
 	}
 

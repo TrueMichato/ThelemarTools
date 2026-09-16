@@ -202,10 +202,14 @@ async function pCheckProductionProviderMetadata ({name}) {
 	}
 }
 
+async function pRemoveProductionSmoke () {
+	await run("docker", ["rm", "--force", productionSmokeName], {isAllowFailure: true, isCleanup: true});
+}
+
 function cleanup () {
 	if (cleanupPromise) return cleanupPromise;
 	cleanupPromise = (async () => {
-		await run("docker", ["rm", "--force", productionSmokeName], {isAllowFailure: true, isCleanup: true});
+		await pRemoveProductionSmoke();
 		await run("docker", [...composeArgs, "down", "-v", "--remove-orphans", "--rmi", "local"], {isAllowFailure: true, isCleanup: true});
 		await run("docker", ["image", "rm", "--force", testBffImage], {isAllowFailure: true, isCleanup: true});
 		if (!externalBaseImage) {
@@ -304,6 +308,7 @@ try {
 	]);
 	await pWaitForContainerHealthy({name: productionSmokeName});
 	await pCheckProductionProviderMetadata({name: productionSmokeName});
+	await pRemoveProductionSmoke();
 	await run("node", [
 		"--experimental-vm-modules",
 		"./node_modules/jest/bin/jest.js",

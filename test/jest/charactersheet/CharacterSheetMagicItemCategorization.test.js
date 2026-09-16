@@ -852,6 +852,26 @@ describe("Hub summary-only inventory metadata migration", () => {
 });
 
 describe("Hub authoritative inventory reconciliation", () => {
+	const makeSessionStorage = () => {
+		const values = new Map();
+		return {
+			getItem: key => values.get(key) ?? null,
+			setItem: (key, value) => values.set(key, `${value}`),
+			removeItem: key => values.delete(key),
+		};
+	};
+	let previousSessionStorage;
+
+	beforeEach(() => {
+		previousSessionStorage = globalThis.sessionStorage;
+		globalThis.sessionStorage = makeSessionStorage();
+	});
+
+	afterEach(() => {
+		if (previousSessionStorage === undefined) delete globalThis.sessionStorage;
+		else globalThis.sessionStorage = previousSessionStorage;
+	});
+
 	test.each([
 		[
 			"player custom metadata on an official UID",

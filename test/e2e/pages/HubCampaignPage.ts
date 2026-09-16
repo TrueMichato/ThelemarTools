@@ -322,7 +322,25 @@ export class HubCampaignPage {
 	async createCampaign (name: string): Promise<string> {
 		await this.gotoHub();
 		await this.page.locator("#hub-campaign-name").fill(name);
-		await this.page.locator("#hub-create-submit").click();
+		const submit = this.page.locator("#hub-create-submit");
+		for (let attempt = 0; attempt < 2; ++attempt) {
+			const responsePromise = this.page.waitForResponse(response =>
+				response.request().method() === "POST"
+				&& new URL(response.url()).pathname === "/api/campaigns",
+			);
+			await submit.click();
+			const response = await responsePromise;
+			if (response.status() === 201) break;
+			if (response.status() !== 429 || attempt === 1) {
+				throw new Error(`Campaign creation failed with HTTP ${response.status()}.`);
+			}
+			const retryAfterSeconds = Number(response.headers()["retry-after"]);
+			if (!Number.isInteger(retryAfterSeconds) || retryAfterSeconds < 1 || retryAfterSeconds > 60) {
+				throw new Error(`Campaign creation returned an invalid Retry-After value: ${response.headers()["retry-after"] || "<missing>"}.`);
+			}
+			await expect(submit).toBeEnabled();
+			await this.page.waitForTimeout(retryAfterSeconds * 1_000 + 250);
+		}
 		await this.page.waitForURL(/campaign\.html\?id=/);
 		const campaignId = new URL(this.page.url()).searchParams.get("id")!;
 		await expect(this.page.locator("#campaign-content")).toBeVisible({timeout: 30_000});
@@ -1339,11 +1357,15 @@ export class HubCampaignPage {
 		itemName,
 		source,
 		quantity,
+		reason,
 	}: {
 		itemName: string;
 		source: string;
 		quantity: number;
+		reason?: string;
 	}): Promise<void> {
+		const notice = `Received ${quantity > 1 ? `${quantity}× ` : ""}${itemName}${reason ? ` — ${reason}` : ""}.`;
+		await expect(this.page.locator(".toast__wrp-content").filter({hasText: notice})).toBeVisible({timeout: 15_000});
 		await expect.poll(() => this.page.evaluate(
 			({itemNameNxt, sourceNxt}) => {
 				const inventory = (window as any).charSheet?._state?._data?.inventory || [];
@@ -1353,6 +1375,38 @@ export class HubCampaignPage {
 			},
 			{itemNameNxt: itemName, sourceNxt: source},
 		), {timeout: 15_000}).toBe(quantity);
+	}
+
+	async expectLiveXpAwardArrival ({
+		amount,
+		totalXp,
+		reason,
+	}: {
+		amount: number;
+		totalXp: number;
+		reason?: string;
+	}): Promise<void> {
+		const notice = `Received ${amount} XP (${totalXp} XP total)${reason ? ` — ${reason}` : ""}.`;
+		await expect(this.page.locator(".toast__wrp-content").filter({hasText: notice})).toBeVisible({timeout: 15_000});
+		await expect.poll(
+			() => this.page.evaluate(() => Number((window as any).charSheet?._state?._data?.xp || 0)),
+			{timeout: 15_000},
+		).toBe(totalXp);
+	}
+
+	async expectActivitySurvivesRefresh ({
+		campaignId,
+		expectedText,
+	}: {
+		campaignId: string;
+		expectedText: string[];
+	}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		const activity = this.page.locator("#campaign-activity-list");
+		for (const text of expectedText) await expect(activity).toContainText(text);
+		await this.page.reload();
+		await expect(this.page.locator("#campaign-content")).toBeVisible({timeout: 30_000});
+		for (const text of expectedText) await expect(activity).toContainText(text);
 	}
 
 	async editCharacterHpAndRollInitiative ({
@@ -1625,13 +1679,31 @@ export class HubCampaignPage {
 		await expect.poll(() => this.page.evaluate(() => !!(window as any).DM_SCREEN)).toBe(false);
 	}
 
-	async grantXp ({campaignId, characterName, amount}: {campaignId: string; characterName: string; amount: number}): Promise<void> {
+	async grantXp ({
+		campaignId,
+		characterName,
+		amount,
+		reason,
+		recipientExpectation,
+	}: {
+		campaignId: string;
+		characterName: string;
+		amount: number;
+		reason?: string;
+		recipientExpectation?: () => Promise<void>;
+	}): Promise<void> {
 		await this.gotoCampaign(campaignId);
 		await this.openCampaignWorkbench();
 		await this.page.locator("#campaign-xp-target").selectOption({label: characterName});
 		await this.page.locator("#campaign-xp-amount").fill(`${amount}`);
+		if (reason) await this.page.locator("#campaign-xp-reason").fill(reason);
+		const recipientResult = recipientExpectation
+			? recipientExpectation().then(() => null, error => error)
+			: Promise.resolve(null);
 		await this.page.locator("#campaign-xp-form button[type='submit']").click();
 		await expect(this.page.locator("#campaign-xp-form button[type='submit']")).toBeEnabled();
+		const recipientError = await recipientResult;
+		if (recipientError) throw recipientError;
 	}
 
 	private async selectItemAwardTargets (characterNames: string[]): Promise<void> {
@@ -1652,6 +1724,7 @@ export class HubCampaignPage {
 		source,
 		quantity,
 		note,
+		recipientExpectation,
 	}: {
 		campaignId: string;
 		characterNames: string[];
@@ -1659,6 +1732,7 @@ export class HubCampaignPage {
 		source: string;
 		quantity: number;
 		note?: string;
+		recipientExpectation?: () => Promise<void>;
 	}): Promise<void> {
 		await this.gotoCampaign(campaignId);
 		await this.openCampaignWorkbench();
@@ -1715,7 +1789,11 @@ export class HubCampaignPage {
 		const form = this.page.locator("#campaign-item-form");
 		const submit = form.locator("button[type='submit']");
 		const status = this.page.locator("#campaign-item-form-status");
+		let recipientResult = Promise.resolve<unknown>(null);
 		try {
+			recipientResult = recipientExpectation
+				? recipientExpectation().then(() => null, error => error)
+				: Promise.resolve(null);
 			await submit.click();
 			await expect(status).toContainText("temporarily unavailable");
 			await expect(submit).toBeEnabled();
@@ -1744,6 +1822,8 @@ export class HubCampaignPage {
 			if (attempt > 1) await successHandled;
 			await this.page.unroute(requestUrl);
 		}
+		const recipientError = await recipientResult;
+		if (recipientError) throw recipientError;
 	}
 
 	async awardStashItems ({
