@@ -94,7 +94,7 @@ describe("Hub lifecycle administration", () => {
 
 	it("cancels a member's reserved transfers on spectator downgrade and keeps resolution read-only", async () => {
 		const source = (await store.pCreateCharacter({
-			accountId: dm.id,
+			accountId: player.id,
 			campaignId: campaign.id,
 			clientImportId: "role-change-source",
 			schemaVersion: 1,
@@ -110,7 +110,7 @@ describe("Hub lifecycle administration", () => {
 			idempotencyKey: key("role-change-target"),
 		})).character;
 		const reserved = (await store.pProposeTransfer({
-			accountId: dm.id,
+			accountId: player.id,
 			campaignId: campaign.id,
 			sourceKind: "character",
 			sourceId: source.id,
@@ -131,10 +131,10 @@ describe("Hub lifecycle administration", () => {
 
 		expect((await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
 			.find(transfer => transfer.id === reserved.id).status).toBe("cancelled");
-		expect((await store.pGetCharacter({accountId: dm.id, characterId: source.id})).character.data.currency.gp).toBe(4);
+		expect((await store.pGetCharacter({accountId: player.id, characterId: source.id})).character.data.currency.gp).toBe(4);
 
 		const afterDowngrade = (await store.pProposeTransfer({
-			accountId: dm.id,
+			accountId: player.id,
 			campaignId: campaign.id,
 			sourceKind: "character",
 			sourceId: source.id,
@@ -150,6 +150,97 @@ describe("Hub lifecycle administration", () => {
 			decision: "accept",
 			idempotencyKey: key("spectator-accept"),
 		})).rejects.toMatchObject({code: "FORBIDDEN"});
+	});
+
+	it("rolls back every Memory transfer cancellation when one escrow restore is invalid", async () => {
+		const firstSource = (await store.pCreateCharacter({
+			accountId: player.id,
+			campaignId: campaign.id,
+			clientImportId: "atomic-role-first-source",
+			schemaVersion: 1,
+			data: {
+				name: "Atomic first source",
+				inventory: [{id: "map", item: {name: "Map", source: "PHB"}, quantity: 1}],
+				currency: {},
+			},
+			idempotencyKey: key("atomic-role-first-source"),
+		})).character;
+		const overflowSource = (await store.pCreateCharacter({
+			accountId: player.id,
+			campaignId: campaign.id,
+			clientImportId: "atomic-role-overflow-source",
+			schemaVersion: 1,
+			data: {
+				name: "Atomic overflow source",
+				inventory: [],
+				currency: {gp: Number.MAX_SAFE_INTEGER},
+			},
+			idempotencyKey: key("atomic-role-overflow-source"),
+		})).character;
+		const refillSource = (await store.pCreateCharacter({
+			accountId: player.id,
+			campaignId: campaign.id,
+			clientImportId: "atomic-role-refill-source",
+			schemaVersion: 1,
+			data: {name: "Atomic refill source", inventory: [], currency: {gp: 1}},
+			idempotencyKey: key("atomic-role-refill-source"),
+		})).character;
+		const target = (await store.pCreateCharacter({
+			accountId: observer.id,
+			campaignId: campaign.id,
+			clientImportId: "atomic-role-target",
+			schemaVersion: 1,
+			data: {name: "Atomic target", inventory: [], currency: {}},
+			idempotencyKey: key("atomic-role-target"),
+		})).character;
+		const first = (await store.pProposeTransfer({
+			accountId: player.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: firstSource.id,
+			targetKind: "character",
+			targetId: target.id,
+			payload: {items: [{entryId: "map", quantity: 1}]},
+			idempotencyKey: key("atomic-role-first-transfer"),
+		})).transfer;
+		const overflow = (await store.pProposeTransfer({
+			accountId: player.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: overflowSource.id,
+			targetKind: "character",
+			targetId: target.id,
+			payload: {currency: {gp: 1}},
+			idempotencyKey: key("atomic-role-overflow-transfer"),
+		})).transfer;
+		await store.pProposeTransfer({
+			accountId: player.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: refillSource.id,
+			targetKind: "character",
+			targetId: overflowSource.id,
+			payload: {currency: {gp: 1}},
+			idempotencyKey: key("atomic-role-refill-transfer"),
+		});
+		const membership = await store.pGetMembership({accountId: observer.id, campaignId: campaign.id});
+		const eventsBefore = await store.pListVisibleEvents({accountId: dm.id, campaignId: campaign.id});
+
+		await expect(store.pChangeMemberRole({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			membershipId: membership.id,
+			role: "spectator",
+			idempotencyKey: key("atomic-role-change"),
+		})).rejects.toMatchObject({code: "NUMERIC_INVALID"});
+
+		expect((await store.pGetMembership({accountId: observer.id, campaignId: campaign.id})).role).toBe("player");
+		const transfers = await store.pListTransfers({accountId: dm.id, campaignId: campaign.id});
+		expect(transfers.find(transfer => transfer.id === first.id).status).toBe("reserved");
+		expect(transfers.find(transfer => transfer.id === overflow.id).status).toBe("reserved");
+		expect((await store.pGetCharacter({accountId: player.id, characterId: firstSource.id})).character.data.inventory).toEqual([]);
+		expect((await store.pGetCharacter({accountId: player.id, characterId: overflowSource.id})).character.data.currency.gp).toBe(Number.MAX_SAFE_INTEGER);
+		expect(await store.pListVisibleEvents({accountId: dm.id, campaignId: campaign.id})).toHaveLength(eventsBefore.length);
 	});
 
 	it("removes a member atomically, restores escrow, and detaches owned characters", async () => {

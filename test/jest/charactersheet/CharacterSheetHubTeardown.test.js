@@ -10,8 +10,18 @@ import "./setup.js";
 import {jest} from "@jest/globals";
 import {CAMPAIGN_RULE_PROTOCOL_VERSION, evaluateCampaignRules} from "../../../js/hub/hub-campaign-rule-evaluator.js";
 import {CAMPAIGN_RULES_POLICY_CAPABILITY, createDefaultCampaignRulesPolicy} from "../../../js/hub/hub-campaign-rules.js";
+import {CharacterSheetPeerTargeting} from "../../../js/charactersheet/charactersheet-peer-targeting.js";
+import {CharacterSheetRealtimeCoordinator} from "../../../js/charactersheet/charactersheet-realtime.js";
 
 const CAMPAIGN_RULES = {thelemar_carryWeight: false, thelemar_criticalRolls: false};
+const PEER_SOURCE_COST_CAPABILITY = Object.freeze({
+	enabled: true,
+	contractVersion: 1,
+	protocolVersion: 4,
+	operationVersion: 1,
+	resourceKinds: ["spell_slot"],
+	templateRegistryVersion: "peer-effects-v1",
+});
 
 function schemaV2Context (id, mutate = () => {}) {
 	const policy = createDefaultCampaignRulesPolicy();
@@ -57,8 +67,9 @@ function makePage () {
 	return page;
 }
 
-function makeContentContext ({sources = ["PHB"], species = ["Human (Base)|PHB"], editions = ["2014"], id = "rules-1"} = {}) {
+function makeContentContext ({sources = ["PHB"], species = ["Human (Base)|PHB"], editions = ["2014"], id = "rules-1", role = "player"} = {}) {
 	return {
+		membership: {role},
 		rulesVersion: {
 			id,
 			rules: {},
@@ -277,6 +288,35 @@ describe("Character Sheet campaign content context lifecycle", () => {
 		]);
 	});
 
+	it("resynchronizes peer targeting when authoritative capability context changes", () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._currentCharacterId = "source-character";
+		page._peerTargeting = {
+			activate: jest.fn(),
+			deactivate: jest.fn(),
+		};
+
+		page._applyHubContext({
+			membership: {role: "player"},
+			rulesVersion: null,
+			brewBundle: null,
+			capabilities: {peerSourceCosts: {enabled: false}},
+		});
+		expect(page._peerTargeting.activate).toHaveBeenLastCalledWith({characterId: "source-character", membershipRole: "player"});
+
+		page._applyHubContext({
+			membership: {role: "player"},
+			rulesVersion: {id: "rules-1", rules: {}},
+			brewBundle: null,
+			capabilities: {peerSourceCosts: {enabled: true}},
+		});
+		expect(page._peerTargeting.activate).toHaveBeenCalledTimes(2);
+		expect(page._peerTargeting.activate).toHaveBeenLastCalledWith({characterId: "source-character", membershipRole: "player"});
+
+		page._clearHubRules();
+		expect(page._peerTargeting.deactivate).toHaveBeenCalledTimes(1);
+	});
+
 	it("blocks candidates immediately during refresh and activates only the refreshed policy", async () => {
 		const page = new CharacterSheetPage({characterRepository: {}});
 		page._applyHubContext(makeContentContext());
@@ -374,6 +414,110 @@ describe("Character Sheet campaign content context lifecycle", () => {
 		expect(page._renderCharacter).toHaveBeenCalledTimes(1);
 	});
 
+	it("suspends a draft through rules activation and resumes only for a current player", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		const targeting = {
+			activate: jest.fn(),
+			deactivate: jest.fn(),
+			suspend: jest.fn(),
+		};
+		page._currentCharacterId = "source-character";
+		page._peerTargeting = targeting;
+		page._applyHubContext(makeContentContext({id: "rules-1"}));
+		page._campaign = {render: jest.fn()};
+		page._renderCharacter = jest.fn();
+		page._hubCampaignContext = {
+			pRefresh: jest.fn(async () => makeContentContext({id: "rules-2", role: "spectator"})),
+		};
+		targeting.activate.mockClear();
+		targeting.deactivate.mockClear();
+
+		page._onHubCampaignContextChanged({type: "rules.activated", aggregateId: "rules-2"});
+		expect(targeting.suspend).toHaveBeenCalledTimes(1);
+		expect(targeting.deactivate).not.toHaveBeenCalled();
+		await pFlushPromises();
+
+		expect(targeting.activate).toHaveBeenCalledWith({
+			characterId: "source-character",
+			membershipRole: "spectator",
+		});
+	});
+
+	it.each([
+		{role: "player", expectedDraftCount: 1, expectedCharacterId: "source-character"},
+		{role: "spectator", expectedDraftCount: 0, expectedCharacterId: null},
+		{role: "co_dm", expectedDraftCount: 0, expectedCharacterId: null},
+	])("revalidates a live membership event and resumes targeting only for $role", async ({role, expectedDraftCount, expectedCharacterId}) => {
+		const clientListeners = new Map();
+		const realtimeClient = {
+			on: jest.fn((type, listener) => {
+				clientListeners.set(type, listener);
+				return () => clientListeners.delete(type);
+			}),
+			pConnect: jest.fn(async () => {}),
+			close: jest.fn(),
+		};
+		const repository = {
+			pEnqueueRealtimeDelivery: jest.fn(async ({fnDeliver}) => fnDeliver()),
+		};
+		const realtime = new CharacterSheetRealtimeCoordinator({
+			campaignId: "campaign-1",
+			isAuthenticated: true,
+			repository,
+			fnCreateRealtimeClient: () => realtimeClient,
+		});
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._hubCampaignId = "campaign-1";
+		page._currentCharacterId = "source-character";
+		page._campaign = {render: jest.fn()};
+		page._renderCharacter = jest.fn();
+		page._hubRealtime = realtime;
+		const targeting = new CharacterSheetPeerTargeting({
+			campaignId: "campaign-1",
+			api: {pListCharacterOutgoingActions: jest.fn(async () => [])},
+			fnGetCharacterId: () => page._currentCharacterId,
+			fnGetRulesVersionId: () => page._hubContext?.rulesVersion?.id,
+			fnGetCapability: () => page._hubContext?.capabilities?.peerSourceCosts,
+		});
+		page._peerTargeting = targeting;
+		page._applyHubContext({
+			...makeContentContext({id: "rules-1", role: "player"}),
+			capabilities: {peerSourceCosts: PEER_SOURCE_COST_CAPABILITY},
+		});
+		targeting._drafts.set("frozen-draft", {
+			commandId: "command-1",
+			draftKey: "frozen-draft",
+			sourceCharacterId: "source-character",
+		});
+		const refresh = deferred();
+		page._hubCampaignContext = {pRefresh: jest.fn(() => refresh.promise)};
+		expect(page._initHubRealtimeListeners()).toBe(true);
+		expect(realtime.attach({characterId: "source-character"})).toBe(true);
+
+		clientListeners.get("event")({
+			id: "role-change",
+			campaignId: "campaign-1",
+			sequence: 18,
+			type: "membership.role_changed",
+			aggregateType: "membership",
+			aggregateId: "opaque-membership",
+		});
+		await pFlushPromises();
+		expect(targeting._isSuspended).toBe(true);
+		expect(targeting._drafts.size).toBe(1);
+
+		refresh.resolve({
+			...makeContentContext({id: "rules-1", role}),
+			capabilities: {peerSourceCosts: PEER_SOURCE_COST_CAPABILITY},
+		});
+		await pFlushPromises();
+
+		expect(targeting._drafts.size).toBe(expectedDraftCount);
+		expect(targeting._characterId).toBe(expectedCharacterId);
+		realtime.detach();
+		targeting.deactivate();
+	});
+
 	it("discards a stale refresh after disconnect and cannot remain refresh-locked", async () => {
 		const page = new CharacterSheetPage({characterRepository: {}});
 		page._applyHubContext(makeContentContext());
@@ -426,6 +570,50 @@ describe("Character Sheet campaign content context lifecycle", () => {
 		expect(page.filterByAllowedSources(getContentCandidates())).toEqual([]);
 		expect(campaignContext.pRefresh).toHaveBeenCalledTimes(1);
 		expect(page._hubCampaignContext).toBeNull();
+	});
+
+	it("revalidates capability-only configuration changes after an ordinary reconnect", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		const targeting = {
+			activate: jest.fn(),
+			deactivate: jest.fn(),
+			suspend: jest.fn(),
+			onConnectionState: jest.fn(),
+		};
+		page._currentCharacterId = "source-character";
+		page._peerTargeting = targeting;
+		page._campaign = {render: jest.fn()};
+		page._renderCharacter = jest.fn();
+		page._characterRepository = {clearRealtimeReconciliation: jest.fn()};
+		page._hubCampaignContext = {
+			pRefresh: jest.fn(async () => ({
+				...makeContentContext({id: "rules-1"}),
+				capabilities: {peerSourceCosts: {enabled: false}},
+			})),
+		};
+		page._applyHubContext({
+			...makeContentContext({id: "rules-1"}),
+			capabilities: {peerSourceCosts: {enabled: true}},
+		});
+		targeting.activate.mockClear();
+		targeting.deactivate.mockClear();
+
+		page._onHubRealtimeConnectionState({state: "reconnecting", attempt: 1});
+		expect(page._hubContext).toBeNull();
+		expect(page._isHubContextRevalidationRequired).toBe(true);
+		expect(targeting.suspend).toHaveBeenCalledTimes(1);
+		expect(targeting.deactivate).not.toHaveBeenCalled();
+
+		page._onHubRealtimeConnectionState({state: "live"});
+		await pFlushPromises();
+
+		expect(page._hubCampaignContext.pRefresh).toHaveBeenCalledTimes(1);
+		expect(page._hubContext).toMatchObject({
+			rulesVersion: {id: "rules-1"},
+			capabilities: {peerSourceCosts: {enabled: false}},
+		});
+		expect(targeting.activate).toHaveBeenCalledWith({characterId: "source-character", membershipRole: "player"});
+		expect(page._isHubContextRevalidationRequired).toBe(false);
 	});
 
 	it("routes realtime access loss through the full campaign teardown", async () => {
@@ -633,6 +821,32 @@ describe("carry authority basis follows the campaign context lifecycle", () => {
 		expect(page._hubRulesPendingVersionId).toBeNull();
 
 		page._clearHubRules();
+		expect(page._hubRulesPendingVersionId).toBeNull();
+		expect(page._hubRulesRefreshBlocked).toBe(false);
+	});
+
+	it("lets transfer recovery accept the latest active rules over an obsolete pending version", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		await activate(page, schemaV2Context("rules-1"));
+		page._hubRulesPendingVersionId = "rules-2";
+		page._hubRulesRefreshBlocked = true;
+		let refreshCount = 0;
+		page._hubApi = {
+			pGetCampaignContext: async () => {
+				if (++refreshCount === 1) throw new Error("offline");
+				return schemaV2Context("rules-3");
+			},
+		};
+		page._hubCampaignId = "campaign";
+		page._renderCharacter = () => {};
+
+		expect(await page._pRefreshHubRules({isUseLatest: true})).toBe(false);
+		expect(page._hubRulesPendingVersionId).toBeNull();
+		expect(page._hubRulesRefreshBlocked).toBe(true);
+
+		expect(await page._pRefreshHubRules({isUseLatest: true})).toBe(true);
+		expect(refreshCount).toBe(2);
+		expect(page._hubContext.rulesVersion.id).toBe("rules-3");
 		expect(page._hubRulesPendingVersionId).toBeNull();
 		expect(page._hubRulesRefreshBlocked).toBe(false);
 	});

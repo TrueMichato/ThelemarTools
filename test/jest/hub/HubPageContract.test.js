@@ -102,6 +102,72 @@ describe("campaign hub pages", () => {
 		expect(campaignHtml).toContain("data-pending-label=\"Applying...\"");
 	});
 
+	it("keeps transfer submission recoverable after a successful mutation outlives its refresh", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("HubTransferProposalDrafts");
+		expect(source).toContain("transferProposalDrafts.stage");
+		expect(source).toContain("transferProposalDrafts.get(proposalRef)");
+		expect(source).toContain("proposalRequest.isAutoResolved");
+		expect(source).toContain("transferProposalDrafts.isReplayable");
+		expect(source).toContain("HubTransferProposalDrafts.reconcileExpiredProposal");
+		expect(source).toContain("transfers: refreshResult.transfers");
+		expect(source).toContain("This request remains locked to prevent a duplicate");
+		expect(source).toContain("The original transfer was found and is still pending.");
+		expect(source).toContain("No matching transfer was found. Latest balances are loaded");
+		expect(source).toContain("Retry transfer");
+		expect(source).toContain("Retry to reconcile the same transfer.");
+		expect(source).toContain("Refresh latest balances");
+		expect(source).toContain("form._hubMutationKey = null");
+		expect(source).toContain("form._hubMutationFingerprint = null");
+		expect(source).toContain("setTransferRefreshFailure");
+		expect(source).toContain("const form = event.currentTarget;");
+		expect(source).toContain("Retry latest balances");
+		expect(source).toContain("Latest balances loaded. You can send another transfer.");
+		expect(source).toContain("const latestSelections = readSelections();");
+		expect(source).toContain("selectionsToRestore");
+		expect(source).toContain("if (sourceKind !== \"character\") return false;");
+		expect(source).toContain("Request sent. A DM must approve before anything leaves the party inventory.");
+		expect(source).not.toContain("Reload the campaign before sending another transfer.");
+		expect(source).not.toContain("event.currentTarget.querySelector(\"button[type='submit']\").disabled = true");
+	});
+
+	it("keeps inbox transfer decisions idempotent and separates committed outcomes from refresh failures", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("HubTransferResolutionDrafts");
+		expect(source).toContain("HubTransferRefreshQueue");
+		expect(source).toContain("transferRefreshQueue.pRun");
+		expect(source).toContain("const pTransferStateRefresh = pRefreshTransferState({");
+		expect(source).toContain("charactersNxt: pCharactersNxt");
+		expect(source).toContain("snapshotNxt: pSnapshotNxt");
+		expect(source).toContain("fnIsSnapshotCurrent: snapshotNxt => snapshotNxt.lastSequence >= liveLastSequence");
+		expect(source).toContain("const acceptedSnapshot = snapshotNxt && fnIsSnapshotCurrent(snapshotNxt)");
+		expect(source).toContain("if (acceptedSnapshot?.roster) rosterRef.current = acceptedSnapshot.roster");
+		expect(source).toContain("pResolveTransferAndRefresh");
+		expect(source).toContain("transferResolutionDrafts.stage");
+		expect(source).toContain("pResolveTransferFromDraft");
+		expect(source).toContain("error?.code !== \"RULES_VERSION_STALE\"");
+		expect(source).toContain("const isDefinitiveWithoutPending = error instanceof HubApiError");
+		expect(source).toContain("&& !isTransferOutcomeUncertain(error)");
+		expect(source).toContain("if (isDefinitiveWithoutPending) {");
+		expect(source).toContain("await pRefreshTransferState();");
+		expect(source).toContain("The latest balances could not be loaded.");
+		expect(source).toContain("setTransferProposalControls");
+		expect(source).toContain("form._hubTransferControlStates");
+		expect(source).toContain("const transfers = await api.pListTransfers({campaignId})");
+		expect(source).toContain("const currentTransfer = transfers.find(it => it.id === proposed.transfer.id)");
+		expect(source).toContain("option[data-hub-frozen-proposal]");
+		expect(source).toContain("Original item stack");
+		expect(source).toContain("const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId})");
+		expect(source).toContain("resolutionRequest.decision !== decision");
+		expect(source).toContain("transferResolutionDrafts.isReplayable");
+		expect(source).toContain("transferResolutionDrafts.reconcilePending");
+		expect(source).toContain("Transfer applied.");
+		expect(source).toContain("The committed outcome is safe");
+		expect(source).toContain("The transfer outcome is not yet confirmed.");
+		expect(source).toContain("Retry inbox refresh");
+		expect(source).not.toMatch(/pResolveTransfer\([\s\S]{0,300}idempotencyKey: crypto\.randomUUID\(\)/);
+	});
+
 	it("requires an explicit source identity for condition effects", () => {
 		const source = read("js/hub/hub-page.js");
 		expect(campaignHtml).toContain("id=\"campaign-action-condition-source\"");
@@ -213,7 +279,8 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("liveEvents = [...liveEvents.filter");
 		expect(source).toContain("renderRecentActivity({events: liveEvents");
 		expect(source).toContain("getCharacterName(target)");
-		expect(source).toContain("getContainerName({kind: transfer.sourceKind");
+		expect(source).toContain("getTransferContainerName({transfer, endpoint: \"source\"");
+		expect(source).toContain("DisplaySnapshot`]?.displayName || \"A character\"");
 		expect(source).toContain("navigator.clipboard.writeText(inviteOutput.value)");
 		expect(campaignHtml).toContain("id=\"campaign-invite-copy\"");
 	});
@@ -386,7 +453,9 @@ describe("campaign hub pages", () => {
 		expect(source).toMatch(/^async function renderPendingTransfers/m);
 		expect(source.indexOf("async function renderPendingTransfers")).toBeLessThan(source.indexOf("async function pInitCampaignForms"));
 		expect(source).toContain("const canReject = canAct && (canAccept || transfer.actorAccountId === session.account.id)");
-		expect(source).toContain("canAccept ? \"Reject\" : \"Cancel\"");
+		expect(source).toContain("[\"proposed\", \"reserved\"].includes(transfer.status)");
+		expect(source).toContain("DM approval is needed before the stash changes");
+		expect(source).toContain("isRequest ? \"Decline\" : \"Reject\"");
 	});
 
 	it("initializes every rules control from the active campaign version", () => {

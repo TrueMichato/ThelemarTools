@@ -56,6 +56,10 @@ assertion, clears that release gate.
 - Writes require base revision, held lease, and monotonic lease epoch.
 - The client retains the accepted base for each in-flight write and performs explicit disjoint rebase or conflict
   recovery. It must not promote an unacknowledged snapshot to the base.
+- A transport-failed owner write remains a local recovery draft. Reconnect/refocus refetches canonical truth:
+  disjoint drafts retry, while overlapping paths use the explicit local/server recovery flow. Client-only save
+  timestamps are excluded from overlap detection. `Use Local` preserves the actual local candidate, except that
+  server-owned inventory and XP paths retain their stricter server-wins overlap policy.
 - Choosing server conflict truth updates accepted, live, latest-submitted, and visible Character Sheet state
   inside the same serialized and generation-fenced mutation before queued realtime delivery resumes. A covered
   event remains suppressed, and a genuinely newer queued operation cannot be overwritten by stale caller

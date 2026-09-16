@@ -89,7 +89,7 @@ tokens and response bodies never cross the callback adapter boundary.
 | `PATCH /api/campaigns/:campaignId/members/:membershipId` | Campaign owner mutation | role co_dm/player/spectator | Changes a non-owner role |
 | `DELETE /api/campaigns/:campaignId/members/:membershipId` | Owner or co-DM mutation | none | Removes allowed non-owner, resolves pending state, detaches characters |
 | `POST /api/campaigns/:campaignId/leave` | Non-owner mutation | none | Leaves and performs the same lifecycle cleanup |
-| `GET /api/campaigns/:campaignId/context` | Active member | none | Active immutable brew/rules versions |
+| `GET /api/campaigns/:campaignId/context` | Active member | none | Current membership role plus active immutable brew/rules versions and capability payloads |
 | `GET /api/campaigns/:campaignId/snapshot` | Active member; protocol-versioned | none | Campaign, membership, authorization-scoped character envelopes, roster metadata, last sequence |
 | `GET /api/campaigns/:campaignId/character-projections` | Active member; protocol-versioned | none | `{projections, roster}` — the batch scoped projector every consumer refetches through |
 | `GET /api/campaigns/:campaignId/events` | Active member | exactly one optional cursor: forward `afterSequence>=0` or backward `beforeSequence>=1`; `limit` 1-500 (default 200) | Forward: `{events, replay: {scannedThroughSequence, hasMore}}`. Backward: `{events, history: {scannedBackThroughSequence, hasMore}}`. Events are always returned in ascending sequence order |
@@ -179,10 +179,24 @@ operation and event ids; any actor/body reuse returns `IDEMPOTENCY_KEY_REUSED`.
 The item-award source is either `{kind:"party_inventory",entryId}` or
 `{kind:"catalog"|"recent"|"campaign_item",item}`. A browser-supplied item is restricted to `name`, `source`,
 `page`, `rarity`, `weight`, `value`, `typeCode`, and `edition`; unknown/rich/executable content is rejected and
-the BFF does not load the site catalog. A stash award derives content from the locked authoritative stack and
-debits `quantity * targetCharacterIds.length` once. All targets, the optional stash debit, one batch audit, the
-ordered per-target grant/projection events, the optional stash invalidation, and the receipt commit together or
-not at all. Exact retries replay the same ordered response without another debit or grant.
+the request summary is never stored as the canonical item. The BFF resolves catalog identities from a generated
+repository-owned site catalog, campaign-item identities from the active validated brew bundle, and recent
+identities from either trusted source. New `item.granted` events record the resolved `catalog` or
+`campaign_item` authority so Recent reuses it exactly. A legacy `recent` identity must exist in exactly one
+authority. Stash-derived events are omitted from Recent; the live party-stash picker retains their stack UUID.
+Missing or source-kind-mismatched identities return `ITEM_AWARD_SOURCE_NOT_FOUND`; unresolved trusted
+`_copy` inheritance, duplicate campaign identities, site/campaign `name|source` collisions, and ambiguous legacy
+Recent identities return `ITEM_AWARD_SOURCE_INVALID`. The resolver supports direct campaign item metadata and
+simple `name`/`source` inheritance, but rejects `_mod`, templates, and other runtime transformations rather than
+executing campaign-supplied instructions in the BFF. Client-supplied metadata cannot override the resolved object. A
+stash award derives content from the locked authoritative stack and debits
+`quantity * targetCharacterIds.length` once. All targets, the optional stash debit, one batch audit, the ordered
+per-target grant/projection events, the optional stash invalidation, and the receipt commit together or not at
+all. Exact retries replay the same ordered response without another debit or grant. Award responses and events
+contain only the bounded summary even though authoritative inventory retains the complete trusted item.
+Those returned/event/audit summaries are derived from the resolved authoritative item, so browser-supplied
+display metadata cannot disagree with the persisted object. Event and audit `sourceKind` identify the resolved
+authority; the response source continues to describe the normalized submitted command for retry identity.
 
 Direct DM/co-DM body:
 
@@ -228,18 +242,60 @@ arbitrary spell prose.
 | Method/path | Authorization | Input | Result |
 |---|---|---|---|
 | `GET /api/campaigns/:campaignId/party-inventory` | Active member | none | Lazily created party inventory, entries, denomination currency |
-| `GET /api/campaigns/:campaignId/transfers` | Active member | none | Transfers visible to DM, actor, source owner, or target owner |
-| `POST /api/campaigns/:campaignId/transfers` | Active-member mutation; source owner or DM for party source | source/target kind+UUID, <=100 item quantities, nonnegative denomination currency | 201 transfer already in `reserved` state |
-| `POST /api/campaigns/:campaignId/transfers/:transferId/resolve` | Target owner or DM/co-DM; originating actor may reject | accept/reject plus active `rulesVersionId` when accepting into a character under restrictive content policy | committed or rejected transfer |
+| `GET /api/campaigns/:campaignId/transfers` | Active member | none | Transfers visible to DM, actor, source owner, or target owner; non-DM views omit unowned character/container IDs and foreign actor attribution |
+| `POST /api/campaigns/:campaignId/transfers` | Active-member mutation; character source owner, DM/co-DM party source, or player requesting party inventory for their own character | source/target kind+UUID, <=100 item quantities, nonnegative denomination currency, and active `rulesVersionId` for a direct character destination under restrictive content policy | 201 viewer-scoped `committed` direct-authority transfer, `reserved` approval-bound escrow transfer, or non-escrowed `proposed` player stash request |
+| `POST /api/campaigns/:campaignId/transfers/:transferId/resolve` | Reserved: target owner or DM/co-DM; proposed stash request: DM/co-DM; originating actor may reject/cancel either | accept/reject plus active `rulesVersionId` when accepting into a character under restrictive content policy | viewer-scoped committed or rejected transfer/request |
 
 `sourceKind`/`targetKind` are `character` or `party_inventory`. Empty/insufficient transfers fail before a
-row is committed. Item quantities must be positive finite safe integers within the route schema limit. The
-authority removes the requested value into escrow before returning `reserved`; acceptance writes that escrow
-to the destination, while rejection or lifecycle cancellation restores the source exactly once. Reusing an
-idempotency key with the same command replays its stored result rather than repeating either mutation.
-Acceptance into a character compares the resulting authoritative document with its prior state and rejects a
-new disallowed/unknown item identity or stale rules pin before destination, resolution, audit, event, outbox, or
-receipt changes. The reserved escrow remains available for an exact reject/cancel restoration.
+row is committed. Item quantities must be positive finite safe integers within the route schema limit.
+The server, not the browser, determines direct authority. A DM/co-DM transfer or a player's character-to-character
+transfer between two characters they own validates both containers and commits source debit, destination credit,
+terminal `committed` transfer, audit, event, outbox, and receipt atomically. No intermediate recipient-resolvable
+reservation exists. Other character-source commands remove the requested value into escrow before returning
+`reserved`; acceptance writes that escrow to the destination, while rejection or lifecycle cancellation restores
+the source exactly once. A player party-source command is allowed only when the destination is that player's own
+character. It stores a server-derived metadata preview and normalized request as `proposed` but does not debit or
+reserve the stash. DM/co-DM acceptance rechecks the live stack and atomically removes its current canonical
+metadata and writes it to the character; concurrent depletion returns `TRANSFER_INSUFFICIENT` without changing
+either container or terminalizing the request. Reusing an idempotency key with the same command replays its stored
+result rather than repeating either mutation.
+Transfer mutation responses and their replay receipts use the same viewer projection as the transfer collection:
+DM/co-DM viewers receive the full authority record, while non-DM viewers receive only owned character endpoint
+IDs and their own actor attribution; party-inventory IDs and foreign actor attribution remain concealed. A
+transfer's originating actor also receives `actorCommandId`, the opaque proposal idempotency key, on proposal
+responses, receipt replays, and transfer-list reads. Other participants, including DM/co-DM viewers who did not
+originate the command, never receive that correlation value. Transfer-list reads may also include
+`sourceDisplaySnapshot` and `targetDisplaySnapshot` for character endpoints whose identity is visible to that
+viewer under the current projection policy. Peer viewers receive the current projected identity name, including
+an explicit replacement alias rather than the canonical name. Owners and DM/co-DM viewers may receive the
+canonical name, but only while the endpoint is still active in the transfer's campaign. These labels are derived
+at read time, are omitted when identity is hidden or the character has since detached or moved campaigns, and
+never restore the concealed endpoint UUID.
+Browser proposal and resolution retries freeze the original body, decision, rules pin, and idempotency key after
+an outcome-uncertain network, invalid-response, or HTTP 5xx failure. That exact retry is allowed for at most 23
+hours, staying inside PostgreSQL's 24-hour command-receipt lifetime. Once the browser window expires, it matches
+the frozen command against an authorization-scoped transfer listing by `actorCommandId` before refreshing either
+inventory. A matching pending transfer keeps the composer locked until it is explicitly cancelled or resolved;
+only a confirmed missing or terminal command lets the composer close. If an acceptance
+fails definitively because its rules pin is stale, the browser reconciles first and creates a complete new
+decision request with a new key while preserving any already-created proposal under its original body and key.
+If the proposal itself is rejected for a stale pin before creating a transfer, both the proposal body and key
+rotate together. The browser never changes a pin beneath an existing key. Offline mutation queues and blind replay
+across reloads remain out of scope. Any definitive proposal rejection also gates new Character Sheet transfer
+drafts until both authoritative character and stash refreshes succeed; dismissing the failed draft does not clear
+that gate or permit a direct method call to reuse cached eligibility. A stale-rules marker also survives draft
+dismissal. Successful authority recovery must fetch and apply the active campaign context before clearing the
+gate, so a dirty source-character save and the next proposal both use the same current rules pin.
+An approval-bound acceptance or direct proposal into a character compares the resulting authoritative document
+with its prior state and rejects a new disallowed/unknown item identity or stale rules pin before source,
+destination, resolution, audit, event, outbox, or receipt changes. Approval-bound reserved escrow remains
+available for an exact reject/cancel restoration. If the remaining same-ID source stack was edited after a
+partial reservation, restoration merges only when the complete transferable metadata is still stack-equivalent.
+Otherwise the escrowed original returns as a collision-free stack near its original index, preserving both
+metadata identities and the conserved total quantity. Each reserved transfer also records the source container
+revision at reservation time as private authority metadata. Lifecycle cancellation restores reservations from
+the newest source revision to the oldest, so independently reserved whole stacks undo in deterministic LIFO
+order and recover their original relative positions in both stores without exposing that revision to viewers.
 
 The server derives item eligibility and stack compatibility from canonical data. A whole stack is refused
 while equipped, attuned, container-linked, spell/component-linked (including a real `itemGrantedSpells[].itemId`
@@ -251,10 +307,14 @@ custom names, source/edition, charges, durability, notes, material/variant/compo
 fields therefore remain distinct when they differ.
 
 An owned campaign-backed Character Sheet uses these routes directly: it fetches the party stash on open and
-after reconnect or relevant transfer events, proposes character-to-stash and character-to-character moves, and
-lets a DM/co-DM move stash items into the open character. The browser never applies an escrow mutation to two
-documents itself. Character updates are adopted through the HTTP character repository's authoritative
-reconciliation queue. Local, signed-out, detached, and non-owner sheets do not activate this integration.
+after reconnect or relevant transfer events, proposes character-to-stash and character-to-character moves,
+lets a player request a stash item for the open character, and lets a DM/co-DM move stash items directly.
+DM/co-DM moves and same-owner character moves receive a terminal server-committed proposal; player deposits,
+peer transfers, and stash requests explain whose approval is pending. The Campaign Overview follows the same
+direct-authority wording and treats `committed` proposal responses as complete. The browser never grants direct
+authority or applies an inventory mutation to either document. Character updates are adopted through the HTTP
+character repository's authoritative reconciliation queue. Local, signed-out, detached, and non-owner sheets do
+not activate this integration.
 
 ## Campaign content routes
 
@@ -301,7 +361,7 @@ Campaign role alone does not permit reading another DM's workspace.
 | Concurrency/lifecycle conflicts | `REVISION_CONFLICT`, `LEASE_HELD`, `LEASE_EXPIRED`, `LEASE_FENCED`, `CHARACTER_BUSY`, `CAMPAIGN_BUSY`, `MEMBERSHIP_OWNER_PROTECTED`, `ACCOUNT_OWNS_CAMPAIGN` |
 | Character/cloud content | `CHARACTER_INVALID`, `CHARACTER_TOO_LARGE`, `CLOUD_DATA_INVALID`, `CLOUD_DATA_TOO_LARGE`, `CLOUD_DATA_TOO_DEEP`, `CLOUD_HTML_FORBIDDEN`, `CLOUD_URL_FORBIDDEN`, `CLOUD_KEY_FORBIDDEN` |
 | Campaign content | `BREW_INVALID`, `BREW_TOO_LARGE`, `BREW_TOO_DEEP`, `BREW_BLOCKLIST_FORBIDDEN`, `BREW_RAW_HTML_FORBIDDEN`, `BREW_URL_FORBIDDEN`, `BREW_KEY_FORBIDDEN`, `BREW_DEPENDENCY_MISSING`, `RULES_INVALID`; generic `CLOUD_DATA_INVALID`, `CLOUD_DATA_TOO_LARGE`, or `CLOUD_DATA_TOO_DEEP` may surface from the shared JSON-safety pass |
-| Actions/transfers/awards | `ACTION_INVALID`, `OPERATION_FORBIDDEN`, `SOURCE_OR_TARGET_UNAVAILABLE`, `SOURCE_COST_UNSUPPORTED`, `PROPOSAL_STALE`, `RESOURCE_INSUFFICIENT`, `NUMERIC_INVALID`, `ITEM_AWARD_INVALID`, `ITEM_AWARD_SOURCE_NOT_FOUND`, `TRANSFER_EMPTY`, `TRANSFER_INSUFFICIENT`, `TRANSFER_ITEM_LINKED`, `TRANSFER_TARGET_INVALID` |
+| Actions/transfers/awards | `ACTION_INVALID`, `OPERATION_FORBIDDEN`, `SOURCE_OR_TARGET_UNAVAILABLE`, `SOURCE_COST_UNSUPPORTED`, `PROPOSAL_STALE`, `RESOURCE_INSUFFICIENT`, `NUMERIC_INVALID`, `ITEM_AWARD_INVALID`, `ITEM_AWARD_SOURCE_NOT_FOUND`, `ITEM_AWARD_SOURCE_INVALID`, `TRANSFER_EMPTY`, `TRANSFER_INSUFFICIENT`, `TRANSFER_ITEM_LINKED`, `TRANSFER_TARGET_INVALID` |
 | Availability | `DATABASE_UNAVAILABLE`, `INTERNAL_ERROR` |
 
 Most validation/domain errors default to 400. Authorization uses 401/403, hidden/unavailable resources use

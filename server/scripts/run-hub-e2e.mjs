@@ -295,7 +295,7 @@ try {
 		"--env", "HUB_CSRF_SECRET",
 		"--env", "HUB_METRICS_TOKEN",
 		"--env", "HUB_ALLOWED_OAUTH_SUBJECTS",
-		"--env", "HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS",
+		"--env", "HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS=",
 		"--env", "HUB_AUTH_PROVIDERS=github,discord,google",
 		"--env", "GITHUB_CLIENT_ID",
 		"--env", "GITHUB_CLIENT_SECRET",

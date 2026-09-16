@@ -7,6 +7,7 @@ const _LISTENER_TYPES = new Set([
 	"cursor",
 	"deliveryError",
 	"inventoryTransfer",
+	"membershipChanged",
 	"projectionInvalidated",
 	"recipientNotice",
 	"rulesChanged",
@@ -99,6 +100,7 @@ export class CharacterSheetRealtimeCoordinator {
 			isDetachQueued: false,
 			isSuspended: false,
 			inventoryEventKeys: new Set(),
+			membershipRole: null,
 			operationKeys: new Set(),
 			recipientNoticeKeys: new Set(),
 			cursorMetadata: null,
@@ -168,6 +170,18 @@ export class CharacterSheetRealtimeCoordinator {
 	_handleCursor (active, baseline) {
 		if (!this._isCurrent(active)) return;
 		if (baseline.cursor?.campaignId !== this._campaignId) return;
+		if (baseline.membership?.role && baseline.membership.role !== active.membershipRole) {
+			active.membershipRole = baseline.membership.role;
+			this._enqueue(active, {
+				type: "membershipChanged",
+				value: {
+					campaignId: this._campaignId,
+					sequence: baseline.cursor?.lastSequence || 0,
+					source: "cursor",
+					role: baseline.membership.role,
+				},
+			});
+		}
 		if (
 			baseline.campaign
 			&& Object.hasOwn(baseline.campaign, "activeRulesVersionId")
@@ -249,6 +263,19 @@ export class CharacterSheetRealtimeCoordinator {
 					sequence: event.sequence,
 					type: event.type,
 					aggregateId: event.aggregateId,
+				},
+			});
+			return;
+		}
+
+		if (event.type === "membership.role_changed") {
+			this._enqueue(active, {
+				type: "membershipChanged",
+				value: {
+					eventId: event.id,
+					campaignId: this._campaignId,
+					sequence: event.sequence,
+					source: "event",
 				},
 			});
 			return;

@@ -48,6 +48,7 @@ describe("campaign activity event presentation", () => {
 		const owner = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "activity-owner", displayName: "Owner"});
 		const player = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "activity-player", displayName: "Player"});
 		const deleter = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "activity-deleter", displayName: "Deleter"});
+		const sender = await store.pUpsertOAuthAccount({provider: "github", providerSubject: "activity-sender", displayName: "Sender"});
 		const campaign = (await store.pCreateCampaign({
 			accountId: owner.id,
 			name: "Activity",
@@ -74,8 +75,9 @@ describe("campaign activity event presentation", () => {
 		await join(player, campaign.id, "player-campaign");
 		await join(player, destination.id, "player-destination");
 		await join(deleter, campaign.id, "deleter-campaign");
+		await join(sender, campaign.id, "sender-campaign");
 		const source = (await store.pCreateCharacter({
-			accountId: owner.id,
+			accountId: sender.id,
 			campaignId: campaign.id,
 			data: {name: "Source", inventory: [], currency: {gp: 100}},
 			schemaVersion: 1,
@@ -105,7 +107,7 @@ describe("campaign activity event presentation", () => {
 		const detachTarget = await createTarget(player, "Detach Target", "activity-detach-target");
 		const deleteTarget = await createTarget(deleter, "Delete Target", "activity-delete-target");
 		const propose = (target, key) => store.pProposeTransfer({
-			accountId: owner.id,
+			accountId: sender.id,
 			campaignId: campaign.id,
 			sourceKind: "character",
 			sourceId: source.id,
@@ -514,8 +516,23 @@ describe("campaign activity event presentation", () => {
 			},
 			characters: [],
 		});
+		const request = normalizeHubEvent({
+			event: {
+				type: "transfer.proposed",
+				aggregateType: "transfer",
+				aggregateId: "request-id",
+				payload: {
+					sourceKind: "party_inventory",
+					targetKind: "character",
+					targetId: "target-id",
+					targetCharacterNameSnapshot: {version: 1, displayName: "Rook"},
+				},
+			},
+			characters: [],
+		});
 		expect(roll.subject).toBe("Nyx");
 		expect(transfer.title).toBe("Nyx offered a transfer to Rook.");
+		expect(request.title).toBe("Rook requested a transfer from Party inventory.");
 		expect(transfer.title).not.toMatch(/source-id|target-id|transfer-id/);
 	});
 
@@ -593,7 +610,7 @@ describe("campaign activity event presentation", () => {
 			sourceId: "character",
 			targetKind: "party_inventory",
 			targetId: "stash",
-		}).title).toBe("Morgan accepted a transfer from Nyx to Party inventory.");
+		}).title).toBe("Morgan completed a transfer from Nyx to Party inventory.");
 	});
 
 	it("renders every semantic lifecycle event from privacy-safe display snapshots", () => {
@@ -740,7 +757,9 @@ describe("campaign activity event presentation", () => {
 		expect(source).toMatch(/async pRemoveMember[\s\S]*?_pRemoveMembershipLifecycle/);
 		expect(source).toMatch(/async pLeaveCampaign[\s\S]*?_pRemoveMembershipLifecycle/);
 		expect(source).toMatch(/async pPurgeDueAccounts[\s\S]*?_pRemoveMembershipLifecycle/);
-		const cancellation = source.slice(source.indexOf("async _pCancelIncomingForCharacter"), source.indexOf("async _pCancelTransferForLifecycle"));
+		const incomingCancellation = source.slice(source.indexOf("async _pCancelIncomingForCharacter"), source.indexOf("async _pCancelTransferForLifecycle"));
+		expect(incomingCancellation).toContain("this._pCancelTransferForLifecycle");
+		const cancellation = source.slice(source.indexOf("async _pCancelTransferForLifecycle"), source.indexOf("async _pCancelTransfersForLifecycle"));
 		expect(cancellation).toContain("sourceKind: transfer.sourceKind");
 		expect(cancellation).toContain("sourceId: transfer.sourceId");
 		expect(cancellation).toContain("targetKind: transfer.targetKind");

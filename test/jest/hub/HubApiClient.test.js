@@ -1,4 +1,11 @@
-import {HubApiClient, HubApiError} from "../../../js/hub/hub-api-client.js";
+import {
+	HubApiClient,
+	HubApiError,
+	HubTransferProposalDrafts,
+	HubTransferRefreshQueue,
+	HubTransferResolutionDrafts,
+	pResolveTransferFromDraft,
+} from "../../../js/hub/hub-api-client.js";
 
 function getResponse ({status = 200, body = {}} = {}) {
 	return {
@@ -9,6 +16,149 @@ function getResponse ({status = 200, body = {}} = {}) {
 }
 
 describe("hub API client", () => {
+	it("serializes transfer refreshes in invocation order and releases the queue after failure", async () => {
+		const queue = new HubTransferRefreshQueue();
+		const order = [];
+		let releaseFirst;
+		const firstGate = new Promise(resolve => releaseFirst = resolve);
+		const pFirst = queue.pRun(async () => {
+			order.push("first:start");
+			await firstGate;
+			order.push("first:end");
+		});
+		const pSecond = queue.pRun(async () => order.push("second"));
+
+		await Promise.resolve();
+		expect(order).toEqual(["first:start"]);
+		releaseFirst();
+		await Promise.all([pFirst, pSecond]);
+		expect(order).toEqual(["first:start", "first:end", "second"]);
+
+		await expect(queue.pRun(async () => { throw new Error("refresh failed"); })).rejects.toThrow("refresh failed");
+		await expect(queue.pRun(async () => "recovered")).resolves.toBe("recovered");
+	});
+
+	it("rotates a definitive stale transfer decision only after a separate reconciled attempt", async () => {
+		const keys = ["accept-1", "accept-2"];
+		const drafts = new HubTransferResolutionDrafts({fnCreateKey: () => keys.shift()});
+		const requests = [];
+		let rulesRead = 0;
+		const pRun = () => pResolveTransferFromDraft({
+			drafts,
+			campaignId: "campaign-1",
+			transferId: "transfer-1",
+			pGetRulesVersionId: async () => `rules-${++rulesRead}`,
+			pResolve: async request => {
+				requests.push(request);
+				if (requests.length === 1) throw new HubApiError({code: "RULES_VERSION_STALE", status: 409});
+				return {transfer: {id: "transfer-1", status: "committed"}};
+			},
+		});
+
+		await expect(pRun()).rejects.toEqual(expect.objectContaining({code: "RULES_VERSION_STALE"}));
+		expect(drafts.get({campaignId: "campaign-1", transferId: "transfer-1"})).toBeNull();
+		await expect(pRun()).resolves.toEqual({transfer: {id: "transfer-1", status: "committed"}});
+
+		expect(requests).toEqual([
+			expect.objectContaining({rulesVersionId: "rules-1", idempotencyKey: "accept-1"}),
+			expect.objectContaining({rulesVersionId: "rules-2", idempotencyKey: "accept-2"}),
+		]);
+		expect(drafts.get({campaignId: "campaign-1", transferId: "transfer-1"})).toBeNull();
+	});
+
+	it("freezes one transfer proposal per account and campaign until its exact key is reconciled", () => {
+		let now = 100;
+		const drafts = new HubTransferProposalDrafts({fnNow: () => now, replayWindowMs: 50});
+		const first = {
+			sourceKind: "character",
+			sourceId: "source-1",
+			targetKind: "character",
+			targetId: "target-1",
+			payload: {items: [{entryId: "item-1", quantity: 1}]},
+			rulesVersionId: "rules-1",
+			idempotencyKey: "proposal-1",
+			isAutoResolved: true,
+		};
+		const staged = drafts.stage({accountId: "account-1", campaignId: "campaign-1", request: first});
+		first.targetId = "changed-locally";
+		staged.payload.items[0].quantity = 99;
+
+		expect(drafts.stage({
+			accountId: "account-1",
+			campaignId: "campaign-1",
+			request: {...first, idempotencyKey: "proposal-2"},
+		})).toEqual(expect.objectContaining({
+			targetId: "target-1",
+			payload: {items: [{entryId: "item-1", quantity: 1}]},
+			rulesVersionId: "rules-1",
+			idempotencyKey: "proposal-1",
+			isAutoResolved: true,
+			replayUntil: 150,
+		}));
+		expect(drafts.isReplayable(staged)).toBe(true);
+		now = 150;
+		expect(drafts.isReplayable(staged)).toBe(false);
+		expect(drafts.get({accountId: "account-2", campaignId: "campaign-1"})).toBeNull();
+		expect(drafts.clear({
+			accountId: "account-1",
+			campaignId: "campaign-1",
+			idempotencyKey: "wrong-key",
+		})).toBe(false);
+		expect(drafts.clear({
+			accountId: "account-1",
+			campaignId: "campaign-1",
+			idempotencyKey: "proposal-1",
+		})).toBe(true);
+		expect(drafts.get({accountId: "account-1", campaignId: "campaign-1"})).toBeNull();
+	});
+
+	it("reconciles expired transfer proposals without unlocking known or ambiguous commands", () => {
+		const proposalRequest = {
+			sourceKind: "character",
+			sourceId: "source-1",
+			targetKind: "character",
+			targetId: "target-1",
+			payload: {
+				items: [{entryId: "item-b", quantity: 2}, {entryId: "item-a", quantity: 1}],
+				currency: {gp: 3},
+			},
+			idempotencyKey: "proposal-1",
+		};
+		const matchingTransfer = {
+			id: "transfer-1",
+			actorCommandId: "proposal-1",
+			status: "reserved",
+			sourceKind: "character",
+			targetKind: "character",
+			targetId: "target-1",
+			payload: {escrow: {items: [{id: "item-a", quantity: 1}, {id: "item-b", quantity: 2}], currency: {gp: 3}}},
+		};
+
+		expect(HubTransferProposalDrafts.reconcileExpiredProposal({
+			proposalRequest,
+			transfers: [matchingTransfer],
+		})).toEqual({state: "pending", transfer: matchingTransfer});
+		const terminalTransfer = {...matchingTransfer, status: "committed"};
+		expect(HubTransferProposalDrafts.reconcileExpiredProposal({
+			proposalRequest,
+			transfers: [terminalTransfer],
+		})).toEqual({state: "terminal", transfer: terminalTransfer});
+		expect(HubTransferProposalDrafts.reconcileExpiredProposal({
+			proposalRequest,
+			transfers: [],
+		})).toEqual({state: "absent"});
+
+		const legacyMatch = {...matchingTransfer, actorCommandId: undefined};
+		expect(HubTransferProposalDrafts.reconcileExpiredProposal({
+			proposalRequest,
+			transfers: [legacyMatch],
+		})).toEqual({state: "pending", transfer: legacyMatch, isLegacy: true});
+		expect(HubTransferProposalDrafts.reconcileExpiredProposal({
+			proposalRequest,
+			transfers: [legacyMatch, {...legacyMatch, id: "transfer-2"}],
+		})).toEqual({state: "ambiguous"});
+	});
+
 	it("calls the browser fetch global without rebinding its receiver", async () => {
 		const originalFetch = globalThis.fetch;
 		globalThis.fetch = async function () {
@@ -110,7 +260,7 @@ describe("hub API client", () => {
 		}));
 	});
 
-	it("pins transfer acceptance to the current policy and retries once after a concurrent activation", async () => {
+	it("keeps a transfer acceptance body immutable and requires a new key after a stale policy pin", async () => {
 		const calls = [];
 		let contextReads = 0;
 		let resolveWrites = 0;
@@ -130,6 +280,7 @@ describe("hub API client", () => {
 				throw new Error(`Unexpected request: ${path}`);
 			},
 		});
+
 		await client.pGetSession();
 
 		await expect(client.pResolveTransfer({
@@ -137,11 +288,48 @@ describe("hub API client", () => {
 			transferId: "transfer-1",
 			decision: "accept",
 			idempotencyKey: "accept-1",
+		})).rejects.toEqual(expect.objectContaining({code: "RULES_VERSION_STALE"}));
+		await expect(client.pResolveTransfer({
+			campaignId: "campaign-1",
+			transferId: "transfer-1",
+			decision: "accept",
+			idempotencyKey: "accept-2",
 		})).resolves.toEqual({transfer: {id: "transfer-1", status: "committed"}});
 
 		const resolveCalls = calls.filter(call => call.path.endsWith("/resolve"));
 		expect(resolveCalls.map(call => JSON.parse(call.opts.body).rulesVersionId)).toEqual(["rules-1", "rules-2"]);
-		expect(resolveCalls.map(call => call.opts.headers["idempotency-key"])).toEqual(["accept-1", "accept-1"]);
+		expect(resolveCalls.map(call => call.opts.headers["idempotency-key"])).toEqual(["accept-1", "accept-2"]);
+	});
+
+	it("pins an atomic direct transfer proposal to the active rules version", async () => {
+		const calls = [];
+		const client = new HubApiClient({
+			fnFetch: async (path, opts = {}) => {
+				calls.push({path, opts});
+				if (path === "/api/session") return getResponse({body: {signedIn: true, csrfToken: "csrf-1"}});
+				return getResponse({status: 201, body: {transfer: {id: "transfer-1", status: "committed"}}});
+			},
+		});
+		await client.pGetSession();
+		await client.pProposeTransfer({
+			campaignId: "campaign-1",
+			sourceKind: "character",
+			sourceId: "source-1",
+			targetKind: "character",
+			targetId: "target-1",
+			payload: {items: [{entryId: "item-1", quantity: 1}], currency: {}},
+			rulesVersionId: "rules-1",
+			idempotencyKey: "transfer-1",
+		});
+
+		expect(JSON.parse(calls[1].opts.body)).toEqual({
+			sourceKind: "character",
+			sourceId: "source-1",
+			targetKind: "character",
+			targetId: "target-1",
+			payload: {items: [{entryId: "item-1", quantity: 1}], currency: {}},
+			rulesVersionId: "rules-1",
+		});
 	});
 
 	it("normalizes browser fetch failures without leaking browser-specific messages", async () => {

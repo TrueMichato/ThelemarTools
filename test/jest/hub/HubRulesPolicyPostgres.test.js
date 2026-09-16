@@ -118,6 +118,33 @@ async function pRunContentScenario (store, label) {
 		name: `${label} content policy`,
 		idempotencyKey: command(`${label}:content:campaign`),
 	})).campaign;
+	const transferSourceAccount = await store.pUpsertOAuthAccount({
+		provider: "test",
+		providerSubject: `${label}-content-source-${crypto.randomUUID()}`,
+		displayName: `${label} transfer source`,
+	});
+	const transferTargetAccount = await store.pUpsertOAuthAccount({
+		provider: "test",
+		providerSubject: `${label}-content-target-${crypto.randomUUID()}`,
+		displayName: `${label} transfer target`,
+	});
+	for (const [member, suffix] of [[transferSourceAccount, "source"], [transferTargetAccount, "target"]]) {
+		const tokenHash = crypto.randomBytes(32).toString("hex");
+		await store.pCreateInvite({
+			accountId: account.id,
+			campaignId: campaign.id,
+			role: "player",
+			tokenHash,
+			expiresAt: new Date(Date.now() + 60_000),
+			maxUses: 1,
+			idempotencyKey: command(`${label}:content:${suffix}:invite`),
+		});
+		await store.pRedeemInvite({
+			accountId: member.id,
+			tokenHash,
+			idempotencyKey: command(`${label}:content:${suffix}:redeem`),
+		});
+	}
 	const permissive = await store.pCreateAndActivateRulesPolicy({
 		accountId: account.id,
 		campaignId: campaign.id,
@@ -137,6 +164,18 @@ async function pRunContentScenario (store, label) {
 		clientImportId: `${label}:legacy`,
 		rulesVersionId: permissive.rulesVersion.id,
 		idempotencyKey: command(`${label}:content:legacy`),
+	})).character;
+	const transferSource = (await store.pCreateCharacter({
+		accountId: transferSourceAccount.id,
+		campaignId: campaign.id,
+		data: {
+			name: "Transfer source",
+			inventory: [{id: "transfer-legacy-item", item: {name: "Legacy item", source: "XPHB", edition: "one"}, quantity: 1}],
+		},
+		schemaVersion: 1,
+		clientImportId: `${label}:transfer-source`,
+		rulesVersionId: permissive.rulesVersion.id,
+		idempotencyKey: command(`${label}:content:transfer-source`),
 	})).character;
 	const detached = (await store.pCreateCharacter({
 		accountId: account.id,
@@ -187,14 +226,23 @@ async function pRunContentScenario (store, label) {
 		rulesVersionId,
 		idempotencyKey: command(`${label}:content:allowed`),
 	})).character;
+	const transferTarget = (await store.pCreateCharacter({
+		accountId: transferTargetAccount.id,
+		campaignId: campaign.id,
+		data: {name: "Transfer target", race: {name: "Human (Base)", source: "PHB", edition: "classic"}, inventory: []},
+		schemaVersion: 1,
+		clientImportId: `${label}:transfer-target`,
+		rulesVersionId,
+		idempotencyKey: command(`${label}:content:transfer-target`),
+	})).character;
 	const transfer = (await store.pProposeTransfer({
-		accountId: account.id,
+		accountId: transferSourceAccount.id,
 		campaignId: campaign.id,
 		sourceKind: "character",
-		sourceId: legacy.id,
+		sourceId: transferSource.id,
 		targetKind: "character",
-		targetId: allowed.id,
-		payload: {items: [{entryId: "legacy-item", quantity: 1}]},
+		targetId: transferTarget.id,
+		payload: {items: [{entryId: "transfer-legacy-item", quantity: 1}]},
 		idempotencyKey: command(`${label}:content:transfer`),
 	})).transfer;
 	const legacyAfterReservation = (await store.pGetCharacter({
@@ -282,8 +330,30 @@ async function pRunContentScenario (store, label) {
 			rulesVersionId,
 			idempotencyKey: command(`${label}:content:denied-award`),
 		})),
-		transferStalePin: await pGetErrorCode(store.pResolveTransfer({
+		directTransferStalePin: await pGetErrorCode(store.pProposeTransfer({
 			accountId: account.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: legacy.id,
+			targetKind: "character",
+			targetId: allowed.id,
+			payload: {items: [{entryId: "legacy-item", quantity: 1}]},
+			rulesVersionId: permissive.rulesVersion.id,
+			idempotencyKey: command(`${label}:content:stale-direct-transfer`),
+		})),
+		directTransfer: await pGetErrorCode(store.pProposeTransfer({
+			accountId: account.id,
+			campaignId: campaign.id,
+			sourceKind: "character",
+			sourceId: legacy.id,
+			targetKind: "character",
+			targetId: allowed.id,
+			payload: {items: [{entryId: "legacy-item", quantity: 1}]},
+			rulesVersionId,
+			idempotencyKey: command(`${label}:content:denied-direct-transfer`),
+		})),
+		transferStalePin: await pGetErrorCode(store.pResolveTransfer({
+			accountId: transferTargetAccount.id,
 			campaignId: campaign.id,
 			transferId: transfer.id,
 			decision: "accept",
@@ -291,7 +361,7 @@ async function pRunContentScenario (store, label) {
 			idempotencyKey: command(`${label}:content:stale-transfer`),
 		})),
 		transfer: await pGetErrorCode(store.pResolveTransfer({
-			accountId: account.id,
+			accountId: transferTargetAccount.id,
 			campaignId: campaign.id,
 			transferId: transfer.id,
 			decision: "accept",
@@ -305,7 +375,7 @@ async function pRunContentScenario (store, label) {
 		limit: 500,
 	})).length;
 	await store.pResolveTransfer({
-		accountId: account.id,
+		accountId: transferTargetAccount.id,
 		campaignId: campaign.id,
 		transferId: transfer.id,
 		decision: "reject",
@@ -336,8 +406,10 @@ async function pRunContentScenario (store, label) {
 		rejectedEventDelta: eventsAfterRejectedWrites - eventsBeforeRejectedWrites,
 		replayedExistingImport: replayedLegacy.id === legacy.id && replayedLegacy.revision === legacy.revision,
 		legacyAwardQuantity,
-		restoredLegacyItem: (await store.pGetCharacter({accountId: account.id, characterId: legacy.id}))
-			.character.data.inventory.some(entry => entry.id === "legacy-item"),
+		legacyQuantityAfterDirectFailures: (await store.pGetCharacter({accountId: account.id, characterId: legacy.id}))
+			.character.data.inventory.find(entry => entry.id === "legacy-item")?.quantity,
+		restoredLegacyItem: (await store.pGetCharacter({accountId: transferSourceAccount.id, characterId: transferSource.id}))
+			.character.data.inventory.some(entry => entry.id === "transfer-legacy-item"),
 		detachedCampaignId: (await store.pGetCharacter({accountId: account.id, characterId: detached.id})).character.campaignId,
 		rolledBackToFirstVersion: rolledBack.rulesVersion.id === permissive.rulesVersion.id,
 		admittedAfterRollbackSource: admittedAfterRollback.data.race.source,
@@ -508,8 +580,9 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 	});
 
 	it("matches memory enforcement for admissions, writes, grandfathering, rollback, atomicity, and privacy", async () => {
-		const memory = await pRunContentScenario(new MemoryHubStore(), "memory");
-		const postgresStore = new PostgresHubStore({pool});
+		const fnResolveAwardItem = async ({item}) => structuredClone(item);
+		const memory = await pRunContentScenario(new MemoryHubStore({fnResolveAwardItem}), "memory");
+		const postgresStore = new PostgresHubStore({pool, fnResolveAwardItem});
 		await postgresStore.pCheckHealth();
 		const postgres = await pRunContentScenario(postgresStore, "postgres");
 
@@ -523,6 +596,8 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 				move: "CONTENT_POLICY_VIOLATION",
 				grant: "CONTENT_POLICY_VIOLATION",
 				award: "CONTENT_POLICY_VIOLATION",
+				directTransferStalePin: "RULES_VERSION_STALE",
+				directTransfer: "CONTENT_POLICY_VIOLATION",
 				transferStalePin: "RULES_VERSION_STALE",
 				transfer: "CONTENT_POLICY_VIOLATION",
 			},
@@ -530,6 +605,7 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 			rejectedEventDelta: 0,
 			replayedExistingImport: true,
 			legacyAwardQuantity: 2,
+			legacyQuantityAfterDirectFailures: 2,
 			restoredLegacyItem: true,
 			detachedCampaignId: null,
 			rolledBackToFirstVersion: true,

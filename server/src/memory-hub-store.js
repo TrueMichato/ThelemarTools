@@ -27,12 +27,15 @@ import {
 	getItemAwardIdempotencyKey,
 	getItemAwardTotalQuantity,
 	getSafeItemSummary,
+	isDirectTransferAuthority,
 	normalizeItemAwardRequest,
 	normalizeItemAwardQuantity,
 	normalizeCharacterInventory,
 	normalizeCurrency,
 	normalizeSafeItemSummary,
 	normalizeSemanticOperation,
+	orderTransfersForLifecycleCancellation,
+	prepareTransferRequest,
 	removeTransferPayload,
 } from "./hub-actions.js";
 import {validateCloudCharacterData, validateCloudValue} from "./cloud-data-validation.js";
@@ -57,6 +60,8 @@ import {
 import {
 	createCharacterDisplayNameSnapshot,
 	enrichEventPayload,
+	getTransferCharacterDisplaySnapshot,
+	projectTransferForViewer,
 	redactTransferEventForViewer,
 } from "./hub-event-snapshots.js";
 import {createSemanticOperationRegistry} from "./semantic-operation-registry.js";
@@ -82,6 +87,10 @@ import {
 	getExternalIdentityKey,
 	normalizeExternalIdentity,
 } from "./external-identity.js";
+import {
+	normalizeItemAwardResolution,
+	resolveItemAwardAuthority,
+} from "./item-award-catalog.js";
 
 function copy (value) {
 	return value === undefined ? undefined : structuredClone(value);
@@ -93,11 +102,13 @@ export class MemoryHubStore {
 		semanticOperationRegistry = createSemanticOperationRegistry(),
 		semanticProposalTtlMs = 24 * 60 * 60 * 1_000,
 		peerSourceCostsEnabled = false,
+		fnResolveAwardItem = resolveItemAwardAuthority,
 	} = {}) {
 		this._fnNow = fnNow;
 		this._semanticOperationRegistry = semanticOperationRegistry;
 		this._semanticProposalTtlMs = semanticProposalTtlMs;
 		this._isPeerSourceCostsEnabled = createPeerSourceCostsGate(peerSourceCostsEnabled);
+		this._fnResolveAwardItem = fnResolveAwardItem;
 		this._accounts = new Map();
 		this._identityToAccount = new Map();
 		this._externalIdentities = new Map();
@@ -598,6 +609,29 @@ export class MemoryHubStore {
 		return copy(response);
 	}
 
+	_projectTransferResponseForViewer ({response, accountId, membership}) {
+		if (!response?.transfer) return copy(response);
+		const canonical = this._transfers.get(response.transfer.id);
+		const transfer = canonical
+			? {
+				...copy(response.transfer),
+				actorAccountId: canonical.actorAccountId,
+				actorCommandId: canonical.actorCommandId,
+				sourceId: canonical.sourceId,
+				targetId: canonical.targetId,
+			}
+			: copy(response.transfer);
+		return {
+			...copy(response),
+			transfer: projectTransferForViewer({
+				transfer,
+				accountId,
+				role: membership.role,
+				getCharacterOwnerId: characterId => this._characters.get(characterId)?.ownerAccountId,
+			}),
+		};
+	}
+
 	_normalizeIdempotencyKey (idempotencyKey) {
 		if (idempotencyKey && typeof idempotencyKey === "object") return idempotencyKey;
 		const key = `${idempotencyKey}`;
@@ -792,6 +826,13 @@ export class MemoryHubStore {
 			const ownedCharacterIds = new Set([...this._characters.values()]
 				.filter(character => character.campaignId === campaignId && character.ownerAccountId === membership.accountId)
 				.map(character => character.id));
+			this._cancelTransfersForLifecycle({
+				campaignId,
+				affectedAccountId: membership.accountId,
+				characterIds: ownedCharacterIds,
+				actorAccountId: accountId,
+				reason: "membership_role_changed",
+			});
 			for (const operation of this._semanticOperations.values()) {
 				if (
 					operation.campaignId === campaignId
@@ -805,13 +846,6 @@ export class MemoryHubStore {
 					this._cancelSemanticOperationForLifecycle({operation, actorAccountId: accountId});
 				}
 			}
-			this._cancelTransfersForLifecycle({
-				campaignId,
-				affectedAccountId: membership.accountId,
-				characterIds: ownedCharacterIds,
-				actorAccountId: accountId,
-				reason: "membership_role_changed",
-			});
 		}
 		membership.role = role;
 		this._appendAudit({campaignId, actorAccountId: accountId, action: "membership.role_changed", targetType: "membership", targetId: membershipId, details: {role}});
@@ -819,45 +853,95 @@ export class MemoryHubStore {
 		return this._setReceipt({accountId, idempotencyKey, response: {membership: copy(membership)}});
 	}
 
-	_cancelTransferForLifecycle ({transfer, actorAccountId, reason}) {
-		if (transfer.status !== "reserved") return;
-		const source = this._getTransferContainer({kind: transfer.sourceKind, id: transfer.sourceId, campaignId: transfer.campaignId});
-		const targetOwnerAccountId = transfer.targetKind === "character"
-			? this._characters.get(transfer.targetId)?.ownerAccountId
-			: null;
-		this._setTransferContainer({
-			holder: source,
-			container: addTransferPayload({container: source.container, escrow: transfer.payload.escrow, isRestore: true}),
-			actorAccountId,
-		});
-		transfer.status = "cancelled";
-		transfer.resolvedAt = this._fnNow().toISOString();
-		this._appendEvent({
-			campaignId: transfer.campaignId,
-			actorAccountId,
-			type: "transfer.cancelled",
-			aggregateType: "transfer",
-			aggregateId: transfer.id,
-			visibility: "explicit_accounts",
-			visibleAccountIds: [...new Set([transfer.actorAccountId, targetOwnerAccountId].filter(Boolean))],
-			payload: {
-				reason,
-				sourceKind: transfer.sourceKind,
-				sourceId: transfer.sourceId,
-				targetKind: transfer.targetKind,
-				targetId: transfer.targetId,
-			},
+	_prepareTransferLifecycleCancellations ({transfers}) {
+		const stagedBySource = new Map();
+		return transfers.map(transfer => {
+			let restore = null;
+			if (transfer.status === "reserved") {
+				const sourceKey = `${transfer.sourceKind}::${transfer.sourceId}`;
+				const staged = stagedBySource.get(sourceKey);
+				let holder = staged?.holder;
+				let sourceContainer = staged?.container;
+				if (!holder) {
+					if (transfer.sourceKind === "party_inventory") {
+						const party = this._partyInventories.get(transfer.campaignId);
+						if (!party || party.id !== transfer.sourceId) throw new HubStoreError("TRANSFER_TARGET_INVALID", `Party inventory was not found.`, {status: 404});
+						holder = {_party: party};
+						sourceContainer = copy(party);
+					} else {
+						const character = this._getCharacterOrThrow(transfer.sourceId);
+						if (character.campaignId !== transfer.campaignId) throw new HubStoreError("TRANSFER_TARGET_INVALID", `Character was not found.`, {status: 404});
+						holder = {_character: character};
+						sourceContainer = normalizeCharacterInventory(copy(character.data));
+					}
+				}
+				let container = addTransferPayload({
+					container: sourceContainer,
+					escrow: transfer.payload.escrow,
+					isRestore: true,
+				});
+				if (holder._character) {
+					stripCarryAuthority(container);
+					validateCloudCharacterData(container);
+				}
+				restore = {holder, container};
+				stagedBySource.set(sourceKey, restore);
+			}
+			return {
+				transfer,
+				restore,
+				targetOwnerAccountId: transfer.targetKind === "character"
+					? this._characters.get(transfer.targetId)?.ownerAccountId
+					: null,
+			};
 		});
 	}
 
+	_applyTransferLifecycleCancellations ({prepared, actorAccountId, reason}) {
+		for (const {transfer, restore, targetOwnerAccountId} of prepared) {
+			if (restore) this._setTransferContainer({...restore, actorAccountId});
+			transfer.status = "cancelled";
+			transfer.resolvedAt = this._fnNow().toISOString();
+			this._appendEvent({
+				campaignId: transfer.campaignId,
+				actorAccountId,
+				type: "transfer.cancelled",
+				aggregateType: "transfer",
+				aggregateId: transfer.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: [...new Set([transfer.actorAccountId, targetOwnerAccountId].filter(Boolean))],
+				payload: {
+					reason,
+					sourceKind: transfer.sourceKind,
+					sourceId: transfer.sourceId,
+					targetKind: transfer.targetKind,
+					targetId: transfer.targetId,
+				},
+			});
+		}
+	}
+
+	_cancelTransferBatchForLifecycle ({transfers, actorAccountId, reason}) {
+		const active = transfers.filter(transfer => ["proposed", "reserved"].includes(transfer.status));
+		if (!active.length) return;
+		const prepared = this._prepareTransferLifecycleCancellations({
+			transfers: orderTransfersForLifecycleCancellation(active),
+		});
+		this._applyTransferLifecycleCancellations({prepared, actorAccountId, reason});
+	}
+
+	_cancelTransferForLifecycle ({transfer, actorAccountId, reason}) {
+		this._cancelTransferBatchForLifecycle({transfers: [transfer], actorAccountId, reason});
+	}
+
 	_cancelTransfersForLifecycle ({campaignId, affectedAccountId, characterIds, actorAccountId, reason}) {
-		for (const transfer of this._transfers.values()) {
-			if (transfer.campaignId !== campaignId || transfer.status !== "reserved") continue;
-			const isAffected = transfer.actorAccountId === affectedAccountId
+		const transfers = [...this._transfers.values()].filter(transfer => {
+			if (transfer.campaignId !== campaignId || !["proposed", "reserved"].includes(transfer.status)) return false;
+			return transfer.actorAccountId === affectedAccountId
 				|| (transfer.sourceKind === "character" && characterIds.has(transfer.sourceId))
 				|| (transfer.targetKind === "character" && characterIds.has(transfer.targetId));
-			if (isAffected) this._cancelTransferForLifecycle({transfer, actorAccountId, reason});
-		}
+		});
+		this._cancelTransferBatchForLifecycle({transfers, actorAccountId, reason});
 	}
 
 	_removeMembershipLifecycle ({campaign, membership, actorAccountId, status}) {
@@ -865,6 +949,13 @@ export class MemoryHubStore {
 			.filter(character => character.ownerAccountId === membership.accountId && character.campaignId === campaign.id)
 			.map(character => character.id);
 		const characterIdSet = new Set(characterIds);
+		this._cancelTransfersForLifecycle({
+			campaignId: campaign.id,
+			affectedAccountId: membership.accountId,
+			characterIds: characterIdSet,
+			actorAccountId,
+			reason: "membership_lifecycle",
+		});
 		for (const operation of this._semanticOperations.values()) {
 			if (operation.campaignId !== campaign.id || operation.status !== "proposed") continue;
 			if (
@@ -892,13 +983,6 @@ export class MemoryHubStore {
 				payload: {reason: "membership_lifecycle", targetCharacterId: action.targetCharacterId},
 			});
 		}
-		this._cancelTransfersForLifecycle({
-			campaignId: campaign.id,
-			affectedAccountId: membership.accountId,
-			characterIds: characterIdSet,
-			actorAccountId,
-			reason: "membership_lifecycle",
-		});
 		const characterNameSnapshots = characterIds
 			.map(characterId => {
 				const character = this._characters.get(characterId);
@@ -1091,7 +1175,13 @@ export class MemoryHubStore {
 			if (
 				(current?.activeRulesVersionId || null) === rulesVersionId
 				&& (current?.activeBrewBundleVersionId || null) === brewBundleVersionId
-			) return enforcement;
+			) {
+				return {
+					...enforcement,
+					activeBrewBundleVersionId: brewBundleVersionId,
+					brewBundle,
+				};
+			}
 		}
 	}
 
@@ -1621,7 +1711,7 @@ export class MemoryHubStore {
 	}
 
 	async pGetCampaignContext ({accountId, campaignId}) {
-		this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
+		const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
 		const campaign = this._campaigns.get(campaignId);
 		const brew = campaign.activeBrewBundleVersionId
 			? this._brewVersions.get(campaign.activeBrewBundleVersionId)
@@ -1631,11 +1721,14 @@ export class MemoryHubStore {
 			: null;
 		return {
 			campaignId,
+			membership: {role: membership.role},
 			brewBundle: copy(brew),
 			rulesVersion: getPublicCampaignRulesVersion(copy(rules)),
 			capabilities: {
 				peerSourceCosts: getPeerSourceCostsCampaignCapability({
-					isEnabled: Boolean(rules) && this._isPeerSourceCostsEnabled(campaignId),
+					isEnabled: campaign.status === "active"
+						&& Boolean(rules)
+						&& this._isPeerSourceCostsEnabled(campaignId),
 				}),
 			},
 		};
@@ -1645,7 +1738,9 @@ export class MemoryHubStore {
 		this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
 		const campaign = this._campaigns.get(campaignId);
 		return getPeerSourceCostsCampaignCapability({
-			isEnabled: Boolean(campaign?.activeRulesVersionId) && this._isPeerSourceCostsEnabled(campaignId),
+			isEnabled: campaign?.status === "active"
+				&& Boolean(campaign.activeRulesVersionId)
+				&& this._isPeerSourceCostsEnabled(campaignId),
 		});
 	}
 
@@ -3111,17 +3206,43 @@ export class MemoryHubStore {
 		const resumedPrior = this._getReceipt({accountId, idempotencyKey});
 		if (resumedPrior) return resumedPrior;
 		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
-		const character = this._getCharacterOrThrow(characterId);
+		let character = this._getCharacterOrThrow(characterId);
 		if (character.campaignId !== campaignId) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
-		const data = normalizeCharacterInventory(character.data);
-		const entry = {id: crypto.randomUUID(), item: copy(normalizedItem), quantity};
-		data.inventory.push(entry);
 		assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+		const provisionalData = normalizeCharacterInventory(character.data);
+		provisionalData.inventory.push({id: crypto.randomUUID(), item: copy(normalizedItem), quantity});
 		assertCharacterCampaignContentMutation({
 			...enforcement,
 			before: character.data,
-			after: data,
+			after: provisionalData,
 			rulesVersionId: enforcement.activeRulesVersionId,
+		});
+		const resolution = normalizeItemAwardResolution(await this._fnResolveAwardItem({
+			sourceKind: "recent",
+			item: normalizedItem,
+			brewBundle: enforcement.brewBundle,
+		}), {sourceKind: "recent"});
+		const authoritativeItem = resolution.authoritativeItem;
+		validateCloudValue(authoritativeItem, {label: "Granted item"});
+		const authoritativeSummary = getSafeItemSummary(authoritativeItem);
+		const currentEnforcement = await this._pGetCampaignContentEnforcement(campaignId);
+		const replayed = this._getReceipt({accountId, idempotencyKey});
+		if (replayed) return replayed;
+		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
+		if (currentEnforcement.activeBrewBundleVersionId !== enforcement.activeBrewBundleVersionId) {
+			throw new HubStoreError("BREW_VERSION_STALE", `Campaign homebrew changed before this item was granted.`, {status: 409});
+		}
+		assertCampaignContentPolicyVersion({...currentEnforcement, rulesVersionId});
+		character = this._getCharacterOrThrow(characterId);
+		if (character.campaignId !== campaignId) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
+		const data = normalizeCharacterInventory(character.data);
+		const entry = {id: crypto.randomUUID(), item: copy(authoritativeItem), quantity};
+		data.inventory.push(entry);
+		assertCharacterCampaignContentMutation({
+			...currentEnforcement,
+			before: character.data,
+			after: data,
+			rulesVersionId: currentEnforcement.activeRulesVersionId,
 		});
 		// The inventory just changed underneath a summary the sheet computed for the previous
 		// one, and no sheet is present to recompute it. Drop it: the projection then reports
@@ -3130,8 +3251,18 @@ export class MemoryHubStore {
 		validateCloudCharacterData(data);
 		this._setCharacterData({character, data});
 		character.revision++;
-		this._appendAudit({campaignId, actorAccountId: accountId, action: "item.granted", targetType: "character", targetId: characterId, details: {entryId: entry.id, quantity: entry.quantity}});
-		this._appendEvent({campaignId, actorAccountId: accountId, type: "item.granted", aggregateType: "character", aggregateId: characterId, aggregateRevision: character.revision, visibility: "explicit_accounts", visibleAccountIds: [...new Set([accountId, character.ownerAccountId])], payload: {entry}});
+		this._appendAudit({campaignId, actorAccountId: accountId, action: "item.granted", targetType: "character", targetId: characterId, details: {entryId: entry.id, quantity: entry.quantity, sourceKind: resolution.sourceKind}});
+		this._appendEvent({
+			campaignId,
+			actorAccountId: accountId,
+			type: "item.granted",
+			aggregateType: "character",
+			aggregateId: characterId,
+			aggregateRevision: character.revision,
+			visibility: "explicit_accounts",
+			visibleAccountIds: [...new Set([accountId, character.ownerAccountId])],
+			payload: {sourceKind: resolution.sourceKind, entry: {...copy(entry), item: copy(authoritativeSummary)}},
+		});
 		// A granted item changes the inventory and carry summaries.
 		this._commitCharacterMutation({character, actorAccountId: accountId, isRevisionBump: false});
 		return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(character), entry}});
@@ -3152,12 +3283,12 @@ export class MemoryHubStore {
 		const prior = this._getReceipt({accountId, idempotencyKey: commandIdempotencyKey});
 		if (prior) return prior;
 		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
-		const enforcement = await this._pGetCampaignContentEnforcement(campaignId);
+		let enforcement = await this._pGetCampaignContentEnforcement(campaignId);
 		const resumedPrior = this._getReceipt({accountId, idempotencyKey: commandIdempotencyKey});
 		if (resumedPrior) return resumedPrior;
 		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
 
-		const targetCharacters = request.targetCharacterIds.map(characterId => {
+		const getTargetCharacters = () => request.targetCharacterIds.map(characterId => {
 			const character = this._characters.get(characterId);
 			const ownerMembership = character
 				? this._memberships.get(`${campaignId}::${character.ownerAccountId}`)
@@ -3170,6 +3301,7 @@ export class MemoryHubStore {
 			) throw new HubStoreError("CHARACTER_NOT_FOUND", `Character was not found.`, {status: 404});
 			return character;
 		});
+		let targetCharacters = getTargetCharacters();
 
 		const totalQuantity = getItemAwardTotalQuantity({
 			quantity: request.quantity,
@@ -3177,6 +3309,7 @@ export class MemoryHubStore {
 		});
 		let item;
 		let incomingEntry;
+		let resolvedSourceKind = request.source.kind;
 		let stagedPartyInventory = null;
 		let partyInventoryResponse = null;
 		if (request.source.kind === "party_inventory") {
@@ -3203,7 +3336,39 @@ export class MemoryHubStore {
 			partyInventoryResponse = {id: partyInventory.id, revision: stagedPartyInventory.revision};
 		} else {
 			item = request.source.item;
-			incomingEntry = {item, quantity: request.quantity};
+			assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+			for (const character of targetCharacters) {
+				const provisional = addAwardedEntryToCharacter({
+					container: character.data,
+					incoming: {item, quantity: request.quantity},
+				});
+				assertCharacterCampaignContentMutation({
+					...enforcement,
+					before: character.data,
+					after: provisional.container,
+					rulesVersionId: enforcement.activeRulesVersionId,
+				});
+			}
+			const resolution = normalizeItemAwardResolution(await this._fnResolveAwardItem({
+				sourceKind: request.source.kind,
+				item,
+				brewBundle: enforcement.brewBundle,
+			}), {sourceKind: request.source.kind});
+			const authoritativeItem = resolution.authoritativeItem;
+			resolvedSourceKind = resolution.sourceKind;
+			validateCloudValue(authoritativeItem, {label: "Awarded item"});
+			item = getSafeItemSummary(authoritativeItem);
+			const currentEnforcement = await this._pGetCampaignContentEnforcement(campaignId);
+			const replayed = this._getReceipt({accountId, idempotencyKey: commandIdempotencyKey});
+			if (replayed) return replayed;
+			this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
+			if (currentEnforcement.activeBrewBundleVersionId !== enforcement.activeBrewBundleVersionId) {
+				throw new HubStoreError("BREW_VERSION_STALE", `Campaign homebrew changed before this item was awarded.`, {status: 409});
+			}
+			assertCampaignContentPolicyVersion({...currentEnforcement, rulesVersionId});
+			enforcement = currentEnforcement;
+			targetCharacters = getTargetCharacters();
+			incomingEntry = {item: authoritativeItem, quantity: request.quantity};
 		}
 		validateCloudValue(item, {label: "Awarded item"});
 		assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
@@ -3211,6 +3376,7 @@ export class MemoryHubStore {
 			const added = addAwardedEntryToCharacter({
 				container: character.data,
 				incoming: {...copy(incomingEntry), quantity: request.quantity},
+				isAllowLegacySummaryUpgrade: resolvedSourceKind === "catalog",
 			});
 			stripCarryAuthority(added.container);
 			validateCloudCharacterData(added.container);
@@ -3266,7 +3432,7 @@ export class MemoryHubStore {
 			targetId: campaignId,
 			details: {
 				awardId,
-				sourceKind: request.source.kind,
+				sourceKind: resolvedSourceKind,
 				item,
 				targetCharacterIds: request.targetCharacterIds,
 				targetCount: request.targetCharacterIds.length,
@@ -3289,7 +3455,7 @@ export class MemoryHubStore {
 					awardId,
 					index,
 					targetCount: stagedCharacters.length,
-					sourceKind: request.source.kind,
+					sourceKind: resolvedSourceKind,
 					note: request.note,
 					entry: {id: entry.id, item: copy(item), quantity: request.quantity},
 				},
@@ -3372,85 +3538,201 @@ export class MemoryHubStore {
 		}
 	}
 
-	async pProposeTransfer ({accountId, campaignId, sourceKind, sourceId, targetKind, targetId, payload, idempotencyKey}) {
+	async pProposeTransfer ({accountId, campaignId, sourceKind, sourceId, targetKind, targetId, payload, rulesVersionId = null, idempotencyKey}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
-		if (prior) return prior;
-		const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
-		const source = this._getTransferContainer({kind: sourceKind, id: sourceId, campaignId});
-		const target = this._getTransferContainer({kind: targetKind, id: targetId, campaignId});
-		if (target._character) this._assertTargetable({character: target._character, accountId, role: membership.role});
-		if (sourceKind === "character" && source._character.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can transfer from this character.`, {status: 403});
-		if (sourceKind === "party_inventory" && !["dm", "co_dm"].includes(membership.role)) throw new HubStoreError("FORBIDDEN", `Only a DM can transfer from party inventory.`, {status: 403});
-		const {container, escrow} = removeTransferPayload({container: source.container, payload});
-		this._setTransferContainer({holder: source, container, actorAccountId: accountId});
+		if (prior) {
+			const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
+			return this._projectTransferResponseForViewer({response: prior, accountId, membership});
+		}
+		if (sourceKind === targetKind && sourceId === targetId) {
+			throw new HubStoreError("TRANSFER_TARGET_INVALID", `Choose a different transfer destination.`, {status: 400});
+		}
+		const getCurrentState = () => {
+			const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
+			const source = this._getTransferContainer({kind: sourceKind, id: sourceId, campaignId});
+			const target = this._getTransferContainer({kind: targetKind, id: targetId, campaignId});
+			if (target._character) this._assertTargetable({character: target._character, accountId, role: membership.role});
+			if (sourceKind === "character" && source._character.ownerAccountId !== accountId) {
+				throw new HubStoreError("FORBIDDEN", `Only the owner can transfer from this character.`, {status: 403});
+			}
+			const isDm = ["dm", "co_dm"].includes(membership.role);
+			const isPlayerStashRequest = sourceKind === "party_inventory" && !isDm;
+			if (
+				isPlayerStashRequest
+				&& (
+					targetKind !== "character"
+					|| target._character?.ownerAccountId !== accountId
+				)
+			) {
+				throw new HubStoreError("FORBIDDEN", `Players can only request party inventory for one of their own characters.`, {status: 403});
+			}
+			return {
+				membership,
+				source,
+				target,
+				isPlayerStashRequest,
+				isDirectAuthority: isDirectTransferAuthority({
+					role: membership.role,
+					accountId,
+					sourceKind,
+					targetKind,
+					targetOwnerAccountId: target._character?.ownerAccountId,
+				}),
+			};
+		};
+		let current = getCurrentState();
+		let enforcement = null;
+		if (current.isDirectAuthority && current.target._character) {
+			enforcement = await this._pGetCampaignContentEnforcement(campaignId);
+			const resumedPrior = this._getReceipt({accountId, idempotencyKey});
+			if (resumedPrior) {
+				const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
+				return this._projectTransferResponseForViewer({response: resumedPrior, accountId, membership});
+			}
+			current = getCurrentState();
+			if (!current.isDirectAuthority) enforcement = null;
+		}
+		const {
+			source,
+			target,
+			isPlayerStashRequest,
+			isDirectAuthority,
+		} = current;
+		const sourceRevision = source._character?.revision ?? source._party?.revision ?? null;
+		const prepared = isPlayerStashRequest
+			? prepareTransferRequest({container: source.container, payload})
+			: removeTransferPayload({container: source.container, payload});
+		let directTargetAfter = null;
+		if (isDirectAuthority) {
+			directTargetAfter = addTransferPayload({container: target.container, escrow: prepared.escrow});
+			if (target._character) {
+				assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+				assertCharacterCampaignContentMutation({
+					...enforcement,
+					before: target.container,
+					after: directTargetAfter,
+					rulesVersionId: enforcement.activeRulesVersionId,
+				});
+				validateCloudCharacterData(directTargetAfter);
+			}
+		}
+		if (!isPlayerStashRequest) {
+			this._setTransferContainer({holder: source, container: prepared.container, actorAccountId: accountId});
+		}
+		if (directTargetAfter) {
+			this._setTransferContainer({holder: target, container: directTargetAfter, actorAccountId: accountId});
+		}
 		const transfer = {
 			id: crypto.randomUUID(),
 			campaignId,
 			actorAccountId: accountId,
+			actorCommandId: this._normalizeIdempotencyKey(idempotencyKey).key,
 			sourceKind,
 			sourceId,
 			targetKind,
 			targetId,
-			status: "reserved",
-			payload: {escrow},
+			_sourceRevision: sourceRevision,
+			status: isPlayerStashRequest ? "proposed" : isDirectAuthority ? "committed" : "reserved",
+			payload: isPlayerStashRequest
+				? {request: prepared.request, preview: prepared.preview}
+				: {escrow: prepared.escrow},
 			createdAt: this._fnNow().toISOString(),
 		};
 		this._transfers.set(transfer.id, transfer);
+		if (isDirectAuthority) {
+			transfer.resolvedAt = this._fnNow().toISOString();
+			this._appendAudit({campaignId, actorAccountId: accountId, action: "transfer.committed", targetType: "transfer", targetId: transfer.id});
+		}
 		this._appendEvent({
 			campaignId,
 			actorAccountId: accountId,
-			type: "transfer.reserved",
+			type: `transfer.${transfer.status}`,
 			aggregateType: "transfer",
 			aggregateId: transfer.id,
 			visibility: "explicit_accounts",
 			visibleAccountIds: [...new Set([accountId, target._character?.ownerAccountId].filter(Boolean))],
 			payload: {sourceKind, sourceId, targetKind, targetId},
 		});
-		return this._setReceipt({accountId, idempotencyKey, response: {transfer}});
+		const response = this._projectTransferResponseForViewer({
+			response: {transfer},
+			accountId,
+			membership: current.membership,
+		});
+		return this._setReceipt({accountId, idempotencyKey, response});
 	}
 
 	async pResolveTransfer ({accountId, campaignId, transferId, decision, rulesVersionId = null, idempotencyKey}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
-		if (prior) return prior;
+		if (prior) {
+			const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
+			return this._projectTransferResponseForViewer({response: prior, accountId, membership});
+		}
 		this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
 		const transferPre = this._transfers.get(transferId);
-		if (!transferPre || transferPre.campaignId !== campaignId || transferPre.status !== "reserved") throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
+		if (!transferPre || transferPre.campaignId !== campaignId || !["proposed", "reserved"].includes(transferPre.status)) throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
 		const enforcement = decision === "accept" && transferPre.targetKind === "character"
 			? await this._pGetCampaignContentEnforcement(campaignId)
 			: null;
 		const resumedPrior = this._getReceipt({accountId, idempotencyKey});
-		if (resumedPrior) return resumedPrior;
+		if (resumedPrior) {
+			const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
+			return this._projectTransferResponseForViewer({response: resumedPrior, accountId, membership});
+		}
 		const membership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm", "player"]});
 		const transfer = this._transfers.get(transferId);
-		if (!transfer || transfer.campaignId !== campaignId || transfer.status !== "reserved") throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
+		if (!transfer || transfer.campaignId !== campaignId || !["proposed", "reserved"].includes(transfer.status)) throw new HubStoreError("TRANSFER_NOT_FOUND", `Transfer was not found.`, {status: 404});
 		const target = this._getTransferContainer({kind: transfer.targetKind, id: transfer.targetId, campaignId});
 		const isActorCancelling = decision === "reject" && transfer.actorAccountId === accountId;
-		const canResolve = isActorCancelling || (transfer.targetKind === "character"
-			? target._character.ownerAccountId === accountId || ["dm", "co_dm"].includes(membership.role)
-			: ["dm", "co_dm"].includes(membership.role));
+		const isDm = ["dm", "co_dm"].includes(membership.role);
+		const canResolve = transfer.status === "proposed"
+			? isActorCancelling || isDm
+			: isActorCancelling || (transfer.targetKind === "character"
+				? target._character.ownerAccountId === accountId || isDm
+				: isDm);
 		if (!canResolve) throw new HubStoreError("FORBIDDEN", `Cannot resolve this transfer.`, {status: 403});
-		const destination = decision === "accept"
-			? target
-			: this._getTransferContainer({kind: transfer.sourceKind, id: transfer.sourceId, campaignId});
-		const after = addTransferPayload({
-			container: destination.container,
-			escrow: transfer.payload.escrow,
-			isRestore: decision !== "accept",
-		});
-		if (decision === "accept" && destination._character) {
-			assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
-			assertCharacterCampaignContentMutation({
-				...enforcement,
-				before: destination.container,
-				after,
-				rulesVersionId: enforcement.activeRulesVersionId,
+		if (transfer.status === "proposed") {
+			if (decision === "accept") {
+				const source = this._getTransferContainer({kind: transfer.sourceKind, id: transfer.sourceId, campaignId});
+				const removed = removeTransferPayload({container: source.container, payload: transfer.payload.request});
+				const after = addTransferPayload({container: target.container, escrow: removed.escrow});
+				if (target._character) {
+					assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+					assertCharacterCampaignContentMutation({
+						...enforcement,
+						before: target.container,
+						after,
+						rulesVersionId: enforcement.activeRulesVersionId,
+					});
+					validateCloudCharacterData(after);
+				}
+				this._setTransferContainer({holder: source, container: removed.container, actorAccountId: accountId});
+				this._setTransferContainer({holder: target, container: after, actorAccountId: accountId});
+				transfer.payload = {...transfer.payload, escrow: removed.escrow};
+			}
+		} else {
+			const destination = decision === "accept"
+				? target
+				: this._getTransferContainer({kind: transfer.sourceKind, id: transfer.sourceId, campaignId});
+			const after = addTransferPayload({
+				container: destination.container,
+				escrow: transfer.payload.escrow,
+				isRestore: decision !== "accept",
+			});
+			if (decision === "accept" && destination._character) {
+				assertCampaignContentPolicyVersion({...enforcement, rulesVersionId});
+				assertCharacterCampaignContentMutation({
+					...enforcement,
+					before: destination.container,
+					after,
+					rulesVersionId: enforcement.activeRulesVersionId,
+				});
+			}
+			this._setTransferContainer({
+				holder: destination,
+				container: after,
+				actorAccountId: accountId,
 			});
 		}
-		this._setTransferContainer({
-			holder: destination,
-			container: after,
-			actorAccountId: accountId,
-		});
 		transfer.status = decision === "accept" ? "committed" : "rejected";
 		transfer.resolvedAt = this._fnNow().toISOString();
 		this._appendAudit({campaignId, actorAccountId: accountId, action: `transfer.${transfer.status}`, targetType: "transfer", targetId: transfer.id});
@@ -3469,7 +3751,12 @@ export class MemoryHubStore {
 				targetId: transfer.targetId,
 			},
 		});
-		return this._setReceipt({accountId, idempotencyKey, response: {transfer}});
+		const response = this._projectTransferResponseForViewer({
+			response: {transfer},
+			accountId,
+			membership,
+		});
+		return this._setReceipt({accountId, idempotencyKey, response});
 	}
 
 	async pListTransfers ({accountId, campaignId}) {
@@ -3483,7 +3770,22 @@ export class MemoryHubStore {
 				}
 				return false;
 			})
-			.map(copy);
+			.map(transfer => projectTransferForViewer({
+				transfer: copy(transfer),
+				accountId,
+				role: membership.role,
+				getCharacterOwnerId: characterId => this._characters.get(characterId)?.ownerAccountId,
+				getCharacterDisplaySnapshot: characterId => {
+					const character = this._characters.get(characterId);
+					return getTransferCharacterDisplaySnapshot({
+						character,
+						transferCampaignId: transfer.campaignId,
+						viewerAccountId: accountId,
+						viewerRole: membership.role,
+					});
+				},
+			}))
+			.filter(Boolean);
 	}
 
 	async pGetAccountDeletion ({accountId}) {
@@ -3640,35 +3942,17 @@ export class MemoryHubStore {
 	}
 
 	_cancelIncomingForCharacter ({character}) {
+		const transfers = [...this._transfers.values()]
+			.filter(transfer => ["proposed", "reserved"].includes(transfer.status)
+				&& transfer.targetKind === "character"
+				&& transfer.targetId === character.id);
+		this._cancelTransferBatchForLifecycle({
+			transfers,
+			actorAccountId: character.ownerAccountId,
+			reason: "target_lifecycle_change",
+		});
 		for (const action of this._pendingActions.values()) {
 			if (action.targetCharacterId === character.id && action.status === "proposed") action.status = "cancelled";
-		}
-		for (const transfer of this._transfers.values()) {
-			if (transfer.status !== "reserved" || transfer.targetKind !== "character" || transfer.targetId !== character.id) continue;
-			const source = this._getTransferContainer({kind: transfer.sourceKind, id: transfer.sourceId, campaignId: transfer.campaignId});
-			this._setTransferContainer({
-				holder: source,
-				container: addTransferPayload({container: source.container, escrow: transfer.payload.escrow, isRestore: true}),
-				actorAccountId: character.ownerAccountId,
-			});
-			transfer.status = "cancelled";
-			transfer.resolvedAt = this._fnNow().toISOString();
-			this._appendEvent({
-				campaignId: transfer.campaignId,
-				actorAccountId: character.ownerAccountId,
-				type: "transfer.cancelled",
-				aggregateType: "transfer",
-				aggregateId: transfer.id,
-				visibility: "explicit_accounts",
-				visibleAccountIds: [...new Set([transfer.actorAccountId, character.ownerAccountId].filter(Boolean))],
-				payload: {
-					reason: "target_lifecycle_change",
-					sourceKind: transfer.sourceKind,
-					sourceId: transfer.sourceId,
-					targetKind: transfer.targetKind,
-					targetId: transfer.targetId,
-				},
-			});
 		}
 	}
 
@@ -3726,6 +4010,11 @@ export class MemoryHubStore {
 		if (campaign.status !== "active") throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 		if ([...this._transfers.values()].some(it => it.campaignId === campaignId && it.status === "reserved")) {
 			throw new HubStoreError("CAMPAIGN_BUSY", `Resolve reserved transfers before archiving.`, {status: 409});
+		}
+		for (const transfer of this._transfers.values()) {
+			if (transfer.campaignId === campaignId && transfer.status === "proposed") {
+				this._cancelTransferForLifecycle({transfer, actorAccountId: accountId, reason: "campaign_archived"});
+			}
 		}
 		campaign.status = "archived";
 		for (const operation of this._semanticOperations.values()) {

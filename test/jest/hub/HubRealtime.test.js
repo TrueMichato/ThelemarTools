@@ -57,6 +57,9 @@ describe("hub projections and event visibility", () => {
 		expect(canViewEvent({event: {visibility: "dm_only"}, accountId: "p", role: "player"})).toBe(false);
 		expect(canViewEvent({event: {visibility: "dm_only"}, accountId: "d", role: "dm"})).toBe(true);
 		expect(canViewEvent({event: {visibility: "actor_and_dm", actorAccountId: "p"}, accountId: "p", role: "player"})).toBe(true);
+		expect(canViewEvent({event: {visibility: "actor_and_dm", actorAccountId: "p"}, accountId: "d", role: "dm"})).toBe(true);
+		expect(canViewEvent({event: {visibility: "actor_and_dm", actorAccountId: "p"}, accountId: "c", role: "co_dm"})).toBe(true);
+		expect(canViewEvent({event: {visibility: "actor_and_dm", actorAccountId: "p"}, accountId: "x", role: "player"})).toBe(false);
 		expect(canViewEvent({event: {visibility: "explicit_accounts", visibleAccountIds: ["p"]}, accountId: "x", role: "player"})).toBe(false);
 	});
 });

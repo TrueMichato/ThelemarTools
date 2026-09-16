@@ -7,6 +7,13 @@ import {
 	MODE_CHOICES,
 	PRESET_CHOICES,
 } from "../../../js/charactersheet/charactersheet-sharing.js";
+import {
+	getOmittedProjectionFieldLabels,
+	getProjectionProfileRows,
+	PROJECTION_FIELD_KEYS,
+	SKILL_RANK_CHOICES,
+	SKILL_RANKS,
+} from "../../../js/hub/hub-character-view.js";
 
 const CATALOG_KEYS = [
 	"identity", "species", "classes", "abilities", "saves", "skills", "ac", "hp",
@@ -32,6 +39,7 @@ function getSharing (overrides = {}) {
 describe("character sheet sharing controls", () => {
 	it("offers every catalog field and every documented mode without exposing JSON", () => {
 		expect(FIELD_KEYS).toEqual(CATALOG_KEYS);
+		expect(FIELD_KEYS).toBe(PROJECTION_FIELD_KEYS);
 		expect(PRESET_CHOICES.map(it => it.value)).toEqual(["table", "minimal", "open", "private"]);
 		expect(MODE_CHOICES.map(it => it.value)).toEqual(["share", "hide", "replace"]);
 		// Every field must be configurable through labelled controls, so an owner never
@@ -42,6 +50,22 @@ describe("character sheet sharing controls", () => {
 			const hasControls = descriptor.shape === "list" || !!descriptor.parts?.length;
 			expect({field, hasControls}).toEqual({field, hasControls: true});
 		}
+	});
+
+	it("derives closed choices from the shared contract while preserving free-form fields", async () => {
+		const server = await import("../../../server/src/character-projection.js");
+		const rankControls = FIELD_DESCRIPTORS.skills.parts.filter(part => part.kind === "select");
+
+		expect(server.SKILL_RANKS).toBe(SKILL_RANKS);
+		expect(rankControls).not.toHaveLength(0);
+		for (const control of rankControls) expect(control.options).toBe(SKILL_RANK_CHOICES);
+		expect(SKILL_RANK_CHOICES.map(choice => choice.value)).toEqual(["none", "half", "proficient", "expertise"]);
+
+		// These values may be homebrew aliases or custom table language, so the browser
+		// keeps them as text instead of pretending the game data is a closed enum.
+		expect(FIELD_DESCRIPTORS.identity.parts.find(part => part.key === "name").kind).toBe("text");
+		expect(FIELD_DESCRIPTORS.senses.parts.find(part => part.key === "name").kind).toBe("text");
+		expect(FIELD_DESCRIPTORS.conditions.shape).toBe("list");
 	});
 
 	it("implements no projection logic in the browser", () => {
@@ -174,6 +198,26 @@ describe("character sheet sharing controls", () => {
 		expect(sharing.getSubmittablePolicy().overrides).toEqual({});
 	});
 
+	it("clears all overrides when the owner chooses the private preset", async () => {
+		const sharing = getSharing({
+			api: getApi({
+				policy: {
+					version: 1,
+					preset: "minimal",
+					overrides: {
+						hp: {mode: "replace", value: {state: "steady"}},
+						saves: {mode: "share"},
+					},
+				},
+			}),
+		});
+		await sharing.pLoad();
+
+		sharing.setPreset("private");
+
+		expect(sharing.getSubmittablePolicy()).toEqual({version: 1, preset: "private", overrides: {}});
+	});
+
 	it("submits a server-valid replacement for every catalog field without extra input", async () => {
 		const {validateProjectionPolicy} = await import("../../../server/src/character-projection.js");
 		const sharing = getSharing();
@@ -226,6 +270,31 @@ describe("character sheet sharing controls", () => {
 		expect(describePreviewValue([{name: "Ranger", level: 5}])).toBe("Ranger 5");
 		expect(describePreviewValue(null)).toBe("—");
 	});
+
+	it("renders the authoritative saved preview as shared, replaced, and omitted fields", async () => {
+		const sharing = getSharing({
+			api: getApi({
+				policy: {version: 1, preset: "minimal", overrides: {hp: {mode: "replace", value: {state: "steady"}}}},
+				preview: {
+					kind: "peer_profile",
+					data: {
+						identity: {name: "Mira"},
+						species: {name: "Elf", source: "PHB"},
+						classes: [{name: "Ranger", source: "PHB", level: 5}],
+						hp: {state: "steady"},
+					},
+				},
+			}),
+		});
+		await sharing.pLoad();
+		const presentation = sharing.getSavedPreviewPresentation();
+
+		expect(presentation.shared).toHaveLength(4);
+		expect(presentation.replacedCount).toBe(1);
+		expect(presentation.shared.find(row => row.field === "hp")).toEqual(expect.objectContaining({value: "steady", status: "replace"}));
+		expect(presentation.shared.find(row => row.field === "identity")).toEqual(expect.objectContaining({value: "Mira", status: "shared"}));
+		expect(presentation.omitted).toContain("Ability scores");
+	});
 });
 
 describe("hub character view reader", () => {
@@ -257,5 +326,27 @@ describe("hub character view reader", () => {
 		expect(isCanonicalProjection(peer)).toBe(false);
 		expect(() => getCanonicalCharacter(peer)).toThrow(/Canonical character data is not available/);
 		expect(getCanonicalCharacter({kind: "owner_truth", character: {id: "c1"}})).toEqual({id: "c1"});
+	});
+
+	it("formats only authorized peer fields for the read-only profile surface", () => {
+		const peer = {
+			kind: "peer_profile",
+			id: "c1",
+			data: {
+				identity: {name: "Mira", pronouns: "she/her"},
+				classes: [{name: "Ranger", source: "PHB", level: 5}],
+				abilities: {str: 10, dex: 18},
+				hp: {state: "steady"},
+			},
+		};
+
+		expect(getProjectionProfileRows(peer)).toEqual([
+			{field: "identity", label: "Name and portrait", value: "Mira · she/her"},
+			{field: "classes", label: "Classes", value: "Ranger (PHB) 5"},
+			{field: "abilities", label: "Ability scores", value: "STR 10 · DEX 18"},
+			{field: "hp", label: "Hit points", value: "steady"},
+		]);
+		expect(getOmittedProjectionFieldLabels(peer)).toContain("Inventory summary");
+		expect(JSON.stringify(getProjectionProfileRows(peer))).not.toContain("notes");
 	});
 });

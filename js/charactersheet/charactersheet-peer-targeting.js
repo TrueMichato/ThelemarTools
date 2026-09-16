@@ -1,4 +1,5 @@
 import {getProjectionId, getProjectionName, getTargetableProjections} from "../hub/hub-character-view.js";
+import {isTransferOutcomeUncertain} from "../hub/hub-api-client.js";
 import {CharacterSheetModal} from "./charactersheet-modal.js";
 
 const {e_} = /** @type {*} */ (globalThis);
@@ -18,10 +19,16 @@ const _SOURCE_VERSIONS = new Map([
 const _STATUSES = new Set(["proposed", "applied", "rejected", "cancelled", "expired", "failed"]);
 const _TERMINAL_STATUSES = new Set([..._STATUSES].filter(status => status !== "proposed"));
 const _ACCESS_LOSS_CODES = new Set(["AUTH_REQUIRED", "CAMPAIGN_NOT_FOUND", "CHARACTER_NOT_FOUND", "FORBIDDEN"]);
+const _NON_ROTATABLE_PROPOSAL_REJECTION_CODES = new Set(["IDEMPOTENCY_KEY_REUSED"]);
+
+const _isDefinitiveProposalRejection = error => typeof error?.code === "string"
+	&& !_NON_ROTATABLE_PROPOSAL_REJECTION_CODES.has(error.code)
+	&& !isTransferOutcomeUncertain(error);
 
 const _getSafeError = error => {
 	switch (error?.code) {
 		case "NETWORK_UNAVAILABLE": return "Targeting is offline. Reconnect before sending this request.";
+		case "POLICY_VERSION_STALE": return "Campaign rules changed. Rechecking targeting before you start a new request.";
 		case "PROTOCOL_UPDATE_REQUIRED": return "Reload the page to use campaign targeting.";
 		case "CAPABILITY_UNAVAILABLE": return "Campaign targeting is not available right now.";
 		case "SOURCE_OR_TARGET_UNAVAILABLE": return "That spell or target is no longer available.";
@@ -39,6 +46,7 @@ export class CharacterSheetPeerTargeting {
 		fnGetCharacterId,
 		fnGetRulesVersionId,
 		fnGetCapability,
+		fnRefreshCampaignContext = null,
 		fnCreateId = () => crypto.randomUUID(),
 		fnPickTarget = null,
 		fnOnAuthoritativeApplied = null,
@@ -49,6 +57,7 @@ export class CharacterSheetPeerTargeting {
 		this._fnGetCharacterId = fnGetCharacterId;
 		this._fnGetRulesVersionId = fnGetRulesVersionId;
 		this._fnGetCapability = fnGetCapability;
+		this._fnRefreshCampaignContext = fnRefreshCampaignContext;
 		this._fnCreateId = fnCreateId;
 		this._fnPickTarget = fnPickTarget || (options => this._pPickTarget(options));
 		this._fnOnAuthoritativeApplied = fnOnAuthoritativeApplied;
@@ -56,15 +65,18 @@ export class CharacterSheetPeerTargeting {
 		this._refreshSequence = 0;
 		this._collectionRevision = 0;
 		this._characterId = null;
+		this._membershipRole = null;
 		this._outgoing = new Map();
 		this._drafts = new Map();
+		this._isSuspended = false;
 		this._isLoading = false;
 		this._loadError = null;
+		this._definitiveRecoveryPromise = null;
 		this._onFocus = () => {
-			if (this._characterId) void this.pRefresh();
+			if (this._characterId && !this._isSuspended) void this.pRefresh();
 		};
 		this._onVisibilityChange = () => {
-			if (document.visibilityState === "visible" && this._characterId) void this.pRefresh();
+			if (document.visibilityState === "visible" && this._characterId && !this._isSuspended) void this.pRefresh();
 		};
 	}
 
@@ -82,12 +94,34 @@ export class CharacterSheetPeerTargeting {
 		document.removeEventListener("visibilitychange", this._onVisibilityChange);
 	}
 
-	activate ({characterId}) {
+	activate ({characterId, membershipRole}) {
+		if (!characterId || membershipRole !== "player" || !this._hasCapability()) {
+			this.deactivate();
+			return false;
+		}
+		if (this._isSuspended && this._characterId === characterId) {
+			this._membershipRole = membershipRole;
+			this._isSuspended = false;
+			this._loadError = null;
+			this._render();
+			void this.pRefresh();
+			return true;
+		}
 		this.deactivate();
-		if (!characterId || !this._hasCapability()) return false;
 		this._characterId = characterId;
+		this._membershipRole = membershipRole;
 		this._generation++;
 		void this.pRefresh();
+		return true;
+	}
+
+	suspend () {
+		if (!this._characterId) return false;
+		this._isSuspended = true;
+		this._refreshSequence++;
+		this._isLoading = false;
+		this._loadError = null;
+		this._render();
 		return true;
 	}
 
@@ -95,10 +129,13 @@ export class CharacterSheetPeerTargeting {
 		this._generation++;
 		this._refreshSequence++;
 		this._characterId = null;
+		this._membershipRole = null;
 		this._outgoing.clear();
 		this._drafts.clear();
+		this._isSuspended = false;
 		this._isLoading = false;
 		this._loadError = null;
+		this._definitiveRecoveryPromise = null;
 		this._render();
 	}
 
@@ -107,8 +144,12 @@ export class CharacterSheetPeerTargeting {
 			this.deactivate();
 			return;
 		}
+		if (state?.state === "reconnecting") {
+			this.suspend();
+			return;
+		}
 		if (state?.state === "live" && this._fnGetCharacterId?.()) {
-			this._characterId = this._fnGetCharacterId();
+			if (this._isSuspended || !this._characterId || this._membershipRole !== "player") return;
 			void this.pRefresh();
 		}
 	}
@@ -131,18 +172,11 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	isSupportedSpellCast ({spell, selectedSlot, hasMetamagic = false, hasVariantComponent = false} = {}) {
-		return this._hasCapability()
+		return !this._isSuspended
+			&& this._hasCapability()
 			&& this._characterId
-			&& String(spell?.name || "").toLowerCase() === "cure wounds"
-			&& _SOURCE_VERSIONS.has(spell?.source)
-			&& Number.isInteger(selectedSlot?.level)
-			&& selectedSlot.level >= Math.max(1, Number(spell?.level) || 1)
-			&& selectedSlot.level <= 9
-			&& !selectedSlot.isPact
-			&& !selectedSlot.isNoSlotResource
-			&& !selectedSlot.isWizardCapstone
-			&& !hasMetamagic
-			&& !hasVariantComponent;
+			&& this._membershipRole === "player"
+			&& this._isSupportedSpellShape({spell, selectedSlot, hasMetamagic, hasVariantComponent});
 	}
 
 	async pMaybeProposeSpell ({
@@ -151,6 +185,24 @@ export class CharacterSheetPeerTargeting {
 		hasMetamagic = false,
 		hasVariantComponent = false,
 	} = {}) {
+		const isSupportedSpellShape = this._isSupportedSpellShape({spell, selectedSlot, hasMetamagic, hasVariantComponent});
+		if (
+			this._isSuspended
+			&& this._characterId
+			&& isSupportedSpellShape
+		) {
+			this._showError("Campaign targeting is reconnecting. Wait for the campaign context to refresh before casting Cure Wounds.");
+			return {handled: true, proposed: false};
+		}
+		if (
+			this._characterId
+			&& this._membershipRole === "player"
+			&& isSupportedSpellShape
+			&& this._hasDraftAwaitingAuthoritativeReconciliation()
+		) {
+			this._showError("Campaign targeting is reconciling a rejected request. Reconnect before starting another Cure Wounds request.");
+			return {handled: true, proposed: false};
+		}
 		if (!this.isSupportedSpellCast({spell, selectedSlot, hasMetamagic, hasVariantComponent})) return {handled: false};
 		const token = {generation: this._generation, characterId: this._characterId};
 		let targets;
@@ -160,30 +212,46 @@ export class CharacterSheetPeerTargeting {
 			if (this._isCurrent(token)) this._showError(_getSafeError(error));
 			return {handled: true, proposed: false};
 		}
-		if (!this._isCurrent(token)) return {handled: true, proposed: false};
+		if (!this._isCurrent(token) || this._isSuspended) return {handled: true, proposed: false};
 
 		const choice = await this._fnPickTarget({spell, slotLevel: selectedSlot.level, targets});
-		if (!this._isCurrent(token) || !choice || choice.kind === "cancel") return {handled: true, proposed: false};
+		if (!this._isCurrent(token) || this._isSuspended || !choice || choice.kind === "cancel") return {handled: true, proposed: false};
 		if (choice.kind === "local") return {handled: false};
 
 		const target = targets.find(it => it.targetRef === choice.targetRef);
 		if (!target) return {handled: true, proposed: false};
 		const draftKey = `${this._characterId}|${spell.source}|${selectedSlot.level}|${target.targetRef}`;
-		const draft = this._drafts.get(draftKey) || {
-			commandId: this._fnCreateId(),
-			draftKey,
-			sourceCharacterId: this._characterId,
-			spell,
-			slotLevel: selectedSlot.level,
-			target,
-		};
+		let draft = this._drafts.get(draftKey);
+		if (!draft) {
+			const commandId = this._fnCreateId();
+			draft = {
+				commandId,
+				draftKey,
+				sourceCharacterId: this._characterId,
+				spell,
+				slotLevel: selectedSlot.level,
+				target,
+				request: this._getProposalRequest({
+					commandId,
+					sourceCharacterId: this._characterId,
+					spell,
+					slotLevel: selectedSlot.level,
+					targetRef: target.targetRef,
+				}),
+			};
+		}
 		this._drafts.set(draftKey, draft);
 		const proposed = await this._pSubmitDraft(draft);
 		return {handled: true, proposed};
 	}
 
 	async pRefresh () {
-		if (!this._characterId || !this._hasCapability() || typeof this._api.pListCharacterOutgoingActions !== "function") return false;
+		if (this._hasDraftAwaitingAuthoritativeReconciliation()) return this._pRecoverDefinitiveProposalRejections();
+		return this._pRefreshOutgoingActions();
+	}
+
+	async _pRefreshOutgoingActions () {
+		if (this._isSuspended || !this._characterId || !this._hasCapability() || typeof this._api.pListCharacterOutgoingActions !== "function") return false;
 		const token = {
 			generation: this._generation,
 			characterId: this._characterId,
@@ -232,7 +300,7 @@ export class CharacterSheetPeerTargeting {
 
 	async pCancel ({actionId}) {
 		const action = this._outgoing.get(actionId);
-		if (!action?.canCancel || action.isSubmitting) return false;
+		if (this._isSuspended || !action?.canCancel || action.isSubmitting) return false;
 		const token = {generation: this._generation, characterId: this._characterId};
 		action.isSubmitting = true;
 		action.error = null;
@@ -303,28 +371,14 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	async _pSubmitDraft (draft) {
-		if (draft.isSubmitting) return false;
+		if (this._isSuspended || draft.isSubmitting || draft.isAwaitingAuthoritativeReconciliation) return false;
 		const token = {generation: this._generation, characterId: draft.sourceCharacterId};
 		draft.isSubmitting = true;
 		draft.error = null;
 		draft.errorCode = null;
 		this._render();
 		try {
-			const response = await this._api.pCreatePeerAction({
-				campaignId: this._campaignId,
-				contractVersion: 1,
-				sourceCharacterId: draft.sourceCharacterId,
-				sourceEntity: {
-					type: "spell",
-					uid: `cure wounds|${String(draft.spell.source).toLowerCase()}`,
-					version: _SOURCE_VERSIONS.get(draft.spell.source),
-				},
-				effectTemplateId: "spell.cure-wounds.heal",
-				choice: {castLevel: draft.slotLevel},
-				targetRef: draft.target.targetRef,
-				rulesVersionId: this._fnGetRulesVersionId?.(),
-				idempotencyKey: draft.commandId,
-			});
+			const response = await this._api.pCreatePeerAction(draft.request);
 			if (!this._isCurrent(token)) return false;
 			const action = this._normalizeOutgoing(response?.operation || response, {
 				fallback: {
@@ -348,6 +402,19 @@ export class CharacterSheetPeerTargeting {
 			return true;
 		} catch (error) {
 			if (!this._isCurrent(token)) return false;
+			if (_ACCESS_LOSS_CODES.has(error?.code)) {
+				this.deactivate();
+				return false;
+			}
+			if (_isDefinitiveProposalRejection(error)) {
+				draft.isAwaitingAuthoritativeReconciliation = true;
+				draft.isSubmitting = false;
+				draft.error = _getSafeError(error);
+				draft.errorCode = error.code;
+				this._render();
+				await this._pRecoverDefinitiveProposalRejections();
+				return false;
+			}
 			draft.isSubmitting = false;
 			draft.error = _getSafeError(error);
 			draft.errorCode = typeof error?.code === "string" ? error.code.slice(0, 80) : "REQUEST_FAILED";
@@ -387,6 +454,90 @@ export class CharacterSheetPeerTargeting {
 			&& capability.templateRegistryVersion === _CAPABILITY.templateRegistryVersion
 			&& Array.isArray(capability.resourceKinds)
 			&& capability.resourceKinds.includes("spell_slot");
+	}
+
+	_isSupportedSpellShape ({spell, selectedSlot, hasMetamagic = false, hasVariantComponent = false} = {}) {
+		return String(spell?.name || "").toLowerCase() === "cure wounds"
+			&& _SOURCE_VERSIONS.has(spell?.source)
+			&& Number.isInteger(selectedSlot?.level)
+			&& selectedSlot.level >= Math.max(1, Number(spell?.level) || 1)
+			&& selectedSlot.level <= 9
+			&& !selectedSlot.isPact
+			&& !selectedSlot.isNoSlotResource
+			&& !selectedSlot.isWizardCapstone
+			&& !hasMetamagic
+			&& !hasVariantComponent;
+	}
+
+	_hasDraftAwaitingAuthoritativeReconciliation () {
+		return [...this._drafts.values()].some(draft => draft.isAwaitingAuthoritativeReconciliation);
+	}
+
+	_pRecoverDefinitiveProposalRejections () {
+		if (this._definitiveRecoveryPromise) return this._definitiveRecoveryPromise;
+		if (!this._hasDraftAwaitingAuthoritativeReconciliation()) return Promise.resolve(true);
+		const token = {generation: this._generation, characterId: this._characterId};
+		const promise = (async () => {
+			const isOutgoingReconciled = await this._pRefreshOutgoingActions();
+			if (!isOutgoingReconciled || !this._isCurrent(token)) {
+				this._setDefinitiveRecoveryError();
+				return false;
+			}
+			let isContextReconciled = false;
+			try {
+				isContextReconciled = await this._fnRefreshCampaignContext?.() === true;
+			} catch {
+				isContextReconciled = false;
+			}
+			if (!this._isCurrent(token)) return false;
+			if (!isContextReconciled) {
+				this._setDefinitiveRecoveryError();
+				return false;
+			}
+			this._retireDraftsAwaitingAuthoritativeReconciliation();
+			this._render();
+			return true;
+		})();
+		const recoveryPromise = promise.finally(() => {
+			if (this._definitiveRecoveryPromise === recoveryPromise) this._definitiveRecoveryPromise = null;
+		});
+		this._definitiveRecoveryPromise = recoveryPromise;
+		return recoveryPromise;
+	}
+
+	_setDefinitiveRecoveryError () {
+		for (const draft of this._drafts.values()) {
+			if (!draft.isAwaitingAuthoritativeReconciliation) continue;
+			draft.isSubmitting = false;
+			draft.error = "Campaign targeting could not verify the latest authoritative state. Reconnect before starting a new request.";
+		}
+		this._render();
+	}
+
+	_retireDraftsAwaitingAuthoritativeReconciliation () {
+		for (const [draftKey, draft] of this._drafts.entries()) {
+			if (draft.isAwaitingAuthoritativeReconciliation) this._drafts.delete(draftKey);
+		}
+	}
+
+	_getProposalRequest ({commandId, sourceCharacterId, spell, slotLevel, targetRef}) {
+		const sourceEntity = Object.freeze({
+			type: "spell",
+			uid: `cure wounds|${String(spell.source).toLowerCase()}`,
+			version: _SOURCE_VERSIONS.get(spell.source),
+		});
+		const choice = Object.freeze({castLevel: slotLevel});
+		return Object.freeze({
+			campaignId: this._campaignId,
+			contractVersion: 1,
+			sourceCharacterId,
+			sourceEntity,
+			effectTemplateId: "spell.cure-wounds.heal",
+			choice,
+			targetRef,
+			rulesVersionId: this._fnGetRulesVersionId?.(),
+			idempotencyKey: commandId,
+		});
 	}
 
 	_isCurrent ({generation, characterId}) {
@@ -492,13 +643,18 @@ export class CharacterSheetPeerTargeting {
 
 	_getDraftCard (draft) {
 		const card = e_({tag: "article", clazz: "charsheet__peer-action"});
+		let statusText = draft.error;
+		if (draft.isSubmitting) statusText = "Sending request… No spell slot has been spent.";
+		if (draft.isAwaitingAuthoritativeReconciliation) statusText = draft.error;
+		if (this._isSuspended) statusText = "Reconnecting… This request keeps its original identity. No spell slot has been spent.";
 		card.append(
 			e_({tag: "strong", text: `Cure Wounds → ${draft.target.name}`}),
-			e_({tag: "span", text: draft.isSubmitting ? "Sending request… No spell slot has been spent." : draft.error}),
+			e_({tag: "span", text: statusText}),
 		);
-		if (draft.error) {
+		if (draft.error && !draft.isAwaitingAuthoritativeReconciliation) {
 			const retry = e_({tag: "button", clazz: "ve-btn ve-btn-sm ve-btn-primary", text: "Retry"});
 			retry.type = "button";
+			retry.disabled = this._isSuspended;
 			retry.addEventListener("click", () => void this._pSubmitDraft(draft));
 			card.append(retry);
 		}
@@ -518,9 +674,13 @@ export class CharacterSheetPeerTargeting {
 		);
 		card.append(copy);
 		if (action.canCancel && action.status === "proposed") {
-			const cancel = e_({tag: "button", clazz: "ve-btn ve-btn-sm ve-btn-default", text: action.isSubmitting ? "Cancelling…" : "Cancel request"});
+			const cancel = e_({
+				tag: "button",
+				clazz: "ve-btn ve-btn-sm ve-btn-default",
+				text: this._isSuspended ? "Reconnect to cancel" : action.isSubmitting ? "Cancelling…" : "Cancel request",
+			});
 			cancel.type = "button";
-			cancel.disabled = action.isSubmitting;
+			cancel.disabled = this._isSuspended || action.isSubmitting;
 			cancel.dataset.hubActionId = action.actionId;
 			cancel.setAttribute("aria-label", `Cancel ${action.presentation.effectLabel} request for ${action.presentation.targetName}`);
 			cancel.addEventListener("click", () => void this.pCancel({actionId: action.actionId}));

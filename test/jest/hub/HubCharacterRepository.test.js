@@ -62,6 +62,20 @@ describe("hub JSON patches", () => {
 		const conflictingLocal = {xp: 150, notes: {backstory: "Old"}};
 		expect(rebaseJsonChanges({base, local: conflictingLocal, remote}).isConflict).toBe(true);
 	});
+
+	it("treats identical overlapping edits as convergence while preserving disjoint changes", () => {
+		const base = {hp: {current: 12}, resources: [], notes: "old", deprecated: true};
+		const resource = {id: "second-wind", current: 1, max: 1};
+		const local = {hp: {current: 11}, resources: [resource], notes: "local"};
+		const remote = {hp: {current: 11}, resources: [resource], notes: "old", xp: 250};
+
+		expect(rebaseJsonChanges({base, local, remote})).toEqual({
+			isConflict: false,
+			conflicts: [],
+			patches: [{op: "replace", path: "/notes", value: "local"}],
+			document: {hp: {current: 11}, resources: [resource], notes: "local", xp: 250},
+		});
+	});
 });
 
 describe("local character repository", () => {

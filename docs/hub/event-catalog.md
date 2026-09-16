@@ -54,10 +54,11 @@
 | `rules.activated` | rules version | all_members | version id/number; schema/catalog version and `publish`/`rollback` operation when emitted by policy management | Context consumers refetch/activate; policy body, parameters, notes, and before/after values are never emitted |
 | `roll.logged` | character or campaign | caller-selected all_members/dm_only/actor_and_dm | formula, total, context, detail | Cooperative evidence, not cryptographic roll authority. Activity presentation prefers bounded `detail.title` and selectively renders safe breakdown/result/advantage/critical/spell/ability/target fields. |
 | `xp.granted` | character | explicit DM+owner | amount, reason, resulting XP | DM/co-DM also included by visibility policy; activity and the recipient notice render the bounded reason when present |
-| `item.granted` | character | explicit DM actor+owner | `{awardId,index,targetCount,sourceKind,note,entry}` | One deterministic per-target fact; bounded entry/note, followed by that target's projection invalidation. Activity and the recipient notice render the bounded note as the award reason |
+| `item.granted` | character | explicit DM actor+owner | `{awardId,index,targetCount,sourceKind,note,entry}` | One deterministic per-target fact; `sourceKind` is the resolved `catalog`/`campaign_item` authority for catalog-like grants (`party_inventory` for stash grants; legacy records may omit it), and `entry.item` is a bounded privacy-safe summary rather than the complete authoritative inventory item. Followed by that target's projection invalidation; activity and the recipient notice render the bounded note as the award reason |
 | `party_inventory.invalidated` | campaign | all_members | empty | Metadata-only shared-stash refresh signal |
+| `transfer.proposed` | transfer | explicit requester+target owner; DMs see explicit events by role | source/target kinds; each non-DM sees only owned character endpoint ids | Player requested party inventory for an owned character; no asset was reserved or removed |
 | `transfer.reserved` | transfer | explicit actor+target owner | source/target kinds; each non-DM sees only owned character endpoint ids | Escrow content and counterpart identities are not broadcast |
-| `transfer.committed` | transfer | explicit actor+target owner | privacy-reduced source/target endpoints | Destination write complete; affected owners refetch authoritative state |
+| `transfer.committed` | transfer | explicit actor+target owner | privacy-reduced source/target endpoints | Destination write complete; direct-authority proposals emit this without a preceding `transfer.reserved`, and affected owners refetch authoritative state |
 | `transfer.rejected` | transfer | explicit actor+target owner | privacy-reduced source/target endpoints | Source restored; affected owners refetch authoritative state |
 | `transfer.cancelled` | transfer | explicit actor+target owner | lifecycle reason plus privacy-reduced endpoints | Source restored; affected owners refetch authoritative state |
 
@@ -89,7 +90,9 @@ retries preserve `eventId` and `operationId`.
 
 ## Snapshot/replay interaction
 
-Current-state character events at/before `snapshot.lastSequence` may be omitted by the client because the
+PostgreSQL replay reads hold the active membership row through event selection and redaction, so a concurrent
+role downgrade cannot reuse stale DM/co-DM authority for the next replay page. Current-state character events
+at/before `snapshot.lastSequence` may be omitted by the client because the
 snapshot already contains their result:
 
 - character create/clone/move/move-out/archive/reactivate;
@@ -99,9 +102,9 @@ snapshot already contains their result:
   includes the event sequence.
 
 One metadata-only invalidation is emitted per affected character per commit by every mutation that can change
-a catalog field: owner patches, item grants, applied structured effects, both legs of a transfer (escrow
-reservation and resolution), archived-import reactivation, and a sharing-policy write. `xp.granted` emits none
-because `xp` is not a catalog field.
+a catalog field: owner patches, item grants, applied structured effects, approval-bound transfer reservation
+and resolution, both participants of an atomic direct transfer, archived-import reactivation, and a
+sharing-policy write. `xp.granted` emits none because `xp` is not a catalog field.
 
 An atomic item-award batch emits each `item.granted` and its projection invalidation in request target order,
 then one `party_inventory.invalidated` if the source stash was debited. Retries replay the receipt and emit
@@ -149,7 +152,7 @@ Current audit actions include:
 - `account.deletion_requested`, `account.deletion_cancelled`, `account.deletion_purged`.
 
 Not every high-frequency product event has an audit row. Character patches, presence, roll logging, action
-proposal, and transfer reservation are represented by canonical/domain data instead. Changing audit policy
+proposal, transfer request, and transfer reservation are represented by canonical/domain data instead. Changing audit policy
 requires privacy/retention review.
 
 `character.projection.invalidated` remains a transport/control signal and is not rendered as campaign activity.

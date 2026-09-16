@@ -169,15 +169,21 @@ No reactive system — renders are explicit. Related modules re-render together 
 - **Toast notifications**: `JqueryUtil.doToast({type: "success", content: "..."})` for user feedback (site-wide utility, not jQuery-dependent despite the name)
 - **HTML generation**: `e_({outer: \`<button class="btn">...</button>\`})` for single elements, `ee\`<div>...</div>\`` tagged template for complex HTML. `insertAdjacentHTML()` for appending HTML strings.
 - **Hub realtime callbacks**: `CharacterSheetRealtimeCoordinator.on()` exposes connection, cursor,
-  metadata-only projection invalidation, semantic-operation lifecycle, minimized XP/item recipient notices,
-  and delivery-error handoffs. Only a
+  membership-authority change, metadata-only projection invalidation, semantic-operation lifecycle, minimized
+  XP/item recipient notices, and delivery-error handoffs. Only a
   signed-in campaign-backed canonical character attaches. Delivery uses the repository mutation queue and is
   generation-fenced on switch/detach/revocation/terminal page hide; a missing canonical ref, remote archive, or remote move
   serializes teardown behind already-queued delivery. Persisted `pagehide` suspends the socket and `pageshow`
-  resumes the same client/cursor rather than replaying through a fresh generation. This substrate must not call
-  state load/render/save or a generic conflict modal. The page turns notices into text-only toasts; XP schedules
-  authoritative owner-document reconciliation after delivery, while item reconciliation remains with the
-  inventory listener.
+  resumes the same client/cursor rather than replaying through a fresh generation. The coordinator substrate
+  does not mutate UI state. The page turns notices into text-only toasts and consumes projection invalidations
+  through `HubHttpCharacterRepository.pReconcileAuthoritativeCharacter()`: disjoint offline recovery drafts
+  retry, overlaps open the explicit local/server dialog, and generation fences prevent adoption after a switch
+  or access loss. Cursor revision changes refetch after ordered semantic replay because one reconnect can
+  contain both semantic and ordinary writes; operation coverage prevents double application. Client-only
+  `_savedAt` metadata is excluded from overlap detection. The generic owner-document path preserves the actual
+  local candidate for explicit `Use Local`, except for server-owned inventory and XP paths. XP notices schedule
+  authoritative owner-document reconciliation after delivery; Party Inventory owns stash refresh, direct
+  transfer reconciliation, and item-award reconciliation.
 - **Temporary-to-canonical identity adoption**: create retry and conflict resolution rebind the state id, URL
   scope, roster selection, projections, and realtime subscription under one updated load/save fence before the
   repository mutation queue releases canonical events. The identity-only detach preserves canonical repository
@@ -512,9 +518,21 @@ Protocol-4 cost-bearing peer operations extend this with per-character operation
 - a local resource conflict after canonical acceptance blocks autosave and keeps the recovery draft visible;
   it never reapplies the operation or silently overwrites the authoritative source spend.
 
+Party-inventory proposal retries use the proposal idempotency key as an actor-only transfer correlation. After
+the 23-hour browser replay window ends, the sheet must list visible transfers before unlocking the frozen
+composer: a correlated pending request remains recoverable/cancellable, while a terminal or confirmed-missing
+request permits an authoritative character-and-stash refresh and close. Never infer absence from balances alone,
+because a pending player stash withdrawal intentionally changes neither container.
+
 `CharacterSheetPeerTargeting` is invoked from the real spell-use path after cast-option validation but before
 local resource mutation. It is gated by the exact campaign `peerSourceCosts` capability tuple. Unsupported
 templates/options and local/signed-out sheets continue through the existing local cast path unchanged.
+The complete proposal request is frozen before first submission and replayed unchanged after ambiguous failures.
+A definitive pre-commit rejection may retire that frozen request only after both authoritative outgoing-action
+reconciliation and the page-owned latest campaign-context fetch/application succeed; either failure stays
+fail-closed, and idempotency collisions never rotate. Realtime membership changes immediately suspend targeting
+and trigger an authoritative context refetch, which resumes only a current player and destructively clears
+spectator/co-DM state.
 
 ## Key Integration Points
 

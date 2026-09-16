@@ -99,11 +99,13 @@ function makeHost ({state} = {}) {
 		_clearActiveCharacterMirror: proto._clearActiveCharacterMirror,
 		_reconcilePersistedCharacter: proto._reconcilePersistedCharacter,
 		_getNextSavedAt: proto._getNextSavedAt,
+		_pResolveHubCharacterConflict: proto._pResolveHubCharacterConflict,
 		_adoptCanonicalCharacterIdentity: proto._adoptCanonicalCharacterIdentity,
 		_pRefreshCanonicalCharacterRoster: proto._pRefreshCanonicalCharacterRoster,
 		_saveCurrentCharacter: proto._saveCurrentCharacter,
 		_characterRepository: null,
 		_lastSavedAt: 0,
+		_isHubCharacterConflictPromptOpen: false,
 	};
 	host._characterRepository = new LocalCharacterRepository({storage: globalThis.StorageUtil});
 	return host;

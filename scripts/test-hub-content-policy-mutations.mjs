@@ -163,15 +163,99 @@ async function probeVersionFence (variant) {
 	);
 }
 
-function getCharacterSheetLifecycleMethods (source) {
-	const connectionStart = source.indexOf("\t_onHubRealtimeConnectionState (");
-	const connectionEnd = source.indexOf("\n\n\t_applyHubContext (", connectionStart);
-	const refreshStart = source.indexOf("\t_onHubCampaignContextChanged (", connectionEnd);
-	const refreshEnd = source.indexOf("\n\n\t_onHubRealtimeDeliveryError (", refreshStart);
-	if ([connectionStart, connectionEnd, refreshStart, refreshEnd].some(index => index < 0)) {
-		throw new Error("Character Sheet campaign content lifecycle methods could not be extracted.");
+function getCharacterSheetMethod (source, name) {
+	const start = source.indexOf(`\t${name} (`);
+	if (start < 0) throw new Error(`Character Sheet method "${name}" could not be found.`);
+	const bodyStart = source.indexOf("{", start);
+	if (bodyStart < 0) throw new Error(`Character Sheet method "${name}" has no body.`);
+
+	let depth = 0;
+	let mode = "code";
+	const templateExpressionDepths = [];
+	for (let i = bodyStart; i < source.length; ++i) {
+		const char = source[i];
+		const next = source[i + 1];
+		if (mode === "lineComment") {
+			if (char === "\n") mode = "code";
+			continue;
+		}
+		if (mode === "blockComment") {
+			if (char === "*" && next === "/") {
+				mode = "code";
+				i++;
+			}
+			continue;
+		}
+		if (mode === "singleQuote" || mode === "doubleQuote") {
+			if (char === "\\") i++;
+			else if (
+				(mode === "singleQuote" && char === "'")
+				|| (mode === "doubleQuote" && char === "\"")
+			) mode = "code";
+			continue;
+		}
+		if (mode === "template") {
+			if (char === "\\") {
+				i++;
+				continue;
+			}
+			if (char === "`") {
+				mode = "code";
+				continue;
+			}
+			if (char === "$" && next === "{") {
+				depth++;
+				templateExpressionDepths.push(depth);
+				mode = "code";
+				i++;
+			}
+			continue;
+		}
+
+		if (char === "/" && next === "/") {
+			mode = "lineComment";
+			i++;
+			continue;
+		}
+		if (char === "/" && next === "*") {
+			mode = "blockComment";
+			i++;
+			continue;
+		}
+		if (char === "'") {
+			mode = "singleQuote";
+			continue;
+		}
+		if (char === "\"") {
+			mode = "doubleQuote";
+			continue;
+		}
+		if (char === "`") {
+			mode = "template";
+			continue;
+		}
+		if (char === "{") {
+			depth++;
+			continue;
+		}
+		if (char !== "}") continue;
+		if (templateExpressionDepths.at(-1) === depth) {
+			templateExpressionDepths.pop();
+			depth--;
+			mode = "template";
+			continue;
+		}
+		depth--;
+		if (depth === 0) return source.slice(start, i + 1);
 	}
-	return `${source.slice(connectionStart, connectionEnd)},\n${source.slice(refreshStart, refreshEnd)}`;
+	throw new Error(`Character Sheet method "${name}" has an unterminated body.`);
+}
+
+function getCharacterSheetLifecycleMethods (source) {
+	return [
+		getCharacterSheetMethod(source, "_onHubRealtimeConnectionState"),
+		getCharacterSheetMethod(source, "_onHubCampaignContextChanged"),
+	].join(",\n");
 }
 
 async function probeTeardownFence (variant) {

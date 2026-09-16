@@ -60,8 +60,10 @@ npm run build:sw
 # Production dependency audit
 npm audit --omit=dev --audit-level=high
 
-# Tracked-file secret scan, paired first-enable probe, and disposable HTTPS/PostgreSQL E2E
+# Tracked-file secret scan, rollout/provider probes, and disposable HTTPS/PostgreSQL E2E
 npm run hub:check-secrets
+# Against a protected environment with exact campaign IDs configured:
+# npm run hub:check-peer-source-cost-rollout
 # Against isolated staging with both providers configured:
 # npm run hub:check-auth-first-enable
 npm run test:hub:e2e:stack
@@ -96,10 +98,15 @@ buffered live events exactly once.
 The memory semantic suite additionally covers every version-1 kind, player generic-operation denial,
 DM/co-DM immediate application, self-target explicit approval, DM non-owner approval denial, unsupported and
 stale source cost/policy, apply-time targetability, target-ref rotation, revocation cleanup, and projection
-privacy canaries. Protocol-4 source-cost suites additionally prove PHB/XPHB Cure Wounds derivation, no mutation
-before consent, slot decrement plus healing, reject/cancel/expiry no-op behavior, concurrent last-slot
-serialization, permanent spent-then-restored slot invalidation, class/preparation/casting-ability derivation,
-self-target combined writes, capability skew, per-leg dedupe, and privacy-shaped failures.
+privacy canaries. Protocol-4 source-cost suites additionally prove exact-ID new-campaign rollout state,
+production configuration validation, PHB/XPHB Cure Wounds derivation and selector gating, no mutation before
+consent, slot decrement plus healing, reject/cancel/expiry no-op behavior, concurrent last-slot serialization,
+permanent spent-then-restored slot invalidation, class/preparation/casting-ability derivation, self-target
+combined writes, capability skew, per-leg dedupe, privacy-shaped failures, and reactivation of an already-open
+Character Sheet after authoritative context changes. The production-derived three-user browser journey begins
+with no active rules/capability, observes the disabled selector state, activates rules through the supported API,
+and then exercises PHB and XPHB targeting. Its `*` gate remains confined to the isolated test entry point; exact
+production enrollment is covered by the closed parser and read-only pre-cutover readiness check.
 
 ## Test data rules
 
@@ -305,14 +312,45 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   references remain ephemeral.
 - Transfer acceptance refreshes canonical character documents, shared inventory, balances, source/target/item
   pickers, and the inbox together; the lifecycle journey proves the accepted item is immediately selectable
-  from party inventory without reloading.
+  from party inventory without reloading. Transfer authority coverage exercises player-to-own/peer/DM-owned and
+  DM-to-owned/player-owned destinations, verifies direct DM and same-owner moves are committed atomically by the
+  server without a recipient-resolvable reservation or redundant browser resolution, keeps player stash
+  requests non-escrowed until DM approval, proves stale approvals return `TRANSFER_INSUFFICIENT`, and forces a
+  post-mutation refetch failure before retrying balances and completing another transfer without a page reload.
+  Inbox resolution coverage loses approve/decline responses after commit, reuses the same decision key, and
+  distinguishes a known committed outcome from a failed authoritative refresh with an explicit inbox retry.
+  Character Sheet refresh/retry tests assert a real refetch, visible pending/success/error state, and retained
+  last-good stash content; cancelling a definitively failed draft cannot clear its dual-refresh gate or enable a
+  new stale proposal, and spectators and unresolved roles receive a read-only stash rather than a rejected
+  Request action. Repository and real-stack regressions also prove deterministic Character Sheet item aliases
+  cannot create a false inventory overlap, semantically converged stale recovery records clear before the next
+  save, canonical-equivalent failed writes stop reporting false pending work, and genuinely unique failed or
+  discarded local intent remains recoverable across authoritative, live-operation, and resync paths.
 - Item-award regressions mutation-verify role/tenant/target gates, strict source and note/quantity bounds,
-  multi-target rollback, exact retry and concurrent duplicate behavior, stash conservation under contention,
-  memory/PostgreSQL parity, carry invalidation, stable audit/event/projection ordering, privacy-safe preview
-  states, normalized retry identity, and open-sheet authoritative reconciliation. The real-stack lifecycle
-  commits a multi-character catalog award behind a lost response, changes incidental form state, retries with
-  the same key, observes exactly one live arrival on an already-open owner sheet, then awards a transferred
-  stash stack without loss or duplication.
+  trusted site/campaign identity resolution, cross-authority collision rejection, resolved Recent provenance,
+  full authoritative metadata persistence, privacy-reduced
+  command/event projections, multi-target rollback, exact retry and concurrent duplicate behavior,
+  award-to-Character-Sheet-save-to-repeat-award stack identity, direct/stash-return metadata conservation,
+  accept/reject/cancel behavior, metadata-diverged same-ID escrow restoration with collision-free source stacks
+  and exact quantity conservation, deterministic LIFO lifecycle restoration and cancellation-event order for
+  independently reserved whole stacks, stash conservation under contention, memory/PostgreSQL parity, carry
+  invalidation, stable audit/event/projection ordering,
+  privacy-safe preview states, normalized retry identity, legacy-summary Character Sheet rehydration, trusted
+  focus/weapon hydration across quantity-only authoritative changes, custom-item metadata preservation, raw
+  patch-value rematerialization, and open-sheet authoritative reconciliation. A complete generated-artifact
+  equality test prevents the browser
+  item data and BFF award catalog from drifting. Character Sheet migration coverage also rejects renderer/filter
+  caches, empty renderer-created `entries`, and renderer-injected `additionalSources` while retaining
+  source-authored `hasRefs` and `additionalSources` from real site catalog entries through repeat award and stash
+  return. A production-order loader regression mutates both a shipped instrument and a synthetic campaign-brew
+  instrument in place, proving the minimal site repair projection was captured before enhancement and excludes
+  mutable brew metadata. Duplicate official/brew UIDs, recursive `_copy` parent collisions, typed/typeless Hub
+  inventory, variant-component collisions against prerelease/brew, and changed brew content across export/reload
+  are also pinned fail-closed while local-save brew effect hydration remains covered. The real-stack
+  lifecycle commits a multi-character catalog award
+  behind a lost response, changes incidental form state, retries with the same key, verifies canonical weapon
+  type/damage/value/weight metadata on both characters, observes exactly one live arrival on an already-open
+  owner sheet, then verifies the same metadata after a stash round trip without loss or duplication.
 - The saturation scenario runs after the interactive journeys, writes 500 rolls, exercises six members, large
   character documents and transfer contention, then waits for the transactional outbox to drain completely
   before cleanup.
