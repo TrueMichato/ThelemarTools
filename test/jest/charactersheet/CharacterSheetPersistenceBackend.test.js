@@ -13,6 +13,7 @@
 import "./setup.js";
 import {jest} from "@jest/globals";
 import {LocalCharacterRepository} from "../../../js/hub/hub-character-repository.js";
+import {HubHttpCharacterRepository} from "../../../js/hub/hub-http-character-repository.js";
 
 const REPO_ROOT = new URL("../../../", import.meta.url).pathname;
 
@@ -58,6 +59,32 @@ const makeDeferred = () => {
 	});
 	return {promise, resolve, reject};
 };
+
+class MemoryStorage {
+	constructor () {
+		this._values = new Map();
+	}
+
+	get length () {
+		return this._values.size;
+	}
+
+	key (index) {
+		return [...this._values.keys()][index] ?? null;
+	}
+
+	getItem (key) {
+		return this._values.get(key) ?? null;
+	}
+
+	setItem (key, value) {
+		this._values.set(key, String(value));
+	}
+
+	removeItem (key) {
+		this._values.delete(key);
+	}
+}
 
 const makeSpellActivity = (spellName, mode = "cantrip") => ({
 	type: "spell.used",
@@ -634,6 +661,192 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 				.toHaveBeenCalledWith({characterId: "temporary-id"});
 		} finally {
 			prompt.mockRestore();
+		}
+	});
+
+	it.each([
+		{aliasLabel: "canonical", routeCharacterId: "server-id", failureCode: "CHARACTER_NOT_FOUND"},
+		{aliasLabel: "temporary", routeCharacterId: "temporary-id", failureCode: "CHARACTER_NOT_FOUND"},
+		{aliasLabel: "canonical", routeCharacterId: "server-id", failureCode: "IDEMPOTENCY_RESULT_GONE"},
+		{aliasLabel: "temporary", routeCharacterId: "temporary-id", failureCode: "IDEMPOTENCY_RESULT_GONE"},
+	])("routes the $aliasLabel alias through fresh startup for create-success PATCH $failureCode recovery", async ({
+		routeCharacterId,
+		failureCode,
+	}) => {
+		const storage = new MemoryStorage();
+		const seed = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pGetCharacter: async () => {
+					throw Object.assign(new Error("missing"), {code: "CHARACTER_NOT_FOUND"});
+				},
+				pCreateCharacter: async ({clientImportId, data}) => ({
+					character: {
+						id: "server-id",
+						ownerAccountId: "owner",
+						campaignId: "campaign-1",
+						clientImportId,
+						revision: 1,
+						data,
+					},
+				}),
+				pAcquireCharacterLease: async () => ({epoch: 1}),
+				pPatchCharacter: async () => {
+					throw Object.assign(new Error(failureCode), {code: failureCode});
+				},
+			},
+		});
+		seed._recoveryStorage = storage;
+		await expect(seed.pUpsert({
+			character: {id: "temporary-id", name: "Mira"},
+			activity: makeSpellActivity("Shield", "spell_slot"),
+		})).rejects.toMatchObject({code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE"});
+
+		const persisted = JSON.parse(storage.getItem("hub-character-recovery:campaign-1:server-id"));
+		expect(persisted).toEqual(expect.objectContaining({
+			queueVersion: 3,
+			intent: "create",
+			ownerAccountId: "owner",
+			clientImportId: "temporary-id",
+			commands: [expect.objectContaining({
+				recoveryFailureCode: failureCode,
+				recoveryFailureOperation: "patch",
+			})],
+		}));
+
+		const colliding = {
+			id: "replacement-character",
+			ownerAccountId: "owner",
+			campaignId: "campaign-1",
+			clientImportId: "temporary-id",
+			revision: 1,
+			data: {name: "Replacement"},
+		};
+		const getCharacter = jest.fn(async ({characterId}) => {
+			expect(["server-id", "new-character-id"]).toContain(characterId);
+			throw Object.assign(new Error("missing"), {code: "CHARACTER_NOT_FOUND"});
+		});
+		const createCharacter = jest.fn(async ({clientImportId, data}) => ({
+			character: {
+				id: "new-server-id",
+				ownerAccountId: "owner",
+				campaignId: "campaign-1",
+				clientImportId,
+				revision: 1,
+				data,
+			},
+		}));
+		const listCharacters = jest.fn(async () => [structuredClone(colliding)]);
+		const api = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+			pListCharacters: listCharacters,
+			pGetCharacter: getCharacter,
+			pCreateCharacter: createCharacter,
+		};
+		let repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api,
+		});
+		repository._recoveryStorage = storage;
+
+		const previousLocation = globalThis.window.location;
+		const previousHistory = globalThis.window.history;
+		globalThis.window.location = new URL(`http://test/charactersheet.html?id=${routeCharacterId}&hubCampaign=campaign-1`);
+		globalThis.window.history = {replaceState: jest.fn()};
+		const state = new CharacterSheetState();
+		const host = makeHost({state});
+		Object.assign(host, {
+			_characterRepository: repository,
+			_hubCampaignId: "campaign-1",
+			_hubContext: null,
+			_isHubCharacter: true,
+			_isUnboundLegacyRecoveryClaimDeferred: false,
+			_characterLoadGeneration: 0,
+			_selCharacter: {value: routeCharacterId},
+			_layout: null,
+			_playMode: null,
+			_pCanonicalizeHubCharacterUrl: CharacterSheetPage.prototype._pCanonicalizeHubCharacterUrl,
+			_pLoadCharacter: CharacterSheetPage.prototype._pLoadCharacter,
+			_detachHubRealtime: jest.fn(),
+			_attachHubRealtime: jest.fn(),
+			_reconcileClassFeatures: jest.fn(() => null),
+			_ensureLinguisticsSkillIfNeeded: jest.fn(),
+			_renderCharacter: jest.fn(),
+			_applyBackgroundTheme: jest.fn(),
+			_updateThemePickerSelection: jest.fn(),
+			_createNewCharacter: jest.fn(function () {
+				this._currentCharacterId = "new-character-id";
+				this._state.reset();
+				this._state.setId("new-character-id");
+			}),
+			_pLoadCharacters: jest.fn(async () => repository.pList()),
+		});
+		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+		const download = jest.spyOn(characterSheetDataUtil, "userDownload").mockImplementation(() => {});
+
+		try {
+			await expect(host._pCanonicalizeHubCharacterUrl()).resolves.toBe(false);
+			expect(getCharacter).not.toHaveBeenCalled();
+			expect(JSON.parse(storage.getItem("hub-character-recovery:campaign-1:server-id")).clientImportId)
+				.toBe("temporary-id");
+
+			repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+			repository._recoveryStorage = storage;
+			host._characterRepository = repository;
+			await expect(host._pCanonicalizeHubCharacterUrl()).resolves.toBe(false);
+			expect(getCharacter).not.toHaveBeenCalled();
+			await expect(repository.pList()).resolves.toEqual([
+				{id: colliding.id, name: "Replacement"},
+				{id: "server-id", name: "Mira"},
+			]);
+			expect(repository._canonicalIds.get("temporary-id")).not.toBe(colliding.id);
+			expect(storage.getItem(`hub-character-recovery:campaign-1:${colliding.id}`)).toBeNull();
+
+			await expect(host._pLoadCharacter(routeCharacterId)).resolves.toBe(true);
+			expect(host._currentCharacterId).toBe("server-id");
+			expect(host._state.getName()).toBe("Mira");
+			expect(repository.isSaveBlocked("server-id")).toBe(true);
+			expect(getCharacter).not.toHaveBeenCalled();
+
+			await expect(host._saveCurrentCharacter()).resolves.toBe(true);
+			expect(prompt).toHaveBeenCalledWith(expect.objectContaining({
+				title: "Cloud Character Is No Longer Available",
+				textYes: "Export Then Remove Local Copy",
+				textNo: "Keep Blocked",
+			}));
+			expect(download).toHaveBeenCalledWith(
+				"character-cloud-recovery",
+				expect.objectContaining({
+					intent: "create",
+					commands: [expect.objectContaining({
+						failureCode,
+						failureOperation: "patch",
+					})],
+				}),
+				{fileType: "character-conflict"},
+			);
+			expect(getCharacter).toHaveBeenCalledTimes(1);
+			expect(getCharacter).toHaveBeenCalledWith({characterId: "server-id"});
+			expect(createCharacter).not.toHaveBeenCalled();
+			expect(storage.getItem("hub-character-recovery:campaign-1:server-id")).toBeNull();
+			expect(host._currentCharacterId).toBe("new-character-id");
+
+			host._state.setName("Later Save");
+			await expect(host._saveCurrentCharacter()).resolves.toBe(true);
+			expect(getCharacter).toHaveBeenCalledTimes(2);
+			expect(getCharacter).toHaveBeenLastCalledWith({characterId: "new-character-id"});
+			expect(createCharacter).toHaveBeenCalledTimes(1);
+			expect(createCharacter).toHaveBeenCalledWith(expect.objectContaining({
+				clientImportId: "new-character-id",
+				data: expect.objectContaining({name: "Later Save"}),
+			}));
+			expect(host._currentCharacterId).toBe("new-server-id");
+		} finally {
+			download.mockRestore();
+			prompt.mockRestore();
+			globalThis.window.location = previousLocation;
+			globalThis.window.history = previousHistory;
 		}
 	});
 

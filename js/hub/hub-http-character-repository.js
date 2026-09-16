@@ -152,8 +152,15 @@ export class HubHttpCharacterRepository {
 	async pGetCampaignId ({characterId}) {
 		await this._pEnsureSession();
 		const recoveryRecord = this._getRecoveryStorageRecord(characterId, {isRequireOwner: true});
-		if (recoveryRecord?.intent === "create") {
+		const isMissingServerPatchRecovery = this._isMissingServerPatchRecoveryRecord(recoveryRecord);
+		if (recoveryRecord?.intent === "create" || isMissingServerPatchRecovery) {
 			return this._pRunMutation(async () => {
+				if (isMissingServerPatchRecovery) {
+					const recoveryCharacterId = this._getRecoveryRecordCharacterId(recoveryRecord);
+					if (recoveryCharacterId && recoveryCharacterId !== characterId) {
+						this._canonicalIds.set(characterId, recoveryCharacterId);
+					}
+				}
 				await this._pListCharactersAndRecover();
 				const canonicalId = this._canonicalIds.get(characterId) || characterId;
 				const accepted = this._accepted.get(canonicalId);
@@ -193,7 +200,10 @@ export class HubHttpCharacterRepository {
 			}
 			if (isOwner && character.clientImportId && character.clientImportId !== character.id) {
 				const recoveryRecord = this._getRecoveryStorageRecord(character.clientImportId, {isRequireOwner: true});
-				if (recoveryRecord?.intent === "create") {
+				const isMatchingCreateRecovery = recoveryRecord?.intent === "create"
+					&& recoveryRecord.parsed?.clientImportId === character.clientImportId
+					&& !this._isMissingServerPatchRecoveryRecord(recoveryRecord);
+				if (isMatchingCreateRecovery) {
 					recovery = this.getPendingRecovery(character.clientImportId);
 					if (recovery) this._migrateCharacterIdentity({fromId: character.clientImportId, toId: character.id});
 				}
@@ -1866,7 +1876,9 @@ export class HubHttpCharacterRepository {
 				const parsed = JSON.parse(this._recoveryStorage.getItem(key));
 				const characterId = key.slice(prefix.length);
 				const intent = this._getRecoveryIntent(parsed);
-				if (parsed?.ownerAccountId !== accountId || parsed?.clientImportId !== characterId || intent !== "create") continue;
+				if (parsed?.ownerAccountId !== accountId) continue;
+				if (!this._isMissingServerPatchRecoveryRecord({parsed, intent})
+					&& (parsed?.clientImportId !== characterId || intent !== "create")) continue;
 				out.push(characterId);
 			} catch {
 				// Invalid recovery blobs are ignored by the same fail-closed rule as getPendingRecovery.
@@ -2036,6 +2048,11 @@ export class HubHttpCharacterRepository {
 		let base = structuredClone(parsed.base ?? null);
 		let baseCoverage = deserializeCoverage(parsed.baseCoverage);
 		const initialIntent = this._getRecoveryIntent(parsed);
+		const createRequestedId = initialIntent === "create"
+			&& typeof parsed.clientImportId === "string"
+			&& parsed.clientImportId
+			? parsed.clientImportId
+			: characterId;
 		const queue = [];
 		for (const [index, raw] of parsed.commands.entries()) {
 			if (!Array.isArray(raw?.patches) || !raw?.commandKeys?.create || !raw?.commandKeys?.patch) return null;
@@ -2048,7 +2065,7 @@ export class HubHttpCharacterRepository {
 			const snapshot = applyJsonPatch(base, raw.patches);
 			const snapshotCoverage = deserializeCoverage(raw.snapshotCoverage);
 			queue.push({
-				requestedId: characterId,
+				requestedId: intent === "create" ? createRequestedId : characterId,
 				submittedSnapshot: structuredClone(snapshot),
 				submittedActivity: structuredClone(raw.activity ?? null),
 				submittedBase: structuredClone(base),
@@ -2106,6 +2123,26 @@ export class HubHttpCharacterRepository {
 	_getRecoveryFailureOperation (command) {
 		if (["create", "patch"].includes(command?.recoveryFailureOperation)) return command.recoveryFailureOperation;
 		return command?.outboundPatch || command?.intent === "patch" ? "patch" : "create";
+	}
+
+	_isMissingServerPatchRecoveryCommand (command) {
+		return this._getRecoveryFailureOperation(command) === "patch"
+			&& ["CHARACTER_NOT_FOUND", "IDEMPOTENCY_RESULT_GONE"].includes(command?.recoveryFailureCode);
+	}
+
+	_isMissingServerPatchRecoveryRecord (record) {
+		const command = record?.parsed?.commands?.[0];
+		if (!command) return false;
+		return this._isMissingServerPatchRecoveryCommand({
+			...command,
+			intent: command.intent || record.intent,
+		});
+	}
+
+	_getRecoveryRecordCharacterId (record) {
+		const prefix = this._getRecoveryStoragePrefix();
+		if (!record?.key?.startsWith(prefix)) return null;
+		return record.key.slice(prefix.length) || null;
 	}
 
 	_assertActivityReplayAvailable ({characterId, command}) {
@@ -3090,8 +3127,7 @@ export class HubHttpCharacterRepository {
 			let queueEntry = this._getRecoveryCommandQueueEntry(canonicalId);
 			if (!queueEntry?.queue.some(command => this._isRecoveryResolutionRequired(command))) return null;
 			const firstCommand = queueEntry.queue[0];
-			const isMissingServerPatchRecovery = this._getRecoveryFailureOperation(firstCommand) === "patch"
-				&& ["CHARACTER_NOT_FOUND", "IDEMPOTENCY_RESULT_GONE"].includes(firstCommand.recoveryFailureCode);
+			const isMissingServerPatchRecovery = this._isMissingServerPatchRecoveryCommand(firstCommand);
 			await this._pEnsureSession();
 			let serverDocument = null;
 			try {

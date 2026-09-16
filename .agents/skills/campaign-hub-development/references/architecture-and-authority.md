@@ -78,6 +78,15 @@ assertion, clears that release gate.
   original keys and activities. Remove obsolete pending aliases only after hydration, migration, or replay
   succeeds. A matching canonical row proves the create portion committed: replay later deltas from the original
   create snapshot as their base, rather than diffing that stale snapshot directly against current canonical truth.
+- Startup campaign-id routing and owner-scoped listing also inspect the persisted failed operation leg. A
+  canonical-key recovery whose stable failure is a missing-server PATCH remains discoverable even when its first
+  command intent is CREATE and its retained `clientImportId` is the former temporary id. This discovery may load
+  the blocked local draft for the Character Sheet prompt, but resolution still requires a fresh canonical GET
+  before discard and must never rematch by `clientImportId` or issue CREATE. Genuine create migration requires
+  both the listed owner-visible row and the stored recovery record to carry the same lookup `clientImportId`;
+  a matching storage key alone is not identity evidence. Canonical-key hydration and reserialization preserve
+  the create-origin record's original temporary `clientImportId`, so an interrupted startup can route that alias
+  again without broadening migration or rematch behavior.
 - Access loss, takeover, campaign switch, detach, logout, or terminal page hide fences queued callbacks and
   pending saves.
 - Durable recovery format 3 stores the exact PATCH body and rules-version pin used with each idempotency key.
