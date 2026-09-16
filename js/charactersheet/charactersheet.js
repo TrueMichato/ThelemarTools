@@ -1130,6 +1130,7 @@ class CharacterSheetPage {
 					fnGetCharacterId: () => this._currentCharacterId,
 					fnGetRulesVersionId: () => this._hubContext?.rulesVersion?.id ?? null,
 					fnGetCapability: () => this._hubCampaignContext?.context?.capabilities?.peerSourceCosts ?? null,
+					fnRefreshCampaignContext: () => this._pRefreshHubRules({isUseLatest: true}),
 					fnOnAuthoritativeApplied: detail => this._onHubAuthoritativeApproval(detail),
 				});
 				this._peerTargeting.init();

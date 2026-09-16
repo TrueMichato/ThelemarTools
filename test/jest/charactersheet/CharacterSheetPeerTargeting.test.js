@@ -56,6 +56,7 @@ describe("Character Sheet peer targeting", () => {
 	let capability;
 	let characterId;
 	let rulesVersionId;
+	let refreshCampaignContext;
 
 	beforeEach(() => {
 		root = globalThis.e_({tag: "div"});
@@ -80,6 +81,7 @@ describe("Character Sheet peer targeting", () => {
 		capability = {...CAPABILITY, resourceKinds: [...CAPABILITY.resourceKinds]};
 		characterId = "source-character";
 		rulesVersionId = "rules-version-1";
+		refreshCampaignContext = jest.fn(async () => true);
 		fnPickTarget = jest.fn(async ({targets}) => ({kind: "target", targetRef: targets.find(target => !target.isSelf).targetRef}));
 		onAuthoritativeApproval = jest.fn(async () => true);
 		controller = new CharacterSheetPeerTargeting({
@@ -89,6 +91,7 @@ describe("Character Sheet peer targeting", () => {
 			fnGetCharacterId: () => characterId,
 			fnGetRulesVersionId: () => rulesVersionId,
 			fnGetCapability: () => capability,
+			fnRefreshCampaignContext: refreshCampaignContext,
 			fnCreateId: () => "command-1",
 			fnPickTarget,
 			fnOnAuthoritativeApplied: onAuthoritativeApproval,
@@ -268,12 +271,19 @@ describe("Character Sheet peer targeting", () => {
 		expect(Object.isFrozen(secondRequest.sourceEntity)).toBe(true);
 		expect(Object.isFrozen(secondRequest.choice)).toBe(true);
 		expect(controller._fnCreateId).toHaveBeenCalledTimes(1);
+		expect(refreshCampaignContext).not.toHaveBeenCalled();
 	});
 
-	it("retires a definitively stale proposal after reconciliation and permits a current-policy command", async () => {
+	it("refreshes outgoing actions and page-owned context before rotating a definitively stale proposal", async () => {
 		await pFlush();
 		const commandIds = ["command-1", "command-2"];
 		controller._fnCreateId = jest.fn(() => commandIds.shift());
+		refreshCampaignContext.mockImplementationOnce(async () => {
+			controller.suspend();
+			rulesVersionId = "rules-version-2";
+			controller.activate({characterId: "source-character", membershipRole: "player"});
+			return true;
+		});
 		api.pCreatePeerAction
 			.mockRejectedValueOnce(Object.assign(new Error("response lost"), {code: "NETWORK_UNAVAILABLE"}))
 			.mockRejectedValueOnce(Object.assign(new Error("rules changed"), {code: "POLICY_VERSION_STALE"}))
@@ -286,12 +296,13 @@ describe("Character Sheet peer targeting", () => {
 		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: false});
 		const frozenRequest = api.pCreatePeerAction.mock.calls[0][0];
 		controller.onConnectionState({state: "reconnecting", attempt: 1});
-		rulesVersionId = "rules-version-2";
 		expect(controller.activate({characterId: "source-character", membershipRole: "player"})).toBe(true);
 		await pFlush();
 
 		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: false});
 		expect(api.pCreatePeerAction.mock.calls[1][0]).toBe(frozenRequest);
+		expect(api.pListCharacterOutgoingActions).toHaveBeenCalled();
+		expect(refreshCampaignContext).toHaveBeenCalledTimes(1);
 		expect(controller._drafts.size).toBe(0);
 
 		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: true});
@@ -302,10 +313,65 @@ describe("Character Sheet peer targeting", () => {
 		expect(api.pCreatePeerAction.mock.calls[2][0]).not.toBe(frozenRequest);
 	});
 
-	it("keeps a definitively stale proposal fail-closed until reconciliation succeeds", async () => {
+	it.each([
+		"CAPABILITY_UNAVAILABLE",
+		"SOURCE_OR_TARGET_UNAVAILABLE",
+	])("rotates a definitively rejected %s proposal only after both authority refreshes", async errorCode => {
 		await pFlush();
 		const commandIds = ["command-1", "command-2"];
 		controller._fnCreateId = jest.fn(() => commandIds.shift());
+		refreshCampaignContext.mockImplementationOnce(async () => {
+			rulesVersionId = "rules-version-2";
+			return true;
+		});
+		api.pCreatePeerAction
+			.mockRejectedValueOnce(Object.assign(new Error("response lost"), {code: "NETWORK_UNAVAILABLE"}))
+			.mockRejectedValueOnce(Object.assign(new Error("definitive rejection"), {code: errorCode}))
+			.mockResolvedValueOnce({operation: {operationId: "operation-2", status: "proposed"}});
+		const request = {
+			spell: {name: "Cure Wounds", source: "PHB", level: 1},
+			selectedSlot: {level: 1},
+		};
+
+		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: false});
+		const frozenRequest = api.pCreatePeerAction.mock.calls[0][0];
+		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: false});
+		expect(api.pCreatePeerAction.mock.calls[1][0]).toBe(frozenRequest);
+		expect(refreshCampaignContext).toHaveBeenCalledTimes(1);
+		expect(controller._drafts.size).toBe(0);
+
+		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: true});
+		expect(api.pCreatePeerAction.mock.calls[2][0]).toEqual(expect.objectContaining({
+			idempotencyKey: "command-2",
+			rulesVersionId: "rules-version-2",
+		}));
+	});
+
+	it("never rotates an idempotency collision as a safely rejected proposal", async () => {
+		await pFlush();
+		api.pCreatePeerAction.mockRejectedValue(Object.assign(new Error("collision"), {code: "IDEMPOTENCY_KEY_REUSED"}));
+		const request = {
+			spell: {name: "Cure Wounds", source: "PHB", level: 1},
+			selectedSlot: {level: 1},
+		};
+
+		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: false});
+		const frozenRequest = api.pCreatePeerAction.mock.calls[0][0];
+		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: false});
+
+		expect(api.pCreatePeerAction.mock.calls).toHaveLength(2);
+		expect(api.pCreatePeerAction.mock.calls[1][0]).toBe(frozenRequest);
+		expect(refreshCampaignContext).not.toHaveBeenCalled();
+		const [draft] = [...controller._drafts.values()];
+		expect(draft).toMatchObject({commandId: "command-1", errorCode: "IDEMPOTENCY_KEY_REUSED"});
+		expect(draft.isAwaitingAuthoritativeReconciliation).toBeUndefined();
+	});
+
+	it.each(["outgoing", "context"])("keeps a definitive proposal fail-closed while %s authority recovery fails", async failure => {
+		await pFlush();
+		const commandIds = ["command-1", "command-2"];
+		controller._fnCreateId = jest.fn(() => commandIds.shift());
+		if (failure === "context") refreshCampaignContext.mockResolvedValueOnce(false);
 		api.pCreatePeerAction
 			.mockRejectedValueOnce(Object.assign(new Error("response lost"), {code: "NETWORK_UNAVAILABLE"}))
 			.mockRejectedValueOnce(Object.assign(new Error("rules changed"), {code: "POLICY_VERSION_STALE"}));
@@ -315,11 +381,9 @@ describe("Character Sheet peer targeting", () => {
 		};
 
 		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: false});
-		controller.onConnectionState({state: "reconnecting", attempt: 1});
-		rulesVersionId = "rules-version-2";
-		expect(controller.activate({characterId: "source-character", membershipRole: "player"})).toBe(true);
-		await pFlush();
-		api.pListCharacterOutgoingActions.mockRejectedValueOnce(Object.assign(new Error("offline"), {code: "NETWORK_UNAVAILABLE"}));
+		if (failure === "outgoing") {
+			api.pListCharacterOutgoingActions.mockRejectedValueOnce(Object.assign(new Error("offline"), {code: "NETWORK_UNAVAILABLE"}));
+		}
 
 		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: false});
 		expect([...controller._drafts.values()]).toEqual([
@@ -333,10 +397,16 @@ describe("Character Sheet peer targeting", () => {
 		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: false});
 		expect(fnPickTarget).toHaveBeenCalledTimes(pickCount);
 		expect(api.pCreatePeerAction).toHaveBeenCalledTimes(2);
+		expect(refreshCampaignContext).toHaveBeenCalledTimes(failure === "context" ? 1 : 0);
 
 		api.pListCharacterOutgoingActions.mockResolvedValueOnce([]);
+		refreshCampaignContext.mockImplementationOnce(async () => {
+			rulesVersionId = "rules-version-2";
+			return true;
+		});
 		expect(await controller.pRefresh()).toBe(true);
 		expect(controller._drafts.size).toBe(0);
+		expect(refreshCampaignContext).toHaveBeenCalledTimes(failure === "context" ? 2 : 1);
 	});
 
 	it.each(["spectator", "co_dm"])("discards a suspended proposal when membership changes to %s", async membershipRole => {

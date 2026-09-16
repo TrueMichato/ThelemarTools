@@ -137,10 +137,11 @@ Realtime membership notifications are invalidation hints, not role authority: th
 targeting immediately, refetches campaign context, and trusts only the returned membership role.
 
 A Cure Wounds proposal freezes its complete request before first submission and replays that request unchanged
-after an ambiguous transport failure. A definitive stale-policy rejection is different: after an authoritative
-outgoing-action refresh succeeds, the rejected request is retired so the player can create a new command with
-the current rules pin. If that reconciliation fails, targeting remains locked rather than rotating identity or
-risking a duplicate proposal.
+after an ambiguous transport failure. A definitive pre-commit rejection is different: the rejected request is
+retired only after both the authorization-scoped outgoing-action list and the page-owned latest campaign context
+have been fetched and applied successfully. The next proposal therefore receives a new command identity and the
+current rules pin. If either reconciliation fails, targeting remains locked rather than rotating identity or
+risking a duplicate proposal. An idempotency-key collision is never treated as safely rotatable.
 
 Private persistence is fenced independently from realtime teardown. Character saves capture both
 the character identity and load generation before their first await; DM workspace saves capture the

@@ -516,10 +516,11 @@ because a pending player stash withdrawal intentionally changes neither containe
 local resource mutation. It is gated by the exact campaign `peerSourceCosts` capability tuple. Unsupported
 templates/options and local/signed-out sheets continue through the existing local cast path unchanged.
 The complete proposal request is frozen before first submission and replayed unchanged after ambiguous failures.
-A definitive stale-policy rejection may retire that frozen request only after authoritative outgoing-action
-reconciliation succeeds; reconciliation failure stays fail-closed. Realtime membership changes immediately
-suspend targeting and trigger an authoritative context refetch, which resumes only a current player and
-destructively clears spectator/co-DM state.
+A definitive pre-commit rejection may retire that frozen request only after both authoritative outgoing-action
+reconciliation and the page-owned latest campaign-context fetch/application succeed; either failure stays
+fail-closed, and idempotency collisions never rotate. Realtime membership changes immediately suspend targeting
+and trigger an authoritative context refetch, which resumes only a current player and destructively clears
+spectator/co-DM state.
 
 ## Key Integration Points
 

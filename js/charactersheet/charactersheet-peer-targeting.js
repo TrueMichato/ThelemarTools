@@ -1,4 +1,5 @@
 import {getProjectionId, getProjectionName, getTargetableProjections} from "../hub/hub-character-view.js";
+import {isTransferOutcomeUncertain} from "../hub/hub-api-client.js";
 import {CharacterSheetModal} from "./charactersheet-modal.js";
 
 const {e_} = /** @type {*} */ (globalThis);
@@ -18,7 +19,11 @@ const _SOURCE_VERSIONS = new Map([
 const _STATUSES = new Set(["proposed", "applied", "rejected", "cancelled", "expired", "failed"]);
 const _TERMINAL_STATUSES = new Set([..._STATUSES].filter(status => status !== "proposed"));
 const _ACCESS_LOSS_CODES = new Set(["AUTH_REQUIRED", "CAMPAIGN_NOT_FOUND", "CHARACTER_NOT_FOUND", "FORBIDDEN"]);
-const _DEFINITIVE_PROPOSAL_REJECTION_CODES = new Set(["POLICY_VERSION_STALE"]);
+const _NON_ROTATABLE_PROPOSAL_REJECTION_CODES = new Set(["IDEMPOTENCY_KEY_REUSED"]);
+
+const _isDefinitiveProposalRejection = error => typeof error?.code === "string"
+	&& !_NON_ROTATABLE_PROPOSAL_REJECTION_CODES.has(error.code)
+	&& !isTransferOutcomeUncertain(error);
 
 const _getSafeError = error => {
 	switch (error?.code) {
@@ -41,6 +46,7 @@ export class CharacterSheetPeerTargeting {
 		fnGetCharacterId,
 		fnGetRulesVersionId,
 		fnGetCapability,
+		fnRefreshCampaignContext = null,
 		fnCreateId = () => crypto.randomUUID(),
 		fnPickTarget = null,
 		fnOnAuthoritativeApplied = null,
@@ -51,6 +57,7 @@ export class CharacterSheetPeerTargeting {
 		this._fnGetCharacterId = fnGetCharacterId;
 		this._fnGetRulesVersionId = fnGetRulesVersionId;
 		this._fnGetCapability = fnGetCapability;
+		this._fnRefreshCampaignContext = fnRefreshCampaignContext;
 		this._fnCreateId = fnCreateId;
 		this._fnPickTarget = fnPickTarget || (options => this._pPickTarget(options));
 		this._fnOnAuthoritativeApplied = fnOnAuthoritativeApplied;
@@ -64,6 +71,7 @@ export class CharacterSheetPeerTargeting {
 		this._isSuspended = false;
 		this._isLoading = false;
 		this._loadError = null;
+		this._definitiveRecoveryPromise = null;
 		this._onFocus = () => {
 			if (this._characterId && !this._isSuspended) void this.pRefresh();
 		};
@@ -127,6 +135,7 @@ export class CharacterSheetPeerTargeting {
 		this._isSuspended = false;
 		this._isLoading = false;
 		this._loadError = null;
+		this._definitiveRecoveryPromise = null;
 		this._render();
 	}
 
@@ -237,6 +246,11 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	async pRefresh () {
+		if (this._hasDraftAwaitingAuthoritativeReconciliation()) return this._pRecoverDefinitiveProposalRejections();
+		return this._pRefreshOutgoingActions();
+	}
+
+	async _pRefreshOutgoingActions () {
 		if (this._isSuspended || !this._characterId || !this._hasCapability() || typeof this._api.pListCharacterOutgoingActions !== "function") return false;
 		const token = {
 			generation: this._generation,
@@ -262,7 +276,6 @@ export class CharacterSheetPeerTargeting {
 				.map(action => this._normalizeOutgoing(action))
 				.filter(Boolean)
 				.map(action => [action.actionId, action]));
-			this._retireDraftsAwaitingAuthoritativeReconciliation();
 			return true;
 		} catch (error) {
 			if (!this._isRefreshCurrent(token)) return false;
@@ -389,20 +402,17 @@ export class CharacterSheetPeerTargeting {
 			return true;
 		} catch (error) {
 			if (!this._isCurrent(token)) return false;
-			if (_DEFINITIVE_PROPOSAL_REJECTION_CODES.has(error?.code)) {
+			if (_ACCESS_LOSS_CODES.has(error?.code)) {
+				this.deactivate();
+				return false;
+			}
+			if (_isDefinitiveProposalRejection(error)) {
 				draft.isAwaitingAuthoritativeReconciliation = true;
+				draft.isSubmitting = false;
 				draft.error = _getSafeError(error);
 				draft.errorCode = error.code;
 				this._render();
-				const isReconciled = await this.pRefresh();
-				if (!this._isCurrent(token)) return false;
-				const currentDraft = this._drafts.get(draft.draftKey);
-				if (currentDraft !== draft) return false;
-				if (!isReconciled) {
-					draft.isSubmitting = false;
-					draft.error = "Campaign rules changed, but targeting could not be reconciled. Reconnect before starting a new request.";
-					this._render();
-				}
+				await this._pRecoverDefinitiveProposalRejections();
 				return false;
 			}
 			draft.isSubmitting = false;
@@ -461,6 +471,47 @@ export class CharacterSheetPeerTargeting {
 
 	_hasDraftAwaitingAuthoritativeReconciliation () {
 		return [...this._drafts.values()].some(draft => draft.isAwaitingAuthoritativeReconciliation);
+	}
+
+	_pRecoverDefinitiveProposalRejections () {
+		if (this._definitiveRecoveryPromise) return this._definitiveRecoveryPromise;
+		if (!this._hasDraftAwaitingAuthoritativeReconciliation()) return Promise.resolve(true);
+		const token = {generation: this._generation, characterId: this._characterId};
+		const promise = (async () => {
+			const isOutgoingReconciled = await this._pRefreshOutgoingActions();
+			if (!isOutgoingReconciled || !this._isCurrent(token)) {
+				this._setDefinitiveRecoveryError();
+				return false;
+			}
+			let isContextReconciled = false;
+			try {
+				isContextReconciled = await this._fnRefreshCampaignContext?.() === true;
+			} catch {
+				isContextReconciled = false;
+			}
+			if (!this._isCurrent(token)) return false;
+			if (!isContextReconciled) {
+				this._setDefinitiveRecoveryError();
+				return false;
+			}
+			this._retireDraftsAwaitingAuthoritativeReconciliation();
+			this._render();
+			return true;
+		})();
+		const recoveryPromise = promise.finally(() => {
+			if (this._definitiveRecoveryPromise === recoveryPromise) this._definitiveRecoveryPromise = null;
+		});
+		this._definitiveRecoveryPromise = recoveryPromise;
+		return recoveryPromise;
+	}
+
+	_setDefinitiveRecoveryError () {
+		for (const draft of this._drafts.values()) {
+			if (!draft.isAwaitingAuthoritativeReconciliation) continue;
+			draft.isSubmitting = false;
+			draft.error = "Campaign targeting could not verify the latest authoritative state. Reconnect before starting a new request.";
+		}
+		this._render();
 	}
 
 	_retireDraftsAwaitingAuthoritativeReconciliation () {
