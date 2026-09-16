@@ -1315,6 +1315,15 @@ describe("Character Sheet party inventory", () => {
 			.mockRejectedValueOnce(Object.assign(new Error("stale rules"), {code: "RULES_VERSION_STALE", status: 409}))
 			.mockResolvedValueOnce({transfer: {id: "transfer-1", status: "committed"}});
 		const getCampaignContext = jest.fn(async () => ({rulesVersion: {id: "rules-2"}}));
+		let rulesVersionId = "rules-1";
+		let contextRefreshCount = 0;
+		const refreshCampaignContext = jest.fn(async () => {
+			if (++contextRefreshCount === 1) return false;
+			rulesVersionId = "rules-2";
+			return true;
+		});
+		let saveCount = 0;
+		const saveCharacter = jest.fn(async () => ++saveCount === 1 || rulesVersionId === "rules-2");
 		const partyInventory = new CharacterSheetPartyInventory({
 			campaignId: "campaign-1",
 			api: {
@@ -1325,9 +1334,10 @@ describe("Character Sheet party inventory", () => {
 			fnGetCharacterData: () => ({
 				inventory: [{id: "stack-1", quantity: 2, item: {name: "Rations", source: "PHB"}}],
 			}),
-			fnSaveCharacter: jest.fn(async () => true),
+			fnSaveCharacter: saveCharacter,
+			fnRefreshCampaignContext: refreshCampaignContext,
 			fnIsCurrentCharacter: () => true,
-			fnGetRulesVersionId: () => "rules-1",
+			fnGetRulesVersionId: () => rulesVersionId,
 		});
 		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
 		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
@@ -1356,6 +1366,10 @@ describe("Character Sheet party inventory", () => {
 		expect(partyInventory._draft).toBeNull();
 		expect(partyInventory._needsAuthoritativeRefresh).toBe(true);
 
+		await expect(partyInventory._pManualRefresh({errorSource: "action"})).resolves.toBe(false);
+		expect(partyInventory._needsAuthoritativeRefresh).toBe(true);
+		expect(saveCharacter).toHaveBeenCalledTimes(1);
+
 		await expect(partyInventory._pManualRefresh({errorSource: "action"})).resolves.toBe(true);
 		expect(partyInventory._needsAuthoritativeRefresh).toBe(false);
 		expect(partyInventory._beginDraft({kind: "character", entryId: "stack-1"})).toBe(true);
@@ -1365,7 +1379,10 @@ describe("Character Sheet party inventory", () => {
 		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
 
 		expect(propose.mock.calls.map(([request]) => request.rulesVersionId)).toEqual(["rules-1", "rules-2"]);
-		expect(getCampaignContext).toHaveBeenCalledTimes(1);
+		expect(refreshCampaignContext).toHaveBeenCalledTimes(2);
+		expect(getCampaignContext).not.toHaveBeenCalled();
+		expect(saveCharacter).toHaveBeenCalledTimes(2);
+		expect(refreshCampaignContext.mock.invocationCallOrder[1]).toBeLessThan(saveCharacter.mock.invocationCallOrder[1]);
 	});
 
 	it("requires an authoritative refresh after a definitive proposal rejection before retrying", async () => {

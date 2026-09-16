@@ -206,6 +206,7 @@ export class CharacterSheetPartyInventory {
 		fnSaveCharacter,
 		fnIsCurrentCharacter,
 		fnGetRulesVersionId = () => null,
+		fnRefreshCampaignContext = null,
 		fnGetCarryProfile = null,
 		fnProjectItemWeight = null,
 		fnToast = detail => globalThis.JqueryUtil?.doToast?.(detail),
@@ -219,6 +220,7 @@ export class CharacterSheetPartyInventory {
 		this._fnSaveCharacter = fnSaveCharacter;
 		this._fnIsCurrentCharacter = fnIsCurrentCharacter;
 		this._fnGetRulesVersionId = fnGetRulesVersionId;
+		this._fnRefreshCampaignContext = fnRefreshCampaignContext;
 		this._transferResolutionDrafts = new HubTransferResolutionDrafts({fnCreateKey: getOpaqueToken});
 		// Supplies the live carry profile so a transfer can be previewed against the same
 		// calculation the carry bar uses. Optional: without it the preview simply omits the
@@ -243,6 +245,7 @@ export class CharacterSheetPartyInventory {
 		this._draft = null;
 		this._needsAuthoritativeRefresh = false;
 		this._needsFreshProposalRules = false;
+		this._freshProposalRulesVersionId = undefined;
 		this._error = null;
 		this._reconcileError = null;
 		this._partyError = null;
@@ -349,6 +352,7 @@ export class CharacterSheetPartyInventory {
 		this._draft = null;
 		this._needsAuthoritativeRefresh = false;
 		this._needsFreshProposalRules = false;
+		this._freshProposalRulesVersionId = undefined;
 		this._error = null;
 		this._reconcileError = null;
 		this._partyError = null;
@@ -737,10 +741,14 @@ export class CharacterSheetPartyInventory {
 			this._render();
 			this._refreshFlags.character = true;
 			this._refreshFlags.party = true;
-			const isSuccessful = await this._pDrainRefresh();
+			let isSuccessful = await this._pDrainRefresh();
 			if (!this._isCurrent(active)) return false;
 			if (this._needsAuthoritativeRefresh) {
-				if (!isSuccessful) this._error = TRANSFER_REFRESH_REQUIRED_MESSAGE;
+				if (isSuccessful && this._needsFreshProposalRules) {
+					isSuccessful = await this._pRefreshProposalRules(active);
+					if (!this._isCurrent(active)) return false;
+				}
+				if (!isSuccessful) this._error ||= TRANSFER_REFRESH_REQUIRED_MESSAGE;
 				else {
 					this._needsAuthoritativeRefresh = false;
 					this._refreshDraftTransferLimit();
@@ -755,6 +763,26 @@ export class CharacterSheetPartyInventory {
 			this._manualRefreshPromise = null;
 		});
 		return this._manualRefreshPromise;
+	}
+
+	async _pRefreshProposalRules (active = this._active) {
+		if (!this._needsFreshProposalRules) return true;
+		try {
+			if (this._fnRefreshCampaignContext) {
+				const isRefreshed = await this._fnRefreshCampaignContext();
+				if (!this._isCurrent(active) || !isRefreshed) return false;
+				this._freshProposalRulesVersionId = this._fnGetRulesVersionId() ?? null;
+			} else {
+				const latestContext = await this._api.pGetCampaignContext({campaignId: this._campaignId});
+				if (!this._isCurrent(active)) return false;
+				this._freshProposalRulesVersionId = latestContext?.rulesVersion?.id ?? null;
+			}
+			this._needsFreshProposalRules = false;
+			return true;
+		} catch (error) {
+			this._error = `${getErrorMessage(error)} ${TRANSFER_REFRESH_REQUIRED_MESSAGE}`;
+			return false;
+		}
 	}
 
 	_rebuildRecipientTokens () {
@@ -1555,6 +1583,12 @@ export class CharacterSheetPartyInventory {
 			this._render();
 			return false;
 		}
+		if (this._needsFreshProposalRules) {
+			this._needsAuthoritativeRefresh = true;
+			this._error = TRANSFER_REFRESH_REQUIRED_MESSAGE;
+			this._render();
+			return false;
+		}
 		const isPartyEndpoint = draft.kind === "party_inventory" || draft.destinationKind === "party_inventory";
 		if (draft.proposalRequest && Date.now() >= draft.proposalReplayUntil) {
 			return this._pCancelDraft();
@@ -1675,18 +1709,15 @@ export class CharacterSheetPartyInventory {
 				const isProposalReplay = !!draft.proposalRequest;
 				const isAutoResolve = this._shouldAutoResolve();
 				const isRulesPinnedProposal = isAutoResolve && draft.destinationKind === "character";
-				if (this._needsFreshProposalRules && isRulesPinnedProposal) {
-					const latestContext = await this._api.pGetCampaignContext({campaignId: this._campaignId});
-					if (!this._isCurrent(active) || this._draft !== draft) return false;
-					draft.proposalRulesVersionId = latestContext?.rulesVersion?.id || null;
-					this._needsFreshProposalRules = false;
-				}
 				if (!draft.proposalRequest) {
 					const rulesVersionId = isRulesPinnedProposal
 						? draft.proposalRulesVersionId !== undefined
 							? draft.proposalRulesVersionId
-							: this._fnGetRulesVersionId()
+							: this._freshProposalRulesVersionId !== undefined
+								? this._freshProposalRulesVersionId
+								: this._fnGetRulesVersionId()
 						: undefined;
+					if (isRulesPinnedProposal) this._freshProposalRulesVersionId = undefined;
 					const targetId = getPartyInventoryTransferTargetId({
 						sourceKind: draft.kind,
 						destinationKind: draft.destinationKind,
@@ -1720,16 +1751,18 @@ export class CharacterSheetPartyInventory {
 						this._needsAuthoritativeRefresh = true;
 						if (error?.code === "RULES_VERSION_STALE") {
 							this._needsFreshProposalRules = true;
+							this._freshProposalRulesVersionId = undefined;
 							draft.commandId = getOpaqueToken();
 							draft.resolutionCommandId = getOpaqueToken();
 							draft.cancellationCommandId = getOpaqueToken();
 						}
 						this._refreshFlags.character = true;
 						this._refreshFlags.party = true;
-						const isRefreshed = await this._pDrainRefresh();
+						let isRefreshed = await this._pDrainRefresh();
+						if (isRefreshed && this._needsFreshProposalRules) isRefreshed = await this._pRefreshProposalRules(active);
 						if (!this._isCurrent(active) || this._draft !== draft) return false;
 						if (!isRefreshed) {
-							this._error = `${getErrorMessage(error)} ${TRANSFER_REFRESH_REQUIRED_MESSAGE}`;
+							this._error ||= `${getErrorMessage(error)} ${TRANSFER_REFRESH_REQUIRED_MESSAGE}`;
 							this._render();
 							return false;
 						}
