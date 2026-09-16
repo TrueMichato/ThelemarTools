@@ -37,6 +37,7 @@ const ERROR_MESSAGES = {
 	TRANSFER_ITEM_LINKED: "That stack is now linked to equipment or another character feature, so it cannot move safely.",
 	TRANSFER_NOT_FOUND: "That transfer is no longer waiting. Refresh to see the latest inventories.",
 };
+const TRANSFER_REFRESH_REQUIRED_MESSAGE = "The latest character and party stash balances could not be loaded. Retry the refresh before sending another transfer.";
 
 let fallbackTokenId = 0;
 
@@ -557,6 +558,7 @@ export class CharacterSheetPartyInventory {
 			cancellationCommandId: getOpaqueToken(),
 			transfer: null,
 			needsStatusCheck: false,
+			needsAuthoritativeRefresh: false,
 			pendingResolution: null,
 		};
 		this._error = null;
@@ -688,7 +690,7 @@ export class CharacterSheetPartyInventory {
 		if (snapshot) {
 			this._role = snapshot.membership?.role || null;
 			if (!this._hasTransferAuthority()) {
-				if (this._isDraftEditable()) {
+				if (this._isDraftEditable() || this._draft?.needsAuthoritativeRefresh) {
 					this._draft = null;
 					this._error = null;
 					this._announcement = "Party transfers are read-only for your current campaign role.";
@@ -729,6 +731,14 @@ export class CharacterSheetPartyInventory {
 			this._refreshFlags.party = true;
 			const isSuccessful = await this._pDrainRefresh();
 			if (!this._isCurrent(active)) return false;
+			if (this._draft?.needsAuthoritativeRefresh) {
+				if (!isSuccessful) this._error = TRANSFER_REFRESH_REQUIRED_MESSAGE;
+				else {
+					this._draft.needsAuthoritativeRefresh = false;
+					this._refreshDraftTransferLimit(this._draft);
+					this._error = null;
+				}
+			}
 			this._refreshNotice = isSuccessful ? "Party stash refreshed." : "";
 			if (isSuccessful) this._announce(this._refreshNotice);
 			this._render();
@@ -964,7 +974,18 @@ export class CharacterSheetPartyInventory {
 	}
 
 	_isDraftEditable (draft = this._draft) {
-		return !!draft && !draft.transfer && !draft.proposalRequest;
+		return !!draft && !draft.transfer && !draft.proposalRequest && !draft.needsAuthoritativeRefresh;
+	}
+
+	_refreshDraftTransferLimit (draft = this._draft) {
+		if (!draft || draft.transfer || draft.proposalRequest) return;
+		const {maxQuantity, blockers} = getTransferLimit({
+			container: this._getContainer(draft.kind),
+			entry: this._getEntry(draft),
+		});
+		draft.maxQuantity = maxQuantity;
+		draft.blockers = blockers;
+		if (maxQuantity > 0 && draft.quantity > maxQuantity) draft.quantity = maxQuantity;
 	}
 
 	_getPendingAcceptance (draft = this._draft) {
@@ -977,8 +998,9 @@ export class CharacterSheetPartyInventory {
 
 	_renderComposer () {
 		const entry = this._getEntry(this._draft);
-		const isProposalFrozen = !this._isDraftEditable() && !this._draft.transfer;
+		const isProposalFrozen = !!this._draft.proposalRequest && !this._draft.transfer;
 		const isProposalReplayExpired = isProposalFrozen && Date.now() >= this._draft.proposalReplayUntil;
+		const isAuthorityRefreshRequired = !!this._draft.needsAuthoritativeRefresh;
 		const pendingAcceptance = this._getPendingAcceptance();
 		const isStatusCheckRequired = !!this._draft.transfer
 			&& !!this._draft.needsStatusCheck
@@ -1129,19 +1151,21 @@ export class CharacterSheetPartyInventory {
 			className: "ve-btn ve-btn-primary",
 			text: isReadOnlyRecovery
 				? "Recover transfer status"
-				: isCancellationUncertain
-					? "Check transfer status"
-					: pendingAcceptance
-						? this._draft.needsStatusCheck ? "Check acceptance status" : "Retry acceptance"
-						: isStatusCheckRequired
-							? "Check transfer status"
-							: isProposalReplayExpired
-								? "Refresh latest balances"
-								: this._isPlayerStashRequest()
-									? "Send request"
-									: this._shouldAutoResolve()
-										? "Move now"
-										: "Offer transfer",
+				: isAuthorityRefreshRequired
+					? "Refresh required"
+					: isCancellationUncertain
+						? "Check transfer status"
+						: pendingAcceptance
+							? this._draft.needsStatusCheck ? "Check acceptance status" : "Retry acceptance"
+							: isStatusCheckRequired
+								? "Check transfer status"
+								: isProposalReplayExpired
+									? "Refresh latest balances"
+									: this._isPlayerStashRequest()
+										? "Send request"
+										: this._shouldAutoResolve()
+											? "Move now"
+											: "Offer transfer",
 			attrs: {type: "submit", "data-party-inventory-focus": "submit"},
 		});
 		actions.append(cancel, submit);
@@ -1303,6 +1327,7 @@ export class CharacterSheetPartyInventory {
 		const isDraftEditable = this._isDraftEditable();
 		const isProposalFrozen = !!this._draft.proposalRequest && !this._draft.transfer;
 		const isProposalReplayExpired = isProposalFrozen && Date.now() >= this._draft.proposalReplayUntil;
+		const isAuthorityRefreshRequired = !!this._draft.needsAuthoritativeRefresh;
 		const pendingAcceptance = this._getPendingAcceptance();
 		const isStatusCheckRequired = !!this._draft.transfer
 			&& !!this._draft.needsStatusCheck
@@ -1310,6 +1335,7 @@ export class CharacterSheetPartyInventory {
 			&& !pendingAcceptance;
 		submit.disabled = this._isSubmitting
 			|| !isQuantityValid
+			|| isAuthorityRefreshRequired
 			|| (!this._hasTransferAuthority() && !(isProposalFrozen || isStatusCheckRequired || !!pendingAcceptance || !!this._draft.pendingResolution))
 			|| (
 				isDraftEditable
@@ -1516,6 +1542,11 @@ export class CharacterSheetPartyInventory {
 			this._render();
 			return false;
 		}
+		if (draft.needsAuthoritativeRefresh) {
+			this._error = TRANSFER_REFRESH_REQUIRED_MESSAGE;
+			this._render();
+			return false;
+		}
 		const isPartyEndpoint = draft.kind === "party_inventory" || draft.destinationKind === "party_inventory";
 		if (draft.proposalRequest && Date.now() >= draft.proposalReplayUntil) {
 			return this._pCancelDraft();
@@ -1677,12 +1708,24 @@ export class CharacterSheetPartyInventory {
 					if (!isTransferOutcomeUncertain(error)) {
 						draft.proposalRequest = null;
 						draft.proposalReplayUntil = null;
+						draft.needsAuthoritativeRefresh = true;
 						if (error?.code === "RULES_VERSION_STALE") {
 							draft.needsFreshProposalRules = true;
 							draft.commandId = getOpaqueToken();
 							draft.resolutionCommandId = getOpaqueToken();
 							draft.cancellationCommandId = getOpaqueToken();
 						}
+						this._refreshFlags.character = true;
+						this._refreshFlags.party = true;
+						const isRefreshed = await this._pDrainRefresh();
+						if (!this._isCurrent(active) || this._draft !== draft) return false;
+						if (!isRefreshed) {
+							this._error = `${getErrorMessage(error)} ${TRANSFER_REFRESH_REQUIRED_MESSAGE}`;
+							this._render();
+							return false;
+						}
+						draft.needsAuthoritativeRefresh = false;
+						this._refreshDraftTransferLimit(draft);
 					}
 					throw error;
 				}
