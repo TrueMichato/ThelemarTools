@@ -71,6 +71,54 @@ describe("Character Sheet repository seam", () => {
 		expect(host._updateCharacterDropdown).toHaveBeenCalledWith(characters);
 	});
 
+	it("syncs state-bound Roll History controls on every full character render", () => {
+		const syncFromActiveCharacter = jest.fn();
+		const host = {
+			_state: {
+				syncDerivedResourceMaxes: jest.fn(),
+				getViewMode: () => "normal",
+			},
+			_rollHistory: {syncFromActiveCharacter},
+			_updateTabVisibility: jest.fn(),
+		};
+		for (const method of [
+			"_renderBasicInfo",
+			"_renderAbilityScores",
+			"_renderSavingThrows",
+			"_renderSkills",
+			"_renderHp",
+			"_renderCombatStats",
+			"_renderDefenses",
+			"_renderHitDice",
+			"_renderDeathSaves",
+			"_renderInspiration",
+			"_renderProficiencies",
+			"_renderCurrency",
+			"_renderNotes",
+			"_renderAppearance",
+			"_renderPortrait",
+			"_renderConditions",
+			"_renderExhaustion",
+			"_renderResources",
+			"_renderOverviewMetamagic",
+			"_renderOverviewRanger",
+			"_renderOverviewPrinciples",
+			"_renderActiveStates",
+			"_renderFavouritesOverview",
+			"_renderOverviewActions",
+			"_renderOverviewSpecialtiesFeats",
+			"_renderAttacks",
+			"_renderQuickSpells",
+			"_renderAbilitiesDetailed",
+			"_renderModifierIndicators",
+			"_renderCompanions",
+		]) host[method] = jest.fn();
+
+		CharacterSheetPage.prototype._renderCharacter.call(host);
+
+		expect(syncFromActiveCharacter).toHaveBeenCalledTimes(1);
+	});
+
 	it("reports remote save failure so character switching can abort", async () => {
 		const repository = makeRepository();
 		repository.pUpsert.mockRejectedValueOnce(new Error("revision conflict"));

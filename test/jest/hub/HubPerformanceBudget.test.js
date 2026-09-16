@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import {gzipSync} from "node:zlib";
 import {validateCampaignBrewBundle} from "../../../server/src/campaign-content.js";
 import {createHubApp} from "../../../server/src/app.js";
@@ -6,6 +7,32 @@ import {MemoryHubStore} from "../../../server/src/memory-hub-store.js";
 import {makeSelectedRecord, serializeActiveCampaignRecord} from "../../../js/hub/hub-active-campaign-record.js";
 
 const read = path => fs.readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
+
+function getStaticModuleSpecifiers (source) {
+	const patterns = [
+		/^\s*import\s*["']([^"']+)["']\s*;?\s*$/gm,
+		/^\s*import\s+(?!["'])[\s\S]*?\s+from\s+["']([^"']+)["']\s*;?\s*$/gm,
+		/^\s*export\s+(?:\*|\{[\s\S]*?\})\s+from\s+["']([^"']+)["']\s*;?\s*$/gm,
+	];
+	return patterns.flatMap(pattern => [...source.matchAll(pattern)].map(([, specifier]) => specifier));
+}
+
+function getStaticModuleGraph (entryPath) {
+	const seen = new Set();
+	const visit = modulePath => {
+		if (seen.has(modulePath)) return;
+		seen.add(modulePath);
+		const source = read(modulePath);
+		const imports = getStaticModuleSpecifiers(source)
+			.filter(specifier => specifier.startsWith("."));
+		for (const specifier of imports) {
+			const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(modulePath), specifier));
+			visit(resolved);
+		}
+	};
+	visit(entryPath);
+	return seen;
+}
 
 describe("hub performance budgets", () => {
 	it.each(["hub.html", "campaign.html"])("%s has a lightweight first-party boot graph", page => {
@@ -34,6 +61,30 @@ describe("hub performance budgets", () => {
 		const signedOutBranch = source.slice(source.indexOf("if (!session.signedIn)"), source.indexOf("setHidden(signedIn, false)"));
 		expect(signedOutBranch).toContain(`import("./hub-auth-providers.js")`);
 		expect(source.split(`import("./hub-auth-providers.js")`)).toHaveLength(2);
+	});
+
+	it("keeps the signed-out Hub static module graph within its request budget", () => {
+		const modules = getStaticModuleGraph("js/hub/hub-page.js");
+		expect([...modules].sort()).toEqual(expect.arrayContaining([
+			"js/hub/hub-character-view.js",
+			"js/hub/hub-page.js",
+		]));
+		expect(modules.size).toBeLessThanOrEqual(16);
+	});
+
+	it("counts every static module declaration form in the boot graph", () => {
+		expect(getStaticModuleSpecifiers(`
+			import "./side-effect.js";
+			import {value} from "./named-import.js";
+			export * from "./export-all.js";
+			export {other} from "./named-export.js";
+			const lazy = import("./dynamic.js");
+		`).sort()).toEqual([
+			"./export-all.js",
+			"./named-export.js",
+			"./named-import.js",
+			"./side-effect.js",
+		]);
 	});
 
 	it("rejects campaign brew above one megabyte", () => {

@@ -1025,6 +1025,14 @@ export class HubCampaignPage {
 		return (await response.json()).events;
 	}
 
+	async getCampaignSnapshot (campaignId: string): Promise<any> {
+		const response = await this.page.request.get(`/api/campaigns/${encodeURIComponent(campaignId)}/snapshot`, {
+			headers: {"x-hub-protocol-version": "3"},
+		});
+		expect(response.ok()).toBe(true);
+		return (await response.json()).snapshot;
+	}
+
 	async waitForOutboxDrain ({token, timeout = 90_000}: {token: string; timeout?: number}): Promise<void> {
 		await expect.poll(async () => {
 			const response = await this.page.request.get("/api/metrics", {
@@ -1117,6 +1125,58 @@ export class HubCampaignPage {
 		const text = (await sharing.innerText()).toLowerCase();
 		expect(text).not.toContain("\"mode\"");
 		expect(text).not.toContain("projectionrevision");
+	}
+
+	async expectSavedSharingPreview ({
+		sharedText,
+		replacedText,
+		omittedText,
+	}: {
+		sharedText: string;
+		replacedText: string;
+		omittedText: string;
+	}): Promise<void> {
+		const preview = this.page.locator(".charsheet__sharing-preview");
+		await expect(preview).toContainText(sharedText);
+		await expect(preview.locator(".charsheet__sharing-preview-status--replace")).toHaveText("Shown instead");
+		await expect(preview.locator(".charsheet__sharing-preview-status--replace").locator("xpath=..")).toContainText(replacedText);
+		await expect(preview.locator(".charsheet__sharing-preview-omitted")).toContainText(omittedText);
+	}
+
+	async expectSharedProfile ({
+		campaignId,
+		characterName,
+		expectedText,
+		forbiddenText = [],
+	}: {
+		campaignId: string;
+		characterName: string;
+		expectedText: string[];
+		forbiddenText?: string[];
+	}): Promise<void> {
+		await this.page.setViewportSize({width: 390, height: 844});
+		await this.gotoCampaign(campaignId);
+		const details = this.page.locator("#campaign-party-roster .hub-shared-profile").filter({hasText: characterName}).first();
+		const summary = details.locator(":scope > summary");
+		await expect(summary).toBeVisible();
+		await expect(summary).toContainText("View shared profile");
+		await expect(details.locator("a[href*='charactersheet.html']")).toHaveCount(0);
+		await summary.focus();
+		await summary.press("Enter");
+		await expect(details).toHaveAttribute("open", "");
+		for (const text of expectedText) await expect(details.locator(".hub-shared-profile__body")).toContainText(text);
+		for (const text of forbiddenText) await expect(details.locator(".hub-shared-profile__body")).not.toContainText(text);
+		const audit = await details.evaluate(element => {
+			const summaryRect = element.querySelector("summary")!.getBoundingClientRect();
+			return {
+				clientWidth: document.documentElement.clientWidth,
+				scrollWidth: document.documentElement.scrollWidth,
+				summaryHeight: summaryRect.height,
+			};
+		});
+		expect(audit.scrollWidth).toBeLessThanOrEqual(audit.clientWidth);
+		expect(audit.summaryHeight).toBeGreaterThanOrEqual(44);
+		await this.page.setViewportSize({width: 1280, height: 720});
 	}
 
 	/** The raw ADR 0011 authorization envelope for a character. */
@@ -1295,7 +1355,19 @@ export class HubCampaignPage {
 		), {timeout: 15_000}).toBe(quantity);
 	}
 
-	async editCharacterHpAndRollInitiative ({campaignId, characterId, name, hp}: {campaignId: string; characterId: string; name: string; hp: number}): Promise<void> {
+	async editCharacterHpAndRollInitiative ({
+		campaignId,
+		characterId,
+		name,
+		hp,
+		rollVisibility = "all_members",
+	}: {
+		campaignId: string;
+		characterId: string;
+		name: string;
+		hp: number;
+		rollVisibility?: "all_members" | "actor_and_dm";
+	}): Promise<void> {
 		await this.openCharacterSheet({campaignId, characterId, name});
 		await this.waitForCharacterRealtimeLive();
 		await this.page.locator("#charsheet-ipt-hp-current").evaluate((input: HTMLInputElement, value) => {
@@ -1303,10 +1375,50 @@ export class HubCampaignPage {
 			input.dispatchEvent(new Event("change", {bubbles: true}));
 		}, hp);
 		await expect.poll(async () => (await this.getCharacter(characterId)).data.hp.current, {timeout: 15_000}).toBe(hp);
+		await this.page.locator("#charsheet-btn-rolllog").click();
+		const visibility = this.page.locator("#charsheet-roll-history-visibility");
+		await expect(visibility).toBeVisible();
+		await visibility.selectOption(rollVisibility);
+		await expect.poll(async () => (await this.getCharacter(characterId)).data.settings?.hubRollVisibility).toBe(rollVisibility);
+		await this.page.locator(".charsheet__roll-history-btn", {hasText: "✕"}).click();
 		await this.page.locator("#charsheet-box-initiative").click();
 		await expect.poll(async () => (await this.getEvents(campaignId))
-			.filter(event => event.type === "roll.logged" && event.aggregateId === characterId)
+			.filter(event => event.type === "roll.logged" && event.aggregateId === characterId && event.visibility === rollVisibility)
 			.length).toBeGreaterThan(0);
+	}
+
+	async switchCharacterAndExpectRollVisibility ({
+		characterId,
+		rollVisibility,
+	}: {
+		characterId: string;
+		rollVisibility: "all_members" | "actor_and_dm";
+	}): Promise<void> {
+		await this.page.locator("#charsheet-sel-character").selectOption(characterId);
+		await expect.poll(() => new URL(this.page.url()).searchParams.get("id")).toBe(characterId);
+
+		await this.page.locator("#charsheet-btn-rolllog").click();
+		const visibility = this.page.locator("#charsheet-roll-history-visibility");
+		await expect(visibility).toBeVisible();
+		await expect(visibility).toHaveValue(rollVisibility);
+		await this.page.locator(".charsheet__roll-history-btn", {hasText: "✕"}).click();
+	}
+
+	async rollInitiativeAndExpectVisibility ({
+		campaignId,
+		characterId,
+		rollVisibility,
+	}: {
+		campaignId: string;
+		characterId: string;
+		rollVisibility: "all_members" | "actor_and_dm";
+	}): Promise<void> {
+		const countMatchingEvents = async () => (await this.getEvents(campaignId))
+			.filter(event => event.type === "roll.logged" && event.aggregateId === characterId && event.visibility === rollVisibility)
+			.length;
+		const countBefore = await countMatchingEvents();
+		await this.page.locator("#charsheet-box-initiative").click();
+		await expect.poll(countMatchingEvents).toBe(countBefore + 1);
 	}
 
 	async editCharacterHpAndResolveDeviceConflict ({
@@ -1325,6 +1437,7 @@ export class HubCampaignPage {
 		if (!this.page.url().includes(`/charactersheet.html?id=${encodeURIComponent(characterId)}`)) {
 			await this.openCharacterSheet({campaignId, characterId, name});
 		}
+		await this.waitForCharacterRealtimeLive();
 		await this.page.locator("#charsheet-ipt-hp-current").fill(`${hp}`);
 		await this.page.locator("#charsheet-ipt-hp-current").blur();
 		await expect(this.page.getByText("Character Changed on Another Device", {exact: true})).toBeVisible();

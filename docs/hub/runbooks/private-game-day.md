@@ -185,14 +185,18 @@ used.
 
 ### GD-06 — DM visibility and player privacy
 
-1. Player B sets Bryn's sharing profile to a restrictive preset and hides at least one supported field.
+1. Player B sets Bryn's sharing profile to a restrictive preset, replaces one supported field, and hides another.
+   Confirm the saved preview labels the replacement, lists omitted fields, and does not change until **Save sharing
+   settings** succeeds.
 2. DM opens Bryn from Campaign A.
-3. Player A opens Bryn's peer projection.
+3. Player A expands Bryn's **View shared profile** row in Campaign A.
 4. Player B edits the hidden field and saves.
 
 **Expected:** Player B sees owner truth; DM sees the authorized full/preview view; Player A sees only the selected
-peer projection; realtime invalidations do not leak the hidden value in activity, Party Tracker, targeting, or
-logs.
+peer projection in a read-only surface and cannot open it as an editable Character Sheet. Replaced values are
+clearly identified only in Player B's owner preview; peers cannot infer whether a shared value is canonical or a
+replacement. Realtime invalidations do not leak the hidden value in activity, Party Tracker, targeting, or logs.
+With the private preset, peers see an unnamed campaign character with no profile details and no target option.
 
 ### GD-07 — XP and item awards
 
@@ -246,12 +250,14 @@ private character details are absent from unrelated users and logs.
 
 ### GD-10 — roll history and visibility
 
-1. Each player makes a representative Character Sheet roll.
-2. DM makes or records a DM-visible event.
-3. Refresh/reconnect one participant and inspect recent activity.
+1. Player A chooses **Everyone in the campaign** in Roll History and makes a representative Character Sheet roll.
+2. Player B chooses **Only me and DMs** and makes a different representative roll.
+3. DM/co-DM, Player A, and Player B inspect recent activity before and after one refresh/reconnect.
 
-**Expected:** readable actor/action labels, correct ordering, no duplicate after replay, and role-filtered detail.
-Internal IDs or raw private payloads must not be shown as user-facing history.
+**Expected:** everyone sees Player A's roll; only Player B and DM/co-DM see Player B's roll. The selected audience
+persists with the character and applies to future rolls only. Activity keeps readable actor/action labels, correct
+ordering, no duplicate after replay, and role-filtered detail. Internal IDs or raw private payloads must not be
+shown as user-facing history.
 
 ### GD-11 — simultaneous editing and stale-writer protection
 
