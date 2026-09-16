@@ -199,11 +199,14 @@ export class CharacterSheetPage {
 
 	async renameCharacter (name: string): Promise<void> {
 		await expect(this.characterName).toBeEditable();
-		await expect.poll(async () => {
-			await this.characterName.fill(name);
-			await this.characterName.dispatchEvent("change");
-			return this.page.evaluate(() => (globalThis as any).charSheet?._state?.getName?.());
-		}, {timeout: 20_000}).toBe(name);
+		await this.characterName.evaluate((input: HTMLInputElement, value) => {
+			input.value = value;
+			input.dispatchEvent(new Event("change", {bubbles: true}));
+		}, name);
+		await expect.poll(
+			() => this.page.evaluate(() => (globalThis as any).charSheet?._state?.getName?.()),
+			{timeout: 20_000},
+		).toBe(name);
 		await expect(this.characterName).toHaveValue(name);
 	}
 

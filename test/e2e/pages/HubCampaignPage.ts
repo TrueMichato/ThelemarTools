@@ -1967,6 +1967,10 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-connection-status")).toHaveText("Signed out · data is read only");
 		await expect(this.page.locator("#campaign-content")).toBeVisible();
 		await expect(this.page.locator("#campaign-action-form button[type='submit']")).toBeDisabled();
+		await expect(this.page.locator("#hub-logout")).toBeEnabled();
+		await expect.poll(() => this.page.locator(
+			"#campaign-content button:not(#hub-logout):not([disabled]), #campaign-content input:not([disabled]), #campaign-content select:not([disabled]), #campaign-content textarea:not([disabled])",
+		).count()).toBe(0);
 	}
 
 	async expectMembershipRevokedWhileOpen ({characterName}: {characterName: string}): Promise<void> {

@@ -541,28 +541,69 @@ test("peer shared profiles render as visible native disclosures", async ({browse
 		await expect(body).toBeVisible();
 		await expect(body).toContainText("Server-authorized profile shared with players");
 
-		let markSnapshotRefreshStarted = () => {};
-		const snapshotRefreshStarted = new Promise<void>(resolve => {
-			markSnapshotRefreshStarted = resolve;
+		let markActionsRefreshStarted = () => {};
+		const actionsRefreshStarted = new Promise<void>(resolve => {
+			markActionsRefreshStarted = resolve;
 		});
-		let continueSnapshotRefresh = () => {};
-		const snapshotRefreshGate = new Promise<void>(resolve => {
-			continueSnapshotRefresh = resolve;
+		let continueActionsRefresh = () => {};
+		const actionsRefreshGate = new Promise<void>(resolve => {
+			continueActionsRefresh = resolve;
 		});
+		let isActionsRefreshDeferred = false;
+		await viewer.page.route(`**/api/campaigns/${campaignId}/actions`, async route => {
+			if (route.request().method() !== "GET" || isActionsRefreshDeferred) {
+				await route.continue();
+				return;
+			}
+			isActionsRefreshDeferred = true;
+			markActionsRefreshStarted();
+			await actionsRefreshGate;
+			await route.fulfill({
+				status: 200,
+				contentType: "application/json",
+				body: JSON.stringify({
+					actions: [{
+						operationId: crypto.randomUUID(),
+						status: "proposed",
+						targetCharacterId: character.id,
+						sourceDisplaySnapshot: {identity: {name: "Stale Shared Profile Hero"}},
+						targetDisplaySnapshot: {identity: {name: "Shared Profile Hero"}},
+						effectDisplaySnapshot: {label: "a stale effect"},
+					}],
+				}),
+			});
+		});
+		let failSnapshotRefresh = false;
+		let failedSnapshotRefreshes = 0;
 		await viewer.page.route(`**/api/campaigns/${campaignId}/snapshot`, async route => {
-			markSnapshotRefreshStarted();
-			await snapshotRefreshGate;
-			await route.continue();
+			if (!failSnapshotRefresh) {
+				await route.continue();
+				return;
+			}
+			failedSnapshotRefreshes++;
+			await route.fulfill({
+				status: 503,
+				contentType: "application/json",
+				body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
+			});
 		});
 		const currentPolicy = await owner.getProjectionPolicy(character.id);
-		await owner.setProjectionPolicy({
+		const unchangedPolicy = await owner.setProjectionPolicy({
 			characterId: character.id,
 			expectedProjectionRevision: currentPolicy.projectionRevision,
+			policy: currentPolicy.policy,
+		});
+		await actionsRefreshStarted;
+		failSnapshotRefresh = true;
+		await owner.setProjectionPolicy({
+			characterId: character.id,
+			expectedProjectionRevision: unchangedPolicy.projectionRevision,
 			policy: {version: 1, preset: "private", overrides: {}},
 		});
-		await snapshotRefreshStarted;
 		await expect(viewer.page.locator("#campaign-party-roster")).not.toContainText("Shared Profile Hero", {timeout: 2_000});
-		continueSnapshotRefresh();
+		continueActionsRefresh();
+		await expect.poll(() => failedSnapshotRefreshes).toBeGreaterThan(0);
+		await expect(viewer.page.locator("#campaign-pending-actions")).not.toContainText("Stale Shared Profile Hero");
 		await expect(viewer.page.locator("#campaign-party-roster")).not.toContainText("Shared Profile Hero");
 	} finally {
 		await Promise.all([

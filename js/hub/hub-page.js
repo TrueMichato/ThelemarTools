@@ -469,6 +469,10 @@ function setTransferProposalControls ({form, proposalRequest, characters, partyI
 	if (!form) return;
 	if (!form._hubTransferControlStates) form._hubTransferControlStates = new Map();
 	if (!isLocked) {
+		if (isCampaignReloadRequired) {
+			for (const control of form.querySelectorAll("button, input, select, textarea")) control.disabled = true;
+			return;
+		}
 		for (const option of form.querySelectorAll("option[data-hub-frozen-proposal]")) option.remove();
 		for (const [control, wasDisabled] of form._hubTransferControlStates) control.disabled = wasDisabled;
 		form._hubTransferControlStates.clear();
@@ -839,6 +843,11 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 				}
 				return;
 			}
+			if (isCampaignReloadRequired) {
+				pendingDisabledStates.clear();
+				for (const control of form.querySelectorAll("input, textarea, select, button")) control.disabled = true;
+				return;
+			}
 			for (const [control, wasDisabled] of pendingDisabledStates) control.disabled = wasDisabled;
 			pendingDisabledStates.clear();
 		},
@@ -946,22 +955,26 @@ function setTransferRefreshFailure ({form, message, pRetry}) {
 	if (!status || !submit) return;
 	submit.disabled = true;
 	status.classList.add("hub-inline-status--error");
-	status.replaceChildren(document.createTextNode(`${message} `));
+	status.replaceChildren(document.createTextNode(isCampaignReloadRequired ? message : `${message} `));
+	if (isCampaignReloadRequired) return;
 	const retry = document.createElement("button");
 	retry.type = "button";
 	retry.className = "hub-button hub-button--inline";
 	retry.textContent = "Retry latest balances";
 	retry.addEventListener("click", async () => {
+		if (isCampaignReloadRequired) return;
 		retry.disabled = true;
 		retry.textContent = "Retrying...";
 		try {
 			await pRetry();
+			if (isCampaignReloadRequired) return;
 			submit.disabled = false;
 			setFormStatus({
 				formId: "campaign-transfer-form",
 				message: "Latest balances loaded. You can send another transfer.",
 			});
 		} catch {
+			if (isCampaignReloadRequired) return;
 			setTransferRefreshFailure({form, message, pRetry});
 		}
 	});
@@ -980,16 +993,19 @@ function setTransferProposalReplayExpired ({
 	if (!status || !submit) return;
 	submit.disabled = true;
 	status.classList.add("hub-inline-status--error");
-	status.replaceChildren(document.createTextNode(`${message} `));
+	status.replaceChildren(document.createTextNode(isCampaignReloadRequired ? message : `${message} `));
+	if (isCampaignReloadRequired) return;
 	const refresh = document.createElement("button");
 	refresh.type = "button";
 	refresh.className = "hub-button hub-button--inline";
 	refresh.textContent = "Refresh latest balances";
 	refresh.addEventListener("click", async () => {
+		if (isCampaignReloadRequired) return;
 		refresh.disabled = true;
 		refresh.textContent = "Refreshing...";
 		try {
 			const refreshResult = await pRefresh();
+			if (isCampaignReloadRequired) return;
 			if (refreshResult?.isFenced || !Array.isArray(refreshResult?.transfers)) {
 				throw new HubApiError({code: "TRANSFER_REFRESH_FAILED", status: 0});
 			}
@@ -1036,6 +1052,7 @@ function setTransferProposalReplayExpired ({
 					|| "No matching transfer was found. Latest balances are loaded; inspect the destination before starting another.",
 			});
 		} catch {
+			if (isCampaignReloadRequired) return;
 			setTransferProposalReplayExpired({
 				form,
 				proposalRef,
@@ -1053,19 +1070,26 @@ function setTransferInboxRefreshFailure ({controls, meta, message, pRetry, isRes
 	const decisionButtons = [...controls.querySelectorAll("[data-transfer-decision]")];
 	const priorRetry = controls.querySelector("[data-transfer-refresh-retry]");
 	priorRetry?.remove();
+	if (isCampaignReloadRequired) {
+		for (const button of decisionButtons) button.disabled = true;
+		return;
+	}
 	const retry = document.createElement("button");
 	retry.type = "button";
 	retry.className = "hub-button hub-button--inline";
 	retry.textContent = "Retry inbox refresh";
 	retry.dataset.transferRefreshRetry = "true";
 	retry.addEventListener("click", async () => {
+		if (isCampaignReloadRequired) return;
 		for (const control of controls.querySelectorAll("button")) control.disabled = true;
 		retry.textContent = "Refreshing...";
 		try {
 			await pRetry();
+			if (isCampaignReloadRequired) return;
 			renderError("");
 		} catch (error) {
 			renderError(error);
+			if (isCampaignReloadRequired) return;
 			setTransferInboxRefreshFailure({controls, meta, message, pRetry, isResolutionKnown, pendingDecision});
 		}
 	});
@@ -1074,6 +1098,26 @@ function setTransferInboxRefreshFailure ({controls, meta, message, pRetry, isRes
 		for (const button of decisionButtons) button.disabled = button.dataset.transferDecision !== pendingDecision;
 		controls.append(retry);
 	}
+	const list = document.getElementById("campaign-pending-transfers");
+	if (list?.isConnected) {
+		list._hubTransferInboxRecovery = {meta, controls};
+		renderTransferInboxRecovery(list);
+	}
+}
+
+function renderTransferInboxRecovery (list = document.getElementById("campaign-pending-transfers")) {
+	const recovery = list?._hubTransferInboxRecovery;
+	if (!list?.isConnected || !recovery) return false;
+	const row = document.createElement("div");
+	row.className = "hub-data-row";
+	const main = document.createElement("span");
+	main.className = "hub-data-row__main";
+	main.append(recovery.meta);
+	row.append(main, recovery.controls);
+	list.replaceChildren(row);
+	setHidden(document.getElementById("campaign-pending-transfers-empty"), true);
+	updateInboxCount({kind: "transfers", count: 1});
+	return true;
 }
 
 function setFormAvailability ({formId, isAvailable, message}) {
@@ -1089,11 +1133,17 @@ function setProjectionFormControlsConcealed ({form, isConcealed}) {
 		if (!form._hubProjectionControlStates) form._hubProjectionControlStates = new Map();
 		if (form.contains(document.activeElement)) form._hubProjectionFocusedControl = document.activeElement;
 		for (const control of form.querySelectorAll("button, input, select, textarea")) {
-			if (!form._hubProjectionControlStates.has(control)) form._hubProjectionControlStates.set(control, control.disabled);
+			if (!form._hubProjectionControlStates.has(control)) {
+				form._hubProjectionControlStates.set(
+					control,
+					form._hubMutationControlStates?.get(control) ?? control.disabled,
+				);
+			}
 			control.disabled = true;
 		}
 		return;
 	}
+	if (isCampaignReloadRequired) return;
 	const focusedControl = form._hubProjectionFocusedControl;
 	for (const [control, wasDisabled] of form._hubProjectionControlStates || []) {
 		if (control.isConnected) control.disabled = wasDisabled;
@@ -1105,6 +1155,23 @@ function setProjectionFormControlsConcealed ({form, isConcealed}) {
 		&& !focusedControl.disabled
 		&& [document.body, focusedControl].includes(document.activeElement)
 	) focusedControl.focus({preventScroll: true});
+}
+
+function getCampaignTransferDraft () {
+	const getValue = id => document.getElementById(id)?.value || "";
+	return {
+		source: getValue("campaign-transfer-source"),
+		target: getValue("campaign-transfer-target"),
+		item: getValue("campaign-transfer-entry"),
+		quantity: getValue("campaign-transfer-quantity"),
+		currency: Object.fromEntries(CURRENCY_TYPES.map(type => [type, getValue(`campaign-transfer-${type}`)])),
+	};
+}
+
+function captureCampaignTransferDraft () {
+	const form = document.getElementById("campaign-transfer-form");
+	if (!form || form._hubProjectionTransferDraft) return;
+	form._hubProjectionTransferDraft = getCampaignTransferDraft();
 }
 
 function renderAccountDeletionPending (deletion) {
@@ -1339,6 +1406,7 @@ async function pInitCampaign ({session}) {
 	let liveRoster = snapshot.roster || [];
 	let activityAuthorizationGeneration = 0;
 	let isActivityAuthorizationFenced = false;
+	let projectionAuthorizationGeneration = 0;
 	const realtime = new HubRealtimeClient({campaignId, initialLastSequence: snapshot.lastSequence});
 	let refreshTimer = null;
 	const invalidateActivityAuthorization = () => {
@@ -1368,15 +1436,20 @@ async function pInitCampaign ({session}) {
 		context = null;
 		concealCampaignAuthorizationSurfaces();
 	};
-	const concealCampaignProjectionAuthorization = () => {
-		concealActivityAuthorization({isLoading: true});
-		liveRoster = [];
+	const concealProjectionFormControls = () => {
 		for (const formId of ["campaign-action-form", "campaign-transfer-form", "campaign-xp-form", "campaign-item-form"]) {
 			setProjectionFormControlsConcealed({
 				form: document.getElementById(formId),
 				isConcealed: true,
 			});
 		}
+	};
+	const concealCampaignProjectionAuthorization = () => {
+		projectionAuthorizationGeneration++;
+		concealActivityAuthorization({isLoading: true});
+		liveRoster = [];
+		captureCampaignTransferDraft();
+		concealProjectionFormControls();
 		for (const id of [
 			"campaign-party-roster",
 			"campaign-pending-actions",
@@ -1384,6 +1457,7 @@ async function pInitCampaign ({session}) {
 			"campaign-item-targets",
 			"campaign-item-preview-list",
 		]) document.getElementById(id)?.replaceChildren();
+		renderTransferInboxRecovery();
 		for (const id of [
 			"campaign-action-target",
 			"campaign-transfer-source",
@@ -1475,7 +1549,8 @@ async function pInitCampaign ({session}) {
 	const {
 		pRefreshTransferState,
 		rulesPolicyManagerPromise,
-		pRefreshConditionOptions,
+		refreshActionFields,
+		refreshItemAwardControlState,
 		pRefreshContextBoundControls,
 		isConditionCatalogRetryNeeded,
 	} = await pInitCampaignForms({
@@ -1502,6 +1577,11 @@ async function pInitCampaign ({session}) {
 			return;
 		}
 		const isRefreshCampaignContext = isCampaignContextRefreshQueued;
+		const refreshProjectionGeneration = projectionAuthorizationGeneration;
+		const fnIsProjectionCurrent = () => (
+			!isCampaignReloadRequired
+			&& projectionAuthorizationGeneration === refreshProjectionGeneration
+		);
 		isCampaignContextRefreshQueued = false;
 		isRefreshing = true;
 		try {
@@ -1540,8 +1620,9 @@ async function pInitCampaign ({session}) {
 				snapshotNxt: pSnapshotNxt,
 				membersNxt: pMembersNxt,
 				eventsNxt: pActivityRefresh.then(({events}) => events),
-				fnIsCurrent: () => !isCampaignReloadRequired,
+				fnIsCurrent: fnIsProjectionCurrent,
 				fnIsSnapshotCurrent: snapshotNxt => snapshotNxt.lastSequence >= liveLastSequence,
+				isProjectionControlRestoreDeferred: true,
 			}).then(
 				value => ({value}),
 				error => ({error}),
@@ -1552,17 +1633,15 @@ async function pInitCampaign ({session}) {
 				pSnapshotNxt,
 				pActivityRefresh,
 			]);
-			if (isCampaignReloadRequired) return;
+			if (!fnIsProjectionCurrent()) {
+				concealProjectionFormControls();
+				isRefreshQueued = true;
+				return;
+			}
 			const isSnapshotCurrent = snapshotNxt.lastSequence >= liveLastSequence;
 			if (!isSnapshotCurrent) {
 				isRefreshQueued = true;
 				return;
-			}
-			for (const formId of ["campaign-action-form", "campaign-xp-form", "campaign-item-form"]) {
-				setProjectionFormControlsConcealed({
-					form: document.getElementById(formId),
-					isConcealed: false,
-				});
 			}
 			liveEvents = activityRefresh.events;
 			if (activityRefresh.isAuthorizationChanged) {
@@ -1597,13 +1676,15 @@ async function pInitCampaign ({session}) {
 				getTargetableProjections({projections: liveCharacters, roster: liveRoster}),
 			);
 			fillCharacterSelect(xpTarget, charactersNxt);
-			if (actionTarget) actionTarget.disabled = !actionTarget.options.length;
-			if (xpTarget) xpTarget.disabled = !xpTarget.options.length;
-			setFormAvailability({
-				formId: "campaign-action-form",
-				isAvailable: !!actionTarget?.options.length,
-				message: "Add a campaign character before proposing an effect.",
-			});
+			if (!document.getElementById("campaign-action-form")?._hubProjectionControlStates) {
+				if (actionTarget) actionTarget.disabled = !actionTarget.options.length;
+				if (xpTarget) xpTarget.disabled = !xpTarget.options.length;
+				setFormAvailability({
+					formId: "campaign-action-form",
+					isAvailable: !!actionTarget?.options.length,
+					message: "Add a campaign character before proposing an effect.",
+				});
+			}
 			if (activityRefresh.isAuthorizationChanged) isActivityAuthorizationFenced = false;
 			renderRecentActivity({
 				events: isActivityAuthorizationFenced ? [] : liveEvents,
@@ -1614,20 +1695,69 @@ async function pInitCampaign ({session}) {
 				isAuthorizationFenced: isActivityAuthorizationFenced,
 			});
 			if (isRefreshCampaignContext) {
-				context = await api.pGetCampaignContext({campaignId});
-				renderCampaignContext(context);
-				void rulesPolicyManagerPromise.then(manager => manager?.replaceContext(context));
-				await pRefreshContextBoundControls({context});
+				const contextNxt = await api.pGetCampaignContext({campaignId});
+				if (!fnIsProjectionCurrent()) {
+					concealProjectionFormControls();
+					isRefreshQueued = true;
+					return;
+				}
+				context = contextNxt;
+				renderCampaignContext(contextNxt);
+				void rulesPolicyManagerPromise.then(manager => {
+					if (fnIsProjectionCurrent()) manager?.replaceContext(contextNxt);
+				});
+				await pRefreshContextBoundControls({context: contextNxt});
 			} else if (isConditionCatalogRetryNeeded()) {
 				await pRefreshContextBoundControls({context});
 			}
-			if (isCampaignReloadRequired) return;
-			const [, transferRefreshResult] = await Promise.all([
-				renderPendingActions({campaign, campaignId, session, targetCharacters: liveCharacters, members: membersNxt, roster: liveRoster}),
+			if (!fnIsProjectionCurrent()) {
+				concealProjectionFormControls();
+				isRefreshQueued = true;
+				return;
+			}
+			const [actionRefreshResult, transferRefreshResult] = await Promise.all([
+				renderPendingActions({
+					campaign,
+					campaignId,
+					session,
+					targetCharacters: liveCharacters,
+					members: membersNxt,
+					roster: liveRoster,
+					fnIsCurrent: fnIsProjectionCurrent,
+				}),
 				pTransferStateRefresh,
 			]);
-			pRefreshConditionOptions();
+			if (
+				!fnIsProjectionCurrent()
+				|| actionRefreshResult?.isFenced
+				|| transferRefreshResult.value?.isFenced
+			) {
+				concealProjectionFormControls();
+				isRefreshQueued = true;
+				return;
+			}
 			if (transferRefreshResult.error) throw transferRefreshResult.error;
+			for (const formId of ["campaign-action-form", "campaign-transfer-form", "campaign-xp-form", "campaign-item-form"]) {
+				setProjectionFormControlsConcealed({
+					form: document.getElementById(formId),
+					isConcealed: false,
+				});
+			}
+			transferRefreshResult.value?.restoreTransferControlState?.();
+			if (actionTarget) actionTarget.disabled = !actionTarget.options.length;
+			if (xpTarget) xpTarget.disabled = !xpTarget.options.length;
+			setFormAvailability({
+				formId: "campaign-action-form",
+				isAvailable: !!actionTarget?.options.length,
+				message: "Add a campaign character before proposing an effect.",
+			});
+			setFormAvailability({
+				formId: "campaign-xp-form",
+				isAvailable: !!xpTarget?.options.length,
+				message: "Add a campaign character before using this grant.",
+			});
+			refreshItemAwardControlState();
+			refreshActionFields({isRetryConditionCatalog: false});
 		} catch (error) {
 			renderError(error);
 		} finally {
@@ -1845,7 +1975,7 @@ function renderMemberList ({campaign, campaignId, members, session, pRefresh}) {
 						await pRefresh();
 					} catch (error) {
 						renderError(error);
-						select.disabled = false;
+						if (!isCampaignReloadRequired) select.disabled = false;
 						select.value = member.role;
 					}
 				});
@@ -1864,7 +1994,7 @@ function renderMemberList ({campaign, campaignId, members, session, pRefresh}) {
 						await pRefresh();
 					} catch (error) {
 						renderError(error);
-						button.disabled = false;
+						if (!isCampaignReloadRequired) button.disabled = false;
 					}
 				});
 				controls.append(button);
@@ -1902,7 +2032,7 @@ function renderInviteList ({campaignId, invites, pRefresh}) {
 					await pRefresh();
 				} catch (error) {
 					renderError(error);
-					button.disabled = false;
+					if (!isCampaignReloadRequired) button.disabled = false;
 				}
 			});
 			row.append(button);
@@ -2088,10 +2218,19 @@ function updateInboxCount ({kind, count}) {
 	}
 }
 
-async function renderPendingActions ({campaign, campaignId, session, targetCharacters, members, roster = null}) {
+async function renderPendingActions ({
+	campaign,
+	campaignId,
+	session,
+	targetCharacters,
+	members,
+	roster = null,
+	fnIsCurrent = () => true,
+}) {
 	const list = document.getElementById("campaign-pending-actions");
 	if (!list) return;
 	const actions = await api.pListPendingActions({campaignId});
+	if (!fnIsCurrent()) return {isFenced: true};
 	const pending = actions.filter(action => action.status === "proposed");
 	updateInboxCount({kind: "actions", count: pending.length});
 	setHidden(document.getElementById("campaign-pending-actions-empty"), !!pending.length);
@@ -2129,7 +2268,7 @@ async function renderPendingActions ({campaign, campaignId, session, targetChara
 						await renderPendingActions({campaign, campaignId, session, targetCharacters, members});
 					} catch (error) {
 						renderError(error);
-						button.disabled = false;
+						if (!isCampaignReloadRequired) button.disabled = false;
 					}
 				});
 				controls.append(button);
@@ -2138,6 +2277,7 @@ async function renderPendingActions ({campaign, campaignId, session, targetChara
 		}
 		return row;
 	}));
+	return {isFenced: false};
 }
 
 async function renderPendingTransfers ({
@@ -2153,6 +2293,7 @@ async function renderPendingTransfers ({
 	if (!list) return {pendingTransferIds: []};
 	const transfers = await api.pListTransfers({campaignId});
 	if (!fnIsCurrent()) return {pendingTransferIds: [], isFenced: true};
+	delete list._hubTransferInboxRecovery;
 	const pending = transfers.filter(transfer => ["proposed", "reserved"].includes(transfer.status));
 	const pendingTransferIds = pending.map(transfer => transfer.id);
 	transferResolutionDrafts.reconcilePending({campaignId, pendingTransferIds});
@@ -2227,8 +2368,10 @@ async function renderPendingTransfers ({
 								? await api.pGetCampaignContext({campaignId})
 								: null;
 						} catch (error) {
-							for (const control of controls.querySelectorAll("button")) control.disabled = false;
 							renderError(error);
+							if (!isCampaignReloadRequired) {
+								for (const control of controls.querySelectorAll("button")) control.disabled = false;
+							}
 							return;
 						}
 						resolutionRequest = transferResolutionDrafts.stage({
@@ -2340,6 +2483,10 @@ async function pRunFormMutation ({form, fingerprint, fnMutate}) {
 		form._hubMutationKey = crypto.randomUUID();
 	}
 	form._hubIsSubmitting = true;
+	form._hubMutationControlStates = new Map(
+		[...form.querySelectorAll("button, input, select, textarea")]
+			.map(control => [control, control.disabled]),
+	);
 	const buttons = [...form.querySelectorAll("button[type='submit']")];
 	const buttonStates = buttons.map(button => ({
 		button,
@@ -2360,9 +2507,10 @@ async function pRunFormMutation ({form, fingerprint, fnMutate}) {
 		form._hubIsSubmitting = false;
 		form.removeAttribute("aria-busy");
 		buttonStates.forEach(({button, disabled, text}) => {
-			button.disabled = disabled;
+			button.disabled = isCampaignReloadRequired ? true : disabled;
 			button.textContent = text;
 		});
+		delete form._hubMutationControlStates;
 	}
 }
 
@@ -2439,7 +2587,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			window.location.assign("hub.html");
 		} catch (error) {
 			renderError(error);
-			leave.disabled = false;
+			if (!isCampaignReloadRequired) leave.disabled = false;
 		}
 	});
 
@@ -2503,7 +2651,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		} catch (error) {
 			renderError(error);
 		} finally {
-			uploadConfirm.disabled = false;
+			if (!isCampaignReloadRequired) uploadConfirm.disabled = false;
 		}
 	});
 
@@ -2524,6 +2672,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			eventsNxt = null,
 			fnIsCurrent = () => true,
 			fnIsSnapshotCurrent = () => true,
+			isProjectionControlRestoreDeferred = false,
 		} = refresh;
 		[charactersNxt, targetCharactersNxt, snapshotNxt, membersNxt, partyInventoryNxt, eventsNxt] = await Promise.all([
 			charactersNxt,
@@ -2536,13 +2685,19 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		const source = document.getElementById("campaign-transfer-source");
 		const target = document.getElementById("campaign-transfer-target");
 		const item = document.getElementById("campaign-transfer-entry");
+		const form = document.getElementById("campaign-transfer-form");
 		const readSelections = () => ({
 			source: source?.value,
 			target: target?.value,
 			item: item?.value,
 			quantity: document.getElementById("campaign-transfer-quantity")?.value,
+			currency: Object.fromEntries(CURRENCY_TYPES.map(type => [
+				type,
+				document.getElementById(`campaign-transfer-${type}`)?.value || "",
+			])),
 		});
-		const selections = readSelections();
+		const concealedSelections = form?._hubProjectionTransferDraft || null;
+		const selections = concealedSelections || readSelections();
 		const [charactersLatest, snapshotLatest, partyInventoryLatest] = await Promise.all([
 			charactersNxt ? null : api.pListCharacters({campaignId}),
 			targetCharactersNxt || snapshotNxt ? null : api.pGetCampaignSnapshot({campaignId}),
@@ -2550,18 +2705,18 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		]);
 		if (!fnIsCurrent()) return {pendingTransferIds: [], isFenced: true};
 		if (snapshotNxt && !fnIsSnapshotCurrent(snapshotNxt)) return {pendingTransferIds: [], isFenced: true};
-		setProjectionFormControlsConcealed({
-			form: document.getElementById("campaign-transfer-form"),
-			isConcealed: false,
-		});
+		if (!isProjectionControlRestoreDeferred) {
+			setProjectionFormControlsConcealed({form, isConcealed: false});
+		}
 		const acceptedSnapshot = snapshotNxt && fnIsSnapshotCurrent(snapshotNxt)
 			? snapshotNxt
 			: snapshotLatest;
 		const latestSelections = readSelections();
-		const selectionsToRestore = Object.keys(selections)
-			.some(key => latestSelections[key] !== selections[key])
-			? latestSelections
-			: selections;
+		const selectionsToRestore = concealedSelections || (
+			JSON.stringify(latestSelections) !== JSON.stringify(selections)
+				? latestSelections
+				: selections
+		);
 		characters.splice(0, characters.length, ...(charactersNxt || charactersLatest));
 		const targetCharactersReplacement = targetCharactersNxt || acceptedSnapshot?.characters;
 		if (targetCharactersReplacement) targetCharacters.splice(0, targetCharacters.length, ...targetCharactersReplacement);
@@ -2580,18 +2735,40 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		// A character whose identity the owner hid is absent from roster metadata and is
 		// therefore not peer-targetable.
 		fillCharacterSelect(target, getTargetableProjections({projections: targetCharacters, roster: rosterRef.current}), {includeParty: true, partyInventory});
-		if (source) source.disabled = !source.options.length;
-		if (target) target.disabled = !target.options.length;
-		if ([...source.options].some(option => option.value === selectionsToRestore.source)) source.value = selectionsToRestore.source;
-		if ([...target.options].some(option => option.value === selectionsToRestore.target)) target.value = selectionsToRestore.target;
+		if (!isProjectionControlRestoreDeferred) {
+			if (source) source.disabled = !source.options.length;
+			if (target) target.disabled = !target.options.length;
+		}
+		const isSourceRestored = [...source.options].some(option => option.value === selectionsToRestore.source);
+		const isTargetRestored = [...target.options].some(option => option.value === selectionsToRestore.target);
+		if (isSourceRestored) source.value = selectionsToRestore.source;
+		if (isTargetRestored) target.value = selectionsToRestore.target;
 		syncTransferItemPicker({characters, partyInventory});
-		if ([...item.options].some(option => option.value === selectionsToRestore.item)) {
+		if (
+			isSourceRestored
+			&& isTargetRestored
+			&& [...item.options].some(option => option.value === selectionsToRestore.item)
+		) {
 			item.value = selectionsToRestore.item;
 			syncTransferQuantity();
 			const maximum = Number(item.selectedOptions[0]?.dataset.quantity);
 			if (Number(selectionsToRestore.quantity) > 0 && Number(selectionsToRestore.quantity) <= maximum) {
 				document.getElementById("campaign-transfer-quantity").value = selectionsToRestore.quantity;
 			}
+		}
+		for (const type of CURRENCY_TYPES) {
+			const input = document.getElementById(`campaign-transfer-${type}`);
+			if (!input) continue;
+			input.value = isSourceRestored && isTargetRestored
+				? selectionsToRestore.currency?.[type] || "0"
+				: "0";
+		}
+		if (isProjectionControlRestoreDeferred) {
+			setProjectionFormControlsConcealed({form, isConcealed: true});
+			setProjectionFormControlsConcealed({
+				form: document.getElementById("campaign-item-form"),
+				isConcealed: true,
+			});
 		}
 		renderPartyInventoryStatus(partyInventory);
 		const transferState = await renderPendingTransfers({
@@ -2604,16 +2781,42 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			fnIsCurrent,
 		});
 		const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId});
-		if (pendingProposal) {
-			setTransferProposalControls({
-				form: document.getElementById("campaign-transfer-form"),
-				proposalRequest: pendingProposal,
-				characters,
-				partyInventory,
-				isLocked: true,
-			});
+		const restoreTransferControlState = () => {
+			if (pendingProposal) {
+				setTransferProposalControls({
+					form,
+					proposalRequest: pendingProposal,
+					characters,
+					partyInventory,
+					isLocked: true,
+				});
+				const submit = form?.querySelector("button[type='submit']");
+				if (submit && !isCampaignReloadRequired) {
+					submit.disabled = false;
+					submit.textContent = "Retry transfer";
+				}
+				return;
+			}
+			setTransferProposalControls({form, isLocked: false});
+			if (source) source.disabled = !source.options.length;
+			if (target) target.disabled = !target.options.length;
+			const submit = form?.querySelector("button[type='submit']");
+			if (submit && !isCampaignReloadRequired) {
+				submit.disabled = !source?.options.length;
+				submit.textContent = "Submit transfer";
+			}
+		};
+		if (!isProjectionControlRestoreDeferred) {
+			restoreTransferControlState();
 		}
-		return transferState;
+		delete form?._hubProjectionTransferDraft;
+		if (isProjectionControlRestoreDeferred) {
+			setProjectionFormControlsConcealed({form, isConcealed: true});
+		}
+		return {
+			...transferState,
+			restoreTransferControlState,
+		};
 	});
 
 	await renderPendingActions({campaign, campaignId, session, targetCharacters, members});
@@ -2726,7 +2929,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		}));
 		if (conditionCatalogByUid.has(previousValue)) actionCondition.value = previousValue;
 	};
-	const syncActionFields = () => {
+	const syncActionFields = ({isRetryConditionCatalog = true} = {}) => {
 		const type = actionType.value;
 		const isSlot = ["spell_slot_spend", "spell_slot_restore"].includes(type);
 		const isCondition = ["condition_add", "condition_remove"].includes(type);
@@ -2736,7 +2939,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		setHidden(actionValue, isSlot || isCondition);
 		if (isCondition) {
 			pRefreshConditionOptions();
-			if (["idle", "module_failed", "data_failed"].includes(conditionCatalogState)) {
+			if (isRetryConditionCatalog && ["idle", "module_failed", "data_failed"].includes(conditionCatalogState)) {
 				void pRefreshConditionCatalog({
 					campaignBrewContent: campaignConditionBrewContent,
 				});
@@ -3271,7 +3474,8 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 	return {
 		pRefreshTransferState,
 		rulesPolicyManagerPromise,
-		pRefreshConditionOptions,
+		refreshActionFields: syncActionFields,
+		refreshItemAwardControlState: () => itemAward.setTargets(targetCharacters),
 		pRefreshContextBoundControls,
 		isConditionCatalogRetryNeeded: () => conditionCatalogState === "data_failed"
 			|| (

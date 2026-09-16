@@ -260,24 +260,32 @@ test("stale move completion cannot detach the selected character and terminal de
 		await panel.getByLabel("I understand that this moves the character instead of creating a copy.").check();
 		await panel.locator("button", {hasText: "Move character"}).click();
 		await expect.poll(() => player.page.evaluate(() => (globalThis as any).charSheet._campaign._isBusy)).toBe(true);
-		await player.page.evaluate(async characterId => {
+		await player.page.evaluate(async ({selectedCharacterId, sourceCharacterId}) => {
 			const sheet = (globalThis as any).charSheet;
 			sheet._saveCurrentCharacter = (globalThis as any).__originalMoveSave;
-			await sheet._pLoadCharacter(characterId);
+			await sheet._pLoadCharacter(selectedCharacterId);
+			await sheet._pLoadCharacter(sourceCharacterId);
 			(globalThis as any).__resolveDeferredMoveSave(true);
-		}, selectedCharacter.id);
+		}, {
+			selectedCharacterId: selectedCharacter.id,
+			sourceCharacterId: sourceCharacter.id,
+		});
 		await expect.poll(() => player.page.evaluate(() => (globalThis as any).charSheet._campaign._isBusy)).toBe(false);
 		expect(moveRequests).toEqual([]);
-		await expect(player.page.locator("#charsheet-ipt-name")).toHaveValue("Selected Survivor");
+		await expect(player.page.locator("#charsheet-ipt-name")).toHaveValue("Deferred Source");
 		expect(await player.page.evaluate(() => ({
 			currentCharacterId: (globalThis as any).charSheet._currentCharacterId,
 			realtimeCharacterId: (globalThis as any).charSheet._hubRealtime?._active?.characterId,
 		}))).toEqual({
-			currentCharacterId: selectedCharacter.id,
-			realtimeCharacterId: selectedCharacter.id,
+			currentCharacterId: sourceCharacter.id,
+			realtimeCharacterId: sourceCharacter.id,
 		});
 		expect((await player.getCharacter(sourceCharacter.id)).campaignId).toBe(sourceCampaignId);
 
+		await player.page.evaluate(
+			characterId => (globalThis as any).charSheet._pLoadCharacter(characterId),
+			selectedCharacter.id,
+		);
 		await player.page.evaluate(() => (globalThis as any).charSheet._detachHubRealtime());
 		await otherDevice.deleteCharacterViaApi(selectedCharacter.id);
 		const deleteErrorCode = await player.page.evaluate(async () => {

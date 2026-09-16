@@ -323,6 +323,9 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   Repository ordering coverage proves a delayed stale roster cannot replace a newer accepted realtime revision.
   Deferred move and terminal-delete races switch to a second character before settlement and prove the old operation
   cannot detach, restore, reconcile, navigate over, or conceal the selected character.
+- Campaign-move regressions advance the load generation through `A → B → A` while a save is deferred and prove the
+  stale move cannot release a lease, detach realtime, mutate the campaign, navigate, or bind an old compatibility
+  preview merely because the original character id is selected again.
 - Campaign overview revocation coverage removes the active membership over the real socket and proves the entire
   previously authorized DOM is destroyed immediately, not merely disabled while private roster/profile/member,
   inventory, pending-action, transfer, or administration content remains present. A separate HTTP-first journey
@@ -336,6 +339,12 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   10-second client watchdog requests an authoritative snapshot while the
   socket remains live. During replay it allows a full unchanged interval before reconnecting, so advancing
   continuation pages are not interrupted while a stalled chain still recovers.
+- Browser coverage defers an old pending-action response across a newer sharing-policy invalidation, fails the
+  replacement snapshot, and proves the stale response cannot repopulate concealed identity. The transfer journey
+  separately proves source/target/item/currency drafts survive an authorized refresh, transient submitting state
+  does not permanently disable retry, and committed refresh failures retain only a generic recovery row.
+- Session-revocation coverage holds a transfer POST in flight while another device revokes the session, then proves
+  its late cleanup cannot re-enable any campaign mutation control; Sign out remains the sole enabled control.
 - Character Sheet realtime regressions use deterministic fake sockets and repository barriers to prove stale
   socket messages/closes cannot advance the cursor, replay/live duplicates collapse, lifecycle states remain
   ordered across owner/DM watermarks, in-flight saves finish before callbacks, and switch/reopen/access-loss

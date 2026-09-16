@@ -181,6 +181,8 @@ campaign/sharing state, and conceals the document. Switching characters also cle
 before the new policy loads, and each controller is permanently bound to the character whose policy it fetched.
 Terminal character DELETE/archive failures use that same ordered resource teardown when the failed request still
 names the open character; a response that settles after a selector switch cannot conceal or reattach the replacement.
+Campaign moves and compatibility previews additionally capture the character-load generation, so navigating
+`A → B → A` cannot make an older operation current merely because the character id matches again.
 
 The campaign overview distinguishes authentication continuity from campaign authority. Session expiry stops
 realtime/timers and disables mutation controls but preserves the last-known campaign as an explicitly signed-out,
@@ -194,6 +196,14 @@ Projection-policy writes snapshot their invalidation audience from members autho
 next policy. A peer losing a shared profile therefore receives one campaign-scoped, metadata-only,
 actor-redacted invalidation needed to conceal stale rows; the event carries no character id, and later members or
 peers excluded by both policies do not receive it.
+
+While a replacement projection is loading, Campaign Overview fences the complete refresh generation: deferred
+action/transfer inbox responses cannot repopulate concealed names, and mutation controls remain disabled until the
+sequence-current snapshot and its dependent inbox reads are accepted. Transfer drafts are preserved across that
+concealment only when their source, destination, and item remain authorized; a committed transfer whose refresh
+fails is represented by a generic recovery row without retaining character names. Session expiry keeps Sign out as
+the sole enabled campaign-content control while every mutation control stays disabled, including after an
+in-flight request settles.
 
 A cancellation is classified as `REQUEST_ABORTED` across the whole request path — including the
 response body read — so it is never mistaken for connectivity loss. Personal brew and local

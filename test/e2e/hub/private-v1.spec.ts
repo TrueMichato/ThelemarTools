@@ -173,9 +173,34 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 
 		await secondDevice.signInSynthetic({providerSubject: "player", displayName: "Rowan Vale", secret});
 		await secondDevice.gotoCampaign(campaignId);
+		await secondDevice.openCampaignWorkbench();
+		await secondDevice.page.locator("#campaign-transfer-source").selectOption({label: "Rowan"});
+		await secondDevice.page.locator("#campaign-transfer-target").selectOption({label: "Party inventory"});
+		await secondDevice.page.locator("#campaign-transfer-gp").fill("1");
+		let markTransferStarted = () => {};
+		const transferStarted = new Promise<void>(resolve => {
+			markTransferStarted = resolve;
+		});
+		let continueTransfer = () => {};
+		const transferGate = new Promise<void>(resolve => {
+			continueTransfer = resolve;
+		});
+		await secondDevice.page.route(`**/api/campaigns/${campaignId}/transfers`, async route => {
+			if (route.request().method() !== "POST") {
+				await route.continue();
+				return;
+			}
+			markTransferStarted();
+			await transferGate;
+			await route.continue();
+		});
+		await secondDevice.page.locator("#campaign-transfer-form button[type='submit']").click();
+		await transferStarted;
 		await player.revokeOtherSession();
+		continueTransfer();
 		expect((await secondDevice.page.request.get("/api/campaigns")).status()).toBe(401);
 		await secondDevice.expectSessionRevokedWhileOpen({characterName: "Rowan"});
+		await secondDevice.page.unroute(`**/api/campaigns/${campaignId}/transfers`);
 
 		await player.gotoCampaign(campaignId);
 		await dm.removeMember({campaignId, displayName: "Rowan Vale"});

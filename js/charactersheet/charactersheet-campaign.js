@@ -564,6 +564,12 @@ export class CharacterSheetCampaign {
 
 	async _pPrepareMove ({sourceCampaignId, campaignId}) {
 		if (!sourceCampaignId || !campaignId || this._isMovePreviewLoading || this._isBusy) return;
+		const characterId = this._page._currentCharacterId;
+		const characterLoadGeneration = this._page._characterLoadGeneration;
+		const isCurrentCharacter = () => (
+			this._page._currentCharacterId === characterId
+			&& this._page._characterLoadGeneration === characterLoadGeneration
+		);
 		this._isMovePreviewLoading = true;
 		this._feedback = null;
 		this.render();
@@ -572,12 +578,14 @@ export class CharacterSheetCampaign {
 				this._api.pGetCampaignCompatibility({campaignId: sourceCampaignId}),
 				this._api.pGetCampaignCompatibility({campaignId}),
 			]);
+			if (!isCurrentCharacter()) return;
 			this._movePreview = {
 				campaignId,
 				report: getCampaignCompatibilityReport({source, target}),
 				rulesVersionId: target.rulesVersion?.id || null,
 			};
 		} catch (error) {
+			if (!isCurrentCharacter()) return;
 			this._feedback = {type: "error", text: getCampaignControlErrorMessage(error)};
 		} finally {
 			this._isMovePreviewLoading = false;
@@ -655,8 +663,12 @@ export class CharacterSheetCampaign {
 
 	async _pMoveCloudCharacter ({campaignId, isDetached}) {
 		const characterId = this._page._currentCharacterId;
+		const characterLoadGeneration = this._page._characterLoadGeneration;
 		const sourceCampaignId = this._currentCharacter?.campaignId || null;
-		const isCurrentCharacter = () => this._page._currentCharacterId === characterId;
+		const isCurrentCharacter = () => (
+			this._page._currentCharacterId === characterId
+			&& this._page._characterLoadGeneration === characterLoadGeneration
+		);
 		if (!characterId || !campaignId || this._isBusy) return;
 		if (!isDetached && (!sourceCampaignId || this._movePreview?.campaignId !== campaignId)) return;
 		this._isBusy = true;

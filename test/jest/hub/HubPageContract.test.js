@@ -195,7 +195,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("conditionCatalogState = \"data_failed\"");
 		expect(source).not.toContain("conditionCatalogState === \"failed\"");
 		expect(source).not.toContain("await pRefreshConditionCatalog({campaignBrewContent: context.brewBundle?.content});");
-		expect(source).toMatch(/if \(\["idle", "module_failed", "data_failed"\]\.includes\(conditionCatalogState\)\) \{\s+void pRefreshConditionCatalog/);
+		expect(source).toMatch(/if \(isRetryConditionCatalog && \["idle", "module_failed", "data_failed"\]\.includes\(conditionCatalogState\)\) \{\s+void pRefreshConditionCatalog/);
 		expect(source).toContain("pLoadCampaignConditionCatalog");
 		expect(source).toContain("conditionCatalogByUid");
 		expect(source).toContain("getCurrentTargetConditions");

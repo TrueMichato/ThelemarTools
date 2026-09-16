@@ -29,6 +29,7 @@ function getControl ({
 } = {}) {
 	const page = {
 		_currentCharacterId: "local-1",
+		_characterLoadGeneration: 0,
 		_saveCurrentCharacter: jest.fn(async () => saveResult),
 		_characterRepository: {
 			pReleaseLease: jest.fn(async () => ({released: true})),
@@ -469,6 +470,77 @@ describe("Character Sheet campaign control", () => {
 		expect(page._attachHubRealtime).not.toHaveBeenCalled();
 		expect(control._fnNavigate).not.toHaveBeenCalled();
 		expect(page._currentCharacterId).toBe("cloud-other");
+	});
+
+	it("does not resume a stale move after navigating from A to B and back to A", async () => {
+		const {control, page} = getControl();
+		const save = makeDeferred();
+		page._currentCharacterId = "cloud-source";
+		page._characterLoadGeneration = 7;
+		page._saveCurrentCharacter.mockImplementationOnce(() => save.promise);
+		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
+		control._movePreview = {campaignId: "campaign-2", report: {}, rulesVersionId: "rules-campaign-2"};
+
+		const pending = control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});
+		await Promise.resolve();
+		page._currentCharacterId = "cloud-other";
+		page._characterLoadGeneration++;
+		page._currentCharacterId = "cloud-source";
+		page._characterLoadGeneration++;
+		save.resolve(true);
+		await pending;
+
+		expect(page._characterRepository.pReleaseLease).not.toHaveBeenCalled();
+		expect(page._detachHubRealtime).not.toHaveBeenCalled();
+		expect(control._api.pMoveCharacter).not.toHaveBeenCalled();
+		expect(page._attachHubRealtime).not.toHaveBeenCalled();
+		expect(control._fnNavigate).not.toHaveBeenCalled();
+	});
+
+	it("does not bind a compatibility preview to a later load of the same character", async () => {
+		const {control, page} = getControl();
+		const sourceCompatibility = makeDeferred();
+		const targetCompatibility = makeDeferred();
+		page._currentCharacterId = "cloud-source";
+		page._characterLoadGeneration = 3;
+		control._api.pGetCampaignCompatibility
+			.mockImplementationOnce(() => sourceCompatibility.promise)
+			.mockImplementationOnce(() => targetCompatibility.promise);
+
+		const pending = control._pPrepareMove({sourceCampaignId: "campaign-1", campaignId: "campaign-2"});
+		await Promise.resolve();
+		page._currentCharacterId = "cloud-other";
+		page._characterLoadGeneration++;
+		page._currentCharacterId = "cloud-source";
+		page._characterLoadGeneration++;
+		sourceCompatibility.resolve({campaignId: "campaign-1", rulesVersion: null, brewBundle: null});
+		targetCompatibility.resolve({campaignId: "campaign-2", rulesVersion: null, brewBundle: null});
+		await pending;
+
+		expect(control._movePreview).toBeNull();
+	});
+
+	it("does not show a compatibility error from an earlier load of the same character", async () => {
+		const {control, page} = getControl();
+		const sourceCompatibility = makeDeferred();
+		const targetCompatibility = makeDeferred();
+		page._currentCharacterId = "cloud-source";
+		page._characterLoadGeneration = 3;
+		control._api.pGetCampaignCompatibility
+			.mockImplementationOnce(() => sourceCompatibility.promise)
+			.mockImplementationOnce(() => targetCompatibility.promise);
+
+		const pending = control._pPrepareMove({sourceCampaignId: "campaign-1", campaignId: "campaign-2"});
+		await Promise.resolve();
+		page._currentCharacterId = "cloud-other";
+		page._characterLoadGeneration++;
+		page._currentCharacterId = "cloud-source";
+		page._characterLoadGeneration++;
+		sourceCompatibility.reject(new Error("stale compatibility failure"));
+		targetCompatibility.resolve({campaignId: "campaign-2", rulesVersion: null, brewBundle: null});
+		await pending;
+
+		expect(control._feedback).toBeNull();
 	});
 
 	it("does not restore the source subscription when a rejected move settles after a switch", async () => {
