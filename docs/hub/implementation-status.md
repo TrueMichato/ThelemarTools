@@ -76,6 +76,10 @@ currently usable class spell (including preparation where required), and changin
 invalidates that proposal even if the slot is later restored. Source, target, and combined self-target operation
 legs reconcile through unsaved/in-flight local edits and reconnect/resync. V2-T7 remains active: NPC/monster,
 party/multi-target, generic-effect, broader spell/ability/resource, and partial-resolution work is not implemented.
+The capability remains default-off for every new campaign: an active immutable rules version and exact
+operator-managed campaign UUID enrollment are both required. Production rejects wildcard or malformed rollout
+configuration, release automation checks enrolled campaign readiness before traffic changes, and already-open
+Character Sheets now clear and resynchronize targeting when authoritative campaign context changes.
 
 V2-T9 Campaign Overview is shipped by PR #243. The page is now a role-adaptive pinned session brief centered on
 campaign identity, party readiness, attention, recent activity, and one role-specific next action. Existing effects,

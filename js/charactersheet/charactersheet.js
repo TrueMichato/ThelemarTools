@@ -223,7 +223,10 @@ class CharacterSheetPage {
 	_attachHubRealtime ({characterId = this._currentCharacterId} = {}) {
 		this._hubRealtimeGeneration++;
 		this._hubEffects?.activate({characterId});
-		this._peerTargeting?.activate({characterId});
+		this._peerTargeting?.activate({
+			characterId,
+			membershipRole: this._hubContext?.membership?.role,
+		});
 		const isAttached = this._hubRealtime?.attach({characterId}) || false;
 		void this._partyInventory?.pAttach({
 			characterId,
@@ -281,7 +284,7 @@ class CharacterSheetPage {
 	 * re-apply `setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules)`, so a retained
 	 * `_hubContext` would silently reinstall the campaign rules on the next character load.
 	 */
-	_clearHubRules ({isUnavailable = false, isFenceRefresh = true} = {}) {
+	_clearHubRules ({isUnavailable = false, isFenceRefresh = true, isSuspendPeerTargeting = false} = {}) {
 		if (isFenceRefresh) this._hubRulesRefreshGeneration++;
 		this._hubRulesRefreshBlocked = false;
 		this._hubRulesPendingVersionId = null;
@@ -292,6 +295,8 @@ class CharacterSheetPage {
 		// Return to the detached basis in lockstep with the overlay: a summary stamped with a
 		// campaign this sheet is no longer in must not keep claiming to be current.
 		this._state.setCarryAuthorityContext(cleared.carryAuthorityContext);
+		if (isSuspendPeerTargeting) this._peerTargeting?.suspend?.();
+		else this._peerTargeting?.deactivate();
 	}
 
 	_teardownHubRules () {
@@ -326,6 +331,7 @@ class CharacterSheetPage {
 		this._hubRealtime.on("semanticOperation", event => this._onHubSemanticOperation(event));
 		this._hubRealtime.on("connectionState", state => this._onHubRealtimeConnectionState(state));
 		this._hubRealtime.on("campaignContextChanged", event => this._onHubCampaignContextChanged(event));
+		this._hubRealtime.on("membershipChanged", event => this._onHubMembershipChanged(event));
 		this._hubRealtime.on("projectionInvalidated", event => this._onHubProjectionInvalidated(event));
 		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
 		this._hubRealtime.on("rulesChanged", event => { void this._pRefreshHubRules(event); });
@@ -338,7 +344,11 @@ class CharacterSheetPage {
 		const contextGeneration = ++this._hubContextGeneration;
 		this._hubContextRefreshActiveGeneration = contextGeneration;
 		this._isHubContextRefreshing = true;
-		this._clearHubRules({isUnavailable: true, isFenceRefresh: false});
+		this._clearHubRules({
+			isUnavailable: true,
+			isFenceRefresh: false,
+			isSuspendPeerTargeting: true,
+		});
 		this._hubRulesRefreshBlocked = true;
 		this._hubRulesPendingVersionId = expectedRulesVersionId;
 		this._campaign?.render();
@@ -368,7 +378,11 @@ class CharacterSheetPage {
 				generation !== this._hubRulesRefreshGeneration
 				|| contextGeneration !== this._hubContextGeneration
 			) return false;
-			this._clearHubRules({isUnavailable: true, isFenceRefresh: false});
+			this._clearHubRules({
+				isUnavailable: true,
+				isFenceRefresh: false,
+				isSuspendPeerTargeting: true,
+			});
 			this._hubRulesRefreshBlocked = true;
 			this._hubRulesPendingVersionId = expectedRulesVersionId;
 			this._isHubContextRevalidationRequired = true;
@@ -424,20 +438,33 @@ class CharacterSheetPage {
 			}
 			return;
 		}
-		if (state?.state !== "closed") return;
+		if (!["closed", "reconnecting"].includes(state?.state)) return;
 		this._hubRealtimeGeneration++;
 		this._hubContextGeneration++;
 		this._hubContextRefreshActiveGeneration = null;
 		this._isHubContextRefreshing = false;
 		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
-		this._isHubContextRevalidationRequired = state.state === "closed";
-		this._clearHubRules?.({isUnavailable: true});
+		this._isHubContextRevalidationRequired = true;
+		this._clearHubRules?.({
+			isUnavailable: true,
+			isSuspendPeerTargeting: state?.state === "reconnecting",
+		});
 		this._campaign?.render();
 	}
 
 	_onHubProjectionInvalidated (event) {
 		if (!this._currentCharacterId || event?.characterId !== this._currentCharacterId) return false;
 		return this._scheduleHubAuthoritativeReconcile({characterId: this._currentCharacterId});
+	}
+
+	_onHubMembershipChanged (event) {
+		if (event?.campaignId && event.campaignId !== this._hubCampaignId) return false;
+		if (!this._hubCampaignContext) {
+			this._peerTargeting?.deactivate();
+			return false;
+		}
+		this._onHubCampaignContextChanged({type: "membership.changed"});
+		return true;
 	}
 
 	_applyHubContext (context) {
@@ -452,6 +479,10 @@ class CharacterSheetPage {
 		this._state.setCarryAuthorityContext({
 			rulesVersionId: context?.rulesVersion?.id ?? null,
 			brewBundleHash: context?.brewBundle?.contentHash ?? null,
+		});
+		this._peerTargeting?.activate({
+			characterId: this._currentCharacterId,
+			membershipRole: context?.membership?.role,
 		});
 	}
 
@@ -471,7 +502,7 @@ class CharacterSheetPage {
 		const generation = ++this._hubContextGeneration;
 		this._hubContextRefreshActiveGeneration = generation;
 		this._isHubContextRefreshing = true;
-		this._clearHubRules();
+		this._clearHubRules({isSuspendPeerTargeting: true});
 		this._campaign?.render();
 		void this._hubCampaignContext.pRefresh({
 			fnIsCurrent: () => generation === this._hubContextGeneration,
@@ -1099,6 +1130,7 @@ class CharacterSheetPage {
 					fnGetCharacterId: () => this._currentCharacterId,
 					fnGetRulesVersionId: () => this._hubContext?.rulesVersion?.id ?? null,
 					fnGetCapability: () => this._hubCampaignContext?.context?.capabilities?.peerSourceCosts ?? null,
+					fnRefreshCampaignContext: () => this._pRefreshHubRules({isUseLatest: true}),
 					fnOnAuthoritativeApplied: detail => this._onHubAuthoritativeApproval(detail),
 				});
 				this._peerTargeting.init();

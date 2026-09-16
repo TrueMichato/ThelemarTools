@@ -1,6 +1,7 @@
 import {createHubApp, SESSION_COOKIE} from "../../../server/src/app.js";
 import {AuthProviderRegistry} from "../../../server/src/auth-provider-registry.js";
 import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
+import {parsePeerSourceCostsCampaignIds} from "../../../server/src/peer-source-cost-rollout.js";
 import {createSemanticOperationRegistry} from "../../../server/src/semantic-operation-registry.js";
 import {
 	getCsrfToken,
@@ -47,10 +48,10 @@ const store = PostgresHubStore.fromConnectionString({
 	connectionString: requireEnv("DATABASE_URL"),
 	ssl: process.env.HUB_DATABASE_SSL !== "false",
 	semanticOperationRegistry,
-	peerSourceCostsEnabled: (process.env.HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS || "")
-		.split(",")
-		.map(it => it.trim())
-		.filter(Boolean),
+	peerSourceCostsEnabled: parsePeerSourceCostsCampaignIds(
+		process.env.HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS,
+		{allowWildcard: true},
+	),
 });
 await store.pCheckHealth();
 const trustedProxies = (process.env.HUB_TRUST_PROXY || "").split(",").map(it => it.trim()).filter(Boolean);

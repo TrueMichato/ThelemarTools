@@ -84,7 +84,7 @@ describe("Phase 2 campaign context and DM workspace", () => {
 		});
 	}
 
-	it("publishes immutable brew and rules versions visible identically to all members", async () => {
+	it("publishes immutable brew and rules versions identically with viewer-scoped membership roles", async () => {
 		const dm = await pSignIn(IDENTITIES.dm);
 		const campaign = await pCampaign(dm);
 		const player = await pSignIn(IDENTITIES.player);
@@ -126,8 +126,13 @@ describe("Phase 2 campaign context and DM workspace", () => {
 			url: `/api/campaigns/${campaign.id}/context`,
 			headers: {cookie: session.cookie},
 		})));
-		expect(contexts[0].json()).toEqual(contexts[1].json());
-		expect(contexts[0].json().context).toEqual(expect.objectContaining({
+		const [dmResponse, playerResponse] = contexts.map(response => response.json());
+		const {membership: dmMembership, ...dmContext} = dmResponse.context;
+		const {membership: playerMembership, ...playerContext} = playerResponse.context;
+		expect(dmMembership).toEqual({role: "dm"});
+		expect(playerMembership).toEqual({role: "player"});
+		expect(dmContext).toEqual(playerContext);
+		expect(dmContext).toEqual(expect.objectContaining({
 			brewBundle: expect.objectContaining({content: brewDocs, contentHash: expect.any(String)}),
 			rulesVersion: expect.objectContaining({
 				rules: expect.objectContaining({exhaustionRules: "2024", thelemar_jumping: false}),

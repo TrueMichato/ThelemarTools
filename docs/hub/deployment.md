@@ -115,7 +115,7 @@ resolution.
 | `HUB_LOG_LEVEL` | BFF | No | Structured log threshold |
 | `HUB_AUTH_PROVIDERS` | BFF | No | Supported slugs `github,discord,google`; Discord and Google normal enablement must be paired; production remains `github` until layer 3 |
 | `HUB_AUTH_EMERGENCY_DISABLED_PROVIDERS` | BFF | No | Emergency provider-specific kill switch; startup fails if no provider remains |
-| `HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS` | BFF | Operationally sensitive | Comma-separated campaign UUID rollout allowlist for protocol-4 peer source costs; `*` is reserved for isolated test stacks |
+| `HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS` | BFF | Operationally sensitive | Comma-separated exact campaign UUID rollout allowlist for protocol-4 peer source costs; blank disables it, and production rejects `*`, malformed IDs, duplicates, and more than 100 IDs |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | BFF | Secret (client secret) | OAuth application |
 | `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` | BFF | Secret (client secret) | Discord confidential OAuth application |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | BFF | Secret (client secret) | Google confidential web/OIDC application |
@@ -136,6 +136,11 @@ The runtime role has CRUD on `oauth_transactions`. PostgreSQL requires the read-
 
 Reference passwords must be URL-safe because Compose interpolates them into local PostgreSQL URLs. Managed
 deployment should inject provider-generated, correctly encoded connection URLs directly.
+
+Peer source-cost enrollment is a release configuration change, not a campaign database mutation. Follow the
+[peer source-cost rollout runbook](runbooks/peer-source-cost-rollout.md): create the campaign, activate an
+immutable rules version, configure only approved exact UUIDs, and let the candidate image run the read-only
+readiness check before traffic changes. Newly created campaigns do not inherit this capability.
 
 ## Edge contract
 
