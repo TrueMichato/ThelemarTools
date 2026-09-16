@@ -33,6 +33,7 @@ import {
 	normalizeCurrency,
 	normalizeSafeItemSummary,
 	normalizeSemanticOperation,
+	orderTransfersForLifecycleCancellation,
 	prepareTransferRequest,
 	removeTransferPayload,
 } from "./hub-actions.js";
@@ -5151,6 +5152,7 @@ export class PostgresHubStore {
 			return {
 				kind,
 				id,
+				sourceRevision: character.revision,
 				ownerAccountId: character.ownerAccountId,
 				character,
 				container: character.data,
@@ -5175,6 +5177,7 @@ export class PostgresHubStore {
 		return {
 			kind,
 			id,
+			sourceRevision: Number(party.revision),
 			container: await this._pReadPartyContainer({client, party}),
 			pWrite: async container => {
 				await this._pWritePartyContainer({client, party, container});
@@ -5209,6 +5212,7 @@ export class PostgresHubStore {
 	_getTransfer (row) {
 		const {
 			_actorCommandId: actorCommandId = null,
+			_sourceRevision: sourceRevision = null,
 			...payload
 		} = row.payload || {};
 		return {
@@ -5220,6 +5224,7 @@ export class PostgresHubStore {
 			sourceId: row.source_character_id || row.source_party_inventory_id,
 			targetKind: row.target_character_id ? "character" : "party_inventory",
 			targetId: row.target_character_id || row.target_party_inventory_id,
+			...(Number.isSafeInteger(sourceRevision) ? {_sourceRevision: sourceRevision} : {}),
 			status: row.status,
 			payload,
 			createdAt: row.created_at,
@@ -5230,7 +5235,7 @@ export class PostgresHubStore {
 	async _pCancelIncomingForCharacter ({client, campaignId, characterId, actorAccountId}) {
 		await client.query(`UPDATE hub.pending_actions SET status = 'cancelled', updated_at = now() WHERE campaign_id = $1 AND target_character_id = $2 AND status = 'proposed'`, [campaignId, characterId]);
 		const transfers = await client.query(`SELECT * FROM hub.transfers WHERE campaign_id = $1 AND target_character_id = $2 AND status IN ('proposed', 'reserved') FOR UPDATE`, [campaignId, characterId]);
-		for (const row of transfers.rows) {
+		for (const row of this._getTransferRowsForLifecycleCancellation(transfers.rows)) {
 			await this._pCancelTransferForLifecycle({
 				client,
 				row,
@@ -5269,6 +5274,12 @@ export class PostgresHubStore {
 		});
 	}
 
+	_getTransferRowsForLifecycleCancellation (rows) {
+		const rowById = new Map(rows.map(row => [row.id, row]));
+		return orderTransfersForLifecycleCancellation(rows.map(row => this._getTransfer(row)))
+			.map(transfer => rowById.get(transfer.id));
+	}
+
 	async _pCancelTransfersForLifecycle ({client, campaignId, affectedAccountId, characterIds, actorAccountId, reason}) {
 		const transfers = await client.query(`
 			SELECT *
@@ -5282,7 +5293,7 @@ export class PostgresHubStore {
 			ORDER BY id
 			FOR UPDATE
 		`, [campaignId, affectedAccountId, characterIds]);
-		for (const row of transfers.rows) {
+		for (const row of this._getTransferRowsForLifecycleCancellation(transfers.rows)) {
 			await this._pCancelTransferForLifecycle({client, row, actorAccountId, reason});
 		}
 	}
@@ -5693,6 +5704,7 @@ export class PostgresHubStore {
 						? {request: prepared.request, preview: prepared.preview}
 						: {escrow: prepared.escrow}),
 					_actorCommandId: actorCommandId,
+					_sourceRevision: source.sourceRevision,
 				}),
 			]);
 			const transfer = this._getTransfer(inserted.rows[0]);

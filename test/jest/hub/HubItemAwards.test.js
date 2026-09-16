@@ -1364,6 +1364,92 @@ describe("Campaign Hub item award domain", () => {
 		expect(secondModified.quantity + secondOriginal.quantity).toBe(6);
 	});
 
+	it("restores independently reserved whole stacks in original order during lifecycle cancellation", async () => {
+		const ctx = await pCreateStoreFixture();
+		const entryIds = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+		const source = await ctx.pCreateCharacter(ctx.accounts.playerA, "Lifecycle source", [
+			{
+				id: entryIds[0],
+				item: {
+					name: "First",
+					source: "PHB",
+					charges: 5,
+					chargesCurrent: 4,
+					material: {name: "Star Iron", source: "PHB"},
+					custom: {batch: "first"},
+				},
+				quantity: 1,
+				note: "First original",
+				customState: {privacy: "owner-only"},
+			},
+			{
+				id: entryIds[1],
+				item: {
+					name: "Second",
+					source: "PHB",
+					charges: 7,
+					chargesCurrent: 3,
+					material: {name: "Dragonbone", source: "PHB"},
+					custom: {batch: "second"},
+				},
+				quantity: 1,
+				note: "Second original",
+				customState: {privacy: "owner-only"},
+			},
+			{id: entryIds[2], item: {name: "Third", source: "PHB"}, quantity: 1},
+		]);
+		const originalInventory = structuredClone((await ctx.store.pGetCharacter({
+			accountId: ctx.accounts.playerA.id,
+			characterId: source.id,
+		})).character.data.inventory);
+		const reservations = [];
+		for (const [index, entryId] of entryIds.slice(0, 2).entries()) {
+			const response = await ctx.store.pProposeTransfer({
+				accountId: ctx.accounts.playerA.id,
+				campaignId: ctx.campaign.id,
+				sourceKind: "character",
+				sourceId: source.id,
+				targetKind: "character",
+				targetId: ctx.characterB.id,
+				payload: {items: [{entryId, quantity: 1}]},
+				idempotencyKey: `lifecycle-order-reserve-${index}`,
+			});
+			expect(response.transfer.status).toBe("reserved");
+			expect(response.transfer).not.toHaveProperty("_sourceRevision");
+			reservations.push(response.transfer);
+		}
+		expect((await ctx.store.pGetCharacter({
+			accountId: ctx.accounts.playerA.id,
+			characterId: source.id,
+		})).character.data.inventory.map(entry => entry.id)).toEqual([entryIds[2]]);
+
+		const targetMembership = await ctx.store.pGetMembership({
+			accountId: ctx.accounts.playerB.id,
+			campaignId: ctx.campaign.id,
+		});
+		await ctx.store.pChangeMemberRole({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+			membershipId: targetMembership.id,
+			role: "spectator",
+			idempotencyKey: "lifecycle-order-spectator",
+		});
+
+		const restored = (await ctx.store.pGetCharacter({
+			accountId: ctx.accounts.playerA.id,
+			characterId: source.id,
+		})).character.data.inventory;
+		expect(restored).toEqual(originalInventory);
+		expect(restored.map(entry => entry.id)).toEqual(entryIds);
+		expect(restored.map(entry => entry.quantity)).toEqual([1, 1, 1]);
+		const cancellationEvents = (await ctx.store.pListVisibleEvents({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+		})).filter(event => event.type === "transfer.cancelled");
+		expect(cancellationEvents.slice(-2).map(event => event.aggregateId))
+			.toEqual([reservations[1].id, reservations[0].id]);
+	});
+
 	it("tightens the legacy grant to safe metadata without breaking name/source callers", async () => {
 		const ctx = await pCreateStoreFixture();
 		const safe = await ctx.store.pGrantItem({

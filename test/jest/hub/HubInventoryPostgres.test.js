@@ -1409,6 +1409,115 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		})).rejects.toMatchObject({code: "FORBIDDEN"});
 	});
 
+	test("restores independently reserved whole stacks in original order during lifecycle cancellation", async () => {
+		const lifecycleTargetOwner = await pCreateAccount("Inventory Ordered Lifecycle Target");
+		const lifecycleMembership = await pJoinCampaign(lifecycleTargetOwner);
+		const entryIds = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+		const source = (await store.pCreateCharacter({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			data: {
+				name: `${prefix} ordered lifecycle source`,
+				inventory: [
+					{
+						id: entryIds[0],
+						item: {
+							name: "First",
+							source: "PHB",
+							charges: 5,
+							chargesCurrent: 4,
+							material: {name: "Star Iron", source: "PHB"},
+							custom: {batch: "first"},
+						},
+						quantity: 1,
+						note: "First original",
+						customState: {privacy: "owner-only"},
+					},
+					{
+						id: entryIds[1],
+						item: {
+							name: "Second",
+							source: "PHB",
+							charges: 7,
+							chargesCurrent: 3,
+							material: {name: "Dragonbone", source: "PHB"},
+							custom: {batch: "second"},
+						},
+						quantity: 1,
+						note: "Second original",
+						customState: {privacy: "owner-only"},
+					},
+					{id: entryIds[2], item: {name: "Third", source: "PHB"}, quantity: 1},
+				],
+				currency: {},
+			},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const originalInventory = structuredClone((await pReadCharacter(sourceOwner.id, source.id)).data.inventory);
+		const target = (await store.pCreateCharacter({
+			accountId: lifecycleTargetOwner.id,
+			campaignId: campaign.id,
+			data: {name: `${prefix} ordered lifecycle target`, inventory: [], currency: {}},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const reservations = [];
+		for (const entryId of entryIds.slice(0, 2)) {
+			const response = await store.pProposeTransfer({
+				accountId: sourceOwner.id,
+				campaignId: campaign.id,
+				sourceKind: "character",
+				sourceId: source.id,
+				targetKind: "character",
+				targetId: target.id,
+				payload: {items: [{entryId, quantity: 1}]},
+				idempotencyKey: crypto.randomUUID(),
+			});
+			expect(response.transfer).not.toHaveProperty("_sourceRevision");
+			reservations.push(response.transfer);
+		}
+		expect((await pReadCharacter(sourceOwner.id, source.id)).data.inventory.map(entry => entry.id))
+			.toEqual([entryIds[2]]);
+
+		const orderedTransferIds = [crypto.randomUUID(), crypto.randomUUID()].sort();
+		await pool.query(`
+			UPDATE hub.transfers
+			SET id = CASE id
+				WHEN $1::uuid THEN $3::uuid
+				WHEN $2::uuid THEN $4::uuid
+			END
+			WHERE id = ANY($5::uuid[])
+		`, [
+			reservations[0].id,
+			reservations[1].id,
+			orderedTransferIds[0],
+			orderedTransferIds[1],
+			reservations.map(transfer => transfer.id),
+		]);
+
+		await store.pChangeMemberRole({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			membershipId: lifecycleMembership.id,
+			role: "spectator",
+			idempotencyKey: crypto.randomUUID(),
+		});
+
+		const restored = (await pReadCharacter(sourceOwner.id, source.id)).data.inventory;
+		expect(restored).toEqual(originalInventory);
+		expect(restored.map(entry => entry.id)).toEqual(entryIds);
+		expect(restored.map(entry => entry.quantity)).toEqual([1, 1, 1]);
+		const cancellationEvents = (await store.pListVisibleEvents({
+			accountId: dm.id,
+			campaignId: campaign.id,
+		})).filter(event => event.type === "transfer.cancelled");
+		expect(cancellationEvents.slice(-2).map(event => event.aggregateId))
+			.toEqual([orderedTransferIds[1], orderedTransferIds[0]]);
+	});
+
 	test("rolls back every PostgreSQL lifecycle cancellation when one escrow restore is invalid", async () => {
 		const lifecycleTargetOwner = await pCreateAccount("Inventory Atomic Lifecycle Target");
 		const lifecycleMembership = await pJoinCampaign(lifecycleTargetOwner);

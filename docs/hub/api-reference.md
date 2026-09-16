@@ -276,7 +276,10 @@ destination, resolution, audit, event, outbox, or receipt changes. Approval-boun
 available for an exact reject/cancel restoration. If the remaining same-ID source stack was edited after a
 partial reservation, restoration merges only when the complete transferable metadata is still stack-equivalent.
 Otherwise the escrowed original returns as a collision-free stack near its original index, preserving both
-metadata identities and the conserved total quantity.
+metadata identities and the conserved total quantity. Each reserved transfer also records the source container
+revision at reservation time as private authority metadata. Lifecycle cancellation restores reservations from
+the newest source revision to the oldest, so independently reserved whole stacks undo in deterministic LIFO
+order and recover their original relative positions in both stores without exposing that revision to viewers.
 
 The server derives item eligibility and stack compatibility from canonical data. A whole stack is refused
 while equipped, attuned, container-linked, spell/component-linked (including a real `itemGrantedSpells[].itemId`
