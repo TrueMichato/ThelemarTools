@@ -120,19 +120,24 @@ sequenceDiagram
 The client never treats an unacknowledged queued snapshot as a new base. Each submitted write retains its own
 base so overlapping and disjoint changes are classified correctly. The repository persists an ordered recovery
 queue as one base plus an ordered patch chain containing every closed one-shot activity descriptor and exact
-idempotency key. Before network submission it also persists the hash-significant PATCH body and the rules-version
-pin; a transport retry sends that exact key/body pair. A confirmed revision conflict rebases into a newly persisted
-request with a new key. The queue is capped at 32 commands and 3.5 MB; a command that cannot be added durably is
-rejected before network submission. Authoritative operation and resync transforms advance every queued base and
-snapshot, then replace the complete persisted queue before replay. Only the matching successful command is
-dequeued. Later commands retain coherent original base/snapshot pairs so their deltas rebase over canonical XP,
-inventory, and operation changes instead of interpreting stale snapshots as full replacements. Choosing local
-after an overlap replays every unresolved command in order against the selected local document and rotates any
-request whose body changed. Choosing server explicitly discards the complete queue and installs that canonical
-document and its operation watermark into the accepted, live, latest-submitted, and visible Character Sheet tracks
-inside the same serialized mutation. Realtime resumes only after that fenced adoption, so neither an
-already-covered event nor a genuinely newer queued operation can be overwritten by the caller's stale conflict
-result.
+idempotency key. Activity-bearing commands also persist one absolute replay deadline, set 23 hours after the
+command is first queued and never extended by reload, rebase, or key rotation. Before network submission the
+repository persists the hash-significant PATCH body and rules-version pin; a transport retry sends that exact
+key/body pair. A confirmed revision conflict means no successful receipt matched before the server checked
+revision. Recovery therefore rebases into a newly persisted request with a new key and retains its activity even
+when the rebased document patch is empty; canonical document equality alone cannot prove the semantic event
+committed. Only a successful receipt response completes and dequeues the command. The queue is capped at 32
+commands and 3.5 MB; a
+command that cannot be added durably is rejected before network submission. Authoritative operation and resync
+transforms advance every queued base and snapshot, then replace the complete persisted queue before replay. Only
+the matching successful command is dequeued. Later commands retain coherent original base/snapshot pairs so
+their deltas rebase over canonical XP, inventory, and operation changes instead of interpreting stale snapshots
+as full replacements. Choosing local after an overlap replays every unresolved command in order against the
+selected local document and rotates any request whose body changed. Choosing server explicitly discards the
+complete queue and installs that canonical document and its operation watermark into the accepted, live,
+latest-submitted, and visible Character Sheet tracks inside the same serialized mutation. Realtime resumes only
+after that fenced adoption, so neither an already-covered event nor a genuinely newer queued operation can be
+overwritten by the caller's stale conflict result.
 
 Recovery format 3 records whether the exact hash-significant request can still be proven. Legacy format-1/2
 activity commands that lack the original PATCH body or rules-version pin are quarantined locally with
@@ -145,13 +150,23 @@ the decision; edits made after dismissal are included as a separate unsaved docu
 The repository refetches canonical truth inside the serialized mutation, durably clears the entire blocked queue,
 adopts that document into every live/accepted coverage track, and only then permits later saves. A quarantined
 recovery-only create which is still absent from an owner-scoped server listing can instead be explicitly exported
-and discarded without inventing server state. A save block prevents newer commands accumulating behind the
-quarantined activity. Activity-free legacy commands may safely rotate their command keys, persist a current
-request envelope, and resume convergence because they cannot duplicate a semantic event. A transactional
+and discarded without inventing server state. A save block prevents newer commands accumulating behind an
+expired activity or any stable non-recoverable failed queue head; the Character Sheet presents the same complete
+export/use-server decision rather than silently accumulating later saves behind poison. Activity-free legacy
+commands may safely rotate their command keys, persist a current request envelope, and resume convergence because
+they cannot duplicate a semantic event. Activity-bearing recovery is quarantined when its persisted deadline is
+missing or reached, before hydration/drain can replay it beyond the server receipt lifetime. A transactional
 `RULES_VERSION_STALE` rejection likewise proves the old request did not commit: the repository adopts the
 authoritative active version, rotates the affected key, durably stores the replacement envelope, and only then
-retries. A format-2 `pending` state alone does not prove a request was unsent; only records carrying the later
-rules-pin marker but no prepared outbound PATCH qualify for that compatibility path.
+retries. `POLICY_VERSION_STALE` is also proof of non-commit. Create and patch recovery refetch canonical state,
+rebase the complete queue, remove the stale derived `data.carry` authority from the outbound document, rotate
+only the affected request identity, durably replace the queue envelope, and then retry under the active rules
+pin. This prevents a retry from reproducing the stale embedded `data.carry.basis.rulesVersionId` even when the
+request-level pin is current. A format-2 `pending` state alone does not prove a request was unsent; only records
+carrying the later rules-pin marker but no prepared outbound PATCH qualify for that compatibility path.
+`IDEMPOTENCY_RESULT_GONE` is not receipt expiry: it proves a prior receipt references a character that has since
+been removed. Create recovery never rotates or recreates from that result; it blocks behind the same complete
+export/discard lifecycle choice.
 
 Recovery queues carry the authenticated owner id and explicit first-command intent. Only genuine creates retain
 the original `clientImportId`; patch recovery is never exposed or replayed as a replacement create when its

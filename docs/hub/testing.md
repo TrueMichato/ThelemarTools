@@ -326,6 +326,12 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   cannot create a false inventory overlap, semantically converged stale recovery records clear before the next
   save, canonical-equivalent failed writes stop reporting false pending work, and genuinely unique failed or
   discarded local intent remains recoverable across authoritative, live-operation, and resync paths.
+  Recovery-safety regressions additionally cover create/patch `POLICY_VERSION_STALE` with stale embedded carry
+  identity, persisted replacement envelopes across reload and later saves, activity-only expiry quarantine,
+  response-loss resource casts quarantined before receipt expiry, in-window revision conflicts retaining activity
+  after an empty rebase, expired/unexpired/activity-free hydration, committed-then-removed creates never being
+  recreated, and stable poison heads becoming actionable export/use-server blocks. Memory and PostgreSQL
+  authority tests prove stale carry rejection changes no character revision, audit, event, outbox, or receipt evidence.
 - Item-award regressions mutation-verify role/tenant/target gates, strict source and note/quantity bounds,
   trusted site/campaign identity resolution, cross-authority collision rejection, resolved Recent provenance,
   full authoritative metadata persistence, privacy-reduced

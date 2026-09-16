@@ -1,6 +1,6 @@
-import {HubApiClient} from "./hub-api-client.js";
+import {HUB_COMMAND_REPLAY_WINDOW_MS, HubApiClient} from "./hub-api-client.js";
 import {applyJsonPatch, diffJson, getJsonPatchesWithDocumentValues, rebaseJsonChanges} from "./hub-json-patch.js";
-import {withRootCarryWrite} from "./hub-carry-authority.js";
+import {stripCarryAuthority, withRootCarryWrite} from "./hub-carry-authority.js";
 import {HubBroadcastSync} from "./hub-broadcast-sync.js";
 import {CHARACTER_OPERATION_LEGS, getCharacterOperationRouting, getOperationLegKey} from "./hub-character-operation-events.js";
 import {getCharacterDocumentWithoutDeterministicItemAliases} from "./hub-inventory-equivalence.js";
@@ -26,6 +26,29 @@ const _RECOVERY_COMMAND_QUEUE_LIMIT = 32;
 const _RECOVERY_COMMAND_QUEUE_MAX_BYTES = 3_500_000;
 const _RECOVERY_COMMAND_TRACK_PREFIX = "recoveryCommand";
 const _SERVER_AUTHORITATIVE_CHARACTER_PATHS = ["/inventory", "/xp"];
+const _DEFINITIVE_RECOVERY_FAILURE_CODES = new Set([
+	"INVALID_REQUEST",
+	"INVALID_ID",
+	"IDEMPOTENCY_KEY_REQUIRED",
+	"IDEMPOTENCY_KEY_REUSED",
+	"IDEMPOTENCY_RESULT_GONE",
+	"PAYLOAD_TOO_LARGE",
+	"REQUEST_REJECTED",
+	"CHARACTER_NOT_FOUND",
+	"CHARACTER_INVALID",
+	"CHARACTER_TOO_LARGE",
+	"CONTENT_POLICY_VIOLATION",
+	"RULES_PROTOCOL_UNSUPPORTED",
+	"RULES_SCHEMA_UNSUPPORTED",
+	"RULES_CATALOG_UNSUPPORTED",
+	"RULES_UNAVAILABLE",
+	"CLOUD_DATA_INVALID",
+	"CLOUD_DATA_TOO_LARGE",
+	"CLOUD_DATA_TOO_DEEP",
+	"CLOUD_HTML_FORBIDDEN",
+	"CLOUD_URL_FORBIDDEN",
+	"CLOUD_KEY_FORBIDDEN",
+]);
 
 const isServerAuthoritativeCharacterPath = path => _SERVER_AUTHORITATIVE_CHARACTER_PATHS
 	.some(authoritativePath => path === authoritativePath || path.startsWith(`${authoritativePath}/`));
@@ -39,13 +62,19 @@ export class HubHttpCharacterRepository {
 		broadcastSync = null,
 		fnGetRulesVersionId = () => null,
 		fnNormalizeCharacterDocument = getCharacterDocumentWithoutDeterministicItemAliases,
+		fnNow = () => Date.now(),
+		activityReplayWindowMs = HUB_COMMAND_REPLAY_WINDOW_MS,
 	}) {
 		if (campaignId != null && (typeof campaignId !== "string" || !campaignId)) throw new TypeError(`campaignId must be a non-empty string or null.`);
 		if (typeof fnNormalizeCharacterDocument !== "function") throw new TypeError(`fnNormalizeCharacterDocument must be a function.`);
+		if (typeof fnNow !== "function") throw new TypeError(`fnNow must be a function.`);
+		if (!Number.isFinite(activityReplayWindowMs) || activityReplayWindowMs <= 0) throw new TypeError(`activityReplayWindowMs must be positive.`);
 		this._campaignId = campaignId;
 		this._api = api;
 		this._fnGetRulesVersionId = fnGetRulesVersionId;
 		this._fnNormalizeCharacterDocument = fnNormalizeCharacterDocument;
+		this._fnNow = fnNow;
+		this._activityReplayWindowMs = activityReplayWindowMs;
 		this._scopeKey = campaignId || "detached";
 		this._broadcastSync = broadcastSync || (
 			!campaignId || typeof BroadcastChannel === "undefined"
@@ -1879,10 +1908,14 @@ export class HubHttpCharacterRepository {
 		const commands = queue.map(command => ({
 			character: {...structuredClone(command.submittedSnapshot), id: canonicalId},
 			activity: structuredClone(command.submittedActivity ?? null),
+			...(command.submittedActivity && Number.isFinite(command.activityReplayUntil)
+				? {activityReplayUntil: command.activityReplayUntil}
+				: {}),
 			commandKeys: {...command.commandKeys},
 			rulesVersionId: command.submittedRulesVersionId ?? null,
 			intent: command.intent || (command.submittedBase == null ? "create" : "patch"),
 			state: command.state,
+			...(command.recoveryFailureCode ? {failureCode: command.recoveryFailureCode} : {}),
 		}));
 		return {
 			intent: commands[0]?.intent || "patch",
@@ -1913,9 +1946,13 @@ export class HubHttpCharacterRepository {
 			const out = {
 				patches: commandPatches,
 				activity: structuredClone(command.submittedActivity),
+				...(command.submittedActivity && Number.isFinite(command.activityReplayUntil)
+					? {activityReplayUntil: command.activityReplayUntil}
+					: {}),
 				commandKeys: {...command.commandKeys},
 				rulesVersionId: command.submittedRulesVersionId ?? null,
 				...(command.isExactRequestUnproven ? {isExactRequestUnproven: true} : {}),
+				...(command.recoveryFailureCode ? {recoveryFailureCode: command.recoveryFailureCode} : {}),
 				...(command.outboundPatch
 					? {
 						outboundPatch: {
@@ -1966,9 +2003,13 @@ export class HubHttpCharacterRepository {
 			submittedSnapshotCoverage: isCoverageKnown ? deserializeCoverage(raw.coverage.snapshot) : createCoverage(),
 			commandKeys: {...raw.commandKeys},
 			submittedRulesVersionId: raw.rulesVersionId ?? null,
+			activityReplayUntil: Number.isFinite(raw.activityReplayUntil) ? raw.activityReplayUntil : null,
 			isExactRequestUnproven: raw.isExactRequestUnproven === true
 				|| !Object.hasOwn(raw, "rulesVersionId")
 				|| !raw.outboundPatch,
+			recoveryFailureCode: typeof raw.recoveryFailureCode === "string" && raw.recoveryFailureCode
+				? raw.recoveryFailureCode
+				: null,
 			outboundPatch: raw.outboundPatch
 				? {
 					baseRevision: raw.outboundPatch.baseRevision,
@@ -2008,6 +2049,11 @@ export class HubHttpCharacterRepository {
 				submittedRulesVersionId: isUnsubmittedLegacyPatch && !Object.hasOwn(raw, "rulesVersionId")
 					? this._fnGetRulesVersionId()
 					: raw.rulesVersionId ?? null,
+				activityReplayUntil: Number.isFinite(raw.activityReplayUntil)
+					? raw.activityReplayUntil
+					: (isUnsubmittedLegacyPatch && raw.activity
+						? this._fnNow() + this._activityReplayWindowMs
+						: null),
 				isExactRequestUnproven: raw.isExactRequestUnproven === true || (
 					isLegacyQueue
 					&& !isUnsubmittedLegacyPatch
@@ -2016,6 +2062,9 @@ export class HubHttpCharacterRepository {
 						|| (intent === "patch" && !raw.outboundPatch)
 					)
 				),
+				recoveryFailureCode: typeof raw.recoveryFailureCode === "string" && raw.recoveryFailureCode
+					? raw.recoveryFailureCode
+					: null,
 				outboundPatch: raw.outboundPatch
 					? {
 						baseRevision: raw.outboundPatch.baseRevision,
@@ -2029,6 +2078,126 @@ export class HubHttpCharacterRepository {
 			baseCoverage = this._cloneTrackCoverage(snapshotCoverage);
 		}
 		return queue;
+	}
+
+	_isActivityReplayUnavailable (command) {
+		if (!command?.submittedActivity) return false;
+		return command.isExactRequestUnproven
+			|| !Number.isFinite(command.activityReplayUntil)
+			|| this._fnNow() >= command.activityReplayUntil;
+	}
+
+	_isRecoveryResolutionRequired (command) {
+		return !!command?.recoveryFailureCode || this._isActivityReplayUnavailable(command);
+	}
+
+	_getRecoveryResolutionMessage (command) {
+		if (command?.recoveryFailureCode) {
+			return `This recovered command cannot be retried safely after ${command.recoveryFailureCode}. Export the local character, then load server state to discard the blocked recovery.`;
+		}
+		if (command?.isExactRequestUnproven) {
+			return `This recovered activity cannot be retried safely because the earlier browser version did not store its exact request. Export the local character, then load server state to discard the blocked recovery.`;
+		}
+		return `This recovered activity cannot be retried safely because its 23-hour replay window expired. Export the local character, then load server state to discard the blocked recovery.`;
+	}
+
+	_getBlockedRecoveryError ({characterId, queue, command = queue[0]}) {
+		const canonicalId = this._canonicalIds.get(characterId) || characterId;
+		const recovery = this._getRecoveryExport({characterId: canonicalId, queue});
+		const message = this._getRecoveryResolutionMessage(command);
+		this._setSaveBlock(canonicalId, {
+			reason: command?.recoveryFailureCode
+				? "failed_request_unavailable"
+				: (command?.isExactRequestUnproven ? "exact_request_unavailable" : "activity_replay_expired"),
+			code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE",
+			message,
+			recovery,
+		});
+		const error = this._getRecoveryStorageError({
+			code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE",
+			message,
+		});
+		error.recovery = recovery;
+		return error;
+	}
+
+	_isDefinitiveRecoveryFailure (error) {
+		return _DEFINITIVE_RECOVERY_FAILURE_CODES.has(error?.code);
+	}
+
+	_replaceRecoveryCommandHead ({
+		characterId,
+		command,
+		submittedBase,
+		submittedSnapshot,
+		submittedBaseCoverage,
+		submittedSnapshotCoverage,
+		rulesVersionId,
+		rotateKey,
+		outboundPatch = null,
+		isStripCarryAuthority = false,
+	}) {
+		const entry = this._getRecoveryCommandQueueEntry(characterId);
+		if (!entry?.queue.length || !this._areSameCommandKeys(entry.queue[0].commandKeys, command.commandKeys)) {
+			throw new Error(`Character recovery command queue changed during serialized replacement.`);
+		}
+		const headSnapshot = structuredClone(submittedSnapshot);
+		if (isStripCarryAuthority) stripCarryAuthority(headSnapshot);
+		const previousCommandKeys = command.commandKeys;
+		const commandKeys = {...previousCommandKeys, [rotateKey]: crypto.randomUUID()};
+		const head = {
+			...command,
+			commandKeys,
+			submittedRulesVersionId: rulesVersionId ?? null,
+			submittedBase: structuredClone(submittedBase),
+			submittedBaseCoverage: this._cloneTrackCoverage(submittedBaseCoverage),
+			submittedSnapshot: headSnapshot,
+			submittedSnapshotCoverage: this._cloneTrackCoverage(submittedSnapshotCoverage),
+			outboundPatch: outboundPatch
+				? {
+					baseRevision: outboundPatch.baseRevision,
+					patches: structuredClone(outboundPatch.patches),
+				}
+				: null,
+			recoveryFailureCode: null,
+			state: "pending",
+		};
+		const queueNxt = [head];
+		let previousSnapshot = structuredClone(head.submittedSnapshot);
+		let previousCoverage = this._cloneTrackCoverage(head.submittedSnapshotCoverage);
+		for (const pending of entry.queue.slice(1)) {
+			const rebased = this._rebaseAuthoritativeCandidate({
+				base: pending.submittedBase,
+				local: pending.submittedSnapshot,
+				remote: previousSnapshot,
+				isPreserveLocalOnConflict: true,
+			}).document;
+			if (isStripCarryAuthority) stripCarryAuthority(rebased);
+			const submittedSnapshotCoverageNxt = this._cloneTrackCoverage(pending.submittedSnapshotCoverage);
+			if (Number.isInteger(previousCoverage.revision)) submittedSnapshotCoverageNxt.revision = previousCoverage.revision;
+			if (Number.isInteger(previousCoverage.acceptedSequence)) {
+				submittedSnapshotCoverageNxt.acceptedSequence = Math.max(
+					submittedSnapshotCoverageNxt.acceptedSequence || 0,
+					previousCoverage.acceptedSequence,
+				);
+			}
+			const next = {
+				...pending,
+				submittedBase: structuredClone(previousSnapshot),
+				submittedBaseCoverage: this._cloneTrackCoverage(previousCoverage),
+				submittedSnapshot: structuredClone(rebased),
+				submittedSnapshotCoverage: submittedSnapshotCoverageNxt,
+				outboundPatch: null,
+				state: "pending",
+			};
+			queueNxt.push(next);
+			previousSnapshot = structuredClone(next.submittedSnapshot);
+			previousCoverage = this._cloneTrackCoverage(next.submittedSnapshotCoverage);
+		}
+		this._persistRecoveryCommandQueue(characterId, {queue: queueNxt, isRequired: true});
+		Object.assign(previousCommandKeys, commandKeys);
+		Object.assign(command, head, {commandKeys: previousCommandKeys});
+		return this._getRecoveryCommandQueueEntry(characterId).queue[0];
 	}
 
 	_stageRecoveryCommandQueue ({characterId, queue, isRequired = queue.length > 0, storageId = null}) {
@@ -2214,14 +2383,14 @@ export class HubHttpCharacterRepository {
 		const details = error?.details;
 		const rulesVersionId = details && Object.hasOwn(details, "activeRulesVersionId")
 			? details.activeRulesVersionId
-			: this._fnGetRulesVersionId();
+			: (details?.policyIdentity?.id ?? this._fnGetRulesVersionId());
 		return rulesVersionId === previousRulesVersionId
 			? {isChanged: false, rulesVersionId}
 			: {isChanged: true, rulesVersionId};
 	}
 
 	async _pExecuteUpsertCommand (command) {
-		const {
+		let {
 			requestedId,
 			submittedSnapshot,
 			submittedActivity,
@@ -2235,7 +2404,7 @@ export class HubHttpCharacterRepository {
 		if (canonicalId !== requestedId) {
 			this._migrateCharacterIdentity({fromId: requestedId, toId: canonicalId});
 		}
-		const characterNxt = {...structuredClone(submittedSnapshot), id: canonicalId};
+		let characterNxt = {...structuredClone(submittedSnapshot), id: canonicalId};
 		const existingConflict = this._conflicts.get(canonicalId);
 		if (existingConflict) {
 			existingConflict.local = this._rebaseAuthoritativeCandidate({
@@ -2249,24 +2418,13 @@ export class HubHttpCharacterRepository {
 			conflict.recovery = structuredClone(existingConflict);
 			throw conflict;
 		}
-		if (command.isExactRequestUnproven && submittedActivity) {
+		if (this._isRecoveryResolutionRequired(command)) {
 			const queueEntry = this._getRecoveryCommandQueueEntry(canonicalId);
-			const recovery = this._getRecoveryExport({
+			throw this._getBlockedRecoveryError({
 				characterId: canonicalId,
 				queue: queueEntry?.queue || [command],
+				command,
 			});
-			this._setSaveBlock(canonicalId, {
-				reason: "exact_request_unavailable",
-				code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE",
-				message: `This recovered activity cannot be retried safely because the earlier browser version did not store its exact request.`,
-				recovery,
-			});
-			const error = this._getRecoveryStorageError({
-				code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE",
-				message: `This recovered activity cannot be retried safely because the earlier browser version did not store its exact request. Export the local character, then load server state to discard the blocked recovery.`,
-			});
-			error.recovery = recovery;
-			throw error;
 		}
 		if (command.isExactRequestUnproven) {
 			const previousCommandKeys = {...command.commandKeys};
@@ -2316,19 +2474,61 @@ export class HubHttpCharacterRepository {
 						idempotencyKey: commandKeys.create,
 					});
 				} catch (error) {
-					if (error?.code !== "RULES_VERSION_STALE") throw error;
-					const rulesRefresh = this._getRulesVersionAfterStaleRejection({
-						error,
-						previousRulesVersionId: submittedRulesVersionId,
-					});
-					if (!rulesRefresh.isChanged) throw error;
-					const retry = this._prepareRecoveryCreateCommand({
-						characterId: requestedId,
-						command,
-						rulesVersionId: rulesRefresh.rulesVersionId,
-					});
-					submittedRulesVersionId = retry.rulesVersionId;
-					created = await pCreate(retry);
+					if (error?.code === "RULES_VERSION_STALE") {
+						const rulesRefresh = this._getRulesVersionAfterStaleRejection({
+							error,
+							previousRulesVersionId: submittedRulesVersionId,
+						});
+						if (!rulesRefresh.isChanged) throw error;
+						const retry = this._prepareRecoveryCreateCommand({
+							characterId: requestedId,
+							command,
+							rulesVersionId: rulesRefresh.rulesVersionId,
+						});
+						submittedRulesVersionId = retry.rulesVersionId;
+						created = await pCreate(retry);
+					} else if (error?.code === "POLICY_VERSION_STALE") {
+						const accountId = this._session?.account?.id;
+						const characters = await this._api.pListCharacters({campaignId: this._campaignId});
+						const canonical = characters.find(character => (
+							character.ownerAccountId === accountId
+							&& character.clientImportId === requestedId
+						));
+						if (canonical) {
+							this._assertCharacterScope(canonical);
+							created = {character: canonical};
+						} else {
+							const rulesRefresh = this._getRulesVersionAfterStaleRejection({
+								error,
+								previousRulesVersionId: submittedRulesVersionId,
+							});
+							const sanitizedSnapshot = stripCarryAuthority(structuredClone(submittedSnapshot));
+							command = this._replaceRecoveryCommandHead({
+								characterId: requestedId,
+								command,
+								submittedBase: null,
+								submittedSnapshot: sanitizedSnapshot,
+								submittedBaseCoverage,
+								submittedSnapshotCoverage,
+								rulesVersionId: rulesRefresh.rulesVersionId,
+								rotateKey: "create",
+								isStripCarryAuthority: true,
+							});
+							({
+								submittedSnapshot,
+								commandKeys,
+								submittedBase,
+								submittedBaseCoverage,
+								submittedSnapshotCoverage,
+							} = command);
+							submittedRulesVersionId = command.submittedRulesVersionId ?? null;
+							characterNxt = {...structuredClone(submittedSnapshot), id: canonicalId};
+							created = await pCreate({
+								rulesVersionId: submittedRulesVersionId,
+								idempotencyKey: commandKeys.create,
+							});
+						}
+					} else throw error;
 				}
 				canonicalId = created.character.id;
 				this._migrateCharacterIdentity({fromId: requestedId, toId: canonicalId});
@@ -2438,7 +2638,8 @@ export class HubHttpCharacterRepository {
 				throw conflict;
 			}
 			const isRulesVersionStale = error?.code === "RULES_VERSION_STALE";
-			if (!isRulesVersionStale && error?.code !== "REVISION_CONFLICT") throw error;
+			const isPolicyVersionStale = error?.code === "POLICY_VERSION_STALE";
+			if (!isRulesVersionStale && !isPolicyVersionStale && error?.code !== "REVISION_CONFLICT") throw error;
 			if (isRulesVersionStale) {
 				const rulesRefresh = this._getRulesVersionAfterStaleRejection({
 					error,
@@ -2446,11 +2647,23 @@ export class HubHttpCharacterRepository {
 				});
 				if (!rulesRefresh.isChanged) throw error;
 				submittedRulesVersionId = rulesRefresh.rulesVersionId;
+			} else if (isPolicyVersionStale) {
+				submittedRulesVersionId = this._getRulesVersionAfterStaleRejection({
+					error,
+					previousRulesVersionId: submittedRulesVersionId,
+				}).rulesVersionId;
 			}
 			const canonical = await this._api.pGetCharacter({characterId: canonicalId});
+			this._assertCharacterScope(canonical);
+			const rebaseBase = structuredClone(isRetryingPreparedPatch ? (effectiveSubmittedBase || accepted.data) : accepted.data);
+			const rebaseLocal = structuredClone(isRetryingPreparedPatch ? submittedDesired : desired);
+			if (isPolicyVersionStale) {
+				stripCarryAuthority(rebaseBase);
+				stripCarryAuthority(rebaseLocal);
+			}
 			const rebased = this._rebaseOwnerCandidate({
-				base: isRetryingPreparedPatch ? (effectiveSubmittedBase || accepted.data) : accepted.data,
-				local: isRetryingPreparedPatch ? submittedDesired : desired,
+				base: rebaseBase,
+				local: rebaseLocal,
 				remote: canonical.data,
 			});
 			if (rebased.isConflict) {
@@ -2479,20 +2692,54 @@ export class HubHttpCharacterRepository {
 				conflict.recovery = structuredClone(recovery);
 				throw conflict;
 			}
+			if (isPolicyVersionStale) stripCarryAuthority(rebased.document);
 			this._accepted.set(canonicalId, canonical);
 			const rebasedPatches = withRootCarryWrite({
 				patches: diffJson(canonical.data, rebased.document),
 				document: rebased.document,
 				base: canonical.data,
 			});
-			const rebasedOutboundPatch = this._prepareRecoveryPatchCommand({
-				characterId: canonicalId,
-				command,
-				baseRevision: canonical.revision,
-				patches: rebasedPatches,
-				isRotateKey: true,
-				rulesVersionId: submittedRulesVersionId,
-			});
+			const rebasedOutboundPatch = isPolicyVersionStale
+				? (() => {
+					const rebasedSnapshotCoverage = createCoverage({
+						revision: canonical.revision,
+						acceptedSequence: this._getOperationWatermark(canonicalId, canonical),
+						appliedOperationLegIds: submittedSnapshotCoverage.appliedOperationLegIds,
+					});
+					command = this._replaceRecoveryCommandHead({
+						characterId: canonicalId,
+						command,
+						submittedBase: canonical.data,
+						submittedSnapshot: rebased.document,
+						submittedBaseCoverage: this._getAcceptedCoverage(canonicalId),
+						submittedSnapshotCoverage: rebasedSnapshotCoverage,
+						rulesVersionId: submittedRulesVersionId,
+						rotateKey: "patch",
+						outboundPatch: {
+							baseRevision: canonical.revision,
+							patches: rebasedPatches,
+						},
+						isStripCarryAuthority: true,
+					});
+					commandKeys = command.commandKeys;
+					submittedSnapshot = command.submittedSnapshot;
+					submittedBase = command.submittedBase;
+					submittedBaseCoverage = command.submittedBaseCoverage;
+					submittedSnapshotCoverage = command.submittedSnapshotCoverage;
+					return {
+						baseRevision: command.outboundPatch.baseRevision,
+						patches: structuredClone(command.outboundPatch.patches),
+						idempotencyKey: command.commandKeys.patch,
+					};
+				})()
+				: this._prepareRecoveryPatchCommand({
+					characterId: canonicalId,
+					command,
+					baseRevision: canonical.revision,
+					patches: rebasedPatches,
+					isRotateKey: true,
+					rulesVersionId: submittedRulesVersionId,
+				});
 			const leaseNxt = await this.pAcquireLease({characterId: canonicalId});
 			result = await this._api.pPatchCharacter({
 				characterId: canonicalId,
@@ -2539,7 +2786,11 @@ export class HubHttpCharacterRepository {
 				const currentEntry = this._getRecoveryCommandQueueEntry(characterId);
 				const queueNxt = (currentEntry?.queue || entry.queue).map((it, index) => index
 					? it
-					: {...it, state: error?.code === "CHARACTER_CONFLICT" ? "conflict" : "failed"});
+					: {
+						...it,
+						state: error?.code === "CHARACTER_CONFLICT" ? "conflict" : "failed",
+						...(this._isDefinitiveRecoveryFailure(error) ? {recoveryFailureCode: error.code} : {}),
+					});
 				if (error?.code === "CHARACTER_CONFLICT") {
 					const canonicalId = this._canonicalIds.get(characterId) || characterId;
 					const recovery = this._conflicts.get(canonicalId);
@@ -2561,6 +2812,13 @@ export class HubHttpCharacterRepository {
 				} catch (storageError) {
 					this._commitRecoveryCommandQueueInMemory({characterId, queue: queueNxt});
 					throw storageError;
+				}
+				if (this._isDefinitiveRecoveryFailure(error)) {
+					throw this._getBlockedRecoveryError({
+						characterId,
+						queue: queueNxt,
+						command: queueNxt[0],
+					});
 				}
 				throw error;
 			}
@@ -2639,6 +2897,9 @@ export class HubHttpCharacterRepository {
 				requestedId,
 				submittedSnapshot,
 				submittedActivity,
+				activityReplayUntil: submittedActivity
+					? this._fnNow() + this._activityReplayWindowMs
+					: null,
 				commandKeys: {create: crypto.randomUUID(), patch: crypto.randomUUID()},
 				submittedRulesVersionId: this._fnGetRulesVersionId(),
 				isExactRequestUnproven: false,
@@ -2714,6 +2975,16 @@ export class HubHttpCharacterRepository {
 				const book = this._getCoverageBook(canonicalId);
 				book.failedWrite = this._cloneTrackCoverage(latest.submittedSnapshotCoverage);
 				this._failedWrites.set(canonicalId, {...structuredClone(latest.submittedSnapshot), id: canonicalId});
+				const blocked = queue.find(command => this._isRecoveryResolutionRequired(command));
+				if (blocked) {
+					try {
+						this._persistRecoveryCommandQueue(canonicalId, {queue, isRequired: true});
+					} catch {
+						// Keep the readable original blob and install the in-memory recovery choice.
+					}
+					const persistedQueue = this._getRecoveryCommandQueueEntry(canonicalId)?.queue || queue;
+					this._getBlockedRecoveryError({characterId: canonicalId, queue: persistedQueue, command: blocked});
+				}
 				this._clearObsoleteCharacterAliasState(canonicalId);
 				return structuredClone(latest.submittedSnapshot);
 			}
@@ -2742,6 +3013,9 @@ export class HubHttpCharacterRepository {
 						},
 					});
 					this._recoveryCommandQueues.set(canonicalId, [command]);
+					if (this._isRecoveryResolutionRequired(command)) {
+						this._getBlockedRecoveryError({characterId: canonicalId, queue: [command], command});
+					}
 				}
 				this._failedWrites.set(canonicalId, {...structuredClone(parsed.snapshot), id: canonicalId});
 				this._clearObsoleteCharacterAliasState(canonicalId);
@@ -2772,7 +3046,7 @@ export class HubHttpCharacterRepository {
 		let canonicalId = this._canonicalIds.get(characterId) || characterId;
 		return this._pRunMutation(async () => {
 			let queueEntry = this._getRecoveryCommandQueueEntry(canonicalId);
-			if (!queueEntry?.queue.some(command => command.isExactRequestUnproven && command.submittedActivity)) return null;
+			if (!queueEntry?.queue.some(command => this._isRecoveryResolutionRequired(command))) return null;
 			await this._pEnsureSession();
 			let serverDocument = null;
 			try {

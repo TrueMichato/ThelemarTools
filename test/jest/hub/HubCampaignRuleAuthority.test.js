@@ -149,6 +149,8 @@ describe("campaign rule write authority", () => {
 			idempotencyKey: "rules",
 		});
 		const eventCountBeforeInvalidCreates = store._events.length;
+		const auditCountBeforeInvalidCreates = store._audit.length;
+		const receiptCountBeforeInvalidCreates = store._commandReceipts.size;
 		for (const {label, basis, protocolVersion, code} of [
 			{label: "missing identity", basis: {kind: "campaign", settingsDigest: "digest"}, protocolVersion: "4", code: "POLICY_VERSION_STALE"},
 			{label: "detached", basis: {kind: "detached", settingsDigest: "digest"}, protocolVersion: "4", code: "POLICY_VERSION_STALE"},
@@ -164,10 +166,20 @@ describe("campaign rule write authority", () => {
 				data: {carry: {schemaVersion: 1, basis}},
 				protocolVersion,
 				idempotencyKey: `invalid-create-${label}`,
+				activity: {
+					type: "spell.used",
+					spellName: "Shield",
+					spellSource: "PHB",
+					spellLevel: 1,
+					slotLevel: 1,
+					mode: "spell_slot",
+				},
 			})).rejects.toEqual(expect.objectContaining({code}));
 		}
 		expect(store._characters.size).toBe(0);
 		expect(store._events).toHaveLength(eventCountBeforeInvalidCreates);
+		expect(store._audit).toHaveLength(auditCountBeforeInvalidCreates);
+		expect(store._commandReceipts.size).toBe(receiptCountBeforeInvalidCreates);
 		await expect(store.pCreateCharacter({
 			accountId: account.id,
 			campaignId: campaign.id,
@@ -178,6 +190,9 @@ describe("campaign rule write authority", () => {
 			idempotencyKey: "stale-create",
 		})).rejects.toEqual(expect.objectContaining({code: "POLICY_VERSION_STALE"}));
 		expect(store._characters.size).toBe(0);
+		expect(store._events).toHaveLength(eventCountBeforeInvalidCreates);
+		expect(store._audit).toHaveLength(auditCountBeforeInvalidCreates);
+		expect(store._commandReceipts.size).toBe(receiptCountBeforeInvalidCreates);
 		const created = await store.pCreateCharacter({
 			accountId: account.id,
 			campaignId: campaign.id,
@@ -265,6 +280,8 @@ describe("campaign rule write authority", () => {
 			characterId: created.character.id,
 		});
 		const eventCount = store._events.length;
+		const auditCount = store._audit.length;
+		const receiptCount = store._commandReceipts.size;
 		for (const {basis, protocolVersion} of [
 			{basis: {kind: "campaign", settingsDigest: "digest"}, protocolVersion: "4"},
 			{basis: {kind: "detached", settingsDigest: "digest"}, protocolVersion: "4"},
@@ -281,6 +298,14 @@ describe("campaign rule write authority", () => {
 				patches: [{op: "replace", path: "/carry", value: {schemaVersion: 1, basis}}],
 				protocolVersion,
 				idempotencyKey: `patch-${protocolVersion}-${basis.kind}`,
+				activity: {
+					type: "spell.used",
+					spellName: "Shield",
+					spellSource: "PHB",
+					spellLevel: 1,
+					slotLevel: 1,
+					mode: "spell_slot",
+				},
 			})).rejects.toEqual(expect.objectContaining({
 				code: expect.stringMatching(/POLICY_VERSION_STALE|RULES_PROTOCOL_UNSUPPORTED/),
 			}));
@@ -288,6 +313,8 @@ describe("campaign rule write authority", () => {
 		const unchanged = store._characters.get(created.character.id);
 		expect(unchanged.revision).toBe(1);
 		expect(store._events).toHaveLength(eventCount);
+		expect(store._audit).toHaveLength(auditCount);
+		expect(store._commandReceipts.size).toBe(receiptCount);
 		const patched = await store.pPatchCharacter({
 			accountId: account.id,
 			sessionId: session.id,

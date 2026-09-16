@@ -986,20 +986,26 @@ class CharacterSheetPage {
 			recoveryExport.unsavedCharacter = unsavedCharacter;
 		}
 		const isRecoveryOnlyCreate = recovery?.intent === "create";
+		const isFailedCommandRecovery = recovery?.commands?.some(command => command.failureCode);
+		const exportName = isFailedCommandRecovery ? "character-cloud-recovery" : "character-activity-recovery";
 		const choice = await InputUiUtil.pGetUserBoolean({
-			title: "Recovered Activity Needs Your Choice",
-			htmlDescription: isRecoveryOnlyCreate
-				? "This older recovery cannot safely resend its activity, and no server character may exist. Discard the blocked recovery to continue. You can export every queued change first."
-				: "This older recovery cannot safely resend its activity. Load the latest server version to discard the blocked recovery. You can export every queued change first.",
+			title: isFailedCommandRecovery ? "Cloud Save Needs Your Choice" : "Recovered Activity Needs Your Choice",
+			htmlDescription: isFailedCommandRecovery
+				? (isRecoveryOnlyCreate
+					? "This failed cloud save cannot be retried safely, and no server character may exist. Discard the blocked recovery to continue. You can export every queued change first."
+					: "This failed cloud save cannot be retried safely. Load the latest server version to discard the blocked recovery. You can export every queued change first.")
+				: (isRecoveryOnlyCreate
+					? "This older recovery cannot safely resend its activity, and no server character may exist. Discard the blocked recovery to continue. You can export every queued change first."
+					: "This older recovery cannot safely resend its activity. Load the latest server version to discard the blocked recovery. You can export every queued change first."),
 			textYes: isRecoveryOnlyCreate ? "Export Then Discard" : "Export Then Use Server",
 			textNo: isRecoveryOnlyCreate ? "Discard Recovery" : "Use Server",
 		});
 		if (!isResolutionCurrent()) return false;
 		if (choice == null) {
-			DataUtil.userDownload("character-activity-recovery", recoveryExport, {fileType: "character-conflict"});
+			DataUtil.userDownload(exportName, recoveryExport, {fileType: "character-conflict"});
 			return false;
 		}
-		if (choice) DataUtil.userDownload("character-activity-recovery", recoveryExport, {fileType: "character-conflict"});
+		if (choice) DataUtil.userDownload(exportName, recoveryExport, {fileType: "character-conflict"});
 		let isResolutionAdopted = false;
 		let isCreateDiscarded = false;
 		const fnAdoptResolution = resolved => {

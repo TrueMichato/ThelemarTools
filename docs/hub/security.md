@@ -50,6 +50,10 @@
 - Spell-use activity is explicit, never inferred from character patches. Its closed payload contains only the
   bounded spell name/source, spell and slot levels, and a cast-mode enum; it excludes spell text, targets,
   component selections, slot totals, resource names/values, document paths, and arbitrary JSON.
+- Character recovery never blindly replays that one-shot activity after the server's idempotency evidence may
+  have expired. The browser persists an immutable 23-hour activity deadline with the exact command; expiry or
+  missing deadline proof quarantines the complete queue behind export/use-server resolution. Canonical document
+  equality never suppresses activity after revision conflict because the server checks receipts before revision.
 - Targeting is authorized on the server, not filtered in the browser. Semantic peers use random target
   references exposed only by an identity-visible profile. Hidden/missing/stale source, target, or eligibility
   fails as `SOURCE_OR_TARGET_UNAVAILABLE` at creation and `PROPOSAL_STALE` at apply, without identifying the

@@ -784,6 +784,61 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 		}
 	});
 
+	it("presents a failed poison-head save as an actionable cloud recovery choice", async () => {
+		const state = new CharacterSheetState();
+		state.setName("Blocked Caster");
+		const host = makeHost({state});
+		host._currentCharacterId = "character-id";
+		host._characterLoadGeneration = 1;
+		host._isHubCharacter = true;
+		host._reconcileClassFeatures = jest.fn();
+		host._renderCharacter = jest.fn();
+		const recovery = {
+			intent: "patch",
+			character: {...state.toJson(), id: "character-id"},
+			commands: [{
+				character: {...state.toJson(), id: "character-id"},
+				activity: null,
+				failureCode: "POLICY_WRITE_FORBIDDEN",
+				intent: "patch",
+				state: "failed",
+			}],
+		};
+		const error = Object.assign(new Error("Exact request unavailable."), {
+			code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE",
+			recovery,
+		});
+		host._characterRepository = {
+			isRescueMirrorEnabled: false,
+			pUpsert: jest.fn().mockRejectedValue(error),
+			pResolveUnprovableRecovery: jest.fn(async ({fnAdoptLive}) => {
+				fnAdoptLive({id: "character-id", name: "Canonical Caster"});
+				return null;
+			}),
+		};
+		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+		const download = jest.spyOn(characterSheetDataUtil, "userDownload").mockImplementation(() => {});
+		const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+
+		try {
+			await expect(host._saveCurrentCharacter()).resolves.toBe(true);
+			expect(prompt).toHaveBeenCalledWith(expect.objectContaining({
+				title: "Cloud Save Needs Your Choice",
+				htmlDescription: expect.stringContaining("cannot be retried safely"),
+			}));
+			expect(download).toHaveBeenCalledWith(
+				"character-cloud-recovery",
+				recovery,
+				{fileType: "character-conflict"},
+			);
+			expect(host._state.toJson().name).toBe("Canonical Caster");
+		} finally {
+			consoleError.mockRestore();
+			download.mockRestore();
+			prompt.mockRestore();
+		}
+	});
+
 	it("exports and discards a quarantined recovery-only create without requiring server state", async () => {
 		const state = new CharacterSheetState();
 		state.setName("Uncommitted Caster");
