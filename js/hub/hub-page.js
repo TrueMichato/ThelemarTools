@@ -1288,8 +1288,10 @@ async function pInitCampaign ({session}) {
 	let liveMembers = members;
 	let liveCharacters = snapshot.characters;
 	let activityAuthorizationGeneration = 0;
+	let isActivityAuthorizationFenced = false;
 	const invalidateActivityAuthorization = () => {
 		activityAuthorizationGeneration++;
+		isActivityAuthorizationFenced = true;
 		const loadEarlier = document.getElementById("campaign-activity-load-earlier");
 		if (loadEarlier) loadEarlier.disabled = true;
 	};
@@ -1306,9 +1308,16 @@ async function pInitCampaign ({session}) {
 			liveEvents = eventsNxt;
 			activityHistory = historyNxt;
 		},
-		render: renderRecentActivity,
+		render: input => renderRecentActivity({...input, isAuthorizationFenced: isActivityAuthorizationFenced}),
 		renderError,
 		getAuthorizationGeneration: () => activityAuthorizationGeneration,
+		isAuthorizationFenced: () => isActivityAuthorizationFenced,
+		onAuthorizationError: error => {
+			if (!["AUTH_REQUIRED", "FORBIDDEN", "CAMPAIGN_NOT_FOUND"].includes(error?.code)) return false;
+			invalidateActivityAuthorization();
+			isCampaignReloadRequired = true;
+			return true;
+		},
 		isTerminal: () => isCampaignReloadRequired,
 	});
 	if (campaign.status !== "active") {
@@ -1371,17 +1380,21 @@ async function pInitCampaign ({session}) {
 			const pActivityRefresh = Promise.all([pSnapshotNxt, pEventsPageNxt])
 				.then(([snapshotNxt, eventsPageNxt]) => {
 					const isSnapshotCurrent = snapshotNxt.lastSequence >= liveLastSequence;
-					const isAuthorizationChanged = isSnapshotCurrent
-						&& hasHubActivityAuthorizationChanged({
+					const isAuthorizationChanged = isSnapshotCurrent && (
+						isActivityAuthorizationFenced
+						|| hasHubActivityAuthorizationChanged({
 							previousCharacters: liveCharacters,
 							nextCharacters: snapshotNxt.characters,
-						});
+						})
+					);
 					return {
-						events: mergeHubActivityEvents({
-							currentEvents: liveEvents,
-							pageEvents: eventsPageNxt.events,
-							isAuthorizationChanged,
-						}),
+						events: isActivityAuthorizationFenced && !isAuthorizationChanged
+							? []
+							: mergeHubActivityEvents({
+								currentEvents: liveEvents,
+								pageEvents: eventsPageNxt.events,
+								isAuthorizationChanged,
+							}),
 						history: eventsPageNxt.history,
 						isAuthorizationChanged,
 					};
@@ -1406,7 +1419,7 @@ async function pInitCampaign ({session}) {
 			const isSnapshotCurrent = snapshotNxt.lastSequence >= liveLastSequence;
 			liveEvents = activityRefresh.events;
 			if (activityRefresh.isAuthorizationChanged) {
-				invalidateActivityAuthorization();
+				if (!isActivityAuthorizationFenced) invalidateActivityAuthorization();
 				activityHistory = activityRefresh.history;
 			}
 			liveMembers = membersNxt;
@@ -1427,7 +1440,15 @@ async function pInitCampaign ({session}) {
 				isDm: ["dm", "co_dm"].includes(campaign.role),
 				roster: liveRoster,
 			});
-			renderRecentActivity({events: liveEvents, characters: liveCharacters, members: membersNxt, history: activityHistory});
+			if (activityRefresh.isAuthorizationChanged) isActivityAuthorizationFenced = false;
+			renderRecentActivity({
+				events: isActivityAuthorizationFenced ? [] : liveEvents,
+				characters: isActivityAuthorizationFenced ? [] : liveCharacters,
+				members: isActivityAuthorizationFenced ? [] : membersNxt,
+				history: isActivityAuthorizationFenced ? null : activityHistory,
+				isLoading: isActivityAuthorizationFenced,
+				isAuthorizationFenced: isActivityAuthorizationFenced,
+			});
 			if (isRefreshCampaignContext) {
 				context = await api.pGetCampaignContext({campaignId});
 				renderCampaignContext(context);
@@ -1481,12 +1502,31 @@ async function pInitCampaign ({session}) {
 			reloadForAuthorityChange();
 			return;
 		}
-		if (event.type === "character.projection.invalidated") invalidateActivityAuthorization();
+		const isProjectionInvalidation = event.type === "character.projection.invalidated";
+		if (isProjectionInvalidation) {
+			invalidateActivityAuthorization();
+			renderRecentActivity({
+				events: [],
+				characters: [],
+				members: [],
+				history: null,
+				isLoading: true,
+				isAuthorizationFenced: true,
+			});
+		}
 		if (!isCampaignReloadRequired && navigator.onLine) {
 			liveLastSequence = Math.max(liveLastSequence, event.sequence || 0);
-			liveEvents = [...liveEvents.filter(existing => existing.id !== event.id), event]
-				.sort((a, b) => a.sequence - b.sequence);
-			renderRecentActivity({events: liveEvents, characters: liveCharacters, members: liveMembers, history: activityHistory});
+			if (!isProjectionInvalidation) {
+				liveEvents = [...liveEvents.filter(existing => existing.id !== event.id), event]
+					.sort((a, b) => a.sequence - b.sequence);
+				renderRecentActivity({
+					events: liveEvents,
+					characters: liveCharacters,
+					members: liveMembers,
+					history: activityHistory,
+					isAuthorizationFenced: isActivityAuthorizationFenced,
+				});
+			}
 		}
 		// ADR 0011: `character.projection.invalidated` carries no character data. Every
 		// event, including an invalidation, is coalesced into one authorization-scoped
@@ -1810,7 +1850,15 @@ function renderPartyRoster ({campaignId, characters, members, session, isDm, ros
 	}));
 }
 
-function renderRecentActivity ({events, characters, members, history = null, isLoading = false, statusMessage = ""}) {
+function renderRecentActivity ({
+	events,
+	characters,
+	members,
+	history = null,
+	isLoading = false,
+	isAuthorizationFenced = false,
+	statusMessage = "",
+}) {
 	const list = document.getElementById("campaign-activity-list");
 	if (!list) return;
 	const rows = renderHubActivityRows({
@@ -1833,7 +1881,7 @@ function renderRecentActivity ({events, characters, members, history = null, isL
 	}
 	const loadEarlier = document.getElementById("campaign-activity-load-earlier");
 	if (loadEarlier) {
-		loadEarlier.disabled = isLoading;
+		loadEarlier.disabled = isLoading || isAuthorizationFenced;
 		setHidden(loadEarlier, !hasMore);
 	}
 	return rows;

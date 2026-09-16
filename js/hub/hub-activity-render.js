@@ -30,9 +30,12 @@ export function bindHubActivityHistoryPagination ({
 	render,
 	renderError,
 	getAuthorizationGeneration,
+	isAuthorizationFenced = () => false,
+	onAuthorizationError = () => false,
 	isTerminal,
 }) {
 	const pLoadEarlier = async () => {
+		if (isAuthorizationFenced()) return;
 		const initialState = getState();
 		if (!initialState.history?.hasMore) return;
 		const requestAuthorizationGeneration = getAuthorizationGeneration();
@@ -58,6 +61,10 @@ export function bindHubActivityHistoryPagination ({
 			});
 		} catch (error) {
 			if (requestAuthorizationGeneration !== getAuthorizationGeneration()) return;
+			if (onAuthorizationError(error)) {
+				renderError(error);
+				return;
+			}
 			render({
 				...getState(),
 				statusMessage: "Earlier activity could not be loaded. Try again.",
@@ -66,6 +73,7 @@ export function bindHubActivityHistoryPagination ({
 		} finally {
 			if (
 				requestAuthorizationGeneration === getAuthorizationGeneration()
+				&& !isAuthorizationFenced()
 				&& !isTerminal()
 			) button.disabled = false;
 		}

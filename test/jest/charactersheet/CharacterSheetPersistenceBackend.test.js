@@ -18,6 +18,7 @@ const REPO_ROOT = new URL("../../../", import.meta.url).pathname;
 
 let CharacterSheetPage;
 let CharacterSheetState;
+let characterSheetDataUtil;
 
 // A fake dual-backend with genuinely SEPARATE sync (localStorage) and async (IndexedDB)
 // backings, matching the real split. Lets a test place a value in only one backing.
@@ -100,6 +101,7 @@ function makeHost ({state} = {}) {
 		_reconcilePersistedCharacter: proto._reconcilePersistedCharacter,
 		_getNextSavedAt: proto._getNextSavedAt,
 		_pResolveHubCharacterConflict: proto._pResolveHubCharacterConflict,
+		_pResolveUnprovableHubRecovery: proto._pResolveUnprovableHubRecovery,
 		_adoptCanonicalCharacterIdentity: proto._adoptCanonicalCharacterIdentity,
 		_pRefreshCanonicalCharacterRoster: proto._pRefreshCanonicalCharacterRoster,
 		_saveCurrentCharacter: proto._saveCurrentCharacter,
@@ -118,6 +120,8 @@ beforeAll(async () => {
 	// charactersheet.js registers window `load`/`beforeunload` handlers at import time.
 	globalThis.window = globalThis.window || {addEventListener: () => {}, location: {search: "", href: "http://test/"}};
 	globalThis.document = globalThis.document || {getElementById: () => null, querySelector: () => null, addEventListener: () => {}};
+	characterSheetDataUtil = globalThis.DataUtil ||= {};
+	characterSheetDataUtil.userDownload ||= () => {};
 	CharacterSheetState = (await import(`${REPO_ROOT}js/charactersheet/charactersheet-state.js`)).CharacterSheetState;
 	CharacterSheetPage = (await import(`${REPO_ROOT}js/charactersheet/charactersheet.js`)).CharacterSheetPage;
 });
@@ -596,6 +600,68 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 			expect(host._characterRepository.pUpsert.mock.calls[1][0].activity).toBeNull();
 		} finally {
 			consoleError.mockRestore();
+			prompt.mockRestore();
+		}
+	});
+
+	it("exports quarantined activity recovery, adopts server truth, and permits a later save", async () => {
+		const state = new CharacterSheetState();
+		state.setName("Legacy Caster");
+		const host = makeHost({state});
+		host._currentCharacterId = "character-id";
+		host._characterLoadGeneration = 1;
+		host._isHubCharacter = true;
+		host._reconcileClassFeatures = jest.fn();
+		host._renderCharacter = jest.fn();
+		host._pLoadCharacters = jest.fn(async () => {});
+		const recovery = {
+			character: {...state.toJson(), id: "character-id"},
+			activity: {
+				type: "spell.used",
+				spellName: "Shield",
+				spellSource: "PHB",
+				spellLevel: 1,
+				slotLevel: 1,
+				mode: "spell_slot",
+			},
+		};
+		const error = Object.assign(new Error("Exact request unavailable."), {
+			code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE",
+			recovery,
+		});
+		host._characterRepository = {
+			isRescueMirrorEnabled: false,
+			pUpsert: jest.fn()
+				.mockRejectedValueOnce(error)
+				.mockImplementationOnce(async ({character}) => character),
+			pResolveUnprovableRecovery: jest.fn(async ({fnAdoptLive}) => {
+				fnAdoptLive({id: "character-id", name: "Canonical Caster"});
+				return null;
+			}),
+		};
+		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+		const download = jest.spyOn(characterSheetDataUtil, "userDownload").mockImplementation(() => {});
+		const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+
+		try {
+			await expect(host._saveCurrentCharacter({activity: recovery.activity})).resolves.toBe(true);
+			expect(download).toHaveBeenCalledWith(
+				"character-activity-recovery",
+				recovery,
+				{fileType: "character-conflict"},
+			);
+			expect(host._characterRepository.pResolveUnprovableRecovery).toHaveBeenCalledWith(expect.objectContaining({
+				characterId: "character-id",
+				fnAdoptLive: expect.any(Function),
+			}));
+			expect(host._state.toJson().name).toBe("Canonical Caster");
+
+			host._state.setName("Later Save");
+			await expect(host._saveCurrentCharacter()).resolves.toBe(true);
+			expect(host._characterRepository.pUpsert).toHaveBeenCalledTimes(2);
+		} finally {
+			consoleError.mockRestore();
+			download.mockRestore();
 			prompt.mockRestore();
 		}
 	});

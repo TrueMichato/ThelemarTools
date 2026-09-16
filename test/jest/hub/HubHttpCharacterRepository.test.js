@@ -2384,7 +2384,7 @@ describe("HTTP character repository", () => {
 				patches: [{op: "replace", path: "/hp", value: 9}],
 				activity,
 				commandKeys: {create: "create-old", patch: "patch-old"},
-				state: "failed",
+				state: "pending",
 				snapshotCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
 			}],
 		}));
@@ -2411,6 +2411,62 @@ describe("HTTP character repository", () => {
 			commandKeys: {create: "create-old", patch: "patch-old"},
 			isExactRequestUnproven: true,
 		}));
+	});
+
+	it("adopts fresh server truth and clears quarantined activity recovery explicitly", async () => {
+		const storage = new MemoryStorage();
+		const activity = makeSpellActivity("Shield", "spell_slot");
+		storage.setItem("hub-character-recovery:cmp:c", JSON.stringify({
+			version: 1,
+			queueVersion: 2,
+			intent: "patch",
+			base: {hp: 10},
+			baseCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+			commands: [{
+				patches: [{op: "replace", path: "/hp", value: 9}],
+				activity,
+				commandKeys: {create: "create-old", patch: "patch-old"},
+				state: "failed",
+				snapshotCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+			}],
+		}));
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 3, data: {hp: 7}}),
+				pAcquireCharacterLease: async () => ({epoch: 1}),
+				pPatchCharacter: async input => ({
+					character: {id: "c", campaignId: "cmp", revision: 4, data: {hp: input.patches.at(-1).value}},
+				}),
+			},
+		});
+		repository._recoveryStorage = storage;
+
+		await repository.pGet({characterId: "c"});
+		await expect(repository.pUpsert({character: {id: "c", hp: 9}, activity}))
+			.rejects.toMatchObject({code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE"});
+		expect(repository.getSaveBlock("c")).toEqual(expect.objectContaining({
+			code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE",
+		}));
+		await expect(repository.pUpsert({
+			character: {id: "c", hp: 8},
+			activity: makeSpellActivity("Magic Missile", "spell_slot"),
+		})).rejects.toMatchObject({code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE"});
+		expect(repository._recoveryCommandQueues.get("c")).toHaveLength(1);
+		const adopted = [];
+		await expect(repository.pResolveUnprovableRecovery({
+			characterId: "c",
+			fnAdoptLive: character => {
+				adopted.push(character);
+				return true;
+			},
+		})).resolves.toBeNull();
+		expect(adopted).toEqual([{id: "c", hp: 7}]);
+		expect(repository.hasPendingWrites()).toBe(false);
+		expect(repository.getSaveBlock("c")).toBeNull();
+		expect(storage.getItem("hub-character-recovery:cmp:c")).toBeNull();
+		await expect(repository.pUpsert({character: {id: "c", hp: 6}})).resolves.toEqual({id: "c", hp: 6});
 	});
 
 	it("rotates an unproven legacy key before retrying an activity-free recovery", async () => {

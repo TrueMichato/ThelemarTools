@@ -511,8 +511,10 @@ Reconciliation is `R = E(B)`, `F = E(L)`, `nextSave = diff(R, F)`:
   transform every queued base/snapshot and durably replace the queue before replay. Recovery format 3 also records
   whether that exact request is provable. A legacy one-shot activity without its original PATCH body or rules pin
   remains quarantined and exportable under `CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE`; the sheet must not
-  retry it under a reconstructed old-key body or rotate the key and duplicate the activity. Activity-free legacy
-  recovery may rotate keys after its replacement request envelope is durably stored.
+  retry it under a reconstructed old-key body or rotate the key and duplicate the activity. The sheet offers
+  **Export Then Use Server** or **Use Server**; repository resolution fetches canonical truth inside the mutation
+  queue, clears the complete durable recovery queue/save block, adopts the server document, and permits later
+  saves. Activity-free legacy recovery may rotate keys after its replacement request envelope is durably stored.
 - A `CHARACTER_LIVE_CONFLICT` is detected after the original repository command committed. `Keep Local` retries
   only the remaining document delta with `activity: null`; replaying the one-shot activity would create a duplicate
   event under a fresh idempotency key.

@@ -83,8 +83,10 @@ assertion, clears that release gate.
 - Durable recovery format 3 stores the exact PATCH body and rules-version pin used with each idempotency key.
   Legacy activity commands that cannot prove that exact request are quarantined locally and remain exportable;
   never reconstruct under the old key or rotate to a new key, because either path can lose or duplicate the
-  one-shot event. Activity-free legacy commands may rotate keys only after the replacement recovery envelope is
-  durably stored.
+  one-shot event. Quarantine installs a save block so newer commands cannot accumulate; explicit server adoption
+  refetches canonical truth, durably clears the queue, and adopts every repository/page track inside the serialized
+  mutation. Activity-free legacy commands may rotate keys only after the replacement recovery envelope is durably
+  stored. A legacy `pending` state is not proof of non-submission; require the later rules-pin marker too.
 
 Primary sources: `docs/hub/architecture.md`, ADR 0002, `hub-http-character-repository.js`, and the character/
 workspace repository tests.
@@ -95,7 +97,8 @@ workspace repository tests.
 - Backward activity requests are fenced by the authorization generation which started them. If role or projection
   authority changes, replace the visible window and discard older in-flight pages. Projection invalidation,
   authority reload, and realtime access loss increment that generation synchronously rather than waiting for a
-  follow-up authorization fetch.
+  follow-up authorization fetch. Conceal cached rows and keep paging disabled until the authorized replacement
+  succeeds; authorization errors keep the fence latched.
 - The projector has three outcomes: `owner_truth`, `dm_truth`, and recipient-independent `peer_profile`.
 - `character.projection.invalidated` contains metadata only. Consumers batch/coalesce invalidations, refetch the
   authorization-scoped projection over HTTP, sequence-fence responses, and replace the prior view.

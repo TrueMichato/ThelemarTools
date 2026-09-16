@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import {jest} from "@jest/globals";
 import {
 	bindHubActivityHistoryPagination,
 	renderHubActivityRows,
@@ -271,10 +272,15 @@ describe("campaign hub pages", () => {
 		expect(source).not.toContain("character.projection.updated");
 		expect(source).toContain("const reloadForAuthorityChange = () =>");
 		expect(source).toContain("let activityAuthorizationGeneration = 0");
+		expect(source).toContain("let isActivityAuthorizationFenced = false");
 		expect(source).toContain("const invalidateActivityAuthorization = () =>");
+		expect(source).toContain("isActivityAuthorizationFenced = true");
+		expect(source).toContain("isActivityAuthorizationFenced = false");
+		expect(source).toContain("isActivityAuthorizationFenced ? [] : liveEvents");
+		expect(source).toContain("[\"AUTH_REQUIRED\", \"FORBIDDEN\", \"CAMPAIGN_NOT_FOUND\"]");
 		expect(activitySource).toContain("const requestAuthorizationGeneration = getAuthorizationGeneration()");
 		expect(activitySource).toContain("requestAuthorizationGeneration !== getAuthorizationGeneration()");
-		expect(source).toContain("if (event.type === \"character.projection.invalidated\") invalidateActivityAuthorization()");
+		expect(source).toContain("const isProjectionInvalidation = event.type === \"character.projection.invalidated\"");
 		expect(source).toMatch(/state === "access_lost"[\s\S]*invalidateActivityAuthorization\(\)/);
 		expect(activitySource).toContain("requestAuthorizationGeneration === getAuthorizationGeneration()");
 		expect(source).toContain("event.type === \"membership.role_changed\"");
@@ -288,7 +294,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("if (isCampaignReloadRequired) return;");
 		expect(source).toContain("snapshotNxt.lastSequence >= liveLastSequence");
 		expect(source).toContain("liveEvents = [...liveEvents.filter");
-		expect(source).toContain("renderRecentActivity({events: liveEvents");
+		expect(source).toContain("events: liveEvents");
 		expect(source).toContain("getCharacterName(target)");
 		expect(source).toContain("getTransferContainerName({transfer, endpoint: \"source\"");
 		expect(source).toContain("DisplaySnapshot`]?.displayName || \"A character\"");
@@ -341,6 +347,79 @@ describe("campaign hub pages", () => {
 			statusMessage: "",
 		}));
 		expect(button.disabled).toBe(false);
+	});
+
+	it("keeps earlier-activity paging fenced until authorized history is replaced", async () => {
+		const listeners = {};
+		let isAuthorizationFenced = true;
+		const button = {
+			disabled: true,
+			addEventListener: (type, listener) => listeners[type] = listener,
+		};
+		const pListEventPage = jest.fn().mockResolvedValue({
+			events: [],
+			history: {hasMore: false, scannedBackThroughSequence: 1},
+		});
+		bindHubActivityHistoryPagination({
+			button,
+			pListEventPage,
+			getState: () => ({
+				events: [{id: "stale", sequence: 2}],
+				characters: [],
+				members: [],
+				history: {hasMore: true, scannedBackThroughSequence: 2},
+			}),
+			setState: jest.fn(),
+			render: jest.fn(),
+			renderError: jest.fn(),
+			getAuthorizationGeneration: () => 1,
+			isAuthorizationFenced: () => isAuthorizationFenced,
+			isTerminal: () => false,
+		});
+
+		await listeners.click();
+		expect(pListEventPage).not.toHaveBeenCalled();
+		expect(button.disabled).toBe(true);
+
+		isAuthorizationFenced = false;
+		await listeners.click();
+		expect(pListEventPage).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps earlier-activity paging fenced after an authorization error", async () => {
+		const listeners = {};
+		let isAuthorizationFenced = false;
+		const error = Object.assign(new Error("access lost"), {code: "CAMPAIGN_NOT_FOUND"});
+		const button = {
+			disabled: false,
+			addEventListener: (type, listener) => listeners[type] = listener,
+		};
+		const renderError = jest.fn();
+		bindHubActivityHistoryPagination({
+			button,
+			pListEventPage: jest.fn().mockRejectedValue(error),
+			getState: () => ({
+				events: [{id: "visible", sequence: 2}],
+				characters: [],
+				members: [],
+				history: {hasMore: true, scannedBackThroughSequence: 2},
+			}),
+			setState: jest.fn(),
+			render: jest.fn(),
+			renderError,
+			getAuthorizationGeneration: () => 0,
+			isAuthorizationFenced: () => isAuthorizationFenced,
+			onAuthorizationError: caught => {
+				isAuthorizationFenced = caught === error;
+				return isAuthorizationFenced;
+			},
+			isTerminal: () => isAuthorizationFenced,
+		});
+
+		await listeners.click();
+
+		expect(renderError).toHaveBeenCalledWith(error);
+		expect(button.disabled).toBe(true);
 	});
 
 	it("renders normalized character subjects safely and keeps activity rows usable on mobile", () => {

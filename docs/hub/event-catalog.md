@@ -134,7 +134,9 @@ request starts. A role or projection change replaces the visible window and inva
 an old response cannot restore activity removed by the new policy. Projection invalidation, authority reload, and
 realtime access loss advance the generation synchronously; a stale request completion cannot re-enable paging
 after terminal access loss. The read-only pagination handler is installed before the archived-campaign early
-return, so authorized retained history remains reachable when campaign mutations are disabled.
+return, so authorized retained history remains reachable when campaign mutations are disabled. Active campaigns
+conceal cached rows and keep pagination disabled while an authorization replacement is pending; authorization
+errors leave that fence latched.
 
 ## Audit entries
 

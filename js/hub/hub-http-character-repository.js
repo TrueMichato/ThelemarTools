@@ -1878,6 +1878,7 @@ export class HubHttpCharacterRepository {
 			const isUnsubmittedLegacyPatch = isLegacyQueue
 				&& intent === "patch"
 				&& raw.state === "pending"
+				&& Object.hasOwn(raw, "rulesVersionId")
 				&& !raw.outboundPatch;
 			const snapshot = applyJsonPatch(base, raw.patches);
 			const snapshotCoverage = deserializeCoverage(raw.snapshotCoverage);
@@ -2096,14 +2097,21 @@ export class HubHttpCharacterRepository {
 			throw conflict;
 		}
 		if (command.isExactRequestUnproven && submittedActivity) {
-			const error = this._getRecoveryStorageError({
-				code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE",
-				message: `This recovered activity cannot be retried safely because the earlier browser version did not store its exact request. Export the local character before discarding recovery or choosing server state.`,
-			});
-			error.recovery = {
+			const recovery = {
 				character: structuredClone(characterNxt),
 				activity: structuredClone(submittedActivity),
 			};
+			this._setSaveBlock(canonicalId, {
+				reason: "exact_request_unavailable",
+				code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE",
+				message: `This recovered activity cannot be retried safely because the earlier browser version did not store its exact request.`,
+				recovery,
+			});
+			const error = this._getRecoveryStorageError({
+				code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE",
+				message: `This recovered activity cannot be retried safely because the earlier browser version did not store its exact request. Export the local character, then load server state to discard the blocked recovery.`,
+			});
+			error.recovery = recovery;
 			throw error;
 		}
 		if (command.isExactRequestUnproven) {
@@ -2404,6 +2412,7 @@ export class HubHttpCharacterRepository {
 			const error = new Error(saveBlock.message || `Character saving is paused until reconciliation completes.`);
 			error.code = saveBlock.code || "CHARACTER_RECONCILIATION_BLOCKED";
 			error.saveBlock = saveBlock;
+			if (saveBlock.recovery) error.recovery = structuredClone(saveBlock.recovery);
 			return Promise.reject(error);
 		}
 		const requestedId = character.id;
@@ -2572,6 +2581,47 @@ export class HubHttpCharacterRepository {
 		if (!reasons.length || reasons.some(reason => !["LEASE_HELD", "LEASE_FENCED", "LEASE_EXPIRED"].includes(reason))) return false;
 		this._conflicts.delete(canonicalId);
 		return true;
+	}
+
+	async pResolveUnprovableRecovery ({characterId, fnAdoptLive = null}) {
+		const canonicalId = this._canonicalIds.get(characterId) || characterId;
+		return this._pRunMutation(async () => {
+			const queueEntry = this._getRecoveryCommandQueueEntry(canonicalId);
+			if (!queueEntry?.queue.some(command => command.isExactRequestUnproven && command.submittedActivity)) return null;
+			await this._pEnsureSession();
+			const serverDocument = await this._api.pGetCharacter({characterId: canonicalId});
+			this._assertCharacterScope(serverDocument);
+			const stagedQueue = this._stageRecoveryCommandQueue({
+				characterId: canonicalId,
+				queue: [],
+				isRequired: true,
+			});
+			const serverData = this._getData(serverDocument);
+			try {
+				if (fnAdoptLive && fnAdoptLive(structuredClone(serverData)) === false) {
+					this._rollbackStagedRecoveryCommandQueue(stagedQueue);
+					return null;
+				}
+			} catch (error) {
+				this._rollbackStagedRecoveryCommandQueue(stagedQueue);
+				throw error;
+			}
+			this._commitStagedRecoveryCommandQueue(stagedQueue);
+			this._conflicts.delete(canonicalId);
+			this._clearSaveBlock(canonicalId);
+			const serverCoverage = this._getAcceptedCoverage(canonicalId);
+			serverCoverage.revision = serverDocument.revision;
+			const acceptedSequence = this._getOperationWatermark(canonicalId, serverDocument);
+			if (Number.isInteger(acceptedSequence)) serverCoverage.acceptedSequence = acceptedSequence;
+			this._adoptServerConflictResolution({
+				canonicalId,
+				recovery: {
+					serverDocument,
+					coverage: {server: serializeCoverage(serverCoverage)},
+				},
+			});
+			return fnAdoptLive ? null : serverData;
+		});
 	}
 
 	async pResolveConflict ({characterId, choice, fnAdoptLive = null}) {

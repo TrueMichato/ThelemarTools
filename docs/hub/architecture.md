@@ -138,9 +138,13 @@ Recovery format 3 records whether the exact hash-significant request can still b
 activity commands that lack the original PATCH body or rules-version pin are quarantined locally with
 `CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE`: retrying the old key with a reconstructed body would violate
 idempotency, while rotating the key could duplicate the one-shot activity. The Character Sheet keeps the draft
-exportable and requires an explicit discard/server choice instead of sending it. Activity-free legacy commands
-may safely rotate their command keys, persist a current request envelope, and resume convergence because they
-cannot duplicate a semantic event.
+exportable and offers an explicit export-then-use-server or use-server choice instead of sending it. The
+repository refetches canonical truth inside the serialized mutation, durably clears the entire blocked queue,
+adopts that document into every live/accepted coverage track, and only then permits later saves. A save block
+prevents newer commands accumulating behind the quarantined activity. Activity-free legacy commands may safely
+rotate their command keys, persist a current request envelope, and resume convergence because they cannot
+duplicate a semantic event. A format-2 `pending` state alone does not prove a request was unsent; only records
+carrying the later rules-pin marker but no prepared outbound PATCH qualify for that compatibility path.
 
 Recovery queues carry the authenticated owner id and explicit first-command intent. Only genuine creates retain
 the original `clientImportId`; patch recovery is never exposed or replayed as a replacement create when its
@@ -219,7 +223,9 @@ pre-transfer response cannot overwrite balances or pending decisions rendered by
 Backward activity requests also capture an authorization generation. A projection or role change advances that
 generation and replaces the visible activity window; any older in-flight page is discarded instead of restoring
 events that the new policy removed. Projection invalidation, authority reload, and realtime access loss advance
-that generation immediately, before any delayed authorization refetch can finish.
+that generation immediately, before any delayed authorization refetch can finish. While fenced, cached activity
+is concealed and backward paging remains disabled; only a successful authorization-scoped replacement clears the
+fence. Authorization errors keep it latched.
 The accepted base and every other base track still advance together with live state so later saves retain exact
 coverage and do not need to rediscover already-accepted edits. Delivery is therefore a prepare/adopt/commit
 transaction over per-track coverage records, and an unprovable delivery schedules a serialized recovery that

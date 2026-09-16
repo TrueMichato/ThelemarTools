@@ -935,6 +935,65 @@ class CharacterSheetPage {
 		}
 	}
 
+	async _pResolveUnprovableHubRecovery ({
+		characterId,
+		recovery,
+		fnIsCurrent = () => this._currentCharacterId === characterId,
+		saveFence = null,
+	} = {}) {
+		if (typeof this._characterRepository?.pResolveUnprovableRecovery !== "function") return false;
+		const resolutionFence = saveFence || getCharacterSaveFence(this);
+		let isIdentityChanged = false;
+		const isResolutionCurrent = () => (
+			isCharacterSaveFenceCurrent({sheet: this, saveFence: resolutionFence})
+			&& (isIdentityChanged || fnIsCurrent())
+		);
+		const choice = await InputUiUtil.pGetUserBoolean({
+			title: "Recovered Activity Needs Your Choice",
+			htmlDescription: "This older recovery cannot safely resend its activity. Load the latest server version to discard the blocked recovery. You can export the local recovery first.",
+			textYes: "Export Then Use Server",
+			textNo: "Use Server",
+		});
+		if (choice == null || !isResolutionCurrent()) return false;
+		if (choice) DataUtil.userDownload("character-activity-recovery", recovery, {fileType: "character-conflict"});
+		let isResolutionAdopted = false;
+		const fnAdoptResolution = resolved => {
+			if (!isResolutionCurrent()) return false;
+			const identity = this._adoptCanonicalCharacterIdentity({
+				canonicalId: resolved?.id || resolutionFence.characterId,
+				saveFence: resolutionFence,
+			});
+			if (!identity.isCurrent) return false;
+			isIdentityChanged ||= identity.isChanged;
+			this._state.loadFromJson(resolved);
+			this._reconcileClassFeatures();
+			this._renderCharacter();
+			isResolutionAdopted = true;
+			return true;
+		};
+		try {
+			const resolved = await this._characterRepository.pResolveUnprovableRecovery({
+				characterId,
+				fnAdoptLive: fnAdoptResolution,
+			});
+			if (!isResolutionCurrent()) return false;
+			if (resolved && !isResolutionAdopted && !fnAdoptResolution(resolved)) return false;
+			if (!resolved && !isResolutionAdopted) return false;
+			if (isIdentityChanged && !await this._pRefreshCanonicalCharacterRoster({
+				canonicalId: resolutionFence.characterId,
+				saveFence: resolutionFence,
+			})) return false;
+			this._updateSaveIndicator("saved");
+			return true;
+		} catch (error) {
+			JqueryUtil.doToast({
+				type: "danger",
+				content: `Could not load server state. The local recovery remains blocked and exportable: ${error.message}`,
+			});
+			return false;
+		}
+	}
+
 	// #endregion
 
 	_canRestoreHubRealtimeAfterError (error) {
@@ -4831,8 +4890,12 @@ class CharacterSheetPage {
 				throw err;
 			}
 			if (err?.code === "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE") {
-				JqueryUtil.doToast({type: "warning", content: err.message});
-				return false;
+				return this._pResolveUnprovableHubRecovery({
+					characterId: saveFence.characterId,
+					recovery: err.recovery,
+					fnIsCurrent: isSaveCurrent,
+					saveFence,
+				});
 			}
 			if (err?.code === "CHARACTER_LIVE_CONFLICT") {
 				const choice = await InputUiUtil.pGetUserBoolean({
