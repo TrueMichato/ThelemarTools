@@ -174,7 +174,9 @@ definitive PATCH `CHARACTER_NOT_FOUND` or `IDEMPOTENCY_RESULT_GONE`, an authorit
 only export-then-remove-local resolution: the browser clears the inaccessible local character and blocked exact
 request without loading server state, matching `clientImportId`, or issuing a replacement CREATE. Recovery
 persists the failed CREATE/PATCH leg separately from original command intent, so this remains true when CREATE
-succeeded and the command's following activity PATCH failed.
+succeeded and the command's following activity PATCH failed. Owner-scoped reload routing exposes that canonical
+recovery-only draft to the Character Sheet before attempting a doomed character GET, while other accounts cannot
+list or route through it.
 
 ## Rolls, actions, and grants
 
