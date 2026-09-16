@@ -36,8 +36,12 @@ const makeProjectionResponse = () => ({
 
 const makeDeferred = () => {
 	let resolve;
-	const promise = new Promise(res => { resolve = res; });
-	return {promise, resolve};
+	let reject;
+	const promise = new Promise((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return {promise, resolve, reject};
 };
 
 const pFlush = () => new Promise(resolve => setImmediate(resolve));
@@ -211,6 +215,86 @@ describe("Character Sheet peer targeting", () => {
 
 		expect(await controller._pSubmitDraft(draft)).toBe(true);
 		expect(api.pCreatePeerAction.mock.calls.map(([request]) => request.idempotencyKey)).toEqual(["command-1", "command-1"]);
+	});
+
+	it("preserves a lost-response proposal command across reconnect and blocks a duplicate cast", async () => {
+		await pFlush();
+		const commandIds = ["command-1", "command-2"];
+		controller._fnCreateId = jest.fn(() => commandIds.shift());
+		const proposal = makeDeferred();
+		api.pCreatePeerAction
+			.mockImplementationOnce(() => proposal.promise)
+			.mockResolvedValueOnce({operation: {operationId: "operation-1", status: "proposed"}});
+		const request = {
+			spell: {name: "Cure Wounds", source: "PHB", level: 1},
+			selectedSlot: {level: 1},
+		};
+
+		const first = controller.pMaybeProposeSpell(request);
+		await pFlush();
+		controller.onConnectionState({state: "reconnecting", attempt: 1});
+
+		expect(controller._isSuspended).toBe(true);
+		expect([...controller._drafts.values()]).toEqual([
+			expect.objectContaining({commandId: "command-1", isSubmitting: true}),
+		]);
+		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: false});
+		expect(fnPickTarget).toHaveBeenCalledTimes(1);
+		expect(api.pCreatePeerAction).toHaveBeenCalledTimes(1);
+
+		proposal.reject(Object.assign(new Error("response lost"), {code: "NETWORK_UNAVAILABLE"}));
+		await expect(first).resolves.toEqual({handled: true, proposed: false});
+		expect([...controller._drafts.values()]).toEqual([
+			expect.objectContaining({commandId: "command-1", isSubmitting: false, errorCode: "NETWORK_UNAVAILABLE"}),
+		]);
+
+		expect(controller.activate({characterId: "source-character"})).toBe(true);
+		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: true});
+		expect(api.pCreatePeerAction.mock.calls.map(([sent]) => sent.idempotencyKey)).toEqual(["command-1", "command-1"]);
+		expect(controller._fnCreateId).toHaveBeenCalledTimes(1);
+	});
+
+	it("discards a suspended proposal on a true close", async () => {
+		await pFlush();
+		const proposal = makeDeferred();
+		api.pCreatePeerAction.mockImplementationOnce(() => proposal.promise);
+		const pending = controller.pMaybeProposeSpell({
+			spell: {name: "Cure Wounds", source: "PHB", level: 1},
+			selectedSlot: {level: 1},
+		});
+		await pFlush();
+
+		controller.onConnectionState({state: "reconnecting", attempt: 1});
+		expect(controller._drafts.size).toBe(1);
+		controller.onConnectionState({state: "closed"});
+		expect(controller._drafts.size).toBe(0);
+		expect(controller._characterId).toBeNull();
+
+		proposal.reject(Object.assign(new Error("closed"), {code: "NETWORK_UNAVAILABLE"}));
+		await expect(pending).resolves.toEqual({handled: true, proposed: false});
+		expect(controller._drafts.size).toBe(0);
+	});
+
+	it("discards a suspended proposal when refreshed context removes the capability", async () => {
+		await pFlush();
+		const proposal = makeDeferred();
+		api.pCreatePeerAction.mockImplementationOnce(() => proposal.promise);
+		const pending = controller.pMaybeProposeSpell({
+			spell: {name: "Cure Wounds", source: "XPHB", level: 1},
+			selectedSlot: {level: 1},
+		});
+		await pFlush();
+
+		controller.onConnectionState({state: "reconnecting", attempt: 1});
+		expect(controller._drafts.size).toBe(1);
+		capability.enabled = false;
+		expect(controller.activate({characterId: "source-character"})).toBe(false);
+		expect(controller._drafts.size).toBe(0);
+		expect(controller._characterId).toBeNull();
+
+		proposal.reject(Object.assign(new Error("capability removed"), {code: "CAPABILITY_UNAVAILABLE"}));
+		await expect(pending).resolves.toEqual({handled: true, proposed: false});
+		expect(controller._drafts.size).toBe(0);
 	});
 
 	it("keeps duplicate submit gestures single-flight", async () => {

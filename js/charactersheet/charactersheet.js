@@ -281,7 +281,7 @@ class CharacterSheetPage {
 	 * re-apply `setCampaignSettingsOverlay(this._hubContext?.rulesVersion?.rules)`, so a retained
 	 * `_hubContext` would silently reinstall the campaign rules on the next character load.
 	 */
-	_clearHubRules ({isUnavailable = false, isFenceRefresh = true} = {}) {
+	_clearHubRules ({isUnavailable = false, isFenceRefresh = true, isSuspendPeerTargeting = false} = {}) {
 		if (isFenceRefresh) this._hubRulesRefreshGeneration++;
 		this._hubRulesRefreshBlocked = false;
 		this._hubRulesPendingVersionId = null;
@@ -292,7 +292,8 @@ class CharacterSheetPage {
 		// Return to the detached basis in lockstep with the overlay: a summary stamped with a
 		// campaign this sheet is no longer in must not keep claiming to be current.
 		this._state.setCarryAuthorityContext(cleared.carryAuthorityContext);
-		this._peerTargeting?.deactivate();
+		if (isSuspendPeerTargeting) this._peerTargeting?.suspend?.();
+		else this._peerTargeting?.deactivate();
 	}
 
 	_teardownHubRules () {
@@ -432,7 +433,10 @@ class CharacterSheetPage {
 		this._isHubContextRefreshing = false;
 		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
 		this._isHubContextRevalidationRequired = true;
-		this._clearHubRules?.({isUnavailable: true});
+		this._clearHubRules?.({
+			isUnavailable: true,
+			isSuspendPeerTargeting: state?.state === "reconnecting",
+		});
 		this._campaign?.render();
 	}
 
@@ -473,7 +477,7 @@ class CharacterSheetPage {
 		const generation = ++this._hubContextGeneration;
 		this._hubContextRefreshActiveGeneration = generation;
 		this._isHubContextRefreshing = true;
-		this._clearHubRules();
+		this._clearHubRules({isSuspendPeerTargeting: event?.type === "reconnected"});
 		this._campaign?.render();
 		void this._hubCampaignContext.pRefresh({
 			fnIsCurrent: () => generation === this._hubContextGeneration,

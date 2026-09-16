@@ -460,6 +460,7 @@ describe("Character Sheet campaign content context lifecycle", () => {
 		const targeting = {
 			activate: jest.fn(),
 			deactivate: jest.fn(),
+			suspend: jest.fn(),
 			onConnectionState: jest.fn(),
 		};
 		page._currentCharacterId = "source-character";
@@ -483,7 +484,8 @@ describe("Character Sheet campaign content context lifecycle", () => {
 		page._onHubRealtimeConnectionState({state: "reconnecting", attempt: 1});
 		expect(page._hubContext).toBeNull();
 		expect(page._isHubContextRevalidationRequired).toBe(true);
-		expect(targeting.deactivate).toHaveBeenCalledTimes(1);
+		expect(targeting.suspend).toHaveBeenCalledTimes(1);
+		expect(targeting.deactivate).not.toHaveBeenCalled();
 
 		page._onHubRealtimeConnectionState({state: "live"});
 		await pFlushPromises();

@@ -58,13 +58,14 @@ export class CharacterSheetPeerTargeting {
 		this._characterId = null;
 		this._outgoing = new Map();
 		this._drafts = new Map();
+		this._isSuspended = false;
 		this._isLoading = false;
 		this._loadError = null;
 		this._onFocus = () => {
-			if (this._characterId) void this.pRefresh();
+			if (this._characterId && !this._isSuspended) void this.pRefresh();
 		};
 		this._onVisibilityChange = () => {
-			if (document.visibilityState === "visible" && this._characterId) void this.pRefresh();
+			if (document.visibilityState === "visible" && this._characterId && !this._isSuspended) void this.pRefresh();
 		};
 	}
 
@@ -83,11 +84,31 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	activate ({characterId}) {
+		if (!characterId || !this._hasCapability()) {
+			this.deactivate();
+			return false;
+		}
+		if (this._isSuspended && this._characterId === characterId) {
+			this._isSuspended = false;
+			this._loadError = null;
+			this._render();
+			void this.pRefresh();
+			return true;
+		}
 		this.deactivate();
-		if (!characterId || !this._hasCapability()) return false;
 		this._characterId = characterId;
 		this._generation++;
 		void this.pRefresh();
+		return true;
+	}
+
+	suspend () {
+		if (!this._characterId) return false;
+		this._isSuspended = true;
+		this._refreshSequence++;
+		this._isLoading = false;
+		this._loadError = null;
+		this._render();
 		return true;
 	}
 
@@ -97,6 +118,7 @@ export class CharacterSheetPeerTargeting {
 		this._characterId = null;
 		this._outgoing.clear();
 		this._drafts.clear();
+		this._isSuspended = false;
 		this._isLoading = false;
 		this._loadError = null;
 		this._render();
@@ -107,7 +129,12 @@ export class CharacterSheetPeerTargeting {
 			this.deactivate();
 			return;
 		}
+		if (state?.state === "reconnecting") {
+			this.suspend();
+			return;
+		}
 		if (state?.state === "live" && this._fnGetCharacterId?.()) {
+			if (this._isSuspended) return;
 			this._characterId = this._fnGetCharacterId();
 			void this.pRefresh();
 		}
@@ -131,18 +158,10 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	isSupportedSpellCast ({spell, selectedSlot, hasMetamagic = false, hasVariantComponent = false} = {}) {
-		return this._hasCapability()
+		return !this._isSuspended
+			&& this._hasCapability()
 			&& this._characterId
-			&& String(spell?.name || "").toLowerCase() === "cure wounds"
-			&& _SOURCE_VERSIONS.has(spell?.source)
-			&& Number.isInteger(selectedSlot?.level)
-			&& selectedSlot.level >= Math.max(1, Number(spell?.level) || 1)
-			&& selectedSlot.level <= 9
-			&& !selectedSlot.isPact
-			&& !selectedSlot.isNoSlotResource
-			&& !selectedSlot.isWizardCapstone
-			&& !hasMetamagic
-			&& !hasVariantComponent;
+			&& this._isSupportedSpellShape({spell, selectedSlot, hasMetamagic, hasVariantComponent});
 	}
 
 	async pMaybeProposeSpell ({
@@ -151,6 +170,14 @@ export class CharacterSheetPeerTargeting {
 		hasMetamagic = false,
 		hasVariantComponent = false,
 	} = {}) {
+		if (
+			this._isSuspended
+			&& this._characterId
+			&& this._isSupportedSpellShape({spell, selectedSlot, hasMetamagic, hasVariantComponent})
+		) {
+			this._showError("Campaign targeting is reconnecting. Wait for the campaign context to refresh before casting Cure Wounds.");
+			return {handled: true, proposed: false};
+		}
 		if (!this.isSupportedSpellCast({spell, selectedSlot, hasMetamagic, hasVariantComponent})) return {handled: false};
 		const token = {generation: this._generation, characterId: this._characterId};
 		let targets;
@@ -160,10 +187,10 @@ export class CharacterSheetPeerTargeting {
 			if (this._isCurrent(token)) this._showError(_getSafeError(error));
 			return {handled: true, proposed: false};
 		}
-		if (!this._isCurrent(token)) return {handled: true, proposed: false};
+		if (!this._isCurrent(token) || this._isSuspended) return {handled: true, proposed: false};
 
 		const choice = await this._fnPickTarget({spell, slotLevel: selectedSlot.level, targets});
-		if (!this._isCurrent(token) || !choice || choice.kind === "cancel") return {handled: true, proposed: false};
+		if (!this._isCurrent(token) || this._isSuspended || !choice || choice.kind === "cancel") return {handled: true, proposed: false};
 		if (choice.kind === "local") return {handled: false};
 
 		const target = targets.find(it => it.targetRef === choice.targetRef);
@@ -183,7 +210,7 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	async pRefresh () {
-		if (!this._characterId || !this._hasCapability() || typeof this._api.pListCharacterOutgoingActions !== "function") return false;
+		if (this._isSuspended || !this._characterId || !this._hasCapability() || typeof this._api.pListCharacterOutgoingActions !== "function") return false;
 		const token = {
 			generation: this._generation,
 			characterId: this._characterId,
@@ -232,7 +259,7 @@ export class CharacterSheetPeerTargeting {
 
 	async pCancel ({actionId}) {
 		const action = this._outgoing.get(actionId);
-		if (!action?.canCancel || action.isSubmitting) return false;
+		if (this._isSuspended || !action?.canCancel || action.isSubmitting) return false;
 		const token = {generation: this._generation, characterId: this._characterId};
 		action.isSubmitting = true;
 		action.error = null;
@@ -303,7 +330,7 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	async _pSubmitDraft (draft) {
-		if (draft.isSubmitting) return false;
+		if (this._isSuspended || draft.isSubmitting) return false;
 		const token = {generation: this._generation, characterId: draft.sourceCharacterId};
 		draft.isSubmitting = true;
 		draft.error = null;
@@ -387,6 +414,19 @@ export class CharacterSheetPeerTargeting {
 			&& capability.templateRegistryVersion === _CAPABILITY.templateRegistryVersion
 			&& Array.isArray(capability.resourceKinds)
 			&& capability.resourceKinds.includes("spell_slot");
+	}
+
+	_isSupportedSpellShape ({spell, selectedSlot, hasMetamagic = false, hasVariantComponent = false} = {}) {
+		return String(spell?.name || "").toLowerCase() === "cure wounds"
+			&& _SOURCE_VERSIONS.has(spell?.source)
+			&& Number.isInteger(selectedSlot?.level)
+			&& selectedSlot.level >= Math.max(1, Number(spell?.level) || 1)
+			&& selectedSlot.level <= 9
+			&& !selectedSlot.isPact
+			&& !selectedSlot.isNoSlotResource
+			&& !selectedSlot.isWizardCapstone
+			&& !hasMetamagic
+			&& !hasVariantComponent;
 	}
 
 	_isCurrent ({generation, characterId}) {
@@ -494,11 +534,19 @@ export class CharacterSheetPeerTargeting {
 		const card = e_({tag: "article", clazz: "charsheet__peer-action"});
 		card.append(
 			e_({tag: "strong", text: `Cure Wounds → ${draft.target.name}`}),
-			e_({tag: "span", text: draft.isSubmitting ? "Sending request… No spell slot has been spent." : draft.error}),
+			e_({
+				tag: "span",
+				text: this._isSuspended
+					? "Reconnecting… This request keeps its original identity. No spell slot has been spent."
+					: draft.isSubmitting
+						? "Sending request… No spell slot has been spent."
+						: draft.error,
+			}),
 		);
 		if (draft.error) {
 			const retry = e_({tag: "button", clazz: "ve-btn ve-btn-sm ve-btn-primary", text: "Retry"});
 			retry.type = "button";
+			retry.disabled = this._isSuspended;
 			retry.addEventListener("click", () => void this._pSubmitDraft(draft));
 			card.append(retry);
 		}
@@ -518,9 +566,13 @@ export class CharacterSheetPeerTargeting {
 		);
 		card.append(copy);
 		if (action.canCancel && action.status === "proposed") {
-			const cancel = e_({tag: "button", clazz: "ve-btn ve-btn-sm ve-btn-default", text: action.isSubmitting ? "Cancelling…" : "Cancel request"});
+			const cancel = e_({
+				tag: "button",
+				clazz: "ve-btn ve-btn-sm ve-btn-default",
+				text: this._isSuspended ? "Reconnect to cancel" : action.isSubmitting ? "Cancelling…" : "Cancel request",
+			});
 			cancel.type = "button";
-			cancel.disabled = action.isSubmitting;
+			cancel.disabled = this._isSuspended || action.isSubmitting;
 			cancel.dataset.hubActionId = action.actionId;
 			cancel.setAttribute("aria-label", `Cancel ${action.presentation.effectLabel} request for ${action.presentation.targetName}`);
 			cancel.addEventListener("click", () => void this.pCancel({actionId: action.actionId}));
