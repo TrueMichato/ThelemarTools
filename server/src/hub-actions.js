@@ -440,6 +440,38 @@ export function isDirectTransferAuthority ({
 		&& targetOwnerAccountId === accountId;
 }
 
+export function orderTransfersForLifecycleCancellation (transfers) {
+	const bySource = new Map();
+	for (const transfer of transfers) {
+		const sourceKey = `${transfer.sourceKind}::${transfer.sourceId}`;
+		const group = bySource.get(sourceKey) || [];
+		group.push(transfer);
+		bySource.set(sourceKey, group);
+	}
+	const getTimestamp = transfer => {
+		const timestamp = new Date(transfer.createdAt).getTime();
+		return Number.isFinite(timestamp) ? timestamp : 0;
+	};
+	return [...bySource.entries()]
+		.sort(([left], [right]) => left.localeCompare(right))
+		.flatMap(([, group]) => group.sort((left, right) => {
+			const leftIsReserved = left.status === "reserved";
+			const rightIsReserved = right.status === "reserved";
+			if (leftIsReserved !== rightIsReserved) return leftIsReserved ? -1 : 1;
+			if (leftIsReserved) {
+				const leftRevision = Number.isSafeInteger(left._sourceRevision) ? left._sourceRevision : null;
+				const rightRevision = Number.isSafeInteger(right._sourceRevision) ? right._sourceRevision : null;
+				if (leftRevision != null && rightRevision != null && leftRevision !== rightRevision) {
+					return rightRevision - leftRevision;
+				}
+				const leftHasRevision = leftRevision != null;
+				const rightHasRevision = rightRevision != null;
+				if (leftHasRevision !== rightHasRevision) return leftHasRevision ? -1 : 1;
+			}
+			return getTimestamp(right) - getTimestamp(left) || `${right.id}`.localeCompare(`${left.id}`);
+		}));
+}
+
 export function addTransferPayload ({container, escrow, isRestore = false}) {
 	const out = structuredClone(container);
 	out.inventory = normalizeInventory(out.inventory);
@@ -447,6 +479,7 @@ export function addTransferPayload ({container, escrow, isRestore = false}) {
 	const incomingItems = isRestore
 		? [...(escrow.items || [])].sort((a, b) => (a._sourceIndex ?? Number.MAX_SAFE_INTEGER) - (b._sourceIndex ?? Number.MAX_SAFE_INTEGER))
 		: escrow.items || [];
+	const collisionRestores = [];
 	for (const incoming of incomingItems) {
 		if (!isRestore) {
 			addDestinationInventoryEntry({inventory: out.inventory, incoming});
@@ -459,8 +492,16 @@ export function addTransferPayload ({container, escrow, isRestore = false}) {
 			existing.quantity = addFinite(existing.quantity, incoming.quantity, "Item quantity");
 			continue;
 		}
-		if (existing) entry.id = getCollisionFreeInventoryEntryId(out.inventory);
+		if (existing) {
+			collisionRestores.push({entry, existingId: existing.id});
+			continue;
+		}
 		out.inventory.splice(Math.min(incoming._sourceIndex ?? out.inventory.length, out.inventory.length), 0, entry);
+	}
+	for (const {entry, existingId} of collisionRestores) {
+		const existing = out.inventory.find(it => it.id === existingId);
+		entry.id = getCollisionFreeInventoryEntryId(out.inventory);
+		out.inventory.splice(existing ? out.inventory.indexOf(existing) : out.inventory.length, 0, entry);
 	}
 	const currency = normalizeCurrency(escrow.currency);
 	for (const type of CURRENCY_TYPES) out.currency[type] = addFinite(out.currency[type], currency[type], `${type} amount`);
