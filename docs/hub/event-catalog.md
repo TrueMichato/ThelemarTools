@@ -105,6 +105,8 @@ One metadata-only invalidation is emitted per affected character per commit by e
 a catalog field: owner patches, item grants, applied structured effects, approval-bound transfer reservation
 and resolution, both participants of an atomic direct transfer, archived-import reactivation, and a
 sharing-policy write. `xp.granted` emits none because `xp` is not a catalog field.
+The recipient Character Sheet therefore schedules an authorization-scoped canonical-character reconciliation
+when it receives the bounded `xp.granted` notice; the notice itself is not treated as character state.
 
 An atomic item-award batch emits each `item.granted` and its projection invalidation in request target order,
 then one `party_inventory.invalidated` if the source stash was debited. Retries replay the receipt and emit
@@ -126,6 +128,10 @@ bounded and versioned so activity remains legible after a rename, detach, archiv
 the snapshot only after the event has passed the existing visibility filter; no new event visibility is granted.
 Legacy events without a snapshot resolve a current authorized roster name, then an authorized account fallback, and
 finally a neutral label.
+
+Campaign Overview backward-history requests are tied to the activity authorization generation active when the
+request starts. A role or projection change replaces the visible window and invalidates older in-flight pages, so
+an old response cannot restore activity removed by the new policy.
 
 ## Audit entries
 

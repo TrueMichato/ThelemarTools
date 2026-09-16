@@ -120,14 +120,19 @@ sequenceDiagram
 The client never treats an unacknowledged queued snapshot as a new base. Each submitted write retains its own
 base so overlapping and disjoint changes are classified correctly. The repository persists an ordered recovery
 queue as one base plus an ordered patch chain containing every closed one-shot activity descriptor and exact
-idempotency key. The queue is capped at 32 commands and 3.5 MB; a command that cannot be added durably is
+idempotency key. Before network submission it also persists the hash-significant PATCH body and the rules-version
+pin; a transport retry sends that exact key/body pair. A confirmed revision conflict rebases into a newly persisted
+request with a new key. The queue is capped at 32 commands and 3.5 MB; a command that cannot be added durably is
 rejected before network submission. Authoritative operation and resync transforms advance every queued base and
 snapshot, then replace the complete persisted queue before replay. Only the matching successful command is
-dequeued. Choosing local after an overlap replays every unresolved command in order against the selected local
-document. Choosing server explicitly discards the complete queue and installs that canonical document and its
-operation watermark into the accepted, live, latest-submitted, and visible Character Sheet tracks inside the
-same serialized mutation. Realtime resumes only after that fenced adoption, so neither an already-covered event
-nor a genuinely newer queued operation can be overwritten by the caller's stale conflict result.
+dequeued. Later commands retain coherent original base/snapshot pairs so their deltas rebase over canonical XP,
+inventory, and operation changes instead of interpreting stale snapshots as full replacements. Choosing local
+after an overlap replays every unresolved command in order against the selected local document and rotates any
+request whose body changed. Choosing server explicitly discards the complete queue and installs that canonical
+document and its operation watermark into the accepted, live, latest-submitted, and visible Character Sheet tracks
+inside the same serialized mutation. Realtime resumes only after that fenced adoption, so neither an
+already-covered event nor a genuinely newer queued operation can be overwritten by the caller's stale conflict
+result.
 
 Recovery queues carry the authenticated owner id and explicit first-command intent. Only genuine creates retain
 the original `clientImportId`; patch recovery is never exposed or replayed as a replacement create when its
@@ -142,7 +147,9 @@ the temporary queue visible and retryable with its original keys and activities.
 rebinds page state, URL scope, roster selection, projections, and realtime
 before queued canonical events resume. Repository hydration and successful replay retain the temporary-to-
 canonical lookup but remove obsolete pending-state aliases, so a completed retry cannot leave unload warnings or
-context-switch blockers behind.
+context-switch blockers behind. If startup discovers that the create already committed, the original creation
+snapshot becomes the replay base and the current canonical row remains authoritative; later XP, inventory, and
+other server changes are not reverted while pending activity or later local deltas are replayed.
 Transport-failed writes remain in that durable queue. Reconnect/refocus refetches canonical truth: disjoint
 drafts retry, while overlapping paths require an explicit local/server choice. Client-only save timestamps are
 excluded from overlap detection. `Use Local` is explicit authority to retry the actual local candidate against
@@ -201,6 +208,9 @@ reintroduce the hydration conflict.
 Campaign Overview serializes every transfer-state refresh in request-start order. Realtime refreshes enter that
 queue when their authorization-scoped character/snapshot requests start, not after those requests finish, so a
 pre-transfer response cannot overwrite balances or pending decisions rendered by the transfer's later refresh.
+Backward activity requests also capture an authorization generation. A projection or role change advances that
+generation and replaces the visible activity window; any older in-flight page is discarded instead of restoring
+events that the new policy removed.
 The accepted base and every other base track still advance together with live state so later saves retain exact
 coverage and do not need to rediscover already-accepted edits. Delivery is therefore a prepare/adopt/commit
 transaction over per-track coverage records, and an unprovable delivery schedules a serialized recovery that

@@ -266,6 +266,10 @@ describe("campaign hub pages", () => {
 		expect(source).not.toContain("event.payload?.character");
 		expect(source).not.toContain("character.projection.updated");
 		expect(source).toContain("const reloadForAuthorityChange = () =>");
+		expect(source).toContain("let activityAuthorizationGeneration = 0");
+		expect(source).toContain("const requestAuthorizationGeneration = activityAuthorizationGeneration");
+		expect(source).toContain("requestAuthorizationGeneration !== activityAuthorizationGeneration");
+		expect(source).toContain("activityAuthorizationGeneration++");
 		expect(source).toContain("event.type === \"membership.role_changed\"");
 		expect(source).toContain("event.payload?.accountId === session.account.id");
 		expect(source).toContain("event.payload?.role !== campaign.role");

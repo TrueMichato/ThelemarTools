@@ -556,4 +556,47 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 			prompt.mockRestore();
 		}
 	});
+
+	it("does not duplicate semantic activity when keeping local state after a live conflict", async () => {
+		const state = new CharacterSheetState();
+		state.setName("Conflict Caster");
+		const host = makeHost({state});
+		host._currentCharacterId = "character-id";
+		host._characterLoadGeneration = 1;
+		host._isHubCharacter = true;
+		host._reconcileClassFeatures = jest.fn();
+		host._renderCharacter = jest.fn();
+		const activity = {
+			type: "spell.used",
+			spellName: "Shield",
+			spellSource: "PHB",
+			spellLevel: 1,
+			slotLevel: 1,
+			mode: "spell_slot",
+		};
+		const conflict = Object.assign(new Error("Live character edits overlap server changes."), {
+			code: "CHARACTER_LIVE_CONFLICT",
+			recovery: {server: state.toJson()},
+		});
+		host._characterRepository = {
+			isRescueMirrorEnabled: false,
+			pUpsert: jest.fn()
+				.mockRejectedValueOnce(conflict)
+				.mockImplementationOnce(async ({character}) => character),
+			getLiveConflictRecovery: jest.fn(() => conflict.recovery),
+			clearLiveConflict: jest.fn(),
+		};
+		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+		const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+
+		try {
+			await expect(host._saveCurrentCharacter({activity})).resolves.toBe(true);
+			expect(host._characterRepository.pUpsert).toHaveBeenCalledTimes(2);
+			expect(host._characterRepository.pUpsert.mock.calls[0][0].activity).toEqual(activity);
+			expect(host._characterRepository.pUpsert.mock.calls[1][0].activity).toBeNull();
+		} finally {
+			consoleError.mockRestore();
+			prompt.mockRestore();
+		}
+	});
 });

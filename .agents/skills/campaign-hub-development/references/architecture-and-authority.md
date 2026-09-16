@@ -60,6 +60,10 @@ assertion, clears that release gate.
   disjoint drafts retry, while overlapping paths use the explicit local/server recovery flow. Client-only save
   timestamps are excluded from overlap detection. `Use Local` preserves the actual local candidate, except that
   server-owned inventory and XP paths retain their stricter server-wins overlap policy.
+- Persist the hash-significant PATCH body and rules-version pin before submission. Transport retries reuse that
+  exact body and idempotency key; a confirmed revision conflict may rebase only after rotating and durably storing
+  a new key. Never advance a later queued base without coherently rebasing its snapshot, because that turns stale
+  XP/inventory into local removal intent.
 - Choosing server conflict truth updates accepted, live, latest-submitted, and visible Character Sheet state
   inside the same serialized and generation-fenced mutation before queued realtime delivery resumes. A covered
   event remains suppressed, and a genuinely newer queued operation cannot be overwritten by stale caller
@@ -72,7 +76,8 @@ assertion, clears that release gate.
   and realtime before queued canonical events resume. Publish a temporary-to-canonical alias only after its
   pending queue is durably migrated; on storage failure, retain the temporary in-memory/durable queue with its
   original keys and activities. Remove obsolete pending aliases only after hydration, migration, or replay
-  succeeds.
+  succeeds. A matching canonical row proves the create portion committed: replay later deltas from the original
+  create snapshot as their base, rather than diffing that stale snapshot directly against current canonical truth.
 - Access loss, takeover, campaign switch, detach, logout, or terminal page hide fences queued callbacks and
   pending saves.
 
@@ -82,6 +87,8 @@ workspace repository tests.
 ## Realtime and projections
 
 - Domain events and outbox rows are committed with authority state. WebSockets deliver already-committed facts.
+- Backward activity requests are fenced by the authorization generation which started them. If role or projection
+  authority changes, replace the visible window and discard older in-flight pages.
 - The projector has three outcomes: `owner_truth`, `dm_truth`, and recipient-independent `peer_profile`.
 - `character.projection.invalidated` contains metadata only. Consumers batch/coalesce invalidations, refetch the
   authorization-scoped projection over HTTP, sequence-fence responses, and replace the prior view.

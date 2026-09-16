@@ -1325,6 +1325,7 @@ async function pInitCampaign ({session}) {
 	let isRefreshing = false;
 	let isRefreshQueued = false;
 	let isCampaignContextRefreshQueued = false;
+	let activityAuthorizationGeneration = 0;
 	const pRefreshLiveViews = async () => {
 		if (isCampaignReloadRequired || !navigator.onLine) return;
 		if (isRefreshing) {
@@ -1380,7 +1381,10 @@ async function pInitCampaign ({session}) {
 			]);
 			const isSnapshotCurrent = snapshotNxt.lastSequence >= liveLastSequence;
 			liveEvents = activityRefresh.events;
-			if (activityRefresh.isAuthorizationChanged) activityHistory = activityRefresh.history;
+			if (activityRefresh.isAuthorizationChanged) {
+				activityAuthorizationGeneration++;
+				activityHistory = activityRefresh.history;
+			}
 			liveMembers = membersNxt;
 			if (isSnapshotCurrent) {
 				// Replacement, not a merge: a field the owner has just stopped sharing must
@@ -1423,6 +1427,7 @@ async function pInitCampaign ({session}) {
 	};
 	const pLoadEarlierActivity = async () => {
 		if (!activityHistory?.hasMore) return;
+		const requestAuthorizationGeneration = activityAuthorizationGeneration;
 		const button = document.getElementById("campaign-activity-load-earlier");
 		button.disabled = true;
 		renderRecentActivity({
@@ -1438,6 +1443,7 @@ async function pInitCampaign ({session}) {
 				beforeSequence: activityHistory.scannedBackThroughSequence,
 				limit: 50,
 			});
+			if (requestAuthorizationGeneration !== activityAuthorizationGeneration) return;
 			liveEvents = mergeHubActivityEvents({
 				currentEvents: liveEvents,
 				pageEvents: page.events,
@@ -1451,6 +1457,7 @@ async function pInitCampaign ({session}) {
 				statusMessage: page.events.length ? "" : "No additional visible activity in this window. Older retained history may still be available.",
 			});
 		} catch (error) {
+			if (requestAuthorizationGeneration !== activityAuthorizationGeneration) return;
 			renderRecentActivity({
 				events: liveEvents,
 				characters: liveCharacters,
@@ -1475,6 +1482,7 @@ async function pInitCampaign ({session}) {
 	};
 	const reloadForAuthorityChange = () => {
 		if (isCampaignReloadRequired) return;
+		activityAuthorizationGeneration++;
 		isCampaignReloadRequired = true;
 		if (refreshTimer != null) {
 			window.clearTimeout(refreshTimer);

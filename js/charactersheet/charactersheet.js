@@ -551,7 +551,7 @@ class CharacterSheetPage {
 			const total = Number.isFinite(notice.totalXp) ? ` (${notice.totalXp} XP total)` : "";
 			const content = e_({tag: "span", txt: `Received ${notice.amount || 0} XP${total}${notice.reason ? ` — ${notice.reason}` : ""}.`});
 			JqueryUtil.doToast({type: "success", content});
-			this._scheduleHubRealtimeResync({characterId: this._currentCharacterId});
+			this._scheduleHubAuthoritativeReconcile({characterId: this._currentCharacterId});
 			return true;
 		}
 		if (notice.kind === "item_award") {
@@ -4846,7 +4846,7 @@ class CharacterSheetPage {
 					DataUtil.userDownload("character-live-conflict-recovery", recovery, {fileType: "character-conflict"});
 					return false;
 				}
-				if (choice) return this._saveCurrentCharacter({activity});
+				if (choice) return this._saveCurrentCharacter({activity: null});
 				this._state.loadFromJson(recovery.server);
 				this._reconcileClassFeatures();
 				this._renderCharacter();

@@ -1790,10 +1790,22 @@ export class HubHttpCharacterRepository {
 					message: `Cloud character recovery history is inconsistent. Reload or export the character before retrying.`,
 				});
 			}
+			const commandPatches = diffJson(command.submittedBase, command.submittedSnapshot);
 			const out = {
-				patches: diffJson(command.submittedBase, command.submittedSnapshot),
+				patches: commandPatches,
 				activity: structuredClone(command.submittedActivity),
 				commandKeys: {...command.commandKeys},
+				rulesVersionId: command.submittedRulesVersionId ?? null,
+				...(command.outboundPatch
+					? {
+						outboundPatch: {
+							baseRevision: command.outboundPatch.baseRevision,
+							...(JSON.stringify(command.outboundPatch.patches) === JSON.stringify(commandPatches)
+								? {}
+								: {patches: structuredClone(command.outboundPatch.patches)}),
+						},
+					}
+					: {}),
 				state: command.state,
 				snapshotCoverage: serializeCoverage(command.submittedSnapshotCoverage),
 			};
@@ -1833,6 +1845,13 @@ export class HubHttpCharacterRepository {
 			submittedBaseCoverage: isCoverageKnown ? deserializeCoverage(raw.coverage.base) : createCoverage(),
 			submittedSnapshotCoverage: isCoverageKnown ? deserializeCoverage(raw.coverage.snapshot) : createCoverage(),
 			commandKeys: {...raw.commandKeys},
+			submittedRulesVersionId: raw.rulesVersionId ?? null,
+			outboundPatch: raw.outboundPatch
+				? {
+					baseRevision: raw.outboundPatch.baseRevision,
+					patches: structuredClone(raw.outboundPatch.patches || diffJson(raw.base, raw.snapshot)),
+				}
+				: null,
 			state: ["failed", "conflict"].includes(raw.state) ? raw.state : "pending",
 			intent: raw.intent || (Object.hasOwn(raw, "base") && raw.base == null ? "create" : "patch"),
 		};
@@ -1856,6 +1875,13 @@ export class HubHttpCharacterRepository {
 				submittedBaseCoverage: this._cloneTrackCoverage(baseCoverage),
 				submittedSnapshotCoverage: this._cloneTrackCoverage(snapshotCoverage),
 				commandKeys: {...raw.commandKeys},
+				submittedRulesVersionId: raw.rulesVersionId ?? null,
+				outboundPatch: raw.outboundPatch
+					? {
+						baseRevision: raw.outboundPatch.baseRevision,
+						patches: structuredClone(raw.outboundPatch.patches || raw.patches),
+					}
+					: null,
 				state: ["failed", "conflict"].includes(raw.state) ? raw.state : "pending",
 				intent: index ? "patch" : initialIntent,
 			});
@@ -1994,6 +2020,28 @@ export class HubHttpCharacterRepository {
 		return staged;
 	}
 
+	_prepareRecoveryPatchCommand ({characterId, command, baseRevision, patches, isRotateKey = false}) {
+		const previousPatchKey = command.commandKeys.patch;
+		const previousOutboundPatch = command.outboundPatch;
+		if (isRotateKey) command.commandKeys.patch = crypto.randomUUID();
+		command.outboundPatch = {
+			baseRevision,
+			patches: structuredClone(patches),
+		};
+		try {
+			this._persistRecoveryCommandQueue(characterId, {isRequired: true});
+		} catch (error) {
+			command.commandKeys.patch = previousPatchKey;
+			command.outboundPatch = previousOutboundPatch;
+			throw error;
+		}
+		return {
+			baseRevision,
+			patches: structuredClone(patches),
+			idempotencyKey: command.commandKeys.patch,
+		};
+	}
+
 	async _pExecuteUpsertCommand (command) {
 		const {
 			requestedId,
@@ -2004,6 +2052,7 @@ export class HubHttpCharacterRepository {
 			submittedBaseCoverage,
 			submittedSnapshotCoverage,
 		} = command;
+		const submittedRulesVersionId = command.submittedRulesVersionId ?? null;
 		let canonicalId = this._canonicalIds.get(requestedId) || requestedId;
 		if (canonicalId !== requestedId) {
 			this._migrateCharacterIdentity({fromId: requestedId, toId: canonicalId});
@@ -2039,7 +2088,7 @@ export class HubHttpCharacterRepository {
 					clientImportId: requestedId,
 					campaignId: this._campaignId,
 					data: this._getSnapshotData(characterNxt),
-					rulesVersionId: this._fnGetRulesVersionId(),
+					rulesVersionId: submittedRulesVersionId,
 					idempotencyKey: commandKeys.create,
 				});
 				canonicalId = created.character.id;
@@ -2048,18 +2097,22 @@ export class HubHttpCharacterRepository {
 				accepted = created.character;
 			}
 		}
-		let desired = this._getSnapshotData(characterNxt);
-		if (submittedBase) {
-			const submittedRebase = this._rebaseOwnerCandidate({
-				base: submittedBase,
+		const submittedDesired = this._getSnapshotData(characterNxt);
+		const effectiveSubmittedBase = submittedBase || (command.intent === "create" ? submittedSnapshot : null);
+		const isRetryingPreparedPatch = !!command.outboundPatch;
+		let desired = submittedDesired;
+		let submittedRebase = null;
+		if (effectiveSubmittedBase) {
+			submittedRebase = this._rebaseOwnerCandidate({
+				base: effectiveSubmittedBase,
 				local: desired,
 				remote: accepted.data,
 			});
-			if (submittedRebase.isConflict) {
+			if (submittedRebase.isConflict && !isRetryingPreparedPatch) {
 				const recovery = {
-					base: submittedBase,
+					base: effectiveSubmittedBase,
 					local: this._rebaseAuthoritativeCandidate({
-						base: submittedBase,
+						base: effectiveSubmittedBase,
 						local: desired,
 						remote: accepted.data,
 						isPreserveLocalOnConflict: true,
@@ -2079,7 +2132,14 @@ export class HubHttpCharacterRepository {
 				conflict.recovery = structuredClone(recovery);
 				throw conflict;
 			}
-			desired = submittedRebase.document;
+			desired = submittedRebase.isConflict
+				? this._rebaseAuthoritativeCandidate({
+					base: effectiveSubmittedBase,
+					local: desired,
+					remote: accepted.data,
+					isPreserveLocalOnConflict: true,
+				}).document
+				: submittedRebase.document;
 		} else if (this._areCharacterCandidatesSemanticallyEqual(desired, accepted.data)) {
 			desired = structuredClone(accepted.data);
 		}
@@ -2087,21 +2147,33 @@ export class HubHttpCharacterRepository {
 		// the server accepts as "this writer understands carry authority". Without this
 		// normalisation an ordinary save strips the summary it is actually carrying.
 		const patches = withRootCarryWrite({patches: diffJson(accepted.data, desired), document: desired, base: accepted.data});
-		if (!patches.length && !submittedActivity) {
+		if (!patches.length && !submittedActivity && !isRetryingPreparedPatch) {
 			this._syncCoverageToAccepted(canonicalId);
 			return this._getData(accepted);
 		}
+		const outboundPatch = isRetryingPreparedPatch
+			? {
+				baseRevision: command.outboundPatch.baseRevision,
+				patches: structuredClone(command.outboundPatch.patches),
+				idempotencyKey: commandKeys.patch,
+			}
+			: this._prepareRecoveryPatchCommand({
+				characterId: canonicalId,
+				command,
+				baseRevision: accepted.revision,
+				patches,
+			});
 		let result;
 		try {
 			const lease = await this.pAcquireLease({characterId: canonicalId});
 			result = await this._api.pPatchCharacter({
 				characterId: canonicalId,
-				baseRevision: accepted.revision,
+				baseRevision: outboundPatch.baseRevision,
 				leaseEpoch: lease.epoch,
-				patches,
+				patches: outboundPatch.patches,
 				activity: submittedActivity,
-				rulesVersionId: this._fnGetRulesVersionId(),
-				idempotencyKey: commandKeys.patch,
+				rulesVersionId: submittedRulesVersionId,
+				idempotencyKey: outboundPatch.idempotencyKey,
 			});
 		} catch (error) {
 			if (["LEASE_HELD", "LEASE_FENCED", "LEASE_EXPIRED"].includes(error?.code)) {
@@ -2129,8 +2201,8 @@ export class HubHttpCharacterRepository {
 			if (error?.code !== "REVISION_CONFLICT") throw error;
 			const canonical = await this._api.pGetCharacter({characterId: canonicalId});
 			const rebased = this._rebaseOwnerCandidate({
-				base: accepted.data,
-				local: desired,
+				base: isRetryingPreparedPatch ? (effectiveSubmittedBase || accepted.data) : accepted.data,
+				local: isRetryingPreparedPatch ? submittedDesired : desired,
 				remote: canonical.data,
 			});
 			if (rebased.isConflict) {
@@ -2160,24 +2232,41 @@ export class HubHttpCharacterRepository {
 				throw conflict;
 			}
 			this._accepted.set(canonicalId, canonical);
+			const rebasedPatches = withRootCarryWrite({
+				patches: diffJson(canonical.data, rebased.document),
+				document: rebased.document,
+				base: canonical.data,
+			});
+			const rebasedOutboundPatch = this._prepareRecoveryPatchCommand({
+				characterId: canonicalId,
+				command,
+				baseRevision: canonical.revision,
+				patches: rebasedPatches,
+				isRotateKey: true,
+			});
 			const leaseNxt = await this.pAcquireLease({characterId: canonicalId});
 			result = await this._api.pPatchCharacter({
 				characterId: canonicalId,
-				baseRevision: canonical.revision,
+				baseRevision: rebasedOutboundPatch.baseRevision,
 				leaseEpoch: leaseNxt.epoch,
-				patches: withRootCarryWrite({
-					patches: diffJson(canonical.data, rebased.document),
-					document: rebased.document,
-					base: canonical.data,
-				}),
+				patches: rebasedOutboundPatch.patches,
 				activity: submittedActivity,
-				rulesVersionId: this._fnGetRulesVersionId(),
-				idempotencyKey: commandKeys.patch,
+				rulesVersionId: submittedRulesVersionId,
+				idempotencyKey: rebasedOutboundPatch.idempotencyKey,
 			});
 		}
-		this._accepted.set(canonicalId, result.character);
+		const acceptedAfterResponse = this._accepted.get(canonicalId);
+		const committedCharacter = (
+			acceptedAfterResponse
+			&& Number.isInteger(acceptedAfterResponse.revision)
+			&& Number.isInteger(result.character?.revision)
+			&& acceptedAfterResponse.revision > result.character.revision
+		)
+			? acceptedAfterResponse
+			: result.character;
+		this._accepted.set(canonicalId, committedCharacter);
 		this._syncCoverageToAccepted(canonicalId);
-		return this._getData(result.character);
+		return this._getData(committedCharacter);
 	}
 
 	async _pDrainRecoveryCommandQueue ({characterId, throughCommandKeys}) {
@@ -2194,9 +2283,7 @@ export class HubHttpCharacterRepository {
 				const accepted = this._accepted.get(canonicalId);
 				return lastResult || (accepted ? this._getData(accepted) : null);
 			}
-
 			const command = entry.queue[0];
-			const isRecoveryReplay = command.state === "failed";
 			try {
 				lastResult = await this._pExecuteUpsertCommand(command);
 			} catch (error) {
@@ -2236,19 +2323,6 @@ export class HubHttpCharacterRepository {
 			}
 			const queueNxt = committedEntry.queue.slice(1);
 			const isTargetCommitted = this._areSameCommandKeys(command.commandKeys, throughCommandKeys);
-			const canonicalId = this._canonicalIds.get(characterId) || characterId;
-			const accepted = this._accepted.get(canonicalId);
-			const next = queueNxt[0];
-			if (next && accepted && isRecoveryReplay) {
-				queueNxt[0] = {
-					...next,
-					requestedId: canonicalId,
-					submittedBase: structuredClone(accepted.data),
-					submittedBaseCoverage: this._cloneTrackCoverage(this._getAcceptedCoverage(canonicalId)),
-					state: "pending",
-					intent: "patch",
-				};
-			}
 			try {
 				this._persistRecoveryCommandQueue(characterId, {
 					queue: queueNxt,
@@ -2316,6 +2390,8 @@ export class HubHttpCharacterRepository {
 				submittedSnapshot,
 				submittedActivity,
 				commandKeys: {create: crypto.randomUUID(), patch: crypto.randomUUID()},
+				submittedRulesVersionId: this._fnGetRulesVersionId(),
+				outboundPatch: null,
 				submittedBase,
 				submittedBaseCoverage,
 				submittedSnapshotCoverage,
@@ -2497,6 +2573,8 @@ export class HubHttpCharacterRepository {
 					const next = {
 						...command,
 						requestedId: canonicalId,
+						commandKeys: {...command.commandKeys, patch: crypto.randomUUID()},
+						outboundPatch: null,
 						submittedBase: structuredClone(previousSnapshot),
 						submittedBaseCoverage: this._cloneTrackCoverage(previousCoverage),
 						submittedSnapshot,
@@ -2513,6 +2591,8 @@ export class HubHttpCharacterRepository {
 					submittedSnapshot: localSnapshot,
 					submittedActivity: null,
 					commandKeys: {create: crypto.randomUUID(), patch: crypto.randomUUID()},
+					submittedRulesVersionId: this._fnGetRulesVersionId(),
+					outboundPatch: null,
 					submittedBase: structuredClone(recovery.serverDocument.data),
 					submittedBaseCoverage: serverCoverage,
 					submittedSnapshotCoverage: this._getConflictCoverage(recovery, "local"),
