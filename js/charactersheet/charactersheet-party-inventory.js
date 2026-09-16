@@ -241,6 +241,7 @@ export class CharacterSheetPartyInventory {
 		this._itemByToken = new Map();
 		this._tokenByItemKey = new Map();
 		this._draft = null;
+		this._needsAuthoritativeRefresh = false;
 		this._error = null;
 		this._reconcileError = null;
 		this._partyError = null;
@@ -345,6 +346,7 @@ export class CharacterSheetPartyInventory {
 		this._clearActivationRetry();
 		this._active = null;
 		this._draft = null;
+		this._needsAuthoritativeRefresh = false;
 		this._error = null;
 		this._reconcileError = null;
 		this._partyError = null;
@@ -505,7 +507,7 @@ export class CharacterSheetPartyInventory {
 				actions.append(button);
 			}
 			button.dataset.token = token;
-			button.disabled = maxQuantity < 1 || !!this._draft || this._isSubmitting;
+			button.disabled = maxQuantity < 1 || !!this._draft || this._needsAuthoritativeRefresh || this._isSubmitting;
 			button.setAttribute("aria-label", maxQuantity
 				? `Share ${getEntryName(entry)} with the party`
 				: `${getEntryName(entry)} cannot be shared: ${blockers.join(", ")}`);
@@ -533,6 +535,11 @@ export class CharacterSheetPartyInventory {
 	}
 
 	_beginDraft ({kind, entryId, returnToken = null}) {
+		if (this._needsAuthoritativeRefresh) {
+			this._error = TRANSFER_REFRESH_REQUIRED_MESSAGE;
+			this._render();
+			return false;
+		}
 		if (!this._hasTransferAuthority() || this._isSubmitting || this._draft) return false;
 		const entry = this._getEntry({kind, entryId});
 		if (!entry) return false;
@@ -558,7 +565,6 @@ export class CharacterSheetPartyInventory {
 			cancellationCommandId: getOpaqueToken(),
 			transfer: null,
 			needsStatusCheck: false,
-			needsAuthoritativeRefresh: false,
 			pendingResolution: null,
 		};
 		this._error = null;
@@ -690,7 +696,7 @@ export class CharacterSheetPartyInventory {
 		if (snapshot) {
 			this._role = snapshot.membership?.role || null;
 			if (!this._hasTransferAuthority()) {
-				if (this._isDraftEditable() || this._draft?.needsAuthoritativeRefresh) {
+				if (this._isDraftEditable() || this._needsAuthoritativeRefresh) {
 					this._draft = null;
 					this._error = null;
 					this._announcement = "Party transfers are read-only for your current campaign role.";
@@ -731,11 +737,11 @@ export class CharacterSheetPartyInventory {
 			this._refreshFlags.party = true;
 			const isSuccessful = await this._pDrainRefresh();
 			if (!this._isCurrent(active)) return false;
-			if (this._draft?.needsAuthoritativeRefresh) {
+			if (this._needsAuthoritativeRefresh) {
 				if (!isSuccessful) this._error = TRANSFER_REFRESH_REQUIRED_MESSAGE;
 				else {
-					this._draft.needsAuthoritativeRefresh = false;
-					this._refreshDraftTransferLimit(this._draft);
+					this._needsAuthoritativeRefresh = false;
+					this._refreshDraftTransferLimit();
 					this._error = null;
 				}
 			}
@@ -949,7 +955,7 @@ export class CharacterSheetPartyInventory {
 			text: isDm ? "Take" : "Request",
 			attrs: {
 				type: "button",
-				disabled: maxQuantity < 1 || !!this._draft || this._isSubmitting,
+				disabled: maxQuantity < 1 || !!this._draft || this._needsAuthoritativeRefresh || this._isSubmitting,
 				"aria-label": maxQuantity
 					? isDm
 						? `Move ${getEntryName(entry)} to this character`
@@ -974,7 +980,7 @@ export class CharacterSheetPartyInventory {
 	}
 
 	_isDraftEditable (draft = this._draft) {
-		return !!draft && !draft.transfer && !draft.proposalRequest && !draft.needsAuthoritativeRefresh;
+		return !!draft && !draft.transfer && !draft.proposalRequest && !this._needsAuthoritativeRefresh;
 	}
 
 	_refreshDraftTransferLimit (draft = this._draft) {
@@ -1000,7 +1006,7 @@ export class CharacterSheetPartyInventory {
 		const entry = this._getEntry(this._draft);
 		const isProposalFrozen = !!this._draft.proposalRequest && !this._draft.transfer;
 		const isProposalReplayExpired = isProposalFrozen && Date.now() >= this._draft.proposalReplayUntil;
-		const isAuthorityRefreshRequired = !!this._draft.needsAuthoritativeRefresh;
+		const isAuthorityRefreshRequired = this._needsAuthoritativeRefresh;
 		const pendingAcceptance = this._getPendingAcceptance();
 		const isStatusCheckRequired = !!this._draft.transfer
 			&& !!this._draft.needsStatusCheck
@@ -1327,7 +1333,7 @@ export class CharacterSheetPartyInventory {
 		const isDraftEditable = this._isDraftEditable();
 		const isProposalFrozen = !!this._draft.proposalRequest && !this._draft.transfer;
 		const isProposalReplayExpired = isProposalFrozen && Date.now() >= this._draft.proposalReplayUntil;
-		const isAuthorityRefreshRequired = !!this._draft.needsAuthoritativeRefresh;
+		const isAuthorityRefreshRequired = this._needsAuthoritativeRefresh;
 		const pendingAcceptance = this._getPendingAcceptance();
 		const isStatusCheckRequired = !!this._draft.transfer
 			&& !!this._draft.needsStatusCheck
@@ -1379,7 +1385,7 @@ export class CharacterSheetPartyInventory {
 	_closeDraft () {
 		const returnToken = this._draft?.returnToken;
 		this._draft = null;
-		this._error = null;
+		this._error = this._needsAuthoritativeRefresh ? TRANSFER_REFRESH_REQUIRED_MESSAGE : null;
 		this._render();
 		if (this._root) this._decorateCharacterInventory();
 		if (!returnToken) return;
@@ -1542,7 +1548,7 @@ export class CharacterSheetPartyInventory {
 			this._render();
 			return false;
 		}
-		if (draft.needsAuthoritativeRefresh) {
+		if (this._needsAuthoritativeRefresh) {
 			this._error = TRANSFER_REFRESH_REQUIRED_MESSAGE;
 			this._render();
 			return false;
@@ -1708,7 +1714,7 @@ export class CharacterSheetPartyInventory {
 					if (!isTransferOutcomeUncertain(error)) {
 						draft.proposalRequest = null;
 						draft.proposalReplayUntil = null;
-						draft.needsAuthoritativeRefresh = true;
+						this._needsAuthoritativeRefresh = true;
 						if (error?.code === "RULES_VERSION_STALE") {
 							draft.needsFreshProposalRules = true;
 							draft.commandId = getOpaqueToken();
@@ -1724,7 +1730,7 @@ export class CharacterSheetPartyInventory {
 							this._render();
 							return false;
 						}
-						draft.needsAuthoritativeRefresh = false;
+						this._needsAuthoritativeRefresh = false;
 						this._refreshDraftTransferLimit(draft);
 					}
 					throw error;

@@ -458,6 +458,69 @@ describe("inventory escrow", () => {
 			.reduce((total, entry) => total + entry.quantity, 0)).toBe(10);
 	});
 
+	it("restores non-colliding whole stacks before anchoring metadata-diverged partial stacks", () => {
+		const originalItem = {
+			name: "Arrow",
+			source: "PHB",
+			charges: 5,
+			chargesCurrent: 4,
+			material: {name: "Star Iron", source: "PHB"},
+			custom: {batch: "original"},
+		};
+		const {container, escrow} = removeTransferPayload({
+			container: {
+				inventory: [
+					{
+						id: "arrows",
+						item: originalItem,
+						quantity: 2,
+						note: "Original stack",
+						customState: {privacy: "owner-only"},
+					},
+					{id: "rope", item: {name: "Rope", source: "PHB"}, quantity: 1},
+					{id: "after", item: {name: "After", source: "PHB"}, quantity: 1},
+				],
+				currency: {},
+			},
+			payload: {
+				items: [
+					{entryId: "arrows", quantity: 1},
+					{entryId: "rope", quantity: 1},
+				],
+			},
+		});
+		const remaining = container.inventory.find(entry => entry.id === "arrows");
+		remaining.item = {...structuredClone(originalItem), custom: {batch: "modified"}};
+		remaining.note = "Modified stack";
+		remaining.customState = {privacy: "shared"};
+
+		const restored = addTransferPayload({container, escrow, isRestore: true});
+		const restoredOriginal = restored.inventory.find(entry => entry.item.custom?.batch === "original");
+
+		expect(restored.inventory.map(entry => entry.id)).toEqual([
+			restoredOriginal.id,
+			"arrows",
+			"rope",
+			"after",
+		]);
+		expect(restoredOriginal).toEqual(expect.objectContaining({
+			item: originalItem,
+			quantity: 1,
+			note: "Original stack",
+			customState: {privacy: "owner-only"},
+		}));
+		expect(restored.inventory.find(entry => entry.id === "arrows")).toEqual(expect.objectContaining({
+			item: expect.objectContaining({custom: {batch: "modified"}}),
+			quantity: 1,
+			note: "Modified stack",
+			customState: {privacy: "shared"},
+		}));
+		expect(restored.inventory.find(entry => entry.id === "rope")).toEqual(expect.objectContaining({
+			item: {name: "Rope", source: "PHB"},
+			quantity: 1,
+		}));
+	});
+
 	it("merges only metadata-compatible stacks", () => {
 		const escrow = {items: [{id: "incoming", item: {name: "Map", source: "HB"}, quantity: 1, note: "Secret route"}], currency: {}};
 		const destination = addTransferPayload({

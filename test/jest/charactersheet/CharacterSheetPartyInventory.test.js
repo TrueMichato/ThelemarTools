@@ -1189,7 +1189,7 @@ describe("Character Sheet party inventory", () => {
 
 		partyInventory._draft.transfer = null;
 		partyInventory._draft.proposalRequest = null;
-		partyInventory._draft.needsAuthoritativeRefresh = true;
+		partyInventory._needsAuthoritativeRefresh = true;
 		partyInventory._syncComposerSummary(composer);
 
 		expect(quantity.disabled).toBe(true);
@@ -1197,7 +1197,7 @@ describe("Character Sheet party inventory", () => {
 		expect(cancel.disabled).toBe(false);
 		expect(submit.disabled).toBe(true);
 
-		partyInventory._draft.needsAuthoritativeRefresh = false;
+		partyInventory._needsAuthoritativeRefresh = false;
 		partyInventory._draft.transfer = {id: "transfer-1", status: "reserved"};
 		partyInventory._transferResolutionDrafts.stage({
 			campaignId: "campaign-1",
@@ -1351,16 +1351,23 @@ describe("Character Sheet party inventory", () => {
 
 		expect(refreshes[0]).toEqual({character: true, party: true});
 		expect(partyInventory._draft.proposalRequest).toBeNull();
-		expect(partyInventory._draft.needsAuthoritativeRefresh).toBe(true);
+		expect(partyInventory._needsAuthoritativeRefresh).toBe(true);
 		expect(partyInventory._isDraftEditable()).toBe(false);
 		expect(partyInventory._error).toContain("latest character and party stash balances");
 
 		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
 		expect(propose).toHaveBeenCalledTimes(1);
 
+		await expect(partyInventory._pCancelDraft()).resolves.toBe(true);
+		expect(partyInventory._draft).toBeNull();
+		expect(partyInventory._needsAuthoritativeRefresh).toBe(true);
+		expect(partyInventory._error).toContain("latest character and party stash balances");
+		expect(partyInventory._beginDraft({kind: "character", entryId: "stack-1"})).toBe(false);
+		expect(propose).toHaveBeenCalledTimes(1);
+
 		await expect(partyInventory._pManualRefresh({errorSource: "action"})).resolves.toBe(true);
-		expect(partyInventory._draft.needsAuthoritativeRefresh).toBe(false);
-		expect(partyInventory._isDraftEditable()).toBe(true);
+		expect(partyInventory._needsAuthoritativeRefresh).toBe(false);
+		expect(partyInventory._beginDraft({kind: "character", entryId: "stack-1"})).toBe(true);
 
 		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
 		expect(propose).toHaveBeenCalledTimes(2);

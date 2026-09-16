@@ -309,7 +309,8 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   Inbox resolution coverage loses approve/decline responses after commit, reuses the same decision key, and
   distinguishes a known committed outcome from a failed authoritative refresh with an explicit inbox retry.
   Character Sheet refresh/retry tests assert a real refetch, visible pending/success/error state, and retained
-  last-good stash content; spectators and unresolved roles receive a read-only stash rather than a rejected
+  last-good stash content; cancelling a definitively failed draft cannot clear its dual-refresh gate or enable a
+  new stale proposal, and spectators and unresolved roles receive a read-only stash rather than a rejected
   Request action. Repository and real-stack regressions also prove deterministic Character Sheet item aliases
   cannot create a false inventory overlap, semantically converged stale recovery records clear before the next
   save, canonical-equivalent failed writes stop reporting false pending work, and genuinely unique failed or

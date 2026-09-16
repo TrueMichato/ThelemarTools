@@ -479,6 +479,7 @@ export function addTransferPayload ({container, escrow, isRestore = false}) {
 	const incomingItems = isRestore
 		? [...(escrow.items || [])].sort((a, b) => (a._sourceIndex ?? Number.MAX_SAFE_INTEGER) - (b._sourceIndex ?? Number.MAX_SAFE_INTEGER))
 		: escrow.items || [];
+	const collisionRestores = [];
 	for (const incoming of incomingItems) {
 		if (!isRestore) {
 			addDestinationInventoryEntry({inventory: out.inventory, incoming});
@@ -492,11 +493,15 @@ export function addTransferPayload ({container, escrow, isRestore = false}) {
 			continue;
 		}
 		if (existing) {
-			entry.id = getCollisionFreeInventoryEntryId(out.inventory);
-			out.inventory.splice(out.inventory.indexOf(existing), 0, entry);
+			collisionRestores.push({entry, existingId: existing.id});
 			continue;
 		}
 		out.inventory.splice(Math.min(incoming._sourceIndex ?? out.inventory.length, out.inventory.length), 0, entry);
+	}
+	for (const {entry, existingId} of collisionRestores) {
+		const existing = out.inventory.find(it => it.id === existingId);
+		entry.id = getCollisionFreeInventoryEntryId(out.inventory);
+		out.inventory.splice(existing ? out.inventory.indexOf(existing) : out.inventory.length, 0, entry);
 	}
 	const currency = normalizeCurrency(escrow.currency);
 	for (const type of CURRENCY_TYPES) out.currency[type] = addFinite(out.currency[type], currency[type], `${type} amount`);
