@@ -40,6 +40,19 @@ export class HubCampaignPage {
 		expect(response.ok()).toBe(true);
 	}
 
+	async grantXpViaApi ({campaignId, characterId, amount, reason = null}: {
+		campaignId: string;
+		characterId: string;
+		amount: number;
+		reason?: string | null;
+	}): Promise<void> {
+		const response = await this.page.request.post(`/api/campaigns/${campaignId}/characters/${characterId}/xp-grants`, {
+			headers: await this.getMutationHeaders(),
+			data: {amount, reason},
+		});
+		expect(response.ok(), await response.text()).toBe(true);
+	}
+
 	private async getMutationHeaders (): Promise<Record<string, string>> {
 		const session = await this.getSession();
 		const currentUrl = new URL(this.page.url());
@@ -1957,11 +1970,10 @@ export class HubCampaignPage {
 	}
 
 	async expectMembershipRevokedWhileOpen ({characterName}: {characterName: string}): Promise<void> {
-		await expect(this.page.locator("#campaign-party-roster")).toContainText(characterName);
 		await expect(this.page.locator("#hub-error")).toContainText("no longer have access");
-		await expect(this.page.locator("#campaign-connection-status")).toHaveText("Access removed · data is read only");
-		await expect(this.page.locator("#campaign-content")).toBeVisible();
-		await expect(this.page.locator("#campaign-action-form button[type='submit']")).toBeDisabled();
+		await expect(this.page.locator("#campaign-content")).toBeHidden();
+		await expect(this.page.locator("#campaign-content")).toBeEmpty();
+		await expect(this.page.locator("body")).not.toContainText(characterName);
 	}
 
 	async reserveItemAndCurrencyToParty ({

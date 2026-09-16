@@ -125,18 +125,63 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 			sheet._state.setViewMode("play");
 			sheet._playMode.activate();
 		});
+		const playModeMore = dm.page.locator("#charsheet-play-mode .pm-status__tool-btn--more");
+		await expect(playModeMore).toBeEnabled();
+		await playModeMore.click();
+		const playModeMenu = dm.page.locator(".pm-context-menu");
+		await expect(playModeMenu).toContainText("Export");
+		await expect(playModeMenu).toContainText("Print");
+		await expect(playModeMenu).not.toContainText("Import");
+		await expect(playModeMenu).not.toContainText("Settings");
+		await dm.page.keyboard.press("Escape");
+		await dm.page.evaluate(() => {
+			const sheet = (globalThis as any).charSheet;
+			sheet._state.setFavorites([
+				{id: "test:first", type: "feature", name: "First read-only favorite", icon: "feature"},
+				{id: "test:second", type: "feature", name: "Second read-only favorite", icon: "feature"},
+			]);
+			sheet._playMode.render();
+		});
 		const lateRoleButton = dm.page.locator("#charsheet-play-mode [role='button']").first();
 		await expect(lateRoleButton).toBeVisible();
 		await expect(lateRoleButton).toHaveAttribute("aria-disabled", "true");
 		await expect(lateRoleButton).toHaveAttribute("tabindex", "-1");
 		const stateBeforeKeyboardActivation = await dm.page.evaluate(() => (globalThis as any).charSheet._state.toJson());
+		await dm.page.keyboard.press("Control+Shift+P");
+		await expect(dm.page.locator("#charsheet-play-mode")).toBeVisible();
 		await lateRoleButton.dispatchEvent("keydown", {key: "Enter", code: "Enter"});
 		await lateRoleButton.dispatchEvent("keydown", {key: " ", code: "Space"});
+		const favorites = dm.page.locator("#charsheet-play-mode .pm-favorite");
+		await expect(favorites).toHaveCount(2);
+		await expect(favorites.first()).toHaveAttribute("draggable", "false");
+		await favorites.first().dispatchEvent("contextmenu");
+		await expect(dm.page.locator(".pm-context-menu")).toHaveCount(0);
+		await favorites.first().dispatchEvent("dragstart");
+		await favorites.nth(1).dispatchEvent("drop");
 		expect(await dm.page.evaluate(() => (globalThis as any).charSheet._state.toJson()))
 			.toEqual(stateBeforeKeyboardActivation);
 		await dm.page.evaluate(() => (globalThis as any).charSheet._playMode.render());
 		await expect(dm.page.locator("#charsheet-play-mode [role='button']").first())
 			.toHaveAttribute("tabindex", "-1");
+		await dm.page.evaluate(() => {
+			(globalThis as any).__dmRecipientNotices = [];
+			const fnToast = (globalThis as any).JqueryUtil.doToast.bind((globalThis as any).JqueryUtil);
+			(globalThis as any).JqueryUtil.doToast = (options: any) => {
+				const content = options?.content?.textContent || options?.content || "";
+				if (`${content}`.startsWith("Received ")) (globalThis as any).__dmRecipientNotices.push(`${content}`);
+				return fnToast(options);
+			};
+		});
+		await dm.grantXpViaApi({
+			campaignId,
+			characterId: character.id,
+			amount: 25,
+			reason: "For the player",
+		});
+		await expect.poll(
+			() => dm.page.evaluate(() => (globalThis as any).charSheet._state.toJson().xp),
+		).toBe(25);
+		expect(await dm.page.evaluate(() => (globalThis as any).__dmRecipientNotices)).toEqual([]);
 
 		let projectionReadRequests = 0;
 		let allowProjectionReads = false;
@@ -249,6 +294,11 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		await expect(condition).toBeDisabled();
 		expect(conditionModuleRequests).toHaveLength(2);
 		await playerSheet.renameCharacter("Readonly Rowan Recovered");
+		await expect.poll(
+			async () => (await player.getCharacter(character.id)).data.name,
+			{timeout: 20_000},
+		).toBe("Readonly Rowan Recovered");
+		await dm.page.locator("#campaign-action-target").selectOption({label: "Readonly Rowan Recovered"});
 		await expect(condition).toBeEnabled();
 		expect(conditionModuleRequests).toHaveLength(2);
 		expect(conditionDataRequests).toHaveLength(2);
@@ -256,7 +306,19 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		await expect(condition.locator("option", {hasText: "Blinded (PHB)"})).toHaveCount(1);
 		await expect(condition.locator("option", {hasText: "Blinded (XPHB)"})).toHaveCount(1);
 		await condition.selectOption({label: "Blinded (PHB)"});
+		const actionResponsePromise = dm.page.waitForResponse(response => (
+			response.request().method() === "POST"
+			&& new URL(response.url()).pathname === `/api/campaigns/${campaignId}/actions`
+		));
 		await dm.page.locator("#campaign-action-form button[type='submit']").click();
+		const actionResponse = await actionResponsePromise;
+		expect(
+			actionResponse.ok(),
+			JSON.stringify({
+				response: await actionResponse.text(),
+				request: actionResponse.request().postDataJSON(),
+			}),
+		).toBe(true);
 		await expect(dm.page.locator("#campaign-action-form-status")).toHaveText("Effect applied.");
 		await expect.poll(
 			async () => (await player.getCharacter(character.id)).data.conditions,
@@ -459,9 +521,10 @@ test("peer shared profiles render as visible native disclosures", async ({browse
 		const campaignId = await dm.createCampaign("Shared Profile Disclosure E2E");
 		await viewer.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
 		await owner.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
-		await owner.createCharacter({campaignId, name: "Shared Profile Hero"});
+		const character = await owner.createCharacter({campaignId, name: "Shared Profile Hero"});
 
 		await viewer.gotoCampaign(campaignId);
+		await expect(viewer.page.locator("#campaign-connection-status")).toHaveText("Live updates connected");
 		const disclosure = viewer.page.locator("#campaign-party-roster details.hub-shared-profile", {
 			hasText: "Shared Profile Hero",
 		});
@@ -477,6 +540,30 @@ test("peer shared profiles render as visible native disclosures", async ({browse
 		await expect(disclosure).toHaveAttribute("open", "");
 		await expect(body).toBeVisible();
 		await expect(body).toContainText("Server-authorized profile shared with players");
+
+		let markSnapshotRefreshStarted = () => {};
+		const snapshotRefreshStarted = new Promise<void>(resolve => {
+			markSnapshotRefreshStarted = resolve;
+		});
+		let continueSnapshotRefresh = () => {};
+		const snapshotRefreshGate = new Promise<void>(resolve => {
+			continueSnapshotRefresh = resolve;
+		});
+		await viewer.page.route(`**/api/campaigns/${campaignId}/snapshot`, async route => {
+			markSnapshotRefreshStarted();
+			await snapshotRefreshGate;
+			await route.continue();
+		});
+		const currentPolicy = await owner.getProjectionPolicy(character.id);
+		await owner.setProjectionPolicy({
+			characterId: character.id,
+			expectedProjectionRevision: currentPolicy.projectionRevision,
+			policy: {version: 1, preset: "private", overrides: {}},
+		});
+		await snapshotRefreshStarted;
+		await expect(viewer.page.locator("#campaign-party-roster")).not.toContainText("Shared Profile Hero", {timeout: 2_000});
+		continueSnapshotRefresh();
+		await expect(viewer.page.locator("#campaign-party-roster")).not.toContainText("Shared Profile Hero");
 	} finally {
 		await Promise.all([
 			pCloseContext(dmContext),
@@ -519,6 +606,48 @@ test("campaign authorization loss immediately destroys previously visible privat
 		await expect(player.page.locator("#hub-error")).toBeVisible();
 		await expect(player.page.locator("body")).not.toContainText("Private Roster Hero");
 		await expect(player.page.locator("body")).not.toContainText("Concealed Player");
+	} finally {
+		await Promise.all([pCloseContext(dmContext), pCloseContext(playerContext)]);
+	}
+});
+
+test("HTTP authorization loss conceals campaign data even when realtime cannot report it", async ({browser}) => {
+	test.setTimeout(180_000);
+	const secret = process.env.HUB_TEST_AUTH_SECRET;
+	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
+
+	const contextOptions = {
+		baseURL: process.env.HUB_E2E_ORIGIN || "https://localhost:8443",
+		ignoreHTTPSErrors: true,
+	};
+	const dmContext = await browser.newContext(contextOptions);
+	const playerContext = await browser.newContext(contextOptions);
+	try {
+		const dm = new HubCampaignPage(await dmContext.newPage());
+		const player = new HubCampaignPage(await playerContext.newPage());
+		await dm.signInSynthetic({providerSubject: "http-concealment-dm", displayName: "HTTP Concealment DM", secret});
+		await player.signInSynthetic({providerSubject: "http-concealment-player", displayName: "HTTP Concealed Player", secret});
+		const campaignId = await dm.createCampaign("HTTP Authorization Concealment E2E");
+		await player.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
+		await player.createCharacter({campaignId, name: "HTTP Private Hero"});
+
+		await player.page.routeWebSocket(/\/ws\/campaign\//, () => {});
+		await player.gotoCampaign(campaignId);
+		const workbench = player.page.locator("#campaign-workbench");
+		if (!await workbench.evaluate(element => (element as HTMLDetailsElement).open)) {
+			await workbench.locator(":scope > summary").click();
+		}
+		await player.page.locator("#campaign-transfer-source").selectOption({label: "HTTP Private Hero"});
+		await player.page.locator("#campaign-transfer-target").selectOption({label: "Party inventory"});
+		await player.page.locator("#campaign-transfer-gp").fill("1");
+		await dm.removeMember({campaignId, displayName: "HTTP Concealed Player"});
+
+		await player.page.locator("#campaign-transfer-form button[type='submit']").click();
+
+		await expect(player.page.locator("#hub-error")).toContainText("no longer have access");
+		await expect(player.page.locator("#campaign-content")).toBeHidden();
+		await expect(player.page.locator("#campaign-content")).toBeEmpty();
+		await expect(player.page.locator("body")).not.toContainText("HTTP Private Hero");
 	} finally {
 		await Promise.all([pCloseContext(dmContext), pCloseContext(playerContext)]);
 	}

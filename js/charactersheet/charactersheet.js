@@ -700,7 +700,11 @@ class CharacterSheetPage {
 
 	_onHubRecipientNotice (notice) {
 		if (!notice || !this._currentCharacterId) return false;
-		if (this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY) return false;
+		if (this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY) {
+			if (notice.kind !== "xp_award") return false;
+			void this._pRefreshHubReadOnlyCharacter({characterId: this._currentCharacterId});
+			return true;
+		}
 		if (notice.kind === "xp_award") {
 			const total = Number.isFinite(notice.totalXp) ? ` (${notice.totalXp} XP total)` : "";
 			const content = e_({tag: "span", txt: `Received ${notice.amount || 0} XP${total}${notice.reason ? ` — ${notice.reason}` : ""}.`});
@@ -2994,13 +2998,13 @@ class CharacterSheetPage {
 				&& !["Enter", " ", "Spacebar"].includes(event.key)
 			) return;
 			const target = event.target?.closest?.(
-				"a[href], #charsheet-sel-character, #charsheet-btn-export, #charsheet-btn-print, #charsheet-btn-rolllog, #charsheet-btn-more",
+				"a[href], [data-charsheet-readonly-allowed=\"true\"], #charsheet-sel-character, #charsheet-btn-export, #charsheet-btn-print, #charsheet-btn-rolllog, #charsheet-btn-more",
 			);
 			if (target) return;
 			event.preventDefault();
 			event.stopImmediatePropagation();
 		};
-		for (const eventName of ["click", "input", "change", "submit", "keydown"]) {
+		for (const eventName of ["click", "input", "change", "submit", "keydown", "dragstart", "dragover", "drop"]) {
 			root.addEventListener(eventName, handle, true);
 		}
 	}
@@ -3150,6 +3154,7 @@ class CharacterSheetPage {
 			if (error?.code !== "CHARACTER_CAMPAIGN_MISMATCH") {
 				if (
 					loadGeneration === this._characterLoadGeneration
+					&& this._currentCharacterId === previousCharacterId
 					&& previousCharacterId
 					&& this._canRestoreHubRealtimeAfterError?.(error) !== false
 				) {
@@ -3158,6 +3163,7 @@ class CharacterSheetPage {
 				}
 				throw error;
 			}
+			if (loadGeneration !== this._characterLoadGeneration || this._currentCharacterId !== previousCharacterId) return false;
 			window.location.replace(getCloudCharacterUrl({
 				campaignId: error.campaignId,
 				characterId: error.characterId || charId,
@@ -3211,6 +3217,7 @@ class CharacterSheetPage {
 				// Nothing to persist, but the mirror (if any) now agrees with canonical — clear it.
 				this._clearActiveCharacterMirror(charId);
 			}
+			if (loadGeneration !== this._characterLoadGeneration || this._currentCharacterId !== resolvedId) return false;
 
 			// Apply saved section layout
 			if (this._layout) {
@@ -3664,9 +3671,11 @@ class CharacterSheetPage {
 			throw error;
 		}
 
-		this._createNewCharacter();
+		if (this._currentCharacterId === characterId) {
+			this._createNewCharacter();
+			this._selCharacter.value = "";
+		}
 		await this._pLoadCharacters();
-		this._selCharacter.value = "";
 	}
 
 	async _onManageCharacters () {
@@ -3743,7 +3752,12 @@ class CharacterSheetPage {
 			await this._characterRepository.pDeleteMany({characterIds: [...selectedIds]});
 		} catch (error) {
 			if (activeDeletedId && this._currentCharacterId === activeDeletedId) {
-				if (this._canRestoreHubRealtimeAfterError(error)) {
+				if (error?.deletedCharacterIds?.includes(activeDeletedId)) {
+					this._endCurrentHubCharacterAccess({
+						characterId: activeDeletedId,
+						accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CHARACTER,
+					});
+				} else if (this._canRestoreHubRealtimeAfterError(error)) {
 					this._attachHubRealtime({characterId: activeDeletedId});
 				} else if (this._isHubCharacter) {
 					this._endCurrentHubCharacterAccess({
@@ -5505,13 +5519,22 @@ class CharacterSheetPage {
 			"charsheet-btn-rolllog",
 			"charsheet-btn-more",
 		]);
-		for (const control of root.querySelectorAll?.("button, input, select, textarea, [contenteditable=\"true\"], [role=\"button\"]") || []) {
-			if (allowedIds.has(control.id)) continue;
+		for (
+			const control of root.querySelectorAll?.(
+				"button, input, select, textarea, [contenteditable=\"true\"], [role=\"button\"], [draggable]",
+			) || []
+		) {
+			if (allowedIds.has(control.id) || control.dataset?.charsheetReadonlyAllowed === "true") continue;
 			const isCustomButton = control.matches?.("[role=\"button\"]") === true;
+			const isDraggable = control.getAttribute?.("draggable") === "true";
 			if (isReadOnly) {
 				if (control.getAttribute?.("contenteditable") === "true") {
 					control.dataset.charsheetReadOnlyWasContenteditable = "true";
 					control.setAttribute("contenteditable", "false");
+				}
+				if (isDraggable && control.dataset.charsheetReadOnlyWasDraggable == null) {
+					control.dataset.charsheetReadOnlyWasDraggable = "true";
+					control.setAttribute("draggable", "false");
 				}
 				if (isCustomButton && control.dataset.charsheetReadOnlyWasTabindex == null) {
 					control.dataset.charsheetReadOnlyWasTabindex = control.getAttribute?.("tabindex") ?? "";
@@ -5540,6 +5563,14 @@ class CharacterSheetPage {
 				control.setAttribute("contenteditable", "true");
 				delete control.dataset.charsheetReadOnlyWasContenteditable;
 			}
+			if (control.dataset.charsheetReadOnlyWasDraggable === "true") {
+				control.setAttribute("draggable", "true");
+				delete control.dataset.charsheetReadOnlyWasDraggable;
+			}
+		}
+		if (isReadOnly) {
+			document.querySelectorAll?.(".pm-context-menu, .pm-modal-overlay, #pm-sticky-overlay")
+				?.forEach?.(element => element.remove());
 		}
 		if (isReadOnly) this._updateSaveIndicator("readonly");
 		else if (wasReadOnly) this._updateSaveIndicator("saved");

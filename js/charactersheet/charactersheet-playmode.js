@@ -8,6 +8,7 @@
  */
 
 import {CharacterSheetProfPicker} from "./charactersheet-prof-editor.js";
+import {CHARACTER_ACCESS_MODES} from "../hub/hub-character-view.js";
 
 const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"];
 const ABILITY_NAMES = {str: "STR", dex: "DEX", con: "CON", int: "INT", wis: "WIS", cha: "CHA"};
@@ -608,13 +609,28 @@ export class CharacterSheetPlayMode {
 		// Secondary tools folded into a single overflow menu so the status row
 		// never overflows (was 17 buttons > viewport at 1440px). The menu is
 		// body-appended + fixed-positioned so it escapes any overflow clipping.
-		const moreBtn = this._makeToolBtn(tools, "more", "More", (e) => this._openToolsMenu(e, moreBtn));
+		const moreBtn = this._makeToolBtn(
+			tools,
+			"more",
+			"More",
+			(e) => this._openToolsMenu(e, moreBtn),
+			{isReadOnlyAllowed: true},
+		);
 		moreBtn.classList.add("pm-status__tool-btn--more");
 		moreBtn.setAttribute("aria-haspopup", "true");
 	}
 
 	/** Overflow menu holding the secondary Alt View tools. */
 	_openToolsMenu (e, anchorBtn) {
+		const isReadOnly = this._page._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY;
+		if (isReadOnly) {
+			const rect = anchorBtn.getBoundingClientRect();
+			this._showContextMenu({clientX: rect.right, clientY: rect.bottom + 4}, [
+				{icon: "save", label: "Export", onClick: () => this._exportCharacter()},
+				{icon: "print", label: "Print", onClick: () => window.print()},
+			], {isReadOnlyAllowed: true});
+			return;
+		}
 		const items = [
 			{icon: "notes", label: "Reference", onClick: () => this._openDrawerByType("reference")},
 			{icon: "edit", label: "Notes", onClick: () => this._openDrawerByType("notes")},
@@ -1438,7 +1454,11 @@ export class CharacterSheetPlayMode {
 			this._makeClickable(el, `Use favorite: ${fav.name}`, () => this._useFavorite(fav));
 
 			// E1: Drag-drop reorder
-			el.addEventListener("dragstart", () => {
+			el.addEventListener("dragstart", (e) => {
+				if (this._isReadOnly()) {
+					e.preventDefault();
+					return;
+				}
 				dragSrcIdx = idx;
 				el.classList.add("pm-favorite--dragging");
 			});
@@ -1453,6 +1473,7 @@ export class CharacterSheetPlayMode {
 			el.addEventListener("dragleave", () => el.classList.remove("pm-favorite--drag-over"));
 			el.addEventListener("drop", (e) => {
 				e.preventDefault();
+				if (this._isReadOnly()) return;
 				el.classList.remove("pm-favorite--drag-over");
 				if (dragSrcIdx === null || dragSrcIdx === idx) return;
 				const reordered = [...favorites];
@@ -4517,6 +4538,7 @@ export class CharacterSheetPlayMode {
 			// Ctrl+Shift+P to toggle play mode
 			if (e.ctrlKey && e.shiftKey && e.key === "P") {
 				e.preventDefault();
+				if (this._isReadOnly()) return;
 				this.toggle();
 			}
 			// Escape to close drawer
@@ -4680,10 +4702,12 @@ export class CharacterSheetPlayMode {
 	}
 
 	/** E2: Show a positioned context menu. items: [{label, icon, onClick, disabled, danger, separator}] */
-	_showContextMenu (e, items) {
+	_showContextMenu (e, items, {isReadOnlyAllowed = false} = {}) {
+		if (this._isReadOnly() && !isReadOnlyAllowed) return false;
 		document.querySelectorAll(".pm-context-menu").forEach(m => m.remove());
 
 		const menu = this._ce("div", "pm-context-menu");
+		if (isReadOnlyAllowed) menu.dataset.charsheetReadonlyAllowed = "true";
 		items.forEach(item => {
 			if (item.separator) {
 				this._ce("div", "pm-context-menu__separator", menu);
@@ -4731,21 +4755,35 @@ export class CharacterSheetPlayMode {
 			document.addEventListener("click", onClose);
 			document.addEventListener("keydown", onEsc);
 		}, 0);
+		return true;
+	}
+
+	_isReadOnly () {
+		return this._page?._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY;
 	}
 
 	/**
 	 * Make an element clickable with full accessibility support.
 	 * Sets role="button", tabindex="0", aria-label, wires click + Enter/Space.
 	 */
-	_makeClickable (el, label, handler) {
+	_makeClickable (el, label, handler, {isReadOnlyAllowed = false} = {}) {
+		const guardedHandler = (e) => {
+			if (this._isReadOnly() && !isReadOnlyAllowed) {
+				e?.preventDefault?.();
+				e?.stopImmediatePropagation?.();
+				return;
+			}
+			handler(e);
+		};
 		el.setAttribute("role", "button");
 		el.setAttribute("tabindex", "0");
 		if (label) el.setAttribute("aria-label", label);
-		el.addEventListener("click", handler);
+		if (isReadOnlyAllowed) el.dataset.charsheetReadonlyAllowed = "true";
+		el.addEventListener("click", guardedHandler);
 		el.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" || e.key === " ") {
 				e.preventDefault();
-				handler(e);
+				guardedHandler(e);
 			}
 		});
 		return el;
@@ -4762,11 +4800,19 @@ export class CharacterSheetPlayMode {
 	}
 
 	/** Create a toolbar button */
-	_makeToolBtn (parent, icon, label, onClick) {
+	_makeToolBtn (parent, icon, label, onClick, {isReadOnlyAllowed = false} = {}) {
 		const btn = this._ce("button", "pm-status__tool-btn", parent);
 		this._icon(icon, {cls: "pm-status__tool-icon", parent: btn});
 		btn.appendChild(document.createTextNode(label));
-		btn.addEventListener("click", onClick);
+		if (isReadOnlyAllowed) btn.dataset.charsheetReadonlyAllowed = "true";
+		btn.addEventListener("click", (e) => {
+			if (this._isReadOnly() && !isReadOnlyAllowed) {
+				e.preventDefault();
+				e.stopImmediatePropagation();
+				return;
+			}
+			onClick(e);
+		});
 		return btn;
 	}
 
@@ -5077,6 +5123,10 @@ export class CharacterSheetPlayMode {
 		// Drag to reposition
 		let dragging = false; let dragOffX = 0; let dragOffY = 0;
 		titleBar.addEventListener("mousedown", (e) => {
+			if (this._isReadOnly()) {
+				e.preventDefault();
+				return;
+			}
 			if (e.target === titleInput || e.target === colorPicker || e.target === delBtn) return;
 			dragging = true;
 			const rect = el.getBoundingClientRect();
@@ -5086,6 +5136,10 @@ export class CharacterSheetPlayMode {
 			e.preventDefault();
 		});
 		document.addEventListener("mousemove", (e) => {
+			if (this._isReadOnly()) {
+				dragging = false;
+				return;
+			}
 			if (!dragging) return;
 			const parentRect = overlayEl.getBoundingClientRect();
 			const x = Math.max(0, e.clientX - parentRect.left - dragOffX);
@@ -5094,6 +5148,10 @@ export class CharacterSheetPlayMode {
 			el.style.top = `${y}px`;
 		});
 		document.addEventListener("mouseup", () => {
+			if (this._isReadOnly()) {
+				dragging = false;
+				return;
+			}
 			if (!dragging) return;
 			dragging = false;
 			el.style.zIndex = "";

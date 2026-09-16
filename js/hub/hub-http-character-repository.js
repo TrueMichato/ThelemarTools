@@ -3443,8 +3443,16 @@ export class HubHttpCharacterRepository {
 
 	async pDeleteMany ({characterIds}) {
 		let count = 0;
-		for (const characterId of characterIds) {
-			if (await this.pDelete({characterId})) count++;
+		const deletedCharacterIds = [];
+		try {
+			for (const characterId of characterIds) {
+				if (!await this.pDelete({characterId})) continue;
+				deletedCharacterIds.push(characterId);
+				count++;
+			}
+		} catch (error) {
+			error.deletedCharacterIds = deletedCharacterIds;
+			throw error;
 		}
 		return count;
 	}

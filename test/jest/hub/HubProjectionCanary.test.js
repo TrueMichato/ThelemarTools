@@ -480,12 +480,23 @@ describe("projection privacy canaries", () => {
 		});
 
 		const peerEvents = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/events`, headers: readHeaders(peerA)})).json().events;
+		const peerInvalidations = peerEvents.filter(
+			event => event.aggregateId === campaign.id && event.type === "character.projection.invalidated",
+		);
 
-		// A hidden character contributes no shared activity rows at all. Redacting the
-		// actor is not enough on its own: lifecycle rows compose with the adjacent
-		// membership event, which is legitimate roster news and cannot be sanitised away.
-		expect(peerEvents.filter(event => event.aggregateId === character.id)).toEqual([]);
+		// A peer who could see the previous projection receives one metadata-only,
+		// actor-redacted invalidation so an open roster can conceal it immediately.
+		expect(peerInvalidations).toEqual([
+			expect.objectContaining({
+				actorAccountId: null,
+				aggregateId: campaign.id,
+				aggregateType: "campaign",
+				payload: {},
+				visibleAccountIds: null,
+			}),
+		]);
 		expect(JSON.stringify(peerEvents)).not.toContain(character.id);
+		expect(JSON.stringify(peerInvalidations)).not.toContain(CHARACTER_DATA.name);
 		// Membership events still name the member: joining a campaign is roster news the
 		// member list already carries. It is the *character* linkage that is suppressed.
 		expect(peerEvents.some(event => event.type === "membership.joined" && event.actorAccountId === owner.account.id)).toBe(true);

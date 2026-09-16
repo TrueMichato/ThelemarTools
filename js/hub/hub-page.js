@@ -45,6 +45,7 @@ import {
 const api = new HubApiClient();
 const transferProposalDrafts = new HubTransferProposalDrafts();
 const transferResolutionDrafts = new HubTransferResolutionDrafts();
+let campaignAuthorizationErrorHandler = null;
 
 function concealCampaignAuthorizationSurfaces () {
 	const content = document.getElementById("campaign-content");
@@ -200,10 +201,14 @@ function setCampaignReadOnlyAfterAccessChange (error) {
 		});
 }
 
-function renderError (messageOrError, {actionLabel = null, fnAction = null} = {}) {
+function renderError (
+	messageOrError,
+	{actionLabel = null, fnAction = null, isAuthorizationHandled = false} = {},
+) {
 	const wrp = document.getElementById("hub-error");
 	if (!wrp) return;
 	const error = messageOrError instanceof HubApiError ? messageOrError : null;
+	if (!isAuthorizationHandled && error && campaignAuthorizationErrorHandler?.(error)) return;
 	const message = error ? getErrorMessage(error) : messageOrError;
 	wrp.replaceChildren();
 	if (message) {
@@ -1078,6 +1083,30 @@ function setFormAvailability ({formId, isAvailable, message}) {
 	if (!isAvailable) setFormStatus({formId, message});
 }
 
+function setProjectionFormControlsConcealed ({form, isConcealed}) {
+	if (!form) return;
+	if (isConcealed) {
+		if (!form._hubProjectionControlStates) form._hubProjectionControlStates = new Map();
+		if (form.contains(document.activeElement)) form._hubProjectionFocusedControl = document.activeElement;
+		for (const control of form.querySelectorAll("button, input, select, textarea")) {
+			if (!form._hubProjectionControlStates.has(control)) form._hubProjectionControlStates.set(control, control.disabled);
+			control.disabled = true;
+		}
+		return;
+	}
+	const focusedControl = form._hubProjectionFocusedControl;
+	for (const [control, wasDisabled] of form._hubProjectionControlStates || []) {
+		if (control.isConnected) control.disabled = wasDisabled;
+	}
+	delete form._hubProjectionControlStates;
+	delete form._hubProjectionFocusedControl;
+	if (
+		focusedControl?.isConnected
+		&& !focusedControl.disabled
+		&& [document.body, focusedControl].includes(document.activeElement)
+	) focusedControl.focus({preventScroll: true});
+}
+
 function renderAccountDeletionPending (deletion) {
 	setHidden(document.getElementById("hub-account-active"), true);
 	setHidden(document.getElementById("hub-account-deletion-pending"), false);
@@ -1339,6 +1368,47 @@ async function pInitCampaign ({session}) {
 		context = null;
 		concealCampaignAuthorizationSurfaces();
 	};
+	const concealCampaignProjectionAuthorization = () => {
+		concealActivityAuthorization({isLoading: true});
+		liveRoster = [];
+		for (const formId of ["campaign-action-form", "campaign-transfer-form", "campaign-xp-form", "campaign-item-form"]) {
+			setProjectionFormControlsConcealed({
+				form: document.getElementById(formId),
+				isConcealed: true,
+			});
+		}
+		for (const id of [
+			"campaign-party-roster",
+			"campaign-pending-actions",
+			"campaign-pending-transfers",
+			"campaign-item-targets",
+			"campaign-item-preview-list",
+		]) document.getElementById(id)?.replaceChildren();
+		for (const id of [
+			"campaign-action-target",
+			"campaign-transfer-source",
+			"campaign-transfer-target",
+			"campaign-transfer-entry",
+			"campaign-xp-target",
+		]) {
+			const select = document.getElementById(id);
+			select?.replaceChildren();
+			if (select) select.disabled = true;
+		}
+		const partyCount = document.getElementById("campaign-party-count");
+		if (partyCount) partyCount.textContent = "0";
+		const partyEmpty = document.getElementById("campaign-party-empty");
+		if (partyEmpty) partyEmpty.textContent = "Refreshing authorized party details...";
+		setHidden(partyEmpty, false);
+		const attentionSummary = document.getElementById("campaign-attention-summary");
+		if (attentionSummary) attentionSummary.textContent = "Refreshing authorized requests...";
+		const attentionCount = document.getElementById("campaign-inbox-count");
+		if (attentionCount) attentionCount.textContent = "0";
+		const previewSummary = document.getElementById("campaign-item-preview-summary");
+		if (previewSummary) previewSummary.textContent = "Refreshing authorized recipients...";
+		const transferBalance = document.getElementById("campaign-transfer-balance");
+		if (transferBalance) transferBalance.textContent = "";
+	};
 	const stopCampaignLiveUpdates = () => {
 		if (refreshTimer != null) {
 			window.clearTimeout(refreshTimer);
@@ -1346,6 +1416,21 @@ async function pInitCampaign ({session}) {
 		}
 		realtime.close();
 	};
+	const handleCampaignAuthorizationError = error => {
+		if (!(error instanceof HubApiError)) return false;
+		if (!["AUTH_REQUIRED", "FORBIDDEN", "CAMPAIGN_NOT_FOUND", "MEMBERSHIP_NOT_FOUND"].includes(error.code)) return false;
+		isCampaignReloadRequired = true;
+		if (error.code === "AUTH_REQUIRED") {
+			stopCampaignLiveUpdates();
+			renderError(error, {isAuthorizationHandled: true});
+			return true;
+		}
+		concealCampaignAuthorization();
+		stopCampaignLiveUpdates();
+		renderError(error, {isAuthorizationHandled: true});
+		return true;
+	};
+	campaignAuthorizationErrorHandler = handleCampaignAuthorizationError;
 	bindHubActivityHistoryPagination({
 		button: document.getElementById("campaign-activity-load-earlier"),
 		pListEventPage: ({beforeSequence, limit}) => api.pListEventPage({campaignId, beforeSequence, limit}),
@@ -1364,11 +1449,7 @@ async function pInitCampaign ({session}) {
 		getAuthorizationGeneration: () => activityAuthorizationGeneration,
 		isAuthorizationFenced: () => isActivityAuthorizationFenced,
 		onAuthorizationError: error => {
-			if (!["AUTH_REQUIRED", "FORBIDDEN", "CAMPAIGN_NOT_FOUND"].includes(error?.code)) return false;
-			concealCampaignAuthorization();
-			isCampaignReloadRequired = true;
-			stopCampaignLiveUpdates();
-			return true;
+			return handleCampaignAuthorizationError(error);
 		},
 		isTerminal: () => isCampaignReloadRequired,
 	});
@@ -1473,19 +1554,27 @@ async function pInitCampaign ({session}) {
 			]);
 			if (isCampaignReloadRequired) return;
 			const isSnapshotCurrent = snapshotNxt.lastSequence >= liveLastSequence;
+			if (!isSnapshotCurrent) {
+				isRefreshQueued = true;
+				return;
+			}
+			for (const formId of ["campaign-action-form", "campaign-xp-form", "campaign-item-form"]) {
+				setProjectionFormControlsConcealed({
+					form: document.getElementById(formId),
+					isConcealed: false,
+				});
+			}
 			liveEvents = activityRefresh.events;
 			if (activityRefresh.isAuthorizationChanged) {
 				if (!isActivityAuthorizationFenced) invalidateActivityAuthorization();
 				activityHistory = activityRefresh.history;
 			}
 			liveMembers = membersNxt;
-			if (isSnapshotCurrent) {
-				// Replacement, not a merge: a field the owner has just stopped sharing must
-				// disappear rather than survive from the previous, broader projection.
-				liveCharacters = snapshotNxt.characters;
-				liveRoster = snapshotNxt.roster || [];
-				liveLastSequence = snapshotNxt.lastSequence;
-			}
+			// Replacement, not a merge: a field the owner has just stopped sharing must
+			// disappear rather than survive from the previous, broader projection.
+			liveCharacters = snapshotNxt.characters;
+			liveRoster = snapshotNxt.roster || [];
+			liveLastSequence = snapshotNxt.lastSequence;
 			renderCharacterList({
 				campaignId,
 				characters: charactersNxt,
@@ -1500,6 +1589,20 @@ async function pInitCampaign ({session}) {
 				session,
 				isDm: ["dm", "co_dm"].includes(campaign.role),
 				roster: liveRoster,
+			});
+			const actionTarget = document.getElementById("campaign-action-target");
+			const xpTarget = document.getElementById("campaign-xp-target");
+			fillCharacterSelect(
+				actionTarget,
+				getTargetableProjections({projections: liveCharacters, roster: liveRoster}),
+			);
+			fillCharacterSelect(xpTarget, charactersNxt);
+			if (actionTarget) actionTarget.disabled = !actionTarget.options.length;
+			if (xpTarget) xpTarget.disabled = !xpTarget.options.length;
+			setFormAvailability({
+				formId: "campaign-action-form",
+				isAvailable: !!actionTarget?.options.length,
+				message: "Add a campaign character before proposing an effect.",
 			});
 			if (activityRefresh.isAuthorizationChanged) isActivityAuthorizationFenced = false;
 			renderRecentActivity({
@@ -1565,7 +1668,7 @@ async function pInitCampaign ({session}) {
 		}
 		const isProjectionInvalidation = event.type === "character.projection.invalidated";
 		if (isProjectionInvalidation) {
-			concealActivityAuthorization({isLoading: true});
+			concealCampaignProjectionAuthorization();
 		}
 		if (!isCampaignReloadRequired && navigator.onLine) {
 			liveLastSequence = Math.max(liveLastSequence, event.sequence || 0);
@@ -1605,14 +1708,17 @@ async function pInitCampaign ({session}) {
 		if (state === "live") setCampaignConnectionStatus({label: "Live updates connected", state: "connected"});
 		else if (state === "reconnecting") setCampaignConnectionStatus({label: "Live updates reconnecting", state: "warning"});
 		else if (state === "access_lost") {
-			concealCampaignAuthorization();
-			isCampaignReloadRequired = true;
-			stopCampaignLiveUpdates();
-			if (/session|account deletion/i.test(reason || "")) renderError(new HubApiError({code: "AUTH_REQUIRED", status: 401}));
-			else renderError(new HubApiError({code: "CAMPAIGN_NOT_FOUND", status: 404}));
+			handleCampaignAuthorizationError(
+				/session|account deletion/i.test(reason || "")
+					? new HubApiError({code: "AUTH_REQUIRED", status: 401})
+					: new HubApiError({code: "CAMPAIGN_NOT_FOUND", status: 404}),
+			);
 		}
 	});
-	window.addEventListener("beforeunload", () => realtime.close(), {once: true});
+	window.addEventListener("beforeunload", () => {
+		if (campaignAuthorizationErrorHandler === handleCampaignAuthorizationError) campaignAuthorizationErrorHandler = null;
+		realtime.close();
+	}, {once: true});
 	await realtime.pConnect().catch(() => {
 		if (!isCampaignReloadRequired) setCampaignConnectionStatus({label: "Live updates reconnecting", state: "warning"});
 	});
@@ -2443,6 +2549,11 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			partyInventoryNxt ? null : api.pGetPartyInventory({campaignId}),
 		]);
 		if (!fnIsCurrent()) return {pendingTransferIds: [], isFenced: true};
+		if (snapshotNxt && !fnIsSnapshotCurrent(snapshotNxt)) return {pendingTransferIds: [], isFenced: true};
+		setProjectionFormControlsConcealed({
+			form: document.getElementById("campaign-transfer-form"),
+			isConcealed: false,
+		});
 		const acceptedSnapshot = snapshotNxt && fnIsSnapshotCurrent(snapshotNxt)
 			? snapshotNxt
 			: snapshotLatest;
@@ -2469,6 +2580,8 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		// A character whose identity the owner hid is absent from roster metadata and is
 		// therefore not peer-targetable.
 		fillCharacterSelect(target, getTargetableProjections({projections: targetCharacters, roster: rosterRef.current}), {includeParty: true, partyInventory});
+		if (source) source.disabled = !source.options.length;
+		if (target) target.disabled = !target.options.length;
 		if ([...source.options].some(option => option.value === selectionsToRestore.source)) source.value = selectionsToRestore.source;
 		if ([...target.options].some(option => option.value === selectionsToRestore.target)) target.value = selectionsToRestore.target;
 		syncTransferItemPicker({characters, partyInventory});
@@ -2728,6 +2841,8 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 				fingerprint: getFormFingerprint(event.currentTarget),
 				fnMutate: async idempotencyKey => {
 					const type = document.getElementById("campaign-action-type").value;
+					const targetCharacterId = document.getElementById("campaign-action-target").value.split(":")[1];
+					if (!targetCharacterId) throw new Error("Choose a target character.");
 					const rawValue = document.getElementById("campaign-action-value").value.trim();
 					if (["damage", "healing"].includes(type) && !(Number(rawValue) > 0)) {
 						throw new Error("Enter a positive amount.");
@@ -2763,7 +2878,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 								: null;
 					await api.pCreateStructuredAction({
 						campaignId,
-						targetCharacterId: document.getElementById("campaign-action-target").value.split(":")[1],
+						targetCharacterId,
 						operation,
 						idempotencyKey,
 					});

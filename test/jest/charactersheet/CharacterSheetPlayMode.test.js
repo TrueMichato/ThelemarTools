@@ -14,8 +14,10 @@ function makeElement (className = "") {
 	return {
 		className,
 		children: [],
+		dataset: {},
 		_handlers: {},
 		classList: {add: jest.fn()},
+		_attributes: new Map(),
 		appendChild (child) {
 			this.children.push(child);
 			child.parentNode = this;
@@ -26,6 +28,12 @@ function makeElement (className = "") {
 		},
 		addEventListener (type, handler) {
 			this._handlers[type] = handler;
+		},
+		setAttribute (name, value) {
+			this._attributes.set(name, `${value}`);
+		},
+		getAttribute (name) {
+			return this._attributes.get(name) ?? null;
 		},
 		remove: jest.fn(),
 	};
@@ -68,6 +76,81 @@ describe("CharacterSheetPlayMode", () => {
 		playMode.render();
 
 		expect(playMode._page._applyCharacterAccessMode).toHaveBeenCalledTimes(1);
+	});
+
+	it("exposes only Export and Print through the read-only Play Mode overflow", () => {
+		const playMode = Object.create(CharacterSheetPlayMode.prototype);
+		playMode._page = {
+			_currentCharacterAccess: "dm_readonly",
+			_export: {_showNpcExportDialog: jest.fn()},
+		};
+		playMode._state = {getCompanions: () => []};
+		playMode._showContextMenu = jest.fn();
+		playMode._exportCharacter = jest.fn();
+		const anchor = {getBoundingClientRect: () => ({right: 100, bottom: 40})};
+
+		playMode._openToolsMenu({}, anchor);
+
+		const items = playMode._showContextMenu.mock.calls[0][1];
+		expect(items.map(item => item.label).filter(Boolean)).toEqual(["Export", "Print"]);
+		expect(playMode._showContextMenu.mock.calls[0][2]).toEqual({isReadOnlyAllowed: true});
+	});
+
+	it("blocks play-mode shortcuts and direct custom controls in a read-only DM view", () => {
+		const documentPrevious = globalThis.document;
+		const listeners = {};
+		globalThis.document = {
+			addEventListener: jest.fn((type, listener) => listeners[type] = listener),
+		};
+		const playMode = Object.create(CharacterSheetPlayMode.prototype);
+		playMode._page = {_currentCharacterAccess: "dm_readonly"};
+		playMode.toggle = jest.fn();
+		try {
+			playMode._bindKeyboard();
+			const shortcut = {
+				ctrlKey: true,
+				shiftKey: true,
+				key: "P",
+				preventDefault: jest.fn(),
+			};
+			listeners.keydown(shortcut);
+			expect(shortcut.preventDefault).toHaveBeenCalledTimes(1);
+			expect(playMode.toggle).not.toHaveBeenCalled();
+
+			const handler = jest.fn();
+			const control = makeElement();
+			playMode._makeClickable(control, "Mutate", handler);
+			const activation = {
+				key: "Enter",
+				preventDefault: jest.fn(),
+				stopImmediatePropagation: jest.fn(),
+			};
+			control._handlers.keydown(activation);
+			expect(handler).not.toHaveBeenCalled();
+			expect(activation.stopImmediatePropagation).toHaveBeenCalledTimes(1);
+
+			playMode._page._currentCharacterAccess = "owner";
+			listeners.keydown(shortcut);
+			expect(playMode.toggle).toHaveBeenCalledTimes(1);
+			control._handlers.keydown(activation);
+			expect(handler).toHaveBeenCalledTimes(1);
+		} finally {
+			globalThis.document = documentPrevious;
+		}
+	});
+
+	it("does not open mutation context menus in a read-only DM view", () => {
+		const documentPrevious = globalThis.document;
+		globalThis.document = {querySelectorAll: jest.fn(() => [])};
+		const playMode = Object.create(CharacterSheetPlayMode.prototype);
+		playMode._page = {_currentCharacterAccess: "dm_readonly"};
+		playMode._ce = jest.fn();
+		try {
+			expect(playMode._showContextMenu({clientX: 0, clientY: 0}, [{label: "Mutate"}])).toBe(false);
+		} finally {
+			globalThis.document = documentPrevious;
+		}
+		expect(playMode._ce).not.toHaveBeenCalled();
 	});
 
 	it("persists play-mode cantrips with the same closed spell activity descriptor", () => {

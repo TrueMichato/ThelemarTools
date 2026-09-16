@@ -161,6 +161,12 @@ const pMakeHarness = async ({seed = {}, access = "owner"} = {}) => {
 	const seedData = structuredClone(state.toJson());
 	delete seedData.id;
 	const api = makeApi(makeCharacterDocument(seedData));
+	if (access === "dm_readonly") {
+		api.pGetCharacterProjection = jest.fn(async () => ({
+			kind: "dm_truth",
+			character: structuredClone(api.state.character),
+		}));
+	}
 	const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
 	if (previousStorage === undefined) delete globalThis.sessionStorage;
 	else globalThis.sessionStorage = previousStorage;
@@ -202,6 +208,7 @@ const pMakeHarness = async ({seed = {}, access = "owner"} = {}) => {
 		_currentCharacterId: "character-1",
 		_currentCharacterAccess: access,
 		_characterLoadGeneration: 0,
+		_hubReadOnlyRefreshGeneration: 0,
 		_hubRealtimeGeneration: 0,
 		_isHubRealtimeListenersBound: false,
 		_renderCount: 0,
@@ -218,6 +225,7 @@ const pMakeHarness = async ({seed = {}, access = "owner"} = {}) => {
 		"_onHubRealtimeConnectionState",
 		"_onHubRealtimeDeliveryError",
 		"_onHubRecipientNotice",
+		"_pRefreshHubReadOnlyCharacter",
 		"_onHubSemanticOperation",
 		"_getHubLiveCharacterData",
 		"_adoptHubLiveCharacterData",
@@ -318,6 +326,31 @@ describe("Live campaign effects on an open Character Sheet", () => {
 			type: "item.granted",
 			isCurrentCharacterAffected: true,
 		})]);
+	});
+
+	it("refreshes DM truth for XP awards without showing the player recipient notice", async () => {
+		const {api, clients, host, state, toasts} = await pMakeHarness({access: "dm_readonly"});
+		api.state.character = makeCharacterDocument({
+			...api.state.character.data,
+			xp: 9_000,
+		}, 2);
+
+		clients[0].emit("event", {
+			id: "dm-visible-xp-award",
+			campaignId: "campaign-1",
+			sequence: 23,
+			type: "xp.granted",
+			aggregateType: "character",
+			aggregateId: "character-1",
+			payload: {amount: 250, xp: 9_000, reason: "For the player"},
+		});
+		await pFlush();
+		await pFlush();
+
+		expect(toasts).toEqual([]);
+		expect(state.toJson().xp).toBe(9_000);
+		expect(api.pGetCharacterProjection).toHaveBeenCalledTimes(2);
+		expect(host._renderCount).toBe(1);
 	});
 
 	it("commits spell activity once when Keep Local retries a post-save live conflict", async () => {

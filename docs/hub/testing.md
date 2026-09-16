@@ -312,8 +312,9 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   reload, fails the scoped projection reads on one reconnect, reconnects again against the same cursor, proves
   the pending refresh converges, forces a later resync, and verifies no owner-only lease, sharing, pending-action, targeting,
   inventory, or document-mutation request escapes. The browser journey also exercises Enter/Space against a late
-  Play Mode role-button and keeps More/Export/Print reachable; the realtime seam proves no DM-inspector recipient
-  toast is substituted for the still-required inventory invalidation.
+  Play Mode role-button, blocks its global toggle shortcut, context menus, and favorite drag reorder, and keeps
+  More/Export/Print reachable. Realtime seams prove item invalidation remains live without a DM recipient toast
+  and DM-visible XP awards perform a scoped truth refresh without presenting the awarding DM as the recipient.
 - Character Sheet repository regressions prove that canonical create/import commits remain successful when roster
   or campaign-control refreshes fail, realtime binds to the canonical id before those reads, and a genuinely failed
   duplicate restores the source character's campaign controls. Realtime teardown regressions preserve structured
@@ -324,10 +325,15 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   cannot detach, restore, reconcile, navigate over, or conceal the selected character.
 - Campaign overview revocation coverage removes the active membership over the real socket and proves the entire
   previously authorized DOM is destroyed immediately, not merely disabled while private roster/profile/member,
-  inventory, pending-action, transfer, or administration content remains present.
+  inventory, pending-action, transfer, or administration content remains present. A separate HTTP-first journey
+  blocks realtime and proves a rejected mutation performs the same concealment, while session revocation retains
+  the established last-known signed-out read-only fallback.
 - Campaign snapshot consumers coalesce `character.projection.invalidated` metadata into one authorization-scoped HTTP refetch and fence older
   in-flight snapshot responses with the campaign event sequence, so an authoritative refresh cannot regress a
-  newer visible projection. A single 10-second client watchdog requests an authoritative snapshot while the
+  newer visible projection. Policy-change invalidations snapshot the old-or-new authorized audience and redact
+  peer actor identity while remaining campaign-scoped and character-id-free, allowing a previously shared row to
+  disappear before the replacement snapshot without exposing it to later or never-authorized peers. A single
+  10-second client watchdog requests an authoritative snapshot while the
   socket remains live. During replay it allows a full unchanged interval before reconnecting, so advancing
   continuation pages are not interrupted while a stalled chain still recovers.
 - Character Sheet realtime regressions use deterministic fake sockets and repository barriers to prove stale

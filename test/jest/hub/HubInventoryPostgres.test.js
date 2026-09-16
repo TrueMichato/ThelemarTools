@@ -661,6 +661,23 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			expectedProjectionRevision: aliasPolicy.projectionRevision,
 			idempotencyKey: `${prefix}-hide-source-after-transfer`,
 		});
+		const targetInvalidations = (await store.pListVisibleEventPage({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			limit: 500,
+		})).events.filter(
+			event => event.aggregateId === campaign.id && event.type === "character.projection.invalidated",
+		);
+		expect(targetInvalidations.at(-1)).toMatchObject({
+			actorAccountId: null,
+			aggregateId: campaign.id,
+			aggregateType: "campaign",
+			payload: {},
+			visibleAccountIds: null,
+		});
+		expect(JSON.stringify(targetInvalidations.at(-1))).not.toContain(sourceOwner.id);
+		expect(JSON.stringify(targetInvalidations.at(-1))).not.toContain(sourceCharacter.id);
+		expect(JSON.stringify(targetInvalidations.at(-1))).not.toContain("Source");
 		const targetViewAfterSourceHide = (await store.pListTransfers({accountId: targetOwner.id, campaignId: campaign.id}))
 			.find(transfer => transfer.id === directPass.transfer.id);
 		expect(targetViewAfterSourceHide).not.toHaveProperty("sourceDisplaySnapshot");

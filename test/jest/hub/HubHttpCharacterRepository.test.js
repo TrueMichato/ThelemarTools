@@ -68,6 +68,19 @@ const makeCarry = rulesVersionId => ({
 });
 
 describe("HTTP character repository", () => {
+	it("reports the committed prefix when bulk archive stops on an error", async () => {
+		const repository = Object.create(HubHttpCharacterRepository.prototype);
+		const failure = Object.assign(new Error("archive failed"), {code: "NETWORK_UNAVAILABLE"});
+		repository.pDelete = jest.fn()
+			.mockResolvedValueOnce(true)
+			.mockRejectedValueOnce(failure);
+
+		await expect(repository.pDeleteMany({
+			characterIds: ["character-a", "character-b"],
+		})).rejects.toBe(failure);
+		expect(failure.deletedCharacterIds).toEqual(["character-a"]);
+	});
+
 	let previousSessionStorage;
 
 	beforeEach(() => {

@@ -1593,17 +1593,24 @@ export class PostgresHubStore {
 	 * announces that a character's projection may have changed, so a new mutation cannot
 	 * silently leave peers holding stale data.
 	 */
-	async _pAppendProjectionInvalidation ({client, character, actorAccountId}) {
+	async _pAppendProjectionInvalidation ({
+		client,
+		character,
+		actorAccountId,
+		visibleAccountIds = null,
+	}) {
 		if (!character.campaignId) return null;
 		return this._pAppendEvent({
 			client,
 			campaignId: character.campaignId,
 			actorAccountId,
 			type: "character.projection.invalidated",
-			aggregateType: "character",
-			aggregateId: character.id,
-			aggregateRevision: character.revision,
-			payload: {projectionRevision: character.projectionRevision},
+			aggregateType: visibleAccountIds ? "campaign" : "character",
+			aggregateId: visibleAccountIds ? character.campaignId : character.id,
+			aggregateRevision: visibleAccountIds ? null : character.revision,
+			visibility: visibleAccountIds ? "explicit_accounts" : "all_members",
+			visibleAccountIds,
+			payload: visibleAccountIds ? {} : {projectionRevision: character.projectionRevision},
 		});
 	}
 
@@ -1704,6 +1711,11 @@ export class PostgresHubStore {
 			}
 			// Validate before any write so a rejected policy leaves the last valid one intact.
 			const validated = validateProjectionPolicy(policy);
+			const invalidationMemberships = (await client.query(`
+				SELECT account_id, role
+				FROM hub.memberships
+				WHERE campaign_id = $1 AND status = 'active'
+			`, [character.campaignId])).rows;
 			const updated = await client.query(`
 				UPDATE hub.characters
 				SET projection_policy = $2::jsonb, projection_revision = projection_revision + 1, updated_at = now()
@@ -1712,7 +1724,26 @@ export class PostgresHubStore {
 			`, [characterId, JSON.stringify(validated)]);
 			const characterNxt = getCharacter(updated.rows[0]);
 			await this._pAppendAudit({client, campaignId: characterNxt.campaignId, actorAccountId: accountId, action: "character.projection_policy.updated", targetType: "character", targetId: characterId});
-			await this._pAppendProjectionInvalidation({client, character: characterNxt, actorAccountId: accountId});
+			const visibleAccountIds = invalidationMemberships
+				.filter(membership => (
+					canViewSharedCharacterEvent({
+						character,
+						accountId: membership.account_id,
+						role: membership.role,
+					})
+					|| canViewSharedCharacterEvent({
+						character: characterNxt,
+						accountId: membership.account_id,
+						role: membership.role,
+					})
+				))
+				.map(membership => membership.account_id);
+			await this._pAppendProjectionInvalidation({
+				client,
+				character: characterNxt,
+				actorAccountId: accountId,
+				visibleAccountIds,
+			});
 			const response = getPolicyManagementResponse(characterNxt, {
 				expectedBasis: getExpectedCarryBasis({character: characterNxt, ...(await this._pGetCarryBasisContext(characterNxt.campaignId))}),
 			});
@@ -3248,6 +3279,18 @@ export class PostgresHubStore {
 	 * envelope cannot map a hidden character back to its named owner.
 	 */
 	_redactRowForViewer ({row, accountId, role, character}) {
+		if (
+			row.event_type === "character.projection.invalidated"
+			&& row.visibility === "explicit_accounts"
+		) {
+			return {
+				...row,
+				visible_account_ids: null,
+				...(["dm", "co_dm"].includes(role) || row.actor_account_id === accountId
+					? {}
+					: {actor_account_id: null, actor_display_name: null}),
+			};
+		}
 		if (row.visibility !== "all_members" || row.aggregate_type !== "character") return row;
 		// A hidden character contributes no shared rows at all, so no adjacent membership
 		// event can be composed with one to recover the owner association.
@@ -3273,6 +3316,14 @@ export class PostgresHubStore {
 				role,
 				getCharacterOwnerId: characterId => ownerById.get(characterId),
 			});
+		}
+		if (
+			event.type === "character.projection.invalidated"
+			&& event.visibility === "explicit_accounts"
+		) {
+			const sanitized = {...event, visibleAccountIds: null};
+			if (["dm", "co_dm"].includes(role) || event.actorAccountId === accountId) return sanitized;
+			return redactEventActor(sanitized);
 		}
 		if (event.visibility !== "all_members" || event.aggregateType !== "character") return event;
 		const result = await this._pool.query(`SELECT owner_account_id, projection_policy FROM hub.characters WHERE id = $1`, [event.aggregateId]);

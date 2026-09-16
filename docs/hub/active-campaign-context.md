@@ -182,11 +182,18 @@ before the new policy loads, and each controller is permanently bound to the cha
 Terminal character DELETE/archive failures use that same ordered resource teardown when the failed request still
 names the open character; a response that settles after a selector switch cannot conceal or reattach the replacement.
 
-The campaign overview applies the same fail-closed rule to membership/session access loss. It invalidates activity
-history, clears its live roster/context state, destroys the complete authorized campaign surface, and only then
-renders the non-enumerating error outside that surface. Previously visible members, character/profile projections,
-inventory, pending actions/transfers, and administration controls therefore cannot remain readable while reload or
-reauthentication is required.
+The campaign overview distinguishes authentication continuity from campaign authority. Session expiry stops
+realtime/timers and disables mutation controls but preserves the last-known campaign as an explicitly signed-out,
+read-only fallback. Membership removal, role/access loss, and campaign concealment errors instead invalidate
+activity, clear live roster/context state, destroy the complete authorized campaign surface, and only then render
+the non-enumerating error outside that surface. Previously visible members, character/profile projections,
+inventory, pending actions/transfers, and administration controls therefore cannot remain readable after campaign
+authority ends. The same full concealment path handles HTTP-first authorization failures when realtime is delayed.
+
+Projection-policy writes snapshot their invalidation audience from members authorized by either the previous or
+next policy. A peer losing a shared profile therefore receives one campaign-scoped, metadata-only,
+actor-redacted invalidation needed to conceal stale rows; the event carries no character id, and later members or
+peers excluded by both policies do not receive it.
 
 A cancellation is classified as `REQUEST_ABORTED` across the whole request path — including the
 response body read — so it is never mistaken for connectivity loss. Personal brew and local
@@ -242,7 +249,10 @@ Character Sheet and DM Screen use one precedence contract regardless of where na
 Campaign Overview links remain explicit because they identify a specific campaign resource. A DM opening another
 member's character receives the same campaign rules/content context as the owner but a distinct `dm_readonly`
 authority mode: the roster says **Inspect sheet**, the sheet announces **Read-only DM view**, mutation controls
-are disabled before input, and authorized changes stay in Campaign Overview's semantic operations.
+are disabled before input, and authorized changes stay in Campaign Overview's semantic operations. The guard
+also covers Play Mode's keyboard, drag, custom-role-button, and body-portaled menu entry points; its read-only
+overflow contains only Export and Print. Server-authored XP changes trigger a fresh scoped `dm_truth` read without
+showing the awarding DM a player-recipient toast.
 
 The remaining long-term cleanup is intentionally phased rather than a broad entry-flow rewrite:
 

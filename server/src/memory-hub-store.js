@@ -1103,7 +1103,12 @@ export class MemoryHubStore {
 	 *
 	 * Callers that only change the sharing policy pass `isRevisionBump: false`.
 	 */
-	_commitCharacterMutation ({character, actorAccountId, isRevisionBump = true}) {
+	_commitCharacterMutation ({
+		character,
+		actorAccountId,
+		isRevisionBump = true,
+		projectionInvalidationVisibleAccountIds = null,
+	}) {
 		if (isRevisionBump) character.revision++;
 		character.updatedAt = this._fnNow().toISOString();
 		if (!character.campaignId) return null;
@@ -1111,10 +1116,12 @@ export class MemoryHubStore {
 			campaignId: character.campaignId,
 			actorAccountId,
 			type: "character.projection.invalidated",
-			aggregateType: "character",
-			aggregateId: character.id,
-			aggregateRevision: character.revision,
-			payload: {projectionRevision: character.projectionRevision},
+			aggregateType: projectionInvalidationVisibleAccountIds ? "campaign" : "character",
+			aggregateId: projectionInvalidationVisibleAccountIds ? character.campaignId : character.id,
+			aggregateRevision: projectionInvalidationVisibleAccountIds ? null : character.revision,
+			visibility: projectionInvalidationVisibleAccountIds ? "explicit_accounts" : "all_members",
+			visibleAccountIds: projectionInvalidationVisibleAccountIds,
+			payload: projectionInvalidationVisibleAccountIds ? {} : {projectionRevision: character.projectionRevision},
 		});
 	}
 
@@ -1269,9 +1276,30 @@ export class MemoryHubStore {
 		}
 		// Validate before any mutation so a rejected write leaves the last valid policy intact.
 		const validated = validateProjectionPolicy(policy);
+		const previousProjectionPolicy = structuredClone(character.projectionPolicy);
 		character.projectionPolicy = validated;
 		character.projectionRevision++;
-		this._commitCharacterMutation({character, actorAccountId: accountId, isRevisionBump: false});
+		const projectionInvalidationVisibleAccountIds = [...this._memberships.values()]
+			.filter(membership => membership.campaignId === character.campaignId && membership.status === "active")
+			.filter(membership => (
+				canViewSharedCharacterEvent({
+					character: {...character, projectionPolicy: previousProjectionPolicy},
+					accountId: membership.accountId,
+					role: membership.role,
+				})
+				|| canViewSharedCharacterEvent({
+					character,
+					accountId: membership.accountId,
+					role: membership.role,
+				})
+			))
+			.map(membership => membership.accountId);
+		this._commitCharacterMutation({
+			character,
+			actorAccountId: accountId,
+			isRevisionBump: false,
+			projectionInvalidationVisibleAccountIds,
+		});
 		this._appendAudit({
 			campaignId: character.campaignId,
 			actorAccountId: accountId,
@@ -2218,6 +2246,14 @@ export class MemoryHubStore {
 			getCharacterOwnerId: characterId => this._characters.get(characterId)?.ownerAccountId,
 		});
 		if (transferEvent !== event) return transferEvent;
+		if (
+			event.type === "character.projection.invalidated"
+			&& event.visibility === "explicit_accounts"
+		) {
+			const sanitized = {...event, visibleAccountIds: null};
+			if (["dm", "co_dm"].includes(role) || event.actorAccountId === accountId) return sanitized;
+			return redactEventActor(sanitized);
+		}
 		if (event.visibility !== "all_members" || event.aggregateType !== "character") return event;
 		const character = this._characters.get(event.aggregateId) || null;
 		// A hidden character contributes no shared rows at all, so no adjacent membership

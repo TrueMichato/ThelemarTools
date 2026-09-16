@@ -137,6 +137,7 @@ export class CharacterSheetPage {
 		await this.page.goto(`/charactersheet.html?hubCampaign=${encodeURIComponent(campaignId)}&id=${encodeURIComponent(characterId)}`);
 		await waitForToolsLoaded(this.page);
 		await expect(this.characterName).toBeVisible();
+		await this.waitForHubRealtimeLive();
 	}
 
 	async gotoCampaignBuilder (campaignId: string): Promise<void> {
@@ -197,8 +198,12 @@ export class CharacterSheetPage {
 	}
 
 	async renameCharacter (name: string): Promise<void> {
-		await this.characterName.fill(name);
-		await this.characterName.press("Enter");
+		await expect(this.characterName).toBeEditable();
+		await expect.poll(async () => {
+			await this.characterName.fill(name);
+			await this.characterName.dispatchEvent("change");
+			return this.page.evaluate(() => (globalThis as any).charSheet?._state?.getName?.());
+		}, {timeout: 20_000}).toBe(name);
 		await expect(this.characterName).toHaveValue(name);
 	}
 
