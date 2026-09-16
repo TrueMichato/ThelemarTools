@@ -2048,6 +2048,11 @@ export class HubHttpCharacterRepository {
 		let base = structuredClone(parsed.base ?? null);
 		let baseCoverage = deserializeCoverage(parsed.baseCoverage);
 		const initialIntent = this._getRecoveryIntent(parsed);
+		const createRequestedId = initialIntent === "create"
+			&& typeof parsed.clientImportId === "string"
+			&& parsed.clientImportId
+			? parsed.clientImportId
+			: characterId;
 		const queue = [];
 		for (const [index, raw] of parsed.commands.entries()) {
 			if (!Array.isArray(raw?.patches) || !raw?.commandKeys?.create || !raw?.commandKeys?.patch) return null;
@@ -2060,7 +2065,7 @@ export class HubHttpCharacterRepository {
 			const snapshot = applyJsonPatch(base, raw.patches);
 			const snapshotCoverage = deserializeCoverage(raw.snapshotCoverage);
 			queue.push({
-				requestedId: characterId,
+				requestedId: intent === "create" ? createRequestedId : characterId,
 				submittedSnapshot: structuredClone(snapshot),
 				submittedActivity: structuredClone(raw.activity ?? null),
 				submittedBase: structuredClone(base),

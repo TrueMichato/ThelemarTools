@@ -738,14 +738,15 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 			},
 		}));
 		const listCharacters = jest.fn(async () => [structuredClone(colliding)]);
-		const repository = new HubHttpCharacterRepository({
+		const api = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+			pListCharacters: listCharacters,
+			pGetCharacter: getCharacter,
+			pCreateCharacter: createCharacter,
+		};
+		let repository = new HubHttpCharacterRepository({
 			campaignId: "campaign-1",
-			api: {
-				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
-				pListCharacters: listCharacters,
-				pGetCharacter: getCharacter,
-				pCreateCharacter: createCharacter,
-			},
+			api,
 		});
 		repository._recoveryStorage = storage;
 
@@ -785,6 +786,14 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 		const download = jest.spyOn(characterSheetDataUtil, "userDownload").mockImplementation(() => {});
 
 		try {
+			await expect(host._pCanonicalizeHubCharacterUrl()).resolves.toBe(false);
+			expect(getCharacter).not.toHaveBeenCalled();
+			expect(JSON.parse(storage.getItem("hub-character-recovery:campaign-1:server-id")).clientImportId)
+				.toBe("temporary-id");
+
+			repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+			repository._recoveryStorage = storage;
+			host._characterRepository = repository;
 			await expect(host._pCanonicalizeHubCharacterUrl()).resolves.toBe(false);
 			expect(getCharacter).not.toHaveBeenCalled();
 			await expect(repository.pList()).resolves.toEqual([

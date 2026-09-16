@@ -84,7 +84,9 @@ assertion, clears that release gate.
   the blocked local draft for the Character Sheet prompt, but resolution still requires a fresh canonical GET
   before discard and must never rematch by `clientImportId` or issue CREATE. Genuine create migration requires
   both the listed owner-visible row and the stored recovery record to carry the same lookup `clientImportId`;
-  a matching storage key alone is not identity evidence.
+  a matching storage key alone is not identity evidence. Canonical-key hydration and reserialization preserve
+  the create-origin record's original temporary `clientImportId`, so an interrupted startup can route that alias
+  again without broadening migration or rematch behavior.
 - Access loss, takeover, campaign switch, detach, logout, or terminal page hide fences queued callbacks and
   pending saves.
 - Durable recovery format 3 stores the exact PATCH body and rules-version pin used with each idempotency key.

@@ -3338,7 +3338,7 @@ describe("HTTP character repository", () => {
 		const getCharacter = jest.fn(async () => {
 			throw Object.assign(new Error("missing"), {code: "CHARACTER_NOT_FOUND"});
 		});
-		const fresh = new HubHttpCharacterRepository({
+		const firstReload = new HubHttpCharacterRepository({
 			campaignId: "cmp",
 			api: {
 				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
@@ -3347,14 +3347,28 @@ describe("HTTP character repository", () => {
 				pCreateCharacter: recreate,
 			},
 		});
-		fresh._recoveryStorage = storage;
-		await expect(fresh.pGetCampaignId({characterId: "temporary-id"})).resolves.toBe("cmp");
-		await expect(fresh.pList()).resolves.toEqual([{id: "server-id", name: "Mira"}]);
-		await expect(fresh.pGet({characterId: "temporary-id"})).resolves.toEqual({id: "server-id", name: "Mira"});
-		expect(fresh._canonicalIds.get("temporary-id")).toBe("server-id");
+		firstReload._recoveryStorage = storage;
+		await expect(firstReload.pGetCampaignId({characterId: "temporary-id"})).resolves.toBe("cmp");
+		expect(JSON.parse(storage.getItem("hub-character-recovery:cmp:server-id")).clientImportId)
+			.toBe("temporary-id");
+
+		const secondReload = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pGetCharacter: getCharacter,
+				pListCharacters: listCharacters,
+				pCreateCharacter: recreate,
+			},
+		});
+		secondReload._recoveryStorage = storage;
+		await expect(secondReload.pGetCampaignId({characterId: "temporary-id"})).resolves.toBe("cmp");
+		await expect(secondReload.pList()).resolves.toEqual([{id: "server-id", name: "Mira"}]);
+		await expect(secondReload.pGet({characterId: "temporary-id"})).resolves.toEqual({id: "server-id", name: "Mira"});
+		expect(secondReload._canonicalIds.get("temporary-id")).toBe("server-id");
 		const rosterReadsBeforeResolution = listCharacters.mock.calls.length;
 
-		await expect(fresh.pResolveUnprovableRecovery({characterId: "server-id"}))
+		await expect(secondReload.pResolveUnprovableRecovery({characterId: "server-id"}))
 			.resolves.toEqual({status: "discarded_missing_patch", characterId: "server-id"});
 		expect(listCharacters).toHaveBeenCalledTimes(rosterReadsBeforeResolution);
 		expect(getCharacter).toHaveBeenCalledTimes(1);
