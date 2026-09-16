@@ -2279,25 +2279,29 @@ export class PostgresHubStore {
 	}
 
 	async pGetCampaignContext ({accountId, campaignId}) {
-		const membership = await this.pGetMembership({accountId, campaignId});
-		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 		const result = await this._pool.query(`
 			SELECT
 				c.id AS campaign_id, c.status AS campaign_status,
+				m.role AS membership_role,
 				b.id AS brew_id, b.version AS brew_version, b.content_hash,
 				b.content, b.manifest,
 				r.id AS rules_id, r.version AS rules_version,
 				r.schema_version AS rules_schema_version, r.rules,
 				r.created_at AS rules_created_at
 			FROM hub.campaigns c
+			JOIN hub.memberships m
+				ON m.campaign_id = c.id
+				AND m.account_id = $2
+				AND m.status = 'active'
 			LEFT JOIN hub.brew_bundle_versions b ON b.id = c.active_brew_bundle_version_id
 			LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
 			WHERE c.id = $1 AND c.status <> 'deleting'
-		`, [campaignId]);
+		`, [campaignId, accountId]);
 		if (!result.rowCount) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 		const row = result.rows[0];
 		return {
 			campaignId: row.campaign_id,
+			membership: {role: row.membership_role},
 			brewBundle: row.brew_id ? {
 				id: row.brew_id,
 				campaignId: row.campaign_id,

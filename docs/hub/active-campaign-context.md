@@ -129,6 +129,11 @@ on **every** character load and reset. Calling `clearCampaignSettingsOverlay()` 
 `teardown-rules` owner must also null `_hubContext`. This is pinned by
 `test/jest/charactersheet/CharacterSheetHubTeardown.test.js`.
 
+The campaign context includes the caller's current membership role. During reconnect or a rules/content
+refresh, peer source-cost targeting is suspended without discarding an in-flight command. It resumes only
+when the refreshed context still identifies the caller as a player with the exact capability; a role change,
+capability removal, character switch, access loss, or true close performs destructive targeting teardown.
+
 Private persistence is fenced independently from realtime teardown. Character saves capture both
 the character identity and load generation before their first await; DM workspace saves capture the
 Board save generation. Conflict prompts, recovery downloads, retries, server-document adoption,

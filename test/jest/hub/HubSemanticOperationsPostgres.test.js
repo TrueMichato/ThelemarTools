@@ -736,6 +736,7 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 			accountId: casterOwner.id,
 			campaignId: campaign.id,
 		})).resolves.toMatchObject({
+			membership: {role: "player"},
 			rulesVersion: {id: rulesVersion.id},
 			capabilities: {
 				peerSourceCosts: {

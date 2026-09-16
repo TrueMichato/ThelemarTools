@@ -57,8 +57,9 @@ function makePage () {
 	return page;
 }
 
-function makeContentContext ({sources = ["PHB"], species = ["Human (Base)|PHB"], editions = ["2014"], id = "rules-1"} = {}) {
+function makeContentContext ({sources = ["PHB"], species = ["Human (Base)|PHB"], editions = ["2014"], id = "rules-1", role = "player"} = {}) {
 	return {
+		membership: {role},
 		rulesVersion: {
 			id,
 			rules: {},
@@ -286,19 +287,21 @@ describe("Character Sheet campaign content context lifecycle", () => {
 		};
 
 		page._applyHubContext({
+			membership: {role: "player"},
 			rulesVersion: null,
 			brewBundle: null,
 			capabilities: {peerSourceCosts: {enabled: false}},
 		});
-		expect(page._peerTargeting.activate).toHaveBeenLastCalledWith({characterId: "source-character"});
+		expect(page._peerTargeting.activate).toHaveBeenLastCalledWith({characterId: "source-character", membershipRole: "player"});
 
 		page._applyHubContext({
+			membership: {role: "player"},
 			rulesVersion: {id: "rules-1", rules: {}},
 			brewBundle: null,
 			capabilities: {peerSourceCosts: {enabled: true}},
 		});
 		expect(page._peerTargeting.activate).toHaveBeenCalledTimes(2);
-		expect(page._peerTargeting.activate).toHaveBeenLastCalledWith({characterId: "source-character"});
+		expect(page._peerTargeting.activate).toHaveBeenLastCalledWith({characterId: "source-character", membershipRole: "player"});
 
 		page._clearHubRules();
 		expect(page._peerTargeting.deactivate).toHaveBeenCalledTimes(1);
@@ -401,6 +404,35 @@ describe("Character Sheet campaign content context lifecycle", () => {
 		expect(page._renderCharacter).toHaveBeenCalledTimes(1);
 	});
 
+	it("suspends a draft through rules activation and resumes only for a current player", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		const targeting = {
+			activate: jest.fn(),
+			deactivate: jest.fn(),
+			suspend: jest.fn(),
+		};
+		page._currentCharacterId = "source-character";
+		page._peerTargeting = targeting;
+		page._applyHubContext(makeContentContext({id: "rules-1"}));
+		page._campaign = {render: jest.fn()};
+		page._renderCharacter = jest.fn();
+		page._hubCampaignContext = {
+			pRefresh: jest.fn(async () => makeContentContext({id: "rules-2", role: "spectator"})),
+		};
+		targeting.activate.mockClear();
+		targeting.deactivate.mockClear();
+
+		page._onHubCampaignContextChanged({type: "rules.activated", aggregateId: "rules-2"});
+		expect(targeting.suspend).toHaveBeenCalledTimes(1);
+		expect(targeting.deactivate).not.toHaveBeenCalled();
+		await pFlushPromises();
+
+		expect(targeting.activate).toHaveBeenCalledWith({
+			characterId: "source-character",
+			membershipRole: "spectator",
+		});
+	});
+
 	it("discards a stale refresh after disconnect and cannot remain refresh-locked", async () => {
 		const page = new CharacterSheetPage({characterRepository: {}});
 		page._applyHubContext(makeContentContext());
@@ -495,7 +527,7 @@ describe("Character Sheet campaign content context lifecycle", () => {
 			rulesVersion: {id: "rules-1"},
 			capabilities: {peerSourceCosts: {enabled: false}},
 		});
-		expect(targeting.activate).toHaveBeenCalledWith({characterId: "source-character"});
+		expect(targeting.activate).toHaveBeenCalledWith({characterId: "source-character", membershipRole: "player"});
 		expect(page._isHubContextRevalidationRequired).toBe(false);
 	});
 

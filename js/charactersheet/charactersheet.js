@@ -223,7 +223,10 @@ class CharacterSheetPage {
 	_attachHubRealtime ({characterId = this._currentCharacterId} = {}) {
 		this._hubRealtimeGeneration++;
 		this._hubEffects?.activate({characterId});
-		this._peerTargeting?.activate({characterId});
+		this._peerTargeting?.activate({
+			characterId,
+			membershipRole: this._hubContext?.membership?.role,
+		});
 		const isAttached = this._hubRealtime?.attach({characterId}) || false;
 		void this._partyInventory?.pAttach({
 			characterId,
@@ -340,7 +343,11 @@ class CharacterSheetPage {
 		const contextGeneration = ++this._hubContextGeneration;
 		this._hubContextRefreshActiveGeneration = contextGeneration;
 		this._isHubContextRefreshing = true;
-		this._clearHubRules({isUnavailable: true, isFenceRefresh: false});
+		this._clearHubRules({
+			isUnavailable: true,
+			isFenceRefresh: false,
+			isSuspendPeerTargeting: true,
+		});
 		this._hubRulesRefreshBlocked = true;
 		this._hubRulesPendingVersionId = expectedRulesVersionId;
 		this._campaign?.render();
@@ -370,7 +377,11 @@ class CharacterSheetPage {
 				generation !== this._hubRulesRefreshGeneration
 				|| contextGeneration !== this._hubContextGeneration
 			) return false;
-			this._clearHubRules({isUnavailable: true, isFenceRefresh: false});
+			this._clearHubRules({
+				isUnavailable: true,
+				isFenceRefresh: false,
+				isSuspendPeerTargeting: true,
+			});
 			this._hubRulesRefreshBlocked = true;
 			this._hubRulesPendingVersionId = expectedRulesVersionId;
 			this._isHubContextRevalidationRequired = true;
@@ -458,7 +469,10 @@ class CharacterSheetPage {
 			rulesVersionId: context?.rulesVersion?.id ?? null,
 			brewBundleHash: context?.brewBundle?.contentHash ?? null,
 		});
-		this._peerTargeting?.activate({characterId: this._currentCharacterId});
+		this._peerTargeting?.activate({
+			characterId: this._currentCharacterId,
+			membershipRole: context?.membership?.role,
+		});
 	}
 
 	_onHubCampaignContextChanged (event = null) {
@@ -477,7 +491,7 @@ class CharacterSheetPage {
 		const generation = ++this._hubContextGeneration;
 		this._hubContextRefreshActiveGeneration = generation;
 		this._isHubContextRefreshing = true;
-		this._clearHubRules({isSuspendPeerTargeting: event?.type === "reconnected"});
+		this._clearHubRules({isSuspendPeerTargeting: true});
 		this._campaign?.render();
 		void this._hubCampaignContext.pRefresh({
 			fnIsCurrent: () => generation === this._hubContextGeneration,

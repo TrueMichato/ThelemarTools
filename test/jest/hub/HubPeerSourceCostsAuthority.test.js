@@ -201,6 +201,7 @@ describe("peer source-cost memory authority", () => {
 			accountId: ctx.sourceOwner.account.id,
 			campaignId: ctx.campaign.id,
 		});
+		expect(context.membership).toEqual({role: "player"});
 		expect(context.rulesVersion).toBeNull();
 		expect(context.capabilities.peerSourceCosts.enabled).toBe(false);
 		expect(await ctx.store.pGetPeerSourceCostsCapability({
@@ -253,6 +254,22 @@ describe("peer source-cost memory authority", () => {
 		})).toMatchObject({enabled: false});
 	});
 
+	it.each(["spectator", "co_dm"])("returns the current %s membership role in campaign context", async role => {
+		const ctx = await fixture();
+		await ctx.store.pChangeMemberRole({
+			accountId: ctx.dm.account.id,
+			campaignId: ctx.campaign.id,
+			membershipId: ctx.sourceOwnerMembership.id,
+			role,
+			idempotencyKey: crypto.randomUUID(),
+		});
+
+		await expect(ctx.store.pGetCampaignContext({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+		})).resolves.toMatchObject({membership: {role}});
+	});
+
 	it("compares pinned JSON canonically across PostgreSQL JSONB key ordering", () => {
 		expect(isCanonicalEqual(
 			{operation: {kind: "hp.heal", arguments: {amount: 4}}, choice: {castLevel: 1}},
@@ -260,6 +277,54 @@ describe("peer source-cost memory authority", () => {
 		)).toBe(true);
 		expect(isCanonicalEqual({components: [{level: 1}, {level: 2}]}, {components: [{level: 2}, {level: 1}]}))
 			.toBe(false);
+	});
+
+	it("replays a committed proposal after rules change and spends its source slot once", async () => {
+		const ctx = await fixture();
+		const commandId = crypto.randomUUID();
+		const request = {
+			contractVersion: 1,
+			commandId,
+			sourceCharacterId: ctx.source.id,
+			sourceEntity: SOURCE_ENTITY,
+			effectTemplateId: EFFECT_TEMPLATE_ID,
+			choice: {castLevel: 1},
+			targetRef: ctx.target.targetRef,
+			rulesVersionId: ctx.rulesVersion.id,
+		};
+		const submit = () => ctx.store.pCreateStructuredAction({
+			accountId: ctx.sourceOwner.account.id,
+			sessionId: ctx.sourceOwner.session.id,
+			campaignId: ctx.campaign.id,
+			...request,
+			protocolVersion: "4",
+			idempotencyKey: idempotency(commandId, request),
+		});
+
+		const first = await submit();
+		await ctx.resolve({operationId: first.operation.operationId});
+		const nextRules = (await ctx.store.pCreateRulesVersion({
+			accountId: ctx.dm.account.id,
+			campaignId: ctx.campaign.id,
+			schemaVersion: 1,
+			rules: {},
+			idempotencyKey: crypto.randomUUID(),
+		})).rulesVersion;
+		await ctx.store.pActivateRulesVersion({
+			accountId: ctx.dm.account.id,
+			campaignId: ctx.campaign.id,
+			rulesVersionId: nextRules.id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await expect(submit()).resolves.toEqual(first);
+		await expect(submit()).resolves.toEqual(first);
+		const source = await ctx.store.pGetCharacter({
+			accountId: ctx.sourceOwner.account.id,
+			characterId: ctx.source.id,
+		});
+		expect(source.character.data.spellcasting.spellSlots[1].current).toBe(0);
+		expect([...ctx.store._semanticOperations.values()]
+			.filter(operation => operation.sourceCharacterId === ctx.source.id)).toHaveLength(1);
 	});
 
 	it("atomically spends one slot, heals once, and emits private source plus target legs", async () => {

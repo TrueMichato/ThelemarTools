@@ -56,6 +56,7 @@ export class CharacterSheetPeerTargeting {
 		this._refreshSequence = 0;
 		this._collectionRevision = 0;
 		this._characterId = null;
+		this._membershipRole = null;
 		this._outgoing = new Map();
 		this._drafts = new Map();
 		this._isSuspended = false;
@@ -83,12 +84,13 @@ export class CharacterSheetPeerTargeting {
 		document.removeEventListener("visibilitychange", this._onVisibilityChange);
 	}
 
-	activate ({characterId}) {
-		if (!characterId || !this._hasCapability()) {
+	activate ({characterId, membershipRole}) {
+		if (!characterId || membershipRole !== "player" || !this._hasCapability()) {
 			this.deactivate();
 			return false;
 		}
 		if (this._isSuspended && this._characterId === characterId) {
+			this._membershipRole = membershipRole;
 			this._isSuspended = false;
 			this._loadError = null;
 			this._render();
@@ -97,6 +99,7 @@ export class CharacterSheetPeerTargeting {
 		}
 		this.deactivate();
 		this._characterId = characterId;
+		this._membershipRole = membershipRole;
 		this._generation++;
 		void this.pRefresh();
 		return true;
@@ -116,6 +119,7 @@ export class CharacterSheetPeerTargeting {
 		this._generation++;
 		this._refreshSequence++;
 		this._characterId = null;
+		this._membershipRole = null;
 		this._outgoing.clear();
 		this._drafts.clear();
 		this._isSuspended = false;
@@ -134,8 +138,7 @@ export class CharacterSheetPeerTargeting {
 			return;
 		}
 		if (state?.state === "live" && this._fnGetCharacterId?.()) {
-			if (this._isSuspended) return;
-			this._characterId = this._fnGetCharacterId();
+			if (this._isSuspended || !this._characterId || this._membershipRole !== "player") return;
 			void this.pRefresh();
 		}
 	}
@@ -161,6 +164,7 @@ export class CharacterSheetPeerTargeting {
 		return !this._isSuspended
 			&& this._hasCapability()
 			&& this._characterId
+			&& this._membershipRole === "player"
 			&& this._isSupportedSpellShape({spell, selectedSlot, hasMetamagic, hasVariantComponent});
 	}
 
@@ -196,14 +200,25 @@ export class CharacterSheetPeerTargeting {
 		const target = targets.find(it => it.targetRef === choice.targetRef);
 		if (!target) return {handled: true, proposed: false};
 		const draftKey = `${this._characterId}|${spell.source}|${selectedSlot.level}|${target.targetRef}`;
-		const draft = this._drafts.get(draftKey) || {
-			commandId: this._fnCreateId(),
-			draftKey,
-			sourceCharacterId: this._characterId,
-			spell,
-			slotLevel: selectedSlot.level,
-			target,
-		};
+		let draft = this._drafts.get(draftKey);
+		if (!draft) {
+			const commandId = this._fnCreateId();
+			draft = {
+				commandId,
+				draftKey,
+				sourceCharacterId: this._characterId,
+				spell,
+				slotLevel: selectedSlot.level,
+				target,
+				request: this._getProposalRequest({
+					commandId,
+					sourceCharacterId: this._characterId,
+					spell,
+					slotLevel: selectedSlot.level,
+					targetRef: target.targetRef,
+				}),
+			};
+		}
 		this._drafts.set(draftKey, draft);
 		const proposed = await this._pSubmitDraft(draft);
 		return {handled: true, proposed};
@@ -337,21 +352,7 @@ export class CharacterSheetPeerTargeting {
 		draft.errorCode = null;
 		this._render();
 		try {
-			const response = await this._api.pCreatePeerAction({
-				campaignId: this._campaignId,
-				contractVersion: 1,
-				sourceCharacterId: draft.sourceCharacterId,
-				sourceEntity: {
-					type: "spell",
-					uid: `cure wounds|${String(draft.spell.source).toLowerCase()}`,
-					version: _SOURCE_VERSIONS.get(draft.spell.source),
-				},
-				effectTemplateId: "spell.cure-wounds.heal",
-				choice: {castLevel: draft.slotLevel},
-				targetRef: draft.target.targetRef,
-				rulesVersionId: this._fnGetRulesVersionId?.(),
-				idempotencyKey: draft.commandId,
-			});
+			const response = await this._api.pCreatePeerAction(draft.request);
 			if (!this._isCurrent(token)) return false;
 			const action = this._normalizeOutgoing(response?.operation || response, {
 				fallback: {
@@ -427,6 +428,26 @@ export class CharacterSheetPeerTargeting {
 			&& !selectedSlot.isWizardCapstone
 			&& !hasMetamagic
 			&& !hasVariantComponent;
+	}
+
+	_getProposalRequest ({commandId, sourceCharacterId, spell, slotLevel, targetRef}) {
+		const sourceEntity = Object.freeze({
+			type: "spell",
+			uid: `cure wounds|${String(spell.source).toLowerCase()}`,
+			version: _SOURCE_VERSIONS.get(spell.source),
+		});
+		const choice = Object.freeze({castLevel: slotLevel});
+		return Object.freeze({
+			campaignId: this._campaignId,
+			contractVersion: 1,
+			sourceCharacterId,
+			sourceEntity,
+			effectTemplateId: "spell.cure-wounds.heal",
+			choice,
+			targetRef,
+			rulesVersionId: this._fnGetRulesVersionId?.(),
+			idempotencyKey: commandId,
+		});
 	}
 
 	_isCurrent ({generation, characterId}) {

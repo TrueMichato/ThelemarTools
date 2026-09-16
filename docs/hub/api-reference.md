@@ -89,7 +89,7 @@ tokens and response bodies never cross the callback adapter boundary.
 | `PATCH /api/campaigns/:campaignId/members/:membershipId` | Campaign owner mutation | role co_dm/player/spectator | Changes a non-owner role |
 | `DELETE /api/campaigns/:campaignId/members/:membershipId` | Owner or co-DM mutation | none | Removes allowed non-owner, resolves pending state, detaches characters |
 | `POST /api/campaigns/:campaignId/leave` | Non-owner mutation | none | Leaves and performs the same lifecycle cleanup |
-| `GET /api/campaigns/:campaignId/context` | Active member | none | Active immutable brew/rules versions |
+| `GET /api/campaigns/:campaignId/context` | Active member | none | Current membership role plus active immutable brew/rules versions and capability payloads |
 | `GET /api/campaigns/:campaignId/snapshot` | Active member; protocol-versioned | none | Campaign, membership, authorization-scoped character envelopes, roster metadata, last sequence |
 | `GET /api/campaigns/:campaignId/character-projections` | Active member; protocol-versioned | none | `{projections, roster}` — the batch scoped projector every consumer refetches through |
 | `GET /api/campaigns/:campaignId/events` | Active member | `afterSequence>=0`, `limit` 1-500 (default 200) | `{events, replay: {scannedThroughSequence, hasMore}}`; ordered authorization-scoped events plus the authoritative continuation boundary |

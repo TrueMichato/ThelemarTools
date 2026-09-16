@@ -1681,7 +1681,7 @@ export class MemoryHubStore {
 	}
 
 	async pGetCampaignContext ({accountId, campaignId}) {
-		this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
+		const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
 		const campaign = this._campaigns.get(campaignId);
 		const brew = campaign.activeBrewBundleVersionId
 			? this._brewVersions.get(campaign.activeBrewBundleVersionId)
@@ -1691,6 +1691,7 @@ export class MemoryHubStore {
 			: null;
 		return {
 			campaignId,
+			membership: {role: membership.role},
 			brewBundle: copy(brew),
 			rulesVersion: getPublicCampaignRulesVersion(copy(rules)),
 			capabilities: {

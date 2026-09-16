@@ -55,6 +55,7 @@ describe("Character Sheet peer targeting", () => {
 	let controller;
 	let capability;
 	let characterId;
+	let rulesVersionId;
 
 	beforeEach(() => {
 		root = globalThis.e_({tag: "div"});
@@ -78,6 +79,7 @@ describe("Character Sheet peer targeting", () => {
 		};
 		capability = {...CAPABILITY, resourceKinds: [...CAPABILITY.resourceKinds]};
 		characterId = "source-character";
+		rulesVersionId = "rules-version-1";
 		fnPickTarget = jest.fn(async ({targets}) => ({kind: "target", targetRef: targets.find(target => !target.isSelf).targetRef}));
 		onAuthoritativeApproval = jest.fn(async () => true);
 		controller = new CharacterSheetPeerTargeting({
@@ -85,14 +87,14 @@ describe("Character Sheet peer targeting", () => {
 			api,
 			root,
 			fnGetCharacterId: () => characterId,
-			fnGetRulesVersionId: () => "rules-version-1",
+			fnGetRulesVersionId: () => rulesVersionId,
 			fnGetCapability: () => capability,
 			fnCreateId: () => "command-1",
 			fnPickTarget,
 			fnOnAuthoritativeApplied: onAuthoritativeApproval,
 		});
 		expect(controller.init()).toBe(true);
-		expect(controller.activate({characterId: "source-character"})).toBe(true);
+		expect(controller.activate({characterId: "source-character", membershipRole: "player"})).toBe(true);
 	});
 
 	it.each([
@@ -102,7 +104,7 @@ describe("Character Sheet peer targeting", () => {
 		capability.protocolVersion = 3;
 		controller.deactivate();
 
-		expect(controller.activate({characterId: "source-character"})).toBe(false);
+		expect(controller.activate({characterId: "source-character", membershipRole: "player"})).toBe(false);
 		expect(controller.isSupportedSpellCast({
 			spell: {name: "Cure Wounds", source, level: 1},
 			selectedSlot: {level: 1},
@@ -115,7 +117,7 @@ describe("Character Sheet peer targeting", () => {
 		expect(api.pCreatePeerAction).not.toHaveBeenCalled();
 
 		capability.protocolVersion = 4;
-		expect(controller.activate({characterId: "source-character"})).toBe(true);
+		expect(controller.activate({characterId: "source-character", membershipRole: "player"})).toBe(true);
 		expect(controller.isSupportedSpellCast({
 			spell: {name: "Cure Wounds", source, level: 1},
 			selectedSlot: {level: 1},
@@ -217,7 +219,7 @@ describe("Character Sheet peer targeting", () => {
 		expect(api.pCreatePeerAction.mock.calls.map(([request]) => request.idempotencyKey)).toEqual(["command-1", "command-1"]);
 	});
 
-	it("preserves a lost-response proposal command across reconnect and blocks a duplicate cast", async () => {
+	it("replays the exact frozen lost-response proposal after reconnect and a rules change", async () => {
 		await pFlush();
 		const commandIds = ["command-1", "command-2"];
 		controller._fnCreateId = jest.fn(() => commandIds.shift());
@@ -248,10 +250,44 @@ describe("Character Sheet peer targeting", () => {
 			expect.objectContaining({commandId: "command-1", isSubmitting: false, errorCode: "NETWORK_UNAVAILABLE"}),
 		]);
 
-		expect(controller.activate({characterId: "source-character"})).toBe(true);
+		const firstRequest = api.pCreatePeerAction.mock.calls[0][0];
+		rulesVersionId = "rules-version-2";
+		expect(controller.activate({characterId: "source-character", membershipRole: "player"})).toBe(true);
 		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: true});
-		expect(api.pCreatePeerAction.mock.calls.map(([sent]) => sent.idempotencyKey)).toEqual(["command-1", "command-1"]);
+		const secondRequest = api.pCreatePeerAction.mock.calls[1][0];
+		expect(secondRequest).toBe(firstRequest);
+		expect(secondRequest).toEqual(expect.objectContaining({
+			idempotencyKey: "command-1",
+			rulesVersionId: "rules-version-1",
+			sourceCharacterId: "source-character",
+			sourceEntity: {type: "spell", uid: "cure wounds|phb", version: "phb-2014-v1"},
+			choice: {castLevel: 1},
+			targetRef: "opaque-target",
+		}));
+		expect(Object.isFrozen(secondRequest)).toBe(true);
+		expect(Object.isFrozen(secondRequest.sourceEntity)).toBe(true);
+		expect(Object.isFrozen(secondRequest.choice)).toBe(true);
 		expect(controller._fnCreateId).toHaveBeenCalledTimes(1);
+	});
+
+	it.each(["spectator", "co_dm"])("discards a suspended proposal when membership changes to %s", async membershipRole => {
+		await pFlush();
+		const proposal = makeDeferred();
+		api.pCreatePeerAction.mockImplementationOnce(() => proposal.promise);
+		const pending = controller.pMaybeProposeSpell({
+			spell: {name: "Cure Wounds", source: "PHB", level: 1},
+			selectedSlot: {level: 1},
+		});
+		await pFlush();
+
+		controller.onConnectionState({state: "reconnecting", attempt: 1});
+		expect(controller._drafts.size).toBe(1);
+		expect(controller.activate({characterId: "source-character", membershipRole})).toBe(false);
+		expect(controller._drafts.size).toBe(0);
+		expect(controller._characterId).toBeNull();
+
+		proposal.reject(Object.assign(new Error("role changed"), {code: "FORBIDDEN"}));
+		await expect(pending).resolves.toEqual({handled: true, proposed: false});
 	});
 
 	it("discards a suspended proposal on a true close", async () => {
@@ -288,7 +324,7 @@ describe("Character Sheet peer targeting", () => {
 		controller.onConnectionState({state: "reconnecting", attempt: 1});
 		expect(controller._drafts.size).toBe(1);
 		capability.enabled = false;
-		expect(controller.activate({characterId: "source-character"})).toBe(false);
+		expect(controller.activate({characterId: "source-character", membershipRole: "player"})).toBe(false);
 		expect(controller._drafts.size).toBe(0);
 		expect(controller._characterId).toBeNull();
 
@@ -326,7 +362,7 @@ describe("Character Sheet peer targeting", () => {
 		await pFlush();
 
 		characterId = "other-source-character";
-		controller.activate({characterId});
+		controller.activate({characterId, membershipRole: "player"});
 		proposal.resolve({operation: {operationId: "stale-operation", status: "proposed"}});
 
 		await expect(pending).resolves.toEqual({handled: true, proposed: false});
@@ -492,8 +528,8 @@ describe("Character Sheet peer targeting", () => {
 				sourceCostState: "pending",
 				capabilities: {canCancel: true},
 			}]);
-		controller.activate({characterId: "source-character"});
-		controller.activate({characterId: "source-character"});
+		controller.activate({characterId: "source-character", membershipRole: "player"});
+		controller.activate({characterId: "source-character", membershipRole: "player"});
 		await pFlush();
 		stale.resolve([{
 			actionId: "operation-stale",
@@ -513,7 +549,7 @@ describe("Character Sheet peer targeting", () => {
 		expect(api.pListCharacterOutgoingActions).toHaveBeenCalledTimes(readsBeforeTerminal + 1);
 	});
 
-	it("clears targeting state on membership loss and restores it on reconnect", async () => {
+	it("clears targeting state on membership loss and requires authoritative player reactivation", async () => {
 		await pFlush();
 		controller.onConnectionState({state: "access_lost"});
 		expect(controller._characterId).toBeNull();
@@ -524,6 +560,11 @@ describe("Character Sheet peer targeting", () => {
 		await pFlush();
 		const beforeReconnect = api.pListCharacterOutgoingActions.mock.calls.length;
 		controller.onConnectionState({state: "live"});
+		await pFlush();
+		expect(controller._characterId).toBeNull();
+		expect(api.pListCharacterOutgoingActions).toHaveBeenCalledTimes(beforeReconnect);
+
+		expect(controller.activate({characterId: "source-character", membershipRole: "player"})).toBe(true);
 		await pFlush();
 		expect(controller._characterId).toBe("source-character");
 		expect(api.pListCharacterOutgoingActions).toHaveBeenCalledTimes(beforeReconnect + 1);
