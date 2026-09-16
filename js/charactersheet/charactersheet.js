@@ -332,8 +332,8 @@ class CharacterSheetPage {
 		return true;
 	}
 
-	async _pRefreshHubRules ({rulesVersionId = null} = {}) {
-		const expectedRulesVersionId = rulesVersionId ?? this._hubRulesPendingVersionId;
+	async _pRefreshHubRules ({rulesVersionId = null, isUseLatest = false} = {}) {
+		const expectedRulesVersionId = isUseLatest ? null : rulesVersionId ?? this._hubRulesPendingVersionId;
 		const generation = ++this._hubRulesRefreshGeneration;
 		const contextGeneration = ++this._hubContextGeneration;
 		this._hubContextRefreshActiveGeneration = contextGeneration;
@@ -1015,7 +1015,7 @@ class CharacterSheetPage {
 					},
 					fnSaveCharacter: () => this._saveCurrentCharacter({isInteractiveConflict: false}),
 					fnGetRulesVersionId: () => this._hubContext?.rulesVersion?.id ?? null,
-					fnRefreshCampaignContext: () => this._pRefreshHubRules(),
+					fnRefreshCampaignContext: () => this._pRefreshHubRules({isUseLatest: true}),
 					fnIsCurrentCharacter: ({characterId, generation}) => (
 						this._currentCharacterId === characterId
 						&& this._characterLoadGeneration === generation

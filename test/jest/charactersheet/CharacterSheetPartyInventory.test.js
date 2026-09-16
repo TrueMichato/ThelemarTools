@@ -1368,6 +1368,7 @@ describe("Character Sheet party inventory", () => {
 
 		await expect(partyInventory._pManualRefresh({errorSource: "action"})).resolves.toBe(false);
 		expect(partyInventory._needsAuthoritativeRefresh).toBe(true);
+		expect(partyInventory._needsFreshProposalRules).toBe(true);
 		expect(saveCharacter).toHaveBeenCalledTimes(1);
 
 		await expect(partyInventory._pManualRefresh({errorSource: "action"})).resolves.toBe(true);
