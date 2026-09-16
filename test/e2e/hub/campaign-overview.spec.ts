@@ -324,42 +324,21 @@ test("DM same-tab login ignores another account's failed owner recovery and stay
 		});
 		const updatingOwnerSheet = new CharacterSheetPage(ownerUpdate.page);
 		await updatingOwnerSheet.gotoCampaignCharacter({campaignId, characterId: character.id});
-		await updatingOwnerSheet.characterName.fill("Canonical Rowan Updated");
-		const ownerSave = await ownerUpdate.page.evaluate(async () => {
+		await updatingOwnerSheet.renameCharacter("Canonical Rowan Updated");
+		await expect.poll(() => ownerUpdate.page.evaluate(() => {
 			const sheet = (globalThis as any).charSheet;
 			const repository = sheet._characterRepository;
-			const originalUpsert = repository.pUpsert;
-			let submittedName = null;
-			let persistedName = null;
-			repository.pUpsert = async function (options: any) {
-				submittedName = options.character?.name || null;
-				const persisted = await originalUpsert.call(this, options);
-				persistedName = persisted?.name || null;
-				return persisted;
+			return {
+				access: sheet._currentCharacterAccess,
+				repositoryAccess: repository.getCharacterAccess({characterId: sheet._currentCharacterId}),
+				isNew: sheet._isCurrentCharacterNew,
+				stateName: sheet._state.getName(),
 			};
-			try {
-				sheet._state.setName((document.querySelector("#charsheet-ipt-name") as HTMLInputElement).value);
-				return {
-					saved: await sheet._saveCurrentCharacter(),
-					access: sheet._currentCharacterAccess,
-					repositoryAccess: repository.getCharacterAccess({characterId: sheet._currentCharacterId}),
-					isNew: sheet._isCurrentCharacterNew,
-					stateName: sheet._state.getName(),
-					submittedName,
-					persistedName,
-				};
-			} finally {
-				repository.pUpsert = originalUpsert;
-			}
-		});
-		expect(ownerSave).toEqual({
-			saved: true,
+		})).toEqual({
 			access: "owner",
 			repositoryAccess: "owner",
 			isNew: false,
 			stateName: "Canonical Rowan Updated",
-			submittedName: "Canonical Rowan Updated",
-			persistedName: "Canonical Rowan Updated",
 		});
 		await expect.poll(
 			async () => (await ownerUpdate.getCharacter(character.id)).data.name,
