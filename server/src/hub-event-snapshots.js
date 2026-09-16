@@ -54,6 +54,7 @@ export function projectTransferForViewer ({
 }) {
 	if (!transfer) return transfer;
 	const projected = {...transfer};
+	delete projected._sourceRevision;
 	delete projected.sourceDisplaySnapshot;
 	delete projected.targetDisplaySnapshot;
 	if (transfer.sourceKind === "character") {

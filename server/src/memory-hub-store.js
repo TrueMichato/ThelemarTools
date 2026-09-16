@@ -33,6 +33,7 @@ import {
 	normalizeCurrency,
 	normalizeSafeItemSummary,
 	normalizeSemanticOperation,
+	orderTransfersForLifecycleCancellation,
 	prepareTransferRequest,
 	removeTransferPayload,
 } from "./hub-actions.js";
@@ -922,7 +923,9 @@ export class MemoryHubStore {
 	_cancelTransferBatchForLifecycle ({transfers, actorAccountId, reason}) {
 		const active = transfers.filter(transfer => ["proposed", "reserved"].includes(transfer.status));
 		if (!active.length) return;
-		const prepared = this._prepareTransferLifecycleCancellations({transfers: active});
+		const prepared = this._prepareTransferLifecycleCancellations({
+			transfers: orderTransfersForLifecycleCancellation(active),
+		});
 		this._applyTransferLifecycleCancellations({prepared, actorAccountId, reason});
 	}
 
@@ -3527,6 +3530,7 @@ export class MemoryHubStore {
 			isPlayerStashRequest,
 			isDirectAuthority,
 		} = current;
+		const sourceRevision = source._character?.revision ?? source._party?.revision ?? null;
 		const prepared = isPlayerStashRequest
 			? prepareTransferRequest({container: source.container, payload})
 			: removeTransferPayload({container: source.container, payload});
@@ -3559,6 +3563,7 @@ export class MemoryHubStore {
 			sourceId,
 			targetKind,
 			targetId,
+			_sourceRevision: sourceRevision,
 			status: isPlayerStashRequest ? "proposed" : isDirectAuthority ? "committed" : "reserved",
 			payload: isPlayerStashRequest
 				? {request: prepared.request, preview: prepared.preview}

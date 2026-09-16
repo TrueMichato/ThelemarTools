@@ -1017,6 +1017,7 @@ class CharacterSheetPage {
 					},
 					fnSaveCharacter: () => this._saveCurrentCharacter({isInteractiveConflict: false}),
 					fnGetRulesVersionId: () => this._hubContext?.rulesVersion?.id ?? null,
+					fnRefreshCampaignContext: () => this._pRefreshHubRules(),
 					fnIsCurrentCharacter: ({characterId, generation}) => (
 						this._currentCharacterId === characterId
 						&& this._characterLoadGeneration === generation

@@ -269,14 +269,21 @@ fails definitively because its rules pin is stale, the browser reconciles first 
 decision request with a new key while preserving any already-created proposal under its original body and key.
 If the proposal itself is rejected for a stale pin before creating a transfer, both the proposal body and key
 rotate together. The browser never changes a pin beneath an existing key. Offline mutation queues and blind replay
-across reloads remain out of scope.
+across reloads remain out of scope. Any definitive proposal rejection also gates new Character Sheet transfer
+drafts until both authoritative character and stash refreshes succeed; dismissing the failed draft does not clear
+that gate or permit a direct method call to reuse cached eligibility. A stale-rules marker also survives draft
+dismissal. Successful authority recovery must fetch and apply the active campaign context before clearing the
+gate, so a dirty source-character save and the next proposal both use the same current rules pin.
 An approval-bound acceptance or direct proposal into a character compares the resulting authoritative document
 with its prior state and rejects a new disallowed/unknown item identity or stale rules pin before source,
 destination, resolution, audit, event, outbox, or receipt changes. Approval-bound reserved escrow remains
 available for an exact reject/cancel restoration. If the remaining same-ID source stack was edited after a
 partial reservation, restoration merges only when the complete transferable metadata is still stack-equivalent.
 Otherwise the escrowed original returns as a collision-free stack near its original index, preserving both
-metadata identities and the conserved total quantity.
+metadata identities and the conserved total quantity. Each reserved transfer also records the source container
+revision at reservation time as private authority metadata. Lifecycle cancellation restores reservations from
+the newest source revision to the oldest, so independently reserved whole stacks undo in deterministic LIFO
+order and recover their original relative positions in both stores without exposing that revision to viewers.
 
 The server derives item eligibility and stack compatibility from canonical data. A whole stack is refused
 while equipped, attuned, container-linked, spell/component-linked (including a real `itemGrantedSpells[].itemId`

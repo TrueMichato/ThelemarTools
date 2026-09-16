@@ -965,8 +965,9 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			.toEqual(before.data.inventory.find(it => it.id === "maps"));
 	});
 
-	test("keeps restored escrow separate from a metadata-diverged same-ID source stack", async () => {
+	test("keeps multiple restored escrow stacks beside their metadata-diverged same-ID source rows", async () => {
 		const stackId = crypto.randomUUID();
+		const secondStackId = crypto.randomUUID();
 		const originalItem = {
 			name: "Arrow",
 			source: "PHB",
@@ -978,6 +979,15 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			appliedUpgrades: [{name: "Balanced", source: "PHB"}],
 			socketedGemstones: [{name: "Journey", source: "PHB"}],
 			custom: {maker: "Rook", batch: "original"},
+		};
+		const secondOriginalItem = {
+			...structuredClone(originalItem),
+			name: "Bolt",
+			_fromPack: "Ranger's Kit|PHB",
+			effects: [{type: "skillBonus", skill: "survival", value: 1}],
+			charges: 9,
+			chargesCurrent: 6,
+			custom: {maker: "Rook", batch: "second-original"},
 		};
 		const source = (await store.pCreateCharacter({
 			accountId: sourceOwner.id,
@@ -991,6 +1001,13 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 						item: originalItem,
 						quantity: 4,
 						note: "Original commission",
+						customState: {privacy: "owner-only"},
+					},
+					{
+						id: secondStackId,
+						item: secondOriginalItem,
+						quantity: 6,
+						note: "Second commission",
 						customState: {privacy: "owner-only"},
 					},
 					{id: "after", item: {name: "Dagger", source: "PHB"}, quantity: 1},
@@ -1010,7 +1027,12 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			sourceId: source.id,
 			targetKind: "character",
 			targetId: target.id,
-			payload: {items: [{entryId: stackId, quantity: 2}]},
+			payload: {
+				items: [
+					{entryId: stackId, quantity: 2},
+					{entryId: secondStackId, quantity: 3},
+				],
+			},
 			idempotencyKey: `${prefix}-metadata-restore-reserve`,
 		});
 		expect(reserved.transfer.status).toBe("reserved");
@@ -1026,10 +1048,24 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			socketedGemstones: [{name: "Ember", source: "PHB"}],
 			custom: {maker: "Vale", batch: "modified"},
 		};
+		const secondModifiedItem = {
+			...structuredClone(secondOriginalItem),
+			_fromPack: "Reforged Ranger's Kit|PHB",
+			effects: [{type: "skillBonus", skill: "stealth", value: 2}],
+			chargesCurrent: 2,
+			material: {name: "Moon Silver", source: "PHB", role: "strikingSurface"},
+			appliedUpgrades: [{name: "Keen", source: "PHB"}],
+			socketedGemstones: [{name: "Frost", source: "PHB"}],
+			custom: {maker: "Vale", batch: "second-modified"},
+		};
 		const currentStack = afterReserve.data.inventory.find(entry => entry.id === stackId);
 		currentStack.item = modifiedItem;
 		currentStack.note = "Reworked commission";
 		currentStack.customState = {privacy: "shared"};
+		const currentSecondStack = afterReserve.data.inventory.find(entry => entry.id === secondStackId);
+		currentSecondStack.item = secondModifiedItem;
+		currentSecondStack.note = "Second reworked commission";
+		currentSecondStack.customState = {privacy: "shared"};
 		await pSaveCharacterInventoryThroughSheet({
 			accountId: sourceOwner.id,
 			character: afterReserve,
@@ -1044,10 +1080,20 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		});
 		const restored = (await pReadCharacter(sourceOwner.id, source.id)).data.inventory;
 		const modified = restored.find(entry => entry.id === stackId);
+		const secondModified = restored.find(entry => entry.id === secondStackId);
 		const original = restored.find(entry => entry.item.custom?.batch === "original");
+		const secondOriginal = restored.find(entry => entry.item.custom?.batch === "second-original");
 		const restoredId = original?.id;
+		const secondRestoredId = secondOriginal?.id;
 
-		expect(restored.map(entry => entry.id)).toEqual(["before", restoredId, stackId, "after"]);
+		expect(restored.map(entry => entry.id)).toEqual([
+			"before",
+			restoredId,
+			stackId,
+			secondRestoredId,
+			secondStackId,
+			"after",
+		]);
 		expect(new Set(restored.map(entry => entry.id)).size).toBe(restored.length);
 		expect(modified).toEqual(expect.objectContaining({
 			item: expect.objectContaining(modifiedItem),
@@ -1061,8 +1107,22 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			note: "Original commission",
 			customState: {privacy: "owner-only"},
 		}));
+		expect(secondModified).toEqual(expect.objectContaining({
+			item: expect.objectContaining(secondModifiedItem),
+			quantity: 3,
+			note: "Second reworked commission",
+			customState: {privacy: "shared"},
+		}));
+		expect(secondOriginal).toEqual(expect.objectContaining({
+			item: expect.objectContaining(secondOriginalItem),
+			quantity: 3,
+			note: "Second commission",
+			customState: {privacy: "owner-only"},
+		}));
 		expect(restoredId).not.toBe(stackId);
+		expect(secondRestoredId).not.toBe(secondStackId);
 		expect(modified.quantity + original.quantity).toBe(4);
+		expect(secondModified.quantity + secondOriginal.quantity).toBe(6);
 	});
 
 	test("awards a party stack in stable target order with exact conservation and event pairing", async () => {
@@ -1347,6 +1407,115 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			decision: "accept",
 			idempotencyKey: crypto.randomUUID(),
 		})).rejects.toMatchObject({code: "FORBIDDEN"});
+	});
+
+	test("restores independently reserved whole stacks in original order during lifecycle cancellation", async () => {
+		const lifecycleTargetOwner = await pCreateAccount("Inventory Ordered Lifecycle Target");
+		const lifecycleMembership = await pJoinCampaign(lifecycleTargetOwner);
+		const entryIds = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+		const source = (await store.pCreateCharacter({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			data: {
+				name: `${prefix} ordered lifecycle source`,
+				inventory: [
+					{
+						id: entryIds[0],
+						item: {
+							name: "First",
+							source: "PHB",
+							charges: 5,
+							chargesCurrent: 4,
+							material: {name: "Star Iron", source: "PHB"},
+							custom: {batch: "first"},
+						},
+						quantity: 1,
+						note: "First original",
+						customState: {privacy: "owner-only"},
+					},
+					{
+						id: entryIds[1],
+						item: {
+							name: "Second",
+							source: "PHB",
+							charges: 7,
+							chargesCurrent: 3,
+							material: {name: "Dragonbone", source: "PHB"},
+							custom: {batch: "second"},
+						},
+						quantity: 1,
+						note: "Second original",
+						customState: {privacy: "owner-only"},
+					},
+					{id: entryIds[2], item: {name: "Third", source: "PHB"}, quantity: 1},
+				],
+				currency: {},
+			},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const originalInventory = structuredClone((await pReadCharacter(sourceOwner.id, source.id)).data.inventory);
+		const target = (await store.pCreateCharacter({
+			accountId: lifecycleTargetOwner.id,
+			campaignId: campaign.id,
+			data: {name: `${prefix} ordered lifecycle target`, inventory: [], currency: {}},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const reservations = [];
+		for (const entryId of entryIds.slice(0, 2)) {
+			const response = await store.pProposeTransfer({
+				accountId: sourceOwner.id,
+				campaignId: campaign.id,
+				sourceKind: "character",
+				sourceId: source.id,
+				targetKind: "character",
+				targetId: target.id,
+				payload: {items: [{entryId, quantity: 1}]},
+				idempotencyKey: crypto.randomUUID(),
+			});
+			expect(response.transfer).not.toHaveProperty("_sourceRevision");
+			reservations.push(response.transfer);
+		}
+		expect((await pReadCharacter(sourceOwner.id, source.id)).data.inventory.map(entry => entry.id))
+			.toEqual([entryIds[2]]);
+
+		const orderedTransferIds = [crypto.randomUUID(), crypto.randomUUID()].sort();
+		await pool.query(`
+			UPDATE hub.transfers
+			SET id = CASE id
+				WHEN $1::uuid THEN $3::uuid
+				WHEN $2::uuid THEN $4::uuid
+			END
+			WHERE id = ANY($5::uuid[])
+		`, [
+			reservations[0].id,
+			reservations[1].id,
+			orderedTransferIds[0],
+			orderedTransferIds[1],
+			reservations.map(transfer => transfer.id),
+		]);
+
+		await store.pChangeMemberRole({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			membershipId: lifecycleMembership.id,
+			role: "spectator",
+			idempotencyKey: crypto.randomUUID(),
+		});
+
+		const restored = (await pReadCharacter(sourceOwner.id, source.id)).data.inventory;
+		expect(restored).toEqual(originalInventory);
+		expect(restored.map(entry => entry.id)).toEqual(entryIds);
+		expect(restored.map(entry => entry.quantity)).toEqual([1, 1, 1]);
+		const cancellationEvents = (await store.pListVisibleEvents({
+			accountId: dm.id,
+			campaignId: campaign.id,
+		})).filter(event => event.type === "transfer.cancelled");
+		expect(cancellationEvents.slice(-2).map(event => event.aggregateId))
+			.toEqual([orderedTransferIds[1], orderedTransferIds[0]]);
 	});
 
 	test("rolls back every PostgreSQL lifecycle cancellation when one escrow restore is invalid", async () => {

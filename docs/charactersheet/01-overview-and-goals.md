@@ -52,6 +52,12 @@ Request controls are removed, and only an already-frozen uncertain request may r
 If that proposal's bounded receipt-replay window expires, the sheet checks the actor-only command correlation in
 the authoritative transfer list before unlocking the composer. A still-pending request stays frozen and can be
 explicitly cancelled; a confirmed terminal or missing request refreshes both inventories before the draft closes.
+Definitive proposal rejections also refresh both authoritative inventories before another transfer can begin.
+Cancelling the visible draft does not clear this authority-stale gate. If that refresh fails, Retry remains
+visible and both the composer and new Share/Take/Request actions stay locked rather than reusing cached balances.
+A stale-rules rejection also preserves its context-refresh requirement across draft cancellation, so the next
+successful authority recovery fetches and applies the active campaign context before transfer controls unlock.
+If that context cannot be applied, the recovery gate remains closed and Retry stays available.
 
 ### 4. **Backward Compatibility**
 
